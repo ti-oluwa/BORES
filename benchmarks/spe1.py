@@ -799,7 +799,7 @@ def run_simulation(Path, bores, store):
     )
 
 
-    def GOR_gte_20_000(state: bores.ModelState[bores.ThreeDimensions]) -> bool:
+    def GOR_gte_20_000(state) -> bool:
         analyst = bores.ModelAnalyst([state])
         rates = analyst.instantaneous_production_rates(cells=[[(9, 9, 2), (9, 9, 2)]])
         return rates.gas_oil_ratio >= 20_000

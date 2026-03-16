@@ -194,8 +194,8 @@ if const is not None:
 | `GAS_SOLUBILITY_TOLERANCE` | 1e-6 | Tolerance for gas solubility calculations |
 | `GAS_PSEUDO_PRESSURE_THRESHOLD` | 0.0 | Pressure above which pseudo-pressure is used |
 | `GAS_PSEUDO_PRESSURE_POINTS` | 200 | Points in pseudo-pressure table |
-| `DEFAULT_WATER_SALINITY_PPM` | 35000 | Default water salinity (ppm NaCl) |
-| `MIN_OIL_ZONE_THICKNESS` | 5 | Minimum oil zone thickness warning (ft) |
+| `DEFAULT_WATER_SALINITY_PPM` | 0.0 | Default water salinity (ppm NaCl) |
+| `MIN_OIL_ZONE_THICKNESS` | 5 | Minimum oil zone thickness warning threshold (ft) |
 | `FLUID_INCOMPRESSIBILITY_THRESHOLD` | 1e-6 | Minimum fluid compressibility below which the fluid should be considered incompressible |
 
 ### Reservoir Fluid Defaults
