@@ -32,7 +32,12 @@ jobs:
 
       - name: Install dependencies
         run: |
-          uv sync --group docs --system
+          uv pip install --system mkdocs-material
+          uv pip install --system mkdocs-minify-plugin
+          uv pip install --system pymdown-extensions
+          uv pip install --system pillow>=12.1.1
+          uv pip install --system cairosvg>=2.9.0
+          uv pip install --system mkdocs-git-revision-date-localized-plugin
 
       - name: Build documentation
         run: mkdocs build --strict
