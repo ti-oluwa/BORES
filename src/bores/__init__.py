@@ -20,6 +20,7 @@ from .config import *
 from .constants import *
 from .errors import *
 from .factories import *
+from .fluids import *
 from .fractures import *
 from .grids import *
 from .models import *

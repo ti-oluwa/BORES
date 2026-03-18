@@ -2097,7 +2097,7 @@ class StoreSerializable(Serializable):
 
     @classmethod
     def from_file(
-        cls, filepath: typing.Union[str, PathLike], **load_kwargs: typing.Any
+        cls, filepath: typing.Union[str, PathLike[str]], **load_kwargs: typing.Any
     ) -> typing.Optional[Self]:
         """
         Load a `Serializable` instance from a file.
@@ -2111,7 +2111,7 @@ class StoreSerializable(Serializable):
         return cls.from_store(store, **load_kwargs)
 
     def to_file(
-        self, filepath: typing.Union[str, PathLike], **dump_kwargs: typing.Any
+        self, filepath: typing.Union[str, PathLike[str]], **dump_kwargs: typing.Any
     ) -> None:
         """
         Dump the `Serializable` instance to a file.

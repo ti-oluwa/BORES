@@ -202,8 +202,7 @@ if const is not None:
 
 | Constant | Value | Description |
 |---|---|---|
-| `RESERVOIR_OIL_NAME` | `"n-Dodecane"` | Default displaced fluid for simulations (CoolProp compatible) |
-| `RESERVOIR_GAS_NAME` | `"Methane"` | Default gas that exists with oil in the reservoir (CoolProp compatible) |
+| `RESERVOIR_GAS` | `"Methane"` | Default gas that exists with oil in the reservoir (CoolProp compatible) |
 
 ### Valid Ranges
 

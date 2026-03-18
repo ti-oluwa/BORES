@@ -325,8 +325,8 @@ Tabular property lookup as an alternative to correlations.
 | `PVTTableData` | class | Single PVT property table: pressure array and corresponding property values. |
 | `build_pvt_table_data()` | function | Build a `PVTTableData` from pressure and value arrays with validation. |
 | `RockFluidTables` | class | Container for relative permeability and capillary pressure tables, used in `Config`. |
-| `GasPseudoPressureTable` | class | Al-Hussainy real-gas pseudo-pressure lookup table for gas well deliverability calculations. |
-| `build_gas_pseudo_pressure_table()` | function | Build a pseudo-pressure table from gas properties over a pressure range. |
+| `PseudoPressureTable` | class | Al-Hussainy real-gas pseudo-pressure lookup table for gas well deliverability calculations. |
+| `build_pseudo_pressure_table()` | function | Build a pseudo-pressure table from gas properties over a pressure range. |
 
 ---
 

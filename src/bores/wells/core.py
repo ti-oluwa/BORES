@@ -1,5 +1,7 @@
 """Core well calculations and utilities."""
 
+from bores.fluids import Fluid
+
 import logging
 import typing
 
@@ -54,8 +56,8 @@ from bores.correlations.core import (
 from bores.errors import ComputationError, ValidationError
 from bores.serialization import Serializable
 from bores.tables.pseudo_pressure import (
-    GasPseudoPressureTable,
-    build_gas_pseudo_pressure_table,
+    PseudoPressureTable,
+    build_pseudo_pressure_table,
 )
 from bores.tables.pvt import PVTTables
 from bores.types import (
@@ -434,7 +436,7 @@ def compute_gas_well_rate(
     phase_mobility: float,
     average_compressibility_factor: float = 1.0,
     use_pseudo_pressure: bool = True,
-    pseudo_pressure_table: typing.Optional[GasPseudoPressureTable] = None,
+    pseudo_pressure_table: typing.Optional[PseudoPressureTable] = None,
     formation_volume_factor: typing.Optional[float] = None,
     gas_gravity: typing.Optional[float] = None,
 ) -> float:
@@ -550,7 +552,7 @@ def compute_required_bhp_for_gas_rate(
     phase_mobility: float,
     average_compressibility_factor: float = 1.0,
     use_pseudo_pressure: bool = True,
-    pseudo_pressure_table: typing.Optional[GasPseudoPressureTable] = None,
+    pseudo_pressure_table: typing.Optional[PseudoPressureTable] = None,
     formation_volume_factor: typing.Optional[float] = None,
 ) -> float:
     """
@@ -634,12 +636,12 @@ def compute_required_bhp_for_gas_rate(
                 )
             )
         except ValidationError as exc:
-            min_mp = pseudo_pressure_table.pseudo_pressures[0]
-            max_mp = pseudo_pressure_table.pseudo_pressures[-1]
+            min_pseudo_pressure = pseudo_pressure_table.pseudo_pressures[0]
+            max_pseudo_pressure = pseudo_pressure_table.pseudo_pressures[-1]
             raise ComputationError(
                 f"Cannot achieve target rate {target_rate:.2f} ft³/day — "
                 f"required pseudo-pressure {required_pseudo_pressure:.2f} is outside "
-                f"the valid table range [{min_mp:.2f}, {max_mp:.2f}]."
+                f"the valid table range [{min_pseudo_pressure:.2f}, {max_pseudo_pressure:.2f}]."
             ) from exc
 
     # Pressure-squared inverse.
@@ -657,281 +659,85 @@ def compute_required_bhp_for_gas_rate(
     return float(np.sqrt(required_bhp_squared))
 
 
-def _build_table_interpolator(
-    pvt_tables: PVTTables, property_name: str, temperature: FloatOrArray
-):
-    """
-    Build a 1D interpolator for a given property at given temperature(s).
-
-    :param pvt_tables: PVT tables containing the property data.
-    :param property_name: Name of the property to interpolate (e.g., "gas_compressibility_factor").
-    :param temperature: Temperature(s) at which to interpolate the property.
-    """
-
-    def interpolator(pressure: FloatOrArray) -> FloatOrArray:
-        result = pvt_tables.pt_interpolate(
-            name=property_name, pressure=pressure, temperature=temperature
-        )
-        if result is None:
-            raise ComputationError(
-                f"Result cannot be None ensure PVT table contains {property_name!r} interpolator. Use `table.exists({property_name!r})`"
-            )
-        return result
-
-    interpolator._supports_arrays = True  # type: ignore
-    interpolator.__name__ = f"{property_name}_interpolator"
-    return interpolator
-
-
-def _validate_pseudo_pressure_table_phase(
-    instance: "WellFluid",
-    attribute: typing.Any,
-    value: typing.Optional[GasPseudoPressureTable],
-) -> None:
-    """Validate that pseudo-pressure table is only provided for gas phase."""
-    if value is not None and instance.phase != FluidPhase.GAS:
-        phase_str = (
-            instance.phase.value
-            if isinstance(instance.phase, FluidPhase)
-            else str(instance.phase)
-        )
-        raise ValidationError(
-            f"Pseudo-pressure table can only be provided for gas phase fluids. "
-            f"Fluid '{instance.name}' has phase '{phase_str}'. "
-            f"Remove pseudo_pressure_table parameter or change phase to GAS."
-        )
-
-
 @attrs.frozen
-class WellFluid(Serializable):
+class WellFluid(Fluid):
     """Base class for fluid properties in wells."""
 
-    name: str
-    """Name of the fluid. Examples: Methane, CO2, Water, Oil."""
-    phase: typing.Union[FluidPhase, str] = attrs.field(converter=FluidPhase)
-    """Phase of the fluid. Examples: WATER, GAS, OIL."""
-    specific_gravity: float = attrs.field(validator=attrs.validators.ge(0))
-    """Specific gravity of the fluid in (lbm/ft³)."""
-    molecular_weight: float = attrs.field(validator=attrs.validators.ge(0))
-    """Molecular weight of the fluid in (g/mol)."""
-    pseudo_pressure_table: typing.Optional[GasPseudoPressureTable] = attrs.field(
-        default=None,
-        validator=attrs.validators.optional(_validate_pseudo_pressure_table_phase),
+    specific_gravity: typing.Optional[float] = attrs.field(
+        default=None, validator=attrs.validators.optional(attrs.validators.ge(0))
     )
     """
-    Optional pre-built pseudo-pressure table for gas phase fluids.
-
-    If provided, this table will be used instead of building one internally from correlations.
-    Only valid for gas phase fluids. Must be None for oil or water phases.
-
-    Example:
-
-    ```python
-    # Build custom table from lab data
-    pressure_values = np.array([100, 500, 1000, 2000, 5000])
-    pseudo_pressure_values = np.array([2.1e4, 5.3e5, 1.2e6, 2.8e6, 8.1e6])
-
-    table = bores.GasPseudoPressureTable(
-        pressures=pressure_values,
-        pseudo_pressures=pseudo_pressure_values,
-    )
-
-    # Or from custom Z-factor/viscosity functions
-    table = bores.GasPseudoPressureTable(
-        z_factor_func=my_z_func,
-        viscosity_func=my_mu_func,
-        pressure_range=(100, 8000),
-        points=2000,
-    )
-
-    # Use in fluid definition
-    fluid = bores.InjectedFluid(
-        name="CO2",
-        phase=bores.FluidPhase.GAS,
-        specific_gravity=1.52,
-        molecular_weight=44.01,
-        pseudo_pressure_table=table,
-    )
-    ```
+    Specific gravity of the fluid (dimensionless).
+ 
+    For gas: relative to air (air = 1.0).
+    For water: relative to fresh water (water = 1.0).
+ 
+    Required when `pvt_table` is not set and correlation-based property
+    calculations are needed (e.g. density, viscosity, pseudo-pressure table).
+    When `pvt_table` is provided this field is optional.
     """
 
-    def _build_pseudo_pressure_cache_key(
+    molecular_weight: typing.Optional[float] = attrs.field(
+        default=None, validator=attrs.validators.optional(attrs.validators.ge(0))
+    )
+    """
+    Molecular weight of the fluid in (g/mol).
+ 
+    Required for gas viscosity correlations (Lee-Kesler) when `pvt_table`
+    is not set.  When `pvt_table` is provided this field is optional.
+    """
+
+    def get_specific_gravity(
         self,
+        pressure: float,
         temperature: float,
-        reference_pressure: typing.Optional[float] = None,
-        pressure_range: typing.Optional[typing.Tuple[float, float]] = None,
-        points: typing.Optional[int] = None,
-        pvt_tables: typing.Optional[PVTTables] = None,
-    ) -> typing.Tuple[typing.Any, ...]:
+    ) -> typing.Optional[float]:
         """
-        Build a hashable cache key for pseudo-pressure table lookup.
+        Get the specific gravity of the fluid at given pressure and temperature.
 
-        The key uniquely identifies a pseudo-pressure table based on all parameters
-        that affect the Z-factor and viscosity functions.
+        Lookup priority:
 
-        :param temperature: Temperature (°F)
-        :param reference_pressure: Reference pressure (psi)
-        :param pressure_range: (min, max) pressure range (psi)
-        :param points: Number of points
-        :param pvt_tables: Optional PVT tables for Z and μ interpolation
-        :return: Hashable tuple that can be used as cache key
+        1. `self.pvt_table.specific_gravity(pressure, temperature)` is used when
+           a PVT table is available and returns a non-`None` result.
+        2. `self.specific_gravity` scalar field is returned directly if set.
+        3. `None` is returned if neither source is available.
+
+        :param pressure: The pressure at which to evaluate the specific gravity (psi).
+        :param temperature: The temperature at which to evaluate the specific gravity (°F).
+        :return: The specific gravity of the fluid (dimensionless), or ``None`` if
+            neither a PVT table nor a scalar value is available.
         """
-        # PVT tables hash: if tables provided, use a hash of their configuration
-        # Otherwise, use None to indicate correlation-based calculation
-        if pvt_tables is not None:
-            # Hash based on table metadata
-            p_bounds = pvt_tables._extrapolation_bounds.get("pressure", (0.0, 0.0))
-            t_bounds = pvt_tables._extrapolation_bounds.get("temperature", (0.0, 0.0))
-            pvt_hash = (
-                (round(p_bounds[0], 2), round(p_bounds[1], 2)),  # Pressure bounds
-                (round(t_bounds[0], 2), round(t_bounds[1], 2)),  # Temperature bounds
-                pvt_tables.interpolation_method,  # Interpolation method
-                pvt_tables.exists("gas_compressibility_factor"),  # Z table exists?
-                pvt_tables.exists("gas_viscosity"),  # μ table exists?
-            )
-        else:
-            pvt_hash = None
+        if self.pvt_table is not None:
+            result = self.pvt_table.specific_gravity(pressure, temperature)
+            if result is not None:
+                return float(result)
+        return self.specific_gravity
 
-        cache_key = (
-            self.name,
-            self.phase.value,  # type: ignore
-            round(self.specific_gravity, 6),
-            round(self.molecular_weight, 6),
-            round(temperature, 2),
-            round(reference_pressure, 2) if reference_pressure is not None else None,
-            tuple(round(p, 2) for p in pressure_range)
-            if pressure_range is not None
-            else None,
-            points,
-            pvt_hash,
-        )
-        return cache_key
-
-    def get_pseudo_pressure_table(
+    def get_molecular_weight(
         self,
+        pressure: float,
         temperature: float,
-        reference_pressure: typing.Optional[float] = None,
-        pressure_range: typing.Optional[typing.Tuple[float, float]] = None,
-        points: typing.Optional[int] = None,
-        pvt_tables: typing.Optional[PVTTables] = None,
-        use_cache: bool = True,
-    ) -> GasPseudoPressureTable:
+    ) -> typing.Optional[float]:
         """
-        Get gas pseudo-pressure table for this fluid.
+        Get the molecular weight of the fluid at given pressure and temperature.
 
-        If a custom `pseudo_pressure_table` was provided during fluid construction,
-        that table is returned directly. Otherwise, a table is built internally from
-        correlations or PVT tables.
+        Lookup priority:
 
-        Uses global caching to avoid recomputing tables for identical fluid properties.
-        Multiple `WellFluid` instances with the same properties will share cached tables.
+        1. `self.pvt_table.molecular_weight(pressure, temperature)` is used when
+           a PVT table is available and returns a non-`None` result.
+        2. `self.molecular_weight` scalar field is returned directly if set.
+        3. `None` is returned if neither source is available.
 
-        :param temperature: Temperature (°F)
-        :param reference_pressure: Reference pressure (psi), default 14.7
-        :param pressure_range: (min, max) pressure range (psi), default (14.7, 5000)
-        :param points: Number of points, default 100
-        :param pvt_tables: Optional PVT tables for Z and μ interpolation
-        :param use_cache: If True, use global cache. If False, always compute new table.
-        :return: `GasPseudoPressureTable` instance
-
-        Example:
-
-        ```python
-        # These two fluids will share the same cached table:
-        methane1 = WellFluid(
-            name="CH4-1",
-            phase=FluidPhase.GAS,
-            specific_gravity=0.65,
-            molecular_weight=16.04
-        )
-        methane2 = WellFluid(
-            name="CH4-2",
-            phase=FluidPhase.GAS,
-            specific_gravity=0.65,
-            molecular_weight=16.04
-        )
-
-        table1 = methane1.get_pseudo_pressure_table(temperature=150)
-        table2 = methane2.get_pseudo_pressure_table(temperature=150)
-        # table1 is table2  # True! Same cached instance
-        ```
+        :param pressure: The pressure at which to evaluate the molecular weight (psi).
+        :param temperature: The temperature at which to evaluate the molecular weight (°F).
+        :return: The molecular weight of the fluid (g/mol), or `None` if
+            neither a PVT table nor a scalar value is available.
         """
-        if self.phase != FluidPhase.GAS:
-            raise ValidationError(
-                "Pseudo-pressure table is only applicable for gas phase."
-            )
-
-        if self.pseudo_pressure_table is not None:
-            logger.debug(f"Using custom pseudo-pressure table for fluid '{self.name}'")
-            return self.pseudo_pressure_table
-
-        z_factor_func = None  # type: ignore
-        viscosity_func = None  # type: ignore
-
-        if pvt_tables is not None:
-            if pvt_tables.exists("gas_compressibility_factor"):
-                z_factor_func = _build_table_interpolator(  # type: ignore
-                    pvt_tables=pvt_tables,
-                    property_name="gas_compressibility_factor",
-                    temperature=temperature,
-                )
-            if pvt_tables.exists("gas_viscosity"):
-                viscosity_func = _build_table_interpolator(  # type: ignore
-                    pvt_tables=pvt_tables,
-                    property_name="gas_viscosity",
-                    temperature=temperature,
-                )
-
-        if z_factor_func is None:
-
-            def z_factor_func(pressure: np.typing.NDArray) -> np.typing.NDArray:
-                temperature_array = np.full_like(pressure, temperature)
-                specific_gravity_array = np.full_like(pressure, self.specific_gravity)
-                return compute_gas_compressibility_factor_vectorized(
-                    pressure=pressure,
-                    temperature=temperature_array,
-                    gas_gravity=specific_gravity_array,
-                )
-
-            z_factor_func._supports_arrays = True  # type: ignore
-
-        if viscosity_func is None:
-
-            def viscosity_func(pressure: np.typing.NDArray) -> np.typing.NDArray:
-                temperature_array = np.full_like(pressure, temperature)
-                specific_gravity_array = np.full_like(pressure, self.specific_gravity)
-                gas_density = compute_gas_density_vectorized(
-                    pressure=pressure,
-                    temperature=temperature_array,
-                    gas_gravity=specific_gravity_array,
-                    gas_compressibility_factor=z_factor_func(pressure),
-                )
-                return compute_gas_viscosity_vectorized(
-                    temperature=temperature_array,
-                    gas_density=gas_density,
-                    gas_molecular_weight=self.molecular_weight,
-                )
-
-            viscosity_func._supports_arrays = True  # type: ignore
-
-        cache_key = None
-        if use_cache:
-            cache_key = self._build_pseudo_pressure_cache_key(
-                temperature=temperature,
-                reference_pressure=reference_pressure,
-                pressure_range=pressure_range,
-                points=points,
-                pvt_tables=pvt_tables,
-            )
-
-        return build_gas_pseudo_pressure_table(
-            z_factor_func=z_factor_func,  # type: ignore[arg-type]
-            viscosity_func=viscosity_func,  # type: ignore[arg-type]
-            reference_pressure=reference_pressure,
-            pressure_range=pressure_range,
-            points=points,
-            cache_key=cache_key,
-        )
+        if self.pvt_table is not None:
+            result = self.pvt_table.molecular_weight(pressure, temperature)
+            if result is not None:
+                return float(result)
+        return self.molecular_weight
 
 
 @typing.final
@@ -941,8 +747,10 @@ class InjectedFluid(WellFluid):
 
     salinity: typing.Optional[float] = None
     """Salinity of the fluid (if water) in (ppm NaCl)."""
+
     is_miscible: bool = False
     """Whether this fluid is miscible with oil (e.g., CO2, N2)"""
+
     todd_longstaff_omega: float = attrs.field(
         validator=attrs.validators.and_(
             attrs.validators.ge(0.0), attrs.validators.le(1.0)
@@ -950,23 +758,40 @@ class InjectedFluid(WellFluid):
         default=0.67,
     )
     """Todd-Longstaff mixing parameter for miscible displacement (0 to 1)."""
+
     minimum_miscibility_pressure: typing.Optional[float] = None
     """Minimum miscibility pressure for this fluid-oil system (psi)"""
+
     miscibility_transition_width: float = attrs.field(  # type: ignore
         default=500.0, validator=attrs.validators.ge(0)
     )
     """Pressure range over which miscibility transitions from immiscible to miscible (psi)"""
+
     concentration: float = attrs.field(
         default=1.0,
         validator=attrs.validators.and_(
             attrs.validators.ge(0.0), attrs.validators.le(1.0)
         ),
     )
-    """Concentration (preferrably volume-based) of the fluid in the mixture (0 to 1). Relevant for miscible fluids."""
+    """Concentration (preferably volume-based) of the fluid in the mixture (0 to 1). Relevant for miscible fluids."""
+
     density: typing.Optional[float] = None
-    """Fluid density (lbm/ft³) at reservoir conditions. If provided, bypasses table or correlation-based density calculations. Useful for non-ideal gases like CO2."""
+    """
+    Fluid density (lbm/ft³) at reservoir conditions.
+
+    When provided, bypasses both `pvt_table` and correlation-based density
+    calculations entirely.  Useful for non-ideal gases such as CO2 where a
+    measured or equation-of-state density is available.
+    """
+
     viscosity: typing.Optional[float] = None
-    """Fluid viscosity (cP) at reservoir conditions. If provided, bypasses table or correlation-based viscosity calculations. Useful for non-ideal gases like CO2."""
+    """
+    Fluid viscosity (cP) at reservoir conditions.
+
+    When provided, bypasses both `pvt_table` and correlation-based viscosity
+    calculations entirely.  Useful for non-ideal gases such as CO2 where a
+    measured or equation-of-state viscosity is available.
+    """
 
     def __attrs_post_init__(self) -> None:
         """Validate the fluid properties."""
@@ -987,15 +812,46 @@ class InjectedFluid(WellFluid):
         """
         Get the density of the fluid at given pressure and temperature.
 
+        Lookup priority:
+
+        1. `self.density` scalar override. Returned directly if set.
+        2. `self.pvt_table.density(pressure, temperature, salinity=...)` — used
+           when a PVT table is available and returns a non-`None` result.
+        3. Correlation fallback. Uses `specific_gravity` via the
+           appropriate phase correlation (McCain for water, real-gas law for gas).
+
         :param pressure: The pressure at which to evaluate the density (psi).
         :param temperature: The temperature at which to evaluate the density (°F).
         :kwargs: Additional parameters for phase density calculations.
+
+            For water:
+                - `gas_free_water_formation_volume_factor`: pre-computed Bwf (bbl/STB).
+                  Computed internally if not provided.
+                - `gas_solubility_in_water`: Rsw (SCF/STB). Defaults to 0.0
+                  (injection water assumed gas-free).
+                - `gas_gravity`: gas specific gravity. Defaults to `self.specific_gravity`.
+
+            For gas:
+                - `gas_compressibility_factor`: Z-factor (dimensionless).
+                  Computed via DAK if not provided.
+
         :return: The density of the fluid (lbm/ft³).
         """
         if self.density is not None:
             if isinstance(pressure, np.ndarray):
                 return np.full_like(pressure, self.density)
             return self.density
+
+        if self.pvt_table is not None:
+            salinity = self.salinity if self.phase == FluidPhase.WATER else None
+            result = self.pvt_table.density(pressure, temperature, salinity=salinity)
+            if result is not None:
+                return result
+
+        if self.specific_gravity is None:
+            raise ValidationError(
+                "`specific_gravity` is required if fluid has not `pvt_table`."
+            )
 
         vectorize_pressure = isinstance(pressure, np.ndarray)
         vectorize_temperature = isinstance(temperature, np.ndarray)
@@ -1082,15 +938,38 @@ class InjectedFluid(WellFluid):
         """
         Get the viscosity of the fluid at given pressure and temperature.
 
+        Lookup priority:
+
+        1. `self.viscosity` scalar override. Returned directly if set.
+        2. `self.pvt_table.viscosity(pressure, temperature, salinity=...)`. Used
+           when a PVT table is available and returns a non-`None` result.
+        3. Correlation fallback. Uses Lee-Kesler for gas (requires
+           `specific_gravity` and `molecular_weight`), and the McCain
+           correlation for water.
+
         :param pressure: The pressure at which to evaluate the viscosity (psi).
         :param temperature: The temperature at which to evaluate the viscosity (°F).
         :kwargs: Additional parameters for viscosity calculations.
+
+            For gas:
+                - `gas_density`: pre-computed gas density (lbm/ft³).
+                  Computed internally if not provided.
+                - `gas_compressibility_factor`: Z-factor (dimensionless).
+                  Computed via DAK if neither `gas_density` nor this value
+                  is provided.
+
         :return: The viscosity of the fluid (cP).
         """
         if self.viscosity is not None:
             if isinstance(pressure, np.ndarray):
                 return np.full_like(pressure, self.viscosity)
             return self.viscosity
+
+        if self.pvt_table is not None:
+            salinity = self.salinity if self.phase == FluidPhase.WATER else None
+            result = self.pvt_table.viscosity(pressure, temperature, salinity=salinity)
+            if result is not None:
+                return result
 
         vectorize_pressure = isinstance(pressure, np.ndarray)
         vectorize_temperature = isinstance(temperature, np.ndarray)
@@ -1111,6 +990,15 @@ class InjectedFluid(WellFluid):
                 pressure=pressure,  # type: ignore
                 temperature=temperature,  # type: ignore
                 salinity=self.salinity or 0.0,
+            )
+
+        if self.specific_gravity is None:
+            raise ValidationError(
+                "`specific_gravity` is required if fluid has not `pvt_table`."
+            )
+        if self.molecular_weight is None:
+            raise ValidationError(
+                "`molecular_weight` is required if fluid has not `pvt_table`."
             )
 
         gas_density = kwargs.get("gas_density", None)
@@ -1165,22 +1053,38 @@ class InjectedFluid(WellFluid):
         """
         Get the compressibility of the fluid at given pressure and temperature.
 
+        Lookup priority:
+
+        1. `self.pvt_table.compressibility(pressure, temperature, salinity=...)`.
+           Used when a PVT table is available and returns a non-`None` result.
+        2. Correlation fallback. Uses the appropriate phase correlation.
+
         :param pressure: The pressure at which to evaluate the compressibility (psi).
         :param temperature: The temperature at which to evaluate the compressibility (°F).
         :kwargs: Additional parameters for compressibility calculations.
 
-        For water:
-            :kwarg bubble_point_pressure: The bubble point pressure (psi).
-            :kwarg gas_formation_volume_factor: The gas formation volume factor (ft³/scf).
-            :kwarg gas_solubility_in_water: The gas solubility in water (scf/stb).
+            For water:
+                - `bubble_point_pressure`: water bubble point pressure (psi).
+                - `gas_formation_volume_factor`: Bg (ft³/scf).
+                - `gas_solubility_in_water`: Rsw (scf/STB).
+                - `gas_free_water_formation_volume_factor`: Bwf (bbl/STB).
+                  Computed internally if not provided.
 
-        For gas:
-            :kwarg gas_gravity: The specific gravity of the gas (dimensionless). Optional
-                Uses the fluid's specific gravity if not provided.
-            :kwarg gas_compressibility_factor: The gas compressibility factor (dimensionless).
+            For gas:
+                - `gas_gravity`: gas specific gravity (dimensionless).
+                  Uses `self.specific_gravity` if not provided.
+                - `gas_compressibility_factor`: Z-factor (dimensionless).
 
         :return: The compressibility of the fluid (psi⁻¹).
         """
+        if self.pvt_table is not None:
+            salinity = self.salinity if self.phase == FluidPhase.WATER else None
+            result = self.pvt_table.compressibility(
+                pressure, temperature, salinity=salinity
+            )
+            if result is not None:
+                return result
+
         vectorize_pressure = isinstance(pressure, np.ndarray)
         vectorize_temperature = isinstance(temperature, np.ndarray)
         use_vectorization = vectorize_pressure or vectorize_temperature
@@ -1244,11 +1148,34 @@ class InjectedFluid(WellFluid):
         """
         Get the formation volume factor of the fluid at given pressure and temperature.
 
+        Lookup priority:
+
+        1. `self.pvt_table.formation_volume_factor(pressure, temperature, salinity=...)`.
+           Used when a PVT table is available and returns a non-`None` result.
+        2. Correlation fallback. Uses the appropriate phase correlation.
+
         :param pressure: The pressure at which to evaluate the formation volume factor (psi).
         :param temperature: The temperature at which to evaluate the formation volume factor (°F).
         :kwargs: Additional parameters for formation volume factor calculations.
-        :return: The formation volume factor of the fluid (bbl/STB or ft³/SCF).
+
+            For water:
+                - `water_density`: pre-computed water density (lbm/ft³).
+                  Computed internally from correlations if not provided.
+
+            For gas:
+                - `gas_compressibility_factor`: Z-factor (dimensionless).
+                  Computed via DAK if not provided.
+
+        :return: The formation volume factor of the fluid (bbl/STB for water, ft³/SCF for gas).
         """
+        if self.pvt_table is not None:
+            salinity = self.salinity if self.phase == FluidPhase.WATER else None
+            result = self.pvt_table.formation_volume_factor(
+                pressure, temperature, salinity=salinity
+            )
+            if result is not None:
+                return result
+
         vectorize_pressure = isinstance(pressure, np.ndarray)
         vectorize_temperature = isinstance(temperature, np.ndarray)
         use_vectorization = vectorize_pressure or vectorize_temperature
@@ -1260,8 +1187,8 @@ class InjectedFluid(WellFluid):
         if self.phase == FluidPhase.WATER:
             water_density = kwargs.get("water_density", None)
             if water_density is None:
-                # Not need for gas free fvf or gas fvf, since injection water
-                # is typically gas free fresh water or degassed formation water
+                # No need for gas-free FVF or gas FVF here since injection water
+                # is typically gas-free fresh water or degassed formation water.
                 if use_vectorization:
                     water_density = compute_water_density_vectorized(
                         pressure=pressure,  # type: ignore
@@ -1283,6 +1210,11 @@ class InjectedFluid(WellFluid):
             return compute_water_formation_volume_factor(
                 salinity=self.salinity or 0.0,
                 water_density=water_density,  # type: ignore
+            )
+
+        if self.specific_gravity is None:
+            raise ValidationError(
+                "`specific_gravity` is required if fluid has not `pvt_table`."
             )
 
         gas_z_factor = kwargs.get("gas_compressibility_factor", None)

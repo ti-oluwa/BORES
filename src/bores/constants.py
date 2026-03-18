@@ -460,15 +460,10 @@ DEFAULT_CONSTANTS: typing.Dict[str, typing.Union[typing.Any, Constant]] = {
         description="Gravitational constant in lbm·ft/(lbf·s²). Conversion factor from pound-force to pound-mass or vice versa under Earth's gravity.",
         unit="lbm·ft/(lbf·s²)",
     ),
-    # Reservoir Fluid Defaults
-    "RESERVOIR_OIL_NAME": Constant(
-        value="n-Dodecane",
-        description="Default displaced fluid for simulations (CoolProp compatible)",
-        unit=None,
-    ),
-    "RESERVOIR_GAS_NAME": Constant(
+    # Reservoir `Fluid` Defaults
+    "RESERVOIR_GAS": Constant(
         value="Methane",
-        description="Default gas that exists with oil in the reservoir (CoolProp compatible)",
+        description="Default gas that exists with oil in the reservoir (`Fluid` or CoolProp compatible fluid name)",
         unit=None,
     ),
     # Valid Ranges
@@ -620,7 +615,7 @@ class Constants(
             if isinstance(value, Constant):
                 self._store[name] = value
             else:
-                # Wrap raw values in Constant objects
+                # Wrap raw values in `Constant` objects
                 self._store[name] = Constant(value=value)
 
     def __setitem__(self, name: str, value: typing.Union[typing.Any, Constant]) -> None:
@@ -632,7 +627,7 @@ class Constants(
         if isinstance(value, Constant):
             self._store[name] = value
         else:
-            # Wrap raw values in Constant objects
+            # Wrap raw values in `Constant` objects
             self._store[name] = Constant(value=value)
 
     def __delattr__(self, name: str) -> None:

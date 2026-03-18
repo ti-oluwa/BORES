@@ -876,7 +876,7 @@ def compute_well_rate_grid(
                     injection_rate=cell_injection_rate,
                     well_name=well.name,
                     time=time_step * time_step_size,
-                    cell=(i, j, k),
+                    cell=(i - pad_width, j - pad_width, k - pad_width),
                     rate_unit="ft³/day"
                     if injected_phase == FluidPhase.GAS
                     else "bbls/day",
@@ -1039,7 +1039,7 @@ def compute_well_rate_grid(
                         production_rate=production_rate,
                         well_name=well.name,
                         time=time_step * time_step_size,
-                        cell=(i, j, k),
+                        cell=(i - pad_width, j - pad_width, k - pad_width),
                         rate_unit="ft³/day"
                         if produced_phase == FluidPhase.GAS
                         else "bbls/day",

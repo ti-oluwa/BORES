@@ -12,6 +12,7 @@ from bores.correlations.core import (
     validate_input_temperature,
 )
 from bores.errors import ValidationError
+from bores.fluids import Fluid
 from bores.fractures import Fracture, apply_fractures
 from bores.grids.base import build_uniform_grid
 from bores.grids.pvt import (
@@ -217,7 +218,7 @@ def reservoir_model(
     dip_angle: float = 0.0,
     dip_azimuth: float = 0.0,
     datum_depth: typing.Optional[float] = None,
-    reservoir_gas: typing.Optional[str] = None,
+    reservoir_gas: typing.Optional[typing.Union[str, Fluid]] = None,
     pvt_tables: typing.Optional[PVTTables] = None,
 ) -> ReservoirModel[NDimension]:
     """
@@ -276,7 +277,7 @@ def reservoir_model(
     :param solvent_concentration_grid: Solvent concentration in oil phase (0=pure oil, 1=pure solvent), optional.
     :param oil_effective_viscosity_grid: Effective oil-solvent mixture viscosity using miscible model (e.g Todd Longstaff) (cP), optional.
     :param fractures: Iterable of fractures to be applied to the reservoir model, optional.
-    :param reservoir_gas: Name of the reservoir gas, defaults to `RESERVOIR_GAS_NAME`. Can also be the name of the gas injected into the reservoir.
+    :param reservoir_gas: Name of the reservoir gas, defaults to `c.RESERVOIR_GAS`. Can also be the name of the gas injected into the reservoir.
     :param pvt_tables: PVT tables for fluid properties, optional.
     :param datum_depth: Reference depth for reservoir model. Basically the reservoir top depth (below sea level)
     :return: The constructed N-Dimensional reservoir model with fluid and rock properties.
@@ -293,7 +294,10 @@ def reservoir_model(
     validate_input_pressure(pressure_grid)
     validate_input_temperature(temperature_grid)
 
-    reservoir_gas = typing.cast(str, reservoir_gas or c.RESERVOIR_GAS_NAME)
+    reservoir_gas = typing.cast(str, reservoir_gas or c.RESERVOIR_GAS)
+    oil_pvt_table = pvt_tables.oil if pvt_tables is not None else None
+    water_pvt_table = pvt_tables.water if pvt_tables is not None else None
+    gas_pvt_table = pvt_tables.gas if pvt_tables is not None else None
 
     if water_salinity_grid is None:
         water_salinity_grid = build_uniform_grid(
@@ -322,10 +326,10 @@ def reservoir_model(
     )
 
     if gas_gravity_grid is None:
-        if pvt_tables is not None:
+        if gas_pvt_table is not None:
             gas_gravity_grid = typing.cast(
                 typing.Optional[NDimensionalGrid[NDimension]],
-                pvt_tables.gas_gravity(
+                gas_pvt_table.specific_gravity(
                     pressure=pressure_grid,
                     temperature=temperature_grid,
                 ),
@@ -339,10 +343,10 @@ def reservoir_model(
 
     # Viscosity Grids
     if gas_viscosity_grid is None:
-        if pvt_tables is not None:
+        if gas_pvt_table is not None:
             gas_viscosity_grid = typing.cast(
                 typing.Optional[NDimensionalGrid[NDimension]],
-                pvt_tables.gas_viscosity(
+                gas_pvt_table.viscosity(
                     pressure=pressure_grid,
                     temperature=temperature_grid,
                 ),
@@ -355,10 +359,10 @@ def reservoir_model(
             )
 
     if water_viscosity_grid is None:
-        if pvt_tables is not None:
+        if water_pvt_table is not None:
             water_viscosity_grid = typing.cast(
                 typing.Optional[NDimensionalGrid[NDimension]],
-                pvt_tables.water_viscosity(
+                water_pvt_table.viscosity(
                     pressure=pressure_grid,
                     temperature=temperature_grid,
                     salinity=water_salinity_grid,
@@ -376,10 +380,10 @@ def reservoir_model(
     # depend on it. Also stored in `FluidProperties` so the simulator does not
     # have to recompute it each timestep.
     if gas_compressibility_factor_grid is None:
-        if pvt_tables is not None:
+        if gas_pvt_table is not None:
             gas_compressibility_factor_grid = typing.cast(
                 typing.Optional[NDimensionalGrid[NDimension]],
-                pvt_tables.gas_compressibility_factor(
+                gas_pvt_table.compressibility_factor(
                     pressure=pressure_grid,
                     temperature=temperature_grid,
                 ),
@@ -398,10 +402,10 @@ def reservoir_model(
     # approximation for the derivative; the Z values themselves come from
     # the selected method above.
     if gas_compressibility_grid is None:
-        if pvt_tables is not None:
+        if gas_pvt_table is not None:
             gas_compressibility_grid = typing.cast(
                 typing.Optional[NDimensionalGrid[NDimension]],
-                pvt_tables.gas_compressibility(
+                gas_pvt_table.compressibility(
                     pressure=pressure_grid,
                     temperature=temperature_grid,
                 ),
@@ -415,10 +419,10 @@ def reservoir_model(
             )
 
     if gas_molecular_weight_grid is None:
-        if pvt_tables is not None:
+        if gas_pvt_table is not None:
             gas_molecular_weight_grid = typing.cast(
                 typing.Optional[NDimensionalGrid[NDimension]],
-                pvt_tables.gas_molecular_weight(
+                gas_pvt_table.molecular_weight(
                     pressure=pressure_grid,
                     temperature=temperature_grid,
                 ),
@@ -430,10 +434,10 @@ def reservoir_model(
 
     # Gas density
     if gas_density_grid is None:
-        if pvt_tables is not None:
+        if gas_pvt_table is not None:
             gas_density_grid = typing.cast(
                 typing.Optional[NDimensionalGrid[NDimension]],
-                pvt_tables.gas_density(
+                gas_pvt_table.density(
                     pressure=pressure_grid,
                     temperature=temperature_grid,
                 ),
@@ -450,14 +454,14 @@ def reservoir_model(
     # Do not use PVT tables for oil api gravity and live oil density as these are
     # direct functions of oil specific gravity
     if oil_specific_gravity_grid is None:
-        if pvt_tables is None:
+        if oil_pvt_table is None:
             raise ValidationError(
-                "`oil_specific_gravity_grid` must be provided if `pvt_tables` is not used."
+                "`oil_specific_gravity_grid` must be provided if `oil_pvt_table` is not used."
             )
         else:
             oil_specific_gravity_grid = typing.cast(
                 NDimensionalGrid[NDimension],
-                pvt_tables.oil_specific_gravity(
+                oil_pvt_table.specific_gravity(
                     pressure=pressure_grid,
                     temperature=temperature_grid,
                 ),
@@ -468,7 +472,7 @@ def reservoir_model(
     # Computing Solution GOR and bubble point pressure, we have four cases:
     #  (a) Both provided            → use as-is
     #  (b) Pb provided, Rs missing  → derive Rs from Pb using correlations
-    #  (c) Rs provided, Pb missing  → derive Pb from Rs (pvt_tables first)
+    #  (c) Rs provided, Pb missing  → derive Pb from Rs (oil_pvt_table first)
     #  (d) Neither provided         → estimate using iterative coupled solver
     #      (estimate_solution_gor handles T variation; Standing alone does not)
     if (
@@ -477,7 +481,7 @@ def reservoir_model(
     ):
         # Case (b): Pb given, derive Rs from it
         # User provided Pb but not Rs, use correlations to compute Rs from Pb
-        # Note: We use correlations here even if `pvt_tables` is provided because
+        # Note: We use correlations here even if `oil_pvt_table` is provided because
         # the user explicitly provided Pb and we need to honor that value
         solution_gas_to_oil_ratio_grid = build_solution_gas_to_oil_ratio_grid(
             pressure_grid=pressure_grid,
@@ -491,11 +495,11 @@ def reservoir_model(
         and oil_bubble_point_pressure_grid is None
     ):
         # Case (c): Rs given, derive Pb from it
-        # When Rs is provided, try to get Pb from `pvt_tables` first, then fall back to correlations
-        if pvt_tables is not None:
+        # When Rs is provided, try to get Pb from `oil_pvt_table` first, then fall back to correlations
+        if oil_pvt_table is not None:
             oil_bubble_point_pressure_grid = typing.cast(
                 typing.Optional[NDimensionalGrid[NDimension]],
-                pvt_tables.oil_bubble_point_pressure(
+                oil_pvt_table.bubble_point_pressure(
                     temperature=temperature_grid,
                     solution_gor=solution_gas_to_oil_ratio_grid,
                 ),
@@ -522,11 +526,11 @@ def reservoir_model(
             UserWarning,
         )
 
-        # Try to use `pvt_tables` first to compute Rs and Pb, fall back to correlations
-        if pvt_tables is not None:
+        # Try to use `oil_pvt_table` first to compute Rs and Pb, fall back to correlations
+        if oil_pvt_table is not None:
             solution_gas_to_oil_ratio_grid = typing.cast(
                 typing.Optional[NDimensionalGrid[NDimension]],
-                pvt_tables.solution_gas_to_oil_ratio(
+                oil_pvt_table.solution_gas_to_oil_ratio(
                     pressure=pressure_grid,
                     temperature=temperature_grid,
                     solution_gor=None,  # Will use 1D table if available
@@ -542,11 +546,11 @@ def reservoir_model(
                 tolerance=1e-4,
             )
 
-        # Now derive Pb from the estimated Rs, trying `pvt_tables` first
-        if pvt_tables is not None:
+        # Now derive Pb from the estimated Rs, trying `oil_pvt_table` first
+        if oil_pvt_table is not None:
             oil_bubble_point_pressure_grid = typing.cast(
                 typing.Optional[NDimensionalGrid[NDimension]],
-                pvt_tables.oil_bubble_point_pressure(
+                oil_pvt_table.bubble_point_pressure(
                     temperature=temperature_grid,
                     solution_gor=solution_gas_to_oil_ratio_grid,
                 ),
@@ -565,10 +569,10 @@ def reservoir_model(
 
     # Gas solubility in water
     if gas_solubility_in_water_grid is None:
-        if pvt_tables is not None:
+        if gas_pvt_table is not None:
             gas_solubility_in_water_grid = typing.cast(
                 typing.Optional[NDimensionalGrid[NDimension]],
-                pvt_tables.gas_solubility_in_water(
+                gas_pvt_table.solubility_in_water(
                     pressure=pressure_grid,
                     temperature=temperature_grid,
                     salinity=water_salinity_grid,
@@ -586,10 +590,10 @@ def reservoir_model(
     # Gas FVF must be built before oil FVF/Co because the oil compressibility
     # liberation correction term (below Pb) depends on gas FVF.
     if gas_formation_volume_factor_grid is None:
-        if pvt_tables is not None:
+        if gas_pvt_table is not None:
             gas_formation_volume_factor_grid = typing.cast(
                 typing.Optional[NDimensionalGrid[NDimension]],
-                pvt_tables.gas_formation_volume_factor(
+                gas_pvt_table.formation_volume_factor(
                     pressure=pressure_grid,
                     temperature=temperature_grid,
                 ),
@@ -605,28 +609,28 @@ def reservoir_model(
     # Bo above Pb uses Co: Bo = Bob * exp(-Co * (P - Pb))
     # Co below Pb uses Bo: Co includes (Bg/Bo) * (dRs/dP) / 5.615 liberation term
     # When both are missing, iterate to convergence (typically 2-3 passes).
-    if oil_formation_volume_factor_grid is None and pvt_tables is not None:
+    if oil_formation_volume_factor_grid is None and oil_pvt_table is not None:
         oil_formation_volume_factor_grid = typing.cast(
             typing.Optional[NDimensionalGrid[NDimension]],
-            pvt_tables.oil_formation_volume_factor(
+            oil_pvt_table.formation_volume_factor(
                 pressure=pressure_grid,
                 temperature=temperature_grid,
                 solution_gor=solution_gas_to_oil_ratio_grid,
             ),
         )
 
-    if oil_compressibility_grid is None and pvt_tables is not None:
+    if oil_compressibility_grid is None and oil_pvt_table is not None:
         oil_compressibility_grid = typing.cast(
             typing.Optional[NDimensionalGrid[NDimension]],
-            pvt_tables.oil_compressibility(
+            oil_pvt_table.compressibility(
                 pressure=pressure_grid,
                 temperature=temperature_grid,
             ),
         )
 
-    need_bo = oil_formation_volume_factor_grid is None
-    need_co = oil_compressibility_grid is None
-    if need_bo and need_co:
+    needs_oil_fvf = oil_formation_volume_factor_grid is None
+    need_oil_compressibility = oil_compressibility_grid is None
+    if needs_oil_fvf and need_oil_compressibility:
         # Both are missing. We use iterative bootstrap.
         # Rs at bubble point is needed for Co below Pb.
         rs_at_bubble_point_grid = build_solution_gas_to_oil_ratio_grid(
@@ -699,7 +703,7 @@ def reservoir_model(
 
         oil_compressibility_grid = oil_compressibility_estimate
 
-    elif need_bo and not need_co:
+    elif needs_oil_fvf and not need_oil_compressibility:
         # Co provided, build Bo in a single pass
         oil_formation_volume_factor_grid = build_oil_formation_volume_factor_grid(
             pressure_grid=pressure_grid,
@@ -711,7 +715,7 @@ def reservoir_model(
             oil_compressibility_grid=oil_compressibility_grid,
         )
 
-    elif need_co and not need_bo:
+    elif need_oil_compressibility and not needs_oil_fvf:
         # Bo provided, build Co in a single pass
         rs_at_bubble_point_grid = build_solution_gas_to_oil_ratio_grid(
             pressure_grid=oil_bubble_point_pressure_grid,
@@ -745,10 +749,10 @@ def reservoir_model(
 
     # Water density
     if water_density_grid is None:
-        if pvt_tables is not None:
+        if water_pvt_table is not None:
             water_density_grid = typing.cast(
                 typing.Optional[NDimensionalGrid[NDimension]],
-                pvt_tables.water_density(
+                water_pvt_table.density(
                     pressure=pressure_grid,
                     temperature=temperature_grid,
                     salinity=water_salinity_grid,
@@ -766,10 +770,10 @@ def reservoir_model(
 
     # Water FVF
     if water_formation_volume_factor_grid is None:
-        if pvt_tables is not None:
+        if water_pvt_table is not None:
             water_formation_volume_factor_grid = typing.cast(
                 typing.Optional[NDimensionalGrid[NDimension]],
-                pvt_tables.water_formation_volume_factor(
+                water_pvt_table.formation_volume_factor(
                     pressure=pressure_grid,
                     temperature=temperature_grid,
                     salinity=water_salinity_grid,
@@ -785,10 +789,10 @@ def reservoir_model(
 
     # Water bubble point pressure
     if water_bubble_point_pressure_grid is None:
-        if pvt_tables is not None:
+        if water_pvt_table is not None:
             water_bubble_point_pressure_grid = typing.cast(
                 typing.Optional[NDimensionalGrid[NDimension]],
-                pvt_tables.water_bubble_point_pressure(
+                water_pvt_table.bubble_point_pressure(
                     pressure=pressure_grid,
                     temperature=temperature_grid,
                     salinity=water_salinity_grid,
@@ -804,10 +808,10 @@ def reservoir_model(
 
     # Water compressibility
     if water_compressibility_grid is None:
-        if pvt_tables is not None:
+        if water_pvt_table is not None:
             water_compressibility_grid = typing.cast(
                 typing.Optional[NDimensionalGrid[NDimension]],
-                pvt_tables.water_compressibility(
+                water_pvt_table.compressibility(
                     pressure=pressure_grid,
                     temperature=temperature_grid,
                     salinity=water_salinity_grid,
@@ -826,12 +830,10 @@ def reservoir_model(
 
     # Live oil density
     oil_density_grid = None
-    if pvt_tables is not None:
+    if oil_pvt_table is not None:
         oil_density_grid = typing.cast(
             typing.Optional[NDimensionalGrid[NDimension]],
-            pvt_tables.oil_density(
-                pressure=pressure_grid, temperature=temperature_grid
-            ),
+            oil_pvt_table.density(pressure=pressure_grid, temperature=temperature_grid),
         )
 
     if oil_density_grid is None:

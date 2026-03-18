@@ -10,11 +10,12 @@ from scipy.integrate import cumulative_trapezoid, quad  # type: ignore[import-un
 from bores._precision import get_dtype
 from bores.constants import c
 from bores.errors import ValidationError
+from bores.stores import StoreSerializable
 from bores.types import FloatOrArray
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["GasPseudoPressureTable", "build_gas_pseudo_pressure_table"]
+__all__ = ["PseudoPressureTable", "build_pseudo_pressure_table"]
 
 
 def compute_gas_pseudo_pressure(
@@ -165,7 +166,7 @@ def _supports_vectorization(
     return z_supports and mu_supports
 
 
-def _build_pseudo_pressure_table_vectorized(
+def _build_pseudo_pressures_vectorized(
     pressures: np.typing.NDArray,
     z_factor_func: typing.Callable[[FloatOrArray], FloatOrArray],
     viscosity_func: typing.Callable[[FloatOrArray], FloatOrArray],
@@ -173,7 +174,7 @@ def _build_pseudo_pressure_table_vectorized(
     dtype: typing.Optional[np.typing.DTypeLike] = None,
 ) -> np.typing.NDArray:
     """
-    Build entire pseudo-pressure table using vectorized operations.
+    Build entire pseudo-pressure table values using vectorized operations.
 
     This is much faster than computing each point individually because:
     - Single vectorized call to Z(P_array) and μ(P_array)
@@ -251,7 +252,7 @@ def _build_pseudo_pressure_table_vectorized(
     return np.ascontiguousarray(pseudo_pressures, dtype=dtype)
 
 
-def _build_pseudo_pressure_table_scalar(
+def _build_pseudo_pressures_scalar(
     pressures: np.typing.NDArray,
     z_factor_func: typing.Callable[[float], float],
     viscosity_func: typing.Callable[[float], float],
@@ -260,7 +261,7 @@ def _build_pseudo_pressure_table_scalar(
     dtype: typing.Optional[np.typing.DTypeLike] = None,
 ) -> np.typing.NDArray:
     """
-    Build pseudo-pressure table using threaded scalar computation.
+    Build pseudo-pressure table values using threaded scalar computation.
 
     Uses `ThreadPoolExecutor` to parallelize individual integrations.
 
@@ -286,7 +287,7 @@ def _build_pseudo_pressure_table_scalar(
     return np.ascontiguousarray(pseudo_pressures, dtype=dtype)
 
 
-def build_pseudo_pressure_table(
+def build_pseudo_pressures(
     pressures: np.typing.NDArray,
     z_factor_func: typing.Callable[[FloatOrArray], FloatOrArray],
     viscosity_func: typing.Callable[[FloatOrArray], FloatOrArray],
@@ -294,7 +295,7 @@ def build_pseudo_pressure_table(
     dtype: typing.Optional[np.typing.DTypeLike] = None,
 ) -> np.typing.NDArray:
     """
-    Build pseudo-pressure table with automatic vectorization detection.
+    Build pseudo-pressure table values with automatic vectorization detection.
 
     If both z_factor_func and viscosity_func have `_supports_arrays=True`,
     uses fast vectorized computation. Otherwise uses threaded scalar computation.
@@ -311,7 +312,7 @@ def build_pseudo_pressure_table(
             f"Building pseudo-pressure table using vectorized computation ({points} points)..."
         )
         try:
-            return _build_pseudo_pressure_table_vectorized(
+            return _build_pseudo_pressures_vectorized(
                 pressures=pressures,
                 z_factor_func=z_factor_func,
                 viscosity_func=viscosity_func,
@@ -328,7 +329,7 @@ def build_pseudo_pressure_table(
         f"Building pseudo-pressure table using threaded scalar computation ({points} points)..."
     )
     max_workers = min(8, points // 50 + 1)
-    return _build_pseudo_pressure_table_scalar(
+    return _build_pseudo_pressures_scalar(
         pressures=pressures,
         z_factor_func=z_factor_func,  # type: ignore[arg-type]
         viscosity_func=viscosity_func,  # type: ignore[arg-type]
@@ -338,7 +339,14 @@ def build_pseudo_pressure_table(
     )
 
 
-class GasPseudoPressureTable:
+class PseudoPressureTable(
+    StoreSerializable,
+    fields={
+        "pressures": np.typing.NDArray,
+        "pseudo_pressures": np.typing.NDArray,
+        "reference_pressure": typing.Optional[float],
+    },
+):
     """
     Pre-computed gas pseudo-pressure table for fast lookup during simulation.
 
@@ -410,7 +418,7 @@ class GasPseudoPressureTable:
         Example (function-based):
 
         ```python
-        table = GasPseudoPressureTable(
+        table = PseudoPressureTable(
             z_factor_func=my_z_func,
             viscosity_func=my_mu_func,
             pressure_range=(100, 5000),
@@ -425,7 +433,7 @@ class GasPseudoPressureTable:
         pressure_values = np.array([100, 500, 1000, 2000, 5000])
         pseudo_pressure_values = np.array([2.1e4, 5.3e5, 1.2e6, 2.8e6, 8.1e6])
 
-        table = GasPseudoPressureTable(
+        table = PseudoPressureTable(
             pressures=pressure_values,
             pseudo_pressures=pseudo_pressure_values,
         )
@@ -501,7 +509,7 @@ class GasPseudoPressureTable:
             )
 
             logger.info(f"Building pseudo-pressure table with {points} points...")
-            self.pseudo_pressures = build_pseudo_pressure_table(
+            self.pseudo_pressures = build_pseudo_pressures(
                 pressures=self.pressures,
                 z_factor_func=self.z_factor_func,
                 viscosity_func=self.viscosity_func,
@@ -591,8 +599,8 @@ class GasPseudoPressureTable:
         return 2.0 * pressure / (mu * Z)  # type: ignore[return-value]
 
 
-_PSEUDO_PRESSURE_TABLE_CACHE: LFUCache[typing.Hashable, GasPseudoPressureTable] = (
-    LFUCache(maxsize=100)
+_PSEUDO_PRESSURE_TABLE_CACHE: LFUCache[typing.Hashable, PseudoPressureTable] = LFUCache(
+    maxsize=100
 )
 """Global cache for pseudo-pressure tables"""
 
@@ -600,18 +608,18 @@ _pseudo_pressure_cache_lock = threading.Lock()
 """Thread-safe lock for pseudo-pressure table cache access"""
 
 
-def build_gas_pseudo_pressure_table(
+def build_pseudo_pressure_table(
     z_factor_func: typing.Callable[[FloatOrArray], FloatOrArray],
     viscosity_func: typing.Callable[[FloatOrArray], FloatOrArray],
     reference_pressure: typing.Optional[float] = None,
     pressure_range: typing.Optional[typing.Tuple[float, float]] = None,
     points: typing.Optional[int] = None,
     cache_key: typing.Optional[typing.Hashable] = None,
-) -> GasPseudoPressureTable:
+) -> PseudoPressureTable:
     """
     Build a gas pseudo-pressure table with optional global caching.
 
-    Creates `GasPseudoPressureTable` instances with intelligent caching
+    Creates `PseudoPressureTable` instances with intelligent caching
     to avoid recomputing expensive integrals for identical fluid properties.
 
     **Thread Safety:**
@@ -643,7 +651,7 @@ def build_gas_pseudo_pressure_table(
         None,   # pvt_tables (or hash of tables)
     )
 
-    table = build_gas_pseudo_pressure_table(
+    table = build_pseudo_pressure_table(
         z_factor_func=z_func,
         viscosity_func=mu_func,
         cache_key=cache_key,
@@ -657,7 +665,7 @@ def build_gas_pseudo_pressure_table(
     :param points: Number of pressure points, default 100
     :param interpolation_method: "linear" or "cubic"
     :param cache_key: Optional hashable key for caching. If None, no caching.
-    :return: `GasPseudoPressureTable` instance
+    :return: `PseudoPressureTable` instance
 
     Note:
         The global cache persists for the lifetime of the Python process.
@@ -672,7 +680,7 @@ def build_gas_pseudo_pressure_table(
 
     # Build new table outside lock to avoid blocking other threads
     logger.debug(f"Building new pseudo-pressure table for key: {cache_key}")
-    table = GasPseudoPressureTable(
+    table = PseudoPressureTable(
         z_factor_func=z_factor_func,
         viscosity_func=viscosity_func,
         reference_pressure=reference_pressure,

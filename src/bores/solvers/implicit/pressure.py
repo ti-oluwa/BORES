@@ -977,8 +977,8 @@ def compute_well_contributions(
     Wells contribute only to the diagonal of A and to b.  The semi-implicit
     Robin boundary condition for both injection and production takes the form:
 
-        A[cell, cell] += PI_phase          (productivity index adds to diagonal)
-        b[cell]       += PI_phase * BHP    (BHP-weighted PI adds to RHS)
+        A[cell, cell] += PI_phase (productivity index adds to diagonal)
+        b[cell] += PI_phase * BHP (BHP-weighted PI adds to RHS)
 
     Perforations where BHP is non-finite are silently skipped. They contribute
     zero to both arrays, which is equivalent to closing that perforation for
@@ -1163,14 +1163,14 @@ def compute_well_contributions(
                 if not np.isfinite(effective_bhp):
                     logger.error(
                         f"Non-finite BHP for injection well {well.name!r} "
-                        f"at cell ({i},{j},{k}): {effective_bhp}. Skipping perforation."
+                        f"at cell ({i - pad_width},{j - pad_width},{k - pad_width}): {effective_bhp}. Skipping perforation."
                     )
                     continue
 
                 if abs(effective_bhp - cell_pressure) > 1e6:
                     logger.warning(
                         f"Extreme BHP for injection well {well.name!r} "
-                        f"at cell ({i},{j},{k}): {effective_bhp:.2e} psi "
+                        f"at cell ({i - pad_width},{j - pad_width},{k - pad_width}): {effective_bhp:.2e} psi "
                         f"(reservoir pressure: {cell_pressure:.1f} psi)."
                     )
 
@@ -1180,7 +1180,7 @@ def compute_well_contributions(
                         cell_pressure=cell_pressure,
                         well_name=well.name,
                         time=time_step * time_step_size,
-                        cell=(i, j, k),
+                        cell=(i - pad_width, j - pad_width, k - pad_width),
                     )
 
                 productivity_index = (
@@ -1336,14 +1336,14 @@ def compute_well_contributions(
                 if not np.isfinite(effective_bhp):
                     logger.error(
                         f"Non-finite BHP for production well {well.name!r} "
-                        f"at cell ({i},{j},{k}): {effective_bhp}. Skipping perforation."
+                        f"at cell ({i - pad_width},{j - pad_width},{k - pad_width}): {effective_bhp}. Skipping perforation."
                     )
                     continue
 
                 if abs(effective_bhp - cell_pressure) > 1e6:
                     logger.warning(
                         f"Extreme BHP for production well {well.name!r} "
-                        f"at cell ({i},{j},{k}): {effective_bhp:.2e} psi "
+                        f"at cell ({i - pad_width},{j - pad_width},{k - pad_width}): {effective_bhp:.2e} psi "
                         f"(reservoir pressure: {cell_pressure:.1f} psi)."
                     )
 
@@ -1353,7 +1353,7 @@ def compute_well_contributions(
                         cell_pressure=cell_pressure,
                         well_name=well.name,
                         time=time_step * time_step_size,
-                        cell=(i, j, k),
+                        cell=(i - pad_width, j - pad_width, k - pad_width),
                     )
 
                 productivity_index = (

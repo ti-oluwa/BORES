@@ -426,7 +426,7 @@ def evolve_saturation(
         avg_reservoir_pressure = float(np.mean(interior_pressure_grid))
 
         msg = f"""
-        CFL condition violated at cell ({i - 1}, {j - 1}, {k - 1}) at timestep {time_step}:
+        CFL condition violated at cell ({i - pad_width}, {j - pad_width}, {k - pad_width}) at timestep {time_step}:
 
         Max CFL number {max_cfl_encountered:.4f} exceeds limit {cfl_threshold:.4f}.
 
@@ -468,7 +468,7 @@ def evolve_saturation(
                 cfl_info=CFLMeta(
                     cfl_threshold=cfl_threshold,
                     max_cfl_encountered=max_cfl_encountered,
-                    cell=(i - 1, j - 1, k - 1),
+                    cell=(i - pad_width, j - pad_width, k - pad_width),
                     time_step=time_step,
                     violated=True,
                 ),
@@ -495,9 +495,9 @@ def evolve_saturation(
     max_cfl_encountered = cfl_violation_info[4]
     # Convert padded index to unpadded index
     cfl_i, cfl_j, cfl_k = (
-        int(cfl_violation_info[1]) - 1,
-        int(cfl_violation_info[2]) - 1,
-        int(cfl_violation_info[3]) - 1,
+        int(cfl_violation_info[1]) - pad_width,
+        int(cfl_violation_info[2]) - pad_width,
+        int(cfl_violation_info[3]) - pad_width,
     )
     return EvolutionResult(
         value=ExplicitSaturationSolution(
@@ -1112,7 +1112,7 @@ def compute_well_rate_grids(
                 _warn_injection_rate_is_negative(
                     injection_rate=cell_injection_rate,
                     well_name=well.name,
-                    cell=(i, j, k),
+                    cell=(i - pad_width, j - pad_width, k - pad_width),
                     time=time_step * time_step_size,
                     rate_unit="ft³/day"
                     if injected_phase == FluidPhase.GAS
@@ -1292,7 +1292,7 @@ def compute_well_rate_grids(
                     _warn_production_rate_is_positive(
                         production_rate=production_rate,
                         well_name=well.name,
-                        cell=(i, j, k),
+                        cell=(i - pad_width, j - pad_width, k - pad_width),
                         time=time_step * time_step_size,
                         rate_unit="ft³/day"
                         if produced_phase == FluidPhase.GAS
@@ -1902,7 +1902,7 @@ def evolve_miscible_saturation(
         avg_reservoir_pressure = float(np.mean(interior_pressure_grid))
 
         msg = f"""
-        CFL condition violated at cell ({i - 1}, {j - 1}, {k - 1}) at timestep {time_step}:
+        CFL condition violated at cell ({i - pad_width}, {j - pad_width}, {k - pad_width}) at timestep {time_step}:
 
         Max CFL number {max_cfl_encountered:.4f} exceeds limit {cfl_threshold:.4f}.
 
@@ -1947,7 +1947,7 @@ def evolve_miscible_saturation(
                 cfl_info=CFLMeta(
                     cfl_threshold=cfl_threshold,
                     max_cfl_encountered=max_cfl_encountered,
-                    cell=(i - 1, j - 1, k - 1),
+                    cell=(i - pad_width, j - pad_width, k - pad_width),
                     time_step=time_step,
                     violated=True,
                 ),
@@ -1973,9 +1973,9 @@ def evolve_miscible_saturation(
     cfl_threshold = cfl_violation_info[5]
     # Convert padded index to unpadded index
     cfl_i, cfl_j, cfl_k = (
-        int(cfl_violation_info[1]) - 1,
-        int(cfl_violation_info[2]) - 1,
-        int(cfl_violation_info[3]) - 1,
+        int(cfl_violation_info[1]) - pad_width,
+        int(cfl_violation_info[2]) - pad_width,
+        int(cfl_violation_info[3]) - pad_width,
     )
     max_cfl_encountered = cfl_violation_info[4]
     return EvolutionResult(
@@ -2665,7 +2665,7 @@ def compute_miscible_well_rate_grids(
                 _warn_injection_rate_is_negative(
                     injection_rate=cell_injection_rate,
                     well_name=well.name,
-                    cell=(i, j, k),
+                    cell=(i - pad_width, j - pad_width, k - pad_width),
                     time=time_step * time_step_size,
                     rate_unit="ft³/day"
                     if injected_phase == FluidPhase.GAS
@@ -2858,7 +2858,7 @@ def compute_miscible_well_rate_grids(
                     _warn_production_rate_is_positive(
                         production_rate=production_rate,
                         well_name=well.name,
-                        cell=(i, j, k),
+                        cell=(i - pad_width, j - pad_width, k - pad_width),
                         time=time_step * time_step_size,
                         rate_unit="ft³/day"
                         if produced_phase == FluidPhase.GAS

@@ -134,7 +134,12 @@ def update_pvt_grids(
     """
     pressure_grid = fluid_properties.pressure_grid
     temperature_grid = fluid_properties.temperature_grid
-    if pvt_tables is None:
+    water_salinity_grid = fluid_properties.water_salinity_grid
+    oil_pvt_table = pvt_tables.oil if pvt_tables is not None else None
+    water_pvt_table = pvt_tables.water if pvt_tables is not None else None
+    gas_pvt_table = pvt_tables.gas if pvt_tables is not None else None
+
+    if gas_pvt_table is None:
         # GAS PROPERTIES
         gas_compressibility_factor_grid = build_gas_compressibility_factor_grid(
             gas_gravity_grid=fluid_properties.gas_gravity_grid,
@@ -163,17 +168,40 @@ def update_pvt_grids(
             gas_density_grid=new_gas_density_grid,
             gas_molecular_weight_grid=fluid_properties.gas_molecular_weight_grid,
         )
-
-        # WATER PROPERTIES
         gas_solubility_in_water_grid = build_gas_solubility_in_water_grid(
             pressure_grid=pressure_grid,
             temperature_grid=temperature_grid,
             salinity_grid=fluid_properties.water_salinity_grid,
             gas=fluid_properties.reservoir_gas,
         )
+
+    else:
+        gas_compressibility_factor_grid = gas_pvt_table.compressibility_factor(
+            pressure=pressure_grid, temperature=temperature_grid
+        )
+        new_gas_formation_volume_factor_grid = gas_pvt_table.formation_volume_factor(
+            pressure=pressure_grid, temperature=temperature_grid
+        )
+        new_gas_compressibility_grid = gas_pvt_table.compressibility(
+            pressure=pressure_grid, temperature=temperature_grid
+        )
+        new_gas_density_grid = gas_pvt_table.density(
+            pressure=pressure_grid, temperature=temperature_grid
+        )
+        new_gas_viscosity_grid = gas_pvt_table.viscosity(
+            pressure=pressure_grid, temperature=temperature_grid
+        )
+        gas_solubility_in_water_grid = gas_pvt_table.solubility_in_water(
+            pressure=pressure_grid,
+            temperature=temperature_grid,
+            salinity=water_salinity_grid,
+        )
+
+    # WATER PROPERTIES
+    if water_pvt_table is None:
         new_water_bubble_point_pressure_grid = build_water_bubble_point_pressure_grid(
             temperature_grid=temperature_grid,
-            gas_solubility_in_water_grid=gas_solubility_in_water_grid,
+            gas_solubility_in_water_grid=gas_solubility_in_water_grid,  # type: ignore[arg-type]
             salinity_grid=fluid_properties.water_salinity_grid,
         )
         gas_free_water_formation_volume_factor_grid = (
@@ -187,7 +215,7 @@ def update_pvt_grids(
             temperature_grid=temperature_grid,
             bubble_point_pressure_grid=new_water_bubble_point_pressure_grid,
             gas_formation_volume_factor_grid=fluid_properties.gas_formation_volume_factor_grid,
-            gas_solubility_in_water_grid=gas_solubility_in_water_grid,
+            gas_solubility_in_water_grid=gas_solubility_in_water_grid,  # type: ignore[arg-type]
             gas_free_water_formation_volume_factor_grid=gas_free_water_formation_volume_factor_grid,
             salinity=fluid_properties.water_salinity_grid,
         )
@@ -196,7 +224,7 @@ def update_pvt_grids(
             temperature_grid=temperature_grid,
             gas_gravity_grid=fluid_properties.gas_gravity_grid,
             salinity_grid=fluid_properties.water_salinity_grid,
-            gas_solubility_in_water_grid=gas_solubility_in_water_grid,
+            gas_solubility_in_water_grid=gas_solubility_in_water_grid,  # type: ignore[arg-type]
             gas_free_water_formation_volume_factor_grid=gas_free_water_formation_volume_factor_grid,
         )
         new_water_formation_volume_factor_grid = (
@@ -211,31 +239,7 @@ def update_pvt_grids(
             pressure_grid=pressure_grid,
         )
     else:
-        # GAS PROPERTIES
-        gas_compressibility_factor_grid = pvt_tables.gas_compressibility_factor(
-            pressure=pressure_grid, temperature=temperature_grid
-        )
-        new_gas_formation_volume_factor_grid = pvt_tables.gas_formation_volume_factor(
-            pressure=pressure_grid, temperature=temperature_grid
-        )
-        new_gas_compressibility_grid = pvt_tables.gas_compressibility(
-            pressure=pressure_grid, temperature=temperature_grid
-        )
-        new_gas_density_grid = pvt_tables.gas_density(
-            pressure=pressure_grid, temperature=temperature_grid
-        )
-        new_gas_viscosity_grid = pvt_tables.gas_viscosity(
-            pressure=pressure_grid, temperature=temperature_grid
-        )
-
-        # WATER PROPERTIES
-        water_salinity_grid = fluid_properties.water_salinity_grid
-        gas_solubility_in_water_grid = pvt_tables.gas_solubility_in_water(
-            pressure=pressure_grid,
-            temperature=temperature_grid,
-            salinity=water_salinity_grid,
-        )
-        new_water_bubble_point_pressure_grid = pvt_tables.water_bubble_point_pressure(
+        new_water_bubble_point_pressure_grid = water_pvt_table.bubble_point_pressure(
             pressure=pressure_grid,
             temperature=temperature_grid,
             salinity=water_salinity_grid,
@@ -246,24 +250,24 @@ def update_pvt_grids(
                 temperature_grid=temperature_grid,
             )
         )
-        new_water_compressibility_grid = pvt_tables.water_compressibility(
+        new_water_compressibility_grid = water_pvt_table.compressibility(
             pressure=pressure_grid,
             temperature=temperature_grid,
             salinity=water_salinity_grid,
         )
-        new_water_density_grid = pvt_tables.water_density(
+        new_water_density_grid = water_pvt_table.density(
             pressure=pressure_grid,
             temperature=temperature_grid,
             salinity=water_salinity_grid,
         )
         new_water_formation_volume_factor_grid = (
-            pvt_tables.water_formation_volume_factor(
+            water_pvt_table.formation_volume_factor(
                 pressure=pressure_grid,
                 temperature=temperature_grid,
                 salinity=water_salinity_grid,
             )
         )
-        new_water_viscosity_grid = pvt_tables.water_viscosity(
+        new_water_viscosity_grid = water_pvt_table.viscosity(
             pressure=pressure_grid,
             temperature=temperature_grid,
             salinity=water_salinity_grid,
@@ -273,7 +277,7 @@ def update_pvt_grids(
     # Make sure to always compute the oil bubble point pressure grid
     # before the gas to oil ratio grid, as the latter depends on the former.
 
-    if pvt_tables is None:
+    if oil_pvt_table is None:
         # Compute New bubble point using Current Rs
         if freeze_saturation_pressure:
             # Keep current bubble point constant
@@ -356,13 +360,13 @@ def update_pvt_grids(
             )
         else:
             # Recompute from tables
-            new_oil_bubble_point_pressure_grid = pvt_tables.oil_bubble_point_pressure(
+            new_oil_bubble_point_pressure_grid = oil_pvt_table.bubble_point_pressure(
                 temperature=temperature_grid,
                 solution_gor=fluid_properties.solution_gas_to_oil_ratio_grid,
             )
 
         # Compute New Rs at current pressure
-        new_solution_gas_to_oil_ratio_grid = pvt_tables.solution_gas_to_oil_ratio(
+        new_solution_gas_to_oil_ratio_grid = oil_pvt_table.solution_gas_to_oil_ratio(
             pressure=pressure_grid,
             temperature=temperature_grid,
             solution_gor=fluid_properties.solution_gas_to_oil_ratio_grid,
@@ -372,23 +376,23 @@ def update_pvt_grids(
         # so we can use the old one (compressibility changes are small, hence, it can be lagged).
         # FVF is a function of pressure and phase behavior. Only when pressure changes,
         # does FVF need to be recalculated.
-        new_oil_formation_volume_factor_grid = pvt_tables.oil_formation_volume_factor(
+        new_oil_formation_volume_factor_grid = oil_pvt_table.formation_volume_factor(
             pressure=pressure_grid,
             temperature=temperature_grid,
             solution_gor=new_solution_gas_to_oil_ratio_grid,
         )
         # Compute oil compressibility
-        new_oil_compressibility_grid = pvt_tables.oil_compressibility(
+        new_oil_compressibility_grid = oil_pvt_table.compressibility(
             pressure=pressure_grid,
             temperature=temperature_grid,
         )
         # Compute oil density and viscosity
-        new_oil_density_grid = pvt_tables.oil_density(
+        new_oil_density_grid = oil_pvt_table.density(
             pressure=pressure_grid,
             temperature=temperature_grid,
         )
         new_oil_effective_density_grid = new_oil_density_grid
-        new_oil_viscosity_grid = pvt_tables.oil_viscosity(
+        new_oil_viscosity_grid = oil_pvt_table.viscosity(
             pressure=pressure_grid,
             temperature=temperature_grid,
             solution_gor=new_solution_gas_to_oil_ratio_grid,

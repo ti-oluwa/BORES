@@ -51,7 +51,7 @@ from bores.solvers import explicit, implicit
 from bores.solvers.base import normalize_saturations
 from bores.states import ModelState
 from bores.stores import StoreSerializable
-from bores.tables.pvt import PVTTableData, PVTTables
+from bores.tables.pvt import PVTDataSet, PVTTables
 from bores.types import MiscibilityModel, NDimension, NDimensionalGrid, ThreeDimensions
 from bores.utils import clip
 from bores.wells import Wells
@@ -1485,8 +1485,8 @@ class Run(StoreSerializable):
     model = ReservoirModel.from_file("path/to/3d_model.h5")
     config = Config.from_file("path/to/simulation_config.yaml")
 
-    simulation_run = Run(model=model, config=config)
-    for state in simulation_run:
+    run = Run(model=model, config=config)
+    for state in run:
         # Process the model state at each output interval
         process(state)
 
@@ -1527,6 +1527,7 @@ class Run(StoreSerializable):
         cls,
         model_path: typing.Union[str, PathLike],
         config_path: typing.Union[str, PathLike],
+        pvt_tables_path: typing.Optional[typing.Union[str, PathLike]] = None,
         pvt_data_path: typing.Optional[typing.Union[str, PathLike]] = None,
     ) -> Self:
         """
@@ -1534,7 +1535,8 @@ class Run(StoreSerializable):
 
         :param model_path: Path to the reservoir model file.
         :param config_path: Path to the simulation configuration file.
-        :param pvt_data_path: Optional path to PVT table data file.
+        :param pvt_tables_path: Optional path to dumped `PVTTables` file.
+        :param pvt_data_path: Optional path to dumped `PVTDataSet` file.
         :return: `Run` instance with loaded model and config.
         """
         model = ReservoirModel.from_file(model_path)
@@ -1547,12 +1549,19 @@ class Run(StoreSerializable):
         if config is None:
             raise ValidationError("Failed to load simulation config from file.")
 
-        if pvt_data_path is not None:
-            pvt_data = PVTTableData.from_file(pvt_data_path)
-            if pvt_data is None:
-                raise ValidationError("Failed to load PVT table data from file.")
+        if pvt_tables_path is not None:
+            pvt_tables = PVTTables.from_file(pvt_tables_path)
+            if pvt_tables is None:
+                raise ValidationError("Failed to load `PVTTables` data from file.")
 
-            pvt_tables = PVTTables(data=pvt_data)
+            config = config.with_updates(pvt_tables=pvt_tables)
+
+        if pvt_data_path is not None:
+            pvt_dataset = PVTDataSet.from_file(pvt_data_path)
+            if pvt_dataset is None:
+                raise ValidationError("Failed to load `PVTDataSet` from file.")
+            
+            pvt_tables = PVTTables.from_dataset(pvt_dataset)
             config = config.with_updates(pvt_tables=pvt_tables)
         return cls(model=model, config=config)
 

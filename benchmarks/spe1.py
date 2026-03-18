@@ -16,7 +16,7 @@ def setup_grid():
     from bores.correlations.core import compute_oil_specific_gravity
 
     logging.basicConfig(level=logging.INFO)
-    bores.use_64bit_precision()
+    bores.use_32bit_precision()
 
     # -------------------------------------------------------------------------
     # Grid geometry — SPE1 benchmark (Odeh, 1981, JPT)
@@ -57,9 +57,7 @@ def setup_grid():
     reference_depth = 8400.0  # ft
 
     # Interpolate undersaturated density at initial pressure
-    rho_at_pb = (
-        37.046  # lbm/ft³ at 4014.7 psia (bubble point, undersaturated table)
-    )
+    rho_at_pb = 37.046  # lbm/ft³ at 4014.7 psia (bubble point, undersaturated table)
     rho_at_9015 = 39.768  # lbm/ft³ at 9014.7 psia (undersaturated table)
     p_interp_frac = (reference_pressure - 4014.7) / (9014.7 - 4014.7)
     rho_oil_initial = rho_at_pb + (rho_at_9015 - rho_at_pb) * p_interp_frac
@@ -143,9 +141,7 @@ def setup_grid():
     residual_oil_saturation_gas_grid = bores.uniform_grid(
         grid_shape=grid_shape, value=0.0
     )
-    residual_gas_saturation_grid = bores.uniform_grid(
-        grid_shape=grid_shape, value=0.0
-    )
+    residual_gas_saturation_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.0)
 
     oil_saturation_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.88)
     water_saturation_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.12)
@@ -163,9 +159,7 @@ def setup_grid():
     # Gas viscosity initial
     gas_viscosity_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.027)
 
-    oil_viscosity_grid = bores.uniform_grid(
-        grid_shape=grid_shape, value=0.51
-    )  # cP
+    oil_viscosity_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.51)  # cP
 
     # Oil specific gravity from Table 2 dead oil density at 14.7 psia: 46.244 lb/ft³ (assuming oil is incompressible at STP)
     oil_specific_gravity = compute_oil_specific_gravity(
@@ -403,26 +397,18 @@ def setup_grid():
     # -------------------------------------------------------------------------
 
     # OIL TABLES
-    solution_gor_table = np.column_stack(
-        [solution_gor_values, solution_gor_values]
-    )
+    solution_gor_table = np.column_stack([solution_gor_values, solution_gor_values])
 
     oil_fvf_table = np.column_stack([oil_fvf_values, oil_fvf_values])
 
-    oil_viscosity_table = np.column_stack(
-        [oil_viscosity_values, oil_viscosity_values]
-    )
+    oil_viscosity_table = np.column_stack([oil_viscosity_values, oil_viscosity_values])
 
-    oil_density_table = np.column_stack(
-        [oil_density_values, oil_density_values]
-    )
+    oil_density_table = np.column_stack([oil_density_values, oil_density_values])
 
     # GAS TABLES
     gas_fvf_table = np.column_stack([gas_fvf_values, gas_fvf_values])
 
-    gas_viscosity_table = np.column_stack(
-        [gas_viscosity_values, gas_viscosity_values]
-    )
+    gas_viscosity_table = np.column_stack([gas_viscosity_values, gas_viscosity_values])
 
     gas_density_table = np.column_stack([gas_density_values, gas_density_values])
 
@@ -452,22 +438,16 @@ def setup_grid():
     # Cast to typed arrays for bores
     solution_gor_table = typing.cast(bores.TwoDimensionalGrid, solution_gor_table)
     oil_fvf_table = typing.cast(bores.TwoDimensionalGrid, oil_fvf_table)
-    oil_viscosity_table = typing.cast(
-        bores.TwoDimensionalGrid, oil_viscosity_table
-    )
+    oil_viscosity_table = typing.cast(bores.TwoDimensionalGrid, oil_viscosity_table)
     oil_density_table = typing.cast(bores.TwoDimensionalGrid, oil_density_table)
     gas_fvf_table = typing.cast(bores.TwoDimensionalGrid, gas_fvf_table)
-    gas_viscosity_table = typing.cast(
-        bores.TwoDimensionalGrid, gas_viscosity_table
-    )
+    gas_viscosity_table = typing.cast(bores.TwoDimensionalGrid, gas_viscosity_table)
     gas_density_table = typing.cast(bores.TwoDimensionalGrid, gas_density_table)
     water_fvf_table = typing.cast(bores.ThreeDimensionalGrid, water_fvf_table)
     water_viscosity_table = typing.cast(
         bores.ThreeDimensionalGrid, water_viscosity_table
     )
-    water_density_table = typing.cast(
-        bores.ThreeDimensionalGrid, water_density_table
-    )
+    water_density_table = typing.cast(bores.ThreeDimensionalGrid, water_density_table)
     gas_solubility_in_water_table = typing.cast(
         bores.ThreeDimensionalGrid, gas_solubility_in_water_table
     )
@@ -475,7 +455,7 @@ def setup_grid():
     # -------------------------------------------------------------------------
     # Build PVT Table Data
     # -------------------------------------------------------------------------
-    pvt_data = bores.build_pvt_table_data(
+    pvt_dataset = bores.build_pvt_dataset(
         pressures=pvt_pressures,
         temperatures=pvt_temperatures,
         salinities=bores.array([0.0]),  # Fresh water
@@ -496,7 +476,9 @@ def setup_grid():
         water_density_table=water_density_table,
         gas_solubility_in_water_table=gas_solubility_in_water_table,
     )
-    pvt_tables = bores.PVTTables(data=pvt_data, interpolation_method="linear")
+    pvt_tables = bores.PVTTables.from_dataset(
+        pvt_dataset, interpolation_method="linear"
+    )
 
     # -------------------------------------------------------------------------
     # Build Reservoir Model
@@ -532,7 +514,7 @@ def setup_grid():
     )
 
     model.save(Path("./benchmarks/runs/spe1/setup/model.h5"))
-    pvt_data.save(Path("./benchmarks/runs/spe1/setup/pvt.h5"))
+    pvt_tables.save(Path("./benchmarks/runs/spe1/setup/pvt.h5"))
     return Path, bores, np, oil_specific_gravity, pvt_tables
 
 
@@ -637,31 +619,35 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
     # -------------------------------------------------------------------------
     # Data from "Gas PVT Functions" table (Odeh, 1981, JPT Table 1)
     # Column 5: Pseudo-pressure m(P) in psi²/cp
-    gas_pressures = bores.array([
-        14.7,      # Reference pressure (standard conditions)
-        264.7,
-        514.7,
-        1014.7,
-        2014.7,
-        2514.7,
-        3014.7,
-        4014.7,
-        5014.7,
-        6014.7,
-    ])
-    gas_pseudo_pressures = bores.array([
-        0.0,                 # Zero at reference pressure
-        7.7791e6,           # 0.77791E+07
-        2.67580e7,          # 0.267580E+08
-        6.75220e7,          # 0.675220E+08
-        2.70709e8,          # 0.270709E+09
-        3.68101e8,          # 0.368101E+09
-        5.18118e8,          # 0.518118E+09
-        8.03683e8,          # 0.803683E+09
-        1.15239e9,          # 1.15239E+10
-        2.51848e9,          # 0.251848E+10
-    ])
-    pseudo_pressure_table = bores.GasPseudoPressureTable(
+    gas_pressures = bores.array(
+        [
+            14.7,  # Reference pressure (standard conditions)
+            264.7,
+            514.7,
+            1014.7,
+            2014.7,
+            2514.7,
+            3014.7,
+            4014.7,
+            5014.7,
+            6014.7,
+        ]
+    )
+    gas_pseudo_pressures = bores.array(
+        [
+            0.0,  # Zero at reference pressure
+            7.7791e6,  # 0.77791E+07
+            2.67580e7,  # 0.267580E+08
+            6.75220e7,  # 0.675220E+08
+            2.70709e8,  # 0.270709E+09
+            3.68101e8,  # 0.368101E+09
+            5.18118e8,  # 0.518118E+09
+            8.03683e8,  # 0.803683E+09
+            1.15239e9,  # 1.15239E+10
+            2.51848e9,  # 0.251848E+10
+        ]
+    )
+    pseudo_pressure_table = bores.PseudoPressureTable(
         pressures=gas_pressures,
         pseudo_pressures=gas_pseudo_pressures,
         reference_pressure=14.7,
@@ -779,7 +765,6 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
         use_pseudo_pressure=True,
         normalize_saturations=True,
     )
-
     config.save(Path("./benchmarks/runs/spe1/setup/config.yaml"))
     return (wells,)
 
@@ -795,15 +780,13 @@ def run_simulation(Path, bores, store):
     run = bores.Run.from_files(
         model_path=Path("./benchmarks/runs/spe1/setup/model.h5"),
         config_path=Path("./benchmarks/runs/spe1/setup/config.yaml"),
-        pvt_data_path=Path("./benchmarks/runs/spe1/setup/pvt.h5"),
+        pvt_tables_path=Path("./benchmarks/runs/spe1/setup/pvt.h5"),
     )
-
 
     def GOR_gte_20_000(state) -> bool:
         analyst = bores.ModelAnalyst([state])
         rates = analyst.instantaneous_production_rates(cells=[[(9, 9, 2), (9, 9, 2)]])
         return rates.gas_oil_ratio >= 20_000
-
 
     last_state = None
     with bores.StateStream(run, store=store, background_io=True) as stream:
@@ -818,7 +801,7 @@ def run_simulation(Path, bores, store):
 @app.cell
 def load_states(bores, store):
     store_stream = bores.StateStream(store=store)
-    states = list(store_stream.replay(steps=lambda s: s % 10 == 0))
+    states = list(store_stream.replay(steps=lambda s: s % 2 == 0))
     return (states,)
 
 
@@ -858,7 +841,7 @@ def setup_analysis(bores, np, states):
         avg_oil_sat = np.mean(fluid_properties.oil_saturation_grid)
         avg_water_sat = np.mean(fluid_properties.water_saturation_grid)
         avg_gas_sat = np.mean(fluid_properties.gas_saturation_grid)
-        avg_pressure = np.mean(fluid_properties.pressure_grid)
+        avg_pressure = np.mean(fluid_properties.pressure_grid[9, 9, 0])
 
         oil_saturation_history.append((time_step, avg_oil_sat))
         water_saturation_history.append((time_step, avg_water_sat))
@@ -1104,9 +1087,7 @@ def reserves_plots(analyst, bores, np):
     # Reserves
     oil_in_place_history = analyst.oil_in_place_history(interval=1, from_step=1)
     gas_in_place_history = analyst.gas_in_place_history(interval=1, from_step=1)
-    water_in_place_history = analyst.water_in_place_history(
-        interval=1, from_step=1
-    )
+    water_in_place_history = analyst.water_in_place_history(interval=1, from_step=1)
 
     oil_water_reserves_fig = bores.make_series_plot(
         data={
@@ -1222,7 +1203,7 @@ def recovery_plots(analyst, bores, np, recovery_efficiency_history):
 
 @app.cell
 def _(analyst):
-    mbe = analyst.material_balance_error(to_step=1200)
+    mbe = analyst.material_balance_error()
     print(mbe.total_mbe)
     return
 
@@ -1254,13 +1235,13 @@ def _(bores, states, viz, wells):
         show_wells=True,
         show_surface_marker=True,
         show_perforations=True,
-        # cmin=0.15,
-        # cmax=1.1,
+        cmin=0.0,
+        cmax=1,
     )
 
-    property = "gas-sat"
+    property = "oil-sat"
     figures = []
-    timesteps = [67]
+    timesteps = [900]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],

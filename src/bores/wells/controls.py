@@ -177,10 +177,17 @@ def _compute_required_bhp(
         )
 
         # Compute Z-factor using reservoir pressure as initial estimate
+        specific_gravity = fluid.get_specific_gravity(
+            pressure=pressure, temperature=temperature
+        )
+        if specific_gravity is None:
+            raise ValidationError(
+                "Well fluid has no specific gravity define. Specify a value or provide a PVT table for the fluid."
+            )
         avg_z = _compute_avg_z_factor(
             pressure=pressure,
             temperature=temperature,
-            gas_gravity=fluid.specific_gravity,
+            gas_gravity=specific_gravity,
         )
         return compute_required_bhp_for_gas_rate(
             target_rate=target_rate,
@@ -511,10 +518,18 @@ class BHPControl(WellControl[WellFluidTcon]):
                 use_pseudo_pressure=use_pseudo_pressure,
                 pvt_tables=pvt_tables,
             )
+            # Compute Z-factor using reservoir pressure as initial estimate
+            specific_gravity = fluid.get_specific_gravity(
+                pressure=pressure, temperature=temperature
+            )
+            if specific_gravity is None:
+                raise ValidationError(
+                    "Well fluid has no specific gravity define. Specify a value or provide a PVT table for the fluid."
+                )
             avg_z = _compute_avg_z_factor(
                 pressure=pressure,
                 temperature=temperature,
-                gas_gravity=fluid.specific_gravity,
+                gas_gravity=specific_gravity,
                 bottom_hole_pressure=bhp,
             )
             rate = compute_gas_well_rate(
@@ -1053,10 +1068,18 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 use_pseudo_pressure=use_pseudo_pressure,
                 pvt_tables=pvt_tables,
             )
+            # Compute Z-factor using reservoir pressure as initial estimate
+            specific_gravity = fluid.get_specific_gravity(
+                pressure=pressure, temperature=temperature
+            )
+            if specific_gravity is None:
+                raise ValidationError(
+                    "Well fluid has no specific gravity define. Specify a value or provide a PVT table for the fluid."
+                )
             avg_z = _compute_avg_z_factor(
                 pressure=pressure,
                 temperature=temperature,
-                gas_gravity=fluid.specific_gravity,
+                gas_gravity=specific_gravity,
                 bottom_hole_pressure=bhp_limit,
             )
             rate = compute_gas_well_rate(
@@ -1456,10 +1479,18 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
                 use_pseudo_pressure=use_pseudo_pressure,
                 pvt_tables=pvt_tables,
             )
+            # Compute Z-factor using reservoir pressure as initial estimate
+            specific_gravity = fluid.get_specific_gravity(
+                pressure=pressure, temperature=temperature
+            )
+            if specific_gravity is None:
+                raise ValidationError(
+                    "Well fluid has no specific gravity define. Specify a value or provide a PVT table for the fluid."
+                )
             avg_z = _compute_avg_z_factor(
                 pressure=pressure,
                 temperature=temperature,
-                gas_gravity=fluid.specific_gravity,
+                gas_gravity=specific_gravity,
                 bottom_hole_pressure=bhp,
             )
             rate = compute_gas_well_rate(

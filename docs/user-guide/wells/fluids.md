@@ -150,7 +150,7 @@ pseudo_pressures = np.array([
 ])  # psi²/cP
 
 # Build table from your data
-custom_table = bores.GasPseudoPressureTable(
+custom_table = bores.PseudoPressureTable(
     pressures=pressures,
     pseudo_pressures=pseudo_pressures,
     reference_pressure=14.7,  # Standard conditions
@@ -190,7 +190,7 @@ my_z_factor._supports_arrays = True
 my_viscosity._supports_arrays = True
 
 # Build table with higher resolution
-custom_table = bores.GasPseudoPressureTable(
+custom_table = bores.PseudoPressureTable(
     z_factor_func=my_z_factor,
     viscosity_func=my_viscosity,
     pressure_range=(100, 8000),  # Wider range
@@ -228,7 +228,7 @@ co2_fluid = bores.InjectedFluid(
     - **Commercial PVT software**: Eclipse PVTi, CMG WinProp, etc.
     - **Laboratory measurements**: Direct PVT cell measurements
 
-    Most commercial tools can export P-Z-μ tables that you can convert to pseudo-pressure using BORES' `GasPseudoPressureTable` with the value-based mode.
+    Most commercial tools can export P-Z-μ tables that you can convert to pseudo-pressure using BORES' `PseudoPressureTable` with the value-based mode.
 
 ### Miscible Gas Injection
 

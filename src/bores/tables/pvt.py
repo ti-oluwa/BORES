@@ -1,6 +1,9 @@
+"""PVT (Pressure-Volume-Temperature) property tables for reservoir simulation."""
+
 import logging
 import typing
 import warnings
+from os import PathLike
 
 import attrs
 import numpy as np
@@ -9,6 +12,7 @@ from scipy.interpolate import (  # type: ignore[import-untyped]
     RegularGridInterpolator,
     interp1d,
 )
+from typing_extensions import Self
 
 from bores._precision import get_dtype
 from bores.constants import c
@@ -39,6 +43,7 @@ from bores.grids.pvt import (
 )
 from bores.stores import StoreSerializable
 from bores.types import (
+    FluidPhase,
     NDimensionalGrid,
     OneDimensionalGrid,
     ThreeDimensionalGrid,
@@ -47,123 +52,185 @@ from bores.types import (
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["PVTTableData", "PVTTables", "build_pvt_table_data"]
+__all__ = [
+    "DEFAULT_GAS_CLAMPS",
+    "DEFAULT_OIL_CLAMPS",
+    "DEFAULT_WATER_CLAMPS",
+    "PVTData",
+    "PVTDataSet",
+    "PVTTable",
+    "PVTTables",
+    "build_gas_pvt_data",
+    "build_oil_pvt_data",
+    "build_pvt_dataset",
+    "build_water_pvt_data",
+]
 
-QueryType = typing.Union[NDimensionalGrid, list, float, np.floating]
 InterpolationMethod = typing.Literal["linear", "cubic"]
 _INTERPOLATION_DEGREES = {"linear": 1, "cubic": 3}
 
+QueryType = typing.Union[NDimensionalGrid, typing.List[typing.Any], float, np.floating]
+
+
+DEFAULT_OIL_CLAMPS: typing.Dict[str, typing.Tuple[float, float]] = {
+    "viscosity": (1e-6, 1e4),
+    "density": (1.0, 80.0),
+    "formation_volume_factor": (0.5, 5.0),
+    "compressibility": (0.0, 1e-1),
+    "solution_gor": (0.0, 5000.0),
+    "specific_gravity": (0.5, 1.2),
+    "molecular_weight": (10.0, 600.0),
+}
+
+DEFAULT_GAS_CLAMPS: typing.Dict[str, typing.Tuple[float, float]] = {
+    "viscosity": (1e-6, 1e2),
+    "density": (0.001, 50.0),
+    "formation_volume_factor": (1e-6, 100.0),
+    "compressibility": (0.0, 1e-1),
+    "compressibility_factor": (0.1, 3.0),
+    "solubility_in_water": (0.0, 500.0),
+    "specific_gravity": (0.5, 2.0),
+    "molecular_weight": (2.0, 100.0),
+}
+
+DEFAULT_WATER_CLAMPS: typing.Dict[str, typing.Tuple[float, float]] = {
+    "viscosity": (1e-6, 10.0),
+    "density": (30.0, 80.0),
+    "formation_volume_factor": (0.9, 2.0),
+    "compressibility": (0.0, 1e-2),
+    "specific_gravity": (0.9, 1.3),
+    "molecular_weight": (18.0, 20.0),
+}
+
+PHASE_DEFAULT_CLAMPS: typing.Dict[
+    FluidPhase, typing.Dict[str, typing.Tuple[float, float]]
+] = {
+    FluidPhase.OIL: DEFAULT_OIL_CLAMPS,
+    FluidPhase.GAS: DEFAULT_GAS_CLAMPS,
+    FluidPhase.WATER: DEFAULT_WATER_CLAMPS,
+}
+
 
 @attrs.frozen
-class PVTTableData(StoreSerializable):
+class PVTData(StoreSerializable):
     """
-    Raw PVT table data for serialization, inspection, and interpolator building.
+    Raw PVT table data for a single fluid phase.
 
-    Holds the complete tabulated data for oil, water, and gas properties.
-    It can be serialized/saved to disk and used to build PVTTables interpolators.
+    Phase-tagged container for tabulated fluid properties. All table arrays are
+    optional - only `phase`, `pressures`, and `temperatures` are required.
+    `PVTTable` validates which fields are meaningful for the phase at initialization time.
 
-    All raw table arrays are stored here. After building interpolators, these can be
-    discarded to save memory (~50% reduction).
+    **Table shapes:**
+    - Oil / gas: 2D arrays with shape `(n_pressures, n_temperatures)`
+    - Water: 3D arrays with shape `(n_pressures, n_temperatures, n_salinities)`
+
+    **Oil-specific fields:** `bubble_point_pressures`, `solution_gas_to_oil_ratios`,
+    `solution_gor_table`
+
+    **Gas-specific fields:** `compressibility_factor_table`, `solubility_in_water_table`
+
+    **Water-specific fields:** `salinities`, `bubble_point_pressure_table`,
+    `gas_free_fvf_table`
     """
 
-    # Base grids for interpolation
+    phase: typing.Union[FluidPhase, str] = attrs.field(converter=FluidPhase)
+    """Fluid phase this data describes."""
+
+    # Base coordinate grids
     pressures: OneDimensionalGrid
-    """One-dimensional grid of pressures (psi)."""
+    """1D array of pressures (psi), strictly increasing."""
 
     temperatures: OneDimensionalGrid
-    """One-dimensional grid of temperatures (°F)."""
+    """1D array of temperatures (°F), strictly increasing."""
 
+    # Water-only coordinate grid
     salinities: typing.Optional[OneDimensionalGrid] = None
-    """One-dimensional grid of salinities (ppm NaCl) for salinity-dependent properties."""
+    """1D array of salinities (ppm NaCl), strictly increasing. Water phase only."""
 
-    solution_gas_oil_ratios: typing.Optional[OneDimensionalGrid] = None
-    """One-dimensional grid of solution gas-oil ratios (SCF/STB) for varying composition properties."""
-
+    # Oil-only coordinate / meta grids
     bubble_point_pressures: typing.Optional[
         typing.Union[OneDimensionalGrid, TwoDimensionalGrid]
     ] = None
     """
-    Bubble point pressures for dead oil (psi). Can be 1D: Pb(T) or 2D: Pb(Rs, T)
+    Bubble point pressures (psi). Oil phase only.
+    - 1D shape `(n_t,)`    → Pb(T)
+    - 2D shape `(n_rs, n_t)` → Pb(Rs, T); requires `solution_gas_to_oil_ratios`
     """
 
-    # Oil properties tables (2D: n_pressures x n_temperatures)
-    oil_viscosity_table: typing.Optional[TwoDimensionalGrid] = None
-    """Oil viscosity μo(P,T) in cP. 2D table: (n_pressures x n_temperatures)."""
+    solution_gas_to_oil_ratios: typing.Optional[OneDimensionalGrid] = None
+    """
+    1D array of Rs values (SCF/STB) used as the first axis of a 2D
+    `bubble_point_pressures` table. Required when `bubble_point_pressures`
+    is 2D. Oil phase only.
+    """
 
-    oil_compressibility_table: typing.Optional[TwoDimensionalGrid] = None
-    """Oil compressibility co(P,T) in psi⁻¹. 2D table: (n_pressures x n_temperatures)."""
+    # Shared property tables (2D for oil/gas, 3D for water)
+    viscosity_table: typing.Optional[
+        typing.Union[TwoDimensionalGrid, ThreeDimensionalGrid]
+    ] = None
+    """Viscosity μ(P,T) in cP. 2D for oil/gas, 3D for water."""
 
-    oil_specific_gravity_table: typing.Optional[TwoDimensionalGrid] = None
-    """Oil specific gravity γo(P,T) (dimensionless, water=1). 2D table: (n_pressures x n_temperatures)."""
+    density_table: typing.Optional[
+        typing.Union[TwoDimensionalGrid, ThreeDimensionalGrid]
+    ] = None
+    """Density ρ(P,T) in lbm/ft³. 2D for oil/gas, 3D for water."""
 
-    oil_api_gravity_table: typing.Optional[TwoDimensionalGrid] = None
-    """Oil API gravity °API(P,T). 2D table: (n_pressures x n_temperatures)."""
+    formation_volume_factor_table: typing.Optional[
+        typing.Union[TwoDimensionalGrid, ThreeDimensionalGrid]
+    ] = None
+    """
+    Formation volume factor B(P,T) in bbl/STB (oil/water) or ft³/SCF (gas).
+    2D for oil/gas, 3D for water.
+    """
 
-    oil_density_table: typing.Optional[TwoDimensionalGrid] = None
-    """Oil density ρo(P,T) in lbm/ft³. 2D table: (n_pressures x n_temperatures)."""
+    compressibility_table: typing.Optional[
+        typing.Union[TwoDimensionalGrid, ThreeDimensionalGrid]
+    ] = None
+    """Compressibility c(P,T) in psi⁻¹. 2D for oil/gas, 3D for water."""
 
-    oil_formation_volume_factor_table: typing.Optional[TwoDimensionalGrid] = None
-    """Oil formation volume factor Bo(P,T) in bbl/STB. 2D table: (n_pressures x n_temperatures)."""
+    specific_gravity_table: typing.Optional[
+        typing.Union[TwoDimensionalGrid, ThreeDimensionalGrid]
+    ] = None
+    """Specific gravity γ(P,T) (dimensionless). 2D for oil/gas, 3D for water."""
 
-    solution_gas_to_oil_ratio_table: typing.Optional[TwoDimensionalGrid] = None
-    """Solution gas-oil ratio Rs(P,T) in SCF/STB. 2D table: (n_pressures x n_temperatures)."""
+    molecular_weight_table: typing.Optional[
+        typing.Union[TwoDimensionalGrid, ThreeDimensionalGrid]
+    ] = None
+    """Molecular weight M(P,T) in lbm/lb-mol. 2D for oil/gas, 3D for water."""
 
-    # Water properties tables (3D: n_pressures x n_temperatures x n_salinities)
-    water_bubble_point_pressure_table: typing.Optional[ThreeDimensionalGrid] = None
-    """Water bubble point pressure Pb,w(P,T,S) in psi. 3D table: (n_pressures x n_temperatures x n_salinities)."""
+    # Oil-only property tables (2D)
+    solution_gor_table: typing.Optional[TwoDimensionalGrid] = None
+    """Solution GOR Rs(P,T) in SCF/STB. Oil phase only."""
 
-    water_viscosity_table: typing.Optional[ThreeDimensionalGrid] = None
-    """Water viscosity μw(P,T,S) in cP. 3D table: (n_pressures x n_temperatures x n_salinities)."""
+    # Gas-only property tables
+    compressibility_factor_table: typing.Optional[TwoDimensionalGrid] = None
+    """Z-factor z(P,T), dimensionless. Gas phase only."""
 
-    water_compressibility_table: typing.Optional[ThreeDimensionalGrid] = None
-    """Water compressibility cw(P,T,S) in psi⁻¹. 3D table: (n_pressures x n_temperatures x n_salinities)."""
+    solubility_in_water_table: typing.Optional[ThreeDimensionalGrid] = None
+    """
+    Gas solubility in water Rsw(P,T,S) in SCF/STB.
+    Gas phase only. 3D shape `(n_p, n_t, n_s)` - requires `salinities`.
+    """
 
-    water_density_table: typing.Optional[ThreeDimensionalGrid] = None
-    """Water density ρw(P,T,S) in lbm/ft³. 3D table: (n_pressures x n_temperatures x n_salinities)."""
+    # Water-only property tables (3D)
+    bubble_point_pressure_table: typing.Optional[ThreeDimensionalGrid] = None
+    """Water bubble point pressure water bubble point pressure(P,T,S) in psi. Water phase only."""
 
-    water_formation_volume_factor_table: typing.Optional[ThreeDimensionalGrid] = None
-    """Water formation volume factor Bw(P,T,S) in bbl/STB. 3D table: (n_pressures x n_temperatures x n_salinities)."""
-
-    # Gas properties tables (2D: n_pressures x n_temperatures)
-    gas_viscosity_table: typing.Optional[TwoDimensionalGrid] = None
-    """Gas viscosity μg(P,T) in cP. 2D table: (n_pressures x n_temperatures)."""
-
-    gas_compressibility_table: typing.Optional[TwoDimensionalGrid] = None
-    """Gas compressibility cg(P,T) in psi⁻¹. 2D table: (n_pressures x n_temperatures)."""
-
-    gas_gravity_table: typing.Optional[TwoDimensionalGrid] = None
-    """Gas specific gravity γg(P,T) (dimensionless, air=1). 2D table: (n_pressures x n_temperatures)."""
-
-    gas_molecular_weight_table: typing.Optional[TwoDimensionalGrid] = None
-    """Gas molecular weight Mg(P,T) in lbm/lb-mol. 2D table: (n_pressures x n_temperatures)."""
-
-    gas_density_table: typing.Optional[TwoDimensionalGrid] = None
-    """Gas density ρg(P,T) in lbm/ft³. 2D table: (n_pressures x n_temperatures)."""
-
-    gas_formation_volume_factor_table: typing.Optional[TwoDimensionalGrid] = None
-    """Gas formation volume factor Bg(P,T) in bbl/SCF. 2D table: (n_pressures x n_temperatures)."""
-
-    gas_solubility_in_water_table: typing.Optional[ThreeDimensionalGrid] = None
-    """Gas solubility in water Rsw(P,T,S) in SCF/STB. 3D table: (n_pressures x n_temperatures x n_salinities)."""
-
-    gas_compressibility_factor_table: typing.Optional[TwoDimensionalGrid] = None
-    """Gas compressibility factor (z-factor) z(P,T) (dimensionless). 2D table: (n_pressures x n_temperatures)."""
+    gas_free_fvf_table: typing.Optional[TwoDimensionalGrid] = None
+    """
+    Gas-free water FVF gas-free water formation volume factor(P,T) in bbl/STB. Water phase only.
+    Used internally for water formation volume factor and water compressibility calculations; not exposed on PVTTable.
+    """
 
     def __attrs_post_init__(self) -> None:
-        """Post-initialization hook to enforce dtype consistency on all arrays."""
         self._ensure_dtype()
+        self._warn_phase_mismatches()
 
     def _ensure_dtype(self) -> None:
-        """
-        Ensure all grids and tables use the correct global dtype from get_dtype().
-
-        Converts all non-None array attributes to the precision specified by get_dtype().
-        This prevents dtype mismatches that can cause numerical issues and memory overhead.
-        """
+        """Convert all array fields to the global simulation dtype."""
         dtype = get_dtype()
         for field in attrs.fields(type(self)):
             value = getattr(self, field.name)
-
             if (
                 value is not None
                 and isinstance(value, np.ndarray)
@@ -171,593 +238,927 @@ class PVTTableData(StoreSerializable):
             ):
                 object.__setattr__(self, field.name, value.astype(dtype, copy=False))
 
+    def _warn_phase_mismatches(self) -> None:
+        """Emit warnings for fields that will be silently ignored for this phase."""
+        phase = typing.cast(FluidPhase, self.phase)
+        if phase == FluidPhase.GAS and self.solution_gor_table is not None:
+            warnings.warn(
+                f"{self.__class__.__name__}: `solution_gor_table` is oil-only and will be ignored "
+                "for GAS phase.",
+                UserWarning,
+                stacklevel=3,
+            )
+        if phase == FluidPhase.OIL and self.compressibility_factor_table is not None:
+            warnings.warn(
+                f"{self.__class__.__name__}: `compressibility_factor_table` is gas-only and will be "
+                "ignored for OIL phase.",
+                UserWarning,
+                stacklevel=3,
+            )
+        if phase == FluidPhase.WATER and self.bubble_point_pressures is not None:
+            warnings.warn(
+                f"{self.__class__.__name__}: `bubble_point_pressures` is oil-only. For water bubble "
+                "point use `bubble_point_pressure_table` (3D). Field will be ignored.",
+                UserWarning,
+                stacklevel=3,
+            )
+        if self.salinities is not None and phase != FluidPhase.WATER:
+            warnings.warn(
+                f"{self.__class__.__name__}: `salinities` is water-only and will be ignored for "
+                f"{phase.value.upper()} phase.",
+                UserWarning,
+                stacklevel=3,
+            )
+        if (
+            self.bubble_point_pressures is not None
+            and isinstance(self.bubble_point_pressures, np.ndarray)
+            and self.bubble_point_pressures.ndim == 2
+            and self.solution_gas_to_oil_ratios is None
+        ):
+            raise ValidationError(
+                f"{self.__class__.__name__}: 2D `bubble_point_pressures` requires "
+                "`solution_gas_to_oil_ratios` to be provided."
+            )
 
-DEFAULT_PROPERTY_CLAMPS: typing.Dict[str, typing.Tuple[float, float]] = {
-    "oil_viscosity": (1e-6, 1e4),
-    "oil_compressibility": (0.0, 1e-1),
-    "oil_density": (1.0, 80.0),
-    "oil_formation_volume_factor": (0.5, 5.0),
-    "solution_gas_to_oil_ratio": (0.0, 5000.0),
-    "gas_viscosity": (1e-6, 1e2),
-    "gas_compressibility": (0.0, 1e-1),
-    "gas_density": (0.001, 50.0),
-    "gas_formation_volume_factor": (1e-6, 100.0),
-    "gas_compressibility_factor": (0.1, 3.0),
-    "water_viscosity": (1e-6, 10.0),
-    "water_compressibility": (0.0, 1e-2),
-    "water_density": (30.0, 80.0),
-    "water_formation_volume_factor": (0.9, 2.0),
-    "gas_solubility_in_water": (0.0, 500.0),
-}
-"""Property ranges to use to clamp computed/interpolated PVT property values into a physically valid range, especially when extrapolated."""
 
-
-class PVTTables:
+class PVTTable(StoreSerializable):
     """
-    PVT (Pressure-Volume-Temperature) property lookup using pre-built interpolators.
+    Phase-aware PVT property lookup using pre-built interpolators.
 
-    Provides O(1) lookup for fluid properties using pre-computed interpolators.
+    Accepts a `PVTData` instance and builds fast scipy interpolators
+    for all non-None tables. The public interface exposes generic method names
+    that apply to all phases; methods that are not applicable to a phase (or
+    whose underlying table was not supplied) return `None`.
 
-    NOTE: This does not store raw table data (only interpolators), saving ~50% memory vs storing both.
-    To preserve raw data for serialization/inspection, keep the `PVTTableData` object separately.
+    **Phase dispatch summary:**
 
-    **Extrapolation Behavior:**
-    When querying outside table bounds:
-    - 2D properties (P-T): Extrapolates linearly/cubically based on interpolation_method
-    - 3D properties (P-T-S): Extrapolates if fill_value=None (current behavior)
-    - Set warn_on_extrapolation=True to log warnings for out-of-bounds queries
+    +---------------------------------+-----+-----+-------+
+    | Method                          | Oil | Gas | Water |
+    +=================================+=====+=====+=======+
+    | viscosity                       | ✓   | ✓   | ✓     |
+    | density                         | ✓   | ✓   | ✓     |
+    | formation_volume_factor         | ✓   | ✓   | ✓     |
+    | compressibility                 | ✓   | ✓   | ✓     |
+    | specific_gravity                | ✓   | ✓   | ✓     |
+    | molecular_weight                | ✓   | ✓   | ✓     |
+    | bubble_point_pressure           | ✓   | ✗   | ✓     |
+    | is_saturated                    | ✓   | ✗   | ✗     |
+    | solution_gor                    | ✓   | ✗   | ✗     |
+    | compressibility_factor          | ✗   | ✓   | ✗     |
+    | solubility_in_water             | ✗   | ✓   | ✗     |
+    +---------------------------------+-----+-----+-------+
 
-    **Performance:**
-    Pre-computed interpolators provide O(1) lookup after initial build.
-    Uses `RectBivariateSpline` for 2D (10-50x faster than `RegularGridInterpolator`).
+    **Extrapolation:**  Outside table bounds the interpolators extrapolate
+    linearly/cubically.  Set `warn_on_extrapolation=True` to log warnings.
+
+    **Performance:**  Uses `RectBivariateSpline` for 2D (oil/gas) - 10-50x
+    faster than `RegularGridInterpolator`, and uses `RegularGridInterpolator`
+    for 3D (water).
     """
+
+    __abstract_serializable__ = True
 
     def __init__(
         self,
-        data: PVTTableData,
+        data: typing.Union[PVTData, PathLike[str], str],
         interpolation_method: InterpolationMethod = "linear",
         validate: bool = True,
         warn_on_extrapolation: bool = False,
         clamps: typing.Optional[typing.Dict[str, typing.Tuple[float, float]]] = None,
-    ):
+    ) -> None:
         """
-        Initialize PVT tables from raw table data.
+        Build a pvt table from raw tabulated data.
 
-        Builds fast interpolators from raw table data. The initialization process mostly involves:
-        1. Validates grid monotonicity and consistency
-        2. Optionally validates physical consistency of property tables
-        3. Builds interpolators for all non-None properties in `data`
-        4. Discards raw table arrays (Garbage Collects) (keeping only interpolators)
-
-        Please note that `data` can be discarded after initialization to free memory,
-        as all necessary data is stored in the interpolators. This saves a substantial amount of memory
-        (~50%) when working with large PVT tables. The garbage collector will reclaim the memory used by
-        the raw arrays once there are no references to `data` but it is still recommended to explicitly delete.
-
-        For Example;
-        ```python
-        import gc
-
-        pvt_data = build_pvt_table_data(...)  # Build raw table data
-        pvt_tables = PVTTables(pvt_data)     # Build interpolators
-        del pvt_data                         # Discard raw data to free memory
-
-        gc.collect()                        # Optionally force garbage collection
-        ```
-
-        :param data: `PVTTableData` containing all raw property tables and grids
-        :param interpolation_method: Interpolation method for property lookup
-            - 'linear': Fast, 1st-order accurate
-            - 'cubic': Slower, 3rd-order accurate, smooth derivatives
-
-        :param validate: If True, perform physical consistency checks on tables
-            - Checks monotonicity of viscosities, densities, etc.
-            - Validates FVF > 0, compressibilities > 0
-            - Raises ValidationError if inconsistencies found
-
-        :param warn_on_extrapolation: If True, log warnings when queries exceed table bounds
-            - Useful for detecting simulation conditions outside calibrated range
-            - No warnings by default to avoid log spam
+        :param data: Phase-tagged raw PVT data or path to PVT data file.
+        :param interpolation_method: `"linear"` (default) or `"cubic"`.
+            Cubic requires ≥ 4 points along each axis.
+        :param validate: Run physical-consistency checks on `data`.
+        :param warn_on_extrapolation: Log a warning when queries fall outside
+            the table pressure/temperature/salinity bounds.
+        :param clamps: Override default per-property clamp ranges.
+            Keys use generic names (e.g. `"viscosity"`, not `"oil_viscosity"`).
+            Merged on top of the phase-appropriate defaults.
         """
-        # Store options
         if interpolation_method not in _INTERPOLATION_DEGREES:
             raise ValidationError(
-                f"Invalid interpolation_method '{interpolation_method}'. "
+                f"Invalid interpolation_method {interpolation_method!r}. "
                 f"Must be one of: {list(_INTERPOLATION_DEGREES.keys())}"
             )
 
-        pressures = data.pressures
-        temperatures = data.temperatures
-        salinities = data.salinities
+        if not isinstance(data, PVTData):
+            data = PVTData.from_file(data)  # type: ignore[assignment]
 
-        if interpolation_method != "linear":
-            # Cubic+ interpolation methods requires atleast 4 points
-            if len(pressures) < 4:
-                raise ValidationError(
-                    f"Atleast 4 pressure points required for "
-                    f"'{interpolation_method}' interpolation, got {len(pressures)}"
-                )
-            if len(temperatures) < 4:
-                raise ValidationError(
-                    f"Atleast 4 temperature points required for "
-                    f"'{interpolation_method}' interpolation, got {len(temperatures)}"
-                )
-            if salinities is not None and len(salinities) < 4:
-                raise ValidationError(
-                    f"Atleast 4 salinity points required for "
-                    f"'{interpolation_method}' interpolation, got {len(salinities)}"
-                )
-
-        self.interpolation_method = interpolation_method
+        data = typing.cast(PVTData, data)
+        self._phase = data.phase
+        self.interpolation_method: InterpolationMethod = interpolation_method
         self.validate = validate
         self.warn_on_extrapolation = warn_on_extrapolation
-        self.clamps = clamps or DEFAULT_PROPERTY_CLAMPS
 
-        # Initialize caches
-        self._interpolators = {}  # type: ignore[var-annotated]
-        self._extrapolation_bounds = {}
-        self.default_salinity = salinities[0] if salinities is not None else None
-        self._pb_ndim = (
-            data.bubble_point_pressures.ndim
-            if data.bubble_point_pressures is not None
-            else None
-        )
+        # Merge clamps
+        self.clamps: typing.Dict[str, typing.Tuple[float, float]] = {
+            **PHASE_DEFAULT_CLAMPS[data.phase],  # type: ignore
+            **(clamps or {}),
+        }
 
-        # Validate and build
+        # Cubic needs ≥ 4 points
+        if interpolation_method != "linear":
+            if len(data.pressures) < 4:
+                raise ValidationError(
+                    f"At least 4 pressure points required for {interpolation_method!r} "
+                    f"interpolation, got {len(data.pressures)}."
+                )
+            if len(data.temperatures) < 4:
+                raise ValidationError(
+                    f"At least 4 temperature points required for {interpolation_method!r} "
+                    f"interpolation, got {len(data.temperatures)}."
+                )
+            if data.salinities is not None and len(data.salinities) < 4:
+                raise ValidationError(
+                    f"At least 4 salinity points required for {interpolation_method!r} "
+                    f"interpolation, got {len(data.salinities)}."
+                )
+
         self._validate_data(data)
-        if self.validate:
+        if validate:
             self._check_physical_consistency(data)
 
-        # Store bounds for extrapolation detection
-        self._extrapolation_bounds = {
-            "pressure": (pressures[0], pressures[-1]),
-            "temperature": (temperatures[0], temperatures[-1]),
+        # Store extrapolation bounds
+        self._extrapolation_bounds: typing.Dict[str, typing.Tuple[float, float]] = {
+            "pressure": (float(data.pressures[0]), float(data.pressures[-1])),
+            "temperature": (float(data.temperatures[0]), float(data.temperatures[-1])),
         }
-        if salinities is not None:
-            self._extrapolation_bounds["salinity"] = (salinities[0], salinities[-1])
+        if data.salinities is not None:
+            self._extrapolation_bounds["salinity"] = (
+                float(data.salinities[0]),
+                float(data.salinities[-1]),
+            )
 
-        # Build all interpolators from data
-        self._build_interpolators(data)
-        logger.info(
-            f"PVT tables initialized: P ∈ [{pressures[0]:.4f}, {pressures[-1]:.4f}] psi, "
-            f"T ∈ [{temperatures[0]:.4f}, {temperatures[-1]:.4f}] °F, "
-            f"interpolation_method={self.interpolation_method!r}"
+        # Oil bubble-point dimensionality
+        self._pb_ndim: typing.Optional[int] = None
+        if data.phase == FluidPhase.OIL and data.bubble_point_pressures is not None:
+            self._pb_ndim = data.bubble_point_pressures.ndim
+
+        # Water default salinity (used when salinity arg is None)
+        self.default_salinity: typing.Optional[float] = (
+            float(data.salinities[0]) if data.salinities is not None else None
         )
 
-    def _validate_data(self, data: PVTTableData):
-        """
-        Validate data grid dimensions and monotonicity.
+        self._data = data
+        self._interpolators: typing.Dict[str, typing.Any] = {}
+        self._build_interpolators(data)
 
-        Ensures that:
-        - Pressure and temperature grids are 1D arrays
-        - All grids are strictly monotonically increasing (required for interpolation)
-        - Bubble point pressure dimensions match grid dimensions
-        - Solution GOR array is provided when using 2D bubble point pressures
+        logger.info(
+            f"PVTTable initialized: phase={self.phase.value.upper()}, "
+            f"P ∈ [{data.pressures[0]:.4f}, {data.pressures[-1]:.4f}] psi, "
+            f"T ∈ [{data.temperatures[0]:.4f}, {data.temperatures[-1]:.4f}] °F, "
+            f"interpolation_method={interpolation_method!r}, "
+            f"interpolators={len(self._interpolators)}"
+        )
 
-        :param data: `PVTTableData` containing grids to validate
-        :raises `ValidationError`: If any validation check fails
+    def __dump__(self, recurse: bool = True) -> typing.Dict[str, typing.Any]:
         """
+        Serialize this `PVTTable` to a dictionary.
+
+        :param recurse: Passed through to nested `StoreSerializable` objects.
+        :return: JSON-compatible dictionary representation.
+        """
+        return {
+            "data": self._data.dump(recurse),
+            "interpolation_method": self.interpolation_method,
+            "validate": self.validate,
+            "warn_on_extrapolation": self.warn_on_extrapolation,
+            # Only store clamps that differ from the phase defaults so the
+            # payload stays compact and phase-default changes propagate forward.
+            "clamps": {
+                k: list(v)
+                for k, v in self.clamps.items()
+                if v != PHASE_DEFAULT_CLAMPS[self.phase].get(k)
+            },
+        }
+
+    @classmethod
+    def __load__(cls, data: typing.Mapping[str, typing.Any]) -> "PVTTable":
+        """
+        Deserialize a `PVTTable` from a dictionary produced by `__dump__`.
+
+        Rebuilds all scipy interpolators from the stored `PVTData`.
+
+        :param data: Dictionary as returned by `__dump__`.
+        :return: Fully initialised `PVTTable` instance.
+        """
+        pvt_data = PVTData.load(data["data"])
+        clamps = {k: tuple(v) for k, v in data.get("clamps", {}).items()} or None
+        return cls(
+            data=pvt_data,
+            interpolation_method=data.get("interpolation_method", "linear"),
+            validate=data.get("validate", True),
+            warn_on_extrapolation=data.get("warn_on_extrapolation", False),
+            clamps=clamps or None,
+        )
+
+    def _validate_data(self, data: PVTData) -> None:
+        """Validate grid monotonicity, shapes, and phase-specific field rules."""
         pressures = data.pressures
         temperatures = data.temperatures
         salinities = data.salinities
-        solution_gas_oil_ratios = data.solution_gas_oil_ratios
-        bubble_point_pressures = data.bubble_point_pressures
+        n_p = len(pressures)
+        n_t = len(temperatures)
+        n_s = len(salinities) if salinities is not None else None
 
-        # Check dimensionality
         if pressures.ndim != 1:
-            raise ValidationError("`pressures` must be 1-dimensional")
+            raise ValidationError("`pressures` must be 1-dimensional.")
         if temperatures.ndim != 1:
-            raise ValidationError("`temperatures` must be 1-dimensional")
-
-        # Check monotonicity (critical for interpolation)
+            raise ValidationError("`temperatures` must be 1-dimensional.")
         if not np.all(np.diff(pressures) > 0):
             raise ValidationError(
-                "`pressures` must be strictly monotonically increasing"
+                "`pressures` must be strictly monotonically increasing."
             )
         if not np.all(np.diff(temperatures) > 0):
             raise ValidationError(
-                "`temperatures` must be strictly monotonically increasing"
+                "`temperatures` must be strictly monotonically increasing."
             )
-
-        # Validate bubble point pressures
-        if bubble_point_pressures is not None:
-            if bubble_point_pressures.ndim == 1:
-                # 1D: Pb(T) for single composition
-                if len(bubble_point_pressures) != len(temperatures):
-                    raise ValidationError(
-                        f"`bubble_point_pressures` length ({len(bubble_point_pressures)}) "
-                        f"must match temperatures length ({len(temperatures)})"
-                    )
-            elif bubble_point_pressures.ndim == 2:
-                # 2D: Pb(Rs, T) for varying composition
-                if solution_gas_oil_ratios is None:
-                    raise ValidationError(
-                        "`solution_gas_oil_ratios` array required for 2D bubble_point_pressures"
-                    )
-
-                if not np.all(np.diff(solution_gas_oil_ratios) > 0):
-                    raise ValidationError(
-                        "`solution_gas_oil_ratios` must be strictly monotonically increasing"
-                    )
-
-                n_rs, n_t = bubble_point_pressures.shape  # type: ignore
-                if n_rs != len(solution_gas_oil_ratios):
-                    raise ValidationError(
-                        f"`bubble_point_pressures` first dimension ({n_rs}) "
-                        f"must match solution_gas_oil_ratios length ({len(solution_gas_oil_ratios)})"
-                    )
-                if n_t != len(temperatures):
-                    raise ValidationError(
-                        f"`bubble_point_pressures` second dimension ({n_t}) "
-                        f"must match temperatures length ({len(temperatures)})"
-                    )
-            else:
-                raise ValidationError("`bubble_point_pressures` must be 1D or 2D")
-
         if salinities is not None:
             if salinities.ndim != 1:
-                raise ValidationError("salinities must be 1-dimensional")
+                raise ValidationError("`salinities` must be 1-dimensional.")
             if not np.all(np.diff(salinities) > 0):
                 raise ValidationError(
-                    "salinities must be strictly monotonically increasing"
+                    "`salinities` must be strictly monotonically increasing."
                 )
 
-    def _check_physical_consistency(self, data: PVTTableData):
-        """
-        Perform physical consistency checks on table data.
+        # Bubble point shape (oil only)
+        bubble_point_pressures = data.bubble_point_pressures
+        if bubble_point_pressures is not None:
+            if bubble_point_pressures.ndim == 1:
+                if len(bubble_point_pressures) != n_t:
+                    raise ValidationError(
+                        f"`bubble_point_pressures` 1D length {len(bubble_point_pressures)} must match "
+                        f"n_temperatures={n_t}."
+                    )
+            elif bubble_point_pressures.ndim == 2:
+                solution_gors = data.solution_gas_to_oil_ratios
+                if solution_gors is None:
+                    raise ValidationError(
+                        "2D `bubble_point_pressures` requires `solution_gas_to_oil_ratios`."
+                    )
+                if not np.all(np.diff(solution_gors) > 0):
+                    raise ValidationError(
+                        "`solution_gas_to_oil_ratios` must be strictly monotonically increasing."
+                    )
+                if bubble_point_pressures.shape != (len(solution_gors), n_t):
+                    raise ValidationError(
+                        f"`bubble_point_pressures` shape {bubble_point_pressures.shape} must be "
+                        f"({len(solution_gors)}, {n_t})."
+                    )
+            else:
+                raise ValidationError("`bubble_point_pressures` must be 1D or 2D.")
 
-        Validates that property values are physically reasonable:
-        - All viscosities must be positive
-        - All densities must be positive
-        - Gas density < oil density (always true for reservoir fluids)
-        - All formation volume factors must be positive
-        - 2D tables have shape (n_pressures, n_temperatures)
-        - 3D tables have shape (n_pressures, n_temperatures, n_salinities)
-
-        :param data: `PVTTableData` to validate
-        :raises `ValidationError`: If any physical consistency check fails
-        """
-        n_p, n_t = len(data.pressures), len(data.temperatures)
-
-        # Check 2D table shapes
-        tables_2d = {
-            "oil_viscosity_table": data.oil_viscosity_table,
-            "oil_density_table": data.oil_density_table,
-            "gas_viscosity_table": data.gas_viscosity_table,
-            "gas_density_table": data.gas_density_table,
-        }
-        for name, table in tables_2d.items():
-            if table is not None and table.shape != (n_p, n_t):
+        # Validate 2D table shapes
+        _2d_fields = [
+            "viscosity_table",
+            "density_table",
+            "formation_volume_factor_table",
+            "compressibility_table",
+            "specific_gravity_table",
+            "molecular_weight_table",
+            "solution_gor_table",
+            "compressibility_factor_table",
+            "gas_free_fvf_table",
+        ]
+        for fname in _2d_fields:
+            arr = getattr(data, fname, None)
+            if arr is not None and arr.ndim == 2 and arr.shape != (n_p, n_t):
                 raise ValidationError(
-                    f"{name} shape {table.shape} must match (n_pressures={n_p}, n_temperatures={n_t})"
+                    f"`{fname}` shape {arr.shape} must be (n_pressures={n_p}, "
+                    f"n_temperatures={n_t})."
                 )
 
-        # Physical bounds checks
-        if data.oil_viscosity_table is not None and np.any(
-            data.oil_viscosity_table <= 0
+        # Validate 3D table shapes. Only valid if salinities present
+        _3d_fields = [
+            "solubility_in_water_table",
+            "bubble_point_pressure_table",
+        ]
+        # Shared fields can be either 2D (oil/gas) or 3D (water)
+        _shared_fields = [
+            "viscosity_table",
+            "density_table",
+            "formation_volume_factor_table",
+            "compressibility_table",
+            "specific_gravity_table",
+            "molecular_weight_table",
+        ]
+        all_3d = _3d_fields + (_shared_fields if data.phase == FluidPhase.WATER else [])
+        for fname in all_3d:
+            arr = getattr(data, fname, None)
+            if arr is None:
+                continue
+            if arr.ndim == 3:
+                if n_s is None:
+                    raise ValidationError(
+                        f"`{fname}` is 3D but `salinities` was not provided."
+                    )
+                if arr.shape != (n_p, n_t, n_s):
+                    raise ValidationError(
+                        f"`{fname}` shape {arr.shape} must be "
+                        f"(n_p={n_p}, n_t={n_t}, n_s={n_s})."
+                    )
+
+        # `solubility_in_water` requires salinities
+        if data.solubility_in_water_table is not None and salinities is None:
+            raise ValidationError(
+                "`solubility_in_water_table` is 3D and requires `salinities`."
+            )
+
+    def _check_physical_consistency(self, data: PVTData) -> None:
+        """Phase-aware physical sanity checks on table values."""
+        phase = typing.cast(FluidPhase, data.phase)
+
+        if data.viscosity_table is not None and np.any(data.viscosity_table <= 0):
+            raise ValidationError(
+                f"{phase.value.upper()} viscosity must be positive everywhere."
+            )
+        if data.density_table is not None and np.any(data.density_table <= 0):
+            raise ValidationError(
+                f"{phase.value.upper()} density must be positive everywhere."
+            )
+        if data.formation_volume_factor_table is not None and np.any(
+            data.formation_volume_factor_table <= 0
         ):
-            raise ValidationError("Oil viscosity must be positive")
-
-        if data.gas_viscosity_table is not None and np.any(
-            data.gas_viscosity_table <= 0
+            raise ValidationError(
+                f"{phase.value.upper()} formation volume factor must be positive everywhere."
+            )
+        if (
+            phase == FluidPhase.GAS
+            and data.compressibility_factor_table is not None
+            and np.any(data.compressibility_factor_table <= 0)
         ):
-            raise ValidationError("Gas viscosity must be positive")
+            raise ValidationError("Gas Z-factor must be positive everywhere.")
 
-        if data.water_viscosity_table is not None and np.any(
-            data.water_viscosity_table <= 0
+        # Gas density < reasonable oil density upper bound (50 lbm/ft³)
+        if (
+            phase == FluidPhase.GAS
+            and data.density_table is not None
+            and np.any(data.density_table >= 50.0)
         ):
-            raise ValidationError("Water viscosity must be positive")
+            warnings.warn(
+                "Gas density table contains values ≥ 50 lbm/ft³, which is unusually "
+                "high. Verify units (expected lbm/ft³).",
+                UserWarning,
+                stacklevel=3,
+            )
 
-        # Density checks
-        if data.oil_density_table is not None and np.any(data.oil_density_table <= 0):
-            raise ValidationError("Oil density must be positive")
+        logger.debug(
+            f"Physical consistency checks passed for {phase.value.upper()} phase."
+        )
 
-        if data.gas_density_table is not None:
-            if np.any(data.gas_density_table <= 0):
-                raise ValidationError("Gas density must be positive")
-            # # Gas should be less dense than oil
-            if data.oil_density_table is not None and np.any(
-                data.gas_density_table >= data.oil_density_table
-            ):
-                raise ValidationError("Gas density should be less than oil density")
+    def _build_interpolators(self, data: PVTData) -> None:
+        """Build scipy interpolator objects for all non-None tables."""
+        phase = typing.cast(FluidPhase, data.phase)
+        pressures = data.pressures
+        temperatures = data.temperatures
+        salinities = data.salinities
+        k = _INTERPOLATION_DEGREES[self.interpolation_method]
 
-        # Formation volume factor checks
-        if data.oil_formation_volume_factor_table is not None and np.any(
-            data.oil_formation_volume_factor_table <= 0
-        ):
-            raise ValidationError("Oil formation volume factor must be positive")
+        def _register_2d(name: str, table: typing.Optional[np.typing.NDArray]) -> None:
+            """Register a 2D RectBivariateSpline interpolator."""
+            if table is None:
+                return
+            self._interpolators[name] = RectBivariateSpline(
+                x=pressures, y=temperatures, z=table, kx=k, ky=k
+            )
 
-        logger.debug("Physical consistency checks passed")
+        def _register_3d(name: str, table: typing.Optional[np.typing.NDArray]) -> None:
+            """Register a 3D RegularGridInterpolator."""
+            if table is None or salinities is None:
+                return
+            self._interpolators[name] = RegularGridInterpolator(
+                points=(pressures, temperatures, salinities),
+                values=table,
+                method=self.interpolation_method,
+                bounds_error=False,
+                fill_value=None,  # extrapolate
+            )
+
+        # Shared tables
+        if phase == FluidPhase.WATER:
+            # Water shared tables are 3D
+            _register_3d("viscosity", data.viscosity_table)
+            _register_3d("density", data.density_table)
+            _register_3d("formation_volume_factor", data.formation_volume_factor_table)
+            _register_3d("compressibility", data.compressibility_table)
+            _register_3d("specific_gravity", data.specific_gravity_table)
+            _register_3d("molecular_weight", data.molecular_weight_table)
+        else:
+            # Oil / gas shared tables are 2D
+            _register_2d("viscosity", data.viscosity_table)
+            _register_2d("density", data.density_table)
+            _register_2d("formation_volume_factor", data.formation_volume_factor_table)
+            _register_2d("compressibility", data.compressibility_table)
+            _register_2d("specific_gravity", data.specific_gravity_table)
+            _register_2d("molecular_weight", data.molecular_weight_table)
+
+        # Oil-specific tables
+        if phase == FluidPhase.OIL:
+            _register_2d("solution_gor", data.solution_gor_table)
+
+            pb = data.bubble_point_pressures
+            if pb is not None:
+                if pb.ndim == 1:
+                    self._interpolators["bubble_point_pressure"] = interp1d(
+                        x=temperatures,
+                        y=pb,
+                        kind=self.interpolation_method,
+                        bounds_error=False,
+                        fill_value="extrapolate",  # type: ignore[arg-type]
+                    )
+                else:  # 2D Pb(Rs, T)
+                    rs = data.solution_gas_to_oil_ratios
+                    assert rs is not None
+                    self._interpolators["bubble_point_pressure"] = RectBivariateSpline(
+                        x=rs, y=temperatures, z=pb, kx=k, ky=k
+                    )
+
+        # Gas-specific
+        if phase == FluidPhase.GAS:
+            _register_2d("compressibility_factor", data.compressibility_factor_table)
+            _register_3d("solubility_in_water", data.solubility_in_water_table)
+
+        # Water-specific
+        if phase == FluidPhase.WATER:
+            _register_3d("bubble_point_pressure", data.bubble_point_pressure_table)
+            _register_2d("gas_free_fvf", data.gas_free_fvf_table)
+
+        logger.debug(
+            f"Built {len(self._interpolators)} interpolators for "
+            f"{phase.value.upper()} phase."
+        )
+
+    @property
+    def phase(self) -> FluidPhase:
+        """The fluid phase this table describes."""
+        return typing.cast(FluidPhase, self._phase)
+
+    def exists(self, name: str) -> bool:
+        """Return True if an interpolator for *name* was built."""
+        return name in self._interpolators
 
     def _warn_extrapolation(
         self,
         pressure: QueryType,
         temperature: QueryType,
         salinity: typing.Optional[QueryType] = None,
-    ):
-        """
-        Log warning if extrapolating beyond table bounds.
+    ) -> None:
+        if not self.warn_on_extrapolation:
+            return
 
-        Checks if query values fall outside the valid range of the property tables.
-        Only logs warnings if warn_on_extrapolation=True was set during initialization.
-
-        :param pressure: Pressure value(s) to check
-        :param temperature: Temperature value(s) to check
-        :param salinity: Optional salinity value(s) to check (for 3D properties)
-        """
-        pressures = np.atleast_1d(pressure)
-        temperatures = np.atleast_1d(temperature)
-
+        p_arr = np.atleast_1d(pressure)
+        t_arr = np.atleast_1d(temperature)
         p_min, p_max = self._extrapolation_bounds["pressure"]
         t_min, t_max = self._extrapolation_bounds["temperature"]
-
-        if np.any(pressures < p_min) or np.any(pressures > p_max):
+        if np.any(p_arr < p_min) or np.any(p_arr > p_max):
             logger.warning(
-                f"Pressure extrapolation: queried P ∈ [{pressures.min():.1f}, {pressures.max():.1f}] psi, "
+                f"Pressure extrapolation: queried P ∈ "
+                f"[{p_arr.min():.1f}, {p_arr.max():.1f}] psi, "
                 f"table range [{p_min:.1f}, {p_max:.1f}] psi"
             )
-
-        if np.any(temperatures < t_min) or np.any(temperatures > t_max):
+        if np.any(t_arr < t_min) or np.any(t_arr > t_max):
             logger.warning(
-                f"Temperature extrapolation: queried T ∈ [{temperatures.min():.1f}, {temperatures.max():.1f}] °F, "
+                f"Temperature extrapolation: queried T ∈ "
+                f"[{t_arr.min():.1f}, {t_arr.max():.1f}] °F, "
                 f"table range [{t_min:.1f}, {t_max:.1f}] °F"
             )
-
-        # Also check salinity bounds if provided
-        if salinity is not None:
-            s_min, s_max = self._extrapolation_bounds.get("salinity", (None, None))
-            if s_min is not None and s_max is not None:
-                salinities_arr = np.atleast_1d(salinity)
-                if np.any(salinities_arr < s_min) or np.any(salinities_arr > s_max):
-                    logger.warning(
-                        f"Salinity extrapolation: queried S ∈ [{salinities_arr.min():.0f}, {salinities_arr.max():.0f}] ppm, "
-                        f"table range [{s_min:.0f}, {s_max:.0f}] ppm"
-                    )
-
-    def _build_interpolators(self, data: PVTTableData):
-        """
-        Build fast interpolators for all provided properties.
-
-        Creates scipy interpolator objects for efficient property lookup:
-        - 1D interpolators: For Pb(T) using interp1d
-        - 2D interpolators: For oil/gas properties using RectBivariateSpline (10-50x faster than RegularGridInterpolator)
-        - 3D interpolators: For water properties using RegularGridInterpolator
-
-        Only builds interpolators for non-None properties in `data`.
-        Raw table data is not stored after interpolators are built.
-
-        :param data: PVTTableData containing raw property tables
-        """
-        method = typing.cast(InterpolationMethod, self.interpolation_method)
-        # Build bubble point pressure interpolator (1D or 2D)
-        if data.bubble_point_pressures is not None:
-            if data.bubble_point_pressures.ndim == 1:
-                # 1D - Pb(T)
-                self._interpolators["bubble_point_pressure"] = interp1d(
-                    x=data.temperatures,
-                    y=data.bubble_point_pressures,
-                    kind=method,
-                    bounds_error=False,
-                    fill_value="extrapolate",  # type: ignore
-                )
-            else:
-                # 2D - Pb(Rs, T)
-                assert data.solution_gas_oil_ratios is not None
-                k = _INTERPOLATION_DEGREES[method]
-                self._interpolators["bubble_point_pressure"] = RectBivariateSpline(
-                    x=data.solution_gas_oil_ratios,
-                    y=data.temperatures,
-                    z=data.bubble_point_pressures,
-                    kx=k,
-                    ky=k,
+        if salinity is not None and "salinity" in self._extrapolation_bounds:
+            s_arr = np.atleast_1d(salinity)
+            s_min, s_max = self._extrapolation_bounds["salinity"]
+            if np.any(s_arr < s_min) or np.any(s_arr > s_max):
+                logger.warning(
+                    f"Salinity extrapolation: queried S ∈ "
+                    f"[{s_arr.min():.0f}, {s_arr.max():.0f}] ppm, "
+                    f"table range [{s_min:.0f}, {s_max:.0f}] ppm"
                 )
 
-        # Build 2D (Pressure-Temperature) interpolators for all provided properties
-        property_map_2d = {
-            "oil_viscosity": data.oil_viscosity_table,
-            "oil_compressibility": data.oil_compressibility_table,
-            "oil_specific_gravity": data.oil_specific_gravity_table,
-            "oil_api_gravity": data.oil_api_gravity_table,
-            "oil_density": data.oil_density_table,
-            "oil_formation_volume_factor": data.oil_formation_volume_factor_table,
-            "gas_viscosity": data.gas_viscosity_table,
-            "gas_compressibility": data.gas_compressibility_table,
-            "gas_gravity": data.gas_gravity_table,
-            "gas_molecular_weight": data.gas_molecular_weight_table,
-            "gas_density": data.gas_density_table,
-            "gas_formation_volume_factor": data.gas_formation_volume_factor_table,
-            "gas_compressibility_factor": data.gas_compressibility_factor_table,
-            "solution_gas_to_oil_ratio": data.solution_gas_to_oil_ratio_table,
-        }
-        # Map interpolation method to spline degree
-        k = _INTERPOLATION_DEGREES[method]
-        for name, grid in property_map_2d.items():
-            if grid is not None:
-                # RectBivariateSpline is 10-50x faster than RegularGridInterpolator for 2D
-                self._interpolators[name] = RectBivariateSpline(
-                    x=data.pressures,
-                    y=data.temperatures,
-                    z=grid,
-                    kx=k,
-                    ky=k,
-                )
-
-        # Build 3D (Pressure-Temperature-Salinity) interpolator for salinity-dependent properties
-        # For 3D, use RegularGridInterpolator (RectBivariateSpline is 2D only)
-        if data.salinities is None:
-            return  # No salinity-dependent properties to build
-
-        property_map_3d = {
-            "water_viscosity": data.water_viscosity_table,
-            "water_bubble_point_pressure": data.water_bubble_point_pressure_table,
-            "water_compressibility": data.water_compressibility_table,
-            "water_density": data.water_density_table,
-            "water_formation_volume_factor": data.water_formation_volume_factor_table,
-            "gas_solubility_in_water": data.gas_solubility_in_water_table,
-        }
-        for name, grid in property_map_3d.items():  # type: ignore[assignment]
-            if grid is not None:
-                self._interpolators[name] = RegularGridInterpolator(
-                    points=(
-                        data.pressures,
-                        data.temperatures,
-                        data.salinities,
-                    ),
-                    values=grid,
-                    method=method,
-                    bounds_error=False,
-                    fill_value=None,  # type: ignore  # Extrapolate
-                )
-
-        logger.debug(f"Built {len(self._interpolators)} interpolators")
-
-    def exists(self, name: str) -> bool:
-        """Check if a specific property interpolator exists."""
-        return name in self._interpolators
-
-    def pt_interpolate(
+    def _pt_interpolate(
         self, name: str, pressure: QueryType, temperature: QueryType
-    ) -> typing.Union[float, np.ndarray, None]:
-        """
-        Fast 2D property lookup using Pressure-Temperature interpolator.
-
-        Uses `RectBivariateSpline` for efficient vectorized evaluation. Handles scalar and array inputs.
-
-        :param name: Property name (e.g., "oil_viscosity", "gas_density")
-        :param pressure: Pressure value(s) in psi
-        :param temperature: Temperature value(s) in °F
-        :return: Interpolated property value(s), or None if property not available
-        """
+    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
+        """2D interpolation via `RectBivariateSpline.ev` with clamping."""
         interp = self._interpolators.get(name)
         if interp is None:
             return None
+        self._warn_extrapolation(pressure, temperature)
 
-        # Fast path for scalar inputs to avoid numpy array conversion overhead
-        if isinstance(pressure, (int, float)) and isinstance(temperature, (int, float)):
-            if self.warn_on_extrapolation:
-                self._warn_extrapolation(pressure, temperature)
-            return float(interp.ev(pressure, temperature))
-
-        # Check for extrapolation if requested
-        if self.warn_on_extrapolation:
-            self._warn_extrapolation(pressure, temperature)
-
-        # Convert to arrays
-        p = np.atleast_1d(pressure)
-        t = np.atleast_1d(temperature)
-
-        # Ensure compatible shapes
-        if p.shape != t.shape:
-            if p.size == 1:
-                p = np.full_like(t, p[0])
-            elif t.size == 1:
-                t = np.full_like(p, t[0])
-            else:
-                raise ValidationError(
-                    f"Incompatible shapes: pressure {p.shape}, temperature {t.shape}"
-                )
-
-        # `RectBivariateSpline.ev` is optimized for vectorized evaluation
-        result = interp.ev(p, t)
+        is_scalar = isinstance(pressure, (int, float)) and isinstance(
+            temperature, (int, float)
+        )
+        if is_scalar:
+            result: typing.Union[float, np.typing.NDArray] = float(
+                interp.ev(pressure, temperature)
+            )
+        else:
+            p = np.atleast_1d(pressure)
+            t = np.atleast_1d(temperature)
+            if p.shape != t.shape:
+                if p.size == 1:
+                    p = np.full_like(t, p[0])
+                elif t.size == 1:
+                    t = np.full_like(p, t[0])
+                else:
+                    raise ValidationError(
+                        f"Incompatible shapes: pressure {p.shape}, temperature {t.shape}"
+                    )
+            result = interp.ev(p, t)
 
         clamps = self.clamps
-        if clamps and name in clamps and clamps[name]:
-            lower, upper = clamps[name]
+        if name in clamps:
+            lo, hi = clamps[name]
             if isinstance(result, np.ndarray):
-                np.clip(result, lower, upper, out=result)
+                np.clip(result, lo, hi, out=result)
             else:
-                result = np.clip(result, lower, upper)
+                result = float(np.clip(result, lo, hi))
 
-        # Return scalar if inputs were scalar
-        return float(result) if result.size == 1 else result
+        return (
+            float(result)
+            if isinstance(result, np.ndarray) and result.size == 1
+            else result
+        )
 
-    def pts_interpolate(
+    def _pts_interpolate(
         self,
         name: str,
         pressure: QueryType,
         temperature: QueryType,
         salinity: QueryType,
-    ) -> typing.Union[float, np.ndarray, None]:
-        """
-        Fast 3D property lookup using Pressure-Temperature-Salinity interpolator.
-
-        Uses `RegularGridInterpolator` for salinity-dependent water properties.
-        Handles scalar and array inputs with broadcasting.
-
-        :param name: Property name (e.g., "water_viscosity", "gas_solubility_in_water")
-        :param pressure: Pressure value(s) in psi
-        :param temperature: Temperature value(s) in °F
-        :param salinity: Salinity value(s) in ppm NaCl
-        :return: Interpolated property value(s), or None if property not available
-        """
+    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
+        """3D interpolation via `RegularGridInterpolator` with clamping."""
         interp = self._interpolators.get(name)
         if interp is None:
             return None
+        self._warn_extrapolation(pressure, temperature, salinity)
 
-        # Check for extrapolation if requested
-        if self.warn_on_extrapolation:
-            self._warn_extrapolation(pressure, temperature, salinity)
-
-        # Convert to arrays and broadcast
         p = np.atleast_1d(pressure)
         t = np.atleast_1d(temperature)
         s = np.atleast_1d(salinity)
         p, t, s = np.broadcast_arrays(p, t, s)
-
-        # Stack and evaluate
         points = np.column_stack([p.ravel(), t.ravel(), s.ravel()])
-        result = interp(points).reshape(p.shape)
-
-        # Preserve global dtype precision
-        dtype = get_dtype()
-        if result.dtype != dtype:
-            result = result.astype(dtype, copy=False)
+        result = interp(points).reshape(p.shape).astype(get_dtype(), copy=False)
 
         clamps = self.clamps
-        if clamps and name in clamps and clamps[name]:
-            lower, upper = clamps[name]
-            if isinstance(result, np.ndarray):
-                np.clip(result, lower, upper, out=result)
-            else:
-                result = np.clip(result, lower, upper)
+        if name in clamps:
+            lo, hi = clamps[name]
+            np.clip(result, lo, hi, out=result)
 
         return float(result) if result.size == 1 else result
 
-    def oil_bubble_point_pressure(
-        self, temperature: QueryType, solution_gor: typing.Optional[QueryType] = None
-    ) -> typing.Union[float, np.ndarray]:
-        """
-        Get bubble point pressure.
+    def _resolve_salinity(self, salinity: typing.Optional[QueryType]) -> QueryType:
+        """Return salinity, falling back to default_salinity for water tables."""
+        if salinity is not None:
+            return salinity
+        if self.default_salinity is not None:
+            return self.default_salinity
+        raise ValidationError(
+            "Salinity is required for water phase PVT lookup but none was provided "
+            "and no default salinity is available."
+        )
 
-        For 1D tables: Pb(T)
-        For 2D tables: Pb(Rs, T) - solution_gor must be provided
-
-        :param temperature: Temperature(s) in °F
-        :param solution_gor: Solution gas-oil ratio(s) in SCF/STB (required for 2D tables)
-        :return: Bubble point pressure(s) in psi
+    def viscosity(
+        self,
+        pressure: QueryType,
+        temperature: QueryType,
+        salinity: typing.Optional[QueryType] = None,
+        solution_gor: typing.Optional[QueryType] = None,
+    ) -> typing.Optional[typing.Union[float, np.ndarray]]:
         """
+        Get fluid viscosity μ (cP).
+
+        **Water / gas phase:** direct table interpolation.
+
+        **Oil phase:**
+        - Saturated (P ≤ Pb): interpolates directly from table.
+        - Undersaturated (P > Pb): applies the modified Beggs & Robinson
+          undersaturated viscosity correlation:
+
+          `μo = μob * (P / Pb)^X`
+
+          where `X = 2.6 * P^1.187 * exp(-11.513 - 8.98e-5 * P)`
+          (Beggs & Robinson 1975, Vazquez & Beggs 1980).
+
+          Falls back to the saturated table value at P if no bubble point
+          table is available.
+
+        :param pressure: Pressure (psi).
+        :param temperature: Temperature (°F).
+        :param salinity: Salinity (ppm NaCl). Water phase only; uses default if None.
+        :param solution_gor: Solution GOR (SCF/STB). Oil phase only; required when
+            the bubble point table is 2D — i.e. `Pb(Rs, T)`, so the correct
+            bubble point can be located before applying the undersaturated
+            correction. Not needed for 1D `Pb(T)` tables.
+        :return: Viscosity in cP, or None if table not provided.
+        """
+        if self._phase == FluidPhase.WATER:
+            return self._pts_interpolate(
+                "viscosity", pressure, temperature, self._resolve_salinity(salinity)
+            )
+
+        if self._phase == FluidPhase.GAS:
+            return self._pt_interpolate("viscosity", pressure, temperature)
+
+        # For oil, apply undersaturated Beggs & Robinson correction above Pb
+        if "viscosity" not in self._interpolators:
+            return None
+
+        pb = self.bubble_point_pressure(
+            temperature=temperature, solution_gor=solution_gor
+        )
+        if pb is None:
+            return self._pt_interpolate("viscosity", pressure, temperature)
+
+        p_arr = np.atleast_1d(pressure)
+        t_arr = np.atleast_1d(temperature)
+        pb_arr = np.atleast_1d(pb)
+        p_arr, t_arr, pb_arr = np.broadcast_arrays(p_arr, t_arr, pb_arr)
+
+        result = np.zeros_like(p_arr, dtype=float)
+        saturated_mask = p_arr <= pb_arr
+        unsaturated_mask = ~saturated_mask
+
+        if np.any(saturated_mask):
+            result[saturated_mask] = self._pt_interpolate(  # type: ignore[index]
+                "viscosity", p_arr[saturated_mask], t_arr[saturated_mask]
+            )
+
+        if np.any(unsaturated_mask):
+            # Viscosity at bubble point (μob)
+            mu_ob = self._pt_interpolate(
+                "viscosity", pb_arr[unsaturated_mask], t_arr[unsaturated_mask]
+            )
+            if mu_ob is None:
+                # Fallback: use table directly at current pressure
+                result[unsaturated_mask] = self._pt_interpolate(  # type: ignore[index]
+                    "viscosity", p_arr[unsaturated_mask], t_arr[unsaturated_mask]
+                )
+            else:
+                p_under = p_arr[unsaturated_mask]
+                pb_under = pb_arr[unsaturated_mask]
+                mu_ob_arr = np.asarray(mu_ob)
+                # Modified Beggs & Robinson (1975) / Vazquez & Beggs (1980)
+                # X = 2.6 * P^1.187 * exp(-11.513 - 8.98e-5 * P)
+                X = 2.6 * (p_under**1.187) * np.exp(-11.513 - 8.98e-5 * p_under)
+                X = np.clip(X, 0.0, 5.0)  # prevent runaway exponentiation
+                pressure_ratio = np.clip(
+                    p_under / pb_under,
+                    1.0,
+                    None,  # P > Pb by definition
+                )
+                result[unsaturated_mask] = np.clip(
+                    mu_ob_arr * (pressure_ratio**X),
+                    mu_ob_arr,  # viscosity must not decrease above Pb
+                    mu_ob_arr * 100.0,  # sanity cap at 100x bubble-point value
+                )
+
+        clamps = self.clamps
+        if "viscosity" in clamps:
+            lo, hi = clamps["viscosity"]
+            np.clip(result, lo, hi, out=result)
+
+        return float(result) if result.size == 1 else result
+
+    def density(
+        self,
+        pressure: QueryType,
+        temperature: QueryType,
+        salinity: typing.Optional[QueryType] = None,
+    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
+        """
+        Get fluid density ρ (lbm/ft³).
+
+        :param pressure: Pressure (psi).
+        :param temperature: Temperature (°F).
+        :param salinity: Salinity (ppm NaCl). Water phase only; uses default if None.
+        :return: Density in lbm/ft³, or None if table not provided.
+        """
+        if self._phase == FluidPhase.WATER:
+            return self._pts_interpolate(
+                "density", pressure, temperature, self._resolve_salinity(salinity)
+            )
+        return self._pt_interpolate("density", pressure, temperature)
+
+    def formation_volume_factor(
+        self,
+        pressure: QueryType,
+        temperature: QueryType,
+        salinity: typing.Optional[QueryType] = None,
+        solution_gor: typing.Optional[QueryType] = None,
+    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
+        """
+        Get formation volume factor B (bbl/STB for oil/water, ft³/SCF for gas).
+
+        **Oil phase:**
+        - Saturated (P ≤ Pb): interpolates directly from table.
+        - Undersaturated (P > Pb): applies McCain compressibility correction:
+          ``Bo = Bob * exp(-co_avg * (P - Pb))``. Falls back to Bob if no
+          compressibility table is available.
+
+        **Gas / water phase:** direct table interpolation.
+
+        :param pressure: Pressure (psi).
+        :param temperature: Temperature (°F).
+        :param salinity: Salinity (ppm NaCl). Water phase only; uses default if None.
+        :param solution_gor: Solution GOR (SCF/STB). Required for 2D oil Pb table.
+        :return: FVF or None if table not provided.
+        """
+        if self._phase == FluidPhase.WATER:
+            return self._pts_interpolate(
+                "formation_volume_factor",
+                pressure,
+                temperature,
+                self._resolve_salinity(salinity),
+            )
+
+        if self._phase == FluidPhase.GAS:
+            return self._pt_interpolate(
+                "formation_volume_factor", pressure, temperature
+            )
+
+        # Oil: handle Pb correction
+        if "formation_volume_factor" not in self._interpolators:
+            return None
+
+        pb = self.bubble_point_pressure(
+            temperature=temperature, solution_gor=solution_gor
+        )
+        if pb is None:
+            # No Pb table
+            return self._pt_interpolate(
+                "formation_volume_factor", pressure, temperature
+            )
+
+        p_arr = np.atleast_1d(pressure)
+        t_arr = np.atleast_1d(temperature)
+        pb_arr = np.atleast_1d(pb)
+        p_arr, t_arr, pb_arr = np.broadcast_arrays(p_arr, t_arr, pb_arr)
+
+        result = np.zeros_like(p_arr, dtype=float)
+
+        saturated_mask = p_arr <= pb_arr
+        unsaturated_mask = ~saturated_mask
+
+        if np.any(saturated_mask):
+            result[saturated_mask] = self._pt_interpolate(  # type: ignore[index]
+                "formation_volume_factor", p_arr[saturated_mask], t_arr[saturated_mask]
+            )
+
+        if np.any(unsaturated_mask):
+            oil_fvf_at_pb = self._pt_interpolate(
+                "formation_volume_factor",
+                pb_arr[unsaturated_mask],
+                t_arr[unsaturated_mask],
+            )
+            if "compressibility" in self._interpolators:
+                co_pb = self._pt_interpolate(
+                    "compressibility", pb_arr[unsaturated_mask], t_arr[unsaturated_mask]
+                )
+                co_p = self._pt_interpolate(
+                    "compressibility", p_arr[unsaturated_mask], t_arr[unsaturated_mask]
+                )
+                co_avg = 0.5 * (np.asarray(co_pb) + np.asarray(co_p))
+                result[unsaturated_mask] = np.asarray(oil_fvf_at_pb) * np.exp(
+                    -co_avg * (p_arr[unsaturated_mask] - pb_arr[unsaturated_mask])
+                )
+            else:
+                result[unsaturated_mask] = np.asarray(oil_fvf_at_pb)
+
+        # Apply clamps
+        clamps = self.clamps
+        if "formation_volume_factor" in clamps:
+            lo, hi = clamps["formation_volume_factor"]
+            np.clip(result, lo, hi, out=result)
+
+        return float(result) if result.size == 1 else result
+
+    def compressibility(
+        self,
+        pressure: QueryType,
+        temperature: QueryType,
+        salinity: typing.Optional[QueryType] = None,
+    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
+        """
+        Get fluid compressibility c (psi⁻¹).
+
+        :param pressure: Pressure (psi).
+        :param temperature: Temperature (°F).
+        :param salinity: Salinity (ppm NaCl). Water phase only; uses default if None.
+        :return: Compressibility in psi⁻¹, or None if table not provided.
+        """
+        if self._phase == FluidPhase.WATER:
+            return self._pts_interpolate(
+                "compressibility",
+                pressure,
+                temperature,
+                self._resolve_salinity(salinity),
+            )
+        return self._pt_interpolate("compressibility", pressure, temperature)
+
+    def specific_gravity(
+        self,
+        pressure: QueryType,
+        temperature: QueryType,
+        salinity: typing.Optional[QueryType] = None,
+    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
+        """
+        Get fluid specific gravity γ (dimensionless, water = 1 for oil/water,
+        air = 1 for gas).
+
+        :param pressure: Pressure (psi).
+        :param temperature: Temperature (°F).
+        :param salinity: Salinity (ppm NaCl). Water phase only; uses default if None.
+        :return: Specific gravity or None if table not provided.
+        """
+        if self._phase == FluidPhase.WATER:
+            return self._pts_interpolate(
+                "specific_gravity",
+                pressure,
+                temperature,
+                self._resolve_salinity(salinity),
+            )
+        return self._pt_interpolate("specific_gravity", pressure, temperature)
+
+    def molecular_weight(
+        self,
+        pressure: QueryType,
+        temperature: QueryType,
+        salinity: typing.Optional[QueryType] = None,
+    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
+        """
+        Get fluid molecular weight `M` (lbm/lb-mol).
+
+        :param pressure: Pressure (psi).
+        :param temperature: Temperature (°F).
+        :param salinity: Salinity (ppm NaCl). Water phase only; uses default if None.
+        :return: Molecular weight or None if table not provided.
+        """
+        if self._phase == FluidPhase.WATER:
+            return self._pts_interpolate(
+                "molecular_weight",
+                pressure,
+                temperature,
+                self._resolve_salinity(salinity),
+            )
+        return self._pt_interpolate("molecular_weight", pressure, temperature)
+
+    def bubble_point_pressure(
+        self,
+        temperature: QueryType,
+        solution_gor: typing.Optional[QueryType] = None,
+        pressure: typing.Optional[QueryType] = None,
+        salinity: typing.Optional[QueryType] = None,
+    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
+        """
+        Get bubble point pressure Pb (psi).
+
+        **Oil phase:**
+        - 1D table Pb(T): `temperature` only.
+        - 2D table Pb(Rs, T): both `temperature` and `solution_gor` required.
+
+        **Water phase:** water bubble point pressure(P, T, S) - `pressure` and `salinity` required
+        (or defaults to `default_salinity` if salinity is None).
+
+        **Gas phase:** returns `None`.
+
+        :param temperature: Temperature (°F).
+        :param solution_gor: Solution GOR (SCF/STB). Required for 2D oil Pb table.
+        :param pressure: Pressure (psi). Required for water Pb table.
+        :param salinity: Salinity (ppm NaCl). Water phase only.
+        :return: Bubble point pressure in psi, or None for gas phase / missing table.
+        """
+        if self._phase == FluidPhase.GAS:
+            return None
+
+        if self._phase == FluidPhase.WATER:
+            if pressure is None:
+                raise ValidationError(
+                    "Water bubble point pressure requires `pressure` argument."
+                )
+            return self._pts_interpolate(
+                "bubble_point_pressure",
+                pressure,
+                temperature,
+                self._resolve_salinity(salinity),
+            )
+
+        # Oil
         interp = self._interpolators.get("bubble_point_pressure")
         if interp is None:
-            raise ValidationError("Bubble point pressure table not provided")
+            return None
 
-        if self._pb_ndim == 1:  # type: ignore
-            # 1D: Pb(T)
-            if solution_gor is not None:
-                logger.debug(
-                    "`solution_gor` provided but `bubble_point_pressures` is 1D - ignoring"
-                )
+        if self._pb_ndim == 1:
             result = interp(temperature)
             return float(result) if np.isscalar(temperature) else result
 
-        # 2D: Pb(Rs, T)
+        # 2D Pb(Rs, T)
         if solution_gor is None:
             raise ValidationError(
-                "`solution_gor` required as PVT table uses 2D bubble point pressures: Pb(Rs, T)"
+                "2D bubble point table requires `solution_gor` (solution GOR) argument."
             )
-
         rs = np.atleast_1d(solution_gor)
         t = np.atleast_1d(temperature)
-
         if rs.shape != t.shape:
             if rs.size == 1:
                 rs = np.full_like(t, rs[0])
@@ -765,9 +1166,8 @@ class PVTTables:
                 t = np.full_like(rs, t[0])
             else:
                 raise ValidationError(
-                    "`solution_gor` and `temperature` must have compatible shapes"
+                    "`solution_gor` and `temperature` must have compatible shapes."
                 )
-
         result = interp.ev(rs, t)
         return float(result) if result.size == 1 else result
 
@@ -776,826 +1176,957 @@ class PVTTables:
         pressure: QueryType,
         temperature: QueryType,
         solution_gor: typing.Optional[QueryType] = None,
-    ) -> typing.Union[bool, np.ndarray]:
+    ) -> typing.Optional[typing.Union[bool, np.typing.NDArray]]:
         """
-        Determine if conditions are saturated (P ≤ Pb) or undersaturated (P > Pb).
+        Determine whether conditions are saturated (P ≤ Pb).
 
-        :param pressure: Pressure(s) in psi
-        :param temperature: Temperature(s) in °F
-        :param solution_gor: Solution gas-oil ratio(s) in SCF/STB (for 2D bubble point tables)
-        :return: Boolean or array: True if saturated, False if undersaturated
+        **Oil and water phase only.** Returns `None` for gas.
+
+        :param pressure: Pressure (psi).
+        :param temperature: Temperature (°F).
+        :param solution_gor: Solution GOR (SCF/STB). Required for 2D Pb tables.
+        :return: Boolean mask (where True = saturated), or None for gas phase.
         """
-        pb = self.oil_bubble_point_pressure(
+        if self._phase == FluidPhase.GAS:
+            return None
+
+        pb = self.bubble_point_pressure(
             temperature=temperature, solution_gor=solution_gor
         )
+        if pb is None:
+            return None
 
         p_arr = np.atleast_1d(pressure)
         pb_arr = np.atleast_1d(pb)
-
         result = p_arr <= pb_arr
         return bool(result) if result.size == 1 else result
-
-    def oil_viscosity(
-        self,
-        pressure: QueryType,
-        temperature: QueryType,
-        solution_gor: typing.Optional[QueryType] = None,
-    ) -> typing.Optional[typing.Union[float, np.ndarray]]:
-        """
-        Get oil viscosity.
-
-        For saturated conditions (P ≤ Pb): Interpolate directly from table
-        For undersaturated conditions (P > Pb): Use correlation or special handling
-
-        :param pressure: Pressure(s) in psi
-        :param temperature: Temperature(s) in °F
-        :param solution_gor: Solution gas-oil ratio(s) in SCF/STB (for 2D bubble point)
-        :return: Oil viscosity in cP
-        """
-        if "oil_viscosity" not in self._interpolators:
-            return None
-
-        # Get bubble point pressure
-        bubble_point_pressure = self.oil_bubble_point_pressure(
-            temperature=temperature, solution_gor=solution_gor
-        )
-
-        # Convert to arrays for vectorized operations
-        p = np.atleast_1d(pressure)
-        t = np.atleast_1d(temperature)
-        pb = np.atleast_1d(bubble_point_pressure)
-
-        # Broadcast to compatible shapes
-        p, t, pb = np.broadcast_arrays(p, t, pb)
-
-        # Interpolate viscosity
-        result = np.zeros_like(p, dtype=float)
-
-        # Saturated conditions: P ≤ Pb - use table directly
-        saturated = p <= pb
-        if np.any(saturated):
-            result[saturated] = self.pt_interpolate(
-                name="oil_viscosity", pressure=p[saturated], temperature=t[saturated]
-            )
-
-        # Undersaturated conditions: P > Pb
-        undersaturated = np.invert(saturated)
-        if np.any(undersaturated):
-            # Get viscosity at bubble point (mu_ob)
-            mu_b = self.pt_interpolate(
-                name="oil_viscosity",
-                pressure=pb[undersaturated],
-                temperature=t[undersaturated],
-            )
-
-            if mu_b is None:
-                # Fallback: use saturated viscosity as approximation
-                result[undersaturated] = self.pt_interpolate(
-                    name="oil_viscosity",
-                    pressure=p[undersaturated],  # type: ignore[assignment]
-                    temperature=t[undersaturated],  # type: ignore[assignment]
-                )
-            else:
-                # Apply Modified Beggs & Robinson undersaturated viscosity correlation
-                # (consistent with bores.correlations.arrays.compute_oil_viscosity)
-                # mu_o = mu_ob * (P / Pb)^X
-                # where X = 2.6 * P^1.187 * exp(-11.513 - 8.98e-5 * P)
-                # Reference: Beggs & Robinson (1975), Vazquez & Beggs (1980)
-                p_under = p[undersaturated]
-                pb_under = pb[undersaturated]
-
-                X = 2.6 * (p_under**1.187) * np.exp(-11.513 - 8.98e-5 * p_under)
-                X = np.clip(X, 0.0, 5.0)  # prevent runaway exponentiation
-                pressure_ratio = np.clip(
-                    p_under / pb_under, 1.0, None
-                )  # P > Pb by definition here
-                result[undersaturated] = np.clip(
-                    mu_b * (pressure_ratio**X),
-                    mu_b,  # viscosity must not decrease above bubble point
-                    mu_b * 100.0,  # cap at 100x bubble point viscosity as sanity bound
-                )
-
-        return float(result) if result.size == 1 else result
-
-    def oil_compressibility(
-        self, pressure: QueryType, temperature: QueryType
-    ) -> typing.Optional[typing.Union[float, np.ndarray]]:
-        """Get oil compressibility at given pressure(s) and temperature(s)."""
-        return self.pt_interpolate(
-            name="oil_compressibility", pressure=pressure, temperature=temperature
-        )
-
-    def oil_specific_gravity(
-        self, pressure: QueryType, temperature: QueryType
-    ) -> typing.Optional[typing.Union[float, np.ndarray]]:
-        """Get oil specific gravity at given pressure(s) and temperature(s)."""
-        return self.pt_interpolate(
-            name="oil_specific_gravity", pressure=pressure, temperature=temperature
-        )
-
-    def oil_api_gravity(
-        self, pressure: QueryType, temperature: QueryType
-    ) -> typing.Optional[typing.Union[float, np.ndarray]]:
-        """Get oil API gravity at given pressure(s) and temperature(s)."""
-        return self.pt_interpolate(
-            name="oil_api_gravity", pressure=pressure, temperature=temperature
-        )
-
-    def oil_density(
-        self, pressure: QueryType, temperature: QueryType
-    ) -> typing.Optional[typing.Union[float, np.ndarray]]:
-        """Get oil density at given pressure(s) and temperature(s)."""
-        return self.pt_interpolate(
-            name="oil_density", pressure=pressure, temperature=temperature
-        )
-
-    def oil_formation_volume_factor(
-        self,
-        pressure: QueryType,
-        temperature: QueryType,
-        solution_gor: typing.Optional[QueryType] = None,
-    ) -> typing.Optional[typing.Union[float, np.ndarray]]:
-        """
-        Get oil formation volume factor.
-
-        For saturated conditions (P ≤ Pb): Bo increases as pressure increases
-        For undersaturated conditions (P > Pb): Bo decreases as pressure increases (compression)
-
-        :param pressure: Pressure(s) in psi
-        :param temperature: Temperature(s) in °F
-        :param solution_gor: Solution gas-oil ratio(s) in SCF/STB (for 2D bubble point)
-        :return Oil formation volume factor in bbl/STB
-        """
-        if "oil_formation_volume_factor" not in self._interpolators:
-            return None
-
-        # Get bubble point pressure
-        bubble_point_pressure = self.oil_bubble_point_pressure(
-            temperature, solution_gor
-        )
-
-        # Convert to arrays
-        p = np.atleast_1d(pressure)
-        t = np.atleast_1d(temperature)
-        pb = np.atleast_1d(bubble_point_pressure)
-        p, t, pb = np.broadcast_arrays(p, t, pb)
-
-        result = np.zeros_like(p, dtype=float)
-
-        # Saturated: P ≤ Pb
-        saturated = p <= pb
-        if np.any(saturated):
-            result[saturated] = self.pt_interpolate(
-                name="oil_formation_volume_factor",
-                pressure=p[saturated],
-                temperature=t[saturated],
-            )
-
-        # Undersaturated: P > Pb
-        # Bo(P) = Bob * exp(-co_avg * (P - Pb))
-        # where `co_avg` is the average compressibility between Pb and P
-        undersaturated = np.invert(saturated)
-        if np.any(undersaturated):
-            # Get Bo at bubble point
-            bob = self.pt_interpolate(
-                name="oil_formation_volume_factor",
-                pressure=pb[undersaturated],
-                temperature=t[undersaturated],
-            )
-
-            # Get compressibility if available
-            if "oil_compressibility" in self._interpolators:
-                # Get compressibility at bubble point
-                co_pb = self.pt_interpolate(
-                    name="oil_compressibility",
-                    pressure=pb[undersaturated],
-                    temperature=t[undersaturated],
-                )
-                # Get compressibility at current pressure for average calculation
-                co_p = self.pt_interpolate(
-                    name="oil_compressibility",
-                    pressure=p[undersaturated],
-                    temperature=t[undersaturated],
-                )
-
-                if co_pb is not None:
-                    # Use average compressibility between Pb and P (McCain method)
-                    if co_p is not None:
-                        co_avg = 0.5 * (co_pb + co_p)
-                    else:
-                        # Fallback to bubble point compressibility if P is out of table range
-                        co_avg = co_pb
-
-                    # Apply compression: Bo decreases with pressure above Pb
-                    # Bo(P) = Bob * exp(-co_avg * (P - Pb))
-                    result[undersaturated] = bob * np.exp(
-                        -co_avg * (p[undersaturated] - pb[undersaturated])
-                    )
-                else:
-                    # Interpolator exists but returned None (shouldn't happen)
-                    result[undersaturated] = bob
-            else:
-                # No compressibility table provided
-                logger.warning(
-                    "Undersaturated Bo: using bubble point value (no compressibility data)"
-                )
-                result[undersaturated] = bob
-
-        return float(result) if result.size == 1 else result
 
     def solution_gas_to_oil_ratio(
         self,
         pressure: QueryType,
         temperature: QueryType,
         solution_gor: typing.Optional[QueryType] = None,
-    ) -> typing.Optional[typing.Union[float, np.ndarray]]:
+    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
         """
-        Get solution gas-to-oil ratio.
+        Get solution gas-oil ratio Rs (SCF/STB).
 
-        For saturated conditions (P ≤ Pb): Rs varies with pressure (more gas dissolves)
-        For undersaturated conditions (P > Pb): Rs = Rsb (constant, no more gas dissolves)
+        **Oil phase only.** Rs is frozen at Rsb above the bubble point.
+        Returns `None` for gas and water phases.
 
-        :param pressure: Pressure(s) in psi
-        :param temperature: Temperature(s) in °F
-        :param solution_gor: Solution gas-oil ratio(s) in SCF/STB (for 2D bubble point)
-        :return: Solution gas-to-oil ratio in SCF/STB
+        :param pressure: Pressure (psi).
+        :param temperature: Temperature (°F).
+        :param solution_gor: Solution GOR (SCF/STB). Required for 2D oil Pb table.
+        :return: Rs in SCF/STB, or None.
         """
-        if "solution_gas_to_oil_ratio" not in self._interpolators:
+        if self._phase != FluidPhase.OIL:
+            return None
+        if "solution_gor" not in self._interpolators:
             return None
 
-        # Get bubble point pressure
-        bubble_point_pressure = self.oil_bubble_point_pressure(
+        pb = self.bubble_point_pressure(
             temperature=temperature, solution_gor=solution_gor
         )
+        if pb is None:
+            return self._pt_interpolate("solution_gor", pressure, temperature)
 
-        # Convert to arrays
-        p = np.atleast_1d(pressure)
-        t = np.atleast_1d(temperature)
-        pb = np.atleast_1d(bubble_point_pressure)
-        p, t, pb = np.broadcast_arrays(p, t, pb)
+        p_arr = np.atleast_1d(pressure)
+        t_arr = np.atleast_1d(temperature)
+        pb_arr = np.atleast_1d(pb)
+        p_arr, t_arr, pb_arr = np.broadcast_arrays(p_arr, t_arr, pb_arr)
 
-        result = np.zeros_like(p, dtype=float)
+        result = np.zeros_like(p_arr, dtype=float)
+        saturated_mask = p_arr <= pb_arr
+        unsaturated_mask = ~saturated_mask
 
-        # Saturated: P ≤ Pb - Rs varies with P
-        saturated = p <= pb
-        if np.any(saturated):
-            result[saturated] = self.pt_interpolate(
-                name="solution_gas_to_oil_ratio",
-                pressure=p[saturated],
-                temperature=t[saturated],
+        if np.any(saturated_mask):
+            result[saturated_mask] = self._pt_interpolate(
+                "solution_gor", p_arr[saturated_mask], t_arr[saturated_mask]
+            )
+        if np.any(unsaturated_mask):
+            # Rs frozen at Rsb above Pb
+            result[unsaturated_mask] = self._pt_interpolate(
+                "solution_gor", pb_arr[unsaturated_mask], t_arr[unsaturated_mask]
             )
 
-        # Undersaturated: P > Pb - Rs = Rsb (constant)
-        undersaturated = np.invert(saturated)
-        if np.any(undersaturated):
-            # Use Rs at bubble point
-            result[undersaturated] = self.pt_interpolate(
-                name="solution_gas_to_oil_ratio",
-                pressure=pb[undersaturated],
-                temperature=t[undersaturated],
-            )
+        clamps = self.clamps
+        if "solution_gor" in clamps:
+            lo, hi = clamps["solution_gor"]
+            np.clip(result, lo, hi, out=result)
 
         return float(result) if result.size == 1 else result
 
-    def water_bubble_point_pressure(
-        self, pressure: QueryType, temperature: QueryType, salinity: QueryType
-    ) -> typing.Optional[typing.Union[float, np.ndarray]]:
-        """Get water bubble point pressure at given pressure(s), temperature(s), and salinity(ies)."""
-        return self.pts_interpolate(
-            name="water_bubble_point_pressure",
-            pressure=pressure,
-            temperature=temperature,
-            salinity=salinity,
-        )
+    def compressibility_factor(
+        self,
+        pressure: QueryType,
+        temperature: QueryType,
+    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
+        """
+        Get gas compressibility factor Z (dimensionless).
 
-    def water_viscosity(
+        **Gas phase only.** Returns `None` for oil and water phases.
+
+        :param pressure: Pressure (psi).
+        :param temperature: Temperature (°F).
+        :return: Z-factor or None.
+        """
+        if self._phase != FluidPhase.GAS:
+            return None
+        return self._pt_interpolate("compressibility_factor", pressure, temperature)
+
+    def solubility_in_water(
         self,
         pressure: QueryType,
         temperature: QueryType,
         salinity: typing.Optional[QueryType] = None,
-    ) -> typing.Optional[typing.Union[float, np.ndarray]]:
+    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
         """
-        Get water viscosity at given pressure(s), temperature(s), and salinity(ies).
+        Get gas solubility in water Rsw (SCF/STB).
 
-        :param pressure: Pressure(s) in psi
-        :param temperature: Temperature(s) in °F
-        :param salinity: Salinity(ies) in ppm NaCl. If None, uses first salinity value from table.
-        :return: Water viscosity in cP
+        **Gas phase only.** Returns `None` for oil and water phases.
+
+        :param pressure: Pressure (psi).
+        :param temperature: Temperature (°F).
+        :param salinity: Salinity (ppm NaCl); uses default if None.
+        :return: Rsw in SCF/STB, or None.
         """
-        if salinity is None:
-            # Use the first (or only) salinity value as default
-            if self.default_salinity is None:
-                raise ValidationError(
-                    "Salinity required but no salinity grid provided in PVT tables"
-                )
-            salinity = self.default_salinity
-
-        return self.pts_interpolate(
-            name="water_viscosity",
-            pressure=pressure,
-            temperature=temperature,
-            salinity=salinity,  # type: ignore[arg-type]
+        if self._phase != FluidPhase.GAS:
+            return None
+        return self._pts_interpolate(
+            "solubility_in_water",
+            pressure,
+            temperature,
+            self._resolve_salinity(salinity),
         )
 
-    def water_compressibility(
-        self,
-        pressure: QueryType,
-        temperature: QueryType,
-        salinity: typing.Optional[QueryType] = None,
-    ) -> typing.Optional[typing.Union[float, np.ndarray]]:
+
+@attrs.frozen
+class PVTDataSet(StoreSerializable):
+    """
+    Serializable bundle of raw `PVTData` for all three fluid phases.
+
+    `PVTDataSet` is the persistence layer. It stores the raw tabulated
+    data for oil, gas, and water and can be saved to / loaded from disk
+    independently of any interpolator settings. Use it when you want to
+    share or inspect PVT data without rebuilding tables, or as an
+    intermediate step before constructing a `PVTTables` bundle.
+
+    Typical workflow:
+
+    ```python
+    # Build once and persist
+    oil_data, gas_data, water_data = build_pvt_dataset(pressures, temperatures, ...)
+    dataset = PVTDataSet(oil=oil_data, gas=gas_data, water=water_data)
+    dataset.save("run/pvt_data.h5")
+
+    # Load and build tables later (possibly with different interp settings)
+    dataset = PVTDataSet.load("run/pvt_data.h5")
+    tables = PVTTables.from_dataset(dataset, interpolation_method="cubic")
+    ```
+
+    See also `PVTTables.from_dataset(...)` and `PVTTables.from_files(...)`.
+    """
+
+    oil: typing.Optional[PVTData] = None
+    """Raw PVT data for the oil phase."""
+
+    gas: typing.Optional[PVTData] = None
+    """Raw PVT data for the gas phase."""
+
+    water: typing.Optional[PVTData] = None
+    """Raw PVT data for the water phase."""
+
+    @classmethod
+    def from_files(
+        cls,
+        oil: typing.Optional[typing.Union[PathLike[str], str]] = None,
+        gas: typing.Optional[typing.Union[PathLike[str], str]] = None,
+        water: typing.Optional[typing.Union[PathLike[str], str]] = None,
+    ) -> Self:
         """
-        Get water compressibility at given pressure(s), temperature(s), and salinity(ies).
+        Load a `PVTDataSet` from individual per-phase files.
 
-        :param pressure: Pressure(s) in psi
-        :param temperature: Temperature(s) in °F
-        :param salinity: Salinity(ies) in ppm NaCl. If None, uses first salinity value from table.
-        :return: Water compressibility in psi⁻¹
+        Each path is optional. Pass only the phases you need. Files must
+        have been created by saving a `PVTData` instance (e.g. via
+        `pvt_data.save(path)`).
+
+        :param oil: Path to serialized oil `PVTData`.
+        :param gas: Path to serialized gas `PVTData`.
+        :param water: Path to serialized water `PVTData`.
+        :return: `PVTDataSet` with the requested phases populated.
+
+        Example:
+
+        ```python
+        dataset = PVTDataSet.from_files(
+            oil="data/oil_pvt.h5", gas="data/gas_pvt.h5"
+        )
+        ```
         """
-        if salinity is None:
-            if self.default_salinity is None:
-                raise ValidationError(
-                    "Salinity required but no salinity grid provided in PVT tables"
-                )
-            salinity = self.default_salinity
-
-        return self.pts_interpolate(
-            name="water_compressibility",
-            pressure=pressure,
-            temperature=temperature,
-            salinity=salinity,  # type: ignore[arg-type]
+        return cls(
+            oil=PVTData.from_file(oil) if oil is not None else None,
+            gas=PVTData.from_file(gas) if gas is not None else None,
+            water=PVTData.from_file(water) if water is not None else None,
         )
 
-    def water_density(
-        self,
-        pressure: QueryType,
-        temperature: QueryType,
-        salinity: typing.Optional[QueryType] = None,
-    ) -> typing.Optional[typing.Union[float, np.ndarray]]:
+
+@attrs.frozen
+class PVTTables(StoreSerializable):
+    """
+    Bundle of phase-specific `PVTTable` instances.
+
+    Holds one optional `PVTTable` per fluid phase. Access via:
+
+    ```python
+    pvt_tables.oil.viscosity(p, t)
+    pvt_tables.gas.formation_volume_factor(p, t)
+    pvt_tables.water.density(p, t, salinity=35000)
+    ```
+
+    ```python
+    tables.save("run/pvt_tables.h5")
+    tables2 = PVTTables.load("run/pvt_tables.h5")
+    ```
+
+    Build from a `PVTDataSet` or directly from per-phase files without touching `PVTData`:
+
+    ```python
+    # From a dataset
+    tables = PVTTables.from_dataset(dataset, interpolation_method="cubic")
+
+    # From individual files
+    tables = PVTTables.from_files(
+        oil="oil.h5",
+        gas="gas.h5",
+        water="water.h5",
+        interpolation_method="linear",
+    )
+    ```
+    """
+
+    oil: typing.Optional[PVTTable] = None
+    """PVT table for the oil phase."""
+
+    gas: typing.Optional[PVTTable] = None
+    """PVT table for the gas phase."""
+
+    water: typing.Optional[PVTTable] = None
+    """PVT table for the water phase."""
+
+    @classmethod
+    def from_dataset(
+        cls,
+        dataset: PVTDataSet,
+        interpolation_method: InterpolationMethod = "linear",
+        validate: bool = True,
+        warn_on_extrapolation: bool = False,
+        clamps: typing.Optional[typing.Dict[str, typing.Tuple[float, float]]] = None,
+    ) -> Self:
         """
-        Get water density at given pressure(s), temperature(s), and salinity(ies).
+        Build a `PVTTables` bundle from a `PVTDataSet`.
 
-        :param pressure: Pressure(s) in psi
-        :param temperature: Temperature(s) in °F
-        :param salinity: Salinity(ies) in ppm NaCl. If None, uses first salinity value from table.
-        :return: Water density in lbm/ft³
+        Constructs one `PVTTable` per non-`None` phase in the
+        dataset, applying the same interpolation settings to all phases.
+
+        :param dataset: Source `PVTDataSet` containing raw tabulated data.
+        :param interpolation_method: `"linear"` (default) or `"cubic"`.
+            Cubic requires ≥ 4 points along each axis.
+        :param validate: Run physical-consistency checks on each phase's data.
+        :param warn_on_extrapolation: Log warnings when queries exceed table bounds.
+        :param clamps: Property clamp overrides applied to all phases.
+            Keys use generic names (e.g. `"viscosity"`). Merged on top of
+            per-phase defaults.
+        :return: `PVTTables` with interpolators ready for simulation.
+
+        Example:
+
+        ```python
+        dataset = PVTDataSet.load("run/pvt_data.h5")
+        tables  = PVTTables.from_dataset(dataset, interpolation_method="cubic")
+        ```
         """
-        if salinity is None:
-            if self.default_salinity is None:
-                raise ValidationError(
-                    "Salinity required but no salinity grid provided in PVT tables"
-                )
-            salinity = self.default_salinity
-
-        return self.pts_interpolate(
-            name="water_density",
-            pressure=pressure,
-            temperature=temperature,
-            salinity=salinity,  # type: ignore[arg-type]
+        kwargs = dict(  # noqa
+            interpolation_method=interpolation_method,
+            validate=validate,
+            warn_on_extrapolation=warn_on_extrapolation,
+            clamps=clamps,
+        )
+        return cls(
+            oil=PVTTable(dataset.oil, **kwargs) if dataset.oil is not None else None,  # type: ignore
+            gas=PVTTable(dataset.gas, **kwargs) if dataset.gas is not None else None,  # type: ignore
+            water=PVTTable(dataset.water, **kwargs)  # type: ignore
+            if dataset.water is not None
+            else None,
         )
 
-    def water_formation_volume_factor(
-        self,
-        pressure: QueryType,
-        temperature: QueryType,
-        salinity: typing.Optional[QueryType] = None,
-    ) -> typing.Optional[typing.Union[float, np.ndarray]]:
+    @classmethod
+    def from_files(
+        cls,
+        oil: typing.Optional[typing.Union[PathLike[str], str]] = None,
+        gas: typing.Optional[typing.Union[PathLike[str], str]] = None,
+        water: typing.Optional[typing.Union[PathLike[str], str]] = None,
+        interpolation_method: InterpolationMethod = "linear",
+        validate: bool = True,
+        warn_on_extrapolation: bool = False,
+        clamps: typing.Optional[typing.Dict[str, typing.Tuple[float, float]]] = None,
+    ) -> Self:
         """
-        Get water formation volume factor at given pressure(s), temperature(s), and salinity(ies).
+        Build a `PVTTables` bundle directly from per-phase data files.
 
-        :param pressure: Pressure(s) in psi
-        :param temperature: Temperature(s) in °F
-        :param salinity: Salinity(ies) in ppm NaCl. If None, uses first salinity value from table.
-        :return: Water formation volume factor in bbl/STB
+        A convenience wrapper around `from_dataset` that loads the
+        `PVTData` files for you. Each path is optional. Pass only
+        the phases you need.
+
+        :param oil: Path to serialized oil `PVTData` file.
+        :param gas: Path to serialized gas `PVTData` file.
+        :param water: Path to serialized water `PVTData` file.
+        :param interpolation_method: `"linear"` (default) or `"cubic"`.
+        :param validate: Run physical-consistency checks on each phase's data.
+        :param warn_on_extrapolation: Log warnings when queries exceed table bounds.
+        :param clamps: Property clamp overrides applied to all phases.
+        :return: `PVTTables` with interpolators ready for simulation.
+
+        Example:
+
+        ```python
+        tables = PVTTables.from_files(
+            oil="data/oil_pvt.h5",
+            gas="data/gas_pvt.h5",
+            interpolation_method="linear",
+        )
+        ```
         """
-        if salinity is None:
-            if self.default_salinity is None:
-                raise ValidationError(
-                    "Salinity required but no salinity grid provided in PVT tables"
-                )
-            salinity = self.default_salinity
-
-        return self.pts_interpolate(
-            name="water_formation_volume_factor",
-            pressure=pressure,
-            temperature=temperature,
-            salinity=salinity,  # type: ignore[arg-type]
+        dataset = PVTDataSet.from_files(oil=oil, gas=gas, water=water)
+        return cls.from_dataset(
+            dataset,
+            interpolation_method=interpolation_method,
+            validate=validate,
+            warn_on_extrapolation=warn_on_extrapolation,
+            clamps=clamps,
         )
 
-    def gas_viscosity(
-        self, pressure: QueryType, temperature: QueryType
-    ) -> typing.Optional[typing.Union[float, np.ndarray]]:
-        """Get gas viscosity at given pressure(s) and temperature(s)."""
-        return self.pt_interpolate(
-            name="gas_viscosity", pressure=pressure, temperature=temperature
-        )
-
-    def gas_compressibility(
-        self, pressure: QueryType, temperature: QueryType
-    ) -> typing.Optional[typing.Union[float, np.ndarray]]:
-        """Get gas compressibility at given pressure(s) and temperature(s)."""
-        return self.pt_interpolate(
-            name="gas_compressibility", pressure=pressure, temperature=temperature
-        )
-
-    def gas_gravity(
-        self, pressure: QueryType, temperature: QueryType
-    ) -> typing.Optional[typing.Union[float, np.ndarray]]:
-        """Get gas gravity at given pressure(s) and temperature(s)."""
-        return self.pt_interpolate(
-            name="gas_gravity", pressure=pressure, temperature=temperature
-        )
-
-    def gas_molecular_weight(
-        self, pressure: QueryType, temperature: QueryType
-    ) -> typing.Optional[typing.Union[float, np.ndarray]]:
-        """Get gas molecular weight at given pressure(s) and temperature(s)."""
-        return self.pt_interpolate(
-            name="gas_molecular_weight", pressure=pressure, temperature=temperature
-        )
-
-    def gas_density(
-        self, pressure: QueryType, temperature: QueryType
-    ) -> typing.Optional[typing.Union[float, np.ndarray]]:
-        """Get gas density at given pressure(s) and temperature(s)."""
-        return self.pt_interpolate(
-            name="gas_density", pressure=pressure, temperature=temperature
-        )
-
-    def gas_formation_volume_factor(
-        self, pressure: QueryType, temperature: QueryType
-    ) -> typing.Optional[typing.Union[float, np.ndarray]]:
-        """Get gas formation volume factor at given pressure(s) and temperature(s)."""
-        return self.pt_interpolate(
-            name="gas_formation_volume_factor",
-            pressure=pressure,
-            temperature=temperature,
-        )
-
-    def gas_compressibility_factor(
-        self, pressure: QueryType, temperature: QueryType
-    ) -> typing.Optional[typing.Union[float, np.ndarray]]:
-        """Get gas compressibility factor at given pressure(s) and temperature(s)."""
-        return self.pt_interpolate(
-            name="gas_compressibility_factor",
-            pressure=pressure,
-            temperature=temperature,
-        )
-
-    def gas_solubility_in_water(
-        self,
-        pressure: QueryType,
-        temperature: QueryType,
-        salinity: typing.Optional[QueryType] = None,
-    ) -> typing.Optional[typing.Union[float, np.ndarray]]:
+    @property
+    def dataset(self) -> PVTDataSet:
         """
-        Get gas solubility in water at given pressure(s), temperature(s), and salinity(ies).
+        Return the underlying raw data as a `PVTDataSet`.
 
-        :param pressure: Pressure(s) in psi
-        :param temperature: Temperature(s) in °F
-        :param salinity: Salinity(ies) in ppm NaCl. If None, uses first salinity value from table.
-        :return: Gas solubility in water in SCF/STB
+        Extracts the `PVTData` stored internally on each
+        `PVTTable` slot. Useful when you want to persist the raw
+        data separately from the interpolator settings, or inspect the
+        tables without re-running the builders.
+
+        :return: `PVTDataSet` containing the raw data for each
+            non-`None` phase.
+
+        Example:
+
+        ```python
+        # Save raw data independently of interpolator settings
+        tables.dataset.save("run/pvt_data.h5")
+        ```
         """
-        if salinity is None:
-            if self.default_salinity is None:
-                raise ValidationError(
-                    "Salinity required but no salinity grid provided in PVT tables"
-                )
-            salinity = self.default_salinity
-
-        return self.pts_interpolate(
-            name="gas_solubility_in_water",
-            pressure=pressure,
-            temperature=temperature,
-            salinity=salinity,  # type: ignore[arg-type]
+        return PVTDataSet(
+            oil=self.oil._data if self.oil is not None else None,
+            gas=self.gas._data if self.gas is not None else None,
+            water=self.water._data if self.water is not None else None,
         )
 
 
-def _validate_table_shape(
-    table: typing.Optional[np.ndarray],
-    expected_shape: typing.Tuple[int, ...],
-    name: str,
-) -> None:
-    """Helpers to validate pre-computed table shapes."""
-    if table is not None and table.shape != expected_shape:
-        raise ValidationError(
-            f"`{name}` shape {table.shape} does not match expected {expected_shape}"
+def _resolve_gas(
+    gas: typing.Optional[typing.Any],
+    gas_gravity: typing.Optional[float],
+) -> typing.Tuple[str, typing.Optional[float], typing.Optional["PVTTable"]]:
+    """
+    Resolve the `gas` argument used across all three builders.
+
+    Returns `(gas_name, gas_gravity, gas_pvt_table)` where:
+    - `gas_name` - String name for correlation lookup
+    - `gas_gravity` - Scalar gravity (may be None if taken from `pvt_table`)
+    - `gas_pvt_table` - `PVTTable` to read gas properties from directly (may be None)
+    """
+    from bores.fluids import Fluid  # type: ignore[import]
+
+    gas_pvt_table: typing.Optional[PVTTable] = None
+    gas_name: str = c.RESERVOIR_GAS
+
+    if gas is None:
+        pass
+    elif isinstance(gas, str):
+        gas_name = gas
+    elif Fluid is not None and isinstance(gas, Fluid):
+        gas_name = gas.name
+        if gas.pvt_table is not None:
+            gas_pvt_table = gas.pvt_table
+    # else: unknown type - fall through to default
+
+    # If `gas_gravity` not supplied, try to get a scalar from the `pvt_table`
+    if gas_gravity is None and gas_pvt_table is not None:
+        # Evaluate at a representative mid-range pressure for a scalar
+        avg_pressure = float(np.mean(gas_pvt_table._extrapolation_bounds["pressure"]))
+        avg_temperature = float(
+            np.mean(gas_pvt_table._extrapolation_bounds["temperature"])
         )
+        specific_gravity = gas_pvt_table.specific_gravity(avg_pressure, avg_temperature)
+        gas_gravity = float(specific_gravity) if specific_gravity is not None else None
+
+    if gas_gravity is None:
+        gas_gravity = compute_gas_gravity(gas=gas_name)
+
+    return gas_name, gas_gravity, gas_pvt_table
 
 
-def build_pvt_table_data(
+def _tables_from_gas_pvt_table(
+    gas_pvt_table: PVTTable,
+    pressure_grid: np.typing.NDArray,
+    temperature_grid: np.typing.NDArray,
+    salinity_grid: typing.Optional[np.typing.NDArray] = None,
+) -> typing.Dict[str, typing.Optional[np.typing.NDArray]]:
+    """
+    Evaluate a gas `PVTTable` on a (P,T) meshgrid and return the resulting
+    2D arrays keyed by table name. Used when a `Fluid` with a `pvt_table` is
+    passed to a builder.
+    """
+    flat_pressure = pressure_grid.ravel()
+    flat_temperature = temperature_grid.ravel()
+    shape = pressure_grid.shape
+
+    def _eval(method_name: str) -> typing.Optional[np.typing.NDArray]:
+        method = getattr(gas_pvt_table, method_name, None)
+        if method is None:
+            return None
+        result = method(flat_pressure, flat_temperature)
+        if result is None:
+            return None
+        return np.asarray(result).reshape(shape).astype(get_dtype(), copy=False)
+
+    return {
+        "viscosity_table": _eval("viscosity"),
+        "density_table": _eval("density"),
+        "formation_volume_factor_table": _eval("formation_volume_factor"),
+        "compressibility_table": _eval("compressibility"),
+        "compressibility_factor_table": _eval("compressibility_factor"),
+        "specific_gravity_table": _eval("specific_gravity"),
+        "molecular_weight_table": _eval("molecular_weight"),
+    }
+
+
+def build_oil_pvt_data(
     pressures: OneDimensionalGrid,
     temperatures: OneDimensionalGrid,
-    oil_specific_gravity: float = 0.85,  # Typical light-medium crude oil
+    oil_specific_gravity: float = 0.85,
     gas_gravity: typing.Optional[float] = None,
-    water_salinity: typing.Optional[float] = None,
     estimated_solution_gor: typing.Optional[float] = None,
-    salinities: typing.Optional[OneDimensionalGrid] = None,
     bubble_point_pressures: typing.Optional[
         typing.Union[OneDimensionalGrid, TwoDimensionalGrid]
     ] = None,
     solution_gas_to_oil_ratios: typing.Optional[OneDimensionalGrid] = None,
-    reservoir_gas: typing.Optional[str] = None,
-    build_oil_properties: bool = True,
-    build_water_properties: bool = True,
-    build_gas_properties: bool = True,
-    # Pre-computed 2D oil tables (n_pressures, n_temperatures)
-    oil_viscosity_table: typing.Optional[TwoDimensionalGrid] = None,
-    oil_compressibility_table: typing.Optional[TwoDimensionalGrid] = None,
-    oil_specific_gravity_table: typing.Optional[TwoDimensionalGrid] = None,
-    oil_api_gravity_table: typing.Optional[TwoDimensionalGrid] = None,
-    oil_density_table: typing.Optional[TwoDimensionalGrid] = None,
-    oil_formation_volume_factor_table: typing.Optional[TwoDimensionalGrid] = None,
+    gas: typing.Optional[typing.Union[str, typing.Any]] = None,
+    # Pre-computed tables (all optional, 2D shape (n_p, n_t))
+    viscosity_table: typing.Optional[TwoDimensionalGrid] = None,
+    density_table: typing.Optional[TwoDimensionalGrid] = None,
+    formation_volume_factor_table: typing.Optional[TwoDimensionalGrid] = None,
+    compressibility_table: typing.Optional[TwoDimensionalGrid] = None,
+    specific_gravity_table: typing.Optional[TwoDimensionalGrid] = None,
+    molecular_weight_table: typing.Optional[TwoDimensionalGrid] = None,
     solution_gas_to_oil_ratio_table: typing.Optional[TwoDimensionalGrid] = None,
-    # Pre-computed 2D gas tables (n_pressures, n_temperatures)
-    gas_viscosity_table: typing.Optional[TwoDimensionalGrid] = None,
-    gas_compressibility_table: typing.Optional[TwoDimensionalGrid] = None,
-    gas_gravity_table: typing.Optional[TwoDimensionalGrid] = None,
-    gas_molecular_weight_table: typing.Optional[TwoDimensionalGrid] = None,
-    gas_density_table: typing.Optional[TwoDimensionalGrid] = None,
-    gas_formation_volume_factor_table: typing.Optional[TwoDimensionalGrid] = None,
-    gas_compressibility_factor_table: typing.Optional[TwoDimensionalGrid] = None,
-    # Pre-computed 3D water tables (n_pressures, n_temperatures, n_salinities)
-    water_bubble_point_pressure_table: typing.Optional[ThreeDimensionalGrid] = None,
-    water_viscosity_table: typing.Optional[ThreeDimensionalGrid] = None,
-    water_compressibility_table: typing.Optional[ThreeDimensionalGrid] = None,
-    water_density_table: typing.Optional[ThreeDimensionalGrid] = None,
-    water_formation_volume_factor_table: typing.Optional[ThreeDimensionalGrid] = None,
-    gas_solubility_in_water_table: typing.Optional[ThreeDimensionalGrid] = None,
-) -> PVTTableData:
+    **kwargs: typing.Any,
+) -> PVTData:
     """
-    Build a best effort comprehensive PVT table data using provided table/data in
-    combination with empirical correlations.
+    Build a `PVTData` for the oil phase.
 
-    Uses provided tables when available and derives other tables not explicitly provided using
-    known PVT correlations.
+    Computes missing tables from empirical correlations (Standing bubble point,
+    iterative oil compressibility andoil FVF bootstrap, Beggs & Robinson viscosity, etc.) and packages
+    everything into a `PVTData(phase=OIL)`.
 
-    This factory function generates complete 2D (P-T) and 3D (P-T-Salinity) lookup tables
-    for fluid properties. It uses the same correlations as `reservoir_model()` but pre-computes
-    them on a grid for fast interpolation during simulation.
-
-    **IMPORTANT: Table Dimensions**
-    - Oil properties: 2D tables with shape (n_pressures, n_temperatures)
-    - Gas properties: 2D tables with shape (n_pressures, n_temperatures)
-    - Water properties: 3D tables with shape (n_pressures, n_temperatures, n_salinities)
-    - Bubble point pressure (used where needed): 1D shape (n_temperatures) OR 2D shape (n_solution_gor, n_temperatures)
-
-    **Water Properties are 3D**
-    Water properties depend on salinity, so all water tables are 3D (P, T, S).
-    If `salinities` is not provided, a default single salinity value will be used,
-    resulting in a 3D table with shape (n_p, n_t, 1).
-
-    :param pressures: 1D array of pressures (psi), e.g. np.linspace(500, 5000, 50)
-    :param temperatures: 1D array of temperatures (°F), e.g. np.linspace(100, 250, 30)
-
-    :param oil_specific_gravity: Oil specific gravity (dimensionless), e.g. 0.85
-    :param gas_gravity: Gas specific gravity (dimensionless), e.g. 0.65
-    :param water_salinity: Single salinity value (ppm NaCl), e.g. 35000.
-        Used if `salinities` array is not provided.
-    :param estimated_solution_gor: Estimated solution gas-to-oil ratio (SCF/STB) for
-        1D bubble point calculation when `solution_gas_to_oil_ratios` is not provided.
-        If None, defaults to solving for it iteratively.
-        This only affects the bubble point curve, not the actual Rs(P,T) table.
-    :param salinities: 1D array of salinities (ppm) for 3D water property tables.
-        If None, uses [water_salinity] as single-value array.
-    :param bubble_point_pressures: Optional Pb - 1D (n_t) or 2D (n_rs, n_t)
-    :param solution_gas_to_oil_ratios: 1D array of Rs values (SCF/STB) for 2D bubble point table
-    :param reservoir_gas: Gas type (e.g. "CO2", "Methane"), defaults to `c.RESERVOIR_GAS_NAME`
-
-    :param build_oil_properties: If True, compute oil property tables (2D)
-    :param build_water_properties: If True, compute water property tables (3D)
-    :param build_gas_properties: If True, compute gas property tables (2D)
-
-    :param oil_viscosity_table: Optional pre-computed oil viscosity (n_p, n_t)
-    :param oil_compressibility_table: Optional pre-computed oil compressibility (n_p, n_t)
-    :param oil_specific_gravity_table: Optional pre-computed oil SG (n_p, n_t)
-    :param oil_api_gravity_table: Optional pre-computed API gravity (n_p, n_t)
-    :param oil_density_table: Optional pre-computed oil density (n_p, n_t)
-    :param oil_formation_volume_factor_table: Optional pre-computed Bo (n_p, n_t)
-    :param solution_gas_to_oil_ratio_table: Optional pre-computed Rs (n_p, n_t)
-
-    :param gas_viscosity_table: Optional pre-computed gas viscosity (n_p, n_t)
-    :param gas_compressibility_table: Optional pre-computed gas compressibility (n_p, n_t)
-    :param gas_gravity_table: Optional pre-computed gas gravity (n_p, n_t)
-    :param gas_molecular_weight_table: Optional pre-computed MW (n_p, n_t)
-    :param gas_density_table: Optional pre-computed gas density (n_p, n_t)
-    :param gas_formation_volume_factor_table: Optional pre-computed Bg (n_p, n_t)
-    :param gas_compressibility_factor_table: Optional pre-computed Z-factor (n_p, n_t)
-
-    :param water_viscosity_table: Optional pre-computed water viscosity (n_p, n_t, n_s)
-    :param water_compressibility_table: Optional pre-computed water compressibility (n_p, n_t, n_s)
-    :param water_density_table: Optional pre-computed water density (n_p, n_t, n_s)
-    :param water_formation_volume_factor_table: Optional pre-computed Bw (n_p, n_t, n_s)
-    :param water_bubble_point_pressure_table: Optional pre-computed water Pb (n_p, n_t, n_s)
-    :param gas_solubility_in_water_table: Optional pre-computed Rsw (n_p, n_t, n_s)
-
-    :return: `PVTTableData` instance with all computed/provided properties
-
-    Example:
-    ```python
-    # Build comprehensive table data for black oil system
-    pressures = np.linspace(500, 5000, 50)
-    temperatures = np.linspace(100, 250, 30)
-    salinities = np.array([0, 35000, 70000, 100000])  # Multiple salinities
-
-    table_data = build_pvt_table_data(
-        pressures=pressures,
-        temperatures=temperatures,
-        salinities=salinities,  # Will create 3D water tables
-        oil_specific_gravity=0.85,
-        gas_gravity=0.65,
-        reservoir_gas="Methane",
-    )
-
-    # Create table with interpolators for fast lookup
-    tables = PVTTables(
-        data=table_data,
-        interpolation_method="cubic",
-        validate=True,
-        warn_on_extrapolation=True,
-    )
-
-    # Query properties during simulation
-    mu_o = tables.oil_viscosity(pressure=2500, temperature=180)
-    mu_w = tables.water_viscosity(pressure=2500, temperature=180, salinity=35000)
-    ```
+    :param pressures: 1D array of pressures (psi), strictly increasing.
+    :param temperatures: 1D array of temperatures (°F), strictly increasing.
+    :param oil_specific_gravity: Oil specific gravity (dimensionless, water=1).
+    :param gas_gravity: Gas specific gravity (air=1). Derived from `gas` if not provided.
+    :param estimated_solution_gor: Estimated solution gas-oil ration (SCF/STB) for 1D bubble point pressure correlation.
+        If None, estimated from API gravity.
+    :param bubble_point_pressures: Pre-computed bubble point pressures. 1D Pb(T) or 2D Pb(Rs,T).
+    :param solution_gas_to_oil_ratios: Solution gas-to-oil ratio axis for 2D Pb table.
+    :param gas: Gas identity. Either a string name (e.g. `"Methane"`)
+        or a `Fluid` instance. If a `Fluid` with a `pvt_table`
+        is supplied, gas properties are read directly from that table instead of
+        being recomputed from correlations.
+    :param viscosity_table: Pre-computed oil viscosity (n_p, n_t) in cP.
+    :param density_table: Pre-computed oil density (n_p, n_t) in lbm/ft³.
+    :param formation_volume_factor_table: Pre-computed oil formation volume factor (n_p, n_t) in bbl/STB.
+    :param compressibility_table: Pre-computed oil compressibility (n_p, n_t) in psi⁻¹.
+    :param specific_gravity_table: Pre-computed oil specific gravity (n_p, n_t).
+    :param molecular_weight_table: Pre-computed oil molecular weight (n_p, n_t).
+    :param solution_gas_to_oil_ratio_table: Pre-computed solution gas-oil ratio, `Rs(P,T)`, (n_p, n_t) in SCF/STB.
+    :return: `PVTData` with `phase=OIL`.
     """
-    if pressures.ndim != 1:
-        raise ValidationError("`pressures` must be 1-dimensional")
-    if temperatures.ndim != 1:
-        raise ValidationError("`temperatures` must be 1-dimensional")
-    if not np.all(np.diff(pressures) > 0):
-        raise ValidationError("`pressures` must be strictly increasing")
-    if not np.all(np.diff(temperatures) > 0):
-        raise ValidationError("`temperatures` must be strictly increasing")
+    if pressures.ndim != 1 or not np.all(np.diff(pressures) > 0):
+        raise ValidationError("`pressures` must be a strictly increasing 1D array.")
+    if temperatures.ndim != 1 or not np.all(np.diff(temperatures) > 0):
+        raise ValidationError("`temperatures` must be a strictly increasing 1D array.")
 
-    # Validate solution_gas_to_oil_ratios if provided
-    if solution_gas_to_oil_ratios is not None:
-        if solution_gas_to_oil_ratios.ndim != 1:
-            raise ValidationError("`solution_gas_to_oil_ratios` must be 1-dimensional")
-        if not np.all(np.diff(solution_gas_to_oil_ratios) > 0):
-            raise ValidationError(
-                "`solution_gas_to_oil_ratios` must be strictly increasing"
-            )
+    _, gas_gravity, gas_pvt_table = _resolve_gas(gas, gas_gravity)
+    assert gas_gravity is not None
 
+    dtype = get_dtype()
     n_p = len(pressures)
     n_t = len(temperatures)
 
-    # Set defaults
-    reservoir_gas = reservoir_gas or c.RESERVOIR_GAS_NAME
-    reservoir_gas = typing.cast(str, reservoir_gas)
-    water_salinity_value = (
-        water_salinity if water_salinity is not None else c.DEFAULT_WATER_SALINITY_PPM
+    pressure_grid, temperature_grid = np.meshgrid(
+        pressures, temperatures, indexing="ij"
     )
+
+    # Gas tables needed for oil Oil Compressibility anf FVF calculation
+    gas_fvf_grid: typing.Optional[np.typing.NDArray] = None
+    if gas_pvt_table is not None:
+        gas_tables = _tables_from_gas_pvt_table(
+            gas_pvt_table, pressure_grid, temperature_grid
+        )
+        gas_fvf_grid = gas_tables.get("formation_volume_factor_table")
+
+    if gas_fvf_grid is None:
+        z_factor_grid = build_gas_compressibility_factor_grid(
+            pressure_grid=pressure_grid,
+            temperature_grid=temperature_grid,
+            gas_gravity_grid=np.full((n_p, n_t), gas_gravity, dtype=dtype),
+        )
+        gas_fvf_grid = build_gas_formation_volume_factor_grid(
+            pressure_grid=pressure_grid,
+            temperature_grid=temperature_grid,
+            gas_compressibility_factor_grid=z_factor_grid,
+        )
+
+    if specific_gravity_table is None:
+        specific_gravity_table = np.full((n_p, n_t), oil_specific_gravity, dtype=dtype)
+
+    oil_api_gravity_table = build_oil_api_gravity_grid(
+        oil_specific_gravity_grid=specific_gravity_table
+    )
+
+    if molecular_weight_table is None:
+        # Approximate from API: molecular weight ≈ 6084 / (API - 5.9)  (Ahmed 2006)
+        oil_api = compute_oil_api_gravity(oil_specific_gravity)
+        molecular_weight = float(np.clip(6084.0 / max(oil_api - 5.9, 1.0), 10.0, 600.0))
+        molecular_weight_table = np.full((n_p, n_t), molecular_weight, dtype=dtype)
+
+    if bubble_point_pressures is None:
+        gas_gravity_grid_1d = np.full(n_t, gas_gravity, dtype=dtype)
+        oil_api_gravity_grid = build_oil_api_gravity_grid(
+            np.full(n_t, oil_specific_gravity, dtype=dtype)
+        )
+        if solution_gas_to_oil_ratios is not None:
+            # 2D Pb(Rs, T)
+            n_rs = len(solution_gas_to_oil_ratios)
+            bubble_point_pressures = np.zeros((n_rs, n_t), dtype=dtype)
+            for i, solution_gor in enumerate(solution_gas_to_oil_ratios):
+                bubble_point_pressures[i, :] = build_oil_bubble_point_pressure_grid(
+                    gas_gravity_grid=gas_gravity_grid_1d,
+                    oil_api_gravity_grid=oil_api_gravity_grid,
+                    temperature_grid=temperatures,
+                    solution_gas_to_oil_ratio_grid=np.full(
+                        n_t, solution_gor, dtype=dtype
+                    ),
+                )
+        else:
+            # 1D Pb(T)
+            oil_api = compute_oil_api_gravity(oil_specific_gravity)
+            if estimated_solution_gor is not None:
+                estimated_gor = estimated_solution_gor
+            else:
+                estimated_gor = float(
+                    np.clip(10 ** (0.0125 * oil_api) * 50.0, 50.0, 2000.0)
+                )
+                warnings.warn(
+                    f"No `estimated_solution_gor` provided. Estimating Rs = {estimated_gor:.1f} "
+                    f"SCF/STB from API = {oil_api:.1f}°. Pass `estimated_solution_gor` "
+                    "for best results.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+            bubble_point_pressures = build_oil_bubble_point_pressure_grid(
+                gas_gravity_grid=gas_gravity_grid_1d,
+                oil_api_gravity_grid=oil_api_gravity_grid,
+                temperature_grid=temperatures,
+                solution_gas_to_oil_ratio_grid=np.full(n_t, estimated_gor, dtype=dtype),
+            )
+
+    # 2D Pb grid for property table construction
+    if bubble_point_pressures.ndim == 1:
+        bubble_point_pressure_grid = np.broadcast_to(
+            bubble_point_pressures[np.newaxis, :], (n_p, n_t)
+        ).copy()
+    else:
+        # Pb(Rs, T) - need Rs(P,T) to map each (P,T) to a Pb
+        if solution_gas_to_oil_ratio_table is None:
+            solution_gas_to_oil_ratio_table = build_estimated_solution_gas_to_oil_ratio_grid(
+                pressure_grid=pressure_grid,  # type: ignore[arg-type]
+                temperature_grid=temperature_grid,
+                oil_api_gravity_grid=oil_api_gravity_table,
+                gas_gravity_grid=np.full((n_p, n_t), gas_gravity, dtype=dtype),
+                max_iterations=20,
+                tolerance=1e-4,
+            )
+
+        pb_interpolator = RectBivariateSpline(
+            x=solution_gas_to_oil_ratios,  # type: ignore[arg-type]
+            y=temperatures,
+            z=bubble_point_pressures,
+            kx=1,
+            ky=1,
+        )
+        temperature_flat = np.broadcast_to(temperatures, (n_p, n_t))
+        assert solution_gas_to_oil_ratio_table is not None
+        bubble_point_pressure_grid = (
+            pb_interpolator.ev(solution_gas_to_oil_ratio_table.ravel(), temperature_flat.ravel())
+            .reshape(n_p, n_t)
+            .astype(dtype)
+        )
+
+    gas_gravity_grid = np.full((n_p, n_t), gas_gravity, dtype=dtype)
+    if solution_gas_to_oil_ratio_table is None:
+        solution_gas_to_oil_ratio_table = build_solution_gas_to_oil_ratio_grid(
+            pressure_grid=pressure_grid,  # type: ignore[arg-type]
+            temperature_grid=temperature_grid,
+            bubble_point_pressure_grid=bubble_point_pressure_grid,
+            gas_gravity_grid=gas_gravity_grid,
+            oil_api_gravity_grid=oil_api_gravity_table,
+        )
+
+    # Solve for oil FVF and compressibility iteratively
+    needs_fvf = formation_volume_factor_table is None
+    needs_compressibility = compressibility_table is None
+
+    gor_at_bubble_point_pressure_grid = build_solution_gas_to_oil_ratio_grid(
+        pressure_grid=bubble_point_pressure_grid,
+        temperature_grid=temperature_grid,
+        bubble_point_pressure_grid=bubble_point_pressure_grid,
+        gas_gravity_grid=gas_gravity_grid,
+        oil_api_gravity_grid=oil_api_gravity_table,
+    )
+
+    if needs_fvf and needs_compressibility:
+        estimated_compressibility = np.full((n_p, n_t), 1e-5, dtype=dtype)
+        max_delta = 0.0
+        for iteration in range(10):
+            formation_volume_factor_table = build_oil_formation_volume_factor_grid(
+                pressure_grid=pressure_grid,  # type: ignore[arg-type]
+                temperature_grid=temperature_grid,
+                bubble_point_pressure_grid=bubble_point_pressure_grid,
+                oil_specific_gravity_grid=specific_gravity_table,
+                gas_gravity_grid=gas_gravity_grid,
+                solution_gas_to_oil_ratio_grid=solution_gas_to_oil_ratio_table,  # type: ignore[arg-type]
+                oil_compressibility_grid=estimated_compressibility,
+            )
+            new_compressibility = build_oil_compressibility_grid(
+                pressure_grid=pressure_grid,
+                temperature_grid=temperature_grid,
+                bubble_point_pressure_grid=bubble_point_pressure_grid,
+                oil_api_gravity_grid=oil_api_gravity_table,
+                gas_gravity_grid=gas_gravity_grid,
+                gor_at_bubble_point_pressure_grid=gor_at_bubble_point_pressure_grid,
+                gas_formation_volume_factor_grid=gas_fvf_grid,
+                oil_formation_volume_factor_grid=formation_volume_factor_table,  # type: ignore[arg-type]
+            )
+            max_delta = float(
+                np.max(np.abs(new_compressibility - estimated_compressibility))
+            )
+            logger.debug(
+                f"Bo/Co bootstrap iteration {iteration + 1}/10: "
+                f"max ΔCo = {max_delta:.3e} psi⁻¹"
+            )
+            estimated_compressibility = new_compressibility
+            if max_delta < 1e-7:
+                logger.debug(
+                    f"Bo/Co bootstrap converged in {iteration + 1} iteration(s)."
+                )
+                break
+        else:
+            warnings.warn(
+                f"Bo/Co bootstrap did not converge within 10 iterations "
+                f"(final max ΔCo = {max_delta:.3e} psi⁻¹).",
+                UserWarning,
+                stacklevel=2,
+            )
+        compressibility_table = estimated_compressibility  # type: ignore[assignment]
+
+    elif needs_fvf:
+        assert compressibility_table is not None
+        formation_volume_factor_table = build_oil_formation_volume_factor_grid(
+            pressure_grid=pressure_grid,  # type: ignore[arg-type]
+            temperature_grid=temperature_grid,
+            bubble_point_pressure_grid=bubble_point_pressure_grid,
+            oil_specific_gravity_grid=specific_gravity_table,
+            gas_gravity_grid=gas_gravity_grid,
+            solution_gas_to_oil_ratio_grid=solution_gas_to_oil_ratio_table,  # type: ignore[arg-type]
+            oil_compressibility_grid=compressibility_table,
+        )
+
+    elif needs_compressibility:
+        assert formation_volume_factor_table is not None
+        compressibility_table = build_oil_compressibility_grid(
+            pressure_grid=pressure_grid,  # type: ignore[arg-type]
+            temperature_grid=temperature_grid,
+            bubble_point_pressure_grid=bubble_point_pressure_grid,
+            oil_api_gravity_grid=oil_api_gravity_table,
+            gas_gravity_grid=gas_gravity_grid,
+            gor_at_bubble_point_pressure_grid=gor_at_bubble_point_pressure_grid,
+            gas_formation_volume_factor_grid=gas_fvf_grid,
+            oil_formation_volume_factor_grid=formation_volume_factor_table,
+        )
+
+    if density_table is None:
+        density_table = build_live_oil_density_grid(
+            oil_api_gravity_grid=oil_api_gravity_table,
+            gas_gravity_grid=gas_gravity_grid,
+            solution_gas_to_oil_ratio_grid=solution_gas_to_oil_ratio_table,  # type: ignore[arg-type]
+            formation_volume_factor_grid=formation_volume_factor_table,  # type: ignore[arg-type]
+        )
+
+    if viscosity_table is None:
+        viscosity_table = build_oil_viscosity_grid(  # type: ignore[assignment]
+            pressure_grid=pressure_grid,  # type: ignore[arg-type]
+            temperature_grid=temperature_grid,
+            bubble_point_pressure_grid=bubble_point_pressure_grid,
+            oil_specific_gravity_grid=specific_gravity_table,
+            solution_gas_to_oil_ratio_grid=solution_gas_to_oil_ratio_table,  # type: ignore[arg-type]
+            gor_at_bubble_point_pressure_grid=gor_at_bubble_point_pressure_grid,
+        )
+
+    return PVTData(
+        phase=FluidPhase.OIL,
+        pressures=pressures,
+        temperatures=temperatures,
+        bubble_point_pressures=bubble_point_pressures,
+        solution_gas_to_oil_ratios=solution_gas_to_oil_ratios,
+        viscosity_table=viscosity_table,
+        density_table=density_table,
+        formation_volume_factor_table=formation_volume_factor_table,
+        compressibility_table=compressibility_table,
+        specific_gravity_table=specific_gravity_table,
+        molecular_weight_table=molecular_weight_table,
+        solution_gor_table=solution_gas_to_oil_ratio_table,
+    )
+
+
+def build_gas_pvt_data(
+    pressures: OneDimensionalGrid,
+    temperatures: OneDimensionalGrid,
+    gas_gravity: typing.Optional[float] = None,
+    gas: typing.Optional[typing.Union[str, typing.Any]] = None,
+    water_salinities: typing.Optional[OneDimensionalGrid] = None,
+    # Pre-computed tables (all optional, 2D shape (n_p, n_t))
+    viscosity_table: typing.Optional[TwoDimensionalGrid] = None,
+    density_table: typing.Optional[TwoDimensionalGrid] = None,
+    formation_volume_factor_table: typing.Optional[TwoDimensionalGrid] = None,
+    compressibility_table: typing.Optional[TwoDimensionalGrid] = None,
+    compressibility_factor_table: typing.Optional[TwoDimensionalGrid] = None,
+    specific_gravity_table: typing.Optional[TwoDimensionalGrid] = None,
+    molecular_weight_table: typing.Optional[TwoDimensionalGrid] = None,
+    solubility_in_water_table: typing.Optional[ThreeDimensionalGrid] = None,
+    **kwargs: typing.Any,
+) -> PVTData:
+    """
+    Build a `PVTData` for the gas phase.
+
+    Computes missing tables from correlations (DAK Z-factor, Lee-Kesler viscosity,
+    etc.) or reads them from a `Fluid`'s `pvt_table` if supplied.
+
+    :param pressures: 1D array of pressures (psi), strictly increasing.
+    :param temperatures: 1D array of temperatures (°F), strictly increasing.
+    :param gas_gravity: Gas specific gravity (air=1). Derived from `gas` if None.
+    :param gas: Gas identity. String name or `Fluid`. If a `Fluid` with a `pvt_table` is supplied,
+        tables are populated from it directly.
+    :param water_salinities: 1D salinity array (ppm) for Rsw(P,T,S) table.
+        If None, `solubility_in_water_table` is not built.
+    :param viscosity_table: Pre-computed gas viscosity (n_p, n_t) in cP.
+    :param density_table: Pre-computed gas density (n_p, n_t) in lbm/ft³.
+    :param formation_volume_factor_table: Pre-computed Bg (n_p, n_t) in ft³/SCF.
+    :param compressibility_table: Pre-computed gas compressibility (n_p, n_t) in psi⁻¹.
+    :param compressibility_factor_table: Pre-computed gas compressibility factor (n_p, n_t).
+    :param specific_gravity_table: Pre-computed gas specific gravity (n_p, n_t).
+    :param molecular_weight_table: Pre-computed gas molecular weight (n_p, n_t) in lbm/lb-mol.
+    :param solubility_in_water_table: Pre-computed gas solubility in water (n_p, n_t, n_s) in SCF/STB.
+    :return: `PVTData` with `phase=GAS`.
+    """
+    if pressures.ndim != 1 or not np.all(np.diff(pressures) > 0):
+        raise ValidationError("`pressures` must be a strictly increasing 1D array.")
+    if temperatures.ndim != 1 or not np.all(np.diff(temperatures) > 0):
+        raise ValidationError("`temperatures` must be a strictly increasing 1D array.")
+
+    gas_name, gas_gravity, gas_pvt_table = _resolve_gas(gas, gas_gravity)
+    assert gas_gravity is not None
+
     dtype = get_dtype()
+    n_p = len(pressures)
+    n_t = len(temperatures)
+
+    pressure_grid, temperature_grid = np.meshgrid(
+        pressures, temperatures, indexing="ij"
+    )
+
+    # If a Fluid pvt_table is available, evaluate all tables from it
+    if gas_pvt_table is not None:
+        gas_tables = _tables_from_gas_pvt_table(
+            gas_pvt_table, pressure_grid, temperature_grid
+        )
+        if viscosity_table is None:
+            viscosity_table = gas_tables.get("viscosity_table")  # type: ignore[arg-type]
+        if density_table is None:
+            density_table = gas_tables.get("density_table")  # type: ignore[arg-type]
+        if formation_volume_factor_table is None:
+            formation_volume_factor_table = gas_tables.get(  # type: ignore[arg-type]
+                "formation_volume_factor_table"
+            )
+        if compressibility_table is None:
+            compressibility_table = gas_tables.get("compressibility_table")  # type: ignore[arg-type]
+        if compressibility_factor_table is None:
+            compressibility_factor_table = gas_tables.get(  # type: ignore[arg-type]
+                "compressibility_factor_table"
+            )
+        if specific_gravity_table is None:
+            specific_gravity_table = gas_tables.get("specific_gravity_table")  # type: ignore[arg-type]
+        if molecular_weight_table is None:
+            molecular_weight_table = gas_tables.get("molecular_weight_table")  # type: ignore[arg-type]
+
+    gas_gravity_grid = np.full((n_p, n_t), gas_gravity, dtype=dtype)
+    if specific_gravity_table is None:
+        specific_gravity_table = gas_gravity_grid.copy()
+
+    if molecular_weight_table is None:
+        molecular_weight_table = build_gas_molecular_weight_grid(
+            gas_gravity_grid=specific_gravity_table
+        )
+
+    if compressibility_factor_table is None:
+        compressibility_factor_table = build_gas_compressibility_factor_grid(
+            pressure_grid=pressure_grid,  # type: ignore[arg-type]
+            temperature_grid=temperature_grid,
+            gas_gravity_grid=gas_gravity_grid,
+        )
+
+    if formation_volume_factor_table is None:
+        formation_volume_factor_table = build_gas_formation_volume_factor_grid(  # type: ignore[asignment]
+            pressure_grid=pressure_grid,  # type: ignore[arg-type]
+            temperature_grid=temperature_grid,
+            gas_compressibility_factor_grid=compressibility_factor_table,  # type: ignore[arg-type]
+        )
+
+    if compressibility_table is None:
+        compressibility_table = build_gas_compressibility_grid(
+            pressure_grid=pressure_grid,  # type: ignore[arg-type]
+            temperature_grid=temperature_grid,
+            gas_gravity_grid=gas_gravity_grid,
+            gas_compressibility_factor_grid=compressibility_factor_table,
+        )
+
+    if density_table is None:
+        density_table = build_gas_density_grid(  # type: ignore[asignment]
+            pressure_grid=pressure_grid,  # type: ignore[arg-type]
+            temperature_grid=temperature_grid,
+            gas_gravity_grid=gas_gravity_grid,
+            gas_compressibility_factor_grid=compressibility_factor_table,  # type: ignore[arg-type]
+        )
+
+    if viscosity_table is None:
+        viscosity_table = build_gas_viscosity_grid(  # type: ignore[aasignment]
+            temperature_grid=temperature_grid,
+            gas_density_grid=density_table,  # type: ignore[arg-type]
+            gas_molecular_weight_grid=molecular_weight_table,
+        )
+
+    # Solubility in water (3D)
+    if solubility_in_water_table is None and water_salinities is not None:
+        pressures_3d, temperatures_3d, salinities_3d = np.meshgrid(
+            pressures, temperatures, water_salinities, indexing="ij"
+        )
+        solubility_in_water_table = build_gas_solubility_in_water_grid(  # type: ignore[assignment]
+            pressure_grid=pressures_3d,
+            temperature_grid=temperatures_3d,
+            salinity_grid=salinities_3d,
+            gas=gas_name,
+        )
+
+    return PVTData(
+        phase=FluidPhase.GAS,
+        pressures=pressures,
+        temperatures=temperatures,
+        salinities=water_salinities,
+        viscosity_table=viscosity_table,
+        density_table=density_table,
+        formation_volume_factor_table=formation_volume_factor_table,
+        compressibility_table=compressibility_table,
+        compressibility_factor_table=compressibility_factor_table,
+        specific_gravity_table=specific_gravity_table,
+        molecular_weight_table=molecular_weight_table,
+        solubility_in_water_table=solubility_in_water_table,
+    )
+
+
+def build_water_pvt_data(
+    pressures: OneDimensionalGrid,
+    temperatures: OneDimensionalGrid,
+    salinities: typing.Optional[OneDimensionalGrid] = None,
+    water_salinity: typing.Optional[float] = None,
+    gas_gravity: typing.Optional[float] = None,
+    gas: typing.Optional[typing.Union[str, typing.Any]] = None,
+    # Pre-computed tables (all optional, 3D shape (n_p, n_t, n_s))
+    viscosity_table: typing.Optional[ThreeDimensionalGrid] = None,
+    density_table: typing.Optional[ThreeDimensionalGrid] = None,
+    formation_volume_factor_table: typing.Optional[ThreeDimensionalGrid] = None,
+    compressibility_table: typing.Optional[ThreeDimensionalGrid] = None,
+    specific_gravity_table: typing.Optional[ThreeDimensionalGrid] = None,
+    molecular_weight_table: typing.Optional[ThreeDimensionalGrid] = None,
+    bubble_point_pressure_table: typing.Optional[ThreeDimensionalGrid] = None,
+    gas_free_fvf_table: typing.Optional[TwoDimensionalGrid] = None,
+    **kwargs: typing.Any,
+) -> PVTData:
+    """
+    Build a `PVTData` for the water phase.
+
+    All property tables are 3D with shape `(n_pressures, n_temperatures, n_salinities)`.
+
+    :param pressures: 1D array of pressures (psi), strictly increasing.
+    :param temperatures: 1D array of temperatures (°F), strictly increasing.
+    :param salinities: 1D array of salinities (ppm NaCl), strictly increasing.
+        If None, falls back to `[water_salinity]` or the library default.
+    :param water_salinity: Single salinity scalar (ppm). Used only when
+        `salinities` is None.
+    :param gas_gravity: Gas specific gravity. Used for water compressibility liberation correction.
+    :param gas: Gas identity. String name or `Fluid`. If a `Fluid` with
+        a `pvt_table` is supplied, Bg is read from that table for water compressibility calculations.
+    :param viscosity_table: Pre-computed water viscosity (n_p, n_t, n_s) in cP.
+    :param density_table: Pre-computed water density (n_p, n_t, n_s) in lbm/ft³.
+    :param formation_volume_factor_table: Pre-computed water formation volume factor (n_p, n_t, n_s) in bbl/STB.
+    :param compressibility_table: Pre-computed water compressibility (n_p, n_t, n_s) in psi⁻¹.
+    :param specific_gravity_table: Pre-computed water specific gravity (n_p, n_t, n_s).
+    :param molecular_weight_table: Pre-computed water molecular weight (n_p, n_t, n_s).
+    :param bubble_point_pressure_table: Pre-computed water bubble point pressure (n_p, n_t, n_s) in psi.
+    :param gas_free_fvf_table: Pre-computed gas-free water formation volume factor (n_p, n_t) in bbl/STB.
+    :return: `PVTData` with `phase=WATER`.
+    """
+    if pressures.ndim != 1 or not np.all(np.diff(pressures) > 0):
+        raise ValidationError("`pressures` must be a strictly increasing 1D array.")
+    if temperatures.ndim != 1 or not np.all(np.diff(temperatures) > 0):
+        raise ValidationError("`temperatures` must be a strictly increasing 1D array.")
+
+    dtype = get_dtype()
+    n_p = len(pressures)
+    n_t = len(temperatures)
 
     if salinities is None:
-        # Use single salinity value
-        salinities = np.array([water_salinity_value], dtype=dtype)  # type: ignore[assignment]
-    else:
-        if salinities.ndim != 1:
-            raise ValidationError("`salinities` must be 1-dimensional")
-        if not np.all(np.diff(salinities) > 0):
-            raise ValidationError("`salinities` must be strictly increasing")
+        salinity = (
+            water_salinity
+            if water_salinity is not None
+            else c.DEFAULT_WATER_SALINITY_PPM
+        )
+        salinities = np.array([salinity], dtype=dtype)  # type: ignore[aassignment]
+
+    _, gas_gravity, gas_pvt_table = _resolve_gas(gas, gas_gravity)
+    assert gas_gravity is not None
 
     n_s = len(salinities)  # type: ignore[arg-type]
 
-    # Validate pre-computed 2D table shapes (n_p, n_t)
-    expected_2d_shape = (n_p, n_t)
-    _validate_table_shape(
-        table=oil_viscosity_table,
-        expected_shape=expected_2d_shape,
-        name="oil_viscosity_table",
-    )
-    _validate_table_shape(
-        table=oil_compressibility_table,
-        expected_shape=expected_2d_shape,
-        name="oil_compressibility_table",
-    )
-    _validate_table_shape(
-        table=oil_specific_gravity_table,
-        expected_shape=expected_2d_shape,
-        name="oil_specific_gravity_table",
-    )
-    _validate_table_shape(
-        table=oil_api_gravity_table,
-        expected_shape=expected_2d_shape,
-        name="oil_api_gravity_table",
-    )
-    _validate_table_shape(
-        table=oil_density_table,
-        expected_shape=expected_2d_shape,
-        name="oil_density_table",
-    )
-    _validate_table_shape(
-        table=oil_formation_volume_factor_table,
-        expected_shape=expected_2d_shape,
-        name="oil_formation_volume_factor_table",
-    )
-    _validate_table_shape(
-        table=solution_gas_to_oil_ratio_table,
-        expected_shape=expected_2d_shape,
-        name="solution_gas_to_oil_ratio_table",
-    )
-    _validate_table_shape(
-        table=gas_viscosity_table,
-        expected_shape=expected_2d_shape,
-        name="gas_viscosity_table",
-    )
-    _validate_table_shape(
-        table=gas_compressibility_table,
-        expected_shape=expected_2d_shape,
-        name="gas_compressibility_table",
-    )
-    _validate_table_shape(
-        table=gas_gravity_table,
-        expected_shape=expected_2d_shape,
-        name="gas_gravity_table",
-    )
-    _validate_table_shape(
-        table=gas_molecular_weight_table,
-        expected_shape=expected_2d_shape,
-        name="gas_molecular_weight_table",
-    )
-    _validate_table_shape(
-        table=gas_density_table,
-        expected_shape=expected_2d_shape,
-        name="gas_density_table",
-    )
-    _validate_table_shape(
-        table=gas_formation_volume_factor_table,
-        expected_shape=expected_2d_shape,
-        name="gas_formation_volume_factor_table",
-    )
-    _validate_table_shape(
-        table=gas_compressibility_factor_table,
-        expected_shape=expected_2d_shape,
-        name="gas_compressibility_factor_table",
-    )
-
-    # Validate pre-computed 3D table shapes (n_p, n_t, n_s)
-    expected_3d_shape = (n_p, n_t, n_s)
-    _validate_table_shape(
-        table=water_bubble_point_pressure_table,
-        expected_shape=expected_3d_shape,
-        name="water_bubble_point_pressure_table",
-    )
-    _validate_table_shape(
-        table=water_viscosity_table,
-        expected_shape=expected_3d_shape,
-        name="water_viscosity_table",
-    )
-    _validate_table_shape(
-        table=water_compressibility_table,
-        expected_shape=expected_3d_shape,
-        name="water_compressibility_table",
-    )
-    _validate_table_shape(
-        table=water_density_table,
-        expected_shape=expected_3d_shape,
-        name="water_density_table",
-    )
-    _validate_table_shape(
-        table=water_formation_volume_factor_table,
-        expected_shape=expected_3d_shape,
-        name="water_formation_volume_factor_table",
-    )
-    _validate_table_shape(
-        table=gas_solubility_in_water_table,
-        expected_shape=expected_3d_shape,
-        name="gas_solubility_in_water_table",
-    )
-
-    # Validate `bubble_point_pressures` shape if provided
-    if bubble_point_pressures is not None:
-        if bubble_point_pressures.ndim == 1:
-            if len(bubble_point_pressures) != n_t:
-                raise ValidationError(
-                    f"`bubble_point_pressures` 1D length {len(bubble_point_pressures)} "
-                    f"does not match n_temperatures={n_t}"
-                )
-        elif bubble_point_pressures.ndim == 2:
-            if solution_gas_to_oil_ratios is None:
-                raise ValidationError(
-                    "2D `bubble_point_pressures` requires `solution_gas_to_oil_ratios` to be provided"
-                )
-            expected_bp_shape = (len(solution_gas_to_oil_ratios), n_t)
-            if bubble_point_pressures.shape != expected_bp_shape:
-                raise ValidationError(
-                    f"`bubble_point_pressures` shape {bubble_point_pressures.shape} "
-                    f"does not match expected {expected_bp_shape}"
-                )
-        else:
-            raise ValidationError("`bubble_point_pressures` must be 1D or 2D")
-
-    logger.info(
-        f"Building PVT tables: {n_p} pressures x {n_t} temperatures x {n_s} salinities",
-    )
-    # CREATE MESHGRIDS
-    # 2D meshgrid for oil and gas properties: (n_p, n_t)
-    pressure_grid_2d, temperature_grid_2d = np.meshgrid(
+    pressure_grid, temperature_grid = np.meshgrid(
         pressures, temperatures, indexing="ij"
     )
-    # 3D meshgrid for water properties: (n_p, n_t, n_s)
     pressure_grid_3d, temperature_grid_3d, salinity_grid_3d = np.meshgrid(
         pressures,
         temperatures,
@@ -1603,483 +2134,226 @@ def build_pvt_table_data(
         indexing="ij",
     )
 
-    if gas_gravity is None:
-        gas_gravity = compute_gas_gravity(gas=reservoir_gas)
-        logger.debug(f"Computed gas gravity = {gas_gravity:.4f} for {reservoir_gas}")
+    # Gas Bg (2D) for water compressibility liberation correction
+    gas_fvf_grid: np.typing.NDArray
+    if gas_pvt_table is not None:
+        gas_tables = _tables_from_gas_pvt_table(
+            gas_pvt_table, pressure_grid, temperature_grid
+        )
+        gas_fvf_grid_2d = gas_tables.get("formation_volume_factor_table")
+        if gas_fvf_grid_2d is not None:
+            gas_fvf_grid = np.broadcast_to(
+                gas_fvf_grid_2d[:, :, np.newaxis], (n_p, n_t, n_s)
+            ).copy()
+        else:
+            gas_fvf_grid = np.ones((n_p, n_t, n_s), dtype=dtype)
+    else:
+        z_factor_grid = build_gas_compressibility_factor_grid(
+            pressure_grid=pressure_grid,
+            temperature_grid=temperature_grid,
+            gas_gravity_grid=np.full((n_p, n_t), gas_gravity, dtype=dtype),
+        )
+        gas_fvf_grid_2d = build_gas_formation_volume_factor_grid(
+            pressure_grid=pressure_grid,
+            temperature_grid=temperature_grid,
+            gas_compressibility_factor_grid=z_factor_grid,
+        )
+        gas_fvf_grid = np.broadcast_to(
+            gas_fvf_grid_2d[:, :, np.newaxis], (n_p, n_t, n_s)
+        ).copy()
 
-    # BUILD GAS PROPERTIES (2D TABLES)
-    if build_gas_properties:
-        logger.debug("Building gas PVT properties...")
-        # Gas gravity (usually constant)
-        if gas_gravity_table is None:
-            gas_gravity_table = np.full((n_p, n_t), gas_gravity, dtype=dtype)
+    # Gas gravity 3D (for density calc)
+    gas_gravity_3d = np.full((n_p, n_t, n_s), gas_gravity, dtype=dtype)
 
-        # Gas molecular weight
-        if gas_molecular_weight_table is None:
-            gas_molecular_weight_table = build_gas_molecular_weight_grid(
-                gas_gravity_grid=gas_gravity_table
-            )
-
-        # Gas Z-factor
-        if gas_compressibility_factor_table is None:
-            gas_compressibility_factor_table = build_gas_compressibility_factor_grid(  # type: ignore[arg-type]
-                pressure_grid=pressure_grid_2d,
-                temperature_grid=temperature_grid_2d,
-                gas_gravity_grid=gas_gravity_table,
-            )
-
-        # Gas formation volume factor
-        if gas_formation_volume_factor_table is None:
-            gas_formation_volume_factor_table = build_gas_formation_volume_factor_grid(  # type: ignore[arg-type]
-                pressure_grid=pressure_grid_2d,  # type: ignore[arg-type]
-                temperature_grid=temperature_grid_2d,
-                gas_compressibility_factor_grid=gas_compressibility_factor_table,  # type: ignore[arg-type]
-            )
-
-        # Gas compressibility
-        if gas_compressibility_table is None:
-            gas_compressibility_table = build_gas_compressibility_grid(  # type: ignore[arg-type]
-                pressure_grid=pressure_grid_2d,
-                temperature_grid=temperature_grid_2d,
-                gas_gravity_grid=gas_gravity_table,
-                gas_compressibility_factor_grid=gas_compressibility_factor_table,
-            )
-
-        # Gas density
-        if gas_density_table is None:
-            gas_density_table = build_gas_density_grid(  # type: ignore[arg-type]
-                pressure_grid=pressure_grid_2d,
-                temperature_grid=temperature_grid_2d,
-                gas_gravity_grid=gas_gravity_table,
-                gas_compressibility_factor_grid=gas_compressibility_factor_table,  # type: ignore[arg-type]
-            )
-
-        # Gas viscosity
-        if gas_viscosity_table is None:
-            gas_viscosity_table = build_gas_viscosity_grid(  # type: ignore[arg-type]
-                temperature_grid=temperature_grid_2d,
-                gas_density_grid=gas_density_table,  # type: ignore[arg-type]
-                gas_molecular_weight_grid=gas_molecular_weight_table,
-            )
-        logger.debug("Gas PVT properties built")
-
-    # BUILD WATER PROPERTIES (3D TABLES)
-    if build_water_properties:
-        logger.debug("Building water PVT properties...")
-        # Water viscosity: μw(P, T, S)
-        if water_viscosity_table is None:
-            water_viscosity_table = build_water_viscosity_grid(  # type: ignore[arg-type]
-                temperature_grid=temperature_grid_3d,
-                salinity_grid=salinity_grid_3d,
-                pressure_grid=pressure_grid_3d,
-            )
-
-        # Gas solubility in water: Rsw(P, T, S)
-        if gas_solubility_in_water_table is None:
-            gas_solubility_in_water_table = build_gas_solubility_in_water_grid(  # type: ignore[arg-type]
-                pressure_grid=pressure_grid_3d,
-                temperature_grid=temperature_grid_3d,
-                salinity_grid=salinity_grid_3d,
-                gas=reservoir_gas,
-            )
-
-        # Water bubble point pressure: Pb,w(P, T, S)
-        if water_bubble_point_pressure_table is None:
-            water_bubble_point_pressure_table = build_water_bubble_point_pressure_grid(  # type: ignore[arg-type]
-                temperature_grid=temperature_grid_3d,
-                gas_solubility_in_water_grid=gas_solubility_in_water_table,  # type: ignore[arg-type]
-                salinity_grid=salinity_grid_3d,
-                gas=reservoir_gas,
-            )
-
-        # Gas-free water FVF (temporary variable for compressibility and density calculations)
-        gas_free_water_fvf_temp = build_gas_free_water_formation_volume_factor_grid(
-            pressure_grid=pressure_grid_3d,
-            temperature_grid=temperature_grid_3d,
+    # Gas-free water FVF (2D)
+    if gas_free_fvf_table is None:
+        gas_free_fvf_table = build_gas_free_water_formation_volume_factor_grid(  # type: ignore[assignment]
+            pressure_grid=pressure_grid,
+            temperature_grid=temperature_grid,
         )
 
-        # Need gas FVF for water compressibility calculation
-        # Broadcast 2D gas FVF to 3D if gas properties were built
-        if build_gas_properties and gas_formation_volume_factor_table is not None:
-            # Broadcast (n_p, n_t) to (n_p, n_t, n_s)
-            gas_fvf_3d = np.broadcast_to(
-                gas_formation_volume_factor_table[:, :, np.newaxis], (n_p, n_t, n_s)
-            ).copy()
-        else:
-            # Use default gas FVF
-            gas_fvf_3d = np.ones((n_p, n_t, n_s))
+    # Solubility & bubble point
+    gas_solubility_in_water_grid = build_gas_solubility_in_water_grid(
+        pressure_grid=pressure_grid_3d,
+        temperature_grid=temperature_grid_3d,
+        salinity_grid=salinity_grid_3d,
+        gas=c.RESERVOIR_GAS,
+    )
 
-        # Need gas gravity for water density calculation
-        if build_gas_properties and gas_gravity_table is not None:
-            # Broadcast (n_p, n_t) to (n_p, n_t, n_s)
-            gas_gravity_3d = np.broadcast_to(
-                gas_gravity_table[:, :, np.newaxis], (n_p, n_t, n_s)
-            ).copy()
-        else:
-            # Use default gas gravity. This will mostlikely not be reached.
-            gas_gravity_3d = np.full((n_p, n_t, n_s), 0.65, dtype=dtype)
+    if bubble_point_pressure_table is None:
+        bubble_point_pressure_table = build_water_bubble_point_pressure_grid(  # type: ignore[assignment]
+            temperature_grid=temperature_grid_3d,
+            gas_solubility_in_water_grid=gas_solubility_in_water_grid,
+            salinity_grid=salinity_grid_3d,
+            gas=c.RESERVOIR_GAS,
+        )
 
-        # Water compressibility: Cw(P, T, S)
-        if water_compressibility_table is None:
-            water_compressibility_table = build_water_compressibility_grid(  # type: ignore[arg-type]
-                pressure_grid=pressure_grid_3d,
-                temperature_grid=temperature_grid_3d,
-                bubble_point_pressure_grid=water_bubble_point_pressure_table,  # type: ignore[arg-type]
-                gas_formation_volume_factor_grid=gas_fvf_3d,
-                gas_solubility_in_water_grid=gas_solubility_in_water_table,  # type: ignore[arg-type]
-                gas_free_water_formation_volume_factor_grid=gas_free_water_fvf_temp,
-                salinity=salinity_grid_3d,
-            )
+    # gas-free water formation volume factor broadcast to 3D for water compressibility/density calcs
+    gas_free_fvf_3d = np.broadcast_to(
+        gas_free_fvf_table[:, :, np.newaxis],  # type: ignore
+        (n_p, n_t, n_s),
+    ).copy()
 
-        # Water density: ρw(P, T, S)
-        if water_density_table is None:
-            water_density_table = build_water_density_grid(  # type: ignore[arg-type]
-                pressure_grid=pressure_grid_3d,
-                temperature_grid=temperature_grid_3d,
-                gas_gravity_grid=gas_gravity_3d,
-                salinity_grid=salinity_grid_3d,
-                gas_solubility_in_water_grid=gas_solubility_in_water_table,  # type: ignore[arg-type]
-                gas_free_water_formation_volume_factor_grid=gas_free_water_fvf_temp,
-            )
+    # Compressibility
+    if compressibility_table is None:
+        compressibility_table = build_water_compressibility_grid(  # type: ignore[assignment]
+            pressure_grid=pressure_grid_3d,
+            temperature_grid=temperature_grid_3d,
+            bubble_point_pressure_grid=bubble_point_pressure_table,  # type: ignore[arg-type]
+            gas_formation_volume_factor_grid=gas_fvf_grid,
+            gas_solubility_in_water_grid=gas_solubility_in_water_grid,
+            gas_free_water_formation_volume_factor_grid=gas_free_fvf_3d,
+            salinity=salinity_grid_3d,
+        )
 
-        # Water formation volume factor: Bw(P, T, S)
-        if water_formation_volume_factor_table is None:
-            water_formation_volume_factor_table = (  # type: ignore[arg-type]
-                build_water_formation_volume_factor_grid(
-                    water_density_grid=water_density_table,  # type: ignore[arg-type]
-                    salinity_grid=salinity_grid_3d,
-                )
-            )
-        logger.debug("Water PVT properties built")
+    if density_table is None:
+        density_table = build_water_density_grid(  # type: ignore[assignment]
+            pressure_grid=pressure_grid_3d,
+            temperature_grid=temperature_grid_3d,
+            gas_gravity_grid=gas_gravity_3d,
+            salinity_grid=salinity_grid_3d,
+            gas_solubility_in_water_grid=gas_solubility_in_water_grid,
+            gas_free_water_formation_volume_factor_grid=gas_free_fvf_3d,
+        )
 
-    # BUILD OIL PROPERTIES (2D TABLES)
-    if build_oil_properties:
-        logger.debug("Building oil PVT properties...")
-        # Oil specific gravity (usually constant)
-        if oil_specific_gravity_table is None:
-            oil_specific_gravity_table = np.full(
-                (n_p, n_t), oil_specific_gravity, dtype=dtype
-            )
+    if formation_volume_factor_table is None:
+        formation_volume_factor_table = build_water_formation_volume_factor_grid(  # type: ignore[assignment]
+            water_density_grid=density_table,  # type: ignore[arg-type]
+            salinity_grid=salinity_grid_3d,
+        )
 
-        # Oil API gravity
-        if oil_api_gravity_table is None:
-            oil_api_gravity_table = build_oil_api_gravity_grid(
-                oil_specific_gravity_grid=oil_specific_gravity_table
-            )
+    if viscosity_table is None:
+        viscosity_table = build_water_viscosity_grid(  # type: ignore[arg-type]
+            temperature_grid=temperature_grid_3d,
+            salinity_grid=salinity_grid_3d,
+            pressure_grid=pressure_grid_3d,
+        )
 
-        # BUBBLE POINT PRESSURE (1D or 2D)
-        if bubble_point_pressures is None:
-            if solution_gas_to_oil_ratios is not None:
-                # Build 2D bubble point table: Pb(Rs, T)
-                n_rs = len(solution_gas_to_oil_ratios)
-                bubble_point_pressures = np.zeros((n_rs, n_t), dtype=dtype)
+    # Specific gravity (water density relative to fresh water at SC: 62.4 lbm/ft³)
+    if specific_gravity_table is None:
+        specific_gravity_table = (
+            density_table / c.STANDARD_WATER_DENSITY_IMPERIAL
+        ).astype(dtype, copy=False)
 
-                for i, rs_value in enumerate(solution_gas_to_oil_ratios):
-                    rs_grid = np.full(n_t, rs_value, dtype=dtype)
-                    bubble_point_pressures[i, :] = build_oil_bubble_point_pressure_grid(
-                        gas_gravity_grid=np.full(n_t, gas_gravity, dtype=dtype),
-                        oil_api_gravity_grid=build_oil_api_gravity_grid(
-                            np.full(n_t, oil_specific_gravity, dtype=dtype)
-                        ),
-                        temperature_grid=temperatures,
-                        solution_gas_to_oil_ratio_grid=rs_grid,
-                    )
-            else:
-                # Build 1D bubble point table: Pb(T)
-                # Use user-specified Rs estimate or default to 500 SCF/STB
-                # The default of 500 is a moderate value typical for medium crude oils
-                # and provides stable behavior for most reservoir conditions.
-                oil_api = compute_oil_api_gravity(oil_specific_gravity)
-                if estimated_solution_gor is not None:
-                    estimated_rs = estimated_solution_gor
-                else:
-                    # estimated_rs = 500.0
-                    # Approximate Rs from API gravity using Standing's empirical relationship.
-                    # Heavy oils (API < 25) typically have Rs ~ 50-200 SCF/STB.
-                    # Medium oils (API 25-40) typically have Rs ~ 200-700 SCF/STB.
-                    # Light oils (API > 40) typically have Rs ~ 700-2000 SCF/STB.
-                    # Using: Rs ≈ 10^(0.0125 * API) * 50 as a rough midpoint estimate.
-                    estimated_rs = float(
-                        np.clip(10 ** (0.0125 * oil_api) * 50.0, 50.0, 2000.0)
-                    )
-                    warnings.warn(
-                        f"No `estimated_solution_gor` provided. Estimating Rs = {estimated_rs:.1f} SCF/STB "
-                        f"from API = {oil_api:.1f}°. This affects bubble point pressure accuracy. "
-                        f"Pass `estimated_solution_gor` explicitly for best results.",
-                        UserWarning,
-                    )
+    # Molecular weight - pure water ≈ 18.015, increases with salinity
+    # Approximate: molecular weight ≈ 18.015 + salinity_ppm * 5.85e-5  (NaCl contribution)
+    if molecular_weight_table is None:
+        molecular_weight_table = (18.015 + salinity_grid_3d * 5.85e-5).astype(  # type: ignore[assignment]
+            dtype, copy=False
+        )
 
-                estimated_rs_grid = np.full(n_t, estimated_rs, dtype=dtype)
-                oil_api = compute_oil_api_gravity(oil_specific_gravity)
-                logger.debug(
-                    f"Using Rs = {estimated_rs:.1f} SCF/STB for 1D bubble point (API = {oil_api:.1f}°)"
-                )
-                bubble_point_pressures = build_oil_bubble_point_pressure_grid(
-                    gas_gravity_grid=np.full(n_t, gas_gravity, dtype=dtype),
-                    oil_api_gravity_grid=build_oil_api_gravity_grid(
-                        np.full(n_t, oil_specific_gravity, dtype=dtype)
-                    ),
-                    temperature_grid=temperatures,
-                    solution_gas_to_oil_ratio_grid=estimated_rs_grid,
-                )
-
-        # Create 2D bubble point grid for property calculations
-        if bubble_point_pressures.ndim == 1:
-            # 1D: Broadcast Pb(T) to (n_p, n_t)
-            bubble_point_pressure_grid_2d = np.broadcast_to(
-                bubble_point_pressures[np.newaxis, :], (n_p, n_t)
-            ).copy()
-        else:
-            # 2D: Pb(Rs, T) - compute Rs(P, T) iteratively if not provided
-            if solution_gas_to_oil_ratio_table is None:
-                # Use iterative solver to estimate Rs(P, T) without needing Pb
-                logger.debug(
-                    "Computing Rs(P, T) iteratively for 2D bubble point pressures..."
-                )
-                solution_gas_to_oil_ratio_table = (
-                    build_estimated_solution_gas_to_oil_ratio_grid(  # type: ignore[arg-type]
-                        pressure_grid=pressure_grid_2d,
-                        temperature_grid=temperature_grid_2d,
-                        oil_api_gravity_grid=oil_api_gravity_table,
-                        gas_gravity_grid=np.full((n_p, n_t), gas_gravity, dtype=dtype),
-                    )
-                )
-
-            # Use the Rs(P,T) table to determine Pb at each (P,T)
-            # For each (P, T), interpolate Pb from the 2D table Pb(Rs, T)
-            bubble_point_pressure_grid_2d = np.zeros((n_p, n_t), dtype=dtype)
-            pb_interpolator = RectBivariateSpline(
-                x=solution_gas_to_oil_ratios,  # type: ignore
-                y=temperatures,
-                z=bubble_point_pressures,
-                kx=1,
-                ky=1,
-            )
-            # Evaluate Pb at each Rs(P, T) value
-            # Create temperature grid matching `solution_gas_to_oil_ratio_table` shape
-            t_grid = np.broadcast_to(temperatures, (n_p, n_t))
-            bubble_point_pressure_grid_2d = (
-                pb_interpolator.ev(
-                    solution_gas_to_oil_ratio_table.ravel(),  # type: ignore
-                    t_grid.ravel(),
-                )
-                .reshape(n_p, n_t)
-                .astype(dtype)
-            )
-
-        # SOLUTION GOR TABLE: Rs(P, T)
-        if solution_gas_to_oil_ratio_table is None:
-            solution_gas_to_oil_ratio_table = build_solution_gas_to_oil_ratio_grid(  # type: ignore[arg-type]
-                pressure_grid=pressure_grid_2d,
-                temperature_grid=temperature_grid_2d,
-                bubble_point_pressure_grid=bubble_point_pressure_grid_2d,
-                gas_gravity_grid=np.full((n_p, n_t), gas_gravity, dtype=dtype),
-                oil_api_gravity_grid=oil_api_gravity_table,
-            )
-
-        # OIL FORMATION VOLUME FACTOR & COMPRESSIBILITY
-        # These have a circular dependency in the saturated (below Pb) region:
-        #  - Oil FVF (Bo) below Pb uses oil compressibility (Co) for the liberation correction term
-        #  - Oil compressibility (Co) below Pb uses Bo and gas FVF (Bg) for the same correction term
-        # So we solve for them iteratively til convergence. Typically 2-3 passes would suffice.
-        need_bo = oil_formation_volume_factor_table is None
-        need_co = oil_compressibility_table is None
-
-        # Pre-compute Rs at bubble point — needed for Co and viscosity calculations.
-        # Rs is flat above Pb, so this 2D grid holds the bubble-point value at every cell.
-        rs_at_bubble_point_grid: typing.Optional[TwoDimensionalGrid] = None
-        gas_fvf_for_compressibility: typing.Optional[TwoDimensionalGrid] = None
-
-        if need_co:
-            rs_at_bubble_point_grid = build_solution_gas_to_oil_ratio_grid(  # type: ignore[arg-type]
-                pressure_grid=bubble_point_pressure_grid_2d,
-                temperature_grid=temperature_grid_2d,
-                bubble_point_pressure_grid=bubble_point_pressure_grid_2d,
-                gas_gravity_grid=np.full((n_p, n_t), gas_gravity, dtype=dtype),
-                oil_api_gravity_grid=oil_api_gravity_table,
-            )
-
-            # Use the provided gas FVF table if available; otherwise fall back to ideal gas (Bg = 1).
-            # Bg = 1 is a poor approximation at high pressure but avoids a hard dependency
-            # on gas properties when the user has not requested gas table construction.
-            if gas_formation_volume_factor_table is not None:
-                gas_fvf_for_compressibility = gas_formation_volume_factor_table
-            else:
-                if not build_gas_properties:
-                    warnings.warn(
-                        "Gas FVF table unavailable for oil compressibility liberation correction term. "
-                        "Using ideal gas approximation (Bg = 1.0 bbl/scf). "
-                        "Enable gas property table construction (`build_gas_properties=True`) for accurate saturated Co.",
-                        UserWarning,
-                    )
-                gas_fvf_for_compressibility = np.ones((n_p, n_t), dtype=dtype)
-
-        gas_gravity_grid_2d = np.full((n_p, n_t), gas_gravity, dtype=dtype)
-        if need_bo and need_co:
-            assert rs_at_bubble_point_grid is not None
-            assert gas_fvf_for_compressibility is not None
-
-            max_iterations = 10
-            convergence_tolerance = 1e-7  # psi⁻¹
-
-            # Seed the iteration with a representative mid-range oil compressibility.
-            # This is only used for the first Bo estimate; it is replaced after the first pass.
-            oil_compressibility_estimate = np.full((n_p, n_t), 1e-5, dtype=dtype)
-
-            logger.debug(
-                f"Beginning iterative Bo/Co bootstrap (max_iterations={max_iterations}, tolerance={convergence_tolerance:.2e}).",
-            )
-
-            max_compressibility_change = 0.0
-            for iteration in range(max_iterations):
-                # Step 1: Build Bo using current Co estimate.
-                # Above Pb: Bo depends on Co via exp(-Co * (P - Pb)).
-                # Below Pb: Bo is independent of Co (uses Standing's correlation directly).
-                oil_formation_volume_factor_table = (
-                    build_oil_formation_volume_factor_grid(  # type: ignore[arg-type]
-                        pressure_grid=pressure_grid_2d,
-                        temperature_grid=temperature_grid_2d,
-                        bubble_point_pressure_grid=bubble_point_pressure_grid_2d,
-                        oil_specific_gravity_grid=oil_specific_gravity_table,
-                        gas_gravity_grid=gas_gravity_grid_2d,
-                        solution_gas_to_oil_ratio_grid=solution_gas_to_oil_ratio_table,  # type: ignore[arg-type]
-                        oil_compressibility_grid=oil_compressibility_estimate,
-                    )
-                )
-
-                # Step 2: Build Co using the Bo from Step 1.
-                # Below Pb: Co includes the liberation correction term (Bg/Bo * dRs/dP) / 5.615,
-                #   which requires both Bo and Bg. This is the source of the circular dependency.
-                # Above Pb: Co uses only P, T, Rs(Pb), API, gas gravity — no Bo or Bg needed.
-                oil_compressibility_updated = build_oil_compressibility_grid(
-                    pressure_grid=pressure_grid_2d,
-                    temperature_grid=temperature_grid_2d,
-                    bubble_point_pressure_grid=bubble_point_pressure_grid_2d,
-                    oil_api_gravity_grid=oil_api_gravity_table,
-                    gas_gravity_grid=gas_gravity_grid_2d,
-                    gor_at_bubble_point_pressure_grid=rs_at_bubble_point_grid,
-                    gas_formation_volume_factor_grid=gas_fvf_for_compressibility,
-                    oil_formation_volume_factor_grid=oil_formation_volume_factor_table,  # type: ignore[arg-type]
-                )
-
-                # Step 3: Check convergence on Co. Bo convergence follows implicitly
-                # because Bo is a smooth monotonic function of Co.
-                max_compressibility_change = float(
-                    np.max(
-                        np.abs(
-                            oil_compressibility_updated - oil_compressibility_estimate
-                        )
-                    )
-                )
-                logger.debug(
-                    f"Bo/Co iteration {iteration + 1}/{max_iterations}: max ΔCo = {max_compressibility_change:.3e} psi⁻¹.",
-                )
-
-                oil_compressibility_estimate = oil_compressibility_updated
-                if max_compressibility_change < convergence_tolerance:
-                    logger.debug(
-                        f"Bo/Co bootstrap converged in {iteration + 1} iteration(s) "
-                        f"(max ΔCo = {max_compressibility_change:.3e} psi⁻¹ < tolerance {convergence_tolerance:.3e} psi⁻¹).",
-                    )
-                    break
-            else:
-                warnings.warn(
-                    f"Bo/Co bootstrap did not converge within {max_iterations} iterations "
-                    f"(final max ΔCo = {max_compressibility_change:.3e} psi⁻¹). "
-                    "Results may be inaccurate for volatile or heavy oil. "
-                    "Consider widening the pressure range or providing pre-computed tables.",
-                    UserWarning,
-                )
-
-            oil_compressibility_table = oil_compressibility_estimate  # type: ignore
-            # `oil_formation_volume_factor_table` already holds the final Bo from the last iteration.
-
-        elif need_bo and not need_co:
-            # Co was provided by the caller — build Bo in a single pass, no iteration needed.
-            assert oil_compressibility_table is not None
-            oil_formation_volume_factor_table = build_oil_formation_volume_factor_grid(  # type: ignore[arg-type]
-                pressure_grid=pressure_grid_2d,
-                temperature_grid=temperature_grid_2d,
-                bubble_point_pressure_grid=bubble_point_pressure_grid_2d,
-                oil_specific_gravity_grid=oil_specific_gravity_table,
-                gas_gravity_grid=gas_gravity_grid_2d,
-                solution_gas_to_oil_ratio_grid=solution_gas_to_oil_ratio_table,  # type: ignore[arg-type]
-                oil_compressibility_grid=oil_compressibility_table,
-            )
-
-        elif need_co and not need_bo:
-            # Bo was provided by the caller — build Co in a single pass, no iteration needed.
-            assert rs_at_bubble_point_grid is not None
-            assert gas_fvf_for_compressibility is not None
-            assert oil_formation_volume_factor_table is not None
-            oil_compressibility_table = build_oil_compressibility_grid(  # type: ignore[arg-type]
-                pressure_grid=pressure_grid_2d,
-                temperature_grid=temperature_grid_2d,
-                bubble_point_pressure_grid=bubble_point_pressure_grid_2d,
-                oil_api_gravity_grid=oil_api_gravity_table,
-                gas_gravity_grid=gas_gravity_grid_2d,
-                gor_at_bubble_point_pressure_grid=rs_at_bubble_point_grid,
-                gas_formation_volume_factor_grid=gas_fvf_for_compressibility,
-                oil_formation_volume_factor_grid=oil_formation_volume_factor_table,
-            )
-
-        # OIL DENSITY: ρo(P, T)
-        if oil_density_table is None:
-            oil_density_table = build_live_oil_density_grid(
-                oil_api_gravity_grid=oil_api_gravity_table,
-                gas_gravity_grid=gas_gravity_grid_2d,
-                solution_gas_to_oil_ratio_grid=solution_gas_to_oil_ratio_table,  # type: ignore[arg-type]
-                formation_volume_factor_grid=oil_formation_volume_factor_table,  # type: ignore[arg-type]
-            )
-
-        # OIL VISCOSITY: μo(P, T)
-        if oil_viscosity_table is None:
-            if rs_at_bubble_point_grid is None:
-                # Compute Rs at bubble point for each (P, T) pair
-                # When P = Pb, oil is saturated: Rs(Pb, T) = Rsb(T)
-                rs_at_bubble_point_grid = build_solution_gas_to_oil_ratio_grid(  # type: ignore[arg-type]
-                    pressure_grid=bubble_point_pressure_grid_2d,
-                    temperature_grid=temperature_grid_2d,
-                    bubble_point_pressure_grid=bubble_point_pressure_grid_2d,
-                    gas_gravity_grid=gas_gravity_grid_2d,
-                    oil_api_gravity_grid=oil_api_gravity_table,
-                )
-
-            oil_viscosity_table = build_oil_viscosity_grid(  # type: ignore[arg-type]
-                pressure_grid=pressure_grid_2d,
-                temperature_grid=temperature_grid_2d,
-                bubble_point_pressure_grid=bubble_point_pressure_grid_2d,
-                oil_specific_gravity_grid=oil_specific_gravity_table,
-                solution_gas_to_oil_ratio_grid=solution_gas_to_oil_ratio_table,  # type: ignore[arg-type]
-                gor_at_bubble_point_pressure_grid=rs_at_bubble_point_grid,  # type: ignore[arg-type]
-            )
-        logger.debug("Oil PVT properties built")
-
-    table_data = PVTTableData(
+    return PVTData(
+        phase=FluidPhase.WATER,
         pressures=pressures,
         temperatures=temperatures,
         salinities=salinities,
-        solution_gas_oil_ratios=solution_gas_to_oil_ratios,
-        bubble_point_pressures=bubble_point_pressures,
-        oil_viscosity_table=oil_viscosity_table,
-        oil_compressibility_table=oil_compressibility_table,
-        oil_specific_gravity_table=oil_specific_gravity_table,
-        oil_api_gravity_table=oil_api_gravity_table,
-        oil_density_table=oil_density_table,
-        oil_formation_volume_factor_table=oil_formation_volume_factor_table,
-        solution_gas_to_oil_ratio_table=solution_gas_to_oil_ratio_table,
-        water_bubble_point_pressure_table=water_bubble_point_pressure_table,
-        water_viscosity_table=water_viscosity_table,
-        water_compressibility_table=water_compressibility_table,
-        water_density_table=water_density_table,
-        water_formation_volume_factor_table=water_formation_volume_factor_table,
-        gas_solubility_in_water_table=gas_solubility_in_water_table,
-        gas_viscosity_table=gas_viscosity_table,
-        gas_compressibility_table=gas_compressibility_table,
-        gas_gravity_table=gas_gravity_table,
-        gas_molecular_weight_table=gas_molecular_weight_table,
-        gas_density_table=gas_density_table,
-        gas_formation_volume_factor_table=gas_formation_volume_factor_table,
-        gas_compressibility_factor_table=gas_compressibility_factor_table,
+        viscosity_table=viscosity_table,
+        density_table=density_table,
+        formation_volume_factor_table=formation_volume_factor_table,
+        compressibility_table=compressibility_table,
+        specific_gravity_table=specific_gravity_table,
+        molecular_weight_table=molecular_weight_table,
+        bubble_point_pressure_table=bubble_point_pressure_table,
+        gas_free_fvf_table=gas_free_fvf_table,
     )
-    return table_data
+
+
+def build_pvt_dataset(
+    pressures: OneDimensionalGrid,
+    temperatures: OneDimensionalGrid,
+    oil_specific_gravity: float = 0.85,
+    gas_gravity: typing.Optional[float] = None,
+    water_salinity: typing.Optional[float] = None,
+    salinities: typing.Optional[OneDimensionalGrid] = None,
+    estimated_solution_gor: typing.Optional[float] = None,
+    bubble_point_pressures: typing.Optional[
+        typing.Union[OneDimensionalGrid, TwoDimensionalGrid]
+    ] = None,
+    solution_gas_to_oil_ratios: typing.Optional[OneDimensionalGrid] = None,
+    gas: typing.Optional[typing.Union[str, typing.Any]] = None,
+    build_oil_data: bool = True,
+    build_gas_data: bool = True,
+    build_water_data: bool = True,
+    **kwargs: typing.Any,
+) -> PVTDataSet:
+    """
+    Constructs water, oil, and gas `PVTData` and returns `PVTDataSet`.
+
+    Returns a 3-tuple `(water_data, oil_data, gas_data)`. Any element is
+    `None` when the corresponding `build_*` flag is `False`.
+
+    Keyword arguments prefixed with `oil_`, `gas_`, or `water_` are
+    forwarded to the appropriate phase builder after stripping the prefix.
+    All other `kwargs` are forwarded to all three builders.
+
+    :param pressures: 1D array of pressures (psi).
+    :param temperatures: 1D array of temperatures (°F).
+    :param oil_specific_gravity: Oil specific gravity (water=1). Forwarded to oil builder.
+    :param gas_gravity: Gas specific gravity (air=1). Forwarded to all builders.
+    :param water_salinity: Single salinity scalar (ppm). Forwarded to water builder.
+    :param salinities: 1D salinity array (ppm). Forwarded to water builder.
+    :param estimated_solution_gor: Estimated solution gas-oil ratio (SCF/STB). Forwarded to oil builder.
+    :param bubble_point_pressures: Pre-computed bubble point pressures. Forwarded to oil builder.
+    :param solution_gas_to_oil_ratios: Solution gas-to-oil ratio axis for 2D bubble point pressures. Forwarded to oil builder.
+    :param gas: Gas identity (str or `Fluid`). Forwarded to all builders.
+    :param build_oil_data: If False, skip oil builder and return `None` for oil.
+    :param build_gas_data: If False, skip gas builder and return `None` for gas.
+    :param build_water_data: If False, skip water builder and return `None` for water.
+    :param kwargs: Additional kwargs forwarded by prefix to phase builders.
+    :return: A `PVTDataSet`.
+    """
+    # Partition kwargs by prefix
+    oil_kwargs: typing.Dict[str, typing.Any] = {}
+    gas_kwargs: typing.Dict[str, typing.Any] = {}
+    water_kwargs: typing.Dict[str, typing.Any] = {}
+    shared_kwargs: typing.Dict[str, typing.Any] = {}
+
+    for key, val in kwargs.items():
+        if key.startswith("oil_"):
+            oil_kwargs[key[4:]] = val
+        elif key.startswith("gas_"):
+            gas_kwargs[key[4:]] = val
+        elif key.startswith("water_"):
+            water_kwargs[key[6:]] = val
+        else:
+            shared_kwargs[key] = val
+
+    oil_data = None
+    gas_data = None
+    water_data = None
+
+    if build_oil_data:
+        oil_data = build_oil_pvt_data(
+            pressures=pressures,
+            temperatures=temperatures,
+            oil_specific_gravity=oil_specific_gravity,
+            gas_gravity=gas_gravity,
+            estimated_solution_gor=estimated_solution_gor,
+            bubble_point_pressures=bubble_point_pressures,
+            solution_gas_to_oil_ratios=solution_gas_to_oil_ratios,
+            gas=gas,
+            **{**shared_kwargs, **oil_kwargs},
+        )
+
+    if build_gas_data:
+        gas_data = build_gas_pvt_data(
+            pressures=pressures,
+            temperatures=temperatures,
+            gas_gravity=gas_gravity,
+            gas=gas,
+            water_salinities=salinities,
+            **{**shared_kwargs, **gas_kwargs},
+        )
+
+    if build_water_data:
+        water_data = build_water_pvt_data(
+            pressures=pressures,
+            temperatures=temperatures,
+            salinities=salinities,
+            water_salinity=water_salinity,
+            gas_gravity=gas_gravity,
+            gas=gas,
+            **{**shared_kwargs, **water_kwargs},
+        )
+
+    return PVTDataSet(oil=oil_data, water=water_data, gas=gas_data)
