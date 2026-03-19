@@ -6,7 +6,7 @@ Well controls define the operating strategy for each well: how the simulator det
 
 In real field operations, wells are typically controlled by one of two modes: constant rate (the operator sets a target production or injection rate, and the well delivers that rate as long as it physically can) or constant pressure (the operator sets a bottom-hole pressure, and the well produces or injects whatever rate the reservoir can deliver at that drawdown). Most production wells start under rate control and switch to pressure control when the reservoir can no longer sustain the target rate. BORES models this with the `AdaptiveRateControl`, which automatically switches between rate and pressure modes.
 
-For production wells in three-phase simulation, a single-phase control is rarely sufficient because oil, water, and gas all flow simultaneously. The standard approach is to control the rate of one "primary" phase (usually oil) and let the other phases produce at whatever rate corresponds to the resulting bottom-hole pressure. BORES provides `CoupledRateControl` for this purpose, and `MultiPhaseRateControl` for cases where you need separate controls for each phase.
+For production wells in three-phase simulation, a single-phase control is rarely sufficient because oil, water, and gas all flow simultaneously. The standard approach is to control the rate of one "primary" phase (usually oil) and let the other phases produce at whatever rate corresponds to the resulting bottom-hole pressure. BORES provides `CoupledRateControl` for this purpose, and `MultiPhaseControl` for cases where you need separate controls for each phase.
 
 ---
 
@@ -157,14 +157,14 @@ This approach ensures physical consistency: all phases share the same wellbore p
 
 ---
 
-## `MultiPhaseRateControl`
+## `MultiPhaseControl`
 
 For cases where you need explicit, independent control over each phase. This provides separate control objects for oil, gas, and water, each with their own target rates and BHP limits.
 
 ```python
 import bores
 
-control = bores.MultiPhaseRateControl(
+control = bores.MultiPhaseControl(
     oil_control=bores.AdaptiveRateControl(
         target_rate=-500.0,
         target_phase="oil",
@@ -190,9 +190,9 @@ Each phase operates under its own control independently. This is less physically
 | `gas_control` | `None` | Control for gas phase (set to `None` to exclude gas) |
 | `water_control` | `None` | Control for water phase (set to `None` to exclude water) |
 
-!!! info "When to Use MultiPhaseRateControl"
+!!! info "When to Use MultiPhaseControl"
 
-    Use `MultiPhaseRateControl` when you have measured production data for each phase separately and want to replay those rates in a history-matching study. For predictive simulations, `CoupledRateControl` is more physically meaningful because it lets the reservoir determine the water cut and GOR based on mobility and relative permeability.
+    Use `MultiPhaseControl` when you have measured production data for each phase separately and want to replay those rates in a history-matching study. For predictive simulations, `CoupledRateControl` is more physically meaningful because it lets the reservoir determine the water cut and GOR based on mobility and relative permeability.
 
 ---
 
@@ -242,5 +242,5 @@ control = bores.RateControl(
 | Water injection | `RateControl` or `AdaptiveRateControl` |
 | Gas injection | `RateControl` or `AdaptiveRateControl` |
 | Constant-pressure production | `BHPControl` with `ProductionClamp` |
-| History matching (known rates per phase) | `MultiPhaseRateControl` |
+| History matching (known rates per phase) | `MultiPhaseControl` |
 | Artificial lift | `BHPControl` (BHP set by lift equipment) |

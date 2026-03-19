@@ -30,7 +30,7 @@ from bores.types import (
     ThreeDimensionalGrid,
     ThreeDimensions,
 )
-from bores.wells import Wells
+from bores.wells.base import Wells
 from bores.wells.controls import CoupledRateControl
 
 logger = logging.getLogger(__name__)
@@ -934,16 +934,16 @@ class WellContributions:
     rhs_cell_indices[k] and rhs_values[k] represent:
         b[rhs_cell_indices[k]] += rhs_values[k]
 
-    In practice diagonal_cell_indices == rhs_cell_indices since every perforation
+    In practice `diagonal_cell_indices` == `rhs_cell_indices` since every perforation
     contributes to both A and b at the same cell. They are stored separately to
     keep the interface clean and to allow skipped perforations (non-finite BHP)
     to contribute to neither without special-casing the reduction.
     """
 
-    diagonal_cell_indices: np.ndarray
-    diagonal_values: np.ndarray
-    rhs_cell_indices: np.ndarray
-    rhs_values: np.ndarray
+    diagonal_cell_indices: np.typing.NDArray
+    diagonal_values: np.typing.NDArray
+    rhs_cell_indices: np.typing.NDArray
+    rhs_values: np.typing.NDArray
 
 
 def compute_well_contributions(
@@ -1015,9 +1015,6 @@ def compute_well_contributions(
         cell_count_y=cell_count_y,
         cell_count_z=cell_count_z,
     )
-
-    # Pre-extract grids used by both injection and production to avoid
-    # repeated attribute lookups inside the perforation loops
     water_bubble_point_pressure_grid = fluid_properties.water_bubble_point_pressure_grid
     gas_formation_volume_factor_grid = fluid_properties.gas_formation_volume_factor_grid
     gas_solubility_in_water_grid = fluid_properties.gas_solubility_in_water_grid
@@ -1032,23 +1029,47 @@ def compute_well_contributions(
     rhs_cell_indices: typing.List[int] = []
     rhs_values: typing.List[float] = []
 
-    def _add_contribution(
+    def _add_bhp_contribution(
         cell_1d_index: int,
         productivity_index: float,
         effective_bhp: float,
     ) -> None:
         """
-        Local helper that appends one (diagonal, rhs) contribution pair.
+        Local helper that appends one (diagonal, rhs) contribution pair for bhp (Robin) controlled wells.
 
         Skips automatically when productivity_index is zero (no mobility)
         or when bhp is non-finite (degenerate well state).
         """
         if not np.isfinite(effective_bhp) or productivity_index == 0.0:
             return
-        diagonal_cell_indices.append(cell_1d_index)
-        diagonal_values.append(productivity_index)
-        rhs_cell_indices.append(cell_1d_index)
-        rhs_values.append(productivity_index * effective_bhp)
+
+        if cell_1d_index not in diagonal_cell_indices:
+            diagonal_cell_indices.append(cell_1d_index)
+            diagonal_values.append(productivity_index)
+        else:
+            idx = diagonal_cell_indices.index(cell_1d_index)
+            diagonal_values[idx] += productivity_index
+
+        if cell_1d_index not in rhs_cell_indices:
+            rhs_cell_indices.append(cell_1d_index)
+            rhs_values.append(productivity_index * effective_bhp)
+        else:
+            idx = rhs_cell_indices.index(cell_1d_index)
+            rhs_values[idx] += productivity_index * effective_bhp
+
+    def _add_rate_contribution(
+        cell_1d_index: int,
+        flow_rate: float,
+    ) -> None:
+        """
+        Local helper that appends a rhs contribution pair for rate (Neumann) controlled wells.
+        """
+        if cell_1d_index not in rhs_cell_indices:
+            rhs_cell_indices.append(cell_1d_index)
+            rhs_values.append(flow_rate)
+        else:
+            idx = rhs_cell_indices.index(cell_1d_index)
+            rhs_values[idx] += flow_rate
 
     bbl_to_ft3 = c.BARRELS_TO_CUBIC_FEET
     for well in wells.injection_wells:
@@ -1057,7 +1078,7 @@ def compute_well_contributions(
 
         injected_fluid = well.injected_fluid
         injected_phase = injected_fluid.phase
-        is_bhp_controlled = not well.control.is_rate_control()
+        is_bhp_controlled = well.control.is_bhp_control()
         use_pseudo_pressure = (
             config.use_pseudo_pressure and injected_phase == FluidPhase.GAS
         )
@@ -1170,7 +1191,7 @@ def compute_well_contributions(
                 if abs(effective_bhp - cell_pressure) > 1e6:
                     logger.warning(
                         f"Extreme BHP for injection well {well.name!r} "
-                        f"at cell ({i - pad_width},{j - pad_width},{k - pad_width}): {effective_bhp:.2e} psi "
+                        f"at cell ({i - pad_width}, {j - pad_width}, {k - pad_width}): {effective_bhp:.2e} psi "
                         f"(reservoir pressure: {cell_pressure:.1f} psi)."
                     )
 
@@ -1186,7 +1207,7 @@ def compute_well_contributions(
                 productivity_index = (
                     well_index * effective_mobility * md_per_cp_to_ft2_per_psi_per_day
                 )
-                _add_contribution(cell_1d_index, productivity_index, effective_bhp)
+                _add_bhp_contribution(cell_1d_index, productivity_index, effective_bhp)
 
             else:
                 # Rate-controlled: We use direct rate injection (Neumann Boundary)
@@ -1205,8 +1226,7 @@ def compute_well_contributions(
                 if injected_phase != FluidPhase.GAS:
                     flow_rate *= bbl_to_ft3
 
-                rhs_cell_indices.append(cell_1d_index)
-                rhs_values.append(flow_rate)
+                _add_rate_contribution(cell_1d_index, flow_rate)
 
     for well in wells.production_wells:
         if not well.is_open:
@@ -1249,6 +1269,9 @@ def compute_well_contributions(
                 well_index_cache.append(((i, j, k, _to_1D_index(i, j, k)), well_index))
                 total_well_index += well_index
 
+        is_bhp_controlled = well.control.is_bhp_control()
+        is_couple_controlled = isinstance(well.control, CoupledRateControl)
+
         # Second pass: one contribution per (perforation, produced phase) pair
         for (i, j, k, cell_1d_index), well_index in well_index_cache:
             cell_pressure = typing.cast(float, current_oil_pressure_grid[i, j, k])
@@ -1257,9 +1280,9 @@ def compute_well_contributions(
                 well_index / total_well_index if total_well_index > 0.0 else 1.0
             )
 
-            primary_phase_context: dict = {}
-            if isinstance(well.control, CoupledRateControl):
-                primary_phase_context = well.control.build_primary_phase_context(
+            primary_phase_context = {}
+            if is_couple_controlled:
+                primary_phase_context = well.control.build_primary_phase_context(  # type: ignore
                     produced_fluids=well.produced_fluids,
                     oil_mobility=typing.cast(
                         float, oil_relative_mobility_grid[i, j, k]
@@ -1359,7 +1382,7 @@ def compute_well_contributions(
                 productivity_index = (
                     well_index * phase_mobility * md_per_cp_to_ft2_per_psi_per_day
                 )
-                _add_contribution(cell_1d_index, productivity_index, effective_bhp)
+                _add_bhp_contribution(cell_1d_index, productivity_index, effective_bhp)
 
     return WellContributions(
         diagonal_cell_indices=np.array(diagonal_cell_indices, dtype=np.int32),

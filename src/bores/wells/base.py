@@ -807,15 +807,16 @@ class Wells(
             - A list of locations for injection wells (starting location of first interval).
             - A list of locations for production wells (starting location of first interval).
         """
-        injection_well_heads = []
-        production_well_heads = []
-        for well in self.injection_wells:
-            if well.perforating_intervals:
-                injection_well_heads.append(well.perforating_intervals[0][0])
-
-        for well in self.production_wells:
-            if well.perforating_intervals:
-                production_well_heads.append(well.perforating_intervals[0][0])
+        injection_well_heads = [
+            well.perforating_intervals[0][0]
+            for well in self.injection_wells
+            if well.perforating_intervals
+        ]
+        production_well_heads = [
+            well.perforating_intervals[0][0]
+            for well in self.production_wells
+            if well.perforating_intervals
+        ]
         return injection_well_heads, production_well_heads
 
     @property

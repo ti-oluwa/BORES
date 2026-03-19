@@ -10,7 +10,8 @@ from bores._precision import get_dtype
 from bores.config import Config
 from bores.constants import c
 from bores.correlations.core import compute_harmonic_mean
-from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids, unpad_grid
+from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
+from bores.grids.utils import unpad_grid
 from bores.models import FluidProperties, RockProperties
 from bores.solvers.base import (
     EvolutionResult,
@@ -26,7 +27,7 @@ from bores.types import (
     ThreeDimensions,
 )
 from bores.utils import clip
-from bores.wells import Wells
+from bores.wells.base import Wells
 from bores.wells.controls import CoupledRateControl
 
 __all__ = ["evolve_miscible_saturation", "evolve_saturation"]
@@ -420,7 +421,7 @@ def evolve_saturation(
             fluid_properties.oil_bubble_point_pressure_grid[i, j, k]
         )
         pressure_state = (
-            "UNDERSATURATED" if cell_pressure > cell_bubble_point else "SATURATED"
+            "undersaturated" if cell_pressure > cell_bubble_point else "saturated"
         )
         interior_pressure_grid = unpad_grid(oil_pressure_grid, pad_width=pad_width)
         avg_reservoir_pressure = float(np.mean(interior_pressure_grid))
@@ -1181,6 +1182,7 @@ def compute_well_rate_grids(
                 well_index_cache.append(((i, j, k), well_index))
                 total_well_index += well_index
 
+        is_couple_controlled = isinstance(well.control, CoupledRateControl)
         # Now compute rates for each perforated cell using cached well indices
         for (i, j, k), well_index in well_index_cache:
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
@@ -1203,9 +1205,9 @@ def compute_well_rate_grids(
             cell_oil_production_rate = 0.0
             cell_gas_production_rate = 0.0
 
-            primary_phase_context: dict = {}
-            if isinstance(well.control, CoupledRateControl):
-                primary_phase_context = well.control.build_primary_phase_context(
+            primary_phase_context = {}
+            if is_couple_controlled:
+                primary_phase_context = well.control.build_primary_phase_context(  # type: ignore
                     produced_fluids=well.produced_fluids,
                     oil_mobility=typing.cast(
                         float, oil_relative_mobility_grid[i, j, k]
@@ -1896,7 +1898,7 @@ def evolve_miscible_saturation(
             fluid_properties.oil_bubble_point_pressure_grid[i, j, k]
         )
         pressure_state = (
-            "UNDERSATURATED" if cell_pressure > cell_bubble_point else "SATURATED"
+            "undersaturated" if cell_pressure > cell_bubble_point else "saturated"
         )
         interior_pressure_grid = unpad_grid(oil_pressure_grid, pad_width=pad_width)
         avg_reservoir_pressure = float(np.mean(interior_pressure_grid))
@@ -2750,6 +2752,7 @@ def compute_miscible_well_rate_grids(
                 well_index_cache.append(((i, j, k), well_index))
                 total_well_index += well_index
 
+        is_couple_controlled = isinstance(well.control, CoupledRateControl)
         # Now compute rates for each perforated cell using cached well indices
         for (i, j, k), well_index in well_index_cache:
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
@@ -2773,9 +2776,9 @@ def compute_miscible_well_rate_grids(
             cell_gas_production_rate = 0.0
 
             # Build primary phase context if using CoupledRateControl
-            primary_phase_context: dict = {}
-            if isinstance(well.control, CoupledRateControl):
-                primary_phase_context = well.control.build_primary_phase_context(
+            primary_phase_context = {}
+            if is_couple_controlled:
+                primary_phase_context = well.control.build_primary_phase_context(  # type: ignore
                     produced_fluids=well.produced_fluids,
                     oil_mobility=typing.cast(
                         float, oil_relative_mobility_grid[i, j, k]
@@ -3173,7 +3176,7 @@ Where:
     Σ_faces [F_x_face] = Net advective flux from all 6 neighbours (ft³/day)
     q_x * V_cell = Source/sink term for the phase (injection/production) (ft³/day)
 
-Phase Flux Computation (per-phase Darcy velocity, NOT fractional flow):
+Phase Flux Computation (per-phase Darcy velocity, not fractional flow):
 
     Each phase has its own Darcy velocity driven by its own potential gradient:
 

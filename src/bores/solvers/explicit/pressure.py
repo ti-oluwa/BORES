@@ -19,7 +19,7 @@ from bores.solvers.base import (
     compute_mobility_grids,
 )
 from bores.types import FluidPhase, ThreeDimensionalGrid, ThreeDimensions
-from bores.wells import Wells
+from bores.wells.base import Wells
 from bores.wells.controls import CoupledRateControl
 
 __all__ = ["evolve_pressure"]
@@ -937,6 +937,7 @@ def compute_well_rate_grid(
         gas_formation_volume_factor_grid = (
             fluid_properties.gas_formation_volume_factor_grid
         )
+        is_couple_controlled = isinstance(well.control, CoupledRateControl)
 
         for (i, j, k), well_index in well_index_cache:
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
@@ -947,8 +948,8 @@ def compute_well_rate_grid(
             )
 
             primary_phase_context: dict = {}
-            if isinstance(well.control, CoupledRateControl):
-                primary_phase_context = well.control.build_primary_phase_context(
+            if is_couple_controlled:
+                primary_phase_context = well.control.build_primary_phase_context(  # type: ignore
                     produced_fluids=well.produced_fluids,
                     oil_mobility=typing.cast(
                         float, oil_relative_mobility_grid[i, j, k]

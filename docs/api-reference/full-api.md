@@ -176,7 +176,7 @@ Well types, fluid definitions, controls, and scheduling are all available at the
 | `BHPControl` | class | Constant bottom-hole pressure control. |
 | `RateControl` | class | Constant surface rate control with optional BHP limit. |
 | `CoupledRateControl` | class | Rate control on the primary phase with BHP fallback. |
-| `MultiPhaseRateControl` | class | Control targeting total liquid or total fluid rate. |
+| `MultiPhaseControl` | class | Control targeting total liquid or total fluid rate. |
 | `AdaptiveRateControl` | class | Starts with rate control, switches to BHP when the rate target cannot be met. |
 | `well_control()` | function | Decorator to register a (custom) well control for easy serialization/deserialization. |
 

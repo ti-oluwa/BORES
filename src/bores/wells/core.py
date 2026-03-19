@@ -1,7 +1,5 @@
 """Core well calculations and utilities."""
 
-from bores.fluids import Fluid
-
 import logging
 import typing
 
@@ -54,12 +52,8 @@ from bores.correlations.core import (
     fahrenheit_to_rankine,
 )
 from bores.errors import ComputationError, ValidationError
-from bores.serialization import Serializable
-from bores.tables.pseudo_pressure import (
-    PseudoPressureTable,
-    build_pseudo_pressure_table,
-)
-from bores.tables.pvt import PVTTables
+from bores.fluids import Fluid
+from bores.tables.pseudo_pressure import PseudoPressureTable
 from bores.types import (
     FloatOrArray,
     FluidPhase,
@@ -158,12 +152,12 @@ def compute_3D_effective_drainage_radius(
 
     If either perpendicular permeability is zero (e.g. a tight layer or shale
     streak), the well has no drainage capacity in that plane and 0.0 is
-    returned.  The caller should treat a zero return value as an indicator
+    returned. The caller should treat a zero return value as an indicator
     that no well index should be assigned to this interval.
 
     :param interval_thickness: Tuple of cell dimensions (dx, dy, dz) in ft.
     :param permeability: Tuple of permeabilities (kx, ky, kz) in mD.
-    :param well_orientation: Wellbore axis — `Orientation.X` for a horizontal
+    :param well_orientation: Wellbore axis. `Orientation.X` for a horizontal
         well along x, `Orientation.Y` for a horizontal well along y, or
         `Orientation.Z` for a standard vertical well.
     :return: Effective drainage (Peaceman) radius in ft, or 0.0 if either
@@ -299,14 +293,14 @@ def compute_oil_well_rate(
     :param bottom_hole_pressure: Well bottom-hole pressure (psi).
     :param phase_mobility: Phase relative mobility kr/mu (md/cP).
         Must not include the FVF term; Bo/Bw/Bg is applied by the caller.
-    :param fluid_compressibility: Fluid compressibility (psi^-1).  When
+    :param fluid_compressibility: Fluid compressibility (psi^-1). When
         provided and above `incompressibility_threshold`, the exponential
-        correction is evaluated.  Pass None (default) to always use the
+        correction is evaluated. Pass `None` (default) to always use the
         linear formula, which is correct for black-oil phases.
     :param incompressibility_threshold: Minimum compressibility (psi^-1) below
         which the fluid is treated as incompressible and the linear formula is
-        used regardless.  Default `1e-6 psi^-1`.
-    :return: Well rate at reservoir conditions (bbl/day).  Negative for
+        used regardless. Default `1e-6 psi^-1`.
+    :return: Well rate at reservoir conditions (bbl/day). Negative for
         production, positive for injection.
     """
     if well_index <= 0:
@@ -387,7 +381,7 @@ def compute_required_bhp_for_oil_rate(
         Must not include the FVF term.
     :param fluid_compressibility: Fluid compressibility (psi^-1).  When
         provided and above `incompressibility_threshold`, the logarithmic
-        inverse is evaluated.  Pass None to always use the linear inverse.
+        inverse is evaluated. Pass `None` to always use the linear inverse.
     :param incompressibility_threshold: Minimum compressibility (psi^-1) below
         which the fluid is treated as incompressible.  Default 1e-6 psi^-1.
     :return: Required bottom-hole pressure (psi).
@@ -488,11 +482,11 @@ def compute_gas_well_rate(
     :param pseudo_pressure_table: Pre-computed pseudo-pressure lookup table.
         Required when `use_pseudo_pressure=True`.
     :param formation_volume_factor: Gas formation volume factor Bg (ft³/SCF)
-        at reservoir conditions.  If None, Bg is computed internally from
+        at reservoir conditions. If None, Bg is computed internally from
         `gas_gravity`, `pressure`, and `temperature`.
-    :param gas_gravity: Gas specific gravity (air = 1.0).  Required when
+    :param gas_gravity: Gas specific gravity (air = 1.0). Required when
         `formation_volume_factor` is None.
-    :return: Gas well rate at reservoir conditions (ft³/day).  Negative for
+    :return: Gas well rate at reservoir conditions (ft³/day). Negative for
         production, positive for injection.
     """
     if well_index <= 0:
@@ -684,14 +678,14 @@ class WellFluid(Fluid):
     Molecular weight of the fluid in (g/mol).
  
     Required for gas viscosity correlations (Lee-Kesler) when `pvt_table`
-    is not set.  When `pvt_table` is provided this field is optional.
+    is not set. When `pvt_table` is provided this field is optional.
     """
 
     def get_specific_gravity(
         self,
-        pressure: float,
-        temperature: float,
-    ) -> typing.Optional[float]:
+        pressure: FloatOrArray,
+        temperature: FloatOrArray,
+    ) -> typing.Optional[FloatOrArray]:
         """
         Get the specific gravity of the fluid at given pressure and temperature.
 
@@ -704,20 +698,20 @@ class WellFluid(Fluid):
 
         :param pressure: The pressure at which to evaluate the specific gravity (psi).
         :param temperature: The temperature at which to evaluate the specific gravity (°F).
-        :return: The specific gravity of the fluid (dimensionless), or ``None`` if
+        :return: The specific gravity of the fluid (dimensionless), or `None` if
             neither a PVT table nor a scalar value is available.
         """
         if self.pvt_table is not None:
             result = self.pvt_table.specific_gravity(pressure, temperature)
             if result is not None:
-                return float(result)
+                return result
         return self.specific_gravity
 
     def get_molecular_weight(
         self,
-        pressure: float,
-        temperature: float,
-    ) -> typing.Optional[float]:
+        pressure: FloatOrArray,
+        temperature: FloatOrArray,
+    ) -> typing.Optional[FloatOrArray]:
         """
         Get the molecular weight of the fluid at given pressure and temperature.
 
@@ -736,7 +730,7 @@ class WellFluid(Fluid):
         if self.pvt_table is not None:
             result = self.pvt_table.molecular_weight(pressure, temperature)
             if result is not None:
-                return float(result)
+                return result
         return self.molecular_weight
 
 
@@ -780,7 +774,7 @@ class InjectedFluid(WellFluid):
     Fluid density (lbm/ft³) at reservoir conditions.
 
     When provided, bypasses both `pvt_table` and correlation-based density
-    calculations entirely.  Useful for non-ideal gases such as CO2 where a
+    calculations entirely. Useful for non-ideal gases such as CO2 where a
     measured or equation-of-state density is available.
     """
 
@@ -789,7 +783,7 @@ class InjectedFluid(WellFluid):
     Fluid viscosity (cP) at reservoir conditions.
 
     When provided, bypasses both `pvt_table` and correlation-based viscosity
-    calculations entirely.  Useful for non-ideal gases such as CO2 where a
+    calculations entirely. Useful for non-ideal gases such as CO2 where a
     measured or equation-of-state viscosity is available.
     """
 

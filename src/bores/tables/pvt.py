@@ -262,7 +262,7 @@ class PVTData(StoreSerializable):
                 UserWarning,
                 stacklevel=3,
             )
-        if self.salinities is not None and phase != FluidPhase.WATER:
+        if self.salinities is not None and phase == FluidPhase.OIL:
             warnings.warn(
                 f"{self.__class__.__name__}: `salinities` is water-only and will be ignored for "
                 f"{phase.value.upper()} phase.",
@@ -308,8 +308,8 @@ class PVTTable(StoreSerializable):
     | solubility_in_water             | ✗   | ✓   | ✗     |
     +---------------------------------+-----+-----+-------+
 
-    **Extrapolation:**  Outside table bounds the interpolators extrapolate
-    linearly/cubically.  Set `warn_on_extrapolation=True` to log warnings.
+    **Extrapolation:** Outside table bounds the interpolators extrapolate
+    linearly/cubically. Set `warn_on_extrapolation=True` to log warnings.
 
     **Performance:**  Uses `RectBivariateSpline` for 2D (oil/gas) - 10-50x
     faster than `RegularGridInterpolator`, and uses `RegularGridInterpolator`
@@ -407,7 +407,7 @@ class PVTTable(StoreSerializable):
         self._interpolators: typing.Dict[str, typing.Any] = {}
         self._build_interpolators(data)
 
-        logger.info(
+        logger.debug(
             f"PVTTable initialized: phase={self.phase.value.upper()}, "
             f"P ∈ [{data.pressures[0]:.4f}, {data.pressures[-1]:.4f}] psi, "
             f"T ∈ [{data.temperatures[0]:.4f}, {data.temperatures[-1]:.4f}] °F, "

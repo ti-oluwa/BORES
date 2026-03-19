@@ -484,7 +484,7 @@ class PseudoPressureTable(
             self.z_factor_func = None  # type: ignore[assignment]
             self.viscosity_func = None  # type: ignore[assignment]
 
-            logger.info(
+            logger.debug(
                 f"Built pseudo-pressure table from {len(pressures)} data points: "
                 f"P ∈ [{pressures.min():.4f}, {pressures.max():.4f}] psi"
             )
@@ -516,7 +516,7 @@ class PseudoPressureTable(
                 reference_pressure=self.reference_pressure,
                 dtype=dtype,
             )
-            logger.info(
+            logger.debug(
                 f"Pseudo-pressure table built: P ∈ [{min_pressure:.4f}, {max_pressure:.4f}] psi"
             )
 
@@ -576,7 +576,7 @@ class PseudoPressureTable(
         """
         if self.z_factor_func is None or self.viscosity_func is None:
             raise ValidationError(
-                "`gradient()` method requires function-based construction mode. "
+                "`gradient(...)` method requires function-based construction mode. "
                 "Table was built from data values without Z-factor/viscosity functions. "
                 "Use numerical differentiation on the table instead."
             )

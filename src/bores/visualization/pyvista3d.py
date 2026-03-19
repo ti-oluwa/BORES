@@ -25,7 +25,7 @@ import numpy as np
 
 from bores._precision import get_dtype
 from bores.errors import ValidationError
-from bores.grids.base import coarsen_grid
+from bores.grids.utils import coarsen_grid
 from bores.models import ReservoirModel
 from bores.states import ModelState
 from bores.types import ThreeDimensionalGrid, ThreeDimensions
@@ -521,9 +521,9 @@ def _render_wells(
             well_type = "Injection (Shut-in)" if well.is_shut_in else "Injection"
             parts = [well.name, well_type]
             if hasattr(well, "radius"):
-                parts.append(f"r={well.radius:.2f} ft")
+                parts.append(f"Radius={well.radius:.2f} ft")
             if hasattr(well, "skin_factor"):
-                parts.append(f"S={well.skin_factor:.2f}")
+                parts.append(f"Skin={well.skin_factor:.2f}")
             if hasattr(well, "control") and well.control is not None:
                 parts.append(str(well.control)[:100])
             label_text = "\n".join(parts)
@@ -622,11 +622,11 @@ def _render_wells(
             well_type = "Production (Shut-in)" if well.is_shut_in else "Production"
             parts = [well.name, well_type]
             if hasattr(well, "radius"):
-                parts.append(f"r={well.radius:.2f} ft")
+                parts.append(f"Radius={well.radius:.2f} ft")
             if hasattr(well, "skin_factor"):
-                parts.append(f"S={well.skin_factor:.2f}")
+                parts.append(f"Skin={well.skin_factor:.2f}")
             if hasattr(well, "control") and well.control is not None:
-                parts.append(str(well.control)[:100])
+                parts.append(str(well.control)[:150])
             label_text = "\n".join(parts)
             plotter.add_point_labels(
                 [(x_surf, y_surf, label_z)],

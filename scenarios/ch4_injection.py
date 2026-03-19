@@ -65,7 +65,7 @@ def setup_run():
 
     # Production well
     production_clamp = bores.ProductionClamp()
-    control = bores.MultiPhaseRateControl(
+    control = bores.MultiPhaseControl(
         oil_control=bores.AdaptiveRateControl(
             target_rate=-150,
             target_phase="oil",

@@ -80,7 +80,7 @@ def setup_grid():
     # -------------------------------------------------------------------------
     # Bubble-point pressure
     # From Table 2: highest saturated pressure = 4014.7 psia
-    # Reservoir is initially UNDERSATURATED (Pi = 4800 > Pb = 4014.7)
+    # Reservoir is initially undersaturated (Pi = 4800 > Pb = 4014.7)
     # -------------------------------------------------------------------------
     oil_bubble_point_pressure_grid = bores.uniform_grid(
         grid_shape=grid_shape,
@@ -101,7 +101,7 @@ def setup_grid():
 
     kx_values = bores.array([500.0, 50.0, 200.0])  # mD per layer
     ky_values = bores.array([500.0, 50.0, 200.0])
-    kz_values = bores.array([50.0, 50.0, 25.0])  # vertical permeability
+    kz_values = bores.array([50.0, 25.0, 50.0])
 
     kx_grid = bores.layered_grid(
         grid_shape=grid_shape,
@@ -136,12 +136,17 @@ def setup_grid():
 
     # Rel-perm endpoints from Table 3
     residual_oil_saturation_water_grid = bores.uniform_grid(
-        grid_shape=grid_shape, value=0.0
+        grid_shape=grid_shape,
+        value=0.3,  # Not determinable from relperm table so we just set as this
     )
     residual_oil_saturation_gas_grid = bores.uniform_grid(
-        grid_shape=grid_shape, value=0.0
+        grid_shape=grid_shape,
+        value=0.3,  # From relperm table
     )
-    residual_gas_saturation_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.0)
+    residual_gas_saturation_grid = bores.uniform_grid(
+        grid_shape=grid_shape,
+        value=0.001,  # From relperm table
+    )
 
     oil_saturation_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.88)
     water_saturation_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.12)
@@ -187,7 +192,6 @@ def setup_grid():
             2514.7,
             3014.7,
             4014.7,  # Bubble point
-            5014.7,  # Undersaturated
             9014.7,  # Undersaturated
         ]
     )
@@ -198,7 +202,7 @@ def setup_grid():
     n_t = len(pvt_temperatures)
 
     # -------------------------------------------------------------------------
-    # OIL PROPERTIES (from "Saturated Oil PVT Functions" and "Undersaturated Oil PVT Functions")
+    # OIL PROPERTIES (from "Undersaturated Oil PVT Functions")
     # -------------------------------------------------------------------------
 
     # Solution GOR (Rs) - SCF/STB
@@ -213,7 +217,6 @@ def setup_grid():
             775.0,  # 2514.7
             930.0,  # 3014.7
             1270.0,  # 4014.7 (bubble point)
-            1270.0,  # 5014.7 (undersaturated - Rs frozen)
             1270.0,  # 9014.7 (undersaturated - Rs frozen)
         ]
     )
@@ -230,21 +233,12 @@ def setup_grid():
             1.4350,  # 2014.7
             1.5000,  # 2514.7
             1.5650,  # 3014.7
-            1.6950,  # 4014.7 (bubble point) — matches undersaturated table
-            1.6718,  # 5014.7 (interpolated: 1.6950 + (1.5790-1.6950)*(1000/5000))
+            1.6950,  # 4014.7 (bubble point)
             1.5790,  # 9014.7 (undersaturated table, explicit)
         ]
     )
 
     # Oil Viscosity (μo) - cP
-    # Above Pb: viscosity INCREASES with pressure (undersaturated compression,
-    # no more gas liberation to thin the oil).
-    # Pb value = 0.5100 cP. At 9014.7 psia, extrapolate using dead oil trend.
-    # Standard correlation: μo_us = μo_b * exp(c_visc * (P - Pb))
-    # With μo_b=0.5100, approximate c_visc ~ 2.5e-4 from saturated branch slope:
-    #   at 5014.7: 0.5100 * exp(2.5e-4 * 1000) = 0.5100 * 1.284 ≈ 0.655 cP
-    #   at 9014.7: 0.5100 * exp(2.5e-4 * 5000) = 0.5100 * 3.490 ≈ 1.780 cP
-    # These are reasonable for a 35-40 API undersaturated oil.
     oil_viscosity_values = bores.array(
         [
             1.0400,  # 14.7 psia
@@ -255,16 +249,11 @@ def setup_grid():
             0.6410,  # 2514.7
             0.5940,  # 3014.7
             0.5100,  # 4014.7 (bubble point)
-            0.6550,  # 5014.7 (undersaturated — increases above Pb)
-            1.7800,  # 9014.7 (undersaturated — significantly higher)
+            0.7400,  # 9014.7 (undersaturated — significantly higher)
         ]
     )
 
     # Oil Density (ρo) - lbm/ft³
-    # Above Pb: from "Undersaturated Oil PVT Functions" — density INCREASES
-    # (compression dominates, no more gas liberation to lower density)
-    # At 4014.7: 37.046 lbm/ft³, at 9014.7: 39.768 lbm/ft³ (explicit in table)
-    # At 5014.7: interpolate = 37.046 + (39.768-37.046)*(1000/5000) = 37.590
     oil_density_values = bores.array(
         [
             46.244,  # 14.7 psia
@@ -274,8 +263,7 @@ def setup_grid():
             38.995,  # 2014.7
             38.304,  # 2514.7
             37.781,  # 3014.7
-            37.046,  # 4014.7 (bubble point) — matches undersaturated table
-            37.590,  # 5014.7 (interpolated from undersaturated table)
+            37.046,  # 4014.7 (bubble point)
             39.768,  # 9014.7 (undersaturated table, explicit)
         ]
     )
@@ -296,12 +284,10 @@ def setup_grid():
                 0.001294,  # 2514.7
                 0.001080,  # 3014.7
                 0.000811,  # 4014.7
-                0.000649,  # 5014.7
                 0.000386,  # 9014.7
             ]
         )
         * bores.c.BARRELS_TO_CUBIC_FEET
-        / 1000
     )
 
     # Gas Viscosity (μg) - cP
@@ -315,7 +301,6 @@ def setup_grid():
             0.020800,  # 2514.7
             0.022800,  # 3014.7
             0.026800,  # 4014.7
-            0.030900,  # 5014.7
             0.047000,  # 9014.7
         ]
     )
@@ -331,7 +316,6 @@ def setup_grid():
             8.3326,  # 2514.7
             9.9837,  # 3014.7
             13.2952,  # 4014.7
-            16.6139,  # 5014.7
             27.9483,  # 9014.7
         ]
     )
@@ -351,7 +335,6 @@ def setup_grid():
             1.0335,  # 2514.7
             1.0320,  # 3014.7
             1.0290,  # 4014.7
-            1.0258,  # 5014.7
             1.0130,  # 9014.7
         ]
     )
@@ -367,7 +350,6 @@ def setup_grid():
             0.3100,  # 2514.7
             0.3100,  # 3014.7
             0.3100,  # 4014.7
-            0.3100,  # 5014.7
             0.3100,  # 9014.7
         ]
     )
@@ -383,13 +365,12 @@ def setup_grid():
             62.690,  # 2514.7
             62.781,  # 3014.7
             62.964,  # 4014.7
-            63.160,  # 5014.7
             63.959,  # 9014.7
         ]
     )
 
     # Gas solubility in water (Rsw) - SCF/STB (all zero per table)
-    gas_solubility_in_water_values = bores.array([0.0] * 10)
+    gas_solubility_in_water_values = bores.array([0.0] * 9)
 
     # -------------------------------------------------------------------------
     # Build 2D Tables (n_pressures × n_temperatures)
@@ -631,6 +612,8 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
             4014.7,
             5014.7,
             6014.7,
+            8014.7,
+            10014.7,
         ]
     )
     gas_pseudo_pressures = bores.array(
@@ -645,6 +628,8 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
             8.03683e8,  # 0.803683E+09
             1.15239e9,  # 1.15239E+10
             2.51848e9,  # 0.251848E+10
+            2.20000e9,  # extrapolated
+            3.00000e9,  # extrapolated to cover bhp_limit
         ]
     )
     pseudo_pressure_table = bores.PseudoPressureTable(
@@ -692,7 +677,7 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
             ),
             secondary_clamp=bores.ProductionClamp(),
         ),
-        produced_fluids=(
+        produced_fluids=[
             bores.ProducedFluid(
                 name="Oil",
                 phase=bores.FluidPhase.OIL,
@@ -706,13 +691,13 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
                 molecular_weight=gas_molecular_weight,
                 pseudo_pressure_table=pseudo_pressure_table,
             ),
-            bores.ProducedFluid(
-                name="Water",
-                phase=bores.FluidPhase.WATER,
-                specific_gravity=1.00,
-                molecular_weight=bores.c.MOLECULAR_WEIGHT_WATER,
-            ),
-        ),
+            # bores.ProducedFluid(
+            #     name="Water",
+            #     phase=bores.FluidPhase.WATER,
+            #     specific_gravity=1.00,
+            #     molecular_weight=bores.c.MOLECULAR_WEIGHT_WATER,
+            # ),
+        ],
         skin_factor=0.0,
         is_active=True,
     )
@@ -724,10 +709,10 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
     timer = bores.Timer(
         initial_step_size=bores.Time(days=3.0),
         max_step_size=bores.Time(days=30.0),
-        min_step_size=bores.Time(minutes=20.0),
-        simulation_time=bores.Time(years=10.0),
-        max_cfl_number=0.9,
-        ramp_up_factor=1.2,
+        min_step_size=bores.Time(minutes=10.0),
+        simulation_time=bores.Time(years=5.0),
+        max_cfl_number=0.5,
+        ramp_up_factor=1.3,
         backoff_factor=0.5,
         aggressive_backoff_factor=0.25,
         max_rejects=20,
@@ -758,9 +743,9 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
         disable_capillary_effects=True,
         freeze_saturation_pressure=False,
         miscibility_model="immiscible",
-        max_gas_saturation_change=0.1,
-        max_oil_saturation_change=0.2,
-        max_water_saturation_change=0.1,
+        max_gas_saturation_change=0.05,
+        max_oil_saturation_change=0.05,
+        max_water_saturation_change=0.05,
         max_pressure_change=1800.0,
         use_pseudo_pressure=True,
         normalize_saturations=True,
@@ -801,7 +786,7 @@ def run_simulation(Path, bores, store):
 @app.cell
 def load_states(bores, store):
     store_stream = bores.StateStream(store=store)
-    states = list(store_stream.replay(steps=lambda s: s % 2 == 0))
+    states = list(store_stream.replay(steps=lambda s: s % 5 == 0))
     return (states,)
 
 
@@ -838,10 +823,10 @@ def setup_analysis(bores, np, states):
     for s in states:
         time_step = s.step
         fluid_properties = s.model.fluid_properties
-        avg_oil_sat = np.mean(fluid_properties.oil_saturation_grid)
-        avg_water_sat = np.mean(fluid_properties.water_saturation_grid)
-        avg_gas_sat = np.mean(fluid_properties.gas_saturation_grid)
-        avg_pressure = np.mean(fluid_properties.pressure_grid[9, 9, 0])
+        avg_oil_sat = np.mean(fluid_properties.oil_saturation_grid[0,0,0])
+        avg_water_sat = np.mean(fluid_properties.water_saturation_grid[0,0,0])
+        avg_gas_sat = np.mean(fluid_properties.gas_saturation_grid[0,0,0])
+        avg_pressure = np.mean(fluid_properties.pressure_grid[9,9,2])
 
         oil_saturation_history.append((time_step, avg_oil_sat))
         water_saturation_history.append((time_step, avg_water_sat))
@@ -875,12 +860,10 @@ def setup_analysis(bores, np, states):
         gas_saturation_history,
         gor_history,
         oil_rate_history,
-        oil_saturation_history,
         recovery_efficiency_history,
         volumetric_sweep_efficiency_history,
         water_cut_history,
         water_rate_history,
-        water_saturation_history,
     )
 
 
@@ -901,18 +884,12 @@ def pressure_plot(avg_pressure_history, bores, np):
 
 
 @app.cell
-def saturation_plots(
-    bores,
-    gas_saturation_history,
-    np,
-    oil_saturation_history,
-    water_saturation_history,
-):
+def saturation_plots(bores, gas_saturation_history, np):
     # Saturation
     saturation_fig = bores.make_series_plot(
         data={
-            "Avg. Water Saturation": np.array(water_saturation_history),
-            "Avg. Oil Saturation": np.array(oil_saturation_history),
+            # "Avg. Water Saturation": np.array(water_saturation_history),
+            # "Avg. Oil Saturation": np.array(oil_saturation_history),
             "Avg. Gas Saturation": np.array(gas_saturation_history),
         },
         title="Saturation Analysis",
@@ -1204,7 +1181,7 @@ def recovery_plots(analyst, bores, np, recovery_efficiency_history):
 @app.cell
 def _(analyst):
     mbe = analyst.material_balance_error()
-    print(mbe.total_mbe)
+    print(mbe.water_mbe)
     return
 
 
@@ -1235,13 +1212,13 @@ def _(bores, states, viz, wells):
         show_wells=True,
         show_surface_marker=True,
         show_perforations=True,
-        cmin=0.0,
-        cmax=1,
+        # cmin=0.0,
+        # cmax=0.5,
     )
 
-    property = "oil-sat"
+    property = "gas-sat"
     figures = []
-    timesteps = [900]
+    timesteps = [194]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],
@@ -1260,17 +1237,21 @@ def _(bores, states, viz, wells):
 
 
 @app.cell
-def _(states, viz):
-    viz.animate(
+def _(bores, states):
+    bores.pyvista3d.DataVisualizer(bores.pyvista3d.PlotConfig(off_screen=True)).animate(
         states,
-        property="oil-saturation",
+        property="gas-saturation",
         plot_type="cell_blocks",
-        save="oil_saturation.mp4",
+        save="gas_saturation2.mp4",
         frame_duration=250,
         # step_size=5,  # Every 5th timestep
         cmin=0.0,
         cmax=1.0,  # Fixed range for consistent coloring
         opacity=1.0,
+        z_scale=5.0,
+        show_wells=True,
+        show_surface_marker=True,
+        show_perforations=True,
     )
     return
 

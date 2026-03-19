@@ -27,8 +27,6 @@ from bores.grids.base import (
     RelPermGrids,
     _RateGridsProxy,
     build_uniform_grid,
-    pad_grid,
-    unpad_grid,
 )
 from bores.grids.boundary_conditions import apply_boundary_conditions
 from bores.grids.pvt import (
@@ -41,6 +39,7 @@ from bores.grids.updates import (
     update_pvt_grids,
     update_residual_saturation_grids,
 )
+from bores.grids.utils import pad_grid, unpad_grid
 from bores.models import (
     FluidProperties,
     ReservoirModel,
@@ -907,11 +906,6 @@ def _run_sequential_implicit_step(
         config=config,
         pressure_change_grid=pressure_change_grid,
         pad_width=pad_width,
-        max_newton_iterations=config.max_newton_iterations,
-        newton_tolerance=config.newton_tolerance,
-        line_search_max_cuts=config.line_search_max_cuts,
-        max_saturation_step=config.max_saturation_step,
-        saturation_convergence_tolerance=config.newton_saturation_change_tolerance,
     )
     saturation_solution = saturation_result.value
     saturation_change_result = _check_saturation_changes(
@@ -1489,7 +1483,6 @@ class Run(StoreSerializable):
     for state in run:
         # Process the model state at each output interval
         process(state)
-
     ```
     """
 
@@ -1560,7 +1553,7 @@ class Run(StoreSerializable):
             pvt_dataset = PVTDataSet.from_file(pvt_data_path)
             if pvt_dataset is None:
                 raise ValidationError("Failed to load `PVTDataSet` from file.")
-            
+
             pvt_tables = PVTTables.from_dataset(pvt_dataset)
             config = config.with_updates(pvt_tables=pvt_tables)
         return cls(model=model, config=config)

@@ -32,7 +32,7 @@ from bores.types import (
     ThreeDimensionalGrid,
     ThreeDimensions,
 )
-from bores.wells import Wells
+from bores.wells.base import Wells
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ def saturations_to_vector(
     cell_count_x: int,
     cell_count_y: int,
     cell_count_z: int,
-) -> np.ndarray:
+) -> np.typing.NDArray:
     """
     Pack Sw and Sg from 3D grids into a 1D vector.
 
@@ -89,7 +89,7 @@ def saturations_to_vector(
 
 @numba.njit(cache=True)
 def vector_to_saturation_grids(
-    saturation_vector: np.ndarray,
+    saturation_vector: np.typing.NDArray,
     water_saturation_grid: ThreeDimensionalGrid,
     oil_saturation_grid: ThreeDimensionalGrid,
     gas_saturation_grid: ThreeDimensionalGrid,
@@ -115,7 +115,7 @@ def vector_to_saturation_grids(
 
 
 @numba.njit(cache=True)
-def project_to_feasible(saturation_vector: np.ndarray) -> np.ndarray:
+def project_to_feasible(saturation_vector: np.typing.NDArray) -> np.typing.NDArray:
     """
     Project saturation vector onto the feasible set:
         0 <= Sw, 0 <= Sg, and Sw + Sg <= 1.
@@ -137,9 +137,9 @@ def project_to_feasible(saturation_vector: np.ndarray) -> np.ndarray:
 
 @numba.njit(cache=True)
 def interleave_residuals(
-    residual_water: np.ndarray,
-    residual_gas: np.ndarray,
-) -> np.ndarray:
+    residual_water: np.typing.NDArray,
+    residual_gas: np.typing.NDArray,
+) -> np.typing.NDArray:
     """
     Interleave water and gas residual arrays into a single vector.
 
@@ -190,7 +190,7 @@ def compute_saturation_residual(
     water_compressibility_grid: ThreeDimensionalGrid,
     gas_compressibility_grid: ThreeDimensionalGrid,
     rock_compressibility: float,
-) -> typing.Tuple[np.ndarray, np.ndarray]:
+) -> typing.Tuple[np.typing.NDArray, np.typing.NDArray]:
     """
     Compute the residual vector R(S) for the implicit saturation equations.
 
@@ -549,7 +549,7 @@ def evaluate_residual(
     rock_compressibility: float,
     pad_width: int,
     dtype: np.typing.DTypeLike,
-) -> typing.Tuple[np.ndarray, np.ndarray]:
+) -> typing.Tuple[np.typing.NDArray, np.typing.NDArray]:
     """
     Full residual evaluation: recomputes saturation-dependent properties,
     well rates, and then calls the Numba residual kernel.
@@ -1312,11 +1312,6 @@ def evolve_saturation(
     config: Config,
     pressure_change_grid: ThreeDimensionalGrid,
     pad_width: int = 1,
-    max_newton_iterations: int = 12,
-    newton_tolerance: float = 1e-6,
-    line_search_max_cuts: int = 4,
-    max_saturation_step: float = 0.05,
-    saturation_convergence_tolerance: float = 1e-4,
 ) -> EvolutionResult[ImplicitSaturationSolution, typing.List[NewtonConvergenceInfo]]:
     """
     Solve the implicit saturation equations for a three-phase system.
@@ -1332,11 +1327,6 @@ def evolve_saturation(
     :param config: Simulation configuration.
     :param pressure_change_grid: P_new - P_old (psi) for PVT volume correction.
     :param pad_width: Ghost cell padding width.
-    :param max_newton_iterations: Maximum Newton iterations.
-    :param newton_tolerance: Relative residual convergence tolerance.
-    :param line_search_max_cuts: Maximum line search bisections.
-    :param max_saturation_step: Maximum per-cell saturation change per Newton iteration.
-    :param saturation_convergence_tolerance: Saturation change tolerance for dual convergence.
     :return: `EvolutionResult` containing `ImplicitSaturationSolution`.
     """
     cell_size_x, cell_size_y = cell_dimension
@@ -1367,9 +1357,9 @@ def evolve_saturation(
         gas_compressibility_grid=fluid_properties.gas_compressibility_grid,
         rock_compressibility=rock_properties.compressibility,
         pad_width=pad_width,
-        max_newton_iterations=max_newton_iterations,
-        newton_tolerance=newton_tolerance,
-        line_search_max_cuts=line_search_max_cuts,
-        max_saturation_step=max_saturation_step,
-        saturation_convergence_tolerance=saturation_convergence_tolerance,
+        max_newton_iterations=config.max_newton_iterations,
+        newton_tolerance=config.newton_tolerance,
+        line_search_max_cuts=config.line_search_max_cuts,
+        max_saturation_step=config.max_saturation_step,
+        saturation_convergence_tolerance=config.saturation_convergence_tolerance,
     )

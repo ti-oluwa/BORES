@@ -13,7 +13,7 @@ The User Guide provides detailed documentation for every major subsystem in BORE
 | [Capillary Pressure](capillary-pressure.md) | Brooks-Corey, Van Genuchten, Leverett J-function, and tabular capillary pressure |
 | **Wells** | |
 | [Well Basics](wells/basics.md) | Production and injection wells, perforations, well index, skin factor |
-| [Well Controls](wells/controls.md) | Rate controls, BHP controls, CoupledRateControl, MultiPhaseRateControl |
+| [Well Controls](wells/controls.md) | Rate controls, BHP controls, CoupledRateControl, MultiPhaseControl |
 | [Well Fluids](wells/fluids.md) | Produced fluids, injected fluids, CO2 property overrides |
 | [Well Schedules](wells/schedules.md) | Time-dependent well events, predicates, and actions |
 | [Well Patterns](wells/patterns.md) | Common well placement patterns for waterfloods and EOR |

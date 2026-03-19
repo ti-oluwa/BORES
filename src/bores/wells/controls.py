@@ -9,7 +9,7 @@ import numba
 
 from bores.constants import c
 from bores.correlations.core import compute_gas_compressibility_factor
-from bores.errors import ValidationError
+from bores.errors import ComputationError, ValidationError
 from bores.serialization import Serializable, make_serializable_type_registrar
 from bores.stores import StoreSerializable
 from bores.tables.pvt import PVTTables
@@ -29,7 +29,7 @@ __all__ = [
     "BHPControl",
     "CoupledRateControl",
     "InjectionClamp",
-    "MultiPhaseRateControl",
+    "MultiPhaseControl",
     "ProductionClamp",
     "RateClamp",
     "RateControl",
@@ -66,7 +66,7 @@ def _disallow_flow(
     )
 
 
-def _setup_gas_pseudo_pressure(
+def _get_pseudo_pressure_table(
     fluid: WellFluid,
     pressure: float,
     temperature: float,
@@ -74,7 +74,7 @@ def _setup_gas_pseudo_pressure(
     pvt_tables: typing.Optional[PVTTables] = None,
 ) -> typing.Tuple[bool, typing.Optional[typing.Any]]:
     """
-    Setup pseudo-pressure table for gas wells if needed.
+    Get existing pseudo-pressure table or setup a new one for gas well fluid if needed.
 
     :return: Tuple of (use_pseudo_pressure, pseudo_pressure_table)
     """
@@ -90,7 +90,7 @@ def _setup_gas_pseudo_pressure(
 
 
 @numba.njit(cache=True)
-def _compute_avg_z_factor(
+def _compute_average_compressibility_factor(
     pressure: float,
     temperature: float,
     gas_gravity: float,
@@ -168,7 +168,7 @@ def _compute_required_bhp(
     """
     if fluid.phase == FluidPhase.GAS:
         # Setup pseudo-pressure if needed
-        use_pp, pp_table = _setup_gas_pseudo_pressure(
+        use_pp, pp_table = _get_pseudo_pressure_table(
             fluid=fluid,
             pressure=pressure,
             temperature=temperature,
@@ -177,14 +177,15 @@ def _compute_required_bhp(
         )
 
         # Compute Z-factor using reservoir pressure as initial estimate
-        specific_gravity = fluid.get_specific_gravity(
-            pressure=pressure, temperature=temperature
+        specific_gravity = typing.cast(
+            float,
+            fluid.get_specific_gravity(pressure=pressure, temperature=temperature),
         )
         if specific_gravity is None:
             raise ValidationError(
                 "Well fluid has no specific gravity define. Specify a value or provide a PVT table for the fluid."
             )
-        avg_z = _compute_avg_z_factor(
+        avg_z_factor = _compute_average_compressibility_factor(
             pressure=pressure,
             temperature=temperature,
             gas_gravity=specific_gravity,
@@ -195,7 +196,7 @@ def _compute_required_bhp(
             pressure=pressure,
             temperature=temperature,
             phase_mobility=phase_mobility,
-            average_compressibility_factor=avg_z,
+            average_compressibility_factor=avg_z_factor,
             use_pseudo_pressure=use_pp,
             pseudo_pressure_table=pp_table,
             formation_volume_factor=formation_volume_factor,
@@ -511,7 +512,7 @@ class BHPControl(WellControl[WellFluidTcon]):
         # Compute rate based on fluid phase
         if fluid.phase == FluidPhase.GAS:
             # Setup pseudo-pressure if needed
-            use_pp, pp_table = _setup_gas_pseudo_pressure(
+            use_pp, pp_table = _get_pseudo_pressure_table(
                 fluid=fluid,
                 pressure=pressure,
                 temperature=temperature,
@@ -519,14 +520,15 @@ class BHPControl(WellControl[WellFluidTcon]):
                 pvt_tables=pvt_tables,
             )
             # Compute Z-factor using reservoir pressure as initial estimate
-            specific_gravity = fluid.get_specific_gravity(
-                pressure=pressure, temperature=temperature
+            specific_gravity = typing.cast(
+                float,
+                fluid.get_specific_gravity(pressure=pressure, temperature=temperature),
             )
             if specific_gravity is None:
                 raise ValidationError(
                     "Well fluid has no specific gravity define. Specify a value or provide a PVT table for the fluid."
                 )
-            avg_z = _compute_avg_z_factor(
+            avg_z_factor = _compute_average_compressibility_factor(
                 pressure=pressure,
                 temperature=temperature,
                 gas_gravity=specific_gravity,
@@ -540,7 +542,7 @@ class BHPControl(WellControl[WellFluidTcon]):
                 phase_mobility=phase_mobility,
                 use_pseudo_pressure=use_pp,
                 pseudo_pressure_table=pp_table,
-                average_compressibility_factor=avg_z,
+                average_compressibility_factor=avg_z_factor,
                 formation_volume_factor=formation_volume_factor,
             )
         else:
@@ -737,7 +739,7 @@ class RateControl(WellControl[WellFluidTcon]):
                     pvt_tables=pvt_tables,
                 )
 
-            except (ValueError, ZeroDivisionError) as exc:
+            except (ValueError, ZeroDivisionError, ComputationError) as exc:
                 logger.warning(
                     f"Failed to compute required BHP for target rate {target_rate:.6f}: {exc}. "
                     "Returning 0."
@@ -828,7 +830,7 @@ class RateControl(WellControl[WellFluidTcon]):
                 incompressibility_threshold=c.FLUID_INCOMPRESSIBILITY_THRESHOLD,
                 pvt_tables=pvt_tables,
             )
-        except (ValueError, ZeroDivisionError) as exc:
+        except (ValueError, ZeroDivisionError, ComputationError) as exc:
             logger.warning(
                 f"Cannot compute required BHP: {exc}. Using reservoir pressure."
             )
@@ -949,7 +951,9 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
             object.__setattr__(self, "target_phase", FluidPhase(self.target_phase))
 
     def get_type(self) -> WellControlType:
-        return "custom"
+        # This is a rate first control although it uses bhp when `bhp_limit` kicks in.
+        # Hence the name adaptive "rate" control
+        return "rate"
 
     def get_flow_rate(
         self,
@@ -1021,7 +1025,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 incompressibility_threshold=incompressibility_threshold,
                 pvt_tables=pvt_tables,
             )
-        except (ValueError, ZeroDivisionError) as exc:
+        except (ValueError, ZeroDivisionError, ComputationError) as exc:
             logger.warning(
                 f"Failed to compute required BHP for adaptive control: {exc}. "
                 "Switching to BHP mode.",
@@ -1061,7 +1065,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
 
         # Compute rate at minimum bottom hole pressure using same logic as BHP control
         if fluid.phase == FluidPhase.GAS:
-            use_pp, pp_table = _setup_gas_pseudo_pressure(
+            use_pp, pp_table = _get_pseudo_pressure_table(
                 fluid=fluid,
                 pressure=pressure,
                 temperature=temperature,
@@ -1069,14 +1073,15 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 pvt_tables=pvt_tables,
             )
             # Compute Z-factor using reservoir pressure as initial estimate
-            specific_gravity = fluid.get_specific_gravity(
-                pressure=pressure, temperature=temperature
+            specific_gravity = typing.cast(
+                float,
+                fluid.get_specific_gravity(pressure=pressure, temperature=temperature),
             )
             if specific_gravity is None:
                 raise ValidationError(
                     "Well fluid has no specific gravity define. Specify a value or provide a PVT table for the fluid."
                 )
-            avg_z = _compute_avg_z_factor(
+            avg_z_factor = _compute_average_compressibility_factor(
                 pressure=pressure,
                 temperature=temperature,
                 gas_gravity=specific_gravity,
@@ -1090,7 +1095,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 phase_mobility=phase_mobility,
                 use_pseudo_pressure=use_pp,
                 pseudo_pressure_table=pp_table,
-                average_compressibility_factor=avg_z,
+                average_compressibility_factor=avg_z_factor,
                 formation_volume_factor=formation_volume_factor,
             )
         else:
@@ -1174,7 +1179,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 incompressibility_threshold=c.FLUID_INCOMPRESSIBILITY_THRESHOLD,
                 pvt_tables=pvt_tables,
             )
-        except (ValueError, ZeroDivisionError) as exc:
+        except (ValueError, ZeroDivisionError, ComputationError) as exc:
             logger.debug(f"Cannot achieve rate mode: {exc}. Using BHP mode.")
             return (
                 _apply_clamp(
@@ -1286,7 +1291,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
         object.__setattr__(self, "primary_phase", FluidPhase(self.primary_phase))
 
     def get_type(self) -> WellControlType:
-        return "custom"
+        return "rate"
 
     def _compute_primary_bhp(
         self,
@@ -1472,7 +1477,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
 
         # Compute secondary phase rate at the primary-phase-derived BHP
         if fluid.phase == FluidPhase.GAS:
-            use_pp, pp_table = _setup_gas_pseudo_pressure(
+            use_pp, pp_table = _get_pseudo_pressure_table(
                 fluid=fluid,
                 pressure=pressure,
                 temperature=temperature,
@@ -1480,14 +1485,15 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
                 pvt_tables=pvt_tables,
             )
             # Compute Z-factor using reservoir pressure as initial estimate
-            specific_gravity = fluid.get_specific_gravity(
-                pressure=pressure, temperature=temperature
+            specific_gravity = typing.cast(
+                float,
+                fluid.get_specific_gravity(pressure=pressure, temperature=temperature),
             )
             if specific_gravity is None:
                 raise ValidationError(
                     "Well fluid has no specific gravity define. Specify a value or provide a PVT table for the fluid."
                 )
-            avg_z = _compute_avg_z_factor(
+            avg_z_factor = _compute_average_compressibility_factor(
                 pressure=pressure,
                 temperature=temperature,
                 gas_gravity=specific_gravity,
@@ -1501,7 +1507,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
                 phase_mobility=phase_mobility,
                 use_pseudo_pressure=use_pp,
                 pseudo_pressure_table=pp_table,
-                average_compressibility_factor=avg_z,
+                average_compressibility_factor=avg_z_factor,
                 formation_volume_factor=formation_volume_factor,
             )
         else:
@@ -1570,11 +1576,11 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
 
 @well_control
 @attrs.frozen
-class MultiPhaseRateControl(WellControl):
+class MultiPhaseControl(WellControl):
     """
-    Multi-phase rate control for wells.
+    Multi-phase well control for wells.
 
-    Defines separate rate controls for oil, gas, and water phases.
+    Defines separate well controls for oil, gas, and water phases.
     """
 
     __type__ = "multi_phase_rate_control"
@@ -1746,14 +1752,14 @@ class MultiPhaseRateControl(WellControl):
         oil_control: typing.Optional[WellControl] = None,
         gas_control: typing.Optional[WellControl] = None,
         water_control: typing.Optional[WellControl] = None,
-    ) -> "MultiPhaseRateControl":
+    ) -> "MultiPhaseControl":
         """
-        Create a new `MultiPhaseRateControl` with updated controls.
+        Create a new `MultiPhaseControl` with updated controls.
 
         :param oil_control: New oil phase control. If None, retains existing.
         :param gas_control: New gas phase control. If None, retains existing.
         :param water_control: New water phase control. If None, retains existing.
-        :return: New `MultiPhaseRateControl` instance with updated controls.
+        :return: New `MultiPhaseControl` instance with updated controls.
         """
         return type(self)(
             oil_control=oil_control or self.oil_control,

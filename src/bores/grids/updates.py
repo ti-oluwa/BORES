@@ -506,18 +506,20 @@ def apply_solution_gas_liberation(
     bbl_to_ft3 = c.BARRELS_TO_CUBIC_FEET
 
     # delta > 0 means gas liberation, < 0 means potential re-dissolution
-    delta_solution_gas_to_oil_ratio = (
+    solution_gas_to_oil_ratio_change = (
         old_solution_gas_to_oil_ratio_grid - new_solution_gas_to_oil_ratio_grid
     )
 
     # Mask for cells where liberation occurs (Rs decreased)
-    liberation_mask = delta_solution_gas_to_oil_ratio > 0.0
+    liberation_mask = solution_gas_to_oil_ratio_change > 0.0
     # Mask for cells where re-dissolution could occur (Rs increased and free gas exists)
-    redissolution_mask = (delta_solution_gas_to_oil_ratio < 0.0) & (
+    redissolution_mask = (solution_gas_to_oil_ratio_change < 0.0) & (
         gas_saturation_grid > 0.0
     )
     # Mask for cells where Rs increased but no free gas to dissolve
-    no_gas_mask = (delta_solution_gas_to_oil_ratio < 0.0) & (gas_saturation_grid <= 0.0)
+    no_gas_mask = (solution_gas_to_oil_ratio_change < 0.0) & (
+        gas_saturation_grid <= 0.0
+    )
 
     # For Gas Liberation
     if np.any(liberation_mask):
@@ -526,7 +528,7 @@ def apply_solution_gas_liberation(
         # Liberated gas (SCF per ft³ pore) = delta_rs * N_o
         # Liberated gas at reservoir conditions (ft³ per ft³ pore) = SCF * Bg
         liberated_gas_saturation = (
-            delta_solution_gas_to_oil_ratio[liberation_mask]
+            solution_gas_to_oil_ratio_change[liberation_mask]
             * oil_saturation_grid[liberation_mask]
             * (
                 new_gas_formation_volume_factor_grid[liberation_mask]
@@ -557,7 +559,7 @@ def apply_solution_gas_liberation(
         )
         # `actual_delta` is negative; cap magnitude at what gas is available
         actual_delta = np.maximum(
-            delta_solution_gas_to_oil_ratio[redissolution_mask],
+            solution_gas_to_oil_ratio_change[redissolution_mask],
             -max_dissolvable_gor,
         )
         # Gas consumed (positive value subtracted from Sg)
