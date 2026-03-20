@@ -9,6 +9,7 @@ import typing
 from abc import ABC, abstractmethod
 from collections.abc import Mapping, Sequence
 from contextlib import contextmanager
+from importlib.metadata import version
 from os import PathLike
 from pathlib import Path
 
@@ -17,6 +18,7 @@ import numpy as np
 import orjson
 import yaml
 import zarr  # type: ignore[import-untyped]
+from packaging.version import Version
 from typing_extensions import ParamSpec, Self
 from zarr.storage import StoreLike  # type: ignore[import-untyped]
 
@@ -34,6 +36,8 @@ __all__ = [
 ]
 
 IS_PYTHON_310_OR_LOWER = sys.version_info < (3, 11)
+ZARR_VERSION_GTE_3 = Version(version("zarr")) >= Version("3.0.0")
+
 
 logger = logging.getLogger(__name__)
 
@@ -580,8 +584,7 @@ def _get_index_from_group_name(name: str) -> typing.Optional[int]:
 """
 DataStore with flattened entry layout.
 
-Encoding contract
------------------
+**Encoding contract**
 Path segments are percent-encoded so that the separator character (``→``,
 U+2192) and the escape character (``%``) can never appear unescaped in a
 segment.  This makes path encoding injective: two distinct nested paths can
@@ -590,8 +593,7 @@ never produce the same flat key.
     encode: "%" → "%25",  "→" → "%E2%86%92"
     decode: reverse of above
 
-Special value types
--------------------
+**Special value types**
 The following non-array leaf types need extra round-trip help and are tagged
 in a ``_vtypes`` attr dict stored once per entry group:
 
@@ -601,13 +603,11 @@ in a ``_vtypes`` attr dict stored once per entry group:
 
 Untagged scalars are int, float, or str and survive attrs round-trips natively.
 
-Empty sequences
----------------
+**Empty sequences**
 Written as a zero-length int8 dataset (same as the nested layout) so the
 array-vs-scalar distinction is preserved.
 
-Collision detection
--------------------
+**Collision detection**
 A debug-mode assertion checks that no two source paths produce the same
 encoded flat key.  This is a safeguard; in practice attrs field names cannot
 collide after encoding.
@@ -649,7 +649,7 @@ _INTERNAL = {"_vtypes", "_meta", "_index", "_group_name", "count", "version"}
 def _flatten(
     data: typing.Mapping[str, typing.Any],
     prefix: typing.Tuple[str, ...] = (),
-    out_arrays: typing.Optional[typing.Dict[str, np.ndarray]] = None,
+    out_arrays: typing.Optional[typing.Dict[str, np.typing.NDArray]] = None,
     out_scalars: typing.Optional[typing.Dict[str, typing.Any]] = None,
     out_vtypes: typing.Optional[typing.Dict[str, str]] = None,
 ) -> typing.Tuple[
@@ -737,7 +737,7 @@ def _flatten(
 
 
 def _unflatten(
-    arrays: typing.Dict[str, np.ndarray],
+    arrays: typing.Dict[str, np.typing.NDArray],
     scalars: typing.Dict[str, typing.Any],
     vtypes: typing.Dict[str, str],
 ) -> typing.Dict[str, typing.Any]:
@@ -861,22 +861,20 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
         self.chunks = chunks
         self._pending_count: int = 0
 
-        if IS_PYTHON_310_OR_LOWER:
-            from numcodecs import Blosc
+        # if IS_PYTHON_310_OR_LOWER:
+        from numcodecs import Blosc
 
-            self.compressor = Blosc(
-                cname=compressor,
-                clevel=compression_level,
-                shuffle=Blosc.BITSHUFFLE,
-            )
-        else:
-            from zarr.codecs import BloscCodec, BloscShuffle  # type: ignore[import]
+        self.compressor = Blosc(
+            cname=compressor, clevel=compression_level, shuffle=Blosc.BITSHUFFLE
+        )
+        # else:
+        #     from zarr.codecs import BloscCodec, BloscShuffle  # type: ignore[import]
 
-            self.compressor = BloscCodec(
-                cname=compressor,
-                clevel=compression_level,
-                shuffle=BloscShuffle.bitshuffle,
-            )
+        #     self.compressor = BloscCodec(
+        #         cname=compressor,
+        #         clevel=compression_level,
+        #         shuffle=BloscShuffle.bitshuffle,
+        #     )
 
     def open(self, mode: str = "a", **kwargs: typing.Any) -> None:
         """
@@ -891,11 +889,11 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
         try:
             self._handle = zarr.open_group(
                 store=self.store,
-                mode=mode,
-                zarr_version=2,  # type: ignore[arg-type]
+                mode=mode,  # type: ignore[arg-type]
+                zarr_version=2,
             )
             # Seed in-memory counter
-            self._pending_count = int(self._handle.attrs.get("count", 0))
+            self._pending_count = int(self._handle.attrs.get("count", 0))  # type: ignore
             logger.debug(
                 f"{self.__class__.__name__} opened (mode={mode!r}): {self.store!s}"
             )
@@ -945,15 +943,25 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
             return (min(20, shape[0]), min(20, shape[1]), min(20, shape[2]))
         if len(shape) == 2:
             return (min(100, shape[0]), min(100, shape[1]))
-        return None
+        return (min(shape[0], 1024),)
 
     def _create_dataset(
         self, group: zarr.Group, name: str, data: np.ndarray
     ) -> zarr.Array:
         chunks = self._get_chunks(data.shape)
+        if ZARR_VERSION_GTE_3:
+            return group.create_array(
+                name=name,
+                data=data,
+                shape=data.shape,
+                chunks=chunks or "auto",
+                compressor=self.compressor,
+                overwrite=True,
+            )
         return group.create_dataset(
             name=name,
             data=data,
+            shape=data.shape,
             chunks=chunks,
             compressor=self.compressor,
             overwrite=True,
@@ -1023,7 +1031,7 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
         Strips internal metadata keys before returning.
         """
         # Collect flat arrays
-        arrays: typing.Dict[str, np.ndarray] = {
+        arrays = {
             key: item_group[key][:]  # type: ignore[index]
             for key in item_group.array_keys()  # type: ignore[attr-defined]
         }
@@ -1033,7 +1041,7 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
             k: v for k, v in item_group.attrs.items() if k not in _INTERNAL
         }
         vtypes: typing.Dict[str, str] = dict(item_group.attrs.get("_vtypes", {}))
-        return _unflatten(arrays, scalars, vtypes)
+        return _unflatten(arrays, scalars, vtypes)  # type: ignore[arg-type]
 
     @reraise_storage_error
     def dump(
@@ -1099,7 +1107,7 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
             # Uses the in-memory `_pending_count` when a persistent handle is open
             index = self._pending_count
         else:
-            index = int(root.attrs.get("count", 0))
+            index = int(root.attrs.get("count", 0))  # type: ignore
 
         if validator is not None:
             item = validator(item)

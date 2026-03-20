@@ -61,7 +61,7 @@ __all__ = [
 ]
 
 
-def _warn_production_rate_is_positive(
+def _warn_production_rate(
     production_rate: float,
     well_name: str,
     cell: ThreeDimensions,
@@ -79,7 +79,7 @@ def _warn_production_rate_is_positive(
     )
 
 
-def _warn_injection_rate_is_negative(
+def _warn_injection_rate(
     injection_rate: float,
     well_name: str,
     cell: ThreeDimensions,
@@ -97,7 +97,7 @@ def _warn_injection_rate_is_negative(
     )
 
 
-def _warn_production_pressure_is_high(
+def _warn_production_pressure(
     bhp: float,
     well_name: str,
     cell: ThreeDimensions,
@@ -111,7 +111,7 @@ def _warn_production_pressure_is_high(
     )
 
 
-def _warn_injection_pressure_is_low(
+def _warn_injection_pressure(
     bhp: float,
     well_name: str,
     cell: ThreeDimensions,
@@ -697,7 +697,7 @@ def _lgmres(
         M=M,
         rtol=rtol,
         atol=atol,
-        maxiter=maxiter,
+        maxiter=maxiter or 1000,
         callback=callback,
         inner_m=inner_m,
         outer_k=outer_k,

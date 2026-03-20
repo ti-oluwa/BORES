@@ -18,8 +18,9 @@ from bores.grids.pvt import build_total_fluid_compressibility_grid
 from bores.models import FluidProperties, RockProperties
 from bores.solvers.base import (
     EvolutionResult,
-    _warn_injection_pressure_is_low,
-    _warn_production_pressure_is_high,
+    _warn_injection_pressure,
+    _warn_injection_rate,
+    _warn_production_pressure,
     compute_mobility_grids,
     solve_linear_system,
     to_1D_index_interior_only,
@@ -918,7 +919,7 @@ def compute_face_transmissibility_arrays(
     )
 
 
-@attrs.frozen
+@attrs.frozen(slots=True)
 class WellContributions:
     """
     COO-style arrays representing well contributions to the linear system A·p = b.
@@ -1196,11 +1197,11 @@ def compute_well_contributions(
                     )
 
                 if cell_pressure > effective_bhp and config.warn_well_anomalies:
-                    _warn_injection_pressure_is_low(
+                    _warn_injection_pressure(
                         bhp=effective_bhp,
                         cell_pressure=cell_pressure,
                         well_name=well.name,
-                        time=time_step * time_step_size,
+                        time=config.timer.elapsed_time + time_step_size,
                         cell=(i - pad_width, j - pad_width, k - pad_width),
                     )
 
@@ -1223,6 +1224,18 @@ def compute_well_contributions(
                     fluid_compressibility=phase_compressibility,
                     pvt_tables=None,
                 )
+
+                if flow_rate < 0.0 and config.warn_well_anomalies:
+                    _warn_injection_rate(
+                        injection_rate=flow_rate,
+                        well_name=well.name,
+                        time=config.timer.elapsed_time + time_step_size,
+                        cell=(i - pad_width, j - pad_width, k - pad_width),
+                        rate_unit="ft³/day"
+                        if injected_phase == FluidPhase.GAS
+                        else "bbls/day",
+                    )
+
                 if injected_phase != FluidPhase.GAS:
                     flow_rate *= bbl_to_ft3
 
@@ -1371,11 +1384,11 @@ def compute_well_contributions(
                     )
 
                 if cell_pressure < effective_bhp and config.warn_well_anomalies:
-                    _warn_production_pressure_is_high(
+                    _warn_production_pressure(
                         bhp=effective_bhp,
                         cell_pressure=cell_pressure,
                         well_name=well.name,
-                        time=time_step * time_step_size,
+                        time=config.timer.elapsed_time + time_step_size,
                         cell=(i - pad_width, j - pad_width, k - pad_width),
                     )
 

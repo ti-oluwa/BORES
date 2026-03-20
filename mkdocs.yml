@@ -42,7 +42,7 @@ theme:
   favicon: images/logo.svg
 
   font:
-    text: DM Sans
+    text: Manrope
     code: Roboto Mono
 
   language: en

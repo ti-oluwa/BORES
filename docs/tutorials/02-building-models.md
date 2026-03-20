@@ -179,7 +179,7 @@ When you later run a simulation with this model, the simulator will account for 
 
 !!! warning "Dip and Gravity"
 
-    Structural dip effects are computed using the depth grid and the gravity term in the flow equations. If you set `disable_structural_dip=True` in the `Config`, the simulator ignores gravity effects regardless of the dip angle specified in the model. This can be useful for debugging or for studying horizontal flow in isolation.
+    Structural dip effects are computed using the depth grid and the gravity term in the flow equations. If you set `disable_structural_dip=True` in the `Config`, the simulator ignores gravity effects **due to dipping** regardless of the dip angle specified in the model. This can be useful for debugging or for studying horizontal flow in isolation.
 
 ---
 
@@ -223,7 +223,7 @@ The permeability visualization reveals the same layered pattern but with a wider
 depth_grid = model.get_depth_grid(apply_dip=True)
 fig = viz.make_plot(
     source=depth_grid,
-    plot_type="volume",
+    plot_type="scatter_3d",
     title="Depth Grid with 3-Degree Eastward Dip",
 )
 fig.show()

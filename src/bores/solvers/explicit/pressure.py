@@ -14,8 +14,8 @@ from bores.grids.pvt import build_total_fluid_compressibility_grid
 from bores.models import FluidProperties, RockProperties
 from bores.solvers.base import (
     EvolutionResult,
-    _warn_injection_rate_is_negative,
-    _warn_production_rate_is_positive,
+    _warn_injection_rate,
+    _warn_production_rate,
     compute_mobility_grids,
 )
 from bores.types import FluidPhase, ThreeDimensionalGrid, ThreeDimensions
@@ -751,6 +751,7 @@ def compute_well_rate_grid(
     :return: 3D grid of net well flow rates (ft³/day), positive = injection, negative = production
     """
     well_rate_grid = np.zeros((cell_count_x, cell_count_y, cell_count_z), dtype=dtype)
+    bbl_to_ft3 = c.BARRELS_TO_CUBIC_FEET
 
     for well in wells.injection_wells:
         if not well.is_open or well.injected_fluid is None:
@@ -867,20 +868,20 @@ def compute_well_rate_grid(
                 pvt_tables=None,
             )
 
-            if injected_phase != FluidPhase.GAS:
-                cell_injection_rate *= c.BARRELS_TO_CUBIC_FEET
-
             # Check for backflow (negative injection)
             if cell_injection_rate < 0.0 and config.warn_well_anomalies:
-                _warn_injection_rate_is_negative(
+                _warn_injection_rate(
                     injection_rate=cell_injection_rate,
                     well_name=well.name,
-                    time=time_step * time_step_size,
+                    time=config.timer.elapsed_time + time_step_size,
                     cell=(i - pad_width, j - pad_width, k - pad_width),
                     rate_unit="ft³/day"
                     if injected_phase == FluidPhase.GAS
                     else "bbls/day",
                 )
+
+            if injected_phase != FluidPhase.GAS:
+                cell_injection_rate *= bbl_to_ft3
 
             well_rate_grid[i, j, k] += cell_injection_rate
 
@@ -942,7 +943,6 @@ def compute_well_rate_grid(
         for (i, j, k), well_index in well_index_cache:
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
             cell_oil_pressure = typing.cast(float, current_oil_pressure_grid[i, j, k])
-
             allocation_fraction = (
                 well_index / total_well_index if total_well_index > 0 else 1.0
             )
@@ -1036,10 +1036,10 @@ def compute_well_rate_grid(
 
                 # Check for backflow (positive production = injection)
                 if production_rate > 0.0 and config.warn_well_anomalies:
-                    _warn_production_rate_is_positive(
+                    _warn_production_rate(
                         production_rate=production_rate,
                         well_name=well.name,
-                        time=time_step * time_step_size,
+                        time=config.timer.elapsed_time + time_step_size,
                         cell=(i - pad_width, j - pad_width, k - pad_width),
                         rate_unit="ft³/day"
                         if produced_phase == FluidPhase.GAS
@@ -1048,7 +1048,7 @@ def compute_well_rate_grid(
 
                 # Convert to ft³/day if not already
                 if produced_phase != FluidPhase.GAS:
-                    production_rate *= c.BARRELS_TO_CUBIC_FEET
+                    production_rate *= bbl_to_ft3
 
                 # Production rates are already negative
                 well_rate_grid[i, j, k] += production_rate
@@ -1106,14 +1106,14 @@ def apply_pressure_updates(
                 # Total flow rate = flux from neighbors + well contribution
                 net_volumetric_flow = net_flux_grid[i, j, k]
                 net_well_flow = well_rate_grid[i, j, k]
-                total_flow_contact_anglerate = net_volumetric_flow + net_well_flow
+                total_flow_rate = net_volumetric_flow + net_well_flow
 
                 # Calculate pressure change
                 # dP = (Δt / (φ * c_t * V)) * Q_total
                 change_in_pressure = (
                     time_step_size_in_days
                     / (cell_porosity * cell_total_compressibility * cell_volume)
-                ) * total_flow_contact_anglerate
+                ) * total_flow_rate
 
                 # Apply the update
                 updated_grid[i, j, k] += change_in_pressure

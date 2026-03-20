@@ -65,6 +65,7 @@ dependencies = [
     "cachetools>=6.2.4",
     "h5py>=3.15.1",
     "zarr>=2.18.3",
+    "numcodecs>=0.12.1",
     "cattrs>=25.3.0",
     "orjson>=3.11.5",
     "types-pyyaml>=6.0.12.20250915",

@@ -15,8 +15,8 @@ from bores.grids.utils import unpad_grid
 from bores.models import FluidProperties, RockProperties
 from bores.solvers.base import (
     EvolutionResult,
-    _warn_injection_rate_is_negative,
-    _warn_production_rate_is_positive,
+    _warn_injection_rate,
+    _warn_production_rate,
     compute_mobility_grids,
 )
 from bores.types import (
@@ -1110,11 +1110,11 @@ def compute_well_rate_grids(
             )
 
             if cell_injection_rate < 0.0 and config.warn_well_anomalies:
-                _warn_injection_rate_is_negative(
+                _warn_injection_rate(
                     injection_rate=cell_injection_rate,
                     well_name=well.name,
                     cell=(i - pad_width, j - pad_width, k - pad_width),
-                    time=time_step * time_step_size,
+                    time=config.timer.elapsed_time + time_step_size,
                     rate_unit="ft³/day"
                     if injected_phase == FluidPhase.GAS
                     else "bbls/day",
@@ -1291,11 +1291,11 @@ def compute_well_rate_grids(
                 )
 
                 if production_rate > 0.0 and config.warn_well_anomalies:
-                    _warn_production_rate_is_positive(
+                    _warn_production_rate(
                         production_rate=production_rate,
                         well_name=well.name,
                         cell=(i - pad_width, j - pad_width, k - pad_width),
-                        time=time_step * time_step_size,
+                        time=config.timer.elapsed_time + time_step_size,
                         rate_unit="ft³/day"
                         if produced_phase == FluidPhase.GAS
                         else "bbls/day",
@@ -2664,11 +2664,11 @@ def compute_miscible_well_rate_grids(
             )
 
             if cell_injection_rate < 0.0 and config.warn_well_anomalies:
-                _warn_injection_rate_is_negative(
+                _warn_injection_rate(
                     injection_rate=cell_injection_rate,
                     well_name=well.name,
                     cell=(i - pad_width, j - pad_width, k - pad_width),
-                    time=time_step * time_step_size,
+                    time=config.timer.elapsed_time + time_step_size,
                     rate_unit="ft³/day"
                     if injected_phase == FluidPhase.GAS
                     else "bbls/day",
@@ -2858,11 +2858,11 @@ def compute_miscible_well_rate_grids(
                 )
 
                 if production_rate > 0.0 and config.warn_well_anomalies:
-                    _warn_production_rate_is_positive(
+                    _warn_production_rate(
                         production_rate=production_rate,
                         well_name=well.name,
                         cell=(i - pad_width, j - pad_width, k - pad_width),
-                        time=time_step * time_step_size,
+                        time=config.timer.elapsed_time + time_step_size,
                         rate_unit="ft³/day"
                         if produced_phase == FluidPhase.GAS
                         else "bbls/day",

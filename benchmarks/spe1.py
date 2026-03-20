@@ -198,8 +198,6 @@ def setup_grid():
 
     # Temperature axis (isothermal at 200°F, but need 2 points for 2D tables)
     pvt_temperatures = bores.array([200.0, 201.0])
-    n_p = len(pvt_pressures)
-    n_t = len(pvt_temperatures)
 
     # -------------------------------------------------------------------------
     # OIL PROPERTIES (from "Undersaturated Oil PVT Functions")
@@ -756,7 +754,7 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
 
 @app.cell
 def setup_store(Path, bores):
-    store = bores.ZarrStore(store=Path("./benchmarks/runs/spe1/results/spe1.zarr"))
+    store = bores.HDF5Store(filepath=Path("./benchmarks/runs/spe1/results/spe1.h5"))
     return (store,)
 
 
@@ -860,10 +858,12 @@ def setup_analysis(bores, np, states):
         gas_saturation_history,
         gor_history,
         oil_rate_history,
+        oil_saturation_history,
         recovery_efficiency_history,
         volumetric_sweep_efficiency_history,
         water_cut_history,
         water_rate_history,
+        water_saturation_history,
     )
 
 
@@ -884,12 +884,18 @@ def pressure_plot(avg_pressure_history, bores, np):
 
 
 @app.cell
-def saturation_plots(bores, gas_saturation_history, np):
+def saturation_plots(
+    bores,
+    gas_saturation_history,
+    np,
+    oil_saturation_history,
+    water_saturation_history,
+):
     # Saturation
     saturation_fig = bores.make_series_plot(
         data={
-            # "Avg. Water Saturation": np.array(water_saturation_history),
-            # "Avg. Oil Saturation": np.array(oil_saturation_history),
+            "Avg. Water Saturation": np.array(water_saturation_history),
+            "Avg. Oil Saturation": np.array(oil_saturation_history),
             "Avg. Gas Saturation": np.array(gas_saturation_history),
         },
         title="Saturation Analysis",
@@ -1207,7 +1213,7 @@ def _(bores, states, viz, wells):
         # opacity=0.7,
         # labels=labels,
         aspect_mode="data",
-        z_scale=5.0,
+        z_scale=10.0,
         marker_size=6,
         show_wells=True,
         show_surface_marker=True,
@@ -1216,7 +1222,7 @@ def _(bores, states, viz, wells):
         # cmax=0.5,
     )
 
-    property = "gas-sat"
+    property = "oil-viscosity"
     figures = []
     timesteps = [194]
     for timestep in timesteps:
@@ -1246,7 +1252,7 @@ def _(bores, states):
         frame_duration=250,
         # step_size=5,  # Every 5th timestep
         cmin=0.0,
-        cmax=1.0,  # Fixed range for consistent coloring
+        cmax=1.0,  
         opacity=1.0,
         z_scale=5.0,
         show_wells=True,

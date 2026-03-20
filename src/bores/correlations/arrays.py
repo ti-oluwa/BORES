@@ -1848,8 +1848,6 @@ def compute_gas_viscosity(
         - ρ_g is gas density in g/cm³
         - T is temperature in Rankine
 
-    Internally computes the gas compressibility factor (Z) and real gas density.
-
     This correlation is valid for a wide range of temperatures and pressures,
     typically from 100 °F to 400 °F and pressures up to 10,000 psi.
 
