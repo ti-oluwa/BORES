@@ -6,6 +6,7 @@ import numba
 import numpy as np
 
 from bores._precision import get_dtype
+from bores.boundary_conditions import BoundaryConditions
 from bores.config import Config
 from bores.constants import c
 from bores.correlations.core import compute_harmonic_mean
@@ -39,12 +40,14 @@ def evolve_pressure(
     elevation_grid: ThreeDimensionalGrid,
     time_step: int,
     time_step_size: float,
+    time: float,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     wells: Wells[ThreeDimensions],
     config: Config,
+    boundary_conditions: BoundaryConditions[ThreeDimensions],
     pad_width: int = 1,
 ) -> EvolutionResult[ExplicitPressureSolution, None]:
     """
@@ -221,9 +224,9 @@ def evolve_pressure(
             thickness_grid=thickness_grid,
             cell_size_x=cell_size_x,
             cell_size_y=cell_size_y,
-            time_step=time_step,
-            time_step_size=time_step_size,
+            time=time,
             config=config,
+            boundary_conditions=boundary_conditions,
             dtype=dtype,
             pad_width=pad_width,
         )
@@ -275,9 +278,9 @@ def evolve_pressure(
             thickness_grid=thickness_grid,
             cell_size_x=cell_size_x,
             cell_size_y=cell_size_y,
-            time_step=time_step,
-            time_step_size=time_step_size,
+            time=time,
             config=config,
+            boundary_conditions=boundary_conditions,
             dtype=dtype,
             pad_width=pad_width,
         )
@@ -712,9 +715,9 @@ def compute_well_rate_grid(
     thickness_grid: ThreeDimensionalGrid,
     cell_size_x: float,
     cell_size_y: float,
-    time_step: int,
-    time_step_size: float,
+    time: float,
     config: Config,
+    boundary_conditions: BoundaryConditions[ThreeDimensions],
     dtype: np.typing.DTypeLike,
     pad_width: int = 1,
 ) -> ThreeDimensionalGrid:
@@ -793,9 +796,7 @@ def compute_well_rate_grid(
                     skin_factor=well.skin_factor,
                     well_location=actual_location,
                     grid_dimensions=grid_dims,
-                    boundary_condition=config.boundary_conditions["pressure"]
-                    if config.boundary_conditions
-                    else None,
+                    boundary_condition=boundary_conditions["pressure"],
                 )
                 well_index_cache.append(((i, j, k), well_index))
                 total_well_index += well_index
@@ -873,7 +874,7 @@ def compute_well_rate_grid(
                 _warn_injection_rate(
                     injection_rate=cell_injection_rate,
                     well_name=well.name,
-                    time=config.timer.elapsed_time + time_step_size,
+                    time=time,
                     cell=(i - pad_width, j - pad_width, k - pad_width),
                     rate_unit="ft³/day"
                     if injected_phase == FluidPhase.GAS
@@ -921,9 +922,7 @@ def compute_well_rate_grid(
                     skin_factor=well.skin_factor,
                     well_location=actual_location,
                     grid_dimensions=grid_dims,
-                    boundary_condition=config.boundary_conditions["pressure"]
-                    if config.boundary_conditions
-                    else None,
+                    boundary_condition=boundary_conditions["pressure"],
                 )
                 well_index_cache.append(((i, j, k), well_index))
                 total_well_index += well_index
@@ -1039,7 +1038,7 @@ def compute_well_rate_grid(
                     _warn_production_rate(
                         production_rate=production_rate,
                         well_name=well.name,
-                        time=config.timer.elapsed_time + time_step_size,
+                        time=time,
                         cell=(i - pad_width, j - pad_width, k - pad_width),
                         rate_unit="ft³/day"
                         if produced_phase == FluidPhase.GAS

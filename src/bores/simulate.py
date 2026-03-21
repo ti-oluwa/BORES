@@ -24,11 +24,14 @@ from bores.grids.base import (
     CapillaryPressureGrids,
     RateGrids,
     RelativeMobilityGrids,
-    RelPermGrids,
     _RateGridsProxy,
     build_uniform_grid,
 )
-from bores.grids.boundary_conditions import apply_boundary_conditions
+from bores.grids.boundary_conditions import (
+    apply_boundary_conditions,
+    apply_pressure_boundary_condition,
+    apply_saturation_boundary_conditions,
+)
 from bores.grids.pvt import (
     build_three_phase_relative_mobilities_grids,
     build_three_phase_relative_permeabilities_grids,
@@ -269,19 +272,22 @@ def _check_saturation_changes(
 def _run_impes_step(
     time_step: int,
     padded_zeros_grid: NDimensionalGrid[ThreeDimensions],
+    grid_shape: ThreeDimensions,
     cell_dimension: typing.Tuple[float, float],
+    thickness_grid: NDimensionalGrid[ThreeDimensions],
     padded_thickness_grid: NDimensionalGrid[ThreeDimensions],
     padded_elevation_grid: NDimensionalGrid[ThreeDimensions],
     time_step_size: float,
+    time: float,
     padded_rock_properties: RockProperties[ThreeDimensions],
     padded_fluid_properties: FluidProperties[ThreeDimensions],
     padded_saturation_history: SaturationHistory[ThreeDimensions],
-    padded_relperm_grids: RelPermGrids[ThreeDimensions],
     padded_relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     padded_capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     wells: Wells[ThreeDimensions],
     miscibility_model: MiscibilityModel,
     config: Config,
+    boundary_conditions: BoundaryConditions[ThreeDimensions],
     pad_width: int = 1,
 ) -> StepResult[ThreeDimensions]:
     """
@@ -289,19 +295,22 @@ def _run_impes_step(
 
     :param time_step: Current time step index.
     :param padded_zeros_grid: Padded grid of zeros for rate tracking.
+    :param grid_shape: Original model grid shape (nx, ny, nz).
     :param cell_dimension: Tuple of cell dimensions (dx, dy).
+    :param thickness_grid: Un-padded thickness grid.
     :param padded_thickness_grid: Padded thickness grid.
     :param padded_elevation_grid: Padded elevation grid.
     :param time_step_size: Size of the current time step.
+    :param time: Total simulation time elapsed. This time step inclusive.
     :param padded_rock_properties: Padded rock properties.
     :param padded_fluid_properties: Padded fluid properties.
     :param padded_saturation_history: Padded saturation history.
-    :param padded_relperm_grids: Padded relative permeability grids.
     :param padded_relative_mobility_grids: Padded relative mobility grids.
     :param padded_capillary_pressure_grids: Padded capillary pressure grids.
     :param wells: Wells in the reservoir.
     :param miscibility_model: Miscibility model used in the simulation.
     :param config: Simulation configuration.
+    :param boundary_conditions: Model boundary conditions.
     :param pad_width: Number of ghost cells used for grid padding.
     :return: `StepResult` containing updated rates and fluid properties.
     """
@@ -315,6 +324,7 @@ def _run_impes_step(
         elevation_grid=padded_elevation_grid,
         time_step=time_step,
         time_step_size=time_step_size,
+        time=time,
         rock_properties=padded_rock_properties,
         fluid_properties=padded_fluid_properties,
         relative_mobility_grids=padded_relative_mobility_grids,
@@ -322,6 +332,7 @@ def _run_impes_step(
         wells=wells,
         config=config,
         pad_width=pad_width,
+        boundary_conditions=boundary_conditions,
     )
     if not pressure_result.success:
         logger.error(
@@ -382,6 +393,21 @@ def _run_impes_step(
     if pressure_validation_result is not None:
         return pressure_validation_result
 
+    # Apply boundary conditions to new pressure grid
+    logger.debug(
+        f"Applying pressure boundary condition after pressure evolution for time step {time_step}..."
+    )
+    apply_pressure_boundary_condition(
+        padded_pressure_grid=padded_pressure_grid,
+        boundary_conditions=boundary_conditions,
+        cell_dimension=cell_dimension,
+        grid_shape=grid_shape,
+        thickness_grid=thickness_grid,
+        time=time,
+        pad_width=pad_width,
+    )
+    logger.debug("Pressure boundary condition applied.")
+
     dtype = get_dtype()
     # Clamp pressures to valid range just for additional safety and to remove numerical noise
     padded_pressure_grid = clip(
@@ -390,6 +416,7 @@ def _run_impes_step(
 
     # Update fluid properties with new pressure grid
     logger.debug("Updating fluid properties with new pressure grid...")
+
     padded_fluid_properties = attrs.evolve(
         padded_fluid_properties, pressure_grid=padded_pressure_grid
     )
@@ -480,6 +507,23 @@ def _run_impes_step(
             },
         )
 
+    # Apply boundary conditions to updated saturation grids
+    logger.debug(
+        f"Applying saturations boundary conditions after solution gas evolution for time step {time_step}..."
+    )
+    apply_saturation_boundary_conditions(
+        padded_water_saturation_grid=padded_fluid_properties.water_saturation_grid,
+        padded_oil_saturation_grid=padded_fluid_properties.oil_saturation_grid,
+        padded_gas_saturation_grid=padded_fluid_properties.gas_saturation_grid,
+        boundary_conditions=boundary_conditions,
+        cell_dimension=cell_dimension,
+        grid_shape=grid_shape,
+        thickness_grid=thickness_grid,
+        time=time,
+        pad_width=pad_width,
+    )
+    logger.debug("Saturation boundary conditions applied.")
+
     # Rebuild relative permeability grids from post-flash saturations.
     # This ensures cells with newly liberated gas get krg > 0 for transport.
     logger.debug("Rebuilding relative permeability and mobility grids...")
@@ -549,12 +593,14 @@ def _run_impes_step(
         elevation_grid=padded_elevation_grid,
         time_step=time_step,
         time_step_size=time_step_size,
+        time=time,
         rock_properties=padded_rock_properties,
         fluid_properties=padded_fluid_properties,
         relative_mobility_grids=padded_relative_mobility_grids,
         capillary_pressure_grids=padded_capillary_pressure_grids,
         wells=wells,
         config=config,
+        boundary_conditions=boundary_conditions,
         # Wrap the grids in a proxy to allow item assignment
         injection_grid=_RateGridsProxy(
             oil=oil_injection_grid,
@@ -645,6 +691,23 @@ def _run_impes_step(
     )
     padded_solvent_concentration_grid = saturation_solution.solvent_concentration_grid
 
+    # Apply boundary conditions to updated saturation grids again
+    logger.debug(
+        f"Applying saturations boundary conditions after saturation evolution for time step {time_step}..."
+    )
+    apply_saturation_boundary_conditions(
+        padded_water_saturation_grid=padded_water_saturation_grid,
+        padded_oil_saturation_grid=padded_oil_saturation_grid,
+        padded_gas_saturation_grid=padded_gas_saturation_grid,
+        boundary_conditions=boundary_conditions,
+        cell_dimension=cell_dimension,
+        grid_shape=grid_shape,
+        thickness_grid=thickness_grid,
+        time=time,
+        pad_width=pad_width,
+    )
+    logger.debug("Saturation boundary conditions applied.")
+
     if padded_solvent_concentration_grid is None:
         padded_fluid_properties = attrs.evolve(
             padded_fluid_properties,
@@ -704,19 +767,22 @@ def _run_impes_step(
 def _run_sequential_implicit_step(
     time_step: int,
     padded_zeros_grid: NDimensionalGrid[ThreeDimensions],
+    grid_shape: ThreeDimensions,
     cell_dimension: typing.Tuple[float, float],
+    thickness_grid: NDimensionalGrid[ThreeDimensions],
     padded_thickness_grid: NDimensionalGrid[ThreeDimensions],
     padded_elevation_grid: NDimensionalGrid[ThreeDimensions],
     time_step_size: float,
+    time: float,
     padded_rock_properties: RockProperties[ThreeDimensions],
     padded_fluid_properties: FluidProperties[ThreeDimensions],
     padded_saturation_history: SaturationHistory[ThreeDimensions],
-    padded_relperm_grids: RelPermGrids[ThreeDimensions],
     padded_relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     padded_capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     wells: Wells[ThreeDimensions],
     miscibility_model: MiscibilityModel,
     config: Config,
+    boundary_conditions: BoundaryConditions[ThreeDimensions],
     pad_width: int = 1,
 ) -> StepResult[ThreeDimensions]:
     """
@@ -726,8 +792,26 @@ def _run_sequential_implicit_step(
     implicitly using Newton-Raphson iteration. This eliminates the CFL
     stability constraint on saturation transport, allowing larger timesteps.
 
-    The flow mirrors _run_impes_step exactly except step 6 (saturation)
-    uses implicit.evolve_saturation instead of explicit.evolve_saturation.
+    :param time_step: Current time step index.
+    :param padded_zeros_grid: Padded grid of zeros for rate tracking.
+    :param grid_shape: Original model grid shape (nx, ny, nz).
+    :param cell_dimension: Tuple of cell dimensions (dx, dy).
+    :param thickness_grid: Un-padded thickness grid.
+    :param padded_thickness_grid: Padded thickness grid.
+    :param padded_elevation_grid: Padded elevation grid.
+    :param time_step_size: Size of the current time step.
+    :param time: Total simulation time elapsed. This time step inclusive.
+    :param padded_rock_properties: Padded rock properties.
+    :param padded_fluid_properties: Padded fluid properties.
+    :param padded_saturation_history: Padded saturation history.
+    :param padded_relative_mobility_grids: Padded relative mobility grids.
+    :param padded_capillary_pressure_grids: Padded capillary pressure grids.
+    :param wells: Wells in the reservoir.
+    :param miscibility_model: Miscibility model used in the simulation.
+    :param config: Simulation configuration.
+    :param boundary_conditions: Model boundary conditions.
+    :param pad_width: Number of ghost cells used for grid padding.
+    :return: `StepResult` containing updated rates and fluid properties.
     """
     # Save old pressure grid before implicit solve (needed for PVT volume correction)
     old_pressure_grid = padded_fluid_properties.pressure_grid.copy()
@@ -739,12 +823,14 @@ def _run_sequential_implicit_step(
         elevation_grid=padded_elevation_grid,
         time_step=time_step,
         time_step_size=time_step_size,
+        time=time,
         rock_properties=padded_rock_properties,
         fluid_properties=padded_fluid_properties,
         relative_mobility_grids=padded_relative_mobility_grids,
         capillary_pressure_grids=padded_capillary_pressure_grids,
         wells=wells,
         config=config,
+        boundary_conditions=boundary_conditions,
         pad_width=pad_width,
     )
     if not pressure_result.success:
@@ -805,6 +891,21 @@ def _run_sequential_implicit_step(
     )
     if pressure_validation_result is not None:
         return pressure_validation_result
+
+    # Apply boundary conditions to new pressure grid
+    logger.debug(
+        f"Applying pressure boundary condition after pressure evolution for time step {time_step}..."
+    )
+    apply_pressure_boundary_condition(
+        padded_pressure_grid=padded_pressure_grid,
+        boundary_conditions=boundary_conditions,
+        cell_dimension=cell_dimension,
+        grid_shape=grid_shape,
+        thickness_grid=thickness_grid,
+        time=time,
+        pad_width=pad_width,
+    )
+    logger.debug("Pressure boundary conditions applied.")
 
     dtype = get_dtype()
     padded_pressure_grid = clip(
@@ -891,6 +992,23 @@ def _run_sequential_implicit_step(
             },
         )
 
+    # Apply boundary conditions to updated saturation grids
+    logger.debug(
+        f"Applying saturations boundary conditions after solution gas evolution for time step {time_step}..."
+    )
+    apply_saturation_boundary_conditions(
+        padded_water_saturation_grid=padded_fluid_properties.water_saturation_grid,
+        padded_oil_saturation_grid=padded_fluid_properties.oil_saturation_grid,
+        padded_gas_saturation_grid=padded_fluid_properties.gas_saturation_grid,
+        boundary_conditions=boundary_conditions,
+        cell_dimension=cell_dimension,
+        grid_shape=grid_shape,
+        thickness_grid=thickness_grid,
+        time=time,
+        pad_width=pad_width,
+    )
+    logger.debug("Saturation boundary conditions applied.")
+
     logger.debug("Evolving saturation (implicit, Newton-Raphson)...")
     pressure_change_grid = padded_pressure_grid - old_pressure_grid
 
@@ -900,10 +1018,12 @@ def _run_sequential_implicit_step(
         elevation_grid=padded_elevation_grid,
         time_step=time_step,
         time_step_size=time_step_size,
+        time=time,
         rock_properties=padded_rock_properties,
         fluid_properties=padded_fluid_properties,
         wells=wells,
         config=config,
+        boundary_conditions=boundary_conditions,
         pressure_change_grid=pressure_change_grid,
         pad_width=pad_width,
     )
@@ -981,6 +1101,24 @@ def _run_sequential_implicit_step(
     padded_gas_saturation_grid = saturation_solution.gas_saturation_grid.astype(
         dtype, copy=False
     )
+
+    # Apply boundary conditions to updated saturation grids again
+    logger.debug(
+        f"Applying saturations boundary conditions after saturation evolution for time step {time_step}..."
+    )
+    apply_saturation_boundary_conditions(
+        padded_water_saturation_grid=padded_water_saturation_grid,
+        padded_oil_saturation_grid=padded_oil_saturation_grid,
+        padded_gas_saturation_grid=padded_gas_saturation_grid,
+        boundary_conditions=boundary_conditions,
+        cell_dimension=cell_dimension,
+        grid_shape=grid_shape,
+        thickness_grid=thickness_grid,
+        time=time,
+        pad_width=pad_width,
+    )
+    logger.debug("Saturation boundary conditions applied.")
+
     padded_fluid_properties = attrs.evolve(
         padded_fluid_properties,
         water_saturation_grid=padded_water_saturation_grid,
@@ -1029,10 +1167,13 @@ def _run_sequential_implicit_step(
 def _run_explicit_step(
     time_step: int,
     padded_zeros_grid: NDimensionalGrid[ThreeDimensions],
+    grid_shape: ThreeDimensions,
     cell_dimension: typing.Tuple[float, float],
+    thickness_grid: NDimensionalGrid[ThreeDimensions],
     padded_thickness_grid: NDimensionalGrid[ThreeDimensions],
     padded_elevation_grid: NDimensionalGrid[ThreeDimensions],
     time_step_size: float,
+    time: float,
     padded_rock_properties: RockProperties[ThreeDimensions],
     padded_fluid_properties: FluidProperties[ThreeDimensions],
     padded_saturation_history: SaturationHistory[ThreeDimensions],
@@ -1041,6 +1182,7 @@ def _run_explicit_step(
     wells: Wells[ThreeDimensions],
     miscibility_model: MiscibilityModel,
     config: Config,
+    boundary_conditions: BoundaryConditions[ThreeDimensions],
     pad_width: int = 1,
 ) -> StepResult[ThreeDimensions]:
     """
@@ -1048,19 +1190,22 @@ def _run_explicit_step(
 
     :param time_step: Current time step index.
     :param padded_zeros_grid: Padded grid of zeros for rate tracking.
+    :param grid_shape: Original model grid shape (nx, ny, nz).
     :param cell_dimension: Tuple of cell dimensions (dx, dy).
+    :param thickness_grid: Un-padded thickness grid.
     :param padded_thickness_grid: Padded thickness grid.
     :param padded_elevation_grid: Padded elevation grid.
     :param time_step_size: Size of the current time step.
+    :param time: Total simulation time elapsed. This time step inclusive.
     :param padded_rock_properties: Padded rock properties.
     :param padded_fluid_properties: Padded fluid properties.
     :param padded_saturation_history: Padded saturation history.
-    :param padded_relperm_grids: Padded relative permeability grids.
     :param padded_relative_mobility_grids: Padded relative mobility grids.
     :param padded_capillary_pressure_grids: Padded capillary pressure grids.
     :param wells: Wells in the reservoir.
     :param miscibility_model: Miscibility model used in the simulation.
     :param config: Simulation configuration.
+    :param boundary_conditions: Model boundary conditions.
     :param pad_width: Number of ghost cells used for grid padding.
     :return: `StepResult` containing updated rates and fluid properties.
     """
@@ -1074,12 +1219,14 @@ def _run_explicit_step(
         elevation_grid=padded_elevation_grid,
         time_step=time_step,
         time_step_size=time_step_size,
+        time=time,
         rock_properties=padded_rock_properties,
         fluid_properties=padded_fluid_properties,
         relative_mobility_grids=padded_relative_mobility_grids,
         capillary_pressure_grids=padded_capillary_pressure_grids,
         wells=wells,
         config=config,
+        boundary_conditions=boundary_conditions,
         pad_width=pad_width,
     )
     pressure_solution = pressure_result.value
@@ -1164,6 +1311,21 @@ def _run_explicit_step(
             timer_kwargs=timer_kwargs,
         )
 
+    # Apply boundary conditions to new pressure grid
+    logger.debug(
+        f"Applying pressure boundary condition after pressure evolution for time step {time_step}..."
+    )
+    apply_pressure_boundary_condition(
+        padded_pressure_grid=padded_pressure_grid,
+        boundary_conditions=boundary_conditions,
+        cell_dimension=cell_dimension,
+        grid_shape=grid_shape,
+        thickness_grid=thickness_grid,
+        time=time,
+        pad_width=pad_width,
+    )
+    logger.debug("Pressure boundary condition applied.")
+
     dtype = get_dtype()
     # Clamp pressures to valid range just for additional safety and to remove numerical noise
     padded_pressure_grid = clip(
@@ -1204,13 +1366,14 @@ def _run_explicit_step(
         elevation_grid=padded_elevation_grid,
         time_step=time_step,
         time_step_size=time_step_size,
+        time=time,
         rock_properties=padded_rock_properties,
         fluid_properties=padded_fluid_properties,
         relative_mobility_grids=padded_relative_mobility_grids,
         capillary_pressure_grids=padded_capillary_pressure_grids,
         wells=wells,
         config=config,
-        # Wrap the grids in a proxy to allow item assignment
+        boundary_conditions=boundary_conditions,
         injection_grid=_RateGridsProxy(
             oil=oil_injection_grid,
             water=water_injection_grid,
@@ -1290,16 +1453,9 @@ def _run_explicit_step(
         )
 
     logger.debug("Saturation evolution completed!")
-    # Update fluid properties with new pressure after saturation update
-    logger.debug(
-        "Updating fluid properties with new pressure grid (explicit scheme)..."
-    )
-    padded_fluid_properties = attrs.evolve(
-        padded_fluid_properties, pressure_grid=padded_pressure_grid
-    )
-    logger.debug("Fluid properties updated with new pressure grid.")
 
-    logger.debug("Updating fluid properties with new saturation grids...")
+    # Update fluid properties with new pressure and saturations after saturation update
+    logger.debug("Updating fluid properties with new pressure and saturation grids...")
 
     padded_water_saturation_grid = saturation_solution.water_saturation_grid.astype(
         dtype, copy=False
@@ -1314,6 +1470,7 @@ def _run_explicit_step(
     if padded_solvent_concentration_grid is None:
         padded_fluid_properties = attrs.evolve(
             padded_fluid_properties,
+            pressure_grid=padded_pressure_grid,
             water_saturation_grid=padded_water_saturation_grid,
             oil_saturation_grid=padded_oil_saturation_grid,
             gas_saturation_grid=padded_gas_saturation_grid,
@@ -1321,6 +1478,7 @@ def _run_explicit_step(
     else:
         padded_fluid_properties = attrs.evolve(
             padded_fluid_properties,
+            pressure_grid=padded_pressure_grid,
             water_saturation_grid=padded_water_saturation_grid,
             oil_saturation_grid=padded_oil_saturation_grid,
             gas_saturation_grid=padded_gas_saturation_grid,
@@ -1418,6 +1576,23 @@ def _run_explicit_step(
                 "max_allowed_saturation_change": flash_sat_check.max_allowed_phase_saturation_change,
             },
         )
+
+    # Apply boundary conditions to updated saturation grids
+    logger.debug(
+        f"Applying saturations boundary conditions after solution gas evolution for time step {time_step}..."
+    )
+    apply_saturation_boundary_conditions(
+        padded_water_saturation_grid=padded_fluid_properties.water_saturation_grid,
+        padded_oil_saturation_grid=padded_fluid_properties.oil_saturation_grid,
+        padded_gas_saturation_grid=padded_fluid_properties.gas_saturation_grid,
+        boundary_conditions=boundary_conditions,
+        cell_dimension=cell_dimension,
+        grid_shape=grid_shape,
+        thickness_grid=thickness_grid,
+        time=time,
+        pad_width=pad_width,
+    )
+    logger.debug("Saturation boundary conditions applied.")
 
     # Update residual saturation grids based on new saturations
     padded_rock_properties, padded_saturation_history = (
@@ -1605,13 +1780,13 @@ def run(
         model = input.model
         if config is not None:
             logger.info(
-                "Overriding 'config' parameter from 'Run' instance with provided 'config' parameter."
+                "Overriding `config` parameter from `Run` instance with provided `config` parameter."
             )
         config = config or input.config
     else:
         if config is None:
             raise ValueError(
-                "Must provide 'config' parameter when 'input' is a ReservoirModel"
+                "Must provide `config` parameter when `input` is a `ReservoirModel`"
             )
         model = input
 
@@ -1673,9 +1848,8 @@ def run(
 
         # Apply boundary conditions to relevant padded grids
         logger.debug("Applying boundary conditions to initial padded grids")
-        padded_fluid_properties, padded_rock_properties = apply_boundary_conditions(
-            fluid_properties=padded_fluid_properties,
-            rock_properties=padded_rock_properties,
+        padded_fluid_properties = apply_boundary_conditions(
+            padded_fluid_properties=padded_fluid_properties,
             boundary_conditions=boundary_conditions,
             cell_dimension=cell_dimension,
             grid_shape=grid_shape,
@@ -1792,6 +1966,7 @@ def run(
             # So we use `timer.next_step` to indicate the new step we are attempting
             new_step = timer.next_step
             step_size = timer.propose_step_size()
+            time = timer.elapsed_time + step_size
             logger.debug(
                 f"Attempting time step {new_step} with size {step_size} seconds..."
             )
@@ -1804,24 +1979,21 @@ def run(
                     logger.debug("Wells updated.")
 
                 if new_step > 1:
-                    # Apply boundary conditions before pressure update for the new time step
+                    # Apply boundary conditions before update for the new time step
                     logger.debug(
                         f"Applying boundary conditions for time step {new_step}..."
                     )
-                    padded_fluid_properties, padded_rock_properties = (
-                        apply_boundary_conditions(
-                            fluid_properties=padded_fluid_properties,
-                            rock_properties=padded_rock_properties,
-                            boundary_conditions=boundary_conditions,
-                            cell_dimension=cell_dimension,
-                            grid_shape=grid_shape,
-                            thickness_grid=thickness_grid,
-                            time=timer.elapsed_time + step_size,
-                            pad_width=pad_width,
-                        )
+                    padded_fluid_properties = apply_boundary_conditions(
+                        padded_fluid_properties=padded_fluid_properties,
+                        boundary_conditions=boundary_conditions,
+                        cell_dimension=cell_dimension,
+                        grid_shape=grid_shape,
+                        thickness_grid=thickness_grid,
+                        time=time,
+                        pad_width=pad_width,
                     )
                     logger.debug("Boundary conditions applied.")
-                    # If the pressure boundary condition is not no-flow, Then apply PVT update before pressure evolution
+                    # If the pressure boundary condition is not no-flow, Then apply PVT update before next (pressure) evolution
                     # since most PVT properties depend on pressure. This is skipped for no-flow BCs to save computation.
                     # because mirroring neighbour values for PVT properties is sufficient for no-flow BCs.
                     if no_flow_pressure_bc is False:
@@ -1896,57 +2068,66 @@ def run(
 
                 if scheme == "implicit":
                     warnings.warn(
-                        "Implicit scheme selected but not yet supported. Falling back to IMPES scheme.",
+                        "Fully implicit scheme selected but not yet supported. Falling back to sequential implicit scheme.",
                         UserWarning,
                     )
-                    scheme = "impes"
+                    scheme = "sequential_implicit"
 
                 if scheme == "impes":
                     result = _run_impes_step(
                         time_step=new_step,
+                        grid_shape=grid_shape,
                         padded_zeros_grid=padded_zeros_grid,
                         cell_dimension=cell_dimension,
+                        thickness_grid=thickness_grid,
                         padded_thickness_grid=padded_thickness_grid,
                         padded_elevation_grid=padded_elevation_grid,
                         time_step_size=step_size,
+                        time=time,
                         padded_rock_properties=padded_rock_properties,
                         padded_fluid_properties=padded_fluid_properties,
                         padded_saturation_history=padded_saturation_history,
-                        padded_relperm_grids=padded_relperm_grids,
                         padded_relative_mobility_grids=padded_relative_mobility_grids,
                         padded_capillary_pressure_grids=padded_capillary_pressure_grids,
                         wells=wells,
                         miscibility_model=miscibility_model,
                         config=config,
+                        boundary_conditions=boundary_conditions,
                         pad_width=pad_width,
                     )
                 elif scheme == "sequential_implicit":
                     result = _run_sequential_implicit_step(
                         time_step=new_step,
+                        grid_shape=grid_shape,
                         padded_zeros_grid=padded_zeros_grid,
                         cell_dimension=cell_dimension,
+                        thickness_grid=thickness_grid,
                         padded_thickness_grid=padded_thickness_grid,
                         padded_elevation_grid=padded_elevation_grid,
                         time_step_size=step_size,
+                        time=time,
                         padded_rock_properties=padded_rock_properties,
                         padded_fluid_properties=padded_fluid_properties,
                         padded_saturation_history=padded_saturation_history,
-                        padded_relperm_grids=padded_relperm_grids,
                         padded_relative_mobility_grids=padded_relative_mobility_grids,
                         padded_capillary_pressure_grids=padded_capillary_pressure_grids,
                         wells=wells,
                         miscibility_model=miscibility_model,
                         config=config,
+                        boundary_conditions=boundary_conditions,
                         pad_width=pad_width,
                     )
                 else:
                     result = _run_explicit_step(
                         time_step=new_step,
+                        grid_shape=grid_shape,
                         padded_zeros_grid=padded_zeros_grid,
                         cell_dimension=cell_dimension,
+                        thickness_grid=thickness_grid,
                         padded_thickness_grid=padded_thickness_grid,
                         padded_elevation_grid=padded_elevation_grid,
                         time_step_size=step_size,
+                        time=time,
                         padded_rock_properties=padded_rock_properties,
                         padded_fluid_properties=padded_fluid_properties,
                         padded_saturation_history=padded_saturation_history,
@@ -1955,6 +2136,7 @@ def run(
                         wells=wells,
                         miscibility_model=miscibility_model,
                         config=config,
+                        boundary_conditions=boundary_conditions,
                         pad_width=pad_width,
                     )
 

@@ -46,7 +46,7 @@ from bores.visualization.utils import (
     Labels,
     get_data,
     resolve_exporter,
-    slice_grid,
+    slice_3d_grid,
 )
 from bores.wells import Wells
 
@@ -1851,7 +1851,7 @@ class DataVisualizer:
         :return: Tuple of (sliced_data, (x_slice_obj, y_slice_obj, z_slice_obj))
         :raises ValidationError: If slice specifications are invalid
         """
-        return slice_grid(data, x_slice, y_slice, z_slice)
+        return slice_3d_grid(data, x_slice, y_slice, z_slice)
 
     def make_plot(
         self,

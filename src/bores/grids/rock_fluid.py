@@ -8,8 +8,8 @@ from bores._precision import get_dtype
 from bores.errors import ValidationError
 from bores.grids.base import (
     CapillaryPressureGrids,
-    RelPermGrids,
     RelativeMobilityGrids,
+    RelPermGrids,
     build_uniform_grid,
 )
 from bores.grids.pvt import (
@@ -19,7 +19,6 @@ from bores.grids.pvt import (
 )
 from bores.tables.rock_fluid import CapillaryPressureTable, RelativePermeabilityTable
 from bores.types import NDimensionalGrid, RelativeMobilityRange, ThreeDimensions
-
 
 logger = logging.getLogger(__name__)
 

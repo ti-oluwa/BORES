@@ -795,8 +795,7 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
     Zarr-based storage.
 
     Fast, efficient compression with lazy loading.
-    Best for large 3D numpy arrays.
-    Best lazy loading support among available formats.
+    Good for large 3D numpy arrays.
 
     **Layout**
 
@@ -1214,7 +1213,7 @@ class HDF5Store(DataStore[SerializableT, h5py.File]):
     HDF5-based storage.
 
     Industry standard, good compression, wide tool support.
-    Slightly slower than Zarr for many small writes.
+    May be faster than Zarr for non-parallel workloads.
 
     Layout:
     ```mermaid

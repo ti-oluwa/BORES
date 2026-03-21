@@ -7,6 +7,7 @@ import numba
 import numpy as np
 
 from bores._precision import get_dtype
+from bores.boundary_conditions import BoundaryConditions
 from bores.config import Config
 from bores.constants import c
 from bores.correlations.core import compute_harmonic_mean
@@ -90,12 +91,14 @@ def evolve_saturation(
     elevation_grid: ThreeDimensionalGrid,
     time_step: int,
     time_step_size: float,
+    time: float,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     wells: Wells[ThreeDimensions],
     config: Config,
+    boundary_conditions: BoundaryConditions[ThreeDimensions],
     injection_grid: typing.Optional[
         SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
     ] = None,
@@ -231,9 +234,9 @@ def evolve_saturation(
             thickness_grid=thickness_grid,
             cell_size_x=cell_size_x,
             cell_size_y=cell_size_y,
-            time_step=time_step,
-            time_step_size=time_step_size,
+            time=time,
             config=config,
+            boundary_conditions=boundary_conditions,
             pad_width=pad_width,
             injection_grid=injection_grid,
             production_grid=production_grid,
@@ -294,9 +297,9 @@ def evolve_saturation(
                 thickness_grid=thickness_grid,
                 cell_size_x=cell_size_x,
                 cell_size_y=cell_size_y,
-                time_step=time_step,
-                time_step_size=time_step_size,
+                time=time,
                 config=config,
+                boundary_conditions=boundary_conditions,
                 pad_width=pad_width,
                 injection_grid=injection_grid,
                 production_grid=production_grid,
@@ -941,9 +944,9 @@ def compute_well_rate_grids(
     thickness_grid: ThreeDimensionalGrid,
     cell_size_x: float,
     cell_size_y: float,
-    time_step: int,
-    time_step_size: float,
+    time: float,
     config: Config,
+    boundary_conditions: BoundaryConditions[ThreeDimensions],
     injection_grid: typing.Optional[
         SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
     ],
@@ -1043,9 +1046,7 @@ def compute_well_rate_grids(
                     skin_factor=well.skin_factor,
                     well_location=actual_location,
                     grid_dimensions=grid_dims,
-                    boundary_condition=config.boundary_conditions["pressure"]
-                    if config.boundary_conditions
-                    else None,
+                    boundary_condition=boundary_conditions["pressure"],
                 )
                 well_index_cache.append(((i, j, k), well_index))
                 total_well_index += well_index
@@ -1114,7 +1115,7 @@ def compute_well_rate_grids(
                     injection_rate=cell_injection_rate,
                     well_name=well.name,
                     cell=(i - pad_width, j - pad_width, k - pad_width),
-                    time=config.timer.elapsed_time + time_step_size,
+                    time=time,
                     rate_unit="ft³/day"
                     if injected_phase == FluidPhase.GAS
                     else "bbls/day",
@@ -1175,9 +1176,7 @@ def compute_well_rate_grids(
                     skin_factor=well.skin_factor,
                     well_location=actual_location,
                     grid_dimensions=grid_dims,
-                    boundary_condition=config.boundary_conditions["pressure"]
-                    if config.boundary_conditions
-                    else None,
+                    boundary_condition=boundary_conditions["pressure"],
                 )
                 well_index_cache.append(((i, j, k), well_index))
                 total_well_index += well_index
@@ -1295,7 +1294,7 @@ def compute_well_rate_grids(
                         production_rate=production_rate,
                         well_name=well.name,
                         cell=(i - pad_width, j - pad_width, k - pad_width),
-                        time=config.timer.elapsed_time + time_step_size,
+                        time=time,
                         rate_unit="ft³/day"
                         if produced_phase == FluidPhase.GAS
                         else "bbls/day",
@@ -1551,12 +1550,14 @@ def evolve_miscible_saturation(
     elevation_grid: ThreeDimensionalGrid,
     time_step: int,
     time_step_size: float,
+    time: float,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     wells: Wells[ThreeDimensions],
     config: Config,
+    boundary_conditions: BoundaryConditions[ThreeDimensions],
     injection_grid: typing.Optional[
         SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
     ] = None,
@@ -1693,9 +1694,9 @@ def evolve_miscible_saturation(
             thickness_grid=thickness_grid,
             cell_size_x=cell_size_x,
             cell_size_y=cell_size_y,
-            time_step=time_step,
-            time_step_size=time_step_size,
+            time=time,
             config=config,
+            boundary_conditions=boundary_conditions,
             pad_width=pad_width,
             injection_grid=injection_grid,
             production_grid=production_grid,
@@ -1772,9 +1773,9 @@ def evolve_miscible_saturation(
             thickness_grid=thickness_grid,
             cell_size_x=cell_size_x,
             cell_size_y=cell_size_y,
-            time_step=time_step,
-            time_step_size=time_step_size,
+            time=time,
             config=config,
+            boundary_conditions=boundary_conditions,
             pad_width=pad_width,
             injection_grid=injection_grid,
             production_grid=production_grid,
@@ -2478,9 +2479,9 @@ def compute_miscible_well_rate_grids(
     thickness_grid: ThreeDimensionalGrid,
     cell_size_x: float,
     cell_size_y: float,
-    time_step: int,
-    time_step_size: float,
+    time: float,
     config: Config,
+    boundary_conditions: BoundaryConditions[ThreeDimensions],
     injection_grid: typing.Optional[
         SupportsSetItem[ThreeDimensions, typing.Tuple[float, float, float]]
     ],
@@ -2598,9 +2599,7 @@ def compute_miscible_well_rate_grids(
                     skin_factor=well.skin_factor,
                     well_location=actual_location,
                     grid_dimensions=grid_dims,
-                    boundary_condition=config.boundary_conditions["pressure"]
-                    if config.boundary_conditions
-                    else None,
+                    boundary_condition=boundary_conditions["pressure"],
                 )
                 well_index_cache.append(((i, j, k), well_index))
                 total_well_index += well_index
@@ -2668,7 +2667,7 @@ def compute_miscible_well_rate_grids(
                     injection_rate=cell_injection_rate,
                     well_name=well.name,
                     cell=(i - pad_width, j - pad_width, k - pad_width),
-                    time=config.timer.elapsed_time + time_step_size,
+                    time=time,
                     rate_unit="ft³/day"
                     if injected_phase == FluidPhase.GAS
                     else "bbls/day",
@@ -2745,9 +2744,7 @@ def compute_miscible_well_rate_grids(
                     skin_factor=well.skin_factor,
                     well_location=actual_location,
                     grid_dimensions=grid_dims,
-                    boundary_condition=config.boundary_conditions["pressure"]
-                    if config.boundary_conditions
-                    else None,
+                    boundary_condition=boundary_conditions["pressure"],
                 )
                 well_index_cache.append(((i, j, k), well_index))
                 total_well_index += well_index
@@ -2862,7 +2859,7 @@ def compute_miscible_well_rate_grids(
                         production_rate=production_rate,
                         well_name=well.name,
                         cell=(i - pad_width, j - pad_width, k - pad_width),
-                        time=config.timer.elapsed_time + time_step_size,
+                        time=time,
                         rate_unit="ft³/day"
                         if produced_phase == FluidPhase.GAS
                         else "bbls/day",

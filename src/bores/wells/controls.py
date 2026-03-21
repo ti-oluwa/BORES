@@ -8,7 +8,6 @@ import attrs
 import numba
 
 from bores.constants import c
-from bores.correlations.core import compute_gas_compressibility_factor
 from bores.errors import ComputationError, ValidationError
 from bores.serialization import Serializable, make_serializable_type_registrar
 from bores.stores import StoreSerializable
@@ -16,10 +15,12 @@ from bores.tables.pvt import PVTTables
 from bores.types import FluidPhase
 from bores.wells.core import (
     WellFluid,
+    compute_average_compressibility_factor,
     compute_gas_well_rate,
     compute_oil_well_rate,
     compute_required_bhp_for_gas_rate,
     compute_required_bhp_for_oil_rate,
+    get_pseudo_pressure_table,
 )
 
 logger = logging.getLogger(__name__)
@@ -63,54 +64,6 @@ def _disallow_flow(
         fluid is None
         or (phase_mobility is not None and phase_mobility < minimum_mobility)
         or not is_active
-    )
-
-
-def _get_pseudo_pressure_table(
-    fluid: WellFluid,
-    pressure: float,
-    temperature: float,
-    use_pseudo_pressure: bool,
-    pvt_tables: typing.Optional[PVTTables] = None,
-) -> typing.Tuple[bool, typing.Optional[typing.Any]]:
-    """
-    Get existing pseudo-pressure table or setup a new one for gas well fluid if needed.
-
-    :return: Tuple of (use_pseudo_pressure, pseudo_pressure_table)
-    """
-    if not use_pseudo_pressure or pressure <= c.GAS_PSEUDO_PRESSURE_THRESHOLD:
-        return False, None
-
-    pseudo_pressure_table = fluid.get_pseudo_pressure_table(
-        temperature=temperature,
-        points=c.GAS_PSEUDO_PRESSURE_POINTS,
-        pvt_tables=pvt_tables,
-    )
-    return True, pseudo_pressure_table
-
-
-@numba.njit(cache=True)
-def _compute_average_compressibility_factor(
-    pressure: float,
-    temperature: float,
-    gas_gravity: float,
-    bottom_hole_pressure: typing.Optional[float] = None,
-) -> float:
-    """
-    Compute average gas compressibility factor.
-
-    :param bottom_hole_pressure: If provided, uses average of reservoir and BHP.
-        Otherwise uses reservoir pressure.
-    """
-    if bottom_hole_pressure is not None:
-        avg_pressure = (pressure + bottom_hole_pressure) * 0.5
-    else:
-        avg_pressure = pressure
-    return compute_gas_compressibility_factor(
-        pressure=avg_pressure,
-        temperature=temperature,
-        gas_gravity=gas_gravity,
-        method="dak",
     )
 
 
@@ -168,7 +121,7 @@ def _compute_required_bhp(
     """
     if fluid.phase == FluidPhase.GAS:
         # Setup pseudo-pressure if needed
-        use_pp, pp_table = _get_pseudo_pressure_table(
+        use_pp, pp_table = get_pseudo_pressure_table(
             fluid=fluid,
             pressure=pressure,
             temperature=temperature,
@@ -185,7 +138,7 @@ def _compute_required_bhp(
             raise ValidationError(
                 "Well fluid has no specific gravity define. Specify a value or provide a PVT table for the fluid."
             )
-        avg_z_factor = _compute_average_compressibility_factor(
+        avg_z_factor = compute_average_compressibility_factor(
             pressure=pressure,
             temperature=temperature,
             gas_gravity=specific_gravity,
@@ -512,7 +465,7 @@ class BHPControl(WellControl[WellFluidTcon]):
         # Compute rate based on fluid phase
         if fluid.phase == FluidPhase.GAS:
             # Setup pseudo-pressure if needed
-            use_pp, pp_table = _get_pseudo_pressure_table(
+            use_pp, pp_table = get_pseudo_pressure_table(
                 fluid=fluid,
                 pressure=pressure,
                 temperature=temperature,
@@ -528,7 +481,7 @@ class BHPControl(WellControl[WellFluidTcon]):
                 raise ValidationError(
                     "Well fluid has no specific gravity define. Specify a value or provide a PVT table for the fluid."
                 )
-            avg_z_factor = _compute_average_compressibility_factor(
+            avg_z_factor = compute_average_compressibility_factor(
                 pressure=pressure,
                 temperature=temperature,
                 gas_gravity=specific_gravity,
@@ -1065,7 +1018,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
 
         # Compute rate at minimum bottom hole pressure using same logic as BHP control
         if fluid.phase == FluidPhase.GAS:
-            use_pp, pp_table = _get_pseudo_pressure_table(
+            use_pp, pp_table = get_pseudo_pressure_table(
                 fluid=fluid,
                 pressure=pressure,
                 temperature=temperature,
@@ -1081,7 +1034,7 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 raise ValidationError(
                     "Well fluid has no specific gravity define. Specify a value or provide a PVT table for the fluid."
                 )
-            avg_z_factor = _compute_average_compressibility_factor(
+            avg_z_factor = compute_average_compressibility_factor(
                 pressure=pressure,
                 temperature=temperature,
                 gas_gravity=specific_gravity,
@@ -1477,7 +1430,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
 
         # Compute secondary phase rate at the primary-phase-derived BHP
         if fluid.phase == FluidPhase.GAS:
-            use_pp, pp_table = _get_pseudo_pressure_table(
+            use_pp, pp_table = get_pseudo_pressure_table(
                 fluid=fluid,
                 pressure=pressure,
                 temperature=temperature,
@@ -1493,7 +1446,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
                 raise ValidationError(
                     "Well fluid has no specific gravity define. Specify a value or provide a PVT table for the fluid."
                 )
-            avg_z_factor = _compute_average_compressibility_factor(
+            avg_z_factor = compute_average_compressibility_factor(
                 pressure=pressure,
                 temperature=temperature,
                 gas_gravity=specific_gravity,

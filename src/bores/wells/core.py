@@ -54,6 +54,7 @@ from bores.correlations.core import (
 from bores.errors import ComputationError, ValidationError
 from bores.fluids import Fluid
 from bores.tables.pseudo_pressure import PseudoPressureTable
+from bores.tables.pvt import PVTTables
 from bores.types import (
     FloatOrArray,
     FluidPhase,
@@ -70,6 +71,7 @@ __all__ = [
     "WellFluid",
     "compute_2D_effective_drainage_radius",
     "compute_3D_effective_drainage_radius",
+    "compute_average_compressibility_factor",
     "compute_gas_well_rate",
     "compute_oil_well_rate",
     "compute_required_bhp_for_gas_rate",
@@ -422,6 +424,34 @@ def compute_required_bhp_for_oil_rate(
     return float(pressure + target_rate / denominator)
 
 
+@numba.njit(cache=True)
+def compute_oil_productivity_index(
+    well_index: float,
+    phase_mobility: float,
+    md_per_cp_to_ft2_per_psi_per_day: float = 0.001127,
+) -> float:
+    """
+    Compute the well productivity index for oil/water phases.
+
+    The PI relates flow rate to drawdown via Darcy's law:
+
+        Q_res = PI * (P_bhp - P_reservoir)   [ft³/day]
+
+    where Q_res is at reservoir conditions (rb/day before FVF conversion).
+
+    This is the linear incompressible formulation, consistent with
+    `compute_oil_well_rate`. The FVF is applied downstream by the caller.
+
+    PI = WI * (kr/μ) * 0.001127 (or as set) [ft³/(psi·day)]
+
+    :param well_index: Well index (mD·ft).
+    :param phase_mobility: Phase relative mobility kr/μ (1/cP).
+    :param md_per_cp_to_ft2_per_psi_per_day: Unit conversion factor (0.001127).
+    :return: Productivity index (ft³/(psi·day)).
+    """
+    return well_index * phase_mobility * md_per_cp_to_ft2_per_psi_per_day
+
+
 def compute_gas_well_rate(
     well_index: float,
     pressure: float,
@@ -651,6 +681,59 @@ def compute_required_bhp_for_gas_rate(
             "The requested rate exceeds reservoir deliverability."
         )
     return float(np.sqrt(required_bhp_squared))
+
+
+def compute_gas_productivity_index(
+    well_index: float,
+    phase_mobility: float,
+    pressure: float,
+    temperature: float,
+    bottom_hole_pressure: float,  # ← add this parameter
+    formation_volume_factor: float,
+    use_pseudo_pressure: bool = False,
+    pseudo_pressure_table: typing.Optional[PseudoPressureTable] = None,
+    average_compressibility_factor: float = 1.0,
+) -> float:
+    drawdown = pressure - bottom_hole_pressure
+    if abs(drawdown) < 1.0:
+        # Near-zero drawdown: use tangent approximation to avoid division by zero
+        # fall through to tangent formula below
+        pass
+    else:
+        # Secant: PI = Q_res / drawdown, where Q_res = compute_gas_well_rate(...)
+        q_res = compute_gas_well_rate(
+            well_index=well_index,
+            pressure=pressure,
+            temperature=temperature,
+            bottom_hole_pressure=bottom_hole_pressure,
+            phase_mobility=phase_mobility,
+            average_compressibility_factor=average_compressibility_factor,
+            use_pseudo_pressure=use_pseudo_pressure,
+            pseudo_pressure_table=pseudo_pressure_table,
+            formation_volume_factor=formation_volume_factor,
+        )
+        return abs(q_res) / abs(drawdown)  # ft³/(psi·day), always positive
+
+    # Tangent fallback for near-zero drawdown
+    Tsc = c.STANDARD_TEMPERATURE_RANKINE
+    Psc = c.STANDARD_PRESSURE_IMPERIAL
+    T_rankine = fahrenheit_to_rankine(temperature)
+    prefactor = 1.9875e-2 * (Tsc / Psc) * (well_index * phase_mobility / T_rankine)
+
+    if use_pseudo_pressure and pseudo_pressure_table is not None:
+        delta_p = max(1.0, pressure * 1e-4)
+        p_hi = min(pressure + delta_p, pseudo_pressure_table.pressures[-1])
+        p_lo = max(pressure - delta_p, pseudo_pressure_table.pressures[0])
+        dm_dp = (pseudo_pressure_table(p_hi) - pseudo_pressure_table(p_lo)) / (
+            p_hi - p_lo
+        )
+        return prefactor * dm_dp * formation_volume_factor
+
+    return (
+        prefactor
+        * (2.0 * pressure / average_compressibility_factor)
+        * formation_volume_factor
+    )
 
 
 @attrs.frozen
@@ -1287,3 +1370,51 @@ def compute_effective_permeability_for_well(
         return np.sqrt(max(kx, 0.0) * max(kz, 0.0))
     # For Oblique/unknown orientation, use geometric mean of all three
     return _geometric_mean((kx, ky, kz))
+
+
+def get_pseudo_pressure_table(
+    fluid: WellFluid,
+    pressure: float,
+    temperature: float,
+    use_pseudo_pressure: bool,
+    pvt_tables: typing.Optional[PVTTables] = None,
+) -> typing.Tuple[bool, typing.Optional[typing.Any]]:
+    """
+    Get existing pseudo-pressure table or setup a new one for gas well fluid if needed.
+
+    :return: Tuple of (use_pseudo_pressure, pseudo_pressure_table)
+    """
+    if not use_pseudo_pressure or pressure <= c.GAS_PSEUDO_PRESSURE_THRESHOLD:
+        return False, None
+
+    pseudo_pressure_table = fluid.get_pseudo_pressure_table(
+        temperature=temperature,
+        points=c.GAS_PSEUDO_PRESSURE_POINTS,
+        pvt_tables=pvt_tables,
+    )
+    return True, pseudo_pressure_table
+
+
+@numba.njit(cache=True)
+def compute_average_compressibility_factor(
+    pressure: float,
+    temperature: float,
+    gas_gravity: float,
+    bottom_hole_pressure: typing.Optional[float] = None,
+) -> float:
+    """
+    Compute average gas compressibility factor.
+
+    :param bottom_hole_pressure: If provided, uses average of reservoir and BHP.
+        Otherwise uses reservoir pressure.
+    """
+    if bottom_hole_pressure is not None:
+        avg_pressure = (pressure + bottom_hole_pressure) * 0.5
+    else:
+        avg_pressure = pressure
+    return compute_gas_compressibility_factor(
+        pressure=avg_pressure,
+        temperature=temperature,
+        gas_gravity=gas_gravity,
+        method="dak",
+    )

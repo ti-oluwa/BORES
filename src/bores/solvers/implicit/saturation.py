@@ -7,6 +7,7 @@ import numpy as np
 from scipy.sparse import coo_matrix, csr_matrix
 
 from bores._precision import get_dtype
+from bores.boundary_conditions import BoundaryConditions
 from bores.config import Config
 from bores.constants import c
 from bores.correlations.core import compute_harmonic_mean
@@ -464,21 +465,11 @@ def recompute_saturation_dependent_properties(
     Called at each Newton iteration. Returns updated relative permeabilities,
     relative mobilities, capillary pressures, and directional mobility grids.
     """
-    # Clamp saturations to [0, 1] before computing rock-fluid properties.
-    # Ghost cells (not managed by the Newton solver) can accumulate tiny
-    # floating-point violations through PVT updates, gas liberation, and
-    # boundary condition application over many timesteps.  The relperm
-    # validation is strict (< 0 or > 1) and operates on the full grid
-    # including ghost cells, so we must ensure all values are in-bounds.
-    water_saturation_grid_clamped = np.clip(water_saturation_grid, 0.0, 1.0)
-    oil_saturation_grid_clamped = np.clip(oil_saturation_grid, 0.0, 1.0)
-    gas_saturation_grid_clamped = np.clip(gas_saturation_grid, 0.0, 1.0)
-
     relperm_grids, relative_mobility_grids, capillary_pressure_grids = (
         build_rock_fluid_properties_grids(
-            water_saturation_grid=water_saturation_grid_clamped,  # type: ignore
-            oil_saturation_grid=oil_saturation_grid_clamped,  # type: ignore
-            gas_saturation_grid=gas_saturation_grid_clamped,  # type: ignore
+            water_saturation_grid=water_saturation_grid,  # type: ignore
+            oil_saturation_grid=oil_saturation_grid,  # type: ignore
+            gas_saturation_grid=gas_saturation_grid,  # type: ignore
             irreducible_water_saturation_grid=rock_properties.irreducible_water_saturation_grid,
             residual_oil_saturation_water_grid=rock_properties.residual_oil_saturation_water_grid,
             residual_oil_saturation_gas_grid=rock_properties.residual_oil_saturation_gas_grid,
@@ -502,7 +493,7 @@ def recompute_saturation_dependent_properties(
         gas_relative_mobility_grid,
     ) = relative_mobility_grids
 
-    directional_mobility_grids = compute_mobility_grids(
+    mobility_grids = compute_mobility_grids(
         absolute_permeability_x=absolute_permeability.x,
         absolute_permeability_y=absolute_permeability.y,
         absolute_permeability_z=absolute_permeability.z,
@@ -511,12 +502,11 @@ def recompute_saturation_dependent_properties(
         gas_relative_mobility_grid=gas_relative_mobility_grid,
         md_per_cp_to_ft2_per_psi_per_day=c.MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_DAY,
     )
-
     return (
         relperm_grids,
         relative_mobility_grids,
         capillary_pressure_grids,
-        directional_mobility_grids,
+        mobility_grids,
     )
 
 
@@ -540,13 +530,13 @@ def evaluate_residual(
     cell_size_y: float,
     elevation_grid: ThreeDimensionalGrid,
     porosity_grid: ThreeDimensionalGrid,
-    time_step: int,
-    time_step_size: float,
+    time: float,
     time_step_in_days: float,
     gravitational_constant: float,
     water_compressibility_grid: ThreeDimensionalGrid,
     gas_compressibility_grid: ThreeDimensionalGrid,
     rock_compressibility: float,
+    boundary_conditions: BoundaryConditions[ThreeDimensions],
     pad_width: int,
     dtype: np.typing.DTypeLike,
 ) -> typing.Tuple[np.typing.NDArray, np.typing.NDArray]:
@@ -561,7 +551,7 @@ def evaluate_residual(
         _,
         relative_mobility_grids,
         capillary_pressure_grids,
-        directional_mobility_grids,
+        mobility_grids,
     ) = recompute_saturation_dependent_properties(
         water_saturation_grid=water_saturation_grid,
         oil_saturation_grid=oil_saturation_grid,
@@ -584,7 +574,7 @@ def evaluate_residual(
         (water_mobility_grid_x, oil_mobility_grid_x, gas_mobility_grid_x),
         (water_mobility_grid_y, oil_mobility_grid_y, gas_mobility_grid_y),
         (water_mobility_grid_z, oil_mobility_grid_z, gas_mobility_grid_z),
-    ) = directional_mobility_grids
+    ) = mobility_grids
 
     # Recompute well rates at current iteration mobilities
     net_water_well_rate_grid, _, net_gas_well_rate_grid = compute_well_rate_grids(
@@ -605,9 +595,9 @@ def evaluate_residual(
         thickness_grid=thickness_grid,
         cell_size_x=cell_size_x,
         cell_size_y=cell_size_y,
-        time_step=time_step,
-        time_step_size=time_step_size,
+        time=time,
         config=config,
+        boundary_conditions=boundary_conditions,
         pad_width=pad_width,
         injection_grid=None,
         production_grid=None,
@@ -679,13 +669,13 @@ def assemble_numerical_jacobian(
     cell_size_y: float,
     elevation_grid: ThreeDimensionalGrid,
     porosity_grid: ThreeDimensionalGrid,
-    time_step: int,
-    time_step_size: float,
+    time: float,
     time_step_in_days: float,
     gravitational_constant: float,
     water_compressibility_grid: ThreeDimensionalGrid,
     gas_compressibility_grid: ThreeDimensionalGrid,
     rock_compressibility: float,
+    boundary_conditions: BoundaryConditions[ThreeDimensions],
     pad_width: int,
     dtype: np.typing.DTypeLike,
 ) -> csr_matrix:
@@ -744,13 +734,13 @@ def assemble_numerical_jacobian(
         cell_size_y=cell_size_y,
         elevation_grid=elevation_grid,
         porosity_grid=porosity_grid,
-        time_step=time_step,
-        time_step_size=time_step_size,
+        time=time,
         time_step_in_days=time_step_in_days,
         gravitational_constant=gravitational_constant,
         water_compressibility_grid=water_compressibility_grid,
         gas_compressibility_grid=gas_compressibility_grid,
         rock_compressibility=rock_compressibility,
+        boundary_conditions=boundary_conditions,
         pad_width=pad_width,
         dtype=dtype,
     )
@@ -850,13 +840,13 @@ def assemble_numerical_jacobian(
                 cell_size_y=cell_size_y,
                 elevation_grid=elevation_grid,
                 porosity_grid=porosity_grid,
-                time_step=time_step,
-                time_step_size=time_step_size,
+                time=time,
                 time_step_in_days=time_step_in_days,
                 gravitational_constant=gravitational_constant,
                 water_compressibility_grid=water_compressibility_grid,
                 gas_compressibility_grid=gas_compressibility_grid,
                 rock_compressibility=rock_compressibility,
+                boundary_conditions=boundary_conditions,
                 pad_width=pad_width,
                 dtype=dtype,
             )
@@ -911,12 +901,13 @@ def solve_implicit_saturation(
     cell_size_y: float,
     elevation_grid: ThreeDimensionalGrid,
     porosity_grid: ThreeDimensionalGrid,
-    time_step: int,
     time_step_size: float,
+    time: float,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
     wells: Wells[ThreeDimensions],
     config: Config,
+    boundary_conditions: BoundaryConditions[ThreeDimensions],
     water_compressibility_grid: ThreeDimensionalGrid,
     gas_compressibility_grid: ThreeDimensionalGrid,
     rock_compressibility: float,
@@ -995,13 +986,13 @@ def solve_implicit_saturation(
         cell_size_y=cell_size_y,
         elevation_grid=elevation_grid,
         porosity_grid=porosity_grid,
-        time_step=time_step,
-        time_step_size=time_step_size,
+        time=time,
         time_step_in_days=time_step_in_days,
         gravitational_constant=gravitational_constant,
         water_compressibility_grid=water_compressibility_grid,
         gas_compressibility_grid=gas_compressibility_grid,
         rock_compressibility=rock_compressibility,
+        boundary_conditions=boundary_conditions,
         pad_width=pad_width,
         dtype=dtype,
     )
@@ -1024,10 +1015,10 @@ def solve_implicit_saturation(
         relative_residual_norm = residual_norm / initial_residual_norm
 
         # Check convergence using dual criteria:
-        # 1. Relative residual below tolerance, OR
-        # 2. Saturation changes negligible and residual is reasonable (<1e-3).
-        #    The second criterion handles the upwind scheme discontinuity
-        #    which creates an irreducible residual floor.
+        # - Relative residual below tolerance, or
+        # - Saturation changes negligible and residual is reasonable (<1e-3).
+        #   This second criterion handles the upwind scheme discontinuity
+        #   which creates an irreducible residual floor.
         residual_converged = (
             relative_residual_norm < newton_tolerance and newton_iter > 0
         )
@@ -1087,13 +1078,13 @@ def solve_implicit_saturation(
             cell_size_y=cell_size_y,
             elevation_grid=elevation_grid,
             porosity_grid=porosity_grid,
-            time_step=time_step,
-            time_step_size=time_step_size,
+            time=time,
             time_step_in_days=time_step_in_days,
             gravitational_constant=gravitational_constant,
             water_compressibility_grid=water_compressibility_grid,
             gas_compressibility_grid=gas_compressibility_grid,
             rock_compressibility=rock_compressibility,
+            boundary_conditions=boundary_conditions,
             pad_width=pad_width,
             dtype=dtype,
         )
@@ -1306,10 +1297,12 @@ def evolve_saturation(
     elevation_grid: ThreeDimensionalGrid,
     time_step: int,
     time_step_size: float,
+    time: float,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
     wells: Wells[ThreeDimensions],
     config: Config,
+    boundary_conditions: BoundaryConditions[ThreeDimensions],
     pressure_change_grid: ThreeDimensionalGrid,
     pad_width: int = 1,
 ) -> EvolutionResult[ImplicitSaturationSolution, typing.List[NewtonConvergenceInfo]]:
@@ -1347,12 +1340,13 @@ def evolve_saturation(
         cell_size_y=cell_size_y,
         elevation_grid=elevation_grid,
         porosity_grid=rock_properties.porosity_grid,
-        time_step=time_step,
         time_step_size=time_step_size,
+        time=time,
         rock_properties=rock_properties,
         fluid_properties=fluid_properties,
         wells=wells,
         config=config,
+        boundary_conditions=boundary_conditions,
         water_compressibility_grid=fluid_properties.water_compressibility_grid,
         gas_compressibility_grid=fluid_properties.gas_compressibility_grid,
         rock_compressibility=rock_properties.compressibility,

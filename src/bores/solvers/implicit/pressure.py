@@ -9,6 +9,7 @@ import numpy as np
 from scipy.sparse import coo_matrix
 
 from bores._precision import get_dtype
+from bores.boundary_conditions import BoundaryConditions
 from bores.config import Config
 from bores.constants import c
 from bores.correlations.core import compute_harmonic_mean
@@ -33,6 +34,12 @@ from bores.types import (
 )
 from bores.wells.base import Wells
 from bores.wells.controls import CoupledRateControl
+from bores.wells.core import (
+    compute_average_compressibility_factor,
+    compute_gas_productivity_index,
+    compute_oil_productivity_index,
+    get_pseudo_pressure_table,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,12 +56,14 @@ def evolve_pressure(
     elevation_grid: ThreeDimensionalGrid,
     time_step: int,
     time_step_size: float,
+    time: float,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     wells: Wells[ThreeDimensions],
     config: Config,
+    boundary_conditions: BoundaryConditions[ThreeDimensions],
     pad_width: int = 1,
 ) -> EvolutionResult[ImplicitPressureSolution, None]:
     """
@@ -65,13 +74,15 @@ def evolve_pressure(
     :param thickness_grid: 3D grid of cell thicknesses in feet
     :param elevation_grid: 3D grid of cell elevations in feet
     :param time_step: Current time step number (for logging/debugging)
-    :param time_step_size: Time step size in seconds
+    :param time_step_size: Time step size in seconds.
+    :param time: Total simulation time elapsed. This time step inclusive.
     :param rock_properties: `RockProperties` object containing model rock properties
     :param fluid_properties: `FluidProperties` object containing model fluid properties
     :param relative_mobility_grids: Tuple of relative mobility grids for (water, oil, gas)
     :param capillary_pressure_grids: Tuple of capillary pressure grids for (oil-water, gas-oil)
     :param wells: `Wells` object containing well definitions and properties
     :param config: `Config` object containing simulation config
+    :param boundary_conditions: Model boundary conditions.
     :param pad_width: Number of ghost cells used for grid padding. Well coordinates are offset by this amount.
     :return: `EvolutionResult` containing the new pressure grid and scheme used
     """
@@ -211,10 +222,11 @@ def evolve_pressure(
             wells=wells,
             cell_size_x=cell_size_x,
             cell_size_y=cell_size_y,
-            time_step=time_step,
-            time_step_size=time_step_size,
+            time=time,
             config=config,
+            boundary_conditions=boundary_conditions,
             md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+            dtype=dtype,
             pad_width=pad_width,
         )
 
@@ -292,10 +304,11 @@ def evolve_pressure(
             wells=wells,
             cell_size_x=cell_size_x,
             cell_size_y=cell_size_y,
-            time_step=time_step,
-            time_step_size=time_step_size,
+            time=time,
             config=config,
+            boundary_conditions=boundary_conditions,
             md_per_cp_to_ft2_per_psi_per_day=c.MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_DAY,
+            dtype=dtype,
             pad_width=pad_width,
         )
 
@@ -965,10 +978,11 @@ def compute_well_contributions(
     wells: Wells[ThreeDimensions],
     cell_size_x: float,
     cell_size_y: float,
-    time_step: int,
-    time_step_size: float,
+    time: float,
     config: Config,
+    boundary_conditions: BoundaryConditions[ThreeDimensions],
     md_per_cp_to_ft2_per_psi_per_day: float,
+    dtype: np.typing.DTypeLike,
     pad_width: int = 1,
 ) -> WellContributions:
     """
@@ -1117,9 +1131,7 @@ def compute_well_contributions(
                     skin_factor=well.skin_factor,
                     well_location=actual_location,
                     grid_dimensions=grid_dims,
-                    boundary_condition=config.boundary_conditions["pressure"]
-                    if config.boundary_conditions
-                    else None,
+                    boundary_condition=boundary_conditions["pressure"],
                 )
                 well_index_cache.append(((i, j, k, _to_1D_index(i, j, k)), well_index))
                 total_well_index += well_index
@@ -1201,13 +1213,48 @@ def compute_well_contributions(
                         bhp=effective_bhp,
                         cell_pressure=cell_pressure,
                         well_name=well.name,
-                        time=config.timer.elapsed_time + time_step_size,
+                        time=time,
                         cell=(i - pad_width, j - pad_width, k - pad_width),
                     )
 
-                productivity_index = (
-                    well_index * effective_mobility * md_per_cp_to_ft2_per_psi_per_day
-                )
+                if injected_phase == FluidPhase.GAS:
+                    use_pp, pp_table = get_pseudo_pressure_table(
+                        fluid=injected_fluid,
+                        pressure=cell_pressure,
+                        temperature=cell_temperature,
+                        use_pseudo_pressure=use_pseudo_pressure,
+                        pvt_tables=config.pvt_tables,
+                    )
+                    specific_gravity = typing.cast(
+                        float,
+                        injected_fluid.get_specific_gravity(
+                            pressure=cell_pressure,
+                            temperature=cell_temperature,
+                        ),
+                    )
+                    avg_z_factor = compute_average_compressibility_factor(
+                        pressure=cell_pressure,
+                        temperature=cell_temperature,
+                        gas_gravity=specific_gravity,
+                    )
+                    productivity_index = compute_gas_productivity_index(
+                        well_index=well_index,
+                        phase_mobility=phase_mobility,
+                        pressure=cell_pressure,
+                        temperature=cell_temperature,
+                        bottom_hole_pressure=effective_bhp,
+                        formation_volume_factor=phase_fvf,
+                        average_compressibility_factor=avg_z_factor,
+                        use_pseudo_pressure=use_pp,
+                        pseudo_pressure_table=pp_table,
+                    )
+                else:
+                    productivity_index = compute_oil_productivity_index(
+                        well_index=well_index,
+                        phase_mobility=phase_mobility,
+                        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+                    )
+
                 _add_bhp_contribution(cell_1d_index, productivity_index, effective_bhp)
 
             else:
@@ -1229,7 +1276,7 @@ def compute_well_contributions(
                     _warn_injection_rate(
                         injection_rate=flow_rate,
                         well_name=well.name,
-                        time=config.timer.elapsed_time + time_step_size,
+                        time=time,
                         cell=(i - pad_width, j - pad_width, k - pad_width),
                         rate_unit="ft³/day"
                         if injected_phase == FluidPhase.GAS
@@ -1275,14 +1322,11 @@ def compute_well_contributions(
                     skin_factor=well.skin_factor,
                     well_location=actual_location,
                     grid_dimensions=grid_dims,
-                    boundary_condition=config.boundary_conditions["pressure"]
-                    if config.boundary_conditions
-                    else None,
+                    boundary_condition=boundary_conditions["pressure"],
                 )
                 well_index_cache.append(((i, j, k, _to_1D_index(i, j, k)), well_index))
                 total_well_index += well_index
 
-        is_bhp_controlled = well.control.is_bhp_control()
         is_couple_controlled = isinstance(well.control, CoupledRateControl)
 
         # Second pass: one contribution per (perforation, produced phase) pair
@@ -1388,20 +1432,63 @@ def compute_well_contributions(
                         bhp=effective_bhp,
                         cell_pressure=cell_pressure,
                         well_name=well.name,
-                        time=config.timer.elapsed_time + time_step_size,
+                        time=time,
                         cell=(i - pad_width, j - pad_width, k - pad_width),
                     )
 
-                productivity_index = (
-                    well_index * phase_mobility * md_per_cp_to_ft2_per_psi_per_day
-                )
+                if produced_phase == FluidPhase.GAS:
+                    use_pp, pp_table = get_pseudo_pressure_table(
+                        fluid=produced_fluid,
+                        pressure=cell_pressure,
+                        temperature=cell_temperature,
+                        use_pseudo_pressure=use_pseudo_pressure,
+                        pvt_tables=config.pvt_tables,
+                    )
+                    specific_gravity = typing.cast(
+                        float,
+                        produced_fluid.get_specific_gravity(
+                            pressure=cell_pressure,
+                            temperature=cell_temperature,
+                        ),
+                    )
+                    avg_z_factor = compute_average_compressibility_factor(
+                        pressure=cell_pressure,
+                        temperature=cell_temperature,
+                        gas_gravity=specific_gravity,
+                    )
+                    productivity_index = compute_gas_productivity_index(
+                        well_index=well_index,
+                        phase_mobility=phase_mobility,
+                        pressure=cell_pressure,
+                        temperature=cell_temperature,
+                        bottom_hole_pressure=effective_bhp,
+                        formation_volume_factor=phase_fvf,
+                        average_compressibility_factor=avg_z_factor,
+                        use_pseudo_pressure=use_pp,
+                        pseudo_pressure_table=pp_table,
+                    )
+                else:
+                    productivity_index = compute_oil_productivity_index(
+                        well_index=well_index,
+                        phase_mobility=phase_mobility,
+                        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+                    )
+
                 _add_bhp_contribution(cell_1d_index, productivity_index, effective_bhp)
+
+                logger.info(
+                    f"Producer gas phase: PI={productivity_index:.4f}, "
+                    f"BHP={effective_bhp:.2f}, P_cell={cell_pressure:.2f}, "
+                    f"drawdown={cell_pressure - effective_bhp:.2f}, "
+                    f"krg={gas_relative_mobility_grid[i, j, k] * fluid_properties.gas_viscosity_grid[i, j, k]:.3e}, "
+                    f"Sg={fluid_properties.gas_saturation_grid[i, j, k]:.3e}"
+                )
 
     return WellContributions(
         diagonal_cell_indices=np.array(diagonal_cell_indices, dtype=np.int32),
-        diagonal_values=np.array(diagonal_values, dtype=np.float64),
+        diagonal_values=np.array(diagonal_values, dtype=dtype),
         rhs_cell_indices=np.array(rhs_cell_indices, dtype=np.int32),
-        rhs_values=np.array(rhs_values, dtype=np.float64),
+        rhs_values=np.array(rhs_values, dtype=dtype),
     )
 
 

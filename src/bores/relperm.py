@@ -783,128 +783,190 @@ class TwoPhaseRelPermTable(Serializable):
     """
     Two-phase relative permeability lookup table.
 
-    Interpolates relative permeabilities for two fluid phases based on saturation values.
-    Uses `np.interp` for fast vectorized interpolation.
+    Interpolates relative permeabilities for two fluid phases based on a
+    reference saturation value. The reference saturation can be either the
+    wetting or non-wetting phase saturation, depending on how the table was
+    constructed (e.g. from lab data indexed by Sg vs So).
 
+    Uses `np.interp` for fast vectorized interpolation.
     Supports both scalar and array inputs up to 3D.
 
-    Example:
-    - Oil-Water system: oil is non-wetting, water is wetting
-    - Gas-Oil system: gas is non-wetting, oil is wetting
+    Examples:
+    - Oil-Water system (water-wet): reference is Sw (wetting phase), reference_phase="wetting"
+    - Gas-Oil system indexed by So:  reference is So (wetting phase), reference_phase="wetting"
+    - Gas-Oil system indexed by Sg:  reference is Sg (non-wetting phase), reference_phase="non_wetting"
     """
 
     wetting_phase: typing.Union[FluidPhase, str] = attrs.field(converter=FluidPhase)
-    """The wetting fluid phase, e.g., 'water' (for oil-water (water-wet)) or 'oil' (for gas-oil (oil-wet))."""
+    """The wetting fluid phase, e.g. WATER (oil-water) or OIL (gas-oil)."""
+
     non_wetting_phase: typing.Union[FluidPhase, str] = attrs.field(converter=FluidPhase)
-    """The non-wetting fluid phase, e.g., 'oil' (for oil-water (water-wet)) or 'gas' (for gas-oil (oil-wet))."""
-    wetting_phase_saturation: npt.NDArray[np.floating] = attrs.field(
-        converter=bores_array
-    )
-    """The saturation values for the wetting phase, ranging from 0 to 1."""
+    """The non-wetting fluid phase, e.g. OIL (oil-water) or GAS (gas-oil)."""
+
+    reference_saturation: npt.NDArray[np.floating] = attrs.field(converter=bores_array)
+    """
+    Saturation values used as the x-axis for interpolation, monotonically increasing.
+    May represent either the wetting or non-wetting phase saturation depending on
+    `reference_phase`.
+    """
+
     wetting_phase_relative_permeability: npt.NDArray[np.floating] = attrs.field(
         converter=bores_array
     )
-    """Relative permeability values for wetting phase corresponding to the saturation values."""
+    """Relative permeability values for the wetting phase at each reference saturation."""
+
     non_wetting_phase_relative_permeability: npt.NDArray[np.floating] = attrs.field(
         converter=bores_array
     )
-    """Relative permeability values for non-wetting phase corresponding to the saturation values."""
+    """Relative permeability values for the non-wetting phase at each reference saturation."""
+
+    reference_phase: typing.Literal["wetting", "non_wetting"] = attrs.field(
+        default="wetting"
+    )
+    """
+    Which phase the `reference_saturation` axis represents.
+
+    - "wetting" - `reference_saturation` holds wetting phase saturation values.
+        krw increases and krnw decreases as `reference_saturation` increases.
+    - "non_wetting" - `reference_saturation` holds non-wetting phase saturation values.
+        krnw increases and krw decreases as `reference_saturation` increases.
+
+    This does not change the interpolation mechanics — it only records which
+    physical saturation the caller must supply when querying the table, so that
+    `ThreePhaseRelPermTable` (and any other consumer) can dispatch the correct
+    saturation grid without hard-coding assumptions.
+    """
 
     def __attrs_post_init__(self) -> None:
-        """Validate table data."""
-        if len(self.wetting_phase_saturation) != len(
+        if self.reference_phase not in ("wetting", "non_wetting"):
+            raise ValidationError(
+                f"`reference_phase` must be 'wetting' or 'non_wetting', got {self.reference_phase!r}"
+            )
+
+        if len(self.reference_saturation) != len(
             self.wetting_phase_relative_permeability
         ):
             raise ValidationError(
-                f"Saturation and wetting phase kr arrays must have same length. "
-                f"Got {len(self.wetting_phase_saturation)} vs {len(self.wetting_phase_relative_permeability)}"
+                f"reference_saturation and wetting phase kr arrays must have same length. "
+                f"Got {len(self.reference_saturation)} vs {len(self.wetting_phase_relative_permeability)}"
             )
-        if len(self.wetting_phase_saturation) != len(
+
+        if len(self.reference_saturation) != len(
             self.non_wetting_phase_relative_permeability
         ):
             raise ValidationError(
-                f"Saturation and non-wetting phase kr arrays must have same length. "
-                f"Got {len(self.wetting_phase_saturation)} vs {len(self.non_wetting_phase_relative_permeability)}"
+                f"reference_saturation and non-wetting phase kr arrays must have same length. "
+                f"Got {len(self.reference_saturation)} vs {len(self.non_wetting_phase_relative_permeability)}"
             )
-        if len(self.wetting_phase_saturation) < 2:
+
+        if len(self.reference_saturation) < 2:
             raise ValidationError("At least 2 points required for interpolation")
 
-        # Ensure arrays are sorted by saturation (required for np.interp)
-        if not np.all(np.diff(self.wetting_phase_saturation) >= 0):
+        if not np.all(np.diff(self.reference_saturation) >= 0):
             raise ValidationError(
-                "Wetting phase saturation must be monotonically increasing"
+                "reference_saturation must be monotonically increasing"
             )
 
-    def get_wetting_phase_relative_permeability(
-        self, wetting_phase_saturation: FloatOrArray
+    def _resolve_reference(
+        self,
+        wetting_saturation: FloatOrArray,
+        non_wetting_saturation: FloatOrArray,
     ) -> FloatOrArray:
         """
-        Get wetting phase relative permeability at given saturation(s).
+        Return whichever saturation array corresponds to the reference axis.
 
-        Uses `np.interp` for fast linear interpolation. Supports both scalar
-        and array inputs up to 3D.
-
-        :param wetting_phase_saturation: Saturation of the wetting phase (scalar or array).
-        :return: Relative permeability value(s) - type matches input type.
+        :param wetting_saturation: Current wetting phase saturation (scalar or array).
+        :param non_wetting_saturation: Current non-wetting phase saturation (scalar or array).
+        :return: The saturation to use as the interpolation x-value.
         """
-        # Handle scalar and array inputs
-        saturation = np.atleast_1d(wetting_phase_saturation)
-        original_shape = saturation.shape
-        saturation_flat = saturation.ravel()
+        if self.reference_phase == "non_wetting":
+            return non_wetting_saturation
+        return wetting_saturation
 
-        # Fast linear interpolation using np.interp
+    def get_wetting_phase_relative_permeability(
+        self,
+        wetting_saturation: FloatOrArray,
+        non_wetting_saturation: typing.Optional[FloatOrArray] = None,
+    ) -> FloatOrArray:
+        """
+        Get wetting phase relative permeability.
+
+        When `reference_phase="wetting"`, only `wetting_saturation` is needed.
+        When `reference_phase="non_wetting"`, `non_wetting_saturation` must be supplied.
+
+        :param wetting_saturation: Wetting phase saturation (scalar or array).
+        :param non_wetting_saturation: Non-wetting phase saturation (scalar or array).
+            Required when `reference_phase="non_wetting"`.
+        :return: Relative permeability value(s).
+        """
+        ref = self._resolve_reference(
+            wetting_saturation,
+            non_wetting_saturation
+            if non_wetting_saturation is not None
+            else wetting_saturation,
+        )
+        saturation = np.atleast_1d(ref)
+        original_shape = saturation.shape
         kr_flat = np.interp(
-            x=saturation_flat,
-            xp=self.wetting_phase_saturation,  # type: ignore[arg-type]
+            x=saturation.ravel(),
+            xp=self.reference_saturation,  # type: ignore[arg-type]
             fp=self.wetting_phase_relative_permeability,  # type: ignore[arg-type]
             left=self.wetting_phase_relative_permeability[0],
             right=self.wetting_phase_relative_permeability[-1],
         )
-        # Reshape back to original dimensions
         return kr_flat.reshape(original_shape)
 
     def get_non_wetting_phase_relative_permeability(
-        self, wetting_phase_saturation: FloatOrArray
+        self,
+        wetting_saturation: FloatOrArray,
+        non_wetting_saturation: typing.Optional[FloatOrArray] = None,
     ) -> FloatOrArray:
         """
-        Get non-wetting phase relative permeability at given wetting phase saturation(s).
+        Get non-wetting phase relative permeability.
 
-        Uses `np.interp` for fast linear interpolation. Supports both scalar
-        and array inputs up to 3D.
+        When `reference_phase="wetting"`, only `wetting_saturation` is needed.
+        When `reference_phase="non_wetting"`, `non_wetting_saturation` must be supplied.
 
-        :param wetting_phase_saturation: Saturation of the wetting phase (scalar or array).
-        :return: Relative permeability value(s) - type matches input type.
+        :param wetting_saturation: Wetting phase saturation (scalar or array).
+        :param non_wetting_saturation: Non-wetting phase saturation (scalar or array).
+            Required when `reference_phase="non_wetting"`.
+        :return: Relative permeability value(s).
         """
-        # Handle scalar and array inputs
-        saturation = np.atleast_1d(wetting_phase_saturation)
+        ref = self._resolve_reference(
+            wetting_saturation,
+            non_wetting_saturation
+            if non_wetting_saturation is not None
+            else wetting_saturation,
+        )
+        saturation = np.atleast_1d(ref)
         original_shape = saturation.shape
-        saturation_flat = saturation.ravel()
-
-        # Fast linear interpolation using np.interp
         kr_flat = np.interp(
-            x=saturation_flat,
-            xp=self.wetting_phase_saturation,  # type: ignore[arg-type]
+            x=saturation.ravel(),
+            xp=self.reference_saturation,  # type: ignore[arg-type]
             fp=self.non_wetting_phase_relative_permeability,  # type: ignore[arg-type]
             left=self.non_wetting_phase_relative_permeability[0],
             right=self.non_wetting_phase_relative_permeability[-1],
         )
-        # Reshape back to original dimensions
         return kr_flat.reshape(original_shape)
 
     def get_relative_permeabilities(
-        self, wetting_phase_saturation: FloatOrArray
+        self,
+        wetting_saturation: FloatOrArray,
+        non_wetting_saturation: typing.Optional[FloatOrArray] = None,
     ) -> typing.Tuple[FloatOrArray, FloatOrArray]:
         """
         Get both wetting and non-wetting phase relative permeabilities.
 
-        :param wetting_phase_saturation: Saturation of the wetting phase (scalar or array).
-        :return: Tuple of (wetting_kr, non_wetting_kr) - types match input type.
+        :param wetting_saturation: Wetting phase saturation (scalar or array).
+        :param non_wetting_saturation: Non-wetting phase saturation (scalar or array).
+            Required when `reference_phase="non_wetting"`.
+        :return: Tuple of (wetting_kr, non_wetting_kr).
         """
         kr_wetting = self.get_wetting_phase_relative_permeability(
-            wetting_phase_saturation
+            wetting_saturation, non_wetting_saturation
         )
         kr_non_wetting = self.get_non_wetting_phase_relative_permeability(
-            wetting_phase_saturation
+            wetting_saturation, non_wetting_saturation
         )
         return kr_wetting, kr_non_wetting
 
@@ -921,42 +983,39 @@ class ThreePhaseRelPermTable(
     """
     Three-phase relative permeability lookup table, with mixing rules.
 
-    Interpolates relative permeabilities for water, oil, and gas based on saturation values.
+    Interpolates relative permeabilities for water, oil, and gas based on
+    saturation values. Uses two `TwoPhaseRelPermTable` instances (oil-water
+    and gas-oil) and a mixing rule for oil in the three-phase system.
 
-    This is the most common approach to handle three-phase relative permeabilities.
-    Uses two two-phase tables (oil-water and gas-oil) and a mixing rule for oil in three-phase system.
-
-    The values for the two-phase tables should be obtained from PVT experiments or literature.
+    Each two-phase table declares its own `reference_phase` ("wetting" or
+    "non_wetting"), so the correct saturation is dispatched automatically —
+    no assumptions are hard-coded about whether a table is indexed by So or Sg.
 
     Supported mixing rules: `min_rule`, `stone_I_rule`, `stone_II_rule`, etc.
-    Additional custom rules can be defined as needed.
     """
 
     __type__ = "three_phase_relperm_table"
 
     oil_water_table: TwoPhaseRelPermTable
-    """Relative permeability table for oil-water system (water = wetting, oil = non-wetting)."""
+    """Relative permeability table for the oil-water system."""
+
     gas_oil_table: TwoPhaseRelPermTable
-    """Relative permeability table for gas-oil system (oil = wetting, gas = non-wetting)."""
+    """Relative permeability table for the gas-oil system."""
+
     mixing_rule: typing.Optional[typing.Union[MixingRule, str]] = None
     """
-    Mixing rule function or name to compute oil relative permeability in three-phase system.
+    Mixing rule function or name to compute oil relative permeability in the
+    three-phase system. Signature:
 
-    The function should take the following parameters in order:
-    - kro_w: Oil relative permeability from oil-water table
-    - kro_g: Oil relative permeability from gas-oil table
-    - Sw: Water saturation
-    - So: Oil saturation
-    - Sg: Gas saturation
-    and return the mixed oil relative permeability.
+        rule(kro_w, kro_g, water_saturation, oil_saturation, gas_saturation) -> kro
 
-    If None, a simple conservative rule (min(kro_w, kro_g)) is used.
+    If None, falls back to min(kro_w, kro_g).
     """
+
     supports_arrays: bool = attrs.field(init=False, repr=False, default=True)
     """Flag indicating support for array inputs."""
 
     def __attrs_post_init__(self) -> None:
-        """Validate that the tables are set up correctly for three-phase flow."""
         if {
             self.oil_water_table.wetting_phase,
             self.oil_water_table.non_wetting_phase,
@@ -964,20 +1023,12 @@ class ThreePhaseRelPermTable(
             raise ValidationError(
                 "`oil_water_table` must be between water and oil phases."
             )
-        if {self.gas_oil_table.wetting_phase, self.gas_oil_table.non_wetting_phase} != {
-            FluidPhase.OIL,
-            FluidPhase.GAS,
-        }:
-            raise ValidationError("`gas_oil_table` must be between oil and gas phases.")
 
-        if self.oil_water_table.wetting_phase == self.gas_oil_table.non_wetting_phase:
-            raise ValidationError(
-                "Wetting phase of `oil_water_table` cannot be the same as non-wetting phase of `gas_oil_table`."
-            )
-        if self.gas_oil_table.wetting_phase != FluidPhase.OIL:
-            raise ValidationError(
-                "`gas_oil_table` wetting phase must be oil in three-phase system."
-            )
+        if {
+            self.gas_oil_table.wetting_phase,
+            self.gas_oil_table.non_wetting_phase,
+        } != {FluidPhase.OIL, FluidPhase.GAS}:
+            raise ValidationError("`gas_oil_table` must be between oil and gas phases.")
 
         mixing_rule = self.mixing_rule
         if isinstance(mixing_rule, str):
@@ -990,30 +1041,30 @@ class ThreePhaseRelPermTable(
         gas_saturation: FloatOrArray,
     ) -> RelativePermeabilities:
         """
-        Compute relative permeabilities for oil, water, gas.
-        Uses two-phase tables + mixing rule for oil in 3-phase system.
+        Compute relative permeabilities for water, oil, and gas.
 
-        Supports both scalar and array inputs.
+        Each two-phase table is queried using its declared `reference_phase`:
+        - reference_phase="wetting" - the wetting phase saturation is passed
+        - reference_phase="non_wetting" - the non-wetting phase saturation is passed
 
-        :param water_saturation: Water saturation (fraction) - scalar or array.
-        :param oil_saturation: Oil saturation (fraction) - scalar or array.
-        :param gas_saturation: Gas saturation (fraction) - scalar or array.
-        :return: A dictionary with relative permeabilities for water, oil, and gas.
-        0 <= water_saturation, oil_saturation, gas_saturation <= 1
+        This means the caller never needs to reverse or reindex tables: build
+        the table with whatever saturation axis is natural (So or Sg) and set
+        `reference_phase` accordingly.
+
+        :param water_saturation: Water saturation (fraction) — scalar or array.
+        :param oil_saturation: Oil saturation (fraction) — scalar or array.
+        :param gas_saturation: Gas saturation (fraction) — scalar or array.
+        :return: `RelativePermeabilities` dict with keys "water", "oil", "gas".
         """
-        # Convert to arrays for vectorized operations
         sw = np.atleast_1d(water_saturation)
         so = np.atleast_1d(oil_saturation)
         sg = np.atleast_1d(gas_saturation)
-
-        # Broadcast all arrays to same shape
         sw, so, sg = np.broadcast_arrays(sw, so, sg)
 
-        # Validate saturations
         if np.any((sw < 0) | (sw > 1) | (so < 0) | (so > 1) | (sg < 0) | (sg > 1)):
             raise ValidationError("Saturations must be between 0 and 1.")
 
-        # Normalize saturations if they do not sum to 1
+        # Normalize if saturations do not sum to 1
         total_saturation = sw + so + sg
         needs_norm = (np.abs(total_saturation - 1.0) > 1e-6) & (total_saturation > 0.0)
         if np.any(needs_norm):
@@ -1021,26 +1072,47 @@ class ThreePhaseRelPermTable(
             so = np.where(needs_norm, so / total_saturation, so)
             sg = np.where(needs_norm, sg / total_saturation, sg)
 
-        # For oil-water table
-        # krw = wetting phase kr at wetting phase saturation
-        # kro_w = non-wetting phase kr at wetting phase saturation
+        # For Oil-water table
+        # Wetting phase is WATER, non-wetting is OIL (water-wet convention)
+        # or wetting is OIL, non-wetting is WATER (oil-wet convention).
+        # In either case we pass both saturations and let the table pick its
+        # reference axis.
         if self.oil_water_table.wetting_phase == FluidPhase.WATER:
-            krw = self.oil_water_table.get_wetting_phase_relative_permeability(sw)
-            kro_w = self.oil_water_table.get_non_wetting_phase_relative_permeability(sw)
+            krw = self.oil_water_table.get_wetting_phase_relative_permeability(
+                sw, non_wetting_saturation=so
+            )
+            kro_w = self.oil_water_table.get_non_wetting_phase_relative_permeability(
+                sw, non_wetting_saturation=so
+            )
         else:
-            # Oil is wetting phase in oil-water table
-            kro_w = self.oil_water_table.get_wetting_phase_relative_permeability(so)
-            krw = self.oil_water_table.get_non_wetting_phase_relative_permeability(so)
+            # Oil is wetting phase
+            kro_w = self.oil_water_table.get_wetting_phase_relative_permeability(
+                so, non_wetting_saturation=sw
+            )
+            krw = self.oil_water_table.get_non_wetting_phase_relative_permeability(
+                so, non_wetting_saturation=sw
+            )
 
-        # For gas-oil table: oil is wetting phase
-        # kro_g = wetting phase kr at oil saturation
-        # krg = non-wetting phase kr at oil saturation
-        kro_g = self.gas_oil_table.get_wetting_phase_relative_permeability(so)
-        krg = self.gas_oil_table.get_non_wetting_phase_relative_permeability(so)
+        # For Gas-oil table
+        if self.gas_oil_table.wetting_phase == FluidPhase.OIL:
+            kro_g = self.gas_oil_table.get_wetting_phase_relative_permeability(
+                so, non_wetting_saturation=sg
+            )
+            krg = self.gas_oil_table.get_non_wetting_phase_relative_permeability(
+                so, non_wetting_saturation=sg
+            )
+        else:
+            # Gas is wetting phase
+            krg = self.gas_oil_table.get_wetting_phase_relative_permeability(
+                sg, non_wetting_saturation=so
+            )
+            kro_g = self.gas_oil_table.get_non_wetting_phase_relative_permeability(
+                sg, non_wetting_saturation=so
+            )
 
-        # Apply mixing rule for three-phase oil relative permeability
+        # Three-phase oil mixing rule
         if self.mixing_rule is not None:
-            kro = self.mixing_rule(  # type: ignore
+            kro = self.mixing_rule(  # type: ignore[operator]
                 kro_w=kro_w,
                 kro_g=kro_g,
                 water_saturation=sw,
@@ -1048,7 +1120,6 @@ class ThreePhaseRelPermTable(
                 gas_saturation=sg,
             )
         else:
-            # Simple conservative rule if no mixing rule supplied
             kro = np.minimum(kro_w, kro_g)
 
         return RelativePermeabilities(water=krw, oil=kro, gas=krg)  # type: ignore[typeddict-item]
@@ -1062,15 +1133,12 @@ class ThreePhaseRelPermTable(
         **kwargs: typing.Any,
     ) -> RelativePermeabilities:
         """
-        Compute relative permeabilities for oil, water, gas.
+        Compute relative permeabilities for water, oil, and gas.
 
-        Supports both scalar and array inputs.
-
-        :param water_saturation: Water saturation (fraction) - scalar or array.
-        :param oil_saturation: Oil saturation (fraction) - scalar or array.
-        :param gas_saturation: Gas saturation (fraction) - scalar or array.
-        :return: A dictionary with relative permeabilities for water, oil, and gas.
-        0 <= water_saturation, oil_saturation, gas_saturation <= 1
+        :param water_saturation: Water saturation (fraction) — scalar or array.
+        :param oil_saturation: Oil saturation (fraction) — scalar or array.
+        :param gas_saturation: Gas saturation (fraction) — scalar or array.
+        :return: RelativePermeabilities dict with keys "water", "oil", "gas".
         """
         return self.get_relative_permeabilities(
             water_saturation=water_saturation,

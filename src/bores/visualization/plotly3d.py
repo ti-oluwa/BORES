@@ -39,7 +39,7 @@ from bores.visualization.utils import (
     _format_value,
     _invert_z_axis,
     get_data,
-    slice_grid,
+    slice_3d_grid,
 )
 from bores.wells import Wells
 
@@ -2485,7 +2485,7 @@ class DataVisualizer:
         :return: Tuple of (sliced_data, actual_slices_used)
         :raises ValidationError: If slicing would result in non-3D data
         """
-        return slice_grid(data, x_slice=x_slice, y_slice=y_slice, z_slice=z_slice)
+        return slice_3d_grid(data, x_slice=x_slice, y_slice=y_slice, z_slice=z_slice)
 
     def _get_data(
         self,

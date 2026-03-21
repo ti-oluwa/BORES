@@ -669,7 +669,7 @@ def coarsen_grid_and_coords(
     )
 
 
-def slice_grid(
+def slice_3d_grid(
     data: ThreeDimensionalGrid,
     x_slice: typing.Optional[typing.Union[int, slice, typing.Tuple[int, int]]] = None,
     y_slice: typing.Optional[typing.Union[int, slice, typing.Tuple[int, int]]] = None,
@@ -690,11 +690,11 @@ def slice_grid(
     ```python
     data = np.random.rand(10, 10, 10)
     # Extract single plane at x=5
-    sliced, _ = slice_grid(data, x_slice=5)
+    sliced, _ = slice_3d_grid(data, x_slice=5)
     # Extract range from x=2 to x=8
-    sliced, _ = slice_grid(data, x_slice=(2, 8))
+    sliced, _ = slice_3d_grid(data, x_slice=(2, 8))
     # Extract middle section in all dimensions
-    sliced, _ = slice_grid(data, x_slice=(2, 8), y_slice=(3, 7), z_slice=(1, 9))
+    sliced, _ = slice_3d_grid(data, x_slice=(2, 8), y_slice=(3, 7), z_slice=(1, 9))
     ```
     """
     nx, ny, nz = data.shape
