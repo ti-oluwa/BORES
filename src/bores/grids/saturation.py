@@ -9,7 +9,6 @@ from bores.errors import ValidationError
 from bores.relperm import RelativePermeabilityTable
 from bores.types import FluidPhase, NDimension, NDimensionalGrid
 
-
 __all__ = ["build_saturation_grids", "seed_phase_saturation"]
 
 
@@ -277,7 +276,6 @@ def build_saturation_grids(
     water_saturation = np.zeros_like(depth_grid, dtype=dtype)
     oil_saturation = np.zeros_like(depth_grid, dtype=dtype)
     gas_saturation = np.zeros_like(depth_grid, dtype=dtype)
-    # Cast to NDimensionalGrid to please type checker
     water_saturation = typing.cast(NDimensionalGrid[NDimension], water_saturation)
     oil_saturation = typing.cast(NDimensionalGrid[NDimension], oil_saturation)
     gas_saturation = typing.cast(NDimensionalGrid[NDimension], gas_saturation)
@@ -880,7 +878,6 @@ def seed_phase_saturation(
             water_saturation_grid = water_saturation_grid.copy()
 
     # Determine seed value
-    seed: float
     if seed_saturation is not None:
         seed = float(seed_saturation)
     else:
@@ -898,10 +895,10 @@ def seed_phase_saturation(
             # Step through candidate Sg values from the table by decrementing So.
             # Use 100 evenly spaced Sg candidates from 0 to (1 - base_water_sat).
             gas_sat_candidates = np.linspace(0.0, 1.0 - base_water_sat, 200)
-            oil_sat_candidates = 1.0 - base_water_sat - gas_sat_candidates
+            oil_saturation_candidates = 1.0 - base_water_sat - gas_sat_candidates
             kr_values = relperm_table(
                 water_saturation=np.full_like(gas_sat_candidates, base_water_sat),
-                oil_saturation=oil_sat_candidates,
+                oil_saturation=oil_saturation_candidates,
                 gas_saturation=gas_sat_candidates,
             )
             krg_values = np.asarray(kr_values["gas"])
@@ -918,12 +915,12 @@ def seed_phase_saturation(
 
         else:  # FluidPhase.WATER
             # Scan increasing Sw from base_water_sat upward.
-            water_sat_candidates = np.linspace(base_water_sat, 1.0, 200)
-            oil_sat_candidates = 1.0 - water_sat_candidates
+            water_saturation_candidates = np.linspace(base_water_sat, 1.0, 200)
+            oil_saturation_candidates = 1.0 - water_saturation_candidates
             kr_values = relperm_table(
-                water_saturation=water_sat_candidates,
-                oil_saturation=oil_sat_candidates,
-                gas_saturation=np.zeros_like(water_sat_candidates),
+                water_saturation=water_saturation_candidates,
+                oil_saturation=oil_saturation_candidates,
+                gas_saturation=np.zeros_like(water_saturation_candidates),
             )
             krw_values = np.asarray(kr_values["water"])
             nonzero_mask = krw_values > 0.0
@@ -933,12 +930,14 @@ def seed_phase_saturation(
                     "the full water saturation range. Cannot auto-detect seed saturation."
                 )
             first_nonzero_idx = int(np.argmax(nonzero_mask))
-            target_idx = min(first_nonzero_idx + 1, len(water_sat_candidates) - 1)
-            seed = float(water_sat_candidates[target_idx])
+            target_idx = min(
+                first_nonzero_idx + 1, len(water_saturation_candidates) - 1
+            )
+            seed = float(water_saturation_candidates[target_idx])
 
     # Apply seed at each cell
-    target_phase_grid: NDimensionalGrid[NDimension] = (
-        gas_saturation_grid if phase == FluidPhase.GAS else water_saturation_grid  # type: ignore[assignment]
+    target_phase_grid: NDimensionalGrid[NDimension] = (  # type: ignore[assignment]
+        gas_saturation_grid if phase == FluidPhase.GAS else water_saturation_grid
     )
 
     for cell in cells:

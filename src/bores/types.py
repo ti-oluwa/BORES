@@ -207,11 +207,36 @@ class RelativePermeabilities(TypedDict):
     gas: FloatOrArray
 
 
+class RelativePermeabilityDerivatives(TypedDict):
+    """Dictionary holding relative permeabilities derivatives."""
+
+    # w.r.t water
+    dKrw_dSw: FloatOrArray
+    dKro_dSw: FloatOrArray
+    dKrg_dSw: FloatOrArray
+    # w.r.t oil
+    dKrw_dSo: FloatOrArray
+    dKro_dSo: FloatOrArray
+    dKrg_dSo: FloatOrArray
+    # w.r.t gas
+    dKrw_dSg: FloatOrArray
+    dKro_dSg: FloatOrArray
+    dKrg_dSg: FloatOrArray
+
+
 class CapillaryPressures(typing.TypedDict):
     """Dictionary containing capillary pressures for different phase pairs."""
 
     oil_water: FloatOrArray  # Pcow = Po - Pw
     gas_oil: FloatOrArray  # Pcgo = Pg - Po
+
+
+class CapillaryPressureDerivatives(TypedDict):
+    """Dictionary containing capillary pressure derivatives for different phase pairs."""
+
+    dPcow_dSw: FloatOrArray
+    dPcow_dSo: FloatOrArray
+    dPcgo_dSg: FloatOrArray
 
 
 class Wettability(enum.Enum):

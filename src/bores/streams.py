@@ -80,8 +80,8 @@ class StateStream(typing.Generic[NDimension]):
     Example Usage:
 
     ```python
-    store = ZarrStore("run01.zarr")
-    with StateStream(states=simulate(), store=store, background_io=True) as stream:
+    store = HDF5Store("run01.h5")
+    with StateStream(states=run(), store=store, background_io=True) as stream:
         for state in stream.until(some_condition):
             analyse(state)          # background thread writes while we analyse
 

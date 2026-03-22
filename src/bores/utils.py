@@ -3,8 +3,11 @@ import typing
 
 import numba  # type: ignore[import-untyped]
 import numpy as np
+import numpy.typing as npt
 import orjson
 from numba.extending import overload  # type: ignore[import-untyped]
+
+from bores.types import FloatOrArray
 
 __all__ = [
     "apply_mask",
@@ -32,11 +35,11 @@ def clip_scalar(value: float, min_val: float, max_val: float) -> float:
 
 
 @typing.overload
-def is_array(x: np.ndarray) -> typing.TypeGuard[np.typing.NDArray]: ...
+def is_array(x: npt.NDArray) -> typing.TypeGuard[npt.NDArray]: ...
 
 
 @typing.overload
-def is_array(x: typing.Any) -> typing.TypeGuard[np.typing.NDArray]: ...
+def is_array(x: typing.Any) -> typing.TypeGuard[npt.NDArray]: ...
 
 
 @numba.njit(cache=True)
@@ -45,9 +48,7 @@ def is_array(x: typing.Any) -> bool:
 
 
 @numba.njit(cache=True)
-def _apply_mask_2d(
-    arr: np.typing.NDArray, mask: np.typing.NDArray, values: np.typing.NDArray
-) -> None:
+def _apply_mask_2d(arr: npt.NDArray, mask: npt.NDArray, values: npt.NDArray) -> None:
     """
     Apply values (scalar or array) to a 2D array where mask is True (in-place).
 
@@ -64,9 +65,7 @@ def _apply_mask_2d(
 
 
 @numba.njit(cache=True)
-def _apply_mask_3d(
-    arr: np.typing.NDArray, mask: np.typing.NDArray, values: np.typing.NDArray
-) -> None:
+def _apply_mask_3d(arr: npt.NDArray, mask: npt.NDArray, values: npt.NDArray) -> None:
     """
     Apply values (scalar or array) to a 3D array where mask is True (in-place).
 
@@ -83,9 +82,7 @@ def _apply_mask_3d(
 
 
 @numba.njit(cache=True)
-def _apply_mask_nd(
-    arr: np.typing.NDArray, mask: np.typing.NDArray, values: np.typing.NDArray
-) -> None:
+def _apply_mask_nd(arr: npt.NDArray, mask: npt.NDArray, values: npt.NDArray) -> None:
     """
     Apply values (scalar or array) to an N-dimensional array where mask is True (in-place).
 
@@ -99,9 +96,7 @@ def _apply_mask_nd(
 
 
 @numba.njit(cache=True)
-def apply_mask(
-    arr: np.typing.NDArray, mask: np.typing.NDArray, values: np.typing.NDArray
-) -> None:
+def apply_mask(arr: npt.NDArray, mask: npt.NDArray, values: npt.NDArray) -> None:
     """
     Dispatcher to apply scalar or array values to an array where mask is True.
 
@@ -119,7 +114,7 @@ def apply_mask(
 
 
 @numba.njit(cache=True)
-def _get_mask_2d(arr: np.typing.NDArray, mask: np.typing.NDArray, fill_value: float):
+def _get_mask_2d(arr: npt.NDArray, mask: npt.NDArray, fill_value: float):
     """
     Return a new 2D array where values are kept if mask is True, otherwise replaced with fill_value.
 
@@ -140,7 +135,7 @@ def _get_mask_2d(arr: np.typing.NDArray, mask: np.typing.NDArray, fill_value: fl
 
 
 @numba.njit(cache=True)
-def _get_mask_3d(arr: np.typing.NDArray, mask: np.typing.NDArray, fill_value: float):
+def _get_mask_3d(arr: npt.NDArray, mask: npt.NDArray, fill_value: float):
     """
     Return a new 3D array where values are kept if mask is True, otherwise replaced with fill_value.
 
@@ -162,7 +157,7 @@ def _get_mask_3d(arr: np.typing.NDArray, mask: np.typing.NDArray, fill_value: fl
 
 
 @numba.njit(cache=True)
-def _get_mask_nd(arr: np.typing.NDArray, mask: np.typing.NDArray, fill_value: float):
+def _get_mask_nd(arr: npt.NDArray, mask: npt.NDArray, fill_value: float):
     """
     Return a new N-dimensional array where values are kept if mask is True, otherwise replaced with fill_value.
 
@@ -181,9 +176,7 @@ def _get_mask_nd(arr: np.typing.NDArray, mask: np.typing.NDArray, fill_value: fl
 
 
 @numba.njit(cache=True)
-def get_mask(
-    arr: np.typing.NDArray, mask: np.typing.NDArray, fill_value: float = np.nan
-):
+def get_mask(arr: npt.NDArray, mask: npt.NDArray, fill_value: float = np.nan):
     """
     Dispatcher to return a masked copy of an array.
 
@@ -250,6 +243,48 @@ def max_overload(x):
         return impl
 
 
+def piecewise_linear_slope(
+    query: FloatOrArray,
+    table_x: npt.NDArray,
+    table_y: npt.NDArray,
+) -> FloatOrArray:
+    """
+    Return the slope of the piecewise-linear interpolant defined by
+    `(table_x, table_y)` at each point in `query`.
+
+    This is the exact derivative of `np.interp(query, table_x, table_y)`
+    with respect to `query`.  The slope is the rise-over-run of the segment
+    that contains the query point.
+
+    Outside the table range the interpolant is constant (same behaviour as
+    `np.interp`), so the slope is zero there.
+
+    :param query: Scalar or array of query saturation values.
+    :param table_x: Monotonically increasing x-axis values of the lookup
+        table (the `xp` argument of `np.interp`).
+    :param table_y: Function values at each `table_x` point (the `fp`
+        argument of `np.interp`).
+    :return: Slope value(s) with the same shape as `query`.
+    """
+    is_scalar = np.isscalar(query)
+    q = np.atleast_1d(np.asarray(query, dtype=np.float64)).ravel()
+
+    dx = np.diff(table_x)
+    safe_dx = np.where(dx != 0.0, dx, 1.0)
+    segment_slopes = np.diff(table_y) / safe_dx
+
+    left_indices = np.searchsorted(table_x, q, side="right") - 1
+    left_indices = np.clip(left_indices, 0, len(segment_slopes) - 1)
+
+    slopes = segment_slopes[left_indices]
+    slopes = np.where(q < table_x[0], 0.0, slopes)
+    slopes = np.where(q > table_x[-1], 0.0, slopes)
+
+    if is_scalar:
+        return float(slopes[0])
+    return slopes.reshape(np.atleast_1d(query).shape)
+
+
 def _numpy_default(obj: typing.Any) -> typing.Mapping[str, typing.Any]:
     if isinstance(obj, np.ndarray):
         # Small arrays are stored as JSON list
@@ -274,7 +309,7 @@ def _numpy_default(obj: typing.Any) -> typing.Mapping[str, typing.Any]:
     raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
 
-def _decode_ndarray(obj: typing.Mapping[str, typing.Any]) -> np.typing.NDArray:
+def _decode_ndarray(obj: typing.Mapping[str, typing.Any]) -> npt.NDArray:
     dtype = np.dtype(obj["dtype"])
     shape = tuple(obj["shape"])
 

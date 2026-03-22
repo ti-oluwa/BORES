@@ -1288,7 +1288,7 @@ def solve_implicit_saturation(
                     f"||R||/||R0|| = {relative_residual_norm:.2e}"
                 )
             else:
-                logger.info(
+                logger.warning(
                     f"Newton stagnated (negligible dS) at iteration {iteration}: "
                     f"max |dS| = {max_saturation_update:.2e}, "
                     f"||R||/||R0|| = {relative_residual_norm:.2e}"
@@ -1317,7 +1317,7 @@ def solve_implicit_saturation(
                     f"no improvement for {stagnation_count} iterations"
                 )
             else:
-                logger.info(
+                logger.warning(
                     f"Newton stagnated (residual flat) at iteration {iteration}: "
                     f"||R||/||R0|| = {relative_residual_norm:.2e}, "
                     f"no improvement for {stagnation_count} iterations"
