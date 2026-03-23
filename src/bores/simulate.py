@@ -2127,7 +2127,7 @@ def run(
                         boundary_conditions=boundary_conditions,
                         pad_width=pad_width,
                     )
-                else:
+                elif scheme == "explicit":
                     result = _run_explicit_step(
                         time_step=new_step,
                         grid_shape=grid_shape,
@@ -2148,6 +2148,10 @@ def run(
                         config=config,
                         boundary_conditions=boundary_conditions,
                         pad_width=pad_width,
+                    )
+                else:
+                    raise ValidationError(
+                        f"Invalid simualtion scheme {scheme!r}. Available schemes include 'impes', 'implicit' or 'explicit'."
                     )
 
                 # If the step was successful, accept that step proposal

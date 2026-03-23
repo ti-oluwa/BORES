@@ -732,7 +732,7 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
     config = bores.Config(
         timer=timer,
         rock_fluid_tables=rock_fluid_tables,
-        scheme="sequential_implicit",
+        scheme="implicit",
         output_frequency=1,
         pressure_solver="direct",
         pressure_preconditioner=None,
@@ -741,6 +741,7 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
         log_interval=10,
         pvt_tables=pvt_tables,
         wells=wells,
+        jacobian_assembly_method="analytical",
         boundary_conditions=None,
         disable_capillary_effects=True,
         freeze_saturation_pressure=False,
@@ -752,6 +753,7 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
         use_pseudo_pressure=True,
         normalize_saturations=True,
         phase_appearance_tolerance=1e-6,
+        saturation_convergence_tolerance=1e-4,
     )
     config.save(Path("./benchmarks/runs/spe1/setup/config.yaml"))
     return (wells,)
@@ -1191,8 +1193,8 @@ def recovery_plots(analyst, bores, np, recovery_efficiency_history):
 
 @app.cell
 def _(analyst):
-    mbe = analyst.material_balance_error()
-    print(mbe.water_mbe)
+    mbe = analyst.material_balance_error(to_step=100)
+    print(mbe.total_mbe)
     return
 
 
