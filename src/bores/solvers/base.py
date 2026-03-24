@@ -212,15 +212,15 @@ def from_1D_index_interior_only(
     :return: Tuple of (i, j, k) indices in the full grid (interior cells only)
     """
     # Compute interior dimensions
-    interior_Ny = cell_count_y - 2
-    interior_Nz = cell_count_z - 2
+    interior_ny = cell_count_y - 2
+    interior_nz = cell_count_z - 2
 
     # Reverse the row-major ordering
-    # idx = i_interior * (interior_Ny * interior_Nz) + j_interior * interior_Nz + k_interior
-    i_interior = idx // (interior_Ny * interior_Nz)
-    remainder = idx % (interior_Ny * interior_Nz)
-    j_interior = remainder // interior_Nz
-    k_interior = remainder % interior_Nz
+    # idx = i_interior * (interior_ny * interior_nz) + j_interior * interior_nz + k_interior
+    i_interior = idx // (interior_ny * interior_nz)
+    remainder = idx % (interior_ny * interior_nz)
+    j_interior = remainder // interior_nz
+    k_interior = remainder % interior_nz
 
     # Convert back to full grid coordinates (add 1 to shift from interior to full grid)
     i = i_interior + 1

@@ -828,10 +828,10 @@ def setup_analysis(bores, np, states):
     for s in states:
         time_step = s.step
         fluid_properties = s.model.fluid_properties
-        avg_oil_sat = np.mean(fluid_properties.oil_saturation_grid)
-        avg_water_sat = np.mean(fluid_properties.water_saturation_grid)
-        avg_gas_sat = np.mean(fluid_properties.gas_saturation_grid)
-        avg_pressure = np.mean(fluid_properties.pressure_grid[9, 9, 2])
+        avg_oil_sat = np.mean(fluid_properties.oil_saturation_grid[9, 9, 2])
+        avg_water_sat = np.mean(fluid_properties.water_saturation_grid[9, 9, 2])
+        avg_gas_sat = np.mean(fluid_properties.gas_saturation_grid[9, 9, 2])
+        avg_pressure = np.mean(fluid_properties.pressure_grid)
 
         oil_saturation_history.append((time_step, avg_oil_sat))
         water_saturation_history.append((time_step, avg_water_sat))
@@ -1230,9 +1230,9 @@ def _(bores, states, viz, wells):
         cmax=1.0,
     )
 
-    property = "oil-sat"
+    property = "gas-sat"
     figures = []
-    timesteps = [70]
+    timesteps = [270]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],

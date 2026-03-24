@@ -56,7 +56,8 @@ from bores.stores import StoreSerializable
 from bores.tables.pvt import PVTDataSet, PVTTables
 from bores.types import MiscibilityModel, NDimension, NDimensionalGrid, ThreeDimensions
 from bores.utils import clip
-from bores.wells import Wells
+from bores.wells.base import Wells
+from bores.wells.indices import WellIndicesCache, build_well_indices_cache
 
 __all__ = ["Run", "run"]
 
@@ -288,6 +289,7 @@ def _run_impes_step(
     miscibility_model: MiscibilityModel,
     config: Config,
     boundary_conditions: BoundaryConditions[ThreeDimensions],
+    well_indices_cache: WellIndicesCache,
     pad_width: int = 1,
 ) -> StepResult[ThreeDimensions]:
     """
@@ -332,7 +334,7 @@ def _run_impes_step(
         wells=wells,
         config=config,
         pad_width=pad_width,
-        boundary_conditions=boundary_conditions,
+        well_indices_cache=well_indices_cache,
     )
     if not pressure_result.success:
         logger.error(
@@ -600,7 +602,7 @@ def _run_impes_step(
         capillary_pressure_grids=padded_capillary_pressure_grids,
         wells=wells,
         config=config,
-        boundary_conditions=boundary_conditions,
+        well_indices_cache=well_indices_cache,
         injection_grid=_RateGridsProxy(
             oil=oil_injection_grid,
             water=water_injection_grid,
@@ -763,7 +765,7 @@ def _run_impes_step(
     )
 
 
-def _run_sequential_implicit_step(
+def _run_implicit_step(
     time_step: int,
     padded_zeros_grid: NDimensionalGrid[ThreeDimensions],
     grid_shape: ThreeDimensions,
@@ -782,6 +784,7 @@ def _run_sequential_implicit_step(
     miscibility_model: MiscibilityModel,
     config: Config,
     boundary_conditions: BoundaryConditions[ThreeDimensions],
+    well_indices_cache: WellIndicesCache,
     pad_width: int = 1,
 ) -> StepResult[ThreeDimensions]:
     """
@@ -829,7 +832,7 @@ def _run_sequential_implicit_step(
         capillary_pressure_grids=padded_capillary_pressure_grids,
         wells=wells,
         config=config,
-        boundary_conditions=boundary_conditions,
+        well_indices_cache=well_indices_cache,
         pad_width=pad_width,
     )
     if not pressure_result.success:
@@ -1030,7 +1033,7 @@ def _run_sequential_implicit_step(
         fluid_properties=padded_fluid_properties,
         wells=wells,
         config=config,
-        boundary_conditions=boundary_conditions,
+        well_indices_cache=well_indices_cache,
         injection_grid=_RateGridsProxy(
             oil=oil_injection_grid,
             water=water_injection_grid,
@@ -1200,6 +1203,7 @@ def _run_explicit_step(
     miscibility_model: MiscibilityModel,
     config: Config,
     boundary_conditions: BoundaryConditions[ThreeDimensions],
+    well_indices_cache: WellIndicesCache,
     pad_width: int = 1,
 ) -> StepResult[ThreeDimensions]:
     """
@@ -1243,7 +1247,7 @@ def _run_explicit_step(
         capillary_pressure_grids=padded_capillary_pressure_grids,
         wells=wells,
         config=config,
-        boundary_conditions=boundary_conditions,
+        well_indices_cache=well_indices_cache,
         pad_width=pad_width,
     )
     pressure_solution = pressure_result.value
@@ -1390,7 +1394,7 @@ def _run_explicit_step(
         capillary_pressure_grids=padded_capillary_pressure_grids,
         wells=wells,
         config=config,
-        boundary_conditions=boundary_conditions,
+        well_indices_cache=well_indices_cache,
         injection_grid=_RateGridsProxy(
             oil=oil_injection_grid,
             water=water_injection_grid,
@@ -1858,6 +1862,18 @@ def run(
         padded_saturation_history = model.saturation_history.pad(pad_width=pad_width)
         thickness_grid = model.thickness_grid
         padded_thickness_grid = pad_grid(thickness_grid, pad_width=pad_width)
+        well_indices_cache = build_well_indices_cache(
+            wells=wells,
+            thickness_grid=padded_thickness_grid,
+            absolute_permeability=padded_rock_properties.absolute_permeability,
+            boundary_conditions=boundary_conditions,
+            cell_size_x=cell_dimension[0],
+            cell_size_y=cell_dimension[1],
+            cell_count_x=padded_thickness_grid.shape[0],
+            cell_count_y=padded_thickness_grid.shape[1],
+            cell_count_z=padded_thickness_grid.shape[2],
+            pad_width=pad_width,
+        )
         elevation_grid = model.get_elevation_grid(
             apply_dip=not config.disable_structural_dip
         )
@@ -2103,10 +2119,11 @@ def run(
                         miscibility_model=miscibility_model,
                         config=config,
                         boundary_conditions=boundary_conditions,
+                        well_indices_cache=well_indices_cache,
                         pad_width=pad_width,
                     )
                 elif scheme == "implicit":
-                    result = _run_sequential_implicit_step(
+                    result = _run_implicit_step(
                         time_step=new_step,
                         grid_shape=grid_shape,
                         padded_zeros_grid=padded_zeros_grid,
@@ -2125,6 +2142,7 @@ def run(
                         miscibility_model=miscibility_model,
                         config=config,
                         boundary_conditions=boundary_conditions,
+                        well_indices_cache=well_indices_cache,
                         pad_width=pad_width,
                     )
                 elif scheme == "explicit":
@@ -2147,6 +2165,7 @@ def run(
                         miscibility_model=miscibility_model,
                         config=config,
                         boundary_conditions=boundary_conditions,
+                        well_indices_cache=well_indices_cache,
                         pad_width=pad_width,
                     )
                 else:

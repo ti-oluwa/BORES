@@ -40,6 +40,7 @@ from bores.wells.core import (
     compute_oil_productivity_index,
     get_pseudo_pressure_table,
 )
+from bores.wells.indices import WellIndicesCache
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ def evolve_pressure(
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     wells: Wells[ThreeDimensions],
     config: Config,
-    boundary_conditions: BoundaryConditions[ThreeDimensions],
+    well_indices_cache: WellIndicesCache,
     pad_width: int = 1,
 ) -> EvolutionResult[ImplicitPressureSolution, None]:
     """
@@ -208,10 +209,8 @@ def evolve_pressure(
             cell_count_x=cell_count_x,
             cell_count_y=cell_count_y,
             cell_count_z=cell_count_z,
-            thickness_grid=thickness_grid,
             current_oil_pressure_grid=current_oil_pressure_grid,
             temperature_grid=fluid_properties.temperature_grid,
-            absolute_permeability=absolute_permeability,
             water_relative_mobility_grid=water_relative_mobility_grid,
             oil_relative_mobility_grid=oil_relative_mobility_grid,
             gas_relative_mobility_grid=gas_relative_mobility_grid,
@@ -220,11 +219,9 @@ def evolve_pressure(
             gas_compressibility_grid=gas_compressibility_grid,
             fluid_properties=fluid_properties,
             wells=wells,
-            cell_size_x=cell_size_x,
-            cell_size_y=cell_size_y,
             time=time,
             config=config,
-            boundary_conditions=boundary_conditions,
+            well_indices_cache=well_indices_cache,
             md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
             dtype=dtype,
             pad_width=pad_width,
@@ -290,10 +287,8 @@ def evolve_pressure(
             cell_count_x=cell_count_x,
             cell_count_y=cell_count_y,
             cell_count_z=cell_count_z,
-            thickness_grid=thickness_grid,
             current_oil_pressure_grid=current_oil_pressure_grid,
             temperature_grid=fluid_properties.temperature_grid,
-            absolute_permeability=absolute_permeability,
             water_relative_mobility_grid=water_relative_mobility_grid,
             oil_relative_mobility_grid=oil_relative_mobility_grid,
             gas_relative_mobility_grid=gas_relative_mobility_grid,
@@ -302,11 +297,9 @@ def evolve_pressure(
             gas_compressibility_grid=gas_compressibility_grid,
             fluid_properties=fluid_properties,
             wells=wells,
-            cell_size_x=cell_size_x,
-            cell_size_y=cell_size_y,
             time=time,
             config=config,
-            boundary_conditions=boundary_conditions,
+            well_indices_cache=well_indices_cache,
             md_per_cp_to_ft2_per_psi_per_day=c.MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_DAY,
             dtype=dtype,
             pad_width=pad_width,
@@ -964,10 +957,8 @@ def compute_well_contributions(
     cell_count_x: int,
     cell_count_y: int,
     cell_count_z: int,
-    thickness_grid: ThreeDimensionalGrid,
     current_oil_pressure_grid: ThreeDimensionalGrid,
     temperature_grid: ThreeDimensionalGrid,
-    absolute_permeability: typing.Any,
     water_relative_mobility_grid: ThreeDimensionalGrid,
     oil_relative_mobility_grid: ThreeDimensionalGrid,
     gas_relative_mobility_grid: ThreeDimensionalGrid,
@@ -976,11 +967,9 @@ def compute_well_contributions(
     gas_compressibility_grid: ThreeDimensionalGrid,
     fluid_properties: FluidProperties[ThreeDimensions],
     wells: Wells[ThreeDimensions],
-    cell_size_x: float,
-    cell_size_y: float,
     time: float,
     config: Config,
-    boundary_conditions: BoundaryConditions[ThreeDimensions],
+    well_indices_cache: WellIndicesCache,
     md_per_cp_to_ft2_per_psi_per_day: float,
     dtype: np.typing.DTypeLike,
     pad_width: int = 1,
@@ -1098,51 +1087,15 @@ def compute_well_contributions(
             config.use_pseudo_pressure and injected_phase == FluidPhase.GAS
         )
 
-        # First pass: cache well indices and accumulate total WI for
-        # allocation fraction computation in the second pass.
-        well_index_cache: typing.List[
-            typing.Tuple[typing.Tuple[int, int, int, int], float]
-        ] = []
-        total_well_index = 0.0
-        grid_dims = (
-            cell_count_x - 2 * pad_width,
-            cell_count_y - 2 * pad_width,
-            cell_count_z - 2 * pad_width,
-        )
-        for interval_start, interval_end in well.perforating_intervals:
-            for i, j, k in itertools.product(
-                range(interval_start[0] + pad_width, interval_end[0] + pad_width + 1),
-                range(interval_start[1] + pad_width, interval_end[1] + pad_width + 1),
-                range(interval_start[2] + pad_width, interval_end[2] + pad_width + 1),
-            ):
-                # Actual grid location (without ghost cell offset)
-                actual_location = (i - pad_width, j - pad_width, k - pad_width)
-                well_index = well.get_well_index(
-                    interval_thickness=(
-                        cell_size_x,
-                        cell_size_y,
-                        thickness_grid[i, j, k],
-                    ),
-                    permeability=(
-                        absolute_permeability.x[i, j, k],
-                        absolute_permeability.y[i, j, k],
-                        absolute_permeability.z[i, j, k],
-                    ),
-                    skin_factor=well.skin_factor,
-                    well_location=actual_location,
-                    grid_dimensions=grid_dims,
-                    boundary_condition=boundary_conditions["pressure"],
-                )
-                well_index_cache.append(((i, j, k, _to_1D_index(i, j, k)), well_index))
-                total_well_index += well_index
-
-        # Second pass: compute BHP and productivity index per perforation.
-        for (i, j, k, cell_1d_index), well_index in well_index_cache:
+        well_indices = well_indices_cache.injection[well.name]
+        # Compute BHP and productivity index per perforation.
+        for perforation_index in well_indices:
+            i, j, k = perforation_index.cell
+            cell_1d_index = perforation_index.cell_1d_index
+            well_index = perforation_index.well_index
+            allocation_fraction = well_indices.allocation_fraction(perforation_index)
             cell_pressure = typing.cast(float, current_oil_pressure_grid[i, j, k])
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
-            allocation_fraction = (
-                well_index / total_well_index if total_well_index > 0.0 else 1.0
-            )
             phase_fvf = typing.cast(
                 float,
                 injected_fluid.get_formation_volume_factor(
@@ -1292,50 +1245,17 @@ def compute_well_contributions(
         if not well.is_open:
             continue
 
-        # First pass: cache well indices
-        well_index_cache = []
-        total_well_index = 0.0
-        grid_dims = (
-            cell_count_x - 2 * pad_width,
-            cell_count_y - 2 * pad_width,
-            cell_count_z - 2 * pad_width,
-        )
-        for interval_start, interval_end in well.perforating_intervals:
-            for i, j, k in itertools.product(
-                range(interval_start[0] + pad_width, interval_end[0] + pad_width + 1),
-                range(interval_start[1] + pad_width, interval_end[1] + pad_width + 1),
-                range(interval_start[2] + pad_width, interval_end[2] + pad_width + 1),
-            ):
-                # Actual grid location (without ghost cell offset)
-                actual_location = (i - pad_width, j - pad_width, k - pad_width)
-                well_index = well.get_well_index(
-                    interval_thickness=(
-                        cell_size_x,
-                        cell_size_y,
-                        thickness_grid[i, j, k],
-                    ),
-                    permeability=(
-                        absolute_permeability.x[i, j, k],
-                        absolute_permeability.y[i, j, k],
-                        absolute_permeability.z[i, j, k],
-                    ),
-                    skin_factor=well.skin_factor,
-                    well_location=actual_location,
-                    grid_dimensions=grid_dims,
-                    boundary_condition=boundary_conditions["pressure"],
-                )
-                well_index_cache.append(((i, j, k, _to_1D_index(i, j, k)), well_index))
-                total_well_index += well_index
-
+        well_indices = well_indices_cache.production[well.name]
         is_couple_controlled = isinstance(well.control, CoupledRateControl)
 
-        # Second pass: one contribution per (perforation, produced phase) pair
-        for (i, j, k, cell_1d_index), well_index in well_index_cache:
+        # One contribution per (perforation, produced phase) pair
+        for perforation_index in well_indices:
+            i, j, k = perforation_index.cell
+            cell_1d_index = perforation_index.cell_1d_index
+            well_index = perforation_index.well_index
+            allocation_fraction = well_indices.allocation_fraction(perforation_index)
             cell_pressure = typing.cast(float, current_oil_pressure_grid[i, j, k])
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
-            allocation_fraction = (
-                well_index / total_well_index if total_well_index > 0.0 else 1.0
-            )
 
             primary_phase_context = {}
             if is_couple_controlled:
@@ -1478,9 +1398,9 @@ def compute_well_contributions(
 
                 logger.info(
                     f"Producer gas phase: PI={productivity_index:.4f}, "
-                    f"BHP={effective_bhp:.2f}, P_cell={cell_pressure:.2f}, "
-                    f"drawdown={cell_pressure - effective_bhp:.2f}, "
-                    f"krg={gas_relative_mobility_grid[i, j, k] * fluid_properties.gas_viscosity_grid[i, j, k]:.3e}, "
+                    f"BHP={effective_bhp:.2f}, Cell Pressure={cell_pressure:.2f}, "
+                    f"∆P={cell_pressure - effective_bhp:.2f}, "
+                    f"Krg={gas_relative_mobility_grid[i, j, k] * fluid_properties.gas_viscosity_grid[i, j, k]:.3e}, "
                     f"Sg={fluid_properties.gas_saturation_grid[i, j, k]:.3e}"
                 )
 
