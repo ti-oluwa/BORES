@@ -293,7 +293,7 @@ def _run_impes_step(
     pad_width: int = 1,
 ) -> StepResult[ThreeDimensions]:
     """
-    Execute one time step using IMPES (Implicit Pressure, Explicit Saturation).
+    Execute one time step using (semi-implicit) IMPES (Implicit Pressure, Explicit Saturation).
 
     :param time_step: Current time step index.
     :param padded_zeros_grid: Padded grid of zeros for rate tracking.

@@ -324,7 +324,10 @@ class PVTTable(StoreSerializable):
         interpolation_method: InterpolationMethod = "linear",
         validate: bool = True,
         warn_on_extrapolation: bool = False,
-        clamps: typing.Optional[typing.Dict[str, typing.Tuple[float, float]]] = None,
+        clamps: typing.Union[
+            typing.Literal[False],
+            typing.Optional[typing.Dict[str, typing.Tuple[float, float]]],
+        ] = None,
     ) -> None:
         """
         Build a pvt table from raw tabulated data.
@@ -354,11 +357,14 @@ class PVTTable(StoreSerializable):
         self.validate = validate
         self.warn_on_extrapolation = warn_on_extrapolation
 
-        # Merge clamps
-        self.clamps: typing.Dict[str, typing.Tuple[float, float]] = {
-            **PHASE_DEFAULT_CLAMPS[data.phase],  # type: ignore
-            **(clamps or {}),
-        }
+        if clamps is False or clamps == {}:
+            self.clamps = {}
+        else:
+            # Merge clamps
+            self.clamps: typing.Dict[str, typing.Tuple[float, float]] = {
+                **PHASE_DEFAULT_CLAMPS[data.phase],  # type: ignore
+                **(clamps or {}),
+            }
 
         # Cubic needs ≥ 4 points
         if interpolation_method != "linear":
@@ -1756,13 +1762,15 @@ def build_oil_pvt_data(
     else:
         # Pb(Rs, T) - need Rs(P,T) to map each (P,T) to a Pb
         if solution_gas_to_oil_ratio_table is None:
-            solution_gas_to_oil_ratio_table = build_estimated_solution_gas_to_oil_ratio_grid(
-                pressure_grid=pressure_grid,  # type: ignore[arg-type]
-                temperature_grid=temperature_grid,
-                oil_api_gravity_grid=oil_api_gravity_table,
-                gas_gravity_grid=np.full((n_p, n_t), gas_gravity, dtype=dtype),
-                max_iterations=20,
-                tolerance=1e-4,
+            solution_gas_to_oil_ratio_table = (
+                build_estimated_solution_gas_to_oil_ratio_grid(
+                    pressure_grid=pressure_grid,  # type: ignore[arg-type]
+                    temperature_grid=temperature_grid,
+                    oil_api_gravity_grid=oil_api_gravity_table,
+                    gas_gravity_grid=np.full((n_p, n_t), gas_gravity, dtype=dtype),
+                    max_iterations=20,
+                    tolerance=1e-4,
+                )
             )
 
         pb_interpolator = RectBivariateSpline(
@@ -1775,7 +1783,9 @@ def build_oil_pvt_data(
         temperature_flat = np.broadcast_to(temperatures, (n_p, n_t))
         assert solution_gas_to_oil_ratio_table is not None
         bubble_point_pressure_grid = (
-            pb_interpolator.ev(solution_gas_to_oil_ratio_table.ravel(), temperature_flat.ravel())
+            pb_interpolator.ev(
+                solution_gas_to_oil_ratio_table.ravel(), temperature_flat.ravel()
+            )
             .reshape(n_p, n_t)
             .astype(dtype)
         )

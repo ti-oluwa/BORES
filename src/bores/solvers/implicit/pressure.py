@@ -1333,6 +1333,9 @@ def compute_well_contributions(
                     **primary_phase_context,
                 )
 
+                # Producers contributions should always be added to Jacobian as BHP terms since
+                # thier flow strongly depends on phase mobility, which depends on saturation, which
+                # must likewise show up in the Jacobian
                 if not np.isfinite(effective_bhp):
                     logger.error(
                         f"Non-finite BHP for production well {well.name!r} "
@@ -1397,7 +1400,7 @@ def compute_well_contributions(
                 _add_bhp_contribution(cell_1d_index, productivity_index, effective_bhp)
 
                 logger.info(
-                    f"Producer gas phase: PI={productivity_index:.4f}, "
+                    f"Producer {produced_phase} phase: PI={productivity_index:.4f}, "
                     f"BHP={effective_bhp:.2f}, Cell Pressure={cell_pressure:.2f}, "
                     f"∆P={cell_pressure - effective_bhp:.2f}, "
                     f"Krg={gas_relative_mobility_grid[i, j, k] * fluid_properties.gas_viscosity_grid[i, j, k]:.3e}, "

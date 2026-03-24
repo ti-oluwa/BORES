@@ -469,7 +469,9 @@ def setup_grid():
         gas_solubility_in_water_table=gas_solubility_in_water_table,
     )
     pvt_tables = bores.PVTTables.from_dataset(
-        pvt_dataset, interpolation_method="linear"
+        pvt_dataset,
+        interpolation_method="linear",
+        clamps=False,
     )
 
     # -------------------------------------------------------------------------
@@ -698,12 +700,12 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
                 molecular_weight=gas_molecular_weight,
                 pseudo_pressure_table=pseudo_pressure_table,
             ),
-            # bores.ProducedFluid(
-            #     name="Water",
-            #     phase=bores.FluidPhase.WATER,
-            #     specific_gravity=1.00,
-            #     molecular_weight=bores.c.MOLECULAR_WEIGHT_WATER,
-            # ),
+            bores.ProducedFluid(
+                name="Water",
+                phase=bores.FluidPhase.WATER,
+                specific_gravity=1.00,
+                molecular_weight=bores.c.MOLECULAR_WEIGHT_WATER,
+            ),
         ],
         skin_factor=0.0,
         is_active=True,
@@ -828,10 +830,10 @@ def setup_analysis(bores, np, states):
     for s in states:
         time_step = s.step
         fluid_properties = s.model.fluid_properties
-        avg_oil_sat = np.mean(fluid_properties.oil_saturation_grid[9, 9, 2])
-        avg_water_sat = np.mean(fluid_properties.water_saturation_grid[9, 9, 2])
-        avg_gas_sat = np.mean(fluid_properties.gas_saturation_grid[9, 9, 2])
-        avg_pressure = np.mean(fluid_properties.pressure_grid)
+        avg_oil_sat = np.mean(fluid_properties.oil_saturation_grid)
+        avg_water_sat = np.mean(fluid_properties.water_saturation_grid)
+        avg_gas_sat = np.mean(fluid_properties.gas_saturation_grid)
+        avg_pressure = np.mean(fluid_properties.pressure_grid[9, 9, 2])
 
         oil_saturation_history.append((time_step, avg_oil_sat))
         water_saturation_history.append((time_step, avg_water_sat))
@@ -1194,7 +1196,7 @@ def recovery_plots(analyst, bores, np, recovery_efficiency_history):
 @app.cell
 def _(analyst):
     mbe = analyst.material_balance_error(to_step=100)
-    print(mbe.total_mbe)
+    print(mbe.water_mbe)
     return
 
 
@@ -1230,9 +1232,9 @@ def _(bores, states, viz, wells):
         cmax=1.0,
     )
 
-    property = "gas-sat"
+    property = "oil-sat"
     figures = []
-    timesteps = [270]
+    timesteps = [200]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],

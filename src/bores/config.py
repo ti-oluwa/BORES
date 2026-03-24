@@ -305,6 +305,16 @@ class Config(
     is below 1e-3, Newton is declared converged.
     """
 
+    newton_stagnation_patience: int = attrs.field(
+        default=3,
+        validator=attrs.validators.ge(1),
+    )
+    
+    newton_stagnation_improvement_threshold: float = attrs.field(
+        default=0.01,
+        validator=attrs.validators.gt(0),
+    )
+
     jacobian_assembly_method: typing.Literal["numerical", "analytical"] = "numerical"
     """
     Method used to assemble the Jacobian matrix in the implicit saturation

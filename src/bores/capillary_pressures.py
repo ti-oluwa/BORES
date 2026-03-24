@@ -369,6 +369,7 @@ class ThreePhaseCapillaryPressureTable(
     A table of Pcow against wetting phase saturation (water saturation if water is wetting phase,
     oil saturation if oil is wetting phase).
     """
+
     gas_oil_table: TwoPhaseCapillaryPressureTable
     """
     Capillary pressure table for gas-oil system (wetting phase = oil).
@@ -498,15 +499,21 @@ class ThreePhaseCapillaryPressureTable(
 
         # Oil-water derivatives
         if oil_water_table.wetting_phase == FluidPhase.WATER:
-            # Reference axis is water saturation regardless of reference_phase
-            # (reference_phase only matters for tables where wetting != WATER,
-            # e.g. an oil-wet table indexed by So; here WATER is always wetting
-            # so the derivative is always dPcow/dSw).
-            d_pcow_d_sw = oil_water_table.get_capillary_pressure_derivative(
-                wetting_saturation=water_saturation,
-                non_wetting_saturation=oil_saturation,
-            )
-            d_pcow_d_so = zero
+            if oil_water_table.reference_phase == "wetting":
+                # Table indexed by Sw (wetting phase) → derivative is dPcow/dSw
+                d_pcow_d_sw = oil_water_table.get_capillary_pressure_derivative(
+                    wetting_saturation=water_saturation,
+                    non_wetting_saturation=oil_saturation,
+                )
+                d_pcow_d_so = zero
+            else:
+                # reference_phase="non_wetting" and wetting_phase=WATER means
+                # table is indexed by So (non-wetting phase) → derivative is dPcow/dSo
+                d_pcow_d_sw = zero
+                d_pcow_d_so = oil_water_table.get_capillary_pressure_derivative(
+                    wetting_saturation=water_saturation,
+                    non_wetting_saturation=oil_saturation,
+                )
         else:
             # Oil is the wetting phase.  The reference_phase attribute then
             # controls whether the table is indexed by So ("wetting") or Sw

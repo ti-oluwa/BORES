@@ -1454,7 +1454,6 @@ class ThreePhaseRelPermTable(
 
         Oil relative permeability derivatives use the chain rule through the
         three-phase mixing rule:
-
         ```
         dkro/dSalpha = (d_kro/d_kro_w) * (d_kro_w/d_Salpha)
                     + (d_kro/d_kro_g) * (d_kro_g/d_Salpha)
@@ -1488,66 +1487,97 @@ class ThreePhaseRelPermTable(
         oil_water_table = self.oil_water_table
         gas_oil_table = self.gas_oil_table
 
-        # krw and kro_w from the oil-water two-phase table
-        if oil_water_table.wetting_phase == FluidPhase.WATER:
-            d_krw_d_sw = (
-                oil_water_table.get_wetting_phase_relative_permeability_derivative(
-                    wetting_saturation=sw,
-                    non_wetting_saturation=so,
-                )
-            )
-            d_krw_d_so = zeros.copy()
-            d_krw_d_sg = zeros.copy()
-            d_kro_w_d_sw = (
-                oil_water_table.get_non_wetting_phase_relative_permeability_derivative(
-                    wetting_saturation=sw,
-                    non_wetting_saturation=so,
-                )
-            )
-            d_kro_w_d_so = zeros.copy()
-            d_kro_w_d_sg = zeros.copy()
-        else:
-            d_krw_d_sw = zeros.copy()
-            d_krw_d_so = (
-                oil_water_table.get_non_wetting_phase_relative_permeability_derivative(
-                    wetting_saturation=so,
-                    non_wetting_saturation=sw,
-                )
-            )
-            d_krw_d_sg = zeros.copy()
-            d_kro_w_d_sw = zeros.copy()
-            d_kro_w_d_so = (
-                oil_water_table.get_wetting_phase_relative_permeability_derivative(
-                    wetting_saturation=so,
-                    non_wetting_saturation=sw,
-                )
-            )
-            d_kro_w_d_sg = zeros.copy()
+        # Oil-water table derivatives: krw and kro_w
+        # Dispatch based on both wetting_phase and reference_phase
 
-        # krg and kro_g from the gas-oil two-phase table
-        if gas_oil_table.wetting_phase == FluidPhase.OIL:
-            if gas_oil_table.reference_phase == "non_wetting":
-                d_krg_d_sw = zeros.copy()
-                d_krg_d_so = zeros.copy()
-                d_krg_d_sg = gas_oil_table.get_non_wetting_phase_relative_permeability_derivative(
-                    wetting_saturation=so,
-                    non_wetting_saturation=sg,
-                )
-                d_kro_g_d_sw = zeros.copy()
-                d_kro_g_d_so = zeros.copy()
-                d_kro_g_d_sg = (
-                    gas_oil_table.get_wetting_phase_relative_permeability_derivative(
-                        wetting_saturation=so,
-                        non_wetting_saturation=sg,
+        if oil_water_table.wetting_phase == FluidPhase.WATER:
+            # Water is wetting phase
+            if oil_water_table.reference_phase == "wetting":
+                # Table indexed by Sw (wetting phase) → derivatives w.r.t. Sw
+                d_krw_d_sw = (
+                    oil_water_table.get_wetting_phase_relative_permeability_derivative(
+                        wetting_saturation=sw,
+                        non_wetting_saturation=so,
                     )
                 )
+                d_krw_d_so = zeros.copy()
+                d_krw_d_sg = zeros.copy()
+
+                d_kro_w_d_sw = oil_water_table.get_non_wetting_phase_relative_permeability_derivative(
+                    wetting_saturation=sw,
+                    non_wetting_saturation=so,
+                )
+                d_kro_w_d_so = zeros.copy()
+                d_kro_w_d_sg = zeros.copy()
             else:
+                # reference_phase="non_wetting": Table indexed by So (non-wetting phase)
+                # → derivatives w.r.t. So
+                d_krw_d_sw = zeros.copy()
+                d_krw_d_so = (
+                    oil_water_table.get_wetting_phase_relative_permeability_derivative(
+                        wetting_saturation=sw,
+                        non_wetting_saturation=so,
+                    )
+                )
+                d_krw_d_sg = zeros.copy()
+
+                d_kro_w_d_sw = zeros.copy()
+                d_kro_w_d_so = oil_water_table.get_non_wetting_phase_relative_permeability_derivative(
+                    wetting_saturation=sw,
+                    non_wetting_saturation=so,
+                )
+                d_kro_w_d_sg = zeros.copy()
+        else:
+            # Oil is wetting phase (oil-wet system)
+            if oil_water_table.reference_phase == "wetting":
+                # Table indexed by So (wetting phase) → derivatives w.r.t. So
+                d_krw_d_sw = zeros.copy()
+                d_krw_d_so = oil_water_table.get_non_wetting_phase_relative_permeability_derivative(
+                    wetting_saturation=so,
+                    non_wetting_saturation=sw,
+                )
+                d_krw_d_sg = zeros.copy()
+
+                d_kro_w_d_sw = zeros.copy()
+                d_kro_w_d_so = (
+                    oil_water_table.get_wetting_phase_relative_permeability_derivative(
+                        wetting_saturation=so,
+                        non_wetting_saturation=sw,
+                    )
+                )
+                d_kro_w_d_sg = zeros.copy()
+            else:
+                # reference_phase="non_wetting": Table indexed by Sw (non-wetting phase)
+                # → derivatives w.r.t. Sw
+                d_krw_d_sw = oil_water_table.get_non_wetting_phase_relative_permeability_derivative(
+                    wetting_saturation=so,
+                    non_wetting_saturation=sw,
+                )
+                d_krw_d_so = zeros.copy()
+                d_krw_d_sg = zeros.copy()
+
+                d_kro_w_d_sw = (
+                    oil_water_table.get_wetting_phase_relative_permeability_derivative(
+                        wetting_saturation=so,
+                        non_wetting_saturation=sw,
+                    )
+                )
+                d_kro_w_d_so = zeros.copy()
+                d_kro_w_d_sg = zeros.copy()
+
+        # Gas-oil table derivatives: krg and kro_g
+        # Dispatch based on both wetting_phase and reference_phase
+        if gas_oil_table.wetting_phase == FluidPhase.OIL:
+            # Oil is wetting phase
+            if gas_oil_table.reference_phase == "wetting":
+                # Table indexed by So (wetting phase) → derivatives w.r.t. So
                 d_krg_d_sw = zeros.copy()
                 d_krg_d_so = gas_oil_table.get_non_wetting_phase_relative_permeability_derivative(
                     wetting_saturation=so,
                     non_wetting_saturation=sg,
                 )
                 d_krg_d_sg = zeros.copy()
+
                 d_kro_g_d_sw = zeros.copy()
                 d_kro_g_d_so = (
                     gas_oil_table.get_wetting_phase_relative_permeability_derivative(
@@ -1556,25 +1586,63 @@ class ThreePhaseRelPermTable(
                     )
                 )
                 d_kro_g_d_sg = zeros.copy()
-        else:
-            d_krg_d_sw = zeros.copy()
-            d_krg_d_so = zeros.copy()
-            d_krg_d_sg = (
-                gas_oil_table.get_wetting_phase_relative_permeability_derivative(
-                    wetting_saturation=sg,
-                    non_wetting_saturation=so,
+            else:
+                # reference_phase="non_wetting": Table indexed by Sg (non-wetting phase)
+                # → derivatives w.r.t. Sg
+                d_krg_d_sw = zeros.copy()
+                d_krg_d_so = zeros.copy()
+                d_krg_d_sg = gas_oil_table.get_non_wetting_phase_relative_permeability_derivative(
+                    wetting_saturation=so,
+                    non_wetting_saturation=sg,
                 )
-            )
-            d_kro_g_d_sw = zeros.copy()
-            d_kro_g_d_so = zeros.copy()
-            d_kro_g_d_sg = (
-                gas_oil_table.get_non_wetting_phase_relative_permeability_derivative(
-                    wetting_saturation=sg,
-                    non_wetting_saturation=so,
-                )
-            )
 
-        # Forward two-phase oil kr values for the mixing rule finite difference
+                d_kro_g_d_sw = zeros.copy()
+                d_kro_g_d_so = zeros.copy()
+                d_kro_g_d_sg = (
+                    gas_oil_table.get_wetting_phase_relative_permeability_derivative(
+                        wetting_saturation=so,
+                        non_wetting_saturation=sg,
+                    )
+                )
+        else:
+            # Gas is wetting phase (uncommon)
+            if gas_oil_table.reference_phase == "wetting":
+                # Table indexed by Sg (wetting phase) → derivatives w.r.t. Sg
+                d_krg_d_sw = zeros.copy()
+                d_krg_d_so = zeros.copy()
+                d_krg_d_sg = (
+                    gas_oil_table.get_wetting_phase_relative_permeability_derivative(
+                        wetting_saturation=sg,
+                        non_wetting_saturation=so,
+                    )
+                )
+
+                d_kro_g_d_sw = zeros.copy()
+                d_kro_g_d_so = zeros.copy()
+                d_kro_g_d_sg = gas_oil_table.get_non_wetting_phase_relative_permeability_derivative(
+                    wetting_saturation=sg,
+                    non_wetting_saturation=so,
+                )
+            else:
+                # reference_phase="non_wetting": Table indexed by So (non-wetting phase)
+                # → derivatives w.r.t. So
+                d_krg_d_sw = zeros.copy()
+                d_krg_d_so = (
+                    gas_oil_table.get_wetting_phase_relative_permeability_derivative(
+                        wetting_saturation=sg,
+                        non_wetting_saturation=so,
+                    )
+                )
+                d_krg_d_sg = zeros.copy()
+
+                d_kro_g_d_sw = zeros.copy()
+                d_kro_g_d_so = gas_oil_table.get_non_wetting_phase_relative_permeability_derivative(
+                    wetting_saturation=sg,
+                    non_wetting_saturation=so,
+                )
+                d_kro_g_d_sg = zeros.copy()
+
+        # Forward two-phase oil kr values for mixing rule finite difference
         if oil_water_table.wetting_phase == FluidPhase.WATER:
             kro_w = oil_water_table.get_non_wetting_phase_relative_permeability(
                 sw, non_wetting_saturation=so
@@ -1593,8 +1661,10 @@ class ThreePhaseRelPermTable(
                 sg, non_wetting_saturation=so
             )
 
+        # Three-phase oil mixing rule derivatives
         mixing_rule = self.mixing_rule
         if mixing_rule is None:
+            # min_rule: kro = min(kro_w, kro_g)
             kro_w_arr = np.asarray(kro_w, dtype=np.float64)
             kro_g_arr = np.asarray(kro_g, dtype=np.float64)
             d_kro_d_kro_w = np.where(kro_w_arr <= kro_g_arr, 1.0, 0.0)
@@ -1618,6 +1688,9 @@ class ThreePhaseRelPermTable(
                 gas_saturation=sg,
             )
 
+        # Chain rule: dkro/dSalpha = (d_kro/d_kro_w) * (d_kro_w/d_Salpha)
+        #                           + (d_kro/d_kro_g) * (d_kro_g/d_Salpha)
+        #                           + (d_kro/d_Salpha)_explicit
         d_kro_d_sw = (
             d_kro_d_kro_w * d_kro_w_d_sw
             + d_kro_d_kro_g * d_kro_g_d_sw
@@ -1634,6 +1707,10 @@ class ThreePhaseRelPermTable(
             + d_kro_d_gas_saturation_explicit
         )
 
+        # ========================================================================
+        # Return results
+        # ========================================================================
+
         results = (
             d_krw_d_sw,
             d_kro_d_sw,
@@ -1645,9 +1722,10 @@ class ThreePhaseRelPermTable(
             d_kro_d_sg,
             d_krg_d_sg,
         )
+
         if is_scalar:
             results = tuple(float(np.ravel(r)[0]) for r in results)
-            RelativePermeabilityDerivatives(
+            return RelativePermeabilityDerivatives(
                 dKrw_dSw=results[0],
                 dKro_dSw=results[1],
                 dKrg_dSw=results[2],
@@ -1658,6 +1736,7 @@ class ThreePhaseRelPermTable(
                 dKro_dSg=results[7],
                 dKrg_dSg=results[8],
             )
+
         return RelativePermeabilityDerivatives(
             dKrw_dSw=d_krw_d_sw,
             dKro_dSw=d_kro_d_sw,
