@@ -76,7 +76,7 @@ injector = bores.injection_well(
     well_name="INJ-1",
     perforating_intervals=[((0, 0, 0), (0, 0, 0))],
     radius=0.25,
-    control=bores.RateControl(
+    control=bores.AdaptiveRateControl(
         target_rate=-10000.0,
         bhp_limit=5000.0,
         clamp=bores.InjectionClamp(),
@@ -147,11 +147,8 @@ config = bores.Config(
     saturation_solver="direct",
     pressure_preconditioner=None,
     saturation_preconditioner=None,
-    jacobian_assembly_method="numerical",
+    jacobian_assembly_method="analytical",
     max_pressure_change=1000,
-    # max_water_saturation_change=0.5,
-    # max_oil_saturation_change=0.5,
-    # max_gas_saturation_change=0.6,
     disable_capillary_effects=True,
 )
 

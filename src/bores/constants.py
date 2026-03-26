@@ -1,15 +1,19 @@
 """Physical constants and conversion factors"""
 
+import logging
 import typing
 from contextvars import ContextVar
 
 import attrs
 from typing_extensions import Self
 
+from bores._precision import get_floating_point_info
 from bores.serialization import Serializable
 from bores.stores import StoreSerializable
 
 __all__ = ["Constant", "Constants", "ConstantsContext", "c", "get_constant"]
+
+logger = logging.getLogger(__name__)
 
 
 @typing.final
@@ -45,8 +49,123 @@ class Constant(Serializable):
         return f"{self.__class__.__name__}({', '.join(parts)})"
 
 
+@typing.final
+@attrs.frozen(slots=True)
+class ConstantFactory(Serializable):
+    """
+    A lazily-evaluated constant whose value is produced by a factory callable
+    at access time.
+
+    The factory takes no arguments and reads whatever context it needs
+    (e.g. the active floating-point dtype via `get_floating_point_info()`).
+    This makes the constant self-aware of the active numerical precision
+    without pushing dtype-scaling logic into every call site.
+
+    Caching is deliberately left to the factory itself (e.g. via
+    `functools.lru_cache` keyed on dtype) rather than baked into this class,
+    because the correct cache invalidation strategy depends on how frequently
+    the dtype context changes in the application.
+
+    Serialization evaluates the factory and stores the result, so a
+    deserialized `ConstantFactory` becomes a plain `Constant`. This is
+    intentional: serialized data represents a snapshot of the value at the
+    time of serialization.
+
+    Example:
+
+    ```
+    from bores.constants import ConstantFactory
+    from bores._precision import get_floating_point_info
+
+    SATURATION_EPSILON = ConstantFactory(
+        factory=lambda: get_floating_point_info().eps ** 0.5,
+        description="Saturation singularity clamp, dtype-aware.",
+        unit="fraction",
+    )
+    ```
+    """
+
+    factory: typing.Callable[[], typing.Any]
+    """Zero-argument callable that returns the constant's current value."""
+
+    description: typing.Optional[str] = None
+    unit: typing.Optional[str] = None
+
+    @property
+    def value(self) -> typing.Any:
+        """Evaluate and return the current value."""
+        return self.factory()
+
+    def __str__(self) -> str:
+        try:
+            v = self.value
+        except Exception:
+            logger.exception(f"Error evaluating constant: {self.factory!r}")
+            v = "<unevaluated>"
+        return f"{v}{self.unit or ''}"
+
+    def __repr__(self) -> str:
+        parts = [f"factory={self.factory!r}"]
+        if self.description:
+            parts.append(f"description='{self.description}'")
+        if self.unit:
+            parts.append(f"unit='{self.unit}'")
+        return f"{self.__class__.__name__}({', '.join(parts)})"
+
+    def __dump__(self, recurse: bool = True) -> typing.Dict[str, typing.Any]:
+        """Serialize by evaluating the factory — produces a plain value snapshot."""
+        evaluated = Constant(
+            value=self.value,
+            description=self.description,
+            unit=self.unit,
+        )
+        return evaluated.dump(recurse)
+
+    @classmethod
+    def __load__(cls, data: typing.Mapping[str, typing.Any]) -> Constant:
+        """
+        Deserialization always produces a plain ``Constant`` — a factory
+        function cannot be reconstructed from serialized data.
+        """
+        return Constant.load(data)
+
+
+def _sat_eps_factory() -> float:
+    """
+    Saturation clamp epsilon, scaled to the active floating-point dtype.
+
+    Target: 8 * machine_epsilon, floored at sqrt(float32 eps) ~ 1e-7 so the
+    clamp is always meaningful even if the context dtype is float64.
+    """
+    info = get_floating_point_info()
+    dtype_based = 8.0 * float(info.eps)
+    floor = 1e-7  # meaningful saturation floor, representable in float32
+    return max(dtype_based, floor)
+
+
+def _min_pore_space_factory() -> float:
+    """
+    Minimum mobile pore-space guard, matched to the saturation epsilon so
+    validity guards and saturation clamps stay numerically consistent.
+    """
+    return _sat_eps_factory()
+
+
+def _fd_eps_factory() -> float:
+    """
+    Central finite-difference step, scaled to the active dtype.
+    Optimal step is cbrt(machine_epsilon); floored at 1e-5 for float64.
+    """
+    info = get_floating_point_info()
+    optimal = info.eps ** (1.0 / 3.0)
+    floor = 1e-5  # float64 conservative floor
+    return float(max(optimal, floor))
+
+
 # Default constants dictionary
-DEFAULT_CONSTANTS: typing.Dict[str, typing.Union[typing.Any, Constant]] = {
+DEFAULT_CONSTANTS: typing.Dict[
+    str, typing.Union[typing.Any, Constant, ConstantFactory]
+] = {
     # Standard Conditions
     "STANDARD_PRESSURE": Constant(
         value=101325, description="Standard atmospheric pressure (SI units)", unit="Pa"
@@ -279,6 +398,11 @@ DEFAULT_CONSTANTS: typing.Dict[str, typing.Union[typing.Any, Constant]] = {
         description="Conversion factor from standard cubic feet to standard cubic meters",
         unit="m³/scf",
     ),
+    "DYNE_PER_CENTIMETER_TO_PSI": Constant(
+        value=4.621,
+        description="Conversion factor from dyne per centimeter to pounds per square inch",
+        unit="dyne/cm·psi",
+    ),
     # Gas Constant
     "IDEAL_GAS_CONSTANT": Constant(
         value=8.31446261815324, description="Universal gas constant", unit="J/(mol·K)"
@@ -497,10 +621,39 @@ DEFAULT_CONSTANTS: typing.Dict[str, typing.Union[typing.Any, Constant]] = {
         description="Number of points to compute when generating gas pseudo-pressure table internally",
         unit="points",
     ),
-    "SATURATION_EPSILON": Constant(
-        value=1e-12,
-        description="Small epsilon value to prevent numerical issues with saturations at 0 or 1",
+    "SATURATION_EPSILON": ConstantFactory(
+        factory=_sat_eps_factory,
+        description=(
+            "Clamp distance from 0 and 1 for normalised effective saturations in "
+            "capillary-pressure and relative-permeability correlations with "
+            "power-law singularities at those boundaries (Brooks-Corey, van "
+            "Genuchten, LET). Evaluated at access time from the active dtype "
+            "context via `get_floating_point_info()`. "
+            "float64: ~1.78e-15 (8*eps) floored to ~1.49e-8 (sqrt(float32 eps)). "
+            "float32: ~9.54e-7 (8*float32_eps)."
+        ),
         unit="fraction",
+    ),
+    "MINIMUM_MOBILE_PORE_SPACE": ConstantFactory(
+        factory=_min_pore_space_factory,
+        description=(
+            "Minimum mobile pore-space fraction below which the corresponding "
+            "phase relative-permeability or capillary-pressure is forced to zero. Matched to `SATURATION_EPSILON` so "
+            "validity guards and clamp bounds are numerically consistent — a "
+            "pore space smaller than the clamp floor cannot produce a meaningful "
+            "normalised saturation. Dtype-aware via `get_floating_point_info()`."
+        ),
+        unit="fraction",
+    ),
+    "FINITE_DIFFERENCE_EPSILON": ConstantFactory(
+        factory=_fd_eps_factory,
+        description=(
+            "Central finite-difference step for mixing-rule Jacobians and "
+            "oil-wet relperm derivatives. Evaluated as max(cbrt(eps), 1e-5) "
+            "where eps is the machine epsilon of the active dtype. "
+            "float64: 1e-5. float32: ~4.93e-3 (cbrt(float32 eps))."
+        ),
+        unit="dimensionless",
     ),
     "MINIMUM_TRANSMISSIBILITY_FACTOR": Constant(
         value=1e-12,
@@ -545,7 +698,7 @@ class Constants(
 
     __slots__ = ("_store",)
 
-    def __new__(cls, *args, **kwargs) -> "Constants":
+    def __new__(cls, *args, **kwargs) -> Self:
         instance = super().__new__(cls)
         instance._store = {}
         return instance
@@ -566,8 +719,11 @@ class Constants(
             else DEFAULT_CONSTANTS
         )
         for name, value in defaults.items():
-            if isinstance(value, Constant):
+            if isinstance(value, (Constant, ConstantFactory)):
                 self._store[name] = value
+            elif callable(value):
+                # Wrap callables in ConstantFactory objects
+                self._store[name] = ConstantFactory(factory=value)
             else:
                 # Wrap raw values in Constant objects
                 self._store[name] = Constant(value=value)
@@ -585,7 +741,11 @@ class Constants(
 
         try:
             constant = self._store[name]
-            return constant.value if isinstance(constant, Constant) else constant
+            return (
+                constant.value
+                if isinstance(constant, (Constant, ConstantFactory))
+                else constant
+            )
         except KeyError:
             raise AttributeError(
                 f"'{type(self).__name__}' object has no attribute '{name}'"
@@ -741,7 +901,9 @@ class Constants(
     def __dump__(self, recurse: bool = True) -> typing.Dict[str, typing.Any]:
         """Dump constants to dict."""
         return {
-            name: const.dump(recurse) if isinstance(const, Constant) else const
+            name: const.dump(recurse)
+            if isinstance(const, (Constant, ConstantFactory))
+            else const
             for name, const in self._store.items()
         }
 

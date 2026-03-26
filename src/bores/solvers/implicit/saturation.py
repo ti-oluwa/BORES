@@ -1227,10 +1227,10 @@ def _assemble_analytical_jacobian(
                 cell_idx = to_1D_index_interior_only(
                     i, j, k, cell_count_x, cell_count_y, cell_count_z
                 )
-                row_w = 2 * cell_idx
-                row_g = 2 * cell_idx + 1
-                col_Sw_i = 2 * cell_idx
-                col_Sg_i = 2 * cell_idx + 1
+                water_row = 2 * cell_idx
+                gas_row = 2 * cell_idx + 1
+                cell_water_saturation_column = 2 * cell_idx
+                cell_gas_saturation_column = 2 * cell_idx + 1
 
                 cell_thickness = thickness_grid[i, j, k]
                 cell_volume = cell_size_x * cell_size_y * cell_thickness
@@ -1239,13 +1239,13 @@ def _assemble_analytical_jacobian(
                 )
 
                 # Accumulation — diagonal entries only
-                all_rows[slice_idx, local_ptr] = row_w
-                all_cols[slice_idx, local_ptr] = col_Sw_i
+                all_rows[slice_idx, local_ptr] = water_row
+                all_cols[slice_idx, local_ptr] = cell_water_saturation_column
                 all_vals[slice_idx, local_ptr] = accumulation_coefficient
                 local_ptr += 1
 
-                all_rows[slice_idx, local_ptr] = row_g
-                all_cols[slice_idx, local_ptr] = col_Sg_i
+                all_rows[slice_idx, local_ptr] = gas_row
+                all_cols[slice_idx, local_ptr] = cell_gas_saturation_column
                 all_vals[slice_idx, local_ptr] = accumulation_coefficient
                 local_ptr += 1
 
@@ -1489,8 +1489,8 @@ def _assemble_analytical_jacobian(
                     neighbour_idx = to_1D_index_interior_only(
                         ni, nj, nk, cell_count_x, cell_count_y, cell_count_z
                     )
-                    col_Sw_n = 2 * neighbour_idx
-                    col_Sg_n = 2 * neighbour_idx + 1
+                    neighbour_water_saturation_column = 2 * neighbour_idx
+                    neigbour_gas_saturation_column = 2 * neighbour_idx + 1
 
                     # Effective kr derivatives at neighbour n
                     dkrw_dSw_n_eff = (
@@ -1676,46 +1676,54 @@ def _assemble_analytical_jacobian(
 
                     # Write diagonal entries (cell i)
                     if dRw_dSw_i != 0.0:
-                        all_rows[slice_idx, local_ptr] = row_w
-                        all_cols[slice_idx, local_ptr] = col_Sw_i
+                        all_rows[slice_idx, local_ptr] = water_row
+                        all_cols[slice_idx, local_ptr] = cell_water_saturation_column
                         all_vals[slice_idx, local_ptr] = dRw_dSw_i
                         local_ptr += 1
                     if dRw_dSg_i != 0.0:
-                        all_rows[slice_idx, local_ptr] = row_w
-                        all_cols[slice_idx, local_ptr] = col_Sg_i
+                        all_rows[slice_idx, local_ptr] = water_row
+                        all_cols[slice_idx, local_ptr] = cell_gas_saturation_column
                         all_vals[slice_idx, local_ptr] = dRw_dSg_i
                         local_ptr += 1
                     if dRg_dSw_i != 0.0:
-                        all_rows[slice_idx, local_ptr] = row_g
-                        all_cols[slice_idx, local_ptr] = col_Sw_i
+                        all_rows[slice_idx, local_ptr] = gas_row
+                        all_cols[slice_idx, local_ptr] = cell_water_saturation_column
                         all_vals[slice_idx, local_ptr] = dRg_dSw_i
                         local_ptr += 1
                     if dRg_dSg_i != 0.0:
-                        all_rows[slice_idx, local_ptr] = row_g
-                        all_cols[slice_idx, local_ptr] = col_Sg_i
+                        all_rows[slice_idx, local_ptr] = gas_row
+                        all_cols[slice_idx, local_ptr] = cell_gas_saturation_column
                         all_vals[slice_idx, local_ptr] = dRg_dSg_i
                         local_ptr += 1
 
                     # Write off-diagonal entries (neighbour n, interior only)
                     if neighbour_idx >= 0:
                         if dRw_dSw_n != 0.0:
-                            all_rows[slice_idx, local_ptr] = row_w
-                            all_cols[slice_idx, local_ptr] = col_Sw_n
+                            all_rows[slice_idx, local_ptr] = water_row
+                            all_cols[slice_idx, local_ptr] = (
+                                neighbour_water_saturation_column
+                            )
                             all_vals[slice_idx, local_ptr] = dRw_dSw_n
                             local_ptr += 1
                         if dRw_dSg_n != 0.0:
-                            all_rows[slice_idx, local_ptr] = row_w
-                            all_cols[slice_idx, local_ptr] = col_Sg_n
+                            all_rows[slice_idx, local_ptr] = water_row
+                            all_cols[slice_idx, local_ptr] = (
+                                neigbour_gas_saturation_column
+                            )
                             all_vals[slice_idx, local_ptr] = dRw_dSg_n
                             local_ptr += 1
                         if dRg_dSw_n != 0.0:
-                            all_rows[slice_idx, local_ptr] = row_g
-                            all_cols[slice_idx, local_ptr] = col_Sw_n
+                            all_rows[slice_idx, local_ptr] = gas_row
+                            all_cols[slice_idx, local_ptr] = (
+                                neighbour_water_saturation_column
+                            )
                             all_vals[slice_idx, local_ptr] = dRg_dSw_n
                             local_ptr += 1
                         if dRg_dSg_n != 0.0:
-                            all_rows[slice_idx, local_ptr] = row_g
-                            all_cols[slice_idx, local_ptr] = col_Sg_n
+                            all_rows[slice_idx, local_ptr] = gas_row
+                            all_cols[slice_idx, local_ptr] = (
+                                neigbour_gas_saturation_column
+                            )
                             all_vals[slice_idx, local_ptr] = dRg_dSg_n
                             local_ptr += 1
 

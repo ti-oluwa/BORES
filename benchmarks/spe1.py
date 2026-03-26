@@ -734,7 +734,7 @@ def setup_config(Path, bores, oil_specific_gravity, pvt_tables):
     config = bores.Config(
         timer=timer,
         rock_fluid_tables=rock_fluid_tables,
-        scheme="impes",
+        scheme="implicit",
         output_frequency=1,
         pressure_solver="direct",
         pressure_preconditioner=None,
@@ -1223,7 +1223,7 @@ def _(bores, states, viz, wells):
         # labels=labels,
         aspect_mode="data",
         z_scale=10.0,
-        # z_slice=(1, 3),
+        z_slice=(1, 3),
         marker_size=6,
         show_wells=True,
         show_surface_marker=True,
@@ -1234,7 +1234,7 @@ def _(bores, states, viz, wells):
 
     property = "gas-sat"
     figures = []
-    timesteps = [272]
+    timesteps = [362]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],

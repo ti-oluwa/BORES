@@ -7,6 +7,7 @@ import attrs
 import numpy as np
 import numpy.typing as npt
 
+from bores.constants import c
 from bores.errors import ValidationError
 from bores.grids.base import array as bores_array
 from bores.serialization import Serializable, make_serializable_type_registrar
@@ -592,6 +593,8 @@ def compute_brooks_corey_capillary_pressures(
     gas_oil_entry_pressure: float,
     gas_oil_pore_size_distribution_index: float,
     mixed_wet_water_fraction: float = 0.5,
+    saturation_epsilon: float = 1e-12,
+    minimum_mobile_pore_space: float = 1e-9,
 ) -> typing.Tuple[FloatOrArray, FloatOrArray]:
     """
     Computes capillary pressures (Pcow, Pcgo) using Brooks-Corey model.
@@ -649,7 +652,9 @@ def compute_brooks_corey_capillary_pressures(
 
     # Normalize saturations if they do not sum to 1
     total_saturation = sw + so + sg
-    needs_norm = (np.abs(total_saturation - 1.0) > 1e-6) & (total_saturation > 0.0)
+    needs_norm = (np.abs(total_saturation - 1.0) > saturation_epsilon) & (
+        total_saturation > 0.0
+    )
     if np.any(needs_norm):
         sw = np.where(needs_norm, sw / total_saturation, sw)
         so = np.where(needs_norm, so / total_saturation, so)
@@ -663,15 +668,19 @@ def compute_brooks_corey_capillary_pressures(
     oil_water_capillary_pressure = np.zeros_like(sw)
 
     # Mask for valid mobile pore space
-    valid_water = total_mobile_pore_space_water > 1e-9
+    valid_water = total_mobile_pore_space_water > minimum_mobile_pore_space
 
     if np.any(valid_water):
         effective_water_saturation = np.where(
             valid_water, (sw - Swc) / total_mobile_pore_space_water, 0.0
         )
-        effective_water_saturation = np.clip(effective_water_saturation, 1e-6, 1.0)
+        effective_water_saturation = np.clip(
+            effective_water_saturation, saturation_epsilon, 1.0
+        )
         # Mask for undersaturated conditions
-        undersaturated = valid_water & (effective_water_saturation < 1.0 - 1e-6)
+        undersaturated = valid_water & (
+            effective_water_saturation < 1.0 - saturation_epsilon
+        )
 
         if np.any(undersaturated):
             if wettability == Wettability.WATER_WET:
@@ -693,36 +702,36 @@ def compute_brooks_corey_capillary_pressures(
 
             elif wettability == Wettability.MIXED_WET:
                 # Mixed-wet: Weighted average
-                pcoil_water_contact_anglewater_wet = (
-                    oil_water_entry_pressure_water_wet
-                    * (
-                        effective_water_saturation
-                        ** (-1.0 / oil_water_pore_size_distribution_index_water_wet)
-                    )
+                pcow_water_wet = oil_water_entry_pressure_water_wet * (
+                    effective_water_saturation
+                    ** (-1.0 / oil_water_pore_size_distribution_index_water_wet)
                 )
-                pcoil_water_contact_angleoil_wet = -(
+                pcow_oil_wet = -(
                     oil_water_entry_pressure_oil_wet
                     * effective_water_saturation
                     ** (-1.0 / oil_water_pore_size_distribution_index_oil_wet)
                 )
                 pcow = (
-                    mixed_wet_water_fraction * pcoil_water_contact_anglewater_wet
-                    + (1.0 - mixed_wet_water_fraction)
-                    * pcoil_water_contact_angleoil_wet
+                    mixed_wet_water_fraction * pcow_water_wet
+                    + (1.0 - mixed_wet_water_fraction) * pcow_oil_wet
                 )
                 oil_water_capillary_pressure = np.where(undersaturated, pcow, 0.0)
 
     # Pcgo (Pg - Po)
     gas_oil_capillary_pressure = np.zeros_like(sg)
-    valid_gas = total_mobile_pore_space_gas > 1e-9
+    valid_gas = total_mobile_pore_space_gas > minimum_mobile_pore_space
 
     if np.any(valid_gas):
         effective_gas_saturation = np.where(
             valid_gas, (sg - Sgr) / total_mobile_pore_space_gas, 0.0
         )
-        effective_gas_saturation = np.clip(effective_gas_saturation, 1e-6, 1.0)
+        effective_gas_saturation = np.clip(
+            effective_gas_saturation, saturation_epsilon, 1.0
+        )
 
-        undersaturated_gas = valid_gas & (effective_gas_saturation < 1.0 - 1e-6)
+        undersaturated_gas = valid_gas & (
+            effective_gas_saturation < 1.0 - saturation_epsilon
+        )
 
         if np.any(undersaturated_gas):
             pcgo = gas_oil_entry_pressure * (
@@ -859,6 +868,8 @@ class BrooksCoreyCapillaryPressureModel(
             gas_oil_entry_pressure=self.gas_oil_entry_pressure,
             gas_oil_pore_size_distribution_index=self.gas_oil_pore_size_distribution_index,
             mixed_wet_water_fraction=self.mixed_wet_water_fraction,
+            saturation_epsilon=c.SATURATION_EPSILON,
+            minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
         )
         return CapillaryPressures(oil_water=pcow, gas_oil=pcgo)  # type: ignore[typeddict-item]
 
@@ -970,15 +981,20 @@ class BrooksCoreyCapillaryPressureModel(
         zero = 0.0 if is_scalar else np.zeros_like(water_saturation)
         sw = np.atleast_1d(water_saturation)
         sg = np.atleast_1d(gas_saturation)
+        minimum_mobile_pore_space = c.MINIMUM_MOBILE_PORE_SPACE
+        saturation_epsilon = c.SATURATION_EPSILON
 
         # dPcow/dSw via chain rule:  dPcow/dSw = (dPcow/dSe_w) * (1 / mobile_water_range)
         mobile_water_range = 1.0 - Swc - Sorw  # type: ignore
         se_w = np.clip(
-            (sw - Swc) / np.where(mobile_water_range > 1e-9, mobile_water_range, 1.0),
-            1e-6,
+            (sw - Swc)
+            / np.where(
+                mobile_water_range > minimum_mobile_pore_space, mobile_water_range, 1.0
+            ),
+            saturation_epsilon,
             1.0,
         )
-        valid_water = mobile_water_range > 1e-9
+        valid_water = mobile_water_range > minimum_mobile_pore_space
 
         if wettability == Wettability.MIXED_WET:
             water_wet_fraction = self.mixed_wet_water_fraction
@@ -1014,7 +1030,8 @@ class BrooksCoreyCapillaryPressureModel(
             d_pcow_d_se_w = sign * entry_pressure * exp * (se_w ** (exp - 1.0))
 
         d_pcow_d_sw = np.where(
-            valid_water,
+            valid_water
+            & (se_w < 1.0 - saturation_epsilon),  # match the forward pass mask
             d_pcow_d_se_w / mobile_water_range,
             np.zeros_like(sw),
         )
@@ -1023,11 +1040,14 @@ class BrooksCoreyCapillaryPressureModel(
         # dPcgo/dSg via chain rule:  dPcgo/dSg = (dPcgo/dSe_g) * (1 / mobile_gas_range)
         mobile_gas_range = 1.0 - Swc - Sorg - Sgr  # type: ignore
         se_g = np.clip(
-            (sg - Sgr) / np.where(mobile_gas_range > 1e-9, mobile_gas_range, 1.0),
-            1e-6,
+            (sg - Sgr)
+            / np.where(
+                mobile_gas_range > minimum_mobile_pore_space, mobile_gas_range, 1.0
+            ),
+            saturation_epsilon,
             1.0,
         )
-        valid_gas = mobile_gas_range > 1e-9
+        valid_gas = mobile_gas_range > minimum_mobile_pore_space
 
         exp_go = -1.0 / self.gas_oil_pore_size_distribution_index
         d_pcgo_d_se_g = self.gas_oil_entry_pressure * exp_go * (se_g ** (exp_go - 1.0))
@@ -1126,6 +1146,8 @@ def compute_van_genuchten_capillary_pressures(
     gas_oil_alpha: float,
     gas_oil_n: float,
     mixed_wet_water_fraction: float = 0.5,
+    saturation_epsilon: float = 1e-6,
+    minimum_mobile_pore_space: float = 1e-9,
 ) -> typing.Tuple[FloatOrArray, FloatOrArray]:
     """
     Computes capillary pressures using van Genuchten model.
@@ -1185,7 +1207,9 @@ def compute_van_genuchten_capillary_pressures(
 
     # Normalize saturations if they do not sum to 1
     total_saturation = sw + so + sg
-    needs_norm = (np.abs(total_saturation - 1.0) > 1e-6) & (total_saturation > 0.0)
+    needs_norm = (np.abs(total_saturation - 1.0) > saturation_epsilon) & (
+        total_saturation > 0.0
+    )
     if np.any(needs_norm):
         sw = np.where(needs_norm, sw / total_saturation, sw)
         so = np.where(needs_norm, so / total_saturation, so)
@@ -1198,14 +1222,14 @@ def compute_van_genuchten_capillary_pressures(
     #  Pcow (Po - Pw)
     oil_water_capillary_pressure = np.zeros_like(sw)
     # Mask for valid mobile pore space
-    valid_water = total_mobile_pore_space_water > 1e-9
+    valid_water = total_mobile_pore_space_water > minimum_mobile_pore_space
 
     if np.any(valid_water):
         effective_water_saturation = np.where(
             valid_water, (sw - Swc) / total_mobile_pore_space_water, 0.0
         )
         effective_water_saturation = np.clip(
-            effective_water_saturation, 1e-6, 1.0 - 1e-6
+            effective_water_saturation, saturation_epsilon, 1.0 - saturation_epsilon
         )
 
         if wettability == Wettability.WATER_WET:
@@ -1251,13 +1275,15 @@ def compute_van_genuchten_capillary_pressures(
 
     #  Pcgo (Pg - Po)
     gas_oil_capillary_pressure = np.zeros_like(sg)
-    valid_gas = total_mobile_pore_space_gas > 1e-9
+    valid_gas = total_mobile_pore_space_gas > minimum_mobile_pore_space
 
     if np.any(valid_gas):
         effective_gas_saturation = np.where(
             valid_gas, (sg - Sgr) / total_mobile_pore_space_gas, 0.0
         )
-        effective_gas_saturation = np.clip(effective_gas_saturation, 1e-6, 1.0 - 1e-6)
+        effective_gas_saturation = np.clip(
+            effective_gas_saturation, saturation_epsilon, 1.0 - saturation_epsilon
+        )
 
         m_go = 1.0 - 1.0 / gas_oil_n
         term = (effective_gas_saturation ** (-1.0 / m_go) - 1.0) ** (1.0 / gas_oil_n)
@@ -1276,6 +1302,7 @@ def _van_genuchten_pc_slope_wrt_effective_saturation(
     alpha: float,
     n: float,
     sign: float,
+    saturation_epsilon: float = 1e-6,
 ) -> npt.NDArray:
     """
     Analytical derivative of the van Genuchten capillary pressure with
@@ -1295,14 +1322,14 @@ def _van_genuchten_pc_slope_wrt_effective_saturation(
     ```
 
     :param effective_saturation: Normalised saturation, clamped to
-        (1e-6, 1-1e-6) internally.
+        (c.SATURATION_EPSILON, 1 - c.SATURATION_EPSILON) internally.
     :param alpha: van Genuchten alpha parameter (1/pressure, positive).
     :param n: van Genuchten n parameter (greater than 1).
     :param sign: +1 for water-wet, -1 for oil-wet oil-water capillary pressure.
     :return: Derivative array with the same shape as `effective_saturation`.
     """
     m = 1.0 - 1.0 / n
-    se = np.clip(effective_saturation, 1e-6, 1.0 - 1e-6)
+    se = np.clip(effective_saturation, saturation_epsilon, 1.0 - saturation_epsilon)
     u = se ** (-1.0 / m) - 1.0
     u_safe = np.where(u > 1e-30, u, 1e-30)
     d_pc_d_u = sign * (1.0 / alpha) * (1.0 / n) * (u_safe ** (1.0 / n - 1.0))
@@ -1430,6 +1457,8 @@ class VanGenuchtenCapillaryPressureModel(
             gas_oil_alpha=self.gas_oil_alpha,
             gas_oil_n=self.gas_oil_n,
             mixed_wet_water_fraction=self.mixed_wet_water_fraction,
+            saturation_epsilon=c.SATURATION_EPSILON,
+            minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
         )
         return CapillaryPressures(oil_water=pcow, gas_oil=pcgo)  # type: ignore[typeddict-item]
 
@@ -1520,13 +1549,15 @@ class VanGenuchtenCapillaryPressureModel(
         zero = 0.0 if is_scalar else np.zeros_like(water_saturation)
         sw = np.atleast_1d(water_saturation)
         sg = np.atleast_1d(gas_saturation)
+        saturation_epsilon = c.SATURATION_EPSILON
+        minimum_mobile_pore_space = c.MINIMUM_MOBILE_PORE_SPACE
 
         mobile_water_range = 1.0 - Swc - Sorw  # type: ignore
-        valid_water = mobile_water_range > 1e-9
+        valid_water = mobile_water_range > minimum_mobile_pore_space
         se_w = np.clip(
             (sw - Swc) / np.where(valid_water, mobile_water_range, 1.0),
-            1e-6,
-            1.0 - 1e-6,
+            saturation_epsilon,
+            1.0 - saturation_epsilon,
         )
 
         if wettability == Wettability.WATER_WET:
@@ -1535,6 +1566,7 @@ class VanGenuchtenCapillaryPressureModel(
                 self.oil_water_alpha_water_wet,
                 self.oil_water_n_water_wet,
                 sign=+1.0,
+                saturation_epsilon=saturation_epsilon,
             )
         elif wettability == Wettability.OIL_WET:
             d_pcow_d_se_w = _van_genuchten_pc_slope_wrt_effective_saturation(
@@ -1542,6 +1574,7 @@ class VanGenuchtenCapillaryPressureModel(
                 self.oil_water_alpha_oil_wet,
                 self.oil_water_n_oil_wet,
                 sign=-1.0,
+                saturation_epsilon=saturation_epsilon,
             )
         else:  # MIXED_WET
             water_wet_fraction = self.mixed_wet_water_fraction
@@ -1550,12 +1583,14 @@ class VanGenuchtenCapillaryPressureModel(
                 self.oil_water_alpha_water_wet,
                 self.oil_water_n_water_wet,
                 sign=+1.0,
+                saturation_epsilon=saturation_epsilon,
             )
             d_ow = _van_genuchten_pc_slope_wrt_effective_saturation(
                 se_w,
                 self.oil_water_alpha_oil_wet,
                 self.oil_water_n_oil_wet,
                 sign=-1.0,
+                saturation_epsilon=saturation_epsilon,
             )
             d_pcow_d_se_w = (
                 water_wet_fraction * d_ww + (1.0 - water_wet_fraction) * d_ow
@@ -1569,17 +1604,18 @@ class VanGenuchtenCapillaryPressureModel(
         d_pcow_d_so = np.zeros_like(sw)
 
         mobile_gas_range = 1.0 - Swc - Sorg - Sgr  # type: ignore
-        valid_gas = mobile_gas_range > 1e-9
+        valid_gas = mobile_gas_range > minimum_mobile_pore_space
         se_g = np.clip(
             (sg - Sgr) / np.where(valid_gas, mobile_gas_range, 1.0),
-            1e-6,
-            1.0 - 1e-6,
+            saturation_epsilon,
+            1.0 - saturation_epsilon,
         )
         d_pcgo_d_se_g = _van_genuchten_pc_slope_wrt_effective_saturation(
             se_g,
             self.gas_oil_alpha,
             self.gas_oil_n,
             sign=+1.0,
+            saturation_epsilon=saturation_epsilon,
         )
         d_pcgo_d_sg = np.where(
             valid_gas,
@@ -1678,6 +1714,8 @@ def compute_leverett_j_capillary_pressures(
     j_function_exponent: float = 0.5,
     mixed_wet_water_fraction: float = 0.5,
     wettability: Wettability = Wettability.WATER_WET,
+    saturation_epsilon: float = 1e-6,
+    minimum_mobile_pore_space: float = 1e-9,
 ) -> typing.Tuple[FloatOrArray, FloatOrArray]:
     """
     Computes capillary pressures using Leverett J-function approach.
@@ -1744,12 +1782,15 @@ def compute_leverett_j_capillary_pressures(
 
     # Normalize saturations if they do not sum to 1
     total_saturation = sw + so + sg
-    needs_norm = (np.abs(total_saturation - 1.0) > 1e-6) & (total_saturation > 0.0)
+    needs_norm = (np.abs(total_saturation - 1.0) > saturation_epsilon) & (
+        total_saturation > 0.0
+    )
     if np.any(needs_norm):
         sw = np.where(needs_norm, sw / total_saturation, sw)
         so = np.where(needs_norm, so / total_saturation, so)
         sg = np.where(needs_norm, sg / total_saturation, sg)
 
+    dyne_per_cm_to_psi = c.DYNE_PER_CENTIMETER_TO_PSI
     # Effective pore spaces
     # Water mobile pore space: excludes connate water and residual oil (to water)
     # Gas residual doesn't affect water-oil mobile space
@@ -1768,14 +1809,16 @@ def compute_leverett_j_capillary_pressures(
 
     # Pcow (Po - Pw)
     oil_water_capillary_pressure = np.zeros_like(sw)
-    valid_water = (total_mobile_pore_space_water > 1e-9) & valid_rock
+    valid_water = (
+        total_mobile_pore_space_water > minimum_mobile_pore_space
+    ) & valid_rock
 
     if np.any(valid_water):
         effective_water_saturation = np.where(
             valid_water, (sw - Swc) / total_mobile_pore_space_water, 0.0
         )
         effective_water_saturation = np.clip(
-            effective_water_saturation, 1e-6, 1.0 - 1e-6
+            effective_water_saturation, saturation_epsilon, 1.0 - saturation_epsilon
         )
 
         # J-function value
@@ -1787,7 +1830,7 @@ def compute_leverett_j_capillary_pressures(
         # Pc = σ * cos(θ) * sqrt(φ/k) * J(Se)
         pc_ow = (
             oil_water_interfacial_tension
-            * 4.725  # Convert to psi
+            * dyne_per_cm_to_psi  # Convert to psi
             * np.cos(theta_oil_water_contact_anglerad)
             * leverett_factor
             * j_value_ow
@@ -1807,13 +1850,15 @@ def compute_leverett_j_capillary_pressures(
 
     # Pcgo (Pg - Po)
     gas_oil_capillary_pressure = np.zeros_like(sg)
-    valid_gas = (total_mobile_pore_space_gas > 1e-9) & valid_rock
+    valid_gas = (total_mobile_pore_space_gas > minimum_mobile_pore_space) & valid_rock
 
     if np.any(valid_gas):
         effective_gas_saturation = np.where(
             valid_gas, (sg - Sgr) / total_mobile_pore_space_gas, 0.0
         )
-        effective_gas_saturation = np.clip(effective_gas_saturation, 1e-6, 1.0 - 1e-6)
+        effective_gas_saturation = np.clip(
+            effective_gas_saturation, saturation_epsilon, 1.0 - saturation_epsilon
+        )
 
         # J-function value
         j_value_go = j_function_coefficient * (
@@ -1823,7 +1868,7 @@ def compute_leverett_j_capillary_pressures(
         # Capillary pressure
         pcgo = (
             gas_oil_interfacial_tension
-            * 4.725  # Convert to psi
+            * dyne_per_cm_to_psi  # Convert to psi
             * np.cos(theta_go_rad)
             * leverett_factor
             * j_value_go
@@ -1965,6 +2010,8 @@ class LeverettJCapillaryPressureModel(
             j_function_exponent=self.j_function_exponent,
             mixed_wet_water_fraction=self.mixed_wet_water_fraction,
             wettability=self.wettability,
+            saturation_epsilon=c.SATURATION_EPSILON,
+            minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
         )
         return CapillaryPressures(oil_water=pcow, gas_oil=pcgo)  # type: ignore[typeddict-item]
 
@@ -2083,14 +2130,21 @@ class LeverettJCapillaryPressureModel(
             if absolute_permeability > 0.0 and porosity > 0.0
             else 0.0
         )
-        dyne_per_cm_to_psi = 4.725
+        dyne_per_cm_to_psi = c.DYNE_PER_CENTIMETER_TO_PSI
+        saturation_epsilon = c.SATURATION_EPSILON
+        minimum_mobile_pore_space = c.MINIMUM_MOBILE_PORE_SPACE
 
         mobile_water_range = 1.0 - Swc - Sorw  # type: ignore
-        valid_water = (mobile_water_range > 1e-9) & (leverett_rock_factor > 0.0)
+        valid_water = (mobile_water_range > minimum_mobile_pore_space) & (
+            leverett_rock_factor > 0.0
+        )
         se_w = np.clip(
-            (sw - Swc) / np.where(mobile_water_range > 1e-9, mobile_water_range, 1.0),
-            1e-6,
-            1.0 - 1e-6,
+            (sw - Swc)
+            / np.where(
+                mobile_water_range > minimum_mobile_pore_space, mobile_water_range, 1.0
+            ),
+            saturation_epsilon,
+            1.0 - saturation_epsilon,
         )
         d_j_d_se_w = (
             -j_function_coefficient
@@ -2119,11 +2173,16 @@ class LeverettJCapillaryPressureModel(
         d_pcow_d_so = np.zeros_like(sw)
 
         mobile_gas_range = 1.0 - Swc - Sorg - Sgr  # type: ignore
-        valid_gas = (mobile_gas_range > 1e-9) & (leverett_rock_factor > 0.0)
+        valid_gas = (mobile_gas_range > minimum_mobile_pore_space) & (
+            leverett_rock_factor > 0.0
+        )
         se_g = np.clip(
-            (sg - Sgr) / np.where(mobile_gas_range > 1e-9, mobile_gas_range, 1.0),
-            1e-6,
-            1.0 - 1e-6,
+            (sg - Sgr)
+            / np.where(
+                mobile_gas_range > minimum_mobile_pore_space, mobile_gas_range, 1.0
+            ),
+            saturation_epsilon,
+            1.0 - saturation_epsilon,
         )
         d_j_d_se_g = (
             -j_function_coefficient
