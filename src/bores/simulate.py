@@ -959,12 +959,6 @@ def _run_implicit_step(
         padded_pressure_grid, c.MINIMUM_VALID_PRESSURE, c.MAXIMUM_VALID_PRESSURE
     ).astype(dtype, copy=False)
 
-    padded_fluid_properties = attrs.evolve(
-        padded_fluid_properties, pressure_grid=padded_pressure_grid
-    )
-
-    # PVT update at new pressure
-    logger.debug("Updating PVT fluid properties for saturation evolution")
     old_solution_gas_to_oil_ratio_grid = (
         padded_fluid_properties.solution_gas_to_oil_ratio_grid.copy()
     )
@@ -975,6 +969,11 @@ def _run_implicit_step(
     old_oil_saturation_grid = padded_fluid_properties.oil_saturation_grid.copy()
     old_gas_saturation_grid = padded_fluid_properties.gas_saturation_grid.copy()
 
+    # PVT update at new pressure
+    logger.debug("Updating PVT fluid properties for saturation evolution")
+    padded_fluid_properties = attrs.evolve(
+        padded_fluid_properties, pressure_grid=padded_pressure_grid
+    )
     padded_fluid_properties = update_pvt_grids(
         fluid_properties=padded_fluid_properties,
         wells=wells,
@@ -1064,6 +1063,7 @@ def _run_implicit_step(
     pressure_change_grid = padded_pressure_grid - old_pressure_grid
 
     saturation_result = implicit.evolve_saturation(
+        grid_shape=grid_shape,
         cell_dimension=cell_dimension,
         thickness_grid=padded_thickness_grid,
         elevation_grid=padded_elevation_grid,
@@ -1084,6 +1084,7 @@ def _run_implicit_step(
             water=production_rates.water,
             gas=production_rates.gas,
         ),
+        boundary_conditions=boundary_conditions,
         pressure_change_grid=pressure_change_grid,
         pad_width=pad_width,
     )

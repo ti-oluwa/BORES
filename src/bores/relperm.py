@@ -2183,13 +2183,13 @@ class BrooksCoreyThreePhaseRelPermModel(
 
             results = (
                 (krw_sw_fwd - krw_sw_bwd) * inv_2_epsilon,
-                (krw_so_fwd - krw_so_bwd) * inv_2_epsilon,
-                (krw_sg_fwd - krw_sg_bwd) * inv_2_epsilon,
                 (kro_sw_fwd - kro_sw_bwd) * inv_2_epsilon,
-                (kro_so_fwd - kro_so_bwd) * inv_2_epsilon,
-                (kro_sg_fwd - kro_sg_bwd) * inv_2_epsilon,
                 (krg_sw_fwd - krg_sw_bwd) * inv_2_epsilon,
+                (krw_so_fwd - krw_so_bwd) * inv_2_epsilon,
+                (kro_so_fwd - kro_so_bwd) * inv_2_epsilon,
                 (krg_so_fwd - krg_so_bwd) * inv_2_epsilon,
+                (krw_sg_fwd - krw_sg_bwd) * inv_2_epsilon,
+                (kro_sg_fwd - kro_sg_bwd) * inv_2_epsilon,
                 (krg_sg_fwd - krg_sg_bwd) * inv_2_epsilon,
             )
             if is_scalar:
@@ -3063,13 +3063,13 @@ class LETThreePhaseRelPermModel(
 
             results = (
                 (krw_sw_fwd - krw_sw_bwd) * inv_2_epsilon,
-                (krw_so_fwd - krw_so_bwd) * inv_2_epsilon,
-                (krw_sg_fwd - krw_sg_bwd) * inv_2_epsilon,
                 (kro_sw_fwd - kro_sw_bwd) * inv_2_epsilon,
-                (kro_so_fwd - kro_so_bwd) * inv_2_epsilon,
-                (kro_sg_fwd - kro_sg_bwd) * inv_2_epsilon,
                 (krg_sw_fwd - krg_sw_bwd) * inv_2_epsilon,
+                (krw_so_fwd - krw_so_bwd) * inv_2_epsilon,
+                (kro_so_fwd - kro_so_bwd) * inv_2_epsilon,
                 (krg_so_fwd - krg_so_bwd) * inv_2_epsilon,
+                (krw_sg_fwd - krw_sg_bwd) * inv_2_epsilon,
+                (kro_sg_fwd - kro_sg_bwd) * inv_2_epsilon,
                 (krg_sg_fwd - krg_sg_bwd) * inv_2_epsilon,
             )
             if is_scalar:

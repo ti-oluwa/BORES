@@ -5,14 +5,17 @@ import attrs
 import numba
 import numpy as np
 import numpy.typing as npt
+import scipy.sparse.linalg as spla
 from scipy.sparse import coo_matrix, csr_matrix
 
 from bores._precision import get_dtype
+from bores.boundary_conditions import BoundaryConditions
 from bores.config import Config
 from bores.constants import c
 from bores.correlations.core import compute_harmonic_mean
 from bores.datastructures import PhaseTensorsProxy
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
+from bores.grids.boundary_conditions import apply_saturation_boundary_conditions
 from bores.grids.rock_fluid import build_rock_fluid_properties_grids
 from bores.models import FluidProperties, RockProperties
 from bores.solvers.base import (
@@ -1380,9 +1383,7 @@ def _assemble_analytical_jacobian(
 
                     transmissibility = flow_area / flow_length
 
-                    # Phase potentials — must match compute_fluxes_from_neighbour
-                    # exactly so that upwind cell selection is identical.
-                    #
+                    
                     # The residual selects the upwind density based on the sign of the
                     # potential difference, where that potential difference itself uses
                     # the upwind density. We resolve this the same way the residual does:
@@ -1898,7 +1899,7 @@ def _assemble_jacobian_well_contributions(
                 # For gas PI, the kr dependence is PI ∝ krg/mu_g * k_abs * conv.
                 # d(PI)/d(krg) * d(krg)/dSw_eff = base_pi / max(krg, eps) * dkrg/dSw_eff
                 # is numerically fragile; instead use the raw mobility derivative:
-                #   d(q_g)/dSw_eff = WI * k_abs * conv / mu_g * dkrg/dSw_eff * drawdown
+                #   d(q_g)/dSw_eff = WI * conv / mu_g * dkrg/dSw_eff * drawdown
                 gas_viscosity = typing.cast(float, gas_viscosity_grid[i, j, k])
                 inverse_gas_viscosity = (
                     1.0 / gas_viscosity if gas_viscosity > 0.0 else 0.0
@@ -2279,7 +2280,7 @@ def assemble_analytical_jacobian(
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
         pad_width=pad_width,
     )
-
+    
     # Merge both parts into a single COO matrix
     # coo_matrix.tocsr() sums duplicate (row, col) entries, so flux and well
     # contributions at the same diagonal position are correctly accumulated.
@@ -2425,6 +2426,8 @@ def assemble_jacobian(
 
 
 def solve_implicit_saturation(
+    grid_shape: ThreeDimensions,
+    cell_dimension: typing.Tuple[float, float],
     oil_pressure_grid: ThreeDimensionalGrid,
     pressure_change_grid: ThreeDimensionalGrid,
     old_water_saturation_grid: ThreeDimensionalGrid,
@@ -2434,8 +2437,6 @@ def solve_implicit_saturation(
     cell_count_y: int,
     cell_count_z: int,
     thickness_grid: ThreeDimensionalGrid,
-    cell_size_x: float,
-    cell_size_y: float,
     elevation_grid: ThreeDimensionalGrid,
     porosity_grid: ThreeDimensionalGrid,
     time_step_size: float,
@@ -2450,6 +2451,7 @@ def solve_implicit_saturation(
     water_compressibility_grid: ThreeDimensionalGrid,
     gas_compressibility_grid: ThreeDimensionalGrid,
     rock_compressibility: float,
+    boundary_conditions: BoundaryConditions[ThreeDimensions],
     pad_width: int = 1,
     max_newton_iterations: int = 12,
     newton_tolerance: float = 1e-6,
@@ -2465,6 +2467,7 @@ def solve_implicit_saturation(
     or the maximum saturation change per iteration drops below `saturation_convergence_tolerance` and the relative
     residual is below 1e-3 (effective convergence despite the upwind discontinuity floor).
     """
+    cell_size_x, cell_size_y = cell_dimension
     time_step_in_days = time_step_size * c.DAYS_PER_SECOND
     dtype = get_dtype()
     interior_cell_count = (cell_count_x - 2) * (cell_count_y - 2) * (cell_count_z - 2)
@@ -2496,8 +2499,8 @@ def solve_implicit_saturation(
     stagnation_count = 0
     stagnation_patience = config.newton_stagnation_patience
     stagnation_improvement_threshold = config.newton_stagnation_improvement_threshold
+    min_step_size = float(np.sqrt(np.finfo(dtype).eps))
 
-    # Shared kwargs the remains unchanged for `compute_residual`
     residual_kwargs = dict(  # noqa
         old_water_saturation_grid=old_water_saturation_grid,
         old_gas_saturation_grid=old_gas_saturation_grid,
@@ -2631,6 +2634,9 @@ def solve_implicit_saturation(
             relative_mobility_grids=relative_mobility_grids,
             mobility_grids=mobility_grids,
         )
+        # condition_number = spla.norm(jacobian, ord=2) * spla.norm(jacobian.T, ord=2)
+        # logger.info(f"Jacobian condition number estimate: {condition_number:.3e}")
+
         # Solve the linear system: J * dS = -R
         saturation_change, _ = solve_linear_system(
             A_csr=jacobian,
@@ -2640,6 +2646,12 @@ def solve_implicit_saturation(
             rtol=config.saturation_convergence_tolerance,
             max_iterations=config.max_iterations,
             fallback_to_direct=True,
+        )
+        
+        linear_residual = jacobian @ saturation_change + residual_vector
+        linear_residual_norm = np.linalg.norm(linear_residual)
+        logger.debug(
+            f"Linear solver residual: ||J*dS + R|| = {linear_residual_norm:.2e}"
         )
 
         # Damp Newton step
@@ -2669,7 +2681,7 @@ def solve_implicit_saturation(
             cell_count_z=cell_count_z,
         )
 
-        for _ in range(line_search_max_cuts):
+        for ls_iteration in range(line_search_max_cuts):
             water_residual_trial, gas_residual_trial = compute_residual(
                 water_saturation_grid=water_saturation_grid_trial,
                 oil_saturation_grid=oil_saturation_grid_trial,
@@ -2682,10 +2694,25 @@ def solve_implicit_saturation(
                 water_residual=water_residual_trial,
                 gas_residual=gas_residual_trial,
             )
-            if np.linalg.norm(residual_trial) < residual_norm:
+            residual_trial_norm = np.linalg.norm(residual_trial)
+            logger.debug(
+                f"Line search iteration {ls_iteration}, alpha={line_search_factor:.4f}, "
+                f"||R||={residual_trial_norm:.4e} vs ||R_base||={residual_norm:.4e}"
+            )
+            if residual_trial_norm < residual_norm:
+                logger.debug(
+                    f"Line search: Accepted at alpha={line_search_factor:.4f}"
+                )
                 break
 
             line_search_factor *= 0.5
+            if (line_search_factor * max_raw_change) < min_step_size:
+                logger.debug(
+                    f"Line search hit precision floor at iteration {iteration}, "
+                    f"alpha={line_search_factor}, max_dS={line_search_factor * max_raw_change:.2e}"
+                )
+                break
+
             saturation_vector_trial = (
                 saturation_vector + line_search_factor * saturation_change
             )
@@ -2812,6 +2839,7 @@ def solve_implicit_saturation(
 
 
 def evolve_saturation(
+    grid_shape: ThreeDimensions,
     cell_dimension: typing.Tuple[float, float],
     thickness_grid: ThreeDimensionalGrid,
     elevation_grid: ThreeDimensionalGrid,
@@ -2825,6 +2853,7 @@ def evolve_saturation(
     pressure_change_grid: ThreeDimensionalGrid,
     injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
     production_rates: PhaseTensorsProxy[float, ThreeDimensions],
+    boundary_conditions: BoundaryConditions[ThreeDimensions],
     pad_width: int = 1,
 ) -> EvolutionResult[ImplicitSaturationSolution, typing.List[NewtonConvergenceInfo]]:
     """
@@ -2843,11 +2872,12 @@ def evolve_saturation(
     :param pad_width: Ghost cell padding width.
     :return: `EvolutionResult` containing `ImplicitSaturationSolution`.
     """
-    cell_size_x, cell_size_y = cell_dimension
     oil_pressure_grid = fluid_properties.pressure_grid
     cell_count_x, cell_count_y, cell_count_z = oil_pressure_grid.shape
 
     return solve_implicit_saturation(
+        grid_shape=grid_shape,
+        cell_dimension=cell_dimension,
         oil_pressure_grid=oil_pressure_grid,
         pressure_change_grid=pressure_change_grid,
         old_water_saturation_grid=fluid_properties.water_saturation_grid,
@@ -2857,8 +2887,6 @@ def evolve_saturation(
         cell_count_y=cell_count_y,
         cell_count_z=cell_count_z,
         thickness_grid=thickness_grid,
-        cell_size_x=cell_size_x,
-        cell_size_y=cell_size_y,
         elevation_grid=elevation_grid,
         porosity_grid=rock_properties.porosity_grid,
         time_step_size=time_step_size,
@@ -2870,6 +2898,7 @@ def evolve_saturation(
         well_indices_cache=well_indices_cache,
         injection_rates=injection_rates,
         production_rates=production_rates,
+        boundary_conditions=boundary_conditions,
         water_compressibility_grid=fluid_properties.water_compressibility_grid,
         gas_compressibility_grid=fluid_properties.gas_compressibility_grid,
         rock_compressibility=rock_properties.compressibility,

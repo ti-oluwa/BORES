@@ -125,11 +125,11 @@ rock_fluid_tables = bores.RockFluidTables(
         water_exponent=2.0,
         oil_exponent=2.0,
         gas_exponent=2.0,
-        wettability=bores.Wettability.OIL_WET,
+        wettability=bores.Wettability.WATER_WET,
         mixing_rule="eclipse_rule"
     ),
     capillary_pressure_table=bores.BrooksCoreyCapillaryPressureModel(
-        wettability=bores.Wettability.OIL_WET,
+        wettability=bores.Wettability.WATER_WET,
     ),
 )
 
@@ -140,11 +140,11 @@ config = bores.Config(
         max_step_size=bores.Time(months=1),
         min_step_size=bores.Time(hours=1),
         simulation_time=bores.Time(years=24),
-        max_rejects=40,
+        max_rejects=10,
     ),
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
-    scheme="implicit",
+    scheme="impes",
     pressure_solver="direct",
     saturation_solver="direct",
     pressure_preconditioner=None,
@@ -152,6 +152,7 @@ config = bores.Config(
     jacobian_assembly_method="analytical",
     max_pressure_change=1800,
     # disable_capillary_effects=True,
+    normalize_saturations=True,
 )
 
 # Run the simulation and collect states

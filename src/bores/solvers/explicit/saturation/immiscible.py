@@ -13,20 +13,8 @@ from bores.datastructures import PhaseTensorsProxy
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.grids.utils import unpad_grid
 from bores.models import FluidProperties, RockProperties
-from bores.solvers.base import (
-    EvolutionResult,
-    _warn_injection_rate,
-    _warn_production_rate,
-    compute_mobility_grids,
-)
-from bores.types import (
-    FluidPhase,
-    OneDimensionalGrid,
-    ThreeDimensionalGrid,
-    ThreeDimensions,
-)
-from bores.wells.base import Wells
-from bores.wells.controls import CoupledRateControl
+from bores.solvers.base import EvolutionResult, compute_mobility_grids
+from bores.types import OneDimensionalGrid, ThreeDimensionalGrid, ThreeDimensions
 from bores.wells.indices import WellIndicesCache
 
 __all__ = ["evolve_saturation"]
@@ -914,21 +902,19 @@ def compute_well_rate_grids(
         (cell_count_x, cell_count_y, cell_count_z), dtype=dtype
     )
 
+    # Update net grids
     for well_indices in well_indices_cache.injection.values():
         for perforation_index in well_indices:
             i, j, k = perforation_index.cell
             water_rate, _, gas_rate = injection_rates[
                 i - pad_width, j - pad_width, k - pad_width
             ]
-
-            # Update net grids
             net_water_well_rate_grid[i, j, k] += water_rate
             net_gas_well_rate_grid[i, j, k] += gas_rate
 
     for well_indices in well_indices_cache.production.values():
         for perforation_index in well_indices:
             i, j, k = perforation_index.cell
-            # Update net grids
             water_rate, oil_rate, gas_rate = production_rates[
                 i - pad_width, j - pad_width, k - pad_width
             ]
