@@ -355,6 +355,59 @@ class Config(
     where Newton updates oscillate or make negligible progress.
     """
 
+    pressure_outer_convergence_tolerance: float = attrs.field(
+        default=1e-2,
+        validator=attrs.validators.and_(
+            attrs.validators.gt(0.0),
+            attrs.validators.le(0.1),
+        ),
+    )
+    """
+    Relative pressure convergence tolerance for the Sequential Implicit outer iteration loop.
+
+    Outer iterations are considered converged when the maximum inter-iterate pressure
+    change, normalised by the mean field pressure, falls below this threshold:
+
+        max(|P_new - P_old|) / mean(|P|) < pressure_outer_convergence_tolerance
+
+    Using a relative measure makes the criterion regime-independent — a 10 psi
+    inter-iterate drift means something very different in a 500 psi near-depleted
+    reservoir versus a 5000 psi deep reservoir.
+
+    At the default of 1e-2 (1%), outer iterations typically converge in 2-3 solves
+    on well-behaved steps. Tighten toward 1e-3 for strongly coupled systems where
+    pressure-saturation feedback is significant (e.g. high-rate gas injection, near-
+    critical fluids). Loosening beyond 5e-2 risks accepting solutions where pressure
+    and saturation are not meaningfully coupled.
+    """
+
+    saturation_outer_convergence_tolerance: float = attrs.field(
+        default=1e-2,
+        validator=attrs.validators.and_(
+            attrs.validators.gt(0.0),
+            attrs.validators.le(0.1),
+        ),
+    )
+    """
+    Absolute saturation convergence tolerance for the Sequential Implicit outer iteration loop.
+
+    Outer iterations are considered converged when the maximum inter-iterate saturation
+    change across all three phases falls below this threshold:
+
+        max(|S_new - S_old|) < saturation_outer_convergence_tolerance
+
+    An absolute measure is appropriate here because saturation is dimensionless and
+    bounded in [0, 1], so the tolerance has a consistent physical meaning regardless
+    of reservoir conditions.
+
+    The default of 1e-2 (0.01 in saturation units) is deliberately looser than the
+    Newton convergence tolerance (`newton_saturation_change_tolerance`), since the
+    outer loop only needs to enforce coupling consistency between the pressure and
+    saturation solves — tight nonlinear convergence is handled within each inner solve.
+    Tighten toward 1e-3 if material balance accuracy is critical or if the simulation
+    involves sharp saturation fronts where small inter-iterate drift can compound.
+    """
+
     jacobian_assembly_method: typing.Literal["numerical", "analytical"] = "numerical"
     """
     Method used to assemble the Jacobian matrix in the implicit saturation
@@ -461,6 +514,38 @@ class Config(
     Do not share a pool between concurrent simulation runs unless the pool has
     sufficient workers to service both simultaneously.
     """
+
+    max_outer_iterations: int = attrs.field(
+        default=5,
+        validator=attrs.validators.and_(
+            attrs.validators.ge(1),
+            attrs.validators.le(20),
+        ),
+    )
+    """
+    Maximum number of Sequential Implicit outer iterations per time step.
+
+    Each outer iteration re-solves pressure then saturation to enforce
+    coupling consistency between the two. More iterations improve accuracy
+    at the cost of compute. 5 is sufficient for most cases; tighten to
+    10-15 only for strongly coupled systems (e.g. near-critical fluids,
+    high-rate gas injection).
+    """
+
+    pressure_outer_convergence_tolerance: float = attrs.field(
+        default=1e-2,
+        validator=attrs.validators.and_(
+            attrs.validators.gt(0.0),
+            attrs.validators.le(0.1),
+        ),
+    )
+    saturation_outer_convergence_tolerance: float = attrs.field(
+        default=1e-2,
+        validator=attrs.validators.and_(
+            attrs.validators.gt(0.0),
+            attrs.validators.le(0.1),
+        ),
+    )
 
     _lock: threading.Lock = attrs.field(
         factory=threading.Lock, init=False, repr=False, hash=False
