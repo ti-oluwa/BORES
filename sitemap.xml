@@ -2,250 +2,250 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
     <url>
          <loc>https://ti-oluwa.github.io/bores/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/api-reference/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/api-reference/correlations-array/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/api-reference/correlations-scalar/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/api-reference/full-api/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/best-practices/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/best-practices/errors/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/best-practices/grid-design/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/best-practices/performance/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/best-practices/solver-selection/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/best-practices/timestep-selection/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/best-practices/validation/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/examples/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/fundamentals/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/fundamentals/black-oil-model/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/fundamentals/grid-systems/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/fundamentals/reservoir-simulation/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/fundamentals/simulation-workflow/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/getting-started/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/getting-started/concepts/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/getting-started/installation/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/getting-started/quickstart/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/reference/glossary/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/reference/tags/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/reference/units/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/tutorials/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/tutorials/01-first-simulation/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/tutorials/02-building-models/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/tutorials/03-waterflood/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/tutorials/04-gas-injection/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/tutorials/05-miscible-flooding/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/capillary-pressure/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/config/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/constants/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/fluid-properties/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/grids/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/relative-permeability/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/rock-properties/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/advanced/aquifers/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/advanced/boundary-conditions/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/advanced/fractures/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/advanced/miscibility/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/advanced/model-analysis/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/advanced/pvt-tables/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/advanced/serialization/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/advanced/states-streams/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/simulation/precision/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/simulation/preconditioners/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/simulation/schemes/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/simulation/solvers/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/simulation/timestep-control/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/wells/basics/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/wells/controls/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/wells/fluids/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/wells/patterns/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/user-guide/wells/schedules/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/visualization/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/visualization/1d-plots/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/visualization/2d-maps/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/visualization/3d-rendering/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
     <url>
          <loc>https://ti-oluwa.github.io/bores/visualization/pyvista3d/</loc>
-         <lastmod>2026-03-27</lastmod>
+         <lastmod>2026-03-28</lastmod>
     </url>
 </urlset>
