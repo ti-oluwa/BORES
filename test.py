@@ -144,7 +144,7 @@ config = bores.Config(
     ),
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
-    scheme="impes",
+    scheme="si",
     pressure_solver="direct",
     saturation_solver="direct",
     pressure_preconditioner=None,

@@ -2318,6 +2318,14 @@ class Run(StoreSerializable):
         return cls(model=model, config=config)
 
 
+_SCHEME_ALIASES = {
+    "si": "Sequential Implicit",
+    "full-si": "Full Sequential Implicit",
+    "impes": "IMPES",
+    "explicit": "Explicit",
+}
+
+
 def run(
     input: typing.Union[ReservoirModel[ThreeDimensions], Run],
     config: typing.Optional[Config] = None,
@@ -2388,7 +2396,6 @@ def run(
         logger.debug("No boundary conditions provided, applying no-flow boundaries.")
         boundary_conditions = BoundaryConditions[ThreeDimensions]()
 
-    logger.info("Starting simulation workflow...")
     cell_dimension = model.cell_dimension
     grid_shape = model.grid_shape
     has_wells = wells.exists()
@@ -2404,12 +2411,15 @@ def run(
     freeze_saturation_pressure = config.freeze_saturation_pressure
     log_interval = config.log_interval
 
-    logger.debug(f"Grid dimensions: {grid_shape}")
-    logger.debug(f"Cell dimensions: {cell_dimension}")
-    logger.debug(f"Evolution scheme: {scheme}")
-    logger.debug(f"Total simulation time: {timer.simulation_time} seconds")
-    logger.debug(f"Output frequency: every {output_frequency} steps")
-    logger.debug(f"Has wells: {has_wells}")
+    logger.info("Starting simulation workflow...")
+    logger.info(f"Grid dimensions: {grid_shape}")
+    logger.info(f"Cell dimensions: {cell_dimension}")
+    logger.info(
+        f"Evolution scheme: {_SCHEME_ALIASES.get(scheme, scheme.replace('-', ' ').title())}"
+    )
+    logger.info(f"Total simulation time: {timer.simulation_time} seconds")
+    logger.info(f"Output frequency: every {output_frequency} steps")
+    logger.info(f"Has wells: {has_wells}")
     if has_wells:
         logger.debug("Checking well locations against grid shape")
         wells.check_location(grid_shape=grid_shape)
@@ -2447,7 +2457,7 @@ def run(
         padded_elevation_grid = pad_grid(elevation_grid, pad_width=pad_width)
 
         # Apply boundary conditions to relevant padded grids
-        logger.debug("Applying boundary conditions to initial padded grids")
+        logger.debug("Applying boundary conditions to initial grids")
         padded_fluid_properties = apply_boundary_conditions(
             padded_fluid_properties=padded_fluid_properties,
             boundary_conditions=boundary_conditions,
