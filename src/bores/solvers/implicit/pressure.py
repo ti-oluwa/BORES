@@ -4,6 +4,7 @@ import typing
 import attrs
 import numba
 import numpy as np
+import numpy.typing as npt
 from scipy.sparse import coo_matrix
 
 from bores._precision import get_dtype
@@ -434,8 +435,8 @@ def compute_accumulation_contributions(
     cell_size_x: float,
     cell_size_y: float,
     time_step_size_in_days: float,
-    dtype: np.typing.DTypeLike,
-) -> typing.Tuple[np.typing.NDArray, np.typing.NDArray]:
+    dtype: npt.DTypeLike,
+) -> typing.Tuple[npt.NDArray, npt.NDArray]:
     """
     Compute accumulation terms for all interior cells and return as dense arrays.
 
@@ -513,13 +514,13 @@ def compute_face_flux_contributions(
     gas_density_grid: ThreeDimensionalGrid,
     elevation_grid: ThreeDimensionalGrid,
     gravitational_constant: float,
-    dtype: np.typing.DTypeLike,
+    dtype: npt.DTypeLike,
 ) -> typing.Tuple[
-    np.typing.NDArray,  # sparse_row_indices
-    np.typing.NDArray,  # sparse_col_indices
-    np.typing.NDArray,  # sparse_off_diagonal_values
-    np.typing.NDArray,  # diagonal_additions       (length = interior_cell_count)
-    np.typing.NDArray,  # rhs_additions            (length = interior_cell_count)
+    npt.NDArray,  # sparse_row_indices
+    npt.NDArray,  # sparse_col_indices
+    npt.NDArray,  # sparse_off_diagonal_values
+    npt.NDArray,  # diagonal_additions       (length = interior_cell_count)
+    npt.NDArray,  # rhs_additions            (length = interior_cell_count)
 ]:
     """
     Compute face flux contributions for the implicit pressure matrix.
@@ -950,10 +951,10 @@ class WellContributions:
     to contribute to neither without special-casing the reduction.
     """
 
-    diagonal_cell_indices: np.typing.NDArray
-    diagonal_values: np.typing.NDArray
-    rhs_cell_indices: np.typing.NDArray
-    rhs_values: np.typing.NDArray
+    diagonal_cell_indices: npt.NDArray
+    diagonal_values: npt.NDArray
+    rhs_cell_indices: npt.NDArray
+    rhs_values: npt.NDArray
 
 
 def compute_well_contributions(
@@ -971,7 +972,7 @@ def compute_well_contributions(
     config: Config,
     well_indices_cache: WellIndicesCache,
     md_per_cp_to_ft2_per_psi_per_day: float,
-    dtype: np.typing.DTypeLike,
+    dtype: npt.DTypeLike,
     injection_rates: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
     production_rates: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
     injection_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,

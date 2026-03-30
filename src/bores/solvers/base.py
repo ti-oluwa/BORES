@@ -6,6 +6,7 @@ import warnings
 import attrs
 import numba  # type: ignore[import-untyped]
 import numpy as np
+import numpy.typing as npt
 import pyamg  # type: ignore[import-untyped]
 from scipy.sparse import (  # type: ignore[import-untyped]
     csr_array,
@@ -450,7 +451,7 @@ def build_block_jacobi_preconditioner(
             remainder_inv = np.diag(1.0 / diag)
             block_inverses.append(remainder_inv)
 
-    def matvec(x: np.typing.NDArray) -> np.typing.NDArray:
+    def matvec(x: npt.NDArray) -> npt.NDArray:
         """Apply Block Jacobi preconditioner."""
         y = np.zeros_like(x)
 
@@ -523,7 +524,7 @@ def build_polynomial_preconditioner(
         if _ < degree - 1:
             A_power = A_power @ A_csr
 
-    def matvec(x: np.typing.NDArray) -> np.typing.NDArray:
+    def matvec(x: npt.NDArray) -> npt.NDArray:
         """Apply polynomial preconditioner: (I + αA + α²A² + ...) x"""
         result = terms[0] * x  # Identity term
 
@@ -630,15 +631,15 @@ def build_cpr_preconditioner(
         raise PreconditionerError(f"ILU factorization failed for CPR: {exc}") from exc
 
     # Restriction and prolongation operators (implicit)
-    def restrict_to_pressure(vec_full: np.typing.NDArray) -> np.typing.NDArray:
+    def restrict_to_pressure(vec_full: npt.NDArray) -> npt.NDArray:
         return vec_full[pressure_dof_indices]
 
-    def prolongate_to_full(vec_pressure: np.typing.NDArray) -> np.typing.NDArray:
+    def prolongate_to_full(vec_pressure: npt.NDArray) -> npt.NDArray:
         out = np.zeros(number_of_equations, dtype=vec_pressure.dtype)
         out[pressure_dof_indices] = vec_pressure
         return out
 
-    def matvec(residual: np.typing.NDArray) -> np.typing.NDArray:
+    def matvec(residual: npt.NDArray) -> npt.NDArray:
         """CPR preconditioner application: x = M^{-1} r"""
         # Stage 1: pressure solve
         r_p = restrict_to_pressure(residual)
@@ -666,8 +667,8 @@ def _spsolve(
     atol: float,
     maxiter: typing.Optional[int],
     M: typing.Optional[typing.Any],
-    callback: typing.Optional[typing.Callable[[np.typing.NDArray], None]],
-) -> np.typing.NDArray:
+    callback: typing.Optional[typing.Callable[[npt.NDArray], None]],
+) -> npt.NDArray:
     return spsolve(A, b), 0  # type: ignore[return-value]
 
 
@@ -680,10 +681,10 @@ def _lgmres(
     atol: float,
     maxiter: typing.Optional[int],
     M: typing.Optional[typing.Any],
-    callback: typing.Optional[typing.Callable[[np.typing.NDArray], None]],
+    callback: typing.Optional[typing.Callable[[npt.NDArray], None]],
     inner_m: int = 50,
     outer_k: int = 5,
-) -> typing.Tuple[np.typing.NDArray, int]:
+) -> typing.Tuple[npt.NDArray, int]:
     """
     LGMRES solver with configurable inner/outer iteration parameters.
 
@@ -774,7 +775,7 @@ class CachedPreconditionerFactory:
         self.recompute_threshold = recompute_threshold
 
         self._cached_M: typing.Optional[LinearOperator] = None
-        self._cached_A_data: typing.Optional[np.typing.NDArray] = None
+        self._cached_A_data: typing.Optional[npt.NDArray] = None
         self._call_count = 0
 
     @property
@@ -1128,14 +1129,14 @@ def _get_solver_func(
 
 def solve_linear_system(
     A_csr: typing.Union[csr_array, csr_matrix],
-    b: np.typing.NDArray,
+    b: npt.NDArray,
     max_iterations: int,
     rtol: typing.Optional[float] = None,
     atol: typing.Optional[float] = None,
     solver: typing.Union[Solver, typing.Iterable[Solver]] = "bicgstab",
     preconditioner: typing.Optional[Preconditioner] = "ilu",
     fallback_to_direct: bool = False,
-) -> typing.Tuple[np.typing.NDArray, typing.Optional[LinearOperator]]:
+) -> typing.Tuple[npt.NDArray, typing.Optional[LinearOperator]]:
     """
     Solves the linear system A·x = b using an (iterative) solver with a fallback strategy.
 

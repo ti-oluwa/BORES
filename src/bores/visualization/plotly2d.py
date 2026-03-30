@@ -11,6 +11,7 @@ from enum import Enum
 
 import attrs
 import numpy as np
+import numpy.typing as npt
 import plotly.graph_objects as go  # type: ignore[import-untyped]
 from plotly.subplots import make_subplots  # type: ignore[import-untyped]
 
@@ -940,13 +941,13 @@ class DataVisualizer:
 
     def make_plot(
         self,
-        data: typing.Union[TwoDimensionalGrid, np.typing.NDArray[np.floating]],
+        data: typing.Union[TwoDimensionalGrid, npt.NDArray[np.floating]],
         plot_type: typing.Union[PlotType, str] = PlotType.HEATMAP,
         metadata: typing.Optional[PropertyMeta] = None,
         figure: typing.Optional[go.Figure] = None,
         title: typing.Optional[str] = None,
-        x_coords: typing.Optional[np.typing.NDArray] = None,
-        y_coords: typing.Optional[np.typing.NDArray] = None,
+        x_coords: typing.Optional[npt.NDArray] = None,
+        y_coords: typing.Optional[npt.NDArray] = None,
         x_label: str = "X",
         y_label: str = "Y",
         width: typing.Optional[int] = None,
@@ -1032,7 +1033,7 @@ class DataVisualizer:
     def make_plots(
         self,
         data_list: typing.Sequence[
-            typing.Union[TwoDimensionalGrid, np.typing.NDArray[np.floating]]
+            typing.Union[TwoDimensionalGrid, npt.NDArray[np.floating]]
         ],
         plot_types: typing.Union[
             PlotType, str, typing.Sequence[typing.Union[PlotType, str]]

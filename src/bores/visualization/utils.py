@@ -11,6 +11,7 @@ from pathlib import Path
 import attrs
 import imageio
 import numpy as np
+import numpy.typing as npt
 import plotly.graph_objects as go
 from typing_extensions import TypedDict
 
@@ -73,7 +74,7 @@ def _format_value(value: float, metadata: PropertyMeta) -> str:
     return formatted if formatted else "0"
 
 
-def _invert_z_axis(arr: np.typing.NDArray) -> np.typing.NDArray:
+def _invert_z_axis(arr: npt.NDArray) -> npt.NDArray:
     """
     Invert the Z axis (last axis) of a 3D array so that data[:,:,0] becomes data[:,:,nz-1].
     This ensures numpy convention (top layer as k=0) matches plotly's rendering (bottom as k=0).
@@ -841,7 +842,7 @@ class FrameExporter(typing.Protocol):
     ```
     """
 
-    def write(self, frames: typing.List[np.typing.NDArray], fps: float) -> None:
+    def write(self, frames: typing.List[npt.NDArray], fps: float) -> None:
         """
         Write captured frames to disk.
 
@@ -862,7 +863,7 @@ class GifExporter:
         self.path = Path(path).resolve()
         self.loop = loop
 
-    def write(self, frames: typing.List[np.typing.NDArray], fps: float) -> None:
+    def write(self, frames: typing.List[npt.NDArray], fps: float) -> None:
         imageio.mimsave(self.path, frames, duration=1.0 / fps, loop=self.loop)  # type: ignore
         logger.info("Wrote GIF (%d frames) to %s", len(frames), self.path)
 
@@ -885,7 +886,7 @@ class Mp4Exporter:
         self.codec = codec
         self.quality = quality
 
-    def write(self, frames: typing.List[np.typing.NDArray], fps: float) -> None:
+    def write(self, frames: typing.List[npt.NDArray], fps: float) -> None:
         writer = imageio.get_writer(
             self.path,
             format="FFMPEG",  # type: ignore
@@ -910,7 +911,7 @@ class WebPExporter:
         self.path = Path(path).resolve()
         self.loop = loop
 
-    def write(self, frames: typing.List[np.typing.NDArray], fps: float) -> None:
+    def write(self, frames: typing.List[npt.NDArray], fps: float) -> None:
         imageio.mimsave(self.path, frames, duration=1.0 / fps, loop=self.loop)  # type: ignore
         logger.info("Wrote WebP (%d frames) to %s", len(frames), self.path)
 

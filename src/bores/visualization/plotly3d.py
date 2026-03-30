@@ -12,6 +12,7 @@ from enum import Enum
 
 import attrs
 import numpy as np
+import numpy.typing as npt
 import plotly.graph_objects as go
 from typing_extensions import TypedDict, Unpack
 
@@ -2059,7 +2060,7 @@ class IsosurfaceRenderer(BaseRenderer):
 
 def interpolate_opacity(
     x: np.ndarray, scale_values: typing.Sequence[typing.Sequence[float]]
-) -> np.typing.NDArray[np.floating]:
+) -> npt.NDArray[np.floating]:
     # scale_values: list of [fraction, opacity]
     fractions, opacities = zip(*scale_values)
     return np.interp(x, fractions, opacities)

@@ -4,6 +4,7 @@ import typing
 import attrs
 import numba
 import numpy as np
+import numpy.typing as npt
 
 from bores._precision import get_dtype
 from bores.config import Config
@@ -710,7 +711,7 @@ def compute_net_flux_contributions(
     gas_density_grid: ThreeDimensionalGrid,
     elevation_grid: ThreeDimensionalGrid,
     gravitational_constant: float,
-    dtype: np.typing.DTypeLike,
+    dtype: npt.DTypeLike,
 ) -> typing.Tuple[
     ThreeDimensionalGrid,
     ThreeDimensionalGrid,
@@ -1006,7 +1007,7 @@ def compute_well_rate_grids(
     time: float,
     config: Config,
     well_indices_cache: WellIndicesCache,
-    dtype: np.typing.DTypeLike,
+    dtype: npt.DTypeLike,
     injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
     production_rates: PhaseTensorsProxy[float, ThreeDimensions],
     pad_width: int = 1,

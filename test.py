@@ -95,7 +95,7 @@ producer = bores.production_well(
     control=bores.CoupledRateControl(
         primary_phase=bores.FluidPhase.OIL,  # Can be set to "oil" too
         primary_control=bores.AdaptiveRateControl(
-            target_rate=-5000.0,
+            target_rate=-15000.0,
             target_phase="oil",
             bhp_limit=1000.0,
             clamp=bores.ProductionClamp(),
@@ -123,8 +123,8 @@ wells = bores.wells_(injectors=[injector], producers=[producer])
 rock_fluid_tables = bores.RockFluidTables(
     relative_permeability_table=bores.BrooksCoreyThreePhaseRelPermModel(
         water_exponent=2.0,
-        oil_exponent=2.0,
-        gas_exponent=2.0,
+        oil_exponent=1.0,
+        gas_exponent=1.0,
         wettability=bores.Wettability.WATER_WET,
         mixing_rule="eclipse_rule"
     ),
@@ -137,22 +137,20 @@ rock_fluid_tables = bores.RockFluidTables(
 config = bores.Config(
     timer=bores.Timer(
         initial_step_size=bores.Time(days=5),
-        max_step_size=bores.Time(months=1),
+        max_step_size=bores.Time(months=3),
         min_step_size=bores.Time(hours=1),
         simulation_time=bores.Time(years=24),
-        max_rejects=10,
+        max_rejects=20,
     ),
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
-    scheme="implicit",
+    scheme="impes",
     pressure_solver="direct",
     saturation_solver="direct",
     pressure_preconditioner=None,
     saturation_preconditioner=None,
     jacobian_assembly_method="analytical",
     max_pressure_change=1800,
-    # disable_capillary_effects=True,
-    normalize_saturations=True,
 )
 
 # Run the simulation and collect states

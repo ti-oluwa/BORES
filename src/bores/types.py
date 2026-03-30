@@ -3,6 +3,7 @@ import typing
 from typing import TypeAlias
 
 import numpy as np
+import numpy.typing as npt
 from scipy.sparse import csr_array, csr_matrix  # type: ignore[import-untyped]
 from scipy.sparse.linalg import LinearOperator  # type: ignore[import-untyped]
 from typing_extensions import TypedDict
@@ -51,7 +52,7 @@ OneDimension: TypeAlias = typing.Tuple[int]
 
 Numeric = typing.Union[int, float, np.floating, np.integer]
 NDimensionalGrid = np.ndarray[NDimension, np.dtype[np.floating]]
-FloatOrArray = typing.Union[float, np.typing.NDArray[np.floating]]
+FloatOrArray = typing.Union[float, npt.NDArray[np.floating]]
 
 
 ThreeDimensionalGrid = NDimensionalGrid[ThreeDimensions]
@@ -90,13 +91,21 @@ class FluidPhase(enum.Enum):
 WellFluidType = typing.Literal["water", "oil", "gas"]
 """Types of fluids that can be injected in the simulation"""
 
-EvolutionScheme = typing.Literal["impes", "explicit", "implicit"]
+EvolutionScheme = typing.Literal[
+    "impes",
+    "explicit",
+    "sequential-implicit",
+    "full-sequential-implicit",
+    "si",
+    "full-si",
+]
 """
 Discretization methods for numerical simulations
 
-- "impes": Implicit pressure, Explicit saturation
-- "explicit": Both pressure and saturation are treated explicitly
-- "implicit": Both pressure and saturation are treated (sequentially) implicitly
+- `"impes"`: Implicit pressure, Explicit saturation
+- `"explicit"`: Both pressure and saturation are treated explicitly
+- `"sequential-implicit"` or `"si"`: Both pressure and saturation are treated (sequentially) implicitly
+- `"full-sequential-implicit"` or `"full-si"`: Both pressure and saturation are treated (sequentially) implicitly
 """
 
 MiscibilityModel = typing.Literal["immiscible", "todd_longstaff"]
@@ -157,8 +166,8 @@ class SolverFunc(typing.Protocol):
         atol: float,
         maxiter: typing.Optional[int],
         M: typing.Optional[typing.Any],
-        callback: typing.Optional[typing.Callable[[np.typing.NDArray], None]],
-    ) -> np.typing.NDArray: ...
+        callback: typing.Optional[typing.Callable[[npt.NDArray], None]],
+    ) -> npt.NDArray: ...
 
 
 Solver = typing.Union[SolverFunc, SolverStr]

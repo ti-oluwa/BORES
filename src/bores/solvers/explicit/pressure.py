@@ -3,6 +3,7 @@ import typing
 import attrs
 import numba
 import numpy as np
+import numpy.typing as npt
 
 from bores._precision import get_dtype
 from bores.config import Config
@@ -585,7 +586,7 @@ def compute_net_flux_contributions(
     gas_density_grid: ThreeDimensionalGrid,
     elevation_grid: ThreeDimensionalGrid,
     gravitational_constant: float,
-    dtype: np.typing.DTypeLike,
+    dtype: npt.DTypeLike,
 ) -> ThreeDimensionalGrid:
     """
     Compute net volumetric flux into each interior cell from all 6 neighbors (excluding wells).
@@ -722,7 +723,7 @@ def compute_well_rate_grid(
     time: float,
     config: Config,
     well_indices_cache: WellIndicesCache,
-    dtype: np.typing.DTypeLike,
+    dtype: npt.DTypeLike,
     injection_rates: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
     production_rates: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
     injection_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,

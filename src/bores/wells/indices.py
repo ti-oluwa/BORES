@@ -54,11 +54,11 @@ class WellIndicesCache:
 
 def build_well_indices_cache(
     wells: Wells[ThreeDimensions],
-    thickness_grid: NDimensionalGrid[ThreeDimensions],
     absolute_permeability: RockPermeability,
     boundary_conditions: BoundaryConditions[ThreeDimensions],
     cell_size_x: float,
     cell_size_y: float,
+    thickness_grid: NDimensionalGrid[ThreeDimensions],
     cell_count_x: int,
     cell_count_y: int,
     cell_count_z: int,

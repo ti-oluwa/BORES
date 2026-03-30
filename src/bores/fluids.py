@@ -5,6 +5,7 @@ import typing
 
 import attrs
 import numpy as np
+import numpy.typing as npt
 
 from bores.correlations.arrays import (
     compute_gas_compressibility_factor as compute_gas_compressibility_factor_array,
@@ -202,7 +203,7 @@ class Fluid(StoreSerializable):
                 _pvt_table = self.pvt_table
                 _temperature = temperature
 
-                def z_factor_func(pressure: np.typing.NDArray) -> np.typing.NDArray:  # type: ignore[misc]
+                def z_factor_func(pressure: npt.NDArray) -> npt.NDArray:  # type: ignore[misc]
                     temperature_arr = np.full_like(pressure, _temperature)
                     result = _pvt_table.compressibility_factor(
                         pressure, temperature_arr
@@ -215,7 +216,7 @@ class Fluid(StoreSerializable):
                 _pvt_table = self.pvt_table
                 _temperature = temperature
 
-                def viscosity_func(pressure: np.typing.NDArray) -> np.typing.NDArray:  # type: ignore[misc]
+                def viscosity_func(pressure: npt.NDArray) -> npt.NDArray:  # type: ignore[misc]
                     temperature_arr = np.full_like(pressure, _temperature)
                     result = _pvt_table.viscosity(pressure, temperature_arr)
                     return np.asarray(result, dtype=pressure.dtype)
@@ -230,7 +231,7 @@ class Fluid(StoreSerializable):
                     _gas_table = gas_table
                     _temperature = temperature
 
-                    def z_factor_func(pressure: np.typing.NDArray) -> np.typing.NDArray:  # type: ignore[misc]
+                    def z_factor_func(pressure: npt.NDArray) -> npt.NDArray:  # type: ignore[misc]
                         temperature_arr = np.full_like(pressure, _temperature)
                         result = _gas_table.compressibility_factor(
                             pressure, temperature_arr
@@ -244,8 +245,8 @@ class Fluid(StoreSerializable):
                     _temperature = temperature
 
                     def viscosity_func(
-                        pressure: np.typing.NDArray,
-                    ) -> np.typing.NDArray:  # type: ignore[misc]
+                        pressure: npt.NDArray,
+                    ) -> npt.NDArray:  # type: ignore[misc]
                         temperature_arr = np.full_like(pressure, _temperature)
                         result = _gas_table.viscosity(pressure, temperature_arr)
                         return np.asarray(result, dtype=pressure.dtype)
@@ -266,7 +267,7 @@ class Fluid(StoreSerializable):
 
             _specific_gravity = float(specific_gravity)
 
-            def z_factor_func(pressure: np.typing.NDArray) -> np.typing.NDArray:  # type: ignore[misc]
+            def z_factor_func(pressure: npt.NDArray) -> npt.NDArray:  # type: ignore[misc]
                 temperature_arr = np.full_like(pressure, temperature)
                 specific_gravity_arr = np.full_like(pressure, _specific_gravity)
                 return compute_gas_compressibility_factor_array(
@@ -288,7 +289,7 @@ class Fluid(StoreSerializable):
             _specific_gravity = float(specific_gravity)
             _molecular_weight = float(molecular_weight)
 
-            def viscosity_func(pressure: np.typing.NDArray) -> np.typing.NDArray:  # type: ignore[misc]
+            def viscosity_func(pressure: npt.NDArray) -> npt.NDArray:  # type: ignore[misc]
                 temperature_arr = np.full_like(pressure, temperature)
                 specific_gravity_arr = np.full_like(pressure, _specific_gravity)
                 z_factor_arr = compute_gas_compressibility_factor_array(
@@ -328,4 +329,3 @@ class Fluid(StoreSerializable):
             points=points,
             cache_key=cache_key,
         )
-

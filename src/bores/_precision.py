@@ -2,6 +2,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 
 import numpy as np
+import numpy.typing as npt
 
 __all__ = [
     "get_dtype",
@@ -12,12 +13,10 @@ __all__ = [
     "with_precision",
 ]
 
-_bores_dtype: ContextVar[np.typing.DTypeLike] = ContextVar(
-    "_bores_dtype", default=np.float32
-)
+_bores_dtype: ContextVar[npt.DTypeLike] = ContextVar("_bores_dtype", default=np.float32)
 
 
-def get_dtype() -> np.typing.DTypeLike:
+def get_dtype() -> npt.DTypeLike:
     """
     Get the current data precision type for used for computations in `bores`.
 
@@ -31,7 +30,7 @@ def get_dtype() -> np.typing.DTypeLike:
 get_precision = get_dtype
 
 
-def set_dtype(dtype: np.typing.DTypeLike) -> None:
+def set_dtype(dtype: npt.DTypeLike) -> None:
     """
     Set the default data precision type for `bores` computations.
 
@@ -46,7 +45,7 @@ set_precision = set_dtype
 
 
 @contextmanager
-def with_precision(dtype: np.typing.DTypeLike):
+def with_precision(dtype: npt.DTypeLike):
     """
     Context manager to temporarily set the data type, and hence the precision for `bores` computations.
 

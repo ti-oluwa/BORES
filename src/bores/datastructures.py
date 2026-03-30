@@ -3,6 +3,7 @@ from collections.abc import MutableMapping
 
 import attrs
 import numpy as np
+import numpy.typing as npt
 from typing_extensions import Self, TypedDict
 
 from bores.errors import ValidationError
@@ -542,7 +543,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
 
         return result  # type: ignore[return-value]
 
-    def __array__(self, dtype: typing.Optional[np.typing.DTypeLike] = None):
+    def __array__(self, dtype: typing.Optional[npt.DTypeLike] = None):
         return self.array(dtype=dtype)
 
     @property
@@ -653,8 +654,8 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
 
     def array(
         self,
-        dtype: typing.Optional[np.typing.DTypeLike] = None,
-    ) -> np.typing.NDArray:
+        dtype: typing.Optional[npt.DTypeLike] = None,
+    ) -> npt.NDArray:
         """
         Convert to a dense NumPy N-dimensional array.
 

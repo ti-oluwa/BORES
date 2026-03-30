@@ -1094,7 +1094,7 @@ def compute_gas_compressibility_factor(
     method: GasZFactorMethod = "dak",
 ) -> NDimensionalGrid[NDimension]:
     """
-    Computes gas compressibility factor with automatic correlation selection.
+    Computes (natural) gas compressibility factor.
 
     Method Selection Strategy:
     1. **High Pressure (Pr > 15)**: Use DAK (most accurate for Pr up to 30)
@@ -1444,9 +1444,9 @@ def compute_gas_to_oil_ratio(
     gor_at_bubble_point_pressure: typing.Optional[NDimensionalGrid[NDimension]] = None,
 ) -> NDimensionalGrid[NDimension]:
     """
-    Computes the gas-to-oil ratio (GOR) using the Vazquez-Beggs correlation.
+    Computes the solution gas-to-oil ratio (Solution-GOR) using the Vazquez-Beggs correlation.
 
-    GOR is the amount of gas dissolved in oil at a given pressure and temperature.
+    Solution GOR is the amount of gas dissolved in oil at a given pressure and temperature.
 
     Two regimes:
         - **Saturated region (P < Pb)**: GOR is pressure-dependent.
@@ -2543,8 +2543,7 @@ def compute_gas_solubility_in_water(
         # Apply Henry's Law for out-of-range temperatures
         if np.any(henry_mask):
             molar_masses = {
-                "co2": c.MOLECULAR_WEIGHtemperature_in_celsiusO2
-                / 1000,  # Convert g/mol to kg/mol
+                "co2": c.MOLECULAR_WEIGHT_CO2 / 1000,  # Convert g/mol to kg/mol
             }
             henry_result = _gas_solubility_in_water_henry_law(
                 pressure=get_mask(pressure, henry_mask),

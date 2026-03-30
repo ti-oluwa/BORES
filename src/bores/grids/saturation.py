@@ -2,6 +2,7 @@ import typing
 import warnings
 
 import numpy as np
+import numpy.typing as npt
 
 from bores._precision import get_dtype
 from bores.constants import c
@@ -323,19 +324,19 @@ def build_saturation_grids(
 
 
 def _validate_inputs(
-    depth_grid: np.typing.NDArray,
+    depth_grid: npt.NDArray,
     gas_oil_contact: float,
     oil_water_contact: float,
-    connate_water_saturation: np.typing.NDArray,
-    residual_oil_saturation_water: np.typing.NDArray,
-    residual_oil_saturation_gas: np.typing.NDArray,
-    residual_gas_saturation: np.typing.NDArray,
-    porosity: np.typing.NDArray,
+    connate_water_saturation: npt.NDArray,
+    residual_oil_saturation_water: npt.NDArray,
+    residual_oil_saturation_gas: npt.NDArray,
+    residual_gas_saturation: npt.NDArray,
+    porosity: npt.NDArray,
     use_transitions: bool,
     gas_oil_transition_thickness: float,
     oil_water_transition_thickness: float,
     transition_curvature_exponent: float,
-    active: np.typing.NDArray,
+    active: npt.NDArray,
 ) -> None:
     """
     Validate all input parameters for saturation grid building.
@@ -482,7 +483,7 @@ def _build_sharp_contacts(
     water_saturation: NDimensionalGrid[NDimension],
     oil_saturation: NDimensionalGrid[NDimension],
     gas_saturation: NDimensionalGrid[NDimension],
-    active: np.typing.NDArray,
+    active: npt.NDArray,
 ) -> typing.Tuple[
     NDimensionalGrid[NDimension],
     NDimensionalGrid[NDimension],
@@ -566,7 +567,7 @@ def _build_transition_zones(
     water_saturation: NDimensionalGrid[NDimension],
     oil_saturation: NDimensionalGrid[NDimension],
     gas_saturation: NDimensionalGrid[NDimension],
-    active: np.typing.NDArray,
+    active: npt.NDArray,
 ) -> typing.Tuple[
     NDimensionalGrid[NDimension],
     NDimensionalGrid[NDimension],
@@ -733,7 +734,7 @@ def _normalize_saturations(
     water_saturation: NDimensionalGrid[NDimension],
     oil_saturation: NDimensionalGrid[NDimension],
     gas_saturation: NDimensionalGrid[NDimension],
-    active: np.typing.NDArray,
+    active: npt.NDArray,
 ) -> typing.Tuple[
     NDimensionalGrid[NDimension],
     NDimensionalGrid[NDimension],

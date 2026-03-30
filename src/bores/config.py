@@ -82,7 +82,7 @@ class Config(
     """Frequency at which model states are yielded/outputted during the simulation."""
 
     scheme: EvolutionScheme = "impes"
-    """Evolution scheme to use for the simulation ('impes', 'explicit', 'implicit', 'sequential_implicit')."""
+    """Evolution scheme to use for the simulation ('impes', 'explicit', 'sequential-implicit', 'full-sequential-implicit')."""
 
     use_pseudo_pressure: bool = True
     """Whether to use pseudo-pressure for gas (when applicable)."""
@@ -356,7 +356,7 @@ class Config(
     """
 
     pressure_outer_convergence_tolerance: float = attrs.field(
-        default=1e-2,
+        default=1e-3,
         validator=attrs.validators.and_(
             attrs.validators.gt(0.0),
             attrs.validators.le(0.1),
@@ -370,7 +370,7 @@ class Config(
 
         max(|P_new - P_old|) / mean(|P|) < pressure_outer_convergence_tolerance
 
-    Using a relative measure makes the criterion regime-independent — a 10 psi
+    Using a relative measure makes the criterion regime-independent - a 10 psi
     inter-iterate drift means something very different in a 500 psi near-depleted
     reservoir versus a 5000 psi deep reservoir.
 
@@ -403,7 +403,7 @@ class Config(
     The default of 1e-2 (0.01 in saturation units) is deliberately looser than the
     Newton convergence tolerance (`newton_saturation_change_tolerance`), since the
     outer loop only needs to enforce coupling consistency between the pressure and
-    saturation solves — tight nonlinear convergence is handled within each inner solve.
+    saturation solves - tight nonlinear convergence is handled within each inner solve.
     Tighten toward 1e-3 if material balance accuracy is critical or if the simulation
     involves sharp saturation fronts where small inter-iterate drift can compound.
     """

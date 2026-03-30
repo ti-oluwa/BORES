@@ -5,6 +5,7 @@ import typing
 
 import attrs
 import numpy as np
+import numpy.typing as npt
 
 from bores._precision import get_dtype
 from bores.constants import c
@@ -97,7 +98,7 @@ def _validate_array(
     model_shape: tuple[int, ...],
     grid: np.ndarray,
     field_name: str,
-    dtype: typing.Optional[np.typing.DTypeLike],
+    dtype: typing.Optional[npt.DTypeLike],
 ) -> np.ndarray:
     if grid.shape != model_shape:
         raise ValidationError(
@@ -111,7 +112,7 @@ def _validate_array(
 def validate_state(
     state: ModelState[NDimension],
     dtype: typing.Optional[
-        typing.Union[np.typing.DTypeLike, typing.Literal["global"]]
+        typing.Union[npt.DTypeLike, typing.Literal["global"]]
     ] = None,
 ) -> ModelState[NDimension]:
     """

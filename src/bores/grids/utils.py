@@ -5,6 +5,7 @@ import warnings
 
 import numba
 import numpy as np
+import numpy.typing as npt
 
 from bores._precision import get_dtype
 from bores.errors import ValidationError
@@ -27,8 +28,9 @@ __all__ = [
     "layer_to_link_permeability",
     "link_to_layer_permeability",
     "pad_grid",
-    "unpad_grid"
+    "unpad_grid",
 ]
+
 
 def pad_grid(
     grid: NDimensionalGrid[NDimension], pad_width: int = 1
@@ -478,8 +480,8 @@ def _coarsen_3d_permeability_grids(
 
 
 def _axis_harmonic_mean(
-    data: np.typing.NDArray, axis: int, epsilon: float = 1e-10
-) -> np.typing.NDArray:
+    data: npt.NDArray, axis: int, epsilon: float = 1e-10
+) -> npt.NDArray:
     """
     Compute harmonic mean along a specific axis, handling NaN values.
 
@@ -577,9 +579,7 @@ def coarsen_permeability_grids(
 
 
 FlattenStrategy = typing.Union[
-    typing.Callable[
-        [np.typing.NDArray], typing.Union[float, np.floating, np.typing.NDArray]
-    ],
+    typing.Callable[[npt.NDArray], typing.Union[float, np.floating, npt.NDArray]],
     typing.Literal["max", "min", "mean", "sum", "top", "bottom", "weighted_mean"],
 ]
 
@@ -848,12 +848,12 @@ def _resolve_axis(
 
 
 def layer_to_link_permeability(
-    cell_permeability: np.typing.NDArray,
-    cell_lenghts: np.typing.NDArray,
+    cell_permeability: npt.NDArray,
+    cell_lenghts: npt.NDArray,
     orientation: typing.Union[
         Orientation, typing.Literal["x", "y", "z"]
     ] = Orientation.Z,
-) -> np.typing.NDArray:
+) -> npt.NDArray:
     """
     Convert per-cell permeability to inter-cell interface (link) permeability.
 
@@ -963,14 +963,14 @@ def layer_to_link_permeability(
 
 
 def link_to_layer_permeability(
-    interface_permeability: np.typing.NDArray,
-    cell_lenghts: np.typing.NDArray,
-    anchor_permeability: typing.Union[float, np.typing.NDArray],
+    interface_permeability: npt.NDArray,
+    cell_lenghts: npt.NDArray,
+    anchor_permeability: typing.Union[float, npt.NDArray],
     anchor_index: int = 0,
     orientation: typing.Union[
         Orientation, typing.Literal["x", "y", "z"]
     ] = Orientation.Z,
-) -> np.typing.NDArray:
+) -> npt.NDArray:
     """
     Recover per-cell permeability from inter-cell interface (link) permeability.
 
@@ -1068,12 +1068,12 @@ def link_to_layer_permeability(
     output_shape[axis] = n_cells
     recovered = np.empty(output_shape, dtype=float)
 
-    def _get(array: np.typing.NDArray, index: int) -> np.typing.NDArray:
+    def _get(array: npt.NDArray, index: int) -> npt.NDArray:
         idx = [slice(None)] * array.ndim
         idx[axis] = index  # type: ignore
         return array[tuple(idx)]
 
-    def _set(array: np.typing.NDArray, index: int, values: np.typing.NDArray) -> None:
+    def _set(array: npt.NDArray, index: int, values: npt.NDArray) -> None:
         idx = [slice(None)] * array.ndim
         idx[axis] = index  # type: ignore
         array[tuple(idx)] = values

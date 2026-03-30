@@ -4,6 +4,7 @@ import typing
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
+import numpy.typing as npt
 from cachetools import LFUCache
 from scipy.integrate import cumulative_trapezoid, quad  # type: ignore[import-untyped]
 
@@ -167,12 +168,12 @@ def _supports_vectorization(
 
 
 def _build_pseudo_pressures_vectorized(
-    pressures: np.typing.NDArray,
+    pressures: npt.NDArray,
     z_factor_func: typing.Callable[[FloatOrArray], FloatOrArray],
     viscosity_func: typing.Callable[[FloatOrArray], FloatOrArray],
     reference_pressure: float,
-    dtype: typing.Optional[np.typing.DTypeLike] = None,
-) -> np.typing.NDArray:
+    dtype: typing.Optional[npt.DTypeLike] = None,
+) -> npt.NDArray:
     """
     Build entire pseudo-pressure table values using vectorized operations.
 
@@ -253,13 +254,13 @@ def _build_pseudo_pressures_vectorized(
 
 
 def _build_pseudo_pressures_scalar(
-    pressures: np.typing.NDArray,
+    pressures: npt.NDArray,
     z_factor_func: typing.Callable[[float], float],
     viscosity_func: typing.Callable[[float], float],
     reference_pressure: float,
     max_workers: int,
-    dtype: typing.Optional[np.typing.DTypeLike] = None,
-) -> np.typing.NDArray:
+    dtype: typing.Optional[npt.DTypeLike] = None,
+) -> npt.NDArray:
     """
     Build pseudo-pressure table values using threaded scalar computation.
 
@@ -288,12 +289,12 @@ def _build_pseudo_pressures_scalar(
 
 
 def build_pseudo_pressures(
-    pressures: np.typing.NDArray,
+    pressures: npt.NDArray,
     z_factor_func: typing.Callable[[FloatOrArray], FloatOrArray],
     viscosity_func: typing.Callable[[FloatOrArray], FloatOrArray],
     reference_pressure: float,
-    dtype: typing.Optional[np.typing.DTypeLike] = None,
-) -> np.typing.NDArray:
+    dtype: typing.Optional[npt.DTypeLike] = None,
+) -> npt.NDArray:
     """
     Build pseudo-pressure table values with automatic vectorization detection.
 
@@ -342,8 +343,8 @@ def build_pseudo_pressures(
 class PseudoPressureTable(
     StoreSerializable,
     fields={
-        "pressures": np.typing.NDArray,
-        "pseudo_pressures": np.typing.NDArray,
+        "pressures": npt.NDArray,
+        "pseudo_pressures": npt.NDArray,
         "reference_pressure": typing.Optional[float],
     },
 ):
@@ -379,8 +380,8 @@ class PseudoPressureTable(
     def __init__(
         self,
         *,
-        pressures: np.typing.NDArray,
-        pseudo_pressures: np.typing.NDArray,
+        pressures: npt.NDArray,
+        pseudo_pressures: npt.NDArray,
         reference_pressure: typing.Optional[float] = None,
     ) -> None: ...
 
@@ -394,8 +395,8 @@ class PseudoPressureTable(
         ] = None,
         pressure_range: typing.Optional[typing.Tuple[float, float]] = None,
         points: typing.Optional[int] = None,
-        pressures: typing.Optional[np.typing.NDArray] = None,
-        pseudo_pressures: typing.Optional[np.typing.NDArray] = None,
+        pressures: typing.Optional[npt.NDArray] = None,
+        pseudo_pressures: typing.Optional[npt.NDArray] = None,
         reference_pressure: typing.Optional[float] = None,
     ):
         """

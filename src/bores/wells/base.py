@@ -550,6 +550,7 @@ class InjectionWell(Well[Coordinates, InjectedFluid]):
             use_pseudo_pressure=use_pseudo_pressure,
             fluid_compressibility=fluid_compressibility,
             pvt_tables=pvt_tables,
+            **kwargs,
         )
 
 

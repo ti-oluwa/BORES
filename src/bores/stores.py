@@ -15,6 +15,8 @@ from pathlib import Path
 
 import h5py  # type: ignore[import-untyped]
 import numpy as np
+import numpy.typing as npt
+
 import orjson
 import yaml
 import zarr  # type: ignore[import-untyped]
@@ -457,7 +459,7 @@ def _is_none_sentinel(value: typing.Any) -> bool:
     return isinstance(value, str) and value == _NONE_SENTINEL
 
 
-def _sequence_to_ndarray(value: Sequence, path: str) -> np.typing.NDArray:
+def _sequence_to_ndarray(value: Sequence, path: str) -> npt.NDArray:
     """
     Convert a (possibly nested) sequence into a NumPy array
     that is safe for HDF5/Zarr storage.
@@ -649,7 +651,7 @@ _INTERNAL = {"_vtypes", "_meta", "_index", "_group_name", "count", "version"}
 def _flatten(
     data: typing.Mapping[str, typing.Any],
     prefix: typing.Tuple[str, ...] = (),
-    out_arrays: typing.Optional[typing.Dict[str, np.typing.NDArray]] = None,
+    out_arrays: typing.Optional[typing.Dict[str, npt.NDArray]] = None,
     out_scalars: typing.Optional[typing.Dict[str, typing.Any]] = None,
     out_vtypes: typing.Optional[typing.Dict[str, str]] = None,
 ) -> typing.Tuple[
@@ -737,7 +739,7 @@ def _flatten(
 
 
 def _unflatten(
-    arrays: typing.Dict[str, np.typing.NDArray],
+    arrays: typing.Dict[str, npt.NDArray],
     scalars: typing.Dict[str, typing.Any],
     vtypes: typing.Dict[str, str],
 ) -> typing.Dict[str, typing.Any]:
@@ -1771,7 +1773,7 @@ class JSONStore(DataStore[SerializableT, typing.List[typing.Any]]):
 
 
 def _ndarray_representer(
-    dumper: typing.Union[yaml.Dumper, yaml.SafeDumper], data: np.typing.NDArray
+    dumper: typing.Union[yaml.Dumper, yaml.SafeDumper], data: npt.NDArray
 ):
     if data.ndim > 2 or data.size > 50:
         return dumper.represent_mapping(
@@ -1802,8 +1804,8 @@ def _np_scalar_representer(
 
 
 def _ndarray_from_base64(
-    encoded: str, dtype: np.typing.DTypeLike, shape: typing.Tuple[int, ...]
-) -> np.typing.NDArray:
+    encoded: str, dtype: npt.DTypeLike, shape: typing.Tuple[int, ...]
+) -> npt.NDArray:
     raw = base64.b64decode(encoded)
     arr = np.frombuffer(raw, dtype=dtype)
     return arr.reshape(shape)

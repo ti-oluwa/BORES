@@ -4,6 +4,7 @@ import warnings
 import attrs
 import numba  # type: ignore[import-untyped]
 import numpy as np
+import numpy.typing as npt
 from typing_extensions import Self
 
 from bores._precision import get_dtype
@@ -134,7 +135,7 @@ layered_grid = build_layered_grid  # Alias for convenience
 @numba.njit(cache=True)
 def _compute_elevation_downward(
     thickness_grid: NDimensionalGrid[NDimension],
-    dtype: np.typing.DTypeLike,
+    dtype: npt.DTypeLike,
     datum: float = 0.0,
 ) -> NDimensionalGrid[NDimension]:
     """
@@ -163,7 +164,7 @@ def _compute_elevation_downward(
 @numba.njit(cache=True)
 def _compute_elevation_upward(
     thickness_grid: NDimensionalGrid[NDimension],
-    dtype: np.typing.DTypeLike,
+    dtype: npt.DTypeLike,
     datum: float = 0.0,
 ) -> NDimensionalGrid[NDimension]:
     """

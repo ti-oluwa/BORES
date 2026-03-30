@@ -7,6 +7,7 @@ from os import PathLike
 
 import attrs
 import numpy as np
+import numpy.typing as npt
 from scipy.interpolate import (  # type: ignore[import-untyped]
     RectBivariateSpline,
     RegularGridInterpolator,
@@ -425,7 +426,7 @@ class PVTTable(StoreSerializable):
         """
         Serialize this `PVTTable` to a dictionary.
 
-        :param recurse: Passed through to nested `StoreSerializable` objects.
+        :param recurse: Passed through to nested `Serializable` objects.
         :return: JSON-compatible dictionary representation.
         """
         return {
@@ -453,13 +454,15 @@ class PVTTable(StoreSerializable):
         :return: Fully initialised `PVTTable` instance.
         """
         pvt_data = PVTData.load(data["data"])
-        clamps = {k: tuple(v) for k, v in data.get("clamps", {}).items()} or None
+        clamps = data.get("clamps", None)
+        if isinstance(clamps, dict):
+            clamps = {k: tuple(v) for k, v in clamps.items()}
         return cls(
             data=pvt_data,
             interpolation_method=data.get("interpolation_method", "linear"),
             validate=data.get("validate", True),
             warn_on_extrapolation=data.get("warn_on_extrapolation", False),
-            clamps=clamps or None,
+            clamps=clamps,
         )
 
     def _validate_data(self, data: PVTData) -> None:
@@ -624,7 +627,7 @@ class PVTTable(StoreSerializable):
         salinities = data.salinities
         k = _INTERPOLATION_DEGREES[self.interpolation_method]
 
-        def _register_2d(name: str, table: typing.Optional[np.typing.NDArray]) -> None:
+        def _register_2d(name: str, table: typing.Optional[npt.NDArray]) -> None:
             """Register a 2D RectBivariateSpline interpolator."""
             if table is None:
                 return
@@ -632,7 +635,7 @@ class PVTTable(StoreSerializable):
                 x=pressures, y=temperatures, z=table, kx=k, ky=k
             )
 
-        def _register_3d(name: str, table: typing.Optional[np.typing.NDArray]) -> None:
+        def _register_3d(name: str, table: typing.Optional[npt.NDArray]) -> None:
             """Register a 3D RegularGridInterpolator."""
             if table is None or salinities is None:
                 return
@@ -744,7 +747,7 @@ class PVTTable(StoreSerializable):
 
     def _pt_interpolate(
         self, name: str, pressure: QueryType, temperature: QueryType
-    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
+    ) -> typing.Optional[typing.Union[float, npt.NDArray]]:
         """2D interpolation via `RectBivariateSpline.ev` with clamping."""
         interp = self._interpolators.get(name)
         if interp is None:
@@ -755,7 +758,7 @@ class PVTTable(StoreSerializable):
             temperature, (int, float)
         )
         if is_scalar:
-            result: typing.Union[float, np.typing.NDArray] = float(
+            result: typing.Union[float, npt.NDArray] = float(
                 interp.ev(pressure, temperature)
             )
         else:
@@ -792,7 +795,7 @@ class PVTTable(StoreSerializable):
         pressure: QueryType,
         temperature: QueryType,
         salinity: QueryType,
-    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
+    ) -> typing.Optional[typing.Union[float, npt.NDArray]]:
         """3D interpolation via `RegularGridInterpolator` with clamping."""
         interp = self._interpolators.get(name)
         if interp is None:
@@ -931,7 +934,7 @@ class PVTTable(StoreSerializable):
         pressure: QueryType,
         temperature: QueryType,
         salinity: typing.Optional[QueryType] = None,
-    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
+    ) -> typing.Optional[typing.Union[float, npt.NDArray]]:
         """
         Get fluid density ρ (lbm/ft³).
 
@@ -952,7 +955,7 @@ class PVTTable(StoreSerializable):
         temperature: QueryType,
         salinity: typing.Optional[QueryType] = None,
         solution_gor: typing.Optional[QueryType] = None,
-    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
+    ) -> typing.Optional[typing.Union[float, npt.NDArray]]:
         """
         Get formation volume factor B (bbl/STB for oil/water, ft³/SCF for gas).
 
@@ -1044,7 +1047,7 @@ class PVTTable(StoreSerializable):
         pressure: QueryType,
         temperature: QueryType,
         salinity: typing.Optional[QueryType] = None,
-    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
+    ) -> typing.Optional[typing.Union[float, npt.NDArray]]:
         """
         Get fluid compressibility c (psi⁻¹).
 
@@ -1067,7 +1070,7 @@ class PVTTable(StoreSerializable):
         pressure: QueryType,
         temperature: QueryType,
         salinity: typing.Optional[QueryType] = None,
-    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
+    ) -> typing.Optional[typing.Union[float, npt.NDArray]]:
         """
         Get fluid specific gravity γ (dimensionless, water = 1 for oil/water,
         air = 1 for gas).
@@ -1091,7 +1094,7 @@ class PVTTable(StoreSerializable):
         pressure: QueryType,
         temperature: QueryType,
         salinity: typing.Optional[QueryType] = None,
-    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
+    ) -> typing.Optional[typing.Union[float, npt.NDArray]]:
         """
         Get fluid molecular weight `M` (lbm/lb-mol).
 
@@ -1115,7 +1118,7 @@ class PVTTable(StoreSerializable):
         solution_gor: typing.Optional[QueryType] = None,
         pressure: typing.Optional[QueryType] = None,
         salinity: typing.Optional[QueryType] = None,
-    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
+    ) -> typing.Optional[typing.Union[float, npt.NDArray]]:
         """
         Get bubble point pressure Pb (psi).
 
@@ -1182,7 +1185,7 @@ class PVTTable(StoreSerializable):
         pressure: QueryType,
         temperature: QueryType,
         solution_gor: typing.Optional[QueryType] = None,
-    ) -> typing.Optional[typing.Union[bool, np.typing.NDArray]]:
+    ) -> typing.Optional[typing.Union[bool, npt.NDArray]]:
         """
         Determine whether conditions are saturated (P ≤ Pb).
 
@@ -1212,7 +1215,7 @@ class PVTTable(StoreSerializable):
         pressure: QueryType,
         temperature: QueryType,
         solution_gor: typing.Optional[QueryType] = None,
-    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
+    ) -> typing.Optional[typing.Union[float, npt.NDArray]]:
         """
         Get solution gas-oil ratio Rs (SCF/STB).
 
@@ -1265,7 +1268,7 @@ class PVTTable(StoreSerializable):
         self,
         pressure: QueryType,
         temperature: QueryType,
-    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
+    ) -> typing.Optional[typing.Union[float, npt.NDArray]]:
         """
         Get gas compressibility factor Z (dimensionless).
 
@@ -1284,7 +1287,7 @@ class PVTTable(StoreSerializable):
         pressure: QueryType,
         temperature: QueryType,
         salinity: typing.Optional[QueryType] = None,
-    ) -> typing.Optional[typing.Union[float, np.typing.NDArray]]:
+    ) -> typing.Optional[typing.Union[float, npt.NDArray]]:
         """
         Get gas solubility in water Rsw (SCF/STB).
 
@@ -1585,10 +1588,10 @@ def _resolve_gas(
 
 def _tables_from_gas_pvt_table(
     gas_pvt_table: PVTTable,
-    pressure_grid: np.typing.NDArray,
-    temperature_grid: np.typing.NDArray,
-    salinity_grid: typing.Optional[np.typing.NDArray] = None,
-) -> typing.Dict[str, typing.Optional[np.typing.NDArray]]:
+    pressure_grid: npt.NDArray,
+    temperature_grid: npt.NDArray,
+    salinity_grid: typing.Optional[npt.NDArray] = None,
+) -> typing.Dict[str, typing.Optional[npt.NDArray]]:
     """
     Evaluate a gas `PVTTable` on a (P,T) meshgrid and return the resulting
     2D arrays keyed by table name. Used when a `Fluid` with a `pvt_table` is
@@ -1598,7 +1601,7 @@ def _tables_from_gas_pvt_table(
     flat_temperature = temperature_grid.ravel()
     shape = pressure_grid.shape
 
-    def _eval(method_name: str) -> typing.Optional[np.typing.NDArray]:
+    def _eval(method_name: str) -> typing.Optional[npt.NDArray]:
         method = getattr(gas_pvt_table, method_name, None)
         if method is None:
             return None
@@ -1684,7 +1687,7 @@ def build_oil_pvt_data(
     )
 
     # Gas tables needed for oil Oil Compressibility anf FVF calculation
-    gas_fvf_grid: typing.Optional[np.typing.NDArray] = None
+    gas_fvf_grid: typing.Optional[npt.NDArray] = None
     if gas_pvt_table is not None:
         gas_tables = _tables_from_gas_pvt_table(
             gas_pvt_table, pressure_grid, temperature_grid
@@ -2148,7 +2151,7 @@ def build_water_pvt_data(
     )
 
     # Gas Bg (2D) for water compressibility liberation correction
-    gas_fvf_grid: np.typing.NDArray
+    gas_fvf_grid: npt.NDArray
     if gas_pvt_table is not None:
         gas_tables = _tables_from_gas_pvt_table(
             gas_pvt_table, pressure_grid, temperature_grid

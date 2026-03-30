@@ -1079,7 +1079,7 @@ def compute_gas_compressibility_factor(
     method: GasZFactorMethod = "dak",
 ) -> float:
     """
-    Computes gas compressibility factor with automatic correlation selection.
+    Computes (natural) gas compressibility factor.
 
     Method Selection Strategy:
     1. **High Pressure (Pr > 15)**: Use DAK (most accurate for Pr up to 30)
@@ -1357,9 +1357,9 @@ def compute_gas_to_oil_ratio(
     gor_at_bubble_point_pressure: typing.Optional[float] = None,
 ) -> float:
     """
-    Computes the gas-to-oil ratio (GOR) using the Vazquez-Beggs correlation.
+    Computes the solution gas-to-oil ratio (Solution-GOR) using the Vazquez-Beggs correlation.
 
-    GOR is the amount of gas dissolved in oil at a given pressure and temperature.
+    Solution GOR is the amount of gas dissolved in oil at a given pressure and temperature.
 
     Two regimes:
         - **Saturated region (P < Pb)**: GOR is pressure-dependent.
@@ -1408,13 +1408,11 @@ def compute_gas_to_oil_ratio(
         )
 
     # Compute GOR at bubble point
-    if gor_at_bubble_point_pressure is not None:
-        gor_at_bp = gor_at_bubble_point_pressure
-    else:
-        gor_at_bp = compute_gor_vasquez_beggs(bubble_point_pressure)
-
     if pressure >= bubble_point_pressure:
-        gor = gor_at_bp
+        if gor_at_bubble_point_pressure is not None:
+            gor = gor_at_bubble_point_pressure
+        else:
+            gor = compute_gor_vasquez_beggs(bubble_point_pressure)
     else:
         gor = compute_gor_vasquez_beggs(pressure)
     return np.maximum(0.0, gor)
@@ -1694,8 +1692,6 @@ def compute_gas_viscosity(
         - M_g is the gas molecular weight (lbm/lbmol)
         - ρ_g is gas density in g/cm³
         - T is temperature in Rankine
-
-    Internally computes the gas compressibility factor (Z) and real gas density.
 
     This correlation is valid for a wide range of temperatures and pressures,
     typically from 100 °F to 400 °F and pressures up to 10,000 psi.
@@ -2348,9 +2344,8 @@ def compute_gas_solubility_in_water(
         )
 
     molar_masses = {
-        "co2": c.MOLECULAR_WEIGHtemperature_in_celsiusO2
-        / 1000,  # Convert g/mol to kg/mol
-        "ch4": c.MOLECULAR_WEIGHtemperature_in_celsiusH4 / 1000,
+        "co2": c.MOLECULAR_WEIGHT_CO2 / 1000,  # Convert g/mol to kg/mol
+        "ch4": c.MOLECULAR_WEIGHT_CH4 / 1000,
         "n2": c.MOLECULAR_WEIGHT_N2 / 1000,
         "ar": c.MOLECULAR_WEIGHT_ARGON / 1000,
         "o2": c.MOLECULAR_WEIGHT_O2 / 1000,

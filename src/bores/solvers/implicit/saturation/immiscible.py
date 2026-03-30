@@ -2348,7 +2348,7 @@ def solve_implicit_saturation(
 
         if iteration == 0:
             initial_residual_norm = max(residual_norm, 1e-30)
-            logger.info(f"Newton iteration 0: ||R0|| = {initial_residual_norm:.4e}")
+            logger.debug(f"Newton iteration 0: ||R0|| = {initial_residual_norm:.4e}")
 
         relative_residual_norm = residual_norm / initial_residual_norm
 
@@ -2378,7 +2378,7 @@ def solve_implicit_saturation(
                 )
             )
             reason = "residual" if residual_converged else "saturation change"
-            logger.info(
+            logger.debug(
                 f"Newton converged at iteration {iteration} ({reason}): "
                 f"||R||/||R0|| = {relative_residual_norm:.2e}, "
                 f"max |∆S| = {last_max_ds:.2e}"
@@ -2423,8 +2423,13 @@ def solve_implicit_saturation(
             capillary_pressure_grids=capillary_pressure_grids,
             mobility_grids=mobility_grids,
         )
-        # condition_number = spla.norm(jacobian, ord=2) * spla.norm(jacobian.T, ord=2)
-        # logger.info(f"Jacobian condition number estimate: {condition_number:.3e}")
+        try:
+            condition_number = spla.norm(jacobian, ord=2) * spla.norm(jacobian.T, ord=2)
+            logger.debug(f"Jacobian condition number estimate: {condition_number:.3e}")
+        except Exception as exc:  # noqa
+            logger.debug(
+                f"Error occured when computing Jacobian condition number. {exc}"
+            )
 
         # Solve the linear system: J * dS = -R
         saturation_change, _ = solve_linear_system(
@@ -2535,7 +2540,7 @@ def solve_implicit_saturation(
             )
         )
 
-        logger.info(
+        logger.debug(
             f"Newton iteration {iteration}: "
             f"||R|| = {residual_norm:.2e}, "
             f"||R||/||R0|| = {relative_residual_norm:.2e}, "
@@ -2549,7 +2554,7 @@ def solve_implicit_saturation(
         if max_saturation_update < 1e-10:
             if relative_residual_norm < 1e-3:
                 converged = True
-                logger.info(
+                logger.debug(
                     f"Newton converged (saturation stagnation) at iteration {iteration}: "
                     f"max |∆S| = {max_saturation_update:.2e}, "
                     f"||R||/||R0|| = {relative_residual_norm:.2e}"
@@ -2573,7 +2578,7 @@ def solve_implicit_saturation(
         if stagnation_count >= stagnation_patience and iteration >= stagnation_patience:
             if relative_residual_norm < 1e-3:
                 converged = True
-                logger.info(
+                logger.debug(
                     f"Newton converged (residual plateau) at iteration {iteration}: "
                     f"||R||/||R0|| = {relative_residual_norm:.2e}, "
                     f"no improvement for {stagnation_count} iterations"
