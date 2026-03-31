@@ -41,6 +41,9 @@ from .utils import *
 from .visualization import *
 from .wells import *
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
 # Use custom ndarray serializer if `BORES_SAVE_RAW_NDARRAY != True`
 if os.getenv("BORES_SAVE_RAW_NDARRAY", "f").lower() not in (
     "t",

@@ -101,15 +101,15 @@ def evolve_saturation(
     :param rock_properties: `RockProperties` object containing rock physical properties.
     :param fluid_properties: `FluidProperties` object containing fluid physical properties,
         including current pressure and saturation grids.
-
-    :param wells: `Wells` object containing information about injection and production wells.
+    :param relative_mobility_grids: Tuple of relative mobility grids for (water, oil, gas)
+    :param capillary_pressure_grids: Tuple of capillary pressure grids for (oil-water, gas-oil)
     :param config: Simulation config and parameters.
-    :param injection_grid: Object supporting setitem to set cell injection rates for each phase in ft³/day.
-    :param production_grid: Object supporting setitem to set cell production rates for each phase in ft³/day.
+    :param well_indices_cache: Cache of well indices for efficient lookup during pressure solve.
+    :param injection_rates: Optional `PhaseTensorsProxy` of injection rates for each phase and cell.
+    :param production_rates: Optional `PhaseTensorsProxy` of production rates for each phase and cell.
+    :param pressure_change_grid: Pressure change grid (P_new - P_old) in psi for PVT volume correction.
     :param pad_width: Number of ghost cells used for grid padding. Well coordinates are offset by this amount.
-    :return: A tuple of 3-Dimensional numpy arrays representing the updated saturation distributions
-        for water, oil, and gas, respectively.
-        (updated_water_saturation_grid, updated_oil_saturation_grid, updated_gas_saturation_grid)
+    :return: `EvolutionResult` containing updated saturations.
     """
     time_step_in_days = time_step_size * c.DAYS_PER_SECOND
     absolute_permeability = rock_properties.absolute_permeability
@@ -889,6 +889,9 @@ def compute_well_rate_grids(
     :param cell_count_x: Number of cells in the x-direction.
     :param cell_count_y: Number of cells in the y-direction.
     :param cell_count_z: Number of cells in the z-direction.
+    :param well_indices_cache: Cache of well indices for efficient lookup during pressure solve.
+    :param injection_rates: Optional `PhaseTensorsProxy` of injection rates for each phase and cell.
+    :param production_rates: Optional `PhaseTensorsProxy` of production rates for each phase and cell.
     :param dtype: Numpy data type for computations.
     :return: (net_water_well_rate_grid, net_oil_well_rate_grid, net_gas_well_rate_grid) (ft³/day)
     """

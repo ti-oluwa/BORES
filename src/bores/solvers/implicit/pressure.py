@@ -88,6 +88,13 @@ def evolve_pressure(
     :param wells: `Wells` object containing well definitions and properties
     :param config: `Config` object containing simulation config
     :param boundary_conditions: Model boundary conditions.
+    :param well_indices_cache: Cache of well indices for efficient lookup during pressure solve.
+    :param injection_rates: Optional `PhaseTensorsProxy` of injection rates for each phase and cell.
+    :param production_rates: Optional `PhaseTensorsProxy` of production rates for each phase and cell.
+    :param injection_fvfs: Optional `PhaseTensorsProxy` of injection formation volume factors for each phase and cell.
+    :param production_fvfs: Optional `PhaseTensorsProxy` of production formation volume factors for each phase and cell.
+    :param injection_bhps: Optional `PhaseTensorsProxy` of injection bottom hole pressures for each phase and cell.
+    :param production_bhps: Optional `PhaseTensorsProxy` of production bottom hole pressures for each phase and cell.
     :param pad_width: Number of ghost cells used for grid padding. Well coordinates are offset by this amount.
     :return: `EvolutionResult` containing the new pressure grid and scheme used
     """

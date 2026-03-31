@@ -28,56 +28,52 @@ BORES is a 3D three-phase black-oil reservoir modelling and simulation framework
 
 ## Quick Example
 
-The following example sets up and runs a small 3D waterflood simulation from scratch. It defines a 10x10x3 grid, places one injector and one producer, and runs for 365 days using the default IMPES scheme.
+The following example sets up and runs a small 3D waterflood simulation from scratch. It defines a 10x10x3 grid, places one injector and one producer, and runs for 10 years using the default IMPES scheme.
 
 ```python
-import bores
-import logging
-import numpy as np
+import typing
 
-# Set log level
-logging.basicConfig(level=logging.INFO)
+import bores
 
 # Set precision (32-bit is the default)
 bores.use_32bit_precision()
 
-# Grid dimensions: 10x10x3 cells, each 100 ft x 100 ft, 20 ft thick
-grid_shape = (10, 10, 3)
-cell_dimension = (100.0, 100.0)
+# Grid dimensions: 10x10x3 cells, each 1000 ft x 1000 ft, 100 ft thick
+grid_shape = typing.cast(bores.ThreeDimensions, (10, 10, 3))
+cell_dimension = (1000.0, 1000.0)
 
 # Build property grids
-thickness = bores.build_uniform_grid(grid_shape, value=20.0)  # ft
+thickness = bores.build_uniform_grid(grid_shape, value=100.0)  # ft
 pressure = bores.build_uniform_grid(grid_shape, value=3000.0)  # psi
 porosity = bores.build_uniform_grid(grid_shape, value=0.20)  # fraction
 temperature = bores.build_uniform_grid(grid_shape, value=180.0)  # deg F
 oil_viscosity = bores.build_uniform_grid(grid_shape, value=1.5)  # cP
 bubble_point = bores.build_uniform_grid(grid_shape, value=2500.0)  # psi
+oil_specific_gravity = bores.build_uniform_grid(grid_shape, value=0.85)
 
 # Residual and irreducible saturations
-Sorw = bores.build_uniform_grid(grid_shape, value=0.20)
-Sorg = bores.build_uniform_grid(grid_shape, value=0.15)
-Sgr = bores.build_uniform_grid(grid_shape, value=0.05)
-Swir = bores.build_uniform_grid(grid_shape, value=0.20)
-Swc = bores.build_uniform_grid(grid_shape, value=0.20)
+residual_oil_saturation_water = bores.build_uniform_grid(grid_shape, value=0.12)
+residual_oil_saturation_gas = bores.build_uniform_grid(grid_shape, value=0.10)
+residual_gas_saturation = bores.build_uniform_grid(grid_shape, value=0.05)
+irreducible_water_saturation = bores.build_uniform_grid(grid_shape, value=0.06)
+connate_water_saturation = bores.build_uniform_grid(grid_shape, value=0.06)
 
 # Build depth grid and compute initial saturations from fluid contacts
 depth = bores.build_depth_grid(thickness, datum=5000.0)  # Top at 5000 ft
 Sw, So, Sg = bores.build_saturation_grids(
     depth_grid=depth,
-    gas_oil_contact=4999.0,  # Above reservoir (no gas cap)
-    oil_water_contact=5100.0,  # Below reservoir (all oil zone)
-    connate_water_saturation_grid=Swc,
-    residual_oil_saturation_water_grid=Sorw,
-    residual_oil_saturation_gas_grid=Sorg,
-    residual_gas_saturation_grid=Sgr,
+    gas_oil_contact=5050.0,  # Above reservoir (no gas cap)
+    oil_water_contact=5280.0,  # Below reservoir (all oil zone)
+    connate_water_saturation_grid=connate_water_saturation,
+    residual_oil_saturation_water_grid=residual_oil_saturation_water,
+    residual_oil_saturation_gas_grid=residual_oil_saturation_gas,
+    residual_gas_saturation_grid=residual_gas_saturation,
     porosity_grid=porosity,
 )
 
 # Isotropic permeability: 100 mD
 perm_grid = bores.build_uniform_grid(grid_shape, value=100.0)
-permeability = bores.RockPermeability(x=perm_grid, y=perm_grid, z=perm_grid)
-
-oil_sg_grid = bores.build_uniform_grid(grid_shape, value=0.85)
+permeability = bores.RockPermeability(x=perm_grid)
 
 # Build the reservoir model
 model = bores.reservoir_model(
@@ -94,23 +90,23 @@ model = bores.reservoir_model(
     oil_saturation_grid=So,
     oil_viscosity_grid=oil_viscosity,
     oil_bubble_point_pressure_grid=bubble_point,
-    residual_oil_saturation_water_grid=Sorw,
-    residual_oil_saturation_gas_grid=Sorg,
-    residual_gas_saturation_grid=Sgr,
-    irreducible_water_saturation_grid=Swir,
-    connate_water_saturation_grid=Swc,
-    oil_specific_gravity_grid=oil_sg_grid,
+    residual_oil_saturation_water_grid=residual_oil_saturation_water,
+    residual_oil_saturation_gas_grid=residual_oil_saturation_gas,
+    residual_gas_saturation_grid=residual_gas_saturation,
+    irreducible_water_saturation_grid=irreducible_water_saturation,
+    connate_water_saturation_grid=connate_water_saturation,
+    oil_specific_gravity_grid=oil_specific_gravity,
     datum_depth=5000.0,
 )
 
 # Define wells
 injector = bores.injection_well(
     well_name="INJ-1",
-    perforating_intervals=[((0, 0, 0), (0, 0, 0))],
+    perforating_intervals=[((0, 0, 2), (0, 0, 2))],
     radius=0.25,
-    control=bores.RateControl(
-        target_rate=500.0,
-        bhp_limit=5000.0,
+    control=bores.AdaptiveRateControl(
+        target_rate=3000,
+        bhp_limit=6000.0,
         clamp=bores.InjectionClamp(),
     ),
     injected_fluid=bores.InjectedFluid(
@@ -122,12 +118,12 @@ injector = bores.injection_well(
 )
 producer = bores.production_well(
     well_name="PROD-1",
-    perforating_intervals=[((9, 9, 2), (9, 9, 2))],
+    perforating_intervals=[((9, 9, 1), (9, 9, 1))],
     radius=0.25,
     control=bores.CoupledRateControl(
-        primary_phase=bores.FluidPhase.OIL,
+        primary_phase=bores.FluidPhase.OIL,  # Can be set to "oil" too
         primary_control=bores.AdaptiveRateControl(
-            target_rate=-500.0,
+            target_rate=-10000.0,
             target_phase="oil",
             bhp_limit=1000.0,
             clamp=bores.ProductionClamp(),
@@ -155,29 +151,38 @@ wells = bores.wells_(injectors=[injector], producers=[producer])
 rock_fluid_tables = bores.RockFluidTables(
     relative_permeability_table=bores.BrooksCoreyThreePhaseRelPermModel(
         water_exponent=2.0,
-        oil_exponent=2.0,
-        gas_exponent=2.0,
+        oil_exponent=1.0,
+        gas_exponent=1.0,
+        wettability=bores.Wettability.WATER_WET,
+        mixing_rule="eclipse_rule",
     ),
-    capillary_pressure_table=bores.BrooksCoreyCapillaryPressureModel(),
+    capillary_pressure_table=bores.BrooksCoreyCapillaryPressureModel(
+        wettability=bores.Wettability.WATER_WET,
+    ),
+)
+timer = bores.Timer(
+    initial_step_size=bores.Time(days=5),
+    max_step_size=bores.Time(months=3),
+    min_step_size=bores.Time(hours=1),
+    simulation_time=bores.Time(years=10),
+    max_rejects=20,
 )
 
 # Simulation configuration
 config = bores.Config(
-    timer=bores.Timer(
-        initial_step_size=bores.Time(days=1),
-        max_step_size=bores.Time(days=10),
-        min_step_size=bores.Time(hours=1),
-        simulation_time=bores.Time(days=365),
-    ),
+    timer=timer,
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
     scheme="impes",
+    pressure_solver="direct",
+    pressure_preconditioner=None,
+    maximum_pressure_change=1800,
 )
 
-# Run the simulation and collect states
-states = list(bores.run(model, config))
-final = states[-1]
-print(f"Completed {final.step} steps in {final.time_in_days:.1f} days")
+# Run and monitor the simulation and collect states
+states = list(bores.monitor(model, config))
+final = states[-1][0]
+print(f"Completed {final.step} steps in {final.time_in_days:.2f} days")
 print(
     f"Final avg pressure: {final.model.fluid_properties.pressure_grid.mean():.1f} psi"
 )

@@ -330,7 +330,6 @@ def _run_impes_step(
     Execute one time step using (semi-implicit) IMPES (Implicit Pressure, Explicit Saturation).
 
     :param time_step: Current time step index.
-    :param padded_zeros_grid: Padded grid of zeros for rate tracking.
     :param grid_shape: Original model grid shape (nx, ny, nz).
     :param cell_dimension: Tuple of cell dimensions (dx, dy).
     :param thickness_grid: Un-padded thickness grid.
@@ -347,7 +346,12 @@ def _run_impes_step(
     :param miscibility_model: Miscibility model used in the simulation.
     :param config: Simulation configuration.
     :param boundary_conditions: Model boundary conditions.
+    :param well_indices_cache: Cache of well indices for efficient lookup during pressure solve.
+    :param dtype: Data type used for numerical arrays.
     :param pad_width: Number of ghost cells used for grid padding.
+    :param min_valid_pressure: Minimum valid pressure (psi) for the simulation. Pressures below this will trigger a failure.
+    :param max_valid_pressure: Maximum valid pressure (psi) for the simulation. Pressures above this will trigger a failure.
+    :param saturation_epsilon: Small value to ensure saturations are strictly between 0 and 1 for numerical stability.
     :return: `StepResult` containing updated rates and fluid properties.
     """
     old_pressure_grid = padded_fluid_properties.pressure_grid.copy()
@@ -836,7 +840,6 @@ def _run_sequential_implicit_step(
     stability constraint on saturation transport, allowing larger timesteps.
 
     :param time_step: Current time step index.
-    :param padded_zeros_grid: Padded grid of zeros for rate tracking.
     :param grid_shape: Original model grid shape (nx, ny, nz).
     :param cell_dimension: Tuple of cell dimensions (dx, dy).
     :param thickness_grid: Un-padded thickness grid.
@@ -853,7 +856,12 @@ def _run_sequential_implicit_step(
     :param miscibility_model: Miscibility model used in the simulation.
     :param config: Simulation configuration.
     :param boundary_conditions: Model boundary conditions.
+    :param well_indices_cache: Cache of well indices for efficient lookup during pressure solve.
+    :param dtype: Data type used for numerical arrays.
     :param pad_width: Number of ghost cells used for grid padding.
+    :param min_valid_pressure: Minimum valid pressure (psi) for the simulation. Pressures below this will trigger a failure.
+    :param max_valid_pressure: Maximum valid pressure (psi) for the simulation. Pressures above this will trigger a failure.
+    :param saturation_epsilon: Small value to ensure saturations are strictly between 0 and 1 for numerical stability.
     :return: `StepResult` containing updated rates and fluid properties.
     """
     # Save old pressure grid before implicit solve (needed for PVT volume correction)
@@ -1252,7 +1260,12 @@ def _run_full_sequential_implicit_step(
     :param miscibility_model: Miscibility model used in the simulation.
     :param config: Simulation configuration.
     :param boundary_conditions: Model boundary conditions.
+    :param well_indices_cache: Cache of well indices for efficient lookup during pressure solve.
+    :param dtype: Data type used for numerical arrays.
     :param pad_width: Number of ghost cells used for grid padding.
+    :param min_valid_pressure: Minimum valid pressure (psi) for the simulation. Pressures below this will trigger a failure.
+    :param max_valid_pressure: Maximum valid pressure (psi) for the simulation. Pressures above this will trigger a failure.
+    :param saturation_epsilon: Small value to ensure saturations are strictly between 0 and 1 for numerical stability.
     :return: `StepResult` containing updated rates and fluid properties.
     """
     saturation_tolerance = config.saturation_outer_convergence_tolerance
@@ -1591,6 +1604,16 @@ def _run_full_sequential_implicit_step(
         # If Newton converged very easily, coupling is weak, stop iteration early.
         newton_iterations = saturation_solution.newton_iterations
         newton_utilization = newton_iterations / maximum_newton_iterations
+        final_timer_kwargs = {
+            "maximum_pressure_change": maximum_pressure_change,
+            "maximum_allowed_pressure_change": maximum_allowed_pressure_change,
+            "maximum_saturation_change": saturation_change_result.max_phase_saturation_change
+            or None,
+            "maximum_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change
+            or None,
+            "newton_iterations": newton_iterations,
+        }
+
         if newton_utilization < 0.25:  # used less than 25% of Newton budget
             logger.debug(
                 f"Newton converged in {newton_iterations} iterations (utilization {newton_utilization:.0%}), "
@@ -1682,16 +1705,6 @@ def _run_full_sequential_implicit_step(
             f"ΔP (relative): {relative_outer_pressure_change:.3e} "
             f"(rtol={pressure_tolerance:.3e})"
         )
-
-        final_timer_kwargs = {
-            "maximum_pressure_change": maximum_pressure_change,
-            "maximum_allowed_pressure_change": maximum_allowed_pressure_change,
-            "maximum_saturation_change": saturation_change_result.max_phase_saturation_change
-            or None,
-            "maximum_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change
-            or None,
-            "newton_iterations": newton_iterations,
-        }
 
         if (
             max_outer_saturation_change < saturation_tolerance
@@ -1814,7 +1827,6 @@ def _run_explicit_step(
     Execute one time step using fully explicit scheme (explicit pressure and saturation).
 
     :param time_step: Current time step index.
-    :param padded_zeros_grid: Padded grid of zeros for rate tracking.
     :param grid_shape: Original model grid shape (nx, ny, nz).
     :param cell_dimension: Tuple of cell dimensions (dx, dy).
     :param thickness_grid: Un-padded thickness grid.
@@ -1831,7 +1843,12 @@ def _run_explicit_step(
     :param miscibility_model: Miscibility model used in the simulation.
     :param config: Simulation configuration.
     :param boundary_conditions: Model boundary conditions.
+    :param well_indices_cache: Cache of well indices for efficient lookup during pressure solve.
+    :param dtype: Data type used for numerical arrays.
     :param pad_width: Number of ghost cells used for grid padding.
+    :param min_valid_pressure: Minimum valid pressure (psi) for the simulation. Pressures below this will trigger a failure.
+    :param max_valid_pressure: Maximum valid pressure (psi) for the simulation. Pressures above this will trigger a failure.
+    :param saturation_epsilon: Small value to ensure saturations are strictly between 0 and 1 for numerical stability.
     :return: `StepResult` containing updated rates and fluid properties.
     """
     old_pressure_grid = padded_fluid_properties.pressure_grid.copy()

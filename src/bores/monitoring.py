@@ -16,7 +16,8 @@ from rich.text import Text
 from tqdm import tqdm
 
 from bores.config import Config
-from bores.datastructures import Rates, SparseTensor
+from bores.constants import c
+from bores.datastructures import Rates, FormationVolumeFactors, SparseTensor
 from bores.models import ReservoirModel
 from bores.simulate import Run, StepCallback, StepResult, run
 from bores.states import ModelState
@@ -76,7 +77,7 @@ class MonitorConfig:
     show_wells: bool = True
     """
     Include a compact well performance section in the Rich panel showing
-    aggregate injection and production rates.
+    per-phase injection and production rates.
     """
 
     color_theme: str = "dark"
@@ -95,7 +96,7 @@ class StepDiagnostics:
 
     Only aggregates (mean, min, max) are stored.
     All pressure values are in psi; saturation values are dimensionless
-    fractions in [0, 1]; rates are reservoir-condition volumetric totals.
+    fractions in [0, 1]; rates are in surface conditions (STB/day or SCF/day).
     """
 
     step: int
@@ -167,11 +168,23 @@ class StepDiagnostics:
     Set to `-1.0` for fully implicit schemes where CFL is not tracked.
     """
 
-    total_injection_rate: float
-    """Sum of injection rates across all phases and all wells (reservoir volumes/time)."""
+    oil_injection_rate: float
+    """Oil injection rate in STB/day."""
 
-    total_production_rate: float
-    """Sum of production rates across all phases and all wells (reservoir volumes/time)."""
+    water_injection_rate: float
+    """Water injection rate in STB/day."""
+
+    gas_injection_rate: float
+    """Gas injection rate in SCF/day."""
+
+    oil_production_rate: float
+    """Oil production rate in STB/day."""
+
+    water_production_rate: float
+    """Water production rate in STB/day."""
+
+    gas_production_rate: float
+    """Gas production rate in SCF/day."""
 
     converged: bool = True
     """`True` if the step was accepted without any convergence fallback."""
@@ -187,7 +200,7 @@ class RunStats:
     the object is safe to inspect after the loop as well.
 
     Running totals (`_total_wall_time_ms`, `_total_newton_iterations`, `_newton_count`)
-    are maintained oil_saturation that derived properties (`average_step_wall_ms`,
+    are maintained so that derived properties (`average_step_wall_ms`,
     `average_newton_iterations`) compute in O(1) without iterating `steps`.
     """
 
@@ -273,6 +286,66 @@ class RunStats:
         idx = min(int(len(arr) * percentage / 100), len(arr) - 1)
         return arr[idx]
 
+    def summary_table(self) -> Table:
+        """
+        Return a Rich Table summarizing the simulation run.
+
+        Includes step counts, wall-time statistics, final physics state,
+        and Newton iteration averages when applicable.
+
+        :return: Rich Table with run summary.
+        """
+        if not self.steps:
+            table = Table(show_header=False, box=box.SIMPLE)
+            table.add_row("No steps recorded.")
+            return table
+
+        last = self.steps[-1]
+        wt = self.step_wall_times_ms
+
+        table = Table(
+            title="[bold]SIMULATION RUN SUMMARY[/bold]",
+            box=box.DOUBLE_EDGE,
+            show_header=True,
+            header_style="bold cyan",
+            title_style="bold white on blue",
+            expand=False,
+        )
+
+        table.add_column("Metric", style="cyan", no_wrap=True)
+        table.add_column("Value", style="white", justify="right")
+
+        # Step counts
+        table.add_row("Accepted steps", f"{self.accepted_steps:,}")
+        table.add_row("Rejected steps", f"{self.rejected_steps:,}")
+
+        # Wall time statistics
+        table.add_section()
+        table.add_row("Total wall time", f"{self.total_wall_time:.3f} s")
+        table.add_row("Avg step time", f"{self.average_step_wall_ms:.3f} ms")
+        table.add_row("p50 step time", f"{self.get_percentile_wall_time_ms(50):.3f} ms")
+        table.add_row("p95 step time", f"{self.get_percentile_wall_time_ms(95):.3f} ms")
+        table.add_row("Max step time", f"{max(wt):.3f} ms")
+
+        # Simulation state
+        table.add_section()
+        table.add_row("Simulation time", f"{last.elapsed_time:.4f} s")
+        table.add_row("Final avg pressure", f"{last.average_pressure:.2f} psi")
+        table.add_row(
+            "Final Sw / So / Sg",
+            f"{last.average_water_saturation:.4f} / "
+            f"{last.average_oil_saturation:.4f} / "
+            f"{last.average_gas_saturation:.4f}",
+        )
+
+        # Newton iterations (if applicable)
+        if self._newton_count:
+            table.add_section()
+            table.add_row(
+                "Avg Newton iterations", f"{self.average_newton_iterations:.2f}"
+            )
+        return table
+
     def summary(self) -> str:
         """
         Return a plain-text end-of-run summary suitable for logging.
@@ -312,6 +385,39 @@ class RunStats:
         return "\n".join(lines)
 
 
+def _convert_to_total_surface_rate(
+    rates: Rates[float, ThreeDimensions],
+    fvfs: FormationVolumeFactors[float, ThreeDimensions],
+    phase: str,
+) -> float:
+    """
+    Convert reservoir-condition volumetric rate to surface-condition rate.
+
+    :param rates: Rates object containing sparse tensors for each phase.
+    :param fvfs: Formation volume factors object containing sparse tensors for each phase.
+    :param phase: Phase name ('oil', 'water', or 'gas').
+    :return: Surface-condition rate in STB/day (oil, water) or SCF/day (gas).
+    """
+    rate_tensor: typing.Optional[SparseTensor] = getattr(rates, phase, None)
+    fvf_tensor: typing.Optional[SparseTensor] = getattr(fvfs, phase, None)
+    if rate_tensor is None or fvf_tensor is None:
+        return 0.0
+
+    total_surface_rate = 0.0
+    ft3_to_bbl = c.CUBIC_FEET_TO_BARRELS
+    for key in rate_tensor:
+        reservoir_rate = abs(float(rate_tensor[key]))
+        fvf = float(fvf_tensor[key])
+        if fvf > 0:
+            if phase in ("oil", "water"):
+                reservoir_rate *= ft3_to_bbl
+            
+            surface_rate = reservoir_rate / fvf
+            total_surface_rate += surface_rate
+
+    return total_surface_rate
+
+
 def _build_step_diagnostics(
     state: ModelState[ThreeDimensions],
     wall_time_ms: float,
@@ -321,8 +427,7 @@ def _build_step_diagnostics(
     Build a `StepDiagnostics` instance from a `ModelState`.
 
     No per-cell arrays are retained; only grid-level aggregates are kept.
-    Rates are obtained by summing the absolute values of all non-zero
-    entries in the sparse phase-rate tensors.
+    Rates are converted from reservoir conditions to surface conditions using FVFs.
 
     :param state: Model state snapshot yielded by the simulation generator.
     :param wall_time_ms: Wall-clock time consumed by this step (ms).
@@ -337,14 +442,38 @@ def _build_step_diagnostics(
     oil_saturation = fluid_properties.oil_saturation_grid
     gas_saturation = fluid_properties.gas_saturation_grid
 
-    def _total_rate(rates: Rates[float, ThreeDimensions]) -> float:
-        total = 0.0
-        for phase in ("oil", "water", "gas"):
-            t: typing.Optional[SparseTensor] = getattr(rates, phase, None)
-            if t is not None:
-                arr = t.array()
-                total += float(np.sum(np.abs(arr)))
-        return total
+    # Convert rates to surface conditions using FVFs
+    oil_injection_rate = _convert_to_total_surface_rate(
+        rates=state.injection_rates,
+        fvfs=state.injection_formation_volume_factors,
+        phase="oil",
+    )
+    water_injection_rate = _convert_to_total_surface_rate(
+        rates=state.injection_rates,
+        fvfs=state.injection_formation_volume_factors,
+        phase="water",
+    )
+    gas_injection_rate = _convert_to_total_surface_rate(
+        rates=state.injection_rates,
+        fvfs=state.injection_formation_volume_factors,
+        phase="gas",
+    )
+
+    oil_production_rate = _convert_to_total_surface_rate(
+        rates=state.production_rates,
+        fvfs=state.production_formation_volume_factors,
+        phase="oil",
+    )
+    water_production_rate = _convert_to_total_surface_rate(
+        rates=state.production_rates,
+        fvfs=state.production_formation_volume_factors,
+        phase="water",
+    )
+    gas_production_rate = _convert_to_total_surface_rate(
+        rates=state.production_rates,
+        fvfs=state.production_formation_volume_factors,
+        phase="gas",
+    )
 
     return StepDiagnostics(
         step=state.step,
@@ -371,8 +500,12 @@ def _build_step_diagnostics(
         ),
         newton_iterations=int(timer_kwargs.get("newton_iterations", -1) or -1),
         maximum_cfl=float(timer_kwargs.get("maximum_cfl_encountered", -1.0) or -1.0),
-        total_injection_rate=_total_rate(state.injection_rates),
-        total_production_rate=_total_rate(state.production_rates),
+        oil_injection_rate=oil_injection_rate,
+        water_injection_rate=water_injection_rate,
+        gas_injection_rate=gas_injection_rate,
+        oil_production_rate=oil_production_rate,
+        water_production_rate=water_production_rate,
+        gas_production_rate=gas_production_rate,
         converged=True,
     )
 
@@ -407,15 +540,15 @@ def _build_rich_panel(
     """
     Build the Rich renderable for the live monitor panel.
 
-    Constructs a `Panel` containing a progress bar, time/step row,
+    Constructs a `Panel` containing a progress bar, time/step info table,
     physics table (pressure and saturation aggregates), solver diagnostics
-    line, performance line, and optional well summary.
+    table, performance table, and optional well summary.
 
     :param diagnostics: Diagnostic snapshot for the most recently accepted step.
     :param stats: Accumulated run statistics used for performance metrics.
     :param total_simulation_time: Total simulation time (s), used to compute progress %.
     :param extended: Whether to include p95 wall time and avg Newton count
-        in the performance line (shown every `extended_every` steps).
+        in the performance metrics.
     :param show_wells: Whether to append the well rate summary table.
     :param theme: `"dark"` or `"light"`. Controls Rich color styles.
     :return: A `rich.panel.Panel` ready to pass to `Live.update()`.
@@ -451,104 +584,131 @@ def _build_rich_panel(
         (f"  {percentage:.1f}%", good if percentage >= 99.9 else val),
     )
 
-    # Time / step row
-    time_row = Text.assemble(
-        ("Step ", dim),
-        (f"{diagnostics.step:>6}", hdr),
-        ("  |  Elapsed Simulation Time ", dim),
-        (_format_time(diagnostics.elapsed_time), val),
-        ("  |  Current Step Size (Δt) ", dim),
-        (_format_time(diagnostics.step_size), val),
-        ("  |  Step Wall Time ", dim),
-        (f"{diagnostics.wall_time_ms:.3f} ms", val),
+    # Time & Step Info Table
+    time_info_table = Table(
+        box=box.SIMPLE,
+        show_header=False,
+        expand=True,
+        border_style=dim,
+        padding=(0, 0),
     )
+    time_info_table.add_column("Label", style=dim, no_wrap=True)
+    time_info_table.add_column("Value", style=val, no_wrap=True, justify="right")
+
+    time_info_table.add_row("Step", f"{diagnostics.step:,}")
+    time_info_table.add_row(
+        "Elapsed Simulation Time", _format_time(diagnostics.elapsed_time)
+    )
+    time_info_table.add_row(
+        "Current Step Size (Δt)", _format_time(diagnostics.step_size)
+    )
+    time_info_table.add_row("Step Wall Time", f"{diagnostics.wall_time_ms:.3f} ms")
 
     # Physics table
-    table = Table(
+    physics_table = Table(
         box=box.SIMPLE,
         show_header=True,
         expand=True,
         header_style=hdr,
         border_style=dim,
     )
-    table.add_column("Quantity", style=dim, no_wrap=True, min_width=16)
-    table.add_column("Average", style=val, no_wrap=True, min_width=12)
-    table.add_column("Min.", style=dim, no_wrap=True, min_width=12)
-    table.add_column("Max.", style=warn, no_wrap=True, min_width=12)
+    physics_table.add_column("Quantity", style=dim, no_wrap=True, min_width=16)
+    physics_table.add_column("Average", style=val, no_wrap=True, min_width=12)
+    physics_table.add_column("Min.", style=dim, no_wrap=True, min_width=12)
+    physics_table.add_column("Max.", style=warn, no_wrap=True, min_width=12)
 
-    table.add_row(
+    physics_table.add_row(
         "Pressure (psi)",
         f"{diagnostics.average_pressure:,.2f}",
         f"{diagnostics.minimum_pressure:,.2f}",
         f"{diagnostics.maximum_pressure:,.2f}",
     )
-    table.add_row(
+    physics_table.add_row(
         "Water Saturation (Sw)",
         f"{diagnostics.average_water_saturation:.5f}",
         f"{diagnostics.minimum_water_saturation:.5f}",
         f"{diagnostics.maximum_water_saturation:.5f}",
     )
-    table.add_row(
+    physics_table.add_row(
         "Oil Saturation (So)",
         f"{diagnostics.average_oil_saturation:.5f}",
         f"{diagnostics.minimum_oil_saturation:.5f}",
         f"{diagnostics.maximum_oil_saturation:.5f}",
     )
-    table.add_row(
+    physics_table.add_row(
         "Gas Saturation (Sg)",
         f"{diagnostics.average_gas_saturation:.5f}",
         f"{diagnostics.minimum_gas_saturation:.5f}",
         f"{diagnostics.maximum_gas_saturation:.5f}",
     )
 
-    # Solver line
-    solver_parts: typing.List[typing.Any] = []
+    # Solver Diagnostics Table
+    solver_table = Table(
+        box=box.SIMPLE,
+        show_header=False,
+        expand=True,
+        border_style=dim,
+        padding=(0, 0),
+    )
+    solver_table.add_column("Metric", style=dim, no_wrap=True)
+    solver_table.add_column("Value", style=val, no_wrap=True, justify="right")
+
     if diagnostics.newton_iterations >= 0:
         ni_style = good if diagnostics.newton_iterations <= 5 else warn
-        solver_parts += [
-            ("Newton Iterations ", dim),
-            (str(diagnostics.newton_iterations), ni_style),
-            ("  ", ""),
-        ]
+        solver_table.add_row(
+            "Newton Iterations",
+            f"[{ni_style}]{diagnostics.newton_iterations}[/{ni_style}]",
+        )
+    else:
+        solver_table.add_row("Newton Iterations", "[dim]N/A[/dim]")
+
     if diagnostics.maximum_cfl >= 0:
         cfl_style = good if diagnostics.maximum_cfl <= 0.7 else warn
-        solver_parts += [
-            ("Maximum CFL ", dim),
-            (f"{diagnostics.maximum_cfl:.4f}", cfl_style),
-            ("  ", ""),
-        ]
-    solver_parts += [
-        ("Pressure Change (ΔP) ", dim),
-        (f"{diagnostics.maximum_pressure_change:,.2f} psi", val),
-        ("  ", ""),
-        ("Saturation Change (ΔS) ", dim),
-        (f"{diagnostics.maximum_saturation_change:.2e}", val),
-    ]
+        solver_table.add_row(
+            "Maximum CFL", f"[{cfl_style}]{diagnostics.maximum_cfl:.4f}[/{cfl_style}]"
+        )
+    else:
+        solver_table.add_row("Maximum CFL", "[dim]N/A[/dim]")
 
-    # Performance line
-    performance_parts: typing.List[typing.Any] = [
-        ("Avg. Time Per Step ", dim),
-        (f"{stats.average_step_wall_ms:.2f} ms", val),
-        ("  |  Total Run Time ", dim),
-        (f"{stats.total_wall_time:.4f} s", val),
-        ("  |  Accepted ", dim),
-        (str(stats.accepted_steps), good),
-        ("  Rejected ", dim),
-        (
-            str(stats.rejected_steps),
-            warn if stats.rejected_steps else dim,
-        ),
-    ]
+    solver_table.add_row(
+        "Pressure Change (ΔP)", f"{diagnostics.maximum_pressure_change:,.2f} psi"
+    )
+    solver_table.add_row(
+        "Saturation Change (ΔS)", f"{diagnostics.maximum_saturation_change:.2e}"
+    )
+
+    # Performance Metrics Table
+    performance_table = Table(
+        box=box.SIMPLE,
+        show_header=False,
+        expand=True,
+        border_style=dim,
+        padding=(0, 0),
+    )
+    performance_table.add_column("Metric", style=dim, no_wrap=True)
+    performance_table.add_column("Value", style=val, no_wrap=True, justify="right")
+
+    performance_table.add_row(
+        "Avg. Time Per Step", f"{stats.average_step_wall_ms:.2f} ms"
+    )
+    performance_table.add_row("Total Run Time", f"{stats.total_wall_time:.4f} s")
+    performance_table.add_row(
+        "Accepted Steps", f"[{good}]{stats.accepted_steps}[/{good}]"
+    )
+
+    reject_style = warn if stats.rejected_steps else dim
+    performance_table.add_row(
+        "Rejected Steps", f"[{reject_style}]{stats.rejected_steps}[/{reject_style}]"
+    )
+
     if extended and stats.accepted_steps >= 2:
-        performance_parts += [
-            ("  |  p95 ", dim),
-            (f"{stats.get_percentile_wall_time_ms(95):.3f} ms", val),
-        ]
+        performance_table.add_row(
+            "p95 Step Time", f"{stats.get_percentile_wall_time_ms(95):.3f} ms"
+        )
         if stats._newton_count:
-            performance_parts += [
-                ("  |  Avg. Newton Iterations ", dim),
-                (f"{stats.average_newton_iterations:.2f}", val),
-            ]
+            performance_table.add_row(
+                "Avg. Newton Iterations", f"{stats.average_newton_iterations:.2f}"
+            )
 
     # Wells table
     well_section: typing.Optional[Table] = None
@@ -560,27 +720,53 @@ def _build_rich_panel(
             header_style=hdr,
             border_style=dim,
         )
-        well_section.add_column("Well", style=dim, no_wrap=True)
-        well_section.add_column("Injection rate", style=val, no_wrap=True)
-        well_section.add_column("Production rate", style=val, no_wrap=True)
-        well_section.add_row(
-            "ALL (aggregate)",
-            f"{diagnostics.total_injection_rate:.3e}",
-            f"{diagnostics.total_production_rate:.3e}",
+        well_section.add_column("Phase", style=dim, no_wrap=True)
+        well_section.add_column(
+            "Injection Rate", style=good, no_wrap=True, justify="right"
+        )
+        well_section.add_column(
+            "Production Rate", style=warn, no_wrap=True, justify="right"
         )
 
-    # Assemble
+        well_section.add_row(
+            "Oil",
+            f"{diagnostics.oil_injection_rate:.6f} STB/day",
+            f"{diagnostics.oil_production_rate:.6f} STB/day",
+        )
+        well_section.add_row(
+            "Water",
+            f"{diagnostics.water_injection_rate:.6f} STB/day",
+            f"{diagnostics.water_production_rate:.6f} STB/day",
+        )
+        well_section.add_row(
+            "Gas",
+            f"{diagnostics.gas_injection_rate:.6f} SCF/day",
+            f"{diagnostics.gas_production_rate:.6f} SCF/day",
+        )
+
+    # Assemble sections with headers
     renderables: typing.List[typing.Any] = [
         progress_line,
         Text(""),
-        time_row,
+        Text("Time & Step", style=hdr),
+        time_info_table,
         Text(""),
-        table,
-        Text.assemble(("Solver - ", dim), *solver_parts),
-        Text.assemble(("Performance  -  ", dim), *performance_parts),
+        Text("Reservoir Physics", style=hdr),
+        physics_table,
+        Text(""),
+        Text("Solver Diagnostics", style=hdr),
+        solver_table,
+        Text(""),
+        Text("Performance", style=hdr),
+        performance_table,
     ]
+
     if well_section is not None:
-        renderables += [Text(""), well_section]
+        renderables += [
+            Text(""),
+            Text("Well Rates", style=hdr),
+            well_section,
+        ]
 
     return Panel(
         Group(*renderables),
@@ -588,7 +774,9 @@ def _build_rich_panel(
         title_align="left",
         style=title_style,
         border_style=hdr,
-        padding=(2, 4),
+        padding=(1, 2),
+        highlight=True,
+        expand=False
     )
 
 
@@ -610,11 +798,11 @@ def monitor(
     Yields `(ModelState, RunStats)` pairs at the same cadence as
     `bores.run` (i.e. every `output_frequency` accepted steps).
     `RunStats` is the same object throughout the run and accumulates
-    data in-place, oil_saturation it remains valid for inspection after the loop.
+    data in-place, so it remains valid for inspection after the loop.
 
     The Rich live panel and/or tqdm bar run concurrently with the simulation
     loop and are torn down cleanly on both normal completion and exceptions.
-    A plain-text summary is always emitted to the logger at INFO level when
+    A summary table is always emitted to the logger at INFO level when
     the generator is exhausted or closed.
 
     :param input: A `ReservoirModel`, `Run`, or an iterable that yields `ModelState`s - identical to
@@ -640,7 +828,7 @@ def monitor(
 
     if not monitor.use_rich and not monitor.use_tqdm:
         logger.warning(
-            "Monitor config has both `use_rich` and `use_tqdm` set to False; no live display will be shown."
+            "Monitor config has both `use_rich` and `use_tqdm` set to False; no live progress display will be shown."
         )
 
     is_generic_input = not isinstance(input, (ReservoirModel, Run))
@@ -819,4 +1007,9 @@ def monitor(
             tqdm_bar.update(100.0 - last_percentage)  # Ensure that bar reaches 100 %
             tqdm_bar.close()
 
-        logger.info(stats.summary())
+        # Print the summary table
+        if _rich_console is not None:
+            _rich_console.print()
+            _rich_console.print(stats.summary_table())
+        else:
+            logger.info(stats.summary())

@@ -111,19 +111,21 @@ def evolve_saturation(
     1. Free gas phase (tracked by `gas_saturation`)
     2. Dissolved in oil (tracked by `solvent_concentration` in oil)
 
-    :param cell_dimension: Tuple of (cell_size_x, cell_size_y) in feet.
-    :param thickness_grid: 3D grid of cell thicknesses (ft).
-    :param elevation_grid: 3D grid of cell elevations (ft).
-    :param time_step: Current time step index.
-    :param time_step_size: Size of the time step (seconds).
-    :param rock_properties: Rock properties object with absolute permeability and porosity.
-    :param fluid_properties: Fluid properties object with necessary property grids.
-    :param relative_mobility_grids: `RelativeMobilityGrids` object with relative mobility grids.
-    :param capillary_pressure_grids: `CapillaryPressureGrids` object with capillary pressure grids.
-    :param wells: `Wells` object with injection and production wells.
-    :param config: Simulation config.
-    :param injection_grid: Optional 3D grid to record injection rates (water, oil, gas).
-    :param production_grid: Optional 3D grid to record production rates (water, oil, gas).
+    :param cell_dimension: Tuple representing the dimensions of each grid cell (cell_size_x, cell_size_y) in feet (ft).
+    :param thickness_grid: N-Dimensional numpy array representing the height of each cell in the grid (ft).
+    :param elevation_grid: N-Dimensional numpy array representing the elevation of each cell in the grid (ft).
+    :param time_step: Current time step index (starting from 0).
+    :param time_step_size: Time step duration in seconds for the simulation.
+    :param rock_properties: `RockProperties` object containing rock physical properties.
+    :param fluid_properties: `FluidProperties` object containing fluid physical properties,
+        including current pressure and saturation grids.
+    :param relative_mobility_grids: Tuple of relative mobility grids for (water, oil, gas)
+    :param capillary_pressure_grids: Tuple of capillary pressure grids for (oil-water, gas-oil)
+    :param config: Simulation config and parameters.
+    :param well_indices_cache: Cache of well indices for efficient lookup during pressure solve.
+    :param injection_rates: Optional `PhaseTensorsProxy` of injection rates for each phase and cell.
+    :param production_rates: Optional `PhaseTensorsProxy` of production rates for each phase and cell.
+    :param pressure_change_grid: Pressure change grid (P_new - P_old) in psi for PVT volume correction.
     :param pad_width: Number of ghost cells used for grid padding. Well coordinates are offset by this amount.
     :return: `EvolutionResult` containing updated saturations and solvent concentration
     """

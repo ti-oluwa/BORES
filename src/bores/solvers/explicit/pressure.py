@@ -70,6 +70,7 @@ def evolve_pressure(
     :param elevation_grid: N-Dimensional numpy array representing the elevation of each cell in the reservoir (ft).
     :param time_step: Current time step number (starting from 0).
     :param time_step_size: Time step size (s) for each iteration.
+    :param time: Total simulation time elapsed. This time step inclusive.
     :param rock_properties: `RockProperties` object containing rock physical properties including
         absolute permeability, porosity, residual saturations.
     :param fluid_properties: `FluidProperties` object containing fluid physical properties like
@@ -77,6 +78,13 @@ def evolve_pressure(
         water, oil, and gas.
     :param wells: `Wells` object containing well parameters for injection and production wells
     :param config: Simulation config.
+    :param well_indices_cache: Cache of well indices for efficient lookup during pressure solve.
+    :param injection_rates: Optional `PhaseTensorsProxy` of injection rates for each phase and cell.
+    :param production_rates: Optional `PhaseTensorsProxy` of production rates for each phase and cell.
+    :param injection_fvfs: Optional `PhaseTensorsProxy` of injection formation volume factors for each phase and cell.
+    :param production_fvfs: Optional `PhaseTensorsProxy` of production formation volume factors for each phase and cell.
+    :param injection_bhps: Optional `PhaseTensorsProxy` of injection bottom hole pressures for each phase and cell.
+    :param production_bhps: Optional `PhaseTensorsProxy` of production bottom hole pressures for each phase and cell.
     :param pad_width: Number of ghost cells used for grid padding. Well coordinates are offset by this amount.
     :return: A N-Dimensional numpy array representing the updated oil phase pressure field (psi).
     """
@@ -741,11 +749,6 @@ def compute_well_rate_grid(
     """
     Compute well rates for all cells (injection + production).
 
-    This function computes the net well flow rate for each cell by evaluating injection
-    and production well contributions. It handles phase-specific calculations, pseudo-pressure
-    for gas wells, and backflow warnings. This function is NOT jitted because it requires
-    method calls on well and fluid objects.
-
     :param cell_count_x: Number of cells in x-direction (including boundaries)
     :param cell_count_y: Number of cells in y-direction (including boundaries)
     :param cell_count_z: Number of cells in z-direction (including boundaries)
@@ -760,13 +763,16 @@ def compute_well_rate_grid(
     :param oil_compressibility_grid: Oil compressibility grid (1/psi)
     :param gas_compressibility_grid: Gas compressibility grid (1/psi)
     :param fluid_properties: Fluid properties container
-    :param thickness_grid: Cell thickness grid (ft)
-    :param cell_size_x: Cell size in x-direction (ft)
-    :param cell_size_y: Cell size in y-direction (ft)
-    :param time_step: Current time step number
-    :param time_step_size: Time step size (seconds)
+    :param time: Total simulation time elapsed. This time step inclusive.
     :param config: Simulation config
     :param dtype: NumPy dtype for array allocation (np.float32 or np.float64)
+    :param well_indices_cache: Cache of well indices for efficient lookup during pressure solve.
+    :param injection_rates: Optional `PhaseTensorsProxy` of injection rates for each phase and cell.
+    :param production_rates: Optional `PhaseTensorsProxy` of production rates for each phase and cell.
+    :param injection_fvfs: Optional `PhaseTensorsProxy` of injection formation volume factors for each phase and cell.
+    :param production_fvfs: Optional `PhaseTensorsProxy` of production formation volume factors for each phase and cell.
+    :param injection_bhps: Optional `PhaseTensorsProxy` of injection bottom hole pressures for each phase and cell.
+    :param production_bhps: Optional `PhaseTensorsProxy` of production bottom hole pressures for each phase and cell.
     :param pad_width: Number of ghost cells used for grid padding. Well coordinates are offset by this amount.
     :return: 3D grid of net well flow rates (ft³/day), positive = injection, negative = production
     """

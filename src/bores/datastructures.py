@@ -592,6 +592,15 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         """
         return len(self._data)
 
+    @property
+    def empty(self) -> bool:
+        """
+        Whether this tensor has no explicitly stored entries.
+
+        :returns: True if no entries are stored, False otherwise.
+        """
+        return len(self._data) == 0
+
     def copy(self) -> Self:
         """
         Return a shallow copy of this `SparseTensor`.

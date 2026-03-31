@@ -988,20 +988,37 @@ class ModelAnalyst(typing.Generic[NDimension]):
         free_gas_produced = self.cumulative_gas_produced  # scf (free gas only)
 
         solution_gas_produced = 0.0
+        dissolved_gas_produced = 0.0
+        days_per_second = c.DAYS_PER_SECOND
+        ft3_to_bbl = c.CUBIC_FEET_TO_BARRELS
         for s in self._sorted_steps:
             st = self._states[s]
             solution_gor_grid = st.model.fluid_properties.solution_gas_to_oil_ratio_grid
+            gas_solubility_in_water_grid = (
+                st.model.fluid_properties.gas_solubility_in_water_grid
+            )
             oil_production = st.production_rates.oil
+            water_production = st.production_rates.water
 
-            step_in_days = st.step_size * c.DAYS_PER_SECOND
+            step_in_days = st.step_size * days_per_second
             oil_fvf_grid = st.model.fluid_properties.oil_formation_volume_factor_grid
-            oil_production_stb = oil_production * c.CUBIC_FEET_TO_BARRELS / oil_fvf_grid
+            water_fvf_grid = (
+                st.model.fluid_properties.water_formation_volume_factor_grid
+            )
+            oil_production_stb = oil_production * ft3_to_bbl / oil_fvf_grid
+            water_production_stb = water_production * ft3_to_bbl / water_fvf_grid
             solution_gas_produced += float(
                 np.nansum(solution_gor_grid * oil_production_stb) * step_in_days
             )
+            dissolved_gas_produced += float(
+                np.nansum(gas_solubility_in_water_grid * water_production_stb)
+                * step_in_days
+            )
 
         # Total gas produced
-        total_gas_produced = free_gas_produced + solution_gas_produced
+        total_gas_produced = (
+            free_gas_produced + solution_gas_produced + dissolved_gas_produced
+        )
         return float(total_gas_produced / stgiip)
 
     def compute_cell_area(self, x_dim: float, y_dim: float) -> float:

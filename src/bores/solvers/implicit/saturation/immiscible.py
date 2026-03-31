@@ -2202,50 +2202,62 @@ def assemble_jacobian(
     )
 
 
-def solve_implicit_saturation(
+def evolve_saturation(
     grid_shape: ThreeDimensions,
     cell_dimension: typing.Tuple[float, float],
-    oil_pressure_grid: ThreeDimensionalGrid,
-    pressure_change_grid: ThreeDimensionalGrid,
-    old_water_saturation_grid: ThreeDimensionalGrid,
-    old_oil_saturation_grid: ThreeDimensionalGrid,
-    old_gas_saturation_grid: ThreeDimensionalGrid,
-    cell_count_x: int,
-    cell_count_y: int,
-    cell_count_z: int,
     thickness_grid: ThreeDimensionalGrid,
     elevation_grid: ThreeDimensionalGrid,
-    porosity_grid: ThreeDimensionalGrid,
     time_step_size: float,
     time: float,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
     config: Config,
     well_indices_cache: WellIndicesCache,
-    injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
-    production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
+    pressure_change_grid: ThreeDimensionalGrid,
     injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
     production_rates: PhaseTensorsProxy[float, ThreeDimensions],
-    water_compressibility_grid: ThreeDimensionalGrid,
-    gas_compressibility_grid: ThreeDimensionalGrid,
-    rock_compressibility: float,
+    injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
+    production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
     boundary_conditions: BoundaryConditions[ThreeDimensions],
     pad_width: int = 1,
-    maximum_newton_iterations: int = 12,
-    newton_tolerance: float = 1e-6,
-    maximum_line_search_cuts: int = 4,
-    maximum_saturation_change: float = 0.05,
-    saturation_convergence_tolerance: float = 1e-4,
 ) -> EvolutionResult[ImplicitSaturationSolution, typing.List[NewtonConvergenceInfo]]:
     """
-    Solve the implicit saturation equations using Newton-Raphson iteration
+    Solves the implicit saturation equations for a three-phase system using Newton-Raphson iteration
     with backtracking line search.
 
     The Newton loop iterates on saturations until either the relative residual norm drops below `newton_tolerance`,
     or the maximum saturation change per iteration drops below `saturation_convergence_tolerance` and the relative
     residual is below 1e-3 (effective convergence despite the upwind discontinuity floor).
+
+    :param cell_dimension: (cell_size_x, cell_size_y) in feet.
+    :param thickness_grid: 3D grid of cell thicknesses (ft).
+    :param elevation_grid: 3D grid of cell elevations (ft).
+    :param time_step: Current time step index (unused, kept for interface symmetry).
+    :param time_step_size: Time step size in seconds.
+    :param time: Total simulation time elapsed. This time step inclusive.
+    :param rock_properties: Rock properties (permeability, porosity, etc.).
+    :param fluid_properties: Fluid properties at the new pressure level.
+    :param config: Simulation configuration.
+    :param pressure_change_grid: Pressure change grid (P_new - P_old) in psi for PVT volume correction.
+    :param well_indices_cache: Cache of well indices for efficient lookup during pressure solve.
+    :param injection_rates: Optional `PhaseTensorsProxy` of injection rates for each phase and cell.
+    :param production_rates: Optional `PhaseTensorsProxy` of production rates for each phase and cell.
+    :param injection_bhps: Optional `PhaseTensorsProxy` of injection bottom hole pressures for each phase and cell.
+    :param production_bhps: Optional `PhaseTensorsProxy` of production bottom hole pressures for each phase and cell.
+    :param pad_width: Ghost cell padding width.
+    :return: `EvolutionResult` containing `ImplicitSaturationSolution`.
     """
+    oil_pressure_grid = fluid_properties.pressure_grid
+    cell_count_x, cell_count_y, cell_count_z = oil_pressure_grid.shape
     cell_size_x, cell_size_y = cell_dimension
+    old_water_saturation_grid = fluid_properties.water_saturation_grid
+    old_oil_saturation_grid = fluid_properties.oil_saturation_grid
+    old_gas_saturation_grid = fluid_properties.gas_saturation_grid
+    water_compressibility_grid = fluid_properties.water_compressibility_grid
+    gas_compressibility_grid = fluid_properties.gas_compressibility_grid
+    porosity_grid = rock_properties.porosity_grid
+    rock_compressibility = rock_properties.compressibility
+
     time_step_in_days = time_step_size * c.DAYS_PER_SECOND
     dtype = get_dtype()
     interior_cell_count = (cell_count_x - 2) * (cell_count_y - 2) * (cell_count_z - 2)
@@ -2278,6 +2290,11 @@ def solve_implicit_saturation(
     stagnation_patience = config.newton_stagnation_patience
     stagnation_improvement_threshold = config.newton_stagnation_improvement_threshold
     min_step_size = float(np.sqrt(np.finfo(dtype).eps))
+    maximum_newton_iterations = config.maximum_newton_iterations
+    newton_tolerance = config.newton_tolerance
+    maximum_line_search_cuts = config.maximum_line_search_cuts
+    maximum_saturation_change = config.maximum_saturation_change
+    saturation_convergence_tolerance = config.saturation_convergence_tolerance
 
     residual_kwargs = dict(  # noqa
         old_water_saturation_grid=old_water_saturation_grid,
@@ -2627,79 +2644,4 @@ def solve_implicit_saturation(
             f"Final relative residual: {final_residual_norm / initial_residual_norm:.2e}"
         ),
         metadata=convergence_history,
-    )
-
-
-def evolve_saturation(
-    grid_shape: ThreeDimensions,
-    cell_dimension: typing.Tuple[float, float],
-    thickness_grid: ThreeDimensionalGrid,
-    elevation_grid: ThreeDimensionalGrid,
-    time_step_size: float,
-    time: float,
-    rock_properties: RockProperties[ThreeDimensions],
-    fluid_properties: FluidProperties[ThreeDimensions],
-    config: Config,
-    well_indices_cache: WellIndicesCache,
-    pressure_change_grid: ThreeDimensionalGrid,
-    injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
-    production_rates: PhaseTensorsProxy[float, ThreeDimensions],
-    injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
-    production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
-    boundary_conditions: BoundaryConditions[ThreeDimensions],
-    pad_width: int = 1,
-) -> EvolutionResult[ImplicitSaturationSolution, typing.List[NewtonConvergenceInfo]]:
-    """
-    Solve the implicit saturation equations for a three-phase system.
-
-    :param cell_dimension: (cell_size_x, cell_size_y) in feet.
-    :param thickness_grid: 3D grid of cell thicknesses (ft).
-    :param elevation_grid: 3D grid of cell elevations (ft).
-    :param time_step: Current time step index (unused, kept for interface symmetry).
-    :param time_step_size: Time step size in seconds.
-    :param rock_properties: Rock properties (permeability, porosity, etc.).
-    :param fluid_properties: Fluid properties at the new pressure level.
-    :param wells: Well definitions.
-    :param config: Simulation configuration.
-    :param pressure_change_grid: P_new - P_old (psi) for PVT volume correction.
-    :param pad_width: Ghost cell padding width.
-    :return: `EvolutionResult` containing `ImplicitSaturationSolution`.
-    """
-    oil_pressure_grid = fluid_properties.pressure_grid
-    cell_count_x, cell_count_y, cell_count_z = oil_pressure_grid.shape
-
-    return solve_implicit_saturation(
-        grid_shape=grid_shape,
-        cell_dimension=cell_dimension,
-        oil_pressure_grid=oil_pressure_grid,
-        pressure_change_grid=pressure_change_grid,
-        old_water_saturation_grid=fluid_properties.water_saturation_grid,
-        old_oil_saturation_grid=fluid_properties.oil_saturation_grid,
-        old_gas_saturation_grid=fluid_properties.gas_saturation_grid,
-        cell_count_x=cell_count_x,
-        cell_count_y=cell_count_y,
-        cell_count_z=cell_count_z,
-        thickness_grid=thickness_grid,
-        elevation_grid=elevation_grid,
-        porosity_grid=rock_properties.porosity_grid,
-        time_step_size=time_step_size,
-        time=time,
-        rock_properties=rock_properties,
-        fluid_properties=fluid_properties,
-        config=config,
-        well_indices_cache=well_indices_cache,
-        injection_bhps=injection_bhps,
-        production_bhps=production_bhps,
-        injection_rates=injection_rates,
-        production_rates=production_rates,
-        boundary_conditions=boundary_conditions,
-        water_compressibility_grid=fluid_properties.water_compressibility_grid,
-        gas_compressibility_grid=fluid_properties.gas_compressibility_grid,
-        rock_compressibility=rock_properties.compressibility,
-        pad_width=pad_width,
-        maximum_newton_iterations=config.maximum_newton_iterations,
-        newton_tolerance=config.newton_tolerance,
-        maximum_line_search_cuts=config.maximum_line_search_cuts,
-        maximum_saturation_change=config.maximum_saturation_change,
-        saturation_convergence_tolerance=config.saturation_convergence_tolerance,
     )
