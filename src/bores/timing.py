@@ -299,9 +299,9 @@ class Timer(StoreSerializable):
         cfl_threshold: typing.Optional[float] = None,
         newton_iterations: typing.Optional[int] = None,
         maximum_saturation_change: typing.Optional[float] = None,
-        max_allowed_saturation_change: typing.Optional[float] = None,
+        maximum_allowed_saturation_change: typing.Optional[float] = None,
         maximum_pressure_change: typing.Optional[float] = None,
-        max_allowed_pressure_change: typing.Optional[float] = None,
+        maximum_allowed_pressure_change: typing.Optional[float] = None,
     ) -> float:
         """
         Registers a rejected time step proposal and computes an intelligently adjusted time step size
@@ -313,9 +313,9 @@ class Timer(StoreSerializable):
         :param cfl_threshold: The CFL threshold that was exceeded.
         :param newton_iterations: Number of Newton iterations attempted before failure.
         :param maximum_saturation_change: The maximum saturation change encountered.
-        :param max_allowed_saturation_change: The allowed saturation change threshold.
+        :param maximum_allowed_saturation_change: The allowed saturation change threshold.
         :param maximum_pressure_change: The maximum pressure change encountered.
-        :param max_allowed_pressure_change: The allowed pressure change threshold.
+        :param maximum_allowed_pressure_change: The allowed pressure change threshold.
         :return: The new/adjusted time step size in seconds.
         """
         if self.rejection_count >= self.max_rejects:
@@ -357,9 +357,9 @@ class Timer(StoreSerializable):
             cfl_threshold=cfl_threshold,
             newton_iterations=newton_iterations,
             maximum_saturation_change=maximum_saturation_change,
-            max_allowed_saturation_change=max_allowed_saturation_change,
+            maximum_allowed_saturation_change=maximum_allowed_saturation_change,
             maximum_pressure_change=maximum_pressure_change,
-            max_allowed_pressure_change=max_allowed_pressure_change,
+            maximum_allowed_pressure_change=maximum_allowed_pressure_change,
             aggressive=aggressive,
         )
         self.next_step_size *= factor
@@ -404,9 +404,9 @@ class Timer(StoreSerializable):
         cfl_threshold: typing.Optional[float] = None,
         newton_iterations: typing.Optional[int] = None,
         maximum_saturation_change: typing.Optional[float] = None,
-        max_allowed_saturation_change: typing.Optional[float] = None,
+        maximum_allowed_saturation_change: typing.Optional[float] = None,
         maximum_pressure_change: typing.Optional[float] = None,
-        max_allowed_pressure_change: typing.Optional[float] = None,
+        maximum_allowed_pressure_change: typing.Optional[float] = None,
         aggressive: bool = False,
     ) -> float:
         """
@@ -448,58 +448,58 @@ class Timer(StoreSerializable):
         # Saturation change backoff
         if (
             maximum_saturation_change is not None
-            and max_allowed_saturation_change is not None
-            and maximum_saturation_change > max_allowed_saturation_change
+            and maximum_allowed_saturation_change is not None
+            and maximum_saturation_change > maximum_allowed_saturation_change
         ):
-            overshoot_ratio = maximum_saturation_change / max_allowed_saturation_change
+            overshoot_ratio = maximum_saturation_change / maximum_allowed_saturation_change
 
             if overshoot_ratio > 3.0:
                 # Very large saturation changes. Apply aggressive reduction
                 sat_factor = 0.25
                 logger.debug(
-                    f"Severe saturation change: {maximum_saturation_change:.4f} > {max_allowed_saturation_change:.4f} (ratio: {overshoot_ratio:.4f})"
+                    f"Severe saturation change: {maximum_saturation_change:.4f} > {maximum_allowed_saturation_change:.4f} (ratio: {overshoot_ratio:.4f})"
                 )
             elif overshoot_ratio > 2.0:
                 # Large saturation changes
                 sat_factor = 0.4
                 logger.debug(
-                    f"Large saturation change: {maximum_saturation_change:.4f} > {max_allowed_saturation_change:.4f} (ratio: {overshoot_ratio:.4f})"
+                    f"Large saturation change: {maximum_saturation_change:.4f} > {maximum_allowed_saturation_change:.4f} (ratio: {overshoot_ratio:.4f})"
                 )
             else:
                 # Moderate overshoot. Apply proportional reduction
-                sat_factor = max_allowed_saturation_change / maximum_saturation_change
+                sat_factor = maximum_allowed_saturation_change / maximum_saturation_change
                 sat_factor = max(sat_factor, 0.5)  # Don't reduce too much
                 logger.debug(
-                    f"Moderate saturation change: {maximum_saturation_change:.4f} > {max_allowed_saturation_change:.4f} (ratio: {overshoot_ratio:.4f})"
+                    f"Moderate saturation change: {maximum_saturation_change:.4f} > {maximum_allowed_saturation_change:.4f} (ratio: {overshoot_ratio:.4f})"
                 )
             factors.append(sat_factor)
 
         # Pressure change backoff
         if (
             maximum_pressure_change is not None
-            and max_allowed_pressure_change is not None
-            and maximum_pressure_change > max_allowed_pressure_change
+            and maximum_allowed_pressure_change is not None
+            and maximum_pressure_change > maximum_allowed_pressure_change
         ):
-            overshoot_ratio = maximum_pressure_change / max_allowed_pressure_change
+            overshoot_ratio = maximum_pressure_change / maximum_allowed_pressure_change
 
             if overshoot_ratio > 3.0:
                 # Very large pressure changes
                 pressure_factor = 0.25
                 logger.debug(
-                    f"Severe pressure change: {maximum_pressure_change:.4e} > {max_allowed_pressure_change:.4e} (ratio: {overshoot_ratio:.4f})"
+                    f"Severe pressure change: {maximum_pressure_change:.4e} > {maximum_allowed_pressure_change:.4e} (ratio: {overshoot_ratio:.4f})"
                 )
             elif overshoot_ratio > 2.0:
                 # Large pressure changes
                 pressure_factor = 0.4
                 logger.debug(
-                    f"Large pressure change: {maximum_pressure_change:.4e} > {max_allowed_pressure_change:.4e} (ratio: {overshoot_ratio:.4f})"
+                    f"Large pressure change: {maximum_pressure_change:.4e} > {maximum_allowed_pressure_change:.4e} (ratio: {overshoot_ratio:.4f})"
                 )
             else:
                 # Moderate overshoot
-                pressure_factor = max_allowed_pressure_change / maximum_pressure_change
+                pressure_factor = maximum_allowed_pressure_change / maximum_pressure_change
                 pressure_factor = max(pressure_factor, 0.5)
                 logger.debug(
-                    f"Moderate pressure change: {maximum_pressure_change:.4e} > {max_allowed_pressure_change:.4e} (ratio: {overshoot_ratio:.4f})"
+                    f"Moderate pressure change: {maximum_pressure_change:.4e} > {maximum_allowed_pressure_change:.4e} (ratio: {overshoot_ratio:.4f})"
                 )
 
             factors.append(pressure_factor)
@@ -546,9 +546,9 @@ class Timer(StoreSerializable):
         maximum_cfl_encountered: typing.Optional[float] = None,
         cfl_threshold: typing.Optional[float] = None,
         maximum_saturation_change: typing.Optional[float] = None,
-        max_allowed_saturation_change: typing.Optional[float] = None,
+        maximum_allowed_saturation_change: typing.Optional[float] = None,
         maximum_pressure_change: typing.Optional[float] = None,
-        max_allowed_pressure_change: typing.Optional[float] = None,
+        maximum_allowed_pressure_change: typing.Optional[float] = None,
     ) -> bool:
         """
         Determine if a time step is acceptable based on given criteria
@@ -556,9 +556,9 @@ class Timer(StoreSerializable):
         :param maximum_cfl_encountered: The maximum CFL number encountered during the step.
         :param cfl_threshold: The CFL threshold used during the step.
         :param maximum_saturation_change: Maximum saturation change in the accepted step.
-        :param max_allowed_saturation_change: Maximum allowed saturation change threshold.
+        :param maximum_allowed_saturation_change: Maximum allowed saturation change threshold.
         :param maximum_pressure_change: Maximum pressure change in the accepted step.
-        :param max_allowed_pressure_change: Maximum allowed pressure change threshold.
+        :param maximum_allowed_pressure_change: Maximum allowed pressure change threshold.
         :return: True if the timestep is acceptable. Else, Flase.
         """
         cfl_limit = cfl_threshold if cfl_threshold is not None else self.maximum_cfl_number
@@ -567,15 +567,15 @@ class Timer(StoreSerializable):
 
         if (
             maximum_saturation_change is not None
-            and max_allowed_saturation_change is not None
-            and maximum_saturation_change > max_allowed_saturation_change
+            and maximum_allowed_saturation_change is not None
+            and maximum_saturation_change > maximum_allowed_saturation_change
         ):
             return False
 
         return (
             maximum_pressure_change is not None
-            and max_allowed_pressure_change is not None
-            and maximum_pressure_change > max_allowed_pressure_change
+            and maximum_allowed_pressure_change is not None
+            and maximum_pressure_change > maximum_allowed_pressure_change
         )
 
     def accept_step(
@@ -586,9 +586,9 @@ class Timer(StoreSerializable):
         cfl_threshold: typing.Optional[float] = None,
         newton_iterations: typing.Optional[int] = None,
         maximum_saturation_change: typing.Optional[float] = None,
-        max_allowed_saturation_change: typing.Optional[float] = None,
+        maximum_allowed_saturation_change: typing.Optional[float] = None,
         maximum_pressure_change: typing.Optional[float] = None,
-        max_allowed_pressure_change: typing.Optional[float] = None,
+        maximum_allowed_pressure_change: typing.Optional[float] = None,
     ) -> float:
         """
         Registers an accepted time step and computes the next time step size
@@ -599,9 +599,9 @@ class Timer(StoreSerializable):
         :param cfl_threshold: The CFL threshold used during the step.
         :param newton_iterations: Number of Newton iterations taken (if applicable).
         :param maximum_saturation_change: Maximum saturation change in the accepted step.
-        :param max_allowed_saturation_change: Maximum allowed saturation change threshold.
+        :param maximum_allowed_saturation_change: Maximum allowed saturation change threshold.
         :param maximum_pressure_change: Maximum pressure change in the accepted step.
-        :param max_allowed_pressure_change: Maximum allowed pressure change threshold.
+        :param maximum_allowed_pressure_change: Maximum allowed pressure change threshold.
         :return: The next proposed time step size.
         """
         # Use small tolerance for floating point comparison as step sizes may slightly overshoot
@@ -670,10 +670,10 @@ class Timer(StoreSerializable):
         # Saturation change adjustment with intelligent scaling
         if (
             maximum_saturation_change is not None
-            and max_allowed_saturation_change is not None
+            and maximum_allowed_saturation_change is not None
             and maximum_saturation_change > 0.0
         ):
-            sat_utilization = maximum_saturation_change / max_allowed_saturation_change
+            sat_utilization = maximum_saturation_change / maximum_allowed_saturation_change
 
             if sat_utilization > 0.95:
                 # Very close to limit. Reduce step size
@@ -696,7 +696,7 @@ class Timer(StoreSerializable):
             elif sat_utilization < 0.3:
                 # Very low usage, could grow more aggressively
                 sat_factor = min(
-                    1.3, max_allowed_saturation_change / maximum_saturation_change * 0.8
+                    1.3, maximum_allowed_saturation_change / maximum_saturation_change * 0.8
                 )
                 logger.debug(
                     f"Saturation change low ({sat_utilization:.2%}), allowing growth"
@@ -705,7 +705,7 @@ class Timer(StoreSerializable):
                 # Normal range. Apply proportional adjustment
                 sat_factor = min(
                     1.15,
-                    max_allowed_saturation_change / maximum_saturation_change * 0.9,
+                    maximum_allowed_saturation_change / maximum_saturation_change * 0.9,
                 )
                 logger.debug(
                     f"Saturation change normal ({sat_utilization:.2%}), proportional growth"
@@ -715,10 +715,10 @@ class Timer(StoreSerializable):
         # Pressure change adjustment with intelligent scaling
         if (
             maximum_pressure_change is not None
-            and max_allowed_pressure_change is not None
+            and maximum_allowed_pressure_change is not None
             and maximum_pressure_change > 0.0
         ):
-            pres_utilization = maximum_pressure_change / max_allowed_pressure_change
+            pres_utilization = maximum_pressure_change / maximum_allowed_pressure_change
 
             if pres_utilization > 0.95:
                 # Very close to limit. Reduce step size
@@ -741,7 +741,7 @@ class Timer(StoreSerializable):
             elif pres_utilization < 0.3:
                 # Very low usage, could grow more aggressively
                 pressure_factor = min(
-                    1.3, max_allowed_pressure_change / maximum_pressure_change * 0.8
+                    1.3, maximum_allowed_pressure_change / maximum_pressure_change * 0.8
                 )
                 logger.debug(
                     f"Pressure change low ({pres_utilization:.2%}), allowing growth"
@@ -749,7 +749,7 @@ class Timer(StoreSerializable):
             else:
                 # Normal range. Apply proportional adjustment
                 pressure_factor = min(
-                    1.15, max_allowed_pressure_change / maximum_pressure_change * 0.9
+                    1.15, maximum_allowed_pressure_change / maximum_pressure_change * 0.9
                 )
                 logger.debug(
                     f"Pressure change normal ({pres_utilization:.2%}), proportional growth"
@@ -797,16 +797,16 @@ class Timer(StoreSerializable):
                 limits_ok &= (maximum_cfl_encountered / maximum_cfl) < 0.7
             if (
                 maximum_saturation_change is not None
-                and max_allowed_saturation_change is not None
+                and maximum_allowed_saturation_change is not None
             ):
                 limits_ok &= (
-                    maximum_saturation_change / max_allowed_saturation_change
+                    maximum_saturation_change / maximum_allowed_saturation_change
                 ) < 0.7
             if (
                 maximum_pressure_change is not None
-                and max_allowed_pressure_change is not None
+                and maximum_allowed_pressure_change is not None
             ):
-                limits_ok &= (maximum_pressure_change / max_allowed_pressure_change) < 0.7
+                limits_ok &= (maximum_pressure_change / maximum_allowed_pressure_change) < 0.7
 
             if limits_ok:
                 dt *= self.ramp_up_factor  # type: ignore

@@ -56,7 +56,6 @@ from bores.states import ModelState
 from bores.stores import StoreSerializable
 from bores.tables.pvt import PVTDataSet, PVTTables
 from bores.types import MiscibilityModel, NDimension, NDimensionalGrid, ThreeDimensions
-from bores.utils import clip
 from bores.wells.base import Wells
 from bores.wells.indices import WellIndicesCache, build_well_indices_cache
 
@@ -378,11 +377,11 @@ def _run_impes_step(
     pressure_solution = pressure_result.value
     padded_pressure_grid = pressure_solution.pressure_grid
     maximum_pressure_change = pressure_solution.maximum_pressure_change
-    max_allowed_pressure_change = config.maximum_pressure_change
-    if maximum_pressure_change > max_allowed_pressure_change:
+    maximum_allowed_pressure_change = config.maximum_pressure_change
+    if maximum_pressure_change > maximum_allowed_pressure_change:
         message = (
             f"Pressure change {maximum_pressure_change:.6f} psi "
-            f"exceeded maximum allowed {max_allowed_pressure_change:.6f} psi "
+            f"exceeded maximum allowed {maximum_allowed_pressure_change:.6f} psi "
             f"at time step {time_step}."
         )
         logger.error(message)
@@ -394,7 +393,7 @@ def _run_impes_step(
             message=message,
             timer_kwargs={
                 "maximum_pressure_change": maximum_pressure_change,
-                "max_allowed_pressure_change": max_allowed_pressure_change,
+                "maximum_allowed_pressure_change": maximum_allowed_pressure_change,
             },
         )
 
@@ -528,7 +527,7 @@ def _run_impes_step(
             message=message,
             timer_kwargs={
                 "maximum_saturation_change": flash_saturation_check.max_phase_saturation_change,
-                "max_allowed_saturation_change": flash_saturation_check.max_allowed_phase_saturation_change,
+                "maximum_allowed_saturation_change": flash_saturation_check.max_allowed_phase_saturation_change,
             },
         )
 
@@ -661,10 +660,10 @@ def _run_impes_step(
         "maximum_cfl_encountered": saturation_solution.maximum_cfl_encountered,
         "cfl_threshold": saturation_solution.cfl_threshold,
         "maximum_pressure_change": maximum_pressure_change,
-        "max_allowed_pressure_change": max_allowed_pressure_change,
+        "maximum_allowed_pressure_change": maximum_allowed_pressure_change,
         "maximum_saturation_change": saturation_change_result.max_phase_saturation_change
         or None,
-        "max_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change
+        "maximum_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change
         or None,
     }
 
@@ -879,11 +878,11 @@ def _run_sequential_implicit_step(
     pressure_solution = pressure_result.value
     padded_pressure_grid = pressure_solution.pressure_grid
     maximum_pressure_change = pressure_solution.maximum_pressure_change
-    max_allowed_pressure_change = config.maximum_pressure_change
-    if maximum_pressure_change > max_allowed_pressure_change:
+    maximum_allowed_pressure_change = config.maximum_pressure_change
+    if maximum_pressure_change > maximum_allowed_pressure_change:
         message = (
             f"Pressure change {maximum_pressure_change:.6f} psi "
-            f"exceeded maximum allowed {max_allowed_pressure_change:.6f} psi "
+            f"exceeded maximum allowed {maximum_allowed_pressure_change:.6f} psi "
             f"at time step {time_step}."
         )
         logger.error(message)
@@ -895,7 +894,7 @@ def _run_sequential_implicit_step(
             message=message,
             timer_kwargs={
                 "maximum_pressure_change": maximum_pressure_change,
-                "max_allowed_pressure_change": max_allowed_pressure_change,
+                "maximum_allowed_pressure_change": maximum_allowed_pressure_change,
             },
         )
 
@@ -1015,7 +1014,7 @@ def _run_sequential_implicit_step(
             message=message,
             timer_kwargs={
                 "maximum_saturation_change": flash_saturation_check.max_phase_saturation_change,
-                "max_allowed_saturation_change": flash_saturation_check.max_allowed_phase_saturation_change,
+                "maximum_allowed_saturation_change": flash_saturation_check.max_allowed_phase_saturation_change,
             },
         )
 
@@ -1065,10 +1064,10 @@ def _run_sequential_implicit_step(
     )
     timer_kwargs = {
         "maximum_pressure_change": maximum_pressure_change,
-        "max_allowed_pressure_change": max_allowed_pressure_change,
+        "maximum_allowed_pressure_change": maximum_allowed_pressure_change,
         "maximum_saturation_change": saturation_change_result.max_phase_saturation_change
         or None,
-        "max_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change
+        "maximum_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change
         or None,
         "newton_iterations": saturation_solution.newton_iterations,
     }
@@ -1316,12 +1315,12 @@ def _run_full_sequential_implicit_step(
         pressure_solution = pressure_result.value
         padded_pressure_grid = pressure_solution.pressure_grid
         maximum_pressure_change = pressure_solution.maximum_pressure_change
-        max_allowed_pressure_change = config.maximum_pressure_change
+        maximum_allowed_pressure_change = config.maximum_pressure_change
 
-        if maximum_pressure_change > max_allowed_pressure_change:
+        if maximum_pressure_change > maximum_allowed_pressure_change:
             message = (
                 f"Pressure change {maximum_pressure_change:.6f} psi exceeded maximum "
-                f"allowed {max_allowed_pressure_change:.6f} psi at time step "
+                f"allowed {maximum_allowed_pressure_change:.6f} psi at time step "
                 f"{time_step}, outer iteration {iteration + 1}."
             )
             logger.error(message)
@@ -1333,7 +1332,7 @@ def _run_full_sequential_implicit_step(
                 message=message,
                 timer_kwargs={
                     "maximum_pressure_change": maximum_pressure_change,
-                    "max_allowed_pressure_change": max_allowed_pressure_change,
+                    "maximum_allowed_pressure_change": maximum_allowed_pressure_change,
                 },
             )
 
@@ -1441,7 +1440,7 @@ def _run_full_sequential_implicit_step(
                 message=message,
                 timer_kwargs={
                     "maximum_saturation_change": flash_saturation_check.max_phase_saturation_change,
-                    "max_allowed_saturation_change": flash_saturation_check.max_allowed_phase_saturation_change,
+                    "maximum_allowed_saturation_change": flash_saturation_check.max_allowed_phase_saturation_change,
                 },
             )
 
@@ -1522,7 +1521,7 @@ def _run_full_sequential_implicit_step(
                 message=message,
                 timer_kwargs={
                     "maximum_saturation_change": saturation_change_result.max_phase_saturation_change,
-                    "max_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change,
+                    "maximum_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change,
                 },
             )
 
@@ -1660,10 +1659,10 @@ def _run_full_sequential_implicit_step(
 
         final_timer_kwargs = {
             "maximum_pressure_change": maximum_pressure_change,
-            "max_allowed_pressure_change": max_allowed_pressure_change,
+            "maximum_allowed_pressure_change": maximum_allowed_pressure_change,
             "maximum_saturation_change": saturation_change_result.max_phase_saturation_change
             or None,
-            "max_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change
+            "maximum_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change
             or None,
             "newton_iterations": newton_iterations,
         }
@@ -1830,12 +1829,12 @@ def _run_explicit_step(
     )
     pressure_solution = pressure_result.value
     maximum_pressure_change = pressure_solution.maximum_pressure_change
-    max_allowed_pressure_change = config.maximum_pressure_change
+    maximum_allowed_pressure_change = config.maximum_pressure_change
     timer_kwargs = {
         "maximum_cfl_encountered": pressure_solution.maximum_cfl_encountered,
         "cfl_threshold": pressure_solution.cfl_threshold,
         "maximum_pressure_change": maximum_pressure_change,
-        "max_allowed_pressure_change": max_allowed_pressure_change,
+        "maximum_allowed_pressure_change": maximum_allowed_pressure_change,
     }
 
     if not pressure_result.success:
@@ -1851,10 +1850,10 @@ def _run_explicit_step(
             timer_kwargs=timer_kwargs,
         )
 
-    if maximum_pressure_change > max_allowed_pressure_change:
+    if maximum_pressure_change > maximum_allowed_pressure_change:
         message = (
             f"Pressure change {maximum_pressure_change:.6f} psi "
-            f"exceeded maximum allowed {max_allowed_pressure_change:.6f} psi "
+            f"exceeded maximum allowed {maximum_allowed_pressure_change:.6f} psi "
             f"at time step {time_step}."
         )
         logger.debug(message)
@@ -1866,7 +1865,7 @@ def _run_explicit_step(
             message=message,
             timer_kwargs={
                 "maximum_pressure_change": maximum_pressure_change,
-                "max_allowed_pressure_change": max_allowed_pressure_change,
+                "maximum_allowed_pressure_change": maximum_allowed_pressure_change,
             },
         )
 
@@ -1978,10 +1977,10 @@ def _run_explicit_step(
         "maximum_cfl_encountered": saturation_solution.maximum_cfl_encountered,
         "cfl_threshold": saturation_solution.cfl_threshold,
         "maximum_pressure_change": maximum_pressure_change,
-        "max_allowed_pressure_change": max_allowed_pressure_change,
+        "maximum_allowed_pressure_change": maximum_allowed_pressure_change,
         "maximum_saturation_change": saturation_change_result.max_phase_saturation_change
         or None,
-        "max_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change
+        "maximum_allowed_saturation_change": saturation_change_result.max_allowed_phase_saturation_change
         or None,
     }
 
@@ -2149,7 +2148,7 @@ def _run_explicit_step(
             message=message,
             timer_kwargs={
                 "maximum_saturation_change": flash_saturation_check.max_phase_saturation_change,
-                "max_allowed_saturation_change": flash_saturation_check.max_allowed_phase_saturation_change,
+                "maximum_allowed_saturation_change": flash_saturation_check.max_allowed_phase_saturation_change,
             },
         )
 
@@ -2224,6 +2223,19 @@ def log_progress(
         )
 
 
+StepCallback = typing.Callable[[StepResult[ThreeDimensions], float, float], None]
+"""
+A callback function or handler that accepts:
+
+- `StepResult[ThreeDimensions]`: The result of the current simulation step, containing updated fluid properties, rock properties, saturation history, rates, bhps, success status, message, and timer kwargs.
+- `float`: The current step size (time step size).
+- `float`: The total (successful) simulation time elapsed up to the current step.
+
+This callback can be used for custom logging, monitoring, or handling of simulation results at each step. 
+It is called after each simulation step with the results and timing information.
+"""
+
+
 @attrs.define
 class Run(StoreSerializable):
     """
@@ -2267,9 +2279,17 @@ class Run(StoreSerializable):
 
     def __call__(
         self,
+        *,
+        on_step_rejected: typing.Optional[StepCallback] = None,
+        on_step_accepted: typing.Optional[StepCallback] = None,
     ) -> typing.Generator[ModelState[ThreeDimensions], None, None]:
         """Returns a genrator that executes this simulation run."""
-        return run(self.model, self.config)
+        return run(
+            self.model,
+            self.config,
+            on_step_rejected=on_step_rejected,
+            on_step_accepted=on_step_accepted,
+        )
 
     def __iter__(self) -> typing.Iterator[ModelState[ThreeDimensions]]:
         return iter(self())
@@ -2329,6 +2349,9 @@ _SCHEME_ALIASES = {
 def run(
     input: typing.Union[ReservoirModel[ThreeDimensions], Run],
     config: typing.Optional[Config] = None,
+    *,
+    on_step_rejected: typing.Optional[StepCallback] = None,
+    on_step_accepted: typing.Optional[StepCallback] = None,
 ) -> typing.Generator[ModelState[ThreeDimensions], None, None]:
     """
     Run a simulation on a 3D reservoir model.
@@ -2343,6 +2366,10 @@ def run(
     :param config: Simulation run configuration and parameters. Only required if `input` is a `ReservoirModel`.
         If `input` is a `Run`, the configuration from the `Run` instance will be used. If config is provided
         alongside a `Run` instance, it will override the config in the `Run`.
+    :param on_step_rejected: Optional callback function that is called when a simulation step is rejected due to convergence or stability issues.
+        The callback receives the `StepResult`, current step size, and total elapsed time.
+    :param on_step_accepted: Optional callback function that is called when a simulation step is accepted and successfully completed.
+        The callback receives the `StepResult`, current step size, and total elapsed time.
     :yield: Yields the model state at specified output intervals.
 
     Example:
@@ -2760,6 +2787,8 @@ def run(
                             is_last_step=timer.is_last_step,
                             interval=log_interval,
                         )
+                    if on_step_accepted is not None:
+                        on_step_accepted(result, step_size, timer.elapsed_time)
                 else:
                     # Reject the step, adjust the time step size, and retry
                     logger.debug(
@@ -2776,6 +2805,10 @@ def run(
                             f"Simulation failed at time step {new_step} and cannot reduce step size further. {exc}."
                             f"\n{result.message}"
                         ) from exc
+
+                    if on_step_rejected is not None:
+                        on_step_rejected(result, step_size, timer.elapsed_time)
+
                     continue  # Retry the time step with a smaller size
 
                 # Get the updated fluid properties, which will also be used for the next time step

@@ -95,7 +95,7 @@ producer = bores.production_well(
     control=bores.CoupledRateControl(
         primary_phase=bores.FluidPhase.OIL,  # Can be set to "oil" too
         primary_control=bores.AdaptiveRateControl(
-            target_rate=-15000.0,
+            target_rate=-10000.0,
             target_phase="oil",
             bhp_limit=1000.0,
             clamp=bores.ProductionClamp(),
@@ -139,12 +139,12 @@ config = bores.Config(
         initial_step_size=bores.Time(days=5),
         max_step_size=bores.Time(months=3),
         min_step_size=bores.Time(hours=1),
-        simulation_time=bores.Time(years=24),
+        simulation_time=bores.Time(years=30),
         max_rejects=20,
     ),
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
-    scheme="si",
+    scheme="impes",
     pressure_solver="direct",
     saturation_solver="direct",
     pressure_preconditioner=None,
@@ -156,7 +156,7 @@ config = bores.Config(
 # Run the simulation and collect states
 states = list(bores.monitor(model, config))
 final = states[-1][0]
-print(f"Completed {final.step} steps in {final.time_in_days:.1f} days")
+print(f"Completed {final.step} steps in {final.time_in_days:.2f} days")
 print(
     f"Final avg pressure: {final.model.fluid_properties.pressure_grid.mean():.1f} psi"
 )

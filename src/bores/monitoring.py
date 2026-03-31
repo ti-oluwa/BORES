@@ -1,7 +1,5 @@
 """Utility API for simulation monitoring"""
 
-from bores.datastructures import Rates, SparseTensor
-
 import logging
 import time
 import typing
@@ -18,8 +16,9 @@ from rich.text import Text
 from tqdm import tqdm
 
 from bores.config import Config
+from bores.datastructures import Rates, SparseTensor
 from bores.models import ReservoirModel
-from bores.simulate import Run, run
+from bores.simulate import Run, StepResult, run
 from bores.states import ModelState
 from bores.types import ThreeDimensions
 
@@ -198,7 +197,7 @@ class RunStats:
     the object is safe to inspect after the loop as well.
 
     Running totals (`_total_wall_time_ms`, `_total_newton_iterations`, `_newton_count`)
-    are maintained oil_saturation that derived properties (`avg_step_wall_ms`,
+    are maintained oil_saturation that derived properties (`average_step_wall_ms`,
     `average_newton_iterations`) compute in O(1) without iterating `steps`.
     """
 
@@ -243,7 +242,7 @@ class RunStats:
         self.rejected_steps += 1
 
     @property
-    def avg_step_wall_ms(self) -> float:
+    def average_step_wall_ms(self) -> float:
         """Mean per-step wall time across all accepted steps (ms)."""
         return (
             self._total_wall_time_ms / self.accepted_steps
@@ -269,19 +268,19 @@ class RunStats:
         """Per-step wall times in chronological order (ms)."""
         return [d.wall_time_ms for d in self.steps]
 
-    def get_percentile_wall_time_ms(self, pct: float) -> float:
+    def get_percentile_wall_time_ms(self, percentage: float) -> float:
         """
-        Return the *pct*-th percentile of per-step wall times using nearest-rank.
+        Return the *percentage*-th percentile of per-step wall times using nearest-rank.
 
         Returns `0.0` if no steps have been recorded yet.
 
-        :param pct: Percentile in the range [0, 100].
+        :param percentage: Percentile in the range [0, 100].
         :return: Wall time at the requested percentile (ms).
         """
         if not self.steps:
             return 0.0
         arr = sorted(self.step_wall_times_ms)
-        idx = min(int(len(arr) * pct / 100), len(arr) - 1)
+        idx = min(int(len(arr) * percentage / 100), len(arr) - 1)
         return arr[idx]
 
     def summary(self) -> str:
@@ -305,11 +304,11 @@ class RunStats:
             "═" * 62,
             f"  Accepted steps    : {self.accepted_steps}",
             f"  Rejected steps    : {self.rejected_steps}",
-            f"  Total wall time   : {self.total_wall_time:.2f} s",
-            f"  Avg step time     : {self.avg_step_wall_ms:.1f} ms",
-            f"  p50 step time     : {self.get_percentile_wall_time_ms(50):.1f} ms",
-            f"  p95 step time     : {self.get_percentile_wall_time_ms(95):.1f} ms",
-            f"  Max step time     : {max(wt):.1f} ms",
+            f"  Total wall time   : {self.total_wall_time:.3f} s",
+            f"  Avg step time     : {self.average_step_wall_ms:.3f} ms",
+            f"  p50 step time     : {self.get_percentile_wall_time_ms(50):.3f} ms",
+            f"  p95 step time     : {self.get_percentile_wall_time_ms(95):.3f} ms",
+            f"  Max step time     : {max(wt):.3f} ms",
             "",
             f"  Simulation time   : {last.elapsed_time:.4f} s",
             f"  Final avg pressure: {last.average_pressure:.2f} psi",
@@ -323,13 +322,13 @@ class RunStats:
         return "\n".join(lines)
 
 
-def _extract_diagnostics(
+def _build_step_diagnostics(
     state: ModelState[ThreeDimensions],
     wall_time_ms: float,
     timer_kwargs: typing.Dict[str, typing.Any],
 ) -> StepDiagnostics:
     """
-    Extract cheap scalar diagnostics from a `ModelState`.
+    Build a `StepDiagnostics` instance from a `ModelState`.
 
     No per-cell arrays are retained; only grid-level aggregates are kept.
     Rates are obtained by summing the absolute values of all non-zero
@@ -348,7 +347,7 @@ def _extract_diagnostics(
     oil_saturation = fluid_properties.oil_saturation_grid
     gas_saturation = fluid_properties.gas_saturation_grid
 
-    def _rate_total(rates: Rates[float, ThreeDimensions]) -> float:
+    def _total_rate(rates: Rates[float, ThreeDimensions]) -> float:
         total = 0.0
         for phase in ("oil", "water", "gas"):
             t: typing.Optional[SparseTensor] = getattr(rates, phase, None)
@@ -382,8 +381,8 @@ def _extract_diagnostics(
         ),
         newton_iterations=int(timer_kwargs.get("newton_iterations", -1) or -1),
         maximum_cfl=float(timer_kwargs.get("maximum_cfl_encountered", -1.0) or -1.0),
-        total_injection_rate=_rate_total(state.injection_rates),
-        total_production_rate=_rate_total(state.production_rates),
+        total_injection_rate=_total_rate(state.injection_rates),
+        total_production_rate=_total_rate(state.production_rates),
         converged=True,
     )
 
@@ -446,7 +445,7 @@ def _build_rich_panel(
         dim = "grey62"
         title_style = "bold bright_yellow on grey11"
 
-    pct = (
+    percentage = (
         min(diagnostics.elapsed_time / total_simulation_time * 100, 100.0)
         if total_simulation_time
         else 0.0
@@ -454,24 +453,24 @@ def _build_rich_panel(
 
     # Progress bar
     bar_width = 38
-    filled = int(bar_width * pct / 100)
+    filled = int(bar_width * percentage / 100)
     bar = f"[{good}]{'█' * filled}[/{good}][{dim}]{'░' * (bar_width - filled)}[/{dim}]"
     progress_line = Text.assemble(
         ("Progress  ", dim),
         Text.from_markup(bar),
-        (f"  {pct:.1f}%", good if pct >= 99.9 else val),
+        (f"  {percentage:.1f}%", good if percentage >= 99.9 else val),
     )
 
     # Time / step row
     time_row = Text.assemble(
         ("Step ", dim),
         (f"{diagnostics.step:>6}", hdr),
-        ("  |  Simulation ", dim),
+        ("  |  Elapsed Simulation Time ", dim),
         (_format_time(diagnostics.elapsed_time), val),
-        ("  |  Δt ", dim),
+        ("  |  Current Step Size (Δt) ", dim),
         (_format_time(diagnostics.step_size), val),
-        ("  |  Wall Time ", dim),
-        (f"{diagnostics.wall_time_ms:.0f} ms", val),
+        ("  |  Step Wall Time ", dim),
+        (f"{diagnostics.wall_time_ms:.3f} ms", val),
     )
 
     # Physics table
@@ -489,27 +488,27 @@ def _build_rich_panel(
 
     table.add_row(
         "Pressure (psi)",
-        f"{diagnostics.average_pressure:,.1f}",
-        f"{diagnostics.minimum_pressure:,.1f}",
-        f"{diagnostics.maximum_pressure:,.1f}",
+        f"{diagnostics.average_pressure:,.2f}",
+        f"{diagnostics.minimum_pressure:,.2f}",
+        f"{diagnostics.maximum_pressure:,.2f}",
     )
     table.add_row(
         "Water Saturation (Sw)",
-        f"{diagnostics.average_water_saturation:.4f}",
-        f"{diagnostics.minimum_water_saturation:.4f}",
-        f"{diagnostics.maximum_water_saturation:.4f}",
+        f"{diagnostics.average_water_saturation:.5f}",
+        f"{diagnostics.minimum_water_saturation:.5f}",
+        f"{diagnostics.maximum_water_saturation:.5f}",
     )
     table.add_row(
         "Oil Saturation (So)",
-        f"{diagnostics.average_oil_saturation:.4f}",
-        f"{diagnostics.minimum_oil_saturation:.4f}",
-        f"{diagnostics.maximum_oil_saturation:.4f}",
+        f"{diagnostics.average_oil_saturation:.5f}",
+        f"{diagnostics.minimum_oil_saturation:.5f}",
+        f"{diagnostics.maximum_oil_saturation:.5f}",
     )
     table.add_row(
         "Gas Saturation (Sg)",
-        f"{diagnostics.average_gas_saturation:.4f}",
-        f"{diagnostics.minimum_gas_saturation:.4f}",
-        f"{diagnostics.maximum_gas_saturation:.4f}",
+        f"{diagnostics.average_gas_saturation:.5f}",
+        f"{diagnostics.minimum_gas_saturation:.5f}",
+        f"{diagnostics.maximum_gas_saturation:.5f}",
     )
 
     # Solver line
@@ -524,27 +523,27 @@ def _build_rich_panel(
     if diagnostics.maximum_cfl >= 0:
         cfl_style = good if diagnostics.maximum_cfl <= 0.7 else warn
         solver_parts += [
-            ("CFL ", dim),
-            (f"{diagnostics.maximum_cfl:.3f}", cfl_style),
+            ("Maximum CFL ", dim),
+            (f"{diagnostics.maximum_cfl:.4f}", cfl_style),
             ("  ", ""),
         ]
     solver_parts += [
         ("ΔP ", dim),
-        (f"{diagnostics.maximum_pressure_change:,.1f} psi", val),
+        (f"{diagnostics.maximum_pressure_change:,.2f} psi", val),
         ("  ", ""),
         ("ΔS ", dim),
-        (f"{diagnostics.maximum_saturation_change:.5f}", val),
+        (f"{diagnostics.maximum_saturation_change:.2e}", val),
     ]
 
     # Performance line
     performance_parts: typing.List[typing.Any] = [
-        ("Average/step ", dim),
-        (f"{stats.avg_step_wall_ms:.0f} ms", val),
-        ("  |  Total ", dim),
-        (f"{stats.total_wall_time:.1f} s", val),
-        ("  |  OK ", dim),
+        ("Avg. Time Per Step ", dim),
+        (f"{stats.average_step_wall_ms:.2f} ms", val),
+        ("  |  Total Run Time ", dim),
+        (f"{stats.total_wall_time:.4f} s", val),
+        ("  |  Accepted ", dim),
         (str(stats.accepted_steps), good),
-        ("  Rej ", dim),
+        ("  Rejected ", dim),
         (
             str(stats.rejected_steps),
             warn if stats.rejected_steps else dim,
@@ -553,12 +552,12 @@ def _build_rich_panel(
     if extended and stats.accepted_steps >= 2:
         performance_parts += [
             ("  |  p95 ", dim),
-            (f"{stats.get_percentile_wall_time_ms(95):.0f} ms", val),
+            (f"{stats.get_percentile_wall_time_ms(95):.3f} ms", val),
         ]
         if stats._newton_count:
             performance_parts += [
-                ("  |  AvgN ", dim),
-                (f"{stats.average_newton_iterations:.1f}", val),
+                ("  |  Avg. Newton Iterations ", dim),
+                (f"{stats.average_newton_iterations:.2f}", val),
             ]
 
     # Wells table
@@ -587,19 +586,19 @@ def _build_rich_panel(
         time_row,
         Text(""),
         table,
-        Text.assemble(("Solver  ", dim), *solver_parts),
-        Text.assemble(("Performance    ", dim), *performance_parts),
+        Text.assemble(("Solver - ", dim), *solver_parts),
+        Text.assemble(("Performance  -  ", dim), *performance_parts),
     ]
     if well_section is not None:
         renderables += [Text(""), well_section]
 
     return Panel(
         Group(*renderables),
-        title="[bold]⬛ BORES - Reservoir Simulation Monitor[/bold]",
+        title="[bold]⬛ BORES - Simulation Monitor[/bold]",
         title_align="left",
         style=title_style,
         border_style=hdr,
-        padding=(0, 1),
+        padding=(2, 4),
     )
 
 
@@ -626,13 +625,13 @@ def monitor(
     A plain-text summary is always emitted to the logger at INFO level when
     the generator is exhausted or closed.
 
-    :param input: A `ReservoirModel` or `Run` instance - identical to
+    :param input: A `ReservoirModel`, `Run`, or an iterable that yields `ModelState`s - identical to
         the first argument of `bores.run`.
     :param config: Simulation configuration. Required when `input` is a
         `ReservoirModel`; optional when `input` is a `Run` (overrides
         the config stored on the `Run` when provided).
     :param monitor: `MonitorConfig` controlling display options. Defaults
-        to `MonitorConfig()` (rich panel + tqdm bar both enabled).
+        to `MonitorConfig()` (rich live panel enabled by default).
     :yields: `(state, stats)` - the model state and the live `RunStats`
         accumulator after each accepted output step.
     :raises ValueError: If `input` is a `ReservoirModel` and `config`
@@ -669,6 +668,21 @@ def monitor(
     _config = _config.with_updates(log_interval=0)
     total_simulation_time: float = float(_config.timer.simulation_time)
     stats = RunStats()
+    _timer_kwargs: typing.Dict[str, typing.Any] = {}
+
+    def _on_step_rejected(
+        step_result: StepResult, step_size: float, elapsed_time: float
+    ) -> None:
+        nonlocal _timer_kwargs
+        stats.record_rejection()
+        _timer_kwargs.clear()
+        _timer_kwargs.update(step_result.timer_kwargs)
+
+    def _on_step_accepted(
+        step_result: StepResult, step_size: float, elapsed_time: float
+    ) -> None:
+        _timer_kwargs.clear()
+        _timer_kwargs.update(step_result.timer_kwargs)
 
     # tqdm bar
     tqdm_bar: typing.Optional[tqdm] = None  # type: ignore[type-arg]
@@ -679,7 +693,7 @@ def monitor(
             unit="%",
             bar_format=(
                 "{desc}: {percentage:3.1f}%|{bar:40}| "
-                "{n:.1f}/{total:.0f}% "
+                "{n:.2f}/{total:.2f}% "
                 "[{elapsed}<{remaining}, {rate_fmt}]"
             ),
             colour="green",
@@ -687,13 +701,14 @@ def monitor(
         )
 
     # Rich Live context.
-    # All logging from bores.* is redirected through the same Console that
-    # owns the Live panel. This prevents the default stderr handler from
+    # All logging from bores.* is redirected through the same `Console` that
+    # owns the `Live` panel. This prevents the default stderr handler from
     # writing lines that force Rich to re-render and print a new panel frame
-    # on every log record emitted by log_interval inside simulate.py.
+    # on every log record emitted inside simulation.
     live: typing.Optional[Live] = None
     _rich_console: typing.Optional[Console] = None
     _bores_logger = logging.getLogger("bores")
+    _original_propagate = _bores_logger.propagate  # Save original propagate setting
     _original_handlers: typing.List[logging.Handler] = []
     _rich_log_handler: typing.Optional[RichHandler] = None
 
@@ -707,8 +722,8 @@ def monitor(
         live.__enter__()
 
         # Swap out all existing handlers on the bores root logger and replace
-        # them with a single RichHandler that writes through the Live console.
-        # Rich's Live context knows how to interleave log lines above the panel
+        # them with a single `RichHandler` that writes through the `Live` console.
+        # Rich's `Live` context knows how to interleave log lines above the panel
         # without triggering a full re-render of the live display.
         _original_handlers = _bores_logger.handlers[:]
         _rich_log_handler = RichHandler(
@@ -720,30 +735,33 @@ def monitor(
         )
         _rich_log_handler.setLevel(logging.DEBUG)
         _bores_logger.handlers = [_rich_log_handler]
+        _bores_logger.propagate = False  # Prevent bubbling to root
 
-    _step_start = time.perf_counter()
-    last_pct = 0.0
+    step_start = time.perf_counter()
+    last_percentage = 0.0
     last_diagnostics: typing.Optional[StepDiagnostics] = None
 
     try:
         if is_generic_input:
             simulation = input
+        elif isinstance(input, Run):
+            simulation = run(  # type: ignore
+                on_step_rejected=_on_step_rejected,
+                on_step_accepted=_on_step_accepted,
+            )
         else:
-            simulation = run(input, _config)  # type: ignore[arg-type]
+            simulation = run(
+                input,  # type: ignore[arg-type]
+                _config,
+                on_step_rejected=_on_step_rejected,
+                on_step_accepted=_on_step_accepted,
+            )
 
         for state in simulation:  # type: ignore[arg-type]
             step_end = time.perf_counter()
-            wall_ms = (step_end - _step_start) * 1000.0
-            _step_start = step_end
-
-            # timer_state is populated by timer.dump_state() after accept_step;
-            # it carries maximum_pressure_change, maximum_saturation_change,
-            # newton_iterations, maximum_cfl_encountered (scheme-dependent).
-            timer_kwargs: typing.Dict[str, typing.Any] = {}
-            if state.timer_state:
-                timer_kwargs = dict(state.timer_state)  # type: ignore
-
-            diagnostics = _extract_diagnostics(state, wall_ms, timer_kwargs)
+            wall_ms = (step_end - step_start) * 1000.0
+            step_start = step_end
+            diagnostics = _build_step_diagnostics(state, wall_ms, _timer_kwargs)
             stats.record(diagnostics)
             last_diagnostics = diagnostics
 
@@ -770,18 +788,18 @@ def monitor(
 
             # tqdm update
             if tqdm_bar is not None:
-                new_pct = min(
+                new_percentage = min(
                     diagnostics.elapsed_time / total_simulation_time * 100, 100.0
                 )
-                delta = new_pct - last_pct
-                if delta > 0:
-                    tqdm_bar.update(delta)
-                last_pct = new_pct
+                change = new_percentage - last_percentage
+                if change > 0:
+                    tqdm_bar.update(change)
+                last_percentage = new_percentage
                 tqdm_bar.set_postfix_str(
                     f"step={diagnostics.step} "
-                    f"P={diagnostics.average_pressure:.0f} psi "
-                    f"Sw={diagnostics.average_water_saturation:.3f} "
-                    f"wall={wall_ms:.0f} ms"
+                    f"P={diagnostics.average_pressure:.2f} psi "
+                    f"Sw={diagnostics.average_water_saturation:.4f} "
+                    f"wall={wall_ms:.2f} ms"
                 )
 
             yield state, stats
@@ -789,7 +807,7 @@ def monitor(
     finally:
         if live is not None:
             if last_diagnostics is not None:
-                # Render the final state into the panel before stopping oil_saturation
+                # Render the final state into the panel before stopping so
                 # the completed view stays in terminal scroll-back history.
                 live.update(
                     _build_rich_panel(
@@ -804,11 +822,12 @@ def monitor(
             live.__exit__(None, None, None)
 
             # Restore the bores logger to whatever handlers it had before we
-            # started, oil_saturation logging behaves normally after the run completes.
+            # started, so logging behaves normally after the run completes.
             _bores_logger.handlers = _original_handlers
+            _bores_logger.propagate = _original_propagate
 
         if tqdm_bar is not None:
-            tqdm_bar.update(100.0 - last_pct)  # ensure bar reaches 100 %
+            tqdm_bar.update(100.0 - last_percentage)  # Ensure that bar reaches 100 %
             tqdm_bar.close()
 
         logger.info(stats.summary())

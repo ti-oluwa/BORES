@@ -4,6 +4,7 @@
 3D 3-Phase Black-Oil Reservoir Modelling and Simulation Framework.
 """
 
+import logging
 import os
 
 import numba
@@ -51,6 +52,5 @@ if os.getenv("BORES_SAVE_RAW_NDARRAY", "f").lower() not in (
     register_ndarray_serializers()
 
 use_32bit_precision()
-
 
 __version__ = "0.1.0"
