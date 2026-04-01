@@ -147,7 +147,7 @@ class EvolutionResult(typing.Generic[T, M]):
     """Optional metadata related to the evolution step."""
 
 
-@numba.njit(inline="always", cache=True)
+@numba.njit(inline="always", parallel=True, cache=True)
 def to_1D_index_interior_only(
     i: int,
     j: int,
@@ -189,7 +189,7 @@ def to_1D_index_interior_only(
     )
 
 
-@numba.njit(cache=True, inline="always")
+@numba.njit(cache=True, parallel=True, inline="always")
 def from_1D_index_interior_only(
     idx: int,
     cell_count_x: int,

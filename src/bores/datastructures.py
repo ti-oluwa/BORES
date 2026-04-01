@@ -624,6 +624,31 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         """
         self._data.clear()
 
+    def get(
+        self,
+        key: ShapeT,
+        default: typing.Optional[typing.Union[float, np.floating]] = None,
+    ) -> DType:
+        """
+        Retrieve the value at the given index, returning a specified default if
+        the entry is absent.
+
+        :param key: An `ShapeT` integer tuple within the declared shape bounds.
+        :param default: Optional override for the default fill value. If None,
+            uses the instance's `default`.
+        :returns: Stored value or the specified default.
+        :raises KeyError: If `key` is not a valid non-negative integer tuple
+            of the correct rank.
+        :raises IndexError: If `key` falls outside the declared `shape`.
+        """
+        self._validate_key(key)
+        self._check_bounds(key)
+        if default is None:
+            return self._data.get(key, self._default)
+
+        cast_default: DType = self._dtype(default)  # type: ignore
+        return self._data.get(key, cast_default)
+
     def update(
         self,
         map: typing.Union[

@@ -408,7 +408,7 @@ class Config(
     involves sharp saturation fronts where small inter-iterate drift can compound.
     """
 
-    jacobian_assembly_method: typing.Literal["numerical", "analytical"] = "numerical"
+    jacobian_assembly_method: typing.Literal["numerical", "analytical"] = "analytical"
     """
     Method used to assemble the Jacobian matrix in the implicit saturation
     Newton loop.

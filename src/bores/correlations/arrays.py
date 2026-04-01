@@ -7,7 +7,6 @@ import numpy as np
 from CoolProp.CoolProp import PropsSI  # type: ignore[import, import-untyped]
 from scipy.optimize import brentq  # type: ignore[import-untyped]
 
-from bores.precision import get_dtype
 from bores.constants import c
 from bores.correlations import fahrenheit_to_rankine
 from bores.correlations.core import (
@@ -29,6 +28,7 @@ from bores.correlations.core import (
     estimate_solution_gor as estimate_solution_gor_scalar,
 )
 from bores.errors import ComputationError, ValidationError
+from bores.precision import get_dtype
 from bores.types import FloatOrArray, GasZFactorMethod, NDimension, NDimensionalGrid
 from bores.utils import apply_mask, clip, get_mask, max_, min_
 
@@ -473,7 +473,7 @@ def _get_vazquez_beggs_oil_fvf_coefficients(
     return a1.astype(input_type), a2.astype(input_type), a3.astype(input_type)  # type: ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def compute_oil_formation_volume_factor_vazquez_and_beggs(
     temperature: NDimensionalGrid[NDimension],
     oil_specific_gravity: NDimensionalGrid[NDimension],
@@ -649,7 +649,7 @@ def compute_water_formation_volume_factor(
     return water_fvf  # type: ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def compute_water_formation_volume_factor_mccain(
     pressure: NDimensionalGrid[NDimension],
     temperature: NDimensionalGrid[NDimension],
@@ -741,7 +741,7 @@ def compute_gas_formation_volume_factor(
     ).astype(dtype)
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def compute_gas_compressibility_factor_papay(
     pressure: NDimensionalGrid[NDimension],
     temperature: NDimensionalGrid[NDimension],
@@ -824,7 +824,7 @@ def compute_gas_compressibility_factor_papay(
     return np.maximum(0.1, compressibility_factor).astype(dtype)  # type: ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def compute_gas_compressibility_factor_hall_yarborough(
     pressure: NDimensionalGrid[NDimension],
     temperature: NDimensionalGrid[NDimension],
@@ -954,7 +954,7 @@ def compute_gas_compressibility_factor_hall_yarborough(
     return clip(Z, 0.2, 3.0).astype(dtype)  # type: ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def compute_gas_compressibility_factor_dranchuk_abou_kassem(
     pressure: NDimensionalGrid[NDimension],
     temperature: NDimensionalGrid[NDimension],
@@ -1157,7 +1157,7 @@ def compute_gas_compressibility_factor(
     )
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def compute_oil_api_gravity(
     oil_specific_gravity: NDimensionalGrid[NDimension],
 ) -> NDimensionalGrid[NDimension]:
@@ -1182,7 +1182,7 @@ def compute_oil_api_gravity(
     return ((141.5 / oil_specific_gravity) - 131.5).astype(dtype)  # type: ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def _get_vazquez_beggs_oil_bubble_point_pressure_coefficients(
     oil_api_gravity: NDimensionalGrid[NDimension],
 ) -> typing.Tuple[
@@ -1212,7 +1212,7 @@ def _get_vazquez_beggs_oil_bubble_point_pressure_coefficients(
     return c1.astype(dtype), c2.astype(dtype), c3.astype(dtype)  # type: ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def compute_oil_bubble_point_pressure(
     gas_gravity: NDimensionalGrid[NDimension],
     oil_api_gravity: NDimensionalGrid[NDimension],
@@ -1266,7 +1266,7 @@ def compute_oil_bubble_point_pressure(
     return pressure.astype(dtype)  # type: ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def compute_water_bubble_point_pressure_mccain(
     temperature: NDimensionalGrid[NDimension],
     gas_solubility_in_water: NDimensionalGrid[NDimension],
@@ -1414,7 +1414,7 @@ def compute_water_bubble_point_pressure(
     return bubble_point_pressure
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def _compute_gor_vasquez_beggs(
     pressure: NDimensionalGrid[NDimension],
     gas_gravity: NDimensionalGrid[NDimension],
@@ -1434,7 +1434,7 @@ def _compute_gor_vasquez_beggs(
     ).astype(dtype)
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def compute_gas_to_oil_ratio(
     pressure: NDimensionalGrid[NDimension],
     temperature: NDimensionalGrid[NDimension],
@@ -1516,7 +1516,7 @@ def compute_gas_to_oil_ratio(
     return np.maximum(0.0, gor).astype(dtype)  # type: ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def _compute_dead_oil_viscosity_modified_beggs(
     temperature: NDimensionalGrid[NDimension],
     oil_api_gravity: NDimensionalGrid[NDimension],
@@ -1565,7 +1565,7 @@ def compute_dead_oil_viscosity_modified_beggs(
     return _compute_dead_oil_viscosity_modified_beggs(temperature, oil_api_gravity)
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def _compute_oil_viscosity(
     pressure: NDimensionalGrid[NDimension],
     bubble_point_pressure: NDimensionalGrid[NDimension],
@@ -1717,7 +1717,7 @@ def compute_gas_molecular_weight(
     return np.multiply(gas_gravity, c.MOLECULAR_WEIGHT_AIR, dtype=dtype)  # type: ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def compute_gas_pseudocritical_properties(
     gas_gravity: NDimensionalGrid[NDimension],
     h2s_mole_fraction: FloatOrArray = 0.0,
@@ -1885,7 +1885,7 @@ def compute_gas_viscosity(
     return np.maximum(0.0, gas_viscosity).astype(temperature.dtype)
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def _compute_water_viscosity(
     temperature: NDimensionalGrid[NDimension],
     salinity: FloatOrArray,
@@ -1971,7 +1971,7 @@ def compute_water_viscosity(
     )
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def _compute_oil_compressibility_liberation_correction_term(
     pressure: NDimensionalGrid[NDimension],
     temperature: NDimensionalGrid[NDimension],
@@ -2033,7 +2033,7 @@ def _compute_oil_compressibility_liberation_correction_term(
     return (gas_formation_volume_factor / oil_formation_volume_factor) * dRs_dp / 5.615  # type: ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def compute_base_compressibility(
     pressure: NDimensionalGrid[NDimension],
     temperature: NDimensionalGrid[NDimension],
@@ -2060,7 +2060,7 @@ def compute_base_compressibility(
     return np.maximum(val, 0.0).astype(pressure.dtype)  # type: ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def compute_oil_compressibility(
     pressure: NDimensionalGrid[NDimension],
     temperature: NDimensionalGrid[NDimension],
@@ -2175,7 +2175,7 @@ def compute_oil_compressibility(
     return result
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def compute_gas_compressibility(
     pressure: NDimensionalGrid[NDimension],
     temperature: NDimensionalGrid[NDimension],
@@ -2256,7 +2256,7 @@ def compute_gas_compressibility(
     return np.maximum(0.0, gas_compressibility).astype(dtype)  # type: ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def _gas_solubility_in_water_mccain_methane(
     pressure: NDimensionalGrid[NDimension],
     temperature: NDimensionalGrid[NDimension],
@@ -2309,7 +2309,7 @@ def _gas_solubility_in_water_mccain_methane(
     return np.maximum(0.0, gas_solubility).astype(dtype)  # type: ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def _gas_solubility_in_water_duan_sun_co2(
     pressure: NDimensionalGrid[NDimension],
     temperature: NDimensionalGrid[NDimension],
@@ -2577,7 +2577,7 @@ def compute_gas_solubility_in_water(
     return result  # type: ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def compute_gas_free_water_formation_volume_factor(
     pressure: NDimensionalGrid[NDimension], temperature: NDimensionalGrid[NDimension]
 ) -> NDimensionalGrid[NDimension]:
@@ -2616,7 +2616,7 @@ def compute_gas_free_water_formation_volume_factor(
     return np.maximum(0.9, gas_free_water_fvf).astype(dtype)  # type: ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def _compute_dRsw_dP_mccain(
     temperature: NDimensionalGrid[NDimension], salinity: FloatOrArray
 ) -> NDimensionalGrid[NDimension]:
@@ -2638,7 +2638,7 @@ def _compute_dRsw_dP_mccain(
     return derivative_pure_water * salinity_correction_factor  # type: ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def _compute_dBw_gas_free_dp_mccain(
     pressure: NDimensionalGrid[NDimension], temperature: NDimensionalGrid[NDimension]
 ) -> NDimensionalGrid[NDimension]:
@@ -2873,7 +2873,7 @@ def compute_water_density_mccain(
     return water_density  # type:ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def compute_water_density_batzle(
     pressure: NDimensionalGrid[NDimension],
     temperature: NDimensionalGrid[NDimension],
@@ -3016,7 +3016,7 @@ def compute_water_density(
     return np.maximum(0.0, live_water_density_in_lb_per_ft3).astype(dtype)  # type: ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def compute_gas_to_oil_ratio_standing(
     pressure: NDimensionalGrid[NDimension],
     oil_api_gravity: NDimensionalGrid[NDimension],
@@ -3202,7 +3202,7 @@ def estimate_bubble_point_pressure_standing(
     return bubble_point_pressure
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def compute_hydrocarbon_in_place(
     area: NDimensionalGrid[NDimension],
     thickness: NDimensionalGrid[NDimension],
@@ -3297,7 +3297,7 @@ def compute_hydrocarbon_in_place(
     return free_gip.astype(dtype)  # type: ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def compute_miscibility_transition_factor(
     pressure: NDimensionalGrid[NDimension],
     minimum_miscibility_pressure: FloatOrArray,
@@ -3377,7 +3377,7 @@ def compute_miscibility_transition_factor(
     return transition_factor.astype(dtype)  # type: ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def compute_effective_todd_longstaff_omega(
     pressure: NDimensionalGrid[NDimension],
     base_omega: FloatOrArray,
@@ -3425,7 +3425,7 @@ def compute_effective_todd_longstaff_omega(
     return (base_omega * transition_factor).astype(dtype)  # type: ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def compute_todd_longstaff_effective_viscosity(
     oil_viscosity: NDimensionalGrid[NDimension],
     solvent_viscosity: NDimensionalGrid[NDimension],
@@ -3549,7 +3549,7 @@ def compute_todd_longstaff_effective_viscosity(
     return mu_effective.astype(dtype)  # type: ignore[return-value]
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def compute_todd_longstaff_effective_density(
     oil_density: NDimensionalGrid[NDimension],
     solvent_density: NDimensionalGrid[NDimension],

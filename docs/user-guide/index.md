@@ -18,6 +18,8 @@ The User Guide provides detailed documentation for every major subsystem in BORE
 | [Well Schedules](wells/schedules.md) | Time-dependent well events, predicates, and actions |
 | [Well Patterns](wells/patterns.md) | Common well placement patterns for waterfloods and EOR |
 | **Simulation** | |
+| [Running & Monitoring](simulation/run-and-monitor.md) | `bores.run()`, `bores.monitor()`, `Run` specification, live diagnostics |
+| [Evolution Schemes](simulation/schemes.md) | IMPES, Explicit, Sequential Implicit, Full Sequential Implicit |
 | [Time Stepping](simulation/timestep-control.md) | Timer class, adaptive control, CFL conditions, ramp-up |
 | [Solvers](simulation/solvers.md) | Pressure solvers, preconditioners, CachedPreconditionerFactory |
 | [Streaming and Storage](advanced/states-streams.md) | StateStream, storage backends, replay |

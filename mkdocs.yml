@@ -218,6 +218,7 @@ nav:
       - Well Schedules: user-guide/wells/schedules.md
       - Well Patterns: user-guide/wells/patterns.md
     - Simulation:
+      - Running & Monitoring: user-guide/simulation/run-and-monitor.md
       - Schemes: user-guide/simulation/schemes.md
       - Solvers: user-guide/simulation/solvers.md
       - Preconditioners: user-guide/simulation/preconditioners.md

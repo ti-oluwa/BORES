@@ -99,13 +99,13 @@ pcow = state.capillary_pressures.oil_water
 pcog = state.capillary_pressures.gas_oil
 ```
 
-### Understanding SparseTensor
+### Understanding `SparseTensor`
 
 Flow rates, formation volume factors, and bottom-hole pressures are stored as `SparseTensor` objects. A `SparseTensor` is a memory-efficient data structure that only stores non-zero entries (or more generally, non-default entries). This is especially useful for well-based quantities like injection rates, which are zero for most cells in the grid (wells only exist at a few locations).
 
 A `SparseTensor` behaves like a sparse array but remains fully compatible with NumPy. You can think of it as a smart dictionary that also knows its overall shape, default fill value, and data type.
 
-#### Common SparseTensor Operations
+#### Common `SparseTensor` Operations
 
 **Dictionary-like access**: Access values by cell index, getting zero (or the default) for missing entries:
 
@@ -236,7 +236,7 @@ total_perforation_cells = (
 print(f"Total well perforation cells active: {total_perforation_cells}")
 ```
 
-#### Why SparseTensor Instead of Dense Arrays?
+#### Why `SparseTensor` Instead of Dense Arrays?
 
 Wells (sources/sinks) only exist at a few grid cells—typically 1-10 cells per well out of 100,000+ total cells. A dense array would waste most of its memory storing zeros. By using a sparse representation, BORES:
 
@@ -257,7 +257,7 @@ if state.wells_exists():
         print(f"Well {well.name}: skin={well.skin_factor}")
 ```
 
-### Timer State
+### `Timer` State
 
 The timer's internal state (step count, proposed next step size, performance history) is optionally captured when `Config.capture_timer_state` is enabled.
 

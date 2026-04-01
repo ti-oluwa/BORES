@@ -44,18 +44,18 @@ from bores.tables.rock_fluid import CapillaryPressureTable, RelativePermeability
 from bores.types import FloatOrArray, NDimension, NDimensionalGrid
 
 __all__ = [
-    "build_fluid_viscosity_grid",
+    "build_estimated_solution_gas_to_oil_ratio_grid",
     "build_fluid_compressibility_grid",
     "build_fluid_density_grid",
+    "build_fluid_viscosity_grid",
+    "build_gas_compressibility_factor_grid",
     "build_gas_gravity_from_density_grid",
-    "build_total_fluid_compressibility_grid",
+    "build_oil_api_gravity_grid",
+    "build_oil_formation_volume_factor_grid",
+    "build_oil_specific_gravity_grid",
     "build_three_phase_capillary_pressure_grids",
     "build_three_phase_relative_mobilities_grids",
-    "build_oil_api_gravity_grid",
-    "build_oil_specific_gravity_grid",
-    "build_gas_compressibility_factor_grid",
-    "build_oil_formation_volume_factor_grid",
-    "build_estimated_solution_gas_to_oil_ratio_grid",
+    "build_total_fluid_compressibility_grid",
 ]
 
 
@@ -417,6 +417,7 @@ def build_three_phase_relative_permeabilities_grids(
     )
 
 
+@numba.njit(cache=True, parallel=True)
 def build_three_phase_relative_mobilities_grids(
     water_relative_permeability_grid: NDimensionalGrid[NDimension],
     oil_relative_permeability_grid: NDimensionalGrid[NDimension],

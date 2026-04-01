@@ -21,7 +21,7 @@ BORES supports four storage backends, each with different trade-offs:
 
 ### ZarrStore
 
-Zarr is the recommended backend for simulation state data. It stores arrays in a chunked, compressed format that is fast to write and read, supports appending without rewriting existing data, and handles large datasets efficiently. Apart from saving in local directories, `ZarrStore` should support any `BaseStore` type support by zarr.
+Zarr is the recommended backend for large simulation state data. It stores arrays in a chunked, compressed format that is fast to write and read, supports appending without rewriting existing data, and handles large datasets efficiently. Apart from saving in local directories, `ZarrStore` should support any `BaseStore` type support by zarr.
 
 ```python
 from bores.stores import ZarrStore

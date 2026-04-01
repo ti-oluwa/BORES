@@ -82,6 +82,7 @@ class ModelState(
             object.__setattr__(self, "_well_exists", self.wells.exists())
         return self._well_exists  # type: ignore[return-value]
 
+    # Quick access properties for commonly queried derived quantities
     @property
     def time_in_days(self) -> float:
         """Time elapsed at this state in days"""
@@ -106,6 +107,31 @@ class ModelState(
     def production_fvfs(self) -> FormationVolumeFactors[float, NDimension]:
         """Formation volume factors for production phases at this state in ft³/SCF or bbls/STB"""
         return self.production_formation_volume_factors
+
+    @property
+    def average_pressure(self) -> float:
+        """Average reservoir pressure at this state in psi, computed as the mean of the pressure grid."""
+        return float(np.mean(self.model.fluid_properties.pressure_grid))
+
+    @property
+    def average_temperature(self) -> float:
+        """Average reservoir temperature at this state in °F, computed as the mean of the temperature grid."""
+        return float(np.mean(self.model.fluid_properties.temperature_grid))
+
+    @property
+    def average_water_saturation(self) -> float:
+        """Average water saturation at this state, computed as the mean of the water saturation grid."""
+        return float(np.mean(self.model.fluid_properties.water_saturation_grid))
+
+    @property
+    def average_oil_saturation(self) -> float:
+        """Average oil saturation at this state, computed as the mean of the oil saturation grid."""
+        return float(np.mean(self.model.fluid_properties.oil_saturation_grid))
+
+    @property
+    def average_gas_saturation(self) -> float:
+        """Average gas saturation at this state, computed as the mean of the gas saturation grid."""
+        return float(np.mean(self.model.fluid_properties.gas_saturation_grid))
 
 
 def _validate_array(

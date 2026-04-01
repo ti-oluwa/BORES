@@ -307,14 +307,15 @@ The generator-based design means the simulation runs lazily. It only computes th
 
 ## Streaming Results to Storage
 
-For long-running simulations, collecting all states in memory is impractical. BORES provides `StateStream` to write states to disk as they are computed, keeping memory usage low. Here is how you would modify the run loop to use a Zarr store:
+For long-running simulations, collecting all states in memory is impractical. BORES provides `StateStream` to write states to disk as they are computed, keeping memory usage low. Here is how you would modify the run loop to use a HDF5 store:
 
 ```python
 import bores
 
 # ... (model and config setup from above, just after step 6) ...
 
-store = bores.ZarrStore("waterflood_results.zarr")
+# Create an HDF5 store to persist results
+store = bores.HDF5Store("waterflood_results.h5")
 
 with bores.StateStream(
     states=bores.run(model, config), 

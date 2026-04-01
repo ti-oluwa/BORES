@@ -147,6 +147,52 @@ if const is not None:
 | `ACRE_FOOT_TO_BARRELS` | 7758 | acre-ft to BBL |
 | `ACRES_TO_SQUARE_FEET` | 43560 | acres to ft² |
 
+### Gas-Oil Ratio (GOR) Conversions
+
+| Constant | Value | Description |
+|---|---|---|
+| `SCF_PER_STB_TO_CUBIC_METER_PER_CUBIC_METER` | 0.1781 | scf/STB to m³/m³ |
+| `CUBIC_METER_PER_CUBIC_METER_TO_SCF_PER_STB` | 5.6146 | m³/m³ to scf/STB |
+
+### Formation Volume Factor (FVF) Conversions
+
+| Constant | Value | Description |
+|---|---|---|
+| `CUBIC_METER_PER_CUBIC_METER_TO_BARRELS_PER_SCF` | 5.6146 | m³/m³ to BBL/scf |
+| `BARRELS_PER_SCF_TO_CUBIC_METER_PER_CUBIC_METER` | 0.1781 | BBL/scf to m³/m³ |
+| `CUBIC_METER_PER_CUBIC_METER_TO_BARRELS_PER_STB` | 1.0 | m³/m³ to BBL/STB |
+| `BARRELS_PER_STB_TO_CUBIC_METER_PER_CUBIC_METER` | 1.0 | BBL/STB to m³/m³ |
+
+### Density Conversions
+
+| Constant | Value | Description |
+|---|---|---|
+| `POUNDS_PER_CUBIC_FEET_TO_KILOGRAM_PER_CUBIC_METER` | 16.0185 | lb/ft³ to kg/m³ |
+| `KILOGRAM_PER_CUBIC_METER_TO_POUNDS_PER_CUBIC_FEET` | 0.0624279 | kg/m³ to lb/ft³ |
+| `POUNDS_PER_CUBIC_FEET_TO_GRAMS_PER_CUBIC_METER` | 0.01602 | lb/ft³ to g/cm³ |
+
+### Concentration/Salinity Conversions
+
+| Constant | Value | Description |
+|---|---|---|
+| `PPM_TO_GRAMS_PER_LITER` | 0.001 | ppm to g/L |
+| `GRAMS_PER_LITER_TO_PPM` | 1000 | g/L to ppm |
+| `PPM_TO_WEIGHT_FRACTION` | 1e-6 | ppm to weight fraction |
+| `PPM_TO_WEIGHT_PERCENT` | 1e-4 | ppm to weight percent |
+| `WEIGHT_PERCENT_TO_PPM` | 10000 | weight percent to ppm |
+
+### Interfacial Tension Conversions
+
+| Constant | Value | Description |
+|---|---|---|
+| `DYNE_PER_CENTIMETER_TO_PSI` | 4.621 | dyne/cm to psi |
+
+### Molar Volume
+
+| Constant | Value | Description |
+|---|---|---|
+| `SCF_PER_POUND_MOLE` | 379.49 | scf/(lb·mol) |
+
 ### Length Conversions
 
 | Constant | Value | Description |
@@ -154,6 +200,7 @@ if const is not None:
 | `FT_TO_METERS` | 0.3048 | ft to m |
 | `METERS_TO_FT` | 3.2808 | m to ft |
 | `INCHES_TO_METERS` | 0.0254 | in to m |
+| `METERS_TO_INCHES` | 39.3701 | m to in |
 
 ### Time Conversions
 
@@ -163,6 +210,7 @@ if const is not None:
 | `DAYS_PER_YEAR` | 365.25 | Days in a year |
 | `MONTHS_PER_YEAR` | 12 | Months in a year |
 | `SECONDS_PER_YEAR` | 31557600 | Seconds in a year |
+| `DAYS_PER_SECOND` | 1.157e-5 | Days in a second |
 
 ### Flow Rate Conversions
 
@@ -170,12 +218,16 @@ if const is not None:
 |---|---|---|
 | `CUBIC_METER_PER_SECOND_TO_STB_PER_DAY` | 543168.4 | m³/s to STB/day |
 | `STB_PER_DAY_TO_CUBIC_METER_PER_SECOND` | 1.841e-6 | STB/day to m³/s |
+| `CUBIC_METER_PER_SECOND_TO_SCF_PER_DAY` | 3049493 | m³/s to scf/day |
+| `SCF_PER_DAY_TO_CUBIC_METER_PER_SECOND` | 3.278e-7 | scf/day to m³/s |
 
 ### Transmissibility Conversions
 
 | Constant | Value | Description |
 |---|---|---|
-| `MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_DAY` | 0.001127 | Darcy transmissibility conversion |
+| `MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_DAY` | 0.001127 | mD/cP to ft²/(psi·day) |
+| `MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_SECOND` | 1.305e-8 | mD/cP to ft²/(psi·s) |
+| `MILLIDARCIES_FT_PER_CENTIPOISE_TO_CUBIC_FEET_PER_PSI_PER_DAY` | 0.001127 | (mD·ft)/cP to ft³/(psi·day) |
 
 ### Gravity
 
