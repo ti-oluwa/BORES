@@ -495,7 +495,11 @@ class ThreePhaseCapillaryPressureTable(
         oil_water_table = self.oil_water_table
         gas_oil_table = self.gas_oil_table
 
-        is_scalar = np.isscalar(water_saturation)
+        is_scalar = (
+            np.isscalar(water_saturation)
+            and np.isscalar(oil_saturation)
+            and np.isscalar(gas_saturation)
+        )
         zero = 0.0 if is_scalar else np.zeros_like(water_saturation)
 
         # Oil-water derivatives
@@ -640,6 +644,15 @@ def compute_brooks_corey_capillary_pressures(
     Sorw = np.atleast_1d(residual_oil_saturation_water)
     Sorg = np.atleast_1d(residual_oil_saturation_gas)
     Sgr = np.atleast_1d(residual_gas_saturation)
+    is_scalar = (
+        np.isscalar(water_saturation)
+        and np.isscalar(oil_saturation)
+        and np.isscalar(gas_saturation)
+        and np.isscalar(irreducible_water_saturation)
+        and np.isscalar(residual_oil_saturation_water)
+        and np.isscalar(residual_oil_saturation_gas)
+        and np.isscalar(residual_gas_saturation)
+    )
 
     # Broadcast all arrays to same shape
     sw, so, sg, Swc, Sorw, Sorg, Sgr = np.broadcast_arrays(
@@ -741,9 +754,8 @@ def compute_brooks_corey_capillary_pressures(
             gas_oil_capillary_pressure = np.where(undersaturated_gas, pcgo, 0.0)
 
     # Return scalars if inputs were scalars
-    is_scalar = np.isscalar(water_saturation)
     if is_scalar:
-        return float(oil_water_capillary_pressure), float(gas_oil_capillary_pressure)
+        return oil_water_capillary_pressure.item(), gas_oil_capillary_pressure.item()
     return oil_water_capillary_pressure, gas_oil_capillary_pressure
 
 
@@ -977,7 +989,11 @@ class BrooksCoreyCapillaryPressureModel(
             )
 
         wettability = self.wettability
-        is_scalar = np.isscalar(water_saturation)
+        is_scalar = (
+            np.isscalar(water_saturation)
+            and np.isscalar(oil_saturation)
+            and np.isscalar(gas_saturation)
+        )
         zero = 0.0 if is_scalar else np.zeros_like(water_saturation)
         sw = np.atleast_1d(water_saturation)
         sg = np.atleast_1d(gas_saturation)
@@ -1059,9 +1075,9 @@ class BrooksCoreyCapillaryPressureModel(
 
         if is_scalar:
             return CapillaryPressureDerivatives(
-                dPcow_dSw=float(np.ravel(d_pcow_d_sw)[0]),
-                dPcow_dSo=float(np.ravel(d_pcow_d_so)[0]),
-                dPcgo_dSg=float(np.ravel(d_pcgo_d_sg)[0]),
+                dPcow_dSw=d_pcow_d_sw.item(),
+                dPcow_dSo=d_pcow_d_so.item(),
+                dPcgo_dSg=d_pcgo_d_sg.item(),
                 dPcgo_dSo=zero,
             )
         return CapillaryPressureDerivatives(
@@ -1195,6 +1211,15 @@ def compute_van_genuchten_capillary_pressures(
     Sorw = np.atleast_1d(residual_oil_saturation_water)
     Sorg = np.atleast_1d(residual_oil_saturation_gas)
     Sgr = np.atleast_1d(residual_gas_saturation)
+    is_scalar = (
+        np.isscalar(water_saturation)
+        and np.isscalar(oil_saturation)
+        and np.isscalar(gas_saturation)
+        and np.isscalar(irreducible_water_saturation)
+        and np.isscalar(residual_oil_saturation_water)
+        and np.isscalar(residual_oil_saturation_gas)
+        and np.isscalar(residual_gas_saturation)
+    )
 
     # Broadcast all arrays to same shape
     sw, so, sg, Swc, Sorw, Sorg, Sgr = np.broadcast_arrays(
@@ -1291,9 +1316,8 @@ def compute_van_genuchten_capillary_pressures(
         gas_oil_capillary_pressure = np.where(valid_gas, pcgo, 0.0)
 
     # Return scalars if inputs were scalars
-    is_scalar = np.isscalar(water_saturation)
     if is_scalar:
-        return float(oil_water_capillary_pressure), float(gas_oil_capillary_pressure)
+        return oil_water_capillary_pressure.item(), gas_oil_capillary_pressure.item()
     return oil_water_capillary_pressure, gas_oil_capillary_pressure
 
 
@@ -1545,7 +1569,15 @@ class VanGenuchtenCapillaryPressureModel(
             )
 
         wettability = self.wettability
-        is_scalar = np.isscalar(water_saturation)
+        is_scalar = (
+            np.isscalar(water_saturation)
+            and np.isscalar(oil_saturation)
+            and np.isscalar(gas_saturation)
+            and np.isscalar(Swc)
+            and np.isscalar(Sorw)
+            and np.isscalar(Sorg)
+            and np.isscalar(Sgr)
+        )
         zero = 0.0 if is_scalar else np.zeros_like(water_saturation)
         sw = np.atleast_1d(water_saturation)
         sg = np.atleast_1d(gas_saturation)
@@ -1625,9 +1657,9 @@ class VanGenuchtenCapillaryPressureModel(
 
         if is_scalar:
             return CapillaryPressureDerivatives(
-                dPcow_dSw=float(np.ravel(d_pcow_d_sw)[0]),
-                dPcow_dSo=float(np.ravel(d_pcow_d_so)[0]),
-                dPcgo_dSg=float(np.ravel(d_pcgo_d_sg)[0]),
+                dPcow_dSw=d_pcow_d_sw.item(),
+                dPcow_dSo=d_pcow_d_so.item(),
+                dPcgo_dSg=d_pcgo_d_sg.item(),
                 dPcgo_dSo=zero,
             )
         return CapillaryPressureDerivatives(
@@ -1766,6 +1798,17 @@ def compute_leverett_j_capillary_pressures(
     Sgr = np.atleast_1d(residual_gas_saturation)
     perm = np.atleast_1d(permeability)
     phi = np.atleast_1d(porosity)
+    is_scalar = (
+        np.isscalar(water_saturation)
+        and np.isscalar(oil_saturation)
+        and np.isscalar(gas_saturation)
+        and np.isscalar(irreducible_water_saturation)
+        and np.isscalar(residual_oil_saturation_water)
+        and np.isscalar(residual_oil_saturation_gas)
+        and np.isscalar(residual_gas_saturation)
+        and np.isscalar(permeability)
+        and np.isscalar(porosity)
+    )
 
     # Broadcast all arrays to same shape
     sw, so, sg, Swc, Sorw, Sorg, Sgr, perm, phi = np.broadcast_arrays(
@@ -1876,9 +1919,8 @@ def compute_leverett_j_capillary_pressures(
         gas_oil_capillary_pressure = np.where(valid_gas, pcgo, 0.0)
 
     # Return scalars if inputs were scalars
-    is_scalar = np.isscalar(water_saturation)
     if is_scalar:
-        return float(oil_water_capillary_pressure), float(gas_oil_capillary_pressure)
+        return oil_water_capillary_pressure.item(), gas_oil_capillary_pressure.item()
     return oil_water_capillary_pressure, gas_oil_capillary_pressure
 
 
@@ -1941,6 +1983,8 @@ class LeverettJCapillaryPressureModel(
         residual_oil_saturation_water: typing.Optional[FloatOrArray] = None,
         residual_oil_saturation_gas: typing.Optional[FloatOrArray] = None,
         residual_gas_saturation: typing.Optional[FloatOrArray] = None,
+        porosity: typing.Optional[FloatOrArray] = None,
+        permeability: typing.Optional[FloatOrArray] = None,
     ) -> CapillaryPressures:
         """
         Compute capillary pressures using Leverett J-function.
@@ -1954,6 +1998,8 @@ class LeverettJCapillaryPressureModel(
         :param residual_oil_saturation_water: Optional override for Sorw - scalar or array.
         :param residual_oil_saturation_gas: Optional override for Sorg - scalar or array.
         :param residual_gas_saturation: Optional override for Sgr - scalar or array.
+        :param porosity: Optional override for porosity - scalar or array.
+        :param permeability: Optional override for permeability - scalar or array.
         :return: `CapillaryPressures` dictionary.
         """
         Swc = (
@@ -1976,6 +2022,8 @@ class LeverettJCapillaryPressureModel(
             if residual_gas_saturation is not None
             else self.residual_gas_saturation
         )
+        porosity = porosity if porosity is not None else self.porosity
+        permeability = permeability if permeability is not None else self.permeability
 
         params_missing = []
         if Swc is None:
@@ -2000,8 +2048,8 @@ class LeverettJCapillaryPressureModel(
             residual_oil_saturation_water=Sorw,  # type: ignore[arg-type]
             residual_oil_saturation_gas=Sorg,  # type: ignore[arg-type]
             residual_gas_saturation=Sgr,  # type: ignore[arg-type]
-            permeability=self.permeability,
-            porosity=self.porosity,
+            permeability=permeability,
+            porosity=porosity,
             oil_water_interfacial_tension=self.oil_water_interfacial_tension,
             gas_oil_interfacial_tension=self.gas_oil_interfacial_tension,
             oil_water_contact_angle=self.oil_water_contact_angle,
@@ -2024,6 +2072,8 @@ class LeverettJCapillaryPressureModel(
         residual_oil_saturation_water: typing.Optional[FloatOrArray] = None,
         residual_oil_saturation_gas: typing.Optional[FloatOrArray] = None,
         residual_gas_saturation: typing.Optional[FloatOrArray] = None,
+        porosity: typing.Optional[FloatOrArray] = None,
+        permeability: typing.Optional[FloatOrArray] = None,
     ) -> CapillaryPressureDerivatives:
         """
         Compute the partial derivatives of the Leverett J-function oil-water and
@@ -2071,6 +2121,8 @@ class LeverettJCapillaryPressureModel(
             oil saturation to gas flooding.
         :param residual_gas_saturation: Optional override for the residual gas
             saturation.
+        :param porosity: Optional override for porosity.
+        :param permeability: Optional override for permeability.
         :return: `CapillaryPressureDerivatives` dictionary containing the partial derivatives as described above.
         """
         Swc = (
@@ -2093,6 +2145,10 @@ class LeverettJCapillaryPressureModel(
             if residual_gas_saturation is not None
             else self.residual_gas_saturation
         )
+        porosity = porosity if porosity is not None else self.porosity
+        absolute_permeability = (
+            permeability if permeability is not None else self.permeability
+        )
 
         params_missing = []
         if Swc is None:
@@ -2110,8 +2166,6 @@ class LeverettJCapillaryPressureModel(
             )
 
         wettability = self.wettability
-        absolute_permeability = self.permeability
-        porosity = self.porosity
         oil_water_interfacial_tension = self.oil_water_interfacial_tension
         gas_oil_interfacial_tension = self.gas_oil_interfacial_tension
         oil_water_contact_angle_deg = self.oil_water_contact_angle
@@ -2120,7 +2174,15 @@ class LeverettJCapillaryPressureModel(
         j_function_exponent = self.j_function_exponent
         mixed_wet_water_fraction = self.mixed_wet_water_fraction
 
-        is_scalar = np.isscalar(water_saturation)
+        is_scalar = (
+            np.isscalar(water_saturation)
+            and np.isscalar(oil_saturation)
+            and np.isscalar(gas_saturation)
+            and np.isscalar(irreducible_water_saturation)
+            and np.isscalar(residual_oil_saturation_water)
+            and np.isscalar(residual_oil_saturation_gas)
+            and np.isscalar(residual_gas_saturation)
+        )
         zero = 0.0 if is_scalar else np.zeros_like(water_saturation)
         sw = np.atleast_1d(water_saturation)
         sg = np.atleast_1d(gas_saturation)
@@ -2204,9 +2266,9 @@ class LeverettJCapillaryPressureModel(
 
         if is_scalar:
             return CapillaryPressureDerivatives(
-                dPcow_dSw=float(np.ravel(d_pcow_d_sw)[0]),
-                dPcow_dSo=float(np.ravel(d_pcow_d_so)[0]),
-                dPcgo_dSg=float(np.ravel(d_pcgo_d_sg)[0]),
+                dPcow_dSw=d_pcow_d_sw.item(),
+                dPcow_dSo=d_pcow_d_so.item(),
+                dPcgo_dSg=d_pcgo_d_sg.item(),
                 dPcgo_dSo=zero,
             )
         return CapillaryPressureDerivatives(
@@ -2233,6 +2295,8 @@ class LeverettJCapillaryPressureModel(
         :kwarg residual_oil_saturation_water: Optional override for Sorw.
         :kwarg residual_oil_saturation_gas: Optional override for Sorg.
         :kwarg residual_gas_saturation: Optional override for Sgr.
+        :kwarg porosity: Optional override for porosity.
+        :kwarg permeability: Optional override for permeability.
         :return: `CapillaryPressures` dictionary.
         """
         return self.get_capillary_pressures(
@@ -2243,6 +2307,8 @@ class LeverettJCapillaryPressureModel(
             residual_oil_saturation_water=kwargs.get("residual_oil_saturation_water"),
             residual_oil_saturation_gas=kwargs.get("residual_oil_saturation_gas"),
             residual_gas_saturation=kwargs.get("residual_gas_saturation"),
+            porosity=kwargs.get("porosity"),
+            permeability=kwargs.get("permeability"),
         )
 
     def derivatives(
@@ -2262,6 +2328,8 @@ class LeverettJCapillaryPressureModel(
         :kwarg residual_oil_saturation_water: Optional override for Sorw.
         :kwarg residual_oil_saturation_gas: Optional override for Sorg.
         :kwarg residual_gas_saturation: Optional override for Sgr.
+        :kwarg porosity: Optional override for porosity.
+        :kwarg permeability: Optional override for permeability.
         :return: `CapillaryPressureDerivatives` dictionary containing the partial derivatives as described above.
         """
         return self.get_capillary_pressure_derivatives(
@@ -2272,4 +2340,6 @@ class LeverettJCapillaryPressureModel(
             residual_oil_saturation_water=kwargs.get("residual_oil_saturation_water"),
             residual_oil_saturation_gas=kwargs.get("residual_oil_saturation_gas"),
             residual_gas_saturation=kwargs.get("residual_gas_saturation"),
+            porosity=kwargs.get("porosity"),
+            permeability=kwargs.get("permeability"),
         )

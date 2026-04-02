@@ -2,7 +2,7 @@
 
 ## Overview
 
-Every well in BORES needs to know the properties of the fluids it handles. Production wells define `ProducedFluid` objects for each phase (oil, water, gas) that may flow into the wellbore. Injection wells define a single `InjectedFluid` object describing the fluid being pumped into the reservoir. These fluid objects provide the specific gravity and molecular weight needed to compute PVT properties (formation volume factors, viscosities, densities) at wellbore conditions.
+Every well in BORES needs to know the properties of the fluids it handles. Production wells define `ProducedFluid` objects for each phase (oil, water, gas) that may flow into the wellbore. Injection wells define a single `InjectedFluid` object describing the fluid being pumped into the reservoir. These fluid objects provide the specific gravity and molecular weight needed to compute PVT properties (formation volume factors, viscosities, densities) at wellbore conditions. Both classes inherit from [Fluid](../fluids.md), which provides the underlying PVT table and pseudo-pressure capabilities.
 
 The distinction between produced and injected fluids matters because of how PVT properties are used. For production wells, the simulator looks up oil, water, and gas properties from the reservoir model's PVT grids. For injection wells, the fluid properties may differ significantly from the in-situ reservoir fluids, particularly for gas injection (where the injected gas may be CO2 or nitrogen with very different properties from the reservoir's solution gas).
 

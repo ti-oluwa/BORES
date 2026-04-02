@@ -11,6 +11,7 @@ The User Guide provides detailed documentation for every major subsystem in BORE
 | [Fluid Properties](fluid-properties.md) | PVT correlations, oil/gas/water properties, and the reservoir model factory |
 | [Relative Permeability](relative-permeability.md) | Brooks-Corey model, Corey exponents, wettability, and three-phase mixing rules |
 | [Capillary Pressure](capillary-pressure.md) | Brooks-Corey, Van Genuchten, Leverett J-function, and tabular capillary pressure |
+| [Fluids](fluids.md) | Fluid class, custom gas characterization, pseudo-pressure for gas wells |
 | **Wells** | |
 | [Well Basics](wells/basics.md) | Production and injection wells, perforations, well index, skin factor |
 | [Well Controls](wells/controls.md) | Rate controls, BHP controls, CoupledRateControl, MultiPhaseControl |

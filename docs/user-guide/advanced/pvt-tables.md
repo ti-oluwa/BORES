@@ -369,6 +369,8 @@ for state in bores.run(model, config):
 
 PVT tables affect every part of the simulation that uses fluid properties: the pressure equation coefficients, mobility calculations, well rate conversions, capillary pressure evaluation, and phase flux computations. You are replacing the entire fluid property engine, not just a subset of it.
 
+If you need to attach PVT tables to a specific injected fluid rather than the entire simulation, see [Fluids](../fluids.md).
+
 ---
 
 ## Saving and Loading PVT Data

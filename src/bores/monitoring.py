@@ -105,6 +105,12 @@ class WellRateDiagnostics:
     """Water rate in STB/day."""
     gas_rate: float
     """Gas rate in SCF/day."""
+    average_oil_bhp: float = 0.0
+    """Average oil bottom hole pressure across all perforations, in psi."""
+    average_water_bhp: float = 0.0
+    """Average water bottom hole pressure across all perforations, in psi."""
+    average_gas_bhp: float = 0.0
+    """Average gas bottom hole pressure across all perforations, in psi."""
 
 
 @dataclass
@@ -488,6 +494,24 @@ def _convert_to_total_surface_rate(
     return total_surface_rate
 
 
+def _avg_bhp_for_well_cells(
+    cell_keys: typing.List[typing.Tuple[int, ...]],
+    bhp_tensor: SparseTensor,
+) -> float:
+    """
+    Compute the average BHP across a well's perforation cells.
+
+    Only cells with an explicitly stored BHP entry are included.
+    Returns 0.0 if no cells have a stored entry.
+
+    :param cell_keys: List of grid index tuples for this well's perforations.
+    :param bhp_tensor: Sparse tensor of bottom hole pressures (psi).
+    :return: Mean BHP in psi, or 0.0 if no entries found.
+    """
+    values = [float(bhp_tensor[key]) for key in cell_keys if key in bhp_tensor]
+    return sum(values) / len(values) if values else 0.0
+
+
 def _build_well_diagnostics(
     state: ModelState[ThreeDimensions],
 ) -> typing.List[WellRateDiagnostics]:
@@ -524,6 +548,9 @@ def _build_well_diagnostics(
             state.injection_formation_volume_factors.gas,
             "gas",
         )
+        average_oil_bhp = _avg_bhp_for_well_cells(cells, state.injection_bhps.oil)
+        average_water_bhp = _avg_bhp_for_well_cells(cells, state.injection_bhps.water)
+        average_gas_bhp = _avg_bhp_for_well_cells(cells, state.injection_bhps.gas)
         results.append(
             WellRateDiagnostics(
                 name=well.name,
@@ -531,6 +558,9 @@ def _build_well_diagnostics(
                 oil_rate=oil_rate,
                 water_rate=water_rate,
                 gas_rate=gas_rate,
+                average_oil_bhp=average_oil_bhp,
+                average_water_bhp=average_water_bhp,
+                average_gas_bhp=average_gas_bhp,
             )
         )
 
@@ -554,6 +584,9 @@ def _build_well_diagnostics(
             state.production_formation_volume_factors.gas,
             "gas",
         )
+        average_oil_bhp = _avg_bhp_for_well_cells(cells, state.production_bhps.oil)
+        average_water_bhp = _avg_bhp_for_well_cells(cells, state.production_bhps.water)
+        average_gas_bhp = _avg_bhp_for_well_cells(cells, state.production_bhps.gas)
         results.append(
             WellRateDiagnostics(
                 name=well.name,
@@ -561,6 +594,9 @@ def _build_well_diagnostics(
                 oil_rate=oil_rate,
                 water_rate=water_rate,
                 gas_rate=gas_rate,
+                average_oil_bhp=average_oil_bhp,
+                average_water_bhp=average_water_bhp,
+                average_gas_bhp=average_gas_bhp,
             )
         )
 
@@ -623,7 +659,6 @@ def _build_step_diagnostics(
         phase="gas",
     )
 
-    # Per-well diagnostics
     well_diagnostics = _build_well_diagnostics(state)
     return StepDiagnostics(
         step=state.step,
@@ -709,8 +744,8 @@ def _build_rich_panel(
         warn = "dark_orange"
         dim = "grey50"
         title_style = "bold navy_blue on grey93"
-        inj_col = "steel_blue1"
-        prod_col = "dark_orange"
+        inj_color = "steel_blue1"
+        prod_color = "dark_orange"
     else:
         hdr = "bold bright_yellow"
         val = "bright_white"
@@ -718,8 +753,8 @@ def _build_rich_panel(
         warn = "yellow"
         dim = "grey62"
         title_style = "bold bright_yellow on grey11"
-        inj_col = "cyan1"
-        prod_col = "orange1"
+        inj_color = "cyan1"
+        prod_color = "orange1"
 
     percentage = (
         min(diagnostics.elapsed_time / total_simulation_time * 100, 100.0)
@@ -848,27 +883,68 @@ def _build_rich_panel(
         )
         well_table.add_column("Well", style=val, no_wrap=True)
         well_table.add_column("Type", style=dim, no_wrap=True)
-        well_table.add_column("Oil", no_wrap=True, justify="right")
-        well_table.add_column("Water", no_wrap=True, justify="right")
-        well_table.add_column("Gas", no_wrap=True, justify="right")
+        well_table.add_column("Oil Rate", no_wrap=True, justify="right")
+        well_table.add_column("Water Rate", no_wrap=True, justify="right")
+        well_table.add_column("Gas Rate", no_wrap=True, justify="right")
+        well_table.add_column("Oil BHP", no_wrap=True, justify="right")
+        well_table.add_column("Water BHP", no_wrap=True, justify="right")
+        well_table.add_column("Gas BHP", no_wrap=True, justify="right")
 
         for wd in diagnostics.well_diagnostics:
             is_inj = wd.well_type == "injection"
             type_markup = (
-                f"[{inj_col}]INJ[/{inj_col}]"
+                f"[{inj_color}]INJ[/{inj_color}]"
                 if is_inj
-                else f"[{prod_col}]PROD[/{prod_col}]"
+                else f"[{prod_color}]PROD[/{prod_color}]"
             )
-            rate_style = inj_col if is_inj else prod_col
+            rate_style = inj_color if is_inj else prod_color
+
+            # Format rate values
+            oil_rate_str = (
+                f"[{rate_style}]{wd.oil_rate:.3e}[/{rate_style}] STB/d"
+                if wd.oil_rate > 0.0
+                else f"[{dim}]—[/{dim}]"
+            )
+            water_rate_str = (
+                f"[{rate_style}]{wd.water_rate:.3e}[/{rate_style}] STB/d"
+                if wd.water_rate > 0.0
+                else f"[{dim}]—[/{dim}]"
+            )
+            gas_rate_str = (
+                f"[{rate_style}]{wd.gas_rate:.3e}[/{rate_style}] SCF/d"
+                if wd.gas_rate > 0.0
+                else f"[{dim}]—[/{dim}]"
+            )
+
+            # Format BHP values
+            oil_bhp_str = (
+                f"[{rate_style}]{wd.average_oil_bhp:,.2f} psi[/{rate_style}]"
+                if wd.average_oil_bhp > 0.0
+                else f"[{dim}]—[/{dim}]"
+            )
+            water_bhp_str = (
+                f"[{rate_style}]{wd.average_water_bhp:,.2f} psi[/{rate_style}]"
+                if wd.average_water_bhp > 0.0
+                else f"[{dim}]—[/{dim}]"
+            )
+            gas_bhp_str = (
+                f"[{rate_style}]{wd.average_gas_bhp:,.2f} psi[/{rate_style}]"
+                if wd.average_gas_bhp > 0.0
+                else f"[{dim}]—[/{dim}]"
+            )
+
             well_table.add_row(
                 wd.name,
                 type_markup,
-                f"[{rate_style}]{wd.oil_rate:.3e}[/{rate_style}] STB/d",
-                f"[{rate_style}]{wd.water_rate:.3e}[/{rate_style}] STB/d",
-                f"[{rate_style}]{wd.gas_rate:.3e}[/{rate_style}] SCF/d",
+                oil_rate_str,
+                water_rate_str,
+                gas_rate_str,
+                oil_bhp_str,
+                water_bhp_str,
+                gas_bhp_str,
             )
 
-        renderables += [Text(""), Text("  Well Rates", style=hdr), well_table]
+        renderables += [Text(""), Text("  Well Rates & BHPs", style=hdr), well_table]
 
     return Panel(
         Group(*renderables),

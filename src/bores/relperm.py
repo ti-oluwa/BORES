@@ -1124,6 +1124,7 @@ class TwoPhaseRelPermTable(Serializable):
             if non_wetting_saturation is not None
             else wetting_saturation,
         )
+        is_scalar = np.isscalar(ref)
         saturation = np.atleast_1d(ref)
         original_shape = saturation.shape
         kr_flat = np.interp(
@@ -1133,7 +1134,7 @@ class TwoPhaseRelPermTable(Serializable):
             left=self.wetting_phase_relative_permeability[0],
             right=self.wetting_phase_relative_permeability[-1],
         )
-        return kr_flat.reshape(original_shape)
+        return kr_flat.reshape(original_shape) if not is_scalar else kr_flat.item()
 
     def get_non_wetting_phase_relative_permeability(
         self,
@@ -1157,6 +1158,7 @@ class TwoPhaseRelPermTable(Serializable):
             if non_wetting_saturation is not None
             else wetting_saturation,
         )
+        is_scalar = np.isscalar(ref)
         saturation = np.atleast_1d(ref)
         original_shape = saturation.shape
         kr_flat = np.interp(
@@ -1166,7 +1168,7 @@ class TwoPhaseRelPermTable(Serializable):
             left=self.non_wetting_phase_relative_permeability[0],
             right=self.non_wetting_phase_relative_permeability[-1],
         )
-        return kr_flat.reshape(original_shape)
+        return kr_flat.reshape(original_shape) if not is_scalar else kr_flat.item()
 
     def get_relative_permeabilities(
         self,
@@ -1362,6 +1364,11 @@ class ThreePhaseRelPermTable(
         so = np.atleast_1d(oil_saturation)
         sg = np.atleast_1d(gas_saturation)
         sw, so, sg = np.broadcast_arrays(sw, so, sg)
+        is_scalar = (
+            np.isscalar(water_saturation)
+            and np.isscalar(oil_saturation)
+            and np.isscalar(gas_saturation)
+        )
 
         if np.any((sw < 0) | (sw > 1) | (so < 0) | (so > 1) | (sg < 0) | (sg > 1)):
             raise ValidationError("Saturations must be between 0 and 1.")
@@ -1424,6 +1431,12 @@ class ThreePhaseRelPermTable(
         else:
             kro = np.minimum(kro_w, kro_g)
 
+        if is_scalar:
+            return RelativePermeabilities(
+                water=krw.item(),  # type: ignore
+                oil=kro.item(),  # type: ignore
+                gas=krg.item(),  # type: ignore
+            )
         return RelativePermeabilities(water=krw, oil=kro, gas=krg)  # type: ignore[typeddict-item]
 
     def get_relative_permeability_derivatives(
@@ -1478,7 +1491,11 @@ class ThreePhaseRelPermTable(
         :param gas_saturation: Gas saturation (fraction, 0 to 1).
         :return: `RelativePermeabilityDerivatives` dictionary containing the partial derivatives as described above.
         """
-        is_scalar = np.isscalar(water_saturation)
+        is_scalar = (
+            np.isscalar(water_saturation)
+            and np.isscalar(oil_saturation)
+            and np.isscalar(gas_saturation)
+        )
         sw = np.atleast_1d(np.asarray(water_saturation, dtype=np.float64))
         so = np.atleast_1d(np.asarray(oil_saturation, dtype=np.float64))
         sg = np.atleast_1d(np.asarray(gas_saturation, dtype=np.float64))
@@ -1721,7 +1738,7 @@ class ThreePhaseRelPermTable(
             d_krg_d_sg,
         )
         if is_scalar:
-            results = tuple(float(np.ravel(r)[0]) for r in results)
+            results = tuple(r.item() for r in results)  # type: ignore
             return RelativePermeabilityDerivatives(
                 dKrw_dSw=results[0],
                 dKro_dSw=results[1],
@@ -1751,15 +1768,15 @@ def compute_corey_three_phase_relative_permeabilities(
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
-    irreducible_water_saturation: float,
-    residual_oil_saturation_water: float,
-    residual_oil_saturation_gas: float,
-    residual_gas_saturation: float,
+    irreducible_water_saturation: FloatOrArray,
+    residual_oil_saturation_water: FloatOrArray,
+    residual_oil_saturation_gas: FloatOrArray,
+    residual_gas_saturation: FloatOrArray,
     water_exponent: float,
     oil_exponent: float,
     gas_exponent: float,
     wettability: Wettability = Wettability.WATER_WET,
-    mixing_rule: MixingRule = stone_II_rule,
+    mixing_rule: MixingRule = eclipse_rule,
     saturation_epsilon: float = 1e-6,
     minimum_mobile_pore_space: float = 1e-9,
 ) -> typing.Tuple[FloatOrArray, FloatOrArray, FloatOrArray]:
@@ -1782,12 +1799,24 @@ def compute_corey_three_phase_relative_permeabilities(
     :param oil_exponent: Corey exponent for oil relative permeability (affects Stone I blending).
     :param gas_exponent: Corey exponent for gas relative permeability.
     :param wettability: Wettability type (water-wet or oil-wet).
-    :return: (water_relative_permeability, oil_relative_permeability, gas_relative_permeability)
+    :param mixing_rule: Mixing rule function for three-phase oil relative permeability.
+    :param saturation_epsilon: Tolerance for checking if saturations sum to 1.
+    :param minimum_mobile_pore_space: Minimum mobile pore space to avoid division by zero in effective saturation calculations.
+    :return: Tuple of (water_relative_permeability, oil_relative_permeability, gas_relative_permeability)
     """
     # Convert to arrays for vectorized operations
     sw = np.atleast_1d(water_saturation)
     so = np.atleast_1d(oil_saturation)
     sg = np.atleast_1d(gas_saturation)
+    is_scalar = (
+        np.isscalar(water_saturation)
+        and np.isscalar(oil_saturation)
+        and np.isscalar(gas_saturation)
+        and np.isscalar(irreducible_water_saturation)
+        and np.isscalar(residual_oil_saturation_water)
+        and np.isscalar(residual_oil_saturation_gas)
+        and np.isscalar(residual_gas_saturation)
+    )
 
     # Broadcast all arrays to same shape
     sw, so, sg = np.broadcast_arrays(sw, so, sg)
@@ -1809,10 +1838,10 @@ def compute_corey_three_phase_relative_permeabilities(
     if wettability == Wettability.WATER_WET:
         # 1. Water relperm (wetting phase)
         movable_water_range = (
-            1.0 - irreducible_water_saturation - residual_oil_saturation_water
+            1.0 - irreducible_water_saturation - residual_oil_saturation_water  # type: ignore[operator]
         )
         effective_water_saturation = np.where(
-            movable_water_range <= minimum_mobile_pore_space,
+            movable_water_range <= minimum_mobile_pore_space,  # type: ignore[operator]
             np.zeros_like(sw),
             np.clip(
                 (sw - irreducible_water_saturation) / movable_water_range, 0.0, 1.0
@@ -1822,14 +1851,14 @@ def compute_corey_three_phase_relative_permeabilities(
 
         # 2. Gas relperm (nonwetting)
         # Mobile gas range must account for connate water + residual oil + residual gas
-        movable_gas_range = (
+        movable_gas_range = (  # type: ignore[operator]
             1.0
-            - irreducible_water_saturation
-            - residual_gas_saturation
+            - irreducible_water_saturation  # type: ignore[operator]
+            - residual_gas_saturation  # type: ignore[operator]
             - residual_oil_saturation_gas
         )
         effective_gas_saturation = np.where(
-            movable_gas_range <= minimum_mobile_pore_space,
+            movable_gas_range <= minimum_mobile_pore_space,  # type: ignore[operator]
             np.zeros_like(sg),
             np.clip((sg - residual_gas_saturation) / movable_gas_range, 0.0, 1.0),
         )
@@ -1853,22 +1882,22 @@ def compute_corey_three_phase_relative_permeabilities(
         # Oil is wetting, water becomes intermediate
         # 1. Oil relperm (wetting phase)
         movable_oil_range = (
-            1.0 - residual_oil_saturation_water - residual_oil_saturation_gas
+            1.0 - residual_oil_saturation_water - residual_oil_saturation_gas  # type: ignore[operator]
         )
         max_residual = np.minimum(
             residual_oil_saturation_water, residual_oil_saturation_gas
         )
         effective_oil_saturation = np.where(
-            movable_oil_range <= minimum_mobile_pore_space,
+            movable_oil_range <= minimum_mobile_pore_space,  # type: ignore[operator]
             np.zeros_like(so),
             np.clip((so - max_residual) / movable_oil_range, 0.0, 1.0),
         )
         kro = effective_oil_saturation**oil_exponent
 
         # 2. Gas relperm (nonwetting phase)
-        movable_gas_range = 1.0 - residual_gas_saturation - irreducible_water_saturation
+        movable_gas_range = 1.0 - residual_gas_saturation - irreducible_water_saturation  # type: ignore[operator]
         effective_gas_saturation = np.where(
-            movable_gas_range <= minimum_mobile_pore_space,
+            movable_gas_range <= minimum_mobile_pore_space,  # type: ignore[operator]
             np.zeros_like(sg),
             np.clip((sg - residual_gas_saturation) / movable_gas_range, 0.0, 1.0),
         )
@@ -1892,6 +1921,10 @@ def compute_corey_three_phase_relative_permeabilities(
     krw = np.clip(krw, 0.0, 1.0)
     kro = np.clip(kro, 0.0, 1.0)
     krg = np.clip(krg, 0.0, 1.0)
+    if is_scalar:
+        krw = krw.item()  # type: ignore
+        kro = kro.item()  # type: ignore
+        krg = krg.item()  # type: ignore
     return krw, kro, krg  # type: ignore[return-value]
 
 
@@ -1906,9 +1939,6 @@ class BrooksCoreyThreePhaseRelPermModel(
 ):
     """
     Brooks-Corey-type three-phase relative permeability model.
-
-    Uses the Brooks-Corey model for two-phase relative permeabilities
-    and Stone I mixing rule for oil in three-phase system.
 
     Supports water-wet and oil-wet wettability assumptions.
     """
@@ -1931,7 +1961,7 @@ class BrooksCoreyThreePhaseRelPermModel(
     """
     oil_exponent: float = 2.0
     """
-    Corey exponent for oil relative permeability (affects Stone I blending). 
+    Corey exponent for oil relative permeability. 
     
     Higher values make the curve steeper. Meaning slower kro increase with saturation.
     """
@@ -1968,10 +1998,10 @@ class BrooksCoreyThreePhaseRelPermModel(
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
         gas_saturation: FloatOrArray,
-        irreducible_water_saturation: typing.Optional[float] = None,
-        residual_oil_saturation_water: typing.Optional[float] = None,
-        residual_oil_saturation_gas: typing.Optional[float] = None,
-        residual_gas_saturation: typing.Optional[float] = None,
+        irreducible_water_saturation: typing.Optional[FloatOrArray] = None,
+        residual_oil_saturation_water: typing.Optional[FloatOrArray] = None,
+        residual_oil_saturation_gas: typing.Optional[FloatOrArray] = None,
+        residual_gas_saturation: typing.Optional[FloatOrArray] = None,
     ) -> RelativePermeabilities:
         """
         Compute relative permeabilities for water, oil, and gas.
@@ -2046,10 +2076,10 @@ class BrooksCoreyThreePhaseRelPermModel(
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
         gas_saturation: FloatOrArray,
-        irreducible_water_saturation: typing.Optional[float] = None,
-        residual_oil_saturation_water: typing.Optional[float] = None,
-        residual_oil_saturation_gas: typing.Optional[float] = None,
-        residual_gas_saturation: typing.Optional[float] = None,
+        irreducible_water_saturation: typing.Optional[FloatOrArray] = None,
+        residual_oil_saturation_water: typing.Optional[FloatOrArray] = None,
+        residual_oil_saturation_gas: typing.Optional[FloatOrArray] = None,
+        residual_gas_saturation: typing.Optional[FloatOrArray] = None,
     ) -> RelativePermeabilityDerivatives:
         """
         Compute all nine partial derivatives of the three-phase relative
@@ -2131,7 +2161,15 @@ class BrooksCoreyThreePhaseRelPermModel(
         wettability = self.wettability
         mixing_rule = typing.cast(MixingRule, self.mixing_rule)
 
-        is_scalar = np.isscalar(water_saturation)
+        is_scalar = (
+            np.isscalar(water_saturation)
+            and np.isscalar(oil_saturation)
+            and np.isscalar(gas_saturation)
+            and np.isscalar(Swc)
+            and np.isscalar(Sorw)
+            and np.isscalar(Sorg)
+            and np.isscalar(Sgr)
+        )
         sw = np.atleast_1d(water_saturation)
         so = np.atleast_1d(oil_saturation)
         sg = np.atleast_1d(gas_saturation)
@@ -2217,7 +2255,7 @@ class BrooksCoreyThreePhaseRelPermModel(
             ) = _mixing_rule_partial_derivatives(
                 mixing_rule=mixing_rule,
                 kro_water_two_phase=kro_proxy,
-                kro_gas_two_phase=krg_proxy,
+                kro_gas_two_phase=krg_proxy,  # type: ignore[arg-type]
                 water_saturation=sw,
                 oil_saturation=so,
                 gas_saturation=sg,
@@ -2253,7 +2291,7 @@ class BrooksCoreyThreePhaseRelPermModel(
                 d_krg_d_sg,
             )
             if is_scalar:
-                results = tuple(float(np.ravel(r)[0]) for r in results)
+                results = tuple(r.item() for r in results)
             return RelativePermeabilityDerivatives(
                 dKrw_dSw=results[0],
                 dKro_dSw=results[1],
@@ -2337,8 +2375,8 @@ class BrooksCoreyThreePhaseRelPermModel(
             d_kro_d_gas_saturation_explicit,
         ) = _mixing_rule_partial_derivatives(
             mixing_rule=mixing_rule,
-            kro_water_two_phase=kro_w_shaped,
-            kro_gas_two_phase=kro_g_shaped,
+            kro_water_two_phase=kro_w_shaped,  # type: ignore[arg-type]
+            kro_gas_two_phase=kro_g_shaped,  # type: ignore[arg-type]
             water_saturation=sw,
             oil_saturation=so,
             gas_saturation=sg,
@@ -2373,7 +2411,7 @@ class BrooksCoreyThreePhaseRelPermModel(
             d_krg_d_sg,
         )
         if is_scalar:
-            results = tuple(float(np.ravel(r)[0]) for r in results)
+            results = tuple(r.item() for r in results)
             return RelativePermeabilityDerivatives(
                 dKrw_dSw=results[0],
                 dKro_dSw=results[1],
@@ -2551,10 +2589,10 @@ def compute_let_three_phase_relative_permeabilities(
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
-    irreducible_water_saturation: float,
-    residual_oil_saturation_water: float,
-    residual_oil_saturation_gas: float,
-    residual_gas_saturation: float,
+    irreducible_water_saturation: FloatOrArray,
+    residual_oil_saturation_water: FloatOrArray,
+    residual_oil_saturation_gas: FloatOrArray,
+    residual_gas_saturation: FloatOrArray,
     water_L: float,
     water_E: float,
     water_T: float,
@@ -2615,9 +2653,17 @@ def compute_let_three_phase_relative_permeabilities(
     sw = np.atleast_1d(water_saturation)
     so = np.atleast_1d(oil_saturation)
     sg = np.atleast_1d(gas_saturation)
+    is_scalar = (
+        np.isscalar(water_saturation)
+        and np.isscalar(oil_saturation)
+        and np.isscalar(gas_saturation)
+        and np.isscalar(irreducible_water_saturation)
+        and np.isscalar(residual_oil_saturation_water)
+        and np.isscalar(residual_oil_saturation_gas)
+        and np.isscalar(residual_gas_saturation)
+    )
 
     sw, so, sg = np.broadcast_arrays(sw, so, sg)
-
     if np.any((sw < 0) | (sw > 1) | (so < 0) | (so > 1) | (sg < 0) | (sg > 1)):
         raise ValidationError("Saturations must be between 0 and 1.")
 
@@ -2638,18 +2684,18 @@ def compute_let_three_phase_relative_permeabilities(
 
     if wettability == Wettability.WATER_WET:
         # Water kr (wetting phase)
-        movable_water_range = 1.0 - Swc - Sorw
+        movable_water_range = 1.0 - Swc - Sorw  # type: ignore[operator]
         sw_star = np.where(
-            movable_water_range <= minimum_mobile_pore_space,
+            movable_water_range <= minimum_mobile_pore_space,  # type: ignore[operator]
             np.zeros_like(sw),
             np.clip((sw - Swc) / movable_water_range, 0.0, 1.0),
         )
         krw = max_water_relperm * _let_relperm(sw_star, water_L, water_E, water_T)
 
         # Gas kr (non-wetting phase)
-        movable_gas_range = 1.0 - Swc - Sgr - Sorg
+        movable_gas_range = 1.0 - Swc - Sgr - Sorg  # type: ignore[operator]
         sg_star = np.where(
-            movable_gas_range <= minimum_mobile_pore_space,
+            movable_gas_range <= minimum_mobile_pore_space,  # type: ignore[operator]
             np.zeros_like(sg),
             np.clip((sg - Sgr) / movable_gas_range, 0.0, 1.0),
         )
@@ -2661,18 +2707,18 @@ def compute_let_three_phase_relative_permeabilities(
         # correct results. The endpoint scaling is applied after mixing.
 
         # Two-phase oil kr in the water-oil system (unit endpoint)
-        movable_oil_water_range = 1.0 - Swc - Sorw
+        movable_oil_water_range = 1.0 - Swc - Sorw  # type: ignore[operator]
         so_star_w = np.where(
-            movable_oil_water_range <= minimum_mobile_pore_space,
+            movable_oil_water_range <= minimum_mobile_pore_space,  # type: ignore[operator]
             np.zeros_like(so),
             np.clip((so - Sorw) / movable_oil_water_range, 0.0, 1.0),
         )
         kro_w = _let_relperm(so_star_w, oil_water_L, oil_water_E, oil_water_T)
 
         # Two-phase oil kr in the gas-oil system (unit endpoint)
-        movable_gas_oil_range = 1.0 - Swc - Sorg - Sgr
+        movable_gas_oil_range = 1.0 - Swc - Sorg - Sgr  # type: ignore[operator]
         so_star_g = np.where(
-            movable_gas_oil_range <= minimum_mobile_pore_space,
+            movable_gas_oil_range <= minimum_mobile_pore_space,  # type: ignore[operator]
             np.zeros_like(so),
             np.clip((so - Sorg) / movable_gas_oil_range, 0.0, 1.0),
         )
@@ -2694,10 +2740,10 @@ def compute_let_three_phase_relative_permeabilities(
     elif wettability == Wettability.OIL_WET:
         # Oil is wetting, water becomes intermediate
         # Oil kr (wetting phase)
-        movable_oil_range = 1.0 - Sorw - Sorg
+        movable_oil_range = 1.0 - Sorw - Sorg  # type: ignore[operator]
         max_residual = np.minimum(Sorw, Sorg)
         so_star = np.where(
-            movable_oil_range <= minimum_mobile_pore_space,
+            movable_oil_range <= minimum_mobile_pore_space,  # type: ignore[operator]
             np.zeros_like(so),
             np.clip((so - max_residual) / movable_oil_range, 0.0, 1.0),
         )
@@ -2706,9 +2752,9 @@ def compute_let_three_phase_relative_permeabilities(
         )
 
         # Gas kr (non-wetting phase)
-        movable_gas_range = 1.0 - Sgr - Swc
+        movable_gas_range = 1.0 - Sgr - Swc  # type: ignore[operator]
         sg_star = np.where(
-            movable_gas_range <= minimum_mobile_pore_space,
+            movable_gas_range <= minimum_mobile_pore_space,  # type: ignore[operator]
             np.zeros_like(sg),
             np.clip((sg - Sgr) / movable_gas_range, 0.0, 1.0),
         )
@@ -2719,18 +2765,18 @@ def compute_let_three_phase_relative_permeabilities(
         # scaling after mixing (same rationale as oil in water-wet case).
 
         # Two-phase water kr from oil-water system (unit endpoint)
-        movable_water_range_ow = 1.0 - Swc - Sorw
+        movable_water_range_ow = 1.0 - Swc - Sorw  # type: ignore[operator]
         sw_star_ow = np.where(
-            movable_water_range_ow <= minimum_mobile_pore_space,
+            movable_water_range_ow <= minimum_mobile_pore_space,  # type: ignore[operator]
             np.zeros_like(sw),
             np.clip((sw - Swc) / movable_water_range_ow, 0.0, 1.0),
         )
         krw_ow = _let_relperm(sw_star_ow, water_L, water_E, water_T)
 
         # Two-phase water kr proxy from gas-water system (unit endpoint)
-        movable_water_range_gw = 1.0 - Swc - Sgr
+        movable_water_range_gw = 1.0 - Swc - Sgr  # type: ignore[operator]
         sw_star_gw = np.where(
-            movable_water_range_gw <= minimum_mobile_pore_space,
+            movable_water_range_gw <= minimum_mobile_pore_space,  # type: ignore[operator]
             np.zeros_like(sw),
             np.clip((sw - Swc) / movable_water_range_gw, 0.0, 1.0),
         )
@@ -2751,6 +2797,10 @@ def compute_let_three_phase_relative_permeabilities(
     krw = np.clip(krw, 0.0, 1.0)
     kro = np.clip(kro, 0.0, 1.0)
     krg = np.clip(krg, 0.0, 1.0)
+    if is_scalar:
+        krw = krw.item()  # type: ignore
+        kro = kro.item()  # type: ignore
+        krg = krg.item()  # type: ignore
     return krw, kro, krg  # type: ignore[return-value]
 
 
@@ -2878,10 +2928,10 @@ class LETThreePhaseRelPermModel(
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
         gas_saturation: FloatOrArray,
-        irreducible_water_saturation: typing.Optional[float] = None,
-        residual_oil_saturation_water: typing.Optional[float] = None,
-        residual_oil_saturation_gas: typing.Optional[float] = None,
-        residual_gas_saturation: typing.Optional[float] = None,
+        irreducible_water_saturation: typing.Optional[FloatOrArray] = None,
+        residual_oil_saturation_water: typing.Optional[FloatOrArray] = None,
+        residual_oil_saturation_gas: typing.Optional[FloatOrArray] = None,
+        residual_gas_saturation: typing.Optional[FloatOrArray] = None,
     ) -> RelativePermeabilities:
         """
         Compute relative permeabilities for water, oil, and gas using the
@@ -2968,10 +3018,10 @@ class LETThreePhaseRelPermModel(
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
         gas_saturation: FloatOrArray,
-        irreducible_water_saturation: typing.Optional[float] = None,
-        residual_oil_saturation_water: typing.Optional[float] = None,
-        residual_oil_saturation_gas: typing.Optional[float] = None,
-        residual_gas_saturation: typing.Optional[float] = None,
+        irreducible_water_saturation: typing.Optional[FloatOrArray] = None,
+        residual_oil_saturation_water: typing.Optional[FloatOrArray] = None,
+        residual_oil_saturation_gas: typing.Optional[FloatOrArray] = None,
+        residual_gas_saturation: typing.Optional[FloatOrArray] = None,
     ) -> RelativePermeabilityDerivatives:
         """
         Compute all nine partial derivatives of the three-phase relative
@@ -3059,7 +3109,15 @@ class LETThreePhaseRelPermModel(
         kro_max = self.max_oil_relperm
         krg_max = self.max_gas_relperm
 
-        is_scalar = np.isscalar(water_saturation)
+        is_scalar = (
+            np.isscalar(water_saturation)
+            and np.isscalar(oil_saturation)
+            and np.isscalar(gas_saturation)
+            and np.isscalar(Swc)
+            and np.isscalar(Sorw)
+            and np.isscalar(Sorg)
+            and np.isscalar(Sgr)
+        )
         sw = np.atleast_1d(water_saturation)
         so = np.atleast_1d(oil_saturation)
         sg = np.atleast_1d(gas_saturation)
@@ -3069,7 +3127,7 @@ class LETThreePhaseRelPermModel(
 
         if wettability == Wettability.OIL_WET:
             # kro (wetting, depends on So)
-            movable_oil_range = 1.0 - Sorw - Sorg  # type: ignore
+            movable_oil_range = 1.0 - Sorw - Sorg  # type: ignore[operator]
             max_residual = np.minimum(Sorw, Sorg)  # type: ignore
             valid_oil = movable_oil_range > minimum_mobile_pore_space
             se_o = np.clip(
@@ -3094,7 +3152,7 @@ class LETThreePhaseRelPermModel(
             d_kro_d_sg = zeros.copy()
 
             # krg (non-wetting, depends on Sg)
-            movable_gas_range = 1.0 - Sgr - Swc  # type: ignore
+            movable_gas_range = 1.0 - Sgr - Swc  # type: ignore[operator]
             valid_gas = movable_gas_range > minimum_mobile_pore_space
             se_g = np.clip(
                 (sg - Sgr) / np.where(valid_gas, movable_gas_range, 1.0),
@@ -3115,7 +3173,7 @@ class LETThreePhaseRelPermModel(
 
             # krw (intermediate, via mixing rule)
             # Two-phase krw proxies (unit-endpoint, same as forward path)
-            movable_water_range_ow = 1.0 - Swc - Sorw  # type: ignore
+            movable_water_range_ow = 1.0 - Swc - Sorw  # type: ignore[operator]
             valid_water_ow = movable_water_range_ow > minimum_mobile_pore_space
             se_w_ow = np.clip(
                 (sw - Swc) / np.where(valid_water_ow, movable_water_range_ow, 1.0),
@@ -3123,10 +3181,13 @@ class LETThreePhaseRelPermModel(
                 1.0,
             )
             krw_ow = _let_relperm(
-                se_w_ow, water_params.L, water_params.E, water_params.T
+                se_w_ow,  # type: ignore[operator]
+                water_params.L,
+                water_params.E,
+                water_params.T,
             )
 
-            movable_water_range_gw = 1.0 - Swc - Sgr  # type: ignore
+            movable_water_range_gw = 1.0 - Swc - Sgr  # type: ignore[operator]
             valid_water_gw = movable_water_range_gw > minimum_mobile_pore_space
             se_w_gw = np.clip(
                 (sw - Swc) / np.where(valid_water_gw, movable_water_range_gw, 1.0),
@@ -3134,7 +3195,10 @@ class LETThreePhaseRelPermModel(
                 1.0,
             )
             krw_gw = _let_relperm(
-                se_w_gw, water_params.L, water_params.E, water_params.T
+                se_w_gw, # type: ignore[operator]
+                water_params.L,
+                water_params.E,
+                water_params.T,
             )
 
             # d(krw_ow)/dSw — depends only on Sw
@@ -3205,7 +3269,7 @@ class LETThreePhaseRelPermModel(
                 d_krg_d_sg,
             )
             if is_scalar:
-                results = tuple(float(np.ravel(r)[0]) for r in results)
+                results = tuple(r.item() for r in results)
             return RelativePermeabilityDerivatives(
                 dKrw_dSw=results[0],
                 dKro_dSw=results[1],
@@ -3372,7 +3436,7 @@ class LETThreePhaseRelPermModel(
             d_krg_d_sg,
         )
         if is_scalar:
-            results = tuple(float(np.ravel(r)[0]) for r in results)
+            results = tuple(r.item() for r in results)
             return RelativePermeabilityDerivatives(
                 dKrw_dSw=results[0],
                 dKro_dSw=results[1],

@@ -211,6 +211,7 @@ nav:
     - Fluid Properties: user-guide/fluid-properties.md
     - Relative Permeability: user-guide/relative-permeability.md
     - Capillary Pressure: user-guide/capillary-pressure.md
+    - Fluids: user-guide/fluids.md
     - Wells:
       - Well Basics: user-guide/wells/basics.md
       - Well Controls: user-guide/wells/controls.md

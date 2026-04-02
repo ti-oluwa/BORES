@@ -303,7 +303,6 @@ def build_three_phase_relative_permeabilities_grids(
     """
     # Check if table supports array operations
     supports_arrays = getattr(relative_permeability_table, "supports_arrays", False)
-
     if supports_arrays:
         relative_permeabilities = relative_permeability_table(
             water_saturation=water_saturation_grid,
@@ -339,13 +338,13 @@ def build_three_phase_relative_permeabilities_grids(
 
         water_relative_permeability_grid = np.where(
             water_inactive, 0.0, relative_permeabilities["water"]
-        )  # type: ignore[assignment]
+        )
         oil_relative_permeability_grid = np.where(
             oil_inactive, 0.0, relative_permeabilities["oil"]
-        )  # type: ignore[assignment]
+        )
         gas_relative_permeability_grid = np.where(
             gas_inactive, 0.0, relative_permeabilities["gas"]
-        )  # type: ignore[assignment]
+        )
     else:
         # Cell-by-cell approach for tables that don't support arrays
         water_relative_permeability_grid = build_uniform_grid(

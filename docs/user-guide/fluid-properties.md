@@ -4,7 +4,7 @@ In reservoir simulation, fluid properties describe how oil, gas, and water behav
 
 BORES takes a practical approach to fluid properties. When you call `bores.reservoir_model()`, you provide the minimum field-available inputs - initial pressure, temperature, oil gravity, and gas gravity - and BORES computes the full suite of derived properties automatically using industry-standard correlations. You do not need a laboratory PVT report to run your first simulation. As your study matures and you acquire measured data, you can replace correlation-computed properties with your own values selectively, one property at a time, without changing anything else.
 
-For cases where you have full PVT laboratory reports or equation-of-state results, BORES also supports tabulated PVT data through its `PVTTables` system. See [PVT Tables](advanced/pvt-tables.md) for that workflow. And for simulations involving gas injection or CO2 flooding where you need to model specific injected fluid behavior, the `Fluid` class described in the [Fluids](fluid-properties.md) page extends these properties with injection-specific capabilities.
+For cases where you have full PVT laboratory reports or equation-of-state results, BORES also supports tabulated PVT data through its `PVTTables` system. See [PVT Tables](advanced/pvt-tables.md) for that workflow. And for simulations involving gas injection or CO2 flooding where you need to model specific injected fluid behavior, the `Fluid` class described in the [Fluids](fluids.md) page extends these properties with injection-specific capabilities. See [Fluids](fluids.md) for details on custom gas characterization and pseudo-pressure too.
 
 ---
 

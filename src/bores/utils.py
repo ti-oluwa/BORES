@@ -281,7 +281,7 @@ def piecewise_linear_slope(
     slopes = np.where(q > table_x[-1], 0.0, slopes)
 
     if is_scalar:
-        return float(slopes[0])
+        return slopes.item()
     return slopes.reshape(np.atleast_1d(query).shape)
 
 

@@ -965,7 +965,7 @@ class Rates(Serializable, typing.Generic[DType, ShapeT]):
         """
         return self.oil + self.water + self.gas
 
-    def __iter__(self) -> typing.Iterator[typing.Optional[SparseTensor[DType, ShapeT]]]:
+    def __iter__(self) -> typing.Iterator[SparseTensor[DType, ShapeT]]:
         yield self.water
         yield self.oil
         yield self.gas
@@ -1008,7 +1008,7 @@ class BottomHolePressures(Serializable, typing.Generic[DType, ShapeT]):
     gas: SparseTensor[DType, ShapeT]
     """Sparse tensor representing oil bottom hole pressures."""
 
-    def __iter__(self) -> typing.Iterator[typing.Optional[SparseTensor[DType, ShapeT]]]:
+    def __iter__(self) -> typing.Iterator[SparseTensor[DType, ShapeT]]:
         yield self.water
         yield self.oil
         yield self.gas
@@ -1064,7 +1064,7 @@ class FormationVolumeFactors(Serializable, typing.Generic[DType, ShapeT]):
     gas: SparseTensor[DType, ShapeT]
     """Sparse tensor representing oil formation volume factors."""
 
-    def __iter__(self) -> typing.Iterator[typing.Optional[SparseTensor[DType, ShapeT]]]:
+    def __iter__(self) -> typing.Iterator[SparseTensor[DType, ShapeT]]:
         yield self.water
         yield self.oil
         yield self.gas
