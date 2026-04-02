@@ -16,7 +16,7 @@ __all__ = [
     "FluidPhase",
     "Interpolator",
     "MiscibilityModel",
-    "MixingRule",
+    "MixingRuleFunc",
     "NDimension",
     "OneDimension",
     "OneDimensionalGrid",
@@ -173,7 +173,7 @@ class SolverFunc(typing.Protocol):
 Solver = typing.Union[SolverFunc, SolverStr]
 
 
-class MixingRule(typing.Protocol):
+class MixingRuleFunc(typing.Protocol):
     """
     Protocol for a mixing rule function that combines two properties
     based on their saturations.
@@ -226,7 +226,7 @@ class RelativePermeabilityDerivatives(TypedDict):
     dKrg_dSg: FloatOrArray
 
 
-class CapillaryPressures(typing.TypedDict):
+class CapillaryPressures(TypedDict):
     """Dictionary containing capillary pressures for different phase pairs."""
 
     oil_water: FloatOrArray  # Pcow = Po - Pw

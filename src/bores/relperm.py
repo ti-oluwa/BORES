@@ -7,6 +7,7 @@ import attrs
 import numba
 import numpy as np
 import numpy.typing as npt
+import plotly.graph_objects as go  # type: ignore[import-untyped]
 
 from bores.constants import c
 from bores.errors import ValidationError
@@ -16,13 +17,14 @@ from bores.stores import StoreSerializable
 from bores.types import (
     FloatOrArray,
     FluidPhase,
-    MixingRule,
+    MixingRuleFunc,
     RelativePermeabilities,
     RelativePermeabilityDerivatives,
     T,
     Wettability,
 )
 from bores.utils import piecewise_linear_slope
+from bores.visualization.plotly1d import make_series_plot
 
 __all__ = [
     "BrooksCoreyThreePhaseRelPermModel",
@@ -73,6 +75,68 @@ Comparison of common three-phase relative permeability mixing rules:
 """
 
 
+@typing.final
+@attrs.define
+class MixingRule:
+    func: typing.Union[MixingRuleFunc, "MixingRule"]
+    derivative_func: typing.Optional[
+        typing.Callable[..., typing.Any]
+    ] = None
+
+    def __post_init__(self) -> None:
+        if self.derivative_func is None:
+            derivative_func = getattr(self.func, "derivatives", None)
+            if callable(derivative_func):
+                self.derivative_func = typing.cast(
+                    typing.Callable[..., typing.Any],
+                    derivative_func,
+                )
+
+    def dfunc(
+        self, derivative_func: typing.Callable[..., typing.Any], /
+    ) -> typing.Callable[..., typing.Any]:
+        """
+        Decorator to set the partial derivative function for this mixing rule.
+        """
+        self.derivative_func = derivative_func
+        return derivative_func
+
+    def __call__(
+        self,
+        kro_w: FloatOrArray,
+        kro_g: FloatOrArray,
+        water_saturation: FloatOrArray,
+        oil_saturation: FloatOrArray,
+        gas_saturation: FloatOrArray,
+    ) -> FloatOrArray:
+        return self.func(
+            kro_w=kro_w,
+            kro_g=kro_g,
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+        )
+
+    def partial_derivatives(
+        self,
+        kro_w: FloatOrArray,
+        kro_g: FloatOrArray,
+        water_saturation: FloatOrArray,
+        oil_saturation: FloatOrArray,
+        gas_saturation: FloatOrArray,
+        epsilon: float = 1e-7,
+    ):
+        if self.derivative_func is not None:
+            return self.derivative_func(
+                kro_w=kro_w,
+                kro_g=kro_g,
+                water_saturation=water_saturation,
+                oil_saturation=oil_saturation,
+                gas_saturation=gas_saturation,
+            )
+        # Do central difference approach here
+
+
 _MIXING_RULES: typing.Dict[str, MixingRule] = {}
 """Registry of mixing rule functions."""
 _MIXING_RULE_SERIALIZERS: typing.Dict[
@@ -87,7 +151,7 @@ _lock = threading.Lock()
 
 
 @typing.overload
-def mixing_rule(func: MixingRule) -> MixingRule: ...
+def mixing_rule(func: typing.Union[MixingRuleFunc, MixingRule]) -> MixingRule: ...
 
 
 @typing.overload
@@ -102,20 +166,28 @@ def mixing_rule(
 
 @typing.overload
 def mixing_rule(
-    func: MixingRule,
+    func: typing.Union[MixingRuleFunc, MixingRule],
     name: typing.Optional[str] = None,
     override: bool = False,
-    serializer: typing.Optional[typing.Callable[[MixingRule, bool], T]] = None,
-    deserializer: typing.Optional[typing.Callable[[T], MixingRule]] = None,
+    serializer: typing.Optional[
+        typing.Callable[[typing.Union[MixingRuleFunc, MixingRule], bool], T]
+    ] = None,
+    deserializer: typing.Optional[
+        typing.Callable[[T], typing.Union[MixingRuleFunc, MixingRule]]
+    ] = None,
 ) -> MixingRule: ...
 
 
 def mixing_rule(
-    func: typing.Optional[MixingRule] = None,
+    func: typing.Optional[typing.Union[MixingRuleFunc, MixingRule]] = None,
     name: typing.Optional[str] = None,
     override: bool = False,
-    serializer: typing.Optional[typing.Callable[[MixingRule, bool], T]] = None,
-    deserializer: typing.Optional[typing.Callable[[T], MixingRule]] = None,
+    serializer: typing.Optional[
+        typing.Callable[[typing.Union[MixingRuleFunc, MixingRule], bool], T]
+    ] = None,
+    deserializer: typing.Optional[
+        typing.Callable[[T], typing.Union[MixingRuleFunc, MixingRule]]
+    ] = None,
 ) -> typing.Union[MixingRule, typing.Callable[[MixingRule], MixingRule]]:
     """
     Decorator to register a mixing rule function.
@@ -152,7 +224,7 @@ def mixing_rule(
     ```
     """
 
-    def decorator(func: MixingRule) -> MixingRule:
+    def decorator(func: typing.Union[MixingRuleFunc, MixingRule]) -> MixingRule:
         rule_name = name or getattr(func, "__name__", None)
         if rule_name is None:
             raise ValueError(
@@ -952,6 +1024,58 @@ class RelativePermeabilityTable(StoreSerializable):
             oil_saturation=oil_saturation,
             gas_saturation=gas_saturation,
             **kwargs,
+        )
+
+    def plot(
+        self,
+        water_saturation: npt.NDArray[np.floating[typing.Any]],
+        oil_saturation: npt.NDArray[np.floating[typing.Any]],
+        gas_saturation: npt.NDArray[np.floating[typing.Any]],
+        title: str | None = None,
+        x_label: str = "Saturation",
+        y_label: str = "Relative Permeability",
+        plot_kwargs: dict[str, typing.Any] | None = None,
+        **kwargs: typing.Any,
+    ) -> go.Figure:
+        """
+        Plot relative permeabilities as a function of saturation.
+
+        Creates a Plotly figure showing water, oil, and gas relative permeabilities
+        across the saturation range. Requires array inputs for generating smooth curves.
+
+        :param water_saturation: Water saturation array (fraction, 0-1).
+        :param oil_saturation: Oil saturation array (fraction, 0-1).
+        :param gas_saturation: Gas saturation array (fraction, 0-1).
+        :param title: Optional plot title. If None, a default title is used.
+        :param x_label: X-axis label (default: "Saturation").
+        :param y_label: Y-axis label (default: "Relative Permeability").
+        :param plot_kwargs: Additional keyword arguments to pass to `make_series_plot`,
+            such as `width`, `height`, `show_legend`, `legend_position`, etc.
+        :param kwargs: Additional keyword arguments to pass to `get_relative_permeabilities`,
+            if needed by specific table implementations.
+        :return: Plotly `graph_objects.Figure` object.
+        """
+        rel_perms = self.get_relative_permeabilities(
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+            **kwargs,
+        )
+        data = {
+            "Water Relative Permeability (krw)": rel_perms["water"],
+            "Oil Relative Permeability (kro)": rel_perms["oil"],
+            "Gas Relative Permeability (krg)": rel_perms["gas"],
+        }
+        if title is None:
+            title = "Relative Permeabilities"
+        if plot_kwargs is None:
+            plot_kwargs = {}
+        return make_series_plot(
+            data=data,  # type: ignore[arg-type]
+            title=title,
+            x_label=x_label,
+            y_label=y_label,
+            **plot_kwargs,
         )
 
 
@@ -1993,7 +2117,7 @@ class BrooksCoreyThreePhaseRelPermModel(
         if isinstance(mixing_rule, str):
             object.__setattr__(self, "mixing_rule", get_mixing_rule(mixing_rule))
 
-    def get_relative_permeabilities(  # type: ignore[override]
+    def get_relative_permeabilities(
         self,
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
@@ -2002,6 +2126,7 @@ class BrooksCoreyThreePhaseRelPermModel(
         residual_oil_saturation_water: typing.Optional[FloatOrArray] = None,
         residual_oil_saturation_gas: typing.Optional[FloatOrArray] = None,
         residual_gas_saturation: typing.Optional[FloatOrArray] = None,
+        **kwargs: typing.Any,
     ) -> RelativePermeabilities:
         """
         Compute relative permeabilities for water, oil, and gas.
@@ -2071,7 +2196,7 @@ class BrooksCoreyThreePhaseRelPermModel(
         )
         return RelativePermeabilities(water=krw, oil=kro, gas=krg)  # type: ignore[typeddict-item]
 
-    def get_relative_permeability_derivatives(  # type: ignore[override]
+    def get_relative_permeability_derivatives(
         self,
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
@@ -2080,6 +2205,7 @@ class BrooksCoreyThreePhaseRelPermModel(
         residual_oil_saturation_water: typing.Optional[FloatOrArray] = None,
         residual_oil_saturation_gas: typing.Optional[FloatOrArray] = None,
         residual_gas_saturation: typing.Optional[FloatOrArray] = None,
+        **kwargs: typing.Any,
     ) -> RelativePermeabilityDerivatives:
         """
         Compute all nine partial derivatives of the three-phase relative
@@ -2433,78 +2559,6 @@ class BrooksCoreyThreePhaseRelPermModel(
             dKrw_dSg=d_krw_d_sg,
             dKro_dSg=d_kro_d_sg,
             dKrg_dSg=d_krg_d_sg,
-        )
-
-    def __call__(
-        self,
-        water_saturation: FloatOrArray,
-        oil_saturation: FloatOrArray,
-        gas_saturation: FloatOrArray,
-        **kwargs: typing.Any,
-    ) -> RelativePermeabilities:
-        """
-        Compute relative permeabilities for water, oil, and gas.
-
-        Supports both scalar and array inputs for saturations.
-
-        :param water_saturation: Water saturation (fraction) - scalar or array.
-        :param oil_saturation: Oil saturation (fraction) - scalar or array.
-        :param gas_saturation: Gas saturation (fraction) - scalar or array.
-        :kwarg irreducible_water_saturation: Optional override for irreducible water saturation.
-        :kwarg residual_oil_saturation_water: Optional override for residual oil saturation after water flood.
-        :kwarg residual_oil_saturation_gas: Optional override for residual oil saturation after gas flood.
-        :kwarg residual_gas_saturation: Optional override for residual gas saturation.
-        :return: `RelativePermeabilities` dictionary.
-        0 <= water_saturation, oil_saturation, gas_saturation <= 1
-        """
-        return self.get_relative_permeabilities(
-            water_saturation=water_saturation,
-            oil_saturation=oil_saturation,
-            gas_saturation=gas_saturation,
-            irreducible_water_saturation=kwargs.get(
-                "irreducible_water_saturation", None
-            ),
-            residual_oil_saturation_water=kwargs.get(
-                "residual_oil_saturation_water", None
-            ),
-            residual_oil_saturation_gas=kwargs.get("residual_oil_saturation_gas", None),
-            residual_gas_saturation=kwargs.get("residual_gas_saturation", None),
-        )
-
-    def derivatives(
-        self,
-        water_saturation: FloatOrArray,
-        oil_saturation: FloatOrArray,
-        gas_saturation: FloatOrArray,
-        **kwargs: typing.Any,
-    ) -> RelativePermeabilityDerivatives:
-        """
-        Compute relative permeability derivatives for water, oil, and gas.
-
-        Supports both scalar and array inputs for saturations.
-
-        :param water_saturation: Water saturation (fraction) - scalar or array.
-        :param oil_saturation: Oil saturation (fraction) - scalar or array.
-        :param gas_saturation: Gas saturation (fraction) - scalar or array.
-        :kwarg irreducible_water_saturation: Optional override for irreducible water saturation.
-        :kwarg residual_oil_saturation_water: Optional override for residual oil saturation after water flood.
-        :kwarg residual_oil_saturation_gas: Optional override for residual oil saturation after gas flood.
-        :kwarg residual_gas_saturation: Optional override for residual gas saturation.
-        :return: `RelativePermeabilityDerivatives` dictionary.
-        0 <= water_saturation, oil_saturation, gas_saturation <= 1
-        """
-        return self.get_relative_permeability_derivatives(
-            water_saturation=water_saturation,
-            oil_saturation=oil_saturation,
-            gas_saturation=gas_saturation,
-            irreducible_water_saturation=kwargs.get(
-                "irreducible_water_saturation", None
-            ),
-            residual_oil_saturation_water=kwargs.get(
-                "residual_oil_saturation_water", None
-            ),
-            residual_oil_saturation_gas=kwargs.get("residual_oil_saturation_gas", None),
-            residual_gas_saturation=kwargs.get("residual_gas_saturation", None),
         )
 
 
@@ -2923,7 +2977,7 @@ class LETThreePhaseRelPermModel(
         if isinstance(mixing_rule, str):
             object.__setattr__(self, "mixing_rule", get_mixing_rule(mixing_rule))
 
-    def get_relative_permeabilities(  # type: ignore[override]
+    def get_relative_permeabilities(
         self,
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
@@ -2932,6 +2986,7 @@ class LETThreePhaseRelPermModel(
         residual_oil_saturation_water: typing.Optional[FloatOrArray] = None,
         residual_oil_saturation_gas: typing.Optional[FloatOrArray] = None,
         residual_gas_saturation: typing.Optional[FloatOrArray] = None,
+        **kwargs: typing.Any,
     ) -> RelativePermeabilities:
         """
         Compute relative permeabilities for water, oil, and gas using the
@@ -3013,7 +3068,7 @@ class LETThreePhaseRelPermModel(
         )
         return RelativePermeabilities(water=krw, oil=kro, gas=krg)  # type: ignore[typeddict-item]
 
-    def get_relative_permeability_derivatives(  # type: ignore[override]
+    def get_relative_permeability_derivatives(
         self,
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
@@ -3022,6 +3077,7 @@ class LETThreePhaseRelPermModel(
         residual_oil_saturation_water: typing.Optional[FloatOrArray] = None,
         residual_oil_saturation_gas: typing.Optional[FloatOrArray] = None,
         residual_gas_saturation: typing.Optional[FloatOrArray] = None,
+        **kwargs: typing.Any,
     ) -> RelativePermeabilityDerivatives:
         """
         Compute all nine partial derivatives of the three-phase relative
@@ -3195,7 +3251,7 @@ class LETThreePhaseRelPermModel(
                 1.0,
             )
             krw_gw = _let_relperm(
-                se_w_gw, # type: ignore[operator]
+                se_w_gw,  # type: ignore[operator]
                 water_params.L,
                 water_params.E,
                 water_params.T,
@@ -3458,75 +3514,4 @@ class LETThreePhaseRelPermModel(
             dKrw_dSg=d_krw_d_sg,
             dKro_dSg=d_kro_d_sg,
             dKrg_dSg=d_krg_d_sg,
-        )
-
-    def __call__(
-        self,
-        water_saturation: FloatOrArray,
-        oil_saturation: FloatOrArray,
-        gas_saturation: FloatOrArray,
-        **kwargs: typing.Any,
-    ) -> RelativePermeabilities:
-        """
-        Compute relative permeabilities for water, oil, and gas.
-
-        Supports both scalar and array inputs for saturations.
-
-        :param water_saturation: Water saturation (fraction) - scalar or array.
-        :param oil_saturation: Oil saturation (fraction) - scalar or array.
-        :param gas_saturation: Gas saturation (fraction) - scalar or array.
-        :kwarg irreducible_water_saturation: Optional override for Swc.
-        :kwarg residual_oil_saturation_water: Optional override for Sorw.
-        :kwarg residual_oil_saturation_gas: Optional override for Sorg.
-        :kwarg residual_gas_saturation: Optional override for Sgr.
-        :return: `RelativePermeabilities` dictionary.
-        """
-        return self.get_relative_permeabilities(
-            water_saturation=water_saturation,
-            oil_saturation=oil_saturation,
-            gas_saturation=gas_saturation,
-            irreducible_water_saturation=kwargs.get(
-                "irreducible_water_saturation", None
-            ),
-            residual_oil_saturation_water=kwargs.get(
-                "residual_oil_saturation_water", None
-            ),
-            residual_oil_saturation_gas=kwargs.get("residual_oil_saturation_gas", None),
-            residual_gas_saturation=kwargs.get("residual_gas_saturation", None),
-        )
-
-    def derivatives(
-        self,
-        water_saturation: FloatOrArray,
-        oil_saturation: FloatOrArray,
-        gas_saturation: FloatOrArray,
-        **kwargs: typing.Any,
-    ) -> RelativePermeabilityDerivatives:
-        """
-        Compute relative permeability derivatives for water, oil, and gas.
-
-        Supports both scalar and array inputs for saturations.
-
-        :param water_saturation: Water saturation (fraction) - scalar or array.
-        :param oil_saturation: Oil saturation (fraction) - scalar or array.
-        :param gas_saturation: Gas saturation (fraction) - scalar or array.
-        :kwarg irreducible_water_saturation: Optional override for irreducible water saturation.
-        :kwarg residual_oil_saturation_water: Optional override for residual oil saturation after water flood.
-        :kwarg residual_oil_saturation_gas: Optional override for residual oil saturation after gas flood.
-        :kwarg residual_gas_saturation: Optional override for residual gas saturation.
-        :return: `RelativePermeabilityDerivatives` dictionary.
-        0 <= water_saturation, oil_saturation, gas_saturation <= 1
-        """
-        return self.get_relative_permeability_derivatives(
-            water_saturation=water_saturation,
-            oil_saturation=oil_saturation,
-            gas_saturation=gas_saturation,
-            irreducible_water_saturation=kwargs.get(
-                "irreducible_water_saturation", None
-            ),
-            residual_oil_saturation_water=kwargs.get(
-                "residual_oil_saturation_water", None
-            ),
-            residual_oil_saturation_gas=kwargs.get("residual_oil_saturation_gas", None),
-            residual_gas_saturation=kwargs.get("residual_gas_saturation", None),
         )
