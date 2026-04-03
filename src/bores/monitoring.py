@@ -23,6 +23,7 @@ from bores.models import ReservoirModel
 from bores.simulate import Run, StepCallback, StepResult, run
 from bores.states import ModelState
 from bores.types import ThreeDimensions
+from bores.utils import _close_iter
 from bores.wells.base import InjectionWell, ProductionWell
 
 __all__ = [
@@ -1147,6 +1148,7 @@ def monitor(
     last_percentage = 0.0
     last_diagnostics: typing.Optional[StepDiagnostics] = None
 
+    simulation = None
     try:
         if is_generic_input:
             simulation = input
@@ -1243,3 +1245,6 @@ def monitor(
             rich_console.print(stats.summary_table())
         else:
             logger.info(stats.summary())
+
+        if simulation is not None:
+            _close_iter(simulation)

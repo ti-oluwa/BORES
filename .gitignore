@@ -23,5 +23,4 @@ videos/
 *.gif
 *.png
 .cache
-src/bores/hysteresis.py
 miscible.md
