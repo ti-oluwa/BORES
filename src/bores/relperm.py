@@ -1572,6 +1572,30 @@ class TwoPhaseRelPermTable(Serializable):
     saturation grid without hard-coding assumptions.
     """
 
+    wetting_phase_relative_permeability_derivative: typing.Optional[
+        npt.NDArray[np.floating]
+    ] = attrs.field(
+        default=None,
+        converter=attrs.converters.optional(bores_array),
+    )
+    """
+    Pre-computed dkr_wetting/d(reference_saturation) at each knot.
+    
+    When provided, derivatives are obtained by interpolating this array
+    with `np.interp` instead of computing piecewise-linear slopes on
+    the fly.  Use this to carry analytical derivatives from the source
+    model through to the tabular representation, giving the Newton solver
+    a smooth, consistent Jacobian.
+    """
+
+    non_wetting_phase_relative_permeability_derivative: typing.Optional[
+        npt.NDArray[np.floating]
+    ] = attrs.field(
+        default=None,
+        converter=attrs.converters.optional(bores_array),
+    )
+    """Pre-computed dkr_non_wetting/d(reference_saturation) at each knot."""
+
     def __attrs_post_init__(self) -> None:
         if self.reference_phase not in ("wetting", "non_wetting"):
             raise ValidationError(
@@ -1582,7 +1606,7 @@ class TwoPhaseRelPermTable(Serializable):
             self.wetting_phase_relative_permeability
         ):
             raise ValidationError(
-                f"reference_saturation and wetting phase kr arrays must have same length. "
+                f"`reference_saturation` and wetting phase kr arrays must have same length. "
                 f"Got {len(self.reference_saturation)} vs {len(self.wetting_phase_relative_permeability)}"
             )
 
@@ -1590,7 +1614,7 @@ class TwoPhaseRelPermTable(Serializable):
             self.non_wetting_phase_relative_permeability
         ):
             raise ValidationError(
-                f"reference_saturation and non-wetting phase kr arrays must have same length. "
+                f"`reference_saturation` and non-wetting phase kr arrays must have same length. "
                 f"Got {len(self.reference_saturation)} vs {len(self.non_wetting_phase_relative_permeability)}"
             )
 
@@ -1599,7 +1623,22 @@ class TwoPhaseRelPermTable(Serializable):
 
         if not np.all(np.diff(self.reference_saturation) >= 0):
             raise ValidationError(
-                "reference_saturation must be monotonically increasing"
+                "`reference_saturation` must be monotonically increasing"
+            )
+
+        if self.wetting_phase_relative_permeability_derivative is not None and len(
+            self.wetting_phase_relative_permeability_derivative
+        ) != len(self.reference_saturation):
+            raise ValidationError(
+                "`wetting_phase_relative_permeability_derivative` must have the same "
+                "length as `reference_saturation`."
+            )
+        if self.non_wetting_phase_relative_permeability_derivative is not None and len(
+            self.non_wetting_phase_relative_permeability_derivative
+        ) != len(self.reference_saturation):
+            raise ValidationError(
+                "`non_wetting_phase_relative_permeability_derivative` must have the same "
+                "length as `reference_saturation`."
             )
 
     def _resolve_reference(
@@ -1742,6 +1781,17 @@ class TwoPhaseRelPermTable(Serializable):
             if non_wetting_saturation is not None
             else wetting_saturation,
         )
+        if self.wetting_phase_relative_permeability_derivative is not None:
+            is_scalar = np.isscalar(reference_saturation)
+            sat = np.atleast_1d(reference_saturation)
+            d_flat = np.interp(
+                x=sat.ravel(),
+                xp=self.reference_saturation,
+                fp=self.wetting_phase_relative_permeability_derivative,
+                left=0.0,
+                right=0.0,
+            )
+            return d_flat.reshape(sat.shape) if not is_scalar else d_flat.item()
         return piecewise_linear_slope(
             query=reference_saturation,
             table_x=self.reference_saturation,
@@ -1783,6 +1833,17 @@ class TwoPhaseRelPermTable(Serializable):
             if non_wetting_saturation is not None
             else wetting_saturation,
         )
+        if self.non_wetting_phase_relative_permeability_derivative is not None:
+            is_scalar = np.isscalar(reference_saturation)
+            sat = np.atleast_1d(reference_saturation)
+            d_flat = np.interp(
+                x=sat.ravel(),
+                xp=self.reference_saturation,
+                fp=self.non_wetting_phase_relative_permeability_derivative,
+                left=0.0,
+                right=0.0,
+            )
+            return d_flat.reshape(sat.shape) if not is_scalar else d_flat.item()
         return piecewise_linear_slope(
             query=reference_saturation,
             table_x=self.reference_saturation,

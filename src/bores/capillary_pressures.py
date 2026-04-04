@@ -225,6 +225,19 @@ class TwoPhaseCapillaryPressureTable(Serializable):
     the correct saturation without hard-coding assumptions.
     """
 
+    capillary_pressure_derivative: typing.Optional[npt.NDArray] = attrs.field(
+        default=None,
+        converter=attrs.converters.optional(bores_array),
+    )
+    """
+    Pre-computed dPc/d(reference_saturation) at each knot.
+
+    When provided, interpolated via `np.interp` instead of
+    `piecewise_linear_slope`. Carrying analytical derivatives avoids
+    the kinks that would otherwise appear in the Newton Jacobian at every
+    table knot.
+    """
+
     def __attrs_post_init__(self) -> None:
         if self.reference_phase not in ("wetting", "non_wetting"):
             raise ValidationError(
@@ -233,7 +246,7 @@ class TwoPhaseCapillaryPressureTable(Serializable):
             )
         if len(self.reference_saturation) != len(self.capillary_pressure):
             raise ValidationError(
-                f"reference_saturation and capillary_pressure arrays must have the "
+                f"`reference_saturation` and `capillary_pressure` arrays must have the "
                 f"same length.  Got {len(self.reference_saturation)} vs "
                 f"{len(self.capillary_pressure)}"
             )
@@ -241,7 +254,14 @@ class TwoPhaseCapillaryPressureTable(Serializable):
             raise ValidationError("At least 2 points required for interpolation.")
         if not np.all(np.diff(self.reference_saturation) >= 0):
             raise ValidationError(
-                "reference_saturation must be monotonically increasing."
+                "`reference_saturation` must be monotonically increasing."
+            )
+
+        if self.capillary_pressure_derivative is not None and len(
+            self.capillary_pressure_derivative
+        ) != len(self.reference_saturation):
+            raise ValidationError(
+                "`capillary_pressure_derivative` must have the same length as `reference_saturation`."
             )
 
     def _resolve_reference(
@@ -328,6 +348,17 @@ class TwoPhaseCapillaryPressureTable(Serializable):
             if non_wetting_saturation is not None
             else wetting_saturation,
         )
+        if self.capillary_pressure_derivative is not None:
+            is_scalar = np.isscalar(ref)
+            sat = np.atleast_1d(ref)
+            d_flat = np.interp(
+                x=sat.ravel(),
+                xp=self.reference_saturation,
+                fp=self.capillary_pressure_derivative,
+                left=0.0,
+                right=0.0,
+            )
+            return d_flat.reshape(sat.shape) if not is_scalar else d_flat.item()
         return piecewise_linear_slope(
             query=ref,
             table_x=self.reference_saturation,

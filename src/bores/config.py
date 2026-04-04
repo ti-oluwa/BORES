@@ -443,6 +443,23 @@ class Config(
       the relperm and capillary pressure tables implement the `derivatives(...)` API.
     """
 
+    maximum_outer_iterations: int = attrs.field(
+        default=5,
+        validator=attrs.validators.and_(
+            attrs.validators.ge(1),
+            attrs.validators.le(20),
+        ),
+    )
+    """
+    Maximum number of Sequential Implicit outer iterations per time step.
+
+    Each outer iteration re-solves pressure then saturation to enforce
+    coupling consistency between the two. More iterations improve accuracy
+    at the cost of compute. 5 is sufficient for most cases; tighten to
+    10-15 only for strongly coupled systems (e.g. near-critical fluids,
+    high-rate gas injection).
+    """
+
     normalize_saturations: bool = True
     """
     Whether to normalize saturations so that `So + Sw + Sg = 1.0` after each timestep.
@@ -479,6 +496,39 @@ class Config(
     - Oil compressibility (Co) - switches at frozen Pb
     - Oil viscosity (μo) - indirectly through Rs
     - Oil density (ρo) - indirectly through Rs and Bo
+    """
+
+    enable_hysteresis: bool = False
+    """
+    Enable saturation hysteresis tracking for residual saturations.
+
+    When True, residual oil and gas saturations are updated each time step
+    based on the saturation reversal history of each cell (drainage vs.
+    imbibition regime). This is required when using hysteresis-aware
+    relative permeability or capillary pressure models (e.g. Killough,
+    Land trapping) where the scanning curves depend on the maximum
+    historical saturation reached in each cell.
+
+    When False (default), residual saturations are treated as fixed rock
+    properties and the saturation history is not updated during the
+    simulation. This is appropriate for standard black-oil simulations
+    without hysteresis models, and avoids the overhead of per-step
+    history tracking.
+
+    This flag should only be enabled when the configured relative
+    permeability and/or capillary pressure tables implement hysteresis-
+    aware scanning curves. Enabling it with non-hysteretic tables has no
+    physical effect and incurs unnecessary computation.
+    """
+
+    capture_timer_state: bool = True
+    """
+    Whether to capture and include the timer state in the yielded model states during simulation monitoring.
+
+    When True (default), the `Timer` state (current time, step, etc.) is included in the `ModelState` objects yielded by the simulator. 
+    This allows for more informative logging and analysis of simulation progress.
+    When False, the timer state is not included in the yielded states, which may reduce memory usage if the timer state is 
+    large or if many states are captured.
     """
 
     task_pool: typing.Optional[ThreadPoolExecutor] = attrs.field(
@@ -535,33 +585,6 @@ class Config(
 
     Do not share a pool between concurrent simulation runs unless the pool has
     sufficient workers to service both simultaneously.
-    """
-
-    maximum_outer_iterations: int = attrs.field(
-        default=5,
-        validator=attrs.validators.and_(
-            attrs.validators.ge(1),
-            attrs.validators.le(20),
-        ),
-    )
-    """
-    Maximum number of Sequential Implicit outer iterations per time step.
-
-    Each outer iteration re-solves pressure then saturation to enforce
-    coupling consistency between the two. More iterations improve accuracy
-    at the cost of compute. 5 is sufficient for most cases; tighten to
-    10-15 only for strongly coupled systems (e.g. near-critical fluids,
-    high-rate gas injection).
-    """
-
-    capture_timer_state: bool = True
-    """
-    Whether to capture and include the timer state in the yielded model states during simulation monitoring.
-
-    When True (default), the `Timer` state (current time, step, etc.) is included in the `ModelState` objects yielded by the simulator. 
-    This allows for more informative logging and analysis of simulation progress.
-    When False, the timer state is not included in the yielded states, which may reduce memory usage if the timer state is 
-    large or if many states are captured.
     """
 
     _lock: threading.Lock = attrs.field(

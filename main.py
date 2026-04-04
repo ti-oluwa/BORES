@@ -129,8 +129,14 @@ rock_fluid_tables = bores.RockFluidTables(
         residual_oil_saturation_water=0.12,
         residual_gas_saturation=0.05,
     ),
-    capillary_pressure_table=bores.BrooksCoreyCapillaryPressureModel(
-        wettability=bores.Wettability.WATER_WET,
+    capillary_pressure_table=bores.as_capillary_pressure_table(
+        bores.BrooksCoreyCapillaryPressureModel(
+            wettability=bores.Wettability.WATER_WET,
+        ),
+        irreducible_water_saturation=0.06,
+        residual_oil_saturation_gas=0.10,
+        residual_oil_saturation_water=0.12,
+        residual_gas_saturation=0.05,
     ),
 )
 timer = bores.Timer(

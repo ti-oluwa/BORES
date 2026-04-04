@@ -7,12 +7,6 @@
 import logging
 import os
 
-import numba
-
-# Set numba thread count to match available cores (or from environment variable)
-cpu_count = os.cpu_count() or 1
-numba.set_num_threads(int(os.environ.get("NUMBA_NUM_THREADS", cpu_count)))
-
 from .analyses import *
 from .boundary_conditions import *
 from .capillary_pressures import *

@@ -246,6 +246,20 @@ def max_overload(x):
         return impl
 
 
+@numba.njit(cache=True, inline="always")
+def _piecewise_linear_slope_scalar(
+    q: float,
+    table_x: npt.NDArray,
+    segment_slopes: npt.NDArray,
+) -> float:
+    """Inner scalar kernel — always returns a single float64."""
+    if q < table_x[0] or q > table_x[-1]:
+        return 0.0
+    idx = np.searchsorted(table_x, q, side="right") - 1
+    idx = min(max(idx, 0), len(segment_slopes) - 1)
+    return segment_slopes[idx]
+
+
 @numba.njit(cache=True)
 def piecewise_linear_slope(
     query: FloatOrArray,
@@ -270,23 +284,18 @@ def piecewise_linear_slope(
         argument of `np.interp`).
     :return: Slope value(s) with the same shape as `query`.
     """
-    is_scalar = np.isscalar(query)
-    q = np.atleast_1d(np.asarray(query, dtype=np.float64)).ravel()
-
     dx = np.diff(table_x)
+    # Avoid division by zero on degenerate segments
     safe_dx = np.where(dx != 0.0, dx, 1.0)
     segment_slopes = np.diff(table_y) / safe_dx
 
-    left_indices = np.searchsorted(table_x, q, side="right") - 1
-    left_indices = np.clip(left_indices, 0, len(segment_slopes) - 1)
+    q = np.asarray(query, dtype=np.float64)
+    flat_q = q.ravel()
+    out = np.empty(flat_q.shape, dtype=np.float64)
 
-    slopes = segment_slopes[left_indices]
-    slopes = np.where(q < table_x[0], 0.0, slopes)
-    slopes = np.where(q > table_x[-1], 0.0, slopes)
-
-    if is_scalar:
-        return slopes.item()
-    return slopes.reshape(np.atleast_1d(query).shape)
+    for i in numba.prange(flat_q.shape[0]):  # type: ignore
+        out[i] = _piecewise_linear_slope_scalar(flat_q[i], table_x, segment_slopes)
+    return out.reshape(q.shape)
 
 
 def _numpy_default(obj: typing.Any) -> typing.Mapping[str, typing.Any]:
