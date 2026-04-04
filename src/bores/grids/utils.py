@@ -27,8 +27,9 @@ __all__ = [
     "get_pad_mask",
     "layer_to_link_permeability",
     "link_to_layer_permeability",
+    "make_saturation_grid",
     "pad_grid",
-    "unpad_grid",
+    "unpad_grid"
 ]
 
 
@@ -1124,3 +1125,43 @@ def link_to_layer_permeability(
         _set(recovered, i, d_upper / upper_resistance)
 
     return recovered
+
+
+Spacing = typing.Literal["cosine", "linspace"]
+
+
+@numba.njit(cache=True)
+def make_saturation_grid(
+    n_points: int = 200,
+    s_min: float = 0.0,
+    s_max: float = 1.0,
+    spacing: Spacing = "cosine",
+    dtype: npt.DTypeLike = np.float64,
+) -> npt.NDArray:
+    """
+    Build a 1-D saturation grid over `[s_min, s_max]`.
+
+    :param n_points: Number of grid points (≥ 2).
+    :param s_min: Physical saturation range. Must satisfy `0 ≤ s_min < s_max ≤ 1`.
+    :param s_max: Physical saturation range. Must satisfy `0 ≤ s_min < s_max ≤ 1`.
+    :param spacing: `"cosine"` (default) — Chebyshev-cosine spacing, denser at the
+        endpoints. `"linspace"` — uniform spacing.
+    :return: NDArray of shape `(n_points,)` with values in `[s_min, s_max]`,
+    monotonically increasing.
+    """
+    if n_points < 2:
+        raise ValueError(f"`n_points` must be ≥ 2, got {n_points}")
+    if not (0.0 <= s_min < s_max <= 1.0):
+        raise ValueError(
+            f"Require 0 ≤ s_min < s_max ≤ 1, got `s_min={s_min}`, `s_max={s_max}`"
+        )
+
+    if spacing == "cosine":
+        i = np.arange(n_points, dtype=dtype)
+        unit: npt.NDArray = 0.5 * (1.0 - np.cos(np.pi * i / (n_points - 1)))
+    elif spacing == "linspace":
+        unit: npt.NDArray = np.linspace(0.0, 1.0, n_points)
+    else:
+        raise ValueError(f"`spacing` must be 'cosine' or 'linspace', got '{spacing}'")
+
+    return (s_min + unit * (s_max - s_min)).astype(dtype)

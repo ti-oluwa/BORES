@@ -250,7 +250,12 @@ def evolve_pressure(
             diagonal_additions,
             rhs_additions,
         ) = face_transmissibility_future.result()
-        well_contributions = wells_future.result()
+        (
+            well_diagonal_cell_indices,
+            well_diagonal_values,
+            well_rhs_cell_indices,
+            well_rhs_values,
+        ) = wells_future.result()
 
     else:
         diagonal_values, rhs_values = compute_accumulation_contributions(
@@ -297,7 +302,12 @@ def evolve_pressure(
             gravitational_constant=gravitational_constant,
             dtype=dtype,
         )
-        well_contributions = compute_well_contributions(
+        (
+            well_diagonal_cell_indices,
+            well_diagonal_values,
+            well_rhs_cell_indices,
+            well_rhs_values,
+        ) = compute_well_contributions(
             current_oil_pressure_grid=current_oil_pressure_grid,
             temperature_grid=fluid_properties.temperature_grid,
             water_relative_mobility_grid=water_relative_mobility_grid,
@@ -326,15 +336,15 @@ def evolve_pressure(
     final_diagonal = diagonal_values + diagonal_additions
     np.add.at(
         final_diagonal,
-        well_contributions.diagonal_cell_indices,
-        well_contributions.diagonal_values,
+        well_diagonal_cell_indices,
+        well_diagonal_values,
     )
 
     residual_vector = rhs_values + rhs_additions
     np.add.at(
         residual_vector,
-        well_contributions.rhs_cell_indices,
-        well_contributions.rhs_values,
+        well_rhs_cell_indices,
+        well_rhs_values,
     )
 
     interior_cell_count = (cell_count_x - 2) * (cell_count_y - 2) * (cell_count_z - 2)
@@ -944,34 +954,6 @@ def compute_face_flux_contributions(
     )
 
 
-@attrs.frozen(slots=True)
-class WellContributions:
-    """
-    COO-style arrays representing well contributions to the linear system A·p = b.
-
-    Wells only ever touch the diagonal of A (each perforated cell couples only
-    to itself via the productivity index). This means we never need off-diagonal
-    entries, just two flat arrays of (index, value) pairs that get scatter-added
-    into the final diagonal and RHS vectors before COO matrix construction.
-
-    diagonal_cell_indices[k] and diagonal_values[k] represent:
-        A[diagonal_cell_indices[k], diagonal_cell_indices[k]] += diagonal_values[k]
-
-    rhs_cell_indices[k] and rhs_values[k] represent:
-        b[rhs_cell_indices[k]] += rhs_values[k]
-
-    In practice `diagonal_cell_indices` == `rhs_cell_indices` since every perforation
-    contributes to both A and b at the same cell. They are stored separately to
-    keep the interface clean and to allow skipped perforations (non-finite BHP)
-    to contribute to neither without special-casing the reduction.
-    """
-
-    diagonal_cell_indices: npt.NDArray
-    diagonal_values: npt.NDArray
-    rhs_cell_indices: npt.NDArray
-    rhs_values: npt.NDArray
-
-
 def compute_well_contributions(
     current_oil_pressure_grid: ThreeDimensionalGrid,
     temperature_grid: ThreeDimensionalGrid,
@@ -995,7 +977,7 @@ def compute_well_contributions(
     injection_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
     production_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
     pad_width: int = 1,
-) -> WellContributions:
+) -> typing.Tuple[npt.NDArray, npt.NDArray, npt.NDArray, npt.NDArray]:
     """
     Compute well contributions to the implicit pressure linear system A·p = b
     and return them as COO-style flat arrays.
@@ -1032,7 +1014,7 @@ def compute_well_contributions(
     :param config: Simulation configuration
     :param md_per_cp_to_ft2_per_psi_per_day: Unit conversion factor
     :param pad_width: Ghost cell offset applied to well coordinates
-    :return: `WellContributions` with four flat arrays ready for scatter-add
+    :return: Four flat arrays ready for scatter-add
         into the final diagonal and RHS before COO matrix construction.
     """
     water_bubble_point_pressure_grid = fluid_properties.water_bubble_point_pressure_grid
@@ -1481,15 +1463,15 @@ def compute_well_contributions(
                     gas_bhp,
                 )
 
-    return WellContributions(
-        diagonal_cell_indices=np.array(diagonal_cell_indices, dtype=np.int32),
-        diagonal_values=np.array(diagonal_values, dtype=dtype),
-        rhs_cell_indices=np.array(rhs_cell_indices, dtype=np.int32),
-        rhs_values=np.array(rhs_values, dtype=dtype),
+    return (
+        np.array(diagonal_cell_indices, dtype=np.int32),
+        np.array(diagonal_values, dtype=dtype),
+        np.array(rhs_cell_indices, dtype=np.int32),
+        np.array(rhs_values, dtype=dtype),
     )
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, inline="always")
 def compute_pseudo_fluxes_from_neighbour(
     cell_indices: ThreeDimensions,
     neighbour_indices: ThreeDimensions,

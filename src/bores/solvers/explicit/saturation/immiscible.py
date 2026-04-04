@@ -478,7 +478,7 @@ def evolve_saturation(
     )
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, inline="always")
 def compute_fluxes_from_neighbour(
     cell_indices: ThreeDimensions,
     neighbour_indices: ThreeDimensions,

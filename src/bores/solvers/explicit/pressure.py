@@ -432,7 +432,7 @@ def compute_pressure_cfl_number(
     return maximum_cfl
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, inline="always")
 def compute_pseudo_flux_from_neighbour(
     cell_indices: ThreeDimensions,
     neighbour_indices: ThreeDimensions,

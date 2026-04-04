@@ -116,9 +116,7 @@ def build_rock_fluid_properties_grids(
         oil_water_capillary_pressure_grid = build_uniform_grid(
             grid_shape=water_saturation_grid.shape, value=0.0
         )
-        gas_oil_capillary_pressure_grid = build_uniform_grid(
-            grid_shape=water_saturation_grid.shape, value=0.0
-        )
+        gas_oil_capillary_pressure_grid = oil_water_capillary_pressure_grid.copy()
     else:
         if capillary_pressure_table is None:
             raise ValidationError(
@@ -266,8 +264,8 @@ def build_effective_residual_saturation_grids(
 
                 # WATER-OIL SYSTEM
                 if Sw > (Sw_max + tolerance):
-                    # Water saturation INCREASING → Water imbibition
-                    # Water is displacing oil → more oil trapped
+                    # If water saturation is increasing we have water imbibition
+                    # hence, water is displacing oil and more oil is trapped
                     effective_residual_oil_saturation_water_grid[i, j, k] = (
                         Sorw_imbibition
                     )
@@ -275,14 +273,14 @@ def build_effective_residual_saturation_grids(
                     new_max_water_saturation_grid[i, j, k] = Sw
 
                 elif Sw < (Sw_max - tolerance):
-                    # Water saturation DECREASING → Oil drainage
-                    # Oil is displacing water → less oil trapped
+                    # If water saturation is decreasing we have Oil drainage
+                    # hence, oil is displacing water and less oil is trapped
                     effective_residual_oil_saturation_water_grid[i, j, k] = Sor_drainage
                     new_water_imbibition_flag_grid[i, j, k] = False
                     # Sw_max stays unchanged (only increases)
 
                 else:
-                    # No significant change - use previous regime
+                    # If no significant change, use previous regime
                     if water_imbibition_flag_grid[i, j, k]:
                         effective_residual_oil_saturation_water_grid[i, j, k] = (
                             Sorw_imbibition
@@ -294,8 +292,8 @@ def build_effective_residual_saturation_grids(
 
                 # GAS-OIL SYSTEM
                 if Sg > (Sg_max + tolerance):
-                    # Gas saturation INCREASING → Gas imbibition
-                    # Gas is displacing oil → more oil trapped
+                    # If gas saturation is increasing the we have gas imbibition
+                    # hence, gas is displacing oil and more oil trapped
                     effective_residual_oil_saturation_gas_grid[i, j, k] = (
                         Sorg_imbibition
                     )
@@ -304,15 +302,15 @@ def build_effective_residual_saturation_grids(
                     new_max_gas_saturation_grid[i, j, k] = Sg
 
                 elif Sg < (Sg_max - tolerance):
-                    # Gas saturation DECREASING → Oil drainage
-                    # Oil is displacing gas → less oil trapped
+                    # If gas saturation descreasing then we have oil drainage
+                    # hence, oil is displacing gas and less oil trapped
                     effective_residual_oil_saturation_gas_grid[i, j, k] = Sorg_drainage
                     effective_residual_gas_saturation_grid[i, j, k] = Sgr_imbibition
                     new_gas_imbibition_flag_grid[i, j, k] = False
                     # Sg_max stays unchanged (only increases)
 
                 else:
-                    # No significant change - use previous regime
+                    # If there's no significant change, use previous regime
                     if gas_imbibition_flag_grid[i, j, k]:
                         effective_residual_oil_saturation_gas_grid[i, j, k] = (
                             Sorg_imbibition

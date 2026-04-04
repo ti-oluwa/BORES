@@ -147,7 +147,7 @@ class EvolutionResult(typing.Generic[T, M]):
     """Optional metadata related to the evolution step."""
 
 
-@numba.njit(inline="always", parallel=True, cache=True)
+@numba.njit(inline="always", cache=True)
 def to_1D_index_interior_only(
     i: int,
     j: int,
@@ -189,7 +189,7 @@ def to_1D_index_interior_only(
     )
 
 
-@numba.njit(cache=True, parallel=True, inline="always")
+@numba.njit(cache=True, inline="always")
 def from_1D_index_interior_only(
     idx: int,
     cell_count_x: int,
@@ -231,7 +231,7 @@ def from_1D_index_interior_only(
     return i, j, k
 
 
-@numba.njit(parallel=True, cache=True)
+@numba.njit(cache=True)
 def compute_mobility_grids(
     absolute_permeability_x: ThreeDimensionalGrid,
     absolute_permeability_y: ThreeDimensionalGrid,
@@ -1194,7 +1194,7 @@ def solve_linear_system(
             callback=None,
         )
         if info == 0:
-            return np.ascontiguousarray(x), M
+            return x, M
         else:
             logger.warning(
                 f"Solver {solver_func!r} failed to converge within {maximum_iterations} iterations. Info: {info}"
@@ -1222,4 +1222,4 @@ def solve_linear_system(
             "All iterative solvers and direct solver failed to solve the system."
         ) from exc
 
-    return np.ascontiguousarray(x), None  # type: ignore[return-value]
+    return x, None  # type: ignore[return-value]

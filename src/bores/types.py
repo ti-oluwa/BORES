@@ -205,11 +205,11 @@ class MixingRulePartialDerivatives(TypedDict):
     """
     The five partial derivatives of a three-phase oil relative permeability
     mixing rule with respect to each of its five arguments.
- 
+
     The mixing rule signature is:
- 
+
         kro = rule(kro_w, kro_g, water_saturation, oil_saturation, gas_saturation)
- 
+
     Fields:
 
     d_kro_d_kro_w :
@@ -225,7 +225,7 @@ class MixingRulePartialDerivatives(TypedDict):
     d_kro_d_sg_explicit :
         ∂kro / ∂Sg  through the explicit gas-saturation argument.
     """
- 
+
     d_kro_d_kro_w: FloatOrArray
     d_kro_d_kro_g: FloatOrArray
     d_kro_d_sw_explicit: FloatOrArray
@@ -246,7 +246,12 @@ class MixingRuleDFunc(typing.Protocol):
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
         gas_saturation: FloatOrArray,
-    ) -> MixingRulePartialDerivatives:
+    ) -> typing.Union[
+        MixingRulePartialDerivatives,
+        typing.Tuple[
+            FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray
+        ],
+    ]:
         """
 
         :param kro_w: Property value for water phase.

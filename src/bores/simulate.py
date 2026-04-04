@@ -2474,6 +2474,7 @@ def run(
     cell_dimension = model.cell_dimension
     grid_shape = model.grid_shape
     has_wells = wells.exists()
+    has_well_schedules = well_schedules is not None
     output_frequency = config.output_frequency
     scheme = config.scheme.replace("_", "-").lower()
     miscibility_model = config.miscibility_model
@@ -2655,7 +2656,7 @@ def run(
                 f"Attempting time step {new_step} with size {step_size} seconds..."
             )
             try:
-                if has_wells and well_schedules is not None:
+                if has_wells and has_well_schedules:
                     logger.debug(
                         f"Updating wells configuration for time step {new_step}"
                     )

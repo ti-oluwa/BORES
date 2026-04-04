@@ -2,6 +2,7 @@
 
 import threading
 import typing
+from collections.abc import Mapping
 
 import attrs
 import numba
@@ -47,7 +48,6 @@ __all__ = [
     "max_rule",
     "max_rule",
     "mixing_rule",
-    "product_saturation_weighted_rule",
     "relperm_table",
     "stone_II_rule",
     "stone_I_rule",
@@ -188,12 +188,21 @@ class MixingRule:
             `"d_kro_d_oil_saturation"`, `"d_kro_d_gas_saturation"`.
         """
         if self._dfunc is not None:
-            return self._dfunc(
+            derivatives = self._dfunc(
                 kro_w=kro_w,
                 kro_g=kro_g,
                 water_saturation=water_saturation,
                 oil_saturation=oil_saturation,
                 gas_saturation=gas_saturation,
+            )
+            if isinstance(derivatives, Mapping):
+                return derivatives
+            return MixingRulePartialDerivatives(
+                d_kro_d_kro_w=derivatives[0],
+                d_kro_d_kro_g=derivatives[1],
+                d_kro_d_sw_explicit=derivatives[2],
+                d_kro_d_so_explicit=derivatives[3],
+                d_kro_d_sg_explicit=derivatives[4],
             )
         return _central_difference_partial_derivatives(
             rule=self,
@@ -558,6 +567,7 @@ def get_mixing_rule(name: str) -> MixingRule:
     )
 
 
+@numba.njit(cache=True, inline="always")
 def _zeros_like_kro(kro_w: FloatOrArray) -> FloatOrArray:
     """Return an array (or scalar) of zeros with the same shape as kro_w."""
     return np.zeros_like(kro_w) if not np.isscalar(kro_w) else 0.0
@@ -580,13 +590,14 @@ def min_rule(
 
 
 @min_rule.dfunc
+@numba.njit(cache=True)
 def _(
     kro_w: FloatOrArray,
     kro_g: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
-) -> MixingRulePartialDerivatives:
+) -> typing.Tuple[FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray]:
     """
     Analytical derivatives for min_rule.
 
@@ -602,13 +613,7 @@ def _(
     d_kro_d_kro_w = np.where(kw < kg, 1.0, np.where(kw > kg, 0.0, 0.5))
     d_kro_d_kro_g = 1.0 - d_kro_d_kro_w
     z = _zeros_like_kro(kro_w)
-    return MixingRulePartialDerivatives(
-        d_kro_d_kro_w=d_kro_d_kro_w,
-        d_kro_d_kro_g=d_kro_d_kro_g,
-        d_kro_d_sw_explicit=z,
-        d_kro_d_so_explicit=z,
-        d_kro_d_sg_explicit=z,
-    )
+    return (d_kro_d_kro_w, d_kro_d_kro_g, z, z, z)
 
 
 @mixing_rule
@@ -631,13 +636,14 @@ def stone_I_rule(
 
 
 @stone_I_rule.dfunc
+@numba.njit(cache=True)
 def _(
     kro_w: FloatOrArray,
     kro_g: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
-) -> MixingRulePartialDerivatives:
+) -> typing.Tuple[FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray]:
     """
     Analytical derivatives for Stone I.
 
@@ -656,13 +662,7 @@ def _(
     d_kro_d_kro_w = np.where(both_zero, 0.0, kg**2 / D**2)
     d_kro_d_kro_g = np.where(both_zero, 0.0, kw**2 / D**2)
     z = _zeros_like_kro(kro_w)
-    return MixingRulePartialDerivatives(
-        d_kro_d_kro_w=d_kro_d_kro_w,
-        d_kro_d_kro_g=d_kro_d_kro_g,
-        d_kro_d_sw_explicit=z,
-        d_kro_d_so_explicit=z,
-        d_kro_d_sg_explicit=z,
-    )
+    return (d_kro_d_kro_w, d_kro_d_kro_g, z, z, z)
 
 
 @mixing_rule
@@ -732,13 +732,14 @@ def stone_II_rule(
 
 
 @stone_II_rule.dfunc
+@numba.njit(cache=True)
 def _(
     kro_w: FloatOrArray,
     kro_g: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
-) -> MixingRulePartialDerivatives:
+) -> typing.Tuple[FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray]:
     """
     Analytical derivatives for Stone II (unit-endpoint).
 
@@ -756,13 +757,7 @@ def _(
     d_kro_d_kro_w = np.where(active, ones, 0.0)
     d_kro_d_kro_g = np.where(active, ones, 0.0)
     z = _zeros_like_kro(kro_w)
-    return MixingRulePartialDerivatives(
-        d_kro_d_kro_w=d_kro_d_kro_w,
-        d_kro_d_kro_g=d_kro_d_kro_g,
-        d_kro_d_sw_explicit=z,
-        d_kro_d_so_explicit=z,
-        d_kro_d_sg_explicit=z,
-    )
+    return (d_kro_d_kro_w, d_kro_d_kro_g, z, z, z)
 
 
 @mixing_rule
@@ -788,23 +783,18 @@ def arithmetic_mean_rule(
 
 
 @arithmetic_mean_rule.dfunc
+@numba.njit(cache=True)
 def _(
     kro_w: FloatOrArray,
     kro_g: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
-) -> MixingRulePartialDerivatives:
+) -> typing.Tuple[FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray]:
     """∂kro/∂kro_w = 0.5, ∂kro/∂kro_g = 0.5, no saturation dependence."""
     half = np.full_like(np.asarray(kro_w, dtype=np.float64), 0.5)
     z = _zeros_like_kro(kro_w)
-    return MixingRulePartialDerivatives(
-        d_kro_d_kro_w=half,
-        d_kro_d_kro_g=half,
-        d_kro_d_sw_explicit=z,
-        d_kro_d_so_explicit=z,
-        d_kro_d_sg_explicit=z,
-    )
+    return (half, half, z, z, z)
 
 
 @mixing_rule
@@ -830,13 +820,14 @@ def geometric_mean_rule(
 
 
 @geometric_mean_rule.dfunc
+@numba.njit(cache=True)
 def _(
     kro_w: FloatOrArray,
     kro_g: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
-) -> MixingRulePartialDerivatives:
+) -> typing.Tuple[FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray]:
     """
     kro = sqrt(kw * kg)
 
@@ -851,13 +842,7 @@ def _(
     d_kro_d_kro_w = np.where(kro > 0.0, 0.5 * kg / safe_kro, 0.0)
     d_kro_d_kro_g = np.where(kro > 0.0, 0.5 * kw / safe_kro, 0.0)
     z = _zeros_like_kro(kro_w)
-    return MixingRulePartialDerivatives(
-        d_kro_d_kro_w=d_kro_d_kro_w,
-        d_kro_d_kro_g=d_kro_d_kro_g,
-        d_kro_d_sw_explicit=z,
-        d_kro_d_so_explicit=z,
-        d_kro_d_sg_explicit=z,
-    )
+    return (d_kro_d_kro_w, d_kro_d_kro_g, z, z, z)
 
 
 @mixing_rule
@@ -892,13 +877,14 @@ def harmonic_mean_rule(
 
 
 @harmonic_mean_rule.dfunc
+@numba.njit(cache=True)
 def _(
     kro_w: FloatOrArray,
     kro_g: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
-) -> MixingRulePartialDerivatives:
+) -> typing.Tuple[FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray]:
     """
     kro = 2 kw kg / (kw + kg)
 
@@ -913,13 +899,7 @@ def _(
     d_kro_d_kro_w = np.where(both_positive, 2.0 * kg**2 / safe_sum**2, 0.0)
     d_kro_d_kro_g = np.where(both_positive, 2.0 * kw**2 / safe_sum**2, 0.0)
     z = _zeros_like_kro(kro_w)
-    return MixingRulePartialDerivatives(
-        d_kro_d_kro_w=d_kro_d_kro_w,
-        d_kro_d_kro_g=d_kro_d_kro_g,
-        d_kro_d_sw_explicit=z,
-        d_kro_d_so_explicit=z,
-        d_kro_d_sg_explicit=z,
-    )
+    return (d_kro_d_kro_w, d_kro_d_kro_g, z, z, z)
 
 
 @mixing_rule
@@ -952,7 +932,6 @@ def baker_linear_rule(
 
     """
     total_displacing = water_saturation + gas_saturation
-
     result = np.where(
         total_displacing > 0.0,
         (kro_w * water_saturation + kro_g * gas_saturation) / total_displacing,
@@ -962,13 +941,14 @@ def baker_linear_rule(
 
 
 @baker_linear_rule.dfunc
+@numba.njit(cache=True)
 def _(
     kro_w: FloatOrArray,
     kro_g: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
-) -> MixingRulePartialDerivatives:
+) -> typing.Tuple[FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray]:
     """
     Identical structure to saturation_weighted_interpolation_rule — same formula.
 
@@ -992,13 +972,7 @@ def _(
     d_sw = np.where(active, sg * (kw - kg) / T_safe**2, 0.0)
     d_sg = np.where(active, sw * (kg - kw) / T_safe**2, 0.0)
     z = _zeros_like_kro(kro_w)
-    return MixingRulePartialDerivatives(
-        d_kro_d_kro_w=d_kro_d_kro_w,
-        d_kro_d_kro_g=d_kro_d_kro_g,
-        d_kro_d_sw_explicit=d_sw,
-        d_kro_d_so_explicit=z,
-        d_kro_d_sg_explicit=d_sg,
-    )
+    return (d_kro_d_kro_w, d_kro_d_kro_g, d_sw, z, d_sg)
 
 
 @mixing_rule
@@ -1031,13 +1005,14 @@ def blunt_rule(
 
 
 @blunt_rule.dfunc
+@numba.njit(cache=True)
 def _(
     kro_w: FloatOrArray,
     kro_g: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
-) -> MixingRulePartialDerivatives:
+) -> typing.Tuple[FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray]:
     """
     kro = kw * kg * (2 - kw - kg)
 
@@ -1053,13 +1028,7 @@ def _(
     d_kro_d_kro_w = np.where(active, kg * (2.0 - 2.0 * kw - kg), 0.0)
     d_kro_d_kro_g = np.where(active, kw * (2.0 - kw - 2.0 * kg), 0.0)
     z = _zeros_like_kro(kro_w)
-    return MixingRulePartialDerivatives(
-        d_kro_d_kro_w=d_kro_d_kro_w,
-        d_kro_d_kro_g=d_kro_d_kro_g,
-        d_kro_d_sw_explicit=z,
-        d_kro_d_so_explicit=z,
-        d_kro_d_sg_explicit=z,
-    )
+    return (d_kro_d_kro_w, d_kro_d_kro_g, z, z, z)
 
 
 @mixing_rule
@@ -1088,13 +1057,14 @@ def hustad_hansen_rule(
 
 
 @hustad_hansen_rule.dfunc
+@numba.njit(cache=True)
 def _(
     kro_w: FloatOrArray,
     kro_g: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
-) -> MixingRulePartialDerivatives:
+) -> typing.Tuple[FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray]:
     """
     kro = (kw * kg) / max(kw, kg)
 
@@ -1118,13 +1088,7 @@ def _(
         both_zero, 0.0, np.where(kg > kw, 0.0, np.where(kw > kg, 1.0, 0.5))
     )
     z = _zeros_like_kro(kro_w)
-    return MixingRulePartialDerivatives(
-        d_kro_d_kro_w=d_kro_d_kro_w,
-        d_kro_d_kro_g=d_kro_d_kro_g,
-        d_kro_d_sw_explicit=z,
-        d_kro_d_so_explicit=z,
-        d_kro_d_sg_explicit=z,
-    )
+    return (d_kro_d_kro_w, d_kro_d_kro_g, z, z, z)
 
 
 def aziz_settari_rule(a: float = 0.5, b: float = 0.5) -> MixingRule:
@@ -1174,13 +1138,16 @@ def aziz_settari_rule(a: float = 0.5, b: float = 0.5) -> MixingRule:
     )
 
     @rule.dfunc
+    @numba.njit(cache=True)
     def _dfunc(
         kro_w: FloatOrArray,
         kro_g: FloatOrArray,
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
         gas_saturation: FloatOrArray,
-    ) -> MixingRulePartialDerivatives:
+    ) -> typing.Tuple[
+        FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray
+    ]:
         """
         kro = kw^a * kg^b
 
@@ -1197,13 +1164,7 @@ def aziz_settari_rule(a: float = 0.5, b: float = 0.5) -> MixingRule:
         d_kro_d_kro_w = np.where(active, a * safe_kw ** (a - 1.0) * safe_kg**b, 0.0)
         d_kro_d_kro_g = np.where(active, b * safe_kw**a * safe_kg ** (b - 1.0), 0.0)
         z = _zeros_like_kro(kro_w)
-        return MixingRulePartialDerivatives(
-            d_kro_d_kro_w=d_kro_d_kro_w,
-            d_kro_d_kro_g=d_kro_d_kro_g,
-            d_kro_d_sw_explicit=z,
-            d_kro_d_so_explicit=z,
-            d_kro_d_sg_explicit=z,
-        )
+        return (d_kro_d_kro_w, d_kro_d_kro_g, z, z, z)
 
     return rule
 
@@ -1246,13 +1207,14 @@ def eclipse_rule(
 
 
 @eclipse_rule.dfunc
+@numba.njit(cache=True)
 def _(
     kro_w: FloatOrArray,
     kro_g: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
-) -> MixingRulePartialDerivatives:
+) -> typing.Tuple[FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray]:
     """
     kro = kw * So/(So+Sg) + kg * So/(So+Sw)
 
@@ -1298,13 +1260,7 @@ def _(
     )
     d_sg = np.where(active & (Dw > 0.0), -kw * so / Dw_safe**2, 0.0)
 
-    return MixingRulePartialDerivatives(
-        d_kro_d_kro_w=d_kro_d_kro_w,
-        d_kro_d_kro_g=d_kro_d_kro_g,
-        d_kro_d_sw_explicit=d_sw,
-        d_kro_d_so_explicit=d_so,
-        d_kro_d_sg_explicit=d_sg,
-    )
+    return (d_kro_d_kro_w, d_kro_d_kro_g, d_sw, d_so, d_sg)
 
 
 @mixing_rule
@@ -1330,13 +1286,14 @@ def max_rule(
 
 
 @max_rule.dfunc
+@numba.njit(cache=True)
 def _(
     kro_w: FloatOrArray,
     kro_g: FloatOrArray,
     water_saturation: FloatOrArray,
     oil_saturation: FloatOrArray,
     gas_saturation: FloatOrArray,
-) -> MixingRulePartialDerivatives:
+) -> typing.Tuple[FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray]:
     """
     kro = max(kw, kg)
 
@@ -1349,94 +1306,7 @@ def _(
     d_kro_d_kro_w = np.where(kw > kg, 1.0, np.where(kg > kw, 0.0, 0.5))
     d_kro_d_kro_g = 1.0 - d_kro_d_kro_w
     z = _zeros_like_kro(kro_w)
-    return MixingRulePartialDerivatives(
-        d_kro_d_kro_w=d_kro_d_kro_w,
-        d_kro_d_kro_g=d_kro_d_kro_g,
-        d_kro_d_sw_explicit=z,
-        d_kro_d_so_explicit=z,
-        d_kro_d_sg_explicit=z,
-    )
-
-
-@mixing_rule
-@numba.njit(cache=True)
-def product_saturation_weighted_rule(
-    kro_w: FloatOrArray,
-    kro_g: FloatOrArray,
-    water_saturation: FloatOrArray,
-    oil_saturation: FloatOrArray,
-    gas_saturation: FloatOrArray,
-) -> FloatOrArray:
-    """
-    Product of two-phase kr values weighted by oil saturation.
-
-    kro = (kro_w * kro_g) * (So / So_max)^n
-
-    where n is an empirical exponent (typically 0.5-2.0).
-
-    Notes:
-        - Accounts for reduction in connectivity at lower oil saturations
-        - Empirical parameter n can be tuned to match experimental data
-        - Conservative for low oil saturations
-    """
-    n = 1.0  # Empirical exponent
-
-    # Assume maximum oil saturation is 1.0 - Swi - Sgr
-    # For simplicity, use total saturation to normalize
-    total_sat = water_saturation + oil_saturation + gas_saturation
-
-    so_normalized = np.where(total_sat > 0.0, oil_saturation / total_sat, 0.0)
-    result = (kro_w * kro_g) * (so_normalized**n)
-
-    # Return 0 if oil_saturation or total_sat is zero
-    return np.where((oil_saturation > 0.0) & (total_sat > 0.0), result, 0.0)
-
-
-@product_saturation_weighted_rule.dfunc
-def _(
-    kro_w: FloatOrArray,
-    kro_g: FloatOrArray,
-    water_saturation: FloatOrArray,
-    oil_saturation: FloatOrArray,
-    gas_saturation: FloatOrArray,
-) -> MixingRulePartialDerivatives:
-    """
-    kro = kw * kg * (So / S_total)  with n = 1.
-
-    Let  R = So / S_total.
-
-    ∂kro/∂kw  = kg * R
-    ∂kro/∂kg  = kw * R
-
-    ∂kro/∂So  (explicit) = kw * kg * (S_total - So) / S_total²
-                         = kw * kg * (Sw + Sg) / S_total²
-    ∂kro/∂Sw  (explicit) = kw * kg * (-So) / S_total²  =  -kw * kg * So / S_total²
-    ∂kro/∂Sg  (explicit) = same as ∂/∂Sw
-    """
-    kw = np.asarray(kro_w, dtype=np.float64)
-    kg = np.asarray(kro_g, dtype=np.float64)
-    sw = np.asarray(water_saturation, dtype=np.float64)
-    so = np.asarray(oil_saturation, dtype=np.float64)
-    sg = np.asarray(gas_saturation, dtype=np.float64)
-
-    S = sw + so + sg
-    active = (so > 0.0) & (S > 0.0)
-    S_safe = np.where(active, S, 1.0)
-    R = np.where(active, so / S_safe, 0.0)
-
-    d_kro_d_kro_w = np.where(active, kg * R, 0.0)
-    d_kro_d_kro_g = np.where(active, kw * R, 0.0)
-    d_so = np.where(active, kw * kg * (sw + sg) / S_safe**2, 0.0)
-    d_sw = np.where(active, -kw * kg * so / S_safe**2, 0.0)
-    d_sg = d_sw.copy()
-
-    return MixingRulePartialDerivatives(
-        d_kro_d_kro_w=d_kro_d_kro_w,
-        d_kro_d_kro_g=d_kro_d_kro_g,
-        d_kro_d_sw_explicit=d_sw,
-        d_kro_d_so_explicit=d_so,
-        d_kro_d_sg_explicit=d_sg,
-    )
+    return (d_kro_d_kro_w, d_kro_d_kro_g, z, z, z)
 
 
 def get_mixing_rule_partial_derivatives(
@@ -1511,6 +1381,12 @@ class RelativePermeabilityTable(StoreSerializable):
     """
 
     __abstract_serializable__ = True
+
+    def get_oil_water_wetting_phase(self) -> FluidPhase:
+        raise NotImplementedError
+
+    def get_gas_oil_wetting_phase(self) -> FluidPhase:
+        raise NotImplementedError
 
     def get_relative_permeabilities(
         self,
@@ -1976,6 +1852,12 @@ class ThreePhaseRelPermTable(
         mixing_rule = self.mixing_rule
         if isinstance(mixing_rule, str):
             object.__setattr__(self, "mixing_rule", get_mixing_rule(mixing_rule))
+
+    def get_oil_water_wetting_phase(self) -> FluidPhase:
+        return self.oil_water_table.wetting_phase  # type:ignore[return-value]
+
+    def get_gas_oil_wetting_phase(self) -> FluidPhase:
+        return self.gas_oil_table.wetting_phase  # type:ignore[return-value]
 
     def get_relative_permeabilities(
         self,
@@ -2722,6 +2604,19 @@ class BrooksCoreyThreePhaseRelPermModel(
         if isinstance(mixing_rule, str):
             object.__setattr__(self, "mixing_rule", get_mixing_rule(mixing_rule))
 
+    def get_oil_water_wetting_phase(self) -> FluidPhase:
+        wettability = self.wettability
+        if wettability == Wettability.WATER_WET:
+            return FluidPhase.WATER
+        elif wettability == Wettability.OIL_WET:
+            return FluidPhase.OIL
+        elif self.mixed_wet_water_fraction >= 0.5:
+            return FluidPhase.WATER
+        return FluidPhase.OIL
+
+    def get_gas_oil_wetting_phase(self) -> FluidPhase:
+        return FluidPhase.OIL
+
     def get_relative_permeabilities(
         self,
         water_saturation: FloatOrArray,
@@ -3403,6 +3298,7 @@ class LETParameters(Serializable):
             raise ValidationError(f"LET parameter `T` must be positive, got {self.T}")
 
 
+@numba.njit(cache=True)
 def _let_relperm(
     normalized_saturation: FloatOrArray,
     L: float,
@@ -3763,6 +3659,7 @@ def compute_let_three_phase_relative_permeabilities(
     return krw, kro, krg  # type: ignore[return-value]
 
 
+@numba.njit(cache=True)
 def _let_curve_slope_wrt_normalized_saturation(
     normalized_saturation: npt.NDArray,
     L: float,
@@ -3884,6 +3781,19 @@ class LETThreePhaseRelPermModel(
         mixing_rule = self.mixing_rule
         if isinstance(mixing_rule, str):
             object.__setattr__(self, "mixing_rule", get_mixing_rule(mixing_rule))
+
+    def get_oil_water_wetting_phase(self) -> FluidPhase:
+        wettability = self.wettability
+        if wettability == Wettability.WATER_WET:
+            return FluidPhase.WATER
+        elif wettability == Wettability.OIL_WET:
+            return FluidPhase.OIL
+        elif self.mixed_wet_water_fraction >= 0.5:
+            return FluidPhase.WATER
+        return FluidPhase.OIL
+
+    def get_gas_oil_wetting_phase(self) -> FluidPhase:
+        return FluidPhase.OIL
 
     def get_relative_permeabilities(
         self,

@@ -246,6 +246,7 @@ def max_overload(x):
         return impl
 
 
+@numba.njit(cache=True)
 def piecewise_linear_slope(
     query: FloatOrArray,
     table_x: npt.NDArray,
