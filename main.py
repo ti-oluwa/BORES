@@ -116,32 +116,20 @@ wells = bores.wells_(injectors=[injector], producers=[producer])
 
 # Rock-fluid tables (Brooks-Corey relative permeability + capillary pressure)
 rock_fluid_tables = bores.RockFluidTables(
-    relative_permeability_table=bores.as_three_phase_relperm_table(
-        bores.BrooksCoreyThreePhaseRelPermModel(
-            water_exponent=3.0,
-            oil_exponent=2.0,
-            gas_exponent=2.0,
-            wettability=bores.Wettability.WATER_WET,
-            mixing_rule="eclipse_rule",
-        ),
-        irreducible_water_saturation=0.06,
-        residual_oil_saturation_gas=0.10,
-        residual_oil_saturation_water=0.12,
-        residual_gas_saturation=0.05,
+    relative_permeability_table=bores.BrooksCoreyThreePhaseRelPermModel(
+        water_exponent=3.0,
+        oil_exponent=2.0,
+        gas_exponent=2.0,
+        wettability=bores.Wettability.WATER_WET,
+        mixing_rule="eclipse_rule",
     ),
-    capillary_pressure_table=bores.as_three_phase_capillary_pressure_table(
-        bores.BrooksCoreyCapillaryPressureModel(
-            wettability=bores.Wettability.WATER_WET,
-        ),
-        irreducible_water_saturation=0.06,
-        residual_oil_saturation_gas=0.10,
-        residual_oil_saturation_water=0.12,
-        residual_gas_saturation=0.05,
+    capillary_pressure_table=bores.LeverettJCapillaryPressureModel(
+        wettability=bores.Wettability.WATER_WET,
     ),
 )
 timer = bores.Timer(
     initial_step_size=bores.Time(days=5),
-    maximum_step_size=bores.Time(months=6),
+    maximum_step_size=bores.Time(months=3),
     minimum_step_size=bores.Time(hours=1),
     simulation_time=bores.Time(years=30),
     maximum_rejections=20,
@@ -153,8 +141,8 @@ config = bores.Config(
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
     scheme="full-si",
-    pressure_solver="direct",
-    saturation_solver="direct",
+    pressure_solver="bicgstab",
+    saturation_solver="tfqmr",
     pressure_preconditioner=None,
     saturation_preconditioner=None,
     maximum_pressure_change=1800,

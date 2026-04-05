@@ -46,6 +46,7 @@ from bores.types import (
     RelativePermeabilities,
     RelativePermeabilityDerivatives,
 )
+from bores.utils import atleast_1d
 
 __all__ = ["KilloughCapillaryPressureModel", "KilloughLandRelPermModel"]
 
@@ -110,7 +111,7 @@ def _land_residual_saturation_array(
     :param saturation_epsilon: Small value to guard against division by zero.
     :return: Dynamic residual saturation array with the same shape as the input.
     """
-    s_i = np.atleast_1d(initial_non_wetting_saturation)
+    s_i = atleast_1d(initial_non_wetting_saturation)
     s_r_max = max(max_residual_saturation, saturation_epsilon)
 
     result = np.empty_like(s_i)
@@ -244,12 +245,12 @@ def _killough_interpolation_array(
     :param epsilon: Numerical stability tolerance.
     :return: Interpolated scanning-curve values with the same shape as `saturation`.
     """
-    sat = np.atleast_1d(saturation)
-    val_d = np.atleast_1d(drainage_value)
-    val_i = np.atleast_1d(imbibition_value)
-    s_rev = np.atleast_1d(reversal_saturation)
-    s_max = np.atleast_1d(max_saturation)
-    imb = np.atleast_1d(is_imbibition)
+    sat = atleast_1d(saturation)
+    val_d = atleast_1d(drainage_value)
+    val_i = atleast_1d(imbibition_value)
+    s_rev = atleast_1d(reversal_saturation)
+    s_max = atleast_1d(max_saturation)
+    imb = atleast_1d(is_imbibition)
 
     # broadcast to common shape
     sat, val_d, val_i, s_rev, s_max, imb = np.broadcast_arrays(
@@ -444,14 +445,14 @@ def _killough_derivative_array(
     :param epsilon: Numerical tolerance.
     :return: Derivative array with the same shape as `saturation`.
     """
-    sat = np.atleast_1d(saturation)
-    val_d = np.atleast_1d(drainage_value)
-    val_i = np.atleast_1d(imbibition_value)
-    dv_d = np.atleast_1d(d_drainage_d_sat)
-    dv_i = np.atleast_1d(d_imbibition_d_sat)
-    s_rev = np.atleast_1d(reversal_saturation)
-    s_max = np.atleast_1d(max_saturation)
-    imb = np.atleast_1d(is_imbibition)
+    sat = atleast_1d(saturation)
+    val_d = atleast_1d(drainage_value)
+    val_i = atleast_1d(imbibition_value)
+    dv_d = atleast_1d(d_drainage_d_sat)
+    dv_i = atleast_1d(d_imbibition_d_sat)
+    s_rev = atleast_1d(reversal_saturation)
+    s_max = atleast_1d(max_saturation)
+    imb = atleast_1d(is_imbibition)
 
     sat, val_d, val_i, dv_d, dv_i, s_rev, s_max, imb = np.broadcast_arrays(
         sat, val_d, val_i, dv_d, dv_i, s_rev, s_max, imb
@@ -1422,9 +1423,7 @@ class KilloughLandRelPermModel(
             exponent=self.scanning_interpolation_exponent,
         )
 
-        # ------------------------------------------------------------------
         # Gas-oil — values and derivatives
-        # ------------------------------------------------------------------
         kro_g_drain, krg_drain = _go_kr(go_drain, sw, so, sg, **kwargs)
         kro_g_imb, krg_imb = _go_kr(go_imb, sw, so, sg, **imb_go_kwargs)
 

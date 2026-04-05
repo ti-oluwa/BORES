@@ -246,6 +246,43 @@ def max_overload(x):
         return impl
 
 
+def atleast_1d(x, dtype: typing.Optional[npt.DTypeLike] = None) -> npt.NDArray:  # type: ignore
+    return np.atleast_1d(x)
+
+
+@overload(atleast_1d)
+def overload_to_1d(x, dtype=None):
+
+    if isinstance(dtype, numba.types.NoneType) or dtype is None:
+        target_dtype = np.float64
+
+    elif isinstance(dtype, numba.types.DTypeSpec):
+        target_dtype = dtype.dtype
+
+    else:
+        return None  # no match
+
+    # array case
+    if isinstance(x, numba.types.Array):
+
+        def impl(x, dtype=None):  # type: ignore
+            return x
+
+        return impl
+
+    # scalar case
+    if isinstance(x, (numba.types.Float, numba.types.Integer)):
+
+        def impl(x, dtype=None):
+            arr = np.empty(1, dtype=target_dtype)
+            arr[0] = x
+            return arr
+
+        return impl
+
+    return None
+
+
 @numba.njit(cache=True, inline="always")
 def _piecewise_linear_slope_scalar(
     q: float,
