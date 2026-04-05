@@ -657,6 +657,211 @@ def update_fluid_properties(
     )
 
 
+@numba.njit(cache=True)
+def _apply_solution_gas_updates(
+    oil_saturation_grid: ThreeDimensionalGrid,
+    water_saturation_grid: ThreeDimensionalGrid,
+    gas_saturation_grid: ThreeDimensionalGrid,
+    new_solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
+    new_oil_formation_volume_factor_grid: ThreeDimensionalGrid,
+    new_gas_solubility_in_water_grid: ThreeDimensionalGrid,
+    new_water_formation_volume_factor_grid: ThreeDimensionalGrid,
+    new_gas_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
+    old_oil_formation_volume_factor_grid: ThreeDimensionalGrid,
+    old_gas_solubility_in_water_grid: ThreeDimensionalGrid,
+    old_water_formation_volume_factor_grid: ThreeDimensionalGrid,
+    bbl_to_ft3: float,
+    dtype: npt.DTypeLike,
+) -> typing.Tuple[
+    ThreeDimensionalGrid,
+    ThreeDimensionalGrid,
+    ThreeDimensionalGrid,
+    ThreeDimensionalGrid,
+    ThreeDimensionalGrid,
+]:
+    """
+    Jit-friendly core of the solution gas liberation/re-dissolution flash.
+
+    Accepts and returns raw grids only; all `attrs` manipulation is handled
+    by the calling `apply_solution_gas_updates` wrapper.
+
+    :param oil_saturation_grid: Oil saturation grid (fraction).
+    :param water_saturation_grid: Water saturation grid (fraction).
+    :param gas_saturation_grid: Gas saturation grid (fraction).
+    :param new_solution_gas_to_oil_ratio_grid: Rs grid after PVT update (SCF/STB).
+    :param new_oil_formation_volume_factor_grid: Bo grid after PVT update (bbl/STB).
+    :param new_gas_solubility_in_water_grid: Rsw grid after PVT update (SCF/STB).
+    :param new_water_formation_volume_factor_grid: Bw grid after PVT update (bbl/STB).
+    :param new_gas_formation_volume_factor_grid: Bg grid after PVT update (bbl/SCF).
+    :param old_solution_gas_to_oil_ratio_grid: Rs grid before PVT update (SCF/STB).
+    :param old_oil_formation_volume_factor_grid: Bo grid before PVT update (bbl/STB).
+    :param old_gas_solubility_in_water_grid: Rsw grid before PVT update (SCF/STB).
+    :param old_water_formation_volume_factor_grid: Bw grid before PVT update (bbl/STB).
+    :return: Tuple of (oil_saturation, water_saturation, gas_saturation, corrected_Rs, corrected_Rsw).
+    """
+    oil_saturation_grid = oil_saturation_grid.copy()
+    water_saturation_grid = water_saturation_grid.copy()
+    gas_saturation_grid = gas_saturation_grid.copy()
+    corrected_rs = new_solution_gas_to_oil_ratio_grid.copy()
+    corrected_rsw = new_gas_solubility_in_water_grid.copy()
+    zero = dtype.type(0.0)  # type: ignore
+
+    # OIL PHASE
+    rs_change = old_solution_gas_to_oil_ratio_grid - new_solution_gas_to_oil_ratio_grid
+
+    oil_liberation_mask = rs_change > 0.0
+    oil_redissolution_mask = (rs_change < 0.0) & (gas_saturation_grid > 0.0)
+    oil_no_gas_mask = (rs_change < 0.0) & (gas_saturation_grid <= 0.0)
+
+    # Liberation: gas comes out of oil
+    liberated_gas_from_oil = np.where(
+        oil_liberation_mask,
+        rs_change
+        * oil_saturation_grid
+        * new_gas_formation_volume_factor_grid
+        / (old_oil_formation_volume_factor_grid * bbl_to_ft3),
+        zero,
+    )
+    # Oil volume correction due to Bo change (applies to liberation cells)
+    oil_saturation_grid = np.where(
+        oil_liberation_mask,
+        oil_saturation_grid
+        * new_oil_formation_volume_factor_grid
+        / old_oil_formation_volume_factor_grid,
+        oil_saturation_grid,
+    )
+    gas_saturation_grid = gas_saturation_grid + liberated_gas_from_oil
+
+    # Re-dissolution: gas goes back into oil
+    safe_oil_saturation = np.maximum(oil_saturation_grid, 1e-30)
+    safe_bg = np.maximum(new_gas_formation_volume_factor_grid, 1e-30)
+
+    max_dissolvable_gor = (
+        gas_saturation_grid
+        * old_oil_formation_volume_factor_grid
+        * bbl_to_ft3
+        / (safe_oil_saturation * safe_bg)
+    )
+    # Actual Rs delta is capped at the available free gas (rs_change is negative here)
+    actual_rs_delta = np.where(
+        oil_redissolution_mask,
+        np.maximum(rs_change, -max_dissolvable_gor),
+        zero,
+    )
+    dissolved_gas_from_oil = np.where(
+        oil_redissolution_mask,
+        -actual_rs_delta
+        * oil_saturation_grid
+        * safe_bg
+        / (old_oil_formation_volume_factor_grid * bbl_to_ft3),
+        zero,
+    )
+    gas_saturation_grid = gas_saturation_grid - dissolved_gas_from_oil
+    # Oil swells on re-dissolution
+    oil_saturation_grid = np.where(
+        oil_redissolution_mask,
+        oil_saturation_grid
+        * new_oil_formation_volume_factor_grid
+        / old_oil_formation_volume_factor_grid,
+        oil_saturation_grid,
+    )
+    # Correct Rs: re-dissolution cells use actual delta; no-gas cells revert to old Rs
+    corrected_rs = np.where(
+        oil_redissolution_mask,
+        old_solution_gas_to_oil_ratio_grid - actual_rs_delta,
+        corrected_rs,
+    )
+    corrected_rs = np.where(
+        oil_no_gas_mask,
+        old_solution_gas_to_oil_ratio_grid,
+        corrected_rs,
+    )
+
+    # WATER PHASE
+    rsw_change = old_gas_solubility_in_water_grid - new_gas_solubility_in_water_grid
+
+    water_liberation_mask = rsw_change > zero
+    water_redissolution_mask = (rsw_change < zero) & (gas_saturation_grid > zero)
+    water_no_gas_mask = (rsw_change < zero) & (gas_saturation_grid <= zero)
+
+    # Liberation: gas comes out of water
+    liberated_gas_from_water = np.where(
+        water_liberation_mask,
+        rsw_change
+        * water_saturation_grid
+        * new_gas_formation_volume_factor_grid
+        / (old_water_formation_volume_factor_grid * bbl_to_ft3),
+        zero,
+    )
+    # Water volume correction due to Bw change (applies to liberation cells)
+    water_saturation_grid = np.where(
+        water_liberation_mask,
+        water_saturation_grid
+        * new_water_formation_volume_factor_grid
+        / old_water_formation_volume_factor_grid,
+        water_saturation_grid,
+    )
+    gas_saturation_grid = gas_saturation_grid + liberated_gas_from_water
+
+    # Re-dissolution: gas goes back into water
+    safe_water_saturation = np.maximum(water_saturation_grid, 1e-30)
+
+    max_dissolvable_rsw = (
+        gas_saturation_grid
+        * old_water_formation_volume_factor_grid
+        * bbl_to_ft3
+        / (safe_water_saturation * safe_bg)
+    )
+    # Actual Rsw delta is capped at the available free gas (rsw_change is negative here)
+    actual_rsw_delta = np.where(
+        water_redissolution_mask,
+        np.maximum(rsw_change, -max_dissolvable_rsw),
+        zero,
+    )
+    dissolved_gas_in_water = np.where(
+        water_redissolution_mask,
+        -actual_rsw_delta
+        * water_saturation_grid
+        * safe_bg
+        / (old_water_formation_volume_factor_grid * bbl_to_ft3),
+        zero,
+    )
+    gas_saturation_grid = gas_saturation_grid - dissolved_gas_in_water
+    # Water swells on re-dissolution
+    water_saturation_grid = np.where(
+        water_redissolution_mask,
+        water_saturation_grid
+        * new_water_formation_volume_factor_grid
+        / old_water_formation_volume_factor_grid,
+        water_saturation_grid,
+    )
+    # Correct Rsw: re-dissolution cells use actual delta; no-gas cells revert to old Rsw
+    corrected_rsw = np.where(
+        water_redissolution_mask,
+        old_gas_solubility_in_water_grid - actual_rsw_delta,
+        corrected_rsw,
+    )
+    corrected_rsw = np.where(
+        water_no_gas_mask,
+        old_gas_solubility_in_water_grid,
+        corrected_rsw,
+    )
+
+    # Clamp saturations (normalization is handled by the caller)
+    oil_saturation_grid = np.maximum(oil_saturation_grid, zero)
+    water_saturation_grid = np.maximum(water_saturation_grid, zero)
+    gas_saturation_grid = np.maximum(gas_saturation_grid, zero)
+
+    return (
+        oil_saturation_grid.astype(dtype),
+        water_saturation_grid.astype(dtype),
+        gas_saturation_grid.astype(dtype),
+        corrected_rs.astype(dtype),
+        corrected_rsw.astype(dtype),
+    )
+
+
 def apply_solution_gas_updates(
     fluid_properties: FluidProperties[ThreeDimensions],
     old_solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
@@ -718,210 +923,6 @@ def apply_solution_gas_updates(
         gas_saturation_grid=new_gas_saturation_grid,
         solution_gas_to_oil_ratio_grid=corrected_solution_gas_to_oil_ratio_grid,
         gas_solubility_in_water_grid=corrected_gas_solubility_in_water_grid,
-    )
-
-
-@numba.njit(cache=True)
-def _apply_solution_gas_updates(
-    oil_saturation_grid: ThreeDimensionalGrid,
-    water_saturation_grid: ThreeDimensionalGrid,
-    gas_saturation_grid: ThreeDimensionalGrid,
-    new_solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
-    new_oil_formation_volume_factor_grid: ThreeDimensionalGrid,
-    new_gas_solubility_in_water_grid: ThreeDimensionalGrid,
-    new_water_formation_volume_factor_grid: ThreeDimensionalGrid,
-    new_gas_formation_volume_factor_grid: ThreeDimensionalGrid,
-    old_solution_gas_to_oil_ratio_grid: ThreeDimensionalGrid,
-    old_oil_formation_volume_factor_grid: ThreeDimensionalGrid,
-    old_gas_solubility_in_water_grid: ThreeDimensionalGrid,
-    old_water_formation_volume_factor_grid: ThreeDimensionalGrid,
-    bbl_to_ft3: float,
-    dtype: npt.DTypeLike,
-) -> typing.Tuple[
-    ThreeDimensionalGrid,
-    ThreeDimensionalGrid,
-    ThreeDimensionalGrid,
-    ThreeDimensionalGrid,
-    ThreeDimensionalGrid,
-]:
-    """
-    Jit-friendly core of the solution gas liberation/re-dissolution flash.
-
-    Accepts and returns raw grids only; all `attrs` manipulation is handled
-    by the calling `apply_solution_gas_updates` wrapper.
-
-    :param oil_saturation_grid: Oil saturation grid (fraction).
-    :param water_saturation_grid: Water saturation grid (fraction).
-    :param gas_saturation_grid: Gas saturation grid (fraction).
-    :param new_solution_gas_to_oil_ratio_grid: Rs grid after PVT update (SCF/STB).
-    :param new_oil_formation_volume_factor_grid: Bo grid after PVT update (bbl/STB).
-    :param new_gas_solubility_in_water_grid: Rsw grid after PVT update (SCF/STB).
-    :param new_water_formation_volume_factor_grid: Bw grid after PVT update (bbl/STB).
-    :param new_gas_formation_volume_factor_grid: Bg grid after PVT update (bbl/SCF).
-    :param old_solution_gas_to_oil_ratio_grid: Rs grid before PVT update (SCF/STB).
-    :param old_oil_formation_volume_factor_grid: Bo grid before PVT update (bbl/STB).
-    :param old_gas_solubility_in_water_grid: Rsw grid before PVT update (SCF/STB).
-    :param old_water_formation_volume_factor_grid: Bw grid before PVT update (bbl/STB).
-    :return: Tuple of (oil_saturation, water_saturation, gas_saturation, corrected_Rs, corrected_Rsw).
-    """
-    oil_saturation_grid = oil_saturation_grid.copy()
-    water_saturation_grid = water_saturation_grid.copy()
-    gas_saturation_grid = gas_saturation_grid.copy()
-    corrected_rs = new_solution_gas_to_oil_ratio_grid.copy()
-    corrected_rsw = new_gas_solubility_in_water_grid.copy()
-
-    # OIL PHASE
-    rs_change = old_solution_gas_to_oil_ratio_grid - new_solution_gas_to_oil_ratio_grid
-
-    oil_liberation_mask = rs_change > 0.0
-    oil_redissolution_mask = (rs_change < 0.0) & (gas_saturation_grid > 0.0)
-    oil_no_gas_mask = (rs_change < 0.0) & (gas_saturation_grid <= 0.0)
-
-    # Liberation: gas comes out of oil
-    liberated_gas_from_oil = np.where(
-        oil_liberation_mask,
-        rs_change
-        * oil_saturation_grid
-        * new_gas_formation_volume_factor_grid
-        / (old_oil_formation_volume_factor_grid * bbl_to_ft3),
-        0.0,
-    )
-    # Oil volume correction due to Bo change (applies to liberation cells)
-    oil_saturation_grid = np.where(
-        oil_liberation_mask,
-        oil_saturation_grid
-        * new_oil_formation_volume_factor_grid
-        / old_oil_formation_volume_factor_grid,
-        oil_saturation_grid,
-    )
-    gas_saturation_grid = gas_saturation_grid + liberated_gas_from_oil
-
-    # Re-dissolution: gas goes back into oil
-    safe_oil_saturation = np.maximum(oil_saturation_grid, 1e-30)
-    safe_bg = np.maximum(new_gas_formation_volume_factor_grid, 1e-30)
-
-    max_dissolvable_gor = (
-        gas_saturation_grid
-        * old_oil_formation_volume_factor_grid
-        * bbl_to_ft3
-        / (safe_oil_saturation * safe_bg)
-    )
-    # Actual Rs delta is capped at the available free gas (rs_change is negative here)
-    actual_rs_delta = np.where(
-        oil_redissolution_mask,
-        np.maximum(rs_change, -max_dissolvable_gor),
-        0.0,
-    )
-    dissolved_gas_from_oil = np.where(
-        oil_redissolution_mask,
-        -actual_rs_delta
-        * oil_saturation_grid
-        * safe_bg
-        / (old_oil_formation_volume_factor_grid * bbl_to_ft3),
-        0.0,
-    )
-    gas_saturation_grid = gas_saturation_grid - dissolved_gas_from_oil
-    # Oil swells on re-dissolution
-    oil_saturation_grid = np.where(
-        oil_redissolution_mask,
-        oil_saturation_grid
-        * new_oil_formation_volume_factor_grid
-        / old_oil_formation_volume_factor_grid,
-        oil_saturation_grid,
-    )
-    # Correct Rs: re-dissolution cells use actual delta; no-gas cells revert to old Rs
-    corrected_rs = np.where(
-        oil_redissolution_mask,
-        old_solution_gas_to_oil_ratio_grid - actual_rs_delta,
-        corrected_rs,
-    )
-    corrected_rs = np.where(
-        oil_no_gas_mask,
-        old_solution_gas_to_oil_ratio_grid,
-        corrected_rs,
-    )
-
-    # WATER PHASE
-    rsw_change = old_gas_solubility_in_water_grid - new_gas_solubility_in_water_grid
-
-    water_liberation_mask = rsw_change > 0.0
-    water_redissolution_mask = (rsw_change < 0.0) & (gas_saturation_grid > 0.0)
-    water_no_gas_mask = (rsw_change < 0.0) & (gas_saturation_grid <= 0.0)
-
-    # Liberation: gas comes out of water
-    liberated_gas_from_water = np.where(
-        water_liberation_mask,
-        rsw_change
-        * water_saturation_grid
-        * new_gas_formation_volume_factor_grid
-        / (old_water_formation_volume_factor_grid * bbl_to_ft3),
-        0.0,
-    )
-    # Water volume correction due to Bw change (applies to liberation cells)
-    water_saturation_grid = np.where(
-        water_liberation_mask,
-        water_saturation_grid
-        * new_water_formation_volume_factor_grid
-        / old_water_formation_volume_factor_grid,
-        water_saturation_grid,
-    )
-    gas_saturation_grid = gas_saturation_grid + liberated_gas_from_water
-
-    # Re-dissolution: gas goes back into water
-    safe_water_saturation = np.maximum(water_saturation_grid, 1e-30)
-
-    max_dissolvable_rsw = (
-        gas_saturation_grid
-        * old_water_formation_volume_factor_grid
-        * bbl_to_ft3
-        / (safe_water_saturation * safe_bg)
-    )
-    # Actual Rsw delta is capped at the available free gas (rsw_change is negative here)
-    actual_rsw_delta = np.where(
-        water_redissolution_mask,
-        np.maximum(rsw_change, -max_dissolvable_rsw),
-        0.0,
-    )
-    dissolved_gas_in_water = np.where(
-        water_redissolution_mask,
-        -actual_rsw_delta
-        * water_saturation_grid
-        * safe_bg
-        / (old_water_formation_volume_factor_grid * bbl_to_ft3),
-        0.0,
-    )
-    gas_saturation_grid = gas_saturation_grid - dissolved_gas_in_water
-    # Water swells on re-dissolution
-    water_saturation_grid = np.where(
-        water_redissolution_mask,
-        water_saturation_grid
-        * new_water_formation_volume_factor_grid
-        / old_water_formation_volume_factor_grid,
-        water_saturation_grid,
-    )
-    # Correct Rsw: re-dissolution cells use actual delta; no-gas cells revert to old Rsw
-    corrected_rsw = np.where(
-        water_redissolution_mask,
-        old_gas_solubility_in_water_grid - actual_rsw_delta,
-        corrected_rsw,
-    )
-    corrected_rsw = np.where(
-        water_no_gas_mask,
-        old_gas_solubility_in_water_grid,
-        corrected_rsw,
-    )
-
-    # Clamp saturations (normalization is handled by the caller)
-    oil_saturation_grid = np.maximum(oil_saturation_grid, 0.0)
-    water_saturation_grid = np.maximum(water_saturation_grid, 0.0)
-    gas_saturation_grid = np.maximum(gas_saturation_grid, 0.0)
-
-    return (
-        oil_saturation_grid,
-        water_saturation_grid,
-        gas_saturation_grid,
-        corrected_rs.astype(dtype),
-        corrected_rsw.astype(dtype),
     )
 
 

@@ -9,7 +9,6 @@ import os
 
 from .analyses import *
 from .boundary_conditions import *
-from .capillary_pressures import *
 from .config import *
 from .constants import *
 from .errors import *
@@ -20,7 +19,7 @@ from .grids import *
 from .models import *
 from .monitoring import *
 from .precision import *
-from .relperm import *
+from .rock_fluid import *
 from .serialization import *
 from .serialization import register_ndarray_serializers
 from .simulate import *

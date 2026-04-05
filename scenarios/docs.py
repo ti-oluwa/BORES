@@ -6,9 +6,11 @@ app = marimo.App(width="full")
 
 @app.cell
 def _():
-    import bores
     import logging
+
     import numpy as np
+
+    import bores
 
     # Set log level
     logging.basicConfig(level=logging.INFO)

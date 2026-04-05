@@ -4,6 +4,7 @@ import typing
 import attrs
 
 from bores.boundary_conditions import BoundaryConditions
+from bores.datastructures import ContextFlag
 from bores.models import RockPermeability
 from bores.solvers.base import to_1D_index_interior_only
 from bores.types import NDimensionalGrid, ThreeDimensions
@@ -144,3 +145,7 @@ def build_well_indices_cache(
             wells.name: _well_indices(wells) for wells in wells.production_wells
         },
     )
+
+
+update_well_indices = ContextFlag(False)
+"""Flag to indicate if a well indices update is needed during a simulation run."""

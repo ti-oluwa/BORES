@@ -104,6 +104,9 @@ scipy = [
   { index = "numpy-mkl", marker = "sys_platform != 'darwin' and platform_machine == 'x86_64'" },
 ]
 
+[tool.ruff.lint]
+select = ["I"]  # Enable all isort rules, including I001
+
 [project.optional-dependencies]
 pyvista = [
     "pyvista[jupyter]>=0.44.0",

@@ -52,7 +52,11 @@ from bores.updates import (
     update_residual_saturation_grids,
 )
 from bores.wells.base import Wells
-from bores.wells.indices import WellIndicesCache, build_well_indices_cache
+from bores.wells.indices import (
+    WellIndicesCache,
+    build_well_indices_cache,
+    update_well_indices,
+)
 
 __all__ = ["Run", "run"]
 
@@ -2732,6 +2736,22 @@ def run(
                         relative_mobility_range=relative_mobility_range,
                         phase_appearance_tolerance=phase_appearance_tolerance,
                     )
+
+                    # Update well indices if the flag as set
+                    with update_well_indices as should_update:
+                        if should_update:
+                            well_indices_cache = build_well_indices_cache(
+                                wells=wells,
+                                thickness_grid=padded_thickness_grid,
+                                absolute_permeability=padded_rock_properties.absolute_permeability,
+                                boundary_conditions=boundary_conditions,
+                                cell_size_x=cell_dimension[0],
+                                cell_size_y=cell_dimension[1],
+                                cell_count_x=padded_thickness_grid.shape[0],
+                                cell_count_y=padded_thickness_grid.shape[1],
+                                cell_count_z=padded_thickness_grid.shape[2],
+                                pad_width=pad_width,
+                            )
 
                 if scheme == "impes":
                     result = _run_impes_step(

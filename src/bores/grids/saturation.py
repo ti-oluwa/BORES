@@ -7,7 +7,7 @@ import numpy.typing as npt
 from bores.constants import c
 from bores.errors import ValidationError
 from bores.precision import get_dtype
-from bores.relperm import RelativePermeabilityTable
+from bores.rock_fluid.relperm import RelativePermeabilityTable
 from bores.types import FluidPhase, NDimension, NDimensionalGrid
 
 __all__ = ["build_saturation_grids", "seed_phase_saturation"]

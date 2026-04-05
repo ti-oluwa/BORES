@@ -6,9 +6,10 @@ app = marimo.App(width="full")
 
 @app.cell
 def _():
-    import numpy as np
     import itertools
     from pathlib import Path
+
+    import numpy as np
 
     import bores
 

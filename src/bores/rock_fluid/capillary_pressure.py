@@ -264,6 +264,12 @@ class TwoPhaseCapillaryPressureTable(Serializable):
                 "`capillary_pressure_derivative` must have the same length as `reference_saturation`."
             )
 
+    def get_oil_water_wetting_phase(self) -> FluidPhase:
+        return self.wetting_phase  # type:ignore[return-value]
+
+    def get_gas_oil_wetting_phase(self) -> FluidPhase:
+        return self.wetting_phase  # type:ignore[return-value]
+
     def _resolve_reference(
         self,
         wetting_saturation: FloatOrArray,

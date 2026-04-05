@@ -1,4 +1,5 @@
 import typing
+from contextvars import ContextVar
 
 import attrs
 import numpy as np
@@ -1204,3 +1205,93 @@ class PhaseRange(TypedDict):
     oil: Range
     water: Range
     gas: Range
+
+
+class ContextFlag(typing.Generic[T]):
+    """
+    Context-local flag.
+
+    Uses `contextvars.ContextVar` for true isolation across concurrent tasks,
+    threads, and async contexts. Each context maintains its own flag value.
+
+    The context manager protocol returns the current value on entry and
+    resets to the initial state on successful exit (no exception).
+
+    Example:
+    ```python
+    flag = ContextFlag(initial=False)
+    flag.set(True)
+
+    with flag as value:
+        assert value is True
+        # ... do work ...
+    # flag is reset to False after context exit (if no exception)
+    ```
+
+    Thread/async safety:
+    ```python
+    # Each thread/task has isolated state
+    import threading
+
+    flag = ContextFlag(initial=0)
+
+    def worker():
+        flag.set(100)
+        # Other threads don't see this value
+
+    t = threading.Thread(target=worker)
+    t.start()
+    assert flag.get() == 0  # Original context unchanged
+    ```
+    """
+
+    __slots__ = ("_var", "_initial")
+
+    def __init__(self, initial: T) -> None:
+        """
+        Initialize the context flag with an initial value.
+
+        :param initial: Initial value for new contexts
+        """
+        self._initial = initial
+        self._var: ContextVar[T] = ContextVar("ContextFlag", default=initial)
+
+    def get(self) -> T:
+        """
+        Get the flag value in the current context.
+
+        :return: Current value (defaults to initial if never set in this context)
+        """
+        return self._var.get()
+
+    def set(self, value: T) -> None:
+        """
+        Set the flag to a new value in the current context.
+
+        :param value: New value
+        """
+        self._var.set(value)
+
+    def reset(self) -> None:
+        """Reset the flag to its initial value in the current context."""
+        self._var.set(self._initial)
+
+    def __enter__(self) -> T:
+        """
+        Enter context manager, returning current flag value.
+
+        :return: Current value
+        """
+        return self.get()
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """
+        Exit context manager. Reset flag on successful exit (no exception).
+
+        :param exc_type: Exception type (None if no exception)
+        :param exc_val: Exception value
+        :param exc_tb: Exception traceback
+        """
+        # Only reset if no exception occurred
+        if exc_type is None:
+            self.reset()
