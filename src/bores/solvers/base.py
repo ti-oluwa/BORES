@@ -16,11 +16,15 @@ from scipy.sparse import (  # type: ignore[import-untyped]
 )
 from scipy.sparse.linalg import (  # type: ignore[import-untyped]
     LinearOperator,
+    bicg,
     bicgstab,
     cg,
     cgs,
+    gcrotmk,
     gmres,
     lgmres,
+    minres,
+    qmr,
     spilu,
     spsolve,
     tfqmr,
@@ -669,6 +673,7 @@ def _spsolve(
     M: typing.Optional[typing.Any],
     callback: typing.Optional[typing.Callable[[npt.NDArray], None]],
 ) -> npt.NDArray:
+    """Direct (SPSOLVE) solver wrapper compatible with the standard `SolverFunc` interface"""
     return spsolve(A, b), 0  # type: ignore[return-value]
 
 
@@ -686,7 +691,8 @@ def _lgmres(
     outer_k: int = 5,
 ) -> typing.Tuple[npt.NDArray, int]:
     """
-    LGMRES solver with configurable inner/outer iteration parameters.
+    LGMRES solver wrapper compatible with the standard `SolverFunc` interface,
+    with configurable inner/outer iteration parameters.
 
     :param inner_m: Number of inner GMRES iterations per restart.
     :param outer_k: Number of vectors to carry between inner GMRES iterations.
@@ -702,6 +708,126 @@ def _lgmres(
         callback=callback,
         inner_m=inner_m,
         outer_k=outer_k,
+    )
+
+
+def _minres(
+    A: typing.Any,
+    b: typing.Any,
+    x0: typing.Optional[typing.Any],
+    *,
+    rtol: float,
+    atol: float,
+    maxiter: typing.Optional[int],
+    M: typing.Optional[typing.Any],
+    callback: typing.Optional[typing.Callable[[npt.NDArray], None]],
+    shift: float = 0.0,
+) -> typing.Tuple[npt.NDArray, int]:
+    """
+    MINRES solver wrapper compatible with the standard `SolverFunc` interface.
+
+    MINRES is only suitable for symmetric (possibly indefinite) systems.  It
+    does **not** accept `atol` directly; instead convergence is declared when
+    the *relative* residual `||r_k|| / ||b||` drops below `rtol`.  To
+    honour the caller's `atol` we tighten `rtol` whenever the absolute
+    criterion is the binding one:
+
+        effective_rtol = min(rtol, atol / max(||b||, ε))
+
+    This guarantees the returned solution satisfies *both* tolerances without
+    exposing the mismatch to callers.
+
+    :param shift: Solves `(A - shift·I) x = b` instead of `A x = b`.
+        Useful when A is nearly singular or when targeting a shifted system
+        (e.g. eigenvalue-deflation tricks). Defaults to 0.0 (no shift).
+    """
+    b_arr: npt.NDArray = np.asarray(b)
+    b_norm = float(np.linalg.norm(b_arr))
+    eps = (
+        float(np.finfo(b_arr.dtype).eps)
+        if np.issubdtype(b_arr.dtype, np.floating)
+        else 1e-15
+    )
+
+    # Derive a single effective rtol that covers both the relative and
+    # absolute stopping criterion requested by the caller.
+    denom = max(b_norm, eps)
+    effective_rtol = min(rtol, atol / denom)
+    # MINRES requires rtol > 0; clamp to a safe floor.
+    effective_rtol = max(effective_rtol, eps * 10)
+    return minres(  # type: ignore[return-value]
+        A,
+        b,
+        x0=x0,
+        shift=shift,
+        M=M,
+        rtol=effective_rtol,
+        maxiter=maxiter or 1000,
+        callback=callback,
+    )
+
+
+def _qmr(
+    A: typing.Any,
+    b: typing.Any,
+    x0: typing.Optional[typing.Any],
+    *,
+    rtol: float,
+    atol: float,
+    maxiter: typing.Optional[int],
+    M: typing.Optional[typing.Any],
+    callback: typing.Optional[typing.Callable[[npt.NDArray], None]],
+) -> typing.Tuple[npt.NDArray, int]:
+    """
+    QMR solver wrapper compatible with the standard `SolverFunc` interface.
+
+    SciPy's `~scipy.sparse.linalg.qmr` uses a *split* preconditioner
+    `(M1, M2)` rather than the single `M` used by every other solver here.
+    The combined effect is equivalent to `M ≈ M1 @ M2`.
+
+    **Mapping strategy**:
+
+    * If `M` is `None`, both `M1` and `M2` are left as `None`
+      (no preconditioning).
+    * If `M` is provided, it is supplied as `M1`; `M2` is set to the
+      identity.  This matches the "left-preconditioned" convention used by the
+      rest of the solver infrastructure and keeps the residual norms comparable
+      with those reported by other solvers.
+
+    **`atol` handling**:
+
+    Like MINRES, QMR has no native `atol` parameter.  We fold it into a
+    tightened `rtol` using the same formula:
+
+        effective_rtol = min(rtol, atol / max(||b||, ε))
+    """
+    b_arr: npt.NDArray = np.asarray(b)
+    b_norm = float(np.linalg.norm(b_arr))
+    eps = (
+        float(np.finfo(b_arr.dtype).eps)
+        if np.issubdtype(b_arr.dtype, np.floating)
+        else 1e-15
+    )
+
+    denom = max(b_norm, eps)
+    effective_rtol = min(rtol, atol / denom)
+    effective_rtol = max(effective_rtol, eps * 10)
+
+    # Split the single preconditioner into the (M1, M2) pair expected by QMR.
+    # Using M as M1 (left preconditioner) and leaving M2=None (identity) is the
+    # conventional choice and ensures the *left*-preconditioned residual is
+    # what gets driven to zero, consistent with the rest of this codebase.
+    M1: typing.Optional[typing.Any] = M
+    M2: typing.Optional[typing.Any] = None
+    return qmr(  # type: ignore[return-value]
+        A,
+        b,
+        x0=x0,
+        M1=M1,
+        M2=M2,
+        rtol=effective_rtol,
+        maxiter=maxiter or 1000,
+        callback=callback,
     )
 
 
@@ -872,11 +998,15 @@ _PRECONDITIONER_FACTORIES = {
 _solver_registry_lock = threading.Lock()
 _SOLVER_FUNCS = {
     "lgmres": _lgmres,
+    "bicg": bicg,
     "bicgstab": bicgstab,
+    "qmr": _qmr,
     "tfqmr": tfqmr,
     "gmres": gmres,
+    "minres": _minres,
     "cg": cg,
     "cgs": cgs,
+    "gcrotmk": gcrotmk,
     "direct": _spsolve,
 }
 """Registered solver functions."""
@@ -1139,11 +1269,6 @@ def solve_linear_system(
 ) -> typing.Tuple[npt.NDArray, typing.Optional[LinearOperator]]:
     """
     Solves the linear system A·x = b using an (iterative) solver with a fallback strategy.
-
-    The function first attempts to solve the system using the BiCGSTAB method, which is
-    generally efficient for large, sparse, non-symmetric systems. If BiCGSTAB fails to
-    converge within the specified number of iterations, the function falls back to the
-    LGMRES method, which is more robust but typically slower.
 
     Preconditioning is applied using a diagonal preconditioner derived from the diagonal
     elements of matrix A to improve convergence.

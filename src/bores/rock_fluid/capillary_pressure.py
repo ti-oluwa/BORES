@@ -3676,9 +3676,7 @@ class LeverettJCapillaryPressureModel(
             else self.residual_gas_saturation
         )
         porosity = porosity if porosity is not None else self.porosity
-        absolute_permeability = (
-            permeability if permeability is not None else self.permeability
-        )
+        permeability = permeability if permeability is not None else self.permeability
 
         params_missing = []
         if Swc is None:
@@ -3695,115 +3693,33 @@ class LeverettJCapillaryPressureModel(
                 f"Missing: {', '.join(params_missing)}"
             )
 
-        wettability = self.wettability
-        oil_water_interfacial_tension = self.oil_water_interfacial_tension
-        gas_oil_interfacial_tension = self.gas_oil_interfacial_tension
-        oil_water_contact_angle_deg = self.oil_water_contact_angle
-        gas_oil_contact_angle_deg = self.gas_oil_contact_angle
-        j_function_coefficient = self.j_function_coefficient
-        j_function_exponent = self.j_function_exponent
-        mixed_wet_water_fraction = self.mixed_wet_water_fraction
-
-        is_scalar = (
-            np.isscalar(water_saturation)
-            and np.isscalar(oil_saturation)
-            and np.isscalar(gas_saturation)
-            and np.isscalar(irreducible_water_saturation)
-            and np.isscalar(residual_oil_saturation_water)
-            and np.isscalar(residual_oil_saturation_gas)
-            and np.isscalar(residual_gas_saturation)
-        )
-        zero = 0.0 if is_scalar else np.zeros_like(water_saturation)
-        sw = np.atleast_1d(water_saturation)
-        sg = np.atleast_1d(gas_saturation)
-
-        leverett_rock_factor = (
-            np.sqrt(porosity / absolute_permeability)
-            if absolute_permeability > 0.0 and porosity > 0.0
-            else 0.0
-        )
-        dyne_per_cm_to_psi = c.DYNE_PER_CENTIMETER_TO_PSI
-        saturation_epsilon = c.SATURATION_EPSILON
-        minimum_mobile_pore_space = c.MINIMUM_MOBILE_PORE_SPACE
-
-        mobile_water_range = 1.0 - Swc - Sorw  # type: ignore
-        valid_water = (mobile_water_range > minimum_mobile_pore_space) & (
-            leverett_rock_factor > 0.0
-        )
-        se_w = np.clip(
-            (sw - Swc)
-            / np.where(
-                mobile_water_range > minimum_mobile_pore_space, mobile_water_range, 1.0
-            ),
-            saturation_epsilon,
-            1.0 - saturation_epsilon,
-        )
-        d_j_d_se_w = (
-            -j_function_coefficient
-            * j_function_exponent
-            * (se_w ** (-j_function_exponent - 1.0))
-        )
-        cos_ow = np.cos(np.deg2rad(oil_water_contact_angle_deg))
-        ow_scale = (
-            oil_water_interfacial_tension
-            * dyne_per_cm_to_psi
-            * cos_ow
-            * leverett_rock_factor
-        )
-        if wettability == Wettability.WATER_WET:
-            wettability_sign = 1.0
-        elif wettability == Wettability.OIL_WET:
-            wettability_sign = -1.0
-        else:  # MIXED_WET
-            wettability_sign = 2.0 * mixed_wet_water_fraction - 1.0
-
-        d_pcow_d_sw = np.where(
-            valid_water,
-            wettability_sign * ow_scale * d_j_d_se_w / mobile_water_range,
-            np.zeros_like(sw),
-        )
-        d_pcow_d_so = np.zeros_like(sw)
-
-        mobile_gas_range = 1.0 - Swc - Sorg - Sgr  # type: ignore
-        valid_gas = (mobile_gas_range > minimum_mobile_pore_space) & (
-            leverett_rock_factor > 0.0
-        )
-        se_g = np.clip(
-            (sg - Sgr)
-            / np.where(
-                mobile_gas_range > minimum_mobile_pore_space, mobile_gas_range, 1.0
-            ),
-            saturation_epsilon,
-            1.0 - saturation_epsilon,
-        )
-        d_j_d_se_g = (
-            -j_function_coefficient
-            * j_function_exponent
-            * (se_g ** (-j_function_exponent - 1.0))
-        )
-        cos_go = np.cos(np.deg2rad(gas_oil_contact_angle_deg))
-        go_scale = (
-            gas_oil_interfacial_tension
-            * dyne_per_cm_to_psi
-            * cos_go
-            * leverett_rock_factor
-        )
-        d_pcgo_d_sg = np.where(
-            valid_gas,
-            go_scale * d_j_d_se_g / mobile_gas_range,
-            np.zeros_like(sg),
-        )
-
-        if is_scalar:
-            return CapillaryPressureDerivatives(
-                dPcow_dSw=d_pcow_d_sw.item(),
-                dPcow_dSo=d_pcow_d_so.item(),
-                dPcgo_dSg=d_pcgo_d_sg.item(),
-                dPcgo_dSo=zero,
+        d_pcow_d_sw, d_pcow_d_so, d_pcgo_d_sg, d_pcgo_d_so = (
+            compute_leverett_j_derivatives(
+                water_saturation=water_saturation,
+                oil_saturation=oil_saturation,
+                gas_saturation=gas_saturation,
+                irreducible_water_saturation=Swc,  # type: ignore[arg-type]
+                residual_oil_saturation_water=Sorw,  # type: ignore[arg-type]
+                residual_oil_saturation_gas=Sorg,  # type: ignore[arg-type]
+                residual_gas_saturation=Sgr,  # type: ignore[arg-type]
+                permeability=permeability,
+                porosity=porosity,
+                wettability=self.wettability,
+                oil_water_interfacial_tension=self.oil_water_interfacial_tension,
+                gas_oil_interfacial_tension=self.gas_oil_interfacial_tension,
+                oil_water_contact_angle=self.oil_water_contact_angle,
+                gas_oil_contact_angle=self.gas_oil_contact_angle,
+                j_function_coefficient=self.j_function_coefficient,
+                j_function_exponent=self.j_function_exponent,
+                mixed_wet_water_fraction=self.mixed_wet_water_fraction,
+                saturation_epsilon=c.SATURATION_EPSILON,
+                minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
+                dyne_per_cm_to_psi=c.DYNE_PER_CENTIMETER_TO_PSI,
             )
+        )
         return CapillaryPressureDerivatives(
             dPcow_dSw=d_pcow_d_sw,
             dPcow_dSo=d_pcow_d_so,
             dPcgo_dSg=d_pcgo_d_sg,
-            dPcgo_dSo=zero,
+            dPcgo_dSo=d_pcgo_d_so,
         )

@@ -123,7 +123,7 @@ rock_fluid_tables = bores.RockFluidTables(
         wettability=bores.Wettability.WATER_WET,
         mixing_rule="eclipse_rule",
     ),
-    capillary_pressure_table=bores.LeverettJCapillaryPressureModel(
+    capillary_pressure_table=bores.BrooksCoreyCapillaryPressureModel(
         wettability=bores.Wettability.WATER_WET,
     ),
 )
@@ -141,8 +141,8 @@ config = bores.Config(
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
     scheme="impes",
-    pressure_solver="direct",
-    saturation_solver="direct",
+    pressure_solver="cg",
+    saturation_solver="qmr",
     pressure_preconditioner=None,
     saturation_preconditioner=None,
     maximum_pressure_change=1800,

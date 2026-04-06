@@ -63,7 +63,7 @@ class NewtonConvergenceInfo:
     line_search_factor: float
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def saturation_grids_to_vector(
     water_saturation_grid: ThreeDimensionalGrid,
     gas_saturation_grid: ThreeDimensionalGrid,
@@ -79,7 +79,7 @@ def saturation_grids_to_vector(
     """
     interior_count = (cell_count_x - 2) * (cell_count_y - 2) * (cell_count_z - 2)
     vector = np.empty(2 * interior_count)
-    for idx in range(interior_count):
+    for idx in numba.prange(interior_count):  # type: ignore
         i, j, k = from_1D_index_interior_only(
             idx, cell_count_x, cell_count_y, cell_count_z
         )
@@ -88,7 +88,7 @@ def saturation_grids_to_vector(
     return vector
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def vector_to_saturation_grids(
     saturation_vector: npt.NDArray,
     water_saturation_grid: ThreeDimensionalGrid,
@@ -104,7 +104,7 @@ def vector_to_saturation_grids(
     Computes oil saturation as So = 1 - Sw - Sg.
     """
     interior_count = (cell_count_x - 2) * (cell_count_y - 2) * (cell_count_z - 2)
-    for idx in range(interior_count):
+    for idx in numba.prange(interior_count):  # type: ignore
         i, j, k = from_1D_index_interior_only(
             idx, cell_count_x, cell_count_y, cell_count_z
         )
@@ -115,7 +115,7 @@ def vector_to_saturation_grids(
         oil_saturation_grid[i, j, k] = max(0.0, 1.0 - water_saturation - gas_saturation)
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def project_to_feasible(saturation_vector: npt.NDArray) -> npt.NDArray:
     """
     Project saturation vector onto the feasible set:
@@ -125,7 +125,7 @@ def project_to_feasible(saturation_vector: npt.NDArray) -> npt.NDArray:
     Uses proportional scaling if Sw + Sg > 1.
     """
     interior_count = len(saturation_vector) // 2
-    for idx in range(interior_count):
+    for idx in numba.prange(interior_count):  # type: ignore
         water_saturation = max(0.0, saturation_vector[2 * idx])
         gas_saturation = max(0.0, saturation_vector[2 * idx + 1])
         total = water_saturation + gas_saturation
@@ -137,7 +137,7 @@ def project_to_feasible(saturation_vector: npt.NDArray) -> npt.NDArray:
     return saturation_vector
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True)
 def interleave_residuals(
     water_residual: npt.NDArray,
     gas_residual: npt.NDArray,
@@ -149,7 +149,7 @@ def interleave_residuals(
     """
     interior_count = len(water_residual)
     result = np.empty(2 * interior_count)
-    for idx in range(interior_count):
+    for idx in numba.prange(interior_count):  # type: ignore
         result[2 * idx] = water_residual[idx]
         result[2 * idx + 1] = gas_residual[idx]
     return result
@@ -943,15 +943,15 @@ def compute_relperm_and_capillary_pressure_derivative_grids(
         residual_gas_saturation=residual_gas_saturation_grid,
     )
 
-    dkrw_dSw = np.asarray(relperm_derivatives["dKrw_dSw"], dtype=np.float64)
-    dkrw_dSo = np.asarray(relperm_derivatives["dKrw_dSo"], dtype=np.float64)
-    dkrw_dSg = np.asarray(relperm_derivatives["dKrw_dSg"], dtype=np.float64)
-    dkro_dSw = np.asarray(relperm_derivatives["dKro_dSw"], dtype=np.float64)
-    dkro_dSo = np.asarray(relperm_derivatives["dKro_dSo"], dtype=np.float64)
-    dkro_dSg = np.asarray(relperm_derivatives["dKro_dSg"], dtype=np.float64)
-    dkrg_dSw = np.asarray(relperm_derivatives["dKrg_dSw"], dtype=np.float64)
-    dkrg_dSo = np.asarray(relperm_derivatives["dKrg_dSo"], dtype=np.float64)
-    dkrg_dSg = np.asarray(relperm_derivatives["dKrg_dSg"], dtype=np.float64)
+    dkrw_dSw = relperm_derivatives["dKrw_dSw"]
+    dkrw_dSo = relperm_derivatives["dKrw_dSo"]
+    dkrw_dSg = relperm_derivatives["dKrw_dSg"]
+    dkro_dSw = relperm_derivatives["dKro_dSw"]
+    dkro_dSo = relperm_derivatives["dKro_dSo"]
+    dkro_dSg = relperm_derivatives["dKro_dSg"]
+    dkrg_dSw = relperm_derivatives["dKrg_dSw"]
+    dkrg_dSo = relperm_derivatives["dKrg_dSo"]
+    dkrg_dSg = relperm_derivatives["dKrg_dSg"]
 
     if capillary_table is not None and not disable_capillary_effects:
         capillary_pressure_derivatives = capillary_table.derivatives(
@@ -962,22 +962,20 @@ def compute_relperm_and_capillary_pressure_derivative_grids(
             residual_oil_saturation_water=residual_oil_saturation_water_grid,
             residual_oil_saturation_gas=residual_oil_saturation_gas_grid,
             residual_gas_saturation=residual_gas_saturation_grid,
+            porosity=rock_properties.porosity_grid,
+            permeability=rock_properties.absolute_permeability.mean,
         )
         raw_dPcow_dSw = (
-            np.asarray(capillary_pressure_derivatives["dPcow_dSw"], dtype=np.float64)
-            * capillary_strength_factor
+            capillary_pressure_derivatives["dPcow_dSw"] * capillary_strength_factor
         )
         raw_dPcow_dSo = (
-            np.asarray(capillary_pressure_derivatives["dPcow_dSo"], dtype=np.float64)
-            * capillary_strength_factor
+            capillary_pressure_derivatives["dPcow_dSo"] * capillary_strength_factor
         )
         raw_dPcgo_dSo = (
-            np.asarray(capillary_pressure_derivatives["dPcgo_dSo"], dtype=np.float64)
-            * capillary_strength_factor
+            capillary_pressure_derivatives["dPcgo_dSo"] * capillary_strength_factor
         )
         raw_dPcgo_dSg = (
-            np.asarray(capillary_pressure_derivatives["dPcgo_dSg"], dtype=np.float64)
-            * capillary_strength_factor
+            capillary_pressure_derivatives["dPcgo_dSg"] * capillary_strength_factor
         )
 
         dPcow_dSw_eff = raw_dPcow_dSw - raw_dPcow_dSo
@@ -991,7 +989,7 @@ def compute_relperm_and_capillary_pressure_derivative_grids(
         dPcgo_dSw_eff = zeros.copy()
         dPcgo_dSg_eff = zeros.copy()
 
-    return (
+    return (  # type: ignore[return-value]
         dkrw_dSw,
         dkrw_dSo,
         dkrw_dSg,
