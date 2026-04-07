@@ -69,18 +69,16 @@ class MonitorConfig:
     Has no effect when `use_rich=False`.
     """
 
-    extended_every: int = 10
-    """
-    Every this many accepted steps, include extended stats (p95 wall time,
-    average Newton iterations) in the Rich performance line.
-
-    Set to `0` to disable extended stats entirely.
-    """
-
     show_wells: bool = True
     """
     Include a per-well performance section in the Rich panel showing
     injection and production rates by well name.
+    """
+
+    show_mbe: bool = True
+    """
+    Include a material balance error section in the Rich panel showing
+    total and phase absolute and relative material balance errors.
     """
 
     color_theme: str = "dark"
@@ -214,17 +212,29 @@ class StepDiagnostics:
     well_diagnostics: typing.List[WellRateDiagnostics] = field(default_factory=list)
     """Per-well rate diagnostics."""
 
-    # Material Balance Errors (absolute, reservoir barrels)
     absolute_oil_mbe: float = 0.0
-    absolute_water_mbe: float = 0.0
-    absolute_gas_mbe: float = 0.0
-    total_absolute_mbe: float = 0.0
+    """Absolute oil material balance error (res ft³). See `MaterialBalanceErrors.absolute_oil_mbe`."""
 
-    # Material Balance Errors (relative, %)
+    absolute_water_mbe: float = 0.0
+    """Absolute water material balance error (res ft³). See `MaterialBalanceErrors.absolute_water_mbe`."""
+
+    absolute_gas_mbe: float = 0.0
+    """Absolute gas material balance error (res ft³), including dissolved gas. See `MaterialBalanceErrors.absolute_gas_mbe`."""
+
+    total_absolute_mbe: float = 0.0
+    """Sum of absolute phase MBEs (res ft³). See `MaterialBalanceErrors.total_absolute_mbe`."""
+
     relative_oil_mbe: float = 0.0
+    """Relative oil MBE as a dimensionless fraction. Multiply by 100 for percent."""
+
     relative_water_mbe: float = 0.0
+    """Relative water MBE as a dimensionless fraction. Multiply by 100 for percent."""
+
     relative_gas_mbe: float = 0.0
+    """Relative gas MBE as a dimensionless fraction. Multiply by 100 for percent."""
+
     total_relative_mbe: float = 0.0
+    """Total relative MBE as a dimensionless fraction. Multiply by 100 for percent."""
 
     converged: bool = True
     """`True` if the step was accepted without any convergence fallback."""
@@ -746,12 +756,12 @@ def _format_time(v: float, /) -> str:
     return f"{v:.2f} s"
 
 
-def _build_rich_panel(
+def build_rich_panel(
     diagnostics: StepDiagnostics,
     stats: RunStats,
     total_simulation_time: float,
-    extended: bool,
     show_wells: bool,
+    show_mbe: bool,
     theme: str,
 ) -> Panel:
     """
@@ -763,8 +773,8 @@ def _build_rich_panel(
     :param diagnostics: Diagnostic snapshot for the most recently accepted step.
     :param stats: Accumulated run statistics used for performance metrics.
     :param total_simulation_time: Total simulation time (s), used to compute progress %.
-    :param extended: Whether to include p95 wall time and avg Newton count.
     :param show_wells: Whether to append the per-well rate summary table.
+    :param show_mbe: Whether to append the material balance error in the solver table.
     :param theme: `"dark"` or `"light"`. Controls Rich color styles.
     :return: A `rich.panel.Panel` ready to pass to `Live.update()`.
     """
@@ -878,7 +888,7 @@ def _build_rich_panel(
     solver_table.add_row("ΔS max", f"{diagnostics.maximum_saturation_change:.2e}")
 
     # Performance extras
-    if extended and stats.accepted_steps >= 2:
+    if stats.accepted_steps >= 2:
         solver_table.add_row(
             "p95 wall", f"{stats.get_percentile_wall_time_ms(95):.2f} ms"
         )
@@ -894,24 +904,26 @@ def _build_rich_panel(
     solver_table.add_row("Run time", f"{stats.total_wall_time:.2f} s")
 
     # Material Balance Errors
-    if diagnostics.step > 1:  # Only show after first step
+    if show_mbe and diagnostics.step > 1:  # Only show after first step
         solver_table.add_row("", "")  # Separator
 
         # Color code MBE based on magnitude
         total_mbe = diagnostics.total_relative_mbe
-        if abs(total_mbe) < 0.01:
+        if abs(total_mbe) < 0.0001:  # < 0.01 %
             mbe_style = good
-        elif abs(total_mbe) < 0.1:
+        elif abs(total_mbe) < 0.001:  # < 0.1 %
             mbe_style = val
         else:
             mbe_style = warn
 
         solver_table.add_row(
-            "MBE (total)", f"[{mbe_style}]{total_mbe:.2e}%[/{mbe_style}]"
+            "MBE (total)", f"[{mbe_style}]{total_mbe * 100:.2e}%[/{mbe_style}]"
         )
-        solver_table.add_row("MBE (oil)", f"{diagnostics.relative_oil_mbe:.2e}%")
-        solver_table.add_row("MBE (water)", f"{diagnostics.relative_water_mbe:.2e}%")
-        solver_table.add_row("MBE (gas)", f"{diagnostics.relative_gas_mbe:.2e}%")
+        solver_table.add_row("MBE (oil)", f"{diagnostics.relative_oil_mbe * 100:.2e}%")
+        solver_table.add_row(
+            "MBE (water)", f"{diagnostics.relative_water_mbe * 100:.2e}%"
+        )
+        solver_table.add_row("MBE (gas)", f"{diagnostics.relative_gas_mbe * 100:.2e}%")
 
     # Two-column grid: physics left, solver right
     cols_table = Table.grid(expand=True, padding=(0, 2))
@@ -1228,22 +1240,17 @@ def monitor(
             stats.record(diagnostics)
             last_diagnostics = diagnostics
 
-            extended = (
-                monitor.extended_every > 0
-                and stats.accepted_steps % monitor.extended_every == 0
-            )
-
             if (
                 live is not None
                 and stats.accepted_steps % monitor.refresh_interval == 0
             ):
                 live.update(
-                    _build_rich_panel(
+                    build_rich_panel(
                         diagnostics=diagnostics,
                         stats=stats,
                         total_simulation_time=total_simulation_time,
-                        extended=extended,
                         show_wells=monitor.show_wells,
+                        show_mbe=monitor.show_mbe,
                         theme=monitor.color_theme,
                     )
                 )
@@ -1277,12 +1284,12 @@ def monitor(
                 # Render the final state into the panel before stopping so
                 # the completed view stays in terminal scroll-back history.
                 live.update(
-                    _build_rich_panel(
+                    build_rich_panel(
                         diagnostics=last_diagnostics,
                         stats=stats,
                         total_simulation_time=total_simulation_time,
-                        extended=True,
                         show_wells=monitor.show_wells,
+                        show_mbe=monitor.show_mbe,
                         theme=monitor.color_theme,
                     )
                 )

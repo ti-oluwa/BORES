@@ -88,6 +88,7 @@ class TimerState(TypedDict):
     maximum_relative_water_mbe: typing.Optional[float]
     maximum_relative_gas_mbe: typing.Optional[float]
     maximum_total_relative_mbe: typing.Optional[float]
+    use_mbe_for_step_size: bool
     maximum_rejections: int
     maximum_growth_per_step: float
     step_size_smoothing: float
@@ -174,6 +175,14 @@ class Timer(StoreSerializable):
     """Relative gas MBE threshold (fraction). Reject step if exceeded."""
     maximum_total_relative_mbe: typing.Optional[float] = None
     """Total relative MBE threshold (fraction). Reject step if exceeded."""
+    use_mbe_for_step_size: bool = False
+    """
+    If True, MBE values are used to modulate the next step size proposal even
+    when the step is accepted (analogous to how CFL and saturation change drive
+    growth/shrinkage on accepted steps). When False (default), MBE only
+    triggers step rejection when a configured limit is exceeded; it has no
+    influence on step-size growth on passing steps.
+    """
 
     # State variables
     elapsed_time: float = attrs.field(init=False, default=0.0)
@@ -350,6 +359,14 @@ class Timer(StoreSerializable):
         :param maximum_allowed_saturation_change: The allowed saturation change threshold.
         :param maximum_pressure_change: The maximum pressure change encountered.
         :param maximum_allowed_pressure_change: The allowed pressure change threshold.
+        :param absolute_oil_mbe: Absolute oil material balance error for this step (res ft³).
+        :param absolute_water_mbe: Absolute water material balance error for this step (res ft³).
+        :param absolute_gas_mbe: Absolute gas material balance error for this step (res ft³), including dissolved gas.
+        :param total_absolute_mbe: Sum of absolute phase MBEs (res ft³).
+        :param relative_oil_mbe: Oil MBE as a fraction of the previous-step oil pore volume.
+        :param relative_water_mbe: Water MBE as a fraction of the previous-step water pore volume.
+        :param relative_gas_mbe: Gas MBE as a fraction of the previous-step gas pore volume equivalent.
+        :param total_relative_mbe: Total MBE as a fraction of the previous-step total pore volume.
         :return: The new/adjusted time step size in seconds.
         """
         if self.rejection_count >= self.maximum_rejections:
@@ -641,7 +658,7 @@ class Timer(StoreSerializable):
         relative_water_mbe: typing.Optional[float] = None,
         relative_gas_mbe: typing.Optional[float] = None,
         total_relative_mbe: typing.Optional[float] = None,
-        **kwargs: typing.Any
+        **kwargs: typing.Any,  # Just to ensure that any other kwargs passed dont cause on error (based on usage)
     ) -> typing.Tuple[bool, str]:
         """
         Determine if a time step is acceptable based on given criteria
@@ -652,6 +669,15 @@ class Timer(StoreSerializable):
         :param maximum_allowed_saturation_change: Maximum allowed saturation change threshold.
         :param maximum_pressure_change: Maximum pressure change in the accepted step.
         :param maximum_allowed_pressure_change: Maximum allowed pressure change threshold.
+        :param absolute_oil_mbe: Absolute oil MBE to check against `maximum_absolute_oil_mbe` (res ft³).
+        :param absolute_water_mbe: Absolute water MBE to check against `maximum_absolute_water_mbe` (res ft³).
+        :param absolute_gas_mbe: Absolute gas MBE to check against `maximum_absolute_gas_mbe` (res ft³).
+        :param total_absolute_mbe: Total absolute MBE to check against `maximum_total_absolute_mbe` (res ft³).
+        :param relative_oil_mbe: Relative oil MBE fraction to check against `maximum_relative_oil_mbe`.
+        :param relative_water_mbe: Relative water MBE fraction to check against `maximum_relative_water_mbe`.
+        :param relative_gas_mbe: Relative gas MBE fraction to check against `maximum_relative_gas_mbe`.
+        :param total_relative_mbe: Total relative MBE fraction to check against `maximum_total_relative_mbe`.
+        :param kwargs: Additional timer kwargs forwarded from `StepResult.timer_kwargs`; ignored.
         :return: Tuple of (acceptable, error/message). The first item is True if the timestep is acceptable. Else, Flase.
         """
         cfl_limit = (
@@ -742,6 +768,14 @@ class Timer(StoreSerializable):
         :param maximum_allowed_saturation_change: Maximum allowed saturation change threshold.
         :param maximum_pressure_change: Maximum pressure change in the accepted step.
         :param maximum_allowed_pressure_change: Maximum allowed pressure change threshold.
+        :param absolute_oil_mbe: Absolute oil material balance error for this step (res ft³).
+        :param absolute_water_mbe: Absolute water material balance error for this step (res ft³).
+        :param absolute_gas_mbe: Absolute gas material balance error for this step (res ft³), including dissolved gas.
+        :param total_absolute_mbe: Sum of absolute phase MBEs (res ft³).
+        :param relative_oil_mbe: Oil MBE as a fraction of the previous-step oil pore volume.
+        :param relative_water_mbe: Water MBE as a fraction of the previous-step water pore volume.
+        :param relative_gas_mbe: Gas MBE as a fraction of the previous-step gas pore volume equivalent.
+        :param total_relative_mbe: Total MBE as a fraction of the previous-step total pore volume.
         :return: The next proposed time step size.
         """
         # Use small tolerance for floating point comparison as step sizes may slightly overshoot
@@ -925,6 +959,53 @@ class Timer(StoreSerializable):
                 )
                 adjustment_factors.append(("Newton", newton_iteration_factor))
 
+        # MBE-based step-size adjustment (only when opt-in flag is set)
+        if self.use_mbe_for_step_size:
+            mbe_accept_pairs = [
+                (absolute_oil_mbe, self.maximum_absolute_oil_mbe, "absolute oil MBE"),
+                (
+                    absolute_water_mbe,
+                    self.maximum_absolute_water_mbe,
+                    "absolute water MBE",
+                ),
+                (absolute_gas_mbe, self.maximum_absolute_gas_mbe, "absolute gas MBE"),
+                (
+                    total_absolute_mbe,
+                    self.maximum_total_absolute_mbe,
+                    "total absolute MBE",
+                ),
+                (relative_oil_mbe, self.maximum_relative_oil_mbe, "relative oil MBE"),
+                (
+                    relative_water_mbe,
+                    self.maximum_relative_water_mbe,
+                    "relative water MBE",
+                ),
+                (relative_gas_mbe, self.maximum_relative_gas_mbe, "relative gas MBE"),
+                (
+                    total_relative_mbe,
+                    self.maximum_total_relative_mbe,
+                    "total relative MBE",
+                ),
+            ]
+            for actual, limit, label in mbe_accept_pairs:
+                if actual is None or limit is None:
+                    continue
+                actual_abs = abs(actual)
+                utilization = actual_abs / limit if limit > 0 else 0.0
+                if utilization > 0.9:
+                    mbe_factor = 0.85
+                elif utilization > 0.75:
+                    mbe_factor = 0.95
+                elif utilization < 0.2:
+                    mbe_factor = min(1.2, limit / max(actual_abs, 1e-30) * 0.5)
+                else:
+                    mbe_factor = 1.0  # comfortable, no adjustment
+                if mbe_factor != 1.0:
+                    logger.debug(
+                        f"MBE accept adjustment ({label}): utilization={utilization:.2%}, factor={mbe_factor:.3f}"
+                    )
+                    adjustment_factors.append((f"MBE({label})", mbe_factor))
+
         # Apply all adjustment factors
         if adjustment_factors:
             logger.debug(f"Applying {len(adjustment_factors)} adjustment factors:")
@@ -1046,6 +1127,7 @@ class Timer(StoreSerializable):
             "maximum_relative_water_mbe": self.maximum_relative_water_mbe,
             "maximum_relative_gas_mbe": self.maximum_relative_gas_mbe,
             "maximum_total_relative_mbe": self.maximum_total_relative_mbe,
+            "use_mbe_for_step_size": self.use_mbe_for_step_size,
             "maximum_growth_per_step": self.maximum_growth_per_step,
             "maximum_rejections": self.maximum_rejections,
             "step_size_smoothing": self.step_size_smoothing,
@@ -1123,6 +1205,7 @@ class Timer(StoreSerializable):
             "maximum_relative_water_mbe": state.get("maximum_relative_water_mbe", None),
             "maximum_relative_gas_mbe": state.get("maximum_relative_gas_mbe", None),
             "maximum_total_relative_mbe": state.get("maximum_total_relative_mbe", None),
+            "use_mbe_for_step_size": state.get("use_mbe_for_step_size", False),
             "maximum_rejections": state.get("maximum_rejections", 10),
             "maximum_growth_per_step": state.get("maximum_growth_per_step", 1.5),
             "step_size_smoothing": state.get("step_size_smoothing", 0.7),
