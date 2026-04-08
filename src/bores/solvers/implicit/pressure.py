@@ -712,7 +712,7 @@ def compute_face_flux_contributions(
                     east_geometric_factor = (
                         cell_size_y * east_face_thickness / cell_size_x
                     )
-                    east_face_mobility, east_cap_flux, east_grav_flux = (
+                    east_face_mobility, east_capillary_flux, east_gravity_flux = (
                         compute_pseudo_fluxes_from_neighbour(
                             cell_indices=(i, j, k),
                             neighbour_indices=(east_i, east_j, east_k),
@@ -730,7 +730,7 @@ def compute_face_flux_contributions(
                     )
                     east_transmissibility = east_face_mobility * east_geometric_factor
                     east_rhs_term = (
-                        east_cap_flux + east_grav_flux
+                        east_capillary_flux + east_gravity_flux
                     ) * east_geometric_factor
 
                     # Entry 0 of the pair: A[this_cell, east_cell]
@@ -769,7 +769,7 @@ def compute_face_flux_contributions(
                     south_geometric_factor = (
                         cell_size_x * south_face_thickness / cell_size_y
                     )
-                    south_face_mobility, south_cap_flux, south_grav_flux = (
+                    south_face_mobility, south_capillary_flux, south_gravity_flux = (
                         compute_pseudo_fluxes_from_neighbour(
                             cell_indices=(i, j, k),
                             neighbour_indices=(south_i, south_j, south_k),
@@ -789,7 +789,7 @@ def compute_face_flux_contributions(
                         south_face_mobility * south_geometric_factor
                     )
                     south_rhs_term = (
-                        south_cap_flux + south_grav_flux
+                        south_capillary_flux + south_gravity_flux
                     ) * south_geometric_factor
 
                     thread_sparse_row_indices[ii, local_slot] = this_cell_1d_index
@@ -829,7 +829,7 @@ def compute_face_flux_contributions(
                     bottom_geometric_factor = (
                         cell_size_x * cell_size_y / bottom_face_thickness
                     )
-                    bottom_face_mobility, bottom_cap_flux, bottom_grav_flux = (
+                    bottom_face_mobility, bottom_capillary_flux, bottom_gravity_flux = (
                         compute_pseudo_fluxes_from_neighbour(
                             cell_indices=(i, j, k),
                             neighbour_indices=(bottom_i, bottom_j, bottom_k),
@@ -849,7 +849,7 @@ def compute_face_flux_contributions(
                         bottom_face_mobility * bottom_geometric_factor
                     )
                     bottom_rhs_term = (
-                        bottom_cap_flux + bottom_grav_flux
+                        bottom_capillary_flux + bottom_gravity_flux
                     ) * bottom_geometric_factor
 
                     thread_sparse_row_indices[ii, local_slot] = this_cell_1d_index
@@ -1526,16 +1526,16 @@ def compute_pseudo_fluxes_from_neighbour(
     elevation_difference = (
         elevation_grid[neighbour_indices] - elevation_grid[cell_indices]
     )
-    # Determine the harmonic densities for each phase across the face
-    harmonic_water_density = compute_harmonic_mean(
-        water_density_grid[neighbour_indices], water_density_grid[cell_indices]
-    )
-    harmonic_oil_density = compute_harmonic_mean(
-        oil_density_grid[neighbour_indices], oil_density_grid[cell_indices]
-    )
-    harmonic_gas_density = compute_harmonic_mean(
-        gas_density_grid[neighbour_indices], gas_density_grid[cell_indices]
-    )
+    # Determine the average densities for each phase across the face
+    average_water_density = (
+        water_density_grid[neighbour_indices] + water_density_grid[cell_indices]
+    ) * 0.5
+    average_oil_density = (
+        oil_density_grid[neighbour_indices] + oil_density_grid[cell_indices]
+    ) * 0.5
+    average_gas_density = (
+        gas_density_grid[neighbour_indices] + gas_density_grid[cell_indices]
+    ) * 0.5
 
     # Calculate harmonic mobilities for each phase across the face
     water_harmonic_mobility = compute_harmonic_mean(
@@ -1569,13 +1569,13 @@ def compute_pseudo_fluxes_from_neighbour(
 
     # Calculate the phase gravity potentials (hydrostatic/gravity head)
     water_gravity_potential = (
-        harmonic_water_density * gravitational_constant * elevation_difference
+        average_water_density * gravitational_constant * elevation_difference
     ) / 144.0
     oil_gravity_potential = (
-        harmonic_oil_density * gravitational_constant * elevation_difference
+        average_oil_density * gravitational_constant * elevation_difference
     ) / 144.0
     gas_gravity_potential = (
-        harmonic_gas_density * gravitational_constant * elevation_difference
+        average_gas_density * gravitational_constant * elevation_difference
     ) / 144.0
     # Total gravity pseudo flux (ft²/day)
     water_gravity_pseudo_flux = water_harmonic_mobility * water_gravity_potential

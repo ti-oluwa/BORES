@@ -541,22 +541,39 @@ def compute_fluxes_from_neighbour(
     elevation_difference = (
         elevation_grid[neighbour_indices] - elevation_grid[cell_indices]
     )
-    # Determine the upwind densities and solubilities based on pressure difference
-    # If pressure difference is positive (P_neighbour - P_current > 0), we use the neighbour's density
-    upwind_water_density = (
-        water_density_grid[neighbour_indices]
-        if water_pressure_difference > 0.0
-        else water_density_grid[cell_indices]
+    # # Determine the upwind densities based on pressure difference
+    # # If pressure difference is positive (P_neighbour - P_current > 0), we use the neighbour's density
+    # upwind_water_density = (
+    #     water_density_grid[neighbour_indices]
+    #     if water_pressure_difference > 0.0
+    #     else water_density_grid[cell_indices]
+    # )
+    # upwind_oil_density = (
+    #     oil_density_grid[neighbour_indices]
+    #     if oil_pressure_difference > 0.0
+    #     else oil_density_grid[cell_indices]
+    # )
+    # upwind_gas_density = (
+    #     gas_density_grid[neighbour_indices]
+    #     if gas_pressure_difference > 0.0
+    #     else gas_density_grid[cell_indices]
+    # )
+
+    # Rank phases by density at the interface and select upwind accordingly
+    # Water > Oil > Gas typically
+    # Heavier phases upwind to the cell with higher density
+    upwind_water_density = max(
+        water_density_grid[neighbour_indices],
+        water_density_grid[cell_indices]
+    )
+    upwind_gas_density = min(
+        gas_density_grid[neighbour_indices],
+        gas_density_grid[cell_indices]
     )
     upwind_oil_density = (
         oil_density_grid[neighbour_indices]
-        if oil_pressure_difference > 0.0
+        if oil_density_grid[neighbour_indices] > oil_density_grid[cell_indices]
         else oil_density_grid[cell_indices]
-    )
-    upwind_gas_density = (
-        gas_density_grid[neighbour_indices]
-        if gas_pressure_difference > 0.0
-        else gas_density_grid[cell_indices]
     )
 
     # Computing the Darcy velocities (ft/day) for the three phases

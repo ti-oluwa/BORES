@@ -506,16 +506,16 @@ def compute_pseudo_flux_from_neighbour(
     elevation_difference = (
         elevation_grid[neighbour_indices] - elevation_grid[cell_indices]
     )
-    # Determine the harmonic densities for each phase across the face
-    harmonic_water_density = compute_harmonic_mean(
-        water_density_grid[neighbour_indices], water_density_grid[cell_indices]
-    )
-    harmonic_oil_density = compute_harmonic_mean(
-        oil_density_grid[neighbour_indices], oil_density_grid[cell_indices]
-    )
-    harmonic_gas_density = compute_harmonic_mean(
-        gas_density_grid[neighbour_indices], gas_density_grid[cell_indices]
-    )
+    # Determine the average densities for each phase across the face
+    average_water_density = (
+        water_density_grid[neighbour_indices] + water_density_grid[cell_indices]
+    ) * 0.5
+    average_oil_density = (
+        oil_density_grid[neighbour_indices] + oil_density_grid[cell_indices]
+    ) * 0.5
+    average_gas_density = (
+        gas_density_grid[neighbour_indices] + gas_density_grid[cell_indices]
+    ) * 0.5
 
     # Calculate harmonic mobilities for each phase across the face (in the direction of flow)
     water_harmonic_mobility = compute_harmonic_mean(
@@ -538,7 +538,7 @@ def compute_pseudo_flux_from_neighbour(
     # q = λ * (∆P + Gravity Potential) (ft³/day)
     # Calculate the water gravity potential (hydrostatic/gravity head)
     water_gravity_potential = (
-        harmonic_water_density * gravitational_constant * elevation_difference
+        average_water_density * gravitational_constant * elevation_difference
     ) / 144.0
     # Calculate the total water phase potential
     water_potential_difference = water_pressure_difference + water_gravity_potential
@@ -548,7 +548,7 @@ def compute_pseudo_flux_from_neighbour(
     # For Oil:
     # Calculate the oil gravity potential (gravity head)
     oil_gravity_potential = (
-        harmonic_oil_density * gravitational_constant * elevation_difference
+        average_oil_density * gravitational_constant * elevation_difference
     ) / 144.0
     # Calculate the total oil phase potential
     oil_potential_difference = oil_pressure_difference + oil_gravity_potential
@@ -559,7 +559,7 @@ def compute_pseudo_flux_from_neighbour(
     # q = λ * ∆P (ft²/day)
     # Calculate the gas gravity potential (gravity head)
     gas_gravity_potential = (
-        harmonic_gas_density * gravitational_constant * elevation_difference
+        average_gas_density * gravitational_constant * elevation_difference
     ) / 144.0
     # Calculate the total gas phase potential
     gas_potential_difference = gas_pressure_difference + gas_gravity_potential
