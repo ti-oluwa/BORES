@@ -553,24 +553,19 @@ def compute_fluxes_from_neighbour(
         else oil_density_grid[cell_indices]
     )
 
-    # Computing the Darcy velocities (ft/day) for the three phases
-    # v_x = λ_x * ∆P / Δx
-    # For water: v_w = λ_w * [(P_oil - P_cow) + (upwind_ρ_water * g * Δz)] / ΔL
+    # Computing the potential difference for the three phases
     water_gravity_potential = (
         upwind_water_density * gravitational_constant * elevation_difference
     ) / 144.0
     # Calculate the total water phase potential
     water_potential_difference = water_pressure_difference + water_gravity_potential
 
-    # For oil: v_o = λ_o * [(P_oil) + (upwind_ρ_oil * g * Δz)] / ΔL
     oil_gravity_potential = (
         upwind_oil_density * gravitational_constant * elevation_difference
     ) / 144.0
     # Calculate the total oil phase potential
     oil_potential_difference = oil_pressure_difference + oil_gravity_potential
 
-    # For gas: v_g = λ_g * ∆P / ΔL
-    # v_g = λ_g * [(P_oil + P_go) - (P_cog + P_gas) + (upwind_ρ_gas * g * Δz)] / ΔL
     gas_gravity_potential = (
         upwind_gas_density * gravitational_constant * elevation_difference
     ) / 144.0

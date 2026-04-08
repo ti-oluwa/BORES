@@ -780,7 +780,6 @@ def _apply_solution_gas_updates(
 
     # WATER PHASE
     rsw_change = old_gas_solubility_in_water_grid - new_gas_solubility_in_water_grid
-
     water_liberation_mask = rsw_change > zero
     water_redissolution_mask = (rsw_change < zero) & (gas_saturation_grid > zero)
     water_no_gas_mask = (rsw_change < zero) & (gas_saturation_grid <= zero)

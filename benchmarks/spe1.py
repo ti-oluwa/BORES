@@ -109,7 +109,7 @@ def setup_grid():
     # -------------------------------------------------------------------------
     kx_values = bores.array([500.0, 50.0, 200.0])  # mD
     ky_values = bores.array([500.0, 50.0, 200.0])  # mD
-    kz_values = kx_values * 0.1  # mD  (kv = 0.1 × kh)
+    kz_values = bores.array([50.0, 50.0, 25.0])  # mD  (kv = 0.1 × kh)
 
     kx_grid = bores.layered_grid(
         grid_shape=grid_shape,
@@ -1203,7 +1203,7 @@ def recovery_plots(analyst, bores, np, recovery_efficiency_history):
 @app.cell
 def _(analyst):
     mbe = analyst.material_balance_error()
-    print(mbe.water_mbe)
+    print(mbe.total_mbe)
     return
 
 
@@ -1239,9 +1239,9 @@ def _(bores, states, viz, wells):
         # cmax=1.0,
     )
 
-    property = "gas-sat"
+    property = "oil-sat"
     figures = []
-    timesteps = [310]
+    timesteps = [329]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],

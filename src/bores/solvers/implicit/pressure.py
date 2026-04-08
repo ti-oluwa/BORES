@@ -99,7 +99,6 @@ def evolve_pressure(
     :param pad_width: Number of ghost cells used for grid padding. Well coordinates are offset by this amount.
     :return: `EvolutionResult` containing the new pressure grid and scheme used
     """
-    absolute_permeability = rock_properties.absolute_permeability
     porosity_grid = rock_properties.porosity_grid
     rock_compressibility = rock_properties.compressibility
     oil_density_grid = fluid_properties.oil_effective_density_grid
@@ -981,21 +980,21 @@ def compute_pseudo_fluxes_from_neighbour(
         # No flow can occur if there is no mobility
         return 0.0, 0.0, 0.0
 
-    # λ_w * T_face * (P_cow_{n+1} - P_cow_{n}) (ft²/psi.day * psi = ft²/day)
+    # λ_w * T_face * (P_cow_{n+1} - P_cow_{n}) (ft³/psi.day * psi = ft³/day)
     water_capillary_flux = (
         water_harmonic_relative_mobility
         * face_transmissibility
         * oil_water_capillary_pressure_difference
         * md_per_cp_to_ft2_per_psi_per_day
     )
-    # λ_g * T_face * (P_cgo_{n+1} - P_cgo_{n}) (ft²/psi.day * psi = ft²/day)
+    # λ_g * T_face * (P_cgo_{n+1} - P_cgo_{n}) (ft³/psi.day * psi = ft³/day)
     gas_capillary_flux = (
         gas_harmonic_relative_mobility
         * face_transmissibility
         * gas_oil_capillary_pressure_difference
         * md_per_cp_to_ft2_per_psi_per_day
     )
-    # Total capillary flux from the neighbour (ft²/day)
+    # Total capillary flux from the neighbour (ft³/day)
     total_capillary_flux = water_capillary_flux + gas_capillary_flux
 
     # Calculate the phase gravity potentials (hydrostatic/gravity head)
@@ -1008,7 +1007,7 @@ def compute_pseudo_fluxes_from_neighbour(
     gas_gravity_potential = (
         average_gas_density * gravitational_constant * elevation_difference
     ) / 144.0
-    # Total gravity pseudo flux (ft²/day)
+    # Total gravity flux (ft³/day)
     water_gravity_flux = (
         water_harmonic_relative_mobility
         * face_transmissibility
@@ -1185,12 +1184,8 @@ def compute_well_contributions(
             )
 
             if injected_phase == FluidPhase.GAS:
-                phase_mobility = typing.cast(float, gas_relative_mobility_grid[i, j, k])
                 compressibility_kwargs: dict = {}
             else:
-                phase_mobility = typing.cast(
-                    float, water_relative_mobility_grid[i, j, k]
-                )
                 compressibility_kwargs = {
                     "bubble_point_pressure": water_bubble_point_pressure_grid[i, j, k],
                     "gas_formation_volume_factor": gas_formation_volume_factor_grid[
@@ -1207,7 +1202,7 @@ def compute_well_contributions(
                     **compressibility_kwargs,
                 ),
             )
-            effective_mobility = typing.cast(
+            total_mobility = typing.cast(
                 float,
                 water_relative_mobility_grid[i, j, k]
                 + oil_relative_mobility_grid[i, j, k]
@@ -1216,7 +1211,7 @@ def compute_well_contributions(
             flow_rate, bhp = well.get_control(
                 pressure=cell_pressure,
                 temperature=cell_temperature,
-                phase_mobility=effective_mobility,
+                phase_mobility=total_mobility,
                 well_index=well_index,
                 fluid=injected_fluid,
                 formation_volume_factor=phase_fvf,
@@ -1275,7 +1270,7 @@ def compute_well_contributions(
                     )
                     productivity_index = compute_gas_productivity_index(
                         well_index=well_index,
-                        phase_mobility=phase_mobility,
+                        phase_mobility=total_mobility,
                         pressure=cell_pressure,
                         temperature=cell_temperature,
                         bottom_hole_pressure=bhp,
@@ -1287,7 +1282,7 @@ def compute_well_contributions(
                 else:
                     productivity_index = compute_oil_productivity_index(
                         well_index=well_index,
-                        phase_mobility=phase_mobility,
+                        phase_mobility=total_mobility,
                         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
 

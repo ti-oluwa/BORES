@@ -990,12 +990,8 @@ def _assemble_analytical_jacobian(
     face_transmissibilities_x: ThreeDimensionalGrid,
     face_transmissibilities_y: ThreeDimensionalGrid,
     face_transmissibilities_z: ThreeDimensionalGrid,
-    water_mobility_grid_x: ThreeDimensionalGrid,
-    water_mobility_grid_y: ThreeDimensionalGrid,
-    water_mobility_grid_z: ThreeDimensionalGrid,
-    gas_mobility_grid_x: ThreeDimensionalGrid,
-    gas_mobility_grid_y: ThreeDimensionalGrid,
-    gas_mobility_grid_z: ThreeDimensionalGrid,
+    water_relative_mobility_grid: ThreeDimensionalGrid,
+    gas_relative_mobility_grid: ThreeDimensionalGrid,
     oil_water_capillary_pressure_grid: ThreeDimensionalGrid,
     gas_oil_capillary_pressure_grid: ThreeDimensionalGrid,
     dkrw_dSw_grid: ThreeDimensionalGrid,
@@ -1010,9 +1006,6 @@ def _assemble_analytical_jacobian(
     dPcgo_dSg_eff_grid: ThreeDimensionalGrid,
     water_viscosity_grid: ThreeDimensionalGrid,
     gas_viscosity_grid: ThreeDimensionalGrid,
-    absolute_permeability_x_grid: ThreeDimensionalGrid,
-    absolute_permeability_y_grid: ThreeDimensionalGrid,
-    absolute_permeability_z_grid: ThreeDimensionalGrid,
     porosity_grid: ThreeDimensionalGrid,
     time_step_in_days: float,
     md_per_cp_to_ft2_per_psi_per_day: float,
@@ -1071,14 +1064,14 @@ def _assemble_analytical_jacobian(
                     if face == 0:
                         ni, nj, nk = i + 1, j, k
                         transmissibility = face_transmissibilities_x[i, j, k]
-                        cell_water_mobility = water_mobility_grid_x[i, j, k]
-                        neighbour_water_mobility = water_mobility_grid_x[ni, nj, nk]
-                        cell_gas_mobility = gas_mobility_grid_x[i, j, k]
-                        neighbour_gas_mobility = gas_mobility_grid_x[ni, nj, nk]
-                        cell_absolute_permeability = absolute_permeability_x_grid[
+                        cell_water_relative_mobility = water_relative_mobility_grid[
                             i, j, k
                         ]
-                        neighbour_absolute_permeability = absolute_permeability_x_grid[
+                        neighbour_water_relative_mobility = (
+                            water_relative_mobility_grid[ni, nj, nk]
+                        )
+                        cell_gas_relative_mobility = gas_relative_mobility_grid[i, j, k]
+                        neighbour_gas_relative_mobility = gas_relative_mobility_grid[
                             ni, nj, nk
                         ]
                         cell_water_viscosity = water_viscosity_grid[i, j, k]
@@ -1088,14 +1081,14 @@ def _assemble_analytical_jacobian(
                     elif face == 1:
                         ni, nj, nk = i - 1, j, k
                         transmissibility = face_transmissibilities_x[i - 1, j, k]
-                        cell_water_mobility = water_mobility_grid_x[i, j, k]
-                        neighbour_water_mobility = water_mobility_grid_x[ni, nj, nk]
-                        cell_gas_mobility = gas_mobility_grid_x[i, j, k]
-                        neighbour_gas_mobility = gas_mobility_grid_x[ni, nj, nk]
-                        cell_absolute_permeability = absolute_permeability_x_grid[
+                        cell_water_relative_mobility = water_relative_mobility_grid[
                             i, j, k
                         ]
-                        neighbour_absolute_permeability = absolute_permeability_x_grid[
+                        neighbour_water_relative_mobility = (
+                            water_relative_mobility_grid[ni, nj, nk]
+                        )
+                        cell_gas_relative_mobility = gas_relative_mobility_grid[i, j, k]
+                        neighbour_gas_relative_mobility = gas_relative_mobility_grid[
                             ni, nj, nk
                         ]
                         cell_water_viscosity = water_viscosity_grid[i, j, k]
@@ -1105,14 +1098,14 @@ def _assemble_analytical_jacobian(
                     elif face == 2:
                         ni, nj, nk = i, j + 1, k
                         transmissibility = face_transmissibilities_y[i, j, k]
-                        cell_water_mobility = water_mobility_grid_y[i, j, k]
-                        neighbour_water_mobility = water_mobility_grid_y[ni, nj, nk]
-                        cell_gas_mobility = gas_mobility_grid_y[i, j, k]
-                        neighbour_gas_mobility = gas_mobility_grid_y[ni, nj, nk]
-                        cell_absolute_permeability = absolute_permeability_y_grid[
+                        cell_water_relative_mobility = water_relative_mobility_grid[
                             i, j, k
                         ]
-                        neighbour_absolute_permeability = absolute_permeability_y_grid[
+                        neighbour_water_relative_mobility = (
+                            water_relative_mobility_grid[ni, nj, nk]
+                        )
+                        cell_gas_relative_mobility = gas_relative_mobility_grid[i, j, k]
+                        neighbour_gas_relative_mobility = gas_relative_mobility_grid[
                             ni, nj, nk
                         ]
                         cell_water_viscosity = water_viscosity_grid[i, j, k]
@@ -1122,14 +1115,14 @@ def _assemble_analytical_jacobian(
                     elif face == 3:
                         ni, nj, nk = i, j - 1, k
                         transmissibility = face_transmissibilities_y[i, j - 1, k]
-                        cell_water_mobility = water_mobility_grid_y[i, j, k]
-                        neighbour_water_mobility = water_mobility_grid_y[ni, nj, nk]
-                        cell_gas_mobility = gas_mobility_grid_y[i, j, k]
-                        neighbour_gas_mobility = gas_mobility_grid_y[ni, nj, nk]
-                        cell_absolute_permeability = absolute_permeability_y_grid[
+                        cell_water_relative_mobility = water_relative_mobility_grid[
                             i, j, k
                         ]
-                        neighbour_absolute_permeability = absolute_permeability_y_grid[
+                        neighbour_water_relative_mobility = (
+                            water_relative_mobility_grid[ni, nj, nk]
+                        )
+                        cell_gas_relative_mobility = gas_relative_mobility_grid[i, j, k]
+                        neighbour_gas_relative_mobility = gas_relative_mobility_grid[
                             ni, nj, nk
                         ]
                         cell_water_viscosity = water_viscosity_grid[i, j, k]
@@ -1139,14 +1132,14 @@ def _assemble_analytical_jacobian(
                     elif face == 4:
                         ni, nj, nk = i, j, k + 1
                         transmissibility = face_transmissibilities_z[i, j, k]
-                        cell_water_mobility = water_mobility_grid_z[i, j, k]
-                        neighbour_water_mobility = water_mobility_grid_z[ni, nj, nk]
-                        cell_gas_mobility = gas_mobility_grid_z[i, j, k]
-                        neighbour_gas_mobility = gas_mobility_grid_z[ni, nj, nk]
-                        cell_absolute_permeability = absolute_permeability_z_grid[
+                        cell_water_relative_mobility = water_relative_mobility_grid[
                             i, j, k
                         ]
-                        neighbour_absolute_permeability = absolute_permeability_z_grid[
+                        neighbour_water_relative_mobility = (
+                            water_relative_mobility_grid[ni, nj, nk]
+                        )
+                        cell_gas_relative_mobility = gas_relative_mobility_grid[i, j, k]
+                        neighbour_gas_relative_mobility = gas_relative_mobility_grid[
                             ni, nj, nk
                         ]
                         cell_water_viscosity = water_viscosity_grid[i, j, k]
@@ -1156,14 +1149,14 @@ def _assemble_analytical_jacobian(
                     else:  # face == 5
                         ni, nj, nk = i, j, k - 1
                         transmissibility = face_transmissibilities_z[i, j, k - 1]
-                        cell_water_mobility = water_mobility_grid_z[i, j, k]
-                        neighbour_water_mobility = water_mobility_grid_z[ni, nj, nk]
-                        cell_gas_mobility = gas_mobility_grid_z[i, j, k]
-                        neighbour_gas_mobility = gas_mobility_grid_z[ni, nj, nk]
-                        cell_absolute_permeability = absolute_permeability_z_grid[
+                        cell_water_relative_mobility = water_relative_mobility_grid[
                             i, j, k
                         ]
-                        neighbour_absolute_permeability = absolute_permeability_z_grid[
+                        neighbour_water_relative_mobility = (
+                            water_relative_mobility_grid[ni, nj, nk]
+                        )
+                        cell_gas_relative_mobility = gas_relative_mobility_grid[i, j, k]
+                        neighbour_gas_relative_mobility = gas_relative_mobility_grid[
                             ni, nj, nk
                         ]
                         cell_water_viscosity = water_viscosity_grid[i, j, k]
@@ -1265,10 +1258,10 @@ def _assemble_analytical_jacobian(
                     dPcgo_dSg_n = dPcgo_dSg_eff_grid[ni, nj, nk]
 
                     # WATER Jacobian contributions
-                    upwind_water_mobility = (
-                        neighbour_water_mobility
+                    upwind_water_relative_mobility = (
+                        neighbour_water_relative_mobility
                         if water_neighbour_is_upwind
-                        else cell_water_mobility
+                        else cell_water_relative_mobility
                     )
 
                     if not water_neighbour_is_upwind:
@@ -1278,18 +1271,16 @@ def _assemble_analytical_jacobian(
                             else 0.0
                         )
                         dFw_mob_dSw_i = (
-                            cell_absolute_permeability
+                            dkrw_dSw_i_eff
                             * md_per_cp_to_ft2_per_psi_per_day
                             * inv_mu_w
-                            * dkrw_dSw_i_eff
                             * water_potential
                             * transmissibility
                         )
                         dFw_mob_dSg_i = (
-                            cell_absolute_permeability
+                            dkrw_dSg_i_eff
                             * md_per_cp_to_ft2_per_psi_per_day
                             * inv_mu_w
-                            * dkrw_dSg_i_eff
                             * water_potential
                             * transmissibility
                         )
@@ -1304,38 +1295,48 @@ def _assemble_analytical_jacobian(
                         dFw_mob_dSw_i = 0.0
                         dFw_mob_dSg_i = 0.0
                         dFw_mob_dSw_n = (
-                            neighbour_absolute_permeability
+                            dkrw_dSw_n_eff
                             * md_per_cp_to_ft2_per_psi_per_day
                             * inv_mu_w
-                            * dkrw_dSw_n_eff
                             * water_potential
                             * transmissibility
                         )
                         dFw_mob_dSg_n = (
-                            neighbour_absolute_permeability
+                            dkrw_dSg_n_eff
                             * md_per_cp_to_ft2_per_psi_per_day
                             * inv_mu_w
-                            * dkrw_dSg_n_eff
                             * water_potential
                             * transmissibility
                         )
 
-                    # Capillary contributions: upwind_water_mobility * (±dPcow) * T
+                    # Capillary contributions: upwind_water_relative_mobility * (±dPcow) * T
                     # Sign: flux F_w increases when Pcow at neighbour increases (more water pressure there),
                     # and decreases when Pcow at cell i increases. So dF_w/dSbeta_i = +upwind_mob * dPcow_i * T
                     # and dF_w/dSbeta_n = -upwind_mob * dPcow_n * T.
                     # dR_w/dS = -dF_w/dS.
                     dFw_cap_dSw_i = (
-                        upwind_water_mobility * dPcow_dSw_i * transmissibility
+                        upwind_water_relative_mobility
+                        * dPcow_dSw_i
+                        * transmissibility
+                        * md_per_cp_to_ft2_per_psi_per_day
                     )
                     dFw_cap_dSg_i = (
-                        upwind_water_mobility * dPcow_dSg_i * transmissibility
+                        upwind_water_relative_mobility
+                        * dPcow_dSg_i
+                        * transmissibility
+                        * md_per_cp_to_ft2_per_psi_per_day
                     )
                     dFw_cap_dSw_n = (
-                        upwind_water_mobility * (-dPcow_dSw_n) * transmissibility
+                        upwind_water_relative_mobility
+                        * (-dPcow_dSw_n)
+                        * transmissibility
+                        * md_per_cp_to_ft2_per_psi_per_day
                     )
                     dFw_cap_dSg_n = (
-                        upwind_water_mobility * (-dPcow_dSg_n) * transmissibility
+                        upwind_water_relative_mobility
+                        * (-dPcow_dSg_n)
+                        * transmissibility
+                        * md_per_cp_to_ft2_per_psi_per_day
                     )
 
                     dRw_dSw_i = -(dFw_mob_dSw_i + dFw_cap_dSw_i)
@@ -1344,10 +1345,10 @@ def _assemble_analytical_jacobian(
                     dRw_dSg_n = -(dFw_mob_dSg_n + dFw_cap_dSg_n)
 
                     # GAS Jacobian contributions
-                    upwind_gas_mobility = (
-                        neighbour_gas_mobility
+                    upwind_gas_relative_mobility = (
+                        neighbour_gas_relative_mobility
                         if gas_neighbour_is_upwind
-                        else cell_gas_mobility
+                        else cell_gas_relative_mobility
                     )
 
                     if not gas_neighbour_is_upwind:
@@ -1357,18 +1358,16 @@ def _assemble_analytical_jacobian(
                             else 0.0
                         )
                         dFg_mob_dSw_i = (
-                            cell_absolute_permeability
+                            dkrg_dSw_i_eff
                             * md_per_cp_to_ft2_per_psi_per_day
                             * inv_mu_g
-                            * dkrg_dSw_i_eff
                             * gas_potential
                             * transmissibility
                         )
                         dFg_mob_dSg_i = (
-                            cell_absolute_permeability
+                            dkrg_dSg_i_eff
                             * md_per_cp_to_ft2_per_psi_per_day
                             * inv_mu_g
-                            * dkrg_dSg_i_eff
                             * gas_potential
                             * transmissibility
                         )
@@ -1383,29 +1382,43 @@ def _assemble_analytical_jacobian(
                         dFg_mob_dSw_i = 0.0
                         dFg_mob_dSg_i = 0.0
                         dFg_mob_dSw_n = (
-                            neighbour_absolute_permeability
-                            * md_per_cp_to_ft2_per_psi_per_day
+                            dkrg_dSw_n_eff
                             * inv_mu_g
-                            * dkrg_dSw_n_eff
                             * gas_potential
                             * transmissibility
+                            * md_per_cp_to_ft2_per_psi_per_day
                         )
                         dFg_mob_dSg_n = (
-                            neighbour_absolute_permeability
+                            dkrg_dSg_n_eff
                             * md_per_cp_to_ft2_per_psi_per_day
                             * inv_mu_g
-                            * dkrg_dSg_n_eff
                             * gas_potential
                             * transmissibility
                         )
 
-                    dFg_cap_dSw_i = upwind_gas_mobility * dPcgo_dSw_i * transmissibility
-                    dFg_cap_dSg_i = upwind_gas_mobility * dPcgo_dSg_i * transmissibility
+                    dFg_cap_dSw_i = (
+                        upwind_gas_relative_mobility
+                        * dPcgo_dSw_i
+                        * transmissibility
+                        * md_per_cp_to_ft2_per_psi_per_day
+                    )
+                    dFg_cap_dSg_i = (
+                        upwind_gas_relative_mobility
+                        * dPcgo_dSg_i
+                        * transmissibility
+                        * md_per_cp_to_ft2_per_psi_per_day
+                    )
                     dFg_cap_dSw_n = (
-                        upwind_gas_mobility * (-dPcgo_dSw_n) * transmissibility
+                        upwind_gas_relative_mobility
+                        * (-dPcgo_dSw_n)
+                        * transmissibility
+                        * md_per_cp_to_ft2_per_psi_per_day
                     )
                     dFg_cap_dSg_n = (
-                        upwind_gas_mobility * (-dPcgo_dSg_n) * transmissibility
+                        upwind_gas_relative_mobility
+                        * (-dPcgo_dSg_n)
+                        * transmissibility
+                        * md_per_cp_to_ft2_per_psi_per_day
                     )
 
                     dRg_dSw_i = -(dFg_mob_dSw_i + dFg_cap_dSw_i)
@@ -1699,20 +1712,13 @@ def assemble_analytical_jacobian(
     gas_density_grid: ThreeDimensionalGrid,
     water_viscosity_grid: ThreeDimensionalGrid,
     gas_viscosity_grid: ThreeDimensionalGrid,
-    absolute_permeability_x_grid: ThreeDimensionalGrid,
-    absolute_permeability_y_grid: ThreeDimensionalGrid,
-    absolute_permeability_z_grid: ThreeDimensionalGrid,
     porosity_grid: ThreeDimensionalGrid,
     face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
     injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
     production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
-    mobility_grids: typing.Tuple[
-        typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
-        typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
-        typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
-    ],
+    relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     elevation_grid: ThreeDimensionalGrid,
     gravitational_constant: float,
     time_step_in_days: float,
@@ -1760,10 +1766,10 @@ def assemble_analytical_jacobian(
         capillary_pressure_grids
     )
     (
-        (water_mobility_grid_x, _, gas_mobility_grid_x),
-        (water_mobility_grid_y, _, gas_mobility_grid_y),
-        (water_mobility_grid_z, _, gas_mobility_grid_z),
-    ) = mobility_grids
+        water_relative_mobility_grid,
+        _,
+        gas_relative_mobility_grid,
+    ) = relative_mobility_grids
 
     # Assemble inter-cell flux Jacobian
     flux_rows, flux_cols, flux_vals = _assemble_analytical_jacobian(
@@ -1778,12 +1784,8 @@ def assemble_analytical_jacobian(
         gas_density_grid=gas_density_grid,
         elevation_grid=elevation_grid,
         gravitational_constant=gravitational_constant,
-        water_mobility_grid_x=water_mobility_grid_x,
-        water_mobility_grid_y=water_mobility_grid_y,
-        water_mobility_grid_z=water_mobility_grid_z,
-        gas_mobility_grid_x=gas_mobility_grid_x,
-        gas_mobility_grid_y=gas_mobility_grid_y,
-        gas_mobility_grid_z=gas_mobility_grid_z,
+        water_relative_mobility_grid=water_relative_mobility_grid,
+        gas_relative_mobility_grid=gas_relative_mobility_grid,
         face_transmissibilities_x=face_transmissibilities.x,
         face_transmissibilities_y=face_transmissibilities.y,
         face_transmissibilities_z=face_transmissibilities.z,
@@ -1801,9 +1803,6 @@ def assemble_analytical_jacobian(
         dPcgo_dSg_eff_grid=dPcgo_dSg_eff_grid,
         water_viscosity_grid=water_viscosity_grid,
         gas_viscosity_grid=gas_viscosity_grid,
-        absolute_permeability_x_grid=absolute_permeability_x_grid,
-        absolute_permeability_y_grid=absolute_permeability_y_grid,
-        absolute_permeability_z_grid=absolute_permeability_z_grid,
         porosity_grid=porosity_grid,
         time_step_in_days=time_step_in_days,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
@@ -1877,11 +1876,7 @@ def assemble_jacobian(
     production_rates: PhaseTensorsProxy[float, ThreeDimensions],
     dtype: npt.DTypeLike,
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
-    mobility_grids: typing.Tuple[
-        typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
-        typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
-        typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
-    ],
+    relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     md_per_cp_to_ft2_per_psi_per_day: float,
     pad_width: int = 1,
 ) -> csr_matrix:
@@ -1921,12 +1916,9 @@ def assemble_jacobian(
             gravitational_constant=gravitational_constant,
             water_viscosity_grid=fluid_properties.water_viscosity_grid,
             gas_viscosity_grid=fluid_properties.gas_viscosity_grid,
-            absolute_permeability_x_grid=rock_properties.absolute_permeability.x,
-            absolute_permeability_y_grid=rock_properties.absolute_permeability.y,
-            absolute_permeability_z_grid=rock_properties.absolute_permeability.z,
             porosity_grid=porosity_grid,
-            mobility_grids=mobility_grids,
             capillary_pressure_grids=capillary_pressure_grids,
+            relative_mobility_grids=relative_mobility_grids,
             time_step_in_days=time_step_in_days,
             config=config,
             well_indices_cache=well_indices_cache,
@@ -2115,7 +2107,7 @@ def evolve_saturation(
             pad_width=pad_width,
         )
         # (Re-)compute all saturation-dependent properties once per iteration
-        relative_mobility_grids, capillary_pressure_grids, mobility_grids = (
+        relative_mobility_grids, capillary_pressure_grids, _ = (
             compute_rock_fluid_properties(
                 water_saturation_grid=water_saturation_grid,
                 oil_saturation_grid=oil_saturation_grid,
@@ -2230,7 +2222,7 @@ def evolve_saturation(
             dtype=dtype,
             md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
             capillary_pressure_grids=capillary_pressure_grids,
-            mobility_grids=mobility_grids,
+            relative_mobility_grids=relative_mobility_grids,
         )
         # try:
         #     condition_number = spla.norm(jacobian, ord=2) * spla.norm(jacobian.T, ord=2)

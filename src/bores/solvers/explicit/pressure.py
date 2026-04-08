@@ -17,14 +17,9 @@ from bores.solvers.base import (
     EvolutionResult,
     _warn_injection_rate,
     _warn_production_rate,
-    compute_mobility_grids,
 )
 from bores.transmissibility import FaceTransmissibilities
-from bores.types import (
-    FluidPhase,
-    ThreeDimensionalGrid,
-    ThreeDimensions,
-)
+from bores.types import FluidPhase, ThreeDimensionalGrid, ThreeDimensions
 from bores.wells.base import Wells
 from bores.wells.controls import CoupledRateControl
 from bores.wells.indices import WellIndicesCache
@@ -91,7 +86,6 @@ def evolve_pressure(
     :return: A N-Dimensional numpy array representing the updated oil phase pressure field (psi).
     """
     time_step_size_in_days = time_step_size * c.DAYS_PER_SECOND
-    absolute_permeability = rock_properties.absolute_permeability
     porosity_grid = rock_properties.porosity_grid
     rock_compressibility = rock_properties.compressibility
     oil_density_grid = fluid_properties.oil_effective_density_grid
@@ -204,7 +198,6 @@ def evolve_pressure(
             md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
             dtype=dtype,
         )
-
         well_rate_future = pool.submit(
             compute_well_rate_grid,
             cell_count_x=cell_count_x,
@@ -285,7 +278,7 @@ def evolve_pressure(
         )
 
     # Apply pressure updates
-    updated_oil_pressure_grid = apply_pressure_updates(
+    updated_oil_pressure_grid = apply_updates(
         current_oil_pressure_grid=current_oil_pressure_grid,
         net_flux_grid=net_flux_grid,
         well_rate_grid=well_rate_grid,
@@ -1169,7 +1162,7 @@ def compute_well_rate_grid(
 
 
 @numba.njit(parallel=True, cache=True)
-def apply_pressure_updates(
+def apply_updates(
     current_oil_pressure_grid: ThreeDimensionalGrid,
     net_flux_grid: ThreeDimensionalGrid,
     well_rate_grid: ThreeDimensionalGrid,

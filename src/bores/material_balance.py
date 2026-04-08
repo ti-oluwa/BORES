@@ -113,7 +113,7 @@ def compute_material_balance_errors(
     time_step_size: float,
 ) -> MaterialBalanceErrors:
     """
-    Compute per-phase material balance errors at reservoir conditions (ft³) for a timestep.
+    Compute per-phase material balance errors for a timestep.
 
     All rate tensors hold values in ft³/day (reservoir condition).
 
@@ -198,14 +198,13 @@ def compute_material_balance_errors(
     # using the mean Bg for reporting alongside oil and water in ft³.
     #
     # We'll report all MBEs in ft³ using phase-specific FVFs for gas.
-
-    bbl_to_ft3 = c.BARRELS_TO_CUBIC_FEET  # 5.614583 ft³/bbl
+    bbl_to_ft3 = c.BARRELS_TO_CUBIC_FEET
 
     # Bg in ft³/SCF  (gas_formation_volume_factor_grid is in ft³/SCF already per models.py)
     current_gas_fvf = current_fluid_properties.gas_formation_volume_factor_grid
     previous_gas_fvf = previous_fluid_properties.gas_formation_volume_factor_grid
 
-    # Bo in ft³/STB  (oil_formation_volume_factor_grid is bbl/STB → x 5.614583)
+    # Bo in ft³/STB
     current_oil_fvf = (
         current_fluid_properties.oil_formation_volume_factor_grid * bbl_to_ft3
     )
@@ -258,17 +257,23 @@ def compute_material_balance_errors(
     )
     previous_gas_volume_scf = float(
         np.sum(
-            pore_volume
-            * previous_fluid_properties.gas_saturation_grid
-            / np.maximum(previous_gas_fvf, 1e-30)
-            + pore_volume
-            * previous_fluid_properties.oil_saturation_grid
-            / np.maximum(previous_oil_fvf, 1e-30)
-            * previous_solution_gor
-            + pore_volume
-            * previous_fluid_properties.water_saturation_grid
-            / np.maximum(previous_water_fvf, 1e-30)
-            * previous_gas_solubility_in_water
+            (
+                pore_volume
+                * previous_fluid_properties.gas_saturation_grid
+                / np.maximum(previous_gas_fvf, 1e-30)
+            )
+            + (
+                pore_volume
+                * previous_fluid_properties.oil_saturation_grid
+                / np.maximum(previous_oil_fvf, 1e-30)
+                * previous_solution_gor
+            )
+            + (
+                pore_volume
+                * previous_fluid_properties.water_saturation_grid
+                / np.maximum(previous_water_fvf, 1e-30)
+                * previous_gas_solubility_in_water
+            )
         )
     )
     gas_volume_change_scf = current_gas_volume_scf - previous_gas_volume_scf
@@ -285,6 +290,7 @@ def compute_material_balance_errors(
             else float(np.mean(current_gas_fvf))
         )
         net_gas_inflow_scf += float(injection_rates.gas[key]) / gas_fvf
+    
     for key in production_rates.gas:
         cell_idx = key
         gas_fvf = (
@@ -309,7 +315,6 @@ def compute_material_balance_errors(
         abs(previous_oil_volume) + abs(previous_water_volume) + reference_gas, 1.0
     )
     total_relative_mbe = total_absolute_mbe / total_reference
-
     return MaterialBalanceErrors(
         absolute_oil_mbe=absolute_oil_mbe,
         absolute_water_mbe=absolute_water_mbe,

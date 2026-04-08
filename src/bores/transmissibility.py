@@ -19,6 +19,7 @@ class FaceTransmissibilities(typing.NamedTuple):
 
     Each array is shaped (nx, ny, nz). Entry [i, j, k] stores the transmissibility
     of the *forward* face:
+    
         x: face between cell (i,j,k) and (i+1,j,k)   units: mD·ft (= mD·ft²/ft)
         y: face between cell (i,j,k) and (i,j+1,k)
         z: face between cell (i,j,k) and (i,j,k+1)
@@ -45,7 +46,7 @@ def build_face_transmissibilities(
 
     Ghost cells mirror their boundary neighbours in both permeability and geometry,
     so transmissibilities at boundary-ghost interfaces are identical to those at the
-    adjacent interior-boundary interfaces - no special-casing needed.
+    adjacent interior-boundary interfaces.
 
     Result arrays are shaped (nx, ny, nz) where (nx, ny, nz) = padded grid shape.
     Entry [i, j, k] is the transmissibility of the face between (i,j,k) and:
@@ -62,62 +63,68 @@ def build_face_transmissibilities(
     :param dtype: NumPy dtype for output arrays.
     :return: `FaceTransmissibilities` named tuple with x, y, z arrays (mD·ft).
     """
-    t_x, t_y, t_z = _compute_face_transmissibilities(
-        k_x=absolute_permeability.x.astype(dtype, copy=False),
-        k_y=absolute_permeability.y.astype(dtype, copy=False),
-        k_z=absolute_permeability.z.astype(dtype, copy=False),
+    Tx, Ty, Tz = _compute_face_transmissibilities(
+        Kx=absolute_permeability.x.astype(dtype, copy=False),
+        Ky=absolute_permeability.y.astype(dtype, copy=False),
+        Kz=absolute_permeability.z.astype(dtype, copy=False),
         thickness_grid=thickness_grid.astype(dtype, copy=False),
         cell_size_x=cell_size_x,
         cell_size_y=cell_size_y,
         dtype=dtype,
     )
-    return FaceTransmissibilities(x=t_x, y=t_y, z=t_z)
+    return FaceTransmissibilities(x=Tx, y=Ty, z=Tz)
 
 
 @numba.njit(parallel=True, cache=True)
 def _compute_face_transmissibilities(
-    k_x: ThreeDimensionalGrid,
-    k_y: ThreeDimensionalGrid,
-    k_z: ThreeDimensionalGrid,
+    Kx: ThreeDimensionalGrid,
+    Ky: ThreeDimensionalGrid,
+    Kz: ThreeDimensionalGrid,
     thickness_grid: ThreeDimensionalGrid,
     cell_size_x: float,
     cell_size_y: float,
     dtype: npt.DTypeLike,
 ) -> typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid]:
-    nx, ny, nz = k_x.shape
+    nx, ny, nz = Kx.shape
 
-    t_x = np.zeros((nx, ny, nz), dtype=dtype)
-    t_y = np.zeros((nx, ny, nz), dtype=dtype)
-    t_z = np.zeros((nx, ny, nz), dtype=dtype)
+    Tx = np.zeros((nx, ny, nz), dtype=dtype)
+    Ty = np.zeros((nx, ny, nz), dtype=dtype)
+    Tz = np.zeros((nx, ny, nz), dtype=dtype)
 
     for i in numba.prange(nx - 1):  # type: ignore[attr-defined]
         for j in range(ny - 1):
             for k in range(nz - 1):
-                h_ijk = thickness_grid[i, j, k]
+                cell_thickness = thickness_grid[i, j, k]
 
-                # ---- X face: (i,j,k) → (i+1,j,k) ----
+                # X face: (i,j,k) → (i+1,j,k)
                 # k_harmonic uses the x-permeability (flow in x-direction)
-                k_harm_x = compute_harmonic_mean(k_x[i, j, k], k_x[i + 1, j, k])
-                # Face area in x: Δy × harmonic(h_ijk, h_i+1)
+                kx_harmonic = compute_harmonic_mean(Kx[i, j, k], Kx[i + 1, j, k])
+                # Face area in x: Δy × harmonic(cell_thickness, h_i+1)
                 # Flow length: Δx (cell-centre to cell-centre = Δx for uniform grid)
-                h_east = thickness_grid[i + 1, j, k]
-                h_harm_east = compute_harmonic_mean(h_ijk, h_east)
-                area_x = cell_size_y * h_harm_east
-                t_x[i, j, k] = k_harm_x * area_x / cell_size_x
+                east_thickness = thickness_grid[i + 1, j, k]
+                east_harmonic_thickness = compute_harmonic_mean(
+                    cell_thickness, east_thickness
+                )
+                flow_area_x = cell_size_y * east_harmonic_thickness
+                Tx[i, j, k] = kx_harmonic * flow_area_x / cell_size_x
 
-                # ---- Y face: (i,j,k) → (i,j+1,k) ----
-                k_harm_y = compute_harmonic_mean(k_y[i, j, k], k_y[i, j + 1, k])
-                h_south = thickness_grid[i, j + 1, k]
-                h_harm_south = compute_harmonic_mean(h_ijk, h_south)
-                area_y = cell_size_x * h_harm_south
-                t_y[i, j, k] = k_harm_y * area_y / cell_size_y
+                # Y face: (i,j,k) → (i,j+1,k)
+                ky_harmonic = compute_harmonic_mean(Ky[i, j, k], Ky[i, j + 1, k])
+                south_thickness = thickness_grid[i, j + 1, k]
+                south_harmonic_thickness = compute_harmonic_mean(
+                    cell_thickness, south_thickness
+                )
+                flow_area_y = cell_size_x * south_harmonic_thickness
+                Ty[i, j, k] = ky_harmonic * flow_area_y / cell_size_y
 
-                # ---- Z face: (i,j,k) → (i,j,k+1) ----
-                k_harm_z = compute_harmonic_mean(k_z[i, j, k], k_z[i, j, k + 1])
-                h_bottom = thickness_grid[i, j, k + 1]
-                h_harm_z = compute_harmonic_mean(h_ijk, h_bottom)
+                # Z face: (i,j,k) → (i,j,k+1)
+                kz_harmonic = compute_harmonic_mean(Kz[i, j, k], Kz[i, j, k + 1])
+                bottom_thickness = thickness_grid[i, j, k + 1]
+                bottom_harmonic_thickness = compute_harmonic_mean(
+                    cell_thickness, bottom_thickness
+                )
                 # For vertical: area = Δx × Δy, flow length = harmonic mean thickness
-                area_z = cell_size_x * cell_size_y
-                t_z[i, j, k] = k_harm_z * area_z / h_harm_z
+                flow_area_z = cell_size_x * cell_size_y
+                Tz[i, j, k] = kz_harmonic * flow_area_z / bottom_harmonic_thickness
 
-    return t_x, t_y, t_z
+    return Tx, Ty, Tz
