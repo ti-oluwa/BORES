@@ -683,7 +683,7 @@ def build_step_diagnostics(
     )
 
     # Compute MBE
-    mbe = None if step_result is None else step_result.mbe
+    mbe = None if step_result is None else step_result.material_balance_errors
     if mbe is not None:
         mbe_kwargs = {
             "absolute_oil_mbe": float(mbe.absolute_oil_mbe or 0.0),

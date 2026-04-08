@@ -20,10 +20,10 @@ from bores.solvers.base import (
     EvolutionResult,
     _warn_injection_pressure,
     _warn_production_pressure,
-    compute_mobility_grids,
     solve_linear_system,
     to_1D_index_interior_only,
 )
+from bores.transmissibility import FaceTransmissibilities
 from bores.types import (
     FluidPhase,
     OneDimensionalGrid,
@@ -60,6 +60,7 @@ def evolve_pressure(
     fluid_properties: FluidProperties[ThreeDimensions],
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
+    face_transmissibilities: FaceTransmissibilities,
     wells: Wells[ThreeDimensions],
     config: Config,
     well_indices_cache: WellIndicesCache,
@@ -148,20 +149,6 @@ def evolve_pressure(
     md_per_cp_to_ft2_per_psi_per_day = (
         c.MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_DAY
     )
-    # Compute mobility grids for x, y, z directions
-    x_mobilities, y_mobilities, z_mobilities = compute_mobility_grids(
-        absolute_permeability_x=absolute_permeability.x,
-        absolute_permeability_y=absolute_permeability.y,
-        absolute_permeability_z=absolute_permeability.z,
-        water_relative_mobility_grid=water_relative_mobility_grid,
-        oil_relative_mobility_grid=oil_relative_mobility_grid,
-        gas_relative_mobility_grid=gas_relative_mobility_grid,
-        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
-    )
-    water_mobility_grid_x, oil_mobility_grid_x, gas_mobility_grid_x = x_mobilities
-    water_mobility_grid_y, oil_mobility_grid_y, gas_mobility_grid_y = y_mobilities
-    water_mobility_grid_z, oil_mobility_grid_z, gas_mobility_grid_z = z_mobilities
-
     time_step_size_in_days = time_step_size * c.DAYS_PER_SECOND
     interior_cell_count = (cell_count_x - 2) * (cell_count_y - 2) * (cell_count_z - 2)
 
@@ -182,7 +169,7 @@ def evolve_pressure(
             cell_count_z=cell_count_z,
             thickness_grid=thickness_grid,
             porosity_grid=porosity_grid,
-            total_compressibility_grid=total_compressibility_grid,  # type:ignore
+            total_compressibility_grid=total_compressibility_grid,
             current_oil_pressure_grid=current_oil_pressure_grid,
             cell_size_x=cell_size_x,
             cell_size_y=cell_size_y,
@@ -194,18 +181,12 @@ def evolve_pressure(
             cell_count_x=cell_count_x,
             cell_count_y=cell_count_y,
             cell_count_z=cell_count_z,
-            thickness_grid=thickness_grid,
-            cell_size_x=cell_size_x,
-            cell_size_y=cell_size_y,
-            water_mobility_grid_x=water_mobility_grid_x,
-            oil_mobility_grid_x=oil_mobility_grid_x,
-            gas_mobility_grid_x=gas_mobility_grid_x,
-            water_mobility_grid_y=water_mobility_grid_y,
-            oil_mobility_grid_y=oil_mobility_grid_y,
-            gas_mobility_grid_y=gas_mobility_grid_y,
-            water_mobility_grid_z=water_mobility_grid_z,
-            oil_mobility_grid_z=oil_mobility_grid_z,
-            gas_mobility_grid_z=gas_mobility_grid_z,
+            water_relative_mobility_grid=water_relative_mobility_grid,
+            oil_relative_mobility_grid=oil_relative_mobility_grid,
+            gas_relative_mobility_grid=gas_relative_mobility_grid,
+            face_transmissibilities_x=face_transmissibilities.x,
+            face_transmissibilities_y=face_transmissibilities.y,
+            face_transmissibilities_z=face_transmissibilities.z,
             oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
             gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
             oil_density_grid=oil_density_grid,
@@ -213,6 +194,7 @@ def evolve_pressure(
             gas_density_grid=gas_density_grid,
             elevation_grid=elevation_grid,
             gravitational_constant=gravitational_constant,
+            md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
             dtype=dtype,
         )
         wells_future = pool.submit(
@@ -264,7 +246,7 @@ def evolve_pressure(
             cell_count_z=cell_count_z,
             thickness_grid=thickness_grid,
             porosity_grid=porosity_grid,
-            total_compressibility_grid=total_compressibility_grid,  # type:ignore
+            total_compressibility_grid=total_compressibility_grid,
             current_oil_pressure_grid=current_oil_pressure_grid,
             cell_size_x=cell_size_x,
             cell_size_y=cell_size_y,
@@ -281,18 +263,12 @@ def evolve_pressure(
             cell_count_x=cell_count_x,
             cell_count_y=cell_count_y,
             cell_count_z=cell_count_z,
-            thickness_grid=thickness_grid,
-            cell_size_x=cell_size_x,
-            cell_size_y=cell_size_y,
-            water_mobility_grid_x=water_mobility_grid_x,
-            oil_mobility_grid_x=oil_mobility_grid_x,
-            gas_mobility_grid_x=gas_mobility_grid_x,
-            water_mobility_grid_y=water_mobility_grid_y,
-            oil_mobility_grid_y=oil_mobility_grid_y,
-            gas_mobility_grid_y=gas_mobility_grid_y,
-            water_mobility_grid_z=water_mobility_grid_z,
-            oil_mobility_grid_z=oil_mobility_grid_z,
-            gas_mobility_grid_z=gas_mobility_grid_z,
+            water_relative_mobility_grid=water_relative_mobility_grid,
+            oil_relative_mobility_grid=oil_relative_mobility_grid,
+            gas_relative_mobility_grid=gas_relative_mobility_grid,
+            face_transmissibilities_x=face_transmissibilities.x,
+            face_transmissibilities_y=face_transmissibilities.y,
+            face_transmissibilities_z=face_transmissibilities.z,
             oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
             gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
             oil_density_grid=oil_density_grid,
@@ -300,6 +276,7 @@ def evolve_pressure(
             gas_density_grid=gas_density_grid,
             elevation_grid=elevation_grid,
             gravitational_constant=gravitational_constant,
+            md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
             dtype=dtype,
         )
         (
@@ -520,18 +497,12 @@ def compute_face_flux_contributions(
     cell_count_x: int,
     cell_count_y: int,
     cell_count_z: int,
-    thickness_grid: ThreeDimensionalGrid,
-    cell_size_x: float,
-    cell_size_y: float,
-    water_mobility_grid_x: ThreeDimensionalGrid,
-    oil_mobility_grid_x: ThreeDimensionalGrid,
-    gas_mobility_grid_x: ThreeDimensionalGrid,
-    water_mobility_grid_y: ThreeDimensionalGrid,
-    oil_mobility_grid_y: ThreeDimensionalGrid,
-    gas_mobility_grid_y: ThreeDimensionalGrid,
-    water_mobility_grid_z: ThreeDimensionalGrid,
-    oil_mobility_grid_z: ThreeDimensionalGrid,
-    gas_mobility_grid_z: ThreeDimensionalGrid,
+    water_relative_mobility_grid: ThreeDimensionalGrid,
+    oil_relative_mobility_grid: ThreeDimensionalGrid,
+    gas_relative_mobility_grid: ThreeDimensionalGrid,
+    face_transmissibilities_x: ThreeDimensionalGrid,
+    face_transmissibilities_y: ThreeDimensionalGrid,
+    face_transmissibilities_z: ThreeDimensionalGrid,
     oil_water_capillary_pressure_grid: ThreeDimensionalGrid,
     gas_oil_capillary_pressure_grid: ThreeDimensionalGrid,
     oil_density_grid: ThreeDimensionalGrid,
@@ -539,6 +510,7 @@ def compute_face_flux_contributions(
     gas_density_grid: ThreeDimensionalGrid,
     elevation_grid: ThreeDimensionalGrid,
     gravitational_constant: float,
+    md_per_cp_to_ft2_per_psi_per_day: float,
     dtype: npt.DTypeLike,
 ) -> typing.Tuple[
     npt.NDArray,  # sparse_row_indices
@@ -689,7 +661,6 @@ def compute_face_flux_contributions(
                     cell_count_y=cell_count_y,
                     cell_count_z=cell_count_z,
                 )
-                this_cell_thickness = thickness_grid[i, j, k]
 
                 # EAST FACE (i+1, j, k) — x-direction flow
                 east_i, east_j, east_k = i + 1, j, k
@@ -702,23 +673,14 @@ def compute_face_flux_contributions(
                         cell_count_y=cell_count_y,
                         cell_count_z=cell_count_z,
                     )
-                    # Harmonic mean thickness at the shared face — ensures
-                    # the effective flow path length is correctly weighted
-                    # when adjacent cells have different thicknesses.
-                    east_face_thickness = compute_harmonic_mean(
-                        this_cell_thickness, thickness_grid[east_i, east_j, east_k]
-                    )
-                    # x-direction: cross-sectional area = Δy × h_face, distance = Δx
-                    east_geometric_factor = (
-                        cell_size_y * east_face_thickness / cell_size_x
-                    )
-                    east_face_mobility, east_capillary_flux, east_gravity_flux = (
+                    east_transmissibility, east_capillary_flux, east_gravity_flux = (
                         compute_pseudo_fluxes_from_neighbour(
                             cell_indices=(i, j, k),
                             neighbour_indices=(east_i, east_j, east_k),
-                            water_mobility_grid=water_mobility_grid_x,
-                            oil_mobility_grid=oil_mobility_grid_x,
-                            gas_mobility_grid=gas_mobility_grid_x,
+                            water_relative_mobility_grid=water_relative_mobility_grid,
+                            oil_relative_mobility_grid=oil_relative_mobility_grid,
+                            gas_relative_mobility_grid=gas_relative_mobility_grid,
+                            face_transmissibility=face_transmissibilities_x[i, j, k],
                             oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
                             gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
                             oil_density_grid=oil_density_grid,
@@ -726,12 +688,10 @@ def compute_face_flux_contributions(
                             gas_density_grid=gas_density_grid,
                             elevation_grid=elevation_grid,
                             gravitational_constant=gravitational_constant,
+                            md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                         )
                     )
-                    east_transmissibility = east_face_mobility * east_geometric_factor
-                    east_rhs_term = (
-                        east_capillary_flux + east_gravity_flux
-                    ) * east_geometric_factor
+                    east_rhs_term = east_capillary_flux + east_gravity_flux
 
                     # Entry 0 of the pair: A[this_cell, east_cell]
                     thread_sparse_row_indices[ii, local_slot] = this_cell_1d_index
@@ -762,20 +722,14 @@ def compute_face_flux_contributions(
                         cell_count_y=cell_count_y,
                         cell_count_z=cell_count_z,
                     )
-                    south_face_thickness = compute_harmonic_mean(
-                        this_cell_thickness, thickness_grid[south_i, south_j, south_k]
-                    )
-                    # y-direction: cross-sectional area = Δx × h_face, distance = Δy
-                    south_geometric_factor = (
-                        cell_size_x * south_face_thickness / cell_size_y
-                    )
-                    south_face_mobility, south_capillary_flux, south_gravity_flux = (
+                    south_transmissibility, south_capillary_flux, south_gravity_flux = (
                         compute_pseudo_fluxes_from_neighbour(
                             cell_indices=(i, j, k),
                             neighbour_indices=(south_i, south_j, south_k),
-                            water_mobility_grid=water_mobility_grid_y,
-                            oil_mobility_grid=oil_mobility_grid_y,
-                            gas_mobility_grid=gas_mobility_grid_y,
+                            water_relative_mobility_grid=water_relative_mobility_grid,
+                            oil_relative_mobility_grid=oil_relative_mobility_grid,
+                            gas_relative_mobility_grid=gas_relative_mobility_grid,
+                            face_transmissibility=face_transmissibilities_y[i, j, k],
                             oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
                             gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
                             oil_density_grid=oil_density_grid,
@@ -783,14 +737,10 @@ def compute_face_flux_contributions(
                             gas_density_grid=gas_density_grid,
                             elevation_grid=elevation_grid,
                             gravitational_constant=gravitational_constant,
+                            md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                         )
                     )
-                    south_transmissibility = (
-                        south_face_mobility * south_geometric_factor
-                    )
-                    south_rhs_term = (
-                        south_capillary_flux + south_gravity_flux
-                    ) * south_geometric_factor
+                    south_rhs_term = south_capillary_flux + south_gravity_flux
 
                     thread_sparse_row_indices[ii, local_slot] = this_cell_1d_index
                     thread_sparse_col_indices[ii, local_slot] = south_cell_1d_index
@@ -821,36 +771,27 @@ def compute_face_flux_contributions(
                         cell_count_y=cell_count_y,
                         cell_count_z=cell_count_z,
                     )
-                    bottom_face_thickness = compute_harmonic_mean(
-                        this_cell_thickness,
-                        thickness_grid[bottom_i, bottom_j, bottom_k],
+                    (
+                        bottom_transmissibility,
+                        bottom_capillary_flux,
+                        bottom_gravity_flux,
+                    ) = compute_pseudo_fluxes_from_neighbour(
+                        cell_indices=(i, j, k),
+                        neighbour_indices=(bottom_i, bottom_j, bottom_k),
+                        water_relative_mobility_grid=water_relative_mobility_grid,
+                        oil_relative_mobility_grid=oil_relative_mobility_grid,
+                        gas_relative_mobility_grid=gas_relative_mobility_grid,
+                        face_transmissibility=face_transmissibilities_z[i, j, k],
+                        oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
+                        gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
+                        oil_density_grid=oil_density_grid,
+                        water_density_grid=water_density_grid,
+                        gas_density_grid=gas_density_grid,
+                        elevation_grid=elevation_grid,
+                        gravitational_constant=gravitational_constant,
+                        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                     )
-                    # z-direction: cross-sectional area = Δx × Δy, distance = h_face
-                    bottom_geometric_factor = (
-                        cell_size_x * cell_size_y / bottom_face_thickness
-                    )
-                    bottom_face_mobility, bottom_capillary_flux, bottom_gravity_flux = (
-                        compute_pseudo_fluxes_from_neighbour(
-                            cell_indices=(i, j, k),
-                            neighbour_indices=(bottom_i, bottom_j, bottom_k),
-                            water_mobility_grid=water_mobility_grid_z,
-                            oil_mobility_grid=oil_mobility_grid_z,
-                            gas_mobility_grid=gas_mobility_grid_z,
-                            oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
-                            gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
-                            oil_density_grid=oil_density_grid,
-                            water_density_grid=water_density_grid,
-                            gas_density_grid=gas_density_grid,
-                            elevation_grid=elevation_grid,
-                            gravitational_constant=gravitational_constant,
-                        )
-                    )
-                    bottom_transmissibility = (
-                        bottom_face_mobility * bottom_geometric_factor
-                    )
-                    bottom_rhs_term = (
-                        bottom_capillary_flux + bottom_gravity_flux
-                    ) * bottom_geometric_factor
+                    bottom_rhs_term = bottom_capillary_flux + bottom_gravity_flux
 
                     thread_sparse_row_indices[ii, local_slot] = this_cell_1d_index
                     thread_sparse_col_indices[ii, local_slot] = bottom_cell_1d_index
@@ -952,6 +893,147 @@ def compute_face_flux_contributions(
         diagonal_additions,
         rhs_additions,
     )
+
+
+@numba.njit(cache=True, inline="always")
+def compute_pseudo_fluxes_from_neighbour(
+    cell_indices: ThreeDimensions,
+    neighbour_indices: ThreeDimensions,
+    face_transmissibility: float,
+    water_relative_mobility_grid: ThreeDimensionalGrid,
+    oil_relative_mobility_grid: ThreeDimensionalGrid,
+    gas_relative_mobility_grid: ThreeDimensionalGrid,
+    oil_water_capillary_pressure_grid: ThreeDimensionalGrid,
+    gas_oil_capillary_pressure_grid: ThreeDimensionalGrid,
+    oil_density_grid: ThreeDimensionalGrid,
+    water_density_grid: ThreeDimensionalGrid,
+    gas_density_grid: ThreeDimensionalGrid,
+    elevation_grid: ThreeDimensionalGrid,
+    gravitational_constant: float,
+    md_per_cp_to_ft2_per_psi_per_day: float,
+) -> typing.Tuple[float, float, float]:
+    """
+    Computes and returns a tuple of the total transmissibility of the phases, the capillary flux,
+    and the gravity flux from the neighbour to the current cell.
+
+    :param cell_indices: Indices of the current cell (i, j, k)
+    :param neighbour_indices: Indices of the neighbouring cell (i±1, j, k) or (i, j±1, k) or (i, j, k±1)
+    :param oil_pressure_grid: 3D grid of oil pressures (psi)
+    :param water_relative_mobility_grid: 3D grid of water mobilities (ft²/psi.day)
+    :param oil_relative_mobility_grid: 3D grid of oil mobilities (ft²/psi.day)
+    :param gas_relative_mobility_grid: 3D grid of gas mobilities (ft²/psi.day)
+    :param oil_water_capillary_pressure_grid: 3D grid of oil-water capillary pressures (psi)
+    :param gas_oil_capillary_pressure_grid: 3D grid of gas-oil capillary pressures (psi)
+    :param oil_density_grid: 3D grid of oil densities (lb/ft³)
+    :param water_density_grid: 3D grid of water densities (lb/ft³)
+    :param gas_density_grid: 3D grid of gas densities (lb/ft³)
+    :param elevation_grid: 3D grid of elevations (ft)
+    :return: A tuple containing:
+        - Total transmissibility (ft³/psi.day)
+        - Total capillary flux (ft³/day)
+        - Total gravity flux (ft³/day)
+    """
+    # Calculate pressure differences relative to current cell (Neighbour - Current)
+    # These represent the gradients driving flow from neighbour to current cell, or vice versa
+    oil_water_capillary_pressure_difference = (
+        oil_water_capillary_pressure_grid[neighbour_indices]
+        - oil_water_capillary_pressure_grid[cell_indices]
+    )
+    gas_oil_capillary_pressure_difference = (
+        gas_oil_capillary_pressure_grid[neighbour_indices]
+        - gas_oil_capillary_pressure_grid[cell_indices]
+    )
+
+    # Calculate the elevation difference between the neighbour and current cell
+    elevation_difference = (
+        elevation_grid[neighbour_indices] - elevation_grid[cell_indices]
+    )
+    # Determine the average densities for each phase across the face
+    average_water_density = (
+        water_density_grid[neighbour_indices] + water_density_grid[cell_indices]
+    ) * 0.5
+    average_oil_density = (
+        oil_density_grid[neighbour_indices] + oil_density_grid[cell_indices]
+    ) * 0.5
+    average_gas_density = (
+        gas_density_grid[neighbour_indices] + gas_density_grid[cell_indices]
+    ) * 0.5
+
+    # Calculate harmonic relative mobilities for each phase across the face
+    water_harmonic_relative_mobility = compute_harmonic_mean(
+        water_relative_mobility_grid[neighbour_indices],
+        water_relative_mobility_grid[cell_indices],
+    )
+    oil_harmonic_relative_mobility = compute_harmonic_mean(
+        oil_relative_mobility_grid[neighbour_indices],
+        oil_relative_mobility_grid[cell_indices],
+    )
+    gas_harmonic_relative_mobility = compute_harmonic_mean(
+        gas_relative_mobility_grid[neighbour_indices],
+        gas_relative_mobility_grid[cell_indices],
+    )
+    total_harmonic_relative_mobility = (
+        water_harmonic_relative_mobility
+        + oil_harmonic_relative_mobility
+        + gas_harmonic_relative_mobility
+    )
+    if total_harmonic_relative_mobility <= 0.0:
+        # No flow can occur if there is no mobility
+        return 0.0, 0.0, 0.0
+
+    # λ_w * T_face * (P_cow_{n+1} - P_cow_{n}) (ft²/psi.day * psi = ft²/day)
+    water_capillary_flux = (
+        water_harmonic_relative_mobility
+        * face_transmissibility
+        * oil_water_capillary_pressure_difference
+        * md_per_cp_to_ft2_per_psi_per_day
+    )
+    # λ_g * T_face * (P_cgo_{n+1} - P_cgo_{n}) (ft²/psi.day * psi = ft²/day)
+    gas_capillary_flux = (
+        gas_harmonic_relative_mobility
+        * face_transmissibility
+        * gas_oil_capillary_pressure_difference
+        * md_per_cp_to_ft2_per_psi_per_day
+    )
+    # Total capillary flux from the neighbour (ft²/day)
+    total_capillary_flux = water_capillary_flux + gas_capillary_flux
+
+    # Calculate the phase gravity potentials (hydrostatic/gravity head)
+    water_gravity_potential = (
+        average_water_density * gravitational_constant * elevation_difference
+    ) / 144.0
+    oil_gravity_potential = (
+        average_oil_density * gravitational_constant * elevation_difference
+    ) / 144.0
+    gas_gravity_potential = (
+        average_gas_density * gravitational_constant * elevation_difference
+    ) / 144.0
+    # Total gravity pseudo flux (ft²/day)
+    water_gravity_flux = (
+        water_harmonic_relative_mobility
+        * face_transmissibility
+        * water_gravity_potential
+        * md_per_cp_to_ft2_per_psi_per_day
+    )
+    oil_gravity_flux = (
+        oil_harmonic_relative_mobility
+        * face_transmissibility
+        * oil_gravity_potential
+        * md_per_cp_to_ft2_per_psi_per_day
+    )
+    gas_gravity_flux = (
+        gas_harmonic_relative_mobility
+        * face_transmissibility
+        * gas_gravity_potential
+        * md_per_cp_to_ft2_per_psi_per_day
+    )
+    total_gravity_flux = water_gravity_flux + oil_gravity_flux + gas_gravity_flux
+    total_transmissibility = (
+        total_harmonic_relative_mobility
+        * face_transmissibility
+        * md_per_cp_to_ft2_per_psi_per_day
+    )
+    return (total_transmissibility, total_capillary_flux, total_gravity_flux)
 
 
 def compute_well_contributions(
@@ -1468,126 +1550,6 @@ def compute_well_contributions(
         np.array(diagonal_values, dtype=dtype),
         np.array(rhs_cell_indices, dtype=np.int32),
         np.array(rhs_values, dtype=dtype),
-    )
-
-
-@numba.njit(cache=True, inline="always")
-def compute_pseudo_fluxes_from_neighbour(
-    cell_indices: ThreeDimensions,
-    neighbour_indices: ThreeDimensions,
-    water_mobility_grid: ThreeDimensionalGrid,
-    oil_mobility_grid: ThreeDimensionalGrid,
-    gas_mobility_grid: ThreeDimensionalGrid,
-    oil_water_capillary_pressure_grid: ThreeDimensionalGrid,
-    gas_oil_capillary_pressure_grid: ThreeDimensionalGrid,
-    oil_density_grid: ThreeDimensionalGrid,
-    water_density_grid: ThreeDimensionalGrid,
-    gas_density_grid: ThreeDimensionalGrid,
-    elevation_grid: ThreeDimensionalGrid,
-    gravitational_constant: float,
-) -> typing.Tuple[float, float, float]:
-    """
-    Computes and returns a tuple of the total harmonic mobility of the phases, the capillary pseudo flux,
-    and the gravity pseudo flux from the neighbour to the current cell.
-
-    Pseudo flux comes about from the fact that the fluxes returned are not actual fluxes with units of ft³/day,
-    but rather pseudo fluxes with units of ft²/day, which are then used to compute the actual fluxes and subsequently,
-    the flow rates in the implicit pressure evolution scheme.
-
-    :param cell_indices: Indices of the current cell (i, j, k)
-    :param neighbour_indices: Indices of the neighbouring cell (i±1, j, k) or (i, j±1, k) or (i, j, k±1)
-    :param oil_pressure_grid: 3D grid of oil pressures (psi)
-    :param water_mobility_grid: 3D grid of water mobilities (ft²/psi.day)
-    :param oil_mobility_grid: 3D grid of oil mobilities (ft²/psi.day)
-    :param gas_mobility_grid: 3D grid of gas mobilities (ft²/psi.day)
-    :param oil_water_capillary_pressure_grid: 3D grid of oil-water capillary pressures (psi)
-    :param gas_oil_capillary_pressure_grid: 3D grid of gas-oil capillary pressures (psi)
-    :param oil_density_grid: 3D grid of oil densities (lb/ft³)
-    :param water_density_grid: 3D grid of water densities (lb/ft³)
-    :param gas_density_grid: 3D grid of gas densities (lb/ft³)
-    :param elevation_grid: 3D grid of elevations (ft)
-    :return: A tuple containing:
-        - Total harmonic mobility (ft²/psi.day)
-        - Total capillary pseudo flux (ft²/day)
-        - Total gravity pseudo flux (ft²/day)
-    """
-    # Calculate pressure differences relative to current cell (Neighbour - Current)
-    # These represent the gradients driving flow from neighbour to current cell, or vice versa
-    oil_water_capillary_pressure_difference = (
-        oil_water_capillary_pressure_grid[neighbour_indices]
-        - oil_water_capillary_pressure_grid[cell_indices]
-    )
-    gas_oil_capillary_pressure_difference = (
-        gas_oil_capillary_pressure_grid[neighbour_indices]
-        - gas_oil_capillary_pressure_grid[cell_indices]
-    )
-
-    # Calculate the elevation difference between the neighbour and current cell
-    elevation_difference = (
-        elevation_grid[neighbour_indices] - elevation_grid[cell_indices]
-    )
-    # Determine the average densities for each phase across the face
-    average_water_density = (
-        water_density_grid[neighbour_indices] + water_density_grid[cell_indices]
-    ) * 0.5
-    average_oil_density = (
-        oil_density_grid[neighbour_indices] + oil_density_grid[cell_indices]
-    ) * 0.5
-    average_gas_density = (
-        gas_density_grid[neighbour_indices] + gas_density_grid[cell_indices]
-    ) * 0.5
-
-    # Calculate harmonic mobilities for each phase across the face
-    water_harmonic_mobility = compute_harmonic_mean(
-        water_mobility_grid[neighbour_indices], water_mobility_grid[cell_indices]
-    )
-    oil_harmonic_mobility = compute_harmonic_mean(
-        oil_mobility_grid[neighbour_indices], oil_mobility_grid[cell_indices]
-    )
-    gas_harmonic_mobility = compute_harmonic_mean(
-        gas_mobility_grid[neighbour_indices], gas_mobility_grid[cell_indices]
-    )
-    total_harmonic_mobility = (
-        water_harmonic_mobility + oil_harmonic_mobility + gas_harmonic_mobility
-    )
-    if total_harmonic_mobility <= 0.0:
-        # No flow can occur if there is no mobility
-        return 0.0, 0.0, 0.0
-
-    # λ_w * (P_cow_{n+1} - P_cow_{n}) (ft²/psi.day * psi = ft²/day)
-    water_capillary_pseudo_flux = (
-        water_harmonic_mobility * oil_water_capillary_pressure_difference
-    )
-    # λ_g * (P_cgo_{n+1} - P_cgo_{n}) (ft²/psi.day * psi = ft²/day)
-    gas_capillary_pseudo_flux = (
-        gas_harmonic_mobility * gas_oil_capillary_pressure_difference
-    )
-    # Total capillary flux from the neighbour (ft²/day)
-    total_capillary_pseudo_flux = (
-        water_capillary_pseudo_flux + gas_capillary_pseudo_flux
-    )
-
-    # Calculate the phase gravity potentials (hydrostatic/gravity head)
-    water_gravity_potential = (
-        average_water_density * gravitational_constant * elevation_difference
-    ) / 144.0
-    oil_gravity_potential = (
-        average_oil_density * gravitational_constant * elevation_difference
-    ) / 144.0
-    gas_gravity_potential = (
-        average_gas_density * gravitational_constant * elevation_difference
-    ) / 144.0
-    # Total gravity pseudo flux (ft²/day)
-    water_gravity_pseudo_flux = water_harmonic_mobility * water_gravity_potential
-    oil_gravity_pseudo_flux = oil_harmonic_mobility * oil_gravity_potential
-    gas_gravity_pseudo_flux = gas_harmonic_mobility * gas_gravity_potential
-    total_gravity_pseudo_flux = (
-        water_gravity_pseudo_flux + oil_gravity_pseudo_flux + gas_gravity_pseudo_flux
-    )
-    return (
-        total_harmonic_mobility,
-        total_capillary_pseudo_flux,
-        total_gravity_pseudo_flux,
     )
 
 

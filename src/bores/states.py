@@ -15,6 +15,7 @@ from bores.grids.base import (
     RelativeMobilityGrids,
     RelPermGrids,
 )
+from bores.material_balance import MaterialBalanceErrors
 from bores.models import (
     FluidProperties,
     ReservoirModel,
@@ -72,8 +73,11 @@ class ModelState(
     """Relative mobilities at this state"""
     capillary_pressures: CapillaryPressureGrids[NDimension]
     """Capillary pressures at this state"""
+    material_balance_errors: MaterialBalanceErrors
+    """Material balance error for the model simulation at this time step"""
     timer_state: typing.Optional[TimerState] = None
     """Optional timer configuration state at this model state"""
+
     _well_exists: typing.Optional[bool] = attrs.field(default=None, init=False)
 
     def wells_exists(self) -> bool:
@@ -132,6 +136,11 @@ class ModelState(
     def average_gas_saturation(self) -> float:
         """Average gas saturation at this state, computed as the mean of the gas saturation grid."""
         return float(np.mean(self.model.fluid_properties.gas_saturation_grid))
+
+    @property
+    def mbe(self) -> MaterialBalanceErrors:
+        """Model simulation material balance errors at this timestep."""
+        return self.material_balance_errors
 
 
 def _validate_array(
@@ -393,6 +402,7 @@ def validate_state(
             relative_permeabilities=relative_permeabilities,
             relative_mobilities=relative_mobilities,
             capillary_pressures=capillary_pressures,
+            material_balance_errors=state.material_balance_errors,
             timer_state=state.timer_state,
         )
     return state

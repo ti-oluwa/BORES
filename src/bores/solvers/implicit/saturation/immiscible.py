@@ -28,6 +28,7 @@ from bores.solvers.explicit.saturation.immiscible import (
     compute_well_rate_grids,
 )
 from bores.tables.rock_fluid import RockFluidTables
+from bores.transmissibility import FaceTransmissibilities
 from bores.types import ThreeDimensionalGrid, ThreeDimensions
 from bores.updates import apply_saturation_boundary_conditions
 from bores.wells.indices import WellIndicesCache
@@ -164,15 +165,12 @@ def _compute_saturation_residual(
     thickness_grid: ThreeDimensionalGrid,
     cell_size_x: float,
     cell_size_y: float,
-    water_mobility_grid_x: ThreeDimensionalGrid,
-    water_mobility_grid_y: ThreeDimensionalGrid,
-    water_mobility_grid_z: ThreeDimensionalGrid,
-    oil_mobility_grid_x: ThreeDimensionalGrid,
-    oil_mobility_grid_y: ThreeDimensionalGrid,
-    oil_mobility_grid_z: ThreeDimensionalGrid,
-    gas_mobility_grid_x: ThreeDimensionalGrid,
-    gas_mobility_grid_y: ThreeDimensionalGrid,
-    gas_mobility_grid_z: ThreeDimensionalGrid,
+    water_relative_mobility_grid: ThreeDimensionalGrid,
+    oil_relative_mobility_grid: ThreeDimensionalGrid,
+    gas_relative_mobility_grid: ThreeDimensionalGrid,
+    face_transmissibilities_x: ThreeDimensionalGrid,
+    face_transmissibilities_y: ThreeDimensionalGrid,
+    face_transmissibilities_z: ThreeDimensionalGrid,
     oil_water_capillary_pressure_grid: ThreeDimensionalGrid,
     gas_oil_capillary_pressure_grid: ThreeDimensionalGrid,
     oil_density_grid: ThreeDimensionalGrid,
@@ -192,6 +190,7 @@ def _compute_saturation_residual(
     water_compressibility_grid: ThreeDimensionalGrid,
     gas_compressibility_grid: ThreeDimensionalGrid,
     rock_compressibility: float,
+    md_per_cp_to_ft2_per_psi_per_day: float,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray]:
     """
     Compute the residual vector R(S) for the implicit saturation equations.
@@ -237,21 +236,14 @@ def _compute_saturation_residual(
                 net_water_flux = 0.0
                 net_gas_flux = 0.0
 
-                flow_length_x = cell_size_x
-                east_neighbour_thickness = thickness_grid[i + 1, j, k]
-                harmonic_thickness = compute_harmonic_mean(
-                    cell_thickness, east_neighbour_thickness
-                )
-                east_flow_area = cell_size_y * harmonic_thickness
                 water_flux, _, gas_flux = compute_fluxes_from_neighbour(
                     cell_indices=(i, j, k),
                     neighbour_indices=(i + 1, j, k),
-                    flow_area=east_flow_area,
-                    flow_length=flow_length_x,
                     oil_pressure_grid=oil_pressure_grid,
-                    water_mobility_grid=water_mobility_grid_x,
-                    oil_mobility_grid=oil_mobility_grid_x,
-                    gas_mobility_grid=gas_mobility_grid_x,
+                    water_relative_mobility_grid=water_relative_mobility_grid,
+                    oil_relative_mobility_grid=oil_relative_mobility_grid,
+                    gas_relative_mobility_grid=gas_relative_mobility_grid,
+                    face_transmissibility=face_transmissibilities_x[i, j, k],
                     oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
                     gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
                     oil_density_grid=oil_density_grid,
@@ -259,24 +251,19 @@ def _compute_saturation_residual(
                     gas_density_grid=gas_density_grid,
                     elevation_grid=elevation_grid,
                     gravitational_constant=gravitational_constant,
+                    md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                 )
                 net_water_flux += water_flux
                 net_gas_flux += gas_flux
 
-                west_neighbour_thickness = thickness_grid[i - 1, j, k]
-                harmonic_thickness = compute_harmonic_mean(
-                    cell_thickness, west_neighbour_thickness
-                )
-                west_flow_area = cell_size_y * harmonic_thickness
                 water_flux, _, gas_flux = compute_fluxes_from_neighbour(
                     cell_indices=(i, j, k),
                     neighbour_indices=(i - 1, j, k),
-                    flow_area=west_flow_area,
-                    flow_length=flow_length_x,
                     oil_pressure_grid=oil_pressure_grid,
-                    water_mobility_grid=water_mobility_grid_x,
-                    oil_mobility_grid=oil_mobility_grid_x,
-                    gas_mobility_grid=gas_mobility_grid_x,
+                    water_relative_mobility_grid=water_relative_mobility_grid,
+                    oil_relative_mobility_grid=oil_relative_mobility_grid,
+                    gas_relative_mobility_grid=gas_relative_mobility_grid,
+                    face_transmissibility=face_transmissibilities_x[i - 1, j, k],
                     oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
                     gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
                     oil_density_grid=oil_density_grid,
@@ -284,25 +271,19 @@ def _compute_saturation_residual(
                     gas_density_grid=gas_density_grid,
                     elevation_grid=elevation_grid,
                     gravitational_constant=gravitational_constant,
+                    md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                 )
                 net_water_flux += water_flux
                 net_gas_flux += gas_flux
 
-                flow_length_y = cell_size_y
-                north_neighbour_thickness = thickness_grid[i, j - 1, k]
-                harmonic_thickness = compute_harmonic_mean(
-                    cell_thickness, north_neighbour_thickness
-                )
-                north_flow_area = cell_size_x * harmonic_thickness
                 water_flux, _, gas_flux = compute_fluxes_from_neighbour(
                     cell_indices=(i, j, k),
                     neighbour_indices=(i, j - 1, k),
-                    flow_area=north_flow_area,
-                    flow_length=flow_length_y,
                     oil_pressure_grid=oil_pressure_grid,
-                    water_mobility_grid=water_mobility_grid_y,
-                    oil_mobility_grid=oil_mobility_grid_y,
-                    gas_mobility_grid=gas_mobility_grid_y,
+                    water_relative_mobility_grid=water_relative_mobility_grid,
+                    oil_relative_mobility_grid=oil_relative_mobility_grid,
+                    gas_relative_mobility_grid=gas_relative_mobility_grid,
+                    face_transmissibility=face_transmissibilities_y[i, j - 1, k],
                     oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
                     gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
                     oil_density_grid=oil_density_grid,
@@ -310,24 +291,19 @@ def _compute_saturation_residual(
                     gas_density_grid=gas_density_grid,
                     elevation_grid=elevation_grid,
                     gravitational_constant=gravitational_constant,
+                    md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                 )
                 net_water_flux += water_flux
                 net_gas_flux += gas_flux
 
-                south_neighbour_thickness = thickness_grid[i, j + 1, k]
-                harmonic_thickness = compute_harmonic_mean(
-                    cell_thickness, south_neighbour_thickness
-                )
-                south_flow_area = cell_size_x * harmonic_thickness
                 water_flux, _, gas_flux = compute_fluxes_from_neighbour(
                     cell_indices=(i, j, k),
                     neighbour_indices=(i, j + 1, k),
-                    flow_area=south_flow_area,
-                    flow_length=flow_length_y,
                     oil_pressure_grid=oil_pressure_grid,
-                    water_mobility_grid=water_mobility_grid_y,
-                    oil_mobility_grid=oil_mobility_grid_y,
-                    gas_mobility_grid=gas_mobility_grid_y,
+                    water_relative_mobility_grid=water_relative_mobility_grid,
+                    oil_relative_mobility_grid=oil_relative_mobility_grid,
+                    gas_relative_mobility_grid=gas_relative_mobility_grid,
+                    face_transmissibility=face_transmissibilities_y[i, j, k],
                     oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
                     gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
                     oil_density_grid=oil_density_grid,
@@ -335,25 +311,19 @@ def _compute_saturation_residual(
                     gas_density_grid=gas_density_grid,
                     elevation_grid=elevation_grid,
                     gravitational_constant=gravitational_constant,
+                    md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                 )
                 net_water_flux += water_flux
                 net_gas_flux += gas_flux
 
-                flow_area_z = cell_size_x * cell_size_y
-                top_neighbour_thickness = thickness_grid[i, j, k - 1]
-                harmonic_thickness = compute_harmonic_mean(
-                    cell_thickness, top_neighbour_thickness
-                )
-                top_flow_length = harmonic_thickness
                 water_flux, _, gas_flux = compute_fluxes_from_neighbour(
                     cell_indices=(i, j, k),
                     neighbour_indices=(i, j, k - 1),
-                    flow_area=flow_area_z,
-                    flow_length=top_flow_length,
                     oil_pressure_grid=oil_pressure_grid,
-                    water_mobility_grid=water_mobility_grid_z,
-                    oil_mobility_grid=oil_mobility_grid_z,
-                    gas_mobility_grid=gas_mobility_grid_z,
+                    water_relative_mobility_grid=water_relative_mobility_grid,
+                    oil_relative_mobility_grid=oil_relative_mobility_grid,
+                    gas_relative_mobility_grid=gas_relative_mobility_grid,
+                    face_transmissibility=face_transmissibilities_z[i, j, k - 1],
                     oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
                     gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
                     oil_density_grid=oil_density_grid,
@@ -361,24 +331,19 @@ def _compute_saturation_residual(
                     gas_density_grid=gas_density_grid,
                     elevation_grid=elevation_grid,
                     gravitational_constant=gravitational_constant,
+                    md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                 )
                 net_water_flux += water_flux
                 net_gas_flux += gas_flux
 
-                bottom_neighbour_thickness = thickness_grid[i, j, k + 1]
-                harmonic_thickness = compute_harmonic_mean(
-                    cell_thickness, bottom_neighbour_thickness
-                )
-                bottom_flow_length = harmonic_thickness
                 water_flux, _, gas_flux = compute_fluxes_from_neighbour(
                     cell_indices=(i, j, k),
                     neighbour_indices=(i, j, k + 1),
-                    flow_area=flow_area_z,
-                    flow_length=bottom_flow_length,
                     oil_pressure_grid=oil_pressure_grid,
-                    water_mobility_grid=water_mobility_grid_z,
-                    oil_mobility_grid=oil_mobility_grid_z,
-                    gas_mobility_grid=gas_mobility_grid_z,
+                    water_relative_mobility_grid=water_relative_mobility_grid,
+                    oil_relative_mobility_grid=oil_relative_mobility_grid,
+                    gas_relative_mobility_grid=gas_relative_mobility_grid,
+                    face_transmissibility=face_transmissibilities_z[i, j, k],
                     oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
                     gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
                     oil_density_grid=oil_density_grid,
@@ -386,6 +351,7 @@ def _compute_saturation_residual(
                     gas_density_grid=gas_density_grid,
                     elevation_grid=elevation_grid,
                     gravitational_constant=gravitational_constant,
+                    md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
                 )
                 net_water_flux += water_flux
                 net_gas_flux += gas_flux
@@ -516,12 +482,9 @@ def _compute_residual(
     old_gas_saturation_grid: ThreeDimensionalGrid,
     oil_pressure_grid: ThreeDimensionalGrid,
     pressure_change_grid: ThreeDimensionalGrid,
+    face_transmissibilities: FaceTransmissibilities,
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
-    mobility_grids: typing.Tuple[
-        typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
-        typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
-        typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
-    ],
+    relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
     cell_count_x: int,
     cell_count_y: int,
@@ -540,6 +503,7 @@ def _compute_residual(
     injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
     production_rates: PhaseTensorsProxy[float, ThreeDimensions],
     dtype: npt.DTypeLike,
+    md_per_cp_to_ft2_per_psi_per_day: float,
     pad_width: int = 1,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray]:
     """
@@ -551,11 +515,10 @@ def _compute_residual(
         capillary_pressure_grids
     )
     (
-        (water_mobility_grid_x, oil_mobility_grid_x, gas_mobility_grid_x),
-        (water_mobility_grid_y, oil_mobility_grid_y, gas_mobility_grid_y),
-        (water_mobility_grid_z, oil_mobility_grid_z, gas_mobility_grid_z),
-    ) = mobility_grids
-
+        water_relative_mobility_grid,
+        oil_relative_mobility_grid,
+        gas_relative_mobility_grid,
+    ) = relative_mobility_grids
     net_water_well_rate_grid, _, net_gas_well_rate_grid = compute_well_rate_grids(
         cell_count_x=cell_count_x,
         cell_count_y=cell_count_y,
@@ -574,15 +537,12 @@ def _compute_residual(
         thickness_grid=thickness_grid,
         cell_size_x=cell_size_x,
         cell_size_y=cell_size_y,
-        water_mobility_grid_x=water_mobility_grid_x,
-        water_mobility_grid_y=water_mobility_grid_y,
-        water_mobility_grid_z=water_mobility_grid_z,
-        oil_mobility_grid_x=oil_mobility_grid_x,
-        oil_mobility_grid_y=oil_mobility_grid_y,
-        oil_mobility_grid_z=oil_mobility_grid_z,
-        gas_mobility_grid_x=gas_mobility_grid_x,
-        gas_mobility_grid_y=gas_mobility_grid_y,
-        gas_mobility_grid_z=gas_mobility_grid_z,
+        water_relative_mobility_grid=water_relative_mobility_grid,
+        oil_relative_mobility_grid=oil_relative_mobility_grid,
+        gas_relative_mobility_grid=gas_relative_mobility_grid,
+        face_transmissibilities_x=face_transmissibilities.x,
+        face_transmissibilities_y=face_transmissibilities.y,
+        face_transmissibilities_z=face_transmissibilities.z,
         oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
         gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
         oil_density_grid=fluid_properties.oil_effective_density_grid,
@@ -602,6 +562,7 @@ def _compute_residual(
         water_compressibility_grid=water_compressibility_grid,
         gas_compressibility_grid=gas_compressibility_grid,
         rock_compressibility=rock_compressibility,
+        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
     )
 
 
@@ -615,6 +576,7 @@ def compute_residual(
     pressure_change_grid: ThreeDimensionalGrid,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
+    face_transmissibilities: FaceTransmissibilities,
     config: Config,
     cell_count_x: int,
     cell_count_y: int,
@@ -633,6 +595,7 @@ def compute_residual(
     injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
     production_rates: PhaseTensorsProxy[float, ThreeDimensions],
     dtype: npt.DTypeLike,
+    md_per_cp_to_ft2_per_psi_per_day: float,
     pad_width: int = 1,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray]:
     """
@@ -642,9 +605,9 @@ def compute_residual(
     :return: `(water_residual, gas_residual)` as 1D arrays of length N.
     """
     (
-        _,
+        relative_mobility_grids,
         capillary_pressure_grids,
-        mobility_grids,
+        _,
     ) = compute_rock_fluid_properties(
         water_saturation_grid=water_saturation_grid,
         oil_saturation_grid=oil_saturation_grid,
@@ -660,8 +623,9 @@ def compute_residual(
         old_gas_saturation_grid=old_gas_saturation_grid,
         oil_pressure_grid=oil_pressure_grid,
         pressure_change_grid=pressure_change_grid,
+        face_transmissibilities=face_transmissibilities,
         capillary_pressure_grids=capillary_pressure_grids,
-        mobility_grids=mobility_grids,
+        relative_mobility_grids=relative_mobility_grids,
         fluid_properties=fluid_properties,
         cell_count_x=cell_count_x,
         cell_count_y=cell_count_y,
@@ -680,6 +644,7 @@ def compute_residual(
         injection_rates=injection_rates,
         production_rates=production_rates,
         dtype=dtype,
+        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
         pad_width=pad_width,
     )
 
@@ -698,6 +663,7 @@ def assemble_numerical_jacobian(
     old_gas_saturation_grid: ThreeDimensionalGrid,
     oil_pressure_grid: ThreeDimensionalGrid,
     pressure_change_grid: ThreeDimensionalGrid,
+    face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
     config: Config,
@@ -715,6 +681,7 @@ def assemble_numerical_jacobian(
     injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
     production_rates: PhaseTensorsProxy[float, ThreeDimensions],
     dtype: npt.DTypeLike,
+    md_per_cp_to_ft2_per_psi_per_day: float,
     pad_width: int = 1,
 ) -> csr_matrix:
     """
@@ -738,6 +705,7 @@ def assemble_numerical_jacobian(
         old_gas_saturation_grid=old_gas_saturation_grid,
         oil_pressure_grid=oil_pressure_grid,
         pressure_change_grid=pressure_change_grid,
+        face_transmissibilities=face_transmissibilities,
         rock_properties=rock_properties,
         fluid_properties=fluid_properties,
         config=config,
@@ -758,6 +726,7 @@ def assemble_numerical_jacobian(
         injection_rates=injection_rates,
         production_rates=production_rates,
         dtype=dtype,
+        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
         pad_width=pad_width,
     )
 
@@ -1951,6 +1920,7 @@ def assemble_analytical_jacobian(
     time_step_in_days: float,
     config: Config,
     well_indices_cache: WellIndicesCache,
+    md_per_cp_to_ft2_per_psi_per_day: float,
     pad_width: int = 1,
 ) -> csr_matrix:
     """
@@ -1996,10 +1966,6 @@ def assemble_analytical_jacobian(
         (water_mobility_grid_y, _, gas_mobility_grid_y),
         (water_mobility_grid_z, _, gas_mobility_grid_z),
     ) = mobility_grids
-
-    md_per_cp_to_ft2_per_psi_per_day = (
-        c.MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_DAY
-    )
 
     # Assemble inter-cell flux Jacobian
     flux_rows, flux_cols, flux_vals = _assemble_analytical_jacobian(
@@ -2090,6 +2056,7 @@ def assemble_jacobian(
     old_gas_saturation_grid: ThreeDimensionalGrid,
     oil_pressure_grid: ThreeDimensionalGrid,
     pressure_change_grid: ThreeDimensionalGrid,
+    face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
     thickness_grid: ThreeDimensionalGrid,
@@ -2114,6 +2081,7 @@ def assemble_jacobian(
         typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
         typing.Tuple[ThreeDimensionalGrid, ThreeDimensionalGrid, ThreeDimensionalGrid],
     ],
+    md_per_cp_to_ft2_per_psi_per_day: float,
     pad_width: int = 1,
 ) -> csr_matrix:
     """
@@ -2162,6 +2130,7 @@ def assemble_jacobian(
             well_indices_cache=well_indices_cache,
             injection_bhps=injection_bhps,
             production_bhps=production_bhps,
+            md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
             pad_width=pad_width,
         )
 
@@ -2180,6 +2149,7 @@ def assemble_jacobian(
         old_gas_saturation_grid=old_gas_saturation_grid,
         oil_pressure_grid=oil_pressure_grid,
         pressure_change_grid=pressure_change_grid,
+        face_transmissibilities=face_transmissibilities,
         rock_properties=rock_properties,
         fluid_properties=fluid_properties,
         config=config,
@@ -2197,6 +2167,7 @@ def assemble_jacobian(
         injection_rates=injection_rates,
         production_rates=production_rates,
         dtype=dtype,
+        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
         pad_width=pad_width,
     )
 
@@ -2210,6 +2181,7 @@ def evolve_saturation(
     time: float,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
+    face_transmissibilities: FaceTransmissibilities,
     config: Config,
     well_indices_cache: WellIndicesCache,
     pressure_change_grid: ThreeDimensionalGrid,
@@ -2265,6 +2237,9 @@ def evolve_saturation(
         c.ACCELERATION_DUE_TO_GRAVITY_FEET_PER_SECONDS_SQUARE
         / c.GRAVITATIONAL_CONSTANT_LBM_FT_PER_LBF_S2
     )
+    md_per_cp_to_ft2_per_psi_per_day = (
+        c.MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_DAY
+    )
 
     water_saturation_grid = old_water_saturation_grid.copy()
     oil_saturation_grid = old_oil_saturation_grid.copy()
@@ -2301,6 +2276,7 @@ def evolve_saturation(
         old_gas_saturation_grid=old_gas_saturation_grid,
         oil_pressure_grid=oil_pressure_grid,
         pressure_change_grid=pressure_change_grid,
+        face_transmissibilities=face_transmissibilities,
         fluid_properties=fluid_properties,
         cell_count_x=cell_count_x,
         cell_count_y=cell_count_y,
@@ -2319,6 +2295,7 @@ def evolve_saturation(
         injection_rates=injection_rates,
         production_rates=production_rates,
         dtype=dtype,
+        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
         pad_width=pad_width,
     )
 
@@ -2336,20 +2313,17 @@ def evolve_saturation(
             pad_width=pad_width,
         )
         # (Re-)compute all saturation-dependent properties once per iteration
-        (
-            _,
-            capillary_pressure_grids,
-            mobility_grids,
-        ) = compute_rock_fluid_properties(
-            water_saturation_grid=water_saturation_grid,
-            oil_saturation_grid=oil_saturation_grid,
-            gas_saturation_grid=gas_saturation_grid,
-            rock_properties=rock_properties,
-            fluid_properties=fluid_properties,
-            config=config,
-            # We only normalize for "numerical" Jacobian assembly, as perturbations may cause
-            # saturation sum to exceed 1.0 sometimes
-            normalize_saturations=config.jacobian_assembly_method == "numerical",
+        relative_mobility_grids, capillary_pressure_grids, mobility_grids = (
+            compute_rock_fluid_properties(
+                water_saturation_grid=water_saturation_grid,
+                oil_saturation_grid=oil_saturation_grid,
+                gas_saturation_grid=gas_saturation_grid,
+                rock_properties=rock_properties,
+                fluid_properties=fluid_properties,
+                config=config,
+                # We only normalize for "numerical" Jacobian assembly, as perturbations may cause saturation sum to exceed 1.0 sometimes
+                normalize_saturations=config.jacobian_assembly_method == "numerical",
+            )
         )
 
         # Evaluate residual using the pre-computed properties
@@ -2357,7 +2331,7 @@ def evolve_saturation(
             water_saturation_grid=water_saturation_grid,
             gas_saturation_grid=gas_saturation_grid,
             capillary_pressure_grids=capillary_pressure_grids,
-            mobility_grids=mobility_grids,
+            relative_mobility_grids=relative_mobility_grids,
             **residual_kwargs,  # type: ignore[arg-type]
         )
         residual_vector = interleave_residuals(water_residual, gas_residual)
@@ -2432,6 +2406,7 @@ def evolve_saturation(
             old_gas_saturation_grid=old_gas_saturation_grid,
             oil_pressure_grid=oil_pressure_grid,
             pressure_change_grid=pressure_change_grid,
+            face_transmissibilities=face_transmissibilities,
             rock_properties=rock_properties,
             fluid_properties=fluid_properties,
             thickness_grid=thickness_grid,
@@ -2451,6 +2426,7 @@ def evolve_saturation(
             production_rates=production_rates,
             pad_width=pad_width,
             dtype=dtype,
+            md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
             capillary_pressure_grids=capillary_pressure_grids,
             mobility_grids=mobility_grids,
         )
