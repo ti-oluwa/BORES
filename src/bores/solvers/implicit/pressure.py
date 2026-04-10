@@ -353,7 +353,7 @@ def evolve_pressure(
             fallback_to_direct=True,
         )
     except (SolverError, PreconditionerError) as exc:
-        logger.error(f"Pressure solve failed at time step {time_step}: {exc}")
+        logger.error("Pressure solve failed at time step %d: %s", time_step, exc)
         return EvolutionResult(
             value=ImplicitPressureSolution(
                 pressure_grid=current_oil_pressure_grid.astype(dtype, copy=False),
@@ -1410,7 +1410,6 @@ def compute_well_contributions(
 
         injected_fluid = well.injected_fluid
         injected_phase = injected_fluid.phase
-        is_bhp_controlled = well.control.is_bhp_control()
         use_pseudo_pressure = (
             config.use_pseudo_pressure and injected_phase == FluidPhase.GAS
         )
@@ -1461,7 +1460,7 @@ def compute_well_contributions(
                 + oil_relative_mobility_grid[i, j, k]
                 + gas_relative_mobility_grid[i, j, k],
             )
-            flow_rate, bhp = well.get_control(
+            control = well.get_control(
                 pressure=cell_pressure,
                 temperature=cell_temperature,
                 phase_mobility=total_mobility,
@@ -1473,19 +1472,33 @@ def compute_well_contributions(
                 fluid_compressibility=phase_compressibility,
                 pvt_tables=None,
             )
+            flow_rate = control.rate
+            bhp = control.bhp
+            is_bhp_control = control.is_bhp_control
 
             if not np.isfinite(bhp):
                 logger.error(
-                    f"Non-finite BHP for injection well {well.name!r} "
-                    f"at cell ({i},{j},{k}): {bhp}. Skipping perforation."
+                    "Non-finite BHP for injection well %r "
+                    "at cell (%d,%d,%d): %s. Skipping perforation.",
+                    well.name,
+                    i,
+                    j,
+                    k,
+                    bhp,
                 )
                 continue
 
             if abs(bhp - cell_pressure) > 1e6:
                 logger.warning(
-                    f"Extreme BHP for injection well {well.name!r} "
-                    f"at cell ({i}, {j}, {k}): {bhp:.2e} psi "
-                    f"(reservoir pressure: {cell_pressure:.1f} psi)."
+                    "Extreme BHP for injection well %r "
+                    "at cell (%d, %d, %d): %.2e psi "
+                    "(reservoir pressure: %.1f psi).",
+                    well.name,
+                    i,
+                    j,
+                    k,
+                    bhp,
+                    cell_pressure,
                 )
 
             if cell_pressure > bhp and config.warn_well_anomalies:
@@ -1500,7 +1513,7 @@ def compute_well_contributions(
             if injected_phase != FluidPhase.GAS:
                 flow_rate *= bbl_to_ft3
 
-            if is_bhp_controlled:
+            if is_bhp_control:
                 if injected_phase == FluidPhase.GAS:
                     use_pp, pp_table = get_pseudo_pressure_table(
                         fluid=injected_fluid,
@@ -1567,7 +1580,6 @@ def compute_well_contributions(
 
         well_indices = well_indices_cache.production[well.name]
         is_couple_controlled = isinstance(well.control, CoupledRateControl)
-        is_bhp_controlled = well.control.is_bhp_control()
 
         for perforation_index in well_indices:
             i, j, k = perforation_index.cell
@@ -1648,7 +1660,7 @@ def compute_well_contributions(
                 use_pseudo_pressure = (
                     config.use_pseudo_pressure and produced_phase == FluidPhase.GAS
                 )
-                flow_rate, bhp = well.get_control(
+                control = well.get_control(
                     pressure=cell_pressure,
                     temperature=cell_temperature,
                     phase_mobility=phase_mobility,
@@ -1661,22 +1673,36 @@ def compute_well_contributions(
                     pvt_tables=config.pvt_tables,
                     **primary_phase_context,
                 )
+                flow_rate = control.rate
+                bhp = control.bhp
+                is_bhp_control = control.is_bhp_control
 
                 # Producers contributions should always be added to Jacobian as BHP terms since
                 # thier flow strongly depends on phase mobility, which depends on saturation, which
                 # must likewise show up in the Jacobian
                 if not np.isfinite(bhp):
                     logger.error(
-                        f"Non-finite BHP for production well {well.name!r} "
-                        f"at cell ({i},{j},{k}): {bhp}. Skipping perforation."
+                        "Non-finite BHP for production well %r "
+                        "at cell (%d,%d,%d): %s. Skipping perforation.",
+                        well.name,
+                        i,
+                        j,
+                        k,
+                        bhp,
                     )
                     continue
 
                 if abs(bhp - cell_pressure) > 1e6:
                     logger.warning(
-                        f"Extreme BHP for production well {well.name!r} "
-                        f"at cell ({i},{j},{k}): {bhp:.2e} psi "
-                        f"(reservoir pressure: {cell_pressure:.1f} psi)."
+                        "Extreme BHP for production well %r "
+                        "at cell (%d,%d,%d): %.2e psi "
+                        "(reservoir pressure: %.1f psi).",
+                        well.name,
+                        i,
+                        j,
+                        k,
+                        bhp,
+                        cell_pressure,
                     )
 
                 if cell_pressure < bhp and config.warn_well_anomalies:
@@ -1691,7 +1717,7 @@ def compute_well_contributions(
                 if produced_phase != FluidPhase.GAS:
                     flow_rate *= bbl_to_ft3
 
-                if is_bhp_controlled:
+                if is_bhp_control:
                     if produced_phase == FluidPhase.GAS:
                         use_pp, pp_table = get_pseudo_pressure_table(
                             fluid=produced_fluid,
@@ -1732,22 +1758,38 @@ def compute_well_contributions(
 
                     _add_bhp_contribution(cell_1d_index, productivity_index, bhp)
 
-                    logger.debug(
-                        f"Producer {produced_phase} phase: PI={productivity_index:.4f}, "
-                        f"BHP={bhp:.2f}, Cell Pressure={cell_pressure:.2f}, "
-                        f"∆P={cell_pressure - bhp:.2f}, "
-                        f"Krg={gas_relative_mobility_grid[i, j, k] * fluid_properties.gas_viscosity_grid[i, j, k]:.3e}, "
-                        f"Sg={fluid_properties.gas_saturation_grid[i, j, k]:.3e}"
-                    )
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            "Producer %s phase: PI=%.4f, "
+                            "BHP=%.2f, Cell Pressure=%.2f, "
+                            "ΔP=%.2f, "
+                            "Krg=%.3e, "
+                            "Sg=%.3e",
+                            produced_phase,
+                            productivity_index,
+                            bhp,
+                            cell_pressure,
+                            cell_pressure - bhp,
+                            gas_relative_mobility_grid[i, j, k]
+                            * fluid_properties.gas_viscosity_grid[i, j, k],
+                            fluid_properties.gas_saturation_grid[i, j, k],
+                        )
                 else:
                     _add_rate_contribution(cell_1d_index, flow_rate)
 
-                    logger.debug(
-                        f"Producer {produced_phase} phase (rate-controlled): "
-                        f"rate={flow_rate:.4f}, Cell Pressure={cell_pressure:.2f}, "
-                        f"Krg={gas_relative_mobility_grid[i, j, k] * fluid_properties.gas_viscosity_grid[i, j, k]:.3e}, "
-                        f"Sg={fluid_properties.gas_saturation_grid[i, j, k]:.3e}"
-                    )
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            "Producer %s phase (rate-controlled): "
+                            "rate=%.4f, Cell Pressure=%.2f, "
+                            "Krg=%.3e, "
+                            "Sg=%.3e",
+                            produced_phase,
+                            flow_rate,
+                            cell_pressure,
+                            gas_relative_mobility_grid[i, j, k]
+                            * fluid_properties.gas_viscosity_grid[i, j, k],
+                            fluid_properties.gas_saturation_grid[i, j, k],
+                        )
 
                 if produced_phase == FluidPhase.GAS:
                     gas_rate += flow_rate

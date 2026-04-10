@@ -1,26 +1,4 @@
-"""
-Boundary condition implementations for 2D/3D reservoir grids.
-
-**Design overview**
-
-Boundary conditions in this module follow a *ghost-cell* approach: for every
-boundary face the simulator maintains one layer of ghost (halo) cells whose
-values are set by the boundary condition before each flux computation. The
-approach is industry-standard and avoids any padding / un-padding overhead
-during the solve - grids are padded once at simulation start and stay padded
-throughout.
-
-Every concrete boundary condition is a *callable* that receives a description
-of the boundary cells it must fill and returns a numpy array of ghost values.
-The `BoundaryConditions` container owns one condition per face, assembles the
-full ghost-cell dictionary via `get_boundaries`, and caches static contributions
-so that constant conditions (Neumann, Dirichlet) are computed only once.
-
-**Units**
-
-All flux values returned by FLUX-type boundary conditions are in **ft³/day**.
-Users who work in bbl/day must convert before constructing a boundary condition.
-"""
+"""Boundary condition implementations for 2D/3D reservoir grids."""
 
 import enum
 import functools
@@ -97,15 +75,17 @@ def boundary_function(
     a function allows `BoundaryCondition` subclasses that store it as an
     attribute to be serialized and deserialized by name.
 
-    Usage::
+    Usage:
+    
+    ```python
+    @boundary_function
+    def linear_pressure_gradient(x, y):
+        return 2000 - 0.5 * x
 
-        @boundary_function
-        def linear_pressure_gradient(x, y):
-            return 2000 - 0.5 * x
-
-        @boundary_function(name="custom_gradient")
-        def my_gradient(x, y):
-            return 2500 + 0.1 * x
+    @boundary_function(name="custom_gradient")
+    def my_gradient(x, y):
+        return 2500 + 0.1 * x
+    ```
 
     :param func: The function to register.  When the decorator is used
         without arguments this is supplied automatically by Python.
@@ -601,8 +581,7 @@ boundary_condition = make_serializable_type_registrar(
 
 
 def _neighbour_slice(
-    boundary_slice: typing.Tuple[slice, ...],
-    direction: Boundary,
+    boundary_slice: typing.Tuple[slice, ...], direction: Boundary
 ) -> typing.Tuple[slice, ...]:
     """
     Return the slice of interior cells adjacent to a ghost-cell layer.
@@ -1465,6 +1444,11 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
     _cache_initialised: bool = attrs.field(default=False, init=False, repr=False)
     """*True* once the first `get_boundaries` call has populated the caches."""
 
+    _all_static: typing.Optional[bool] = attrs.field(
+        default=None, init=False, repr=False
+    )
+    """Cache indicating whether all boundary conditions are static (determined on first call)."""
+
     def _face_conditions(
         self, ndim: int
     ) -> typing.List[typing.Tuple[Boundary, BoundaryCondition]]:
@@ -1501,7 +1485,7 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
         On the *first* call every face is evaluated and the results are stored
         in the internal caches. On *subsequent* calls only faces whose
         condition reports `is_static() == False` are re-evaluated; static
-        faces reuse their cached values.  This means that for a model with
+        faces reuse their cached values. This means that for a model with
         only no-flow or constant-pressure boundaries the boundary evaluation
         cost after the first time step is essentially zero.
 
@@ -1538,10 +1522,16 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
             pressure_cache = np.full(padded_shape, np.nan, dtype=metadata.dtype)
             object.__setattr__(self, "_flux_cache", flux_cache)
             object.__setattr__(self, "_pressure_cache", pressure_cache)
+            # Determine and cache whether all boundaries are static
+            all_static = all(condition.is_static() for direction, condition in face_conditions)
+            object.__setattr__(self, "_all_static", all_static)
         else:
             flux_cache = self._flux_cache
             pressure_cache = self._pressure_cache
             assert flux_cache is not None and pressure_cache is not None
+            # If all conditions are static, can skip re-evaluation entirely
+            if self._all_static:
+                return flux_cache, pressure_cache
 
         for direction, condition in face_conditions:
             # Skip static faces after the first initialisation pass.
@@ -1557,7 +1547,7 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
             # So we build an inset slice: on the face-normal axis keep ghost_slice as-is,
             # on all other axes shift inward by pad_width to skip corner ghost cells.
             inset = []
-            for ax, s in enumerate(ghost_slice):
+            for _, s in enumerate(ghost_slice):
                 if isinstance(s, slice) and s.start is None and s.stop is None:
                     # This is a slice(None) axis. It spans the full padded dimension.
                     # Inset by pad_width on each end to reach only real-cell-facing ghosts.
@@ -1577,6 +1567,72 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
 
         if first_call:
             object.__setattr__(self, "_cache_initialised", True)
+
+        return flux_cache, pressure_cache
+
+    def refresh_dynamic_boundaries(
+        self,
+        metadata: BoundaryMetadata,
+        pad_width: int = 1,
+    ) -> typing.Tuple[NDimensionalGrid, NDimensionalGrid]:
+        """
+        Re-evaluate only dynamic (time-dependent) boundary conditions.
+
+        On entry, the caches must already be initialized (via a prior call to
+        `get_boundaries`). This method updates only the cache entries for
+        boundaries that report `is_static() == False`, leaving all others untouched.
+
+        **Precondition**: `get_boundaries` must have been called at least once.
+
+        :param metadata: Simulation context bundle. Should typically have
+            an updated `fluid_properties` reflecting the latest pressure state.
+        :param pad_width: Ghost-cell layer width (must match the value used in
+            the initial `get_boundaries` call).
+        :return: A 2-tuple ``(flux_grid, pressure_grid)`` - the updated cached arrays.
+        :raises RuntimeError: If called before `get_boundaries` initialization.
+        """
+        if not self._cache_initialised:
+            raise RuntimeError(
+                "`refresh_dynamic_boundaries` requires prior initialization via `get_boundaries`."
+            )
+
+        flux_cache = self._flux_cache
+        pressure_cache = self._pressure_cache
+        assert flux_cache is not None and pressure_cache is not None
+
+        # If all conditions are static, nothing to refresh
+        if self._all_static:
+            return flux_cache, pressure_cache
+
+        ndim = flux_cache.ndim
+        faces = _face_slices(ndim)
+        face_conditions = self._face_conditions(ndim)
+
+        for direction, condition in face_conditions:
+            # Skip static faces - their cache entries are already correct
+            if condition.is_static():
+                continue
+
+            ghost_slice, _ = faces[direction]
+            values = condition(ghost_slice, direction, metadata)
+            bc_type = condition.get_type()
+
+            # Build inset slice (same logic as in get_boundaries)
+            inset = []
+            for _, s in enumerate(ghost_slice):
+                if isinstance(s, slice) and s.start is None and s.stop is None:
+                    inset.append(slice(pad_width, -pad_width))
+                else:
+                    inset.append(s)
+            inset_slice = tuple(inset)
+
+            # Update only the cache entries for this dynamic face
+            if bc_type == BoundaryType.FLUX:
+                flux_cache[inset_slice] = values
+                pressure_cache[inset_slice] = np.nan
+            else:
+                pressure_cache[inset_slice] = values
+                flux_cache[inset_slice] = np.nan
 
         return flux_cache, pressure_cache
 

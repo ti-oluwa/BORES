@@ -212,6 +212,20 @@ class Timer(StoreSerializable):
     failed_step_sizes: typing.Deque[float] = attrs.field(init=False)
     """Recent failed step sizes for memory."""
 
+    # Rolling statistics (optimization to avoid list comprehensions)
+    _recent_cfl_sum: float = attrs.field(init=False, default=0.0)
+    """Sum of recent successful CFL values for rolling average."""
+    _recent_cfl_count: int = attrs.field(init=False, default=0)
+    """Count of recent successful CFL values."""
+    _recent_newton_sum: int = attrs.field(init=False, default=0)
+    """Sum of recent Newton iterations for rolling average."""
+    _recent_newton_count: int = attrs.field(init=False, default=0)
+    """Count of recent Newton iterations."""
+    _recent_cfl_oldest: typing.Optional[float] = attrs.field(init=False, default=None)
+    """Oldest CFL value in rolling window (5-step)."""
+    _recent_newton_oldest: typing.Optional[int] = attrs.field(init=False, default=None)
+    """Oldest Newton iteration count in rolling window (5-step)."""
+
     def __attrs_post_init__(self) -> None:
         self.next_step_size = self.initial_step_size
         self.step_size = self.initial_step_size
@@ -266,44 +280,83 @@ class Timer(StoreSerializable):
         Returns a factor in (0, 1] where:
         - 1.0 = excellent performance, allow normal growth
         - <1.0 = concerning trends, be more conservative
+
+        Uses rolling statistics to avoid expensive list comprehensions.
         """
-        if len(self.recent_metrics) < 3:
+        if self._recent_cfl_count < 3 and self._recent_newton_count < 3:
             return 1.0
 
         factor = 1.0
 
-        # Check CFL trend (are we pushing limits?)
-        recent_cfls = [
-            m.cfl
-            for m in list(self.recent_metrics)[-5:]
-            if m.cfl is not None and m.success
-        ]
-        if len(recent_cfls) >= 3:
-            # If CFL is consistently high or increasing, be conservative
-            avg_cfl = sum(recent_cfls) / len(recent_cfls)
+        # Check CFL trend (are we pushing limits?) - using rolling averages
+        if self._recent_cfl_count >= 3:
+            avg_cfl = self._recent_cfl_sum / self._recent_cfl_count
             if avg_cfl > 0.75 * self.maximum_cfl_number:
                 factor *= 0.95
 
-            # Check if CFL is trending upward
-            if len(recent_cfls) >= 4:
-                cfl_trend = recent_cfls[-1] - recent_cfls[-4]
-                if cfl_trend > 0.15:
-                    factor *= 0.9
+            # Check if CFL is trending upward by comparing newest vs oldest in rolling window
+            if self._recent_cfl_count >= 4 and self._recent_cfl_oldest is not None:
+                # Get the newest CFL from recent_metrics
+                if len(self.recent_metrics) > 0:
+                    newest_metric = self.recent_metrics[-1]
+                    if newest_metric.cfl is not None:
+                        cfl_trend = newest_metric.cfl - (self._recent_cfl_oldest or 0.0)
+                        if cfl_trend > 0.15:
+                            factor *= 0.9
 
-        # Check Newton iteration trends (is solver struggling?)
-        recent_iterations = [
-            m.newton_iterations
-            for m in list(self.recent_metrics)[-5:]
-            if m.newton_iterations is not None and m.success
-        ]
-        if len(recent_iterations) >= 3:
-            avg_iterations = sum(recent_iterations) / len(recent_iterations)
+        # Check Newton iteration trends (is solver struggling?) - using rolling averages
+        if self._recent_newton_count >= 3:
+            avg_iterations = self._recent_newton_sum / self._recent_newton_count
             if avg_iterations > 8:
                 factor *= 0.85
-            elif all(i > 10 for i in recent_iterations[-3:]):
-                factor *= 0.75  # Solver consistently struggling
+            elif self._recent_newton_count >= 3 and len(self.recent_metrics) >= 3:
+                # Check if last 3 are all > 10
+                recent_newtons = [
+                    m.newton_iterations
+                    for m in list(self.recent_metrics)[-3:]
+                    if m.newton_iterations is not None and m.success
+                ]
+                if len(recent_newtons) >= 3 and all(i > 10 for i in recent_newtons):
+                    factor *= 0.75  # Solver consistently struggling
 
         return max(factor, 0.5)  # We don't want to be too aggressive in reduction
+
+    def _check_mbe_violations(
+        self,
+        absolute_oil_mbe: typing.Optional[float] = None,
+        absolute_water_mbe: typing.Optional[float] = None,
+        absolute_gas_mbe: typing.Optional[float] = None,
+        total_absolute_mbe: typing.Optional[float] = None,
+        relative_oil_mbe: typing.Optional[float] = None,
+        relative_water_mbe: typing.Optional[float] = None,
+        relative_gas_mbe: typing.Optional[float] = None,
+        total_relative_mbe: typing.Optional[float] = None,
+    ) -> typing.Tuple[bool, typing.List[str]]:
+        """
+        Check if any MBE limits are violated and collect violation messages.
+
+        :return: Tuple of (any_violated, message_list). If any_violated is False,
+            message_list will be empty. Otherwise message_list contains descriptions
+            of each violation.
+        """
+        mbe_checks = [
+            (absolute_oil_mbe, self.maximum_absolute_oil_mbe, "abs oil MBE"),
+            (absolute_water_mbe, self.maximum_absolute_water_mbe, "abs water MBE"),
+            (absolute_gas_mbe, self.maximum_absolute_gas_mbe, "abs gas MBE"),
+            (total_absolute_mbe, self.maximum_total_absolute_mbe, "total abs MBE"),
+            (relative_oil_mbe, self.maximum_relative_oil_mbe, "rel oil MBE"),
+            (relative_water_mbe, self.maximum_relative_water_mbe, "rel water MBE"),
+            (relative_gas_mbe, self.maximum_relative_gas_mbe, "rel gas MBE"),
+            (total_relative_mbe, self.maximum_total_relative_mbe, "total rel MBE"),
+        ]
+        messages = []
+        for actual, limit, label in mbe_checks:
+            if limit is None or actual is None:
+                continue
+            if actual > limit:
+                messages.append(f"{label}: |{actual:.3e}| > {limit:.3e}")
+
+        return len(messages) > 0, messages
 
     def propose_step_size(self) -> float:
         """Proposes the next time step size without updating state."""
@@ -319,10 +372,14 @@ class Timer(StoreSerializable):
                 else remaining_time
             )
 
-        logger.debug(
-            f"Proposing time step of size {dt} for time step {self.next_step} "
-            f"at elapsed time {self.elapsed_time}."
-        )
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Proposing time step of size %.6e for time step %d "
+                "at elapsed time %.4f",
+                dt,
+                self.next_step,
+                self.elapsed_time,
+            )
         return dt
 
     def reject_step(
@@ -381,9 +438,11 @@ class Timer(StoreSerializable):
             and self.rejection_count < self.maximum_rejections
         ):
             logger.warning(
-                f"Time step rejection count ({self.rejection_count}) is approaching "
-                f"maximum allowed ({self.maximum_rejections}). Consider adjusting simulation "
-                f"parameters or initial conditions."
+                "Time step rejection count (%d) is approaching "
+                "maximum allowed (%d). Consider adjusting simulation "
+                "parameters or initial conditions.",
+                self.rejection_count,
+                self.maximum_rejections,
             )
 
         if self.use_constant_step_size:
@@ -426,8 +485,9 @@ class Timer(StoreSerializable):
         # Warn when hitting minimum step size
         if self.next_step_size < self.minimum_step_size:
             logger.warning(
-                f"Step size {self.next_step_size:.6e} would be below minimum "
-                f"{self.minimum_step_size:.6e}. Clamping to minimum."
+                "Step size %.6e would be below minimum %.6e. Clamping to minimum.",
+                self.next_step_size,
+                self.minimum_step_size,
             )
         self.next_step_size = max(self.next_step_size, self.minimum_step_size)
 
@@ -438,8 +498,10 @@ class Timer(StoreSerializable):
             )
             if min_failures >= 3:
                 logger.error(
-                    f"Repeated failures ({min_failures}) at or near minimum step size "
-                    f"({self.minimum_step_size:.6e}). Simulation may be unstable."
+                    "Repeated failures (%d) at or near minimum step size "
+                    "(%.6e). Simulation may be unstable.",
+                    min_failures,
+                    self.minimum_step_size,
                 )
 
         # Update EMA to reflect the reduction
@@ -493,22 +555,34 @@ class Timer(StoreSerializable):
                 if overshoot_ratio > 2.0:
                     # Severe CFL violation
                     cfl_factor = 0.3
-                    logger.debug(
-                        f"Severe CFL violation: {maximum_cfl_encountered:.3f} > {cfl_limit:.3f} (ratio: {overshoot_ratio:.4f})"
-                    )
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            "Severe CFL violation: %.3f > %.3f (ratio: %.4f)",
+                            maximum_cfl_encountered,
+                            cfl_limit,
+                            overshoot_ratio,
+                        )
                 elif overshoot_ratio > 1.5:
                     # Moderate CFL violation
                     cfl_factor = 0.5
-                    logger.debug(
-                        f"Moderate CFL violation: {maximum_cfl_encountered:.3f} > {cfl_limit:.3f} (ratio: {overshoot_ratio:.4f})"
-                    )
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            "Moderate CFL violation: %.3f > %.3f (ratio: %.4f)",
+                            maximum_cfl_encountered,
+                            cfl_limit,
+                            overshoot_ratio,
+                        )
                 else:
                     # Mild CFL violation. Try to target the limit
                     cfl_factor = (cfl_limit * 0.9) / maximum_cfl_encountered
                     cfl_factor = max(cfl_factor, 0.6)  # Don't reduce too much
-                    logger.debug(
-                        f"Mild CFL violation: {maximum_cfl_encountered:.3f} > {cfl_limit:.3f} (ratio: {overshoot_ratio:.4f})"
-                    )
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            "Mild CFL violation: %.3f > %.3f (ratio: %.4f)",
+                            maximum_cfl_encountered,
+                            cfl_limit,
+                            overshoot_ratio,
+                        )
                 factors.append(cfl_factor)
 
         # Saturation change backoff
@@ -524,24 +598,36 @@ class Timer(StoreSerializable):
             if overshoot_ratio > 3.0:
                 # Very large saturation changes. Apply aggressive reduction
                 saturation_factor = 0.25
-                logger.debug(
-                    f"Severe saturation change: {maximum_saturation_change:.4f} > {maximum_allowed_saturation_change:.4f} (ratio: {overshoot_ratio:.4f})"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Severe saturation change: %.4f > %.4f (ratio: %.4f)",
+                        maximum_saturation_change,
+                        maximum_allowed_saturation_change,
+                        overshoot_ratio,
+                    )
             elif overshoot_ratio > 2.0:
                 # Large saturation changes
                 saturation_factor = 0.4
-                logger.debug(
-                    f"Large saturation change: {maximum_saturation_change:.4f} > {maximum_allowed_saturation_change:.4f} (ratio: {overshoot_ratio:.4f})"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Large saturation change: %.4f > %.4f (ratio: %.4f)",
+                        maximum_saturation_change,
+                        maximum_allowed_saturation_change,
+                        overshoot_ratio,
+                    )
             else:
                 # Moderate overshoot. Apply proportional reduction
                 saturation_factor = (
                     maximum_allowed_saturation_change / maximum_saturation_change
                 )
                 saturation_factor = max(saturation_factor, 0.5)  # Don't reduce too much
-                logger.debug(
-                    f"Moderate saturation change: {maximum_saturation_change:.4f} > {maximum_allowed_saturation_change:.4f} (ratio: {overshoot_ratio:.4f})"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Moderate saturation change: %.4f > %.4f (ratio: %.4f)",
+                        maximum_saturation_change,
+                        maximum_allowed_saturation_change,
+                        overshoot_ratio,
+                    )
             factors.append(saturation_factor)
 
         # Pressure change backoff
@@ -555,24 +641,36 @@ class Timer(StoreSerializable):
             if overshoot_ratio > 3.0:
                 # Very large pressure changes
                 pressure_factor = 0.25
-                logger.debug(
-                    f"Severe pressure change: {maximum_pressure_change:.4e} > {maximum_allowed_pressure_change:.4e} (ratio: {overshoot_ratio:.4f})"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Severe pressure change: %.4e > %.4e (ratio: %.4f)",
+                        maximum_pressure_change,
+                        maximum_allowed_pressure_change,
+                        overshoot_ratio,
+                    )
             elif overshoot_ratio > 2.0:
                 # Large pressure changes
                 pressure_factor = 0.4
-                logger.debug(
-                    f"Large pressure change: {maximum_pressure_change:.4e} > {maximum_allowed_pressure_change:.4e} (ratio: {overshoot_ratio:.4f})"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Large pressure change: %.4e > %.4e (ratio: %.4f)",
+                        maximum_pressure_change,
+                        maximum_allowed_pressure_change,
+                        overshoot_ratio,
+                    )
             else:
                 # Moderate overshoot
                 pressure_factor = (
                     maximum_allowed_pressure_change / maximum_pressure_change
                 )
                 pressure_factor = max(pressure_factor, 0.5)
-                logger.debug(
-                    f"Moderate pressure change: {maximum_pressure_change:.4e} > {maximum_allowed_pressure_change:.4e} (ratio: {overshoot_ratio:.4f})"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Moderate pressure change: %.4e > %.4e (ratio: %.4f)",
+                        maximum_pressure_change,
+                        maximum_allowed_pressure_change,
+                        overshoot_ratio,
+                    )
 
             factors.append(pressure_factor)
 
@@ -581,26 +679,31 @@ class Timer(StoreSerializable):
             if newton_iterations > 20:
                 # Solver really struggling. Apply aggressive reduction
                 newton_iteration_factor = 0.3
-                logger.debug(
-                    f"Newton solver struggling severely: {newton_iterations} iterations"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Newton solver struggling severely: %d iterations",
+                        newton_iterations,
+                    )
                 factors.append(newton_iteration_factor)
             elif newton_iterations > 15:
                 # Solver struggling. Apply moderate reduction
                 newton_iteration_factor = 0.5
-                logger.debug(
-                    f"Newton solver struggling: {newton_iterations} iterations"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Newton solver struggling: %d iterations", newton_iterations
+                    )
                 factors.append(newton_iteration_factor)
             elif newton_iterations > 10:
                 # Solver having some difficulty
                 newton_iteration_factor = 0.7
-                logger.debug(
-                    f"Newton solver having difficulty: {newton_iterations} iterations"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Newton solver having difficulty: %d iterations",
+                        newton_iterations,
+                    )
                 factors.append(newton_iteration_factor)
 
-        # MBE-based backoff
+        # Compute backoff factors for each MBE violation
         mbe_pairs = [
             (absolute_oil_mbe, self.maximum_absolute_oil_mbe, "absolute oil MBE"),
             (absolute_water_mbe, self.maximum_absolute_water_mbe, "absolute water MBE"),
@@ -623,22 +726,33 @@ class Timer(StoreSerializable):
                     mbe_factor = 0.6
                 else:
                     mbe_factor = max(limit / actual_abs * 0.9, 0.7)
-                logger.debug(
-                    f"MBE violation ({label}): |{actual:.3e}| > {limit:.3e} "
-                    f"(ratio {overshoot:.2f}), factor={mbe_factor:.3f}"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "MBE violation (%s): |%.3e| > %.3e (ratio %.2f), factor=%.3f",
+                        label,
+                        actual,
+                        limit,
+                        overshoot,
+                        mbe_factor,
+                    )
                 factors.append(mbe_factor)
 
         # If we have specific information, use the most conservative (smallest) factor
         if factors:
             final_factor = min(factors)
-            logger.debug(
-                f"Computed backoff factor: {final_factor:.3f} from {len(factors)} criteria"
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "Computed backoff factor: %.3f from %d criteria",
+                    final_factor,
+                    len(factors),
+                )
             return final_factor
 
         # Fallback to original behavior if no specific information provided
-        logger.debug("No specific failure information provided, using fallback backoff")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "No specific failure information provided, using fallback backoff"
+            )
         return self.aggressive_backoff_factor if aggressive else self.backoff_factor
 
     def is_acceptable(
@@ -711,28 +825,19 @@ class Timer(StoreSerializable):
                 "Maximum saturation change encountered is {maximum_saturation_change}",
             )
 
-        mbe_violated = False
-        mbe_message_parts = []
-        mbe_checks = [
-            (absolute_oil_mbe, self.maximum_absolute_oil_mbe, "abs oil MBE"),
-            (absolute_water_mbe, self.maximum_absolute_water_mbe, "abs water MBE"),
-            (absolute_gas_mbe, self.maximum_absolute_gas_mbe, "abs gas MBE"),
-            (total_absolute_mbe, self.maximum_total_absolute_mbe, "total abs MBE"),
-            (relative_oil_mbe, self.maximum_relative_oil_mbe, "rel oil MBE"),
-            (relative_water_mbe, self.maximum_relative_water_mbe, "rel water MBE"),
-            (relative_gas_mbe, self.maximum_relative_gas_mbe, "rel gas MBE"),
-            (total_relative_mbe, self.maximum_total_relative_mbe, "total rel MBE"),
-        ]
-        for actual, limit, label in mbe_checks:
-            if limit is None or actual is None:
-                continue
-            if actual > limit:
-                mbe_violated = True
-                mbe_message_parts.append(f"{label}: |{actual:.3e}| > {limit:.3e}")
-
+        mbe_violated, mbe_message_parts = self._check_mbe_violations(
+            absolute_oil_mbe=absolute_oil_mbe,
+            absolute_water_mbe=absolute_water_mbe,
+            absolute_gas_mbe=absolute_gas_mbe,
+            total_absolute_mbe=total_absolute_mbe,
+            relative_oil_mbe=relative_oil_mbe,
+            relative_water_mbe=relative_water_mbe,
+            relative_gas_mbe=relative_gas_mbe,
+            total_relative_mbe=total_relative_mbe,
+        )
         if mbe_violated:
-            message = f"MBE limits violated: " + "; ".join(mbe_message_parts)
-            return True, message
+            message = "MBE limits violated: " + "; ".join(mbe_message_parts)
+            return False, message
 
         return True, "Step acceptable"
 
@@ -804,6 +909,38 @@ class Timer(StoreSerializable):
         )
         self.recent_metrics.append(metrics)
 
+        # Update rolling statistics for performance tracking to avoid list comprehensions
+        if maximum_cfl_encountered is not None and maximum_cfl_encountered > 0.0:
+            self._recent_cfl_sum += maximum_cfl_encountered
+            self._recent_cfl_count += 1
+            # Keep only last 5 values by removing oldest when exceeding window
+            if self._recent_cfl_count > 5:
+                # When we have more than 5, the oldest value needs to be removed from the sum
+                # We approximate by dividing the oldest value
+                if self._recent_cfl_oldest is not None:
+                    self._recent_cfl_sum -= self._recent_cfl_oldest
+                # Get the oldest value from metrics (5 steps back)
+                if len(self.recent_metrics) >= 5:
+                    old_metric = list(self.recent_metrics)[
+                        -6
+                    ]  # 6th from end (5 steps back)
+                    if old_metric.cfl is not None:
+                        self._recent_cfl_oldest = old_metric.cfl
+                self._recent_cfl_count = 5
+
+        if newton_iterations is not None and newton_iterations > 0:
+            self._recent_newton_sum += newton_iterations
+            self._recent_newton_count += 1
+            # Keep only last 5 values
+            if self._recent_newton_count > 5:
+                if self._recent_newton_oldest is not None:
+                    self._recent_newton_sum -= self._recent_newton_oldest
+                if len(self.recent_metrics) >= 5:
+                    old_metric = list(self.recent_metrics)[-6]
+                    if old_metric.newton_iterations is not None:
+                        self._recent_newton_oldest = old_metric.newton_iterations
+                self._recent_newton_count = 5
+
         # Start with current step size as base
         dt = self.next_step_size
 
@@ -826,21 +963,27 @@ class Timer(StoreSerializable):
             if proximity_to_limit > 0.9:
                 # Very close to limit, we only decrease or maintain
                 cfl_factor = min(cfl_ratio, 1.0)
-                logger.debug(
-                    f"CFL very close to limit ({proximity_to_limit:.2%}), conservative growth"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "CFL very close to limit (%.2f%%), conservative growth",
+                        proximity_to_limit * 100,
+                    )
             elif proximity_to_limit > 0.8:
                 # Close to limit, we need be cautious
                 cfl_factor = min(cfl_ratio, 1.1)
-                logger.debug(
-                    f"CFL close to limit ({proximity_to_limit:.2%}), cautious growth"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "CFL close to limit (%.2f%%), cautious growth",
+                        proximity_to_limit * 100,
+                    )
             else:
                 # Comfortable margin, we can allow normal growth
                 cfl_factor = cfl_ratio
-                logger.debug(
-                    f"CFL comfortable ({proximity_to_limit:.2%}), normal growth"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "CFL comfortable (%.2f%%), normal growth",
+                        proximity_to_limit * 100,
+                    )
             adjustment_factors.append(("CFL", cfl_factor))
 
         # Saturation change adjustment with intelligent scaling
@@ -856,39 +999,49 @@ class Timer(StoreSerializable):
             if saturation_utilization > 0.95:
                 # Very close to limit. Reduce step size
                 saturation_factor = 0.85
-                logger.debug(
-                    f"Saturation change very high ({saturation_utilization:.2%}), reducing step"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Saturation change very high (%.2f%%), reducing step",
+                        saturation_utilization * 100,
+                    )
             elif saturation_utilization > 0.85:
                 # Getting close, maintain or slightly reduce
                 saturation_factor = 0.95
-                logger.debug(
-                    f"Saturation change high ({saturation_utilization:.2%}), maintaining step"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Saturation change high (%.2f%%), maintaining step",
+                        saturation_utilization * 100,
+                    )
             elif saturation_utilization > 0.7:
                 # Moderate usage, allow modest growth
                 saturation_factor = 1.05
-                logger.debug(
-                    f"Saturation change moderate ({saturation_utilization:.2%}), modest growth"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Saturation change moderate (%.2f%%), modest growth",
+                        saturation_utilization * 100,
+                    )
             elif saturation_utilization < 0.3:
                 # Very low usage, could grow more aggressively
                 saturation_factor = min(
                     1.3,
                     maximum_allowed_saturation_change / maximum_saturation_change * 0.8,
                 )
-                logger.debug(
-                    f"Saturation change low ({saturation_utilization:.2%}), allowing growth"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Saturation change low (%.2f%%), allowing growth",
+                        saturation_utilization * 100,
+                    )
             else:
                 # Normal range. Apply proportional adjustment
                 saturation_factor = min(
                     1.15,
                     maximum_allowed_saturation_change / maximum_saturation_change * 0.9,
                 )
-                logger.debug(
-                    f"Saturation change normal ({saturation_utilization:.2%}), proportional growth"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Saturation change normal (%.2f%%), proportional growth",
+                        saturation_utilization * 100,
+                    )
             adjustment_factors.append(("Saturation", saturation_factor))
 
         # Pressure change adjustment with intelligent scaling
@@ -904,38 +1057,48 @@ class Timer(StoreSerializable):
             if pressure_utilization > 0.95:
                 # Very close to limit. Reduce step size
                 pressure_factor = 0.85
-                logger.debug(
-                    f"Pressure change very high ({pressure_utilization:.2%}), reducing step"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Pressure change very high (%.2f%%), reducing step",
+                        pressure_utilization * 100,
+                    )
             elif pressure_utilization > 0.85:
                 # Getting close. Maintain or slightly reduce
                 pressure_factor = 0.95
-                logger.debug(
-                    f"Pressure change high ({pressure_utilization:.2%}), maintaining step"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Pressure change high (%.2f%%), maintaining step",
+                        pressure_utilization * 100,
+                    )
             elif pressure_utilization > 0.7:
                 # Moderate usage. Allow modest growth
                 pressure_factor = 1.05
-                logger.debug(
-                    f"Pressure change moderate ({pressure_utilization:.2%}), modest growth"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Pressure change moderate (%.2f%%), modest growth",
+                        pressure_utilization * 100,
+                    )
             elif pressure_utilization < 0.3:
                 # Very low usage, could grow more aggressively
                 pressure_factor = min(
                     1.3, maximum_allowed_pressure_change / maximum_pressure_change * 0.8
                 )
-                logger.debug(
-                    f"Pressure change low ({pressure_utilization:.2%}), allowing growth"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Pressure change low (%.2f%%), allowing growth",
+                        pressure_utilization * 100,
+                    )
             else:
                 # Normal range. Apply proportional adjustment
                 pressure_factor = min(
                     1.15,
                     maximum_allowed_pressure_change / maximum_pressure_change * 0.9,
                 )
-                logger.debug(
-                    f"Pressure change normal ({pressure_utilization:.2%}), proportional growth"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Pressure change normal (%.2f%%), proportional growth",
+                        pressure_utilization * 100,
+                    )
             adjustment_factors.append(("Pressure", pressure_factor))
 
         # Performance-based factor from historical trends

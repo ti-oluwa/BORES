@@ -89,7 +89,7 @@ def compute_gas_pseudo_pressure(
         result = 2.0 * P_clamped / (mu * Z)
         # Sanity check on integrand value
         if not np.isfinite(result) or result < 0:
-            logger.warning(f"Invalid integrand {result} at P={P_clamped}")
+            logger.warning("Invalid integrand %s at P=%.4e", result, P_clamped)
             return 0.0
 
         return result
@@ -138,7 +138,7 @@ def compute_gas_pseudo_pressure(
                 limit=200,
             )
         except Exception as exc:
-            logger.warning(f"Integration failed: {exc}. Using trapezoidal fallback.")
+            logger.warning("Integration failed: %s. Using trapezoidal fallback.", exc)
             # Fallback to simple trapezoidal rule
             p_points = np.linspace(p_min, p_max, 100)
             y_points = np.array([integrand(p) for p in p_points])  # type: ignore
@@ -206,11 +206,11 @@ def _build_pseudo_pressures_vectorized(
     invalid_mu = (mu_array <= 0) | ~np.isfinite(mu_array)
 
     if np.any(invalid_Z):
-        logger.warning(f"Clamping {np.sum(invalid_Z)} invalid Z-factor values")
+        logger.warning("Clamping %d invalid Z-factor values", np.sum(invalid_Z))
         Z_array = np.maximum(Z_array, 0.01)
 
     if np.any(invalid_mu):
-        logger.warning(f"Clamping {np.sum(invalid_mu)} invalid viscosity values")
+        logger.warning("Clamping %d invalid viscosity values", np.sum(invalid_mu))
         mu_array = np.maximum(mu_array, 0.001)
 
     # Compute integrand: 2*P / (μ*Z)
@@ -219,7 +219,7 @@ def _build_pseudo_pressures_vectorized(
     # Handle invalid integrand values
     invalid = ~np.isfinite(integrand_array) | (integrand_array < 0)
     if np.any(invalid):
-        logger.warning(f"Setting {np.sum(invalid)} invalid integrand values to zero")
+        logger.warning("Setting %d invalid integrand values to zero", np.sum(invalid))
         integrand_array = np.where(invalid, 0.0, integrand_array)
 
     # Cumulative integration from reference pressure
@@ -509,7 +509,7 @@ class PseudoPressureTable(
                 np.log10(min_pressure), np.log10(max_pressure), points, dtype=dtype
             )
 
-            logger.info(f"Building pseudo-pressure table with {points} points...")
+            logger.info("Building pseudo-pressure table with %d points...", points)
             self.pseudo_pressures = build_pseudo_pressures(
                 pressures=self.pressures,
                 z_factor_func=self.z_factor_func,
@@ -676,11 +676,13 @@ def build_pseudo_pressure_table(
     if cache_key is not None:
         with _pseudo_pressure_cache_lock:
             if cache_key in _PSEUDO_PRESSURE_TABLE_CACHE:
-                logger.debug(f"Using cached pseudo-pressure table for key: {cache_key}")
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug("Using cached pseudo-pressure table for key: %s", cache_key)
                 return _PSEUDO_PRESSURE_TABLE_CACHE[cache_key]
 
     # Build new table outside lock to avoid blocking other threads
-    logger.debug(f"Building new pseudo-pressure table for key: {cache_key}")
+    if logger.isEnabledFor(logging.DEBUG):
+        logger.debug("Building new pseudo-pressure table for key: %s", cache_key)
     table = PseudoPressureTable(
         z_factor_func=z_factor_func,
         viscosity_func=viscosity_func,
@@ -710,7 +712,7 @@ def clear_pseudo_pressure_table_cache() -> None:
     with _pseudo_pressure_cache_lock:
         cache_size = len(_PSEUDO_PRESSURE_TABLE_CACHE)
         _PSEUDO_PRESSURE_TABLE_CACHE.clear()
-    logger.info(f"Cleared {cache_size} cached pseudo-pressure tables")
+    logger.info("Cleared %d cached pseudo-pressure tables", cache_size)
 
 
 def get_pseudo_pressure_table_cache_info() -> typing.Dict[str, typing.Any]:

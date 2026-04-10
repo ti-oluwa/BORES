@@ -661,7 +661,7 @@ def compute_net_flux_contributions(
               gas_flux   = T_geo * λ_g[i,j,k] * md_per_cp * (p_bc - p_cell)
 
        b. **Neumann** (pressure value is NaN in pressure_boundaries):
-          Known boundary flux q_bc in ft³/day from flux_boundaries. The total flux
+          Known boundary flux flux_boundary in ft³/day from flux_boundaries. The total flux
           is split across phases in proportion to their mobility fractions at the
           interior cell, then added directly to each phase's net flux. If total
           mobility is zero, the flux is skipped (no flow).
@@ -746,24 +746,30 @@ def compute_net_flux_contributions(
                     ni, nj, nk = ei + 1, j + 1, k + 1
                     pressure_boundary = pressure_boundaries[ni, nj, nk]
                     if not np.isnan(pressure_boundary):
-                        pressure_diff = pressure_boundary - cell_pressure
-                        t_conv = (
+                        pressure_difference = pressure_boundary - cell_pressure
+                        t_factor = (
                             face_transmissibilities_x[i, j, k]
                             * md_per_cp_to_ft2_per_psi_per_day
                         )
-                        net_water_flux += cell_water_mobility * t_conv * pressure_diff
-                        net_oil_flux += cell_oil_mobility * t_conv * pressure_diff
-                        net_gas_flux += cell_gas_mobility * t_conv * pressure_diff
+                        net_water_flux += (
+                            cell_water_mobility * t_factor * pressure_difference
+                        )
+                        net_oil_flux += (
+                            cell_oil_mobility * t_factor * pressure_difference
+                        )
+                        net_gas_flux += (
+                            cell_gas_mobility * t_factor * pressure_difference
+                        )
                     else:
-                        q_bc = flux_boundaries[ni, nj, nk]
+                        flux_boundary = flux_boundaries[ni, nj, nk]
                         if cell_total_mobility > 0.0:
-                            net_water_flux += q_bc * (
+                            net_water_flux += flux_boundary * (
                                 cell_water_mobility / cell_total_mobility
                             )
-                            net_oil_flux += q_bc * (
+                            net_oil_flux += flux_boundary * (
                                 cell_oil_mobility / cell_total_mobility
                             )
-                            net_gas_flux += q_bc * (
+                            net_gas_flux += flux_boundary * (
                                 cell_gas_mobility / cell_total_mobility
                             )
 
@@ -794,26 +800,32 @@ def compute_net_flux_contributions(
                     ni, nj, nk = wi + 1, j + 1, k + 1
                     pressure_boundary = pressure_boundaries[ni, nj, nk]
                     if not np.isnan(pressure_boundary):
-                        pressure_diff = pressure_boundary - cell_pressure
+                        pressure_difference = pressure_boundary - cell_pressure
                         # West boundary face: use current cell's x-transmissibility
                         # since face_transmissibilities_x[-1] would be out of bounds.
-                        t_conv = (
+                        t_factor = (
                             face_transmissibilities_x[i, j, k]
                             * md_per_cp_to_ft2_per_psi_per_day
                         )
-                        net_water_flux += cell_water_mobility * t_conv * pressure_diff
-                        net_oil_flux += cell_oil_mobility * t_conv * pressure_diff
-                        net_gas_flux += cell_gas_mobility * t_conv * pressure_diff
+                        net_water_flux += (
+                            cell_water_mobility * t_factor * pressure_difference
+                        )
+                        net_oil_flux += (
+                            cell_oil_mobility * t_factor * pressure_difference
+                        )
+                        net_gas_flux += (
+                            cell_gas_mobility * t_factor * pressure_difference
+                        )
                     else:
-                        q_bc = flux_boundaries[ni, nj, nk]
+                        flux_boundary = flux_boundaries[ni, nj, nk]
                         if cell_total_mobility > 0.0:
-                            net_water_flux += q_bc * (
+                            net_water_flux += flux_boundary * (
                                 cell_water_mobility / cell_total_mobility
                             )
-                            net_oil_flux += q_bc * (
+                            net_oil_flux += flux_boundary * (
                                 cell_oil_mobility / cell_total_mobility
                             )
-                            net_gas_flux += q_bc * (
+                            net_gas_flux += flux_boundary * (
                                 cell_gas_mobility / cell_total_mobility
                             )
 
@@ -844,24 +856,30 @@ def compute_net_flux_contributions(
                     ni, nj, nk = i + 1, sj + 1, k + 1
                     pressure_boundary = pressure_boundaries[ni, nj, nk]
                     if not np.isnan(pressure_boundary):
-                        pressure_diff = pressure_boundary - cell_pressure
-                        t_conv = (
+                        pressure_difference = pressure_boundary - cell_pressure
+                        t_factor = (
                             face_transmissibilities_y[i, j, k]
                             * md_per_cp_to_ft2_per_psi_per_day
                         )
-                        net_water_flux += cell_water_mobility * t_conv * pressure_diff
-                        net_oil_flux += cell_oil_mobility * t_conv * pressure_diff
-                        net_gas_flux += cell_gas_mobility * t_conv * pressure_diff
+                        net_water_flux += (
+                            cell_water_mobility * t_factor * pressure_difference
+                        )
+                        net_oil_flux += (
+                            cell_oil_mobility * t_factor * pressure_difference
+                        )
+                        net_gas_flux += (
+                            cell_gas_mobility * t_factor * pressure_difference
+                        )
                     else:
-                        q_bc = flux_boundaries[ni, nj, nk]
+                        flux_boundary = flux_boundaries[ni, nj, nk]
                         if cell_total_mobility > 0.0:
-                            net_water_flux += q_bc * (
+                            net_water_flux += flux_boundary * (
                                 cell_water_mobility / cell_total_mobility
                             )
-                            net_oil_flux += q_bc * (
+                            net_oil_flux += flux_boundary * (
                                 cell_oil_mobility / cell_total_mobility
                             )
-                            net_gas_flux += q_bc * (
+                            net_gas_flux += flux_boundary * (
                                 cell_gas_mobility / cell_total_mobility
                             )
 
@@ -892,26 +910,32 @@ def compute_net_flux_contributions(
                     ni, nj, nk = i + 1, nj + 1, k + 1
                     pressure_boundary = pressure_boundaries[ni, nj, nk]
                     if not np.isnan(pressure_boundary):
-                        pressure_diff = pressure_boundary - cell_pressure
+                        pressure_difference = pressure_boundary - cell_pressure
                         # North boundary face: use current cell's y-transmissibility
                         # since face_transmissibilities_y[i, -1, k] would be out of bounds.
-                        t_conv = (
+                        t_factor = (
                             face_transmissibilities_y[i, j, k]
                             * md_per_cp_to_ft2_per_psi_per_day
                         )
-                        net_water_flux += cell_water_mobility * t_conv * pressure_diff
-                        net_oil_flux += cell_oil_mobility * t_conv * pressure_diff
-                        net_gas_flux += cell_gas_mobility * t_conv * pressure_diff
+                        net_water_flux += (
+                            cell_water_mobility * t_factor * pressure_difference
+                        )
+                        net_oil_flux += (
+                            cell_oil_mobility * t_factor * pressure_difference
+                        )
+                        net_gas_flux += (
+                            cell_gas_mobility * t_factor * pressure_difference
+                        )
                     else:
-                        q_bc = flux_boundaries[ni, nj, nk]
+                        flux_boundary = flux_boundaries[ni, nj, nk]
                         if cell_total_mobility > 0.0:
-                            net_water_flux += q_bc * (
+                            net_water_flux += flux_boundary * (
                                 cell_water_mobility / cell_total_mobility
                             )
-                            net_oil_flux += q_bc * (
+                            net_oil_flux += flux_boundary * (
                                 cell_oil_mobility / cell_total_mobility
                             )
-                            net_gas_flux += q_bc * (
+                            net_gas_flux += flux_boundary * (
                                 cell_gas_mobility / cell_total_mobility
                             )
 
@@ -942,24 +966,30 @@ def compute_net_flux_contributions(
                     ni, nj, nk = i + 1, j + 1, bk + 1
                     pressure_boundary = pressure_boundaries[ni, nj, nk]
                     if not np.isnan(pressure_boundary):
-                        pressure_diff = pressure_boundary - cell_pressure
-                        t_conv = (
+                        pressure_difference = pressure_boundary - cell_pressure
+                        t_factor = (
                             face_transmissibilities_z[i, j, k]
                             * md_per_cp_to_ft2_per_psi_per_day
                         )
-                        net_water_flux += cell_water_mobility * t_conv * pressure_diff
-                        net_oil_flux += cell_oil_mobility * t_conv * pressure_diff
-                        net_gas_flux += cell_gas_mobility * t_conv * pressure_diff
+                        net_water_flux += (
+                            cell_water_mobility * t_factor * pressure_difference
+                        )
+                        net_oil_flux += (
+                            cell_oil_mobility * t_factor * pressure_difference
+                        )
+                        net_gas_flux += (
+                            cell_gas_mobility * t_factor * pressure_difference
+                        )
                     else:
-                        q_bc = flux_boundaries[ni, nj, nk]
+                        flux_boundary = flux_boundaries[ni, nj, nk]
                         if cell_total_mobility > 0.0:
-                            net_water_flux += q_bc * (
+                            net_water_flux += flux_boundary * (
                                 cell_water_mobility / cell_total_mobility
                             )
-                            net_oil_flux += q_bc * (
+                            net_oil_flux += flux_boundary * (
                                 cell_oil_mobility / cell_total_mobility
                             )
-                            net_gas_flux += q_bc * (
+                            net_gas_flux += flux_boundary * (
                                 cell_gas_mobility / cell_total_mobility
                             )
 
@@ -990,26 +1020,32 @@ def compute_net_flux_contributions(
                     ni, nj, nk = i + 1, j + 1, tk + 1
                     pressure_boundary = pressure_boundaries[ni, nj, nk]
                     if not np.isnan(pressure_boundary):
-                        pressure_diff = pressure_boundary - cell_pressure
+                        pressure_difference = pressure_boundary - cell_pressure
                         # Top boundary face: use current cell's z-transmissibility
                         # since face_transmissibilities_z[i, j, -1] would be out of bounds.
-                        t_conv = (
+                        t_factor = (
                             face_transmissibilities_z[i, j, k]
                             * md_per_cp_to_ft2_per_psi_per_day
                         )
-                        net_water_flux += cell_water_mobility * t_conv * pressure_diff
-                        net_oil_flux += cell_oil_mobility * t_conv * pressure_diff
-                        net_gas_flux += cell_gas_mobility * t_conv * pressure_diff
+                        net_water_flux += (
+                            cell_water_mobility * t_factor * pressure_difference
+                        )
+                        net_oil_flux += (
+                            cell_oil_mobility * t_factor * pressure_difference
+                        )
+                        net_gas_flux += (
+                            cell_gas_mobility * t_factor * pressure_difference
+                        )
                     else:
-                        q_bc = flux_boundaries[ni, nj, nk]
+                        flux_boundary = flux_boundaries[ni, nj, nk]
                         if cell_total_mobility > 0.0:
-                            net_water_flux += q_bc * (
+                            net_water_flux += flux_boundary * (
                                 cell_water_mobility / cell_total_mobility
                             )
-                            net_oil_flux += q_bc * (
+                            net_oil_flux += flux_boundary * (
                                 cell_oil_mobility / cell_total_mobility
                             )
-                            net_gas_flux += q_bc * (
+                            net_gas_flux += flux_boundary * (
                                 cell_gas_mobility / cell_total_mobility
                             )
 

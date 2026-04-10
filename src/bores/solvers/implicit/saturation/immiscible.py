@@ -2514,11 +2514,16 @@ def evolve_saturation(
             final_iteration = iteration
             final_residual_norm = residual_norm
             reason = "residual" if residual_converged else "saturation change"
-            logger.debug(
-                f"Newton converged at iteration {iteration} ({reason}): "
-                f"||R||/||R0|| = {relative_residual_norm:.2e}, "
-                f"max |ΔS| = {last_max_ds:.2e}"
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "Newton converged at iteration %d (%s): "
+                    "||R||/||R0|| = %.2e, "
+                    "max |ΔS| = %.2e",
+                    iteration,
+                    reason,
+                    relative_residual_norm,
+                    last_max_ds,
+                )
             convergence_history.append(
                 NewtonConvergenceInfo(
                     iteration=iteration,
@@ -2586,21 +2591,26 @@ def evolve_saturation(
         linear_residual_norm = float(
             np.linalg.norm(jacobian @ saturation_change + residual_vector)
         )
-        logger.debug(
-            f"Newton iteration {iteration}: "
-            f"||R||/||R0|| = {relative_residual_norm:.2e}, "
-            f"linear residual = {linear_residual_norm:.2e}"
-        )
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Newton iteration %d: ||R||/||R0|| = %.2e, linear residual = %.2e",
+                iteration,
+                relative_residual_norm,
+                linear_residual_norm,
+            )
 
         # Damp Newton step if it exceeds the configured maximum saturation change
         max_raw_change = float(np.max(np.abs(saturation_change)))
         if max_raw_change > maximum_saturation_change:
             damping_factor = maximum_saturation_change / max_raw_change
             saturation_change = saturation_change * damping_factor
-            logger.debug(
-                f"  Step damped by {damping_factor:.3f} "
-                f"(max |ΔS| = {max_raw_change:.4f} > {maximum_saturation_change})"
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "  Step damped by %.3f (max |ΔS| = %.4f > %s)",
+                    damping_factor,
+                    max_raw_change,
+                    maximum_saturation_change,
+                )
 
         # Backtracking line search
         line_search_factor = 1.0
@@ -2635,17 +2645,21 @@ def evolve_saturation(
             )
             residual_trial_norm = float(np.linalg.norm(residual_trial))
             if residual_trial_norm < residual_norm:
-                logger.debug(
-                    f"  Line search accepted at alpha = {line_search_factor:.4f}, "
-                    f"||R_trial|| = {residual_trial_norm:.4e}"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "  Line search accepted at alpha = %.4f, ||R_trial|| = %.4e",
+                        line_search_factor,
+                        residual_trial_norm,
+                    )
                 break
 
             line_search_factor *= 0.5
             if (line_search_factor * max_raw_change) < minimum_step_size:
-                logger.debug(
-                    f"  Line search hit precision floor at alpha = {line_search_factor:.4e}"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "  Line search hit precision floor at alpha = %.4e",
+                        line_search_factor,
+                    )
                 break
 
             saturation_vector_trial = (
@@ -2690,25 +2704,37 @@ def evolve_saturation(
         if max_saturation_update < 1e-10:
             if relative_residual_norm < 1e-3:
                 converged = True
-                logger.debug(
-                    f"Newton converged (saturation stagnation) at iteration {iteration}: "
-                    f"max |ΔS| = {max_saturation_update:.2e}, "
-                    f"||R||/||R0|| = {relative_residual_norm:.2e}"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Newton converged (saturation stagnation) at iteration %d: "
+                        "max |ΔS| = %.2e, "
+                        "||R||/||R0|| = %.2e",
+                        iteration,
+                        max_saturation_update,
+                        relative_residual_norm,
+                    )
             elif residual_norm <= best_residual_norm * 1.05 and iteration >= 3:
                 converged = True
-                logger.debug(
-                    f"Newton converged (weak problem) at iteration {iteration}: "
-                    f"max |ΔS| = {max_saturation_update:.2e}, "
-                    f"||R||/||R0|| = {relative_residual_norm:.2e}"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Newton converged (weak problem) at iteration %d: "
+                        "max |ΔS| = %.2e, "
+                        "||R||/||R0|| = %.2e",
+                        iteration,
+                        max_saturation_update,
+                        relative_residual_norm,
+                    )
             else:
-                logger.debug(
-                    f"Newton stagnated (negligible dS, residual not converged) "
-                    f"at iteration {iteration}: "
-                    f"max |ΔS| = {max_saturation_update:.2e}, "
-                    f"||R||/||R0|| = {relative_residual_norm:.2e}"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Newton stagnated (negligible dS, residual not converged) "
+                        "at iteration %d: "
+                        "max |ΔS| = %.2e, "
+                        "||R||/||R0|| = %.2e",
+                        iteration,
+                        max_saturation_update,
+                        relative_residual_norm,
+                    )
             break
 
         # Residual-plateau stagnation check
@@ -2723,15 +2749,21 @@ def evolve_saturation(
         if stagnation_count >= stagnation_patience and iteration >= stagnation_patience:
             if relative_residual_norm < 1e-3:
                 converged = True
-                logger.debug(
-                    f"Newton converged (residual plateau) at iteration {iteration}: "
-                    f"||R||/||R0|| = {relative_residual_norm:.2e}"
-                )
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
+                        "Newton converged (residual plateau) at iteration %d: "
+                        "||R||/||R0|| = %.2e",
+                        iteration,
+                        relative_residual_norm,
+                    )
             else:
                 logger.warning(
-                    f"Newton stagnated (residual flat) at iteration {iteration}: "
-                    f"||R||/||R0|| = {relative_residual_norm:.2e}, "
-                    f"no improvement for {stagnation_count} iterations"
+                    "Newton stagnated (residual flat) at iteration %d: "
+                    "||R||/||R0|| = %.2e, "
+                    "no improvement for %d iterations",
+                    iteration,
+                    relative_residual_norm,
+                    stagnation_count,
                 )
             break
 
@@ -2753,11 +2785,14 @@ def evolve_saturation(
             and final_residual_norm <= best_residual_norm * 1.5
         ):
             converged = True
-            logger.debug(
-                f"Newton max iterations reached; accepting weak-problem solution: "
-                f"max |ΔS| = {last_max_ds:.2e}, "
-                f"||R||/||R0|| = {final_relative_residual:.2e}"
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "Newton max iterations reached; accepting weak-problem solution: "
+                    "max |ΔS| = %.2e, "
+                    "||R||/||R0|| = %.2e",
+                    last_max_ds,
+                    final_relative_residual,
+                )
 
     maximum_water_saturation_change = float(
         np.max(np.abs(water_saturation_grid - old_water_saturation_grid))

@@ -66,12 +66,21 @@ class ControlResult:
         pressure (no drawdown) when the well is inactive or flow is disallowed.
         Otherwise reflects the actual operating BHP after all constraints and
         clamps have been applied.
+    :param is_bhp_control: Whether the control is currently operating in BHP control mode
+        (vs. rate control). This is relevant for adaptive controls that can switch modes.
     """
 
     rate: float
     """Flow rate (bbl/day or ft³/day). Positive for injection, negative for production."""
     bhp: float
     """Effective bottom-hole pressure (psi)."""
+    is_bhp_control: bool
+    """Whether the control is currently operating in BHP control mode (vs. rate control)."""
+
+    @property
+    def is_rate_control(self) -> bool:
+        """Whether the control is currently operating in rate control mode (vs. BHP control)."""
+        return not self.is_bhp_control
 
     def __iter__(self) -> typing.Iterator[float]:
         yield self.rate
@@ -100,38 +109,6 @@ def _disallow_flow(
         or (phase_mobility is not None and phase_mobility < minimum_mobility)
         or not is_active
     )
-
-
-def _apply_clamp(
-    pressure: float,
-    control_type: str,
-    rate: typing.Optional[float] = None,
-    bhp: typing.Optional[float] = None,
-    clamp: typing.Optional["RateClamp"] = None,
-) -> typing.Optional[float]:
-    """
-    Apply clamping condition if provided.
-
-    :return: Clamped rate/bhp if clamp condition is met, None if not clamped (caller should return original rate)
-    """
-    if clamp is not None:
-        if rate is not None:
-            clamped_rate = clamp.clamp_rate(rate, pressure)
-            if clamped_rate is not None:
-                logger.debug(
-                    f"Clamping rate {rate:.6f} to {clamped_rate:.6f} "
-                    f"({control_type}, pressure={pressure:.3f} psi)"
-                )
-                return clamped_rate
-        elif bhp is not None:
-            clamped_bhp = clamp.clamp_bhp(bhp, pressure)
-            if clamped_bhp is not None:
-                logger.debug(
-                    f"Clamping BHP {bhp:.6f} to {clamped_bhp:.6f} "
-                    f"({control_type}, pressure={pressure:.3f} psi)"
-                )
-                return clamped_bhp
-    return None
 
 
 def _compute_required_bhp(
@@ -206,33 +183,51 @@ class RateClamp(Serializable):
 
     Determines when a computed flow rate or BHP should be clamped
     to prevent unphysical scenarios (e.g., production during injection).
+
+    Both `clamp_rate` and `clamp_bhp` return a `(is_clamped, value)` tuple
+    so callers always know whether clamping actually fired:
+
+    - `is_clamped=True`  → clamping condition was met; `value` is the
+      clamped replacement.
+    - `is_clamped=False` → clamping condition was not met; `value` is the
+      original input, unchanged.
+
+    When the clamped replacement value is not explicitly provided by the
+    subclass (i.e. the corresponding `clamp_rate` or `clamp_bhp` field is
+    `None`), a physically reasonable default is used:
+
+    - For rates: `0.0` (well is effectively shut in).
+    - For BHPs:  `pressure` (no drawdown — reservoir pressure is the safest
+      neutral value).
     """
 
     __abstract_serializable__ = True
 
     def clamp_rate(
         self, rate: float, pressure: float, **kwargs
-    ) -> typing.Optional[float]:
+    ) -> typing.Tuple[bool, float]:
         """
-        Determine if the flow rate should be clamped to zero.
+        Determine if the flow rate should be clamped.
 
         :param rate: The computed flow rate (bbl/day or ft³/day).
         :param pressure: The reservoir pressure at the well location (psi).
         :param kwargs: Additional context for clamping decision.
-        :return: The clamped flow rate if clamping condition is met, else None.
+        :return: `(is_clamped, value)` where `is_clamped` indicates whether
+            clamping fired and `value` is the rate to use (clamped or original).
         """
         raise NotImplementedError
 
     def clamp_bhp(
         self, bottom_hole_pressure: float, pressure: float, **kwargs
-    ) -> typing.Optional[float]:
+    ) -> typing.Tuple[bool, float]:
         """
         Determine if the bottom-hole pressure should be clamped.
 
         :param bottom_hole_pressure: The computed bottom-hole pressure (psi).
         :param pressure: The reservoir pressure at the well location (psi).
         :param kwargs: Additional context for clamping decision.
-        :return: The clamped bottom-hole pressure if clamping condition is met, else None.
+        :return: `(is_clamped, value)` where `is_clamped` indicates whether
+            clamping fired and `value` is the BHP to use (clamped or original).
         """
         raise NotImplementedError
 
@@ -258,23 +253,32 @@ class ProductionClamp(RateClamp):
 
     __type__ = "production_clamp"
 
-    value: float = 0.0
-    """Clamp value to return when condition is met."""
+    value: typing.Optional[float] = None
+    """
+    Clamped rate to return when the condition is met.
+
+    Defaults to `None`, which causes the clamp to return `0.0` (well shut
+    in) when the rate condition fires, and `pressure` when the BHP condition
+    fires.  Set an explicit value to override both defaults.
+    """
 
     def clamp_rate(
         self, rate: float, pressure: float, **kwargs
-    ) -> typing.Optional[float]:
+    ) -> typing.Tuple[bool, float]:
         """Clamp if rate is positive (injection during production)."""
         if rate > 0.0:
-            return self.value
-        return None
+            clamped_value = self.value if self.value is not None else 0.0
+            return True, clamped_value
+        return False, rate
 
     def clamp_bhp(
         self, bottom_hole_pressure: float, pressure: float, **kwargs
-    ) -> typing.Optional[float]:
+    ) -> typing.Tuple[bool, float]:
+        """Clamp BHP if it exceeds reservoir pressure (injection-direction drawdown)."""
         if bottom_hole_pressure > pressure:
-            return pressure
-        return None
+            clamped_value = self.value if self.value is not None else pressure
+            return True, clamped_value
+        return False, bottom_hole_pressure
 
 
 @rate_clamp
@@ -284,23 +288,32 @@ class InjectionClamp(RateClamp):
 
     __type__ = "injection_clamp"
 
-    value: float = 0.0
-    """Clamp value to return when condition is met."""
+    value: typing.Optional[float] = None
+    """
+    Clamped rate to return when the condition is met.
+
+    Defaults to None, which causes the clamp to return 0.0 (well shut
+    in) when the rate condition fires, and pressure when the BHP condition
+    fires.  Set an explicit value to override both defaults.
+    """
 
     def clamp_rate(
         self, rate: float, pressure: float, **kwargs
-    ) -> typing.Optional[float]:
+    ) -> typing.Tuple[bool, float]:
         """Clamp if rate is negative (production during injection)."""
         if rate < 0.0:
-            return self.value
-        return None
+            clamped_value = self.value if self.value is not None else 0.0
+            return True, clamped_value
+        return False, rate
 
     def clamp_bhp(
         self, bottom_hole_pressure: float, pressure: float, **kwargs
-    ) -> typing.Optional[float]:
+    ) -> typing.Tuple[bool, float]:
+        """Clamp BHP if it falls below reservoir pressure (production-direction drawdown)."""
         if bottom_hole_pressure < pressure:
-            return pressure
-        return None
+            clamped_value = self.value if self.value is not None else pressure
+            return True, clamped_value
+        return False, bottom_hole_pressure
 
 
 WellControlType = typing.Literal["rate", "bhp", "custom"]
@@ -481,7 +494,7 @@ class WellControl(StoreSerializable, typing.Generic[WellFluidTcon]):
             pvt_tables=pvt_tables,
             **kwargs,
         )
-        return ControlResult(rate=rate, bhp=bhp)
+        return ControlResult(rate=rate, bhp=bhp, is_bhp_control=self.is_bhp_control())
 
 
 _WELL_CONTROLS: typing.Dict[str, typing.Type[WellControl]] = {}
@@ -621,13 +634,15 @@ class BHPControl(WellControl[WellFluidTcon]):
             )
 
         # Apply clamp condition if any
-        clamped = _apply_clamp(
-            rate=rate,
-            clamp=self.clamp,
-            pressure=pressure,
-            control_type="BHP control",
-        )
-        return clamped if clamped is not None else rate
+        if self.clamp is not None:
+            is_clamped, clamped_rate = self.clamp.clamp_rate(rate, pressure)
+            if is_clamped:
+                logger.debug(
+                    f"Clamping rate {rate:.6f} to {clamped_rate:.6f} "
+                    f"(BHP control, pressure={pressure:.3f} psi)"
+                )
+                return clamped_rate
+        return rate
 
     def get_bottom_hole_pressure(
         self,
@@ -672,15 +687,15 @@ class BHPControl(WellControl[WellFluidTcon]):
             return pressure
 
         bhp = self.bhp
-        return (
-            _apply_clamp(
-                pressure=pressure,
-                control_type="BHP control",
-                clamp=self.clamp,
-                bhp=bhp,
-            )
-            or bhp
-        )
+        if self.clamp is not None:
+            is_clamped, clamped_bhp = self.clamp.clamp_bhp(bhp, pressure)
+            if is_clamped:
+                logger.debug(
+                    f"Clamping BHP {bhp:.6f} to {clamped_bhp:.6f} "
+                    f"(BHP control, pressure={pressure:.3f} psi)"
+                )
+                return clamped_bhp
+        return bhp
 
     def get_control(
         self,
@@ -737,18 +752,20 @@ class BHPControl(WellControl[WellFluidTcon]):
         if _disallow_flow(fluid=fluid, is_active=is_active) or (
             self.target_phase is not None and fluid.phase != self.target_phase
         ):
-            return ControlResult(rate=0.0, bhp=pressure)
+            return ControlResult(rate=0.0, bhp=pressure, is_bhp_control=True)
 
         bhp = self.bhp
 
         # Apply BHP clamp before computing rate so the two are consistent.
-        clamped_bhp = _apply_clamp(
-            pressure=pressure,
-            control_type="BHP control",
-            clamp=self.clamp,
-            bhp=bhp,
-        )
-        effective_bhp = clamped_bhp if clamped_bhp is not None else bhp
+        effective_bhp = bhp
+        if self.clamp is not None:
+            is_clamped, clamped_bhp = self.clamp.clamp_bhp(bhp, pressure)
+            if is_clamped:
+                logger.debug(
+                    f"Clamping BHP {bhp:.6f} to {clamped_bhp:.6f} "
+                    f"(BHP control, pressure={pressure:.3f} psi)"
+                )
+                effective_bhp = clamped_bhp
 
         # Compute rate from `effective_bhp` (shared intermediates)
         if fluid.phase == FluidPhase.GAS:
@@ -796,14 +813,17 @@ class BHPControl(WellControl[WellFluidTcon]):
             )
 
         # Apply rate clamp (BHP has already been clamped above).
-        clamped_rate = _apply_clamp(
-            rate=rate,
-            clamp=self.clamp,
-            pressure=pressure,
-            control_type="BHP control",
-        )
-        final_rate = clamped_rate if clamped_rate is not None else rate
-        return ControlResult(rate=final_rate, bhp=effective_bhp)
+        final_rate = rate
+        if self.clamp is not None:
+            is_clamped, clamped_rate = self.clamp.clamp_rate(rate, pressure)
+            if is_clamped:
+                logger.debug(
+                    f"Clamping rate {rate:.6f} to {clamped_rate:.6f} "
+                    f"(BHP control, pressure={pressure:.3f} psi)"
+                )
+                final_rate = clamped_rate
+
+        return ControlResult(rate=final_rate, bhp=effective_bhp, is_bhp_control=True)
 
     def __str__(self) -> str:
         """String representation."""
@@ -828,6 +848,7 @@ class RateControl(WellControl[WellFluidTcon]):
 
     target_rate: float
     """Target flow rate (STB/day or SCF/day). Positive for injection, negative for production."""
+
     bhp_limit: typing.Optional[float] = None
     """
     Minimum allowable BHP for production wells, and maximum allowable BHP for injection wells.
@@ -842,8 +863,10 @@ class RateControl(WellControl[WellFluidTcon]):
     If not specified, no BHP constraint is applied (rate is always achieved regardless of
     required pressure. Use with caution!).
     """
+
     target_phase: typing.Optional[typing.Union[str, FluidPhase]] = None
     """Target fluid phase for the control."""
+
     clamp: typing.Optional[RateClamp] = None
     """Condition for clamping flow rates to zero. None means no clamping."""
 
@@ -949,13 +972,15 @@ class RateControl(WellControl[WellFluidTcon]):
                     )
                     return 0.0
 
-        clamped = _apply_clamp(
-            rate=target_rate,
-            clamp=self.clamp,
-            pressure=pressure,
-            control_type="constant rate control",
-        )
-        return clamped if clamped is not None else target_rate
+        if self.clamp is not None:
+            is_clamped, clamped_rate = self.clamp.clamp_rate(target_rate, pressure)
+            if is_clamped:
+                logger.debug(
+                    f"Clamping rate {target_rate:.6f} to {clamped_rate:.6f} "
+                    f"(constant rate control, pressure={pressure:.3f} psi)"
+                )
+                return clamped_rate
+        return target_rate
 
     def get_bottom_hole_pressure(
         self,
@@ -1021,17 +1046,15 @@ class RateControl(WellControl[WellFluidTcon]):
             logger.warning(
                 f"Cannot compute required BHP: {exc}. Using reservoir pressure."
             )
-            return (
-                _apply_clamp(
-                    pressure=pressure,
-                    control_type="constant rate control",
-                    clamp=self.clamp,
-                    bhp=pressure,
-                )
-                or pressure
-            )
+            bhp = pressure
+            if self.clamp is not None:
+                is_clamped, clamped_bhp = self.clamp.clamp_bhp(bhp, pressure)
+                if is_clamped:
+                    return clamped_bhp
+            return bhp
 
-        # Check BHP constraint
+        # Check BHP constraint — cap required_bhp at bhp_limit so the reported
+        # BHP never exceeds (injection) or goes below (production) the declared limit.
         bhp = required_bhp
         bhp_limit = self.bhp_limit
         if bhp_limit is not None:
@@ -1046,7 +1069,7 @@ class RateControl(WellControl[WellFluidTcon]):
                     )
                     bhp = bhp_limit
             else:
-                # Injection: BHP must be <= max_bhp (bhp_limit is actually max here)
+                # Injection: BHP must be <= max_bhp (bhp_limit is the ceiling)
                 if required_bhp > bhp_limit:
                     logger.debug(
                         f"Required BHP {required_bhp:.4f} > max {bhp_limit:.4f}. "
@@ -1054,15 +1077,15 @@ class RateControl(WellControl[WellFluidTcon]):
                     )
                     bhp = bhp_limit
 
-        return (
-            _apply_clamp(
-                pressure=pressure,
-                control_type="constant rate control",
-                clamp=self.clamp,
-                bhp=bhp,
-            )
-            or bhp
-        )
+        if self.clamp is not None:
+            is_clamped, clamped_bhp = self.clamp.clamp_bhp(bhp, pressure)
+            if is_clamped:
+                logger.debug(
+                    f"Clamping BHP {bhp:.6f} to {clamped_bhp:.6f} "
+                    f"(constant rate control, pressure={pressure:.3f} psi)"
+                )
+                return clamped_bhp
+        return bhp
 
     def get_control(
         self,
@@ -1125,25 +1148,25 @@ class RateControl(WellControl[WellFluidTcon]):
         if _disallow_flow(fluid=fluid, is_active=is_active) or (
             self.target_phase is not None and fluid.phase != self.target_phase
         ):
-            return ControlResult(rate=0.0, bhp=pressure)
+            return ControlResult(rate=0.0, bhp=pressure, is_bhp_control=False)
 
         # Allocated reservoir rate
         target_rate = self.target_rate * allocation_fraction * formation_volume_factor
 
         # Strict rate mode: no mobility provided hence skip BHP feasibility check.
-        # We still need to report a BHP; try to back-compute it from the rate,
-        # falling back to reservoir pressure if the solve fails.
+        # BHP is indeterminate in strict mode — return reservoir pressure as a
+        # conservative sentinel (zero drawdown).
         if phase_mobility is None:
-            clamped_rate = _apply_clamp(
-                rate=target_rate,
-                clamp=self.clamp,
-                pressure=pressure,
-                control_type="constant rate control",
-            )
-            final_rate = clamped_rate if clamped_rate is not None else target_rate
-            # BHP is indeterminate in strict mode - return reservoir pressure as
-            # a conservative sentinel (zero drawdown).
-            return ControlResult(rate=final_rate, bhp=pressure)
+            final_rate = target_rate
+            if self.clamp is not None:
+                is_clamped, clamped_rate = self.clamp.clamp_rate(target_rate, pressure)
+                if is_clamped:
+                    logger.debug(
+                        f"Clamping rate {target_rate:.6f} to {clamped_rate:.6f} "
+                        f"(constant rate control - strict mode, pressure={pressure:.3f} psi)"
+                    )
+                    final_rate = clamped_rate
+            return ControlResult(rate=final_rate, bhp=pressure, is_bhp_control=False)
 
         # Constrained mode: solve for required BHP once.
         bhp_limit = self.bhp_limit
@@ -1168,7 +1191,7 @@ class RateControl(WellControl[WellFluidTcon]):
                 f"Failed to compute required BHP for target rate {target_rate:.6f}: {exc}. "
                 "Returning shut-in state (rate=0, bhp=reservoir pressure)."
             )
-            return ControlResult(rate=0.0, bhp=pressure)
+            return ControlResult(rate=0.0, bhp=pressure, is_bhp_control=False)
 
         logger.debug(
             f"Required BHP: {required_bhp:.6f} psi, Reservoir pressure: {pressure:.6f} psi, "
@@ -1187,31 +1210,47 @@ class RateControl(WellControl[WellFluidTcon]):
                     f"BHP limit {bhp_limit:.3f} psi (required BHP: {required_bhp:.3f} psi, "
                     f"reservoir pressure: {pressure:.3f} psi). Returning shut-in state."
                 )
-                return ControlResult(rate=0.0, bhp=pressure)
+                return ControlResult(rate=0.0, bhp=pressure, is_bhp_control=False)
 
-        clamped_rate = _apply_clamp(
-            rate=target_rate,
-            clamp=self.clamp,
-            pressure=pressure,
-            control_type="constant rate control",
-        )
-        final_rate = clamped_rate if clamped_rate is not None else target_rate
+        # Cap the reported BHP at bhp_limit so it never exceeds the declared
+        # constraint even when the solve lands exactly on the boundary.
+        effective_bhp = required_bhp
+        if bhp_limit is not None:
+            if is_production:
+                effective_bhp = max(required_bhp, bhp_limit)
+            else:
+                effective_bhp = min(required_bhp, bhp_limit)
 
-        # Clamp the BHP that corresponds to the (possibly clamped) rate. If
-        # the rate clamp fired it means the well is effectively shut; reflect
-        # that in BHP too.
-        if clamped_rate is not None and clamped_rate == 0.0:
+        # Apply rate clamp.
+        final_rate = target_rate
+        rate_was_clamped = False
+        if self.clamp is not None:
+            is_clamped, clamped_rate = self.clamp.clamp_rate(target_rate, pressure)
+            if is_clamped:
+                logger.debug(
+                    f"Clamping rate {target_rate:.6f} to {clamped_rate:.6f} "
+                    f"(constant rate control, pressure={pressure:.3f} psi)"
+                )
+                final_rate = clamped_rate
+                rate_was_clamped = True
+
+        # If the rate clamp fired the well is effectively shut in; collapse BHP to
+        # reservoir pressure so the matrix sees no drawdown.
+        if rate_was_clamped and final_rate == 0.0:
             final_bhp = pressure
         else:
-            clamped_bhp = _apply_clamp(
-                pressure=pressure,
-                control_type="constant rate control",
-                clamp=self.clamp,
-                bhp=required_bhp,
-            )
-            final_bhp = clamped_bhp if clamped_bhp is not None else required_bhp
+            # Apply BHP clamp after the bhp_limit cap.
+            final_bhp = effective_bhp
+            if self.clamp is not None:
+                is_clamped, clamped_bhp = self.clamp.clamp_bhp(effective_bhp, pressure)
+                if is_clamped:
+                    logger.debug(
+                        f"Clamping BHP {effective_bhp:.6f} to {clamped_bhp:.6f} "
+                        f"(constant rate control, pressure={pressure:.3f} psi)"
+                    )
+                    final_bhp = clamped_bhp
 
-        return ControlResult(rate=final_rate, bhp=final_bhp)
+        return ControlResult(rate=final_rate, bhp=final_bhp, is_bhp_control=False)
 
     def update(
         self,
@@ -1338,15 +1377,20 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
 
         # If no mobility provided, skip BHP feasibility check, return rate directly.
         if phase_mobility is None:
-            clamped = _apply_clamp(
-                rate=target_rate,
-                clamp=self.clamp,
-                pressure=pressure,
-                control_type="adaptive control - strict rate mode",
-            )
-            return clamped if clamped is not None else target_rate
+            final_rate = target_rate
+            if self.clamp is not None:
+                is_clamped, clamped_rate = self.clamp.clamp_rate(target_rate, pressure)
+                if is_clamped:
+                    logger.debug(
+                        f"Clamping rate {target_rate:.6f} to {clamped_rate:.6f} "
+                        f"(adaptive control - strict rate mode, pressure={pressure:.3f} psi)"
+                    )
+                    final_rate = clamped_rate
+            return final_rate
 
         # Compute required BHP to achieve target rate
+        in_rate_mode = False
+        required_bhp = None
         try:
             required_bhp = _compute_required_bhp(
                 target_rate=target_rate,
@@ -1372,34 +1416,36 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 f"Required BHP: {required_bhp:.6f} psi, Reservoir pressure: {pressure:.6f} psi, Fluid phase: {fluid.phase}"
             )
             if is_production:
-                can_achieve_rate = required_bhp >= bhp_limit
+                in_rate_mode = required_bhp >= bhp_limit
             else:
-                can_achieve_rate = required_bhp <= bhp_limit
+                in_rate_mode = required_bhp <= bhp_limit
 
-            if can_achieve_rate:
-                # Can achieve target rate without violating minimum bottom hole pressure
-                clamped = _apply_clamp(
-                    rate=target_rate,
-                    clamp=self.clamp,
-                    pressure=pressure,
-                    control_type="adaptive control - rate mode",
-                )
-                if clamped is not None:
-                    return clamped
+        if in_rate_mode:
+            # Can achieve target rate without violating BHP limit
+            final_rate = target_rate
+            if self.clamp is not None:
+                is_clamped, clamped_rate = self.clamp.clamp_rate(target_rate, pressure)
+                if is_clamped:
+                    logger.debug(
+                        f"Clamping rate {target_rate:.6f} to {clamped_rate:.6f} "
+                        f"(adaptive control - rate mode, pressure={pressure:.3f} psi)"
+                    )
+                    final_rate = clamped_rate
+            
+            assert required_bhp is not None
+            logger.debug(
+                f"Using rate control at {final_rate:.6f} "
+                f"(required BHP: {required_bhp:.3f} psi, limit: {bhp_limit:.3f} psi)"
+            )
+            return final_rate
 
-                logger.debug(
-                    f"Using rate control at {target_rate:.6f} "
-                    f"(required BHP: {required_bhp:.3f} psi > minimum: {bhp_limit:.3f} psi)"
-                )
-                return target_rate
-
-        # Target rate would violate minimum bottom hole pressure, switch to BHP control
+        # Target rate would violate BHP limit — switch to BHP control at bhp_limit
         logger.debug(
             f"Switching to BHP control at {bhp_limit:.3f} psi "
             f"(target rate not achievable within pressure constraints)"
         )
 
-        # Compute rate at minimum bottom hole pressure using same logic as BHP control
+        # Compute rate at bhp_limit using same logic as BHP control
         if fluid.phase == FluidPhase.GAS:
             use_pp, pp_table = get_pseudo_pressure_table(
                 fluid=fluid,
@@ -1445,13 +1491,16 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 incompressibility_threshold=incompressibility_threshold,
             )
 
-        clamped = _apply_clamp(
-            rate=rate,
-            clamp=self.clamp,
-            pressure=pressure,
-            control_type="adaptive control - BHP mode",
-        )
-        return clamped if clamped is not None else rate
+        final_rate = rate
+        if self.clamp is not None:
+            is_clamped, clamped_rate = self.clamp.clamp_rate(rate, pressure)
+            if is_clamped:
+                logger.debug(
+                    f"Clamping rate {rate:.6f} to {clamped_rate:.6f} "
+                    f"(adaptive control - BHP mode, pressure={pressure:.3f} psi)"
+                )
+                final_rate = clamped_rate
+        return final_rate
 
     def get_bottom_hole_pressure(
         self,
@@ -1516,16 +1565,19 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 pvt_tables=pvt_tables,
             )
         except (ValueError, ZeroDivisionError, ComputationError) as exc:
-            logger.debug(f"Cannot achieve rate mode: {exc}. Using BHP mode.")
-            return (
-                _apply_clamp(
-                    pressure=pressure,
-                    control_type="adaptive control - BHP mode",
-                    clamp=self.clamp,
-                    bhp=bhp_limit,
-                )
-                or bhp_limit
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("Cannot achieve rate mode: %s. Using BHP mode.", exc)
+            # BHP mode fallback — report bhp_limit, clamped if necessary
+            bhp = bhp_limit
+            if self.clamp is not None:
+                is_clamped, clamped_bhp = self.clamp.clamp_bhp(bhp_limit, pressure)
+                if is_clamped:
+                    logger.debug(
+                        f"Clamping BHP {bhp_limit:.6f} to {clamped_bhp:.6f} "
+                        f"(adaptive control - BHP mode, pressure={pressure:.3f} psi)"
+                    )
+                    bhp = clamped_bhp
+            return bhp
 
         # Check if rate is achievable within BHP constraint
         is_production = target_rate_reservoir < 0.0
@@ -1535,20 +1587,29 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
             can_achieve = required_bhp <= bhp_limit
 
         if can_achieve:
-            logger.debug(f"Adaptive control: rate mode (BHP={required_bhp:.4f})")
-            bhp = required_bhp
-        else:
-            logger.debug(f"Adaptive control: BHP mode (BHP={bhp_limit:.4f})")
-            bhp = bhp_limit
-        return (
-            _apply_clamp(
-                pressure=pressure,
-                control_type="adaptive control",
-                clamp=self.clamp,
-                bhp=bhp,
+            # Rate mode — cap required_bhp at bhp_limit so it is never reported
+            # beyond the declared limit even if the solve overshoots slightly.
+            bhp = (
+                min(required_bhp, bhp_limit)
+                if not is_production
+                else max(required_bhp, bhp_limit)
             )
-            or bhp
-        )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("Adaptive control: rate mode (BHP=%.4f)", bhp)
+        else:
+            bhp = bhp_limit
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug("Adaptive control: BHP mode (BHP=%.4f)", bhp_limit)
+
+        if self.clamp is not None:
+            is_clamped, clamped_bhp = self.clamp.clamp_bhp(bhp, pressure)
+            if is_clamped:
+                logger.debug(
+                    f"Clamping BHP {bhp:.6f} to {clamped_bhp:.6f} "
+                    f"(adaptive control, pressure={pressure:.3f} psi)"
+                )
+                return clamped_bhp
+        return bhp
 
     def get_control(
         self,
@@ -1611,13 +1672,13 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
         :param pvt_tables: PVT look-up tables for fluid properties.
         :return: `ControlResult` with the flow rate and effective BHP.
             BHP equals `bhp_limit` when operating in BHP mode, or the
-            required BHP when in rate mode. Reservoir pressure is used as the
-            BHP sentinel in strict rate mode.
+            required BHP (capped at `bhp_limit`) when in rate mode.
+            Reservoir pressure is used as the BHP sentinel in strict rate mode.
         """
         if _disallow_flow(fluid=fluid, is_active=is_active) or (
             self.target_phase is not None and fluid.phase != self.target_phase
         ):
-            return ControlResult(rate=0.0, bhp=pressure)
+            return ControlResult(rate=0.0, bhp=pressure, is_bhp_control=False)
 
         target_rate = self.target_rate * allocation_fraction * formation_volume_factor
         is_production = target_rate < 0.0
@@ -1626,20 +1687,21 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
 
         # Strict rate mode - no mobility, skip feasibility check.
         if phase_mobility is None:
-            clamped = _apply_clamp(
-                rate=target_rate,
-                clamp=self.clamp,
-                pressure=pressure,
-                control_type="adaptive control - strict rate mode",
-            )
-            final_rate = clamped if clamped is not None else target_rate
+            final_rate = target_rate
+            if self.clamp is not None:
+                is_clamped, clamped_rate = self.clamp.clamp_rate(target_rate, pressure)
+                if is_clamped:
+                    logger.debug(
+                        f"Clamping rate {target_rate:.6f} to {clamped_rate:.6f} "
+                        f"(adaptive control - strict rate mode, pressure={pressure:.3f} psi)"
+                    )
+                    final_rate = clamped_rate
             # No mobility → cannot back-solve for BHP; use reservoir pressure.
-            return ControlResult(rate=final_rate, bhp=pressure)
+            return ControlResult(rate=final_rate, bhp=pressure, is_bhp_control=False)
 
         # Attempt to solve for the BHP required to deliver the target rate.
         bhp_solve_failed = False
-        # Default. Will be overwritten or used as fallback
-        required_bhp: float = bhp_limit
+        required_bhp: float = bhp_limit  # safe default if solve fails
 
         try:
             required_bhp = _compute_required_bhp(
@@ -1677,32 +1739,48 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
             else:
                 in_rate_mode = required_bhp <= bhp_limit
 
-        # Rate mode: target rate is achievable.
+        # Rate mode: target rate is achievable within the BHP constraint.
         if in_rate_mode:
-            clamped_rate = _apply_clamp(
-                rate=target_rate,
-                clamp=self.clamp,
-                pressure=pressure,
-                control_type="adaptive control - rate mode",
-            )
-            final_rate = clamped_rate if clamped_rate is not None else target_rate
+            # Cap the reported BHP at bhp_limit so it is never advertised
+            # beyond the declared constraint even if the solve overshoots.
+            if is_production:
+                effective_bhp = max(required_bhp, bhp_limit)
+            else:
+                effective_bhp = min(required_bhp, bhp_limit)
 
-            # If clamp zeroed the rate the effective BHP collapses to reservoir pressure.
-            if clamped_rate is not None and clamped_rate == 0.0:
+            # Apply rate clamp first.
+            final_rate = target_rate
+            rate_was_clamped = False
+            if self.clamp is not None:
+                is_clamped, clamped_rate = self.clamp.clamp_rate(target_rate, pressure)
+                if is_clamped:
+                    logger.debug(
+                        f"Clamping rate {target_rate:.6f} to {clamped_rate:.6f} "
+                        f"(adaptive control - rate mode, pressure={pressure:.3f} psi)"
+                    )
+                    final_rate = clamped_rate
+                    rate_was_clamped = True
+
+            # If the rate clamp zeroed the well, collapse BHP to reservoir pressure.
+            if rate_was_clamped and final_rate == 0.0:
                 final_bhp = pressure
             else:
-                clamped_bhp = _apply_clamp(
-                    pressure=pressure,
-                    control_type="adaptive control - rate mode",
-                    clamp=self.clamp,
-                    bhp=required_bhp,
-                )
-                final_bhp = clamped_bhp if clamped_bhp is not None else required_bhp
+                final_bhp = effective_bhp
+                if self.clamp is not None:
+                    is_clamped, clamped_bhp = self.clamp.clamp_bhp(
+                        effective_bhp, pressure
+                    )
+                    if is_clamped:
+                        logger.debug(
+                            f"Clamping BHP {effective_bhp:.6f} to {clamped_bhp:.6f} "
+                            f"(adaptive control - rate mode, pressure={pressure:.3f} psi)"
+                        )
+                        final_bhp = clamped_bhp
 
             logger.debug(
                 f"Adaptive control - rate mode: rate={final_rate:.6f}, BHP={final_bhp:.4f} psi"
             )
-            return ControlResult(rate=final_rate, bhp=final_bhp)
+            return ControlResult(rate=final_rate, bhp=final_bhp, is_bhp_control=False)
 
         # BHP mode: operate at bhp_limit and compute the resulting Darcy rate.
         logger.debug(
@@ -1755,26 +1833,34 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 incompressibility_threshold=incompressibility_threshold,
             )
 
-        clamped_rate = _apply_clamp(
-            rate=rate,
-            clamp=self.clamp,
-            pressure=pressure,
-            control_type="adaptive control - BHP mode",
-        )
-        final_rate = clamped_rate if clamped_rate is not None else rate
+        # Apply rate clamp.
+        final_rate = rate
+        rate_was_clamped = False
+        if self.clamp is not None:
+            is_clamped, clamped_rate = self.clamp.clamp_rate(rate, pressure)
+            if is_clamped:
+                logger.debug(
+                    f"Clamping rate {rate:.6f} to {clamped_rate:.6f} "
+                    f"(adaptive control - BHP mode, pressure={pressure:.3f} psi)"
+                )
+                final_rate = clamped_rate
+                rate_was_clamped = True
 
-        if clamped_rate is not None and clamped_rate == 0.0:
+        # If the rate clamp zeroed the well, collapse BHP to reservoir pressure.
+        if rate_was_clamped and final_rate == 0.0:
             final_bhp = pressure
         else:
-            clamped_bhp = _apply_clamp(
-                pressure=pressure,
-                control_type="adaptive control - BHP mode",
-                clamp=self.clamp,
-                bhp=bhp_limit,
-            )
-            final_bhp = clamped_bhp if clamped_bhp is not None else bhp_limit
+            final_bhp = bhp_limit
+            if self.clamp is not None:
+                is_clamped, clamped_bhp = self.clamp.clamp_bhp(bhp_limit, pressure)
+                if is_clamped:
+                    logger.debug(
+                        f"Clamping BHP {bhp_limit:.6f} to {clamped_bhp:.6f} "
+                        f"(adaptive control - BHP mode, pressure={pressure:.3f} psi)"
+                    )
+                    final_bhp = clamped_bhp
 
-        return ControlResult(rate=final_rate, bhp=final_bhp)
+        return ControlResult(rate=final_rate, bhp=final_bhp, is_bhp_control=True)
 
     def update(
         self,
@@ -2082,13 +2168,15 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
                 incompressibility_threshold=c.FLUID_INCOMPRESSIBILITY_THRESHOLD,
             )
 
-        clamped = _apply_clamp(
-            rate=rate,
-            clamp=self.secondary_clamp,
-            pressure=pressure,
-            control_type="primary phase rate control (secondary)",
-        )
-        return clamped if clamped is not None else rate
+        if self.secondary_clamp is not None:
+            is_clamped, clamped_rate = self.secondary_clamp.clamp_rate(rate, pressure)
+            if is_clamped:
+                logger.debug(
+                    f"Clamping rate {rate:.6f} to {clamped_rate:.6f} "
+                    f"(coupled rate control - secondary, pressure={pressure:.3f} psi)"
+                )
+                return clamped_rate
+        return rate
 
     def get_control(
         self,
@@ -2162,9 +2250,9 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
             requires; for secondary phases it is the same shared BHP.
         """
         if not is_active:
-            return ControlResult(rate=0.0, bhp=pressure)
+            return ControlResult(rate=0.0, bhp=pressure, is_bhp_control=False)
 
-        # Primary phase: delegate entirely to primary_control.get_control so
+        # Primary phase: delegate entirely to `primary_control.get_control` so
         # that the BHP solve and rate computation share intermediates there.
         if fluid.phase == self.primary_phase:
             return self.primary_control.get_control(
@@ -2191,7 +2279,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
                 f"Cannot compute control result for secondary phase {fluid.phase!s} - "
                 f"primary phase properties not provided. Returning zero rate / cell pressure."
             )
-            return ControlResult(rate=0.0, bhp=pressure)
+            return ControlResult(rate=0.0, bhp=pressure, is_bhp_control=False)
 
         if phase_mobility is None:
             raise ValidationError(
@@ -2202,7 +2290,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
         if _disallow_flow(
             fluid=fluid, phase_mobility=phase_mobility, is_active=is_active
         ):
-            return ControlResult(rate=0.0, bhp=pressure)
+            return ControlResult(rate=0.0, bhp=pressure, is_bhp_control=False)
 
         # Compute the shared BHP from the primary phase
         shared_bhp = self._compute_primary_bhp(
@@ -2263,15 +2351,17 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
                 incompressibility_threshold=c.FLUID_INCOMPRESSIBILITY_THRESHOLD,
             )
 
-        clamped_rate = _apply_clamp(
-            rate=rate,
-            clamp=self.secondary_clamp,
-            pressure=pressure,
-            control_type="coupled rate control (secondary)",
-        )
-        final_rate = clamped_rate if clamped_rate is not None else rate
+        final_rate = rate
+        if self.secondary_clamp is not None:
+            is_clamped, clamped_rate = self.secondary_clamp.clamp_rate(rate, pressure)
+            if is_clamped:
+                logger.debug(
+                    f"Clamping rate {rate:.6f} to {clamped_rate:.6f} "
+                    f"(coupled rate control - secondary, pressure={pressure:.3f} psi)"
+                )
+                final_rate = clamped_rate
 
-        return ControlResult(rate=final_rate, bhp=shared_bhp)
+        return ControlResult(rate=final_rate, bhp=shared_bhp, is_bhp_control=True)
 
     def build_primary_phase_context(
         self,
@@ -2558,7 +2648,7 @@ class MultiPhaseControl(WellControl):
             return self.water_control.get_control(**kwds)  # type: ignore[arg-type]
 
         # No sub-control for this phase, hence no flow, no drawdown.
-        return ControlResult(rate=0.0, bhp=pressure)
+        return ControlResult(rate=0.0, bhp=pressure, is_bhp_control=False)
 
     def update(
         self,

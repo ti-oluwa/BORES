@@ -688,7 +688,7 @@ def compute_gas_productivity_index(
     phase_mobility: float,
     pressure: float,
     temperature: float,
-    bottom_hole_pressure: float,  # ← add this parameter
+    bottom_hole_pressure: float, 
     formation_volume_factor: float,
     use_pseudo_pressure: bool = False,
     pseudo_pressure_table: typing.Optional[PseudoPressureTable] = None,

@@ -416,8 +416,7 @@ def _run_impes_step(
         dtype=dtype,
     )
     flux_boundaries, pressure_boundaries = boundary_conditions.get_boundaries(
-        grid_shape=grid_shape,
-        metadata=metadata,
+        grid_shape=grid_shape, metadata=metadata
     )
 
     logger.debug("Evolving pressure (implicit)...")
@@ -514,9 +513,8 @@ def _run_impes_step(
     # Carter-Tracy) see the new interior pressures before saturation evolves.
     logger.debug("Refreshing boundary maps after pressure solve...")
     metadata = attrs.evolve(metadata, fluid_properties=fluid_properties)
-    flux_boundaries, pressure_boundaries = boundary_conditions.get_boundaries(
-        grid_shape=grid_shape,
-        metadata=metadata,
+    flux_boundaries, pressure_boundaries = (
+        boundary_conditions.refresh_dynamic_boundaries(metadata=metadata)
     )
 
     logger.debug("Updating PVT fluid properties for saturation evolution...")
@@ -865,8 +863,7 @@ def _run_sequential_implicit_step(
         dtype=dtype,
     )
     flux_boundaries, pressure_boundaries = boundary_conditions.get_boundaries(
-        grid_shape=grid_shape,
-        metadata=metadata,
+        grid_shape=grid_shape, metadata=metadata
     )
 
     logger.debug("Evolving pressure (implicit)...")
@@ -959,9 +956,8 @@ def _run_sequential_implicit_step(
 
     # Refresh boundary maps so the saturation solve sees post-pressure BC values.
     metadata = attrs.evolve(metadata, fluid_properties=fluid_properties)
-    flux_boundaries, pressure_boundaries = boundary_conditions.get_boundaries(
-        grid_shape=grid_shape,
-        metadata=metadata,
+    flux_boundaries, pressure_boundaries = (
+        boundary_conditions.refresh_dynamic_boundaries(metadata=metadata)
     )
 
     old_rs = fluid_properties.solution_gas_to_oil_ratio_grid.copy()
@@ -1271,7 +1267,10 @@ def _run_full_sequential_implicit_step(
     )
 
     for iteration in range(maximum_outer_iterations):
-        logger.debug(f"Outer iteration {iteration + 1}/{maximum_outer_iterations}")
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "Outer iteration %d/%d", iteration + 1, maximum_outer_iterations
+            )
 
         metadata = build_boundary_metadata(
             fluid_properties=iter_fluid_properties,
@@ -1287,8 +1286,7 @@ def _run_full_sequential_implicit_step(
             dtype=dtype,
         )
         flux_boundaries, pressure_boundaries = boundary_conditions.get_boundaries(
-            grid_shape=grid_shape,
-            metadata=metadata,
+            grid_shape=grid_shape, metadata=metadata
         )
 
         pressure_result = implicit.evolve_pressure(
@@ -1442,13 +1440,11 @@ def _run_full_sequential_implicit_step(
 
         # Refresh boundary maps with updated pressure for the saturation solve.
         metadata = attrs.evolve(metadata, fluid_properties=iter_fluid_properties)
-        flux_boundaries, pressure_boundaries = boundary_conditions.get_boundaries(
-            grid_shape=grid_shape,
-            metadata=metadata,
+        flux_boundaries, pressure_boundaries = (
+            boundary_conditions.refresh_dynamic_boundaries(metadata=metadata)
         )
 
         pressure_change_grid = pressure_grid - fluid_properties.pressure_grid
-
         saturation_result = implicit.evolve_saturation(
             grid_shape=grid_shape,
             cell_dimension=cell_dimension,
@@ -1783,8 +1779,7 @@ def _run_explicit_step(
         dtype=dtype,
     )
     flux_boundaries, pressure_boundaries = boundary_conditions.get_boundaries(
-        grid_shape=grid_shape,
-        metadata=metadata,
+        grid_shape=grid_shape, metadata=metadata
     )
 
     logger.debug("Evolving pressure (explicit)...")
@@ -2385,9 +2380,9 @@ def run(
     logger.info(
         f"Evolution scheme: {_SCHEME_ALIASES.get(scheme, scheme.replace('-', ' ').title())}"
     )
-    logger.info(f"Total simulation time: {timer.simulation_time} seconds")
-    logger.info(f"Output frequency: every {output_frequency} steps")
-    logger.info(f"Has wells: {has_wells}")
+    logger.info("Total simulation time: %.1f seconds", timer.simulation_time)
+    logger.info("Output frequency: every %d steps", output_frequency)
+    logger.info("Has wells: %s", has_wells)
     if has_wells:
         logger.debug("Checking well locations against grid shape")
         wells.check_location(grid_shape=grid_shape)
@@ -2538,13 +2533,13 @@ def run(
                 )
 
                 if scheme == "impes":
-                    result = _run_impes_step(**step_kwargs)
+                    result = _run_impes_step(**step_kwargs) # type: ignore[arg-type]
                 elif scheme in {"sequential-implicit", "si"}:
-                    result = _run_sequential_implicit_step(**step_kwargs)
+                    result = _run_sequential_implicit_step(**step_kwargs) # type: ignore[arg-type]
                 elif scheme in {"full-sequential-implicit", "full-si"}:
-                    result = _run_full_sequential_implicit_step(**step_kwargs)
+                    result = _run_full_sequential_implicit_step(**step_kwargs) # type: ignore[arg-type]
                 elif scheme == "explicit":
-                    result = _run_explicit_step(**step_kwargs)
+                    result = _run_explicit_step(**step_kwargs) # type: ignore[arg-type]
                 else:
                     raise ValidationError(
                         f"Invalid simulation scheme {scheme!r}. "
@@ -2558,7 +2553,10 @@ def run(
                 if result.success:
                     acceptable, error_msg = timer.is_acceptable(**timer_kwargs)
                     if acceptable:
-                        logger.debug(f"Time step {new_step} completed successfully.")
+                        if logger.isEnabledFor(logging.DEBUG):
+                            logger.debug(
+                                "Time step %d completed successfully.", new_step
+                            )
                         timer.accept_step(step_size=step_size, **timer_kwargs)
                         if log_interval:
                             log_progress(
@@ -2603,7 +2601,10 @@ def run(
                     or (timer.step % output_frequency == 0)
                     or timer.is_last_step
                 ):
-                    logger.debug(f"Capturing model state at time step {timer.step}")
+                    if logger.isEnabledFor(logging.DEBUG):
+                        logger.debug(
+                            "Capturing model state at time step %d", timer.step
+                        )
                     injection_rates = result.injection_rates
                     production_rates = result.production_rates
                     injection_fvfs = result.injection_fvfs
@@ -2664,11 +2665,11 @@ def run(
                     yield state
 
             except StopSimulation as exc:
-                logger.info(f"Stopping simulation on request: {exc}")
+                logger.info("Stopping simulation on request: %s", exc)
                 break
             except Exception as exc:
                 raise SimulationError(
                     f"Simulation failed while attempting time step {new_step} due to error: {exc}"
                 ) from exc
 
-    logger.info(f"Simulation completed successfully after {timer.step} time steps")
+    logger.info("Simulation completed successfully after %d time steps", timer.step)
