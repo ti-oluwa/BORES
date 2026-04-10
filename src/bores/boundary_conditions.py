@@ -29,6 +29,7 @@ import typing
 
 import attrs
 import numpy as np
+import numpy.typing as npt
 from typing_extensions import ParamSpec, Self
 
 from bores.constants import c
@@ -322,7 +323,7 @@ def _constant_productivity_index(
     """
     assert metadata.fluid_properties is not None
     shape = metadata.fluid_properties.pressure_grid[boundary_slice].shape
-    return np.full(shape, value, dtype=np.float64)
+    return np.full(shape, value, dtype=metadata.dtype)
 
 
 @boundary_function(name="transmissibility_weighted_pi")
@@ -470,6 +471,9 @@ class BoundaryMetadata:
 
     thickness_grid: typing.Optional[NDimensionalGrid] = None
     """Un-padded cell thickness array (ft)."""
+
+    dtype: npt.DTypeLike = np.float64
+    """Data type for any arrays returned by boundary conditions."""
 
 
 class BoundaryCondition(
@@ -649,7 +653,7 @@ class NeumannBoundary(BoundaryCondition[NDimension]):
                 "the boundary slice shape."
             )
         shape = metadata.fluid_properties.pressure_grid[boundary_slice].shape
-        return np.full(shape, self.flux, dtype=np.float64)
+        return np.full(shape, self.flux, dtype=metadata.dtype)
 
     def get_type(self) -> BoundaryType:
         """
@@ -728,7 +732,7 @@ class DirichletBoundary(BoundaryCondition[NDimension]):
                 "the boundary slice shape."
             )
         shape = metadata.fluid_properties.pressure_grid[boundary_slice].shape
-        return np.full(shape, self.pressure, dtype=np.float64)
+        return np.full(shape, self.pressure, dtype=metadata.dtype)
 
     def get_type(self) -> BoundaryType:
         """
@@ -847,10 +851,10 @@ class RobinBoundary(BoundaryCondition[NDimension]):
 
         nbr_slice = _neighbour_slice(boundary_slice, direction)
         p_interior = metadata.fluid_properties.pressure_grid[nbr_slice].astype(
-            np.float64, copy=False
+            metadata.dtype, copy=False
         )
         pi_array = np.asarray(
-            self.alpha(metadata, boundary_slice, direction), dtype=np.float64
+            self.alpha(metadata, boundary_slice, direction), dtype=metadata.dtype
         )
         return pi_array * (self.pressure - p_interior)
 
@@ -1095,7 +1099,7 @@ class CarterTracyAquifer(BoundaryCondition[NDimension]):
 
         shape = metadata.fluid_properties.pressure_grid[boundary_slice].shape
         if metadata.time is None:
-            return np.zeros(shape, dtype=np.float64)
+            return np.zeros(shape, dtype=metadata.dtype)
 
         current_time_days = metadata.time * c.DAYS_PER_SECOND
 
@@ -1120,7 +1124,7 @@ class CarterTracyAquifer(BoundaryCondition[NDimension]):
         # Distribute the scalar influx uniformly across the boundary face cells.
         n_cells = int(np.prod(shape)) if shape else 1
         per_cell_flux = influx_rate / n_cells if n_cells > 0 else 0.0
-        return np.full(shape, per_cell_flux, dtype=np.float64)
+        return np.full(shape, per_cell_flux, dtype=metadata.dtype)
 
     def get_type(self) -> BoundaryType:
         """
@@ -1487,8 +1491,8 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
 
         # Initialize caches on first call
         if first_call:
-            flux_cache = np.full(padded_shape, np.nan, dtype=np.float64)
-            pressure_cache = np.full(padded_shape, np.nan, dtype=np.float64)
+            flux_cache = np.full(padded_shape, np.nan, dtype=metadata.dtype)
+            pressure_cache = np.full(padded_shape, np.nan, dtype=metadata.dtype)
             object.__setattr__(self, "_flux_cache", flux_cache)
             object.__setattr__(self, "_pressure_cache", pressure_cache)
         else:
@@ -1497,22 +1501,36 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
             assert flux_cache is not None and pressure_cache is not None
 
         for direction, condition in face_conditions:
-            ghost_slice, _ = faces[direction]
-
             # Skip static faces after the first initialisation pass.
             if not first_call and condition.is_static():
                 continue
 
+            ghost_slice, _ = faces[direction]
             values = condition(ghost_slice, direction, metadata)
             bc_type = condition.get_type()
 
+            # `ghost_slice` addresses the padded cache but the BC returns values
+            # shaped for the real grid face (no corners/edges).
+            # So we build an inset slice: on the face-normal axis keep ghost_slice as-is,
+            # on all other axes shift inward by pad_width to skip corner ghost cells.
+            inset = []
+            for ax, s in enumerate(ghost_slice):
+                if isinstance(s, slice) and s.start is None and s.stop is None:
+                    # This is a slice(None) axis. It spans the full padded dimension.
+                    # Inset by pad_width on each end to reach only real-cell-facing ghosts.
+                    inset.append(slice(pad_width, -pad_width))
+                else:
+                    # This is the face-normal axis so we keep as-is (the single ghost layer).
+                    inset.append(s)
+            inset_slice = tuple(inset)
+
             # Write values to the appropriate cache and clear the opposite cache
             if bc_type == BoundaryType.FLUX:
-                flux_cache[ghost_slice] = values
-                pressure_cache[ghost_slice] = np.nan
+                flux_cache[inset_slice] = values
+                pressure_cache[inset_slice] = np.nan
             else:
-                pressure_cache[ghost_slice] = values
-                flux_cache[ghost_slice] = np.nan
+                pressure_cache[inset_slice] = values
+                flux_cache[inset_slice] = np.nan
 
         if first_call:
             object.__setattr__(self, "_cache_initialised", True)

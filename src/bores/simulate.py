@@ -141,6 +141,7 @@ def build_boundary_metadata(
     cell_dimension: typing.Tuple[float, float],
     thickness_grid: NDimensionalGrid[ThreeDimensions],
     time: float,
+    dtype: npt.DTypeLike = np.float64,
 ) -> BoundaryMetadata:
     """
     Build a `BoundaryMetadata` bundle from the current simulation state.
@@ -173,6 +174,7 @@ def build_boundary_metadata(
         grid_shape=grid_shape,
         cell_dimension=cell_dimension,
         thickness_grid=thickness_grid,
+        dtype=dtype,
     )
 
 
@@ -459,8 +461,9 @@ def _run_impes_step(
         cell_dimension=cell_dimension,
         thickness_grid=thickness_grid,
         time=time,
+        dtype=dtype,
     )
-    flux_map, pressure_map = boundary_conditions.get_boundaries(
+    flux_boundaries, pressure_boundaries = boundary_conditions.get_boundaries(
         grid_shape=grid_shape,
         metadata=metadata,
     )
@@ -487,8 +490,8 @@ def _run_impes_step(
         face_transmissibilities=face_transmissibilities,
         wells=wells,
         config=config,
-        flux_boundaries=flux_map,
-        pressure_boundaries=pressure_map,
+        flux_boundaries=flux_boundaries,
+        pressure_boundaries=pressure_boundaries,
         injection_rates=_rates_proxy(injection_rates),
         production_rates=_rates_proxy(production_rates),
         injection_fvfs=_fvfs_proxy(injection_fvfs),
@@ -559,7 +562,7 @@ def _run_impes_step(
     # Carter-Tracy) see the new interior pressures before saturation evolves.
     logger.debug("Refreshing boundary maps after pressure solve...")
     metadata = attrs.evolve(metadata, fluid_properties=fluid_properties)
-    flux_map, pressure_map = boundary_conditions.get_boundaries(
+    flux_boundaries, pressure_boundaries = boundary_conditions.get_boundaries(
         grid_shape=grid_shape,
         metadata=metadata,
     )
@@ -675,8 +678,8 @@ def _run_impes_step(
             capillary_pressure_grids=capillary_pressure_grids,
             face_transmissibilities=face_transmissibilities,
             config=config,
-            flux_boundaries=flux_map,
-            pressure_boundaries=pressure_map,
+            flux_boundaries=flux_boundaries,
+            pressure_boundaries=pressure_boundaries,
             well_indices_cache=well_indices_cache,
             injection_rates=_rates_proxy(injection_rates),
             production_rates=_rates_proxy(production_rates),
@@ -697,8 +700,8 @@ def _run_impes_step(
             capillary_pressure_grids=capillary_pressure_grids,
             wells=wells,
             config=config,
-            flux_boundaries=flux_map,
-            pressure_boundaries=pressure_map,
+            flux_boundaries=flux_boundaries,
+            pressure_boundaries=pressure_boundaries,
             well_indices_cache=well_indices_cache,
             injection_rates=_rates_proxy(injection_rates),
             production_rates=_rates_proxy(production_rates),
@@ -907,8 +910,9 @@ def _run_sequential_implicit_step(
         cell_dimension=cell_dimension,
         thickness_grid=thickness_grid,
         time=time,
+        dtype=dtype,
     )
-    flux_map, pressure_map = boundary_conditions.get_boundaries(
+    flux_boundaries, pressure_boundaries = boundary_conditions.get_boundaries(
         grid_shape=grid_shape,
         metadata=metadata,
     )
@@ -935,8 +939,8 @@ def _run_sequential_implicit_step(
         face_transmissibilities=face_transmissibilities,
         wells=wells,
         config=config,
-        flux_boundaries=flux_map,
-        pressure_boundaries=pressure_map,
+        flux_boundaries=flux_boundaries,
+        pressure_boundaries=pressure_boundaries,
         well_indices_cache=well_indices_cache,
         injection_rates=_rates_proxy(injection_rates),
         production_rates=_rates_proxy(production_rates),
@@ -1003,7 +1007,7 @@ def _run_sequential_implicit_step(
 
     # Refresh boundary maps so the saturation solve sees post-pressure BC values.
     metadata = attrs.evolve(metadata, fluid_properties=fluid_properties)
-    flux_map, pressure_map = boundary_conditions.get_boundaries(
+    flux_boundaries, pressure_boundaries = boundary_conditions.get_boundaries(
         grid_shape=grid_shape,
         metadata=metadata,
     )
@@ -1087,8 +1091,8 @@ def _run_sequential_implicit_step(
         face_transmissibilities=face_transmissibilities,
         config=config,
         well_indices_cache=well_indices_cache,
-        flux_boundaries=flux_map,
-        pressure_boundaries=pressure_map,
+        flux_boundaries=flux_boundaries,
+        pressure_boundaries=pressure_boundaries,
         injection_rates=_rates_proxy(injection_rates),
         production_rates=_rates_proxy(production_rates),
         injection_bhps=_bhps_proxy(injection_bhps),
@@ -1328,8 +1332,9 @@ def _run_full_sequential_implicit_step(
             cell_dimension=cell_dimension,
             thickness_grid=thickness_grid,
             time=time,
+            dtype=dtype,
         )
-        flux_map, pressure_map = boundary_conditions.get_boundaries(
+        flux_boundaries, pressure_boundaries = boundary_conditions.get_boundaries(
             grid_shape=grid_shape,
             metadata=metadata,
         )
@@ -1349,8 +1354,8 @@ def _run_full_sequential_implicit_step(
             wells=wells,
             config=config,
             well_indices_cache=well_indices_cache,
-            flux_boundaries=flux_map,
-            pressure_boundaries=pressure_map,
+            flux_boundaries=flux_boundaries,
+            pressure_boundaries=pressure_boundaries,
             injection_rates=_rates_proxy(injection_rates),
             production_rates=_rates_proxy(production_rates),
             injection_fvfs=_fvfs_proxy(injection_fvfs),
@@ -1485,7 +1490,7 @@ def _run_full_sequential_implicit_step(
 
         # Refresh boundary maps with updated pressure for the saturation solve.
         metadata = attrs.evolve(metadata, fluid_properties=iter_fluid_properties)
-        flux_map, pressure_map = boundary_conditions.get_boundaries(
+        flux_boundaries, pressure_boundaries = boundary_conditions.get_boundaries(
             grid_shape=grid_shape,
             metadata=metadata,
         )
@@ -1504,8 +1509,8 @@ def _run_full_sequential_implicit_step(
             face_transmissibilities=face_transmissibilities,
             config=config,
             well_indices_cache=well_indices_cache,
-            flux_boundaries=flux_map,
-            pressure_boundaries=pressure_map,
+            flux_boundaries=flux_boundaries,
+            pressure_boundaries=pressure_boundaries,
             injection_rates=_rates_proxy(injection_rates),
             production_rates=_rates_proxy(production_rates),
             injection_bhps=_bhps_proxy(injection_bhps),
@@ -1823,8 +1828,9 @@ def _run_explicit_step(
         cell_dimension=cell_dimension,
         thickness_grid=thickness_grid,
         time=time,
+        dtype=dtype,
     )
-    flux_map, pressure_map = boundary_conditions.get_boundaries(
+    flux_boundaries, pressure_boundaries = boundary_conditions.get_boundaries(
         grid_shape=grid_shape,
         metadata=metadata,
     )
@@ -1851,8 +1857,8 @@ def _run_explicit_step(
         face_transmissibilities=face_transmissibilities,
         wells=wells,
         config=config,
-        flux_boundaries=flux_map,
-        pressure_boundaries=pressure_map,
+        flux_boundaries=flux_boundaries,
+        pressure_boundaries=pressure_boundaries,
         well_indices_cache=well_indices_cache,
         injection_rates=_rates_proxy(injection_rates),
         production_rates=_rates_proxy(production_rates),
@@ -1949,8 +1955,8 @@ def _run_explicit_step(
             capillary_pressure_grids=capillary_pressure_grids,
             face_transmissibilities=face_transmissibilities,
             config=config,
-            flux_boundaries=flux_map,
-            pressure_boundaries=pressure_map,
+            flux_boundaries=flux_boundaries,
+            pressure_boundaries=pressure_boundaries,
             well_indices_cache=well_indices_cache,
             injection_rates=_rates_proxy(injection_rates),
             production_rates=_rates_proxy(production_rates),
@@ -1971,8 +1977,8 @@ def _run_explicit_step(
             capillary_pressure_grids=capillary_pressure_grids,
             wells=wells,
             config=config,
-            flux_boundaries=flux_map,
-            pressure_boundaries=pressure_map,
+            flux_boundaries=flux_boundaries,
+            pressure_boundaries=pressure_boundaries,
             well_indices_cache=well_indices_cache,
             injection_rates=_rates_proxy(injection_rates),
             production_rates=_rates_proxy(production_rates),
