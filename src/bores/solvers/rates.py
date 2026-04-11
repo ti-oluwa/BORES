@@ -121,9 +121,15 @@ def compute_well_rates(
                     temperature=cell_temperature,
                 ),
             )
+            phase_mobility = typing.cast(
+                float,
+                injected_fluid.get_mobility(
+                    pressure=new_pressure,
+                    temperature=cell_temperature,
+                ),
+            )
 
             if injected_phase == FluidPhase.GAS:
-                phase_mobility = typing.cast(float, gas_relative_mobility_grid[i, j, k])
                 # Build pseudo-pressure table if needed
                 use_pp, pp_table = get_pseudo_pressure_table(
                     fluid=injected_fluid,
@@ -163,9 +169,6 @@ def compute_well_rates(
 
             else:
                 # Water injection
-                phase_mobility = typing.cast(
-                    float, water_relative_mobility_grid[i, j, k]
-                )
                 if well.injected_fluid.phase == FluidPhase.WATER:
                     compressibility_kwargs = {
                         "bubble_point_pressure": water_bubble_point_pressure_grid[

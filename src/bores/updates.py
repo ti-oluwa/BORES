@@ -31,6 +31,7 @@ from bores.grids.pvt import (
 )
 from bores.grids.rock_fluid import build_effective_residual_saturation_grids
 from bores.models import FluidProperties, RockProperties, SaturationHistory
+from bores.solvers.base import normalize_saturations
 from bores.tables.pvt import PVTTables
 from bores.types import (
     MiscibilityModel,
@@ -482,6 +483,7 @@ def _apply_solution_gas_updates(
     old_water_formation_volume_factor_grid: ThreeDimensionalGrid,
     bbl_to_ft3: float,
     dtype: npt.DTypeLike,
+    saturation_epsilon: float = 1e-6,
 ) -> typing.Tuple[
     ThreeDimensionalGrid,
     ThreeDimensionalGrid,
@@ -490,10 +492,7 @@ def _apply_solution_gas_updates(
     ThreeDimensionalGrid,
 ]:
     """
-    Jit-friendly core of the solution gas liberation/re-dissolution flash.
-
-    Accepts and returns raw grids only; all `attrs` manipulation is handled
-    by the calling `apply_solution_gas_updates` wrapper.
+    Jitted core of the solution gas liberation/re-dissolution flash.
 
     :param oil_saturation_grid: Oil saturation grid (fraction).
     :param water_saturation_grid: Water saturation grid (fraction).
@@ -507,6 +506,9 @@ def _apply_solution_gas_updates(
     :param old_oil_formation_volume_factor_grid: Bo grid before PVT update (bbl/STB).
     :param old_gas_solubility_in_water_grid: Rsw grid before PVT update (SCF/STB).
     :param old_water_formation_volume_factor_grid: Bw grid before PVT update (bbl/STB).
+    :param bbl_to_ft3: Conversion factor from barrels to cubic feet.
+    :param dtype: Data type for intermediate calculations (e.g., np.float32 or np.float64).
+    :param saturation_epsilon: Small threshold to prevent numerical issues with very low saturations.
     :return: Tuple of (oil_saturation, water_saturation, gas_saturation, corrected_Rs, corrected_Rsw).
     """
     oil_saturation_grid = oil_saturation_grid.copy()
@@ -661,6 +663,12 @@ def _apply_solution_gas_updates(
     water_saturation_grid = np.maximum(water_saturation_grid, zero)
     gas_saturation_grid = np.maximum(gas_saturation_grid, zero)
 
+    normalize_saturations(
+        oil_saturation_grid=oil_saturation_grid,
+        water_saturation_grid=water_saturation_grid,
+        gas_saturation_grid=gas_saturation_grid,
+        saturation_epsilon=saturation_epsilon,
+    )
     return (
         oil_saturation_grid.astype(dtype),
         water_saturation_grid.astype(dtype),
@@ -723,6 +731,7 @@ def apply_solution_gas_updates(
         old_water_formation_volume_factor_grid=old_water_formation_volume_factor_grid,
         bbl_to_ft3=c.BARRELS_TO_CUBIC_FEET,
         dtype=fluid_properties.oil_saturation_grid.dtype,
+        saturation_epsilon=c.SATURATION_EPSILON,
     )
     return attrs.evolve(
         fluid_properties,

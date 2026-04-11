@@ -1000,21 +1000,18 @@ def compute_well_rate_grid(
                 **compressibility_kwargs,
             )
             phase_compressibility = typing.cast(float, phase_compressibility)
-
-            # Injection wells use total mobility since injected fluid
-            # displaces all existing phases in the cell
-            total_mobility = (
-                water_relative_mobility_grid[i, j, k]
-                + oil_relative_mobility_grid[i, j, k]
-                + gas_relative_mobility_grid[i, j, k]
+            phase_mobility = typing.cast(
+                float,
+                injected_fluid.get_mobility(
+                    pressure=cell_oil_pressure, temperature=cell_temperature
+                ),
             )
-            effective_mobility = typing.cast(float, total_mobility)
 
             flow_rate, effective_bhp = well.get_control(
                 pressure=cell_oil_pressure,
                 temperature=cell_temperature,
                 well_index=well_index,
-                phase_mobility=effective_mobility,
+                phase_mobility=phase_mobility,
                 fluid=injected_fluid,
                 fluid_compressibility=phase_compressibility,
                 use_pseudo_pressure=use_pseudo_pressure,

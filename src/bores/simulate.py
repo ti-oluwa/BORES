@@ -598,7 +598,7 @@ def _run_impes_step(
         pvt_tables=config.pvt_tables,
         freeze_saturation_pressure=config.freeze_saturation_pressure,
     )
-
+    
     # Rebuild rock-fluid grids from post-flash saturations so that krg > 0
     # in cells with newly liberated gas before the saturation transport.
     logger.debug("Rebuilding relative permeability and mobility grids...")

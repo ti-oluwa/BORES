@@ -688,7 +688,7 @@ def compute_gas_productivity_index(
     phase_mobility: float,
     pressure: float,
     temperature: float,
-    bottom_hole_pressure: float, 
+    bottom_hole_pressure: float,
     formation_volume_factor: float,
     use_pseudo_pressure: bool = False,
     pseudo_pressure_table: typing.Optional[PseudoPressureTable] = None,
@@ -868,6 +868,18 @@ class InjectedFluid(WellFluid):
     When provided, bypasses both `pvt_table` and correlation-based viscosity
     calculations entirely. Useful for non-ideal gases such as CO2 where a
     measured or equation-of-state viscosity is available.
+    """
+
+    mobility: typing.Optional[float] = None
+    """
+    Fluid relative mobility (1/cP) at reservoir conditions.
+
+    When provided, is its used in the rate calculations directly, 
+    else;
+    - For water: computed as 1/viscosity, where viscosity is obtained from
+      `self.viscosity` or water viscosity correlations.
+    - For gas: computed as 1/viscosity, where viscosity is obtained from `self.viscosity` or gas
+        viscosity correlations.
     """
 
     def __attrs_post_init__(self) -> None:
@@ -1123,6 +1135,33 @@ class InjectedFluid(WellFluid):
             gas_density=gas_density,  # type: ignore
             gas_molecular_weight=self.molecular_weight,
         )
+
+    def get_mobility(
+        self, pressure: FloatOrArray, temperature: FloatOrArray, **kwargs: typing.Any
+    ) -> FloatOrArray:
+        """
+        Get the relative mobility (1/cP) of the fluid at given pressure and temperature.
+
+        Lookup priority:
+
+        1. `self.mobility` scalar override. Returned directly if set.
+        2. Computed as 1/viscosity, where viscosity is obtained from `self.viscosity`,
+           `pvt_table`, or correlations as per `get_viscosity`.
+
+        :param pressure: The pressure at which to evaluate the mobility (psi).
+        :param temperature: The temperature at which to evaluate the mobility (°F).
+        :kwargs: Additional parameters for mobility calculations, passed through to `get_viscosity`.
+        :return: The relative mobility of the fluid (1/cP).
+        """
+        if self.mobility is not None:
+            if isinstance(pressure, np.ndarray):
+                return np.full_like(pressure, self.mobility)
+            return self.mobility
+
+        viscosity = self.get_viscosity(pressure, temperature, **kwargs)
+        # Avoid division by zero; enforce a minimum viscosity of 0.001 cP
+        safe_viscosity = np.maximum(viscosity, 0.001)
+        return 1.0 / safe_viscosity
 
     def get_compressibility(
         self, pressure: FloatOrArray, temperature: FloatOrArray, **kwargs: typing.Any
