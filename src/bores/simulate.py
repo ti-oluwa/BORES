@@ -341,7 +341,6 @@ def _rebuild_rock_fluid_grids(
         capillary_pressure_table=config.rock_fluid_tables.capillary_pressure_table,
         disable_capillary_effects=config.disable_capillary_effects,
         capillary_strength_factor=config.capillary_strength_factor,
-        relative_mobility_range=config.relative_mobility_range,
         phase_appearance_tolerance=config.phase_appearance_tolerance,
     )
 
@@ -427,6 +426,11 @@ def _run_impes_step(
     production_fvfs = _make_fvfs(grid_shape)
     injection_bhps = _make_bhps(grid_shape)
     production_bhps = _make_bhps(grid_shape)
+    injection_saturation_changes = PhaseTensorsProxy(
+        oil=SparseTensor(grid_shape, dtype=float),
+        water=SparseTensor(grid_shape, dtype=float),
+        gas=SparseTensor(grid_shape, dtype=float),
+    )
 
     pressure_result = implicit.evolve_pressure(
         cell_dimension=cell_dimension,
@@ -502,7 +506,6 @@ def _run_impes_step(
         dtype=dtype,
         out=pressure_grid,
     )
-
     fluid_properties = attrs.evolve(fluid_properties, pressure_grid=pressure_grid)
     logger.debug("Pressure evolution completed.")
 
@@ -525,6 +528,28 @@ def _run_impes_step(
         production_rates=_rates_proxy(production_rates),
         injection_fvfs=_fvfs_proxy(injection_fvfs),
         production_fvfs=_fvfs_proxy(production_fvfs),
+        injection_saturation_changes=injection_saturation_changes,
+        cell_dimension=cell_dimension,
+        time_step_size=time_step_size,
+        porosity_grid=rock_properties.porosity_grid,
+        thickness_grid=thickness_grid,
+        net_to_gross_grid=rock_properties.net_to_gross_ratio_grid,
+    )
+
+    # Update saturations with injection changes before the flash so that gas
+    # from injection is accounted for in the flash and relative permeability updates.
+    water_saturation_grid = (
+        fluid_properties.water_saturation_grid
+        + injection_saturation_changes.water.array(dtype=dtype)
+    )
+    gas_saturation_grid = (
+        fluid_properties.gas_saturation_grid
+        + injection_saturation_changes.gas.array(dtype=dtype)
+    )
+    fluid_properties = attrs.evolve(
+        fluid_properties,
+        water_saturation_grid=water_saturation_grid,
+        gas_saturation_grid=gas_saturation_grid,
     )
 
     # Refresh boundary maps after pressure update so that dynamic BCs (Robin,
@@ -558,7 +583,6 @@ def _run_impes_step(
         old_gas_solubility_in_water_grid=old_rsw,
         old_water_formation_volume_factor_grid=old_bw,
     )
-
     flash_check = _check_saturation_changes(
         maximum_oil_saturation_change=float(
             np.max(np.abs(fluid_properties.oil_saturation_grid - old_so))
@@ -598,7 +622,7 @@ def _run_impes_step(
         pvt_tables=config.pvt_tables,
         freeze_saturation_pressure=config.freeze_saturation_pressure,
     )
-    
+
     # Rebuild rock-fluid grids from post-flash saturations so that krg > 0
     # in cells with newly liberated gas before the saturation transport.
     logger.debug("Rebuilding relative permeability and mobility grids...")
@@ -621,9 +645,6 @@ def _run_impes_step(
         oil_viscosity_grid=fluid_properties.oil_effective_viscosity_grid,
         gas_viscosity_grid=fluid_properties.gas_viscosity_grid,
     )
-    lw = config.relative_mobility_range["water"].clip(lw)
-    lo = config.relative_mobility_range["oil"].clip(lo)
-    lg = config.relative_mobility_range["gas"].clip(lg)
     relative_mobility_grids = RelativeMobilityGrids(
         water_relative_mobility=lw,
         oil_relative_mobility=lo,
@@ -891,6 +912,11 @@ def _run_sequential_implicit_step(
     production_fvfs = _make_fvfs(grid_shape)
     injection_bhps = _make_bhps(grid_shape)
     production_bhps = _make_bhps(grid_shape)
+    injection_saturation_changes = PhaseTensorsProxy(
+        oil=SparseTensor(grid_shape, dtype=float),
+        water=SparseTensor(grid_shape, dtype=float),
+        gas=SparseTensor(grid_shape, dtype=float),
+    )
 
     pressure_result = implicit.evolve_pressure(
         cell_dimension=cell_dimension,
@@ -988,6 +1014,28 @@ def _run_sequential_implicit_step(
         production_rates=_rates_proxy(production_rates),
         injection_fvfs=_fvfs_proxy(injection_fvfs),
         production_fvfs=_fvfs_proxy(production_fvfs),
+        injection_saturation_changes=injection_saturation_changes,
+        cell_dimension=cell_dimension,
+        time_step_size=time_step_size,
+        porosity_grid=rock_properties.porosity_grid,
+        thickness_grid=thickness_grid,
+        net_to_gross_grid=rock_properties.net_to_gross_ratio_grid,
+    )
+
+    # Update saturations with injection changes before the flash so that gas
+    # from injection is accounted for in the flash and relative permeability updates.
+    water_saturation_grid = (
+        fluid_properties.water_saturation_grid
+        + injection_saturation_changes.water.array(dtype=dtype)
+    )
+    gas_saturation_grid = (
+        fluid_properties.gas_saturation_grid
+        + injection_saturation_changes.gas.array(dtype=dtype)
+    )
+    fluid_properties = attrs.evolve(
+        fluid_properties,
+        water_saturation_grid=water_saturation_grid,
+        gas_saturation_grid=gas_saturation_grid,
     )
 
     # Refresh boundary maps so the saturation solve sees post-pressure BC values.
@@ -1289,6 +1337,11 @@ def _run_full_sequential_implicit_step(
     production_fvfs = _make_fvfs(grid_shape)
     injection_bhps = _make_bhps(grid_shape)
     production_bhps = _make_bhps(grid_shape)
+    injection_saturation_changes = PhaseTensorsProxy(
+        oil=SparseTensor(grid_shape, dtype=float),
+        water=SparseTensor(grid_shape, dtype=float),
+        gas=SparseTensor(grid_shape, dtype=float),
+    )
 
     outer_converged = False
     saturation_result = None
@@ -1413,9 +1466,13 @@ def _run_full_sequential_implicit_step(
         iter_fluid_properties = attrs.evolve(
             iter_fluid_properties, pressure_grid=pressure_grid
         )
-        logger.debug("Pressure updated in fluid properties for outer iteration saturation solve.")
+        logger.debug(
+            "Pressure updated in fluid properties for outer iteration saturation solve."
+        )
 
-        logger.debug("Computing well rates from new pressure and stored BHPs for outer iteration saturation solve...")
+        logger.debug(
+            "Computing well rates from new pressure and stored BHPs for outer iteration saturation solve..."
+        )
         compute_well_rates(
             new_pressure_grid=pressure_grid,
             temperature_grid=iter_fluid_properties.temperature_grid,
@@ -1434,6 +1491,28 @@ def _run_full_sequential_implicit_step(
             production_rates=_rates_proxy(production_rates),
             injection_fvfs=_fvfs_proxy(injection_fvfs),
             production_fvfs=_fvfs_proxy(production_fvfs),
+            injection_saturation_changes=injection_saturation_changes,
+            cell_dimension=cell_dimension,
+            time_step_size=time_step_size,
+            porosity_grid=rock_properties.porosity_grid,
+            thickness_grid=thickness_grid,
+            net_to_gross_grid=rock_properties.net_to_gross_ratio_grid,
+        )
+
+        # Update saturations with injection changes before the flash so that gas
+        # from injection is accounted for in the flash and relative permeability updates.
+        water_saturation_grid = (
+            iter_fluid_properties.water_saturation_grid
+            + injection_saturation_changes.water.array(dtype=dtype)
+        )
+        gas_saturation_grid = (
+            iter_fluid_properties.gas_saturation_grid
+            + injection_saturation_changes.gas.array(dtype=dtype)
+        )
+        iter_fluid_properties = attrs.evolve(
+            iter_fluid_properties,
+            water_saturation_grid=water_saturation_grid,
+            gas_saturation_grid=gas_saturation_grid,
         )
 
         iter_fluid_properties = update_fluid_properties(
@@ -1698,6 +1777,11 @@ def _run_full_sequential_implicit_step(
         production_fvfs = _make_fvfs(grid_shape)
         injection_bhps = _make_bhps(grid_shape)
         production_bhps = _make_bhps(grid_shape)
+        injection_saturation_changes = PhaseTensorsProxy(
+            oil=SparseTensor(grid_shape, dtype=float),
+            water=SparseTensor(grid_shape, dtype=float),
+            gas=SparseTensor(grid_shape, dtype=float),
+        )
 
     if not outer_converged:
         logger.warning(
@@ -2451,6 +2535,8 @@ def run(
         rock_properties = model.rock_properties
         saturation_history = model.saturation_history if enable_hysteresis else None
         thickness_grid = model.thickness_grid
+        absolute_permeability = rock_properties.absolute_permeability
+        net_to_gross_grid = rock_properties.net_to_gross_ratio_grid
 
         logger.debug("Building well indices cache")
         well_indices_cache = build_well_indices_cache(
@@ -2459,7 +2545,8 @@ def run(
             cell_size_y=cell_dimension[1],
             thickness_grid=thickness_grid,
             wells=wells,
-            absolute_permeability=rock_properties.absolute_permeability,
+            absolute_permeability=absolute_permeability,
+            net_to_gross_grid=net_to_gross_grid,
             boundary_conditions=boundary_conditions,
         )
 
@@ -2469,8 +2556,9 @@ def run(
 
         logger.debug("Building face transmissibilities")
         face_transmissibilities = build_face_transmissibilities(
-            absolute_permeability=rock_properties.absolute_permeability,
+            absolute_permeability=absolute_permeability,
             thickness_grid=thickness_grid,
+            net_to_gross_grid=net_to_gross_grid,
             cell_size_x=cell_dimension[0],
             cell_size_y=cell_dimension[1],
             dtype=dtype,
@@ -2557,7 +2645,8 @@ def run(
                                 cell_size_y=cell_dimension[1],
                                 thickness_grid=thickness_grid,
                                 wells=wells,
-                                absolute_permeability=rock_properties.absolute_permeability,
+                                absolute_permeability=absolute_permeability,
+                                net_to_gross_grid=net_to_gross_grid,
                                 boundary_conditions=boundary_conditions,
                             )
 

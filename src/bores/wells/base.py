@@ -267,6 +267,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         interval_thickness: typing.Tuple[float, ...],
         permeability: typing.Tuple[float, ...],
         skin_factor: typing.Optional[float] = None,
+        net_to_gross: float = 1.0,
         well_location: typing.Optional[Coordinates] = None,
         grid_shape: typing.Optional[Coordinates] = None,
         boundary_conditions: typing.Optional[BoundaryConditions[Coordinates]] = None,
@@ -279,6 +280,8 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
         :param interval_thickness: A tuple representing the thickness of the reservoir interval in each direction (ft).
         :param permeability: A tuple representing the permeability of the reservoir rock in each direction (mD).
         :param skin_factor: Well skin factor (dimensionless). If None, uses self.skin_factor.
+        :param net_to_gross: Net-to-gross ratio of the reservoir interval (default is 1.0).
+            Reduces the effective thickness of the reservoir contributing to flow into the well.
         :param well_location: Grid indices (i, j, k) of the well. Required for boundary correction.
         :param grid_shape: Grid dimensions (nx, ny, nz). Required for boundary correction.
         :param boundary_conditions: `BoundaryConditions` defining BC on each face. Required for boundary correction.
@@ -317,6 +320,7 @@ class Well(StoreSerializable, typing.Generic[Coordinates, WellFluidT]):
             wellbore_radius=radius,
             effective_drainage_radius=effective_drainage_radius,
             skin_factor=skin_factor,
+            net_to_gross=net_to_gross,
         )
 
     def get_flow_rate(

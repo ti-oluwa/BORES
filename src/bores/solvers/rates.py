@@ -31,10 +31,16 @@ def compute_well_rates(
     well_indices_cache: WellIndicesCache,
     injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
     production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
-    injection_rates: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
-    production_rates: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
-    injection_fvfs: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
-    production_fvfs: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
+    injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
+    production_rates: PhaseTensorsProxy[float, ThreeDimensions],
+    injection_fvfs: PhaseTensorsProxy[float, ThreeDimensions],
+    production_fvfs: PhaseTensorsProxy[float, ThreeDimensions],
+    injection_saturation_changes: PhaseTensorsProxy[float, ThreeDimensions],
+    cell_dimension: typing.Tuple[float, float],
+    porosity_grid: ThreeDimensionalGrid,
+    thickness_grid: ThreeDimensionalGrid,
+    net_to_gross_grid: ThreeDimensionalGrid,
+    time_step_size: float,
 ) -> None:
     """
     Compute well flow rates using the new pressure from the pressure solve and
@@ -77,6 +83,8 @@ def compute_well_rates(
     """
     bbl_to_ft3 = c.BARRELS_TO_CUBIC_FEET
     incompressibility_threshold = c.FLUID_INCOMPRESSIBILITY_THRESHOLD
+    time_step_size_in_days = time_step_size * c.DAYS_PER_SECOND
+    cell_size_x, cell_size_y = cell_dimension
 
     gas_formation_volume_factor_grid = fluid_properties.gas_formation_volume_factor_grid
     water_fvf_grid = fluid_properties.water_formation_volume_factor_grid
@@ -162,10 +170,21 @@ def compute_well_rates(
                     average_compressibility_factor=avg_z_factor,
                     formation_volume_factor=phase_fvf,
                 )
-                if injection_rates is not None:
-                    injection_rates[i, j, k] = (0.0, 0.0, flow_rate)
-                if injection_fvfs is not None:
-                    injection_fvfs[i, j, k] = (0.0, 0.0, phase_fvf)
+
+                saturation_change = (
+                    flow_rate
+                    * time_step_size_in_days
+                    / (
+                        cell_size_x
+                        * cell_size_y
+                        * thickness_grid[i, j, k]
+                        * porosity_grid[i, j, k]
+                        * net_to_gross_grid[i, j, k]
+                    )
+                )
+                injection_rates[i, j, k] = (0.0, 0.0, flow_rate)
+                injection_fvfs[i, j, k] = (0.0, 0.0, phase_fvf)
+                injection_saturation_changes[i, j, k] = (0.0, 0.0, saturation_change)
 
             else:
                 # Water injection
@@ -202,10 +221,20 @@ def compute_well_rates(
                     )
                     * bbl_to_ft3
                 )
-                if injection_rates is not None:
-                    injection_rates[i, j, k] = (flow_rate, 0.0, 0.0)
-                if injection_fvfs is not None:
-                    injection_fvfs[i, j, k] = (phase_fvf, 0.0, 0.0)
+                saturation_change = (
+                    flow_rate
+                    * time_step_size_in_days
+                    / (
+                        cell_size_x
+                        * cell_size_y
+                        * thickness_grid[i, j, k]
+                        * porosity_grid[i, j, k]
+                        * net_to_gross_grid[i, j, k]
+                    )
+                )
+                injection_rates[i, j, k] = (flow_rate, 0.0, 0.0)
+                injection_fvfs[i, j, k] = (phase_fvf, 0.0, 0.0)
+                injection_saturation_changes[i, j, k] = (saturation_change, 0.0, 0.0)
 
     # Production wells
     for well in wells.production_wells:
@@ -326,7 +355,5 @@ def compute_well_rates(
                     oil_rate += flow_rate
                     oil_fvf = phase_fvf
 
-            if production_rates is not None:
-                production_rates[i, j, k] = (water_rate, oil_rate, gas_rate)
-            if production_fvfs is not None:
-                production_fvfs[i, j, k] = (water_fvf, oil_fvf, gas_fvf)
+            production_rates[i, j, k] = (water_rate, oil_rate, gas_rate)
+            production_fvfs[i, j, k] = (water_fvf, oil_fvf, gas_fvf)

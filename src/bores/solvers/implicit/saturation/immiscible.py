@@ -13,7 +13,6 @@ from bores.datastructures import PhaseTensorsProxy
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.grids.rock_fluid import build_rock_fluid_properties_grids
 from bores.models import FluidProperties, RockProperties
-from bores.precision import get_dtype
 from bores.solvers.base import (
     EvolutionResult,
     compute_mobility_grids,
@@ -215,6 +214,7 @@ def _compute_saturation_residual(
     old_water_saturation_grid: ThreeDimensionalGrid,
     old_gas_saturation_grid: ThreeDimensionalGrid,
     porosity_grid: ThreeDimensionalGrid,
+    net_to_gross_grid: ThreeDimensionalGrid,
     time_step_in_days: float,
     net_water_well_rate_grid: ThreeDimensionalGrid,
     net_gas_well_rate_grid: ThreeDimensionalGrid,
@@ -274,6 +274,7 @@ def _compute_saturation_residual(
     :param old_water_saturation_grid: Water saturation at start of time step.
     :param old_gas_saturation_grid: Gas saturation at start of time step.
     :param porosity_grid: Porosity (fraction).
+    :param net_to_gross_grid: Net-to-gross ratio (fraction).
     :param time_step_in_days: Time step size (days).
     :param net_water_well_rate_grid: Net water well rate per cell (ft³/day).
     :param net_gas_well_rate_grid: Net gas well rate per cell (ft³/day).
@@ -306,8 +307,12 @@ def _compute_saturation_residual(
                     cell_count_z=cell_count_z,
                 )
 
-                cell_thickness = thickness_grid[i, j, k]
-                cell_total_volume = cell_size_x * cell_size_y * cell_thickness
+                cell_total_volume = (
+                    cell_size_x
+                    * cell_size_y
+                    * thickness_grid[i, j, k]
+                    * net_to_gross_grid[i, j, k]
+                )
                 cell_porosity = porosity_grid[i, j, k]
                 cell_pore_volume = cell_total_volume * cell_porosity
                 accumulation_coefficient = cell_pore_volume / time_step_in_days
@@ -366,12 +371,12 @@ def _compute_saturation_residual(
                         net_water_flux += cell_water_mobility * t_conv * pressure_diff
                         net_gas_flux += cell_gas_mobility * t_conv * pressure_diff
                     else:
-                        q_bc = flux_boundaries[ghost_i, ghost_j, ghost_k]
+                        flux_boundary = flux_boundaries[ghost_i, ghost_j, ghost_k]
                         if cell_total_mobility > 0.0:
-                            net_water_flux += q_bc * (
+                            net_water_flux += flux_boundary * (
                                 cell_water_mobility / cell_total_mobility
                             )
-                            net_gas_flux += q_bc * (
+                            net_gas_flux += flux_boundary * (
                                 cell_gas_mobility / cell_total_mobility
                             )
 
@@ -410,12 +415,12 @@ def _compute_saturation_residual(
                         net_water_flux += cell_water_mobility * t_conv * pressure_diff
                         net_gas_flux += cell_gas_mobility * t_conv * pressure_diff
                     else:
-                        q_bc = flux_boundaries[ghost_i, ghost_j, ghost_k]
+                        flux_boundary = flux_boundaries[ghost_i, ghost_j, ghost_k]
                         if cell_total_mobility > 0.0:
-                            net_water_flux += q_bc * (
+                            net_water_flux += flux_boundary * (
                                 cell_water_mobility / cell_total_mobility
                             )
-                            net_gas_flux += q_bc * (
+                            net_gas_flux += flux_boundary * (
                                 cell_gas_mobility / cell_total_mobility
                             )
 
@@ -453,12 +458,12 @@ def _compute_saturation_residual(
                         net_water_flux += cell_water_mobility * t_conv * pressure_diff
                         net_gas_flux += cell_gas_mobility * t_conv * pressure_diff
                     else:
-                        q_bc = flux_boundaries[ghost_i, ghost_j, ghost_k]
+                        flux_boundary = flux_boundaries[ghost_i, ghost_j, ghost_k]
                         if cell_total_mobility > 0.0:
-                            net_water_flux += q_bc * (
+                            net_water_flux += flux_boundary * (
                                 cell_water_mobility / cell_total_mobility
                             )
-                            net_gas_flux += q_bc * (
+                            net_gas_flux += flux_boundary * (
                                 cell_gas_mobility / cell_total_mobility
                             )
 
@@ -496,12 +501,12 @@ def _compute_saturation_residual(
                         net_water_flux += cell_water_mobility * t_conv * pressure_diff
                         net_gas_flux += cell_gas_mobility * t_conv * pressure_diff
                     else:
-                        q_bc = flux_boundaries[ghost_i, ghost_j, ghost_k]
+                        flux_boundary = flux_boundaries[ghost_i, ghost_j, ghost_k]
                         if cell_total_mobility > 0.0:
-                            net_water_flux += q_bc * (
+                            net_water_flux += flux_boundary * (
                                 cell_water_mobility / cell_total_mobility
                             )
-                            net_gas_flux += q_bc * (
+                            net_gas_flux += flux_boundary * (
                                 cell_gas_mobility / cell_total_mobility
                             )
 
@@ -539,12 +544,12 @@ def _compute_saturation_residual(
                         net_water_flux += cell_water_mobility * t_conv * pressure_diff
                         net_gas_flux += cell_gas_mobility * t_conv * pressure_diff
                     else:
-                        q_bc = flux_boundaries[ghost_i, ghost_j, ghost_k]
+                        flux_boundary = flux_boundaries[ghost_i, ghost_j, ghost_k]
                         if cell_total_mobility > 0.0:
-                            net_water_flux += q_bc * (
+                            net_water_flux += flux_boundary * (
                                 cell_water_mobility / cell_total_mobility
                             )
-                            net_gas_flux += q_bc * (
+                            net_gas_flux += flux_boundary * (
                                 cell_gas_mobility / cell_total_mobility
                             )
 
@@ -582,12 +587,12 @@ def _compute_saturation_residual(
                         net_water_flux += cell_water_mobility * t_conv * pressure_diff
                         net_gas_flux += cell_gas_mobility * t_conv * pressure_diff
                     else:
-                        q_bc = flux_boundaries[ghost_i, ghost_j, ghost_k]
+                        flux_boundary = flux_boundaries[ghost_i, ghost_j, ghost_k]
                         if cell_total_mobility > 0.0:
-                            net_water_flux += q_bc * (
+                            net_water_flux += flux_boundary * (
                                 cell_water_mobility / cell_total_mobility
                             )
-                            net_gas_flux += q_bc * (
+                            net_gas_flux += flux_boundary * (
                                 cell_gas_mobility / cell_total_mobility
                             )
 
@@ -685,7 +690,6 @@ def compute_rock_fluid_properties(
             capillary_pressure_table=config.rock_fluid_tables.capillary_pressure_table,
             disable_capillary_effects=config.disable_capillary_effects,
             capillary_strength_factor=config.capillary_strength_factor,
-            relative_mobility_range=config.relative_mobility_range,
             phase_appearance_tolerance=config.phase_appearance_tolerance,
         )
     )
@@ -728,6 +732,7 @@ def _compute_residual(
     cell_size_y: float,
     elevation_grid: ThreeDimensionalGrid,
     porosity_grid: ThreeDimensionalGrid,
+    net_to_gross_grid: ThreeDimensionalGrid,
     time_step_in_days: float,
     gravitational_constant: float,
     water_compressibility_grid: ThreeDimensionalGrid,
@@ -762,6 +767,7 @@ def _compute_residual(
     :param cell_size_y: Cell size in y-direction (ft).
     :param elevation_grid: Cell elevation grid (ft).
     :param porosity_grid: Porosity (fraction).
+    :param net_to_gross_grid: Net-to-gross ratio (fraction).
     :param time_step_in_days: Time step size (days).
     :param gravitational_constant: Gravitational constant conversion factor (lbf/lbm).
     :param water_compressibility_grid: Water compressibility (psi⁻¹).
@@ -821,6 +827,7 @@ def _compute_residual(
         old_water_saturation_grid=old_water_saturation_grid,
         old_gas_saturation_grid=old_gas_saturation_grid,
         porosity_grid=porosity_grid,
+        net_to_gross_grid=net_to_gross_grid,
         time_step_in_days=time_step_in_days,
         net_water_well_rate_grid=net_water_well_rate_grid,
         net_gas_well_rate_grid=net_gas_well_rate_grid,
@@ -853,12 +860,10 @@ def compute_residual(
     cell_size_x: float,
     cell_size_y: float,
     elevation_grid: ThreeDimensionalGrid,
-    porosity_grid: ThreeDimensionalGrid,
     time_step_in_days: float,
     gravitational_constant: float,
     water_compressibility_grid: ThreeDimensionalGrid,
     gas_compressibility_grid: ThreeDimensionalGrid,
-    rock_compressibility: float,
     well_indices_cache: WellIndicesCache,
     injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
     production_rates: PhaseTensorsProxy[float, ThreeDimensions],
@@ -888,12 +893,10 @@ def compute_residual(
     :param cell_size_x: Cell size in x-direction (ft).
     :param cell_size_y: Cell size in y-direction (ft).
     :param elevation_grid: Cell elevation grid (ft).
-    :param porosity_grid: Porosity (fraction).
     :param time_step_in_days: Time step size (days).
     :param gravitational_constant: Gravitational constant conversion factor (lbf/lbm).
     :param water_compressibility_grid: Water compressibility (psi⁻¹).
     :param gas_compressibility_grid: Gas compressibility (psi⁻¹).
-    :param rock_compressibility: Scalar rock compressibility (psi⁻¹).
     :param well_indices_cache: Cache of well indices.
     :param injection_rates: Injection rates proxy.
     :param production_rates: Production rates proxy.
@@ -933,12 +936,13 @@ def compute_residual(
         cell_size_x=cell_size_x,
         cell_size_y=cell_size_y,
         elevation_grid=elevation_grid,
-        porosity_grid=porosity_grid,
+        porosity_grid=rock_properties.porosity_grid,
+        net_to_gross_grid=rock_properties.net_to_gross_ratio_grid,
         time_step_in_days=time_step_in_days,
         gravitational_constant=gravitational_constant,
         water_compressibility_grid=water_compressibility_grid,
         gas_compressibility_grid=gas_compressibility_grid,
-        rock_compressibility=rock_compressibility,
+        rock_compressibility=rock_properties.compressibility,
         well_indices_cache=well_indices_cache,
         injection_rates=injection_rates,
         production_rates=production_rates,
@@ -971,12 +975,10 @@ def assemble_numerical_jacobian(
     cell_size_x: float,
     cell_size_y: float,
     elevation_grid: ThreeDimensionalGrid,
-    porosity_grid: ThreeDimensionalGrid,
     time_step_in_days: float,
     gravitational_constant: float,
     water_compressibility_grid: ThreeDimensionalGrid,
     gas_compressibility_grid: ThreeDimensionalGrid,
-    rock_compressibility: float,
     well_indices_cache: WellIndicesCache,
     injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
     production_rates: PhaseTensorsProxy[float, ThreeDimensions],
@@ -1009,12 +1011,10 @@ def assemble_numerical_jacobian(
     :param cell_size_x: Cell size in x-direction (ft).
     :param cell_size_y: Cell size in y-direction (ft).
     :param elevation_grid: Cell elevation grid (ft).
-    :param porosity_grid: Porosity (fraction).
     :param time_step_in_days: Time step size (days).
     :param gravitational_constant: Gravitational constant conversion factor (lbf/lbm).
     :param water_compressibility_grid: Water compressibility (psi⁻¹).
     :param gas_compressibility_grid: Gas compressibility (psi⁻¹).
-    :param rock_compressibility: Scalar rock compressibility (psi⁻¹).
     :param well_indices_cache: Cache of well indices.
     :param injection_rates: Injection rates proxy.
     :param production_rates: Production rates proxy.
@@ -1051,12 +1051,13 @@ def assemble_numerical_jacobian(
         cell_size_x=cell_size_x,
         cell_size_y=cell_size_y,
         elevation_grid=elevation_grid,
-        porosity_grid=porosity_grid,
+        porosity_grid=rock_properties.porosity_grid,
+        net_to_gross_grid=rock_properties.net_to_gross_ratio_grid,
         time_step_in_days=time_step_in_days,
         gravitational_constant=gravitational_constant,
         water_compressibility_grid=water_compressibility_grid,
         gas_compressibility_grid=gas_compressibility_grid,
-        rock_compressibility=rock_compressibility,
+        rock_compressibility=rock_properties.compressibility,
         well_indices_cache=well_indices_cache,
         injection_rates=injection_rates,
         production_rates=production_rates,
@@ -1342,6 +1343,7 @@ def _assemble_analytical_jacobian(
     water_viscosity_grid: ThreeDimensionalGrid,
     gas_viscosity_grid: ThreeDimensionalGrid,
     porosity_grid: ThreeDimensionalGrid,
+    net_to_gross_grid: ThreeDimensionalGrid,
     time_step_in_days: float,
     md_per_cp_to_ft2_per_psi_per_day: float,
 ) -> typing.Tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
@@ -1350,12 +1352,11 @@ def _assemble_analytical_jacobian(
 
     Iterates over all real cells. For each cell and each of its six face
     neighbours the function emits Jacobian entries for both the water and gas
-    residual equations with respect to ``Sw`` and ``Sg`` of both the current
+    residual equations with respect to `Sw` and `Sg` of both the current
     cell and the (interior) neighbour. Boundary neighbours (out-of-bounds
-    indices) are skipped — their contribution to the Jacobian is zero because
-    the boundary flux is prescribed (Dirichlet flux from
-    ``pressure_boundaries``) or constant (Neumann flux from
-    ``flux_boundaries``).
+    indices) are skipped because their contribution to the Jacobian is zero because
+    the boundary flux is prescribed (Dirichlet flux from `pressure_boundaries`)
+    or constant (Neumann flux from `flux_boundaries`).
 
     The assembly follows a thread-safe prange-over-i-slices strategy identical
     to the implicit pressure solver: each i-slice writes into its own row of
@@ -1368,7 +1369,7 @@ def _assemble_analytical_jacobian(
     :param thickness_grid: Cell thickness grid (ft).
     :param cell_size_x: Cell size in x-direction (ft).
     :param cell_size_y: Cell size in y-direction (ft).
-    :param oil_pressure_grid: Oil pressure grid (psi), shape ``(nx, ny, nz)``.
+    :param oil_pressure_grid: Oil pressure grid (psi), shape `(nx, ny, nz)`.
     :param water_density_grid: Water density grid (lb/ft³).
     :param gas_density_grid: Gas density grid (lb/ft³).
     :param elevation_grid: Cell elevation grid (ft).
@@ -1380,22 +1381,23 @@ def _assemble_analytical_jacobian(
     :param gas_relative_mobility_grid: Gas relative mobility (ft²/psi·day).
     :param oil_water_capillary_pressure_grid: Oil-water capillary pressure (psi).
     :param gas_oil_capillary_pressure_grid: Gas-oil capillary pressure (psi).
-    :param dkrw_dSw_grid: ``∂krw/∂Sw`` grid.
-    :param dkrw_dSo_grid: ``∂krw/∂So`` grid.
-    :param dkrw_dSg_grid: ``∂krw/∂Sg`` grid.
-    :param dkrg_dSw_grid: ``∂krg/∂Sw`` grid.
-    :param dkrg_dSo_grid: ``∂krg/∂So`` grid.
-    :param dkrg_dSg_grid: ``∂krg/∂Sg`` grid.
-    :param dPcow_dSw_eff_grid: Effective ``∂Pcow/∂Sw`` (So eliminated) grid.
-    :param dPcow_dSg_eff_grid: Effective ``∂Pcow/∂Sg`` (So eliminated) grid.
-    :param dPcgo_dSw_eff_grid: Effective ``∂Pcgo/∂Sw`` (So eliminated) grid.
-    :param dPcgo_dSg_eff_grid: Effective ``∂Pcgo/∂Sg`` (So eliminated) grid.
+    :param dkrw_dSw_grid: `∂krw/∂Sw` grid.
+    :param dkrw_dSo_grid: `∂krw/∂So` grid.
+    :param dkrw_dSg_grid: `∂krw/∂Sg` grid.
+    :param dkrg_dSw_grid: `∂krg/∂Sw` grid.
+    :param dkrg_dSo_grid: `∂krg/∂So` grid.
+    :param dkrg_dSg_grid: `∂krg/∂Sg` grid.
+    :param dPcow_dSw_eff_grid: Effective `∂Pcow/∂Sw` (So eliminated) grid.
+    :param dPcow_dSg_eff_grid: Effective `∂Pcow/∂Sg` (So eliminated) grid.
+    :param dPcgo_dSw_eff_grid: Effective `∂Pcgo/∂Sw` (So eliminated) grid.
+    :param dPcgo_dSg_eff_grid: Effective `∂Pcgo/∂Sg` (So eliminated) grid.
     :param water_viscosity_grid: Water viscosity (cP).
     :param gas_viscosity_grid: Gas viscosity (cP).
     :param porosity_grid: Porosity (fraction).
+    :param net_to_gross_grid: Net-to-gross ratio (fraction).
     :param time_step_in_days: Time step size (days).
     :param md_per_cp_to_ft2_per_psi_per_day: Unit conversion factor.
-    :return: COO triplet ``(rows, cols, vals)`` for the inter-cell Jacobian entries.
+    :return: COO triplet `(rows, cols, vals)` for the inter-cell Jacobian entries.
     """
     # Upper bound per i-slice: each cell has 6 faces, each face can produce up to
     # 8 entries (4 dof combos x 2 cells).  Only interior neighbours contribute
@@ -1421,8 +1423,12 @@ def _assemble_analytical_jacobian(
                 cell_water_saturation_column = 2 * cell_1d_index
                 cell_gas_saturation_column = 2 * cell_1d_index + 1
 
-                cell_thickness = thickness_grid[i, j, k]
-                cell_volume = cell_size_x * cell_size_y * cell_thickness
+                cell_volume = (
+                    cell_size_x
+                    * cell_size_y
+                    * thickness_grid[i, j, k]
+                    * net_to_gross_grid[i, j, k]
+                )
                 accumulation_coefficient = (
                     porosity_grid[i, j, k] * cell_volume / time_step_in_days
                 )
@@ -2011,7 +2017,6 @@ def assemble_analytical_jacobian(
     gas_density_grid: ThreeDimensionalGrid,
     water_viscosity_grid: ThreeDimensionalGrid,
     gas_viscosity_grid: ThreeDimensionalGrid,
-    porosity_grid: ThreeDimensionalGrid,
     face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
     injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
@@ -2049,7 +2054,6 @@ def assemble_analytical_jacobian(
     :param gas_density_grid: Gas density grid (lb/ft³).
     :param water_viscosity_grid: Water viscosity grid (cP).
     :param gas_viscosity_grid: Gas viscosity grid (cP).
-    :param porosity_grid: Porosity (fraction).
     :param face_transmissibilities: Precomputed geometric face transmissibilities.
     :param rock_properties: Rock properties.
     :param injection_bhps: Injection bottom-hole pressures proxy.
@@ -2128,7 +2132,8 @@ def assemble_analytical_jacobian(
         dPcgo_dSg_eff_grid=dPcgo_dSg_eff_grid,
         water_viscosity_grid=water_viscosity_grid,
         gas_viscosity_grid=gas_viscosity_grid,
-        porosity_grid=porosity_grid,
+        porosity_grid=rock_properties.porosity_grid,
+        net_to_gross_grid=rock_properties.net_to_gross_ratio_grid,
         time_step_in_days=time_step_in_days,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
     )
@@ -2182,12 +2187,10 @@ def assemble_jacobian(
     cell_size_x: float,
     cell_size_y: float,
     elevation_grid: ThreeDimensionalGrid,
-    porosity_grid: ThreeDimensionalGrid,
     time_step_in_days: float,
     gravitational_constant: float,
     water_compressibility_grid: ThreeDimensionalGrid,
     gas_compressibility_grid: ThreeDimensionalGrid,
-    rock_compressibility: float,
     well_indices_cache: WellIndicesCache,
     injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
     production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
@@ -2225,12 +2228,10 @@ def assemble_jacobian(
     :param cell_size_x: Cell size in x-direction (ft).
     :param cell_size_y: Cell size in y-direction (ft).
     :param elevation_grid: Cell elevation grid (ft).
-    :param porosity_grid: Porosity (fraction).
     :param time_step_in_days: Time step size (days).
     :param gravitational_constant: Gravitational constant conversion factor (lbf/lbm).
     :param water_compressibility_grid: Water compressibility (psi⁻¹).
     :param gas_compressibility_grid: Gas compressibility (psi⁻¹).
-    :param rock_compressibility: Scalar rock compressibility (psi⁻¹).
     :param well_indices_cache: Cache of well indices.
     :param injection_bhps: Injection bottom-hole pressures proxy.
     :param production_bhps: Production bottom-hole pressures proxy.
@@ -2265,7 +2266,6 @@ def assemble_jacobian(
             gravitational_constant=gravitational_constant,
             water_viscosity_grid=fluid_properties.water_viscosity_grid,
             gas_viscosity_grid=fluid_properties.gas_viscosity_grid,
-            porosity_grid=porosity_grid,
             capillary_pressure_grids=capillary_pressure_grids,
             relative_mobility_grids=relative_mobility_grids,
             time_step_in_days=time_step_in_days,
@@ -2298,12 +2298,10 @@ def assemble_jacobian(
         cell_size_x=cell_size_x,
         cell_size_y=cell_size_y,
         elevation_grid=elevation_grid,
-        porosity_grid=porosity_grid,
         time_step_in_days=time_step_in_days,
         gravitational_constant=gravitational_constant,
         water_compressibility_grid=water_compressibility_grid,
         gas_compressibility_grid=gas_compressibility_grid,
-        rock_compressibility=rock_compressibility,
         well_indices_cache=well_indices_cache,
         injection_rates=injection_rates,
         production_rates=production_rates,
@@ -2335,47 +2333,50 @@ def evolve_saturation(
     production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
     dtype: npt.DTypeLike = np.float64,
 ) -> EvolutionResult[ImplicitSaturationSolution, typing.List[NewtonConvergenceInfo]]:
-    """Solve the implicit saturation equations using Newton-Raphson iteration.
+    """
+    Solve the implicit saturation equations using Newton-Raphson iteration.
 
-    Operates on the **unpadded** ``(nx, ny, nz)`` grid.  Boundary conditions
-    are communicated through the ``pressure_boundaries`` and ``flux_boundaries``
-    arrays of shape ``(nx+2, ny+2, nz+2)``, which follow the same ghost-cell
+    Operates on the `(nx, ny, nz)` grid.  Boundary conditions
+    are communicated through the `pressure_boundaries` and `flux_boundaries`
+    arrays of shape `(nx+2, ny+2, nz+2)`, which follow the same ghost-cell
     indexing convention as the explicit saturation and implicit pressure solvers:
-    a boundary cell at out-of-bounds index ``(i_oob, j, k)`` is looked up at
-    ``pressure_boundaries[i_oob + 1, j + 1, k + 1]``.
+    a boundary cell at out-of-bounds index `(i_oob, j, k)` is looked up at
+    `pressure_boundaries[i_oob + 1, j + 1, k + 1]`.
 
-    The Newton loop iterates on all ``nx * ny * nz`` cells simultaneously.
+    The Newton loop iterates on all `nx * ny * nz` cells simultaneously.
     Convergence is declared when the relative residual norm drops below
-    ``config.newton_tolerance``, or when the maximum saturation change per
+    `config.newton_tolerance`, or when the maximum saturation change per
     iteration is sufficiently small (quasi-equilibrium acceptance).
 
-    :param grid_shape: Grid shape ``(nx, ny, nz)``.
-    :param cell_dimension: ``(cell_size_x, cell_size_y)`` in feet.
-    :param thickness_grid: Cell thickness grid (ft), shape ``(nx, ny, nz)``.
-    :param elevation_grid: Cell elevation grid (ft), shape ``(nx, ny, nz)``.
+    :param grid_shape: Grid shape `(nx, ny, nz)`.
+    :param cell_dimension: `(cell_size_x, cell_size_y)` in feet.
+    :param thickness_grid: Cell thickness grid (ft), shape `(nx, ny, nz)`.
+    :param elevation_grid: Cell elevation grid (ft), shape `(nx, ny, nz)`.
     :param time_step_size: Time step size in seconds.
     :param time: Total simulation time elapsed, this time step inclusive (seconds).
     :param rock_properties: Rock properties (permeability, porosity, residual saturations, etc.).
     :param fluid_properties: Fluid properties at the new pressure level.
     :param face_transmissibilities: Precomputed geometric face transmissibilities,
-        shape ``(nx, ny, nz)`` each.
-    :param pressure_boundaries: Padded Dirichlet BC array, shape ``(nx+2, ny+2, nz+2)``.
+        shape `(nx, ny, nz)` each.
+    :param pressure_boundaries: Padded Dirichlet BC array, shape `(nx+2, ny+2, nz+2)`.
         NaN indicates a Neumann face.
-    :param flux_boundaries: Padded Neumann BC array, shape ``(nx+2, ny+2, nz+2)``.
-        Read when the corresponding ``pressure_boundaries`` entry is NaN.
+    :param flux_boundaries: Padded Neumann BC array, shape `(nx+2, ny+2, nz+2)`.
+        Read when the corresponding `pressure_boundaries` entry is NaN.
     :param config: Simulation configuration.
     :param well_indices_cache: Cache of well indices for rate look-up.
-    :param pressure_change_grid: ``P_new - P_old`` (psi) for PVT volume correction.
+    :param pressure_change_grid: `P_new - P_old` (psi) for PVT volume correction.
     :param injection_rates: Injection rates proxy (ft³/day per phase per cell).
     :param production_rates: Production rates proxy (ft³/day per phase per cell).
     :param injection_bhps: Injection bottom-hole pressures proxy (psi per phase per cell).
     :param production_bhps: Production bottom-hole pressures proxy (psi per phase per cell).
     :param dtype: NumPy dtype for numerical arrays.
-    :return: :class:`EvolutionResult` containing an
-        :class:`ImplicitSaturationSolution` and a list of
-        :class:`NewtonConvergenceInfo` records.
+    :return: `EvolutionResult` containing an `ImplicitSaturationSolution` and a list of
+        `NewtonConvergenceInfo` records.
     """
     oil_pressure_grid = fluid_properties.pressure_grid
+    porosity_grid = rock_properties.porosity_grid
+    net_to_gross_grid = rock_properties.net_to_gross_ratio_grid
+    rock_compressibility = rock_properties.compressibility
     cell_count_x, cell_count_y, cell_count_z = oil_pressure_grid.shape
     cell_size_x, cell_size_y = cell_dimension
 
@@ -2384,11 +2385,8 @@ def evolve_saturation(
     old_gas_saturation_grid = fluid_properties.gas_saturation_grid
     water_compressibility_grid = fluid_properties.water_compressibility_grid
     gas_compressibility_grid = fluid_properties.gas_compressibility_grid
-    porosity_grid = rock_properties.porosity_grid
-    rock_compressibility = rock_properties.compressibility
 
     time_step_in_days = time_step_size * c.DAYS_PER_SECOND
-    dtype = get_dtype()
     total_cell_count = cell_count_x * cell_count_y * cell_count_z
 
     gravitational_constant = (
@@ -2426,12 +2424,10 @@ def evolve_saturation(
         cell_size_x=cell_size_x,
         cell_size_y=cell_size_y,
         elevation_grid=elevation_grid,
-        porosity_grid=porosity_grid,
         time_step_in_days=time_step_in_days,
         gravitational_constant=gravitational_constant,
         water_compressibility_grid=water_compressibility_grid,
         gas_compressibility_grid=gas_compressibility_grid,
-        rock_compressibility=rock_compressibility,
         well_indices_cache=well_indices_cache,
         injection_rates=injection_rates,
         production_rates=production_rates,
@@ -2480,6 +2476,9 @@ def evolve_saturation(
             gas_saturation_grid=gas_saturation_grid,
             capillary_pressure_grids=capillary_pressure_grids,
             relative_mobility_grids=relative_mobility_grids,
+            porosity_grid=porosity_grid,
+            net_to_gross_grid=net_to_gross_grid,
+            rock_compressibility=rock_compressibility,
             **shared_residual_kwargs,  # type: ignore[arg-type]
         )
         residual_vector = interleave_residuals(water_residual, gas_residual)
@@ -2558,12 +2557,10 @@ def evolve_saturation(
             cell_size_x=cell_size_x,
             cell_size_y=cell_size_y,
             elevation_grid=elevation_grid,
-            porosity_grid=porosity_grid,
             time_step_in_days=time_step_in_days,
             gravitational_constant=gravitational_constant,
             water_compressibility_grid=water_compressibility_grid,
             gas_compressibility_grid=gas_compressibility_grid,
-            rock_compressibility=rock_compressibility,
             well_indices_cache=well_indices_cache,
             injection_bhps=injection_bhps,
             production_bhps=production_bhps,

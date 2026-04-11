@@ -8,7 +8,7 @@ from typing_extensions import Self
 
 from bores.boundary_conditions import BoundaryConditions
 from bores.constants import Constants
-from bores.datastructures import PhaseRange, Range
+from bores.datastructures import Range
 from bores.stores import StoreSerializable
 from bores.tables.pvt import PVTTables
 from bores.tables.rock_fluid import RockFluidTables
@@ -86,22 +86,6 @@ class Config(
 
     use_pseudo_pressure: bool = True
     """Whether to use pseudo-pressure for gas (when applicable)."""
-
-    relative_mobility_range: PhaseRange = attrs.field(
-        default=PhaseRange(
-            oil=Range(min=1e-12, max=1e6),
-            water=Range(min=1e-12, max=1e6),
-            gas=Range(min=1e-12, max=1e6),
-        )
-    )
-    """
-    Relative mobility ranges for oil, water, and gas phases.
-
-    Each phase has a `Range` object defining its minimum and maximum relative mobility.
-    Adjust minimum or maximum values to constrain phase mobilities during simulation.
-
-    Minimum values should not be exactly zero for the best numerical stability.
-    """
 
     total_compressibility_range: Range = attrs.field(default=Range(min=1e-24, max=1e-2))
     """Range to constrain total compressibility for the simulation. This is usually necessary for numerical stability."""

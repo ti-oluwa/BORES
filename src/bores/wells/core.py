@@ -87,6 +87,7 @@ def compute_well_index(
     wellbore_radius: float,
     effective_drainage_radius: float,
     skin_factor: float = 0.0,
+    net_to_gross: float = 1.0,
 ) -> float:
     """
     Compute the well index for a given well using the Peaceman equation.
@@ -96,7 +97,7 @@ def compute_well_index(
 
     The formula for the well index is:
 
-    W = (k * h) / (ln(re/rw) + s)
+    W = (k * h * net_to_gross) / (ln(re/rw) + s)
 
     where:
         - W is the well index (md*ft)
@@ -111,9 +112,11 @@ def compute_well_index(
     :param wellbore_radius: Radius of the wellbore (ft).
     :param effective_drainage_radius: Effective drainage radius (ft).
     :param skin_factor: Skin factor for the well (dimensionless, default is 0).
+    :param net_to_gross: Net-to-gross ratio of the reservoir interval (default is 1.0).
+        Reduces the effective thickness of the reservoir contributing to flow into the well.
     :return: The well index in (mD*ft).
     """
-    return (permeability * interval_thickness) / (
+    return (permeability * interval_thickness * net_to_gross) / (
         np.log(effective_drainage_radius / wellbore_radius) + skin_factor
     )
 
@@ -305,10 +308,13 @@ def compute_oil_well_rate(
     :return: Well rate at reservoir conditions (bbl/day). Negative for
         production, positive for injection.
     """
-    if well_index <= 0:
+    if well_index < 0:
         raise ValidationError("Well index must be a positive value.")
-    if phase_mobility <= 0:
+    if phase_mobility < 0:
         raise ValidationError("Phase mobility must be a positive value.")
+
+    if well_index == 0.0 or phase_mobility == 0.0:
+        return 0.0
 
     pressure_difference = bottom_hole_pressure - pressure
     is_compressible = (
@@ -388,10 +394,13 @@ def compute_required_bhp_for_oil_rate(
         which the fluid is treated as incompressible.  Default 1e-6 psi^-1.
     :return: Required bottom-hole pressure (psi).
     """
-    if well_index <= 0:
+    if well_index < 0:
         raise ValidationError("Well index must be a positive value.")
-    if phase_mobility <= 0:
+    if phase_mobility < 0:
         raise ValidationError("Phase mobility must be a positive value.")
+
+    if well_index == 0.0 or phase_mobility == 0.0:
+        return float(pressure)
 
     denominator = 7.08e-3 * well_index * phase_mobility
 
@@ -519,10 +528,13 @@ def compute_gas_well_rate(
     :return: Gas well rate at reservoir conditions (ft³/day). Negative for
         production, positive for injection.
     """
-    if well_index <= 0:
+    if well_index < 0:
         raise ValidationError("Well index must be a positive value.")
-    if phase_mobility <= 0:
+    if phase_mobility < 0:
         raise ValidationError("Phase mobility must be a positive value.")
+
+    if well_index == 0.0 or phase_mobility == 0.0:
+        return 0.0
 
     Tsc = c.STANDARD_TEMPERATURE_RANKINE
     Psc = c.STANDARD_PRESSURE_IMPERIAL
@@ -623,15 +635,17 @@ def compute_required_bhp_for_gas_rate(
         surface SCF/day before inverting the well equation.
     :return: Required bottom-hole pressure (psi).
     """
-    if well_index <= 0:
+    if well_index < 0:
         raise ValidationError("Well index must be a positive value.")
-    if phase_mobility <= 0:
+    if phase_mobility < 0:
         raise ValidationError("Phase mobility must be a positive value.")
     if formation_volume_factor is None:
         raise ValidationError(
             "`formation_volume_factor` (Bg) must be provided to convert the "
             "reservoir-condition target rate to surface conditions."
         )
+    if well_index == 0.0 or phase_mobility == 0.0:
+        return float(pressure)
 
     Tsc = c.STANDARD_TEMPERATURE_RANKINE
     Psc = c.STANDARD_PRESSURE_IMPERIAL
@@ -876,6 +890,7 @@ class InjectedFluid(WellFluid):
 
     When provided, is its used in the rate calculations directly, 
     else;
+    
     - For water: computed as 1/viscosity, where viscosity is obtained from
       `self.viscosity` or water viscosity correlations.
     - For gas: computed as 1/viscosity, where viscosity is obtained from `self.viscosity` or gas

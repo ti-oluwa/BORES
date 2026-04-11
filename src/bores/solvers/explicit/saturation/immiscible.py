@@ -11,7 +11,7 @@ from bores.constants import c
 from bores.datastructures import PhaseTensorsProxy
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.models import FluidProperties, RockProperties
-from bores.solvers.base import EvolutionResult, to_1D_index
+from bores.solvers.base import EvolutionResult
 from bores.transmissibility import FaceTransmissibilities
 from bores.types import OneDimensionalGrid, ThreeDimensionalGrid, ThreeDimensions
 from bores.wells.indices import WellIndicesCache
@@ -114,6 +114,7 @@ def evolve_saturation(
     """
     time_step_in_days = time_step_size * c.DAYS_PER_SECOND
     porosity_grid = rock_properties.porosity_grid
+    net_to_gross_grid = rock_properties.net_to_gross_ratio_grid
     oil_density_grid = fluid_properties.oil_effective_density_grid
     water_density_grid = fluid_properties.water_density_grid
     gas_density_grid = fluid_properties.gas_density_grid
@@ -258,6 +259,7 @@ def evolve_saturation(
         cell_count_z=cell_count_z,
         thickness_grid=thickness_grid,
         porosity_grid=porosity_grid,
+        net_to_gross_grid=net_to_gross_grid,
         cell_size_x=cell_size_x,
         cell_size_y=cell_size_y,
         time_step_in_days=time_step_in_days,
@@ -576,7 +578,7 @@ def compute_fluxes_from_neighbour(
 
     upwind_water_relative_mobility = (
         water_relative_mobility_grid[neighbour_indices]
-        if water_potential_difference > 0.0  # Flow from neighbour to cell
+        if water_potential_difference > 0.0
         else water_relative_mobility_grid[cell_indices]
     )
     upwind_oil_relative_mobility = (
@@ -704,7 +706,7 @@ def compute_net_flux_contributions(
         (cell_count_x, cell_count_y, cell_count_z), dtype=dtype
     )
 
-    for i in numba.prange(cell_count_x):  # type: ignore[attr-defined]
+    for i in numba.prange(cell_count_x):  # type: ignore
         for j in range(cell_count_y):
             for k in range(cell_count_z):
                 cell_pressure = oil_pressure_grid[i, j, k]
@@ -1126,6 +1128,7 @@ def apply_updates(
     cell_count_z: int,
     thickness_grid: ThreeDimensionalGrid,
     porosity_grid: ThreeDimensionalGrid,
+    net_to_gross_grid: ThreeDimensionalGrid,
     cell_size_x: float,
     cell_size_y: float,
     time_step_in_days: float,
@@ -1167,6 +1170,7 @@ def apply_updates(
     :param cell_count_z: Number of cells in the z-direction.
     :param thickness_grid: 3D grid of cell thicknesses (ft).
     :param porosity_grid: 3D grid of cell porosities (fraction).
+    :param net_to_gross_grid: 3D grid of net-to-gross ratios (fraction).
     :param cell_size_x: Size of each cell in the x-direction (ft).
     :param cell_size_y: Size of each cell in the y-direction (ft).
     :param time_step_in_days: Time step size in days.
@@ -1192,11 +1196,15 @@ def apply_updates(
     cfl_violation_info = np.zeros(6, dtype=dtype)
     maximum_cfl_encountered = 0.0
 
-    for i in numba.prange(cell_count_x):  # type: ignore[attr-defined]
+    for i in numba.prange(cell_count_x):  # type: ignore
         for j in range(cell_count_y):
             for k in range(cell_count_z):
-                cell_thickness = thickness_grid[i, j, k]
-                cell_total_volume = cell_size_x * cell_size_y * cell_thickness
+                cell_total_volume = (
+                    cell_size_x
+                    * cell_size_y
+                    * thickness_grid[i, j, k]
+                    * net_to_gross_grid[i, j, k]
+                )
                 cell_porosity = porosity_grid[i, j, k]
                 cell_pore_volume = cell_total_volume * cell_porosity
 
@@ -1270,27 +1278,27 @@ def apply_updates(
                 # When pressure decreases: fluids expand, pore volume contracts so Sα increases.
                 # When pressure increases: fluids contract, pore volume expands so Sα decreases.
                 if apply_pvt_correction:
-                    delta_pressure = pressure_change_grid[i, j, k]  # type: ignore[index]
+                    delta_pressure = pressure_change_grid[i, j, k]  # type: ignore
                     negative_delta_pressure = -delta_pressure
 
                     new_oil_saturation += (
                         old_oil_saturation
                         * (
-                            oil_compressibility_grid[i, j, k] + rock_compressibility  # type: ignore[index]
+                            oil_compressibility_grid[i, j, k] + rock_compressibility  # type: ignore
                         )
                         * negative_delta_pressure
                     )
                     new_water_saturation += (
                         old_water_saturation
                         * (
-                            water_compressibility_grid[i, j, k] + rock_compressibility  # type: ignore[index]
+                            water_compressibility_grid[i, j, k] + rock_compressibility  # type: ignore
                         )
                         * negative_delta_pressure
                     )
                     new_gas_saturation += (
                         old_gas_saturation
                         * (
-                            gas_compressibility_grid[i, j, k] + rock_compressibility  # type: ignore[index]
+                            gas_compressibility_grid[i, j, k] + rock_compressibility  # type: ignore
                         )
                         * negative_delta_pressure
                     )

@@ -146,7 +146,8 @@ config = bores.Config(
     pressure_preconditioner=None,
     saturation_preconditioner=None,
     maximum_pressure_change=1800,
-    disable_capillary_effects=True
+    # freeze_saturation_pressure=True
+    # disable_capillary_effects=True
 )
 
 # Run and monitor the simulation and collect states

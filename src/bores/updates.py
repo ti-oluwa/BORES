@@ -288,6 +288,7 @@ def update_fluid_properties(
                 fluid_properties.oil_bubble_point_pressure_grid
             )
         else:
+            # print(fluid_properties.solution_gas_to_oil_ratio_grid.dtype)
             # Recompute bubble point using current Rs
             new_oil_bubble_point_pressure_grid = build_oil_bubble_point_pressure_grid(
                 gas_gravity_grid=fluid_properties.gas_gravity_grid,
@@ -483,7 +484,6 @@ def _apply_solution_gas_updates(
     old_water_formation_volume_factor_grid: ThreeDimensionalGrid,
     bbl_to_ft3: float,
     dtype: npt.DTypeLike,
-    saturation_epsilon: float = 1e-6,
 ) -> typing.Tuple[
     ThreeDimensionalGrid,
     ThreeDimensionalGrid,
@@ -659,16 +659,10 @@ def _apply_solution_gas_updates(
     )
 
     # Clamp saturations (normalization is handled by the caller)
-    oil_saturation_grid = np.maximum(oil_saturation_grid, zero)
-    water_saturation_grid = np.maximum(water_saturation_grid, zero)
-    gas_saturation_grid = np.maximum(gas_saturation_grid, zero)
-
-    normalize_saturations(
-        oil_saturation_grid=oil_saturation_grid,
-        water_saturation_grid=water_saturation_grid,
-        gas_saturation_grid=gas_saturation_grid,
-        saturation_epsilon=saturation_epsilon,
-    )
+    one = dtype.type(1.0)  # type: ignore
+    oil_saturation_grid = np.clip(oil_saturation_grid, zero, one)
+    water_saturation_grid = np.clip(water_saturation_grid, zero, one)
+    gas_saturation_grid = np.clip(gas_saturation_grid, zero, one)
     return (
         oil_saturation_grid.astype(dtype),
         water_saturation_grid.astype(dtype),
@@ -695,12 +689,13 @@ def apply_solution_gas_updates(
     gas can re-dissolve into oil and water.
 
     Physics:
-        - Oil shrinks when Rs decreases: So_new = So_old * Bo_new / Bo_old
-        - Water shrinks when Rsw decreases: Sw_new = Sw_old * Bw_new / Bw_old
-        - Gas appears from oil: dSg_oil = (Rs_old - Rs_new) * So_old * [Bg_new / (Bo_old * bbl_to_ft3)]
-        - Gas appears from water: dSg_water = (Rsw_old - Rsw_new) * Sw_old * [Bg_new / (Bw_old * bbl_to_ft3)]
-        - Re-dissolution is capped at available free gas
-        - Rs and Rsw are corrected if the PVT update assumed more gas could dissolve than exists
+    
+    - Oil shrinks when Rs decreases: So_new = So_old * Bo_new / Bo_old
+    - Water shrinks when Rsw decreases: Sw_new = Sw_old * Bw_new / Bw_old
+    - Gas appears from oil: dSg_oil = (Rs_old - Rs_new) * So_old * [Bg_new / (Bo_old * bbl_to_ft3)]
+    - Gas appears from water: dSg_water = (Rsw_old - Rsw_new) * Sw_old * [Bg_new / (Bw_old * bbl_to_ft3)]
+    - Re-dissolution is capped at available free gas
+    - Rs and Rsw are corrected if the PVT update assumed more gas could dissolve than exists
 
     :param fluid_properties: Fluid properties with updated PVT (new Rs, Rsw, Bo, Bw, Bg)
         but old saturations.
@@ -731,7 +726,6 @@ def apply_solution_gas_updates(
         old_water_formation_volume_factor_grid=old_water_formation_volume_factor_grid,
         bbl_to_ft3=c.BARRELS_TO_CUBIC_FEET,
         dtype=fluid_properties.oil_saturation_grid.dtype,
-        saturation_epsilon=c.SATURATION_EPSILON,
     )
     return attrs.evolve(
         fluid_properties,

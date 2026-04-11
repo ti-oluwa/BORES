@@ -4,7 +4,6 @@ import typing
 import numba
 import numpy as np
 
-from bores.datastructures import PhaseRange
 from bores.errors import ValidationError
 from bores.grids.base import (
     CapillaryPressureGrids,
@@ -41,7 +40,6 @@ def build_rock_fluid_properties_grids(
     capillary_pressure_table: typing.Optional[CapillaryPressureTable] = None,
     disable_capillary_effects: bool = False,
     capillary_strength_factor: float = 1.0,
-    relative_mobility_range: typing.Optional[PhaseRange] = None,
     phase_appearance_tolerance: float = 1e-6,
 ) -> typing.Tuple[
     RelPermGrids[ThreeDimensions],
@@ -67,7 +65,6 @@ def build_rock_fluid_properties_grids(
     :param capillary_pressure_table: Optional capillary pressure table. Required if capillary effects are enabled.
     :param disable_capillary_effects: If True, capillary effects are disabled (zero capillary pressures).
     :param capillary_strength_factor: Factor to scale capillary pressure grids.
-    :param relative_mobility_range: Optional clamping range for relative mobility grids.
     :param phase_appearance_tolerance: Tolerance for phase appearance/disappearance.
     :return: A tuple containing:
         - `RelPermGrids`: Relative permeability grids for oil, water, and gas.
@@ -97,23 +94,6 @@ def build_rock_fluid_properties_grids(
         oil_viscosity_grid=oil_viscosity_grid,
         gas_viscosity_grid=gas_viscosity_grid,
     )
-
-    if relative_mobility_range is not None:
-        # Clamp relative mobility grids to avoid numerical issues
-        # NOTE: Important design decision! We would normally apply these clamps to active
-        # phases only, i.e where "S > Sirr + phase tolerance". This respects the physics but leads to numerical
-        # instability as phase mobility can become zero and hence transmissibilities, and hence diagonals in the
-        # the sparse matrix can be zeroed out making the matrix singular. Therefore, we clamp all to a very small
-        # non-zero value to ensure numerical stability.
-        water_relative_mobility_grid = relative_mobility_range["water"].clip(
-            water_relative_mobility_grid
-        )
-        oil_relative_mobility_grid = relative_mobility_range["oil"].clip(
-            oil_relative_mobility_grid
-        )
-        gas_relative_mobility_grid = relative_mobility_range["gas"].clip(
-            gas_relative_mobility_grid
-        )
 
     if disable_capillary_effects:
         logger.debug("Capillary effects disabled; using zero capillary pressure grids")

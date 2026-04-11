@@ -1480,8 +1480,8 @@ def compute_gas_to_oil_ratio(
     if min_(pressure) <= 0:
         raise ValidationError("Pressure must be greater than zero.")
 
-    temperature_in_rankine = temperature + 459.67
     dtype = pressure.dtype
+    temperature_in_rankine = temperature + dtype.type(459.67)
 
     # Compute GOR at bubble point
     if gor_at_bubble_point_pressure is not None:
@@ -1494,7 +1494,7 @@ def compute_gas_to_oil_ratio(
             temperature_in_rankine=temperature_in_rankine,
         )
 
-    gor = np.empty_like(pressure)
+    gor = np.empty_like(pressure, dtype=dtype)
     saturated_mask = pressure < bubble_point_pressure
     undersaturated_mask = np.invert(saturated_mask)
 
@@ -1811,11 +1811,11 @@ def compute_gas_density(
     :param gas_compressibility_factor: Gas compressibility factor (dimensionless).
     :return: Gas density in lbm/ft³.
     """
-    temperature_in_rankine = temperature + 459.67
+    dtype = pressure.dtype
+    temperature_in_rankine = temperature + dtype.type(459.67)
     # lbm/lbmol is the same numerical value as g/mol
     gas_molecular_weight_lbm_per_lbmole = compute_gas_molecular_weight(gas_gravity)
     # Density in lbm/ft3
-    dtype = pressure.dtype
     gas_density = (pressure * gas_molecular_weight_lbm_per_lbmole) / (
         np.multiply(
             gas_compressibility_factor, c.IDEAL_GAS_CONSTANT_IMPERIAL, dtype=dtype
@@ -1856,7 +1856,8 @@ def compute_gas_viscosity(
     :param gas_molecular_weight: Gas molecular weight (g/mol)
     :return: Gas viscosity in (cP)
     """
-    temperature_in_rankine = temperature + 459.67
+    dtype = temperature.dtype
+    temperature_in_rankine = temperature + dtype.type(459.67)
     # g/mol is numerically equal to lb/lbmol
     gas_molecular_weight_lbm_per_lbmole = gas_molecular_weight
     density_in_grams_per_cm3 = (

@@ -94,6 +94,7 @@ def evolve_pressure(
     :return: `EvolutionResult` containing the new pressure grid and scheme used
     """
     porosity_grid = rock_properties.porosity_grid
+    net_to_gross_grid = rock_properties.net_to_gross_ratio_grid
     rock_compressibility = rock_properties.compressibility
     oil_density_grid = fluid_properties.oil_effective_density_grid
     water_density_grid = fluid_properties.water_density_grid
@@ -160,6 +161,7 @@ def evolve_pressure(
             cell_count_z=cell_count_z,
             thickness_grid=thickness_grid,
             porosity_grid=porosity_grid,
+            net_to_gross_grid=net_to_gross_grid,
             total_compressibility_grid=total_compressibility_grid,
             current_oil_pressure_grid=current_oil_pressure_grid,
             cell_size_x=cell_size_x,
@@ -234,6 +236,7 @@ def evolve_pressure(
             cell_count_z=cell_count_z,
             thickness_grid=thickness_grid,
             porosity_grid=porosity_grid,
+            net_to_gross_grid=net_to_gross_grid,
             total_compressibility_grid=total_compressibility_grid,
             current_oil_pressure_grid=current_oil_pressure_grid,
             cell_size_x=cell_size_x,
@@ -412,6 +415,7 @@ def compute_accumulation_contributions(
     cell_count_z: int,
     thickness_grid: ThreeDimensionalGrid,
     porosity_grid: ThreeDimensionalGrid,
+    net_to_gross_grid: ThreeDimensionalGrid,
     total_compressibility_grid: ThreeDimensionalGrid,
     current_oil_pressure_grid: ThreeDimensionalGrid,
     cell_size_x: float,
@@ -431,6 +435,7 @@ def compute_accumulation_contributions(
     :param cell_count_z: Number of cells in z-direction
     :param thickness_grid: Cell thickness grid (ft)
     :param porosity_grid: Cell porosity grid (fraction)
+    :param net_to_gross_grid: Cell net-to-gross ratio grid (fraction)
     :param total_compressibility_grid: Total compressibility grid (1/psi)
     :param current_oil_pressure_grid: Current oil pressure grid (psi)
     :param cell_size_x: Cell size in x-direction (ft)
@@ -455,8 +460,12 @@ def compute_accumulation_contributions(
                     cell_count_z=cell_count_z,
                 )
 
-                cell_thickness = thickness_grid[i, j, k]
-                cell_volume = cell_size_x * cell_size_y * cell_thickness
+                cell_volume = (
+                    cell_size_x
+                    * cell_size_y
+                    * thickness_grid[i, j, k]
+                    * net_to_gross_grid[i, j, k]
+                )
                 cell_porosity = porosity_grid[i, j, k]
                 cell_total_compressibility = total_compressibility_grid[i, j, k]
                 cell_oil_pressure = current_oil_pressure_grid[i, j, k]

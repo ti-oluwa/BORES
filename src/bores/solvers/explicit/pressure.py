@@ -88,6 +88,7 @@ def evolve_pressure(
     """
     time_step_size_in_days = time_step_size * c.DAYS_PER_SECOND
     porosity_grid = rock_properties.porosity_grid
+    net_to_gross_grid = rock_properties.net_to_gross_ratio_grid
     rock_compressibility = rock_properties.compressibility
     oil_density_grid = fluid_properties.oil_effective_density_grid
     water_density_grid = fluid_properties.water_density_grid
@@ -142,6 +143,7 @@ def evolve_pressure(
         porosity_grid=porosity_grid,
         total_compressibility_grid=total_compressibility_grid,
         thickness_grid=thickness_grid,
+        net_to_gross_grid=net_to_gross_grid,
         cell_size_x=cell_size_x,
         cell_size_y=cell_size_y,
         water_relative_mobility_grid=water_relative_mobility_grid,
@@ -289,6 +291,7 @@ def evolve_pressure(
         cell_count_z=cell_count_z,
         thickness_grid=thickness_grid,
         porosity_grid=porosity_grid,
+        net_to_gross_grid=net_to_gross_grid,
         total_compressibility_grid=total_compressibility_grid,
         cell_size_x=cell_size_x,
         cell_size_y=cell_size_y,
@@ -316,6 +319,7 @@ def compute_pressure_cfl_number(
     porosity_grid: ThreeDimensionalGrid,
     total_compressibility_grid: ThreeDimensionalGrid,
     thickness_grid: ThreeDimensionalGrid,
+    net_to_gross_grid: ThreeDimensionalGrid,
     cell_size_x: float,
     cell_size_y: float,
     water_relative_mobility_grid: ThreeDimensionalGrid,
@@ -351,8 +355,12 @@ def compute_pressure_cfl_number(
     for i in range(cell_count_x):
         for j in range(cell_count_y):
             for k in range(cell_count_z):
-                cell_thickness = thickness_grid[i, j, k]
-                cell_volume = cell_size_x * cell_size_y * cell_thickness
+                cell_volume = (
+                    cell_size_x
+                    * cell_size_y
+                    * thickness_grid[i, j, k]
+                    * net_to_gross_grid[i, j, k]
+                )
                 cell_porosity = porosity_grid[i, j, k]
                 cell_compressibility = total_compressibility_grid[i, j, k]
 
@@ -1230,6 +1238,7 @@ def apply_updates(
     cell_count_z: int,
     thickness_grid: ThreeDimensionalGrid,
     porosity_grid: ThreeDimensionalGrid,
+    net_to_gross_grid: ThreeDimensionalGrid,
     total_compressibility_grid: ThreeDimensionalGrid,
     cell_size_x: float,
     cell_size_y: float,
@@ -1250,6 +1259,7 @@ def apply_updates(
     :param cell_count_z: Number of cells in z-direction (including boundaries)
     :param thickness_grid: Cell thickness grid (ft)
     :param porosity_grid: Cell porosity grid (fraction)
+    :param net_to_gross_grid: Cell net-to-gross ratio grid (fraction)
     :param total_compressibility_grid: Total compressibility grid (1/psi)
     :param cell_size_x: Cell size in x-direction (ft)
     :param cell_size_y: Cell size in y-direction (ft)
@@ -1260,8 +1270,12 @@ def apply_updates(
         for j in range(cell_count_y):
             for k in range(cell_count_z):
                 # Cell properties
-                cell_thickness = thickness_grid[i, j, k]
-                cell_volume = cell_size_x * cell_size_y * cell_thickness
+                cell_volume = (
+                    cell_size_x
+                    * cell_size_y
+                    * thickness_grid[i, j, k]
+                    * net_to_gross_grid[i, j, k]
+                )
                 cell_porosity = porosity_grid[i, j, k]
                 cell_total_compressibility = total_compressibility_grid[i, j, k]
 

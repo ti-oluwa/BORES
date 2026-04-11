@@ -58,6 +58,7 @@ def build_well_indices_cache(
     cell_size_x: float,
     cell_size_y: float,
     thickness_grid: NDimensionalGrid[ThreeDimensions],
+    net_to_gross_grid: NDimensionalGrid[ThreeDimensions],
     wells: Wells[ThreeDimensions],
     absolute_permeability: RockPermeability,
     boundary_conditions: BoundaryConditions[ThreeDimensions],
@@ -76,8 +77,9 @@ def build_well_indices_cache(
     :param cell_size_x: Cell size in the x-direction (ft).
     :param cell_size_y: Cell size in the y-direction (ft).
     :param wells: `Wells` container holding all injection and production wells.
-    :param thickness_grid:3D grid of cell thicknesses (ft). Must include ghost cells.
-    :param absolute_permeability:absolute permeability object with x, y, z component grids (mD).
+    :param thickness_grid: 3D grid of cell thicknesses (ft). Must include ghost cells.
+    :param net_to_gross_grid: 3D grid of net-to-gross ratios (0-1). Must include ghost cells.
+    :param absolute_permeability: Absolute permeability object with x, y, z component grids (mD).
     :param boundary_conditions: Model boundary conditions. Used to apply no-flow boundary
         corrections to the Peaceman effective drainage radius for wells at grid boundaries.
     :return: `WellIndicesCache` containing precomputed `WellIndices` for every injection
@@ -106,6 +108,7 @@ def build_well_indices_cache(
                         absolute_permeability.z[i, j, k],
                     ),
                     skin_factor=well.skin_factor,
+                    net_to_gross=net_to_gross_grid[i, j, k],
                     well_location=(i, j, k),
                     grid_shape=grid_shape,
                     boundary_conditions=boundary_conditions,
