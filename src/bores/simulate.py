@@ -426,11 +426,6 @@ def _run_impes_step(
     production_fvfs = _make_fvfs(grid_shape)
     injection_bhps = _make_bhps(grid_shape)
     production_bhps = _make_bhps(grid_shape)
-    injection_saturation_changes = PhaseTensorsProxy(
-        oil=SparseTensor(grid_shape, dtype=float),
-        water=SparseTensor(grid_shape, dtype=float),
-        gas=SparseTensor(grid_shape, dtype=float),
-    )
 
     pressure_result = implicit.evolve_pressure(
         cell_dimension=cell_dimension,
@@ -528,28 +523,6 @@ def _run_impes_step(
         production_rates=_rates_proxy(production_rates),
         injection_fvfs=_fvfs_proxy(injection_fvfs),
         production_fvfs=_fvfs_proxy(production_fvfs),
-        injection_saturation_changes=injection_saturation_changes,
-        cell_dimension=cell_dimension,
-        time_step_size=time_step_size,
-        porosity_grid=rock_properties.porosity_grid,
-        thickness_grid=thickness_grid,
-        net_to_gross_grid=rock_properties.net_to_gross_ratio_grid,
-    )
-
-    # Update saturations with injection changes before the flash so that gas
-    # from injection is accounted for in the flash and relative permeability updates.
-    water_saturation_grid = (
-        fluid_properties.water_saturation_grid
-        + injection_saturation_changes.water.array(dtype=dtype)
-    )
-    gas_saturation_grid = (
-        fluid_properties.gas_saturation_grid
-        + injection_saturation_changes.gas.array(dtype=dtype)
-    )
-    fluid_properties = attrs.evolve(
-        fluid_properties,
-        water_saturation_grid=water_saturation_grid,
-        gas_saturation_grid=gas_saturation_grid,
     )
 
     # Refresh boundary maps after pressure update so that dynamic BCs (Robin,
@@ -646,9 +619,7 @@ def _run_impes_step(
         gas_viscosity_grid=fluid_properties.gas_viscosity_grid,
     )
     relative_mobility_grids = RelativeMobilityGrids(
-        water_relative_mobility=lw,
-        oil_relative_mobility=lo,
-        gas_relative_mobility=lg,
+        water_relative_mobility=lw, oil_relative_mobility=lo, gas_relative_mobility=lg
     )
 
     logger.debug("Evolving saturation (explicit)...")
@@ -912,11 +883,6 @@ def _run_sequential_implicit_step(
     production_fvfs = _make_fvfs(grid_shape)
     injection_bhps = _make_bhps(grid_shape)
     production_bhps = _make_bhps(grid_shape)
-    injection_saturation_changes = PhaseTensorsProxy(
-        oil=SparseTensor(grid_shape, dtype=float),
-        water=SparseTensor(grid_shape, dtype=float),
-        gas=SparseTensor(grid_shape, dtype=float),
-    )
 
     pressure_result = implicit.evolve_pressure(
         cell_dimension=cell_dimension,
@@ -1014,28 +980,6 @@ def _run_sequential_implicit_step(
         production_rates=_rates_proxy(production_rates),
         injection_fvfs=_fvfs_proxy(injection_fvfs),
         production_fvfs=_fvfs_proxy(production_fvfs),
-        injection_saturation_changes=injection_saturation_changes,
-        cell_dimension=cell_dimension,
-        time_step_size=time_step_size,
-        porosity_grid=rock_properties.porosity_grid,
-        thickness_grid=thickness_grid,
-        net_to_gross_grid=rock_properties.net_to_gross_ratio_grid,
-    )
-
-    # Update saturations with injection changes before the flash so that gas
-    # from injection is accounted for in the flash and relative permeability updates.
-    water_saturation_grid = (
-        fluid_properties.water_saturation_grid
-        + injection_saturation_changes.water.array(dtype=dtype)
-    )
-    gas_saturation_grid = (
-        fluid_properties.gas_saturation_grid
-        + injection_saturation_changes.gas.array(dtype=dtype)
-    )
-    fluid_properties = attrs.evolve(
-        fluid_properties,
-        water_saturation_grid=water_saturation_grid,
-        gas_saturation_grid=gas_saturation_grid,
     )
 
     # Refresh boundary maps so the saturation solve sees post-pressure BC values.
@@ -1337,11 +1281,6 @@ def _run_full_sequential_implicit_step(
     production_fvfs = _make_fvfs(grid_shape)
     injection_bhps = _make_bhps(grid_shape)
     production_bhps = _make_bhps(grid_shape)
-    injection_saturation_changes = PhaseTensorsProxy(
-        oil=SparseTensor(grid_shape, dtype=float),
-        water=SparseTensor(grid_shape, dtype=float),
-        gas=SparseTensor(grid_shape, dtype=float),
-    )
 
     outer_converged = False
     saturation_result = None
@@ -1491,28 +1430,6 @@ def _run_full_sequential_implicit_step(
             production_rates=_rates_proxy(production_rates),
             injection_fvfs=_fvfs_proxy(injection_fvfs),
             production_fvfs=_fvfs_proxy(production_fvfs),
-            injection_saturation_changes=injection_saturation_changes,
-            cell_dimension=cell_dimension,
-            time_step_size=time_step_size,
-            porosity_grid=rock_properties.porosity_grid,
-            thickness_grid=thickness_grid,
-            net_to_gross_grid=rock_properties.net_to_gross_ratio_grid,
-        )
-
-        # Update saturations with injection changes before the flash so that gas
-        # from injection is accounted for in the flash and relative permeability updates.
-        water_saturation_grid = (
-            iter_fluid_properties.water_saturation_grid
-            + injection_saturation_changes.water.array(dtype=dtype)
-        )
-        gas_saturation_grid = (
-            iter_fluid_properties.gas_saturation_grid
-            + injection_saturation_changes.gas.array(dtype=dtype)
-        )
-        iter_fluid_properties = attrs.evolve(
-            iter_fluid_properties,
-            water_saturation_grid=water_saturation_grid,
-            gas_saturation_grid=gas_saturation_grid,
         )
 
         iter_fluid_properties = update_fluid_properties(
@@ -1777,11 +1694,6 @@ def _run_full_sequential_implicit_step(
         production_fvfs = _make_fvfs(grid_shape)
         injection_bhps = _make_bhps(grid_shape)
         production_bhps = _make_bhps(grid_shape)
-        injection_saturation_changes = PhaseTensorsProxy(
-            oil=SparseTensor(grid_shape, dtype=float),
-            water=SparseTensor(grid_shape, dtype=float),
-            gas=SparseTensor(grid_shape, dtype=float),
-        )
 
     if not outer_converged:
         logger.warning(

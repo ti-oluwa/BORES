@@ -1425,17 +1425,16 @@ def compute_well_contributions(
                     **compressibility_kwargs,
                 ),
             )
-            phase_mobility = typing.cast(
+            total_mobility = typing.cast(
                 float,
-                injected_fluid.get_mobility(
-                    pressure=cell_pressure,
-                    temperature=cell_temperature,
-                ),
+                water_relative_mobility_grid[i, j, k]
+                + oil_relative_mobility_grid[i, j, k]
+                + gas_relative_mobility_grid[i, j, k],
             )
             effective_bhp = well.get_bottom_hole_pressure(
                 pressure=cell_pressure,
                 temperature=cell_temperature,
-                phase_mobility=phase_mobility,
+                phase_mobility=total_mobility,
                 well_index=well_index,
                 fluid=injected_fluid,
                 formation_volume_factor=phase_fvf,
@@ -1479,7 +1478,7 @@ def compute_well_contributions(
                 )
 
             productivity_index = (
-                well_index * phase_mobility * md_per_cp_to_ft2_per_psi_per_day
+                well_index * total_mobility * md_per_cp_to_ft2_per_psi_per_day
             )
             _add_bhp_contribution(cell_1d_index, productivity_index, effective_bhp)
 

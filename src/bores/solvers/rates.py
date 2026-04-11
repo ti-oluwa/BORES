@@ -35,12 +35,6 @@ def compute_well_rates(
     production_rates: PhaseTensorsProxy[float, ThreeDimensions],
     injection_fvfs: PhaseTensorsProxy[float, ThreeDimensions],
     production_fvfs: PhaseTensorsProxy[float, ThreeDimensions],
-    injection_saturation_changes: PhaseTensorsProxy[float, ThreeDimensions],
-    cell_dimension: typing.Tuple[float, float],
-    porosity_grid: ThreeDimensionalGrid,
-    thickness_grid: ThreeDimensionalGrid,
-    net_to_gross_grid: ThreeDimensionalGrid,
-    time_step_size: float,
 ) -> None:
     """
     Compute well flow rates using the new pressure from the pressure solve and
@@ -83,8 +77,6 @@ def compute_well_rates(
     """
     bbl_to_ft3 = c.BARRELS_TO_CUBIC_FEET
     incompressibility_threshold = c.FLUID_INCOMPRESSIBILITY_THRESHOLD
-    time_step_size_in_days = time_step_size * c.DAYS_PER_SECOND
-    cell_size_x, cell_size_y = cell_dimension
 
     gas_formation_volume_factor_grid = fluid_properties.gas_formation_volume_factor_grid
     water_fvf_grid = fluid_properties.water_formation_volume_factor_grid
@@ -129,15 +121,11 @@ def compute_well_rates(
                     temperature=cell_temperature,
                 ),
             )
-            phase_mobility = typing.cast(
-                float,
-                injected_fluid.get_mobility(
-                    pressure=new_pressure,
-                    temperature=cell_temperature,
-                ),
-            )
 
             if injected_phase == FluidPhase.GAS:
+                phase_mobility = typing.cast(
+                    float, gas_relative_mobility_grid[i, j, k]
+                )
                 # Build pseudo-pressure table if needed
                 use_pp, pp_table = get_pseudo_pressure_table(
                     fluid=injected_fluid,
@@ -170,21 +158,8 @@ def compute_well_rates(
                     average_compressibility_factor=avg_z_factor,
                     formation_volume_factor=phase_fvf,
                 )
-
-                saturation_change = (
-                    flow_rate
-                    * time_step_size_in_days
-                    / (
-                        cell_size_x
-                        * cell_size_y
-                        * thickness_grid[i, j, k]
-                        * porosity_grid[i, j, k]
-                        * net_to_gross_grid[i, j, k]
-                    )
-                )
                 injection_rates[i, j, k] = (0.0, 0.0, flow_rate)
                 injection_fvfs[i, j, k] = (0.0, 0.0, phase_fvf)
-                injection_saturation_changes[i, j, k] = (0.0, 0.0, saturation_change)
 
             else:
                 # Water injection
@@ -202,6 +177,7 @@ def compute_well_rates(
                     }
                 else:
                     compressibility_kwargs = {}
+                
                 phase_compressibility = typing.cast(
                     float,
                     injected_fluid.get_compressibility(
@@ -209,6 +185,9 @@ def compute_well_rates(
                         temperature=cell_temperature,
                         **compressibility_kwargs,
                     ),
+                )
+                phase_mobility = typing.cast(
+                    float, water_relative_mobility_grid[i, j, k]
                 )
                 flow_rate = (
                     compute_oil_well_rate(
@@ -221,20 +200,8 @@ def compute_well_rates(
                     )
                     * bbl_to_ft3
                 )
-                saturation_change = (
-                    flow_rate
-                    * time_step_size_in_days
-                    / (
-                        cell_size_x
-                        * cell_size_y
-                        * thickness_grid[i, j, k]
-                        * porosity_grid[i, j, k]
-                        * net_to_gross_grid[i, j, k]
-                    )
-                )
                 injection_rates[i, j, k] = (flow_rate, 0.0, 0.0)
                 injection_fvfs[i, j, k] = (phase_fvf, 0.0, 0.0)
-                injection_saturation_changes[i, j, k] = (saturation_change, 0.0, 0.0)
 
     # Production wells
     for well in wells.production_wells:

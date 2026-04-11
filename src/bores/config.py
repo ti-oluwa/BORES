@@ -242,6 +242,9 @@ class Config(
 
     Note: Larger changes can cause density/viscosity jumps and well control issues.
     """
+    
+    minimum_injector_gas_saturation: typing.Optional[float] = 1e-4
+    minimum_injector_water_saturation: typing.Optional[float] = 1e-4 
 
     maximum_newton_iterations: int = attrs.field(  # type: ignore
         default=15,
