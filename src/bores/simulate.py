@@ -380,7 +380,7 @@ def _apply_minimum_injector_saturations(
         active water injector wellblocks. Should be above
         `phase_appearance_tolerance` to guarantee `krw > 0`. Pass `None` to disable water seeding.
     :param dtype: NumPy dtype used for all grid arrays.
-    :return: Updated `(gas_saturation_grid, oil_saturation_grid, water_saturation_grid)` 
+    :return: Updated `(gas_saturation_grid, oil_saturation_grid, water_saturation_grid)`
         with minimum saturations enforced.
     """
     sg = gas_saturation_grid
@@ -412,7 +412,7 @@ def _apply_minimum_injector_saturations(
                 np.maximum(sw, np.full_like(sw, minimum_water_saturation, dtype=dtype)),
                 sw,
             ).astype(dtype)
-            
+
             delta_sw = sw_new - sw
             so = np.where(
                 water_injector_mask,
@@ -1070,6 +1070,16 @@ def _run_sequential_implicit_step(
         production_fvfs=_fvfs_proxy(production_fvfs),
     )
 
+    _apply_minimum_injector_saturations(
+        gas_saturation_grid=fluid_properties.gas_saturation_grid,
+        oil_saturation_grid=fluid_properties.oil_saturation_grid,
+        water_saturation_grid=fluid_properties.water_saturation_grid,
+        injection_rates=injection_rates,
+        minimum_gas_saturation=config.minimum_injector_gas_saturation,
+        minimum_water_saturation=config.minimum_injector_water_saturation,
+        dtype=dtype,
+    )
+
     # Refresh boundary maps so the saturation solve sees post-pressure BC values.
     metadata = attrs.evolve(metadata, fluid_properties=fluid_properties)
     flux_boundaries, pressure_boundaries = (
@@ -1518,6 +1528,16 @@ def _run_full_sequential_implicit_step(
             production_rates=_rates_proxy(production_rates),
             injection_fvfs=_fvfs_proxy(injection_fvfs),
             production_fvfs=_fvfs_proxy(production_fvfs),
+        )
+
+        _apply_minimum_injector_saturations(
+            gas_saturation_grid=iter_fluid_properties.gas_saturation_grid,
+            oil_saturation_grid=iter_fluid_properties.oil_saturation_grid,
+            water_saturation_grid=iter_fluid_properties.water_saturation_grid,
+            injection_rates=injection_rates,
+            minimum_gas_saturation=config.minimum_injector_gas_saturation,
+            minimum_water_saturation=config.minimum_injector_water_saturation,
+            dtype=dtype,
         )
 
         iter_fluid_properties = update_fluid_properties(

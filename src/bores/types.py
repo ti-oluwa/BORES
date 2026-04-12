@@ -36,7 +36,6 @@ __all__ = [
 
 T = typing.TypeVar("T")
 Tco = typing.TypeVar("Tco", covariant=True)
-
 S = typing.TypeVar("S")
 
 
@@ -188,8 +187,17 @@ Solver = typing.Union[SolverFunc, SolverStr]
 
 class MixingRuleFunc(typing.Protocol):
     """
-    Protocol for a mixing rule function that combines two properties
-    based on their saturations.
+    Protocol for a mixing rule function that combines two-phase oil relative
+    permeabilities into a three-phase estimate.
+
+    The extended signature provides every quantity a mixing rule could need,
+    including the actual two-phase water and gas relative permeabilities and
+    the oil endpoint, so that rules requiring the full Stone II normalization
+    or saturation-weighted interpolations can be implemented without
+    approximation.
+
+    Parameters that a simple rule (e.g. geometric mean) does not need can
+    simply be ignored in the implementation.
     """
 
     def __call__(
@@ -197,31 +205,51 @@ class MixingRuleFunc(typing.Protocol):
         *,
         kro_w: FloatOrArray,
         kro_g: FloatOrArray,
+        krw: FloatOrArray,
+        krg: FloatOrArray,
+        kro_endpoint: FloatOrArray,
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
         gas_saturation: FloatOrArray,
     ) -> FloatOrArray:
         """
-        Combines two properties based on their saturations.
+        Compute the three-phase oil relative permeability.
 
-        :param kro_w: Property value for water phase.
-        :param kro_g: Property value for gas phase.
-        :param water_saturation: Saturation of the water phase.
-        :param oil_saturation: Saturation of the oil phase.
-        :param gas_saturation: Saturation of the gas phase.
-        :return: Combined property value.
+        :param kro_w: Two-phase oil relative permeability from the oil-water
+            table at the current water saturation.
+        :param kro_g: Two-phase oil relative permeability from the gas-oil
+            table at the current gas (or oil) saturation.
+        :param krw: Two-phase water relative permeability from the oil-water
+            table at the current water saturation.
+        :param krg: Two-phase gas relative permeability from the gas-oil
+            table at the current gas saturation.
+        :param kro_endpoint: Oil relative permeability at connate water
+            saturation (kro at Sw=Swc, Sg=0).  Equal to ``max_oil_relperm``
+            for normalized tables; 1.0 for unit-endpoint tables.
+        :param water_saturation: Current water saturation.
+        :param oil_saturation: Current oil saturation.
+        :param gas_saturation: Current gas saturation.
+        :return: Three-phase oil relative permeability.
         """
         ...
 
 
 class MixingRulePartialDerivatives(TypedDict):
     """
-    The five partial derivatives of a three-phase oil relative permeability
-    mixing rule with respect to each of its five arguments.
+    The seven partial derivatives of a three-phase oil relative permeability
+    mixing rule with respect to each of its seven saturation-dependent
+    arguments.
 
     The mixing rule signature is:
 
-        kro = rule(kro_w, kro_g, water_saturation, oil_saturation, gas_saturation)
+        kro = rule(kro_w, kro_g, krw, krg, kro_endpoint,
+                   water_saturation, oil_saturation, gas_saturation)
+
+    The derivatives here are taken with respect to the *inputs that vary
+    with saturation* in a way that is explicit in the mixing rule itself.
+    The chain-rule terms through `kro_w`, `kro_g`, `krw`, and `krg`
+    back to physical saturations are assembled at the call site in the table
+    derivative methods.
 
     Fields:
 
@@ -229,9 +257,15 @@ class MixingRulePartialDerivatives(TypedDict):
         ∂kro / ∂kro_w  - sensitivity to the oil-water two-phase oil kr.
     d_kro_d_kro_g :
         ∂kro / ∂kro_g  - sensitivity to the gas-oil two-phase oil kr.
+    d_kro_d_krw :
+        ∂kro / ∂krw  - sensitivity to the two-phase water kr.
+        Zero for rules that do not use `krw` directly (most simple rules).
+    d_kro_d_krg :
+        ∂kro / ∂krg  - sensitivity to the two-phase gas kr.
+        Zero for rules that do not use `krg` directly (most simple rules).
     d_kro_d_sw_explicit :
         ∂kro / ∂Sw  through the explicit water-saturation argument of the
-        mixing rule (e.g. saturation weighting in ``eclipse_rule``).
+        mixing rule (e.g. saturation weighting in `eclipse_rule`).
         Zero for rules that do not depend directly on saturation.
     d_kro_d_so_explicit :
         ∂kro / ∂So  through the explicit oil-saturation argument.
@@ -241,6 +275,8 @@ class MixingRulePartialDerivatives(TypedDict):
 
     d_kro_d_kro_w: FloatOrArray
     d_kro_d_kro_g: FloatOrArray
+    d_kro_d_krw: FloatOrArray
+    d_kro_d_krg: FloatOrArray
     d_kro_d_sw_explicit: FloatOrArray
     d_kro_d_so_explicit: FloatOrArray
     d_kro_d_sg_explicit: FloatOrArray
@@ -256,23 +292,42 @@ class MixingRuleDFunc(typing.Protocol):
         *,
         kro_w: FloatOrArray,
         kro_g: FloatOrArray,
+        krw: FloatOrArray,
+        krg: FloatOrArray,
+        kro_endpoint: FloatOrArray,
         water_saturation: FloatOrArray,
         oil_saturation: FloatOrArray,
         gas_saturation: FloatOrArray,
     ) -> typing.Union[
         MixingRulePartialDerivatives,
         typing.Tuple[
-            FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray, FloatOrArray
+            FloatOrArray,
+            FloatOrArray,
+            FloatOrArray,
+            FloatOrArray,
+            FloatOrArray,
+            FloatOrArray,
+            FloatOrArray,
         ],
     ]:
         """
+        Return the seven partial derivatives of the mixing rule.
 
-        :param kro_w: Property value for water phase.
-        :param kro_g: Property value for gas phase.
-        :param water_saturation: Saturation of the water phase.
-        :param oil_saturation: Saturation of the oil phase.
-        :param gas_saturation: Saturation of the gas phase.
-        :return: The partial derivatives.
+        The tuple order (when not returning a `MixingRulePartialDerivatives` dict) is:
+
+        `(d_kro_d_kro_w, d_kro_d_kro_g, d_kro_d_krw, d_kro_d_krg,
+           d_kro_d_sw_explicit, d_kro_d_so_explicit, d_kro_d_sg_explicit)`
+
+        :param kro_w: Two-phase oil kr from oil-water table.
+        :param kro_g: Two-phase oil kr from gas-oil table.
+        :param krw: Two-phase water kr from oil-water table.
+        :param krg: Two-phase gas kr from gas-oil table.
+        :param kro_endpoint: Oil kr at connate water (normalization reference).
+        :param water_saturation: Current water saturation.
+        :param oil_saturation: Current oil saturation.
+        :param gas_saturation: Current gas saturation.
+        :return: The seven partial derivatives, either as a
+            `MixingRulePartialDerivatives` dict or a 7-tuple.
         """
         ...
 

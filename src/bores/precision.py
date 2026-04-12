@@ -18,7 +18,7 @@ _bores_dtype: ContextVar[npt.DTypeLike] = ContextVar("_bores_dtype", default=np.
 
 def get_dtype() -> npt.DTypeLike:
     """
-    Get the current data precision type for used for computations in `bores`.
+    Get the current data precision type for used for computations in `BORES`.
 
     This defines the precision used in calculations.
 
@@ -32,7 +32,7 @@ get_precision = get_dtype
 
 def set_dtype(dtype: npt.DTypeLike) -> None:
     """
-    Set the default data precision type for `bores` computations.
+    Set the default data precision type for `BORES` computations.
 
     Useful for setting precision for current context.
 
@@ -47,7 +47,7 @@ set_precision = set_dtype
 @contextmanager
 def with_precision(dtype: npt.DTypeLike):
     """
-    Context manager to temporarily set the data type, and hence the precision for `bores` computations.
+    Context manager to temporarily set the data type, and hence the precision for `BORES` computations.
 
     :param dtype: The data type to set within the context.
     """
@@ -58,32 +58,25 @@ def with_precision(dtype: npt.DTypeLike):
         _bores_dtype.reset(token)
 
 
-def use_128bit_precision() -> None:
-    """
-    Set the default data precision type to float128 for `bores` computations.
-    """
-    set_dtype(np.float128)
-
-
 def use_64bit_precision() -> None:
     """
-    Set the default data precision type to float64 for `bores` computations.
+    Set the default data precision type to float64 for `BORES` computations.
     """
     set_dtype(np.float64)
 
 
 def use_32bit_precision() -> None:
     """
-    Set the default data precision type to float32 for `bores` computations.
+    Set the default data precision type to float32 for `BORES` computations.
 
-    Default precision for `bores`.
+    Default precision for `BORES`.
     """
     set_dtype(np.float32)
 
 
 def get_floating_point_info() -> np.finfo[np.floating]:
     """
-    Get the floating point information for the current data type used in `bores` computations.
+    Get the floating point information for the current data type used in `BORES` computations.
 
     :return: The floating point information.
     """
