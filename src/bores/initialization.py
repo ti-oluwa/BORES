@@ -684,7 +684,7 @@ def check_zero_flow_initialization(
         )
         for v in violations[:5]:
             logger.warning(
-                "  Cell %s: rel_flux=%.3e day⁻¹  "
+                "  Cell %s: relative_flux=%.3e day⁻¹  "
                 "(qw=%.3e, qo=%.3e, qg=%.3e ft³/day, PV=%.3e ft³)",
                 v.cell,
                 v.relative_flux,

@@ -111,7 +111,7 @@ class Config(
     """Whether to disable structural dip effects in reservoir modeling/simulation."""
 
     miscibility_model: MiscibilityModel = "immiscible"
-    """Miscibility model: 'immiscible', 'todd_longstaff'"""
+    """Miscibility model: 'immiscible', 'todd-longstaff'"""
 
     saturation_cfl_threshold: float = 0.7
     """

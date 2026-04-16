@@ -2646,7 +2646,7 @@ def evolve_saturation(
             cell_count_z=cell_count_z,
         )
 
-        for ls_iteration in range(maximum_line_search_cuts):
+        for _ in range(maximum_line_search_cuts):
             water_residual_trial, gas_residual_trial = compute_residual(
                 water_saturation_grid=water_saturation_grid_trial,
                 oil_saturation_grid=oil_saturation_grid_trial,
@@ -2830,7 +2830,6 @@ def evolve_saturation(
         maximum_oil_saturation_change=maximum_oil_saturation_change,
         maximum_gas_saturation_change=maximum_gas_saturation_change,
     )
-
     if converged:
         return EvolutionResult(
             value=solution,

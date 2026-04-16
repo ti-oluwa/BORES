@@ -1407,6 +1407,9 @@ def compute_well_contributions(
 
         injected_fluid = well.injected_fluid
         injected_phase = injected_fluid.phase
+        use_pseudo_pressure = (
+            config.use_pseudo_pressure and injected_phase == FluidPhase.GAS
+        )
         well_indices = well_indices_cache.injection[well.name]
 
         # Compute BHP and productivity index per perforation.
@@ -1458,7 +1461,7 @@ def compute_well_contributions(
                 fluid=injected_fluid,
                 formation_volume_factor=phase_fvf,
                 allocation_fraction=allocation_fraction,
-                use_pseudo_pressure=False,
+                use_pseudo_pressure=use_pseudo_pressure,
                 fluid_compressibility=phase_compressibility,
                 pvt_tables=None,
             )
@@ -1561,16 +1564,19 @@ def compute_well_contributions(
                 phase_fvf = typing.cast(
                     float, gas_formation_volume_factor_grid[i, j, k]
                 )
+                use_pseudo_pressure = config.use_pseudo_pressure
             elif primary_phase == FluidPhase.WATER:
                 phase_compressibility = typing.cast(
                     float, water_compressibility_grid[i, j, k]
                 )
                 phase_fvf = typing.cast(float, water_fvf_grid[i, j, k])
+                use_pseudo_pressure = False
             else:  # Oil
                 phase_compressibility = typing.cast(
                     float, oil_compressibility_grid[i, j, k]
                 )
                 phase_fvf = typing.cast(float, oil_fvf_grid[i, j, k])
+                use_pseudo_pressure = False
 
             total_mobility = typing.cast(
                 float,
@@ -1586,7 +1592,7 @@ def compute_well_contributions(
                 fluid=primary_fluid,
                 formation_volume_factor=phase_fvf,
                 allocation_fraction=allocation_fraction,
-                use_pseudo_pressure=False,
+                use_pseudo_pressure=use_pseudo_pressure,
                 fluid_compressibility=phase_compressibility,
                 pvt_tables=config.pvt_tables,
                 **context,

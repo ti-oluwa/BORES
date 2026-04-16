@@ -1577,13 +1577,13 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
 
         return flux_cache, pressure_cache
 
-    def refresh_dynamic_boundaries(
+    def refresh_boundaries(
         self,
         metadata: BoundaryMetadata,
         pad_width: int = 1,
     ) -> typing.Tuple[NDimensionalGrid, NDimensionalGrid]:
         """
-        Re-evaluate only dynamic (time-dependent) boundary conditions.
+        Re-evaluate (only dynamic or time-dependent) boundary conditions.
 
         On entry, the caches must already be initialized (via a prior call to
         `get_boundaries`). This method updates only the cache entries for
@@ -1600,7 +1600,7 @@ class BoundaryConditions(Serializable, typing.Generic[NDimension]):
         """
         if not self._cache_initialised:
             raise RuntimeError(
-                "`refresh_dynamic_boundaries` requires prior initialization via `get_boundaries`."
+                "`refresh_boundaries` requires prior initialization via `get_boundaries`."
             )
 
         flux_cache = self._flux_cache

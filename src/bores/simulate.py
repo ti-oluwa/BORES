@@ -536,8 +536,8 @@ def _run_impes_step(
     # Carter-Tracy) see the new interior pressures before saturation evolves.
     logger.debug("Refreshing boundary conditions after pressure solve...")
     metadata = attrs.evolve(metadata, fluid_properties=fluid_properties)
-    flux_boundaries, pressure_boundaries = (
-        boundary_conditions.refresh_dynamic_boundaries(metadata=metadata)
+    flux_boundaries, pressure_boundaries = boundary_conditions.refresh_boundaries(
+        metadata=metadata
     )
 
     # Copy before PVT updates so that we can check saturation changes after solution gas liberation
@@ -1015,8 +1015,8 @@ def _run_sequential_implicit_step(
 
     # Refresh boundary conditions so the saturation solve sees post-pressure BC values.
     metadata = attrs.evolve(metadata, fluid_properties=fluid_properties)
-    flux_boundaries, pressure_boundaries = (
-        boundary_conditions.refresh_dynamic_boundaries(metadata=metadata)
+    flux_boundaries, pressure_boundaries = boundary_conditions.refresh_boundaries(
+        metadata=metadata
     )
 
     old_solution_gor_grid = fluid_properties.solution_gas_to_oil_ratio_grid.copy()
@@ -1499,8 +1499,8 @@ def _run_full_sequential_implicit_step(
 
         # Refresh boundary conditions with updated pressure for the saturation solve.
         metadata = attrs.evolve(metadata, fluid_properties=iter_fluid_properties)
-        flux_boundaries, pressure_boundaries = (
-            boundary_conditions.refresh_dynamic_boundaries(metadata=metadata)
+        flux_boundaries, pressure_boundaries = boundary_conditions.refresh_boundaries(
+            metadata=metadata
         )
 
         pressure_change_grid = pressure_grid - fluid_properties.pressure_grid
@@ -2514,7 +2514,11 @@ def run(
     )
     logger.info(f"Array numerical precision: {np.dtype(dtype).name!r}")
     logger.info("Total simulation time: %.1f seconds", timer.simulation_time)
-    logger.info("Output frequency: every %d steps", output_frequency)
+    logger.info(
+        f"Output frequency: Every {output_frequency} steps"
+        if output_frequency > 1
+        else "Output frequency: Every step",
+    )
     logger.info("Has wells: %s", has_wells)
     if has_wells:
         logger.debug("Checking well locations against grid shape")

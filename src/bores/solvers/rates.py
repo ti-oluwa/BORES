@@ -128,7 +128,6 @@ def compute_well_rates(
                 + oil_relative_mobility_grid[i, j, k],
             )
             if injected_phase == FluidPhase.GAS:
-                phase_mobility = typing.cast(float, gas_relative_mobility_grid[i, j, k])
                 # Build pseudo-pressure table if needed
                 use_pp, pp_table = get_pseudo_pressure_table(
                     fluid=injected_fluid,
@@ -188,9 +187,6 @@ def compute_well_rates(
                         temperature=cell_temperature,
                         **compressibility_kwargs,
                     ),
-                )
-                phase_mobility = typing.cast(
-                    float, water_relative_mobility_grid[i, j, k]
                 )
                 flow_rate = (
                     compute_oil_well_rate(

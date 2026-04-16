@@ -107,7 +107,7 @@ Discretization methods for numerical simulations
 - `"full-sequential-implicit"` or `"full-si"`: Both pressure and saturation are treated (sequentially) implicitly
 """
 
-MiscibilityModel = typing.Literal["immiscible", "todd_longstaff"]
+MiscibilityModel = typing.Literal["immiscible", "todd-longstaff"]
 """Miscibility models for fluid interactions in the simulation"""
 
 

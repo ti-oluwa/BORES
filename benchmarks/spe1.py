@@ -55,11 +55,14 @@ def setup_grid():
     reference_pressure = 4800.0  # psia
     reference_depth = 8400.0  # ft (layer 3 centre)
 
-    rho_at_pb = 37.046  # lbm/ft³ at 4014.7 psia
-    rho_at_9015 = 39.768  # lbm/ft³ at 9014.7 psia
-    p_interp_frac = (reference_pressure - 4014.7) / (9014.7 - 4014.7)
-    rho_oil_initial = rho_at_pb + (rho_at_9015 - rho_at_pb) * p_interp_frac
-    oil_gradient = rho_oil_initial / 144.0  # psi/ft
+    density_at_pb = 37.046  # lbm/ft³ at 4014.7 psia
+    density_at_9015 = 39.768  # lbm/ft³ at 9014.7 psia
+    pressure_interpolation_fraction = (reference_pressure - 4014.7) / (9014.7 - 4014.7)
+    initial_oil_density = (
+        density_at_pb
+        + (density_at_9015 - density_at_pb) * pressure_interpolation_fraction
+    )
+    oil_gradient = initial_oil_density / 144.0  # psi/ft
 
     layer_centre_depths = np.array([8335.0, 8360.0, 8400.0])  # ft TVDSS
     layer_pressures = (
@@ -300,9 +303,7 @@ def setup_grid():
         ]
     )
     # Convert RB/MSCF → ft³/SCF
-    gas_fvf_values = gas_fvf_values_rb_mscf * (
-        bores.c.BARRELS_TO_CUBIC_FEET / 1000.0
-    )
+    gas_fvf_values = gas_fvf_values_rb_mscf * (bores.c.BARRELS_TO_CUBIC_FEET / 1000.0)
 
     # μg (cP): Table 2
     gas_viscosity_values = bores.array(
@@ -372,14 +373,12 @@ def setup_grid():
     # Gas solubility in water (Rsw): zero throughout per Table 2
     gas_solubility_in_water_values = bores.array([0.0] * 9)
 
-
     # -------------------------------------------------------------------------
     # Build 2-D tables (n_pressures × n_temperatures)
     # Broadcast each 1-D array across the temperature axis (isothermal)
     # -------------------------------------------------------------------------
     def make_2d(arr):
         return np.column_stack([arr, arr])
-
 
     solution_gor_table = typing.cast(
         bores.TwoDimensionalGrid, make_2d(solution_gor_values)
@@ -399,16 +398,12 @@ def setup_grid():
         bores.TwoDimensionalGrid, make_2d(gas_density_values)
     )
 
-
     # Water tables are 3-D: (n_pressures, n_temperatures, n_salinities)
     # SPE1 uses fresh water → salinity = 0 ppm → n_salinities = 1
     def make_3d(arr):
         return np.stack([make_2d(arr)], axis=2)
 
-
-    water_fvf_table = typing.cast(
-        bores.ThreeDimensionalGrid, make_3d(water_fvf_values)
-    )
+    water_fvf_table = typing.cast(bores.ThreeDimensionalGrid, make_3d(water_fvf_values))
     water_viscosity_table = typing.cast(
         bores.ThreeDimensionalGrid, make_3d(water_viscosity_values)
     )
