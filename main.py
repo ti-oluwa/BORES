@@ -121,7 +121,7 @@ rock_fluid_tables = bores.RockFluidTables(
         oil_exponent=1.0,
         gas_exponent=1.5,
         wettability=bores.Wettability.WATER_WET,
-        mixing_rule="eclipse_rule",
+        mixing_rule="stone_II_rule",
     ),
     capillary_pressure_table=bores.BrooksCoreyCapillaryPressureModel(
         wettability=bores.Wettability.WATER_WET,
@@ -129,7 +129,7 @@ rock_fluid_tables = bores.RockFluidTables(
 )
 timer = bores.Timer(
     initial_step_size=bores.Time(days=5),
-    maximum_step_size=bores.Time(months=6),
+    maximum_step_size=bores.Time(months=3),
     minimum_step_size=bores.Time(hours=1),
     simulation_time=bores.Time(years=30),
     maximum_rejections=20,
@@ -140,13 +140,12 @@ config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
-    scheme="impes",
+    scheme="si",
     pressure_solver="direct",
     saturation_solver="direct",
     pressure_preconditioner=None,
     saturation_preconditioner=None,
-    maximum_pressure_change=1800,
-    jacobian_assembly_method="analytical",
+    maximum_pressure_change=800,
     # freeze_saturation_pressure=True,
     # disable_capillary_effects=True,
     # minimum_injector_water_saturation=0.1,

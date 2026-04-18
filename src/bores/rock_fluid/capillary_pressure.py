@@ -7,20 +7,23 @@ import attrs
 import numba
 import numpy as np
 import numpy.typing as npt
+from scipy.interpolate import PchipInterpolator
 
 from bores.constants import c
 from bores.errors import ValidationError
 from bores.grids.base import array as bores_array
 from bores.serialization import Serializable, make_serializable_type_registrar
 from bores.stores import StoreSerializable
+from bores.tables.utils import build_pchip_interpolant
 from bores.types import (
     CapillaryPressureDerivatives,
     CapillaryPressures,
     FloatOrArray,
     FluidPhase,
+    Spacing,
     Wettability,
 )
-from bores.utils import atleast_1d, piecewise_linear_slope
+from bores.utils import atleast_1d
 
 __all__ = [
     "BrooksCoreyCapillaryPressureModel",
@@ -174,18 +177,27 @@ def get_capillary_pressure_table(name: str) -> typing.Type[CapillaryPressureTabl
 
 
 @attrs.frozen
-class TwoPhaseCapillaryPressureTable(Serializable):
+class TwoPhaseCapillaryPressureTable(
+    Serializable, load_exclude={"_pchip", "_dpchip"}, dump_exclude={"_pchip", "_dpchip"}
+):
     """
-    Two-phase capillary pressure lookup table.
+    Two-phase capillary pressure lookup table backed by a PCHIP interpolant.
 
     Interpolates capillary pressure for two fluid phases based on a
     **reference saturation** value. The reference saturation can be either
     the wetting or non-wetting phase saturation, depending on how the table
-    was constructed - e.g. a gas-oil table may be indexed by oil saturation
+    was constructed, e.g. a gas-oil table may be indexed by oil saturation
     (wetting) or by gas saturation (non-wetting).
 
-    Uses `np.interp` for fast vectorized interpolation.
     Supports both scalar and array inputs.
+
+    **Grid scaling** (`number_of_base_points` / `number_of_endpoint_extra_points`):
+
+    Identical semantics to `TwoPhaseRelPermTable`. The default
+    `number_of_endpoint_extra_points=30` (vs 20 for relperm) reflects that Pc curves are
+    typically unbounded near residual saturation, making endpoint fidelity
+    especially important for implicit convergence. Pass `number_of_base_points=0`
+    to disable scaling.
     """
 
     wetting_phase: typing.Union[FluidPhase, str] = attrs.field(converter=FluidPhase)
@@ -197,7 +209,7 @@ class TwoPhaseCapillaryPressureTable(Serializable):
     reference_saturation: npt.NDArray = attrs.field(converter=bores_array)
     """
     Saturation values used as the x-axis for interpolation, monotonically
-    increasing. May represent either the wetting or non-wetting phase
+    increasing.  May represent either the wetting or non-wetting phase
     saturation depending on `reference_phase`.
     """
 
@@ -213,30 +225,40 @@ class TwoPhaseCapillaryPressureTable(Serializable):
     """
     Which phase the `reference_saturation` axis represents.
  
-    - `"wetting"` - the x-axis holds wetting-phase saturation values.
+    - `"wetting"` — the x-axis holds wetting-phase saturation values.
       This is the standard convention for oil-water tables (Sw axis) and for
       gas-oil tables indexed by So.
-    - `"non_wetting"` - the x-axis holds non-wetting-phase saturation values.
-      Use this for gas-oil tables indexed by Sg.
+    - `"non_wetting"` — the x-axis holds non-wetting-phase saturation
+      values.  Use this for gas-oil tables indexed by Sg.
  
-    This attribute does not change the interpolation mechanics.  It only
+    This attribute does not change the interpolation mechanics. It only
     records which physical saturation must be supplied by the caller so that
     `ThreePhaseCapillaryPressureTable` (and any other consumer) can dispatch
     the correct saturation without hard-coding assumptions.
     """
 
-    capillary_pressure_derivative: typing.Optional[npt.NDArray] = attrs.field(
-        default=None,
-        converter=attrs.converters.optional(bores_array),
-    )
+    number_of_base_points: int = attrs.field(default=200)
     """
-    Pre-computed dPc/d(reference_saturation) at each knot.
+    Target number of base knot points used when expanding the raw saturation
+    grid before fitting the PCHIP interpolant.
+ 
+    Pass `0` to disable grid scaling and use the raw knots directly.
+    """
 
-    When provided, interpolated via `np.interp` instead of
-    `piecewise_linear_slope`. Carrying analytical derivatives avoids
-    the kinks that would otherwise appear in the Newton Jacobian at every
-    table knot.
+    number_of_endpoint_extra_points: int = attrs.field(default=30)
     """
+    Number of extra knots injected into the first and last 10 % of the
+    saturation range during grid expansion (see `number_of_base_points`).
+ 
+    The higher default of 30 (vs 20 for relperm) reflects that Pc curves vary
+    most steeply near residual saturations. Pass `0` to disable.
+    """
+
+    spacing: Spacing = attrs.field(default="cosine")
+    """Grid spacing mode used when building the expanded knot grid."""
+
+    _pchip: PchipInterpolator = attrs.field(init=False, repr=False)
+    _dpchip: PchipInterpolator = attrs.field(init=False, repr=False)
 
     def __attrs_post_init__(self) -> None:
         if self.reference_phase not in ("wetting", "non_wetting"):
@@ -246,8 +268,8 @@ class TwoPhaseCapillaryPressureTable(Serializable):
             )
         if len(self.reference_saturation) != len(self.capillary_pressure):
             raise ValidationError(
-                f"`reference_saturation` and `capillary_pressure` arrays must have the "
-                f"same length.  Got {len(self.reference_saturation)} vs "
+                f"`reference_saturation` and `capillary_pressure` arrays must have "
+                f"the same length.  Got {len(self.reference_saturation)} vs "
                 f"{len(self.capillary_pressure)}"
             )
         if len(self.reference_saturation) < 2:
@@ -257,18 +279,22 @@ class TwoPhaseCapillaryPressureTable(Serializable):
                 "`reference_saturation` must be monotonically increasing."
             )
 
-        if self.capillary_pressure_derivative is not None and len(
-            self.capillary_pressure_derivative
-        ) != len(self.reference_saturation):
-            raise ValidationError(
-                "`capillary_pressure_derivative` must have the same length as `reference_saturation`."
-            )
+        # Build interpolant
+        pchip, dpchip = build_pchip_interpolant(
+            reference_saturation=self.reference_saturation,
+            values=self.capillary_pressure,
+            number_of_base_points=self.number_of_base_points,
+            number_of_endpoint_extra_points=self.number_of_endpoint_extra_points,
+            spacing=self.spacing,
+        )
+        object.__setattr__(self, "_pchip", pchip)
+        object.__setattr__(self, "_dpchip", dpchip)
 
     def get_oil_water_wetting_phase(self) -> FluidPhase:
-        return self.wetting_phase  # type:ignore[return-value]
+        return self.wetting_phase  # type: ignore[return-value]
 
     def get_gas_oil_wetting_phase(self) -> FluidPhase:
-        return self.wetting_phase  # type:ignore[return-value]
+        return self.wetting_phase  # type: ignore[return-value]
 
     def _resolve_reference(
         self,
@@ -286,6 +312,50 @@ class TwoPhaseCapillaryPressureTable(Serializable):
             return non_wetting_saturation
         return wetting_saturation
 
+    def _query_pchip(
+        self,
+        reference: FloatOrArray,
+    ) -> FloatOrArray:
+        """
+        Evaluate the capillary pressure PCHIP interpolant at `reference`,
+        applying constant extrapolation at the boundaries.
+
+        :param reference: Query saturation value(s) — scalar or array.
+        :return: Capillary pressure value(s).
+        """
+        is_scalar = np.isscalar(reference)
+        sat = np.atleast_1d(np.asarray(reference, dtype=np.float64))
+        x_min = float(self._pchip.x[0])
+        x_max = float(self._pchip.x[-1])
+
+        result = self._pchip(np.clip(sat, x_min, x_max))
+        result = np.where(sat < x_min, float(self.capillary_pressure[0]), result)
+        result = np.where(sat > x_max, float(self.capillary_pressure[-1]), result)
+
+        if is_scalar:
+            return float(result.ravel()[0])
+        return result.reshape(sat.shape)
+
+    def _query_dpchip(self, reference: FloatOrArray) -> FloatOrArray:
+        """
+        Evaluate the analytical PCHIP derivative at `reference`, returning
+        zero outside the knot range.
+
+        :param reference: Query saturation value(s) — scalar or array.
+        :return: Derivative value(s).
+        """
+        is_scalar = np.isscalar(reference)
+        sat = np.atleast_1d(np.asarray(reference, dtype=np.float64))
+        x_min = float(self._dpchip.x[0])
+        x_max = float(self._dpchip.x[-1])
+
+        result = self._dpchip(np.clip(sat, x_min, x_max))
+        result = np.where((sat < x_min) | (sat > x_max), 0.0, result)
+
+        if is_scalar:
+            return float(result.ravel()[0])
+        return result.reshape(sat.shape)
+
     def get_capillary_pressure(
         self,
         wetting_saturation: FloatOrArray,
@@ -295,15 +365,11 @@ class TwoPhaseCapillaryPressureTable(Serializable):
         Get capillary pressure at the given saturation(s).
 
         When `reference_phase="wetting"`, only `wetting_saturation` is
-        needed. When `reference_phase="non_wetting"`,
-        `non_wetting_saturation` must be supplied.
-
-        Uses `np.interp` for fast linear interpolation with constant
-        extrapolation at the boundaries.
+        needed. When `reference_phase="non_wetting"`, `non_wetting_saturation` must be supplied.
 
         :param wetting_saturation: Wetting-phase saturation (scalar or array).
-        :param non_wetting_saturation: Non-wetting-phase saturation (scalar or
-            array). Required when `reference_phase="non_wetting"`.
+        :param non_wetting_saturation: Non-wetting-phase saturation (scalar or array).
+            Required when `reference_phase="non_wetting"`.
         :return: Capillary pressure value(s) matching the input shape.
         """
         ref = self._resolve_reference(
@@ -312,19 +378,7 @@ class TwoPhaseCapillaryPressureTable(Serializable):
             if non_wetting_saturation is not None
             else wetting_saturation,
         )
-        is_scalar = np.isscalar(ref)
-        sat = np.atleast_1d(ref)
-        original_shape = sat.shape
-
-        pc_flat = np.interp(
-            x=sat.ravel(),
-            xp=self.reference_saturation,  # type: ignore[arg-type]
-            fp=self.capillary_pressure,  # type: ignore[arg-type]
-            left=self.capillary_pressure[0],
-            right=self.capillary_pressure[-1],
-        )
-        pc = pc_flat.reshape(original_shape)
-        return float(pc[0]) if is_scalar else pc
+        return self._query_pchip(ref)
 
     def get_capillary_pressure_derivative(
         self,
@@ -335,17 +389,12 @@ class TwoPhaseCapillaryPressureTable(Serializable):
         Derivative of capillary pressure with respect to the reference
         saturation axis of this table: `dPc / d(reference_saturation)`.
 
-        When `reference_phase="wetting"` this is `dPc/dSw` (or `dPc/dSo`
-        for oil-wet tables).  When `reference_phase="non_wetting"` this is
-        `dPc/dSg` (for gas-oil tables indexed by Sg).
-
-        Uses the exact piecewise-linear slope of the tabulated curve - the same
-        interpolant used by `get_capillary_pressure`.  Zero outside the
-        tabulated range (constant extrapolation).
+        Evaluated from the analytical PCHIP derivative. Zero outside the
+        tabulated range (constant extrapolation = zero slope).
 
         :param wetting_saturation: Wetting-phase saturation (scalar or array).
-        :param non_wetting_saturation: Non-wetting-phase saturation (scalar or
-            array).  Required when `reference_phase="non_wetting"`.
+        :param non_wetting_saturation: Non-wetting-phase saturation (scalar or array).
+            Required when `reference_phase="non_wetting"`.
         :return: Derivative value(s) with the same shape as the input.
         """
         ref = self._resolve_reference(
@@ -354,22 +403,7 @@ class TwoPhaseCapillaryPressureTable(Serializable):
             if non_wetting_saturation is not None
             else wetting_saturation,
         )
-        if self.capillary_pressure_derivative is not None:
-            is_scalar = np.isscalar(ref)
-            sat = np.atleast_1d(ref)
-            d_flat = np.interp(
-                x=sat.ravel(),
-                xp=self.reference_saturation,
-                fp=self.capillary_pressure_derivative,
-                left=0.0,
-                right=0.0,
-            )
-            return d_flat.reshape(sat.shape) if not is_scalar else d_flat.item()
-        return piecewise_linear_slope(
-            query=ref,
-            table_x=self.reference_saturation,
-            table_y=self.capillary_pressure,
-        )
+        return self._query_dpchip(ref)
 
     def __call__(
         self,

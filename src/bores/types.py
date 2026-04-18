@@ -110,6 +110,7 @@ Discretization methods for numerical simulations
 MiscibilityModel = typing.Literal["immiscible", "todd-longstaff"]
 """Miscibility models for fluid interactions in the simulation"""
 
+Spacing = typing.Literal["cosine", "linspace"]
 
 class ArrayLike(typing.Protocol[Tco]):
     """

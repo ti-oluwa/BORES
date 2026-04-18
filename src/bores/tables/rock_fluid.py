@@ -4,10 +4,8 @@ import attrs
 import numba
 import numpy as np
 import numpy.typing as npt
-from scipy.interpolate import PchipInterpolator
 
 from bores.errors import ValidationError
-from bores.grids.utils import Spacing, make_saturation_grid
 from bores.rock_fluid.capillary_pressure import (
     CapillaryPressureTable,
     ThreePhaseCapillaryPressureTable,
@@ -20,11 +18,16 @@ from bores.rock_fluid.relperm import (
     TwoPhaseRelPermTable,
 )
 from bores.serialization import Serializable
+from bores.tables.utils import (
+    build_saturation_reference_grid,
+    pchip_resample,
+)
 from bores.types import (
     CapillaryPressures,
     FloatOrArray,
     FluidPhase,
     RelativePermeabilities,
+    Spacing,
 )
 
 __all__ = [
@@ -113,7 +116,7 @@ def _resolve_saturation_endpoint(
     :param model: Model object that may carry the endpoint as an attribute.
     :param model_attribute_name: Name of the attribute to read from `model`.
     :param calling_function_name: Name of the public function to include in the
-        error message so the user knows where to fix the missing value.
+        error message oil_saturation the user knows where to fix the missing value.
     :return: Resolved saturation endpoint as a Python float.
     """
     if argument_value is not None:
@@ -125,43 +128,6 @@ def _resolve_saturation_endpoint(
             f"{calling_function_name}() or stored in the model."
         )
     return float(attribute_value)
-
-
-@numba.njit(cache=True, inline="always")
-def _make_saturation_grid_with_minimum_span(
-    number_of_points: int,
-    saturation_minimum: float,
-    saturation_maximum: float,
-    spacing_mode: Spacing,
-    minimum_span: float,
-) -> npt.NDArray:
-    """
-    Build a saturation grid, enforcing a floor of `minimum_span` on the
-    total range so the grid never collapses to a single point.
-
-    `minimum_span` is a plain positional argument rather than keyword-only
-    so that Numba can inline this function without a typing error.
-
-    :param number_of_points: Number of points in the output grid.
-    :param saturation_minimum: Lower bound of the saturation range.
-    :param saturation_maximum: Upper bound of the saturation range.
-    :param spacing_mode: Grid spacing strategy (e.g. `'cosine'`, `'linspace'`).
-    :param minimum_span: Minimum permitted distance between the lower and upper
-        bounds. When the natural span is smaller, the upper bound is extended to
-        `saturation_minimum + minimum_span`.
-    :return: 1-D array of saturation values.
-    """
-    if saturation_maximum - saturation_minimum < minimum_span:
-        return np.array(
-            [
-                saturation_minimum,
-                max(saturation_minimum + minimum_span, saturation_maximum),
-            ],
-            dtype=np.float64,
-        )
-    return make_saturation_grid(
-        number_of_points, saturation_minimum, saturation_maximum, spacing_mode
-    )
 
 
 @numba.njit(cache=True, inline="always")
@@ -179,100 +145,6 @@ def _clamp_to_closed_interval(
     return max(lower_bound, min(upper_bound, value))
 
 
-def _pchip_resample_with_derivative(
-    source_saturations: npt.NDArray,
-    source_values: npt.NDArray,
-    number_of_output_points: int,
-    spacing_mode: Spacing,
-) -> typing.Tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
-    """
-    Fit a PCHIP interpolant through (`source_saturations`, `source_values`),
-    resample at `number_of_output_points` and return both the resampled values
-    and their first derivatives.
-
-    Returning the derivative alongside the values lets callers populate both
-    the value and derivative arrays of a two-phase table in one pass, giving
-    the Newton solver a C¹-consistent Jacobian without extra model evaluations.
-
-    :param source_saturations: Original saturation knots, strictly increasing.
-    :param source_values: Function values at each knot (kr or Pc).
-    :param number_of_output_points: Number of points in the resampled grid.
-    :param spacing_mode: Grid spacing strategy for the output grid.
-    :return: Three-tuple of `(resampled_saturations, resampled_values, resampled_derivatives)`.
-    """
-    interpolant = PchipInterpolator(source_saturations, source_values)
-    resampled_saturations = make_saturation_grid(
-        number_of_output_points,
-        float(source_saturations[0]),
-        float(source_saturations[-1]),
-        spacing_mode,
-    )
-    return (
-        resampled_saturations,
-        interpolant(resampled_saturations),
-        interpolant(resampled_saturations, 1),
-    )
-
-
-@numba.njit(cache=True)
-def _build_saturation_reference_grid(
-    number_of_base_points: int,
-    saturation_lower_bound: float,
-    saturation_upper_bound: float,
-    spacing_mode: Spacing,
-    number_of_endpoint_extra_points: int,
-) -> npt.NDArray:
-    """
-    Build a saturation reference grid with optional endpoint refinement.
-
-    The base grid spans [`saturation_lower_bound`, `saturation_upper_bound`]
-    at `number_of_base_points` using `spacing_mode`. When
-    `number_of_endpoint_extra_points` > 0, extra knots are injected into the
-    first and last 10 % of the range to capture the rapid variation of kr and
-    Pc curves near residual saturations.
-
-    `number_of_endpoint_extra_points` is a plain positional argument rather
-    than keyword-only so that Numba can compile this function without a typing
-    error when inlining `_make_saturation_grid_with_minimum_span`.
-
-    :param number_of_base_points: Number of evenly-spaced base knots.
-    :param saturation_lower_bound: Left end of the saturation range.
-    :param saturation_upper_bound: Right end of the saturation range.
-    :param spacing_mode: Grid spacing strategy (e.g. `'cosine'`, `'linspace'`).
-    :param number_of_endpoint_extra_points: Number of extra knots added inside
-        each boundary decade. Pass `0` to disable endpoint refinement.
-    :return: Sorted 1-D array of unique saturation values.
-    """
-    minimum_grid_span = 1e-6
-    base_grid = _make_saturation_grid_with_minimum_span(
-        number_of_base_points,
-        saturation_lower_bound,
-        saturation_upper_bound,
-        spacing_mode,
-        minimum_grid_span,
-    )
-    saturation_span = saturation_upper_bound - saturation_lower_bound
-    if saturation_span < minimum_grid_span or number_of_endpoint_extra_points <= 0:
-        return base_grid
-
-    endpoint_decade_width = 0.10 * saturation_span
-    lower_endpoint_refinement = np.linspace(
-        saturation_lower_bound,
-        saturation_lower_bound + endpoint_decade_width,
-        number_of_endpoint_extra_points + 2,
-    )
-    upper_endpoint_refinement = np.linspace(
-        saturation_upper_bound - endpoint_decade_width,
-        saturation_upper_bound,
-        number_of_endpoint_extra_points + 2,
-    )
-    return np.unique(
-        np.concatenate(
-            (base_grid, lower_endpoint_refinement, upper_endpoint_refinement)
-        )
-    )
-
-
 @numba.njit(cache=True)
 def _oil_water_point_sweep_along_water_saturation(
     water_saturation: float,
@@ -288,13 +160,15 @@ def _oil_water_point_sweep_along_water_saturation(
     :param residual_oil_saturation_water: Residual oil saturation in a waterflood (Sorw).
     :return: Three-tuple `(Sw, So, Sg)` with Sg = 0.
     """
-    sw = _clamp_to_closed_interval(
+    water_saturation = _clamp_to_closed_interval(
         water_saturation,
         irreducible_water_saturation,
         1.0 - residual_oil_saturation_water,
     )
-    so = _clamp_to_closed_interval(1.0 - sw, 0.0, 1.0 - irreducible_water_saturation)
-    return sw, so, 0.0
+    oil_saturation = _clamp_to_closed_interval(
+        1.0 - water_saturation, 0.0, 1.0 - irreducible_water_saturation
+    )
+    return water_saturation, oil_saturation, 0.0
 
 
 @numba.njit(cache=True)
@@ -312,13 +186,15 @@ def _oil_water_point_sweep_along_oil_saturation(
     :param residual_oil_saturation_water: Residual oil saturation in a waterflood (Sorw).
     :return: Three-tuple `(Sw, So, Sg)` with Sg = 0.
     """
-    so = _clamp_to_closed_interval(
+    oil_saturation = _clamp_to_closed_interval(
         oil_saturation,
         residual_oil_saturation_water,
         1.0 - irreducible_water_saturation,
     )
-    sw = _clamp_to_closed_interval(irreducible_water_saturation, 0.0, 1.0 - so)
-    return sw, so, 0.0
+    water_saturation = _clamp_to_closed_interval(
+        irreducible_water_saturation, 0.0, 1.0 - oil_saturation
+    )
+    return water_saturation, oil_saturation, 0.0
 
 
 @numba.njit(cache=True)
@@ -339,17 +215,17 @@ def _gas_oil_point_sweep_along_gas_saturation(
     :param residual_gas_saturation: Residual gas saturation (Sgr).
     :return: Three-tuple `(Sw, So, Sg)` with Sw = Swc.
     """
-    sg = _clamp_to_closed_interval(
+    gas_saturation = _clamp_to_closed_interval(
         gas_saturation,
         residual_gas_saturation,
         1.0 - irreducible_water_saturation - residual_oil_saturation_gas,
     )
-    so = _clamp_to_closed_interval(
-        1.0 - irreducible_water_saturation - sg,
+    oil_saturation = _clamp_to_closed_interval(
+        1.0 - irreducible_water_saturation - gas_saturation,
         0.0,
         1.0 - irreducible_water_saturation,
     )
-    return irreducible_water_saturation, so, sg
+    return irreducible_water_saturation, oil_saturation, gas_saturation
 
 
 @numba.njit(cache=True)
@@ -369,17 +245,17 @@ def _gas_oil_point_sweep_along_oil_saturation(
     :param residual_gas_saturation: Residual gas saturation (Sgr).
     :return: Three-tuple `(Sw, So, Sg)` with Sw = Swc.
     """
-    so = _clamp_to_closed_interval(
+    oil_saturation = _clamp_to_closed_interval(
         oil_saturation,
         residual_oil_saturation_gas,
         1.0 - irreducible_water_saturation - residual_gas_saturation,
     )
-    sg = _clamp_to_closed_interval(
-        1.0 - irreducible_water_saturation - so,
+    gas_saturation = _clamp_to_closed_interval(
+        1.0 - irreducible_water_saturation - oil_saturation,
         0.0,
         1.0 - irreducible_water_saturation,
     )
-    return irreducible_water_saturation, so, sg
+    return irreducible_water_saturation, oil_saturation, gas_saturation
 
 
 def _oil_water_sweep_axis_is_water_saturation(
@@ -424,21 +300,13 @@ def _sample_oil_water_relative_permeabilities(
     model_call_kwargs: typing.Dict[str, typing.Any],
     oil_water_wetting_phase: FluidPhase,
     number_of_output_points: int,
-    spacing_mode: Spacing,
-) -> typing.Tuple[
-    npt.NDArray,
-    npt.NDArray,
-    npt.NDArray,
-    typing.Optional[npt.NDArray],
-    typing.Optional[npt.NDArray],
-]:
+    spacing: Spacing,
+) -> typing.Tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     """
-    Sample oil-water relative permeability values and their derivatives across
-    the oil-water saturation range.
+    Sample oil-water relative permeability values across the oil-water saturation range.
 
     For tabular source models (`ThreePhaseRelPermTable`) the existing knots
-    are PCHIP-resampled to the denser output grid, recovering C¹-continuous
-    values and derivatives in a single pass without extra model evaluations.
+    are PCHIP-resampled to the denser output grid.
 
     :param relperm_model: Relative permeability model to sample from.
     :param oil_water_reference_saturations: Saturation axis to sample along.
@@ -449,106 +317,69 @@ def _sample_oil_water_relative_permeabilities(
     :param model_call_kwargs: Extra keyword arguments forwarded to every model evaluation call.
     :param oil_water_wetting_phase: Wetting phase for the oil-water system.
     :param number_of_output_points: Number of points used when PCHIP-resampling a tabular source model.
-    :param spacing_mode: Grid spacing strategy used during PCHIP resampling.
-    :return: Five-tuple of `(reference_saturations, wetting_phase_kr,
-        non_wetting_phase_kr, wetting_phase_kr_derivative,
-        non_wetting_phase_kr_derivative)`.
+    :param spacing: Grid spacing strategy used during PCHIP resampling.
+    :return: Threes-tuple of `(reference_saturations, wetting_phase_kr, non_wetting_phase_kr)`.
     """
     if isinstance(relperm_model, ThreePhaseRelPermTable):
         oil_water_table = relperm_model.oil_water_table
-        resampled_saturations, wetting_phase_kr, wetting_phase_kr_derivative = (
-            _pchip_resample_with_derivative(
-                source_saturations=oil_water_table.reference_saturation,
-                source_values=oil_water_table.wetting_phase_relative_permeability,
-                number_of_output_points=number_of_output_points,
-                spacing_mode=spacing_mode,
-            )
+        resampled_saturations, wetting_phase_kr = pchip_resample(
+            source_saturations=oil_water_table.reference_saturation,
+            source_values=oil_water_table.wetting_phase_relative_permeability,
+            number_of_output_points=number_of_output_points,
+            spacing=spacing,
         )
-        _, non_wetting_phase_kr, non_wetting_phase_kr_derivative = (
-            _pchip_resample_with_derivative(
-                source_saturations=oil_water_table.reference_saturation,
-                source_values=oil_water_table.non_wetting_phase_relative_permeability,
-                number_of_output_points=number_of_output_points,
-                spacing_mode=spacing_mode,
-            )
+        _, non_wetting_phase_kr = pchip_resample(
+            source_saturations=oil_water_table.reference_saturation,
+            source_values=oil_water_table.non_wetting_phase_relative_permeability,
+            number_of_output_points=number_of_output_points,
+            spacing=spacing,
         )
         return (
             resampled_saturations,
             wetting_phase_kr,
             non_wetting_phase_kr,
-            wetting_phase_kr_derivative,
-            non_wetting_phase_kr_derivative,
         )
 
     water_relative_permeability = np.empty(len(oil_water_reference_saturations))
     oil_relative_permeability = np.empty(len(oil_water_reference_saturations))
-    water_relative_permeability_derivative = np.empty(
-        len(oil_water_reference_saturations)
-    )
-    oil_relative_permeability_derivative = np.empty(
-        len(oil_water_reference_saturations)
-    )
 
     for index, reference_saturation_value in enumerate(oil_water_reference_saturations):
         if sweep_axis_is_water_saturation:
-            sw, so, sg = _oil_water_point_sweep_along_water_saturation(
-                water_saturation=float(reference_saturation_value),
-                irreducible_water_saturation=irreducible_water_saturation,
-                residual_oil_saturation_water=residual_oil_saturation_water,
+            water_saturation, oil_saturation, gas_saturation = (
+                _oil_water_point_sweep_along_water_saturation(
+                    water_saturation=float(reference_saturation_value),
+                    irreducible_water_saturation=irreducible_water_saturation,
+                    residual_oil_saturation_water=residual_oil_saturation_water,
+                )
             )
         else:
-            sw, so, sg = _oil_water_point_sweep_along_oil_saturation(
-                oil_saturation=float(reference_saturation_value),
-                irreducible_water_saturation=irreducible_water_saturation,
-                residual_oil_saturation_water=residual_oil_saturation_water,
+            water_saturation, oil_saturation, gas_saturation = (
+                _oil_water_point_sweep_along_oil_saturation(
+                    oil_saturation=float(reference_saturation_value),
+                    irreducible_water_saturation=irreducible_water_saturation,
+                    residual_oil_saturation_water=residual_oil_saturation_water,
+                )
             )
 
         relative_permeabilities = relperm_model.get_relative_permeabilities(
-            water_saturation=sw,
-            oil_saturation=so,
-            gas_saturation=sg,
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
             **model_call_kwargs,
         )
         water_relative_permeability[index] = float(relative_permeabilities["water"])
         oil_relative_permeability[index] = float(relative_permeabilities["oil"])
-
-        relative_permeability_derivatives = (
-            relperm_model.get_relative_permeability_derivatives(  # type: ignore[union-attr]
-                water_saturation=sw,
-                oil_saturation=so,
-                gas_saturation=sg,
-                **model_call_kwargs,
-            )
-        )
-        if sweep_axis_is_water_saturation:
-            water_relative_permeability_derivative[index] = float(
-                relative_permeability_derivatives["dKrw_dSw"]
-            )
-            oil_relative_permeability_derivative[index] = float(
-                relative_permeability_derivatives["dKro_dSw"]
-            )
-        else:
-            water_relative_permeability_derivative[index] = float(
-                relative_permeability_derivatives["dKrw_dSo"]
-            )
-            oil_relative_permeability_derivative[index] = float(
-                relative_permeability_derivatives["dKro_dSo"]  # type: ignore[index]
-            )
 
     if oil_water_wetting_phase == FluidPhase.WATER:
         return (
             oil_water_reference_saturations,
             water_relative_permeability,
             oil_relative_permeability,
-            water_relative_permeability_derivative,
-            oil_relative_permeability_derivative,
         )
     return (
         oil_water_reference_saturations,
         oil_relative_permeability,
         water_relative_permeability,
-        oil_relative_permeability_derivative,
-        water_relative_permeability_derivative,
     )
 
 
@@ -563,20 +394,13 @@ def _sample_gas_oil_relative_permeabilities(
     model_call_kwargs: typing.Dict[str, typing.Any],
     gas_oil_wetting_phase: FluidPhase,
     number_of_output_points: int,
-    spacing_mode: Spacing,
-) -> typing.Tuple[
-    npt.NDArray,
-    npt.NDArray,
-    npt.NDArray,
-    typing.Optional[npt.NDArray],
-    typing.Optional[npt.NDArray],
-]:
+    spacing: Spacing,
+) -> typing.Tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     """
-    Sample gas-oil relative permeability values and their derivatives across
-    the gas-oil saturation range.
+    Sample gas-oil relative permeability values across the gas-oil saturation range.
 
     For tabular source models (`ThreePhaseRelPermTable`) the existing knots
-    are PCHIP-resampled to the denser output grid (fast path).
+    are PCHIP-resampled to the denser output grid.
 
     :param relperm_model: Relative permeability model to sample from.
     :param gas_oil_reference_saturations: Saturation axis to sample along.
@@ -588,104 +412,71 @@ def _sample_gas_oil_relative_permeabilities(
     :param model_call_kwargs: Extra keyword arguments forwarded to every model evaluation call.
     :param gas_oil_wetting_phase: Wetting phase for the gas-oil system.
     :param number_of_output_points: Number of points used when PCHIP-resampling a tabular source model.
-    :param spacing_mode: Grid spacing strategy used during PCHIP resampling.
-    :return: Five-tuple of `(reference_saturations, wetting_phase_kr,
-        non_wetting_phase_kr, wetting_phase_kr_derivative,
-        non_wetting_phase_kr_derivative)`.
+    :param spacing: Grid spacing strategy used during PCHIP resampling.
+    :return: Three-tuple of `(reference_saturations, wetting_phase_kr, non_wetting_phase_kr)`.
     """
     if isinstance(relperm_model, ThreePhaseRelPermTable):
         gas_oil_table = relperm_model.gas_oil_table
-        resampled_saturations, wetting_phase_kr, wetting_phase_kr_derivative = (
-            _pchip_resample_with_derivative(
-                source_saturations=gas_oil_table.reference_saturation,
-                source_values=gas_oil_table.wetting_phase_relative_permeability,
-                number_of_output_points=number_of_output_points,
-                spacing_mode=spacing_mode,
-            )
+        resampled_saturations, wetting_phase_kr = pchip_resample(
+            source_saturations=gas_oil_table.reference_saturation,
+            source_values=gas_oil_table.wetting_phase_relative_permeability,
+            number_of_output_points=number_of_output_points,
+            spacing=spacing,
         )
-        _, non_wetting_phase_kr, non_wetting_phase_kr_derivative = (
-            _pchip_resample_with_derivative(
-                source_saturations=gas_oil_table.reference_saturation,
-                source_values=gas_oil_table.non_wetting_phase_relative_permeability,
-                number_of_output_points=number_of_output_points,
-                spacing_mode=spacing_mode,
-            )
+        _, non_wetting_phase_kr = pchip_resample(
+            source_saturations=gas_oil_table.reference_saturation,
+            source_values=gas_oil_table.non_wetting_phase_relative_permeability,
+            number_of_output_points=number_of_output_points,
+            spacing=spacing,
         )
         return (
             resampled_saturations,
             wetting_phase_kr,
             non_wetting_phase_kr,
-            wetting_phase_kr_derivative,
-            non_wetting_phase_kr_derivative,
         )
 
     gas_relative_permeability = np.empty(len(gas_oil_reference_saturations))
     oil_relative_permeability = np.empty(len(gas_oil_reference_saturations))
-    gas_relative_permeability_derivative = np.empty(len(gas_oil_reference_saturations))
-    oil_relative_permeability_derivative = np.empty(len(gas_oil_reference_saturations))
 
     for index, reference_saturation_value in enumerate(gas_oil_reference_saturations):
         if sweep_axis_is_gas_saturation:
-            sw, so, sg = _gas_oil_point_sweep_along_gas_saturation(
-                gas_saturation=float(reference_saturation_value),
-                irreducible_water_saturation=irreducible_water_saturation,
-                residual_oil_saturation_gas=residual_oil_saturation_gas,
-                residual_gas_saturation=residual_gas_saturation,
+            water_saturation, oil_saturation, gas_saturation = (
+                _gas_oil_point_sweep_along_gas_saturation(
+                    gas_saturation=float(reference_saturation_value),
+                    irreducible_water_saturation=irreducible_water_saturation,
+                    residual_oil_saturation_gas=residual_oil_saturation_gas,
+                    residual_gas_saturation=residual_gas_saturation,
+                )
             )
         else:
-            sw, so, sg = _gas_oil_point_sweep_along_oil_saturation(
-                oil_saturation=float(reference_saturation_value),
-                irreducible_water_saturation=irreducible_water_saturation,
-                residual_oil_saturation_gas=residual_oil_saturation_gas,
-                residual_gas_saturation=residual_gas_saturation,
+            water_saturation, oil_saturation, gas_saturation = (
+                _gas_oil_point_sweep_along_oil_saturation(
+                    oil_saturation=float(reference_saturation_value),
+                    irreducible_water_saturation=irreducible_water_saturation,
+                    residual_oil_saturation_gas=residual_oil_saturation_gas,
+                    residual_gas_saturation=residual_gas_saturation,
+                )
             )
 
         relative_permeabilities = relperm_model.get_relative_permeabilities(
-            water_saturation=sw,
-            oil_saturation=so,
-            gas_saturation=sg,
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
             **model_call_kwargs,
         )
         gas_relative_permeability[index] = float(relative_permeabilities["gas"])
         oil_relative_permeability[index] = float(relative_permeabilities["oil"])
-
-        relative_permeability_derivatives = (
-            relperm_model.get_relative_permeability_derivatives(  # type: ignore[union-attr]
-                water_saturation=sw,
-                oil_saturation=so,
-                gas_saturation=sg,
-                **model_call_kwargs,
-            )
-        )
-        if sweep_axis_is_gas_saturation:
-            gas_relative_permeability_derivative[index] = float(
-                relative_permeability_derivatives["dKrg_dSg"]
-            )
-            oil_relative_permeability_derivative[index] = float(
-                relative_permeability_derivatives["dKro_dSg"]
-            )
-        else:
-            gas_relative_permeability_derivative[index] = float(
-                relative_permeability_derivatives["dKrg_dSo"]
-            )
-            oil_relative_permeability_derivative[index] = float(
-                relative_permeability_derivatives["dKro_dSo"]  # type: ignore[index]
-            )
 
     if gas_oil_wetting_phase == FluidPhase.OIL:
         return (
             gas_oil_reference_saturations,
             oil_relative_permeability,
             gas_relative_permeability,
-            oil_relative_permeability_derivative,
-            gas_relative_permeability_derivative,
         )
     return (
         gas_oil_reference_saturations,
         gas_relative_permeability,
         oil_relative_permeability,
-        gas_relative_permeability_derivative,
-        oil_relative_permeability_derivative,
     )
 
 
@@ -698,11 +489,10 @@ def _sample_oil_water_capillary_pressure(
     residual_oil_saturation_water: float,
     model_call_kwargs: typing.Dict[str, typing.Any],
     number_of_output_points: int,
-    spacing_mode: Spacing,
-) -> typing.Tuple[npt.NDArray, npt.NDArray, typing.Optional[npt.NDArray]]:
+    spacing: Spacing,
+) -> typing.Tuple[npt.NDArray, npt.NDArray]:
     """
-    Sample oil-water capillary pressure values and their derivatives across
-    the oil-water saturation range.
+    Sample oil-water capillary pressure values across the oil-water saturation range.
 
     For tabular source models (`ThreePhaseCapillaryPressureTable`) the
     existing knots are PCHIP-resampled to the denser output grid (fast path).
@@ -717,74 +507,47 @@ def _sample_oil_water_capillary_pressure(
         evaluation call.
     :param number_of_output_points: Number of points used when PCHIP-resampling
         a tabular source model.
-    :param spacing_mode: Grid spacing strategy used during PCHIP resampling.
-    :return: Three-tuple of `(reference_saturations, capillary_pressure_values, capillary_pressure_derivatives)`.
+    :param spacing: Grid spacing strategy used during PCHIP resampling.
+    :return: Two-tuple of `(reference_saturations, capillary_pressure_values)`.
     """
     if isinstance(capillary_pressure_model, ThreePhaseCapillaryPressureTable):
         oil_water_table = capillary_pressure_model.oil_water_table
-        (
-            resampled_saturations,
-            capillary_pressure_values,
-            capillary_pressure_derivatives,
-        ) = _pchip_resample_with_derivative(
+        resampled_saturations, capillary_pressure_values = pchip_resample(
             source_saturations=oil_water_table.reference_saturation,
             source_values=oil_water_table.capillary_pressure,
             number_of_output_points=number_of_output_points,
-            spacing_mode=spacing_mode,
+            spacing=spacing,
         )
-        return (
-            resampled_saturations,
-            capillary_pressure_values,
-            capillary_pressure_derivatives,
-        )
+        return resampled_saturations, capillary_pressure_values
 
     capillary_pressure_values = np.empty(len(oil_water_reference_saturations))
-    capillary_pressure_derivatives = np.empty(len(oil_water_reference_saturations))
-
     for index, reference_saturation_value in enumerate(oil_water_reference_saturations):
         if sweep_axis_is_water_saturation:
-            sw, so, sg = _oil_water_point_sweep_along_water_saturation(
-                water_saturation=float(reference_saturation_value),
-                irreducible_water_saturation=irreducible_water_saturation,
-                residual_oil_saturation_water=residual_oil_saturation_water,
+            water_saturation, oil_saturation, gas_saturation = (
+                _oil_water_point_sweep_along_water_saturation(
+                    water_saturation=float(reference_saturation_value),
+                    irreducible_water_saturation=irreducible_water_saturation,
+                    residual_oil_saturation_water=residual_oil_saturation_water,
+                )
             )
         else:
-            sw, so, sg = _oil_water_point_sweep_along_oil_saturation(
-                oil_saturation=float(reference_saturation_value),
-                irreducible_water_saturation=irreducible_water_saturation,
-                residual_oil_saturation_water=residual_oil_saturation_water,
+            water_saturation, oil_saturation, gas_saturation = (
+                _oil_water_point_sweep_along_oil_saturation(
+                    oil_saturation=float(reference_saturation_value),
+                    irreducible_water_saturation=irreducible_water_saturation,
+                    residual_oil_saturation_water=residual_oil_saturation_water,
+                )
             )
 
         capillary_pressures = capillary_pressure_model.get_capillary_pressures(
-            water_saturation=sw,
-            oil_saturation=so,
-            gas_saturation=sg,
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
             **model_call_kwargs,
         )
         capillary_pressure_values[index] = float(capillary_pressures["oil_water"])
 
-        capillary_pressure_derivative_values = (
-            capillary_pressure_model.get_capillary_pressure_derivatives(  # type: ignore[union-attr]
-                water_saturation=sw,
-                oil_saturation=so,
-                gas_saturation=sg,
-                **model_call_kwargs,
-            )
-        )
-        if sweep_axis_is_water_saturation:
-            capillary_pressure_derivatives[index] = float(
-                capillary_pressure_derivative_values["dPcow_dSw"]
-            )
-        else:
-            capillary_pressure_derivatives[index] = float(
-                capillary_pressure_derivative_values["dPcow_dSo"]
-            )
-
-    return (
-        oil_water_reference_saturations,
-        capillary_pressure_values,
-        capillary_pressure_derivatives,
-    )
+    return oil_water_reference_saturations, capillary_pressure_values
 
 
 def _sample_gas_oil_capillary_pressure(
@@ -797,14 +560,13 @@ def _sample_gas_oil_capillary_pressure(
     residual_gas_saturation: float,
     model_call_kwargs: typing.Dict[str, typing.Any],
     number_of_output_points: int,
-    spacing_mode: Spacing,
-) -> typing.Tuple[npt.NDArray, npt.NDArray, typing.Optional[npt.NDArray]]:
+    spacing: Spacing,
+) -> typing.Tuple[npt.NDArray, npt.NDArray]:
     """
-    Sample gas-oil capillary pressure values and their derivatives across the
-    gas-oil saturation range.
+    Sample gas-oil capillary pressure values across the gas-oil saturation range.
 
     For tabular source models (`ThreePhaseCapillaryPressureTable`) the
-    existing knots are PCHIP-resampled to the denser output grid (fast path).
+    existing knots are PCHIP-resampled to the denser output grid.
 
     :param capillary_pressure_model: Capillary pressure model to sample from.
     :param gas_oil_reference_saturations: Saturation axis to sample along.
@@ -815,76 +577,48 @@ def _sample_gas_oil_capillary_pressure(
     :param residual_gas_saturation: Residual gas saturation (Sgr).
     :param model_call_kwargs: Extra keyword arguments forwarded to every model evaluation call.
     :param number_of_output_points: Number of points used when PCHIP-resampling a tabular source model.
-    :param spacing_mode: Grid spacing strategy used during PCHIP resampling.
-    :return: Three-tuple of `(reference_saturations, capillary_pressure_values, capillary_pressure_derivatives)`.
+    :param spacing: Grid spacing strategy used during PCHIP resampling.
+    :return: Two-tuple of `(reference_saturations, capillary_pressure_values)`.
     """
     if isinstance(capillary_pressure_model, ThreePhaseCapillaryPressureTable):
         gas_oil_table = capillary_pressure_model.gas_oil_table
-        (
-            resampled_saturations,
-            capillary_pressure_values,
-            capillary_pressure_derivatives,
-        ) = _pchip_resample_with_derivative(
+        resampled_saturations, capillary_pressure_values = pchip_resample(
             source_saturations=gas_oil_table.reference_saturation,
             source_values=gas_oil_table.capillary_pressure,
             number_of_output_points=number_of_output_points,
-            spacing_mode=spacing_mode,
+            spacing=spacing,
         )
-        return (
-            resampled_saturations,
-            capillary_pressure_values,
-            capillary_pressure_derivatives,
-        )
+        return resampled_saturations, capillary_pressure_values
 
     capillary_pressure_values = np.empty(len(gas_oil_reference_saturations))
-    capillary_pressure_derivatives = np.empty(len(gas_oil_reference_saturations))
-
     for index, reference_saturation_value in enumerate(gas_oil_reference_saturations):
         if sweep_axis_is_gas_saturation:
-            sw, so, sg = _gas_oil_point_sweep_along_gas_saturation(
-                gas_saturation=float(reference_saturation_value),
-                irreducible_water_saturation=irreducible_water_saturation,
-                residual_oil_saturation_gas=residual_oil_saturation_gas,
-                residual_gas_saturation=residual_gas_saturation,
+            water_saturation, oil_saturation, gas_saturation = (
+                _gas_oil_point_sweep_along_gas_saturation(
+                    gas_saturation=float(reference_saturation_value),
+                    irreducible_water_saturation=irreducible_water_saturation,
+                    residual_oil_saturation_gas=residual_oil_saturation_gas,
+                    residual_gas_saturation=residual_gas_saturation,
+                )
             )
         else:
-            sw, so, sg = _gas_oil_point_sweep_along_oil_saturation(
-                oil_saturation=float(reference_saturation_value),
-                irreducible_water_saturation=irreducible_water_saturation,
-                residual_oil_saturation_gas=residual_oil_saturation_gas,
-                residual_gas_saturation=residual_gas_saturation,
+            water_saturation, oil_saturation, gas_saturation = (
+                _gas_oil_point_sweep_along_oil_saturation(
+                    oil_saturation=float(reference_saturation_value),
+                    irreducible_water_saturation=irreducible_water_saturation,
+                    residual_oil_saturation_gas=residual_oil_saturation_gas,
+                    residual_gas_saturation=residual_gas_saturation,
+                )
             )
 
         capillary_pressures = capillary_pressure_model.get_capillary_pressures(
-            water_saturation=sw,
-            oil_saturation=so,
-            gas_saturation=sg,
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
             **model_call_kwargs,
         )
         capillary_pressure_values[index] = float(capillary_pressures["gas_oil"])
-
-        capillary_pressure_derivative_values = (
-            capillary_pressure_model.get_capillary_pressure_derivatives(  # type: ignore[union-attr]
-                water_saturation=sw,
-                oil_saturation=so,
-                gas_saturation=sg,
-                **model_call_kwargs,
-            )
-        )
-        if sweep_axis_is_gas_saturation:
-            capillary_pressure_derivatives[index] = float(
-                capillary_pressure_derivative_values["dPcgo_dSg"]
-            )
-        else:
-            capillary_pressure_derivatives[index] = float(
-                capillary_pressure_derivative_values["dPcgo_dSo"]
-            )
-
-    return (
-        gas_oil_reference_saturations,
-        capillary_pressure_values,
-        capillary_pressure_derivatives,
-    )
+    return gas_oil_reference_saturations, capillary_pressure_values
 
 
 def as_three_phase_relperm_table(
@@ -911,7 +645,7 @@ def as_three_phase_relperm_table(
     backed by piecewise-linear `TwoPhaseRelPermTable` instances.
 
     Analytical derivatives are sampled at every knot and stored in the
-    two-phase sub-tables so that `get_*_derivative` returns smooth,
+    two-phase sub-tables oil_saturation that `get_*_derivative` returns smooth,
     consistent values instead of piecewise-linear slopes.
 
     For tabular source models (`ThreePhaseRelPermTable`) the existing knots
@@ -1015,11 +749,11 @@ def as_three_phase_relperm_table(
         else:
             oil_water_lower_bound = resolved_residual_oil_saturation_water
             oil_water_upper_bound = 1.0 - resolved_irreducible_water_saturation
-        oil_water_reference_saturations = _build_saturation_reference_grid(
+        oil_water_reference_saturations = build_saturation_reference_grid(
             number_of_base_points=n_points,
             saturation_lower_bound=oil_water_lower_bound,
             saturation_upper_bound=oil_water_upper_bound,
-            spacing_mode=spacing,
+            spacing=spacing,
             number_of_endpoint_extra_points=n_endpoint_extra,
         )
 
@@ -1042,11 +776,11 @@ def as_three_phase_relperm_table(
                 - resolved_irreducible_water_saturation
                 - resolved_residual_gas_saturation
             )
-        gas_oil_reference_saturations = _build_saturation_reference_grid(
+        gas_oil_reference_saturations = build_saturation_reference_grid(
             number_of_base_points=n_points,
             saturation_lower_bound=gas_oil_lower_bound,
             saturation_upper_bound=gas_oil_upper_bound,
-            spacing_mode=spacing,
+            spacing=spacing,
             number_of_endpoint_extra_points=n_endpoint_extra,
         )
 
@@ -1054,8 +788,6 @@ def as_three_phase_relperm_table(
         oil_water_reference_saturations,
         oil_water_wetting_phase_kr,
         oil_water_non_wetting_phase_kr,
-        oil_water_wetting_phase_kr_derivative,
-        oil_water_non_wetting_phase_kr_derivative,
     ) = _sample_oil_water_relative_permeabilities(
         relperm_model=model,
         oil_water_reference_saturations=oil_water_reference_saturations,
@@ -1065,15 +797,13 @@ def as_three_phase_relperm_table(
         model_call_kwargs=model_call_kwargs,
         oil_water_wetting_phase=oil_water_wetting_phase_resolved,
         number_of_output_points=n_points,
-        spacing_mode=spacing,
+        spacing=spacing,
     )
 
     (
         gas_oil_reference_saturations,
         gas_oil_wetting_phase_kr,
         gas_oil_non_wetting_phase_kr,
-        gas_oil_wetting_phase_kr_derivative,
-        gas_oil_non_wetting_phase_kr_derivative,
     ) = _sample_gas_oil_relative_permeabilities(
         relperm_model=model,
         gas_oil_reference_saturations=gas_oil_reference_saturations,
@@ -1084,7 +814,7 @@ def as_three_phase_relperm_table(
         model_call_kwargs=model_call_kwargs,
         gas_oil_wetting_phase=gas_oil_wetting_phase_resolved,
         number_of_output_points=n_points,
-        spacing_mode=spacing,
+        spacing=spacing,
     )
 
     oil_water_table = TwoPhaseRelPermTable(
@@ -1094,8 +824,6 @@ def as_three_phase_relperm_table(
         wetting_phase_relative_permeability=oil_water_wetting_phase_kr,
         non_wetting_phase_relative_permeability=oil_water_non_wetting_phase_kr,
         reference_phase=oil_water_reference_phase,
-        wetting_phase_relative_permeability_derivative=oil_water_wetting_phase_kr_derivative,
-        non_wetting_phase_relative_permeability_derivative=oil_water_non_wetting_phase_kr_derivative,
     )
     gas_oil_table = TwoPhaseRelPermTable(
         wetting_phase=gas_oil_wetting_phase_resolved,
@@ -1104,8 +832,6 @@ def as_three_phase_relperm_table(
         wetting_phase_relative_permeability=gas_oil_wetting_phase_kr,
         non_wetting_phase_relative_permeability=gas_oil_non_wetting_phase_kr,
         reference_phase=gas_oil_reference_phase,
-        wetting_phase_relative_permeability_derivative=gas_oil_wetting_phase_kr_derivative,
-        non_wetting_phase_relative_permeability_derivative=gas_oil_non_wetting_phase_kr_derivative,
     )
 
     if mixing_rule is None:
@@ -1245,11 +971,11 @@ def as_three_phase_capillary_pressure_table(
         else:
             oil_water_lower_bound = resolved_residual_oil_saturation_water
             oil_water_upper_bound = 1.0 - resolved_irreducible_water_saturation
-        oil_water_reference_saturations = _build_saturation_reference_grid(
+        oil_water_reference_saturations = build_saturation_reference_grid(
             number_of_base_points=n_points,
             saturation_lower_bound=oil_water_lower_bound,
             saturation_upper_bound=oil_water_upper_bound,
-            spacing_mode=spacing,
+            spacing=spacing,
             number_of_endpoint_extra_points=n_endpoint_extra,
         )
 
@@ -1272,18 +998,17 @@ def as_three_phase_capillary_pressure_table(
                 - resolved_irreducible_water_saturation
                 - resolved_residual_gas_saturation
             )
-        gas_oil_reference_saturations = _build_saturation_reference_grid(
+        gas_oil_reference_saturations = build_saturation_reference_grid(
             number_of_base_points=n_points,
             saturation_lower_bound=gas_oil_lower_bound,
             saturation_upper_bound=gas_oil_upper_bound,
-            spacing_mode=spacing,
+            spacing=spacing,
             number_of_endpoint_extra_points=n_endpoint_extra,
         )
 
     (
         oil_water_reference_saturations,
         oil_water_capillary_pressure_values,
-        oil_water_capillary_pressure_derivatives,
     ) = _sample_oil_water_capillary_pressure(
         capillary_pressure_model=model,
         oil_water_reference_saturations=oil_water_reference_saturations,
@@ -1292,13 +1017,12 @@ def as_three_phase_capillary_pressure_table(
         residual_oil_saturation_water=resolved_residual_oil_saturation_water,
         model_call_kwargs=model_call_kwargs,
         number_of_output_points=n_points,
-        spacing_mode=spacing,
+        spacing=spacing,
     )
 
     (
         gas_oil_reference_saturations,
         gas_oil_capillary_pressure_values,
-        gas_oil_capillary_pressure_derivatives,
     ) = _sample_gas_oil_capillary_pressure(
         capillary_pressure_model=model,
         gas_oil_reference_saturations=gas_oil_reference_saturations,
@@ -1308,7 +1032,7 @@ def as_three_phase_capillary_pressure_table(
         residual_gas_saturation=resolved_residual_gas_saturation,
         model_call_kwargs=model_call_kwargs,
         number_of_output_points=n_points,
-        spacing_mode=spacing,
+        spacing=spacing,
     )
 
     oil_water_table = TwoPhaseCapillaryPressureTable(
@@ -1317,7 +1041,6 @@ def as_three_phase_capillary_pressure_table(
         reference_saturation=oil_water_reference_saturations,
         capillary_pressure=oil_water_capillary_pressure_values,
         reference_phase=oil_water_reference_phase,
-        capillary_pressure_derivative=oil_water_capillary_pressure_derivatives,
     )
     gas_oil_table = TwoPhaseCapillaryPressureTable(
         wetting_phase=gas_oil_wetting_phase_resolved,
@@ -1325,7 +1048,6 @@ def as_three_phase_capillary_pressure_table(
         reference_saturation=gas_oil_reference_saturations,
         capillary_pressure=gas_oil_capillary_pressure_values,
         reference_phase=gas_oil_reference_phase,
-        capillary_pressure_derivative=gas_oil_capillary_pressure_derivatives,
     )
     return ThreePhaseCapillaryPressureTable(
         oil_water_table=oil_water_table, gas_oil_table=gas_oil_table

@@ -30,19 +30,19 @@ class ZeroFlowViolation:
 
     cell: typing.Tuple[int, int, int]
     """`(i, j, k)` index of the offending cell."""
-    net_water_flux: float
+    net_water_flux_grid: float
     """Net water flux into the cell (ft³/day). Positive = net inflow."""
-    net_oil_flux: float
+    net_oil_flux_grid: float
     """Net oil flux into the cell (ft³/day)."""
-    net_gas_flux: float
+    net_gas_flux_grid: float
     """Net gas flux into the cell (ft³/day)."""
-    net_total_flux: float
-    """`|net_water_flux| + |net_oil_flux| + |net_gas_flux|` (ft³/day)."""
+    net_total_flux_grid: float
+    """`|net_water_flux_grid| + |net_oil_flux_grid| + |net_gas_flux_grid|` (ft³/day)."""
     pore_volume: float
     """Cell pore volume (ft³). Used to normalise the flux for comparison against the relative tolerance."""
     relative_flux: float
     """
-    `net_total_flux / pore_volume` (day⁻¹). This is the quantity compared against
+    `net_total_flux_grid / pore_volume` (day⁻¹). This is the quantity compared against
     `relative_tolerance` in `check_zero_flow_initialization`.
     """
 
@@ -59,12 +59,14 @@ class ZeroFlowCheckResult:
     """Maximum `sum(|phase_fluxes|)` across all cells (ft³/day)."""
     worst_cell: typing.Optional[typing.Tuple[int, int, int]]
     """`(i, j, k)` index of the cell with the highest relative flux, or `None` when the grid is empty."""
+    violation_count: int
+    """Total number of cells whose relative flux exceeds `relative_tolerance`."""
     violations: typing.List[ZeroFlowViolation]
     """All cells (up to `max_reported_violations`) whose relative flux exceeds `relative_tolerance`,
     sorted descending by `relative_flux`."""
     relative_tolerance: float
     """The tolerance that was applied (day⁻¹), for reference."""
-    n_cells_checked: int
+    cells_checked: int
     """Total number of active cells evaluated."""
 
 
@@ -72,14 +74,14 @@ def seed_injection_saturations(
     fluid_properties: FluidProperties[ThreeDimensions],
     wells: Wells[ThreeDimensions],
     well_indices_cache: WellIndicesCache,
-    rock_fluid_tables_config: Config,
+    config: Config,
     minimum_injector_water_saturation: typing.Optional[float] = None,
     minimum_injector_gas_saturation: typing.Optional[float] = None,
     inplace: bool = False,
 ) -> FluidProperties[ThreeDimensions]:
     """
     Seed the injected-phase saturation in every injector perforation cell
-    so that relative permeability is non-zero before the first pressure solve.
+    so that relative permeability is non-zero before the step solve.
 
     **Background**
 
@@ -89,7 +91,7 @@ def seed_injection_saturations(
     index `PI_w = WI · λw = 0`, and the BHP-driven injection rate
     `qw = PI_w · (P_cell - BHP) = 0` - regardless of how large the BHP
     constraint is. The saturation transport solver then has no source term for
-    water, so Sw stays at Swi on the next step, and the deadlock persists
+    water, `oil_saturation_grid` Sw stays at Swi on the next step, and the deadlock persists
     indefinitely.
 
     The same deadlock applies to gas injection when Sg_initial = 0.
@@ -98,27 +100,18 @@ def seed_injection_saturations(
     injected-phase saturation in every perforated cell, backed out of oil
     saturation (which is always the displaced phase for both water and gas
     injection). The seed value is taken from the `minimum_injector_*`
-    parameters; if those are `None` the value from `rock_fluid_tables_config`
-    is used as a fallback.
-
-    The caller must rebuild relative-mobility grids from the returned
-    `FluidProperties` *before* calling the pressure solver.
+    parameters; if those are `None` the value from `config` is used as a fallback.
 
     :param fluid_properties: Current fluid properties at t = 0 (before any time-stepping).
     :param wells: Wells configuration containing all injection wells.
     :param well_indices_cache: Pre-built cache mapping well names to their perforated cell indices.
-        Built by `build_well_indices_cache` in `simulate.py`.
-    :param rock_fluid_tables_config: The simulation `Config` instance. Used to read
-        `minimum_injector_water_saturation` and `minimum_injector_gas_saturation` when the
-        explicit overrides are `None`.
+    :param config: The simulation `Config` instance. Used to get fallback seed values when the corresponding parameters are `None`.
     :param minimum_injector_water_saturation: Override for the minimum water saturation to seed in
-        water-injector perforations. When `None`, falls back to
-        `rock_fluid_tables_config.minimum_injector_water_saturation`. Must be >
-        `phase_appearance_tolerance` to guarantee `krw > 0`.
+        water-injector perforations. When `None`, falls back to `config.minimum_injector_water_saturation`.
+        Must be greater than `phase_appearance_tolerance` to guarantee `krw > 0`.
     :param minimum_injector_gas_saturation: Override for the minimum gas saturation to seed in
-        gas-injector perforations. When `None`, falls back to
-        `rock_fluid_tables_config.minimum_injector_gas_saturation`. Must be >
-        `phase_appearance_tolerance` to guarantee `krg > 0`.
+        gas-injector perforations. When `None`, falls back to `config.minimum_injector_gas_saturation`.
+        Must be greater than `phase_appearance_tolerance` to guarantee `krg > 0`.
     :param inplace: When `True` the saturation arrays inside `fluid_properties` are
         modified in-place and the *same* `FluidProperties` object is returned. When `False`
         (default) copies are made and the original is left unchanged.
@@ -138,33 +131,31 @@ def seed_injection_saturations(
     - The function does **not** rebuild relative-permeability or mobility grids.
       That must be done by the caller after this function returns.
     """
-    # Resolve effective seed values from config fallbacks
-    effective_water_seed: typing.Optional[float] = (
+    effective_water_seed = (
         minimum_injector_water_saturation
         if minimum_injector_water_saturation is not None
-        else rock_fluid_tables_config.minimum_injector_water_saturation
+        else config.minimum_injector_water_saturation
     )
-    effective_gas_seed: typing.Optional[float] = (
+    effective_gas_seed = (
         minimum_injector_gas_saturation
         if minimum_injector_gas_saturation is not None
-        else rock_fluid_tables_config.minimum_injector_gas_saturation
+        else config.minimum_injector_gas_saturation
     )
-
     if effective_water_seed is None and effective_gas_seed is None:
         logger.debug("No seed values configured, skipping.")
         return fluid_properties
 
     if inplace:
-        sw = fluid_properties.water_saturation_grid
-        so = fluid_properties.oil_saturation_grid
-        sg = fluid_properties.gas_saturation_grid
+        water_saturation_grid = fluid_properties.water_saturation_grid
+        oil_saturation_grid = fluid_properties.oil_saturation_grid
+        gas_saturation_grid = fluid_properties.gas_saturation_grid
     else:
-        sw = fluid_properties.water_saturation_grid.copy()
-        so = fluid_properties.oil_saturation_grid.copy()
-        sg = fluid_properties.gas_saturation_grid.copy()
+        water_saturation_grid = fluid_properties.water_saturation_grid.copy()
+        oil_saturation_grid = fluid_properties.oil_saturation_grid.copy()
+        gas_saturation_grid = fluid_properties.gas_saturation_grid.copy()
 
-    n_water_seeded = 0
-    n_gas_seeded = 0
+    water_cells_seeded = 0
+    gas_cells_seeded = 0
 
     for well in wells.injection_wells:
         if not well.is_open or well.injected_fluid is None:
@@ -198,12 +189,13 @@ def seed_injection_saturations(
             i, j, k = perforation_index.cell
 
             if injected_phase == FluidPhase.WATER:
-                current_phase_saturation = float(sw[i, j, k])
+                current_phase_saturation = float(water_saturation_grid[i, j, k])
                 if current_phase_saturation >= seed_value:
                     # Already satisfies the constraint
                     continue
+
                 delta = seed_value - current_phase_saturation
-                current_oil_saturation = float(so[i, j, k])
+                current_oil_saturation = float(oil_saturation_grid[i, j, k])
                 if current_oil_saturation - delta < 0.0:
                     raise ValueError(
                         f"Cannot seed water saturation "
@@ -214,16 +206,17 @@ def seed_injection_saturations(
                         f"Reduce minimum_injector_water_saturation or review "
                         f"the initial saturation distribution."
                     )
-                sw[i, j, k] = seed_value
-                so[i, j, k] = current_oil_saturation - delta
-                n_water_seeded += 1
+                water_saturation_grid[i, j, k] = seed_value
+                oil_saturation_grid[i, j, k] = current_oil_saturation - delta
+                water_cells_seeded += 1
 
             else:  # GAS
-                current_phase_saturation = float(sg[i, j, k])
+                current_phase_saturation = float(gas_saturation_grid[i, j, k])
                 if current_phase_saturation >= seed_value:
                     continue
+
                 delta = seed_value - current_phase_saturation
-                current_oil_saturation = float(so[i, j, k])
+                current_oil_saturation = float(oil_saturation_grid[i, j, k])
                 if current_oil_saturation - delta < 0.0:
                     raise ValueError(
                         f"Cannot seed gas saturation "
@@ -234,15 +227,15 @@ def seed_injection_saturations(
                         f"Reduce minimum_injector_gas_saturation or review "
                         f"the initial saturation distribution."
                     )
-                sg[i, j, k] = seed_value
-                so[i, j, k] = current_oil_saturation - delta
-                n_gas_seeded += 1
+                gas_saturation_grid[i, j, k] = seed_value
+                oil_saturation_grid[i, j, k] = current_oil_saturation - delta
+                gas_cells_seeded += 1
 
-    if n_water_seeded > 0 or n_gas_seeded > 0:
+    if water_cells_seeded > 0 or gas_cells_seeded > 0:
         logger.info(
             "Seeded %d water-injector and %d gas-injector perforations.",
-            n_water_seeded,
-            n_gas_seeded,
+            water_cells_seeded,
+            gas_cells_seeded,
         )
 
     if inplace:
@@ -250,9 +243,9 @@ def seed_injection_saturations(
 
     return attrs.evolve(
         fluid_properties,
-        water_saturation_grid=sw,
-        oil_saturation_grid=so,
-        gas_saturation_grid=sg,
+        water_saturation_grid=water_saturation_grid,
+        oil_saturation_grid=oil_saturation_grid,
+        gas_saturation_grid=gas_saturation_grid,
     )
 
 
@@ -270,28 +263,27 @@ def apply_minimum_injector_saturations(
 
     **Background**
 
-    Even after the one-time pre-simulation seeding performed by
-    `seed_injection_saturations`, later time steps can cause the
-    seeded saturation to drop back below the critical threshold - for example
-    if the explicit saturation solver clips it to zero, or if the re-dissolution
-    flash removes free gas. Without re-enforcement the injector may fall back
-    into the mobility-deadlock described in `seed_injection_saturations`.
+    Even after the one-time pre-simulation seeding performed by `seed_injection_saturations`,
+    later time steps can cause the seeded saturation to drop back below the critical threshold.
+    For example, if the explicit saturation solver clips it to zero, or if the re-dissolution
+    flash removes free gas. Without re-enforcement the injector may fall back into the mobility-deadlock
+    described in `seed_injection_saturations`.
 
     :param fluid_properties: Fluid properties at the start of the current time step.
     :param wells: Wells configuration. Only **open** injection wells with a configured
         `injected_fluid` are processed.
     :param well_indices_cache: Cache of well indices. Only the `injection` sub-cache is used.
     :param minimum_injector_water_saturation: Minimum water saturation to enforce in every active
-        water-injector wellblock. Must be > `phase_appearance_tolerance` (see `Config`) to
+        water-injector wellblock. Must be greater than `phase_appearance_tolerance` (see `Config`) to
         guarantee `krw > 0`. Pass `None` to skip water enforcement.
     :param minimum_injector_gas_saturation: Minimum gas saturation to enforce in every active
-        gas-injector wellblock. Must be > `phase_appearance_tolerance` to guarantee `krg > 0`.
+        gas-injector wellblock. Must be greater than `phase_appearance_tolerance` to guarantee `krg > 0`.
         Pass `None` to skip gas enforcement.
     :param dtype: NumPy dtype used for all saturation arrays (e.g. `np.float64`).
-    :return: New `FluidProperties` instance with updated saturation grids. The original is never
-        modified. Oil saturation is reduced by exactly the delta applied to the injected-phase
-        saturation in each cell, so that `Sw + So + Sg = 1` is preserved exactly. Cells where
-        the current saturation already meets the minimum are left untouched.
+    :return: New `FluidProperties` instance with updated saturation grids.
+        Oil saturation is reduced by exactly the delta applied to the injected-phase
+        saturation in each cell, oil_saturation_grid that `Sw + So + Sg = 1` is preserved exactly.
+        Cells where the current saturation already meets the minimum are left untouched.
 
     **Notes**
 
@@ -312,12 +304,12 @@ def apply_minimum_injector_saturations(
     ):
         return fluid_properties
 
-    sw: ThreeDimensionalGrid = fluid_properties.water_saturation_grid.copy()
-    so: ThreeDimensionalGrid = fluid_properties.oil_saturation_grid.copy()
-    sg: ThreeDimensionalGrid = fluid_properties.gas_saturation_grid.copy()
+    water_saturation_grid = fluid_properties.water_saturation_grid.copy()
+    oil_saturation_grid = fluid_properties.oil_saturation_grid.copy()
+    gas_saturation_grid = fluid_properties.gas_saturation_grid.copy()
 
-    n_water_enforced = 0
-    n_gas_enforced = 0
+    water_cells_enforced = 0
+    gas_cells_enforced = 0
 
     for well in wells.injection_wells:
         if not well.is_open or well.injected_fluid is None:
@@ -339,11 +331,12 @@ def apply_minimum_injector_saturations(
             i, j, k = perforation_index.cell
 
             if injected_phase == FluidPhase.WATER:
-                current = float(sw[i, j, k])
+                current = float(water_saturation_grid[i, j, k])
                 if current >= seed:
                     continue
+
                 delta = dtype(seed - current)  # type: ignore[union-attr]
-                oil_available = float(so[i, j, k])
+                oil_available = float(oil_saturation_grid[i, j, k])
                 if oil_available - delta < 0.0:
                     logger.warning(
                         "Oil saturation "
@@ -356,16 +349,20 @@ def apply_minimum_injector_saturations(
                         delta,
                     )
                     delta = dtype(oil_available)  # type: ignore[union-attr]
-                sw[i, j, k] = dtype(current + delta)  # type: ignore[union-attr]
-                so[i, j, k] = max(dtype(0.0), dtype(oil_available - delta))  # type: ignore[union-attr]
-                n_water_enforced += 1
+
+                water_saturation_grid[i, j, k] = dtype(current + delta)  # type: ignore[union-attr]
+                oil_saturation_grid[i, j, k] = max(
+                    dtype(0.0), dtype(oil_available - delta)
+                )  # type: ignore[union-attr]
+                water_cells_enforced += 1
 
             else:  # GAS
-                current = float(sg[i, j, k])
+                current = float(gas_saturation_grid[i, j, k])
                 if current >= seed:
                     continue
+
                 delta = dtype(seed - current)  # type: ignore[union-attr]
-                oil_available = float(so[i, j, k])
+                oil_available = float(oil_saturation_grid[i, j, k])
                 if oil_available - delta < 0.0:
                     logger.warning(
                         "Oil saturation "
@@ -378,23 +375,27 @@ def apply_minimum_injector_saturations(
                         delta,
                     )
                     delta = dtype(oil_available)  # type: ignore[union-attr]
-                sg[i, j, k] = dtype(current + delta)  # type: ignore[union-attr]
-                so[i, j, k] = max(dtype(0.0), dtype(oil_available - delta))  # type: ignore[union-attr]
-                n_gas_enforced += 1
 
-    if n_water_enforced == 0 and n_gas_enforced == 0:
+                gas_saturation_grid[i, j, k] = dtype(current + delta)  # type: ignore[union-attr]
+                oil_saturation_grid[i, j, k] = max(  # type: ignore[union-attr]
+                    dtype(0.0),
+                    dtype(oil_available - delta),
+                )
+                gas_cells_enforced += 1
+
+    if water_cells_enforced == 0 and gas_cells_enforced == 0:
         return fluid_properties
 
     logger.debug(
         "Enforced minimum in %d water and %d gas injector cells.",
-        n_water_enforced,
-        n_gas_enforced,
+        water_cells_enforced,
+        gas_cells_enforced,
     )
     return attrs.evolve(
         fluid_properties,
-        water_saturation_grid=sw,
-        oil_saturation_grid=so,
-        gas_saturation_grid=sg,
+        water_saturation_grid=water_saturation_grid,
+        oil_saturation_grid=oil_saturation_grid,
+        gas_saturation_grid=gas_saturation_grid,
     )
 
 
@@ -444,16 +445,11 @@ def check_zero_flow_initialization(
 
     :param fluid_properties: Initial fluid properties (t = 0, before any time-stepping).
     :param rock_properties: Rock properties (porosity, permeability, residual saturations).
-    :param face_transmissibilities: Geometric face transmissibilities precomputed by
-        `build_face_transmissibilities`. Same object used by the solvers.
-    :param elevation_grid: Cell elevation grid (ft), built with the same dip/azimuth as used in
-        the simulation.
-    :param config: Simulation configuration. Used to build the rock-fluid property grids
-        (relative permeability, capillary pressure) and for the `capillary_strength_factor`
-        and `disable_capillary_effects` flags.
-    :param cell_dimension: `(cell_size_x, cell_size_y)` in feet. Used to compute pore volumes
-        for the relative-flux normalisation.
-    :param thickness_grid: Cell thickness grid (ft). Used to compute pore volumes.
+    :param face_transmissibilities: Precomputed geometric face transmissibilities.
+    :param elevation_grid: Cell elevation grid (ft).
+    :param config: Simulation configuration.
+    :param cell_dimension: `(cell_size_x, cell_size_y)` in feet.
+    :param thickness_grid: Cell thickness grid (ft). 
     :param relative_tolerance: Maximum acceptable `|net_flux| / pore_volume` (day⁻¹) for a
         cell to be considered "at rest". Default `1e-6` day⁻¹. A value of `1e-6` means that
         the spurious flux would change the saturation by at most 1e-6 per day, which is
@@ -467,14 +463,9 @@ def check_zero_flow_initialization(
         - `max_relative_flux` - worst-case relative flux (day⁻¹).
         - `violations` - list of `ZeroFlowViolation` for the worst offending cells.
 
-    **Warnings**
-
-    The function logs a `WARNING` for every violation if `len(violations) > 0` and an
-    `INFO` message summarising the outcome.
-
     **Example**
 
-    Typical call pattern in a user script:
+    Typical usage pattern:
 
     ```python
     from bores.initialization import check_zero_flow_initialization
@@ -505,8 +496,6 @@ def check_zero_flow_initialization(
     cell_count_x, cell_count_y, cell_count_z = pressure_grid.shape
     cell_size_x, cell_size_y = cell_dimension
 
-    # Build relative-permeability, mobility, and capillary-pressure grids
-    # using the same path as the main simulation loop.
     _, relative_mobility_grids, capillary_pressure_grids = (
         build_rock_fluid_properties_grids(
             water_saturation_grid=fluid_properties.water_saturation_grid,
@@ -553,31 +542,31 @@ def check_zero_flow_initialization(
         c.MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_DAY
     )
 
-    # Compute per-phase net fluxes using the same upwind kernel as the
-    # explicit saturation solver - this is the exact flux that would corrupt
-    # the first saturation update if it were non-zero.
-    net_water_flux, net_oil_flux, net_gas_flux = compute_net_flux_contributions(
-        oil_pressure_grid=pressure_grid,
-        cell_count_x=cell_count_x,
-        cell_count_y=cell_count_y,
-        cell_count_z=cell_count_z,
-        pressure_boundaries=pressure_boundaries,
-        flux_boundaries=flux_boundaries,
-        water_relative_mobility_grid=water_relative_mobility_grid,
-        oil_relative_mobility_grid=oil_relative_mobility_grid,
-        gas_relative_mobility_grid=gas_relative_mobility_grid,
-        face_transmissibilities_x=face_transmissibilities.x,
-        face_transmissibilities_y=face_transmissibilities.y,
-        face_transmissibilities_z=face_transmissibilities.z,
-        oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
-        gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
-        oil_density_grid=fluid_properties.oil_effective_density_grid,
-        water_density_grid=fluid_properties.water_density_grid,
-        gas_density_grid=fluid_properties.gas_density_grid,
-        elevation_grid=elevation_grid,
-        gravitational_constant=gravitational_constant,
-        md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
-        dtype=dtype,
+    # Compute per-phase net fluxes using the same kernel as the explicit saturation solver.
+    net_water_flux_grid, net_oil_flux_grid, net_gas_flux_grid = (
+        compute_net_flux_contributions(
+            oil_pressure_grid=pressure_grid,
+            cell_count_x=cell_count_x,
+            cell_count_y=cell_count_y,
+            cell_count_z=cell_count_z,
+            pressure_boundaries=pressure_boundaries,
+            flux_boundaries=flux_boundaries,
+            water_relative_mobility_grid=water_relative_mobility_grid,
+            oil_relative_mobility_grid=oil_relative_mobility_grid,
+            gas_relative_mobility_grid=gas_relative_mobility_grid,
+            face_transmissibilities_x=face_transmissibilities.x,
+            face_transmissibilities_y=face_transmissibilities.y,
+            face_transmissibilities_z=face_transmissibilities.z,
+            oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
+            gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
+            oil_density_grid=fluid_properties.oil_effective_density_grid,
+            water_density_grid=fluid_properties.water_density_grid,
+            gas_density_grid=fluid_properties.gas_density_grid,
+            elevation_grid=elevation_grid,
+            gravitational_constant=gravitational_constant,
+            md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
+            dtype=dtype,
+        )
     )
 
     # Compute per-cell pore volumes for relative-flux normalisation
@@ -590,19 +579,19 @@ def check_zero_flow_initialization(
     )
 
     # Total absolute flux per cell (ft³/day)
-    net_total_flux = (
-        np.abs(net_water_flux) + np.abs(net_oil_flux) + np.abs(net_gas_flux)
+    net_total_flux_grid = (
+        np.abs(net_water_flux_grid)
+        + np.abs(net_oil_flux_grid)
+        + np.abs(net_gas_flux_grid)
     )
-
-    # Safe relative flux - avoid division by zero in zero-porosity cells
     safe_pore_volume_grid = np.where(pore_volume_grid > 0.0, pore_volume_grid, np.inf)
-    relative_flux_grid = net_total_flux / safe_pore_volume_grid  # day⁻¹
+    relative_flux_grid = net_total_flux_grid / safe_pore_volume_grid  # day⁻¹
 
     # Identify active cells (non-zero porosity)
     active_mask = rock_properties.porosity_grid > 0.0
-    n_cells_checked = int(np.sum(active_mask))
+    cells_checked = int(np.sum(active_mask))
 
-    if n_cells_checked == 0:
+    if cells_checked == 0:
         logger.warning("No active cells found (all porosity = 0).")
         return ZeroFlowCheckResult(
             passed=True,
@@ -610,15 +599,16 @@ def check_zero_flow_initialization(
             max_absolute_flux=0.0,
             worst_cell=None,
             violations=[],
+            violation_count=0,
             relative_tolerance=relative_tolerance,
-            n_cells_checked=0,
+            cells_checked=0,
         )
 
-    active_rel_flux = relative_flux_grid[active_mask]
-    active_abs_flux = net_total_flux[active_mask]
+    active_relative_flux = relative_flux_grid[active_mask]
+    active_absolute_flux = net_total_flux_grid[active_mask]
 
-    max_relative_flux = float(np.max(active_rel_flux))
-    max_absolute_flux = float(np.max(active_abs_flux))
+    max_relative_flux = float(np.max(active_relative_flux))
+    max_absolute_flux = float(np.max(active_absolute_flux))
 
     # Locate the worst cell
     flat_worst = int(np.argmax(relative_flux_grid * active_mask.astype(dtype)))
@@ -626,7 +616,7 @@ def check_zero_flow_initialization(
         flat_worst,
         (cell_count_x, cell_count_y, cell_count_z),
     )
-    worst_cell: typing.Tuple[int, int, int] = (int(worst_i), int(worst_j), int(worst_k))
+    worst_cell = (int(worst_i), int(worst_j), int(worst_k))
 
     # Collect violation cells sorted by descending relative flux
     violation_mask = (relative_flux_grid > relative_tolerance) & active_mask
@@ -644,54 +634,20 @@ def check_zero_flow_initialization(
         for idx in sorted_indices[:max_reported_violations]:
             vi, vj, vk = int(idx[0]), int(idx[1]), int(idx[2])
             pv = float(pore_volume_grid[vi, vj, vk])
-            nwf = float(net_water_flux[vi, vj, vk])
-            nof = float(net_oil_flux[vi, vj, vk])
-            ngf = float(net_gas_flux[vi, vj, vk])
+            nwf = float(net_water_flux_grid[vi, vj, vk])
+            nof = float(net_oil_flux_grid[vi, vj, vk])
+            ngf = float(net_gas_flux_grid[vi, vj, vk])
             ntf = abs(nwf) + abs(nof) + abs(ngf)
             violations.append(
                 ZeroFlowViolation(
                     cell=(vi, vj, vk),
-                    net_water_flux=nwf,
-                    net_oil_flux=nof,
-                    net_gas_flux=ngf,
-                    net_total_flux=ntf,
+                    net_water_flux_grid=nwf,
+                    net_oil_flux_grid=nof,
+                    net_gas_flux_grid=ngf,
+                    net_total_flux_grid=ntf,
                     pore_volume=pv,
                     relative_flux=float(relative_flux_grid[vi, vj, vk]),
                 )
-            )
-
-    # Log summary
-    if passed:
-        logger.info(
-            "PASSED. "
-            "Max relative flux = %.3e day⁻¹ (tolerance = %.3e day⁻¹). "
-            "Checked %d active cells.",
-            max_relative_flux,
-            relative_tolerance,
-            n_cells_checked,
-        )
-    else:
-        logger.warning(
-            "FAILED. "
-            "%d of %d active cells exceed tolerance %.3e day⁻¹. "
-            "Max relative flux = %.3e day⁻¹ at cell %s. "
-            "Check pressure/saturation/density/capillary-pressure consistency.",
-            n_violations,
-            n_cells_checked,
-            relative_tolerance,
-            max_relative_flux,
-            worst_cell,
-        )
-        for v in violations[:5]:
-            logger.warning(
-                "  Cell %s: relative_flux=%.3e day⁻¹  "
-                "(qw=%.3e, qo=%.3e, qg=%.3e ft³/day, PV=%.3e ft³)",
-                v.cell,
-                v.relative_flux,
-                v.net_water_flux,
-                v.net_oil_flux,
-                v.net_gas_flux,
-                v.pore_volume,
             )
 
     return ZeroFlowCheckResult(
@@ -700,6 +656,7 @@ def check_zero_flow_initialization(
         max_absolute_flux=max_absolute_flux,
         worst_cell=worst_cell,
         violations=violations,
+        violation_count=n_violations,
         relative_tolerance=relative_tolerance,
-        n_cells_checked=n_cells_checked,
+        cells_checked=cells_checked,
     )

@@ -605,8 +605,8 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
         reference_phase="non_wetting",  # indexed by So
         wetting_phase_relative_permeability=krw_values,
         non_wetting_phase_relative_permeability=krow_values,
-        min_non_wetting_relperm=None,
-        min_wetting_relperm=None,
+        # min_non_wetting_relperm=None,
+        # min_wetting_relperm=None,
     )
 
     relative_permeability_table = bores.ThreePhaseRelPermTable(
@@ -766,17 +766,12 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
         scheme="impes",
         output_frequency=1,
         pressure_solver="direct",
-        pressure_preconditioner=None,
         saturation_solver="direct",
-        saturation_preconditioner=None,
         log_interval=10,
         pvt_tables=pvt_tables,
         wells=wells,
-        jacobian_assembly_method="analytical",
-        boundary_conditions=None,
         disable_capillary_effects=True,
         freeze_saturation_pressure=False,
-        miscibility_model="immiscible",
         # maximum_gas_saturation_change=0.9,
         # maximum_oil_saturation_change=0.5,
         # maximum_water_saturation_change=0.5,
@@ -823,7 +818,7 @@ def load_states():
 
 
 @app.cell
-def setup_analysis(bores, np, states):
+def setup_analysis(bores, states):
     analyst = bores.ModelAnalyst(states)
 
     sweep_efficiency_history = analyst.sweep_efficiency_history(
@@ -855,10 +850,10 @@ def setup_analysis(bores, np, states):
     for s in states:
         time_step = s.time_in_days
         fluid_properties = s.model.fluid_properties
-        avg_oil_sat = np.mean(fluid_properties.oil_saturation_grid)
-        avg_water_sat = np.mean(fluid_properties.water_saturation_grid)
-        avg_gas_sat = np.mean(fluid_properties.gas_saturation_grid[9, 9, 2])
-        avg_pressure = s.injection_bhps.gas[0, 0, 0]
+        avg_oil_sat = fluid_properties.oil_saturation_grid.mean()
+        avg_water_sat = fluid_properties.water_saturation_grid.mean()
+        avg_gas_sat = fluid_properties.gas_saturation_grid.mean()
+        avg_pressure = s.production_bhps.gas[9, 9, 2]
 
         oil_saturation_history.append((time_step, avg_oil_sat))
         water_saturation_history.append((time_step, avg_water_sat))
@@ -1250,9 +1245,9 @@ def _(bores, states, viz, wells):
         # cmax=1.0,
     )
 
-    property = "oil-sat"
+    property = "gas-sat"
     figures = []
-    timesteps = [100]
+    timesteps = [200]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],

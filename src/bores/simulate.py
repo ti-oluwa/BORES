@@ -24,10 +24,7 @@ from bores.datastructures import (
 )
 from bores.errors import SimulationError, StopSimulation, TimingError, ValidationError
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids, RelPermGrids
-from bores.grids.pvt import (
-    build_three_phase_relative_mobilities_grids,
-    build_three_phase_relative_permeabilities_grids,
-)
+from bores.grids.pvt import build_three_phase_relative_mobilities_grids
 from bores.grids.rock_fluid import build_rock_fluid_properties_grids
 from bores.initialization import (
     apply_minimum_injector_saturations,
@@ -364,7 +361,7 @@ def _run_impes_step(
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
     saturation_history: typing.Optional[SaturationHistory[ThreeDimensions]],
-    relperm_grids: typing.Any,
+    relperm_grids: RelPermGrids[ThreeDimensions],
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     wells: Wells[ThreeDimensions],
@@ -511,6 +508,47 @@ def _run_impes_step(
     fluid_properties = attrs.evolve(fluid_properties, pressure_grid=pressure_grid)
     logger.debug("Pressure evolution completed.")
 
+    # Copy before PVT updates so that we can check saturation changes after solution gas liberation
+    # We did not do the copy at the very start because, it will be a wasted op, if the pressure solve fails
+    old_solution_gor_grid = fluid_properties.solution_gas_to_oil_ratio_grid.copy()
+    old_oil_fvf_grid = fluid_properties.oil_formation_volume_factor_grid.copy()
+    old_gas_solubility_in_water_grid = (
+        fluid_properties.gas_solubility_in_water_grid.copy()
+    )
+    old_water_fvf_grid = fluid_properties.water_formation_volume_factor_grid.copy()
+    old_oil_saturation_grid = fluid_properties.oil_saturation_grid.copy()
+    old_gas_saturation_grid = fluid_properties.gas_saturation_grid.copy()
+    old_water_saturation_grid = fluid_properties.water_saturation_grid.copy()
+
+    logger.debug("Updating PVT fluid properties after pressure change...")
+    fluid_properties = update_fluid_properties(
+        fluid_properties=fluid_properties,
+        wells=wells,
+        miscibility_model=miscibility_model,
+        pvt_tables=config.pvt_tables,
+        freeze_saturation_pressure=config.freeze_saturation_pressure,
+    )
+
+    # Rebuild relative mobility grids (using existing relperm grids since no saturation change)
+    logger.debug("Rebuilding relative mobility grids...")
+    (
+        water_relative_mobility_grid,
+        oil_relative_mobility_grid,
+        gas_relative_mobility_grid,
+    ) = build_three_phase_relative_mobilities_grids(
+        oil_relative_permeability_grid=relperm_grids.kro,
+        water_relative_permeability_grid=relperm_grids.krw,
+        gas_relative_permeability_grid=relperm_grids.krg,
+        water_viscosity_grid=fluid_properties.water_viscosity_grid,
+        oil_viscosity_grid=fluid_properties.oil_effective_viscosity_grid,
+        gas_viscosity_grid=fluid_properties.gas_viscosity_grid,
+    )
+    relative_mobility_grids = RelativeMobilityGrids(
+        water_relative_mobility=water_relative_mobility_grid,
+        oil_relative_mobility=oil_relative_mobility_grid,
+        gas_relative_mobility=gas_relative_mobility_grid,
+    )
+
     logger.debug("Computing well rates from new pressure and stored BHPs...")
     compute_well_rates(
         new_pressure_grid=pressure_grid,
@@ -538,56 +576,6 @@ def _run_impes_step(
     metadata = attrs.evolve(metadata, fluid_properties=fluid_properties)
     flux_boundaries, pressure_boundaries = boundary_conditions.refresh_boundaries(
         metadata=metadata
-    )
-
-    # Copy before PVT updates so that we can check saturation changes after solution gas liberation
-    # We did not do the copy at the very start because, it will be a wasted op, if the pressure solve fails
-    old_solution_gor_grid = fluid_properties.solution_gas_to_oil_ratio_grid.copy()
-    old_oil_fvf_grid = fluid_properties.oil_formation_volume_factor_grid.copy()
-    old_gas_solubility_in_water_grid = (
-        fluid_properties.gas_solubility_in_water_grid.copy()
-    )
-    old_water_fvf_grid = fluid_properties.water_formation_volume_factor_grid.copy()
-    old_oil_saturation_grid = fluid_properties.oil_saturation_grid.copy()
-    old_gas_saturation_grid = fluid_properties.gas_saturation_grid.copy()
-    old_water_saturation_grid = fluid_properties.water_saturation_grid.copy()
-
-    logger.debug("Updating PVT fluid properties after pressure change...")
-    fluid_properties = update_fluid_properties(
-        fluid_properties=fluid_properties,
-        wells=wells,
-        miscibility_model=miscibility_model,
-        pvt_tables=config.pvt_tables,
-        freeze_saturation_pressure=config.freeze_saturation_pressure,
-    )
-
-    # Rebuild rock-fluid grids
-    logger.debug("Rebuilding relative permeability and mobility grids...")
-    krw, kro, krg = build_three_phase_relative_permeabilities_grids(
-        water_saturation_grid=fluid_properties.water_saturation_grid,
-        oil_saturation_grid=fluid_properties.oil_saturation_grid,
-        gas_saturation_grid=fluid_properties.gas_saturation_grid,
-        irreducible_water_saturation_grid=rock_properties.irreducible_water_saturation_grid,
-        residual_oil_saturation_water_grid=rock_properties.residual_oil_saturation_water_grid,
-        residual_oil_saturation_gas_grid=rock_properties.residual_oil_saturation_gas_grid,
-        residual_gas_saturation_grid=rock_properties.residual_gas_saturation_grid,
-        relative_permeability_table=config.rock_fluid_tables.relative_permeability_table,
-        phase_appearance_tolerance=config.phase_appearance_tolerance,
-    )
-    water_relative_mobility, oil_relative_mobility, gas_relative_mobility = (
-        build_three_phase_relative_mobilities_grids(
-            oil_relative_permeability_grid=kro,
-            water_relative_permeability_grid=krw,
-            gas_relative_permeability_grid=krg,
-            water_viscosity_grid=fluid_properties.water_viscosity_grid,
-            oil_viscosity_grid=fluid_properties.oil_effective_viscosity_grid,
-            gas_viscosity_grid=fluid_properties.gas_viscosity_grid,
-        )
-    )
-    relative_mobility_grids = RelativeMobilityGrids(
-        water_relative_mobility=water_relative_mobility,
-        oil_relative_mobility=oil_relative_mobility,
-        gas_relative_mobility=gas_relative_mobility,
     )
 
     logger.debug("Evolving saturation (explicit)...")
@@ -687,24 +675,30 @@ def _run_impes_step(
         )
 
     logger.debug("Updating fluid properties with new saturation grids...")
-    sw = saturation_solution.water_saturation_grid.astype(dtype, copy=False)
-    so = saturation_solution.oil_saturation_grid.astype(dtype, copy=False)
-    sg = saturation_solution.gas_saturation_grid.astype(dtype, copy=False)
+    water_saturation_grid = saturation_solution.water_saturation_grid.astype(
+        dtype, copy=False
+    )
+    oil_saturation_grid = saturation_solution.oil_saturation_grid.astype(
+        dtype, copy=False
+    )
+    gas_saturation_grid = saturation_solution.gas_saturation_grid.astype(
+        dtype, copy=False
+    )
     solvent_concentration_grid = saturation_solution.solvent_concentration_grid
 
     if solvent_concentration_grid is None:
         fluid_properties = attrs.evolve(
             fluid_properties,
-            water_saturation_grid=sw,
-            oil_saturation_grid=so,
-            gas_saturation_grid=sg,
+            water_saturation_grid=water_saturation_grid,
+            oil_saturation_grid=oil_saturation_grid,
+            gas_saturation_grid=gas_saturation_grid,
         )
     else:
         fluid_properties = attrs.evolve(
             fluid_properties,
-            water_saturation_grid=sw,
-            oil_saturation_grid=so,
-            gas_saturation_grid=sg,
+            water_saturation_grid=water_saturation_grid,
+            oil_saturation_grid=oil_saturation_grid,
+            gas_saturation_grid=gas_saturation_grid,
             solvent_concentration_grid=solvent_concentration_grid.astype(
                 dtype, copy=False
             ),
@@ -842,7 +836,7 @@ def _run_sequential_implicit_step(
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
     saturation_history: typing.Optional[SaturationHistory[ThreeDimensions]],
-    relperm_grids: typing.Any,
+    relperm_grids: RelPermGrids[ThreeDimensions],
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     wells: Wells[ThreeDimensions],
@@ -992,6 +986,44 @@ def _run_sequential_implicit_step(
     fluid_properties = attrs.evolve(fluid_properties, pressure_grid=pressure_grid)
     logger.debug("Pressure evolution completed.")
 
+    old_solution_gor_grid = fluid_properties.solution_gas_to_oil_ratio_grid.copy()
+    old_oil_fvf_grid = fluid_properties.oil_formation_volume_factor_grid.copy()
+    old_gas_solubility_in_water_grid = (
+        fluid_properties.gas_solubility_in_water_grid.copy()
+    )
+    old_water_fvf_grid = fluid_properties.water_formation_volume_factor_grid.copy()
+    old_oil_saturation_grid = fluid_properties.oil_saturation_grid.copy()
+    old_gas_saturation_grid = fluid_properties.gas_saturation_grid.copy()
+    old_water_saturation_grid = fluid_properties.water_saturation_grid.copy()
+
+    logger.debug("Updating PVT fluid properties to reflect pressure changes...")
+    fluid_properties = update_fluid_properties(
+        fluid_properties=fluid_properties,
+        wells=wells,
+        miscibility_model=miscibility_model,
+        pvt_tables=config.pvt_tables,
+        freeze_saturation_pressure=config.freeze_saturation_pressure,
+    )
+
+    logger.debug("Rebuilding relative mobility grids...")
+    (
+        water_relative_mobility_grid,
+        oil_relative_mobility_grid,
+        gas_relative_mobility_grid,
+    ) = build_three_phase_relative_mobilities_grids(
+        oil_relative_permeability_grid=relperm_grids.kro,
+        water_relative_permeability_grid=relperm_grids.krw,
+        gas_relative_permeability_grid=relperm_grids.krg,
+        water_viscosity_grid=fluid_properties.water_viscosity_grid,
+        oil_viscosity_grid=fluid_properties.oil_effective_viscosity_grid,
+        gas_viscosity_grid=fluid_properties.gas_viscosity_grid,
+    )
+    relative_mobility_grids = RelativeMobilityGrids(
+        water_relative_mobility=water_relative_mobility_grid,
+        oil_relative_mobility=oil_relative_mobility_grid,
+        gas_relative_mobility=gas_relative_mobility_grid,
+    )
+
     logger.debug("Computing well rates from new pressure and stored BHPs...")
     compute_well_rates(
         new_pressure_grid=pressure_grid,
@@ -1017,25 +1049,6 @@ def _run_sequential_implicit_step(
     metadata = attrs.evolve(metadata, fluid_properties=fluid_properties)
     flux_boundaries, pressure_boundaries = boundary_conditions.refresh_boundaries(
         metadata=metadata
-    )
-
-    old_solution_gor_grid = fluid_properties.solution_gas_to_oil_ratio_grid.copy()
-    old_oil_fvf_grid = fluid_properties.oil_formation_volume_factor_grid.copy()
-    old_gas_solubility_in_water_grid = (
-        fluid_properties.gas_solubility_in_water_grid.copy()
-    )
-    old_water_fvf_grid = fluid_properties.water_formation_volume_factor_grid.copy()
-    old_oil_saturation_grid = fluid_properties.oil_saturation_grid.copy()
-    old_gas_saturation_grid = fluid_properties.gas_saturation_grid.copy()
-    old_water_saturation_grid = fluid_properties.water_saturation_grid.copy()
-
-    logger.debug("Updating PVT fluid properties to reflect pressure changes...")
-    fluid_properties = update_fluid_properties(
-        fluid_properties=fluid_properties,
-        wells=wells,
-        miscibility_model=miscibility_model,
-        pvt_tables=config.pvt_tables,
-        freeze_saturation_pressure=config.freeze_saturation_pressure,
     )
 
     logger.debug("Evolving saturation (implicit, Newton-Raphson)...")
@@ -1109,15 +1122,20 @@ def _run_sequential_implicit_step(
         )
 
     logger.debug("Updating fluid properties with new saturation grids...")
-    sw = saturation_solution.water_saturation_grid.astype(dtype, copy=False)
-    so = saturation_solution.oil_saturation_grid.astype(dtype, copy=False)
-    sg = saturation_solution.gas_saturation_grid.astype(dtype, copy=False)
-
+    water_saturation_grid = saturation_solution.water_saturation_grid.astype(
+        dtype, copy=False
+    )
+    oil_saturation_grid = saturation_solution.oil_saturation_grid.astype(
+        dtype, copy=False
+    )
+    gas_saturation_grid = saturation_solution.gas_saturation_grid.astype(
+        dtype, copy=False
+    )
     fluid_properties = attrs.evolve(
         fluid_properties,
-        water_saturation_grid=sw,
-        oil_saturation_grid=so,
-        gas_saturation_grid=sg,
+        water_saturation_grid=water_saturation_grid,
+        oil_saturation_grid=oil_saturation_grid,
+        gas_saturation_grid=gas_saturation_grid,
     )
 
     logger.debug(
@@ -1252,7 +1270,7 @@ def _run_full_sequential_implicit_step(
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
     saturation_history: typing.Optional[SaturationHistory[ThreeDimensions]],
-    relperm_grids: typing.Any,
+    relperm_grids: RelPermGrids[ThreeDimensions],
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     wells: Wells[ThreeDimensions],
@@ -1442,6 +1460,13 @@ def _run_full_sequential_implicit_step(
             out=pressure_grid,
         )
 
+        iter_fluid_properties = attrs.evolve(
+            iter_fluid_properties, pressure_grid=pressure_grid
+        )
+        logger.debug(
+            "Pressure updated in fluid properties for outer iteration saturation solve."
+        )
+
         old_solution_gor_grid = (
             iter_fluid_properties.solution_gas_to_oil_ratio_grid.copy()
         )
@@ -1452,15 +1477,38 @@ def _run_full_sequential_implicit_step(
         old_water_fvf_grid = (
             iter_fluid_properties.water_formation_volume_factor_grid.copy()
         )
-        pre_flash_so = iter_fluid_properties.oil_saturation_grid.copy()
-        pre_flash_sg = iter_fluid_properties.gas_saturation_grid.copy()
-        pre_flash_sw = iter_fluid_properties.water_saturation_grid.copy()
+        old_oil_saturation_grid = iter_fluid_properties.oil_saturation_grid.copy()
+        old_gas_saturation_grid = iter_fluid_properties.gas_saturation_grid.copy()
+        old_water_saturation_grid = iter_fluid_properties.water_saturation_grid.copy()
 
-        iter_fluid_properties = attrs.evolve(
-            iter_fluid_properties, pressure_grid=pressure_grid
-        )
         logger.debug(
-            "Pressure updated in fluid properties for outer iteration saturation solve."
+            "Updating fluid properties to reflect pressure change for outer iteration..."
+        )
+        iter_fluid_properties = update_fluid_properties(
+            fluid_properties=iter_fluid_properties,
+            wells=wells,
+            miscibility_model=miscibility_model,
+            pvt_tables=config.pvt_tables,
+            freeze_saturation_pressure=config.freeze_saturation_pressure,
+        )
+
+        logger.debug("Rebuilding relative mobility grids...")
+        (
+            water_relative_mobility_grid,
+            oil_relative_mobility_grid,
+            gas_relative_mobility_grid,
+        ) = build_three_phase_relative_mobilities_grids(
+            oil_relative_permeability_grid=iter_relperm_grids.kro,
+            water_relative_permeability_grid=iter_relperm_grids.krw,
+            gas_relative_permeability_grid=iter_relperm_grids.krg,
+            water_viscosity_grid=iter_fluid_properties.water_viscosity_grid,
+            oil_viscosity_grid=iter_fluid_properties.oil_effective_viscosity_grid,
+            gas_viscosity_grid=iter_fluid_properties.gas_viscosity_grid,
+        )
+        iter_relative_mobility_grids = RelativeMobilityGrids(
+            water_relative_mobility=water_relative_mobility_grid,
+            oil_relative_mobility=oil_relative_mobility_grid,
+            gas_relative_mobility=gas_relative_mobility_grid,
         )
 
         logger.debug(
@@ -1484,17 +1532,6 @@ def _run_full_sequential_implicit_step(
             production_rates=_rates_proxy(production_rates),
             injection_fvfs=_fvfs_proxy(injection_fvfs),
             production_fvfs=_fvfs_proxy(production_fvfs),
-        )
-
-        logger.debug(
-            "Updating fluid properties to reflect pressure change for outer iteration..."
-        )
-        iter_fluid_properties = update_fluid_properties(
-            fluid_properties=iter_fluid_properties,
-            wells=wells,
-            miscibility_model=miscibility_model,
-            pvt_tables=config.pvt_tables,
-            freeze_saturation_pressure=config.freeze_saturation_pressure,
         )
 
         # Refresh boundary conditions with updated pressure for the saturation solve.
@@ -1572,15 +1609,21 @@ def _run_full_sequential_implicit_step(
                 },
             )
 
-        sw = saturation_solution.water_saturation_grid.astype(dtype, copy=False)
-        so = saturation_solution.oil_saturation_grid.astype(dtype, copy=False)
-        sg = saturation_solution.gas_saturation_grid.astype(dtype, copy=False)
+        water_saturation_grid = saturation_solution.water_saturation_grid.astype(
+            dtype, copy=False
+        )
+        oil_saturation_grid = saturation_solution.oil_saturation_grid.astype(
+            dtype, copy=False
+        )
+        gas_saturation_grid = saturation_solution.gas_saturation_grid.astype(
+            dtype, copy=False
+        )
 
         iter_fluid_properties = attrs.evolve(
             iter_fluid_properties,
-            water_saturation_grid=sw,
-            oil_saturation_grid=so,
-            gas_saturation_grid=sg,
+            water_saturation_grid=water_saturation_grid,
+            oil_saturation_grid=oil_saturation_grid,
+            gas_saturation_grid=gas_saturation_grid,
         )
 
         logger.debug(
@@ -1595,15 +1638,28 @@ def _run_full_sequential_implicit_step(
         )
         flash_check = _check_saturation_changes(
             maximum_oil_saturation_change=float(
-                np.max(np.abs(iter_fluid_properties.oil_saturation_grid - pre_flash_so))
+                np.max(
+                    np.abs(
+                        iter_fluid_properties.oil_saturation_grid
+                        - old_oil_saturation_grid
+                    )
+                )
             ),
             maximum_water_saturation_change=float(
                 np.max(
-                    np.abs(iter_fluid_properties.water_saturation_grid - pre_flash_sw)
+                    np.abs(
+                        iter_fluid_properties.water_saturation_grid
+                        - old_water_saturation_grid
+                    )
                 )
             ),
             maximum_gas_saturation_change=float(
-                np.max(np.abs(iter_fluid_properties.gas_saturation_grid - pre_flash_sg))
+                np.max(
+                    np.abs(
+                        iter_fluid_properties.gas_saturation_grid
+                        - old_gas_saturation_grid
+                    )
+                )
             ),
             max_allowed_oil_saturation_change=config.maximum_oil_saturation_change,
             max_allowed_water_saturation_change=config.maximum_water_saturation_change,
@@ -1834,7 +1890,7 @@ def _run_explicit_step(
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
     saturation_history: typing.Optional[SaturationHistory[ThreeDimensions]],
-    relperm_grids: typing.Any,
+    relperm_grids: RelPermGrids[ThreeDimensions],
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     wells: Wells[ThreeDimensions],
@@ -2100,37 +2156,35 @@ def _run_explicit_step(
         )
 
     logger.debug("Saturation evolution completed.")
-    sw = saturation_solution.water_saturation_grid.astype(dtype, copy=False)
-    so = saturation_solution.oil_saturation_grid.astype(dtype, copy=False)
-    sg = saturation_solution.gas_saturation_grid.astype(dtype, copy=False)
+    water_saturation_grid = saturation_solution.water_saturation_grid.astype(
+        dtype, copy=False
+    )
+    oil_saturation_grid = saturation_solution.oil_saturation_grid.astype(
+        dtype, copy=False
+    )
+    gas_saturation_grid = saturation_solution.gas_saturation_grid.astype(
+        dtype, copy=False
+    )
     solvent_concentration_grid = saturation_solution.solvent_concentration_grid
 
     if solvent_concentration_grid is None:
         fluid_properties = attrs.evolve(
             fluid_properties,
             pressure_grid=pressure_grid,
-            water_saturation_grid=sw,
-            oil_saturation_grid=so,
-            gas_saturation_grid=sg,
+            water_saturation_grid=water_saturation_grid,
+            oil_saturation_grid=oil_saturation_grid,
+            gas_saturation_grid=gas_saturation_grid,
         )
     else:
         fluid_properties = attrs.evolve(
             fluid_properties,
             pressure_grid=pressure_grid,
-            water_saturation_grid=sw,
-            oil_saturation_grid=so,
-            gas_saturation_grid=sg,
+            water_saturation_grid=water_saturation_grid,
+            oil_saturation_grid=oil_saturation_grid,
+            gas_saturation_grid=gas_saturation_grid,
             solvent_concentration_grid=solvent_concentration_grid.astype(
                 dtype, copy=False
             ),
-        )
-
-    if config.normalize_saturations:
-        normalize_saturations(
-            oil_saturation_grid=fluid_properties.oil_saturation_grid,
-            water_saturation_grid=fluid_properties.water_saturation_grid,
-            gas_saturation_grid=fluid_properties.gas_saturation_grid,
-            saturation_epsilon=saturation_epsilon,
         )
 
     old_solution_gor_grid = fluid_properties.solution_gas_to_oil_ratio_grid.copy()
@@ -2209,6 +2263,14 @@ def _run_explicit_step(
         pvt_tables=config.pvt_tables,
         freeze_saturation_pressure=config.freeze_saturation_pressure,
     )
+
+    if config.normalize_saturations:
+        normalize_saturations(
+            oil_saturation_grid=fluid_properties.oil_saturation_grid,
+            water_saturation_grid=fluid_properties.water_saturation_grid,
+            gas_saturation_grid=fluid_properties.gas_saturation_grid,
+            saturation_epsilon=saturation_epsilon,
+        )
 
     if saturation_history is not None:
         rock_properties, saturation_history = update_residual_saturation_grids(
@@ -2569,7 +2631,7 @@ def run(
                 fluid_properties=fluid_properties,
                 wells=wells,
                 well_indices_cache=well_indices_cache,
-                rock_fluid_tables_config=config,
+                config=config,
                 minimum_injector_water_saturation=config.minimum_injector_water_saturation,
                 minimum_injector_gas_saturation=config.minimum_injector_gas_saturation,
                 inplace=True,
@@ -2577,7 +2639,7 @@ def run(
 
         if config.check_zero_flow_initialization:
             logger.debug("Checking initial state for zero-flow violations...")
-            check_result = check_zero_flow_initialization(
+            zero_flow_check = check_zero_flow_initialization(
                 fluid_properties=fluid_properties,
                 rock_properties=rock_properties,
                 face_transmissibilities=face_transmissibilities,
@@ -2585,7 +2647,40 @@ def run(
                 config=config,
                 cell_dimension=cell_dimension,
                 thickness_grid=thickness_grid,
+                relative_tolerance=config.zero_flow_relative_flux_tolerance,
+                max_reported_violations=10,
+                dtype=dtype,
             )
+            if zero_flow_check.passed:
+                logger.info(
+                    "PASSED. Max relative flux = %.3e day⁻¹ (tolerance = %.3e day⁻¹). "
+                    "Checked %d active cells.",
+                    zero_flow_check.max_relative_flux,
+                    zero_flow_check.relative_tolerance,
+                    zero_flow_check.cells_checked,
+                )
+            else:
+                logger.warning(
+                    "FAILED. %d of %d active cells exceed tolerance %.3e day⁻¹. "
+                    "Max relative flux = %.3e day⁻¹ at cell %s. "
+                    "Check pressure/saturation/density/capillary-pressure consistency.",
+                    zero_flow_check.violation_count,
+                    zero_flow_check.cells_checked,
+                    zero_flow_check.relative_tolerance,
+                    zero_flow_check.max_relative_flux,
+                    zero_flow_check.worst_cell,
+                )
+                for violation in zero_flow_check.violations:
+                    logger.warning(
+                        "  Cell %s: relative_flux=%.3e day⁻¹  "
+                        "(qw=%.3e, qo=%.3e, qg=%.3e ft³/day, PV=%.3e ft³)",
+                        violation.cell,
+                        violation.relative_flux,
+                        violation.net_water_flux_grid,
+                        violation.net_oil_flux_grid,
+                        violation.net_gas_flux_grid,
+                        violation.pore_volume,
+                    )
 
         logger.debug("Building initial rock-fluid property grids...")
         relperm_grids, relative_mobility_grids, capillary_pressure_grids = (
@@ -2626,12 +2721,12 @@ def run(
             step_size = timer.propose_step_size()
             time = timer.elapsed_time + step_size
             logger.debug(
-                f"Attempting time step {new_step} with size {step_size} seconds..."
+                "Attempting time step %d with size %d seconds...", new_step, step_size
             )
             try:
                 if has_wells and has_well_schedules:
                     logger.debug(
-                        f"Updating wells configuration for time step {new_step}"
+                        "Updating wells configuration for time step %d", new_step
                     )
                     well_schedules.apply(wells, state)  # type: ignore[attr-defined]
                     logger.debug("Wells updated.")
@@ -2641,7 +2736,8 @@ def run(
                     # non-zero mobilities in the pressure Jacobian.
                     if has_wells:
                         logger.debug(
-                            f"Enforcing minimum injector saturations for time step {new_step}..."
+                            "Enforcing minimum injector saturations for time step %d...",
+                            new_step,
                         )
                         fluid_properties = apply_minimum_injector_saturations(
                             fluid_properties=fluid_properties,
@@ -2656,7 +2752,8 @@ def run(
                     # Rebuild rock-fluid grids from the current saturation state
                     # at the start of every step so the solvers see consistent mobilities.
                     logger.debug(
-                        f"Rebuilding rock-fluid property grids for time step {new_step}..."
+                        "Rebuilding rock-fluid property grids for time step %d...",
+                        new_step,
                     )
                     relperm_grids, relative_mobility_grids, capillary_pressure_grids = (
                         _rebuild_rock_fluid_grids(
@@ -2715,8 +2812,7 @@ def run(
                 else:
                     raise ValidationError(
                         f"Invalid simulation scheme {scheme!r}. "
-                        "Available schemes: 'impes', 'sequential-implicit', "
-                        "'full-sequential-implicit', 'explicit'."
+                        "Supported schemes: 'impes', 'sequential-implicit', 'full-sequential-implicit', 'explicit'."
                     )
 
                 acceptable = False
@@ -2725,10 +2821,7 @@ def run(
                 if result.success:
                     acceptable, error_msg = timer.is_acceptable(**timer_kwargs)
                     if acceptable:
-                        if logger.isEnabledFor(logging.DEBUG):
-                            logger.debug(
-                                "Time step %d completed successfully.", new_step
-                            )
+                        logger.debug("Time step %d completed successfully.", new_step)
                         timer.accept_step(step_size=step_size, **timer_kwargs)
                         if log_interval:
                             log_progress(
@@ -2744,8 +2837,9 @@ def run(
 
                 if not acceptable:
                     logger.debug(
-                        f"Time step {new_step} failed with step size {step_size}. "
-                        "Retrying with smaller step size."
+                        "Time step %d failed with step size %d. Retrying with smaller step size.",
+                        new_step,
+                        step_size,
                     )
                     try:
                         timer.reject_step(
@@ -2773,10 +2867,7 @@ def run(
                     or (timer.step % output_frequency == 0)
                     or timer.is_last_step
                 ):
-                    if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(
-                            "Capturing model state at time step %d", timer.step
-                        )
+                    logger.debug("Capturing model state at time step %d", timer.step)
                     injection_rates = result.injection_rates
                     production_rates = result.production_rates
                     injection_fvfs = result.injection_fvfs
@@ -2791,7 +2882,6 @@ def run(
                     assert production_bhps is not None
 
                     wells_snapshot = copy.deepcopy(wells)
-
                     if saturation_history is not None:
                         model_snapshot = model.evolve(
                             fluid_properties=fluid_properties,

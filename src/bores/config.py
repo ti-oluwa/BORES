@@ -573,6 +573,18 @@ class Config(
     the simulation. When False, the validation is skipped.
     """
 
+    zero_flow_relative_flux_tolerance: float = attrs.field(
+        default=1e-6,
+        validator=attrs.validators.gt(0),
+    )
+    """
+    Relative flux tolerance for zero-flow initialization check.
+
+    When `check_zero_flow_initialization` is True, this parameter defines the threshold for
+    identifying zero-flow conditions. If the maximum absolute inter-cell flux in a cell is less than
+    this fraction of the average flux across the domain, the cell is flagged for potential deadlock.
+    """
+
     task_pool: typing.Optional[ThreadPoolExecutor] = attrs.field(
         default=None,
         eq=False,

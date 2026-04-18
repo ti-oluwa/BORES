@@ -1186,7 +1186,7 @@ def assemble_numerical_jacobian(
     )
 
 
-def compute_relperm_and_capillary_pressure_derivative_grids(
+def compute_rock_fluid_derivative_grids(
     water_saturation_grid: ThreeDimensionalGrid,
     oil_saturation_grid: ThreeDimensionalGrid,
     gas_saturation_grid: ThreeDimensionalGrid,
@@ -1285,23 +1285,23 @@ def compute_relperm_and_capillary_pressure_derivative_grids(
             porosity=rock_properties.porosity_grid,
             permeability=rock_properties.absolute_permeability.mean,
         )
-        raw_dPcow_dSw = (
+        dPcow_dSw = (
             capillary_pressure_derivatives["dPcow_dSw"] * capillary_strength_factor
         )
-        raw_dPcow_dSo = (
+        dPcow_dSo = (
             capillary_pressure_derivatives["dPcow_dSo"] * capillary_strength_factor
         )
-        raw_dPcgo_dSo = (
+        dPcgo_dSo = (
             capillary_pressure_derivatives["dPcgo_dSo"] * capillary_strength_factor
         )
-        raw_dPcgo_dSg = (
+        dPcgo_dSg = (
             capillary_pressure_derivatives["dPcgo_dSg"] * capillary_strength_factor
         )
 
-        dPcow_dSw_eff = raw_dPcow_dSw - raw_dPcow_dSo
-        dPcow_dSg_eff = -raw_dPcow_dSo
-        dPcgo_dSw_eff = -raw_dPcgo_dSo
-        dPcgo_dSg_eff = raw_dPcgo_dSg - raw_dPcgo_dSo
+        dPcow_dSw_eff = dPcow_dSw - dPcow_dSo
+        dPcow_dSg_eff = -dPcow_dSo
+        dPcgo_dSw_eff = -dPcgo_dSo
+        dPcgo_dSg_eff = dPcgo_dSg - dPcgo_dSo
     else:
         zeros = np.zeros_like(water_saturation_grid)
         dPcow_dSw_eff = zeros
@@ -1327,7 +1327,7 @@ def compute_relperm_and_capillary_pressure_derivative_grids(
 
 
 @numba.njit(parallel=True, cache=True)
-def _assemble_analytical_jacobian(
+def _assemble_jacobian_flux_contributions(
     cell_count_x: int,
     cell_count_y: int,
     cell_count_z: int,
@@ -1376,7 +1376,7 @@ def _assemble_analytical_jacobian(
 
     The assembly follows a thread-safe prange-over-i-slices strategy identical
     to the implicit pressure solver: each i-slice writes into its own row of
-    2-D thread-local buffers, so no races occur.  A sequential compaction pass
+    2-D thread-local buffers, so no races occur. A sequential compaction pass
     at the end flattens those buffers into COO triplets.
 
     :param cell_count_x: Number of cells in x-direction.
@@ -1439,15 +1439,14 @@ def _assemble_analytical_jacobian(
                 cell_water_column = 2 * cell_1d_index
                 cell_gas_column = 2 * cell_1d_index + 1
 
-                cell_volume = (
+                pore_volume = (
                     cell_size_x
                     * cell_size_y
                     * thickness_grid[i, j, k]
                     * net_to_gross_grid[i, j, k]
+                    * porosity_grid[i, j, k]
                 )
-                accumulation_coefficient = (
-                    porosity_grid[i, j, k] * cell_volume / time_step_in_days
-                )
+                accumulation_coefficient = pore_volume / time_step_in_days
 
                 # Accumulation diagonal (dR_w/dSw and dR_g/dSg = phi*V/dt)
                 all_rows[i, local_ptr] = water_row
@@ -1504,7 +1503,7 @@ def _assemble_analytical_jacobian(
                             ni + 1, nj + 1, nk + 1
                         ]
 
-                    # Skip boundary faces — prescribed BC flux has zero Jacobian w.r.t. S
+                    # Skip boundary faces. Prescribed BC flux has zero Jacobian w.r.t. S
                     if (
                         ni < 0
                         or ni >= cell_count_x
@@ -1515,7 +1514,6 @@ def _assemble_analytical_jacobian(
                     ):
                         continue
 
-                    # Potential differences (matching compute_fluxes_from_neighbour)
                     oil_pressure_difference = (
                         oil_pressure_grid[ni, nj, nk] - oil_pressure_grid[i, j, k]
                     )
@@ -1538,12 +1536,16 @@ def _assemble_analytical_jacobian(
                         oil_pressure_difference + gas_oil_capillary_pressure_difference
                     )
 
-                    # Density upwinding (matching compute_fluxes_from_neighbour exactly)
-                    upwind_water_density = max(
-                        water_density_grid[ni, nj, nk], water_density_grid[i, j, k]
+                    # Density upwinding (match `compute_fluxes_from_neighbour`)
+                    upwind_water_density = (
+                        water_density_grid[ni, nj, nk]
+                        if water_pressure_difference > 0
+                        else water_density_grid[i, j, k]
                     )
-                    upwind_gas_density = min(
-                        gas_density_grid[ni, nj, nk], gas_density_grid[i, j, k]
+                    upwind_gas_density = (
+                        gas_density_grid[ni, nj, nk]
+                        if gas_pressure_difference > 0
+                        else gas_density_grid[i, j, k]
                     )
 
                     water_gravity_potential = (
@@ -1597,15 +1599,14 @@ def _assemble_analytical_jacobian(
                     dPcgo_dSw_n = dPcgo_dSw_eff_grid[ni, nj, nk]
                     dPcgo_dSg_n = dPcgo_dSg_eff_grid[ni, nj, nk]
 
-                    # WATER Jacobian contributions
+                    # Water Jacobian contributions
                     upwind_water_relative_mobility = (
                         water_relative_mobility_grid[ni, nj, nk]
                         if water_neighbour_is_upwind
                         else water_relative_mobility_grid[i, j, k]
                     )
-
                     if not water_neighbour_is_upwind:
-                        inv_mu_w = (
+                        inverse_water_viscosity = (
                             1.0 / water_viscosity_grid[i, j, k]
                             if water_viscosity_grid[i, j, k] > 0.0
                             else 0.0
@@ -1613,21 +1614,21 @@ def _assemble_analytical_jacobian(
                         dFw_mob_dSw_i = (
                             dkrw_dSw_i_eff
                             * md_per_cp_to_ft2_per_psi_per_day
-                            * inv_mu_w
+                            * inverse_water_viscosity
                             * water_potential
                             * transmissibility
                         )
                         dFw_mob_dSg_i = (
                             dkrw_dSg_i_eff
                             * md_per_cp_to_ft2_per_psi_per_day
-                            * inv_mu_w
+                            * inverse_water_viscosity
                             * water_potential
                             * transmissibility
                         )
                         dFw_mob_dSw_n = 0.0
                         dFw_mob_dSg_n = 0.0
                     else:
-                        inv_mu_w = (
+                        inverse_water_viscosity = (
                             1.0 / water_viscosity_grid[ni, nj, nk]
                             if water_viscosity_grid[ni, nj, nk] > 0.0
                             else 0.0
@@ -1637,14 +1638,14 @@ def _assemble_analytical_jacobian(
                         dFw_mob_dSw_n = (
                             dkrw_dSw_n_eff
                             * md_per_cp_to_ft2_per_psi_per_day
-                            * inv_mu_w
+                            * inverse_water_viscosity
                             * water_potential
                             * transmissibility
                         )
                         dFw_mob_dSg_n = (
                             dkrw_dSg_n_eff
                             * md_per_cp_to_ft2_per_psi_per_day
-                            * inv_mu_w
+                            * inverse_water_viscosity
                             * water_potential
                             * transmissibility
                         )
@@ -1680,15 +1681,14 @@ def _assemble_analytical_jacobian(
                     dRw_dSw_n = -(dFw_mob_dSw_n + dFw_cap_dSw_n)
                     dRw_dSg_n = -(dFw_mob_dSg_n + dFw_cap_dSg_n)
 
-                    # GAS Jacobian contributions
+                    # Gas Jacobian contributions
                     upwind_gas_relative_mobility = (
                         gas_relative_mobility_grid[ni, nj, nk]
                         if gas_neighbour_is_upwind
                         else gas_relative_mobility_grid[i, j, k]
                     )
-
                     if not gas_neighbour_is_upwind:
-                        inv_mu_g = (
+                        inverse_gas_viscosity = (
                             1.0 / gas_viscosity_grid[i, j, k]
                             if gas_viscosity_grid[i, j, k] > 0.0
                             else 0.0
@@ -1696,21 +1696,21 @@ def _assemble_analytical_jacobian(
                         dFg_mob_dSw_i = (
                             dkrg_dSw_i_eff
                             * md_per_cp_to_ft2_per_psi_per_day
-                            * inv_mu_g
+                            * inverse_gas_viscosity
                             * gas_potential
                             * transmissibility
                         )
                         dFg_mob_dSg_i = (
                             dkrg_dSg_i_eff
                             * md_per_cp_to_ft2_per_psi_per_day
-                            * inv_mu_g
+                            * inverse_gas_viscosity
                             * gas_potential
                             * transmissibility
                         )
                         dFg_mob_dSw_n = 0.0
                         dFg_mob_dSg_n = 0.0
                     else:
-                        inv_mu_g = (
+                        inverse_gas_viscosity = (
                             1.0 / gas_viscosity_grid[ni, nj, nk]
                             if gas_viscosity_grid[ni, nj, nk] > 0.0
                             else 0.0
@@ -1720,14 +1720,14 @@ def _assemble_analytical_jacobian(
                         dFg_mob_dSw_n = (
                             dkrg_dSw_n_eff
                             * md_per_cp_to_ft2_per_psi_per_day
-                            * inv_mu_g
+                            * inverse_gas_viscosity
                             * gas_potential
                             * transmissibility
                         )
                         dFg_mob_dSg_n = (
                             dkrg_dSg_n_eff
                             * md_per_cp_to_ft2_per_psi_per_day
-                            * inv_mu_g
+                            * inverse_gas_viscosity
                             * gas_potential
                             * transmissibility
                         )
@@ -2051,7 +2051,7 @@ def assemble_analytical_jacobian(
 
     Combines inter-cell flux derivatives and well-rate derivatives, both
     assembled as COO triplets and merged into a single CSR matrix.
-    Duplicate (row, col) entries are summed automatically by the COO→CSR
+    Duplicate (row, col) entries are summed automatically by the COO to CSR
     conversion, so diagonal contributions from multiple faces and wells
     accumulate correctly.
 
@@ -2098,7 +2098,7 @@ def assemble_analytical_jacobian(
         dPcow_dSg_eff_grid,
         dPcgo_dSw_eff_grid,
         dPcgo_dSg_eff_grid,
-    ) = compute_relperm_and_capillary_pressure_derivative_grids(
+    ) = compute_rock_fluid_derivative_grids(
         water_saturation_grid=water_saturation_grid,
         oil_saturation_grid=oil_saturation_grid,
         gas_saturation_grid=gas_saturation_grid,
@@ -2117,7 +2117,7 @@ def assemble_analytical_jacobian(
         gas_relative_mobility_grid,
     ) = relative_mobility_grids
 
-    flux_rows, flux_cols, flux_vals = _assemble_analytical_jacobian(
+    flux_rows, flux_cols, flux_vals = _assemble_jacobian_flux_contributions(
         cell_count_x=cell_count_x,
         cell_count_y=cell_count_y,
         cell_count_z=cell_count_z,
@@ -2153,7 +2153,6 @@ def assemble_analytical_jacobian(
         time_step_in_days=time_step_in_days,
         md_per_cp_to_ft2_per_psi_per_day=md_per_cp_to_ft2_per_psi_per_day,
     )
-
     well_rows, well_cols, well_vals = _assemble_jacobian_well_contributions(
         oil_pressure_grid=oil_pressure_grid,
         water_viscosity_grid=water_viscosity_grid,
@@ -2171,13 +2170,11 @@ def assemble_analytical_jacobian(
     )
 
     system_size = 2 * total_cell_count
-    combined_rows = np.concatenate([flux_rows, well_rows])
-    combined_cols = np.concatenate([flux_cols, well_cols])
-    combined_vals = np.concatenate([flux_vals, well_vals])
+    rows = np.concatenate([flux_rows, well_rows])
+    cols = np.concatenate([flux_cols, well_cols])
+    vals = np.concatenate([flux_vals, well_vals])
     return coo_matrix(
-        (combined_vals, (combined_rows, combined_cols)),
-        shape=(system_size, system_size),
-        dtype=np.float64,
+        (vals, (rows, cols)), shape=(system_size, system_size), dtype=np.float64
     )
 
 

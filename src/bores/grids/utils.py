@@ -13,6 +13,7 @@ from bores.types import (
     NDimension,
     NDimensionalGrid,
     Orientation,
+    Spacing,
     ThreeDimensionalGrid,
     ThreeDimensions,
     TwoDimensionalGrid,
@@ -29,7 +30,7 @@ __all__ = [
     "link_to_layer_permeability",
     "make_saturation_grid",
     "pad_grid",
-    "unpad_grid"
+    "unpad_grid",
 ]
 
 
@@ -1125,9 +1126,6 @@ def link_to_layer_permeability(
         _set(recovered, i, d_upper / upper_resistance)
 
     return recovered
-
-
-Spacing = typing.Literal["cosine", "linspace"]
 
 
 @numba.njit(cache=True)

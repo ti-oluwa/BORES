@@ -299,7 +299,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         if self._ndim == 0 or other._ndim == 0:
             raise ValueError("matmul does not support rank-0 tensors")
 
-        # 1D @ 1D - dot product → scalar
+        # 1D @ 1D: dot product to scalar
         if self._ndim == 1 and other._ndim == 1:
             if self._shape[0] != other._shape[0]:
                 raise ValueError(
@@ -312,7 +312,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
                     acc = self._dtype(acc + v1 * other._data[(i,)])  # type: ignore
             return acc
 
-        # 1D @ 2D - (n,) @ (n, m) → (m,)
+        # 1D @ 2D: (n,) @ (n, m) to (m,)
         if self._ndim == 1 and other._ndim == 2:
             n, m = other._shape
             if self._shape[0] != n:
@@ -328,7 +328,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
                         result[(j,)] = result[(j,)] + v1 * v2  # type: ignore
             return result
 
-        # 2D @ 1D - (n, m) @ (m,) → (n,)
+        # 2D @ 1D: (n, m) @ (m,) to (n,)
         if self._ndim == 2 and other._ndim == 1:
             n, m = self._shape
             if m != other._shape[0]:
@@ -343,7 +343,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
                     result[(i,)] = result[(i,)] + v1 * other._data[(k,)]  # type: ignore
             return result
 
-        # 2D @ 2D - standard matrix product
+        # 2D @ 2D: standard matrix product
         if self._ndim == 2 and other._ndim == 2:
             n, k = self._shape
             k2, m = other._shape
@@ -360,7 +360,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
                         result[(i, j)] = result[(i, j)] + v1 * v2  # type: ignore
             return result
 
-        # ND @ ND - batched contraction, delegate to NumPy
+        # ND @ ND: batched contraction, delegate to NumPy
         if self._shape[-1] != other._shape[-2]:
             raise ValueError(
                 f"Shape mismatch for batched matmul: "
@@ -398,6 +398,27 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         )
         for k, v in self._data.items():
             result[k] = v / scalar
+        return result  # type: ignore[return-value]
+
+    def __pow__(self, exponent: typing.Union[float, np.floating], /) -> Self:
+        """
+        Element-wise power: `self ** exponent`.
+
+        Only stored (non-default) entries are raised to the power. If `default`
+        is `0.0` this is correct since `0 ** n == 0` for all positive `n`.
+
+        :param exponent: Numeric exponent.
+        :returns: New `SparseTensor` with entries raised to the power.
+        :raises TypeError: If `exponent` is not numeric.
+        """
+        if not isinstance(exponent, (float, np.floating)):
+            return NotImplemented
+
+        result: SparseTensor[DType, ShapeT] = SparseTensor(  # type: ignore
+            shape=self._shape, dtype=self._dtype, default=self._default
+        )
+        for k, v in self._data.items():
+            result[k] = v**exponent
         return result  # type: ignore[return-value]
 
     def __iadd__(self, other: "SparseTensor[DType, ShapeT]", /) -> Self:

@@ -106,7 +106,7 @@ rock_compressibility = 3.0e-6  # 1/psi
 # -------------------------------------------------------------------------
 kx_values = bores.array([500.0, 50.0, 200.0])  # mD
 ky_values = bores.array([500.0, 50.0, 200.0])  # mD
-kz_values = bores.array([50.0, 50.0, 25.0])  # mD  (kv = 0.1 × kh)
+kz_values = bores.array([50.0, 50.0, 25.0])  # mD 
 
 kx_grid = bores.layered_grid(
     grid_shape=grid_shape,
@@ -154,15 +154,14 @@ water_saturation_grid, oil_saturation_grid, gas_saturation_grid = (
         residual_gas_saturation_grid=residual_gas_saturation_grid,
         porosity_grid=porosity_grid,
         use_transition_zones=True,
-        transition_curvature_exponent=1.0,
+        transition_curvature_exponent=2.0,
     )
 )
 
 # -------------------------------------------------------------------------
 # Fluid properties (initial estimates — overridden by PVT tables)
 # -------------------------------------------------------------------------
-gas_gravity = 0.792  # Table 1
-gas_gravity_grid = bores.uniform_grid(grid_shape=grid_shape, value=gas_gravity)
+gas_gravity_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.792)
 gas_viscosity_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.027)
 oil_viscosity_grid = bores.uniform_grid(grid_shape=grid_shape, value=0.51)
 
@@ -271,7 +270,7 @@ oil_density_values = bores.array(
 # So: Bg [ft³/SCF] = Bg_paper [RB/MSCF] × 5.614583 / 1000
 # -------------------------------------------------------------------------
 # Raw values from paper (RB/MSCF):
-gas_fvf_values_rb_mscf = bores.array(
+gas_fvf_values_bbl_per_mscf = bores.array(
     [
         166.666,  # 14.7     (note: 1/6 × 1000 ≈ atmospheric)
         12.093,  # 264.7
@@ -285,7 +284,7 @@ gas_fvf_values_rb_mscf = bores.array(
     ]
 )
 # Convert RB/MSCF → ft³/SCF
-gas_fvf_values = gas_fvf_values_rb_mscf * (bores.c.BARRELS_TO_CUBIC_FEET / 1000.0)
+gas_fvf_values = gas_fvf_values_bbl_per_mscf * (bores.c.BARRELS_TO_CUBIC_FEET / 1000.0)
 
 # μg (cP): Table 2
 gas_viscosity_values = bores.array(
@@ -394,16 +393,14 @@ gas_solubility_in_water_table = typing.cast(
     bores.ThreeDimensionalGrid, make_3d(gas_solubility_in_water_values)
 )
 
-# -------------------------------------------------------------------------
 # Build PVT dataset
-# -------------------------------------------------------------------------
 pvt_dataset = bores.build_pvt_dataset(
     pressures=pvt_pressures,
     temperatures=pvt_temperatures,
     salinities=bores.array([0.0]),  # fresh water
     bubble_point_pressures=bores.array([4014.7, 4014.7]),
     oil_specific_gravity=oil_specific_gravity,
-    gas_gravity=gas_gravity,
+    gas_gravity=0.792,
     water_salinity=0.0,
     solution_gas_to_oil_ratio_table=solution_gor_table,
     oil_formation_volume_factor_table=oil_fvf_table,
@@ -418,14 +415,10 @@ pvt_dataset = bores.build_pvt_dataset(
     gas_solubility_in_water_table=gas_solubility_in_water_table,
 )
 pvt_tables = bores.PVTTables.from_dataset(
-    pvt_dataset,
-    interpolation_method="linear",
-    clamps=False,
+    pvt_dataset, interpolation_method="linear", clamps=False
 )
 
-# -------------------------------------------------------------------------
 # Build Reservoir Model
-# -------------------------------------------------------------------------
 model = bores.reservoir_model(
     grid_shape=grid_shape,
     cell_dimension=cell_dimension,
@@ -577,8 +570,6 @@ oil_water_table = bores.TwoPhaseRelPermTable(
     reference_phase="non_wetting",  # indexed by So
     wetting_phase_relative_permeability=krw_values,
     non_wetting_phase_relative_permeability=krow_values,
-    min_non_wetting_relperm=None,
-    min_wetting_relperm=None,
 )
 
 relative_permeability_table = bores.ThreePhaseRelPermTable(
@@ -729,7 +720,7 @@ timer = bores.Timer(
 config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
-    scheme="si",
+    scheme="impes",
     output_frequency=1,
     pressure_solver="direct",
     saturation_solver="direct",
@@ -737,7 +728,7 @@ config = bores.Config(
     pvt_tables=pvt_tables,
     wells=wells,
     disable_capillary_effects=True,
-    freeze_saturation_pressure=True,
+    # freeze_saturation_pressure=True,
     # maximum_gas_saturation_change=0.05,
     # maximum_oil_saturation_change=0.05,
     # maximum_water_saturation_change=0.05,
@@ -747,7 +738,7 @@ config = bores.Config(
     normalize_saturations=True,
     phase_appearance_tolerance=1e-6,
     saturation_convergence_tolerance=1e-4,
-    minimum_injector_gas_saturation=1e-4,
+    # minimum_injector_gas_saturation=1e-4,
 )
 
 # Run and monitor the simulation and collect states

@@ -59,8 +59,8 @@ def evolve_pressure(
     wells: Wells[ThreeDimensions],
     config: Config,
     well_indices_cache: WellIndicesCache,
-    injection_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
-    production_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
+    injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
+    production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
     dtype: npt.DTypeLike = np.float64,
 ) -> EvolutionResult[ImplicitPressureSolution, None]:
     """
@@ -84,12 +84,8 @@ def evolve_pressure(
     :param config: `Config` object containing simulation config
     :param boundary_conditions: Model boundary conditions.
     :param well_indices_cache: Cache of well indices for efficient lookup during pressure solve.
-    :param injection_rates: Optional `PhaseTensorsProxy` of injection rates for each phase and cell.
-    :param production_rates: Optional `PhaseTensorsProxy` of production rates for each phase and cell.
-    :param injection_fvfs: Optional `PhaseTensorsProxy` of injection formation volume factors for each phase and cell.
-    :param production_fvfs: Optional `PhaseTensorsProxy` of production formation volume factors for each phase and cell.
-    :param injection_bhps: Optional `PhaseTensorsProxy` of injection bottom hole pressures for each phase and cell.
-    :param production_bhps: Optional `PhaseTensorsProxy` of production bottom hole pressures for each phase and cell.
+    :param injection_bhps: `PhaseTensorsProxy` of injection bottom hole pressures for each phase and cell.
+    :param production_bhps: `PhaseTensorsProxy` of production bottom hole pressures for each phase and cell.
     :param pad_width: Number of ghost cells used for grid padding. Well coordinates are offset by this amount.
     :return: `EvolutionResult` containing the new pressure grid and scheme used
     """
@@ -324,12 +320,18 @@ def evolve_pressure(
         ),
         shape=(cell_count, cell_count),
         dtype=dtype,  # type: ignore
-    ).tocsr()
+    )
 
+    # Scale Jacobian and residual by inverse diagonal to improve conditioning for iterative solver
+    D = np.abs(jacobian.diagonal())
+    D = np.where(D > 0, D, 1.0)
+    jacobian = jacobian / D[:, None]
+    residual_vector = residual_vector / D
+    
     # Solve the linear system A·pⁿ⁺¹ = b
     try:
         new_1D_pressure_grid, _ = solve_linear_system(
-            A_csr=jacobian,
+            A_csr=jacobian.tocsr(),
             b=residual_vector,
             rtol=config.pressure_convergence_tolerance,
             maximum_iterations=config.maximum_solver_iterations,
@@ -351,7 +353,7 @@ def evolve_pressure(
 
     # Map solution back to 3D grid
     new_pressure_grid = map_solution_to_grid(
-        solution_1D=new_1D_pressure_grid,  # type: ignore
+        solution_1D=new_1D_pressure_grid,
         solution_grid=current_oil_pressure_grid.copy(),
         cell_count_x=cell_count_x,
         cell_count_y=cell_count_y,
@@ -1327,8 +1329,8 @@ def compute_well_contributions(
     well_indices_cache: WellIndicesCache,
     md_per_cp_to_ft2_per_psi_per_day: float,
     dtype: npt.DTypeLike,
-    injection_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
-    production_bhps: typing.Optional[PhaseTensorsProxy[float, ThreeDimensions]] = None,
+    injection_bhps: PhaseTensorsProxy[float, ThreeDimensions],
+    production_bhps: PhaseTensorsProxy[float, ThreeDimensions],
 ) -> typing.Tuple[npt.NDArray, npt.NDArray, npt.NDArray, npt.NDArray]:
     """
     Compute well contributions to the implicit pressure linear system A·p = b
@@ -1366,10 +1368,9 @@ def compute_well_contributions(
     :param config: Simulation configuration
     :param md_per_cp_to_ft2_per_psi_per_day: Unit conversion factor
     :param dtype: Desired dtype for output arrays (e.g. np.float32 or np.float64)
-    :param injection_bhps: Optional proxy to write back computed injection BHPs
-    :param production_bhps: Optional proxy to write back computed production BHPs
-    :return: Four flat arrays ready for scatter-add
-        into the final diagonal and RHS before COO matrix construction.
+    :param injection_bhps: Proxy to write back computed injection BHPs
+    :param production_bhps: Proxy to write back computed production BHPs
+    :return: Four flat arrays ready for scatter-add into the final diagonal and RHS before COO matrix construction.
     """
     water_bubble_point_pressure_grid = fluid_properties.water_bubble_point_pressure_grid
     gas_formation_volume_factor_grid = fluid_properties.gas_formation_volume_factor_grid
@@ -1504,11 +1505,10 @@ def compute_well_contributions(
             )
             _add_bhp_contribution(cell_1d_index, productivity_index, effective_bhp)
 
-            if injection_bhps is not None:
-                if injected_phase == FluidPhase.GAS:
-                    injection_bhps[i, j, k] = (np.nan, np.nan, effective_bhp)
-                else:
-                    injection_bhps[i, j, k] = (effective_bhp, np.nan, np.nan)
+            if injected_phase == FluidPhase.GAS:
+                injection_bhps[i, j, k] = (np.nan, np.nan, effective_bhp)
+            else:
+                injection_bhps[i, j, k] = (effective_bhp, np.nan, np.nan)
 
     for well in wells.production_wells:
         if not well.is_open:
@@ -1648,19 +1648,16 @@ def compute_well_contributions(
                 )
                 _add_bhp_contribution(cell_1d_index, productivity_index, effective_bhp)
 
-            if production_bhps is not None:
-                gas_bhp = (
-                    effective_bhp if FluidPhase.GAS in well.produced_phases else np.nan
-                )
-                water_bhp = (
-                    effective_bhp
-                    if FluidPhase.WATER in well.produced_phases
-                    else np.nan
-                )
-                oil_bhp = (
-                    effective_bhp if FluidPhase.OIL in well.produced_phases else np.nan
-                )
-                production_bhps[i, j, k] = (water_bhp, oil_bhp, gas_bhp)
+            gas_bhp = (
+                effective_bhp if FluidPhase.GAS in well.produced_phases else np.nan
+            )
+            water_bhp = (
+                effective_bhp if FluidPhase.WATER in well.produced_phases else np.nan
+            )
+            oil_bhp = (
+                effective_bhp if FluidPhase.OIL in well.produced_phases else np.nan
+            )
+            production_bhps[i, j, k] = (water_bhp, oil_bhp, gas_bhp)
     return (
         np.array(list(diagonal_dict.keys()), dtype=np.int32),
         np.array(list(diagonal_dict.values()), dtype=dtype),
@@ -1749,9 +1746,9 @@ Gravity driven segregation (in effect in all directions; dominant in z, non-zero
     gravity_potential_phase = (harmonic_ρ_phase * g/gc * ∆elevation) / 144   [psi]
 
     total_gravity_flow = (
-            [λ_w * (harmonic_ρ_w * g/gc * ∆elevation) / 144]
-            + [λ_o * (harmonic_ρ_o * g/gc * ∆elevation) / 144]
-            + [λ_g * (harmonic_ρ_g * g/gc * ∆elevation) / 144]
+            [λ_w * (average_ρ_w * g/gc * ∆elevation) / 144]
+            + [λ_o * (average_ρ_o * g/gc * ∆elevation) / 144]
+            + [λ_g * (average_ρ_g * g/gc * ∆elevation) / 144]
     ) * A / ΔL
 
     Where:

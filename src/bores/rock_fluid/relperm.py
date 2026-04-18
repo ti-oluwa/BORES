@@ -9,6 +9,7 @@ import numba
 import numpy as np
 import numpy.typing as npt
 from numba.extending import overload
+from scipy.interpolate import PchipInterpolator
 
 from bores.constants import c
 from bores.errors import ValidationError
@@ -16,6 +17,7 @@ from bores.grids.base import array as bores_array
 from bores.precision import get_floating_point_info
 from bores.serialization import Serializable, make_serializable_type_registrar
 from bores.stores import StoreSerializable
+from bores.tables.utils import build_pchip_interpolant
 from bores.types import (
     FloatOrArray,
     FluidPhase,
@@ -24,10 +26,10 @@ from bores.types import (
     MixingRulePartialDerivatives,
     RelativePermeabilities,
     RelativePermeabilityDerivatives,
+    Spacing,
     T,
     Wettability,
 )
-from bores.utils import piecewise_linear_slope
 
 __all__ = [
     "BrooksCoreyRelPermModel",
@@ -924,7 +926,7 @@ def _(
     """
     Analytical derivatives for Stone I.
 
-    Let D = kro_w + kro_g - kro_w * kro_g  (clamped ≥ ε)
+    Let D = kro_w + kro_g - kro_w * kro_g  (clamped >= ε)
         N = kro_w * kro_g
 
     ∂kro/∂kro_w = (kro_g * D - N * (1 - kro_g)) / D²
@@ -1929,24 +1931,51 @@ def get_relperm_table(name: str) -> typing.Type[RelativePermeabilityTable]:
 
 
 @attrs.frozen
-class TwoPhaseRelPermTable(Serializable):
+class TwoPhaseRelPermTable(
+    Serializable,
+    load_exclude={
+        "_wetting_pchip",
+        "_wetting_dpchip",
+        "_non_wetting_pchip",
+        "_non_wetting_dpchip",
+    },
+    dump_exclude={
+        "_wetting_pchip",
+        "_wetting_dpchip",
+        "_non_wetting_pchip",
+        "_non_wetting_dpchip",
+    },
+):
     """
-    Two-phase relative permeability lookup table.
+    Two-phase relative permeability lookup table backed by a PCHIP interpolant.
 
     Interpolates relative permeabilities for two fluid phases based on a
     reference saturation value. The reference saturation can be either the
     wetting or non-wetting phase saturation, depending on how the table was
     constructed (e.g. from lab data indexed by Sg vs So).
 
-    Uses `np.interp` for fast vectorized interpolation.
     Supports both scalar and array inputs up to 3D.
 
     Examples:
-    - Oil-Water system (water-wet): reference is Sw (wetting phase), `reference_phase="wetting"`
-    - Gas-Oil system indexed by So:  reference is So (wetting phase), `reference_phase="wetting"`
-    - Gas-Oil system indexed by Sg:  reference is Sg (non-wetting phase), `reference_phase="non_wetting"`
 
-    **Minimum relperm floors** (`min_wetting_relperm` and `min_non_wetting_relperm`):
+    - Oil-Water system (water-wet): reference is Sw (wetting phase),
+      `reference_phase="wetting"`
+    - Gas-Oil system indexed by So: reference is So (wetting phase),
+      `reference_phase="wetting"`
+    - Gas-Oil system indexed by Sg: reference is Sg (non-wetting phase),
+      `reference_phase="non_wetting"`
+
+    **Grid scaling** (`number_of_base_points` / `number_of_endpoint_extra_points`):
+
+    When `number_of_base_points > 0` and the raw knot count is smaller than
+    `number_of_base_points`, the table expands the knot grid to `number_of_base_points`
+    base points (plus `number_of_endpoint_extra_points` extra knots in each boundary
+    decade) before fitting the PCHIP interpolant. This gives smoother curves
+    and better derivative accuracy near residual saturations without requiring
+    the caller to pre-supply a dense grid.  Pass `number_of_base_points=0` to
+    disable scaling entirely and use the raw knots directly.
+
+    **Minimum relperm floors** (`min_wetting_relperm` / `min_non_wetting_relperm`):
 
     When non-`None`, a floor is applied to the interpolated kr value and
     the derivative is zeroed out wherever the raw (pre-floor) kr is at or
@@ -1954,9 +1983,8 @@ class TwoPhaseRelPermTable(Serializable):
     the floored kr, preventing Jacobian-residual mismatches that cause MBE.
 
     `"auto"` derives the floor from the active floating-point dtype:
-    `max(4 * machine_epsilon, 1e-8)`. This is consistent with the
-    minimum mobility floor approach used by CMG IMEX/GEM. `None`
-    disables the floor (kr can reach zero exactly).
+    `max(4 * machine_epsilon, 1e-8)`. `None` disables the floor (kr can
+    reach zero exactly).
     """
 
     wetting_phase: typing.Union[FluidPhase, str] = attrs.field(converter=FluidPhase)
@@ -1967,9 +1995,9 @@ class TwoPhaseRelPermTable(Serializable):
 
     reference_saturation: npt.NDArray[np.floating] = attrs.field(converter=bores_array)
     """
-    Saturation values used as the x-axis for interpolation, monotonically increasing.
-    May represent either the wetting or non-wetting phase saturation depending on
-    `reference_phase`.
+    Saturation values used as the x-axis for interpolation, monotonically
+    increasing. May represent either the wetting or non-wetting phase
+    saturation depending on `reference_phase`.
     """
 
     wetting_phase_relative_permeability: npt.NDArray[np.floating] = attrs.field(
@@ -1987,50 +2015,28 @@ class TwoPhaseRelPermTable(Serializable):
     )
     """
     Which phase the `reference_saturation` axis represents.
-
-    - "wetting" - `reference_saturation` holds wetting phase saturation values.
-        krw increases and krnw decreases as `reference_saturation` increases.
-    - "non_wetting" - `reference_saturation` holds non-wetting phase saturation values.
-        krnw increases and krw decreases as `reference_saturation` increases.
-
-    This does not change the interpolation mechanics — it only records which
-    physical saturation the caller must supply when querying the table, so that
-    `ThreePhaseRelPermTable` (and any other consumer) can dispatch the correct
-    saturation grid without hard-coding assumptions.
+ 
+    - `"wetting"` — `reference_saturation` holds wetting phase saturation
+      values.  krw increases and krnw decreases as `reference_saturation`
+      increases.
+    - `"non_wetting"` — `reference_saturation` holds non-wetting phase
+      saturation values.  krnw increases and krw decreases as
+      `reference_saturation` increases.
+ 
+    This does not change the interpolation mechanics. It only records which
+    physical saturation the caller must supply when querying the table, so
+    that `ThreePhaseRelPermTable` (and any other consumer) can dispatch the
+    correct saturation grid without hard-coding assumptions.
     """
-
-    wetting_phase_relative_permeability_derivative: typing.Optional[
-        npt.NDArray[np.floating]
-    ] = attrs.field(
-        default=None,
-        converter=attrs.converters.optional(bores_array),
-    )
-    """
-    Pre-computed dkr_wetting/d(reference_saturation) at each knot.
-    
-    When provided, derivatives are obtained by interpolating this array
-    with `np.interp` instead of computing piecewise-linear slopes on
-    the fly.  Use this to carry analytical derivatives from the source
-    model through to the tabular representation, giving the Newton solver
-    a smooth, consistent Jacobian.
-    """
-
-    non_wetting_phase_relative_permeability_derivative: typing.Optional[
-        npt.NDArray[np.floating]
-    ] = attrs.field(
-        default=None,
-        converter=attrs.converters.optional(bores_array),
-    )
-    """Pre-computed dkr_non_wetting/d(reference_saturation) at each knot."""
 
     min_wetting_relperm: RelPermFloor = attrs.field(default=None)
     """
     Minimum floor for the wetting-phase relative permeability.
-
-    `"auto"` - `max(4 * machine_epsilon, 1e-8)` (dtype-aware).
-    `None`   - no floor; kr can reach zero exactly.
-    `float`  - explicit user-supplied floor value.
-
+ 
+    `"auto"` — `max(4 * machine_epsilon, 1e-8)` (dtype-aware).
+    `None` — no floor; kr can reach zero exactly.
+    `float` — explicit user-supplied floor value.
+ 
     The floor is applied to the interpolated kr value, and the derivative is
     zeroed out in the floored region so that the Jacobian is consistent with
     the kr value (no MBE from mismatched kr/derivative pairs).
@@ -2039,64 +2045,102 @@ class TwoPhaseRelPermTable(Serializable):
     min_non_wetting_relperm: RelPermFloor = attrs.field(default=None)
     """
     Minimum floor for the non-wetting-phase relative permeability.
-
+ 
     Same semantics as `min_wetting_relperm`.
     """
+
+    number_of_base_points: int = attrs.field(default=200)
+    """
+    Target number of base knot points used when expanding the raw saturation
+    grid before fitting the PCHIP interpolant.
+ 
+    When the number of raw knots is already >= `number_of_base_points`, no
+    expansion is performed and the raw knots are used as-is.
+    Pass `0` to disable grid scaling entirely.
+    """
+
+    number_of_endpoint_extra_points: int = attrs.field(default=20)
+    """
+    Number of extra knots injected into the first and last 10 % of the
+    saturation range during grid expansion (see `number_of_base_points`).
+ 
+    These additional knots improve derivative accuracy near residual
+    saturations where kr curves vary most rapidly.
+    Pass `0` to disable endpoint enrichment.
+    """
+
+    spacing: Spacing = attrs.field(default="cosine")
+    """
+    Grid spacing mode used when building the expanded knot grid.
+ 
+    Passed directly to `_build_saturation_reference_grid`.  Typical
+    values are `"cosine"` (default, clusters points near endpoints) and
+    `"linspace"` (uniform).
+    """
+
+    _wetting_pchip: PchipInterpolator = attrs.field(init=False, repr=False)
+    _wetting_dpchip: PchipInterpolator = attrs.field(init=False, repr=False)
+    _non_wetting_pchip: PchipInterpolator = attrs.field(init=False, repr=False)
+    _non_wetting_dpchip: PchipInterpolator = attrs.field(init=False, repr=False)
 
     def __attrs_post_init__(self) -> None:
         if self.reference_phase not in ("wetting", "non_wetting"):
             raise ValidationError(
-                f"`reference_phase` must be 'wetting' or 'non_wetting', got {self.reference_phase!r}"
+                f"`reference_phase` must be 'wetting' or 'non_wetting', "
+                f"got {self.reference_phase!r}"
             )
-
         if len(self.reference_saturation) != len(
             self.wetting_phase_relative_permeability
         ):
             raise ValidationError(
-                f"`reference_saturation` and wetting phase kr arrays must have same length. "
-                f"Got {len(self.reference_saturation)} vs {len(self.wetting_phase_relative_permeability)}"
+                f"`reference_saturation` and wetting phase kr arrays must have same "
+                f"length. Got {len(self.reference_saturation)} vs "
+                f"{len(self.wetting_phase_relative_permeability)}"
             )
-
         if len(self.reference_saturation) != len(
             self.non_wetting_phase_relative_permeability
         ):
             raise ValidationError(
-                f"`reference_saturation` and non-wetting phase kr arrays must have same length. "
-                f"Got {len(self.reference_saturation)} vs {len(self.non_wetting_phase_relative_permeability)}"
+                f"`reference_saturation` and non-wetting phase kr arrays must have "
+                f"same length. Got {len(self.reference_saturation)} vs "
+                f"{len(self.non_wetting_phase_relative_permeability)}"
             )
-
         if len(self.reference_saturation) < 2:
             raise ValidationError("At least 2 points required for interpolation")
-
         if not np.all(np.diff(self.reference_saturation) >= 0):
             raise ValidationError(
                 "`reference_saturation` must be monotonically increasing"
-            )
-
-        if self.wetting_phase_relative_permeability_derivative is not None and len(
-            self.wetting_phase_relative_permeability_derivative
-        ) != len(self.reference_saturation):
-            raise ValidationError(
-                "`wetting_phase_relative_permeability_derivative` must have the same "
-                "length as `reference_saturation`."
-            )
-        if self.non_wetting_phase_relative_permeability_derivative is not None and len(
-            self.non_wetting_phase_relative_permeability_derivative
-        ) != len(self.reference_saturation):
-            raise ValidationError(
-                "`non_wetting_phase_relative_permeability_derivative` must have the same "
-                "length as `reference_saturation`."
             )
 
         # Validate floor sentinels eagerly so errors surface at construction time
         _resolve_relperm_floor(self.min_wetting_relperm)
         _resolve_relperm_floor(self.min_non_wetting_relperm)
 
+        # Build interpolants
+        wetting_pchip, wetting_dpchip = build_pchip_interpolant(
+            reference_saturation=self.reference_saturation,
+            values=self.wetting_phase_relative_permeability,
+            number_of_base_points=self.number_of_base_points,
+            number_of_endpoint_extra_points=self.number_of_endpoint_extra_points,
+            spacing=self.spacing,
+        )
+        non_wetting_pchip, non_wetting_dpchip = build_pchip_interpolant(
+            reference_saturation=self.reference_saturation,
+            values=self.non_wetting_phase_relative_permeability,
+            number_of_base_points=self.number_of_base_points,
+            number_of_endpoint_extra_points=self.number_of_endpoint_extra_points,
+            spacing=self.spacing,
+        )
+        object.__setattr__(self, "_wetting_pchip", wetting_pchip)
+        object.__setattr__(self, "_wetting_dpchip", wetting_dpchip)
+        object.__setattr__(self, "_non_wetting_pchip", non_wetting_pchip)
+        object.__setattr__(self, "_non_wetting_dpchip", non_wetting_dpchip)
+
     def get_oil_water_wetting_phase(self) -> FluidPhase:
-        return self.wetting_phase  # type:ignore[return-value]
+        return self.wetting_phase  # type: ignore[return-value]
 
     def get_gas_oil_wetting_phase(self) -> FluidPhase:
-        return self.wetting_phase  # type:ignore[return-value]
+        return self.wetting_phase  # type: ignore[return-value]
 
     def _resolve_reference(
         self,
@@ -2114,6 +2158,61 @@ class TwoPhaseRelPermTable(Serializable):
             return non_wetting_saturation
         return wetting_saturation
 
+    def _query_pchip(
+        self,
+        interpolant: PchipInterpolator,
+        reference: FloatOrArray,
+        extrapolate_left: float,
+        extrapolate_right: float,
+    ) -> FloatOrArray:
+        """
+        Evaluate a pre-built PCHIP interpolant at `reference`, applying
+        constant extrapolation at the boundaries.
+
+        :param interpolant: Pre-built `PchipInterpolator` instance.
+        :param reference: Query saturation value(s) — scalar or array.
+        :param extrapolate_left: Constant returned for values below the knot range.
+        :param extrapolate_right: Constant returned for values above the knot range.
+        :return: Interpolated value(s) with the same shape as `reference`.
+        """
+        is_scalar = np.isscalar(reference)
+        sat = np.atleast_1d(np.asarray(reference, dtype=np.float64))
+        x_min = float(interpolant.x[0])
+        x_max = float(interpolant.x[-1])
+
+        result = interpolant(np.clip(sat, x_min, x_max))
+        result = np.where(sat < x_min, extrapolate_left, result)
+        result = np.where(sat > x_max, extrapolate_right, result)
+
+        if is_scalar:
+            return float(result.ravel()[0])
+        return result.reshape(sat.shape)
+
+    def _query_dpchip(
+        self,
+        d_interpolant: PchipInterpolator,
+        reference: FloatOrArray,
+    ) -> FloatOrArray:
+        """
+        Evaluate a pre-built PCHIP derivative interpolant at `reference`,
+        returning zero outside the knot range (constant extrapolation = zero slope).
+
+        :param d_interpolant: Pre-built derivative `PchipInterpolator`.
+        :param reference: Query saturation value(s) — scalar or array.
+        :return: Derivative value(s) with the same shape as `reference`.
+        """
+        is_scalar = np.isscalar(reference)
+        sat = np.atleast_1d(np.asarray(reference, dtype=np.float64))
+        x_min = float(d_interpolant.x[0])
+        x_max = float(d_interpolant.x[-1])
+
+        result = d_interpolant(np.clip(sat, x_min, x_max))
+        result = np.where((sat < x_min) | (sat > x_max), 0.0, result)
+
+        if is_scalar:
+            return float(result.ravel()[0])
+        return result.reshape(sat.shape)
+
     def get_wetting_phase_relative_permeability(
         self,
         wetting_saturation: FloatOrArray,
@@ -2122,8 +2221,8 @@ class TwoPhaseRelPermTable(Serializable):
         """
         Get wetting phase relative permeability.
 
-        When `reference_phase="wetting"`, only `wetting_saturation` is needed.
-        When `reference_phase="non_wetting"`, `non_wetting_saturation` must be supplied.
+        When `reference_phase="wetting"`, only `wetting_saturation` is
+        needed. When `reference_phase="non_wetting"`, `non_wetting_saturation` must be supplied.
 
         The `min_wetting_relperm` floor (if set) is applied to the result.
 
@@ -2138,17 +2237,12 @@ class TwoPhaseRelPermTable(Serializable):
             if non_wetting_saturation is not None
             else wetting_saturation,
         )
-        is_scalar = np.isscalar(ref)
-        saturation = np.atleast_1d(ref)
-        original_shape = saturation.shape
-        kr_flat = np.interp(
-            x=saturation.ravel(),
-            xp=self.reference_saturation,  # type: ignore[arg-type]
-            fp=self.wetting_phase_relative_permeability,  # type: ignore[arg-type]
-            left=self.wetting_phase_relative_permeability[0],
-            right=self.wetting_phase_relative_permeability[-1],
+        kr = self._query_pchip(
+            self._wetting_pchip,
+            ref,
+            extrapolate_left=float(self.wetting_phase_relative_permeability[0]),
+            extrapolate_right=float(self.wetting_phase_relative_permeability[-1]),
         )
-        kr = kr_flat.reshape(original_shape) if not is_scalar else kr_flat.item()
         floor = _resolve_relperm_floor(self.min_wetting_relperm)
         return _apply_relperm_floor(kr, floor)
 
@@ -2160,8 +2254,8 @@ class TwoPhaseRelPermTable(Serializable):
         """
         Get non-wetting phase relative permeability.
 
-        When `reference_phase="wetting"`, only `wetting_saturation` is needed.
-        When `reference_phase="non_wetting"`, `non_wetting_saturation` must be supplied.
+        When `reference_phase="wetting"`, only `wetting_saturation` is
+        needed. When `reference_phase="non_wetting"`, `non_wetting_saturation` must be supplied.
 
         The `min_non_wetting_relperm` floor (if set) is applied to the result.
 
@@ -2176,17 +2270,12 @@ class TwoPhaseRelPermTable(Serializable):
             if non_wetting_saturation is not None
             else wetting_saturation,
         )
-        is_scalar = np.isscalar(ref)
-        saturation = np.atleast_1d(ref)
-        original_shape = saturation.shape
-        kr_flat = np.interp(
-            x=saturation.ravel(),
-            xp=self.reference_saturation,  # type: ignore[arg-type]
-            fp=self.non_wetting_phase_relative_permeability,  # type: ignore[arg-type]
-            left=self.non_wetting_phase_relative_permeability[0],
-            right=self.non_wetting_phase_relative_permeability[-1],
+        kr = self._query_pchip(
+            self._non_wetting_pchip,
+            ref,
+            extrapolate_left=float(self.non_wetting_phase_relative_permeability[0]),
+            extrapolate_right=float(self.non_wetting_phase_relative_permeability[-1]),
         )
-        kr = kr_flat.reshape(original_shape) if not is_scalar else kr_flat.item()
         floor = _resolve_relperm_floor(self.min_non_wetting_relperm)
         return _apply_relperm_floor(kr, floor)
 
@@ -2201,7 +2290,7 @@ class TwoPhaseRelPermTable(Serializable):
         :param wetting_saturation: Wetting phase saturation (scalar or array).
         :param non_wetting_saturation: Non-wetting phase saturation (scalar or array).
             Required when `reference_phase="non_wetting"`.
-        :return: Tuple of (wetting_kr, non_wetting_kr).
+        :return: Tuple of `(wetting_kr, non_wetting_kr)`.
         """
         kr_wetting = self.get_wetting_phase_relative_permeability(
             wetting_saturation, non_wetting_saturation
@@ -2218,64 +2307,39 @@ class TwoPhaseRelPermTable(Serializable):
     ) -> FloatOrArray:
         """
         Derivative of the wetting-phase relative permeability with respect to
-        the reference saturation axis of this table.
+        the reference saturation axis of this table, evaluated from the
+        analytical PCHIP derivative.
 
-        The derivative is the exact slope of the piecewise-linear interpolant
-        defined by the tabulated relative permeability values.  The slope is
-        zero outside the tabulated saturation range because the interpolant is
-        constant there.
+        The derivative is zero outside the tabulated saturation range
+        (constant extrapolation = zero slope).
 
         Where the `min_wetting_relperm` floor is active (raw kr ≤ floor),
         the derivative is zeroed out to be consistent with the floored
-        (constant) kr value — preventing Jacobian-residual mismatches.
+        (constant) kr value, preventing Jacobian-residual mismatches.
 
         :param wetting_saturation: Wetting-phase saturation (scalar or array).
-        :param non_wetting_saturation: Non-wetting-phase saturation (scalar or
-            array).  Required when `reference_phase="non_wetting"`; ignored
-            when `reference_phase="wetting"`.
+        :param non_wetting_saturation: Non-wetting-phase saturation (scalar or array).
+            Required when `reference_phase="non_wetting"`.
         :return: Derivative value(s) with the same shape as the input.
         """
-        reference_saturation = self._resolve_reference(
+        ref = self._resolve_reference(
             wetting_saturation,
             non_wetting_saturation
             if non_wetting_saturation is not None
             else wetting_saturation,
         )
-        # Compute the raw (pre-floor) kr for flooring the derivative
+        dkr = self._query_dpchip(self._wetting_dpchip, ref)
         floor = _resolve_relperm_floor(self.min_wetting_relperm)
-
-        if self.wetting_phase_relative_permeability_derivative is not None:
-            is_scalar = np.isscalar(reference_saturation)
-            sat = np.atleast_1d(reference_saturation)
-            d_flat = np.interp(
-                x=sat.ravel(),
-                xp=self.reference_saturation,
-                fp=self.wetting_phase_relative_permeability_derivative,
-                left=0.0,
-                right=0.0,
-            )
-            dkr = d_flat.reshape(sat.shape) if not is_scalar else d_flat.item()
-        else:
-            dkr = piecewise_linear_slope(
-                query=reference_saturation,
-                table_x=self.reference_saturation,
-                table_y=self.wetting_phase_relative_permeability,
-            )
-
         if floor is None:
             return dkr
 
-        # Zero derivative where raw kr is at or below the floor
-        is_scalar = np.isscalar(reference_saturation)
-        sat = np.atleast_1d(reference_saturation)
-        kr_raw_flat = np.interp(
-            x=sat.ravel(),
-            xp=self.reference_saturation,  # type: ignore[arg-type]
-            fp=self.wetting_phase_relative_permeability,  # type: ignore[arg-type]
-            left=self.wetting_phase_relative_permeability[0],
-            right=self.wetting_phase_relative_permeability[-1],
+        # Need raw kr to decide where floor is active
+        kr_raw = self._query_pchip(
+            self._wetting_pchip,
+            ref,
+            extrapolate_left=float(self.wetting_phase_relative_permeability[0]),
+            extrapolate_right=float(self.wetting_phase_relative_permeability[-1]),
         )
-        kr_raw = kr_raw_flat.reshape(sat.shape) if not is_scalar else kr_raw_flat.item()
         return _apply_relperm_floor_to_derivative(dkr, kr_raw, floor)
 
     def get_non_wetting_phase_relative_permeability_derivative(
@@ -2285,63 +2349,38 @@ class TwoPhaseRelPermTable(Serializable):
     ) -> FloatOrArray:
         """
         Derivative of the non-wetting-phase relative permeability with respect
-        to the reference saturation axis of this table.
+        to the reference saturation axis of this table, evaluated from the
+        analytical PCHIP derivative.
 
-        The derivative is the exact slope of the piecewise-linear interpolant
-        defined by the tabulated relative permeability values.  The slope is
-        zero outside the tabulated saturation range because the interpolant is
-        constant there.
+        The derivative is zero outside the tabulated saturation range
+        (constant extrapolation = zero slope).
 
-        Where the `min_non_wetting_relperm` floor is active (raw kr ≤ floor),
-        the derivative is zeroed out to be consistent with the floored
-        (constant) kr value — preventing Jacobian-residual mismatches.
+        Where the `min_non_wetting_relperm` floor is active (raw kr ≤
+        floor), the derivative is zeroed out to be consistent with the floored
+        (constant) kr value, preventing Jacobian-residual mismatches.
 
         :param wetting_saturation: Wetting-phase saturation (scalar or array).
-        :param non_wetting_saturation: Non-wetting-phase saturation (scalar or
-            array).  Required when `reference_phase="non_wetting"`; ignored
-            when `reference_phase="wetting"`.
+        :param non_wetting_saturation: Non-wetting-phase saturation (scalar or array).
+            Required when `reference_phase="non_wetting"`.
         :return: Derivative value(s) with the same shape as the input.
         """
-        reference_saturation = self._resolve_reference(
+        ref = self._resolve_reference(
             wetting_saturation,
             non_wetting_saturation
             if non_wetting_saturation is not None
             else wetting_saturation,
         )
+        dkr = self._query_dpchip(self._non_wetting_dpchip, ref)
         floor = _resolve_relperm_floor(self.min_non_wetting_relperm)
-
-        if self.non_wetting_phase_relative_permeability_derivative is not None:
-            is_scalar = np.isscalar(reference_saturation)
-            sat = np.atleast_1d(reference_saturation)
-            d_flat = np.interp(
-                x=sat.ravel(),
-                xp=self.reference_saturation,
-                fp=self.non_wetting_phase_relative_permeability_derivative,
-                left=0.0,
-                right=0.0,
-            )
-            dkr = d_flat.reshape(sat.shape) if not is_scalar else d_flat.item()
-        else:
-            dkr = piecewise_linear_slope(
-                query=reference_saturation,
-                table_x=self.reference_saturation,
-                table_y=self.non_wetting_phase_relative_permeability,
-            )
-
         if floor is None:
             return dkr
 
-        # Zero derivative where raw kr is at or below the floor
-        is_scalar = np.isscalar(reference_saturation)
-        sat = np.atleast_1d(reference_saturation)
-        kr_raw_flat = np.interp(
-            x=sat.ravel(),
-            xp=self.reference_saturation,  # type: ignore[arg-type]
-            fp=self.non_wetting_phase_relative_permeability,  # type: ignore[arg-type]
-            left=self.non_wetting_phase_relative_permeability[0],
-            right=self.non_wetting_phase_relative_permeability[-1],
+        kr_raw = self._query_pchip(
+            self._non_wetting_pchip,
+            ref,
+            extrapolate_left=float(self.non_wetting_phase_relative_permeability[0]),
+            extrapolate_right=float(self.non_wetting_phase_relative_permeability[-1]),
         )
-        kr_raw = kr_raw_flat.reshape(sat.shape) if not is_scalar else kr_raw_flat.item()
         return _apply_relperm_floor_to_derivative(dkr, kr_raw, floor)
 
 
@@ -2553,7 +2592,7 @@ class ThreePhaseRelPermTable(
         gas saturation.
 
         Returns a dictionary containing:
-        ```
+        ``
         (dkrw/dSw, dkrw/dSo, dkrw/dSg,
         dkro/dSw, dkro/dSo, dkro/dSg,
         dkrg/dSw, dkrg/dSo, dkrg/dSg)
