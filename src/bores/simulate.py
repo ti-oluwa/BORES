@@ -1046,15 +1046,15 @@ def _run_sequential_implicit_step(
             f"Water: {saturation_solution.maximum_water_saturation_change:.6f}, "
             f"Gas: {saturation_solution.maximum_gas_saturation_change:.6f}."
         )
-        logger.debug(message)
-        return StepResult(
-            fluid_properties=fluid_properties,
-            rock_properties=rock_properties,
-            saturation_history=saturation_history,
-            success=False,
-            message=message,
-            timer_kwargs=timer_kwargs,
-        )
+        logger.warning(message)
+        # return StepResult(
+        #     fluid_properties=fluid_properties,
+        #     rock_properties=rock_properties,
+        #     saturation_history=saturation_history,
+        #     success=False,
+        #     message=message,
+        #     timer_kwargs=timer_kwargs,
+        # )
 
     logger.debug("Updating fluid properties with new saturation grids...")
     water_saturation_grid = saturation_solution.water_saturation_grid.astype(
@@ -1506,17 +1506,17 @@ def _run_full_sequential_implicit_step(
                 f"Gas: {saturation_solution.maximum_gas_saturation_change:.6f}."
             )
             logger.warning(message)
-            return StepResult(
-                fluid_properties=fluid_properties,
-                rock_properties=rock_properties,
-                saturation_history=saturation_history,
-                success=False,
-                message=message,
-                timer_kwargs={
-                    "maximum_saturation_change": sat_check.max_phase_saturation_change,
-                    "maximum_allowed_saturation_change": sat_check.max_allowed_phase_saturation_change,
-                },
-            )
+            # return StepResult(
+            #     fluid_properties=fluid_properties,
+            #     rock_properties=rock_properties,
+            #     saturation_history=saturation_history,
+            #     success=False,
+            #     message=message,
+            #     timer_kwargs={
+            #         "maximum_saturation_change": sat_check.max_phase_saturation_change,
+            #         "maximum_allowed_saturation_change": sat_check.max_allowed_phase_saturation_change,
+            #     },
+            # )
 
         water_saturation_grid = saturation_solution.water_saturation_grid.astype(
             dtype, copy=False

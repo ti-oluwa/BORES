@@ -126,7 +126,7 @@ injector = bores.injection_well(
     radius=0.25,  # ft
     control=bores.AdaptiveRateControl(
         target_rate=1000.0,  # STB/D
-        bhp_limit=5000.0,  # max injection pressure
+        bhp_limit=6000.0,  # max injection pressure
         clamp=bores.InjectionClamp(),
     ),
     injected_fluid=bores.InjectedFluid(
