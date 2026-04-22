@@ -71,9 +71,8 @@ def compute_well_rates(
 
         injected_fluid = well.injected_fluid
         injected_phase = injected_fluid.phase
-        use_pseudo_pressure = (
-            config.use_pseudo_pressure and injected_phase == FluidPhase.GAS
-        )
+        is_gas = injected_phase == FluidPhase.GAS
+        use_pseudo_pressure = config.use_pseudo_pressure and is_gas
         well_indices = well_indices_cache.injection[well.name]
 
         for perforation_index in well_indices:
@@ -84,7 +83,7 @@ def compute_well_rates(
 
             # Retrieve BHP stored during pressure solve.
             # injection_bhps stores (water_bhp, 0, gas_bhp) depending on phase.
-            if injected_phase == FluidPhase.GAS:
+            if is_gas:
                 bhp = injection_bhps.gas[i, j, k]
             else:
                 bhp = injection_bhps.water[i, j, k]
@@ -100,7 +99,7 @@ def compute_well_rates(
                     temperature=cell_temperature,
                 ),
             )
-            if injected_phase == FluidPhase.GAS:
+            if is_gas:
                 # Build pseudo-pressure table if needed
                 phase_mobility = gas_relative_mobility_grid[i, j, k]
                 use_pp, pp_table = get_pseudo_pressure_table(
@@ -196,11 +195,10 @@ def compute_well_rates(
 
             for produced_fluid in well.produced_fluids:
                 produced_phase = produced_fluid.phase
-                use_pseudo_pressure = (
-                    config.use_pseudo_pressure and produced_phase == FluidPhase.GAS
-                )
+                is_gas = produced_phase == FluidPhase.GAS
+                use_pseudo_pressure = config.use_pseudo_pressure and is_gas
 
-                if produced_phase == FluidPhase.GAS:
+                if is_gas:
                     phase_mobility = typing.cast(
                         float, gas_relative_mobility_grid[i, j, k]
                     )

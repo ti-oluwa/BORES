@@ -156,16 +156,6 @@ def setup_grid():
             transition_curvature_exponent=1.0,
         )
     )
-    water_saturation_grid, oil_saturation_grid, gas_saturation_grid = (
-        bores.seed_phase_saturation(
-            oil_saturation_grid=oil_saturation_grid,
-            cells=[(0, 0, 0)],
-            phase="gas",
-            water_saturation_grid=water_saturation_grid,
-            gas_saturation_grid=gas_saturation_grid,
-            seed_saturation=0.2,
-        )
-    )
 
     pressure_grid = bores.build_pressure_grid(
         depth_grid=depth_grid,
@@ -887,7 +877,7 @@ def setup_analysis(bores, states):
 
 
 @app.cell
-def pressure_plot(avg_pressure_history, bores, np):
+def _(avg_pressure_history, bores, np):
     # Pressure
     pressure_fig = bores.make_series_plot(
         data={"Avg. Reservoir Pressure": np.array(avg_pressure_history[1:])},

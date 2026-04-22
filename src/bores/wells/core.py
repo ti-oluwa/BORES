@@ -1384,7 +1384,7 @@ def compute_effective_permeability_for_well(
 
 
 def get_pseudo_pressure_table(
-    fluid: WellFluid,
+    fluid: Fluid,
     temperature: float,
     use_pseudo_pressure: bool,
     pvt_tables: typing.Optional[PVTTables] = None,

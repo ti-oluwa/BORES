@@ -775,7 +775,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
         """
         total_size = int(np.prod(self._shape))
         if total_size == 0:
-            raise ZeroDivisionError("Mean of empty tensor")
+            raise ZeroDivisionError("Mean of empty tensor cannot be evaluated")
         return self._dtype(self.sum() / total_size)
 
     def nanmean(self) -> DType:
@@ -813,7 +813,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
             values.append(self._default)
 
         if not values:
-            raise ValueError("min() of empty tensor")
+            raise ValueError("min() of an empty tensor cannot be evaluated")
 
         return self._dtype(min(values))  # type: ignore
 
@@ -827,7 +827,7 @@ class SparseTensor(Serializable, typing.Generic[DType, ShapeT]):
             values.append(self._default)
 
         if not values:
-            raise ValueError("max() of empty tensor")
+            raise ValueError("max() of an empty tensor cannot be evaluated")
 
         return self._dtype(max(values))  # type: ignore
 
@@ -1083,6 +1083,62 @@ class BottomHolePressures(Serializable, typing.Generic[DType, ShapeT]):
 
         :param key: The N-dimensional cell index typed as `ShapeT`.
         :param value: A three-tuple `(water_bhp, oil_bhp, gas_bhp)`.
+        """
+        water, oil, gas = value
+        self.oil[key] = oil
+        self.water[key] = water
+        self.gas[key] = gas
+
+
+@attrs.frozen(slots=True)
+class PressureDrawdowns(Serializable, typing.Generic[DType, ShapeT]):
+    """
+    Wrapper for N-dimensional sparse tensors representing phase injection/production
+    bottom hole pressure drawdowns (oil, water, gas).
+    """
+
+    oil: SparseTensor[DType, ShapeT]
+    """Sparse tensor representing oil bottom hole pressure drawdown."""
+
+    water: SparseTensor[DType, ShapeT]
+    """Sparse tensor representing oil bottom hole pressure drawdown."""
+
+    gas: SparseTensor[DType, ShapeT]
+    """Sparse tensor representing oil bottom hole pressure drawdown."""
+
+    def __iter__(self) -> typing.Iterator[SparseTensor[DType, ShapeT]]:
+        yield self.water
+        yield self.oil
+        yield self.gas
+
+    def __getitem__(self, key: ShapeT) -> typing.Tuple[DType, DType, DType]:
+        """
+        Return the water, oil and gas bottom hole pressure drawdown at the specified cell.
+
+        If a phase tensor is not defined, its drawdown is returned as the
+        default fill value of the other defined tensors, falling back to
+        `0.0` if none are defined.
+
+        :param key: The N-dimensional cell index typed as `ShapeT`.
+        :returns: A tuple `(water_drawdown, oil_drawdown, gas_drawdown)` each of type
+            `DType`.
+        """
+        return self.water[key], self.oil[key], self.gas[key]
+
+    def __setitem__(
+        self,
+        key: ShapeT,
+        value: typing.Tuple[
+            typing.Union[DType, float],
+            typing.Union[DType, float],
+            typing.Union[DType, float],
+        ],
+    ) -> None:
+        """
+        Set the water, oil and gas bottom hole pressure drawdowns at the specified cell.
+
+        :param key: The N-dimensional cell index typed as `ShapeT`.
+        :param value: A three-tuple `(water_drawdown, oil_drawdown, gas_drawdown)`.
         """
         water, oil, gas = value
         self.oil[key] = oil

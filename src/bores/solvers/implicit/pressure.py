@@ -199,8 +199,6 @@ def evolve_pressure(
             water_compressibility_grid=water_compressibility_grid,
             oil_compressibility_grid=oil_compressibility_grid,
             gas_compressibility_grid=gas_compressibility_grid,
-            oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
-            gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
             fluid_properties=fluid_properties,
             wells=wells,
             time=time,
@@ -285,8 +283,6 @@ def evolve_pressure(
             water_compressibility_grid=water_compressibility_grid,
             oil_compressibility_grid=oil_compressibility_grid,
             gas_compressibility_grid=gas_compressibility_grid,
-            oil_water_capillary_pressure_grid=oil_water_capillary_pressure_grid,
-            gas_oil_capillary_pressure_grid=gas_oil_capillary_pressure_grid,
             fluid_properties=fluid_properties,
             wells=wells,
             time=time,
@@ -1328,8 +1324,6 @@ def compute_well_contributions(
     oil_compressibility_grid: ThreeDimensionalGrid,
     gas_compressibility_grid: ThreeDimensionalGrid,
     fluid_properties: FluidProperties[ThreeDimensions],
-    oil_water_capillary_pressure_grid: ThreeDimensionalGrid,
-    gas_oil_capillary_pressure_grid: ThreeDimensionalGrid,
     wells: Wells[ThreeDimensions],
     time: float,
     config: Config,
@@ -1515,14 +1509,14 @@ def compute_well_contributions(
                     pvt_tables=config.pvt_tables,
                 )
                 assert pp_table is not None
-                m_cell = pp_table(cell_pressure)
-                dm_dp = pp_table.gradient(cell_pressure)
-                m_bhp = pp_table(effective_bhp)
+                m_cell = typing.cast(float, pp_table(cell_pressure))
+                dm_dp = typing.cast(float, pp_table.gradient(cell_pressure))
+                m_bhp = typing.cast(float, pp_table(effective_bhp))
                 _add_bhp_contribution(
                     cell_1d_index,
                     phase_index,
-                    (m_bhp - m_cell + dm_dp * cell_pressure),  # type: ignore[arg-type]
-                    dm_dp,  # type: ignore[arg-type]
+                    (m_bhp - m_cell + dm_dp * cell_pressure),
+                    dm_dp,
                 )
             else:
                 _add_bhp_contribution(cell_1d_index, phase_index, effective_bhp)
@@ -1652,16 +1646,18 @@ def compute_well_contributions(
                         pvt_tables=config.pvt_tables,
                     )
                     assert pp_table is not None
-                    m_cell = pp_table(cell_pressure)
-                    dm_dp = pp_table.gradient(cell_pressure)
-                    m_bhp = pp_table(effective_bhp)
+                    m_cell = typing.cast(float, pp_table(cell_pressure))
+                    dm_dp = typing.cast(float, pp_table.gradient(cell_pressure))
+                    m_bhp = typing.cast(float, pp_table(effective_bhp))
                     _add_bhp_contribution(
                         cell_1d_index,
                         phase_index,
                         (m_bhp - m_cell + dm_dp * cell_pressure),  # type: ignore[arg-type]
                         dm_dp,  # type: ignore[arg-type]
                     )
+                    drawdown = m_bhp - m_cell
                 else:
+                    drawdown = effective_bhp - cell_pressure
                     _add_bhp_contribution(cell_1d_index, phase_index, effective_bhp)
 
                 if produced_phase == FluidPhase.GAS:
