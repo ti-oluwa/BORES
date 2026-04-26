@@ -100,7 +100,7 @@ config = bores.Config(
 ```
 
 !!! warning "Stability with the Explicit Scheme"
-    The explicit scheme requires smaller timesteps than IMPES to remain stable. BORES monitors the CFL number at each step and will reject steps that exceed the configured `pressure_cfl_threshold` (default 0.9) or `saturation_cfl_threshold` (default 0.6). If your simulation is rejecting many steps, try reducing `maximum_step_size` in the `Timer` or switching to `scheme="impes"`.
+    The explicit scheme requires smaller timesteps than IMPES to remain stable. BORES monitors the CFL number at each step and will reject steps that exceed the configured `pressure_cfl_threshold` (default 0.9) or `cfl_threshold` (default 0.6). If your simulation is rejecting many steps, try reducing `maximum_step_size` in the `Timer` or switching to `scheme="impes"`.
 
 ## Timestep Control
 

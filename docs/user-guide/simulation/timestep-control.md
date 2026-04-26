@@ -61,7 +61,7 @@ The maximum step size caps how large the timer can grow. Even when conditions ar
 | `maximum_step_size` | (required) | Upper bound on step size |
 | `minimum_step_size` | (required) | Lower bound on step size |
 | `simulation_time` | (required) | Total simulation duration |
-| `maximum_cfl_number` | 0.9 | Default CFL limit for adaptive adjustments |
+| `maximum_cfl` | 0.9 | Default CFL limit for adaptive adjustments |
 | `backoff_factor` | 0.5 | Multiplier when a step is rejected |
 | `aggressive_backoff_factor` | 0.25 | Multiplier for severe rejections |
 | `ramp_up_factor` | `None` | Optional growth multiplier after cooldown |
@@ -183,14 +183,14 @@ config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
-    saturation_cfl_threshold=0.6,   # Default
+    cfl_threshold=0.6,   # Default
     pressure_cfl_threshold=0.9,     # Default
 )
 ```
 
 The saturation CFL threshold (0.6) is more conservative than the pressure threshold (0.9) because saturation transport is hyperbolic and more sensitive to CFL violations. The pressure equation is parabolic (or elliptic in incompressible limits) and tolerates higher CFL numbers.
 
-These thresholds interact with the timer's `maximum_cfl_number` (default 0.9) and `cfl_safety_margin` (default 0.85). The timer targets a CFL of `threshold * safety_margin`, so with defaults the effective target for saturation is approximately 0.51 and for pressure approximately 0.77.
+These thresholds interact with the timer's `maximum_cfl` (default 0.9) and `cfl_safety_margin` (default 0.85). The timer targets a CFL of `threshold * safety_margin`, so with defaults the effective target for saturation is approximately 0.51 and for pressure approximately 0.77.
 
 !!! tip "CFL and Scheme Selection"
 

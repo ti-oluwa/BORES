@@ -842,7 +842,7 @@ class FrameExporter(typing.Protocol):
     ```
     """
 
-    def write(self, frames: typing.List[npt.NDArray], fps: float) -> None:
+    def write(self, frames: typing.Iterable[npt.NDArray], fps: float) -> None:
         """
         Write captured frames to disk.
 
@@ -863,9 +863,19 @@ class GifExporter:
         self.path = Path(path).resolve()
         self.loop = loop
 
-    def write(self, frames: typing.List[npt.NDArray], fps: float) -> None:
-        imageio.mimsave(self.path, frames, duration=1.0 / fps, loop=self.loop)  # type: ignore
-        logger.info("Wrote GIF (%d frames) to %s", len(frames), self.path)
+    def write(self, frames: typing.Iterable[npt.NDArray], fps: float) -> None:
+        duration = 1.0 / fps
+        count = 0
+        with imageio.get_writer(
+            self.path,
+            format="GIF",  # type: ignore
+            duration=duration,
+            loop=self.loop,
+        ) as writer:
+            for frame in frames:
+                writer.append_data(frame)  # type: ignore[attr-defined]
+                count += 1
+        logger.info("Wrote GIF (%d frames) to %s", count, self.path)
 
 
 class Mp4Exporter:
@@ -886,18 +896,19 @@ class Mp4Exporter:
         self.codec = codec
         self.quality = quality
 
-    def write(self, frames: typing.List[npt.NDArray], fps: float) -> None:
-        writer = imageio.get_writer(
+    def write(self, frames: typing.Iterable[npt.NDArray], fps: float) -> None:
+        count = 0
+        with imageio.get_writer(
             self.path,
             format="FFMPEG",  # type: ignore
             fps=fps,
             codec=self.codec,
             quality=self.quality,
-        )
-        for frame in frames:
-            writer.append_data(frame)
-        writer.close()
-        logger.info("Wrote MP4 (%d frames) to %s", len(frames), self.path)
+        ) as writer:
+            for frame in frames:
+                writer.append_data(frame)  # type: ignore[attr-defined]
+                count += 1
+        logger.info("Wrote MP4 (%d frames) to %s", count, self.path)
 
 
 class WebPExporter:
@@ -911,9 +922,21 @@ class WebPExporter:
         self.path = Path(path).resolve()
         self.loop = loop
 
-    def write(self, frames: typing.List[npt.NDArray], fps: float) -> None:
-        imageio.mimsave(self.path, frames, duration=1.0 / fps, loop=self.loop)  # type: ignore
-        logger.info("Wrote WebP (%d frames) to %s", len(frames), self.path)
+    def write(self, frames: typing.Iterable[npt.NDArray], fps: float) -> None:
+        duration = 1.0 / fps
+        count = 0
+
+        with imageio.get_writer(
+            self.path,
+            format="WEBP",  # type: ignore
+            duration=duration,
+            loop=self.loop,
+        ) as writer:
+            for frame in frames:
+                writer.append_data(frame)  # type: ignore[attr-defined]
+                count += 1
+
+        logger.info("Wrote WebP (%d frames) to %s", count, self.path)
 
 
 class HtmlExporter:

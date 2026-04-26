@@ -131,7 +131,7 @@ def setup_run():
         maximum_step_size=bores.Time(days=10.0),
         minimum_step_size=bores.Time(hours=6.0),
         simulation_time=bores.Time(years=10, days=100),
-        maximum_cfl_number=0.9,
+        maximum_cfl=0.9,
         ramp_up_factor=1.2,
         backoff_factor=0.5,
         aggressive_backoff_factor=0.25,

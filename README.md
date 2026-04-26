@@ -194,15 +194,11 @@ print(
 )
 ```
 
-<p align="center">
-  <img src="docs/images/quick-example.gif" width="800" alt="Quick Example"/>
-</p>
-
 ## Features
 
 - 3D structured grid with uniform, layered, and heterogeneous property distributions
 - Three-phase (oil, water, gas) black-oil PVT correlations (Standing, Vazquez-Beggs, Hall-Yarborough, and more)
-- IMPES, explicit, and implicit evolution schemes
+- IMPES and Sequential Implicit evolution schemes
 - Multiple linear solvers (BiCGSTAB, GMRES, CG, direct) with preconditioner support (ILU, AMG, CPR)
 - Well models with BHP control, rate control, schedules, and event-driven actions
 - Faults, fractures, and transmissibility modifications

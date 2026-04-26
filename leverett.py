@@ -195,14 +195,14 @@ config = bores.Config(
     wells=wells,
     scheme="impes",
     pressure_solver="direct",
-    saturation_solver="direct",
+    transport_solver="direct",
     maximum_saturation_change=0.5,  # Control numerical diffusion
     disable_capillary_effects=True,  # Classic BL has no Pc
     normalize_saturations=True,
-    maximum_pressure_change=2500,
+    maximum_pressure_change=3500,
     output_frequency=5,  # Save every 5th step for analysis
     minimum_injector_water_saturation=0.1,
-    saturation_cfl_threshold=0.6,
+    cfl_threshold=0.6,
     use_pseudo_pressure=False,
 )
 

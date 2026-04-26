@@ -352,7 +352,7 @@ config = bores.Config(
         ```python
         explicit_config = config.with_updates(
             scheme="explicit",
-            saturation_cfl_threshold=0.6,    # CFL stability limit
+            cfl_threshold=0.6,    # CFL stability limit
             pressure_cfl_threshold=0.9,
         )
         ```

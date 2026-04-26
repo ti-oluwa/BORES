@@ -314,7 +314,7 @@ def solve_transport(
         )
 
     # Apply saturation and solvent concentration updates
-    cfl_threshold = config.saturation_cfl_threshold
+    cfl_threshold = config.cfl_threshold
     time_step_in_days = time_step_size * c.DAYS_PER_SECOND
     (
         updated_water_saturation_grid,

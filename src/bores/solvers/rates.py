@@ -277,7 +277,7 @@ def compute_well_rates(
                 temperature=cell_temperature,
                 well_index=well_index,
                 phase_viscosity=phase_viscosity,
-                phase_mobility=total_mobility,
+                phase_mobility=phase_mobility,
                 fluid=injected_fluid,
                 fluid_compressibility=phase_compressibility,
                 use_pseudo_pressure=use_pseudo_pressure,

@@ -4,7 +4,7 @@
 
 At each time step, the pressure equation (and in the implicit scheme, the saturation equation) is discretized into a sparse linear system $A \cdot x = b$, where $A$ is a large, sparse matrix representing the transmissibilities between grid cells, $x$ is the unknown (pressure or saturation), and $b$ is the right-hand side containing source terms and accumulation. The solver is the algorithm that finds $x$ given $A$ and $b$.
 
-BORES provides several iterative solvers from SciPy's sparse linear algebra library, plus a direct solver for small problems. You select the solver through the `pressure_solver` and `saturation_solver` parameters in the `Config`. The same solver types are available for both systems, but you can (and often should) use different solvers for pressure and saturation because they have different mathematical properties.
+BORES provides several iterative solvers from SciPy's sparse linear algebra library, plus a direct solver for small problems. You select the solver through the `pressure_solver` and `transport_solver` parameters in the `Config`. The same solver types are available for both systems, but you can (and often should) use different solvers for pressure and saturation because they have different mathematical properties.
 
 ```python
 import bores
@@ -15,7 +15,7 @@ config = bores.Config(
     wells=wells,
     scheme="impes",
     pressure_solver="bicgstab",      # Solver for pressure
-    saturation_solver="bicgstab",    # Solver for saturation
+    transport_solver="bicgstab",    # Solver for saturation
 )
 ```
 
@@ -43,7 +43,7 @@ config = bores.Config(
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
     pressure_solver="bicgstab",
-    saturation_solver="bicgstab",
+    transport_solver="bicgstab",
 )
 ```
 
@@ -77,13 +77,13 @@ config = bores.Config(
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
     pressure_solver="cg",
-    saturation_solver="bicgstab",  # Saturation matrix is not SPD
+    transport_solver="bicgstab",  # Saturation matrix is not SPD
 )
 ```
 
 !!! warning "CG Requires Symmetric Matrices"
 
-    Only use CG for the pressure solver, and only when you are confident the pressure matrix is symmetric positive definite. If the solver diverges or produces incorrect results, switch back to BiCGSTAB. The saturation transport matrix is almost never symmetric, so do not use CG for `saturation_solver`.
+    Only use CG for the pressure solver, and only when you are confident the pressure matrix is symmetric positive definite. If the solver diverges or produces incorrect results, switch back to BiCGSTAB. The saturation transport matrix is almost never symmetric, so do not use CG for `transport_solver`.
 
 ### Direct Solver
 
@@ -96,7 +96,7 @@ config = bores.Config(
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
     pressure_solver="direct",
-    saturation_solver="direct",
+    transport_solver="direct",
 )
 ```
 
@@ -114,7 +114,7 @@ config = bores.Config(
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
     pressure_solver=["bicgstab", "gmres", "direct"],
-    saturation_solver=["bicgstab", "tfqmr"],
+    transport_solver=["bicgstab", "tfqmr"],
 )
 ```
 
@@ -156,7 +156,7 @@ The key parameters that affect solver performance are:
 
 **`pressure_convergence_tolerance`** (default: `1e-6`): The relative residual tolerance for the pressure solver. Tighter tolerances give more accurate pressure but require more iterations. For most simulations, `1e-6` is a good balance. If you notice pressure oscillations, try tightening to `1e-8`. If the solver is spending too many iterations, try relaxing to `1e-5`.
 
-**`saturation_convergence_tolerance`** (default: `1e-4`): The tolerance for the saturation solver (implicit scheme only). Saturation transport is typically better conditioned than pressure, so a more relaxed tolerance is appropriate.
+**`transport_convergence_tolerance`** (default: `1e-4`): The tolerance for the saturation solver (implicit scheme only). Saturation transport is typically better conditioned than pressure, so a more relaxed tolerance is appropriate.
 
 **`maximum_solver_iterations`** (default: `250`): The maximum number of iterations before the solver gives up. Well-conditioned problems typically converge in 10 to 50 iterations. If you regularly hit the iteration limit, the problem is likely poorly conditioned and needs a better preconditioner rather than more iterations.
 

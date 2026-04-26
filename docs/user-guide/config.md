@@ -129,11 +129,11 @@ See [Schemes](simulation/schemes.md) for detailed information on each evolution 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `pressure_solver` | `str` or list | `"bicgstab"` | Solver(s) for the pressure equation |
-| `saturation_solver` | `str` or list | `"bicgstab"` | Solver(s) for the saturation equation |
+| `transport_solver` | `str` or list | `"bicgstab"` | Solver(s) for the saturation equation |
 | `pressure_preconditioner` | `str` or `None` | `"ilu"` | Preconditioner for pressure solvers |
-| `saturation_preconditioner` | `str` or `None` | `"ilu"` | Preconditioner for saturation solvers |
+| `transport_preconditioner` | `str` or `None` | `"ilu"` | Preconditioner for saturation solvers |
 | `pressure_convergence_tolerance` | `float` | `1e-6` | Relative convergence tolerance for pressure |
-| `saturation_convergence_tolerance` | `float` | `1e-4` | Relative convergence tolerance for saturation |
+| `transport_convergence_tolerance` | `float` | `1e-4` | Relative convergence tolerance for saturation |
 | `maximum_solver_iterations` | `int` | `250` | Maximum solver iterations per step (capped at 500) |
 | `task_pool` | `ThreadPoolExecutor` | `None` | Thread pool for concurrent solver matrix assembly |
 
@@ -143,7 +143,7 @@ See [Solvers](simulation/solvers.md) and [Preconditioners](simulation/preconditi
 
 | Parameter | Type | Default | Description |
 |---|---|---|---|
-| `saturation_cfl_threshold` | `float` | `0.7` | Maximum saturation CFL number (explicit scheme only) |
+| `cfl_threshold` | `float` | `0.7` | Maximum saturation CFL number (explicit scheme only) |
 | `pressure_cfl_threshold` | `float` | `0.9` | Maximum pressure CFL number (explicit scheme only) |
 
 ### Time Step Saturation Controls
@@ -214,7 +214,7 @@ These parameters control outer loop convergence for the sequential-implicit sche
 | Parameter | Type | Default | Description |
 |---|---|---|---|
 | `pressure_outer_convergence_tolerance` | `float` | `1e-3` | Relative pressure inter-iterate tolerance |
-| `saturation_outer_convergence_tolerance` | `float` | `1e-2` | Absolute saturation inter-iterate tolerance |
+| `transport_outer_convergence_tolerance` | `float` | `1e-2` | Absolute saturation inter-iterate tolerance |
 
 ### Additional Numerical Controls
 

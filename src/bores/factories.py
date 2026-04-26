@@ -995,12 +995,12 @@ def wells_(
     **kwargs: typing.Any,
 ) -> Wells[Coordinates]:
     """
-    Constructs a ``Wells`` instance containing both injection and production wells.
+    Constructs a `Wells` instance containing both injection and production wells.
 
     :param injectors: Sequence of injection wells
     :param producers: Sequence of production wells
     :param kwargs: Additional keyword arguments to be passed to the `Wells` constructor
-    :return: ``Wells`` instance
+    :return: `Wells` instance
     """
     return Wells(
         injection_wells=injectors or [],

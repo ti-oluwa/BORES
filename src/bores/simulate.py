@@ -1090,7 +1090,7 @@ def _run_full_sequential_implicit_step(
     :param saturation_epsilon: Small value to keep saturations strictly between 0 and 1.
     :return: `StepResult` containing updated fluid properties, rock properties, and rates.
     """
-    saturation_tolerance = config.saturation_outer_convergence_tolerance
+    saturation_tolerance = config.transport_outer_convergence_tolerance
     pressure_tolerance = config.pressure_outer_convergence_tolerance
     maximum_newton_iterations = config.maximum_newton_iterations
     maximum_outer_iterations = config.maximum_outer_iterations

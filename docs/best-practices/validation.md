@@ -39,7 +39,7 @@ Material balance error tends to accumulate over time. A simulation with 0.01% er
 
 ### Common Causes of Material Balance Error
 
-**Timestep too large.** The explicit saturation update in IMPES introduces truncation error proportional to the timestep size. Reducing `maximum_step_size` or lowering `maximum_cfl_number` reduces material balance error.
+**Timestep too large.** The explicit saturation update in IMPES introduces truncation error proportional to the timestep size. Reducing `maximum_step_size` or lowering `maximum_cfl` reduces material balance error.
 
 **Grid too coarse.** Coarse grids cannot resolve sharp saturation fronts accurately, leading to numerical dispersion that manifests as material balance error. Refine the grid and compare.
 

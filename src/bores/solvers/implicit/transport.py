@@ -532,7 +532,7 @@ def _compute_saturation_residuals(
                         )
                     else:
                         flux_boundary = flux_boundaries[pei, pej, pek]
-                        if cell_total_mobility > 0.0:
+                        if flux_boundary > 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -630,7 +630,7 @@ def _compute_saturation_residuals(
                         )
                     else:
                         flux_boundary = flux_boundaries[pwi, pwj, pwk]
-                        if cell_total_mobility > 0.0:
+                        if flux_boundary > 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -732,7 +732,7 @@ def _compute_saturation_residuals(
                         )
                     else:
                         flux_boundary = flux_boundaries[psi, psj, psk]
-                        if cell_total_mobility > 0.0:
+                        if flux_boundary > 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -832,7 +832,7 @@ def _compute_saturation_residuals(
                         )
                     else:
                         flux_boundary = flux_boundaries[pni, pnj, pnk]
-                        if cell_total_mobility > 0.0:
+                        if flux_boundary > 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -935,7 +935,7 @@ def _compute_saturation_residuals(
                         )
                     else:
                         flux_boundary = flux_boundaries[pbi, pbj, pbk]
-                        if cell_total_mobility > 0.0:
+                        if flux_boundary > 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -1033,7 +1033,7 @@ def _compute_saturation_residuals(
                         )
                     else:
                         flux_boundary = flux_boundaries[pti, ptj, ptk]
-                        if cell_total_mobility > 0.0:
+                        if flux_boundary > 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -1992,34 +1992,40 @@ def assemble_jacobian_contributions(
                 for face in range(6):
                     if face == 0:  # East
                         ni, nj, nk = np.int64(i + 1), np.int64(j), np.int64(k)
-                        transmissibility = face_transmissibilities_x[
-                            i + 1, j + 1, k + 1
-                        ]
+                        T = (
+                            face_transmissibilities_x[i + 1, j + 1, k + 1]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
                     elif face == 1:  # West
                         ni, nj, nk = np.int64(i - 1), np.int64(j), np.int64(k)
-                        transmissibility = face_transmissibilities_x[
-                            ni + 1, nj + 1, nk + 1
-                        ]
+                        T = (
+                            face_transmissibilities_x[ni + 1, nj + 1, nk + 1]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
                     elif face == 2:  # South
                         ni, nj, nk = np.int64(i), np.int64(j + 1), np.int64(k)
-                        transmissibility = face_transmissibilities_y[
-                            i + 1, j + 1, k + 1
-                        ]
+                        T = (
+                            face_transmissibilities_y[i + 1, j + 1, k + 1]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
                     elif face == 3:  # North
                         ni, nj, nk = np.int64(i), np.int64(j - 1), np.int64(k)
-                        transmissibility = face_transmissibilities_y[
-                            ni + 1, nj + 1, nk + 1
-                        ]
+                        T = (
+                            face_transmissibilities_y[ni + 1, nj + 1, nk + 1]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
                     elif face == 4:  # Bottom
                         ni, nj, nk = np.int64(i), np.int64(j), np.int64(k + 1)
-                        transmissibility = face_transmissibilities_z[
-                            i + 1, j + 1, k + 1
-                        ]
+                        T = (
+                            face_transmissibilities_z[i + 1, j + 1, k + 1]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
                     else:  # Top (face == 5)
                         ni, nj, nk = np.int64(i), np.int64(j), np.int64(k - 1)
-                        transmissibility = face_transmissibilities_z[
-                            ni + 1, nj + 1, nk + 1
-                        ]
+                        T = (
+                            face_transmissibilities_z[ni + 1, nj + 1, nk + 1]
+                            * md_per_cp_to_ft2_per_psi_per_day
+                        )
 
                     if (
                         ni < 0
@@ -2196,17 +2202,15 @@ def assemble_jacobian_contributions(
                         )
                         dFw_mob_dSw_i = (
                             dkrw_dSw_i_eff
-                            * md_per_cp_to_ft2_per_psi_per_day
                             * inverse_water_viscosity
                             * water_potential
-                            * transmissibility
+                            * T
                         )
                         dFw_mob_dSg_i = (
                             dkrw_dSg_i_eff
-                            * md_per_cp_to_ft2_per_psi_per_day
                             * inverse_water_viscosity
                             * water_potential
-                            * transmissibility
+                            * T
                         )
                         dFw_mob_dSw_n = 0.0
                         dFw_mob_dSg_n = 0.0
@@ -2220,43 +2224,21 @@ def assemble_jacobian_contributions(
                         dFw_mob_dSg_i = 0.0
                         dFw_mob_dSw_n = (
                             dkrw_dSw_n_eff
-                            * md_per_cp_to_ft2_per_psi_per_day
                             * inverse_water_viscosity
                             * water_potential
-                            * transmissibility
+                            * T
                         )
                         dFw_mob_dSg_n = (
                             dkrw_dSg_n_eff
-                            * md_per_cp_to_ft2_per_psi_per_day
                             * inverse_water_viscosity
                             * water_potential
-                            * transmissibility
+                            * T
                         )
 
-                    dFw_cap_dSw_i = (
-                        upwind_water_relative_mobility
-                        * dPcow_dSw_i
-                        * transmissibility
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
-                    dFw_cap_dSg_i = (
-                        upwind_water_relative_mobility
-                        * dPcow_dSg_i
-                        * transmissibility
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
-                    dFw_cap_dSw_n = (
-                        upwind_water_relative_mobility
-                        * (-dPcow_dSw_n)
-                        * transmissibility
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
-                    dFw_cap_dSg_n = (
-                        upwind_water_relative_mobility
-                        * (-dPcow_dSg_n)
-                        * transmissibility
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
+                    dFw_cap_dSw_i = upwind_water_relative_mobility * dPcow_dSw_i * T
+                    dFw_cap_dSg_i = upwind_water_relative_mobility * dPcow_dSg_i * T
+                    dFw_cap_dSw_n = upwind_water_relative_mobility * (-dPcow_dSw_n) * T
+                    dFw_cap_dSg_n = upwind_water_relative_mobility * (-dPcow_dSg_n) * T
 
                     # dR_w/dS = -upwind_water_density * dF_w/dS
                     dRw_dSw_i = -face_water_density * (dFw_mob_dSw_i + dFw_cap_dSw_i)
@@ -2273,18 +2255,10 @@ def assemble_jacobian_contributions(
                             else 0.0
                         )
                         dFo_mob_dSw_i = (
-                            dkro_dSw_i_eff
-                            * md_per_cp_to_ft2_per_psi_per_day
-                            * inverse_oil_viscosity
-                            * oil_potential
-                            * transmissibility
+                            dkro_dSw_i_eff * inverse_oil_viscosity * oil_potential * T
                         )
                         dFo_mob_dSg_i = (
-                            dkro_dSg_i_eff
-                            * md_per_cp_to_ft2_per_psi_per_day
-                            * inverse_oil_viscosity
-                            * oil_potential
-                            * transmissibility
+                            dkro_dSg_i_eff * inverse_oil_viscosity * oil_potential * T
                         )
                         dFo_mob_dSw_n = 0.0
                         dFo_mob_dSg_n = 0.0
@@ -2297,18 +2271,10 @@ def assemble_jacobian_contributions(
                         dFo_mob_dSw_i = 0.0
                         dFo_mob_dSg_i = 0.0
                         dFo_mob_dSw_n = (
-                            dkro_dSw_n_eff
-                            * md_per_cp_to_ft2_per_psi_per_day
-                            * inverse_oil_viscosity
-                            * oil_potential
-                            * transmissibility
+                            dkro_dSw_n_eff * inverse_oil_viscosity * oil_potential * T
                         )
                         dFo_mob_dSg_n = (
-                            dkro_dSg_n_eff
-                            * md_per_cp_to_ft2_per_psi_per_day
-                            * inverse_oil_viscosity
-                            * oil_potential
-                            * transmissibility
+                            dkro_dSg_n_eff * inverse_oil_viscosity * oil_potential * T
                         )
 
                     # dR_g contribution from oil stream: -rho_o_upwind * alpha_Rs * dF_o/dS
@@ -2330,18 +2296,10 @@ def assemble_jacobian_contributions(
                             else 0.0
                         )
                         dFg_mob_dSw_i = (
-                            dkrg_dSw_i_eff
-                            * md_per_cp_to_ft2_per_psi_per_day
-                            * inverse_gas_viscosity
-                            * gas_potential
-                            * transmissibility
+                            dkrg_dSw_i_eff * inverse_gas_viscosity * gas_potential * T
                         )
                         dFg_mob_dSg_i = (
-                            dkrg_dSg_i_eff
-                            * md_per_cp_to_ft2_per_psi_per_day
-                            * inverse_gas_viscosity
-                            * gas_potential
-                            * transmissibility
+                            dkrg_dSg_i_eff * inverse_gas_viscosity * gas_potential * T
                         )
                         dFg_mob_dSw_n = 0.0
                         dFg_mob_dSg_n = 0.0
@@ -2354,44 +2312,16 @@ def assemble_jacobian_contributions(
                         dFg_mob_dSw_i = 0.0
                         dFg_mob_dSg_i = 0.0
                         dFg_mob_dSw_n = (
-                            dkrg_dSw_n_eff
-                            * md_per_cp_to_ft2_per_psi_per_day
-                            * inverse_gas_viscosity
-                            * gas_potential
-                            * transmissibility
+                            dkrg_dSw_n_eff * inverse_gas_viscosity * gas_potential * T
                         )
                         dFg_mob_dSg_n = (
-                            dkrg_dSg_n_eff
-                            * md_per_cp_to_ft2_per_psi_per_day
-                            * inverse_gas_viscosity
-                            * gas_potential
-                            * transmissibility
+                            dkrg_dSg_n_eff * inverse_gas_viscosity * gas_potential * T
                         )
 
-                    dFg_cap_dSw_i = (
-                        upwind_gas_relative_mobility
-                        * dPcgo_dSw_i
-                        * transmissibility
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
-                    dFg_cap_dSg_i = (
-                        upwind_gas_relative_mobility
-                        * dPcgo_dSg_i
-                        * transmissibility
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
-                    dFg_cap_dSw_n = (
-                        upwind_gas_relative_mobility
-                        * (-dPcgo_dSw_n)
-                        * transmissibility
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
-                    dFg_cap_dSg_n = (
-                        upwind_gas_relative_mobility
-                        * (-dPcgo_dSg_n)
-                        * transmissibility
-                        * md_per_cp_to_ft2_per_psi_per_day
-                    )
+                    dFg_cap_dSw_i = upwind_gas_relative_mobility * dPcgo_dSw_i * T
+                    dFg_cap_dSg_i = upwind_gas_relative_mobility * dPcgo_dSg_i * T
+                    dFg_cap_dSw_n = upwind_gas_relative_mobility * (-dPcgo_dSw_n) * T
+                    dFg_cap_dSg_n = upwind_gas_relative_mobility * (-dPcgo_dSg_n) * T
 
                     # dR_g/dS = -rho_g_upwind * dF_g/dS - rho_o_upwind * alpha_Rs * dF_o/dS
                     dRg_dSw_i = (
@@ -2806,7 +2736,7 @@ def solve_transport(
     dtype: npt.DTypeLike = np.float64,
 ) -> Solution[ImplicitSaturationSolution, typing.List[NewtonConvergenceInfo]]:
     """
-    Solve the mass-based implicit saturation equations using Newton-Raphson iteration.
+    Solve the mass-based implicit transport equations using Newton-Raphson iteration.
 
     The residual equations conserve fluid mass rather than reservoir-condition volume.
     For water:
@@ -2863,7 +2793,7 @@ def solve_transport(
         net_oil_well_mass_rate_grid = rates.net_oil_well_mass_rate_grid
         net_gas_well_mass_rate_grid = rates.net_gas_well_mass_rate_grid
     else:
-        zeros_grid = np.zeros_like(fluid_properties.pressure_grid)
+        zeros_grid = np.zeros_like(fluid_properties.pressure_grid, dtype=dtype)
         net_water_well_mass_rate_grid = zeros_grid
         net_oil_well_mass_rate_grid = zeros_grid
         net_gas_well_mass_rate_grid = zeros_grid
@@ -2944,7 +2874,7 @@ def solve_transport(
     newton_tolerance = config.newton_tolerance
     maximum_line_search_cuts = config.maximum_line_search_cuts
     maximum_saturation_change = config.maximum_saturation_change
-    saturation_convergence_tolerance = config.saturation_convergence_tolerance
+    transport_convergence_tolerance = config.transport_convergence_tolerance
 
     for iteration in range(maximum_newton_iterations):
         relative_mobility_grids, capillary_pressure_grids, _ = (
@@ -3012,7 +2942,7 @@ def solve_transport(
         residual_converged = relative_residual_norm < newton_tolerance and iteration > 0
         saturation_converged = (
             (
-                last_max_ds < saturation_convergence_tolerance
+                last_max_ds < transport_convergence_tolerance
                 and relative_residual_norm < 1e-3
             )
             or (
@@ -3096,9 +3026,9 @@ def solve_transport(
         saturation_change, _ = solve_linear_system(
             A_csr=jacobian.tocsr(),
             b=-residual_vector,
-            solver=config.saturation_solver,
-            preconditioner=config.saturation_preconditioner,
-            rtol=config.saturation_convergence_tolerance,
+            solver=config.transport_solver,
+            preconditioner=config.transport_preconditioner,
+            rtol=config.transport_convergence_tolerance,
             maximum_iterations=config.maximum_solver_iterations,
             fallback_to_direct=True,
         )

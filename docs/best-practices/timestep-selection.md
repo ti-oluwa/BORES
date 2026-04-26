@@ -22,7 +22,7 @@ $$
 
 where $v$ is the flow velocity, $\Delta t$ is the timestep, and $\Delta x$ is the cell size. Higher velocities (near wells, in high-permeability zones) and smaller cells both push the CFL number higher for a given timestep.
 
-In BORES, the `maximum_cfl_number` parameter on the `Timer` controls the stability limit. The default is 0.9, which provides a 10% safety margin below the theoretical limit of 1.0. If the simulation detects that the CFL number has been exceeded during a step, it rejects the step and retries with a smaller timestep.
+In BORES, the `maximum_cfl` parameter on the `Timer` controls the stability limit. The default is 0.9, which provides a 10% safety margin below the theoretical limit of 1.0. If the simulation detects that the CFL number has been exceeded during a step, it rejects the step and retries with a smaller timestep.
 
 ```python
 import bores
@@ -32,13 +32,13 @@ timer = bores.Timer(
     maximum_step_size=bores.Time(days=30),
     minimum_step_size=bores.Time(seconds=1),
     simulation_time=bores.Time(years=5),
-    maximum_cfl_number=0.9,   # Default, good for most problems
+    maximum_cfl=0.9,   # Default, good for most problems
 )
 ```
 
-!!! tip "When to Lower maximum_cfl_number"
+!!! tip "When to Lower maximum_cfl"
 
-    If you see oscillations in saturation or pressure even though the simulation is not rejecting steps, try lowering `maximum_cfl_number` to 0.7 or 0.5. Some problems with sharp permeability contrasts or complex well patterns have local CFL numbers that are not perfectly captured by the global estimate, and a lower target provides extra margin.
+    If you see oscillations in saturation or pressure even though the simulation is not rejecting steps, try lowering `maximum_cfl` to 0.7 or 0.5. Some problems with sharp permeability contrasts or complex well patterns have local CFL numbers that are not perfectly captured by the global estimate, and a lower target provides extra margin.
 
 ---
 
@@ -115,7 +115,7 @@ timer = bores.Timer(
     maximum_step_size=bores.Time(days=30),
     minimum_step_size=bores.Time(seconds=1),
     simulation_time=bores.Time(years=10),
-    maximum_cfl_number=0.9,
+    maximum_cfl=0.9,
     maximum_growth_per_step=1.3,
     backoff_factor=0.5,
 )
@@ -133,7 +133,7 @@ timer = bores.Timer(
     maximum_step_size=bores.Time(days=5),
     minimum_step_size=bores.Time(milliseconds=100),
     simulation_time=bores.Time(years=5),
-    maximum_cfl_number=0.5,        # More conservative for fully explicit
+    maximum_cfl=0.5,        # More conservative for fully explicit
     maximum_growth_per_step=1.2,   # Slower growth
 )
 ```
@@ -150,7 +150,7 @@ timer = bores.Timer(
     maximum_step_size=bores.Time(days=90),
     minimum_step_size=bores.Time(days=0.1),
     simulation_time=bores.Time(years=20),
-    maximum_cfl_number=5.0,         # Much higher, not a hard limit
+    maximum_cfl=5.0,         # Much higher, not a hard limit
     maximum_growth_per_step=1.5,    # Can grow faster
     ramp_up_factor=1.2,         # Additional growth when stable
 )
@@ -182,7 +182,7 @@ For benchmarking or debugging, you may want to disable adaptive control and use 
 
 | Parameter | When to Adjust | Direction |
 | --- | --- | --- |
-| `maximum_cfl_number` | Oscillations, instability | Lower (0.5 to 0.7) |
+| `maximum_cfl` | Oscillations, instability | Lower (0.5 to 0.7) |
 | `maximum_growth_per_step` | Timestep jumps too fast | Lower (1.1 to 1.2) |
 | `backoff_factor` | Too many rejected steps | Lower (0.3) for faster recovery |
 | `minimum_step_size` | Simulation stalls at minimum | Lower, but investigate root cause |

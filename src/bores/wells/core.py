@@ -604,10 +604,12 @@ def compute_required_bhp_for_gas_rate(
             raise ValidationError("`pseudo_pressure_table` must be provided.")
 
         viscosity = gas_viscosity if gas_viscosity is not None else 1.0
-        required_m = (
+        required_pseudo_pressure = (
             pseudo_pressure_table(pressure) + target_rate_scf * factor * viscosity
         )
-        return float(pseudo_pressure_table.inverse(pseudo_pressure=required_m))
+        return float(
+            pseudo_pressure_table.inverse(pseudo_pressure=required_pseudo_pressure)
+        )
 
     required_bhp_squared = (
         pressure**2 + target_rate_scf * factor * average_compressibility_factor

@@ -74,7 +74,7 @@ class TimerState(TypedDict):
     maximum_step_size: float
     minimum_step_size: float
     simulation_time: float
-    maximum_cfl_number: float
+    maximum_cfl: float
     cfl_safety_margin: float
     ramp_up_factor: typing.Optional[float]
     backoff_factor: float
@@ -133,8 +133,8 @@ class Timer(StoreSerializable):
     """Minimum allowable time step size in seconds."""
     simulation_time: float
     """Total simulation time in seconds."""
-    maximum_cfl_number: float = 0.9
-    """Default maximum CFL number for time step adjustments."""
+    maximum_cfl: float = 0.9
+    """Default CFL limit (max CFL number) for time step adjustments."""
     ramp_up_factor: typing.Optional[float] = None
     """Factor by which to ramp up time step size on successful steps."""
     backoff_factor: float = 0.5
@@ -158,7 +158,7 @@ class Timer(StoreSerializable):
     failure_memory_window: int = 5
     """Number of recent failures to remember for adaptive behavior."""
 
-    # MBE-based step control (all optional)
+    # MBE-based step control
     maximum_absolute_oil_mbe: typing.Optional[float] = None
     """Absolute oil MBE threshold (res ft³). Reject step if exceeded."""
     maximum_absolute_water_mbe: typing.Optional[float] = None
@@ -291,7 +291,7 @@ class Timer(StoreSerializable):
         # Check CFL trend (are we pushing limits?) - using rolling averages
         if self._recent_cfl_count >= 3:
             avg_cfl = self._recent_cfl_sum / self._recent_cfl_count
-            if avg_cfl > 0.75 * self.maximum_cfl_number:
+            if avg_cfl > 0.75 * self.maximum_cfl:
                 factor *= 0.95
 
             # Check if CFL is trending upward by comparing newest vs oldest in rolling window
@@ -547,7 +547,7 @@ class Timer(StoreSerializable):
 
         # CFL-based backoff
         if maximum_cfl_encountered is not None and cfl_threshold is not None:
-            cfl_limit = cfl_threshold if cfl_threshold > 0 else self.maximum_cfl_number
+            cfl_limit = cfl_threshold if cfl_threshold > 0 else self.maximum_cfl
             if maximum_cfl_encountered > cfl_limit:
                 # Proportional backoff based on how much we exceeded the limit
                 overshoot_ratio = maximum_cfl_encountered / cfl_limit
@@ -795,12 +795,12 @@ class Timer(StoreSerializable):
         :return: Tuple of (acceptable, error/message). The first item is True if the timestep is acceptable. Else, Flase.
         """
         cfl_limit = (
-            cfl_threshold if cfl_threshold is not None else self.maximum_cfl_number
+            cfl_threshold if cfl_threshold is not None else self.maximum_cfl
         )
         if maximum_cfl_encountered is not None and maximum_cfl_encountered > cfl_limit:
             return (
                 False,
-                f"Maximum CFL limit ({cfl_limit}) violated. Maximum CFL encountered is {maximum_cfl_encountered}",
+                f"Maximum CFL ({cfl_limit}) violated. Maximum CFL encountered is {maximum_cfl_encountered}",
             )
 
         if (
@@ -949,7 +949,7 @@ class Timer(StoreSerializable):
 
         # CFL-based adjustment with safety margin
         maximum_cfl = (
-            cfl_threshold if cfl_threshold is not None else self.maximum_cfl_number
+            cfl_threshold if cfl_threshold is not None else self.maximum_cfl
         )
         if maximum_cfl_encountered is not None and maximum_cfl_encountered > 0.0:
             target_cfl = maximum_cfl * self.cfl_safety_margin
@@ -1276,7 +1276,7 @@ class Timer(StoreSerializable):
             "maximum_step_size": self.maximum_step_size,
             "minimum_step_size": self.minimum_step_size,
             "simulation_time": self.simulation_time,
-            "maximum_cfl_number": self.maximum_cfl_number,
+            "maximum_cfl": self.maximum_cfl,
             "cfl_safety_margin": self.cfl_safety_margin,
             "ramp_up_factor": self.ramp_up_factor,
             "backoff_factor": self.backoff_factor,
@@ -1354,7 +1354,7 @@ class Timer(StoreSerializable):
             "maximum_step_size": state["maximum_step_size"],
             "minimum_step_size": state["minimum_step_size"],
             "simulation_time": state["simulation_time"],
-            "maximum_cfl_number": state.get("maximum_cfl_number", 1.0),
+            "maximum_cfl": state.get("maximum_cfl", 1.0),
             "cfl_safety_margin": state.get("cfl_safety_margin", 0.9),
             "ramp_up_factor": state.get("ramp_up_factor"),
             "backoff_factor": state.get("backoff_factor", 0.5),

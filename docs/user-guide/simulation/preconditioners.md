@@ -18,7 +18,7 @@ config = bores.Config(
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
     pressure_preconditioner="ilu",
-    saturation_preconditioner="ilu",
+    transport_preconditioner="ilu",
 )
 ```
 
@@ -45,7 +45,7 @@ config = bores.Config(
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
     pressure_preconditioner="ilu",
-    saturation_preconditioner="ilu",
+    transport_preconditioner="ilu",
 )
 ```
 
@@ -192,7 +192,7 @@ config = bores.Config(
     rock_fluid_tables=rock_fluid_tables,
     wells=wells,
     pressure_preconditioner=None,    # No preconditioning
-    saturation_preconditioner=None,
+    transport_preconditioner=None,
 )
 ```
 

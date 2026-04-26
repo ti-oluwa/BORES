@@ -63,9 +63,9 @@ def _get_origin_class(typ: typing.Any) -> typing.Optional[type]:
     Extract the origin class from a generic type.
 
     Examples:
-        RockPermeability[NDimension] -> RockPermeability
-        List[int] -> list
-        int -> int
+    - RockPermeability[NDimension] -> RockPermeability
+    - List[int] -> list
+    - int -> int
     """
     if _is_generic_alias(typ):
         origin = typing.get_origin(typ)
@@ -134,12 +134,12 @@ def _unwrap_type(typ: typing.Any) -> typing.List[typing.Type[typing.Any]]:
     Recursively unwrap a type to get all constituent non-None types.
 
     Examples:
-        Optional[Foo] -> [Foo]
-        Union[Foo, Bar, None] -> [Foo, Bar]
-        List[Optional[Foo]] -> [List[Foo], Foo]
-        Dict[str, Optional[Foo]] -> [Dict[str, Foo], Foo]
-        Optional[List[Foo]] -> [List[Foo], Foo]
-        Union[List[Foo], Dict[str, Bar]] -> [List[Foo], Dict[str, Bar], Foo, Bar]
+    - Optional[Foo] -> [Foo]
+    - Union[Foo, Bar, None] -> [Foo, Bar]
+    - List[Optional[Foo]] -> [List[Foo], Foo]
+    - Dict[str, Optional[Foo]] -> [Dict[str, Foo], Foo]
+    - Optional[List[Foo]] -> [List[Foo], Foo]
+    - Union[List[Foo], Dict[str, Bar]] -> [List[Foo], Dict[str, Bar], Foo, Bar]
     """
     result = []
 

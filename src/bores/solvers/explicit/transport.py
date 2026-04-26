@@ -276,7 +276,7 @@ def solve_transport(
         cell_size_x=cell_size_x,
         cell_size_y=cell_size_y,
         time_step_in_days=time_step_in_days,
-        cfl_threshold=config.saturation_cfl_threshold,
+        cfl_threshold=config.cfl_threshold,
         dtype=dtype,
     )
 
@@ -839,7 +839,7 @@ def assemble_flux_contributions(
                         volumetric_outflow += abs(min(0.0, gas_flux))
                     else:
                         flux_boundary = flux_boundaries[pei, pej, pek]
-                        if cell_total_mobility > 0.0:
+                        if flux_boundary > 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -943,7 +943,7 @@ def assemble_flux_contributions(
                         volumetric_outflow += abs(min(0.0, gas_flux))
                     else:
                         flux_boundary = flux_boundaries[pwi, pwj, pwk]
-                        if cell_total_mobility > 0.0:
+                        if flux_boundary > 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -1051,7 +1051,7 @@ def assemble_flux_contributions(
                         volumetric_outflow += abs(min(0.0, gas_flux))
                     else:
                         flux_boundary = flux_boundaries[psi, psj, psk]
-                        if cell_total_mobility > 0.0:
+                        if flux_boundary > 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -1157,7 +1157,7 @@ def assemble_flux_contributions(
                         volumetric_outflow += abs(min(0.0, gas_flux))
                     else:
                         flux_boundary = flux_boundaries[pni, pnj, pnk]
-                        if cell_total_mobility > 0.0:
+                        if flux_boundary > 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -1266,7 +1266,7 @@ def assemble_flux_contributions(
                         volumetric_outflow += abs(min(0.0, gas_flux))
                     else:
                         flux_boundary = flux_boundaries[pbi, pbj, pbk]
-                        if cell_total_mobility > 0.0:
+                        if flux_boundary > 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -1370,7 +1370,7 @@ def assemble_flux_contributions(
                         volumetric_outflow += abs(min(0.0, gas_flux))
                     else:
                         flux_boundary = flux_boundaries[pti, ptj, ptk]
-                        if cell_total_mobility > 0.0:
+                        if flux_boundary > 0 and cell_total_mobility > 0.0:
                             water_fraction = cell_water_mobility / cell_total_mobility
                             oil_fraction = cell_oil_mobility / cell_total_mobility
                             gas_fraction = cell_gas_mobility / cell_total_mobility
@@ -1534,7 +1534,7 @@ def apply_updates(
         `cfl_violation_info` is a 1-D array of length 6:
         [violated_flag, i, j, k, max_cfl_encountered, cfl_threshold].
     """
-    # Store CFL values in a temporary grid to avoid race condition during parallel loop.
+    # We store CFL values in a temporary grid to avoid race condition during parallel loop.
     cfl_grid = np.zeros((cell_count_x, cell_count_y, cell_count_z), dtype=dtype)
 
     for i in numba.prange(cell_count_x):  # type: ignore
@@ -1628,7 +1628,6 @@ def apply_updates(
 
                 # Water mass update
                 well_water_mass_rate = net_water_well_mass_rate_grid[i, j, k]
-
                 old_water_mass = old_water_density * old_water_saturation
                 new_water_mass = old_water_mass + dt_over_pv * (
                     net_water_mass_flux_grid[i, j, k] + well_water_mass_rate
@@ -1689,7 +1688,10 @@ def apply_updates(
                 if free_gas_mass < 0.0:
                     free_gas_mass = 0.0
 
-                new_gas_saturation = free_gas_mass / current_gas_density
+                new_gas_saturation = free_gas_mass / (
+                    current_gas_density
+                    - (current_oil_density * current_alpha_solution_gor)
+                )
 
                 # Clamp Sg
                 if new_gas_saturation < 0.0:

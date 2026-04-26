@@ -22,6 +22,7 @@ from enum import Enum
 
 import attrs
 import numpy as np
+import numpy.typing as npt
 
 from bores.errors import ValidationError
 from bores.grids.utils import coarsen_grid
@@ -53,18 +54,17 @@ from bores.wells import Wells
 try:
     import pyvista as pv  # type: ignore[import]
 except ImportError:
-    pv = None  # type: ignore[assignment]
-
-
-logger = logging.getLogger(__name__)
-
-if pv is None:
     raise ImportError(
         "PyVista is required for pyvista3d visualization.\n"
         "Install with: pip install 'bores-framework[pyvista]'\n"
         "Or: pip install pyvista trame imageio"
     )
 
+
+logger = logging.getLogger(__name__)
+
+
+pv.global_theme.allow_empty_mesh = True
 
 _COLORSCHEME_TO_CMAP: typing.Dict[str, str] = {
     "viridis": "viridis",
@@ -295,7 +295,7 @@ def _make_explicit_grid(
     """
     Build PyVista `StructuredGrid` for reservoirs with structural dip.
 
-    Corner-point coordinates computed via NumPy broadcasting (no Python loops).
+    Corner-point coordinates computed via NumPy broadcasting.
     Supports sliced grids via `coordinate_offsets` for proper spatial positioning.
 
     :param data: 3D array of cell values with shape (nx, ny, nz)
@@ -350,13 +350,13 @@ def _make_explicit_grid(
     x_3d = np.repeat(x_grid[:, :, np.newaxis], nz + 1, axis=2)
     y_3d = np.repeat(y_grid[:, :, np.newaxis], nz + 1, axis=2)
 
-    grid = pv.StructuredGrid(x_3d, y_3d, z_corner)  # type: ignore
+    grid = pv.StructuredGrid(x_3d, y_3d, z_corner)
     grid.cell_data["values"] = data.flatten(order="F")
     return grid
 
 
 def _render_wells(
-    plotter: pv.Plotter,  # type: ignore
+    plotter: pv.Plotter,
     wells: Wells[ThreeDimensions],
     cell_dimension: typing.Optional[typing.Tuple[float, float]],
     depth_grid: typing.Optional[ThreeDimensionalGrid],
@@ -458,7 +458,7 @@ def _render_wells(
             casing_pts = np.array(
                 [[x_surf, y_surf, z_surface], [x_surf, y_surf, z_perf]]
             )
-            casing = pv.PolyData(casing_pts)  # type: ignore
+            casing = pv.PolyData(casing_pts)
             casing.lines = np.array([2, 0, 1])
             plotter.add_mesh(
                 casing,
@@ -490,7 +490,7 @@ def _render_wells(
                 perforation_cells.extend([2, base, base + 1])
 
             if perforation_points:
-                perforation_mesh = pv.PolyData(  # type: ignore
+                perforation_mesh = pv.PolyData(
                     np.array(perforation_points, dtype=float)
                 )
                 perforation_mesh.lines = np.array(perforation_cells, dtype=int)
@@ -505,7 +505,7 @@ def _render_wells(
         # Render surface marker (arrow pointing down)
         if show_surface_marker:
             arrow_top = z_surface + arrow_length
-            arrow = pv.Arrow(  # type: ignore
+            arrow = pv.Arrow(
                 start=(x_surf, y_surf, arrow_top),
                 direction=(0.0, 0.0, -1.0),
                 scale=arrow_length,
@@ -559,7 +559,7 @@ def _render_wells(
             casing_pts = np.array(
                 [[x_surf, y_surf, z_surface], [x_surf, y_surf, z_perf]]
             )
-            casing = pv.PolyData(casing_pts)  # type: ignore
+            casing = pv.PolyData(casing_pts)
             casing.lines = np.array([2, 0, 1])
             plotter.add_mesh(
                 casing,
@@ -591,7 +591,7 @@ def _render_wells(
                 perforation_cells.extend([2, base, base + 1])
 
             if perforation_points:
-                perforation_mesh = pv.PolyData(  # type: ignore
+                perforation_mesh = pv.PolyData(
                     np.array(perforation_points, dtype=float)
                 )
                 perforation_mesh.lines = np.array(perforation_cells, dtype=int)
@@ -606,7 +606,7 @@ def _render_wells(
         # Render surface marker (arrow outward of reservoir)
         if show_surface_marker:
             arrow_top = z_surface + arrow_length
-            arrow = pv.Arrow(  # type: ignore
+            arrow = pv.Arrow(
                 start=(x_surf, y_surf, z_surface),
                 direction=(0.0, 0.0, 1.0),
                 scale=arrow_length,
@@ -672,7 +672,7 @@ def _normalize_hex_color(color: str) -> str:
 _active_plotters: typing.List[weakref.ref] = []
 
 
-def _register_plotter(plotter: pv.Plotter) -> None:  # type: ignore
+def _register_plotter(plotter: pv.Plotter) -> None:
     """
     Track active plotter for automatic GPU resource cleanup.
 
@@ -742,17 +742,17 @@ class BaseRenderer(ABC):
         """
         self.config = config
 
-    def _plotter(self, title: str = "") -> pv.Plotter:  # type: ignore
+    def _plotter(self, title: str = "") -> pv.Plotter:
         """
-        Create and configure PyVista Plotter instance.
+        Create and configure PyVista `Plotter` instance.
 
         :param title: Window title (uses config.title if empty)
         :return: Configured `pv.Plotter` ready for mesh addition
         """
         if self.config.notebook:
-            pv.set_jupyter_backend("trame")  # type: ignore
+            pv.set_jupyter_backend("trame")
 
-        plotter = pv.Plotter(  # type: ignore
+        plotter = pv.Plotter(
             off_screen=self.config.off_screen,
             window_size=[self.config.width, self.config.height],
             title=title or self.config.title or "BORES 3D Visualizer",
@@ -771,7 +771,7 @@ class BaseRenderer(ABC):
         depth_grid: typing.Optional[ThreeDimensionalGrid],
         z_scale: float,
         coordinate_offsets: typing.Optional[typing.Tuple[int, int, int]],
-    ) -> typing.Union[pv.ImageData, pv.StructuredGrid]:  # type: ignore
+    ) -> typing.Union[pv.ImageData, pv.StructuredGrid]:
         """
         Build appropriate PyVista grid type based on geometry.
 
@@ -802,7 +802,7 @@ class BaseRenderer(ABC):
         metadata: PropertyMeta,
         *args: typing.Any,
         **kwargs: typing.Any,
-    ) -> pv.Plotter:  # type: ignore
+    ) -> pv.Plotter:
         """Render data and return configured `Plotter`."""
         ...
 
@@ -843,7 +843,7 @@ class VolumeRenderer(BaseRenderer):
         title: str = "",
         coordinate_offsets: typing.Optional[typing.Tuple[int, int, int]] = None,
         **kwargs: typing.Any,
-    ) -> pv.Plotter:  # type: ignore
+    ) -> pv.Plotter:
         """
         GPU-accelerated ray-cast volume rendering.
 
@@ -985,7 +985,7 @@ class IsosurfaceRenderer(BaseRenderer):
         title: str = "",
         coordinate_offsets: typing.Optional[typing.Tuple[int, int, int]] = None,
         **kwargs: typing.Any,
-    ) -> pv.Plotter:  # type: ignore
+    ) -> pv.Plotter:
         """
         Extract and render isosurface contours via VTK Marching Cubes.
 
@@ -1016,13 +1016,13 @@ class IsosurfaceRenderer(BaseRenderer):
         grid = self._build_grid(
             plot_data, cell_dimension, depth_grid, z_scale, coordinate_offsets
         )
-        grid_pts = grid.cell_data_to_point_data()
+        grid_points = grid.cell_data_to_point_data()
 
         low = isomin if isomin is not None else float(np.nanmin(plot_data))
         high = isomax if isomax is not None else float(np.nanmax(plot_data))
 
-        contours = grid_pts.contour(
-            isosurfaces=np.linspace(low, high, surface_count),  # type: ignore
+        contours = grid_points.contour(
+            isosurfaces=np.linspace(low, high, surface_count),
             scalars="values",
         )
 
@@ -1069,7 +1069,7 @@ class CellBlockRenderer(BaseRenderer):
         threshold_percentile: typing.Optional[float] = None,
         coordinate_offsets: typing.Optional[typing.Tuple[int, int, int]] = None,
         **kwargs: typing.Any,
-    ) -> pv.Plotter:  # type: ignore
+    ) -> pv.Plotter:
         """
         Render grid as voxel blocks (single structured mesh).
 
@@ -1170,7 +1170,7 @@ class Scatter3DRenderer(BaseRenderer):
         title: str = "",
         coordinate_offsets: typing.Optional[typing.Tuple[int, int, int]] = None,
         **kwargs: typing.Any,
-    ) -> pv.Plotter:  # type: ignore
+    ) -> pv.Plotter:
         """
         Render above-threshold cells as 3D point cloud.
 
@@ -1228,7 +1228,7 @@ class Scatter3DRenderer(BaseRenderer):
             py = yi + 0.5
             pz = zi + 0.5
 
-        cloud = pv.PolyData(np.column_stack([px, py, pz]))  # type: ignore
+        cloud = pv.PolyData(np.column_stack([px, py, pz]))
         cloud["values"] = vals
 
         plotter = self._plotter(title)
@@ -1272,7 +1272,7 @@ def _apply_slider_theme() -> None:
     - Zero-opacity caps so only the handle/track are visible
     - Applies to both "classic" and "modern" named styles
     """
-    ss = pv.global_theme.slider_styles  # type: ignore
+    ss = pv.global_theme.slider_styles
     for style in (ss.classic, ss.modern):
         style.slider_length = 0.015  # short pill handle
         style.slider_width = 0.022  # slim — not a fat disk
@@ -1284,8 +1284,8 @@ def _apply_slider_theme() -> None:
         style.cap_width = 0.02
 
 
-def _styled_slider(
-    plotter: pv.Plotter,  # type: ignore
+def _add_styled_slider(
+    plotter: pv.Plotter,
     callback: typing.Callable,
     rng: typing.Tuple[float, float],
     value: float,
@@ -1330,7 +1330,7 @@ def _styled_slider(
     rep = widget.GetRepresentation()
 
     # Title (static label)
-    title_prop = rep.GetTitleProperty()
+    title_prop = rep.GetTitleProperty()  # type: ignore[attr-defined]
     title_prop.SetColor(0.88, 0.91, 0.96)  # #e0e8f4 in float RGB
     title_prop.SetFontFamilyToArial()
     title_prop.BoldOff()
@@ -1338,19 +1338,17 @@ def _styled_slider(
     title_prop.ShadowOff()
 
     # Live value label
-    label_prop = rep.GetLabelProperty()
+    label_prop = rep.GetLabelProperty()  # type: ignore[attr-defined]
     label_prop.SetColor(0.55, 0.75, 0.98)  # brighter accent blue for the number
     label_prop.SetFontFamilyToArial()
     label_prop.BoldOff()
     label_prop.ShadowOff()
 
-    rep.SetLabelFormat(fmt)
+    rep.SetLabelFormat(fmt)  # type: ignore[attr-defined]
 
 
 def _setup_interactive_widgets(
-    plotter: pv.Plotter,  # type: ignore
-    config: PlotConfig,
-    metadata: PropertyMeta,
+    plotter: pv.Plotter, config: PlotConfig, metadata: PropertyMeta
 ) -> None:
     """
     Add interactive widgets and keyboard shortcuts to a PyVista plotter.
@@ -1404,7 +1402,7 @@ def _setup_interactive_widgets(
                 if hasattr(p, "SetOpacity"):
                     p.SetOpacity(value)
 
-    _styled_slider(
+    _add_styled_slider(
         plotter,
         _set_opacity,
         rng=(0.0, 1.0),
@@ -1438,7 +1436,7 @@ def _setup_interactive_widgets(
             except Exception as exc:
                 logger.error(exc, exc_info=True)
 
-        _styled_slider(
+        _add_styled_slider(
             plotter,
             _apply_threshold,
             rng=(data_min, data_max),
@@ -1466,7 +1464,7 @@ def _setup_interactive_widgets(
                 actor.SetScale(sx, sy, sz * factor)  # type: ignore
         plotter.render()
 
-    _styled_slider(
+    _add_styled_slider(
         plotter,
         _set_zscale,
         rng=(0.1, 20.0),
@@ -1501,7 +1499,7 @@ def _setup_interactive_widgets(
             _clim["hi"] = max(value, _clim["lo"] + 1e-9)
             _apply_clim()
 
-        _styled_slider(
+        _add_styled_slider(
             plotter,
             _set_cmin,
             rng=(_cdata_min, _cdata_max),
@@ -1512,7 +1510,7 @@ def _setup_interactive_widgets(
             fmt="%.3g",
         )
 
-        _styled_slider(
+        _add_styled_slider(
             plotter,
             _set_cmax,
             rng=(_cdata_min, _cdata_max),
@@ -2023,7 +2021,7 @@ class DataVisualizer:
                 plotter,
                 source.wells,  # type: ignore
                 cell_dimension=cell_dimension,
-                depth_grid=depth_grid,  # type: ignore
+                depth_grid=depth_grid,
                 coordinate_offsets=coordinate_offsets,
                 z_scale=kwargs.get("z_scale", 1.0),
                 **well_kwargs,
@@ -2036,7 +2034,7 @@ class DataVisualizer:
                     try:
                         xp, yp, zp = label.position.as_physical(
                             cell_dimension,
-                            depth_grid,  # type: ignore
+                            depth_grid,
                             coordinate_offsets,
                         )
                         # as_physical returns -depth; apply z_scale to match mesh
@@ -2190,8 +2188,6 @@ class DataVisualizer:
         if not sequence:
             raise ValidationError("Empty sequence")
 
-        resolved_exporter = resolve_exporter(save, output_gif)
-
         is_model_sequence = isinstance(sequence[0], (ModelState, ReservoirModel))
         if is_model_sequence and property is None:
             raise ValidationError(
@@ -2211,36 +2207,60 @@ class DataVisualizer:
             kwargs["cmin"] = float(np.nanmin([np.nanmin(a) for a in arrays]))  # type: ignore
             kwargs["cmax"] = float(np.nanmax([np.nanmax(a) for a in arrays]))  # type: ignore
 
-        plotters: typing.List[typing.Any] = []
-        frames: typing.List[np.ndarray] = []
+        plotters: typing.List[pv.Plotter] = []
+        exporter = resolve_exporter(save, output_gif)
 
-        for i, item in enumerate(sequence[::step_size]):
-            frame_title = title or (
-                f"{_PLOT_TYPE_NAMES.get(plot_type, '3D')}: {property or 'Data'} - frame {i}"
-            )
-            plotter = self.make_plot(
-                item,  # type: ignore
-                property=property,
-                plot_type=plot_type,
-                title=frame_title,
-                width=width,
-                height=height,
-                x_slice=x_slice,
-                y_slice=y_slice,
-                z_slice=z_slice,
-                labels=labels,
-                **kwargs,
-            )
-            plotters.append(plotter)
+        if exporter is not None:
 
-            if resolved_exporter is not None:
-                frames.append(plotter.screenshot(return_img=True))
-                plotter.close()
+            def _frames(
+                plotter: typing.List[pv.Plotter],
+            ) -> typing.Generator[npt.NDArray, None, None]:
+                for i, item in enumerate(sequence[::step_size]):
+                    frame_title = title or (
+                        f"{_PLOT_TYPE_NAMES.get(plot_type, '3D')}: {property or 'Data'} - frame {i}"
+                    )
+                    plotter = self.make_plot(
+                        item,
+                        property=property,
+                        plot_type=plot_type,
+                        title=frame_title,
+                        width=width,
+                        height=height,
+                        x_slice=x_slice,
+                        y_slice=y_slice,
+                        z_slice=z_slice,
+                        labels=labels,
+                        **kwargs,
+                    )
+                    plotters.append(plotter)
 
-        if resolved_exporter is not None and frames:
+                    if exporter is not None:
+                        try:
+                            yield plotter.screenshot(return_img=True)
+                        finally:
+                            plotter.close()
+
             fps = 1000.0 / frame_duration
-            resolved_exporter.write(frames, fps=fps)  # type: ignore
-
+            exporter.write(_frames(plotters), fps=fps)  # type: ignore
+        else:
+            for i, item in enumerate(sequence[::step_size]):
+                frame_title = title or (
+                    f"{_PLOT_TYPE_NAMES.get(plot_type, '3D')}: {property or 'Data'} - frame {i}"
+                )
+                plotter = self.make_plot(
+                    item,
+                    property=property,
+                    plot_type=plot_type,
+                    title=frame_title,
+                    width=width,
+                    height=height,
+                    x_slice=x_slice,
+                    y_slice=y_slice,
+                    z_slice=z_slice,
+                    labels=labels,
+                    **kwargs,
+                )
+                plotters.append(plotter)
         return plotters
 
     def help(self, plot_type: typing.Optional[PlotType] = None) -> str:

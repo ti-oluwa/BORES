@@ -606,7 +606,7 @@ injector = bores.injection_well(
     control=bores.AdaptiveRateControl(
         target_rate=100.0e6,  # 100 MMscf/D
         bhp_limit=9011.0,  # max injection BHP (psia)
-        clamp=bores.InjectionClamp(),
+        # clamp=bores.InjectionClamp(),
     ),
     injected_fluid=bores.InjectedFluid(
         name="Gas",
@@ -660,27 +660,25 @@ producer = bores.production_well(
 )
 wells = bores.wells_(injectors=[injector], producers=[producer])
 
-# Timer — 10-year simulation
 timer = bores.Timer(
     initial_step_size=bores.Time(days=1.0),
     maximum_step_size=bores.Time(days=30.0),
     minimum_step_size=bores.Time(minutes=10.0),
     simulation_time=bores.Time(years=10.0),
-    maximum_cfl_number=0.8,
+    maximum_cfl=0.4,
     ramp_up_factor=1.3,
     backoff_factor=0.5,
     aggressive_backoff_factor=0.25,
     maximum_rejections=20,
 )
 
-# Config
 config = bores.Config(
     timer=timer,
     rock_fluid_tables=rock_fluid_tables,
-    scheme="full-si",
-    output_frequency=10,
+    scheme="impes",
+    output_frequency=1,
     pressure_solver="direct",
-    saturation_solver="direct",
+    transport_solver="direct",
     log_interval=10,
     pvt_tables=pvt_tables,
     wells=wells,
@@ -692,8 +690,7 @@ config = bores.Config(
     maximum_pressure_change=1500.0,
     use_pseudo_pressure=True,
     phase_appearance_tolerance=1e-6,
-    saturation_convergence_tolerance=1e-4,
-    saturation_cfl_threshold=0.4,
+    cfl_threshold=0.4,
     # minimum_injector_gas_saturation=0.2,
 )
 

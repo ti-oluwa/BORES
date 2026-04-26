@@ -39,7 +39,7 @@ You can specify multiple solvers as a list. BORES will try them in order, fallin
 ```python
 config = bores.Config(
     pressure_solver=["bicgstab", "lgmres", "gmres"],
-    saturation_solver="bicgstab",
+    transport_solver="bicgstab",
     # ...
 )
 ```
@@ -111,11 +111,11 @@ config = bores.Config(
     timer=timer,
     wells=wells,
     pressure_solver="bicgstab",                  # Solver for the pressure equation
-    saturation_solver="bicgstab",                 # Solver for the saturation equation
+    transport_solver="bicgstab",                 # Solver for the saturation equation
     pressure_preconditioner="ilu",                # Preconditioner for pressure
-    saturation_preconditioner="ilu",              # Preconditioner for saturation
+    transport_preconditioner="ilu",              # Preconditioner for saturation
     pressure_convergence_tolerance=1e-6,          # Relative tolerance for pressure
-    saturation_convergence_tolerance=1e-4,        # Relative tolerance for saturation
+    transport_convergence_tolerance=1e-4,        # Relative tolerance for saturation
     maximum_solver_iterations=250,                           # Max iterations per solve
 )
 ```
@@ -155,8 +155,8 @@ If the solver converges but takes many iterations (50+), the preconditioner is n
 ```python
 config = bores.Config(
     pressure_solver="direct",
-    saturation_solver="bicgstab",
-    saturation_preconditioner="ilu",
+    transport_solver="bicgstab",
+    transport_preconditioner="ilu",
     # ...
 )
 ```
@@ -168,9 +168,9 @@ Direct solvers are fast for small problems and eliminate convergence concerns.
 ```python
 config = bores.Config(
     pressure_solver="bicgstab",
-    saturation_solver="bicgstab",
+    transport_solver="bicgstab",
     pressure_preconditioner="ilu",
-    saturation_preconditioner="ilu",
+    transport_preconditioner="ilu",
     # ...
 )
 ```
@@ -182,9 +182,9 @@ The default configuration works well. Consider adding preconditioner caching if 
 ```python
 config = bores.Config(
     pressure_solver=["bicgstab", "lgmres"],
-    saturation_solver="bicgstab",
+    transport_solver="bicgstab",
     pressure_preconditioner="amg",
-    saturation_preconditioner="ilu",
+    transport_preconditioner="ilu",
     pressure_convergence_tolerance=1e-6,
     maximum_solver_iterations=500,
     # ...

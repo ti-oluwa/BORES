@@ -601,9 +601,9 @@ class BHPControl(WellControl[WellFluidTcon]):
                 "Phase mobility is required for bottom hole pressure (BHP) control"
             )
 
-        if _disallow_flow(fluid=fluid, is_active=is_active) or (
-            self.target_phase is not None and fluid.phase != self.target_phase
-        ):
+        if _disallow_flow(
+            fluid=fluid, is_active=is_active, phase_mobility=phase_mobility
+        ) or (self.target_phase is not None and fluid.phase != self.target_phase):
             return 0.0
 
         bhp = self.bhp
@@ -703,9 +703,9 @@ class BHPControl(WellControl[WellFluidTcon]):
                 "Phase mobility is required for bottom hole pressure (BHP) control"
             )
 
-        if _disallow_flow(fluid=fluid, is_active=is_active) or (
-            self.target_phase is not None and fluid.phase != self.target_phase
-        ):
+        if _disallow_flow(
+            fluid=fluid, is_active=is_active, phase_mobility=phase_mobility
+        ) or (self.target_phase is not None and fluid.phase != self.target_phase):
             # Return reservoir pressure (no driving force)
             return pressure
 
@@ -773,9 +773,9 @@ class BHPControl(WellControl[WellFluidTcon]):
                 "Phase mobility is required for bottom hole pressure (BHP) control"
             )
 
-        if _disallow_flow(fluid=fluid, is_active=is_active) or (
-            self.target_phase is not None and fluid.phase != self.target_phase
-        ):
+        if _disallow_flow(
+            fluid=fluid, is_active=is_active, phase_mobility=phase_mobility
+        ) or (self.target_phase is not None and fluid.phase != self.target_phase):
             return ControlInfo(rate=0.0, bhp=pressure, is_bhp_control=True)
 
         bhp = self.bhp
@@ -944,9 +944,9 @@ class RateControl(WellControl[WellFluidTcon]):
         :return: Target flow rate if the required bottom hole pressure to produce/inject
             is above or equal to the minimum bottom hole pressure constraint (if any). Otherwise returns 0.0.
         """
-        if _disallow_flow(fluid=fluid, is_active=is_active) or (
-            self.target_phase is not None and fluid.phase != self.target_phase
-        ):
+        if _disallow_flow(
+            fluid=fluid, is_active=is_active, phase_mobility=phase_mobility
+        ) or (self.target_phase is not None and fluid.phase != self.target_phase):
             return 0.0
 
         # Apply allocation to target rate
@@ -1045,9 +1045,9 @@ class RateControl(WellControl[WellFluidTcon]):
                 "Phase mobility is required to get the effective bottom hole pressure (BHP) for the rate control."
             )
 
-        if _disallow_flow(fluid=fluid, is_active=is_active) or (
-            self.target_phase is not None and fluid.phase != self.target_phase
-        ):
+        if _disallow_flow(
+            fluid=fluid, is_active=is_active, phase_mobility=phase_mobility
+        ) or (self.target_phase is not None and fluid.phase != self.target_phase):
             return pressure
 
         # Apply allocation to target rate and convert to reservoir rate
@@ -1174,9 +1174,9 @@ class RateControl(WellControl[WellFluidTcon]):
             When the BHP constraint cannot be satisfied both fields reflect the
             shut-in state: `rate=0`, `bhp=pressure`.
         """
-        if _disallow_flow(fluid=fluid, is_active=is_active) or (
-            self.target_phase is not None and fluid.phase != self.target_phase
-        ):
+        if _disallow_flow(
+            fluid=fluid, is_active=is_active, phase_mobility=phase_mobility
+        ) or (self.target_phase is not None and fluid.phase != self.target_phase):
             return ControlInfo(rate=0.0, bhp=pressure, is_bhp_control=False)
 
         # Allocated reservoir rate
@@ -1396,9 +1396,9 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
         :param pvt_tables: `PVTTables` object for fluid property lookups
         :return: Flow rate in (bbl/day or ft³/day).
         """
-        if _disallow_flow(fluid=fluid, is_active=is_active) or (
-            self.target_phase is not None and fluid.phase != self.target_phase
-        ):
+        if _disallow_flow(
+            fluid=fluid, is_active=is_active, phase_mobility=phase_mobility
+        ) or (self.target_phase is not None and fluid.phase != self.target_phase):
             return 0.0
 
         # Apply allocation to target rate (for rate mode) and convert to reservoir rate
@@ -1572,9 +1572,9 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
                 "Phase mobility is required to get the effective bottom hole pressure (BHP) for the control."
             )
 
-        if _disallow_flow(fluid=fluid, is_active=is_active) or (
-            self.target_phase is not None and fluid.phase != self.target_phase
-        ):
+        if _disallow_flow(
+            fluid=fluid, is_active=is_active, phase_mobility=phase_mobility
+        ) or (self.target_phase is not None and fluid.phase != self.target_phase):
             return pressure
 
         # Apply allocation to target rate (for rate mode)
@@ -1711,9 +1711,9 @@ class AdaptiveRateControl(WellControl[WellFluidTcon]):
             required BHP (capped at `bhp_limit`) when in rate mode.
             Reservoir pressure is used as the BHP sentinel in strict rate mode.
         """
-        if _disallow_flow(fluid=fluid, is_active=is_active) or (
-            self.target_phase is not None and fluid.phase != self.target_phase
-        ):
+        if _disallow_flow(
+            fluid=fluid, is_active=is_active, phase_mobility=phase_mobility
+        ) or (self.target_phase is not None and fluid.phase != self.target_phase):
             return ControlInfo(rate=0.0, bhp=pressure, is_bhp_control=False)
 
         target_rate = self.target_rate * allocation_fraction * formation_volume_factor
@@ -2300,7 +2300,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
         """
         if not is_active:
             return ControlInfo(rate=0.0, bhp=pressure, is_bhp_control=False)
-        
+
         # Primary phase: delegate entirely to `primary_control.get_control` so
         # that the BHP solve and rate computation share intermediates there.
         if fluid.phase == self.primary_phase:

@@ -1019,9 +1019,9 @@ class Rates(Serializable, typing.Generic[DType, ShapeT]):
 
     def abs(self) -> Self:
         return Rates(  # type: ignore[return-value]
-            oil=abs(self.oil),
-            water=abs(self.water),
-            gas=abs(self.gas),
+            oil=self.oil.abs(),
+            water=self.water.abs(),
+            gas=self.gas.abs(),
         )
 
 
@@ -1246,7 +1246,7 @@ class ContextFlag(typing.Generic[T]):
     """
     Context-local flag.
 
-    Uses `contextvars.ContextVar` for true isolation across concurrent tasks,
+    Uses `contextvars.ContextVar` for isolation across concurrent tasks,
     threads, and async contexts. Each context maintains its own flag value.
 
     The context manager protocol returns the current value on entry and

@@ -726,7 +726,7 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
         maximum_step_size=bores.Time(days=30.0),
         minimum_step_size=bores.Time(minutes=10.0),
         simulation_time=bores.Time(years=8.0),
-        maximum_cfl_number=0.9,
+        maximum_cfl=0.9,
         ramp_up_factor=1.5,
         backoff_factor=0.5,
         aggressive_backoff_factor=0.25,
@@ -739,10 +739,10 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
     config = bores.Config(
         timer=timer,
         rock_fluid_tables=rock_fluid_tables,
-        scheme="si",
+        scheme="impes",
         output_frequency=1,
         pressure_solver="direct",
-        saturation_solver="direct",
+        transport_solver="direct",
         log_interval=10,
         pvt_tables=pvt_tables,
         wells=wells,
@@ -755,10 +755,7 @@ def setup_config(Path, bores, np, oil_specific_gravity, pvt_tables):
         maximum_pressure_change=2000.0,
         use_pseudo_pressure=True,
         normalize_saturations=True,
-        phase_appearance_tolerance=1e-6,
-        saturation_convergence_tolerance=1e-4,
-        saturation_cfl_threshold=0.8,
-        minimum_injector_gas_saturation=0.1,
+        cfl_threshold=0.4,
     )
     config.save(Path("./benchmarks/runs/spe1/setup/config.yaml"))
     return (wells,)
@@ -833,7 +830,7 @@ def setup_analysis(bores, states):
         avg_oil_sat = fluid_properties.oil_saturation_grid.mean()
         avg_water_sat = fluid_properties.water_saturation_grid.mean()
         avg_gas_sat = fluid_properties.gas_saturation_grid[9, 9, 2]
-        avg_pressure = s.production_bhps.gas[9, 9, 2]
+        avg_pressure = s.rates.injection_bhps.gas[0, 0, 0]
 
         oil_saturation_history.append((time_step, avg_oil_sat))
         water_saturation_history.append((time_step, avg_water_sat))
@@ -1195,7 +1192,7 @@ def recovery_plots(analyst, bores, np, recovery_efficiency_history):
 
 @app.cell
 def _(bores):
-    viz = bores.pyvista3d.DataVisualizer(bores.pyvista3d.PlotConfig(off_screen=False))
+    viz = bores.pyvista3d.DataVisualizer(bores.pyvista3d.PlotConfig(off_screen=False, background_color="#999"))
     return (viz,)
 
 
@@ -1209,7 +1206,7 @@ def _(bores, states, viz, wells):
     labels.add_well_labels(well_positions, well_names)
 
     shared_kwargs = dict(
-        plot_type="cell_blocks",
+        plot_type="isosurface",
         width=1200,
         height=720,
         # opacity=0.7,
@@ -1225,9 +1222,9 @@ def _(bores, states, viz, wells):
         # cmax=1.0,
     )
 
-    property = "gas-sat"
+    property = "pressure"
     figures = []
-    timesteps = [295]
+    timesteps = [240]
     for timestep in timesteps:
         figure = viz.make_plot(
             states[timestep],

@@ -26,10 +26,10 @@ __all__ = ["Config"]
 @attrs.frozen(kw_only=True, auto_attribs=True)
 class Config(
     StoreSerializable,
-    load_exclude={"pvt_tables", "_lock", "task_pool"},
-    dump_exclude={"pvt_tables", "_lock", "task_pool"},
+    load_exclude={"pvt_tables", "_lock"},
+    dump_exclude={"pvt_tables", "_lock"},
 ):
-    """Simulation run configuration and parameters."""
+    """Simulation configuration and parameters."""
 
     timer: Timer
     """Simulation time manager to control time steps and simulation time."""
@@ -54,7 +54,7 @@ class Config(
     )
     """Relative convergence tolerance for pressure iterative solvers (default is 1e-6)."""
 
-    saturation_convergence_tolerance: float = attrs.field(
+    transport_convergence_tolerance: float = attrs.field(
         default=1e-4, validator=attrs.validators.le(1e-2)
     )
     """Relative convergence tolerance for saturation iterative solvers (default is 1e-4). Transport matrix tend to be more well conditioned."""
@@ -107,22 +107,12 @@ class Config(
     miscibility_model: MiscibilityModel = "immiscible"
     """Miscibility model: 'immiscible', 'todd-longstaff'"""
 
-    saturation_cfl_threshold: float = 0.7
+    cfl_threshold: float = 0.7
     """
-    Maximum allowable saturation CFL number for the 'explicit' evolution scheme to ensure numerical stability.
+    Maximum allowable transport CFL number for the 'explicit' evolution scheme to ensure numerical stability.
 
-    Typically kept below 1.0 to prevent instability in explicit saturation updates.
+    Typically kept below 1.0 to prevent instability in explicit transport updates.
 
-    Lowering this value increases stability but may require smaller time steps.
-    Raising them can improve performance but risks instability. Use with caution and monitor simulation behavior.
-    """
-
-    pressure_cfl_threshold: float = 0.9
-    """
-    Maximum allowable pressure CFL number for the 'explicit' evolution scheme to ensure numerical stability.
-
-    Typically kept below 1.0 to prevent instability in explicit pressure updates.
-    
     Lowering this value increases stability but may require smaller time steps.
     Raising them can improve performance but risks instability. Use with caution and monitor simulation behavior.
     """
@@ -139,14 +129,14 @@ class Config(
     pressure_solver: typing.Union[SolverStr, typing.Iterable[SolverStr]] = "bicgstab"
     """Pressure matrix system solver(s) (can be a list of solver to use in sequence) to use for solving linear systems."""
 
-    saturation_solver: typing.Union[SolverStr, typing.Iterable[SolverStr]] = "bicgstab"
-    """Saturation matrix system solver(s) (can be a list of solver to use in sequence) to use for solving linear systems."""
+    transport_solver: typing.Union[SolverStr, typing.Iterable[SolverStr]] = "bicgstab"
+    """Transport matrix system solver(s) (can be a list of solver to use in sequence) to use for solving linear systems."""
 
     pressure_preconditioner: typing.Optional[PreconditionerStr] = "ilu"
-    """Preconditioner to use for pressure solvers."""
+    """Preconditioner to use for pressure syetem solvers."""
 
-    saturation_preconditioner: typing.Optional[PreconditionerStr] = "ilu"
-    """Preconditioner to use for saturation solvers."""
+    transport_preconditioner: typing.Optional[PreconditionerStr] = "ilu"
+    """Preconditioner to use for transport system solvers."""
 
     phase_appearance_tolerance: float = attrs.field(  # type: ignore
         default=1e-6,
@@ -429,7 +419,7 @@ class Config(
     and saturation are not meaningfully coupled.
     """
 
-    saturation_outer_convergence_tolerance: float = attrs.field(
+    transport_outer_convergence_tolerance: float = attrs.field(
         default=1e-2,
         validator=attrs.validators.and_(
             attrs.validators.gt(0.0),
@@ -437,12 +427,12 @@ class Config(
         ),
     )
     """
-    Absolute saturation convergence tolerance for the Sequential Implicit outer iteration loop.
+    Absolute transport/saturation convergence tolerance for the Sequential Implicit outer iteration loop.
 
     Outer iterations are considered converged when the maximum inter-iterate saturation
     change across all three phases falls below this threshold:
 
-        max(|S_new - S_old|) < saturation_outer_convergence_tolerance
+        max(|S_new - S_old|) < transport_outer_convergence_tolerance
 
     An absolute measure is appropriate here because saturation is dimensionless and
     bounded in [0, 1], so the tolerance has a consistent physical meaning regardless

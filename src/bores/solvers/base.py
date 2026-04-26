@@ -639,7 +639,7 @@ def _spsolve(
     maxiter: typing.Optional[int],
     M: typing.Optional[typing.Any],
     callback: typing.Optional[typing.Callable[[npt.NDArray], None]],
-) -> npt.NDArray:
+) -> typing.Tuple[npt.NDArray, int]:
     """Direct (SPSOLVE) solver wrapper compatible with the standard `SolverFunc` interface"""
     return spsolve(A, b), 0  # type: ignore[return-value]
 
@@ -1286,7 +1286,7 @@ def solve_linear_system(
             callback=None,
         )
         if info == 0:
-            return x, M
+            return np.ascontiguousarray(x), M
         else:
             logger.warning(
                 f"Solver {solver_func!r} failed to converge within {maximum_iterations} iterations. Info: {info}"
@@ -1314,4 +1314,4 @@ def solve_linear_system(
             "All iterative solvers and direct solver failed to solve the system."
         ) from exc
 
-    return x, None  # type: ignore[return-value]
+    return np.ascontiguousarray(x), None  # type: ignore[return-value]

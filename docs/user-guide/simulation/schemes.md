@@ -93,7 +93,7 @@ config = bores.Config(
     scheme="full-sequential-implicit",  # or "full-si"
     maximum_outer_iterations=5,
     pressure_outer_convergence_tolerance=1e-3,
-    saturation_outer_convergence_tolerance=1e-2,
+    transport_outer_convergence_tolerance=1e-2,
 )
 ```
 
@@ -101,7 +101,7 @@ Important outer-loop parameters:
 
 - `maximum_outer_iterations` — maximum outer coupling iterations (default 5).
 - `pressure_outer_convergence_tolerance` — relative pressure inter-iterate tolerance for outer-loop convergence.
-- `saturation_outer_convergence_tolerance` — absolute saturation inter-iterate tolerance for outer-loop convergence.
+- `transport_outer_convergence_tolerance` — absolute saturation inter-iterate tolerance for outer-loop convergence.
 
 Full-SI is appropriate when pressure–saturation coupling is strong (for example, high-rate gas injection, near-critical PVT behaviour, or situations with strong compositional feedback) and you need better coupling than SI provides but want to avoid the complexity or cost of a fully monolithic implicit Jacobian.
 
@@ -131,7 +131,7 @@ config = bores.Config(
     wells=wells,
     scheme="explicit",
     pressure_cfl_threshold=0.9,     # Max pressure CFL number
-    saturation_cfl_threshold=0.6,   # Max saturation CFL number
+    cfl_threshold=0.6,   # Max saturation CFL number
 )
 ```
 
@@ -181,7 +181,7 @@ config = bores.Config(
 
     # Solver convergence
     pressure_convergence_tolerance=1e-6,
-    saturation_convergence_tolerance=1e-4,
+    transport_convergence_tolerance=1e-4,
     maximum_solver_iterations=250,
 
     # Saturation change limits (trigger timestep rejection if exceeded)
@@ -191,7 +191,7 @@ config = bores.Config(
     maximum_pressure_change=100.0,         # psi per step
 
     # CFL thresholds (explicit and IMPES saturation)
-    saturation_cfl_threshold=0.6,
+    cfl_threshold=0.6,
     pressure_cfl_threshold=0.9,
 
     # Output control
@@ -202,7 +202,7 @@ config = bores.Config(
 
 The `pressure_convergence_tolerance` controls when the iterative solver considers the pressure solution converged. A tighter tolerance (smaller number) gives more accurate pressure but requires more iterations. The default of `1e-6` is appropriate for most cases.
 
-The `saturation_convergence_tolerance` plays the same role for the implicit saturation solver. It can be more relaxed than the pressure tolerance because the saturation transport equation is typically better conditioned.
+The `transport_convergence_tolerance` plays the same role for the implicit saturation solver. It can be more relaxed than the pressure tolerance because the saturation transport equation is typically better conditioned.
 
 The `maximum_solver_iterations` parameter caps how many iterations the solver attempts before giving up. If the solver hits this limit, the time step is rejected and retried with a smaller step size. The default of 250 is generous; well-conditioned problems typically converge in 20 to 50 iterations.
 
