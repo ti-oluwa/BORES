@@ -47,7 +47,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "CachedPreconditionerFactory",
-    "EvolutionResult",
+    "Solution",
     "build_amg_preconditioner",
     "build_block_jacobi_preconditioner",
     "build_cpr_preconditioner",
@@ -134,21 +134,21 @@ M = typing.TypeVar("M")
 
 
 @attrs.frozen
-class EvolutionResult(typing.Generic[T, M]):
+class Solution(typing.Generic[T, M]):
     """
-    Result of a single evolution step in the simulation.
+    Result of a single solve (sub)step in the simulation.
     """
 
     value: T
     """The result value if successful, otherwise None."""
     scheme: typing.Literal["implicit", "explicit"]
-    """The numerical scheme used for the evolution step."""
+    """The numerical scheme used for the solve (sub)step."""
     success: bool = True
-    """Indicates if the evolution step was successful."""
+    """Indicates if the solve (sub)step was successful."""
     message: typing.Optional[str] = None
     """A message providing additional information about the result."""
     metadata: typing.Optional[M] = None
-    """Optional metadata related to the evolution step."""
+    """Optional metadata related to the solve (sub)step."""
 
 
 @numba.njit(inline="always", cache=True)

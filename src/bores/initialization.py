@@ -11,11 +11,11 @@ from bores.config import Config
 from bores.constants import c
 from bores.grids.rock_fluid import build_rock_fluid_properties_grids
 from bores.models import FluidProperties, RockProperties
-from bores.solvers.explicit.immiscible import assemble_flux_contributions
+from bores.solvers.explicit.transport import assemble_flux_contributions
 from bores.transmissibility import FaceTransmissibilities
 from bores.types import FluidPhase, ThreeDimensionalGrid, ThreeDimensions
 from bores.wells.base import Wells
-from bores.wells.indices import WellIndicesCache
+from bores.wells.indices import WellsIndices
 
 logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ class ZeroFlowCheckResult:
 def seed_injection_saturations(
     fluid_properties: FluidProperties[ThreeDimensions],
     wells: Wells[ThreeDimensions],
-    well_indices_cache: WellIndicesCache,
+    wells_indices: WellsIndices,
     config: Config,
     minimum_injector_water_saturation: typing.Optional[float] = None,
     minimum_injector_gas_saturation: typing.Optional[float] = None,
@@ -103,7 +103,7 @@ def seed_injection_saturations(
 
     :param fluid_properties: Current fluid properties at t = 0 (before any time-stepping).
     :param wells: Wells configuration containing all injection wells.
-    :param well_indices_cache: Pre-built cache mapping well names to their perforated cell indices.
+    :param wells_indices: Pre-built cache mapping well names to their perforated cell indices.
     :param config: The simulation `Config` instance. Used to get fallback seed values when the corresponding parameters are `None`.
     :param minimum_injector_water_saturation: Override for the minimum water saturation to seed in
         water-injector perforations. When `None`, falls back to `config.minimum_injector_water_saturation`.
@@ -176,15 +176,15 @@ def seed_injection_saturations(
             )
             continue
 
-        if well.name not in well_indices_cache.injection:
+        if well.name not in wells_indices.injection:
             logger.warning(
-                "Well %r not found in well_indices_cache, skipping.",
+                "Well %r not found in wells_indices, skipping.",
                 well.name,
             )
             continue
 
-        well_indices = well_indices_cache.injection[well.name]
-        for perforation_index in well_indices:
+        wells_indices = wells_indices.injection[well.name]
+        for perforation_index in wells_indices:
             i, j, k = perforation_index.cell
 
             if injected_phase == FluidPhase.WATER:
@@ -251,7 +251,7 @@ def seed_injection_saturations(
 def apply_minimum_injector_saturations(
     fluid_properties: FluidProperties[ThreeDimensions],
     wells: Wells[ThreeDimensions],
-    well_indices_cache: WellIndicesCache,
+    wells_indices: WellsIndices,
     minimum_injector_water_saturation: typing.Optional[float],
     minimum_injector_gas_saturation: typing.Optional[float],
     dtype: npt.DTypeLike,
@@ -271,7 +271,7 @@ def apply_minimum_injector_saturations(
     :param fluid_properties: Fluid properties at the start of the current time step.
     :param wells: Wells configuration. Only **open** injection wells with a configured
         `injected_fluid` are processed.
-    :param well_indices_cache: Cache of well indices. Only the `injection` sub-cache is used.
+    :param wells_indices: Cache of well indices. Only the `injection` sub-cache is used.
     :param minimum_injector_water_saturation: Minimum water saturation to enforce in every active
         water-injector wellblock. Must be greater than `phase_appearance_tolerance` (see `Config`) to
         guarantee `krw > 0`. Pass `None` to skip water enforcement.
@@ -323,10 +323,10 @@ def apply_minimum_injector_saturations(
         if seed is None:
             continue
 
-        if well.name not in well_indices_cache.injection:
+        if well.name not in wells_indices.injection:
             continue
 
-        for perforation_index in well_indices_cache.injection[well.name]:
+        for perforation_index in wells_indices.injection[well.name]:
             i, j, k = perforation_index.cell
 
             if injected_phase == FluidPhase.WATER:

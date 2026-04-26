@@ -24,8 +24,8 @@ class PerforationIndex:
 
 
 @attrs.frozen
-class WellIndices:
-    """Computed well indices for all perforations of a single well."""
+class WellIndex:
+    """Container for the computed well indices for all perforations of a single well."""
 
     well_name: str
     """Well name"""
@@ -34,7 +34,7 @@ class WellIndices:
     total_well_index: float
     """Sum total of all perforated cells' well indices"""
 
-    def allocation_fraction(self, perforation: PerforationIndex) -> float:
+    def get_allocation_fraction(self, perforation: PerforationIndex) -> float:
         if self.total_well_index <= 0:
             return 1.0
         return perforation.well_index / self.total_well_index
@@ -44,16 +44,16 @@ class WellIndices:
 
 
 @attrs.frozen
-class WellIndicesCache:
+class WellsIndices:
     """(Pre)computed well indices for all wells."""
 
-    injection: typing.Dict[str, WellIndices]
-    """Mapping of injection well names to their corresponding `WellIndices`"""
-    production: typing.Dict[str, WellIndices]
-    """Mapping of injection well names to their corresponding `WellIndices`"""
+    injection: typing.Dict[str, WellIndex]
+    """Mapping of injection well names to their corresponding `WellIndex`"""
+    production: typing.Dict[str, WellIndex]
+    """Mapping of injection well names to their corresponding `WellIndex`"""
 
 
-def build_well_indices_cache(
+def build_wells_indices(
     grid_shape: ThreeDimensions,
     cell_size_x: float,
     cell_size_y: float,
@@ -63,16 +63,13 @@ def build_well_indices_cache(
     absolute_permeability: RockPermeability,
     boundary_conditions: BoundaryConditions[ThreeDimensions],
     regime_constant: float = -3 / 4,
-) -> WellIndicesCache:
+) -> WellsIndices:
     """
     Compute well indices for all perforated cells across all injection and production wells.
 
     Well indices depend only on static geometric and rock properties (permeability, cell
     dimensions, skin factor, wellbore radius, and boundary conditions), so they are
     invariant across time steps and can be computed once at simulation startup.
-
-    The resulting cache eliminates redundant well index computations from the inner
-    time-step loop in the pressure and saturation solvers.
 
     :param grid_shape: 3D reservoir grid shape.
     :param cell_size_x: Cell size in the x-direction (ft).
@@ -84,12 +81,12 @@ def build_well_indices_cache(
     :param boundary_conditions: Model boundary conditions. Used to apply no-flow boundary
         corrections to the Peaceman effective drainage radius for wells at grid boundaries.
     :param regime_constant: The flow regime constant. 0 for steady, -3/4 for pseudo steady, 1/2 for transient regime
-    :return: `WellIndicesCache` containing precomputed `WellIndices` for every injection
+    :return: `WellsIndices` containing precomputed `WellIndex` for every injection
         and production well, keyed by well name.
     """
     cell_count_x, cell_count_y, cell_count_z = grid_shape
 
-    def _well_indices(well: Well) -> WellIndices:
+    def _well_indices(well: Well) -> WellIndex:
         perforations = []
         total_well_index = 0.0
         for start, end in well.perforating_intervals:
@@ -127,13 +124,13 @@ def build_well_indices_cache(
                     )
                 )
                 total_well_index += well_index
-        return WellIndices(
+        return WellIndex(
             well_name=well.name,
             perforations=tuple(perforations),
             total_well_index=total_well_index,
         )
 
-    return WellIndicesCache(
+    return WellsIndices(
         injection={wells.name: _well_indices(wells) for wells in wells.injection_wells},
         production={
             wells.name: _well_indices(wells) for wells in wells.production_wells
@@ -141,5 +138,5 @@ def build_well_indices_cache(
     )
 
 
-update_well_indices = ContextFlag(False)
+update_wells_indices = ContextFlag(False)
 """Flag to indicate if a well indices update is needed during a simulation run."""

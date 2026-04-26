@@ -84,7 +84,7 @@ injector = bores.injection_well(
     radius=0.25,
     control=bores.AdaptiveRateControl(
         target_rate=10000,
-        bhp_limit=6000.0,
+        bhp_limit=8000.0,
         clamp=bores.InjectionClamp(),
     ),
     injected_fluid=bores.InjectedFluid(
@@ -134,7 +134,7 @@ rock_fluid_tables = bores.RockFluidTables(
         wettability=bores.Wettability.WATER_WET,
         mixing_rule="eclipse_rule",
     ),
-    capillary_pressure_table=bores.BrooksCoreyCapillaryPressureModel(
+    capillary_pressure_table=bores.VanGenuchtenCapillaryPressureModel(
         wettability=bores.Wettability.WATER_WET,
     ),
 )
@@ -157,9 +157,9 @@ config = bores.Config(
     pressure_preconditioner=None,
     saturation_preconditioner=None,
     maximum_pressure_change=800,
-    freeze_saturation_pressure=True,
-    # disable_capillary_effects=True,
-    # minimum_injector_water_saturation=0.1
+    # freeze_saturation_pressure=True,
+    disable_capillary_effects=True,
+    minimum_injector_water_saturation=0.1
 )
 
 # Run and monitor the simulation and collect states

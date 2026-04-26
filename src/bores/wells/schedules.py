@@ -13,7 +13,7 @@ from bores.types import Coordinates, S, T
 from bores.wells.base import InjectionWell, ProductionWell, Well, Wells, WellT
 from bores.wells.controls import WellControl
 from bores.wells.core import InjectedFluid, ProducedFluid, WellFluid
-from bores.wells.indices import update_well_indices
+from bores.wells.indices import update_wells_indices
 
 __all__ = [
     "EventAction",
@@ -1125,7 +1125,7 @@ class UpdateAction(
             well.skin_factor = self.skin_factor
             if skin_factor_changed:
                 # Skin factor change warrants well indices update
-                update_well_indices.set(True)
+                update_wells_indices.set(True)
 
         if self.is_active is True:
             well.open()

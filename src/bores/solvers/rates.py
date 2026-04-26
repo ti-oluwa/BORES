@@ -24,7 +24,7 @@ from bores.types import (
 )
 from bores.wells.base import Wells
 from bores.wells.controls import CoupledRateControl
-from bores.wells.indices import WellIndicesCache
+from bores.wells.indices import WellsIndices
 
 
 @attrs.frozen
@@ -95,7 +95,7 @@ def compute_well_rates(
     wells: Wells[ThreeDimensions],
     time: float,
     config: Config,
-    well_indices_cache: WellIndicesCache,
+    wells_indices: WellsIndices,
     dtype: npt.DTypeLike,
 ) -> WellRates[ThreeDimensions]:
     """
@@ -110,7 +110,7 @@ def compute_well_rates(
     :param wells: Wells container with injection and production well definitions.
     :param time: Total simulation time elapsed, this time step inclusive (s).
     :param config: Simulation configuration.
-    :param well_indices_cache: Cache of well indices and allocation fractions.
+    :param wells_indices: Cache of well indices and allocation fractions.
     :param dtype: NumPy dtype for the returned grid arrays.
     :return: `WellRates` container holding the total volumetric well-rate grid,
         the six per-phase volumetric and mass rate grids, and the per-phase
@@ -213,12 +213,12 @@ def compute_well_rates(
         injected_phase = injected_fluid.phase
         is_gas = injected_phase == FluidPhase.GAS
         use_pseudo_pressure = config.use_pseudo_pressure and is_gas
-        well_indices = well_indices_cache.injection[well.name]
+        indices = wells_indices.injection[well.name]
 
-        for perforation_index in well_indices:
+        for perforation_index in indices:
             i, j, k = perforation_index.cell
             well_index = perforation_index.well_index
-            allocation_fraction = well_indices.allocation_fraction(perforation_index)
+            allocation_fraction = indices.get_allocation_fraction(perforation_index)
             cell_pressure = typing.cast(float, pressure_grid[i, j, k])
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
 
@@ -298,19 +298,21 @@ def compute_well_rates(
                 net_well_rate_grid[i, j, k] += flow_rate
                 net_gas_well_rate_grid[i, j, k] += flow_rate
                 net_gas_well_mass_rate_grid[i, j, k] += flow_rate * phase_density
-                injection_rates[i, j, k] = (0.0, 0.0, flow_rate)
-                injection_mass_rates[i, j, k] = (0.0, 0.0, flow_rate * phase_density)
-                injection_fvfs[i, j, k] = (np.nan, np.nan, phase_fvf)
-                injection_bhps[i, j, k] = (np.nan, np.nan, effective_bhp)
+                injection_rates.gas[i, j, k] = flow_rate
+                injection_mass_rates.gas[i, j, k] = flow_rate * phase_density
+                injection_fvfs.gas[i, j, k] = phase_fvf
+                if effective_bhp != cell_pressure:
+                    injection_bhps.gas[i, j, k] = effective_bhp
             else:
                 flow_rate *= bbl_to_ft3
                 net_well_rate_grid[i, j, k] += flow_rate
                 net_water_well_rate_grid[i, j, k] += flow_rate
                 net_water_well_mass_rate_grid[i, j, k] += flow_rate * phase_density
-                injection_rates[i, j, k] = (flow_rate, 0.0, 0.0)
-                injection_mass_rates[i, j, k] = (flow_rate * phase_density, 0.0, 0.0)
-                injection_fvfs[i, j, k] = (phase_fvf, np.nan, np.nan)
-                injection_bhps[i, j, k] = (effective_bhp, np.nan, np.nan)
+                injection_rates.water[i, j, k] += flow_rate
+                injection_mass_rates.water[i, j, k] += flow_rate * phase_density
+                injection_fvfs.water[i, j, k] = phase_fvf
+                if effective_bhp != cell_pressure:
+                    injection_bhps.water[i, j, k] = effective_bhp
 
     # Production wells
     for well in wells.production_wells:
@@ -318,12 +320,12 @@ def compute_well_rates(
             continue
 
         is_couple_controlled = isinstance(well.control, CoupledRateControl)
-        well_indices = well_indices_cache.production[well.name]
+        indices = wells_indices.production[well.name]
 
-        for perforation_index in well_indices:
+        for perforation_index in indices:
             i, j, k = perforation_index.cell
             well_index = perforation_index.well_index
-            allocation_fraction = well_indices.allocation_fraction(perforation_index)
+            allocation_fraction = indices.get_allocation_fraction(perforation_index)
             cell_pressure = typing.cast(float, pressure_grid[i, j, k])
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
 
@@ -429,7 +431,11 @@ def compute_well_rates(
                     gas_flow_rate += flow_rate
                     gas_mass_flow_rate += flow_rate * phase_density
                     gas_phase_fvf = phase_fvf
-                    gas_effective_bhp = effective_bhp
+                    # When bhp returned is same as cell pressure, there no drawdown
+                    # so no flow. Hence, bhp should be unset
+                    if effective_bhp != cell_pressure:
+                        gas_effective_bhp = effective_bhp
+
                     net_gas_well_rate_grid[i, j, k] += flow_rate
                     net_gas_well_mass_rate_grid[i, j, k] += flow_rate * phase_density
                 elif is_water:
@@ -438,7 +444,9 @@ def compute_well_rates(
                     water_flow_rate += flow_rate
                     water_mass_flow_rate += flow_rate * phase_density
                     water_phase_fvf = phase_fvf
-                    water_effective_bhp = effective_bhp
+                    if effective_bhp != cell_pressure:
+                        water_effective_bhp = effective_bhp
+
                     net_water_well_rate_grid[i, j, k] += flow_rate
                     net_water_well_mass_rate_grid[i, j, k] += flow_rate * phase_density
                 else:
@@ -447,7 +455,9 @@ def compute_well_rates(
                     oil_flow_rate += flow_rate
                     oil_mass_flow_rate += flow_rate * phase_density
                     oil_phase_fvf = phase_fvf
-                    oil_effective_bhp = effective_bhp
+                    if effective_bhp != cell_pressure:
+                        oil_effective_bhp = effective_bhp
+
                     net_oil_well_rate_grid[i, j, k] += flow_rate
                     net_oil_well_mass_rate_grid[i, j, k] += flow_rate * phase_density
 

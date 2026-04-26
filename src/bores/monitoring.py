@@ -19,6 +19,7 @@ from tqdm import tqdm
 from bores.config import Config
 from bores.constants import c
 from bores.datastructures import FormationVolumeFactors, Rates, SparseTensor
+from bores.errors import ValidationError
 from bores.models import ReservoirModel
 from bores.simulate import Run, StepCallback, StepResult, run
 from bores.states import ModelState
@@ -88,6 +89,12 @@ class MonitorConfig:
     `"dark"` uses a charcoal background with amber accents.
     `"light"` uses off-white with navy accents.
     """
+
+    def __post_init__(self) -> None:
+        if self.use_rich and self.use_tqdm:
+            raise ValidationError(
+                "`use_tqdm=True` and `use_rich=True` is not allowed. Choose one"
+            )
 
 
 @dataclass
@@ -554,7 +561,7 @@ def _convert_to_total_surface_rate(
     return total_surface_rate
 
 
-def _avg_bhp_for_well_cells(
+def _compute_average_bhp_for_cells(
     cell_keys: typing.List[typing.Tuple[int, ...]],
     bhp_tensor: SparseTensor,
 ) -> float:
@@ -608,11 +615,15 @@ def build_well_diagnostics(
             state.rates.injection_fvfs.gas,
             "gas",
         )
-        average_oil_bhp = _avg_bhp_for_well_cells(cells, state.rates.injection_bhps.oil)
-        average_water_bhp = _avg_bhp_for_well_cells(
+        average_oil_bhp = _compute_average_bhp_for_cells(
+            cells, state.rates.injection_bhps.oil
+        )
+        average_water_bhp = _compute_average_bhp_for_cells(
             cells, state.rates.injection_bhps.water
         )
-        average_gas_bhp = _avg_bhp_for_well_cells(cells, state.rates.injection_bhps.gas)
+        average_gas_bhp = _compute_average_bhp_for_cells(
+            cells, state.rates.injection_bhps.gas
+        )
         results.append(
             WellRateDiagnostics(
                 name=well.name,
@@ -646,13 +657,13 @@ def build_well_diagnostics(
             state.rates.production_fvfs.gas,
             "gas",
         )
-        average_oil_bhp = _avg_bhp_for_well_cells(
+        average_oil_bhp = _compute_average_bhp_for_cells(
             cells, state.rates.production_bhps.oil
         )
-        average_water_bhp = _avg_bhp_for_well_cells(
+        average_water_bhp = _compute_average_bhp_for_cells(
             cells, state.rates.production_bhps.water
         )
-        average_gas_bhp = _avg_bhp_for_well_cells(
+        average_gas_bhp = _compute_average_bhp_for_cells(
             cells, state.rates.production_bhps.gas
         )
         results.append(
@@ -684,7 +695,7 @@ def build_step_diagnostics(
 
     :param state: Model state snapshot yielded by the simulation generator.
     :param wall_time_ms: Wall-clock time consumed by this step (ms).
-    :param timer_kwargs: Dict from `state.timer_state`; may contain
+    :param timer_context: Dict from `state.timer_state`; may contain
         `maximum_pressure_change`, `maximum_saturation_change`,
         `newton_iterations`, and `maximum_cfl_encountered`.
     :return: `StepDiagnostics` instance with all scalar fields populated.
@@ -744,7 +755,7 @@ def build_step_diagnostics(
         mbe_kwargs = {}
 
     well_diagnostics = build_well_diagnostics(state)
-    timer_kwargs = {} if step_result is None else step_result.timer_kwargs
+    timer_context = {} if step_result is None else step_result.timer_context
     return StepDiagnostics(
         step=state.step,
         elapsed_time=state.time,
@@ -754,7 +765,7 @@ def build_step_diagnostics(
         minimum_pressure=float(np.min(pressure)),
         maximum_pressure=float(np.max(pressure)),
         maximum_pressure_change=float(
-            timer_kwargs.get("maximum_pressure_change", 0.0) or 0.0
+            timer_context.get("maximum_pressure_change", 0.0) or 0.0
         ),
         average_water_saturation=float(np.mean(water_saturation)),
         average_oil_saturation=float(np.mean(oil_saturation)),
@@ -766,10 +777,10 @@ def build_step_diagnostics(
         minimum_gas_saturation=float(np.min(gas_saturation)),
         maximum_gas_saturation=float(np.max(gas_saturation)),
         maximum_saturation_change=float(
-            timer_kwargs.get("maximum_saturation_change", 0.0) or 0.0
+            timer_context.get("maximum_saturation_change", 0.0) or 0.0
         ),
-        newton_iterations=int(timer_kwargs.get("newton_iterations", -1) or -1),
-        maximum_cfl=float(timer_kwargs.get("maximum_cfl_encountered", -1.0) or -1.0),
+        newton_iterations=int(timer_context.get("newton_iterations", -1) or -1),
+        maximum_cfl=float(timer_context.get("maximum_cfl_encountered", -1.0) or -1.0),
         oil_injection_rate=oil_injection_rate,
         water_injection_rate=water_injection_rate,
         gas_injection_rate=gas_injection_rate,

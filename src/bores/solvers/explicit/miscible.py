@@ -15,7 +15,7 @@ from bores.grids.utils import unpad_grid
 from bores.models import FluidProperties, RockProperties
 from bores.precision import get_dtype
 from bores.solvers.base import (
-    EvolutionResult,
+    Solution,
     _warn_injection_rate,
     _warn_production_rate,
     compute_mobility_grids,
@@ -29,9 +29,9 @@ from bores.types import (
 from bores.utils import clip
 from bores.wells.base import Wells
 from bores.wells.controls import CoupledRateControl
-from bores.wells.indices import WellIndicesCache
+from bores.wells.indices import WellsIndices
 
-__all__ = ["evolve_saturation"]
+__all__ = ["solve_transport"]
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +85,7 @@ class ExplicitSaturationSolution:
     solvent_concentration_grid: typing.Optional[ThreeDimensionalGrid] = None
 
 
-def evolve_saturation(
+def solve_transport(
     cell_dimension: typing.Tuple[float, float],
     thickness_grid: ThreeDimensionalGrid,
     elevation_grid: ThreeDimensionalGrid,
@@ -98,12 +98,12 @@ def evolve_saturation(
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     wells: Wells[ThreeDimensions],
     config: Config,
-    well_indices_cache: WellIndicesCache,
+    wells_indices: WellsIndices,
     injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
     production_rates: PhaseTensorsProxy[float, ThreeDimensions],
     pressure_change_grid: typing.Optional[ThreeDimensionalGrid] = None,
     pad_width: int = 1,
-) -> EvolutionResult[ExplicitSaturationSolution, SaturationEvolutionMeta]:
+) -> Solution[ExplicitSaturationSolution, SaturationEvolutionMeta]:
     """
     Evolve saturations explicitly with Todd-Longstaff miscible displacement.
 
@@ -122,12 +122,12 @@ def evolve_saturation(
     :param relative_mobility_grids: Tuple of relative mobility grids for (water, oil, gas)
     :param capillary_pressure_grids: Tuple of capillary pressure grids for (oil-water, gas-oil)
     :param config: Simulation config and parameters.
-    :param well_indices_cache: Cache of well indices for efficient lookup during pressure solve.
+    :param wells_indices: Cache of well indices for efficient lookup during pressure solve.
     :param injection_rates: Optional `PhaseTensorsProxy` of injection rates for each phase and cell.
     :param production_rates: Optional `PhaseTensorsProxy` of production rates for each phase and cell.
     :param pressure_change_grid: Pressure change grid (P_new - P_old) in psi for PVT volume correction.
     :param pad_width: Number of ghost cells used for grid padding. Well coordinates are offset by this amount.
-    :return: `EvolutionResult` containing updated saturations and solvent concentration
+    :return: `Solution` containing updated saturations and solvent concentration
     """
     absolute_permeability = rock_properties.absolute_permeability
     porosity_grid = rock_properties.porosity_grid
@@ -231,7 +231,7 @@ def evolve_saturation(
             fluid_properties=fluid_properties,
             time=time,
             config=config,
-            well_indices_cache=well_indices_cache,
+            wells_indices=wells_indices,
             pad_width=pad_width,
             injection_rates=injection_rates,
             production_rates=production_rates,
@@ -306,7 +306,7 @@ def evolve_saturation(
             fluid_properties=fluid_properties,
             time=time,
             config=config,
-            well_indices_cache=well_indices_cache,
+            wells_indices=wells_indices,
             pad_width=pad_width,
             injection_rates=injection_rates,
             production_rates=production_rates,
@@ -454,7 +454,7 @@ def evolve_saturation(
 
         Consider reducing time step size from {time_step_size} seconds.
         """
-        return EvolutionResult(
+        return Solution(
             success=False,
             value=ExplicitSaturationSolution(
                 water_saturation_grid=updated_water_saturation_grid.astype(
@@ -512,7 +512,7 @@ def evolve_saturation(
         int(cfl_violation_info[3]) - pad_width,
     )
     maximum_cfl_encountered = cfl_violation_info[4]
-    return EvolutionResult(
+    return Solution(
         value=ExplicitSaturationSolution(
             water_saturation_grid=updated_water_saturation_grid.astype(
                 dtype, copy=False
@@ -1008,7 +1008,7 @@ def compute_well_rate_grids(
     fluid_properties: FluidProperties[ThreeDimensions],
     time: float,
     config: Config,
-    well_indices_cache: WellIndicesCache,
+    wells_indices: WellsIndices,
     dtype: npt.DTypeLike,
     injection_rates: PhaseTensorsProxy[float, ThreeDimensions],
     production_rates: PhaseTensorsProxy[float, ThreeDimensions],
@@ -1091,12 +1091,12 @@ def compute_well_rate_grids(
         )
         gas_solubility_in_water_grid = fluid_properties.gas_solubility_in_water_grid
 
-        well_indices = well_indices_cache.injection[well.name]
+        wells_indices = wells_indices.injection[well.name]
         # Compute rates for each perforated cell using cached well indices
-        for perforation_index in well_indices:
+        for perforation_index in wells_indices:
             i, j, k = perforation_index.cell
             well_index = perforation_index.well_index
-            allocation_fraction = well_indices.allocation_fraction(perforation_index)
+            allocation_fraction = wells_indices.get_allocation_fraction(perforation_index)
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
             cell_oil_pressure = typing.cast(float, oil_pressure_grid[i, j, k])
 
@@ -1194,12 +1194,12 @@ def compute_well_rate_grids(
             continue
 
         is_couple_controlled = isinstance(well.control, CoupledRateControl)
-        well_indices = well_indices_cache.production[well.name]
+        wells_indices = wells_indices.production[well.name]
         # Compute rates for each perforated cell using cached well indices
-        for perforation_index in well_indices:
+        for perforation_index in wells_indices:
             i, j, k = perforation_index.cell
             well_index = perforation_index.well_index
-            allocation_fraction = well_indices.allocation_fraction(perforation_index)
+            allocation_fraction = wells_indices.get_allocation_fraction(perforation_index)
             cell_temperature = typing.cast(float, temperature_grid[i, j, k])
             cell_oil_pressure = typing.cast(float, oil_pressure_grid[i, j, k])
 

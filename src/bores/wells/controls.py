@@ -2300,7 +2300,7 @@ class CoupledRateControl(WellControl[WellFluidTcon]):
         """
         if not is_active:
             return ControlInfo(rate=0.0, bhp=pressure, is_bhp_control=False)
-
+        
         # Primary phase: delegate entirely to `primary_control.get_control` so
         # that the BHP solve and rate computation share intermediates there.
         if fluid.phase == self.primary_phase:

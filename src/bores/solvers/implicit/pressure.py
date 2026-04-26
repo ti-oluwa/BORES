@@ -15,7 +15,7 @@ from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.grids.pvt import build_total_fluid_compressibility_grid
 from bores.models import FluidProperties, RockProperties
 from bores.solvers.base import (
-    EvolutionResult,
+    Solution,
     solve_linear_system,
     to_1D_index,
 )
@@ -31,7 +31,7 @@ class ImplicitPressureSolution:
     maximum_pressure_change: float
 
 
-def evolve_pressure(
+def solve_pressure(
     cell_dimension: typing.Tuple[float, float],
     thickness_grid: ThreeDimensionalGrid,
     elevation_grid: ThreeDimensionalGrid,
@@ -47,7 +47,7 @@ def evolve_pressure(
     config: Config,
     net_well_rate_grid: typing.Optional[ThreeDimensionalGrid] = None,
     dtype: npt.DTypeLike = np.float64,
-) -> EvolutionResult[ImplicitPressureSolution, None]:
+) -> Solution[ImplicitPressureSolution, None]:
     """
     Solves the fully implicit finite-difference pressure equation for a slightly compressible,
     three-phase flow system in a 3D reservoir.
@@ -66,7 +66,7 @@ def evolve_pressure(
     :param pressure_boundaries: 3D grid of boundary pressures (psi) with ghost-cell indexing
     :param flux_boundaries: 3D grid of boundary fluxes (ft³/day) with ghost-cell indexing
     :param config: `Config` object containing simulation config
-    :return: `EvolutionResult` containing the new pressure grid and scheme used
+    :return: `Solution` containing the new pressure grid and scheme used
     """
     porosity_grid = rock_properties.porosity_grid
     net_to_gross_grid = rock_properties.net_to_gross_grid
@@ -215,7 +215,7 @@ def evolve_pressure(
         )
     except (SolverError, PreconditionerError) as exc:
         logger.error("Pressure solve failed at time step %d: %s", time_step, exc)
-        return EvolutionResult(
+        return Solution(
             value=ImplicitPressureSolution(
                 pressure_grid=current_pressure_grid.astype(dtype, copy=False),
                 maximum_pressure_change=0.0,  # No change since solve failed
@@ -234,7 +234,7 @@ def evolve_pressure(
         cell_count_z=cell_count_z,
     )
     maximum_pressure_change = np.max(np.abs(new_pressure_grid - current_pressure_grid))
-    return EvolutionResult(
+    return Solution(
         value=ImplicitPressureSolution(
             pressure_grid=new_pressure_grid.astype(dtype, copy=False),
             maximum_pressure_change=maximum_pressure_change,

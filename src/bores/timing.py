@@ -212,7 +212,7 @@ class Timer(StoreSerializable):
     failed_step_sizes: typing.Deque[float] = attrs.field(init=False)
     """Recent failed step sizes for memory."""
 
-    # Rolling statistics (optimization to avoid list comprehensions)
+    # Rolling statistics (saved to avoid list comprehensions)
     _recent_cfl_sum: float = attrs.field(init=False, default=0.0)
     """Sum of recent successful CFL values for rolling average."""
     _recent_cfl_count: int = attrs.field(init=False, default=0)
@@ -1349,7 +1349,7 @@ class Timer(StoreSerializable):
         if missing_keys:
             raise ValidationError(f"Timer state missing required keys: {missing_keys}")
 
-        config_params = {
+        params = {
             "initial_step_size": state["initial_step_size"],
             "maximum_step_size": state["maximum_step_size"],
             "minimum_step_size": state["minimum_step_size"],
@@ -1376,7 +1376,7 @@ class Timer(StoreSerializable):
             "failure_memory_window": state.get("failure_memory_window", 10),
             "metrics_history_size": state.get("metrics_history_size", 20),
         }
-        timer = cls(**config_params)  # type: ignore
+        timer = cls(**params)  # type: ignore
 
         # Restore runtime state (use `object.__setattr__` just in case `Timer` is frozen)
         object.__setattr__(timer, "elapsed_time", state["elapsed_time"])

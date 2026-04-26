@@ -11,13 +11,13 @@ from bores.constants import c
 from bores.datastructures import Rates
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.models import FluidProperties, RockProperties
-from bores.solvers.base import EvolutionResult
+from bores.solvers.base import Solution
 from bores.solvers.rates import WellRates
 from bores.transmissibility import FaceTransmissibilities
 from bores.types import OneDimensionalGrid, ThreeDimensionalGrid, ThreeDimensions
-from bores.wells.indices import WellIndicesCache
+from bores.wells.indices import WellsIndices
 
-__all__ = ["evolve_saturation"]
+__all__ = ["solve_transport"]
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +69,7 @@ class ExplicitSaturationSolution:
     solvent_concentration_grid: typing.Optional[ThreeDimensionalGrid] = None
 
 
-def evolve_saturation(
+def solve_transport(
     cell_dimension: typing.Tuple[float, float],
     thickness_grid: ThreeDimensionalGrid,
     elevation_grid: ThreeDimensionalGrid,
@@ -93,7 +93,7 @@ def evolve_saturation(
     config: Config,
     rates: typing.Optional[WellRates[ThreeDimensions]] = None,
     dtype: npt.DTypeLike = np.float64,
-) -> EvolutionResult[ExplicitSaturationSolution, SaturationEvolutionMeta]:
+) -> Solution[ExplicitSaturationSolution, SaturationEvolutionMeta]:
     """
     Computes the new saturation distribution for water, oil, and gas across the
     reservoir grid using a mass-based explicit upwind finite difference method.
@@ -135,11 +135,11 @@ def evolve_saturation(
         NaN indicates a Neumann face.
     :param flux_boundaries: Padded boundary flux grid (nx+2, ny+2, nz+2).
     :param config: Simulation config and parameters.
-    :param well_indices_cache: Cache of well indices.
+    :param wells_indices: Cache of well indices.
     :param injection_rates: Injection rates for each phase and cell (ft³/day).
     :param production_rates: Production rates for each phase and cell (ft³/day).
     :param dtype: Numpy dtype for output arrays.
-    :return: `EvolutionResult` containing updated saturations.
+    :return: `Solution` containing updated saturations.
     """
     time_step_in_days = time_step_size * c.DAYS_PER_SECOND
     porosity_grid = rock_properties.porosity_grid
@@ -347,7 +347,7 @@ def evolve_saturation(
 
         Consider reducing time step size from {time_step_size} seconds.
         """
-        return EvolutionResult(
+        return Solution(
             success=False,
             value=ExplicitSaturationSolution(
                 water_saturation_grid=updated_water_saturation_grid.astype(
@@ -399,7 +399,7 @@ def evolve_saturation(
         int(cfl_violation_info[2]),
         int(cfl_violation_info[3]),
     )
-    return EvolutionResult(
+    return Solution(
         value=ExplicitSaturationSolution(
             water_saturation_grid=updated_water_saturation_grid.astype(
                 dtype, copy=False
