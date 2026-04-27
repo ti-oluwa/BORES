@@ -8,14 +8,12 @@ import numpy.typing as npt
 
 from bores.config import Config
 from bores.constants import c
-from bores.datastructures import Rates
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.models import FluidProperties, RockProperties
 from bores.solvers.base import Solution
 from bores.solvers.rates import WellRates
 from bores.transmissibility import FaceTransmissibilities
 from bores.types import OneDimensionalGrid, ThreeDimensionalGrid, ThreeDimensions
-from bores.wells.indices import WellsIndices
 
 __all__ = ["solve_transport"]
 
@@ -1534,7 +1532,6 @@ def apply_updates(
         `cfl_violation_info` is a 1-D array of length 6:
         [violated_flag, i, j, k, max_cfl_encountered, cfl_threshold].
     """
-    # We store CFL values in a temporary grid to avoid race condition during parallel loop.
     cfl_grid = np.zeros((cell_count_x, cell_count_y, cell_count_z), dtype=dtype)
 
     for i in numba.prange(cell_count_x):  # type: ignore
@@ -1548,7 +1545,7 @@ def apply_updates(
                     * porosity_grid[i, j, k]
                 )
 
-                # CFL check
+                # CFL
                 water_well_outflow = abs(min(0.0, net_water_well_rate_grid[i, j, k]))
                 oil_well_outflow = abs(min(0.0, net_oil_well_rate_grid[i, j, k]))
                 gas_well_outflow = abs(min(0.0, net_gas_well_rate_grid[i, j, k]))
@@ -1558,12 +1555,11 @@ def apply_updates(
                     + oil_well_outflow
                     + gas_well_outflow
                 )
-                cfl_number = (
+                cfl_grid[i, j, k] = (
                     total_volumetric_outflow * time_step_in_days
                 ) / cell_pore_volume
-                cfl_grid[i, j, k] = cfl_number
 
-                # PVT alpha factors at new pressure for dissolved gas accounting
+                # PVT alpha factors at new pressure
                 safe_oil_fvf = oil_formation_volume_factor_grid[i, j, k]
                 safe_water_fvf = water_formation_volume_factor_grid[i, j, k]
                 safe_gas_fvf = gas_formation_volume_factor_grid[i, j, k]
@@ -1574,17 +1570,18 @@ def apply_updates(
                 if safe_gas_fvf < 1e-30:
                     safe_gas_fvf = 1e-30
 
-                current_alpha_solution_gor = (
+                current_alpha_rs = (
                     solution_gas_to_oil_ratio_grid[i, j, k]
                     * safe_gas_fvf
                     / safe_oil_fvf
                 )
-                current_alpha_gas_solubility_in_water = (
+                current_alpha_rsw = (
                     gas_solubility_in_water_grid[i, j, k]
                     * safe_gas_fvf
                     / safe_water_fvf
                 )
 
+                # PVT alpha factors at old pressure
                 safe_old_oil_fvf = old_oil_formation_volume_factor_grid[i, j, k]
                 safe_old_water_fvf = old_water_formation_volume_factor_grid[i, j, k]
                 safe_old_gas_fvf = old_gas_formation_volume_factor_grid[i, j, k]
@@ -1595,12 +1592,12 @@ def apply_updates(
                 if safe_old_gas_fvf < 1e-30:
                     safe_old_gas_fvf = 1e-30
 
-                old_alpha_solution_gor = (
+                old_alpha_rs = (
                     old_solution_gas_to_oil_ratio_grid[i, j, k]
                     * safe_old_gas_fvf
                     / safe_old_oil_fvf
                 )
-                old_alpha_gas_solubility_in_water = (
+                old_alpha_rsw = (
                     old_gas_solubility_in_water_grid[i, j, k]
                     * safe_old_gas_fvf
                     / safe_old_water_fvf
@@ -1608,15 +1605,15 @@ def apply_updates(
 
                 old_water_saturation = old_water_saturation_grid[i, j, k]
                 old_oil_saturation = old_oil_saturation_grid[i, j, k]
-                old_gas_aturation = old_gas_saturation_grid[i, j, k]
+                old_gas_saturation = old_gas_saturation_grid[i, j, k]
 
                 old_water_density = old_water_density_grid[i, j, k]
                 old_oil_density = old_oil_density_grid[i, j, k]
                 old_gas_density = old_gas_density_grid[i, j, k]
+
                 current_water_density = current_water_density_grid[i, j, k]
                 current_oil_density = current_oil_density_grid[i, j, k]
                 current_gas_density = current_gas_density_grid[i, j, k]
-
                 if current_water_density < 1e-30:
                     current_water_density = 1e-30
                 if current_oil_density < 1e-30:
@@ -1626,82 +1623,71 @@ def apply_updates(
 
                 dt_over_pv = time_step_in_days / cell_pore_volume
 
-                # Water mass update
-                well_water_mass_rate = net_water_well_mass_rate_grid[i, j, k]
+                # Water mass update → Sw_new
                 old_water_mass = old_water_density * old_water_saturation
                 new_water_mass = old_water_mass + dt_over_pv * (
-                    net_water_mass_flux_grid[i, j, k] + well_water_mass_rate
+                    net_water_mass_flux_grid[i, j, k]
+                    + net_water_well_mass_rate_grid[i, j, k]
                 )
                 new_water_saturation = new_water_mass / current_water_density
-
-                # Total gas mass update
-                # Old total gas mass per unit pore volume (lb/ft³ of pore space)
-                old_total_gas_mass = (
-                    old_gas_density * old_gas_aturation
-                    + old_oil_density * old_alpha_solution_gor * old_oil_saturation
-                    + old_water_density
-                    * old_alpha_gas_solubility_in_water
-                    * old_water_saturation
-                )
-
-                # Mass well rate for total gas: includes solution gas in produced/injected oil and water
-                well_gas_mass_rate = (
-                    net_gas_well_mass_rate_grid[i, j, k]
-                    + current_alpha_solution_gor * net_oil_well_mass_rate_grid[i, j, k]
-                    + current_alpha_gas_solubility_in_water
-                    * net_water_well_mass_rate_grid[i, j, k]
-                )
-                new_total_gas_mass = old_total_gas_mass + dt_over_pv * (
-                    net_gas_total_mass_flux_grid[i, j, k] + well_gas_mass_rate
-                )
-
-                # Oil saturation (derived from volume constraint)
-                # Clamp Sw first; So will be derived after Sg
                 if new_water_saturation < 0.0:
                     new_water_saturation = 0.0
                 if new_water_saturation > 1.0:
                     new_water_saturation = 1.0
 
-                # Free gas saturation from total gas mass
-                # M_g_total = rho_g * Sg + rho_o * alpha_Rs * So + rho_w * alpha_Rsw * Sw
-                # So = 1 - Sw - Sg  (derived), substitute and solve for Sg:
-                # M_g_total = rho_g * Sg + rho_o * alpha_Rs * (1 - Sw - Sg) + rho_w * alpha_Rsw * Sw
-                # M_g_total = (rho_g - rho_o * alpha_Rs) * Sg
-                #             + rho_o * alpha_Rs * (1 - Sw)
-                #             + rho_w * alpha_Rsw * Sw
-                # Sg = (M_g_total - rho_o * alpha_Rs * (1 - Sw) - rho_w * alpha_Rsw * Sw)
-                #      / (rho_g - rho_o * alpha_Rs)
-                #
-                # When rho_g >> rho_o * alpha_Rs (which holds for most reservoir conditions),
-                # the denominator is positive. We guard against degenerate cases.
-                gas_mass_dissolved_in_oil_and_water = (
-                    current_oil_density
-                    * current_alpha_solution_gor
-                    * (1.0 - new_water_saturation)
-                    + current_water_density
-                    * current_alpha_gas_solubility_in_water
-                    * new_water_saturation
+                # Total gas mass update
+                old_total_gas_mass = (
+                    old_gas_density * old_gas_saturation
+                    + old_oil_density * old_alpha_rs * old_oil_saturation
+                    + old_water_density * old_alpha_rsw * old_water_saturation
                 )
-                free_gas_mass = new_total_gas_mass - gas_mass_dissolved_in_oil_and_water
+                well_gas_mass_rate = (
+                    net_gas_well_mass_rate_grid[i, j, k]
+                    + current_alpha_rs * net_oil_well_mass_rate_grid[i, j, k]
+                    + current_alpha_rsw * net_water_well_mass_rate_grid[i, j, k]
+                )
+                new_total_gas_mass = old_total_gas_mass + dt_over_pv * (
+                    net_gas_total_mass_flux_grid[i, j, k] + well_gas_mass_rate
+                )
 
-                # Free gas mass cannot be negative (gas fully redissolves)
-                if free_gas_mass < 0.0:
-                    free_gas_mass = 0.0
+                # Free gas saturation — simultaneous solution (THE FIX)
+                #
+                # Substituting So = 1 - Sw - Sg into the gas mass balance:
+                #   M_g = rho_g*Sg + rho_o*alpha*(1-Sw-Sg) + rho_w*alpha_w*Sw
+                #
+                # Rearranging for Sg:
+                #   Sg = (M_g - rho_o*alpha*(1-Sw) - rho_w*alpha_w*Sw)
+                #        / (rho_g - rho_o*alpha)
+                #
+                # Above bubble point rho_o*alpha > rho_g so both num and denom
+                # are negative — their ratio is still the correct positive Sg.
+                numerator_sg = (
+                    new_total_gas_mass
+                    - current_oil_density
+                    * current_alpha_rs
+                    * (1.0 - new_water_saturation)
+                    - current_water_density * current_alpha_rsw * new_water_saturation
+                )
+                denominator_sg = (
+                    current_gas_density - current_oil_density * current_alpha_rs
+                )
 
-                new_gas_saturation = free_gas_mass / current_gas_density
+                if abs(denominator_sg) < 1e-20:
+                    new_gas_saturation = 0.0
+                else:
+                    new_gas_saturation = numerator_sg / denominator_sg
 
-                # Clamp Sg
                 if new_gas_saturation < 0.0:
                     new_gas_saturation = 0.0
                 if new_gas_saturation > 1.0 - new_water_saturation:
                     new_gas_saturation = 1.0 - new_water_saturation
 
-                # Derive So from volume constraint
+                # Oil saturation from volume constraint
                 new_oil_saturation = 1.0 - new_water_saturation - new_gas_saturation
                 if new_oil_saturation < 0.0:
                     new_oil_saturation = 0.0
 
-                # Residual volume balance correction. Absorb tiny numerical gap into oil
+                # Absorb any sub-epsilon gap into oil
                 total_saturation = (
                     new_water_saturation + new_oil_saturation + new_gas_saturation
                 )
@@ -1714,7 +1700,7 @@ def apply_updates(
                 updated_oil_saturation_grid[i, j, k] = new_oil_saturation
                 updated_gas_saturation_grid[i, j, k] = new_gas_saturation
 
-    # Sequential region for thread-safe CFL analysis
+    # Sequential CFL scan
     cfl_violation_info = np.zeros(6, dtype=dtype)
     max_cfl = 0.0
     max_i, max_j, max_k = 0, 0, 0
@@ -1724,10 +1710,8 @@ def apply_updates(
         for j in range(cell_count_y):
             for k in range(cell_count_z):
                 cfl_value = cfl_grid[i, j, k]
-
                 if cfl_value > cfl_threshold:
                     violated = True
-
                 if cfl_value > max_cfl:
                     max_cfl = cfl_value
                     max_i, max_j, max_k = i, j, k

@@ -2187,8 +2187,8 @@ def compute_gas_compressibility(
     n2_mole_fraction: FloatOrArray = 0.0,
 ) -> NDimensionalGrid[NDimension]:
     """
-    Calculates the isothermal gas compressibility (C_g) in psi⁻¹ using Papay's Z-factor correlation
-    and its analytical derivative.
+    Calculates isothermal gas compressibility (C_g) in psi^-1 using a
+    numerically consistent derivative of the Z-factor.
 
     :param pressure: Reservoir pressure (psi).
     :param temperature: Reservoir temperature (°F).
@@ -2205,23 +2205,7 @@ def compute_gas_compressibility(
             "Pressure, temperature, and gas specific gravity must be positive."
         )
 
-    # Calculate pseudocritical properties
-    pseudo_critical_pressure, pseudo_critical_temperature = (
-        compute_gas_pseudocritical_properties(
-            gas_gravity=gas_gravity,
-            h2s_mole_fraction=h2s_mole_fraction,
-            co2_mole_fraction=co2_mole_fraction,
-            n2_mole_fraction=n2_mole_fraction,
-        )
-    )
-
-    # Calculate pseudo-reduced properties at the given pressure and temperature
-    pseudo_reduced_pressure = pressure / pseudo_critical_pressure
-    pseudo_reduced_temperature = temperature / pseudo_critical_temperature
-
-    # Calculate Z-factor using your provided function
     if gas_compressibility_factor is not None:
-        # If a Z-factor is provided, use it directly
         Z = gas_compressibility_factor
     else:
         Z = compute_gas_compressibility_factor(
@@ -2233,26 +2217,43 @@ def compute_gas_compressibility(
             n2_mole_fraction=n2_mole_fraction,
         )
 
-    # Calculate the analytical derivative of Z with respect to P_r (pseudo-reduced pressure)
-    # from Papay's correlation: dZ/dP_r = -3.52 * exp(-0.869 * T_r) / T_r + 0.548 * P_r / T_r^2
+    # Numerical derivative dZ/dP (central difference)
+    dP = 1e-4 * pressure
+    dP = np.where(dP == 0.0, 1e-6, dP)
 
-    exp_term = np.exp(-0.869 * pseudo_reduced_temperature)
-    dZ_dP_r = (-3.52 * exp_term / pseudo_reduced_temperature) + (
-        0.548 * pseudo_reduced_pressure / (pseudo_reduced_temperature**2)
+    P_plus = pressure + dP
+    P_minus = pressure - dP
+
+    # Handle near-zero pressure safely
+    use_forward = P_minus <= 0.0
+
+    # Compute Z at perturbed pressures
+    Z_plus = compute_gas_compressibility_factor(
+        gas_gravity=gas_gravity,
+        pressure=P_plus,
+        temperature=temperature,
+        h2s_mole_fraction=h2s_mole_fraction,
+        co2_mole_fraction=co2_mole_fraction,
+        n2_mole_fraction=n2_mole_fraction,
     )
 
-    # Calculate the gas compressibility (C_g)
-    # C_g = (1/P) - (1/(Z * Ppc)) * (dZ/dPpr)
-    # Ensure Ppc is not zero, which should be handled by compute_gas_pseudocritical_properties
-    if np.any(pseudo_critical_pressure == 0):
-        raise ValidationError(
-            "Pseudo-critical pressure cannot be zero for compressibility calculation."
-        )
+    Z_minus = compute_gas_compressibility_factor(
+        gas_gravity=gas_gravity,
+        pressure=P_minus,
+        temperature=temperature,
+        h2s_mole_fraction=h2s_mole_fraction,
+        co2_mole_fraction=co2_mole_fraction,
+        n2_mole_fraction=n2_mole_fraction,
+    )
 
-    gas_compressibility = (1 / pressure) - (
-        1 / (Z * pseudo_critical_pressure)
-    ) * dZ_dP_r
-    # Compressibility must be non-negative
+    # Central difference
+    dZ_dP_central = (Z_plus - Z_minus) / (2.0 * dP)
+    # Forward difference where needed
+    dZ_dP_forward = (Z_plus - Z) / dP
+
+    # Select scheme
+    dZ_dP = np.where(use_forward, dZ_dP_forward, dZ_dP_central)
+    gas_compressibility = (1.0 / pressure) - (1.0 / Z) * dZ_dP
     dtype = pressure.dtype
     return np.maximum(0.0, gas_compressibility).astype(dtype)  # type: ignore[return-value]
 

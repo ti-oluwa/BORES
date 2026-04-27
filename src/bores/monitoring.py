@@ -180,8 +180,14 @@ class StepDiagnostics:
     maximum_gas_saturation: float
     """Maximum gas saturation."""
 
-    maximum_saturation_change: float
-    """Largest per-cell saturation change (any phase) during this step."""
+    maximum_water_saturation_change: float
+    """Maximum water saturation change during this step."""
+
+    maximum_oil_saturation_change: float
+    """Maximum oil saturation change during this step."""
+
+    maximum_gas_saturation_change: float
+    """Maximum gas saturation change during this step."""
 
     newton_iterations: int
     """
@@ -695,9 +701,8 @@ def build_step_diagnostics(
 
     :param state: Model state snapshot yielded by the simulation generator.
     :param wall_time_ms: Wall-clock time consumed by this step (ms).
-    :param timer_context: Dict from `state.timer_state`; may contain
-        `maximum_pressure_change`, `maximum_saturation_change`,
-        `newton_iterations`, and `maximum_cfl_encountered`.
+    :param step_result: Optional StepResult with pressure and saturation changes,
+        newton_iterations, and maximum_cfl_encountered from timer_context.
     :return: `StepDiagnostics` instance with all scalar fields populated.
     """
     fluid_properties = state.model.fluid_properties
@@ -765,7 +770,7 @@ def build_step_diagnostics(
         minimum_pressure=float(np.min(pressure)),
         maximum_pressure=float(np.max(pressure)),
         maximum_pressure_change=float(
-            timer_context.get("maximum_pressure_change", 0.0) or 0.0
+            (step_result.maximum_pressure_change if step_result else None) or 0.0
         ),
         average_water_saturation=float(np.mean(water_saturation)),
         average_oil_saturation=float(np.mean(oil_saturation)),
@@ -776,8 +781,15 @@ def build_step_diagnostics(
         maximum_oil_saturation=float(np.max(oil_saturation)),
         minimum_gas_saturation=float(np.min(gas_saturation)),
         maximum_gas_saturation=float(np.max(gas_saturation)),
-        maximum_saturation_change=float(
-            timer_context.get("maximum_saturation_change", 0.0) or 0.0
+        maximum_water_saturation_change=float(
+            (step_result.maximum_water_saturation_change if step_result else None)
+            or 0.0
+        ),
+        maximum_oil_saturation_change=float(
+            (step_result.maximum_oil_saturation_change if step_result else None) or 0.0
+        ),
+        maximum_gas_saturation_change=float(
+            (step_result.maximum_gas_saturation_change if step_result else None) or 0.0
         ),
         newton_iterations=int(timer_context.get("newton_iterations", -1) or -1),
         maximum_cfl=float(timer_context.get("maximum_cfl_encountered", -1.0) or -1.0),
@@ -874,7 +886,7 @@ def build_rich_panel(
 
     # Left column: physics
     physics_table = Table(
-        box=box.SIMPLE,
+        box=box.HEAVY_HEAD,
         show_header=True,
         expand=True,
         header_style=hdr,
@@ -913,7 +925,7 @@ def build_rich_panel(
 
     # Right column: solver + performance (stacked)
     solver_table = Table(
-        box=box.SIMPLE,
+        box=box.HEAVY,
         show_header=False,
         expand=True,
         border_style=dim,
@@ -941,7 +953,12 @@ def build_rich_panel(
         )
 
     solver_table.add_row("ΔP max", f"{diagnostics.maximum_pressure_change:,.2f} psi")
-    solver_table.add_row("ΔS max", f"{diagnostics.maximum_saturation_change:.2e}")
+    solver_table.add_row(
+        "ΔS (Sw/So/Sg)",
+        f"{diagnostics.maximum_water_saturation_change:.2e} / "
+        f"{diagnostics.maximum_oil_saturation_change:.2e} / "
+        f"{diagnostics.maximum_gas_saturation_change:.2e}",
+    )
 
     # Performance extras
     if stats.accepted_steps >= 2:
@@ -994,7 +1011,7 @@ def build_rich_panel(
 
     if show_wells and diagnostics.well_diagnostics:
         well_table = Table(
-            box=box.SIMPLE,
+            box=box.HEAVY_HEAD,
             show_header=True,
             expand=True,
             header_style=hdr,

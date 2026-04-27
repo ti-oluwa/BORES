@@ -557,7 +557,7 @@ class Timer(StoreSerializable):
                     cfl_factor = 0.3
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug(
-                            "Severe CFL violation: %.3f > %.3f (ratio: %.4f)",
+                            "Severe CFL violation: %.3f > %.3f (ratio: %.6f)",
                             maximum_cfl_encountered,
                             cfl_limit,
                             overshoot_ratio,
@@ -567,7 +567,7 @@ class Timer(StoreSerializable):
                     cfl_factor = 0.5
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug(
-                            "Moderate CFL violation: %.3f > %.3f (ratio: %.4f)",
+                            "Moderate CFL violation: %.3f > %.3f (ratio: %.6f)",
                             maximum_cfl_encountered,
                             cfl_limit,
                             overshoot_ratio,
@@ -578,7 +578,7 @@ class Timer(StoreSerializable):
                     cfl_factor = max(cfl_factor, 0.6)  # Don't reduce too much
                     if logger.isEnabledFor(logging.DEBUG):
                         logger.debug(
-                            "Mild CFL violation: %.3f > %.3f (ratio: %.4f)",
+                            "Mild CFL violation: %.3f > %.3f (ratio: %.6f)",
                             maximum_cfl_encountered,
                             cfl_limit,
                             overshoot_ratio,
@@ -600,7 +600,7 @@ class Timer(StoreSerializable):
                 saturation_factor = 0.25
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(
-                        "Severe saturation change: %.4f > %.4f (ratio: %.4f)",
+                        "Severe saturation change: %.4f > %.4f (ratio: %.6f)",
                         maximum_saturation_change,
                         maximum_allowed_saturation_change,
                         overshoot_ratio,
@@ -610,7 +610,7 @@ class Timer(StoreSerializable):
                 saturation_factor = 0.4
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(
-                        "Large saturation change: %.4f > %.4f (ratio: %.4f)",
+                        "Large saturation change: %.4f > %.4f (ratio: %.6f)",
                         maximum_saturation_change,
                         maximum_allowed_saturation_change,
                         overshoot_ratio,
@@ -623,7 +623,7 @@ class Timer(StoreSerializable):
                 saturation_factor = max(saturation_factor, 0.5)  # Don't reduce too much
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug(
-                        "Moderate saturation change: %.4f > %.4f (ratio: %.4f)",
+                        "Moderate saturation change: %.4f > %.4f (ratio: %.6f)",
                         maximum_saturation_change,
                         maximum_allowed_saturation_change,
                         overshoot_ratio,
@@ -641,9 +641,9 @@ class Timer(StoreSerializable):
             if overshoot_ratio > 3.0:
                 # Very large pressure changes
                 pressure_factor = 0.25
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Severe pressure change: %.4e > %.4e (ratio: %.4f)",
+                if logger.isEnabledFor(logging.INFO):
+                    logger.info(
+                        "Severe pressure change: %.4e > %.4e (ratio: %.6f)",
                         maximum_pressure_change,
                         maximum_allowed_pressure_change,
                         overshoot_ratio,
@@ -651,9 +651,9 @@ class Timer(StoreSerializable):
             elif overshoot_ratio > 2.0:
                 # Large pressure changes
                 pressure_factor = 0.4
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Large pressure change: %.4e > %.4e (ratio: %.4f)",
+                if logger.isEnabledFor(logging.INFO):
+                    logger.info(
+                        "Large pressure change: %.4e > %.4e (ratio: %.6f)",
                         maximum_pressure_change,
                         maximum_allowed_pressure_change,
                         overshoot_ratio,
@@ -664,9 +664,9 @@ class Timer(StoreSerializable):
                     maximum_allowed_pressure_change / maximum_pressure_change
                 )
                 pressure_factor = max(pressure_factor, 0.5)
-                if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug(
-                        "Moderate pressure change: %.4e > %.4e (ratio: %.4f)",
+                if logger.isEnabledFor(logging.INFO):
+                    logger.info(
+                        "Moderate pressure change: %.4e > %.4e (ratio: %.6f)",
                         maximum_pressure_change,
                         maximum_allowed_pressure_change,
                         overshoot_ratio,
@@ -821,8 +821,8 @@ class Timer(StoreSerializable):
         ):
             return (
                 False,
-                f"Maximum allowed saturation change ({maximum_allowed_saturation_change}) violated. "
-                "Maximum saturation change encountered is {maximum_saturation_change}",
+                f"Maximum allowed pressure change ({maximum_allowed_pressure_change}) violated. "
+                "Maximum pressure change encountered is {maximum_pressure_change}",
             )
 
         mbe_violated, mbe_message_parts = self._check_mbe_violations(

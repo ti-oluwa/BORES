@@ -51,13 +51,9 @@ from bores.transmissibility import FaceTransmissibilities
 from bores.types import MiscibilityModel, NDimension, NDimensionalGrid, ThreeDimensions
 from bores.updates import update_fluid_properties, update_residual_saturation_grids
 from bores.wells.base import Wells
-from bores.wells.indices import (
-    WellsIndices,
-    build_wells_indices,
-    update_wells_indices,
-)
+from bores.wells.indices import WellsIndices, build_wells_indices, update_wells_indices
 
-__all__ = ["Run", "run"]
+__all__ = ["StepResult", "Run", "run"]
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +101,14 @@ class StepResult(typing.Generic[NDimension]):
     """Optional message providing additional information about the time step result."""
     material_balance_errors: typing.Optional[MaterialBalanceErrors] = None
     """Material balance errors for this time step. None for rejected steps or first step."""
+    maximum_pressure_change: typing.Optional[float] = None
+    """Maximum pressure change from the pressure solution."""
+    maximum_oil_saturation_change: typing.Optional[float] = None
+    """Maximum oil saturation change from the transport solution."""
+    maximum_water_saturation_change: typing.Optional[float] = None
+    """Maximum water saturation change from the transport solution."""
+    maximum_gas_saturation_change: typing.Optional[float] = None
+    """Maximum gas saturation change from the transport solution."""
     timer_context: typing.Dict[str, typing.Any] = attrs.field(factory=dict)
     """Keyword argument that should be passed to the simulation timer on accepting or rejecting a step."""
 
@@ -200,8 +204,9 @@ def _check_saturation_changes(
     max_allowed_phase_saturation_change = None
 
     oil_tol = max(tolerance, 0.005 * max_allowed_oil_saturation_change)
-    max_allowed_oil_saturation_change *= 1 + oil_tol
-    if maximum_oil_saturation_change > max_allowed_oil_saturation_change:
+    effective_allowed_oil = max_allowed_oil_saturation_change + oil_tol
+
+    if maximum_oil_saturation_change > effective_allowed_oil:
         violated = True
         max_phase_saturation_change = maximum_oil_saturation_change
         max_allowed_phase_saturation_change = max_allowed_oil_saturation_change
@@ -211,8 +216,9 @@ def _check_saturation_changes(
         )
 
     water_tol = max(tolerance, 0.005 * max_allowed_water_saturation_change)
-    max_allowed_water_saturation_change *= 1 + water_tol
-    if maximum_water_saturation_change > max_allowed_water_saturation_change:
+    effective_allowed_water = max_allowed_water_saturation_change + water_tol
+
+    if maximum_water_saturation_change > effective_allowed_water:
         violated = True
         if (
             max_phase_saturation_change is None
@@ -220,14 +226,16 @@ def _check_saturation_changes(
         ):
             max_phase_saturation_change = maximum_water_saturation_change
             max_allowed_phase_saturation_change = max_allowed_water_saturation_change
+
         messages.append(
             f"Water saturation change {maximum_water_saturation_change:.9f} exceeded "
             f"maximum allowed {max_allowed_water_saturation_change:.9f}."
         )
 
     gas_tol = max(tolerance, 0.005 * max_allowed_gas_saturation_change)
-    max_allowed_gas_saturation_change *= 1 + gas_tol
-    if maximum_gas_saturation_change > max_allowed_gas_saturation_change:
+    effective_allowed_gas = max_allowed_gas_saturation_change + gas_tol
+
+    if maximum_gas_saturation_change > effective_allowed_gas:
         violated = True
         if (
             max_phase_saturation_change is None
@@ -235,6 +243,7 @@ def _check_saturation_changes(
         ):
             max_phase_saturation_change = maximum_gas_saturation_change
             max_allowed_phase_saturation_change = max_allowed_gas_saturation_change
+
         messages.append(
             f"Gas saturation change {maximum_gas_saturation_change:.9f} exceeded "
             f"maximum allowed {max_allowed_gas_saturation_change:.9f}."
@@ -366,7 +375,6 @@ def _run_impes_step(
     :param saturation_epsilon: Small value to keep saturations strictly between 0 and 1.
     :return: `StepResult` containing updated fluid properties, rock properties, and rates.
     """
-    old_pressure_grid = fluid_properties.pressure_grid.copy()
     initial_fluid_properties = fluid_properties
 
     # Build boundary metadata and get the initial ghost-cell maps.
@@ -404,7 +412,7 @@ def _run_impes_step(
     else:
         well_rates = None
 
-    logger.debug("Evolving pressure (implicit)...")
+    logger.debug("Solving pressure implicitly...")
     pressure_result = implicit.solve_pressure(
         cell_dimension=cell_dimension,
         thickness_grid=thickness_grid,
@@ -436,7 +444,7 @@ def _run_impes_step(
 
     pressure_solution = pressure_result.value
     new_pressure_grid = pressure_solution.pressure_grid
-    maximum_pressure_change = pressure_solution.maximum_pressure_change
+    maximum_pressure_change = float(pressure_solution.maximum_pressure_change)
     maximum_allowed_pressure_change = config.maximum_pressure_change * 1.0001
 
     if maximum_pressure_change > maximum_allowed_pressure_change:
@@ -452,6 +460,7 @@ def _run_impes_step(
             saturation_history=saturation_history,
             success=False,
             message=message,
+            maximum_pressure_change=maximum_pressure_change,
             timer_context={
                 "maximum_pressure_change": maximum_pressure_change,
                 "maximum_allowed_pressure_change": maximum_allowed_pressure_change,
@@ -526,7 +535,7 @@ def _run_impes_step(
         metadata=metadata
     )
 
-    logger.debug("Evolving saturation (explicit)...")
+    logger.debug("Solving transport explicitly...")
     transport_result = explicit.solve_transport(
         cell_dimension=cell_dimension,
         thickness_grid=thickness_grid,
@@ -554,10 +563,19 @@ def _run_impes_step(
     )
 
     transport_solution = transport_result.value
+    maximum_oil_saturation_change = float(
+        transport_solution.maximum_oil_saturation_change
+    )
+    maximum_water_saturation_change = float(
+        transport_solution.maximum_water_saturation_change
+    )
+    maximum_gas_saturation_change = float(
+        transport_solution.maximum_gas_saturation_change
+    )
     saturation_check = _check_saturation_changes(
-        maximum_oil_saturation_change=transport_solution.maximum_oil_saturation_change,
-        maximum_water_saturation_change=transport_solution.maximum_water_saturation_change,
-        maximum_gas_saturation_change=transport_solution.maximum_gas_saturation_change,
+        maximum_oil_saturation_change=maximum_oil_saturation_change,
+        maximum_water_saturation_change=maximum_water_saturation_change,
+        maximum_gas_saturation_change=maximum_gas_saturation_change,
         max_allowed_oil_saturation_change=config.maximum_oil_saturation_change,
         max_allowed_water_saturation_change=config.maximum_water_saturation_change,
         max_allowed_gas_saturation_change=config.maximum_gas_saturation_change,
@@ -571,7 +589,6 @@ def _run_impes_step(
         "maximum_saturation_change": saturation_check.max_phase_saturation_change,
         "maximum_allowed_saturation_change": saturation_check.max_allowed_phase_saturation_change,
     }
-
     if not transport_result.success:
         logger.warning(
             f"Explicit saturation evolution failed at time step {time_step}: \n{transport_result.message}"
@@ -582,6 +599,10 @@ def _run_impes_step(
             saturation_history=saturation_history,
             success=False,
             message=transport_result.message,
+            maximum_pressure_change=maximum_pressure_change,
+            maximum_oil_saturation_change=maximum_oil_saturation_change,
+            maximum_water_saturation_change=maximum_water_saturation_change,
+            maximum_gas_saturation_change=maximum_gas_saturation_change,
             timer_context=timer_context,
         )
 
@@ -589,9 +610,9 @@ def _run_impes_step(
         message = (
             f"At time step {time_step}, saturation change limits were violated:\n"
             f"{saturation_check.message}\n"
-            f"Oil: {transport_solution.maximum_oil_saturation_change:.6f}, "
-            f"Water: {transport_solution.maximum_water_saturation_change:.6f}, "
-            f"Gas: {transport_solution.maximum_gas_saturation_change:.6f}."
+            f"Oil: {maximum_oil_saturation_change:.6f}, "
+            f"Water: {maximum_water_saturation_change:.6f}, "
+            f"Gas: {maximum_gas_saturation_change:.6f}."
         )
         logger.debug(message)
         return StepResult(
@@ -600,6 +621,10 @@ def _run_impes_step(
             saturation_history=saturation_history,
             success=False,
             message=message,
+            maximum_pressure_change=maximum_pressure_change,
+            maximum_oil_saturation_change=maximum_oil_saturation_change,
+            maximum_water_saturation_change=maximum_water_saturation_change,
+            maximum_gas_saturation_change=maximum_gas_saturation_change,
             timer_context=timer_context,
         )
 
@@ -678,7 +703,7 @@ def _run_impes_step(
             "total_relative_mbe": material_balance_errors.total_relative_mbe,
         }
     )
-    logger.debug("Saturation evolution completed.")
+    logger.debug("Transport solve completed.")
     return StepResult(
         fluid_properties=fluid_properties,
         rock_properties=rock_properties,
@@ -686,6 +711,10 @@ def _run_impes_step(
         rates=well_rates,
         success=True,
         message=transport_result.message,
+        maximum_pressure_change=maximum_pressure_change,
+        maximum_oil_saturation_change=maximum_oil_saturation_change,
+        maximum_water_saturation_change=maximum_water_saturation_change,
+        maximum_gas_saturation_change=maximum_gas_saturation_change,
         material_balance_errors=material_balance_errors,
         timer_context=timer_context,
     )
@@ -784,7 +813,7 @@ def _run_sequential_implicit_step(
     else:
         well_rates = None
 
-    logger.debug("Evolving pressure (implicit)...")
+    logger.debug("Solving pressure implicitly...")
     pressure_result = implicit.solve_pressure(
         cell_dimension=cell_dimension,
         thickness_grid=thickness_grid,
@@ -816,7 +845,7 @@ def _run_sequential_implicit_step(
 
     pressure_solution = pressure_result.value
     new_pressure_grid = pressure_solution.pressure_grid
-    maximum_pressure_change = pressure_solution.maximum_pressure_change
+    maximum_pressure_change = float(pressure_solution.maximum_pressure_change)
     maximum_allowed_pressure_change = config.maximum_pressure_change * 1.0001
 
     if maximum_pressure_change > maximum_allowed_pressure_change:
@@ -885,7 +914,7 @@ def _run_sequential_implicit_step(
         metadata=metadata
     )
 
-    logger.debug("Evolving saturation (implicit, Newton-Raphson)...")
+    logger.debug("Solving transport implicitly (Newton-Raphson)...")
     transport_result = implicit.solve_transport(
         cell_dimension=cell_dimension,
         thickness_grid=thickness_grid,
@@ -909,10 +938,19 @@ def _run_sequential_implicit_step(
         dtype=dtype,
     )
     transport_solution = transport_result.value
+    maximum_oil_saturation_change = float(
+        transport_solution.maximum_oil_saturation_change
+    )
+    maximum_water_saturation_change = float(
+        transport_solution.maximum_water_saturation_change
+    )
+    maximum_gas_saturation_change = float(
+        transport_solution.maximum_gas_saturation_change
+    )
     saturation_check = _check_saturation_changes(
-        maximum_oil_saturation_change=transport_solution.maximum_oil_saturation_change,
-        maximum_water_saturation_change=transport_solution.maximum_water_saturation_change,
-        maximum_gas_saturation_change=transport_solution.maximum_gas_saturation_change,
+        maximum_oil_saturation_change=maximum_oil_saturation_change,
+        maximum_water_saturation_change=maximum_water_saturation_change,
+        maximum_gas_saturation_change=maximum_gas_saturation_change,
         max_allowed_oil_saturation_change=config.maximum_oil_saturation_change,
         max_allowed_water_saturation_change=config.maximum_water_saturation_change,
         max_allowed_gas_saturation_change=config.maximum_gas_saturation_change,
@@ -936,6 +974,10 @@ def _run_sequential_implicit_step(
             saturation_history=saturation_history,
             success=False,
             message=transport_result.message,
+            maximum_pressure_change=maximum_pressure_change,
+            maximum_oil_saturation_change=maximum_oil_saturation_change,
+            maximum_water_saturation_change=maximum_water_saturation_change,
+            maximum_gas_saturation_change=maximum_gas_saturation_change,
             timer_context=timer_context,
         )
 
@@ -943,9 +985,9 @@ def _run_sequential_implicit_step(
         message = (
             f"At time step {time_step}, saturation change limits were violated:\n"
             f"{saturation_check.message}\n"
-            f"Oil: {transport_solution.maximum_oil_saturation_change:.6f}, "
-            f"Water: {transport_solution.maximum_water_saturation_change:.6f}, "
-            f"Gas: {transport_solution.maximum_gas_saturation_change:.6f}."
+            f"Oil: {maximum_oil_saturation_change:.6f}, "
+            f"Water: {maximum_water_saturation_change:.6f}, "
+            f"Gas: {maximum_gas_saturation_change:.6f}."
         )
         logger.warning(message)
         return StepResult(
@@ -954,6 +996,10 @@ def _run_sequential_implicit_step(
             saturation_history=saturation_history,
             success=False,
             message=message,
+            maximum_pressure_change=maximum_pressure_change,
+            maximum_oil_saturation_change=maximum_oil_saturation_change,
+            maximum_water_saturation_change=maximum_water_saturation_change,
+            maximum_gas_saturation_change=maximum_gas_saturation_change,
             timer_context=timer_context,
         )
 
@@ -1027,6 +1073,10 @@ def _run_sequential_implicit_step(
         rates=well_rates,
         success=True,
         message=transport_result.message,
+        maximum_pressure_change=maximum_pressure_change,
+        maximum_oil_saturation_change=maximum_oil_saturation_change,
+        maximum_water_saturation_change=maximum_water_saturation_change,
+        maximum_gas_saturation_change=maximum_gas_saturation_change,
         material_balance_errors=material_balance_errors,
         timer_context=timer_context,
     )
@@ -1115,6 +1165,7 @@ def _run_full_sequential_implicit_step(
     outer_converged = False
     transport_result = None
     transport_solution = None
+    maximum_pressure_change = None
     well_rates = None
     has_open_wells = False
     final_timer_kwargs: typing.Dict[str, typing.Any] = {}
@@ -1163,7 +1214,7 @@ def _run_full_sequential_implicit_step(
             well_rates = None
 
         logger.debug(
-            "Evolving pressure (implicit) for outer iteration saturation solve..."
+            "Solving pressure implicitly for outer iteration saturation solve..."
         )
         pressure_result = implicit.solve_pressure(
             cell_dimension=cell_dimension,
@@ -1200,7 +1251,7 @@ def _run_full_sequential_implicit_step(
 
         pressure_solution = pressure_result.value
         new_pressure_grid = pressure_solution.pressure_grid
-        maximum_pressure_change = pressure_solution.maximum_pressure_change
+        maximum_pressure_change = float(pressure_solution.maximum_pressure_change)
         maximum_allowed_pressure_change = config.maximum_pressure_change * 1.0001
 
         if maximum_pressure_change > maximum_allowed_pressure_change:
@@ -1216,6 +1267,7 @@ def _run_full_sequential_implicit_step(
                 saturation_history=saturation_history,
                 success=False,
                 message=message,
+                maximum_pressure_change=maximum_pressure_change,
                 timer_context={
                     "maximum_pressure_change": maximum_pressure_change,
                     "maximum_allowed_pressure_change": maximum_allowed_pressure_change,
@@ -1280,7 +1332,7 @@ def _run_full_sequential_implicit_step(
         )
 
         logger.debug(
-            "Evolving saturation (implicit, Newton-Raphson) for outer iteration %d/%d...",
+            "Solving transport implicitly (Newton-Raphson) for outer iteration %d/%d...",
             iteration + 1,
             maximum_outer_iterations,
         )
@@ -1306,7 +1358,16 @@ def _run_full_sequential_implicit_step(
             rates=well_rates,
             dtype=dtype,
         )
-
+        transport_solution = transport_result.value
+        maximum_oil_saturation_change = float(
+            transport_solution.maximum_oil_saturation_change
+        )
+        maximum_water_saturation_change = float(
+            transport_solution.maximum_water_saturation_change
+        )
+        maximum_gas_saturation_change = float(
+            transport_solution.maximum_gas_saturation_change
+        )
         if not transport_result.success:
             logger.warning(
                 f"Implicit saturation solve failed at outer iteration "
@@ -1318,13 +1379,16 @@ def _run_full_sequential_implicit_step(
                 saturation_history=saturation_history,
                 success=False,
                 message=transport_result.message,
+                maximum_pressure_change=maximum_pressure_change,
+                maximum_oil_saturation_change=maximum_oil_saturation_change,
+                maximum_water_saturation_change=maximum_water_saturation_change,
+                maximum_gas_saturation_change=maximum_gas_saturation_change,
             )
 
-        transport_solution = transport_result.value
         saturation_check = _check_saturation_changes(
-            maximum_oil_saturation_change=transport_solution.maximum_oil_saturation_change,
-            maximum_water_saturation_change=transport_solution.maximum_water_saturation_change,
-            maximum_gas_saturation_change=transport_solution.maximum_gas_saturation_change,
+            maximum_oil_saturation_change=maximum_oil_saturation_change,
+            maximum_water_saturation_change=maximum_water_saturation_change,
+            maximum_gas_saturation_change=maximum_gas_saturation_change,
             max_allowed_oil_saturation_change=config.maximum_oil_saturation_change,
             max_allowed_water_saturation_change=config.maximum_water_saturation_change,
             max_allowed_gas_saturation_change=config.maximum_gas_saturation_change,
@@ -1334,9 +1398,9 @@ def _run_full_sequential_implicit_step(
             message = (
                 f"At time step {time_step}, outer iteration {iteration + 1}, "
                 f"saturation change limits were violated:\n{saturation_check.message}\n"
-                f"Oil: {transport_solution.maximum_oil_saturation_change:.6f}, "
-                f"Water: {transport_solution.maximum_water_saturation_change:.6f}, "
-                f"Gas: {transport_solution.maximum_gas_saturation_change:.6f}."
+                f"Oil: {maximum_oil_saturation_change:.6f}, "
+                f"Water: {maximum_water_saturation_change:.6f}, "
+                f"Gas: {maximum_gas_saturation_change:.6f}."
             )
             logger.warning(message)
             return StepResult(
@@ -1345,6 +1409,10 @@ def _run_full_sequential_implicit_step(
                 saturation_history=saturation_history,
                 success=False,
                 message=message,
+                maximum_pressure_change=maximum_pressure_change,
+                maximum_oil_saturation_change=maximum_oil_saturation_change,
+                maximum_water_saturation_change=maximum_water_saturation_change,
+                maximum_gas_saturation_change=maximum_gas_saturation_change,
                 timer_context={
                     "maximum_saturation_change": saturation_check.max_phase_saturation_change,
                     "maximum_allowed_saturation_change": saturation_check.max_allowed_phase_saturation_change,
@@ -1360,7 +1428,6 @@ def _run_full_sequential_implicit_step(
         gas_saturation_grid = transport_solution.gas_saturation_grid.astype(
             dtype, copy=False
         )
-
         iter_fluid_properties = attrs.evolve(
             iter_fluid_properties,
             water_saturation_grid=water_saturation_grid,
@@ -1555,6 +1622,10 @@ def _run_full_sequential_implicit_step(
         rates=well_rates,
         success=True,
         message=transport_result.message,
+        maximum_pressure_change=maximum_pressure_change,
+        maximum_oil_saturation_change=maximum_oil_saturation_change,
+        maximum_water_saturation_change=maximum_water_saturation_change,
+        maximum_gas_saturation_change=maximum_gas_saturation_change,
         material_balance_errors=material_balance_errors,
         timer_context=final_timer_kwargs,
     )

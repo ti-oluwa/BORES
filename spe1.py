@@ -614,6 +614,7 @@ injector = bores.injection_well(
         specific_gravity=0.792,
         molecular_weight=gas_molecular_weight,
         is_miscible=False,
+        pvt_table=pvt_tables.gas,
         pseudo_pressure_table=pseudo_pressure_table,
     ),
     is_active=True,
@@ -665,7 +666,7 @@ timer = bores.Timer(
     maximum_step_size=bores.Time(days=30.0),
     minimum_step_size=bores.Time(minutes=10.0),
     simulation_time=bores.Time(years=10.0),
-    maximum_cfl=0.4,
+    maximum_cfl=0.8,
     ramp_up_factor=1.3,
     backoff_factor=0.5,
     aggressive_backoff_factor=0.25,
@@ -690,7 +691,7 @@ config = bores.Config(
     maximum_pressure_change=1500.0,
     use_pseudo_pressure=True,
     phase_appearance_tolerance=1e-6,
-    cfl_threshold=0.4,
+    cfl_threshold=0.8,
     # minimum_injector_gas_saturation=0.1,
 )
 

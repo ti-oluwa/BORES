@@ -139,11 +139,12 @@ rock_fluid_tables = bores.RockFluidTables(
     ),
 )
 timer = bores.Timer(
-    initial_step_size=bores.Time(days=5),
-    maximum_step_size=bores.Time(months=3),
+    initial_step_size=bores.Time(days=1),
+    maximum_step_size=bores.Time(days=7),
     minimum_step_size=bores.Time(hours=1),
     simulation_time=bores.Time(years=30),
     maximum_rejections=20,
+    maximum_cfl=0.6,
 )
 
 # Simulation configuration
@@ -156,14 +157,32 @@ config = bores.Config(
     transport_solver="direct",
     pressure_preconditioner=None,
     transport_preconditioner=None,
-    maximum_pressure_change=800,
+    maximum_pressure_change=500,
     # freeze_saturation_pressure=True,
     disable_capillary_effects=True,
-    minimum_injector_water_saturation=0.1
+    cfl_threshold=0.5,
+    # minimum_injector_water_saturation=0.1
 )
 
+
+def on_dP_gte_max_dP(
+    result: bores.StepResult[bores.ThreeDimensions], time: float, elapsed: float
+) -> None:
+    max_allowed_dP = config.maximum_pressure_change
+    max_dP = result.maximum_pressure_change
+    if max_dP and max_allowed_dP and max_dP >= max_allowed_dP:
+        print(f"Pressure change is {max_dP}. Max allowed is {max_allowed_dP}")
+
+
 # Run and monitor the simulation and collect states
-states = list(bores.monitor(model, config))
+states = list(
+    bores.monitor(
+        model,
+        config,
+        on_step_accepted=on_dP_gte_max_dP,
+        on_step_rejected=on_dP_gte_max_dP,
+    )
+)
 final = states[-1]
 print(f"Completed {final.step} steps in {final.time_in_days:.2f} days")
 print(
