@@ -138,7 +138,11 @@ class Timer(StoreSerializable):
     ramp_up_factor: typing.Optional[float] = None
     """Factor by which to ramp up time step size on successful steps."""
     backoff_factor: float = 0.5
-    """Factor by which to reduce time step size on failed steps."""
+    """
+    Default factor by which to reduce time step size on failed steps. 
+
+    Only used when there not enough information to intelligently determine a suitable backoff factor for the time step size.
+    """
     aggressive_backoff_factor: float = 0.25
     """Factor by which to aggressively reduce time step size on failed steps."""
     maximum_steps: typing.Optional[int] = None
@@ -641,8 +645,8 @@ class Timer(StoreSerializable):
             if overshoot_ratio > 3.0:
                 # Very large pressure changes
                 pressure_factor = 0.25
-                if logger.isEnabledFor(logging.INFO):
-                    logger.info(
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
                         "Severe pressure change: %.4e > %.4e (ratio: %.6f)",
                         maximum_pressure_change,
                         maximum_allowed_pressure_change,
@@ -651,8 +655,8 @@ class Timer(StoreSerializable):
             elif overshoot_ratio > 2.0:
                 # Large pressure changes
                 pressure_factor = 0.4
-                if logger.isEnabledFor(logging.INFO):
-                    logger.info(
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
                         "Large pressure change: %.4e > %.4e (ratio: %.6f)",
                         maximum_pressure_change,
                         maximum_allowed_pressure_change,
@@ -664,8 +668,8 @@ class Timer(StoreSerializable):
                     maximum_allowed_pressure_change / maximum_pressure_change
                 )
                 pressure_factor = max(pressure_factor, 0.5)
-                if logger.isEnabledFor(logging.INFO):
-                    logger.info(
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug(
                         "Moderate pressure change: %.4e > %.4e (ratio: %.6f)",
                         maximum_pressure_change,
                         maximum_allowed_pressure_change,
@@ -746,7 +750,7 @@ class Timer(StoreSerializable):
                     final_factor,
                     len(factors),
                 )
-            return final_factor
+            return self.aggressive_backoff_factor if aggressive else final_factor
 
         # Fallback to original behavior if no specific information provided
         if logger.isEnabledFor(logging.DEBUG):
@@ -794,9 +798,7 @@ class Timer(StoreSerializable):
         :param kwargs: Additional timer kwargs forwarded from `StepResult.timer_kwargs`; ignored.
         :return: Tuple of (acceptable, error/message). The first item is True if the timestep is acceptable. Else, Flase.
         """
-        cfl_limit = (
-            cfl_threshold if cfl_threshold is not None else self.maximum_cfl
-        )
+        cfl_limit = cfl_threshold if cfl_threshold is not None else self.maximum_cfl
         if maximum_cfl_encountered is not None and maximum_cfl_encountered > cfl_limit:
             return (
                 False,
@@ -948,9 +950,7 @@ class Timer(StoreSerializable):
         adjustment_factors = []
 
         # CFL-based adjustment with safety margin
-        maximum_cfl = (
-            cfl_threshold if cfl_threshold is not None else self.maximum_cfl
-        )
+        maximum_cfl = cfl_threshold if cfl_threshold is not None else self.maximum_cfl
         if maximum_cfl_encountered is not None and maximum_cfl_encountered > 0.0:
             target_cfl = maximum_cfl * self.cfl_safety_margin
             cfl_ratio = target_cfl / maximum_cfl_encountered

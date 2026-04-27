@@ -30,7 +30,7 @@ ny = 1
 nz = 1
 grid_shape = typing.cast(bores.ThreeDimensions, (nx, ny, nz))
 
-cell_dimension = (100.0, 100.0)  # DX, DY in feet
+cell_dimension = (1000.0, 1000.0)  # DX, DY in feet
 thickness = 10.0  # ft
 
 # Uniform properties
@@ -88,7 +88,7 @@ gas_gravity_grid = bores.uniform_grid(grid_shape, value=gas_gravity)
 oil_bubble_point_grid = bores.uniform_grid(grid_shape, value=2700.0)
 
 rock_fluid_tables = bores.RockFluidTables(
-    relative_permeability_table=bores.LETThreePhaseRelPermModel()
+    relative_permeability_table=bores.BrooksCoreyRelPermModel(water_exponent=1.0)
 )
 
 model = bores.reservoir_model(
@@ -123,7 +123,7 @@ injector = bores.injection_well(
     perforating_intervals=[((0, 0, 0), (0, 0, 0))],
     radius=0.25,  # ft
     control=bores.AdaptiveRateControl(
-        target_rate=200.0,  # STB/D
+        target_rate=1000.0,  # STB/D
         bhp_limit=6000.0,  # max injection pressure
         clamp=bores.InjectionClamp(),
     ),
@@ -146,7 +146,7 @@ producer = bores.production_well(
     control=bores.CoupledRateControl(
         primary_phase=bores.FluidPhase.OIL,
         primary_control=bores.AdaptiveRateControl(
-            target_rate=-150.0,  # large negative (effectively BHP control)
+            target_rate=-10000.0,  # large negative (effectively BHP control)
             bhp_limit=1000.0,  # min BHP
             clamp=bores.ProductionClamp(),
         ),
@@ -182,12 +182,14 @@ wells = bores.wells_(injectors=[injector], producers=[producer])
 # Buckley-Leverett breakthrough typically occurs within days to weeks
 # depending on rate and pore volume
 timer = bores.Timer(
-    initial_step_size=bores.Time(hours=0.5),
+    initial_step_size=bores.Time(hours=6),
     maximum_step_size=bores.Time(days=2),
     minimum_step_size=bores.Time(minutes=1),
     simulation_time=bores.Time(days=200),
     maximum_rejections=20,
+    maximum_cfl=0.7,
 )
+bc = bores.BoundaryConditions()
 
 config = bores.Config(
     timer=timer,
@@ -199,9 +201,9 @@ config = bores.Config(
     maximum_saturation_change=0.5,  # Control numerical diffusion
     disable_capillary_effects=True,  # Classic BL has no Pc
     normalize_saturations=True,
-    maximum_pressure_change=3500,
+    maximum_pressure_change=500,
     output_frequency=5,  # Save every 5th step for analysis
-    minimum_injector_water_saturation=0.1,
+    # minimum_injector_water_saturation=0.4,
     cfl_threshold=0.6,
     use_pseudo_pressure=False,
 )

@@ -91,6 +91,12 @@ class StepResult(typing.Generic[NDimension]):
     """Updated fluid properties after the time step."""
     rock_properties: RockProperties[NDimension]
     """Updated rock properties after the time step."""
+    time_step: int
+    """The time step number (iteration index) for this result."""
+    time_step_size: float
+    """Size of the current time step (seconds)."""
+    time: float
+    """Total elapsed simulation time (seconds)."""
     saturation_history: typing.Optional[SaturationHistory[NDimension]] = None
     """Updated saturation history after the time step."""
     rates: typing.Optional[WellRates[NDimension]] = None
@@ -124,6 +130,8 @@ class SaturationChangeCheckResult:
 def _validate_pressure_range(
     pressure_grid: NDimensionalGrid[ThreeDimensions],
     time_step: int,
+    time_step_size: float,
+    time: float,
     fluid_properties: FluidProperties[ThreeDimensions],
     rock_properties: RockProperties[ThreeDimensions],
     saturation_history: typing.Optional[SaturationHistory[ThreeDimensions]] = None,
@@ -133,6 +141,8 @@ def _validate_pressure_range(
 
     :param pressure_grid: Pressure grid to validate.
     :param time_step: Current time step index.
+    :param time_step_size: Size of the current time step (seconds).
+    :param time: Total elapsed simulation time (seconds).
     :param fluid_properties: Fluid properties for the current state.
     :param rock_properties: Rock properties for the current state.
     :param saturation_history: Saturation history for the current state.
@@ -167,6 +177,9 @@ def _validate_pressure_range(
         return StepResult(
             fluid_properties=fluid_properties,
             rock_properties=rock_properties,
+            time_step=time_step,
+            time_step_size=time_step_size,
+            time=time,
             saturation_history=saturation_history,
             success=False,
             message=message,
@@ -437,6 +450,9 @@ def _run_impes_step(
         return StepResult(
             fluid_properties=fluid_properties,
             rock_properties=rock_properties,
+            time_step=time_step,
+            time_step_size=time_step_size,
+            time=time,
             saturation_history=saturation_history,
             success=False,
             message=pressure_result.message,
@@ -457,6 +473,9 @@ def _run_impes_step(
         return StepResult(
             fluid_properties=fluid_properties,
             rock_properties=rock_properties,
+            time_step=time_step,
+            time_step_size=time_step_size,
+            time=time,
             saturation_history=saturation_history,
             success=False,
             message=message,
@@ -470,6 +489,8 @@ def _run_impes_step(
     result = _validate_pressure_range(
         pressure_grid=new_pressure_grid,
         time_step=time_step,
+        time_step_size=time_step_size,
+        time=time,
         fluid_properties=fluid_properties,
         rock_properties=rock_properties,
         saturation_history=saturation_history,
@@ -596,6 +617,9 @@ def _run_impes_step(
         return StepResult(
             fluid_properties=fluid_properties,
             rock_properties=rock_properties,
+            time_step=time_step,
+            time_step_size=time_step_size,
+            time=time,
             saturation_history=saturation_history,
             success=False,
             message=transport_result.message,
@@ -618,6 +642,9 @@ def _run_impes_step(
         return StepResult(
             fluid_properties=fluid_properties,
             rock_properties=rock_properties,
+            time_step=time_step,
+            time_step_size=time_step_size,
+            time=time,
             saturation_history=saturation_history,
             success=False,
             message=message,
@@ -707,6 +734,9 @@ def _run_impes_step(
     return StepResult(
         fluid_properties=fluid_properties,
         rock_properties=rock_properties,
+        time_step=time_step,
+        time_step_size=time_step_size,
+        time=time,
         saturation_history=saturation_history,
         rates=well_rates,
         success=True,
@@ -838,6 +868,9 @@ def _run_sequential_implicit_step(
         return StepResult(
             fluid_properties=fluid_properties,
             rock_properties=rock_properties,
+            time_step=time_step,
+            time_step_size=time_step_size,
+            time=time,
             saturation_history=saturation_history,
             success=False,
             message=pressure_result.message,
@@ -858,6 +891,9 @@ def _run_sequential_implicit_step(
         return StepResult(
             fluid_properties=fluid_properties,
             rock_properties=rock_properties,
+            time_step=time_step,
+            time_step_size=time_step_size,
+            time=time,
             saturation_history=saturation_history,
             success=False,
             message=message,
@@ -870,6 +906,8 @@ def _run_sequential_implicit_step(
     result = _validate_pressure_range(
         pressure_grid=new_pressure_grid,
         time_step=time_step,
+        time_step_size=time_step_size,
+        time=time,
         fluid_properties=fluid_properties,
         rock_properties=rock_properties,
         saturation_history=saturation_history,
@@ -971,6 +1009,9 @@ def _run_sequential_implicit_step(
         return StepResult(
             fluid_properties=fluid_properties,
             rock_properties=rock_properties,
+            time_step=time_step,
+            time_step_size=time_step_size,
+            time=time,
             saturation_history=saturation_history,
             success=False,
             message=transport_result.message,
@@ -993,6 +1034,9 @@ def _run_sequential_implicit_step(
         return StepResult(
             fluid_properties=fluid_properties,
             rock_properties=rock_properties,
+            time_step=time_step,
+            time_step_size=time_step_size,
+            time=time,
             saturation_history=saturation_history,
             success=False,
             message=message,
@@ -1069,6 +1113,9 @@ def _run_sequential_implicit_step(
     return StepResult(
         fluid_properties=fluid_properties,
         rock_properties=rock_properties,
+        time_step=time_step,
+        time_step_size=time_step_size,
+        time=time,
         saturation_history=saturation_history,
         rates=well_rates,
         success=True,
@@ -1166,6 +1213,9 @@ def _run_full_sequential_implicit_step(
     transport_result = None
     transport_solution = None
     maximum_pressure_change = None
+    maximum_oil_saturation_change = None
+    maximum_water_saturation_change = None
+    maximum_gas_saturation_change = None
     well_rates = None
     has_open_wells = False
     final_timer_kwargs: typing.Dict[str, typing.Any] = {}
@@ -1244,6 +1294,9 @@ def _run_full_sequential_implicit_step(
             return StepResult(
                 fluid_properties=fluid_properties,
                 rock_properties=rock_properties,
+                time_step=time_step,
+                time_step_size=time_step_size,
+                time=time,
                 saturation_history=saturation_history,
                 success=False,
                 message=pressure_result.message,
@@ -1264,6 +1317,9 @@ def _run_full_sequential_implicit_step(
             return StepResult(
                 fluid_properties=fluid_properties,
                 rock_properties=rock_properties,
+                time_step=time_step,
+                time_step_size=time_step_size,
+                time=time,
                 saturation_history=saturation_history,
                 success=False,
                 message=message,
@@ -1277,6 +1333,8 @@ def _run_full_sequential_implicit_step(
         result = _validate_pressure_range(
             pressure_grid=new_pressure_grid,
             time_step=time_step,
+            time_step_size=time_step_size,
+            time=time,
             fluid_properties=fluid_properties,
             rock_properties=rock_properties,
             saturation_history=saturation_history,
@@ -1376,6 +1434,9 @@ def _run_full_sequential_implicit_step(
             return StepResult(
                 fluid_properties=fluid_properties,
                 rock_properties=rock_properties,
+                time_step=time_step,
+                time_step_size=time_step_size,
+                time=time,
                 saturation_history=saturation_history,
                 success=False,
                 message=transport_result.message,
@@ -1406,6 +1467,9 @@ def _run_full_sequential_implicit_step(
             return StepResult(
                 fluid_properties=fluid_properties,
                 rock_properties=rock_properties,
+                time_step=time_step,
+                time_step_size=time_step_size,
+                time=time,
                 saturation_history=saturation_history,
                 success=False,
                 message=message,
@@ -1618,6 +1682,9 @@ def _run_full_sequential_implicit_step(
     return StepResult(
         fluid_properties=iter_fluid_properties,
         rock_properties=rock_properties,
+        time_step=time_step,
+        time_step_size=time_step_size,
+        time=time,
         saturation_history=saturation_history,
         rates=well_rates,
         success=True,
@@ -1658,18 +1725,8 @@ def log_progress(
         )
 
 
-StepCallback = typing.Callable[[StepResult[ThreeDimensions], float, float], None]
-"""
-A callback invoked after each simulation step attempt.
-
-Arguments:
-
-- `StepResult[ThreeDimensions]`: The result of the current step, containing updated
-  fluid properties, rock properties, saturation history, rates, BHPs, success status,
-  message, and timer kwargs.
-- `float`: The step size that was attempted (seconds).
-- `float`: Total accepted simulation time elapsed up to the current step (seconds).
-"""
+StepCallback = typing.Callable[[StepResult[ThreeDimensions]], None]
+"""A callback invoked after each simulation step attempt."""
 
 
 @attrs.define
@@ -2137,7 +2194,7 @@ def run(
                                 interval=log_interval,
                             )
                         if on_step_accepted is not None:
-                            on_step_accepted(result, step_size, timer.elapsed_time)
+                            on_step_accepted(result)
 
                 if not acceptable:
                     logger.debug(
@@ -2158,7 +2215,7 @@ def run(
                         ) from exc
 
                     if on_step_rejected is not None:
-                        on_step_rejected(result, step_size, timer.elapsed_time)
+                        on_step_rejected(result)
 
                     continue
 

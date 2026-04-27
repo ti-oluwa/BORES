@@ -83,7 +83,7 @@ injector = bores.injection_well(
     perforating_intervals=[((0, 0, 2), (0, 0, 2))],
     radius=0.25,
     control=bores.AdaptiveRateControl(
-        target_rate=10000,
+        target_rate=5000,
         bhp_limit=8000.0,
         clamp=bores.InjectionClamp(),
     ),
@@ -134,7 +134,7 @@ rock_fluid_tables = bores.RockFluidTables(
         wettability=bores.Wettability.WATER_WET,
         mixing_rule="eclipse_rule",
     ),
-    capillary_pressure_table=bores.VanGenuchtenCapillaryPressureModel(
+    capillary_pressure_table=bores.BrooksCoreyCapillaryPressureModel(
         wettability=bores.Wettability.WATER_WET,
     ),
 )
@@ -157,32 +157,16 @@ config = bores.Config(
     transport_solver="direct",
     pressure_preconditioner=None,
     transport_preconditioner=None,
-    maximum_pressure_change=500,
+    maximum_pressure_change=300,
     # freeze_saturation_pressure=True,
-    disable_capillary_effects=True,
+    # disable_capillary_effects=True,
     cfl_threshold=0.5,
     # minimum_injector_water_saturation=0.1
 )
 
 
-def on_dP_gte_max_dP(
-    result: bores.StepResult[bores.ThreeDimensions], time: float, elapsed: float
-) -> None:
-    max_allowed_dP = config.maximum_pressure_change
-    max_dP = result.maximum_pressure_change
-    if max_dP and max_allowed_dP and max_dP >= max_allowed_dP:
-        print(f"Pressure change is {max_dP}. Max allowed is {max_allowed_dP}")
-
-
 # Run and monitor the simulation and collect states
-states = list(
-    bores.monitor(
-        model,
-        config,
-        on_step_accepted=on_dP_gte_max_dP,
-        on_step_rejected=on_dP_gte_max_dP,
-    )
-)
+states = list(bores.monitor(model, config))
 final = states[-1]
 print(f"Completed {final.step} steps in {final.time_in_days:.2f} days")
 print(

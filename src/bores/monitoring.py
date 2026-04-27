@@ -1212,22 +1212,18 @@ def monitor(
     stats = RunStats()
     _step_result: typing.Optional[StepResult] = None
 
-    def _on_step_rejected(
-        step_result: StepResult, step_size: float, elapsed_time: float
-    ) -> None:
+    def _on_step_rejected(step_result: StepResult) -> None:
         nonlocal _step_result, on_step_rejected
         stats.record_rejection()
         _step_result = step_result
         if on_step_rejected is not None:
-            on_step_rejected(step_result, step_size, elapsed_time)
+            on_step_rejected(step_result)
 
-    def _on_step_accepted(
-        step_result: StepResult, step_size: float, elapsed_time: float
-    ) -> None:
+    def _on_step_accepted(step_result: StepResult) -> None:
         nonlocal _step_result, on_step_accepted
         _step_result = step_result
         if on_step_accepted is not None:
-            on_step_accepted(step_result, step_size, elapsed_time)
+            on_step_accepted(step_result)
 
     tqdm_bar: typing.Optional[tqdm] = None  # type: ignore[type-arg]
     if monitor.use_tqdm:
