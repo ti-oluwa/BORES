@@ -33,6 +33,7 @@ from bores.types import (
     OneDimension,
     TableQuery,
     TableResult,
+    TwoDimensions,
     UnitSystem,
 )
 
@@ -176,6 +177,124 @@ def build_bilinear_2d_derivative_interpolator(
         for idx in np.unique(cell_idx):
             mask = cell_idx == idx
             result[mask] = cell_interps[idx](t[mask])
+        return result
+
+    return _ev
+
+
+def build_pchip_3d_derivative_interpolator(
+    pressures: NumberArray[NDimension],
+    temperatures: NumberArray[NDimension],
+    salinities: NumberArray[NDimension],
+    table: NumberArray[NDimension],
+    dtype: npt.DTypeLike,
+) -> typing.Callable[[NumberArray[NDimension]], NumberArray[OneDimension]]:
+    """
+    Build a three-stage PCHIP interpolator for `∂table/∂P` over
+    `(pressure, temperature, salinity)`.
+
+    At every `(temperature, salinity)` grid node, builds a PCHIP along
+    pressure and takes its analytical first derivative, exactly as
+    `build_pchip_2d_derivative_interpolator` does per temperature column.
+    The resulting derivative surface is then re-interpolated over salinity
+    and temperature for each query point, same two-stage blend as the 2-D
+    case with one extra axis.
+
+    :param pressures: 1-D array of pressure knots, strictly increasing.
+    :param temperatures: 1-D array of temperature knots, strictly increasing.
+    :param salinities: 1-D array of salinity knots, strictly increasing.
+    :param table: 3-D array of shape `(n_p, n_t, n_s)`.
+    :returns: Callable `(points) -> ∂table/∂P`, where `points` is an
+        `(n, 3)` array with columns `(pressure, temperature, salinity)`.
+    """
+    n_t = len(temperatures)
+    n_s = len(salinities)
+    dp_interps = [
+        [
+            PchipInterpolator(pressures, table[:, j, k], extrapolate=True).derivative(1)
+            for k in range(n_s)
+        ]
+        for j in range(n_t)
+    ]
+
+    def _ev(points: NumberArray[NDimension]) -> NumberArray[OneDimension]:
+        points = typing.cast(NumberArray[TwoDimensions], np.atleast_2d(points))  # type: ignore
+        p = points[:, 0].astype(dtype, copy=False)
+        t = points[:, 1].astype(dtype, copy=False)
+        s = points[:, 2].astype(dtype, copy=False)
+        n = len(p)
+
+        # ∂/∂P at every (temperature, salinity) grid node, at each query
+        # point's own pressure.
+        values = np.empty((n_t, n_s, n), dtype=dtype)
+        for j in range(n_t):
+            for k in range(n_s):
+                values[j, k] = dp_interps[j][k](p)
+
+        result = np.empty(n, dtype=dtype)
+        for i in range(n):
+            over_salinity = np.empty(n_t, dtype=dtype)
+            for j in range(n_t):
+                over_salinity[j] = PchipInterpolator(
+                    salinities, values[j, :, i], extrapolate=True
+                )(s[i])
+            result[i] = PchipInterpolator(temperatures, over_salinity, extrapolate=True)(t[i])
+        return result
+
+    return _ev
+
+
+def build_bilinear_3d_derivative_interpolator(
+    pressures: NumberArray[NDimension],
+    temperatures: NumberArray[NDimension],
+    salinities: NumberArray[NDimension],
+    table: NumberArray[NDimension],
+    dtype: npt.DTypeLike,
+) -> typing.Callable[[NumberArray[NDimension]], NumberArray[OneDimension]]:
+    """
+    Build the exact `∂table/∂P` of a trilinear (`kx=ky=kz=1`) surface.
+
+    Same reasoning as `build_bilinear_2d_derivative_interpolator`: within a
+    pressure cell, `∂z/∂P` is the bracketing pressure columns' slope,
+    `(z[i+1,j,k] - z[i,j,k]) / (P[i+1] - P[i])`, bilinearly blended over
+    `(temperature, salinity)` for the query point.
+
+    :param pressures: 1-D array of pressure knots, strictly increasing.
+    :param temperatures: 1-D array of temperature knots, strictly increasing.
+    :param salinities: 1-D array of salinity knots, strictly increasing.
+    :param table: 3-D array of shape `(n_p, n_t, n_s)`.
+    :returns: Callable `(points) -> ∂table/∂P`, where `points` is an
+        `(n, 3)` array with columns `(pressure, temperature, salinity)`.
+    """
+    # Per-column slopes between consecutive pressure knots: shape (n_p-1, n_t, n_s)
+    column_slopes = np.diff(table, axis=0) / np.diff(pressures)[:, np.newaxis, np.newaxis]
+    slope_interps = [
+        RegularGridInterpolator(
+            points=(temperatures, salinities),
+            values=column_slopes[i],
+            method="linear",
+            bounds_error=False,
+            fill_value=None,
+        )
+        for i in range(column_slopes.shape[0])
+    ]
+
+    def _ev(points: NumberArray[NDimension]) -> NumberArray[OneDimension]:
+        points = typing.cast(NumberArray[TwoDimensions], np.atleast_2d(points))  # type: ignore
+        p = points[:, 0].astype(dtype, copy=False)
+        t = points[:, 1].astype(dtype, copy=False)
+        s = points[:, 2].astype(dtype, copy=False)
+        # Clip to the last cell at/above the top knot (flat extrapolation,
+        # matching the value interpolant's own boundary behavior).
+        cell_idx = np.clip(
+            np.searchsorted(pressures, p, side="right") - 1,
+            0,
+            len(slope_interps) - 1,
+        )
+        result = np.empty(len(p), dtype=dtype)
+        for idx in np.unique(cell_idx):
+            mask = cell_idx == idx
+            result[mask] = slope_interps[idx](np.column_stack([t[mask], s[mask]]))
         return result
 
     return _ev
@@ -762,6 +881,16 @@ class PVTTable(StoreSerializable):
                     bounds_error=False,
                     fill_value=None,
                 )
+                if use_pchip:
+                    self._derivative_interpolatants[name] = build_pchip_3d_derivative_interpolator(
+                        pressures, temperatures, salinities, table, dtype=self.dtype
+                    )
+                else:
+                    self._derivative_interpolatants[name] = (
+                        build_bilinear_3d_derivative_interpolator(
+                            pressures, temperatures, salinities, table, dtype=self.dtype
+                        )
+                    )
 
         # Shared properties
         if phase == FluidPhase.WATER:
@@ -947,14 +1076,14 @@ class PVTTable(StoreSerializable):
             )
 
         if salinity is not None and "salinity" in self._extrapolation_bounds:
-            salinity_arr = np.atleast_1d(salinity)
+            salinity_array = np.atleast_1d(salinity)
             min_salinity, max_salinity = self._extrapolation_bounds["salinity"]
-            if np.any(salinity_arr < min_salinity) or np.any(salinity_arr > max_salinity):
+            if np.any(salinity_array < min_salinity) or np.any(salinity_array > max_salinity):
                 logger.warning(
                     "Salinity extrapolation: queried S ∈ [%.0f, %.0f] ppm, "
                     "table range [%.0f, %.0f] ppm",
-                    float(salinity_arr.min()),
-                    float(salinity_arr.max()),
+                    float(salinity_array.min()),
+                    float(salinity_array.max()),
                     min_salinity,
                     max_salinity,
                 )
@@ -1047,22 +1176,24 @@ class PVTTable(StoreSerializable):
         if self._water_constant_salinity:
             return self.query(name, pressure, temperature, derivative=derivative)
 
-        interp = self._interpolatants.get(name)
+        store = self._derivative_interpolatants if derivative else self._interpolatants
+        interp = store.get(name)
         if interp is None:
             return None
-        self._warn_extrapolation(pressure, temperature, salinity)
+        if not derivative:
+            self._warn_extrapolation(pressure, temperature, salinity)
 
         dtype = self.dtype
         pressure_array = np.atleast_1d(pressure)
         temperature_array = np.atleast_1d(temperature)
-        salinity_arr = np.atleast_1d(salinity)
-        pressure_array, temperature_array, salinity_arr = np.broadcast_arrays(
-            pressure_array, temperature_array, salinity_arr
+        salinity_array = np.atleast_1d(salinity)
+        pressure_array, temperature_array, salinity_array = np.broadcast_arrays(
+            pressure_array, temperature_array, salinity_array
         )
         points = np.column_stack([
             pressure_array.ravel(),
             temperature_array.ravel(),
-            salinity_arr.ravel(),
+            salinity_array.ravel(),
         ])
         result = interp(points).reshape(pressure_array.shape).astype(dtype, copy=False)
 
