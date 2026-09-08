@@ -1,0 +1,609 @@
+diff --git a/src/bores/wells/compile.py b/src/bores/wells/compile.py
+index 4df06fc..97683e1 100644
+--- a/src/bores/wells/compile.py
++++ b/src/bores/wells/compile.py
+@@ -285,6 +285,17 @@ class CompiledPerforations(typing.NamedTuple):
+     cell_indices: IntArray[OneDimension]
+     """Shape `(n_rows,)`. The grid cell each connection resolves to."""
+ 
++    perforation_indices: IntArray[OneDimension]
++    """
++    Shape `(n_rows,)`. Position of the rich `Perforation`/`MDPerforation`
++    this row came from, within that well's own `Well.perforations`. One
++    rich perforation can resolve to several rows (a trajectory crossing
++    several grid cells), so this is not the same as the row's own
++    position - it lets a row be traced back to its source without relying
++    on row position, which decompiling needs since `CompiledPerforations`
++    keeps no other reference to the rich perforations it was built from.
++    """
++
+     well_indices: NumberArray[OneDimension]
+     """Shape `(n_rows,)`. Each connection's connection factor."""
+ 
+@@ -502,7 +513,7 @@ def _resolve_perforations_geometry(
+     well: Well,
+     permeabilities: typing.Mapping[Orientation, NumberArray[OneDimension]],
+     **resolve_kwargs: typing.Any,
+-) -> tuple[tuple[PerforationIndex, ...], dict[Integer, AnyPerforation]]:
++) -> tuple[tuple[PerforationIndex, ...], dict[Integer, AnyPerforation], dict[Integer, int]]:
+     """
+     Resolves connection geometry and connection factor for every
+     perforation on a well, open or shut.
+@@ -518,8 +529,10 @@ def _resolve_perforations_geometry(
+     :param permeabilities: Forwarded to `build_wells_indices`.
+     :param resolve_kwargs: Forwarded to `build_wells_indices`.
+     :returns: Every resolved `PerforationIndex` for this well (against the
+-        shadow perforations), and a mapping from `id(shadow_perforation)`
+-        to the matching original perforation.
++        shadow perforations), a mapping from `id(shadow_perforation)` to
++        the matching original perforation, and a mapping from
++        `id(shadow_perforation)` to that perforation's ordinal position in
++        `well.perforations`.
+     """
+     shadow_perforations = tuple(
+         attrs.evolve(perforation, status=CompletionStatus.OPEN)
+@@ -529,6 +542,9 @@ def _resolve_perforations_geometry(
+         id(shadow): original
+         for shadow, original in zip(shadow_perforations, well.perforations, strict=False)
+     }
++    ordinal_by_id: dict[Integer, int] = {
++        id(shadow): ordinal for ordinal, shadow in enumerate(shadow_perforations)
++    }
+     shadow_well = attrs.evolve(well, perforations=shadow_perforations)
+     shadow_wells = Wells(wells={well.name: shadow_well})
+ 
+@@ -539,7 +555,7 @@ def _resolve_perforations_geometry(
+         **resolve_kwargs,
+     )
+     well_index = result[well.name]
+-    return well_index.perforations, original_by_id
++    return well_index.perforations, original_by_id, ordinal_by_id
+ 
+ 
+ def compile_perforations(
+@@ -562,6 +578,7 @@ def compile_perforations(
+     """
+     well_offsets = [0]
+     cell_indices: list[Integer] = []
++    perforation_indices: list[Integer] = []
+     well_indices: list[Number] = []
+     wellbore_radii: list[Number] = []
+     skins: list[Number] = []
+@@ -574,15 +591,17 @@ def compile_perforations(
+ 
+     for name in names:
+         well = wells[name]
+-        perforation_indices, original_by_id = _resolve_perforations_geometry(
++        perforation_indices_geometry, original_by_id, ordinal_by_id = _resolve_perforations_geometry(
+             grid=grid,
+             well=well,
+             permeabilities=permeabilities,
+             **resolve_kwargs,
+         )
+-        for perforation_index in perforation_indices:
+-            original = original_by_id[id(perforation_index.perforation)]
++        for perforation_index in perforation_indices_geometry:
++            shadow_id = id(perforation_index.perforation)
++            original = original_by_id[shadow_id]
+             cell_indices.append(perforation_index.cell_index)
++            perforation_indices.append(ordinal_by_id[shadow_id])
+             well_indices.append(
+                 perforation_index.well_index
+                 if perforation_index.well_index is not None
+@@ -604,6 +623,9 @@ def compile_perforations(
+     return CompiledPerforations(
+         well_offsets=typing.cast(IntArray[OneDimension], np.asarray(well_offsets, dtype=np.int64)),
+         cell_indices=typing.cast(IntArray[OneDimension], np.asarray(cell_indices, dtype=np.int64)),
++        perforation_indices=typing.cast(
++            IntArray[OneDimension], np.asarray(perforation_indices, dtype=np.int64)
++        ),
+         well_indices=typing.cast(NumberArray[OneDimension], np.asarray(well_indices, dtype=dtype)),
+         wellbore_radii=typing.cast(
+             NumberArray[OneDimension], np.asarray(wellbore_radii, dtype=dtype)
+diff --git a/src/bores/wells/decompile.py b/src/bores/wells/decompile.py
+index 58cb800..dd569a9 100644
+--- a/src/bores/wells/decompile.py
++++ b/src/bores/wells/decompile.py
+@@ -2,14 +2,21 @@
+ 
+ import math
+ 
++import attrs
++
+ from bores.types import FluidPhase, UnitSystem
+-from bores.wells.base import Wells
++from bores.wells.base import AnyPerforation, CompletionStatus, Well, WellStatus, WellType, Wells
+ from bores.wells.compile import (
+     UNSET_INT,
++    CompiledGroupControls,
++    CompiledPerforations,
+     CompiledWellControls,
+     CompiledWellSystem,
+     EconomicQuantityTag,
+     FluidPhaseTag,
++    GroupInjectorControlModeTag,
++    GroupKind,
++    GroupProducerControlModeTag,
+     InjectorControlModeTag,
+     LimitKind,
+     ProducerControlModeTag,
+@@ -30,12 +37,34 @@ from bores.wells.controls import (
+     RateQuantity,
+     THPLimit,
+     WellControl,
++    WellControls,
+     WorkoverAction,
+ )
++from bores.wells.groups import (
++    GroupControl,
++    GroupControls,
++    GroupInjectorControlMode,
++    GroupProducerControlMode,
++)
++from bores.wells.model import WellSystem
+ from bores.wells.resolution.compile import CompiledWellResolution
+ from bores.wells.states import PerforationState, PhaseValues, WellsStates, WellState
+ 
+-__all__ = ["build_wells_states"]
++__all__ = [
++    "build_wells_states",
++    "decompile_control",
++    "decompile_group_control",
++    "decompile_group_controls",
++    "decompile_limit",
++    "decompile_perforation",
++    "decompile_perforations",
++    "decompile_well",
++    "decompile_well_control",
++    "decompile_well_controls",
++    "decompile_well_perforations",
++    "decompile_well_system",
++    "decompile_wells",
++]
+ 
+ PRODUCER_MODE_FROM_TAG = {
+     ProducerControlModeTag.OIL_RATE: ProducerControlMode.OIL_RATE,
+@@ -54,6 +83,26 @@ INJECTOR_MODE_FROM_TAG = {
+     InjectorControlModeTag.THP: InjectorControlMode.THP,
+     InjectorControlModeTag.GROUP: InjectorControlMode.GROUP,
+ }
++GROUP_PRODUCER_MODE_FROM_TAG = {
++    GroupProducerControlModeTag.OIL_RATE: GroupProducerControlMode.OIL_RATE,
++    GroupProducerControlModeTag.WATER_RATE: GroupProducerControlMode.WATER_RATE,
++    GroupProducerControlModeTag.GAS_RATE: GroupProducerControlMode.GAS_RATE,
++    GroupProducerControlModeTag.LIQUID_RATE: GroupProducerControlMode.LIQUID_RATE,
++    GroupProducerControlModeTag.RESERVOIR_VOLUME_RATE: (
++        GroupProducerControlMode.RESERVOIR_VOLUME_RATE
++    ),
++    GroupProducerControlModeTag.FIELD: GroupProducerControlMode.FIELD,
++    GroupProducerControlModeTag.NONE: GroupProducerControlMode.NONE,
++}
++GROUP_INJECTOR_MODE_FROM_TAG = {
++    GroupInjectorControlModeTag.RATE: GroupInjectorControlMode.RATE,
++    GroupInjectorControlModeTag.RESERVOIR_VOLUME_RATE: (
++        GroupInjectorControlMode.RESERVOIR_VOLUME_RATE
++    ),
++    GroupInjectorControlModeTag.VOIDAGE_REPLACEMENT: GroupInjectorControlMode.VOIDAGE_REPLACEMENT,
++    GroupInjectorControlModeTag.REINJECTION: GroupInjectorControlMode.REINJECTION,
++    GroupInjectorControlModeTag.FIELD: GroupInjectorControlMode.FIELD,
++}
+ RATE_QUANTITY_FROM_TAG = {
+     RateQuantityTag.OIL: RateQuantity.OIL,
+     RateQuantityTag.WATER: RateQuantity.WATER,
+@@ -79,6 +128,33 @@ FLUID_PHASE_FROM_TAG = {
+     FluidPhaseTag.WATER: FluidPhase.WATER,
+     FluidPhaseTag.GAS: FluidPhase.GAS,
+ }
++WELL_TYPE_FROM_KIND = {
++    WellKind.PRODUCER: WellType.PRODUCER,
++    WellKind.INJECTOR: WellType.INJECTOR,
++}
++
++
++def get_well_status(tag: int) -> WellStatus:
++    """
++    Converts a compiled well-status tag back to `WellStatus`. Inverse of
++    `bores.wells.compile.get_well_status_tag`.
++
++    :param tag: `1` for `ACTIVE`, `0` for `PENDING`.
++    :returns: The matching `WellStatus`.
++    """
++    return WellStatus.ACTIVE if tag else WellStatus.PENDING
++
++
++def get_completion_status(tag: int) -> CompletionStatus:
++    """
++    Converts a compiled completion-status tag back to `CompletionStatus`.
++    Inverse of `bores.wells.compile.get_completion_status_tag`.
++
++    :param tag: `1` for `OPEN`, `0` for `SHUT`.
++    :returns: The matching `CompletionStatus`.
++    """
++    return CompletionStatus.OPEN if tag else CompletionStatus.SHUT
++
+ 
+ 
+ def none_if_nan(value: float) -> float | None:
+@@ -91,6 +167,186 @@ def none_if_nan(value: float) -> float | None:
+     return None if math.isnan(value) else value
+ 
+ 
++def decompile_perforation(
++    original: AnyPerforation,
++    perforations: CompiledPerforations,
++    row: int,
++) -> AnyPerforation:
++    """
++    Rebuilds one rich perforation from a single compiled connection row.
++
++    `original` supplies every field the compiled layer doesn't carry (the
++    depth range, or the measured-depth range and trajectory reference for
++    an `MDPerforation`). `status`, `schedule_status`, `skin`,
++    `wellbore_radius`, and `saturation_region` are all overridden from the
++    compiled row instead, so this reflects any in-place patch applied to
++    the compiled layer since compile time (a `WELOPEN` event, a `WPIMULT`
++    reissue) rather than trusting a possibly-stale original.
++
++    :param original: The source rich `Perforation`/`MDPerforation`,
++        matched via `CompiledPerforations.perforation_indices`.
++    :param perforations: `CompiledPerforations` for the whole system.
++    :param row: The compiled connection row to read current state from.
++    :returns: `original`, evolved with the compiled row's current state.
++    """
++    saturation_region = perforations.saturation_regions[row]
++    return attrs.evolve(
++        original,
++        status=get_completion_status(perforations.completion_statuses[row]),
++        schedule_status=get_well_status(perforations.schedule_statuses[row]),
++        skin=perforations.skins[row],
++        wellbore_radius=perforations.wellbore_radii[row],
++        saturation_region=None if saturation_region == UNSET_INT else int(saturation_region),
++    )
++
++
++def decompile_perforations(
++    wells: Wells,
++    well_name: str,
++    perforations: CompiledPerforations,
++    well_row: int,
++) -> tuple[AnyPerforation, ...]:
++    """
++    Rebuilds one well's per-connection rich perforations from its rows of
++    `CompiledPerforations`.
++
++    Returns one entry per compiled connection row for this well, not one
++    per rich perforation - a rich perforation whose trajectory crosses
++    several grid cells produces several consecutive rows here, each
++    rebuilt from that row's own current state (see `decompile_perforation`).
++    Matched through `CompiledPerforations.perforation_indices`, not row
++    position, since a well with any multi-cell perforation would
++    otherwise misalign. Use `decompile_well_perforations` instead when
++    rebuilding a standalone `Well`, which wants one entry per original
++    completion, not one per grid cell.
++
++    :param wells: The original rich `Wells` this system was compiled
++        from. The compiled layer keeps no reference back to these, so
++        this is required to get anything but positions and cell indices.
++    :param well_name: This well's name, to look it up in `wells`.
++    :param perforations: `CompiledPerforations` for the whole system.
++    :param well_row: This well's row, positionally aligned with
++        `CompiledWellSystem.names`.
++    :returns: One rich `AnyPerforation` per compiled connection row for
++        this well, in `CompiledPerforations` row order.
++    """
++    row_start = perforations.well_offsets[well_row]
++    row_end = perforations.well_offsets[well_row + 1]
++    rich_perforations = wells[well_name].perforations
++    return tuple(
++        decompile_perforation(
++            rich_perforations[perforations.perforation_indices[row]], perforations, row
++        )
++        for row in range(row_start, row_end)
++    )
++
++
++def decompile_well_perforations(
++    wells: Wells,
++    well_name: str,
++    perforations: CompiledPerforations,
++    well_row: int,
++) -> tuple[AnyPerforation, ...]:
++    """
++    Rebuilds one well's rich perforations at completion granularity - one
++    entry per original `Well.perforations` entry, not one per grid cell -
++    for reconstructing a standalone `Well`.
++
++    A completion whose trajectory or depth range crosses several grid
++    cells produced several consecutive rows in `CompiledPerforations`;
++    those rows can end up patched independently of each other (a
++    per-connection `WELOPEN` naming specific cells within one wide
++    completion). This collapses each such group back to one
++    representative perforation using its first row, so it cannot show
++    that kind of within-completion divergence. Use `decompile_perforations`
++    instead when that level of detail matters - it matches
++    `PerforationState`, one entry per connection.
++
++    :param wells: The original rich `Wells` this system was compiled from.
++    :param well_name: This well's name, to look it up in `wells`.
++    :param perforations: `CompiledPerforations` for the whole system.
++    :param well_row: This well's row.
++    :returns: One rich `AnyPerforation` per original completion, in the
++        same order as the source `Well.perforations`.
++    """
++    row_start = perforations.well_offsets[well_row]
++    row_end = perforations.well_offsets[well_row + 1]
++    rich_perforations = wells[well_name].perforations
++
++    rebuilt = []
++    row = row_start
++    while row < row_end:
++        ordinal = perforations.perforation_indices[row]
++        rebuilt.append(decompile_perforation(rich_perforations[ordinal], perforations, row))
++        row += 1
++        while row < row_end and perforations.perforation_indices[row] == ordinal:
++            row += 1
++    return tuple(rebuilt)
++
++
++def decompile_group_control(
++    group_controls: CompiledGroupControls,
++    row: int,
++    unit_system: UnitSystem,
++) -> GroupControl:
++    """
++    Rebuilds one rich `GroupControl` from a single row of `CompiledGroupControls`.
++
++    :param group_controls: The compiled group controls.
++    :param row: The row to rebuild.
++    :param unit_system: Unit system to tag the rebuilt control with.
++    :returns: The rebuilt `GroupControl`.
++    """
++    target_rate = none_if_nan(group_controls.target_rates[row])
++    injected_phase_tag = group_controls.injected_phases[row]
++
++    if group_controls.group_kinds[row] == GroupKind.INJECTOR:
++        return GroupControl(
++            mode=GROUP_INJECTOR_MODE_FROM_TAG[group_controls.control_modes[row]],
++            target_rate=target_rate,
++            injected_phase=(
++                FLUID_PHASE_FROM_TAG[injected_phase_tag]
++                if injected_phase_tag != UNSET_INT
++                else None
++            ),
++            unit_system=unit_system,
++        )
++    return GroupControl(
++        mode=GROUP_PRODUCER_MODE_FROM_TAG[group_controls.control_modes[row]],
++        target_rate=target_rate,
++        unit_system=unit_system,
++    )
++
++
++def decompile_group_controls(
++    group_controls: CompiledGroupControls | None,
++    unit_system: UnitSystem,
++) -> GroupControls | None:
++    """
++    Rebuilds a rich `GroupControls` from `CompiledGroupControls`.
++
++    Only rebuilds each group's control target, not its resolved
++    membership - `CompiledGroupControls.member_well_indices` is a
++    solve-time convenience (already-resolved well positions for
++    allocation), not something a rich `GroupControl` itself carries. The
++    group hierarchy (`WellGroups`) this was compiled against is the
++    source of truth for membership, separately from this.
++
++    :param group_controls: `CompiledGroupControls`, or `None` if no group
++        has an explicit control.
++    :param unit_system: Unit system to tag every rebuilt control with.
++    :returns: `GroupControls` keyed by group name, or `None` if
++        `group_controls` is `None`.
++    """
++    if group_controls is None:
++        return None
++    controls = {
++        name: decompile_group_control(group_controls, row, unit_system)
++        for row, name in enumerate(group_controls.names)
++    }
++    return GroupControls(controls=controls, unit_system=unit_system)
++
++
+ def decompile_limit(controls: CompiledWellControls, row: int, unit_system: UnitSystem) -> Limit:
+     """
+     Rebuilds one rich `Limit` from a single row of `CompiledLimits`.
+@@ -180,6 +436,134 @@ def decompile_control(
+     )
+ 
+ 
++def decompile_well_control(
++    controls: CompiledWellControls,
++    well_row: int,
++    unit_system: UnitSystem,
++) -> WellControl:
++    """
++    Rebuilds one well's rich `WellControl`, own limits included, from its
++    row in `CompiledWellControls`.
++
++    Composes `decompile_limit` for every one of this well's rows in
++    `controls.limits`, then `decompile_control` for the control target
++    itself.
++
++    :param controls: `CompiledWellControls` for the whole system.
++    :param well_row: This well's row.
++    :param unit_system: Unit system to tag the rebuilt control and limits with.
++    :returns: The rebuilt `ProducerControl` or `InjectorControl`.
++    """
++    limits_start = controls.limits.well_offsets[well_row]
++    limits_end = controls.limits.well_offsets[well_row + 1]
++    well_limits = tuple(
++        decompile_limit(controls, row, unit_system) for row in range(limits_start, limits_end)
++    )
++    return decompile_control(controls, well_row, well_limits, unit_system)
++
++
++def decompile_well_controls(compiled_system: CompiledWellSystem) -> WellControls:
++    """
++    Rebuilds a rich `WellControls` from every well's row in a `CompiledWellSystem`.
++
++    :param compiled_system: The compiled system to read from.
++    :returns: `WellControls` keyed by well name, one entry per row in
++        `compiled_system.names`.
++    """
++    controls = compiled_system.controls
++    unit_system = compiled_system.unit_system
++    result = {
++        well_name: decompile_well_control(controls, well_row, unit_system)
++        for well_row, well_name in enumerate(compiled_system.names)
++    }
++    return WellControls(controls=result, unit_system=unit_system)
++
++
++def decompile_well(
++    wells: Wells,
++    compiled_system: CompiledWellSystem,
++    well_row: int,
++) -> Well:
++    """
++    Rebuilds one rich `Well` from its row in a `CompiledWellSystem`.
++
++    `surface_location`, `trajectory`, `preferred_phase`, `group`, and
++    `pvt_region` are read straight from the matching original in `wells`,
++    since the compiled layer carries no geometry or grouping data at all -
++    there's nothing to rebuild them from. `well_type`, `reference_depth`,
++    and `schedule_status` come from `compiled_system` directly, and
++    `perforations` is rebuilt via `decompile_well_perforations`, so all
++    four reflect any in-place patch made since compile time.
++
++    :param wells: The original rich `Wells` this system was compiled from.
++    :param compiled_system: The compiled system to read from.
++    :param well_row: This well's row, positionally aligned with
++        `compiled_system.names`.
++    :returns: The rebuilt `Well`.
++    """
++    well_name = compiled_system.names[well_row]
++    original = wells[well_name]
++    perforations = decompile_well_perforations(
++        wells, well_name, compiled_system.perforations, well_row
++    )
++    return attrs.evolve(
++        original,
++        well_type=WELL_TYPE_FROM_KIND[compiled_system.well_kinds[well_row]],
++        reference_depth=compiled_system.reference_depths[well_row],
++        schedule_status=get_well_status(compiled_system.schedule_statuses[well_row]),
++        perforations=perforations,
++    )
++
++
++def decompile_wells(wells: Wells, compiled_system: CompiledWellSystem) -> Wells:
++    """
++    Rebuilds every well in a `CompiledWellSystem` as rich `Wells`.
++
++    :param wells: The original rich `Wells` this system was compiled from.
++    :param compiled_system: The compiled system to read from.
++    :returns: `Wells` keyed by name, one entry per row in
++        `compiled_system.names`.
++    """
++    rebuilt = {
++        well_name: decompile_well(wells, compiled_system, well_row)
++        for well_row, well_name in enumerate(compiled_system.names)
++    }
++    return Wells(wells=rebuilt, unit_system=compiled_system.unit_system)
++
++
++def decompile_well_system(
++    well_system: WellSystem,
++    compiled_system: CompiledWellSystem,
++) -> WellSystem:
++    """
++    Rebuilds a full rich `WellSystem` from a `CompiledWellSystem`.
++
++    `wells`, `well_controls`, and `group_controls` are rebuilt entirely
++    from `compiled_system`, so they reflect any in-place patch made to it
++    since compile time. `default_wellbore`, `wellbore_overrides`,
++    `groups`, and `resolver_spec` are carried over from `well_system`
++    unchanged - none of these are part of the compiled representation.
++    Hydraulics correlation choice is dispatched by name at call time, not
++    stored per well, and the group hierarchy and resolver configuration
++    aren't hot-path data at all, so there's nothing in `compiled_system`
++    to rebuild them from.
++
++    :param well_system: The original rich `WellSystem` `compiled_system`
++        was compiled from.
++    :param compiled_system: The compiled system to read `wells`,
++        `well_controls`, and `group_controls` from.
++    :returns: A new `WellSystem` reflecting `compiled_system`'s current state.
++    """
++    return attrs.evolve(
++        well_system,
++        wells=decompile_wells(well_system.wells, compiled_system),
++        well_controls=decompile_well_controls(compiled_system),
++        group_controls=decompile_group_controls(
++            compiled_system.group_controls, compiled_system.unit_system
++        ),
++    )
++
++
+ def build_wells_states(
+     wells: Wells,
+     compiled_system: CompiledWellSystem,
+@@ -193,11 +577,9 @@ def build_wells_states(
+     `resolve_control`) is skipped rather than reported with meaningless
+     values.
+ 
+-    Each connection's own phase rates aren't tracked past a resolve pass
+-    and so are not set on the returned `PerforationState`s (left `NaN`,
+-    the same way any other not-computed value is elsewhere in this
+-    package). Only that connection's own flowing pressure is real. The
+-    well's own total rates, reservoir- and surface-condition alike, are real.
++    Composes `decompile_perforations`, `decompile_limit`, and
++    `decompile_well_control` rather than rebuilding any of them inline,
++    so each piece can be reused or tested on its own.
+ 
+     :param wells: The original rich `Wells` this system was compiled
+         from. This supplies each `PerforationState.perforation`, which the
+@@ -216,20 +598,18 @@ def build_wells_states(
+         if math.isnan(bhp):
+             continue  # not resolved this pass (PENDING, or UNSET control)
+ 
+-        perforation_start = perforations.well_offsets[well_row]
+-        perforation_end = perforations.well_offsets[well_row + 1]
+-        rich_perforations = wells[well_name].perforations
++        row_start = perforations.well_offsets[well_row]
++        rich_perforations = decompile_perforations(wells, well_name, perforations, well_row)
+ 
+         perforation_states = []
+-        for row in range(perforation_start, perforation_end):
++        for row in range(row_start, perforations.well_offsets[well_row + 1]):
+             pressure = resolution.connection_pressures[row]
+             if math.isnan(pressure):
+                 continue  # this connection wasn't active this pass (shut or pending)
+ 
+-            local_index = row - perforation_start
+             perforation_states.append(
+                 PerforationState(
+-                    perforation=rich_perforations[local_index],
++                    perforation=rich_perforations[row - row_start],
+                     cell_index=int(perforations.cell_indices[row]),
+                     flowing_pressure=pressure,
+                     phase_rates=PhaseValues(
+@@ -241,11 +621,6 @@ def build_wells_states(
+                 )
+             )
+ 
+-        limits_start = controls.limits.well_offsets[well_row]
+-        limits_end = controls.limits.well_offsets[well_row + 1]
+-        well_limits = tuple(
+-            decompile_limit(controls, row, unit_system) for row in range(limits_start, limits_end)
+-        )
+         active_limit_row = resolution.active_limit_rows[well_row]
+         active_limit = (
+             None
+@@ -256,7 +631,7 @@ def build_wells_states(
+         states[well_name] = WellState(
+             well_name=well_name,
+             is_open=not bool(resolution.economic_shutins[well_row]),
+-            active_control=decompile_control(controls, well_row, well_limits, unit_system),
++            active_control=decompile_well_control(controls, well_row, unit_system),
+             bhp=bhp,
+             perforation_states=tuple(perforation_states),
+             phase_rates=PhaseValues(

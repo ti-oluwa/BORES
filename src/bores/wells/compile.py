@@ -285,6 +285,17 @@ class CompiledPerforations(typing.NamedTuple):
     cell_indices: IntArray[OneDimension]
     """Shape `(n_rows,)`. The grid cell each connection resolves to."""
 
+    perforation_indices: IntArray[OneDimension]
+    """
+    Shape `(n_rows,)`. Position of the rich `Perforation`/`MDPerforation`
+    this row came from, within that well's own `Well.perforations`. One
+    rich perforation can resolve to several rows (a trajectory crossing
+    several grid cells), so this is not the same as the row's own
+    position - it lets a row be traced back to its source without relying
+    on row position, which decompiling needs since `CompiledPerforations`
+    keeps no other reference to the rich perforations it was built from.
+    """
+
     well_indices: NumberArray[OneDimension]
     """Shape `(n_rows,)`. Each connection's connection factor."""
 
@@ -502,7 +513,7 @@ def _resolve_perforations_geometry(
     well: Well,
     permeabilities: typing.Mapping[Orientation, NumberArray[OneDimension]],
     **resolve_kwargs: typing.Any,
-) -> tuple[tuple[PerforationIndex, ...], dict[Integer, AnyPerforation]]:
+) -> tuple[tuple[PerforationIndex, ...], dict[Integer, AnyPerforation], dict[Integer, int]]:
     """
     Resolves connection geometry and connection factor for every
     perforation on a well, open or shut.
@@ -518,8 +529,10 @@ def _resolve_perforations_geometry(
     :param permeabilities: Forwarded to `build_wells_indices`.
     :param resolve_kwargs: Forwarded to `build_wells_indices`.
     :returns: Every resolved `PerforationIndex` for this well (against the
-        shadow perforations), and a mapping from `id(shadow_perforation)`
-        to the matching original perforation.
+        shadow perforations), a mapping from `id(shadow_perforation)` to
+        the matching original perforation, and a mapping from
+        `id(shadow_perforation)` to that perforation's ordinal position in
+        `well.perforations`.
     """
     shadow_perforations = tuple(
         attrs.evolve(perforation, status=CompletionStatus.OPEN)
@@ -528,6 +541,9 @@ def _resolve_perforations_geometry(
     original_by_id: dict[Integer, AnyPerforation] = {
         id(shadow): original
         for shadow, original in zip(shadow_perforations, well.perforations, strict=False)
+    }
+    ordinal_by_id: dict[Integer, int] = {
+        id(shadow): ordinal for ordinal, shadow in enumerate(shadow_perforations)
     }
     shadow_well = attrs.evolve(well, perforations=shadow_perforations)
     shadow_wells = Wells(wells={well.name: shadow_well})
@@ -539,7 +555,7 @@ def _resolve_perforations_geometry(
         **resolve_kwargs,
     )
     well_index = result[well.name]
-    return well_index.perforations, original_by_id
+    return well_index.perforations, original_by_id, ordinal_by_id
 
 
 def compile_perforations(
@@ -562,6 +578,7 @@ def compile_perforations(
     """
     well_offsets = [0]
     cell_indices: list[Integer] = []
+    perforation_indices: list[Integer] = []
     well_indices: list[Number] = []
     wellbore_radii: list[Number] = []
     skins: list[Number] = []
@@ -574,15 +591,17 @@ def compile_perforations(
 
     for name in names:
         well = wells[name]
-        perforation_indices, original_by_id = _resolve_perforations_geometry(
+        perforation_indices_geometry, original_by_id, ordinal_by_id = _resolve_perforations_geometry(
             grid=grid,
             well=well,
             permeabilities=permeabilities,
             **resolve_kwargs,
         )
-        for perforation_index in perforation_indices:
-            original = original_by_id[id(perforation_index.perforation)]
+        for perforation_index in perforation_indices_geometry:
+            shadow_id = id(perforation_index.perforation)
+            original = original_by_id[shadow_id]
             cell_indices.append(perforation_index.cell_index)
+            perforation_indices.append(ordinal_by_id[shadow_id])
             well_indices.append(
                 perforation_index.well_index
                 if perforation_index.well_index is not None
@@ -604,6 +623,9 @@ def compile_perforations(
     return CompiledPerforations(
         well_offsets=typing.cast(IntArray[OneDimension], np.asarray(well_offsets, dtype=np.int64)),
         cell_indices=typing.cast(IntArray[OneDimension], np.asarray(cell_indices, dtype=np.int64)),
+        perforation_indices=typing.cast(
+            IntArray[OneDimension], np.asarray(perforation_indices, dtype=np.int64)
+        ),
         well_indices=typing.cast(NumberArray[OneDimension], np.asarray(well_indices, dtype=dtype)),
         wellbore_radii=typing.cast(
             NumberArray[OneDimension], np.asarray(wellbore_radii, dtype=dtype)
