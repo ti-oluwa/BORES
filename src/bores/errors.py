@@ -1,10 +1,16 @@
 """BORES-specific error classes."""
 
 __all__ = [
+    "ActionError",
     "BORESError",
+    "BoundaryConditionCompilationError",
+    "CompilationError",
     "ComputationError",
     "DeserializationError",
+    "EventError",
+    "ModelCompilationError",
     "PreconditionerError",
+    "ScheduleError",
     "SerializableError",
     "SerializationError",
     "SimulationError",
@@ -14,6 +20,7 @@ __all__ = [
     "StreamError",
     "TimingError",
     "ValidationError",
+    "WellCompilationError",
 ]
 
 
@@ -200,3 +207,47 @@ class UnsupportedGridFormatError(GridIOError):
     """
     Raised when a grid format is unsupported.
     """
+
+
+# Compilation Errors
+class CompilationError(BORESError):
+    """Base class for errors raised while compiling a rich model into its compiled form."""
+
+    pass
+
+
+class ModelCompilationError(CompilationError):
+    """Raised when a `BlackOilModel` fails to compile."""
+
+    pass
+
+
+class WellCompilationError(CompilationError):
+    """Raised when a well system fails to compile."""
+
+    pass
+
+
+class BoundaryConditionCompilationError(CompilationError):
+    """Raised when boundary conditions fail to compile."""
+
+    pass
+
+
+# Schedule Errors
+class ScheduleError(BORESError):
+    """Base class for errors raised while building or applying a schedule."""
+
+    pass
+
+
+class EventError(ScheduleError):
+    """Raised when an event fails to evaluate."""
+
+    pass
+
+
+class ActionError(ScheduleError):
+    """Raised when an action fails to apply."""
+
+    pass
