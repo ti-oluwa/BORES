@@ -273,15 +273,22 @@ FLUID_PHASE_TAG = {
 PRODUCER_MODE_FROM_TAG = {tag: mode for mode, tag in PRODUCER_MODE_TAG.items()}
 INJECTOR_MODE_FROM_TAG = {tag: mode for mode, tag in INJECTOR_MODE_TAG.items()}
 FLUID_PHASE_FROM_TAG = {tag: phase for phase, tag in FLUID_PHASE_TAG.items()}
+RATE_QUANTITY_FROM_TAG = {tag: quantity for quantity, tag in RATE_QUANTITY_TAG.items()}
+ECONOMIC_QUANTITY_FROM_TAG = {tag: quantity for quantity, tag in ECONOMIC_QUANTITY_TAG.items()}
+WORKOVER_ACTION_FROM_TAG = {tag: action for action, tag in WORKOVER_ACTION_TAG.items()}
 """
-Inverses of the `*_MODE_TAG`/`FLUID_PHASE_TAG` maps above, for the
-`CompiledWellControls` accessor methods to translate a stored tag back
-into the rich enum a caller actually wants to see.
+Inverses of the `*_TAG` maps above, for accessor methods to translate a
+stored tag back into the rich enum a caller actually wants to see.
 """
 
 
 def none_if_nan(value: float) -> float | None:
-    """Returns `value`, or `None` if it's `NaN` - used by accessor methods reading an optional array."""
+    """
+    Returns `value`, or `None` if it's `NaN`.
+
+    :param value: A possibly-`NaN` float read from a compiled array.
+    :returns: `value`, or `None` if it's `NaN`.
+    """
     return None if math.isnan(value) else value
 
 
@@ -341,66 +348,116 @@ class CompiledPerforations(typing.NamedTuple):
     saturation_regions: IntArray[OneDimension]
     """Shape `(n_rows,)`. Per-connection SATNUM override; `-1` means use the cell's own region."""
 
-    def connection_rows(self, well_row: Integer) -> range:
+    def connection_rows(self, *, well_row: Integer) -> range:
         """
-        A well's own row range, without the caller needing to know about
-        `well_offsets`.
+        A well's own row range, without the caller needing to know about `well_offsets`.
 
         :param well_row: The well's row in `CompiledWellSystem.names`.
         :returns: `range(start, end)` over this well's rows.
         """
         return range(int(self.well_offsets[well_row]), int(self.well_offsets[well_row + 1]))
 
-    def get_cell_index(self, row: Integer) -> int:
-        """The grid cell a connection resolves to."""
+    def get_cell_index(self, *, row: Integer) -> int:
+        """
+        :param row: The connection row to read.
+        :returns: The grid cell this connection resolves to.
+        """
         return int(self.cell_indices[row])
 
-    def get_well_index(self, row: Integer) -> float:
-        """A connection's own connection factor (well index)."""
+    def get_well_index(self, *, row: Integer) -> float:
+        """
+        :param row: The connection row to read.
+        :returns: This connection's own connection factor (well index).
+        """
         return float(self.well_indices[row])
 
-    def set_well_index(self, row: Integer, value: Number) -> None:
-        """Overwrites a connection's connection factor in place."""
+    def set_well_index(self, *, row: Integer, value: Number) -> None:
+        """
+        Overwrites a connection's connection factor in place.
+
+        :param row: The connection row to write.
+        :param value: The new connection factor.
+        """
         self.well_indices[row] = value
 
-    def multiply_well_index(self, row: Integer, factor: Number) -> None:
-        """Multiplies a connection's existing connection factor in place (a `WPIMULT` reissue)."""
+    def multiply_well_index(self, *, row: Integer, factor: Number) -> None:
+        """
+        Multiplies a connection's existing connection factor in place (a `WPIMULT` reissue).
+
+        :param row: The connection row to write.
+        :param factor: The multiplier to apply.
+        """
         self.well_indices[row] *= factor
 
-    def get_completion_status(self, row: Integer) -> CompletionStatus:
-        """A connection's own open/shut status, as `CompletionStatus`."""
+    def get_completion_status(self, *, row: Integer) -> CompletionStatus:
+        """
+        :param row: The connection row to read.
+        :returns: This connection's own open/shut status.
+        """
         return CompletionStatus.OPEN if self.completion_statuses[row] else CompletionStatus.SHUT
 
-    def set_completion_status(self, row: Integer, status: CompletionStatus) -> None:
-        """Sets a connection's open/shut status in place (a `WELOPEN` event)."""
+    def set_completion_status(self, *, row: Integer, status: CompletionStatus) -> None:
+        """
+        Sets a connection's open/shut status in place (a `WELOPEN` event).
+
+        :param row: The connection row to write.
+        :param status: The new open/shut status.
+        """
         self.completion_statuses[row] = 1 if status == CompletionStatus.OPEN else 0
 
-    def get_schedule_status(self, row: Integer) -> WellStatus:
-        """A connection's own active/pending status, as `WellStatus`."""
+    def get_schedule_status(self, *, row: Integer) -> WellStatus:
+        """
+        :param row: The connection row to read.
+        :returns: This connection's own active/pending status.
+        """
         return WellStatus.ACTIVE if self.schedule_statuses[row] else WellStatus.PENDING
 
-    def set_schedule_status(self, row: Integer, status: WellStatus) -> None:
-        """Sets a connection's active/pending status in place (a workover completion coming due)."""
+    def set_schedule_status(self, *, row: Integer, status: WellStatus) -> None:
+        """
+        Sets a connection's active/pending status in place (a workover completion coming due).
+
+        :param row: The connection row to write.
+        :param status: The new active/pending status.
+        """
         self.schedule_statuses[row] = 1 if status == WellStatus.ACTIVE else 0
 
-    def get_skin(self, row: Integer) -> float:
-        """A connection's own skin factor."""
+    def get_skin(self, *, row: Integer) -> float:
+        """
+        :param row: The connection row to read.
+        :returns: This connection's own skin factor.
+        """
         return float(self.skins[row])
 
-    def set_skin(self, row: Integer, value: Number) -> None:
-        """Overwrites a connection's skin factor in place."""
+    def set_skin(self, *, row: Integer, value: Number) -> None:
+        """
+        Overwrites a connection's skin factor in place.
+
+        :param row: The connection row to write.
+        :param value: The new skin factor.
+        """
         self.skins[row] = value
 
-    def get_wellbore_radius(self, row: Integer) -> float:
-        """A connection's own wellbore radius."""
+    def get_wellbore_radius(self, *, row: Integer) -> float:
+        """
+        :param row: The connection row to read.
+        :returns: This connection's own wellbore radius.
+        """
         return float(self.wellbore_radii[row])
 
-    def set_wellbore_radius(self, row: Integer, value: Number) -> None:
-        """Overwrites a connection's wellbore radius in place."""
+    def set_wellbore_radius(self, *, row: Integer, value: Number) -> None:
+        """
+        Overwrites a connection's wellbore radius in place.
+
+        :param row: The connection row to write.
+        :param value: The new wellbore radius.
+        """
         self.wellbore_radii[row] = value
 
-    def get_saturation_region(self, row: Integer) -> int | None:
-        """A connection's own SATNUM override, or `None` to use the cell's own region."""
+    def get_saturation_region(self, *, row: Integer) -> int | None:
+        """
+        :param row: The connection row to read.
+        :returns: This connection's own SATNUM override, or `None` to use the cell's own region.
+        """
         region = int(self.saturation_regions[row])
         return None if region == UNSET_INT else region
 
@@ -432,11 +489,104 @@ class CompiledLimits(typing.NamedTuple):
 
     workover_actions: IntArray[OneDimension]
     """Shape `(n_rows,)`. A `WorkoverActionTag` on an `ECONOMIC` row,
-    `UNSET_INT` otherwise. What to do once that row is breached."""
+    `UNSET_INT` otherwise - what to do once that row is breached."""
 
     end_run_flags: IntArray[OneDimension]
     """Shape `(n_rows,)`. `1` on an `ECONOMIC` row that should stop the
     whole run once breached, `0` otherwise."""
+
+    def limit_rows(self, *, well_row: Integer) -> range:
+        """
+        A well's own limit-row range, without the caller needing to know about `well_offsets`.
+
+        :param well_row: The well's row in `CompiledWellSystem.names`.
+        :returns: `range(start, end)` over this well's limit rows.
+        """
+        return range(int(self.well_offsets[well_row]), int(self.well_offsets[well_row + 1]))
+
+    def find_economic_limit_row(self, *, well_row: Integer) -> int | None:
+        """
+        Finds a well's own `ECONOMIC`-kind limit row, if it has one.
+
+        :param well_row: The well's row.
+        :returns: The row, or `None` if this well has no economic limit.
+        """
+        for row in self.limit_rows(well_row=well_row):
+            if self.kinds[row] == LimitKind.ECONOMIC:
+                return row
+        return None
+
+    def get_kind(self, *, row: Integer) -> LimitKind:
+        """
+        :param row: The limit row to read.
+        :returns: This row's own kind.
+        """
+        return LimitKind(int(self.kinds[row]))
+
+    def get_min_value(self, *, row: Integer) -> float | None:
+        """
+        :param row: The limit row to read.
+        :returns: This row's own floor, or `None` if it has none.
+        """
+        return none_if_nan(float(self.min_values[row]))
+
+    def set_min_value(self, *, row: Integer, value: Number) -> None:
+        """
+        Overwrites a limit row's floor in place.
+
+        :param row: The limit row to write.
+        :param value: The new floor.
+        """
+        self.min_values[row] = value
+
+    def get_max_value(self, *, row: Integer) -> float | None:
+        """
+        :param row: The limit row to read.
+        :returns: This row's own ceiling, or `None` if it has none.
+        """
+        return none_if_nan(float(self.max_values[row]))
+
+    def set_max_value(self, *, row: Integer, value: Number) -> None:
+        """
+        Overwrites a limit row's ceiling in place.
+
+        :param row: The limit row to write.
+        :param value: The new ceiling.
+        """
+        self.max_values[row] = value
+
+    def get_workover_action(self, *, row: Integer) -> WorkoverAction | None:
+        """
+        :param row: The limit row to read.
+        :returns: This `ECONOMIC` row's own workover action, or `None` on a non-economic row.
+        """
+        tag = self.workover_actions[row]
+        return None if tag == UNSET_INT else WORKOVER_ACTION_FROM_TAG[tag]
+
+    def set_workover_action(self, *, row: Integer, action: WorkoverAction) -> None:
+        """
+        Overwrites an `ECONOMIC` row's workover action in place.
+
+        :param row: The limit row to write.
+        :param action: The new workover action.
+        """
+        self.workover_actions[row] = WORKOVER_ACTION_TAG[action]
+
+    def get_end_run(self, *, row: Integer) -> bool:
+        """
+        :param row: The limit row to read.
+        :returns: Whether breaching this row should stop the whole run.
+        """
+        return bool(self.end_run_flags[row])
+
+    def set_end_run(self, *, row: Integer, end_run: bool) -> None:
+        """
+        Overwrites an `ECONOMIC` row's end-run flag in place.
+
+        :param row: The limit row to write.
+        :param end_run: Whether breaching this row should stop the whole run.
+        """
+        self.end_run_flags[row] = 1 if end_run else 0
 
 
 class CompiledWellControls(typing.NamedTuple):
@@ -478,56 +628,124 @@ class CompiledWellControls(typing.NamedTuple):
 
     limits: CompiledLimits
 
-    def get_control_mode(self, well_row: Integer) -> ProducerControlMode | InjectorControlMode:
-        """A well's own control mode, as a rich enum."""
+    def get_control_mode(self, *, well_row: Integer) -> ProducerControlMode | InjectorControlMode:
+        """
+        :param well_row: The well's row.
+        :returns: This well's own control mode.
+        """
         is_injector = self.well_kinds[well_row] == WellKind.INJECTOR
         from_tag = INJECTOR_MODE_FROM_TAG if is_injector else PRODUCER_MODE_FROM_TAG
         return from_tag[self.control_modes[well_row]]
 
     def set_control_mode(
-        self, well_row: Integer, mode: ProducerControlMode | InjectorControlMode
+        self, *, well_row: Integer, mode: ProducerControlMode | InjectorControlMode
     ) -> None:
-        """Sets a well's control mode in place. `mode` must match the well's own kind."""
+        """
+        Sets a well's control mode in place. `mode` must match the well's own kind.
+
+        :param well_row: The well's row.
+        :param mode: The new control mode.
+        """
         is_injector = self.well_kinds[well_row] == WellKind.INJECTOR
         tag_map = INJECTOR_MODE_TAG if is_injector else PRODUCER_MODE_TAG
         self.control_modes[well_row] = tag_map[mode]  # type: ignore
 
-    def get_injected_phase(self, well_row: Integer) -> FluidPhase | None:
-        """An injector's own injected phase, or `None` on a producer or unset injector."""
+    def get_injected_phase(self, *, well_row: Integer) -> FluidPhase | None:
+        """
+        :param well_row: The well's row.
+        :returns: This injector's own injected phase, or `None` on a producer or unset injector.
+        """
         tag = self.injected_phases[well_row]
         return None if tag == UNSET_INT else FLUID_PHASE_FROM_TAG[tag]
 
-    def get_target_rate(self, well_row: Integer) -> float | None:
-        """A well's own target rate, or `None` if unset."""
+    def set_injected_phase(self, *, well_row: Integer, phase: FluidPhase) -> None:
+        """
+        Overwrites an injector's injected phase in place.
+
+        :param well_row: The well's row.
+        :param phase: The new injected phase.
+        """
+        self.injected_phases[well_row] = FLUID_PHASE_TAG[phase]
+
+    def get_target_rate(self, *, well_row: Integer) -> float | None:
+        """
+        :param well_row: The well's row.
+        :returns: This well's own target rate, or `None` if unset.
+        """
         return none_if_nan(float(self.target_rates[well_row]))
 
-    def set_target_rate(self, well_row: Integer, value: Number) -> None:
-        """Overwrites a well's target rate in place."""
+    def set_target_rate(self, *, well_row: Integer, value: Number) -> None:
+        """
+        Overwrites a well's target rate in place.
+
+        :param well_row: The well's row.
+        :param value: The new target rate.
+        """
         self.target_rates[well_row] = value
 
-    def get_target_bhp(self, well_row: Integer) -> float | None:
-        """A well's own target BHP, or `None` if unset."""
+    def get_target_bhp(self, *, well_row: Integer) -> float | None:
+        """
+        :param well_row: The well's row.
+        :returns: This well's own target BHP, or `None` if unset.
+        """
         return none_if_nan(float(self.target_bhps[well_row]))
 
-    def set_target_bhp(self, well_row: Integer, value: Number) -> None:
-        """Overwrites a well's target BHP in place."""
+    def set_target_bhp(self, *, well_row: Integer, value: Number) -> None:
+        """
+        Overwrites a well's target BHP in place.
+
+        :param well_row: The well's row.
+        :param value: The new target BHP.
+        """
         self.target_bhps[well_row] = value
 
-    def get_target_thp(self, well_row: Integer) -> float | None:
-        """A well's own target THP, or `None` if unset."""
+    def get_target_thp(self, *, well_row: Integer) -> float | None:
+        """
+        :param well_row: The well's row.
+        :returns: This well's own target THP, or `None` if unset.
+        """
         return none_if_nan(float(self.target_thps[well_row]))
 
-    def set_target_thp(self, well_row: Integer, value: Number) -> None:
-        """Overwrites a well's target THP in place."""
+    def set_target_thp(self, *, well_row: Integer, value: Number) -> None:
+        """
+        Overwrites a well's target THP in place.
+
+        :param well_row: The well's row.
+        :param value: The new target THP.
+        """
         self.target_thps[well_row] = value
 
-    def get_efficiency_factor(self, well_row: Integer) -> float:
-        """A well's own efficiency factor."""
+    def get_efficiency_factor(self, *, well_row: Integer) -> float:
+        """
+        :param well_row: The well's row.
+        :returns: This well's own efficiency factor.
+        """
         return float(self.efficiency_factors[well_row])
 
-    def get_guide_rate(self, well_row: Integer) -> float | None:
-        """A well's own guide rate, or `None` if unset."""
+    def set_efficiency_factor(self, *, well_row: Integer, value: Number) -> None:
+        """
+        Overwrites a well's efficiency factor in place.
+
+        :param well_row: The well's row.
+        :param value: The new efficiency factor.
+        """
+        self.efficiency_factors[well_row] = value
+
+    def get_guide_rate(self, *, well_row: Integer) -> float | None:
+        """
+        :param well_row: The well's row.
+        :returns: This well's own guide rate, or `None` if unset.
+        """
         return none_if_nan(float(self.guide_rates[well_row]))
+
+    def set_guide_rate(self, *, well_row: Integer, value: Number) -> None:
+        """
+        Overwrites a well's guide rate in place.
+
+        :param well_row: The well's row.
+        :param value: The new guide rate.
+        """
+        self.guide_rates[well_row] = value
 
 
 class CompiledGroupControls(typing.NamedTuple):
@@ -615,7 +833,7 @@ class CompiledWellSystem(typing.NamedTuple):
     unit_system: UnitSystem
     """Unit system used to interpret the compiled well data."""
 
-    def well_row(self, name: str) -> int:
+    def well_row(self, *, name: str) -> int:
         """
         A well's row, by name.
 
@@ -628,28 +846,45 @@ class CompiledWellSystem(typing.NamedTuple):
         except ValueError:
             raise ValidationError(f"No well named {name!r} in this compiled system.") from None
 
-    def has_well(self, name: str) -> bool:
-        """Whether a well with this name exists in this system."""
+    def has_well(self, *, name: str) -> bool:
+        """
+        :param name: The well to check for.
+        :returns: Whether a well with this name exists in this system.
+        """
         return name in self.names
 
-    def get_well_type(self, well_row: Integer) -> WellType:
-        """A well's own type, as a rich `WellType`."""
+    def get_well_type(self, *, well_row: Integer) -> WellType:
+        """
+        :param well_row: The well's row.
+        :returns: This well's own type.
+        """
         return (
             WellType.PRODUCER
             if self.well_kinds[well_row] == WellKind.PRODUCER
             else WellType.INJECTOR
         )
 
-    def get_schedule_status(self, well_row: Integer) -> WellStatus:
-        """A well's own active/pending status, as a rich `WellStatus`."""
+    def get_schedule_status(self, *, well_row: Integer) -> WellStatus:
+        """
+        :param well_row: The well's row.
+        :returns: This well's own active/pending status.
+        """
         return WellStatus.ACTIVE if self.schedule_statuses[well_row] else WellStatus.PENDING
 
-    def set_schedule_status(self, well_row: Integer, status: WellStatus) -> None:
-        """Sets a well's active/pending status in place."""
-        self.schedule_statuses[well_row] = get_well_status_tag(status)
+    def set_schedule_status(self, *, well_row: Integer, status: WellStatus) -> None:
+        """
+        Sets a well's active/pending status in place.
 
-    def get_reference_depth(self, well_row: Integer) -> float:
-        """A well's own reference depth."""
+        :param well_row: The well's row.
+        :param status: The new active/pending status.
+        """
+        self.schedule_statuses[well_row] = get_well_status_tag(status=status)
+
+    def get_reference_depth(self, *, well_row: Integer) -> float:
+        """
+        :param well_row: The well's row.
+        :returns: This well's own reference depth.
+        """
         return float(self.reference_depths[well_row])
 
 
@@ -673,7 +908,7 @@ def get_completion_status_tag(status: CompletionStatus) -> Integer:
     return 1 if status is CompletionStatus.OPEN else 0
 
 
-def _resolve_perforations_geometry(
+def resolve_perforations_geometry(
     grid: Grid,
     well: Well,
     permeabilities: typing.Mapping[Orientation, NumberArray[OneDimension]],
@@ -736,9 +971,9 @@ def compile_perforations(
 
     :param names: Well names, in the row order `CompiledWellSystem` will use.
     :param wells: Source `Wells`.
-    :param grid: Forwarded to `_resolve_perforations_geometry`.
-    :param permeabilities: Forwarded to `_resolve_perforations_geometry`.
-    :param resolve_kwargs: Forwarded to `_resolve_perforations_geometry`.
+    :param grid: Forwarded to `resolve_perforations_geometry`.
+    :param permeabilities: Forwarded to `resolve_perforations_geometry`.
+    :param resolve_kwargs: Forwarded to `resolve_perforations_geometry`.
     :returns: `CompiledPerforations`, one row per (well, perforation, cell) triple.
     """
     well_offsets = [0]
@@ -757,7 +992,7 @@ def compile_perforations(
     for name in names:
         well = wells[name]
         perforation_indices_geometry, original_by_id, ordinal_by_id = (
-            _resolve_perforations_geometry(
+            resolve_perforations_geometry(
                 grid=grid,
                 well=well,
                 permeabilities=permeabilities,

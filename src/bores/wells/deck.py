@@ -35,6 +35,35 @@ from bores.wells.groups import (
     WellGroups,
 )
 
+__all__ = [
+    "DIRECTION_MAP",
+    "ECONOMIC_MIN_RATE_QUANTITY_FIELDS",
+    "ECONOMIC_QUANTITY_FIELDS",
+    "GROUP_INJECTOR_CONTROL_MODE_MAP",
+    "GROUP_PRODUCER_CONTROL_MODE_MAP",
+    "INJECTOR_CONTROL_MODE_MAP",
+    "PRODUCER_CONTROL_MODE_MAP",
+    "WELOPEN_STATUS_MAP",
+    "WELTARG_TARGET_FIELD",
+    "apply_economic_limits",
+    "apply_guide_rates",
+    "from_deck_gas_rate",
+    "load_controls_from_records",
+    "load_economic_limits_from_record",
+    "load_group_control_from_record",
+    "load_group_controls",
+    "load_group_controls_from_records",
+    "load_groups",
+    "load_groups_from_records",
+    "load_injector_control_from_record",
+    "load_producer_control_from_record",
+    "load_well_controls",
+    "load_well_from_records",
+    "load_wells",
+    "load_wells_from_records",
+    "select_current_records",
+]
+
 DIRECTION_MAP = {"X": Orientation.X, "Y": Orientation.Y, "Z": Orientation.Z}
 PRODUCER_CONTROL_MODE_MAP = {
     "ORAT": ProducerControlMode.OIL_RATE,
@@ -585,7 +614,7 @@ Which `ProducerControl`/`InjectorControl` field a `WELTARG` record's
 """
 
 
-def _apply_weltarg(control: WellControl, record: typing.Mapping[str, typing.Any]) -> WellControl:
+def apply_weltarg(control: WellControl, record: typing.Mapping[str, typing.Any]) -> WellControl:
     """
     Applies one `WELTARG` record to an already-resolved control, changing
     only its mode and the one target value the record names, leaving
@@ -691,7 +720,7 @@ def load_controls_from_records(
                         f"`WELTARG` references well {well_name!r} before it has any "
                         "`WCONPROD`/`WCONINJE` control to modify."
                     )
-                current = _apply_weltarg(current, record)
+                current = apply_weltarg(current, record)
         if current is not None:
             controls[well_name] = current
     return WellControls(controls=controls)
@@ -836,7 +865,7 @@ def apply_guide_rates(
         controls.set(well_name, attrs.evolve(current_control, guide_rate=guide_rate))
 
 
-def load_wells_from_deck(deck_file: DeckFile, grid: Grid, current_time: float = 0.0) -> Wells:
+def load_wells(deck_file: DeckFile, grid: Grid, current_time: float = 0.0) -> Wells:
     """
     Builds the full well roster from a parsed deck, covering every well
     and completion the deck ever defines across the whole schedule.
@@ -873,7 +902,7 @@ def load_wells_from_deck(deck_file: DeckFile, grid: Grid, current_time: float = 
     )
 
 
-def load_well_controls_from_deck(deck_file: DeckFile, current_time: float = 0.0) -> WellControls:
+def load_well_controls(deck_file: DeckFile, current_time: float = 0.0) -> WellControls:
     """
     Builds well controls from a parsed deck, resolved to whatever is
     actually in effect for each well at a given point in the schedule.
@@ -907,7 +936,7 @@ def load_well_controls_from_deck(deck_file: DeckFile, current_time: float = 0.0)
     return controls
 
 
-def load_groups_from_deck(deck_file: DeckFile) -> WellGroups:
+def load_groups(deck_file: DeckFile) -> WellGroups:
     """
     Builds the group hierarchy from a parsed deck.
 
@@ -921,7 +950,7 @@ def load_groups_from_deck(deck_file: DeckFile) -> WellGroups:
     return load_groups_from_records(gruptree)
 
 
-def load_group_controls_from_deck(deck_file: DeckFile, current_time: float = 0.0) -> GroupControls:
+def load_group_controls(deck_file: DeckFile, current_time: float = 0.0) -> GroupControls:
     """
     Builds group controls from a parsed deck, resolved to whatever is
     actually in effect for each group at a given point in the schedule.

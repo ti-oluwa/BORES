@@ -22,3 +22,4 @@ benchmarks/runs
 *.gif
 *.png
 .cache
+*.patch

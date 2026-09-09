@@ -8,11 +8,13 @@ import attrs
 from bores.errors import ActionError, EventError, StopSimulation
 from bores.serde.base import Serializable
 from bores.serde.registry import make_serializable_type_registrar
+from bores.simulation.runspec import RunSpec
 from bores.types import Boolean, Number, UnitSystem
 
 __all__ = [
     "ACTION_TYPES",
     "EVENT_TYPES",
+    "PASSTHROUGH_EXCEPTIONS",
     "Action",
     "Event",
     "ModelT",
@@ -29,7 +31,7 @@ ModelT = typing.TypeVar("ModelT")
 ModelTcon = typing.TypeVar("ModelTcon", contravariant=True)
 
 PASSTHROUGH_EXCEPTIONS: tuple[type[BaseException], ...] = (StopSimulation,)
-"""Exceptions `Schedule.apply` never wraps in `EventError`/`ActionError` but is re-raised as is."""
+"""Exceptions `Schedule.apply` never wraps in `EventError`/`ActionError` - re-raised as is."""
 
 
 @attrs.frozen(kw_only=True, slots=True)
@@ -45,13 +47,13 @@ class ScheduleContext:
     unit_system: UnitSystem = UnitSystem.FIELD
     """Unit system for `time`, `previous_time`, and any value an event reads."""
 
-    runspec: typing.Any | None = None
-    """The run's `RunSpec`, if any."""
+    runspec: RunSpec | None = None
+    """The run's configuration, if any."""
 
-    state: typing.Any | None = None
+    state: object | None = None
     """The latest solved state, if any (a `CompiledWellResolution`, for example)."""
 
-    extra: typing.Mapping[str, typing.Any] = attrs.field(factory=dict)
+    extra: typing.Mapping[str, object] = attrs.field(factory=dict)
     """Additional domain-specific context."""
 
 
@@ -61,6 +63,8 @@ class Event(typing.Protocol[ModelTcon]):
 
     def __call__(self, model: ModelTcon, context: ScheduleContext) -> Boolean:
         """
+        Evaluates whether the paired action should fire.
+
         :param model: The model being scheduled against.
         :param context: The current moment's context.
         :returns: Whether the paired action should fire.
@@ -74,6 +78,8 @@ class Action(typing.Protocol[ModelT]):
 
     def __call__(self, model: ModelT, context: ScheduleContext) -> ModelT:
         """
+        Applies this action to `model`.
+
         :param model: The model to change.
         :param context: The current moment's context.
         :returns: The changed model.
@@ -91,6 +97,13 @@ class SerializableEvent(Serializable, typing.Generic[ModelT]):
     __abstract_serializable__ = True
 
     def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:
+        """
+        Evaluates whether the paired action should fire. Must be overridden.
+
+        :param model: The model being scheduled against.
+        :param context: The current moment's context.
+        :returns: Whether the paired action should fire.
+        """
         raise NotImplementedError
 
 
@@ -100,6 +113,13 @@ class SerializableAction(Serializable, typing.Generic[ModelT]):
     __abstract_serializable__ = True
 
     def __call__(self, model: ModelT, context: ScheduleContext) -> ModelT:
+        """
+        Applies this action to `model`. Must be overridden.
+
+        :param model: The model to change.
+        :param context: The current moment's context.
+        :returns: The changed model.
+        """
         raise NotImplementedError
 
 
@@ -127,8 +147,8 @@ class Rule(
     def __init__(
         self,
         *,
-        event: Event[ModelT],
-        action: Action[ModelT],
+        event: "Event[ModelT]",
+        action: "Action[ModelT]",
         name: str | None = None,
     ) -> None:
         """
@@ -189,9 +209,9 @@ class Schedule(typing.Generic[ModelT]):
         time: Number,
         previous_time: Number = 0.0,
         unit_system: UnitSystem = UnitSystem.FIELD,
-        runspec: typing.Any | None = None,
-        state: typing.Any | None = None,
-        extra: typing.Mapping[str, typing.Any] | None = None,
+        runspec: RunSpec | None = None,
+        state: object | None = None,
+        extra: typing.Mapping[str, object] | None = None,
     ) -> ModelT:
         """
         Builds a `ScheduleContext` and calls `apply`.
@@ -200,7 +220,7 @@ class Schedule(typing.Generic[ModelT]):
         :param time: Elapsed time to advance to.
         :param previous_time: Elapsed time last advanced to.
         :param unit_system: Unit system for `time`/`previous_time`.
-        :param runspec: The run's `RunSpec`, if any.
+        :param runspec: The run's configuration, if any.
         :param state: The latest solved state, if any.
         :param extra: Additional domain-specific context.
         :returns: The model after every firing rule's action has run.
@@ -213,19 +233,25 @@ class Schedule(typing.Generic[ModelT]):
             state=state,
             extra=extra or {},
         )
-        return self.apply(model, context)
+        return self.apply(model=model, context=context)
 
-    def dump(self) -> dict[str, typing.Any]:
+    def dump(self) -> dict[str, list[typing.Mapping[str, object]]]:
         """
+        Dumps every rule.
+
         :returns: `{"rules": [...]}`. Every rule's `event`/`action` must
             be a `SerializableEvent`/`SerializableAction`.
         """
         return {"rules": [rule.dump() for rule in self.rules]}
 
     @classmethod
-    def load(cls, data: typing.Mapping[str, typing.Any]) -> "Schedule[ModelT]":
+    def load(
+        cls, data: typing.Mapping[str, typing.Sequence[typing.Mapping[str, object]]]
+    ) -> "Schedule[ModelT]":
         """
+        Loads a `Schedule` from `dump()`'s own output.
+
         :param data: `{"rules": [...]}`, as produced by `dump()`.
         :returns: The loaded `Schedule`.
         """
-        return cls(rules=tuple(Rule.load(rule_data) for rule_data in data["rules"]))
+        return cls(rules=tuple(Rule.load(data=rule_data) for rule_data in data["rules"]))

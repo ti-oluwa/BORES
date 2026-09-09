@@ -741,9 +741,9 @@ class WellControls(
         :param deck_file: Parsed deck containing WCONPROD/WCONINJE/WECON.
         :returns: WellControls for every well with a control record.
         """
-        from bores.wells.deck import load_well_controls_from_deck
+        from bores.wells.deck import load_well_controls
 
-        return typing.cast(Self, load_well_controls_from_deck(deck_file))
+        return typing.cast(Self, load_well_controls(deck_file))
 
     def __getitem__(self, name: str) -> WellControl:
         control = self.get(name)

@@ -32,7 +32,10 @@ class CompiledBlackOilModel(typing.NamedTuple):
 
 
 def compile_model(
-    model: BlackOilModel, *, dtype: typing.Any = None, **resolve_kwargs: typing.Any
+    model: BlackOilModel,
+    *,
+    dtype: typing.Any = None,
+    **resolve_kwargs: typing.Any,
 ) -> CompiledBlackOilModel:
     """
     Compiles a `BlackOilModel`'s wells into a `CompiledBlackOilModel`.
@@ -49,8 +52,8 @@ def compile_model(
     """
     if model.boundary_conditions is not None:
         raise BoundaryConditionCompilationError(
-            "`CompiledBoundaryConditions` does not exist yet. Compile a model with "
-            "`boundary_conditions=None`."
+            "CompiledBoundaryConditions does not exist yet. Compile a model with "
+            "boundary_conditions=None."
         )
 
     compiled_wells = None

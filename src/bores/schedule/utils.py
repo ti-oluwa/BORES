@@ -1,28 +1,28 @@
-"""Small convenience builders on top of `bores.schedule.base`/`events`."""
+"""Convenience builders for `Rule`/`Schedule` construction: `at`, `rule`, `schedule`, `all_of`, `any_of`."""
 
 from bores.schedule.base import Action, Event, ModelT, Rule, Schedule, SerializableEvent
-from bores.schedule.events import AllOf, AnyOf
+from bores.schedule.events import AllOf, AnyOf, TimeEvent
 
 __all__ = ["all_of", "any_of", "at", "rule", "schedule"]
 
 
-def at(time: float, action: Action[ModelT], *, name: str | None = None) -> Rule[ModelT]:
+def at(*, time: float, action: Action[ModelT], name: str | None = None) -> Rule[ModelT]:
     """
-    Shorthand for the common case: run `action` once, at `time`.
+    Builds a `Rule` that runs `action` once, at `time`.
 
     :param time: Elapsed time to fire at.
     :param action: The action to run.
     :param name: Optional label for the rule.
     :returns: A `Rule` pairing a `TimeEvent` with `action`.
     """
-    from bores.schedule.events import TimeEvent
-
     return Rule(event=TimeEvent(at=time), action=action, name=name)
 
 
-def rule(event: Event[ModelT], action: Action[ModelT], *, name: str | None = None) -> Rule[ModelT]:
+def rule(
+    *, event: Event[ModelT], action: Action[ModelT], name: str | None = None
+) -> "Rule[ModelT]":
     """
-    Shorthand for `Rule(event=..., action=..., name=...)`.
+    Builds a `Rule` from an event and an action.
 
     :param event: Fires (or not) to decide whether `action` runs.
     :param action: Runs when `event` fires.
@@ -34,7 +34,7 @@ def rule(event: Event[ModelT], action: Action[ModelT], *, name: str | None = Non
 
 def schedule(*rules: Rule[ModelT]) -> Schedule[ModelT]:
     """
-    Shorthand for `Schedule(rules=rules)`.
+    Builds a `Schedule` from a set of rules.
 
     :param rules: Every rule for the schedule, in firing-check order.
     :returns: The `Schedule`.
@@ -43,10 +43,20 @@ def schedule(*rules: Rule[ModelT]) -> Schedule[ModelT]:
 
 
 def all_of(*events: SerializableEvent) -> AllOf:
-    """Shorthand for `AllOf(events=events)`."""
+    """
+    Builds an `AllOf` from a set of events.
+
+    :param events: Every event that must fire.
+    :returns: The `AllOf`.
+    """
     return AllOf(events=tuple(events))
 
 
 def any_of(*events: SerializableEvent) -> AnyOf:
-    """Shorthand for `AnyOf(events=events)`."""
+    """
+    Builds an `AnyOf` from a set of events.
+
+    :param events: Every event checked; any one firing is enough.
+    :returns: The `AnyOf`.
+    """
     return AnyOf(events=tuple(events))

@@ -6,10 +6,16 @@ import typing
 
 import attrs
 
-from bores.schedule.base import ModelT, ScheduleContext, SerializableEvent, event_type
+from bores.schedule.base import (
+    ModelT,
+    ScheduleContext,
+    SerializableEvent,
+    event_type,
+)
 from bores.types import Boolean, Number
 
 __all__ = [
+    "COMPARISON_FUNCTIONS",
     "AllOf",
     "AnyOf",
     "ComparisonOperator",
@@ -29,13 +35,14 @@ class ComparisonOperator(str, enum.Enum):
     EQ = "eq"
 
 
-COMPARISON_FUNCTIONS = {
+COMPARISON_FUNCTIONS: dict[ComparisonOperator, typing.Callable[[Number, Number], bool]] = {
     ComparisonOperator.GT: operator.gt,
     ComparisonOperator.GE: operator.ge,
     ComparisonOperator.LT: operator.lt,
     ComparisonOperator.LE: operator.le,
     ComparisonOperator.EQ: operator.eq,
 }
+"""Maps each `ComparisonOperator` to the function it applies."""
 
 
 @event_type
@@ -46,7 +53,14 @@ class TimeEvent(SerializableEvent[ModelT]):
     at: Number
     """Elapsed time this event fires at, in the schedule's unit system."""
 
-    def __call__(self, model: typing.Any, context: ScheduleContext) -> Boolean:
+    def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:
+        """
+        Fires when `context.time` crosses `at` since `context.previous_time`.
+
+        :param model: The model being scheduled against. Unused.
+        :param context: The current moment's context.
+        :returns: Whether `at` was just crossed.
+        """
         return context.previous_time < self.at <= context.time
 
 
@@ -61,16 +75,27 @@ class IntervalEvent(SerializableEvent[ModelT]):
     start: Number = 0.0
     """The first time this event is eligible to fire."""
 
-    def __call__(self, model: typing.Any, context: ScheduleContext) -> Boolean:
+    def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:
+        """
+        Fires when an interval boundary was crossed since `context.previous_time`.
+
+        :param model: The model being scheduled against. Unused.
+        :param context: The current moment's context.
+        :returns: Whether an interval boundary was just crossed.
+        """
         if context.time < self.start:
             return False
-        # Number of interval boundaries at/before previous_time vs. time -
-        # if that count changed, an interval boundary was just crossed.
-        previous_count = self._boundary_count(context.previous_time)
-        current_count = self._boundary_count(context.time)
+        previous_count = self.boundary_count(time=context.previous_time)
+        current_count = self.boundary_count(time=context.time)
         return current_count > previous_count
 
-    def _boundary_count(self, time: Number) -> int:
+    def boundary_count(self, *, time: Number) -> int:
+        """
+        Counts how many interval boundaries fall at or before `time`.
+
+        :param time: Elapsed time to count boundaries up to.
+        :returns: The number of boundaries at or before `time`.
+        """
         if time < self.start:
             return 0
         return int((time - self.start) // self.every) + 1
@@ -88,7 +113,7 @@ class ThresholdEvent(SerializableEvent[ModelT]):
     threshold: Number
     """The value `get_value(...)` is compared against."""
 
-    def get_value(self, model: ModelT, context: ScheduleContext) -> Number:
+    def get_value(self, *, model: ModelT, context: ScheduleContext) -> Number:
         """
         Reads the value this event watches. Must be overridden.
 
@@ -101,7 +126,14 @@ class ThresholdEvent(SerializableEvent[ModelT]):
         raise NotImplementedError
 
     def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:
-        value = self.get_value(model, context)
+        """
+        Fires when `get_value(model, context)` satisfies `op` against `threshold`.
+
+        :param model: The model being scheduled against.
+        :param context: The current moment's context.
+        :returns: Whether the comparison holds.
+        """
+        value = self.get_value(model=model, context=context)
         return COMPARISON_FUNCTIONS[self.op](value, self.threshold)
 
 
@@ -111,8 +143,16 @@ class AllOf(SerializableEvent[ModelT]):
     """Fires only when every one of `events` fires."""
 
     events: tuple[SerializableEvent, ...] = attrs.field(converter=tuple)
+    """Every event that must fire for this one to fire."""
 
-    def __call__(self, model: typing.Any, context: ScheduleContext) -> Boolean:
+    def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:
+        """
+        Fires when every one of `events` fires.
+
+        :param model: The model being scheduled against.
+        :param context: The current moment's context.
+        :returns: Whether every sub-event fired.
+        """
         return all(event(model, context) for event in self.events)
 
 
@@ -122,6 +162,14 @@ class AnyOf(SerializableEvent[ModelT]):
     """Fires when any one of `events` fires."""
 
     events: tuple[SerializableEvent, ...] = attrs.field(converter=tuple)
+    """Every event checked; any one firing is enough."""
 
-    def __call__(self, model: typing.Any, context: ScheduleContext) -> Boolean:
+    def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:
+        """
+        Fires when any one of `events` fires.
+
+        :param model: The model being scheduled against.
+        :param context: The current moment's context.
+        :returns: Whether any sub-event fired.
+        """
         return any(event(model, context) for event in self.events)

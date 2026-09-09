@@ -659,9 +659,9 @@ class Wells(
             to the loaded `Well` instance.
         :returns: `Wells` for every well in the deck.
         """
-        from bores.wells.deck import load_wells_from_deck
+        from bores.wells.deck import load_wells
 
-        return typing.cast(Self, load_wells_from_deck(deck_file, grid))
+        return typing.cast(Self, load_wells(deck_file, grid))
 
     def __getitem__(self, name: str) -> Well:
         return self.well(name)

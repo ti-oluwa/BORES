@@ -212,9 +212,9 @@ class WellGroups(
         :param deck_file: Parsed deck.
         :returns: `WellGroups` from `GRUPTREE`, or None if absent.
         """
-        from bores.wells.deck import load_groups_from_deck
+        from bores.wells.deck import load_groups
 
-        return typing.cast(Self, load_groups_from_deck(deck_file))
+        return typing.cast(Self, load_groups(deck_file))
 
     def __format__(self, spec: str) -> str:
         """
@@ -414,9 +414,9 @@ class GroupControls(
         :param deck_file: Parsed deck.
         :returns: `GroupControls` from `GCONPROD`/`GCONINJE`, or None if absent.
         """
-        from bores.wells.deck import load_group_controls_from_deck
+        from bores.wells.deck import load_group_controls
 
-        return typing.cast(Self, load_group_controls_from_deck(deck_file))
+        return typing.cast(Self, load_group_controls(deck_file))
 
     def __getitem__(self, name: str) -> GroupControl:
         control = self.get(name)
