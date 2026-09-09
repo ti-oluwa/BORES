@@ -21,8 +21,8 @@ class DeckParseError(ValidationError):
     """Raised when an Eclipse deck or one of its keyword records is malformed."""
 
 
-_COMMENT_RE = re.compile(r"--[^\n]*")
-_INCLUDE_RE = re.compile(
+COMMENT_RE = re.compile(r"--[^\n]*")
+INCLUDE_RE = re.compile(
     r"""\bINCLUDE\b\s*
         (?:
             ['"]([^'"]+)['"]   # quoted filename
@@ -37,10 +37,10 @@ _INCLUDE_RE = re.compile(
 
 def strip_comments(text: str) -> str:
     """Remove `--` line comments from Eclipse text."""
-    return _COMMENT_RE.sub("", text)
+    return COMMENT_RE.sub("", text)
 
 
-def _resolve_includes(text: str, source_dir: Path | None) -> str:
+def resolve_includes(text: str, source_dir: Path | None) -> str:
     """
     Recursively inline `INCLUDE 'path' /` directives.
 
@@ -54,7 +54,7 @@ def _resolve_includes(text: str, source_dir: Path | None) -> str:
     :raises DeckParseError: If an included file cannot be found or read.
     """
 
-    def _replace(match: re.Match[str]) -> str:
+    def replace(match: re.Match[str]) -> str:
         relative_path = (match.group(1) or match.group(2)).strip()
         if source_dir is None:
             warnings.warn(
@@ -72,9 +72,9 @@ def _resolve_includes(text: str, source_dir: Path | None) -> str:
             included_text = include_path.read_text(encoding="ascii", errors="replace")
         except OSError as exc:
             raise DeckParseError(f"Cannot read `INCLUDE` file {include_path!r}: {exc}") from exc
-        return _resolve_includes(included_text, include_path.parent)
+        return resolve_includes(included_text, include_path.parent)
 
-    return _INCLUDE_RE.sub(_replace, text)
+    return INCLUDE_RE.sub(replace, text)
 
 
 def resolve_source(source: TextOrPath, *, encoding: str) -> str:
@@ -108,15 +108,15 @@ def resolve_source(source: TextOrPath, *, encoding: str) -> str:
         else:
             raise DeckParseError(f"Cannot read deck file. Invalid source: {source!r}")
 
-    return _resolve_includes(text, source_dir)
+    return resolve_includes(text, source_dir)
 
 
 # Matches "N*value" repeat syntax. Value must be non-empty; a bare "N*" is
 # treated as N repetitions of the empty string and rejected by callers that
 # call float() on the result. We keep the permissive match here and let
 # callers produce a meaningful error message.
-_REPEAT_RE = re.compile(r"^(\d+)\*(.*)$")
-_QUOTED_RE = re.compile(r"""(['"])((?:(?!\1).)*)\1""")
+REPEAT_RE = re.compile(r"^(\d+)\*(.*)$")
+QUOTED_RE = re.compile(r"""(['"])((?:(?!\1).)*)\1""")
 
 
 def parse_repeat_token(token: str) -> tuple[int, str] | None:
@@ -127,7 +127,7 @@ def parse_repeat_token(token: str) -> tuple[int, str] | None:
     materializing `N` copies of `value` (see `tokenize`'s `expand_repeats`
     parameter) can detect and handle repeat groups themselves.
     """
-    match = _REPEAT_RE.match(token)
+    match = REPEAT_RE.match(token)
     if match is None:
         return None
 
@@ -177,11 +177,11 @@ def tokenize(text: str, *, expand_repeats: bool = True) -> list[str]:
     """
     placeholders: list[str] = []
 
-    def _stash(match: re.Match[str]) -> str:
+    def stash(match: re.Match[str]) -> str:
         placeholders.append(match.group(2))
         return f"\x00{len(placeholders) - 1}\x00"
 
-    stashed_text = _QUOTED_RE.sub(_stash, text)
+    stashed_text = QUOTED_RE.sub(stash, text)
 
     tokens: list[str] = []
     for raw_token in stashed_text.split():
@@ -196,7 +196,7 @@ def tokenize(text: str, *, expand_repeats: bool = True) -> list[str]:
         else:
             tokens.append(raw_token)
 
-    def _unstash(token: str) -> str:
+    def unstash(token: str) -> str:
         if token.startswith("\x00") and token.endswith("\x00"):
             try:
                 return placeholders[int(token[1:-1])]
@@ -204,7 +204,7 @@ def tokenize(text: str, *, expand_repeats: bool = True) -> list[str]:
                 return token
         return token
 
-    return [_unstash(token) for token in tokens]
+    return [unstash(token) for token in tokens]
 
 
 class Record(typing.NamedTuple):
@@ -243,7 +243,7 @@ class Record(typing.NamedTuple):
 # standing alone on its own line (only whitespace or end-of-line after it).
 # The underscore in `[A-Z0-9_]` is intentional because some simulator extensions
 # use keywords like `COORD_V`.
-_KEYWORD_LINE_RE = re.compile(
+KEYWORD_LINE_RE = re.compile(
     r"^[ \t]*(?P<keyword>[A-Z][A-Z0-9_]{0,7}-?)[ \t]*\r?$",
     re.MULTILINE,
 )
@@ -310,7 +310,7 @@ class Deck:
         :param text: Clean Eclipse text (no comments, no `INCLUDE` directives).
         :returns: `ScanResult` containing records in file order and a keyword index.
         """
-        keyword_lines = list(_KEYWORD_LINE_RE.finditer(text))
+        keyword_lines = list(KEYWORD_LINE_RE.finditer(text))
 
         records: list[Record] = []
         keyword_records: dict[str, list[Record]] = {}
@@ -366,11 +366,11 @@ class Deck:
             keyword_records.setdefault(keyword, []).append(record)
         return ScanResult(records=records, keyword_records=keyword_records)
 
-    def records_for(self, keyword: str) -> list[Record]:
+    def get_records_for(self, keyword: str) -> list[Record]:
         """Return every record for `keyword`, in file order."""
         return self._keyword_records.get(keyword.upper(), [])
 
-    def first_record_for(self, keyword: str) -> Record | None:
+    def get_first_record_for(self, keyword: str) -> Record | None:
         """Return the first record for `keyword`, or `None` if absent."""
         records = self._keyword_records.get(keyword.upper())
         return records[0] if records else None

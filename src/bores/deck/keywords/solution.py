@@ -87,9 +87,9 @@ EQUIL = RepeatedRecordKeyword[float](
         Field("datum_depth", np.float64),
         Field("datum_pressure", np.float64),
         Field("woc_depth", np.float64, required=False, default=0.0),
-        Field("pcow_woc", np.float64, required=False, default=0.0),
+        Field("pcow_at_woc", np.float64, required=False, default=0.0),
         Field("goc_depth", np.float64, required=False, default=0.0),
-        Field("pcog_goc", np.float64, required=False, default=0.0),
+        Field("pcgo_at_goc", np.float64, required=False, default=0.0),
         Field("rsvd_table", int, required=False, default=0),
         Field("rvvd_table", int, required=False, default=0),
         Field("accuracy_flag", int, required=False, default=0),
@@ -112,10 +112,10 @@ Fields:
   applies.
 - `datum_pressure` - reservoir pressure at `datum_depth`.
 - `woc_depth`      - water-oil contact depth.
-- `pcow_woc`       - oil-water capillary pressure at the WOC (usually
+- `pcow_at_woc`       - oil-water capillary pressure at the WOC (usually
   `0`).
 - `goc_depth`      - gas-oil contact depth.
-- `pcog_goc`       - gas-oil capillary pressure at the GOC (usually
+- `pcgo_at_goc`       - gas-oil capillary pressure at the GOC (usually
   `0`).
 - `rsvd_table`      - `RSVD`-table number for depth-dependent solution
   GOR below the bubble point (`0` = use the `PVTO` bubble-point Rs
@@ -273,7 +273,7 @@ class RestartKeyword(Keyword[dict[str, typing.Any]]):
         operations: list[Operation] | None = None,
         schedule_times: dict[int, float] | None = None,
     ) -> dict[str, typing.Any] | None:
-        record = deck.first_record_for(self.name)
+        record = deck.get_first_record_for(self.name)
         if record is None:
             return None
 

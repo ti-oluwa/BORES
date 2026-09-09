@@ -27,9 +27,9 @@ __all__ = [
     "resolve_operations",
 ]
 
-_BOX_KEYWORD = "BOX"
-_ENDBOX_KEYWORD = "ENDBOX"
-_OPERATOR_KEYWORDS: frozenset[str] = frozenset({
+BOX_KEYWORD = "BOX"
+ENDBOX_KEYWORD = "ENDBOX"
+OPERATOR_KEYWORDS: frozenset[str] = frozenset({
     "EQUALS",
     "ADD",
     "MULTIPLY",
@@ -39,7 +39,7 @@ _OPERATOR_KEYWORDS: frozenset[str] = frozenset({
 })
 
 OPERATOR_CONTROL_KEYWORDS: frozenset[str] = (
-    frozenset({_BOX_KEYWORD, _ENDBOX_KEYWORD}) | _OPERATOR_KEYWORDS
+    frozenset({BOX_KEYWORD, ENDBOX_KEYWORD}) | OPERATOR_KEYWORDS
 )
 """
 Keywords that scope or drive operators rather than holding their own
@@ -83,11 +83,11 @@ class Operation(typing.NamedTuple):
     """
 
 
-def _default_box(dims: GridDimensions) -> tuple[int, int, int, int, int, int]:
+def get_default_box(dims: GridDimensions) -> tuple[int, int, int, int, int, int]:
     return (0, dims.nx - 1, 0, dims.ny - 1, 0, dims.nz - 1)
 
 
-def _clamp_box(
+def clamp_box(
     i1: int,
     i2: int,
     j1: int,
@@ -118,12 +118,12 @@ def resolve_operations(deck: Deck, dims: GridDimensions) -> list[Operation]:
         default (whole-grid) box.
     :returns: Resolved operations in file order (by `order`).
     """
-    default_box = _default_box(dims)
+    default_box = get_default_box(dims)
     current_box = default_box
     operations: list[Operation] = []
 
     for record in deck.records:
-        if record.keyword == _BOX_KEYWORD:
+        if record.keyword == BOX_KEYWORD:
             tokens = tokenize(record.body)
             if len(tokens) < 6:
                 warnings.warn(
@@ -142,21 +142,21 @@ def resolve_operations(deck: Deck, dims: GridDimensions) -> list[Operation]:
                     stacklevel=4,
                 )
                 continue
-            current_box = _clamp_box(i1, i2, j1, j2, k1, k2, dims)
+            current_box = clamp_box(i1, i2, j1, j2, k1, k2, dims)
 
-        elif record.keyword == _ENDBOX_KEYWORD:
+        elif record.keyword == ENDBOX_KEYWORD:
             current_box = default_box
 
-        elif record.keyword in _OPERATOR_KEYWORDS:
+        elif record.keyword in OPERATOR_KEYWORDS:
             for line_index, op in enumerate(
-                _parse_operator_records(record.body, record.keyword, current_box, dims)
+                parse_operator_records(record.body, record.keyword, current_box, dims)
             ):
                 operations.append(op._replace(order=(record.start, line_index)))
 
     return operations
 
 
-def _parse_operator_records(
+def parse_operator_records(
     body: str,
     op: str,
     box: tuple[int, int, int, int, int, int],
@@ -219,7 +219,7 @@ def _parse_operator_records(
             try:
                 # Minus 1, to move from 1-based to 0-based indexing used internally
                 ri1, ri2, rj1, rj2, rk1, rk2 = (int(t) - 1 for t in extra[:6])
-                record_box = _clamp_box(ri1, ri2, rj1, rj2, rk1, rk2, dims)
+                record_box = clamp_box(ri1, ri2, rj1, rj2, rk1, rk2, dims)
             except ValueError:
                 pass  # fall back to ambient box
 
@@ -233,7 +233,7 @@ def _parse_operator_records(
         )
 
 
-def _box_indices(
+def get_box_indices(
     box: tuple[int, int, int, int, int, int], dims: GridDimensions
 ) -> IntArray[OneDimension]:
     """
@@ -276,7 +276,7 @@ def apply_operation(
         keyword name, used by `COPY` to fetch the source array. May
         return `None` if the source keyword has no data yet.
     """
-    indices = _box_indices(operation.box, dims)
+    indices = get_box_indices(operation.box, dims)
 
     if operation.op == "EQUALS":
         array[indices] = operation.value

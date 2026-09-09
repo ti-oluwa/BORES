@@ -102,7 +102,7 @@ def make_new_cache(n_cells: int, dtype: npt.DTypeLike) -> MobilityCache:
 
 
 @numba.njit(cache=True, parallel=True)
-def _update_mobility_cache(
+def update_mobility_cache(
     pvt_cache: PVTCache, satfunc_cache: SatFuncCache, out: MobilityCache
 ) -> None:
     """
@@ -264,5 +264,5 @@ def compute_mobility_cache(
         dtype = np.dtype(dtype) if dtype is not None else get_dtype()
         cache = make_new_cache(n_cells, dtype=dtype)
 
-    _update_mobility_cache(pvt_cache=pvt_cache, satfunc_cache=satfunc_cache, out=cache)
+    update_mobility_cache(pvt_cache=pvt_cache, satfunc_cache=satfunc_cache, out=cache)
     return cache

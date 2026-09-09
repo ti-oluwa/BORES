@@ -72,7 +72,9 @@ def build_pchip_2d_interpolator(
         for j in range(len(temperatures))
     ]
 
-    def _ev(p: NumberArray[NDimension], t: NumberArray[NDimension]) -> NumberArray[OneDimension]:
+    def interpolator(
+        p: NumberArray[NDimension], t: NumberArray[NDimension]
+    ) -> NumberArray[OneDimension]:
         p = p.astype(dtype, copy=False).ravel()  # type: ignore
         t = t.astype(dtype, copy=False).ravel()  # type: ignore
         n = len(p)
@@ -86,7 +88,7 @@ def build_pchip_2d_interpolator(
             result[i] = PchipInterpolator(temperatures, values[:, i], extrapolate=True)(t[i])
         return result
 
-    return _ev
+    return interpolator
 
 
 def build_pchip_2d_derivative_interpolator(
@@ -114,7 +116,9 @@ def build_pchip_2d_derivative_interpolator(
         for j in range(len(temperatures))
     ]
 
-    def _ev(p: NumberArray[NDimension], t: NumberArray[NDimension]) -> NumberArray[OneDimension]:
+    def interpolator(
+        p: NumberArray[NDimension], t: NumberArray[NDimension]
+    ) -> NumberArray[OneDimension]:
         p = p.astype(dtype, copy=False).ravel()  # type: ignore
         t = t.astype(dtype, copy=False).ravel()  # type: ignore
         n = len(p)
@@ -128,7 +132,7 @@ def build_pchip_2d_derivative_interpolator(
             result[i] = PchipInterpolator(temperatures, values[:, i], extrapolate=True)(t[i])
         return result
 
-    return _ev
+    return interpolator
 
 
 def build_bilinear_2d_derivative_interpolator(
@@ -163,7 +167,9 @@ def build_bilinear_2d_derivative_interpolator(
         for i in range(column_slopes.shape[0])
     ]
 
-    def _ev(p: NumberArray[NDimension], t: NumberArray[NDimension]) -> NumberArray[OneDimension]:
+    def interpolator(
+        p: NumberArray[NDimension], t: NumberArray[NDimension]
+    ) -> NumberArray[OneDimension]:
         p = p.astype(dtype, copy=False).ravel()  # type: ignore
         t = t.astype(dtype, copy=False).ravel()  # type: ignore
         # Clip to the last cell at/above the top knot (flat extrapolation,
@@ -179,7 +185,7 @@ def build_bilinear_2d_derivative_interpolator(
             result[mask] = cell_interps[idx](t[mask])
         return result
 
-    return _ev
+    return interpolator
 
 
 def build_pchip_3d_derivative_interpolator(
@@ -217,7 +223,7 @@ def build_pchip_3d_derivative_interpolator(
         for j in range(n_t)
     ]
 
-    def _ev(points: NumberArray[NDimension]) -> NumberArray[OneDimension]:
+    def interpolator(points: NumberArray[NDimension]) -> NumberArray[OneDimension]:
         points = typing.cast(NumberArray[TwoDimensions], np.atleast_2d(points))  # type: ignore
         p = points[:, 0].astype(dtype, copy=False)
         t = points[:, 1].astype(dtype, copy=False)
@@ -241,7 +247,7 @@ def build_pchip_3d_derivative_interpolator(
             result[i] = PchipInterpolator(temperatures, over_salinity, extrapolate=True)(t[i])
         return result
 
-    return _ev
+    return interpolator
 
 
 def build_bilinear_3d_derivative_interpolator(
@@ -279,7 +285,7 @@ def build_bilinear_3d_derivative_interpolator(
         for i in range(column_slopes.shape[0])
     ]
 
-    def _ev(points: NumberArray[NDimension]) -> NumberArray[OneDimension]:
+    def interpolator(points: NumberArray[NDimension]) -> NumberArray[OneDimension]:
         points = typing.cast(NumberArray[TwoDimensions], np.atleast_2d(points))  # type: ignore
         p = points[:, 0].astype(dtype, copy=False)
         t = points[:, 1].astype(dtype, copy=False)
@@ -297,7 +303,7 @@ def build_bilinear_3d_derivative_interpolator(
             result[mask] = slope_interps[idx](np.column_stack([t[mask], s[mask]]))
         return result
 
-    return _ev
+    return interpolator
 
 
 def clip_compressibility(
@@ -344,7 +350,7 @@ def clip_compressibility(
             f"{context}: {n_excess} value(s) exceeded the {max_value:g} ceiling "
             f"(max {float(np.max(values)):.4g}) and were clipped. This usually "
             "indicates a noisy or sparsely-tabulated PVT table rather than "
-            "physical compressibility - consider checking the source table.",
+            "physical compressibility. Consider checking the source table.",
             UserWarning,
             stacklevel=3,
         )
@@ -370,6 +376,295 @@ SHARED_THREE_DIMENSIONAL_TABLES = (
     "bubble_point_pressure_table",
 )
 THREE_DIMENSIONAL_TABLES = COMMON_THREE_DIMENSIONAL_TABLES + SHARED_THREE_DIMENSIONAL_TABLES
+
+
+def build_derived_tables(data: PVTData, pvt: StaticPVT, dtype: npt.DTypeLike = None) -> PVTData:
+    """
+    Build `density_table` and `compressibility_table` if absent.
+
+    Uses the standard reservoir-engineering formulas so that at
+    simulation time every property is a single interpolator call.
+
+    :param data: Source `PVTData`.
+    :param pvt: Static PVT properties.
+    :returns: `PVTData` with derived tables filled in (may be the same
+        object if nothing was missing).
+    """
+    phase = typing.cast(FluidPhase, data.phase)
+    pressures = data.pressures
+    temperatures = data.temperatures
+    n_p = len(pressures)
+    n_t = len(temperatures)
+    pressure_table, _ = np.meshgrid(pressures, temperatures, indexing="ij")
+
+    updates: dict[str, typing.Any] = {}
+    stock_tank_oil_density = pvt.stock_tank_oil_density
+    stock_tank_gas_density = pvt.stock_tank_gas_density
+    stock_tank_water_density = pvt.stock_tank_water_density
+
+    # Oil Phase
+    if phase == FluidPhase.OIL:
+        oil_fvf_table = data.formation_volume_factor_table
+        solution_gor_table = data.solution_gor_table
+
+        # Density: ρo = (ρo,SC + Rs·ρg,SC) / Bo
+        if (
+            data.density_table is None
+            and oil_fvf_table is not None
+            and solution_gor_table is not None
+            and stock_tank_oil_density is not None
+            and stock_tank_gas_density is not None
+        ):
+            density_table = (
+                stock_tank_oil_density + solution_gor_table * stock_tank_gas_density
+            ) / oil_fvf_table
+            updates["density_table"] = density_table.astype(dtype, copy=False)
+
+        # Compressibility: co = -(1/Bo)·(∂Bo/∂P)
+        if data.compressibility_table is None and oil_fvf_table is not None:
+            # Build dBo/dP via PCHIP derivative at each temperature column
+            dbo_dp = np.empty((n_p, n_t), dtype=dtype)
+            for j in range(n_t):
+                d = PchipInterpolator(pressures, oil_fvf_table[:, j]).derivative(1)
+                dbo_dp[:, j] = d(pressures)
+
+            oil_compressibility_table = -(1.0 / oil_fvf_table) * dbo_dp
+            clip_compressibility(
+                oil_compressibility_table,
+                dtype=dtype,
+                context="PVT table derived oil compressibility",
+            )
+            updates["compressibility_table"] = oil_compressibility_table.astype(dtype, copy=False)
+
+    # Gas Phase
+    elif phase == FluidPhase.GAS:
+        gas_fvf_table = data.formation_volume_factor_table
+        vaporized_oil_ratio_table = data.vaporized_oil_ratio_table
+        compressibility_factor_table = data.compressibility_factor_table
+
+        # Density: ρg = (ρg,SC + Rv·ρo,SC) / Bg  [wet] or ρg,SC / Bg [dry]
+        if (
+            data.density_table is None
+            and gas_fvf_table is not None
+            and stock_tank_oil_density is not None
+            and stock_tank_gas_density is not None
+        ):
+            if vaporized_oil_ratio_table is not None:
+                density = (
+                    stock_tank_gas_density + vaporized_oil_ratio_table * stock_tank_oil_density
+                ) / gas_fvf_table
+            else:
+                density = stock_tank_gas_density / gas_fvf_table
+            updates["density_table"] = density.astype(dtype, copy=False)
+
+        # Compressibility: cg = 1/P - (1/z)·(∂z/∂P)
+        if data.compressibility_table is None:
+            if compressibility_factor_table is not None:
+                dz_dp = np.empty((n_p, n_t), dtype=dtype)
+                for j in range(n_t):
+                    d = PchipInterpolator(
+                        pressures, compressibility_factor_table[:, j]
+                    ).derivative(1)
+                    dz_dp[:, j] = d(pressures)
+
+                gas_compressibility_table = (
+                    1.0 / pressure_table - (1.0 / compressibility_factor_table) * dz_dp
+                )
+                clip_compressibility(
+                    gas_compressibility_table,
+                    dtype=dtype,
+                    context="PVT table derived gas compressibility",
+                )
+                updates["compressibility_table"] = gas_compressibility_table.astype(
+                    dtype, copy=False
+                )
+
+            elif gas_fvf_table is not None:
+                # Fallback: cg ≈ -(1/Bg)·(∂Bg/∂P)
+                dbg_dp = np.empty((n_p, n_t), dtype=dtype)
+                for j in range(n_t):
+                    d = PchipInterpolator(pressures, gas_fvf_table[:, j]).derivative(1)
+                    dbg_dp[:, j] = d(pressures)
+
+                gas_compressibility_table = -(1.0 / gas_fvf_table) * dbg_dp
+                clip_compressibility(
+                    gas_compressibility_table,
+                    dtype=dtype,
+                    context="PVT table derived gas compressibility",
+                )
+                updates["compressibility_table"] = gas_compressibility_table.astype(
+                    dtype, copy=False
+                )
+
+    # Water Phase
+    elif phase == FluidPhase.WATER:
+        gas_free_water_fvf_table = data.gas_free_water_fvf_table
+
+        # Density: ρw = (ρw,SC + Rsw · ρg,SC) / Bw
+        if (
+            data.density_table is None
+            and gas_free_water_fvf_table is not None
+            and stock_tank_water_density is not None
+            and stock_tank_gas_density is not None
+        ):
+            salinities = data.salinities
+            if salinities is not None:
+                n_s = len(salinities)
+                density_3d_table = np.empty((n_p, n_t, n_s), dtype=dtype)
+                for s_idx in range(n_s):
+                    # Use gas solubility in water (Rsw) if available,
+                    # otherwise fall back to gas-free approximation (Rsw = 0)
+                    if (
+                        data.solubility_in_water_table is not None
+                        and data.solubility_in_water_table.shape[2] > s_idx
+                    ):
+                        rsw_slice = data.solubility_in_water_table[:, :, s_idx]
+                        density_3d_table[:, :, s_idx] = (
+                            stock_tank_water_density + rsw_slice * stock_tank_gas_density
+                        ) / gas_free_water_fvf_table
+                    else:
+                        density_3d_table[:, :, s_idx] = (
+                            stock_tank_water_density / gas_free_water_fvf_table
+                        )
+                updates["density_table"] = density_3d_table.astype(dtype, copy=False)
+
+        # Compressibility: cw = -(1/Bw_gf)·(∂Bw_gf/∂P) [undersaturated]
+        if data.compressibility_table is None and gas_free_water_fvf_table is not None:
+            dbw_dp = np.empty((n_p, n_t), dtype=dtype)
+            for j in range(n_t):
+                d = PchipInterpolator(pressures, gas_free_water_fvf_table[:, j]).derivative(1)
+                dbw_dp[:, j] = d(pressures)
+
+            water_compressibility_2d_table = -(1.0 / gas_free_water_fvf_table) * dbw_dp
+            clip_compressibility(
+                water_compressibility_2d_table,
+                dtype=dtype,
+                context="PVT table derived water compressibility",
+            )
+            if data.salinities is not None:
+                n_s = len(data.salinities)
+                water_compressibility_3d_table = np.broadcast_to(
+                    water_compressibility_2d_table[:, :, np.newaxis],
+                    (n_p, n_t, n_s),
+                ).copy()
+                updates["compressibility_table"] = water_compressibility_3d_table.astype(
+                    dtype, copy=False
+                )
+
+    if not updates:
+        return data
+    return attrs.evolve(data, **updates)
+
+
+def validate_pvt_data(data: PVTData) -> None:
+    """Validate grid monotonicity, shapes, and phase-specific field/table rules."""
+    pressures = data.pressures
+    temperatures = data.temperatures
+    salinities = data.salinities
+    n_p = len(pressures)
+    n_t = len(temperatures)
+    n_s = len(salinities) if salinities is not None else None
+
+    if pressures.ndim != 1:
+        raise ValidationError("`pressures` must be 1-dimensional.")
+    if temperatures.ndim != 1:
+        raise ValidationError("`temperatures` must be 1-dimensional.")
+    if not np.all(np.diff(pressures) > 0):
+        raise ValidationError("`pressures` must be strictly monotonically increasing.")
+    if not np.all(np.diff(temperatures) > 0):
+        raise ValidationError("`temperatures` must be strictly monotonically increasing.")
+    if salinities is not None:
+        if salinities.ndim != 1:
+            raise ValidationError("`salinities` must be 1-dimensional.")
+        if not np.all(np.diff(salinities) > 0):
+            raise ValidationError("`salinities` must be strictly monotonically increasing.")
+
+    bubble_point_array = data.bubble_point_pressures
+    if bubble_point_array is not None:
+        if bubble_point_array.ndim == 1:
+            if len(bubble_point_array) != n_t:
+                raise ValidationError(
+                    f"`bubble_point_pressures` 1-D length {len(bubble_point_array)} must "
+                    f"match n_temperatures={n_t}."
+                )
+
+        elif bubble_point_array.ndim == 2:
+            solution_gors = data.solution_gas_to_oil_ratios
+            if solution_gors is None:
+                raise ValidationError(
+                    "2-D `bubble_point_pressures` requires `solution_gas_to_oil_ratios`."
+                )
+            if not np.all(np.diff(solution_gors) > 0):
+                raise ValidationError(
+                    "`solution_gas_to_oil_ratios` must be strictly monotonically increasing."
+                )
+            if bubble_point_array.shape != (len(solution_gors), n_t):
+                raise ValidationError(
+                    f"`bubble_point_pressures` shape {bubble_point_array.shape} must be "
+                    f"({len(solution_gors)}, {n_t})."
+                )
+        else:
+            raise ValidationError("`bubble_point_pressures` must be 1-D or 2-D.")
+
+    for table_name in TWO_DIMENSIONAL_TABLES:
+        array = getattr(data, table_name, None)
+        if array is not None and array.ndim == 2 and array.shape != (n_p, n_t):
+            raise ValidationError(
+                f"`{table_name}` shape {array.shape} must be "
+                f"(n_pressures={n_p}, n_temperatures={n_t})."
+            )
+
+    phase = typing.cast(FluidPhase, data.phase)
+    shared_3d_tables = SHARED_THREE_DIMENSIONAL_TABLES if phase == FluidPhase.WATER else ()
+    for table_name in COMMON_THREE_DIMENSIONAL_TABLES + shared_3d_tables:
+        array = getattr(data, table_name, None)
+        if array is None:
+            continue
+        if array.ndim == 3:
+            if n_s is None:
+                raise ValidationError(f"`{table_name}` is 3-D but `salinities` was not provided.")
+            if array.shape != (n_p, n_t, n_s):
+                raise ValidationError(
+                    f"`{table_name}` shape {array.shape} must be "
+                    f"(n_p={n_p}, n_t={n_t}, n_s={n_s})."
+                )
+
+    if data.solubility_in_water_table is not None and salinities is None:
+        raise ValidationError("`solubility_in_water_table` is 3-D and requires `salinities`.")
+
+
+def check_physical_consistency(data: PVTData) -> None:
+    """Phase-aware physical sanity checks on table values."""
+    phase = typing.cast(FluidPhase, data.phase)
+    if data.viscosity_table is not None and np.any(data.viscosity_table <= 0):
+        raise ValidationError(f"{phase.value.upper()} viscosity must be positive everywhere.")
+    if data.density_table is not None and np.any(data.density_table <= 0):
+        raise ValidationError(f"{phase.value.upper()} density must be positive everywhere.")
+    if data.formation_volume_factor_table is not None and np.any(
+        data.formation_volume_factor_table <= 0
+    ):
+        raise ValidationError(f"{phase.value.upper()} FVF must be positive everywhere.")
+    if (
+        phase == FluidPhase.GAS
+        and data.compressibility_factor_table is not None
+        and np.any(data.compressibility_factor_table <= 0)
+    ):
+        raise ValidationError("Gas z-factor must be positive everywhere.")
+
+    max_gas_density_field_unit = 50  # 50 lbm/ft³
+    factors = get_conversion_factors(UnitSystem.FIELD, data.unit_system)
+    max_gas_density = max_gas_density_field_unit * factors["density"]
+    if (
+        phase == FluidPhase.GAS
+        and data.density_table is not None
+        and np.any(data.density_table >= max_gas_density)
+    ):
+        warnings.warn(
+            f"Gas density table contains values >= {max_gas_density} density units (e.g, lbm/ft³ for FIELD). "
+            "Verify that the table's values are in right unit system.",
+            UserWarning,
+            stacklevel=3,
+        )
 
 
 class PVTTable(StoreSerializable):
@@ -474,9 +769,9 @@ class PVTTable(StoreSerializable):
                     f"got {len(data.temperatures)}."
                 )
 
-        self.validate_data(data)
+        validate_pvt_data(data)
         if validate:
-            self.check_physical_consistency(data)
+            check_physical_consistency(data)
 
         self._extrapolation_bounds: dict[str, tuple[Number, Number]] = {
             "pressure": (data.pressures[0], data.pressures[-1]),
@@ -519,7 +814,7 @@ class PVTTable(StoreSerializable):
                 pvt = pvt.convert(self.unit_system)
             self._stock_tank_oil_density = pvt.stock_tank_oil_density
             self._stock_tank_gas_density = pvt.stock_tank_gas_density
-            data = self.build_derived_tables(data, pvt)
+            data = build_derived_tables(data, pvt, dtype)
 
         self._data = data
         self._interpolatants: dict[str, typing.Any] = {}
@@ -536,299 +831,6 @@ class PVTTable(StoreSerializable):
             len(self._interpolatants),
             len(self._derivative_interpolatants),
         )
-
-    def build_derived_tables(self, data: PVTData, pvt: StaticPVT) -> PVTData:
-        """
-        Build `density_table` and `compressibility_table` if absent.
-
-        Uses the standard reservoir-engineering formulas so that at
-        simulation time every property is a single interpolator call.
-
-        :param data: Source `PVTData`.
-        :param pvt: Static PVT properties.
-        :returns: `PVTData` with derived tables filled in (may be the same
-            object if nothing was missing).
-        """
-        phase = typing.cast(FluidPhase, data.phase)
-        pressures = data.pressures
-        temperatures = data.temperatures
-        n_p = len(pressures)
-        n_t = len(temperatures)
-        pressure_table, _temperature_table = np.meshgrid(pressures, temperatures, indexing="ij")
-        dtype = self.dtype
-
-        updates: dict[str, typing.Any] = {}
-        stock_tank_oil_density = pvt.stock_tank_oil_density
-        stock_tank_gas_density = pvt.stock_tank_gas_density
-        stock_tank_water_density = pvt.stock_tank_water_density
-
-        # Oil Phase
-        if phase == FluidPhase.OIL:
-            oil_fvf_table = data.formation_volume_factor_table
-            solution_gor_table = data.solution_gor_table
-
-            # Density: ρo = (ρo,SC + Rs·ρg,SC) / Bo
-            if (
-                data.density_table is None
-                and oil_fvf_table is not None
-                and solution_gor_table is not None
-                and stock_tank_oil_density is not None
-                and stock_tank_gas_density is not None
-            ):
-                density_table = (
-                    stock_tank_oil_density + solution_gor_table * stock_tank_gas_density
-                ) / oil_fvf_table
-                updates["density_table"] = density_table.astype(dtype, copy=False)
-
-            # Compressibility: co = -(1/Bo)·(∂Bo/∂P)
-            if data.compressibility_table is None and oil_fvf_table is not None:
-                # Build dBo/dP via PCHIP derivative at each temperature column
-                dbo_dp = np.empty((n_p, n_t), dtype=dtype)
-                for j in range(n_t):
-                    d = PchipInterpolator(pressures, oil_fvf_table[:, j]).derivative(1)
-                    dbo_dp[:, j] = d(pressures)
-
-                oil_compressibility_table = -(1.0 / oil_fvf_table) * dbo_dp
-                clip_compressibility(
-                    oil_compressibility_table,
-                    dtype=dtype,
-                    context="PVT table derived oil compressibility",
-                )
-                updates["compressibility_table"] = oil_compressibility_table.astype(
-                    dtype, copy=False
-                )
-
-        # Gas Phase
-        elif phase == FluidPhase.GAS:
-            gas_fvf_table = data.formation_volume_factor_table
-            vaporized_oil_ratio_table = data.vaporized_oil_ratio_table
-            compressibility_factor_table = data.compressibility_factor_table
-
-            # Density: ρg = (ρg,SC + Rv·ρo,SC) / Bg  [wet] or ρg,SC / Bg [dry]
-            if (
-                data.density_table is None
-                and gas_fvf_table is not None
-                and stock_tank_oil_density is not None
-                and stock_tank_gas_density is not None
-            ):
-                if vaporized_oil_ratio_table is not None:
-                    density = (
-                        stock_tank_gas_density + vaporized_oil_ratio_table * stock_tank_oil_density
-                    ) / gas_fvf_table
-                else:
-                    density = stock_tank_gas_density / gas_fvf_table
-                updates["density_table"] = density.astype(dtype, copy=False)
-
-            # Compressibility: cg = 1/P - (1/z)·(∂z/∂P)
-            if data.compressibility_table is None:
-                if compressibility_factor_table is not None:
-                    dz_dp = np.empty((n_p, n_t), dtype=dtype)
-                    for j in range(n_t):
-                        d = PchipInterpolator(
-                            pressures, compressibility_factor_table[:, j]
-                        ).derivative(1)
-                        dz_dp[:, j] = d(pressures)
-
-                    gas_compressibility_table = (
-                        1.0 / pressure_table - (1.0 / compressibility_factor_table) * dz_dp
-                    )
-                    clip_compressibility(
-                        gas_compressibility_table,
-                        dtype=dtype,
-                        context="PVT table derived gas compressibility",
-                    )
-                    updates["compressibility_table"] = gas_compressibility_table.astype(
-                        dtype, copy=False
-                    )
-
-                elif gas_fvf_table is not None:
-                    # Fallback: cg ≈ -(1/Bg)·(∂Bg/∂P)
-                    dbg_dp = np.empty((n_p, n_t), dtype=dtype)
-                    for j in range(n_t):
-                        d = PchipInterpolator(pressures, gas_fvf_table[:, j]).derivative(1)
-                        dbg_dp[:, j] = d(pressures)
-
-                    gas_compressibility_table = -(1.0 / gas_fvf_table) * dbg_dp
-                    clip_compressibility(
-                        gas_compressibility_table,
-                        dtype=dtype,
-                        context="PVT table derived gas compressibility",
-                    )
-                    updates["compressibility_table"] = gas_compressibility_table.astype(
-                        dtype, copy=False
-                    )
-
-        # Water Phase
-        elif phase == FluidPhase.WATER:
-            gas_free_water_fvf_table = data.gas_free_water_fvf_table
-
-            # Density: ρw = (ρw,SC + Rsw · ρg,SC) / Bw
-            if (
-                data.density_table is None
-                and gas_free_water_fvf_table is not None
-                and stock_tank_water_density is not None
-                and stock_tank_gas_density is not None
-            ):
-                salinities = data.salinities
-                if salinities is not None:
-                    n_s = len(salinities)
-                    density_3d_table = np.empty((n_p, n_t, n_s), dtype=dtype)
-                    for s_idx in range(n_s):
-                        # Use gas solubility in water (Rsw) if available,
-                        # otherwise fall back to gas-free approximation (Rsw = 0)
-                        if (
-                            data.solubility_in_water_table is not None
-                            and data.solubility_in_water_table.shape[2] > s_idx
-                        ):
-                            rsw_slice = data.solubility_in_water_table[:, :, s_idx]
-                            density_3d_table[:, :, s_idx] = (
-                                stock_tank_water_density + rsw_slice * stock_tank_gas_density
-                            ) / gas_free_water_fvf_table
-                        else:
-                            density_3d_table[:, :, s_idx] = (
-                                stock_tank_water_density / gas_free_water_fvf_table
-                            )
-                    updates["density_table"] = density_3d_table.astype(dtype, copy=False)
-
-            # Compressibility: cw = -(1/Bw_gf)·(∂Bw_gf/∂P) [undersaturated]
-            if data.compressibility_table is None and gas_free_water_fvf_table is not None:
-                dbw_dp = np.empty((n_p, n_t), dtype=dtype)
-                for j in range(n_t):
-                    d = PchipInterpolator(pressures, gas_free_water_fvf_table[:, j]).derivative(1)
-                    dbw_dp[:, j] = d(pressures)
-
-                water_compressibility_2d_table = -(1.0 / gas_free_water_fvf_table) * dbw_dp
-                clip_compressibility(
-                    water_compressibility_2d_table,
-                    dtype=dtype,
-                    context="PVT table derived water compressibility",
-                )
-                if data.salinities is not None:
-                    n_s = len(data.salinities)
-                    water_compressibility_3d_table = np.broadcast_to(
-                        water_compressibility_2d_table[:, :, np.newaxis],
-                        (n_p, n_t, n_s),
-                    ).copy()
-                    updates["compressibility_table"] = water_compressibility_3d_table.astype(
-                        dtype, copy=False
-                    )
-
-        if not updates:
-            return data
-        return attrs.evolve(data, **updates)
-
-    @staticmethod
-    def validate_data(data: PVTData) -> None:
-        """Validate grid monotonicity, shapes, and phase-specific field/table rules."""
-        pressures = data.pressures
-        temperatures = data.temperatures
-        salinities = data.salinities
-        n_p = len(pressures)
-        n_t = len(temperatures)
-        n_s = len(salinities) if salinities is not None else None
-
-        if pressures.ndim != 1:
-            raise ValidationError("`pressures` must be 1-dimensional.")
-        if temperatures.ndim != 1:
-            raise ValidationError("`temperatures` must be 1-dimensional.")
-        if not np.all(np.diff(pressures) > 0):
-            raise ValidationError("`pressures` must be strictly monotonically increasing.")
-        if not np.all(np.diff(temperatures) > 0):
-            raise ValidationError("`temperatures` must be strictly monotonically increasing.")
-        if salinities is not None:
-            if salinities.ndim != 1:
-                raise ValidationError("`salinities` must be 1-dimensional.")
-            if not np.all(np.diff(salinities) > 0):
-                raise ValidationError("`salinities` must be strictly monotonically increasing.")
-
-        bubble_point_array = data.bubble_point_pressures
-        if bubble_point_array is not None:
-            if bubble_point_array.ndim == 1:
-                if len(bubble_point_array) != n_t:
-                    raise ValidationError(
-                        f"`bubble_point_pressures` 1-D length {len(bubble_point_array)} must "
-                        f"match n_temperatures={n_t}."
-                    )
-
-            elif bubble_point_array.ndim == 2:
-                solution_gors = data.solution_gas_to_oil_ratios
-                if solution_gors is None:
-                    raise ValidationError(
-                        "2-D `bubble_point_pressures` requires `solution_gas_to_oil_ratios`."
-                    )
-                if not np.all(np.diff(solution_gors) > 0):
-                    raise ValidationError(
-                        "`solution_gas_to_oil_ratios` must be strictly monotonically increasing."
-                    )
-                if bubble_point_array.shape != (len(solution_gors), n_t):
-                    raise ValidationError(
-                        f"`bubble_point_pressures` shape {bubble_point_array.shape} must be "
-                        f"({len(solution_gors)}, {n_t})."
-                    )
-            else:
-                raise ValidationError("`bubble_point_pressures` must be 1-D or 2-D.")
-
-        for table_name in TWO_DIMENSIONAL_TABLES:
-            array = getattr(data, table_name, None)
-            if array is not None and array.ndim == 2 and array.shape != (n_p, n_t):
-                raise ValidationError(
-                    f"`{table_name}` shape {array.shape} must be "
-                    f"(n_pressures={n_p}, n_temperatures={n_t})."
-                )
-
-        phase = typing.cast(FluidPhase, data.phase)
-        shared_3d_tables = SHARED_THREE_DIMENSIONAL_TABLES if phase == FluidPhase.WATER else ()
-        for table_name in COMMON_THREE_DIMENSIONAL_TABLES + shared_3d_tables:
-            array = getattr(data, table_name, None)
-            if array is None:
-                continue
-            if array.ndim == 3:
-                if n_s is None:
-                    raise ValidationError(
-                        f"`{table_name}` is 3-D but `salinities` was not provided."
-                    )
-                if array.shape != (n_p, n_t, n_s):
-                    raise ValidationError(
-                        f"`{table_name}` shape {array.shape} must be "
-                        f"(n_p={n_p}, n_t={n_t}, n_s={n_s})."
-                    )
-
-        if data.solubility_in_water_table is not None and salinities is None:
-            raise ValidationError("`solubility_in_water_table` is 3-D and requires `salinities`.")
-
-    @staticmethod
-    def check_physical_consistency(data: PVTData) -> None:
-        """Phase-aware physical sanity checks on table values."""
-        phase = typing.cast(FluidPhase, data.phase)
-        if data.viscosity_table is not None and np.any(data.viscosity_table <= 0):
-            raise ValidationError(f"{phase.value.upper()} viscosity must be positive everywhere.")
-        if data.density_table is not None and np.any(data.density_table <= 0):
-            raise ValidationError(f"{phase.value.upper()} density must be positive everywhere.")
-        if data.formation_volume_factor_table is not None and np.any(
-            data.formation_volume_factor_table <= 0
-        ):
-            raise ValidationError(f"{phase.value.upper()} FVF must be positive everywhere.")
-        if (
-            phase == FluidPhase.GAS
-            and data.compressibility_factor_table is not None
-            and np.any(data.compressibility_factor_table <= 0)
-        ):
-            raise ValidationError("Gas z-factor must be positive everywhere.")
-
-        max_gas_density_field_unit = 50  # 50 lbm/ft³
-        factors = get_conversion_factors(UnitSystem.FIELD, data.unit_system)
-        max_gas_density = max_gas_density_field_unit * factors["density"]
-        if (
-            phase == FluidPhase.GAS
-            and data.density_table is not None
-            and np.any(data.density_table >= max_gas_density)
-        ):
-            warnings.warn(
-                f"Gas density table contains values >= {max_gas_density} density units (e.g, lbm/ft³ for FIELD). "
-                "Verify that the table's values are in right unit system.",
-                UserWarning,
-                stacklevel=3,
-            )
 
     def build_interpolants(self, data: PVTData) -> None:
         """Build scipy / PCHIP interpolators and their pressure-derivatives."""
@@ -1733,7 +1735,7 @@ class PVTTable(StoreSerializable):
             # Rs is fixed at its bubble-point value above Pb - by
             # construction, that value is exactly the `solution_gor` this
             # cell's own bubble point was computed from.
-            solution_gor_arr = np.broadcast_to(np.atleast_1d(solution_gor), pressure_array.shape)  # type: ignore[arg-type]
+            solution_gor_array = np.broadcast_to(np.atleast_1d(solution_gor), pressure_array.shape)  # type: ignore[arg-type]
             undersaturated_fvf = self.formation_volume_factor(
                 pressure_array[undersaturated],
                 temperature_array[undersaturated],
@@ -1741,7 +1743,7 @@ class PVTTable(StoreSerializable):
             )
             result[undersaturated] = (
                 self._stock_tank_oil_density
-                + solution_gor_arr[undersaturated] * self._stock_tank_gas_density
+                + solution_gor_array[undersaturated] * self._stock_tank_gas_density
             ) / np.asarray(undersaturated_fvf)
 
         return typing.cast(
@@ -1975,21 +1977,21 @@ class PVTTable(StoreSerializable):
         if solution_gor is None:
             raise ValidationError("2-D bubble-point table requires the `solution_gor` argument.")
 
-        solution_gor_arr = np.atleast_1d(solution_gor)
+        solution_gor_array = np.atleast_1d(solution_gor)
         temperature_array = np.atleast_1d(temperature)
-        if solution_gor_arr.shape != temperature_array.shape:
-            if solution_gor_arr.size == 1:
-                solution_gor_arr = np.full_like(temperature_array, solution_gor_arr[0])
+        if solution_gor_array.shape != temperature_array.shape:
+            if solution_gor_array.size == 1:
+                solution_gor_array = np.full_like(temperature_array, solution_gor_array[0])
             elif temperature_array.size == 1:
-                temperature_array = np.full_like(solution_gor_arr, temperature_array[0])
+                temperature_array = np.full_like(solution_gor_array, temperature_array[0])
             else:
                 raise ValidationError(
                     "`solution_gor` and `temperature` must have compatible shapes."
                 )
         result = (
-            interp.ev(solution_gor_arr, temperature_array)
+            interp.ev(solution_gor_array, temperature_array)
             if hasattr(interp, "ev")
-            else interp(solution_gor_arr, temperature_array)
+            else interp(solution_gor_array, temperature_array)
         )
         return typing.cast(
             TableResult[NDimension],
@@ -1998,7 +2000,7 @@ class PVTTable(StoreSerializable):
             else result.astype(dtype, copy=False),
         )
 
-    pb = pbub = bubble_point_pressure
+    pb = pbub = p_bub = bubble_point_pressure
 
     def dpb_drs(
         self,
@@ -2023,12 +2025,12 @@ class PVTTable(StoreSerializable):
             return None
 
         dtype = self.dtype
-        solution_gor_arr = np.atleast_1d(solution_gor)
+        solution_gor_array = np.atleast_1d(solution_gor)
         temperature_array = np.atleast_1d(temperature)
         result = (
-            interp.ev(solution_gor_arr, temperature_array)
+            interp.ev(solution_gor_array, temperature_array)
             if hasattr(interp, "ev")
-            else interp(solution_gor_arr, temperature_array)
+            else interp(solution_gor_array, temperature_array)
         )
         return typing.cast(
             TableResult[NDimension],
@@ -2102,7 +2104,7 @@ class PVTTable(StoreSerializable):
             else result.astype(dtype, copy=False),
         )
 
-    rs = solution_gor = solution_gas_to_oil_ratio
+    rs = Rs = solution_gor = solution_gas_to_oil_ratio
 
     def drs_dp(
         self,
@@ -2120,6 +2122,8 @@ class PVTTable(StoreSerializable):
         if self._phase != FluidPhase.OIL:
             return None
         return self.query("solution_gor", pressure, temperature, derivative=True)
+
+    dRs_dP = drs_dp
 
     def is_saturated(
         self,
@@ -2168,7 +2172,7 @@ class PVTTable(StoreSerializable):
             return None
         return self.query("compressibility_factor", pressure, temperature)
 
-    z = compressibility_factor
+    z = Z = compressibility_factor
 
     def dz_dp(
         self,
@@ -2186,6 +2190,8 @@ class PVTTable(StoreSerializable):
         if self._phase != FluidPhase.GAS:
             return None
         return self.query("compressibility_factor", pressure, temperature, derivative=True)
+
+    dZ_dP = dz_dp
 
     def vaporized_oil_to_gas_ratio(
         self,
@@ -2224,13 +2230,13 @@ class PVTTable(StoreSerializable):
         if dew_point_pressure is None:
             return self.query("vaporized_oil_to_gas_ratio", pressure_array, temperature_array)
 
-        dew_point_arr = np.atleast_1d(dew_point_pressure)
-        pressure_array, temperature_array, dew_point_arr = np.broadcast_arrays(
-            pressure_array, temperature_array, dew_point_arr
+        dew_point_array = np.atleast_1d(dew_point_pressure)
+        pressure_array, temperature_array, dew_point_array = np.broadcast_arrays(
+            pressure_array, temperature_array, dew_point_array
         )
 
         result = np.zeros_like(pressure_array, dtype=dtype)
-        above = pressure_array >= dew_point_arr  # above dew point: Rv = Rv_sat (frozen)
+        above = pressure_array >= dew_point_array  # above dew point: Rv = Rv_sat (frozen)
         below = ~above
 
         if np.any(below):
@@ -2239,7 +2245,7 @@ class PVTTable(StoreSerializable):
             )
         if np.any(above):
             result[above] = self.query(  # type: ignore[index]
-                "vaporized_oil_to_gas_ratio", dew_point_arr[above], temperature_array[above]
+                "vaporized_oil_to_gas_ratio", dew_point_array[above], temperature_array[above]
             )
         return typing.cast(
             TableResult[NDimension],
@@ -2248,7 +2254,7 @@ class PVTTable(StoreSerializable):
             else result.astype(dtype, copy=False),
         )
 
-    rv = vaporized_ogr = vaporized_oil_to_gas_ratio
+    rv = Rv = vaporized_ogr = vaporized_oil_to_gas_ratio
 
     def drv_dp(
         self,
@@ -2292,7 +2298,7 @@ class PVTTable(StoreSerializable):
             else result.astype(dtype, copy=False)
         )
 
-    pd = pdew = dew_point_pressure
+    pd = pdew = p_dew = dew_point_pressure
 
     def solubility_in_water(
         self,
@@ -2317,7 +2323,7 @@ class PVTTable(StoreSerializable):
             self.resolve_salinity(salinity),
         )
 
-    rsw = solubility_in_water
+    rsw = Rsw = solubility_in_water
 
     def drsw_dp(
         self,
@@ -2343,6 +2349,8 @@ class PVTTable(StoreSerializable):
             self.resolve_salinity(salinity),
             derivative=True,
         )
+
+    dRsw_dP = drsw_dp
 
 
 @attrs.frozen(slots=True)

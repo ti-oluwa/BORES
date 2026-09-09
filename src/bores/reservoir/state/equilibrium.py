@@ -81,8 +81,8 @@ class DepthTable(StoreSerializable):
             outside its range.
         """
         is_scalar = np.isscalar(depth)
-        depth_arr = np.atleast_1d(depth)
-        result = np.interp(depth_arr, self.depths, self.values)
+        depth_array = np.atleast_1d(depth)
+        result = np.interp(depth_array, self.depths, self.values)
         return (
             typing.cast(Number, result[0])
             if is_scalar
@@ -114,7 +114,7 @@ class DepthTable(StoreSerializable):
         )
 
 
-def _load_depth_tables(
+def load_depth_tables(
     deck_file: DeckFile,
     keyword: str,
     value_column: str,
@@ -190,7 +190,7 @@ class EquilibriumRegion(StoreSerializable):
     all-oil column with no underlying aquifer, or fully water-saturated).
     """
 
-    pcow_woc: Number = 0.0
+    pcow_at_woc: Number = 0.0
     """Oil-water capillary pressure at the WOC (usually `0`)."""
 
     goc_depth: Number = 0.0
@@ -199,7 +199,7 @@ class EquilibriumRegion(StoreSerializable):
     cap - oil is at or below its bubble point everywhere, or absent).
     """
 
-    pcog_goc: Number = 0.0
+    pcgo_at_goc: Number = 0.0
     """Gas-oil capillary pressure at the GOC (usually `0`)."""
 
     rsvd_table: int = 0
@@ -237,7 +237,7 @@ class EquilibriumRegion(StoreSerializable):
         if self.woc_depth < 0 or self.goc_depth < 0:
             raise ValidationError(
                 "`woc_depth` / `goc_depth` must be non-negative; got "
-                f"woc_depth={self.woc_depth}, goc_depth={self.goc_depth}."
+                f"`woc_depth={self.woc_depth}`, `goc_depth={self.goc_depth}`."
             )
         if self.has_woc and self.has_goc and self.goc_depth > self.woc_depth:
             raise ValidationError(
@@ -248,8 +248,8 @@ class EquilibriumRegion(StoreSerializable):
         if self.rsvd_table < 0 or self.rvvd_table < 0:
             raise ValidationError(
                 "`rsvd_table` / `rvvd_table` must be non-negative table "
-                f"numbers; got rsvd_table={self.rsvd_table}, "
-                f"rvvd_table={self.rvvd_table}."
+                f"numbers; got `rsvd_table={self.rsvd_table}`, "
+                f"`rvvd_table={self.rvvd_table}`."
             )
 
     @property
@@ -284,7 +284,7 @@ class EquilibriumRegion(StoreSerializable):
         to *target*.
 
         Depths use the length factor; pressures (`datum_pressure`,
-        `pcow_woc`, `pcog_goc`) use the pressure factor. Table numbers and
+        `pcow_at_woc`, `pcgo_at_goc`) use the pressure factor. Table numbers and
         `accuracy_flag` are dimensionless and copied unchanged.
 
         :param target: Target `UnitSystem`.
@@ -303,9 +303,9 @@ class EquilibriumRegion(StoreSerializable):
             datum_depth=self.datum_depth * length_factor,
             datum_pressure=self.datum_pressure * pressure_factor,
             woc_depth=self.woc_depth * length_factor,
-            pcow_woc=self.pcow_woc * pressure_factor,
+            pcow_at_woc=self.pcow_at_woc * pressure_factor,
             goc_depth=self.goc_depth * length_factor,
-            pcog_goc=self.pcog_goc * pressure_factor,
+            pcgo_at_goc=self.pcgo_at_goc * pressure_factor,
             rsvd_table=self.rsvd_table,
             rvvd_table=self.rvvd_table,
             accuracy_flag=self.accuracy_flag,
@@ -339,9 +339,7 @@ class EquilibriumRegion(StoreSerializable):
             )
         return typing.cast(
             Self,
-            _load_equilibrium_region_from_record(
-                records[eqlnum - 1], eqlnum, deck_file.unit_system
-            ),
+            load_equilibrium_region(records[eqlnum - 1], eqlnum, deck_file.unit_system),
         )
 
 
@@ -578,11 +576,17 @@ class Equilibrium(StoreSerializable):
         uses_field_units = unit_system == UnitSystem.FIELD
         scf_to_mscf = c.SCF_TO_MSCF if uses_field_units else 1.0
         mscf_to_scf = c.MSCF_TO_SCF if uses_field_units else 1.0
-        rsvd_tables = _load_depth_tables(
-            deck_file, "RSVD", "solution_gor", value_multiplier=mscf_to_scf
+        rsvd_tables = load_depth_tables(
+            deck_file,
+            keyword="RSVD",
+            value_column="solution_gor",
+            value_multiplier=mscf_to_scf,
         )
-        rvvd_tables = _load_depth_tables(
-            deck_file, "RVVD", "vaporized_ogr", value_multiplier=scf_to_mscf
+        rvvd_tables = load_depth_tables(
+            deck_file,
+            keyword="RVVD",
+            value_column="vaporized_ogr",
+            value_multiplier=scf_to_mscf,
         )
         return cls(
             regions=regions,
@@ -592,20 +596,15 @@ class Equilibrium(StoreSerializable):
         )
 
 
-def _load_equilibrium_region_from_record(
-    record: typing.Mapping[str, typing.Any],
+def load_equilibrium_region(
+    equil_record: typing.Mapping[str, typing.Any],
     eqlnum: int,
     unit_system: UnitSystem,
 ) -> EquilibriumRegion:
     """
     Build one `EquilibriumRegion` from a single parsed `EQUIL` record dict.
 
-    The single field-mapping implementation shared by
-    `EquilibriumRegion.from_deck` and `load_equilibrium_regions`, so the
-    two call sites can never drift out of sync on how raw record fields
-    map onto `EquilibriumRegion` fields.
-
-    :param record: One row of `deck_file.get("EQUIL")`.
+    :param equil_record: One row of `deck_file.get("EQUIL")`.
     :param eqlnum: 1-based `EQLNUM` index this record belongs to (used only
         for error messages).
     :param unit_system: Unit system of the source `DeckFile`.
@@ -614,26 +613,24 @@ def _load_equilibrium_region_from_record(
     """
     try:
         return EquilibriumRegion(
-            datum_depth=record["datum_depth"],
-            datum_pressure=record["datum_pressure"],
-            woc_depth=record["woc_depth"] or 0.0,
-            pcow_woc=record["pcow_woc"] or 0.0,
-            goc_depth=record["goc_depth"] or 0.0,
-            pcog_goc=record["pcog_goc"] or 0.0,
-            rsvd_table=record["rsvd_table"] or 0,
-            rvvd_table=record["rvvd_table"] or 0,
-            accuracy_flag=record["accuracy_flag"] or 0,
+            datum_depth=equil_record["datum_depth"],
+            datum_pressure=equil_record["datum_pressure"],
+            woc_depth=equil_record["woc_depth"] or 0.0,
+            pcow_at_woc=equil_record["pcow_at_woc"] or 0.0,
+            goc_depth=equil_record["goc_depth"] or 0.0,
+            pcgo_at_goc=equil_record["pcgo_at_goc"] or 0.0,
+            rsvd_table=equil_record["rsvd_table"] or 0,
+            rvvd_table=equil_record["rvvd_table"] or 0,
+            accuracy_flag=equil_record["accuracy_flag"] or 0,
             unit_system=unit_system,
         )
     except (ValidationError, TypeError, KeyError) as exc:
-        raise ValidationError(f"EQUIL record {eqlnum}: {exc}") from exc
+        raise ValidationError(f"`EQUIL` record {eqlnum}: {exc}") from exc
 
 
-def load_equilibrium_regions(
-    deck_file: DeckFile,
-) -> dict[int, EquilibriumRegion]:
+def load_equilibrium_regions(deck_file: DeckFile) -> dict[int, EquilibriumRegion]:
     """
-    Parse every `EQUIL` record in *deck_file* into `EquilibriumRegion`
+    Parse every `EQUIL` record in the deck file into `EquilibriumRegion`
     objects, keyed by 1-based `EQLNUM` index.
 
     :param deck_file: Parsed `DeckFile`.
@@ -653,6 +650,6 @@ def load_equilibrium_regions(
 
     unit_system = deck_file.unit_system
     return {
-        idx + 1: _load_equilibrium_region_from_record(record, idx + 1, unit_system)
+        idx + 1: load_equilibrium_region(record, idx + 1, unit_system)
         for idx, record in enumerate(records)
     }

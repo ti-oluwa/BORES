@@ -222,12 +222,12 @@ class Temperature(StoreSerializable):
     The simplest case - one temperature for all cells:
 
     ```python
-    temps = Temperature(default=200.0, unit_system=UnitSystem.FIELD)
+    temperature = Temperature(default=200.0, unit_system=UnitSystem.FIELD)
     ```
 
     Per-region scalars:
     ```python
-    temps = Temperature(
+    temperature = Temperature(
         regions={1: 180.0, 2: 210.0},
         unit_system=UnitSystem.FIELD,
     )
@@ -236,7 +236,7 @@ class Temperature(StoreSerializable):
     Mixed - some regions use a gradient, one a table:
 
     ```python
-    temps = Temperature(
+    temperature = Temperature(
         default=200.0,
         regions={
             1: TemperatureGradient(reference_temperature=180.0, ...),
@@ -398,14 +398,14 @@ class Temperature(StoreSerializable):
 
         Keyword priority (highest to lowest):
 
-        1. `TEMPVD` - depth-indexed table, one per PVT/EQL region.
+        1. `TEMPVD`: depth-indexed table, one per PVT/EQL region.
            Each table becomes a `TemperatureTable` keyed by its 1-based
            PVT/EQL region index. When `EQLNUM` and `PVTNUM`
            differ in the deck this may require the caller to remap keys;
            the method assumes each `TEMPVD` table index maps to the same-
            numbered PVT/EQL region.
-        2. `RTEMP` - single scalar applied uniformly as the `default`.
-        3. Neither present - returns `None`; caller is responsible for
+        2. `RTEMP`: single scalar applied uniformly as the `default`.
+        3. Neither present: returns `None`; caller is responsible for
            supplying a default temperature.
 
         :param deck_file: Parsed `DeckFile` containing SOLUTION-section
@@ -418,14 +418,16 @@ class Temperature(StoreSerializable):
         unit_system = deck_file.unit_system
         dtype = np.dtype(dtype) if dtype is not None else get_dtype()
 
-        tempvd_all: list | None = deck_file.get("TEMPVD") or deck_file.get("RTEMPVD")
-        rtemp_all: list | None = deck_file.get("RTEMP")
+        tempvd_records: list[list[dict[str, typing.Any]]] | None = deck_file.get(
+            "TEMPVD"
+        ) or deck_file.get("RTEMPVD")
+        rtemp_records: list[list[dict[str, typing.Any]]] | None = deck_file.get("RTEMP")
 
         # `TEMPVD`: one `TemperatureTable` per equilibration or PVT region,
         # depending on whether it is regioned by `PVTNUM` or `EQLNUM`
-        if tempvd_all:
+        if tempvd_records:
             regions: dict[int, TemperatureSpec] = {}
-            for region_idx, rows in enumerate(tempvd_all):
+            for region_idx, rows in enumerate(tempvd_records):
                 if not rows:
                     continue
 
@@ -447,8 +449,8 @@ class Temperature(StoreSerializable):
             return cls(regions=regions, unit_system=unit_system)
 
         # RTEMP: single scalar default
-        if rtemp_all and rtemp_all[0]:
-            temperature: Number = float(rtemp_all[0][0]["temperature"])
+        if rtemp_records and rtemp_records[0]:
+            temperature: Number = float(rtemp_records[0][0]["temperature"])
             return cls(default=temperature, unit_system=unit_system)
 
         raise ValidationError(

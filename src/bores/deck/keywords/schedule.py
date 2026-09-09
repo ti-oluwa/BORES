@@ -118,7 +118,7 @@ class TStepKeyword(Keyword[list[float]]):
         operations: list[Operation] | None = None,
         schedule_times: dict[int, float] | None = None,
     ) -> list[float] | None:
-        records = deck.records_for(self.name)
+        records = deck.get_records_for(self.name)
         if not records:
             return None
 

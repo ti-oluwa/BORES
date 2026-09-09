@@ -81,7 +81,7 @@ class SummaryVectorKeyword(Keyword[list[str]]):
         operations: list[Operation] | None = None,
         schedule_times: dict[int, float] | None = None,
     ) -> list[str] | None:
-        record = deck.first_record_for(self.name)
+        record = deck.get_first_record_for(self.name)
         if record is None:
             return None
         return tokenize(record.body.split("/", 1)[0])
@@ -162,7 +162,7 @@ class MnemonicReportKeyword(Keyword[dict[str, int | None]]):
         operations: list[Operation] | None = None,
         schedule_times: dict[int, float] | None = None,
     ) -> dict[str, int | None] | None:
-        record = deck.first_record_for(self.name)
+        record = deck.get_first_record_for(self.name)
         if record is None:
             return None
 

@@ -394,7 +394,7 @@ class DeckFile:
             PVT / relperm tables).
         """
         for name in DIMENSION_KEYWORDS:
-            record = self._deck.first_record_for(name)
+            record = self._deck.get_first_record_for(name)
             if record is None:
                 continue
             keyword = self._registry.get(name)

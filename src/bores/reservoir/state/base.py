@@ -18,7 +18,7 @@ from bores.utils import scale, scale_and_offset
 __all__ = ["Hysteresis", "ReservoirState"]
 
 
-def _advance_phase_hysteresis(
+def advance_phase_hysteresis(
     new_saturation: npt.NDArray,
     previous_saturation: npt.NDArray,
     max_saturation: npt.NDArray,
@@ -204,14 +204,14 @@ class Hysteresis(StoreSerializable):
         previous_sw = np.asarray(previous_water_saturation, dtype=get_dtype())
         previous_sg = np.asarray(previous_gas_saturation, dtype=get_dtype())
 
-        new_max_water, new_water_flag, new_water_reversal = _advance_phase_hysteresis(
+        new_max_water, new_water_flag, new_water_reversal = advance_phase_hysteresis(
             new_saturation=sw,
             previous_saturation=previous_sw,
             max_saturation=np.asarray(self.max_water_saturation),
             imbibition_flag=np.asarray(self.water_imbibition_flag),
             reversal_saturation=np.asarray(self.water_reversal_saturation),
         )
-        new_max_gas, new_gas_flag, new_gas_reversal = _advance_phase_hysteresis(
+        new_max_gas, new_gas_flag, new_gas_reversal = advance_phase_hysteresis(
             new_saturation=sg,
             previous_saturation=previous_sg,
             max_saturation=np.asarray(self.max_gas_saturation),

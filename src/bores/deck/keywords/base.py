@@ -210,7 +210,7 @@ class RecordKeyword(Keyword[dict[str, T | None]]):
         operations: list[Operation] | None = None,
         schedule_times: dict[int, float] | None = None,
     ) -> dict[str, T | None] | None:
-        record = deck.first_record_for(self.name)
+        record = deck.get_first_record_for(self.name)
         if record is None:
             return None
 
@@ -254,7 +254,7 @@ class RepeatedRecordKeyword(Keyword[list[dict[str, T | None]]]):
         operations: list[Operation] | None = None,
         schedule_times: dict[int, float] | None = None,
     ) -> list[dict[str, T | None]] | None:
-        records = deck.records_for(self.name)
+        records = deck.get_records_for(self.name)
         if not records:
             return None
 
@@ -584,7 +584,7 @@ class ArrayKeyword(Keyword[FloatArray[OneDimension]]):
         """
         events: list[tuple[tuple[int, int], str, typing.Any]] = []
 
-        for record in deck.records_for(self.name):
+        for record in deck.get_records_for(self.name):
             # Compact tokens: an "N*value" repeat group stays as one token
             # instead of expanding to N copies - large arrays are commonly
             # one or a handful of such groups, so this avoids materializing
@@ -725,7 +725,7 @@ class DateKeyword(Keyword[datetime.date]):
         operations: list[Operation] | None = None,
         schedule_times: dict[int, float] | None = None,
     ) -> datetime.date | None:
-        record = deck.first_record_for(self.name)
+        record = deck.get_first_record_for(self.name)
         if record is None:
             return None
 
@@ -762,7 +762,7 @@ class DatesKeyword(Keyword[list[datetime.date]]):
         operations: list[Operation] | None = None,
         schedule_times: dict[int, float] | None = None,
     ) -> list[datetime.date] | None:
-        records = deck.records_for(self.name)
+        records = deck.get_records_for(self.name)
         if not records:
             return None
 
@@ -839,7 +839,7 @@ class TableKeyword(Keyword[list[PVTTable[Number]]]):
         operations: list[Operation] | None = None,
         schedule_times: dict[int, float] | None = None,
     ) -> list[PVTTable[Number]] | None:
-        records = deck.records_for(self.name)
+        records = deck.get_records_for(self.name)
         if not records:
             return None
 
@@ -1006,7 +1006,7 @@ def get_schedule_times(deck: Deck, time_unit: TimeUnit = "days") -> dict[int, fl
     # Resolve the simulation start date from `START` keyword, if present.
     # This makes sure `DATES`-based elapsed time is correct even when the first `DATES`
     # entry is not the same as `START`.
-    start_record = deck.first_record_for("START")
+    start_record = deck.get_first_record_for("START")
     start_date: datetime.date | None = None
     if start_record is not None:
         start_body = start_record.body.split("/", 1)[0]
@@ -1079,7 +1079,7 @@ class ScheduledRecordKeyword(RepeatedRecordKeyword[T | float]):
         schedule_times: dict[int, float] | None = None,
         time_unit: TimeUnit = "days",
     ) -> list[dict[str, T | float | None]] | None:
-        records = deck.records_for(self.name)
+        records = deck.get_records_for(self.name)
         if not records:
             return None
 

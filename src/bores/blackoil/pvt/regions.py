@@ -1177,7 +1177,7 @@ def load_pvt_regions(
     :param interpolation_method: `"linear"` (default) or `"cubic"`.
     :param validate: Run physical-consistency checks.
     :param warn_on_extrapolation: Log warnings when queries exceed table bounds.
-    :returns: Mapping of 1-based PVTNUM region index to corresponding `PVTRegion`.
+    :returns: Mapping of 1-based `PVTNUM` region index to corresponding `PVTRegion`.
     :raises ValidationError: If no recognisable PVT keyword is found.
     """
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()

@@ -134,7 +134,7 @@ def get_gravity_acceleration(unit_system: UnitSystem) -> float:
 
 
 @numba.njit(cache=True, parallel=True)
-def _update_transmissibility_cache(
+def update_transmissibility_cache(
     owner_indices: IntCellArray,
     neighbour_indices: IntCellArray,
     geometric_transmissibility: CellArray,
@@ -345,7 +345,7 @@ def compute_transmissibility_cache(
     water_pressure = typing.cast(CellArray, oil_pressure - oil_water_capillary_pressure)
     gas_pressure = typing.cast(CellArray, oil_pressure + gas_oil_capillary_pressure)
 
-    _update_transmissibility_cache(
+    update_transmissibility_cache(
         owner_indices=owner_indices,
         neighbour_indices=neighbour_indices,
         geometric_transmissibility=reservoir.transmissibilities.interior,

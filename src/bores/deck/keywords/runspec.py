@@ -148,7 +148,7 @@ class TitleKeyword(Keyword[str]):
         operations: list[Operation] | None = None,
         schedule_times: dict[int, float] | None = None,
     ) -> str | None:
-        record = deck.first_record_for(self.name)
+        record = deck.get_first_record_for(self.name)
         if record is None:
             return None
         # The body is everything after the keyword name up to the scanner's

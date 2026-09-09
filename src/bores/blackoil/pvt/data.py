@@ -42,7 +42,7 @@ class PVTData(StoreSerializable):
     - Water: 3-D arrays with shape `(n_pressures, n_temperatures, n_salinities)`.
     - For wet-gas (PVTG) tables: `(n_pressures, n_rv)` where the Rv axis
       replaces the temperature axis (`temperatures` carries the Rv values in
-      that case - see `PVTTable.__init__` notes).
+      that case).
 
     **Primary (interpolated) properties**
 

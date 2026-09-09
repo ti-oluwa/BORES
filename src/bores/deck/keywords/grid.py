@@ -104,7 +104,7 @@ class CoordKeyword(Keyword[FloatArray[ThreeDimensions]]):
         if dims is None:
             raise DeckParseError("`COORD` requires grid dimensions (`SPECGRID`/`DIMENS`).")
 
-        record = deck.first_record_for(self.name)
+        record = deck.get_first_record_for(self.name)
         if record is None:
             return None
 
@@ -149,7 +149,7 @@ class ZCornKeyword(Keyword[FloatArray[ThreeDimensions]]):
         if dims is None:
             raise DeckParseError("`ZCORN` requires grid dimensions (`SPECGRID`/`DIMENS`).")
 
-        record = deck.first_record_for(self.name)
+        record = deck.get_first_record_for(self.name)
         if record is None:
             return None
 
@@ -303,7 +303,7 @@ class VectorDimsKeyword(Keyword[list[np.float64]]):
                 "dimensions (`SPECGRID`/`DIMENS` not found)."
             )
 
-        record = deck.first_record_for(self.name)
+        record = deck.get_first_record_for(self.name)
         if record is None:
             return None
 

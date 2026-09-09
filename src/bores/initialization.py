@@ -363,7 +363,7 @@ def initialize_center_point_equilibrium(
     all_depths = [oil_depths_up[:-1], oil_depths_down]
     all_pressures = [oil_pressures_up[:-1], oil_pressures_down]
 
-    # Gas cap: full-range Pg(z) march from GOC, re-referenced to Po via pcog_goc.
+    # Gas cap: full-range Pg(z) march from GOC, re-referenced to Po via pcgo_at_goc.
     # Full range (not just the gas-cap zone) so Pcgo(z) is defined everywhere,
     # which the capillary-pressure saturation path needs.
     gas_profile: tuple[npt.NDArray, npt.NDArray] | None = None
@@ -373,7 +373,7 @@ def initialize_center_point_equilibrium(
                 "Region has a gas-oil contact but no gas PVT table was supplied."
             )
         gas_pressure_at_goc = (
-            np.interp(region.goc_depth, oil_depths_up, oil_pressures_up) + region.pcog_goc
+            np.interp(region.goc_depth, oil_depths_up, oil_pressures_up) + region.pcgo_at_goc
         )
         gas_depths_full, gas_pressures_full = _march_full_range(
             density_fn=compute_gas_density,
@@ -389,9 +389,9 @@ def initialize_center_point_equilibrium(
         in_gas_zone = gas_depths_full < region.goc_depth
         if min_depth < region.goc_depth:
             all_depths.append(gas_depths_full[in_gas_zone])
-            all_pressures.append(gas_pressures_full[in_gas_zone] - region.pcog_goc)
+            all_pressures.append(gas_pressures_full[in_gas_zone] - region.pcgo_at_goc)
 
-    # Aquifer: full-range Pw(z) march from WOC, re-referenced to Po via pcow_woc.
+    # Aquifer: full-range Pw(z) march from WOC, re-referenced to Po via pcow_at_woc.
     water_profile: tuple[npt.NDArray, npt.NDArray] | None = None
     if region.has_woc:
         if water_table is None:
@@ -399,7 +399,7 @@ def initialize_center_point_equilibrium(
                 "Region has a water-oil contact but no water PVT table was supplied."
             )
         water_pressure_at_woc = (
-            np.interp(region.woc_depth, oil_depths_down, oil_pressures_down) - region.pcow_woc
+            np.interp(region.woc_depth, oil_depths_down, oil_pressures_down) - region.pcow_at_woc
         )
         water_depths_full, water_pressures_full = _march_full_range(
             density_fn=compute_water_density,
@@ -415,7 +415,7 @@ def initialize_center_point_equilibrium(
         in_aquifer = water_depths_full > region.woc_depth
         if max_depth > region.woc_depth:
             all_depths.append(water_depths_full[in_aquifer])
-            all_pressures.append(water_pressures_full[in_aquifer] + region.pcow_woc)
+            all_pressures.append(water_pressures_full[in_aquifer] + region.pcow_at_woc)
 
     grid_depths = np.concatenate(all_depths, dtype=dtype)
     grid_pressures = np.concatenate(all_pressures, dtype=dtype)

@@ -9,7 +9,7 @@ from bores.reservoir.model import Reservoir
 from bores.types import Orientation, UnitSystem
 from bores.wells.compile import CompiledWellSystem, compile_well_system
 
-__all__ = ["CompiledBlackOilModel", "compile_blackoil_model"]
+__all__ = ["CompiledBlackOilModel", "compile_model"]
 
 
 class CompiledBlackOilModel(typing.NamedTuple):
@@ -31,7 +31,7 @@ class CompiledBlackOilModel(typing.NamedTuple):
     """Unchanged from `BlackOilModel.unit_system`."""
 
 
-def compile_blackoil_model(
+def compile_model(
     model: BlackOilModel, *, dtype: typing.Any = None, **resolve_kwargs: typing.Any
 ) -> CompiledBlackOilModel:
     """

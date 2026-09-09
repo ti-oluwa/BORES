@@ -300,7 +300,6 @@ class Reservoir(
 
         :returns: Dictionary of scalar statistics.
         """
-        pv = self.pore_volumes
         return {
             "n_cells": self.n_cells,
             "n_faces": self.n_faces,
@@ -308,7 +307,7 @@ class Reservoir(
             "n_boundary_faces": self.n_boundary_faces,
             "n_nnc": self.grid.n_nnc,
             "unit_system": self.unit_system.value,
-            "total_pore_volume": float(pv.sum()),
+            "total_pore_volume": float(self.pore_volumes.sum()),
             "has_transmissibility_multipliers": (self.grid.has_transmissibility_multipliers),
         }
 

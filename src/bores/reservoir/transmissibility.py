@@ -176,7 +176,7 @@ def compute_connection_transmissibilities(
     interior_face_indices = grid.interior_face_indices
     boundary_face_indices = grid.boundary_face_indices
 
-    interior_transmissibilities = _compute_interior_tpfa_transmissibilities(
+    interior_transmissibilities = compute_interior_tpfa_transmissibilities(
         interior_face_indices=interior_face_indices,
         face_cell_indices=grid.face_cell_indices,
         face_centroids=grid.face_centroids,
@@ -189,7 +189,7 @@ def compute_connection_transmissibilities(
         dtype=dtype,
     )
 
-    boundary_transmissibilities = _compute_boundary_half_transmissibilities(
+    boundary_transmissibilities = compute_boundary_half_transmissibilities(
         boundary_face_indices=boundary_face_indices,
         face_cell_indices=grid.face_cell_indices,
         face_centroids=grid.face_centroids,
@@ -203,7 +203,7 @@ def compute_connection_transmissibilities(
     )
 
     if grid.has_transmissibility_multipliers:
-        interior_transmissibilities, boundary_transmissibilities = _apply_directional_multipliers(
+        interior_transmissibilities, boundary_transmissibilities = apply_directional_multipliers(
             interior_transmissibilities=interior_transmissibilities,
             boundary_transmissibilities=boundary_transmissibilities,
             interior_face_indices=interior_face_indices,
@@ -223,7 +223,7 @@ def compute_connection_transmissibilities(
         assert grid.nnc_cell_indices is not None
         assert grid.nnc_connection_types is not None
 
-        nnc_transmissibilities = _resolve_nnc_transmissibilities(
+        nnc_transmissibilities = resolve_nnc_transmissibilities(
             nnc_cell_indices=grid.nnc_cell_indices.astype(np.int32, copy=False),  # type: ignore[arg-type]
             nnc_transmissibilities=(  # type: ignore[arg-type]
                 grid.nnc_transmissibilities
@@ -242,7 +242,7 @@ def compute_connection_transmissibilities(
             grid.fault_transmissibility_multipliers is not None
             and grid.nnc_fault_indices is not None
         ):
-            nnc_transmissibilities = _apply_nnc_fault_multipliers(
+            nnc_transmissibilities = apply_nnc_fault_multipliers(
                 nnc_transmissibilities=nnc_transmissibilities,
                 nnc_fault_indices=grid.nnc_fault_indices,
                 fault_transmissibility_multipliers=grid.fault_transmissibility_multipliers,
@@ -250,7 +250,7 @@ def compute_connection_transmissibilities(
 
     # Apply `MULTFLT` to face-based connections
     if grid.fault_face_indices is not None and grid.fault_transmissibility_multipliers is not None:
-        interior_transmissibilities, boundary_transmissibilities = _apply_fault_face_multipliers(
+        interior_transmissibilities, boundary_transmissibilities = apply_fault_face_multipliers(
             interior_transmissibilities=interior_transmissibilities,
             boundary_transmissibilities=boundary_transmissibilities,
             interior_face_indices=interior_face_indices,
@@ -268,7 +268,7 @@ def compute_connection_transmissibilities(
 
 
 @numba.njit(parallel=True, cache=True)
-def _compute_interior_tpfa_transmissibilities(
+def compute_interior_tpfa_transmissibilities(
     interior_face_indices: IntArray[OneDimension],
     face_cell_indices: IntArray[TwoDimensions],
     face_centroids: NumberArray[TwoDimensions],
@@ -346,7 +346,7 @@ def _compute_interior_tpfa_transmissibilities(
 
 
 @numba.njit(parallel=True, cache=True)
-def _compute_boundary_half_transmissibilities(
+def compute_boundary_half_transmissibilities(
     boundary_face_indices: IntArray[OneDimension],
     face_cell_indices: IntArray[TwoDimensions],
     face_centroids: NumberArray[TwoDimensions],
@@ -404,7 +404,7 @@ def _compute_boundary_half_transmissibilities(
 
 
 @numba.njit(parallel=True, cache=True)
-def _resolve_nnc_transmissibilities(
+def resolve_nnc_transmissibilities(
     nnc_cell_indices: IntArray[TwoDimensions],
     nnc_transmissibilities: NumberArray[OneDimension],
     cell_centroids: NumberArray[TwoDimensions],
@@ -488,7 +488,7 @@ def _resolve_nnc_transmissibilities(
 
 
 @numba.njit(cache=True)
-def _apply_directional_multipliers(
+def apply_directional_multipliers(
     interior_transmissibilities: NumberArray[OneDimension],
     boundary_transmissibilities: NumberArray[OneDimension],
     interior_face_indices: IntArray[OneDimension],
@@ -581,7 +581,7 @@ def _apply_directional_multipliers(
 
 
 @numba.njit(cache=True)
-def _apply_fault_face_multipliers(
+def apply_fault_face_multipliers(
     interior_transmissibilities: NumberArray[OneDimension],
     boundary_transmissibilities: NumberArray[OneDimension],
     interior_face_indices: IntArray[OneDimension],
@@ -626,7 +626,7 @@ def _apply_fault_face_multipliers(
     return interior_transmissibilities, boundary_transmissibilities
 
 
-def _apply_nnc_fault_multipliers(
+def apply_nnc_fault_multipliers(
     nnc_transmissibilities: NumberArray[OneDimension],
     nnc_fault_indices: typing.Mapping[str, IntArray[OneDimension]],
     fault_transmissibility_multipliers: typing.Mapping[str, Number],
