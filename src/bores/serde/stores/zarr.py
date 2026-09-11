@@ -19,11 +19,6 @@ from zarr.storage import StoreLike  # type: ignore[import-untyped]
 
 from bores.errors import StorageError
 from bores.serde.base import SerializableT
-from bores.serde.stores._utils import (
-    denormalize_from_storage,
-    normalize_loaded_value,
-    sequence_to_ndarray,
-)
 from bores.serde.stores.base import (
     DataStore,
     EntryMeta,
@@ -31,6 +26,11 @@ from bores.serde.stores.base import (
     _get_index_from_group_name,
     reraise_storage_error,
     validate_path,
+)
+from bores.serde.stores.utils import (
+    denormalize_from_storage,
+    normalize_loaded_value,
+    sequence_to_ndarray,
 )
 
 __all__ = ["ZarrStore"]

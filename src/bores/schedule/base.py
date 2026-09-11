@@ -147,8 +147,8 @@ class Rule(
     def __init__(
         self,
         *,
-        event: "Event[ModelT]",
-        action: "Action[ModelT]",
+        event: Event[ModelT],
+        action: Action[ModelT],
         name: str | None = None,
     ) -> None:
         """

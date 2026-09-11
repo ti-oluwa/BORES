@@ -11,8 +11,11 @@ from bores.deck.core import DeckParseError
 from bores.deck.file import DeckFile
 from bores.errors import NotSupportedError, ValidationError
 from bores.grids.base import Grid
-from bores.types import FluidPhase, Orientation, UnitSystem
+from bores.schedule.base import Rule, Schedule
+from bores.schedule.events import TimeEvent
+from bores.types import FluidPhase, UnitSystem
 from bores.wells.base import CompletionStatus, Perforation, Well, Wells, WellStatus, WellType
+from bores.wells.compile import LimitKind
 from bores.wells.controls import (
     BHPLimit,
     EconomicLimit,
@@ -29,22 +32,38 @@ from bores.wells.controls import (
 from bores.wells.groups import (
     GroupControl,
     GroupControls,
-    GroupInjectorControlMode,
-    GroupProducerControlMode,
     WellGroup,
     WellGroups,
 )
+from bores.wells.mappings import (
+    DIRECTION_MAP,
+    ECONOMIC_MIN_RATE_QUANTITY_FIELDS,
+    ECONOMIC_QUANTITY_FIELDS,
+    GROUP_INJECTOR_CONTROL_MODE_MAP,
+    GROUP_PRODUCER_CONTROL_MODE_MAP,
+    INJECTOR_CONTROL_MODE_MAP,
+    PRODUCER_CONTROL_MODE_MAP,
+    WELOPEN_STATUS_MAP,
+    WELTARG_TARGET_FIELD,
+)
+from bores.wells.schedule import (
+    ActivateCompletion,
+    ActivateWell,
+    MultiplyConnectionFactor,
+    OpenWell,
+    SetLimit,
+    SetWellControl,
+    SetWellTarget,
+)
+
+# NOTE: Future Self, All imports from `wells.deck` in other modules
+# (mostly in the `wells.*`) should be inline. Top-level imports will cause
+# circular import issues. Also, avoid doing a top-level import of `blackoil.*`
+# in the `wells` module
+if typing.TYPE_CHECKING:
+    from bores.blackoil.compile import CompiledBlackOilModel
 
 __all__ = [
-    "DIRECTION_MAP",
-    "ECONOMIC_MIN_RATE_QUANTITY_FIELDS",
-    "ECONOMIC_QUANTITY_FIELDS",
-    "GROUP_INJECTOR_CONTROL_MODE_MAP",
-    "GROUP_PRODUCER_CONTROL_MODE_MAP",
-    "INJECTOR_CONTROL_MODE_MAP",
-    "PRODUCER_CONTROL_MODE_MAP",
-    "WELOPEN_STATUS_MAP",
-    "WELTARG_TARGET_FIELD",
     "apply_economic_limits",
     "apply_guide_rates",
     "from_deck_gas_rate",
@@ -57,70 +76,13 @@ __all__ = [
     "load_groups_from_records",
     "load_injector_control_from_record",
     "load_producer_control_from_record",
+    "load_schedule",
     "load_well_controls",
     "load_well_from_records",
     "load_wells",
     "load_wells_from_records",
     "select_current_records",
 ]
-
-DIRECTION_MAP = {"X": Orientation.X, "Y": Orientation.Y, "Z": Orientation.Z}
-PRODUCER_CONTROL_MODE_MAP = {
-    "ORAT": ProducerControlMode.OIL_RATE,
-    "WRAT": ProducerControlMode.WATER_RATE,
-    "GRAT": ProducerControlMode.GAS_RATE,
-    "LRAT": ProducerControlMode.LIQUID_RATE,
-    "RESV": ProducerControlMode.RESERVOIR_VOLUME_RATE,
-    "BHP": ProducerControlMode.BHP,
-    "THP": ProducerControlMode.THP,
-    "GRUP": ProducerControlMode.GROUP,
-}
-"""
-Maps `WCONPROD`/`WELTARG` item 2's deck-literal control mode string to the
-internal `ProducerControlMode`. The deck keeps Eclipse's own abbreviated
-vocabulary (`ORAT`, `WRAT`, and so on); the internal enum spells things
-out. This is the one place that translation happens.
-"""
-INJECTOR_CONTROL_MODE_MAP = {
-    "RATE": InjectorControlMode.RATE,
-    "RESV": InjectorControlMode.RESERVOIR_VOLUME_RATE,
-    "BHP": InjectorControlMode.BHP,
-    "THP": InjectorControlMode.THP,
-    "GRUP": InjectorControlMode.GROUP,
-}
-"""Injector analogue of `PRODUCER_CONTROL_MODE_MAP`, for `WCONINJE`/`WELTARG`."""
-GROUP_PRODUCER_CONTROL_MODE_MAP = {
-    "ORAT": GroupProducerControlMode.OIL_RATE,
-    "WRAT": GroupProducerControlMode.WATER_RATE,
-    "GRAT": GroupProducerControlMode.GAS_RATE,
-    "LRAT": GroupProducerControlMode.LIQUID_RATE,
-    "RESV": GroupProducerControlMode.RESERVOIR_VOLUME_RATE,
-    "FLD": GroupProducerControlMode.FIELD,
-    "NONE": GroupProducerControlMode.NONE,
-}
-"""Group-control analogue of `PRODUCER_CONTROL_MODE_MAP`, for `GCONPROD`."""
-GROUP_INJECTOR_CONTROL_MODE_MAP = {
-    "RATE": GroupInjectorControlMode.RATE,
-    "RESV": GroupInjectorControlMode.RESERVOIR_VOLUME_RATE,
-    "VREP": GroupInjectorControlMode.VOIDAGE_REPLACEMENT,
-    "REIN": GroupInjectorControlMode.REINJECTION,
-    "FLD": GroupInjectorControlMode.FIELD,
-}
-"""Group-control analogue of `INJECTOR_CONTROL_MODE_MAP`, for `GCONINJE`."""
-WELOPEN_STATUS_MAP = {
-    "OPEN": CompletionStatus.OPEN,
-    "AUTO": CompletionStatus.OPEN,
-    "SHUT": CompletionStatus.SHUT,
-    "STOP": CompletionStatus.SHUT,
-}
-"""
-`CompletionStatus` only distinguishes open from shut, so `WELOPEN`'s
-`STOP` (stop flow, but not the same as a deck author marking a completion
-as never meant to flow) is treated the same as `SHUT` here, and `AUTO`
-(resume normal operation) the same as `OPEN`. A real distinction between
-"shut" and "temporarily stopped" would need `CompletionStatus` itself
-extended, not something patched in at the deck-loading layer.
-"""
 
 
 def load_well_from_records(
@@ -496,14 +458,6 @@ def load_injector_control_from_record(
     )
 
 
-ECONOMIC_QUANTITY_FIELDS = {
-    EconomicQuantity.WATER_CUT: "max_water_cut",
-    EconomicQuantity.GOR: "max_gor",
-    EconomicQuantity.WATER_GAS_RATIO: "max_wgr",
-}
-ECONOMIC_MIN_RATE_QUANTITY_FIELDS = {EconomicQuantity.OIL_RATE: "min_oil_rate"}
-
-
 def load_economic_limits_from_record(
     record: typing.Mapping[str, typing.Any], unit_system: UnitSystem
 ) -> tuple[EconomicLimit, ...]:
@@ -595,23 +549,6 @@ def apply_economic_limits(
             if not (isinstance(limit, EconomicLimit) and limit.quantity in new_quantities)
         )
         controls.set(well_name, attrs.evolve(current_control, limits=kept_limits + new_limits))
-
-
-WELTARG_TARGET_FIELD = {
-    "ORAT": "target_rate",
-    "WRAT": "target_rate",
-    "GRAT": "target_rate",
-    "LRAT": "target_rate",
-    "RESV": "target_rate",
-    "RATE": "target_rate",
-    "BHP": "target_bhp",
-    "THP": "target_thp",
-    "GRUP": None,
-}
-"""
-Which `ProducerControl`/`InjectorControl` field a `WELTARG` record's
-`control_mode` writes to. `GRUP` takes no value, just switches the mode.
-"""
 
 
 def apply_weltarg(control: WellControl, record: typing.Mapping[str, typing.Any]) -> WellControl:
@@ -975,3 +912,243 @@ def load_group_controls(deck_file: DeckFile, current_time: float = 0.0) -> Group
         unit_system=deck_file.unit_system,
         current_time=current_time,
     )
+
+
+def load_schedule(
+    deck_file: DeckFile, *, compiled_at: float = 0.0
+) -> Schedule["CompiledBlackOilModel"]:
+    """
+    Builds a `Schedule[CompiledBlackOilModel]` from every well-editing
+    keyword in a deck's schedule section, for events strictly after
+    `compiled_at`.
+
+    Covers every well ever mentioned anywhere in the deck, not just ones
+    active at `compiled_at`. `load_wells`/`compile_well_system` already
+    compiles the whole roster up front, tagging a well or completion not
+    yet due as `PENDING` rather than leaving it out (see
+    `compile_well_system`'s own docstring). A `WELSPECS` after
+    `compiled_at` becomes an `ActivateWell` action, and a `COMPDAT` after
+    `compiled_at` becomes an `ActivateCompletion` action. Both are just
+    status flips against rows that already exist, and not a new-row
+    allocation. Nothing here reloads or recompiles anything.
+
+    Every `WECON` record with `schedule_time <= compiled_at` is assumed
+    already baked into the model's economic limits at compile time (see
+    `apply_economic_limits`), and is skipped. A `WECON` reissue after
+    `compiled_at` becomes one `SetLimit` action per quantity the record
+    defines (a single record can set several at once, a max water cut
+    and a max GOR together, say).
+
+    A `WCONPROD`/`WCONINJE` reissue sets the well's control mode and
+    targets, and, when its own `bhp` item is given and its mode isn't
+    `BHP`, also patches the well's existing implicit `BHPLimit` via a
+    second `SetLimit` action (mirrors `load_producer_control_from_record`/
+    `load_injector_control_from_record`'s own construction of that limit
+    at compile time).
+
+    Every `SetLimit` action here can only patch a limit row the well
+    already had for that kind/quantity at compile time. The `CompiledLimits`'
+    CSR table can't grow a new row mid-schedule. A `RateLimit`/`THPLimit`
+    change isn't covered at all yet; only `BHPLimit` (via the implicit
+    `WCONPROD`/`WCONINJE` case) and `EconomicLimit` (via `WECON`) are.
+
+    :param deck_file: The deck to read schedule keywords from.
+    :param compiled_at: The point on the schedule clock the model this
+        schedule will run against was compiled at, in the deck's time
+        unit. Only events strictly after this become actions.
+    :returns: A `Schedule[CompiledBlackOilModel]`, one rule per
+        qualifying record, sorted by `schedule_time`.
+    """
+    unit_system = deck_file.unit_system
+    rules: list[Rule[CompiledBlackOilModel]] = []
+    empty = []
+
+    def is_due(record: typing.Mapping[str, typing.Any]) -> bool:
+        return record.get("schedule_time", 0.0) > compiled_at
+
+    for record in deck_file.get("WELSPECS") or empty:
+        if not is_due(record):
+            continue
+        schedule_time = record["schedule_time"]
+        action = ActivateWell(well_name=record["well"])
+        rules.append(
+            Rule(
+                event=TimeEvent(at=schedule_time),
+                action=action,
+                name=f"welspecs:{record['well']}@{schedule_time}",
+            )
+        )
+
+    for record in deck_file.get("WELOPEN") or empty:
+        if not is_due(record):
+            continue
+        schedule_time = record["schedule_time"]
+        action = OpenWell(
+            well_name=record["well"],
+            status=WELOPEN_STATUS_MAP[record["status"]],
+            i=record.get("i", 0),
+            j=record.get("j", 0),
+            k1=record.get("k1", 0),
+            k2=record.get("k2", 0),
+        )
+        rules.append(
+            Rule(
+                event=TimeEvent(at=schedule_time),
+                action=action,
+                name=f"welopen:{record['well']}@{schedule_time}",
+            )
+        )
+
+    for record in deck_file.get("WPIMULT") or empty:
+        if not is_due(record):
+            continue
+        schedule_time = record["schedule_time"]
+        action = MultiplyConnectionFactor(
+            well_name=record["well"],
+            multiplier=record["multiplier"],
+            i=record.get("i", 0),
+            j=record.get("j", 0),
+            k1=record.get("k1", 0),
+            k2=record.get("k2", 0),
+        )
+        rules.append(
+            Rule(
+                event=TimeEvent(at=schedule_time),
+                action=action,
+                name=f"wpimult:{record['well']}@{schedule_time}",
+            )
+        )
+
+    for record in deck_file.get("WELTARG") or empty:
+        if not is_due(record):
+            continue
+        schedule_time = record["schedule_time"]
+        action = SetWellTarget(
+            well_name=record["well"],
+            control_mode=record["control_mode"],
+            value=record.get("value"),
+        )
+        rules.append(
+            Rule(
+                event=TimeEvent(at=schedule_time),
+                action=action,
+                name=f"weltarg:{record['well']}@{schedule_time}",
+            )
+        )
+
+    for record in deck_file.get("WCONPROD") or empty:
+        if not is_due(record):
+            continue
+        schedule_time = record["schedule_time"]
+        control = load_producer_control_from_record(record, unit_system=unit_system)
+        action = SetWellControl(
+            well_name=record["well"],
+            mode=control.mode,
+            target_rate=control.target_rate,
+            target_bhp=control.target_bhp,
+            target_thp=control.target_thp,
+        )
+        rules.append(
+            Rule(
+                event=TimeEvent(at=schedule_time),
+                action=action,
+                name=f"wconprod:{record['well']}@{schedule_time}",
+            )
+        )
+        for limit in control.limits:
+            if not isinstance(limit, BHPLimit):
+                continue
+            limit_action = SetLimit(
+                well_name=record["well"],
+                kind=LimitKind.BHP,
+                min_value=limit.min_value,
+                max_value=limit.max_value,
+            )
+            rules.append(
+                Rule(
+                    event=TimeEvent(at=schedule_time),
+                    action=limit_action,
+                    name=f"wconprod-bhplimit:{record['well']}@{schedule_time}",
+                )
+            )
+
+    for record in deck_file.get("WCONINJE") or empty:
+        if not is_due(record):
+            continue
+        schedule_time = record["schedule_time"]
+        control = load_injector_control_from_record(record, unit_system=unit_system)
+        action = SetWellControl(
+            well_name=record["well"],
+            mode=control.mode,
+            target_rate=control.target_rate,
+            target_bhp=control.target_bhp,
+            target_thp=control.target_thp,
+            injected_phase=control.injected_phase,
+        )
+        rules.append(
+            Rule(
+                event=TimeEvent(at=schedule_time),
+                action=action,
+                name=f"wconinje:{record['well']}@{schedule_time}",
+            )
+        )
+        for limit in control.limits:
+            if not isinstance(limit, BHPLimit):
+                continue
+            limit_action = SetLimit(
+                well_name=record["well"],
+                kind=LimitKind.BHP,
+                min_value=limit.min_value,
+                max_value=limit.max_value,
+            )
+            rules.append(
+                Rule(
+                    event=TimeEvent(at=schedule_time),
+                    action=limit_action,
+                    name=f"wconinje-bhplimit:{record['well']}@{schedule_time}",
+                )
+            )
+
+    for record in deck_file.get("WECON") or empty:
+        if not is_due(record):
+            continue
+        schedule_time = record["schedule_time"]
+        for limit in load_economic_limits_from_record(record, unit_system=unit_system):
+            action = SetLimit(
+                well_name=record["well"],
+                kind=LimitKind.ECONOMIC,
+                quantity=limit.quantity,
+                min_value=limit.min_value,
+                max_value=limit.max_value,
+                workover_action=limit.workover_action,
+                end_run=limit.end_run,
+            )
+            rules.append(
+                Rule(
+                    event=TimeEvent(at=schedule_time),
+                    action=action,
+                    name=f"wecon:{record['well']}:{limit.quantity}@{schedule_time}",
+                )
+            )
+
+    for record in deck_file.get("COMPDAT") or empty:
+        if not is_due(record):
+            continue
+        schedule_time = record["schedule_time"]
+        action = ActivateCompletion(
+            well_name=record["well"],
+            i=record["i"],
+            j=record["j"],
+            k1=record["k1"],
+            k2=record["k2"],
+        )
+        rules.append(
+            Rule(
+                event=TimeEvent(at=schedule_time),
+                action=action,
+                name=f"compdat:{record['well']}@{schedule_time}",
+            )
+        )
+
+    rules.sort(key=lambda rule: rule.event.at)  # type: ignore[attr-defined]
+    return Schedule(rules=tuple(rules))

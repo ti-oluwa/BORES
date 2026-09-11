@@ -52,7 +52,7 @@ def compile_model(
     """
     if model.boundary_conditions is not None:
         raise BoundaryConditionCompilationError(
-            "CompiledBoundaryConditions does not exist yet. Compile a model with "
+            "`CompiledBoundaryConditions` does not exist yet. Compile a model with "
             "boundary_conditions=None."
         )
 

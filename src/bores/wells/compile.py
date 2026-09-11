@@ -12,11 +12,14 @@ from bores.errors import ValidationError
 from bores.grids.base import Grid
 from bores.precision import get_dtype
 from bores.types import (
+    Boolean,
     FluidPhase,
     IntArray,
     Integer,
+    IntOrArray,
     Number,
     NumberArray,
+    NumberOrArray,
     OneDimension,
     Orientation,
     UnitSystem,
@@ -282,11 +285,11 @@ stored tag back into the rich enum a caller actually wants to see.
 """
 
 
-def none_if_nan(value: float) -> float | None:
+def none_if_nan(value: Number) -> Number | None:
     """
     Returns `value`, or `None` if it's `NaN`.
 
-    :param value: A possibly-`NaN` float read from a compiled array.
+    :param value: A possibly-`NaN` number read from a compiled array.
     :returns: `value`, or `None` if it's `NaN`.
     """
     return None if math.isnan(value) else value
@@ -357,109 +360,168 @@ class CompiledPerforations(typing.NamedTuple):
         """
         return range(int(self.well_offsets[well_row]), int(self.well_offsets[well_row + 1]))
 
-    def get_cell_index(self, *, row: Integer) -> int:
+    def get_cell_index(self, *, row: IntOrArray[OneDimension]) -> IntOrArray[OneDimension]:
         """
-        :param row: The connection row to read.
-        :returns: The grid cell this connection resolves to.
+        :param row: One connection row, or an array of them.
+        :returns: The grid cell each connection resolves to. Matches `row`'s own shape.
         """
-        return int(self.cell_indices[row])
+        return self.cell_indices[row]
 
-    def get_well_index(self, *, row: Integer) -> float:
+    def get_well_index(self, *, row: IntOrArray[OneDimension]) -> NumberOrArray[OneDimension]:
         """
-        :param row: The connection row to read.
-        :returns: This connection's own connection factor (well index).
+        :param row: One connection row, or an array of them.
+        :returns: Each connection's own connection factor (well index). Matches `row`'s own shape.
         """
-        return float(self.well_indices[row])
+        return self.well_indices[row]
 
-    def set_well_index(self, *, row: Integer, value: Number) -> None:
+    def set_well_index(
+        self, *, row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
+    ) -> None:
         """
-        Overwrites a connection's connection factor in place.
+        Overwrites one or more connections' connection factor in place.
 
-        :param row: The connection row to write.
-        :param value: The new connection factor.
+        :param row: One connection row, or an array of them.
+        :param value: The new connection factor. A single value applies
+            to every row in `row`; an array sets each row to its own value.
         """
         self.well_indices[row] = value
 
-    def multiply_well_index(self, *, row: Integer, factor: Number) -> None:
+    def multiply_well_index(
+        self, *, row: IntOrArray[OneDimension], factor: NumberOrArray[OneDimension]
+    ) -> None:
         """
-        Multiplies a connection's existing connection factor in place (a `WPIMULT` reissue).
+        Multiplies one or more connections' existing connection factor in
+        place (a `WPIMULT` reissue).
 
-        :param row: The connection row to write.
-        :param factor: The multiplier to apply.
+        :param row: One connection row, or an array of them.
+        :param factor: The multiplier to apply. A single value applies to
+            every row in `row`; an array multiplies each row by its own factor.
         """
         self.well_indices[row] *= factor
 
-    def get_completion_status(self, *, row: Integer) -> CompletionStatus:
+    def get_completion_status(
+        self, *, row: IntOrArray[OneDimension]
+    ) -> CompletionStatus | list[CompletionStatus]:
         """
-        :param row: The connection row to read.
-        :returns: This connection's own open/shut status.
+        :param row: One connection row, or an array of them.
+        :returns: Each connection's own open/shut status. A single
+            `CompletionStatus` for a single `row`, a list for an array.
         """
-        return CompletionStatus.OPEN if self.completion_statuses[row] else CompletionStatus.SHUT
+        if np.isscalar(row):
+            return (
+                CompletionStatus.OPEN if self.completion_statuses[row] else CompletionStatus.SHUT
+            )
+        return [
+            CompletionStatus.OPEN if tag else CompletionStatus.SHUT
+            for tag in self.completion_statuses[row]
+        ]
 
-    def set_completion_status(self, *, row: Integer, status: CompletionStatus) -> None:
+    def set_completion_status(
+        self,
+        *,
+        row: IntOrArray[OneDimension],
+        status: CompletionStatus | typing.Sequence[CompletionStatus],
+    ) -> None:
         """
-        Sets a connection's open/shut status in place (a `WELOPEN` event).
+        Sets one or more connections' open/shut status in place (a `WELOPEN` event).
 
-        :param row: The connection row to write.
-        :param status: The new open/shut status.
+        :param row: One connection row, or an array of them.
+        :param status: The new open/shut status. A single `CompletionStatus`
+            applies to every row in `row`; a sequence sets each row to its own status.
         """
-        self.completion_statuses[row] = 1 if status == CompletionStatus.OPEN else 0
+        if isinstance(status, CompletionStatus):
+            self.completion_statuses[row] = 1 if status == CompletionStatus.OPEN else 0
+        else:
+            self.completion_statuses[row] = [
+                1 if one_status == CompletionStatus.OPEN else 0 for one_status in status
+            ]
 
-    def get_schedule_status(self, *, row: Integer) -> WellStatus:
+    def get_schedule_status(
+        self, *, row: IntOrArray[OneDimension]
+    ) -> WellStatus | list[WellStatus]:
         """
-        :param row: The connection row to read.
-        :returns: This connection's own active/pending status.
+        :param row: One connection row, or an array of them.
+        :returns: Each connection's own active/pending status. A single
+            `WellStatus` for a single `row`, a list for an array.
         """
-        return WellStatus.ACTIVE if self.schedule_statuses[row] else WellStatus.PENDING
+        if np.isscalar(row):
+            return WellStatus.ACTIVE if self.schedule_statuses[row] else WellStatus.PENDING
+        return [
+            WellStatus.ACTIVE if tag else WellStatus.PENDING for tag in self.schedule_statuses[row]
+        ]
 
-    def set_schedule_status(self, *, row: Integer, status: WellStatus) -> None:
+    def set_schedule_status(
+        self,
+        *,
+        row: IntOrArray[OneDimension],
+        status: WellStatus | typing.Sequence[WellStatus],
+    ) -> None:
         """
-        Sets a connection's active/pending status in place (a workover completion coming due).
+        Sets one or more connections' active/pending status in place (a
+        workover completion coming due).
 
-        :param row: The connection row to write.
-        :param status: The new active/pending status.
+        :param row: One connection row, or an array of them.
+        :param status: The new active/pending status. A single `WellStatus`
+            applies to every row in `row`; a sequence sets each row to its own status.
         """
-        self.schedule_statuses[row] = 1 if status == WellStatus.ACTIVE else 0
+        if isinstance(status, WellStatus):
+            self.schedule_statuses[row] = 1 if status == WellStatus.ACTIVE else 0
+        else:
+            self.schedule_statuses[row] = [
+                1 if one_status == WellStatus.ACTIVE else 0 for one_status in status
+            ]
 
-    def get_skin(self, *, row: Integer) -> float:
+    def get_skin(self, *, row: IntOrArray[OneDimension]) -> NumberOrArray[OneDimension]:
         """
-        :param row: The connection row to read.
-        :returns: This connection's own skin factor.
+        :param row: One connection row, or an array of them.
+        :returns: Each connection's own skin factor. Matches `row`'s own shape.
         """
-        return float(self.skins[row])
+        return self.skins[row]
 
-    def set_skin(self, *, row: Integer, value: Number) -> None:
+    def set_skin(
+        self, *, row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
+    ) -> None:
         """
-        Overwrites a connection's skin factor in place.
+        Overwrites one or more connections' skin factor in place.
 
-        :param row: The connection row to write.
-        :param value: The new skin factor.
+        :param row: One connection row, or an array of them.
+        :param value: The new skin factor. A single value applies to
+            every row in `row`; an array sets each row to its own value.
         """
         self.skins[row] = value
 
-    def get_wellbore_radius(self, *, row: Integer) -> float:
+    def get_wellbore_radius(self, *, row: IntOrArray[OneDimension]) -> NumberOrArray[OneDimension]:
         """
-        :param row: The connection row to read.
-        :returns: This connection's own wellbore radius.
+        :param row: One connection row, or an array of them.
+        :returns: Each connection's own wellbore radius. Matches `row`'s own shape.
         """
-        return float(self.wellbore_radii[row])
+        return self.wellbore_radii[row]
 
-    def set_wellbore_radius(self, *, row: Integer, value: Number) -> None:
+    def set_wellbore_radius(
+        self, *, row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
+    ) -> None:
         """
-        Overwrites a connection's wellbore radius in place.
+        Overwrites one or more connections' wellbore radius in place.
 
-        :param row: The connection row to write.
-        :param value: The new wellbore radius.
+        :param row: One connection row, or an array of them.
+        :param value: The new wellbore radius. A single value applies to
+            every row in `row`; an array sets each row to its own value.
         """
         self.wellbore_radii[row] = value
 
-    def get_saturation_region(self, *, row: Integer) -> int | None:
+    def get_saturation_region(
+        self, *, row: IntOrArray[OneDimension]
+    ) -> int | list[int | None] | None:
         """
-        :param row: The connection row to read.
-        :returns: This connection's own SATNUM override, or `None` to use the cell's own region.
+        :param row: One connection row, or an array of them.
+        :returns: Each connection's own SATNUM override, or `None` where
+            it uses the cell's own region. A single value for a single
+            `row`, a list for an array.
         """
-        region = int(self.saturation_regions[row])
-        return None if region == UNSET_INT else region
+        if np.isscalar(row):
+            region = self.saturation_regions[row]
+            return None if region == UNSET_INT else region
+        return [None if region == UNSET_INT else region for region in self.saturation_regions[row]]
 
 
 class CompiledLimits(typing.NamedTuple):
@@ -502,91 +564,189 @@ class CompiledLimits(typing.NamedTuple):
         :param well_row: The well's row in `CompiledWellSystem.names`.
         :returns: `range(start, end)` over this well's limit rows.
         """
-        return range(int(self.well_offsets[well_row]), int(self.well_offsets[well_row + 1]))
+        return range(self.well_offsets[well_row], self.well_offsets[well_row + 1])
 
-    def find_economic_limit_row(self, *, well_row: Integer) -> int | None:
+    def find_limit_row(
+        self,
+        *,
+        well_row: Integer,
+        kind: LimitKind,
+        quantity: RateQuantity | EconomicQuantity | None = None,
+    ) -> Integer | None:
         """
-        Finds a well's own `ECONOMIC`-kind limit row, if it has one.
+        Finds a well's limit row matching its kind and, when applicable,
+        its quantity.
 
         :param well_row: The well's row.
-        :returns: The row, or `None` if this well has no economic limit.
+        :param kind: The kind of limit to find.
+        :param quantity: The quantity to find the limit for.
+        :returns: The row, or `None` if this well has no economic limit for `quantity`.
         """
+        quantity_tag = None
+        if kind == LimitKind.RATE:
+            if not isinstance(quantity, RateQuantity):
+                return None
+            quantity_tag = RATE_QUANTITY_TAG[quantity]
+        elif kind == LimitKind.ECONOMIC:
+            if not isinstance(quantity, EconomicQuantity):
+                return None
+            quantity_tag = ECONOMIC_QUANTITY_TAG[quantity]
+        elif quantity is not None:
+            return None
+
         for row in self.limit_rows(well_row=well_row):
-            if self.kinds[row] == LimitKind.ECONOMIC:
+            if self.kinds[row] != kind:
+                continue
+            if quantity_tag is None or self.quantities[row] == quantity_tag:
                 return row
         return None
 
-    def get_kind(self, *, row: Integer) -> LimitKind:
+    def get_quantity(
+        self, *, row: IntOrArray[OneDimension]
+    ) -> RateQuantity | EconomicQuantity | list[RateQuantity | EconomicQuantity | None] | None:
+        """
+        :param row: One limit row, or an array of them.
+        :returns: Each row's own quantity (a `RateQuantity` on a `RATE`
+            row, an `EconomicQuantity` on an `ECONOMIC` row, `None` on a
+            `BHP`/`THP` row). A single value for a single `row`, a list for an array.
+        """
+        if np.isscalar(row):
+            return self._quantity_at(row=row)
+        return [self._quantity_at(row=one_row) for one_row in np.atleast_1d(row)]
+
+    def _quantity_at(self, *, row: Integer) -> RateQuantity | EconomicQuantity | None:
         """
         :param row: The limit row to read.
-        :returns: This row's own kind.
+        :returns: This row's own quantity, per `get_quantity`'s own rules.
         """
-        return LimitKind(int(self.kinds[row]))
+        kind = LimitKind(self.kinds[row])
+        tag = self.quantities[row]
+        if tag == UNSET_INT:
+            return None
+        if kind == LimitKind.RATE:
+            return RATE_QUANTITY_FROM_TAG[tag]
+        if kind == LimitKind.ECONOMIC:
+            return ECONOMIC_QUANTITY_FROM_TAG[tag]
+        return None
 
-    def get_min_value(self, *, row: Integer) -> float | None:
+    def get_kind(self, *, row: IntOrArray[OneDimension]) -> LimitKind | list[LimitKind]:
         """
-        :param row: The limit row to read.
-        :returns: This row's own floor, or `None` if it has none.
+        :param row: One limit row, or an array of them.
+        :returns: Each row's own kind. A single `LimitKind` for a single
+            `row`, a list for an array.
         """
-        return none_if_nan(float(self.min_values[row]))
+        if np.isscalar(row):
+            return LimitKind(self.kinds[row])
+        return [LimitKind(kind) for kind in self.kinds[row]]
 
-    def set_min_value(self, *, row: Integer, value: Number) -> None:
+    def get_min_value(
+        self, *, row: IntOrArray[OneDimension]
+    ) -> Number | NumberArray[OneDimension] | None:
         """
-        Overwrites a limit row's floor in place.
+        :param row: One limit row, or an array of them.
+        :returns: Each row's own floor. For a single `row`, a Number or
+            `None` if unset. For an array, the raw array (`NaN` means unset).
+        """
+        if np.isscalar(row):
+            return none_if_nan(self.min_values[row])
+        return self.min_values[row]
 
-        :param row: The limit row to write.
-        :param value: The new floor.
+    def set_min_value(
+        self, *, row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
+    ) -> None:
+        """
+        Overwrites one or more limit rows' floor in place.
+
+        :param row: One limit row, or an array of them.
+        :param value: The new floor. A single value applies to every row
+            in `row`; an array sets each row to its own value.
         """
         self.min_values[row] = value
 
-    def get_max_value(self, *, row: Integer) -> float | None:
+    def get_max_value(
+        self, *, row: IntOrArray[OneDimension]
+    ) -> float | NumberArray[OneDimension] | None:
         """
-        :param row: The limit row to read.
-        :returns: This row's own ceiling, or `None` if it has none.
+        :param row: One limit row, or an array of them.
+        :returns: Each row's own ceiling. For a single `row`, a float or
+            `None` if unset. For an array, the raw array (`NaN` means unset).
         """
-        return none_if_nan(float(self.max_values[row]))
+        if np.isscalar(row):
+            return none_if_nan(self.max_values[row])
+        return self.max_values[row]
 
-    def set_max_value(self, *, row: Integer, value: Number) -> None:
+    def set_max_value(
+        self, *, row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
+    ) -> None:
         """
-        Overwrites a limit row's ceiling in place.
+        Overwrites one or more limit rows' ceiling in place.
 
-        :param row: The limit row to write.
-        :param value: The new ceiling.
+        :param row: One limit row, or an array of them.
+        :param value: The new ceiling. A single value applies to every
+            row in `row`; an array sets each row to its own value.
         """
         self.max_values[row] = value
 
-    def get_workover_action(self, *, row: Integer) -> WorkoverAction | None:
+    def get_workover_action(
+        self, *, row: IntOrArray[OneDimension]
+    ) -> WorkoverAction | list[WorkoverAction | None] | None:
         """
-        :param row: The limit row to read.
-        :returns: This `ECONOMIC` row's own workover action, or `None` on a non-economic row.
+        :param row: One limit row, or an array of them.
+        :returns: Each `ECONOMIC` row's own workover action, or `None`
+            on a non-economic row. A single value for a single `row`, a
+            list for an array.
         """
-        tag = self.workover_actions[row]
-        return None if tag == UNSET_INT else WORKOVER_ACTION_FROM_TAG[tag]
+        if np.isscalar(row):
+            tag = self.workover_actions[row]
+            return None if tag == UNSET_INT else WORKOVER_ACTION_FROM_TAG[tag]
+        return [
+            None if tag == UNSET_INT else WORKOVER_ACTION_FROM_TAG[tag]
+            for tag in self.workover_actions[row]
+        ]
 
-    def set_workover_action(self, *, row: Integer, action: WorkoverAction) -> None:
+    def set_workover_action(
+        self,
+        *,
+        row: IntOrArray[OneDimension],
+        action: WorkoverAction | typing.Sequence[WorkoverAction],
+    ) -> None:
         """
-        Overwrites an `ECONOMIC` row's workover action in place.
+        Overwrites one or more `ECONOMIC` rows' workover action in place.
 
-        :param row: The limit row to write.
-        :param action: The new workover action.
+        :param row: One limit row, or an array of them.
+        :param action: The new workover action. A single action applies
+            to every row in `row`; a sequence sets each row to its own action.
         """
-        self.workover_actions[row] = WORKOVER_ACTION_TAG[action]
+        if isinstance(action, WorkoverAction):
+            self.workover_actions[row] = WORKOVER_ACTION_TAG[action]
+        else:
+            self.workover_actions[row] = [WORKOVER_ACTION_TAG[one_action] for one_action in action]
 
-    def get_end_run(self, *, row: Integer) -> bool:
+    def get_end_run(self, *, row: IntOrArray[OneDimension]) -> Boolean | list[Boolean]:
         """
-        :param row: The limit row to read.
-        :returns: Whether breaching this row should stop the whole run.
+        :param row: One limit row, or an array of them.
+        :returns: Whether breaching each row should stop the whole run.
+            A single `bool` for a single `row`, a list for an array.
         """
-        return bool(self.end_run_flags[row])
+        if np.isscalar(row):
+            return bool(self.end_run_flags[row])
+        return [bool(flag) for flag in self.end_run_flags[row]]
 
-    def set_end_run(self, *, row: Integer, end_run: bool) -> None:
+    def set_end_run(
+        self, *, row: IntOrArray[OneDimension], end_run: Boolean | typing.Sequence[Boolean]
+    ) -> None:
         """
-        Overwrites an `ECONOMIC` row's end-run flag in place.
+        Overwrites one or more `ECONOMIC` rows' end-run flag in place.
 
-        :param row: The limit row to write.
-        :param end_run: Whether breaching this row should stop the whole run.
+        :param row: One limit row, or an array of them.
+        :param end_run: Whether breaching each row should stop the whole
+            run. A single `bool` applies to every row in `row`; a
+            sequence sets each row to its own flag.
         """
-        self.end_run_flags[row] = 1 if end_run else 0
+        if isinstance(end_run, bool):
+            self.end_run_flags[row] = 1 if end_run else 0
+        else:
+            self.end_run_flags[row] = [1 if one_end_run else 0 for one_end_run in end_run]
 
 
 class CompiledWellControls(typing.NamedTuple):
@@ -628,122 +788,208 @@ class CompiledWellControls(typing.NamedTuple):
 
     limits: CompiledLimits
 
-    def get_control_mode(self, *, well_row: Integer) -> ProducerControlMode | InjectorControlMode:
+    def get_control_mode(
+        self, *, well_row: IntOrArray[OneDimension]
+    ) -> (
+        ProducerControlMode | InjectorControlMode | list[ProducerControlMode | InjectorControlMode]
+    ):
         """
-        :param well_row: The well's row.
-        :returns: This well's own control mode.
+        :param well_row: One well's row, or an array of them.
+        :returns: Each well's own control mode. A single mode for a
+            single `well_row`, a list for an array.
         """
-        is_injector = self.well_kinds[well_row] == WellKind.INJECTOR
-        from_tag = INJECTOR_MODE_FROM_TAG if is_injector else PRODUCER_MODE_FROM_TAG
-        return from_tag[self.control_modes[well_row]]
+        if np.isscalar(well_row):
+            is_injector = self.well_kinds[well_row] == WellKind.INJECTOR
+            from_tag = INJECTOR_MODE_FROM_TAG if is_injector else PRODUCER_MODE_FROM_TAG
+            return from_tag[self.control_modes[well_row]]
+        return [
+            (INJECTOR_MODE_FROM_TAG if kind == WellKind.INJECTOR else PRODUCER_MODE_FROM_TAG)[mode]
+            for kind, mode in zip(
+                self.well_kinds[well_row], self.control_modes[well_row], strict=True
+            )
+        ]
 
     def set_control_mode(
-        self, *, well_row: Integer, mode: ProducerControlMode | InjectorControlMode
+        self,
+        *,
+        well_row: IntOrArray[OneDimension],
+        mode: (
+            ProducerControlMode
+            | InjectorControlMode
+            | typing.Sequence[ProducerControlMode | InjectorControlMode]
+        ),
     ) -> None:
         """
-        Sets a well's control mode in place. `mode` must match the well's own kind.
+        Sets one or more wells' control mode in place. Each `mode` must
+        match its own well's kind.
 
-        :param well_row: The well's row.
-        :param mode: The new control mode.
+        :param well_row: One well's row, or an array of them.
+        :param mode: The new control mode. A single mode applies to
+            every row in `well_row`; a sequence sets each row to its own mode.
         """
+        if isinstance(well_row, typing.Sequence) or (
+            isinstance(well_row, np.ndarray) and well_row.ndim > 0
+        ):
+            modes = mode if isinstance(mode, typing.Sequence) else [mode] * len(well_row)
+            for one_row, one_mode in zip(well_row, modes, strict=True):
+                self.set_control_mode(well_row=one_row, mode=one_mode)
+            return
         is_injector = self.well_kinds[well_row] == WellKind.INJECTOR
         tag_map = INJECTOR_MODE_TAG if is_injector else PRODUCER_MODE_TAG
         self.control_modes[well_row] = tag_map[mode]  # type: ignore
 
-    def get_injected_phase(self, *, well_row: Integer) -> FluidPhase | None:
+    def get_injected_phase(
+        self, *, well_row: IntOrArray[OneDimension]
+    ) -> FluidPhase | list[FluidPhase | None] | None:
         """
-        :param well_row: The well's row.
-        :returns: This injector's own injected phase, or `None` on a producer or unset injector.
+        :param well_row: One well's row, or an array of them.
+        :returns: Each injector's own injected phase, or `None` on a
+            producer or unset injector. A single value for a single
+            `well_row`, a list for an array.
         """
-        tag = self.injected_phases[well_row]
-        return None if tag == UNSET_INT else FLUID_PHASE_FROM_TAG[tag]
+        if np.isscalar(well_row):
+            tag = self.injected_phases[well_row]
+            return None if tag == UNSET_INT else FLUID_PHASE_FROM_TAG[tag]
+        return [
+            None if tag == UNSET_INT else FLUID_PHASE_FROM_TAG[tag]
+            for tag in self.injected_phases[well_row]
+        ]
 
-    def set_injected_phase(self, *, well_row: Integer, phase: FluidPhase) -> None:
+    def set_injected_phase(
+        self,
+        *,
+        well_row: IntOrArray[OneDimension],
+        phase: FluidPhase | typing.Sequence[FluidPhase],
+    ) -> None:
         """
-        Overwrites an injector's injected phase in place.
+        Overwrites one or more injectors' injected phase in place.
 
-        :param well_row: The well's row.
-        :param phase: The new injected phase.
+        :param well_row: One well's row, or an array of them.
+        :param phase: The new injected phase. A single phase applies to
+            every row in `well_row`; a sequence sets each row to its own phase.
         """
-        self.injected_phases[well_row] = FLUID_PHASE_TAG[phase]
+        if isinstance(phase, FluidPhase):
+            self.injected_phases[well_row] = FLUID_PHASE_TAG[phase]
+        else:
+            self.injected_phases[well_row] = [FLUID_PHASE_TAG[one_phase] for one_phase in phase]
 
-    def get_target_rate(self, *, well_row: Integer) -> float | None:
+    def get_target_rate(
+        self, *, well_row: IntOrArray[OneDimension]
+    ) -> float | NumberArray[OneDimension] | None:
         """
-        :param well_row: The well's row.
-        :returns: This well's own target rate, or `None` if unset.
+        :param well_row: One well's row, or an array of them.
+        :returns: Each well's own target rate. For a single `well_row`,
+            a float or `None` if unset. For an array, the raw array
+            (`NaN` means unset).
         """
-        return none_if_nan(float(self.target_rates[well_row]))
+        if np.isscalar(well_row):
+            return none_if_nan(self.target_rates[well_row])
+        return self.target_rates[well_row]
 
-    def set_target_rate(self, *, well_row: Integer, value: Number) -> None:
+    def set_target_rate(
+        self, *, well_row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
+    ) -> None:
         """
-        Overwrites a well's target rate in place.
+        Overwrites one or more wells' target rate in place.
 
-        :param well_row: The well's row.
-        :param value: The new target rate.
+        :param well_row: One well's row, or an array of them.
+        :param value: The new target rate. A single value applies to
+            every row in `well_row`; an array sets each row to its own value.
         """
         self.target_rates[well_row] = value
 
-    def get_target_bhp(self, *, well_row: Integer) -> float | None:
+    def get_target_bhp(
+        self, *, well_row: IntOrArray[OneDimension]
+    ) -> Number | NumberArray[OneDimension] | None:
         """
-        :param well_row: The well's row.
-        :returns: This well's own target BHP, or `None` if unset.
+        :param well_row: One well's row, or an array of them.
+        :returns: Each well's own target BHP. For a single `well_row`,
+            a Number or `None` if unset. For an array, the raw array
+            (`NaN` means unset).
         """
-        return none_if_nan(float(self.target_bhps[well_row]))
+        if np.isscalar(well_row):
+            return none_if_nan(self.target_bhps[well_row])
+        return self.target_bhps[well_row]
 
-    def set_target_bhp(self, *, well_row: Integer, value: Number) -> None:
+    def set_target_bhp(
+        self, *, well_row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
+    ) -> None:
         """
-        Overwrites a well's target BHP in place.
+        Overwrites one or more wells' target BHP in place.
 
-        :param well_row: The well's row.
-        :param value: The new target BHP.
+        :param well_row: One well's row, or an array of them.
+        :param value: The new target BHP. A single value applies to
+            every row in `well_row`; an array sets each row to its own value.
         """
         self.target_bhps[well_row] = value
 
-    def get_target_thp(self, *, well_row: Integer) -> float | None:
+    def get_target_thp(
+        self, *, well_row: IntOrArray[OneDimension]
+    ) -> Number | NumberArray[OneDimension] | None:
         """
-        :param well_row: The well's row.
-        :returns: This well's own target THP, or `None` if unset.
+        :param well_row: One well's row, or an array of them.
+        :returns: Each well's own target THP. For a single `well_row`,
+            a Number or `None` if unset. For an array, the raw array
+            (`NaN` means unset).
         """
-        return none_if_nan(float(self.target_thps[well_row]))
+        if np.isscalar(well_row):
+            return none_if_nan(self.target_thps[well_row])
+        return self.target_thps[well_row]
 
-    def set_target_thp(self, *, well_row: Integer, value: Number) -> None:
+    def set_target_thp(
+        self, *, well_row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
+    ) -> None:
         """
-        Overwrites a well's target THP in place.
+        Overwrites one or more wells' target THP in place.
 
-        :param well_row: The well's row.
-        :param value: The new target THP.
+        :param well_row: One well's row, or an array of them.
+        :param value: The new target THP. A single value applies to
+            every row in `well_row`; an array sets each row to its own value.
         """
         self.target_thps[well_row] = value
 
-    def get_efficiency_factor(self, *, well_row: Integer) -> float:
+    def get_efficiency_factor(
+        self, *, well_row: IntOrArray[OneDimension]
+    ) -> NumberOrArray[OneDimension]:
         """
-        :param well_row: The well's row.
-        :returns: This well's own efficiency factor.
+        :param well_row: One well's row, or an array of them.
+        :returns: Each well's own efficiency factor. Matches `well_row`'s own shape.
         """
-        return float(self.efficiency_factors[well_row])
+        return self.efficiency_factors[well_row]
 
-    def set_efficiency_factor(self, *, well_row: Integer, value: Number) -> None:
+    def set_efficiency_factor(
+        self, *, well_row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
+    ) -> None:
         """
-        Overwrites a well's efficiency factor in place.
+        Overwrites one or more wells' efficiency factor in place.
 
-        :param well_row: The well's row.
-        :param value: The new efficiency factor.
+        :param well_row: One well's row, or an array of them.
+        :param value: The new efficiency factor. A single value applies
+            to every row in `well_row`; an array sets each row to its own value.
         """
         self.efficiency_factors[well_row] = value
 
-    def get_guide_rate(self, *, well_row: Integer) -> float | None:
+    def get_guide_rate(
+        self, *, well_row: IntOrArray[OneDimension]
+    ) -> Number | NumberArray[OneDimension] | None:
         """
-        :param well_row: The well's row.
-        :returns: This well's own guide rate, or `None` if unset.
+        :param well_row: One well's row, or an array of them.
+        :returns: Each well's own guide rate. For a single `well_row`, a
+            Number or `None` if unset. For an array, the raw array (`NaN` means unset).
         """
-        return none_if_nan(float(self.guide_rates[well_row]))
+        if np.isscalar(well_row):
+            return none_if_nan(self.guide_rates[well_row])
+        return self.guide_rates[well_row]
 
-    def set_guide_rate(self, *, well_row: Integer, value: Number) -> None:
+    def set_guide_rate(
+        self, *, well_row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
+    ) -> None:
         """
-        Overwrites a well's guide rate in place.
+        Overwrites one or more wells' guide rate in place.
 
-        :param well_row: The well's row.
-        :param value: The new guide rate.
+        :param well_row: One well's row, or an array of them.
+        :param value: The new guide rate. A single value applies to
+            every row in `well_row`; an array sets each row to its own value.
         """
         self.guide_rates[well_row] = value
 
@@ -833,18 +1079,20 @@ class CompiledWellSystem(typing.NamedTuple):
     unit_system: UnitSystem
     """Unit system used to interpret the compiled well data."""
 
-    def well_row(self, *, name: str) -> int:
+    def well_row(self, *, name: str | typing.Sequence[str]) -> Integer | list[Integer]:
         """
         A well's row, by name.
 
-        :param name: The well to find.
-        :returns: The well's row.
-        :raises ValidationError: If no well in this system has this name.
+        :param name: The well to find, or a sequence of them.
+        :returns: The well's row for a single `name`, a list for a sequence.
+        :raises ValidationError: If any named well isn't in this system.
         """
-        try:
-            return self.names.index(name)
-        except ValueError:
-            raise ValidationError(f"No well named {name!r} in this compiled system.") from None
+        if isinstance(name, str):
+            try:
+                return self.names.index(name)
+            except ValueError:
+                raise ValidationError(f"No well named {name!r} in this compiled system.") from None
+        return [self.well_row(name=one_name) for one_name in name]
 
     def has_well(self, *, name: str) -> bool:
         """
@@ -853,39 +1101,66 @@ class CompiledWellSystem(typing.NamedTuple):
         """
         return name in self.names
 
-    def get_well_type(self, *, well_row: Integer) -> WellType:
+    def get_well_type(self, *, well_row: IntOrArray[OneDimension]) -> WellType | list[WellType]:
         """
-        :param well_row: The well's row.
-        :returns: This well's own type.
+        :param well_row: One well's row, or an array of them.
+        :returns: Each well's own type. A single `WellType` for a single
+            `well_row`, a list for an array.
         """
-        return (
-            WellType.PRODUCER
-            if self.well_kinds[well_row] == WellKind.PRODUCER
-            else WellType.INJECTOR
-        )
+        if np.isscalar(well_row):
+            return (
+                WellType.PRODUCER
+                if self.well_kinds[well_row] == WellKind.PRODUCER
+                else WellType.INJECTOR
+            )
+        return [
+            WellType.PRODUCER if kind == WellKind.PRODUCER else WellType.INJECTOR
+            for kind in self.well_kinds[well_row]
+        ]
 
-    def get_schedule_status(self, *, well_row: Integer) -> WellStatus:
+    def get_schedule_status(
+        self, *, well_row: IntOrArray[OneDimension]
+    ) -> WellStatus | list[WellStatus]:
         """
-        :param well_row: The well's row.
-        :returns: This well's own active/pending status.
+        :param well_row: One well's row, or an array of them.
+        :returns: Each well's own active/pending status. A single
+            `WellStatus` for a single `well_row`, a list for an array.
         """
-        return WellStatus.ACTIVE if self.schedule_statuses[well_row] else WellStatus.PENDING
+        if np.isscalar(well_row):
+            return WellStatus.ACTIVE if self.schedule_statuses[well_row] else WellStatus.PENDING
+        return [
+            WellStatus.ACTIVE if tag else WellStatus.PENDING
+            for tag in self.schedule_statuses[well_row]
+        ]
 
-    def set_schedule_status(self, *, well_row: Integer, status: WellStatus) -> None:
+    def set_schedule_status(
+        self,
+        *,
+        well_row: IntOrArray[OneDimension],
+        status: WellStatus | typing.Sequence[WellStatus],
+    ) -> None:
         """
-        Sets a well's active/pending status in place.
+        Sets one or more wells' active/pending status in place.
 
-        :param well_row: The well's row.
-        :param status: The new active/pending status.
+        :param well_row: One well's row, or an array of them.
+        :param status: The new active/pending status. A single `WellStatus`
+            applies to every row in `well_row`; a sequence sets each row to its own status.
         """
-        self.schedule_statuses[well_row] = get_well_status_tag(status=status)
+        if isinstance(status, WellStatus):
+            self.schedule_statuses[well_row] = get_well_status_tag(status=status)
+        else:
+            self.schedule_statuses[well_row] = [
+                get_well_status_tag(status=one_status) for one_status in status
+            ]
 
-    def get_reference_depth(self, *, well_row: Integer) -> float:
+    def get_reference_depth(
+        self, *, well_row: IntOrArray[OneDimension]
+    ) -> NumberOrArray[OneDimension]:
         """
-        :param well_row: The well's row.
-        :returns: This well's own reference depth.
+        :param well_row: One well's row, or an array of them.
+        :returns: Each well's own reference depth. Matches `well_row`'s own shape.
         """
-        return float(self.reference_depths[well_row])
+        return self.reference_depths[well_row]
 
 
 def get_well_status_tag(status: WellStatus) -> Integer:
@@ -913,7 +1188,7 @@ def resolve_perforations_geometry(
     well: Well,
     permeabilities: typing.Mapping[Orientation, NumberArray[OneDimension]],
     **resolve_kwargs: typing.Any,
-) -> tuple[tuple[PerforationIndex, ...], dict[Integer, AnyPerforation], dict[Integer, int]]:
+) -> tuple[tuple[PerforationIndex, ...], dict[Integer, AnyPerforation], dict[Integer, Integer]]:
     """
     Resolves connection geometry and connection factor for every
     perforation on a well, open or shut.
@@ -942,7 +1217,7 @@ def resolve_perforations_geometry(
         id(shadow): original
         for shadow, original in zip(shadow_perforations, well.perforations, strict=False)
     }
-    ordinal_by_id: dict[Integer, int] = {
+    ordinal_by_id: dict[Integer, Integer] = {
         id(shadow): ordinal for ordinal, shadow in enumerate(shadow_perforations)
     }
     shadow_well = attrs.evolve(well, perforations=shadow_perforations)
