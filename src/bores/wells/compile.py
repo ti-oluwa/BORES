@@ -1067,6 +1067,9 @@ class CompiledWellSystem(typing.NamedTuple):
     reference_depths: NumberArray[OneDimension]
     """Shape `(n_wells,)`."""
 
+    d_factors: NumberArray[OneDimension]
+    """Shape `(n_wells,)`. Non-Darcy flow coefficient. `NaN` where unset."""
+
     perforations: CompiledPerforations
     """Compiled perforation data for the solver hot path."""
 
@@ -1161,6 +1164,31 @@ class CompiledWellSystem(typing.NamedTuple):
         :returns: Each well's own reference depth. Matches `well_row`'s own shape.
         """
         return self.reference_depths[well_row]
+
+    def get_d_factor(
+        self, *, well_row: IntOrArray[OneDimension]
+    ) -> Number | NumberArray[OneDimension] | None:
+        """
+        :param well_row: One well's row, or an array of them.
+        :returns: Each well's own non-Darcy coefficient. For a single
+            `well_row`, a float or `None` if unset. For an array, the
+            raw array (`NaN` means unset).
+        """
+        if np.isscalar(well_row):
+            return none_if_nan(self.d_factors[well_row])
+        return self.d_factors[well_row]
+
+    def set_d_factor(
+        self, *, well_row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
+    ) -> None:
+        """
+        Overwrites one or more wells' non-Darcy coefficient in place.
+
+        :param well_row: One well's row, or an array of them.
+        :param value: The new coefficient. A single value applies to
+            every row in `well_row`; an array sets each row to its own value.
+        """
+        self.d_factors[well_row] = value
 
 
 def get_well_status_tag(status: WellStatus) -> Integer:
@@ -1680,11 +1708,22 @@ def compile_well_system(
         NumberArray[OneDimension],
         np.asarray([wells[name].reference_depth for name in names], dtype=dtype),
     )
+    d_factors = typing.cast(
+        NumberArray[OneDimension],
+        np.asarray(
+            [
+                wells[name].d_factor if wells[name].d_factor is not None else np.nan
+                for name in names
+            ],
+            dtype=dtype,
+        ),
+    )
     return CompiledWellSystem(
         names=tuple(names),
         well_kinds=well_controls.well_kinds,
         schedule_statuses=schedule_statuses,
         reference_depths=reference_depths,
+        d_factors=d_factors,
         perforations=perforations,
         controls=well_controls,
         group_controls=compile_group_controls(

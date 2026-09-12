@@ -1,5 +1,5 @@
 """
-Utilities for loading well model definition objects from parsed Eclipse deck records.
+Utilities for building well model definition objects from parsed Eclipse deck records.
 """
 
 import typing
@@ -65,6 +65,7 @@ if typing.TYPE_CHECKING:
     from bores.blackoil.compile import CompiledBlackOilModel
 
 __all__ = [
+    "apply_d_factors",
     "apply_economic_limits",
     "apply_guide_rates",
     "from_deck_gas_rate",
@@ -811,6 +812,31 @@ def apply_guide_rates(
             continue
         current_control = controls[well_name]
         controls.set(well_name, attrs.evolve(current_control, guide_rate=guide_rate))
+
+
+def apply_d_factors(
+    wells: Wells,
+    wdfac_records: typing.Sequence[typing.Mapping[str, typing.Any]],
+    current_time: float = 0.0,
+) -> None:
+    """
+    Sets each well's non-Darcy coefficient on its existing `Well` in
+    `wells`, in place, using whichever `WDFAC` record is in effect for
+    that well at a given point in the schedule.
+
+    :param wells: Wells to update.
+    :param wdfac_records: Every `WDFAC` record in the deck.
+    :param current_time: The point on the schedule clock to resolve
+        `d_factor` for, in the deck's time unit. Defaults to zero, the
+        start of the run.
+    :raises KeyError: If a record's well isn't in `wells` yet.
+    """
+    current_records = select_current_records(wdfac_records, key="well", current_time=current_time)
+    for well_name, record in current_records.items():
+        d_factor = record.get("d_factor")
+        if d_factor is None:
+            continue
+        wells.wells[well_name] = attrs.evolve(wells[well_name], d_factor=d_factor)
 
 
 def load_wells(deck_file: DeckFile, grid: Grid, current_time: float = 0.0) -> Wells:

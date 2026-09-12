@@ -401,6 +401,9 @@ class Well(Serializable):
     metadata: typing.Mapping[str, typing.Any] | None = None
     """Free-form, mirrors `Grid.metadata`."""
 
+    d_factor: Number | None = None
+    """Non-Darcy flow coefficient, deck `WDFAC`. `None` if not set."""
+
     def __attrs_post_init__(self) -> None:
         if not self.name:
             raise ValidationError("`name` must be a non-empty string.")
