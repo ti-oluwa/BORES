@@ -1,4 +1,4 @@
-"""Builtin `Action` implementations: `NoOp`, `RunSequence`."""
+"""Builtin `Action` implementations."""
 
 import attrs
 

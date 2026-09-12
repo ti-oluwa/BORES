@@ -72,7 +72,7 @@ def build_pressure_grid(
     ┌──────────────────────────────────┐
     │  GAS CAP  (depth < GOC)          │  gradient = gas_gradient
     ├──────────────────────────────────┤ ← Gas-Oil Contact (GOC)
-    │  OIL ZONE (GOC ≤ depth < OWC)   │  gradient = oil_gradient   ← datum here
+    │  OIL ZONE (GOC ≤ depth < OWC)    │  gradient = oil_gradient   ← datum here
     ├──────────────────────────────────┤ ← Oil-Water Contact (OWC)
     │  WATER ZONE (depth >= OWC)       │  gradient = water_gradient
     └──────────────────────────────────┘

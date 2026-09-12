@@ -12,10 +12,15 @@ from bores.reservoir import Regions, Reservoir, Temperature
 from bores.reservoir.rock import Rock
 from bores.reservoir.state import Equilibrium
 from bores.types import UnitSystem
+from bores.wells.deck import load_schedule
 from bores.wells.hydraulics.homogeneous import homogeneous_model
 from bores.wells.model import WellSystem
 
-df = DeckFile("./data/SPE1CASE1.DATA", encoding="utf-8", unit_system=UnitSystem.METRIC)
+df = DeckFile(
+    "/home/tioluwa/Projects/nagscu/Phase One/Data/NigerDelta UGH1 Composite Field.DATA",
+    encoding="utf-8",
+    unit_system=UnitSystem.METRIC,
+)
 
 # Load reservoir model
 grid = Grid.from_deck(df)
@@ -59,6 +64,14 @@ wells = WellSystem.from_deck(
 
 # Construct the final model
 model = BlackOilModel(reservoir=reservoir, fluid=blackoil, wells=wells)
+
+# Load the well schedule
+wells_schedule = load_schedule(df)
+
+for event in wells_schedule:
+    print(event, "\n")
+
+print(f"{len(wells_schedule)} well events")
 
 # Plot the grid
 print(f"cells   : {grid.n_cells}")

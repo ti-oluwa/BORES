@@ -633,20 +633,20 @@ def get_dip_aware_top_bottom_faces(
                 candidate_areas.append(grid.face_areas[face_index])
 
         if len(candidate_depths) >= 2:
-            depths_arr = np.asarray(candidate_depths, dtype=np.float64)
-            areas_arr = np.asarray(candidate_areas, dtype=np.float64)
-            midpoint = 0.5 * (depths_arr.min() + depths_arr.max())
-            is_top = depths_arr <= midpoint
+            depths_array = np.asarray(candidate_depths, dtype=np.float64)
+            areas_array = np.asarray(candidate_areas, dtype=np.float64)
+            midpoint = 0.5 * (depths_array.min() + depths_array.max())
+            is_top = depths_array <= midpoint
             if not np.any(is_top) or np.all(is_top):
                 # All candidates landed on one side of the midpoint (e.g.
                 # a single degenerate face), so we split by the extremes instead.
-                is_top = depths_arr == depths_arr.min()
+                is_top = depths_array == depths_array.min()
             is_bottom = ~is_top
 
-            top_depth[i] = np.average(depths_arr[is_top], weights=areas_arr[is_top])
-            bottom_depth[i] = np.average(depths_arr[is_bottom], weights=areas_arr[is_bottom])
-            top_area[i] = areas_arr[is_top].sum()
-            bottom_area[i] = areas_arr[is_bottom].sum()
+            top_depth[i] = np.average(depths_array[is_top], weights=areas_array[is_top])
+            bottom_depth[i] = np.average(depths_array[is_bottom], weights=areas_array[is_bottom])
+            top_area[i] = areas_array[is_top].sum()
+            bottom_area[i] = areas_array[is_bottom].sum()
         else:
             top_depth[i] = grid.cell_min_xyz[cell_index, 2]
             bottom_depth[i] = grid.cell_max_xyz[cell_index, 2]

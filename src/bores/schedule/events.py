@@ -112,11 +112,11 @@ class IntervalEvent(SerializableEvent[ModelT]):
         """
         if context.time < self.start:
             return False
-        previous_count = self.boundary_count(time=context.previous_time)
-        current_count = self.boundary_count(time=context.time)
+        previous_count = self.get_boundary_count(time=context.previous_time)
+        current_count = self.get_boundary_count(time=context.time)
         return current_count > previous_count
 
-    def boundary_count(self, *, time: Number) -> int:
+    def get_boundary_count(self, *, time: Number) -> int:
         """
         Counts how many interval boundaries fall at or before `time`.
 

@@ -221,7 +221,7 @@ class Schedule(typing.Generic[ModelT]):
         previous_time: Number = 0.0,
         unit_system: UnitSystem = UnitSystem.FIELD,
         runspec: RunSpec | None = None,
-        state: object | None = None,
+        state: typing.Any | None = None,
         time_step: int | None = None,
         previous_time_step: int | None = None,
         step_size: Number | None = None,
