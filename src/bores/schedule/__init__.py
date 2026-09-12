@@ -19,6 +19,7 @@ from bores.schedule.events import (
     IntervalEvent,
     ThresholdEvent,
     TimeEvent,
+    TimeStepEvent,
 )
 from bores.schedule.utils import all_of, any_of, at, rule, schedule
 
@@ -38,6 +39,7 @@ __all__ = [
     "SerializableEvent",
     "ThresholdEvent",
     "TimeEvent",
+    "TimeStepEvent",
     "action_type",
     "all_of",
     "any_of",

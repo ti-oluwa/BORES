@@ -4,6 +4,7 @@ import threading
 import typing
 
 import attrs
+from typing_extensions import Self
 
 from bores.errors import ActionError, EventError, StopSimulation
 from bores.serde.base import Serializable
@@ -52,6 +53,16 @@ class ScheduleContext:
 
     state: object | None = None
     """The latest solved state, if any (a `CompiledWellResolution`, for example)."""
+
+    time_step: int | None = None
+    """The current time-step index, if the caller is tracking one."""
+
+    previous_time_step: int | None = None
+    """The time-step index the schedule was last advanced at. `TimeStepEvent` needs this to
+    tell "just reached this step" apart from "still past it next call too"."""
+
+    step_size: Number | None = None
+    """The current time-step's size, in `unit_system`, if the caller is tracking one."""
 
     extra: typing.Mapping[str, object] = attrs.field(factory=dict)
     """Additional domain-specific context."""
@@ -211,6 +222,9 @@ class Schedule(typing.Generic[ModelT]):
         unit_system: UnitSystem = UnitSystem.FIELD,
         runspec: RunSpec | None = None,
         state: object | None = None,
+        time_step: int | None = None,
+        previous_time_step: int | None = None,
+        step_size: Number | None = None,
         extra: typing.Mapping[str, object] | None = None,
     ) -> ModelT:
         """
@@ -222,6 +236,9 @@ class Schedule(typing.Generic[ModelT]):
         :param unit_system: Unit system for `time`/`previous_time`.
         :param runspec: The run's configuration, if any.
         :param state: The latest solved state, if any.
+        :param time_step: The current time-step index, if tracked.
+        :param previous_time_step: The time-step index last advanced at, if tracked.
+        :param step_size: The current time-step's size, if tracked.
         :param extra: Additional domain-specific context.
         :returns: The model after every firing rule's action has run.
         """
@@ -231,6 +248,9 @@ class Schedule(typing.Generic[ModelT]):
             unit_system=unit_system,
             runspec=runspec,
             state=state,
+            time_step=time_step,
+            previous_time_step=previous_time_step,
+            step_size=step_size,
             extra=extra or {},
         )
         return self.apply(model=model, context=context)
@@ -245,9 +265,7 @@ class Schedule(typing.Generic[ModelT]):
         return {"rules": [rule.dump() for rule in self.rules]}
 
     @classmethod
-    def load(
-        cls, data: typing.Mapping[str, typing.Sequence[typing.Mapping[str, object]]]
-    ) -> "Schedule[ModelT]":
+    def load(cls, data: typing.Mapping[str, typing.Sequence[typing.Mapping[str, object]]]) -> Self:
         """
         Loads a `Schedule` from `dump()`'s own output.
 
@@ -255,3 +273,41 @@ class Schedule(typing.Generic[ModelT]):
         :returns: The loaded `Schedule`.
         """
         return cls(rules=tuple(Rule.load(data=rule_data) for rule_data in data["rules"]))
+
+    def __len__(self) -> int:
+        """:returns: How many rules this schedule has."""
+        return len(self.rules)
+
+    def __iter__(self) -> typing.Iterator[Rule[ModelT]]:
+        """:returns: An iterator over this schedule's rules, in order."""
+        return iter(self.rules)
+
+    def __contains__(self, name: str) -> bool:
+        """:returns: Whether any rule in this schedule has this name."""
+        return any(rule.name == name for rule in self.rules)
+
+    def __add__(self, other: Self) -> Self:
+        """
+        Concatenates two schedules' rules, in order, keeping duplicates.
+
+        :param other: The schedule to append.
+        :returns: A new `Schedule` with `self`'s rules followed by `other`'s.
+        """
+        if not isinstance(other, Schedule):
+            return NotImplemented
+        return self.__class__(rules=self.rules + other.rules)
+
+    def __or__(self, other: Self) -> Self:
+        """
+        Merges two schedules, `other`'s named rules overriding `self`'s
+        own rules of the same name - the same override convention as
+        `dict | dict`. Unnamed rules from both are kept, never merged.
+
+        :param other: The schedule to merge in.
+        :returns: A new, merged `Schedule`.
+        """
+        if not isinstance(other, Schedule):
+            return NotImplemented
+        other_names = {rule.name for rule in other.rules if rule.name is not None}
+        kept = [rule for rule in self.rules if rule.name is None or rule.name not in other_names]
+        return self.__class__(rules=tuple(kept) + other.rules)

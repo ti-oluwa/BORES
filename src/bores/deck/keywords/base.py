@@ -985,7 +985,7 @@ def timedelta_to_timeunit(delta: datetime.timedelta, time_unit: TimeUnit) -> int
 
 def get_schedule_times(deck: Deck, time_unit: TimeUnit = "days") -> dict[int, float]:
     """
-    One linear pass over `deck.records` (already in file order), mapping
+    Takes one linear pass over `deck.records` (already in file order), mapping
     each record's `.start` offset to the elapsed-time clock value in effect
     at that point.
 
@@ -995,7 +995,7 @@ def get_schedule_times(deck: Deck, time_unit: TimeUnit = "days") -> dict[int, fl
     block (since all subsequent records come after all those dates have
     elapsed).
 
-    Both keywords' own records get the *new* clock value (they are the
+    Both keywords' own records get the new clock value (they are the
     transition point). Records before the first `TSTEP`/`DATES` get `0.0`.
 
     :param deck: Scanned deck.

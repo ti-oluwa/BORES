@@ -6,6 +6,7 @@ import typing
 
 import attrs
 
+from bores.errors import ValidationError
 from bores.schedule.base import (
     ModelT,
     ScheduleContext,
@@ -22,6 +23,7 @@ __all__ = [
     "IntervalEvent",
     "ThresholdEvent",
     "TimeEvent",
+    "TimeStepEvent",
 ]
 
 
@@ -62,6 +64,31 @@ class TimeEvent(SerializableEvent[ModelT]):
         :returns: Whether `at` was just crossed.
         """
         return context.previous_time < self.at <= context.time
+
+
+@event_type
+@attrs.frozen(kw_only=True, slots=True)
+class TimeStepEvent(SerializableEvent[ModelT]):
+    """Fires once, the first time the schedule is advanced past step `at`."""
+
+    at: int
+    """The time-step index this event fires at."""
+
+    def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:
+        """
+        Fires when `context.time_step` crosses `at` since `context.previous_time_step`.
+
+        :param model: The model being scheduled against. Unused.
+        :param context: The current moment's context. `context.time_step`
+            and `context.previous_time_step` must both be set.
+        :returns: Whether `at` was just crossed.
+        """
+        if context.time_step is None or context.previous_time_step is None:
+            raise ValidationError(
+                f"{type(self).__name__} needs `context.time_step` and "
+                "`context.previous_time_step` to both be set."
+            )
+        return context.previous_time_step < self.at <= context.time_step
 
 
 @event_type
