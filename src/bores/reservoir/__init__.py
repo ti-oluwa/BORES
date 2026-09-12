@@ -39,6 +39,10 @@ from bores.reservoir.state import (
     load_equilibrium_regions,
 )
 from bores.reservoir.temperature import Temperature, TemperatureGradient, TemperatureTable
+from bores.reservoir.transmissibility import (
+    ConnectionTransmissibilities,
+    compute_connection_transmissibilities,
+)
 
 __all__ = [
     "BoundaryCondition",
@@ -46,6 +50,7 @@ __all__ = [
     "BoundaryConditions",
     "BoundaryRegion",
     "CarterTracyAquifer",
+    "ConnectionTransmissibilities",
     "ConstantFluxBoundary",
     "ConstantPressureBoundary",
     "DepthTable",
@@ -66,6 +71,7 @@ __all__ = [
     "TemperatureGradient",
     "TemperatureTable",
     "TimeDependentFluxBoundary",
+    "compute_connection_transmissibilities",
     "load_equilibrium_regions",
     "make_axis_aligned_boundary_conditions",
     "make_boundary_region",

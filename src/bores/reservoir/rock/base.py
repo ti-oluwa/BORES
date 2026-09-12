@@ -6,13 +6,15 @@ import numpy as np
 import numpy.typing as npt
 from typing_extensions import Self
 
-from bores.blackoil.satfunc.regions import SatFunc
 from bores.constants import UnitConversionTable, get_conversion_factors
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.grids.base import Grid
 from bores.precision import get_dtype
 from bores.reservoir.regions import load_region_array
+
+if typing.TYPE_CHECKING:
+    from bores.blackoil.satfunc.regions import SatFunc
 from bores.reservoir.rock.compressibility import (
     RockCompressibility,
     RockCompressibilityTables,
@@ -347,7 +349,7 @@ class Rock(StoreSerializable):
 
     @staticmethod
     def get_saturation_endpoints(
-        satfunc: SatFunc,
+        satfunc: "SatFunc",
         saturation_region: IntCellArray,
         n_cells: int,
         dtype: npt.DTypeLike,
@@ -401,7 +403,7 @@ class Rock(StoreSerializable):
         *,
         grid: Grid,
         rock_region: IntCellArray | None = None,
-        satfunc: SatFunc | None = None,
+        satfunc: "SatFunc | None" = None,
         saturation_region: IntCellArray | None = None,
         interpolation_method: InterpolationMethod = "linear",
         dtype: npt.DTypeLike = None,

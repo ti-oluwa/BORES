@@ -1,29 +1,20 @@
 """
-Grid import / export functions. Each sub-module handles one file family.
-
-IO code only converts between external representations and the
-`bores.grids.base.Grid` data model.
+Grid import/export functions. Each sub-module handles one file family.
 
 GRDECL / Eclipse text:
 
     from bores.grids.io.grdecl import load_grdecl, dump_grdecl
 
-Eclipse binary / unified restart (.EGRID, .GRID):
-
-    from bores.grids.io.eclipse import load_eclipse_grid
-
 Gmsh (.msh):
 
     from bores.grids.io.gmsh import load_msh
 
-VTK / VTU / meshio-readable formats:
+meshio-readable formats (optional dependency, not re-exported here):
 
-    from bores.grids.io.vtk import load_vtk, load_vtu, dump_vtk, dump_vtu, load_mesh
-
-PyVista conversion:
-
-    from bores.grids.io.pyvista import to_pyvista
+    from bores.grids.io.meshio import load_mesh, dump_mesh
 """
 
-from .gmsh import *
-from .grdecl import *
+from bores.grids.io.gmsh import load_msh
+from bores.grids.io.grdecl import dump_grdecl, load_grdecl
+
+__all__ = ["dump_grdecl", "load_grdecl", "load_msh"]

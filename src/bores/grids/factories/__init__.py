@@ -16,8 +16,15 @@ The z-axis is positive **downward** (reservoir depth convention), matching
 `bores.grids.base.Grid`.
 """
 
-from .base import *
-from .cartesian import *
-from .corner_point import *
-from .polyhedral import *
-from .voronoi import *
+from bores.grids.factories.cartesian import make_cartesian_grid
+from bores.grids.factories.corner_point import make_corner_point_grid, rederive_corner_point_arrays
+from bores.grids.factories.polyhedral import make_polyhedral_grid
+from bores.grids.factories.voronoi import make_voronoi_grid
+
+__all__ = [
+    "make_cartesian_grid",
+    "make_corner_point_grid",
+    "make_polyhedral_grid",
+    "make_voronoi_grid",
+    "rederive_corner_point_arrays",
+]

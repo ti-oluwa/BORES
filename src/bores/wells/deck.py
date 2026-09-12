@@ -1,5 +1,5 @@
 """
-Utilities for building well model definition objects from parsed Eclipse deck records.
+Utilities for loading well model definition objects from parsed Eclipse deck records.
 """
 
 import typing
@@ -25,6 +25,7 @@ from bores.wells.controls import (
     Limit,
     ProducerControl,
     ProducerControlMode,
+    THPLimit,
     WellControl,
     WellControls,
     WorkoverAction,
@@ -393,14 +394,19 @@ def load_producer_control_from_record(
 
     :param record: One parsed `WCONPROD` record.
     :param unit_system: The deck's unit system.
-    :returns: Constructed `ProducerControl`. If item bhp is present and mode
-        isn't BHP, adds an implicit `BHPLimit(min_value=bhp)`.
+    :returns: Constructed `ProducerControl`. Adds an implicit `BHPLimit(min_value=bhp)`
+        when `bhp` is given and mode isn't `BHP`, and an implicit
+        `THPLimit(min_value=thp)` when `thp` is given and mode isn't `THP`.
     """
     mode = PRODUCER_CONTROL_MODE_MAP[record["control_mode"]]
     limits: list[Limit] = []
     bhp = record.get("bhp")
     if bhp is not None and mode is not ProducerControlMode.BHP:
         limits.append(BHPLimit(min_value=bhp, unit_system=unit_system))
+
+    thp = record.get("thp")
+    if thp is not None and mode is not ProducerControlMode.THP:
+        limits.append(THPLimit(min_value=thp, unit_system=unit_system))
 
     if mode is ProducerControlMode.OIL_RATE:
         target_rate = record.get("oil_rate")
@@ -433,8 +439,9 @@ def load_injector_control_from_record(
 
     :param record: One parsed `WCONINJE` record.
     :param unit_system: The deck's unit system.
-    :returns: Constructed `InjectorControl`. If item bhp is present and mode
-        isn't BHP, adds an implicit `BHPLimit(max_value=bhp)`.
+    :returns: Constructed `InjectorControl`. Adds an implicit `BHPLimit(max_value=bhp)`
+        when `bhp` is given and mode isn't `BHP`, and an implicit
+        `THPLimit(max_value=thp)` when `thp` is given and mode isn't `THP`.
     """
     mode = INJECTOR_CONTROL_MODE_MAP[record["control_mode"]]
     phase = FluidPhase(record["injector_type"].lower())
@@ -442,6 +449,10 @@ def load_injector_control_from_record(
     bhp = record.get("bhp")
     if bhp is not None and mode is not InjectorControlMode.BHP:
         limits.append(BHPLimit(max_value=bhp, unit_system=unit_system))
+
+    thp = record.get("thp")
+    if thp is not None and mode is not InjectorControlMode.THP:
+        limits.append(THPLimit(max_value=thp, unit_system=unit_system))
 
     rate = record.get("rate")
     if phase is FluidPhase.GAS:
@@ -940,17 +951,15 @@ def load_schedule(
     and a max GOR together, say).
 
     A `WCONPROD`/`WCONINJE` reissue sets the well's control mode and
-    targets, and, when its own `bhp` item is given and its mode isn't
-    `BHP`, also patches the well's existing implicit `BHPLimit` via a
-    second `SetLimit` action (mirrors `load_producer_control_from_record`/
-    `load_injector_control_from_record`'s own construction of that limit
-    at compile time).
+    targets. When its own `bhp`/`thp` item is given and the mode isn't
+    that item, it also patches the well's implicit `BHPLimit`/`THPLimit`
+    via an additional `SetLimit` action.
 
     Every `SetLimit` action here can only patch a limit row the well
-    already had for that kind/quantity at compile time. The `CompiledLimits`'
-    CSR table can't grow a new row mid-schedule. A `RateLimit`/`THPLimit`
-    change isn't covered at all yet; only `BHPLimit` (via the implicit
-    `WCONPROD`/`WCONINJE` case) and `EconomicLimit` (via `WECON`) are.
+    already had for that kind/quantity at compile time. The
+    `CompiledLimits` CSR table can't grow a new row mid-schedule.
+    `RateLimit` has no deck-record source in this codebase at all, so
+    it's never emitted here.
 
     :param deck_file: The deck to read schedule keywords from.
     :param compiled_at: The point on the schedule clock the model this
@@ -1056,11 +1065,15 @@ def load_schedule(
             )
         )
         for limit in control.limits:
-            if not isinstance(limit, BHPLimit):
+            if isinstance(limit, BHPLimit):
+                kind = LimitKind.BHP
+            elif isinstance(limit, THPLimit):
+                kind = LimitKind.THP
+            else:
                 continue
             limit_action = SetLimit(
                 well_name=record["well"],
-                kind=LimitKind.BHP,
+                kind=kind,
                 min_value=limit.min_value,
                 max_value=limit.max_value,
             )
@@ -1068,7 +1081,7 @@ def load_schedule(
                 Rule(
                     event=TimeEvent(at=schedule_time),
                     action=limit_action,
-                    name=f"wconprod-bhplimit:{record['well']}@{schedule_time}",
+                    name=f"wconprod-{kind.name.lower()}limit:{record['well']}@{schedule_time}",
                 )
             )
 
@@ -1093,11 +1106,15 @@ def load_schedule(
             )
         )
         for limit in control.limits:
-            if not isinstance(limit, BHPLimit):
+            if isinstance(limit, BHPLimit):
+                kind = LimitKind.BHP
+            elif isinstance(limit, THPLimit):
+                kind = LimitKind.THP
+            else:
                 continue
             limit_action = SetLimit(
                 well_name=record["well"],
-                kind=LimitKind.BHP,
+                kind=kind,
                 min_value=limit.min_value,
                 max_value=limit.max_value,
             )
@@ -1105,7 +1122,7 @@ def load_schedule(
                 Rule(
                     event=TimeEvent(at=schedule_time),
                     action=limit_action,
-                    name=f"wconinje-bhplimit:{record['well']}@{schedule_time}",
+                    name=f"wconinje-{kind.name.lower()}limit:{record['well']}@{schedule_time}",
                 )
             )
 
