@@ -323,6 +323,15 @@ class CompiledPerforations(typing.NamedTuple):
     well_indices: NumberArray[OneDimension]
     """Shape `(n_rows,)`. Each connection's connection factor."""
 
+    connection_conductivities: NumberArray[OneDimension]
+    """
+    Shape `(n_rows,)`. Peaceman numerator (`k*h*N/G`), isolated from
+    skin/geometry. `NaN` on an overridden connection
+    (`Perforation.connection_factor_override`), where there's no such
+    decomposition. Lets a rate-dependent skin addition (non-Darcy `D*q`)
+    be applied to `well_indices` without rederiving the well-index formula.
+    """
+
     wellbore_radii: NumberArray[OneDimension]
     """Shape `(n_rows,)`."""
 
@@ -373,6 +382,19 @@ class CompiledPerforations(typing.NamedTuple):
         :returns: Each connection's own connection factor (well index). Matches `row`'s own shape.
         """
         return self.well_indices[row]
+
+    def get_connection_conductivity(
+        self, *, row: IntOrArray[OneDimension]
+    ) -> Number | NumberArray[OneDimension] | None:
+        """
+        :param row: One connection row, or an array of them.
+        :returns: Each connection's own Peaceman numerator. For a single
+            `row`, a value or `None` if unset (an overridden connection).
+            For an array, the raw array (`NaN` means unset).
+        """
+        if np.isscalar(row):
+            return none_if_nan(self.connection_conductivities[row])
+        return self.connection_conductivities[row]
 
     def set_well_index(
         self, *, row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
@@ -1283,6 +1305,7 @@ def compile_perforations(
     cell_indices: list[Integer] = []
     perforation_indices: list[Integer] = []
     well_indices: list[Number] = []
+    connection_conductivities: list[Number] = []
     wellbore_radii: list[Number] = []
     skins: list[Number] = []
     partial_penetration_fractions: list[Number] = []
@@ -1312,6 +1335,11 @@ def compile_perforations(
                 if perforation_index.well_index is not None
                 else np.nan
             )
+            connection_conductivities.append(
+                perforation_index.conductivity
+                if perforation_index.conductivity is not None
+                else np.nan
+            )
             wellbore_radii.append(original.wellbore_radius)
             skins.append(original.skin)
             partial_penetration_fractions.append(perforation_index.partial_penetration_fraction)
@@ -1332,6 +1360,9 @@ def compile_perforations(
             IntArray[OneDimension], np.asarray(perforation_indices, dtype=np.int64)
         ),
         well_indices=typing.cast(NumberArray[OneDimension], np.asarray(well_indices, dtype=dtype)),
+        connection_conductivities=typing.cast(
+            NumberArray[OneDimension], np.asarray(connection_conductivities, dtype=dtype)
+        ),
         wellbore_radii=typing.cast(
             NumberArray[OneDimension], np.asarray(wellbore_radii, dtype=dtype)
         ),

@@ -512,7 +512,29 @@ def build_wells_indices(
                 regime_constant=regime_constant,
                 net_to_gross=cell_net_to_gross,
             )
-            resolved.append(attrs.evolve(perforation_index, well_index=well_index))
+            conductivity = None
+            if perforation.connection_factor_override is None:
+                # Isolates the Peaceman numerator (k*h*N/G) by evaluating the
+                # same connection a second time with skin shifted by +1 and
+                # solving the two-point system: 1/numerator = 1/WI(skin+1) - 1/WI(skin).
+                # This works for any starting skin, including zero, and never
+                # touches well_index itself.
+                perturbed_well_index = resolve_connection_factor(
+                    perforation=attrs.evolve(perforation, skin=perforation.skin + 1.0),
+                    grid=grid,
+                    cell_index=cell_idx,
+                    partial_penetration_fraction=perforation_index.partial_penetration_fraction,
+                    wellbore_radius=wellbore_radius,
+                    permeabilities=cell_permeabilities,
+                    regime_constant=regime_constant,
+                    net_to_gross=cell_net_to_gross,
+                )
+                inverse_difference = (1.0 / perturbed_well_index) - (1.0 / well_index)
+                if inverse_difference != 0:
+                    conductivity = 1.0 / inverse_difference
+            resolved.append(
+                attrs.evolve(perforation_index, well_index=well_index, conductivity=conductivity)
+            )
             total_well_index += well_index
 
         result[well.name] = WellIndex(

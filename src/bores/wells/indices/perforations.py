@@ -66,6 +66,16 @@ class PerforationIndex(Serializable):
     well_index: Number | None = None
     """Connection factor for this connection. `None` until computed."""
 
+    conductivity: Number | None = None
+    """
+    Peaceman numerator (`k*h*N/G`) for this connection, isolated from its
+    skin/geometry denominator. `None` for an overridden connection
+    (`Perforation.connection_factor_override`), where `well_index` bypasses
+    the Peaceman formula entirely and has no such decomposition. Used to
+    recompute an effective `well_index` under a rate-dependent skin
+    addition (non-Darcy `D*q`) without rederiving the whole formula.
+    """
+
     unit_system: UnitSystem = UnitSystem.FIELD
     """Unit system this connection's dimensioned fields are expressed in."""
 

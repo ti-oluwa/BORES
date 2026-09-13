@@ -1,5 +1,7 @@
 """Run-level configuration, passed through `ScheduleContext.runspec`."""
 
+import datetime
+
 import attrs
 
 from bores.constants import Constants
@@ -18,6 +20,7 @@ class RunSpec(
         "constants": Constants,
         "timer": Timer | None,
         "output_frequency": int,
+        "start_date": datetime.datetime | None,
     },
 ):
     """Run-level configuration for a simulation."""
@@ -33,3 +36,6 @@ class RunSpec(
 
     output_frequency: int = attrs.field(default=1, validator=attrs.validators.ge(1))
     """Frequency, in time steps, at which model states are output."""
+
+    start_date: datetime.datetime | None = None
+    """The run's calendar start date, if the run is calendar-anchored."""
