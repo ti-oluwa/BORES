@@ -79,6 +79,9 @@ class EconomicQuantity(enum.Enum):
 class WorkoverAction(enum.Enum):
     """What to do once an `EconomicLimit` is breached (deck `WECON`/`GECON` item 6)."""
 
+    NONE = "none"
+    """No workover action configured. `GECON`'s own default. The limit is tracked but not enforced."""
+
     WELL = "well"
     """Shut in the whole well."""
 
@@ -100,6 +103,9 @@ class WorkoverAction(enum.Enum):
     Shut in the worst connection, then check the well's limits again;
     repeat until the well satisfies them or has no connections left open.
     """
+
+    RATE = "rate"
+    """`GECON`-only. Cut back the group's target rate rather than shutting a well."""
 
     def __str__(self) -> str:
         return self.value

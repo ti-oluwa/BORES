@@ -563,6 +563,102 @@ def apply_economic_limits(
         controls.set(well_name, attrs.evolve(current_control, limits=kept_limits + new_limits))
 
 
+def load_group_economic_limits_from_record(
+    record: typing.Mapping[str, typing.Any], unit_system: UnitSystem
+) -> tuple[EconomicLimit, ...]:
+    """
+    Loads a group's economic limits from one `GECON` record.
+
+    Same shape as `load_economic_limits_from_record`, except `GECON`
+    carries a fifth quantity `WECON` doesn't, `min_gas_rate`, and its
+    workover field is named `workover_procedure`, defaulting to `NONE`
+    rather than `WELL`. A group's limit is tracked but not enforced
+    unless a procedure is explicitly named.
+
+    :param record: One parsed `GECON` record.
+    :param unit_system: The deck's unit system.
+    :returns: One economic limit per non-zero threshold present on the
+        record (minimum oil rate, minimum gas rate, water cut, GOR,
+        water-gas ratio).
+    """
+    workover_action = WorkoverAction(record.get("workover_procedure", "NONE"))
+    end_run = bool(record.get("end_run", False))
+
+    limits = []
+    for quantity, field_name in ECONOMIC_MIN_RATE_QUANTITY_FIELDS.items():
+        value = record.get(field_name)
+        if not value:
+            continue
+        limits.append(
+            EconomicLimit(
+                quantity=quantity,
+                min_value=value,
+                workover_action=workover_action,
+                end_run=end_run,
+                unit_system=unit_system,
+            )
+        )
+
+    for quantity, field_name in ECONOMIC_QUANTITY_FIELDS.items():
+        value = record.get(field_name)
+        if value is None:
+            continue
+        if quantity == EconomicQuantity.GOR:
+            value = from_deck_gas_rate(value, unit_system)
+        elif quantity is EconomicQuantity.WATER_GAS_RATIO and unit_system is UnitSystem.FIELD:
+            value /= c.MSCF_TO_SCF
+        limits.append(
+            EconomicLimit(
+                quantity=quantity,
+                max_value=value,
+                workover_action=workover_action,
+                end_run=end_run,
+                unit_system=unit_system,
+            )
+        )
+    return tuple(limits)
+
+
+def apply_group_economic_limits(
+    group_controls: GroupControls,
+    gecon_records: typing.Sequence[typing.Mapping[str, typing.Any]],
+    unit_system: UnitSystem,
+    current_time: float = 0.0,
+) -> None:
+    """
+    Adds each group's economic limits onto its existing control in
+    `group_controls`, in place, using whichever `GECON` record is in
+    effect for that group at a given point in the schedule.
+
+    A reissue replaces that group's earlier economic limits rather than
+    adding to them, matching `apply_economic_limits`' own well-level
+    behavior. Deciding which member well to act on when a group's limit
+    is breached isn't implemented - this only loads and stores the
+    limits themselves.
+
+    :param group_controls: Group controls to update.
+    :param gecon_records: Every `GECON` record in the deck.
+    :param unit_system: The deck's unit system.
+    :param current_time: The point on the schedule clock to resolve
+        limits for, in the deck's time unit. Defaults to zero, the start
+        of the run.
+    :raises KeyError: If a record's group has no control set in `group_controls` yet.
+    """
+    current_records = select_current_records(gecon_records, key="group", current_time=current_time)
+    for group_name, record in current_records.items():
+        current_control = group_controls[group_name]
+        new_limits = load_group_economic_limits_from_record(record, unit_system=unit_system)
+        if not new_limits:
+            continue
+        new_quantities = {limit.quantity for limit in new_limits}
+        kept_limits = tuple(
+            limit for limit in current_control.limits if limit.quantity not in new_quantities
+        )
+        group_controls.set(
+            group_name, attrs.evolve(current_control, limits=kept_limits + new_limits)
+        )
+
+
 def apply_weltarg(control: WellControl, record: typing.Mapping[str, typing.Any]) -> WellControl:
     """
     Applies one `WELTARG` record to an already-resolved control, changing

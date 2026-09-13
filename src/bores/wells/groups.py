@@ -12,6 +12,7 @@ from bores.errors import ValidationError
 from bores.serde.base import Serializable
 from bores.serde.stores import StoreSerializable
 from bores.types import FluidPhase, Number, UnitConversionTable, UnitSystem
+from bores.wells.controls import EconomicLimit
 
 __all__ = [
     "FIELD_GROUP",
@@ -314,6 +315,11 @@ class GroupControl(Serializable):
     target_rate: Number | None = None
     injected_phase: FluidPhase | None = None
     """Set only for an injection group (`mode` is a `GroupInjectorControlMode`)."""
+    limits: tuple[EconomicLimit, ...] = ()
+    """
+    This group's own economic limits, deck `GECON`. Applied to the
+    group collectively, distinct from any individual member well's own limits.
+    """
     unit_system: UnitSystem = UnitSystem.FIELD
 
     def convert(

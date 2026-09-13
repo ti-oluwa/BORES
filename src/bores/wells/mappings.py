@@ -83,4 +83,7 @@ ECONOMIC_QUANTITY_FIELDS = {
     EconomicQuantity.GOR: "max_gor",
     EconomicQuantity.WATER_GAS_RATIO: "max_wgr",
 }
-ECONOMIC_MIN_RATE_QUANTITY_FIELDS = {EconomicQuantity.OIL_RATE: "min_oil_rate"}
+ECONOMIC_MIN_RATE_QUANTITY_FIELDS = {
+    EconomicQuantity.OIL_RATE: "min_oil_rate",
+    EconomicQuantity.GAS_RATE: "min_gas_rate",
+}
