@@ -2,6 +2,7 @@
 
 import enum
 import typing
+from collections.abc import Mapping
 
 import attrs
 from typing_extensions import Self
@@ -573,29 +574,33 @@ class Wells(
 
     def __init__(
         self,
-        wells: typing.Mapping[str, Well],
+        wells: typing.Mapping[str, Well] | typing.Sequence[Well],
         unit_system: UnitSystem | None = None,
     ) -> None:
         """
-        :param wells: Mapping from well name to Well.
+        :param wells: Sequence of `Well`s or a mapping from well name to `Well`.
         :param unit_system: Target unit system for every well. None
             requires all wells to already share the same unit system.
         :raises ValidationError: If wells is empty, any key doesn't match
-            its value's Well.name, or (unit_system is None) the wells
+            its value's `Well.name`, or (unit_system is None) the wells
             don't all share one unit system.
         """
         if not wells:
             raise ValidationError("`wells` must contain at least one entry.")
 
-        mismatched = {key: well.name for key, well in wells.items() if key != well.name}
-        if mismatched:
-            raise ValidationError(
-                f"`wells` dict keys must match Well.name; mismatches "
-                f"(key -> well.name): {mismatched}."
-            )
+        if isinstance(wells, Mapping):
+            mismatched = {key: well.name for key, well in wells.items() if key != well.name}
+            if mismatched:
+                raise ValidationError(
+                    f"`wells` dict keys must match `Well.name`; mismatches "
+                    f"(key -> well.name): {mismatched}."
+                )
+            all_wells = wells
+        else:
+            all_wells = {well.name: well for well in wells}
 
         if unit_system is None:
-            systems = {well.unit_system for well in wells.values()}
+            systems = {well.unit_system for well in all_wells.values()}
             if len(systems) > 1:
                 raise ValidationError(
                     "All wells must share the same unit system when "
@@ -603,17 +608,17 @@ class Wells(
                     f"{sorted(s.value for s in systems)}."
                 )
             unit_system = systems.pop()
-            wells = dict(wells)
+            all_wells = dict(all_wells)
         else:
-            wells = {
+            all_wells = {
                 name: well if well.unit_system == unit_system else well.convert(unit_system)
-                for name, well in wells.items()
+                for name, well in all_wells.items()
             }
 
-        self.wells = wells
+        self.wells = all_wells
         self.unit_system = unit_system
 
-    def well(self, name: str) -> Well:
+    def get(self, name: str) -> Well:
         """
         Retrieve a registered `Well` by name.
 
@@ -625,6 +630,31 @@ class Wells(
         if well is None:
             raise KeyError(f"No well named {name!r}. Available: {sorted(self.wells)}.")
         return well
+
+    def add(self, well: Well) -> None:
+        """
+        Add a new `Well` to the container. If a well with the same name already exists, it is replaced.
+
+        :param well: `Well` to add.
+        """
+        if well.unit_system != self.unit_system:
+            raise ValidationError(
+                f"`Well` {well.name!r} has unit system {well.unit_system}, expected {self.unit_system}."
+            )
+        self.wells[well.name] = well
+
+    def set(self, name: str, well: Well) -> None:
+        """
+        Set an existing `Well` in the container by name. The name must match the `Well.name`.
+
+        :param name: Name of the well to set.
+        :param well: `Well` to set.
+        """
+        if name != well.name:
+            raise ValidationError(
+                f"Name mismatch: key {name!r} does not match Well.name {well.name!r}."
+            )
+        self.add(well)
 
     @property
     def names(self) -> tuple[str, ...]:
@@ -667,13 +697,65 @@ class Wells(
         return typing.cast(Self, load_wells(deck_file, grid))
 
     def __getitem__(self, name: str) -> Well:
-        return self.well(name)
+        return self.get(name)
+
+    def __setitem__(self, name: str, well: Well) -> None:
+        self.set(name, well)
 
     def __iter__(self) -> typing.Iterator[str]:
         return iter(self.wells)
 
     def __len__(self) -> int:
         return len(self.wells)
+
+    def __add__(self, other: Self | Well) -> Self:
+        """
+        Return a new `Wells` object containing the union of this and *other*.
+
+        :param other: Another `Wells` or a single `Well`.
+        :returns: New `Wells` with all wells from both.
+        :raises ValidationError: If any well names collide.
+        """
+        if isinstance(other, Well):
+            other_wells = {other.name: other}
+        elif isinstance(other, Wells):
+            other_wells = other.wells
+        else:
+            raise TypeError(f"Cannot add {type(other).__name__} to `{type(self).__name__}`.")
+
+        overlapping_names = set(self.wells) & set(other_wells)
+        if overlapping_names:
+            raise ValidationError(
+                f"Cannot add `Well`s with overlapping names: {sorted(overlapping_names)}."
+            )
+
+        combined_wells = {**self.wells, **other_wells}
+        return self.__class__(wells=combined_wells, unit_system=self.unit_system)
+
+    def __iadd__(self, other: Self | Well) -> Self:
+        """
+        In-place addition of another `Wells` or a single `Well`.
+
+        :param other: Another `Wells` or a single `Well`.
+        :returns: Self with wells from *other* added.
+        :raises ValidationError: If any well names collide.
+        """
+        if isinstance(other, Well):
+            other_wells = {other.name: other}
+        elif isinstance(other, Wells):
+            other_wells = other.wells
+        else:
+            raise TypeError(f"Cannot add {type(other).__name__} to `{type(self).__name__}`.")
+
+        overlapping_names = set(self.wells) & set(other_wells)
+        if overlapping_names:
+            raise ValidationError(
+                f"Cannot add `Well`s with overlapping names: {sorted(overlapping_names)}."
+            )
+
+        for name, well in other_wells.items():
+            self.set(name, well)
+        return self
 
     def __contains__(self, name: object) -> bool:
         return name in self.wells

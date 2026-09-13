@@ -633,10 +633,10 @@ class CompiledLimits(typing.NamedTuple):
             `BHP`/`THP` row). A single value for a single `row`, a list for an array.
         """
         if np.isscalar(row):
-            return self._quantity_at(row=row)
-        return [self._quantity_at(row=one_row) for one_row in np.atleast_1d(row)]
+            return self.get_quantity_at(row=row)
+        return [self.get_quantity_at(row=one_row) for one_row in np.atleast_1d(row)]
 
-    def _quantity_at(self, *, row: Integer) -> RateQuantity | EconomicQuantity | None:
+    def get_quantity_at(self, *, row: Integer) -> RateQuantity | EconomicQuantity | None:
         """
         :param row: The limit row to read.
         :returns: This row's own quantity, per `get_quantity`'s own rules.

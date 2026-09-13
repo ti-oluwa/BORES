@@ -484,12 +484,12 @@ def decompile_well(wells: Wells, compiled_system: CompiledWellSystem, well_row: 
     :returns: The rebuilt `Well`.
     """
     well_name = compiled_system.names[well_row]
-    original = wells[well_name]
+    well = wells[well_name]
     perforations = decompile_well_perforations(
         wells, well_name, compiled_system.perforations, well_row
     )
     return attrs.evolve(
-        original,
+        well,
         well_type=WELL_TYPE_FROM_KIND[compiled_system.well_kinds[well_row]],
         reference_depth=compiled_system.reference_depths[well_row],
         schedule_status=get_well_status(compiled_system.schedule_statuses[well_row]),

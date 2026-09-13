@@ -836,7 +836,7 @@ def apply_d_factors(
         d_factor = record.get("d_factor")
         if d_factor is None:
             continue
-        wells.wells[well_name] = attrs.evolve(wells[well_name], d_factor=d_factor)
+        wells[well_name] = attrs.evolve(wells[well_name], d_factor=d_factor)
 
 
 def load_wells(deck_file: DeckFile, grid: Grid, current_time: float = 0.0) -> Wells:

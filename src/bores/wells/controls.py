@@ -83,17 +83,23 @@ class WorkoverAction(enum.Enum):
     """Shut in the whole well."""
 
     PLUG = "plug"
-    """Shut in the whole well and plug it back. Whether the well can
+    """
+    Shut in the whole well and plug it back. Whether the well can
     later be reopened is decided outside a single control resolution, by
-    whatever is driving the schedule over time."""
+    whatever is driving the schedule over time.
+    """
 
     CON = "con"
-    """Shut in the connection responsible for the breach, leaving the
-    rest of the well open."""
+    """
+    Shut in the connection responsible for the breach, leaving the
+    rest of the well open.
+    """
 
     PLUS_CON = "+con"
-    """Shut in the worst connection, then check the well's limits again;
-    repeat until the well satisfies them or has no connections left open."""
+    """
+    Shut in the worst connection, then check the well's limits again;
+    repeat until the well satisfies them or has no connections left open.
+    """
 
     def __str__(self) -> str:
         return self.value
@@ -714,6 +720,9 @@ class WellControls(
         Replace the current control for `name` wholesale (say for a
         `WCONPROD`/`WCONINJE` reissue, a limit-triggered mode switch, or an
         initial assignment).
+
+        :param name: Well name.
+        :param control: New `WellControl` for that well.
         """
         self.controls[name] = control
 
@@ -725,8 +734,8 @@ class WellControls(
         The `WellControl` analogue of deck `WELTARG`/`WELCNTL` (single-target edits),
         once `factories.py` parses those.
 
-        :raises KeyError    groups: typing.Optional[WellGroups] = None
-        : If `name` has no current control set.
+        :param name: Well name.
+        :raises KeyError: If `name` has no current control set.
         """
         current = self.controls.get(name)
         if current is None:
