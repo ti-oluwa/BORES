@@ -1,5 +1,6 @@
 """Generic event-driven scheduling: `Event`/`Action` protocols, `Rule`, `Schedule`."""
 
+import datetime
 import threading
 import typing
 
@@ -52,6 +53,9 @@ class ScheduleContext:
 
     step_size: Number | None = None
     """The current time-step's size, in `unit_system`, if the caller is tracking one."""
+
+    start_date: datetime.datetime | None = None
+    """The simulation's start date, if the caller is tracking one."""
 
     unit_system: UnitSystem = UnitSystem.FIELD
     """Unit system for `time`, `previous_time`, and any value an event reads."""
@@ -215,6 +219,7 @@ class Schedule(typing.Generic[ModelT]):
         time_step: int | None = None,
         previous_time_step: int | None = None,
         step_size: Number | None = None,
+        start_date: datetime.datetime | None = None,
         extra: typing.Mapping[str, object] | None = None,
     ) -> ModelT:
         """
@@ -227,6 +232,7 @@ class Schedule(typing.Generic[ModelT]):
         :param time_step: The current time-step index, if tracked.
         :param previous_time_step: The time-step index last advanced at, if tracked.
         :param step_size: The current time-step's size, if tracked.
+        :param start_date: The simulation's start date, if tracked.
         :param extra: Additional domain-specific context.
         :returns: The model after every firing rule's action has run.
         """
@@ -237,6 +243,7 @@ class Schedule(typing.Generic[ModelT]):
             time_step=time_step,
             previous_time_step=previous_time_step,
             step_size=step_size,
+            start_date=start_date,
             extra=extra or {},
         )
         return self.apply(model=model, context=context)

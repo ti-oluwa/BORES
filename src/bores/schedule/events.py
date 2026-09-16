@@ -3,6 +3,7 @@
 import enum
 import operator
 import typing
+from datetime import datetime
 
 import attrs
 
@@ -14,12 +15,14 @@ from bores.schedule.base import (
     event_type,
 )
 from bores.types import Boolean, Number
+from bores.utils import get_current_date
 
 __all__ = [
     "COMPARISON_FUNCTIONS",
     "AllOf",
     "AnyOf",
     "ComparisonOperator",
+    "DateEvent",
     "IntervalEvent",
     "ThresholdEvent",
     "TimeEvent",
@@ -89,6 +92,44 @@ class TimeStepEvent(SerializableEvent[ModelT]):
                 "`context.previous_time_step` to both be set."
             )
         return context.previous_time_step < self.at <= context.time_step
+
+
+@event_type
+@attrs.frozen(kw_only=True, slots=True)
+class DateEvent(SerializableEvent[ModelT]):
+    """Fires once, the first time the schedule is advanced past `at`."""
+
+    at: str | datetime
+    """The date this event fires at, in ISO 8601 format or as a `datetime.datetime`."""
+
+    def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:
+        """
+        Fires when `context.start_date + context.time` crosses `at` since
+        `context.start_date + context.previous_time`.
+
+        :param model: The model being scheduled against. Unused.
+        :param context: The current moment's context. `context.start_date`
+            must be set.
+        :returns: Whether `at` was just crossed.
+        """
+        if context.start_date is None:
+            raise ValidationError(f"{type(self).__name__} needs `context.start_date` to be set.")
+
+        current_date = get_current_date(
+            start_date=context.start_date,
+            elapsed_time=context.time,
+            unit_system=context.unit_system,
+        )
+        previous_date = get_current_date(
+            start_date=context.start_date,
+            elapsed_time=context.previous_time,
+            unit_system=context.unit_system,
+        )
+        if isinstance(self.at, str):
+            at = datetime.fromisoformat(self.at)
+        else:
+            at = self.at
+        return previous_date < at <= current_date
 
 
 @event_type

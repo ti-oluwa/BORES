@@ -1,6 +1,7 @@
 import base64
 import logging
 import typing
+from datetime import datetime, timedelta
 
 import numba  # type: ignore[import-untyped]
 import numpy as np
@@ -447,3 +448,49 @@ def get_hydrostatic_gradient_factor(unit_system: UnitSystem) -> float:
     elif unit_system == UnitSystem.SI:
         return c.HYDROSTATIC_GRADIENT_FACTOR_SI  # Pa per (kg/m^3 * m)
     raise ValueError(f"Unsupported unit system: {unit_system!r}")
+
+
+TIME_UNIT_PER_UNIT_SYSTEM = {
+    UnitSystem.FIELD: "days",
+    UnitSystem.METRIC: "days",
+    UnitSystem.LAB: "hours",
+    UnitSystem.SI: "seconds",
+}
+"""Elapsed-time unit each `UnitSystem` uses, following Eclipse/OPM convention."""
+
+
+def get_current_date(
+    *, start_date: datetime, elapsed_time: Number, unit_system: UnitSystem
+) -> datetime:
+    """
+    Converts an elapsed-time offset into a calendar date.
+
+    :param start_date: The run's start date.
+    :param elapsed_time: Time since `start_date`, in `unit_system`'s own
+        time unit (days for `FIELD`/`METRIC`, hours for `LAB`, seconds for `SI`).
+    :param unit_system: Determines `elapsed_time`'s unit.
+    :returns: `start_date` plus `elapsed_time`.
+    """
+    return start_date + timedelta(**{TIME_UNIT_PER_UNIT_SYSTEM[unit_system]: float(elapsed_time)})
+
+
+def get_current_time(
+    *, start_date: datetime, current_date: datetime, unit_system: UnitSystem
+) -> float:
+    """
+    Converts a calendar date into an elapsed-time offset from `start_date`.
+
+    :param start_date: The run's start date.
+    :param current_date: The date to find the elapsed time to.
+    :param unit_system: Determines the result's unit (days for
+        `FIELD`/`METRIC`, hours for `LAB`, seconds for `SI`).
+    :returns: `current_date - start_date`, in `unit_system`'s own time unit.
+    """
+    from bores.constants import c
+
+    total_seconds = (current_date - start_date).total_seconds()
+    if unit_system is UnitSystem.SI:
+        return total_seconds
+    if unit_system is UnitSystem.LAB:
+        return total_seconds * c.DAYS_PER_SECOND * c.HOURS_PER_DAY
+    return total_seconds * c.DAYS_PER_SECOND
