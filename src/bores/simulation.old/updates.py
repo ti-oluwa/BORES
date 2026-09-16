@@ -27,7 +27,7 @@ from bores.grids.pvt import (
     buildsolution_gas_to_oil_ratio_grid,
 )
 from bores.grids.rock_fluid import build_effective_residual_saturation_grids
-from bores.reservoir import FluidProperties, HysteresisState, RockProperties
+from bores.reservoir import FluidProperties, Hysteresis, RockProperties
 from bores.types import MiscibilityModel, NDimensionalGrid, ThreeDimensions
 from bores.wells.base import Wells
 
@@ -450,7 +450,7 @@ def update_fluid_properties(
 
 def update_residual_saturation_grids(
     rock_properties: RockProperties[ThreeDimensions],
-    hysteresis_state: HysteresisState[ThreeDimensions],
+    hysteresis_state: Hysteresis[ThreeDimensions],
     water_saturation_grid: NDimensionalGrid[ThreeDimensions],
     gas_saturation_grid: NDimensionalGrid[ThreeDimensions],
     old_water_saturation_grid: NDimensionalGrid[ThreeDimensions],
@@ -459,7 +459,7 @@ def update_residual_saturation_grids(
     residual_oil_drainage_ratio_gas_flood: float = 0.6,  # sorg_drainage = 0.6 x sorg_imbibition
     residual_gas_drainage_ratio: float = 0.5,  # sgr_drainage = 0.5 x sgr_imbibition
     tolerance: float = 1e-6,
-) -> tuple[RockProperties[ThreeDimensions], HysteresisState[ThreeDimensions]]:
+) -> tuple[RockProperties[ThreeDimensions], Hysteresis[ThreeDimensions]]:
     """
     Updates the effective residual saturation grids based on current displacement regimes
     (drainage or imbibition) determined from hysteresis state and current saturations.
@@ -472,7 +472,7 @@ def update_residual_saturation_grids(
     :param residual_gas_drainage_ratio: Ratio to compute gas drainage residual from imbibition value.
     :param residual_oil_drainage_ratio_gas_flood: Ratio to compute oil drainage residual from gas flooding imbibition value.
     :param tolerance: Tolerance to determine significant saturation changes.
-    :return: Tuple of updated `RockProperties` and `HysteresisState` with new effective residual saturations
+    :return: Tuple of updated `RockProperties` and `Hysteresis` with new effective residual saturations
     """
     residual_oil_saturation_water_grid = rock_properties.residual_oil_saturation_water_grid
     residual_oil_saturation_gas_grid = rock_properties.residual_oil_saturation_gas_grid

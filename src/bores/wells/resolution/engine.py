@@ -1,4 +1,4 @@
-"""Top-level well-control resolution: one well's row, one call."""
+"""Top-level well-control resolution. One well's row per call."""
 
 import typing
 
@@ -11,7 +11,6 @@ from bores.wells.compile import (
     WellKind,
 )
 from bores.wells.hydraulics.base import SurfaceFluidProperties, WellBoreModel
-from bores.wells.resolution.compile import WellsWorkspace, build_perforation_workspace
 from bores.wells.resolution.limits import apply_limits
 from bores.wells.resolution.solvers import (
     ALL_PHASES,
@@ -27,11 +26,12 @@ from bores.wells.resolution.solvers import (
 )
 from bores.wells.resolution.spec import WellControlSpec
 from bores.wells.states import ConnectionSample
+from bores.wells.workspace import WellsWorkspace, build_perforation_workspace
 
-__all__ = ["resolve_control"]
+__all__ = ["resolve_well_control"]
 
 
-def resolve_control(
+def resolve_well_control(
     *,
     compiled_system: CompiledWellSystem,
     well_row: Integer,
@@ -85,7 +85,7 @@ def resolve_control(
     ]
     if not active_open or len(active_open) != len(connection_samples):
         raise ValidationError(
-            f"`resolve_control`: `well_row` {well_row} has {len(active_open)} "
+            f"`resolve_well_control`: `well_row` {well_row} has {len(active_open)} "
             f"active/open connections but was given {len(connection_samples)} "
             "`connection_samples`. These must match 1:1."
         )
@@ -167,7 +167,7 @@ def resolve_control(
             raise ValidationError(
                 f"Well row {well_row} is under GRUP control - resolve group "
                 "allocation (wells.resolution.allocation) into a concrete "
-                "rate/BHP target before calling resolve_control."
+                "rate/BHP target before calling resolve_well_control."
             )
         else:
             raise ValidationError(f"Unknown InjectorControlModeTag: {control_mode!r}.")
@@ -235,7 +235,7 @@ def resolve_control(
             raise ValidationError(
                 f"Well row {well_row} is under GRUP control - resolve group "
                 "allocation (wells.resolution.allocation) into a concrete "
-                "rate/BHP target before calling resolve_control."
+                "rate/BHP target before calling resolve_well_control."
             )
         else:
             raise ValidationError(f"Unknown ProducerControlModeTag: {control_mode!r}.")

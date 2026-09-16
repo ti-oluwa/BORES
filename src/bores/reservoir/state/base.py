@@ -72,7 +72,8 @@ class Hysteresis(StoreSerializable):
     These are consumed inside relative-permeability and capillary-pressure
     evaluation routines; the flow solver does not interpret them directly.
 
-    All arrays are dimensionless (saturations, flags) and therefore require no unit conversion.
+    All arrays are dimensionless (saturations, flags) and therefore require
+    no unit conversion.
     """
 
     max_water_saturation: CellArray
@@ -464,7 +465,7 @@ class ReservoirState(StoreSerializable):
 
     hysteresis: Hysteresis | None = None
     """
-    Optional `HysteresisState` for Killough scanning curves.
+    Optional `Hysteresis` for Killough scanning curves.
     `None` (default) for simulations without hysteresis.
     """
 

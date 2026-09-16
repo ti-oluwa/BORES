@@ -17,7 +17,7 @@ from bores.grids.base import (
     build_uniform_grid,
 )
 from bores.precision import get_dtype
-from bores.reservoir import HysteresisState
+from bores.reservoir import Hysteresis
 from bores.types import NDimension, NDimensionalGrid, ThreeDimensions
 
 logger = logging.getLogger(__name__)
@@ -419,7 +419,7 @@ def build_rock_fluid_properties_grids(
     permeability_grid: NDimensionalGrid[ThreeDimensions],
     relative_permeability_table: RelativePermeabilityTable,
     capillary_pressure_table: CapillaryPressureTable | None = None,
-    hysteresis_state: HysteresisState[ThreeDimensions] | None = None,
+    hysteresis_state: Hysteresis[ThreeDimensions] | None = None,
     disable_capillary_effects: bool = False,
     capillary_strength_factor: float = 1.0,
     phase_appearance_tolerance: float = 1e-6,
@@ -445,7 +445,7 @@ def build_rock_fluid_properties_grids(
     :param permeability_grid: Reservoir mean permeability grid (mD).
     :param relative_permeability_table: Relative permeability table.
     :param capillary_pressure_table: Optional capillary pressure table. Required if capillary effects are enabled.
-    :param hysteresis_state: Optional `HysteresisState` instance for tracking drainage-imbibition effects. If provided, its historical saturation extrema and displacement flags are used to compute hysteresis-dependent properties.
+    :param hysteresis_state: Optional `Hysteresis` instance for tracking drainage-imbibition effects. If provided, its historical saturation extrema and displacement flags are used to compute hysteresis-dependent properties.
     :param disable_capillary_effects: If True, capillary effects are disabled (zero capillary pressures).
     :param capillary_strength_factor: Factor to scale capillary pressure grids.
     :param phase_appearance_tolerance: Tolerance for phase appearance/disappearance.

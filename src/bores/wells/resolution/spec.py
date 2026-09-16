@@ -1,9 +1,11 @@
 import attrs
+from typing_extensions import Self
 
-from bores.constants import c
+from bores.constants import UnitConversionTable, c, get_conversion_factors
 from bores.errors import ValidationError
 from bores.serde.base import Serializable
-from bores.types import Integer, Number
+from bores.types import Integer, Number, UnitSystem
+from bores.utils import scale
 
 __all__ = ["WellControlSpec"]
 
@@ -29,6 +31,8 @@ class WellControlSpec(Serializable):
     injector_bhp_bracket_multiplier: Number = attrs.field(
         factory=lambda: c.CONTROL_INJECTOR_BHP_BRACKET_MULTIPLIER
     )
+    unit_system: UnitSystem = UnitSystem.FIELD
+    """Unit system for pressure-valued control limits."""
 
     def __attrs_post_init__(self) -> None:
         if self.max_fixed_point_iterations < 1:
@@ -58,3 +62,32 @@ class WellControlSpec(Serializable):
                 "`injector_bhp_bracket_multiplier` must be > 1.0; got "
                 f"{self.injector_bhp_bracket_multiplier}."
             )
+
+    def convert(
+        self,
+        target: UnitSystem,
+        /,
+        *,
+        table: UnitConversionTable | None = None,
+    ) -> Self:
+        """
+        Return a new `WellControlSpec` with pressure-valued limits rescaled
+        to *target*.
+
+        `producer_bhp_floor` is converted using the pressure factor for the
+        source and target unit systems. Iteration limits, tolerances, and
+        dimensionless multipliers are copied unchanged.
+
+        :param target: Target unit system.
+        :param table: Optional custom conversion table.
+        :returns: New `WellControlSpec` in *target* units.
+        """
+        if target == self.unit_system:
+            return self
+
+        factors = get_conversion_factors(self.unit_system, target, table=table)
+        return attrs.evolve(
+            self,
+            producer_bhp_floor=scale(self.producer_bhp_floor, factors["pressure"]),
+            unit_system=target,
+        )

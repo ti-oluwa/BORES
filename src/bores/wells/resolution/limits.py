@@ -13,7 +13,6 @@ from bores.wells.compile import (
     RateQuantityTag,
 )
 from bores.wells.hydraulics.base import SurfaceFluidProperties, WellBoreModel
-from bores.wells.resolution.compile import PerforationWorkspace
 from bores.wells.resolution.solvers import (
     RATE_QUANTITY_PHASES,
     bisect_bhp,
@@ -23,6 +22,7 @@ from bores.wells.resolution.solvers import (
 )
 from bores.wells.resolution.spec import WellControlSpec
 from bores.wells.states import ConnectionSample, PhaseValues
+from bores.wells.workspace import PerforationWorkspace
 
 __all__ = ["apply_limits"]
 

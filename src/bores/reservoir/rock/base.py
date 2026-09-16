@@ -231,7 +231,7 @@ class Rock(StoreSerializable):
     Equal to or greater than `connate_water_saturation`.
     """
 
-    residual_oil_saturation_water_flood: CellArray
+    residual_oil_saturation_water: CellArray
     """
     Shape (n_cells,) - residual oil saturation at end of water flooding
     (Sor,w - fraction).
@@ -239,7 +239,7 @@ class Rock(StoreSerializable):
     Oil is immobile below this saturation during water-flood imbibition.
     """
 
-    residual_oil_saturation_gas_flood: CellArray
+    residual_oil_saturation_gas: CellArray
     """
     Shape (n_cells,) - residual oil saturation at end of gas flooding
     (Sor,g - fraction).
@@ -341,8 +341,8 @@ class Rock(StoreSerializable):
             else None,
             connate_water_saturation=self.connate_water_saturation,
             irreducible_water_saturation=self.irreducible_water_saturation,
-            residual_oil_saturation_water_flood=self.residual_oil_saturation_water_flood,
-            residual_oil_saturation_gas_flood=self.residual_oil_saturation_gas_flood,
+            residual_oil_saturation_water=self.residual_oil_saturation_water,
+            residual_oil_saturation_gas=self.residual_oil_saturation_gas,
             residual_gas_saturation=self.residual_gas_saturation,
             unit_system=target,
         )
@@ -376,23 +376,23 @@ class Rock(StoreSerializable):
         :returns: Dictionary keyed by `Rock` field name, each shape `(n_cells,)`.
         """
         connate_water_saturation = np.zeros(n_cells, dtype=dtype)
-        residual_oil_saturation_water_flood = np.zeros(n_cells, dtype=dtype)
-        residual_oil_saturation_gas_flood = np.zeros(n_cells, dtype=dtype)
+        residual_oil_saturation_water = np.zeros(n_cells, dtype=dtype)
+        residual_oil_saturation_gas = np.zeros(n_cells, dtype=dtype)
         residual_gas_saturation = np.zeros(n_cells, dtype=dtype)
 
         for satnum in np.unique(saturation_region):
             mask = saturation_region == satnum
             endpoints = satfunc.region(satnum).relative_permeability.get_saturation_endpoints()
             connate_water_saturation[mask] = endpoints.connate_water
-            residual_oil_saturation_water_flood[mask] = endpoints.residual_oil_water
-            residual_oil_saturation_gas_flood[mask] = endpoints.residual_oil_gas
+            residual_oil_saturation_water[mask] = endpoints.residual_oil_water
+            residual_oil_saturation_gas[mask] = endpoints.residual_oil_gas
             residual_gas_saturation[mask] = endpoints.residual_gas
 
         return {
             "connate_water_saturation": connate_water_saturation,
             "irreducible_water_saturation": connate_water_saturation.copy(),
-            "residual_oil_saturation_water_flood": residual_oil_saturation_water_flood,
-            "residual_oil_saturation_gas_flood": residual_oil_saturation_gas_flood,
+            "residual_oil_saturation_water": residual_oil_saturation_water,
+            "residual_oil_saturation_gas": residual_oil_saturation_gas,
             "residual_gas_saturation": residual_gas_saturation,
         }
 
@@ -509,11 +509,11 @@ class Rock(StoreSerializable):
             irreducible_water_saturation=get_saturation_endpoint(
                 "SWCRIT", "irreducible_water_saturation", table_derived_endpoints
             ),
-            residual_oil_saturation_water_flood=get_saturation_endpoint(
-                "SOWCR", "residual_oil_saturation_water_flood", table_derived_endpoints
+            residual_oil_saturation_water=get_saturation_endpoint(
+                "SOWCR", "residual_oil_saturation_water", table_derived_endpoints
             ),
-            residual_oil_saturation_gas_flood=get_saturation_endpoint(
-                "SOGCR", "residual_oil_saturation_gas_flood", table_derived_endpoints
+            residual_oil_saturation_gas=get_saturation_endpoint(
+                "SOGCR", "residual_oil_saturation_gas", table_derived_endpoints
             ),
             residual_gas_saturation=get_saturation_endpoint(
                 "SGCR", "residual_gas_saturation", table_derived_endpoints

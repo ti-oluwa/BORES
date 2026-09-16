@@ -20,7 +20,7 @@ from bores.precision import get_dtype
 from bores.reservoir import (
     BlackOil,
     FluidProperties,
-    HysteresisState,
+    Hysteresis,
     Permeability,
     RockProperties,
 )
@@ -346,7 +346,7 @@ def validate_state(
             dtype=dtype,
         )
         sat_hist = model.hysteresis_state
-        hysteresis_state = HysteresisState(
+        hysteresis_state = Hysteresis(
             max_water_saturation_grid=_validate_array(
                 model_shape=model_shape,
                 grid=sat_hist.max_water_saturation_grid,

@@ -41,8 +41,8 @@ def validate_rock(rock: Rock, n_cells: int) -> Rock:
         "rock.net_to_gross": rock.net_to_gross,
         "rock.connate_water_saturation": rock.connate_water_saturation,
         "rock.irreducible_water_saturation": rock.irreducible_water_saturation,
-        "rock.residual_oil_saturation_water_flood": (rock.residual_oil_saturation_water_flood),
-        "rock.residual_oil_saturation_gas_flood": (rock.residual_oil_saturation_gas_flood),
+        "rock.residual_oil_saturation_water": (rock.residual_oil_saturation_water),
+        "rock.residual_oil_saturation_gas": (rock.residual_oil_saturation_gas),
         "rock.residual_gas_saturation": rock.residual_gas_saturation,
     }
     for name, array in checks.items():
@@ -57,6 +57,7 @@ class Reservoir(
         "grid": Grid,
         "rock": Rock,
         "regions": Regions | None,
+        "faults": typing.Collection[Fault] | None,
         "unit_system": UnitSystem | None,
     },
 ):
@@ -71,11 +72,15 @@ class Reservoir(
     __slots__ = (
         "_face_transmissibility_map",
         "_transmissibilities",
+        "faults",
         "grid",
         "regions",
         "rock",
         "unit_system",
     )
+
+    # TODO: Add flag to track fault application, so the
+    # same faults are not applied twice when the reservoir is dumped and loaded
 
     def __init__(
         self,
@@ -90,6 +95,8 @@ class Reservoir(
 
         :param grid: Fully constructed `bores.grids.base.Grid`.
         :param rock: Static petrophysical properties. Array lengths must equal `grid.n_cells`.
+        :param regions: Optional per-cell region assignments. Array lengths must equal `grid.n_cells`.
+        :param faults: Optional collection of `Fault` objects to apply to the grid.
         :param unit_system: Target unit system for all property groups. When `None`, defaults
             to `grid.unit_system`.
         :raises ValidationError: If any array length in `rock`, `state`, or `hysteresis` does not
@@ -117,6 +124,9 @@ class Reservoir(
 
         self.regions = regions
         """Per-cell region assignments metadata."""
+
+        self.faults = faults
+        """Optional collection of `Fault` objects applied to the grid."""
 
         self.unit_system = target_unit_system
         """
@@ -272,6 +282,7 @@ class Reservoir(
             regions=self.regions,
             unit_system=target,
         )
+        new_model.faults = self.faults
         # Transmissibility cache is invalidated automatically since rock was
         # converted and the new model starts with a clean cache.
         return new_model
@@ -306,6 +317,7 @@ class Reservoir(
             "n_interior_faces": self.n_interior_faces,
             "n_boundary_faces": self.n_boundary_faces,
             "n_nnc": self.grid.n_nnc,
+            "n_faults": len(self.faults) if self.faults else 0,
             "unit_system": self.unit_system.value,
             "total_pore_volume": float(self.pore_volumes.sum()),
             "has_transmissibility_multipliers": (self.grid.has_transmissibility_multipliers),
@@ -319,6 +331,7 @@ class Reservoir(
             f"n_interior={self.n_interior_faces}, "
             f"n_boundary={self.n_boundary_faces}, "
             f"n_nnc={self.n_nnc}, "
+            f"n_faults={len(self.faults) if self.faults else 0}, "
             f"unit_system={self.unit_system.value!r}, "
             f")"
         )

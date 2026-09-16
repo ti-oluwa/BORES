@@ -42,7 +42,7 @@ from bores.precision import get_dtype
 from bores.reservoir import (
     BlackOil,
     FluidProperties,
-    HysteresisState,
+    Hysteresis,
     RockProperties,
 )
 from bores.rock_fluid.relperm import RelPermEndpoints
@@ -102,7 +102,7 @@ class StepResult(typing.Generic[NDimension]):
     """Size of the current time step (seconds)."""
     time: float
     """Total elapsed simulation time (seconds)."""
-    hysteresis_state: HysteresisState[NDimension] | None = None
+    hysteresis_state: Hysteresis[NDimension] | None = None
     """Updated hysteresis state after the time step."""
     rates: WellRates[NDimension] | None = None
     """Well rate info for the step"""
@@ -139,7 +139,7 @@ def _validate_pressure_range(
     time: float,
     fluid_properties: FluidProperties[ThreeDimensions],
     rock_properties: RockProperties[ThreeDimensions],
-    hysteresis_state: HysteresisState[ThreeDimensions] | None = None,
+    hysteresis_state: Hysteresis[ThreeDimensions] | None = None,
 ) -> StepResult[ThreeDimensions] | None:
     """
     Check for out-of-range pressures and return a failure `StepResult` if found.
@@ -297,7 +297,7 @@ def _make_bhps(grid_shape: NDimension) -> BottomHolePressures[float, NDimension]
 def _rebuild_rock_fluid_grids(
     fluid_properties: FluidProperties[ThreeDimensions],
     rock_properties: RockProperties[ThreeDimensions],
-    hysteresis_state: HysteresisState[ThreeDimensions] | None,
+    hysteresis_state: Hysteresis[ThreeDimensions] | None,
     config: Config,
 ) -> tuple[
     RelPermGrids[ThreeDimensions],
@@ -347,7 +347,7 @@ def _run_impes_step(
     face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
-    hysteresis_state: HysteresisState[ThreeDimensions] | None,
+    hysteresis_state: Hysteresis[ThreeDimensions] | None,
     relperm_grids: RelPermGrids[ThreeDimensions],
     relperm_endpoints: RelPermEndpoints,
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
@@ -789,7 +789,7 @@ def _run_sequential_implicit_step(
     face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
-    hysteresis_state: HysteresisState[ThreeDimensions] | None,
+    hysteresis_state: Hysteresis[ThreeDimensions] | None,
     relperm_grids: RelPermGrids[ThreeDimensions],
     relperm_endpoints: RelPermEndpoints,
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
@@ -1213,7 +1213,7 @@ def _run_full_sequential_implicit_step(
     face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
-    hysteresis_state: HysteresisState[ThreeDimensions] | None,
+    hysteresis_state: Hysteresis[ThreeDimensions] | None,
     relperm_grids: RelPermGrids[ThreeDimensions],
     relperm_endpoints: RelPermEndpoints,
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],

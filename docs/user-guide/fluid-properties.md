@@ -240,6 +240,6 @@ The factory follows a deterministic resolution order, checking at each step whet
 6. Resolve $B_o$ and $c_o$ using iterative bootstrap if both are missing, or a single pass if one is provided.
 7. Compute oil density, live oil viscosity, and gas solubility in water.
 8. Resolve water density, $B_w$, $c_w$, and $\mu_w$ from pressure, temperature, and salinity.
-9. Assemble `FluidProperties`, `RockProperties`, and `HysteresisState` into a `BlackOil`.
+9. Assemble `FluidProperties`, `RockProperties`, and `Hysteresis` into a `BlackOil`.
 
 Because all grid fields in `FluidProperties` are stored as numpy arrays, you can inspect the full set of computed properties before running any simulation by examining `model.fluid_properties` directly after calling `bores.reservoir_model()`.

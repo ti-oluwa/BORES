@@ -11,13 +11,13 @@ from bores.wells.compile import (
     RateQuantityTag,
 )
 from bores.wells.hydraulics.base import SurfaceFluidProperties, WellBoreModel
-from bores.wells.resolution.compile import (
+from bores.wells.resolution.spec import WellControlSpec
+from bores.wells.states import ConnectionSample, PhaseValues
+from bores.wells.workspace import (
     PerforationWorkspace,
     accumulate_phase_rates,
     build_connection_phase_rates,
 )
-from bores.wells.resolution.spec import WellControlSpec
-from bores.wells.states import ConnectionSample, PhaseValues
 
 __all__ = [
     "PRODUCER_RATE_MODE_PHASES",

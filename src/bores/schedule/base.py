@@ -168,8 +168,8 @@ class Rule(
         self.name = name
 
     def __repr__(self) -> str:
-        label = f" {self.name!r}" if self.name else ""
-        return f"{type(self).__name__}({self.event!r}, {self.action!r}{label})"
+        label = f"{self.name!r}" if self.name else "<un-named>"
+        return f"{type(self).__name__}({label}, when={self.event!r}, do={self.action!r})"
 
 
 @attrs.frozen(kw_only=True, slots=True)

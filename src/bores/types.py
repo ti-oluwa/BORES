@@ -13,7 +13,7 @@ __all__ = [
     "ArrayLike",
     "CapillaryPressures",
     "Coordinates",
-    "EvolutionScheme",
+    "DiscretizationMethod",
     "FluidPhase",
     "Interpolator",
     "MiscibilityModel",
@@ -202,19 +202,12 @@ class Side(enum.Enum):
 WellFluidType = typing.Literal["water", "oil", "gas"]
 """Types of fluids that can be injected in the simulation"""
 
-EvolutionScheme = typing.Literal[
-    "impes",
-    "sequential-implicit",
-    "full-sequential-implicit",
-    "si",
-    "full-si",
-]
+DiscretizationMethod = typing.Literal["impes", "implicit"]
 """
 Discretization methods for numerical simulations
 
 - `"impes"`: Implicit pressure, Explicit saturation
-- `"sequential-implicit"` or `"si"`: Both pressure and saturation are treated (sequentially) implicitly
-- `"full-sequential-implicit"` or `"full-si"`: Both pressure and saturation are treated (sequentially) implicitly
+- `"implicit"`: Both pressure and saturation are treated implicitly
 """
 
 MiscibilityModel = typing.Literal["immiscible", "todd-longstaff"]

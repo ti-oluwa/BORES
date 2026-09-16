@@ -1,5 +1,6 @@
 """Compiled (buffer-reuse) structures for the well-control resolution hot path."""
 
+import math
 import typing
 
 import numba
@@ -8,8 +9,17 @@ import numpy.typing as npt
 
 from bores.precision import get_dtype
 from bores.types import Boolean, IntArray, Integer, Number, NumberArray, OneDimension
-from bores.wells.compile import UNSET_INT
-from bores.wells.states import ConnectionSample, PhaseValues
+from bores.utils import none_if_nan
+from bores.wells.base import Wells
+from bores.wells.compile import UNSET_INT, CompiledWellSystem
+from bores.wells.decompile import decompile_limit, decompile_perforations, decompile_well_control
+from bores.wells.states import (
+    ConnectionSample,
+    PerforationState,
+    PhaseValues,
+    WellsStates,
+    WellState,
+)
 
 __all__ = [
     "PerforationWorkspace",
@@ -19,6 +29,7 @@ __all__ = [
     "build_perforation_workspace",
     "build_wells_workspace",
     "compute_perforation_drawdown",
+    "load_wells_states",
 ]
 
 
@@ -142,11 +153,9 @@ class WellsWorkspace(typing.NamedTuple):
     """
     Every well's control-resolution result, one row per well.
 
-    Built once for the whole run (`build_wells_workspace`), not once per
-    timestep - every `resolve_control` call updates rows in place. A
-    reported timestep's `WellsStates` is decompiled from whatever this
-    holds at that point; nothing here is cleared between timesteps
-    before the next resolve pass overwrites each row it touches.
+    A reported timestep's `WellsStates` is decompiled from whatever this
+    holds at that point. Nothing here is cleared between timesteps.
+    The next resolve pass overwrites each row in place.
     """
 
     bhps: NumberArray[OneDimension]
@@ -208,9 +217,9 @@ def build_wells_workspace(
 ) -> WellsWorkspace:
     """
     Builds an empty `WellsWorkspace` for a system of `n_wells` wells with
-    `n_connections` active connections in total. Call once at the start
-    of a run. Every `resolve_control` call across every timestep
-    updates rows in this same object in place.
+    `n_connections` active connections in total. To be called once at the start
+    of a run. Every `resolve_control` call across every timestep updates rows in
+    this same object in place.
 
     :param n_wells: Number of wells.
     :param n_connections: Total active connections across every well,
@@ -371,12 +380,6 @@ def build_connection_phase_rates(
     `connection_phase_rates` parameter) needs, from `accumulate_phase_rates`'
     per-connection output buffers.
 
-    Not `numba.njit` - `PhaseValues` is a plain `NamedTuple` consumed by
-    the still-Python `compute_perforation_pressures` orchestration, not
-    the jitted primitives. Callers on the hot path should expect this to
-    allocate one list and `n` tuples per call; folding the hydraulics
-    walk itself into the compiled layer (Step 5/8) is what removes this.
-
     :param connection_oil_rates: `PerforationWorkspace.connection_oil_rates`,
         already populated by `accumulate_phase_rates`.
     :param connection_water_rates: Water analogue of `connection_oil_rates`.
@@ -389,3 +392,85 @@ def build_connection_phase_rates(
             connection_oil_rates, connection_water_rates, connection_gas_rates, strict=False
         )
     ]
+
+
+def load_wells_states(
+    wells: Wells, compiled_system: CompiledWellSystem, workspace: WellsWorkspace
+) -> WellsStates:
+    """
+    Load `WellsStates` from a resolved `WellsWorkspace`.
+
+    Only covers wells actually resolved this pass/step. A well whose
+    `WellStatus` is still `PENDING` (its BHP is left `NaN` by
+    `resolve_control`) is skipped rather than reported with meaningless
+    values.
+
+    :param wells: The original rich `Wells` this system was compiled
+        from. This supplies each `PerforationState.perforation`, which the
+        compiled layer doesn't retain a reference to.
+    :param compiled_system: The system `workspace` was resolved against.
+    :param workspace: A `WellsWorkspace` from a completed resolve pass.
+    :returns: One `WellState` per resolved well, keyed by well name.
+    """
+    controls = compiled_system.controls
+    perforations = compiled_system.perforations
+    unit_system = compiled_system.unit_system
+
+    states: dict[str, WellState] = {}
+    for well_row, well_name in enumerate(compiled_system.names):
+        bhp = workspace.bhps[well_row]
+        if math.isnan(bhp):
+            continue  # not resolved this pass (PENDING, or UNSET control)
+
+        row_start = perforations.well_offsets[well_row]
+        rich_perforations = decompile_perforations(wells, well_name, perforations, well_row)
+
+        perforation_states = []
+        for row in range(row_start, perforations.well_offsets[well_row + 1]):
+            pressure = workspace.connection_pressures[row]
+            if math.isnan(pressure):
+                continue  # this connection wasn't active this pass (shut or pending)
+
+            perforation_states.append(
+                PerforationState(
+                    perforation=rich_perforations[row - row_start],
+                    cell_index=int(perforations.cell_indices[row]),
+                    flowing_pressure=pressure,
+                    phase_rates=PhaseValues(
+                        oil=workspace.connection_oil_rates[row],
+                        water=workspace.connection_water_rates[row],
+                        gas=workspace.connection_gas_rates[row],
+                    ),
+                    unit_system=unit_system,
+                )
+            )
+
+        active_limit_row = workspace.active_limit_rows[well_row]
+        active_limit = (
+            None
+            if active_limit_row == UNSET_INT
+            else decompile_limit(controls, active_limit_row, unit_system)
+        )
+
+        states[well_name] = WellState(
+            well_name=well_name,
+            is_open=not bool(workspace.economic_shutins[well_row]),
+            active_control=decompile_well_control(controls, well_row, unit_system),
+            bhp=bhp,
+            perforation_states=tuple(perforation_states),
+            phase_rates=PhaseValues(
+                oil=workspace.oil_rates[well_row],
+                water=workspace.water_rates[well_row],
+                gas=workspace.gas_rates[well_row],
+            ),
+            surface_phase_rates=PhaseValues(
+                oil=workspace.surface_oil_rates[well_row],
+                water=workspace.surface_water_rates[well_row],
+                gas=workspace.surface_gas_rates[well_row],
+            ),
+            active_limit=active_limit,
+            thp=none_if_nan(workspace.thps[well_row]),
+            unit_system=unit_system,
+        )
+
+    return WellsStates(states=states, unit_system=unit_system)

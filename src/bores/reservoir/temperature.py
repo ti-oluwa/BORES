@@ -454,7 +454,7 @@ class Temperature(StoreSerializable):
             return cls(default=temperature, unit_system=unit_system)
 
         raise ValidationError(
-            "No temperature keyword found in the DeckFile. "
+            "No temperature keyword found in the `DeckFile`. "
             "Expected `TEMPVD` (depth-indexed table) or `RTEMP` (single scalar). "
             f"Supply a temperature explicitly via `{cls.__name__}(default=...)`."
         )

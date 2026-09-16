@@ -1,5 +1,6 @@
 import base64
 import logging
+import math
 import typing
 from datetime import datetime, timedelta
 
@@ -494,3 +495,13 @@ def get_current_time(
     if unit_system is UnitSystem.LAB:
         return total_seconds * c.DAYS_PER_SECOND * c.HOURS_PER_DAY
     return total_seconds * c.DAYS_PER_SECOND
+
+
+def none_if_nan(value: Number) -> Number | None:
+    """
+    Returns `value`, or `None` if it's `NaN`.
+
+    :param value: A possibly-`NaN` number read from a compiled array.
+    :returns: `value`, or `None` if it's `NaN`.
+    """
+    return None if math.isnan(value) else value

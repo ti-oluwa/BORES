@@ -1,10 +1,9 @@
 """Turns a resolved compiled well structure back into rich, readable objects."""
 
-import math
-
 import attrs
 
 from bores.types import FluidPhase, UnitSystem
+from bores.utils import none_if_nan
 from bores.wells.base import AnyPerforation, CompletionStatus, Well, Wells, WellStatus, WellType
 from bores.wells.compile import (
     UNSET_INT,
@@ -47,11 +46,8 @@ from bores.wells.groups import (
     GroupProducerControlMode,
 )
 from bores.wells.model import WellSystem
-from bores.wells.resolution.compile import WellsWorkspace
-from bores.wells.states import PerforationState, PhaseValues, WellsStates, WellState
 
 __all__ = [
-    "build_wells_states",
     "decompile_control",
     "decompile_group_control",
     "decompile_group_controls",
@@ -154,16 +150,6 @@ def get_completion_status(tag: int) -> CompletionStatus:
     :returns: The matching `CompletionStatus`.
     """
     return CompletionStatus.OPEN if tag else CompletionStatus.SHUT
-
-
-def none_if_nan(value: float) -> float | None:
-    """
-    Returns `value`, or `None` if it's `NaN`
-
-    :param value: A possibly-`NaN` float from a compiled array.
-    :returns: `value`, or `None` if it's `NaN`.
-    """
-    return None if math.isnan(value) else value
 
 
 def decompile_perforation(
@@ -543,91 +529,3 @@ def decompile_well_system(
             compiled_system.group_controls, compiled_system.unit_system
         ),
     )
-
-
-def build_wells_states(
-    wells: Wells,
-    compiled_system: CompiledWellSystem,
-    resolution: WellsWorkspace,
-) -> WellsStates:
-    """
-    Builds `WellsStates` from a resolved `WellsWorkspace`.
-
-    Only covers wells actually resolved this pass. A well whose
-    `WellStatus` is still `PENDING` (its BHP is left `NaN` by
-    `resolve_control`) is skipped rather than reported with meaningless
-    values.
-
-    Composes `decompile_perforations`, `decompile_limit`, and
-    `decompile_well_control` rather than rebuilding any of them inline,
-    so each piece can be reused or tested on its own.
-
-    :param wells: The original rich `Wells` this system was compiled
-        from. This supplies each `PerforationState.perforation`, which the
-        compiled layer doesn't retain a reference to.
-    :param compiled_system: The system `resolution` was resolved against.
-    :param resolution: A `WellsWorkspace` from a completed resolve pass.
-    :returns: One `WellState` per resolved well, keyed by well name.
-    """
-    controls = compiled_system.controls
-    perforations = compiled_system.perforations
-    unit_system = compiled_system.unit_system
-
-    states: dict[str, WellState] = {}
-    for well_row, well_name in enumerate(compiled_system.names):
-        bhp = resolution.bhps[well_row]
-        if math.isnan(bhp):
-            continue  # not resolved this pass (PENDING, or UNSET control)
-
-        row_start = perforations.well_offsets[well_row]
-        rich_perforations = decompile_perforations(wells, well_name, perforations, well_row)
-
-        perforation_states = []
-        for row in range(row_start, perforations.well_offsets[well_row + 1]):
-            pressure = resolution.connection_pressures[row]
-            if math.isnan(pressure):
-                continue  # this connection wasn't active this pass (shut or pending)
-
-            perforation_states.append(
-                PerforationState(
-                    perforation=rich_perforations[row - row_start],
-                    cell_index=int(perforations.cell_indices[row]),
-                    flowing_pressure=pressure,
-                    phase_rates=PhaseValues(
-                        oil=resolution.connection_oil_rates[row],
-                        water=resolution.connection_water_rates[row],
-                        gas=resolution.connection_gas_rates[row],
-                    ),
-                    unit_system=unit_system,
-                )
-            )
-
-        active_limit_row = resolution.active_limit_rows[well_row]
-        active_limit = (
-            None
-            if active_limit_row == UNSET_INT
-            else decompile_limit(controls, active_limit_row, unit_system)
-        )
-
-        states[well_name] = WellState(
-            well_name=well_name,
-            is_open=not bool(resolution.economic_shutins[well_row]),
-            active_control=decompile_well_control(controls, well_row, unit_system),
-            bhp=bhp,
-            perforation_states=tuple(perforation_states),
-            phase_rates=PhaseValues(
-                oil=resolution.oil_rates[well_row],
-                water=resolution.water_rates[well_row],
-                gas=resolution.gas_rates[well_row],
-            ),
-            surface_phase_rates=PhaseValues(
-                oil=resolution.surface_oil_rates[well_row],
-                water=resolution.surface_water_rates[well_row],
-                gas=resolution.surface_gas_rates[well_row],
-            ),
-            active_limit=active_limit,
-            thp=none_if_nan(resolution.thps[well_row]),
-            unit_system=unit_system,
-        )
-
-    return WellsStates(states=states, unit_system=unit_system)

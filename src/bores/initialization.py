@@ -816,8 +816,8 @@ def initialize_equilibrium_arrays(
 
     depth = reservoir.depth
     connate_water_saturation = reservoir.rock.connate_water_saturation
-    residual_oil_saturation_water = reservoir.rock.residual_oil_saturation_water_flood
-    residual_oil_saturation_gas = reservoir.rock.residual_oil_saturation_gas_flood
+    residual_oil_saturation_water = reservoir.rock.residual_oil_saturation_water
+    residual_oil_saturation_gas = reservoir.rock.residual_oil_saturation_gas
     residual_gas_saturation = reservoir.rock.residual_gas_saturation
 
     pressure = np.zeros(n_cells, dtype=dtype)
@@ -1010,7 +1010,7 @@ def initialize_reservoir_state(
     solution_gor: CellArray | None = None,
     vaporized_oil_to_gas_ratio: CellArray | None = None,
     depth_step: Number = 1.0,
-    with_hysteresis: bool = False,
+    hysteresis_enabled: bool = False,
     dtype: npt.DTypeLike = None,
     saturation_samples: int = N_SATURATION_SAMPLES,
 ) -> ReservoirState:
@@ -1056,7 +1056,7 @@ def initialize_reservoir_state(
     :param solution_gor: Optional explicit solution GOR array (overrides `RS` keyword).
     :param vaporized_oil_to_gas_ratio: Optional explicit vaporized oil ratio array (overrides `RV` keyword).
     :param depth_step: Step size for hydrostatic integration in equilibration.
-    :param with_hysteresis: If `True`, initialize hysteresis state from the
+    :param hysteresis_enabled: If `True`, initialize hysteresis state from the
         resolved saturations (`Hysteresis.from_initial_saturation`) for
         later scanning-curve tracking. Works regardless of whether
         saturations came from a sharp contact or capillary-pressure
@@ -1356,7 +1356,7 @@ def initialize_reservoir_state(
     zeros = np.zeros(n_cells, dtype=dtype)
     hysteresis = (
         Hysteresis.from_initial_saturation(water_saturation_array, gas_saturation_array)
-        if with_hysteresis
+        if hysteresis_enabled
         else None
     )
     return ReservoirState(

@@ -27,15 +27,15 @@ class TransmissibilityCache(typing.NamedTuple):
     Every field is shape `(n_interior_faces,)`, aligned with
     `grid.interior_face_indices`/`reservoir.transmissibilities.interior`.
 
-    That is, Position `p` here is the same connection as position `p` there, not a
+    That is, position `p` here is the same connection as position `p` there, not a
     global face index.
 
-    `*_upstream_cell` is the winning cell's *global* cell index
+    `*_upstream_cell` is the winning cell's global cell index
     (whichever of the connection's owner/neighbour has higher gravity-adjusted
     potential for that phase).
 
     `dT*_dP`/ `dT*_dsw` etc. give the transmissibility's sensitivity to the
-    *upstream* cell's primary variables only. This is because by construction
+    upstream cell's primary variables only. This is because by construction
     of upstream weighting, the downstream cell's mobility never enters a TPFA
     phase transmissibility at all, so its derivative is exactly zero and isn't
     stored. Which cell "upstream" refers to for a given connection is `*_upstream_cell`.
@@ -287,6 +287,8 @@ def compute_transmissibility_cache(
     oil_pressure: CellArray,
     oil_water_capillary_pressure: CellArray,
     gas_oil_capillary_pressure: CellArray,
+    gravity_enabled: bool = True,
+    capillary_effects_enabled: bool = True,
     out: TransmissibilityCache | None = None,
     dtype: npt.DTypeLike = None,
 ) -> TransmissibilityCache:
@@ -315,9 +317,14 @@ def compute_transmissibility_cache(
         `SatFuncCache.oil_water_capillary_pressure`.
     :param gas_oil_capillary_pressure: Shape `(n_cells,)` - `Pcgo`, e.g.
         `SatFuncCache.gas_oil_capillary_pressure`.
+    :param gravity_enabled: Whether to include the hydrostatic gravity term in
+        phase potentials. When false, the gravity term is omitted entirely.
+    :param capillary_effects_enabled: Whether to include capillary-pressure
+        contributions in the water and gas phase pressures; if false, both are
+        taken equal to the oil pressure.
     :param out: Previous `TransmissibilityCache` to overwrite in place, or
         `None` to allocate a new one.
-    :return: The populated `TransmissibilityCache` - `out` itself if given,
+    :return: The populated `TransmissibilityCache`. `out` itself if given,
         otherwise a newly allocated one. Always returned, never `None`.
     :raises ValueError: If `out` is given but sized for a different
         interior-connection count than `reservoir.grid`.
@@ -340,10 +347,20 @@ def compute_transmissibility_cache(
     neighbour_indices = grid.face_cell_indices[grid.interior_face_indices, 1]
     assert grid.cell_centroids is not None
     cell_depth = typing.cast(CellArray, grid.cell_centroids[:, 2])
-    gravity_acceleration = get_gravity_acceleration(reservoir.unit_system)
+    gravity_acceleration = (
+        get_gravity_acceleration(reservoir.unit_system) if gravity_enabled else 0.0
+    )
 
-    water_pressure = typing.cast(CellArray, oil_pressure - oil_water_capillary_pressure)
-    gas_pressure = typing.cast(CellArray, oil_pressure + gas_oil_capillary_pressure)
+    water_pressure = (
+        typing.cast(CellArray, oil_pressure - oil_water_capillary_pressure)
+        if capillary_effects_enabled
+        else oil_pressure
+    )
+    gas_pressure = (
+        typing.cast(CellArray, oil_pressure + gas_oil_capillary_pressure)
+        if capillary_effects_enabled
+        else oil_pressure
+    )
 
     update_transmissibility_cache(
         owner_indices=owner_indices,

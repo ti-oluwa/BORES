@@ -82,7 +82,7 @@ model = bores.reservoir_model(
 | `FluidProperties` | class | Oil, gas, and water PVT properties at reservoir conditions. |
 | `RockProperties` | class | Porosity, permeability, and compressibility. |
 | `Permeability` | class | Directional permeability (kx, ky, kz). |
-| `HysteresisState` | class | Historical saturation data for hysteresis tracking. |
+| `Hysteresis` | class | Historical saturation data for hysteresis tracking. |
 
 All data model classes are frozen `attrs` classes. You modify them using `attrs.evolve()` to create new instances with changed fields.
 
@@ -611,7 +611,7 @@ Type aliases and enumerations used throughout the API.
 | Name | Type | Description |
 | --- | --- | --- |
 | `FluidPhase` | enum | Fluid phase: `OIL`, `WATER`, `GAS`. |
-| `EvolutionScheme` | literal | Simulation scheme: `"impes"`, `"explicit"`, `"implicit"`. |
+| `DiscretizationMethod` | literal | Simulation scheme: `"impes"`, `"explicit"`, `"implicit"`. |
 | `Orientation` | enum | Spatial orientation for fractures and boundaries. |
 | `Wettability` | enum | Rock wettability: `WATER_WET`, `OIL_WET`, `MIXED_WET`. |
 | `MiscibilityModel` | literal | Miscibility model type: `"immiscible"` or `"todd_longstaff"` |

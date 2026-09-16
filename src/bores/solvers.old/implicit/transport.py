@@ -13,7 +13,7 @@ from bores.constants import c
 from bores.datastructures import BottomHolePressures
 from bores.grids.base import CapillaryPressureGrids, RelativeMobilityGrids
 from bores.grids.rock_fluid import build_rock_fluid_properties_grids
-from bores.reservoir import FluidProperties, HysteresisState, RockProperties
+from bores.reservoir import FluidProperties, Hysteresis, RockProperties
 from bores.solvers.base import (
     Solution,
     compute_mobility_grids,
@@ -1030,7 +1030,7 @@ def compute_rock_fluid_properties(
     gas_saturation_grid: ThreeDimensionalGrid,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
-    hysteresis_state: HysteresisState[ThreeDimensions] | None,
+    hysteresis_state: Hysteresis[ThreeDimensions] | None,
     config: Config,
 ) -> tuple[
     RelativeMobilityGrids[ThreeDimensions],
@@ -1197,7 +1197,7 @@ def assemble_residuals(
     old_dissolved_gas_mass_in_water_grid: ThreeDimensionalGrid,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
-    hysteresis_state: HysteresisState[ThreeDimensions] | None,
+    hysteresis_state: Hysteresis[ThreeDimensions] | None,
     face_transmissibilities: FaceTransmissibilities,
     config: Config,
     cell_count_x: int,
@@ -1300,7 +1300,7 @@ def assemble_numerical_jacobian(
     face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
-    hysteresis_state: HysteresisState[ThreeDimensions] | None,
+    hysteresis_state: Hysteresis[ThreeDimensions] | None,
     config: Config,
     elevation_grid: ThreeDimensionalGrid,
     time_step_in_days: float,
@@ -1492,7 +1492,7 @@ def compute_rock_fluid_derivatives(
     oil_saturation_grid: ThreeDimensionalGrid,
     gas_saturation_grid: ThreeDimensionalGrid,
     rock_properties: RockProperties[ThreeDimensions],
-    hysteresis_state: HysteresisState[ThreeDimensions] | None,
+    hysteresis_state: Hysteresis[ThreeDimensions] | None,
     rock_fluid_tables: SatFuncTables,
     disable_capillary_effects: bool = False,
     capillary_strength_factor: float = 1.0,
@@ -2477,7 +2477,7 @@ def assemble_analytical_jacobian(
     gas_viscosity_grid: ThreeDimensionalGrid,
     face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
-    hysteresis_state: HysteresisState[ThreeDimensions] | None,
+    hysteresis_state: Hysteresis[ThreeDimensions] | None,
     capillary_pressure_grids: CapillaryPressureGrids[ThreeDimensions],
     relative_mobility_grids: RelativeMobilityGrids[ThreeDimensions],
     elevation_grid: ThreeDimensionalGrid,
@@ -2660,7 +2660,7 @@ def assemble_jacobian(
     face_transmissibilities: FaceTransmissibilities,
     rock_properties: RockProperties[ThreeDimensions],
     fluid_properties: FluidProperties[ThreeDimensions],
-    hysteresis_state: HysteresisState[ThreeDimensions] | None,
+    hysteresis_state: Hysteresis[ThreeDimensions] | None,
     elevation_grid: ThreeDimensionalGrid,
     time_step_in_days: float,
     gravitational_constant: float,
@@ -2788,7 +2788,7 @@ def solve_transport(
     config: Config,
     wells_indices: WellsIndices,
     rates: WellRates[ThreeDimensions] | None = None,
-    hysteresis_state: HysteresisState[ThreeDimensions] | None = None,
+    hysteresis_state: Hysteresis[ThreeDimensions] | None = None,
     dtype: npt.DTypeLike = np.float64,
 ) -> Solution[ImplicitSaturationSolution, list[NewtonConvergenceInfo]]:
     """

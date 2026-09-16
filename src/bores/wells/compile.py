@@ -1,7 +1,6 @@
 """Compiled (Structure-of-Arrays) well data for the reservoir solver hot path."""
 
 import enum
-import math
 import typing
 
 import attrs
@@ -25,6 +24,7 @@ from bores.types import (
     Orientation,
     UnitSystem,
 )
+from bores.utils import none_if_nan
 from bores.wells.base import (
     AnyPerforation,
     CompletionStatus,
@@ -284,16 +284,6 @@ WORKOVER_ACTION_FROM_TAG = {tag: action for action, tag in WORKOVER_ACTION_TAG.i
 Inverses of the `*_TAG` maps above, for accessor methods to translate a
 stored tag back into the rich enum a caller actually wants to see.
 """
-
-
-def none_if_nan(value: Number) -> Number | None:
-    """
-    Returns `value`, or `None` if it's `NaN`.
-
-    :param value: A possibly-`NaN` number read from a compiled array.
-    :returns: `value`, or `None` if it's `NaN`.
-    """
-    return None if math.isnan(value) else value
 
 
 class CompiledPerforations(typing.NamedTuple):

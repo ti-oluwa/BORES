@@ -11,7 +11,7 @@ from bores.constants import Constants
 from bores.serde.stores import StoreSerializable
 from bores.timing import Timer
 from bores.types import (
-    EvolutionScheme,
+    DiscretizationMethod,
     MiscibilityModel,
     PreconditionerStr,
     SolverStr,
@@ -55,7 +55,7 @@ class Config(
     output_frequency: int = attrs.field(default=1, validator=attrs.validators.ge(1))
     """Frequency at which model states are yielded/outputted during the simulation."""
 
-    scheme: EvolutionScheme = "impes"
+    scheme: DiscretizationMethod = "impes"
     """Evolution scheme to use for the simulation ('impes', 'explicit', 'sequential-implicit', 'full-sequential-implicit')."""
 
     use_pseudo_pressure: bool = False

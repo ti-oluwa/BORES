@@ -14,7 +14,7 @@ from bores.blackoil.pvt.regions import PVT
 from bores.blackoil.satfunc.regions import SatFunc
 from bores.blackoil.satfunc.relperm.tables import MinimumRelPerm
 from bores.deck.file import DeckFile
-from bores.errors import CaseLoadError, CaseValidationError, ValidationError
+from bores.errors import CaseLoadError, CaseValidationError
 from bores.grids.base import Grid
 from bores.initialization import N_SATURATION_SAMPLES, initialize_reservoir_state
 from bores.precision import get_dtype
@@ -22,12 +22,13 @@ from bores.reservoir.model import Reservoir
 from bores.reservoir.regions import Regions
 from bores.reservoir.rock.base import Rock
 from bores.reservoir.state import Equilibrium, ReservoirState
+from bores.reservoir.state.base import Hysteresis
 from bores.reservoir.temperature import Temperature
 from bores.schedule.base import Schedule
 from bores.serde.base import Serializable
 from bores.simulation.spec import RunSpec
 from bores.simulation.workspace import SimulationWorkspace, build_simulation_workspace
-from bores.types import InterpolationMethod, UnitSystem
+from bores.types import CellArray, InterpolationMethod, Number, UnitSystem
 from bores.wells.deck import load_schedule
 from bores.wells.hydraulics.base import WellBoreModel
 from bores.wells.model import WellSystem
@@ -37,11 +38,7 @@ __all__ = ["SimulationCase", "load_case"]
 
 @attrs.define(kw_only=True, slots=True, frozen=True)
 class SimulationCase(Serializable):
-    """
-    A black-oil simulation case.
-
-    It cholds the model, its initial state, and everything needed to run it end to end.
-    """
+    """A black-oil simulation case."""
 
     model: CompiledBlackOilModel
     """The black-oil model this case runs against."""
@@ -58,6 +55,24 @@ class SimulationCase(Serializable):
     summary: typing.Any = None
     """Summary-vector request/output configuration. Not built out yet."""
 
+    salinity: CellArray | None = None
+    """
+    Optional salinity values for the reservoir cells.
+    
+    Leaves `None` if salinity is not used in the simulation. If provided, 
+    it must be a 1D array of length equal to the number of cells in the reservoir grid, 
+    representing the salinity in each cell.
+    """
+
+    hysteresis: Hysteresis | None = None
+    """
+    Optional hysteresis configuration for the simulation. 
+
+    Only used if `RunSpec.enable_hysteresis` is `True`. If so, the case's initial state
+    must have been initialized with `hysteresis_enabled=True` and `saturation_samples>0`.
+    If `hysteresis` is `None`, the case's initial state's hysteresis configuration is used.
+    """
+
     dtype: npt.DTypeLike = attrs.field(factory=get_dtype)
     """Array dtype for every buffer. `bores.precision.get_dtype()` if not provided"""
 
@@ -65,13 +80,22 @@ class SimulationCase(Serializable):
 
     def __post_init__(self) -> None:
         if self.model.unit_system != self.runspec.unit_system:
-            raise ValidationError(
+            raise CaseValidationError(
                 "Simulation case's model and runspec must share the same unit system."
             )
         if self.model.unit_system != self.initial_state.unit_system:
-            raise ValidationError(
+            raise CaseValidationError(
                 "Simulation case's model and initial state must share the same unit system."
             )
+
+    @property
+    def unit_system(self) -> UnitSystem:
+        """
+        The simulation case's unit system.
+
+        :returns: The case's unit system.
+        """
+        return self.model.unit_system
 
     @property
     def workspace(self) -> SimulationWorkspace:
@@ -84,21 +108,6 @@ class SimulationCase(Serializable):
             object.__setattr__(self, "_workspace", self.build_workspace(dtype=self.dtype))
         return typing.cast(SimulationWorkspace, self._workspace)
 
-    def validate(self) -> None:
-        """
-        Validates the simulation case.
-
-        :raises CaseValidationError: If any component fails validation.
-        """
-        if self.model.unit_system != self.runspec.unit_system:
-            raise CaseValidationError(
-                "Simulation case's model and runspec must share the same unit system."
-            )
-        if self.model.unit_system != self.initial_state.unit_system:
-            raise CaseValidationError(
-                "Simulation case's model and initial state must share the same unit system."
-            )
-
     def build_workspace(self, *, dtype: npt.DTypeLike = None) -> SimulationWorkspace:
         dtype = np.dtype(dtype) if dtype is not None else self.dtype
         model = self.model
@@ -106,15 +115,33 @@ class SimulationCase(Serializable):
         n_wells = len(wells.names) if wells is not None else 0
         n_connections = wells.perforations.well_offsets[-1] if wells is not None else 0
         regions = model.reservoir.regions
+        initial_state = self.initial_state
         if regions is None:
             regions = Regions()
+
+        hysteresis = self.hysteresis
+        hysteresis_enabled = self.runspec.hysteresis_enabled
+        if not hysteresis_enabled:
+            hysteresis = None
+        elif hysteresis_enabled and hysteresis is None:
+            if initial_state.hysteresis is not None:
+                hysteresis = initial_state.hysteresis
+            else:
+                hysteresis = Hysteresis.from_initial_saturation(
+                    water_saturation=initial_state.water_saturation,
+                    gas_saturation=initial_state.gas_saturation,
+                )
+
         return build_simulation_workspace(
             reservoir=model.reservoir,
             regions=regions,
             fluid=model.fluid,
-            initial_state=self.initial_state,
+            initial_state=initial_state,
             n_wells=n_wells,
             n_connections=n_connections,
+            runspec=self.runspec,
+            hysteresis=hysteresis,
+            salinity=self.salinity,
             dtype=dtype,
         )
 
@@ -124,7 +151,7 @@ class SimulationCase(Serializable):
         deck_file: DeckFile,
         *,
         default_wellbore: WellBoreModel,
-        temperature: Temperature | float,
+        temperature: Temperature | Number | None = None,
         mixing_rule: str = "eclipse_rule",
         compiled_at: float = 0.0,
         runspec: RunSpec | None = None,
@@ -132,7 +159,7 @@ class SimulationCase(Serializable):
         min_wetting_relperm: MinimumRelPerm = None,
         min_non_wetting_relperm: MinimumRelPerm = None,
         include_capillary_pressure: bool = True,
-        with_hysteresis: bool = False,
+        hysteresis_enabled: bool | None = None,
         saturation_samples: int = N_SATURATION_SAMPLES,
         interpolation_method: InterpolationMethod = "linear",
         unit_system: UnitSystem | None = None,
@@ -157,7 +184,7 @@ class SimulationCase(Serializable):
         :param min_non_wetting_relperm: Minimum non-wetting-phase relative permeability for `SatFunc.from_deck`.
         :param include_capillary_pressure: Whether to include capillary pressure in the saturation functions.
             Forwarded to `SatFunc.from_deck`.
-        :param with_hysteresis: Whether to include hysteresis in the initial state.
+        :param hysteresis_enabled: Whether to include hysteresis in the initial state.
             Forwarded to `initialize_reservoir_state`.
         :param saturation_samples: Number of saturation samples for the initial state.
             Forwarded to `initialize_reservoir_state`.
@@ -177,7 +204,7 @@ class SimulationCase(Serializable):
             min_wetting_relperm=min_wetting_relperm,
             min_non_wetting_relperm=min_non_wetting_relperm,
             include_capillary_pressure=include_capillary_pressure,
-            with_hysteresis=with_hysteresis,
+            hysteresis_enabled=hysteresis_enabled,
             saturation_samples=saturation_samples,
             interpolation_method=interpolation_method,
             unit_system=unit_system,
@@ -190,7 +217,7 @@ def load_case(
     deck_file: DeckFile,
     *,
     default_wellbore: WellBoreModel,
-    temperature: Temperature | float,
+    temperature: Temperature | Number | None = None,
     mixing_rule: str = "eclipse_rule",
     compiled_at: float = 0.0,
     runspec: RunSpec | None = None,
@@ -198,7 +225,7 @@ def load_case(
     min_wetting_relperm: MinimumRelPerm = None,
     min_non_wetting_relperm: MinimumRelPerm = None,
     include_capillary_pressure: bool = True,
-    with_hysteresis: bool = False,
+    hysteresis_enabled: bool | None = None,
     saturation_samples: int = N_SATURATION_SAMPLES,
     interpolation_method: InterpolationMethod = "linear",
     unit_system: UnitSystem | None = None,
@@ -224,7 +251,7 @@ def load_case(
     :param min_non_wetting_relperm: Minimum non-wetting-phase relative permeability for `SatFunc.from_deck`.
     :param include_capillary_pressure: Whether to include capillary pressure in the saturation functions.
         Forwarded to `SatFunc.from_deck`.
-    :param with_hysteresis: Whether to include hysteresis in the initial state.
+    :param hysteresis_enabled: Whether to include hysteresis in the initial state.
         Forwarded to `initialize_reservoir_state`.
     :param saturation_samples: Number of saturation samples for the initial state.
         Forwarded to `initialize_reservoir_state`.
@@ -237,7 +264,17 @@ def load_case(
     """
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
     unit_system = unit_system if unit_system is not None else deck_file.unit_system
-    temperature = temperature if isinstance(temperature, Temperature) else Temperature(temperature)
+    runspec = (
+        runspec.convert(unit_system) if runspec is not None else RunSpec(unit_system=unit_system)
+    )
+    if temperature is None:
+        temperature = Temperature.from_deck(deck_file, dtype=dtype)
+    else:
+        temperature = (
+            temperature.convert(unit_system)
+            if isinstance(temperature, Temperature)
+            else Temperature(temperature, unit_system=unit_system)
+        )
 
     try:
         grid = Grid.from_deck(deck_file)
@@ -296,7 +333,9 @@ def load_case(
             equilibrium=equilibrium,
             satfunc=satfunc,
             temperature=temperature,
-            with_hysteresis=with_hysteresis,
+            hysteresis_enabled=hysteresis_enabled
+            if hysteresis_enabled is not None
+            else runspec.hysteresis_enabled,
             saturation_samples=saturation_samples,
             dtype=dtype,
         )
@@ -315,7 +354,6 @@ def load_case(
     except Exception as exc:
         raise CaseLoadError(f"Failed to load schedule from {deck_file!r}.") from exc
 
-    runspec = runspec if runspec is not None else RunSpec(unit_system=unit_system)
     return SimulationCase(
         model=compile_model(model, dtype=dtype),
         initial_state=initial_state,

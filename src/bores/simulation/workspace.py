@@ -15,79 +15,16 @@ from bores.precision import get_dtype
 from bores.reservoir.model import Reservoir
 from bores.reservoir.regions import Regions
 from bores.reservoir.state import ReservoirState
-from bores.types import Integer, NumberArray, OneDimension
-from bores.wells.resolution.compile import WellsWorkspace, build_wells_workspace
+from bores.reservoir.state.base import Hysteresis
+from bores.reservoir.workspace import ReservoirWorkspace, build_reservoir_workspace
+from bores.simulation.spec import RunSpec
+from bores.types import CellArray, Integer
+from bores.wells.workspace import WellsWorkspace, build_wells_workspace
 
 __all__ = [
-    "ReservoirWorkspace",
     "SimulationWorkspace",
-    "build_reservoir_workspace",
     "build_simulation_workspace",
 ]
-
-
-class ReservoirWorkspace(typing.NamedTuple):
-    """
-    Per-cell reservoir primary unknowns, one row per cell, for the whole run.
-    The reservoir state (`ReservoirState`) is decompiled from whatever this holds at a
-    reported timestep, mirroring `WellsWorkspace`/`WellsStates`.
-    """
-
-    pressure: NumberArray[OneDimension]
-    """Shape `(n_cells,)`. Oil-phase reference pressure."""
-
-    oil_saturation: NumberArray[OneDimension]
-    """Shape `(n_cells,)`."""
-
-    water_saturation: NumberArray[OneDimension]
-    """Shape `(n_cells,)`."""
-
-    gas_saturation: NumberArray[OneDimension]
-    """Shape `(n_cells,)`."""
-
-    solution_gor: NumberArray[OneDimension]
-    """Shape `(n_cells,)`. Rs."""
-
-    oil_bubble_point_pressure: NumberArray[OneDimension]
-    """Shape `(n_cells,)`."""
-
-    vaporized_oil_to_gas_ratio: NumberArray[OneDimension]
-    """Shape `(n_cells,)`. Rv."""
-
-    gas_dew_point_pressure: NumberArray[OneDimension]
-    """Shape `(n_cells,)`."""
-
-    gas_solubility_in_water: NumberArray[OneDimension]
-    """Shape `(n_cells,)`. Rsw."""
-
-    water_bubble_point_pressure: NumberArray[OneDimension]
-    """Shape `(n_cells,)`."""
-
-
-def build_reservoir_workspace(
-    *, state: ReservoirState, dtype: npt.DTypeLike = None
-) -> ReservoirWorkspace:
-    """
-    Builds a `ReservoirWorkspace` from a reservoir state's own primary unknowns.
-
-    :param state: The reservoir state to seed the workspace from.
-    :param n_cells: Number of grid cells.
-    :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
-    :returns: `ReservoirWorkspace` seeded from `state`.
-    """
-    dtype = np.dtype(dtype) if dtype is not None else get_dtype()
-    return ReservoirWorkspace(
-        pressure=state.pressure.astype(dtype, copy=True),
-        oil_saturation=state.oil_saturation.astype(dtype, copy=True),
-        water_saturation=state.water_saturation.astype(dtype, copy=True),
-        gas_saturation=state.gas_saturation.astype(dtype, copy=True),
-        solution_gor=state.solution_gor.astype(dtype, copy=True),
-        oil_bubble_point_pressure=state.oil_bubble_point_pressure.astype(dtype, copy=True),
-        vaporized_oil_to_gas_ratio=state.vaporized_oil_to_gas_ratio.astype(dtype, copy=True),
-        gas_dew_point_pressure=state.gas_dew_point_pressure.astype(dtype, copy=True),
-        gas_solubility_in_water=state.gas_solubility_in_water.astype(dtype, copy=True),
-        water_bubble_point_pressure=state.water_bubble_point_pressure.astype(dtype, copy=True),
-    )
 
 
 class SimulationWorkspace(typing.NamedTuple):
@@ -98,12 +35,12 @@ class SimulationWorkspace(typing.NamedTuple):
     """
 
     reservoir: ReservoirWorkspace
-    """This run's reservoir primary unknowns."""
+    """This run's reservoir primary unknowns. Refreshed in place every timestep."""
 
     physics: PhysicsCache
     """
-    PVT/satfunc/mobility at the current cell state. Refreshed in place
-    (`compute_physics_cache(..., out=...)`) every timestep.
+    PVT/satfunc/mobility at the current cell state. Refreshed in place 
+    every timestep.
     """
 
     transmissibilities: TransmissibilityCache
@@ -111,11 +48,17 @@ class SimulationWorkspace(typing.NamedTuple):
     Per-interior-connection upwinding, gravity, and transmissibility
     at the current cell state. 
     
-    Refreshed in place (`compute_transmissibility_cache(..., out=...)`) every timestep.
+    Refreshed in place every timestep.
     """
 
     wells: WellsWorkspace
-    """This run's well control-resolution results."""
+    """This run's well control-resolution workspace. Refreshed in place every timestep."""
+
+    hysteresis: Hysteresis | None
+    """Optional hysteresis state tracking saturation history for the run."""
+
+    salinity: CellArray | None
+    """Optional cell-wise salinity field for salinity-dependent calculations."""
 
 
 def build_simulation_workspace(
@@ -126,6 +69,9 @@ def build_simulation_workspace(
     initial_state: ReservoirState,
     n_wells: Integer,
     n_connections: Integer,
+    runspec: RunSpec,
+    hysteresis: Hysteresis | None = None,
+    salinity: CellArray | None = None,
     dtype: npt.DTypeLike = None,
 ) -> SimulationWorkspace:
     """
@@ -138,8 +84,7 @@ def build_simulation_workspace(
     :param initial_state: The reservoir's state at the start of the run.
     :param n_wells: Number of wells.
     :param n_connections: Total active connections across every well.
-    :param control_spec: Well-control resolution tunables to compile.
-        `WellControlSpec`'s own defaults if not given.
+    :param runspec: Simulation run settings controlling enabled physics terms such as gravity and capillary effects.
     :param dtype: Output array dtype for every buffer. `bores.precision.get_dtype()` if not given.
     :returns: The assembled `SimulationWorkspace`.
     """
@@ -153,6 +98,7 @@ def build_simulation_workspace(
         if regions.saturation_region is not None
         else np.ones(n_cells, dtype=np.int32)
     )
+    rock = reservoir.rock
     physics = compute_physics_cache(
         pressure=initial_state.pressure,
         temperature=initial_state.temperature,
@@ -163,6 +109,12 @@ def build_simulation_workspace(
         pvt_region=pvt_region,
         saturation_region=saturation_region,
         fluid=fluid,
+        hysteresis=hysteresis,
+        salinity=salinity,
+        irreducible_water_saturation=rock.irreducible_water_saturation,
+        residual_gas_saturation=rock.residual_gas_saturation,
+        residual_oil_saturation_water=rock.residual_oil_saturation_water,
+        residual_oil_saturation_gas=rock.residual_oil_saturation_gas,
         dtype=dtype,
     )
     transmissibilities = compute_transmissibility_cache(
@@ -172,6 +124,8 @@ def build_simulation_workspace(
         oil_pressure=initial_state.pressure,
         oil_water_capillary_pressure=physics.satfunc.oil_water_capillary_pressure,
         gas_oil_capillary_pressure=physics.satfunc.gas_oil_capillary_pressure,
+        gravity_enabled=runspec.gravity_enabled,
+        capillary_effects_enabled=runspec.capillary_effects_enabled,
         dtype=dtype,
     )
     return SimulationWorkspace(
@@ -179,4 +133,6 @@ def build_simulation_workspace(
         transmissibilities=transmissibilities,
         wells=build_wells_workspace(n_wells=n_wells, n_connections=n_connections, dtype=dtype),
         reservoir=build_reservoir_workspace(state=initial_state, dtype=dtype),
+        hysteresis=hysteresis,
+        salinity=salinity,
     )

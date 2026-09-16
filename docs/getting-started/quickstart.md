@@ -272,7 +272,7 @@ The `bores.reservoir_model()` factory function is the primary entry point for co
 
 Second, it computes any fluid properties you did not provide explicitly. In this example, we supplied oil viscosity and bubble point pressure, but omitted properties like gas density, water compressibility, formation volume factors, and solution gas-oil ratio. The factory uses industry-standard PVT correlations (Standing, Vasquez-Beggs, Lee-Gonzalez, and others) to estimate these from pressure, temperature, and fluid gravity. This means you can get a working model with minimal input while retaining the option to override any property with your own data.
 
-Third, it assembles the `FluidProperties`, `RockProperties`, and `HysteresisState` objects and packages them into an immutable `BlackOil`. Because the model is immutable, you can safely pass it around your code without worrying about accidental modifications.
+Third, it assembles the `FluidProperties`, `RockProperties`, and `Hysteresis` objects and packages them into an immutable `BlackOil`. Because the model is immutable, you can safely pass it around your code without worrying about accidental modifications.
 
 ### Defining Wells
 

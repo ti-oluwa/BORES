@@ -40,7 +40,7 @@ flowchart LR
 
 ## Immutable Data Models
 
-BORES represents *almost* all reservoir data using immutable (frozen) classes built with the [attrs](https://www.attrs.org/) library. The core model classes - `BlackOil`, `FluidProperties`, `RockProperties`, `HysteresisState`, and `Config` - are all frozen. Once created, their fields cannot be changed in place.
+BORES represents *almost* all reservoir data using immutable (frozen) classes built with the [attrs](https://www.attrs.org/) library. The core model classes - `BlackOil`, `FluidProperties`, `RockProperties`, `Hysteresis`, and `Config` - are all frozen. Once created, their fields cannot be changed in place.
 
 Immutability matters deeply in simulation software. When you pass a `BlackOil` to `bores.run()`, the simulator works on internal copies of the data. Your original model object remains untouched, so you can safely reuse it for parameter sweeps, what-if scenarios, or debugging. There is no hidden state mutation that could silently corrupt your baseline.
 
