@@ -8,7 +8,7 @@ from bores.constants import Constants
 from bores.serde.stores import StoreSerializable
 from bores.simulation.timing import Timer
 from bores.types import UnitSystem
-from bores.wells.resolution.spec import ControlResolverSpec
+from bores.wells.resolution.spec import WellControlSpec
 
 __all__ = ["RunSpec"]
 
@@ -32,5 +32,5 @@ class RunSpec(StoreSerializable):
     start_date: datetime.datetime | None = None
     """The run's calendar start date, if the run is calendar-anchored."""
 
-    resolver_spec: ControlResolverSpec = attrs.field(factory=ControlResolverSpec)
-    """Numerical tuning for well-control resolution. Defaults to `ControlResolverSpec`'s own defaults."""
+    control_spec: WellControlSpec = attrs.field(factory=WellControlSpec)
+    """Numerical tuning for well-control resolution. Defaults to `WellControlSpec`'s own defaults."""

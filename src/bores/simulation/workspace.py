@@ -138,8 +138,8 @@ def build_simulation_workspace(
     :param initial_state: The reservoir's state at the start of the run.
     :param n_wells: Number of wells.
     :param n_connections: Total active connections across every well.
-    :param resolver_spec: Well-control resolution tunables to compile.
-        `ControlResolverSpec`'s own defaults if not given.
+    :param control_spec: Well-control resolution tunables to compile.
+        `WellControlSpec`'s own defaults if not given.
     :param dtype: Output array dtype for every buffer. `bores.precision.get_dtype()` if not given.
     :returns: The assembled `SimulationWorkspace`.
     """

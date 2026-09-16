@@ -21,7 +21,7 @@ from bores.wells.resolution.solvers import (
     compute_tubing_head_pressure,
     solve_connection_pressures_and_rates,
 )
-from bores.wells.resolution.spec import ControlResolverSpec
+from bores.wells.resolution.spec import WellControlSpec
 from bores.wells.states import ConnectionSample, PhaseValues
 
 __all__ = ["apply_limits"]
@@ -60,7 +60,7 @@ def get_rate_bound(
     is_injector: bool,
     min_pressure: Number,
     max_pressure: Number,
-    resolver_spec: ControlResolverSpec,
+    control_spec: WellControlSpec,
 ) -> Number | None:
     """
     Gets the bounding BHP for a `RateLimit` row, if violated.
@@ -84,7 +84,7 @@ def get_rate_bound(
     :param is_injector: Whether this well is an injector.
     :param min_pressure: Lower bisection bracket bound.
     :param max_pressure: Upper bisection bracket bound.
-    :param resolver_spec: Solver tunables.
+    :param control_spec: Solver tunables.
     :returns: Bounding BHP, or `None` if not violated.
     """
     quantity_phases = RATE_QUANTITY_PHASES[quantity]
@@ -100,7 +100,7 @@ def get_rate_bound(
         reference_pressure=bhp,
         relevant_phases=quantity_phases,
         is_injector=is_injector,
-        resolver_spec=resolver_spec,
+        control_spec=control_spec,
     )
     rates_to_check = (
         reservoir_condition_rates
@@ -121,7 +121,7 @@ def get_rate_bound(
         target=max_value,
         min_pressure=min_pressure,
         max_pressure=max_pressure,
-        resolver_spec=resolver_spec,
+        control_spec=control_spec,
         metric="rate",
         target_rate_condition=target_rate_condition,
     )
@@ -142,7 +142,7 @@ def get_thp_bound(
     is_injector: bool,
     min_pressure: Number,
     max_pressure: Number,
-    resolver_spec: ControlResolverSpec,
+    control_spec: WellControlSpec,
     surface_fluid_properties: SurfaceFluidProperties,
 ) -> Number | None:
     """
@@ -164,7 +164,7 @@ def get_thp_bound(
     :param is_injector: Whether this well is an injector.
     :param min_pressure: Lower bisection bracket bound.
     :param max_pressure: Upper bisection bracket bound.
-    :param resolver_spec: Solver tunables.
+    :param control_spec: Solver tunables.
     :param surface_fluid_properties: Fluid properties at surface conditions.
     :returns: Bounding BHP, or `None` if not violated.
     """
@@ -195,7 +195,7 @@ def get_thp_bound(
         target=target,
         min_pressure=min_pressure,
         max_pressure=max_pressure,
-        resolver_spec=resolver_spec,
+        control_spec=control_spec,
         metric="thp",
         surface_fluid_properties=surface_fluid_properties,
     )
@@ -266,7 +266,7 @@ def apply_limits(
     surface_phase_rates: PhaseValues,
     min_pressure: Number,
     max_pressure: Number,
-    resolver_spec: ControlResolverSpec,
+    control_spec: WellControlSpec,
     surface_fluid_properties: SurfaceFluidProperties | None = None,
 ) -> tuple[Number, NumberArray[OneDimension], PhaseValues, PhaseValues, Integer, bool]:
     """
@@ -306,7 +306,7 @@ def apply_limits(
     :param surface_phase_rates: The nominal resolution's surface-condition phase rates.
     :param min_pressure: Lower bisection bracket bound.
     :param max_pressure: Upper bisection bracket bound.
-    :param resolver_spec: Solver tunables.
+    :param control_spec: Solver tunables.
     :param surface_fluid_properties: Required if any row in range is a `THPLimit`.
     :returns: `(bhp, connection_pressures, phase_rates, surface_phase_rates,
         active_limit_row, economic_shutin)`. `active_limit_row` is
@@ -342,7 +342,7 @@ def apply_limits(
                 is_injector=is_injector,
                 min_pressure=min_pressure,
                 max_pressure=max_pressure,
-                resolver_spec=resolver_spec,
+                control_spec=control_spec,
             )
         elif kind == LimitKind.THP:
             if surface_fluid_properties is None:
@@ -364,7 +364,7 @@ def apply_limits(
                 is_injector=is_injector,
                 min_pressure=min_pressure,
                 max_pressure=max_pressure,
-                resolver_spec=resolver_spec,
+                control_spec=control_spec,
                 surface_fluid_properties=surface_fluid_properties,
             )
         else:
@@ -396,7 +396,7 @@ def apply_limits(
                 reference_pressure=governing_bhp,
                 relevant_phases=relevant_phases,
                 is_injector=is_injector,
-                resolver_spec=resolver_spec,
+                control_spec=control_spec,
             )
         )
 

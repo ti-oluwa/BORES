@@ -25,7 +25,7 @@ from bores.wells.resolution.solvers import (
     solve_producer_bhp_mode,
     solve_producer_rate_mode,
 )
-from bores.wells.resolution.spec import ControlResolverSpec
+from bores.wells.resolution.spec import WellControlSpec
 from bores.wells.states import ConnectionSample
 
 __all__ = ["resolve_control"]
@@ -38,7 +38,7 @@ def resolve_control(
     wellbore: WellBoreModel,
     connection_samples: typing.Sequence[ConnectionSample],
     workspace: WellsWorkspace,
-    resolver_spec: ControlResolverSpec,
+    control_spec: WellControlSpec,
     surface_fluid_properties: SurfaceFluidProperties | None = None,
 ) -> None:
     """
@@ -57,7 +57,7 @@ def resolve_control(
         rows for this well appear (after filtering to
         `completion_statuses == 1` and `schedule_statuses == 1`).
     :param workspace: The system-wide `WellsWorkspace` to update in place.
-    :param resolver_spec: Solver tunables.
+    :param control_spec: Solver tunables.
     :param surface_fluid_properties: Required to compute THP, or to
         resolve a `THP`-mode control, or to check a `THPLimit`. Omit if
         none of those apply to this well.
@@ -121,7 +121,7 @@ def resolve_control(
                 reference_depth=reference_depth,
                 workspace=perforation_workspace,
                 connection_samples=connection_samples,
-                resolver_spec=resolver_spec,
+                control_spec=control_spec,
             )
         elif control_mode == InjectorControlModeTag.BHP:
             bhp, connection_pressures, phase_rates, surface_phase_rates = solve_injector_bhp_mode(
@@ -131,13 +131,13 @@ def resolve_control(
                 reference_depth=reference_depth,
                 workspace=perforation_workspace,
                 connection_samples=connection_samples,
-                resolver_spec=resolver_spec,
+                control_spec=control_spec,
             )
         elif control_mode == InjectorControlModeTag.THP:
             if surface_fluid_properties is None:
                 raise ValidationError("A THP-mode injector requires `surface_fluid_properties`.")
             min_pressure, max_pressure = get_default_pressure_bracket(
-                connection_samples, is_injector=True, resolver_spec=resolver_spec
+                connection_samples, is_injector=True, control_spec=control_spec
             )
             bhp, _, _ = bisect_bhp(
                 wellbore=wellbore,
@@ -149,7 +149,7 @@ def resolve_control(
                 target=controls.target_thps[well_row],
                 min_pressure=min_pressure,
                 max_pressure=max_pressure,
-                resolver_spec=resolver_spec,
+                control_spec=control_spec,
                 metric="thp",
                 surface_fluid_properties=surface_fluid_properties,
             )
@@ -161,7 +161,7 @@ def resolve_control(
                 reference_pressure=bhp,
                 relevant_phases=relevant_phases,
                 is_injector=True,
-                resolver_spec=resolver_spec,
+                control_spec=control_spec,
             )
         elif control_mode == InjectorControlModeTag.GROUP:
             raise ValidationError(
@@ -190,7 +190,7 @@ def resolve_control(
                 reference_depth=reference_depth,
                 workspace=perforation_workspace,
                 connection_samples=connection_samples,
-                resolver_spec=resolver_spec,
+                control_spec=control_spec,
             )
         elif control_mode == ProducerControlModeTag.BHP:
             bhp, connection_pressures, phase_rates, surface_phase_rates = solve_producer_bhp_mode(
@@ -199,13 +199,13 @@ def resolve_control(
                 reference_depth=reference_depth,
                 workspace=perforation_workspace,
                 connection_samples=connection_samples,
-                resolver_spec=resolver_spec,
+                control_spec=control_spec,
             )
         elif control_mode == ProducerControlModeTag.THP:
             if surface_fluid_properties is None:
                 raise ValidationError("A THP-mode producer requires `surface_fluid_properties`.")
             min_pressure, max_pressure = get_default_pressure_bracket(
-                connection_samples, is_injector=False, resolver_spec=resolver_spec
+                connection_samples, is_injector=False, control_spec=control_spec
             )
             bhp, _, _ = bisect_bhp(
                 wellbore=wellbore,
@@ -217,7 +217,7 @@ def resolve_control(
                 target=controls.target_thps[well_row],
                 min_pressure=min_pressure,
                 max_pressure=max_pressure,
-                resolver_spec=resolver_spec,
+                control_spec=control_spec,
                 metric="thp",
                 surface_fluid_properties=surface_fluid_properties,
             )
@@ -229,7 +229,7 @@ def resolve_control(
                 reference_pressure=bhp,
                 relevant_phases=relevant_phases,
                 is_injector=False,
-                resolver_spec=resolver_spec,
+                control_spec=control_spec,
             )
         elif control_mode == ProducerControlModeTag.GROUP:
             raise ValidationError(
@@ -246,7 +246,7 @@ def resolve_control(
         limits.well_offsets[well_row + 1],
     )
     min_pressure, max_pressure = get_default_pressure_bracket(
-        connection_samples, is_injector=is_injector, resolver_spec=resolver_spec
+        connection_samples, is_injector=is_injector, control_spec=control_spec
     )
     (
         bhp,
@@ -271,7 +271,7 @@ def resolve_control(
         surface_phase_rates=surface_phase_rates,
         min_pressure=min_pressure,
         max_pressure=max_pressure,
-        resolver_spec=resolver_spec,
+        control_spec=control_spec,
         surface_fluid_properties=surface_fluid_properties,
     )
 

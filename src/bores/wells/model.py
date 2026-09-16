@@ -14,7 +14,7 @@ from bores.wells.base import Wells
 from bores.wells.controls import WellControls
 from bores.wells.groups import GroupControls, WellGroups
 from bores.wells.hydraulics.base import WellBoreModel
-from bores.wells.resolution.spec import ControlResolverSpec
+from bores.wells.resolution.spec import WellControlSpec
 
 __all__ = ["WellSystem"]
 
@@ -42,7 +42,7 @@ class WellSystem(StoreSerializable):
     group_controls: GroupControls | None = None
     """Current control target for each group, if the deck defined any."""
 
-    resolver_spec: ControlResolverSpec = attrs.field(factory=ControlResolverSpec)
+    control_spec: WellControlSpec = attrs.field(factory=WellControlSpec)
     """Configuration for how well controls are resolved during simulation."""
 
     def __attrs_post_init__(self) -> None:

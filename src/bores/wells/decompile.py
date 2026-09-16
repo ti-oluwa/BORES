@@ -522,7 +522,7 @@ def decompile_well_system(
     `wells`, `well_controls`, and `group_controls` are rebuilt entirely
     from `compiled_system`, so they reflect any in-place patch made to it
     since compile time. `default_wellbore`, `wellbore_overrides`,
-    `groups`, and `resolver_spec` are carried over from `well_system`
+    `groups`, and `control_spec` are carried over from `well_system`
     unchanged - none of these are part of the compiled representation.
     Hydraulics correlation choice is dispatched by name at call time, not
     stored per well, and the group hierarchy and resolver configuration

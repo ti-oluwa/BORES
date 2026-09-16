@@ -5,11 +5,11 @@ from bores.errors import ValidationError
 from bores.serde.base import Serializable
 from bores.types import Integer, Number
 
-__all__ = ["ControlResolverSpec"]
+__all__ = ["WellControlSpec"]
 
 
 @attrs.frozen(kw_only=True, slots=True)
-class ControlResolverSpec(Serializable):
+class WellControlSpec(Serializable):
     """
     Numerical tuning for well-control resolution.
 
