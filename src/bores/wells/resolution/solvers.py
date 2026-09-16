@@ -12,11 +12,11 @@ from bores.wells.compile import (
 )
 from bores.wells.hydraulics.base import SurfaceFluidProperties, WellBoreModel
 from bores.wells.resolution.compile import (
-    CompiledControlResolverSpec,
     PerforationWorkspace,
     accumulate_phase_rates,
     build_connection_phase_rates,
 )
+from bores.wells.resolution.spec import ControlResolverSpec
 from bores.wells.states import ConnectionSample, PhaseValues
 
 __all__ = [
@@ -138,13 +138,13 @@ def get_default_pressure_bracket(
     connection_samples: typing.Sequence[ConnectionSample],
     *,
     is_injector: bool,
-    resolver_spec: CompiledControlResolverSpec,
+    resolver_spec: ControlResolverSpec,
 ) -> tuple[Number, Number]:
     """
     Builds a default `(min_pressure, max_pressure)` BHP bisection bracket.
 
     A producer's BHP can't usefully exceed the highest connected-cell
-    pressure - there's no drawdown left to give a rate above that. An
+    pressure as there's no drawdown left to give a rate above that. An
     injector's upper bound is reservoir pressure scaled by
     `resolver_spec.injector_bhp_bracket_multiplier`, giving room above
     reservoir pressure to actually inject.
@@ -171,7 +171,7 @@ def solve_connection_pressures_and_rates(
     reference_pressure: Number,
     relevant_phases: PhaseValues,
     is_injector: bool,
-    resolver_spec: CompiledControlResolverSpec,
+    resolver_spec: ControlResolverSpec,
 ) -> tuple[NumberArray[OneDimension], PhaseValues, PhaseValues]:
     """
     Does fixed-point iterations of connection flowing pressures against IPR-derived
@@ -287,7 +287,7 @@ def compute_phase_rates(
     reference_pressure: Number,
     relevant_phases: PhaseValues,
     is_injector: bool,
-    resolver_spec: CompiledControlResolverSpec,
+    resolver_spec: ControlResolverSpec,
 ) -> tuple[NumberArray[OneDimension], PhaseValues, PhaseValues]:
     """
     `solve_connection_pressures_and_rates` at a fixed BHP.
@@ -333,7 +333,7 @@ def bisect_bhp(
     target: Number,
     min_pressure: Number,
     max_pressure: Number,
-    resolver_spec: CompiledControlResolverSpec,
+    resolver_spec: ControlResolverSpec,
     metric: typing.Literal["rate", "thp"] = "rate",
     target_rate_condition: typing.Literal["surface", "reservoir"] = "surface",
     surface_fluid_properties: SurfaceFluidProperties | None = None,
@@ -433,7 +433,7 @@ def solve_producer_rate_mode(
     reference_depth: Number,
     workspace: PerforationWorkspace,
     connection_samples: typing.Sequence[ConnectionSample],
-    resolver_spec: CompiledControlResolverSpec,
+    resolver_spec: ControlResolverSpec,
 ) -> tuple[Number, NumberArray[OneDimension], PhaseValues, PhaseValues]:
     """
     Resolves a producer under `control_mode in {ORAT, WRAT, GRAT, LRAT, RESV}`.
@@ -490,7 +490,7 @@ def solve_producer_bhp_mode(
     reference_depth: Number,
     workspace: PerforationWorkspace,
     connection_samples: typing.Sequence[ConnectionSample],
-    resolver_spec: CompiledControlResolverSpec,
+    resolver_spec: ControlResolverSpec,
 ) -> tuple[Number, NumberArray[OneDimension], PhaseValues, PhaseValues]:
     """
     Resolves a producer held at a fixed BHP; rates are the output.
@@ -519,7 +519,7 @@ def solve_injector_rate_mode(
     reference_depth: Number,
     workspace: PerforationWorkspace,
     connection_samples: typing.Sequence[ConnectionSample],
-    resolver_spec: CompiledControlResolverSpec,
+    resolver_spec: ControlResolverSpec,
 ) -> tuple[Number, NumberArray[OneDimension], PhaseValues, PhaseValues]:
     """
     Injector analogue of `solve_producer_rate_mode` - `injected_phase`
@@ -578,7 +578,7 @@ def solve_injector_bhp_mode(
     reference_depth: Number,
     workspace: PerforationWorkspace,
     connection_samples: typing.Sequence[ConnectionSample],
-    resolver_spec: CompiledControlResolverSpec,
+    resolver_spec: ControlResolverSpec,
 ) -> tuple[Number, NumberArray[OneDimension], PhaseValues, PhaseValues]:
     """
     Injector analogue of `solve_producer_bhp_mode`.

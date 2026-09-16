@@ -14,6 +14,7 @@ from bores.precision import get_dtype
 from bores.types import (
     Boolean,
     FluidPhase,
+    GridIntersectionMethod,
     IntArray,
     Integer,
     IntOrArray,
@@ -1236,8 +1237,11 @@ def get_completion_status_tag(status: CompletionStatus) -> Integer:
 def resolve_perforations_geometry(
     grid: Grid,
     well: Well,
+    *,
     permeabilities: typing.Mapping[Orientation, NumberArray[OneDimension]],
-    **resolve_kwargs: typing.Any,
+    horizontal_tolerance: Number | None = None,
+    intersection_method: GridIntersectionMethod = "aabb",
+    search_radius: Number | None = None,
 ) -> tuple[tuple[PerforationIndex, ...], dict[Integer, AnyPerforation], dict[Integer, Integer]]:
     """
     Resolves connection geometry and connection factor for every
@@ -1252,7 +1256,6 @@ def resolve_perforations_geometry(
     :param grid: Grid to resolve against.
     :param well: The well to resolve. Not modified.
     :param permeabilities: Forwarded to `build_wells_indices`.
-    :param resolve_kwargs: Forwarded to `build_wells_indices`.
     :returns: Every resolved `PerforationIndex` for this well (against the
         shadow perforations), a mapping from `id(shadow_perforation)` to
         the matching original perforation, and a mapping from
@@ -1277,7 +1280,9 @@ def resolve_perforations_geometry(
         grid=grid,
         wells=shadow_wells,
         permeabilities=permeabilities,
-        **resolve_kwargs,
+        horizontal_tolerance=horizontal_tolerance,
+        intersection_method=intersection_method,
+        search_radius=search_radius,
     )
     well_index = result[well.name]
     return well_index.perforations, original_by_id, ordinal_by_id
@@ -1286,10 +1291,13 @@ def resolve_perforations_geometry(
 def compile_perforations(
     names: typing.Sequence[str],
     wells: Wells,
+    *,
     grid: Grid,
     permeabilities: typing.Mapping[Orientation, NumberArray[OneDimension]],
+    horizontal_tolerance: Number | None = None,
+    intersection_method: GridIntersectionMethod = "aabb",
+    search_radius: Number | None = None,
     dtype: npt.DTypeLike = None,
-    **resolve_kwargs: typing.Any,
 ) -> CompiledPerforations:
     """
     Builds `CompiledPerforations` for a set of wells, in order.
@@ -1298,7 +1306,6 @@ def compile_perforations(
     :param wells: Source `Wells`.
     :param grid: Forwarded to `resolve_perforations_geometry`.
     :param permeabilities: Forwarded to `resolve_perforations_geometry`.
-    :param resolve_kwargs: Forwarded to `resolve_perforations_geometry`.
     :returns: `CompiledPerforations`, one row per (well, perforation, cell) triple.
     """
     well_offsets = [0]
@@ -1322,7 +1329,9 @@ def compile_perforations(
                 grid=grid,
                 well=well,
                 permeabilities=permeabilities,
-                **resolve_kwargs,
+                horizontal_tolerance=horizontal_tolerance,
+                intersection_method=intersection_method,
+                search_radius=search_radius,
             )
         )
         for perforation_index in perforation_indices_geometry:
@@ -1675,11 +1684,14 @@ def compile_well_system(
     wells: Wells,
     controls: WellControls,
     grid: Grid,
+    *,
     permeabilities: typing.Mapping[Orientation, NumberArray[OneDimension]],
     group_controls: GroupControls | None = None,
     groups: WellGroups | None = None,
     dtype: npt.DTypeLike = None,
-    **resolve_kwargs: typing.Any,
+    horizontal_tolerance: Number | None = None,
+    intersection_method: GridIntersectionMethod = "aabb",
+    search_radius: Number | None = None,
 ) -> CompiledWellSystem:
     """
     Compiles a rich `Wells`/`WellControls` pair into a `CompiledWellSystem`.
@@ -1718,8 +1730,10 @@ def compile_well_system(
         wells=wells,
         grid=grid,
         permeabilities=permeabilities,
+        horizontal_tolerance=horizontal_tolerance,
+        intersection_method=intersection_method,
+        search_radius=search_radius,
         dtype=dtype,
-        **resolve_kwargs,
     )
     well_controls = compile_well_controls(
         names=names,

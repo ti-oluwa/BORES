@@ -164,7 +164,7 @@ class StepMetrics:
     success: bool = True
 
 
-def _utilization(actual: float | None, limit: float | None) -> float | None:
+def compute_utilization(actual: float | None, limit: float | None) -> float | None:
     """Return actual/limit, or None if either is None/zero."""
     if actual is None or limit is None or limit <= 0.0:
         return None
@@ -269,7 +269,7 @@ class Timer(StoreSerializable):
     use_constant_step_size: bool = attrs.field(init=False, default=False)
     """Whether to use a constant time step size (init == max == min)."""
     last_successful_step_size: float = attrs.field(init=False, default=0.0)
-    """The step size used in the most recently *accepted* step."""
+    """The step size used in the most recently accepted step."""
 
     # Performance tracking
     recent_metrics: deque[StepMetrics] = attrs.field(init=False)
@@ -323,33 +323,33 @@ class Timer(StoreSerializable):
         return self.maximum_steps is not None and self.step >= self.maximum_steps
 
     @property
-    def _avg_cfl(self) -> float | None:
+    def average_cfl(self) -> float | None:
         """Average CFL over the recent window, or None if no data."""
         if not self._cfl_window:
             return None
         return sum(self._cfl_window) / len(self._cfl_window)
 
     @property
-    def _avg_newton(self) -> float | None:
+    def average_newton_iterations(self) -> float | None:
         """Average Newton iterations over the recent window, or None if no data."""
         if not self._newton_window:
             return None
         return sum(self._newton_window) / len(self._newton_window)
 
-    def _is_near_failed_size(self, dt: float, tolerance: float = 0.10) -> bool:
+    def is_near_failed_size(self, dt: float, tolerance: float = 0.10) -> bool:
         """
-        True if *dt* is within *tolerance* of a recently failed size **from below**.
+        True if `dt` is within `tolerance` of a recently failed size **from below**.
 
         We only guard against stepping into the failure zone from the safe side
         (i.e., growing toward a previously failed size). A size that is already
-        *smaller* than a failed size is safe by definition.
+        smaller than a failed size is safe by definition.
         """
         for failed_size in self.failed_step_sizes:
             if 0.0 < (failed_size - dt) / failed_size < tolerance:
                 return True
         return False
 
-    def _compute_performance_factor(self) -> float:
+    def compute_performance_factor(self) -> float:
         """
         Derive a multiplicative adjustment factor from recent solver trends.
 
@@ -358,7 +358,7 @@ class Timer(StoreSerializable):
         """
         factor = 1.0
 
-        avg_cfl = self._avg_cfl
+        avg_cfl = self.average_cfl
         if avg_cfl is not None and len(self._cfl_window) >= 3:
             # If we are consistently using >75 % of the CFL budget, be cautious.
             if avg_cfl > 0.75 * self.maximum_cfl:
@@ -370,7 +370,7 @@ class Timer(StoreSerializable):
                 if trend > 0.15:
                     factor *= 0.90
 
-        avg_newton = self._avg_newton
+        avg_newton = self.average_newton_iterations
         if avg_newton is not None and len(self._newton_window) >= 3:
             if avg_newton > 8:
                 factor *= 0.85
@@ -381,7 +381,7 @@ class Timer(StoreSerializable):
 
         return max(factor, 0.5)
 
-    def _check_mbe_violations(
+    def check_mbe_violations(
         self,
         absolute_oil_mbe: float | None = None,
         absolute_water_mbe: float | None = None,
@@ -474,14 +474,14 @@ class Timer(StoreSerializable):
 
         Each diagnostic argument is used to derive a proportional backoff factor.
         The most conservative factor across all active signals is selected and
-        applied to the current `next_step_size`.  When the result would fall
+        applied to the current `next_step_size`. When the result would fall
         below the last known-good step size and the failure is not severe
         (backoff factor ≥ 0.5), a conservative floor of
         `last_successful_step_size * 0.90` is applied to avoid over-cutting.
 
         :param step_size: The step size that was rejected (seconds).
         :param aggressive: When *True*, the final factor is additionally capped
-            by `aggressive_backoff_factor`.  Intended for use after repeated
+            by `aggressive_backoff_factor`. Intended for use after repeated
             consecutive rejections.
         :param maximum_cfl_encountered: Maximum CFL number observed during the
             attempted step.
@@ -539,7 +539,7 @@ class Timer(StoreSerializable):
             )
         )
 
-        factor = self._compute_backoff_factor(
+        factor = self.compute_backoff_factor(
             maximum_cfl_encountered=maximum_cfl_encountered,
             cfl_threshold=cfl_threshold,
             newton_iterations=newton_iterations,
@@ -621,7 +621,7 @@ class Timer(StoreSerializable):
         )
         return self.next_step_size
 
-    def _compute_backoff_factor(
+    def compute_backoff_factor(
         self,
         *,
         maximum_cfl_encountered: float | None = None,
@@ -643,7 +643,7 @@ class Timer(StoreSerializable):
     ) -> float:
         """
         Compute the most conservative (smallest) backoff factor from all
-        failure signals.  Returns a value in (0, 1].
+        failure signals. Returns a value in (0, 1].
         """
         factors: list[float] = []
 
@@ -663,7 +663,7 @@ class Timer(StoreSerializable):
                 factors.append(max((cfl_limit * 0.90) / maximum_cfl_encountered, 0.60))
 
         # Saturation change
-        saturation_utilization = _utilization(
+        saturation_utilization = compute_utilization(
             maximum_saturation_change, maximum_allowed_saturation_change
         )
         if saturation_utilization is not None and saturation_utilization > 1.0:
@@ -675,7 +675,7 @@ class Timer(StoreSerializable):
                 factors.append(max(1.0 / saturation_utilization, 0.50))
 
         # Pressure change
-        pressure_utilization = _utilization(
+        pressure_utilization = compute_utilization(
             maximum_pressure_change, maximum_allowed_pressure_change
         )
         if pressure_utilization is not None and pressure_utilization > 1.0:
@@ -707,14 +707,14 @@ class Timer(StoreSerializable):
             (total_relative_mbe, self.maximum_total_relative_mbe),
         ]
         for actual, limit in mbe_pairs:
-            u = _utilization(actual, limit)
-            if u is not None and u > 1.0:
-                if u > 3.0:
+            utilization = compute_utilization(actual, limit)
+            if utilization is not None and utilization > 1.0:
+                if utilization > 3.0:
                     factors.append(0.40)
-                elif u > 1.5:
+                elif utilization > 1.5:
                     factors.append(0.60)
                 else:
-                    factors.append(max(0.90 / u, 0.70))
+                    factors.append(max(0.90 / utilization, 0.70))
 
         if factors:
             final = min(factors)
@@ -755,18 +755,18 @@ class Timer(StoreSerializable):
         `(True, 'Step acceptable')` is returned.
 
         :param maximum_cfl_encountered: Maximum CFL number observed during the
-            step.  Checked against `cfl_threshold` (or `maximum_cfl` when
-            *cfl_threshold* is *None*).
+            step. Checked against `cfl_threshold` (or `maximum_cfl` when
+            `cfl_threshold` is `None`).
         :param cfl_threshold: The CFL threshold that was active during the step.
         :param maximum_saturation_change: Maximum phase saturation change
             encountered (fraction, 0-1).
         :param maximum_allowed_saturation_change: Configured saturation change
-            limit.  Both this and *maximum_saturation_change* must be non-*None*
+            limit. Both this and `maximum_saturation_change` must be non-`None`
             for the check to be active.
         :param maximum_pressure_change: Maximum absolute pressure change
             encountered (psi).
         :param maximum_allowed_pressure_change: Configured pressure change limit
-            (psi).  Both this and *maximum_pressure_change* must be non-*None*
+            (psi). Both this and `maximum_pressure_change` must be non-`None`
             for the check to be active.
         :param absolute_oil_mbe: Absolute oil MBE (res ft³) to check against
             `maximum_absolute_oil_mbe`.
@@ -786,8 +786,8 @@ class Timer(StoreSerializable):
             `maximum_total_relative_mbe`.
         :param kwargs: Additional keyword arguments forwarded from
             `StepResult.timer_context`; silently ignored.
-        :return: Tuple of `(acceptable, message)`.  *acceptable* is *True*
-            when the step passes all checks.  *message* describes the first
+        :return: Tuple of `(acceptable, message)`. `acceptable` is `True`
+            when the step passes all checks. `message` describes the first
             violated criterion, or `'Step acceptable'` on success.
         """
         cfl_limit = cfl_threshold if cfl_threshold is not None else self.maximum_cfl
@@ -797,7 +797,7 @@ class Timer(StoreSerializable):
                 f"Maximum CFL ({cfl_limit}) violated. Encountered: {maximum_cfl_encountered}",
             )
 
-        saturation_utilization = _utilization(
+        saturation_utilization = compute_utilization(
             maximum_saturation_change, maximum_allowed_saturation_change
         )
         if saturation_utilization is not None and saturation_utilization > 1.0:
@@ -807,7 +807,7 @@ class Timer(StoreSerializable):
                 f"Encountered: {maximum_saturation_change}",
             )
 
-        pressure_utilization = _utilization(
+        pressure_utilization = compute_utilization(
             maximum_pressure_change, maximum_allowed_pressure_change
         )
         if pressure_utilization is not None and pressure_utilization > 1.0:
@@ -817,7 +817,7 @@ class Timer(StoreSerializable):
                 f"Encountered: {maximum_pressure_change}",
             )
 
-        mbe_violated, mbe_messages = self._check_mbe_violations(
+        mbe_violated, mbe_messages = self.check_mbe_violations(
             absolute_oil_mbe=absolute_oil_mbe,
             absolute_water_mbe=absolute_water_mbe,
             absolute_gas_mbe=absolute_gas_mbe,
@@ -856,8 +856,8 @@ class Timer(StoreSerializable):
         Register an accepted time step and compute the next proposed step size.
 
         The next step size is derived by collecting adjustment factors from all
-        active diagnostic signals, separating them into *limiting* factors
-        (≤ 1.0, all applied) and *growth* factors (> 1.0, only the most
+        active diagnostic signals, separating them into `limiting` factors
+        (≤ 1.0, all applied) and `growth` factors (> 1.0, only the most
         conservative applied). An additional easy-regime acceleration is
         triggered when all utilization metrics are well below their limits and
         the solver has had several consecutive successes, allowing fast geometric
@@ -866,9 +866,9 @@ class Timer(StoreSerializable):
 
         :param step_size: The time step size that was just accepted (seconds).
         :param maximum_cfl_encountered: Maximum CFL number observed during the
-            step.  Used to compute a CFL-proportional growth or limiting factor.
+            step. Used to compute a CFL-proportional growth or limiting factor.
         :param cfl_threshold: The CFL threshold that was active during the step.
-            Falls back to `maximum_cfl` when *None*.
+            Falls back to `maximum_cfl` when `None`.
         :param newton_iterations: Number of Newton iterations taken by the
             transport solver. High counts produce a limiting factor; very low
             counts (< 4) after a cooldown period allow additional growth.
@@ -881,25 +881,25 @@ class Timer(StoreSerializable):
         :param maximum_allowed_pressure_change: Configured pressure change limit
             (psi) used to compute the utilization ratio.
         :param absolute_oil_mbe: Absolute oil material balance error (res ft³).
-            Only used when `use_mbe_for_step_size` is *True*.
+            Only used when `use_mbe_for_step_size` is `True`.
         :param absolute_water_mbe: Absolute water material balance error (res ft³).
-            Only used when `use_mbe_for_step_size` is *True*.
+            Only used when `use_mbe_for_step_size` is `True`.
         :param absolute_gas_mbe: Absolute gas material balance error (res ft³),
             including dissolved gas. Only used when `use_mbe_for_step_size`
-            is *True*.
+            is `True`.
         :param total_absolute_mbe: Sum of all absolute phase MBEs (res ft³).
-            Only used when `use_mbe_for_step_size` is *True*.
+            Only used when `use_mbe_for_step_size` is `True`.
         :param relative_oil_mbe: Oil MBE as a fraction of the previous-step oil
-            pore volume. Only used when `use_mbe_for_step_size` is *True*.
+            pore volume. Only used when `use_mbe_for_step_size` is `True`.
         :param relative_water_mbe: Water MBE as a fraction of the previous-step
-            water pore volume. Only used when `use_mbe_for_step_size` is *True*.
+            water pore volume. Only used when `use_mbe_for_step_size` is `True`.
         :param relative_gas_mbe: Gas MBE as a fraction of the previous-step gas
             pore volume equivalent. Only used when `use_mbe_for_step_size`
-            is *True*.
+            is `True`.
         :param total_relative_mbe: Total MBE as a fraction of the previous-step
-            total pore volume. Only used when `use_mbe_for_step_size` is *True*.
+            total pore volume. Only used when `use_mbe_for_step_size` is `True`.
         :return: The next proposed time step size in seconds.
-        :raises TimingError: If *step_size* exceeds the remaining simulation time,
+        :raises TimingError: If `step_size` exceeds the remaining simulation time,
             which indicates a bug in the calling time-stepping logic.
         """
         if step_size > (self.time_remaining + 1e-9):
@@ -935,8 +935,8 @@ class Timer(StoreSerializable):
             self._newton_window.append(newton_iterations)
 
         # Build a single consolidated growth factor.
-        # Strategy: collect one factor per "signal type", then take the
-        # *minimum* of the limiting signals and the *maximum* of the growth
+        # Strategy: collect one factor per signal type, then take the
+        # minimum of the limiting signals, and the maximum of the growth
         # signals separately, then combine. This is more physically
         # meaningful than chaining multiplications, which compounds noise.
         limiting_factors: list[float] = []  # ≤ 1.0 must honour all
@@ -957,7 +957,7 @@ class Timer(StoreSerializable):
             (limiting_factors if cfl_factor < 1.0 else growth_factors).append(cfl_factor)
 
         # Saturation signal
-        saturation_utilization = _utilization(
+        saturation_utilization = compute_utilization(
             maximum_saturation_change, maximum_allowed_saturation_change
         )
         if saturation_utilization is not None and saturation_utilization > 0.0:
@@ -973,7 +973,7 @@ class Timer(StoreSerializable):
                 growth_factors.append(min(1.15, (1.0 / saturation_utilization) * 0.90))
 
         # Pressure signal
-        pressure_utilization = _utilization(
+        pressure_utilization = compute_utilization(
             maximum_pressure_change, maximum_allowed_pressure_change
         )
         if pressure_utilization is not None and pressure_utilization > 0.0:
@@ -996,9 +996,9 @@ class Timer(StoreSerializable):
                 growth_factors.append(1.20)
 
         # Historical performance signal
-        perf = self._compute_performance_factor()
-        if perf < 1.0:
-            limiting_factors.append(perf)
+        performance_factor = self.compute_performance_factor()
+        if performance_factor < 1.0:
+            limiting_factors.append(performance_factor)
 
         # MBE signal (optional)
         if self.use_mbe_for_step_size:
@@ -1013,15 +1013,15 @@ class Timer(StoreSerializable):
                 (total_relative_mbe, self.maximum_total_relative_mbe),
             ]
             for actual, limit in mbe_accept_pairs:
-                u = _utilization(actual, limit)
-                if u is None:
+                utilization = compute_utilization(actual, limit)
+                if utilization is None:
                     continue
-                if u > 0.90:
+                if utilization > 0.90:
                     limiting_factors.append(0.85)
-                elif u > 0.75:
+                elif utilization > 0.75:
                     limiting_factors.append(0.95)
-                elif u < 0.20:
-                    growth_factors.append(min(1.20, (1.0 / max(u, 1e-9)) * 0.50))
+                elif utilization < 0.20:
+                    growth_factors.append(min(1.20, (1.0 / max(utilization, 1e-9)) * 0.50))
 
         # Combine: all limiting factors must apply; of growth factors only
         # the most conservative (smallest) is used so we don't overshoot.
@@ -1043,9 +1043,9 @@ class Timer(StoreSerializable):
         )
         if can_ramp:
             all_comfy = all(
-                u is None or u < 0.70
-                for u in (
-                    _utilization(maximum_cfl_encountered, maximum_cfl),
+                utilization is None or utilization < 0.70
+                for utilization in (
+                    compute_utilization(maximum_cfl_encountered, maximum_cfl),
                     saturation_utilization,
                     pressure_utilization,
                 )
@@ -1063,9 +1063,9 @@ class Timer(StoreSerializable):
             self.steps_since_last_failure >= self.growth_cooldown_steps
             and not limiting_factors
             and all(
-                u is None or u < 0.30
-                for u in (
-                    _utilization(maximum_cfl_encountered, maximum_cfl),
+                utilization is None or utilization < 0.30
+                for utilization in (
+                    compute_utilization(maximum_cfl_encountered, maximum_cfl),
                     saturation_utilization,
                     pressure_utilization,
                 )
@@ -1086,7 +1086,7 @@ class Timer(StoreSerializable):
         dt = max(dt, self.minimum_step_size)
 
         # Failure-zone avoidance
-        if self._is_near_failed_size(dt):
+        if self.is_near_failed_size(dt):
             dt *= 0.85
             dt = max(dt, self.minimum_step_size)
             logger.debug("Failure-zone avoidance: reduced proposed size to %.6e", dt)

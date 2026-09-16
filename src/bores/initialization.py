@@ -956,6 +956,7 @@ def resolve_temperature(
     deck_file: DeckFile | None,
     temperature: Temperature | Number | None,
     dtype: npt.DTypeLike = None,
+    unit_system: UnitSystem | None = None,
 ) -> CellArray:
     """
     Resolve per-cell temperature. Explicit `temperature` kwarg > deck
@@ -972,7 +973,9 @@ def resolve_temperature(
     elif deck_file is not None and (
         deck_file.has("RTEMP") or deck_file.has("TEMPVD") or deck_file.has("RTEMPVD")
     ):
-        source = Temperature.from_deck(deck_file, dtype=dtype)
+        # Ensure that the load `Temperture`'s unit syatem is consistent with what we need
+        unit_system = unit_system if unit_system is not None else reservoir.unit_system
+        source = Temperature.from_deck(deck_file, dtype=dtype).convert(unit_system)
     else:
         raise ValidationError(
             "No temperature source available. Pass `temperature=` explicitly "
@@ -1098,14 +1101,15 @@ def initialize_reservoir_state(
             f"`reservoir.unit_system` ({unit_system.value!r}) does not "
             f"match `equilibrium.unit_system` ({equilibrium.unit_system.value!r})."
         )
-    if (
-        satfunc is not None
-        and satfunc.unit_system is not None
-        and satfunc.unit_system != unit_system
-    ):
+    if satfunc is not None and satfunc.unit_system != unit_system:
         raise ValidationError(
             f"`reservoir.unit_system` ({unit_system.value!r}) does not "
             f"match `satfunc.unit_system` ({satfunc.unit_system.value!r})."
+        )
+    if isinstance(temperature, Temperature) and temperature.unit_system != unit_system:
+        raise ValidationError(
+            f"`reservoir.unit_system` ({unit_system.value!r}) does not "
+            f"match `temperature.unit_system` ({temperature.unit_system.value!r})."
         )
 
     temperature_array = resolve_temperature(
@@ -1113,6 +1117,7 @@ def initialize_reservoir_state(
         deck_file=deck_file,
         temperature=temperature,
         dtype=dtype,
+        unit_system=unit_system,
     )
     explicit: dict[str, CellArray | None] = {
         "pressure": pressure,
@@ -1139,7 +1144,7 @@ def initialize_reservoir_state(
     if any(value is None for value in explicit.values()):
         if equilibrium is None:
             if deck_file is not None and deck_file.get("EQUIL"):
-                equilibrium = Equilibrium.from_deck(deck_file)
+                equilibrium = Equilibrium.from_deck(deck_file).convert(unit_system)
             else:
                 missing = [field for field, value in explicit.items() if value is None]
                 raise ValidationError(
@@ -1267,12 +1272,12 @@ def initialize_reservoir_state(
 
     for pvtnum in np.unique(pvt_region_index):
         mask = pvt_region_index == pvtnum
-        pvt_region = pvt.region(int(pvtnum))
+        pvt_region = pvt.region(pvtnum)
         static = pvt_region.static
         if static.stock_tank_oil_density is None:
             raise ValidationError(
-                f"PVTNUM {pvtnum}: `stock_tank_oil_density` (DENSITY "
-                "keyword) is required to assemble ReservoirState masses."
+                f"`PVTNUM` {pvtnum}: `stock_tank_oil_density` (`DENSITY` "
+                "keyword) is required to assemble `ReservoirState` masses."
             )
 
         rho_o_sc = static.stock_tank_oil_density
@@ -1292,7 +1297,7 @@ def initialize_reservoir_state(
         )
         if bo is None:
             raise ValidationError(
-                f"PVTNUM {pvtnum}: oil formation volume factor table is unavailable."
+                f"`PVTNUM` {pvtnum}: oil formation volume factor table is unavailable."
             )
         oil_mass[mask] = so * pv / bo * rho_o_sc
 
@@ -1311,14 +1316,14 @@ def initialize_reservoir_state(
         if np.any(sg > 0.0):
             if pvt_region.tables.gas is None:
                 raise ValidationError(
-                    f"PVTNUM {pvtnum}: free gas saturation is present "
+                    f"`PVTNUM` {pvtnum}: free gas saturation is present "
                     "but no gas PVT table is available."
                 )
 
             bg = pvt_region.tables.gas.formation_volume_factor(pressure=p, temperature=t)
             if bg is None or rho_g_sc is None:
                 raise ValidationError(
-                    f"PVTNUM {pvtnum}: gas FVF table or "
+                    f"`PVTNUM` {pvtnum}: gas FVF table or "
                     "`stock_tank_gas_density` is unavailable but Sg > 0."
                 )
             free_gas_mass[mask] = sg * pv / bg * rho_g_sc
@@ -1331,14 +1336,14 @@ def initialize_reservoir_state(
         if np.any(sw > 0.0):
             if pvt_region.tables.water is None:
                 raise ValidationError(
-                    f"PVTNUM {pvtnum}: water saturation is present "
+                    f"`PVTNUM` {pvtnum}: water saturation is present "
                     "but no water PVT table is available."
                 )
 
             bw = pvt_region.tables.water.formation_volume_factor(pressure=p, temperature=t)
             if bw is None or rho_w_sc is None:
                 raise ValidationError(
-                    f"PVTNUM {pvtnum}: water FVF table or "
+                    f"`PVTNUM` {pvtnum}: water FVF table or "
                     "`stock_tank_water_density` is unavailable."
                 )
             water_mass[mask] = sw * pv / bw * rho_w_sc

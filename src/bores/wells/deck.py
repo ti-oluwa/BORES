@@ -1092,7 +1092,7 @@ def load_schedule(
     """
     unit_system = deck_file.unit_system
     rules: list[Rule[CompiledBlackOilModel]] = []
-    empty = []
+    empty: list[dict[str, typing.Any]] = []
 
     def is_due(record: typing.Mapping[str, typing.Any]) -> bool:
         return record.get("schedule_time", 0.0) > compiled_at

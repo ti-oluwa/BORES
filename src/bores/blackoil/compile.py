@@ -2,11 +2,13 @@
 
 import typing
 
+import numpy.typing as npt
+
 from bores.blackoil.fluids.model import BlackOil
 from bores.blackoil.model import BlackOilModel
 from bores.errors import BoundaryConditionCompilationError, WellCompilationError
 from bores.reservoir.model import Reservoir
-from bores.types import Orientation, UnitSystem
+from bores.types import GridIntersectionMethod, Number, Orientation, UnitSystem
 from bores.wells.compile import CompiledWellSystem, compile_well_system
 
 __all__ = ["CompiledBlackOilModel", "compile_model"]
@@ -34,8 +36,10 @@ class CompiledBlackOilModel(typing.NamedTuple):
 def compile_model(
     model: BlackOilModel,
     *,
-    dtype: typing.Any = None,
-    **resolve_kwargs: typing.Any,
+    horizontal_tolerance: Number | None = None,
+    intersection_method: GridIntersectionMethod = "aabb",
+    search_radius: Number | None = None,
+    dtype: npt.DTypeLike = None,
 ) -> CompiledBlackOilModel:
     """
     Compiles a `BlackOilModel`'s wells into a `CompiledBlackOilModel`.
@@ -50,6 +54,7 @@ def compile_model(
     :raises BoundaryConditionCompilationError: If `model.boundary_conditions` is set.
     :raises WellCompilationError: If well compilation fails.
     """
+    model.validate()
     if model.boundary_conditions is not None:
         raise BoundaryConditionCompilationError(
             "`CompiledBoundaryConditions` does not exist yet. Compile a model with "
@@ -71,8 +76,10 @@ def compile_model(
                 },
                 group_controls=model.wells.group_controls,
                 groups=model.wells.groups,
+                horizontal_tolerance=horizontal_tolerance,
+                intersection_method=intersection_method,
+                search_radius=search_radius,
                 dtype=dtype,
-                **resolve_kwargs,
             )
         except Exception as exc:
             raise WellCompilationError(f"Failed to compile wells for {model!r}.") from exc

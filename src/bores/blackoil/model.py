@@ -1,8 +1,5 @@
 """Top-level black-oil simulation model: reservoir, fluid, wells, boundary conditions."""
 
-import typing
-
-import numpy.typing as npt
 from typing_extensions import Self
 
 from bores.blackoil.fluids.model import BlackOil
@@ -13,9 +10,6 @@ from bores.reservoir.model import Reservoir
 from bores.serde.stores import StoreSerializable
 from bores.types import UnitSystem
 from bores.wells.model import WellSystem
-
-if typing.TYPE_CHECKING:
-    from bores.blackoil.compile import CompiledBlackOilModel
 
 __all__ = ["BlackOilModel"]
 
@@ -116,6 +110,18 @@ class BlackOilModel(
         self.unit_system = unit_system
         """Unit system in which every component is expressed."""
 
+        self._validated = False
+
+    def validate(self) -> None:
+        """
+        Run all necessary validation and correctness checks on the model
+
+        :raise ValidationError:
+        """
+        if self._validated:
+            return
+        ...
+
     def convert(
         self,
         target: UnitSystem,
@@ -143,22 +149,6 @@ class BlackOilModel(
             ),
             unit_system=target,
         )
-
-    def compile(
-        self, *, dtype: npt.DTypeLike = None, **resolve_kwargs: typing.Any
-    ) -> "CompiledBlackOilModel":
-        """
-        Compiles this model into a `CompiledBlackOilModel`.
-
-        :param dtype: Forwarded to `compile_model`.
-        :param resolve_kwargs: Forwarded to `compile_model`.
-        :returns: The compiled model.
-        :raises BoundaryConditionCompilationError: If `boundary_conditions` is set.
-        :raises WellCompilationError: If well compilation fails.
-        """
-        from bores.blackoil.compile import compile_model
-
-        return compile_model(self, dtype=dtype, **resolve_kwargs)
 
     def __repr__(self) -> str:
         return (

@@ -13,10 +13,7 @@ from bores.wells.compile import (
     RateQuantityTag,
 )
 from bores.wells.hydraulics.base import SurfaceFluidProperties, WellBoreModel
-from bores.wells.resolution.compile import (
-    CompiledControlResolverSpec,
-    PerforationWorkspace,
-)
+from bores.wells.resolution.compile import PerforationWorkspace
 from bores.wells.resolution.solvers import (
     RATE_QUANTITY_PHASES,
     bisect_bhp,
@@ -24,6 +21,7 @@ from bores.wells.resolution.solvers import (
     compute_tubing_head_pressure,
     solve_connection_pressures_and_rates,
 )
+from bores.wells.resolution.spec import ControlResolverSpec
 from bores.wells.states import ConnectionSample, PhaseValues
 
 __all__ = ["apply_limits"]
@@ -62,7 +60,7 @@ def get_rate_bound(
     is_injector: bool,
     min_pressure: Number,
     max_pressure: Number,
-    resolver_spec: CompiledControlResolverSpec,
+    resolver_spec: ControlResolverSpec,
 ) -> Number | None:
     """
     Gets the bounding BHP for a `RateLimit` row, if violated.
@@ -144,7 +142,7 @@ def get_thp_bound(
     is_injector: bool,
     min_pressure: Number,
     max_pressure: Number,
-    resolver_spec: CompiledControlResolverSpec,
+    resolver_spec: ControlResolverSpec,
     surface_fluid_properties: SurfaceFluidProperties,
 ) -> Number | None:
     """
@@ -268,7 +266,7 @@ def apply_limits(
     surface_phase_rates: PhaseValues,
     min_pressure: Number,
     max_pressure: Number,
-    resolver_spec: CompiledControlResolverSpec,
+    resolver_spec: ControlResolverSpec,
     surface_fluid_properties: SurfaceFluidProperties | None = None,
 ) -> tuple[Number, NumberArray[OneDimension], PhaseValues, PhaseValues, Integer, bool]:
     """

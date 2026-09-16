@@ -14,6 +14,7 @@ from bores.grids.base import Grid
 from bores.serde.base import Serializable
 from bores.types import (
     Boolean,
+    GridIntersectionMethod,
     IntArray,
     Integer,
     Number,
@@ -346,7 +347,7 @@ def resolve_perforations_indices(
     well: Well,
     *,
     horizontal_tolerance: Number | None = None,
-    method: typing.Literal["aabb", "exact"] = "aabb",
+    intersection_method: GridIntersectionMethod = "aabb",
 ) -> tuple[PerforationIndex, ...]:
     """
     Resolve every open `Perforation` on `well` to the `Grid` cell(s) it
@@ -393,7 +394,7 @@ def resolve_perforations_indices(
     candidates = get_vertical_column_candidates(grid, x, y, tolerance)
     compute_extent = (
         compute_local_vertical_extent_aabb
-        if method == "aabb"
+        if intersection_method == "aabb"
         else compute_local_vertical_extent_exact
     )
 

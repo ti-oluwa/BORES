@@ -26,6 +26,7 @@ from bores.errors import ValidationError
 from bores.grids.base import Grid
 from bores.serde.base import Serializable
 from bores.types import (
+    GridIntersectionMethod,
     Integer,
     Number,
     NumberArray,
@@ -456,10 +457,13 @@ def resolve_connection_factor(
 def build_wells_indices(
     grid: Grid,
     wells: Wells,
+    *,
     permeabilities: typing.Mapping[Orientation, NumberArray[OneDimension]],
     regime_constant: float = -3 / 4,
     net_to_gross: NumberOrArray[OneDimension] = 1.0,
-    **resolve_kwargs: typing.Any,
+    horizontal_tolerance: Number | None = None,
+    intersection_method: GridIntersectionMethod = "aabb",
+    search_radius: Number | None = None,
 ) -> dict[str, WellIndex]:
     """
     Resolve every well in `wells` against `grid` and compute connection
@@ -469,7 +473,11 @@ def build_wells_indices(
     :param wells: `Wells` container (all wells to resolve).
     :param permeabilities: Per-axis permeability arrays, shape `(n_cells,)`
         each, keyed by `Orientation.X`/`Y`/`Z`.
-    :param resolve_kwargs: Passed through to `resolve_perforations_indices`.
+    :param regime_constant: Forwarded to `resolve_connection_factor`.
+    :param net_to_gross: Forwarded to `resolve_connection_factor`.
+    :param horizontal_tolerance: Forwarded to `resolve_perforations_indices`.
+    :param method: Forwarded to `resolve_perforations_indices`.
+    :param search_radius: Forwarded to `resolve_md_perforations_indices`.
     :returns: Mapping from well name to `WellIndex`.
     :raises ValidationError: Propagated from `resolve_perforations_indices` for any
         well with a dangling completion.
@@ -485,11 +493,14 @@ def build_wells_indices(
         well = wells[name]
         if well.trajectory is None:
             perforation_indices = resolve_perforations_indices(
-                grid=grid, well=well, **resolve_kwargs
+                grid=grid,
+                well=well,
+                horizontal_tolerance=horizontal_tolerance,
+                intersection_method=intersection_method,
             )
         else:
             perforation_indices = resolve_md_perforations_indices(
-                grid=grid, well=well, **resolve_kwargs
+                grid=grid, well=well, search_radius=search_radius
             )
 
         resolved: list[PerforationIndex] = []

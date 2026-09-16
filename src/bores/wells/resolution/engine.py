@@ -11,11 +11,7 @@ from bores.wells.compile import (
     WellKind,
 )
 from bores.wells.hydraulics.base import SurfaceFluidProperties, WellBoreModel
-from bores.wells.resolution.compile import (
-    CompiledControlResolverSpec,
-    CompiledWellResolution,
-    build_perforation_workspace,
-)
+from bores.wells.resolution.compile import WellsWorkspace, build_perforation_workspace
 from bores.wells.resolution.limits import apply_limits
 from bores.wells.resolution.solvers import (
     ALL_PHASES,
@@ -29,6 +25,7 @@ from bores.wells.resolution.solvers import (
     solve_producer_bhp_mode,
     solve_producer_rate_mode,
 )
+from bores.wells.resolution.spec import ControlResolverSpec
 from bores.wells.states import ConnectionSample
 
 __all__ = ["resolve_control"]
@@ -40,8 +37,8 @@ def resolve_control(
     well_row: Integer,
     wellbore: WellBoreModel,
     connection_samples: typing.Sequence[ConnectionSample],
-    resolution: CompiledWellResolution,
-    resolver_spec: CompiledControlResolverSpec,
+    workspace: WellsWorkspace,
+    resolver_spec: ControlResolverSpec,
     surface_fluid_properties: SurfaceFluidProperties | None = None,
 ) -> None:
     """
@@ -59,7 +56,7 @@ def resolve_control(
         open connections, in the same order `compiled_system.perforations`'
         rows for this well appear (after filtering to
         `completion_statuses == 1` and `schedule_statuses == 1`).
-    :param resolution: The system-wide `CompiledWellResolution` to update in place.
+    :param workspace: The system-wide `WellsWorkspace` to update in place.
     :param resolver_spec: Solver tunables.
     :param surface_fluid_properties: Required to compute THP, or to
         resolve a `THP`-mode control, or to check a `THPLimit`. Omit if
@@ -93,7 +90,7 @@ def resolve_control(
             "`connection_samples`. These must match 1:1."
         )
 
-    workspace = build_perforation_workspace(
+    perforation_workspace = build_perforation_workspace(
         well_indices=typing.cast(
             NumberArray[OneDimension], perforations.well_indices[active_open]
         ),
@@ -122,7 +119,7 @@ def resolve_control(
                 injected_phase=injected_phase,
                 wellbore=wellbore,
                 reference_depth=reference_depth,
-                workspace=workspace,
+                workspace=perforation_workspace,
                 connection_samples=connection_samples,
                 resolver_spec=resolver_spec,
             )
@@ -132,7 +129,7 @@ def resolve_control(
                 injected_phase=injected_phase,
                 wellbore=wellbore,
                 reference_depth=reference_depth,
-                workspace=workspace,
+                workspace=perforation_workspace,
                 connection_samples=connection_samples,
                 resolver_spec=resolver_spec,
             )
@@ -145,7 +142,7 @@ def resolve_control(
             bhp, _, _ = bisect_bhp(
                 wellbore=wellbore,
                 reference_depth=reference_depth,
-                workspace=workspace,
+                workspace=perforation_workspace,
                 connection_samples=connection_samples,
                 relevant_phases=relevant_phases,
                 is_injector=True,
@@ -159,7 +156,7 @@ def resolve_control(
             connection_pressures, phase_rates, surface_phase_rates = compute_phase_rates(
                 wellbore=wellbore,
                 reference_depth=reference_depth,
-                workspace=workspace,
+                workspace=perforation_workspace,
                 connection_samples=connection_samples,
                 reference_pressure=bhp,
                 relevant_phases=relevant_phases,
@@ -191,7 +188,7 @@ def resolve_control(
                 target_rate=controls.target_rates[well_row],
                 wellbore=wellbore,
                 reference_depth=reference_depth,
-                workspace=workspace,
+                workspace=perforation_workspace,
                 connection_samples=connection_samples,
                 resolver_spec=resolver_spec,
             )
@@ -200,7 +197,7 @@ def resolve_control(
                 target_bhp=controls.target_bhps[well_row],
                 wellbore=wellbore,
                 reference_depth=reference_depth,
-                workspace=workspace,
+                workspace=perforation_workspace,
                 connection_samples=connection_samples,
                 resolver_spec=resolver_spec,
             )
@@ -213,7 +210,7 @@ def resolve_control(
             bhp, _, _ = bisect_bhp(
                 wellbore=wellbore,
                 reference_depth=reference_depth,
-                workspace=workspace,
+                workspace=perforation_workspace,
                 connection_samples=connection_samples,
                 relevant_phases=relevant_phases,
                 is_injector=False,
@@ -227,7 +224,7 @@ def resolve_control(
             connection_pressures, phase_rates, surface_phase_rates = compute_phase_rates(
                 wellbore=wellbore,
                 reference_depth=reference_depth,
-                workspace=workspace,
+                workspace=perforation_workspace,
                 connection_samples=connection_samples,
                 reference_pressure=bhp,
                 relevant_phases=relevant_phases,
@@ -264,7 +261,7 @@ def resolve_control(
         limits_end=limits_end,
         wellbore=wellbore,
         reference_depth=reference_depth,
-        workspace=workspace,
+        workspace=perforation_workspace,
         connection_samples=connection_samples,
         relevant_phases=relevant_phases,
         is_injector=is_injector,
@@ -278,20 +275,20 @@ def resolve_control(
         surface_fluid_properties=surface_fluid_properties,
     )
 
-    resolution.bhps[well_row] = bhp
-    resolution.oil_rates[well_row] = phase_rates.oil
-    resolution.water_rates[well_row] = phase_rates.water
-    resolution.gas_rates[well_row] = phase_rates.gas
-    resolution.surface_oil_rates[well_row] = surface_phase_rates.oil
-    resolution.surface_water_rates[well_row] = surface_phase_rates.water
-    resolution.surface_gas_rates[well_row] = surface_phase_rates.gas
-    resolution.active_limit_rows[well_row] = active_limit_row
-    resolution.economic_shutins[well_row] = 1 if economic_shutin else 0
-    resolution.connection_pressures[active_open] = connection_pressures
+    workspace.bhps[well_row] = bhp
+    workspace.oil_rates[well_row] = phase_rates.oil
+    workspace.water_rates[well_row] = phase_rates.water
+    workspace.gas_rates[well_row] = phase_rates.gas
+    workspace.surface_oil_rates[well_row] = surface_phase_rates.oil
+    workspace.surface_water_rates[well_row] = surface_phase_rates.water
+    workspace.surface_gas_rates[well_row] = surface_phase_rates.gas
+    workspace.active_limit_rows[well_row] = active_limit_row
+    workspace.economic_shutins[well_row] = 1 if economic_shutin else 0
+    workspace.connection_pressures[active_open] = connection_pressures
     if economic_shutin:
-        resolution.connection_oil_rates[active_open] = 0.0
-        resolution.connection_water_rates[active_open] = 0.0
-        resolution.connection_gas_rates[active_open] = 0.0
+        workspace.connection_oil_rates[active_open] = 0.0
+        workspace.connection_water_rates[active_open] = 0.0
+        workspace.connection_gas_rates[active_open] = 0.0
     else:
         # workspace's own per-connection scratch arrays hold whatever the
         # last solve call for this well wrote into them which is the governing
@@ -299,9 +296,11 @@ def resolve_control(
         # own recompute at a limit-adjusted BHP, since every such call
         # reuses (overwrites) the same buffers. Safe to read here only
         # because nothing else touches this workspace after this point.
-        resolution.connection_oil_rates[active_open] = workspace.connection_oil_rates
-        resolution.connection_water_rates[active_open] = workspace.connection_water_rates
-        resolution.connection_gas_rates[active_open] = workspace.connection_gas_rates
+        workspace.connection_oil_rates[active_open] = perforation_workspace.connection_oil_rates
+        workspace.connection_water_rates[active_open] = (
+            perforation_workspace.connection_water_rates
+        )
+        workspace.connection_gas_rates[active_open] = perforation_workspace.connection_gas_rates
 
     if economic_shutin and limits.end_run_flags[active_limit_row]:
         raise StopSimulation(
@@ -310,7 +309,7 @@ def resolve_control(
         )
 
     if surface_fluid_properties is not None:
-        resolution.thps[well_row] = compute_tubing_head_pressure(
+        workspace.thps[well_row] = compute_tubing_head_pressure(
             wellbore=wellbore,
             reference_depth=reference_depth,
             reference_pressure=bhp,

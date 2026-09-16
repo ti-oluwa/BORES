@@ -9,7 +9,6 @@ from typing_extensions import Self
 from bores.errors import ActionError, EventError, StopSimulation
 from bores.serde.base import Serializable
 from bores.serde.registry import make_serializable_type_registrar
-from bores.simulation.runspec import RunSpec
 from bores.types import Boolean, Number, UnitSystem
 
 __all__ = [
@@ -35,7 +34,7 @@ PASSTHROUGH_EXCEPTIONS: tuple[type[BaseException], ...] = (StopSimulation,)
 """Exceptions `Schedule.apply` never wraps in `EventError`/`ActionError` - re-raised as is."""
 
 
-@attrs.frozen(kw_only=True, slots=True)
+@attrs.frozen(kw_only=True, slots=True, frozen=True)
 class ScheduleContext:
     """Context passed to every `Event`/`Action` call alongside the model."""
 
@@ -45,24 +44,17 @@ class ScheduleContext:
     previous_time: Number = 0.0
     """Elapsed time the schedule was last advanced to."""
 
-    unit_system: UnitSystem = UnitSystem.FIELD
-    """Unit system for `time`, `previous_time`, and any value an event reads."""
-
-    runspec: RunSpec | None = None
-    """The run's configuration, if any."""
-
-    state: object | None = None
-    """The latest solved state, if any (a `CompiledWellResolution`, for example)."""
-
     time_step: int | None = None
     """The current time-step index, if the caller is tracking one."""
 
     previous_time_step: int | None = None
-    """The time-step index the schedule was last advanced at. `TimeStepEvent` needs this to
-    tell "just reached this step" apart from "still past it next call too"."""
+    """The time-step index the schedule was last advanced at."""
 
     step_size: Number | None = None
     """The current time-step's size, in `unit_system`, if the caller is tracking one."""
+
+    unit_system: UnitSystem = UnitSystem.FIELD
+    """Unit system for `time`, `previous_time`, and any value an event reads."""
 
     extra: typing.Mapping[str, object] = attrs.field(factory=dict)
     """Additional domain-specific context."""
@@ -220,8 +212,6 @@ class Schedule(typing.Generic[ModelT]):
         time: Number,
         previous_time: Number = 0.0,
         unit_system: UnitSystem = UnitSystem.FIELD,
-        runspec: RunSpec | None = None,
-        state: typing.Any | None = None,
         time_step: int | None = None,
         previous_time_step: int | None = None,
         step_size: Number | None = None,
@@ -234,8 +224,6 @@ class Schedule(typing.Generic[ModelT]):
         :param time: Elapsed time to advance to.
         :param previous_time: Elapsed time last advanced to.
         :param unit_system: Unit system for `time`/`previous_time`.
-        :param runspec: The run's configuration, if any.
-        :param state: The latest solved state, if any.
         :param time_step: The current time-step index, if tracked.
         :param previous_time_step: The time-step index last advanced at, if tracked.
         :param step_size: The current time-step's size, if tracked.
@@ -246,8 +234,6 @@ class Schedule(typing.Generic[ModelT]):
             time=time,
             previous_time=previous_time,
             unit_system=unit_system,
-            runspec=runspec,
-            state=state,
             time_step=time_step,
             previous_time_step=previous_time_step,
             step_size=step_size,
@@ -300,8 +286,7 @@ class Schedule(typing.Generic[ModelT]):
     def __or__(self, other: Self) -> Self:
         """
         Merges two schedules, `other`'s named rules overriding `self`'s
-        own rules of the same name - the same override convention as
-        `dict | dict`. Unnamed rules from both are kept, never merged.
+        own rules of the same name. Unnamed rules from both are kept, never merged.
 
         :param other: The schedule to merge in.
         :returns: A new, merged `Schedule`.

@@ -47,7 +47,7 @@ from bores.wells.groups import (
     GroupProducerControlMode,
 )
 from bores.wells.model import WellSystem
-from bores.wells.resolution.compile import CompiledWellResolution
+from bores.wells.resolution.compile import WellsWorkspace
 from bores.wells.states import PerforationState, PhaseValues, WellsStates, WellState
 
 __all__ = [
@@ -548,10 +548,10 @@ def decompile_well_system(
 def build_wells_states(
     wells: Wells,
     compiled_system: CompiledWellSystem,
-    resolution: CompiledWellResolution,
+    resolution: WellsWorkspace,
 ) -> WellsStates:
     """
-    Builds `WellsStates` from a resolved `CompiledWellResolution`.
+    Builds `WellsStates` from a resolved `WellsWorkspace`.
 
     Only covers wells actually resolved this pass. A well whose
     `WellStatus` is still `PENDING` (its BHP is left `NaN` by
@@ -566,7 +566,7 @@ def build_wells_states(
         from. This supplies each `PerforationState.perforation`, which the
         compiled layer doesn't retain a reference to.
     :param compiled_system: The system `resolution` was resolved against.
-    :param resolution: A `CompiledWellResolution` from a completed resolve pass.
+    :param resolution: A `WellsWorkspace` from a completed resolve pass.
     :returns: One `WellState` per resolved well, keyed by well name.
     """
     controls = compiled_system.controls

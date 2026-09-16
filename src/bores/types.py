@@ -492,6 +492,8 @@ Vcon = typing.TypeVar("Vcon", contravariant=True)
 
 ZFactorMethod = typing.Literal["papay", "hall-yarborough", "dak"]
 
+GridIntersectionMethod = typing.Literal["aabb", "exact"]
+
 
 class UnitConversionFactors(TypedDict):
     """

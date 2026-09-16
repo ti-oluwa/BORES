@@ -24,7 +24,6 @@ from bores.wells.mappings import (
     PRODUCER_CONTROL_MODE_MAP,
     WELTARG_TARGET_FIELD,
 )
-from bores.wells.resolution.compile import CompiledWellResolution
 
 if typing.TYPE_CHECKING:
     from bores.blackoil.compile import CompiledBlackOilModel
@@ -387,8 +386,8 @@ class ActivateWell(SerializableAction["CompiledBlackOilModel"]):
     compiled arrays since compile time.
 
     A well is compiled the moment it's first mentioned anywhere in the
-    deck, regardless of when its own `WELSPECS` takes effect - the same
-    load-once-roster convention `ActivateCompletion` relies on for a
+    deck, regardless of when its own `WELSPECS` takes effect, the same
+    load-once roster convention `ActivateCompletion` relies on for a
     workover completion. Activating the well only flips its own
     well-level status; each of its perforations still activates on its
     own `COMPDAT` schedule time via `ActivateCompletion`, which
@@ -497,7 +496,7 @@ RATE_ARRAYS: dict[tuple[RateQuantity, Boolean], str] = {
     (RateQuantity.WATER, True): "surface_water_rates",
     (RateQuantity.GAS, True): "surface_gas_rates",
 }
-"""Maps a `(quantity, surface)` pair to the `CompiledWellResolution` array it reads from."""
+"""Maps a `(quantity, surface)` pair to the `WellsWorkspace` array it reads from."""
 
 
 @event_type
@@ -521,16 +520,20 @@ class RateThreshold(ThresholdEvent["CompiledBlackOilModel"]):
         Reads the well's own current rate from `context.state`.
 
         :param model: The model being scheduled against.
-        :param context: The current moment's context. `context.state`
-            must be a `CompiledWellResolution`.
+        :param context: The current moment's context.
         :returns: The well's current rate for `quantity`/`surface`.
-        :raises ValidationError: If `context.state` isn't a
-            `CompiledWellResolution`, or `quantity`/`surface` isn't supported.
+        :raises ValidationError: If `context.extra` has no `workspace`,
+        or if `quantity`/`surface` isn't supported.
         """
-        if not isinstance(context.state, CompiledWellResolution):
+        from bores.simulation.workspace import SimulationWorkspace
+
+        workspace = context.extra.get("workspace")
+        if not isinstance(workspace, SimulationWorkspace):
             raise ValidationError(
-                f"{type(self).__name__} needs context.state to be a CompiledWellResolution."
+                f"{type(self).__name__} needs key 'workspace' in context.extra, with a `SimulationWorkspace` value, to read "
+                f"{self.quantity!r} {self.surface!r} rate for well {self.well_name!r}, but got {workspace!r}."
             )
+
         well_row, _ = resolve_well(model=model, well_name=self.well_name)
         array_name = RATE_ARRAYS.get((self.quantity, self.surface))
         if array_name is None:
@@ -538,4 +541,4 @@ class RateThreshold(ThresholdEvent["CompiledBlackOilModel"]):
                 f"{type(self).__name__} doesn't support quantity={self.quantity!r}, "
                 f"surface={self.surface!r}."
             )
-        return getattr(context.state, array_name)[well_row]
+        return getattr(workspace.wells, array_name)[well_row]

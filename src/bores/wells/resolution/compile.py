@@ -9,58 +9,17 @@ import numpy.typing as npt
 from bores.precision import get_dtype
 from bores.types import Boolean, IntArray, Integer, Number, NumberArray, OneDimension
 from bores.wells.compile import UNSET_INT
-from bores.wells.resolution.spec import ControlResolverSpec
 from bores.wells.states import ConnectionSample, PhaseValues
 
 __all__ = [
-    "CompiledControlResolverSpec",
-    "CompiledWellResolution",
     "PerforationWorkspace",
+    "WellsWorkspace",
     "accumulate_phase_rates",
     "build_connection_phase_rates",
     "build_perforation_workspace",
-    "compile_control_resolver_spec",
-    "compile_well_resolution",
+    "build_wells_workspace",
     "compute_perforation_drawdown",
 ]
-
-
-class CompiledControlResolverSpec(typing.NamedTuple):
-    """Numerical tuning for well-control resolution, resolved and ready for the hot path."""
-
-    max_fixed_point_iterations: Integer
-    """Iteration cap for the connection-pressure/rate fixed-point loop."""
-
-    rate_convergence_tolerance: Number
-    """Relative tolerance for both the fixed-point loop and bisection."""
-
-    max_bisection_iterations: Integer
-    """Iteration cap for the BHP bisection search."""
-
-    producer_bhp_floor: Number
-    """Lower bound of a producer's BHP bisection bracket."""
-
-    injector_bhp_bracket_multiplier: Number
-    """Multiplier applied to reservoir pressure for an injector's BHP
-    bisection bracket upper bound."""
-
-
-def compile_control_resolver_spec(spec: ControlResolverSpec) -> CompiledControlResolverSpec:
-    """
-    Builds a `CompiledControlResolverSpec` from a `ControlResolverSpec`.
-
-    :param spec: Source spec. `ControlResolverSpec` post initilization
-        already resolves every field, so this is a direct copy, but
-        with no defaulting.
-    :returns: `CompiledControlResolverSpec`.
-    """
-    return CompiledControlResolverSpec(
-        max_fixed_point_iterations=spec.max_fixed_point_iterations,  # type: ignore[arg-type]
-        rate_convergence_tolerance=spec.rate_convergence_tolerance,  # type: ignore[arg-type]
-        max_bisection_iterations=spec.max_bisection_iterations,  # type: ignore[arg-type]
-        producer_bhp_floor=spec.producer_bhp_floor,  # type: ignore[arg-type]
-        injector_bhp_bracket_multiplier=spec.injector_bhp_bracket_multiplier,  # type: ignore[arg-type]
-    )
 
 
 class PerforationWorkspace(typing.NamedTuple):
@@ -179,13 +138,15 @@ def build_perforation_workspace(
     )
 
 
-class CompiledWellResolution(typing.NamedTuple):
+class WellsWorkspace(typing.NamedTuple):
     """
-    Every well's control-resolution result for one timestep, one row per well.
+    Every well's control-resolution result, one row per well.
 
-    Built once per resolve pass (`compile_well_resolution`) and
-    updated one well's row at a time as `resolve_control` resolves each
-    well. Never reallocated per well or per iteration.
+    Built once for the whole run (`build_wells_workspace`), not once per
+    timestep - every `resolve_control` call updates rows in place. A
+    reported timestep's `WellsStates` is decompiled from whatever this
+    holds at that point; nothing here is cleared between timesteps
+    before the next resolve pass overwrites each row it touches.
     """
 
     bhps: NumberArray[OneDimension]
@@ -242,37 +203,38 @@ class CompiledWellResolution(typing.NamedTuple):
     """
 
 
-def compile_well_resolution(
-    n_wells: Integer, n_connections: Integer, dtype: npt.DTypeLike = None
-) -> CompiledWellResolution:
+def build_wells_workspace(
+    *, n_wells: Integer, n_connections: Integer, dtype: npt.DTypeLike = None
+) -> WellsWorkspace:
     """
-    Builds an empty `CompiledWellResolution` for a system of `n_wells`
-    wells with `n_connections` active connections in total, ready to be
-    updated one well's row at a time.
+    Builds an empty `WellsWorkspace` for a system of `n_wells` wells with
+    `n_connections` active connections in total. Call once at the start
+    of a run. Every `resolve_control` call across every timestep
+    updates rows in this same object in place.
 
     :param n_wells: Number of wells.
     :param n_connections: Total active connections across every well,
         matching `CompiledPerforations`' own row count - sizes
         `connection_pressures`.
     :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
-    :returns: `CompiledWellResolution` with every row `NaN`/`UNSET_INT`/`0`.
+    :returns: `WellsWorkspace` with every row `NaN`/`UNSET_INT`/`0`.
     """
-    resolved_dtype = np.dtype(dtype) if dtype is not None else get_dtype()
-    return CompiledWellResolution(
-        bhps=np.full(n_wells, np.nan, dtype=resolved_dtype),
-        oil_rates=np.full(n_wells, np.nan, dtype=resolved_dtype),
-        water_rates=np.full(n_wells, np.nan, dtype=resolved_dtype),
-        gas_rates=np.full(n_wells, np.nan, dtype=resolved_dtype),
-        surface_oil_rates=np.full(n_wells, np.nan, dtype=resolved_dtype),
-        surface_water_rates=np.full(n_wells, np.nan, dtype=resolved_dtype),
-        surface_gas_rates=np.full(n_wells, np.nan, dtype=resolved_dtype),
-        thps=np.full(n_wells, np.nan, dtype=resolved_dtype),
+    dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+    return WellsWorkspace(
+        bhps=np.full(n_wells, np.nan, dtype=dtype),
+        oil_rates=np.full(n_wells, np.nan, dtype=dtype),
+        water_rates=np.full(n_wells, np.nan, dtype=dtype),
+        gas_rates=np.full(n_wells, np.nan, dtype=dtype),
+        surface_oil_rates=np.full(n_wells, np.nan, dtype=dtype),
+        surface_water_rates=np.full(n_wells, np.nan, dtype=dtype),
+        surface_gas_rates=np.full(n_wells, np.nan, dtype=dtype),
+        thps=np.full(n_wells, np.nan, dtype=dtype),
         active_limit_rows=np.full(n_wells, UNSET_INT, dtype=np.int32),
         economic_shutins=np.zeros(n_wells, dtype=np.int32),
-        connection_pressures=np.full(n_connections, np.nan, dtype=resolved_dtype),
-        connection_oil_rates=np.full(n_connections, np.nan, dtype=resolved_dtype),
-        connection_water_rates=np.full(n_connections, np.nan, dtype=resolved_dtype),
-        connection_gas_rates=np.full(n_connections, np.nan, dtype=resolved_dtype),
+        connection_pressures=np.full(n_connections, np.nan, dtype=dtype),
+        connection_oil_rates=np.full(n_connections, np.nan, dtype=dtype),
+        connection_water_rates=np.full(n_connections, np.nan, dtype=dtype),
+        connection_gas_rates=np.full(n_connections, np.nan, dtype=dtype),
     )
 
 

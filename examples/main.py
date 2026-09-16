@@ -36,7 +36,7 @@ rock = Rock.from_deck(
 reservoir = Reservoir(grid=grid, rock=rock, regions=regions)
 
 # Define fluid
-temperature = Temperature(200)
+temperature = Temperature(200, unit_system=UnitSystem.METRIC)
 pvt = PVT.from_deck(df, temperature=temperature)
 blackoil = BlackOil(pvt=pvt, satfunc=satfunc)
 table = pvt.region(1).tables.oil

@@ -13,6 +13,7 @@ __all__ = [
     "ScheduleError",
     "SerializableError",
     "SerializationError",
+    "SimulationCaseError",
     "SimulationError",
     "SolverError",
     "StopSimulation",
@@ -64,6 +65,24 @@ class ComputationError(BORESError):
 # Simulation Errors
 class SimulationError(BORESError):
     """Base class for simulation-related errors."""
+
+    pass
+
+
+class SimulationCaseError(SimulationError):
+    """Raised when there is an error related to a `SimulationCase`."""
+
+    pass
+
+
+class CaseLoadError(SimulationCaseError):
+    """Raised when a `SimulationCase` fails to load from a file or other source."""
+
+    pass
+
+
+class CaseValidationError(SimulationCaseError, ValidationError):
+    """Raised when a `SimulationCase` fails validation checks."""
 
     pass
 
