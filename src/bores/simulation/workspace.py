@@ -14,9 +14,11 @@ from bores.blackoil.fluids.model import BlackOil
 from bores.precision import get_dtype
 from bores.reservoir.model import Reservoir
 from bores.reservoir.regions import Regions
-from bores.reservoir.state import ReservoirState
-from bores.reservoir.state.base import Hysteresis
-from bores.reservoir.workspace import ReservoirWorkspace, build_reservoir_workspace
+from bores.reservoir.state import Hysteresis, ReservoirState
+from bores.reservoir.workspace import (
+    HysteresisWorkspace,
+    ReservoirWorkspace,
+)
 from bores.simulation.spec import RunSpec
 from bores.types import CellArray, Integer
 from bores.wells.workspace import WellsWorkspace, build_wells_workspace
@@ -54,8 +56,8 @@ class SimulationWorkspace(typing.NamedTuple):
     wells: WellsWorkspace
     """This run's well control-resolution workspace. Refreshed in place every timestep."""
 
-    hysteresis: Hysteresis | None
-    """Optional hysteresis state tracking saturation history for the run."""
+    hysteresis: HysteresisWorkspace | None
+    """Optional mutable hysteresis history for the run."""
 
     salinity: CellArray | None
     """Optional cell-wise salinity field for salinity-dependent calculations."""
@@ -70,7 +72,7 @@ def build_simulation_workspace(
     n_wells: Integer,
     n_connections: Integer,
     runspec: RunSpec,
-    hysteresis: Hysteresis | None = None,
+    hysteresis: Hysteresis | HysteresisWorkspace | None = None,
     salinity: CellArray | None = None,
     dtype: npt.DTypeLike = None,
 ) -> SimulationWorkspace:
@@ -89,6 +91,9 @@ def build_simulation_workspace(
     :returns: The assembled `SimulationWorkspace`.
     """
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+    if isinstance(hysteresis, Hysteresis):
+        hysteresis = HysteresisWorkspace.from_state(hysteresis, dtype=dtype)
+
     n_cells = reservoir.grid.n_cells
     pvt_region = (
         regions.pvt_region if regions.pvt_region is not None else np.ones(n_cells, dtype=np.int32)
@@ -99,7 +104,7 @@ def build_simulation_workspace(
         else np.ones(n_cells, dtype=np.int32)
     )
     rock = reservoir.rock
-    physics = compute_physics_cache(
+    physics_cache = compute_physics_cache(
         pressure=initial_state.pressure,
         temperature=initial_state.temperature,
         solution_gas_oil_ratio=initial_state.solution_gor,
@@ -117,22 +122,26 @@ def build_simulation_workspace(
         residual_oil_saturation_gas=rock.residual_oil_saturation_gas,
         dtype=dtype,
     )
-    transmissibilities = compute_transmissibility_cache(
+    transmissibility_cache = compute_transmissibility_cache(
         reservoir=reservoir,
-        pvt_cache=physics.pvt,
-        mobility_cache=physics.mobility,
+        pvt_cache=physics_cache.pvt,
+        mobility_cache=physics_cache.mobility,
         oil_pressure=initial_state.pressure,
-        oil_water_capillary_pressure=physics.satfunc.oil_water_capillary_pressure,
-        gas_oil_capillary_pressure=physics.satfunc.gas_oil_capillary_pressure,
+        oil_water_capillary_pressure=physics_cache.satfunc.oil_water_capillary_pressure,
+        gas_oil_capillary_pressure=physics_cache.satfunc.gas_oil_capillary_pressure,
         gravity_enabled=runspec.gravity_enabled,
         capillary_effects_enabled=runspec.capillary_effects_enabled,
         dtype=dtype,
     )
+    reservoir_workspace = ReservoirWorkspace.from_state(initial_state, dtype=dtype)
+    wells_workspace = build_wells_workspace(
+        n_wells=n_wells, n_connections=n_connections, dtype=dtype
+    )
     return SimulationWorkspace(
-        physics=physics,
-        transmissibilities=transmissibilities,
-        wells=build_wells_workspace(n_wells=n_wells, n_connections=n_connections, dtype=dtype),
-        reservoir=build_reservoir_workspace(state=initial_state, dtype=dtype),
+        physics=physics_cache,
+        transmissibilities=transmissibility_cache,
+        wells=wells_workspace,
+        reservoir=reservoir_workspace,
         hysteresis=hysteresis,
         salinity=salinity,
     )

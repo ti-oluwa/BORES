@@ -127,9 +127,10 @@ class SimulationCase(Serializable):
             if initial_state.hysteresis is not None:
                 hysteresis = initial_state.hysteresis
             else:
-                hysteresis = Hysteresis.from_initial_saturation(
+                hysteresis = Hysteresis.from_saturation(
                     water_saturation=initial_state.water_saturation,
                     gas_saturation=initial_state.gas_saturation,
+                    dtype=dtype,
                 )
 
         return build_simulation_workspace(

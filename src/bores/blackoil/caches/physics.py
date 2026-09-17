@@ -17,6 +17,7 @@ from bores.blackoil.caches.pvt import PVTCache, compute_pvt_cache
 from bores.blackoil.caches.satfunc import SatFuncCache, compute_satfunc_cache
 from bores.blackoil.fluids.model import BlackOil
 from bores.reservoir.state.base import Hysteresis
+from bores.reservoir.workspace import HysteresisWorkspace
 from bores.types import CellArray, IntCellArray
 
 __all__ = ["PhysicsCache", "compute_physics_cache"]
@@ -61,7 +62,7 @@ def compute_physics_cache(
     residual_oil_saturation_water: CellArray | None = None,
     residual_oil_saturation_gas: CellArray | None = None,
     residual_gas_saturation: CellArray | None = None,
-    hysteresis: Hysteresis | None = None,
+    hysteresis: Hysteresis | HysteresisWorkspace | None = None,
     out: PhysicsCache | None = None,
     dtype: npt.DTypeLike = None,
 ) -> PhysicsCache:

@@ -1355,7 +1355,7 @@ def initialize_reservoir_state(
 
     zeros = np.zeros(n_cells, dtype=dtype)
     hysteresis = (
-        Hysteresis.from_initial_saturation(water_saturation_array, gas_saturation_array)
+        Hysteresis.from_saturation(water_saturation_array, gas_saturation_array, dtype=dtype)
         if hysteresis_enabled
         else None
     )

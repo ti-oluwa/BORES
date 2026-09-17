@@ -36,7 +36,7 @@ class RunSpec(StoreSerializable):
     """Physical and conversion constants for the run."""
 
     timer: Timer | None = None
-    """The run's time manager, if one has been attached yet."""
+    """The run's time step manager, if one has been attached yet."""
 
     output_frequency: int = attrs.field(default=1, validator=attrs.validators.ge(1))
     """Frequency, in time steps, at which model states are output."""
@@ -50,9 +50,12 @@ class RunSpec(StoreSerializable):
     discretization_method: DiscretizationMethod = "impes"
     """Evolution scheme to use for the simulation ('impes' or 'implicit')."""
 
+    capillary_effects_enabled: bool = True
+    """Whether to include capillary pressure effects in the simulation."""
+
     capillary_strength_factor: float = attrs.field(
         default=1.0,
-        validator=attrs.validators.and_(attrs.validators.ge(0), attrs.validators.le(1)),  # type: ignore[arg-type]
+        validator=attrs.validators.ge(0),  # type: ignore[arg-type]
     )
     """
     Factor to scale capillary flow for numerical stability. Reduce to dampen capillary effects.
@@ -63,9 +66,6 @@ class RunSpec(StoreSerializable):
 
     Set to 0 to disable capillary effects entirely (not recommended).
     """
-
-    capillary_effects_enabled: bool = True
-    """Whether to include capillary pressure effects in the simulation."""
 
     gravity_enabled: bool = True
     """Whether to disable structural dip effects in reservoir modeling/simulation."""

@@ -62,15 +62,13 @@ def advance_phase_hysteresis(
     return new_max_saturation, new_imbibition_flag, new_reversal_saturation
 
 
-@attrs.frozen(slots=True)
+@attrs.frozen(slots=True, kw_only=True)
 class Hysteresis(StoreSerializable):
     """
-    Drainage / imbibition hysteresis tracking for Killough scanning curves.
+    Drainage/imbibition hysteresis tracking for Killough scanning curves.
 
     Maintains historical saturation extrema and displacement-regime flags
     required to compute effective residual saturations on the scanning curves.
-    These are consumed inside relative-permeability and capillary-pressure
-    evaluation routines; the flow solver does not interpret them directly.
 
     All arrays are dimensionless (saturations, flags) and therefore require
     no unit conversion.
@@ -81,9 +79,8 @@ class Hysteresis(StoreSerializable):
     Shape (n_cells,) - historical maximum water saturation reached in each
     cell (fraction).
 
-    Initialised to the initial water saturation. Updated whenever the
-    current water saturation exceeds the stored maximum. Determines the
-    imbibition end-point on the scanning curve when drainage reverses.
+    Updated whenever the current water saturation exceeds the stored maximum. 
+    Determines the imbibition end-point on the scanning curve when drainage reverses.
     """
 
     max_gas_saturation: CellArray
@@ -129,26 +126,27 @@ class Hysteresis(StoreSerializable):
     """
 
     @classmethod
-    def from_initial_saturation(
+    def from_saturation(
         cls,
+        *,
         water_saturation: npt.ArrayLike,
         gas_saturation: npt.ArrayLike,
+        dtype: npt.DTypeLike = None,
     ) -> Self:
         """
-        Construct a `Hysteresis` from initial saturation arrays.
+        Load a `Hysteresis` from saturation arrays.
 
-        Sets maximum saturations to the initial values, marks all cells as
+        Sets maximum saturations to the current values, marks all cells as
         drainage (not yet reversing), and places reversal points at the
-        initial saturation values.
+        current saturation values.
 
-        :param water_saturation: Array-like (n_cells,) - initial water
-            saturation per cell (fraction).
-        :param gas_saturation: Array-like (n_cells,) - initial gas saturation
-            per cell (fraction).
+        :param water_saturation: Array-like (n_cells,) - water saturation per cell (fraction).
+        :param gas_saturation: Array-like (n_cells,) - gas saturation per cell (fraction).
         :returns: Initialised `Hysteresis`.
         """
-        sw = np.asarray(water_saturation, dtype=get_dtype())
-        sg = np.asarray(gas_saturation, dtype=get_dtype())
+        dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+        sw = np.asarray(water_saturation, dtype=dtype)
+        sg = np.asarray(gas_saturation, dtype=dtype)
         return cls(
             max_water_saturation=typing.cast(CellArray, sw.copy()),
             max_gas_saturation=typing.cast(CellArray, sg.copy()),
@@ -160,21 +158,14 @@ class Hysteresis(StoreSerializable):
             gas_reversal_saturation=typing.cast(CellArray, sg.copy()),
         )
 
-    def evolve(self, **kwargs: typing.Any) -> Self:
-        """
-        Return a new `Hysteresis` with selected fields replaced.
-
-        :param kwargs: Field names and their replacement values.
-        :returns: New immutable `Hysteresis`.
-        """
-        return attrs.evolve(self, **kwargs)
-
     def advance(
         self,
+        *,
         water_saturation: npt.ArrayLike,
         gas_saturation: npt.ArrayLike,
         previous_water_saturation: npt.ArrayLike,
         previous_gas_saturation: npt.ArrayLike,
+        dtype: npt.DTypeLike = None,
     ) -> Self:
         """
         Return a new `Hysteresis` updated for the current timestep's saturations.
@@ -200,26 +191,28 @@ class Hysteresis(StoreSerializable):
             saturation this cell had before this timestep.
         :returns: New `Hysteresis` reflecting this timestep.
         """
-        sw = np.asarray(water_saturation, dtype=get_dtype())
-        sg = np.asarray(gas_saturation, dtype=get_dtype())
-        previous_sw = np.asarray(previous_water_saturation, dtype=get_dtype())
-        previous_sg = np.asarray(previous_gas_saturation, dtype=get_dtype())
+        dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+        sw = np.asarray(water_saturation, dtype=dtype)
+        sg = np.asarray(gas_saturation, dtype=dtype)
+        previous_sw = np.asarray(previous_water_saturation, dtype=dtype)
+        previous_sg = np.asarray(previous_gas_saturation, dtype=dtype)
 
         new_max_water, new_water_flag, new_water_reversal = advance_phase_hysteresis(
             new_saturation=sw,
             previous_saturation=previous_sw,
-            max_saturation=np.asarray(self.max_water_saturation),
-            imbibition_flag=np.asarray(self.water_imbibition_flag),
-            reversal_saturation=np.asarray(self.water_reversal_saturation),
+            max_saturation=self.max_water_saturation,
+            imbibition_flag=self.water_imbibition_flag,
+            reversal_saturation=self.water_reversal_saturation,
         )
         new_max_gas, new_gas_flag, new_gas_reversal = advance_phase_hysteresis(
             new_saturation=sg,
             previous_saturation=previous_sg,
-            max_saturation=np.asarray(self.max_gas_saturation),
-            imbibition_flag=np.asarray(self.gas_imbibition_flag),
-            reversal_saturation=np.asarray(self.gas_reversal_saturation),
+            max_saturation=self.max_gas_saturation,
+            imbibition_flag=self.gas_imbibition_flag,
+            reversal_saturation=self.gas_reversal_saturation,
         )
-        return self.evolve(
+        return attrs.evolve(
+            self,
             max_water_saturation=new_max_water,
             max_gas_saturation=new_max_gas,
             water_imbibition_flag=new_water_flag,
@@ -229,7 +222,7 @@ class Hysteresis(StoreSerializable):
         )
 
 
-@attrs.frozen(slots=True)
+@attrs.frozen(slots=True, kw_only=True)
 class ReservoirState(StoreSerializable):
     """
     Reservoir (dynamic) per-cell state, updated at every time step.
