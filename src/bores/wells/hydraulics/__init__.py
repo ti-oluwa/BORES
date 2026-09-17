@@ -26,31 +26,31 @@ from bores.wells.hydraulics.base import (
     get_unit_system_constant,
 )
 from bores.wells.hydraulics.beggs_and_brill import (
-    BeggsAndBrillModel,
-    beggs_and_brill_model,
+    BeggsAndBrillWellbore,
+    beggs_and_brill_wellbore,
     compute_beggs_brill_holdup,
     compute_two_phase_friction_factor,
     flow_pattern_tag,
     horizontal_holdup,
 )
 from bores.wells.hydraulics.hagedorn_brown import (
-    HagedornBrownModel,
+    HagedornBrownWellbore,
     compute_griffith_holdup,
     compute_hagedorn_brown_holdup,
-    hagedorn_brown_model,
+    hagedorn_brown_wellbore,
     is_griffith_bubble_flow,
 )
-from bores.wells.hydraulics.homogeneous import HomogeneousModel, homogeneous_model
+from bores.wells.hydraulics.homogeneous import HomogeneousWellbore, homogeneous_wellbore
 
 __all__ = [
-    "BeggsAndBrillModel",
-    "HagedornBrownModel",
-    "HomogeneousModel",
+    "BeggsAndBrillWellbore",
+    "HagedornBrownWellbore",
+    "HomogeneousWellbore",
     "PressureDrop",
     "SurfaceFluidProperties",
     "WellBoreModel",
     "WellBoreModelOptions",
-    "beggs_and_brill_model",
+    "beggs_and_brill_wellbore",
     "compute_beggs_brill_holdup",
     "compute_friction_factor",
     "compute_griffith_holdup",
@@ -67,8 +67,8 @@ __all__ = [
     "compute_two_phase_friction_factor",
     "flow_pattern_tag",
     "get_unit_system_constant",
-    "hagedorn_brown_model",
-    "homogeneous_model",
+    "hagedorn_brown_wellbore",
+    "homogeneous_wellbore",
     "horizontal_holdup",
     "is_griffith_bubble_flow",
 ]

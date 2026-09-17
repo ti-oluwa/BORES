@@ -13,7 +13,7 @@ from bores.reservoir.rock import Rock
 from bores.reservoir.state import Equilibrium
 from bores.types import UnitSystem
 from bores.wells.deck import load_schedule
-from bores.wells.hydraulics.homogeneous import homogeneous_model
+from bores.wells.hydraulics.homogeneous import homogeneous_wellbore
 from bores.wells.model import WellSystem
 
 df = DeckFile(
@@ -58,20 +58,20 @@ initial_state = initialize_reservoir_state(
 wells = WellSystem.from_deck(
     df,
     grid=grid,
-    default_wellbore=homogeneous_model(tubing_inner_diameter=0.5),
+    default_wellbore=homogeneous_wellbore(tubing_inner_diameter=0.5),
 )
 # rich.print(wells.dump())
 
 # Construct the final model
 model = BlackOilModel(reservoir=reservoir, fluid=blackoil, wells=wells)
 
-# Load the well schedule
-wells_schedule = load_schedule(df)
+# Load the simulation schedule
+schedule = load_schedule(df)
 
-for event in wells_schedule:
+for event in schedule:
     print(event, "\n")
 
-print(f"{len(wells_schedule)} well events")
+print(f"{len(schedule)} scheduled events")
 
 # Plot the grid
 print(f"cells   : {grid.n_cells}")

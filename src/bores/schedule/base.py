@@ -3,6 +3,7 @@
 import datetime
 import threading
 import typing
+from uuid import uuid4
 
 import attrs
 from typing_extensions import Self
@@ -144,39 +145,26 @@ action_type = make_serializable_type_registrar(
 )
 
 
-class Rule(
-    typing.Generic[ModelT],
-    Serializable,
-    fields={"event": SerializableEvent, "action": SerializableAction, "name": str | None},
-):
-    """One `(Event, Action)` pairing: `action` fires whenever `event` fires."""
+@attrs.frozen(kw_only=True, slots=True, repr=False, hash=True, unsafe_hash=True)
+class Rule(typing.Generic[ModelT], Serializable):
+    """One `(Event, Action)` pairing: `action` fires whenever `event` occurs."""
 
-    def __init__(
-        self,
-        *,
-        event: Event[ModelT],
-        action: Action[ModelT],
-        name: str | None = None,
-    ) -> None:
-        """
-        :param event: Decides whether `action` runs.
-        :param action: Changes the model when `event` fires.
-        :param name: Optional label.
-        """
-        self.event = event
-        self.action = action
-        self.name = name
+    event: Event[ModelT] = attrs.field(hash=False)
+    """Decides whether and when `action` runs."""
+    action: Action[ModelT] = attrs.field(hash=False)
+    """Changes the model when `event` fires."""
+    name: str = attrs.field(factory=lambda: uuid4().hex)
+    """Optional label. If not provided, a random UUID is generated."""
 
     def __repr__(self) -> str:
-        label = f"{self.name!r}" if self.name else "<un-named>"
-        return f"{type(self).__name__}({label}, when={self.event!r}, do={self.action!r})"
+        return f"{type(self).__name__}({self.name!r}, when={self.event!r}, do={self.action!r})"
 
 
-@attrs.frozen(kw_only=True, slots=True)
+@attrs.frozen(slots=True)
 class Schedule(typing.Generic[ModelT]):
     """Every rule for a run. Advances a model by applying whichever rules fire."""
 
-    rules: tuple[Rule[ModelT], ...] = attrs.field(converter=tuple)
+    rules: tuple[Rule[ModelT], ...] = attrs.field(converter=tuple, factory=tuple)
 
     def apply(self, model: ModelT, context: ScheduleContext) -> ModelT:
         """
@@ -192,13 +180,13 @@ class Schedule(typing.Generic[ModelT]):
         """
         for rule in self.rules:
             try:
-                fires = rule.event(model, context)
+                occurred = rule.event(model, context)
             except PASSTHROUGH_EXCEPTIONS:
                 raise
             except Exception as exc:
                 raise EventError(f"Event failed for rule {rule.name!r}.") from exc
 
-            if not fires:
+            if not occurred:
                 continue
 
             try:
@@ -268,15 +256,12 @@ class Schedule(typing.Generic[ModelT]):
         return cls(rules=tuple(Rule.load(data=rule_data) for rule_data in data["rules"]))
 
     def __len__(self) -> int:
-        """:returns: How many rules this schedule has."""
         return len(self.rules)
 
     def __iter__(self) -> typing.Iterator[Rule[ModelT]]:
-        """:returns: An iterator over this schedule's rules, in order."""
         return iter(self.rules)
 
     def __contains__(self, name: str) -> bool:
-        """:returns: Whether any rule in this schedule has this name."""
         return any(rule.name == name for rule in self.rules)
 
     def __add__(self, other: Self) -> Self:
@@ -288,7 +273,20 @@ class Schedule(typing.Generic[ModelT]):
         """
         if not isinstance(other, Schedule):
             return NotImplemented
-        return self.__class__(rules=self.rules + other.rules)
+        return self.__class__(rules=set(self.rules + other.rules))
+
+    def __sub__(self, other: Self) -> Self:
+        """
+        Removes any rules from `self` that have the same name as a rule in `other`.
+
+        :param other: The schedule to remove rules from.
+        :returns: A new `Schedule` with only rules whose names are not in `other`.
+        """
+        if not isinstance(other, Schedule):
+            return NotImplemented
+        other_rules = set(other.rules)
+        kept = [rule for rule in self.rules if rule.name not in other_rules]
+        return self.__class__(rules=tuple(kept))
 
     def __or__(self, other: Self) -> Self:
         """
@@ -300,6 +298,6 @@ class Schedule(typing.Generic[ModelT]):
         """
         if not isinstance(other, Schedule):
             return NotImplemented
-        other_names = {rule.name for rule in other.rules if rule.name is not None}
-        kept = [rule for rule in self.rules if rule.name is None or rule.name not in other_names]
+        other_rules = set(other.rules)
+        kept = [rule for rule in self.rules if rule.name not in other_rules]
         return self.__class__(rules=tuple(kept) + other.rules)

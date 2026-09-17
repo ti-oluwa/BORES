@@ -18,19 +18,19 @@ class CompiledBlackOilModel(typing.NamedTuple):
     """A `BlackOilModel` with its compilable components compiled."""
 
     reservoir: Reservoir
-    """Unchanged from `BlackOilModel.reservoir`."""
+    """The reservoir model."""
 
     fluid: BlackOil
-    """Unchanged from `BlackOilModel.fluid`."""
+    """The fluid model."""
 
     wells: CompiledWellSystem | None
-    """The compiled form of `BlackOilModel.wells`, or `None` if there were none."""
+    """The compiled `Wells` model, or `None` if the original model had no wells."""
 
     boundary_conditions: None
-    """Always `None`. `CompiledBoundaryConditions` isn't built yet."""
+    """The compiled boundary conditions. Currently, this is always `None` because `CompiledBoundaryConditions` does not exist yet."""
 
     unit_system: UnitSystem
-    """Unchanged from `BlackOilModel.unit_system`."""
+    """The model's unit system."""
 
 
 def compile_model(

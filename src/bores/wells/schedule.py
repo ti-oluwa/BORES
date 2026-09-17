@@ -418,7 +418,7 @@ class ActivateWell(SerializableAction["CompiledBlackOilModel"]):
 @attrs.frozen(kw_only=True, slots=True)
 class SetLimit(SerializableAction["CompiledBlackOilModel"]):
     """
-    Updates one of a well's existing limit rows in place - a `WECON`
+    Updates one of a well's existing limit rows in place. A `WECON`
     reissue (`kind=ECONOMIC`), or the implicit `BHPLimit` a `WCONPROD`/
     `WCONINJE` record's own `bhp` item carries when its control mode
     isn't `BHP` (`kind=BHP`).
@@ -474,8 +474,8 @@ class SetLimit(SerializableAction["CompiledBlackOilModel"]):
             raise ValidationError(
                 f"Well {self.well_name!r} has no {self.kind!r} limit"
                 f"{f' for {self.quantity!r}' if self.quantity is not None else ''} at compile "
-                "time. Adding one mid-schedule needs CompiledLimits' CSR table to grow, "
-                "which is not supported yet."
+                "time. Adding one mid-schedule needs `CompiledLimits`' CSR table to grow, "
+                "which is not supported."
             )
         if self.min_value is not None:
             limits.set_min_value(row=row, value=self.min_value)

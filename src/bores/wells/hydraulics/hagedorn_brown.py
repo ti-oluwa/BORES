@@ -33,18 +33,18 @@ from bores.wells.hydraulics.base import (
 from bores.wells.states import ConnectionSample, PhaseValues
 
 __all__ = [
-    "HagedornBrownModel",
+    "HagedornBrownWellbore",
     "compute_griffith_holdup",
     "compute_hagedorn_brown_holdup",
     "compute_perforation_pressures",
     "compute_segment_drop",
     "compute_tubing_head_pressure",
-    "hagedorn_brown_model",
+    "hagedorn_brown_wellbore",
     "is_griffith_bubble_flow",
 ]
 
 
-class HagedornBrownModel(typing.NamedTuple):
+class HagedornBrownWellbore(typing.NamedTuple):
     """Configuration for the Hagedorn & Brown two-phase slip wellbore hydraulics model."""
 
     tubing_inner_diameter: Number
@@ -119,7 +119,7 @@ class HagedornBrownModel(typing.NamedTuple):
         )
 
 
-def hagedorn_brown_model(
+def hagedorn_brown_wellbore(
     *,
     tubing_inner_diameter: Number,
     tubing_roughness: Number | None = None,
@@ -133,7 +133,7 @@ def hagedorn_brown_model(
     friction_tolerance: Number | None = None,
 ) -> WellBoreModel:
     """
-    Builds a `WellBoreModel` wrapping a fully configured `HagedornBrownModel`.
+    Builds a `WellBoreModel` wrapping a fully configured `HagedornBrownWellbore`.
 
     Hagedorn & Brown was built from a vertical test well and doesn't
     correct its liquid holdup for pipe inclination the way Beggs & Brill
@@ -158,7 +158,7 @@ def hagedorn_brown_model(
         `c.COLEBROOK_MAX_ITERATIONS` if not given.
     :param friction_tolerance: Colebrook convergence tolerance.
         `c.COLEBROOK_TOLERANCE` if not given.
-    :returns: `WellBoreModel(name="hagedorn_brown", options=<HagedornBrownModel>)`.
+    :returns: `WellBoreModel(name="hagedorn_brown", options=<HagedornBrownWellbore>)`.
     """
     if unit_system != UnitSystem.FIELD:
         factors = get_conversion_factors(UnitSystem.FIELD, unit_system)
@@ -173,7 +173,7 @@ def hagedorn_brown_model(
     if griffith_slip_velocity is None:
         griffith_slip_velocity = c.GRIFFITH_BUBBLE_SLIP_VELOCITY_FEET_PER_SECOND * length_factor
 
-    options = HagedornBrownModel(
+    options = HagedornBrownWellbore(
         tubing_inner_diameter=tubing_inner_diameter,
         tubing_roughness=tubing_roughness if tubing_roughness is not None else float("nan"),
         friction_method=1 if friction_method == "colebrook" else 0,
@@ -380,7 +380,7 @@ def compute_griffith_holdup(
 
     :param superficial_liquid_velocity: Liquid rate divided by cross-sectional area.
     :param superficial_gas_velocity: Gas rate divided by cross-sectional area.
-    :param griffith_slip_velocity: Bubble rise velocity, `HagedornBrownModel.griffith_slip_velocity`.
+    :param griffith_slip_velocity: Bubble rise velocity, `HagedornBrownWellbore.griffith_slip_velocity`.
     :returns: In-situ liquid holdup for bubble flow.
     """
     mixture_velocity = superficial_liquid_velocity + superficial_gas_velocity
@@ -395,7 +395,7 @@ def compute_griffith_holdup(
 
 
 def compute_segment_drop(
-    model: HagedornBrownModel,
+    model: HagedornBrownWellbore,
     length: Number,
     inclination_from_vertical: Number,
     superficial_liquid_velocity: Number,
@@ -422,7 +422,7 @@ def compute_segment_drop(
     switches to the Griffith correlation, and the friction and Reynolds
     number terms switch to using the liquid phase alone rather than the mixture.
 
-    :param model: This well's `HagedornBrownModel`.
+    :param model: This well's `HagedornBrownWellbore`.
     :param length: Along-wellbore segment length.
     :param inclination_from_vertical: Segment inclination, in radians. `0`
         is vertical. Hagedorn & Brown's own holdup correlation has no
@@ -537,7 +537,7 @@ def compute_segment_drop(
 
 
 def compute_perforation_pressures(
-    model: HagedornBrownModel,
+    model: HagedornBrownWellbore,
     reference_depth: Number,
     reference_pressure: Number,
     connection_phase_rates: typing.Sequence[PhaseValues],
@@ -558,7 +558,7 @@ def compute_perforation_pressures(
     still ahead of it on its side of the reference point, not the whole
     well's rate applied uniformly everywhere.
 
-    :param model: This well's `HagedornBrownModel`.
+    :param model: This well's `HagedornBrownWellbore`.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param reference_pressure: Pressure at `reference_depth`.
     :param connection_phase_rates: Each connection's own rate of each
@@ -681,7 +681,7 @@ def compute_perforation_pressures(
 
 
 def compute_tubing_head_pressure(
-    model: HagedornBrownModel,
+    model: HagedornBrownWellbore,
     reference_depth: Number,
     reference_pressure: Number,
     phase_rates: PhaseValues,
@@ -691,7 +691,7 @@ def compute_tubing_head_pressure(
     """
     Computes tubing head pressure at surface.
 
-    :param model: This well's `HagedornBrownModel`.
+    :param model: This well's `HagedornBrownWellbore`.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param reference_pressure: Pressure at `reference_depth`.
     :param phase_rates: Rate of each phase, at reservoir conditions.

@@ -31,8 +31,8 @@ __all__ = [
 
 WellBoreModelOptions = typing.TypeVar("WellBoreModelOptions")
 """
-A correlation's own config type. `HomogeneousModel`, `BeggsAndBrillModel`,
-`HagedornBrownModel`, or any other correlation's own `NamedTuple`.
+A correlation's own config type. `HomogeneousWellbore`, `BeggsAndBrillWellbore`,
+`HagedornBrownWellbore`, or any other correlation's own `NamedTuple`.
 """
 
 
@@ -90,8 +90,8 @@ class WellBoreModel(typing.NamedTuple):
 
     options: typing.Any
     """
-    This correlation's own configuration. `HomogeneousModel`,
-    `BeggsAndBrillModel`, `HagedornBrownModel`, or any other correlation's own `NamedTuple`.
+    This correlation's own configuration. `HomogeneousWellbore`,
+    `BeggsAndBrillWellbore`, `HagedornBrownWellbore`, or any other correlation's own `NamedTuple`.
     """
 
     def convert(
