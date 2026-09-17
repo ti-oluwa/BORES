@@ -6,6 +6,7 @@ from scipy.optimize import brentq  # type: ignore[import-untyped]
 
 from bores.constants import c
 from bores.correlations.core import (
+    HENRY_COEFFICIENTS,
     SETSCHENOW_CONSTANTS,
     fahrenheit_to_celsius,
     fahrenheit_to_kelvin,

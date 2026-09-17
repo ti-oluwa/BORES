@@ -1,12 +1,12 @@
-"""Convenience builders for `Rule`/`Schedule` construction: `at`, `rule`, `schedule`, `all_of`, `any_of`."""
+"""Convenience factories for `ScheduleItem`s/`Schedule`s."""
 
-from bores.schedule.base import Action, Event, ModelT, Rule, Schedule, SerializableEvent
+from bores.schedule.base import Action, Event, ModelT, Schedule, ScheduleItem, SerializableEvent
 from bores.schedule.events import AllOf, AnyOf, TimeEvent
 
-__all__ = ["all_of", "any_of", "at", "rule", "schedule"]
+__all__ = ["all_of", "any_of", "at", "item", "schedule"]
 
 
-def at(*, time: float, action: Action[ModelT], name: str | None = None) -> Rule[ModelT]:
+def at(*, time: float, action: Action[ModelT], name: str | None = None) -> ScheduleItem[ModelT]:
     """
     Builds a `Rule` that runs `action` once, at `time`.
 
@@ -15,31 +15,33 @@ def at(*, time: float, action: Action[ModelT], name: str | None = None) -> Rule[
     :param name: Optional label for the rule.
     :returns: A `Rule` pairing a `TimeEvent` with `action`.
     """
-    return Rule(event=TimeEvent(at=time), action=action, name=name)
+    return ScheduleItem(
+        event=TimeEvent(at=time), action=action, name=name or f"at({time!r}, {action!r})"
+    )
 
 
-def rule(
+def item(
     *, event: Event[ModelT], action: Action[ModelT], name: str | None = None
-) -> "Rule[ModelT]":
+) -> "ScheduleItem[ModelT]":
     """
-    Builds a `Rule` from an event and an action.
+    Builds a `ScheduleItem` from an event and an action.
 
     :param event: Fires (or not) to decide whether `action` runs.
     :param action: Runs when `event` fires.
-    :param name: Optional label for the rule.
+    :param name: Optional label for the item.
     :returns: The `Rule`.
     """
-    return Rule(event=event, action=action, name=name)
+    return ScheduleItem(event=event, action=action, name=name or f"item({event!r}, {action!r})")
 
 
-def schedule(*rules: Rule[ModelT]) -> Schedule[ModelT]:
+def schedule(*rules: ScheduleItem[ModelT]) -> Schedule[ModelT]:
     """
     Builds a `Schedule` from a set of rules.
 
     :param rules: Every rule for the schedule, in firing-check order.
     :returns: The `Schedule`.
     """
-    return Schedule(rules=tuple(rules))
+    return Schedule(items=tuple(rules))
 
 
 def all_of(*events: SerializableEvent) -> AllOf:

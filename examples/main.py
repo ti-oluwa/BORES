@@ -6,7 +6,7 @@ from bores.blackoil.pvt import PVT
 from bores.blackoil.satfunc import SatFunc
 from bores.deck import DeckFile
 from bores.grids import Grid
-from bores.grids.utils import as_pyvista_grid
+from bores.grids.utils import make_pyvista_grid
 from bores.initialization import initialize_reservoir_state
 from bores.reservoir import Regions, Reservoir, Temperature
 from bores.reservoir.rock import Rock
@@ -68,17 +68,17 @@ model = BlackOilModel(reservoir=reservoir, fluid=blackoil, wells=wells)
 # Load the simulation schedule
 schedule = load_schedule(df)
 
-for event in schedule:
-    print(event, "\n")
+for item in schedule:
+    print(item, "\n")
 
-print(f"{len(schedule)} scheduled events")
+print(f"{len(schedule)} scheduled item(s)")
 
 # Plot the grid
 print(f"cells   : {grid.n_cells}")
 print(f"faces   : {grid.n_faces}")
 print(f"bbox    : {grid.bounding_box}")
 
-pv_grid = as_pyvista_grid(grid, cell_data={"pressure": initial_state.pressure})
+pv_grid = make_pyvista_grid(grid, cell_data={"pressure": initial_state.pressure})
 pl = pv.Plotter()
 pl.add_mesh(pv_grid, scalars="pressure", show_edges=True)
 pl.set_scale(zscale=15, xscale=2, yscale=2)  # type:ignore

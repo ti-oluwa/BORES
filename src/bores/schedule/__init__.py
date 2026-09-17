@@ -4,9 +4,9 @@ from bores.schedule.actions import NoOp, RunSequence
 from bores.schedule.base import (
     Action,
     Event,
-    Rule,
     Schedule,
     ScheduleContext,
+    ScheduleItem,
     SerializableAction,
     SerializableEvent,
     action_type,
@@ -21,7 +21,7 @@ from bores.schedule.events import (
     TimeEvent,
     TimeStepEvent,
 )
-from bores.schedule.utils import all_of, any_of, at, rule, schedule
+from bores.schedule.utils import all_of, any_of, at, item, schedule
 
 __all__ = [
     "Action",
@@ -31,10 +31,10 @@ __all__ = [
     "Event",
     "IntervalEvent",
     "NoOp",
-    "Rule",
     "RunSequence",
     "Schedule",
     "ScheduleContext",
+    "ScheduleItem",
     "SerializableAction",
     "SerializableEvent",
     "ThresholdEvent",
@@ -45,6 +45,6 @@ __all__ = [
     "any_of",
     "at",
     "event_type",
-    "rule",
+    "item",
     "schedule",
 ]

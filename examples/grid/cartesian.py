@@ -27,7 +27,7 @@ import numpy as np
 import pyvista as pv
 
 from bores.grids.io.grdecl import load_grdecl
-from bores.grids.utils import as_pyvista_grid
+from bores.grids.utils import make_pyvista_grid
 
 # Load
 grdecl_path = pathlib.Path("data/cartesian.grdecl")
@@ -93,7 +93,7 @@ if grid.fault_face_indices:
 
 # Convert to PyVista grid
 print("\nConverting to PyVista …")
-pv_grid = as_pyvista_grid(
+pv_grid = make_pyvista_grid(
     grid,
     cell_data={
         "porosity": poro,

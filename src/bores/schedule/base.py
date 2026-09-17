@@ -20,9 +20,9 @@ __all__ = [
     "Action",
     "Event",
     "ModelT",
-    "Rule",
     "Schedule",
     "ScheduleContext",
+    "ScheduleItem",
     "SerializableAction",
     "SerializableEvent",
     "action_type",
@@ -146,14 +146,16 @@ action_type = make_serializable_type_registrar(
 
 
 @attrs.frozen(kw_only=True, slots=True, repr=False, hash=True, unsafe_hash=True)
-class Rule(typing.Generic[ModelT], Serializable):
+class ScheduleItem(typing.Generic[ModelT], Serializable):
     """One `(Event, Action)` pairing: `action` fires whenever `event` occurs."""
 
     event: Event[ModelT] = attrs.field(hash=False)
     """Decides whether and when `action` runs."""
+
     action: Action[ModelT] = attrs.field(hash=False)
     """Changes the model when `event` fires."""
-    name: str = attrs.field(factory=lambda: uuid4().hex)
+
+    name: str = attrs.field(factory=lambda: uuid4().hex, validator=attrs.validators.min_len(1))
     """Optional label. If not provided, a random UUID is generated."""
 
     def __repr__(self) -> str:
@@ -162,13 +164,13 @@ class Rule(typing.Generic[ModelT], Serializable):
 
 @attrs.frozen(slots=True)
 class Schedule(typing.Generic[ModelT]):
-    """Every rule for a run. Advances a model by applying whichever rules fire."""
+    """Every rule for a run. Advances a model by applying whichever items fire."""
 
-    rules: tuple[Rule[ModelT], ...] = attrs.field(converter=tuple, factory=tuple)
+    items: tuple[ScheduleItem[ModelT], ...] = attrs.field(converter=tuple, factory=tuple)
 
     def apply(self, model: ModelT, context: ScheduleContext) -> ModelT:
         """
-        Applies every rule whose event fires, in `rules` order.
+        Applies every rule whose event fires, in `items` order.
 
         :param model: The model to advance.
         :param context: The current moment's context.
@@ -178,7 +180,7 @@ class Schedule(typing.Generic[ModelT]):
         :raises ActionError: If a rule's action raises anything other
             than a `PASSTHROUGH_EXCEPTIONS` member.
         """
-        for rule in self.rules:
+        for rule in self.items:
             try:
                 occurred = rule.event(model, context)
             except PASSTHROUGH_EXCEPTIONS:
@@ -240,64 +242,64 @@ class Schedule(typing.Generic[ModelT]):
         """
         Dumps every rule.
 
-        :returns: `{"rules": [...]}`. Every rule's `event`/`action` must
+        :returns: `{"items": [...]}`. Every rule's `event`/`action` must
             be a `SerializableEvent`/`SerializableAction`.
         """
-        return {"rules": [rule.dump() for rule in self.rules]}
+        return {"items": [rule.dump() for rule in self.items]}
 
     @classmethod
     def load(cls, data: typing.Mapping[str, typing.Sequence[typing.Mapping[str, object]]]) -> Self:
         """
         Loads a `Schedule` from `dump()`'s own output.
 
-        :param data: `{"rules": [...]}`, as produced by `dump()`.
+        :param data: `{"items": [...]}`, as produced by `dump()`.
         :returns: The loaded `Schedule`.
         """
-        return cls(rules=tuple(Rule.load(data=rule_data) for rule_data in data["rules"]))
+        return cls(items=tuple(ScheduleItem.load(data=rule_data) for rule_data in data["items"]))
 
     def __len__(self) -> int:
-        return len(self.rules)
+        return len(self.items)
 
-    def __iter__(self) -> typing.Iterator[Rule[ModelT]]:
-        return iter(self.rules)
+    def __iter__(self) -> typing.Iterator[ScheduleItem[ModelT]]:
+        return iter(self.items)
 
     def __contains__(self, name: str) -> bool:
-        return any(rule.name == name for rule in self.rules)
+        return any(rule.name == name for rule in self.items)
 
     def __add__(self, other: Self) -> Self:
         """
-        Concatenates two schedules' rules, in order, keeping duplicates.
+        Concatenates two schedules' items, in order, keeping duplicates.
 
         :param other: The schedule to append.
-        :returns: A new `Schedule` with `self`'s rules followed by `other`'s.
+        :returns: A new `Schedule` with `self`'s items followed by `other`'s.
         """
         if not isinstance(other, Schedule):
             return NotImplemented
-        return self.__class__(rules=set(self.rules + other.rules))
+        return self.__class__(items=set(self.items + other.items))
 
     def __sub__(self, other: Self) -> Self:
         """
-        Removes any rules from `self` that have the same name as a rule in `other`.
+        Removes any items from `self` that have the same name as a rule in `other`.
 
-        :param other: The schedule to remove rules from.
-        :returns: A new `Schedule` with only rules whose names are not in `other`.
+        :param other: The schedule to remove items from.
+        :returns: A new `Schedule` with only items whose names are not in `other`.
         """
         if not isinstance(other, Schedule):
             return NotImplemented
-        other_rules = set(other.rules)
-        kept = [rule for rule in self.rules if rule.name not in other_rules]
-        return self.__class__(rules=tuple(kept))
+        other_items = set(other.items)
+        kept = [rule for rule in self.items if rule.name not in other_items]
+        return self.__class__(items=tuple(kept))
 
     def __or__(self, other: Self) -> Self:
         """
-        Merges two schedules, `other`'s named rules overriding `self`'s
-        own rules of the same name. Unnamed rules from both are kept, never merged.
+        Merges two schedules, `other`'s named items overriding `self`'s
+        own items of the same name. Unnamed items from both are kept, never merged.
 
         :param other: The schedule to merge in.
         :returns: A new, merged `Schedule`.
         """
         if not isinstance(other, Schedule):
             return NotImplemented
-        other_rules = set(other.rules)
-        kept = [rule for rule in self.rules if rule.name not in other_rules]
-        return self.__class__(rules=tuple(kept) + other.rules)
+        other_items = set(other.items)
+        kept = [rule for rule in self.items if rule.name not in other_items]
+        return self.__class__(items=tuple(kept) + other.items)

@@ -4,7 +4,7 @@ import typing
 import numpy as np
 
 from bores.constants import c
-from bores.correlations.core import fahrenheit_to_rankine
+from bores.correlations.core import fahrenheit_to_kelvin, fahrenheit_to_rankine
 from bores.correlations.scalars.core import compute_fluid_density
 from bores.errors import ValidationError
 from bores.types import Number, ZFactorMethod

@@ -20,7 +20,7 @@ import numpy as np
 import pyvista as pv
 
 from bores.grids.factories.voronoi import make_voronoi_grid
-from bores.grids.utils import as_pyvista_grid
+from bores.grids.utils import make_pyvista_grid
 
 # Seed geometry
 rng = np.random.default_rng(42)
@@ -99,7 +99,7 @@ pressure = hydrostatic + drawdown + 0.5 * rng.standard_normal(grid.n_cells)
 # PyVista visualisation
 
 print("\nConverting to PyVista …")
-pv_grid = as_pyvista_grid(
+pv_grid = make_pyvista_grid(
     grid,
     cell_data={
         "porosity": poro,

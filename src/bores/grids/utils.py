@@ -10,7 +10,7 @@ from bores.errors import ValidationError
 from bores.grids.base import Grid
 from bores.types import CellArray, IntArray, OneDimension, Side
 
-__all__ = ["as_pyvista_grid"]
+__all__ = ["make_pyvista_grid"]
 
 
 SIDE_ALIASES: dict[str, Side] = {
@@ -294,7 +294,7 @@ def _fill_cell_entries(
         out[total_count_pos] = position - total_count_pos - np.int64(1)
 
 
-def as_pyvista_grid(
+def make_pyvista_grid(
     grid: Grid,
     *,
     cell_data: dict[str, CellArray] | None = None,
@@ -339,11 +339,11 @@ def as_pyvista_grid(
     Example:
 
     ```python
-    from bores.grids.utils import as_pyvista_grid
+    from bores.grids.utils import make_pyvista_grid
     import pyvista as pv
 
     pressure = np.zeros((n_cells,))
-    pv_grid = as_pyvista_grid(grid, cell_data={"pressure": pressure})
+    pv_grid = make_pyvista_grid(grid, cell_data={"pressure": pressure})
 
     pl = pv.Plotter()
     pl.add_mesh(pv_grid, scalars="pressure", show_edges=True)

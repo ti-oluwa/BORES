@@ -11,7 +11,7 @@ from bores.deck.core import DeckParseError
 from bores.deck.file import DeckFile
 from bores.errors import NotSupportedError, ValidationError
 from bores.grids.base import Grid
-from bores.schedule.base import Rule, Schedule
+from bores.schedule.base import Schedule, ScheduleItem
 from bores.schedule.events import TimeEvent
 from bores.types import FluidPhase, UnitSystem
 from bores.wells.base import CompletionStatus, Perforation, Well, Wells, WellStatus, WellType
@@ -1091,7 +1091,7 @@ def load_schedule(
         qualifying record, sorted by `schedule_time`.
     """
     unit_system = deck_file.unit_system
-    rules: list[Rule[CompiledBlackOilModel]] = []
+    items: list[ScheduleItem[CompiledBlackOilModel]] = []
     empty: list[dict[str, typing.Any]] = []
 
     def is_due(record: typing.Mapping[str, typing.Any]) -> bool:
@@ -1102,8 +1102,8 @@ def load_schedule(
             continue
         schedule_time = record["schedule_time"]
         action = ActivateWell(well_name=record["well"])
-        rules.append(
-            Rule(
+        items.append(
+            ScheduleItem(
                 event=TimeEvent(at=schedule_time),
                 action=action,
                 name=f"welspecs:{record['well']}@{schedule_time}",
@@ -1122,8 +1122,8 @@ def load_schedule(
             k1=record.get("k1", 0),
             k2=record.get("k2", 0),
         )
-        rules.append(
-            Rule(
+        items.append(
+            ScheduleItem(
                 event=TimeEvent(at=schedule_time),
                 action=action,
                 name=f"welopen:{record['well']}@{schedule_time}",
@@ -1142,8 +1142,8 @@ def load_schedule(
             k1=record.get("k1", 0),
             k2=record.get("k2", 0),
         )
-        rules.append(
-            Rule(
+        items.append(
+            ScheduleItem(
                 event=TimeEvent(at=schedule_time),
                 action=action,
                 name=f"wpimult:{record['well']}@{schedule_time}",
@@ -1159,8 +1159,8 @@ def load_schedule(
             control_mode=record["control_mode"],
             value=record.get("value"),
         )
-        rules.append(
-            Rule(
+        items.append(
+            ScheduleItem(
                 event=TimeEvent(at=schedule_time),
                 action=action,
                 name=f"weltarg:{record['well']}@{schedule_time}",
@@ -1179,8 +1179,8 @@ def load_schedule(
             target_bhp=control.target_bhp,
             target_thp=control.target_thp,
         )
-        rules.append(
-            Rule(
+        items.append(
+            ScheduleItem(
                 event=TimeEvent(at=schedule_time),
                 action=action,
                 name=f"wconprod:{record['well']}@{schedule_time}",
@@ -1199,8 +1199,8 @@ def load_schedule(
                 min_value=limit.min_value,
                 max_value=limit.max_value,
             )
-            rules.append(
-                Rule(
+            items.append(
+                ScheduleItem(
                     event=TimeEvent(at=schedule_time),
                     action=limit_action,
                     name=f"wconprod-{kind.name.lower()}limit:{record['well']}@{schedule_time}",
@@ -1220,8 +1220,8 @@ def load_schedule(
             target_thp=control.target_thp,
             injected_phase=control.injected_phase,
         )
-        rules.append(
-            Rule(
+        items.append(
+            ScheduleItem(
                 event=TimeEvent(at=schedule_time),
                 action=action,
                 name=f"wconinje:{record['well']}@{schedule_time}",
@@ -1240,8 +1240,8 @@ def load_schedule(
                 min_value=limit.min_value,
                 max_value=limit.max_value,
             )
-            rules.append(
-                Rule(
+            items.append(
+                ScheduleItem(
                     event=TimeEvent(at=schedule_time),
                     action=limit_action,
                     name=f"wconinje-{kind.name.lower()}limit:{record['well']}@{schedule_time}",
@@ -1262,8 +1262,8 @@ def load_schedule(
                 workover_action=limit.workover_action,
                 end_run=limit.end_run,
             )
-            rules.append(
-                Rule(
+            items.append(
+                ScheduleItem(
                     event=TimeEvent(at=schedule_time),
                     action=action,
                     name=f"wecon:{record['well']}:{limit.quantity}@{schedule_time}",
@@ -1281,13 +1281,13 @@ def load_schedule(
             k1=record["k1"],
             k2=record["k2"],
         )
-        rules.append(
-            Rule(
+        items.append(
+            ScheduleItem(
                 event=TimeEvent(at=schedule_time),
                 action=action,
                 name=f"compdat:{record['well']}@{schedule_time}",
             )
         )
 
-    rules.sort(key=lambda rule: rule.event.at)  # type: ignore[attr-defined]
-    return Schedule(rules=tuple(rules))
+    items.sort(key=lambda rule: rule.event.at)  # type: ignore[attr-defined]
+    return Schedule(items=tuple(items))
