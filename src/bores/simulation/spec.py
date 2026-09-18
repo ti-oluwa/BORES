@@ -430,7 +430,7 @@ class RunSpec(StoreSerializable):
     large or if many states are captured.
     """
 
-    def __post_init__(self) -> None:
+    def __attrs_post_init__(self) -> None:
         # Validate that the minimum injector saturations are
         # greater than the phase appearance tolerance to avoid numerical issues.
         if (

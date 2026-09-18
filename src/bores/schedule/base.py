@@ -146,7 +146,7 @@ action_type = make_serializable_type_registrar(
 
 
 @attrs.frozen(kw_only=True, slots=True, repr=False, hash=True, unsafe_hash=True)
-class ScheduleItem(typing.Generic[ModelT], Serializable):
+class ScheduleItem(Serializable, typing.Generic[ModelT]):
     """One `(Event, Action)` pairing: `action` fires whenever `event` occurs."""
 
     event: Event[ModelT] = attrs.field(hash=False)
@@ -163,10 +163,16 @@ class ScheduleItem(typing.Generic[ModelT], Serializable):
 
 
 @attrs.frozen(slots=True)
-class Schedule(typing.Generic[ModelT]):
+class Schedule(Serializable, typing.Generic[ModelT]):
     """Every rule for a run. Advances a model by applying whichever items fire."""
 
     items: tuple[ScheduleItem[ModelT], ...] = attrs.field(converter=tuple, factory=tuple)
+    """The `(Event, Action)` pairings to apply, in order."""
+
+    _items_map: dict[str, ScheduleItem[ModelT]] = attrs.field(init=False, hash=False, repr=False)
+
+    def __attrs_post_init__(self) -> None:
+        object.__setattr__(self, "_items_map", {item.name: item for item in self.items})
 
     def apply(self, model: ModelT, context: ScheduleContext) -> ModelT:
         """
@@ -238,24 +244,27 @@ class Schedule(typing.Generic[ModelT]):
         )
         return self.apply(model=model, context=context)
 
-    def dump(self) -> dict[str, list[typing.Mapping[str, object]]]:
+    def get(self, name: str, /) -> ScheduleItem[ModelT] | None:
         """
-        Dumps every rule.
+        Returns the `ScheduleItem` with the given name, if any.
 
-        :returns: `{"items": [...]}`. Every rule's `event`/`action` must
-            be a `SerializableEvent`/`SerializableAction`.
+        :param name: The name of the item to retrieve.
+        :returns: The item with that name, or `None` if not found.
         """
-        return {"items": [rule.dump() for rule in self.items]}
+        return self._items_map.get(name)
 
-    @classmethod
-    def load(cls, data: typing.Mapping[str, typing.Sequence[typing.Mapping[str, object]]]) -> Self:
+    def __getitem__(self, name: str, /) -> ScheduleItem[ModelT]:
         """
-        Loads a `Schedule` from `dump()`'s own output.
+        Returns the `ScheduleItem` with the given name, if any.
 
-        :param data: `{"items": [...]}`, as produced by `dump()`.
-        :returns: The loaded `Schedule`.
+        :param name: The name of the item to retrieve.
+        :returns: The item with that name.
+        :raises KeyError: If no item with that name exists.
         """
-        return cls(items=tuple(ScheduleItem.load(data=rule_data) for rule_data in data["items"]))
+        try:
+            return self._items_map[name]
+        except KeyError as exc:
+            raise KeyError(f"No schedule item named {name!r}.") from exc
 
     def __len__(self) -> int:
         return len(self.items)
@@ -263,8 +272,8 @@ class Schedule(typing.Generic[ModelT]):
     def __iter__(self) -> typing.Iterator[ScheduleItem[ModelT]]:
         return iter(self.items)
 
-    def __contains__(self, name: str) -> bool:
-        return any(rule.name == name for rule in self.items)
+    def __contains__(self, o: str | ScheduleItem[ModelT], /) -> bool:
+        return any(item == o for item in self.items)
 
     def __add__(self, other: Self) -> Self:
         """

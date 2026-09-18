@@ -78,7 +78,7 @@ class SimulationCase(Serializable):
 
     _workspace: SimulationWorkspace | None = attrs.field(default=None, init=False, repr=False)
 
-    def __post_init__(self) -> None:
+    def __attrs_post_init__(self) -> None:
         if self.model.unit_system != self.runspec.unit_system:
             raise CaseValidationError(
                 "Simulation case's model and runspec must share the same unit system."

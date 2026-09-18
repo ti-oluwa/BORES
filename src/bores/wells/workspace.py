@@ -37,13 +37,12 @@ class PerforationWorkspace(typing.NamedTuple):
     """
     One well's active-connection data for the resolution hot path.
 
-    Built once per well per `resolve_control` call, and reused across every
+    Built once per well per control resolution call, and reused across every
     fixed-point and bisection iteration within that call.
 
     The per-connection values never change mid-resolution, and `connection_pressures`
-    is a scratch buffer callers overwrite in place (via
-    `compute_perforation_pressures(..., out=workspace.connection_pressures)`)
-    rather than allocating a fresh array on every iteration.
+    is a scratch buffer callers overwrite in place on every iteration.
+    The other arrays are read-only for the duration of a control resolution call.
     """
 
     well_indices: NumberArray[OneDimension]
@@ -53,29 +52,48 @@ class PerforationWorkspace(typing.NamedTuple):
     """Matching reservoir pressure at each connection."""
 
     oil_mobilities: NumberArray[OneDimension]
+    """Matching reservoir-condition oil mobility at each connection."""
+
     water_mobilities: NumberArray[OneDimension]
+    """Matching reservoir-condition water mobility at each connection."""
+
     gas_mobilities: NumberArray[OneDimension]
+    """Matching reservoir-condition gas mobility at each connection."""
+
     oil_formation_volume_factors: NumberArray[OneDimension]
+    """Matching oil formation volume factor at each connection."""
+
     water_formation_volume_factors: NumberArray[OneDimension]
+    """Matching water formation volume factor at each connection."""
+
     gas_formation_volume_factors: NumberArray[OneDimension]
+    """Matching gas formation volume factor at each connection."""
 
     representative_depths: NumberArray[OneDimension]
+    """Representative depth of each connection, for hydrostatic pressure correction."""
+
     inclinations_from_vertical: NumberArray[OneDimension]
+    """Inclination of each connection from vertical, for hydrostatic pressure correction."""
 
     connection_pressures: NumberArray[OneDimension]
-    """
-    Scratch buffer for `compute_perforation_pressures`' `out` parameter.
-    Overwritten on every call and has no meaningful contents before the first one.
-    """
+    """Buffer for the flowing pressure at each connection, at this well's current BHP. Overwritten on every call."""
 
     connection_oil_rates: NumberArray[OneDimension]
+    """
+    Buffer for the reservoir-condition oil rate at each connection, 
+    at this well's current BHP. Overwritten on every call.
+    """
+
     connection_water_rates: NumberArray[OneDimension]
+    """
+    Buffer for the reservoir-condition water rate at each connection, 
+    at this well's current BHP. Overwritten on every call.
+    """
+
     connection_gas_rates: NumberArray[OneDimension]
     """
-    Scratch buffers for `accumulate_phase_rates`' per-connection `out_*`
-    parameters. Each connection's own reservoir-condition phase rate, `0.0`
-    for a phase not relevant to the current solve. Overwritten on every
-    call; feeds the segmented hydraulics walk's `connection_phase_rates`.
+    Buffer for the reservoir-condition gas rate at each connection, 
+    at this well's current BHP. Overwritten on every call.
     """
 
 
@@ -150,26 +168,28 @@ def build_perforation_workspace(
 
 
 class WellsWorkspace(typing.NamedTuple):
-    """
-    Every well's control-resolution result, one row per well.
-
-    A reported timestep's `WellsStates` is decompiled from whatever this
-    holds at that point. Nothing here is cleared between timesteps.
-    The next resolve pass overwrites each row in place.
-    """
+    """Every well's control-resolution result, one row per well."""
 
     bhps: NumberArray[OneDimension]
     """Shape `(n_wells,)`. `NaN` for a well not yet resolved this pass."""
 
     oil_rates: NumberArray[OneDimension]
+    """Shape `(n_wells,)`. Reservoir-condition oil phase rate."""
+
     water_rates: NumberArray[OneDimension]
+    """Shape `(n_wells,)`. Reservoir-condition water phase rate."""
+
     gas_rates: NumberArray[OneDimension]
-    """Shape `(n_wells,)` each. Reservoir-condition phase rate."""
+    """Shape `(n_wells,)`. Reservoir-condition gas phase rate."""
 
     surface_oil_rates: NumberArray[OneDimension]
+    """Shape `(n_wells,)`. Surface-condition oil phase rate."""
+
     surface_water_rates: NumberArray[OneDimension]
+    """Shape `(n_wells,)`. Surface-condition water phase rate."""
+
     surface_gas_rates: NumberArray[OneDimension]
-    """Shape `(n_wells,)` each. Surface-condition phase rate."""
+    """Shape `(n_wells,)`. Surface-condition gas phase rate."""
 
     thps: NumberArray[OneDimension]
     """Shape `(n_wells,)`. `NaN` where not computed."""
@@ -200,15 +220,30 @@ class WellsWorkspace(typing.NamedTuple):
     """
 
     connection_oil_rates: NumberArray[OneDimension]
+    """
+    Shape `(n_connections,)` each, same CSR indexing as `connection_pressures`.
+    Each active connection's own reservoir-condition oil phase rate, at that
+    well's final governing BHP. Zeroed (not `NaN`) for a connection
+    belonging to an economically shut-in well, matching `oil_rates`'s own zeroing. 
+    `NaN` means "not resolved this pass", not "resolved to zero".
+    """
+
     connection_water_rates: NumberArray[OneDimension]
+    """
+    Shape `(n_connections,)` each, same CSR indexing as `connection_pressures`.
+    Each active connection's own reservoir-condition water phase rate, at that
+    well's final governing BHP. Zeroed (not `NaN`) for a connection
+    belonging to an economically shut-in well, matching `water_rates`'s own zeroing. 
+    `NaN` means "not resolved this pass", not "resolved to zero".
+    """
+
     connection_gas_rates: NumberArray[OneDimension]
     """
     Shape `(n_connections,)` each, same CSR indexing as `connection_pressures`.
-    Each active connection's own reservoir-condition phase rate, at that
+    Each active connection's own reservoir-condition gas phase rate, at that
     well's final governing BHP. Zeroed (not `NaN`) for a connection
-    belonging to an economically shut-in well, matching `oil_rates`/
-    `water_rates`/`gas_rates`'s own zeroing. `NaN` still means "not
-    resolved this pass", not "resolved to zero".
+    belonging to an economically shut-in well, matching `gas_rates`'s own zeroing. 
+    `NaN` means "not resolved this pass", not "resolved to zero".
     """
 
 
@@ -223,8 +258,7 @@ def build_wells_workspace(
 
     :param n_wells: Number of wells.
     :param n_connections: Total active connections across every well,
-        matching `CompiledPerforations`' own row count - sizes
-        `connection_pressures`.
+        matching `CompiledPerforations`' own row count. Sizes `connection_pressures`.
     :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
     :returns: `WellsWorkspace` with every row `NaN`/`UNSET_INT`/`0`.
     """

@@ -379,15 +379,15 @@ class Temperature(StoreSerializable):
         factor = factors["temperature"]
         offset = factors["temperature_offset"]
 
-        def _convert_spec(spec: TemperatureSpec) -> TemperatureSpec:
+        def convert_spec(spec: TemperatureSpec) -> TemperatureSpec:
             if isinstance(spec, (TemperatureGradient, TemperatureTable)):
                 return spec.convert(target, table=table)
             return scale_and_offset(spec, factor=factor, offset=offset)
 
-        new_default = _convert_spec(self.default) if self.default is not None else None
+        new_default = convert_spec(self.default) if self.default is not None else None
         new_regions: dict[int, TemperatureSpec] | None = None
         if self.regions is not None:
-            new_regions = {k: _convert_spec(v) for k, v in self.regions.items()}
+            new_regions = {k: convert_spec(v) for k, v in self.regions.items()}
 
         return attrs.evolve(self, default=new_default, regions=new_regions, unit_system=target)
 
