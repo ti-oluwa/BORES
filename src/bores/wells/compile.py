@@ -59,6 +59,7 @@ from bores.wells.indices.wells import build_wells_indices
 
 __all__ = [
     "CompiledGroupControls",
+    "CompiledGroupLimits",
     "CompiledLimits",
     "CompiledPerforations",
     "CompiledWellControls",
@@ -181,6 +182,10 @@ class WorkoverActionTag(enum.IntEnum):
     PLUG = 1
     CON = 2
     PLUS_CON = 3
+    NONE = 4
+    """`GECON`-only. Tracked but not enforced."""
+    RATE = 5
+    """`GECON`-only. Cut the group's rate rather than shutting a well."""
 
 
 class FluidPhaseTag(enum.IntEnum):
@@ -268,6 +273,8 @@ WORKOVER_ACTION_TAG = {
     WorkoverAction.PLUG: WorkoverActionTag.PLUG,
     WorkoverAction.CON: WorkoverActionTag.CON,
     WorkoverAction.PLUS_CON: WorkoverActionTag.PLUS_CON,
+    WorkoverAction.NONE: WorkoverActionTag.NONE,
+    WorkoverAction.RATE: WorkoverActionTag.RATE,
 }
 FLUID_PHASE_TAG = {
     FluidPhase.OIL: FluidPhaseTag.OIL,
@@ -1007,6 +1014,45 @@ class CompiledWellControls(typing.NamedTuple):
         self.guide_rates[well_row] = value
 
 
+class CompiledGroupLimits(typing.NamedTuple):
+    """
+    Every group's own economic limits (deck `GECON`), flattened
+    row-per-limit and CSR-indexed by group. A group with no `GECON`
+    limits has an empty row range. Every row is `ECONOMIC` kind. A group
+    never carries a `BHP`/`THP`/`RATE` limit, only a well does.
+    """
+
+    group_offsets: IntArray[OneDimension]
+    """Shape `(n_groups + 1,)`."""
+
+    kinds: IntArray[OneDimension]
+    """Shape `(n_rows,)`. Always `LimitKind.ECONOMIC`."""
+
+    quantities: IntArray[OneDimension]
+    """Shape `(n_rows,)`. An `EconomicQuantityTag` for each row."""
+
+    min_values: NumberArray[OneDimension]
+    """Shape `(n_rows,)`. `NaN` where this row has no floor."""
+
+    max_values: NumberArray[OneDimension]
+    """Shape `(n_rows,)`. `NaN` where this row has no ceiling."""
+
+    workover_actions: IntArray[OneDimension]
+    """Shape `(n_rows,)`. A `WorkoverActionTag` for each row."""
+
+    end_run_flags: IntArray[OneDimension]
+    """Shape `(n_rows,)`. `1` on a row that should stop the whole run once breached, `0` otherwise."""
+
+    def limit_rows(self, *, group_row: Integer) -> range:
+        """
+        A group's own limit-row range, without the caller needing to know about `group_offsets`.
+
+        :param group_row: The group's row in `CompiledGroupControls.names`.
+        :returns: `range(start, end)` over this group's limit rows.
+        """
+        return range(self.group_offsets[group_row], self.group_offsets[group_row + 1])
+
+
 class CompiledGroupControls(typing.NamedTuple):
     """
     Every group's current control target, one row per group, plus each
@@ -1053,6 +1099,9 @@ class CompiledGroupControls(typing.NamedTuple):
     `.controls` (not well names). Direct array indices so there's no further 
     lookup needed at allocation time.
     """
+
+    limits: CompiledGroupLimits
+    """This group's own `GECON` economic limits, one row per group even when empty."""
 
 
 class CompiledWellSystem(typing.NamedTuple):
@@ -1609,7 +1658,9 @@ def compile_group_controls(
         restricts membership to a group's *direct* members only (no
         `WellGroups` to look up descendants through).
     :returns: `CompiledGroupControls`, one row per group with a control,
-        in sorted name order; `None` if `group_controls` is `None`.
+        in sorted name order; `None` if `group_controls` is `None`. Each
+        row's own `limits` covers that group's `GroupControl.limits`
+        (deck `GECON`), an empty row range if it has none.
     :raises ValidationError: If a group's control mode isn't a recognized
         `GroupProducerControlMode`/`GroupInjectorControlMode`.
     """
@@ -1625,6 +1676,14 @@ def compile_group_controls(
     name_to_index = {name: i for i, name in enumerate(names)}
     member_offsets: list[Integer] = [0]
     member_well_indices: list[Integer] = []
+
+    group_limits_offsets: list[Integer] = [0]
+    group_limits_kinds: list[Integer] = []
+    group_limits_quantities: list[Integer] = []
+    group_limits_min_values: list[Number] = []
+    group_limits_max_values: list[Number] = []
+    group_limits_workover_actions: list[Integer] = []
+    group_limits_end_run_flags: list[Integer] = []
 
     for name in control_names:
         control = group_controls[name]
@@ -1650,7 +1709,44 @@ def compile_group_controls(
                 member_well_indices.append(name_to_index[well_name])
         member_offsets.append(len(member_well_indices))
 
+        (
+            limit_kinds,
+            limit_quantities,
+            limit_min_values,
+            limit_max_values,
+            limit_workover_actions,
+            limit_end_run_flags,
+        ) = _compile_limits(limits=control.limits)
+        group_limits_kinds.extend(limit_kinds)
+        group_limits_quantities.extend(limit_quantities)
+        group_limits_min_values.extend(limit_min_values)
+        group_limits_max_values.extend(limit_max_values)
+        group_limits_workover_actions.extend(limit_workover_actions)
+        group_limits_end_run_flags.extend(limit_end_run_flags)
+        group_limits_offsets.append(len(group_limits_kinds))
+
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+    group_limits = CompiledGroupLimits(
+        group_offsets=typing.cast(
+            IntArray[OneDimension], np.asarray(group_limits_offsets, dtype=np.int64)
+        ),
+        kinds=typing.cast(IntArray[OneDimension], np.asarray(group_limits_kinds, dtype=np.int32)),
+        quantities=typing.cast(
+            IntArray[OneDimension], np.asarray(group_limits_quantities, dtype=np.int32)
+        ),
+        min_values=typing.cast(
+            NumberArray[OneDimension], np.asarray(group_limits_min_values, dtype=dtype)
+        ),
+        max_values=typing.cast(
+            NumberArray[OneDimension], np.asarray(group_limits_max_values, dtype=dtype)
+        ),
+        workover_actions=typing.cast(
+            IntArray[OneDimension], np.asarray(group_limits_workover_actions, dtype=np.int32)
+        ),
+        end_run_flags=typing.cast(
+            IntArray[OneDimension], np.asarray(group_limits_end_run_flags, dtype=np.int32)
+        ),
+    )
     return CompiledGroupControls(
         names=tuple(control_names),
         group_kinds=typing.cast(IntArray[OneDimension], np.asarray(group_kinds, dtype=np.int32)),
@@ -1667,6 +1763,7 @@ def compile_group_controls(
         member_well_indices=typing.cast(
             IntArray[OneDimension], np.asarray(member_well_indices, dtype=np.int32)
         ),
+        limits=group_limits,
     )
 
 

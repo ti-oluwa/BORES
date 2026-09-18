@@ -31,6 +31,13 @@ class WellControlSpec(Serializable):
     injector_bhp_bracket_multiplier: Number = attrs.field(
         factory=lambda: c.CONTROL_INJECTOR_BHP_BRACKET_MULTIPLIER
     )
+    group_rate_cutback_factor: Number = attrs.field(
+        factory=lambda: c.CONTROL_GROUP_RATE_CUTBACK_FACTOR
+    )
+    """
+    Fraction a group's target rate is multiplied by, per call, when a
+    `GECON` limit with `WorkoverAction.RATE` is breached.
+    """
     unit_system: UnitSystem = UnitSystem.FIELD
     """Unit system for pressure-valued control limits."""
 
@@ -61,6 +68,12 @@ class WellControlSpec(Serializable):
             raise ValidationError(
                 "`injector_bhp_bracket_multiplier` must be > 1.0; got "
                 f"{self.injector_bhp_bracket_multiplier}."
+            )
+
+        if not (0.0 < self.group_rate_cutback_factor < 1.0):
+            raise ValidationError(
+                "`group_rate_cutback_factor` must be strictly between 0.0 "
+                f"and 1.0; got {self.group_rate_cutback_factor}."
             )
 
     def convert(

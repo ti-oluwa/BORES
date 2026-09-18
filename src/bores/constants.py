@@ -933,6 +933,18 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         ),
         unit="dimensionless",
     ),
+    "CONTROL_GROUP_RATE_CUTBACK_FACTOR": Constant(
+        value=0.9,
+        description=(
+            "Fraction a group's own target rate is multiplied by, per "
+            "enforcement call, when a `GECON` limit with `WorkoverAction.RATE` "
+            "is breached. Applied once per call, not iterated internally, "
+            "since satisfying the limit needs the group's targets "
+            "reallocated across its members and those members re-resolved, "
+            "both outside group-limit enforcement's own scope."
+        ),
+        unit="dimensionless",
+    ),
     "AQUIFER_BESSEL_SERIES_TERMS": Constant(
         value=30,
         description=("Empirically validated safety margin for the Klins finite-aquifer series"),
@@ -1776,7 +1788,7 @@ def get_conversion_factors(
 
     - "temperature"  - multiplicative factor.
     - "temperature_offset" - additive delta (in target units) applied
-    *after* scaling: T_to = T_from * scale + offset.
+    after scaling: T_to = T_from * scale + offset.
 
     :param from_system: Source `UnitSystem`.
     :param to_system: Target `UnitSystem`.
