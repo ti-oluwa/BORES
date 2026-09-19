@@ -113,9 +113,9 @@ def reallocate_and_reresolve(
     open_members: typing.Sequence[Integer],
     grup_mode_tag: Integer,
     grup_member_rows: typing.Sequence[Integer],
-    wellbore_for: typing.Callable[[Integer], WellBoreModel],
-    connection_samples_for: typing.Callable[[Integer], typing.Sequence[ConnectionSample]],
-    surface_fluid_properties_for: typing.Callable[[Integer], SurfaceFluidProperties | None],
+    get_wellbore: typing.Callable[[Integer], WellBoreModel],
+    get_connection_samples: typing.Callable[[Integer], typing.Sequence[ConnectionSample]],
+    get_surface_fluid_properties: typing.Callable[[Integer], SurfaceFluidProperties | None],
 ) -> tuple[str, ...]:
     """
     Reallocates `group_name`'s current target across `grup_member_rows`
@@ -139,10 +139,10 @@ def reallocate_and_reresolve(
         `enforce_group_economic_limits` was first called for this group,
         the members this group's own reallocation is meant to keep
         covering across every pass this call makes.
-    :param wellbore_for: Given a well row, its hydraulics correlation.
-    :param connection_samples_for: Given a well row, its active, open
+    :param get_wellbore: Given a well row, its hydraulics correlation.
+    :param get_connection_samples: Given a well row, its active, open
         connections' current reservoir samples.
-    :param surface_fluid_properties_for: Given a well row, its surface
+    :param get_surface_fluid_properties: Given a well row, its surface
         fluid properties, or `None` if it has no THP control/limit to check.
     :returns: Names of the members actually re-resolved.
     """
@@ -160,11 +160,11 @@ def reallocate_and_reresolve(
         resolve_well_control(
             compiled_system=well_system,
             well_row=well_row,
-            wellbore=wellbore_for(well_row),
-            connection_samples=connection_samples_for(well_row),
+            wellbore=get_wellbore(well_row),
+            connection_samples=get_connection_samples(well_row),
             workspace=workspace,
             control_spec=control_spec,
-            surface_fluid_properties=surface_fluid_properties_for(well_row),
+            surface_fluid_properties=get_surface_fluid_properties(well_row),
         )
     return tuple(reresolved)
 
@@ -175,9 +175,9 @@ def enforce_group_economic_limits(
     well_system: CompiledWellSystem,
     workspace: WellsWorkspace,
     control_spec: WellControlSpec,
-    wellbore_for: typing.Callable[[Integer], WellBoreModel],
-    connection_samples_for: typing.Callable[[Integer], typing.Sequence[ConnectionSample]],
-    surface_fluid_properties_for: typing.Callable[[Integer], SurfaceFluidProperties | None]
+    get_wellbore: typing.Callable[[Integer], WellBoreModel],
+    get_connection_samples: typing.Callable[[Integer], typing.Sequence[ConnectionSample]],
+    get_surface_fluid_properties: typing.Callable[[Integer], SurfaceFluidProperties | None]
     | None = None,
 ) -> GroupEconomicLimitOutcome:
     """
@@ -211,12 +211,12 @@ def enforce_group_economic_limits(
         membership) and `.controls`/`.well_kinds` (guide rates, read only).
     :param workspace: This run's `WellsWorkspace`, updated in place.
     :param control_spec: Supplies `group_rate_cutback_factor` and `max_fixed_point_iterations`.
-    :param wellbore_for: Given a well row, its hydraulics correlation.
+    :param get_wellbore: Given a well row, its hydraulics correlation.
         Only called for a member actually being re-resolved.
-    :param connection_samples_for: Given a well row, its active, open
+    :param get_connection_samples: Given a well row, its active, open
         connections' current reservoir samples. Only called for a member
         actually being re-resolved.
-    :param surface_fluid_properties_for: Given a well row, its surface
+    :param get_surface_fluid_properties: Given a well row, its surface
         fluid properties, or `None` if it has no THP control/limit to
         check. Omit if no affected member ever needs this.
     :returns: `GroupEconomicLimitOutcome` describing what was done.
@@ -243,7 +243,7 @@ def enforce_group_economic_limits(
             satisfied=True, shut_wells=(), rate_cutback_applied=False, reallocated_wells=()
         )
 
-    resolved_surface_fluid_properties_for = surface_fluid_properties_for or (lambda well_row: None)
+    get_resolved_surface_fluid_properties = get_surface_fluid_properties or (lambda well_row: None)
 
     member_start = group_controls.member_offsets[group_row]
     member_end = group_controls.member_offsets[group_row + 1]
@@ -349,9 +349,9 @@ def enforce_group_economic_limits(
             open_members=open_members,
             grup_mode_tag=grup_mode_tag,
             grup_member_rows=grup_member_rows,
-            wellbore_for=wellbore_for,
-            connection_samples_for=connection_samples_for,
-            surface_fluid_properties_for=resolved_surface_fluid_properties_for,
+            get_wellbore=get_wellbore,
+            get_connection_samples=get_connection_samples,
+            get_surface_fluid_properties=get_resolved_surface_fluid_properties,
         )
         reallocated_wells.extend(name for name in reresolved if name not in reallocated_wells)
 

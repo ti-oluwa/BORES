@@ -49,7 +49,7 @@ class SimulationCase(Serializable):
     runspec: RunSpec = attrs.field(factory=RunSpec)
     """Run configuration - unit system, constants, timer, start date, resolver tuning."""
 
-    schedule: Schedule[CompiledBlackOilModel] = attrs.field(factory=Schedule)
+    schedule: Schedule[CompiledBlackOilModel] = attrs.field(factory=Schedule[CompiledBlackOilModel])
     """Every scheduled well/model edit for the run."""
 
     summary: typing.Any = None

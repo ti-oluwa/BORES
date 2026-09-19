@@ -841,8 +841,9 @@ class CompiledLimits(typing.NamedTuple):
         if isinstance(end_run, bool):
             self.end_run_flags[row] = 1 if end_run else 0
         else:
-            self.end_run_flags[row] = [  # type: ignore[index]
-                1 if one_end_run else 0 for one_end_run in end_run
+            self.end_run_flags[row] = [
+                1 if one_end_run else 0
+                for one_end_run in end_run  # type: ignore[index]
             ]
 
 

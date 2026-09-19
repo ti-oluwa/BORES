@@ -33,9 +33,9 @@ def resolve_wells(
     compiled_system: CompiledWellSystem,
     workspace: WellsWorkspace,
     control_spec: WellControlSpec,
-    wellbore_for: typing.Callable[[Integer], WellBoreModel],
-    connection_samples_for: typing.Callable[[Integer], typing.Sequence[ConnectionSample]],
-    surface_fluid_properties_for: typing.Callable[[Integer], SurfaceFluidProperties | None]
+    get_wellbore: typing.Callable[[Integer], WellBoreModel],
+    get_connection_samples: typing.Callable[[Integer], typing.Sequence[ConnectionSample]],
+    get_surface_fluid_properties: typing.Callable[[Integer], SurfaceFluidProperties | None]
     | None = None,
 ) -> dict[str, GroupEconomicLimitOutcome]:
     """
@@ -45,23 +45,23 @@ def resolve_wells(
     1. Allocates every group's own target across its `GRUP`-mode members
        (`allocate_group_targets`), converting each to a concrete mode.
        A group whose own control mode has no directly allocatable target
-       (`FLD`/`NONE`/`VREP`/`REIN`) is skipped - its members are
+       (`FLD`/`NONE`/`VREP`/`REIN`) is skipped. Its members are
        controlled some other way, not this group's own target.
     2. Resolves every active well's control (`resolve_well_control`), now
        that none are left in `GRUP` mode.
     3. Enforces every group's own `GECON` limits
        (`enforce_group_economic_limits`), which may shut a member well,
-       cut a group's target, or both - each followed by its own
+       cut a group's target, or both with each followed by its own
        reallocation and re-resolution of the wells it affects, so the
        workspace is fully consistent before this function returns.
 
     :param compiled_system: The compiled well system to resolve.
     :param workspace: This run's `WellsWorkspace`, updated in place.
     :param control_spec: Solver tunables, shared by every well and group.
-    :param wellbore_for: Given a well row, its hydraulics correlation.
-    :param connection_samples_for: Given a well row, its active, open
+    :param get_wellbore: Given a well row, its hydraulics correlation.
+    :param get_connection_samples: Given a well row, its active, open
         connections' current reservoir samples.
-    :param surface_fluid_properties_for: Given a well row, its surface
+    :param get_surface_fluid_properties: Given a well row, its surface
         fluid properties, or `None` if it has no THP control/limit to
         check. Omit if no well in the system ever needs this.
     :returns: Each group's own `enforce_group_economic_limits` outcome,
@@ -85,12 +85,12 @@ def resolve_wells(
         resolve_well_control(
             compiled_system=compiled_system,
             well_row=well_row,
-            wellbore=wellbore_for(well_row),
-            connection_samples=connection_samples_for(well_row),
+            wellbore=get_wellbore(well_row),
+            connection_samples=get_connection_samples(well_row),
             workspace=workspace,
             control_spec=control_spec,
             surface_fluid_properties=(
-                surface_fluid_properties_for(well_row) if surface_fluid_properties_for else None
+                get_surface_fluid_properties(well_row) if get_surface_fluid_properties else None
             ),
         )
 
@@ -108,8 +108,8 @@ def resolve_wells(
                 well_system=compiled_system,
                 workspace=workspace,
                 control_spec=control_spec,
-                wellbore_for=wellbore_for,
-                connection_samples_for=connection_samples_for,
-                surface_fluid_properties_for=surface_fluid_properties_for,
+                get_wellbore=get_wellbore,
+                get_connection_samples=get_connection_samples,
+                get_surface_fluid_properties=get_surface_fluid_properties,
             )
     return outcomes
