@@ -1,6 +1,7 @@
 """Compiled (Structure-of-Arrays) well data for the reservoir solver hot path."""
 
 import enum
+import functools
 import typing
 
 import attrs
@@ -77,6 +78,25 @@ __all__ = [
 
 UNSET_INT = -1
 """Sentinel for an int tag column entry that doesn't apply to that row."""
+
+
+@functools.lru_cache(maxsize=32)
+def name_to_row_map(names: tuple[str, ...]) -> dict[str, int]:
+    """
+    Builds (and caches) a name-to-row dict for a `names` tuple.
+
+    `CompiledWellSystem`/`CompiledGroupControls` are frozen `NamedTuple`s,
+    so a given `names` tuple is a stable, hashable identity for the
+    lifetime of the system it belongs to - the cache key. `well_row`/
+    `CompiledGroupControls.group_row` call this instead of `names.index`,
+    trading one O(n) dict build (once, per distinct `names` tuple) for
+    every lookup after that being O(1) instead of O(n).
+
+    :param names: A `CompiledWellSystem.names` or
+        `CompiledGroupControls.names` tuple.
+    :returns: `{name: row}` for every entry in `names`.
+    """
+    return {name: row for row, name in enumerate(names)}
 
 
 class WellKind(enum.IntEnum):
@@ -1304,6 +1324,25 @@ class CompiledGroupControls(typing.NamedTuple):
     limits: CompiledGroupLimits
     """This group's own `GECON` economic limits, one row per group even when empty."""
 
+    @typing.overload
+    def group_row(self, *, name: str) -> Integer: ...  # type: ignore
+    @typing.overload
+    def group_row(self, *, name: typing.Iterable[str]) -> list[Integer]: ...
+    def group_row(self, *, name: str | typing.Iterable[str]) -> Integer | list[Integer]:
+        """
+        A group's row, by name.
+
+        :param name: The group to find, or a sequence of them.
+        :returns: The group's row for a single `name`, a list for a sequence.
+        :raises ValidationError: If any named group isn't in this system.
+        """
+        if isinstance(name, str):
+            try:
+                return name_to_row_map(self.names)[name]
+            except KeyError:
+                raise ValidationError(f"No group named {name!r} in this compiled system.") from None
+        return [self.group_row(name=one_name) for one_name in name]
+
 
 class CompiledWellSystem(typing.NamedTuple):
     """
@@ -1359,8 +1398,8 @@ class CompiledWellSystem(typing.NamedTuple):
         """
         if isinstance(name, str):
             try:
-                return self.names.index(name)
-            except ValueError:
+                return name_to_row_map(self.names)[name]
+            except KeyError:
                 raise ValidationError(f"No well named {name!r} in this compiled system.") from None
         return [self.well_row(name=one_name) for one_name in name]
 

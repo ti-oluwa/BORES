@@ -230,10 +230,7 @@ def enforce_group_economic_limits(
     if group_controls is None:
         raise ValidationError("`well_system.group_controls` is not set.")
 
-    try:
-        group_row = group_controls.names.index(group_name)
-    except ValueError:
-        raise ValidationError(f"No `GroupControl` set for group {group_name!r}.") from None
+    group_row = group_controls.group_row(name=group_name)
 
     group_limits = group_controls.limits
     limits_start = group_limits.group_offsets[group_row]

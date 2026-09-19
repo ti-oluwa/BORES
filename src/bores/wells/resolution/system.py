@@ -16,7 +16,10 @@ from bores.types import Integer
 from bores.wells.compile import CompiledWellSystem
 from bores.wells.hydraulics.base import SurfaceFluidProperties, WellBoreModel
 from bores.wells.resolution.engine import resolve_well_control
-from bores.wells.resolution.groups.allocation import allocate_group_targets
+from bores.wells.resolution.groups.allocation import (
+    allocate_group_targets,
+    redistribute_group_shortfall,
+)
 from bores.wells.resolution.groups.limits import (
     GroupEconomicLimitOutcome,
     enforce_group_economic_limits,
@@ -49,7 +52,10 @@ def resolve_wells(
        controlled some other way, not this group's own target.
     2. Resolves every active well's control (`resolve_well_control`), now
        that none are left in `GRUP` mode.
-    3. Enforces every group's own `GECON` limits
+    3. Redistributes any shortfall left in a group's own target across
+       whichever of its members have headroom
+       (`redistribute_group_shortfall`), re-resolving each one boosted.
+    4. Enforces every group's own `GECON` limits
        (`enforce_group_economic_limits`), which may shut a member well,
        cut a group's target, or both with each followed by its own
        reallocation and re-resolution of the wells it affects, so the
@@ -68,11 +74,14 @@ def resolve_wells(
         keyed by group name. Empty if `compiled_system.group_controls` is `None`.
     """
     group_controls = compiled_system.group_controls
+    allocated_wells_by_group: dict[str, tuple[str, ...]] = {}
 
     if group_controls is not None:
         for group_name in group_controls.names:
             try:
-                allocate_group_targets(group_name, compiled_system, workspace)
+                allocated_wells_by_group[group_name] = allocate_group_targets(
+                    group_name, compiled_system, workspace
+                )
             except ValidationError:
                 # This group's own control mode has no directly
                 # allocatable rate target. Its members are controlled
@@ -96,6 +105,20 @@ def resolve_wells(
 
     outcomes: dict[str, GroupEconomicLimitOutcome] = {}
     if group_controls is not None:
+        for group_name, allocated_wells in allocated_wells_by_group.items():
+            if not allocated_wells:
+                continue
+            redistribute_group_shortfall(
+                group_name=group_name,
+                allocated_wells=allocated_wells,
+                well_system=compiled_system,
+                workspace=workspace,
+                control_spec=control_spec,
+                get_wellbore=get_wellbore,
+                get_connection_samples=get_connection_samples,
+                get_surface_fluid_properties=get_surface_fluid_properties,
+            )
+
         group_limits = group_controls.limits
         for group_row, group_name in enumerate(group_controls.names):
             has_limits = (
