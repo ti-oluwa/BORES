@@ -387,8 +387,7 @@ def correct_well_indices_for_non_darcy(
             out_well_indices[i] = static_well_indices[i]
             continue
         out_well_indices[i] = 1.0 / (
-            1.0 / static_well_indices[i]
-            + d_factor * abs(connection_gas_rates[i]) / conductivity
+            1.0 / static_well_indices[i] + d_factor * abs(connection_gas_rates[i]) / conductivity
         )
 
 

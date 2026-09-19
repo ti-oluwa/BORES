@@ -2,9 +2,34 @@
 
 import attrs
 
+from bores.errors import StopSimulation
 from bores.schedule.base import ModelT, ScheduleContext, SerializableAction, action_type
 
-__all__ = ["NoOp", "RunSequence"]
+__all__ = ["EndRun", "NoOp", "RunSequence"]
+
+
+@action_type
+@attrs.frozen(kw_only=True, slots=True)
+class EndRun(SerializableAction[ModelT]):
+    """
+    Ends the simulation unconditionally when applied. Pair with an event
+    for a manual stop condition, the schedule-driven equivalent of
+    Eclipse's `END` keyword, separate from the automatic end-run an
+    economic limit's own `end_run` flag can already raise.
+    """
+
+    reason: str = "Schedule requested an end to the run."
+    """Carried on the `StopSimulation` this action raises."""
+
+    def __call__(self, model: ModelT, context: ScheduleContext) -> ModelT:
+        """
+        Always raises. Never returns.
+
+        :param model: The model being scheduled against. Unused.
+        :param context: The current moment's context. Unused.
+        :raises StopSimulation: Always, with `reason` as its message.
+        """
+        raise StopSimulation(self.reason)
 
 
 @action_type

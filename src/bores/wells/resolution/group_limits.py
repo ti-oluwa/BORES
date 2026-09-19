@@ -152,7 +152,9 @@ def reallocate_and_reresolve(
             well_system.controls.control_modes[well_row] = grup_mode_tag
 
     reallocated = allocate_group_targets(group_name, well_system, workspace)
-    reresolved = [name for name in reallocated if well_system.well_row(name=name) in open_member_set]
+    reresolved = [
+        name for name in reallocated if well_system.well_row(name=name) in open_member_set
+    ]
     for name in reresolved:
         well_row = well_system.well_row(name=name)
         resolve_well_control(
@@ -276,7 +278,9 @@ def enforce_group_economic_limits(
     for _ in range(control_spec.max_fixed_point_iterations):
         phase_rates = aggregate_member_rates(workspace=workspace, open_member_wells=open_members)
         violated_row = check_economic_violation(
-            limits=group_limits, limits_start=limits_start, limits_end=limits_end,
+            limits=group_limits,
+            limits_start=limits_start,
+            limits_end=limits_end,
             phase_rates=phase_rates,
         )
         if violated_row == UNSET_INT:
@@ -354,7 +358,9 @@ def enforce_group_economic_limits(
     phase_rates = aggregate_member_rates(workspace=workspace, open_member_wells=open_members)
     still_violated = (
         check_economic_violation(
-            limits=group_limits, limits_start=limits_start, limits_end=limits_end,
+            limits=group_limits,
+            limits_start=limits_start,
+            limits_end=limits_end,
             phase_rates=phase_rates,
         )
         != UNSET_INT
@@ -365,4 +371,3 @@ def enforce_group_economic_limits(
         rate_cutback_applied=rate_cutback_applied,
         reallocated_wells=tuple(reallocated_wells),
     )
-
