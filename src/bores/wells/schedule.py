@@ -10,7 +10,16 @@ from bores.errors import ValidationError
 from bores.grids.base import Grid
 from bores.schedule.base import ScheduleContext, SerializableAction, action_type
 from bores.schedule.events import ThresholdEvent, event_type
-from bores.types import Boolean, FluidPhase, IntArray, Integer, Number, OneDimension
+from bores.types import (
+    Boolean,
+    FluidPhase,
+    IntArray,
+    Integer,
+    Number,
+    NumberArray,
+    NumberOrArray,
+    OneDimension,
+)
 from bores.wells.base import CompletionStatus, WellStatus
 from bores.wells.compile import (
     CompiledGroupLimits,
@@ -41,26 +50,27 @@ __all__ = [
     "RATE_ARRAYS",
     "TARGET_SETTERS",
     "ActivateCompletion",
+    "ActivateCompletions",
     "ActivateWell",
-    "BulkActivateCompletion",
-    "BulkActivateWell",
-    "BulkApplyMode",
-    "BulkMultiplyConnectionFactor",
-    "BulkOpenWell",
-    "BulkSetLimit",
-    "BulkSetWellControl",
-    "BulkSetWellTarget",
+    "ActivateWells",
+    "ApplicationMode",
     "MultiplyConnectionFactor",
+    "MultiplyConnectionFactors",
     "OpenWell",
+    "OpenWells",
     "RateThreshold",
     "SetGroupLimit",
     "SetLimit",
+    "SetLimits",
     "SetWellControl",
+    "SetWellControls",
     "SetWellTarget",
+    "SetWellTargets",
+    "as_number_or_array",
     "broadcast_or_match",
-    "expand_per_well",
+    "expand_values",
+    "get_many_matching_connection_rows",
     "get_matching_connection_rows",
-    "get_matching_connection_rows_bulk",
     "resolve_group",
     "resolve_well",
     "resolve_wells",
@@ -71,7 +81,7 @@ def resolve_well(
     *, model: "CompiledBlackOilModel", well_name: str
 ) -> tuple[Integer, CompiledWellSystem]:
     """
-    Finds a well's row and its compiled well system within a model.
+    Finds and returns a well's row and its compiled well system within a model.
 
     :param model: The model to look `well_name` up in.
     :param well_name: The well to find.
@@ -106,9 +116,9 @@ def resolve_group(
 
 def resolve_wells(
     *, model: "CompiledBlackOilModel", well_names: typing.Sequence[str]
-) -> tuple[list[Integer], CompiledWellSystem]:
+) -> tuple[IntArray[OneDimension], CompiledWellSystem]:
     """
-    Finds several wells' rows and the shared compiled well system within a model.
+    Finds and returns several wells' rows and the shared compiled well system within a model.
 
     :param model: The model to look `well_names` up in.
     :param well_names: The wells to find.
@@ -117,11 +127,17 @@ def resolve_wells(
     """
     if model.wells is None:
         raise ValidationError(f"{model!r} has no compiled wells.")
-    well_rows = model.wells.well_row(name=well_names)
-    return typing.cast(list[Integer], well_rows), model.wells
+    well_rows = np.asarray(model.wells.well_row(name=well_names), dtype=np.intp)
+    return well_rows, model.wells  # type: ignore[return-value]
 
 
-def broadcast_or_match(value: object, *, count: Integer, field_name: str) -> object:
+BulkValue = typing.TypeVar("BulkValue")
+"""One bulk action field's own value type, e.g. `CompletionStatus` or `Number`."""
+
+
+def broadcast_or_match(
+    value: BulkValue | tuple[BulkValue, ...], *, count: Integer, field_name: str
+) -> BulkValue | tuple[BulkValue, ...]:
     """
     Accepts a bulk action field: a single value to broadcast to every
     target, or a sequence already aligned one-to-one with the targets.
@@ -142,55 +158,39 @@ def broadcast_or_match(value: object, *, count: Integer, field_name: str) -> obj
     return value
 
 
-def get_matching_connection_rows_bulk(
-    *,
-    perforations: CompiledPerforations,
-    well_rows: typing.Sequence[Integer],
-    i: Integer,
-    j: Integer,
-    k1: Integer,
-    k2: Integer,
-    grid: Grid | None,
-) -> tuple[IntArray[OneDimension], list[int]]:
+def as_number_or_array(value: Number | typing.Sequence[Number]) -> NumberOrArray[OneDimension]:
     """
-    Resolves matching connection rows across several wells at once.
+    Normalizes a scalar or per-target numeric value into the array-like
+    form expected by bulk numeric setters.
 
-    :param perforations: `CompiledPerforations` for the whole system.
-    :param well_rows: Every well's own row.
-    :param i: 1-based deck index, or `0` for whole-well.
-    :param j: 1-based deck index, or `0`.
-    :param k1: 1-based deck index, or `0`.
-    :param k2: 1-based deck index, or `0`.
-    :param grid: Required only when `(i, j, k1, k2)` targets specific connections.
-    :returns: Every well's matching rows, concatenated in `well_rows`'
-        order, and, in the same order, how many rows each well
-        contributed (to later align a per-well value with the
-        concatenated rows via `expand_per_well`).
+    :param value: A single numeric value, or a sequence of numeric values
+        that has already been validated against the target count.
+    :returns: The original scalar if one was provided; otherwise, the
+        values converted to a NumPy array.
     """
-    rows_per_well = [
-        get_matching_connection_rows(
-            perforations=perforations, well_row=well_row, i=i, j=j, k1=k1, k2=k2, grid=grid
-        )
-        for well_row in well_rows
-    ]
-    counts = [len(rows) for rows in rows_per_well]
-    if not rows_per_well:
-        return np.empty(0, dtype=np.intp), counts
-    return np.concatenate(rows_per_well), counts
+    if isinstance(value, (list, tuple)):
+        return np.asarray(value)  # type: ignore[return-value]
+    return typing.cast(NumberOrArray[OneDimension], value)
 
 
-def expand_per_well(value: typing.Sequence, *, counts: typing.Sequence[int]) -> list:
+def expand_values(
+    values: typing.Sequence[BulkValue] | NumberArray[OneDimension], *, counts: typing.Sequence[int]
+) -> list[BulkValue]:
     """
-    Repeats each well's own value to match how many connection rows that
-    well contributed, aligning it with a concatenated connection-row array.
+    Repeats each input value according to a matching count so the
+    resulting list lines up with a concatenated target array.
 
-    :param value: One value per well.
-    :param counts: How many connection rows each well contributed, same order as `value`.
-    :returns: `value[i]` repeated `counts[i]` times, for every well, concatenated.
+    :param values: One value per item in the original grouping, such as
+        a `tuple`/`list` returned by a broadcast-or-match helper or a
+        direct `np.ndarray` supplied by a caller.
+    :param counts: How many times each corresponding value should be
+        repeated, in the same order as `values`.
+    :returns: A flat list where each `values[i]` is repeated
+        `counts[i]` times and concatenated in order.
     """
-    expanded: list = []
-    for one_value, count in zip(value, counts, strict=True):
-        expanded.extend([one_value] * count)
+    expanded: list[BulkValue] = []
+    for value, count in zip(values, counts, strict=True):
+        expanded.extend([typing.cast(BulkValue, value)] * count)
     return expanded
 
 
@@ -202,7 +202,7 @@ def get_matching_connection_rows(
     j: Integer,
     k1: Integer,
     k2: Integer,
-    grid: Grid | None,
+    grid: Grid | None = None,
 ) -> IntArray[OneDimension]:
     """
     Resolves which of a well's connection rows a deck targeting tuple selects.
@@ -231,6 +231,43 @@ def get_matching_connection_rows(
     cell_indices = perforations.get_cell_index(row=np.arange(all_rows.start, all_rows.stop))
     mask = np.isin(cell_indices, list(target_cells))  # type: ignore[arg-type]
     return typing.cast(IntArray[OneDimension], np.arange(all_rows.start, all_rows.stop)[mask])
+
+
+def get_many_matching_connection_rows(
+    *,
+    perforations: CompiledPerforations,
+    well_rows: IntArray[OneDimension],
+    i: Integer,
+    j: Integer,
+    k1: Integer,
+    k2: Integer,
+    grid: Grid | None,
+) -> tuple[IntArray[OneDimension], list[int]]:
+    """
+    Resolves matching connection rows across several wells at once.
+
+    :param perforations: `CompiledPerforations` for the whole system.
+    :param well_rows: Every well's own row.
+    :param i: 1-based deck index, or `0` for whole-well.
+    :param j: 1-based deck index, or `0`.
+    :param k1: 1-based deck index, or `0`.
+    :param k2: 1-based deck index, or `0`.
+    :param grid: Required only when `(i, j, k1, k2)` targets specific connections.
+    :returns: Every well's matching rows, concatenated in `well_rows`'
+        order, and, in the same order, how many rows each well
+        contributed (to later align a per-well value with the
+        concatenated rows via `expand_values`).
+    """
+    rows_per_well = [
+        get_matching_connection_rows(
+            perforations=perforations, well_row=well_row, i=i, j=j, k1=k1, k2=k2, grid=grid
+        )
+        for well_row in well_rows
+    ]
+    counts = [len(rows) for rows in rows_per_well]
+    if not rows_per_well:
+        return np.empty(0, dtype=np.intp), counts  # type: ignore[return-value]
+    return np.concatenate(rows_per_well), counts  # type: ignore[return-value]
 
 
 @action_type
@@ -621,29 +658,25 @@ class SetLimit(SerializableAction["CompiledBlackOilModel"]):
         return model
 
 
-# Bulk actions: the same operations as above, across several wells (and,
-# for BulkSetLimit, several limits) in one bulk write instead of one
-# action per well. Each resolves every well's row once via `resolve_wells`
-# and reuses the same `Compiled*` bulk setters the single-well actions
-# call, which already accept either one value (broadcast) or a sequence
-# matching the target rows (one-to-one).
-
-
-class BulkApplyMode(enum.Enum):
-    """How `BulkSetLimit`'s well-targeting field pairs with its limit-targeting field(s)."""
+class ApplicationMode(enum.Enum):
+    """How `SetLimits`'s well-targeting field pairs with its limit-targeting field(s)."""
 
     ONE_TO_ONE = "one_to_one"
-    """Each index across `well_names` and `kinds`/`quantities` names one
-    distinct target; all three must be the same length."""
+    """
+    Each index across `well_names` and `kinds`/`quantities` names one
+    distinct target; all three must be the same length.
+    """
 
     ALL = "all"
-    """Every entry in `kinds`/`quantities` applies to every well in
-    `well_names`, a full cross product."""
+    """
+    Every entry in `kinds`/`quantities` applies to every well in
+    `well_names`, a full cross product.
+    """
 
 
 @action_type
 @attrs.frozen(kw_only=True, slots=True)
-class BulkActivateWell(SerializableAction["CompiledBlackOilModel"]):
+class ActivateWells(SerializableAction["CompiledBlackOilModel"]):
     """`ActivateWell`, applied to several wells at once."""
 
     __type__: typing.ClassVar[str] = "bulk_activate_well"
@@ -670,9 +703,11 @@ class BulkActivateWell(SerializableAction["CompiledBlackOilModel"]):
 
 @action_type
 @attrs.frozen(kw_only=True, slots=True)
-class BulkOpenWell(SerializableAction["CompiledBlackOilModel"]):
-    """`OpenWell`, applied to several wells at once, all against the same
-    targeted connection(s)."""
+class OpenWells(SerializableAction["CompiledBlackOilModel"]):
+    """
+    `OpenWell`, applied to several wells at once, all against the same
+    targeted connection(s).
+    """
 
     __type__: typing.ClassVar[str] = "bulk_open_well"
 
@@ -682,8 +717,10 @@ class BulkOpenWell(SerializableAction["CompiledBlackOilModel"]):
     """The wells to act on."""
 
     status: CompletionStatus | tuple[CompletionStatus, ...]
-    """The new open/shut status. A single value applies to every well; a
-    sequence matching `well_names` sets each well to its own status."""
+    """
+    The new open/shut status. A single value applies to every well; 
+    a sequence matching `well_names` sets each well to its own status.
+    """
 
     i: Integer = 0
     """1-based deck index, or `0` for whole-well."""
@@ -711,7 +748,7 @@ class BulkOpenWell(SerializableAction["CompiledBlackOilModel"]):
         well_rows, wells = resolve_wells(model=model, well_names=self.well_names)
         status = broadcast_or_match(self.status, count=len(self.well_names), field_name="status")
         grid = model.reservoir.grid if (self.i or self.j or self.k1 or self.k2) else None
-        rows, counts = get_matching_connection_rows_bulk(
+        rows, counts = get_many_matching_connection_rows(
             perforations=wells.perforations,
             well_rows=well_rows,
             i=self.i,
@@ -721,16 +758,18 @@ class BulkOpenWell(SerializableAction["CompiledBlackOilModel"]):
             grid=grid,
         )
         if isinstance(status, (list, tuple, np.ndarray)):
-            status = expand_per_well(status, counts=counts)
+            status = expand_values(status, counts=counts)
         wells.perforations.set_completion_status(row=rows, status=status)
         return model
 
 
 @action_type
 @attrs.frozen(kw_only=True, slots=True)
-class BulkMultiplyConnectionFactor(SerializableAction["CompiledBlackOilModel"]):
-    """`MultiplyConnectionFactor`, applied to several wells at once, all
-    against the same targeted connection(s)."""
+class MultiplyConnectionFactors(SerializableAction["CompiledBlackOilModel"]):
+    """
+    `MultiplyConnectionFactor`, applied to several wells at once, all
+    against the same targeted connection(s).
+    """
 
     __type__: typing.ClassVar[str] = "bulk_multiply_connection_factor"
 
@@ -740,8 +779,10 @@ class BulkMultiplyConnectionFactor(SerializableAction["CompiledBlackOilModel"]):
     """The wells to act on."""
 
     multiplier: float | tuple[float, ...]
-    """The multiplier to apply. A single value applies to every well; a
-    sequence matching `well_names` gives each well its own multiplier."""
+    """
+    The multiplier to apply. A single value applies to every well; 
+    a sequence matching `well_names` gives each well its own multiplier.
+    """
 
     i: Integer = 0
     """1-based deck index, or `0` for whole-well."""
@@ -771,7 +812,7 @@ class BulkMultiplyConnectionFactor(SerializableAction["CompiledBlackOilModel"]):
             self.multiplier, count=len(self.well_names), field_name="multiplier"
         )
         grid = model.reservoir.grid if (self.i or self.j or self.k1 or self.k2) else None
-        rows, counts = get_matching_connection_rows_bulk(
+        rows, counts = get_many_matching_connection_rows(
             perforations=wells.perforations,
             well_rows=well_rows,
             i=self.i,
@@ -781,16 +822,18 @@ class BulkMultiplyConnectionFactor(SerializableAction["CompiledBlackOilModel"]):
             grid=grid,
         )
         if isinstance(multiplier, (list, tuple, np.ndarray)):
-            multiplier = expand_per_well(multiplier, counts=counts)
-        wells.perforations.multiply_well_index(row=rows, factor=multiplier)
+            multiplier = expand_values(multiplier, counts=counts)
+        wells.perforations.multiply_well_index(row=rows, factor=as_number_or_array(multiplier))
         return model
 
 
 @action_type
 @attrs.frozen(kw_only=True, slots=True)
-class BulkActivateCompletion(SerializableAction["CompiledBlackOilModel"]):
-    """`ActivateCompletion`, applied to several wells at once, all
-    against the same targeted connection(s)."""
+class ActivateCompletions(SerializableAction["CompiledBlackOilModel"]):
+    """
+    `ActivateCompletion`, applied to several wells at once, all
+    against the same targeted connection(s).
+    """
 
     __type__: typing.ClassVar[str] = "bulk_activate_completion"
 
@@ -824,7 +867,7 @@ class BulkActivateCompletion(SerializableAction["CompiledBlackOilModel"]):
         """
         well_rows, wells = resolve_wells(model=model, well_names=self.well_names)
         grid = model.reservoir.grid if (self.i or self.j or self.k1 or self.k2) else None
-        rows, _ = get_matching_connection_rows_bulk(
+        rows, _ = get_many_matching_connection_rows(
             perforations=wells.perforations,
             well_rows=well_rows,
             i=self.i,
@@ -839,7 +882,7 @@ class BulkActivateCompletion(SerializableAction["CompiledBlackOilModel"]):
 
 @action_type
 @attrs.frozen(kw_only=True, slots=True)
-class BulkSetWellControl(SerializableAction["CompiledBlackOilModel"]):
+class SetWellControls(SerializableAction["CompiledBlackOilModel"]):
     """`SetWellControl`, applied to several wells at once."""
 
     __type__: typing.ClassVar[str] = "bulk_set_well_control"
@@ -854,9 +897,11 @@ class BulkSetWellControl(SerializableAction["CompiledBlackOilModel"]):
         | InjectorControlMode
         | tuple[ProducerControlMode | InjectorControlMode, ...]
     )
-    """The new control mode. Must match each well's own kind. A single
+    """
+    The new control mode. Must match each well's own kind. A single
     value applies to every well; a sequence matching `well_names` gives
-    each well its own mode."""
+    each well its own mode.
+    """
 
     target_rate: Number | tuple[Number, ...] | None = None
     """The new target rate(s), if given."""
@@ -895,17 +940,23 @@ class BulkSetWellControl(SerializableAction["CompiledBlackOilModel"]):
         if self.target_rate is not None:
             controls.set_target_rate(
                 well_row=well_rows,
-                value=broadcast_or_match(self.target_rate, count=n, field_name="target_rate"),
+                value=as_number_or_array(
+                    broadcast_or_match(self.target_rate, count=n, field_name="target_rate")
+                ),
             )
         if self.target_bhp is not None:
             controls.set_target_bhp(
                 well_row=well_rows,
-                value=broadcast_or_match(self.target_bhp, count=n, field_name="target_bhp"),
+                value=as_number_or_array(
+                    broadcast_or_match(self.target_bhp, count=n, field_name="target_bhp")
+                ),
             )
         if self.target_thp is not None:
             controls.set_target_thp(
                 well_row=well_rows,
-                value=broadcast_or_match(self.target_thp, count=n, field_name="target_thp"),
+                value=as_number_or_array(
+                    broadcast_or_match(self.target_thp, count=n, field_name="target_thp")
+                ),
             )
         if self.injected_phase is not None:
             controls.set_injected_phase(
@@ -917,21 +968,25 @@ class BulkSetWellControl(SerializableAction["CompiledBlackOilModel"]):
         if self.efficiency_factor is not None:
             controls.set_efficiency_factor(
                 well_row=well_rows,
-                value=broadcast_or_match(
-                    self.efficiency_factor, count=n, field_name="efficiency_factor"
+                value=as_number_or_array(
+                    broadcast_or_match(
+                        self.efficiency_factor, count=n, field_name="efficiency_factor"
+                    )
                 ),
             )
         if self.guide_rate is not None:
             controls.set_guide_rate(
                 well_row=well_rows,
-                value=broadcast_or_match(self.guide_rate, count=n, field_name="guide_rate"),
+                value=as_number_or_array(
+                    broadcast_or_match(self.guide_rate, count=n, field_name="guide_rate")
+                ),
             )
         return model
 
 
 @action_type
 @attrs.frozen(kw_only=True, slots=True)
-class BulkSetWellTarget(SerializableAction["CompiledBlackOilModel"]):
+class SetWellTargets(SerializableAction["CompiledBlackOilModel"]):
     """
     `SetWellTarget`, applied to several wells at once. Each well's own
     kind (producer or injector) still picks which deck vocabulary
@@ -1017,7 +1072,9 @@ class BulkSetWellTarget(SerializableAction["CompiledBlackOilModel"]):
         return model
 
 
-def as_list(value: object, *, count: Integer, field_name: str) -> list:
+def as_list(
+    value: BulkValue | tuple[BulkValue, ...], *, count: Integer, field_name: str
+) -> list[BulkValue]:
     """
     Turns a bulk field into an explicit per-target list.
 
@@ -1041,7 +1098,7 @@ def find_limit_rows(
     *,
     limits: CompiledLimits,
     well_names: typing.Sequence[str],
-    well_rows: typing.Sequence[Integer],
+    well_rows: IntArray[OneDimension],
     kinds: typing.Sequence[LimitKind],
     quantities: typing.Sequence[RateQuantity | EconomicQuantity | None],
     action_name: str,
@@ -1076,7 +1133,7 @@ def find_limit_rows(
             "Adding one mid-schedule needs `CompiledLimits`' CSR table to grow, which is not "
             "supported."
         )
-    return np.asarray(rows, dtype=np.intp)
+    return np.asarray(rows, dtype=np.intp)  # type: ignore[return-value]
 
 
 def apply_limit_values(
@@ -1084,16 +1141,17 @@ def apply_limit_values(
     limits: CompiledLimits,
     rows: IntArray[OneDimension],
     count: Integer,
-    min_values: object,
-    max_values: object,
-    workover_actions: object,
-    end_runs: object,
+    min_values: Number | tuple[Number, ...] | None,
+    max_values: Number | tuple[Number, ...] | None,
+    workover_actions: WorkoverAction | tuple[WorkoverAction, ...] | None,
+    end_runs: Boolean | tuple[Boolean, ...] | None,
 ) -> None:
     """
     Overwrites every value field given, in place, on `rows`.
 
-    Every field given is validated before any of them are written, so a
-    bad field length never leaves `rows` partially patched.
+    Every field given is validated (via `broadcast_or_match`) before any
+    of them are written, so a bad field length never leaves `rows`
+    partially patched.
 
     :param limits: The compiled limits table to patch.
     :param rows: The limit rows to write to.
@@ -1104,35 +1162,40 @@ def apply_limit_values(
     :param workover_actions: The new workover action(s), if given.
     :param end_runs: The new end-run flag(s), if given.
     """
-    resolved: dict[str, object] = {}
-    if min_values is not None:
-        resolved["min_value"] = broadcast_or_match(
-            min_values, count=count, field_name="min_values"
-        )
-    if max_values is not None:
-        resolved["max_value"] = broadcast_or_match(
-            max_values, count=count, field_name="max_values"
-        )
-    if workover_actions is not None:
-        resolved["workover_action"] = broadcast_or_match(
-            workover_actions, count=count, field_name="workover_actions"
-        )
-    if end_runs is not None:
-        resolved["end_run"] = broadcast_or_match(end_runs, count=count, field_name="end_runs")
+    resolved_min = (
+        None
+        if min_values is None
+        else broadcast_or_match(min_values, count=count, field_name="min_values")
+    )
+    resolved_max = (
+        None
+        if max_values is None
+        else broadcast_or_match(max_values, count=count, field_name="max_values")
+    )
+    resolved_workover = (
+        None
+        if workover_actions is None
+        else broadcast_or_match(workover_actions, count=count, field_name="workover_actions")
+    )
+    resolved_end_run = (
+        None
+        if end_runs is None
+        else broadcast_or_match(end_runs, count=count, field_name="end_runs")
+    )
 
-    if "min_value" in resolved:
-        limits.set_min_value(row=rows, value=resolved["min_value"])
-    if "max_value" in resolved:
-        limits.set_max_value(row=rows, value=resolved["max_value"])
-    if "workover_action" in resolved:
-        limits.set_workover_action(row=rows, action=resolved["workover_action"])
-    if "end_run" in resolved:
-        limits.set_end_run(row=rows, end_run=resolved["end_run"])
+    if resolved_min is not None:
+        limits.set_min_value(row=rows, value=as_number_or_array(resolved_min))
+    if resolved_max is not None:
+        limits.set_max_value(row=rows, value=as_number_or_array(resolved_max))
+    if resolved_workover is not None:
+        limits.set_workover_action(row=rows, action=resolved_workover)
+    if resolved_end_run is not None:
+        limits.set_end_run(row=rows, end_run=resolved_end_run)
 
 
 @action_type
 @attrs.frozen(kw_only=True, slots=True)
-class BulkSetLimit(SerializableAction["CompiledBlackOilModel"]):
+class SetLimits(SerializableAction["CompiledBlackOilModel"]):
     """
     `SetLimit`, applied across several `(well, limit)` targets in one bulk write.
 
@@ -1181,7 +1244,7 @@ class BulkSetLimit(SerializableAction["CompiledBlackOilModel"]):
     end_runs: Boolean | tuple[Boolean, ...] | None = None
     """The new end-run flag(s), if given. Only meaningful for `kind=ECONOMIC`."""
 
-    mode: BulkApplyMode = BulkApplyMode.ONE_TO_ONE
+    mode: ApplicationMode = ApplicationMode.ONE_TO_ONE
     """How `well_names` pairs with `kinds`/`quantities`."""
 
     def __call__(
@@ -1203,14 +1266,14 @@ class BulkSetLimit(SerializableAction["CompiledBlackOilModel"]):
         """
         well_rows, wells = resolve_wells(model=model, well_names=self.well_names)
         limits = wells.controls.limits
-        if self.mode == BulkApplyMode.ONE_TO_ONE:
+        if self.mode == ApplicationMode.ONE_TO_ONE:
             self.apply_one_to_one(limits=limits, well_rows=well_rows)
         else:
             self.apply_all(limits=limits, well_rows=well_rows)
         return model
 
     def apply_one_to_one(
-        self, *, limits: CompiledLimits, well_rows: typing.Sequence[Integer]
+        self, *, limits: CompiledLimits, well_rows: IntArray[OneDimension]
     ) -> None:
         """
         Resolves and patches one `(well, kind, quantity)` target per `well_names` index.
@@ -1223,7 +1286,7 @@ class BulkSetLimit(SerializableAction["CompiledBlackOilModel"]):
         n = len(self.well_names)
         if len(self.kinds) != n:
             raise ValidationError(
-                f"{type(self).__name__} in ONE_TO_ONE mode needs exactly {n} `kinds` (one per "
+                f"{type(self).__name__} in `ONE_TO_ONE` mode needs exactly {n} `kinds` (one per "
                 f"well in `well_names`); got {len(self.kinds)}."
             )
         quantities = as_list(self.quantities, count=n, field_name="quantities")
@@ -1245,7 +1308,7 @@ class BulkSetLimit(SerializableAction["CompiledBlackOilModel"]):
             end_runs=self.end_runs,
         )
 
-    def apply_all(self, *, limits: CompiledLimits, well_rows: typing.Sequence[Integer]) -> None:
+    def apply_all(self, *, limits: CompiledLimits, well_rows: IntArray[OneDimension]) -> None:
         """
         Resolves and patches every entry in `kinds` against every well in `well_names`.
 
@@ -1310,12 +1373,7 @@ class SetGroupLimit(SerializableAction["CompiledBlackOilModel"]):
     Updates one of a group's existing `GECON` limit rows in place, the
     group-level counterpart of `SetLimit`. A `GECON` reissue.
 
-    Only an already-compiled limit row matching `quantity` can be
-    patched. `CompiledGroupLimits`' CSR table has no slack to grow a
-    brand new row for a group with no such limit at compile time, the
-    same restriction `SetLimit` already carries for a well. A single
-    `GECON` record can define several limits at once - `load_schedule`
-    emits one `SetGroupLimit` per quantity in that case, not one per record.
+    Only an already-compiled limit row matching `quantity` can be patched.
     """
 
     __type__: typing.ClassVar[str] = "set_group_limit"
@@ -1354,7 +1412,7 @@ class SetGroupLimit(SerializableAction["CompiledBlackOilModel"]):
         row = limits.find_limit_row(group_row=group_row, quantity=self.quantity)
         if row is None:
             raise ValidationError(
-                f"Group {self.group_name!r} has no ECONOMIC limit for {self.quantity!r} at "
+                f"Group {self.group_name!r} has no `ECONOMIC` limit for {self.quantity!r} at "
                 "compile time. Adding one mid-schedule needs `CompiledGroupLimits`' CSR table "
                 "to grow, which is not supported."
             )
@@ -1411,7 +1469,7 @@ class RateThreshold(ThresholdEvent["CompiledBlackOilModel"]):
         workspace = context.extra.get("workspace")
         if not isinstance(workspace, SimulationWorkspace):
             raise ValidationError(
-                f"{type(self).__name__} needs key 'workspace' in context.extra, with a `SimulationWorkspace` value, to read "
+                f"{type(self).__name__} needs key 'workspace' in `context.extra`, with a `SimulationWorkspace` value, to read "
                 f"{self.quantity!r} {self.surface!r} rate for well {self.well_name!r}, but got {workspace!r}."
             )
 
@@ -1419,7 +1477,7 @@ class RateThreshold(ThresholdEvent["CompiledBlackOilModel"]):
         array_name = RATE_ARRAYS.get((self.quantity, self.surface))
         if array_name is None:
             raise ValidationError(
-                f"{type(self).__name__} doesn't support quantity={self.quantity!r}, "
+                f"{type(self).__name__} doesn't support `quantity={self.quantity!r}`, "
                 f"surface={self.surface!r}."
             )
         return getattr(workspace.wells, array_name)[well_row]
