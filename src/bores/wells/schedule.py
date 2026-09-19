@@ -11,7 +11,13 @@ from bores.schedule.base import ScheduleContext, SerializableAction, action_type
 from bores.schedule.events import ThresholdEvent, event_type
 from bores.types import Boolean, FluidPhase, IntArray, Integer, Number, OneDimension
 from bores.wells.base import CompletionStatus, WellStatus
-from bores.wells.compile import CompiledPerforations, CompiledWellSystem, LimitKind, WellKind
+from bores.wells.compile import (
+    CompiledGroupLimits,
+    CompiledPerforations,
+    CompiledWellSystem,
+    LimitKind,
+    WellKind,
+)
 from bores.wells.controls import (
     EconomicQuantity,
     InjectorControlMode,
@@ -37,10 +43,12 @@ __all__ = [
     "MultiplyConnectionFactor",
     "OpenWell",
     "RateThreshold",
+    "SetGroupLimit",
     "SetLimit",
     "SetWellControl",
     "SetWellTarget",
     "get_matching_connection_rows",
+    "resolve_group",
     "resolve_well",
 ]
 
@@ -59,6 +67,27 @@ def resolve_well(
     if model.wells is None:
         raise ValidationError(f"{model!r} has no compiled wells.")
     return typing.cast(Integer, model.wells.well_row(name=well_name)), model.wells
+
+
+def resolve_group(
+    *, model: "CompiledBlackOilModel", group_name: str
+) -> tuple[Integer, CompiledWellSystem]:
+    """
+    Finds a group's row and its compiled well system within a model.
+
+    :param model: The model to look `group_name` up in.
+    :param group_name: The group to find.
+    :returns: `(group_row, model.wells)`.
+    :raises ValidationError: If `model.wells` is `None`, or it has no `group_controls`.
+    """
+    if model.wells is None:
+        raise ValidationError(f"{model!r} has no compiled wells.")
+    if model.wells.group_controls is None:
+        raise ValidationError(f"{model!r}'s compiled wells have no group controls.")
+    try:
+        return model.wells.group_controls.names.index(group_name), model.wells
+    except ValueError:
+        raise ValidationError(f"No group named {group_name!r} in this compiled system.") from None
 
 
 def get_matching_connection_rows(
@@ -476,6 +505,72 @@ class SetLimit(SerializableAction["CompiledBlackOilModel"]):
                 f"{f' for {self.quantity!r}' if self.quantity is not None else ''} at compile "
                 "time. Adding one mid-schedule needs `CompiledLimits`' CSR table to grow, "
                 "which is not supported."
+            )
+        if self.min_value is not None:
+            limits.set_min_value(row=row, value=self.min_value)
+        if self.max_value is not None:
+            limits.set_max_value(row=row, value=self.max_value)
+        if self.workover_action is not None:
+            limits.set_workover_action(row=row, action=self.workover_action)
+        if self.end_run is not None:
+            limits.set_end_run(row=row, end_run=self.end_run)
+        return model
+
+
+@action_type
+@attrs.frozen(kw_only=True, slots=True)
+class SetGroupLimit(SerializableAction["CompiledBlackOilModel"]):
+    """
+    Updates one of a group's existing `GECON` limit rows in place, the
+    group-level counterpart of `SetLimit`. A `GECON` reissue.
+
+    Only an already-compiled limit row matching `quantity` can be
+    patched. `CompiledGroupLimits`' CSR table has no slack to grow a
+    brand new row for a group with no such limit at compile time, the
+    same restriction `SetLimit` already carries for a well. A single
+    `GECON` record can define several limits at once - `load_schedule`
+    emits one `SetGroupLimit` per quantity in that case, not one per record.
+    """
+
+    __type__: typing.ClassVar[str] = "set_group_limit"
+
+    group_name: str
+    """The group to act on."""
+
+    quantity: EconomicQuantity
+    """Which quantity to update. A group's own limits are always `ECONOMIC`."""
+
+    min_value: Number | None = None
+    """The new floor, if given."""
+
+    max_value: Number | None = None
+    """The new ceiling, if given."""
+
+    workover_action: WorkoverAction | None = None
+    """The new workover action, if given."""
+
+    end_run: Boolean | None = None
+    """The new end-run flag, if given."""
+
+    def __call__(
+        self, model: "CompiledBlackOilModel", context: ScheduleContext
+    ) -> "CompiledBlackOilModel":
+        """
+        Overwrites every field given, in place, on the group's matching limit row.
+
+        :param model: The model to change.
+        :param context: The current moment's context. Unused.
+        :returns: `model`, with the group's limit patched.
+        :raises ValidationError: If the group has no matching limit at compile time.
+        """
+        group_row, wells = resolve_group(model=model, group_name=self.group_name)
+        limits: CompiledGroupLimits = wells.group_controls.limits  # type: ignore[union-attr]
+        row = limits.find_limit_row(group_row=group_row, quantity=self.quantity)
+        if row is None:
+            raise ValidationError(
+                f"Group {self.group_name!r} has no ECONOMIC limit for {self.quantity!r} at "
+                "compile time. Adding one mid-schedule needs `CompiledGroupLimits`' CSR table "
+                "to grow, which is not supported."
             )
         if self.min_value is not None:
             limits.set_min_value(row=row, value=self.min_value)

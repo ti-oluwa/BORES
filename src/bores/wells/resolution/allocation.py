@@ -21,11 +21,14 @@ from bores.wells.compile import (
     ProducerControlModeTag,
     WellKind,
 )
+from bores.wells.workspace import WellsWorkspace
 
 __all__ = ["allocate_group_targets"]
 
 
-def allocate_group_targets(group_name: str, well_system: CompiledWellSystem) -> tuple[str, ...]:
+def allocate_group_targets(
+    group_name: str, well_system: CompiledWellSystem, workspace: WellsWorkspace
+) -> tuple[str, ...]:
     """
     Allocate `group_name`'s current target rate across its member wells
     whose control mode is `GRUP`, by guide rate.
@@ -36,11 +39,16 @@ def allocate_group_targets(group_name: str, well_system: CompiledWellSystem) -> 
 
     Member wells were resolved once at compile time (`compile_group_controls`);
     this only re-evaluates which of them currently sit in `GRUP` mode,
-    since that's dynamic.
+    since that's dynamic. A member currently shut in (`workspace.economic_shutins`)
+    is excluded from both the weighting and the allocation, whatever its
+    own `control_mode` still says, since it isn't actually available to
+    take a share of the group's target right now.
 
     :param group_name: Group to allocate. A row in  `well_system.group_controls.names`.
     :param well_system: Supplies `.group_controls` (target and compiled
         membership) and `.controls`/`.well_kinds` (written to in place).
+    :param workspace: This run's `WellsWorkspace`. Read only, for each
+        member's current `economic_shutins` flag.
     :returns: Names of the wells actually allocated, for the eligible
         member wells (empty if none are eligible).
     :raises ValidationError: If `well_system.group_controls` is `None`, or
@@ -85,6 +93,7 @@ def allocate_group_targets(group_name: str, well_system: CompiledWellSystem) -> 
         for i in member_indices
         if well_system.well_kinds[i] == expected_well_kind
         and controls.control_modes[i] == grup_mode_tag
+        and workspace.economic_shutins[i] == 0
     ]
     if not eligible:
         return ()

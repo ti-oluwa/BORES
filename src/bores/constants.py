@@ -1788,7 +1788,7 @@ def get_conversion_factors(
 
     - "temperature"  - multiplicative factor.
     - "temperature_offset" - additive delta (in target units) applied
-    after scaling: T_to = T_from * scale + offset.
+    *after* scaling: T_to = T_from * scale + offset.
 
     :param from_system: Source `UnitSystem`.
     :param to_system: Target `UnitSystem`.

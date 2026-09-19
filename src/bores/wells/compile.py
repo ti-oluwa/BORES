@@ -749,7 +749,7 @@ class CompiledLimits(typing.NamedTuple):
             A single `bool` for a single `row`, a list for an array.
         """
         if np.isscalar(row):
-            return bool(self.end_run_flags[row])
+            return bool(self.end_run_flags[row])  # type: ignore
         return [bool(flag) for flag in self.end_run_flags[row]]
 
     def set_end_run(
@@ -766,7 +766,7 @@ class CompiledLimits(typing.NamedTuple):
         if isinstance(end_run, bool):
             self.end_run_flags[row] = 1 if end_run else 0
         else:
-            self.end_run_flags[row] = [1 if one_end_run else 0 for one_end_run in end_run]
+            self.end_run_flags[row] = [1 if one_end_run else 0 for one_end_run in end_run]  # type: ignore
 
 
 class CompiledWellControls(typing.NamedTuple):
@@ -1018,7 +1018,7 @@ class CompiledGroupLimits(typing.NamedTuple):
     """
     Every group's own economic limits (deck `GECON`), flattened
     row-per-limit and CSR-indexed by group. A group with no `GECON`
-    limits has an empty row range. Every row is `ECONOMIC` kind. A group
+    limits has an empty row range. Every row is `ECONOMIC` kind - a group
     never carries a `BHP`/`THP`/`RATE` limit, only a well does.
     """
 
@@ -1051,6 +1051,82 @@ class CompiledGroupLimits(typing.NamedTuple):
         :returns: `range(start, end)` over this group's limit rows.
         """
         return range(self.group_offsets[group_row], self.group_offsets[group_row + 1])
+
+    def find_limit_row(
+        self, *, group_row: Integer, quantity: "EconomicQuantity"
+    ) -> Integer | None:
+        """
+        Finds a group's limit row matching `quantity`. Every row here is
+        `ECONOMIC`, so there's no `kind` to match on the way
+        `CompiledLimits.find_limit_row` does for a well.
+
+        :param group_row: The group's row.
+        :param quantity: The quantity to find the limit for.
+        :returns: The row, or `None` if this group has no limit for `quantity`.
+        """
+        quantity_tag = ECONOMIC_QUANTITY_TAG[quantity]
+        for row in self.limit_rows(group_row=group_row):
+            if self.quantities[row] == quantity_tag:
+                return row
+        return None
+
+    def set_min_value(
+        self, *, row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
+    ) -> None:
+        """
+        Overwrites one or more limit rows' floor in place.
+
+        :param row: One limit row, or an array of them.
+        :param value: The new floor. A single value applies to every row
+            in `row`; an array sets each row to its own value.
+        """
+        self.min_values[row] = value
+
+    def set_max_value(
+        self, *, row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
+    ) -> None:
+        """
+        Overwrites one or more limit rows' ceiling in place.
+
+        :param row: One limit row, or an array of them.
+        :param value: The new ceiling. A single value applies to every
+            row in `row`; an array sets each row to its own value.
+        """
+        self.max_values[row] = value
+
+    def set_workover_action(
+        self,
+        *,
+        row: IntOrArray[OneDimension],
+        action: "WorkoverAction | typing.Sequence[WorkoverAction]",
+    ) -> None:
+        """
+        Overwrites one or more limit rows' workover action in place.
+
+        :param row: One limit row, or an array of them.
+        :param action: The new workover action. A single action applies
+            to every row in `row`; a sequence sets each row to its own action.
+        """
+        if isinstance(action, WorkoverAction):
+            self.workover_actions[row] = WORKOVER_ACTION_TAG[action]
+        else:
+            self.workover_actions[row] = [WORKOVER_ACTION_TAG[one_action] for one_action in action]
+
+    def set_end_run(
+        self, *, row: IntOrArray[OneDimension], end_run: "Boolean | typing.Sequence[Boolean]"
+    ) -> None:
+        """
+        Overwrites one or more limit rows' end-run flag in place.
+
+        :param row: One limit row, or an array of them.
+        :param end_run: Whether breaching each row should stop the whole
+            run. A single `bool` applies to every row in `row`; a
+            sequence sets each row to its own flag.
+        """
+        if isinstance(end_run, bool):
+            self.end_run_flags[row] = 1 if end_run else 0
+        else:
+            self.end_run_flags[row] = [1 if one_end_run else 0 for one_end_run in end_run]
 
 
 class CompiledGroupControls(typing.NamedTuple):

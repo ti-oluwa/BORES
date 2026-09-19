@@ -52,6 +52,7 @@ from bores.wells.schedule import (
     ActivateWell,
     MultiplyConnectionFactor,
     OpenWell,
+    SetGroupLimit,
     SetLimit,
     SetWellControl,
     SetWellTarget,
@@ -1070,18 +1071,20 @@ def load_schedule(
     `apply_economic_limits`), and is skipped. A `WECON` reissue after
     `compiled_at` becomes one `SetLimit` action per quantity the record
     defines (a single record can set several at once, a max water cut
-    and a max GOR together, say).
+    and a max GOR together, say). `GECON` (a group's own economic
+    limits) works the same way, one `SetGroupLimit` action per quantity,
+    already-compiled rows only.
 
     A `WCONPROD`/`WCONINJE` reissue sets the well's control mode and
     targets. When its own `bhp`/`thp` item is given and the mode isn't
     that item, it also patches the well's implicit `BHPLimit`/`THPLimit`
     via an additional `SetLimit` action.
 
-    Every `SetLimit` action here can only patch a limit row the well
-    already had for that kind/quantity at compile time. The
-    `CompiledLimits` CSR table can't grow a new row mid-schedule.
-    `RateLimit` has no deck-record source in this codebase at all, so
-    it's never emitted here.
+    Every `SetLimit`/`SetGroupLimit` action here can only patch a limit
+    row the well/group already had for that kind/quantity at compile
+    time. Neither `CompiledLimits`' nor `CompiledGroupLimits`' CSR table
+    can grow a new row mid-schedule. `RateLimit` has no deck-record
+    source in this codebase at all, so it's never emitted here.
 
     :param deck_file: The deck to read schedule keywords from.
     :param compiled_at: The point on the schedule clock the model this
@@ -1267,6 +1270,27 @@ def load_schedule(
                     event=TimeEvent(at=schedule_time),
                     action=action,
                     name=f"wecon:{record['well']}:{limit.quantity}@{schedule_time}",
+                )
+            )
+
+    for record in deck_file.get("GECON") or empty:
+        if not is_due(record):
+            continue
+        schedule_time = record["schedule_time"]
+        for limit in load_group_economic_limits_from_record(record, unit_system=unit_system):
+            action = SetGroupLimit(
+                group_name=record["group"],
+                quantity=limit.quantity,
+                min_value=limit.min_value,
+                max_value=limit.max_value,
+                workover_action=limit.workover_action,
+                end_run=limit.end_run,
+            )
+            items.append(
+                ScheduleItem(
+                    event=TimeEvent(at=schedule_time),
+                    action=action,
+                    name=f"gecon:{record['group']}:{limit.quantity}@{schedule_time}",
                 )
             )
 

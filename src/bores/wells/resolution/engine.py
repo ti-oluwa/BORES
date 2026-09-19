@@ -102,6 +102,11 @@ def resolve_well_control(
             perforations.inclinations_from_vertical[active_open],
         ),
         connection_samples=connection_samples,
+        connection_conductivities=typing.cast(
+            NumberArray[OneDimension],
+            perforations.connection_conductivities[active_open],
+        ),
+        d_factor=compiled_system.d_factors[well_row],
     )
 
     if is_injector:
@@ -165,9 +170,9 @@ def resolve_well_control(
             )
         elif control_mode == InjectorControlModeTag.GROUP:
             raise ValidationError(
-                f"Well row {well_row} is under GRUP control - resolve group "
+                f"Well row {well_row} is under `GRUP` control. Resolve group "
                 "allocation (wells.resolution.allocation) into a concrete "
-                "rate/BHP target before calling resolve_well_control."
+                "rate/BHP target before calling `resolve_well_control`."
             )
         else:
             raise ValidationError(f"Unknown InjectorControlModeTag: {control_mode!r}.")
@@ -233,12 +238,12 @@ def resolve_well_control(
             )
         elif control_mode == ProducerControlModeTag.GROUP:
             raise ValidationError(
-                f"Well row {well_row} is under GRUP control - resolve group "
+                f"Well row {well_row} is under `GRUP` control. Resolve group "
                 "allocation (wells.resolution.allocation) into a concrete "
-                "rate/BHP target before calling resolve_well_control."
+                "rate/BHP target before calling `resolve_well_control`."
             )
         else:
-            raise ValidationError(f"Unknown ProducerControlModeTag: {control_mode!r}.")
+            raise ValidationError(f"Unknown `ProducerControlModeTag`: {control_mode!r}.")
 
     limits = controls.limits
     limits_start, limits_end = (

@@ -7,6 +7,7 @@ from bores.errors import ValidationError
 from bores.types import Integer, Number, NumberArray, OneDimension
 from bores.wells.compile import (
     UNSET_INT,
+    CompiledGroupLimits,
     CompiledLimits,
     EconomicQuantityTag,
     LimitKind,
@@ -204,7 +205,7 @@ def get_thp_bound(
 
 def check_economic_violation(
     *,
-    limits: CompiledLimits,
+    limits: CompiledLimits | CompiledGroupLimits,
     limits_start: Integer,
     limits_end: Integer,
     phase_rates: PhaseValues,

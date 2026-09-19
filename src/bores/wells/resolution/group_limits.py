@@ -2,10 +2,11 @@
 `GECON` group-level economic-limit enforcement.
 
 Checked after a group's member wells have already been resolved for the
-current timestep (and, for a `GRUP`-mode member, after
-`wells.resolution.allocation.allocate_group_targets` has given it a
-concrete target). Aggregates already-resolved member rates rather than
-resolving anything itself.
+current timestep. Every action this module takes against a group's
+target or membership is followed by reallocating (`allocate_group_targets`)
+and actually re-resolving (`resolve_well_control`) every affected member
+still open, before rechecking the group's aggregate - never leaves a
+stale rate behind for the caller to reconcile.
 """
 
 import math
@@ -19,12 +20,17 @@ from bores.wells.compile import (
     UNSET_INT,
     CompiledWellSystem,
     GroupKind,
+    InjectorControlModeTag,
+    ProducerControlModeTag,
     WellKind,
     WorkoverActionTag,
 )
+from bores.wells.hydraulics.base import SurfaceFluidProperties, WellBoreModel
+from bores.wells.resolution.allocation import allocate_group_targets
+from bores.wells.resolution.engine import resolve_well_control
 from bores.wells.resolution.limits import check_economic_violation
 from bores.wells.resolution.spec import WellControlSpec
-from bores.wells.states import PhaseValues
+from bores.wells.states import ConnectionSample, PhaseValues
 from bores.wells.workspace import WellsWorkspace
 
 __all__ = ["GroupEconomicLimitOutcome", "enforce_group_economic_limits"]
@@ -33,36 +39,24 @@ __all__ = ["GroupEconomicLimitOutcome", "enforce_group_economic_limits"]
 class GroupEconomicLimitOutcome(typing.NamedTuple):
     """Result of one `enforce_group_economic_limits` call."""
 
-    violated_row: Integer
-    """
-    The last-checked violated row in this group's `CompiledGroupLimits`,
-    or `UNSET_INT` if the group satisfies every limit (including after
-    every action this call could take).
-    """
-
-    workover_action: WorkoverActionTag | None
-    """`violated_row`'s own action, or `None` if `violated_row` is `UNSET_INT`."""
+    satisfied: bool
+    """Whether every one of this group's `GECON` limits is satisfied when this call returns."""
 
     shut_wells: tuple[str, ...]
-    """
-    Names of member wells shut this call, in the order they were shut.
-    Empty unless `workover_action` was `WELL`/`PLUG`/`CON`/`PLUS_CON`.
-    """
+    """Names of member wells shut this call, in the order they were shut."""
 
     rate_cutback_applied: bool
+    """Whether this call cut the group's own `target_rate` (`workover_action` was `RATE`)."""
+
+    reallocated_wells: tuple[str, ...]
     """
-    Whether this call cut the group's own `target_rate`
-    (`workover_action` was `RATE`). The caller still needs to
-    re-run `allocate_group_targets` and re-resolve affected member wells
-    for the cutback to take effect, and call this again afterward to
-    check whether it was enough.
+    Names of `GRUP`-mode member wells whose target was recomputed and who
+    were actually re-resolved this call, following a shut-in or a rate cutback.
     """
 
 
-def _aggregate_member_rates(
-    *,
-    workspace: WellsWorkspace,
-    open_member_wells: typing.Sequence[Integer],
+def aggregate_member_rates(
+    *, workspace: WellsWorkspace, open_member_wells: typing.Sequence[Integer]
 ) -> PhaseValues:
     """
     Sums already-resolved reservoir-condition rates over `open_member_wells`.
@@ -77,11 +71,8 @@ def _aggregate_member_rates(
     return PhaseValues(oil=oil, water=water, gas=gas)
 
 
-def _shut_in_member_well(
-    *,
-    well_system: CompiledWellSystem,
-    workspace: WellsWorkspace,
-    well_row: Integer,
+def shut_in_member_well(
+    *, well_system: CompiledWellSystem, workspace: WellsWorkspace, well_row: Integer
 ) -> None:
     """
     Zeroes one member well's rates in place, well-level and per-connection,
@@ -113,32 +104,102 @@ def _shut_in_member_well(
     workspace.connection_gas_rates[row_start:row_end][resolved_mask] = 0.0
 
 
+def reallocate_and_reresolve(
+    *,
+    group_name: str,
+    well_system: CompiledWellSystem,
+    workspace: WellsWorkspace,
+    control_spec: WellControlSpec,
+    open_members: typing.Sequence[Integer],
+    grup_mode_tag: Integer,
+    grup_member_rows: typing.Sequence[Integer],
+    wellbore_for: typing.Callable[[Integer], WellBoreModel],
+    connection_samples_for: typing.Callable[[Integer], typing.Sequence[ConnectionSample]],
+    surface_fluid_properties_for: typing.Callable[[Integer], SurfaceFluidProperties | None],
+) -> tuple[str, ...]:
+    """
+    Reallocates `group_name`'s current target across `grup_member_rows`
+    and actually re-resolves every one still open, in place, so the
+    group's aggregate reflects real, freshly resolved rates on the next
+    check, not a stale pre-reallocation value.
+
+    `allocate_group_targets` only picks up a member currently in `GRUP`
+    mode, but converts it to a concrete mode as part of allocating it -
+    so a member already reallocated by an earlier call this pass would
+    be silently skipped on a later one. Restoring `grup_member_rows`'
+    still-open rows to `grup_mode_tag` immediately before calling it
+    keeps every one of this group's own members reallocatable on every
+    pass, for as long as this function keeps calling this helper.
+
+    :param open_members: Rows currently eligible to be resolved (open,
+        matching well kind, not economically shut).
+    :param grup_mode_tag: This group's own `GRUP`-equivalent control mode
+        tag (producer or injector, matching `group_name`'s own kind).
+    :param grup_member_rows: Rows that were in `GRUP` mode when
+        `enforce_group_economic_limits` was first called for this group,
+        the members this group's own reallocation is meant to keep
+        covering across every pass this call makes.
+    :param wellbore_for: Given a well row, its hydraulics correlation.
+    :param connection_samples_for: Given a well row, its active, open
+        connections' current reservoir samples.
+    :param surface_fluid_properties_for: Given a well row, its surface
+        fluid properties, or `None` if it has no THP control/limit to check.
+    :returns: Names of the members actually re-resolved.
+    """
+    open_member_set = set(open_members)
+    for well_row in grup_member_rows:
+        if well_row in open_member_set:
+            well_system.controls.control_modes[well_row] = grup_mode_tag
+
+    reallocated = allocate_group_targets(group_name, well_system, workspace)
+    reresolved = [name for name in reallocated if well_system.well_row(name=name) in open_member_set]
+    for name in reresolved:
+        well_row = well_system.well_row(name=name)
+        resolve_well_control(
+            compiled_system=well_system,
+            well_row=well_row,
+            wellbore=wellbore_for(well_row),
+            connection_samples=connection_samples_for(well_row),
+            workspace=workspace,
+            control_spec=control_spec,
+            surface_fluid_properties=surface_fluid_properties_for(well_row),
+        )
+    return tuple(reresolved)
+
+
 def enforce_group_economic_limits(
     *,
     group_name: str,
     well_system: CompiledWellSystem,
     workspace: WellsWorkspace,
     control_spec: WellControlSpec,
+    wellbore_for: typing.Callable[[Integer], WellBoreModel],
+    connection_samples_for: typing.Callable[[Integer], typing.Sequence[ConnectionSample]],
+    surface_fluid_properties_for: typing.Callable[[Integer], SurfaceFluidProperties | None]
+    | None = None,
 ) -> GroupEconomicLimitOutcome:
     """
     Checks `group_name`'s own `GECON` limits against its member wells'
-    already-resolved rates, and acts on the first one violated.
+    resolved rates, and drives it to a satisfied state.
 
     For `WELL`/`PLUG`/`CON`/`PLUS_CON`, shuts in the eligible open member
-    well with the lowest guide rate (the same weighting
-    `allocate_group_targets` already uses for allocation, applied here in
-    reverse, as a triage order), rechecking the group's aggregate after
-    each shut-in, until the limit is satisfied or no eligible member well
-    remains open. `CON`/`PLUS_CON` are treated the same as `WELL`/`PLUG`
-    here (the whole well is shut), since per-connection shut-in isn't
-    enforced at the well level yet either.
+    with the lowest guide rate (the same weighting `allocate_group_targets`
+    already uses for allocation, applied here in reverse, as a triage
+    order). `CON`/`PLUS_CON` are treated the same as `WELL`/`PLUG` here
+    (the whole well is shut), since per-connection shut-in isn't enforced
+    at the well level yet either.
 
     For `RATE` (`GECON`-only), cuts the group's own `target_rate` by
-    `control_spec.group_rate_cutback_factor` and stops, rather than
-    shutting any member well - satisfying a rate cutback needs the
-    group's targets reallocated and the affected members re-resolved,
-    both outside this function's own scope. Call `allocate_group_targets`
-    and re-resolve, then call this again to check whether it was enough.
+    `control_spec.group_rate_cutback_factor`.
+
+    After every shut-in or rate cutback, reallocates the group's target
+    across its remaining `GRUP`-mode members and re-resolves each one
+    actually affected, before rechecking - a shut-in or cutback is never
+    left half-applied. Repeats (shut another well, or cut again) until
+    the group's limits are satisfied, no further eligible member well
+    remains open, or `control_spec.max_fixed_point_iterations` outer
+    passes are reached (best-effort, mirroring the well-level fixed-point
+    solve's own iteration cap).
 
     For `NONE` (`GECON`'s own default), the limit is left violated and
     nothing is changed - tracked, not enforced.
@@ -146,15 +207,22 @@ def enforce_group_economic_limits(
     :param group_name: Group to check. A row in `well_system.group_controls.names`.
     :param well_system: Supplies `.group_controls` (limits and
         membership) and `.controls`/`.well_kinds` (guide rates, read only).
-    :param workspace: This run's `WellsWorkspace`, updated in place for
-        any well actually shut in.
-    :param control_spec: Supplies `group_rate_cutback_factor`.
-    :returns: `GroupEconomicLimitOutcome` describing what, if anything, was done.
+    :param workspace: This run's `WellsWorkspace`, updated in place.
+    :param control_spec: Supplies `group_rate_cutback_factor` and `max_fixed_point_iterations`.
+    :param wellbore_for: Given a well row, its hydraulics correlation.
+        Only called for a member actually being re-resolved.
+    :param connection_samples_for: Given a well row, its active, open
+        connections' current reservoir samples. Only called for a member
+        actually being re-resolved.
+    :param surface_fluid_properties_for: Given a well row, its surface
+        fluid properties, or `None` if it has no THP control/limit to
+        check. Omit if no affected member ever needs this.
+    :returns: `GroupEconomicLimitOutcome` describing what was done.
     :raises ValidationError: If `well_system.group_controls` is `None`, or
         `group_name` isn't one of its rows.
     :raises StopSimulation: If a violated row's `end_run` breaches with no
-        further eligible member well to shut (`WELL`/`PLUG`/`CON`/`PLUS_CON`),
-        immediately after shutting one, or immediately for `RATE`/`NONE`.
+        further eligible member well to shut, immediately after shutting
+        one, or immediately for `RATE`/`NONE`.
     """
     group_controls = well_system.group_controls
     if group_controls is None:
@@ -170,8 +238,10 @@ def enforce_group_economic_limits(
     limits_end = group_limits.group_offsets[group_row + 1]
     if limits_start == limits_end:
         return GroupEconomicLimitOutcome(
-            violated_row=UNSET_INT, workover_action=None, shut_wells=(), rate_cutback_applied=False
+            satisfied=True, shut_wells=(), rate_cutback_applied=False, reallocated_wells=()
         )
+
+    resolved_surface_fluid_properties_for = surface_fluid_properties_for or (lambda well_row: None)
 
     member_start = group_controls.member_offsets[group_row]
     member_end = group_controls.member_offsets[group_row + 1]
@@ -192,30 +262,41 @@ def enforce_group_economic_limits(
         and not math.isnan(workspace.bhps[i])
     ]
 
+    grup_mode_tag = (
+        InjectorControlModeTag.GROUP
+        if expected_well_kind == WellKind.INJECTOR
+        else ProducerControlModeTag.GROUP
+    )
+    grup_member_rows = tuple(i for i in open_members if controls.control_modes[i] == grup_mode_tag)
+
     shut_wells: list[str] = []
-    violated_row = UNSET_INT
-    action: WorkoverActionTag | None = None
+    reallocated_wells: list[str] = []
     rate_cutback_applied = False
 
-    while True:
-        phase_rates = _aggregate_member_rates(
-            workspace=workspace, open_member_wells=open_members
-        )
+    for _ in range(control_spec.max_fixed_point_iterations):
+        phase_rates = aggregate_member_rates(workspace=workspace, open_member_wells=open_members)
         violated_row = check_economic_violation(
-            limits=group_limits,
-            limits_start=limits_start,
-            limits_end=limits_end,
+            limits=group_limits, limits_start=limits_start, limits_end=limits_end,
             phase_rates=phase_rates,
         )
         if violated_row == UNSET_INT:
-            action = None
-            break
+            return GroupEconomicLimitOutcome(
+                satisfied=True,
+                shut_wells=tuple(shut_wells),
+                rate_cutback_applied=rate_cutback_applied,
+                reallocated_wells=tuple(reallocated_wells),
+            )
 
         action = WorkoverActionTag(group_limits.workover_actions[violated_row])
         end_run = bool(group_limits.end_run_flags[violated_row])
 
         if action == WorkoverActionTag.NONE:
-            break
+            return GroupEconomicLimitOutcome(
+                satisfied=False,
+                shut_wells=tuple(shut_wells),
+                rate_cutback_applied=rate_cutback_applied,
+                reallocated_wells=tuple(reallocated_wells),
+            )
 
         if action == WorkoverActionTag.RATE:
             if end_run:
@@ -225,36 +306,63 @@ def enforce_group_economic_limits(
                 )
             group_controls.target_rates[group_row] *= control_spec.group_rate_cutback_factor
             rate_cutback_applied = True
-            break
+        else:
+            # WELL / PLUG / CON / PLUS_CON: shut the eligible open member
+            # with the lowest guide rate (NaN treated as the default
+            # weight of 1.0, matching allocate_group_targets' own convention).
+            if not open_members:
+                if end_run:
+                    raise StopSimulation(
+                        f"Group {group_name!r} breached a GECON limit flagged to "
+                        "end the run, with no eligible member well left to shut."
+                    )
+                return GroupEconomicLimitOutcome(
+                    satisfied=False,
+                    shut_wells=tuple(shut_wells),
+                    rate_cutback_applied=rate_cutback_applied,
+                    reallocated_wells=tuple(reallocated_wells),
+                )
 
-        # WELL / PLUG / CON / PLUS_CON: shut the eligible open member with
-        # the lowest guide rate (NaN treated as the default weight of 1.0,
-        # matching allocate_group_targets' own convention).
-        if not open_members:
+            guide_rates = controls.guide_rates[open_members]
+            weights = np.where(np.isnan(guide_rates), 1.0, guide_rates)
+            candidate = open_members[int(np.argmin(weights))]
+
+            shut_in_member_well(well_system=well_system, workspace=workspace, well_row=candidate)
+            shut_wells.append(well_system.names[candidate])
+            open_members = [i for i in open_members if i != candidate]
+
             if end_run:
                 raise StopSimulation(
-                    f"Group {group_name!r} breached a GECON limit flagged to "
-                    "end the run, with no eligible member well left to shut."
+                    f"Group {group_name!r} breached a GECON limit flagged to end "
+                    f"the run; shut in well {well_system.names[candidate]!r}."
                 )
-            break
 
-        guide_rates = controls.guide_rates[open_members]
-        weights = np.where(np.isnan(guide_rates), 1.0, guide_rates)
-        candidate = open_members[int(np.argmin(weights))]
+        reresolved = reallocate_and_reresolve(
+            group_name=group_name,
+            well_system=well_system,
+            workspace=workspace,
+            control_spec=control_spec,
+            open_members=open_members,
+            grup_mode_tag=grup_mode_tag,
+            grup_member_rows=grup_member_rows,
+            wellbore_for=wellbore_for,
+            connection_samples_for=connection_samples_for,
+            surface_fluid_properties_for=resolved_surface_fluid_properties_for,
+        )
+        reallocated_wells.extend(name for name in reresolved if name not in reallocated_wells)
 
-        _shut_in_member_well(well_system=well_system, workspace=workspace, well_row=candidate)
-        shut_wells.append(well_system.names[candidate])
-        open_members = [i for i in open_members if i != candidate]
-
-        if end_run:
-            raise StopSimulation(
-                f"Group {group_name!r} breached a GECON limit flagged to end "
-                f"the run; shut in well {well_system.names[candidate]!r}."
-            )
-
+    phase_rates = aggregate_member_rates(workspace=workspace, open_member_wells=open_members)
+    still_violated = (
+        check_economic_violation(
+            limits=group_limits, limits_start=limits_start, limits_end=limits_end,
+            phase_rates=phase_rates,
+        )
+        != UNSET_INT
+    )
     return GroupEconomicLimitOutcome(
-        violated_row=violated_row,
-        workover_action=action,
+        satisfied=not still_violated,
         shut_wells=tuple(shut_wells),
         rate_cutback_applied=rate_cutback_applied,
+        reallocated_wells=tuple(reallocated_wells),
     )
+

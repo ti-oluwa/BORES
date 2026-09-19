@@ -17,6 +17,7 @@ from bores.wells.workspace import (
     PerforationWorkspace,
     accumulate_phase_rates,
     build_connection_phase_rates,
+    correct_well_indices_for_non_darcy,
 )
 
 __all__ = [
@@ -187,6 +188,11 @@ def solve_connection_pressures_and_rates(
     `workspace.connection_pressures` is reused as the output buffer on
     every call rather than reallocated.
 
+    Each iteration also corrects `workspace.well_indices` for non-Darcy
+    flow from `workspace.static_well_indices` and the previous
+    iteration's gas rates, before computing this iteration's rates. A
+    well with no `d_factor` set is unaffected.
+
     :param wellbore: Hydraulics correlation for this well.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
@@ -220,6 +226,13 @@ def solve_connection_pressures_and_rates(
     relevant_gas = relevant_phases.gas > 0.0
 
     for _ in range(control_spec.max_fixed_point_iterations):
+        correct_well_indices_for_non_darcy(
+            static_well_indices=workspace.static_well_indices,
+            connection_conductivities=workspace.connection_conductivities,
+            connection_gas_rates=workspace.connection_gas_rates,
+            d_factor=workspace.d_factor,
+            out_well_indices=workspace.well_indices,
+        )
         (
             oil_rate,
             water_rate,

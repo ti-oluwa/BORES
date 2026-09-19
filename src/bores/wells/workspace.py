@@ -29,6 +29,7 @@ __all__ = [
     "build_perforation_workspace",
     "build_wells_workspace",
     "compute_perforation_drawdown",
+    "correct_well_indices_for_non_darcy",
     "load_wells_states",
 ]
 
@@ -46,7 +47,32 @@ class PerforationWorkspace(typing.NamedTuple):
     """
 
     well_indices: NumberArray[OneDimension]
-    """This well's active connections' connection factors."""
+    """
+    This well's active connections' connection factors, at the current
+    fixed-point iteration. Equal to `static_well_indices` unless a
+    non-Darcy correction is active, in which case this is overwritten in
+    place every iteration from `static_well_indices` and the previous
+    iteration's gas rate.
+    """
+
+    static_well_indices: NumberArray[OneDimension]
+    """
+    This well's active connections' connection factors, at zero rate.
+    Never mutated during resolution. The non-Darcy correction recomputes
+    `well_indices` from this array every iteration rather than
+    compounding a previous correction.
+    """
+
+    connection_conductivities: NumberArray[OneDimension]
+    """
+    This well's active connections' Peaceman numerator, isolated from
+    skin/geometry. `NaN` at a connection with an overridden well index,
+    where there's no such decomposition. Feeds the non-Darcy correction;
+    a `NaN` entry leaves that connection's well index at its static value.
+    """
+
+    d_factor: Number
+    """This well's non-Darcy flow coefficient. `NaN` disables the correction."""
 
     reservoir_pressures: NumberArray[OneDimension]
     """Matching reservoir pressure at each connection."""
@@ -102,15 +128,23 @@ def build_perforation_workspace(
     representative_depths: NumberArray[OneDimension],
     inclinations_from_vertical: NumberArray[OneDimension],
     connection_samples: typing.Sequence[ConnectionSample],
+    connection_conductivities: NumberArray[OneDimension] | None = None,
+    d_factor: Number = math.nan,
     dtype: npt.DTypeLike = None,
 ) -> PerforationWorkspace:
     """
     Builds a `PerforationWorkspace` for one well.
 
-    :param well_indices: This well's active connections' connection factors.
+    :param well_indices: This well's active connections' connection
+        factors, at zero rate. Becomes `static_well_indices`.
     :param representative_depths: Matching depths, same order as `well_indices`.
     :param inclinations_from_vertical: Matching inclinations, same order as `well_indices`.
     :param connection_samples: Matching reservoir conditions, same order as `well_indices`.
+    :param connection_conductivities: Matching Peaceman numerators, same
+        order as `well_indices`, `NaN` at an overridden connection. All
+        `NaN` (the default) if this well has no non-Darcy correction to apply.
+    :param d_factor: This well's non-Darcy flow coefficient. `NaN`
+        (the default) disables the correction.
     :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
     :returns: `PerforationWorkspace` for this well.
     """
@@ -133,10 +167,21 @@ def build_perforation_workspace(
         water_fvf[i] = sample.phase_fvfs.water
         gas_fvf[i] = sample.phase_fvfs.gas
 
+    static_well_indices = typing.cast(
+        NumberArray[OneDimension], np.asarray(well_indices, dtype=resolved_dtype)
+    )
+    resolved_connection_conductivities = (
+        np.full(n, np.nan, dtype=resolved_dtype)
+        if connection_conductivities is None
+        else np.asarray(connection_conductivities, dtype=resolved_dtype)
+    )
     return PerforationWorkspace(
-        well_indices=typing.cast(
-            NumberArray[OneDimension], np.asarray(well_indices, dtype=resolved_dtype)
+        well_indices=static_well_indices.copy(),
+        static_well_indices=static_well_indices,
+        connection_conductivities=typing.cast(
+            NumberArray[OneDimension], resolved_connection_conductivities
         ),
+        d_factor=d_factor,
         reservoir_pressures=reservoir_pressures,
         oil_mobilities=oil_mobilities,
         water_mobilities=water_mobilities,
@@ -162,7 +207,7 @@ def build_perforation_workspace(
             NumberArray[OneDimension], np.empty(n, dtype=resolved_dtype)
         ),
         connection_gas_rates=typing.cast(
-            NumberArray[OneDimension], np.empty(n, dtype=resolved_dtype)
+            NumberArray[OneDimension], np.zeros(n, dtype=resolved_dtype)
         ),
     )
 
@@ -301,6 +346,50 @@ def compute_perforation_drawdown(
     else:
         drawdown = reservoir_pressure - connection_pressure
     return max(drawdown, 0.0)
+
+
+@numba.njit(cache=True)
+def correct_well_indices_for_non_darcy(
+    static_well_indices: NumberArray[OneDimension],
+    connection_conductivities: NumberArray[OneDimension],
+    connection_gas_rates: NumberArray[OneDimension],
+    d_factor: Number,
+    out_well_indices: NumberArray[OneDimension],
+) -> None:
+    """
+    Corrects each connection's well index in place for non-Darcy
+    (rate-dependent) skin.
+
+    Recomputes from `static_well_indices` every call rather than
+    compounding a previous correction, using `connection_gas_rates` from
+    the previous fixed-point iteration (lagged, avoiding an implicit
+    solve). A connection with no conductivity decomposition (`NaN`) is
+    left at its static well index, as is every connection when `d_factor`
+    itself is `NaN`.
+
+    :param static_well_indices: Each connection's well index at zero rate.
+    :param connection_conductivities: Each connection's Peaceman
+        numerator, `NaN` at an overridden connection.
+    :param connection_gas_rates: Each connection's own reservoir-condition
+        gas rate from the previous iteration.
+    :param d_factor: This well's non-Darcy flow coefficient.
+    :param out_well_indices: Buffer to write the corrected well index
+        into, same shape as `static_well_indices`. May be
+        `static_well_indices` itself only when the caller no longer needs
+        the uncorrected value.
+    """
+    if math.isnan(d_factor):
+        out_well_indices[:] = static_well_indices
+        return
+    for i in range(static_well_indices.shape[0]):
+        conductivity = connection_conductivities[i]
+        if math.isnan(conductivity):
+            out_well_indices[i] = static_well_indices[i]
+            continue
+        out_well_indices[i] = 1.0 / (
+            1.0 / static_well_indices[i]
+            + d_factor * abs(connection_gas_rates[i]) / conductivity
+        )
 
 
 @numba.njit(cache=True)
