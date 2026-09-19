@@ -26,8 +26,8 @@ from bores.wells.compile import (
     WorkoverActionTag,
 )
 from bores.wells.hydraulics.base import SurfaceFluidProperties, WellBoreModel
-from bores.wells.resolution.allocation import allocate_group_targets
 from bores.wells.resolution.engine import resolve_well_control
+from bores.wells.resolution.groups.allocation import allocate_group_targets
 from bores.wells.resolution.limits import check_economic_violation
 from bores.wells.resolution.spec import WellControlSpec
 from bores.wells.states import ConnectionSample, PhaseValues
@@ -124,8 +124,8 @@ def reallocate_and_reresolve(
     check, not a stale pre-reallocation value.
 
     `allocate_group_targets` only picks up a member currently in `GRUP`
-    mode, but converts it to a concrete mode as part of allocating it -
-    so a member already reallocated by an earlier call this pass would
+    mode, but converts it to a concrete mode as part of allocating it.
+    So a member already reallocated by an earlier call this pass would
     be silently skipped on a later one. Restoring `grup_member_rows`'
     still-open rows to `grup_mode_tag` immediately before calling it
     keeps every one of this group's own members reallocatable on every
@@ -196,7 +196,7 @@ def enforce_group_economic_limits(
 
     After every shut-in or rate cutback, reallocates the group's target
     across its remaining `GRUP`-mode members and re-resolves each one
-    actually affected, before rechecking - a shut-in or cutback is never
+    actually affected, before rechecking so a shut-in or cutback is never
     left half-applied. Repeats (shut another well, or cut again) until
     the group's limits are satisfied, no further eligible member well
     remains open, or `control_spec.max_fixed_point_iterations` outer
@@ -204,7 +204,7 @@ def enforce_group_economic_limits(
     solve's own iteration cap).
 
     For `NONE` (`GECON`'s own default), the limit is left violated and
-    nothing is changed - tracked, not enforced.
+    nothing is changed. It is just tracked, not enforced.
 
     :param group_name: Group to check. A row in `well_system.group_controls.names`.
     :param well_system: Supplies `.group_controls` (limits and
@@ -305,19 +305,19 @@ def enforce_group_economic_limits(
         if action == WorkoverActionTag.RATE:
             if end_run:
                 raise StopSimulation(
-                    f"Group {group_name!r} breached a GECON limit flagged to "
+                    f"Group {group_name!r} breached a `GECON` limit flagged to "
                     "end the run (workover action RATE)."
                 )
             group_controls.target_rates[group_row] *= control_spec.group_rate_cutback_factor
             rate_cutback_applied = True
         else:
-            # WELL / PLUG / CON / PLUS_CON: shut the eligible open member
+            # `WELL` / `PLUG` / `CON` / `PLUS_CON`: shut the eligible open member
             # with the lowest guide rate (NaN treated as the default
-            # weight of 1.0, matching allocate_group_targets' own convention).
+            # weight of 1.0, matching `allocate_group_targets`' own convention).
             if not open_members:
                 if end_run:
                     raise StopSimulation(
-                        f"Group {group_name!r} breached a GECON limit flagged to "
+                        f"Group {group_name!r} breached a `GECON` limit flagged to "
                         "end the run, with no eligible member well left to shut."
                     )
                 return GroupEconomicLimitOutcome(
@@ -337,7 +337,7 @@ def enforce_group_economic_limits(
 
             if end_run:
                 raise StopSimulation(
-                    f"Group {group_name!r} breached a GECON limit flagged to end "
+                    f"Group {group_name!r} breached a `GECON` limit flagged to end "
                     f"the run; shut in well {well_system.names[candidate]!r}."
                 )
 

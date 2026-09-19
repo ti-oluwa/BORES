@@ -15,9 +15,9 @@ from bores.errors import ValidationError
 from bores.types import Integer
 from bores.wells.compile import CompiledWellSystem
 from bores.wells.hydraulics.base import SurfaceFluidProperties, WellBoreModel
-from bores.wells.resolution.allocation import allocate_group_targets
 from bores.wells.resolution.engine import resolve_well_control
-from bores.wells.resolution.group_limits import (
+from bores.wells.resolution.groups.allocation import allocate_group_targets
+from bores.wells.resolution.groups.limits import (
     GroupEconomicLimitOutcome,
     enforce_group_economic_limits,
 )
@@ -75,7 +75,7 @@ def resolve_wells(
                 allocate_group_targets(group_name, compiled_system, workspace)
             except ValidationError:
                 # This group's own control mode has no directly
-                # allocatable rate target - its members are controlled
+                # allocatable rate target. Its members are controlled
                 # some other way, not this group's own target.
                 continue
 

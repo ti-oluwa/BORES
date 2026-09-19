@@ -1345,7 +1345,11 @@ class CompiledWellSystem(typing.NamedTuple):
     unit_system: UnitSystem
     """Unit system used to interpret the compiled well data."""
 
-    def well_row(self, *, name: str | typing.Sequence[str]) -> Integer | list[Integer]:
+    @typing.overload
+    def well_row(self, *, name: str) -> Integer: ...  # type: ignore
+    @typing.overload
+    def well_row(self, *, name: typing.Iterable[str]) -> list[Integer]: ...
+    def well_row(self, *, name: str | typing.Iterable[str]) -> Integer | list[Integer]:
         """
         A well's row, by name.
 

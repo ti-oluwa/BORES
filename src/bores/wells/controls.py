@@ -453,7 +453,7 @@ class WellControl(Serializable):
     Weight used by group-target allocation (deck WGRUPCON item 3).
     `None` falls back to equal-weight allocation among eligible wells.
 
-    See `wells.resolution.allocation`.
+    See `wells.resolution.groups.allocation`.
     """
     unit_system: UnitSystem
 
@@ -606,10 +606,10 @@ class InjectorControl(WellControl):
     efficiency_factor: Number = 1.0
     guide_rate: Number | None = None
     """
-    Weight used by group-target allocation (deck WGRUPCON item 3).
+    Weight used by group-target allocation (deck `WGRUPCON` item 3).
     `None` falls back to equal-weight allocation among eligible wells.
 
-    See `wells.resolution.allocation`.
+    See `wells.resolution.groups.allocation`.
     """
     unit_system: UnitSystem = UnitSystem.FIELD
 

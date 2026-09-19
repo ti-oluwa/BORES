@@ -79,7 +79,7 @@ def allocate_group_targets(
 
     target_rate = group_controls.target_rates[group_index]
     if np.isnan(target_rate):
-        raise ValidationError(f"Group {group_name!r}'s control has no target_rate.")
+        raise ValidationError(f"Group {group_name!r}'s control has no `target_rate`.")
 
     member_start = group_controls.member_offsets[group_index]
     member_end = group_controls.member_offsets[group_index + 1]

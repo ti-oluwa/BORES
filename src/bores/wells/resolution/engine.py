@@ -171,7 +171,7 @@ def resolve_well_control(
         elif control_mode == InjectorControlModeTag.GROUP:
             raise ValidationError(
                 f"Well row {well_row} is under `GRUP` control. Resolve group "
-                "allocation (wells.resolution.allocation) into a concrete "
+                "allocation (wells.resolution.groups.allocation) into a concrete "
                 "rate/BHP target before calling `resolve_well_control`."
             )
         else:
@@ -239,7 +239,7 @@ def resolve_well_control(
         elif control_mode == ProducerControlModeTag.GROUP:
             raise ValidationError(
                 f"Well row {well_row} is under `GRUP` control. Resolve group "
-                "allocation (wells.resolution.allocation) into a concrete "
+                "allocation (wells.resolution.groups.allocation) into a concrete "
                 "rate/BHP target before calling `resolve_well_control`."
             )
         else:

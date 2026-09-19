@@ -23,10 +23,7 @@ from bores.simulation.spec import RunSpec
 from bores.types import CellArray, Integer
 from bores.wells.workspace import WellsWorkspace, build_wells_workspace
 
-__all__ = [
-    "SimulationWorkspace",
-    "build_simulation_workspace",
-]
+__all__ = ["SimulationWorkspace", "build_simulation_workspace"]
 
 
 class SimulationWorkspace(typing.NamedTuple):
@@ -41,8 +38,7 @@ class SimulationWorkspace(typing.NamedTuple):
 
     physics: PhysicsCache
     """
-    PVT/satfunc/mobility at the current cell state. Refreshed in place 
-    every timestep.
+    PVT/satfunc/mobility at the current cell state. Refreshed in place every timestep.
     """
 
     transmissibilities: TransmissibilityCache
