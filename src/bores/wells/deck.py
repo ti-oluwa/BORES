@@ -1026,7 +1026,7 @@ def load_group_controls(deck_file: DeckFile, current_time: float = 0.0) -> Group
     Builds group controls from a parsed deck, resolved to whatever is
     actually in effect for each group at a given point in the schedule.
 
-    :param deck_file: Parsed deck.
+    :param deck_file: Parsed deck containing `GCONPROD`, `GCONINJE`, and `GECON`.
     :param current_time: The point on the schedule clock to resolve
         controls for, in the deck's time unit. Defaults to zero, the start
         of the run.
@@ -1040,12 +1040,21 @@ def load_group_controls(deck_file: DeckFile, current_time: float = 0.0) -> Group
             "Cannot load well group controls from deck. `GCONPROD` and `GCONINJE` are both missing. "
             "At least one should be present."
         )
-    return load_group_controls_from_records(
+    controls = load_group_controls_from_records(
         gconprod_records=gconprod,
         gconinje_records=gconinje,
         unit_system=deck_file.unit_system,
         current_time=current_time,
     )
+    gecon = deck_file.get("GECON") or []
+    if gecon:
+        apply_group_economic_limits(
+            group_controls=controls,
+            gecon_records=gecon,
+            unit_system=deck_file.unit_system,
+            current_time=current_time,
+        )
+    return controls
 
 
 def load_schedule(

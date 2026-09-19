@@ -367,20 +367,34 @@ class CompiledPerforations(typing.NamedTuple):
         """
         return range(int(self.well_offsets[well_row]), int(self.well_offsets[well_row + 1]))
 
+    @typing.overload
+    def get_cell_index(self, *, row: Integer) -> Integer: ...
+    @typing.overload
+    def get_cell_index(self, *, row: IntArray[OneDimension]) -> IntArray[OneDimension]: ...
     def get_cell_index(self, *, row: IntOrArray[OneDimension]) -> IntOrArray[OneDimension]:
         """
         :param row: One connection row, or an array of them.
         :returns: The grid cell each connection resolves to. Matches `row`'s own shape.
         """
-        return self.cell_indices[row]
+        return self.cell_indices[row]  # type: ignore[index]
 
+    @typing.overload
+    def get_well_index(self, *, row: Integer) -> Number: ...
+    @typing.overload
+    def get_well_index(self, *, row: IntArray[OneDimension]) -> NumberArray[OneDimension]: ...
     def get_well_index(self, *, row: IntOrArray[OneDimension]) -> NumberOrArray[OneDimension]:
         """
         :param row: One connection row, or an array of them.
         :returns: Each connection's own connection factor (well index). Matches `row`'s own shape.
         """
-        return self.well_indices[row]
+        return self.well_indices[row]  # type: ignore[index]
 
+    @typing.overload
+    def get_connection_conductivity(self, *, row: Integer) -> Number | None: ...
+    @typing.overload
+    def get_connection_conductivity(
+        self, *, row: IntArray[OneDimension]
+    ) -> NumberArray[OneDimension]: ...
     def get_connection_conductivity(
         self, *, row: IntOrArray[OneDimension]
     ) -> Number | NumberArray[OneDimension] | None:
@@ -391,8 +405,9 @@ class CompiledPerforations(typing.NamedTuple):
             For an array, the raw array (`NaN` means unset).
         """
         if np.isscalar(row):
+            row = typing.cast(Integer, row)
             return none_if_nan(self.connection_conductivities[row])
-        return self.connection_conductivities[row]
+        return self.connection_conductivities[row]  # type: ignore[index]
 
     def set_well_index(
         self, *, row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
@@ -419,6 +434,10 @@ class CompiledPerforations(typing.NamedTuple):
         """
         self.well_indices[row] *= factor
 
+    @typing.overload
+    def get_completion_status(self, *, row: Integer) -> CompletionStatus: ...
+    @typing.overload
+    def get_completion_status(self, *, row: IntArray[OneDimension]) -> list[CompletionStatus]: ...
     def get_completion_status(
         self, *, row: IntOrArray[OneDimension]
     ) -> CompletionStatus | list[CompletionStatus]:
@@ -428,12 +447,13 @@ class CompiledPerforations(typing.NamedTuple):
             `CompletionStatus` for a single `row`, a list for an array.
         """
         if np.isscalar(row):
+            row = typing.cast(Integer, row)
             return (
                 CompletionStatus.OPEN if self.completion_statuses[row] else CompletionStatus.SHUT
             )
         return [
             CompletionStatus.OPEN if tag else CompletionStatus.SHUT
-            for tag in self.completion_statuses[row]
+            for tag in self.completion_statuses[row]  # type: ignore[index]
         ]
 
     def set_completion_status(
@@ -456,6 +476,10 @@ class CompiledPerforations(typing.NamedTuple):
                 1 if one_status == CompletionStatus.OPEN else 0 for one_status in status
             ]
 
+    @typing.overload
+    def get_schedule_status(self, *, row: Integer) -> WellStatus: ...
+    @typing.overload
+    def get_schedule_status(self, *, row: IntArray[OneDimension]) -> list[WellStatus]: ...
     def get_schedule_status(
         self, *, row: IntOrArray[OneDimension]
     ) -> WellStatus | list[WellStatus]:
@@ -465,9 +489,11 @@ class CompiledPerforations(typing.NamedTuple):
             `WellStatus` for a single `row`, a list for an array.
         """
         if np.isscalar(row):
+            row = typing.cast(Integer, row)
             return WellStatus.ACTIVE if self.schedule_statuses[row] else WellStatus.PENDING
         return [
-            WellStatus.ACTIVE if tag else WellStatus.PENDING for tag in self.schedule_statuses[row]
+            WellStatus.ACTIVE if tag else WellStatus.PENDING
+            for tag in self.schedule_statuses[row]  # type: ignore[index]
         ]
 
     def set_schedule_status(
@@ -491,12 +517,16 @@ class CompiledPerforations(typing.NamedTuple):
                 1 if one_status == WellStatus.ACTIVE else 0 for one_status in status
             ]
 
+    @typing.overload
+    def get_skin(self, *, row: Integer) -> Number: ...
+    @typing.overload
+    def get_skin(self, *, row: IntArray[OneDimension]) -> NumberArray[OneDimension]: ...
     def get_skin(self, *, row: IntOrArray[OneDimension]) -> NumberOrArray[OneDimension]:
         """
         :param row: One connection row, or an array of them.
         :returns: Each connection's own skin factor. Matches `row`'s own shape.
         """
-        return self.skins[row]
+        return self.skins[row]  # type: ignore[index]
 
     def set_skin(
         self, *, row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
@@ -510,12 +540,16 @@ class CompiledPerforations(typing.NamedTuple):
         """
         self.skins[row] = value
 
+    @typing.overload
+    def get_wellbore_radius(self, *, row: Integer) -> Number: ...
+    @typing.overload
+    def get_wellbore_radius(self, *, row: IntArray[OneDimension]) -> NumberArray[OneDimension]: ...
     def get_wellbore_radius(self, *, row: IntOrArray[OneDimension]) -> NumberOrArray[OneDimension]:
         """
         :param row: One connection row, or an array of them.
         :returns: Each connection's own wellbore radius. Matches `row`'s own shape.
         """
-        return self.wellbore_radii[row]
+        return self.wellbore_radii[row]  # type: ignore[index]
 
     def set_wellbore_radius(
         self, *, row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
@@ -529,6 +563,10 @@ class CompiledPerforations(typing.NamedTuple):
         """
         self.wellbore_radii[row] = value
 
+    @typing.overload
+    def get_saturation_region(self, *, row: Integer) -> int | None: ...
+    @typing.overload
+    def get_saturation_region(self, *, row: IntArray[OneDimension]) -> list[int | None]: ...
     def get_saturation_region(
         self, *, row: IntOrArray[OneDimension]
     ) -> int | list[int | None] | None:
@@ -539,9 +577,13 @@ class CompiledPerforations(typing.NamedTuple):
             `row`, a list for an array.
         """
         if np.isscalar(row):
+            row = typing.cast(Integer, row)
             region = self.saturation_regions[row]
             return None if region == UNSET_INT else region
-        return [None if region == UNSET_INT else region for region in self.saturation_regions[row]]
+        return [
+            None if region == UNSET_INT else region
+            for region in self.saturation_regions[row]  # type: ignore[index]
+        ]
 
 
 class CompiledLimits(typing.NamedTuple):
@@ -621,6 +663,12 @@ class CompiledLimits(typing.NamedTuple):
                 return row
         return None
 
+    @typing.overload
+    def get_quantity(self, *, row: Integer) -> RateQuantity | EconomicQuantity | None: ...
+    @typing.overload
+    def get_quantity(
+        self, *, row: IntArray[OneDimension]
+    ) -> list[RateQuantity | EconomicQuantity | None]: ...
     def get_quantity(
         self, *, row: IntOrArray[OneDimension]
     ) -> RateQuantity | EconomicQuantity | list[RateQuantity | EconomicQuantity | None] | None:
@@ -631,7 +679,7 @@ class CompiledLimits(typing.NamedTuple):
             `BHP`/`THP` row). A single value for a single `row`, a list for an array.
         """
         if np.isscalar(row):
-            return self.get_quantity_at(row=row)
+            return self.get_quantity_at(row=typing.cast(Integer, row))
         return [self.get_quantity_at(row=one_row) for one_row in np.atleast_1d(row)]
 
     def get_quantity_at(self, *, row: Integer) -> RateQuantity | EconomicQuantity | None:
@@ -649,6 +697,10 @@ class CompiledLimits(typing.NamedTuple):
             return ECONOMIC_QUANTITY_FROM_TAG[tag]
         return None
 
+    @typing.overload
+    def get_kind(self, *, row: Integer) -> LimitKind: ...
+    @typing.overload
+    def get_kind(self, *, row: IntArray[OneDimension]) -> list[LimitKind]: ...
     def get_kind(self, *, row: IntOrArray[OneDimension]) -> LimitKind | list[LimitKind]:
         """
         :param row: One limit row, or an array of them.
@@ -656,9 +708,14 @@ class CompiledLimits(typing.NamedTuple):
             `row`, a list for an array.
         """
         if np.isscalar(row):
+            row = typing.cast(Integer, row)
             return LimitKind(self.kinds[row])
-        return [LimitKind(kind) for kind in self.kinds[row]]
+        return [LimitKind(kind) for kind in self.kinds[row]]  # type: ignore[index]
 
+    @typing.overload
+    def get_min_value(self, *, row: Integer) -> Number | None: ...
+    @typing.overload
+    def get_min_value(self, *, row: IntArray[OneDimension]) -> NumberArray[OneDimension]: ...
     def get_min_value(
         self, *, row: IntOrArray[OneDimension]
     ) -> Number | NumberArray[OneDimension] | None:
@@ -668,8 +725,9 @@ class CompiledLimits(typing.NamedTuple):
             `None` if unset. For an array, the raw array (`NaN` means unset).
         """
         if np.isscalar(row):
+            row = typing.cast(Integer, row)
             return none_if_nan(self.min_values[row])
-        return self.min_values[row]
+        return self.min_values[row]  # type: ignore[index]
 
     def set_min_value(
         self, *, row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
@@ -683,17 +741,22 @@ class CompiledLimits(typing.NamedTuple):
         """
         self.min_values[row] = value
 
+    @typing.overload
+    def get_max_value(self, *, row: Integer) -> Number | None: ...
+    @typing.overload
+    def get_max_value(self, *, row: IntArray[OneDimension]) -> NumberArray[OneDimension]: ...
     def get_max_value(
         self, *, row: IntOrArray[OneDimension]
-    ) -> float | NumberArray[OneDimension] | None:
+    ) -> Number | NumberArray[OneDimension] | None:
         """
         :param row: One limit row, or an array of them.
         :returns: Each row's own ceiling. For a single `row`, a float or
             `None` if unset. For an array, the raw array (`NaN` means unset).
         """
         if np.isscalar(row):
+            row = typing.cast(Integer, row)
             return none_if_nan(self.max_values[row])
-        return self.max_values[row]
+        return self.max_values[row]  # type: ignore[index]
 
     def set_max_value(
         self, *, row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
@@ -707,6 +770,12 @@ class CompiledLimits(typing.NamedTuple):
         """
         self.max_values[row] = value
 
+    @typing.overload
+    def get_workover_action(self, *, row: Integer) -> WorkoverAction | None: ...
+    @typing.overload
+    def get_workover_action(
+        self, *, row: IntArray[OneDimension]
+    ) -> list[WorkoverAction | None]: ...
     def get_workover_action(
         self, *, row: IntOrArray[OneDimension]
     ) -> WorkoverAction | list[WorkoverAction | None] | None:
@@ -717,11 +786,12 @@ class CompiledLimits(typing.NamedTuple):
             list for an array.
         """
         if np.isscalar(row):
+            row = typing.cast(Integer, row)
             tag = self.workover_actions[row]
             return None if tag == UNSET_INT else WORKOVER_ACTION_FROM_TAG[tag]
         return [
             None if tag == UNSET_INT else WORKOVER_ACTION_FROM_TAG[tag]
-            for tag in self.workover_actions[row]
+            for tag in self.workover_actions[row]  # type: ignore[index]
         ]
 
     def set_workover_action(
@@ -742,6 +812,10 @@ class CompiledLimits(typing.NamedTuple):
         else:
             self.workover_actions[row] = [WORKOVER_ACTION_TAG[one_action] for one_action in action]
 
+    @typing.overload
+    def get_end_run(self, *, row: Integer) -> Boolean: ...
+    @typing.overload
+    def get_end_run(self, *, row: IntArray[OneDimension]) -> list[Boolean]: ...
     def get_end_run(self, *, row: IntOrArray[OneDimension]) -> Boolean | list[Boolean]:
         """
         :param row: One limit row, or an array of them.
@@ -749,8 +823,9 @@ class CompiledLimits(typing.NamedTuple):
             A single `bool` for a single `row`, a list for an array.
         """
         if np.isscalar(row):
-            return bool(self.end_run_flags[row])  # type: ignore
-        return [bool(flag) for flag in self.end_run_flags[row]]
+            row = typing.cast(Integer, row)
+            return bool(self.end_run_flags[row])
+        return [bool(flag) for flag in self.end_run_flags[row]]  # type: ignore[index]
 
     def set_end_run(
         self, *, row: IntOrArray[OneDimension], end_run: Boolean | typing.Sequence[Boolean]
@@ -766,7 +841,9 @@ class CompiledLimits(typing.NamedTuple):
         if isinstance(end_run, bool):
             self.end_run_flags[row] = 1 if end_run else 0
         else:
-            self.end_run_flags[row] = [1 if one_end_run else 0 for one_end_run in end_run]  # type: ignore
+            self.end_run_flags[row] = [  # type: ignore[index]
+                1 if one_end_run else 0 for one_end_run in end_run
+            ]
 
 
 class CompiledWellControls(typing.NamedTuple):
@@ -808,6 +885,14 @@ class CompiledWellControls(typing.NamedTuple):
 
     limits: CompiledLimits
 
+    @typing.overload
+    def get_control_mode(
+        self, *, well_row: Integer
+    ) -> ProducerControlMode | InjectorControlMode: ...
+    @typing.overload
+    def get_control_mode(
+        self, *, well_row: IntArray[OneDimension]
+    ) -> list[ProducerControlMode | InjectorControlMode]: ...
     def get_control_mode(
         self, *, well_row: IntOrArray[OneDimension]
     ) -> (
@@ -819,13 +904,16 @@ class CompiledWellControls(typing.NamedTuple):
             single `well_row`, a list for an array.
         """
         if np.isscalar(well_row):
+            well_row = typing.cast(Integer, well_row)
             is_injector = self.well_kinds[well_row] == WellKind.INJECTOR
             from_tag = INJECTOR_MODE_FROM_TAG if is_injector else PRODUCER_MODE_FROM_TAG
             return from_tag[self.control_modes[well_row]]
         return [
             (INJECTOR_MODE_FROM_TAG if kind == WellKind.INJECTOR else PRODUCER_MODE_FROM_TAG)[mode]
             for kind, mode in zip(
-                self.well_kinds[well_row], self.control_modes[well_row], strict=True
+                self.well_kinds[well_row],  # type: ignore[index]
+                self.control_modes[well_row],  # type: ignore[index]
+                strict=True,
             )
         ]
 
@@ -856,8 +944,15 @@ class CompiledWellControls(typing.NamedTuple):
             return
         is_injector = self.well_kinds[well_row] == WellKind.INJECTOR
         tag_map = INJECTOR_MODE_TAG if is_injector else PRODUCER_MODE_TAG
-        self.control_modes[well_row] = tag_map[mode]  # type: ignore
+        single_mode = typing.cast("ProducerControlMode | InjectorControlMode", mode)
+        self.control_modes[well_row] = tag_map[single_mode]  # type: ignore[index]
 
+    @typing.overload
+    def get_injected_phase(self, *, well_row: Integer) -> FluidPhase | None: ...
+    @typing.overload
+    def get_injected_phase(
+        self, *, well_row: IntArray[OneDimension]
+    ) -> list[FluidPhase | None]: ...
     def get_injected_phase(
         self, *, well_row: IntOrArray[OneDimension]
     ) -> FluidPhase | list[FluidPhase | None] | None:
@@ -868,11 +963,12 @@ class CompiledWellControls(typing.NamedTuple):
             `well_row`, a list for an array.
         """
         if np.isscalar(well_row):
+            well_row = typing.cast(Integer, well_row)
             tag = self.injected_phases[well_row]
             return None if tag == UNSET_INT else FLUID_PHASE_FROM_TAG[tag]
         return [
             None if tag == UNSET_INT else FLUID_PHASE_FROM_TAG[tag]
-            for tag in self.injected_phases[well_row]
+            for tag in self.injected_phases[well_row]  # type: ignore[index]
         ]
 
     def set_injected_phase(
@@ -893,9 +989,15 @@ class CompiledWellControls(typing.NamedTuple):
         else:
             self.injected_phases[well_row] = [FLUID_PHASE_TAG[one_phase] for one_phase in phase]
 
+    @typing.overload
+    def get_target_rate(self, *, well_row: Integer) -> Number | None: ...
+    @typing.overload
+    def get_target_rate(
+        self, *, well_row: IntArray[OneDimension]
+    ) -> NumberArray[OneDimension]: ...
     def get_target_rate(
         self, *, well_row: IntOrArray[OneDimension]
-    ) -> float | NumberArray[OneDimension] | None:
+    ) -> Number | NumberArray[OneDimension] | None:
         """
         :param well_row: One well's row, or an array of them.
         :returns: Each well's own target rate. For a single `well_row`,
@@ -903,8 +1005,9 @@ class CompiledWellControls(typing.NamedTuple):
             (`NaN` means unset).
         """
         if np.isscalar(well_row):
+            well_row = typing.cast(Integer, well_row)
             return none_if_nan(self.target_rates[well_row])
-        return self.target_rates[well_row]
+        return self.target_rates[well_row]  # type: ignore[index]
 
     def set_target_rate(
         self, *, well_row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
@@ -918,6 +1021,10 @@ class CompiledWellControls(typing.NamedTuple):
         """
         self.target_rates[well_row] = value
 
+    @typing.overload
+    def get_target_bhp(self, *, well_row: Integer) -> Number | None: ...
+    @typing.overload
+    def get_target_bhp(self, *, well_row: IntArray[OneDimension]) -> NumberArray[OneDimension]: ...
     def get_target_bhp(
         self, *, well_row: IntOrArray[OneDimension]
     ) -> Number | NumberArray[OneDimension] | None:
@@ -928,8 +1035,9 @@ class CompiledWellControls(typing.NamedTuple):
             (`NaN` means unset).
         """
         if np.isscalar(well_row):
+            well_row = typing.cast(Integer, well_row)
             return none_if_nan(self.target_bhps[well_row])
-        return self.target_bhps[well_row]
+        return self.target_bhps[well_row]  # type: ignore[index]
 
     def set_target_bhp(
         self, *, well_row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
@@ -943,6 +1051,10 @@ class CompiledWellControls(typing.NamedTuple):
         """
         self.target_bhps[well_row] = value
 
+    @typing.overload
+    def get_target_thp(self, *, well_row: Integer) -> Number | None: ...
+    @typing.overload
+    def get_target_thp(self, *, well_row: IntArray[OneDimension]) -> NumberArray[OneDimension]: ...
     def get_target_thp(
         self, *, well_row: IntOrArray[OneDimension]
     ) -> Number | NumberArray[OneDimension] | None:
@@ -953,8 +1065,9 @@ class CompiledWellControls(typing.NamedTuple):
             (`NaN` means unset).
         """
         if np.isscalar(well_row):
+            well_row = typing.cast(Integer, well_row)
             return none_if_nan(self.target_thps[well_row])
-        return self.target_thps[well_row]
+        return self.target_thps[well_row]  # type: ignore[index]
 
     def set_target_thp(
         self, *, well_row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
@@ -968,6 +1081,12 @@ class CompiledWellControls(typing.NamedTuple):
         """
         self.target_thps[well_row] = value
 
+    @typing.overload
+    def get_efficiency_factor(self, *, well_row: Integer) -> Number: ...
+    @typing.overload
+    def get_efficiency_factor(
+        self, *, well_row: IntArray[OneDimension]
+    ) -> NumberArray[OneDimension]: ...
     def get_efficiency_factor(
         self, *, well_row: IntOrArray[OneDimension]
     ) -> NumberOrArray[OneDimension]:
@@ -975,7 +1094,7 @@ class CompiledWellControls(typing.NamedTuple):
         :param well_row: One well's row, or an array of them.
         :returns: Each well's own efficiency factor. Matches `well_row`'s own shape.
         """
-        return self.efficiency_factors[well_row]
+        return self.efficiency_factors[well_row]  # type: ignore[index]
 
     def set_efficiency_factor(
         self, *, well_row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
@@ -989,6 +1108,10 @@ class CompiledWellControls(typing.NamedTuple):
         """
         self.efficiency_factors[well_row] = value
 
+    @typing.overload
+    def get_guide_rate(self, *, well_row: Integer) -> Number | None: ...
+    @typing.overload
+    def get_guide_rate(self, *, well_row: IntArray[OneDimension]) -> NumberArray[OneDimension]: ...
     def get_guide_rate(
         self, *, well_row: IntOrArray[OneDimension]
     ) -> Number | NumberArray[OneDimension] | None:
@@ -998,8 +1121,9 @@ class CompiledWellControls(typing.NamedTuple):
             Number or `None` if unset. For an array, the raw array (`NaN` means unset).
         """
         if np.isscalar(well_row):
+            well_row = typing.cast(Integer, well_row)
             return none_if_nan(self.guide_rates[well_row])
-        return self.guide_rates[well_row]
+        return self.guide_rates[well_row]  # type: ignore[index]
 
     def set_guide_rate(
         self, *, well_row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
@@ -1098,7 +1222,7 @@ class CompiledGroupLimits(typing.NamedTuple):
         self,
         *,
         row: IntOrArray[OneDimension],
-        action: "WorkoverAction | typing.Sequence[WorkoverAction]",
+        action: WorkoverAction | typing.Sequence[WorkoverAction],
     ) -> None:
         """
         Overwrites one or more limit rows' workover action in place.
@@ -1113,7 +1237,7 @@ class CompiledGroupLimits(typing.NamedTuple):
             self.workover_actions[row] = [WORKOVER_ACTION_TAG[one_action] for one_action in action]
 
     def set_end_run(
-        self, *, row: IntOrArray[OneDimension], end_run: "Boolean | typing.Sequence[Boolean]"
+        self, *, row: IntOrArray[OneDimension], end_run: Boolean | typing.Sequence[Boolean]
     ) -> None:
         """
         Overwrites one or more limit rows' end-run flag in place.
@@ -1126,7 +1250,7 @@ class CompiledGroupLimits(typing.NamedTuple):
         if isinstance(end_run, bool):
             self.end_run_flags[row] = 1 if end_run else 0
         else:
-            self.end_run_flags[row] = [1 if one_end_run else 0 for one_end_run in end_run]
+            self.end_run_flags[row] = [1 if one_end_run else 0 for one_end_run in end_run]  # type: ignore
 
 
 class CompiledGroupControls(typing.NamedTuple):
@@ -1242,6 +1366,10 @@ class CompiledWellSystem(typing.NamedTuple):
         """
         return name in self.names
 
+    @typing.overload
+    def get_well_type(self, *, well_row: Integer) -> WellType: ...
+    @typing.overload
+    def get_well_type(self, *, well_row: IntArray[OneDimension]) -> list[WellType]: ...
     def get_well_type(self, *, well_row: IntOrArray[OneDimension]) -> WellType | list[WellType]:
         """
         :param well_row: One well's row, or an array of them.
@@ -1249,6 +1377,7 @@ class CompiledWellSystem(typing.NamedTuple):
             `well_row`, a list for an array.
         """
         if np.isscalar(well_row):
+            well_row = typing.cast(Integer, well_row)
             return (
                 WellType.PRODUCER
                 if self.well_kinds[well_row] == WellKind.PRODUCER
@@ -1256,9 +1385,13 @@ class CompiledWellSystem(typing.NamedTuple):
             )
         return [
             WellType.PRODUCER if kind == WellKind.PRODUCER else WellType.INJECTOR
-            for kind in self.well_kinds[well_row]
+            for kind in self.well_kinds[well_row]  # type: ignore[index]
         ]
 
+    @typing.overload
+    def get_schedule_status(self, *, well_row: Integer) -> WellStatus: ...
+    @typing.overload
+    def get_schedule_status(self, *, well_row: IntArray[OneDimension]) -> list[WellStatus]: ...
     def get_schedule_status(
         self, *, well_row: IntOrArray[OneDimension]
     ) -> WellStatus | list[WellStatus]:
@@ -1268,10 +1401,11 @@ class CompiledWellSystem(typing.NamedTuple):
             `WellStatus` for a single `well_row`, a list for an array.
         """
         if np.isscalar(well_row):
+            well_row = typing.cast(Integer, well_row)
             return WellStatus.ACTIVE if self.schedule_statuses[well_row] else WellStatus.PENDING
         return [
             WellStatus.ACTIVE if tag else WellStatus.PENDING
-            for tag in self.schedule_statuses[well_row]
+            for tag in self.schedule_statuses[well_row]  # type: ignore[index]
         ]
 
     def set_schedule_status(
@@ -1294,6 +1428,12 @@ class CompiledWellSystem(typing.NamedTuple):
                 get_well_status_tag(status=one_status) for one_status in status
             ]
 
+    @typing.overload
+    def get_reference_depth(self, *, well_row: Integer) -> Number: ...
+    @typing.overload
+    def get_reference_depth(
+        self, *, well_row: IntArray[OneDimension]
+    ) -> NumberArray[OneDimension]: ...
     def get_reference_depth(
         self, *, well_row: IntOrArray[OneDimension]
     ) -> NumberOrArray[OneDimension]:
@@ -1301,8 +1441,12 @@ class CompiledWellSystem(typing.NamedTuple):
         :param well_row: One well's row, or an array of them.
         :returns: Each well's own reference depth. Matches `well_row`'s own shape.
         """
-        return self.reference_depths[well_row]
+        return self.reference_depths[well_row]  # type: ignore[index]
 
+    @typing.overload
+    def get_d_factor(self, *, well_row: Integer) -> Number | None: ...
+    @typing.overload
+    def get_d_factor(self, *, well_row: IntArray[OneDimension]) -> NumberArray[OneDimension]: ...
     def get_d_factor(
         self, *, well_row: IntOrArray[OneDimension]
     ) -> Number | NumberArray[OneDimension] | None:
@@ -1313,8 +1457,9 @@ class CompiledWellSystem(typing.NamedTuple):
             raw array (`NaN` means unset).
         """
         if np.isscalar(well_row):
+            well_row = typing.cast(Integer, well_row)
             return none_if_nan(self.d_factors[well_row])
-        return self.d_factors[well_row]
+        return self.d_factors[well_row]  # type: ignore[index]
 
     def set_d_factor(
         self, *, well_row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
