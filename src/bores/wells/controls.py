@@ -30,6 +30,7 @@ __all__ = [
     "THPLimit",
     "WellControl",
     "WellControls",
+    "WellTargetMode",
     "WorkoverAction",
 ]
 
@@ -168,6 +169,46 @@ class InjectorControlMode(enum.Enum):
         lowered = str(value).lower()
         for member in cls:
             if member.value == lowered:
+                return member
+        return None
+
+
+class WellTargetMode(enum.Enum):
+    """
+    A `WELTARG` record's own control mode, spelled out so a caller
+    building `SetWellTarget`/`SetWellTargets` by hand doesn't need
+    Eclipse's abbreviated deck vocabulary (`ORAT`, `WRAT`, and so on)
+    memorized. Every member's own value is that deck string.
+
+    A `WELTARG` record doesn't itself commit to a well kind - it names
+    a mode and lets whichever well it's applied to interpret it as
+    either a `ProducerControlMode` or an `InjectorControlMode`, resolved
+    at that point. This enum mirrors that: it's the union of every mode
+    either kind of well accepts, not a stand-in for one or the other.
+    `OIL_RATE`/`WATER_RATE`/`GAS_RATE`/`LIQUID_RATE` only make sense for
+    a producer and `RATE` only for an injector; giving one to the wrong
+    kind of well raises a validation error when the action runs, the
+    same as passing the wrong string ever did.
+    """
+
+    OIL_RATE = "ORAT"
+    WATER_RATE = "WRAT"
+    GAS_RATE = "GRAT"
+    LIQUID_RATE = "LRAT"
+    RESERVOIR_VOLUME_RATE = "RESV"
+    RATE = "RATE"
+    BHP = "BHP"
+    THP = "THP"
+    GROUP = "GRUP"
+
+    def __str__(self) -> str:
+        return self.value
+
+    @classmethod
+    def _missing_(cls, value: object) -> Self | None:
+        uppered = str(value).upper()
+        for member in cls:
+            if member.value == uppered:
                 return member
         return None
 

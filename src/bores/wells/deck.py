@@ -28,6 +28,7 @@ from bores.wells.controls import (
     THPLimit,
     WellControl,
     WellControls,
+    WellTargetMode,
     WorkoverAction,
 )
 from bores.wells.groups import (
@@ -1168,7 +1169,7 @@ def load_schedule(
         schedule_time = record["schedule_time"]
         action = SetWellTarget(
             well_name=record["well"],
-            control_mode=record["control_mode"],
+            control_mode=WellTargetMode(record["control_mode"]),
             value=record.get("value"),
         )
         items.append(

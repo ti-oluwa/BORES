@@ -34,6 +34,7 @@ from bores.wells.controls import (
     InjectorControlMode,
     ProducerControlMode,
     RateQuantity,
+    WellTargetMode,
     WorkoverAction,
 )
 from bores.wells.mappings import (
@@ -273,7 +274,12 @@ def get_many_matching_connection_rows(
 @action_type
 @attrs.frozen(kw_only=True, slots=True)
 class OpenWell(SerializableAction["CompiledBlackOilModel"]):
-    """`WELOPEN`: opens or shuts a whole well or specific connections."""
+    """
+    Opens or shuts a whole well, or specific connections on it. Build
+    this directly for a manual shut-in exactly as freely as any other
+    action; it also happens to be what a deck `WELOPEN` record becomes
+    when `load_schedule` reads one.
+    """
 
     __type__: typing.ClassVar[str] = "open_well"
 
@@ -284,16 +290,16 @@ class OpenWell(SerializableAction["CompiledBlackOilModel"]):
     """The new open/shut status."""
 
     i: Integer = 0
-    """1-based deck index, or `0` for whole-well."""
+    """The connection's grid I index (1-based), or `0` to target every connection on the well."""
 
     j: Integer = 0
-    """1-based deck index, or `0`."""
+    """The connection's grid J index (1-based), or `0`. Only meaningful together with `i`."""
 
     k1: Integer = 0
-    """1-based deck index, or `0`."""
+    """The starting grid K index (1-based) of the targeted layer range, or `0`."""
 
     k2: Integer = 0
-    """1-based deck index, or `0`."""
+    """The ending grid K index (1-based) of the targeted layer range, or `0`."""
 
     def __call__(
         self, model: "CompiledBlackOilModel", context: ScheduleContext
@@ -323,7 +329,12 @@ class OpenWell(SerializableAction["CompiledBlackOilModel"]):
 @action_type
 @attrs.frozen(kw_only=True, slots=True)
 class MultiplyConnectionFactor(SerializableAction["CompiledBlackOilModel"]):
-    """`WPIMULT`: multiplies existing connection factors in place."""
+    """
+    Multiplies a well's existing connection factor(s) in place - a
+    whole-well or per-connection productivity adjustment, constructed
+    directly or, equally, produced from a deck `WPIMULT` record by
+    `load_schedule`.
+    """
 
     __type__: typing.ClassVar[str] = "multiply_connection_factor"
 
@@ -334,16 +345,16 @@ class MultiplyConnectionFactor(SerializableAction["CompiledBlackOilModel"]):
     """The multiplier to apply."""
 
     i: Integer = 0
-    """1-based deck index, or `0` for whole-well."""
+    """The connection's grid I index (1-based), or `0` to target every connection on the well."""
 
     j: Integer = 0
-    """1-based deck index, or `0`."""
+    """The connection's grid J index (1-based), or `0`. Only meaningful together with `i`."""
 
     k1: Integer = 0
-    """1-based deck index, or `0`."""
+    """The starting grid K index (1-based) of the targeted layer range, or `0`."""
 
     k2: Integer = 0
-    """1-based deck index, or `0`."""
+    """The ending grid K index (1-based) of the targeted layer range, or `0`."""
 
     def __call__(
         self, model: "CompiledBlackOilModel", context: ScheduleContext
@@ -387,18 +398,26 @@ TARGET_SETTERS = {
 @action_type
 @attrs.frozen(kw_only=True, slots=True)
 class SetWellTarget(SerializableAction["CompiledBlackOilModel"]):
-    """`WELTARG`: changes a well's control mode and the one target value it names."""
+    """
+    Changes a well's control mode, and the one target value that mode
+    names, in one step. Build this directly for a manual control change
+    exactly as freely as any other action; it also happens to be what a
+    deck `WELTARG` record becomes when `load_schedule` reads one.
+    """
 
     __type__: typing.ClassVar[str] = "set_well_target"
 
     well_name: str
     """The well to act on."""
 
-    control_mode: str
-    """Deck item 2's literal string (`ORAT`, `BHP`, `GRUP`, and so on), pre-translation."""
+    control_mode: WellTargetMode
+    """The mode to switch to. Must apply to this well's own kind (a
+    producer or an injector) - see `WellTargetMode`."""
 
     value: Number | None = None
-    """Deck item 3. `None` only valid when `control_mode` is `GRUP` (takes no value)."""
+    """The new value for whichever field `control_mode` names (a rate,
+    BHP, or THP). `None` is only valid when `control_mode` is `GROUP`,
+    which takes no value."""
 
     def __call__(
         self, model: "CompiledBlackOilModel", context: ScheduleContext
@@ -416,23 +435,24 @@ class SetWellTarget(SerializableAction["CompiledBlackOilModel"]):
         controls = wells.controls
         is_injector = controls.well_kinds[well_row] == WellKind.INJECTOR
         mode_map = INJECTOR_CONTROL_MODE_MAP if is_injector else PRODUCER_CONTROL_MODE_MAP
+        deck_mode = self.control_mode.value
 
         try:
-            new_mode = mode_map[self.control_mode]
+            new_mode = mode_map[deck_mode]
         except KeyError:
             raise ValidationError(
-                f"{type(self).__name__} control mode {self.control_mode!r} doesn't apply to "
+                f"{type(self).__name__} control mode {self.control_mode.name} doesn't apply to "
                 f"{'an injector' if is_injector else 'a producer'} ({self.well_name!r})."
             ) from None
         controls.set_control_mode(well_row=well_row, mode=new_mode)
 
-        target_field = WELTARG_TARGET_FIELD[self.control_mode]
+        target_field = WELTARG_TARGET_FIELD[deck_mode]
         if target_field is None:
-            return model  # GRUP: only the mode changes
+            return model  # GROUP: only the mode changes
         if self.value is None:
             raise ValidationError(
                 f"{type(self).__name__} on well {self.well_name!r} names control mode "
-                f"{self.control_mode!r}, which needs a value, but none was given."
+                f"{self.control_mode.name}, which needs a value, but none was given."
             )
         setter = TARGET_SETTERS[target_field]
         setter(controls, well_row, self.value)
@@ -442,7 +462,12 @@ class SetWellTarget(SerializableAction["CompiledBlackOilModel"]):
 @action_type
 @attrs.frozen(kw_only=True, slots=True)
 class SetWellControl(SerializableAction["CompiledBlackOilModel"]):
-    """`WCONPROD`/`WCONINJE`: redefines a well's control mode and targets in one go."""
+    """
+    Redefines a well's control mode and targets in one go. Just as
+    valid to build directly for a manual control change as it is to
+    load from a deck - `load_schedule` produces one from each
+    `WCONPROD`/`WCONINJE` record it reads.
+    """
 
     __type__: typing.ClassVar[str] = "set_well_control"
 
@@ -502,8 +527,12 @@ class SetWellControl(SerializableAction["CompiledBlackOilModel"]):
 @attrs.frozen(kw_only=True, slots=True)
 class ActivateCompletion(SerializableAction["CompiledBlackOilModel"]):
     """
-    `COMPDAT`: activates a workover completion already sitting `PENDING`
-    in the compiled arrays since compile time.
+    Activates a well's connection(s), flipping their schedule status
+    from `PENDING` to `ACTIVE`. Every connection is compiled up front,
+    at compile time, regardless of when it actually starts flowing -
+    this is what brings one online, whether built by hand for a
+    scripted/manual schedule or produced from a deck `COMPDAT` record
+    by `load_schedule`.
     """
 
     __type__: typing.ClassVar[str] = "activate_completion"
@@ -512,16 +541,16 @@ class ActivateCompletion(SerializableAction["CompiledBlackOilModel"]):
     """The well to act on."""
 
     i: Integer = 0
-    """1-based deck index, or `0` for whole-well."""
+    """The connection's grid I index (1-based), or `0` to target every connection on the well."""
 
     j: Integer = 0
-    """1-based deck index, or `0`."""
+    """The connection's grid J index (1-based), or `0`. Only meaningful together with `i`."""
 
     k1: Integer = 0
-    """1-based deck index, or `0`."""
+    """The starting grid K index (1-based) of the targeted layer range, or `0`."""
 
     k2: Integer = 0
-    """1-based deck index, or `0`."""
+    """The ending grid K index (1-based) of the targeted layer range, or `0`."""
 
     def __call__(
         self, model: "CompiledBlackOilModel", context: ScheduleContext
@@ -552,16 +581,15 @@ class ActivateCompletion(SerializableAction["CompiledBlackOilModel"]):
 @attrs.frozen(kw_only=True, slots=True)
 class ActivateWell(SerializableAction["CompiledBlackOilModel"]):
     """
-    `WELSPECS`: activates a well already sitting `PENDING` in the
-    compiled arrays since compile time.
+    Activates a well, flipping its schedule status from `PENDING` to
+    `ACTIVE`. Every well is compiled up front, the moment it's first
+    mentioned anywhere in the deck, regardless of when it actually
+    starts - this is what brings one online, whether built by hand or
+    produced from a deck `WELSPECS` record by `load_schedule`.
 
-    A well is compiled the moment it's first mentioned anywhere in the
-    deck, regardless of when its own `WELSPECS` takes effect, the same
-    load-once roster convention `ActivateCompletion` relies on for a
-    workover completion. Activating the well only flips its own
-    well-level status; each of its perforations still activates on its
-    own `COMPDAT` schedule time via `ActivateCompletion`, which
-    `load_schedule` already emits separately.
+    This only flips the well-level status; each of its connections
+    still activates on its own schedule via `ActivateCompletion`, which
+    `load_schedule` emits separately for a real `COMPDAT` record.
     """
 
     __type__: typing.ClassVar[str] = "activate_well"
@@ -588,8 +616,10 @@ class ActivateWell(SerializableAction["CompiledBlackOilModel"]):
 @attrs.frozen(kw_only=True, slots=True)
 class SetLimit(SerializableAction["CompiledBlackOilModel"]):
     """
-    Updates one of a well's existing limit rows in place. A `WECON`
-    reissue (`kind=ECONOMIC`), or the implicit `BHPLimit` a `WCONPROD`/
+    Updates one of a well's existing limit rows in place - build this
+    directly for a manual limit change exactly as freely as any other
+    action. `load_schedule` also produces one from a `WECON` reissue
+    (`kind=ECONOMIC`), or from the implicit `BHPLimit` a `WCONPROD`/
     `WCONINJE` record's own `bhp` item carries when its control mode
     isn't `BHP` (`kind=BHP`).
 
@@ -723,16 +753,16 @@ class OpenWells(SerializableAction["CompiledBlackOilModel"]):
     """
 
     i: Integer = 0
-    """1-based deck index, or `0` for whole-well."""
+    """The connection's grid I index (1-based), or `0` to target every connection on the well."""
 
     j: Integer = 0
-    """1-based deck index, or `0`."""
+    """The connection's grid J index (1-based), or `0`. Only meaningful together with `i`."""
 
     k1: Integer = 0
-    """1-based deck index, or `0`."""
+    """The starting grid K index (1-based) of the targeted layer range, or `0`."""
 
     k2: Integer = 0
-    """1-based deck index, or `0`."""
+    """The ending grid K index (1-based) of the targeted layer range, or `0`."""
 
     def __call__(
         self, model: "CompiledBlackOilModel", context: ScheduleContext
@@ -785,16 +815,16 @@ class MultiplyConnectionFactors(SerializableAction["CompiledBlackOilModel"]):
     """
 
     i: Integer = 0
-    """1-based deck index, or `0` for whole-well."""
+    """The connection's grid I index (1-based), or `0` to target every connection on the well."""
 
     j: Integer = 0
-    """1-based deck index, or `0`."""
+    """The connection's grid J index (1-based), or `0`. Only meaningful together with `i`."""
 
     k1: Integer = 0
-    """1-based deck index, or `0`."""
+    """The starting grid K index (1-based) of the targeted layer range, or `0`."""
 
     k2: Integer = 0
-    """1-based deck index, or `0`."""
+    """The ending grid K index (1-based) of the targeted layer range, or `0`."""
 
     def __call__(
         self, model: "CompiledBlackOilModel", context: ScheduleContext
@@ -843,16 +873,16 @@ class ActivateCompletions(SerializableAction["CompiledBlackOilModel"]):
     """The wells to act on."""
 
     i: Integer = 0
-    """1-based deck index, or `0` for whole-well."""
+    """The connection's grid I index (1-based), or `0` to target every connection on the well."""
 
     j: Integer = 0
-    """1-based deck index, or `0`."""
+    """The connection's grid J index (1-based), or `0`. Only meaningful together with `i`."""
 
     k1: Integer = 0
-    """1-based deck index, or `0`."""
+    """The starting grid K index (1-based) of the targeted layer range, or `0`."""
 
     k2: Integer = 0
-    """1-based deck index, or `0`."""
+    """The ending grid K index (1-based) of the targeted layer range, or `0`."""
 
     def __call__(
         self, model: "CompiledBlackOilModel", context: ScheduleContext
@@ -989,9 +1019,10 @@ class SetWellControls(SerializableAction["CompiledBlackOilModel"]):
 class SetWellTargets(SerializableAction["CompiledBlackOilModel"]):
     """
     `SetWellTarget`, applied to several wells at once. Each well's own
-    kind (producer or injector) still picks which deck vocabulary
-    `control_mode` translates through, so a mixed set of producers and
-    injectors is fine even when `control_mode` is broadcast to all of them.
+    kind (producer or injector) still picks which of
+    `ProducerControlMode`/`InjectorControlMode` `control_mode` resolves
+    to, so a mixed set of producers and injectors is fine even when
+    `control_mode` is broadcast to all of them.
     """
 
     __type__: typing.ClassVar[str] = "bulk_set_well_target"
@@ -1001,16 +1032,17 @@ class SetWellTargets(SerializableAction["CompiledBlackOilModel"]):
     )
     """The wells to act on."""
 
-    control_mode: str | tuple[str, ...]
-    """Deck item 2's literal string (`ORAT`, `BHP`, `GRUP`, and so on),
-    pre-translation. A single value applies to every well; a sequence
-    matching `well_names` gives each well its own control mode."""
+    control_mode: WellTargetMode | tuple[WellTargetMode, ...]
+    """The mode(s) to switch to - see `WellTargetMode`. A single value
+    applies to every well; a sequence matching `well_names` gives each
+    well its own mode."""
 
     value: Number | tuple[Number | None, ...] | None = None
-    """Deck item 3. A single value applies to every well; a sequence
-    matching `well_names` gives each well its own value. `None` (for a
-    well, or for all of them) is only valid when that well's own
-    `control_mode` is `GRUP`."""
+    """The new value(s) for whichever field each well's own
+    `control_mode` names. A single value applies to every well; a
+    sequence matching `well_names` gives each well its own value.
+    `None` (for a well, or for all of them) is only valid when that
+    well's own `control_mode` is `GROUP`."""
 
     def __call__(
         self, model: "CompiledBlackOilModel", context: ScheduleContext
@@ -1018,11 +1050,12 @@ class SetWellTargets(SerializableAction["CompiledBlackOilModel"]):
         """
         Sets every named well's control mode, and its named target value if it has one.
 
-        Every well's own mode is resolved individually, since deck
-        vocabulary translation depends on whether that well is a
-        producer or an injector, but the actual value writes are still
-        batched: every well needing the same target field (rate, BHP,
-        or THP) is written in one bulk call, not one call per well.
+        Every well's own mode is resolved individually, since whether
+        it translates to a `ProducerControlMode` or an
+        `InjectorControlMode` depends on that well's own kind, but the
+        actual value writes are still batched: every well needing the
+        same target field (rate, BHP, or THP) is written in one bulk
+        call, not one call per well.
 
         :param model: The model to change.
         :param context: The current moment's context. Unused.
@@ -1046,22 +1079,23 @@ class SetWellTargets(SerializableAction["CompiledBlackOilModel"]):
             one_mode = control_modes[index] if per_well_mode else control_modes
             is_injector = controls.well_kinds[well_row] == WellKind.INJECTOR
             mode_map = INJECTOR_CONTROL_MODE_MAP if is_injector else PRODUCER_CONTROL_MODE_MAP
+            deck_mode = one_mode.value
             try:
-                resolved_modes.append(mode_map[one_mode])
+                resolved_modes.append(mode_map[deck_mode])
             except KeyError:
                 raise ValidationError(
-                    f"{type(self).__name__} control mode {one_mode!r} doesn't apply to "
+                    f"{type(self).__name__} control mode {one_mode.name} doesn't apply to "
                     f"{'an injector' if is_injector else 'a producer'} ({well_name!r})."
                 ) from None
 
-            target_field = WELTARG_TARGET_FIELD[one_mode]
+            target_field = WELTARG_TARGET_FIELD[deck_mode]
             if target_field is None:
-                continue  # GRUP: only the mode changes
+                continue  # GROUP: only the mode changes
             one_value = values[index] if per_well_value else values
             if one_value is None:
                 raise ValidationError(
                     f"{type(self).__name__} on well {well_name!r} names control mode "
-                    f"{one_mode!r}, which needs a value, but none was given."
+                    f"{one_mode.name}, which needs a value, but none was given."
                 )
             by_target_field.setdefault(target_field, []).append((well_row, one_value))
 

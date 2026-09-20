@@ -1,6 +1,7 @@
 """Gridding utilities"""
 
 import typing
+from collections.abc import Mapping
 
 import numba
 import numpy as np
@@ -297,7 +298,7 @@ def _fill_cell_entries(
 def make_pyvista_grid(
     grid: Grid,
     *,
-    cell_data: dict[str, CellArray] | None = None,
+    cell_data: Mapping[str, CellArray | npt.NDArray] | None = None,
 ) -> typing.Any:
     """
     Convert a `bores.grids.base.Grid` to a `pyvista.UnstructuredGrid`.

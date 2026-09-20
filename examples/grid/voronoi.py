@@ -75,13 +75,13 @@ r = np.sqrt(cx**2 + cy**2)  # radial distance from well
 
 # Porosity: higher in main pay (layer 3), radially symmetric with scatter
 layer_index = np.arange(grid.n_cells) % n_layers  # 0 = cap, 4 = aquifer
-layer_poro = np.array([0.04, 0.18, 0.28, 0.22, 0.10])
-poro = layer_poro[layer_index] + 0.03 * rng.standard_normal(grid.n_cells)
-poro = np.clip(poro, 0.02, 0.40)
+layer_porosity = np.array([0.04, 0.18, 0.28, 0.22, 0.10])
+porosity = layer_porosity[layer_index] + 0.03 * rng.standard_normal(grid.n_cells)
+porosity = np.clip(porosity, 0.02, 0.40)
 
 # Permeability: log-normal, correlated with porosity, higher near well bore
 radial_perm_factor = np.exp(-r / 600.0)  # near-well enhancement
-perm_base = 80 * (poro / 0.22) ** 3  # Kozeny-Carman proxy
+perm_base = 80 * (porosity / 0.22) ** 3  # Kozeny-Carman proxy
 perm = perm_base * (1.0 + 2.0 * radial_perm_factor)
 perm *= np.exp(0.5 * rng.standard_normal(grid.n_cells))  # log-normal scatter
 perm = np.clip(perm, 0.1, 2000.0)
@@ -102,7 +102,7 @@ print("\nConverting to PyVista …")
 pv_grid = make_pyvista_grid(
     grid,
     cell_data={
-        "porosity": poro,
+        "porosity": porosity,
         "permeability_x": perm,
         "water_sat": sw,
         "pressure_bar": pressure,
@@ -141,11 +141,11 @@ pl.show()
 
 # Summary stats
 print("\n── Property summary")
-print(f"  Porosity   : {poro.mean():.3f}  ±  {poro.std():.3f}")
+print(f"  Porosity   : {porosity.mean():.3f}  ±  {porosity.std():.3f}")
 print(
     f"  Perm (mD)  : {perm.mean():.1f}  ±  {perm.std():.1f}  "
     f"  [p10={np.percentile(perm, 10):.1f}, p90={np.percentile(perm, 90):.1f}]"
 )
 print(f"  Water sat  : {sw.mean():.3f}  ±  {sw.std():.3f}")
 print(f"  Pressure   : {pressure.mean():.1f}  ±  {pressure.std():.1f} bar")
-print(f"\nPore volume (m³): {grid.compute_pore_volume(poro, np.ones(grid.n_cells)).sum():.3e}")
+print(f"\nPore volume (m³): {grid.compute_pore_volume(porosity, np.ones(grid.n_cells)).sum():.3e}")  # type: ignore
