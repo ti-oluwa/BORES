@@ -347,9 +347,14 @@ def compute_segment_pressure_drop(
     :param mixture_velocity_in: Superficial mixture velocity entering the segment.
     :param mixture_velocity_out: Superficial mixture velocity leaving the segment.
     :param gravitational_acceleration: Acceleration due to gravity, already unit-resolved.
-    :param hydrostatic_scale: Unit-conversion factor for the hydrostatic
-        term - `1 / (gravitational_factor * hydrostatic_area_factor)` for
-        the caller's unit system.
+    :param hydrostatic_scale: Unit-conversion factor converting a
+        `density * velocity-squared` or `density * gravitational_acceleration
+        * length` term into the caller's own pressure unit -
+        `1 / (gravitational_factor * hydrostatic_area_factor)` for that
+        unit system. Applied to both the hydrostatic and the friction
+        term, since both are that same kind of quantity before
+        conversion; without it, friction comes out several thousand
+        times too large relative to hydrostatic in field units.
     :param method: Forwarded to `compute_friction_factor`.
     :param laminar_reynolds_limit: Forwarded to `compute_friction_factor`.
     :param turbulent_reynolds_limit: Forwarded to `compute_friction_factor`.
@@ -385,6 +390,7 @@ def compute_segment_pressure_drop(
             friction_factor
             * (length / tubing_inner_diameter)
             * (mixture_density * mean_velocity**2 / 2.0)
+            * hydrostatic_scale
         )
 
     acceleration_drop = mixture_density * (mixture_velocity_out**2 - mixture_velocity_in**2) / 2.0

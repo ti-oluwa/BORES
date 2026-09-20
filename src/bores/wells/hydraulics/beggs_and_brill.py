@@ -75,7 +75,11 @@ class BeggsAndBrillWellbore(typing.NamedTuple):
     """Convergence tolerance for the Colebrook friction-factor calculation."""
 
     hydrostatic_scale: Number
-    """Unit-conversion factor applied to the hydrostatic pressure term."""
+    """Unit-conversion factor converting a `density * velocity-squared` or
+    `density * gravitational_acceleration * length` term into this
+    model's own pressure unit. Applied to both the hydrostatic and the
+    friction term, since both are that same kind of quantity before
+    conversion."""
 
     unit_system: UnitSystem
     """This model's unit system."""
@@ -458,6 +462,7 @@ def compute_segment_drop(
         friction_factor
         * (length / model.tubing_inner_diameter)
         * (no_slip_density * mixture_velocity**2 / 2.0)
+        * model.hydrostatic_scale
     )
 
     # Velocity is only ever set at a connection, where a perforation's own

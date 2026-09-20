@@ -71,7 +71,11 @@ class HomogeneousWellbore(typing.NamedTuple):
     """Convergence tolerance for the Colebrook friction-factor calculation."""
 
     hydrostatic_scale: Number
-    """Unit-conversion factor applied to the hydrostatic pressure term."""
+    """Unit-conversion factor converting a `density * velocity-squared` or
+    `density * gravitational_acceleration * length` term into this
+    model's own pressure unit. Applied to both the hydrostatic and the
+    friction term, since both are that same kind of quantity before
+    conversion."""
 
     unit_system: UnitSystem
     """This model's unit system."""
