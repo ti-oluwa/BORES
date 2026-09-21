@@ -30,8 +30,8 @@ from bores.wells.hydraulics.beggs_and_brill import (
     beggs_and_brill_wellbore,
     compute_beggs_brill_holdup,
     compute_two_phase_friction_factor,
-    flow_pattern_tag,
-    horizontal_holdup,
+    get_flow_pattern,
+    compute_horizontal_holdup,
 )
 from bores.wells.hydraulics.gray import (
     GrayWellbore,
@@ -81,12 +81,12 @@ __all__ = [
     "compute_surface_mixture_viscosity",
     "compute_two_phase_friction_factor",
     "compute_woldesemayat_ghajar_void_fraction",
-    "flow_pattern_tag",
+    "get_flow_pattern",
     "get_unit_system_constant",
     "gray_wellbore",
     "hagedorn_brown_wellbore",
     "homogeneous_wellbore",
-    "horizontal_holdup",
+    "compute_horizontal_holdup",
     "is_griffith_bubble_flow",
     "woldesemayat_ghajar_wellbore",
 ]

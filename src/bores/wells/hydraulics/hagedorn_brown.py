@@ -81,11 +81,13 @@ class HagedornBrownWellbore(typing.NamedTuple):
     """Convergence tolerance for the Colebrook friction-factor calculation."""
 
     hydrostatic_scale: Number
-    """Unit-conversion factor converting a `density * velocity-squared` or
+    """
+    Unit-conversion factor converting a `density * velocity-squared` or
     `density * gravitational_acceleration * length` term into this
     model's own pressure unit. Applied to both the hydrostatic and the
     friction term, since both are that same kind of quantity before
-    conversion."""
+    conversion.
+    """
 
     unit_system: UnitSystem
     """This model's unit system."""
@@ -580,14 +582,14 @@ def compute_perforation_pressures(
     :raises ValueError: If `representative_depths`, `inclinations_from_vertical`,
         `connection_phase_rates`, and `connection_samples` don't all have the same length.
     """
-    n = len(connection_samples)
-    if out is not None and len(out) != n:
+    n_samples = len(connection_samples)
+    if out is not None and len(out) != n_samples:
         raise ValueError("If given, `out` must have the same length as `connection_samples`.")
     if not (
         len(representative_depths)
         == len(inclinations_from_vertical)
         == len(connection_phase_rates)
-        == n
+        == n_samples
     ):
         raise ValueError(
             "`representative_depths`, `inclinations_from_vertical`, "
@@ -598,17 +600,17 @@ def compute_perforation_pressures(
         pressures = out
     else:
         dtype = np.dtype(dtype) if dtype is not None else get_dtype()
-        pressures = np.empty(n, dtype=dtype)
+        pressures = np.empty(n_samples, dtype=dtype)
 
     friction_sign = -1.0 if is_injector else 1.0
     cross_sectional_area = math.pi * (model.tubing_inner_diameter / 2.0) ** 2
 
     below = sorted(
-        (i for i in range(n) if representative_depths[i] >= reference_depth),
+        (i for i in range(n_samples) if representative_depths[i] >= reference_depth),
         key=lambda i: representative_depths[i],
     )
     above = sorted(
-        (i for i in range(n) if representative_depths[i] < reference_depth),
+        (i for i in range(n_samples) if representative_depths[i] < reference_depth),
         key=lambda i: -representative_depths[i],
     )
 
@@ -711,17 +713,17 @@ def compute_tubing_head_pressure(
     """
     if surface_fluid_properties.phase_densities is None:
         raise ValueError(
-            "SurfaceFluidProperties.phase_densities is required for the Hagedorn & Brown "
+            "`SurfaceFluidProperties.phase_densities` is required for the Hagedorn & Brown "
             "wellbore model."
         )
     if surface_fluid_properties.phase_viscosities is None:
         raise ValueError(
-            "SurfaceFluidProperties.phase_viscosities is required for the Hagedorn & Brown "
+            "`SurfaceFluidProperties.phase_viscosities` is required for the Hagedorn & Brown "
             "wellbore model."
         )
     if surface_fluid_properties.gas_liquid_surface_tension is None:
         raise ValueError(
-            "SurfaceFluidProperties.gas_liquid_surface_tension is required for the "
+            "`SurfaceFluidProperties.gas_liquid_surface_tension` is required for the "
             "Hagedorn & Brown wellbore model."
         )
 

@@ -51,9 +51,11 @@ class GrayWellbore(typing.NamedTuple):
     """Absolute dry-pipe roughness. `NaN` for a smooth pipe."""
 
     friction_method: int
-    """Which single-phase friction-factor correlation to apply, using
+    """
+    Which single-phase friction-factor correlation to apply, using
     Gray's own effective roughness in place of `tubing_roughness`: `0`
-    for the simplified correlation, `1` for Colebrook."""
+    for the simplified correlation, `1` for Colebrook.
+    """
 
     gravitational_acceleration: Number
     """Acceleration due to gravity, in this model's unit system."""
@@ -71,12 +73,14 @@ class GrayWellbore(typing.NamedTuple):
     """Convergence tolerance for the Colebrook friction-factor calculation."""
 
     hydrostatic_scale: Number
-    """Unit-conversion factor converting a `density * velocity-squared` or
+    """
+    Unit-conversion factor converting a `density * velocity-squared` or
     `density * gravitational_acceleration * length` term into this
     model's own pressure unit. Applied to both the hydrostatic and the
     friction term, since both are that same kind of quantity before
     conversion; without it, friction comes out several thousand times
-    too large relative to hydrostatic in field units."""
+    too large relative to hydrostatic in field units.
+    """
 
     unit_system: UnitSystem
     """This model's unit system."""
@@ -130,8 +134,8 @@ def gray_wellbore(
 
     Gray (1974) is an empirical correlation for vertical gas and gas
     condensate wells carrying a light liquid load, developed as part of
-    API 14B and widely used for mist-flow gas wells. Field units
-    throughout: the holdup and effective-roughness correlations are
+    API 14B and widely used for mist-flow gas wells. This uses Field units
+    throughout. The holdup and effective-roughness correlations are
     calibrated for velocities in ft/s, densities in lbm/ft3, surface
     tension in dyne/cm, and diameter in ft, the same assumption Hagedorn
     & Brown makes elsewhere in this package.
@@ -465,14 +469,14 @@ def compute_perforation_pressures(
     :raises ValueError: If `representative_depths`, `inclinations_from_vertical`,
         `connection_phase_rates`, and `connection_samples` don't all have the same length.
     """
-    n = len(connection_samples)
-    if out is not None and len(out) != n:
+    n_samples = len(connection_samples)
+    if out is not None and len(out) != n_samples:
         raise ValueError("If given, `out` must have the same length as `connection_samples`.")
     if not (
         len(representative_depths)
         == len(inclinations_from_vertical)
         == len(connection_phase_rates)
-        == n
+        == n_samples
     ):
         raise ValueError(
             "`representative_depths`, `inclinations_from_vertical`, "
@@ -483,17 +487,17 @@ def compute_perforation_pressures(
         pressures = out
     else:
         dtype = np.dtype(dtype) if dtype is not None else get_dtype()
-        pressures = np.empty(n, dtype=dtype)
+        pressures = np.empty(n_samples, dtype=dtype)
 
     friction_sign = -1.0 if is_injector else 1.0
     cross_sectional_area = math.pi * (model.tubing_inner_diameter / 2.0) ** 2
 
     below = sorted(
-        (i for i in range(n) if representative_depths[i] >= reference_depth),
+        (i for i in range(n_samples) if representative_depths[i] >= reference_depth),
         key=lambda i: representative_depths[i],
     )
     above = sorted(
-        (i for i in range(n) if representative_depths[i] < reference_depth),
+        (i for i in range(n_samples) if representative_depths[i] < reference_depth),
         key=lambda i: -representative_depths[i],
     )
 
@@ -594,15 +598,15 @@ def compute_tubing_head_pressure(
     """
     if surface_fluid_properties.phase_densities is None:
         raise ValueError(
-            "SurfaceFluidProperties.phase_densities is required for the Gray wellbore model."
+            "`SurfaceFluidProperties.phase_densities` is required for the Gray wellbore model."
         )
     if surface_fluid_properties.phase_viscosities is None:
         raise ValueError(
-            "SurfaceFluidProperties.phase_viscosities is required for the Gray wellbore model."
+            "`SurfaceFluidProperties.phase_viscosities` is required for the Gray wellbore model."
         )
     if surface_fluid_properties.gas_liquid_surface_tension is None:
         raise ValueError(
-            "SurfaceFluidProperties.gas_liquid_surface_tension is required for the "
+            "`SurfaceFluidProperties.gas_liquid_surface_tension` is required for the "
             "Gray wellbore model."
         )
 

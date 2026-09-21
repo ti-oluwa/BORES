@@ -34,12 +34,12 @@ __all__ = [
     "BeggsAndBrillWellbore",
     "beggs_and_brill_wellbore",
     "compute_beggs_brill_holdup",
+    "compute_horizontal_holdup",
     "compute_perforation_pressures",
     "compute_segment_drop",
     "compute_tubing_head_pressure",
     "compute_two_phase_friction_factor",
-    "flow_pattern_tag",
-    "horizontal_holdup",
+    "get_flow_pattern",
 ]
 
 
@@ -191,7 +191,7 @@ def beggs_and_brill_wellbore(
 
 
 @numba.njit(cache=True)
-def flow_pattern_tag(no_slip_holdup: Number, froude_number: Number) -> int:
+def get_flow_pattern(no_slip_holdup: Number, froude_number: Number) -> int:
     """
     Classifies two-phase flow pattern per Beggs & Brill (1973).
 
@@ -218,19 +218,21 @@ def flow_pattern_tag(no_slip_holdup: Number, froude_number: Number) -> int:
 
 
 @numba.njit(cache=True)
-def horizontal_holdup(pattern_tag: int, no_slip_holdup: Number, froude_number: Number) -> Number:
+def compute_horizontal_holdup(
+    pattern: int, no_slip_holdup: Number, froude_number: Number
+) -> Number:
     """
     Computes horizontal (zero-inclination) liquid holdup for a given flow pattern.
 
-    A `pattern_tag` of `1` (transition) interpolates between the
+    A `pattern` of `1` (transition) interpolates between the
     segregated and intermittent correlations.
 
-    :param pattern_tag: Flow pattern, from `flow_pattern_tag`.
+    :param pattern: Flow pattern, from `get_flow_pattern`.
     :param no_slip_holdup: No-slip liquid holdup.
     :param froude_number: Mixture Froude number.
     :returns: Horizontal liquid holdup.
     """
-    if pattern_tag == 1:
+    if pattern == 1:
         l2 = 0.0009252 * no_slip_holdup**-2.4684
         l3 = 0.10 * no_slip_holdup**-1.4516
         hl_segregated = 0.98 * no_slip_holdup**0.4846 / froude_number**0.0868
@@ -239,9 +241,9 @@ def horizontal_holdup(pattern_tag: int, no_slip_holdup: Number, froude_number: N
         holdup = (
             interpolation_weight * hl_segregated + (1.0 - interpolation_weight) * hl_intermittent
         )
-    elif pattern_tag == 0:
+    elif pattern == 0:
         holdup = 0.98 * no_slip_holdup**0.4846 / froude_number**0.0868
-    elif pattern_tag == 2:
+    elif pattern == 2:
         holdup = 0.845 * no_slip_holdup**0.5351 / froude_number**0.0173
     else:
         holdup = 1.065 * no_slip_holdup**0.5824 / froude_number**0.0609
@@ -282,9 +284,9 @@ def compute_beggs_brill_holdup(
         1.938 * superficial_liquid_velocity * (liquid_density / liquid_surface_tension) ** 0.25
     )
 
-    pattern_tag = flow_pattern_tag(no_slip_holdup=no_slip_holdup, froude_number=froude_number)
-    holdup_at_horizontal = horizontal_holdup(
-        pattern_tag=pattern_tag,
+    pattern = get_flow_pattern(no_slip_holdup=no_slip_holdup, froude_number=froude_number)
+    holdup_at_horizontal = compute_horizontal_holdup(
+        pattern=pattern,
         no_slip_holdup=no_slip_holdup,
         froude_number=froude_number,
     )
@@ -300,10 +302,10 @@ def compute_beggs_brill_holdup(
         )
         correction_coefficient = max(0.0, (1.0 - no_slip_holdup) * math.log(correction_argument))
     else:
-        if pattern_tag == 3:  # distributed: no correction
+        if pattern == 3:  # distributed: no correction
             correction_coefficient = 0.0
         else:
-            if pattern_tag == 0:  # segregated
+            if pattern == 0:  # segregated
                 d_coef, e_coef, f_coef, g_coef = 0.011, -3.768, 3.539, -1.614
             else:  # intermittent or transition
                 d_coef, e_coef, f_coef, g_coef = 2.96, 0.305, -0.4473, 0.0978
@@ -338,7 +340,7 @@ def compute_two_phase_friction_factor(
     friction_tolerance: Number,
 ) -> Number:
     """
-    Computes the two-phase Darcy friction factor: the single-phase
+    Computes the two-phase Darcy friction factor. The single-phase
     (no-slip) friction factor, scaled by Beggs & Brill's holdup-ratio correction.
 
     :param no_slip_holdup: No-slip liquid holdup.
@@ -465,6 +467,7 @@ def compute_segment_drop(
         * model.hydrostatic_scale
     )
 
+    # TODO: Look into this and if this is valid
     # Velocity is only ever set at a connection, where a perforation's own
     # rate joins or leaves the flow (see compute_perforation_pressures).
     # Within one segment there is no other source of velocity change
@@ -528,14 +531,14 @@ def compute_perforation_pressures(
     :raises ValueError: If `representative_depths`, `inclinations_from_vertical`,
         `connection_phase_rates`, and `connection_samples` don't all have the same length.
     """
-    n = len(connection_samples)
-    if out is not None and len(out) != n:
+    n_samples = len(connection_samples)
+    if out is not None and len(out) != n_samples:
         raise ValueError("If given, `out` must have the same length as `connection_samples`.")
     if not (
         len(representative_depths)
         == len(inclinations_from_vertical)
         == len(connection_phase_rates)
-        == n
+        == n_samples
     ):
         raise ValueError(
             "`representative_depths`, `inclinations_from_vertical`, "
@@ -546,17 +549,17 @@ def compute_perforation_pressures(
         pressures = out
     else:
         dtype = np.dtype(dtype) if dtype is not None else get_dtype()
-        pressures = np.empty(n, dtype=dtype)
+        pressures = np.empty(n_samples, dtype=dtype)
 
     friction_sign = -1.0 if is_injector else 1.0
     cross_sectional_area = math.pi * (model.tubing_inner_diameter / 2.0) ** 2
 
     below = sorted(
-        (i for i in range(n) if representative_depths[i] >= reference_depth),
+        (i for i in range(n_samples) if representative_depths[i] >= reference_depth),
         key=lambda i: representative_depths[i],
     )
     above = sorted(
-        (i for i in range(n) if representative_depths[i] < reference_depth),
+        (i for i in range(n_samples) if representative_depths[i] < reference_depth),
         key=lambda i: -representative_depths[i],
     )
 
@@ -658,17 +661,17 @@ def compute_tubing_head_pressure(
     """
     if surface_fluid_properties.phase_densities is None:
         raise ValueError(
-            "SurfaceFluidProperties.phase_densities is required for the Beggs & Brill "
+            "`SurfaceFluidProperties.phase_densities` is required for the Beggs & Brill "
             "wellbore model."
         )
     if surface_fluid_properties.phase_viscosities is None:
         raise ValueError(
-            "SurfaceFluidProperties.phase_viscosities is required for the Beggs & Brill "
+            "`SurfaceFluidProperties.phase_viscosities` is required for the Beggs & Brill "
             "wellbore model."
         )
     if surface_fluid_properties.gas_liquid_surface_tension is None:
         raise ValueError(
-            "SurfaceFluidProperties.gas_liquid_surface_tension is required for the "
+            "`SurfaceFluidProperties.gas_liquid_surface_tension` is required for the "
             "Beggs & Brill wellbore model."
         )
 
