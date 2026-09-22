@@ -1340,7 +1340,9 @@ class CompiledGroupControls(typing.NamedTuple):
             try:
                 return name_to_row_map(self.names)[name]
             except KeyError:
-                raise ValidationError(f"No group named {name!r} in this compiled system.") from None
+                raise ValidationError(
+                    f"No group named {name!r} in this compiled system."
+                ) from None
         return [self.group_row(name=one_name) for one_name in name]
 
 

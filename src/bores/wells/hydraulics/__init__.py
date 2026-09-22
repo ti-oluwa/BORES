@@ -29,9 +29,9 @@ from bores.wells.hydraulics.beggs_and_brill import (
     BeggsAndBrillWellbore,
     beggs_and_brill_wellbore,
     compute_beggs_brill_holdup,
+    compute_horizontal_holdup,
     compute_two_phase_friction_factor,
     get_flow_pattern,
-    compute_horizontal_holdup,
 )
 from bores.wells.hydraulics.gray import (
     GrayWellbore,
@@ -70,6 +70,7 @@ __all__ = [
     "compute_gray_holdup",
     "compute_griffith_holdup",
     "compute_hagedorn_brown_holdup",
+    "compute_horizontal_holdup",
     "compute_hydrostatic_pressure",
     "compute_mixture_density",
     "compute_mixture_velocity",
@@ -86,7 +87,6 @@ __all__ = [
     "gray_wellbore",
     "hagedorn_brown_wellbore",
     "homogeneous_wellbore",
-    "compute_horizontal_holdup",
     "is_griffith_bubble_flow",
     "woldesemayat_ghajar_wellbore",
 ]

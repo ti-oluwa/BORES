@@ -1,6 +1,6 @@
 """Boundary system for unstructured polyhedral reservoir grids."""
 
-from bores.reservoir.boundary.aquifers import CarterTracyAquifer
+from bores.reservoir.boundary.aquifers import CarterTracyAquifer, FetkovichAquifer
 from bores.reservoir.boundary.base import BoundaryCondition, BoundaryConditionType
 from bores.reservoir.boundary.conditions import BoundaryConditions, BoundaryRegion
 from bores.reservoir.boundary.factories import (
@@ -11,7 +11,6 @@ from bores.reservoir.boundary.types import (
     ConstantFluxBoundary,
     ConstantPressureBoundary,
     ProductivityIndexBoundary,
-    TimeDependentFluxBoundary,
 )
 
 __all__ = [
@@ -22,8 +21,8 @@ __all__ = [
     "CarterTracyAquifer",
     "ConstantFluxBoundary",
     "ConstantPressureBoundary",
+    "FetkovichAquifer",
     "ProductivityIndexBoundary",
-    "TimeDependentFluxBoundary",
     "make_axis_aligned_boundary_conditions",
     "make_boundary_region",
 ]

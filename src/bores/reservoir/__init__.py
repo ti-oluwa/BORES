@@ -1,10 +1,6 @@
 """
-Reservoir characterization: `Reservoir` itself, its rock/region/temperature
-inputs, boundary conditions, and simulation state.
-
-Lower-level computational utilities (transmissibility calculation, fault
-application) live in their own submodules and aren't re-exported here -
-`from bores.reservoir.transmissibility import ...`, and so on.
+Reservoir characterization. `Reservoir` itself, its rock/region/temperature
+inputs, boundary conditions, transmissibility, and state.
 """
 
 from bores.reservoir.boundary import (
@@ -15,8 +11,8 @@ from bores.reservoir.boundary import (
     CarterTracyAquifer,
     ConstantFluxBoundary,
     ConstantPressureBoundary,
+    FetkovichAquifer,
     ProductivityIndexBoundary,
-    TimeDependentFluxBoundary,
     make_axis_aligned_boundary_conditions,
     make_boundary_region,
 )
@@ -57,6 +53,7 @@ __all__ = [
     "Equilibrium",
     "EquilibriumRegion",
     "Fault",
+    "FetkovichAquifer",
     "Hysteresis",
     "Permeability",
     "ProductivityIndexBoundary",
@@ -70,7 +67,6 @@ __all__ = [
     "Temperature",
     "TemperatureGradient",
     "TemperatureTable",
-    "TimeDependentFluxBoundary",
     "compute_connection_transmissibilities",
     "load_equilibrium_regions",
     "make_axis_aligned_boundary_conditions",
