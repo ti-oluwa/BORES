@@ -630,10 +630,7 @@ class InjectorControl(WellControl):
     """
     An injector's control target plus its secondary limits.
 
-    Same "all targets may be populated, `mode` selects the active one"
-    shape as `ProducerControl`, plus `injected_phase` since an
-    injector's fluid identity is a control decision (deck `WCONINJE` item
-    2), not a static well property.
+    Deck `WCONINJE` item 2.
     """
 
     __type__ = "injector"

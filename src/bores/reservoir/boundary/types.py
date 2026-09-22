@@ -73,7 +73,7 @@ class ConstantFluxBoundary(BoundaryCondition):
         if target == self.unit_system:
             return self
         factors = get_conversion_factors(self.unit_system, target, table=table)
-        return self.__class__(flux=self.flux * factors["reservoir_rate"], unit_system=target)
+        return attrs.evolve(self, flux=self.flux * factors["reservoir_rate"], unit_system=target)
 
     def is_no_flow(self) -> bool:
         """Return `True` if `flux == 0` (sealed boundary)."""
@@ -142,7 +142,7 @@ class ConstantPressureBoundary(BoundaryCondition):
         if target == self.unit_system:
             return self
         factors = get_conversion_factors(self.unit_system, target, table=table)
-        return self.__class__(pressure=self.pressure * factors["pressure"], unit_system=target)
+        return attrs.evolve(self, pressure=self.pressure * factors["pressure"], unit_system=target)
 
 
 @boundary_condition
@@ -215,7 +215,8 @@ class ProductivityIndexBoundary(BoundaryCondition):
             return self
         factors = get_conversion_factors(self.unit_system, target, table=table)
         productivity_index_factor = factors["reservoir_rate"] / factors["pressure"]
-        return self.__class__(
+        return attrs.evolve(
+            self,
             pressure_boundary=self.pressure_boundary * factors["pressure"],
             productivity_index=self.productivity_index * productivity_index_factor,
             unit_system=target,

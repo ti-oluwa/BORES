@@ -23,8 +23,8 @@ class BoundaryRegion(StoreSerializable):
     Associates a named `BoundaryCondition` with a set of boundary faces.
 
     A `BoundaryRegion` is the unit of assignment. It defines what faces
-    (identified by their positions in `Grid.boundary_face_indices`)
-    are governed by what condition.
+    (identified by their positions in `Grid.boundary_face_indices`) are
+    governed by what condition.
 
     **Face positions vs global face indices**
 
@@ -43,11 +43,6 @@ class BoundaryRegion(StoreSerializable):
     and error reporting. It does not need to match any other identifier in
     the model and does not need to be unique within a `BoundaryConditions`
     container (though uniqueness is recommended for clarity).
-
-    :param name: Human-readable label (e.g. `"south_aquifer"`, `"producer_flank"`).
-    :param face_positions: Shape `(n_faces,)` int32 - 0-based positions
-        into `Grid.boundary_face_indices` that belong to this region.
-    :param condition: The `BoundaryCondition` applied at these faces.
     """
 
     name: str

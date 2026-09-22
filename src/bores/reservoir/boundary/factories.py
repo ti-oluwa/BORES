@@ -1,11 +1,11 @@
 """
-Convenience factories for building `BoundaryRegion` / `BoundaryConditions`
+Convenience factories for building `BoundaryRegion`/`BoundaryConditions`
 objects from a `Grid`, without hand-deriving boundary face positions.
 
-Building a `BoundaryRegion` by hand requires: pulling `Grid.boundary_face_indices`,
+Building a `BoundaryRegion` by hand requires pulling `Grid.boundary_face_indices`,
 figuring out which of those global face indices actually sit on the flank of
 the domain you care about, then converting the survivors back into
-*positions* within `boundary_face_indices` - which is the indexing
+positions within `boundary_face_indices`, which is the indexing
 `BoundaryRegion.face_positions` actually expects, not global face indices.
 """
 

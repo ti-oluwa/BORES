@@ -34,11 +34,13 @@ def compute_incremental_influx(
     writes nothing. Safe to call every Newton/Picard iteration within a
     single not yet accepted timestep (each call with the same arguments
     returns the same result); the caller decides separately whether to
-    treat this as a trial value or to write the result into
-    `AquiferWorkspace` as the new committed state.
+    treat this as a trial value or to write the result into `AquiferWorkspace`
+    as the new committed state:
 
         ΔWe = (We_i/p_i) · (p̄_a - p̄_R) · [1 - exp(-J·p_i·Δt / We_i)]
+
         We_new = We_previous + ΔWe
+
         p̄_a,new = p_i · (1 - We_new/We_i)
 
     where `p̄_a` is the aquifer's own average pressure (declining as it
@@ -408,10 +410,10 @@ class FetkovichAquifer(BoundaryCondition):
                 self.aquifer_productivity_index, rate_factor
             ),
             initial_encroachable_water=convert_optional(
-                self.initial_encroachable_water, factors["reservoir_volume"]
+                self.initial_encroachable_water, factors["volume"]
             ),
             initial_aquifer_water_volume=convert_optional(
-                self.initial_aquifer_water_volume, factors["reservoir_volume"]
+                self.initial_aquifer_water_volume, factors["volume"]
             ),
             angle=self.angle,
             unit_system=target,

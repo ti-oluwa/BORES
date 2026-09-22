@@ -9,7 +9,7 @@ import numpy.typing as npt
 from bores.precision import get_dtype
 from bores.reservoir.boundary.aquifers import carter_tracy, fetkovich
 from bores.reservoir.boundary.compile import (
-    AQUIFER_KIND_CARTER_TRACY,
+    CARTER_TRACY_AQUIFER_KIND,
     CompiledAquifers,
     CompiledBoundaryConditions,
     CompiledProductivityIndices,
@@ -117,7 +117,7 @@ def apply_aquifer_rates(
         if elapsed_time <= 0.0:
             rate = 0.0
         else:
-            if kinds[row] == AQUIFER_KIND_CARTER_TRACY:
+            if kinds[row] == CARTER_TRACY_AQUIFER_KIND:
                 current_dimensionless_time = dimensionless_time_scales[row] * time
                 pressure_drop = initial_pressures[row] - boundary_pressure
                 new_cumulative_influx = carter_tracy.compute_incremental_influx(
@@ -202,7 +202,7 @@ def advance_aquifer_workspace(
         if elapsed_time <= 0.0:
             continue
 
-        if kinds[row] == AQUIFER_KIND_CARTER_TRACY:
+        if kinds[row] == CARTER_TRACY_AQUIFER_KIND:
             current_dimensionless_time = dimensionless_time_scales[row] * time
             pressure_drop = initial_pressures[row] - boundary_pressure
             new_cumulative_influx = carter_tracy.compute_incremental_influx(
@@ -289,8 +289,8 @@ def commit_boundary_conditions(
     field, never from inside a Newton/Picard iteration.
 
     Stateless conditions (`ConstantFluxBoundary`, `ConstantPressureBoundary`,
-    `ProductivityIndexBoundary`) have nothing to commit so only
-    `aquifer_workspace`'s rows change here.
+    `ProductivityIndexBoundary`) have nothing to commit so only `aquifer_workspace`'s
+    rows change here.
 
     :param compiled: The compiled boundary condition set.
     :param aquifer_workspace: Updated in place.

@@ -27,9 +27,7 @@ def compute_bessel_roots(r_ed: Number, n_max: int) -> NumberArray[OneDimension]:
 
     Ported from `pywaterflood.aquifer.get_bessel_roots` (Frank Male,
     https://github.com/frank1010111/pywaterflood, MIT licensed), which cites
-    Klins, Bouchard & Cable (1988), eq. 9. Construction-time only (root
-    finding only depends on `r_eD`, never on a running simulation's time) -
-    `CarterTracyAquifer` computes this once, in `__attrs_post_init__`.
+    Klins, Bouchard & Cable (1988), eq. 9.
 
     :param r_ed: Dimensionless radius `r_e / r_w`. Must be `> 1`.
     :param n_max: Number of roots to find.
@@ -59,11 +57,9 @@ def compute_bessel_series_coefficients(
     """
     Precomputes the Bessel-dependent part of every term in the bounded
     aquifer's `pD`/`pD'` series (Klins, Bouchard & Cable, 1988, eqs. 6-9),
-    since `J1(β_n·r_eD)` and `J1(β_n)` depend only on `β_n` and `r_eD` -
-    both fixed once an aquifer is constructed - never on `t_D`. Only
-    `exp(-β_n²·t_D)` actually varies at evaluation time, so the hot-path
-    series reduces to `Σ 2·exp(-β_n²·t_D)·coefficient_n`, with no
-    `scipy.special` call anywhere near it.
+    since `J1(β_n·r_eD)` and `J1(β_n)` depend only on `β_n` and `r_eD`and not
+    on `t_D`. Only `exp(-β_n²·t_D)` actually varies at evaluation time,
+    so the hot-path series reduces to `Σ 2·exp(-β_n²·t_D)·coefficient_n`.
 
     `pD`'s per-term coefficient: `J1(β_n·r_eD)² / (β_n²·(J1(β_n·r_eD)² - J1(β_n)²))`.
     `pD'`'s per-term coefficient: `-J1(β_n·r_eD)² / (J1(β_n·r_eD)² - J1(β_n)²)`
@@ -163,7 +159,7 @@ def compute_finite_dimensionless_pressure(
     """
     Dimensionless pressure `pD(tD, r_eD)` for a bounded (finite) radial
     aquifer, from precomputed per-root coefficients
-    (`compute_bessel_series_coefficients`) - no `scipy.special` call.
+    (`compute_bessel_series_coefficients`).
 
     :param t_d: Dimensionless time.
     :param betas: This aquifer's Bessel roots.
@@ -437,7 +433,7 @@ class CarterTracyAquifer(BoundaryCondition):
     unit_system: UnitSystem = attrs.field(default=UnitSystem.FIELD)
     """Unit system for all dimensional parameters and returned flux values."""
 
-    # Resolved scalars to be compiled into CompiledAquifers
+    # Resolved scalars to be compiled into `CompiledAquifers`
 
     resolved_aquifer_constant: Number = attrs.field(default=0.0, init=False, repr=False)
     """Resolved aquifer constant in `unit_system` units. Set on initialization."""

@@ -215,7 +215,9 @@ def decompile_perforations(
     rich_perforations = wells[well_name].perforations
     return tuple(
         decompile_perforation(
-            rich_perforations[perforations.perforation_indices[row]], perforations, row
+            original=rich_perforations[perforations.perforation_indices[row]],
+            perforations=perforations,
+            row=row,
         )
         for row in range(row_start, row_end)
     )
@@ -236,8 +238,8 @@ def decompile_well_perforations(
     completion). This collapses each such group back to one
     representative perforation using its first row, so it cannot show
     that kind of within-completion divergence. Use `decompile_perforations`
-    instead when that level of detail matters - it matches
-    `PerforationState`, one entry per connection.
+    instead when that level of detail matters. It matches `PerforationState`,
+    one entry per connection.
 
     :param wells: The original rich `Wells` this system was compiled from.
     :param well_name: This well's name, to look it up in `wells`.
@@ -508,12 +510,7 @@ def decompile_well_system(
     `wells`, `well_controls`, and `group_controls` are rebuilt entirely
     from `compiled_system`, so they reflect any in-place patch made to it
     since compile time. `default_wellbore`, `wellbore_overrides`,
-    `groups`, and `control_spec` are carried over from `well_system`
-    unchanged - none of these are part of the compiled representation.
-    Hydraulics correlation choice is dispatched by name at call time, not
-    stored per well, and the group hierarchy and resolver configuration
-    aren't hot-path data at all, so there's nothing in `compiled_system`
-    to rebuild them from.
+    `groups`, and `control_spec` are carried over from `well_system` unchanged.
 
     :param well_system: The original rich `WellSystem` `compiled_system`
         was compiled from.

@@ -316,9 +316,10 @@ stored tag back into the rich enum a caller actually wants to see.
 class CompiledPerforations(typing.NamedTuple):
     """
     Every well's perforations, flattened row-per-connection and
-    CSR-indexed by well. Includes every perforation regardless of status -
-    a shut or not-yet-scheduled connection is a tagged row here, not an
-    absent one, so a later status change never needs to re-resolve geometry.
+    CSR-indexed by well. Includes every perforation regardless of status.
+
+    A shut or not yet scheduled connection is a tagged row here, and is not
+    absent, so a later status change never needs to re-resolve geometry.
     """
 
     well_offsets: IntArray[OneDimension]
@@ -333,7 +334,7 @@ class CompiledPerforations(typing.NamedTuple):
     this row came from, within that well's own `Well.perforations`. One
     rich perforation can resolve to several rows (a trajectory crossing
     several grid cells), so this is not the same as the row's own
-    position - it lets a row be traced back to its source without relying
+    position. It lets a row be traced back to its source without relying
     on row position, which decompiling needs since `CompiledPerforations`
     keeps no other reference to the rich perforations it was built from.
     """
@@ -385,7 +386,7 @@ class CompiledPerforations(typing.NamedTuple):
         :param well_row: The well's row in `CompiledWellSystem.names`.
         :returns: `range(start, end)` over this well's rows.
         """
-        return range(int(self.well_offsets[well_row]), int(self.well_offsets[well_row + 1]))
+        return range(self.well_offsets[well_row], self.well_offsets[well_row + 1])
 
     @typing.overload
     def get_cell_index(self, *, row: Integer) -> Integer: ...
@@ -633,7 +634,7 @@ class CompiledLimits(typing.NamedTuple):
 
     workover_actions: IntArray[OneDimension]
     """Shape `(n_rows,)`. A `WorkoverActionTag` on an `ECONOMIC` row,
-    `UNSET_INT` otherwise - what to do once that row is breached."""
+    `UNSET_INT` otherwise. What to do once that row is breached."""
 
     end_run_flags: IntArray[OneDimension]
     """Shape `(n_rows,)`. `1` on an `ECONOMIC` row that should stop the
@@ -963,10 +964,11 @@ class CompiledWellControls(typing.NamedTuple):
             for one_row, one_mode in zip(well_row, modes, strict=True):
                 self.set_control_mode(well_row=one_row, mode=one_mode)
             return
+
         is_injector = self.well_kinds[well_row] == WellKind.INJECTOR
         tag_map = INJECTOR_MODE_TAG if is_injector else PRODUCER_MODE_TAG
-        single_mode = typing.cast("ProducerControlMode | InjectorControlMode", mode)
-        self.control_modes[well_row] = tag_map[single_mode]  # type: ignore[index]
+        mode = typing.cast(ProducerControlMode | InjectorControlMode, mode)
+        self.control_modes[well_row] = tag_map[mode]  # type: ignore[index]
 
     @typing.overload
     def get_injected_phase(self, *, well_row: Integer) -> FluidPhase | None: ...
@@ -1347,13 +1349,7 @@ class CompiledGroupControls(typing.NamedTuple):
 
 
 class CompiledWellSystem(typing.NamedTuple):
-    """
-    Top-level compiled wells bundle for the solver hot path.
-
-    Pass `.perforations`/`.controls`/`.group_controls` (or their individual
-    arrays) into a jitted kernel and never this whole tuple, since `names`
-    and `unit_system` aren't valid jittable argument types.
-    """
+    """Top-level compiled wells bundle for the solver hot path."""
 
     names: tuple[str, ...]
     """Shape `(n_wells,)`. Every other array here is positional against this order."""
@@ -1554,7 +1550,7 @@ def resolve_perforations_geometry(
     perforation on a well, open or shut.
 
     `resolve_perforations_indices`/`resolve_md_perforations_indices` only
-    resolve `well.open_perforations`, so this builds a shadow copy of
+    resolves `well.open_perforations`, so this builds a shadow copy of
     `well` with every perforation forced `CompletionStatus.OPEN` for
     resolution purposes only, then reads each connection's real status
     back off the matching original perforation.
@@ -1967,7 +1963,7 @@ def compile_group_controls(
             control_modes.append(GROUP_PRODUCER_MODE_TAG[control.mode])
             injected_phases.append(UNSET_INT)
         else:
-            raise ValidationError(f"Unknown GroupControl mode type: {type(control.mode)!r}.")
+            raise ValidationError(f"Unknown `GroupControl` mode type: {type(control.mode)!r}.")
         target_rates.append(control.target_rate if control.target_rate is not None else np.nan)
 
         member_group_names = {name, *groups.descendants(name)} if groups is not None else {name}
@@ -2048,10 +2044,11 @@ def compile_well_system(
     search_radius: Number | None = None,
 ) -> CompiledWellSystem:
     """
-    Compiles a rich `Wells`/`WellControls` pair into a `CompiledWellSystem`.
+    Compiles a rich `Wells`/`WellControls` (from a `WellSystem`) pair
+    into a `CompiledWellSystem`.
 
     Every well `wells` contains is included, regardless of `schedule_status`
-    as this is the load-once roster: a `WellStatus.PENDING` well is compiled
+    as this is the load-once roster. A `WellStatus.PENDING` well is compiled
     the same as an `ACTIVE` one, just tagged, so a later schedule event can
     activate it in place without recompiling.
 
@@ -2068,7 +2065,8 @@ def compile_well_system(
         with membership restricted to that group's direct members.
     :param resolve_kwargs: Forwarded to `build_wells_indices`.
     :returns: `CompiledWellSystem`, well rows in `wells.names` order.
-    :raises ValidationError: If `controls.unit_system` doesn't match `wells.unit_system`.
+    :raises ValidationError: If `controls.unit_system` doesn't match
+        `wells.unit_system`.
     """
     if controls.unit_system != wells.unit_system:
         raise ValidationError(

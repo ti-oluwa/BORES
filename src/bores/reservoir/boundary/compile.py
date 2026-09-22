@@ -28,8 +28,8 @@ from bores.types import (
 )
 
 __all__ = [
-    "AQUIFER_KIND_CARTER_TRACY",
-    "AQUIFER_KIND_FETKOVICH",
+    "CARTER_TRACY_AQUIFER_KIND",
+    "FETKOVICH_AQUIFER_KIND",
     "AquiferKind",
     "CompiledAquifers",
     "CompiledBoundaryConditions",
@@ -45,19 +45,14 @@ class AquiferKind(enum.IntEnum):
     FETKOVICH = 1
 
 
-# Plain-int mirrors of AquiferKind's own values, for use inside @numba.njit
+# Plain-int mirrors of AquiferKind's own values, for use inside `@numba.njit`
 # code, where comparing against an IntEnum member directly is best avoided.
-AQUIFER_KIND_CARTER_TRACY: Integer = AquiferKind.CARTER_TRACY.value
-AQUIFER_KIND_FETKOVICH: Integer = AquiferKind.FETKOVICH.value
+CARTER_TRACY_AQUIFER_KIND: Integer = AquiferKind.CARTER_TRACY.value
+FETKOVICH_AQUIFER_KIND: Integer = AquiferKind.FETKOVICH.value
 
 
 class CompiledProductivityIndices(typing.NamedTuple):
-    """
-    Every `ProductivityIndexBoundary` region's faces, flattened row-per-face.
-    No persistent state - recomputed fresh every call to
-    `compute_boundary_cache` from current cell pressure alone. Fully
-    numeric - passable whole into a `@numba.njit` kernel.
-    """
+    """Every `ProductivityIndexBoundary` region's faces, flattened row-per-face."""
 
     owner_cells: IntArray[OneDimension]
     """Shape `(n_faces,)`. Each face's owner cell, precomputed once so no grid lookup on the hot path."""
@@ -109,9 +104,8 @@ class CompiledAquifers(typing.NamedTuple):
     dimensionless_time_scales: NumberArray[OneDimension]
     """
     Shape `(n_aquifers,)`. Carter-Tracy only. `tD = dimensionless_time_scales[row] * time`,
-    already resolved from whichever of `hydraulic_diffusivity/inner_radius^2`
-    (physical mode) or `dimensionless_time_scale` (calibrated mode, `1.0`
-    if that was left unset) applies - the hot path never re-derives this.
+    already resolved from whichever of `hydraulic_diffusivity/inner_radius^2` (physical mode) 
+    or `dimensionless_time_scale` (calibrated mode, `1.0` if that was left unset) applies.
     """
 
     bounded: BooleanArray[OneDimension]
@@ -158,13 +152,12 @@ class CompiledBoundaryConditions(typing.NamedTuple):
     """
     Every boundary condition in a model, compiled to flat arrays.
 
-    `static_pressure_values`/`static_flux_values`/`static_is_dirichlet`
-    are filled once, here, from every `ConstantFluxBoundary`/
-    `ConstantPressureBoundary` region. This is genuinely static, since neither
-    depends on anything that changes during a run. Every other face
-    position is zero/`False` here and gets filled in by
-    `compute_boundary_cache` every call, from `productivity_indices` or
-    `aquifers`.
+    `static_pressure_values`/`static_flux_values`/`static_is_dirichlet` are filled
+    once, here, from every `ConstantFluxBoundary`/`ConstantPressureBoundary` region.
+
+    This is genuinely static, since neither depends on anything that changes during a run.
+    Every other face position is zero/`False` here and gets filled in by
+    `compute_boundary_cache` every call, from `productivity_indices` or `aquifers`.
     """
 
     n_boundary_faces: Integer
@@ -217,8 +210,8 @@ def compile_boundary_conditions(
     `CompiledBoundaryConditions`.
 
     Processes `boundary_conditions.regions` in list order, matching the
-    "later region wins" convention `BoundaryConditions` itself documents:
-    a region assigns its own faces regardless of kind, so a
+    "later region wins" convention `BoundaryConditions` itself documents.
+    A region assigns its own faces regardless of kind, so a
     `ConstantPressureBoundary` region appearing after an aquifer region
     on the same faces correctly overrides it, and vice versa.
 
@@ -341,23 +334,23 @@ def compile_boundary_conditions(
 
     # Aquifer table
     n_terms = c.AQUIFER_BESSEL_SERIES_TERMS
-    aq_region_offsets = [0]
-    aq_owner_cells: list[Integer] = []
-    aq_face_positions: list[Integer] = []
-    aq_names: list[str] = []
-    aq_kinds: list[Integer] = []
-    aq_initial_pressures: list[Number] = []
-    aq_aquifer_constants: list[Number] = []
-    aq_dimensionless_time_scales: list[Number] = []
-    aq_bounded: list[bool] = []
-    aq_dimensionless_radius_ratios: list[Number] = []
-    aq_bessel_roots: list[NumberArray[OneDimension]] = []
-    aq_pd_coefficients: list[NumberArray[OneDimension]] = []
-    aq_pd_prime_coefficients: list[NumberArray[OneDimension]] = []
-    aq_linear_coefficients: list[Number] = []
-    aq_constant_coefficients: list[Number] = []
-    aq_productivity_indices: list[Number] = []
-    aq_encroachable_waters: list[Number] = []
+    aquifer_region_offsets = [0]
+    aquifer_owner_cells: list[Integer] = []
+    aquifer_face_positions: list[Integer] = []
+    aquifer_names: list[str] = []
+    aquifer_kinds: list[Integer] = []
+    aquifer_initial_pressures: list[Number] = []
+    aquifer_aquifer_constants: list[Number] = []
+    aquifer_dimensionless_time_scales: list[Number] = []
+    aquifer_bounded: list[bool] = []
+    aquifer_dimensionless_radius_ratios: list[Number] = []
+    aquifer_bessel_roots: list[NumberArray[OneDimension]] = []
+    aquifer_pd_coefficients: list[NumberArray[OneDimension]] = []
+    aquifer_pd_prime_coefficients: list[NumberArray[OneDimension]] = []
+    aquifer_linear_coefficients: list[Number] = []
+    aquifer_constant_coefficients: list[Number] = []
+    aquifer_productivity_indices: list[Number] = []
+    aquifer_encroachable_waters: list[Number] = []
 
     for original_row, (name, face_positions, condition) in enumerate(aquifer_regions):
         kept_positions = typing.cast(
@@ -375,15 +368,15 @@ def compile_boundary_conditions(
         if kept_positions.shape[0] == 0:
             continue
         owner_cells = resolve_owner_cells(reservoir, kept_positions)
-        aq_owner_cells.extend(owner_cells.tolist())
-        aq_face_positions.extend(kept_positions.tolist())
-        aq_region_offsets.append(len(aq_owner_cells))
-        aq_names.append(name)
-        aq_initial_pressures.append(condition.initial_pressure)
+        aquifer_owner_cells.extend(owner_cells.tolist())
+        aquifer_face_positions.extend(kept_positions.tolist())
+        aquifer_region_offsets.append(len(aquifer_owner_cells))
+        aquifer_names.append(name)
+        aquifer_initial_pressures.append(condition.initial_pressure)
 
         if isinstance(condition, CarterTracyAquifer):
-            aq_kinds.append(AquiferKind.CARTER_TRACY)
-            aq_aquifer_constants.append(condition.resolved_aquifer_constant)
+            aquifer_kinds.append(AquiferKind.CARTER_TRACY)
+            aquifer_aquifer_constants.append(condition.resolved_aquifer_constant)
             if condition.hydraulic_diffusivity is not None:
                 assert condition.inner_radius is not None
                 dt_scale = condition.hydraulic_diffusivity / (condition.inner_radius**2)
@@ -391,69 +384,72 @@ def compile_boundary_conditions(
                 dt_scale = condition.dimensionless_time_scale
             else:
                 dt_scale = 1.0
-            aq_dimensionless_time_scales.append(dt_scale)
-            aq_bounded.append(condition.bounded_aquifer)
-            aq_dimensionless_radius_ratios.append(condition.resolved_dimensionless_radius_ratio)
+            aquifer_dimensionless_time_scales.append(dt_scale)
+            aquifer_bounded.append(condition.bounded_aquifer)
+            aquifer_dimensionless_radius_ratios.append(
+                condition.resolved_dimensionless_radius_ratio
+            )
             if condition.bounded_aquifer:
-                aq_bessel_roots.append(condition.bessel_roots)
-                aq_pd_coefficients.append(condition.pd_coefficients)
-                aq_pd_prime_coefficients.append(condition.pd_prime_coefficients)
+                aquifer_bessel_roots.append(condition.bessel_roots)
+                aquifer_pd_coefficients.append(condition.pd_coefficients)
+                aquifer_pd_prime_coefficients.append(condition.pd_prime_coefficients)
             else:
-                aq_bessel_roots.append(np.zeros(n_terms, dtype=resolved_dtype))
-                aq_pd_coefficients.append(np.zeros(n_terms, dtype=resolved_dtype))
-                aq_pd_prime_coefficients.append(np.zeros(n_terms, dtype=resolved_dtype))
-            aq_linear_coefficients.append(condition.linear_coefficient)
-            aq_constant_coefficients.append(condition.constant_coefficient)
-            aq_productivity_indices.append(np.nan)
-            aq_encroachable_waters.append(np.nan)
+                aquifer_bessel_roots.append(np.zeros(n_terms, dtype=resolved_dtype))  # type: ignore[arg-type]
+                aquifer_pd_coefficients.append(np.zeros(n_terms, dtype=resolved_dtype))  # type: ignore[arg-type]
+                aquifer_pd_prime_coefficients.append(np.zeros(n_terms, dtype=resolved_dtype))  # type: ignore[arg-type]
+            aquifer_linear_coefficients.append(condition.linear_coefficient)
+            aquifer_constant_coefficients.append(condition.constant_coefficient)
+            aquifer_productivity_indices.append(np.nan)
+            aquifer_encroachable_waters.append(np.nan)
         else:
             assert isinstance(condition, FetkovichAquifer)
-            aq_kinds.append(AquiferKind.FETKOVICH)
-            aq_aquifer_constants.append(np.nan)
-            aq_dimensionless_time_scales.append(np.nan)
-            aq_bounded.append(False)
-            aq_dimensionless_radius_ratios.append(np.nan)
-            aq_bessel_roots.append(np.zeros(n_terms, dtype=resolved_dtype))
-            aq_pd_coefficients.append(np.zeros(n_terms, dtype=resolved_dtype))
-            aq_pd_prime_coefficients.append(np.zeros(n_terms, dtype=resolved_dtype))
-            aq_linear_coefficients.append(0.0)
-            aq_constant_coefficients.append(0.0)
-            aq_productivity_indices.append(condition.productivity_index)
-            aq_encroachable_waters.append(condition.encroachable_water)
+            aquifer_kinds.append(AquiferKind.FETKOVICH)
+            aquifer_aquifer_constants.append(np.nan)
+            aquifer_dimensionless_time_scales.append(np.nan)
+            aquifer_bounded.append(False)
+            aquifer_dimensionless_radius_ratios.append(np.nan)
+            aquifer_bessel_roots.append(np.zeros(n_terms, dtype=resolved_dtype))  # type: ignore[arg-type]
+            aquifer_pd_coefficients.append(np.zeros(n_terms, dtype=resolved_dtype))  # type: ignore[arg-type]
+            aquifer_pd_prime_coefficients.append(np.zeros(n_terms, dtype=resolved_dtype))  # type: ignore[arg-type]
+            aquifer_linear_coefficients.append(0.0)
+            aquifer_constant_coefficients.append(0.0)
+            aquifer_productivity_indices.append(condition.productivity_index)
+            aquifer_encroachable_waters.append(condition.encroachable_water)
 
     aquifers = CompiledAquifers(
-        kinds=np.asarray(aq_kinds, dtype=np.int32),
-        region_offsets=np.asarray(aq_region_offsets, dtype=np.int64),
-        owner_cells=np.asarray(aq_owner_cells, dtype=np.int64),
-        face_positions=np.asarray(aq_face_positions, dtype=np.int64),
-        initial_pressures=np.asarray(aq_initial_pressures, dtype=resolved_dtype),
-        aquifer_constants=np.asarray(aq_aquifer_constants, dtype=resolved_dtype),
-        dimensionless_time_scales=np.asarray(aq_dimensionless_time_scales, dtype=resolved_dtype),
-        bounded=np.asarray(aq_bounded, dtype=np.bool_),
-        dimensionless_radius_ratios=np.asarray(
-            aq_dimensionless_radius_ratios, dtype=resolved_dtype
+        kinds=np.asarray(aquifer_kinds, dtype=np.int32),  # type: ignore[arg-type]
+        region_offsets=np.asarray(aquifer_region_offsets, dtype=np.int64),  # type: ignore[arg-type]
+        owner_cells=np.asarray(aquifer_owner_cells, dtype=np.int64),  # type: ignore[arg-type]
+        face_positions=np.asarray(aquifer_face_positions, dtype=np.int64),  # type: ignore[arg-type]
+        initial_pressures=np.asarray(aquifer_initial_pressures, dtype=resolved_dtype),  # type: ignore[arg-type]
+        aquifer_constants=np.asarray(aquifer_aquifer_constants, dtype=resolved_dtype),  # type: ignore[arg-type]
+        dimensionless_time_scales=np.asarray(  # type: ignore[arg-type]
+            aquifer_dimensionless_time_scales, dtype=resolved_dtype
         ),
-        bessel_roots=(
-            np.stack(aq_bessel_roots).astype(resolved_dtype)
-            if aq_bessel_roots
+        bounded=np.asarray(aquifer_bounded, dtype=np.bool_),  # type: ignore[arg-type]
+        dimensionless_radius_ratios=np.asarray(  # type: ignore[arg-type]
+            aquifer_dimensionless_radius_ratios, dtype=resolved_dtype
+        ),
+        bessel_roots=(  # type: ignore[arg-type]
+            np.stack(aquifer_bessel_roots).astype(resolved_dtype)
+            if aquifer_bessel_roots
             else np.zeros((0, n_terms), dtype=resolved_dtype)
         ),
-        pd_coefficients=(
-            np.stack(aq_pd_coefficients).astype(resolved_dtype)
-            if aq_pd_coefficients
+        pd_coefficients=(  # type: ignore[arg-type]
+            np.stack(aquifer_pd_coefficients).astype(resolved_dtype)
+            if aquifer_pd_coefficients
             else np.zeros((0, n_terms), dtype=resolved_dtype)
         ),
-        pd_prime_coefficients=(
-            np.stack(aq_pd_prime_coefficients).astype(resolved_dtype)
-            if aq_pd_prime_coefficients
+        pd_prime_coefficients=(  # type: ignore[arg-type]
+            np.stack(aquifer_pd_prime_coefficients).astype(resolved_dtype)
+            if aquifer_pd_prime_coefficients
             else np.zeros((0, n_terms), dtype=resolved_dtype)
         ),
-        linear_coefficients=np.asarray(aq_linear_coefficients, dtype=resolved_dtype),
-        constant_coefficients=np.asarray(aq_constant_coefficients, dtype=resolved_dtype),
-        productivity_indices=np.asarray(aq_productivity_indices, dtype=resolved_dtype),
-        encroachable_waters=np.asarray(aq_encroachable_waters, dtype=resolved_dtype),
+        linear_coefficients=np.asarray(aquifer_linear_coefficients, dtype=resolved_dtype),  # type: ignore[arg-type]
+        constant_coefficients=np.asarray(aquifer_constant_coefficients, dtype=resolved_dtype),  # type: ignore[arg-type]
+        productivity_indices=np.asarray(aquifer_productivity_indices, dtype=resolved_dtype),  # type: ignore[arg-type]
+        encroachable_waters=np.asarray(aquifer_encroachable_waters, dtype=resolved_dtype),  # type: ignore[arg-type]
     )
-
     return CompiledBoundaryConditions(
         n_boundary_faces=n_boundary_faces,
         static_pressure_values=static_pressure_values,
@@ -462,5 +458,5 @@ def compile_boundary_conditions(
         productivity_indices=productivity_indices,
         productivity_index_names=tuple(pi_names),
         aquifers=aquifers,
-        aquifer_names=tuple(aq_names),
+        aquifer_names=tuple(aquifer_names),
     )

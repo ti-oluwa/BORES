@@ -15,13 +15,7 @@ def compute_average_boundary_pressure(
 ) -> Number:
     """
     Average reservoir pressure over one aquifer's own boundary faces'
-    owner cells - a plain mean, matching `CarterTracyAquifer`'s own
-    original, validated convention exactly (not area-weighted).
-
-    Reads only `pressure` (a plain cell-pressure array, from
-    `ReservoirWorkspace`, never a rich `ReservoirState`) and one static,
-    precomputed geometry array - no grid or reservoir object lookup, and
-    no allocation.
+    owner cells (not area-weighted).
 
     :param owner_cells: Shape `(n_faces,)`. This aquifer's own boundary
         faces' owner cells, precomputed once at compile time.
