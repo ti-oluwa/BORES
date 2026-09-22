@@ -1000,7 +1000,7 @@ class Constants(
 
     def _register_aliases(self, canonical: str, constant: Constant | ConstantFactory) -> None:
         """
-        Index *constant*'s declared aliases against *canonical* in `_aliases`.
+        Index `constant`'s declared aliases against `canonical` in `_aliases`.
 
         :raises ValidationError: If an alias collides with an existing
             canonical name, or is already claimed by a different canonical.
@@ -1023,11 +1023,11 @@ class Constants(
 
     def _unregister_aliases_for(self, canonical: str) -> None:
         """Drop every alias currently pointing at *canonical* (used on delete)."""
-        for alias in [a for a, c in self._aliases.items() if c == canonical]:
+        for alias in (a for a, c in self._aliases.items() if c == canonical):
             del self._aliases[alias]
 
     def _resolve(self, name: str) -> str:
-        """Resolve *name* to its canonical store key (identity if not an alias)."""
+        """Resolve `name` to its canonical store key (identity if not an alias)."""
         return self._aliases.get(name, name)
 
     def __getattr__(self, name: str) -> typing.Any:

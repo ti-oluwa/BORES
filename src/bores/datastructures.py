@@ -149,8 +149,8 @@ class ContextFlag(typing.Generic[T]):
     """
     Context-local flag.
 
-    Uses `contextvars.ContextVar` for isolation across concurrent tasks,
-    threads, and async contexts. Each context maintains its own flag value.
+    Uses `contextvars.ContextVar` for isolation across concurrent contexts. 
+    Each context maintains its own flag value.
     """
 
     __slots__ = ("_token", "_var")
