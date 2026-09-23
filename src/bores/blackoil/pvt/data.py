@@ -302,7 +302,6 @@ class PVTData(StoreSerializable):
             density_table=scale(self.density_table, density_factor),
             compressibility_table=scale(self.compressibility_table, compressibility_factor),
             gas_free_water_fvf_table=scale(self.gas_free_water_fvf_table, liquid_fvf_factor),
-            # Others are dimensionless, so no scaling.
             unit_system=target,
         )
 
@@ -310,7 +309,7 @@ class PVTData(StoreSerializable):
 @attrs.frozen(slots=True)
 class PVTDataSet(StoreSerializable):
     """
-    Serialisable bundle of raw `PVTData` for all three fluid phases.
+    Bundle of raw `PVTData` for all three fluid phases.
 
     Stores the raw tabulated data for oil, gas, and water independently of
     any interpolation settings. Use it to persist PVT data and rebuild

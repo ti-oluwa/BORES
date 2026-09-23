@@ -6,7 +6,11 @@ import numpy.typing as npt
 
 from bores.blackoil.fluids.model import BlackOil
 from bores.blackoil.model import BlackOilModel
-from bores.errors import BoundaryConditionCompilationError, WellCompilationError
+from bores.errors import ModelCompilationError
+from bores.reservoir.boundary.compile import (
+    CompiledBoundaryConditions,
+    compile_boundary_conditions,
+)
 from bores.reservoir.model import Reservoir
 from bores.types import GridIntersectionMethod, Number, Orientation, UnitSystem
 from bores.wells.compile import CompiledWellSystem, compile_well_system
@@ -26,8 +30,8 @@ class CompiledBlackOilModel(typing.NamedTuple):
     wells: CompiledWellSystem | None
     """The compiled `Wells` model, or `None` if the original model had no wells."""
 
-    boundary_conditions: None
-    """The compiled boundary conditions. Currently, this is always `None` because `CompiledBoundaryConditions` does not exist yet."""
+    boundary_conditions: CompiledBoundaryConditions | None
+    """The compiled boundary conditions, or `None` if the original model had none defined."""
 
     unit_system: UnitSystem
     """The model's unit system."""
@@ -42,24 +46,39 @@ def compile_model(
     dtype: npt.DTypeLike = None,
 ) -> CompiledBlackOilModel:
     """
-    Compiles a `BlackOilModel`'s wells into a `CompiledBlackOilModel`.
+    Validate and compile a `BlackOilModel` into a `CompiledBlackOilModel`.
 
-    Permeability for well-index resolution is read from
-    `model.reservoir.rock.absolute_permeability`.
+    This function validates the input model, compiles any boundary conditions and
+    well data into optimized runtime structures, and returns the original
+    reservoir and fluid models together with those compiled components.
 
-    :param model: The model to compile.
-    :param dtype: Forwarded to `compile_well_system`.
-    :param resolve_kwargs: Forwarded to `compile_well_system`.
-    :returns: The compiled model.
-    :raises BoundaryConditionCompilationError: If `model.boundary_conditions` is set.
-    :raises WellCompilationError: If well compilation fails.
+    :param model: The black-oil model to validate and compile.
+    :param horizontal_tolerance: Optional horizontal tolerance forwarded to
+        `compile_well_system` during well-cell intersection checks.
+    :param intersection_method: The grid-intersection strategy passed to
+        `compile_well_system`.
+    :param search_radius: Optional search radius forwarded to
+        `compile_well_system` when resolving well-grid intersections.
+    :param dtype: NumPy dtype used when constructing compiled boundary condition
+        and well arrays.
+    :returns: A compiled black-oil model containing the original reservoir and
+        fluid plus any compiled wells and boundary conditions.
+    :raises ModelCompilationError: If boundary condition or well syatem compilation fails.
     """
     model.validate()
+    reservoir = model.reservoir
+    compiled_boundary_conditions = None
     if model.boundary_conditions is not None:
-        raise BoundaryConditionCompilationError(
-            "`CompiledBoundaryConditions` does not exist yet. Compile a model with "
-            "boundary_conditions=None."
-        )
+        try:
+            compiled_boundary_conditions = compile_boundary_conditions(
+                boundary_conditions=model.boundary_conditions,
+                reservoir=reservoir,
+                dtype=dtype,
+            )
+        except Exception as exc:
+            raise ModelCompilationError(
+                f"Failed to compile boundary conditions for {model!r}."
+            ) from exc
 
     compiled_wells = None
     if model.wells is not None:
@@ -68,7 +87,7 @@ def compile_model(
             compiled_wells = compile_well_system(
                 wells=model.wells.wells,
                 controls=model.wells.well_controls,
-                grid=model.reservoir.grid,
+                grid=reservoir.grid,
                 permeabilities={
                     Orientation.X: permeability.x,
                     Orientation.Y: permeability.y,
@@ -82,12 +101,12 @@ def compile_model(
                 dtype=dtype,
             )
         except Exception as exc:
-            raise WellCompilationError(f"Failed to compile wells for {model!r}.") from exc
+            raise ModelCompilationError(f"Failed to compile wells for {model!r}.") from exc
 
     return CompiledBlackOilModel(
-        reservoir=model.reservoir,
+        reservoir=reservoir,
         fluid=model.fluid,
         wells=compiled_wells,
-        boundary_conditions=None,
+        boundary_conditions=compiled_boundary_conditions,
         unit_system=model.unit_system,
     )

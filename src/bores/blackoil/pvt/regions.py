@@ -311,13 +311,13 @@ def generate_temperature_axis(
       (see `_broadcast_to_2d`), so extra points cost nothing and change
       nothing physically - they only exist to satisfy `PVTTable`.
     - `TemperatureGradient`: samples `gradient.at_depth(...)` across
-      *depth_range* (the actual depth extent of the region's cells, when
+      `depth_range` (the actual depth extent of the region's cells, when
       known) so the axis truly brackets the temperatures the region will
       see. Without a known depth extent, falls back to a minimal bracket
       around the reference temperature and warns, since the gradient's
       true range can't be determined.
     - `TemperatureTable`: uses the table's own (sorted, unique) temperature
-      knots directly. This is the most faithful axis possible - it
+      knots directly. This is the most faithful axis possible. It
       reproduces the table's actual breakpoints with zero extra
       interpolation error, rather than resampling onto an arbitrary grid.
       Very dense tables are downsampled to *max_points* (endpoints
@@ -348,7 +348,7 @@ def generate_temperature_axis(
             depths = np.linspace(min_value, max_value, count, dtype=dtype)
         else:
             warnings.warn(
-                "`TemperatureGradient` without a `depth_range`: falling back to a "
+                "`TemperatureGradient` without a `depth_range`. Falling back to a "
                 "minimal bracket around the reference temperature. Pass the "
                 "region's actual cell-depth extent for a physically accurate "
                 "temperature axis.",

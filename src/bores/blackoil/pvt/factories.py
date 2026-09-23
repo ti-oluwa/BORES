@@ -499,11 +499,10 @@ def build_gas_pvt_data(
     :param compressibility_table: Pre-computed cg(P, T) (n_p, n_t) in psi⁻¹.
     :param compressibility_factor_table: Pre-computed z(P, T) (n_p, n_t).
     :param molecular_weight: Pre-computed Mg in lbm/lb-mol. NOTE: takes
-        precedence over `molecular_weight_table` - if you're passing a
+        precedence over `molecular_weight_table`. If you're passing a
         pre-computed table instead of a scalar, this function currently
         still recomputes it from `gas_gravity` unless `molecular_weight`
-        (the scalar) is also given. Kept as-is to match existing behavior;
-        flagging in case it isn't what you intended.
+        (the scalar) is also given.
     :param solubility_in_water_table: Pre-computed Rsw(P, T, S) (n_p, n_t, n_s).
     :param stock_tank_gas_density: Stock-tank gas density (lbm/ft³) for density derivation.
     :param stock_tank_oil_density: Stock-tank oil density (lbm/ft³) for wet-gas density

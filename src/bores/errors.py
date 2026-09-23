@@ -3,7 +3,6 @@
 __all__ = [
     "ActionError",
     "BORESError",
-    "BoundaryConditionCompilationError",
     "CompilationError",
     "ComputationError",
     "DeserializationError",
@@ -21,7 +20,6 @@ __all__ = [
     "StreamError",
     "TimingError",
     "ValidationError",
-    "WellCompilationError",
 ]
 
 
@@ -237,18 +235,6 @@ class CompilationError(BORESError):
 
 class ModelCompilationError(CompilationError):
     """Raised when a `BlackOilModel` fails to compile."""
-
-    pass
-
-
-class WellCompilationError(CompilationError):
-    """Raised when a well system fails to compile."""
-
-    pass
-
-
-class BoundaryConditionCompilationError(CompilationError):
-    """Raised when boundary conditions fail to compile."""
 
     pass
 
