@@ -149,7 +149,7 @@ class ContextFlag(typing.Generic[T]):
     """
     Context-local flag.
 
-    Uses `contextvars.ContextVar` for isolation across concurrent contexts. 
+    Uses `contextvars.ContextVar` for isolation across concurrent contexts.
     Each context maintains its own flag value.
     """
 

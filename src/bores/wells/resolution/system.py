@@ -25,7 +25,7 @@ from bores.wells.resolution.groups.limits import (
     enforce_group_economic_limits,
 )
 from bores.wells.resolution.spec import WellControlSpec
-from bores.wells.states import ConnectionSample
+from bores.wells.state import ConnectionSample
 from bores.wells.workspace import WellsWorkspace
 
 __all__ = ["resolve_wells"]

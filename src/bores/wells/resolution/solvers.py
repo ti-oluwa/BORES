@@ -12,7 +12,7 @@ from bores.wells.compile import (
 )
 from bores.wells.hydraulics.base import SurfaceFluidProperties, WellBoreModel
 from bores.wells.resolution.spec import WellControlSpec
-from bores.wells.states import ConnectionSample, PhaseValues
+from bores.wells.state import ConnectionSample, PhaseValues
 from bores.wells.workspace import (
     PerforationWorkspace,
     accumulate_phase_rates,

@@ -25,7 +25,7 @@ from bores.wells.resolution.solvers import (
     solve_producer_rate_mode,
 )
 from bores.wells.resolution.spec import WellControlSpec
-from bores.wells.states import ConnectionSample
+from bores.wells.state import ConnectionSample
 from bores.wells.workspace import WellsWorkspace, build_perforation_workspace
 
 __all__ = ["resolve_well_control"]

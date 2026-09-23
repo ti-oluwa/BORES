@@ -82,19 +82,20 @@ def compile_model(
 
     compiled_wells = None
     if model.wells is not None:
-        permeability = model.reservoir.rock.absolute_permeability
+        permeability = reservoir.rock.absolute_permeability
+        wells = model.wells
         try:
             compiled_wells = compile_well_system(
-                wells=model.wells.wells,
-                controls=model.wells.well_controls,
+                wells=wells.wells,
+                controls=wells.well_controls,
                 grid=reservoir.grid,
                 permeabilities={
                     Orientation.X: permeability.x,
                     Orientation.Y: permeability.y,
                     Orientation.Z: permeability.z,
                 },
-                group_controls=model.wells.group_controls,
-                groups=model.wells.groups,
+                group_controls=wells.group_controls,
+                groups=wells.groups,
                 horizontal_tolerance=horizontal_tolerance,
                 intersection_method=intersection_method,
                 search_radius=search_radius,

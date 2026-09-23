@@ -13,12 +13,12 @@ from bores.utils import none_if_nan
 from bores.wells.base import Wells
 from bores.wells.compile import UNSET_INT, CompiledWellSystem
 from bores.wells.decompile import decompile_limit, decompile_perforations, decompile_well_control
-from bores.wells.states import (
+from bores.wells.state import (
     ConnectionSample,
     PerforationState,
     PhaseValues,
-    WellsStates,
     WellState,
+    WellStates,
 )
 
 __all__ = [
@@ -518,9 +518,9 @@ def build_connection_phase_rates(
 
 def load_wells_states(
     wells: Wells, compiled_system: CompiledWellSystem, workspace: WellsWorkspace
-) -> WellsStates:
+) -> WellStates:
     """
-    Load `WellsStates` from a resolved `WellsWorkspace`.
+    Load `WellStates` from a resolved `WellsWorkspace`.
 
     Only covers wells actually resolved this pass/step. A well whose
     `WellStatus` is still `PENDING` (its BHP is left `NaN` by
@@ -595,4 +595,4 @@ def load_wells_states(
             unit_system=unit_system,
         )
 
-    return WellsStates(states=states, unit_system=unit_system)
+    return WellStates(states=states, unit_system=unit_system)

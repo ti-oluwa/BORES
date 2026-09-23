@@ -33,7 +33,7 @@ from bores.wells.compile import (
 from bores.wells.hydraulics.base import SurfaceFluidProperties, WellBoreModel
 from bores.wells.resolution.engine import resolve_well_control
 from bores.wells.resolution.spec import WellControlSpec
-from bores.wells.states import ConnectionSample
+from bores.wells.state import ConnectionSample
 from bores.wells.workspace import WellsWorkspace
 
 __all__ = ["allocate_group_targets", "get_group_controlled_rate", "redistribute_group_shortfall"]

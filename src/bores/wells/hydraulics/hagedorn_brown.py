@@ -30,7 +30,7 @@ from bores.wells.hydraulics.base import (
     get_unit_system_constant,
     split_liquid_gas,
 )
-from bores.wells.states import ConnectionSample, PhaseValues
+from bores.wells.state import ConnectionSample, PhaseValues
 
 __all__ = [
     "HagedornBrownWellbore",

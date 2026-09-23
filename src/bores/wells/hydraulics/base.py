@@ -8,7 +8,7 @@ from typing_extensions import Self
 
 from bores.constants import c
 from bores.types import Number, UnitConversionTable, UnitSystem
-from bores.wells.states import PhaseValues
+from bores.wells.state import PhaseValues
 
 __all__ = [
     "PressureDrop",

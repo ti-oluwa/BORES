@@ -170,7 +170,7 @@ def _supports_vectorization(
     viscosity_func: typing.Callable[[NumberOrArray[NDimension]], NumberOrArray[NDimension]],
 ) -> bool:
     """
-    Check if both z_factor and viscosity functions support vectorized operations.
+    Check if both Z-factor and viscosity functions support vectorized operations.
 
     :param z_factor_func: Z-factor function
     :param viscosity_func: Viscosity function
@@ -206,29 +206,29 @@ def compute_pseudo_pressures_vectorized(
     clamped_pressures = np.maximum(pressures, 1.0)
 
     # Single vectorized call for all pressures
-    z_factor_arr = np.asarray(z_factor_func(clamped_pressures))  # type: ignore[arg-type]
-    viscosity_arr = np.asarray(viscosity_func(clamped_pressures))  # type: ignore[arg-type]
+    z_factor_array = np.asarray(z_factor_func(clamped_pressures))  # type: ignore[arg-type]
+    viscosity_array = np.asarray(viscosity_func(clamped_pressures))  # type: ignore[arg-type]
 
     # Validate shapes
-    if z_factor_arr.shape != pressures.shape or viscosity_arr.shape != pressures.shape:
+    if z_factor_array.shape != pressures.shape or viscosity_array.shape != pressures.shape:
         raise ValueError(
-            f"Shape mismatch: P={pressures.shape}, z_factor={z_factor_arr.shape}, μ={viscosity_arr.shape}"
+            f"Shape mismatch: P={pressures.shape}, z_factor={z_factor_array.shape}, μ={viscosity_array.shape}"
         )
 
     # Handle invalid values
-    invalid_z_factor = (z_factor_arr <= 0) | ~np.isfinite(z_factor_arr)
-    invalid_viscosity = (viscosity_arr <= 0) | ~np.isfinite(viscosity_arr)
+    invalid_z_factor = (z_factor_array <= 0) | ~np.isfinite(z_factor_array)
+    invalid_viscosity = (viscosity_array <= 0) | ~np.isfinite(viscosity_array)
 
     if np.any(invalid_z_factor):
         logger.warning("Clamping %d invalid Z-factor values", np.sum(invalid_z_factor))
-        z_factor_arr = np.maximum(z_factor_arr, 0.01)
+        z_factor_array = np.maximum(z_factor_array, 0.01)
 
     if np.any(invalid_viscosity):
         logger.warning("Clamping %d invalid viscosity values", np.sum(invalid_viscosity))
-        viscosity_arr = np.maximum(viscosity_arr, 0.001)
+        viscosity_array = np.maximum(viscosity_array, 0.001)
 
     # Compute integrand: 2*P / (μ*z_factor)
-    integrand_array = 2.0 * clamped_pressures / (viscosity_arr * z_factor_arr)
+    integrand_array = 2.0 * clamped_pressures / (viscosity_array * z_factor_array)
 
     # Handle invalid integrand values
     invalid = ~np.isfinite(integrand_array) | (integrand_array < 0)

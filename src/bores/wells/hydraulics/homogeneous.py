@@ -31,7 +31,7 @@ from bores.wells.hydraulics.base import (
     compute_surface_mixture_viscosity,
     get_unit_system_constant,
 )
-from bores.wells.states import ConnectionSample, PhaseValues
+from bores.wells.state import ConnectionSample, PhaseValues
 
 __all__ = [
     "HomogeneousWellbore",

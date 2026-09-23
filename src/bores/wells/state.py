@@ -18,7 +18,7 @@ __all__ = [
     "PerforationState",
     "PhaseValues",
     "WellState",
-    "WellsStates",
+    "WellStates",
 ]
 
 
@@ -253,7 +253,7 @@ class WellState(StoreSerializable):
         )
 
 
-class WellsStates(
+class WellStates(
     StoreSerializable,
     fields={
         "states": typing.Mapping[str, WellState],
@@ -270,7 +270,7 @@ class WellsStates(
         unit_system: UnitSystem | None = None,
     ) -> None:
         """
-        Initialize a `WellsStates` instance.
+        Initialize a `WellStates` instance.
 
         :param states: Mapping from well name to `WellState`.
         :param unit_system: Target unit system for every state. None
@@ -361,11 +361,11 @@ class WellsStates(
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Returns a  new `WellsStates` in the *target* unit system.
+        Returns a  new `WellStates` in the *target* unit system.
 
         :param target: Target unit system.
         :param table: Optional custom conversion table.
-        :returns: New `WellsStates` with every state converted to target.
+        :returns: New `WellStates` with every state converted to target.
         """
         if target == self.unit_system:
             return self

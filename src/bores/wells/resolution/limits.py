@@ -22,7 +22,7 @@ from bores.wells.resolution.solvers import (
     solve_connection_pressures_and_rates,
 )
 from bores.wells.resolution.spec import WellControlSpec
-from bores.wells.states import ConnectionSample, PhaseValues
+from bores.wells.state import ConnectionSample, PhaseValues
 from bores.wells.workspace import PerforationWorkspace
 
 __all__ = ["apply_limits"]

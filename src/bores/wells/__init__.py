@@ -53,12 +53,12 @@ from bores.wells.hydraulics import (
 )
 from bores.wells.indices import PerforationIndex, WellIndex, build_wells_indices
 from bores.wells.model import WellSystem
-from bores.wells.states import (
+from bores.wells.state import (
     ConnectionSample,
     PerforationState,
     PhaseValues,
-    WellsStates,
     WellState,
+    WellStates,
 )
 from bores.wells.trajectory import TrajectoryStation, WellTrajectory
 
@@ -99,12 +99,12 @@ __all__ = [
     "WellGroups",
     "WellIndex",
     "WellState",
+    "WellStates",
     "WellStatus",
     "WellSystem",
     "WellTrajectory",
     "WellType",
     "Wells",
-    "WellsStates",
     "WorkoverAction",
     "beggs_and_brill_wellbore",
     "build_wells_indices",
