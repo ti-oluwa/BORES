@@ -2,6 +2,7 @@
 
 import logging
 import typing
+import warnings
 from contextvars import ContextVar, Token
 from uuid import uuid4
 
@@ -15,6 +16,7 @@ from bores.serde.stores import StoreSerializable
 from bores.types import UnitConversionFactors, UnitConversionTable, UnitSystem
 
 __all__ = [
+    "CONSTANTS",
     "UNIT_CONVERSION_TABLE",
     "Constant",
     "Constants",
@@ -22,8 +24,9 @@ __all__ = [
     "build_unit_conversion_table",
     "c",
     "get_constant",
+    "get_constants",
     "get_conversion_factors",
-    "set_default_constants",
+    "set_constants",
 ]
 
 logger = logging.getLogger(__name__)
@@ -161,7 +164,7 @@ class ConstantFactory(Serializable):
         return Constant.load(data)
 
 
-def _sat_eps_factory() -> float:
+def _get_saturation_epsilon() -> float:
     """
     Saturation clamp epsilon, scaled to the active floating-point dtype.
 
@@ -174,15 +177,15 @@ def _sat_eps_factory() -> float:
     return max(dtype_based, floor)
 
 
-def _min_pore_space_factory() -> float:
+def _get_minimum_pore_space() -> float:
     """
     Minimum mobile pore-space guard, matched to the saturation epsilon so
     validity guards and saturation clamps stay numerically consistent.
     """
-    return _sat_eps_factory()
+    return _get_saturation_epsilon()
 
 
-def _fd_eps_factory() -> float:
+def _get_finite_difference_epsilon() -> float:
     """
     Central finite-difference step, scaled to the active dtype.
     Optimal step is cbrt(machine_epsilon); floored at 1e-5 for float64.
@@ -797,7 +800,7 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         unit="points",
     ),
     "SATURATION_EPSILON": ConstantFactory(
-        factory=_sat_eps_factory,
+        factory=_get_saturation_epsilon,
         description=(
             "Clamp distance from 0 and 1 for normalised effective saturations in "
             "capillary-pressure and relative-permeability correlations with "
@@ -810,7 +813,7 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         unit="fraction",
     ),
     "MINIMUM_MOBILE_PORE_SPACE": ConstantFactory(
-        factory=_min_pore_space_factory,
+        factory=_get_minimum_pore_space,
         description=(
             "Minimum mobile pore-space fraction below which the corresponding "
             "phase relative-permeability or capillary-pressure is forced to zero. Matched to `SATURATION_EPSILON` so "
@@ -821,7 +824,7 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         unit="fraction",
     ),
     "FINITE_DIFFERENCE_EPSILON": ConstantFactory(
-        factory=_fd_eps_factory,
+        factory=_get_finite_difference_epsilon,
         description=(
             "Central finite-difference step for mixing-rule Jacobians and "
             "oil-wet relperm derivatives. Evaluated as max(cbrt(eps), 1e-5) "
@@ -1159,7 +1162,7 @@ class ConstantsContext:
     `Constants` instance is restored.
     """
 
-    __slots__ = ("_constants", "_id", "_token")
+    __slots__ = ("_constants", "_entry_depth", "_id", "_token")
 
     def __init__(self, constants: Constants) -> None:
         """
@@ -1168,6 +1171,7 @@ class ConstantsContext:
         :param constants: New `Constants` instance to use within the context
         """
         self._constants = constants
+        self._entry_depth = 0
         self._id = uuid4().hex
         self._token: Token[tuple[Constants, str]] | None = None
 
@@ -1187,13 +1191,34 @@ class ConstantsContext:
 
         :return: The new `Constants` instance
         """
+        current_context_id = _constants_context.get()[1]
+        if current_context_id == self._id:
+            warnings.warn(
+                f"Constant context {current_context_id!r} is already active; re-entering it is unnecessary.",
+                UserWarning,
+                stacklevel=2,
+            )
+            self._entry_depth += 1
+            return self._constants
+
+        if self._entry_depth:
+            raise RuntimeError(
+                f"Constant context {current_context_id!r} is already active in another context."
+            )
+
         self._token = _constants_context.set((self._constants, self._id))
+        self._entry_depth = 1
         return self._constants
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
         """Exit the context, restoring the previous `Constants` instance."""
-        if self._token is not None:
+        if self._entry_depth == 0 or _constants_context.get()[1] != self._id:
+            return
+
+        self._entry_depth -= 1
+        if self._entry_depth == 0 and self._token is not None:
             _constants_context.reset(self._token)
+            self._token = None
 
 
 @typing.final
@@ -1216,7 +1241,7 @@ class __ConstantsProxy:
         return _constants_context.get()[1]
 
     @property
-    def _constants(self) -> Constants:
+    def value(self) -> Constants:
         """
         Get the current context's `Constants` instance.
 
@@ -1236,7 +1261,7 @@ class __ConstantsProxy:
         :return: Value of the constant
         :raises AttributeError: If the constant does not exist
         """
-        return getattr(self._constants, name)
+        return getattr(self.value, name)
 
     def __getitem__(self, name: str) -> Constant:
         """
@@ -1246,18 +1271,23 @@ class __ConstantsProxy:
         :return: Constant object
         :raises KeyError: If the constant does not exist
         """
-        return self._constants[name]
+        return self.value[name]
 
     def __dir__(self):
         default = super().__dir__()
-        return sorted({*default, *self._constants.__dir__()})
+        return sorted({*default, *self.value.__dir__()})
 
     def _ipython_key_completions_(self) -> list[str]:
-        return self._constants._ipython_key_completions_()
+        return self.value._ipython_key_completions_()
 
 
-c = __ConstantsProxy()
+CONSTANTS = c = __ConstantsProxy()
 """Global proxy to access physical constants and conversion factors."""
+
+
+def get_constants() -> Constants:
+    """Return the `Constants` instance active in the current context."""
+    return _constants_context.get()[0]
 
 
 def get_constant(name: str) -> Constant | None:
@@ -1267,10 +1297,10 @@ def get_constant(name: str) -> Constant | None:
     :param name: Name of the constant
     :return: `Constant` object or None if not found
     """
-    return c._constants.get_constant(name)
+    return c.value.get_constant(name)
 
 
-def set_default_constants(constants: Constants, /) -> None:
+def set_constants(constants: Constants, /) -> None:
     """
     Set/override the default (process local) `Constants` used.
 
