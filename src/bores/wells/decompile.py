@@ -4,7 +4,7 @@ import attrs
 
 from bores.types import FluidPhase, UnitSystem
 from bores.utils import none_if_nan
-from bores.wells.base import AnyPerforation, CompletionStatus, Well, Wells, WellStatus, WellType
+from bores.wells.base import CompletionStatus, Perforation, Well, Wells, WellStatus, WellType
 from bores.wells.compile import (
     UNSET_INT,
     CompiledGroupControls,
@@ -153,20 +153,20 @@ def get_completion_status(tag: int) -> CompletionStatus:
 
 
 def decompile_perforation(
-    original: AnyPerforation, perforations: CompiledPerforations, row: int
-) -> AnyPerforation:
+    original: Perforation, perforations: CompiledPerforations, row: int
+) -> Perforation:
     """
     Rebuilds one rich perforation from a single compiled connection row.
 
     `original` supplies every field the compiled layer doesn't carry (the
-    depth range, or the measured-depth range and trajectory reference for
-    an `MDPerforation`). `status`, `schedule_status`, `skin`,
+    TVD range, or the measured-depth range, for a trajectory well).
+    `status`, `schedule_status`, `skin`,
     `wellbore_radius`, and `saturation_region` are all overridden from the
     compiled row instead, so this reflects any in-place patch applied to
     the compiled layer since compile time (a `WELOPEN` event, a `WPIMULT`
     reissue) rather than trusting a possibly-stale original.
 
-    :param original: The source rich `Perforation`/`MDPerforation`,
+    :param original: The source rich `Perforation`,
         matched via `CompiledPerforations.perforation_indices`.
     :param perforations: `CompiledPerforations` for the whole system.
     :param row: The compiled connection row to read current state from.
@@ -185,7 +185,7 @@ def decompile_perforation(
 
 def decompile_perforations(
     wells: Wells, well_name: str, perforations: CompiledPerforations, well_row: int
-) -> tuple[AnyPerforation, ...]:
+) -> tuple[Perforation, ...]:
     """
     Rebuilds one well's per-connection rich perforations from its rows of
     `CompiledPerforations`.
@@ -207,7 +207,7 @@ def decompile_perforations(
     :param perforations: `CompiledPerforations` for the whole system.
     :param well_row: This well's row, positionally aligned with
         `CompiledWellSystem.names`.
-    :returns: One rich `AnyPerforation` per compiled connection row for
+    :returns: One rich `Perforation` per compiled connection row for
         this well, in `CompiledPerforations` row order.
     """
     row_start = perforations.well_offsets[well_row]
@@ -215,9 +215,7 @@ def decompile_perforations(
     rich_perforations = wells[well_name].perforations
     return tuple(
         decompile_perforation(
-            original=rich_perforations[perforations.perforation_indices[row]],
-            perforations=perforations,
-            row=row,
+            rich_perforations[perforations.perforation_indices[row]], perforations, row
         )
         for row in range(row_start, row_end)
     )
@@ -225,7 +223,7 @@ def decompile_perforations(
 
 def decompile_well_perforations(
     wells: Wells, well_name: str, perforations: CompiledPerforations, well_row: int
-) -> tuple[AnyPerforation, ...]:
+) -> tuple[Perforation, ...]:
     """
     Rebuilds one well's rich perforations at completion granularity - one
     entry per original `Well.perforations` entry, not one per grid cell -
@@ -238,14 +236,14 @@ def decompile_well_perforations(
     completion). This collapses each such group back to one
     representative perforation using its first row, so it cannot show
     that kind of within-completion divergence. Use `decompile_perforations`
-    instead when that level of detail matters. It matches `PerforationState`,
-    one entry per connection.
+    instead when that level of detail matters - it matches
+    `PerforationState`, one entry per connection.
 
     :param wells: The original rich `Wells` this system was compiled from.
     :param well_name: This well's name, to look it up in `wells`.
     :param perforations: `CompiledPerforations` for the whole system.
     :param well_row: This well's row.
-    :returns: One rich `AnyPerforation` per original completion, in the
+    :returns: One rich `Perforation` per original completion, in the
         same order as the source `Well.perforations`.
     """
     row_start = perforations.well_offsets[well_row]
@@ -510,7 +508,8 @@ def decompile_well_system(
     `wells`, `well_controls`, and `group_controls` are rebuilt entirely
     from `compiled_system`, so they reflect any in-place patch made to it
     since compile time. `default_wellbore`, `wellbore_overrides`,
-    `groups`, and `control_spec` are carried over from `well_system` unchanged.
+    `groups`, and `control_spec` are carried over from `well_system`
+    unchanged.
 
     :param well_system: The original rich `WellSystem` `compiled_system`
         was compiled from.

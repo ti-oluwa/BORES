@@ -2,7 +2,6 @@
 
 from bores.wells.base import (
     CompletionStatus,
-    MDPerforation,
     Perforation,
     Well,
     Wells,
@@ -79,7 +78,6 @@ __all__ = [
     "InjectorControl",
     "InjectorControlMode",
     "Limit",
-    "MDPerforation",
     "Perforation",
     "PerforationIndex",
     "PerforationState",

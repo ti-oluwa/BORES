@@ -39,19 +39,6 @@ __all__ = [
     "woldesemayat_ghajar_wellbore",
 ]
 
-_STANDARD_ATMOSPHERE_PASCALS: typing.Final[float] = 101_325.0
-"""Standard atmosphere, in pascals. Fixed by definition, not this model's own unit system."""
-
-_DYNE_PER_CM_TO_NEWTON_PER_M: typing.Final[float] = 0.001
-"""`gas_liquid_surface_tension` is always in dyne/cm in this package, regardless of
-this model's own unit system, the same assumption Hagedorn & Brown makes elsewhere."""
-
-_STANDARD_GRAVITY_SI: typing.Final[float] = 9.80665
-"""Standard gravity in metres per second squared, fixed by definition for the
-drift-velocity term's own SI calculation. A literal, not `c.<NAME>`, since
-`bores.constants`'s proxy can't be resolved inside a numba `njit` function;
-see `compute_woldesemayat_ghajar_void_fraction`."""
-
 
 class WoldesemayatGhajarWellbore(typing.NamedTuple):
     """Configuration for the Woldesemayat and Ghajar (2007) wellbore hydraulics model."""
@@ -111,6 +98,36 @@ class WoldesemayatGhajarWellbore(typing.NamedTuple):
     Multiplies a pressure in this model's unit system to get pascals,
     for the same reason as `si_length_factor`.
     """
+
+    standard_gravity_si: Number
+    """
+    `c.ACCELERATION_DUE_TO_GRAVITY_METER_PER_SECONDS_SQUARE`, resolved
+    here rather than as a literal in the njit'd functions that need it
+    (`bores.constants`'s proxy can't be resolved inside a numba `njit`
+    function), for the drift-velocity term's own SI calculation. Not the
+    same thing as `gravitational_acceleration`, which is in this model's
+    own unit system and used for the actual hydrostatic term.
+    """
+
+    standard_atmosphere_si: Number
+    """`c.STANDARD_PRESSURE_PASCAL`, resolved here for the same reason as
+    `standard_gravity_si` - the drift-velocity term's own atmospheric-to-local
+    pressure ratio."""
+
+    dyne_per_cm_to_newton_per_m: Number
+    """`c.DYNE_PER_CENTIMETER_TO_NEWTON_PER_METER`, resolved here for the
+    same reason as `standard_gravity_si`. `gas_liquid_surface_tension` is
+    always in dyne/cm in this package, regardless of this model's own
+    unit system, the same assumption Hagedorn & Brown makes elsewhere."""
+
+    centipoise_to_pascal_second: Number
+    """`c.CENTIPOISE_TO_PASCAL_SECONDS`, resolved here for the same reason
+    as `standard_gravity_si`. Viscosity is always in cP in this package,
+    regardless of this model's own unit system, the same assumption
+    Hagedorn & Brown makes elsewhere. Used only for `compute_segment_drop`'s
+    own Reynolds number, which must be genuinely dimensionless; the
+    friction and hydrostatic terms themselves stay in this model's native
+    units throughout, converted by `hydrostatic_scale` as usual."""
 
     unit_system: UnitSystem
     """This model's unit system."""
@@ -242,6 +259,10 @@ def woldesemayat_ghajar_wellbore(
         si_length_factor=si_factors["length"],
         si_density_factor=si_factors["density"],
         si_pressure_factor=si_factors["pressure"],
+        standard_gravity_si=c.ACCELERATION_DUE_TO_GRAVITY_METER_PER_SECONDS_SQUARE,
+        standard_atmosphere_si=c.STANDARD_PRESSURE_PASCAL,
+        dyne_per_cm_to_newton_per_m=c.DYNE_PER_CENTIMETER_TO_NEWTON_PER_METER,
+        centipoise_to_pascal_second=c.CENTIPOISE_TO_PASCAL_SECONDS,
         unit_system=unit_system,
     )
     return WellBoreModel(name="woldesemayat_ghajar", options=options)
@@ -260,6 +281,9 @@ def compute_woldesemayat_ghajar_void_fraction(
     si_length_factor: Number,
     si_density_factor: Number,
     si_pressure_factor: Number,
+    standard_gravity_si: Number,
+    standard_atmosphere_si: Number,
+    dyne_per_cm_to_newton_per_m: Number,
 ) -> Number:
     """
     Computes void fraction (in-situ gas fraction) per Woldesemayat and Ghajar (2007).
@@ -268,7 +292,7 @@ def compute_woldesemayat_ghajar_void_fraction(
     `si_density_factor`, and `si_pressure_factor` convert into SI
     internally, since the drift-velocity term is only dimensionally
     consistent there. `gas_liquid_surface_tension` is always dyne/cm,
-    converted to N/m directly.
+    converted to N/m directly via `dyne_per_cm_to_newton_per_m`.
 
     The original paper's inclination angle is measured from horizontal,
     with `0` horizontal and increasing upward; this package measures
@@ -277,6 +301,11 @@ def compute_woldesemayat_ghajar_void_fraction(
     so `cos(angle_from_horizontal) = sin(inclination_from_vertical)` and
     `sin(angle_from_horizontal) = cos(inclination_from_vertical)`; both
     are applied below rather than converting the angle itself.
+
+    `standard_gravity_si`/`standard_atmosphere_si`/`dyne_per_cm_to_newton_per_m`
+    are `c.<NAME>` constants, resolved once in `woldesemayat_ghajar_wellbore`
+    and passed in here rather than referenced directly, since
+    `bores.constants`'s proxy can't be resolved inside a numba `njit` function.
 
     :param superficial_liquid_velocity: Liquid rate divided by cross-sectional area.
     :param superficial_gas_velocity: Gas rate divided by cross-sectional area.
@@ -293,6 +322,9 @@ def compute_woldesemayat_ghajar_void_fraction(
         system to get kilograms per cubic metre.
     :param si_pressure_factor: Multiplies a pressure in this model's unit
         system to get pascals.
+    :param standard_gravity_si: `c.ACCELERATION_DUE_TO_GRAVITY_METER_PER_SECONDS_SQUARE`.
+    :param standard_atmosphere_si: `c.STANDARD_PRESSURE_PASCAL`.
+    :param dyne_per_cm_to_newton_per_m: `c.DYNE_PER_CENTIMETER_TO_NEWTON_PER_METER`.
     :returns: Void fraction, between `0` and `1`.
     """
     mixture_velocity = superficial_liquid_velocity + superficial_gas_velocity
@@ -312,11 +344,11 @@ def compute_woldesemayat_ghajar_void_fraction(
     diameter_si = tubing_inner_diameter * si_length_factor
     liquid_density_si = liquid_density * si_density_factor
     gas_density_si = gas_density * si_density_factor
-    surface_tension_si = gas_liquid_surface_tension * _DYNE_PER_CM_TO_NEWTON_PER_M
+    surface_tension_si = gas_liquid_surface_tension * dyne_per_cm_to_newton_per_m
     pressure_si = max(pressure * si_pressure_factor, 1.0)
 
     buoyancy_term = max(
-        _STANDARD_GRAVITY_SI
+        standard_gravity_si
         * diameter_si
         * surface_tension_si
         * (1.0 + math.sin(inclination_from_vertical))
@@ -325,7 +357,7 @@ def compute_woldesemayat_ghajar_void_fraction(
         0.0,
     )
     inclination_factor = (1.22 + 1.22 * math.cos(inclination_from_vertical)) ** (
-        _STANDARD_ATMOSPHERE_PASCALS / pressure_si
+        standard_atmosphere_si / pressure_si
     )
     drift_velocity_si = 2.9 * buoyancy_term**0.25 * inclination_factor
     drift_velocity = drift_velocity_si / si_length_factor if si_length_factor > 0.0 else 0.0
@@ -384,6 +416,9 @@ def compute_segment_drop(
         si_length_factor=model.si_length_factor,
         si_density_factor=model.si_density_factor,
         si_pressure_factor=model.si_pressure_factor,
+        standard_gravity_si=model.standard_gravity_si,
+        standard_atmosphere_si=model.standard_atmosphere_si,
+        dyne_per_cm_to_newton_per_m=model.dyne_per_cm_to_newton_per_m,
     )
     in_situ_holdup = 1.0 - void_fraction
     in_situ_density = liquid_density * in_situ_holdup + gas_density * void_fraction
@@ -402,8 +437,24 @@ def compute_segment_drop(
         if math.isnan(model.tubing_roughness)
         else model.tubing_roughness / model.tubing_inner_diameter
     )
+    # Reynolds number must come out the same regardless of unit system, since it's
+    # what compute_friction_factor's laminar/turbulent thresholds and Darcy/Colebrook
+    # formulas are calibrated against - none of that has any unit-system slack built
+    # in. density/velocity/diameter are already correctly rescaled between unit
+    # systems by model construction, but viscosity is always cP (see
+    # compute_woldesemayat_ghajar_void_fraction's own docstring on this), so computing
+    # the ratio directly in native units would silently pick up a spurious unit-system
+    # dependence: only the mass/length units of density*velocity*diameter change
+    # between systems, cP does not, so the ratio isn't actually dimensionless unless
+    # everything is converted to one consistent system first. SI is the one already
+    # available via si_length_factor/si_density_factor; centipoise_to_pascal_second
+    # (cP -> Pa*s) is the same fixed, unit-system-independent conversion
+    # dyne_per_cm_to_newton_per_m already applies to surface tension.
     reynolds_number = (
-        in_situ_density * mixture_velocity * model.tubing_inner_diameter / in_situ_viscosity
+        (in_situ_density * model.si_density_factor)
+        * (mixture_velocity * model.si_length_factor)
+        * (model.tubing_inner_diameter * model.si_length_factor)
+        / (in_situ_viscosity * model.centipoise_to_pascal_second)
     )
     if reynolds_number <= 0.0:
         friction_drop = 0.0

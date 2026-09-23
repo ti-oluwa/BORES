@@ -9,6 +9,7 @@ import numpy.typing as npt
 from typing_extensions import Self
 
 from bores.constants import c, get_conversion_factors
+from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.types import (
     FrictionMethod,
@@ -98,9 +99,15 @@ class GrayWellbore(typing.NamedTuple):
         :param target: Target unit system.
         :param table: Optional custom unit-conversion table.
         :returns: This model, converted to `target`.
+        :raises ValidationError: If `target` isn't `UnitSystem.FIELD` - see `gray_wellbore`.
         """
         if target == self.unit_system:
             return self
+        if target != UnitSystem.FIELD:
+            raise ValidationError(
+                f"`GrayWellbore` only supports UnitSystem.FIELD; got {target!r}. See "
+                "`gray_wellbore`'s own docstring for why."
+            )
 
         factors = get_conversion_factors(self.unit_system, target, table=table)
         length_factor = factors["length"]
@@ -134,11 +141,13 @@ def gray_wellbore(
 
     Gray (1974) is an empirical correlation for vertical gas and gas
     condensate wells carrying a light liquid load, developed as part of
-    API 14B and widely used for mist-flow gas wells. This uses Field units
-    throughout. The holdup and effective-roughness correlations are
-    calibrated for velocities in ft/s, densities in lbm/ft3, surface
-    tension in dyne/cm, and diameter in ft, the same assumption Hagedorn
-    & Brown makes elsewhere in this package.
+    API 14B and widely used for mist-flow gas wells. Field units only -
+    unlike Woldesemayat and Ghajar elsewhere in this package, Gray's
+    holdup and effective-roughness correlations have no general
+    unit-system conversion available: their constants are calibrated
+    for velocities in ft/s, densities in lbm/ft3, surface tension in
+    dyne/cm, and diameter in ft, the same limitation Hagedorn & Brown
+    has elsewhere in this package. `unit_system` must be `FIELD`.
 
     Unlike Beggs & Brill or Hagedorn & Brown, Gray does not carry
     gas/liquid slip into the friction term. Friction uses the no-slip
@@ -152,7 +161,7 @@ def gray_wellbore(
     :param tubing_roughness: Absolute dry-pipe roughness. `None` for a smooth pipe.
     :param friction_method: Which single-phase friction-factor correlation
         to apply, using Gray's own effective roughness.
-    :param unit_system: This model's unit system.
+    :param unit_system: This model's unit system. Must be `UnitSystem.FIELD`.
     :param gravitational_acceleration: Acceleration due to gravity. Resolved
         from `unit_system`'s standard gravity if not given.
     :param laminar_reynolds_limit: Reynolds number below which flow is
@@ -165,14 +174,20 @@ def gray_wellbore(
     :param friction_tolerance: Colebrook convergence tolerance.
         `c.COLEBROOK_TOLERANCE` if not given.
     :returns: `WellBoreModel(name="gray", options=<GrayWellbore>)`.
+    :raises ValidationError: If `unit_system` isn't `UnitSystem.FIELD`.
     """
+    if unit_system != UnitSystem.FIELD:
+        raise ValidationError(
+            f"`GrayWellbore` only supports UnitSystem.FIELD; got {unit_system!r}. Gray's own "
+            "holdup and effective-roughness correlations are calibrated to specific field "
+            "units (ft/s, lbm/ft3, dyne/cm, ft), with no general unit-system conversion "
+            "available for them, the same limitation Hagedorn & Brown has elsewhere in this "
+            "package."
+        )
     if gravitational_acceleration is None:
         gravitational_acceleration = typing.cast(
             Number, c.ACCELERATION_DUE_TO_GRAVITY_FEET_PER_SECONDS_SQUARE
         )
-        if unit_system != UnitSystem.FIELD:
-            factors = get_conversion_factors(UnitSystem.FIELD, unit_system)
-            gravitational_acceleration = gravitational_acceleration * factors["length"]
 
     options = GrayWellbore(
         tubing_inner_diameter=tubing_inner_diameter,

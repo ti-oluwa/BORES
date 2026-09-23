@@ -37,7 +37,7 @@ from bores.types import (
     UnitSystem,
 )
 from bores.utils import scale
-from bores.wells.base import AnyPerforation, MDPerforation, Perforation, Wells
+from bores.wells.base import Perforation, Wells
 from bores.wells.indices.perforations import (
     PerforationIndex,
     resolve_md_perforations_indices,
@@ -353,7 +353,7 @@ def compute_equivalent_radius_well_index(
 
 
 def resolve_connection_factor(
-    perforation: AnyPerforation,
+    perforation: Perforation,
     grid: Grid,
     cell_index: Integer,
     partial_penetration_fraction: Number,
@@ -388,7 +388,7 @@ def resolve_connection_factor(
     ky = permeabilities[Orientation.Y]
     kz = permeabilities[Orientation.Z]
 
-    if isinstance(perforation, MDPerforation):
+    if perforation.top_md is not None:
         # No discrete axis to run Peaceman against so we always use isotropic
         # equivalent-radius, using the geometric-mean permeability and this
         # connection's true (MD-fraction-scaled) length within the cell.
@@ -484,8 +484,8 @@ def build_wells_indices(
     """
     if grid.unit_system != wells.unit_system:
         raise ValidationError(
-            f"Grid `unit_system` ({grid.unit_system.value}) != Wells "
-            f"`unit_system` ({wells.unit_system.value})."
+            f"`Grid.unit_system` ({grid.unit_system.value}) != `Wells."
+            f"unit_system` ({wells.unit_system.value})."
         )
 
     result: dict[str, WellIndex] = {}

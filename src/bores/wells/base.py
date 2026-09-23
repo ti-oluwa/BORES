@@ -25,7 +25,6 @@ from bores.wells.trajectory import WellTrajectory
 
 __all__ = [
     "CompletionStatus",
-    "MDPerforation",
     "Perforation",
     "Well",
     "WellStatus",
@@ -124,24 +123,44 @@ class WellStatus(enum.Enum):
 @attrs.frozen(kw_only=True, slots=True)
 class Perforation(Serializable):
     """
-    A single completion interval on a vertical well, defined by true
-    vertical depth.
+    A single completion interval on a well, defined by true vertical
+    depth, measured depth, or both.
 
-    Two `Perforation` instances with identical fields are interchangeable;
-    nothing about a `Perforation` depends on which well it belongs to. Only
-    valid on a `Well` with no `trajectory`.
+    Give `top_depth`/`bottom_depth` for a well with no `trajectory.
+    Give `top_md`/`bottom_md` for a well with one,
+    since true vertical depth is not invertible along a horizontal or
+    S-shaped section (multiple measured depths can share the same
+    TVD), so measured depth is the only interval representation that
+    identifies a unique location on an arbitrary path there; that
+    well's own TVD at this interval is then derived from
+    `top_md`/`bottom_md` through the trajectory's own interpolation,
+    not given directly. Both may be given together, on a trajectory
+    well, if the TVD is already known from some other source.
 
-    See `MDPerforation` for a well with one.
+    Two `Perforation` instances with identical fields are
+    interchangeable; nothing about a `Perforation` depends on which
+    well it belongs to, beyond `top_md`/`bottom_md` needing that well's
+    own `trajectory` to mean anything.
     """
 
-    top_depth: Number
+    top_depth: Number | None = None
     """
     Positive-down depth, same convention as `Grid.vertex_coordinates`
-    z-axis and `Grid.cell_center_depths`.
+    z-axis and `Grid.cell_center_depths`. Required on a well with no
+    `trajectory`; derived from `top_md` there instead, on one that has one.
     """
 
-    bottom_depth: Number
-    """Equals `top_depth` for a point perforation. Validated `>= top_depth`."""
+    bottom_depth: Number | None = None
+    """Equals `top_depth` for a point perforation. Validated `>= top_depth`, when given."""
+
+    top_md: Number | None = None
+    """
+    Measured depth. Must fall within the owning `Well`'s trajectory
+    range. Only valid on a well with a `trajectory`.
+    """
+
+    bottom_md: Number | None = None
+    """Equals `top_md` for a point perforation. Validated `>= top_md`, when given."""
 
     skin: Number = 0.0
     """
@@ -183,12 +202,18 @@ class Perforation(Serializable):
     direction: Orientation | None = None
     """
     `bores.typing.Orientation` (`X`/`Y`/`Z`/`UNSET`). `None` means
-    `wells.indices` resolves a direction.
+    `wells.indices` resolves a direction. Only meaningful when
+    `top_md`/`bottom_md` aren't given: Peaceman's formula assumes a
+    wellbore aligned with a principal permeability axis, which an
+    arbitrary trajectory azimuth generally isn't, so a completion with
+    `top_md`/`bottom_md` set always resolves through the isotropic
+    equivalent-radius well index instead, never Peaceman's formula,
+    regardless of `direction`.
     """
 
     partial_penetration_fraction: Number | None = None
     """
-    **Not set by the user.** 
+    **Not to be set by the user.** 
 
     Populated during perforation indices computation (overlap-length /
     cell-thickness ratio). `None` on a freshly constructed `Perforation` is
@@ -196,9 +221,29 @@ class Perforation(Serializable):
     """
 
     def __attrs_post_init__(self) -> None:
-        if self.bottom_depth < self.top_depth:
+        has_tvd = self.top_depth is not None or self.bottom_depth is not None
+        has_md = self.top_md is not None or self.bottom_md is not None
+        if not has_tvd and not has_md:
+            raise ValidationError(
+                "Give `top_depth`/`bottom_depth`, `top_md`/`bottom_md`, or both."
+            )
+        if (self.top_depth is None) != (self.bottom_depth is None):
+            raise ValidationError("`top_depth` and `bottom_depth` must be given together.")
+        if self.top_depth is not None and self.bottom_depth < self.top_depth:  # type: ignore[operator]
             raise ValidationError(
                 f"`bottom_depth` ({self.bottom_depth}) must be >= `top_depth` ({self.top_depth})."
+            )
+        if (self.top_md is None) != (self.bottom_md is None):
+            raise ValidationError("`top_md` and `bottom_md` must be given together.")
+        if self.top_md is not None and self.bottom_md < self.top_md:  # type: ignore[operator]
+            raise ValidationError(
+                f"`bottom_md` ({self.bottom_md}) must be >= `top_md` ({self.top_md})."
+            )
+        if self.direction is not None and has_md:
+            raise ValidationError(
+                "`direction` only applies to a TVD-based completion; it has no effect once "
+                "`top_md`/`bottom_md` are given, since that always resolves through the "
+                "isotropic equivalent-radius well index instead of Peaceman's formula."
             )
         if self.wellbore_radius <= 0:
             raise ValidationError("`wellbore_radius` must be positive.")
@@ -214,7 +259,10 @@ class Perforation(Serializable):
 
     @property
     def is_point_perforation(self) -> bool:
-        """`True` if `top_depth == bottom_depth` (no completion length)."""
+        """`True` if the given interval (measured depth, if given, else true
+        vertical depth) has zero length."""
+        if self.top_md is not None:
+            return self.top_md == self.bottom_md
         return self.top_depth == self.bottom_depth
 
     @property
@@ -224,118 +272,15 @@ class Perforation(Serializable):
 
     @property
     def length(self) -> Number:
-        """`bottom_depth - top_depth`. Zero for a point perforation."""
-        return self.bottom_depth - self.top_depth
-
-
-@attrs.frozen(kw_only=True, slots=True)
-class MDPerforation(Serializable):
-    """
-    A single completion interval on a well with a `WellTrajectory`, defined
-    by measured depth rather than true vertical depth.
-
-    True vertical depth is not invertible along a horizontal or S-shaped
-    section, multiple measured depths can share the same TVD, so
-    measured depth is the only interval representation that identifies a
-    unique location on an arbitrary path.
-
-    Carries no `direction` field, unlike `Perforation`, orientation
-    comes from the trajectory's local tangent at this interval, not a discrete axis
-    choice, and wells indices computations never runs Peaceman's formula against an
-    `MDPerforation` connection for the same reason. As Peaceman's formula
-    assumes a wellbore aligned with a principal permeability axis, which an
-    arbitrary trajectory azimuth generally isn't.
-
-    Therefore, connections at an `MDPerforation` always resolve through the isotropic
-    equivalent-radius well index instead.
-    """
-
-    top_md: Number
-    """Measured depth. Must fall within the owning `Well`'s trajectory range."""
-
-    bottom_md: Number
-    """Equals `top_md` for a point perforation. Validated `>= top_md`."""
-
-    skin: Number = 0.0
-    """Dimensionless skin factor."""
-
-    wellbore_radius: Number = 0.25
-    """Perforation radius."""
-
-    status: CompletionStatus = CompletionStatus.OPEN
-    """See `CompletionStatus`."""
-
-    schedule_status: WellStatus = WellStatus.ACTIVE
-    """
-    See `WellStatus`. Independent of `status`: a perforation added by a
-    `COMPDAT` record later in the schedule can be `WellStatus.PENDING`
-    while every already-active sibling perforation on the same well is
-    `ACTIVE`, and a `WellStatus.PENDING` perforation can still carry
-    `CompletionStatus.SHUT` for when it does activate.
-    """
-
-    saturation_region: int | None = None
-
-    connection_factor_override: Number | None = None
-    """
-    When present, `wells.indices` uses this directly instead of
-    computing an equivalent-radius well index.
-    """
-
-    connection_factor_multiplier: Number | None = None
-    """
-    Deck `WPIMULT`. Scales the computed well index rather than replacing
-    it. Applied after `connection_factor_override`, if that's also set,
-    though the two would not normally both be present on one perforation.
-    """
-
-    partial_penetration_fraction: Number | None = None
-    """
-    **Not set by the user.** Populated by `wells.perforations.resolve_perforations_indices`. 
-    `None` on a freshly constructed `MDPerforation` is the correct/expected state. 
-
-    Validated: if set, must be in `(0, 1]`.
-    """
-
-    def __attrs_post_init__(self) -> None:
-        if self.bottom_md < self.top_md:
-            raise ValidationError(
-                f"`bottom_md` ({self.bottom_md}) must be >= `top_md` ({self.top_md})."
-            )
-        if self.wellbore_radius <= 0:
-            raise ValidationError("`wellbore_radius` must be positive.")
-        if self.connection_factor_override is not None and (self.connection_factor_override <= 0):
-            raise ValidationError("`connection_factor_override` must be positive.")
-        if self.partial_penetration_fraction is not None and not (
-            0 < self.partial_penetration_fraction <= 1
-        ):
-            raise ValidationError(
-                "`partial_penetration_fraction` must be in (0, 1]; got "
-                f"{self.partial_penetration_fraction}."
-            )
-
-    @property
-    def is_point_perforation(self) -> bool:
-        """`True` if `top_md == bottom_md` (no completion length)."""
-        return self.top_md == self.bottom_md
-
-    @property
-    def is_active(self) -> bool:
-        """`True` if `schedule_status is WellStatus.ACTIVE`."""
-        return self.schedule_status is WellStatus.ACTIVE
-
-    @property
-    def length(self) -> Number:
         """
-        `bottom_md - top_md`.
-
-        Measured-depth length, not a true vertical depth length;
-        along a horizontal section these differ substantially.
+        `bottom_md - top_md` if measured depth is given, else `bottom_depth
+        - top_depth`. Zero for a point perforation. Measured-depth length,
+        when given, is not a true-vertical-depth length; along a
+        horizontal section these differ substantially.
         """
-        return self.bottom_md - self.top_md
-
-
-AnyPerforation = Perforation | MDPerforation
+        if self.top_md is not None:
+            return self.bottom_md - self.top_md  # type: ignore[operator]
+        return self.bottom_depth - self.top_depth  # type: ignore[operator]
 
 
 @attrs.frozen(kw_only=True, slots=True)
@@ -356,10 +301,10 @@ class Well(Serializable):
     reference_depth: Number
     """BHP/THP reporting datum, deck `WELSPECS` item 5."""
 
-    perforations: tuple[AnyPerforation, ...] = attrs.field(converter=tuple)
+    perforations: tuple[Perforation, ...] = attrs.field(converter=tuple)
     """
-    `Perforation` (TVD) if `trajectory` is `None`;
-    `MDPerforation` (measured depth) if it's set. Do not mix.
+    Each with `top_depth`/`bottom_depth` set if `trajectory` is `None`,
+    or `top_md`/`bottom_md` set if it isn't (both may be set either way).
 
     Must not be empty. 
     """
@@ -368,10 +313,11 @@ class Well(Serializable):
     """
     Deviation survey. 
 
-    **`None`** (default): a vertical well at `surface_location`, and 
-    `perforations` must be `Perforation`. 
+    **`None`** (default): a vertical well at `surface_location`, and every
+    entry in `perforations` must have `top_depth`/`bottom_depth` set. 
     
-    **Set**: a deviated/horizontal well, and `perforations` must be `MDPerforation`.
+    **Set**: a deviated/horizontal well, and every entry in `perforations`
+    must have `top_md`/`bottom_md` set instead.
     """
 
     preferred_phase: FluidPhase | None = None
@@ -412,16 +358,14 @@ class Well(Serializable):
             raise ValidationError(f"Well {self.name!r} must have at least one perforation.")
 
         if self.trajectory is not None:
-            if not all(
-                isinstance(perforation, MDPerforation) for perforation in self.perforations
-            ):
+            if not all(perforation.top_md is not None for perforation in self.perforations):
                 raise ValidationError(
-                    f"Well {self.name!r} has a `trajectory`; every entry in "
-                    "`perforations` must be an `MDPerforation`, not `Perforation`."
+                    f"Well {self.name!r} has a `trajectory`; every entry in `perforations` "
+                    "must have `top_md`/`bottom_md` set."
                 )
 
             for perforation in self.perforations:
-                assert isinstance(perforation, MDPerforation)
+                assert perforation.top_md is not None and perforation.bottom_md is not None
                 if not (
                     self.trajectory.top_measured_depth
                     <= perforation.top_md
@@ -436,11 +380,11 @@ class Well(Serializable):
                         f"{self.trajectory.bottom_measured_depth}]."
                     )
         else:
-            if not all(isinstance(perforation, Perforation) for perforation in self.perforations):
+            if not all(perforation.top_depth is not None for perforation in self.perforations):
                 raise ValidationError(
-                    f"Well {self.name!r} has no `trajectory`; every entry in "
-                    "`perforations` must be a `Perforation`, not `MDPerforation`. "
-                    "Set `trajectory` to use `MDPerforation`."
+                    f"Well {self.name!r} has no `trajectory`; every entry in `perforations` "
+                    "must have `top_depth`/`bottom_depth` set. Set `trajectory` to use "
+                    "`top_md`/`bottom_md` instead."
                 )
 
     @property
@@ -449,7 +393,7 @@ class Well(Serializable):
         return len(self.perforations)
 
     @property
-    def open_perforations(self) -> tuple[AnyPerforation, ...]:
+    def open_perforations(self) -> tuple[Perforation, ...]:
         """Perforations with `CompletionStatus.OPEN` only."""
         return tuple(
             perforation
@@ -458,7 +402,7 @@ class Well(Serializable):
         )
 
     @property
-    def active_perforations(self) -> tuple[AnyPerforation, ...]:
+    def active_perforations(self) -> tuple[Perforation, ...]:
         """Perforations with `WellStatus.ACTIVE` only."""
         return tuple(
             perforation
@@ -513,7 +457,7 @@ class Well(Serializable):
         length_factor = factors["length"]
 
         trajectory: WellTrajectory | None
-        perforations: tuple[AnyPerforation, ...]
+        perforations: tuple[Perforation, ...]
 
         if self.trajectory is not None:
             trajectory = WellTrajectory(

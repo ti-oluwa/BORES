@@ -10,7 +10,7 @@ from bores.errors import ValidationError
 from bores.serde.stores import StoreSerializable
 from bores.types import Number, UnitConversionTable, UnitSystem
 from bores.utils import scale
-from bores.wells.base import AnyPerforation
+from bores.wells.base import Perforation
 from bores.wells.controls import Limit, WellControl
 
 __all__ = [
@@ -73,7 +73,7 @@ class ConnectionSample(typing.NamedTuple):
 class PerforationState(StoreSerializable):
     """Per-perforation dynamic snapshot for one timestep."""
 
-    perforation: AnyPerforation
+    perforation: Perforation
     """The perforation this snapshot is for."""
 
     cell_index: int

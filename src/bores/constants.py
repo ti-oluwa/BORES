@@ -507,6 +507,11 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         description="Conversion factor from dyne per centimeter to pounds per square inch",
         unit="dyne/cm·psi",
     ),
+    "DYNE_PER_CENTIMETER_TO_NEWTON_PER_METER": Constant(
+        value=0.001,
+        description="Conversion factor from dyne per centimeter to Newtons per metre",
+        unit="(N/m)/(dyne/cm)",
+    ),
     # Gas Constant
     "IDEAL_GAS_CONSTANT_LAB": Constant(
         value=8.31446261815324,

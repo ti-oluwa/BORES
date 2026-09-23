@@ -42,11 +42,11 @@ class WellTrajectory(Serializable):
     A well's 3-D path: an ordered, piecewise-linear polyline of
     `TrajectoryStation`.
 
-    `MDPerforation` intervals are defined against this trajectory's
-    measured depth, not true vertical depth as TVD is not invertible along
-    a horizontal or S-shaped section (multiple measured depths can share
-    the same TVD), so measured depth is the only interval representation
-    that identifies a unique location on an arbitrary path.
+    `Perforation` intervals on a well with this trajectory are defined
+    against its measured depth, not true vertical depth, as TVD is not
+    invertible along a horizontal or S-shaped section (multiple measured
+    depths can share the same TVD), so measured depth is the only interval
+    representation that identifies a unique location on an arbitrary path.
     """
 
     stations: tuple[TrajectoryStation, ...] = attrs.field(converter=tuple)

@@ -27,8 +27,8 @@ from bores.types import (
 )
 from bores.utils import none_if_nan
 from bores.wells.base import (
-    AnyPerforation,
     CompletionStatus,
+    Perforation,
     Well,
     Wells,
     WellStatus,
@@ -330,7 +330,7 @@ class CompiledPerforations(typing.NamedTuple):
 
     perforation_indices: IntArray[OneDimension]
     """
-    Shape `(n_rows,)`. Position of the rich `Perforation`/`MDPerforation`
+    Shape `(n_rows,)`. Position of the rich `Perforation`
     this row came from, within that well's own `Well.perforations`. One
     rich perforation can resolve to several rows (a trajectory crossing
     several grid cells), so this is not the same as the row's own
@@ -1544,7 +1544,7 @@ def resolve_perforations_geometry(
     horizontal_tolerance: Number | None = None,
     intersection_method: GridIntersectionMethod = "aabb",
     search_radius: Number | None = None,
-) -> tuple[tuple[PerforationIndex, ...], dict[Integer, AnyPerforation], dict[Integer, Integer]]:
+) -> tuple[tuple[PerforationIndex, ...], dict[Integer, Perforation], dict[Integer, Integer]]:
     """
     Resolves connection geometry and connection factor for every
     perforation on a well, open or shut.
@@ -1568,7 +1568,7 @@ def resolve_perforations_geometry(
         attrs.evolve(perforation, status=CompletionStatus.OPEN)
         for perforation in well.perforations
     )
-    original_by_id: dict[Integer, AnyPerforation] = {
+    original_by_id: dict[Integer, Perforation] = {
         id(shadow): original
         for shadow, original in zip(shadow_perforations, well.perforations, strict=False)
     }

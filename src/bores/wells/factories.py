@@ -5,7 +5,6 @@ import typing
 from bores.errors import ValidationError
 from bores.types import FluidPhase, Number, Orientation, UnitSystem
 from bores.wells.base import (
-    AnyPerforation,
     Perforation,
     Well,
     Wells,
@@ -58,7 +57,7 @@ PHASE_RATE_QUANTITY = {
 def _resolve_perforations(
     *,
     perforation_depths: tuple[Number, Number] | None,
-    perforations: typing.Sequence[AnyPerforation] | None,
+    perforations: typing.Sequence[Perforation] | None,
     reference_depth: Number | None,
     wellbore_radius: Number,
     skin: Number,
@@ -67,7 +66,7 @@ def _resolve_perforations(
     connection_factor_multiplier: Number | None,
     direction: Orientation | None,
     schedule_status: WellStatus,
-) -> tuple[tuple[AnyPerforation, ...], Number]:
+) -> tuple[tuple[Perforation, ...], Number]:
     """
     Resolves `make_producer`/`make_injector`'s two perforation-building
     paths into one `(perforations, reference_depth)` pair.
@@ -77,15 +76,15 @@ def _resolve_perforations(
     today's only option, unchanged.
 
     **Direct path** (`perforations`): passes a caller-built sequence of
-    `Perforation`/`MDPerforation` straight through. Multiple intervals, or
-    (paired with `trajectory=` on the well itself) `MDPerforation`s for a
-    deviated well. The flat per-perforation params don't apply here (each
-    interval already carries its own); `reference_depth` has no safe
-    default across multiple intervals or a deviated trajectory, so it's
-    required in this path.
+    `Perforation` straight through. Multiple intervals, or (paired with
+    `trajectory=` on the well itself) intervals with `top_md`/`bottom_md`
+    set for a deviated well. The flat per-perforation params don't apply
+    here (each interval already carries its own); `reference_depth` has no
+    safe default across multiple intervals or a deviated trajectory, so
+    it's required in this path.
 
     `Well`'s post initialization logic is what actually enforces the
-    `MDPerforation` needs `trajectory` (and vice versa) rule, once the
+    `top_md`/`bottom_md` needs `trajectory` (and vice versa) rule, once the
     resolved perforations reach `Well(...)`.
 
     :returns: `(perforations, resolved_reference_depth)`.
@@ -96,7 +95,7 @@ def _resolve_perforations(
         raise ValidationError(
             "Supply exactly one of `perforation_depths` (single vertical "
             "perforation) or `perforations` (full "
-            "control: multiple intervals, or `MDPerforation`s for a "
+            "control: multiple intervals, or `top_md`/`bottom_md`-based intervals for a "
             "deviated well via `trajectory=`)."
         )
 
@@ -130,7 +129,7 @@ def make_producer(
     *,
     surface_location: tuple[Number, Number],
     perforation_depths: tuple[Number, Number] | None = None,
-    perforations: typing.Sequence[AnyPerforation] | None = None,
+    perforations: typing.Sequence[Perforation] | None = None,
     trajectory: WellTrajectory | None = None,
     reference_depth: Number | None = None,
     target_rate: Number | None = None,
@@ -167,12 +166,13 @@ def make_producer(
     :param perforation_depths: `(top_depth, bottom_depth)` for one single
         vertical perforation. Mutually exclusive with `perforations`;
         supply exactly one.
-    :param perforations: A caller-built sequence of `Perforation`/
-        `MDPerforation`, for multiple intervals or (with
-        `trajectory=`) a deviated well. `reference_depth` is required in
-        this path. Mutually exclusive with `perforation_depths`.
+    :param perforations: A caller-built sequence of `Perforation`,
+        for multiple intervals or (with `trajectory=`) a deviated well,
+        with `top_md`/`bottom_md` set instead of `top_depth`/`bottom_depth`.
+        `reference_depth` is required in this path. Mutually exclusive
+        with `perforation_depths`.
     :param trajectory: Deviation survey. Only meaningful with `perforations`
-        made of `MDPerforation`. See `Well.trajectory`.
+        that have `top_md`/`bottom_md` set. See `Well.trajectory`.
     :param reference_depth: BHP/THP reporting datum. Defaults to
         `perforation_depths[1]` in the simple path; required in the direct path.
     :param target_rate: Rate target.
@@ -276,7 +276,7 @@ def make_injector(
     injected_phase: FluidPhase,
     surface_location: tuple[Number, Number],
     perforation_depths: tuple[Number, Number] | None = None,
-    perforations: typing.Sequence[AnyPerforation] | None = None,
+    perforations: typing.Sequence[Perforation] | None = None,
     trajectory: WellTrajectory | None = None,
     reference_depth: Number | None = None,
     target_rate: Number | None = None,
@@ -312,12 +312,13 @@ def make_injector(
     :param perforation_depths: `(top_depth, bottom_depth)` for one single
         vertical perforation. Mutually exclusive with `perforations`;
         supply exactly one.
-    :param perforations: A caller-built sequence of `Perforation`/
-        `MDPerforation`, for multiple intervals or (with
-        `trajectory=`) a deviated well. `reference_depth` is required in
-        this path. Mutually exclusive with `perforation_depths`.
+    :param perforations: A caller-built sequence of `Perforation`,
+        for multiple intervals or (with `trajectory=`) a deviated well,
+        with `top_md`/`bottom_md` set instead of `top_depth`/`bottom_depth`.
+        `reference_depth` is required in this path. Mutually exclusive
+        with `perforation_depths`.
     :param trajectory: Deviation survey. Only meaningful with `perforations`
-        made of `MDPerforation`. See `Well.trajectory`.
+        that have `top_md`/`bottom_md` set. See `Well.trajectory`.
     :param reference_depth: BHP/THP reporting datum. Defaults to
         `perforation_depths[1]` in the simple path; required in the direct path.
     :param target_rate: Rate target.

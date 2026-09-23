@@ -25,7 +25,7 @@ from bores.types import (
     UnitConversionTable,
     UnitSystem,
 )
-from bores.wells.base import MDPerforation, Perforation, Well
+from bores.wells.base import Perforation, Well
 
 __all__ = [
     "PerforationIndex",
@@ -39,7 +39,7 @@ __all__ = [
 class PerforationIndex(Serializable):
     """One resolved (perforation, cell) pair, Basically, a connection."""
 
-    perforation: Perforation | MDPerforation
+    perforation: Perforation
     """The perforation this connection belongs to."""
 
     cell_index: Integer
@@ -400,7 +400,7 @@ def resolve_perforations_indices(
 
     results: list[PerforationIndex] = []
     for perforation in well.open_perforations:
-        assert isinstance(perforation, Perforation)
+        assert perforation.top_depth is not None and perforation.bottom_depth is not None
         inclination = (
             0.0 if resolve_perforation_orientation(perforation) is Orientation.Z else math.pi / 2.0
         )
@@ -666,7 +666,7 @@ def resolve_md_perforations_indices(
     search_radius: Number | None = None,
 ) -> tuple[PerforationIndex, ...]:
     """
-    Resolve every open `MDPerforation` on `well` to the `Grid` cell(s) its
+    Resolve every open perforation on `well` to the `Grid` cell(s) its
     measured-depth interval passes through. Only valid for a `well` with a
     `trajectory` set - see `resolve_perforations_indices` for one without.
 
@@ -712,9 +712,10 @@ def resolve_md_perforations_indices(
 
     results: list[PerforationIndex] = []
     for perforation in well.open_perforations:
-        assert isinstance(perforation, MDPerforation)
+        assert perforation.top_md is not None and perforation.bottom_md is not None
         top_md = perforation.top_md
-        bottom_md = max(perforation.bottom_md, perforation.top_md + 1e-9)
+        true_bottom_md = perforation.bottom_md
+        bottom_md = max(true_bottom_md, top_md + 1e-9)
         # A point perforation (top_md == bottom_md) has no direction to
         # walk - nudge to an infinitesimal interval so it still resolves
         # to exactly one cell via the same walk machinery, rather than a
@@ -755,7 +756,7 @@ def resolve_md_perforations_indices(
                         partial_penetration_fraction=(
                             1.0
                             if perforation.is_point_perforation
-                            else sub_length / (perforation.bottom_md - perforation.top_md)
+                            else sub_length / (true_bottom_md - top_md)
                         ),
                         representative_depth=trajectory.position_at(0.5 * (entry_md + exit_md))[2],
                         inclination_from_vertical=inclination,
@@ -765,7 +766,7 @@ def resolve_md_perforations_indices(
 
         if not matches:
             raise ValidationError(
-                f"`MDPerforation` [{perforation.top_md}, {perforation.bottom_md}] on "
+                f"Perforation [{perforation.top_md}, {perforation.bottom_md}] on "
                 f"well {well.name!r} does not intersect any grid cell along its "
                 "trajectory (dangling completion, or the trajectory passes "
                 "outside the active grid over this range)."

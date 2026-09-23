@@ -101,6 +101,16 @@ def compute_perforation_pressures(
         )
 
         return compute(model=wellbore.options, **kwargs)
+    if wellbore.name == "gray":
+        from bores.wells.hydraulics.gray import compute_perforation_pressures as compute
+
+        return compute(model=wellbore.options, **kwargs)
+    if wellbore.name == "woldesemayat_ghajar":
+        from bores.wells.hydraulics.woldesemayat_ghajar import (
+            compute_perforation_pressures as compute,
+        )
+
+        return compute(model=wellbore.options, **kwargs)
     raise ValidationError(f"Unknown `WellBoreModel` name: {wellbore.name!r}")
 
 
@@ -128,6 +138,16 @@ def compute_tubing_head_pressure(*, wellbore: WellBoreModel, **kwargs: typing.An
         return compute(model=wellbore.options, **kwargs)
     if wellbore.name == "hagedorn_brown":
         from bores.wells.hydraulics.hagedorn_brown import (
+            compute_tubing_head_pressure as compute,
+        )
+
+        return compute(model=wellbore.options, **kwargs)
+    if wellbore.name == "gray":
+        from bores.wells.hydraulics.gray import compute_tubing_head_pressure as compute
+
+        return compute(model=wellbore.options, **kwargs)
+    if wellbore.name == "woldesemayat_ghajar":
+        from bores.wells.hydraulics.woldesemayat_ghajar import (
             compute_tubing_head_pressure as compute,
         )
 
