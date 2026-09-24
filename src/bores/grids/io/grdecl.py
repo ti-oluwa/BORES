@@ -332,7 +332,7 @@ def load_grdecl(
         deck_file = source
     else:
         try:
-            deck_file = DeckFile(source, encoding=encoding)
+            deck_file = DeckFile(source, encoding=encoding, unit_system=unit_system)
         except DeckParseError as exc:
             raise GridImportError(f"Failed to parse GRDECL deck: {exc}") from exc
 

@@ -12,6 +12,8 @@ from bores.blackoil.caches.transmissibility import (
 )
 from bores.blackoil.fluids.model import BlackOil
 from bores.precision import get_dtype
+from bores.reservoir.boundary.compile import CompiledBoundaryConditions
+from bores.reservoir.boundary.workspace import AquiferWorkspace, build_aquifer_workspace
 from bores.reservoir.model import Reservoir
 from bores.reservoir.regions import Regions
 from bores.reservoir.state import Hysteresis, ReservoirState
@@ -55,6 +57,9 @@ class SimulationWorkspace(typing.NamedTuple):
     hysteresis: HysteresisWorkspace | None
     """Optional mutable hysteresis history for the run."""
 
+    aquifers: AquiferWorkspace | None
+    """Optional mutable analytic aquifer state for the run."""
+
     salinity: CellArray | None
     """Optional cell-wise salinity field for salinity-dependent calculations."""
 
@@ -68,6 +73,7 @@ def build_simulation_workspace(
     n_wells: Integer,
     n_connections: Integer,
     runspec: RunSpec,
+    boundary_conditions: CompiledBoundaryConditions | None = None,
     hysteresis: Hysteresis | HysteresisWorkspace | None = None,
     salinity: CellArray | None = None,
     dtype: npt.DTypeLike = None,
@@ -83,6 +89,7 @@ def build_simulation_workspace(
     :param n_wells: Number of wells.
     :param n_connections: Total active connections across every well.
     :param runspec: Simulation run settings controlling enabled physics terms such as gravity and capillary effects.
+    :param boundary_conditions: The run's compiled boundary conditions, if any.
     :param dtype: Output array dtype for every buffer. `bores.precision.get_dtype()` if not given.
     :returns: The assembled `SimulationWorkspace`.
     """
@@ -133,11 +140,17 @@ def build_simulation_workspace(
     wells_workspace = build_wells_workspace(
         n_wells=n_wells, n_connections=n_connections, dtype=dtype
     )
+    aquifer_workspace = (
+        build_aquifer_workspace(boundary_conditions.aquifers, dtype=dtype)
+        if boundary_conditions is not None
+        else None
+    )
     return SimulationWorkspace(
         physics=physics_cache,
         transmissibilities=transmissibility_cache,
         wells=wells_workspace,
         reservoir=reservoir_workspace,
         hysteresis=hysteresis,
+        aquifers=aquifer_workspace,
         salinity=salinity,
     )

@@ -13,6 +13,7 @@ from bores.precision import get_dtype
 from bores.reservoir.rock import Rock
 from bores.types import (
     IntArray,
+    Integer,
     Number,
     NumberArray,
     NumberOrArray,
@@ -27,7 +28,7 @@ __all__ = ["ConnectionTransmissibilities", "compute_connection_transmissibilitie
 
 
 class ConnectionTransmissibilities(typing.NamedTuple):
-    """Precomputed transmissibilities for all connections in a `BlackOilModel`."""
+    """Precomputed transmissibilities for all connections in a reservoir."""
 
     interior: NumberArray[OneDimension]
     """
@@ -128,7 +129,7 @@ def compute_connection_transmissibilities(
     - Directional MULT arrays (MULTX, MULTX-, MULTY, MULTY-, MULTZ, MULTZ-) are
       applied only to regular face-based connections (interior, boundary, and fault).
       NNCs are not directional and are not affected.
-    - `MULTFLT` is applied to face-based fault connections *and* NNCs whose
+    - `MULTFLT` is applied to face-based fault connections and NNCs whose
       type is `ConnectionType.*FAULT*`. Pinchout and user NNCs are not affected
       by `MULTFLT`.
 
@@ -529,51 +530,51 @@ def apply_directional_multipliers(
     n_boundary = len(boundary_face_indices)
 
     for idx in range(n_interior):
-        face_idx = int(interior_face_indices[idx])
-        owner = int(face_cell_indices[face_idx, 0])
-        neighbour = int(face_cell_indices[face_idx, 1])
+        face_idx = interior_face_indices[idx]
+        owner = face_cell_indices[face_idx, 0]
+        neighbour = face_cell_indices[face_idx, 1]
 
-        nx = abs(float(face_unit_normals[face_idx, 0]))
-        ny = abs(float(face_unit_normals[face_idx, 1]))
-        nz = abs(float(face_unit_normals[face_idx, 2]))
+        nx = abs(face_unit_normals[face_idx, 0])
+        ny = abs(face_unit_normals[face_idx, 1])
+        nz = abs(face_unit_normals[face_idx, 2])
 
         multiplier = 1.0
         if nx >= ny and nx >= nz:
             if positive_x_multipliers is not None:
-                multiplier *= float(positive_x_multipliers[owner])
+                multiplier *= positive_x_multipliers[owner]
             if negative_x_multipliers is not None:
-                multiplier *= float(negative_x_multipliers[neighbour])
+                multiplier *= negative_x_multipliers[neighbour]
         elif ny >= nx and ny >= nz:
             if positive_y_multipliers is not None:
-                multiplier *= float(positive_y_multipliers[owner])
+                multiplier *= positive_y_multipliers[owner]
             if negative_y_multipliers is not None:
-                multiplier *= float(negative_y_multipliers[neighbour])
+                multiplier *= negative_y_multipliers[neighbour]
         else:
             if positive_z_multipliers is not None:
-                multiplier *= float(positive_z_multipliers[owner])
+                multiplier *= positive_z_multipliers[owner]
             if negative_z_multipliers is not None:
-                multiplier *= float(negative_z_multipliers[neighbour])
+                multiplier *= negative_z_multipliers[neighbour]
 
         interior_transmissibilities[idx] *= multiplier
 
     for idx in range(n_boundary):
-        face_idx = int(boundary_face_indices[idx])
-        owner = int(face_cell_indices[face_idx, 0])
+        face_idx = boundary_face_indices[idx]
+        owner = face_cell_indices[face_idx, 0]
 
-        nx = abs(float(face_unit_normals[face_idx, 0]))
-        ny = abs(float(face_unit_normals[face_idx, 1]))
-        nz = abs(float(face_unit_normals[face_idx, 2]))
+        nx = abs(face_unit_normals[face_idx, 0])
+        ny = abs(face_unit_normals[face_idx, 1])
+        nz = abs(face_unit_normals[face_idx, 2])
 
         multiplier = 1.0
         if nx >= ny and nx >= nz:
             if positive_x_multipliers is not None:
-                multiplier *= float(positive_x_multipliers[owner])
+                multiplier *= positive_x_multipliers[owner]
         elif ny >= nx and ny >= nz:
             if positive_y_multipliers is not None:
-                multiplier *= float(positive_y_multipliers[owner])
+                multiplier *= positive_y_multipliers[owner]
         else:
             if positive_z_multipliers is not None:
-                multiplier *= float(positive_z_multipliers[owner])
+                multiplier *= positive_z_multipliers[owner]
 
         boundary_transmissibilities[idx] *= multiplier
 
@@ -603,11 +604,11 @@ def apply_fault_face_multipliers(
     :param fault_transmissibility_multipliers: `{name: multiplier}`.
     :returns: Updated transmissibility arrays.
     """
-    global_to_interior: dict[int, int] = {
-        int(global_idx): pos for pos, global_idx in enumerate(interior_face_indices)
+    global_to_interior: dict[Integer, int] = {
+        global_idx: position for position, global_idx in enumerate(interior_face_indices)
     }
-    global_to_boundary: dict[int, int] = {
-        int(global_idx): pos for pos, global_idx in enumerate(boundary_face_indices)
+    global_to_boundary: dict[Integer, int] = {
+        global_idx: position for position, global_idx in enumerate(boundary_face_indices)
     }
 
     for fault_name, face_indices in fault_face_indices.items():
@@ -615,11 +616,11 @@ def apply_fault_face_multipliers(
         if multiplier == 1:
             continue
         for global_idx in face_indices:
-            interior_position = global_to_interior.get(int(global_idx))
+            interior_position = global_to_interior.get(global_idx)
             if interior_position is not None:
                 interior_transmissibilities[interior_position] *= multiplier
                 continue
-            boundary_position = global_to_boundary.get(int(global_idx))
+            boundary_position = global_to_boundary.get(global_idx)
             if boundary_position is not None:
                 boundary_transmissibilities[boundary_position] *= multiplier
 

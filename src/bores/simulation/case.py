@@ -143,6 +143,7 @@ class SimulationCase(Serializable):
             n_wells=n_wells,
             n_connections=n_connections,
             runspec=self.runspec,
+            boundary_conditions=model.boundary_conditions,
             hysteresis=hysteresis,
             salinity=self.salinity,
             dtype=dtype,

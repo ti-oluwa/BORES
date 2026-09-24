@@ -1,5 +1,5 @@
 """
-Loads and visualises the complex Cartesian GRDECL test grid.
+Loads and visualises a Cartesian GRDECL test grid.
 
 **Grid description**:
 
@@ -16,9 +16,6 @@ Loads and visualises the complex Cartesian GRDECL test grid.
     * Channel-flow MULTY enhancement (1.5 along j=6-8, reservoir layers)
     * 55 cross-fault NNCs connecting i=8 to i=11
     * PINCH tolerance 1e-3 m
-- Keywords: SPECGRID, GRIDUNIT, MAPAXES, MAPUNITS, TOPS, DXV, DYV, DZV,
-            ACTNUM, MULTX, MULTY, MULTZ, FAULTS, MULTFLT, NNC, PINCH
-
 """
 
 import pathlib
@@ -28,12 +25,13 @@ import pyvista as pv
 
 from bores.grids.io.grdecl import load_grdecl
 from bores.grids.utils import make_pyvista_grid
+from bores.units import UNIT_SYSTEM
 
 # Load
 grdecl_path = pathlib.Path("data/cartesian.grdecl")
 
 print(f"Loading {grdecl_path.name} …")
-grid = load_grdecl(grdecl_path, encoding="ascii")
+grid = load_grdecl(grdecl_path, encoding="ascii", unit_system=UNIT_SYSTEM.value)
 
 print(f"  cells        : {grid.n_cells}")
 print(f"  faces        : {grid.n_faces}")
@@ -66,17 +64,17 @@ z_ref = bb[4]
 
 # Porosity: dome-shaped, higher at crest, decreasing with depth and toward fault
 r_dome = np.sqrt(((cx - x_mid) / 800) ** 2 + ((cy - y_mid) / 600) ** 2)
-poro_base = 0.28 * np.exp(-r_dome) - 0.04 * (cz - z_ref) / 130.0
-poro = np.clip(poro_base + 0.02 * rng.standard_normal(n), 0.02, 0.38)
+base_porosity = 0.28 * np.exp(-r_dome) - 0.04 * (cz - z_ref) / 130.0
+porosity = np.clip(base_porosity + 0.02 * rng.standard_normal(n), 0.02, 0.38)
 
 # Permeability: log-normal, strongly correlated with porosity
-log_k = np.log(50.0) + 6.0 * (poro - 0.15) + 0.6 * rng.standard_normal(n)
-perm = np.exp(log_k)
-perm = np.clip(perm, 0.01, 5000.0)
+log_k = np.log(50.0) + 6.0 * (porosity - 0.15) + 0.6 * rng.standard_normal(n)
+permeability = np.exp(log_k)
+permeability = np.clip(permeability, 0.01, 5000.0)
 
 # Water saturation: structurally controlled (rises away from dome crest)
-sw_base = 0.12 + 0.5 * r_dome + 0.25 * (cz - z_ref) / 130.0
-sw = np.clip(sw_base + 0.04 * rng.standard_normal(n), 0.10, 1.0)
+base_water_saturation = 0.12 + 0.5 * r_dome + 0.25 * (cz - z_ref) / 130.0
+water_saturation = np.clip(base_water_saturation + 0.04 * rng.standard_normal(n), 0.10, 1.0)
 
 # Pressure: hydrostatic gradient + slight over-pressure at dome crest
 pressure = 195.0 + 0.098 * cz - 4.0 * np.exp(-r_dome * 2) + 0.3 * rng.standard_normal(n)
@@ -85,21 +83,21 @@ pressure = 195.0 + 0.098 * cz - 4.0 * np.exp(-r_dome * 2) + 0.3 * rng.standard_n
 fault_flag = np.zeros(n)
 if grid.fault_face_indices:
     for face_idxs in grid.fault_face_indices.values():
-        for fi in face_idxs:
+        for face_idx in face_idxs:
             for side in range(2):
-                ci = int(grid.face_cell_indices[fi, side])
+                ci = int(grid.face_cell_indices[face_idx, side])
                 if ci >= 0:
                     fault_flag[ci] = 1.0
 
 # Convert to PyVista grid
 print("\nConverting to PyVista …")
-pv_grid = make_pyvista_grid(
+pore_volume_grid = make_pyvista_grid(
     grid,
     cell_data={
-        "porosity": poro,
-        "permeability_x": perm,
-        "water_sat": sw,
-        "pressure_bar": pressure,
+        "porosity": porosity,
+        "permeability_x": permeability,
+        "water_saturation": water_saturation,
+        "pressure": pressure,
         "fault_flag": fault_flag,
     },
 )
@@ -110,8 +108,8 @@ pl = pv.Plotter(shape=(2, 2), window_size=(1600, 1000))  # type: ignore
 panel_cfg = [
     (0, 0, "porosity", "viridis", "Porosity", (0.0, 0.38)),
     (0, 1, "permeability_x", "plasma", "Permeability (mD)", None),
-    (1, 0, "water_sat", "Blues", "Water Saturation", (0.1, 1.0)),
-    (1, 1, "pressure_bar", "RdYlGn_r", "Pressure (bar)", None),
+    (1, 0, "water_saturation", "Blues", "Water Saturation", (0.1, 1.0)),
+    (1, 1, "pressure", "RdYlGn_r", "Pressure (bar)", None),
 ]
 for row, col, scalar, cmap, title, clim in panel_cfg:
     pl.subplot(row, col)
@@ -124,7 +122,7 @@ for row, col, scalar, cmap, title, clim in panel_cfg:
     )
     if clim:
         kwargs["clim"] = clim  # type: ignore
-    pl.add_mesh(pv_grid, **kwargs)  # type: ignore
+    pl.add_mesh(pore_volume_grid, **kwargs)  # type: ignore
     # flip z (depth down → screen up) and exaggerate
     pl.set_scale(zscale=-3)  # type: ignore
     pl.view_isometric()  # type: ignore
@@ -134,15 +132,17 @@ pl.show()
 
 # Summary
 print("\n── Property summary")
-print(f"  Porosity   : {poro.mean():.3f}  ±  {poro.std():.3f}")
+print(f"  Porosity   : {porosity.mean():.3f}  ±  {porosity.std():.3f}")
 print(
-    f"  Perm (mD)  : {perm.mean():.1f}  "
-    f"  [p10={np.percentile(perm, 10):.1f}, p90={np.percentile(perm, 90):.1f}]"
+    f"  Perm (mD)  : {permeability.mean():.1f}  "
+    f"  [p10={np.percentile(permeability, 10):.1f}, p90={np.percentile(permeability, 90):.1f}]"
 )
-print(f"  Water sat  : {sw.mean():.3f}  ±  {sw.std():.3f}")
+print(f"  Water sat  : {water_saturation.mean():.3f}  ±  {water_saturation.std():.3f}")
 print(f"  Pressure   : {pressure.mean():.1f}  ±  {pressure.std():.1f} bar")
 
-net_to_gross = np.where(sw < 0.60, 1.0, 0.3)
-pv_total = grid.compute_pore_volume(poro, net_to_gross).sum()
-print(f"\nNet pore volume (m³): {pv_total:.3e}")
-print(f"Oil in place (m³ at res. cond.): {(pv_total * (1 - sw)).mean():.3e}")
+net_to_gross = np.where(water_saturation < 0.60, 1.0, 0.3)
+total_pore_volume = grid.compute_pore_volume(porosity, net_to_gross).sum()  # type: ignore[arg-type]
+print(f"\nNet pore volume (m³): {total_pore_volume:.3e}")
+print(
+    f"Oil in place (m³ at res. cond.): {(total_pore_volume * (1 - water_saturation)).mean():.3e}"
+)
