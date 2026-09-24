@@ -243,7 +243,7 @@ class ReservoirState(StoreSerializable):
       cells* (Sg = 0, Po < Pbub is not possible, so here Pbub tracks the
       evolving bubble-point as the reservoir depletes below saturation
       pressure).
-    - `vaporized_oil_to_gas_ratio` (Rv) - stock-tank oil vaporized in gas per unit
+    - `vaporized_oil_gas_ratio` (Rv) - stock-tank oil vaporized in gas per unit
       standard gas volume. Primary variable for volatile-oil / gas-condensate
       models when So = 0.
     - `water_bubble_point_pressure` - bubble-point pressure of the water
@@ -332,7 +332,7 @@ class ReservoirState(StoreSerializable):
     used by Eclipse E100 (PBPD switching logic).
     """
 
-    vaporized_oil_to_gas_ratio: CellArray
+    vaporized_oil_gas_ratio: CellArray
     """
     Shape (n_cells,) - vaporized oil ratio (Rv).
 
@@ -562,7 +562,7 @@ class ReservoirState(StoreSerializable):
             gas_saturation=self.gas_saturation,
             solution_gor=scale(self.solution_gor, gor_factor),
             oil_bubble_point_pressure=scale(self.oil_bubble_point_pressure, pressure_factor),
-            vaporized_oil_to_gas_ratio=scale(self.vaporized_oil_to_gas_ratio, gor_factor),
+            vaporized_oil_gas_ratio=scale(self.vaporized_oil_gas_ratio, gor_factor),
             gas_dew_point_pressure=scale(self.gas_dew_point_pressure, pressure_factor),
             gas_solubility_in_water=scale(self.gas_solubility_in_water, gor_factor),
             water_bubble_point_pressure=scale(self.water_bubble_point_pressure, pressure_factor),

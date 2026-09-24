@@ -30,9 +30,11 @@ __all__ = [
     "DatesKeyword",
     "Field",
     "FlagKeyword",
+    "HeaderedScheduledRecordKeyword",
     "Keyword",
     "RecordKeyword",
     "RepeatedRecordKeyword",
+    "ScheduledRecordKeyword",
     "TableKeyword",
 ]
 
@@ -1097,4 +1099,60 @@ class ScheduledRecordKeyword(RepeatedRecordKeyword[T | float]):
                 parsed = self.parse_tokens(tokens)
                 parsed["schedule_time"] = schedule_time
                 results.append(parsed)
+        return results or None
+
+
+class HeaderedScheduledRecordKeyword(Keyword[list[dict[str, typing.Any]]]):
+    """
+    A keyword whose body is one header record followed by zero or more
+    detail records with a different field layout (`WELSEGS`, `COMPSEGS`),
+    each occurrence stamped with `"schedule_time"` the same way
+    `ScheduledRecordKeyword` stamps a flat `RepeatedRecordKeyword`.
+
+    One dict per keyword occurrence in the deck, not one per detail
+    record: `{**header_fields, "schedule_time": ..., "details": [{**detail_fields}, ...]}`.
+    """
+
+    __slots__ = ("detail_fields", "header_fields")
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        header_fields: typing.Sequence[Field[typing.Any]],
+        detail_fields: typing.Sequence[Field[typing.Any]],
+    ) -> None:
+        super().__init__(name)
+        self.header_fields = list(header_fields)
+        self.detail_fields = list(detail_fields)
+
+    def parse(
+        self,
+        deck: Deck,
+        dims: GridDimensions | None,
+        *,
+        operations: list[Operation] | None = None,
+        schedule_times: dict[int, float] | None = None,
+        time_unit: TimeUnit = "days",
+    ) -> list[dict[str, typing.Any]] | None:
+        records = deck.get_records_for(self.name)
+        if not records:
+            return None
+
+        times = (
+            schedule_times if schedule_times is not None else get_schedule_times(deck, time_unit)
+        )
+        results: list[dict[str, typing.Any]] = []
+        for record in records:
+            lines = [tokenize(line) for line in record.body.split("/")]
+            lines = [line for line in lines if line]
+            if not lines:
+                continue
+
+            parsed = parse_tokens(self.name, self.header_fields, lines[0])
+            parsed["schedule_time"] = times.get(record.start, 0.0)
+            parsed["details"] = [
+                parse_tokens(self.name, self.detail_fields, line) for line in lines[1:]
+            ]
+            results.append(parsed)
         return results or None

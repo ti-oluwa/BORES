@@ -909,7 +909,7 @@ class PVTTable(StoreSerializable):
         # Phase-specific
         if phase == FluidPhase.OIL:
             register_2d("solution_gor", data.solution_gor_table)
-            register_2d("vaporized_oil_to_gas_ratio", None)  # not applicable for oil
+            register_2d("vaporized_oil_gas_ratio", None)  # not applicable for oil
 
             bubble_point_array = data.bubble_point_pressures
             if bubble_point_array is not None:
@@ -961,7 +961,7 @@ class PVTTable(StoreSerializable):
 
         if phase == FluidPhase.GAS:
             register_2d("compressibility_factor", data.compressibility_factor_table)
-            register_2d("vaporized_oil_to_gas_ratio", data.vaporized_oil_ratio_table)
+            register_2d("vaporized_oil_gas_ratio", data.vaporized_oil_ratio_table)
             register_3d("solubility_in_water", data.solubility_in_water_table)
 
             dp = data.dew_point_pressures
@@ -2193,7 +2193,7 @@ class PVTTable(StoreSerializable):
 
     dZ_dP = dz_dp
 
-    def vaporized_oil_to_gas_ratio(
+    def vaporized_oil_gas_ratio(
         self,
         pressure: TableQuery[NDimension],
         temperature: TableQuery[NDimension],
@@ -2214,7 +2214,7 @@ class PVTTable(StoreSerializable):
         """
         if self._phase != FluidPhase.GAS:
             return None
-        if not self.has("vaporized_oil_to_gas_ratio"):
+        if not self.has("vaporized_oil_gas_ratio"):
             return None
 
         dew_point_pressure = (
@@ -2228,7 +2228,7 @@ class PVTTable(StoreSerializable):
         temperature_array = np.atleast_1d(temperature)
 
         if dew_point_pressure is None:
-            return self.query("vaporized_oil_to_gas_ratio", pressure_array, temperature_array)
+            return self.query("vaporized_oil_gas_ratio", pressure_array, temperature_array)
 
         dew_point_array = np.atleast_1d(dew_point_pressure)
         pressure_array, temperature_array, dew_point_array = np.broadcast_arrays(
@@ -2241,11 +2241,11 @@ class PVTTable(StoreSerializable):
 
         if np.any(below):
             result[below] = self.query(  # type: ignore[index]
-                "vaporized_oil_to_gas_ratio", pressure_array[below], temperature_array[below]
+                "vaporized_oil_gas_ratio", pressure_array[below], temperature_array[below]
             )
         if np.any(above):
             result[above] = self.query(  # type: ignore[index]
-                "vaporized_oil_to_gas_ratio", dew_point_array[above], temperature_array[above]
+                "vaporized_oil_gas_ratio", dew_point_array[above], temperature_array[above]
             )
         return typing.cast(
             TableResult[NDimension],
@@ -2254,7 +2254,7 @@ class PVTTable(StoreSerializable):
             else result.astype(dtype, copy=False),
         )
 
-    rv = Rv = vaporized_ogr = vaporized_oil_to_gas_ratio
+    rv = Rv = vaporized_ogr = vaporized_oil_gas_ratio
 
     def drv_dp(
         self,
@@ -2271,7 +2271,7 @@ class PVTTable(StoreSerializable):
         """
         if self._phase != FluidPhase.GAS:
             return None
-        return self.query("vaporized_oil_to_gas_ratio", pressure, temperature, derivative=True)
+        return self.query("vaporized_oil_gas_ratio", pressure, temperature, derivative=True)
 
     def dew_point_pressure(
         self,

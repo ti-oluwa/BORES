@@ -861,7 +861,7 @@ def build_gas_data_from_pvtg(
     """
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
     # Eclipse reports Rv in STB/Mscf under FIELD units (see PVTG's deck docs);
-    # internally we standardize on STB/SCF, matching the `vaporized_oil_to_gas_ratio`
+    # internally we standardize on STB/SCF, matching the `vaporized_oil_gas_ratio`
     # convention `get_conversion_factors` assumes. METRIC/LAB decks already
     # report Rv in the internally-expected units (sm³/sm³ / scc/scc), so no
     # rescale is needed there.

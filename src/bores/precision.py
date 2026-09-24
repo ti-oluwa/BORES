@@ -13,7 +13,7 @@ __all__ = [
     "with_precision",
 ]
 
-_default_precision: ContextVar[npt.DTypeLike] = ContextVar("bores_precision", default=np.float32)
+_precision_context: ContextVar[npt.DTypeLike] = ContextVar("bores_precision", default=np.float32)
 
 
 def get_dtype() -> npt.DTypeLike:
@@ -24,7 +24,7 @@ def get_dtype() -> npt.DTypeLike:
 
     :return: The current data type.
     """
-    return _default_precision.get()
+    return _precision_context.get()
 
 
 get_precision = get_dtype
@@ -38,7 +38,7 @@ def set_dtype(dtype: npt.DTypeLike) -> None:
 
     :param dtype: The data type to set as default.
     """
-    _default_precision.set(np.dtype(dtype))
+    _precision_context.set(np.dtype(dtype))
 
 
 set_precision = set_dtype
@@ -51,11 +51,11 @@ def with_precision(dtype: npt.DTypeLike):
 
     :param dtype: The data type to set within the context.
     """
-    token = _default_precision.set(np.dtype(dtype))
+    token = _precision_context.set(np.dtype(dtype))
     try:
         yield
     finally:
-        _default_precision.reset(token)
+        _precision_context.reset(token)
 
 
 def use_64bit_precision() -> None:

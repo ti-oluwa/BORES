@@ -58,6 +58,7 @@ from bores.wells.schedule import (
     SetWellControl,
     SetWellTarget,
 )
+from bores.wells.trajectory import TrajectoryStation, WellTrajectory
 
 # NOTE: Future Self, All imports from `wells.deck` in other modules
 # (mostly in the `wells.*`) should be inline. Top-level imports will cause
@@ -70,6 +71,7 @@ __all__ = [
     "apply_d_factors",
     "apply_economic_limits",
     "apply_guide_rates",
+    "apply_well_segments",
     "from_deck_gas_rate",
     "load_controls_from_records",
     "load_economic_limits_from_record",
@@ -83,6 +85,7 @@ __all__ = [
     "load_schedule",
     "load_well_controls",
     "load_well_from_records",
+    "load_well_segments",
     "load_wells",
     "load_wells_from_records",
     "select_current_records",
@@ -271,6 +274,196 @@ def load_well_from_records(
         unit_system=unit_system,
         schedule_status=well_schedule_status,
     )
+
+
+def load_well_segments(deck_file: DeckFile, grid: Grid, wells: Wells) -> Wells:
+    """
+    Reads every `WELSEGS`/`COMPSEGS` record in `deck_file` and layers
+    measured depth onto `wells`' already-built `COMPDAT` perforations.
+
+    :param deck_file: The deck to read from.
+    :param grid: The same `Grid` `wells` was built against.
+    :param wells: An already-built `Wells`, from `load_wells`.
+    :returns: `wells`, with every well named in a `WELSEGS` record
+        updated; a well `WELSEGS` doesn't mention is returned unchanged.
+    """
+    welsegs_records = deck_file.get("WELSEGS")
+    compsegs_records = deck_file.get("COMPSEGS")
+    if not welsegs_records or not compsegs_records:
+        return wells
+    return apply_well_segments(
+        wells,
+        grid=grid,
+        welsegs_records=welsegs_records,
+        compsegs_records=compsegs_records,
+    )
+
+
+def apply_well_segments(
+    wells: Wells,
+    *,
+    grid: Grid,
+    welsegs_records: typing.Sequence[typing.Mapping[str, typing.Any]],
+    compsegs_records: typing.Sequence[typing.Mapping[str, typing.Any]],
+    current_time: float = 0.0,
+) -> Wells:
+    """
+    Layers measured depth onto a well's already-built `COMPDAT`
+    perforations, from a `WELSEGS`/`COMPSEGS` pair.
+
+    Only the main bore (`branch == 1`) is supported - a lateral branch
+    raises rather than being silently dropped. `COMPDAT` still owns
+    which grid cells a well connects to; `WELSEGS`/`COMPSEGS` only add
+    each connection's own measured depth on top of that, matching how
+    Eclipse itself always requires `COMPDAT` alongside a multi-segment
+    well's own `WELSEGS`/`COMPSEGS`, rather than deriving connections
+    from a survey the way this package's own `WellTrajectory` does for
+    a hand-built deviated well elsewhere.
+
+    A well's segment tree gives a measured depth to true vertical depth
+    profile with no horizontal position in it (`WELSEGS` carries
+    along-hole length and depth change only, not azimuth), so the
+    `WellTrajectory` built here has every station's `x`/`y` at `0.0`,
+    accurate for true vertical depth and inclination.
+
+    :param wells: An already-built `Wells`, from `load_wells`.
+    :param grid: The same `Grid` `wells` was built against.
+    :param welsegs_records: Every `WELSEGS` occurrence in the deck, from
+        `DeckFile.get("WELSEGS")`.
+    :param compsegs_records: Every `COMPSEGS` occurrence in the deck, from
+        `DeckFile.get("COMPSEGS")`.
+    :param current_time: Only `WELSEGS`/`COMPSEGS` occurrences at or
+        before this time are applied.
+    :returns: `wells`, with every well named in `welsegs_records` updated;
+        a well not named there is returned unchanged.
+    :raises NotSupportedError: If a `COMPSEGS` record targets a branch
+        other than `1`.
+    :raises ValidationError: If a `COMPSEGS` record has no explicit
+        `start_length`/`end_length`, or names a connection with no
+        matching `COMPDAT` perforation.
+    """
+    dims = grid.dimensions
+    assert dims is not None
+    compsegs_by_well: dict[str, list[typing.Mapping[str, typing.Any]]] = {}
+    for occurrence in compsegs_records:
+        if occurrence.get("schedule_time", 0.0) > current_time:
+            continue
+        compsegs_by_well.setdefault(occurrence["well"], []).append(occurrence)
+
+    updated_wells = dict(wells.wells)
+    for header in welsegs_records:
+        if header.get("schedule_time", 0.0) > current_time:
+            continue
+        
+        well_name = header["well"]
+        occurrences = compsegs_by_well.get(well_name)
+        if well_name not in updated_wells or not occurrences:
+            continue
+        well = updated_wells[well_name]
+
+        # Segment tree: segment number -> (cumulative measured depth,
+        # cumulative true vertical depth), walked from the first segment
+        # node (already at (tubing_length_to_first_segment, reference_depth))
+        # via each detail record's own outlet_segment. Records are expected
+        # in an order where a segment's outlet is already resolved by the
+        # time that segment's own record is reached, the same assumption
+        # Eclipse itself makes.
+        tubing_length_to_first_segment = header["tubing_length_to_first_segment"]
+        reference_depth = header["reference_depth"]
+        mode = header.get("length_depth_mode") or "INC"
+        node_md = {1: tubing_length_to_first_segment}
+        node_tvd = {1: reference_depth}
+        for detail in header["details"]:
+            if detail["branch"] != 1:
+                continue  # a lateral's own segments; only the main bore matters here
+            outlet = detail["outlet_segment"]
+            if outlet not in node_md:
+                continue  # outlet not yet resolved; skip rather than guess
+            if mode == "ABS":
+                md = tubing_length_to_first_segment + detail["length"]
+                tvd = reference_depth + detail["depth_change"]
+            else:
+                md = node_md[outlet] + detail["length"]
+                tvd = node_tvd[outlet] + detail["depth_change"]
+            for segment in range(detail["first_segment"], detail["last_segment"] + 1):
+                node_md[segment] = md
+                node_tvd[segment] = tvd
+
+        if len(node_md) <= 1:
+            continue  # no main-bore segment resolved; nothing to attach
+
+        points = sorted(set(zip(node_md.values(), node_tvd.values(), strict=True)))
+        md_points = [points[0][0]]
+        tvd_points = [points[0][1]]
+        for md, tvd in points[1:]:
+            if md > md_points[-1]:
+                md_points.append(md)
+                tvd_points.append(tvd)
+
+        new_perforations = list(well.perforations)
+        matched_any = False
+        for occurrence in occurrences:
+            for completion in occurrence["details"]:
+                if completion["branch"] != 1:
+                    raise NotSupportedError(
+                        f"`COMPSEGS` on well {well_name!r} targets branch "
+                        f"{completion['branch']!r}; only the main bore (branch 1) is "
+                        "supported by `apply_well_segments` today."
+                    )
+                start_length = completion.get("start_length")
+                end_length = completion.get("end_length")
+                if start_length is None or end_length is None:
+                    raise ValidationError(
+                        f"`COMPSEGS` on well {well_name!r}, connection "
+                        f"({completion['i']}, {completion['j']}, {completion['k']}), needs "
+                        "an explicit `start_length`/`end_length`; deriving them from the "
+                        "connection's own grid-block geometry (deck `1*`) is not supported."
+                    )
+
+                i, j, k = completion["i"], completion["j"], completion["k"]
+                cell_index = dims.flat_index(i - 1, j - 1, k - 1)
+                cell_top = grid.cell_min_xyz[cell_index, 2]
+                cell_bottom = grid.cell_max_xyz[cell_index, 2]
+                match_index = next(
+                    (
+                        index
+                        for index, perforation in enumerate(new_perforations)
+                        if perforation.top_depth is not None
+                        and perforation.top_depth <= cell_bottom
+                        and perforation.bottom_depth >= cell_top
+                    ),
+                    None,
+                )
+                if match_index is None:
+                    raise ValidationError(
+                        f"`COMPSEGS` on well {well_name!r} names connection "
+                        f"({i}, {j}, {k}), but no existing `COMPDAT` perforation there was "
+                        "found to attach measured depth to."
+                    )
+
+                top_md = tubing_length_to_first_segment + start_length
+                bottom_md = tubing_length_to_first_segment + end_length
+                new_perforations[match_index] = attrs.evolve(
+                    new_perforations[match_index],
+                    top_md=min(top_md, bottom_md),
+                    bottom_md=max(top_md, bottom_md),
+                )
+                matched_any = True
+
+        if not matched_any:
+            continue
+
+        stations = tuple(
+            TrajectoryStation(measured_depth=md, x=0.0, y=0.0, z=tvd)
+            for md, tvd in zip(md_points, tvd_points, strict=True)
+        )
+        updated_wells[well_name] = attrs.evolve(
+            well,
+            perforations=tuple(new_perforations),
+            trajectory=WellTrajectory(stations=stations),
+        )
+
+    return Wells(wells=updated_wells, unit_system=wells.unit_system)
 
 
 def load_wells_from_records(

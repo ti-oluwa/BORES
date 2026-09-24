@@ -86,6 +86,7 @@ from bores.deck.keywords.runspec import (
 )
 from bores.deck.keywords.schedule import (
     COMPDAT,
+    COMPSEGS,
     DATES,
     GCONINJE,
     GCONPROD,
@@ -100,6 +101,7 @@ from bores.deck.keywords.schedule import (
     WECON,
     WELOPEN,
     WELPI,
+    WELSEGS,
     WELSPECS,
     WELTARG,
     WGRUPCON,
@@ -240,6 +242,7 @@ DEFAULT_KEYWORDS = frozenset({
     RVVD,
     # SCHEDULE ###
     COMPDAT,
+    COMPSEGS,
     DATES,
     GCONINJE,
     GCONPROD,
@@ -247,6 +250,7 @@ DEFAULT_KEYWORDS = frozenset({
     TSTEP,
     WECON,
     WELOPEN,
+    WELSEGS,
     WELSPECS,
     WELTARG,
     WCONINJE,

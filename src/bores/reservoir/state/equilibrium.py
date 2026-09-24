@@ -53,7 +53,7 @@ class DepthTable(StoreSerializable):
     """
     Unit system for `depths`. `values` unit conversion is not handled
     here - GOR-type quantities are converted by the caller (same factor
-    used for `ReservoirState.solution_gor` / `vaporized_oil_to_gas_ratio`).
+    used for `ReservoirState.solution_gor` / `vaporized_oil_gas_ratio`).
     """
 
     def __attrs_post_init__(self) -> None:

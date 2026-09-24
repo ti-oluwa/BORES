@@ -91,6 +91,7 @@ from bores.deck.keywords.runspec import (
 )
 from bores.deck.keywords.schedule import (
     COMPDAT,
+    COMPSEGS,
     DATES,
     GCONINJE,
     GCONPROD,
@@ -105,6 +106,7 @@ from bores.deck.keywords.schedule import (
     WECON,
     WELOPEN,
     WELPI,
+    WELSEGS,
     WELSPECS,
     WELTARG,
     WGRUPCON,
@@ -152,6 +154,7 @@ from bores.deck.keywords.summary import (
 __all__ = [
     "ACTNUM",
     "COMPDAT",
+    "COMPSEGS",
     "COORD",
     "DATES",
     "DENSITY",
@@ -262,6 +265,7 @@ __all__ = [
     "WELLDIMS",
     "WELOPEN",
     "WELPI",
+    "WELSEGS",
     "WELSPECS",
     "WELTARG",
     "WGPR",

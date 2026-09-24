@@ -237,7 +237,7 @@ class ReservoirWorkspace(typing.NamedTuple):
     oil_bubble_point_pressure: NumberArray[OneDimension]
     """Shape `(n_cells,)`."""
 
-    vaporized_oil_to_gas_ratio: NumberArray[OneDimension]
+    vaporized_oil_gas_ratio: NumberArray[OneDimension]
     """Shape `(n_cells,)`. Rv."""
 
     gas_dew_point_pressure: NumberArray[OneDimension]
@@ -296,7 +296,7 @@ def build_reservoir_workspace(
         gas_saturation=state.gas_saturation.astype(dtype, copy=True),
         solution_gor=state.solution_gor.astype(dtype, copy=True),
         oil_bubble_point_pressure=state.oil_bubble_point_pressure.astype(dtype, copy=True),
-        vaporized_oil_to_gas_ratio=state.vaporized_oil_to_gas_ratio.astype(dtype, copy=True),
+        vaporized_oil_gas_ratio=state.vaporized_oil_gas_ratio.astype(dtype, copy=True),
         gas_dew_point_pressure=state.gas_dew_point_pressure.astype(dtype, copy=True),
         gas_solubility_in_water=state.gas_solubility_in_water.astype(dtype, copy=True),
         water_bubble_point_pressure=state.water_bubble_point_pressure.astype(dtype, copy=True),
@@ -355,7 +355,7 @@ def load_reservoir_state(
     #     gas_saturation=workspace.gas_saturation.astype(dtype, copy=True),
     #     solution_gor=workspace.solution_gor.astype(dtype, copy=True),
     #     oil_bubble_point_pressure=workspace.oil_bubble_point_pressure.astype(dtype, copy=True),
-    #     vaporized_oil_to_gas_ratio=workspace.vaporized_oil_to_gas_ratio.astype(dtype, copy=True),
+    #     vaporized_oil_gas_ratio=workspace.vaporized_oil_gas_ratio.astype(dtype, copy=True),
     #     gas_dew_point_pressure=workspace.gas_dew_point_pressure.astype(dtype, copy=True),
     #     gas_solubility_in_water=workspace.gas_solubility_in_water.astype(dtype, copy=True),
     #     water_bubble_point_pressure=workspace.water_bubble_point_pressure.astype(dtype, copy=True),

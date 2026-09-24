@@ -109,7 +109,7 @@ class PVTCache(typing.NamedTuple):
     vaporized_oil_gas_ratio: CellArray
     """
     Vaporized oil-gas ratio, $R_v$. `Rv`, evaluated along the dew curve
-    (`PVTTable.vaporized_oil_to_gas_ratio`). Unlike `Rs`, the underlying table has no
+    (`PVTTable.vaporized_oil_gas_ratio`). Unlike `Rs`, the underlying table has no
     separate undersaturated-wet-gas correction exposed for `Bg`/`mu_g` - this
     is always the dew-curve value, not a primary-variable override. `NaN` for
     dry-gas models with no `Rv` table.
@@ -331,9 +331,9 @@ def compute_pvt_cache(
             if z_dp is not None:
                 cache.dz_dp[mask] = z_dp
 
-            vaporized_oil_to_gas_ratio = gas.vaporized_oil_to_gas_ratio(p, t)
-            if vaporized_oil_to_gas_ratio is not None:
-                cache.vaporized_oil_gas_ratio[mask] = vaporized_oil_to_gas_ratio
+            vaporized_oil_gas_ratio = gas.vaporized_oil_gas_ratio(p, t)
+            if vaporized_oil_gas_ratio is not None:
+                cache.vaporized_oil_gas_ratio[mask] = vaporized_oil_gas_ratio
             drv_dp = gas.drv_dp(p, t)
             if drv_dp is not None:
                 cache.drv_dp[mask] = drv_dp

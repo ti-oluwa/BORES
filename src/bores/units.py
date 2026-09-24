@@ -17,10 +17,9 @@ __all__ = [
 ]
 
 
-DEFAULT_UNIT_SYSTEM = UnitSystem.FIELD
 DEFAULT_CONTEXT_ID = uuid4().hex
 _unit_system_context: contextvars.ContextVar[tuple[UnitSystem, str]] = contextvars.ContextVar(
-    "unit_system_context", default=(DEFAULT_UNIT_SYSTEM, DEFAULT_CONTEXT_ID)
+    "unit_system_context", default=(UnitSystem.FIELD, DEFAULT_CONTEXT_ID)
 )
 
 
@@ -69,10 +68,10 @@ class UnitSystemContext:
 
     def __enter__(self) -> UnitSystem:
         """Enter the context and activate its unit system."""
-        current_context_id = _unit_system_context.get()[1]
-        if current_context_id == self._id:
+        context_id = _unit_system_context.get()[1]
+        if context_id == self._id:
             warnings.warn(
-                f"Unit system context {current_context_id!r} is already active; re-entering it is unnecessary.",
+                f"Unit system context {context_id!r} is already active; re-entering it is unnecessary.",
                 UserWarning,
                 stacklevel=2,
             )
@@ -81,7 +80,7 @@ class UnitSystemContext:
 
         if self._entry_depth:
             raise RuntimeError(
-                f"Unit system context {current_context_id!r} is already active in another context."
+                f"Unit system context {context_id!r} is already active in another context."
             )
 
         self._token = _unit_system_context.set((self._unit_system, self._id))

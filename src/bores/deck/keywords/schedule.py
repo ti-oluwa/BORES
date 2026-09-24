@@ -44,6 +44,7 @@ from bores.deck.core import Deck, DeckParseError, tokenize
 from bores.deck.keywords.base import (
     DatesKeyword,
     Field,
+    HeaderedScheduledRecordKeyword,
     Keyword,
     RecordKeyword,
     ScheduledRecordKeyword,
@@ -53,6 +54,7 @@ from bores.errors import ValidationError
 
 __all__ = [
     "COMPDAT",
+    "COMPSEGS",
     "DATES",
     "GCONINJE",
     "GCONPROD",
@@ -67,6 +69,7 @@ __all__ = [
     "WECON",
     "WELOPEN",
     "WELPI",
+    "WELSEGS",
     "WELSPECS",
     "WELTARG",
     "WGRUPCON",
@@ -279,6 +282,119 @@ Fields:
 - `d_factor`            - non-Darcy (rate-dependent) skin factor.
 - `direction`           - completion direction (`X`, `Y`, or `Z`).
 - `kh_multiplier` - additional permeability-thickness multiplier.
+"""
+
+WELSEGS = HeaderedScheduledRecordKeyword(
+    "WELSEGS",
+    header_fields=[
+        Field("well", str),
+        Field("reference_depth", np.float64),
+        Field("tubing_length_to_first_segment", np.float64),
+        Field("first_segment_volume", np.float64, required=False, default=None),
+        Field(
+            "length_depth_mode",
+            lambda v: str(v).upper(),
+            required=False,
+            default="INC",
+            options={"INC", "ABS"},
+        ),
+        Field(
+            "pressure_drop_model",
+            lambda v: str(v).upper(),
+            required=False,
+            default="HFA",
+        ),
+    ],
+    detail_fields=[
+        Field("first_segment", int),
+        Field("last_segment", int),
+        Field("branch", int),
+        Field("outlet_segment", int),
+        Field("length", np.float64),
+        Field("depth_change", np.float64),
+        Field("diameter", np.float64),
+        Field("roughness", np.float64, required=False, default=0.0),
+    ],
+)
+"""
+`WELSEGS 'WELL' DEPTH1 TLEN1 [VOL1] [LEN&DEP] [PRESDROP] / segment records... /`
+- defines a multi-segment well's segment tree: one header record for the
+well, then one record per segment (or contiguous segment range).
+
+Only the main bore (`branch == 1`) is supported by
+`bores.wells.deck.load_well_segments` today; a lateral branch (`branch
+!= 1`) parses without error here, since that's still a faithful reading
+of the keyword, but is rejected where it's actually used.
+
+Header fields:
+
+- `well`                          - well name.
+- `reference_depth`               - depth of the first segment node (deck
+  item 2, `DEPTH1`) - the same BHP/THP reference `WELSPECS` establishes.
+- `tubing_length_to_first_segment` - along-hole length from the wellhead
+  to the first segment node (deck item 3, `TLEN1`).
+- `first_segment_volume`          - wellbore volume of the first segment
+  (deck item 4, `VOL1`); `None` means Eclipse computes it from geometry.
+- `length_depth_mode`             - `INC`: each segment record's own
+  `length`/`depth_change` are relative to its outlet segment. `ABS`:
+  they're cumulative from the first segment node instead.
+- `pressure_drop_model`           - which pressure-drop components apply
+  (`H`ydrostatic/`F`riction/`A`cceleration, e.g. `HFA`, `HF-`, `H--`).
+  Parsed through but not yet consumed by `load_well_segments`.
+
+Segment record fields:
+
+- `first_segment` / `last_segment` - segment number, or an inclusive
+  range of them sharing this record's own values.
+- `branch`                         - which branch this segment belongs
+  to (`1` is always the main bore).
+- `outlet_segment`                 - the segment this one flows into,
+  forming the tree; the main bore's own first segment outlets to `1`
+  (the reference node itself).
+- `length` / `depth_change`        - this segment's own along-hole
+  length and true-vertical-depth change, interpreted per
+  `length_depth_mode`.
+- `diameter` / `roughness`         - tubing inner diameter and absolute
+  roughness for this segment.
+"""
+
+COMPSEGS = HeaderedScheduledRecordKeyword(
+    "COMPSEGS",
+    header_fields=[
+        Field("well", str),
+    ],
+    detail_fields=[
+        Field("i", int),
+        Field("j", int),
+        Field("k", int),
+        Field("branch", int, required=False, default=1),
+        Field("start_length", np.float64, required=False, default=None),
+        Field("end_length", np.float64, required=False, default=None),
+    ],
+)
+"""
+`COMPSEGS 'WELL' / I J K [branch] [start_length] [end_length] ... / ... /`
+- maps a well's existing `COMPDAT` connections onto its `WELSEGS`
+segment tree, one record per connection.
+
+Real decks may add further, rarely-used trailing items (direction,
+end-range, and an explicit connection depth); they refine cases this parser 
+does not attempt to support yet (see its own docstring).
+
+Header field:
+
+- `well` - well name; the only thing on this record.
+
+Detail fields:
+
+- `i` / `j` / `k`         - the `COMPDAT` connection this record refines
+  - must already exist.
+- `branch`                - which `WELSEGS` branch this connection maps
+  onto; only `1` (the main bore) is supported by `load_well_segments` today.
+- `start_length` / `end_length` - along-branch length where this
+  connection starts/ends. `None` (`1*`) means Eclipse would derive it
+  from the connection's own grid-block geometry; `load_well_segments`
+  requires both explicitly instead of attempting that derivation.
 """
 
 WCONPROD = ScheduledRecordKeyword[str | float](

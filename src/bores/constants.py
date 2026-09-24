@@ -1191,10 +1191,10 @@ class ConstantsContext:
 
         :return: The new `Constants` instance
         """
-        current_context_id = _constants_context.get()[1]
-        if current_context_id == self._id:
+        context_id = _constants_context.get()[1]
+        if context_id == self._id:
             warnings.warn(
-                f"Constant context {current_context_id!r} is already active; re-entering it is unnecessary.",
+                f"Constant context {context_id!r} is already active; re-entering it is unnecessary.",
                 UserWarning,
                 stacklevel=2,
             )
@@ -1203,7 +1203,7 @@ class ConstantsContext:
 
         if self._entry_depth:
             raise RuntimeError(
-                f"Constant context {current_context_id!r} is already active in another context."
+                f"Constant context {context_id!r} is already active in another context."
             )
 
         self._token = _constants_context.set((self._constants, self._id))
