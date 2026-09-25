@@ -18,9 +18,7 @@ from bores.types import Number, UnitConversionTable, UnitSystem
 __all__ = [
     "FetkovichAquifer",
     "compute_incremental_influx",
-    "from_deck",
-    "load_fetkovich_aquifer_from_record",
-    "load_fetkovich_aquifers_from_records",
+    "load_fetkovich_aquifer",
 ]
 
 
@@ -239,6 +237,22 @@ class FetkovichAquifer(BoundaryCondition):
     unit_system: UnitSystem = attrs.field(default=UnitSystem.FIELD)
     """Unit system for all dimensional parameters."""
 
+    aquifer_id: int | None = attrs.field(default=None)
+    """
+    Aquifer identification number, when built `from_deck`. The `AQUFETP`
+    record's own `aquifer_id`, referenced by `AQUANCON` to attach this
+    aquifer to grid connections. Record-keeping only; `None` when built
+    directly rather than from a deck.
+    """
+
+    pvt_table_number: int | None = attrs.field(default=None)
+    """
+    Water PVT table number, usually when built `from_deck`. The `AQUFETP`
+    record's own `pvt_table_number`. Record-keeping only; not read
+    anywhere in class or the recurrence itself, since `AQUFETP` gives 
+    `aquifer_compressibility` directly rather than through a table lookup.
+    """
+
     productivity_index: Number = attrs.field(default=0.0, init=False, repr=False)
     """Resolved `J` in `unit_system` units. Set on initialization. Compiles into `CompiledAquifers`."""
 
@@ -426,58 +440,75 @@ class FetkovichAquifer(BoundaryCondition):
             unit_system=target,
         )
 
+    @typing.overload
+    @classmethod
+    def from_deck(cls, deck_file: DeckFile, *, aquifer_id: int) -> Self: ...
+    @typing.overload
+    @classmethod
+    def from_deck(cls, deck_file: DeckFile, *, aquifer_id: None = None) -> dict[int, Self]: ...
 
-def load_fetkovich_aquifer_from_record(
+    @classmethod
+    def from_deck(
+        cls,
+        deck_file: DeckFile,
+        *,
+        aquifer_id: int | None = None,
+    ) -> Self | dict[int, Self]:
+        """
+        Construct one or all `FetkovichAquifer` objects from a parsed `DeckFile`.
+
+        Reads the `AQUFETP` keyword. When `aquifer_id` is given, returns a
+        single `FetkovichAquifer` for that aquifer. When `aquifer_id` is
+        `None`, returns every aquifer the keyword defines, keyed by their
+        own `aquifer_id`.
+
+        :param deck_file: Parsed `bores.deck.file.DeckFile`.
+        :param aquifer_id: Id of a specific aquifer to extract, or `None` for all.
+        :returns: A single `FetkovichAquifer` if `aquifer_id` is given;
+            a `dict[int, FetkovichAquifer]` otherwise.
+        :raises ValidationError: If the deck has no `AQUFETP` keyword, or
+            `aquifer_id` is given but not found in it.
+        """
+        records = deck_file.get("AQUFETP")
+        if not records:
+            raise ValidationError("No `AQUFETP` keyword found in the provided deck.")
+
+        if aquifer_id is not None:
+            matching = [record for record in records if record["aquifer_id"] == aquifer_id]
+            if not matching:
+                available = sorted(record["aquifer_id"] for record in records)
+                raise ValidationError(
+                    f"Aquifer {aquifer_id!r} not found in `AQUFETP`. Available: {available}."
+                )
+            return typing.cast(Self, load_fetkovich_aquifer(matching[0], deck_file.unit_system))
+
+        return typing.cast(
+            dict[int, Self],
+            {
+                record["aquifer_id"]: load_fetkovich_aquifer(record, deck_file.unit_system)
+                for record in records
+            },
+        )
+
+
+def load_fetkovich_aquifer(
     record: typing.Mapping[str, typing.Any], unit_system: UnitSystem
 ) -> FetkovichAquifer:
     """
     Build a `FetkovichAquifer` from one `AQUFETP` record.
 
-    Uses calibrated mode-from-deck (`aquifer_productivity_index`,
-    `aquifer_compressibility`, `initial_aquifer_water_volume`) - `AQUFETP`
-    gives exactly these three quantities directly, so no physical-mode
-    derivation is needed.
-
     :param record: One parsed `AQUFETP` record.
     :param unit_system: The deck's unit system.
-    :returns: Constructed `FetkovichAquifer`. `pvt_table_number` and
-        `salt_concentration` are read by the deck parser but not consumed
-        here - this codebase has no PVTW-linked water-property resolution
-        or brine tracking wired into `FetkovichAquifer` yet.
+    :returns: Constructed `FetkovichAquifer`. `salt_concentration` is read
+        by the deck parser but not consumed here as this codebase has no
+        brine tracking wired into `FetkovichAquifer` yet.
     """
     return FetkovichAquifer(
+        aquifer_id=record["aquifer_id"],
         initial_pressure=record["initial_pressure"],
         aquifer_productivity_index=record["productivity_index"],
         aquifer_compressibility=record["total_compressibility"],
         initial_aquifer_water_volume=record["initial_water_volume"],
+        pvt_table_number=record["pvt_table_number"],
         unit_system=unit_system,
     )
-
-
-def load_fetkovich_aquifers_from_records(
-    records: typing.Sequence[typing.Mapping[str, typing.Any]], unit_system: UnitSystem
-) -> dict[int, FetkovichAquifer]:
-    """
-    Build every `FetkovichAquifer` a deck's `AQUFETP` records define.
-
-    :param records: Every `AQUFETP` record in the deck.
-    :param unit_system: The deck's unit system.
-    :returns: `FetkovichAquifer`s keyed by their deck `aquifer_id`, ready
-        to be matched against `AQUANCON` connections by that same id.
-    """
-    return {
-        record["aquifer_id"]: load_fetkovich_aquifer_from_record(record, unit_system)
-        for record in records
-    }
-
-
-def from_deck(deck_file: DeckFile) -> dict[int, FetkovichAquifer]:
-    """
-    Build every `FetkovichAquifer` a deck defines, from its `AQUFETP` keyword.
-
-    :param deck_file: Parsed deck, read for its `AQUFETP` records and unit system.
-    :returns: `FetkovichAquifer`s keyed by their deck `aquifer_id`. Empty
-        if the deck has no `AQUFETP` keyword.
-    """
-    records = deck_file.get("AQUFETP") or []
-    return load_fetkovich_aquifers_from_records(records, unit_system=deck_file.unit_system)

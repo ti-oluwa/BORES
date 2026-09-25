@@ -354,7 +354,7 @@ def apply_well_segments(
     for header in welsegs_records:
         if header.get("schedule_time", 0.0) > current_time:
             continue
-        
+
         well_name = header["well"]
         occurrences = compsegs_by_well.get(well_name)
         if well_name not in updated_wells or not occurrences:

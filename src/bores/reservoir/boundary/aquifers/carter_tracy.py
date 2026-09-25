@@ -9,7 +9,6 @@ from scipy.special import j1, y1
 from typing_extensions import Self
 
 from bores.constants import c, get_conversion_factors
-from bores.deck.core import DeckParseError
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.reservoir.boundary.base import (
@@ -19,12 +18,13 @@ from bores.reservoir.boundary.base import (
 )
 from bores.types import Number, NumberArray, OneDimension, UnitConversionTable, UnitSystem
 
+if typing.TYPE_CHECKING:
+    from bores.blackoil.pvt.regions import PVT
+
 __all__ = [
     "CarterTracyAquifer",
     "compute_incremental_influx",
-    "from_deck",
-    "load_carter_tracy_aquifer_from_record",
-    "load_carter_tracy_aquifers_from_records",
+    "load_carter_tracy_aquifer",
 ]
 
 
@@ -319,12 +319,16 @@ class CarterTracyAquifer(BoundaryCondition):
     where `r_w` is the inner (reservoir-aquifer contact) radius in ft and
     `t` is in days.
 
-    **Aquifer constant** (FIELD units, Carter & Tracy 1960, Eq. 2):
+    **Aquifer constant** (FIELD units, Carter & Tracy 1960, Eq. 2; Ahmed,
+    Reservoir Engineering Handbook):
 
-        aquifer_constant = 1.119 * φ * ct * (r_e² - r_w²) * h * f
+        aquifer_constant = 1.119 * φ * ct * r_w² * h * f
 
-    where `f = θ/360` is the encroachment angle fraction and `r_e` is the
-    outer aquifer radius in ft.
+    where `f = θ/360` is the encroachment angle fraction and `r_w` is the
+    reservoir/aquifer contact radius (`inner_radius`) in ft. This is the
+    same radius `tD` uses - the aquifer's own outer extent (`outer_radius`)
+    plays no part in either formula; it only sets `r_eD = r_e/r_w` for the
+    bounded-aquifer Bessel series below.
 
     **pD and pD' approximations**: Edwardson et al. (1962) polynomial for
     `tD <= 100`, logarithmic approximation for `tD > 100` - see
@@ -334,9 +338,10 @@ class CarterTracyAquifer(BoundaryCondition):
 
     *Physical-properties mode*: supply `aquifer_permeability`,
     `aquifer_porosity`, `aquifer_compressibility`, `water_viscosity`,
-    `inner_radius`, `outer_radius`, `aquifer_thickness`. `aquifer_constant`
-    and hydraulic diffusivity are derived automatically in FIELD units
-    then stored in `unit_system` units.
+    `inner_radius`, `aquifer_thickness`. `aquifer_constant` and hydraulic
+    diffusivity are derived automatically in FIELD units then stored in
+    `unit_system` units. Also supply `outer_radius` if `bounded_aquifer=True`
+    (it isn't needed otherwise).
 
     *Calibrated-constant mode*: supply `aquifer_constant` and,
     optionally, `dimensionless_time_scale` (recommended) and
@@ -394,9 +399,11 @@ class CarterTracyAquifer(BoundaryCondition):
 
     outer_radius: Number | None = attrs.field(default=None)
     """
-    Outer aquifer extent. Physical mode only. Always sets total aquifer
-    storage capacity (via `r_e^2 - r_w^2` in `aquifer_constant`); also
-    sets the transient response's `r_eD = r_e/r_w` when `bounded_aquifer=True`.
+    Outer aquifer extent. Physical mode only, and only needed when
+    `bounded_aquifer=True`, to set the transient response's
+    `r_eD = r_e/r_w`. Plays no part in `aquifer_constant`, which depends
+    on `inner_radius` alone. Ignored (with a warning if set) when
+    `bounded_aquifer=False`.
     """
 
     aquifer_thickness: Number | None = attrs.field(default=None)
@@ -410,10 +417,12 @@ class CarterTracyAquifer(BoundaryCondition):
 
     dimensionless_radius_ratio: Number = attrs.field(default=10.0)
     """
-    `r_e / r_w`. Calibrated-constant mode only - physical mode derives
-    its own `r_e / r_w` from `outer_radius`/`inner_radius` instead and
-    ignores this field. Affects the transient response shape only when
-    `bounded_aquifer=True`; otherwise stored for the record only.
+    `r_e / r_w`. Calibrated-constant mode, and physical mode when
+    `outer_radius` is left unset, both use this directly; physical mode
+    with `outer_radius` given derives `r_e / r_w` from
+    `outer_radius`/`inner_radius` instead and ignores this field. Affects
+    the transient response shape only when `bounded_aquifer=True`;
+    otherwise stored for the record only.
     """
 
     bounded_aquifer: bool = attrs.field(default=False)
@@ -421,9 +430,7 @@ class CarterTracyAquifer(BoundaryCondition):
     Opt-in: use the Klins, Bouchard & Cable (1988) finite/bounded-aquifer
     `pD(tD, r_eD)` once `tD` passes `compute_bounded_aquifer_threshold(r_eD)`,
     instead of always treating the aquifer as infinite-acting. Defaults
-    to `False` for backward compatibility - see the full discussion in
-    the class docstring history (prior handoff notes) if reviving this
-    default is ever considered.
+    to `False` for backward compatibility.
     """
 
     dimensionless_time_scale: Number | None = attrs.field(default=None)
@@ -431,8 +438,8 @@ class CarterTracyAquifer(BoundaryCondition):
     `tD / t` - dimensionless time per unit of `unit_system` time.
     Calibrated-constant mode only, optional but recommended. When set,
     `tD = dimensionless_time_scale * t`. When left `None`, `tD` falls
-    back to raw elapsed `time` - dimensionally meaningless and dependent
-    on `unit_system`'s time unit - and `__attrs_post_init__` warns about it.
+    back to raw elapsed `time`. Dimensionally meaningless and dependent
+    on `unit_system`'s time unit.
     """
 
     angle: Number = attrs.field(default=360.0)
@@ -440,6 +447,22 @@ class CarterTracyAquifer(BoundaryCondition):
 
     unit_system: UnitSystem = attrs.field(default=UnitSystem.FIELD)
     """Unit system for all dimensional parameters and returned flux values."""
+
+    aquifer_id: int | None = attrs.field(default=None)
+    """
+    Aquifer identification number, when built `from_deck`. The `AQUCT`
+    record's own `aquifer_id`, referenced by `AQUANCON` to attach this
+    aquifer to grid connections. Record-keeping only; `None` when built
+    directly rather than from a deck.
+    """
+
+    pvt_table_number: int | None = attrs.field(default=None)
+    """
+    Water PVT table number, usually when built `from_deck`. The `AQUCT` record's
+    own `pvt_table_number`, used to resolve `water_viscosity` from a `PVT`
+    object at load time. Record-keeping only afterwards; not read anywhere
+    in the class or the recurrence itself.
+    """
 
     # Resolved scalars to be compiled into `CompiledAquifers`
 
@@ -490,7 +513,6 @@ class CarterTracyAquifer(BoundaryCondition):
                 self.aquifer_compressibility,
                 self.water_viscosity,
                 self.inner_radius,
-                self.outer_radius,
                 self.aquifer_thickness,
             )
         )
@@ -501,13 +523,13 @@ class CarterTracyAquifer(BoundaryCondition):
                 f"{type(self).__name__!r} requires either:\n"
                 "  Physical-properties mode: aquifer_permeability, aquifer_porosity,\n"
                 "    aquifer_compressibility, water_viscosity, inner_radius,\n"
-                "    outer_radius, aquifer_thickness.\n"
+                "    aquifer_thickness. `outer_radius` is also needed if\n"
+                "    `bounded_aquifer=True`.\n"
                 "  Calibrated-constant mode: aquifer_constant."
             )
 
         if has_physical:
             assert self.inner_radius is not None
-            assert self.outer_radius is not None
             assert self.aquifer_permeability is not None
             assert self.aquifer_porosity is not None
             assert self.aquifer_compressibility is not None
@@ -516,13 +538,17 @@ class CarterTracyAquifer(BoundaryCondition):
 
             if self.inner_radius <= 0:
                 raise ValidationError("`inner_radius` must be positive.")
-            if self.outer_radius <= self.inner_radius:
+            if self.outer_radius is not None and self.outer_radius <= self.inner_radius:
                 raise ValidationError("`outer_radius` must be greater than `inner_radius`.")
 
             if self.unit_system != UnitSystem.FIELD:
                 to_field = get_conversion_factors(self.unit_system, UnitSystem.FIELD)
                 r_w_ft = self.inner_radius * to_field["length"]
-                r_e_ft = self.outer_radius * to_field["length"]
+                r_e_ft = (
+                    self.outer_radius * to_field["length"]
+                    if self.outer_radius is not None
+                    else None
+                )
                 height_ft = self.aquifer_thickness * to_field["length"]
                 compressibility_psi = self.aquifer_compressibility * to_field["compressibility"]
                 permeability_md = self.aquifer_permeability * to_field["permeability"]
@@ -537,16 +563,33 @@ class CarterTracyAquifer(BoundaryCondition):
                 viscosity_cp = self.water_viscosity
                 from_field = None
 
-            r_d = r_e_ft / r_w_ft
+            # `r_eD = r_e/r_w` only matters for the bounded-aquifer Bessel
+            # series (see the `if self.bounded_aquifer:` block below), not
+            # for `aquifer_constant`. Fall back to `dimensionless_radius_ratio`
+            # (same as calibrated-constant mode) when `outer_radius` isn't given.
+            r_d = r_e_ft / r_w_ft if r_e_ft is not None else self.dimensionless_radius_ratio
             object.__setattr__(self, "resolved_dimensionless_radius_ratio", r_d)
+
+            if not self.bounded_aquifer and self.outer_radius is not None:
+                warnings.warn(
+                    f"{type(self).__name__!r} was given `outer_radius`, but "
+                    "`bounded_aquifer=False`, so it has no effect as the "
+                    "aquifer is treated as infinite-acting regardless.",
+                    stacklevel=2,
+                )
 
             angle_fraction = self.angle / 360.0
 
+            # Carter & Tracy (1960), Eq. 2 / Ahmed, Reservoir Engineering
+            # Handbook: B = 1.119 * phi * ct * r_w^2 * h * f - one radius
+            # (the reservoir/aquifer contact radius), not `r_e^2 - r_w^2`.
+            # Matches the Handbook's own worked example to 3 s.f.:
+            # 1.119*0.2*1e-6*2000**2*25*1.0 = 22.38 ~ 22.4 bbl/psi.
             aquifer_constant_bbl_per_psi = (
                 1.119
                 * self.aquifer_porosity
                 * compressibility_psi
-                * (r_e_ft**2 - r_w_ft**2)
+                * (r_w_ft**2)
                 * height_ft
                 * angle_fraction
             )
@@ -697,138 +740,127 @@ class CarterTracyAquifer(BoundaryCondition):
             unit_system=target,
         )
 
+    @typing.overload
+    @classmethod
+    def from_deck(cls, deck_file: DeckFile, *, pvt: "PVT", aquifer_id: int) -> Self: ...
+    @typing.overload
+    @classmethod
+    def from_deck(
+        cls, deck_file: DeckFile, *, pvt: "PVT", aquifer_id: None = None
+    ) -> dict[int, Self]: ...
 
-def load_carter_tracy_aquifer_from_record(
+    @classmethod
+    def from_deck(
+        cls,
+        deck_file: DeckFile,
+        *,
+        pvt: "PVT",
+        aquifer_id: int | None = None,
+    ) -> Self | dict[int, Self]:
+        """
+        Construct one or all `CarterTracyAquifer` objects from a parsed `DeckFile`.
+
+        Reads the `AQUCT` keyword. When `aquifer_id` is given, returns a
+        single `CarterTracyAquifer` for that aquifer. When `aquifer_id` is
+        `None`, returns every aquifer the keyword defines, keyed by their
+        own `aquifer_id`.
+
+        :param deck_file: Parsed `bores.deck.file.DeckFile`.
+        :param pvt: The model's PVT tables - see `load_carter_tracy_aquifer`
+            for how `water_viscosity` is resolved from it.
+        :param aquifer_id: Id of a specific aquifer to extract, or `None` for all.
+        :returns: A single `CarterTracyAquifer` if `aquifer_id` is given;
+            a `dict[int, CarterTracyAquifer]` otherwise.
+        :raises ValidationError: If the deck has no `AQUCT` keyword, or
+            `aquifer_id` is given but not found in it.
+        """
+        records = deck_file.get("AQUCT")
+        if not records:
+            raise ValidationError("No AQUCT keyword found in the provided deck.")
+
+        if aquifer_id is not None:
+            matching = [record for record in records if record["aquifer_id"] == aquifer_id]
+            if not matching:
+                available = sorted(record["aquifer_id"] for record in records)
+                raise ValidationError(
+                    f"Aquifer {aquifer_id!r} not found in AQUCT. Available: {available}."
+                )
+            return typing.cast(
+                Self, load_carter_tracy_aquifer(matching[0], deck_file.unit_system, pvt=pvt)
+            )
+
+        return typing.cast(
+            dict[int, Self],
+            {
+                record["aquifer_id"]: load_carter_tracy_aquifer(
+                    record, deck_file.unit_system, pvt=pvt
+                )
+                for record in records
+            },
+        )
+
+
+def load_carter_tracy_aquifer(
     record: typing.Mapping[str, typing.Any],
     unit_system: UnitSystem,
     *,
-    outer_radius: Number,
-    water_viscosity: Number,
+    pvt: "PVT",
 ) -> CarterTracyAquifer:
     """
     Build a `CarterTracyAquifer` from one `AQUCT` record, in
     physical-properties mode.
 
-    `AQUCT` does not fully specify a physical-mode `CarterTracyAquifer` on
-    its own, so two inputs have to come from elsewhere and are required
-    keyword arguments here rather than silently defaulted:
-
-    - `outer_radius` - `AQUCT`'s own `radius` item is the aquifer's inner
-      (reservoir-contact) radius only; `resolved_aquifer_constant`'s
-      `r_e^2 - r_w^2` term needs the aquifer's outer extent too, which
-      `AQUCT` never supplies as a number. Eclipse instead controls
-      boundedness through a referenced `AQUTAB` influence-function table,
-      which this codebase does not parse yet - see the
-      `aquifer_influence_table_number` warning below.
-    - `water_viscosity` - `AQUCT` gives a `pvt_table_number` (available
-      on `record["pvt_table_number"]`) rather than a viscosity value
-      directly; resolving it means evaluating that water PVT table at
-      `record["initial_pressure"]`, which this function does not do, so
-      the resolved viscosity has to be supplied directly.
+    `AQUCT` gives every physical-mode input directly except water
+    viscosity. Item 10 (`pvt_table_number`) is a water PVT table
+    reference, not a value, so it's resolved here as `pvt.region(
+    pvt_table_number).static.water_reference_viscosity`, the `PVTW`
+    reference viscosity for that region, evaluated once rather than
+    re-interpolated per timestep, matching this class's own
+    constant-viscosity assumption. `AQUCT`'s single `radius` item maps to
+    `inner_radius`; `outer_radius` is left unset.
 
     :param record: One parsed `AQUCT` record.
     :param unit_system: The deck's unit system.
-    :param outer_radius: Aquifer outer radius, `unit_system` units.
-    :param water_viscosity: Water viscosity at aquifer conditions, `unit_system` units.
+    :param pvt: The model's PVT tables, covering at least
+        `record["pvt_table_number"]`'s region (e.g. `PVT.from_deck(deck_file, ...)`).
     :returns: Constructed `CarterTracyAquifer`, always `bounded_aquifer=False`
-        - see the note on `aquifer_influence_table_number` above.
+        - see the note on `aquifer_influence_table_number` below.
+    :raises ValidationError: If `pvt`'s region for `record["pvt_table_number"]`
+        has no `PVTW`-derived reference viscosity.
     """
+    aquifer_id = record["aquifer_id"]
+    pvt_table_number = record["pvt_table_number"]
+
     influence_table = record["aquifer_influence_table_number"]
     if influence_table != 1:
         warnings.warn(
-            f"AQUCT aquifer {record['aquifer_id']!r} references AQUTAB table "
+            f"`AQUCT` aquifer {aquifer_id!r} references AQUTAB table "
             f"{influence_table!r}, but custom AQUTAB influence functions are "
             "not parsed by this codebase yet. Building it as infinite-acting "
             "(bounded_aquifer=False) instead of honouring that table.",
             stacklevel=2,
         )
 
+    water_viscosity = pvt.region(pvt_table_number).static.water_reference_viscosity
+    if water_viscosity is None:
+        raise ValidationError(
+            f"`AQUCT` aquifer {aquifer_id!r}: PVT region {pvt_table_number!r} "
+            "has no `PVTW`-derived `water_reference_viscosity`. `AQUCT` "
+            "references this region as its water PVT table but the deck's "
+            "`PVTW` keyword doesn't cover it."
+        )
+
     return CarterTracyAquifer(
+        aquifer_id=aquifer_id,
         initial_pressure=record["initial_pressure"],
         aquifer_permeability=record["permeability"],
         aquifer_porosity=record["porosity"],
         aquifer_compressibility=record["total_compressibility"],
         water_viscosity=water_viscosity,
         inner_radius=record["radius"],
-        outer_radius=outer_radius,
         aquifer_thickness=record["thickness"],
         bounded_aquifer=False,
         angle=record["influence_angle"],
+        pvt_table_number=pvt_table_number,
         unit_system=unit_system,
-    )
-
-
-def load_carter_tracy_aquifers_from_records(
-    records: typing.Sequence[typing.Mapping[str, typing.Any]],
-    unit_system: UnitSystem,
-    *,
-    outer_radii: typing.Mapping[int, Number],
-    water_viscosities: typing.Mapping[int, Number],
-) -> dict[int, CarterTracyAquifer]:
-    """
-    Build every `CarterTracyAquifer` a deck's `AQUCT` records define.
-
-    :param records: Every `AQUCT` record in the deck.
-    :param unit_system: The deck's unit system.
-    :param outer_radii: Aquifer outer radius per `aquifer_id` - see
-        `load_carter_tracy_aquifer_from_record` for why this can't be
-        read from the record itself.
-    :param water_viscosities: Water viscosity at aquifer conditions per
-        `aquifer_id` - see `load_carter_tracy_aquifer_from_record`.
-    :returns: `CarterTracyAquifer`s keyed by their deck `aquifer_id`,
-        ready to be matched against `AQUANCON` connections by that same id.
-    :raises DeckParseError: If an aquifer's id is missing from `outer_radii`
-        or `water_viscosities`.
-    """
-    aquifers: dict[int, CarterTracyAquifer] = {}
-    for record in records:
-        aquifer_id = record["aquifer_id"]
-        if aquifer_id not in outer_radii:
-            raise DeckParseError(
-                f"AQUCT aquifer {aquifer_id!r}: no `outer_radius` supplied in "
-                "`outer_radii`. `AQUCT` doesn't specify the aquifer's outer "
-                "extent - see `load_carter_tracy_aquifer_from_record`."
-            )
-        if aquifer_id not in water_viscosities:
-            raise DeckParseError(
-                f"AQUCT aquifer {aquifer_id!r}: no `water_viscosity` supplied "
-                "in `water_viscosities`. `AQUCT` gives a PVT table reference "
-                "(`pvt_table_number`), not a viscosity value directly - see "
-                "`load_carter_tracy_aquifer_from_record`."
-            )
-        aquifers[aquifer_id] = load_carter_tracy_aquifer_from_record(
-            record,
-            unit_system,
-            outer_radius=outer_radii[aquifer_id],
-            water_viscosity=water_viscosities[aquifer_id],
-        )
-    return aquifers
-
-
-def from_deck(
-    deck_file: DeckFile,
-    *,
-    outer_radii: typing.Mapping[int, Number],
-    water_viscosities: typing.Mapping[int, Number],
-) -> dict[int, CarterTracyAquifer]:
-    """
-    Build every `CarterTracyAquifer` a deck defines, from its `AQUCT` keyword.
-
-    :param deck_file: Parsed deck, read for its `AQUCT` records and unit system.
-    :param outer_radii: Aquifer outer radius per `aquifer_id` - see
-        `load_carter_tracy_aquifer_from_record` for why this can't be
-        read from the deck.
-    :param water_viscosities: Water viscosity at aquifer conditions per
-        `aquifer_id` - see `load_carter_tracy_aquifer_from_record`.
-    :returns: `CarterTracyAquifer`s keyed by their deck `aquifer_id`. Empty
-        if the deck has no `AQUCT` keyword.
-    :raises DeckParseError: If an aquifer's id is missing from `outer_radii`
-        or `water_viscosities`.
-    """
-    records = deck_file.get("AQUCT") or []
-    return load_carter_tracy_aquifers_from_records(
-        records,
-        unit_system=deck_file.unit_system,
-        outer_radii=outer_radii,
-        water_viscosities=water_viscosities,
     )
