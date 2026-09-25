@@ -110,6 +110,8 @@ from bores.deck.keywords.schedule import (
     WTEST,
 )
 from bores.deck.keywords.solution import (
+    AQUCT,
+    AQUFETP,
     EQUIL,
     PRESSURE,
     RESTART,
@@ -227,6 +229,8 @@ DEFAULT_KEYWORDS = frozenset({
     SWFN,
     SWOF,
     # SOLUTION ###
+    AQUCT,
+    AQUFETP,
     EQUIL,
     PRESSURE,
     RESTART,

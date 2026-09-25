@@ -6,6 +6,7 @@ import numpy as np
 from typing_extensions import Self
 
 from bores.constants import c, get_conversion_factors
+from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.reservoir.boundary.base import (
     BoundaryCondition,
@@ -14,7 +15,13 @@ from bores.reservoir.boundary.base import (
 )
 from bores.types import Number, UnitConversionTable, UnitSystem
 
-__all__ = ["FetkovichAquifer", "compute_incremental_influx"]
+__all__ = [
+    "FetkovichAquifer",
+    "compute_incremental_influx",
+    "from_deck",
+    "load_fetkovich_aquifer_from_record",
+    "load_fetkovich_aquifers_from_records",
+]
 
 
 @numba.njit(cache=True)
@@ -418,3 +425,59 @@ class FetkovichAquifer(BoundaryCondition):
             angle=self.angle,
             unit_system=target,
         )
+
+
+def load_fetkovich_aquifer_from_record(
+    record: typing.Mapping[str, typing.Any], unit_system: UnitSystem
+) -> FetkovichAquifer:
+    """
+    Build a `FetkovichAquifer` from one `AQUFETP` record.
+
+    Uses calibrated mode-from-deck (`aquifer_productivity_index`,
+    `aquifer_compressibility`, `initial_aquifer_water_volume`) - `AQUFETP`
+    gives exactly these three quantities directly, so no physical-mode
+    derivation is needed.
+
+    :param record: One parsed `AQUFETP` record.
+    :param unit_system: The deck's unit system.
+    :returns: Constructed `FetkovichAquifer`. `pvt_table_number` and
+        `salt_concentration` are read by the deck parser but not consumed
+        here - this codebase has no PVTW-linked water-property resolution
+        or brine tracking wired into `FetkovichAquifer` yet.
+    """
+    return FetkovichAquifer(
+        initial_pressure=record["initial_pressure"],
+        aquifer_productivity_index=record["productivity_index"],
+        aquifer_compressibility=record["total_compressibility"],
+        initial_aquifer_water_volume=record["initial_water_volume"],
+        unit_system=unit_system,
+    )
+
+
+def load_fetkovich_aquifers_from_records(
+    records: typing.Sequence[typing.Mapping[str, typing.Any]], unit_system: UnitSystem
+) -> dict[int, FetkovichAquifer]:
+    """
+    Build every `FetkovichAquifer` a deck's `AQUFETP` records define.
+
+    :param records: Every `AQUFETP` record in the deck.
+    :param unit_system: The deck's unit system.
+    :returns: `FetkovichAquifer`s keyed by their deck `aquifer_id`, ready
+        to be matched against `AQUANCON` connections by that same id.
+    """
+    return {
+        record["aquifer_id"]: load_fetkovich_aquifer_from_record(record, unit_system)
+        for record in records
+    }
+
+
+def from_deck(deck_file: DeckFile) -> dict[int, FetkovichAquifer]:
+    """
+    Build every `FetkovichAquifer` a deck defines, from its `AQUFETP` keyword.
+
+    :param deck_file: Parsed deck, read for its `AQUFETP` records and unit system.
+    :returns: `FetkovichAquifer`s keyed by their deck `aquifer_id`. Empty
+        if the deck has no `AQUFETP` keyword.
+    """
+    records = deck_file.get("AQUFETP") or []
+    return load_fetkovich_aquifers_from_records(records, unit_system=deck_file.unit_system)

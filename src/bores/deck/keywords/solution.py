@@ -26,6 +26,14 @@ float64 arrays):
 
 - `RESTART` - resumes from a previously written restart file instead
   of explicit initial conditions.
+
+**Analytic aquifer keywords** (one record per aquifer):
+
+- `AQUCT` - Carter-Tracy analytic aquifer, given by physical properties
+  (permeability, porosity, compressibility, radius, thickness) plus a
+  water PVT table reference.
+- `AQUFETP` - Fetkovich analytic aquifer, given directly by productivity
+  index, total compressibility, and initial water volume.
 """
 
 import typing
@@ -44,6 +52,8 @@ from bores.deck.keywords.base import (
 from bores.deck.operators import Operation
 
 __all__ = [
+    "AQUCT",
+    "AQUFETP",
     "EQUIL",
     "PRESSURE",
     "RESTART",
@@ -294,6 +304,94 @@ class RestartKeyword(Keyword[dict[str, typing.Any]]):
 
         return {"root_name": tokens[0], "report_step": report_step}
 
+
+AQUCT = RepeatedRecordKeyword[float](
+    "AQUCT",
+    fields=[
+        Field("aquifer_id", int),
+        Field("datum_depth", np.float64),
+        Field("initial_pressure", np.float64),
+        Field("permeability", np.float64),
+        Field("porosity", np.float64),
+        Field("total_compressibility", np.float64),
+        Field("radius", np.float64),
+        Field("thickness", np.float64),
+        Field("influence_angle", np.float64, required=False, default=360.0),
+        Field("pvt_table_number", int, required=False, default=1),
+        Field("aquifer_influence_table_number", int, required=False, default=1),
+    ],
+)
+"""
+`AQUCT  AQUIFER_ID  DATUM_DEPTH  INITIAL_PRESSURE  PERMEABILITY  POROSITY
+TOTAL_COMPRESSIBILITY  RADIUS  THICKNESS  INFLUENCE_ANGLE  PVT_TABLE_NUMBER
+AQUIFER_INFLUENCE_TABLE_NUMBER /` (one record per aquifer) - Carter-Tracy
+analytic aquifer definitions.
+
+Multiple records (one per aquifer) are separated by `/` within a single
+`AQUCT` block, and multiple `AQUCT` blocks in the same deck are
+concatenated in file order.
+
+Fields:
+
+- `aquifer_id`      - aquifer identification number, referenced later by
+  `AQUANCON` to attach the aquifer to grid connections.
+- `datum_depth`      - depth at which `initial_pressure` applies.
+- `initial_pressure` - aquifer pressure at `datum_depth`.
+- `permeability`      - aquifer permeability.
+- `porosity`      - aquifer porosity (fraction).
+- `total_compressibility` - combined rock and water compressibility.
+- `radius`      - radius of the reservoir, i.e. the aquifer's inner
+  (reservoir-contact) radius. Used to derive dimensionless time; the
+  aquifer's own outer extent is a separate quantity this keyword does
+  not supply.
+- `thickness`      - aquifer thickness.
+- `influence_angle` - angle subtended by the aquifer at the reservoir,
+  in degrees. `360` (a fully encircling aquifer) if omitted.
+- `pvt_table_number` - water PVT table number, for water viscosity and
+  formation volume factor at aquifer conditions. `1` if omitted.
+- `aquifer_influence_table_number` - `AQUTAB` table number giving a
+  custom dimensionless pressure influence function. `1` selects the
+  built-in infinite-acting Van Everdingen-Hurst behaviour, the default.
+"""
+
+AQUFETP = RepeatedRecordKeyword[float](
+    "AQUFETP",
+    fields=[
+        Field("aquifer_id", int),
+        Field("datum_depth", np.float64),
+        Field("initial_pressure", np.float64),
+        Field("initial_water_volume", np.float64),
+        Field("total_compressibility", np.float64),
+        Field("productivity_index", np.float64),
+        Field("pvt_table_number", int, required=False, default=1),
+        Field("salt_concentration", np.float64, required=False, default=0.0),
+    ],
+)
+"""
+`AQUFETP  AQUIFER_ID  DATUM_DEPTH  INITIAL_PRESSURE  INITIAL_WATER_VOLUME
+TOTAL_COMPRESSIBILITY  PRODUCTIVITY_INDEX  PVT_TABLE_NUMBER
+SALT_CONCENTRATION /` (one record per aquifer) - Fetkovich analytic
+aquifer definitions.
+
+Multiple records (one per aquifer) are separated by `/` within a single
+`AQUFETP` block, and multiple `AQUFETP` blocks in the same deck are
+concatenated in file order.
+
+Fields:
+
+- `aquifer_id`      - aquifer identification number, referenced later by
+  `AQUANCON` to attach the aquifer to grid connections.
+- `datum_depth`      - depth at which `initial_pressure` applies.
+- `initial_pressure` - aquifer pressure at `datum_depth`. Required here;
+  Eclipse's own equilibration-derived default when this is omitted or
+  given as `1*` is not supported.
+- `initial_water_volume` - `W_i`, the aquifer's initial water volume.
+- `total_compressibility` - combined rock and water compressibility.
+- `productivity_index` - aquifer productivity index `J`.
+- `pvt_table_number` - water PVT table number. `1` if omitted.
+- `salt_concentration` - initial salt concentration, for brine tracking.
+  `0` if omitted.
+"""
 
 RESTART = RestartKeyword()
 """

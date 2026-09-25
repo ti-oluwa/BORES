@@ -9,6 +9,8 @@ from scipy.special import j1, y1
 from typing_extensions import Self
 
 from bores.constants import c, get_conversion_factors
+from bores.deck.core import DeckParseError
+from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.reservoir.boundary.base import (
     BoundaryCondition,
@@ -17,7 +19,13 @@ from bores.reservoir.boundary.base import (
 )
 from bores.types import Number, NumberArray, OneDimension, UnitConversionTable, UnitSystem
 
-__all__ = ["CarterTracyAquifer", "compute_incremental_influx"]
+__all__ = [
+    "CarterTracyAquifer",
+    "compute_incremental_influx",
+    "from_deck",
+    "load_carter_tracy_aquifer_from_record",
+    "load_carter_tracy_aquifers_from_records",
+]
 
 
 def compute_bessel_roots(r_ed: Number, n_max: int) -> NumberArray[OneDimension]:
@@ -688,3 +696,139 @@ class CarterTracyAquifer(BoundaryCondition):
             angle=self.angle,
             unit_system=target,
         )
+
+
+def load_carter_tracy_aquifer_from_record(
+    record: typing.Mapping[str, typing.Any],
+    unit_system: UnitSystem,
+    *,
+    outer_radius: Number,
+    water_viscosity: Number,
+) -> CarterTracyAquifer:
+    """
+    Build a `CarterTracyAquifer` from one `AQUCT` record, in
+    physical-properties mode.
+
+    `AQUCT` does not fully specify a physical-mode `CarterTracyAquifer` on
+    its own, so two inputs have to come from elsewhere and are required
+    keyword arguments here rather than silently defaulted:
+
+    - `outer_radius` - `AQUCT`'s own `radius` item is the aquifer's inner
+      (reservoir-contact) radius only; `resolved_aquifer_constant`'s
+      `r_e^2 - r_w^2` term needs the aquifer's outer extent too, which
+      `AQUCT` never supplies as a number. Eclipse instead controls
+      boundedness through a referenced `AQUTAB` influence-function table,
+      which this codebase does not parse yet - see the
+      `aquifer_influence_table_number` warning below.
+    - `water_viscosity` - `AQUCT` gives a `pvt_table_number` (available
+      on `record["pvt_table_number"]`) rather than a viscosity value
+      directly; resolving it means evaluating that water PVT table at
+      `record["initial_pressure"]`, which this function does not do, so
+      the resolved viscosity has to be supplied directly.
+
+    :param record: One parsed `AQUCT` record.
+    :param unit_system: The deck's unit system.
+    :param outer_radius: Aquifer outer radius, `unit_system` units.
+    :param water_viscosity: Water viscosity at aquifer conditions, `unit_system` units.
+    :returns: Constructed `CarterTracyAquifer`, always `bounded_aquifer=False`
+        - see the note on `aquifer_influence_table_number` above.
+    """
+    influence_table = record["aquifer_influence_table_number"]
+    if influence_table != 1:
+        warnings.warn(
+            f"AQUCT aquifer {record['aquifer_id']!r} references AQUTAB table "
+            f"{influence_table!r}, but custom AQUTAB influence functions are "
+            "not parsed by this codebase yet. Building it as infinite-acting "
+            "(bounded_aquifer=False) instead of honouring that table.",
+            stacklevel=2,
+        )
+
+    return CarterTracyAquifer(
+        initial_pressure=record["initial_pressure"],
+        aquifer_permeability=record["permeability"],
+        aquifer_porosity=record["porosity"],
+        aquifer_compressibility=record["total_compressibility"],
+        water_viscosity=water_viscosity,
+        inner_radius=record["radius"],
+        outer_radius=outer_radius,
+        aquifer_thickness=record["thickness"],
+        bounded_aquifer=False,
+        angle=record["influence_angle"],
+        unit_system=unit_system,
+    )
+
+
+def load_carter_tracy_aquifers_from_records(
+    records: typing.Sequence[typing.Mapping[str, typing.Any]],
+    unit_system: UnitSystem,
+    *,
+    outer_radii: typing.Mapping[int, Number],
+    water_viscosities: typing.Mapping[int, Number],
+) -> dict[int, CarterTracyAquifer]:
+    """
+    Build every `CarterTracyAquifer` a deck's `AQUCT` records define.
+
+    :param records: Every `AQUCT` record in the deck.
+    :param unit_system: The deck's unit system.
+    :param outer_radii: Aquifer outer radius per `aquifer_id` - see
+        `load_carter_tracy_aquifer_from_record` for why this can't be
+        read from the record itself.
+    :param water_viscosities: Water viscosity at aquifer conditions per
+        `aquifer_id` - see `load_carter_tracy_aquifer_from_record`.
+    :returns: `CarterTracyAquifer`s keyed by their deck `aquifer_id`,
+        ready to be matched against `AQUANCON` connections by that same id.
+    :raises DeckParseError: If an aquifer's id is missing from `outer_radii`
+        or `water_viscosities`.
+    """
+    aquifers: dict[int, CarterTracyAquifer] = {}
+    for record in records:
+        aquifer_id = record["aquifer_id"]
+        if aquifer_id not in outer_radii:
+            raise DeckParseError(
+                f"AQUCT aquifer {aquifer_id!r}: no `outer_radius` supplied in "
+                "`outer_radii`. `AQUCT` doesn't specify the aquifer's outer "
+                "extent - see `load_carter_tracy_aquifer_from_record`."
+            )
+        if aquifer_id not in water_viscosities:
+            raise DeckParseError(
+                f"AQUCT aquifer {aquifer_id!r}: no `water_viscosity` supplied "
+                "in `water_viscosities`. `AQUCT` gives a PVT table reference "
+                "(`pvt_table_number`), not a viscosity value directly - see "
+                "`load_carter_tracy_aquifer_from_record`."
+            )
+        aquifers[aquifer_id] = load_carter_tracy_aquifer_from_record(
+            record,
+            unit_system,
+            outer_radius=outer_radii[aquifer_id],
+            water_viscosity=water_viscosities[aquifer_id],
+        )
+    return aquifers
+
+
+def from_deck(
+    deck_file: DeckFile,
+    *,
+    outer_radii: typing.Mapping[int, Number],
+    water_viscosities: typing.Mapping[int, Number],
+) -> dict[int, CarterTracyAquifer]:
+    """
+    Build every `CarterTracyAquifer` a deck defines, from its `AQUCT` keyword.
+
+    :param deck_file: Parsed deck, read for its `AQUCT` records and unit system.
+    :param outer_radii: Aquifer outer radius per `aquifer_id` - see
+        `load_carter_tracy_aquifer_from_record` for why this can't be
+        read from the deck.
+    :param water_viscosities: Water viscosity at aquifer conditions per
+        `aquifer_id` - see `load_carter_tracy_aquifer_from_record`.
+    :returns: `CarterTracyAquifer`s keyed by their deck `aquifer_id`. Empty
+        if the deck has no `AQUCT` keyword.
+    :raises DeckParseError: If an aquifer's id is missing from `outer_radii`
+        or `water_viscosities`.
+    """
+    records = deck_file.get("AQUCT") or []
+    return load_carter_tracy_aquifers_from_records(
+        records,
+        unit_system=deck_file.unit_system,
+        outer_radii=outer_radii,
+        water_viscosities=water_viscosities,
+    )
