@@ -198,6 +198,7 @@ def load_well_from_records(
             "k2": k2,
             "top_depth": top_depth,
             "bottom_depth": bottom_depth,
+            "cell_index": top_cell if k1 == k2 else None,
             "skin": skin,
             "wellbore_radius": radius,
             "status": status,
@@ -234,6 +235,7 @@ def load_well_from_records(
         Perforation(
             top_depth=spec["top_depth"],
             bottom_depth=spec["bottom_depth"],
+            cell_index=spec["cell_index"],
             skin=spec["skin"],
             wellbore_radius=spec["wellbore_radius"],
             status=spec["status"],
@@ -247,7 +249,11 @@ def load_well_from_records(
     ]
 
     reference_depth = welspecs_record.get("reference_depth")
-    deepest_bottom_depth = max(perforation.bottom_depth for perforation in perforations)
+    deepest_bottom_depth = max(
+        perforation.bottom_depth
+        for perforation in perforations
+        if perforation.bottom_depth is not None
+    )
     surface_location = grid.get_cell_center_at(
         welspecs_record["i"] - 1,
         welspecs_record["j"] - 1,
@@ -276,14 +282,25 @@ def load_well_from_records(
     )
 
 
-def load_well_segments(deck_file: DeckFile, grid: Grid, wells: Wells) -> Wells:
+def load_well_segments(
+    deck_file: DeckFile,
+    wells: Wells,
+    *,
+    compdat_records: typing.Sequence[typing.Mapping[str, typing.Any]] | None = None,
+) -> Wells:
     """
     Reads every `WELSEGS`/`COMPSEGS` record in `deck_file` and layers
     measured depth onto `wells`' already-built `COMPDAT` perforations.
 
+    A well's trajectory is static, load-once geometry, the same as its
+    perforations. Every `WELSEGS`/`COMPSEGS` record is applied regardless
+    of its `schedule_time`, matching how `load_wells` already includes
+    every `COMPDAT` record for a well no matter when it takes effect.
+
     :param deck_file: The deck to read from.
-    :param grid: The same `Grid` `wells` was built against.
     :param wells: An already-built `Wells`, from `load_wells`.
+    :param compdat_records: Every `COMPDAT` record in the deck, in the
+        same order `wells` was built from. Defaults to `deck_file.get("COMPDAT")`.
     :returns: `wells`, with every well named in a `WELSEGS` record
         updated; a well `WELSEGS` doesn't mention is returned unchanged.
     """
@@ -291,21 +308,23 @@ def load_well_segments(deck_file: DeckFile, grid: Grid, wells: Wells) -> Wells:
     compsegs_records = deck_file.get("COMPSEGS")
     if not welsegs_records or not compsegs_records:
         return wells
+    resolved_compdat_records: typing.Sequence[typing.Mapping[str, typing.Any]] = (
+        compdat_records if compdat_records is not None else (deck_file.get("COMPDAT") or [])
+    )
     return apply_well_segments(
         wells,
-        grid=grid,
         welsegs_records=welsegs_records,
         compsegs_records=compsegs_records,
+        compdat_records=resolved_compdat_records,
     )
 
 
 def apply_well_segments(
     wells: Wells,
     *,
-    grid: Grid,
     welsegs_records: typing.Sequence[typing.Mapping[str, typing.Any]],
     compsegs_records: typing.Sequence[typing.Mapping[str, typing.Any]],
-    current_time: float = 0.0,
+    compdat_records: typing.Sequence[typing.Mapping[str, typing.Any]],
 ) -> Wells:
     """
     Layers measured depth onto a well's already-built `COMPDAT`
@@ -320,6 +339,13 @@ def apply_well_segments(
     from a survey the way this package's own `WellTrajectory` does for
     a hand-built deviated well elsewhere.
 
+    Each `COMPSEGS` connection is matched back to a perforation by its
+    own `(i, j, k)` against `compdat_records`, not by true vertical
+    depth. Several completions on a horizontal or deviated well often
+    share the same true vertical depth, so depth alone cannot tell them
+    apart; grid location can, since `compdat_records` is what `wells`'
+    own perforations were built from, in the same order.
+
     A well's segment tree gives a measured depth to true vertical depth
     profile with no horizontal position in it (`WELSEGS` carries
     along-hole length and depth change only, not azimuth), so the
@@ -327,39 +353,49 @@ def apply_well_segments(
     accurate for true vertical depth and inclination.
 
     :param wells: An already-built `Wells`, from `load_wells`.
-    :param grid: The same `Grid` `wells` was built against.
     :param welsegs_records: Every `WELSEGS` occurrence in the deck, from
         `DeckFile.get("WELSEGS")`.
     :param compsegs_records: Every `COMPSEGS` occurrence in the deck, from
         `DeckFile.get("COMPSEGS")`.
-    :param current_time: Only `WELSEGS`/`COMPSEGS` occurrences at or
-        before this time are applied.
+    :param compdat_records: Every `COMPDAT` record in the deck, the same
+        set `wells` was built from, in the same order.
     :returns: `wells`, with every well named in `welsegs_records` updated;
         a well not named there is returned unchanged.
     :raises NotSupportedError: If a `COMPSEGS` record targets a branch
         other than `1`.
     :raises ValidationError: If a `COMPSEGS` record has no explicit
-        `start_length`/`end_length`, or names a connection with no
-        matching `COMPDAT` perforation.
+        `start_length`/`end_length`, names a connection with no matching
+        `COMPDAT` perforation, or leaves some of a well's perforations
+        without a measured depth.
     """
-    dims = grid.dimensions
-    assert dims is not None
+    connections_by_well: dict[str, list[tuple[int, int, int, int]]] = {}
+    for record in compdat_records:
+        connections_by_well.setdefault(record["well"], []).append((
+            record["i"],
+            record["j"],
+            record["k1"],
+            record["k2"],
+        ))
+
     compsegs_by_well: dict[str, list[typing.Mapping[str, typing.Any]]] = {}
     for occurrence in compsegs_records:
-        if occurrence.get("schedule_time", 0.0) > current_time:
-            continue
         compsegs_by_well.setdefault(occurrence["well"], []).append(occurrence)
 
     updated_wells = dict(wells.wells)
     for header in welsegs_records:
-        if header.get("schedule_time", 0.0) > current_time:
-            continue
-
         well_name = header["well"]
         occurrences = compsegs_by_well.get(well_name)
         if well_name not in updated_wells or not occurrences:
             continue
         well = updated_wells[well_name]
+        connections = connections_by_well.get(well_name, [])
+        if len(connections) != len(well.perforations):
+            raise ValidationError(
+                f"Well {well_name!r} has {len(well.perforations)} perforation(s) but "
+                f"{len(connections)} `COMPDAT` connection(s) were found for it. "
+                "`compdat_records` must be the same set `wells` was built from, so "
+                "`COMPSEGS` connections can be matched back to perforations by position."
+            )
 
         # Segment tree: segment number -> (cumulative measured depth,
         # cumulative true vertical depth), walked from the first segment
@@ -401,7 +437,7 @@ def apply_well_segments(
                 tvd_points.append(tvd)
 
         new_perforations = list(well.perforations)
-        matched_any = False
+        matched_indices: set[int] = set()
         for occurrence in occurrences:
             for completion in occurrence["details"]:
                 if completion["branch"] != 1:
@@ -421,24 +457,18 @@ def apply_well_segments(
                     )
 
                 i, j, k = completion["i"], completion["j"], completion["k"]
-                cell_index = dims.flat_index(i - 1, j - 1, k - 1)
-                cell_top = grid.cell_min_xyz[cell_index, 2]
-                cell_bottom = grid.cell_max_xyz[cell_index, 2]
                 match_index = next(
                     (
                         index
-                        for index, perforation in enumerate(new_perforations)
-                        if perforation.top_depth is not None
-                        and perforation.top_depth <= cell_bottom
-                        and perforation.bottom_depth >= cell_top
+                        for index, (ci, cj, ck1, ck2) in enumerate(connections)
+                        if ci == i and cj == j and ck1 <= k <= ck2
                     ),
                     None,
                 )
                 if match_index is None:
                     raise ValidationError(
                         f"`COMPSEGS` on well {well_name!r} names connection "
-                        f"({i}, {j}, {k}), but no existing `COMPDAT` perforation there was "
-                        "found to attach measured depth to."
+                        f"({i}, {j}, {k}), but no `COMPDAT` connection there was found."
                     )
 
                 top_md = tubing_length_to_first_segment + start_length
@@ -447,11 +477,29 @@ def apply_well_segments(
                     new_perforations[match_index],
                     top_md=min(top_md, bottom_md),
                     bottom_md=max(top_md, bottom_md),
+                    # A completion direction only means something for a TVD-based
+                    # perforation resolved via Peaceman's formula; a measured-depth
+                    # one always resolves through the isotropic equivalent-radius
+                    # well index instead, and `Perforation` itself rejects the two
+                    # together (see its own validation).
+                    direction=None,
                 )
-                matched_any = True
+                matched_indices.add(match_index)
 
-        if not matched_any:
+        if not matched_indices:
             continue
+
+        unmatched = [
+            index for index in range(len(new_perforations)) if index not in matched_indices
+        ]
+        if unmatched:
+            raise ValidationError(
+                f"Well {well_name!r} has a `WELSEGS`/`COMPSEGS` trajectory, but "
+                f"{len(unmatched)} of its {len(new_perforations)} `COMPDAT` connection(s) "
+                f"were never given a measured depth by `COMPSEGS`: "
+                f"{[connections[index] for index in unmatched]}. Every connection on a "
+                "multi-segment well needs its own `COMPSEGS` entry."
+            )
 
         stations = tuple(
             TrajectoryStation(measured_depth=md, x=0.0, y=0.0, z=tvd)
@@ -1155,7 +1203,7 @@ def load_wells(deck_file: DeckFile, grid: Grid, current_time: float = 0.0) -> We
     wpimult = deck_file.get("WPIMULT")
     welopen = deck_file.get("WELOPEN")
     injector_names = {record["well"] for record in wconinje}
-    return load_wells_from_records(
+    wells = load_wells_from_records(
         grid=grid,
         welspecs_records=welspecs,
         compdat_records=compdat,
@@ -1165,6 +1213,7 @@ def load_wells(deck_file: DeckFile, grid: Grid, current_time: float = 0.0) -> We
         injector_names=injector_names,
         current_time=current_time,
     )
+    return load_well_segments(deck_file, wells, compdat_records=compdat)
 
 
 def load_well_controls(deck_file: DeckFile, current_time: float = 0.0) -> WellControls:

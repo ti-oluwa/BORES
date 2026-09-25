@@ -15,6 +15,7 @@ from bores.serde.base import Serializable
 from bores.serde.stores import StoreSerializable
 from bores.types import (
     FluidPhase,
+    Integer,
     Number,
     Orientation,
     UnitConversionTable,
@@ -220,6 +221,22 @@ class Perforation(Serializable):
     the correct/expected state. Validated: if set, must be in `(0, 1]`.
     """
 
+    cell_index: Integer | None = None
+    """
+    **Not to be set by the user.**
+
+    The grid cell this completion connects to, when that is already
+    exact and known upfront (a single-layer structured-grid connection,
+    such as one `COMPDAT` record with `k1 == k2`). `wells.indices`
+    resolves straight to this cell instead of re-deriving it from
+    geometry, which a horizontal or multi-segment well's completions
+    otherwise cannot do reliably: several completions on the same well
+    often share a true vertical depth, and measured depth on its own
+    carries no lateral position to search with. `None` means the cell
+    is derived geometrically instead, the same as before this field
+    existed.
+    """
+
     def __attrs_post_init__(self) -> None:
         has_tvd = self.top_depth is not None or self.bottom_depth is not None
         has_md = self.top_md is not None or self.bottom_md is not None
@@ -256,6 +273,8 @@ class Perforation(Serializable):
                 "`partial_penetration_fraction` must be in (0, 1]; got "
                 f"{self.partial_penetration_fraction}."
             )
+        if self.cell_index is not None and self.cell_index < 0:
+            raise ValidationError(f"`cell_index` must be >= 0; got {self.cell_index}.")
 
     @property
     def is_point_perforation(self) -> bool:

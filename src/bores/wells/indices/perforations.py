@@ -29,6 +29,7 @@ from bores.wells.base import Perforation, Well
 
 __all__ = [
     "PerforationIndex",
+    "resolve_known_cell_perforations_indices",
     "resolve_md_perforations_indices",
     "resolve_perforation_orientation",
     "resolve_perforations_indices",
@@ -340,6 +341,76 @@ def compute_local_vertical_extent_exact(
     if not crossings:
         return None
     return min(crossings), max(crossings)
+
+
+def resolve_known_cell_perforations_indices(
+    *, grid: Grid, well: Well
+) -> tuple[PerforationIndex, ...]:
+    """
+    Resolve every open perforation on `well` straight to its own
+    `Perforation.cell_index`, skipping geometric derivation entirely.
+
+    For a completion built from a structured-grid deck record
+    (`COMPDAT`), the grid cell a single-layer connection connects to is
+    already known exactly. Re-deriving it geometrically would need the
+    well's true lateral path: `resolve_perforations_indices` only looks
+    near one `surface_location`, and a `WELSEGS`/`COMPSEGS`-derived
+    trajectory carries measured depth and true vertical depth only, no
+    azimuth, so `resolve_md_perforations_indices`'s spatial walk can't
+    place it either. Every returned entry has `partial_penetration_fraction
+    = 1.0`, since `Perforation.cell_index` is only ever set for a
+    completion that fully occupies exactly one grid cell.
+
+    :param grid: Grid to resolve against, only for `well.unit_system`'s
+        consistency check; the cell itself is already known, so nothing
+        here is derived from `grid`'s geometry.
+    :param well: `Well` whose perforations are resolved. Every open
+        perforation must already have `cell_index` set; see
+        `resolve_perforations_indices`/`resolve_md_perforations_indices`
+        for a well without that.
+    :returns: Tuple of `PerforationIndex`, one per open perforation.
+    """
+    if grid.unit_system != well.unit_system:
+        raise ValidationError(
+            f"Grid `unit_system` ({grid.unit_system.value}) != well "
+            f"{well.name!r}'s `unit_system` ({well.unit_system.value})."
+        )
+
+    results: list[PerforationIndex] = []
+    for perforation in well.open_perforations:
+        assert perforation.cell_index is not None
+        assert perforation.top_depth is not None and perforation.bottom_depth is not None
+        representative_depth = 0.5 * (perforation.top_depth + perforation.bottom_depth)
+        if perforation.top_md is not None:
+            # A `WELSEGS`-derived trajectory only carries measured depth and
+            # true vertical depth, no azimuth, so its position/tangent along
+            # a mostly-horizontal leg is degenerate (a real lateral reach
+            # with no x/y to show for it). The completion's own true
+            # vertical depth against its own measured-depth span gives the
+            # same inclination without needing that geometry at all.
+            md_length = perforation.bottom_md - perforation.top_md  # type: ignore[operator]
+            tvd_length = perforation.bottom_depth - perforation.top_depth
+            inclination = (
+                math.acos(max(-1.0, min(1.0, tvd_length / md_length))) if md_length > 0 else 0.0
+            )
+        else:
+            inclination = (
+                0.0
+                if resolve_perforation_orientation(perforation) is Orientation.Z
+                else math.pi / 2.0
+            )
+
+        results.append(
+            PerforationIndex(
+                perforation=perforation,
+                cell_index=perforation.cell_index,
+                partial_penetration_fraction=1.0,
+                representative_depth=representative_depth,
+                inclination_from_vertical=inclination,
+                unit_system=well.unit_system,
+            )
+        )
+    return tuple(results)
 
 
 def resolve_perforations_indices(
