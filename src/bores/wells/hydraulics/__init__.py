@@ -47,6 +47,7 @@ from bores.wells.hydraulics.hagedorn_brown import (
     is_griffith_bubble_flow,
 )
 from bores.wells.hydraulics.homogeneous import HomogeneousWellbore, homogeneous_wellbore
+from bores.wells.hydraulics.vfp import VFPData, VFPTable, VFPTables
 from bores.wells.hydraulics.woldesemayat_ghajar import (
     WoldesemayatGhajarWellbore,
     compute_woldesemayat_ghajar_void_fraction,
@@ -60,6 +61,9 @@ __all__ = [
     "HomogeneousWellbore",
     "PressureDrop",
     "SurfaceFluidProperties",
+    "VFPData",
+    "VFPTable",
+    "VFPTables",
     "WellBoreModel",
     "WellBoreModelOptions",
     "WoldesemayatGhajarWellbore",
