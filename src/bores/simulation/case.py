@@ -363,15 +363,15 @@ def load_case(
         raise CaseLoadError(f"Failed to load wells from {deck_file!r}.") from exc
 
     try:
-        deck_boundary_conditions = load_boundary_conditions(deck_file, grid, pvt=pvt)
+        resolved_boundary_conditions = load_boundary_conditions(deck_file, grid, pvt=pvt)
     except Exception as exc:
         raise CaseLoadError(f"Failed to load boundary conditions from {deck_file!r}.") from exc
 
     if boundary_conditions is not None:
         boundary_conditions = boundary_conditions.convert(unit_system)
-        deck_boundary_conditions = (
-            deck_boundary_conditions.override(boundary_conditions)
-            if deck_boundary_conditions is not None
+        resolved_boundary_conditions = (
+            resolved_boundary_conditions.override(boundary_conditions)
+            if resolved_boundary_conditions is not None
             else boundary_conditions
         )
 
@@ -379,7 +379,7 @@ def load_case(
         reservoir=reservoir,
         fluid=fluid,
         wells=wells,
-        boundary_conditions=deck_boundary_conditions,
+        boundary_conditions=resolved_boundary_conditions,
         unit_system=unit_system,
     )
 
