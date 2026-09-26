@@ -54,7 +54,7 @@ def get_rate_bound(
     quantity: Integer,
     max_value: Number,
     bhp: Number,
-    wellbore: WellBoreModel,
+    wellbore: WellBoreModel | None,
     reference_depth: Number,
     workspace: PerforationWorkspace,
     connection_samples: typing.Sequence[ConnectionSample],
@@ -78,7 +78,7 @@ def get_rate_bound(
     :param quantity: `RateQuantityTag` value.
     :param max_value: The limit row's `max_value`.
     :param bhp: The nominal resolution's BHP.
-    :param wellbore: Hydraulics correlation for this well.
+    :param wellbore: Hydraulics correlation for this well. May be `None`.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
     :param connection_samples: Reservoir samples, same order as `workspace`'s arrays.
@@ -156,7 +156,9 @@ def get_thp_bound(
     :param max_value: The limit row's `max_value`. `NaN` means no ceiling.
     :param bhp: The nominal resolution's BHP.
     :param phase_rates: The nominal resolution's reservoir-condition phase rates.
-    :param wellbore: Hydraulics correlation for this well.
+    :param wellbore: Hydraulics correlation for this well. Required as a
+        THP limit can't be evaluated without one, regardless of
+        `control_spec.connection_pressure_mode`.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
     :param connection_samples: Reservoir samples, same order as `workspace`'s arrays.
@@ -168,6 +170,7 @@ def get_thp_bound(
     :param control_spec: Solver tunables.
     :param surface_fluid_properties: Fluid properties at surface conditions.
     :returns: Bounding BHP, or `None` if not violated.
+    :raises ValidationError: If `wellbore` is `None`.
     """
     current_thp = compute_tubing_head_pressure(
         wellbore=wellbore,
@@ -255,7 +258,7 @@ def apply_limits(
     limits: CompiledLimits,
     limits_start: Integer,
     limits_end: Integer,
-    wellbore: WellBoreModel,
+    wellbore: WellBoreModel | None,
     reference_depth: Number,
     workspace: PerforationWorkspace,
     connection_samples: typing.Sequence[ConnectionSample],
@@ -293,7 +296,8 @@ def apply_limits(
     :param limits: The full system's `CompiledLimits`.
     :param limits_start: First row of this well's limit range.
     :param limits_end: One past the last row of this well's limit range.
-    :param wellbore: Hydraulics correlation for this well.
+    :param wellbore: Hydraulics correlation for this well. May be `None`. 
+        A `THPLimit` row in range still requires one regardless.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
     :param connection_samples: Reservoir samples, same order as `workspace`'s arrays.
@@ -313,9 +317,9 @@ def apply_limits(
         active_limit_row, economic_shutin)`. `active_limit_row` is
         `UNSET_INT` if nothing is binding. `phase_rates`/`surface_phase_rates`
         are zeroed if `economic_shutin` is `True`; `connection_pressures`
-        is not - a shut-in well still has a real wellbore pressure profile.
+        is not, as a shut-in well still has a real wellbore pressure profile.
     :raises ValidationError: If a `THPLimit` row is present but
-        `surface_fluid_properties` wasn't supplied.
+        `surface_fluid_properties` wasn't supplied, or `wellbore` is `None`.
     """
     candidates: list[tuple[Number, Integer]] = []
 
@@ -351,6 +355,13 @@ def apply_limits(
                     "A THP limit is present but no `surface_fluid_properties` "
                     "was supplied to `apply_limits`. THP limits can't be "
                     "evaluated without it."
+                )
+            if wellbore is None:
+                raise ValidationError(
+                    "A THP limit is present but no `WellBoreModel` or VFP table "
+                    "is assigned to this well. THP limits can't be evaluated "
+                    "without one, regardless of "
+                    "`control_spec.connection_pressure_mode`."
                 )
             bound = get_thp_bound(
                 min_value=limits.min_values[row],

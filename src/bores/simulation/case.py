@@ -156,7 +156,7 @@ class SimulationCase(Serializable):
         cls,
         deck_file: DeckFile,
         *,
-        default_wellbore: WellBoreModel,
+        default_wellbore: WellBoreModel | None = None,
         temperature: Temperature | Number | None = None,
         mixing_rule: str = "eclipse_rule",
         compiled_at: float = 0.0,
@@ -177,8 +177,8 @@ class SimulationCase(Serializable):
 
         :param deck_file: The deck to load from.
         :param default_wellbore: Wellbore hydraulics model for every well
-            that doesn't override it. Deck loading has no sensible universal
-            default (tubing diameter is deck-specific), so this is required.
+            that doesn't override it. Omit if nothing in the deck needs
+            one - see `WellSystem.from_deck`.
         :param temperature: Reservoir temperature, either a `Temperature` or
             a constant value in the deck's own unit system.
         :param mixing_rule: Three-phase relative permeability mixing rule for `SatFunc.from_deck`.
@@ -224,7 +224,7 @@ class SimulationCase(Serializable):
 def load_case(
     deck_file: DeckFile,
     *,
-    default_wellbore: WellBoreModel,
+    default_wellbore: WellBoreModel | None = None,
     temperature: Temperature | Number | None = None,
     mixing_rule: str = "eclipse_rule",
     compiled_at: float = 0.0,
@@ -246,8 +246,8 @@ def load_case(
 
     :param deck_file: The deck to load from.
     :param default_wellbore: Wellbore hydraulics model for every well
-        that doesn't override it. Deck loading has no sensible universal
-        default (tubing diameter is deck-specific), so this is required.
+        that doesn't override it. Omit if nothing in the deck needs one.
+        See `WellSystem.from_deck`.
     :param temperature: Reservoir temperature, either a `Temperature` or
         a constant value in the deck's own unit system.
     :param mixing_rule: Three-phase relative permeability mixing rule for `SatFunc.from_deck`.

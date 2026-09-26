@@ -189,7 +189,7 @@ def redistribute_group_shortfall(
     well_system: CompiledWellSystem,
     workspace: WellsWorkspace,
     control_spec: WellControlSpec,
-    get_wellbore: typing.Callable[[Integer], WellBoreModel],
+    get_wellbore: typing.Callable[[Integer], WellBoreModel | None],
     get_connection_samples: typing.Callable[[Integer], typing.Sequence[ConnectionSample]],
     get_surface_fluid_properties: typing.Callable[[Integer], SurfaceFluidProperties | None]
     | None = None,
@@ -224,8 +224,9 @@ def redistribute_group_shortfall(
     :param well_system: Supplies `.group_controls`/`.controls`/`.well_kinds`.
     :param workspace: This run's `WellsWorkspace`, updated in place.
     :param control_spec: Supplies `max_fixed_point_iterations` and `rate_convergence_tolerance`.
-    :param get_wellbore: Given a well row, its hydraulics correlation.
-        Only called for a member actually being re-resolved.
+    :param get_wellbore: Given a well row, its hydraulics correlation, or
+        `None` if it has none. Only called for a member actually being
+        re-resolved.
     :param get_connection_samples: Given a well row, its active, open
         connections' current reservoir samples. Only called for a member
         actually being re-resolved.

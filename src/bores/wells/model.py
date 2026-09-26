@@ -29,12 +29,22 @@ class WellSystem(StoreSerializable):
     well_controls: WellControls
     """Current control target for each well."""
 
-    default_wellbore: WellBoreModel
-    """Hydraulics model used by any well without an entry in `wellbore_overrides`."""
+    default_wellbore: WellBoreModel | None = None
+    """
+    Hydraulics model used by any well without an entry in
+    `wellbore_overrides`. `None` if no well in this system needs one, and
+    every well is then subject to `control_spec.connection_pressure_mode`
+    for connection-pressure distribution, and can't use THP control, a
+    `THPLimit`, or THP reporting.
+    """
 
-    wellbore_overrides: typing.Mapping[str, WellBoreModel] = attrs.field(factory=dict)
-    """Per-well hydraulics override - e.g. a gas well on Beggs & Brill while
-    every oil well uses the homogeneous no-slip model."""
+    wellbore_overrides: typing.Mapping[str, WellBoreModel | None] = attrs.field(factory=dict)
+    """
+    Per-well hydraulics override, e.g. a gas well on Beggs & Brill
+    while every oil well uses the homogeneous no-slip model. A well
+    mapped to `None` here has no hydraulics model even when
+    `default_wellbore` is set for the rest of the system.
+    """
 
     groups: WellGroups | None = None
     """The well-group hierarchy, if the deck defined one."""
@@ -65,12 +75,14 @@ class WellSystem(StoreSerializable):
         """Unit system shared by `wells`/`well_controls`/`group_controls`."""
         return self.wells.unit_system
 
-    def get_wellbore_model(self, well_name: str) -> WellBoreModel:
+    def get_wellbore_model(self, well_name: str) -> WellBoreModel | None:
         """
         Gets the hydraulics model to use for a well.
 
         :param well_name: Name of the well.
-        :returns: `wellbore_overrides[well_name]` if present, else `default_wellbore`.
+        :returns: `wellbore_overrides[well_name]` if present (`None` counts
+            as present, and overrides `default_wellbore`), else
+            `default_wellbore`, which may itself be `None`.
         """
         return self.wellbore_overrides.get(well_name, self.default_wellbore)
 
@@ -92,17 +104,21 @@ class WellSystem(StoreSerializable):
 
     @classmethod
     def from_deck(
-        cls, deck_file: DeckFile, *, grid: Grid, default_wellbore: WellBoreModel
+        cls,
+        deck_file: DeckFile,
+        *,
+        grid: Grid,
+        default_wellbore: WellBoreModel | None = None,
     ) -> Self:
         """
         Builds a `WellSystem` from a parsed deck.
 
         :param deck_file: Parsed deck.
         :param grid: `Grid` built from the same deck.
-        :param default_wellbore: Hydraulics model for every well - build
-            one via `wells.hydraulics.homogeneous.homogeneous_wellbore()`,
-            `wells.hydraulics.beggs_and_brill.beggs_and_brill_wellbore()`, or
-            `wells.hydraulics.hagedorn_brown.hagedorn_brown_wellbore()`.
+        :param default_wellbore: Hydraulics model for every well.
+            Omit if nothing in this deck needs one, e.g, no well under THP
+            control, no `THPLimit`, and `control_spec.connection_pressure_mode`
+            set to cover connection distribution without one.
         :returns: `WellSystem` built from every well/control/group keyword
             in the deck. `groups`/`group_controls` are `None` if the deck
             has no `GRUPTREE`/`GCONPROD`/`GCONINJE`.
@@ -137,6 +153,7 @@ class WellSystem(StoreSerializable):
         :param table: Optional custom unit-conversion table.
         :returns: This system, with `wells`/`well_controls`/`default_wellbore`/
             `wellbore_overrides`/`group_controls` converted to `target`.
+            A `None` `default_wellbore` or override stays `None`.
         """
         if target == self.unit_system:
             return self
@@ -144,9 +161,15 @@ class WellSystem(StoreSerializable):
             self,
             wells=self.wells.convert(target, table=table),
             well_controls=self.well_controls.convert(target, table=table),
-            default_wellbore=self.default_wellbore.convert(target, table=table),
+            default_wellbore=(
+                self.default_wellbore.convert(target, table=table)
+                if self.default_wellbore is not None
+                else None
+            ),
             wellbore_overrides={
-                well_name: wellbore.convert(target, table=table)
+                well_name: (
+                    wellbore.convert(target, table=table) if wellbore is not None else None
+                )
                 for well_name, wellbore in self.wellbore_overrides.items()
             },
             group_controls=(

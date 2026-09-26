@@ -1,3 +1,5 @@
+import enum
+
 import attrs
 from typing_extensions import Self
 
@@ -7,7 +9,34 @@ from bores.serde.base import Serializable
 from bores.types import Integer, Number, UnitSystem
 from bores.utils import scale
 
-__all__ = ["WellControlSpec"]
+__all__ = ["ConnectionPressureMode", "WellControlSpec"]
+
+
+class ConnectionPressureMode(enum.Enum):
+    """
+    How a well's per-connection flowing pressure is derived when it has
+    no `WellBoreModel`/`VFPTable` assigned.
+
+    Only affects the connection-to-connection distribution below a
+    well's reference depth. A well with no hydraulics model still can't
+    resolve a THP control mode, a `THPLimit`, or THP reporting so those
+    always require one, regardless of this setting.
+    """
+
+    HYDRAULIC = "hydraulic"
+    """
+    Require a real `WellBoreModel`/`VFPTable` for any well whose
+    connections need pressure distributed across them. Raises clearly
+    if one isn't assigned. The rigorous default.
+    """
+
+    UNIFORM_BHP = "uniform_bhp"
+    """
+    Apply the reference pressure unchanged at every connection, with
+    no hydrostatic or friction correction between them. Matches how a
+    simulator with no hydraulics model assigned treats a well's
+    connections when nothing else is available.
+    """
 
 
 @attrs.frozen(kw_only=True, slots=True)
@@ -40,6 +69,9 @@ class WellControlSpec(Serializable):
     """
     unit_system: UnitSystem = UnitSystem.FIELD
     """Unit system for pressure-valued control limits."""
+    
+    connection_pressure_mode: ConnectionPressureMode = ConnectionPressureMode.HYDRAULIC
+    """How to treat a well with no `WellBoreModel`/`VFPTable` assigned."""
 
     def __attrs_post_init__(self) -> None:
         if self.max_fixed_point_iterations < 1:

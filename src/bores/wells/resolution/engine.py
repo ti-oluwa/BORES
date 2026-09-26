@@ -35,7 +35,7 @@ def resolve_well_control(
     *,
     compiled_system: CompiledWellSystem,
     well_row: Integer,
-    wellbore: WellBoreModel,
+    wellbore: WellBoreModel | None,
     connection_samples: typing.Sequence[ConnectionSample],
     workspace: WellsWorkspace,
     control_spec: WellControlSpec,
@@ -51,7 +51,9 @@ def resolve_well_control(
 
     :param compiled_system: The compiled well system.
     :param well_row: Which well, by row index into `compiled_system`.
-    :param wellbore: Hydraulics correlation for this well.
+    :param wellbore: Hydraulics correlation for this well. May be `None`.
+        THP control, a `THPLimit`, and THP reporting still require one
+        regardless of `control_spec.connection_pressure_mode`.
     :param connection_samples: Reservoir samples for this well's active,
         open connections, in the same order `compiled_system.perforations`'
         rows for this well appear (after filtering to
@@ -62,7 +64,11 @@ def resolve_well_control(
         resolve a `THP`-mode control, or to check a `THPLimit`. Omit if
         none of those apply to this well.
     :raises ValidationError: If `control_modes[well_row]` isn't a
-        recognized tag for this well's `well_kinds[well_row]`.
+        recognized tag for this well's `well_kinds[well_row]`, if this
+        well is under THP control or has a `THPLimit`/THP reporting
+        requested and `wellbore` is `None`, or if `wellbore` is `None`
+        and `control_spec.connection_pressure_mode` isn't `UNIFORM_BHP`
+        while this well still needs connection-pressure distribution.
     """
     if compiled_system.schedule_statuses[well_row] == 0:
         return
@@ -141,6 +147,11 @@ def resolve_well_control(
         elif control_mode == InjectorControlModeTag.THP:
             if surface_fluid_properties is None:
                 raise ValidationError("A THP-mode injector requires `surface_fluid_properties`.")
+            if wellbore is None:
+                raise ValidationError(
+                    "A THP-mode injector requires a `WellBoreModel` or VFP table, "
+                    "regardless of `control_spec.connection_pressure_mode`."
+                )
             min_pressure, max_pressure = get_default_pressure_bracket(
                 connection_samples, is_injector=True, control_spec=control_spec
             )
@@ -209,6 +220,11 @@ def resolve_well_control(
         elif control_mode == ProducerControlModeTag.THP:
             if surface_fluid_properties is None:
                 raise ValidationError("A THP-mode producer requires `surface_fluid_properties`.")
+            if wellbore is None:
+                raise ValidationError(
+                    "A THP-mode producer requires a `WellBoreModel` or VFP table, "
+                    "regardless of `control_spec.connection_pressure_mode`."
+                )
             min_pressure, max_pressure = get_default_pressure_bracket(
                 connection_samples, is_injector=False, control_spec=control_spec
             )
