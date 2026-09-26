@@ -21,11 +21,11 @@ from bores.blackoil.satfunc.capillary_pressure.tables import (
     CapillaryPressureTable,
 )
 from bores.blackoil.satfunc.regions import SatFunc
-from bores.constants import c
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.grids.base import Grid
 from bores.precision import get_dtype
+from bores.reservoir.mass import compute_masses
 from bores.reservoir.model import Reservoir
 from bores.reservoir.state.base import Hysteresis, ReservoirState
 from bores.reservoir.state.equilibrium import (
@@ -1251,55 +1251,13 @@ def initialize_reservoir_state(
         else typing.cast(IntCellArray, np.ones(n_cells, dtype=np.int32))
     )
 
-    oil_mass = np.zeros(n_cells, dtype=dtype)
-    water_mass = np.zeros(n_cells, dtype=dtype)
-    free_gas_mass = np.zeros(n_cells, dtype=dtype)
-    dissolved_gas_mass_in_oil = np.zeros(n_cells, dtype=dtype)
-    vaporized_oil_mass_in_gas = np.zeros(n_cells, dtype=dtype)
+    if equilibrium_arrays is None:
+        for pvtnum in np.unique(pvt_region_index):
+            mask = pvt_region_index == pvtnum
+            pvt_region = pvt.region(pvtnum)
+            t = temperature_array[mask]
+            rs = solution_gor_array[mask]
 
-    # `UnitSystem.FIELD` mixes two volume "families": oil/water are barrels (STB), gas is
-    # cubic feet (SCF), and 1 barrel = 5.614583 ft3 (`c.BARRELS_TO_CUBIC_FEET`).
-    # `solution_gor` (Rs) and `vaporized_oil_gas_ratio` (Rv) are both normalized
-    # to SCF/STB by this codebase (see `equilibrium.py` / `pvt/regions.py`),
-    # so each crosses those two families the same way: converting
-    # `Rs * rho_g_sc` into an oil-mass-basis term (or `Rv * rho_o_sc` into a
-    # gas-mass-basis term) needs an explicit ft3<->bbl correction; skipping
-    # it overstates the mass by ~5.615x. `METRIC/SI/LAB` use a single volume unit
-    # throughout (m3/m3, cc/cc) so no such correction applies for them.
-    volume_correction = c.CUBIC_FEET_TO_STB if unit_system is UnitSystem.FIELD else 1.0
-
-    for pvtnum in np.unique(pvt_region_index):
-        mask = pvt_region_index == pvtnum
-        pvt_region = pvt.region(pvtnum)
-        static = pvt_region.static
-        if static.stock_tank_oil_density is None:
-            raise ValidationError(
-                f"`PVTNUM` {pvtnum}: `stock_tank_oil_density` (`DENSITY` "
-                "keyword) is required to assemble `ReservoirState` masses."
-            )
-
-        rho_o_sc = static.stock_tank_oil_density
-        rho_g_sc = static.stock_tank_gas_density
-        rho_w_sc = static.stock_tank_water_density
-
-        p = pressure_array[mask]
-        t = temperature_array[mask]
-        so = oil_saturation_array[mask]
-        sw = water_saturation_array[mask]
-        sg = gas_saturation_array[mask]
-        rs = solution_gor_array[mask]
-        pv = pore_volumes[mask]
-
-        bo = pvt_region.tables.oil.formation_volume_factor(  # type: ignore[union-attr]
-            pressure=p, temperature=t, solution_gor=rs
-        )
-        if bo is None:
-            raise ValidationError(
-                f"`PVTNUM` {pvtnum}: oil formation volume factor table is unavailable."
-            )
-        oil_mass[mask] = so * pv / bo * rho_o_sc
-
-        if equilibrium_arrays is None:
             oil_bubble_point = pvt_region.tables.oil.bubble_point_pressure(  # type: ignore[union-attr]
                 temperature=t, solution_gor=rs
             )
@@ -1311,45 +1269,20 @@ def initialize_reservoir_state(
                 if gas_dew_point is not None:
                     gas_dew_point_pressure_array[mask] = gas_dew_point
 
-        if np.any(sg > 0.0):
-            if pvt_region.tables.gas is None:
-                raise ValidationError(
-                    f"`PVTNUM` {pvtnum}: free gas saturation is present "
-                    "but no gas PVT table is available."
-                )
-
-            bg = pvt_region.tables.gas.formation_volume_factor(pressure=p, temperature=t)
-            if bg is None or rho_g_sc is None:
-                raise ValidationError(
-                    f"`PVTNUM` {pvtnum}: gas FVF table or "
-                    "`stock_tank_gas_density` is unavailable but Sg > 0."
-                )
-            free_gas_mass[mask] = sg * pv / bg * rho_g_sc
-
-            rv = vaporized_oil_ratio_array[mask]
-            vaporized_oil_mass_in_gas[mask] = (
-                rv * free_gas_mass[mask] * (rho_o_sc / rho_g_sc) * volume_correction
-            )
-
-        if np.any(sw > 0.0):
-            if pvt_region.tables.water is None:
-                raise ValidationError(
-                    f"`PVTNUM` {pvtnum}: water saturation is present "
-                    "but no water PVT table is available."
-                )
-
-            bw = pvt_region.tables.water.formation_volume_factor(pressure=p, temperature=t)
-            if bw is None or rho_w_sc is None:
-                raise ValidationError(
-                    f"`PVTNUM` {pvtnum}: water FVF table or "
-                    "`stock_tank_water_density` is unavailable."
-                )
-            water_mass[mask] = sw * pv / bw * rho_w_sc
-
-        if rho_g_sc is not None:
-            dissolved_gas_mass_in_oil[mask] = (
-                rs * oil_mass[mask] * (rho_g_sc / rho_o_sc) * volume_correction
-            )
+    masses = compute_masses(
+        pressure=pressure_array,
+        temperature=temperature_array,
+        oil_saturation=oil_saturation_array,
+        water_saturation=water_saturation_array,
+        gas_saturation=gas_saturation_array,
+        solution_gor=solution_gor_array,
+        vaporized_oil_gas_ratio=vaporized_oil_ratio_array,
+        pore_volumes=pore_volumes,
+        pvt=pvt,
+        pvt_region_index=pvt_region_index,
+        unit_system=unit_system,
+        dtype=dtype,
+    )
 
     zeros = np.zeros(n_cells, dtype=dtype)
     hysteresis = (
@@ -1373,12 +1306,12 @@ def initialize_reservoir_state(
         gas_dew_point_pressure=typing.cast(CellArray, gas_dew_point_pressure_array),
         gas_solubility_in_water=zeros,
         water_bubble_point_pressure=zeros,
-        oil_mass=typing.cast(CellArray, oil_mass),
-        water_mass=typing.cast(CellArray, water_mass),
-        free_gas_mass=typing.cast(CellArray, free_gas_mass),
-        dissolved_gas_mass_in_oil=typing.cast(CellArray, dissolved_gas_mass_in_oil),
-        dissolved_gas_mass_in_water=zeros,
-        vaporized_oil_mass_in_gas=typing.cast(CellArray, vaporized_oil_mass_in_gas),
+        oil_mass=masses.oil_mass,
+        water_mass=masses.water_mass,
+        free_gas_mass=masses.free_gas_mass,
+        dissolved_gas_mass_in_oil=masses.dissolved_gas_mass_in_oil,
+        dissolved_gas_mass_in_water=masses.dissolved_gas_mass_in_water,
+        vaporized_oil_mass_in_gas=masses.vaporized_oil_mass_in_gas,
         hysteresis=hysteresis,
         unit_system=unit_system,
     )
