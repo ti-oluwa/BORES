@@ -374,24 +374,11 @@ def load_reservoir_state(
     """
     Load an independent snapshot of the current reservoir state from a workspace.
 
-    Masses (`oil_mass`/`water_mass`/`free_gas_mass`/`dissolved_gas_mass_in_oil`/
-    `dissolved_gas_mass_in_water`/`vaporized_oil_mass_in_gas`) aren't part of
-    `ReservoirWorkspace` - they're not primary unknowns, they're derived
-    from it (pressure, saturations, `Rs`/`Rv`) plus pore volume and PVT
-    properties, the same way `initialize_reservoir_state` derives them for
-    the initial state. They're recomputed here via
-    `bores.reservoir.mass.compute_masses` on every snapshot rather than
-    tracked as their own workspace fields, so they can never drift out of
-    sync with the primary unknowns the way a second stored copy could.
-    `temperature` is left out of `ReservoirWorkspace` for the same reason:
-    black-oil simulation here is isothermal, so it's a static per-cell
-    input resolved once elsewhere, not evolving state.
-
     :param workspace: The reservoir workspace to snapshot.
     :param temperature: Reservoir temperature per cell.
     :param pore_volumes: Pore volume at `workspace.pressure` (i.e. already
         scaled by `rock.compressibility_table.pore_volume_multiplier` where
-        rock compressibility applies) - see `compute_masses`.
+        rock compressibility applies). See `compute_masses`.
     :param pvt: PVT tables to compute masses from, by `PVTNUM` region.
     :param pvt_region_index: `PVTNUM` per cell. All region `1` if not given.
     :param unit_system: The workspace's unit system. Needed for masses'
@@ -418,6 +405,7 @@ def load_reservoir_state(
         pore_volumes=pore_volumes,
         pvt=pvt,
         pvt_region_index=pvt_region_index,
+        gas_solubility_in_water=workspace.gas_solubility_in_water,
         unit_system=unit_system,
         dtype=dtype,
     )

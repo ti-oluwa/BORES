@@ -33,9 +33,9 @@ class Masses(typing.NamedTuple):
 
     dissolved_gas_mass_in_water: CellArray
     """
-    Shape `(n_cells,)`. Gas mass dissolved in the water phase. Always
-    zero - gas solubility in water (`Rsw`) isn't accounted for in mass
-    terms anywhere in this codebase yet, matching `initialize_reservoir_state`.
+    Shape `(n_cells,)`. Gas mass dissolved in the water phase, `Rsw`-derived.
+    Zero wherever `gas_solubility_in_water` isn't given, or a `PVTNUM`
+    region has no `stock_tank_gas_density`.
     """
 
     vaporized_oil_mass_in_gas: CellArray
@@ -54,6 +54,7 @@ def compute_masses(
     pore_volumes: CellArray,
     pvt: "PVT",
     pvt_region_index: IntCellArray | None = None,
+    gas_solubility_in_water: CellArray | None = None,
     unit_system: UnitSystem = UnitSystem.FIELD,
     dtype: npt.DTypeLike = None,
 ) -> Masses:
@@ -61,11 +62,9 @@ def compute_masses(
     Compute per-cell phase masses from saturations, pore volume, and PVT
     properties.
 
-    Masses are not primary unknowns anywhere in this codebase - they're
-    derived from pressure, saturations, `Rs`/`Rv`, and each `PVTNUM`
-    region's own PVT tables, the same way `initialize_reservoir_state`
-    derives them for the initial state. This function is that same
-    derivation, shared so it isn't duplicated.
+    Masses are not primary unknowns anywhere in this codebase, they're
+    derived from pressure, saturations, `Rs`/`Rv`/`Rsw`, and each `PVTNUM`
+    region's own PVT tables.
 
     :param pressure: Oil-phase reference pressure, shape `(n_cells,)`.
     :param temperature: Reservoir temperature, shape `(n_cells,)`.
@@ -80,8 +79,13 @@ def compute_masses(
     :param pvt: PVT tables to evaluate `Bo`/`Bg`/`Bw` and stock-tank
         densities from, by `PVTNUM` region.
     :param pvt_region_index: `PVTNUM` per cell. All region `1` if not given.
+    :param gas_solubility_in_water: `Rsw`, shape `(n_cells,)`. Not every
+        deck or PVT model carries this. A plain `PVTW`-only water model
+        doesn't so it's optional. `dissolved_gas_mass_in_water` is zero
+        wherever it isn't given, or a region has no `stock_tank_gas_density`.
     :param unit_system: Needed to apply the `FIELD`-only ft3<->bbl
-        correction between `Rs`/`Rv` (SCF/STB) and oil/water volumes (STB).
+        correction between `Rs`/`Rv`/`Rsw` (SCF/STB) and oil/water/gas
+        volumes (STB/Mscf).
     :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
     :returns: `Masses` for every cell.
     :raises ValidationError: If a `PVTNUM` region needed by at least one
@@ -98,17 +102,18 @@ def compute_masses(
     water_mass = np.zeros(n_cells, dtype=dtype)
     free_gas_mass = np.zeros(n_cells, dtype=dtype)
     dissolved_gas_mass_in_oil = np.zeros(n_cells, dtype=dtype)
+    dissolved_gas_mass_in_water = np.zeros(n_cells, dtype=dtype)
     vaporized_oil_mass_in_gas = np.zeros(n_cells, dtype=dtype)
 
     # `UnitSystem.FIELD` mixes two volume "families": oil/water are barrels (STB), gas is
     # cubic feet (SCF), and 1 barrel = 5.614583 ft3 (`c.BARRELS_TO_CUBIC_FEET`).
-    # `solution_gor` (Rs) and `vaporized_oil_gas_ratio` (Rv) are both normalized
-    # to SCF/STB by this codebase, so each crosses those two families the same
-    # way: converting `Rs * rho_g_sc` into an oil-mass-basis term (or
-    # `Rv * rho_o_sc` into a gas-mass-basis term) needs an explicit ft3<->bbl
-    # correction; skipping it overstates the mass by ~5.615x. `METRIC`/`SI`/
-    # `LAB` use a single volume unit throughout (m3/m3, cc/cc) so no such
-    # correction applies for them.
+    # `solution_gor` (Rs), `vaporized_oil_gas_ratio` (Rv), and `gas_solubility_in_water`
+    # (Rsw) are all normalized to SCF/STB by this codebase, so each crosses those
+    # two families the same way: converting `Rs * rho_g_sc` into an oil-mass-basis
+    # term (or `Rv * rho_o_sc`/`Rsw * rho_g_sc` into a gas/water-mass-basis term)
+    # needs an explicit ft3<->bbl correction; skipping it overstates the mass by
+    # ~5.615x. `METRIC`/`SI`/`LAB` use a single volume unit throughout (m3/m3,
+    # cc/cc) so no such correction applies for them.
     volume_correction = c.CUBIC_FEET_TO_STB if unit_system is UnitSystem.FIELD else 1.0
 
     for pvtnum in np.unique(pvt_region_index):
@@ -178,6 +183,12 @@ def compute_masses(
                 )
             water_mass[mask] = sw * pv / bw * rho_w_sc
 
+            if gas_solubility_in_water is not None and rho_g_sc is not None:
+                rsw = gas_solubility_in_water[mask]
+                dissolved_gas_mass_in_water[mask] = (
+                    rsw * water_mass[mask] * (rho_g_sc / rho_w_sc) * volume_correction
+                )
+
         if rho_g_sc is not None:
             dissolved_gas_mass_in_oil[mask] = (
                 rs * oil_mass[mask] * (rho_g_sc / rho_o_sc) * volume_correction
@@ -188,6 +199,6 @@ def compute_masses(
         water_mass=typing.cast(CellArray, water_mass),
         free_gas_mass=typing.cast(CellArray, free_gas_mass),
         dissolved_gas_mass_in_oil=typing.cast(CellArray, dissolved_gas_mass_in_oil),
-        dissolved_gas_mass_in_water=typing.cast(CellArray, np.zeros(n_cells, dtype=dtype)),
+        dissolved_gas_mass_in_water=typing.cast(CellArray, dissolved_gas_mass_in_water),
         vaporized_oil_mass_in_gas=typing.cast(CellArray, vaporized_oil_mass_in_gas),
     )

@@ -153,7 +153,7 @@ If you use BORES in academic work, please cite it as:
 ```bibtex
 @software{bores,
   author = {Daniel Toluwalase Afolayan},
-  title = {BORES: 3D 3-Phase Black-Oil Reservoir Simulation Framework},
+  title = {BORES: Black-Oil Reservoir Simulation Framework},
   year = {2026},
   url = {https://github.com/ti-oluwa/bores},
 }
