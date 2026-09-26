@@ -127,7 +127,7 @@ def compute_utilization(actual: float | None, limit: float | None) -> float | No
     return actual / limit
 
 
-@attrs.mutable
+@attrs.mutable(kw_only=True, slots=True)
 class Timer(StoreSerializable):
     """
     Simulation time manager for smart and adaptive time stepping.
