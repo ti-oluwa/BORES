@@ -547,7 +547,9 @@ class CarterTracyAquifer(BoundaryCondition):
                 to_field = get_conversion_factors(self.unit_system, UnitSystem.FIELD)
                 r_w_ft = self.inner_radius * to_field["length"]
                 r_e_ft = (
-                    self.outer_radius * to_field["length"] if self.outer_radius is not None else None
+                    self.outer_radius * to_field["length"]
+                    if self.outer_radius is not None
+                    else None
                 )
                 height_ft = self.aquifer_thickness * to_field["length"]
                 compressibility_psi = self.aquifer_compressibility * to_field["compressibility"]
@@ -742,9 +744,7 @@ class CarterTracyAquifer(BoundaryCondition):
 
     @typing.overload
     @classmethod
-    def from_deck(
-        cls, deck_file: DeckFile, *, pvt: "PVT", aquifer_id: int
-    ) -> Self: ...
+    def from_deck(cls, deck_file: DeckFile, *, pvt: "PVT", aquifer_id: int) -> Self: ...
     @typing.overload
     @classmethod
     def from_deck(
