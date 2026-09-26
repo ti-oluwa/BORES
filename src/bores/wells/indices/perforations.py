@@ -353,7 +353,7 @@ def resolve_known_cell_perforations_indices(
     For a completion built from a structured-grid deck record
     (`COMPDAT`), the grid cell a single-layer connection connects to is
     already known exactly. Re-deriving it geometrically would need the
-    well's true lateral path: `resolve_perforations_indices` only looks
+    well's true lateral path. `resolve_perforations_indices` only looks
     near one `surface_location`, and a `WELSEGS`/`COMPSEGS`-derived
     trajectory carries measured depth and true vertical depth only, no
     azimuth, so `resolve_md_perforations_indices`'s spatial walk can't
@@ -739,9 +739,9 @@ def resolve_md_perforations_indices(
     """
     Resolve every open perforation on `well` to the `Grid` cell(s) its
     measured-depth interval passes through. Only valid for a `well` with a
-    `trajectory` set - see `resolve_perforations_indices` for one without.
+    `trajectory` set. See `resolve_perforations_indices` for one without.
 
-    For each open perforation, gets the trajectory polyline vertices
+    For each open perforation, it gets the trajectory polyline vertices
     covering `[top_md, bottom_md]` (`WellTrajectory.stations_between`),
     then walks each leg of that polyline through `grid`
     (`walk_segment_through_grid`) to find every cell it passes through,
@@ -764,7 +764,7 @@ def resolve_md_perforations_indices(
     """
     if well.trajectory is None:
         raise ValidationError(
-            f"Well {well.name!r} has no trajectory; use resolve_perforations_indices instead."
+            f"Well {well.name!r} has no trajectory; use `resolve_perforations_indices` instead."
         )
 
     if grid.unit_system != well.unit_system:
@@ -788,7 +788,7 @@ def resolve_md_perforations_indices(
         true_bottom_md = perforation.bottom_md
         bottom_md = max(true_bottom_md, top_md + 1e-9)
         # A point perforation (top_md == bottom_md) has no direction to
-        # walk - nudge to an infinitesimal interval so it still resolves
+        # walk, so nudge to an infinitesimal interval so it still resolves
         # to exactly one cell via the same walk machinery, rather than a
         # separate point-lookup code path.
 

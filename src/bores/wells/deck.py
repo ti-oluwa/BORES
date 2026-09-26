@@ -330,20 +330,20 @@ def apply_well_segments(
     Layers measured depth onto a well's already-built `COMPDAT`
     perforations, from a `WELSEGS`/`COMPSEGS` pair.
 
-    Only the main bore (`branch == 1`) is supported - a lateral branch
-    raises rather than being silently dropped. `COMPDAT` still owns
-    which grid cells a well connects to; `WELSEGS`/`COMPSEGS` only add
+    Only the main bore (`branch == 1`) is supported. A lateral branch
+    raises an error rather than being dropped. `COMPDAT` still owns
+    which grid cells a well connects to, `WELSEGS`/`COMPSEGS` only add
     each connection's own measured depth on top of that, matching how
     Eclipse itself always requires `COMPDAT` alongside a multi-segment
     well's own `WELSEGS`/`COMPSEGS`, rather than deriving connections
-    from a survey the way this package's own `WellTrajectory` does for
+    from a survey the way `bores`'s own `WellTrajectory` does for
     a hand-built deviated well elsewhere.
 
     Each `COMPSEGS` connection is matched back to a perforation by its
     own `(i, j, k)` against `compdat_records`, not by true vertical
     depth. Several completions on a horizontal or deviated well often
     share the same true vertical depth, so depth alone cannot tell them
-    apart; grid location can, since `compdat_records` is what `wells`'
+    apart. Grid location can htough, since `compdat_records` is what `wells`'
     own perforations were built from, in the same order.
 
     A well's segment tree gives a measured depth to true vertical depth
@@ -397,7 +397,7 @@ def apply_well_segments(
                 "`COMPSEGS` connections can be matched back to perforations by position."
             )
 
-        # Segment tree: segment number -> (cumulative measured depth,
+        # Segment tree built as a mapping of segment number -> (cumulative measured depth,
         # cumulative true vertical depth), walked from the first segment
         # node (already at (tubing_length_to_first_segment, reference_depth))
         # via each detail record's own outlet_segment. Records are expected
@@ -412,15 +412,18 @@ def apply_well_segments(
         for detail in header["details"]:
             if detail["branch"] != 1:
                 continue  # a lateral's own segments; only the main bore matters here
+
             outlet = detail["outlet_segment"]
             if outlet not in node_md:
                 continue  # outlet not yet resolved; skip rather than guess
+
             if mode == "ABS":
                 md = tubing_length_to_first_segment + detail["length"]
                 tvd = reference_depth + detail["depth_change"]
             else:
                 md = node_md[outlet] + detail["length"]
                 tvd = node_tvd[outlet] + detail["depth_change"]
+
             for segment in range(detail["first_segment"], detail["last_segment"] + 1):
                 node_md[segment] = md
                 node_tvd[segment] = tvd
@@ -446,6 +449,7 @@ def apply_well_segments(
                         f"{completion['branch']!r}; only the main bore (branch 1) is "
                         "supported by `apply_well_segments` today."
                     )
+
                 start_length = completion.get("start_length")
                 end_length = completion.get("end_length")
                 if start_length is None or end_length is None:

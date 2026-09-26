@@ -546,6 +546,7 @@ def build_wells_indices(
                 inverse_difference = (1.0 / perturbed_well_index) - (1.0 / well_index)
                 if inverse_difference != 0:
                     conductivity = 1.0 / inverse_difference
+
             resolved.append(
                 attrs.evolve(perforation_index, well_index=well_index, conductivity=conductivity)
             )

@@ -1,4 +1,4 @@
-"""Turns a resolved compiled well structure back into rich, readable objects."""
+"""Loads a (resolved) compiled well structure back into rich, readable objects."""
 
 import attrs
 
