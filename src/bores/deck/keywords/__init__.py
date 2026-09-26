@@ -115,8 +115,10 @@ from bores.deck.keywords.schedule import (
     WTEST,
 )
 from bores.deck.keywords.solution import (
+    AQUANCON,
     AQUCT,
     AQUFETP,
+    AQUFLUX,
     EQUIL,
     PRESSURE,
     RESTART,
@@ -155,8 +157,10 @@ from bores.deck.keywords.summary import (
 
 __all__ = [
     "ACTNUM",
+    "AQUANCON",
     "AQUCT",
     "AQUFETP",
+    "AQUFLUX",
     "COMPDAT",
     "COMPSEGS",
     "COORD",

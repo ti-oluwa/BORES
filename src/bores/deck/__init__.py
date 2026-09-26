@@ -19,10 +19,11 @@ from bores.deck.core import Deck, DeckParseError, Record, parse_repeat_token, to
 from bores.deck.file import DeckFile
 from bores.deck.keywords import (
     ACTNUM,
+    AQUANCON,
     AQUCT,
     AQUFETP,
+    AQUFLUX,
     COMPDAT,
-    COMPSEGS,
     COORD,
     DATES,
     DENSITY,
@@ -133,7 +134,6 @@ from bores.deck.keywords import (
     WELLDIMS,
     WELOPEN,
     WELPI,
-    WELSEGS,
     WELSPECS,
     WELTARG,
     WGPR,
@@ -164,10 +164,11 @@ from bores.deck.operators import (
 
 __all__ = [
     "ACTNUM",
+    "AQUANCON",
     "AQUCT",
     "AQUFETP",
+    "AQUFLUX",
     "COMPDAT",
-    "COMPSEGS",
     "COORD",
     "DATES",
     "DENSITY",
@@ -279,7 +280,6 @@ __all__ = [
     "WELLDIMS",
     "WELOPEN",
     "WELPI",
-    "WELSEGS",
     "WELSPECS",
     "WELTARG",
     "WGPR",

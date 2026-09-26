@@ -269,6 +269,27 @@ class BoundaryConditions(StoreSerializable):
         """
         return attrs.evolve(self, regions=[*self.regions, region], unit_system=unit_system)
 
+    def override(self, other: Self) -> Self:
+        """
+        Return a new `BoundaryConditions` merging `other` into `self` by
+        region name: a region in `other` replaces a same-named region
+        here, and a region with a new name is appended. Regions present
+        here but absent from `other` are kept unchanged.
+
+        Useful for taking boundary conditions loaded from a deck and
+        selectively updating or overriding specific regions - e.g. a
+        manually-specified `ConstantPressureBoundary` in place of a
+        deck's `AQUCT` aquifer on the same flank - without having to
+        rebuild the whole `BoundaryConditions`.
+
+        :param other: Regions to merge in. Converted to `self.unit_system`
+            if different.
+        :returns: New, merged `BoundaryConditions`.
+        """
+        merged: dict[str, BoundaryRegion] = {region.name: region for region in self.regions}
+        merged.update({region.name: region for region in other.regions})
+        return attrs.evolve(self, regions=list(merged.values()), unit_system=self.unit_system)
+
     def remove_region(self, name: str) -> Self:
         """
         Return a new `BoundaryConditions` with the named region removed.

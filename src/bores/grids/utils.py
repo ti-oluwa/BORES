@@ -1,6 +1,7 @@
 """Gridding utilities"""
 
 import typing
+import warnings
 from collections.abc import Mapping
 
 import numba
@@ -9,9 +10,9 @@ import numpy.typing as npt
 
 from bores.errors import ValidationError
 from bores.grids.base import Grid
-from bores.types import CellArray, IntArray, OneDimension, Side
+from bores.types import CellArray, IntArray, Integer, OneDimension, Side
 
-__all__ = ["make_pyvista_grid"]
+__all__ = ["make_pyvista_grid", "resolve_boundary_faces_for_box"]
 
 
 SIDE_ALIASES: dict[str, Side] = {
@@ -27,6 +28,18 @@ AXIS_SIDES: dict[int, tuple[Side, Side]] = {
     0: (Side.WEST, Side.EAST),
     1: (Side.SOUTH, Side.NORTH),
     2: (Side.TOP, Side.BOTTOM),
+}
+
+# Eclipse's own `I+`/`I-`/`J+`/`J-`/`K+`/`K-` face-direction convention (as
+# used by `AQUANCON`), each mapped to (dominant outward-normal axis, sign) -
+# axis 0=X/I, 1=Y/J, 2=Z/K, matching `AXIS_SIDES` above.
+FACE_DIRECTION_AXIS_SIGN: dict[str, tuple[int, float]] = {
+    "I+": (0, 1.0),
+    "I-": (0, -1.0),
+    "J+": (1, 1.0),
+    "J-": (1, -1.0),
+    "K+": (2, 1.0),
+    "K-": (2, -1.0),
 }
 
 
@@ -124,6 +137,121 @@ def classify_boundary_faces(grid: Grid) -> dict[Side, IntArray[OneDimension]]:
             np.int32
         )
     return result
+
+
+def resolve_boundary_faces_for_box(
+    grid: Grid,
+    *,
+    i1: Integer,
+    i2: Integer,
+    j1: Integer,
+    j2: Integer,
+    k1: Integer,
+    k2: Integer,
+    face_direction: str,
+    label: str = "box",
+) -> IntArray[OneDimension]:
+    """
+    Resolve an Eclipse-style IJK box + face direction (as `AQUANCON` gives
+    it) to boundary face positions (into `Grid.boundary_face_indices`).
+
+    For each cell in the 1-based, inclusive box, it finds the face in
+    `face_direction` by dominant outward-normal axis/sign (same convention
+    `classify_boundary_faces` uses) via `Grid.get_face_normal_for_cell`,
+    and includes it only when that face is a genuine grid-boundary face, i.e,
+    the domain's true edge, not just the edge of an active region within a
+    larger box. A cell is skipped, with a warning naming it, when:
+
+    - it is outside `grid`'s bounds,
+    - it is inactive,
+    - its face in `face_direction` is an interior face. Even one
+      adjoining an inactive neighbour. `BoundaryRegion` can only carry
+      genuine `Grid.boundary_face_indices` positions, so a boundary
+      condition can't be attached to an interior active/inactive junction
+      through this function; that needs a different mechanism.
+
+    When a cell has more than one face sharing `face_direction`'s
+    dominant axis/sign (possible on irregular corner-point geometry), the
+    first one found is used.
+
+    :param grid: Grid to resolve against. Must have `dimensions` set.
+    :param i1: 1-based start I index.
+    :param i2: 1-based end I index (inclusive).
+    :param j1: 1-based start J index.
+    :param j2: 1-based end J index (inclusive).
+    :param k1: 1-based start K index.
+    :param k2: 1-based end K index (inclusive).
+    :param face_direction: One of `'I+'`, `'I-'`, `'J+'`, `'J-'`, `'K+'`, `'K-'`.
+    :param label: Identifies the source record in warning messages.
+    :returns: Sorted, de-duplicated `int32` array of boundary face positions.
+    :raises ValidationError: If `face_direction` is invalid, or `grid` has
+        no resolvable `dimensions`.
+    """
+    if face_direction not in FACE_DIRECTION_AXIS_SIGN:
+        raise ValidationError(
+            f"`face_direction` must be one of {sorted(FACE_DIRECTION_AXIS_SIGN)}; "
+            f"got {face_direction!r}."
+        )
+    axis, sign = FACE_DIRECTION_AXIS_SIGN[face_direction]
+
+    dims = grid.dimensions
+    if dims is None:
+        raise ValidationError(f"{label}: `grid` has no `dimensions`; cannot resolve an IJK box.")
+    nx, ny, nz = dims
+
+    boundary_position_by_face: dict[int, int] = {
+        int(face_idx): position for position, face_idx in enumerate(grid.boundary_face_indices)
+    }
+
+    positions: set[int] = set()
+    for k in range(k1, k2 + 1):
+        for j in range(j1, j2 + 1):
+            for i in range(i1, i2 + 1):
+                if not (1 <= i <= nx and 1 <= j <= ny and 1 <= k <= nz):
+                    warnings.warn(
+                        f"{label}: cell ({i},{j},{k}) is outside grid bounds "
+                        f"({nx}x{ny}x{nz}). Skipping.",
+                        stacklevel=2,
+                    )
+                    continue
+
+                cell_flat = int(grid.flat_index(i - 1, j - 1, k - 1))
+                if not grid.is_cell_active(cell_flat):
+                    warnings.warn(
+                        f"{label}: cell ({i},{j},{k}) is inactive. Skipping connection.",
+                        stacklevel=2,
+                    )
+                    continue
+
+                matched_face: int | None = None
+                for face_idx in grid.get_cell_face_indices(cell_flat):
+                    normal = grid.get_face_normal_for_cell(int(face_idx), cell_flat)
+                    dominant_axis = int(np.argmax(np.abs(normal)))
+                    dominant_sign = np.sign(normal[dominant_axis])
+                    if dominant_axis == axis and dominant_sign == sign:
+                        matched_face = int(face_idx)
+                        break
+
+                if matched_face is None:
+                    warnings.warn(
+                        f"{label}: cell ({i},{j},{k}) has no {face_direction!r} face. Skipping.",
+                        stacklevel=2,
+                    )
+                    continue
+
+                position = boundary_position_by_face.get(matched_face)
+                if position is None:
+                    warnings.warn(
+                        f"{label}: cell ({i},{j},{k})'s {face_direction!r} face is not a "
+                        "grid-boundary face. It has a real interior neighbour, active or "
+                        "not. Boundary conditions can only attach to genuine grid-edge "
+                        "faces. Skipping.",
+                        stacklevel=2,
+                    )
+                    continue
+                positions.add(position)
+
+    return typing.cast(IntArray[OneDimension], np.asarray(sorted(positions), dtype=np.int32))
 
 
 def classify_boundary_cells(grid: Grid) -> dict[Side, IntArray[OneDimension]]:

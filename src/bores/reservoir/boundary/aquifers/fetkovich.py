@@ -239,7 +239,7 @@ class FetkovichAquifer(BoundaryCondition):
 
     aquifer_id: int | None = attrs.field(default=None)
     """
-    Aquifer identification number, when built `from_deck`. The `AQUFETP`
+    Aquifer identification number, when built `from_deck` - the `AQUFETP`
     record's own `aquifer_id`, referenced by `AQUANCON` to attach this
     aquifer to grid connections. Record-keeping only; `None` when built
     directly rather than from a deck.
@@ -247,10 +247,11 @@ class FetkovichAquifer(BoundaryCondition):
 
     pvt_table_number: int | None = attrs.field(default=None)
     """
-    Water PVT table number, usually when built `from_deck`. The `AQUFETP`
+    Water PVT table number, when built `from_deck` - the `AQUFETP`
     record's own `pvt_table_number`. Record-keeping only; not read
-    anywhere in class or the recurrence itself, since `AQUFETP` gives 
-    `aquifer_compressibility` directly rather than through a table lookup.
+    anywhere in `__attrs_post_init__` or the recurrence itself, since
+    `AQUFETP` gives `aquifer_compressibility` directly rather than through
+    a PVT table lookup.
     """
 
     productivity_index: Number = attrs.field(default=0.0, init=False, repr=False)
@@ -453,7 +454,7 @@ class FetkovichAquifer(BoundaryCondition):
         deck_file: DeckFile,
         *,
         aquifer_id: int | None = None,
-    ) -> Self | dict[int, Self]:
+    ) -> "Self | dict[int, Self]":
         """
         Construct one or all `FetkovichAquifer` objects from a parsed `DeckFile`.
 
@@ -471,24 +472,21 @@ class FetkovichAquifer(BoundaryCondition):
         """
         records = deck_file.get("AQUFETP")
         if not records:
-            raise ValidationError("No `AQUFETP` keyword found in the provided deck.")
+            raise ValidationError("No AQUFETP keyword found in the provided deck.")
 
         if aquifer_id is not None:
             matching = [record for record in records if record["aquifer_id"] == aquifer_id]
             if not matching:
                 available = sorted(record["aquifer_id"] for record in records)
                 raise ValidationError(
-                    f"Aquifer {aquifer_id!r} not found in `AQUFETP`. Available: {available}."
+                    f"Aquifer {aquifer_id!r} not found in AQUFETP. Available: {available}."
                 )
-            return typing.cast(Self, load_fetkovich_aquifer(matching[0], deck_file.unit_system))
+            return load_fetkovich_aquifer(matching[0], deck_file.unit_system)
 
-        return typing.cast(
-            dict[int, Self],
-            {
-                record["aquifer_id"]: load_fetkovich_aquifer(record, deck_file.unit_system)
-                for record in records
-            },
-        )
+        return {
+            record["aquifer_id"]: load_fetkovich_aquifer(record, deck_file.unit_system)
+            for record in records
+        }
 
 
 def load_fetkovich_aquifer(
@@ -497,10 +495,15 @@ def load_fetkovich_aquifer(
     """
     Build a `FetkovichAquifer` from one `AQUFETP` record.
 
+    Uses calibrated mode-from-deck (`aquifer_productivity_index`,
+    `aquifer_compressibility`, `initial_aquifer_water_volume`) - `AQUFETP`
+    gives exactly these three quantities directly, so no physical-mode
+    derivation is needed.
+
     :param record: One parsed `AQUFETP` record.
     :param unit_system: The deck's unit system.
     :returns: Constructed `FetkovichAquifer`. `salt_concentration` is read
-        by the deck parser but not consumed here as this codebase has no
+        by the deck parser but not consumed here - this codebase has no
         brine tracking wired into `FetkovichAquifer` yet.
     """
     return FetkovichAquifer(

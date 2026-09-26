@@ -18,6 +18,8 @@ from bores.errors import CaseLoadError, CaseValidationError
 from bores.grids.base import Grid
 from bores.initialization import N_SATURATION_SAMPLES, initialize_reservoir_state
 from bores.precision import get_dtype
+from bores.reservoir.boundary.conditions import BoundaryConditions
+from bores.reservoir.boundary.deck import load_boundary_conditions
 from bores.reservoir.model import Reservoir
 from bores.reservoir.regions import Regions
 from bores.reservoir.rock.base import Rock
@@ -166,6 +168,7 @@ class SimulationCase(Serializable):
         hysteresis_enabled: bool | None = None,
         saturation_samples: int = N_SATURATION_SAMPLES,
         interpolation_method: InterpolationMethod = "linear",
+        boundary_conditions: BoundaryConditions | None = None,
         unit_system: UnitSystem | None = None,
         dtype: npt.DTypeLike = None,
     ) -> Self:
@@ -211,6 +214,7 @@ class SimulationCase(Serializable):
             hysteresis_enabled=hysteresis_enabled,
             saturation_samples=saturation_samples,
             interpolation_method=interpolation_method,
+            boundary_conditions=boundary_conditions,
             unit_system=unit_system,
             dtype=dtype,
         )
@@ -232,6 +236,7 @@ def load_case(
     hysteresis_enabled: bool | None = None,
     saturation_samples: int = N_SATURATION_SAMPLES,
     interpolation_method: InterpolationMethod = "linear",
+    boundary_conditions: BoundaryConditions | None = None,
     unit_system: UnitSystem | None = None,
     dtype: npt.DTypeLike = None,
 ) -> SimulationCase:
@@ -262,6 +267,12 @@ def load_case(
     :param interpolation_method: Interpolation method for `Rock.from_deck` and `PVT.from_deck`.
     :param unit_system: Unit system for the case. Defaults to the deck's unit system.
     :param dtype: Array dtype for every buffer. Defaults to `bores.precision.get_dtype()`.
+    :param boundary_conditions: Updates or overrides the boundary conditions
+        loaded from the deck's `AQUCT`/`AQUFETP`/`AQUFLUX`/`AQUANCON` keywords.
+        A region here replaces a same-named deck-loaded region, and a
+        region with a new name is added; see `BoundaryConditions.override`.
+        Converted to `unit_system` if given in a different one. If the
+        deck defines no boundary conditions, this is used as-is.
     :returns: The loaded `SimulationCase`.
     :raises CaseLoadError: If any loading stage fails. The
         original exception is chained as the cause.
@@ -351,7 +362,26 @@ def load_case(
     except Exception as exc:
         raise CaseLoadError(f"Failed to load wells from {deck_file!r}.") from exc
 
-    model = BlackOilModel(reservoir=reservoir, fluid=fluid, wells=wells, unit_system=unit_system)
+    try:
+        deck_boundary_conditions = load_boundary_conditions(deck_file, grid, pvt=pvt)
+    except Exception as exc:
+        raise CaseLoadError(f"Failed to load boundary conditions from {deck_file!r}.") from exc
+
+    if boundary_conditions is not None:
+        boundary_conditions = boundary_conditions.convert(unit_system)
+        deck_boundary_conditions = (
+            deck_boundary_conditions.override(boundary_conditions)
+            if deck_boundary_conditions is not None
+            else boundary_conditions
+        )
+
+    model = BlackOilModel(
+        reservoir=reservoir,
+        fluid=fluid,
+        wells=wells,
+        boundary_conditions=deck_boundary_conditions,
+        unit_system=unit_system,
+    )
 
     try:
         schedule = load_schedule(deck_file, compiled_at=compiled_at)

@@ -430,7 +430,9 @@ class CarterTracyAquifer(BoundaryCondition):
     Opt-in: use the Klins, Bouchard & Cable (1988) finite/bounded-aquifer
     `pD(tD, r_eD)` once `tD` passes `compute_bounded_aquifer_threshold(r_eD)`,
     instead of always treating the aquifer as infinite-acting. Defaults
-    to `False` for backward compatibility.
+    to `False` for backward compatibility - see the full discussion in
+    the class docstring history (prior handoff notes) if reviving this
+    default is ever considered.
     """
 
     dimensionless_time_scale: Number | None = attrs.field(default=None)
@@ -438,8 +440,8 @@ class CarterTracyAquifer(BoundaryCondition):
     `tD / t` - dimensionless time per unit of `unit_system` time.
     Calibrated-constant mode only, optional but recommended. When set,
     `tD = dimensionless_time_scale * t`. When left `None`, `tD` falls
-    back to raw elapsed `time`. Dimensionally meaningless and dependent
-    on `unit_system`'s time unit.
+    back to raw elapsed `time` - dimensionally meaningless and dependent
+    on `unit_system`'s time unit - and `__attrs_post_init__` warns about it.
     """
 
     angle: Number = attrs.field(default=360.0)
@@ -450,7 +452,7 @@ class CarterTracyAquifer(BoundaryCondition):
 
     aquifer_id: int | None = attrs.field(default=None)
     """
-    Aquifer identification number, when built `from_deck`. The `AQUCT`
+    Aquifer identification number, when built `from_deck` - the `AQUCT`
     record's own `aquifer_id`, referenced by `AQUANCON` to attach this
     aquifer to grid connections. Record-keeping only; `None` when built
     directly rather than from a deck.
@@ -458,10 +460,10 @@ class CarterTracyAquifer(BoundaryCondition):
 
     pvt_table_number: int | None = attrs.field(default=None)
     """
-    Water PVT table number, usually when built `from_deck`. The `AQUCT` record's
+    Water PVT table number, when built `from_deck` - the `AQUCT` record's
     own `pvt_table_number`, used to resolve `water_viscosity` from a `PVT`
     object at load time. Record-keeping only afterwards; not read anywhere
-    in the class or the recurrence itself.
+    in `__attrs_post_init__` or the recurrence itself.
     """
 
     # Resolved scalars to be compiled into `CompiledAquifers`
@@ -545,9 +547,7 @@ class CarterTracyAquifer(BoundaryCondition):
                 to_field = get_conversion_factors(self.unit_system, UnitSystem.FIELD)
                 r_w_ft = self.inner_radius * to_field["length"]
                 r_e_ft = (
-                    self.outer_radius * to_field["length"]
-                    if self.outer_radius is not None
-                    else None
+                    self.outer_radius * to_field["length"] if self.outer_radius is not None else None
                 )
                 height_ft = self.aquifer_thickness * to_field["length"]
                 compressibility_psi = self.aquifer_compressibility * to_field["compressibility"]
@@ -742,7 +742,9 @@ class CarterTracyAquifer(BoundaryCondition):
 
     @typing.overload
     @classmethod
-    def from_deck(cls, deck_file: DeckFile, *, pvt: "PVT", aquifer_id: int) -> Self: ...
+    def from_deck(
+        cls, deck_file: DeckFile, *, pvt: "PVT", aquifer_id: int
+    ) -> Self: ...
     @typing.overload
     @classmethod
     def from_deck(
@@ -756,7 +758,7 @@ class CarterTracyAquifer(BoundaryCondition):
         *,
         pvt: "PVT",
         aquifer_id: int | None = None,
-    ) -> Self | dict[int, Self]:
+    ) -> "Self | dict[int, Self]":
         """
         Construct one or all `CarterTracyAquifer` objects from a parsed `DeckFile`.
 
@@ -785,19 +787,12 @@ class CarterTracyAquifer(BoundaryCondition):
                 raise ValidationError(
                     f"Aquifer {aquifer_id!r} not found in AQUCT. Available: {available}."
                 )
-            return typing.cast(
-                Self, load_carter_tracy_aquifer(matching[0], deck_file.unit_system, pvt=pvt)
-            )
+            return load_carter_tracy_aquifer(matching[0], deck_file.unit_system, pvt=pvt)
 
-        return typing.cast(
-            dict[int, Self],
-            {
-                record["aquifer_id"]: load_carter_tracy_aquifer(
-                    record, deck_file.unit_system, pvt=pvt
-                )
-                for record in records
-            },
-        )
+        return {
+            record["aquifer_id"]: load_carter_tracy_aquifer(record, deck_file.unit_system, pvt=pvt)
+            for record in records
+        }
 
 
 def load_carter_tracy_aquifer(
@@ -811,13 +806,14 @@ def load_carter_tracy_aquifer(
     physical-properties mode.
 
     `AQUCT` gives every physical-mode input directly except water
-    viscosity. Item 10 (`pvt_table_number`) is a water PVT table
+    viscosity: item 10 (`pvt_table_number`) is a water PVT table
     reference, not a value, so it's resolved here as `pvt.region(
-    pvt_table_number).static.water_reference_viscosity`, the `PVTW`
+    pvt_table_number).static.water_reference_viscosity` - the `PVTW`
     reference viscosity for that region, evaluated once rather than
     re-interpolated per timestep, matching this class's own
     constant-viscosity assumption. `AQUCT`'s single `radius` item maps to
-    `inner_radius`; `outer_radius` is left unset.
+    `inner_radius`; `outer_radius` is left unset (not needed - see
+    `CarterTracyAquifer.outer_radius`).
 
     :param record: One parsed `AQUCT` record.
     :param unit_system: The deck's unit system.
@@ -834,7 +830,7 @@ def load_carter_tracy_aquifer(
     influence_table = record["aquifer_influence_table_number"]
     if influence_table != 1:
         warnings.warn(
-            f"`AQUCT` aquifer {aquifer_id!r} references AQUTAB table "
+            f"AQUCT aquifer {aquifer_id!r} references AQUTAB table "
             f"{influence_table!r}, but custom AQUTAB influence functions are "
             "not parsed by this codebase yet. Building it as infinite-acting "
             "(bounded_aquifer=False) instead of honouring that table.",
@@ -844,7 +840,7 @@ def load_carter_tracy_aquifer(
     water_viscosity = pvt.region(pvt_table_number).static.water_reference_viscosity
     if water_viscosity is None:
         raise ValidationError(
-            f"`AQUCT` aquifer {aquifer_id!r}: PVT region {pvt_table_number!r} "
+            f"AQUCT aquifer {aquifer_id!r}: PVT region {pvt_table_number!r} "
             "has no `PVTW`-derived `water_reference_viscosity`. `AQUCT` "
             "references this region as its water PVT table but the deck's "
             "`PVTW` keyword doesn't cover it."

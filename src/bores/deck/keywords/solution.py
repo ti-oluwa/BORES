@@ -52,8 +52,10 @@ from bores.deck.keywords.base import (
 from bores.deck.operators import Operation
 
 __all__ = [
+    "AQUANCON",
     "AQUCT",
     "AQUFETP",
+    "AQUFLUX",
     "EQUIL",
     "PRESSURE",
     "RESTART",
@@ -391,6 +393,79 @@ Fields:
 - `pvt_table_number` - water PVT table number. `1` if omitted.
 - `salt_concentration` - initial salt concentration, for brine tracking.
   `0` if omitted.
+"""
+
+AQUANCON = RepeatedRecordKeyword[typing.Any](
+    "AQUANCON",
+    fields=[
+        Field("aquifer_id", int),
+        Field("i1", int),
+        Field("i2", int),
+        Field("j1", int),
+        Field("j2", int),
+        Field("k1", int),
+        Field("k2", int),
+        Field("face", lambda v: str(v).upper(), options={"I+", "I-", "J+", "J-", "K+", "K-"}),
+        Field("influx_coefficient", np.float64, required=False, default=None),
+        Field("connection_multiplier", np.float64, required=False, default=1.0),
+        Field(
+            "allow_already_connected",
+            lambda v: str(v).upper(),
+            required=False,
+            default="NO",
+            options={"YES", "NO"},
+        ),
+    ],
+)
+"""
+`AQUANCON  AQUIFER_ID  I1  I2  J1  J2  K1  K2  FACE  INFLUX_COEFFICIENT
+CONNECTION_MULTIPLIER  ALLOW_ALREADY_CONNECTED /` (one record per box) -
+attaches an analytic (`AQUCT`/`AQUFETP`) or flux (`AQUFLUX`) aquifer to a
+box of grid cells' faces. Several records for the same `aquifer_id` are
+unioned.
+
+Multiple records are separated by `/` within a single `AQUANCON` block,
+and multiple `AQUANCON` blocks in the same deck are concatenated in file
+order.
+
+Fields:
+
+- `aquifer_id`      - id of the `AQUCT`/`AQUFETP`/`AQUFLUX` aquifer this
+  connection belongs to.
+- `i1`, `i2`, `j1`, `j2`, `k1`, `k2` - 1-based, inclusive IJK box of cells
+  to connect, passed through unchanged.
+- `face`      - which face of each cell in the box to connect, one of
+  `I+`, `I-`, `J+`, `J-`, `K+`, `K-`.
+- `influx_coefficient` - overrides the connection's face area for aquifer
+  influence. `None` (Eclipse's own default) means use the face's own area.
+- `connection_multiplier` - multiplies the resolved influx coefficient.
+  `1.0` if omitted.
+- `allow_already_connected` - `YES`/`NO`, whether this connection may
+  reuse a face already connected to a different aquifer. `NO` if omitted.
+"""
+
+AQUFLUX = RepeatedRecordKeyword[float](
+    "AQUFLUX",
+    fields=[
+        Field("aquifer_id", int),
+        Field("flux", np.float64),
+    ],
+)
+"""
+`AQUFLUX  AQUIFER_ID  FLUX /` (one record per aquifer) - flux-specified
+analytic aquifer: a fixed influx rate rather than one derived from
+pressure difference. Attached to grid cells the same way as `AQUCT`/
+`AQUFETP`, via `AQUANCON`.
+
+Multiple records (one per aquifer) are separated by `/` within a single
+`AQUFLUX` block, and multiple `AQUFLUX` blocks in the same deck are
+concatenated in file order.
+
+Fields:
+
+- `aquifer_id`      - aquifer identification number, referenced by
+  `AQUANCON` to attach the aquifer to grid connections.
+- `flux`      - constant influx rate, reservoir volume per day.
 """
 
 RESTART = RestartKeyword()
