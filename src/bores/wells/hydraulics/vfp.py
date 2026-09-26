@@ -1,20 +1,14 @@
 """
-Eclipse-style VFP (vertical flow performance) tables.
+Eclipse-style VFP (vertical flow performance) tables: bottomhole
+pressure at a well's datum depth as a function of flow rate, tubing
+head pressure, water cut, gas-oil ratio, and artificial lift quantity.
+This is the datum-to-surface leg of well hydraulics only; connection-level
+pressure distribution below the datum is unaffected by whether a table
+is assigned.
 
-A VFP table gives bottomhole pressure at a well's reference/datum depth
-as a function of flow rate, tubing head pressure, water cut, gas-oil
-ratio, and artificial lift quantity. It's the datum-to-surface leg of
-well hydraulics only - the same relationship `WellBoreModel`'s
-`compute_tubing_head_pressure` computes analytically, tabulated for a
-single interpolation call instead of an iterative solve. It says
-nothing about how pressure is distributed among a well's individual
-connections below the datum; that stays with `WellBoreModel`
-regardless of whether a VFP table is present. See
-`wells.resolution.spec.ConnectionPressureMode`.
-
-Real VFPPROD/VFPINJ deck parsing (reading the actual axis quantity
-codes and data rows) isn't implemented here yet - this module only
-covers the table representation, in-memory construction, and lookup.
+Real VFPPROD/VFPINJ deck parsing isn't implemented here yet. This
+module covers the table representation, in-memory construction, and
+lookup.
 """
 
 import logging
@@ -31,7 +25,16 @@ from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.serde.base import Serializable
 from bores.serde.stores.base import StoreSerializable
-from bores.types import Integer, Number, NumberArray, NumberOrArray, OneDimension, UnitSystem
+from bores.types import (
+    Integer,
+    NDimension,
+    Number,
+    NumberArray,
+    OneDimension,
+    TableQuery,
+    TableResult,
+    UnitSystem,
+)
 from bores.utils import scale
 from bores.wells.base import WellType
 
@@ -50,16 +53,15 @@ class VFPData(Serializable):
     """
     Raw axes and bottomhole-pressure grid for one VFP table.
 
-    A producer table (`well_type=WellType.PRODUCER`) typically varies
-    over all five axes. An injector table (`well_type=WellType.INJECTOR`)
-    usually only varies with `flow_rates`/`thps` - leave `water_cuts`,
-    `gas_oil_ratios`, and `artificial_lift_quantities` at their single-value
-    defaults in that case.
+    A producer table typically varies over all five axes. An injector
+    table usually varies only with `flow_rates` and `thps`; leave
+    `water_cuts`, `gas_oil_ratios`, and `artificial_lift_quantities` at
+    their single-value defaults in that case.
     """
 
     table_number: Integer
-    """Table number - deck `VFPPROD`/`VFPINJ` item 1. How a well selects
-    this table over another, via `WCONPROD`/`WCONINJE`'s `vfp_table` item."""
+    """Table number, matching deck `VFPPROD`/`VFPINJ` item 1. A well
+    selects this table through `WCONPROD`/`WCONINJE`'s `vfp_table` item."""
 
     well_type: WellType
     """Whether this is a `VFPPROD` (producer) or `VFPINJ` (injector) table."""
@@ -93,7 +95,7 @@ class VFPData(Serializable):
     """Artificial lift quantity axis (gas-lift injection rate, pump
     power, etc.), strictly ascending. A single value (the default) for
     a table with no artificial-lift dependence. Not unit-converted by
-    `convert()` - see its docstring."""
+    `convert()`; see its docstring."""
 
     bhps: NumberArray[FiveDimensions]
     """
@@ -135,17 +137,16 @@ class VFPData(Serializable):
         """
         Converts every dimensioned axis and `bhps` to a different unit system.
 
-        `artificial_lift_quantities` is left unconverted: its physical
-        quantity (a gas-lift rate, a pump power, an injection pressure,
-        ...) depends on the lift method, and this data structure doesn't
-        know which. Build/load `VFPData` already in the unit system you
-        intend to use if artificial lift is in play across a unit-system
-        boundary.
+        `artificial_lift_quantities` is left unconverted, since its
+        physical quantity depends on the lift method and this data
+        structure doesn't know which. Build or load `VFPData` already
+        in the target unit system if artificial lift matters across a
+        unit-system boundary.
 
         :param target: Target unit system.
         :param table: Optional custom unit-conversion table.
-        :returns: This data, with every axis but `artificial_lift_quantities`,
-            and `bhps`, converted to `target`.
+        :returns: This data, with every axis except
+            `artificial_lift_quantities`, and `bhps`, converted to `target`.
         """
         if target == self.unit_system:
             return self
@@ -170,13 +171,10 @@ class VFPData(Serializable):
 
 class VFPTable(StoreSerializable):
     """
-    A `VFPData` grid with a pre-built interpolator for fast BHP lookup.
+    A `VFPData` grid with a pre-built interpolator for bottomhole-pressure lookup.
 
-    A single-value axis (the common case for `water_cuts`/`gas_oil_ratios`/
-    `artificial_lift_quantities`, and often for an injector's `thps`
-    dependence too) is collapsed out at construction time, the same way
-    `PVTTable` collapses a single-salinity water table - the interpolator
-    is only ever built over the axes that actually vary.
+    Any axis with only one value is collapsed out at construction; the
+    interpolator is only built over axes that actually vary.
     """
 
     __abstract_serializable__ = True
@@ -196,8 +194,7 @@ class VFPTable(StoreSerializable):
             outside the table's bounds on any axis that varies.
         :param dtype: Output array dtype. `bores.precision.get_dtype()`
             if not given.
-        :raises ValidationError: If every axis is single-valued (nothing
-            to interpolate over).
+        :raises ValidationError: If every axis is single-valued.
         """
         self._data = data
         self.warn_on_extrapolation = warn_on_extrapolation
@@ -227,7 +224,7 @@ class VFPTable(StoreSerializable):
 
         self._interpolator = RegularGridInterpolator(
             points=active_axes,
-            values=values,
+            values=values,  # type: ignore[arg-type]
             method="linear",
             bounds_error=False,
             fill_value=None,
@@ -245,7 +242,7 @@ class VFPTable(StoreSerializable):
         }
 
     @classmethod
-    def __load__(cls, data: typing.Mapping[str, typing.Any]) -> "VFPTable":
+    def __load__(cls, data: typing.Mapping[str, typing.Any]) -> Self:
         return cls(
             data=VFPData.load(data["data"]),
             warn_on_extrapolation=data.get("warn_on_extrapolation", False),
@@ -253,7 +250,7 @@ class VFPTable(StoreSerializable):
 
     @property
     def table_number(self) -> Integer:
-        """This table's number - deck `VFPPROD`/`VFPINJ` item 1."""
+        """This table's number, matching deck `VFPPROD`/`VFPINJ` item 1."""
         return self._data.table_number
 
     @property
@@ -293,9 +290,22 @@ class VFPTable(StoreSerializable):
             dtype=self.dtype,
         )
 
-    def _warn_extrapolation(self, point: typing.Mapping[str, NumberOrArray[typing.Any]]) -> None:
-        for name, value in point.items():
-            min_value, max_value = self._extrapolation_bounds[name]
+    def _warn_extrapolation(
+        self,
+        flow_rate: TableQuery[NDimension],
+        thp: TableQuery[NDimension],
+        water_cut: TableQuery[NDimension],
+        gas_oil_ratio: TableQuery[NDimension],
+        artificial_lift_quantity: TableQuery[NDimension],
+    ) -> None:
+        if not self.warn_on_extrapolation:
+            return
+        values = (flow_rate, thp, water_cut, gas_oil_ratio, artificial_lift_quantity)
+        for name, value in zip(_AXIS_NAMES, values, strict=True):
+            bounds = self._extrapolation_bounds.get(name)
+            if bounds is None:
+                continue
+            min_value, max_value = bounds
             value_array = np.atleast_1d(value)
             if np.any(value_array < min_value) or np.any(value_array > max_value):
                 logger.warning(
@@ -311,44 +321,35 @@ class VFPTable(StoreSerializable):
     def query(
         self,
         *,
-        flow_rate: NumberOrArray[typing.Any],
-        thp: NumberOrArray[typing.Any],
-        water_cut: NumberOrArray[typing.Any] = 0.0,
-        gas_oil_ratio: NumberOrArray[typing.Any] = 0.0,
-        artificial_lift_quantity: NumberOrArray[typing.Any] = 0.0,
-    ) -> NumberOrArray[typing.Any]:
+        flow_rate: TableQuery[NDimension],
+        thp: TableQuery[NDimension],
+        water_cut: TableQuery[NDimension] = 0.0,
+        gas_oil_ratio: TableQuery[NDimension] = 0.0,
+        artificial_lift_quantity: TableQuery[NDimension] = 0.0,
+    ) -> TableResult[NDimension]:
         """
         Interpolates bottomhole pressure at a point.
 
-        A value given for an axis this table doesn't vary over (collapsed
-        at construction time) is accepted but ignored - it never
-        participates in the interpolation. Pass whatever the caller has
-        on hand for every axis; there's no need to check which axes this
-        particular table actually varies over first.
+        A value given for an axis this table doesn't vary over is
+        accepted but ignored.
 
         :param flow_rate: Flow rate.
         :param thp: Tubing head pressure.
-        :param water_cut: Water cut. Ignored if this table's `water_cuts`
-            axis is single-valued.
-        :param gas_oil_ratio: Gas-oil ratio. Ignored if this table's
-            `gas_oil_ratios` axis is single-valued.
+        :param water_cut: Water cut. Ignored if `water_cuts` is single-valued.
+        :param gas_oil_ratio: Gas-oil ratio. Ignored if `gas_oil_ratios` is single-valued.
         :param artificial_lift_quantity: Artificial lift quantity.
-            Ignored if this table's `artificial_lift_quantities` axis is
-            single-valued.
-        :returns: Interpolated bottomhole pressure, scalar or array
-            matching the broadcast shape of the given active-axis values.
+            Ignored if `artificial_lift_quantities` is single-valued.
+        :returns: Interpolated bottomhole pressure, matching the input shape.
         """
+        self._warn_extrapolation(
+            flow_rate, thp, water_cut, gas_oil_ratio, artificial_lift_quantity
+        )
+
         full_point = (flow_rate, thp, water_cut, gas_oil_ratio, artificial_lift_quantity)
         active_point = tuple(
             value for value, active in zip(full_point, self._active, strict=True) if active
         )
-        active_names = tuple(
-            name for name, active in zip(_AXIS_NAMES, self._active, strict=True) if active
-        )
         is_scalar = all(np.isscalar(value) for value in active_point)
-
-        if self.warn_on_extrapolation:
-            self._warn_extrapolation(dict(zip(active_names, active_point, strict=True)))
 
         arrays = [np.atleast_1d(value) for value in active_point]
         broadcast_shape = np.broadcast_shapes(*(arr.shape for arr in arrays))
@@ -356,9 +357,10 @@ class VFPTable(StoreSerializable):
         points = np.column_stack([arr.ravel() for arr in arrays])
         result = self._interpolator(points).reshape(broadcast_shape)
 
+        dtype = self.dtype
         if is_scalar:
-            return typing.cast(Number, self.dtype.type(result.item()))
-        return typing.cast(NumberArray[typing.Any], result.astype(self.dtype, copy=False))
+            return typing.cast(Number, result.astype(dtype, copy=False).item())
+        return typing.cast(NumberArray[NDimension], result.astype(dtype, copy=False))
 
 
 @attrs.frozen(kw_only=True, slots=True)
@@ -366,9 +368,8 @@ class VFPTables(StoreSerializable):
     """
     Number-indexed collection of `VFPTable`s.
 
-    Wells select a table by number (deck `WCONPROD`/`WCONINJE`'s
-    `vfp_table` item), the same way a cell selects a PVT/SATNUM region
-    by number - not by well name, since several wells commonly share
+    Wells select a table by number, via `WCONPROD`/`WCONINJE`'s
+    `vfp_table` item, not by well name; several wells commonly share
     one table.
     """
 
