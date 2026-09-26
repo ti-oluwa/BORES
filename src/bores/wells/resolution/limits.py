@@ -296,7 +296,7 @@ def apply_limits(
     :param limits: The full system's `CompiledLimits`.
     :param limits_start: First row of this well's limit range.
     :param limits_end: One past the last row of this well's limit range.
-    :param wellbore: Hydraulics correlation for this well. May be `None`. 
+    :param wellbore: Hydraulics correlation for this well. May be `None`.
         A `THPLimit` row in range still requires one regardless.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.

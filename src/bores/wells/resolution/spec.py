@@ -69,7 +69,7 @@ class WellControlSpec(Serializable):
     """
     unit_system: UnitSystem = UnitSystem.FIELD
     """Unit system for pressure-valued control limits."""
-    
+
     connection_pressure_mode: ConnectionPressureMode = ConnectionPressureMode.HYDRAULIC
     """How to treat a well with no `WellBoreModel`/`VFPTable` assigned."""
 

@@ -114,7 +114,9 @@ def compute_perforation_pressures(
     raise ValidationError(f"Unknown `WellBoreModel` name: {wellbore.name!r}")
 
 
-def compute_tubing_head_pressure(*, wellbore: WellBoreModel | None, **kwargs: typing.Any) -> Number:
+def compute_tubing_head_pressure(
+    *, wellbore: WellBoreModel | None, **kwargs: typing.Any
+) -> Number:
     """
     Dispatches to the `compute_tubing_head_pressure` of whichever module
     `wellbore.name` selects.
@@ -247,7 +249,10 @@ def solve_connection_pressures_and_rates(
     :raises ValidationError: If `wellbore` is `None` and
         `control_spec.connection_pressure_mode` isn't `UNIFORM_BHP`.
     """
-    if wellbore is None and control_spec.connection_pressure_mode != ConnectionPressureMode.UNIFORM_BHP:
+    if (
+        wellbore is None
+        and control_spec.connection_pressure_mode != ConnectionPressureMode.UNIFORM_BHP
+    ):
         raise ValidationError(
             "This well has no `WellBoreModel` or VFP table assigned, and "
             f"`control_spec.connection_pressure_mode` is "
