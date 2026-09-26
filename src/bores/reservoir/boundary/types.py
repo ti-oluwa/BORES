@@ -186,6 +186,7 @@ class ProductivityIndexBoundary(BoundaryCondition):
     """
 
     __type__: typing.ClassVar[str] = "productivity_index_boundary"
+
     condition_type: typing.ClassVar[BoundaryConditionType] = BoundaryConditionType.FLUX
 
     pressure_boundary: Number

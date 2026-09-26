@@ -22,7 +22,7 @@ from bores.reservoir.boundary.conditions import BoundaryConditions
 from bores.reservoir.boundary.deck import load_boundary_conditions
 from bores.reservoir.model import Reservoir
 from bores.reservoir.regions import Regions
-from bores.reservoir.rock.base import Rock
+from bores.reservoir.rock.model import Rock
 from bores.reservoir.state import Equilibrium, ReservoirState
 from bores.reservoir.state.base import Hysteresis
 from bores.reservoir.temperature import Temperature

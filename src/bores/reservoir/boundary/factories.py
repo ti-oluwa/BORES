@@ -1,12 +1,6 @@
 """
 Convenience factories for building `BoundaryRegion`/`BoundaryConditions`
 objects from a `Grid`, without hand-deriving boundary face positions.
-
-Building a `BoundaryRegion` by hand requires pulling `Grid.boundary_face_indices`,
-figuring out which of those global face indices actually sit on the flank of
-the domain you care about, then converting the survivors back into
-positions within `boundary_face_indices`, which is the indexing
-`BoundaryRegion.face_positions` actually expects, not global face indices.
 """
 
 import logging
@@ -20,7 +14,7 @@ from bores.types import IntArray, OneDimension, Side, UnitSystem
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["make_axis_aligned_boundary_conditions", "make_boundary_region"]
+__all__ = ["make_boundary_conditions", "make_boundary_region"]
 
 
 def make_boundary_region(
@@ -69,7 +63,7 @@ def make_boundary_region(
     )
 
 
-def make_axis_aligned_boundary_conditions(
+def make_boundary_conditions(
     grid: Grid,
     sides: typing.Mapping[Side | str, BoundaryCondition],
     *,
@@ -77,11 +71,11 @@ def make_axis_aligned_boundary_conditions(
     unit_system: UnitSystem | None = None,
 ) -> BoundaryConditions:
     """
-    Build a complete `BoundaryConditions` from a `{side: condition}` mapping
-    in one call.
+    Build a complete (axis-aligned) `BoundaryConditions` from a `{side: condition}`
+    mapping.
 
     ```python
-    boundary_conditions = make_axis_aligned_boundary_conditions(
+    boundary_conditions = make_boundary_conditions(
         grid,
         sides={
             "south": CarterTracyAquifer(initial_pressure=4500.0, aquifer_constant=1.2e6),

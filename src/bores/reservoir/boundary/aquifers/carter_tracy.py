@@ -823,8 +823,8 @@ def load_carter_tracy_aquifer(
     :param unit_system: The deck's unit system.
     :param pvt: The model's PVT tables, covering at least
         `record["pvt_table_number"]`'s region (e.g. `PVT.from_deck(deck_file, ...)`).
-    :returns: Constructed `CarterTracyAquifer`, always `bounded_aquifer=False`
-        - see the note on `aquifer_influence_table_number` below.
+    :returns: Constructed `CarterTracyAquifer`, always `bounded_aquifer=False`.
+        See the note on `aquifer_influence_table_number` below.
     :raises ValidationError: If `pvt`'s region for `record["pvt_table_number"]`
         has no `PVTW`-derived reference viscosity.
     """
@@ -834,8 +834,8 @@ def load_carter_tracy_aquifer(
     influence_table = record["aquifer_influence_table_number"]
     if influence_table != 1:
         warnings.warn(
-            f"`AQUCT` aquifer {aquifer_id!r} references AQUTAB table "
-            f"{influence_table!r}, but custom AQUTAB influence functions are "
+            f"`AQUCT` aquifer {aquifer_id!r} references `AQUTAB` table "
+            f"{influence_table!r}, but custom `AQUTAB` influence functions are "
             "not parsed by this codebase yet. Building it as infinite-acting "
             "(bounded_aquifer=False) instead of honouring that table.",
             stacklevel=2,

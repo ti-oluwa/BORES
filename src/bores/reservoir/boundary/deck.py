@@ -58,7 +58,7 @@ def resolve_aquancon_region(
     cells whose face in the given direction isn't a genuine grid-boundary
     face).
 
-    `allow_already_connected="YES"` on a record is not enforced - this
+    `allow_already_connected="YES"` on a record is not enforced as this
     function doesn't track which faces other aquifers have already
     claimed, so a `YES` record is treated the same as the `NO` default,
     with a warning.
@@ -135,7 +135,7 @@ def load_boundary_conditions(
     :param deck_file: Parsed deck.
     :param grid: The model's `Grid`, read for `AQUANCON`'s face resolution.
     :param pvt: The model's PVT tables. Required if the deck has an
-        `AQUCT` keyword - see `load_carter_tracy_aquifer` for why.
+        `AQUCT` keyword. See `load_carter_tracy_aquifer` for why.
     :param extra_regions: Additional `BoundaryRegion`s to include as-is
         (e.g. a manually-built `ConstantPressureBoundary` region). Appended
         after every deck-sourced region, so they win on overlapping faces.
@@ -156,14 +156,14 @@ def load_boundary_conditions(
             raise ValidationError(
                 f"Aquifer id {aquifer_id!r} is defined by both "
                 f"{defined_ids[aquifer_id]!r} and {source!r}. Each aquifer id "
-                "must come from exactly one of AQUCT/AQUFETP/AQUFLUX."
+                "must come from exactly one of `AQUCT`/`AQUFETP`/`AQUFLUX`."
             )
         defined_ids[aquifer_id] = source
 
     if deck_file.get("AQUCT"):
         if pvt is None:
             raise ValidationError(
-                "Deck defines an AQUCT keyword but no `pvt` was given to "
+                "Deck defines an `AQUCT` keyword but no `pvt` was given to "
                 "resolve water viscosity from. See `load_carter_tracy_aquifer`."
             )
         for aquifer_id, aquifer in CarterTracyAquifer.from_deck(deck_file, pvt=pvt).items():

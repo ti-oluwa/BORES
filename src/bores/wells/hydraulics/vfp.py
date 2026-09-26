@@ -1,14 +1,10 @@
 """
-Eclipse-style VFP (vertical flow performance) tables: bottomhole
-pressure at a well's datum depth as a function of flow rate, tubing
-head pressure, water cut, gas-oil ratio, and artificial lift quantity.
-This is the datum-to-surface leg of well hydraulics only; connection-level
-pressure distribution below the datum is unaffected by whether a table
-is assigned.
+VFP (vertical flow performance) tables.
 
-Real VFPPROD/VFPINJ deck parsing isn't implemented here yet. This
-module covers the table representation, in-memory construction, and
-lookup.
+Interpolates bottomhole pressure at a well's datum depth as a function of flow rate,
+tubing head pressure, water cut, gas-oil ratio, and artificial lift quantity.
+This is the datum-to-surface leg of well hydraulics only; connection-level
+pressure distribution below the datum is unaffected by whether a table is assigned.
 """
 
 import logging
@@ -44,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 FiveDimensions: typing.TypeAlias = tuple[int, int, int, int, int]
 
-_AXIS_NAMES = ("flow_rate", "thp", "water_cut", "gas_oil_ratio", "artificial_lift_quantity")
+AXIS_NAMES = ("flow_rate", "thp", "water_cut", "gas_oil_ratio", "artificial_lift_quantity")
 """Order `VFPData`'s five axes are always addressed in, internally."""
 
 
@@ -60,19 +56,25 @@ class VFPData(Serializable):
     """
 
     table_number: Integer
-    """Table number, matching deck `VFPPROD`/`VFPINJ` item 1. A well
-    selects this table through `WCONPROD`/`WCONINJE`'s `vfp_table` item."""
+    """
+    Table number, matching deck `VFPPROD`/`VFPINJ` item 1. A well
+    selects this table through `WCONPROD`/`WCONINJE`'s `vfp_table` item.
+    """
 
     well_type: WellType
     """Whether this is a `VFPPROD` (producer) or `VFPINJ` (injector) table."""
 
     datum_depth: Number
-    """Reference depth this table's bottomhole pressure is reported at,
-    matching the owning well's `reference_depth`."""
+    """
+    Reference depth this table's bottomhole pressure is reported at,
+    matching the owning well's `reference_depth`.
+    """
 
     flow_rates: NumberArray[OneDimension]
-    """Flow rate axis, strictly ascending. Liquid rate for most producer
-    tables; the injected phase's rate for an injector table."""
+    """
+    Flow rate axis, strictly ascending. Liquid rate for most producer
+    tables; the injected phase's rate for an injector table.
+    """
 
     thps: NumberArray[OneDimension]
     """Tubing head pressure axis, strictly ascending."""
@@ -80,22 +82,27 @@ class VFPData(Serializable):
     water_cuts: NumberArray[OneDimension] = attrs.field(
         factory=lambda: typing.cast(NumberArray[OneDimension], np.array([0.0]))
     )
-    """Water cut axis, strictly ascending. A single value (the default)
-    for a table with no water-cut dependence."""
+    """
+    Water cut axis, strictly ascending. A single value (the default)
+    for a table with no water-cut dependence.
+    """
 
     gas_oil_ratios: NumberArray[OneDimension] = attrs.field(
         factory=lambda: typing.cast(NumberArray[OneDimension], np.array([0.0]))
     )
-    """Gas-oil ratio axis, strictly ascending. A single value (the
-    default) for a table with no GOR dependence."""
+    """
+    Gas-oil ratio axis, strictly ascending. A single value (the
+    default) for a table with no GOR dependence.
+    """
 
     artificial_lift_quantities: NumberArray[OneDimension] = attrs.field(
         factory=lambda: typing.cast(NumberArray[OneDimension], np.array([0.0]))
     )
-    """Artificial lift quantity axis (gas-lift injection rate, pump
+    """
+    Artificial lift quantity axis (gas-lift injection rate, pump
     power, etc.), strictly ascending. A single value (the default) for
-    a table with no artificial-lift dependence. Not unit-converted by
-    `convert()`; see its docstring."""
+    a table with no artificial-lift dependence.
+    """
 
     bhps: NumberArray[FiveDimensions]
     """
@@ -119,9 +126,9 @@ class VFPData(Serializable):
         if self.bhps.shape != expected_shape:
             raise ValidationError(
                 f"`bhps` shape {self.bhps.shape} doesn't match the axes "
-                f"{dict(zip(_AXIS_NAMES, expected_shape, strict=True))}."
+                f"{dict(zip(AXIS_NAMES, expected_shape, strict=True))}."
             )
-        for name, axis in zip(_AXIS_NAMES, axes, strict=True):
+        for name, axis in zip(AXIS_NAMES, axes, strict=True):
             if len(axis) == 0:
                 raise ValidationError(f"`{name}s` must have at least one value.")
             if len(axis) > 1 and not np.all(np.diff(axis) > 0):
@@ -198,7 +205,7 @@ class VFPTable(StoreSerializable):
         """
         self._data = data
         self.warn_on_extrapolation = warn_on_extrapolation
-        self.dtype = np.dtype(dtype) if dtype is not None else np.dtype(get_dtype())
+        self.dtype = np.dtype(dtype) if dtype is not None else get_dtype()
 
         axes = (
             data.flow_rates,
@@ -231,7 +238,7 @@ class VFPTable(StoreSerializable):
         )
         self._extrapolation_bounds: dict[str, tuple[Number, Number]] = {
             name: (axis[0], axis[-1])
-            for name, axis, active in zip(_AXIS_NAMES, axes, self._active, strict=True)
+            for name, axis, active in zip(AXIS_NAMES, axes, self._active, strict=True)
             if active
         }
 
@@ -301,7 +308,7 @@ class VFPTable(StoreSerializable):
         if not self.warn_on_extrapolation:
             return
         values = (flow_rate, thp, water_cut, gas_oil_ratio, artificial_lift_quantity)
-        for name, value in zip(_AXIS_NAMES, values, strict=True):
+        for name, value in zip(AXIS_NAMES, values, strict=True):
             bounds = self._extrapolation_bounds.get(name)
             if bounds is None:
                 continue
@@ -312,8 +319,8 @@ class VFPTable(StoreSerializable):
                     "%s extrapolation: queried %s ∈ [%.4g, %.4g], table range [%.4g, %.4g]",
                     name,
                     name,
-                    float(value_array.min()),
-                    float(value_array.max()),
+                    value_array.min(),
+                    value_array.max(),
                     min_value,
                     max_value,
                 )
@@ -342,7 +349,11 @@ class VFPTable(StoreSerializable):
         :returns: Interpolated bottomhole pressure, matching the input shape.
         """
         self._warn_extrapolation(
-            flow_rate, thp, water_cut, gas_oil_ratio, artificial_lift_quantity
+            flow_rate=flow_rate,
+            thp=thp,
+            water_cut=water_cut,
+            gas_oil_ratio=gas_oil_ratio,
+            artificial_lift_quantity=artificial_lift_quantity,
         )
 
         full_point = (flow_rate, thp, water_cut, gas_oil_ratio, artificial_lift_quantity)
@@ -352,9 +363,9 @@ class VFPTable(StoreSerializable):
         is_scalar = all(np.isscalar(value) for value in active_point)
 
         arrays = [np.atleast_1d(value) for value in active_point]
-        broadcast_shape = np.broadcast_shapes(*(arr.shape for arr in arrays))
-        arrays = [np.broadcast_to(arr, broadcast_shape) for arr in arrays]
-        points = np.column_stack([arr.ravel() for arr in arrays])
+        broadcast_shape = np.broadcast_shapes(*(array.shape for array in arrays))
+        arrays = [np.broadcast_to(array, broadcast_shape) for array in arrays]
+        points = np.column_stack([array.ravel() for array in arrays])
         result = self._interpolator(points).reshape(broadcast_shape)
 
         dtype = self.dtype
@@ -369,8 +380,7 @@ class VFPTables(StoreSerializable):
     Number-indexed collection of `VFPTable`s.
 
     Wells select a table by number, via `WCONPROD`/`WCONINJE`'s
-    `vfp_table` item, not by well name; several wells commonly share
-    one table.
+    `vfp_table` item. Several wells commonly share one table.
     """
 
     tables: typing.Mapping[Integer, VFPTable] = attrs.field(factory=dict)
@@ -389,7 +399,7 @@ class VFPTables(StoreSerializable):
         """Unit system shared by every table, or `None` if empty."""
         return next((table.unit_system for table in self.tables.values()), None)
 
-    def table(self, table_number: Integer) -> VFPTable:
+    def table(self, table_number: Integer, /) -> VFPTable:
         """
         Gets a table by number.
 

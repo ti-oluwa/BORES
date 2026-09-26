@@ -263,7 +263,7 @@ def compile_boundary_conditions(
             for position in face_positions.tolist():
                 face_aquifer_row[position] = row
         else:
-            # ProductivityIndexBoundary, or any other FLUX/PRESSURE kind
+            # `ProductivityIndexBoundary`, or any other FLUX/PRESSURE kind
             # not covered above - resolved generically via its own
             # `pressure_boundary`/`productivity_index` fields.
             pi_condition = typing.cast(ProductivityIndexBoundary, condition)

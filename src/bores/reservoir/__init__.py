@@ -13,7 +13,7 @@ from bores.reservoir.boundary import (
     ConstantPressureBoundary,
     FetkovichAquifer,
     ProductivityIndexBoundary,
-    make_axis_aligned_boundary_conditions,
+    make_boundary_conditions,
     make_boundary_region,
 )
 from bores.reservoir.faults import Fault
@@ -69,6 +69,6 @@ __all__ = [
     "TemperatureTable",
     "compute_connection_transmissibilities",
     "load_equilibrium_regions",
-    "make_axis_aligned_boundary_conditions",
+    "make_boundary_conditions",
     "make_boundary_region",
 ]

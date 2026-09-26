@@ -81,5 +81,5 @@ boundary_condition = make_serializable_type_registrar(
 """
 Class decorator that registers a `BoundaryCondition` subclass for
 serialisation. Must be applied to every concrete condition class that needs
-to survive a `dump` / `load` cycle.
+to survive a `dump`/`load` cycle.
 """

@@ -297,4 +297,9 @@ def commit_boundary_conditions(
     :param pressure: The accepted cell pressures for `time`.
     :param time: Time being committed to.
     """
-    advance_aquifer_workspace(compiled.aquifers, aquifer_workspace, pressure, time)
+    advance_aquifer_workspace(
+        aquifers=compiled.aquifers,
+        workspace=aquifer_workspace,
+        pressure=pressure,
+        time=time,
+    )

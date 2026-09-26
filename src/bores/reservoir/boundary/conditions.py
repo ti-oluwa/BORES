@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 __all__ = ["BoundaryConditions", "BoundaryRegion"]
 
 
-@attrs.frozen
+@attrs.frozen(slots=True, kw_only=True)
 class BoundaryRegion(StoreSerializable):
     """
     Associates a named `BoundaryCondition` with a set of boundary faces.
@@ -272,14 +272,14 @@ class BoundaryConditions(StoreSerializable):
     def override(self, other: Self) -> Self:
         """
         Return a new `BoundaryConditions` merging `other` into `self` by
-        region name: a region in `other` replaces a same-named region
+        region name. A region in `other` replaces a same-named region
         here, and a region with a new name is appended. Regions present
         here but absent from `other` are kept unchanged.
 
         Useful for taking boundary conditions loaded from a deck and
-        selectively updating or overriding specific regions - e.g. a
+        selectively updating or overriding specific regions, e.g. a
         manually-specified `ConstantPressureBoundary` in place of a
-        deck's `AQUCT` aquifer on the same flank - without having to
+        deck's `AQUCT` aquifer on the same flank, without having to
         rebuild the whole `BoundaryConditions`.
 
         :param other: Regions to merge in. Converted to `self.unit_system`

@@ -387,8 +387,8 @@ class FetkovichAquifer(BoundaryCondition):
         if self.encroachable_water <= 0:
             raise ValidationError(
                 "Resolved `encroachable_water` (We_i) must be positive; got "
-                f"{self.encroachable_water!r}. Check aquifer_compressibility/"
-                "aquifer_porosity/initial_pressure are all positive."
+                f"{self.encroachable_water!r}. Check that `aquifer_compressibility`/"
+                "`aquifer_porosity`/`initial_pressure` are all positive."
             )
 
     def convert(
