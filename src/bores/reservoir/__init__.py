@@ -1,6 +1,5 @@
 """
-Reservoir characterization. `Reservoir` itself, its rock/region/temperature
-inputs, boundary conditions, transmissibility, and state.
+Reservoir characterization. Its rock/region/temperature inputs, boundary conditions, transmissibility, and state.
 """
 
 from bores.reservoir.boundary import (
@@ -16,6 +15,12 @@ from bores.reservoir.boundary import (
     make_boundary_conditions,
     make_boundary_region,
 )
+from bores.reservoir.equilibrium import (
+    DepthTable,
+    Equilibrium,
+    EquilibriumRegion,
+    load_equilibrium_regions,
+)
 from bores.reservoir.faults import Fault
 from bores.reservoir.model import Reservoir
 from bores.reservoir.regions import Regions
@@ -26,14 +31,7 @@ from bores.reservoir.rock import (
     RockCompressibilityTable,
     RockCompressibilityTables,
 )
-from bores.reservoir.state import (
-    DepthTable,
-    Equilibrium,
-    EquilibriumRegion,
-    Hysteresis,
-    ReservoirState,
-    load_equilibrium_regions,
-)
+from bores.reservoir.state import Hysteresis, ReservoirState
 from bores.reservoir.temperature import Temperature, TemperatureGradient, TemperatureTable
 from bores.reservoir.transmissibility import (
     ConnectionTransmissibilities,

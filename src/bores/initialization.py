@@ -25,14 +25,14 @@ from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.grids.base import Grid
 from bores.precision import get_dtype
-from bores.reservoir.mass import compute_masses
-from bores.reservoir.model import Reservoir
-from bores.reservoir.state.base import Hysteresis, ReservoirState
-from bores.reservoir.state.equilibrium import (
+from bores.reservoir.equilibrium import (
     DepthTable,
     Equilibrium,
     EquilibriumRegion,
 )
+from bores.reservoir.mass import compute_masses
+from bores.reservoir.model import Reservoir
+from bores.reservoir.state import Hysteresis, ReservoirState
 from bores.reservoir.temperature import (
     Temperature,
     TemperatureGradient,

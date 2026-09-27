@@ -16,7 +16,7 @@ from bores.blackoil.caches.mobility import MobilityCache, compute_mobility_cache
 from bores.blackoil.caches.pvt import PVTCache, compute_pvt_cache
 from bores.blackoil.caches.satfunc import SatFuncCache, compute_satfunc_cache
 from bores.blackoil.fluids.model import BlackOil
-from bores.reservoir.state.base import Hysteresis
+from bores.reservoir.state import Hysteresis
 from bores.reservoir.workspace import HysteresisWorkspace
 from bores.types import CellArray, IntCellArray
 
