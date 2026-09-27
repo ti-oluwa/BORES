@@ -22,6 +22,7 @@ from bores.precision import get_dtype
 from bores.serde.base import Serializable
 from bores.serde.stores.base import StoreSerializable
 from bores.types import (
+    FluidPhase,
     Integer,
     NDimension,
     Number,
@@ -33,8 +34,14 @@ from bores.types import (
 )
 from bores.utils import scale
 from bores.wells.base import WellType
+from bores.wells.hydraulics.base import (
+    SurfaceFluidProperties,
+    WellBoreModel,
+    compute_tubing_head_pressure,
+)
+from bores.wells.state import PhaseValues
 
-__all__ = ["VFPData", "VFPTable", "VFPTables"]
+__all__ = ["VFPData", "VFPTable", "VFPTables", "as_vfp_table"]
 
 logger = logging.getLogger(__name__)
 
@@ -436,3 +443,192 @@ class VFPTables(StoreSerializable):
                 for number, vfp_table in self.tables.items()
             },
         )
+
+
+def compute_reservoir_phase_rates(
+    *,
+    flow_rate: Number,
+    water_cut: Number,
+    gas_oil_ratio: Number,
+    well_type: WellType,
+    injected_phase: FluidPhase | None,
+    formation_volume_factors: PhaseValues,
+) -> PhaseValues:
+    if well_type == WellType.INJECTOR:
+        if injected_phase == FluidPhase.WATER:
+            return PhaseValues(oil=0.0, water=flow_rate * formation_volume_factors.water, gas=0.0)
+        if injected_phase == FluidPhase.GAS:
+            return PhaseValues(oil=0.0, water=0.0, gas=flow_rate * formation_volume_factors.gas)
+        raise ValidationError(
+            f"`injected_phase` must be `FluidPhase.WATER` or `FluidPhase.GAS` "
+            f"for an injector table, got {injected_phase!r}."
+        )
+    water_rate = flow_rate * water_cut
+    oil_rate = flow_rate - water_rate
+    gas_rate = oil_rate * gas_oil_ratio
+    return PhaseValues(
+        oil=oil_rate * formation_volume_factors.oil,
+        water=water_rate * formation_volume_factors.water,
+        gas=gas_rate * formation_volume_factors.gas,
+    )
+
+
+def bisect_bhp_for_thp(
+    *,
+    wellbore: WellBoreModel,
+    reference_depth: Number,
+    phase_rates: PhaseValues,
+    surface_fluid_properties: SurfaceFluidProperties,
+    is_injector: bool,
+    target_thp: Number,
+    min_bhp: Number,
+    max_bhp: Number,
+    max_iterations: Integer,
+    convergence_tolerance: Number,
+) -> Number:
+    low, high = min_bhp, max_bhp
+    bhp = 0.5 * (low + high)
+    for _ in range(max_iterations):
+        bhp = 0.5 * (low + high)
+        thp = compute_tubing_head_pressure(
+            wellbore=wellbore,
+            reference_depth=reference_depth,
+            reference_pressure=bhp,
+            phase_rates=phase_rates,
+            surface_fluid_properties=surface_fluid_properties,
+            is_injector=is_injector,
+        )
+        if abs(thp - target_thp) <= convergence_tolerance * max(abs(target_thp), 1.0):
+            break
+        # Higher BHP means higher THP, for both well types.
+        if thp < target_thp:
+            low = bhp
+        else:
+            high = bhp
+    return bhp
+
+
+def as_vfp_table(
+    wellbore: WellBoreModel,
+    *,
+    table_number: Integer,
+    well_type: WellType,
+    reference_depth: Number,
+    flow_rates: NumberArray[OneDimension],
+    thps: NumberArray[OneDimension],
+    surface_fluid_properties: SurfaceFluidProperties,
+    water_cuts: NumberArray[OneDimension] | None = None,
+    gas_oil_ratios: NumberArray[OneDimension] | None = None,
+    formation_volume_factors: PhaseValues | None = None,
+    injected_phase: FluidPhase | None = None,
+    min_bhp: Number,
+    max_bhp: Number,
+    max_bisection_iterations: Integer = 60,
+    bhp_convergence_tolerance: Number = 1e-4,
+    unit_system: UnitSystem = UnitSystem.FIELD,
+    dtype: npt.DTypeLike = None,
+    warn_on_extrapolation: bool = False,
+) -> VFPTable:
+    """
+    Samples a `WellBoreModel` correlation into a `VFPTable`.
+
+    For each grid point, finds the BHP that makes the correlation's THP
+    match that point's `thps` value, by bisection. This resamples the
+    same datum-to-surface relationship `compute_tubing_head_pressure`
+    computes analytically, once per grid point, so later lookups are a
+    single interpolation instead of a bisection.
+
+    `formation_volume_factors` and `surface_fluid_properties` are held
+    fixed across the whole grid; this doesn't vary either with pressure
+    or with the `water_cuts`/`gas_oil_ratios` sweep. Build separate
+    tables if a wider composition range needs its own PVT behavior.
+
+    No artificial-lift correlation exists in `wells.hydraulics` yet, so
+    the resulting table's `artificial_lift_quantities` axis is always
+    single-valued.
+
+    :param wellbore: The correlation to sample.
+    :param table_number: Table number for the resulting `VFPData`.
+    :param well_type: Producer or injector.
+    :param reference_depth: The well's BHP/THP reporting datum.
+    :param flow_rates: Flow rate axis, at surface conditions.
+    :param thps: Tubing head pressure axis to solve BHP for.
+    :param surface_fluid_properties: Fixed surface fluid properties used
+        for every grid point.
+    :param water_cuts: Water cut axis. Ignored for an injector. `[0.0]` if not given.
+    :param gas_oil_ratios: Gas-oil ratio axis. Ignored for an injector. `[0.0]` if not given.
+    :param formation_volume_factors: Fixed oil/water/gas FVFs, converting
+        `flow_rates`/`water_cuts`/`gas_oil_ratios` (surface conditions) to
+        the reservoir-condition rates `wellbore`'s correlation needs.
+        `PhaseValues(oil=1.0, water=1.0, gas=1.0)` (no conversion) if not given.
+    :param injected_phase: Which phase `flow_rates` is, for an injector.
+        Required if `well_type` is `WellType.INJECTOR`.
+    :param min_bhp: Lower bisection bracket bound, covering every grid point.
+    :param max_bhp: Upper bisection bracket bound, covering every grid point.
+    :param max_bisection_iterations: Per grid point.
+    :param bhp_convergence_tolerance: Relative tolerance on `thps` for
+        the bisection to stop early.
+    :param unit_system: Unit system `flow_rates`/`thps`/etc. are already
+        expressed in.
+    :param dtype: Output array dtype for the resulting `VFPTable`.
+    :param warn_on_extrapolation: Forwarded to `VFPTable`.
+    :returns: A `VFPTable` covering `flow_rates` x `thps` x `water_cuts` x `gas_oil_ratios`.
+    :raises ValidationError: If `well_type` is `WellType.INJECTOR` and
+        `injected_phase` isn't `FluidPhase.WATER` or `FluidPhase.GAS`.
+    """
+    is_injector = well_type == WellType.INJECTOR
+    resolved_formation_volume_factors = (
+        formation_volume_factors
+        if formation_volume_factors is not None
+        else PhaseValues(oil=1.0, water=1.0, gas=1.0)
+    )
+    resolved_water_cuts = water_cuts if water_cuts is not None else np.array([0.0])
+    resolved_gas_oil_ratios = gas_oil_ratios if gas_oil_ratios is not None else np.array([0.0])
+    if is_injector:
+        resolved_water_cuts = np.array([0.0])
+        resolved_gas_oil_ratios = np.array([0.0])
+
+    bhps = np.empty((
+        len(flow_rates),
+        len(thps),
+        len(resolved_water_cuts),
+        len(resolved_gas_oil_ratios),
+        1,
+    ))
+    for i, flow_rate in enumerate(flow_rates):
+        for k, water_cut in enumerate(resolved_water_cuts):
+            for m, gas_oil_ratio in enumerate(resolved_gas_oil_ratios):
+                phase_rates = compute_reservoir_phase_rates(
+                    flow_rate=flow_rate,
+                    water_cut=water_cut,
+                    gas_oil_ratio=gas_oil_ratio,
+                    well_type=well_type,
+                    injected_phase=injected_phase,
+                    formation_volume_factors=resolved_formation_volume_factors,
+                )
+                for j, thp in enumerate(thps):
+                    bhps[i, j, k, m, 0] = bisect_bhp_for_thp(
+                        wellbore=wellbore,
+                        reference_depth=reference_depth,
+                        phase_rates=phase_rates,
+                        surface_fluid_properties=surface_fluid_properties,
+                        is_injector=is_injector,
+                        target_thp=thp,
+                        min_bhp=min_bhp,
+                        max_bhp=max_bhp,
+                        max_iterations=max_bisection_iterations,
+                        convergence_tolerance=bhp_convergence_tolerance,
+                    )
+
+    data = VFPData(
+        table_number=table_number,
+        well_type=well_type,
+        datum_depth=reference_depth,
+        flow_rates=flow_rates,
+        thps=thps,
+        water_cuts=typing.cast(NumberArray[OneDimension], resolved_water_cuts),
+        gas_oil_ratios=typing.cast(NumberArray[OneDimension], resolved_gas_oil_ratios),
+        bhps=bhps,
+        unit_system=unit_system,
+    )
+    return VFPTable(data, warn_on_extrapolation=warn_on_extrapolation, dtype=dtype)

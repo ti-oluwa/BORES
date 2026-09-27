@@ -26,6 +26,7 @@ from bores.wells.hydraulics.base import (
     compute_friction_factor,
     compute_static_hydrostatic_drop,
     compute_static_mixture_density,
+    compute_superficial_velocity,
     get_unit_system_constant,
     split_liquid_gas,
 )
@@ -505,7 +506,6 @@ def compute_perforation_pressures(
         pressures = np.empty(n_samples, dtype=dtype)
 
     friction_sign = -1.0 if is_injector else 1.0
-    cross_sectional_area = math.pi * (model.tubing_inner_diameter / 2.0) ** 2
 
     below = sorted(
         (i for i in range(n_samples) if representative_depths[i] >= reference_depth),
@@ -562,8 +562,8 @@ def compute_perforation_pressures(
                     model=model,
                     length=length,
                     inclination_from_vertical=inclinations_from_vertical[i],
-                    superficial_liquid_velocity=liquid_rate / cross_sectional_area,
-                    superficial_gas_velocity=gas_rate / cross_sectional_area,
+                    superficial_liquid_velocity=compute_superficial_velocity(liquid_rate, model.tubing_inner_diameter),
+                    superficial_gas_velocity=compute_superficial_velocity(gas_rate, model.tubing_inner_diameter),
                     liquid_density=liquid_density,
                     gas_density=gas_density,
                     liquid_viscosity=liquid_viscosity,
@@ -628,7 +628,6 @@ def compute_tubing_head_pressure(
     dz = 0.0 - reference_depth
     total_rate = phase_rates.oil + phase_rates.water + phase_rates.gas
     friction_sign = -1.0 if is_injector else 1.0
-    cross_sectional_area = math.pi * (model.tubing_inner_diameter / 2.0) ** 2
 
     if total_rate == 0:
         drop = compute_static_hydrostatic_drop(
@@ -660,8 +659,8 @@ def compute_tubing_head_pressure(
         model=model,
         length=abs(dz),
         inclination_from_vertical=0.0,
-        superficial_liquid_velocity=liquid_rate / cross_sectional_area,
-        superficial_gas_velocity=gas_rate / cross_sectional_area,
+        superficial_liquid_velocity=compute_superficial_velocity(liquid_rate, model.tubing_inner_diameter),
+        superficial_gas_velocity=compute_superficial_velocity(gas_rate, model.tubing_inner_diameter),
         liquid_density=liquid_density,
         gas_density=gas_density,
         liquid_viscosity=liquid_viscosity,

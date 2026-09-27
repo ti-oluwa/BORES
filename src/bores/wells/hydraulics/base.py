@@ -7,7 +7,8 @@ import numba
 from typing_extensions import Self
 
 from bores.constants import c
-from bores.types import Number, UnitConversionTable, UnitSystem
+from bores.errors import ValidationError
+from bores.types import Number, NumberArray, OneDimension, UnitConversionTable, UnitSystem
 from bores.wells.state import PhaseValues
 
 __all__ = [
@@ -20,20 +21,20 @@ __all__ = [
     "compute_mixture_density",
     "compute_mixture_velocity",
     "compute_mixture_viscosity",
+    "compute_perforation_pressures",
     "compute_segment_pressure_drop",
     "compute_static_hydrostatic_drop",
     "compute_static_mixture_density",
+    "compute_superficial_velocity",
     "compute_surface_mixture_density",
     "compute_surface_mixture_viscosity",
+    "compute_tubing_head_pressure",
     "get_unit_system_constant",
     "split_liquid_gas",
 ]
 
 WellBoreModelOptions = typing.TypeVar("WellBoreModelOptions")
-"""
-A correlation's own config type. `HomogeneousWellbore`, `BeggsAndBrillWellbore`,
-`HagedornBrownWellbore`, or any other correlation's own `NamedTuple`.
-"""
+"""A wellbore models's own config type"""
 
 
 class PressureDrop(typing.NamedTuple):
@@ -159,20 +160,34 @@ def compute_mixture_viscosity(phase_rates: PhaseValues, phase_viscosities: Phase
     ) / total_rate
 
 
-@numba.njit(cache=True)
-def compute_mixture_velocity(phase_rates: PhaseValues, tubing_inner_diameter: Number) -> Number:
+def compute_superficial_velocity(rate: Number, tubing_inner_diameter: Number) -> Number:
     """
-    Computes the no-slip superficial velocity of a multiphase stream in tubing.
+    Converts a single phase's day-rate to a superficial velocity in tubing.
 
-    :param phase_rates: Rate of each phase, at reservoir conditions.
+    :param rate: Phase rate, at reservoir conditions, per day.
     :param tubing_inner_diameter: Tubing inner diameter.
-    :returns: Mixture velocity.
+    :returns: Superficial velocity, per second (matching the per-second
+        `gravitational_acceleration`/`hydrostatic_scale` convention every
+        correlation's hydrostatic term already uses).
     :raises ValueError: If `tubing_inner_diameter` isn't positive.
     """
     if tubing_inner_diameter <= 0.0:
         raise ValueError("`tubing_inner_diameter` must be positive")
     cross_sectional_area = math.pi * (tubing_inner_diameter / 2.0) ** 2
-    return (phase_rates.oil + phase_rates.water + phase_rates.gas) / cross_sectional_area
+    return (rate * c.DAYS_PER_SECOND) / cross_sectional_area
+
+
+def compute_mixture_velocity(phase_rates: PhaseValues, tubing_inner_diameter: Number) -> Number:
+    """
+    Computes the no-slip superficial velocity of a multiphase stream in tubing.
+
+    :param phase_rates: Rate of each phase, at reservoir conditions, per day.
+    :param tubing_inner_diameter: Tubing inner diameter.
+    :returns: Mixture velocity, per second.
+    :raises ValueError: If `tubing_inner_diameter` isn't positive.
+    """
+    total_rate = phase_rates.oil + phase_rates.water + phase_rates.gas
+    return compute_superficial_velocity(total_rate, tubing_inner_diameter)
 
 
 def compute_surface_mixture_density(
@@ -492,3 +507,105 @@ def compute_static_mixture_density(
         + phase_saturations.water * phase_densities.water
         + phase_saturations.gas * phase_densities.gas
     ) / total_saturation
+
+
+def compute_perforation_pressures(
+    *, wellbore: WellBoreModel, **kwargs: typing.Any
+) -> NumberArray[OneDimension]:
+    """
+    Dispatches to the `compute_perforation_pressures` of whichever module
+    `wellbore.name` selects.
+
+    :param wellbore: `WellBoreModel` naming a hydraulics correlation.
+    :param kwargs: Forwarded to that correlation's `compute_perforation_pressures`.
+    :returns: Pressure at each connection.
+    :raises ValidationError: If `wellbore.name` isn't recognized.
+    """
+    if wellbore.name == "homogeneous":
+        from bores.wells.hydraulics.homogeneous import (
+            compute_perforation_pressures as compute,
+        )
+
+        return compute(model=wellbore.options, **kwargs)
+    if wellbore.name in ("beggs_brill", "beggs_and_brill"):
+        from bores.wells.hydraulics.beggs_and_brill import (
+            compute_perforation_pressures as compute,
+        )
+
+        return compute(model=wellbore.options, **kwargs)
+    if wellbore.name == "hagedorn_brown":
+        from bores.wells.hydraulics.hagedorn_brown import (
+            compute_perforation_pressures as compute,
+        )
+
+        return compute(model=wellbore.options, **kwargs)
+    if wellbore.name == "gray":
+        from bores.wells.hydraulics.gray import compute_perforation_pressures as compute
+
+        return compute(model=wellbore.options, **kwargs)
+    if wellbore.name == "woldesemayat_ghajar":
+        from bores.wells.hydraulics.woldesemayat_ghajar import (
+            compute_perforation_pressures as compute,
+        )
+
+        return compute(model=wellbore.options, **kwargs)
+    raise ValidationError(f"Unknown `WellBoreModel` name: {wellbore.name!r}")
+
+
+def compute_tubing_head_pressure(
+    *, wellbore: WellBoreModel | None, **kwargs: typing.Any
+) -> Number:
+    """
+    Dispatches to the `compute_tubing_head_pressure` of whichever module
+    `wellbore.name` selects.
+
+    Unlike the connection-distribution leg, this has no fallback for a
+    missing `wellbore`; converting between BHP and THP is meaningless
+    without a real hydraulics model or VFP table, so `ConnectionPressureMode`
+    doesn't apply here. Also used directly by `wells.hydraulics.vfp.as_vfp_table`
+    to sample a correlation while building a `VFPTable`.
+
+    :param wellbore: `WellBoreModel` naming a hydraulics correlation.
+        Required; `None` always raises.
+    :param kwargs: Forwarded to that correlation's `compute_tubing_head_pressure`.
+    :returns: Tubing head pressure.
+    :raises ValidationError: If `wellbore` is `None`, or `wellbore.name`
+        isn't recognized.
+    """
+    if wellbore is None:
+        raise ValidationError(
+            "Tubing head pressure requires a `WellBoreModel` or VFP table "
+            "assigned to this well; THP control, a `THPLimit`, and THP "
+            "reporting all need one. `ConnectionPressureMode.UNIFORM_BHP` "
+            "only covers connection-to-connection pressure distribution, "
+            "not the datum-to-surface relationship."
+        )
+    if wellbore.name == "homogeneous":
+        from bores.wells.hydraulics.homogeneous import (
+            compute_tubing_head_pressure as compute,
+        )
+
+        return compute(model=wellbore.options, **kwargs)
+    if wellbore.name in ("beggs_brill", "beggs_and_brill"):
+        from bores.wells.hydraulics.beggs_and_brill import (
+            compute_tubing_head_pressure as compute,
+        )
+
+        return compute(model=wellbore.options, **kwargs)
+    if wellbore.name == "hagedorn_brown":
+        from bores.wells.hydraulics.hagedorn_brown import (
+            compute_tubing_head_pressure as compute,
+        )
+
+        return compute(model=wellbore.options, **kwargs)
+    if wellbore.name == "gray":
+        from bores.wells.hydraulics.gray import compute_tubing_head_pressure as compute
+
+        return compute(model=wellbore.options, **kwargs)
+    if wellbore.name == "woldesemayat_ghajar":
+        from bores.wells.hydraulics.woldesemayat_ghajar import (
+            compute_tubing_head_pressure as compute,
+        )
+
+        return compute(model=wellbore.options, **kwargs)
+    raise ValidationError(f"Unknown `WellBoreModel` name: {wellbore.name!r}")
