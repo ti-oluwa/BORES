@@ -5,7 +5,7 @@
 <h1 align="center">BORES</h1>
 
 <p align="center">
-  <strong>3-Phase Black-Oil Reservoir Simulation Framework</strong>
+  <strong>Black-Oil Reservoir Simulation Framework</strong>
 </p>
 
 [![Documentation](https://img.shields.io/badge/docs-ti--oluwa.github.io%2Fbores-blue)](https://ti-oluwa.github.io/bores)
@@ -25,13 +25,13 @@ BORES is under active development and going through a fairly major migration rig
 
 Rough status, best of my knowledge as of right now:
 
-- **Working**: Eclipse/GRDECL-style deck parsing (grid, PVT, saturation functions, regions, operators like `BOX`/`EQUALS`/`ADD`/`MULTIPLY`/`COPY`), grid construction and viewing (Cartesian, corner-point, and polyhedral), PVT (correlations and table-based), relative permeability and capillary pressure models, reservoir initialization/equilibration, multiple linear solvers with preconditioner support, and storage backends with serialization.
-- **Built, but needs to be wired into the compiled solver path**: boundary conditions (including a Carter-Tracy analytical aquifer) exist, but still need compilation, and that may take a bit of a refactor to fit the JIT-compiled architecture the solver hot path needs.
-- **In progress**: well models (BHP/rate control, schedules, event-driven actions) are being reworked for free-form grids, and I'm currently writing the compilation piece for them, this is where most of the current effort is going.
-- **Not started yet**: schedule/event API, and the main solver kernel(s).
-- **Planned order of work**: finish wells, then schedule/event API, then boundary condition compilation, then the main solver kernel(s), then testing and finalizing.
+- **Working**: Eclipse/GRDECL-style deck parsing (grid, PVT, saturation functions, regions, boundary conditions, operators like `BOX`/`EQUALS`/`ADD`/`MULTIPLY`/`COPY`), grid construction and viewing (Cartesian, corner-point, and polyhedral), PVT (correlations and table-based), relative permeability and capillary pressure models, reservoir initialization/equilibration, boundary conditions (Carter-Tracy and Fetkovich analytic aquifers, flux aquifers, attached to the grid through `AQUANCON`), well models with BHP/rate control and a schedule/event API for time-varying well and group behavior, multiple linear solvers with preconditioner support, and storage backends with serialization.
+- **Working, one call from deck to a ready-to-run model**: `SimulationCase.from_deck` compiles the model, resolves the initial reservoir state, and reads the schedule, all from one deck. The run's workspace (reservoir, wells, boundary conditions) builds lazily off that on first access via `case.workspace`.
+- **In progress**: wrapping up the well module, specifically wellbore hydraulics (five correlations now: homogeneous, Beggs and Brill, Hagedorn and Brown, Gray, and Woldesemayat and Ghajar) and VFP table support. This is the last piece of wells left, so it's close.
+- **Not started yet**: the main solver kernel(s).
+- **Planned order of work**: finish wells (hydraulics and VFP), consolidate everything onto a single units module and retire the overlapping bits still living in `constants`, then the main solver kernel(s), then testing and finalizing.
 
-On the solver side, the plan is to get a fully implicit kernel working first, and possibly circle back to add an IMPES scheme later once that's stable. Neither is wired up on `main` yet, so don't expect `bores.monitor(...)`-style simulation runs to work right now, everything up to and including initialization does though.
+On the solver side, the plan is to get a fully implicit kernel working first, and possibly circle back to add an IMPES scheme later once that's stable. Neither is wired up on `main` yet, so don't expect `bores.monitor(...)`-style simulation runs to work right now, everything up to and including building a compiled, ready-to-run case does though.
 
 ## Installation
 
@@ -53,67 +53,34 @@ uv add "git+https://github.com/ti-oluwa/bores.git@main"
 
 ## Quick Example
 
-This is roughly what the current, deck-driven workflow looks like: load an Eclipse/GRDECL-style `.DATA` file, build a grid, PVT, saturation functions and rock model off it, and get an initialized reservoir state out. Well loading is included since it mostly works, but that module is still being rewritten so treat it as unstable for now.
+`SimulationCase.from_deck` is the recommended way to load a model: point it at an Eclipse/GRDECL-style `.DATA` file and it builds the grid, PVT, saturation functions, rock model, boundary conditions, wells, and schedule off it, then resolves an initial reservoir state, all in one call.
 
 ```python
-from bores.blackoil.fluids.model import BlackOil
-from bores.blackoil.pvt import PVT
-from bores.blackoil.satfunc import SatFunc
 from bores.deck import DeckFile
-from bores.grids import Grid
-from bores.initialization import initialize_reservoir_state
-from bores.reservoir import Regions, Reservoir, Temperature
-from bores.reservoir.rock import Rock
-from bores.reservoir.state import Equilibrium
-from bores.typing import UnitSystem
+from bores.simulation.case import SimulationCase
+from bores.types import UnitSystem
 from bores.wells.hydraulics.homogeneous import homogeneous_wellbore
-from bores.wells.model import WellSystem
 
 df = DeckFile(
     "path/to/model.DATA",
     encoding="utf-8",
-    unit_system=UnitSystem.METRIC,
+    unit_system=UnitSystem.FIELD,
 )
 
-# Grid, regions, saturation functions and rock, all read straight off the deck
-grid = Grid.from_deck(df)
-regions = Regions.from_deck(df, n_cells=grid.n_cells, use_default=True)
-satfunc = SatFunc.from_deck(df, mixing_rule="eclipse_rule")
-rock = Rock.from_deck(
-    df,
-    grid=grid,
-    rock_region=regions.rock_region,
-    satfunc=satfunc,
-    saturation_region=regions.saturation_region,
-)
-reservoir = Reservoir(grid=grid, rock=rock, regions=regions)
+default_wellbore = homogeneous_wellbore(tubing_inner_diameter=2.5, unit_system=UnitSystem.FIELD)
 
-# Fluid model
-temperature = Temperature(200)
-pvt = PVT.from_deck(df, temperature=temperature)
-blackoil = BlackOil(pvt=pvt, satfunc=satfunc)
+# One call gets you a compiled model, initial reservoir state, and schedule,
+# all read straight off the deck.
+case = SimulationCase.from_deck(df, default_wellbore=default_wellbore, temperature=200.0)
 
-# Equilibrium and initial reservoir state
-equilibrium = Equilibrium.from_deck(df)
-initial_state = initialize_reservoir_state(
-    reservoir=reservoir,
-    pvt=pvt,
-    deck_file=df,
-    equilibrium=equilibrium,
-    satfunc=satfunc,
-    temperature=temperature,
-)
-
-# Wells (still being reworked as part of the free-form migration)
-wells = WellSystem.from_deck(
-    df,
-    grid=grid,
-    default_wellbore=homogeneous_wellbore(tubing_inner_diameter=0.5),
-)
-
+grid = case.model.reservoir.grid
 print(f"cells: {grid.n_cells}, faces: {grid.n_faces}, bbox: {grid.bounding_box}")
-print(f"mean initial pressure: {initial_state.pressure.mean():.1f}")
+print(f"mean initial pressure: {case.initial_state.pressure.mean():.1f}")
+print(f"wells: {list(case.model.wells.names) if case.model.wells else []}")
+print(f"scheduled items: {len(case.schedule)}")
 ```
+
+If you want more control than a deck gives you, or you're building a model by hand rather than loading one, every piece `SimulationCase` builds internally (`Grid`, `PVT`, `SatFunc`, `Rock`, `Reservoir`, `BlackOil`, `WellSystem`, `BoundaryConditions`) is still usable on its own, `load_case`/`SimulationCase.from_deck` just wires them together for you.
 
 See `examples/` for a fuller version of this, including grid visualization with PyVista.
 
@@ -127,20 +94,19 @@ What's actually working right now:
 - Relative permeability models (Brooks-Corey, LET, tabular) with 15+ three-phase mixing rules
 - Capillary pressure models (Brooks-Corey, Leverett J-function, Van Genuchten, tabular)
 - Reservoir initialization and equilibration (including capillary transition zones, wet-gas EQUIL support)
+- Boundary conditions, including Carter-Tracy and Fetkovich analytic aquifers and flux-specified aquifers, attached to grid faces through `AQUANCON`, fully compiled into the solver's data structures
+- Well models with BHP/rate control, and a schedule/event API for time-varying well and group behavior
+- `SimulationCase`, loading a full compiled model, initial state, and schedule from a deck in one call, with a run workspace (reservoir, wells, boundary conditions) built lazily off that
 - Multiple linear solvers (BiCGSTAB, GMRES, CG, direct) with preconditioner support (ILU, AMG, CPR)
 - HDF5, Zarr, JSON, and YAML storage backends with serialization
 
-Built, but not yet plugged into the compiled solver path:
-
-- Boundary conditions, including a Carter-Tracy analytical aquifer, still need to go through compilation, which will likely need a bit of a refactor to fit
-
 In progress:
 
-- Well models with BHP/rate control, schedules, and event-driven actions, being rebuilt for free-form grids, currently writing the compilation piece for these
+- Wellbore hydraulics (homogeneous, Beggs and Brill, Hagedorn and Brown, Gray, and Woldesemayat and Ghajar correlations) and VFP table support, the last piece of the well module being wrapped up
 
 Planned, not started yet:
 
-- Schedule and event API for time-varying well/group behavior
+- Consolidating unit handling onto a single `units` module and retiring the overlapping bits currently in `constants`
 - A fully implicit solver kernel, with an IMPES scheme possibly following once that's stable
 - Todd-Longstaff miscible flooding with pressure-dependent miscibility
 - Plotly-based visualization (1D time series, 2D maps, 3D volume rendering)

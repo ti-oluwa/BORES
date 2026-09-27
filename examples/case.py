@@ -1,42 +1,29 @@
-import pyvista as pv
+"""
+Quick start: load a full simulation case from a deck in one call.
+
+This is the same example as the README's Quick Example. See main.py for a
+fuller walkthrough that also plots the grid.
+"""
 
 from bores.deck import DeckFile
-from bores.grids.utils import make_pyvista_grid
-from bores.reservoir import Temperature
 from bores.simulation.case import SimulationCase
 from bores.types import UnitSystem
 from bores.wells.hydraulics.homogeneous import homogeneous_wellbore
 
 df = DeckFile(
-    "/home/tioluwa/Projects/nagscu/Phase One/Data/NigerDelta UGH1 Composite Field.DATA",
+    "data/SPE1CASE1.DATA",
     encoding="utf-8",
-    unit_system=UnitSystem.METRIC,
+    unit_system=UnitSystem.FIELD,
 )
 
-temperature = Temperature(200, unit_system=UnitSystem.METRIC)
-wellbore = homogeneous_wellbore(tubing_inner_diameter=0.5, unit_system=UnitSystem.METRIC)
-# Load simulation case
-case = SimulationCase.from_deck(df, default_wellbore=wellbore, temperature=temperature)
+default_wellbore = homogeneous_wellbore(tubing_inner_diameter=2.5, unit_system=UnitSystem.FIELD)
 
-# Test the fluid
-pvt = case.model.fluid.pvt
-table = pvt.region(1).tables.oil
-assert table is not None, "`table` should not be None"
-print(table.viscosity([4700, 200, 3456, 10000, 4000], 200, solution_gor=800))
+# One call gets you a compiled model, initial reservoir state, and schedule,
+# all read straight off the deck.
+case = SimulationCase.from_deck(df, default_wellbore=default_wellbore, temperature=200.0)
 
-for item in case.schedule:
-    print(item, "\n")
-
-print(f"{len(case.schedule)} scheduled item(s)")
-
-# Plot the grid
 grid = case.model.reservoir.grid
-print(f"cells   : {grid.n_cells}")
-print(f"faces   : {grid.n_faces}")
-print(f"bbox    : {grid.bounding_box}")
-
-pv_grid = make_pyvista_grid(grid, cell_data={"pressure": case.initial_state.pressure})
-pl = pv.Plotter()
-pl.add_mesh(pv_grid, scalars="pressure", show_edges=True)
-pl.set_scale(zscale=15, xscale=2, yscale=2)  # type:ignore
-pl.show()
+print(f"cells: {grid.n_cells}, faces: {grid.n_faces}, bbox: {grid.bounding_box}")
+print(f"mean initial pressure: {case.initial_state.pressure.mean():.1f}")
+print(f"wells: {list(case.model.wells.names) if case.model.wells else []}")
+print(f"scheduled items: {len(case.schedule)}")
