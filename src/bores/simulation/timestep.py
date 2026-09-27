@@ -8,9 +8,11 @@ from datetime import timedelta
 import attrs
 from typing_extensions import Self, TypedDict
 
-from bores.constants import c
+from bores.constants import c, get_conversion_factors
 from bores.errors import TimingError, ValidationError
 from bores.serde.stores import StoreSerializable
+from bores.types import Number, UnitConversionTable, UnitSystem
+from bores.utils import scale
 
 __all__ = ["Time", "Timer", "TimerState"]
 
@@ -18,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 
 def Time(
+    *,
     milliseconds: float = 0,
     seconds: float = 0,
     minutes: float = 0,
@@ -26,9 +29,12 @@ def Time(
     weeks: float = 0,
     months: float = 0,
     years: float = 0,
-) -> float:
+    unit_system: UnitSystem | None = None,
+    table: UnitConversionTable | None = None,
+) -> Number:
     """
-    Expresses time components as total seconds.
+    Expresses time components as a total in the requested unit system's
+    native time unit.
 
     :param milliseconds: Number of milliseconds.
     :param seconds: Number of seconds.
@@ -38,7 +44,12 @@ def Time(
     :param weeks: Number of weeks.
     :param months: Number of months.
     :param years: Number of years.
-    :return: Total time in seconds.
+    :param unit_system: Target `UnitSystem` to express the total in (day for
+        FIELD and METRIC, hour for LAB, second for SI). `None` (default)
+        returns the total in seconds, unconverted.
+    :param table: Optional custom conversion table; `None` uses the default.
+    :return: Total time, in `unit_system`'s native time unit, or in seconds
+        if `unit_system` is `None`.
     """
     if years:
         days += years * c.DAYS_PER_YEAR
@@ -54,14 +65,19 @@ def Time(
         seconds=seconds,
         milliseconds=milliseconds,
     )
-    return delta.total_seconds()
+    total_seconds = delta.total_seconds()
+    if unit_system is None:
+        return total_seconds
+
+    factors = get_conversion_factors(UnitSystem.SI, unit_system, table=table)
+    return scale(total_seconds, factors["time"])
 
 
 class StepMetricsDict(TypedDict):
     """Dictionary representation of step metrics."""
 
     step_number: int
-    step_size: float
+    step_size: Number
     cfl: float | None
     newton_iterations: int | None
     success: bool
@@ -70,10 +86,11 @@ class StepMetricsDict(TypedDict):
 class TimerState(TypedDict):
     """Complete state of a timer instance for serialization."""
 
-    initial_step_size: float
-    maximum_step_size: float
-    minimum_step_size: float
-    simulation_time: float
+    initial_step_size: Number
+    maximum_step_size: Number
+    minimum_step_size: Number
+    simulation_time: Number
+    unit_system: str
     maximum_cfl: float
     cfl_safety_margin: float
     ramp_up_factor: float | None
@@ -96,17 +113,17 @@ class TimerState(TypedDict):
     failure_memory_window: int
     metrics_history_size: int
     use_constant_step_size: bool
-    elapsed_time: float
+    elapsed_time: Number
     step: int
-    step_size: float
-    next_step_size: float
-    ema_step_size: float
+    step_size: Number
+    next_step_size: Number
+    ema_step_size: Number
     last_step_failed: bool
     rejection_count: int
     steps_since_last_failure: int
     recent_metrics: list[StepMetricsDict]
-    failed_step_sizes: list[float]
-    last_successful_step_size: float
+    failed_step_sizes: list[Number]
+    last_successful_step_size: Number
 
 
 @attrs.frozen(slots=True)
@@ -114,10 +131,15 @@ class StepMetrics:
     """Metrics for a single time step."""
 
     step_number: int
-    step_size: float
+    """The 1-indexed step count this metric belongs to."""
+    step_size: Number
+    """The step size attempted, in the owning `Timer`'s `unit_system` native time unit."""
     cfl: float | None = None
+    """Maximum CFL number encountered during the step, if tracked."""
     newton_iterations: int | None = None
+    """Number of Newton iterations taken by the transport solver, if tracked."""
     success: bool = True
+    """Whether the step was accepted."""
 
 
 def compute_utilization(actual: float | None, limit: float | None) -> float | None:
@@ -133,14 +155,22 @@ class Timer(StoreSerializable):
     Simulation time manager for smart and adaptive time stepping.
     """
 
-    initial_step_size: float
-    """Initial time step size in seconds."""
-    maximum_step_size: float
-    """Maximum allowable time step size in seconds."""
-    minimum_step_size: float
-    """Minimum allowable time step size in seconds."""
-    simulation_time: float
-    """Total simulation time in seconds."""
+    initial_step_size: Number
+    """Initial time step size, in `unit_system`'s native time unit."""
+    maximum_step_size: Number
+    """Maximum allowable time step size, in `unit_system`'s native time unit."""
+    minimum_step_size: Number
+    """Minimum allowable time step size, in `unit_system`'s native time unit."""
+    simulation_time: Number
+    """Total simulation time, in `unit_system`'s native time unit."""
+    unit_system: UnitSystem = UnitSystem.FIELD
+    """
+    Unit system the timer's time-valued fields are expressed in.
+
+    Determines the native time unit every step-size and elapsed/simulation
+    time field is read and written in: day for FIELD and METRIC, hour for
+    LAB, second for SI. Use `convert(target)` to produce a rescaled copy.
+    """
     maximum_cfl: float = 0.9
     """Default CFL limit (max CFL number) for time step adjustments."""
     ramp_up_factor: float | None = None
@@ -204,14 +234,14 @@ class Timer(StoreSerializable):
     """
 
     # Runtime state
-    elapsed_time: float = attrs.field(init=False, default=0.0)
-    """Current simulation time in seconds (sum of all accepted steps)."""
-    step_size: float = attrs.field(init=False, default=0.0)
-    """The time step size used for the most recently accepted step."""
-    next_step_size: float = attrs.field(init=False, default=0.0)
-    """Time step size to propose for the next step."""
-    ema_step_size: float = attrs.field(init=False, default=0.0)
-    """Exponential moving average of accepted step sizes."""
+    elapsed_time: Number = attrs.field(init=False, default=0.0)
+    """Current simulation time, in `unit_system`'s native time unit (sum of all accepted steps)."""
+    step_size: Number = attrs.field(init=False, default=0.0)
+    """The time step size used for the most recently accepted step, in `unit_system`'s native time unit."""
+    next_step_size: Number = attrs.field(init=False, default=0.0)
+    """Time step size to propose for the next step, in `unit_system`'s native time unit."""
+    ema_step_size: Number = attrs.field(init=False, default=0.0)
+    """Exponential moving average of accepted step sizes, in `unit_system`'s native time unit."""
     step: int = attrs.field(init=False, default=0)
     """Number of accepted time steps completed so far."""
     last_step_failed: bool = attrs.field(init=False, default=False)
@@ -224,14 +254,14 @@ class Timer(StoreSerializable):
     """Number of successful steps since the last failure."""
     use_constant_step_size: bool = attrs.field(init=False, default=False)
     """Whether to use a constant time step size (init == max == min)."""
-    last_successful_step_size: float = attrs.field(init=False, default=0.0)
-    """The step size used in the most recently accepted step."""
+    last_successful_step_size: Number = attrs.field(init=False, default=0.0)
+    """The step size used in the most recently accepted step, in `unit_system`'s native time unit."""
 
     # Performance tracking
     recent_metrics: deque[StepMetrics] = attrs.field(init=False)
     """Recent step performance metrics (bounded deque, newest at right)."""
-    failed_step_sizes: deque[float] = attrs.field(init=False)
-    """Recent failed step sizes for failure-zone memory."""
+    failed_step_sizes: deque[Number] = attrs.field(init=False)
+    """Recent failed step sizes for failure-zone memory, in `unit_system`'s native time unit."""
 
     # Rolling window statistics stored as a fixed-size deque so the sliding
     # window is exact and never corrupted by approximation.
@@ -251,7 +281,7 @@ class Timer(StoreSerializable):
         )
         self.recent_metrics = deque(maxlen=self.metrics_history_size)
         self.failed_step_sizes = deque(maxlen=self.failure_memory_window)
-        # Rolling windows share the same bound as metrics_history_size for simplicity.
+        # Rolling windows share the same bound as `metrics_history_size` for simplicity.
         self._cfl_window = deque(maxlen=self.metrics_history_size)
         self._newton_window = deque(maxlen=self.metrics_history_size)
 
@@ -267,8 +297,8 @@ class Timer(StoreSerializable):
         return self.maximum_steps is not None and self.step >= self.maximum_steps
 
     @property
-    def time_remaining(self) -> float:
-        """Remaining simulation time in seconds."""
+    def time_remaining(self) -> Number:
+        """Remaining simulation time, in `unit_system`'s native time unit."""
         return max(self.simulation_time - self.elapsed_time, 0.0)
 
     @property
@@ -292,7 +322,7 @@ class Timer(StoreSerializable):
             return None
         return sum(self._newton_window) / len(self._newton_window)
 
-    def is_near_failed_size(self, dt: float, tolerance: float = 0.10) -> bool:
+    def is_near_failed_size(self, dt: Number, tolerance: float = 0.10) -> bool:
         """
         True if `dt` is within `tolerance` of a recently failed size **from below**.
 
@@ -314,10 +344,10 @@ class Timer(StoreSerializable):
         """
         factor = 1.0
 
-        avg_cfl = self.average_cfl
-        if avg_cfl is not None and len(self._cfl_window) >= 3:
+        average_cfl = self.average_cfl
+        if average_cfl is not None and len(self._cfl_window) >= 3:
             # If we are consistently using >75 % of the CFL budget, be cautious.
-            if avg_cfl > 0.75 * self.maximum_cfl:
+            if average_cfl > 0.75 * self.maximum_cfl:
                 factor *= 0.95
             # Upward CFL trend within the window?
             cfl_list = list(self._cfl_window)
@@ -326,13 +356,15 @@ class Timer(StoreSerializable):
                 if trend > 0.15:
                     factor *= 0.90
 
-        avg_newton = self.average_newton_iterations
-        if avg_newton is not None and len(self._newton_window) >= 3:
-            if avg_newton > 8:
+        average_newton_iterations = self.average_newton_iterations
+        if average_newton_iterations is not None and len(self._newton_window) >= 3:
+            if average_newton_iterations > 8:
                 factor *= 0.85
             # Are the last 3 iterations consistently high?
-            recent_newtons = list(self._newton_window)[-3:]
-            if len(recent_newtons) == 3 and all(n > 10 for n in recent_newtons):
+            recent_newton_iterations = list(self._newton_window)[-3:]
+            if len(recent_newton_iterations) == 3 and all(
+                iteration_count > 10 for iteration_count in recent_newton_iterations
+            ):
                 factor *= 0.75
 
         return max(factor, 0.5)
@@ -371,7 +403,7 @@ class Timer(StoreSerializable):
                 messages.append(f"{label}: |{actual:.3e}| > {limit:.3e}")
         return bool(messages), messages
 
-    def propose_step_size(self) -> float:
+    def propose_step_size(self) -> Number:
         """
         Propose the next time step size without updating any internal state.
 
@@ -379,7 +411,7 @@ class Timer(StoreSerializable):
         clamped to the remaining time. The minimum step size is honoured
         unless the remaining time is already smaller than it.
 
-        :return: Proposed time step size in seconds.
+        :return: Proposed time step size, in `unit_system`'s native time unit.
         """
         if self.use_constant_step_size:
             return self.initial_step_size
@@ -405,7 +437,7 @@ class Timer(StoreSerializable):
 
     def reject_step(
         self,
-        step_size: float,
+        step_size: Number,
         *,
         aggressive: bool = False,
         maximum_cfl_encountered: float | None = None,
@@ -423,7 +455,7 @@ class Timer(StoreSerializable):
         relative_water_mbe: float | None = None,
         relative_gas_mbe: float | None = None,
         total_relative_mbe: float | None = None,
-    ) -> float:
+    ) -> Number:
         """
         Register a rejected time step and compute an intelligently adjusted step
         size based on the specific failure criteria encountered.
@@ -435,14 +467,15 @@ class Timer(StoreSerializable):
         (backoff factor ≥ 0.5), a conservative floor of
         `last_successful_step_size * 0.90` is applied to avoid over-cutting.
 
-        :param step_size: The step size that was rejected (seconds).
-        :param aggressive: When *True*, the final factor is additionally capped
+        :param step_size: The step size that was rejected, in `unit_system`'s
+            native time unit.
+        :param aggressive: When True, the final factor is additionally capped
             by `aggressive_backoff_factor`. Intended for use after repeated
             consecutive rejections.
         :param maximum_cfl_encountered: Maximum CFL number observed during the
             attempted step.
         :param cfl_threshold: The CFL threshold that was active during the step.
-            Falls back to `maximum_cfl` when *None*.
+            Falls back to `maximum_cfl` when None.
         :param newton_iterations: Number of Newton iterations attempted before
             the transport solve failed or was deemed too expensive.
         :param maximum_saturation_change: Maximum phase saturation change
@@ -466,7 +499,8 @@ class Timer(StoreSerializable):
             pore volume equivalent.
         :param total_relative_mbe: Total MBE as a fraction of the previous-step
             total pore volume.
-        :return: The new proposed time step size in seconds.
+        :return: The new proposed time step size, in `unit_system`'s native
+            time unit.
         :raises TimingError: If the number of consecutive rejections has reached
             `maximum_rejections`.
         """
@@ -513,7 +547,7 @@ class Timer(StoreSerializable):
             total_relative_mbe=total_relative_mbe,
             aggressive=aggressive,
         )
-        raw_new_size = self.next_step_size * factor
+        new_step_size = self.next_step_size * factor
 
         # If the backoff brings us *below* the last
         # successful size, don't go lower than a slight discount off that
@@ -526,27 +560,27 @@ class Timer(StoreSerializable):
             self.last_successful_step_size > 0.0
             and step_size > self.last_successful_step_size  # we grew and failed
             and factor >= 0.5  # not a severe failure
-            and raw_new_size < self.last_successful_step_size
+            and new_step_size < self.last_successful_step_size
         ):
             # Prefer a slight discount off the last known-good size rather than
             # an over-aggressive cut.
             conservative_floor = self.last_successful_step_size * 0.90
-            raw_new_size = max(raw_new_size, conservative_floor)
+            new_step_size = max(new_step_size, conservative_floor)
             logger.debug(
                 "Backoff floor applied: raw %.6e raised to conservative floor %.6e "
                 "(last successful: %.6e)",
                 self.next_step_size * factor,
-                raw_new_size,
+                new_step_size,
                 self.last_successful_step_size,
             )
 
-        if raw_new_size < self.minimum_step_size:
+        if new_step_size < self.minimum_step_size:
             logger.warning(
                 "Step size %.6e would be below minimum %.6e. Clamping to minimum.",
-                raw_new_size,
+                new_step_size,
                 self.minimum_step_size,
             )
-        self.next_step_size = max(raw_new_size, self.minimum_step_size)
+        self.next_step_size = max(new_step_size, self.minimum_step_size)
 
         # Panic-mode detection: repeated failures at/near minimum
         if self.next_step_size <= self.minimum_step_size * 1.01:
@@ -596,7 +630,7 @@ class Timer(StoreSerializable):
         relative_gas_mbe: float | None = None,
         total_relative_mbe: float | None = None,
         aggressive: bool = False,
-    ) -> float:
+    ) -> Number:
         """
         Compute the most conservative (smallest) backoff factor from all
         failure signals. Returns a value in (0, 1].
@@ -620,7 +654,7 @@ class Timer(StoreSerializable):
 
         # Saturation change
         saturation_utilization = compute_utilization(
-            maximum_saturation_change, maximum_allowed_saturation_change
+            actual=maximum_saturation_change, limit=maximum_allowed_saturation_change
         )
         if saturation_utilization is not None and saturation_utilization > 1.0:
             if saturation_utilization > 3.0:
@@ -632,7 +666,7 @@ class Timer(StoreSerializable):
 
         # Pressure change
         pressure_utilization = compute_utilization(
-            maximum_pressure_change, maximum_allowed_pressure_change
+            actual=maximum_pressure_change, limit=maximum_allowed_pressure_change
         )
         if pressure_utilization is not None and pressure_utilization > 1.0:
             if pressure_utilization > 3.0:
@@ -754,7 +788,7 @@ class Timer(StoreSerializable):
             )
 
         saturation_utilization = compute_utilization(
-            maximum_saturation_change, maximum_allowed_saturation_change
+            actual=maximum_saturation_change, limit=maximum_allowed_saturation_change
         )
         if saturation_utilization is not None and saturation_utilization > 1.0:
             return (
@@ -764,7 +798,7 @@ class Timer(StoreSerializable):
             )
 
         pressure_utilization = compute_utilization(
-            maximum_pressure_change, maximum_allowed_pressure_change
+            actual=maximum_pressure_change, limit=maximum_allowed_pressure_change
         )
         if pressure_utilization is not None and pressure_utilization > 1.0:
             return (
@@ -790,7 +824,7 @@ class Timer(StoreSerializable):
 
     def accept_step(
         self,
-        step_size: float,
+        step_size: Number,
         *,
         maximum_cfl_encountered: float | None = None,
         cfl_threshold: float | None = None,
@@ -807,7 +841,7 @@ class Timer(StoreSerializable):
         relative_water_mbe: float | None = None,
         relative_gas_mbe: float | None = None,
         total_relative_mbe: float | None = None,
-    ) -> float:
+    ) -> Number:
         """
         Register an accepted time step and compute the next proposed step size.
 
@@ -820,7 +854,8 @@ class Timer(StoreSerializable):
         growth toward `maximum_step_size`. The result is smoothed via an
         exponential moving average controlled by `step_size_smoothing`.
 
-        :param step_size: The time step size that was just accepted (seconds).
+        :param step_size: The time step size that was just accepted, in
+            `unit_system`'s native time unit.
         :param maximum_cfl_encountered: Maximum CFL number observed during the
             step. Used to compute a CFL-proportional growth or limiting factor.
         :param cfl_threshold: The CFL threshold that was active during the step.
@@ -854,7 +889,8 @@ class Timer(StoreSerializable):
             is `True`.
         :param total_relative_mbe: Total MBE as a fraction of the previous-step
             total pore volume. Only used when `use_mbe_for_step_size` is `True`.
-        :return: The next proposed time step size in seconds.
+        :return: The next proposed time step size, in `unit_system`'s native
+            time unit.
         :raises TimingError: If `step_size` exceeds the remaining simulation time,
             which indicates a bug in the calling time-stepping logic.
         """
@@ -914,7 +950,7 @@ class Timer(StoreSerializable):
 
         # Saturation signal
         saturation_utilization = compute_utilization(
-            maximum_saturation_change, maximum_allowed_saturation_change
+            actual=maximum_saturation_change, limit=maximum_allowed_saturation_change
         )
         if saturation_utilization is not None and saturation_utilization > 0.0:
             if saturation_utilization > 0.95:
@@ -930,7 +966,7 @@ class Timer(StoreSerializable):
 
         # Pressure signal
         pressure_utilization = compute_utilization(
-            maximum_pressure_change, maximum_allowed_pressure_change
+            actual=maximum_pressure_change, limit=maximum_allowed_pressure_change
         )
         if pressure_utilization is not None and pressure_utilization > 0.0:
             if pressure_utilization > 0.95:
@@ -1073,6 +1109,70 @@ class Timer(StoreSerializable):
         )
         return self.next_step_size
 
+    def convert(
+        self,
+        target: UnitSystem,
+        /,
+        *,
+        table: UnitConversionTable | None = None,
+    ) -> Self:
+        """
+        Return a new `Timer` with every time-valued field rescaled to `target`.
+
+        Step sizes, simulation/elapsed time, and step-size history are all
+        rescaled from `unit_system`'s native time unit to `target`'s. Every
+        other configuration field carries over unchanged via `attrs.evolve`,
+        since none of them are time-valued.
+
+        :param target: Desired `UnitSystem`.
+        :param table: Optional custom conversion table; `None` uses the default.
+        :returns: New `Timer` in `target`'s native time unit, with accrued
+            runtime state preserved and rescaled.
+        """
+        if target == self.unit_system:
+            return self
+
+        factors = get_conversion_factors(self.unit_system, target, table=table)
+        time_factor = factors["time"]
+
+        converted = attrs.evolve(
+            self,
+            initial_step_size=scale(self.initial_step_size, time_factor),
+            maximum_step_size=scale(self.maximum_step_size, time_factor),
+            minimum_step_size=scale(self.minimum_step_size, time_factor),
+            simulation_time=scale(self.simulation_time, time_factor),
+            unit_system=target,
+        )
+
+        # `attrs.evolve` only threads `init=True` fields through the
+        # constructor, so `__attrs_post_init__` just seeded runtime state
+        # from the converted `initial_step_size`. Overwrite it with the
+        # actual accrued state, rescaled, rather than a fresh timer's
+        # defaults.
+        converted.elapsed_time = scale(self.elapsed_time, time_factor)
+        converted.step_size = scale(self.step_size, time_factor)
+        converted.next_step_size = scale(self.next_step_size, time_factor)
+        converted.ema_step_size = scale(self.ema_step_size, time_factor)
+        converted.step = self.step
+        converted.last_step_failed = self.last_step_failed
+        converted.rejection_count = self.rejection_count
+        converted.steps_since_last_failure = self.steps_since_last_failure
+        converted.last_successful_step_size = scale(self.last_successful_step_size, time_factor)
+        converted.recent_metrics = deque(
+            (
+                attrs.evolve(metrics, step_size=scale(metrics.step_size, time_factor))
+                for metrics in self.recent_metrics
+            ),
+            maxlen=self.metrics_history_size,
+        )
+        converted.failed_step_sizes = deque(
+            (scale(failed_size, time_factor) for failed_size in self.failed_step_sizes),
+            maxlen=self.failure_memory_window,
+        )
+        converted._cfl_window = deque(self._cfl_window, maxlen=self.metrics_history_size)
+        converted._newton_window = deque(self._newton_window, maxlen=self.metrics_history_size)
+        return converted
+
     def dump_state(self) -> TimerState:
         """Serialize the current timer state to a dictionary."""
         return {
@@ -1080,6 +1180,7 @@ class Timer(StoreSerializable):
             "maximum_step_size": self.maximum_step_size,
             "minimum_step_size": self.minimum_step_size,
             "simulation_time": self.simulation_time,
+            "unit_system": self.unit_system.value,
             "maximum_cfl": self.maximum_cfl,
             "cfl_safety_margin": self.cfl_safety_margin,
             "ramp_up_factor": self.ramp_up_factor,
@@ -1112,7 +1213,8 @@ class Timer(StoreSerializable):
             "steps_since_last_failure": self.steps_since_last_failure,
             "last_successful_step_size": self.last_successful_step_size,
             "recent_metrics": [
-                typing.cast(StepMetricsDict, attrs.asdict(m)) for m in self.recent_metrics
+                typing.cast(StepMetricsDict, attrs.asdict(metrics))
+                for metrics in self.recent_metrics
             ],
             "failed_step_sizes": list(self.failed_step_sizes),
         }
@@ -1138,6 +1240,7 @@ class Timer(StoreSerializable):
             "maximum_step_size": state["maximum_step_size"],
             "minimum_step_size": state["minimum_step_size"],
             "simulation_time": state["simulation_time"],
+            "unit_system": UnitSystem(state.get("unit_system", UnitSystem.FIELD.value)),
             "maximum_cfl": state.get("maximum_cfl", 1.0),
             "cfl_safety_margin": state.get("cfl_safety_margin", 0.9),
             "ramp_up_factor": state.get("ramp_up_factor"),
@@ -1180,7 +1283,7 @@ class Timer(StoreSerializable):
             object.__setattr__(timer, attr, state.get(key, default))
 
         recent_metrics = deque(
-            [StepMetrics(**m) for m in state.get("recent_metrics", [])],
+            [StepMetrics(**metrics) for metrics in state.get("recent_metrics", [])],
             maxlen=timer.metrics_history_size,
         )
         object.__setattr__(timer, "recent_metrics", recent_metrics)
@@ -1194,12 +1297,12 @@ class Timer(StoreSerializable):
         # Rebuild rolling windows from recent_metrics history
         cfl_window: deque = deque(maxlen=timer.metrics_history_size)
         newton_window: deque = deque(maxlen=timer.metrics_history_size)
-        for m in recent_metrics:
-            if m.success:
-                if m.cfl is not None and m.cfl > 0.0:
-                    cfl_window.append(m.cfl)
-                if m.newton_iterations is not None and m.newton_iterations > 0:
-                    newton_window.append(m.newton_iterations)
+        for metrics in recent_metrics:
+            if metrics.success:
+                if metrics.cfl is not None and metrics.cfl > 0.0:
+                    cfl_window.append(metrics.cfl)
+                if metrics.newton_iterations is not None and metrics.newton_iterations > 0:
+                    newton_window.append(metrics.newton_iterations)
         object.__setattr__(timer, "_cfl_window", cfl_window)
         object.__setattr__(timer, "_newton_window", newton_window)
 

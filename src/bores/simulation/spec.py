@@ -10,7 +10,7 @@ from typing_extensions import Self
 from bores.constants import Constants, get_conversion_factors
 from bores.errors import ValidationError
 from bores.serde.stores import StoreSerializable
-from bores.simulation.timing import Timer
+from bores.simulation.timestep import Timer
 from bores.types import (
     DiscretizationMethod,
     MiscibilityModel,
