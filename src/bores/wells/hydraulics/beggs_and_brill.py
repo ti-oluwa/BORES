@@ -293,7 +293,7 @@ def compute_beggs_brill_holdup(
         no_slip_holdup=no_slip_holdup,
         froude_number=froude_number,
     )
-    theta_from_horizontal = (math.pi / 2.0) - inclination_from_vertical
+    inclination_from_horizontal = (math.pi / 2.0) - inclination_from_vertical
 
     if is_injector:
         d_coef, e_coef, f_coef, g_coef = 4.7, -0.3692, 0.1244, -0.5056
@@ -323,8 +323,8 @@ def compute_beggs_brill_holdup(
             )
 
     psi = 1.0 + correction_coefficient * (
-        math.sin(1.8 * theta_from_horizontal)
-        - (1.0 / 3.0) * math.sin(1.8 * theta_from_horizontal) ** 3
+        math.sin(1.8 * inclination_from_horizontal)
+        - (1.0 / 3.0) * math.sin(1.8 * inclination_from_horizontal) ** 3
     )
     in_situ_holdup = holdup_at_horizontal * psi
     return min(max(in_situ_holdup, no_slip_holdup), 1.0)
@@ -611,8 +611,12 @@ def compute_perforation_pressures(
                     model=model,
                     length=length,
                     inclination_from_vertical=inclinations_from_vertical[i],
-                    superficial_liquid_velocity=compute_superficial_velocity(liquid_rate, model.tubing_inner_diameter),
-                    superficial_gas_velocity=compute_superficial_velocity(gas_rate, model.tubing_inner_diameter),
+                    superficial_liquid_velocity=compute_superficial_velocity(
+                        liquid_rate, model.tubing_inner_diameter
+                    ),
+                    superficial_gas_velocity=compute_superficial_velocity(
+                        gas_rate, model.tubing_inner_diameter
+                    ),
                     liquid_density=liquid_density,
                     gas_density=gas_density,
                     liquid_viscosity=liquid_viscosity,
@@ -685,7 +689,9 @@ def compute_tubing_head_pressure(
         drop = compute_static_hydrostatic_drop(
             mixture_density=compute_static_mixture_density(
                 phase_saturations=PhaseValues(
-                    oil=phase_rates.oil, water=phase_rates.water, gas=phase_rates.gas
+                    oil=phase_rates.oil,
+                    water=phase_rates.water,
+                    gas=phase_rates.gas,
                 ),
                 phase_densities=surface_fluid_properties.phase_densities,
             ),
@@ -711,8 +717,12 @@ def compute_tubing_head_pressure(
         model=model,
         length=abs(dz),
         inclination_from_vertical=0.0,
-        superficial_liquid_velocity=compute_superficial_velocity(liquid_rate, model.tubing_inner_diameter),
-        superficial_gas_velocity=compute_superficial_velocity(gas_rate, model.tubing_inner_diameter),
+        superficial_liquid_velocity=compute_superficial_velocity(
+            liquid_rate, model.tubing_inner_diameter
+        ),
+        superficial_gas_velocity=compute_superficial_velocity(
+            gas_rate, model.tubing_inner_diameter
+        ),
         liquid_density=liquid_density,
         gas_density=gas_density,
         liquid_viscosity=liquid_viscosity,

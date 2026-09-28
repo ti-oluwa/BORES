@@ -21,6 +21,16 @@ from bores.schedule.events import (
     TimeEvent,
     TimeStepEvent,
 )
+from bores.schedule.summary import (
+    RecordSummary,
+    SerializableSummary,
+    Summary,
+    SummaryRecord,
+    SummaryReport,
+    record_at,
+    record_every,
+    summary_type,
+)
 from bores.schedule.utils import all_of, any_of, at, item, schedule
 
 __all__ = [
@@ -31,12 +41,17 @@ __all__ = [
     "Event",
     "IntervalEvent",
     "NoOp",
+    "RecordSummary",
     "RunSequence",
     "Schedule",
     "ScheduleContext",
     "ScheduleItem",
     "SerializableAction",
     "SerializableEvent",
+    "SerializableSummary",
+    "Summary",
+    "SummaryRecord",
+    "SummaryReport",
     "ThresholdEvent",
     "TimeEvent",
     "TimeStepEvent",
@@ -46,5 +61,8 @@ __all__ = [
     "at",
     "event_type",
     "item",
+    "record_at",
+    "record_every",
     "schedule",
+    "summary_type",
 ]

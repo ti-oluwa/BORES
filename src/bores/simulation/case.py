@@ -20,10 +20,11 @@ from bores.initialization import N_SATURATION_SAMPLES, initialize_reservoir_stat
 from bores.precision import get_dtype
 from bores.reservoir.boundary.conditions import BoundaryConditions
 from bores.reservoir.boundary.deck import load_boundary_conditions
+from bores.reservoir.equilibrium import Equilibrium
 from bores.reservoir.model import Reservoir
 from bores.reservoir.regions import Regions
 from bores.reservoir.rock.model import Rock
-from bores.reservoir.state import Equilibrium, Hysteresis, ReservoirState
+from bores.reservoir.state import Hysteresis, ReservoirState
 from bores.reservoir.temperature import Temperature
 from bores.schedule.base import Schedule
 from bores.serde.base import Serializable
@@ -55,8 +56,11 @@ class SimulationCase(Serializable):
     )
     """Every scheduled well/model edit for the run."""
 
-    summary: typing.Any = None
-    """Summary-vector request/output configuration. Not built out yet."""
+    summary: Schedule[CompiledBlackOilModel] = attrs.field(factory=Schedule[CompiledBlackOilModel])
+    """
+    Every summary-vector report for the run, as a schedule of `RecordSummary` actions. 
+    Records into a `bores.schedule.summary.SummaryReport`.
+    """
 
     salinity: CellArray | None = None
     """
@@ -160,7 +164,7 @@ class SimulationCase(Serializable):
         mixing_rule: str = "eclipse_rule",
         compiled_at: float = 0.0,
         runspec: RunSpec | None = None,
-        summary: typing.Any = None,
+        summary: Schedule[CompiledBlackOilModel] | None = None,
         min_wetting_relperm: MinimumRelPerm = None,
         min_non_wetting_relperm: MinimumRelPerm = None,
         include_capillary_pressure: bool = True,
@@ -185,7 +189,7 @@ class SimulationCase(Serializable):
             model reflects. Forwarded to `bores.wells.deck.load_schedule`.
             Only schedule events strictly after this remain as actions.
         :param runspec: Run configuration. `RunSpec`'s own defaults if not given.
-        :param summary: Summary-vector request/output configuration. Not built out yet.
+        :param summary: Summary-vector reports for the run. Empty if not given.
         :param min_wetting_relperm: Minimum wetting-phase relative permeability for `SatFunc.from_deck`.
         :param min_non_wetting_relperm: Minimum non-wetting-phase relative permeability for `SatFunc.from_deck`.
         :param include_capillary_pressure: Whether to include capillary pressure in the saturation functions.
@@ -228,7 +232,7 @@ def load_case(
     mixing_rule: str = "eclipse_rule",
     compiled_at: float = 0.0,
     runspec: RunSpec | None = None,
-    summary: typing.Any = None,
+    summary: Schedule[CompiledBlackOilModel] | None = None,
     min_wetting_relperm: MinimumRelPerm = None,
     min_non_wetting_relperm: MinimumRelPerm = None,
     include_capillary_pressure: bool = True,
@@ -254,7 +258,7 @@ def load_case(
         model reflects. Forwarded to `bores.wells.deck.load_schedule`.
         Only schedule events strictly after this remain as actions.
     :param runspec: Run configuration. `RunSpec`'s own defaults if not given.
-    :param summary: Summary-vector request/output configuration. Not built out yet.
+    :param summary: Summary-vector reports for the run. Empty if not given.
     :param min_wetting_relperm: Minimum wetting-phase relative permeability for `SatFunc.from_deck`.
     :param min_non_wetting_relperm: Minimum non-wetting-phase relative permeability for `SatFunc.from_deck`.
     :param include_capillary_pressure: Whether to include capillary pressure in the saturation functions.
@@ -392,6 +396,6 @@ def load_case(
         initial_state=initial_state,
         runspec=runspec,
         schedule=schedule,
-        summary=summary,
+        summary=summary if summary is not None else Schedule[CompiledBlackOilModel](),
         dtype=dtype,
     )

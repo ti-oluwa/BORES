@@ -18,6 +18,7 @@ __all__ = [
     "StopSimulation",
     "StorageError",
     "StreamError",
+    "SummaryError",
     "TimingError",
     "ValidationError",
 ]
@@ -254,5 +255,11 @@ class EventError(ScheduleError):
 
 class ActionError(ScheduleError):
     """Raised when an action fails to apply."""
+
+    pass
+
+
+class SummaryError(ScheduleError):
+    """Raised when a summary quantity fails to evaluate or record."""
 
     pass
