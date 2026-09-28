@@ -1,4 +1,4 @@
-"""Generic event-driven scheduling framework. See `bores.schedule.base` for the core types."""
+"""Event-driven scheduling framework"""
 
 from bores.schedule.actions import NoOp, RunSequence
 from bores.schedule.base import (

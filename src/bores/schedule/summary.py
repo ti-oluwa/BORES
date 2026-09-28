@@ -1,19 +1,15 @@
 """
-Generic summary-vector recording, built on `bores.schedule`.
+Summary-vector recording API.
 
 A summary vector (Eclipse's own term: `FOPR`, `WBHP`, `WWCT`, and so on) is
-just another thing a schedule can read at a point in time - it fires on the
-same `Event`s as any other scheduled item, and the values it reads land in
-a `SummaryReport` rather than changing the model. `Summary` is the read-only
-counterpart to `Action`: an `Action` changes the model an `Event` fires
-against; a `Summary` reports on it instead, via `RecordSummary`, an `Action`
-that evaluates one or more `Summary` quantities and appends what they
-return to a `SummaryReport`.
+just another thing a schedule can read at a point in time. It fires on the
+same `Event`s as any other scheduled item, and the values it reads a recorded in
+a `SummaryReport` rather than mutating the model.
 
-Concrete, domain-specific quantities (`FOPR`, `WWCT`, and so on) live in
-`bores.simulation.summary`, built on the generic pieces here the same way
-`bores.wells.schedule`'s concrete `Event`/`Action` types are built on
-`bores.schedule.base`.
+`Summary` is the read-only counterpart to `Action`. An `Action` changes the model
+an `Event` fires against; a `Summary` reports on it instead, via `RecordSummary`,
+an `Action` that evaluates one or more `Summary` quantities and records what they
+return in a `SummaryReport`.
 """
 
 import datetime
@@ -55,8 +51,9 @@ __all__ = [
 @typing.runtime_checkable
 class Summary(typing.Protocol[ModelTcon]):
     """
-    A summary vector. Any callable matching this signature, with a `key`
-    attribute, satisfies it - the read-only counterpart to `Action`.
+    A summary vector.
+
+    Any callable matching this signature, with a `key` attribute, satisfies it.
     """
 
     key: str
@@ -148,7 +145,7 @@ class SummaryReport(
     Keeps an index from each vector key to the positions of its records,
     so per-vector queries cost time proportional to that vector's own
     record count, not the whole report's. Records appended directly to
-    `records` instead of through `record` are picked up on the next query.
+    `records` instead of through `record(...)` are picked up on the next query.
     """
 
     records: list[SummaryRecord] = attrs.field(factory=list)
@@ -241,14 +238,15 @@ class SummaryReport(
         cached = self.series_cache.get(key)
         if cached is not None and cached[0] == len(positions):
             return cached[1], cached[2]
+
         records = self.records
         times = typing.cast(
             NumberArray[OneDimension],
-            np.fromiter((records[position].time for position in positions), dtype=float),
+            np.fromiter((records[position].time for position in positions), dtype=np.float64),
         )
         values = typing.cast(
             NumberArray[OneDimension],
-            np.fromiter((records[position].value for position in positions), dtype=float),
+            np.fromiter((records[position].value for position in positions), dtype=np.float64),
         )
         self.series_cache[key] = (len(positions), times, values)
         return times, values
@@ -279,6 +277,7 @@ class SummaryReport(
         positions = self.key_indices.get(key)
         if not positions:
             return None
+
         records = self.records
         low, high = 0, len(positions)
         while low < high:
@@ -287,6 +286,7 @@ class SummaryReport(
                 low = middle + 1
             else:
                 high = middle
+
         if low == 0:
             return None
         return records[positions[low - 1]]
@@ -325,10 +325,10 @@ class SummaryReport(
 @attrs.frozen(kw_only=True, slots=True)
 class RecordSummary(SerializableAction[ModelT]):
     """
-    Evaluates `quantities` and appends what they return to the run's
-    `SummaryReport`. Pair with whichever `Event` should drive reporting
-    cadence (`IntervalEvent` for "every N time units", `TimeStepEvent`
-    for "every timestep", and so on) - see `record_at` for the common case.
+    Evaluates `quantities` and records what they return to the run's `SummaryReport`.
+
+    Pair with whichever `Event` should drive reporting cadence (`IntervalEvent`
+    for "every N time units", `TimeStepEvent` for "every timestep", and so on).
     """
 
     __type__: typing.ClassVar[str] = "record_summary"

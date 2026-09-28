@@ -1,7 +1,7 @@
 """
 Well and field summary vectors, built on `bores.schedule.summary`.
 
-Names follow Eclipse's own summary mnemonics: a leading `F` is a field-wide
+Names follow Eclipse's own summary mnemonics. a leading `F` is a field-wide
 total, a leading `W` is one well. Every class has a short alias
 (`FOPR = FieldOilProductionRate`). All rates are surface-condition, and
 production/injection totals only count wells of the matching kind.
@@ -100,11 +100,7 @@ def get_wells(*, model: "CompiledBlackOilModel") -> CompiledWellSystem:
 
 
 def sum_rates(
-    *,
-    wells: CompiledWellSystem,
-    workspace: "SimulationWorkspace",
-    array_name: str,
-    kind: WellKind
+    *, wells: CompiledWellSystem, workspace: "SimulationWorkspace", array_name: str, kind: WellKind
 ) -> Number:
     """
     Sums one per-well rate array over every well of one kind.

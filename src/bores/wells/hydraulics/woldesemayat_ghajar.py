@@ -614,8 +614,12 @@ def compute_perforation_pressures(
                     model=model,
                     length=length,
                     inclination_from_vertical=inclinations_from_vertical[i],
-                    superficial_liquid_velocity=compute_superficial_velocity(liquid_rate, model.tubing_inner_diameter),
-                    superficial_gas_velocity=compute_superficial_velocity(gas_rate, model.tubing_inner_diameter),
+                    superficial_liquid_velocity=compute_superficial_velocity(
+                        liquid_rate, model.tubing_inner_diameter
+                    ),
+                    superficial_gas_velocity=compute_superficial_velocity(
+                        gas_rate, model.tubing_inner_diameter
+                    ),
                     liquid_density=liquid_density,
                     gas_density=gas_density,
                     liquid_viscosity=liquid_viscosity,
@@ -715,8 +719,12 @@ def compute_tubing_head_pressure(
         model=model,
         length=abs(dz),
         inclination_from_vertical=0.0,
-        superficial_liquid_velocity=compute_superficial_velocity(liquid_rate, model.tubing_inner_diameter),
-        superficial_gas_velocity=compute_superficial_velocity(gas_rate, model.tubing_inner_diameter),
+        superficial_liquid_velocity=compute_superficial_velocity(
+            liquid_rate, model.tubing_inner_diameter
+        ),
+        superficial_gas_velocity=compute_superficial_velocity(
+            gas_rate, model.tubing_inner_diameter
+        ),
         liquid_density=liquid_density,
         gas_density=gas_density,
         liquid_viscosity=liquid_viscosity,

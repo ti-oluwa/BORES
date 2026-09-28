@@ -1,4 +1,4 @@
-"""Builtin `Event` implementations: `TimeEvent`, `IntervalEvent`, `ThresholdEvent`, `AllOf`, `AnyOf`."""
+"""Builtin `Event` implementations."""
 
 import enum
 import operator

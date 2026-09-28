@@ -58,7 +58,7 @@ class SimulationCase(Serializable):
 
     summary: Schedule[CompiledBlackOilModel] = attrs.field(factory=Schedule[CompiledBlackOilModel])
     """
-    Every summary-vector report for the run, as a schedule of `RecordSummary` actions. 
+    Summary-vector report for the run, as a schedule of `RecordSummary` actions. 
     Records into a `bores.schedule.summary.SummaryReport`.
     """
 
@@ -181,7 +181,7 @@ class SimulationCase(Serializable):
         :param deck_file: The deck to load from.
         :param default_wellbore: Wellbore hydraulics model for every well
             that doesn't override it. Omit if nothing in the deck needs
-            one - see `WellSystem.from_deck`.
+            one. See `WellSystem.from_deck`.
         :param temperature: Reservoir temperature, either a `Temperature` or
             a constant value in the deck's own unit system.
         :param mixing_rule: Three-phase relative permeability mixing rule for `SatFunc.from_deck`.
