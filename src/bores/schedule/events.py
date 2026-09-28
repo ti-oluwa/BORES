@@ -66,7 +66,8 @@ class TimeEvent(SerializableEvent[ModelT]):
         :param context: The current moment's context.
         :returns: Whether `at` was just crossed.
         """
-        return context.previous_time < self.at <= context.time
+        previous_time = context.previous_time
+        return (previous_time is None or previous_time < self.at) and self.at <= context.time
 
 
 @event_type
@@ -83,15 +84,14 @@ class TimeStepEvent(SerializableEvent[ModelT]):
 
         :param model: The model being scheduled against. Unused.
         :param context: The current moment's context. `context.time_step`
-            and `context.previous_time_step` must both be set.
+            must be set. A `None` `context.previous_time_step` means no step
+            has been advanced to yet.
         :returns: Whether `at` was just crossed.
         """
-        if context.time_step is None or context.previous_time_step is None:
-            raise ValidationError(
-                f"{type(self).__name__} needs `context.time_step` and "
-                "`context.previous_time_step` to both be set."
-            )
-        return context.previous_time_step < self.at <= context.time_step
+        if context.time_step is None:
+            raise ValidationError(f"{type(self).__name__} needs `context.time_step` to be set.")
+        previous_step = context.previous_time_step
+        return (previous_step is None or previous_step < self.at) and self.at <= context.time_step
 
 
 @event_type
@@ -120,16 +120,20 @@ class DateEvent(SerializableEvent[ModelT]):
             elapsed_time=context.time,
             unit_system=context.unit_system,
         )
-        previous_date = get_current_date(
-            start_date=context.start_date,
-            elapsed_time=context.previous_time,
-            unit_system=context.unit_system,
+        previous_date = (
+            get_current_date(
+                start_date=context.start_date,
+                elapsed_time=context.previous_time,
+                unit_system=context.unit_system,
+            )
+            if context.previous_time is not None
+            else None
         )
         if isinstance(self.at, str):
             at = datetime.fromisoformat(self.at)
         else:
             at = self.at
-        return previous_date < at <= current_date
+        return (previous_date is None or previous_date < at) and at <= current_date
 
 
 @event_type
@@ -153,7 +157,11 @@ class IntervalEvent(SerializableEvent[ModelT]):
         """
         if context.time < self.start:
             return False
-        previous_count = self.get_boundary_count(time=context.previous_time)
+        previous_count = (
+            0
+            if context.previous_time is None
+            else self.get_boundary_count(time=context.previous_time)
+        )
         current_count = self.get_boundary_count(time=context.time)
         return current_count > previous_count
 

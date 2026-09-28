@@ -10,7 +10,11 @@ from typing_extensions import Self
 
 from bores.errors import ActionError, EventError, StopSimulation
 from bores.serde.base import Serializable
-from bores.serde.registry import make_serializable_type_registrar
+from bores.serde.registry import (
+    make_registry_deserializer,
+    make_registry_serializer,
+    make_serializable_type_registrar,
+)
 from bores.types import Boolean, Number, UnitSystem
 
 __all__ = [
@@ -43,8 +47,11 @@ class ScheduleContext:
     time: Number
     """Elapsed time the schedule is being advanced to, in `unit_system`."""
 
-    previous_time: Number = 0.0
-    """Elapsed time the schedule was last advanced to."""
+    previous_time: Number | None = None
+    """
+    Elapsed time the schedule was last advanced to. `None` on the first advance
+    of a run, so an event at the very start (time zero) can still fire.
+    """
 
     time_step: int | None = None
     """The current time-step index, if the caller is tracking one."""
@@ -145,8 +152,23 @@ action_type = make_serializable_type_registrar(
 )
 
 
+dump_event = make_registry_serializer(
+    base_cls=SerializableEvent, registry=EVENT_TYPES, key_attr="__type__"
+)
+load_event = make_registry_deserializer(base_cls=SerializableEvent, registry=EVENT_TYPES)
+dump_action = make_registry_serializer(
+    base_cls=SerializableAction, registry=ACTION_TYPES, key_attr="__type__"
+)
+load_action = make_registry_deserializer(base_cls=SerializableAction, registry=ACTION_TYPES)
+
+
 @attrs.frozen(kw_only=True, slots=True, repr=False, hash=True, unsafe_hash=True)
-class ScheduleItem(Serializable, typing.Generic[ModelT]):
+class ScheduleItem(
+    Serializable,
+    typing.Generic[ModelT],
+    serializers={"event": dump_event, "action": dump_action},
+    deserializers={"event": load_event, "action": load_action},
+):
     """One `(Event, Action)` pairing: `action` fires whenever `event` occurs."""
 
     event: Event[ModelT] = attrs.field(hash=False)
@@ -163,7 +185,12 @@ class ScheduleItem(Serializable, typing.Generic[ModelT]):
 
 
 @attrs.frozen(slots=True)
-class Schedule(Serializable, typing.Generic[ModelT]):
+class Schedule(
+    Serializable,
+    typing.Generic[ModelT],
+    dump_exclude={"_items_map"},
+    load_exclude={"_items_map"},
+):
     """Every rule for a run. Advances a model by applying whichever items fire."""
 
     items: tuple[ScheduleItem[ModelT], ...] = attrs.field(converter=tuple, factory=tuple)
@@ -210,7 +237,7 @@ class Schedule(Serializable, typing.Generic[ModelT]):
         model: ModelT,
         *,
         time: Number,
-        previous_time: Number = 0.0,
+        previous_time: Number | None = None,
         unit_system: UnitSystem = UnitSystem.FIELD,
         time_step: int | None = None,
         previous_time_step: int | None = None,
@@ -223,7 +250,7 @@ class Schedule(Serializable, typing.Generic[ModelT]):
 
         :param model: The model to advance.
         :param time: Elapsed time to advance to.
-        :param previous_time: Elapsed time last advanced to.
+        :param previous_time: Elapsed time last advanced to. `None` on the first advance of a run.
         :param unit_system: Unit system for `time`/`previous_time`.
         :param time_step: The current time-step index, if tracked.
         :param previous_time_step: The time-step index last advanced at, if tracked.
@@ -272,8 +299,10 @@ class Schedule(Serializable, typing.Generic[ModelT]):
     def __iter__(self) -> typing.Iterator[ScheduleItem[ModelT]]:
         return iter(self.items)
 
-    def __contains__(self, o: str | ScheduleItem[ModelT], /) -> bool:
-        return any(item == o for item in self.items)
+    def __contains__(self, o: typing.Any, /) -> bool:
+        if isinstance(o, str):
+            return o in self._items_map
+        return o in self.items
 
     def __add__(self, other: Self) -> Self:
         """
@@ -284,20 +313,19 @@ class Schedule(Serializable, typing.Generic[ModelT]):
         """
         if not isinstance(other, Schedule):
             return NotImplemented
-        return self.__class__(items=set(self.items + other.items))
+        return self.__class__(items=self.items + other.items)
 
     def __sub__(self, other: Self) -> Self:
         """
-        Removes any items from `self` that have the same name as a rule in `other`.
+        Removes any items from `self` that have the same name as an item in `other`.
 
-        :param other: The schedule to remove items from.
+        :param other: The schedule whose item names to remove.
         :returns: A new `Schedule` with only items whose names are not in `other`.
         """
         if not isinstance(other, Schedule):
             return NotImplemented
-        other_items = set(other.items)
-        kept = [rule for rule in self.items if rule.name not in other_items]
-        return self.__class__(items=tuple(kept))
+        kept = tuple(item for item in self.items if item.name not in other._items_map)
+        return self.__class__(items=kept)
 
     def __or__(self, other: Self) -> Self:
         """
@@ -309,6 +337,5 @@ class Schedule(Serializable, typing.Generic[ModelT]):
         """
         if not isinstance(other, Schedule):
             return NotImplemented
-        other_items = set(other.items)
-        kept = [rule for rule in self.items if rule.name not in other_items]
-        return self.__class__(items=tuple(kept) + other.items)
+        kept = tuple(item for item in self.items if item.name not in other._items_map)
+        return self.__class__(items=kept + other.items)

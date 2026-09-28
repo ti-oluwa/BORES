@@ -25,6 +25,7 @@ __all__ = [
     "PerforationWorkspace",
     "WellsWorkspace",
     "accumulate_phase_rates",
+    "accumulate_well_volumes",
     "build_connection_phase_rates",
     "build_perforation_workspace",
     "build_wells_workspace",
@@ -291,6 +292,19 @@ class WellsWorkspace(typing.NamedTuple):
     `NaN` means "not resolved this pass", not "resolved to zero".
     """
 
+    cumulative_oil_volumes: NumberArray[OneDimension]
+    """
+    Shape `(n_wells,)`. Surface-condition oil volume each well has produced
+    or injected since the start of the run. Never `NaN`. Advanced by
+    `accumulate_well_volumes`, never by control resolution itself.
+    """
+
+    cumulative_water_volumes: NumberArray[OneDimension]
+    """Shape `(n_wells,)`. Same as `cumulative_oil_volumes`, for water."""
+
+    cumulative_gas_volumes: NumberArray[OneDimension]
+    """Shape `(n_wells,)`. Same as `cumulative_oil_volumes`, for gas."""
+
 
 def build_wells_workspace(
     *, n_wells: Integer, n_connections: Integer, dtype: npt.DTypeLike = None
@@ -323,7 +337,31 @@ def build_wells_workspace(
         connection_oil_rates=np.full(n_connections, np.nan, dtype=dtype),
         connection_water_rates=np.full(n_connections, np.nan, dtype=dtype),
         connection_gas_rates=np.full(n_connections, np.nan, dtype=dtype),
+        cumulative_oil_volumes=np.zeros(n_wells, dtype=dtype),
+        cumulative_water_volumes=np.zeros(n_wells, dtype=dtype),
+        cumulative_gas_volumes=np.zeros(n_wells, dtype=dtype),
     )
+
+
+def accumulate_well_volumes(*, workspace: WellsWorkspace, step_size: Number) -> None:
+    """
+    Adds one accepted time step's surface volumes to every well's running totals, in place.
+
+    Each well's rate from the step just resolved is taken as constant over
+    the whole step, which is exactly how an implicit step applies it. Call
+    once per accepted step, after well control resolution and never for a
+    rejected attempt, so totals stay exact no matter how rarely summaries
+    are recorded. A well with a `NaN` rate (not yet resolved) adds nothing.
+
+    :param workspace: The run's wells workspace.
+    :param step_size: The accepted step's size, in the run's time unit.
+    """
+    for rates, volumes in (
+        (workspace.surface_oil_rates, workspace.cumulative_oil_volumes),
+        (workspace.surface_water_rates, workspace.cumulative_water_volumes),
+        (workspace.surface_gas_rates, workspace.cumulative_gas_volumes),
+    ):
+        np.add(volumes, rates * step_size, out=volumes, where=~np.isnan(rates))
 
 
 @numba.njit(cache=True)

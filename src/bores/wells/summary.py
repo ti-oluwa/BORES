@@ -4,7 +4,9 @@ Well and field summary vectors, built on `bores.schedule.summary`.
 Names follow Eclipse's own summary mnemonics. a leading `F` is a field-wide
 total, a leading `W` is one well. Every class has a short alias
 (`FOPR = FieldOilProductionRate`). All rates are surface-condition, and
-production/injection totals only count wells of the matching kind.
+production/injection totals only count wells of the matching kind. Cumulative totals
+(`FOPT`, `WWIT`, ...) read the workspace's running volumes, which the run advances every
+accepted step with `bores.wells.workspace.accumulate_well_volumes`.
 """
 
 import typing
@@ -26,41 +28,61 @@ if typing.TYPE_CHECKING:
 
 __all__ = [
     "FGIR",
+    "FGIT",
     "FGOR",
     "FGPR",
+    "FGPT",
     "FLPR",
     "FOPR",
+    "FOPT",
     "FWCT",
     "FWIR",
+    "FWIT",
     "FWPR",
+    "FWPT",
     "WBHP",
     "WGIR",
+    "WGIT",
     "WGOR",
     "WGPR",
+    "WGPT",
     "WLPR",
     "WOPR",
+    "WOPT",
     "WTHP",
     "WWCT",
     "WWIR",
+    "WWIT",
     "WWPR",
+    "WWPT",
     "FieldGasInjectionRate",
+    "FieldGasInjectionTotal",
     "FieldGasOilRatio",
     "FieldGasProductionRate",
+    "FieldGasProductionTotal",
     "FieldLiquidProductionRate",
     "FieldOilProductionRate",
+    "FieldOilProductionTotal",
     "FieldWaterCut",
     "FieldWaterInjectionRate",
+    "FieldWaterInjectionTotal",
     "FieldWaterProductionRate",
+    "FieldWaterProductionTotal",
     "WellBottomHolePressure",
     "WellGasInjectionRate",
+    "WellGasInjectionTotal",
     "WellGasOilRatio",
     "WellGasProductionRate",
+    "WellGasProductionTotal",
     "WellLiquidProductionRate",
     "WellOilProductionRate",
+    "WellOilProductionTotal",
     "WellTubingHeadPressure",
     "WellWaterCut",
     "WellWaterInjectionRate",
+    "WellWaterInjectionTotal",
     "WellWaterProductionRate",
+    "WellWaterProductionTotal",
     "get_wells",
     "get_workspace",
     "sum_rates",
@@ -578,6 +600,123 @@ class WellTubingHeadPressure(WellVector):
         return workspace.wells.thps[well_row]
 
 
+@summary_type
+@attrs.frozen(kw_only=True, slots=True)
+class FieldOilProductionTotal(FieldRate):
+    """Field cumulative oil production (`FOPT`)."""
+
+    __abstract_serializable__ = True
+    __type__: typing.ClassVar[str] = "field_oil_production_total"
+
+    mnemonic = "FOPT"
+    array_name = "cumulative_oil_volumes"
+
+
+@summary_type
+@attrs.frozen(kw_only=True, slots=True)
+class FieldWaterProductionTotal(FieldRate):
+    """Field cumulative water production (`FWPT`)."""
+
+    __abstract_serializable__ = True
+    __type__: typing.ClassVar[str] = "field_water_production_total"
+
+    mnemonic = "FWPT"
+    array_name = "cumulative_water_volumes"
+
+
+@summary_type
+@attrs.frozen(kw_only=True, slots=True)
+class FieldGasProductionTotal(FieldRate):
+    """Field cumulative gas production (`FGPT`)."""
+
+    __abstract_serializable__ = True
+    __type__: typing.ClassVar[str] = "field_gas_production_total"
+
+    mnemonic = "FGPT"
+    array_name = "cumulative_gas_volumes"
+
+
+@summary_type
+@attrs.frozen(kw_only=True, slots=True)
+class FieldWaterInjectionTotal(FieldRate):
+    """Field cumulative water injection (`FWIT`)."""
+
+    __abstract_serializable__ = True
+    __type__: typing.ClassVar[str] = "field_water_injection_total"
+
+    mnemonic = "FWIT"
+    array_name = "cumulative_water_volumes"
+    kind = WellKind.INJECTOR
+
+
+@summary_type
+@attrs.frozen(kw_only=True, slots=True)
+class FieldGasInjectionTotal(FieldRate):
+    """Field cumulative gas injection (`FGIT`)."""
+
+    __abstract_serializable__ = True
+    __type__: typing.ClassVar[str] = "field_gas_injection_total"
+
+    mnemonic = "FGIT"
+    array_name = "cumulative_gas_volumes"
+    kind = WellKind.INJECTOR
+
+
+@summary_type
+@attrs.frozen(kw_only=True, slots=True)
+class WellOilProductionTotal(WellRate):
+    """Well cumulative oil production (`WOPT`)."""
+
+    __type__: typing.ClassVar[str] = "well_oil_production_total"
+
+    mnemonic = "WOPT"
+    array_name = "cumulative_oil_volumes"
+
+
+@summary_type
+@attrs.frozen(kw_only=True, slots=True)
+class WellWaterProductionTotal(WellRate):
+    """Well cumulative water production (`WWPT`)."""
+
+    __type__: typing.ClassVar[str] = "well_water_production_total"
+
+    mnemonic = "WWPT"
+    array_name = "cumulative_water_volumes"
+
+
+@summary_type
+@attrs.frozen(kw_only=True, slots=True)
+class WellGasProductionTotal(WellRate):
+    """Well cumulative gas production (`WGPT`)."""
+
+    __type__: typing.ClassVar[str] = "well_gas_production_total"
+
+    mnemonic = "WGPT"
+    array_name = "cumulative_gas_volumes"
+
+
+@summary_type
+@attrs.frozen(kw_only=True, slots=True)
+class WellWaterInjectionTotal(WellRate):
+    """Well cumulative water injection (`WWIT`)."""
+
+    __type__: typing.ClassVar[str] = "well_water_injection_total"
+
+    mnemonic = "WWIT"
+    array_name = "cumulative_water_volumes"
+
+
+@summary_type
+@attrs.frozen(kw_only=True, slots=True)
+class WellGasInjectionTotal(WellRate):
+    """Well cumulative gas injection (`WGIT`)."""
+
+    __type__: typing.ClassVar[str] = "well_gas_injection_total"
+
+    mnemonic = "WGIT"
+    array_name = "cumulative_gas_volumes"
+
+
 FOPR = FieldOilProductionRate
 FWPR = FieldWaterProductionRate
 FGPR = FieldGasProductionRate
@@ -596,3 +735,13 @@ WWCT = WellWaterCut
 WGOR = WellGasOilRatio
 WBHP = WellBottomHolePressure
 WTHP = WellTubingHeadPressure
+FOPT = FieldOilProductionTotal
+FWPT = FieldWaterProductionTotal
+FGPT = FieldGasProductionTotal
+FWIT = FieldWaterInjectionTotal
+FGIT = FieldGasInjectionTotal
+WOPT = WellOilProductionTotal
+WWPT = WellWaterProductionTotal
+WGPT = WellGasProductionTotal
+WWIT = WellWaterInjectionTotal
+WGIT = WellGasInjectionTotal
