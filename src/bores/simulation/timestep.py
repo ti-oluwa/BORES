@@ -1,4 +1,4 @@
-"""Simulation time management with smart and adaptive time stepping."""
+"""Simulation timestep management with smart and adaptive time stepping."""
 
 import logging
 import typing

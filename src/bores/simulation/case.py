@@ -27,6 +27,7 @@ from bores.reservoir.rock.model import Rock
 from bores.reservoir.state import Hysteresis, ReservoirState
 from bores.reservoir.temperature import Temperature
 from bores.schedule.base import Schedule
+from bores.schedule.summary import SummaryReport
 from bores.serde.base import Serializable
 from bores.simulation.spec import RunSpec
 from bores.simulation.workspace import SimulationWorkspace, build_simulation_workspace
@@ -56,10 +57,9 @@ class SimulationCase(Serializable):
     )
     """Every scheduled well/model edit for the run."""
 
-    summary: Schedule[CompiledBlackOilModel] = attrs.field(factory=Schedule[CompiledBlackOilModel])
+    summary: SummaryReport = attrs.field(factory=SummaryReport)
     """
-    Summary-vector report for the run, as a schedule of `RecordSummary` actions. 
-    Records into a `bores.schedule.summary.SummaryReport`.
+    Summary-vector report for the run, from the schedule of `RecordSummary` actions. 
     """
 
     salinity: CellArray | None = None
@@ -164,7 +164,7 @@ class SimulationCase(Serializable):
         mixing_rule: str = "eclipse_rule",
         compiled_at: float = 0.0,
         runspec: RunSpec | None = None,
-        summary: Schedule[CompiledBlackOilModel] | None = None,
+        summary: SummaryReport | None = None,
         min_wetting_relperm: MinimumRelPerm = None,
         min_non_wetting_relperm: MinimumRelPerm = None,
         include_capillary_pressure: bool = True,
@@ -232,7 +232,7 @@ def load_case(
     mixing_rule: str = "eclipse_rule",
     compiled_at: float = 0.0,
     runspec: RunSpec | None = None,
-    summary: Schedule[CompiledBlackOilModel] | None = None,
+    summary: SummaryReport | None = None,
     min_wetting_relperm: MinimumRelPerm = None,
     min_non_wetting_relperm: MinimumRelPerm = None,
     include_capillary_pressure: bool = True,
@@ -396,6 +396,6 @@ def load_case(
         initial_state=initial_state,
         runspec=runspec,
         schedule=schedule,
-        summary=summary if summary is not None else Schedule[CompiledBlackOilModel](),
+        summary=summary if summary is not None else SummaryReport(),
         dtype=dtype,
     )
