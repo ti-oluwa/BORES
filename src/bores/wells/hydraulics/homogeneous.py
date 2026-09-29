@@ -29,6 +29,7 @@ from bores.wells.hydraulics.base import (
     compute_static_mixture_density,
     compute_surface_mixture_density,
     compute_surface_mixture_viscosity,
+    get_rate_time_factor,
     get_unit_system_constant,
 )
 from bores.wells.state import ConnectionSample, PhaseValues
@@ -72,6 +73,13 @@ class HomogeneousWellbore(typing.NamedTuple):
     friction_tolerance: Number
     """Convergence tolerance for the Colebrook friction-factor calculation."""
 
+    rate_time_factor: Number
+    """
+    Multiplier converting a phase rate, in this model's own unit system,
+    to a per-second rate. Turns a rate into a velocity that matches the
+    per-second `gravitational_acceleration`.
+    """
+
     hydrostatic_scale: Number
     """
     Unit-conversion factor converting a `density * velocity-squared` or
@@ -107,6 +115,7 @@ class HomogeneousWellbore(typing.NamedTuple):
             tubing_inner_diameter=self.tubing_inner_diameter * length_factor,
             tubing_roughness=self.tubing_roughness * length_factor,
             gravitational_acceleration=self.gravitational_acceleration * length_factor,
+            rate_time_factor=get_rate_time_factor(target),
             hydrostatic_scale=1.0
             / (
                 get_unit_system_constant(prefix="GRAVITATIONAL_FACTOR", unit_system=target)
@@ -187,6 +196,7 @@ def homogeneous_wellbore(
         friction_tolerance=(
             friction_tolerance if friction_tolerance is not None else c.COLEBROOK_TOLERANCE
         ),
+        rate_time_factor=get_rate_time_factor(unit_system),
         hydrostatic_scale=1.0
         / (
             get_unit_system_constant(prefix="GRAVITATIONAL_FACTOR", unit_system=unit_system)
@@ -357,6 +367,7 @@ def compute_perforation_pressures(
                 velocity = compute_mixture_velocity(
                     phase_rates=remaining_rates,
                     tubing_inner_diameter=model.tubing_inner_diameter,
+                    rate_time_factor=model.rate_time_factor,
                 )
                 # Velocity is only ever set at a connection, where a
                 # perforation's own rate joins or leaves the flow (see the
@@ -430,7 +441,9 @@ def compute_tubing_head_pressure(
         properties=surface_fluid_properties, phase_rates=phase_rates
     )
     velocity = compute_mixture_velocity(
-        phase_rates=phase_rates, tubing_inner_diameter=model.tubing_inner_diameter
+        phase_rates=phase_rates,
+        tubing_inner_diameter=model.tubing_inner_diameter,
+        rate_time_factor=model.rate_time_factor,
     )
     # Same simplification as compute_perforation_pressures: velocity is
     # held constant across this tubing segment, so the acceleration term

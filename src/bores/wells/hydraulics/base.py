@@ -29,6 +29,7 @@ __all__ = [
     "compute_surface_mixture_density",
     "compute_surface_mixture_viscosity",
     "compute_tubing_head_pressure",
+    "get_rate_time_factor",
     "get_unit_system_constant",
     "split_liquid_gas",
 ]
@@ -160,34 +161,55 @@ def compute_mixture_viscosity(phase_rates: PhaseValues, phase_viscosities: Phase
     ) / total_rate
 
 
-def compute_superficial_velocity(rate: Number, tubing_inner_diameter: Number) -> Number:
+def get_rate_time_factor(unit_system: UnitSystem) -> Number:
     """
-    Converts a single phase's day-rate to a superficial velocity in tubing.
+    Gets the multiplier that converts a phase rate to a per-second rate.
 
-    :param rate: Phase rate, at reservoir conditions, per day.
+    FIELD, METRIC, and LAB express rates per day. SI already expresses
+    them per second.
+
+    :param unit_system: Unit system the rate is expressed in.
+    :returns: Factor to multiply a rate in `unit_system` by to get a per-second rate.
+    """
+    if unit_system == UnitSystem.SI:
+        return 1.0
+    return typing.cast(Number, c.DAYS_PER_SECOND)
+
+
+@numba.njit(cache=True)
+def compute_superficial_velocity(
+    rate: Number, tubing_inner_diameter: Number, rate_time_factor: Number
+) -> Number:
+    """
+    Converts a single phase's rate to a superficial velocity in tubing.
+
+    :param rate: Phase rate at reservoir conditions, in the model's own unit system.
     :param tubing_inner_diameter: Tubing inner diameter.
-    :returns: Superficial velocity, per second (matching the per-second
-        `gravitational_acceleration`/`hydrostatic_scale` convention every
-        correlation's hydrostatic term already uses).
+    :param rate_time_factor: Multiplier converting `rate` to a per-second
+        rate, so the velocity matches the per-second `gravitational_acceleration`.
+    :returns: Superficial velocity.
     :raises ValueError: If `tubing_inner_diameter` isn't positive.
     """
     if tubing_inner_diameter <= 0.0:
         raise ValueError("`tubing_inner_diameter` must be positive")
     cross_sectional_area = math.pi * (tubing_inner_diameter / 2.0) ** 2
-    return (rate * c.DAYS_PER_SECOND) / cross_sectional_area
+    return (rate * rate_time_factor) / cross_sectional_area
 
 
-def compute_mixture_velocity(phase_rates: PhaseValues, tubing_inner_diameter: Number) -> Number:
+def compute_mixture_velocity(
+    phase_rates: PhaseValues, tubing_inner_diameter: Number, rate_time_factor: Number
+) -> Number:
     """
     Computes the no-slip superficial velocity of a multiphase stream in tubing.
 
-    :param phase_rates: Rate of each phase, at reservoir conditions, per day.
+    :param phase_rates: Rate of each phase at reservoir conditions, in the model's own unit system.
     :param tubing_inner_diameter: Tubing inner diameter.
-    :returns: Mixture velocity, per second.
+    :param rate_time_factor: Multiplier converting a rate to a per-second rate.
+    :returns: Mixture velocity.
     :raises ValueError: If `tubing_inner_diameter` isn't positive.
     """
     total_rate = phase_rates.oil + phase_rates.water + phase_rates.gas
-    return compute_superficial_velocity(total_rate, tubing_inner_diameter)
+    return compute_superficial_velocity(total_rate, tubing_inner_diameter, rate_time_factor)
 
 
 def compute_surface_mixture_density(
