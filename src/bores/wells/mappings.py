@@ -1,6 +1,11 @@
 from bores.types import Orientation
 from bores.wells.base import CompletionStatus
-from bores.wells.controls import EconomicQuantity, InjectorControlMode, ProducerControlMode
+from bores.wells.controls import (
+    EconomicQuantity,
+    InjectorControlMode,
+    ProducerControlMode,
+    RateQuantity,
+)
 from bores.wells.groups import GroupInjectorControlMode, GroupProducerControlMode
 
 DIRECTION_MAP = {"X": Orientation.X, "Y": Orientation.Y, "Z": Orientation.Z}
@@ -86,4 +91,13 @@ ECONOMIC_QUANTITY_FIELDS = {
 ECONOMIC_MIN_RATE_QUANTITY_FIELDS = {
     EconomicQuantity.OIL_RATE: "min_oil_rate",
     EconomicQuantity.GAS_RATE: "min_gas_rate",
+}
+
+
+QUANTITY_GROUP_CONTROL_MODES = {
+    RateQuantity.OIL: GroupProducerControlMode.OIL_RATE,
+    RateQuantity.WATER: GroupProducerControlMode.WATER_RATE,
+    RateQuantity.GAS: GroupProducerControlMode.GAS_RATE,
+    RateQuantity.LIQUID: GroupProducerControlMode.LIQUID_RATE,
+    RateQuantity.RESERVOIR: GroupProducerControlMode.RESERVOIR_VOLUME_RATE,
 }

@@ -136,8 +136,6 @@ class SerializableAction(Serializable, typing.Generic[ModelT]):
 
 EVENT_TYPES: dict[str, type[SerializableEvent]] = {}
 ACTION_TYPES: dict[str, type[SerializableAction]] = {}
-
-
 event_type = make_serializable_type_registrar(
     base_cls=SerializableEvent,
     registry=EVENT_TYPES,

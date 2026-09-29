@@ -5,6 +5,7 @@ import typing
 from bores.errors import ValidationError
 from bores.types import FluidPhase, Number, Orientation, UnitSystem
 from bores.wells.base import (
+    CompletionStatus,
     Perforation,
     Well,
     Wells,
@@ -23,16 +24,14 @@ from bores.wells.controls import (
     WellControl,
     WellControls,
 )
-from bores.wells.groups import (
-    GroupControl,
-    GroupInjectorControlMode,
-    GroupProducerControlMode,
-)
+from bores.wells.groups import GroupControl, GroupInjectorControlMode
+from bores.wells.mappings import QUANTITY_GROUP_CONTROL_MODES
 from bores.wells.trajectory import WellTrajectory
 
 __all__ = [
     "make_group_control",
     "make_injector",
+    "make_perforation",
     "make_producer",
     "make_well_controls",
     "make_wells",
@@ -52,6 +51,54 @@ PHASE_RATE_QUANTITY = {
     FluidPhase.WATER: RateQuantity.WATER,
     FluidPhase.GAS: RateQuantity.GAS,
 }
+
+
+def make_perforation(
+    top_depth: Number | None = None,
+    bottom_depth: Number | None = None,
+    *,
+    top_md: Number | None = None,
+    bottom_md: Number | None = None,
+    skin: Number = 0.0,
+    wellbore_radius: Number = 0.25,
+    status: CompletionStatus = CompletionStatus.OPEN,
+    schedule_status: WellStatus = WellStatus.ACTIVE,
+    saturation_region: int | None = None,
+    connection_factor_override: Number | None = None,
+    connection_factor_multiplier: Number | None = None,
+    direction: Orientation | None = None,
+) -> Perforation:
+    """
+    Build one perforation from vertical-depth or measured-depth bounds.
+
+    :param top_depth: Top true-vertical depth; pair with `bottom_depth`.
+    :param bottom_depth: Bottom true-vertical depth; pair with `top_depth`.
+    :param top_md: Top measured depth, for a well with a trajectory.
+    :param bottom_md: Bottom measured depth; pair with `top_md`.
+    :param skin: Dimensionless skin factor.
+    :param wellbore_radius: Perforation radius.
+    :param status: Completion open/shut status.
+    :param schedule_status: Schedule activation status.
+    :param saturation_region: Optional saturation-region integer identifier.
+    :param connection_factor_override: Optional explicit connection factor.
+    :param connection_factor_multiplier: Optional multiplier on the computed factor.
+    :param direction: Optional principal-axis direction for TVD-based perforations.
+    :returns: Constructed `Perforation`.
+    """
+    return Perforation(
+        top_depth=top_depth,
+        bottom_depth=bottom_depth,
+        top_md=top_md,
+        bottom_md=bottom_md,
+        skin=skin,
+        wellbore_radius=wellbore_radius,
+        status=status,
+        schedule_status=schedule_status,
+        saturation_region=saturation_region,
+        connection_factor_override=connection_factor_override,
+        connection_factor_multiplier=connection_factor_multiplier,
+        direction=direction,
+    )
 
 
 def _resolve_perforations(
@@ -153,6 +200,7 @@ def make_producer(
     schedule_status: WellStatus = WellStatus.ACTIVE,
     unit_system: UnitSystem = UnitSystem.FIELD,
     metadata: typing.Mapping[str, typing.Any] | None = None,
+    d_factor: Number | None = None,
 ) -> tuple[Well, ProducerControl]:
     """
     Builds a producer `Well` and its `ProducerControl`, for direct
@@ -197,6 +245,7 @@ def make_producer(
         single `Perforation.schedule_status`.
     :param unit_system: `Well.unit_system` and `ProducerControl.unit_system`.
     :param metadata: `Well.metadata`.
+    :param d_factor: `Well.d_factor`, the non-Darcy flow coefficient.
     :returns: `(Well, ProducerControl)`.
     :raises ValidationError: If none of `target_rate`, `target_bhp`, or
         `target_thp` is given; if both or neither of `perforation_depths`/
@@ -230,6 +279,7 @@ def make_producer(
         schedule_status=schedule_status,
         unit_system=unit_system,
         metadata=metadata,
+        d_factor=d_factor,
     )
 
     resolved_limits: list[Limit] = []
@@ -298,6 +348,7 @@ def make_injector(
     schedule_status: WellStatus = WellStatus.ACTIVE,
     unit_system: UnitSystem = UnitSystem.FIELD,
     metadata: typing.Mapping[str, typing.Any] | None = None,
+    d_factor: Number | None = None,
 ) -> tuple[Well, InjectorControl]:
     """
     Builds an injector `Well` and its `InjectorControl`, for direct
@@ -341,6 +392,7 @@ def make_injector(
         single `Perforation.schedule_status`.
     :param unit_system: `Well.unit_system` and `InjectorControl.unit_system`.
     :param metadata: `Well.metadata`.
+    :param d_factor: `Well.d_factor`, the non-Darcy flow coefficient.
     :returns: `(Well, InjectorControl)`.
     :raises ValidationError: If none of `target_rate`, `target_bhp`, or
         `target_thp` is given; if both or neither of `perforation_depths`/
@@ -374,6 +426,7 @@ def make_injector(
         schedule_status=schedule_status,
         unit_system=unit_system,
         metadata=metadata,
+        d_factor=d_factor,
     )
 
     resolved_limits: list[Limit] = []
@@ -417,15 +470,6 @@ def make_injector(
             unit_system=unit_system,
         )
     return well, control
-
-
-QUANTITY_GROUP_CONTROL_MODES = {
-    RateQuantity.OIL: GroupProducerControlMode.OIL_RATE,
-    RateQuantity.WATER: GroupProducerControlMode.WATER_RATE,
-    RateQuantity.GAS: GroupProducerControlMode.GAS_RATE,
-    RateQuantity.LIQUID: GroupProducerControlMode.LIQUID_RATE,
-    RateQuantity.RESERVOIR: GroupProducerControlMode.RESERVOIR_VOLUME_RATE,
-}
 
 
 def make_group_control(

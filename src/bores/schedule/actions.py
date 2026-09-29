@@ -56,7 +56,7 @@ class NoOp(SerializableAction[ModelT]):
 class RunSequence(SerializableAction[ModelT]):
     """Applies `actions` in order, threading the model through each in turn."""
 
-    actions: tuple[SerializableAction, ...] = attrs.field(converter=tuple)
+    actions: tuple[SerializableAction[ModelT], ...] = attrs.field(converter=tuple)
     """Every action to apply, in order."""
 
     def __call__(self, model: ModelT, context: ScheduleContext) -> ModelT:

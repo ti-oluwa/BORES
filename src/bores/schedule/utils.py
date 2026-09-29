@@ -22,7 +22,7 @@ def at(*, time: float, action: Action[ModelT], name: str | None = None) -> Sched
 
 def item(
     *, event: Event[ModelT], action: Action[ModelT], name: str | None = None
-) -> "ScheduleItem[ModelT]":
+) -> ScheduleItem[ModelT]:
     """
     Builds a `ScheduleItem` from an event and an action.
 
@@ -44,7 +44,7 @@ def schedule(*rules: ScheduleItem[ModelT]) -> Schedule[ModelT]:
     return Schedule(items=tuple(rules))
 
 
-def all_of(*events: SerializableEvent) -> AllOf:
+def all_of(*events: SerializableEvent[ModelT]) -> AllOf[ModelT]:
     """
     Builds an `AllOf` from a set of events.
 
@@ -54,7 +54,7 @@ def all_of(*events: SerializableEvent) -> AllOf:
     return AllOf(events=tuple(events))
 
 
-def any_of(*events: SerializableEvent) -> AnyOf:
+def any_of(*events: SerializableEvent[ModelT]) -> AnyOf[ModelT]:
     """
     Builds an `AnyOf` from a set of events.
 

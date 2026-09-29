@@ -38,7 +38,7 @@ __all__ = ["dump_mesh", "load_mesh"]
 
 # `meshio` cell type names that map to 3-D volumetric elements.
 # 2-D surface elements (triangle, quad, …) are discarded during import.
-_VOLUMETRIC_CELL_TYPES: frozenset[str] = frozenset({
+VOLUMETRIC_CELL_TYPES: frozenset[str] = frozenset({
     "tetra",
     "hexahedron",
     "wedge",
@@ -48,7 +48,7 @@ _VOLUMETRIC_CELL_TYPES: frozenset[str] = frozenset({
 })
 
 # Map from `meshio` quadratic type to the linear equivalent and node count.
-_QUADRATIC_TO_LINEAR: dict[str, tuple[str, int]] = {
+QUADRATIC_TO_LINEAR: dict[str, tuple[str, int]] = {
     "tetra10": ("tetra", 4),
     "hexahedron20": ("hexahedron", 8),
 }
@@ -62,8 +62,6 @@ def load_mesh(
     unit_system: UnitSystem | None = ...,
     metadata: typing.Mapping[str, typing.Any] | None = ...,
 ) -> Grid: ...
-
-
 @typing.overload
 def load_mesh(
     source: str,
@@ -72,8 +70,6 @@ def load_mesh(
     unit_system: UnitSystem | None = ...,
     metadata: typing.Mapping[str, typing.Any] | None = ...,
 ) -> Grid: ...
-
-
 @typing.overload
 def load_mesh(
     source: bytes,
@@ -120,8 +116,6 @@ def dump_mesh(
     file_format: str,
     cell_data: dict[str, np.ndarray] | None = ...,
 ) -> None: ...
-
-
 @typing.overload
 def dump_mesh(
     grid: Grid,
@@ -130,8 +124,6 @@ def dump_mesh(
     file_format: str,
     cell_data: dict[str, np.ndarray] | None = ...,
 ) -> bytes: ...
-
-
 @typing.overload
 def dump_mesh(
     grid: Grid,
@@ -243,12 +235,12 @@ def _mesh_to_grid(
         cell_type = block.type
         connectivity = np.asarray(block.data, dtype=np.int32)
 
-        if cell_type in _QUADRATIC_TO_LINEAR:
-            linear_type, n_linear_verts = _QUADRATIC_TO_LINEAR[cell_type]
+        if cell_type in QUADRATIC_TO_LINEAR:
+            linear_type, n_linear_verts = QUADRATIC_TO_LINEAR[cell_type]
             connectivity = connectivity[:, :n_linear_verts]
             cell_type = linear_type
 
-        if cell_type not in _VOLUMETRIC_CELL_TYPES:
+        if cell_type not in VOLUMETRIC_CELL_TYPES:
             continue  # skip surface / line elements
 
         cell_blocks.append({"cell_type": cell_type, "connectivity": connectivity})
@@ -256,7 +248,7 @@ def _mesh_to_grid(
     if not cell_blocks:
         raise GridImportError(
             "Mesh contains no supported 3-D cell types "
-            f"(supported: {sorted(_VOLUMETRIC_CELL_TYPES)})."
+            f"(supported: {sorted(VOLUMETRIC_CELL_TYPES)})."
         )
 
     meta = {"source_format": "meshio"}

@@ -285,19 +285,19 @@ class FieldLiquidProductionRate(FieldRate):
         """
         wells = get_wells(model=model)
         workspace = get_workspace(context=context)
-        oil = sum_rates(
+        oil_rate = sum_rates(
             wells=wells,
             workspace=workspace,
             array_name="surface_oil_rates",
             kind=WellKind.PRODUCER,
         )
-        water = sum_rates(
+        water_rate = sum_rates(
             wells=wells,
             workspace=workspace,
             array_name="surface_water_rates",
             kind=WellKind.PRODUCER,
         )
-        return oil + water
+        return oil_rate + water_rate
 
 
 @summary_type
@@ -320,19 +320,19 @@ class FieldWaterCut(FieldRate):
         """
         wells = get_wells(model=model)
         workspace = get_workspace(context=context)
-        oil = sum_rates(
+        oil_rate = sum_rates(
             wells=wells,
             workspace=workspace,
             array_name="surface_oil_rates",
             kind=WellKind.PRODUCER,
         )
-        water = sum_rates(
+        water_rate = sum_rates(
             wells=wells,
             workspace=workspace,
             array_name="surface_water_rates",
             kind=WellKind.PRODUCER,
         )
-        return divide(numerator=water, denominator=oil + water)
+        return divide(numerator=water_rate, denominator=oil_rate + water_rate)
 
 
 @summary_type
@@ -355,19 +355,19 @@ class FieldGasOilRatio(FieldRate):
         """
         wells = get_wells(model=model)
         workspace = get_workspace(context=context)
-        oil = sum_rates(
+        oil_rate = sum_rates(
             wells=wells,
             workspace=workspace,
             array_name="surface_oil_rates",
             kind=WellKind.PRODUCER,
         )
-        gas = sum_rates(
+        gas_rate = sum_rates(
             wells=wells,
             workspace=workspace,
             array_name="surface_gas_rates",
             kind=WellKind.PRODUCER,
         )
-        return divide(numerator=gas, denominator=oil)
+        return divide(numerator=gas_rate, denominator=oil_rate)
 
 
 @attrs.frozen(kw_only=True, slots=True)

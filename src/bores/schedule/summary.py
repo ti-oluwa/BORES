@@ -73,9 +73,6 @@ class Summary(typing.Protocol[ModelTcon]):
         ...
 
 
-SUMMARY_TYPES: dict[str, type["SerializableSummary"]] = {}
-
-
 class SerializableSummary(Serializable, typing.Generic[ModelT]):
     """Base for `Summary` implementations that support `dump`/`load`."""
 
@@ -101,6 +98,7 @@ class SerializableSummary(Serializable, typing.Generic[ModelT]):
         raise NotImplementedError
 
 
+SUMMARY_TYPES: dict[str, type[SerializableSummary]] = {}
 summary_type = make_serializable_type_registrar(
     base_cls=SerializableSummary,
     registry=SUMMARY_TYPES,
@@ -188,7 +186,13 @@ class SummaryReport(
         :param date: The calendar date this value was recorded at, if tracked.
         :returns: The `SummaryRecord` that was appended.
         """
-        record = SummaryRecord(key=key, time=time, value=value, time_step=time_step, date=date)
+        record = SummaryRecord(
+            key=key,
+            time=time,
+            value=value,
+            time_step=time_step,
+            date=date,
+        )
         self.records.append(record)
         self.update_index()
         return record

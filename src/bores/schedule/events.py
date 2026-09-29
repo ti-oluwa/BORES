@@ -218,7 +218,7 @@ class ThresholdEvent(SerializableEvent[ModelT]):
 class AllOf(SerializableEvent[ModelT]):
     """Fires only when every one of `events` fires."""
 
-    events: tuple[SerializableEvent, ...] = attrs.field(converter=tuple)
+    events: tuple[SerializableEvent[ModelT], ...] = attrs.field(converter=tuple)
     """Every event that must fire for this one to fire."""
 
     def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:
@@ -237,7 +237,7 @@ class AllOf(SerializableEvent[ModelT]):
 class AnyOf(SerializableEvent[ModelT]):
     """Fires when any one of `events` fires."""
 
-    events: tuple[SerializableEvent, ...] = attrs.field(converter=tuple)
+    events: tuple[SerializableEvent[ModelT], ...] = attrs.field(converter=tuple)
     """Every event checked; any one firing is enough."""
 
     def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:

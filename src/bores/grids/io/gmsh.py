@@ -55,8 +55,6 @@ def load_msh(
     unit_system: UnitSystem | None = ...,
     metadata: typing.Mapping[str, typing.Any] | None = ...,
 ) -> Grid: ...
-
-
 @typing.overload
 def load_msh(
     source: str,
@@ -65,8 +63,6 @@ def load_msh(
     unit_system: UnitSystem | None = ...,
     metadata: typing.Mapping[str, typing.Any] | None = ...,
 ) -> Grid: ...
-
-
 @typing.overload
 def load_msh(
     source: bytes,

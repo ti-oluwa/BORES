@@ -233,8 +233,7 @@ class Perforation(Serializable):
     otherwise cannot do reliably: several completions on the same well
     often share a true vertical depth, and measured depth on its own
     carries no lateral position to search with. `None` means the cell
-    is derived geometrically instead, the same as before this field
-    existed.
+    is derived geometrically instead.
     """
 
     def __attrs_post_init__(self) -> None:

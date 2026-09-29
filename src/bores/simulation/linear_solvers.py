@@ -934,8 +934,8 @@ def solve_linear_system(
     :param A: Coefficient matrix in CSR format.
     :param b: Right-hand side vector.
     :param maximum_iterations: Maximum number of iterations for each solver.
-    :param solver: (Iterative) solver or sequence of solvers to use ("bicgstab", "gmres", 
-        "lgmres", "tfqmr"), or custom callable(s). If a sequence is provided, solvers will 
+    :param solver: (Iterative) solver or sequence of solvers to use ("bicgstab", "gmres",
+        "lgmres", "tfqmr"), or custom callable(s). If a sequence is provided, solvers will
         be tried in order until one converges.
     :param preconditioner: Type of preconditioner to use ("ilu", "amg", "diagonal"), or None.
         Can also be a preconditioner factory function, that takes A and returns a preconditioner.
