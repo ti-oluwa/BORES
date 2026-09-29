@@ -641,7 +641,7 @@ Type aliases and enumerations used throughout the API.
 | Name | Type | Description |
 | --- | --- | --- |
 | `Solver` | type alias | A linear system solver callable. |
-| `SolverFunc` | type alias | A solver function signature. |
+| `SolverFunction` | type alias | A solver function signature. |
 | `Preconditioner` | type alias | A preconditioner callable. |
 | `Interpolator` | type alias | An interpolation function. |
 

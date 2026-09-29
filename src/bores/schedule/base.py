@@ -1,4 +1,4 @@
-"""Generic event-driven scheduling: `Event`/`Action` protocols, `Rule`, `Schedule`."""
+"""Event-driven scheduling: `Event`/`Action` protocols, `Rule`, `Schedule`."""
 
 import datetime
 import threading
@@ -102,10 +102,6 @@ class Action(typing.Protocol[ModelT]):
         ...
 
 
-EVENT_TYPES: dict[str, type["SerializableEvent"]] = {}
-ACTION_TYPES: dict[str, type["SerializableAction"]] = {}
-
-
 class SerializableEvent(Serializable, typing.Generic[ModelT]):
     """Base for `Event` implementations that support `dump`/`load`."""
 
@@ -136,6 +132,10 @@ class SerializableAction(Serializable, typing.Generic[ModelT]):
         :returns: The changed model.
         """
         raise NotImplementedError
+
+
+EVENT_TYPES: dict[str, type[SerializableEvent]] = {}
+ACTION_TYPES: dict[str, type[SerializableAction]] = {}
 
 
 event_type = make_serializable_type_registrar(

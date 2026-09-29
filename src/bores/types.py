@@ -25,7 +25,7 @@ __all__ = [
     "Preconditioner",
     "RelativePermeabilities",
     "Solver",
-    "SolverFunc",
+    "SolverFunction",
     "ThreeDimensionalGrid",
     "ThreeDimensions",
     "TwoDimensionalGrid",
@@ -266,7 +266,7 @@ SolverStr = (
 )
 
 
-class SolverFunc(typing.Protocol):
+class SolverFunction(typing.Protocol):
     """
     Protocol for a solver function compatible with SciPy's linear solvers.
     """
@@ -285,7 +285,7 @@ class SolverFunc(typing.Protocol):
     ) -> npt.NDArray: ...
 
 
-Solver = SolverFunc | SolverStr
+Solver = SolverFunction | SolverStr
 
 
 class MixingRuleFunc(typing.Protocol):

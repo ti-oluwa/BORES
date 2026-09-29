@@ -36,7 +36,7 @@ from bores.types import (
     Preconditioner,
     PreconditionerFactory,
     Solver,
-    SolverFunc,
+    SolverFunction,
     T,
     ThreeDimensionalGrid,
     ThreeDimensions,
@@ -623,7 +623,7 @@ def _spsolve(
     M: typing.Any | None,
     callback: typing.Callable[[npt.NDArray], None] | None,
 ) -> tuple[npt.NDArray, int]:
-    """Direct (SPSOLVE) solver wrapper compatible with the standard `SolverFunc` interface"""
+    """Direct (SPSOLVE) solver wrapper compatible with the standard `SolverFunction` interface"""
     return spsolve(A, b), 0  # type: ignore[return-value]
 
 
@@ -641,7 +641,7 @@ def _lgmres(
     outer_k: int = 5,
 ) -> tuple[npt.NDArray, int]:
     """
-    LGMRES solver wrapper compatible with the standard `SolverFunc` interface,
+    LGMRES solver wrapper compatible with the standard `SolverFunction` interface,
     with configurable inner/outer iteration parameters.
 
     :param inner_m: Number of inner GMRES iterations per restart.
@@ -674,7 +674,7 @@ def _minres(
     shift: float = 0.0,
 ) -> tuple[npt.NDArray, int]:
     """
-    MINRES solver wrapper compatible with the standard `SolverFunc` interface.
+    MINRES solver wrapper compatible with the standard `SolverFunction` interface.
 
     MINRES is only suitable for symmetric (possibly indefinite) systems.  It
     does **not** accept `atol` directly; instead convergence is declared when
@@ -725,7 +725,7 @@ def _qmr(
     callback: typing.Callable[[npt.NDArray], None] | None,
 ) -> tuple[npt.NDArray, int]:
     """
-    QMR solver wrapper compatible with the standard `SolverFunc` interface.
+    QMR solver wrapper compatible with the standard `SolverFunction` interface.
 
     SciPy's `~scipy.sparse.linalg.qmr` uses a *split* preconditioner
     `(M1, M2)` rather than the single `M` used by every other solver here.
@@ -1041,7 +1041,7 @@ def get_preconditioner_factory(name: str) -> PreconditionerFactory:
 
 
 @typing.overload
-def solver_func(func: SolverFunc) -> SolverFunc: ...
+def solver_func(func: SolverFunction) -> SolverFunction: ...
 
 
 @typing.overload
@@ -1049,22 +1049,22 @@ def solver_func(
     func: None = None,
     name: str | None = None,
     override: bool = False,
-) -> typing.Callable[[SolverFunc], SolverFunc]: ...
+) -> typing.Callable[[SolverFunction], SolverFunction]: ...
 
 
 @typing.overload
 def solver_func(
-    func: SolverFunc,
+    func: SolverFunction,
     name: str | None = None,
     override: bool = False,
-) -> SolverFunc: ...
+) -> SolverFunction: ...
 
 
 def solver_func(
-    func: SolverFunc | None = None,
+    func: SolverFunction | None = None,
     name: str | None = None,
     override: bool = False,
-) -> SolverFunc | typing.Callable[[SolverFunc], SolverFunc]:
+) -> SolverFunction | typing.Callable[[SolverFunction], SolverFunction]:
     """
     Decorator to register a solver function.
 
@@ -1078,7 +1078,7 @@ def solver_func(
     :return: The original function, unmodified.
     """
 
-    def decorator(func: SolverFunc) -> SolverFunc:
+    def decorator(func: SolverFunction) -> SolverFunction:
         with _solver_registry_lock:
             key = name or getattr(func, "__name__", None)
             if not key:
@@ -1109,7 +1109,7 @@ def list_solver_funcs() -> list[str]:
         return list(_SOLVER_FUNCS.keys())
 
 
-def get_solver_func(name: str) -> SolverFunc | None:
+def get_solver_func(name: str) -> SolverFunction | None:
     """
     Get a registered solver function by name.
 
@@ -1158,7 +1158,7 @@ def _get_preconditioner(
 
 def _get_solver_func(
     solver: Solver | typing.Iterable[Solver],
-) -> list[SolverFunc]:
+) -> list[SolverFunction]:
     """
     Get solver functions from a solver specification.
 
