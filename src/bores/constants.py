@@ -762,6 +762,72 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         description="density * gravitational_acceleration * length already lands in Pa for SI units - no conversion needed.",
         unit="dimensionless",
     ),
+    "RATE_TIME_FACTOR_FIELD": Constant(
+        value=1.0 / 86400.0,
+        description=(
+            "Multiply a rate expressed per FIELD time unit (day) by this "
+            "to get a per-second rate (1 / 86400 seconds-per-day), so "
+            "velocity/Reynolds-number calculations match the per-second "
+            "gravitational_acceleration every wellbore correlation's "
+            "hydrostatic term already uses."
+        ),
+        unit="day/s",
+    ),
+    "RATE_TIME_FACTOR_METRIC": Constant(
+        value=1.0 / 86400.0,
+        description="Same reasoning and value as RATE_TIME_FACTOR_FIELD - METRIC also reports rates per day.",
+        unit="day/s",
+    ),
+    "RATE_TIME_FACTOR_LAB": Constant(
+        value=1.0 / 3600.0,
+        description=(
+            "Multiply a rate expressed per LAB time unit (hour) by this "
+            "to get a per-second rate (1 / 3600 seconds-per-hour) - same "
+            "reasoning as RATE_TIME_FACTOR_FIELD."
+        ),
+        unit="hr/s",
+    ),
+    "RATE_TIME_FACTOR_SI": Constant(
+        value=1.0,
+        description="SI already reports rates per second - already 1:1, included for a uniform per-system lookup.",
+        unit="dimensionless",
+    ),
+    "VISCOSITY_SCALE_FIELD": Constant(
+        value=6.71968975e-4,
+        description=(
+            "Converts viscosity from FIELD's reporting unit (cP) to the "
+            "coherent unit FIELD's Reynolds-number calculation needs "
+            "(lbm/(ft*s), matching density in lbm/ft3 and velocity in "
+            "ft/s): 1 cP = 0.001 Pa*s = 0.001 kg/(m*s), converted to "
+            "lbm/(ft*s) via mass and length factors."
+        ),
+        unit="(lbm/(ft*s))/cP",
+    ),
+    "VISCOSITY_SCALE_METRIC": Constant(
+        value=0.001,
+        description=(
+            "Converts viscosity from METRIC's reporting unit (cP) to the "
+            "coherent unit METRIC's Reynolds-number calculation needs "
+            "(Pa*s = kg/(m*s), matching density in kg/m3 and velocity in "
+            "m/s): 1 cP = 0.001 Pa*s."
+        ),
+        unit="Pa*s/cP",
+    ),
+    "VISCOSITY_SCALE_LAB": Constant(
+        value=0.01,
+        description=(
+            "Converts viscosity from LAB's reporting unit (cP) to the "
+            "coherent CGS unit LAB's Reynolds-number calculation needs "
+            "(Poise = g/(cm*s), matching density in g/cm3 and velocity "
+            "in cm/s): 1 cP = 0.01 Poise."
+        ),
+        unit="P/cP",
+    ),
+    "VISCOSITY_SCALE_SI": Constant(
+        value=1.0,
+        description="SI already reports viscosity in the coherent unit (Pa*s) its Reynolds-number calculation needs - no conversion.",
+        unit="dimensionless",
+    ),
     # Reservoir `Fluid` Defaults
     "RESERVOIR_GAS": Constant(
         value="Methane",

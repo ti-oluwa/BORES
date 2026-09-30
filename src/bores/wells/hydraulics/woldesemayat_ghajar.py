@@ -26,7 +26,6 @@ from bores.wells.hydraulics.base import (
     compute_static_hydrostatic_drop,
     compute_static_mixture_density,
     compute_superficial_velocity,
-    get_rate_time_factor,
     get_unit_system_constant,
     split_liquid_gas,
 )
@@ -165,7 +164,9 @@ class WoldesemayatGhajarWellbore(typing.NamedTuple):
             tubing_inner_diameter=self.tubing_inner_diameter * length_factor,
             tubing_roughness=self.tubing_roughness * length_factor,
             gravitational_acceleration=self.gravitational_acceleration * length_factor,
-            rate_time_factor=get_rate_time_factor(target),
+            rate_time_factor=get_unit_system_constant(
+                prefix="RATE_TIME_FACTOR", unit_system=target
+            ),
             hydrostatic_scale=1.0
             / (
                 get_unit_system_constant(prefix="GRAVITATIONAL_FACTOR", unit_system=target)
@@ -261,7 +262,9 @@ def woldesemayat_ghajar_wellbore(
         friction_tolerance=(
             friction_tolerance if friction_tolerance is not None else c.COLEBROOK_TOLERANCE
         ),
-        rate_time_factor=get_rate_time_factor(unit_system),
+        rate_time_factor=get_unit_system_constant(
+            prefix="RATE_TIME_FACTOR", unit_system=unit_system
+        ),
         hydrostatic_scale=1.0
         / (
             get_unit_system_constant(prefix="GRAVITATIONAL_FACTOR", unit_system=unit_system)
@@ -625,10 +628,14 @@ def compute_perforation_pressures(
                     length=length,
                     inclination_from_vertical=inclinations_from_vertical[i],
                     superficial_liquid_velocity=compute_superficial_velocity(
-                        liquid_rate, model.tubing_inner_diameter, model.rate_time_factor
+                        rate=liquid_rate,
+                        tubing_inner_diameter=model.tubing_inner_diameter,
+                        rate_time_factor=model.rate_time_factor,
                     ),
                     superficial_gas_velocity=compute_superficial_velocity(
-                        gas_rate, model.tubing_inner_diameter, model.rate_time_factor
+                        rate=gas_rate,
+                        tubing_inner_diameter=model.tubing_inner_diameter,
+                        rate_time_factor=model.rate_time_factor,
                     ),
                     liquid_density=liquid_density,
                     gas_density=gas_density,
@@ -730,10 +737,14 @@ def compute_tubing_head_pressure(
         length=abs(dz),
         inclination_from_vertical=0.0,
         superficial_liquid_velocity=compute_superficial_velocity(
-            liquid_rate, model.tubing_inner_diameter, model.rate_time_factor
+            rate=liquid_rate,
+            tubing_inner_diameter=model.tubing_inner_diameter,
+            rate_time_factor=model.rate_time_factor,
         ),
         superficial_gas_velocity=compute_superficial_velocity(
-            gas_rate, model.tubing_inner_diameter, model.rate_time_factor
+            rate=gas_rate,
+            tubing_inner_diameter=model.tubing_inner_diameter,
+            rate_time_factor=model.rate_time_factor,
         ),
         liquid_density=liquid_density,
         gas_density=gas_density,

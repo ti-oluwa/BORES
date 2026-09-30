@@ -29,7 +29,6 @@ __all__ = [
     "compute_surface_mixture_density",
     "compute_surface_mixture_viscosity",
     "compute_tubing_head_pressure",
-    "get_rate_time_factor",
     "get_unit_system_constant",
     "split_liquid_gas",
 ]
@@ -161,21 +160,6 @@ def compute_mixture_viscosity(phase_rates: PhaseValues, phase_viscosities: Phase
     ) / total_rate
 
 
-def get_rate_time_factor(unit_system: UnitSystem) -> Number:
-    """
-    Gets the multiplier that converts a phase rate to a per-second rate.
-
-    FIELD, METRIC, and LAB express rates per day. SI already expresses
-    them per second.
-
-    :param unit_system: Unit system the rate is expressed in.
-    :returns: Factor to multiply a rate in `unit_system` by to get a per-second rate.
-    """
-    if unit_system == UnitSystem.SI:
-        return 1.0
-    return typing.cast(Number, c.DAYS_PER_SECOND)
-
-
 @numba.njit(cache=True)
 def compute_superficial_velocity(
     rate: Number, tubing_inner_diameter: Number, rate_time_factor: Number
@@ -183,11 +167,19 @@ def compute_superficial_velocity(
     """
     Converts a single phase's rate to a superficial velocity in tubing.
 
-    :param rate: Phase rate at reservoir conditions, in the model's own unit system.
-    :param tubing_inner_diameter: Tubing inner diameter.
-    :param rate_time_factor: Multiplier converting `rate` to a per-second
-        rate, so the velocity matches the per-second `gravitational_acceleration`.
-    :returns: Superficial velocity.
+    :param rate: Phase rate at reservoir conditions, in the model's own
+        unit system's own reporting time unit (day for FIELD/METRIC,
+        hour for LAB, second for SI - see `UnitConversionFactors.time`).
+    :param tubing_inner_diameter: Tubing inner diameter, in the model's
+        own unit system's length unit.
+    :param rate_time_factor: `c.RATE_TIME_FACTOR_<unit_system>` -
+        seconds per that system's own time unit. Converts `rate` to a
+        per-second rate, so the resulting velocity is per second,
+        matching the per-second `gravitational_acceleration` every
+        wellbore correlation's hydrostatic term already uses, in every
+        unit system (FIELD: ft/s; METRIC/SI: m/s; LAB: cm/s).
+    :returns: Superficial velocity, per second, in the model's own
+        unit system's length unit.
     :raises ValueError: If `tubing_inner_diameter` isn't positive.
     """
     if tubing_inner_diameter <= 0.0:
@@ -202,14 +194,19 @@ def compute_mixture_velocity(
     """
     Computes the no-slip superficial velocity of a multiphase stream in tubing.
 
-    :param phase_rates: Rate of each phase at reservoir conditions, in the model's own unit system.
+    :param phase_rates: Rate of each phase at reservoir conditions, in
+        the model's own unit system's own reporting time unit.
     :param tubing_inner_diameter: Tubing inner diameter.
-    :param rate_time_factor: Multiplier converting a rate to a per-second rate.
-    :returns: Mixture velocity.
+    :param rate_time_factor: `c.RATE_TIME_FACTOR_<unit_system>` - see `compute_superficial_velocity`.
+    :returns: Mixture velocity, per second.
     :raises ValueError: If `tubing_inner_diameter` isn't positive.
     """
     total_rate = phase_rates.oil + phase_rates.water + phase_rates.gas
-    return compute_superficial_velocity(total_rate, tubing_inner_diameter, rate_time_factor)
+    return compute_superficial_velocity(
+        rate=total_rate,
+        tubing_inner_diameter=tubing_inner_diameter,
+        rate_time_factor=rate_time_factor,
+    )
 
 
 def compute_surface_mixture_density(
@@ -365,6 +362,7 @@ def compute_segment_pressure_drop(
     mixture_velocity_out: Number,
     gravitational_acceleration: Number,
     hydrostatic_scale: Number,
+    viscosity_scale: Number,
     method: int,
     laminar_reynolds_limit: Number,
     turbulent_reynolds_limit: Number,
@@ -392,6 +390,11 @@ def compute_segment_pressure_drop(
         term, since both are that same kind of quantity before
         conversion; without it, friction comes out several thousand
         times too large relative to hydrostatic in field units.
+    :param viscosity_scale: `c.VISCOSITY_SCALE_<unit_system>` - converts
+        `mixture_viscosity` from that unit system's reporting unit (cP
+        for FIELD/METRIC/LAB, already Pa*s for SI) to the coherent unit
+        the Reynolds number needs to come out dimensionless, matching
+        `mixture_density`/velocity/`tubing_inner_diameter`.
     :param method: Forwarded to `compute_friction_factor`.
     :param laminar_reynolds_limit: Forwarded to `compute_friction_factor`.
     :param turbulent_reynolds_limit: Forwarded to `compute_friction_factor`.
@@ -409,7 +412,10 @@ def compute_segment_pressure_drop(
         0.0 if math.isnan(tubing_roughness) else tubing_roughness / tubing_inner_diameter
     )
     reynolds_number = (
-        mixture_density * abs(mean_velocity) * tubing_inner_diameter / mixture_viscosity
+        mixture_density
+        * abs(mean_velocity)
+        * tubing_inner_diameter
+        / (mixture_viscosity * viscosity_scale)
     )
     if reynolds_number <= 0.0:
         friction_drop = 0.0

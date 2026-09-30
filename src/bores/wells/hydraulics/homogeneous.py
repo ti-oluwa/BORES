@@ -29,7 +29,6 @@ from bores.wells.hydraulics.base import (
     compute_static_mixture_density,
     compute_surface_mixture_density,
     compute_surface_mixture_viscosity,
-    get_rate_time_factor,
     get_unit_system_constant,
 )
 from bores.wells.state import ConnectionSample, PhaseValues
@@ -80,6 +79,13 @@ class HomogeneousWellbore(typing.NamedTuple):
     per-second `gravitational_acceleration`.
     """
 
+    viscosity_scale: Number
+    """
+    `c.VISCOSITY_SCALE_<unit_system>` - converts a viscosity from this
+    unit system's reporting unit (cP for FIELD/METRIC/LAB, already Pa*s
+    for SI) to the coherent unit the Reynolds number needs.
+    """
+
     hydrostatic_scale: Number
     """
     Unit-conversion factor converting a `density * velocity-squared` or
@@ -115,7 +121,10 @@ class HomogeneousWellbore(typing.NamedTuple):
             tubing_inner_diameter=self.tubing_inner_diameter * length_factor,
             tubing_roughness=self.tubing_roughness * length_factor,
             gravitational_acceleration=self.gravitational_acceleration * length_factor,
-            rate_time_factor=get_rate_time_factor(target),
+            rate_time_factor=get_unit_system_constant(
+                prefix="RATE_TIME_FACTOR", unit_system=target
+            ),
+            viscosity_scale=get_unit_system_constant(prefix="VISCOSITY_SCALE", unit_system=target),
             hydrostatic_scale=1.0
             / (
                 get_unit_system_constant(prefix="GRAVITATIONAL_FACTOR", unit_system=target)
@@ -196,7 +205,12 @@ def homogeneous_wellbore(
         friction_tolerance=(
             friction_tolerance if friction_tolerance is not None else c.COLEBROOK_TOLERANCE
         ),
-        rate_time_factor=get_rate_time_factor(unit_system),
+        rate_time_factor=get_unit_system_constant(
+            prefix="RATE_TIME_FACTOR", unit_system=unit_system
+        ),
+        viscosity_scale=get_unit_system_constant(
+            prefix="VISCOSITY_SCALE", unit_system=unit_system
+        ),
         hydrostatic_scale=1.0
         / (
             get_unit_system_constant(prefix="GRAVITATIONAL_FACTOR", unit_system=unit_system)
@@ -240,6 +254,7 @@ def compute_segment_drop(
         mixture_velocity_out=mixture_velocity_out,
         gravitational_acceleration=model.gravitational_acceleration,
         hydrostatic_scale=model.hydrostatic_scale,
+        viscosity_scale=model.viscosity_scale,
         method=model.friction_method,
         laminar_reynolds_limit=model.laminar_reynolds_limit,
         turbulent_reynolds_limit=model.turbulent_reynolds_limit,
