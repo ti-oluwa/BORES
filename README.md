@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/logo.svg" alt="BORES Logo" width="200">
+  <img src="docs/images/logo.svg" alt="BORES Logo" width="150">
 </p>
 
 <h2 align="center">BORES</h2>
