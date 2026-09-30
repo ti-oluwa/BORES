@@ -337,7 +337,7 @@ class RecordSummary(SerializableAction[ModelT]):
 
     __type__: typing.ClassVar[str] = "record_summary"
 
-    quantities: tuple[SerializableSummary, ...] = attrs.field(converter=tuple)
+    quantities: tuple[SerializableSummary[ModelT], ...] = attrs.field(converter=tuple)
     """Every vector to evaluate and record when this action fires."""
 
     def __call__(self, model: ModelT, context: ScheduleContext) -> ModelT:

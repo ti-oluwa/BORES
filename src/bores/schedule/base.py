@@ -302,30 +302,38 @@ class Schedule(
             return o in self._items_map
         return o in self.items
 
-    def __add__(self, other: Self) -> Self:
+    def __add__(self, other: Self | ScheduleItem[ModelT]) -> Self:
         """
         Concatenates two schedules' items, in order, keeping duplicates.
 
         :param other: The schedule to append.
         :returns: A new `Schedule` with `self`'s items followed by `other`'s.
         """
-        if not isinstance(other, Schedule):
+        if isinstance(other, ScheduleItem):
+            other_items = (other,)
+        elif isinstance(other, Schedule):
+            other_items = other.items
+        else:
             return NotImplemented
-        return self.__class__(items=self.items + other.items)
+        return self.__class__(items=self.items + other_items)
 
-    def __sub__(self, other: Self) -> Self:
+    def __sub__(self, other: Self | ScheduleItem[ModelT]) -> Self:
         """
         Removes any items from `self` that have the same name as an item in `other`.
 
         :param other: The schedule whose item names to remove.
         :returns: A new `Schedule` with only items whose names are not in `other`.
         """
-        if not isinstance(other, Schedule):
+        if isinstance(other, ScheduleItem):
+            other_names = {other.name}
+        elif isinstance(other, Schedule):
+            other_names = other._items_map
+        else:
             return NotImplemented
-        kept = tuple(item for item in self.items if item.name not in other._items_map)
+        kept = tuple(item for item in self.items if item.name not in other_names)
         return self.__class__(items=kept)
 
-    def __or__(self, other: Self) -> Self:
+    def __or__(self, other: Self | ScheduleItem[ModelT]) -> Self:
         """
         Merges two schedules, `other`'s named items overriding `self`'s
         own items of the same name. Unnamed items from both are kept, never merged.
@@ -333,7 +341,13 @@ class Schedule(
         :param other: The schedule to merge in.
         :returns: A new, merged `Schedule`.
         """
-        if not isinstance(other, Schedule):
+        if isinstance(other, ScheduleItem):
+            other_items = (other,)
+            other_names = {other.name}
+        elif isinstance(other, Schedule):
+            other_items = other.items
+            other_names = other._items_map
+        else:
             return NotImplemented
-        kept = tuple(item for item in self.items if item.name not in other._items_map)
-        return self.__class__(items=kept + other.items)
+        kept = tuple(item for item in self.items if item.name not in other_names)
+        return self.__class__(items=kept + other_items)

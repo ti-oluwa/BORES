@@ -336,8 +336,10 @@ DEFAULT_KEYWORDS = frozenset({
 
 class DeckFile:
     """
-    A parsed Eclipse deck file: comment-stripped, `INCLUDE`-resolved text plus a
-    registry of `bores.deck.keywords.base.Keyword` objects, exposed through `get`.
+    A parsed Eclipse deck (*.DATA / *.GRDECL) file.
+
+    Comment-stripped, `INCLUDE`-resolved text plus a registry of `bores.deck.keywords.base.Keyword`
+    objects, exposed through `get`.
 
     **Usage**:
 
@@ -346,8 +348,10 @@ class DeckFile:
     from bores.deck import keywords as k
 
     df = DeckFile("path/to/model.DATA")
-    poro = df.get("PORO")  # ndarray (n_cells,) or None (string - poor typing support)
-    faults = df.get(k.FAULTS)  # List[Dict] or None (this - better typing support)
+    poro = df.get(
+        "PORO"
+    )  # typing.Any but actually np.ndarray (n_cells,) or None (poor typing support)
+    faults = df.get(k.FAULTS)  # list[dict[str, typing.Any]] or None (better typing support)
 
     # With extra keywords not in the default set:
     df2 = DeckFile(text, keywords=DEFAULT_KEYWORDS | [MyCustomKeyword()])

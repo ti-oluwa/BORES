@@ -67,6 +67,10 @@ __all__ = [
     "SetWellControls",
     "SetWellTarget",
     "SetWellTargets",
+    "ShutInWell",
+    "ShutInWells",
+    "UpdateWellStatus",
+    "UpdateWellStatuses",
     "as_number_or_array",
     "broadcast_or_match",
     "expand_values",
@@ -273,7 +277,7 @@ def get_many_matching_connection_rows(
 
 @action_type
 @attrs.frozen(kw_only=True, slots=True)
-class OpenWell(SerializableAction["CompiledBlackOilModel"]):
+class UpdateWellStatus(SerializableAction["CompiledBlackOilModel"]):
     """
     Opens or shuts a whole well, or specific connections on it. Build
     this directly for a manual shut-in exactly as freely as any other
@@ -324,6 +328,32 @@ class OpenWell(SerializableAction["CompiledBlackOilModel"]):
         )
         wells.perforations.set_completion_status(row=rows, status=self.status)
         return model
+
+
+@action_type
+@attrs.frozen(kw_only=True, slots=True)
+class OpenWell(UpdateWellStatus):
+    """Sets a well's targeted completion status to `OPEN`."""
+
+    __type__: typing.ClassVar[str] = "open_well_completion"
+
+    status: CompletionStatus = attrs.field(
+        default=CompletionStatus.OPEN,
+        validator=attrs.validators.in_((CompletionStatus.OPEN,)),
+    )
+
+
+@action_type
+@attrs.frozen(kw_only=True, slots=True)
+class ShutInWell(UpdateWellStatus):
+    """Sets a well's targeted completion status to `SHUT`."""
+
+    __type__: typing.ClassVar[str] = "shut_in_well_completion"
+
+    status: CompletionStatus = attrs.field(
+        default=CompletionStatus.SHUT,
+        validator=attrs.validators.in_((CompletionStatus.SHUT,)),
+    )
 
 
 @action_type
@@ -733,9 +763,9 @@ class ActivateWells(SerializableAction["CompiledBlackOilModel"]):
 
 @action_type
 @attrs.frozen(kw_only=True, slots=True)
-class OpenWells(SerializableAction["CompiledBlackOilModel"]):
+class UpdateWellStatuses(SerializableAction["CompiledBlackOilModel"]):
     """
-    `OpenWell`, applied to several wells at once, all against the same
+    `UpdateWellStatus`, applied to several wells at once, all against the same
     targeted connection(s).
     """
 
@@ -791,6 +821,32 @@ class OpenWells(SerializableAction["CompiledBlackOilModel"]):
             status = expand_values(status, counts=counts)
         wells.perforations.set_completion_status(row=rows, status=status)
         return model
+
+
+@action_type
+@attrs.frozen(kw_only=True, slots=True)
+class OpenWells(UpdateWellStatuses):
+    """Sets the targeted completions on several wells to `OPEN`."""
+
+    __type__: typing.ClassVar[str] = "bulk_open_wells"
+
+    status: CompletionStatus = attrs.field(
+        default=CompletionStatus.OPEN,
+        validator=attrs.validators.in_((CompletionStatus.OPEN,)),
+    )
+
+
+@action_type
+@attrs.frozen(kw_only=True, slots=True)
+class ShutInWells(UpdateWellStatuses):
+    """Sets the targeted completions on several wells to `SHUT`."""
+
+    __type__: typing.ClassVar[str] = "bulk_shut_in_wells"
+
+    status: CompletionStatus = attrs.field(
+        default=CompletionStatus.SHUT,
+        validator=attrs.validators.in_((CompletionStatus.SHUT,)),
+    )
 
 
 @action_type

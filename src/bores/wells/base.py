@@ -406,6 +406,16 @@ class Well(Serializable):
                 )
 
     @property
+    def is_injector(self) -> bool:
+        """`True` if `well_type is WellType.INJECTOR`."""
+        return self.well_type is WellType.INJECTOR
+
+    @property
+    def is_producer(self) -> bool:
+        """`True` if `well_type is WellType.PRODUCER`."""
+        return self.well_type is WellType.PRODUCER
+
+    @property
     def n_perforations(self) -> int:
         """Total perforation count, including any with `CompletionStatus.SHUT`."""
         return len(self.perforations)

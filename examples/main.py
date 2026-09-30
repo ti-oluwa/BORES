@@ -14,18 +14,17 @@ from bores.types import UnitSystem
 from bores.wells.hydraulics.homogeneous import homogeneous_wellbore
 
 df = DeckFile(
-    "data/SPE1CASE1.DATA",
+    "/home/tioluwa/Projects/nagcsu/runs_new/auto_final/NigerDelta UGH1 Composite Field.DATA",
     encoding="utf-8",
     unit_system=UnitSystem.FIELD,
 )
 
-default_wellbore = homogeneous_wellbore(tubing_inner_diameter=2.5, unit_system=UnitSystem.FIELD)
 
-# One call gets you a compiled model, initial reservoir state, and schedule,
-# all read straight off the deck.
-case = SimulationCase.from_deck(df, default_wellbore=default_wellbore, temperature=200.0)
+# Load the simultion case from the deck.
+wellbore = homogeneous_wellbore(tubing_inner_diameter=2.5, unit_system=UnitSystem.FIELD)
+case = SimulationCase.from_deck(df, default_wellbore=wellbore, temperature=200.0)
 
-# Fluid model, straight off the compiled case
+# Fluid model, from the compiled case
 pvt = case.model.fluid.pvt
 oil_table = pvt.region(1).tables.oil
 assert oil_table is not None, "`oil_table` should not be None"

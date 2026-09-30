@@ -56,11 +56,11 @@ from bores.wells.schedule import (
     ActivateCompletion,
     ActivateWell,
     MultiplyConnectionFactor,
-    OpenWell,
     SetGroupLimit,
     SetLimit,
     SetWellControl,
     SetWellTarget,
+    UpdateWellStatus,
 )
 from bores.wells.trajectory import TrajectoryStation, WellTrajectory
 
@@ -1360,7 +1360,7 @@ def load_summary_items(
 
     Every requested vector is recorded together at every report time (a
     `TSTEP`/`DATES` boundary), matching Eclipse's own default summary
-    output behavior - a `SUMMARY` declaration has no cadence of its own,
+    output behavior. A `SUMMARY` declaration has no cadence of its own,
     unlike a `SCHEDULE`-section keyword's `schedule_time`. A well
     keyword with no object list (`WOPR` alone, say) requests every well
     ever mentioned via `WELSPECS`, matching Eclipse's own default.
@@ -1379,16 +1379,16 @@ def load_summary_items(
     """
     well_names = [record["well"] for record in deck_file.get("WELSPECS") or []]
 
-    quantities: list[SerializableSummary] = []
-    for mnemonic, field_cls in FIELD_SUMMARY_VECTORS.items():
+    quantities: list[SerializableSummary[CompiledBlackOilModel]] = []
+    for mnemonic, field_summary_cls in FIELD_SUMMARY_VECTORS.items():
         if deck_file.get(mnemonic) is not None:
-            quantities.append(field_cls())
+            quantities.append(field_summary_cls())
 
-    for mnemonic, well_cls in WELL_SUMMARY_VECTORS.items():
+    for mnemonic, well_summary_cls in WELL_SUMMARY_VECTORS.items():
         requested = deck_file.get(mnemonic)
         if requested is None:
             continue
-        quantities.extend(well_cls(well_name=name) for name in (requested or well_names))
+        quantities.extend(well_summary_cls(well_name=name) for name in (requested or well_names))
 
     if not quantities:
         return []
@@ -1475,7 +1475,7 @@ def load_schedule(
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
-        action = OpenWell(
+        action = UpdateWellStatus(
             well_name=record["well"],
             status=WELOPEN_STATUS_MAP[record["status"]],
             i=record.get("i", 0),

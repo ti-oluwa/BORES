@@ -2,7 +2,7 @@
   <img src="docs/images/logo.svg" alt="BORES Logo" width="200">
 </p>
 
-<h1 align="center">BORES</h1>
+<h2 align="center">BORES</h2>
 
 <p align="center">
   <strong>Black-Oil Reservoir Simulation Framework</strong>
@@ -12,10 +12,10 @@
 [![PyPI](https://img.shields.io/pypi/v/bores-framework)](https://pypi.org/project/bores-framework/)
 [![License](https://img.shields.io/github/license/ti-oluwa/bores)](LICENSE)
 
-BORES is a Python framework for 2D/3D block grid black-oil reservoir simulation of three-phase (oil, water, gas) flow in porous media. You can build a simulation case by hand through its Python API or load one straight from an Eclipse/GRDECL-style deck, then run and analyze the simulation.
+BORES is a Python framework for 2D/3D block grid black-oil reservoir simulation of three-phase (oil, water, gas) flow in porous media. You can build a simulation case by hand through ease-to-use APIs or load one straight from an Eclipse/GRDECL-style deck, then run and analyze the simulation.
 
 > [!IMPORTANT]
-> **Disclaimer**: BORES is designed for **educational, research, and prototyping purposes**. It is not production-grade software and should not be used for critical business decisions or regulatory compliance. Results should be validated against established commercial simulators before any real-world application.
+> **Disclaimer**: BORES' goal is to support **educational, research, and prototyping** work. It is not production-grade code yet and should not be used for critical business decisions or regulatory compliance. Results should be validated against established simulators before any real-world application.
 
 **Full documentation @** [https://ti-oluwa.github.io/BORES](https://ti-oluwa.github.io/BORES)
 
@@ -67,11 +67,9 @@ df = DeckFile(
     unit_system=UnitSystem.FIELD,
 )
 
-default_wellbore = homogeneous_wellbore(tubing_inner_diameter=2.5, unit_system=UnitSystem.FIELD)
-
-# One call gets you a compiled model, initial reservoir state, and schedule,
-# all read straight off the deck.
-case = SimulationCase.from_deck(df, default_wellbore=default_wellbore, temperature=200.0)
+# One call loads the compiled model, initial reservoir state, and schedule, all read from the deck.
+wellbore = homogeneous_wellbore(tubing_inner_diameter=2.5, unit_system=UnitSystem.FIELD)
+case = SimulationCase.from_deck(df, default_wellbore=wellbore, temperature=200.0)
 
 grid = case.model.reservoir.grid
 print(f"cells: {grid.n_cells}, faces: {grid.n_faces}, bbox: {grid.bounding_box}")
@@ -86,7 +84,7 @@ See `examples/` for a fuller version of this, including grid visualization with 
 
 ## Features
 
-What's actually working right now:
+What's sort-off working right now (not fully tested yet):
 
 - Eclipse/GRDECL-style deck parsing, including grid, PVT, saturation function, and region keywords, plus `BOX`/`EQUALS`/`ADD`/`MULTIPLY`/`COPY`/`MAXVALUE`/`MINVALUE` operators
 - Cartesian and corner-point (free-form) grid construction, with faults, NNCs, and transmissibility multipliers
@@ -97,7 +95,7 @@ What's actually working right now:
 - Boundary conditions, including Carter-Tracy and Fetkovich analytic aquifers and flux-specified aquifers, attached to grid faces through `AQUANCON`, fully compiled into the solver's data structures
 - Well models with BHP/rate control, and a schedule/event API for time-varying well and group behavior
 - `SimulationCase`, loading a full compiled model, initial state, and schedule from a deck in one call, with a run workspace (reservoir, wells, boundary conditions) built lazily off that
-- Multiple linear solvers (BiCGSTAB, GMRES, CG, direct) with preconditioner support (ILU, AMG, CPR)
+- Multiple linear solvers (BiCGSTAB, GMRES, CG, direct, etc.) with preconditioner support (from SciPy) (ILU, AMG, CPR)
 - HDF5, Zarr, JSON, and YAML storage backends with serialization
 
 In progress:
@@ -106,10 +104,10 @@ In progress:
 
 Planned, not started yet:
 
-- Consolidating unit handling onto a single `units` module and retiring the overlapping bits currently in `constants`
+- Consolidating unit handling onto the `units` module and retiring the overlapping bits currently in `constants`
 - A fully implicit solver kernel, with an IMPES scheme possibly following once that's stable
-- Todd-Longstaff miscible flooding with pressure-dependent miscibility
-- Plotly-based visualization (1D time series, 2D maps, 3D volume rendering)
+- Todd-Longstaff miscible flooding with pressure-dependent miscibility (Solvent support)
+- Custom visualization API for model state, simulation or analyses results (1D time series, 2D maps, 3D volume/section rendering)
 - Post-simulation analysis (recovery factors, sweep efficiency, front tracking)
 
 ## Citing BORES
@@ -127,9 +125,9 @@ If you use BORES in academic work, please cite it as:
 
 ## Contributing
 
-BORES is being developed by a graduate petroleum engineer with just theoretical knowledge and little research experience. The project does not have the benefit of decades of field experience backing its implementations, so contributions from practitioners and researchers are welcome.
+BORES is being developed by a graduate petroleum engineer with just theoretical/research knowledge and little experience. The project does not have the benefit of decades of field/research experience backing its implementation (atleast in code), so contributions, issues, bug report and fixes, from students,researchers, and domain experts are very welcome and appreciated.
 
-**Reporting issues**: If you find bugs, inaccuracies in the physics, or unexpected behavior, please [open an issue](https://github.com/ti-oluwa/bores/issues) on GitHub with a clear description and, if possible, a minimal example that reproduces the problem.
+**Reporting issues**: If you find bugs, inaccuracies in the physics, or unexpected behavior, please [open an issue](https://github.com/ti-oluwa/bores/issues) on GitHub with a clear description and, if possible, a minimal example that reproduces the problem. Even better, draft a fix and submit a pull request for review.
 
 **Improvements**: Pull requests for bug fixes, documentation improvements, and enhancements that fall within the scope of a black-oil reservoir simulation framework are welcome. Please keep changes focused and well-tested. Given the migration in progress, it's worth opening an issue first to check a change still fits before putting work into a PR.
 

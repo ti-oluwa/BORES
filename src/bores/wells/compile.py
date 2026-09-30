@@ -1327,10 +1327,10 @@ class CompiledGroupControls(typing.NamedTuple):
     """This group's own `GECON` economic limits, one row per group even when empty."""
 
     @typing.overload
-    def group_row(self, *, name: str) -> Integer: ...  # type: ignore
+    def group_row(self, name: str) -> Integer: ...  # type: ignore
     @typing.overload
-    def group_row(self, *, name: typing.Iterable[str]) -> list[Integer]: ...
-    def group_row(self, *, name: str | typing.Iterable[str]) -> Integer | list[Integer]:
+    def group_row(self, name: typing.Iterable[str]) -> list[Integer]: ...
+    def group_row(self, name: str | typing.Iterable[str]) -> Integer | list[Integer]:
         """
         A group's row, by name.
 
@@ -1383,10 +1383,10 @@ class CompiledWellSystem(typing.NamedTuple):
     """Unit system used to interpret the compiled well data."""
 
     @typing.overload
-    def well_row(self, *, name: str) -> Integer: ...  # type: ignore
+    def well_row(self, name: str) -> Integer: ...  # type: ignore
     @typing.overload
-    def well_row(self, *, name: typing.Iterable[str]) -> list[Integer]: ...
-    def well_row(self, *, name: str | typing.Iterable[str]) -> Integer | list[Integer]:
+    def well_row(self, name: typing.Iterable[str]) -> list[Integer]: ...
+    def well_row(self, name: str | typing.Iterable[str]) -> Integer | list[Integer]:
         """
         A well's row, by name.
 
@@ -1401,12 +1401,54 @@ class CompiledWellSystem(typing.NamedTuple):
                 raise ValidationError(f"No well named {name!r} in this compiled system.") from None
         return [self.well_row(name=one_name) for one_name in name]
 
-    def has_well(self, *, name: str) -> bool:
+    def has_well(self, name: str) -> bool:
         """
         :param name: The well to check for.
         :returns: Whether a well with this name exists in this system.
         """
         return name in self.names
+
+    def is_injector(self, well: str | Integer) -> bool:
+        """Whether `well`, given by name or row, is an injector."""
+        well_row = self.well_row(name=well) if isinstance(well, str) else well
+        return self.well_kinds[well_row] == WellKind.INJECTOR
+
+    def is_producer(self, well: str | Integer) -> bool:
+        """Whether `well`, given by name or row, is a producer."""
+        well_row = self.well_row(name=well) if isinstance(well, str) else well
+        return self.well_kinds[well_row] == WellKind.PRODUCER
+
+    @typing.overload
+    def get_producers(self, *, row: typing.Literal[False] = False) -> tuple[str, ...]: ...
+    @typing.overload
+    def get_producers(self, *, row: typing.Literal[True]) -> tuple[Integer, ...]: ...
+    def get_producers(self, *, row: bool = False) -> tuple[str, ...] | tuple[Integer, ...]:
+        """Returns producer names, or their row indices when `row` is `True`."""
+        if row:
+            return tuple(
+                index for index, kind in enumerate(self.well_kinds) if kind == WellKind.PRODUCER
+            )
+        return tuple(
+            name
+            for name, kind in zip(self.names, self.well_kinds, strict=True)
+            if kind == WellKind.PRODUCER
+        )
+
+    @typing.overload
+    def get_injectors(self, *, row: typing.Literal[False] = False) -> tuple[str, ...]: ...
+    @typing.overload
+    def get_injectors(self, *, row: typing.Literal[True]) -> tuple[Integer, ...]: ...
+    def get_injectors(self, *, row: bool = False) -> tuple[str, ...] | tuple[Integer, ...]:
+        """Returns injector names, or their row indices when `row` is `True`."""
+        if row:
+            return tuple(
+                index for index, kind in enumerate(self.well_kinds) if kind == WellKind.INJECTOR
+            )
+        return tuple(
+            name
+            for name, kind in zip(self.names, self.well_kinds, strict=True)
+            if kind == WellKind.INJECTOR
+        )
 
     @typing.overload
     def get_well_type(self, *, well_row: Integer) -> WellType: ...
@@ -1756,6 +1798,7 @@ def _compile_limits(
 
 
 def compile_well_controls(
+    *,
     names: typing.Sequence[str],
     controls: WellControls,
     wells: Wells,
@@ -1894,6 +1937,7 @@ def compile_well_controls(
 
 def compile_group_controls(
     group_controls: GroupControls | None,
+    *,
     wells: Wells,
     names: typing.Sequence[str],
     groups: WellGroups | None = None,
