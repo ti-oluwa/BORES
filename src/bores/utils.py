@@ -451,7 +451,7 @@ def get_hydrostatic_gradient_factor(unit_system: UnitSystem) -> float:
     raise ValueError(f"Unsupported unit system: {unit_system!r}")
 
 
-TIME_UNIT_PER_UNIT_SYSTEM = {
+TIME_UNIT_PER_UNIT_SYSTEM: dict[UnitSystem, typing.Literal["days", "hours", "seconds"]] = {
     UnitSystem.FIELD: "days",
     UnitSystem.METRIC: "days",
     UnitSystem.LAB: "hours",

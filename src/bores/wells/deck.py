@@ -9,11 +9,15 @@ import attrs
 from bores.constants import c
 from bores.deck.core import DeckParseError
 from bores.deck.file import DeckFile
+from bores.deck.keywords.base import get_schedule_times
 from bores.errors import NotSupportedError, ValidationError
 from bores.grids.base import Grid
 from bores.schedule.base import Schedule, ScheduleItem
 from bores.schedule.events import TimeEvent
+from bores.schedule.summary import RecordSummary, SerializableSummary
 from bores.types import FluidPhase, UnitSystem
+from bores.utils import TIME_UNIT_PER_UNIT_SYSTEM
+from bores.wells import summary as ws
 from bores.wells.base import CompletionStatus, Perforation, Well, Wells, WellStatus, WellType
 from bores.wells.compile import LimitKind
 from bores.wells.controls import (
@@ -83,6 +87,7 @@ __all__ = [
     "load_injector_control_from_record",
     "load_producer_control_from_record",
     "load_schedule",
+    "load_summary_items",
     "load_well_controls",
     "load_well_from_records",
     "load_well_segments",
@@ -1304,6 +1309,100 @@ def load_group_controls(deck_file: DeckFile, current_time: float = 0.0) -> Group
     return controls
 
 
+FIELD_SUMMARY_VECTORS: dict[str, type[ws.FieldRate]] = {
+    "FOPR": ws.FieldOilProductionRate,
+    "FWPR": ws.FieldWaterProductionRate,
+    "FGPR": ws.FieldGasProductionRate,
+    "FLPR": ws.FieldLiquidProductionRate,
+    "FWIR": ws.FieldWaterInjectionRate,
+    "FGIR": ws.FieldGasInjectionRate,
+    "FOIR": ws.FieldOilInjectionRate,
+    "FWCT": ws.FieldWaterCut,
+    "FGOR": ws.FieldGasOilRatio,
+    "FOPT": ws.FieldOilProductionTotal,
+    "FWPT": ws.FieldWaterProductionTotal,
+    "FGPT": ws.FieldGasProductionTotal,
+    "FWIT": ws.FieldWaterInjectionTotal,
+    "FGIT": ws.FieldGasInjectionTotal,
+    "FOIT": ws.FieldOilInjectionTotal,
+}
+"""Deck mnemonic to the `bores.wells.summary` class it requests. Field-wide, no object list."""
+
+WELL_SUMMARY_VECTORS: dict[str, type[ws.WellVector]] = {
+    "WOPR": ws.WellOilProductionRate,
+    "WWPR": ws.WellWaterProductionRate,
+    "WGPR": ws.WellGasProductionRate,
+    "WLPR": ws.WellLiquidProductionRate,
+    "WWIR": ws.WellWaterInjectionRate,
+    "WGIR": ws.WellGasInjectionRate,
+    "WOIR": ws.WellOilInjectionRate,
+    "WWCT": ws.WellWaterCut,
+    "WGOR": ws.WellGasOilRatio,
+    "WBHP": ws.WellBottomHolePressure,
+    "WTHP": ws.WellTubingHeadPressure,
+    "WOPT": ws.WellOilProductionTotal,
+    "WWPT": ws.WellWaterProductionTotal,
+    "WGPT": ws.WellGasProductionTotal,
+    "WWIT": ws.WellWaterInjectionTotal,
+    "WGIT": ws.WellGasInjectionTotal,
+    "WOIT": ws.WellOilInjectionTotal,
+}
+"""Deck mnemonic to the `bores.wells.summary` class it requests. One instance per named well."""
+
+
+def load_summary_items(
+    deck_file: DeckFile, *, compiled_at: float = 0.0
+) -> list[ScheduleItem["CompiledBlackOilModel"]]:
+    """
+    Builds one `ScheduleItem` per report time from every summary-vector
+    keyword in a deck's `SUMMARY` section, for report times strictly
+    after `compiled_at`.
+
+    Every requested vector is recorded together at every report time (a
+    `TSTEP`/`DATES` boundary), matching Eclipse's own default summary
+    output behavior - a `SUMMARY` declaration has no cadence of its own,
+    unlike a `SCHEDULE`-section keyword's `schedule_time`. A well
+    keyword with no object list (`WOPR` alone, say) requests every well
+    ever mentioned via `WELSPECS`, matching Eclipse's own default.
+
+    `ROIP`/`RGIP`/`RWIP` (region in-place volumes) are recognized by
+    `FIELD_SUMMARY_VECTORS`/`WELL_SUMMARY_VECTORS`'s absence, not read:
+    no `bores.wells.summary` implementation exists for them yet.
+
+    :param deck_file: The deck to read the `SUMMARY` section from.
+    :param compiled_at: The point on the schedule clock the model this
+        schedule will run against was compiled at, in the deck's time
+        unit. Only report times strictly after this become items.
+    :returns: One `ScheduleItem` per qualifying report time, each
+        wrapping the same `RecordSummary` action, carrying every
+        requested vector.
+    """
+    well_names = [record["well"] for record in deck_file.get("WELSPECS") or []]
+
+    quantities: list[SerializableSummary] = []
+    for mnemonic, field_cls in FIELD_SUMMARY_VECTORS.items():
+        if deck_file.get(mnemonic) is not None:
+            quantities.append(field_cls())
+
+    for mnemonic, well_cls in WELL_SUMMARY_VECTORS.items():
+        requested = deck_file.get(mnemonic)
+        if requested is None:
+            continue
+        quantities.extend(well_cls(well_name=name) for name in (requested or well_names))
+
+    if not quantities:
+        return []
+
+    action = RecordSummary(quantities=tuple(quantities))
+    time_unit = TIME_UNIT_PER_UNIT_SYSTEM[deck_file.unit_system]
+    report_times = sorted(set(get_schedule_times(deck_file.deck, time_unit=time_unit).values()))
+    return [
+        ScheduleItem(event=TimeEvent(at=time), action=action, name=f"summary@{time}")
+        for time in report_times
+        if time > compiled_at
+    ]
+
+
 def load_schedule(
     deck_file: DeckFile, *, compiled_at: float = 0.0
 ) -> Schedule["CompiledBlackOilModel"]:
@@ -1341,6 +1440,9 @@ def load_schedule(
     time. Neither `CompiledLimits`' nor `CompiledGroupLimits`' CSR table
     can grow a new row mid-schedule. `RateLimit` has no deck-record
     source in this codebase at all, so it's never emitted here.
+
+    Every requested `SUMMARY`-section vector (see `load_summary_items`)
+    is added too, one item per report time strictly after `compiled_at`.
 
     :param deck_file: The deck to read schedule keywords from.
     :param compiled_at: The point on the schedule clock the model this
@@ -1569,5 +1671,6 @@ def load_schedule(
             )
         )
 
+    items.extend(load_summary_items(deck_file, compiled_at=compiled_at))
     items.sort(key=lambda rule: rule.event.at)  # type: ignore[attr-defined]
     return Schedule(items=tuple(items))

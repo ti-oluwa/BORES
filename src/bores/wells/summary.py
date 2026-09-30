@@ -33,6 +33,8 @@ __all__ = [
     "FGPR",
     "FGPT",
     "FLPR",
+    "FOIR",
+    "FOIT",
     "FOPR",
     "FOPT",
     "FWCT",
@@ -47,6 +49,8 @@ __all__ = [
     "WGPR",
     "WGPT",
     "WLPR",
+    "WOIR",
+    "WOIT",
     "WOPR",
     "WOPT",
     "WTHP",
@@ -61,6 +65,8 @@ __all__ = [
     "FieldGasProductionRate",
     "FieldGasProductionTotal",
     "FieldLiquidProductionRate",
+    "FieldOilInjectionRate",
+    "FieldOilInjectionTotal",
     "FieldOilProductionRate",
     "FieldOilProductionTotal",
     "FieldWaterCut",
@@ -75,6 +81,8 @@ __all__ = [
     "WellGasProductionRate",
     "WellGasProductionTotal",
     "WellLiquidProductionRate",
+    "WellOilInjectionRate",
+    "WellOilInjectionTotal",
     "WellOilProductionRate",
     "WellOilProductionTotal",
     "WellTubingHeadPressure",
@@ -249,6 +257,19 @@ class FieldWaterInjectionRate(FieldRate):
 
     mnemonic = "FWIR"
     array_name = "surface_water_rates"
+    kind = WellKind.INJECTOR
+
+
+@summary_type
+@attrs.frozen(kw_only=True, slots=True)
+class FieldOilInjectionRate(FieldRate):
+    """Field oil injection rate (`FOIR`). Rare in practice; Eclipse still defines it."""
+
+    __abstract_serializable__ = True
+    __type__: typing.ClassVar[str] = "field_oil_injection_rate"
+
+    mnemonic = "FOIR"
+    array_name = "surface_oil_rates"
     kind = WellKind.INJECTOR
 
 
@@ -483,6 +504,17 @@ class WellWaterInjectionRate(WellRate):
 
 @summary_type
 @attrs.frozen(kw_only=True, slots=True)
+class WellOilInjectionRate(WellRate):
+    """Well oil injection rate (`WOIR`). Rare in practice; Eclipse still defines it."""
+
+    __type__: typing.ClassVar[str] = "well_oil_injection_rate"
+
+    mnemonic = "WOIR"
+    array_name = "surface_oil_rates"
+
+
+@summary_type
+@attrs.frozen(kw_only=True, slots=True)
 class WellGasInjectionRate(WellRate):
     """Well gas injection rate (`WGIR`)."""
 
@@ -532,9 +564,9 @@ class WellWaterCut(WellVector):
         :param workspace: The run's workspace.
         :returns: The well's water cut, between `0` and `1`.
         """
-        oil = workspace.wells.surface_oil_rates[well_row]
-        water = workspace.wells.surface_water_rates[well_row]
-        return divide(numerator=water, denominator=oil + water)
+        oil_rate = workspace.wells.surface_oil_rates[well_row]
+        water_rate = workspace.wells.surface_water_rates[well_row]
+        return divide(numerator=water_rate, denominator=oil_rate + water_rate)
 
 
 @summary_type
@@ -651,6 +683,19 @@ class FieldWaterInjectionTotal(FieldRate):
 
 @summary_type
 @attrs.frozen(kw_only=True, slots=True)
+class FieldOilInjectionTotal(FieldRate):
+    """Field cumulative oil injection (`FOIT`). Rare in practice; Eclipse still defines it."""
+
+    __abstract_serializable__ = True
+    __type__: typing.ClassVar[str] = "field_oil_injection_total"
+
+    mnemonic = "FOIT"
+    array_name = "cumulative_oil_volumes"
+    kind = WellKind.INJECTOR
+
+
+@summary_type
+@attrs.frozen(kw_only=True, slots=True)
 class FieldGasInjectionTotal(FieldRate):
     """Field cumulative gas injection (`FGIT`)."""
 
@@ -708,6 +753,17 @@ class WellWaterInjectionTotal(WellRate):
 
 @summary_type
 @attrs.frozen(kw_only=True, slots=True)
+class WellOilInjectionTotal(WellRate):
+    """Well cumulative oil injection (`WOIT`). Rare in practice; Eclipse still defines it."""
+
+    __type__: typing.ClassVar[str] = "well_oil_injection_total"
+
+    mnemonic = "WOIT"
+    array_name = "cumulative_oil_volumes"
+
+
+@summary_type
+@attrs.frozen(kw_only=True, slots=True)
 class WellGasInjectionTotal(WellRate):
     """Well cumulative gas injection (`WGIT`)."""
 
@@ -722,6 +778,7 @@ FWPR = FieldWaterProductionRate
 FGPR = FieldGasProductionRate
 FLPR = FieldLiquidProductionRate
 FWIR = FieldWaterInjectionRate
+FOIR = FieldOilInjectionRate
 FGIR = FieldGasInjectionRate
 FWCT = FieldWaterCut
 FGOR = FieldGasOilRatio
@@ -730,6 +787,7 @@ WWPR = WellWaterProductionRate
 WGPR = WellGasProductionRate
 WLPR = WellLiquidProductionRate
 WWIR = WellWaterInjectionRate
+WOIR = WellOilInjectionRate
 WGIR = WellGasInjectionRate
 WWCT = WellWaterCut
 WGOR = WellGasOilRatio
@@ -739,9 +797,11 @@ FOPT = FieldOilProductionTotal
 FWPT = FieldWaterProductionTotal
 FGPT = FieldGasProductionTotal
 FWIT = FieldWaterInjectionTotal
+FOIT = FieldOilInjectionTotal
 FGIT = FieldGasInjectionTotal
 WOPT = WellOilProductionTotal
 WWPT = WellWaterProductionTotal
 WGPT = WellGasProductionTotal
 WWIT = WellWaterInjectionTotal
+WOIT = WellOilInjectionTotal
 WGIT = WellGasInjectionTotal

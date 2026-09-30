@@ -10,19 +10,37 @@ named/numbered objects.
 
 **Field vectors** (whole-reservoir totals, no object list):
 
-- `FOPR` / `FWPR` / `FGPR` - field oil/water/gas production rate.
+- `FOPR` / `FWPR` / `FGPR` / `FLPR` - field oil/water/gas/liquid production rate.
+- `FWIR` / `FGIR` - field water/gas injection rate.
 - `FOPT` / `FWPT` / `FGPT` - field oil/water/gas production cumulative total.
+- `FWIT` / `FGIT` - field water/gas injection cumulative total.
+- `FWCT` - field water cut. `FGOR` - field gas-oil ratio.
+- `FOIR` / `FOIT` - field oil injection rate/total. Rare in practice; Eclipse still defines them.
 
 **Well vectors** (one series per well; optionally restricted to named wells):
 
-- `WOPR` / `WWPR` / `WGPR` - well oil/water/gas production rate.
+- `WOPR` / `WWPR` / `WGPR` / `WLPR` - well oil/water/gas/liquid production rate.
+- `WWIR` / `WGIR` - well water/gas injection rate.
+- `WOPT` / `WWPT` / `WGPT` - well oil/water/gas production cumulative total.
+- `WWIT` / `WGIT` - well water/gas injection cumulative total.
+- `WWCT` - well water cut. `WGOR` - well gas-oil ratio.
 - `WBHP` - well bottom-hole pressure.
 - `WTHP` - well tubing-head pressure.
+- `WOIR` / `WOIT` - well oil injection rate/total. Rare in practice; Eclipse still defines them.
+
+Every vector above has a matching `bores.wells.summary` `Summary`
+implementation of the same mnemonic.
 
 **Region vectors** (one series per FIP region; optionally restricted to
 named region numbers):
 
 - `ROIP` / `RGIP` / `RWIP` - reservoir oil/gas/water in place.
+
+No `Summary` implementation reads these yet: a correct one needs
+region-scoped, FVF-converted in-place volumes from pore volume and PVT
+data, not just the wells workspace `bores.wells.summary` reads. Real
+reservoir-engineering work this module doesn't have the pieces for yet,
+flagged rather than rushed.
 
 **Reporting controls** (`RPTRST` / `RPTSCHED`) configure restart-file /
 print-summary mnemonics rather than naming a result vector; they are kept
@@ -36,10 +54,19 @@ from bores.deck.keywords.base import Keyword
 from bores.deck.operators import Operation
 
 __all__ = [
+    "FGIR",
+    "FGIT",
+    "FGOR",
     "FGPR",
     "FGPT",
+    "FLPR",
+    "FOIR",
+    "FOIT",
     "FOPR",
     "FOPT",
+    "FWCT",
+    "FWIR",
+    "FWIT",
     "FWPR",
     "FWPT",
     "RGIP",
@@ -48,10 +75,22 @@ __all__ = [
     "RPTSCHED",
     "RWIP",
     "WBHP",
+    "WGIR",
+    "WGIT",
+    "WGOR",
     "WGPR",
+    "WGPT",
+    "WLPR",
+    "WOIR",
+    "WOIT",
     "WOPR",
+    "WOPT",
     "WTHP",
+    "WWCT",
+    "WWIR",
+    "WWIT",
     "WWPR",
+    "WWPT",
 ]
 
 
@@ -105,6 +144,33 @@ FWPT = SummaryVectorKeyword("FWPT")
 FGPT = SummaryVectorKeyword("FGPT")
 """`FGPT` - field cumulative gas production total. Takes no object list."""
 
+FLPR = SummaryVectorKeyword("FLPR")
+"""`FLPR` - field liquid (oil plus water) production rate. Takes no object list."""
+
+FWIR = SummaryVectorKeyword("FWIR")
+"""`FWIR` - field water injection rate. Takes no object list."""
+
+FOIR = SummaryVectorKeyword("FOIR")
+"""`FOIR` - field oil injection rate. Rare in practice; Eclipse still defines it. Takes no object list."""
+
+FGIR = SummaryVectorKeyword("FGIR")
+"""`FGIR` - field gas injection rate. Takes no object list."""
+
+FWIT = SummaryVectorKeyword("FWIT")
+"""`FWIT` - field cumulative water injection total. Takes no object list."""
+
+FOIT = SummaryVectorKeyword("FOIT")
+"""`FOIT` - field cumulative oil injection total. Rare in practice; Eclipse still defines it. Takes no object list."""
+
+FGIT = SummaryVectorKeyword("FGIT")
+"""`FGIT` - field cumulative gas injection total. Takes no object list."""
+
+FWCT = SummaryVectorKeyword("FWCT")
+"""`FWCT` - field water cut (water over oil plus water production). Takes no object list."""
+
+FGOR = SummaryVectorKeyword("FGOR")
+"""`FGOR` - field gas-oil ratio (gas over oil production). Takes no object list."""
+
 WOPR = SummaryVectorKeyword("WOPR")
 """
 `WOPR ['WELL1' 'WELL2' ...] /` - well oil production rate.
@@ -124,6 +190,42 @@ WBHP = SummaryVectorKeyword("WBHP")
 
 WTHP = SummaryVectorKeyword("WTHP")
 """`WTHP ['WELL1' ...] /` - well tubing-head pressure (see `WOPR`)."""
+
+WLPR = SummaryVectorKeyword("WLPR")
+"""`WLPR ['WELL1' ...] /` - well liquid (oil plus water) production rate (see `WOPR`)."""
+
+WWIR = SummaryVectorKeyword("WWIR")
+"""`WWIR ['WELL1' ...] /` - well water injection rate (see `WOPR`)."""
+
+WOIR = SummaryVectorKeyword("WOIR")
+"""`WOIR ['WELL1' ...] /` - well oil injection rate. Rare in practice; Eclipse still defines it (see `WOPR`)."""
+
+WGIR = SummaryVectorKeyword("WGIR")
+"""`WGIR ['WELL1' ...] /` - well gas injection rate (see `WOPR`)."""
+
+WOPT = SummaryVectorKeyword("WOPT")
+"""`WOPT ['WELL1' ...] /` - well cumulative oil production total (see `WOPR`)."""
+
+WWPT = SummaryVectorKeyword("WWPT")
+"""`WWPT ['WELL1' ...] /` - well cumulative water production total (see `WOPR`)."""
+
+WGPT = SummaryVectorKeyword("WGPT")
+"""`WGPT ['WELL1' ...] /` - well cumulative gas production total (see `WOPR`)."""
+
+WWIT = SummaryVectorKeyword("WWIT")
+"""`WWIT ['WELL1' ...] /` - well cumulative water injection total (see `WOPR`)."""
+
+WOIT = SummaryVectorKeyword("WOIT")
+"""`WOIT ['WELL1' ...] /` - well cumulative oil injection total. Rare in practice; Eclipse still defines it (see `WOPR`)."""
+
+WGIT = SummaryVectorKeyword("WGIT")
+"""`WGIT ['WELL1' ...] /` - well cumulative gas injection total (see `WOPR`)."""
+
+WWCT = SummaryVectorKeyword("WWCT")
+"""`WWCT ['WELL1' ...] /` - well water cut (see `WOPR`)."""
+
+WGOR = SummaryVectorKeyword("WGOR")
+"""`WGOR ['WELL1' ...] /` - well gas-oil ratio (see `WOPR`)."""
 
 ROIP = SummaryVectorKeyword("ROIP")
 """

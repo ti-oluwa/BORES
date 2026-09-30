@@ -129,10 +129,19 @@ from bores.deck.keywords.solution import (
     TEMPVD,
 )
 from bores.deck.keywords.summary import (
+    FGIR,
+    FGIT,
+    FGOR,
     FGPR,
     FGPT,
+    FLPR,
+    FOIR,
+    FOIT,
     FOPR,
     FOPT,
+    FWCT,
+    FWIR,
+    FWIT,
     FWPR,
     FWPT,
     RGIP,
@@ -141,10 +150,22 @@ from bores.deck.keywords.summary import (
     RPTSCHED,
     RWIP,
     WBHP,
+    WGIR,
+    WGIT,
+    WGOR,
     WGPR,
+    WGPT,
+    WLPR,
+    WOIR,
+    WOIT,
     WOPR,
+    WOPT,
     WTHP,
+    WWCT,
+    WWIR,
+    WWIT,
     WWPR,
+    WWPT,
 )
 from bores.deck.operators import Operation, resolve_operations
 from bores.types import TextOrPath, UnitSystem
@@ -273,10 +294,19 @@ DEFAULT_KEYWORDS = frozenset({
     WCONINJH,
     WDFAC,
     # SUMMARY ###
+    FGIR,
+    FGIT,
+    FGOR,
     FGPR,
     FGPT,
+    FLPR,
+    FOIR,
+    FOIT,
     FOPR,
     FOPT,
+    FWCT,
+    FWIR,
+    FWIT,
     FWPR,
     FWPT,
     RGIP,
@@ -285,10 +315,22 @@ DEFAULT_KEYWORDS = frozenset({
     RPTSCHED,
     RWIP,
     WBHP,
+    WGIR,
+    WGIT,
+    WGOR,
     WGPR,
+    WGPT,
+    WLPR,
+    WOIR,
+    WOIT,
     WOPR,
+    WOPT,
     WTHP,
+    WWCT,
+    WWIR,
+    WWIT,
     WWPR,
+    WWPT,
 })
 
 
@@ -420,7 +462,7 @@ class DeckFile:
 
     def _resolve_unit_system(self) -> UnitSystem | None:
         """
-        Resolve the unit system from the RUNSPEC unit keywords.
+        Resolve the unit system from the `RUNSPEC` unit keywords.
 
         Eclipse decks declare exactly one of `FIELD`, `METRIC`, or `LAB`.
         When none is present (e.g. a standalone PVT or relperm include file),
