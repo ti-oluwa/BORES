@@ -328,12 +328,12 @@ class TwoPhaseCapillaryPressureTable(
         object.__setattr__(
             self,
             "reference_saturation",
-            np.asarray(self.reference_saturation, dtype=dtype, copy=False),
+            np.asarray(self.reference_saturation, dtype=dtype),
         )
         object.__setattr__(
             self,
             "capillary_pressure",
-            np.asarray(self.capillary_pressure, dtype=dtype, copy=False),
+            np.asarray(self.capillary_pressure, dtype=dtype),
         )
 
         # Build interpolant
@@ -395,7 +395,7 @@ class TwoPhaseCapillaryPressureTable(
 
         if is_scalar:
             return typing.cast(Number, dtype.type(result.item()))  # type: ignore
-        return typing.cast(NumberOrArray[NDimension], result.reshape(sat.shape, copy=False))
+        return typing.cast(NumberOrArray[NDimension], result.reshape(sat.shape))
 
     def _d_query(self, reference: NumberOrArray[NDimension]) -> NumberOrArray[NDimension]:
         """
@@ -421,7 +421,7 @@ class TwoPhaseCapillaryPressureTable(
 
         if is_scalar:
             return typing.cast(Number, dtype.type(result.item()))  # type: ignore
-        return typing.cast(NumberOrArray[NDimension], result.reshape(sat.shape, copy=False))
+        return typing.cast(NumberOrArray[NDimension], result.reshape(sat.shape))
 
     def get_capillary_pressure(
         self,

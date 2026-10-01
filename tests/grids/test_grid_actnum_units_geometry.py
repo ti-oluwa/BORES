@@ -82,15 +82,24 @@ def test_cell_thickness_is_vertical_not_bounding_box_height():
     assert (grid.cell_length_z > 10.0).all()
 
 
-def test_convert_scales_nnc_transmissibility_by_permeability_and_length():
+@pytest.mark.parametrize(
+    "target, eclipse_darcy_constant",
+    [(UnitSystem.METRIC, 0.00852702), (UnitSystem.LAB, 3.6)],
+)
+def test_convert_scales_explicit_nnc_flow_transmissibility(target, eclipse_darcy_constant):
+    from bores.constants import get_conversion_factors
+
     grid = make_cartesian_grid(
         nx=4, ny=3, nz=2, dx=10.0, dy=10.0, dz=1.0,
         nnc_cell_indices=np.array([[0, 23], [1, 22]]),
         nnc_transmissibilities=np.array([5.0, np.nan]),
     )
-    metric = grid.convert(UnitSystem.METRIC)
-    assert metric.nnc_transmissibilities[0] == pytest.approx(5.0 * 0.3048)
-    assert np.isnan(metric.nnc_transmissibilities[1])
+    converted = grid.convert(target)
+    factors = get_conversion_factors(UnitSystem.FIELD, target)
+    # T_eclipse = darcy_constant * perm * length, so the ratio between systems follows from it.
+    expected = (eclipse_darcy_constant / 0.00112712) * factors["permeability"] * factors["length"]
+    assert converted.nnc_transmissibilities[0] == pytest.approx(5.0 * expected, rel=1e-4)
+    assert np.isnan(converted.nnc_transmissibilities[1])
 
 
 def write_deck(tmp_path, body):
@@ -147,14 +156,41 @@ def test_dx_varying_across_rows_is_rejected(tmp_path):
         load_grdecl(write_deck(tmp_path, cartesian_deck(dx=dx)), unit_system=UnitSystem.FIELD)
 
 
-def test_deck_nnc_transmissibility_is_converted_to_geometric_and_back(tmp_path):
+def test_deck_nnc_flow_transmissibility_is_kept_verbatim_and_round_trips(tmp_path):
     deck = cartesian_deck(extra="NNC\n1 1 1 4 3 3 0.5 /\n/\n")
     grid = load_grdecl(write_deck(tmp_path, deck), unit_system=UnitSystem.FIELD)
-    assert grid.nnc_transmissibilities[-1] == pytest.approx(0.5 / 0.00112712)
+    assert grid.nnc_transmissibilities[-1] == pytest.approx(0.5)
     path = tmp_path / "out.grdecl"
     path.write_text(build_grdecl_text(grid))
     reloaded = load_grdecl(path, unit_system=UnitSystem.FIELD)
-    assert reloaded.nnc_transmissibilities[-1] == pytest.approx(grid.nnc_transmissibilities[-1], rel=1e-5)
+    assert reloaded.nnc_transmissibilities[-1] == pytest.approx(0.5, rel=1e-5)
+
+
+def test_explicit_and_computed_nnc_are_reported_separately():
+    from bores.reservoir.transmissibility import compute_connection_transmissibilities
+    import bores.reservoir.rock as rock_module
+
+    n = 4 * 3 * 2
+    grid = make_cartesian_grid(
+        nx=4, ny=3, nz=2, dx=10.0, dy=10.0, dz=1.0,
+        nnc_cell_indices=np.array([[0, 23], [1, 22]]),
+        nnc_transmissibilities=np.array([5.0, np.nan]),
+    )
+    permeability_type = next(getattr(rock_module, name) for name in dir(rock_module) if "Permeab" in name)
+    ones = np.ones(n)
+    rock = rock_module.Rock(
+        porosity=ones * 0.2,
+        absolute_permeability=permeability_type(x=ones * 100, y=ones * 100, z=ones * 10),
+        net_to_gross=ones,
+        connate_water_saturation=ones * 0.2,
+        irreducible_water_saturation=ones * 0.2,
+        residual_oil_saturation_water=ones * 0.2,
+        residual_oil_saturation_gas=ones * 0.1,
+        residual_gas_saturation=ones * 0.05,
+    )
+    result = compute_connection_transmissibilities(grid, rock)
+    assert result.nnc_flow[0] == pytest.approx(5.0) and np.isnan(result.nnc_flow[1])
+    assert np.isnan(result.nnc[0]) and np.isfinite(result.nnc[1])
 
 
 def test_export_round_trip_with_inactive_cells(tmp_path):

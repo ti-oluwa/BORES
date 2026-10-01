@@ -610,17 +610,17 @@ class TwoPhaseRelPermTable(
         object.__setattr__(
             self,
             "reference_saturation",
-            np.asarray(self.reference_saturation, dtype=dtype, copy=False),
+            np.asarray(self.reference_saturation, dtype=dtype),
         )
         object.__setattr__(
             self,
             "wetting_phase_relative_permeability",
-            np.asarray(self.wetting_phase_relative_permeability, dtype=dtype, copy=False),
+            np.asarray(self.wetting_phase_relative_permeability, dtype=dtype),
         )
         object.__setattr__(
             self,
             "non_wetting_phase_relative_permeability",
-            np.asarray(self.non_wetting_phase_relative_permeability, dtype=dtype, copy=False),
+            np.asarray(self.non_wetting_phase_relative_permeability, dtype=dtype),
         )
 
         # Validate min_value sentinels eagerly so errors surface at construction time
@@ -701,7 +701,7 @@ class TwoPhaseRelPermTable(
 
         if is_scalar:
             return typing.cast(Number, dtype.type(result.item()))  # type: ignore
-        return typing.cast(NumberArray[NDimension], result.reshape(sat.shape, copy=False))
+        return typing.cast(NumberArray[NDimension], result.reshape(sat.shape))
 
     def _d_query(
         self,
@@ -732,7 +732,7 @@ class TwoPhaseRelPermTable(
 
         if is_scalar:
             return typing.cast(Number, dtype.type(result.item()))  # type: ignore
-        return typing.cast(NumberArray[NDimension], result.reshape(sat.shape, copy=False))
+        return typing.cast(NumberArray[NDimension], result.reshape(sat.shape))
 
     def get_wetting_phase_relative_permeability(
         self,

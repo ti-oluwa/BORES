@@ -132,24 +132,11 @@ def build_map_axes(deck_file: DeckFile) -> MapAxes | None:
     )
 
 
-ECLIPSE_DARCY_CONSTANT_BY_UNIT_SYSTEM: typing.Mapping[UnitSystem, float] = {
-    UnitSystem.METRIC: 0.00852702,
-    UnitSystem.FIELD: 0.00112712,
-    UnitSystem.LAB: 3.6,
-}
-"""
-Eclipse's Darcy constant for each unit system. Transmissibilities in a deck include this
-constant (cP.rb/day/psi for FIELD), while `Grid` stores purely geometric transmissibility
-(permeability x area / length), so deck values are divided by it on import.
-"""
-
-
 def build_nnc_arrays(
     deck_file: DeckFile,
     nx: Integer,
     ny: Integer,
     nz: Integer,
-    unit_system: UnitSystem,
 ) -> tuple[
     IntArray[TwoDimensions] | None,
     NumberArray[OneDimension] | None,
@@ -161,8 +148,6 @@ def build_nnc_arrays(
     :param nx: Grid extent in x.
     :param ny: Grid extent in y.
     :param nz: Grid extent in z.
-    :param unit_system: Unit system of the deck, used to remove the Darcy constant from
-        the deck's transmissibilities.
     :returns: `(pairs, transmissibilities)` - shape `(n_nnc, 2)` int32
         and shape `(n_nnc,)` float64 arrays, or `(None, None)` if the
         keyword is absent.
@@ -172,11 +157,6 @@ def build_nnc_arrays(
     if not nnc_records:
         return None, None
 
-    darcy_constant = ECLIPSE_DARCY_CONSTANT_BY_UNIT_SYSTEM.get(unit_system)
-    if darcy_constant is None:
-        raise GridImportError(
-            f"NNC transmissibilities cannot be imported for unit system {unit_system!r}."
-        )
     pairs: list[tuple[int, int]] = []
     transmissibilities: list[float] = []
 
@@ -196,7 +176,7 @@ def build_nnc_arrays(
         c1 = (i1 - 1) + (j1 - 1) * nx + (k1 - 1) * nx * ny
         c2 = (i2 - 1) + (j2 - 1) * nx + (k2 - 1) * nx * ny
         pairs.append((c1, c2))
-        transmissibilities.append(transmissibility / darcy_constant)
+        transmissibilities.append(transmissibility)
 
     if not pairs:
         return None, None
@@ -559,7 +539,7 @@ def assemble_corner_point(
     meta["coord"] = np.asarray(coord, dtype=np.float64).ravel()
     meta["zcorn"] = np.asarray(zcorn, dtype=np.float64).ravel()
 
-    nnc_pairs, nnc_transmissibilities = build_nnc_arrays(deck_file, nx, ny, nz, unit_system)
+    nnc_pairs, nnc_transmissibilities = build_nnc_arrays(deck_file, nx, ny, nz)
     fault_records = build_fault_records(deck_file)
     multflt = build_multflt(deck_file)
     return make_corner_point_grid(
@@ -659,7 +639,7 @@ def assemble_cartesian(
         else None
     )
 
-    nnc_pairs, nnc_transmissibilities = build_nnc_arrays(deck_file, nx, ny, nz, unit_system)
+    nnc_pairs, nnc_transmissibilities = build_nnc_arrays(deck_file, nx, ny, nz)
     fault_records = build_fault_records(deck_file)
     multflt = build_multflt(deck_file)
     multipliers = {
@@ -967,11 +947,6 @@ def _emit_nnc(lines: list[str], grid: Grid, nx: Integer, ny: Integer) -> None:
         return
 
     user_type = int(ConnectionType.USER_NNC)
-    darcy_constant = ECLIPSE_DARCY_CONSTANT_BY_UNIT_SYSTEM.get(grid.unit_system)
-    if darcy_constant is None:
-        raise GridExportError(
-            f"NNC transmissibilities cannot be exported for unit system {grid.unit_system!r}."
-        )
     has_transmissibility = grid.nnc_transmissibilities is not None and len(
         grid.nnc_transmissibilities
     ) == len(grid.nnc_cell_indices)
@@ -996,7 +971,7 @@ def _emit_nnc(lines: list[str], grid: Grid, nx: Integer, ny: Integer) -> None:
             # No explicit value: the transmissibility is computed from rock properties, and
             # writing 0.0 would make the connection closed when the deck is read back.
             continue
-        transmissibility_str = f"{transmissibility * darcy_constant:.6e}"
+        transmissibility_str = f"{transmissibility:.6e}"
         user_nnc_lines.append(f"  {i1}  {j1}  {k1}  {i2}  {j2}  {k2}  {transmissibility_str}  /")
 
     if not user_nnc_lines:

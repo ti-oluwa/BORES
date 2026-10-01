@@ -511,10 +511,10 @@ class Grid(
 
     nnc_transmissibilities: NumberArray[OneDimension] | None = attrs.field(default=None)
     """
-    Shape `(n_nnc,)` - geometric transmissibility (permeability x area / length, so
-    mD * ft in FIELD units and mD * m in METRIC) for each NNC pair, without any Darcy
-    unit-conversion constant. `None` when not supplied; NaN entries indicate
-    connections whose transmissibility must be computed from rock properties.
+    Shape `(n_nnc,)` - explicitly supplied flow transmissibility of each NNC pair, exactly as
+    given in a deck's `NNC` keyword (cP.rb/day/psi in FIELD units). It already includes the
+    unit conversion constant, so it multiplies mobility and pressure difference directly.
+    `None` when not supplied; NaN entries mean no explicit value was given.
     """
 
     nnc_fault_indices: typing.Mapping[str, IntArray[OneDimension]] | None = attrs.field(
@@ -1663,9 +1663,14 @@ class Grid(
         cell_centroids = (
             self.cell_centroids * length_factor if self.cell_centroids is not None else None
         )
-        # Geometric transmissibility is permeability x area / length = permeability x length.
+        # Flow transmissibility has units of volumetric rate x viscosity / pressure.
         nnc_transmissibilities = (
-            self.nnc_transmissibilities * (factors["permeability"] * length_factor)
+            self.nnc_transmissibilities
+            * (
+                factors["liquid_surface_volume"]
+                * factors["viscosity"]
+                / (factors["pressure"] * factors["time"])
+            )
             if self.nnc_transmissibilities is not None
             else None
         )

@@ -662,15 +662,15 @@ class PseudoPressureTable(
         """
         is_scalar = np.isscalar(pressure)
         dtype = self.dtype
-        pressure_arr = np.atleast_1d(pressure)
+        pressure_array = np.atleast_1d(pressure)
         min_pressure = self._p_interp.x[0]
         max_pressure = self._p_interp.x[-1]
-        result = self._p_interp(np.clip(pressure_arr, min_pressure, max_pressure, dtype=dtype))
-        result = np.where(pressure_arr < min_pressure, self.pseudo_pressures[0], result)
-        result = np.where(pressure_arr > max_pressure, self.pseudo_pressures[-1], result)
+        result = self._p_interp(np.clip(pressure_array, min_pressure, max_pressure, dtype=dtype))
+        result = np.where(pressure_array < min_pressure, self.pseudo_pressures[0], result)
+        result = np.where(pressure_array > max_pressure, self.pseudo_pressures[-1], result)
         if is_scalar:
             return typing.cast(Number, dtype.type(result.item()))
-        return typing.cast(FloatArray[NDimension], result.reshape(pressure_arr.shape, copy=False))
+        return typing.cast(FloatArray[NDimension], result.reshape(pressure_array.shape))
 
     def inverse(self, pseudo_pressure: NumberOrArray[NDimension]) -> NumberOrArray[NDimension]:
         """
@@ -740,16 +740,16 @@ class PseudoPressureTable(
         """
         is_scalar = np.isscalar(pressure)
         dtype = self.dtype
-        pressure_arr = np.atleast_1d(np.asarray(pressure, dtype=dtype))
+        pressure_array = np.atleast_1d(np.asarray(pressure, dtype=dtype))
         min_pressure = self._dp_interp.x[0]
         max_pressure = self._dp_interp.x[-1]
-        result = self._dp_interp(np.clip(pressure_arr, min_pressure, max_pressure, dtype=dtype))
+        result = self._dp_interp(np.clip(pressure_array, min_pressure, max_pressure, dtype=dtype))
         result = np.where(
-            (pressure_arr < min_pressure) | (pressure_arr > max_pressure), 0.0, result
+            (pressure_array < min_pressure) | (pressure_array > max_pressure), 0.0, result
         )
         if is_scalar:
             return typing.cast(Number, dtype.type(result.item()))
-        return typing.cast(FloatArray[NDimension], result.reshape(pressure_arr.shape, copy=False))
+        return typing.cast(FloatArray[NDimension], result.reshape(pressure_array.shape))
 
     dm_dp = gradient  # alias
 

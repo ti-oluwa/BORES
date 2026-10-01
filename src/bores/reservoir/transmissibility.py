@@ -42,9 +42,16 @@ class ConnectionTransmissibilities(typing.NamedTuple):
     """
     nnc: NumberArray[OneDimension] | None
     """
-    Shape `(n_nnc,)` float64 or `None` - transmissibilities for
-    non-neighbour connections, in the same order as `Grid.nnc_cell_indices`.
-    `None` when the grid has no NNCs.
+    Shape `(n_nnc,)` float64 or `None` - transmissibility, in the same convention as
+    `interior` and `boundary`, of each non-neighbour connection that has no explicit
+    flow transmissibility. NaN where `nnc_flow` holds a value. Same order as
+    `Grid.nnc_cell_indices`; `None` when the grid has no NNCs.
+    """
+    nnc_flow: NumberArray[OneDimension] | None
+    """
+    Shape `(n_nnc,)` float64 or `None` - explicitly supplied flow transmissibility of each
+    non-neighbour connection, which already includes the unit conversion constant. NaN where
+    `nnc` holds a value. Same order as `Grid.nnc_cell_indices`; `None` when the grid has no NNCs.
     """
     unit_system: UnitSystem
 
@@ -72,6 +79,16 @@ class ConnectionTransmissibilities(typing.NamedTuple):
             interior=scale(self.interior, transmissibility_factor),
             boundary=scale(self.boundary, transmissibility_factor),
             nnc=(None if self.nnc is None else scale(self.nnc, transmissibility_factor)),
+            nnc_flow=(
+                None
+                if self.nnc_flow is None
+                else scale(
+                    self.nnc_flow,
+                    factors["liquid_surface_volume"]
+                    * factors["viscosity"]
+                    / (factors["pressure"] * factors["time"]),
+                )
+            ),
             unit_system=target,
         )
 
@@ -118,8 +135,9 @@ def compute_connection_transmissibilities(
 
     **NNC transmissibilities** are resolved in priority order:
 
-    1. If `grid.nnc_transmissibilities` contains a finite value for an NNC, that
-       value is used verbatim (caller-supplied or Eclipse-format NNC keyword).
+    1. If `grid.nnc_transmissibilities` contains a finite value for an NNC, that flow
+       transmissibility is returned verbatim in `ConnectionTransmissibilities.nnc_flow`
+       (caller-supplied or Eclipse-format NNC keyword).
     2. NaN entries (geometry-detected pinchouts or unresolved fault NNCs) are
        computed geometrically using the arithmetic-mean permeability and the
        straight-line distance between cell centroids.
@@ -216,17 +234,14 @@ def compute_connection_transmissibilities(
         )
 
     nnc_transmissibilities: NumberArray[OneDimension] | None = None
+    nnc_flow_transmissibilities: NumberArray[OneDimension] | None = None
     if grid.n_nnc > 0:
         assert grid.nnc_cell_indices is not None
         assert grid.nnc_connection_types is not None
 
         nnc_transmissibilities = resolve_nnc_transmissibilities(
             nnc_cell_indices=grid.nnc_cell_indices.astype(np.int32, copy=False),  # type: ignore[arg-type]
-            nnc_transmissibilities=(  # type: ignore[arg-type]
-                grid.nnc_transmissibilities
-                if grid.nnc_transmissibilities is not None
-                else np.full(grid.n_nnc, np.nan, dtype=dtype)
-            ),
+            nnc_transmissibilities=np.full(grid.n_nnc, np.nan, dtype=dtype),
             cell_centroids=grid.cell_centroids,  # type: ignore[arg-type]
             effective_kx=effective_kx,  # type: ignore[arg-type]
             effective_ky=effective_ky,  # type: ignore[arg-type]
@@ -234,16 +249,26 @@ def compute_connection_transmissibilities(
             dtype=dtype,
         )
 
+        nnc_flow_transmissibilities = (
+            grid.nnc_transmissibilities.astype(dtype, copy=True)
+            if grid.nnc_transmissibilities is not None
+            else np.full(grid.n_nnc, np.nan, dtype=dtype)
+        )
+        nnc_transmissibilities = np.where(
+            np.isnan(nnc_flow_transmissibilities), nnc_transmissibilities, np.nan
+        ).astype(dtype, copy=False)
+
         # Apply MULTFLT to fault-type NNCs only
         if (
             grid.fault_transmissibility_multipliers is not None
             and grid.nnc_fault_indices is not None
         ):
-            nnc_transmissibilities = apply_nnc_fault_multipliers(
-                nnc_transmissibilities=nnc_transmissibilities,
-                nnc_fault_indices=grid.nnc_fault_indices,
-                fault_transmissibility_multipliers=grid.fault_transmissibility_multipliers,
-            )
+            for values in (nnc_transmissibilities, nnc_flow_transmissibilities):
+                apply_nnc_fault_multipliers(
+                    nnc_transmissibilities=values,
+                    nnc_fault_indices=grid.nnc_fault_indices,
+                    fault_transmissibility_multipliers=grid.fault_transmissibility_multipliers,
+                )
 
     # Apply `MULTFLT` to face-based connections
     if grid.fault_face_indices is not None and grid.fault_transmissibility_multipliers is not None:
@@ -263,6 +288,11 @@ def compute_connection_transmissibilities(
             None
             if nnc_transmissibilities is None
             else nnc_transmissibilities.astype(dtype, copy=False)
+        ),
+        nnc_flow=(
+            None
+            if nnc_flow_transmissibilities is None
+            else nnc_flow_transmissibilities.astype(dtype, copy=False)
         ),
         unit_system=target_unit_system,
     )
