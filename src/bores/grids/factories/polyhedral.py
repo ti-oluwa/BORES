@@ -93,7 +93,7 @@ def make_polyhedral_grid(
     :raises ValidationError: If a cell block contains an unrecognised element type.
     :raises InvalidPointArrayError: If `vertex_coordinates` is not `(N, 3)`.
     """
-    points = np.asarray(vertex_coordinates, dtype=np.float64, copy=False)
+    points = np.asarray(vertex_coordinates, dtype=np.float64)
     if points.ndim != 2 or points.shape[1] != 3:
         raise InvalidPointArrayError(
             f"vertex_coordinates must be shape (n_vertices, 3); got {points.shape!r}."
@@ -108,7 +108,7 @@ def make_polyhedral_grid(
     for block_idx, block in enumerate(cell_blocks):
         element_name = resolve_cell_type_name(block, elements_faces, block_idx)
         element_faces = elements_faces[element_name]
-        connectivity = np.asarray(block["connectivity"], dtype=np.int32, copy=False)
+        connectivity = np.asarray(block["connectivity"], dtype=np.int32)
 
         if connectivity.ndim != 2:
             raise ValidationError(

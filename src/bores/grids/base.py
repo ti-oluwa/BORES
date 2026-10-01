@@ -362,7 +362,10 @@ class Grid(
         "face_vertex_offsets": IntArray[OneDimension],
         "face_cell_indices": IntArray[TwoDimensions],
         "unit_system": UnitSystem,
+        "dimensions": GridDimensions | None,
         "metadata": typing.Mapping[str, typing.Any] | None,
+        "cell_statuses": IntArray[OneDimension] | None,
+        "face_connection_types": IntArray[OneDimension] | None,
         "cell_volumes": NumberArray[OneDimension] | None,
         "cell_centroids": NumberArray[TwoDimensions] | None,
         "nnc_cell_indices": IntArray[TwoDimensions] | None,
@@ -604,7 +607,7 @@ class Grid(
     def __attrs_post_init__(self) -> None:
         if self.dimensions is None and self.metadata is not None:
             dims = self.metadata.get("dimensions", None)
-            if isinstance(dims, tuple) and dims:
+            if isinstance(dims, (tuple, list)) and dims:
                 size = len(dims)
                 if size == 3:
                     dimensions = GridDimensions(*dims)
@@ -615,6 +618,7 @@ class Grid(
                 object.__setattr__(self, "dimensions", dimensions)
 
         self._validate_inputs()
+        self._canonicalize_boundary_faces()
         self._classify_faces()
         self._populate_defaults()
         self._build_cell_face_connectivity()
@@ -659,6 +663,17 @@ class Grid(
                     f"{int(self.face_vertex_indices.max())} which exceeds "
                     f"max valid index {max_valid_vertex}."
                 )
+            if int(self.face_vertex_indices.min()) < 0:
+                raise InvalidFaceConnectivityError(
+                    f"`face_vertex_indices` contains negative index "
+                    f"{int(self.face_vertex_indices.min())}."
+                )
+
+        if self.face_cell_indices.shape[0] == 0:
+            raise InvalidFaceConnectivityError(
+                "`face_cell_indices` must contain at least one face."
+            )
+
         min_cell_index = int(self.face_cell_indices.min())
         if min_cell_index < -1:
             raise InvalidFaceConnectivityError(
@@ -680,15 +695,97 @@ class Grid(
                     f"`nnc_transmissibilities` length {len(self.nnc_transmissibilities)} "
                     f"does not match `nnc_cell_indices` length {len(self.nnc_cell_indices)}."
                 )
+            if len(self.nnc_cell_indices) > 0:
+                n_cells_declared = self._get_cell_count()
+                if self.nnc_cell_indices.ndim != 2 or self.nnc_cell_indices.shape[1] != 2:
+                    raise InvalidFaceConnectivityError(
+                        f"`nnc_cell_indices` must be shape (n_nnc, 2); "
+                        f"got {self.nnc_cell_indices.shape!r}."
+                    )
+                lowest = int(self.nnc_cell_indices.min())
+                highest = int(self.nnc_cell_indices.max())
+                if lowest < 0 or highest >= n_cells_declared:
+                    raise InvalidFaceConnectivityError(
+                        f"`nnc_cell_indices` contains cell index "
+                        f"{lowest if lowest < 0 else highest} outside the valid range "
+                        f"[0, {n_cells_declared - 1}]."
+                    )
             if self.nnc_cell_indices is not None and self.nnc_fault_indices is not None:
                 n_nnc = len(self.nnc_cell_indices)
                 for fault_name, nnc_indices in self.nnc_fault_indices.items():
-                    if nnc_indices.max() >= n_nnc:
+                    if len(nnc_indices) == 0:
+                        continue
+                    if nnc_indices.max() >= n_nnc or nnc_indices.min() < 0:
                         raise InvalidFaceConnectivityError(
                             f"`nnc_fault_indices[{fault_name!r}]` contains NNC index "
                             f"{int(nnc_indices.max())} which exceeds max valid index "
                             f"{n_nnc - 1}."
                         )
+
+    def _get_cell_count(self) -> int:
+        """
+        Number of cells implied by the face connectivity and any per-cell arrays supplied.
+
+        Cells with no faces (fully pinched out) carry no entries in `face_cell_indices`, so
+        the count is taken from the per-cell arrays when they are longer.
+        """
+        from_faces = int(self.face_cell_indices.max()) + 1
+        supplied = {
+            len(array)
+            for array in (self.cell_volumes, self.cell_centroids, self.cell_statuses)
+            if array is not None
+        }
+        if len(supplied) > 1:
+            raise InvalidFaceConnectivityError(
+                "`cell_volumes`, `cell_centroids` and `cell_statuses` must have the same "
+                f"length; got lengths {sorted(supplied)}."
+            )
+        if supplied:
+            count = supplied.pop()
+            if count < from_faces:
+                raise InvalidFaceConnectivityError(
+                    f"Per-cell arrays have {count} entries but `face_cell_indices` "
+                    f"references cell {from_faces - 1}."
+                )
+            return count
+        return from_faces
+
+    def _canonicalize_boundary_faces(self) -> None:
+        """
+        Ensure every boundary face has a real owner cell and a `-1` neighbour.
+
+        A boundary face supplied with the `-1` in the owner column is swapped so the
+        owner is the real cell, and its vertex winding is reversed so the face normal
+        still points out of its (new) owner.
+        """
+        owner_cells = self.face_cell_indices[:, 0]
+        neighbour_cells = self.face_cell_indices[:, 1]
+        if np.any((owner_cells < 0) & (neighbour_cells < 0)):
+            bad = np.where((owner_cells < 0) & (neighbour_cells < 0))[0]
+            raise InvalidFaceConnectivityError(
+                f"{len(bad)} face(s) have no adjacent cell: {bad[:5].tolist()}"
+                f"{'...' if len(bad) > 5 else ''}."
+            )
+
+        flip = np.where((owner_cells < 0) & (neighbour_cells >= 0))[0]
+        if flip.size == 0:
+            return
+
+        face_cell_indices = self.face_cell_indices.copy()
+        face_cell_indices[flip] = face_cell_indices[flip][:, ::-1]
+
+        offsets = self.face_vertex_offsets.astype(np.int64)
+        starts = offsets[flip]
+        lengths = offsets[flip + 1] - starts
+        face_position = np.repeat(np.arange(flip.size), lengths)
+        local = np.arange(int(lengths.sum())) - np.repeat(np.cumsum(lengths) - lengths, lengths)
+        source = starts[face_position] + local
+        destination = starts[face_position] + (lengths[face_position] - 1 - local)
+        face_vertex_indices = self.face_vertex_indices.copy()
+        face_vertex_indices[destination] = self.face_vertex_indices[source]
+
+        object.__setattr__(self, "face_cell_indices", face_cell_indices)
+        object.__setattr__(self, "face_vertex_indices", face_vertex_indices)
 
     def _classify_faces(self) -> None:
         owner_cells = self.face_cell_indices[:, 0]
@@ -708,7 +805,7 @@ class Grid(
 
     def _populate_defaults(self) -> None:
         n_faces = self.face_cell_indices.shape[0]
-        n_cells = int(self.face_cell_indices.max()) + 1
+        n_cells = self._get_cell_count()
 
         if self.face_connection_types is None:
             face_connection_types = np.full(n_faces, ConnectionType.INTERIOR_FACE, dtype=np.int8)
@@ -741,37 +838,32 @@ class Grid(
             object.__setattr__(self, "nnc_connection_types", nnc_connection_types)
 
     def _build_cell_face_connectivity(self) -> None:
-        n_cells = int(self.face_cell_indices.max()) + 1
-        cell_face_lists: list[list[int]] = [[] for _ in range(n_cells)]
-        for face_idx, (owner, neighbour) in enumerate(self.face_cell_indices):
-            if owner >= 0:
-                cell_face_lists[owner].append(face_idx)
-            if neighbour >= 0:
-                cell_face_lists[neighbour].append(face_idx)
-
-        flat: list[int] = []
-        offsets: list[int] = [0]
-        for faces in cell_face_lists:
-            flat.extend(faces)
-            offsets.append(len(flat))
-        object.__setattr__(self, "cell_face_indices", np.asarray(flat, dtype=np.int32))
-        object.__setattr__(self, "cell_face_offsets", np.asarray(offsets, dtype=np.int32))
+        n_cells = self._get_cell_count()
+        n_faces = self.face_cell_indices.shape[0]
+        cells = self.face_cell_indices.reshape(-1).astype(np.int64)
+        faces = np.repeat(np.arange(n_faces, dtype=np.int64), 2)
+        present = cells >= 0
+        cells = cells[present]
+        faces = faces[present]
+        order = np.argsort(cells, kind="stable")
+        counts = np.bincount(cells, minlength=n_cells)
+        offsets = np.concatenate([[0], np.cumsum(counts)])
+        object.__setattr__(self, "cell_face_indices", faces[order].astype(np.int32))
+        object.__setattr__(self, "cell_face_offsets", offsets.astype(np.int32))
 
     def _build_cell_neighbor_connectivity(self) -> None:
-        n_cells = int(self.face_cell_indices.max()) + 1
-        neighbor_sets: list[set[int]] = [set() for _ in range(n_cells)]
-        for owner, neighbour in self.face_cell_indices:
-            if owner >= 0 and neighbour >= 0:
-                neighbor_sets[owner].add(neighbour)
-                neighbor_sets[neighbour].add(owner)
-
-        flat: list[int] = []
-        offsets: list[int] = [0]
-        for neighbors in neighbor_sets:
-            flat.extend(sorted(neighbors))
-            offsets.append(len(flat))
-        object.__setattr__(self, "cell_neighbor_indices", np.asarray(flat, dtype=np.int32))
-        object.__setattr__(self, "cell_neighbor_offsets", np.asarray(offsets, dtype=np.int32))
+        n_cells = self._get_cell_count()
+        interior = (self.face_cell_indices[:, 0] >= 0) & (self.face_cell_indices[:, 1] >= 0)
+        owners = self.face_cell_indices[interior, 0].astype(np.int64)
+        neighbours = self.face_cell_indices[interior, 1].astype(np.int64)
+        sources = np.concatenate([owners, neighbours])
+        targets = np.concatenate([neighbours, owners])
+        keys = np.unique(sources * n_cells + targets)
+        source_cells = keys // n_cells
+        counts = np.bincount(source_cells, minlength=n_cells)
+        offsets = np.concatenate([[0], np.cumsum(counts)])
+        object.__setattr__(self, "cell_neighbor_indices", (keys % n_cells).astype(np.int32))
+        object.__setattr__(self, "cell_neighbor_offsets", offsets.astype(np.int32))
 
     def _compute_face_geometry(self) -> None:
         face_centroids, face_areas, face_unit_normals = compute_face_geometry(
@@ -787,15 +879,17 @@ class Grid(
         if self.cell_volumes is not None and self.cell_centroids is not None:
             return
 
-        n_cells = int(self.face_cell_indices.max()) + 1
+        n_cells = self._get_cell_count()
+        origin = self.vertex_coordinates.mean(axis=0)
         cell_volumes, cell_centroids = compute_cell_volumes_and_centroids(
             face_cell_indices=self.face_cell_indices,
             face_vertex_indices=self.face_vertex_indices,
             face_vertex_offsets=self.face_vertex_offsets,
-            vertex_coordinates=self.vertex_coordinates,
+            vertex_coordinates=self.vertex_coordinates - origin,
             n_cells=n_cells,
         )
-        invalid_mask = cell_volumes <= 0.0
+        cell_centroids += origin
+        invalid_mask = ~(cell_volumes > 0.0)
         if invalid_mask.any():
             bad = np.where(invalid_mask)[0].tolist()
             raise InvalidVolumeError(
@@ -806,7 +900,7 @@ class Grid(
         object.__setattr__(self, "cell_centroids", cell_centroids)
 
     def _compute_bounding_boxes(self) -> None:
-        n_cells = int(self.face_cell_indices.max()) + 1
+        n_cells = self._get_cell_count()
         cell_min, cell_max = compute_cell_bounding_boxes(
             face_cell_indices=self.face_cell_indices,
             face_vertex_indices=self.face_vertex_indices,
@@ -834,10 +928,10 @@ class Grid(
 
     def _compute_derived_dimensions(self) -> None:
         delta = self.cell_max_xyz - self.cell_min_xyz
-        object.__setattr__(self, "cell_length_x", delta[:, 0])
-        object.__setattr__(self, "cell_length_y", delta[:, 1])
-        object.__setattr__(self, "cell_length_z", delta[:, 2])
-        object.__setattr__(self, "cell_thickness", delta[:, 2])
+        object.__setattr__(self, "cell_length_x", np.ascontiguousarray(delta[:, 0]))
+        object.__setattr__(self, "cell_length_y", np.ascontiguousarray(delta[:, 1]))
+        object.__setattr__(self, "cell_length_z", np.ascontiguousarray(delta[:, 2]))
+        object.__setattr__(self, "cell_thickness", np.ascontiguousarray(delta[:, 2]))
 
         assert self.cell_centroids is not None
         depths = self.cell_centroids[:, 2].copy()
@@ -977,8 +1071,7 @@ class Grid(
         :returns: `ConnectionType` enum value.
         :raises IndexError: If `nnc_index` is out of range.
         """
-        assert self.nnc_connection_types is not None
-        if nnc_index < 0 or nnc_index >= self.n_connections:
+        if self.nnc_connection_types is None or nnc_index < 0 or nnc_index >= self.n_nnc:
             raise IndexError(f"NNC index {nnc_index} is out of range [0, {self.n_nnc - 1}].")
         return ConnectionType(int(self.nnc_connection_types[nnc_index]))
 
@@ -1036,6 +1129,9 @@ class Grid(
         :param face_index: 0-based face index.
         :returns: Shape `(n_verts_for_face, 3)` coordinate array.
         """
+        if face_index < 0 or face_index >= self.n_faces:
+            raise IndexError(f"Face index {face_index} is out of range [0, {self.n_faces - 1}].")
+
         start = self.face_vertex_offsets[face_index]
         end = self.face_vertex_offsets[face_index + 1]
         return typing.cast(
@@ -1066,8 +1162,13 @@ class Grid(
         :returns: Shape `(3,)` unit normal pointing outward from `cell_index`.
         :raises ValidationError: If `cell_index` is not connected to `face_index`.
         """
+        if face_index < 0 or face_index >= self.n_faces:
+            raise IndexError(f"Face index {face_index} is out of range [0, {self.n_faces - 1}].")
+
         owner = self.face_cell_indices[face_index, 0]
         neighbour = self.face_cell_indices[face_index, 1]
+        if cell_index < 0:
+            raise ValidationError(f"Cell {cell_index} is not a valid cell index.")
         if cell_index == owner:
             return self.face_unit_normals[face_index]
         elif cell_index == neighbour:
@@ -1270,8 +1371,8 @@ class Grid(
         :raises InvalidNormalVectorError: If any face normal deviates from unit length.
         """
         assert self.cell_volumes is not None
-        if (self.cell_volumes <= 0.0).any():
-            bad = np.where(self.cell_volumes <= 0.0)[0]
+        if (~(self.cell_volumes > 0.0)).any():
+            bad = np.where(~(self.cell_volumes > 0.0))[0]
             raise InvalidVolumeError(
                 f"{len(bad)} cell(s) have non-positive volume: {bad[:5].tolist()}..."
             )

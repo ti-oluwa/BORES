@@ -4,13 +4,14 @@ import warnings
 import numpy as np
 import numpy.typing as npt
 
-from bores.datastructures import MapAxes
+from bores.datastructures import GridDimensions, MapAxes
 from bores.errors import ValidationError
 from bores.grids.base import ConnectionType, Grid
 from bores.grids.factories.base import (
     VALID_FAULT_FACE_DIRECTIONS,
     FaultRecord,
     VertexCoordinates,
+    map_xy_to_map_space,
 )
 from bores.types import (
     FloatArray,
@@ -99,6 +100,8 @@ def make_cartesian_grid(
     :returns: Fully initialised `Grid`.
     :raises ValidationError: If spacing or NNC arrays are inconsistent.
     """
+    if nnc_transmissibilities is not None and nnc_cell_indices is None:
+        raise ValidationError("`nnc_transmissibilities` was given without `nnc_cell_indices`.")
     if nnc_cell_indices is not None and nnc_transmissibilities is not None:
         if len(nnc_cell_indices) != len(nnc_transmissibilities):
             raise ValidationError(
@@ -122,7 +125,7 @@ def make_cartesian_grid(
 
     if resolved_map_axes is not None and apply_map_axes:
         vertex_coordinates = vertex_coordinates.copy()
-        vertex_coordinates[:, :2] = _map_axes_xy_forward(
+        vertex_coordinates[:, :2] = map_xy_to_map_space(
             xy=vertex_coordinates[:, :2],  # type: ignore[arg-type]
             map_axes=resolved_map_axes,
         )
@@ -239,6 +242,7 @@ def make_cartesian_grid(
         face_vertex_offsets=face_vertex_offsets,
         face_cell_indices=face_cell_indices,
         unit_system=unit_system,
+        dimensions=GridDimensions(nx, ny, nz),
         metadata=metadata,
         face_connection_types=face_connection_types,  # type: ignore[arg-type]
         nnc_cell_indices=merged_nnc_pairs,  # type: ignore[arg-type]
@@ -257,21 +261,6 @@ def make_cartesian_grid(
         negative_y_transmissibility_multipliers=negative_y_transmissibility_multipliers,
         positive_z_transmissibility_multipliers=positive_z_transmissibility_multipliers,
         negative_z_transmissibility_multipliers=negative_z_transmissibility_multipliers,
-    )
-
-
-def _map_axes_xy_forward(
-    xy: NumberArray[TwoDimensions], map_axes: MapAxes
-) -> NumberArray[TwoDimensions]:
-    """
-    Map local `(x, y)` pairs into map space: `origin + rotation_matrix @ xy`.
-
-    :param xy: Shape `(n, 2)` local-space points.
-    :param map_axes: Map axes to apply.
-    :returns: Shape `(n, 2)` map-space points.
-    """
-    return typing.cast(
-        NumberArray[TwoDimensions], map_axes.origin + xy @ map_axes.rotation_matrix.T
     )
 
 
@@ -298,8 +287,10 @@ def resolve_fault_face_indices(
     - Z-normal faces (count `nx*ny*(nz+1)`, offset `n_x_faces + n_y_faces`):
       `n_x_faces + n_y_faces + i * ny * (nz+1) + j * (nz+1) + k_plane`.
 
-    Cell pairs that map to boundary or out-of-range faces are returned as
-    fault NNC pairs instead of being silently dropped.
+    `X`, `Y` and `Z` select the face on the positive side of each cell in the
+    record's range; `X-`, `Y-` and `Z-` select the face on its negative side.
+    Faces on the outer edge of the grid have no neighbour and are skipped.
+    The returned fault NNC list is always empty for a Cartesian grid.
 
     :param fault_records: Sequence of `FaultRecord`.
     :param nx: Grid dimension x.
@@ -309,9 +300,6 @@ def resolve_fault_face_indices(
     :param n_y_faces: Total Y-normal face count.
     :returns: Tuple `(fault_face_dict, fault_nnc_pairs)`.
     """
-    cell_stride_j = nx
-    cell_stride_k = nx * ny
-
     result: dict[str, list[int]] = {}
     fault_nnc_pairs: list[tuple[int, int, str]] = []
 
@@ -326,63 +314,31 @@ def resolve_fault_face_indices(
             )
             continue
 
-        face_indices: list[int] = []
+        negative = face_dir.endswith("-")
+        i_range = np.arange(max(record.i1 - 1, 0), min(record.i2, nx), dtype=np.int64)
+        j_range = np.arange(max(record.j1 - 1, 0), min(record.j2, ny), dtype=np.int64)
+        k_range = np.arange(max(record.k1 - 1, 0), min(record.k2, nz), dtype=np.int64)
+        if i_range.size == 0 or j_range.size == 0 or k_range.size == 0:
+            continue
 
-        for k in range(record.k1 - 1, record.k2):
-            for j in range(record.j1 - 1, record.j2):
-                for i in range(record.i1 - 1, record.i2):
-                    face_idx: int | None = None
-                    if face_dir in ("X", "X-"):
-                        i_plane = i + 1
-                        is_interior = 0 <= i < nx - 1 and 0 <= j < ny and 0 <= k < nz
-                        if 0 <= i < nx and 0 <= j < ny and 0 <= k < nz:
-                            face_idx = i_plane * ny * nz + j * nz + k
+        ii, jj, kk = (
+            axis.ravel() for axis in np.meshgrid(i_range, j_range, k_range, indexing="ij")
+        )
+        axis_letter = face_dir[0]
+        if axis_letter == "X":
+            plane = ii if negative else ii + 1
+            is_interior = (plane >= 1) & (plane <= nx - 1)
+            global_faces = plane * ny * nz + jj * nz + kk
+        elif axis_letter == "Y":
+            plane = jj if negative else jj + 1
+            is_interior = (plane >= 1) & (plane <= ny - 1)
+            global_faces = n_x_faces + ii * (ny + 1) * nz + plane * nz + kk
+        else:
+            plane = kk if negative else kk + 1
+            is_interior = (plane >= 1) & (plane <= nz - 1)
+            global_faces = n_x_faces + n_y_faces + ii * ny * (nz + 1) + jj * (nz + 1) + plane
 
-                    elif face_dir in ("Y", "Y-"):
-                        j_plane = j + 1
-                        is_interior = 0 <= i < nx and 0 <= j < ny - 1 and 0 <= k < nz
-                        if 0 <= i < nx and 0 <= j < ny and 0 <= k < nz:
-                            face_idx = n_x_faces + i * (ny + 1) * nz + j_plane * nz + k
-
-                    else:  # Z, Z-
-                        k_plane = k + 1
-                        is_interior = 0 <= i < nx and 0 <= j < ny and 0 <= k < nz - 1
-                        if 0 <= i < nx and 0 <= j < ny and 0 <= k < nz:
-                            face_idx = (
-                                n_x_faces + n_y_faces + i * ny * (nz + 1) + j * (nz + 1) + k_plane
-                            )
-
-                    if face_idx is None:
-                        continue
-
-                    if not is_interior:
-                        # Boundary face - no interior neighbour; record as fault derived NNC
-                        # if both cells exist within the grid extents.
-                        if face_dir in ("X", "X-") and 0 <= i < nx and 0 <= j < ny and 0 <= k < nz:
-                            nb_i = i + 1
-                            if 0 <= nb_i < nx:
-                                cell_a = i + j * cell_stride_j + k * cell_stride_k
-                                cell_b = nb_i + j * cell_stride_j + k * cell_stride_k
-                                fault_nnc_pairs.append((cell_a, cell_b, record.name))
-                        elif (
-                            face_dir in ("Y", "Y-") and 0 <= i < nx and 0 <= j < ny and 0 <= k < nz
-                        ):
-                            nb_j = j + 1
-                            if 0 <= nb_j < ny:
-                                cell_a = i + j * cell_stride_j + k * cell_stride_k
-                                cell_b = i + nb_j * cell_stride_j + k * cell_stride_k
-                                fault_nnc_pairs.append((cell_a, cell_b, record.name))
-                        elif (
-                            face_dir in ("Z", "Z-") and 0 <= i < nx and 0 <= j < ny and 0 <= k < nz
-                        ):
-                            nb_k = k + 1
-                            if 0 <= nb_k < nz:
-                                cell_a = i + j * cell_stride_j + k * cell_stride_k
-                                cell_b = i + j * cell_stride_j + nb_k * cell_stride_k
-                                fault_nnc_pairs.append((cell_a, cell_b, record.name))
-                        continue
-
-                    face_indices.append(face_idx)
+        face_indices: list[int] = global_faces[is_interior].tolist()
 
         if face_indices:
             existing = result.get(record.name)

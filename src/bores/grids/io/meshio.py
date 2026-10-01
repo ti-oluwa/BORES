@@ -225,7 +225,7 @@ def _mesh_to_grid(
     :returns: A fully initialised `bores.grids.base.Grid`.
     :raises GridImportError: If no supported 3-D cell blocks are found.
     """
-    points = np.asarray(mesh.points, dtype=np.float64, copy=False)
+    points = np.asarray(mesh.points, dtype=np.float64)
     if points.shape[1] == 2:
         # 2-D mesh: promote to 3-D with z = 0
         points = np.column_stack([points, np.zeros(len(points))])
@@ -307,7 +307,7 @@ def _grid_to_mesh(grid: Grid, *, cell_data: dict[str, npt.NDArray] | None) -> ty
     meshio_cell_data: dict[str, list[np.ndarray]] = {}
     if cell_data:
         for field_name, field_array in cell_data.items():
-            array = np.asarray(field_array, dtype=np.float64, copy=False)
+            array = np.asarray(field_array, dtype=np.float64)
             if array.shape[0] != n_cells:
                 raise GridExportError(
                     f"cell_data[{field_name!r}] has {array.shape[0]} entries "

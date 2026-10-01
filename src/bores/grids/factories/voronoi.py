@@ -130,10 +130,10 @@ def make_voronoi_grid(
     )
     ```
     """
-    seeds = np.asarray(seed_coordinates, dtype=np.float64, copy=False)
+    seeds = np.asarray(seed_coordinates, dtype=np.float64)
     if seeds.ndim != 2 or seeds.shape[1] not in (2, 3):
         raise ValidationError(
-            f"seed_coordinates must be shape (N, 2) or (N, 3); got {seeds.shape!r}."
+            f"`seed_coordinates` must be shape (N, 2) or (N, 3); got {seeds.shape!r}."
         )
     if seeds.shape[0] < 4:
         raise ValidationError(f"At least 4 seed points are required; got {seeds.shape[0]}.")
@@ -377,9 +377,15 @@ def make_2d_voronoi_grid(
 
         # Recover Voronoi vertex indices for each polygon vertex
         region_idx = voronoi.point_region[original_column_idx]
-        region_vertex_indices = voronoi.regions[region_idx]
-        # region_vertex_indices[k] is the voronoi.vertices index for polygon_2d[k]
+        region_vertex_indices = list(voronoi.regions[region_idx])
         assert len(region_vertex_indices) == n_polygon_vertices
+        polygon_x = polygon_2d[:, 0]
+        polygon_y = polygon_2d[:, 1]
+        shoelace = np.dot(polygon_x, np.roll(polygon_y, -1)) - np.dot(
+            np.roll(polygon_x, -1), polygon_y
+        )
+        if shoelace < 0.0:
+            region_vertex_indices.reverse()
 
         for layer in range(n_layers):
             top_level = layer
@@ -606,7 +612,7 @@ def compute_2d_signed_area(
     :param point: Test point, shape `(2,)`.
     :returns: Signed area (positive if `point` is left of `a -> b`).
     """
-    return 0.5 * (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0])
+    return 0.5 * ((b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0]))
 
 
 def compute_depth_nodes(

@@ -275,7 +275,7 @@ def resolve_vector_spacing(
     if per_cell is None:
         return None
 
-    flat = np.asarray(per_cell, dtype=np.float64, copy=False).ravel()
+    flat = np.asarray(per_cell, dtype=np.float64).ravel()
     reshaped = flat.reshape(nz, ny, nx)
     if axis == "x":
         return reshaped[0, 0, :]  # varies in x; take first y-row, first z-layer
@@ -538,7 +538,7 @@ def assemble_cartesian(
     # Z origin from TOPS
     tops_flat = deck_file.get("TOPS")
     if tops_flat is not None:
-        tops_flat = np.asarray(tops_flat, dtype=np.float64, copy=False)
+        tops_flat = np.asarray(tops_flat, dtype=np.float64)
         n_columns = nx * ny
         tops_col = tops_flat[:n_columns]
         z_top = tops_col.min()
@@ -659,20 +659,20 @@ def _emit_mapaxes(lines: list[str], map_axes: MapAxes) -> None:
 def _emit_actnum(
     lines: list[str],
     actnum: ActNumArray,
-    n_cells: int,
     nx: Integer,
     ny: Integer,
     nz: Integer,
 ) -> None:
     """Append an `ACTNUM` block in Eclipse Fortran order (i fastest)."""
-    actnum_arr = np.asarray(actnum, dtype=np.int32, copy=False)
-    if len(actnum_arr) != n_cells:
+    actnum_array = np.asarray(actnum, dtype=np.int32)
+    if actnum_array.size != nx * ny * nz:
         raise GridExportError(
-            f"`actnum` length {len(actnum_arr)} does not match `n_cells` {n_cells}."
+            f"`actnum` has {actnum_array.size} entries but the grid has {nx * ny * nz} "
+            f"cells ({nx} x {ny} x {nz})."
         )
     lines.append("")
     lines.append("ACTNUM")
-    flat = actnum_arr.reshape(nz, ny, nx).transpose(2, 1, 0).ravel(order="F")
+    flat = actnum_array.reshape(nz, ny, nx).ravel()
     for i in range(0, len(flat), 20):
         chunk = flat[i : i + 20]
         lines.append("  " + "  ".join(str(int(v)) for v in chunk))
@@ -691,11 +691,7 @@ def _emit_mult_array(
     lines.append("")
     lines.append(keyword)
     flat = (
-        np
-        .asarray(array, dtype=np.float64, copy=False)
-        .reshape(nz, ny, nx)
-        .transpose(2, 1, 0)
-        .ravel(order="F")
+        np.asarray(array, dtype=np.float64).reshape(nz, ny, nx).transpose(2, 1, 0).ravel(order="F")
     )
     for i in range(0, len(flat), 6):
         chunk = flat[i : i + 6]
@@ -769,6 +765,32 @@ def _emit_faults(lines: list[str], grid: Grid, nx: Integer, ny: Integer) -> None
         # Add 1, to move from 0-based to 1-based indexing which Eclipse uses
         return (i + 1, j + 1, k + 1)
 
+    def _fault_line(fault_name: str, label: str, cell_a: int, cell_b: int) -> str | None:
+        """
+        One `FAULTS` record for the face between two adjacent cells, anchored on the
+        lower-indexed cell and pointing to its positive side (`X`, `Y` or `Z`).
+        """
+        ai, aj, ak = _flat_to_ijk(cell_a)
+        bi, bj, bk = _flat_to_ijk(cell_b)
+        if bi != ai:
+            face_dir = "X"
+            ai, aj, ak = min((ai, aj, ak), (bi, bj, bk), key=lambda ijk: ijk[0])
+        elif bj != aj:
+            face_dir = "Y"
+            ai, aj, ak = min((ai, aj, ak), (bi, bj, bk), key=lambda ijk: ijk[1])
+        elif bk != ak:
+            face_dir = "Z"
+            ai, aj, ak = min((ai, aj, ak), (bi, bj, bk), key=lambda ijk: ijk[2])
+        else:
+            warnings.warn(
+                f"Fault {fault_name!r}: {label} connects cells with "
+                f"identical IJK ({ai},{aj},{ak}) - cannot determine direction. "
+                f"Skipping.",
+                stacklevel=4,
+            )
+            return None
+        return f"  '{fault_name}'  {ai}  {ai}  {aj}  {aj}  {ak}  {ak}  '{face_dir}'  /"
+
     lines.append("")
     lines.append("FAULTS")
 
@@ -780,34 +802,9 @@ def _emit_faults(lines: list[str], grid: Grid, nx: Integer, ny: Integer) -> None
                 neighbour = grid.face_cell_indices[face_idx, 1]
                 if owner < 0 or neighbour < 0:
                     continue
-
-                oi, oj, ok = _flat_to_ijk(owner)
-                ni, nj, nk = _flat_to_ijk(neighbour)
-
-                if ni != oi:
-                    face_dir = "I" if ni > oi else "I-"
-                    if ni < oi:
-                        oi, oj, ok = ni, nj, nk
-                elif nj != oj:
-                    face_dir = "J" if nj > oj else "J-"
-                    if nj < oj:
-                        oi, oj, ok = ni, nj, nk
-                elif nk != ok:
-                    face_dir = "K" if nk > ok else "K-"
-                    if nk < ok:
-                        oi, oj, ok = ni, nj, nk
-                else:
-                    warnings.warn(
-                        f"Fault {fault_name!r}: face {face_idx} connects cells with "
-                        f"identical IJK ({oi},{oj},{ok}) - cannot determine direction. "
-                        f"Skipping.",
-                        stacklevel=4,
-                    )
-                    continue
-
-                lines.append(
-                    f"  '{fault_name}'  {oi}  {oi}  {oj}  {oj}  {ok}  {ok}  '{face_dir}'  /"
-                )
+                line = _fault_line(fault_name, f"face {face_idx}", int(owner), int(neighbour))
+                if line is not None:
+                    lines.append(line)
 
     # Fault NNCs (cell pairs that had no shared geometric face)
     if has_nnc_faults:
@@ -816,33 +813,9 @@ def _emit_faults(lines: list[str], grid: Grid, nx: Integer, ny: Integer) -> None
             for nnc_idx in nnc_indices:
                 c1 = grid.nnc_cell_indices[nnc_idx, 0]
                 c2 = grid.nnc_cell_indices[nnc_idx, 1]
-                oi, oj, ok = _flat_to_ijk(c1)
-                ni, nj, nk = _flat_to_ijk(c2)
-
-                if ni != oi:
-                    face_dir = "I" if ni > oi else "I-"
-                    if ni < oi:
-                        oi, oj, ok = ni, nj, nk
-                elif nj != oj:
-                    face_dir = "J" if nj > oj else "J-"
-                    if nj < oj:
-                        oi, oj, ok = ni, nj, nk
-                elif nk != ok:
-                    face_dir = "K" if nk > ok else "K-"
-                    if nk < ok:
-                        oi, oj, ok = ni, nj, nk
-                else:
-                    warnings.warn(
-                        f"Fault {fault_name!r}: NNC {nnc_idx} connects cells with "
-                        f"identical IJK ({oi},{oj},{ok}) - cannot determine direction. "
-                        f"Skipping.",
-                        stacklevel=4,
-                    )
-                    continue
-
-                lines.append(
-                    f"  '{fault_name}'  {oi}  {oi}  {oj}  {oj}  {ok}  {ok}  '{face_dir}'  /"
-                )
+                line = _fault_line(fault_name, f"NNC {nnc_idx}", int(c1), int(c2))
+                if line is not None:
+                    lines.append(line)
 
     lines.append("/")
     lines.append("")
@@ -1123,7 +1096,7 @@ def build_grdecl_cartesian_text(grid: Grid, *, actnum: ActNumArray | None = None
 
     effective_actnum = actnum if actnum is not None else meta.get("actnum")
     if effective_actnum is not None:
-        _emit_actnum(lines, effective_actnum, grid.n_cells, nx, ny, nz)
+        _emit_actnum(lines, effective_actnum, nx, ny, nz)
 
     _emit_mult_arrays(lines, grid, nx, ny, nz)
     _emit_faults(lines, grid, nx, ny)
@@ -1182,7 +1155,7 @@ def build_grdecl_corner_point_text(grid: Grid, *, actnum: ActNumArray | None = N
 
     effective_actnum = actnum if actnum is not None else meta.get("actnum")
     if effective_actnum is not None:
-        _emit_actnum(lines, effective_actnum, grid.n_cells, nx, ny, nz)
+        _emit_actnum(lines, effective_actnum, nx, ny, nz)
 
     _emit_mult_arrays(lines, grid, nx, ny, nz)
     _emit_faults(lines, grid, nx, ny)

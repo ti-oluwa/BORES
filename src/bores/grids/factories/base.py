@@ -3,6 +3,7 @@ from typing import TypeAlias
 
 import numpy as np
 
+from bores.datastructures import MapAxes
 from bores.errors import InvalidFaceConnectivityError
 from bores.types import IntArray, Integer, NumberArray, OneDimension, TwoDimensions
 
@@ -203,3 +204,18 @@ VALID_FAULT_FACE_DIRECTIONS: frozenset[str] = frozenset({
     "Z",
     "Z-",
 })
+
+
+def map_xy_to_map_space(
+    xy: NumberArray[TwoDimensions], map_axes: MapAxes
+) -> NumberArray[TwoDimensions]:
+    """
+    Map local `(x, y)` pairs into map space: `origin + rotation_matrix @ xy`.
+
+    :param xy: Shape `(n, 2)` local-space points.
+    :param map_axes: Map axes to apply.
+    :returns: Shape `(n, 2)` map-space points.
+    """
+    return typing.cast(
+        NumberArray[TwoDimensions], map_axes.origin + xy @ map_axes.rotation_matrix.T
+    )

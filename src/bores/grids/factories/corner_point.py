@@ -30,6 +30,7 @@ from bores.grids.factories.base import (
     FaceRecord,
     FaultRecord,
     VertexCoordinates,
+    map_xy_to_map_space,
 )
 from bores.types import (
     Boolean,
@@ -141,8 +142,8 @@ def make_corner_point_grid(
                 f"`nnc_transmissibilities` has {len(nnc_transmissibilities)} entries."
             )
 
-    coord_arr = np.asarray(coord, dtype=np.float64, copy=False)
-    zcorn_arr = np.asarray(zcorn, dtype=np.float64, copy=False)
+    coord_array = np.asarray(coord, dtype=np.float64)
+    zcorn_array = np.asarray(zcorn, dtype=np.float64)
 
     resolved_map_axes = map_axes if map_axes is not None else (metadata or {}).get("map_axes")
     if resolved_map_axes is not None:
@@ -152,7 +153,7 @@ def make_corner_point_grid(
         resolved_map_axes = resolved_map_axes.convert(unit_system)
 
     if resolved_map_axes is not None and apply_map_axes:
-        coord_arr = apply_map_axes_to_coord(coord_arr, map_axes=resolved_map_axes)  # type: ignore[arg-type]
+        coord_array = apply_map_axes_to_coord(coord_array, map_axes=resolved_map_axes)  # type: ignore[arg-type]
 
     if resolved_map_axes is not None:
         # Keep grid.metadata['map_axes'] consistent with whatever was
@@ -160,29 +161,31 @@ def make_corner_point_grid(
         # differed from (or `metadata` didn't yet have) one.
         metadata = {**(metadata or {}), "map_axes": resolved_map_axes}
 
-    if coord_arr.ndim != 3 or coord_arr.shape[2] != 6:
-        raise ValidationError(f"`coord` must have shape (NY+1, NX+1, 6); got {coord_arr.shape!r}.")
-    if zcorn_arr.ndim != 3:
-        raise ValidationError(f"`zcorn` must be a 3-D array; got ndim={zcorn_arr.ndim}.")
+    if coord_array.ndim != 3 or coord_array.shape[2] != 6:
+        raise ValidationError(
+            f"`coord` must have shape (NY+1, NX+1, 6); got {coord_array.shape!r}."
+        )
+    if zcorn_array.ndim != 3:
+        raise ValidationError(f"`zcorn` must be a 3-D array; got ndim={zcorn_array.ndim}.")
 
-    ny_plus1, nx_plus1 = coord_arr.shape[:2]
+    ny_plus1, nx_plus1 = coord_array.shape[:2]
     nx = nx_plus1 - 1
     ny = ny_plus1 - 1
-    nz = zcorn_arr.shape[0] // 2
+    nz = zcorn_array.shape[0] // 2
 
-    if zcorn_arr.shape != (nz * 2, ny * 2, nx * 2):
+    if zcorn_array.shape != (nz * 2, ny * 2, nx * 2):
         raise ValidationError(
-            f"`zcorn` shape {zcorn_arr.shape!r} is inconsistent with "
+            f"`zcorn` shape {zcorn_array.shape!r} is inconsistent with "
             f"coord-derived grid dimensions ({nx} x {ny} x {nz})."
         )
 
     if actnum is None:
-        actnum_arr = typing.cast(ActNumArray, np.ones((nz, ny, nx), dtype=np.int32))
+        actnum_array = typing.cast(ActNumArray, np.ones((nz, ny, nx), dtype=np.int32))
     else:
-        actnum_arr = typing.cast(ActNumArray, np.asarray(actnum, dtype=np.int32, copy=False))
-        if actnum_arr.shape != (nz, ny, nx):
+        actnum_array = typing.cast(ActNumArray, np.asarray(actnum, dtype=np.int32))
+        if actnum_array.shape != (nz, ny, nx):
             raise ValidationError(
-                f"actnum shape {actnum_arr.shape!r} does not match "
+                f"`actnum` shape {actnum_array.shape!r} does not match "
                 f"grid dimensions ({nx} x {ny} x {nz})."
             )
 
@@ -195,15 +198,15 @@ def make_corner_point_grid(
         face_vertex_offsets,
         face_cell_indices,
         face_connection_types,
-        geo_nnc_pairs,
-        geo_nnc_connection_types,
+        geometric_nnc_pairs,
+        geometric_nnc_connection_types,
         active_cells,
         cell_volumes,
         cell_centroids,
     ) = compute_corner_point_geometry(
-        coord=coord_arr,  # type: ignore[arg-type]
-        zcorn=zcorn_arr,  # type: ignore[arg-type]
-        actnum=actnum_arr,
+        coord=coord_array,  # type: ignore[arg-type]
+        zcorn=zcorn_array,  # type: ignore[arg-type]
+        actnum=actnum_array,
         vertex_tolerance=vertex_tolerance,
         pinch_tolerance=pinch_tolerance,
     )
@@ -241,12 +244,12 @@ def make_corner_point_grid(
         ]
     ] = []
 
-    if geo_nnc_pairs is not None and len(geo_nnc_pairs) > 0:
-        geo_transmissibilities = np.full(len(geo_nnc_pairs), np.nan, dtype=np.float64)
+    if geometric_nnc_pairs is not None and len(geometric_nnc_pairs) > 0:
+        geometric_transmissibilities = np.full(len(geometric_nnc_pairs), np.nan, dtype=np.float64)
         all_nnc_parts.append((
-            np.asarray(geo_nnc_pairs, dtype=np.int32, copy=False),
-            geo_nnc_connection_types,
-            geo_transmissibilities,
+            np.asarray(geometric_nnc_pairs, dtype=np.int32),
+            geometric_nnc_connection_types,
+            geometric_transmissibilities,
         ))
 
     fault_nnc_indices: dict[str, list[int]] = {}
@@ -335,21 +338,6 @@ def make_corner_point_grid(
     )
 
 
-def _map_axes_xy_forward(
-    xy: NumberArray[TwoDimensions], map_axes: MapAxes
-) -> NumberArray[TwoDimensions]:
-    """
-    Map local `(x, y)` pairs into map space: `origin + rotation_matrix @ xy`.
-
-    :param xy: Shape `(n, 2)` local-space points.
-    :param map_axes: Map axes to apply.
-    :returns: Shape `(n, 2)` map-space points.
-    """
-    return typing.cast(
-        NumberArray[TwoDimensions], map_axes.origin + xy @ map_axes.rotation_matrix.T
-    )
-
-
 def get_map_axes_xy_inverse(
     xy: NumberArray[TwoDimensions], map_axes: MapAxes
 ) -> NumberArray[TwoDimensions]:
@@ -392,8 +380,8 @@ def apply_map_axes_to_coord(coord: CoordArray, map_axes: MapAxes) -> CoordArray:
     shape_xy = (*coord.shape[:-1], 2)
     top_xy = coord[..., 0:2].reshape(-1, 2)
     bottom_xy = coord[..., 3:5].reshape(-1, 2)
-    rotated[..., 0:2] = _map_axes_xy_forward(top_xy, map_axes).reshape(shape_xy)
-    rotated[..., 3:5] = _map_axes_xy_forward(bottom_xy, map_axes).reshape(shape_xy)
+    rotated[..., 0:2] = map_xy_to_map_space(top_xy, map_axes).reshape(shape_xy)
+    rotated[..., 3:5] = map_xy_to_map_space(bottom_xy, map_axes).reshape(shape_xy)
     return rotated
 
 
@@ -551,14 +539,14 @@ def compute_corner_point_geometry(
     :param vertex_tolerance: Vertex merge distance.
     :param pinch_tolerance: Average thickness threshold for pinch detection.
     :returns: 10-tuple `(vertex_coordinates, face_vertex_indices,
-        face_vertex_offsets, face_cell_indices, face_connection_types, geo_nnc_pairs,
-        geo_nnc_connection_types, active_cells, cell_volumes, cell_centroids)`.
+        face_vertex_offsets, face_cell_indices, face_connection_types, geometric_nnc_pairs,
+        geometric_nnc_connection_types, active_cells, cell_volumes, cell_centroids)`.
     :raises InvalidGridError: If no active cells are found.
     """
     active_cells = np.argwhere(actnum > 0).astype(np.int32)
     if active_cells.size == 0:
         raise InvalidGridError(
-            "No active cells found in the corner-point grid (ACTNUM is all zeros)."
+            "No active cells found in the corner-point grid (`ACTNUM` is all zeros)."
         )
 
     corner_coordinates = compute_active_cell_corner_coordinates(
@@ -717,12 +705,13 @@ def resolve_fault_face_indices(
             )
             continue
 
-        if face_direction in ("X", "X-"):
-            di, dj, dk = 1, 0, 0
-        elif face_direction in ("Y", "Y-"):
-            di, dj, dk = 0, 1, 0
+        step = -1 if face_direction.endswith("-") else 1
+        if face_direction.startswith("X"):
+            di, dj, dk = step, 0, 0
+        elif face_direction.startswith("Y"):
+            di, dj, dk = 0, step, 0
         else:
-            di, dj, dk = 0, 0, 1
+            di, dj, dk = 0, 0, step
 
         face_indices: list[int] = []
         n_inactive = 0
@@ -980,7 +969,7 @@ def rederive_corner_point_arrays(
     `MAPAXES` card being re-emitted alongside it (see `get_map_axes_xy_inverse`).
 
     :param grid: A `Grid` whose cells are stored in k-major, j-middle, i-minor order.
-    :returns: Tuple `(coord_arr, zcorn_arr, nx, ny, nz)`.
+    :returns: Tuple `(coord_array, zcorn_array, nx, ny, nz)`.
     :raises GridExportError: If the cell count cannot be factored.
     """
     n_cells = grid.n_cells
@@ -1013,8 +1002,15 @@ def rederive_corner_point_arrays(
                 "grid.metadata to enable GRDECL export."
             )
 
+    if int(nx) * int(ny) * int(nz) != n_cells:  # type: ignore[arg-type]
+        raise GridExportError(
+            f"Cannot reconstruct COORD/ZCORN: the grid has {n_cells} cells but its dimensions "
+            f"({nx} x {ny} x {nz}) imply {int(nx) * int(ny) * int(nz)}. Grids with inactive "  # type: ignore
+            "cells do not retain the geometry of those cells and cannot be exported."
+        )
+
     warnings.warn(
-        "Exporting a corner-point Grid to GRDECL without stored COORD/ZCORN "
+        "Exporting a corner-point Grid to GRDECL without stored `COORD`/`ZCORN` "
         "arrays. Pillars are reconstructed as straight vertical lines from "
         "cell bounding boxes. This is lossy for grids with lateral pillar "
         "displacement (faults, dipping layers).",

@@ -12,7 +12,7 @@
 [![PyPI](https://img.shields.io/pypi/v/bores-framework)](https://pypi.org/project/bores-framework/)
 [![License](https://img.shields.io/github/license/ti-oluwa/bores)](LICENSE)
 
-BORES is a Python framework for 2D/3D block grid black-oil reservoir simulation of three-phase (oil, water, gas) flow in porous media. You can build a simulation case by hand through ease-to-use APIs or load one straight from an Eclipse/GRDECL-style deck, then run and analyze the simulation.
+BORES is a Python framework for 2D/3D block grid black-oil reservoir simulation of three-phase (oil, water, gas) flow in porous media. You can build a simulation case by hand through easy-to-use APIs or load one straight from an Eclipse/GRDECL-style deck, then run and analyze the simulation.
 
 > [!IMPORTANT]
 > **Disclaimer**: BORES' goal is to support **educational, research, and prototyping** work. It is not production-grade code yet and should not be used for critical business decisions or regulatory compliance. Results should be validated against established simulators before any real-world application.
