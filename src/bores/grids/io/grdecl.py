@@ -35,7 +35,7 @@ from bores.datastructures import MapAxes
 from bores.deck.core import DeckParseError
 from bores.deck.file import DeckFile
 from bores.errors import GridExportError, GridImportError
-from bores.grids.base import ConnectionType, Grid
+from bores.grids.base import CellStatus, ConnectionType, Grid
 from bores.grids.factories.cartesian import make_cartesian_grid
 from bores.grids.factories.corner_point import (
     ActNumArray,
@@ -132,11 +132,24 @@ def build_map_axes(deck_file: DeckFile) -> MapAxes | None:
     )
 
 
+ECLIPSE_DARCY_CONSTANT_BY_UNIT_SYSTEM: typing.Mapping[UnitSystem, float] = {
+    UnitSystem.METRIC: 0.00852702,
+    UnitSystem.FIELD: 0.00112712,
+    UnitSystem.LAB: 3.6,
+}
+"""
+Eclipse's Darcy constant for each unit system. Transmissibilities in a deck include this
+constant (cP.rb/day/psi for FIELD), while `Grid` stores purely geometric transmissibility
+(permeability x area / length), so deck values are divided by it on import.
+"""
+
+
 def build_nnc_arrays(
     deck_file: DeckFile,
     nx: Integer,
     ny: Integer,
     nz: Integer,
+    unit_system: UnitSystem,
 ) -> tuple[
     IntArray[TwoDimensions] | None,
     NumberArray[OneDimension] | None,
@@ -148,6 +161,8 @@ def build_nnc_arrays(
     :param nx: Grid extent in x.
     :param ny: Grid extent in y.
     :param nz: Grid extent in z.
+    :param unit_system: Unit system of the deck, used to remove the Darcy constant from
+        the deck's transmissibilities.
     :returns: `(pairs, transmissibilities)` - shape `(n_nnc, 2)` int32
         and shape `(n_nnc,)` float64 arrays, or `(None, None)` if the
         keyword is absent.
@@ -157,6 +172,11 @@ def build_nnc_arrays(
     if not nnc_records:
         return None, None
 
+    darcy_constant = ECLIPSE_DARCY_CONSTANT_BY_UNIT_SYSTEM.get(unit_system)
+    if darcy_constant is None:
+        raise GridImportError(
+            f"NNC transmissibilities cannot be imported for unit system {unit_system!r}."
+        )
     pairs: list[tuple[int, int]] = []
     transmissibilities: list[float] = []
 
@@ -176,7 +196,7 @@ def build_nnc_arrays(
         c1 = (i1 - 1) + (j1 - 1) * nx + (k1 - 1) * nx * ny
         c2 = (i2 - 1) + (j2 - 1) * nx + (k2 - 1) * nx * ny
         pairs.append((c1, c2))
-        transmissibilities.append(transmissibility)
+        transmissibilities.append(transmissibility / darcy_constant)
 
     if not pairs:
         return None, None
@@ -226,7 +246,7 @@ def build_multflt(deck_file: DeckFile) -> dict[str, Number] | None:
     return {record["name"]: record["multiplier"] for record in multflt_records}
 
 
-def resolve_vector_spacing(
+def resolve_cell_spacing(
     deck_file: DeckFile,
     vector_key: str,
     per_cell_key: str,
@@ -237,51 +257,104 @@ def resolve_vector_spacing(
     nx: Integer,
 ) -> npt.NDArray[np.float64] | None:
     """
-    Try to obtain a 1-D spacing vector for one axis.
+    Read the cell spacing along one axis as a `(nz, ny, nx)` array.
 
-    Resolution order:
-
-    1. `DXV` / `DYV` / `DZV` - single-valued vectors of length
-       `nx`, `ny`, `nz` respectively, already 1-D in the deck.
-    2. `DX` / `DY` / `DZ` - per-cell arrays of length
-       `nx*ny*nz`.  Reshaped to `(nz, ny, nx)` and the first
-       row / column / layer is extracted.
-    3. Returns `None` if neither keyword is present.
+    The vector form (`DXV` / `DYV` / `DZV`, one value per cell along the axis) is preferred
+    and broadcast over the other axes. Otherwise the per-cell form (`DX` / `DY` / `DZ`, one
+    value per cell) is used as given.
 
     :param deck_file: Parsed deck.
     :param vector_key: Vector keyword name (`"DXV"`, `"DYV"`, `"DZV"`).
     :param per_cell_key: Per-cell keyword name (`"DX"`, `"DY"`, `"DZ"`).
-    :param count: Expected length of the vector (`nx`, `ny`, or `nz`).
-    :param axis: Axis label for error messages (`"x"`, `"y"`, `"z"`).
-    :param nz: Grid depth count.
-    :param ny: Grid lateral count (y).
-    :param nx: Grid lateral count (x).
-    :returns: 1-D float64 spacing array or `None`.
-    :raises GridImportError: If the vector keyword has the wrong length.
+    :param count: Expected length of the vector form (`nx`, `ny`, or `nz`).
+    :param axis: Axis label (`"x"`, `"y"`, `"z"`).
+    :returns: Spacing for every cell, or `None` if neither keyword is present.
+    :raises GridImportError: If either keyword has the wrong number of values.
     """
-    # Prefer the vector form (DXV / DYV / DZV).
-    vec = deck_file.get(vector_key)
-    if vec is not None:
-        array = np.asarray(vec, dtype=np.float64).ravel()
+    vector = deck_file.get(vector_key)
+    if vector is not None:
+        array = np.asarray(vector, dtype=np.float64).ravel()
         if len(array) != count:
             raise GridImportError(
                 f"{vector_key} has {len(array)} values but expected {count} "
                 f"(grid has n{axis}={count})."
             )
-        return array
+        shape = {"x": (1, 1, nx), "y": (1, ny, 1), "z": (nz, 1, 1)}[axis]
+        return np.broadcast_to(array.reshape(shape), (nz, ny, nx)).copy()  # type: ignore[arg-type]
 
-    # Fall back to the per-cell array.
     per_cell = deck_file.get(per_cell_key)
     if per_cell is None:
         return None
-
     flat = np.asarray(per_cell, dtype=np.float64).ravel()
-    reshaped = flat.reshape(nz, ny, nx)
-    if axis == "x":
-        return reshaped[0, 0, :]  # varies in x; take first y-row, first z-layer
-    if axis == "y":
-        return reshaped[0, :, 0]  # varies in y
-    return reshaped[:, 0, 0]  # varies in z
+    if flat.size != nx * ny * nz:
+        raise GridImportError(
+            f"{per_cell_key} has {flat.size} values but expected {nx * ny * nz} ({nx}x{ny}x{nz})."
+        )
+    return flat.reshape(nz, ny, nx)
+
+
+def uniform_along_other_axes(
+    spacing: npt.NDArray[np.float64], axis: str
+) -> npt.NDArray[np.float64] | None:
+    """
+    Reduce a `(nz, ny, nx)` spacing array to one value per cell along `axis`.
+
+    :returns: The 1-D spacing, or `None` if it differs across the other two axes.
+    """
+    keep = {"x": 2, "y": 1, "z": 0}[axis]
+    moved = np.moveaxis(spacing, keep, 0)
+    vector = moved.reshape(moved.shape[0], -1)[:, 0]
+    if np.allclose(moved.reshape(moved.shape[0], -1), vector[:, None], rtol=1e-9, atol=0.0):
+        return vector
+    return None
+
+
+def cartesian_corner_point_arrays(
+    dx: npt.NDArray[np.float64],
+    dy: npt.NDArray[np.float64],
+    cell_tops: npt.NDArray[np.float64],
+    cell_thicknesses: npt.NDArray[np.float64],
+) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    """
+    Build `COORD` and `ZCORN` for a block grid with vertical pillars.
+
+    Corner depths are averaged over the cells meeting at each node so neighbouring cells
+    share corners (a watertight grid), which reduces to flat-topped cells when the top
+    surface and thicknesses are uniform.
+
+    :param dx: Shape `(nx,)` cell widths along x.
+    :param dy: Shape `(ny,)` cell widths along y.
+    :param cell_tops: Shape `(nz, ny, nx)` depth of each cell's top.
+    :param cell_thicknesses: Shape `(nz, ny, nx)` thickness of each cell.
+    :returns: `(coord, zcorn)` with shapes `(ny + 1, nx + 1, 6)` and `(2 * nz, 2 * ny, 2 * nx)`.
+    """
+    nz, ny, nx = cell_tops.shape
+    x_edges = np.concatenate([[0.0], np.cumsum(dx)])
+    y_edges = np.concatenate([[0.0], np.cumsum(dy)])
+
+    def node_average(field: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
+        total = np.zeros((nz, ny + 1, nx + 1))
+        count = np.zeros((nz, ny + 1, nx + 1))
+        for dj in (0, 1):
+            for di in (0, 1):
+                total[:, dj : dj + ny, di : di + nx] += field
+                count[:, dj : dj + ny, di : di + nx] += 1.0
+        return total / count
+
+    top_nodes = node_average(cell_tops)
+    bottom_nodes = node_average(cell_tops + cell_thicknesses)
+    zcorn = np.empty((2 * nz, 2 * ny, 2 * nx))
+    for dj in (0, 1):
+        for di in (0, 1):
+            zcorn[0::2, dj::2, di::2] = top_nodes[:, dj : dj + ny, di : di + nx]
+            zcorn[1::2, dj::2, di::2] = bottom_nodes[:, dj : dj + ny, di : di + nx]
+
+    coord = np.zeros((ny + 1, nx + 1, 6))
+    coord[:, :, 0] = coord[:, :, 3] = x_edges[None, :]
+    coord[:, :, 1] = coord[:, :, 4] = y_edges[:, None]
+    coord[:, :, 2] = zcorn.min()
+    coord[:, :, 5] = zcorn.max()
+    return coord, zcorn
 
 
 def load_grdecl(
@@ -483,8 +556,10 @@ def assemble_corner_point(
 
     meta["source_format"] = "grdecl_corner_point"
     meta["actnum"] = actnum
+    meta["coord"] = np.asarray(coord, dtype=np.float64).ravel()
+    meta["zcorn"] = np.asarray(zcorn, dtype=np.float64).ravel()
 
-    nnc_pairs, nnc_transmissibilities = build_nnc_arrays(deck_file, nx, ny, nz)
+    nnc_pairs, nnc_transmissibilities = build_nnc_arrays(deck_file, nx, ny, nz, unit_system)
     fault_records = build_fault_records(deck_file)
     multflt = build_multflt(deck_file)
     return make_corner_point_grid(
@@ -515,16 +590,16 @@ def assemble_cartesian(
     meta: dict[str, typing.Any],
 ) -> Grid:
     """
-    Build a Cartesian `bores.grids.base.Grid` from `TOPS` /
-    `DX` / `DY` / `DZ` (per-cell) or `DXV` / `DYV` / `DZV`
-    (vector) keywords.
+    Build a `bores.grids.base.Grid` from `TOPS` / `DX` / `DY` / `DZ` (per-cell) or
+    `DXV` / `DYV` / `DZV` (vector) keywords.
 
-    Vector forms (`DXV` / `DYV` / `DZV`) are preferred when present
-    and specify spacing directly as 1-D arrays of length `nx`, `ny`,
-    and `nz`.  Per-cell forms are reshaped and sliced to 1-D.
+    A deck with uniform spacing, a flat top surface and every cell active becomes a
+    regular Cartesian grid. Anything else (a varying `TOPS` surface, `DZ` varying across
+    columns, or inactive cells in `ACTNUM`) is built as a corner-point grid with vertical
+    pillars so that no part of the deck's geometry is dropped. `DX` must be constant along
+    y and z, and `DY` along x and z, since pillars are straight.
 
-    Also reads `FAULTS`, `MULTFLT`, `NNC`, and all six `MULT*`
-    arrays, passing them on to :func:`make_cartesian_grid`.
+    Also reads `FAULTS`, `MULTFLT`, `NNC`, and all six `MULT*` arrays.
 
     :param deck_file: Parsed deck.
     :param nx: Grid extent in x.
@@ -533,75 +608,111 @@ def assemble_cartesian(
     :param unit_system: Detected unit system.
     :param meta: Metadata dict passed to the factory.
     :returns: Fully initialised `bores.grids.base.Grid`.
-    :raises GridImportError: If required keywords are missing or malformed.
+    :raises GridImportError: If required keywords are missing or malformed, or `DX` / `DY`
+        vary in a way vertical pillars cannot represent.
     """
-    # Z origin from TOPS
-    tops_flat = deck_file.get("TOPS")
-    if tops_flat is not None:
-        tops_flat = np.asarray(tops_flat, dtype=np.float64)
-        n_columns = nx * ny
-        tops_col = tops_flat[:n_columns]
-        z_top = tops_col.min()
-        if tops_col.max() - tops_col.min() > 1.0:
-            warnings.warn(
-                "GRDECL `TOPS` values vary by more than 1 unit; the Cartesian factory "
-                "uses a flat top surface at the minimum `TOPS` value. Geometry may be "
-                "approximate for dipping grids.",
-                stacklevel=6,
+    dx_cells = resolve_cell_spacing(deck_file, "DXV", "DX", nx, "x", nz, ny, nx)
+    dy_cells = resolve_cell_spacing(deck_file, "DYV", "DY", ny, "y", nz, ny, nx)
+    dz_cells = resolve_cell_spacing(deck_file, "DZV", "DZ", nz, "z", nz, ny, nx)
+    for cells, name in ((dx_cells, "DX"), (dy_cells, "DY"), (dz_cells, "DZ")):
+        if cells is None:
+            raise GridImportError(
+                f"Cartesian GRDECL grid is missing required spacing keyword `{name}` or `{name}V`."
             )
-    else:
-        z_top = 0.0
+    assert dx_cells is not None and dy_cells is not None and dz_cells is not None
 
-    # Spacing vectors
-    dx_1d = resolve_vector_spacing(deck_file, "DXV", "DX", nx, "x", nz, ny, nx)
-    dy_1d = resolve_vector_spacing(deck_file, "DYV", "DY", ny, "y", nz, ny, nx)
-    dz_1d = resolve_vector_spacing(deck_file, "DZV", "DZ", nz, "z", nz, ny, nx)
-
+    dx_1d = uniform_along_other_axes(dx_cells, "x")
+    dy_1d = uniform_along_other_axes(dy_cells, "y")
     if dx_1d is None:
         raise GridImportError(
-            "Cartesian GRDECL grid is missing required spacing keyword `DX` or `DXV`."
+            "`DX` varies along y or z, which a grid with straight pillars cannot represent."
         )
     if dy_1d is None:
         raise GridImportError(
-            "Cartesian GRDECL grid is missing required spacing keyword `DY` or `DYV`."
-        )
-    if dz_1d is None:
-        raise GridImportError(
-            "Cartesian GRDECL grid is missing required spacing keyword `DZ` or `DZV`."
+            "`DY` varies along x or z, which a grid with straight pillars cannot represent."
         )
 
-    actnum_flat = deck_file.get("ACTNUM")
-    meta["source_format"] = "grdecl_cartesian"
-    if actnum_flat is not None:
-        meta["actnum"] = actnum_flat.astype(np.int32).reshape(nz, ny, nx)
+    tops_values = deck_file.get("TOPS")
+    if tops_values is None:
+        cell_tops = np.zeros((nz, ny, nx))
+        cell_tops[1:] = np.cumsum(dz_cells, axis=0)[:-1]
+    else:
+        tops = np.asarray(tops_values, dtype=np.float64).ravel()
+        if tops.size not in (nx * ny, nx * ny * nz):
+            raise GridImportError(
+                f"`TOPS` has {tops.size} values but expected {nx * ny} or {nx * ny * nz}."
+            )
+        # The deck repeats an `nx * ny` TOPS array to fill the grid, so layers that are all
+        # identical mean only the top layer was given (the standard form).
+        layers = np.resize(tops, (nz, ny, nx))
+        if np.allclose(layers, layers[0], rtol=0.0, atol=0.0):
+            cell_tops = np.empty((nz, ny, nx))
+            cell_tops[0] = layers[0]
+            cell_tops[1:] = cell_tops[0] + np.cumsum(dz_cells, axis=0)[:-1]
+        else:
+            cell_tops = layers
 
-    nnc_pairs, nnc_transmissibilities = build_nnc_arrays(deck_file, nx, ny, nz)
+    actnum_values = deck_file.get("ACTNUM")
+    actnum = (
+        np.asarray(actnum_values, dtype=np.int32).reshape(nz, ny, nx)
+        if actnum_values is not None
+        else None
+    )
+
+    nnc_pairs, nnc_transmissibilities = build_nnc_arrays(deck_file, nx, ny, nz, unit_system)
     fault_records = build_fault_records(deck_file)
     multflt = build_multflt(deck_file)
+    multipliers = {
+        "positive_x_transmissibility_multipliers": deck_file.get("MULTX"),
+        "negative_x_transmissibility_multipliers": deck_file.get("MULTX-"),
+        "positive_y_transmissibility_multipliers": deck_file.get("MULTY"),
+        "negative_y_transmissibility_multipliers": deck_file.get("MULTY-"),
+        "positive_z_transmissibility_multipliers": deck_file.get("MULTZ"),
+        "negative_z_transmissibility_multipliers": deck_file.get("MULTZ-"),
+    }
 
-    # Store pinch in metadata so dump_grdecl can re-emit it.
-    if meta.get("pinch") is not None:
-        meta["pinch"] = meta["pinch"]
-    return make_cartesian_grid(
-        nx=nx,
-        ny=ny,
-        nz=nz,
-        dx=dx_1d,  # type: ignore[arg-type]
-        dy=dy_1d,  # type: ignore[arg-type]
-        dz=dz_1d,  # type: ignore[arg-type]
-        origin=(0.0, 0.0, z_top),
+    dz_1d = uniform_along_other_axes(dz_cells, "z")
+    contiguous = bool(
+        np.allclose(cell_tops[1:], cell_tops[:-1] + dz_cells[:-1], rtol=1e-9, atol=1e-9)
+    )
+    flat_top = bool(np.allclose(cell_tops[0], cell_tops[0, 0, 0], rtol=0.0, atol=1e-9))
+    all_active = actnum is None or bool((actnum > 0).all())
+
+    if dz_1d is not None and contiguous and flat_top and all_active:
+        meta["source_format"] = "grdecl_cartesian"
+        return make_cartesian_grid(
+            nx=nx,
+            ny=ny,
+            nz=nz,
+            dx=dx_1d,  # type: ignore[arg-type]
+            dy=dy_1d,  # type: ignore[arg-type]
+            dz=dz_1d,  # type: ignore[arg-type]
+            origin=(0.0, 0.0, float(cell_tops[0, 0, 0])),
+            unit_system=unit_system,
+            metadata=meta,
+            fault_records=fault_records,
+            fault_transmissibility_multipliers=multflt,
+            nnc_cell_indices=nnc_pairs,
+            nnc_transmissibilities=nnc_transmissibilities,
+            **multipliers,  # type: ignore
+        )
+
+    coord, zcorn = cartesian_corner_point_arrays(dx_1d, dy_1d, cell_tops, dz_cells)
+    meta["source_format"] = "grdecl_corner_point"
+    meta["dimensions"] = (nx, ny, nz)
+    meta["coord"] = coord.ravel()
+    meta["zcorn"] = zcorn.ravel()
+    return make_corner_point_grid(
+        coord=coord,  # type: ignore[arg-type]
+        zcorn=zcorn,  # type: ignore[arg-type]
+        actnum=actnum,
         unit_system=unit_system,
         metadata=meta,
-        fault_records=fault_records,
-        fault_transmissibility_multipliers=multflt,
         nnc_cell_indices=nnc_pairs,
         nnc_transmissibilities=nnc_transmissibilities,
-        positive_x_transmissibility_multipliers=deck_file.get("MULTX"),
-        negative_x_transmissibility_multipliers=deck_file.get("MULTX-"),
-        positive_y_transmissibility_multipliers=deck_file.get("MULTY"),
-        negative_y_transmissibility_multipliers=deck_file.get("MULTY-"),
-        positive_z_transmissibility_multipliers=deck_file.get("MULTZ"),
-        negative_z_transmissibility_multipliers=deck_file.get("MULTZ-"),
+        fault_records=fault_records,
+        fault_transmissibility_multipliers=multflt,
+        **multipliers,  # type: ignore
     )
 
 
@@ -654,6 +765,15 @@ def _emit_mapaxes(lines: list[str], map_axes: MapAxes) -> None:
         f"  {my[0]:.6f}  {my[1]:.6f}  {o[0]:.6f}  {o[1]:.6f}  {mx[0]:.6f}  {mx[1]:.6f}  /"
     )
     lines.append("")
+
+
+def _actnum_from_grid(grid: Grid) -> ActNumArray | None:
+    """`ACTNUM` mask taken from the grid's cell statuses, or `None` if every cell is active."""
+    if grid.cell_statuses is None or bool((grid.cell_statuses == int(CellStatus.ACTIVE)).all()):
+        return None
+    return typing.cast(
+        ActNumArray, (grid.cell_statuses == int(CellStatus.ACTIVE)).astype(np.int32)
+    )
 
 
 def _emit_actnum(
@@ -847,6 +967,11 @@ def _emit_nnc(lines: list[str], grid: Grid, nx: Integer, ny: Integer) -> None:
         return
 
     user_type = int(ConnectionType.USER_NNC)
+    darcy_constant = ECLIPSE_DARCY_CONSTANT_BY_UNIT_SYSTEM.get(grid.unit_system)
+    if darcy_constant is None:
+        raise GridExportError(
+            f"NNC transmissibilities cannot be exported for unit system {grid.unit_system!r}."
+        )
     has_transmissibility = grid.nnc_transmissibilities is not None and len(
         grid.nnc_transmissibilities
     ) == len(grid.nnc_cell_indices)
@@ -864,13 +989,14 @@ def _emit_nnc(lines: list[str], grid: Grid, nx: Integer, ny: Integer) -> None:
 
         i1, j1, k1 = _flat_to_ijk(int(c1))
         i2, j2, k2 = _flat_to_ijk(int(c2))
-        if has_transmissibility:
-            transmissibility = grid.nnc_transmissibilities[idx]  # type: ignore
-            transmissibility_str = (
-                f"{transmissibility:.6e}" if not np.isnan(transmissibility) else "0.0 -- T unknown"
-            )
-        else:
-            transmissibility_str = "0.0 -- T unknown"
+        if not has_transmissibility:
+            continue
+        transmissibility = grid.nnc_transmissibilities[idx]  # type: ignore
+        if not np.isfinite(transmissibility):
+            # No explicit value: the transmissibility is computed from rock properties, and
+            # writing 0.0 would make the connection closed when the deck is read back.
+            continue
+        transmissibility_str = f"{transmissibility * darcy_constant:.6e}"
         user_nnc_lines.append(f"  {i1}  {j1}  {k1}  {i2}  {j2}  {k2}  {transmissibility_str}  /")
 
     if not user_nnc_lines:
@@ -1094,7 +1220,7 @@ def build_grdecl_cartesian_text(grid: Grid, *, actnum: ActNumArray | None = None
     lines.append("/")
     lines.append("")
 
-    effective_actnum = actnum if actnum is not None else meta.get("actnum")
+    effective_actnum = actnum if actnum is not None else _actnum_from_grid(grid)
     if effective_actnum is not None:
         _emit_actnum(lines, effective_actnum, nx, ny, nz)
 
@@ -1153,7 +1279,7 @@ def build_grdecl_corner_point_text(grid: Grid, *, actnum: ActNumArray | None = N
     lines.append("/")
     lines.append("")
 
-    effective_actnum = actnum if actnum is not None else meta.get("actnum")
+    effective_actnum = actnum if actnum is not None else _actnum_from_grid(grid)
     if effective_actnum is not None:
         _emit_actnum(lines, effective_actnum, nx, ny, nz)
 

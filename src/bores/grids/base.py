@@ -146,7 +146,7 @@ def compute_face_geometry(
     NumberArray[TwoDimensions],
 ]:
     """
-    Compute face centroids, areas, and unit outward normals via Newell's method.
+    Compute area-weighted face centroids, areas, and unit normals (Newell's method).
 
     :param face_vertex_indices: Flat CSR data array of vertex indices.
     :param face_vertex_offsets: CSR offset array of length `n_faces + 1`.
@@ -175,6 +175,35 @@ def compute_face_geometry(
         cx /= n_verts
         cy /= n_verts
         cz /= n_verts
+
+        # Area-weighted centroid: triangle fan about the vertex mean, offsets taken
+        # relative to that mean to keep precision at large coordinates.
+        weighted_x = 0.0
+        weighted_y = 0.0
+        weighted_z = 0.0
+        total_triangle_area = 0.0
+        for local_idx in range(n_verts):
+            a_idx = face_vertex_indices[start + local_idx]
+            b_idx = face_vertex_indices[start + (local_idx + 1) % n_verts]
+            ax = vertex_coordinates[a_idx, 0] - cx
+            ay = vertex_coordinates[a_idx, 1] - cy
+            az = vertex_coordinates[a_idx, 2] - cz
+            bx = vertex_coordinates[b_idx, 0] - cx
+            by = vertex_coordinates[b_idx, 1] - cy
+            bz = vertex_coordinates[b_idx, 2] - cz
+            cross_x = ay * bz - az * by
+            cross_y = az * bx - ax * bz
+            cross_z = ax * by - ay * bx
+            triangle_area = 0.5 * np.sqrt(cross_x**2 + cross_y**2 + cross_z**2)
+            total_triangle_area += triangle_area
+            weighted_x += triangle_area * (ax + bx) / 3.0
+            weighted_y += triangle_area * (ay + by) / 3.0
+            weighted_z += triangle_area * (az + bz) / 3.0
+
+        if total_triangle_area > 0.0:
+            cx += weighted_x / total_triangle_area
+            cy += weighted_y / total_triangle_area
+            cz += weighted_z / total_triangle_area
         face_centroids[face_idx, 0] = cx
         face_centroids[face_idx, 1] = cy
         face_centroids[face_idx, 2] = cz
@@ -482,9 +511,10 @@ class Grid(
 
     nnc_transmissibilities: NumberArray[OneDimension] | None = attrs.field(default=None)
     """
-    Shape `(n_nnc,)` - transmissibility for each NNC pair.
-    `None` when not supplied; NaN entries indicate geometrically-detected
-    connections whose T must be computed.
+    Shape `(n_nnc,)` - geometric transmissibility (permeability x area / length, so
+    mD * ft in FIELD units and mD * m in METRIC) for each NNC pair, without any Darcy
+    unit-conversion constant. `None` when not supplied; NaN entries indicate
+    connections whose transmissibility must be computed from rock properties.
     """
 
     nnc_fault_indices: typing.Mapping[str, IntArray[OneDimension]] | None = attrs.field(
@@ -590,10 +620,13 @@ class Grid(
     """Shape `(n_cells,)` - AABB extent in y direction."""
 
     cell_length_z: NumberArray[OneDimension] = attrs.field(init=False)
-    """Shape `(n_cells,)` - AABB extent in z direction (thickness)."""
+    """Shape `(n_cells,)` - bounding-box extent in z direction."""
 
     cell_thickness: NumberArray[OneDimension] = attrs.field(init=False)
-    """Shape `(n_cells,)` - vertical thickness (alias for `cell_length_z`)."""
+    """
+    Shape `(n_cells,)` - mean vertical thickness (cell volume divided by its horizontally
+    projected area). Equals `cell_length_z` for flat-topped cells and is smaller for dipping ones.
+    """
 
     cell_center_depths: NumberArray[OneDimension] = attrs.field(init=False)
     """Shape `(n_cells,)` - depth of cell centroid (positive downward)."""
@@ -621,6 +654,7 @@ class Grid(
         self._canonicalize_boundary_faces()
         self._classify_faces()
         self._populate_defaults()
+        self._validate_consistency()
         self._build_cell_face_connectivity()
         self._build_cell_neighbor_connectivity()
         self._compute_face_geometry()
@@ -635,6 +669,12 @@ class Grid(
                 f"`vertex_coordinates` must be shape (n_vertices, 3); "
                 f"got {self.vertex_coordinates.shape!r}."
             )
+        if not np.isfinite(self.vertex_coordinates).all():
+            bad = np.where(~np.isfinite(self.vertex_coordinates).all(axis=1))[0]
+            raise InvalidPointArrayError(
+                f"`vertex_coordinates` contains non-finite values at vertices "
+                f"{bad[:5].tolist()}{'...' if len(bad) > 5 else ''}."
+            )
         if self.face_cell_indices.ndim != 2 or self.face_cell_indices.shape[1] != 2:
             raise InvalidFaceConnectivityError(
                 f"`face_cell_indices` must be shape (n_faces, 2); "
@@ -645,11 +685,22 @@ class Grid(
                 "`face_vertex_offsets` must be a 1-D array starting at 0."
             )
         expected_n_faces = self.face_cell_indices.shape[0]
+        same_cell = (self.face_cell_indices[:, 0] == self.face_cell_indices[:, 1]) & (
+            self.face_cell_indices[:, 0] >= 0
+        )
+        if same_cell.any():
+            bad = np.where(same_cell)[0]
+            raise InvalidFaceConnectivityError(
+                f"{len(bad)} face(s) have the same cell as owner and neighbour: "
+                f"{bad[:5].tolist()}{'...' if len(bad) > 5 else ''}."
+            )
         if self.face_vertex_offsets.shape[0] != expected_n_faces + 1:
             raise InvalidFaceConnectivityError(
                 f"`face_vertex_offsets` length must be n_faces + 1 = "
                 f"{expected_n_faces + 1}; got {self.face_vertex_offsets.shape[0]}."
             )
+        if np.any(np.diff(self.face_vertex_offsets) < 0):
+            raise InvalidFaceConnectivityError("`face_vertex_offsets` must be non-decreasing.")
         if int(self.face_vertex_offsets[-1]) != len(self.face_vertex_indices):
             raise InvalidFaceConnectivityError(
                 f"face_vertex_offsets[-1] = {self.face_vertex_offsets[-1]} does not "
@@ -749,6 +800,111 @@ class Grid(
                 )
             return count
         return from_faces
+
+    def _validate_consistency(self) -> None:
+        """Check that per-cell, per-face and per-NNC arrays agree with the grid topology."""
+        n_cells = self._get_cell_count()
+        n_faces = self.face_cell_indices.shape[0]
+
+        assert self.cell_statuses is not None
+        if self.cell_statuses.shape != (n_cells,) or not np.isin(
+            self.cell_statuses, [int(CellStatus.ACTIVE), int(CellStatus.INACTIVE)]
+        ).all():
+            raise ValidationError(
+                f"`cell_statuses` must have shape ({n_cells},) with values 0 (inactive) or 1 (active)."
+            )
+
+        assert self.face_connection_types is not None
+        valid_face_types = [int(member) for member in ConnectionType]
+        if self.face_connection_types.shape != (n_faces,) or not np.isin(
+            self.face_connection_types, valid_face_types
+        ).all():
+            raise ValidationError(
+                f"`face_connection_types` must have shape ({n_faces},) and hold valid `ConnectionType` values."
+            )
+
+        if self.dimensions is not None:
+            nx, ny, nz = self.dimensions
+            if nx * ny * nz != n_cells:
+                raise ValidationError(
+                    f"`dimensions` {tuple(self.dimensions)} imply {nx * ny * nz} cells but the "
+                    f"grid has {n_cells}."
+                )
+
+        for name in (
+            "positive_x_transmissibility_multipliers",
+            "negative_x_transmissibility_multipliers",
+            "positive_y_transmissibility_multipliers",
+            "negative_y_transmissibility_multipliers",
+            "positive_z_transmissibility_multipliers",
+            "negative_z_transmissibility_multipliers",
+        ):
+            multipliers = getattr(self, name)
+            if multipliers is None:
+                continue
+            if multipliers.shape != (n_cells,):
+                raise ValidationError(
+                    f"`{name}` must have shape ({n_cells},); got {multipliers.shape!r}."
+                )
+            if not (np.isfinite(multipliers).all() and (multipliers >= 0.0).all()):
+                raise ValidationError(f"`{name}` must be finite and non-negative.")
+
+        if self.fault_transmissibility_multipliers:
+            for fault_name, multiplier in self.fault_transmissibility_multipliers.items():
+                if not (np.isfinite(multiplier) and multiplier >= 0.0):
+                    raise ValidationError(
+                        f"Transmissibility multiplier for fault {fault_name!r} must be finite "
+                        f"and non-negative; got {multiplier}."
+                    )
+        if self.fault_face_indices:
+            for fault_name, face_indices in self.fault_face_indices.items():
+                if len(face_indices) and (face_indices.min() < 0 or face_indices.max() >= n_faces):
+                    raise ValidationError(
+                        f"Fault {fault_name!r} references a face outside [0, {n_faces - 1}]."
+                    )
+
+        if self.cell_volumes is not None:
+            if self.cell_volumes.shape != (n_cells,) or not (
+                np.isfinite(self.cell_volumes).all() and (self.cell_volumes >= 0.0).all()
+            ):
+                raise InvalidVolumeError(
+                    f"`cell_volumes` must have shape ({n_cells},) and be finite and non-negative."
+                )
+        if self.cell_centroids is not None:
+            if self.cell_centroids.shape != (n_cells, 3) or not np.isfinite(self.cell_centroids).all():
+                raise InvalidPointArrayError(
+                    f"`cell_centroids` must have shape ({n_cells}, 3) and be finite."
+                )
+
+        if self.nnc_cell_indices is not None and len(self.nnc_cell_indices) > 0:
+            n_nnc = len(self.nnc_cell_indices)
+            pairs = self.nnc_cell_indices
+            if (pairs[:, 0] == pairs[:, 1]).any():
+                raise InvalidFaceConnectivityError("An NNC connects a cell to itself.")
+            if not (
+                (self.cell_statuses[pairs[:, 0]] == int(CellStatus.ACTIVE)).all()
+                and (self.cell_statuses[pairs[:, 1]] == int(CellStatus.ACTIVE)).all()
+            ):
+                raise InvalidFaceConnectivityError("An NNC connects to an inactive cell.")
+            if self.nnc_connection_types is not None and self.nnc_connection_types.shape != (
+                n_nnc,
+            ):
+                raise InvalidFaceConnectivityError(
+                    f"`nnc_connection_types` must have {n_nnc} entries; "
+                    f"got {self.nnc_connection_types.shape!r}."
+                )
+            if self.nnc_transmissibilities is not None:
+                if self.nnc_transmissibilities.shape != (n_nnc,):
+                    raise InvalidFaceConnectivityError(
+                        f"`nnc_transmissibilities` must have {n_nnc} entries; "
+                        f"got {self.nnc_transmissibilities.shape!r}."
+                    )
+                explicit = self.nnc_transmissibilities[~np.isnan(self.nnc_transmissibilities)]
+                if not (np.isfinite(explicit).all() and (explicit >= 0.0).all()):
+                    raise ValidationError(
+                        "`nnc_transmissibilities` must be non-negative and finite (NaN means "
+                        "unspecified)."
+                    )
 
     def _canonicalize_boundary_faces(self) -> None:
         """
@@ -889,7 +1045,7 @@ class Grid(
             n_cells=n_cells,
         )
         cell_centroids += origin
-        invalid_mask = ~(cell_volumes > 0.0)
+        invalid_mask = ~(cell_volumes > 0.0) & (self.cell_statuses == int(CellStatus.ACTIVE))
         if invalid_mask.any():
             bad = np.where(invalid_mask)[0].tolist()
             raise InvalidVolumeError(
@@ -931,12 +1087,34 @@ class Grid(
         object.__setattr__(self, "cell_length_x", np.ascontiguousarray(delta[:, 0]))
         object.__setattr__(self, "cell_length_y", np.ascontiguousarray(delta[:, 1]))
         object.__setattr__(self, "cell_length_z", np.ascontiguousarray(delta[:, 2]))
-        object.__setattr__(self, "cell_thickness", np.ascontiguousarray(delta[:, 2]))
+        object.__setattr__(self, "cell_thickness", self._compute_cell_thickness())
 
         assert self.cell_centroids is not None
         depths = self.cell_centroids[:, 2].copy()
         object.__setattr__(self, "cell_center_depths", depths)
         object.__setattr__(self, "cell_center_elevations", -depths)
+
+    def _compute_cell_thickness(self) -> NumberArray[OneDimension]:
+        """
+        Mean vertical thickness of each cell: volume divided by horizontally projected area.
+
+        For a cell with sloping or dipping top and bottom surfaces this is the true vertical
+        thickness, unlike the bounding-box height, which also includes the dip.
+        """
+        assert self.cell_volumes is not None
+        n_cells = self.cell_volumes.shape[0]
+        vertical_projection = self.face_areas * np.abs(self.face_unit_normals[:, 2])
+        projected_area = np.zeros(n_cells, dtype=np.float64)
+        for column in (0, 1):
+            cells = self.face_cell_indices[:, column]
+            present = cells >= 0
+            projected_area += np.bincount(
+                cells[present], weights=vertical_projection[present], minlength=n_cells
+            )
+        projected_area *= 0.5
+        thickness = np.zeros(n_cells, dtype=np.float64)
+        np.divide(self.cell_volumes, projected_area, out=thickness, where=projected_area > 0.0)
+        return thickness
 
     def _build_spatial_index(self) -> None:
         assert self.cell_centroids is not None
@@ -1366,18 +1544,20 @@ class Grid(
         """
         Validate that all computed geometry values are physically reasonable.
 
-        :raises InvalidVolumeError: If any cell volume is <= 0.
+        :raises InvalidVolumeError: If any active cell volume is <= 0.
         :raises InvalidFaceAreaError: If any face area is negative.
         :raises InvalidNormalVectorError: If any face normal deviates from unit length.
         """
         assert self.cell_volumes is not None
-        if (~(self.cell_volumes > 0.0)).any():
-            bad = np.where(~(self.cell_volumes > 0.0))[0]
+        assert self.cell_statuses is not None
+        invalid_volume = ~(self.cell_volumes > 0.0) & (self.cell_statuses == int(CellStatus.ACTIVE))
+        if invalid_volume.any():
+            bad = np.where(invalid_volume)[0]
             raise InvalidVolumeError(
-                f"{len(bad)} cell(s) have non-positive volume: {bad[:5].tolist()}..."
+                f"{len(bad)} active cell(s) have non-positive volume: {bad[:5].tolist()}..."
             )
-        if (self.face_areas < 0.0).any():
-            bad = np.where(self.face_areas < 0.0)[0]
+        if (~(self.face_areas >= 0.0)).any():
+            bad = np.where(~(self.face_areas >= 0.0))[0]
             raise InvalidFaceAreaError(
                 f"{len(bad)} face(s) have negative area: {bad[:5].tolist()}..."
             )
@@ -1438,21 +1618,20 @@ class Grid(
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `Grid` with all coordinates expressed in the target unit system.
+        Return a new `Grid` expressed in the target unit system.
 
-        If `grid.unit_system == to` the original grid object is returned
-        unchanged (no copy, no allocation).
+        Coordinates, volumes and explicit NNC transmissibilities are rescaled. If the grid is
+        already in the target unit system, the same object is returned.
 
-        :param grid: Source grid. Must have a valid `unit_system` tag.
-        :param target: Target `bores.typing.UnitSystem`.
-        :returns: A new `Grid` with rescaled coordinates,
-            or the original `grid` if already in the target system.
+        :param target: Target `bores.types.UnitSystem`.
+        :param table: Optional precomputed unit conversion table.
+        :returns: A new `Grid` in the target unit system, or this grid if already there.
 
         Example:
 
         ```python
         from bores.grids.factories.cartesian import make_cartesian_grid
-        from bores.typing import UnitSystem
+        from bores.types import UnitSystem
 
         # Build a grid in field units (feet)
         grid_ft = make_cartesian_grid(
@@ -1484,11 +1663,25 @@ class Grid(
         cell_centroids = (
             self.cell_centroids * length_factor if self.cell_centroids is not None else None
         )
+        # Geometric transmissibility is permeability x area / length = permeability x length.
+        nnc_transmissibilities = (
+            self.nnc_transmissibilities * (factors["permeability"] * length_factor)
+            if self.nnc_transmissibilities is not None
+            else None
+        )
+        metadata = self.metadata
+        if metadata:
+            metadata = {
+                key: (np.asarray(value) * length_factor if key in ("coord", "zcorn") else value)
+                for key, value in metadata.items()
+            }
         return attrs.evolve(
             self,
             vertex_coordinates=vertex_coordinates,
             cell_volumes=cell_volumes,
             cell_centroids=cell_centroids,
+            nnc_transmissibilities=nnc_transmissibilities,
+            metadata=metadata,
             unit_system=target,
         )
 

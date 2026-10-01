@@ -22,7 +22,7 @@ import numba
 import numpy as np
 import numpy.typing as npt
 
-from bores.datastructures import MapAxes
+from bores.datastructures import GridDimensions, MapAxes
 from bores.errors import GridExportError, InvalidGridError, ValidationError
 from bores.grids.base import CellStatus, ConnectionType, Grid
 from bores.grids.factories.base import (
@@ -176,7 +176,7 @@ def make_corner_point_grid(
     if zcorn_array.shape != (nz * 2, ny * 2, nx * 2):
         raise ValidationError(
             f"`zcorn` shape {zcorn_array.shape!r} is inconsistent with "
-            f"coord-derived grid dimensions ({nx} x {ny} x {nz})."
+            f"`coord`-derived grid dimensions ({nx} x {ny} x {nz})."
         )
 
     if actnum is None:
@@ -200,7 +200,7 @@ def make_corner_point_grid(
         face_connection_types,
         geometric_nnc_pairs,
         geometric_nnc_connection_types,
-        active_cells,
+        cell_statuses,
         cell_volumes,
         cell_centroids,
     ) = compute_corner_point_geometry(
@@ -211,16 +211,14 @@ def make_corner_point_grid(
         pinch_tolerance=pinch_tolerance,
     )
 
-    n_active_cells = len(active_cells)
-    cell_statuses = np.full(n_active_cells, int(CellStatus.ACTIVE), dtype=np.int8)
-
     # Resolve fault face indices; cell pairs with no shared face become fault NNCs.
     fault_nnc_pairs: list[tuple[int, int, str]] = []
     fault_face_indices: dict[str, IntArray[OneDimension]] | None = None
     if fault_records:
         fault_face_indices, fault_nnc_pairs = resolve_fault_face_indices(
             fault_records=fault_records,
-            active_cells=active_cells,
+            dimensions=(nx, ny, nz),
+            actnum=actnum_array,
             face_cell_indices=face_cell_indices,
         )
         for face_indices in fault_face_indices.values():
@@ -273,14 +271,36 @@ def make_corner_point_grid(
             fault_nnc_indices.setdefault(name, []).append(fault_nnc_offset + local_idx)
 
     if nnc_cell_indices is not None and len(nnc_cell_indices) > 0:
-        user_nnc_pairs = np.asarray(nnc_cell_indices, dtype=np.int32)
-        user_nnc_connection_types = np.full(
-            len(user_nnc_pairs), int(ConnectionType.USER_NNC), dtype=np.int8
-        )
+        user_nnc_pairs = np.asarray(nnc_cell_indices, dtype=np.int32).reshape(-1, 2)
         user_nnc_transmissibilities = (
             np.asarray(nnc_transmissibilities, dtype=np.float64)
             if nnc_transmissibilities is not None
             else np.full(len(user_nnc_pairs), np.nan, dtype=np.float64)
+        )
+        if len(user_nnc_transmissibilities) != len(user_nnc_pairs):
+            raise ValidationError(
+                f"`nnc_cell_indices` has {len(user_nnc_pairs)} pairs but `nnc_transmissibilities` "
+                f"has {len(user_nnc_transmissibilities)} values."
+            )
+        if user_nnc_pairs.min() < 0 or user_nnc_pairs.max() >= cell_statuses.shape[0]:
+            raise ValidationError(
+                f"`nnc_cell_indices` must lie in [0, {cell_statuses.shape[0] - 1}] "
+                f"(flat index i + j * nx + k * nx * ny)."
+            )
+
+        keep = (cell_statuses[user_nnc_pairs[:, 0]] == int(CellStatus.ACTIVE)) & (
+            cell_statuses[user_nnc_pairs[:, 1]] == int(CellStatus.ACTIVE)
+        )
+        if not keep.all():
+            warnings.warn(
+                f"Dropped {int((~keep).sum())} user NNC(s) connected to inactive cells.",
+                stacklevel=3,
+            )
+            user_nnc_pairs = user_nnc_pairs[keep]
+            user_nnc_transmissibilities = user_nnc_transmissibilities[keep]
+
+        user_nnc_connection_types = np.full(
+            len(user_nnc_pairs), int(ConnectionType.USER_NNC), dtype=np.int8
         )
         all_nnc_parts.append((
             user_nnc_pairs,
@@ -316,8 +336,9 @@ def make_corner_point_grid(
         cell_volumes=cell_volumes,
         cell_centroids=cell_centroids,
         unit_system=unit_system,
+        dimensions=GridDimensions(nx, ny, nz),
         metadata=metadata,
-        cell_statuses=cell_statuses,
+        cell_statuses=cell_statuses,  # type: ignore[arg-type]
         face_connection_types=face_connection_types,  # type: ignore[arg-type]
         nnc_cell_indices=merged_nnc_pairs,  # type: ignore[arg-type]
         nnc_connection_types=merged_nnc_connection_types,  # type: ignore[arg-type]
@@ -363,7 +384,7 @@ def apply_map_axes_to_coord(coord: CoordArray, map_axes: MapAxes) -> CoordArray:
     Rotate and translate a COORD pillar array's `(x, y)` pairs into map space.
 
     Applied once, upstream of pillar interpolation (`coord` is the only
-    array `compute_active_cell_corner_coordinates` reads for areal
+    array `compute_cell_corner_coordinates` reads for areal
     position), so every derived quantity - `vertex_coordinates`,
     `cell_centroids`, face geometry, comes out already correctly
     positioned; `cell_volumes` are unaffected, being invariant under
@@ -415,13 +436,13 @@ def _interpolate_pillar_point(
 
 
 @numba.njit(parallel=True, cache=True)
-def compute_active_cell_corner_coordinates(
-    active_cells: IntArray[TwoDimensions],
+def compute_cell_corner_coordinates(
+    cells: IntArray[TwoDimensions],
     coord: CoordArray,
     zcorn: ZCornArray,
 ) -> NumberArray[ThreeDimensions]:
     """
-    Compute all active-cell corner coordinates.
+    Compute the eight corner coordinates of each given cell.
 
     Corner layout (index 0..7):
 
@@ -438,19 +459,19 @@ def compute_active_cell_corner_coordinates(
     ==  =========  ========================
     ```
 
-    :param active_cells: Shape `(n_active, 3)` - `(k, j, i)` indices.
+    :param cells: Shape `(n_cells, 3)` - `(k, j, i)` index of each cell.
     :param coord: Shape `(NY+1, NX+1, 6)` pillar array.
     :param zcorn: Shape `(NZ*2, NY*2, NX*2)` depth array.
-    :returns: Shape `(n_active, 8, 3)` corner coordinate array.
+    :returns: Shape `(n_cells, 8, 3)` corner coordinate array.
     """
-    n_active = active_cells.shape[0]
-    corners = np.empty((n_active, 8, 3), dtype=np.float64)
+    n_cells = cells.shape[0]
+    corners = np.empty((n_cells, 8, 3), dtype=np.float64)
     pillar_order = [0, 1, 2, 3, 0, 1, 2, 3]
 
-    for cell_idx in numba.prange(n_active):  # type: ignore
-        k = active_cells[cell_idx, 0]
-        j = active_cells[cell_idx, 1]
-        i = active_cells[cell_idx, 2]
+    for cell_idx in numba.prange(n_cells):  # type: ignore
+        k = cells[cell_idx, 0]
+        j = cells[cell_idx, 1]
+        i = cells[cell_idx, 2]
 
         pt = np.empty((4, 3), dtype=np.float64)
         pb = np.empty((4, 3), dtype=np.float64)
@@ -526,7 +547,7 @@ def compute_corner_point_geometry(
     npt.NDArray[np.int8],
     npt.NDArray[np.int32] | None,
     npt.NDArray[np.int8],
-    IntArray[TwoDimensions],
+    npt.NDArray[np.int8],
     NumberArray[OneDimension],
     NumberArray[TwoDimensions],
 ]:
@@ -540,17 +561,20 @@ def compute_corner_point_geometry(
     :param pinch_tolerance: Average thickness threshold for pinch detection.
     :returns: 10-tuple `(vertex_coordinates, face_vertex_indices,
         face_vertex_offsets, face_cell_indices, face_connection_types, geometric_nnc_pairs,
-        geometric_nnc_connection_types, active_cells, cell_volumes, cell_centroids)`.
+        geometric_nnc_connection_types, cell_statuses, cell_volumes, cell_centroids)`. Cells are
+        numbered by their full-grid flat index `i + j * nx + k * nx * ny`. Inactive cells
+        keep their index, have status `INACTIVE`, zero volume and no faces.
     :raises InvalidGridError: If no active cells are found.
     """
-    active_cells = np.argwhere(actnum > 0).astype(np.int32)
-    if active_cells.size == 0:
+    active_mask = (actnum > 0).ravel()
+    if not active_mask.any():
         raise InvalidGridError(
             "No active cells found in the corner-point grid (`ACTNUM` is all zeros)."
         )
 
-    corner_coordinates = compute_active_cell_corner_coordinates(
-        active_cells=active_cells,  # type: ignore[arg-type]
+    all_cells = np.argwhere(np.ones(actnum.shape, dtype=bool)).astype(np.int32)
+    corner_coordinates = compute_cell_corner_coordinates(
+        cells=all_cells,  # type: ignore[arg-type]
         coord=coord,
         zcorn=zcorn,
     )
@@ -561,8 +585,8 @@ def compute_corner_point_geometry(
         quantized, axis=0, return_index=True, return_inverse=True
     )
     vertex_coordinates = flat_corners[unique_indices]
-    n_active = len(active_cells)
-    corner_global = inverse.reshape(n_active, 8)
+    n_cells = len(all_cells)
+    corner_global = inverse.reshape(n_cells, 8)
 
     vtk_to_corner = [0, 1, 3, 2, 4, 5, 7, 6]
 
@@ -574,7 +598,7 @@ def compute_corner_point_geometry(
     n_pinched = 0
     n_degenerate = 0
 
-    for cell_idx in range(n_active):
+    for cell_idx in np.flatnonzero(active_mask):
         vtk_vertices = [corner_global[cell_idx, vtk_to_corner[v]] for v in range(8)]
         pinched = _is_cell_pinched(
             vtk_vertices,
@@ -640,14 +664,18 @@ def compute_corner_point_geometry(
         nnc_array = np.asarray(nnc_pairs, dtype=np.int32).reshape(-1, 2)
         nnc_connection_types_array = np.asarray(nnc_pair_types, dtype=np.int8)
 
-    vtk_corner_indices = np.empty((n_active, 8), dtype=np.int32)
-    for cell_idx in range(n_active):
+    vtk_corner_indices = np.empty((n_cells, 8), dtype=np.int32)
+    for cell_idx in range(n_cells):
         for vertex in range(8):
             vtk_corner_indices[cell_idx, vertex] = corner_global[cell_idx, vtk_to_corner[vertex]]
 
     cell_volumes, cell_centroids = _compute_hex_volumes_and_centroids(
         vtk_corner_indices=vtk_corner_indices,
         vertex_coordinates=vertex_coordinates,  # type: ignore[arg-type]
+    )
+    cell_volumes = np.where(active_mask, cell_volumes, 0.0)
+    cell_statuses = np.where(active_mask, int(CellStatus.ACTIVE), int(CellStatus.INACTIVE)).astype(
+        np.int8
     )
     return (  # type: ignore[return-value]
         vertex_coordinates,
@@ -657,7 +685,7 @@ def compute_corner_point_geometry(
         np.asarray(face_connection_types, dtype=np.int8),
         nnc_array,
         nnc_connection_types_array,
-        active_cells,
+        cell_statuses,
         cell_volumes,
         cell_centroids,
     )
@@ -665,7 +693,8 @@ def compute_corner_point_geometry(
 
 def resolve_fault_face_indices(
     fault_records: typing.Sequence[FaultRecord],
-    active_cells: IntArray[TwoDimensions],
+    dimensions: tuple[Integer, Integer, Integer],
+    actnum: ActNumArray,
     face_cell_indices: IntArray[TwoDimensions],
 ) -> tuple[
     dict[str, IntArray[OneDimension]],
@@ -678,13 +707,15 @@ def resolve_fault_face_indices(
     as NNC pairs of type `FAULT` instead of being silently skipped.
 
     :param fault_records: Sequence of `FaultRecord` objects.
-    :param active_cells: Shape `(n_active, 3)` - `(k, j, i)` per active cell.
+    :param dimensions: Grid extents `(nx, ny, nz)`.
+    :param actnum: Shape `(nz, ny, nx)` activation mask.
     :param face_cell_indices: Shape `(n_faces, 2)`.
     :returns: Tuple `(fault_face_index_dict, fault_nnc_pairs)`.
     """
+    nx, ny, _ = dimensions
     kji_to_cell: dict[tuple[int, int, int], int] = {}
-    for cell_idx, (k, j, i) in enumerate(active_cells):
-        kji_to_cell[int(k), int(j), int(i)] = cell_idx
+    for k, j, i in np.argwhere(actnum > 0):
+        kji_to_cell[int(k), int(j), int(i)] = int(i) + int(j) * nx + int(k) * nx * ny
 
     cell_pair_to_face: dict[frozenset[int], int] = {}
     for face_idx, (owner, neighbour) in enumerate(face_cell_indices):
@@ -998,15 +1029,36 @@ def rederive_corner_point_arrays(
         if not found or (nx * ny * nz) != n_cells:  # type: ignore
             raise GridExportError(
                 f"Cannot determine (nx, ny, nz) factorisation for "
-                f"n_cells={n_cells}. Store 'nx', 'ny', 'nz' in "
-                "grid.metadata to enable GRDECL export."
+                f"`n_cells={n_cells}`. Store 'nx', 'ny', 'nz' in "
+                "`grid.metadata` to enable GRDECL export."
             )
 
     if int(nx) * int(ny) * int(nz) != n_cells:  # type: ignore[arg-type]
         raise GridExportError(
-            f"Cannot reconstruct COORD/ZCORN: the grid has {n_cells} cells but its dimensions "
-            f"({nx} x {ny} x {nz}) imply {int(nx) * int(ny) * int(nz)}. Grids with inactive "  # type: ignore
-            "cells do not retain the geometry of those cells and cannot be exported."
+            f"Cannot reconstruct `COORD`/`ZCORN`: the grid has {n_cells} cells but its dimensions "
+            f"({nx} x {ny} x {nz}) imply {int(nx) * int(ny) * int(nz)}."  # type: ignore[arg-type]
+        )
+
+    stored_coord = meta.get("coord")
+    stored_zcorn = meta.get("zcorn")
+    if stored_coord is not None and stored_zcorn is not None:
+        return (
+            np.asarray(stored_coord, dtype=np.float64).reshape(int(ny) + 1, int(nx) + 1, 6),  # type: ignore[arg-type]
+            np.asarray(stored_zcorn, dtype=np.float64).reshape(
+                int(nz) * 2,  # type: ignore[arg-type]
+                int(ny) * 2,  # type: ignore[arg-type]
+                int(nx) * 2,  # type: ignore[arg-type]
+            ),
+            int(nx),  # type: ignore[arg-type]
+            int(ny),  # type: ignore[arg-type]
+            int(nz),  # type: ignore[arg-type]
+        )
+    if grid.cell_statuses is not None and bool(
+        (grid.cell_statuses == int(CellStatus.INACTIVE)).any()
+    ):
+        raise GridExportError(
+            "Cannot reconstruct `COORD`/`ZCORN` for a grid with inactive cells: the geometry of "
+            "inactive cells is not retained."
         )
 
     warnings.warn(

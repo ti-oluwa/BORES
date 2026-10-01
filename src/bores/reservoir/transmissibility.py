@@ -159,11 +159,7 @@ def compute_connection_transmissibilities(
     kx = rock.absolute_permeability.x.astype(dtype, copy=False)
     ky = rock.absolute_permeability.y.astype(dtype, copy=False)
     kz = rock.absolute_permeability.z.astype(dtype, copy=False)
-    ntg = np.asarray(
-        rock.net_to_gross if net_to_gross is None else net_to_gross,
-        dtype=dtype,
-        copy=False,
-    )
+    ntg = np.asarray(rock.net_to_gross if net_to_gross is None else net_to_gross, dtype=dtype)
 
     n_cells = grid.n_cells
     for name, array in (("Kx", kx), ("Ky", ky), ("Kz", kz), ("NTG", ntg)):
@@ -263,7 +259,11 @@ def compute_connection_transmissibilities(
     return ConnectionTransmissibilities(
         interior=interior_transmissibilities.astype(dtype, copy=False),
         boundary=boundary_transmissibilities.astype(dtype, copy=False),
-        nnc=nnc_transmissibilities.astype(dtype, copy=False),  # type: ignore[union-attr]
+        nnc=(
+            None
+            if nnc_transmissibilities is None
+            else nnc_transmissibilities.astype(dtype, copy=False)
+        ),
         unit_system=target_unit_system,
     )
 
