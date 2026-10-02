@@ -554,6 +554,54 @@ def polygon_signed_area(polygon: list[tuple[float, float]]) -> float:
     return 0.5 * total
 
 
+def clip_half_plane(
+    polygon: list[tuple[float, float]],
+    a: tuple[float, float],
+    b: tuple[float, float],
+    *,
+    keep_inside: bool,
+) -> list[tuple[float, float]]:
+    """
+    Clip a 2-D polygon against the half-plane to the left (or right) of the line `a -> b`.
+
+    :param polygon: Polygon vertices.
+    :param a: First point of the line.
+    :param b: Second point of the line.
+    :param keep_inside: Keep the part to the left of `a -> b` when `True`, otherwise the part
+        to its right.
+    :returns: Vertices of the clipped polygon, empty if nothing remains.
+    """
+    sign = 1.0 if keep_inside else -1.0
+
+    def signed_distance(point: tuple[float, float]) -> float:
+        return sign * ((b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0]))
+
+    output: list[tuple[float, float]] = []
+    if not polygon:
+        return output
+    previous = polygon[-1]
+    previous_distance = signed_distance(previous)
+    for current in polygon:
+        current_distance = signed_distance(current)
+        if current_distance >= 0.0:
+            if previous_distance < 0.0:
+                t = previous_distance / (previous_distance - current_distance)
+                output.append((
+                    previous[0] + t * (current[0] - previous[0]),
+                    previous[1] + t * (current[1] - previous[1]),
+                ))
+            output.append(current)
+        elif previous_distance >= 0.0:
+            t = previous_distance / (previous_distance - current_distance)
+            output.append((
+                previous[0] + t * (current[0] - previous[0]),
+                previous[1] + t * (current[1] - previous[1]),
+            ))
+        previous = current
+        previous_distance = current_distance
+    return output
+
+
 def clip_convex_polygon(
     subject: list[tuple[float, float]],
     clip: list[tuple[float, float]],
@@ -565,191 +613,264 @@ def clip_convex_polygon(
     :param clip: Convex clipping polygon, vertices counter-clockwise.
     :returns: Vertices of the intersection, empty if the polygons do not overlap.
     """
-
-    def is_inside(
-        point: tuple[float, float], a: tuple[float, float], b: tuple[float, float]
-    ) -> bool:
-        return (b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0]) >= 0.0
-
-    def crossing(
-        p1: tuple[float, float],
-        p2: tuple[float, float],
-        a: tuple[float, float],
-        b: tuple[float, float],
-    ) -> tuple[float, float]:
-        d1 = (p2[0] - p1[0], p2[1] - p1[1])
-        d2 = (b[0] - a[0], b[1] - a[1])
-        denominator = d1[0] * d2[1] - d1[1] * d2[0]
-        if denominator == 0.0:
-            return p2
-        t = ((a[0] - p1[0]) * d2[1] - (a[1] - p1[1]) * d2[0]) / denominator
-        return (p1[0] + t * d1[0], p1[1] + t * d1[1])
-
     output = list(subject)
     for index in range(len(clip)):
-        a = clip[index]
-        b = clip[(index + 1) % len(clip)]
-        incoming = output
-        output = []
-        if not incoming:
+        output = clip_half_plane(
+            output, clip[index], clip[(index + 1) % len(clip)], keep_inside=True
+        )
+        if not output:
             break
-        previous = incoming[-1]
-        for current in incoming:
-            if is_inside(current, a, b):
-                if not is_inside(previous, a, b):
-                    output.append(crossing(previous, current, a, b))
-                output.append(current)
-            elif is_inside(previous, a, b):
-                output.append(crossing(previous, current, a, b))
-            previous = current
     return output
 
 
-def connect_overlapping_lateral_faces(
+def subtract_convex_polygon(
+    subject: list[tuple[float, float]],
+    clip: list[tuple[float, float]],
+) -> list[list[tuple[float, float]]]:
+    """
+    Remove a convex polygon from a 2-D polygon.
+
+    :param subject: Polygon to cut, vertices counter-clockwise.
+    :param clip: Convex polygon to remove, vertices counter-clockwise.
+    :returns: Disjoint pieces of `subject` that lie outside `clip`.
+    """
+    pieces: list[list[tuple[float, float]]] = []
+    remaining = list(subject)
+    for index in range(len(clip)):
+        a = clip[index]
+        b = clip[(index + 1) % len(clip)]
+        outside = clip_half_plane(remaining, a, b, keep_inside=False)
+        if len(outside) >= 3:
+            pieces.append(outside)
+        remaining = clip_half_plane(remaining, a, b, keep_inside=True)
+        if len(remaining) < 3:
+            break
+    return pieces
+
+
+def connect_unmatched_faces(
     *,
     face_registry: dict[FaceKey, FaceRecord],
-    lateral_face_local_index: dict[FaceKey, int],
-    degenerate_lateral_faces: list[tuple[int, int]],
+    face_local_index: dict[FaceKey, int],
+    degenerate_faces: list[tuple[int, int]],
+    pinched_cells: set[int],
+    active_mask: npt.NDArray[np.bool_],
     corner_coordinates: NumberArray[ThreeDimensions],
     coord: CoordArray,
     dimensions: tuple[int, int, int],
     vertex_coordinates: VertexCoordinates,
 ) -> VertexCoordinates:
     """
-    Connect cells whose lateral faces overlap without sharing all four vertices.
+    Connect cells whose facing faces do not share all four vertices.
 
-    Across a fault, the neighbouring column's cells may sit at a different depth, so a lateral
-    face can face several cells of the next column, each only partly. For every unmatched
-    lateral face the overlap with each facing cell of the adjacent column (any `k`) is
-    computed as a polygon in the surface spanned by the two shared pillars. Each overlap
-    becomes an interior face between the two cells, and the unmatched faces it replaces are
-    removed from `face_registry`.
+    **Lateral faces.** Across a fault the neighbouring column's cells may sit at a different
+    depth, so one lateral face can face several cells of the next column, each only partly. The
+    overlap with every facing cell of the adjacent column (any `k`) is computed as a polygon in
+    the surface spanned by the two shared pillars and becomes an interior face between the two
+    cells. The part of a face that no neighbour covers is kept as a boundary face.
+
+    **Vertical faces.** The bottom face of a cell and the top face of the next active,
+    non-pinched cell below it in the same column share a footprint but not necessarily their
+    corner depths (layer gaps or overlaps). They are replaced by one interior face halfway
+    between the two surfaces. An inactive cell between them blocks the connection.
 
     :param face_registry: Face registry built from exact vertex matches; modified in place.
-    :param lateral_face_local_index: Local face index of each registered lateral face.
-    :param degenerate_lateral_faces: `(cell, local face index)` of lateral faces that collapse to
-        a triangle or line and were not registered.
+    :param face_local_index: Local face index of each registered lateral or vertical face.
+    :param degenerate_faces: `(cell, local face index)` of lateral or vertical faces that collapse
+        to fewer than four distinct vertices and were not registered.
+    :param pinched_cells: Flat indices of pinched-out cells.
+    :param active_mask: Shape `(n_cells,)` activation mask.
     :param corner_coordinates: Shape `(n_cells, 8, 3)` corner coordinates of every cell.
     :param coord: Pillar array of shape `(ny + 1, nx + 1, 6)`.
     :param dimensions: Grid extents `(nx, ny, nz)`.
     :param vertex_coordinates: Existing merged vertex coordinates.
-    :returns: Vertex coordinates with the vertices of the new overlap faces appended.
+    :returns: Vertex coordinates with the vertices of the new faces appended.
     """
     nx, ny, nz = dimensions
-    unmatched: dict[tuple[int, int], FaceKey | None] = {}
-    for key, local_index in lateral_face_local_index.items():
+    layer_size = nx * ny
+
+    unmatched: dict[tuple[Integer, Integer], FaceKey | None] = {}
+    for key, local_index in face_local_index.items():
         record = face_registry[key]
         if record.neighbour_cell_index == -1:
             unmatched[record.owner_cell_index, local_index] = key
-    for cell, local_index in degenerate_lateral_faces:
+    for cell, local_index in degenerate_faces:
         unmatched[cell, local_index] = None
     if not unmatched:
         return vertex_coordinates
 
-    # (plus-side local face, minus-side local face, A corners, B corners, pillar offsets)
+    new_points: list[NumberArray[OneDimension]] = []
+    next_vertex = len(vertex_coordinates)
+    replaced: set[FaceKey] = set()
+    cell_centers = corner_coordinates.mean(axis=1)
+
+    def add_face(
+        points: list[NumberArray[OneDimension]], owner: Integer, neighbour: Integer
+    ) -> None:
+        nonlocal next_vertex
+        normal = np.zeros(3)
+        for index, point in enumerate(points):
+            normal += np.cross(point, points[(index + 1) % len(points)])
+        face_center = np.mean(points, axis=0)
+        if float(np.dot(normal, face_center - cell_centers[owner])) < 0.0:
+            points = points[::-1]
+
+        indices = list(range(next_vertex, next_vertex + len(points)))
+        next_vertex += len(points)
+        new_points.extend(points)
+        record = FaceRecord(owner_cell_index=owner, face_vertex_indices=indices)
+        record.neighbour_cell_index = neighbour
+        face_registry[tuple(sorted(indices))] = record
+
+    # (plus local face, minus local face, plus corners, minus corners, pillar 1, pillar 2)
     directions = (
         (5, 4, (1, 3, 5, 7), (0, 2, 4, 6), (0, 1), (1, 1)),
         (3, 2, (2, 3, 6, 7), (0, 1, 4, 5), (1, 0), (1, 1)),
     )
-    new_points: list[NumberArray[OneDimension]] = []
-    next_vertex = len(vertex_coordinates)
-    replaced: set[FaceKey] = set()
+    covers: dict[tuple[Integer, Integer], list[list[tuple[float, float]]]] = {}
+    face_geometry: dict[
+        tuple[Integer, Integer],
+        tuple[list[tuple[float, float]], NumberArray[OneDimension], NumberArray[OneDimension]],
+    ] = {}
 
-    for (
-        plus_local,
-        minus_local,
-        a_corners,
-        b_corners,
-        pillar_1_offset,
-        pillar_2_offset,
-    ) in directions:
+    def lateral_polygon(cell: Integer, corners: tuple[Integer, ...]) -> list[tuple[float, float]]:
+        z = corner_coordinates[cell, :, 2]
+        polygon = [
+            (0.0, z[corners[0]]),
+            (1.0, z[corners[1]]),
+            (1.0, z[corners[3]]),
+            (0.0, z[corners[2]]),
+        ]
+        if polygon_signed_area(polygon) < 0.0:
+            polygon.reverse()
+        return polygon
+
+    for plus_local, minus_local, a_corners, b_corners, offset_1, offset_2 in directions:
         step_i, step_j = (1, 0) if plus_local == 5 else (0, 1)
         for (cell_a, local_index), key_a in list(unmatched.items()):
             if local_index != plus_local:
                 continue
-            _k_a, rest = divmod(cell_a, nx * ny)
+
+            _k_a, rest = divmod(cell_a, layer_size)
             j_a, i_a = divmod(rest, nx)
             if i_a + step_i >= nx or j_a + step_j >= ny:
                 continue
 
-            pillar_1 = coord[j_a + pillar_1_offset[0], i_a + pillar_1_offset[1]]
-            pillar_2 = coord[j_a + pillar_2_offset[0], i_a + pillar_2_offset[1]]
-            z_a = corner_coordinates[cell_a, :, 2]
-            polygon_a = [
-                (0.0, z_a[a_corners[0]]),
-                (1.0, z_a[a_corners[1]]),
-                (1.0, z_a[a_corners[3]]),
-                (0.0, z_a[a_corners[2]]),
-            ]
+            pillar_1 = coord[j_a + offset_1[0], i_a + offset_1[1]]
+            pillar_2 = coord[j_a + offset_2[0], i_a + offset_2[1]]
+            polygon_a = lateral_polygon(cell_a, a_corners)
             area_a = abs(polygon_signed_area(polygon_a))
             if area_a <= 0.0:
                 continue
-            if polygon_signed_area(polygon_a) < 0.0:
-                polygon_a.reverse()
-
-            outward_corners = [
-                corner_coordinates[cell_a, c]
-                for c in (a_corners[0], a_corners[1], a_corners[3], a_corners[2])
-            ]
-            reference_normal = np.cross(
-                outward_corners[2] - outward_corners[0], outward_corners[3] - outward_corners[1]
-            )
+            face_geometry[cell_a, plus_local] = (polygon_a, pillar_1, pillar_2)
 
             for k_b in range(nz):
-                cell_b = (i_a + step_i) + (j_a + step_j) * nx + k_b * nx * ny
+                cell_b = (i_a + step_i) + (j_a + step_j) * nx + k_b * layer_size
                 if (cell_b, minus_local) not in unmatched:
                     continue
-                z_b = corner_coordinates[cell_b, :, 2]
-                polygon_b = [
-                    (0.0, z_b[b_corners[0]]),
-                    (1.0, z_b[b_corners[1]]),
-                    (1.0, z_b[b_corners[3]]),
-                    (0.0, z_b[b_corners[2]]),
-                ]
+                polygon_b = lateral_polygon(cell_b, b_corners)
                 area_b = abs(polygon_signed_area(polygon_b))
                 if area_b <= 0.0:
                     continue
-                if polygon_signed_area(polygon_b) < 0.0:
-                    polygon_b.reverse()
-
                 overlap = clip_convex_polygon(polygon_a, polygon_b)
-                if len(overlap) < 3:
-                    continue
-                if abs(polygon_signed_area(overlap)) <= MINIMUM_RELATIVE_OVERLAP_AREA * min(
-                    area_a, area_b
+                if len(overlap) < 3 or abs(polygon_signed_area(overlap)) <= (
+                    MINIMUM_RELATIVE_OVERLAP_AREA * min(area_a, area_b)
                 ):
                     continue
 
-                points: list[NumberArray[OneDimension]] = []
-                for s_value, z_value in overlap:
-                    p1 = _interpolate_pillar_point(pillar_1[:3], pillar_1[3:], z_value)
-                    p2 = _interpolate_pillar_point(pillar_2[:3], pillar_2[3:], z_value)
-                    points.append(p1 + s_value * (p2 - p1))
-                normal = np.zeros(3)
-                for index, point in enumerate(points):
-                    following = points[(index + 1) % len(points)]
-                    normal += np.cross(point, following)
-                if float(np.dot(normal, reference_normal)) < 0.0:
-                    points.reverse()
+                face_geometry[cell_b, minus_local] = (polygon_b, pillar_1, pillar_2)
+                add_face(
+                    [
+                        _point_on_pillar_pair(pillar_1, pillar_2, s_value, z_value)
+                        for s_value, z_value in overlap
+                    ],
+                    owner=cell_a,
+                    neighbour=cell_b,
+                )
+                covers.setdefault((cell_a, plus_local), []).append(overlap)
+                covers.setdefault((cell_b, minus_local), []).append(overlap)
 
-                indices = list(range(next_vertex, next_vertex + len(points)))
-                next_vertex += len(points)
-                new_points.extend(points)
-                new_key: FaceKey = tuple(sorted(indices))
-                record = FaceRecord(owner_cell_index=cell_a, face_vertex_indices=indices)
-                record.neighbour_cell_index = cell_b
-                face_registry[new_key] = record
-                key_b = unmatched[cell_b, minus_local]
-                if key_a is not None:
-                    replaced.add(key_a)
-                if key_b is not None:
-                    replaced.add(key_b)
+    for (cell, local_index), overlaps in covers.items():
+        polygon, pillar_1, pillar_2 = face_geometry[cell, local_index]
+        full_area = abs(polygon_signed_area(polygon))
+        pieces = [polygon]
+        for overlap in overlaps:
+            pieces = [rest for piece in pieces for rest in subtract_convex_polygon(piece, overlap)]
+        for piece in pieces:
+            if abs(polygon_signed_area(piece)) > MINIMUM_RELATIVE_OVERLAP_AREA * full_area:
+                add_face(
+                    [
+                        _point_on_pillar_pair(pillar_1, pillar_2, s_value, z_value)
+                        for s_value, z_value in piece
+                    ],
+                    owner=cell,
+                    neighbour=-1,
+                )
+        key = unmatched[cell, local_index]
+        if key is not None:
+            replaced.add(key)
+
+    used_tops: set[int] = set()
+    for (cell_a, local_index), key_a in list(unmatched.items()):
+        if local_index != BOTTOM_FACE_LOCAL:
+            continue
+        cell_b = cell_a + layer_size
+        while cell_b < nz * layer_size and active_mask[cell_b] and cell_b in pinched_cells:
+            cell_b += layer_size
+        if (
+            cell_b >= nz * layer_size
+            or not active_mask[cell_b]
+            or cell_b in used_tops
+            or (cell_b, TOP_FACE_LOCAL) not in unmatched
+        ):
+            continue
+        bottom_corners = corner_coordinates[cell_a, 4:8]
+        top_corners = corner_coordinates[cell_b, 0:4]
+        middle = 0.5 * (bottom_corners + top_corners)
+        footprint: list[NumberArray[OneDimension]] = []
+        for corner in (0, 1, 3, 2):
+            if not footprint or float(np.linalg.norm(middle[corner] - footprint[-1])) > 1e-9:
+                footprint.append(middle[corner])
+        if len(footprint) > 1 and float(np.linalg.norm(footprint[0] - footprint[-1])) <= 1e-9:
+            footprint.pop()
+        if len(footprint) < 3:
+            continue
+        normal = np.zeros(3)
+        for index, point in enumerate(footprint):
+            normal += np.cross(point, footprint[(index + 1) % len(footprint)])
+        if float(np.linalg.norm(normal)) <= 0.0:
+            continue
+        add_face(footprint, owner=cell_a, neighbour=cell_b)
+        used_tops.add(cell_b)
+        for key in (key_a, unmatched[cell_b, TOP_FACE_LOCAL]):
+            if key is not None:
+                replaced.add(key)
 
     for key in replaced:
         face_registry.pop(key, None)
     if not new_points:
         return vertex_coordinates
     return np.vstack([vertex_coordinates, np.asarray(new_points, dtype=np.float64)])
+
+
+def _point_on_pillar_pair(
+    pillar_1: NumberArray[OneDimension],
+    pillar_2: NumberArray[OneDimension],
+    s_value: float,
+    z_value: float,
+) -> NumberArray[OneDimension]:
+    """
+    Point at fractional position `s_value` between two pillars, at depth `z_value`.
+
+    :param pillar_1: Shape `(6,)` top and bottom points of the first pillar.
+    :param pillar_2: Shape `(6,)` top and bottom points of the second pillar.
+    :param s_value: Fraction of the way from the first pillar to the second.
+    :param z_value: Depth of the point.
+    :returns: Shape `(3,)` coordinates.
+    """
+    p1 = _interpolate_pillar_point(pillar_1[:3], pillar_1[3:], z_value)
+    p2 = _interpolate_pillar_point(pillar_2[:3], pillar_2[3:], z_value)
+    return p1 + s_value * (p2 - p1)
 
 
 def compute_corner_point_geometry(
@@ -816,8 +937,9 @@ def compute_corner_point_geometry(
 
     n_pinched = 0
     n_degenerate = 0
-    lateral_face_local_index: dict[FaceKey, int] = {}
-    degenerate_lateral_faces: list[tuple[int, int]] = []
+    face_local_index: dict[FaceKey, int] = {}
+    degenerate_faces: list[tuple[int, int]] = []
+    pinched_cells: set[int] = set()
 
     for cell_idx in np.flatnonzero(active_mask):
         vtk_vertices = [corner_global[cell_idx, vtk_to_corner[v]] for v in range(8)]
@@ -828,14 +950,15 @@ def compute_corner_point_geometry(
         )
         if pinched:
             n_pinched += 1
+            pinched_cells.add(int(cell_idx))
 
         for local_idx, local_face in enumerate(HEXAHEDRON_FACES_ZDOWN):
             face_vertex_indices = [vtk_vertices[v] for v in local_face]
 
             if len(set(face_vertex_indices)) < len(face_vertex_indices):
                 n_degenerate += 1
-                if local_idx in LATERAL_FACE_LOCAL_INDICES:
-                    degenerate_lateral_faces.append((int(cell_idx), local_idx))
+                if local_idx in LATERAL_FACE_LOCAL_INDICES or not pinched:
+                    degenerate_faces.append((int(cell_idx), local_idx))
                 continue
 
             if pinched and local_idx in (TOP_FACE_LOCAL, BOTTOM_FACE_LOCAL):
@@ -847,8 +970,7 @@ def compute_corner_point_geometry(
                     owner_cell_index=cell_idx,
                     face_vertex_indices=face_vertex_indices,
                 )
-                if local_idx in LATERAL_FACE_LOCAL_INDICES:
-                    lateral_face_local_index[key] = local_idx
+                face_local_index[key] = local_idx
             elif face_registry[key].neighbour_cell_index == -1:
                 face_registry[key].neighbour_cell_index = cell_idx
             else:
@@ -858,10 +980,12 @@ def compute_corner_point_geometry(
                 nnc_face_keys.add(key)
 
     nz_cells, ny_cells, nx_cells = actnum.shape
-    vertex_coordinates = connect_overlapping_lateral_faces(
+    vertex_coordinates = connect_unmatched_faces(
         face_registry=face_registry,
-        lateral_face_local_index=lateral_face_local_index,
-        degenerate_lateral_faces=degenerate_lateral_faces,
+        face_local_index=face_local_index,
+        degenerate_faces=degenerate_faces,
+        pinched_cells=pinched_cells,
+        active_mask=active_mask,
         corner_coordinates=corner_coordinates,
         coord=coord,
         dimensions=(nx_cells, ny_cells, nz_cells),
