@@ -42,16 +42,11 @@ class ConnectionTransmissibilities(typing.NamedTuple):
     """
     nnc: NumberArray[OneDimension] | None
     """
-    Shape `(n_nnc,)` float64 or `None` - transmissibility, in the same convention as
-    `interior` and `boundary`, of each non-neighbour connection that has no explicit
-    flow transmissibility. NaN where `nnc_flow` holds a value. Same order as
+    Shape `(n_nnc,)` float64 or `None` - flow transmissibility of each non-neighbour connection,
+    exactly as supplied on the grid. Unlike `interior` and `boundary`, which are geometric
+    (permeability x area / length), it already includes the Darcy unit conversion constant, so
+    it multiplies mobility and pressure difference directly. Same order as
     `Grid.nnc_cell_indices`; `None` when the grid has no NNCs.
-    """
-    nnc_flow: NumberArray[OneDimension] | None
-    """
-    Shape `(n_nnc,)` float64 or `None` - explicitly supplied flow transmissibility of each
-    non-neighbour connection, which already includes the unit conversion constant. NaN where
-    `nnc` holds a value. Same order as `Grid.nnc_cell_indices`; `None` when the grid has no NNCs.
     """
     unit_system: UnitSystem
 
@@ -78,12 +73,11 @@ class ConnectionTransmissibilities(typing.NamedTuple):
         return self._replace(
             interior=scale(self.interior, transmissibility_factor),
             boundary=scale(self.boundary, transmissibility_factor),
-            nnc=(None if self.nnc is None else scale(self.nnc, transmissibility_factor)),
-            nnc_flow=(
+            nnc=(
                 None
-                if self.nnc_flow is None
+                if self.nnc is None
                 else scale(
-                    self.nnc_flow,
+                    self.nnc,
                     factors["reservoir_rate"] * factors["viscosity"] / factors["pressure"],
                 )
             ),
@@ -131,23 +125,16 @@ def compute_connection_transmissibilities(
 
     **Interior / boundary faces** use the standard harmonic-mean / half-T formulas.
 
-    **NNC transmissibilities** are resolved in priority order:
-
-    1. If `grid.nnc_transmissibilities` contains a finite value for an NNC, that flow
-       transmissibility is returned verbatim in `ConnectionTransmissibilities.nnc_flow`
-       (caller-supplied or Eclipse-format NNC keyword).
-    2. NaN entries (geometry-detected pinchouts or unresolved fault NNCs) are
-       computed geometrically using the arithmetic-mean permeability and the
-       straight-line distance between cell centroids.
+    **NNC transmissibilities** are returned as given on the grid. They are flow
+    transmissibilities (the Darcy constant is already included) and, since an NNC has no shared
+    surface, nothing is computed from rock properties.
 
     **Multiplier application**:
 
     - Directional MULT arrays (MULTX, MULTX-, MULTY, MULTY-, MULTZ, MULTZ-) are
       applied only to regular face-based connections (interior, boundary, and fault).
       NNCs are not directional and are not affected.
-    - `MULTFLT` is applied to face-based fault connections and NNCs whose
-      type is `ConnectionType.*FAULT*`. Pinchout and user NNCs are not affected
-      by `MULTFLT`.
+    - `MULTFLT` is applied to face-based fault connections only.
 
     Note: On construction the transmissibilities are normalised to the
         declared `unit_system` (defaults to the grid's own unit system).
@@ -232,47 +219,10 @@ def compute_connection_transmissibilities(
         )
 
     nnc_transmissibilities: NumberArray[OneDimension] | None = None
-    nnc_flow_transmissibilities: NumberArray[OneDimension] | None = None
-    if grid.n_nnc > 0:
-        assert grid.nnc_cell_indices is not None
-        assert grid.nnc_connection_types is not None
-
-        nnc_transmissibilities = resolve_nnc_transmissibilities(
-            nnc_cell_indices=grid.nnc_cell_indices.astype(np.int32, copy=False),  # type: ignore[arg-type]
-            nnc_transmissibilities=np.full(grid.n_nnc, np.nan, dtype=dtype),
-            cell_centroids=grid.cell_centroids,  # type: ignore[arg-type]
-            effective_kx=effective_kx,  # type: ignore[arg-type]
-            effective_ky=effective_ky,  # type: ignore[arg-type]
-            effective_kz=effective_kz,  # type: ignore[arg-type]
-            dtype=dtype,
-        )
-
-        nnc_flow_transmissibilities = typing.cast(
-            NumberArray[OneDimension],
-            (
-                grid.nnc_transmissibilities.astype(dtype, copy=True)
-                if grid.nnc_transmissibilities is not None
-                else np.full(grid.n_nnc, np.nan, dtype=dtype)
-            ),
-        )
+    if grid.n_nnc > 0 and grid.nnc_transmissibilities is not None:
         nnc_transmissibilities = typing.cast(
-            NumberArray[OneDimension],
-            np.where(np.isnan(nnc_flow_transmissibilities), nnc_transmissibilities, np.nan).astype(
-                dtype, copy=False
-            ),
+            NumberArray[OneDimension], grid.nnc_transmissibilities.astype(dtype, copy=True)
         )
-
-        # Apply MULTFLT to fault-type NNCs only
-        if (
-            grid.fault_transmissibility_multipliers is not None
-            and grid.nnc_fault_indices is not None
-        ):
-            for values in (nnc_transmissibilities, nnc_flow_transmissibilities):
-                apply_nnc_fault_multipliers(
-                    nnc_transmissibilities=typing.cast(NumberArray[OneDimension], values),
-                    nnc_fault_indices=grid.nnc_fault_indices,
-                    fault_transmissibility_multipliers=grid.fault_transmissibility_multipliers,
-                )
 
     # Apply `MULTFLT` to face-based connections
     if grid.fault_face_indices is not None and grid.fault_transmissibility_multipliers is not None:
@@ -288,18 +238,7 @@ def compute_connection_transmissibilities(
     return ConnectionTransmissibilities(
         interior=interior_transmissibilities.astype(dtype, copy=False),
         boundary=boundary_transmissibilities.astype(dtype, copy=False),
-        nnc=(
-            None
-            if nnc_transmissibilities is None
-            else nnc_transmissibilities.astype(dtype, copy=False)
-        ),
-        nnc_flow=(
-            None
-            if nnc_flow_transmissibilities is None
-            else typing.cast(
-                NumberArray[OneDimension], nnc_flow_transmissibilities.astype(dtype, copy=False)
-            )
-        ),
+        nnc=nnc_transmissibilities,
         unit_system=target_unit_system,
     )
 
@@ -440,90 +379,6 @@ def compute_boundary_half_transmissibilities(
     return transmissibilities
 
 
-@numba.njit(parallel=True, cache=True)
-def resolve_nnc_transmissibilities(
-    nnc_cell_indices: IntArray[TwoDimensions],
-    nnc_transmissibilities: NumberArray[OneDimension],
-    cell_centroids: NumberArray[TwoDimensions],
-    effective_kx: NumberArray[OneDimension],
-    effective_ky: NumberArray[OneDimension],
-    effective_kz: NumberArray[OneDimension],
-    dtype: npt.DTypeLike,
-) -> NumberArray[OneDimension]:
-    """
-    Resolve final NNC transmissibilities.
-
-    For each NNC:
-
-    - If `nnc_transmissibilities` is finite (caller-supplied explicitly), use it verbatim.
-    - Otherwise compute geometrically using the arithmetic-mean permeability
-      and straight-line centroid-to-centroid distance (Eclipse/OPM convention
-      for NNCs without explicit T):
-
-        ```text
-        K_nnc = 0.5 * (Kx_a + Kx_b) * |dx/d| + ...
-        T_nnc = K_nnc / d
-        ```
-
-      where `d` is the Euclidean distance between the two cell centroids and
-      the direction cosines are derived from the centroid-to-centroid vector.
-      There is no face area term because NNCs have no geometric shared face;
-      the T value is treated as a bulk connection conductance.
-
-    :param nnc_cell_indices: Shape `(n_nnc, 2)` - cell pair indices.
-    :param nnc_connection_types: Shape `(n_nnc,)` - `ConnectionType` per NNC.
-    :param nnc_transmissibilities: Shape `(n_nnc,)` - Current NNC transmissibilities values
-        (any nnc with NaN transmissibility will be computed).
-    :param cell_centroids: Shape `(n_cells, 3)`.
-    :param effective_kx: Shape `(n_cells,)`.
-    :param effective_ky: Shape `(n_cells,)`.
-    :param effective_kz: Shape `(n_cells,)`.
-    :param dtype: Output dtype.
-    :returns: Shape `(n_nnc,)` transmissibility array.
-    """
-    n_nnc = nnc_cell_indices.shape[0]
-    result = np.zeros(n_nnc, dtype=dtype)
-
-    for idx in numba.prange(n_nnc):  # type: ignore
-        stored_transmissibility = nnc_transmissibilities[idx]
-        if stored_transmissibility == stored_transmissibility:  # NaN check: NaN != NaN
-            result[idx] = stored_transmissibility
-            continue
-
-        cell_a = nnc_cell_indices[idx, 0]
-        cell_b = nnc_cell_indices[idx, 1]
-
-        dx = cell_centroids[cell_b, 0] - cell_centroids[cell_a, 0]
-        dy = cell_centroids[cell_b, 1] - cell_centroids[cell_a, 1]
-        dz = cell_centroids[cell_b, 2] - cell_centroids[cell_a, 2]
-        d = (dx * dx + dy * dy + dz * dz) ** 0.5
-
-        if d <= 0.0:
-            result[idx] = 0.0
-            continue
-
-        # Direction cosines from centroid-to-centroid vector
-        abs_dx = abs(dx) / d
-        abs_dy = abs(dy) / d
-        abs_dz = abs(dz) / d
-
-        # Arithmetic-mean permeability along the connection direction
-        k_a = (
-            abs_dx * effective_kx[cell_a]
-            + abs_dy * effective_ky[cell_a]
-            + abs_dz * effective_kz[cell_a]
-        )
-        k_b = (
-            abs_dx * effective_kx[cell_b]
-            + abs_dy * effective_ky[cell_b]
-            + abs_dz * effective_kz[cell_b]
-        )
-        k_mean = 0.5 * (k_a + k_b)
-        result[idx] = k_mean / d
-
-    return result
-
-
 @numba.njit(cache=True)
 def apply_directional_multipliers(
     interior_transmissibilities: NumberArray[OneDimension],
@@ -661,30 +516,3 @@ def apply_fault_face_multipliers(
                 boundary_transmissibilities[boundary_position] *= multiplier
 
     return interior_transmissibilities, boundary_transmissibilities
-
-
-def apply_nnc_fault_multipliers(
-    nnc_transmissibilities: NumberArray[OneDimension],
-    nnc_fault_indices: typing.Mapping[str, IntArray[OneDimension]],
-    fault_transmissibility_multipliers: typing.Mapping[str, Number],
-) -> NumberArray[OneDimension]:
-    """
-    Apply `MULTFLT` multipliers to fault NNCs using per-fault NNC index maps.
-
-    Each named fault maps directly to the NNC positions it owns via
-    `nnc_fault_indices`, so only the correct multiplier is applied to each NNC.
-    Faults absent from `fault_transmissibility_multipliers` are skipped.
-    Pinchout and user NNCs are never present in `nnc_fault_indices` and are
-    therefore unaffected.
-
-    :param nnc_transmissibilities: Shape `(n_nnc,)` - modified in-place.
-    :param nnc_fault_indices: `{fault_name: nnc_index_array}` from `Grid`.
-    :param fault_transmissibility_multipliers: `{fault_name: multiplier}` from MULTFLT.
-    :returns: Updated `nnc_transmissibilities`.
-    """
-    for fault_name, nnc_indices in nnc_fault_indices.items():
-        multiplier = fault_transmissibility_multipliers.get(fault_name, 1.0)
-        if multiplier == 1:
-            continue
-        nnc_transmissibilities[nnc_indices] *= multiplier
-    return nnc_transmissibilities

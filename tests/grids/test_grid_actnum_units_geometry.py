@@ -3,7 +3,7 @@ import warnings
 import numpy as np
 import pytest
 
-from bores.errors import InvalidFaceConnectivityError, ValidationError
+from bores.errors import InvalidFaceConnectivityError, InvalidPointArrayError, ValidationError
 from bores.grids.factories.cartesian import make_cartesian_grid
 from bores.grids.factories.corner_point import make_corner_point_grid
 from bores.grids.factories.polyhedral import make_polyhedral_grid
@@ -34,7 +34,7 @@ def test_inactive_cells_keep_their_flat_index():
     actnum[0, 0, 0] = 0
     grid = corner_point(3, 2, 2, actnum)
     assert grid.n_cells == 12
-    assert grid.cell_statuses[0] == 0 and grid.cell_volumes[0] == 0.0
+    assert grid.cell_statuses[0] == 0 and grid.cell_volumes[0] == pytest.approx(0.0)
     assert len(grid.get_cell_face_indices(0)) == 0
     for i, j, k in [(1, 0, 0), (2, 1, 1), (0, 1, 0)]:
         flat = grid.flat_index(i, j, k)
@@ -101,7 +101,7 @@ def test_convert_scales_explicit_nnc_flow_transmissibility(target, eclipse_darcy
         dy=10.0,
         dz=1.0,
         nnc_cell_indices=np.array([[0, 23], [1, 22]]),
-        nnc_transmissibilities=np.array([5.0, np.nan]),
+        nnc_transmissibilities=np.array([5.0, 7.0]),
     )
     converted = grid.convert(target)
     factors = get_conversion_factors(UnitSystem.FIELD, target)
@@ -117,7 +117,7 @@ def test_convert_scales_explicit_nnc_flow_transmissibility(target, eclipse_darcy
         * factors["length"]
     )
     assert converted.nnc_transmissibilities[0] == pytest.approx(expected, rel=1e-4)
-    assert np.isnan(converted.nnc_transmissibilities[1])
+    assert converted.nnc_transmissibilities[1] == pytest.approx(expected * 7.0 / 5.0, rel=1e-4)
 
 
 def write_deck(tmp_path, body):
@@ -196,7 +196,7 @@ def test_deck_nnc_flow_transmissibility_is_rescaled_to_cubic_feet_and_round_trip
     )
 
 
-def test_explicit_and_computed_nnc_are_reported_separately():
+def test_nnc_flow_transmissibility_is_passed_through_unchanged():
     import bores.reservoir.rock as rock_module
     from bores.reservoir.transmissibility import compute_connection_transmissibilities
 
@@ -209,7 +209,7 @@ def test_explicit_and_computed_nnc_are_reported_separately():
         dy=10.0,
         dz=1.0,
         nnc_cell_indices=np.array([[0, 23], [1, 22]]),
-        nnc_transmissibilities=np.array([5.0, np.nan]),
+        nnc_transmissibilities=np.array([5.0, 7.0]),
     )
     permeability_type = next(
         getattr(rock_module, name) for name in dir(rock_module) if "Permeab" in name
@@ -226,8 +226,17 @@ def test_explicit_and_computed_nnc_are_reported_separately():
         residual_gas_saturation=ones * 0.05,
     )
     result = compute_connection_transmissibilities(grid, rock)
-    assert result.nnc_flow[0] == pytest.approx(5.0) and np.isnan(result.nnc_flow[1])
-    assert np.isnan(result.nnc[0]) and np.isfinite(result.nnc[1])
+    assert result.nnc.tolist() == [5.0, 7.0]
+
+
+def test_nnc_requires_a_finite_non_negative_transmissibility():
+    kwargs = dict(nx=4, ny=3, nz=2, dx=10.0, dy=10.0, dz=1.0, nnc_cell_indices=np.array([[0, 23]]))
+    with pytest.raises(ValidationError):
+        make_cartesian_grid(**kwargs)
+    with pytest.raises(ValidationError):
+        make_cartesian_grid(**kwargs, nnc_transmissibilities=np.array([np.nan]))
+    with pytest.raises(ValidationError):
+        make_cartesian_grid(**kwargs, nnc_transmissibilities=np.array([-1.0]))
 
 
 def test_export_round_trip_with_inactive_cells(tmp_path):
@@ -260,7 +269,7 @@ def test_validation_rejects_inconsistent_inputs():
         attrs.evolve(good, nnc_cell_indices=np.array([[2, 2]]))
     with pytest.raises(ValidationError):
         attrs.evolve(good, dimensions=(5, 5, 5))
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidPointArrayError):
         bad = good.vertex_coordinates.copy()
         bad[0, 0] = np.nan
         attrs.evolve(good, vertex_coordinates=bad)

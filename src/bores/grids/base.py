@@ -66,20 +66,6 @@ class ConnectionType(enum.IntEnum):
     `BOUNDARY_FAULT_FACE`
         Boundary face belonging to a named fault.
 
-
-    **NNC connections**:
-
-    `PINCHOUT_NNC`
-        Non-neighbour connection generated from pinchout processing where
-        flow occurs between cells that do not share a geometric face.
-
-    `USER_NNC`
-        Explicit user-defined non-neighbour connection, typically created
-        from an Eclipse `NNC` keyword.
-
-    `FAULT_NNC`
-        Non-neighbour connection generated from fault juxtaposition where
-        communicating cells do not share a geometric face.
     """
 
     INTERIOR_FACE = 0
@@ -99,21 +85,6 @@ class ConnectionType(enum.IntEnum):
     BOUNDARY_FAULT_FACE = 3
     """
     Boundary face belonging to a fault.
-    """
-
-    PINCHOUT_NNC = 4
-    """
-    Non-neighbour connection generated from pinchout processing.
-    """
-
-    USER_NNC = 5
-    """
-    Explicit user-defined non-neighbour connection.
-    """
-
-    FAULT_NNC = 6
-    """
-    Non-neighbour connection generated from fault juxtaposition.
     """
 
 
@@ -399,8 +370,6 @@ class Grid(
         "cell_centroids": NumberArray[TwoDimensions] | None,
         "nnc_cell_indices": IntArray[TwoDimensions] | None,
         "nnc_transmissibilities": NumberArray[OneDimension] | None,
-        "nnc_connection_types": IntArray[OneDimension] | None,
-        "nnc_fault_indices": typing.Mapping[str, IntArray[OneDimension]] | None,
         "fault_face_indices": typing.Mapping[str, IntArray[OneDimension]] | None,
         "fault_transmissibility_multipliers": typing.Mapping[str, Number] | None,
         "positive_x_transmissibility_multipliers": NumberArray[OneDimension] | None,
@@ -425,10 +394,6 @@ class Grid(
     `face_connection_types` (shape `(n_faces,)`)
         Per-face type: `BOUNDARY_FACE`, `INTERIOR_FACE`, `INTERIOR_FAULT_FACE`,
         `BOUNDARY_FAULT_FACE`. This covers every geometric face in the grid.
-
-    `nnc_connection_types` (shape `(n_nnc,)`)
-        Per-NNC type: `USER_NNC`, `FAULT_NNC`, or `PINCHOUT_NNC`.
-        These are connections with no corresponding shared geometric face.
 
     **Raises**:
 
@@ -502,32 +467,13 @@ class Grid(
     `None` when no NNCs are present.
     """
 
-    nnc_connection_types: IntArray[OneDimension] | None = attrs.field(default=None)
-    """
-    Shape `(n_nnc,)` - `ConnectionType` for each NNC entry.
-    Auto-populated to all `NNC` when `nnc_cell_indices`
-    is provided but this is `None`.
-    """
-
     nnc_transmissibilities: NumberArray[OneDimension] | None = attrs.field(default=None)
     """
     Shape `(n_nnc,)` - explicitly supplied flow transmissibility of each NNC pair: volumetric
     rate x viscosity / pressure, in the grid's unit system (ft3.cP/day/psi in FIELD units).
     It already includes the Darcy unit conversion constant, so it multiplies mobility and
-    pressure difference directly. `None` when not supplied; NaN entries mean no explicit value
-    was given.
-    """
-
-    nnc_fault_indices: typing.Mapping[str, IntArray[OneDimension]] | None = attrs.field(
-        default=None
-    )
-    """
-    Mapping from fault name to 1-D array of NNC indices (positions into
-    `nnc_cell_indices`) belonging to that fault.
-
-    Mirrors `fault_face_indices` but for NNC-type connections. Populated by
-    factories when fault cell pairs have no shared geometric face.
-    `None` when no fault NNCs are present.
+    pressure difference directly. Required whenever `nnc_cell_indices` is given: every value
+    must be finite and non-negative.
     """
 
     fault_face_indices: typing.Mapping[str, IntArray[OneDimension]] | None = attrs.field(
@@ -733,13 +679,6 @@ class Grid(
                 "only -1 is allowed (boundary sentinel)."
             )
         if self.nnc_cell_indices is not None:
-            if self.nnc_connection_types is not None and len(self.nnc_connection_types) != len(
-                self.nnc_cell_indices
-            ):
-                raise InvalidFaceConnectivityError(
-                    f"`nnc_connection_types` length {len(self.nnc_connection_types)} does not match "
-                    f"`nnc_cell_indices` length {len(self.nnc_cell_indices)}."
-                )
             if self.nnc_transmissibilities is not None and len(self.nnc_transmissibilities) != len(
                 self.nnc_cell_indices
             ):
@@ -762,17 +701,6 @@ class Grid(
                         f"{lowest if lowest < 0 else highest} outside the valid range "
                         f"[0, {n_cells_declared - 1}]."
                     )
-            if self.nnc_cell_indices is not None and self.nnc_fault_indices is not None:
-                n_nnc = len(self.nnc_cell_indices)
-                for fault_name, nnc_indices in self.nnc_fault_indices.items():
-                    if len(nnc_indices) == 0:
-                        continue
-                    if nnc_indices.max() >= n_nnc or nnc_indices.min() < 0:
-                        raise InvalidFaceConnectivityError(
-                            f"`nnc_fault_indices[{fault_name!r}]` contains NNC index "
-                            f"{int(nnc_indices.max())} which exceeds max valid index "
-                            f"{n_nnc - 1}."
-                        )
 
     def _get_cell_count(self) -> int:
         """
@@ -894,25 +822,21 @@ class Grid(
                 and (self.cell_statuses[pairs[:, 1]] == int(CellStatus.ACTIVE)).all()
             ):
                 raise InvalidFaceConnectivityError("An NNC connects to an inactive cell.")
-            if self.nnc_connection_types is not None and self.nnc_connection_types.shape != (
-                n_nnc,
-            ):
-                raise InvalidFaceConnectivityError(
-                    f"`nnc_connection_types` must have {n_nnc} entries; "
-                    f"got {self.nnc_connection_types.shape!r}."
+            if self.nnc_transmissibilities is None:
+                raise ValidationError(
+                    "`nnc_transmissibilities` is required with `nnc_cell_indices`: an NNC has no "
+                    "shared surface, so its flow transmissibility cannot be computed."
                 )
-            if self.nnc_transmissibilities is not None:
-                if self.nnc_transmissibilities.shape != (n_nnc,):
-                    raise InvalidFaceConnectivityError(
-                        f"`nnc_transmissibilities` must have {n_nnc} entries; "
-                        f"got {self.nnc_transmissibilities.shape!r}."
-                    )
-                explicit = self.nnc_transmissibilities[~np.isnan(self.nnc_transmissibilities)]
-                if not (np.isfinite(explicit).all() and (explicit >= 0.0).all()):
-                    raise ValidationError(
-                        "`nnc_transmissibilities` must be non-negative and finite (NaN means "
-                        "unspecified)."
-                    )
+            if self.nnc_transmissibilities.shape != (n_nnc,):
+                raise InvalidFaceConnectivityError(
+                    f"`nnc_transmissibilities` must have {n_nnc} entries; "
+                    f"got {self.nnc_transmissibilities.shape!r}."
+                )
+            if not (
+                np.isfinite(self.nnc_transmissibilities).all()
+                and (self.nnc_transmissibilities >= 0.0).all()
+            ):
+                raise ValidationError("`nnc_transmissibilities` must be finite and non-negative.")
 
     def _canonicalize_boundary_faces(self) -> None:
         """
@@ -994,12 +918,6 @@ class Grid(
         if self.cell_statuses is None:
             cell_statuses = np.full(n_cells, CellStatus.ACTIVE, dtype=np.int8)
             object.__setattr__(self, "cell_statuses", cell_statuses)
-
-        if self.nnc_cell_indices is not None and self.nnc_connection_types is None:
-            nnc_connection_types = np.full(
-                len(self.nnc_cell_indices), int(ConnectionType.USER_NNC), dtype=np.int8
-            )
-            object.__setattr__(self, "nnc_connection_types", nnc_connection_types)
 
     def _build_cell_face_connectivity(self) -> None:
         n_cells = self._get_cell_count()
@@ -1168,13 +1086,8 @@ class Grid(
 
     @property
     def n_faults(self) -> int:
-        """Number of named faults (face-based and/or NNC-only). 0 when no fault data."""
-        names: set[str] = set()
-        if self.fault_face_indices is not None:
-            names.update(self.fault_face_indices.keys())
-        if self.nnc_fault_indices is not None:
-            names.update(self.nnc_fault_indices.keys())
-        return len(names)
+        """Number of named faults. 0 when no fault data."""
+        return len(self.fault_face_indices) if self.fault_face_indices is not None else 0
 
     @property
     def has_transmissibility_multipliers(self) -> bool:
@@ -1248,18 +1161,6 @@ class Grid(
 
         assert self.cell_statuses is not None
         return bool(self.cell_statuses[cell_index])
-
-    def get_nnc_type(self, nnc_index: Integer) -> ConnectionType:
-        """
-        Return the `ConnectionType` for a given NNC.
-
-        :param nnc_index: 0-based NNC index.
-        :returns: `ConnectionType` enum value.
-        :raises IndexError: If `nnc_index` is out of range.
-        """
-        if self.nnc_connection_types is None or nnc_index < 0 or nnc_index >= self.n_nnc:
-            raise IndexError(f"NNC index {nnc_index} is out of range [0, {self.n_nnc - 1}].")
-        return ConnectionType(int(self.nnc_connection_types[nnc_index]))
 
     def get_face_type(self, face_index: Integer) -> ConnectionType:
         """
@@ -1698,11 +1599,7 @@ class Grid(
 
     def __repr__(self) -> str:
         bbox = self.bounding_box
-        fault_info = (
-            f", n_faults={self.n_faults}"
-            if (self.fault_face_indices or self.nnc_fault_indices)
-            else ""
-        )
+        fault_info = f", n_faults={self.n_faults}" if self.fault_face_indices else ""
         nnc_info = f", n_nnc={self.n_nnc}" if self.n_nnc > 0 else ""
         return (
             f"{self.__class__.__name__}("

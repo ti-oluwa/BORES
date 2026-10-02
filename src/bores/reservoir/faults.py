@@ -24,8 +24,8 @@ class Fault(Serializable):
 
     Combines the information from the Eclipse `FAULTS` and `MULTFLT` keywords
     into a single object. A fault without a transmissibility multiplier is valid
-    (`transmissibility_multiplier=None`); it will still classify faces and NNCs
-    but will not modify their transmissibilities.
+    (`transmissibility_multiplier=None`); it will still classify faces but
+    will not modify their transmissibilities.
 
     All IJK indices are 1-based, following Eclipse convention.
 
@@ -183,13 +183,10 @@ def apply_faults(grid: Grid, *faults: Fault) -> Grid:
     **What changes on the returned grid**:
 
     - `grid.fault_face_indices` - updated with the new fault's face memberships.
-    - `grid.nnc_fault_indices` - updated for fault cell pairs with no shared face.
     - `grid.face_connection_types` - faces that now belong to a fault are
       reclassified from `INTERIOR_FACE`/`BOUNDARY_FACE` to
       `INTERIOR_FAULT_FACE`/`BOUNDARY_FAULT_FACE`.
-    - `grid.nnc_cell_indices`, `grid.nnc_connection_types`,
-      `grid.nnc_transmissibilities` - new `FAULT_NNC` entries are appended for
-      fault cell pairs that share no geometric face.
+    - Fault cell pairs that share no geometric face are not connected and are skipped.
     - `grid.fault_transmissibility_multipliers` - updated from the
       `transmissibility_multiplier` on each `Fault` (when not `None`).
 
@@ -231,8 +228,7 @@ def remove_faults(grid: Grid, *names: str) -> Grid:
 
     Strips the specified faults from all grid fault data structures:
     face classifications are reverted to plain `INTERIOR_FACE`/`BOUNDARY_FACE`,
-    NNC entries belonging to those faults are removed, and their transmissibility
-    multipliers are dropped.
+    and their transmissibility multipliers are dropped.
 
     When `names` is empty, **all** faults are removed.
 
@@ -245,8 +241,6 @@ def remove_faults(grid: Grid, *names: str) -> Grid:
     existing_names: set[str] = set()
     if grid.fault_face_indices:
         existing_names.update(grid.fault_face_indices.keys())
-    if grid.nnc_fault_indices:
-        existing_names.update(grid.nnc_fault_indices.keys())
 
     names_to_remove: frozenset[str] = frozenset(names) if names else frozenset(existing_names)
 
@@ -374,7 +368,7 @@ def _apply_faults_to_grid(
     checked against the face lookup:
 
     - If a shared face exists -> the face is classified as a fault face.
-    - If no shared face exists -> a `FAULT_NNC` entry is created.
+    - If no shared face exists -> the pair is not connected and is skipped.
 
     Existing faults with the same name are replaced; new fault names are merged.
 
@@ -391,67 +385,10 @@ def _apply_faults_to_grid(
         dict[str, list[Integer]],
         {name: list(indices) for name, indices in (grid.fault_face_indices or {}).items()},
     )
-    nnc_fault_indices_lists = typing.cast(
-        dict[str, list[Integer]],
-        {name: list(indices) for name, indices in (grid.nnc_fault_indices or {}).items()},
-    )
 
-    # Existing NNC arrays (we may append to these)
-    existing_nnc_pairs: list[tuple[Integer, Integer]] = (
-        [
-            (grid.nnc_cell_indices[i, 0], grid.nnc_cell_indices[i, 1])
-            for i in range(len(grid.nnc_cell_indices))
-        ]
-        if grid.nnc_cell_indices is not None
-        else []
-    )
-    existing_nnc_types: list[Integer] = (
-        [typ for typ in grid.nnc_connection_types] if grid.nnc_connection_types is not None else []
-    )
-    existing_nnc_transmissibilities: list[Number] = (
-        [typ for typ in grid.nnc_transmissibilities]
-        if grid.nnc_transmissibilities is not None
-        else [float("nan")] * len(existing_nnc_pairs)
-    )
-
-    # Drop existing NNC entries for faults being replaced
     names_being_replaced: set[str] = {fault.name for fault in faults}
-    indices_to_drop: set[Integer] = set()
     for name in names_being_replaced:
-        if name in nnc_fault_indices_lists:
-            indices_to_drop.update(nnc_fault_indices_lists.pop(name))
         fault_face_indices.pop(name, None)
-
-    if indices_to_drop:
-        # Build compacted NNC arrays excluding dropped indices
-        old_to_new: dict[Integer, Integer] = {}
-        new_nnc_pairs: list[tuple[Integer, Integer]] = []
-        new_nnc_types: list[Integer] = []
-        new_nnc_transmissibilities: list[Number] = []
-        for old_idx, (cell_pair, nnc_type, transmissibility) in enumerate(
-            zip(
-                existing_nnc_pairs,
-                existing_nnc_types,
-                existing_nnc_transmissibilities,
-                strict=False,
-            )
-        ):
-            if old_idx in indices_to_drop:
-                continue
-            new_idx = len(new_nnc_pairs)
-            old_to_new[old_idx] = new_idx
-            new_nnc_pairs.append(cell_pair)
-            new_nnc_types.append(nnc_type)
-            new_nnc_transmissibilities.append(transmissibility)
-
-        # Remap surviving nnc_fault_indices positions
-        nnc_fault_indices_lists = {
-            name: [old_to_new[old_idx] for old_idx in old_indices if old_idx in old_to_new]
-            for name, old_indices in nnc_fault_indices_lists.items()
-        }
-        existing_nnc_pairs = new_nnc_pairs
-        existing_nnc_types = new_nnc_types
-        existing_nnc_transmissibilities = new_nnc_transmissibilities
 
     # New face_connection_types: start from grid's current array
     assert grid.face_connection_types is not None
@@ -461,7 +398,6 @@ def _apply_faults_to_grid(
     for fault in faults:
         cell_pairs = resolve_fault_cell_pairs(fault, nx, ny, nz)
         face_list: list[Integer] = []
-        nnc_list: list[Integer] = []
 
         for cell_a, cell_b in cell_pairs:
             face_idx = face_lookup.get((cell_a, cell_b))
@@ -476,18 +412,8 @@ def _apply_faults_to_grid(
                     if is_boundary
                     else ConnectionType.INTERIOR_FAULT_FACE
                 )
-            else:
-                # No shared face -> FAULT_NNC
-                nnc_idx = len(existing_nnc_pairs)
-                existing_nnc_pairs.append((cell_a, cell_b))
-                existing_nnc_types.append(int(ConnectionType.FAULT_NNC))
-                existing_nnc_transmissibilities.append(float("nan"))
-                nnc_list.append(nnc_idx)
-
         if face_list:
             fault_face_indices[fault.name] = face_list
-        if nnc_list:
-            nnc_fault_indices_lists[fault.name] = nnc_list
 
     # Build updated fault_transmissibility_multipliers
     updated_multipliers: dict[str, Number] = dict(grid.fault_transmissibility_multipliers or {})
@@ -498,42 +424,15 @@ def _apply_faults_to_grid(
             # If the old multiplier existed and user supplied None, preserve old value
             pass
 
-    # Assemble final NNC arrays (or None if empty)
-    merged_nnc_cell_indices = (
-        np.asarray(existing_nnc_pairs, dtype=np.int32).reshape(-1, 2)
-        if existing_nnc_pairs
-        else None
-    )
-    merged_nnc_connection_types = (
-        np.asarray(existing_nnc_types, dtype=np.int8) if existing_nnc_types else None
-    )
-    merged_nnc_transmissibilities = (
-        np.asarray(existing_nnc_transmissibilities, dtype=np.float64)
-        if existing_nnc_transmissibilities
-        else None
-    )
     merged_fault_face_indices = (
         {name: np.asarray(idxs, dtype=np.int32) for name, idxs in fault_face_indices.items()}
         if fault_face_indices
-        else None
-    )
-    merged_nnc_fault_indices = (
-        {
-            name: np.asarray(idxs, dtype=np.int32)
-            for name, idxs in nnc_fault_indices_lists.items()
-            if idxs
-        }
-        if nnc_fault_indices_lists
         else None
     )
     return attrs.evolve(
         grid,
         face_connection_types=new_face_connection_types,
         fault_face_indices=merged_fault_face_indices,
-        nnc_cell_indices=merged_nnc_cell_indices,
-        nnc_connection_types=merged_nnc_connection_types,
-        nnc_transmissibilities=merged_nnc_transmissibilities,
-        nnc_fault_indices=merged_nnc_fault_indices,
         fault_transmissibility_multipliers=updated_multipliers or None,
     )
 
@@ -543,9 +442,7 @@ def _remove_faults_from_grid(grid: Grid, names: frozenset[str]) -> Grid:
     Produce a new `Grid` with the specified faults stripped out.
 
     Fault face classifications are reverted to plain `INTERIOR_FACE` or
-    `BOUNDARY_FACE`. NNC entries belonging to those faults are removed and
-    the remaining NNC indices are compacted. Transmissibility multipliers for
-    the removed faults are dropped.
+    `BOUNDARY_FACE`. Transmissibility multipliers for the removed faults are dropped.
 
     :param grid: The source grid.
     :param names: Names of faults to remove.
@@ -568,56 +465,10 @@ def _remove_faults_from_grid(grid: Grid, names: frozenset[str]) -> Grid:
                     ConnectionType.BOUNDARY_FACE if is_boundary else ConnectionType.INTERIOR_FACE
                 )
 
-    # Determine NNC indices to drop
-    indices_to_drop: set[Integer] = set()
-    if grid.nnc_fault_indices:
-        for name in names:
-            nnc_indices = grid.nnc_fault_indices.get(name)
-            if nnc_indices is not None:
-                indices_to_drop.update(idx for idx in nnc_indices)
-
-    # Compact remaining NNC arrays
-    n_nnc = grid.n_nnc
-    has_nnc_transmissibilities = grid.nnc_transmissibilities is not None
-
-    surviving_pairs: list[tuple[Integer, Integer]] = []
-    surviving_types: list[Integer] = []
-    surviving_transmissibilities: list[Number] = []
-    old_to_new: dict[Integer, Integer] = {}
-
-    for old_idx in range(n_nnc):
-        if old_idx in indices_to_drop:
-            continue
-        new_idx = len(surviving_pairs)
-        old_to_new[old_idx] = new_idx
-        assert grid.nnc_cell_indices is not None
-        assert grid.nnc_connection_types is not None
-        surviving_pairs.append((
-            grid.nnc_cell_indices[old_idx, 0],
-            grid.nnc_cell_indices[old_idx, 1],
-        ))
-        surviving_types.append(grid.nnc_connection_types[old_idx])
-        surviving_transmissibilities.append(
-            grid.nnc_transmissibilities[old_idx]  # type: ignore
-            if has_nnc_transmissibilities
-            else float("nan")
-        )
-
-    # Updated fault maps (minus removed faults, minus any remapped nnc indices)
+    # Updated fault maps (minus removed faults)
     new_fault_face_indices = (
         {name: indices for name, indices in grid.fault_face_indices.items() if name not in names}
         if grid.fault_face_indices
-        else None
-    )
-    new_nnc_fault_indices = (
-        {
-            name: np.asarray(
-                [old_to_new[idx] for idx in indices if idx in old_to_new], dtype=np.int32
-            )
-            for name, indices in grid.nnc_fault_indices.items()
-            if name not in names
-        }
-        if grid.nnc_fault_indices
         else None
     )
     new_multipliers = (
@@ -633,17 +484,5 @@ def _remove_faults_from_grid(grid: Grid, names: frozenset[str]) -> Grid:
         grid,
         face_connection_types=new_face_connection_types,
         fault_face_indices=new_fault_face_indices or None,
-        nnc_cell_indices=(
-            np.asarray(surviving_pairs, dtype=np.int32).reshape(-1, 2) if surviving_pairs else None
-        ),
-        nnc_connection_types=(
-            np.asarray(surviving_types, dtype=np.int8) if surviving_types else None
-        ),
-        nnc_transmissibilities=(
-            np.asarray(surviving_transmissibilities, dtype=np.float64)
-            if has_nnc_transmissibilities and surviving_transmissibilities
-            else None
-        ),
-        nnc_fault_indices=new_nnc_fault_indices or None,
         fault_transmissibility_multipliers=new_multipliers or None,
     )

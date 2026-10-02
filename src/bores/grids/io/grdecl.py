@@ -36,7 +36,7 @@ from bores.datastructures import MapAxes
 from bores.deck.core import DeckParseError
 from bores.deck.file import DeckFile
 from bores.errors import GridExportError, GridImportError
-from bores.grids.base import CellStatus, ConnectionType, Grid
+from bores.grids.base import CellStatus, Grid
 from bores.grids.factories.cartesian import make_cartesian_grid
 from bores.grids.factories.corner_point import (
     ActNumArray,
@@ -843,28 +843,14 @@ def _emit_faults(lines: list[str], grid: Grid, nx: Integer, ny: Integer) -> None
     """
     Append a `FAULTS` block to `lines` covering all named faults on the grid.
 
-    Named faults can manifest in two ways on the grid and both are handled here:
+    Each face in `grid.fault_face_indices` is looked up in `grid.face_cell_indices` to recover
+    its two adjacent cells, which are converted to 1-based IJK and compared to infer the face
+    direction.
 
-    - **Face-based faults** (`grid.fault_face_indices`): cell pairs that share
-      a geometric face. The face index is looked up in `grid.face_cell_indices`
-      to recover the two adjacent cells, which are then converted to 1-based IJK
-      and compared to infer the face direction.
+    Faces whose cells have identical IJK in all three directions (degenerate connections) are
+    skipped with a warning.
 
-    - **NNC-based faults** (`grid.nnc_fault_indices`): cell pairs from the
-      original `FAULTS` records that had no shared geometric face (e.g. across
-      a pinched-out layer) and were instead stored as `FAULT_NNC` connections.
-      Their cell indices are read directly from `grid.nnc_cell_indices` and
-      converted to IJK in the same way.
-
-    A fault that appears in both maps (some faces resolved geometrically, others
-    as NNCs) will have records emitted from both passes under the same fault name,
-    which is correct Eclipse behaviour.
-
-    Faces or NNC pairs whose IJK coordinates are identical in all three directions
-    (degenerate connections) are skipped with a warning.
-
-    Does nothing if both `grid.fault_face_indices` and `grid.nnc_fault_indices`
-    are absent or empty.
+    Does nothing if `grid.fault_face_indices` is absent or empty.
 
     :param lines: Output text lines list, mutated in-place.
     :param grid: Source grid.
@@ -872,9 +858,7 @@ def _emit_faults(lines: list[str], grid: Grid, nx: Integer, ny: Integer) -> None
     :param ny: Grid dimension in y.
     :param nz: Grid dimension in z.
     """
-    has_face_faults = bool(grid.fault_face_indices)
-    has_nnc_faults = bool(grid.nnc_fault_indices)
-    if not has_face_faults and not has_nnc_faults:
+    if not grid.fault_face_indices:
         return
 
     def _flat_to_ijk(flat: int) -> tuple[int, int, int]:
@@ -913,28 +897,15 @@ def _emit_faults(lines: list[str], grid: Grid, nx: Integer, ny: Integer) -> None
     lines.append("")
     lines.append("FAULTS")
 
-    # Face-based faults
-    if has_face_faults:
-        for fault_name, face_indices in sorted(grid.fault_face_indices.items()):  # type: ignore
-            for face_idx in face_indices:
-                owner = grid.face_cell_indices[face_idx, 0]
-                neighbour = grid.face_cell_indices[face_idx, 1]
-                if owner < 0 or neighbour < 0:
-                    continue
-                line = _fault_line(fault_name, f"face {face_idx}", int(owner), int(neighbour))
-                if line is not None:
-                    lines.append(line)
-
-    # Fault NNCs (cell pairs that had no shared geometric face)
-    if has_nnc_faults:
-        assert grid.nnc_cell_indices is not None
-        for fault_name, nnc_indices in sorted(grid.nnc_fault_indices.items()):  # type: ignore
-            for nnc_idx in nnc_indices:
-                c1 = grid.nnc_cell_indices[nnc_idx, 0]
-                c2 = grid.nnc_cell_indices[nnc_idx, 1]
-                line = _fault_line(fault_name, f"NNC {nnc_idx}", int(c1), int(c2))
-                if line is not None:
-                    lines.append(line)
+    for fault_name, face_indices in sorted(grid.fault_face_indices.items()):
+        for face_idx in face_indices:
+            owner = grid.face_cell_indices[face_idx, 0]
+            neighbour = grid.face_cell_indices[face_idx, 1]
+            if owner < 0 or neighbour < 0:
+                continue
+            line = _fault_line(fault_name, f"face {face_idx}", int(owner), int(neighbour))
+            if line is not None:
+                lines.append(line)
 
     lines.append("/")
     lines.append("")
@@ -954,53 +925,32 @@ def _emit_multflt(lines: list[str], grid: Grid) -> None:
 
 def _emit_nnc(lines: list[str], grid: Grid, nx: Integer, ny: Integer) -> None:
     """
-    Emit a `NNC` block containing only explicitly user-defined NNCs
-    (`ConnectionType.USER_NNC`).
-
-    Fault-derived NNCs are emitted by `_emit_faults` via
-    `grid.nnc_fault_indices`. Pinchout NNCs are implicitly
-    reconstructed by the simulator from the `PINCH` keyword and must
-    not be listed here.
+    Emit an `NNC` block with the flow transmissibility of every NNC, in the deck's volume unit.
     """
-    if grid.nnc_cell_indices is None or grid.nnc_connection_types is None:
+    if grid.nnc_cell_indices is None or grid.nnc_transmissibilities is None:
         return
 
-    user_type = int(ConnectionType.USER_NNC)
-    has_transmissibility = grid.nnc_transmissibilities is not None and len(
-        grid.nnc_transmissibilities
-    ) == len(grid.nnc_cell_indices)
+    volume_factor = get_deck_nnc_volume_factor(grid.unit_system)
 
-    def _flat_to_ijk(flat: int) -> tuple[int, int, int]:
+    def _flat_to_ijk(flat: Integer) -> tuple[Integer, Integer, Integer]:
         i = flat % nx
         j = (flat // nx) % ny
         k = flat // (nx * ny)
         return i + 1, j + 1, k + 1
 
-    user_nnc_lines: list[str] = []
-    for idx, (c1, c2) in enumerate(grid.nnc_cell_indices):
-        if int(grid.nnc_connection_types[idx]) != user_type:
-            continue
-
+    nnc_lines: list[str] = []
+    for (c1, c2), transmissibility in zip(
+        grid.nnc_cell_indices, grid.nnc_transmissibilities, strict=True
+    ):
         i1, j1, k1 = _flat_to_ijk(int(c1))
         i2, j2, k2 = _flat_to_ijk(int(c2))
-        if not has_transmissibility:
-            continue
-        transmissibility = grid.nnc_transmissibilities[idx]  # type: ignore
-        if not np.isfinite(transmissibility):
-            # No explicit value: the transmissibility is computed from rock properties, and
-            # writing 0.0 would make the connection closed when the deck is read back.
-            continue
-        transmissibility_str = (
-            f"{transmissibility / get_deck_nnc_volume_factor(grid.unit_system):.6e}"
+        nnc_lines.append(
+            f"  {i1}  {j1}  {k1}  {i2}  {j2}  {k2}  {transmissibility / volume_factor:.6e}  /"
         )
-        user_nnc_lines.append(f"  {i1}  {j1}  {k1}  {i2}  {j2}  {k2}  {transmissibility_str}  /")
-
-    if not user_nnc_lines:
-        return
 
     lines.append("")
     lines.append("NNC")
-    lines.extend(user_nnc_lines)
+    lines.extend(nnc_lines)
     lines.append("/")
     lines.append("")
 

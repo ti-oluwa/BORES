@@ -8,6 +8,7 @@ from bores.grids.factories.corner_point import (
     clip_convex_polygon,
     make_corner_point_grid,
     polygon_signed_area,
+    subtract_convex_polygon,
 )
 
 warnings.simplefilter("ignore")
@@ -46,11 +47,18 @@ def lateral_connection_areas(grid):
 
 
 def test_polygon_clipping_returns_the_intersection():
-    square = [(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)]
-    shifted = [(1.0, 1.0), (3.0, 1.0), (3.0, 3.0), (1.0, 3.0)]
+    square = np.array([(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)])
+    shifted = np.array([(1.0, 1.0), (3.0, 1.0), (3.0, 3.0), (1.0, 3.0)])
     assert polygon_signed_area(clip_convex_polygon(square, shifted)) == pytest.approx(1.0)
-    far = [(5.0, 5.0), (6.0, 5.0), (6.0, 6.0), (5.0, 6.0)]
-    assert clip_convex_polygon(square, far) == []
+    far = np.array([(5.0, 5.0), (6.0, 5.0), (6.0, 6.0), (5.0, 6.0)])
+    assert clip_convex_polygon(square, far).shape[0] == 0
+
+
+def test_polygon_subtraction_returns_the_remaining_pieces():
+    square = np.array([(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)])
+    middle = np.array([(1.0, 1.0), (3.0, 1.0), (3.0, 3.0), (1.0, 3.0)])
+    pieces = subtract_convex_polygon(square, middle)
+    assert sum(polygon_signed_area(piece) for piece in pieces) == pytest.approx(12.0)
 
 
 def test_offset_fault_connects_cells_across_the_fault_with_partial_areas():
@@ -116,7 +124,7 @@ def test_named_fault_over_an_offset_uses_the_overlap_faces():
         fault_records=[FaultRecord("F", 1, 1, 1, 1, 1, 2, "X")],
         fault_transmissibility_multipliers={"F": 0.1},
     )
-    assert len(grid.fault_face_indices["F"]) == 2
+    assert len(grid.fault_face_indices["F"]) == 3
 
 
 def incident_area(grid, cell, axis):

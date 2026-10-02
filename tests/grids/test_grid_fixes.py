@@ -110,22 +110,6 @@ def test_negative_fault_directions_select_the_negative_face():
     assert _fault_cells("X", 5) == []
 
 
-def test_nnc_type_bounds():
-    grid = make_cartesian_grid(
-        nx=4,
-        ny=3,
-        nz=2,
-        dx=10.0,
-        dy=10.0,
-        dz=1.0,
-        nnc_cell_indices=np.array([[0, 23], [1, 22]]),
-        nnc_transmissibilities=np.array([5.0, 7.0]),
-    )
-    grid.get_nnc_type(1)
-    with pytest.raises(IndexError):
-        grid.get_nnc_type(2)
-
-
 def test_serde_round_trip_keeps_statuses_and_dimensions():
     import attrs
 

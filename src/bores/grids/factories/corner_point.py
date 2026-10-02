@@ -7,12 +7,12 @@ Builds a `bores.grids.base.Grid` from ECLIPSE-style COORD / ZCORN / ACTNUM array
 
 **Pinchout handling**: cells whose average thickness is at or below
 `pinch_tolerance` have their top/bottom faces suppressed so that adjacent
-active cells share those face keys. Third claimants on any face key are
-recorded as NNCs of type `PINCHOUT_NNC`.
+active cells share those face keys. A face key claimed by a third cell is ignored for
+that cell.
 
 **Fault handling**: named faults from `fault_records` are first resolved to
 shared face indices. Cell pairs in the fault IJK range that share no geometric
-face are recorded as NNCs of type `FAULT` rather than silently discarded.
+face are not connected and are skipped.
 """
 
 import typing
@@ -20,7 +20,6 @@ import warnings
 
 import numba
 import numpy as np
-import numpy.typing as npt
 
 from bores.datastructures import GridDimensions, MapAxes
 from bores.errors import GridExportError, InvalidGridError, ValidationError
@@ -28,12 +27,15 @@ from bores.grids.base import CellStatus, ConnectionType, Grid
 from bores.grids.factories.base import (
     FaceKey,
     FaceRecord,
+    FaceVertexIndices,
     FaultRecord,
     VertexCoordinates,
     map_xy_to_map_space,
 )
 from bores.types import (
     Boolean,
+    BooleanArray,
+    Float,
     IntArray,
     Integer,
     Number,
@@ -56,7 +58,7 @@ ActNumArray: typing.TypeAlias = IntArray[ThreeDimensions]
 """Corner-point ACTNUM array, shape `(NZ, NY, NX)`; 1 = active."""
 
 
-HEXAHEDRON_FACES_ZDOWN: list[list[int]] = [
+HEXAHEDRON_FACES_ZDOWN: list[list[Integer]] = [
     [0, 3, 2, 1],  # top    - outward normal = -z
     [4, 5, 6, 7],  # bottom - outward normal = +z
     [0, 1, 5, 4],  # -y face
@@ -65,10 +67,10 @@ HEXAHEDRON_FACES_ZDOWN: list[list[int]] = [
     [1, 2, 6, 5],  # +x face
 ]
 
-TOP_FACE_LOCAL: int = 0
-BOTTOM_FACE_LOCAL: int = 1
+TOP_FACE_LOCAL: Integer = 0
+BOTTOM_FACE_LOCAL: Integer = 1
 
-FACE_DIRECTION_TO_LOCAL: dict[str, int] = {
+FACE_DIRECTION_TO_LOCAL: dict[str, Integer] = {
     "X": 5,
     "X-": 4,
     "Y": 3,
@@ -122,7 +124,8 @@ def make_corner_point_grid(
         Set `False` to keep the grid in local (pre-`MAPAXES`) space - the
         resolved `map_axes` is still stored on `grid.metadata` either way.
     :param nnc_cell_indices: Shape `(n_nnc, 2)` user-declared NNC cell pairs.
-    :param nnc_transmissibilities: Shape `(n_nnc,)` user-declared NNC transmissibilities.
+    :param nnc_transmissibilities: Shape `(n_nnc,)` flow transmissibility of each NNC pair.
+        Required with `nnc_cell_indices`.
     :param fault_records: `FaultRecord` objects from the GRDECL `FAULTS` keyword.
     :param fault_transmissibility_multipliers: `{name: multiplier}` from `MULTFLT`.
     :param positive_x_transmissibility_multipliers: Per-cell MULTX. `None` if absent.
@@ -135,6 +138,12 @@ def make_corner_point_grid(
     :raises ValidationError: On array shape mismatches or inconsistent NNC lengths.
     :raises InvalidGridError: If no active cells are found.
     """
+    if (
+        nnc_cell_indices is not None
+        and len(nnc_cell_indices) > 0
+        and nnc_transmissibilities is None
+    ):
+        raise ValidationError("`nnc_cell_indices` was given without `nnc_transmissibilities`.")
     if nnc_cell_indices is not None and nnc_transmissibilities is not None:
         if len(nnc_cell_indices) != len(nnc_transmissibilities):
             raise ValidationError(
@@ -198,8 +207,6 @@ def make_corner_point_grid(
         face_vertex_offsets,
         face_cell_indices,
         face_connection_types,
-        geometric_nnc_pairs,
-        geometric_nnc_connection_types,
         cell_statuses,
         cell_volumes,
         cell_centroids,
@@ -211,11 +218,10 @@ def make_corner_point_grid(
         pinch_tolerance=pinch_tolerance,
     )
 
-    # Resolve fault face indices; cell pairs with no shared face become fault NNCs.
-    fault_nnc_pairs: list[tuple[int, int, str]] = []
+    # Resolve fault face indices; cell pairs with no shared face are skipped.
     fault_face_indices: dict[str, IntArray[OneDimension]] | None = None
     if fault_records:
-        fault_face_indices, fault_nnc_pairs = resolve_fault_face_indices(
+        fault_face_indices = resolve_fault_face_indices(
             fault_records=fault_records,
             dimensions=(nx, ny, nz),
             actnum=actnum_array,
@@ -231,102 +237,38 @@ def make_corner_point_grid(
             face_connection_types[interior_fault_faces] = int(ConnectionType.INTERIOR_FAULT_FACE)
             face_connection_types[boundary_fault_faces] = int(ConnectionType.BOUNDARY_FAULT_FACE)
 
-    # Merge all NNC sources: [geometry pinchouts] + [geometry fault NNCs] + [user NNCs]
-    # Each source contributes a pairs array (n, 2), a types array (n,), and
-    # optionally a transmissibilities array (n,).
-    all_nnc_parts: list[
-        tuple[
-            npt.NDArray[np.int32],
-            npt.NDArray[np.int8],
-            npt.NDArray[np.float64],
-        ]
-    ] = []
-
-    if geometric_nnc_pairs is not None and len(geometric_nnc_pairs) > 0:
-        geometric_transmissibilities = np.full(len(geometric_nnc_pairs), np.nan, dtype=np.float64)
-        all_nnc_parts.append((
-            np.asarray(geometric_nnc_pairs, dtype=np.int32),
-            geometric_nnc_connection_types,
-            geometric_transmissibilities,
-        ))
-
-    fault_nnc_indices: dict[str, list[int]] = {}
-    if fault_nnc_pairs:
-        fault_pairs = np.asarray([(a, b) for a, b, _ in fault_nnc_pairs], dtype=np.int32).reshape(
-            -1, 2
+    nnc_pairs: IntArray[OneDimension] | None = None
+    nnc_flow_transmissibilities: NumberArray[OneDimension] | None = None
+    if nnc_cell_indices is not None and cell_statuses is not None and len(nnc_cell_indices) > 0:
+        pairs = typing.cast(
+            IntArray[OneDimension], np.asarray(nnc_cell_indices, dtype=np.int32).reshape(-1, 2)
         )
-        fault_connection_types = np.full(
-            len(fault_nnc_pairs), int(ConnectionType.FAULT_NNC), dtype=np.int8
-        )
-        fault_transmissibilities = np.full(len(fault_nnc_pairs), np.nan, dtype=np.float64)
-        all_nnc_parts.append((
-            fault_pairs,
-            fault_connection_types,
-            fault_transmissibilities,
-        ))
-        # Build nnc_fault_indices: fault name -> positions into the merged NNC array.
-        # The offset is the total NNC count already accumulated before this block.
-        fault_nnc_offset = sum(len(p) for p, _, _ in all_nnc_parts[:-1])
-        for local_idx, (_, _, name) in enumerate(fault_nnc_pairs):
-            fault_nnc_indices.setdefault(name, []).append(fault_nnc_offset + local_idx)
-
-    if nnc_cell_indices is not None and len(nnc_cell_indices) > 0:
-        user_nnc_pairs = np.asarray(nnc_cell_indices, dtype=np.int32).reshape(-1, 2)
-        user_nnc_transmissibilities = (
-            np.asarray(nnc_transmissibilities, dtype=np.float64)
-            if nnc_transmissibilities is not None
-            else np.full(len(user_nnc_pairs), np.nan, dtype=np.float64)
-        )
-        if len(user_nnc_transmissibilities) != len(user_nnc_pairs):
+        flow_transmissibilities = np.asarray(nnc_transmissibilities, dtype=np.float64)
+        if len(flow_transmissibilities) != len(pairs):
             raise ValidationError(
-                f"`nnc_cell_indices` has {len(user_nnc_pairs)} pairs but `nnc_transmissibilities` "
-                f"has {len(user_nnc_transmissibilities)} values."
+                f"`nnc_cell_indices` has {len(pairs)} pairs but `nnc_transmissibilities` "
+                f"has {len(flow_transmissibilities)} values."
             )
-        if user_nnc_pairs.min() < 0 or user_nnc_pairs.max() >= cell_statuses.shape[0]:
+
+        if pairs.min() < 0 or pairs.max() >= cell_statuses.shape[0]:
             raise ValidationError(
                 f"`nnc_cell_indices` must lie in [0, {cell_statuses.shape[0] - 1}] "
                 f"(flat index i + j * nx + k * nx * ny)."
             )
 
-        keep = (cell_statuses[user_nnc_pairs[:, 0]] == int(CellStatus.ACTIVE)) & (
-            cell_statuses[user_nnc_pairs[:, 1]] == int(CellStatus.ACTIVE)
+        keep = (cell_statuses[pairs[:, 0]] == int(CellStatus.ACTIVE)) & (
+            cell_statuses[pairs[:, 1]] == int(CellStatus.ACTIVE)
         )
         if not keep.all():
             warnings.warn(
                 f"Dropped {int((~keep).sum())} user NNC(s) connected to inactive cells.",
                 stacklevel=3,
             )
-            user_nnc_pairs = user_nnc_pairs[keep]
-            user_nnc_transmissibilities = user_nnc_transmissibilities[keep]
-
-        user_nnc_connection_types = np.full(
-            len(user_nnc_pairs), int(ConnectionType.USER_NNC), dtype=np.int8
-        )
-        all_nnc_parts.append((
-            user_nnc_pairs,
-            user_nnc_connection_types,
-            user_nnc_transmissibilities,
-        ))
-
-    merged_nnc_pairs: npt.NDArray[np.int32] | None = None
-    merged_nnc_connection_types: npt.NDArray[np.int8] | None = None
-    merged_nnc_transmissibilities: npt.NDArray[np.float64] | None = None
-    merged_nnc_fault_indices: dict[str, IntArray[OneDimension]] | None = None
-
-    if all_nnc_parts:
-        merged_nnc_pairs = np.vstack([p for p, _, _ in all_nnc_parts]).astype(np.int32)
-        merged_nnc_connection_types = np.concatenate([t for _, t, _ in all_nnc_parts]).astype(
-            np.int8, copy=False
-        )
-        merged_transmissibilities = np.concatenate([t for _, _, t in all_nnc_parts])
-        # Only store if at least one value is finite (avoids all-NaN array)
-        merged_nnc_transmissibilities = (
-            merged_transmissibilities if np.any(np.isfinite(merged_transmissibilities)) else None
-        )
-        if fault_nnc_pairs:
-            merged_nnc_fault_indices = {  # type: ignore[arg-type]
-                name: np.asarray(idxs, dtype=np.int32) for name, idxs in fault_nnc_indices.items()
-            }
+        if keep.any():
+            nnc_pairs = typing.cast(IntArray[OneDimension], pairs[keep])
+            nnc_flow_transmissibilities = typing.cast(
+                NumberArray[OneDimension], flow_transmissibilities[keep]
+            )
 
     return Grid(
         vertex_coordinates=vertex_coordinates,
@@ -340,10 +282,8 @@ def make_corner_point_grid(
         metadata=metadata,
         cell_statuses=cell_statuses,  # type: ignore[arg-type]
         face_connection_types=face_connection_types,  # type: ignore[arg-type]
-        nnc_cell_indices=merged_nnc_pairs,  # type: ignore[arg-type]
-        nnc_connection_types=merged_nnc_connection_types,  # type: ignore[arg-type]
-        nnc_transmissibilities=merged_nnc_transmissibilities,  # type: ignore[arg-type]
-        nnc_fault_indices=merged_nnc_fault_indices,
+        nnc_cell_indices=nnc_pairs,  # type: ignore[arg-type]
+        nnc_transmissibilities=nnc_flow_transmissibilities,  # type: ignore[arg-type]
         fault_face_indices=fault_face_indices,
         fault_transmissibility_multipliers=(
             dict(fault_transmissibility_multipliers)
@@ -533,117 +473,131 @@ def _is_cell_pinched(
     return (total_dz / 4.0) <= pinch_tolerance
 
 
-LATERAL_FACE_LOCAL_INDICES: tuple[int, ...] = (2, 3, 4, 5)
+LATERAL_FACE_LOCAL_INDICES: tuple[Integer, ...] = (2, 3, 4, 5)
 """Local face indices of the four lateral faces (`-y`, `+y`, `-x`, `+x`)."""
 
-MINIMUM_RELATIVE_OVERLAP_AREA: float = 1e-6
+MINIMUM_RELATIVE_OVERLAP_AREA: Number = 1e-6
 """Overlaps smaller than this fraction of the smaller of the two facing faces are ignored."""
 
 
-def polygon_signed_area(polygon: list[tuple[float, float]]) -> float:
+@numba.njit(cache=True)
+def compute_polygon_signed_area(polygon: NumberArray[TwoDimensions]) -> Float:
     """
     Signed area of a 2-D polygon (positive when the vertices run counter-clockwise).
 
-    :param polygon: Polygon vertices.
+    :param polygon: Shape `(n, 2)` polygon vertices.
     :returns: Signed area.
     """
     total = 0.0
-    for index, (x1, y1) in enumerate(polygon):
-        x2, y2 = polygon[(index + 1) % len(polygon)]
-        total += x1 * y2 - x2 * y1
+    n_vertices = polygon.shape[0]
+    for index in range(n_vertices):
+        following = (index + 1) % n_vertices
+        total += polygon[index, 0] * polygon[following, 1]
+        total -= polygon[following, 0] * polygon[index, 1]
     return 0.5 * total
 
 
+@numba.njit(cache=True)
 def clip_half_plane(
-    polygon: list[tuple[float, float]],
-    a: tuple[float, float],
-    b: tuple[float, float],
-    *,
-    keep_inside: bool,
-) -> list[tuple[float, float]]:
+    polygon: NumberArray[TwoDimensions],
+    a: NumberArray[OneDimension],
+    b: NumberArray[OneDimension],
+    keep_inside: Boolean,
+) -> NumberArray[TwoDimensions]:
     """
-    Clip a 2-D polygon against the half-plane to the left (or right) of the line `a -> b`.
+    Clip a convex 2-D polygon against the half-plane to the left (or right) of the line `a -> b`.
 
-    :param polygon: Polygon vertices.
-    :param a: First point of the line.
-    :param b: Second point of the line.
+    :param polygon: Shape `(n, 2)` polygon vertices.
+    :param a: Shape `(2,)` first point of the line.
+    :param b: Shape `(2,)` second point of the line.
     :param keep_inside: Keep the part to the left of `a -> b` when `True`, otherwise the part
         to its right.
-    :returns: Vertices of the clipped polygon, empty if nothing remains.
+    :returns: Shape `(m, 2)` vertices of the clipped polygon, with `m = 0` if nothing remains.
     """
+    n_vertices = polygon.shape[0]
+    output = np.empty((2 * n_vertices + 2, 2), dtype=np.float64)
+    if n_vertices == 0:
+        return output[:0]  # type: ignore[return-value]
+
     sign = 1.0 if keep_inside else -1.0
-
-    def signed_distance(point: tuple[float, float]) -> float:
-        return sign * ((b[0] - a[0]) * (point[1] - a[1]) - (b[1] - a[1]) * (point[0] - a[0]))
-
-    output: list[tuple[float, float]] = []
-    if not polygon:
-        return output
-    previous = polygon[-1]
-    previous_distance = signed_distance(previous)
-    for current in polygon:
-        current_distance = signed_distance(current)
-        if current_distance >= 0.0:
-            if previous_distance < 0.0:
-                t = previous_distance / (previous_distance - current_distance)
-                output.append((
-                    previous[0] + t * (current[0] - previous[0]),
-                    previous[1] + t * (current[1] - previous[1]),
-                ))
-            output.append(current)
-        elif previous_distance >= 0.0:
+    count = 0
+    previous = n_vertices - 1
+    previous_distance = sign * (
+        (b[0] - a[0]) * (polygon[previous, 1] - a[1])
+        - (b[1] - a[1]) * (polygon[previous, 0] - a[0])
+    )
+    for current in range(n_vertices):
+        current_distance = sign * (
+            (b[0] - a[0]) * (polygon[current, 1] - a[1])
+            - (b[1] - a[1]) * (polygon[current, 0] - a[0])
+        )
+        crosses = (current_distance >= 0.0) != (previous_distance >= 0.0)
+        if crosses:
             t = previous_distance / (previous_distance - current_distance)
-            output.append((
-                previous[0] + t * (current[0] - previous[0]),
-                previous[1] + t * (current[1] - previous[1]),
-            ))
+            output[count, 0] = polygon[previous, 0] + t * (
+                polygon[current, 0] - polygon[previous, 0]
+            )
+            output[count, 1] = polygon[previous, 1] + t * (
+                polygon[current, 1] - polygon[previous, 1]
+            )
+            count += 1
+        if current_distance >= 0.0:
+            output[count, 0] = polygon[current, 0]
+            output[count, 1] = polygon[current, 1]
+            count += 1
         previous = current
         previous_distance = current_distance
-    return output
+    return output[:count]  # type: ignore[return-value]
 
 
+@numba.njit(cache=True)
 def clip_convex_polygon(
-    subject: list[tuple[float, float]],
-    clip: list[tuple[float, float]],
-) -> list[tuple[float, float]]:
+    subject: NumberArray[TwoDimensions],
+    clip: NumberArray[TwoDimensions],
+) -> NumberArray[TwoDimensions]:
     """
     Intersect two convex 2-D polygons (Sutherland-Hodgman clipping).
 
-    :param subject: Polygon to clip, vertices counter-clockwise.
-    :param clip: Convex clipping polygon, vertices counter-clockwise.
-    :returns: Vertices of the intersection, empty if the polygons do not overlap.
+    :param subject: Shape `(n, 2)` polygon to clip, vertices counter-clockwise.
+    :param clip: Shape `(m, 2)` convex clipping polygon, vertices counter-clockwise.
+    :returns: Vertices of the intersection, with zero rows if the polygons do not overlap.
     """
-    output = list(subject)
-    for index in range(len(clip)):
+    output = subject
+    n_edges = clip.shape[0]
+    for index in range(n_edges):
         output = clip_half_plane(
-            output, clip[index], clip[(index + 1) % len(clip)], keep_inside=True
+            polygon=output,
+            a=clip[index],
+            b=clip[(index + 1) % n_edges],
+            keep_inside=True,
         )
-        if not output:
+        if output.shape[0] == 0:
             break
     return output
 
 
 def subtract_convex_polygon(
-    subject: list[tuple[float, float]],
-    clip: list[tuple[float, float]],
-) -> list[list[tuple[float, float]]]:
+    subject: NumberArray[TwoDimensions],
+    clip: NumberArray[TwoDimensions],
+) -> list[NumberArray[TwoDimensions]]:
     """
-    Remove a convex polygon from a 2-D polygon.
+    Remove a convex polygon from a convex 2-D polygon.
 
-    :param subject: Polygon to cut, vertices counter-clockwise.
-    :param clip: Convex polygon to remove, vertices counter-clockwise.
+    :param subject: Shape `(n, 2)` polygon to cut, vertices counter-clockwise.
+    :param clip: Shape `(m, 2)` convex polygon to remove, vertices counter-clockwise.
     :returns: Disjoint pieces of `subject` that lie outside `clip`.
     """
-    pieces: list[list[tuple[float, float]]] = []
-    remaining = list(subject)
-    for index in range(len(clip)):
+    pieces: list[NumberArray[TwoDimensions]] = []
+    remaining = subject
+    n_edges = clip.shape[0]
+    for index in range(n_edges):
         a = clip[index]
-        b = clip[(index + 1) % len(clip)]
-        outside = clip_half_plane(remaining, a, b, keep_inside=False)
-        if len(outside) >= 3:
+        b = clip[(index + 1) % n_edges]
+        outside = clip_half_plane(polygon=remaining, a=a, b=b, keep_inside=False)
+        if outside.shape[0] >= 3:
             pieces.append(outside)
-        remaining = clip_half_plane(remaining, a, b, keep_inside=True)
-        if len(remaining) < 3:
+        remaining = clip_half_plane(polygon=remaining, a=a, b=b, keep_inside=True)
+        if remaining.shape[0] < 3:
             break
     return pieces
 
@@ -651,13 +605,13 @@ def subtract_convex_polygon(
 def connect_unmatched_faces(
     *,
     face_registry: dict[FaceKey, FaceRecord],
-    face_local_index: dict[FaceKey, int],
-    degenerate_faces: list[tuple[int, int]],
-    pinched_cells: set[int],
-    active_mask: npt.NDArray[np.bool_],
+    face_local_index: dict[FaceKey, Integer],
+    degenerate_faces: list[tuple[Integer, Integer]],
+    pinched_cells: set[Integer],
+    active_mask: BooleanArray[OneDimension],
     corner_coordinates: NumberArray[ThreeDimensions],
     coord: CoordArray,
-    dimensions: tuple[int, int, int],
+    dimensions: tuple[Integer, Integer, Integer],
     vertex_coordinates: VertexCoordinates,
 ) -> VertexCoordinates:
     """
@@ -715,7 +669,9 @@ def connect_unmatched_faces(
         if float(np.dot(normal, face_center - cell_centers[owner])) < 0.0:
             points = points[::-1]
 
-        indices = list(range(next_vertex, next_vertex + len(points)))
+        indices = typing.cast(
+            FaceVertexIndices, list(range(next_vertex, next_vertex + len(points)))
+        )
         next_vertex += len(points)
         new_points.extend(points)
         record = FaceRecord(owner_cell_index=owner, face_vertex_indices=indices)
@@ -727,39 +683,49 @@ def connect_unmatched_faces(
         (5, 4, (1, 3, 5, 7), (0, 2, 4, 6), (0, 1), (1, 1)),
         (3, 2, (2, 3, 6, 7), (0, 1, 4, 5), (1, 0), (1, 1)),
     )
-    covers: dict[tuple[Integer, Integer], list[list[tuple[float, float]]]] = {}
+    covers: dict[tuple[Integer, Integer], list[NumberArray[TwoDimensions]]] = {}
     face_geometry: dict[
         tuple[Integer, Integer],
-        tuple[list[tuple[float, float]], NumberArray[OneDimension], NumberArray[OneDimension]],
+        tuple[NumberArray[TwoDimensions], NumberArray[OneDimension], NumberArray[OneDimension]],
     ] = {}
 
-    def lateral_polygon(cell: Integer, corners: tuple[Integer, ...]) -> list[tuple[float, float]]:
+    def lateral_polygon(cell: Integer, corners: tuple[Integer, ...]) -> NumberArray[TwoDimensions]:
         z = corner_coordinates[cell, :, 2]
-        polygon = [
-            (0.0, z[corners[0]]),
-            (1.0, z[corners[1]]),
-            (1.0, z[corners[3]]),
-            (0.0, z[corners[2]]),
-        ]
-        if polygon_signed_area(polygon) < 0.0:
-            polygon.reverse()
-        return polygon
+        polygon = typing.cast(
+            NumberArray[TwoDimensions],
+            np.array(
+                [
+                    (0.0, z[corners[0]]),
+                    (1.0, z[corners[1]]),
+                    (1.0, z[corners[3]]),
+                    (0.0, z[corners[2]]),
+                ],
+                dtype=np.float64,
+            ),
+        )
+        if compute_polygon_signed_area(polygon) < 0.0:
+            polygon = polygon[::-1].copy()
+        return typing.cast(VertexCoordinates, polygon)
 
     for plus_local, minus_local, a_corners, b_corners, offset_1, offset_2 in directions:
         step_i, step_j = (1, 0) if plus_local == 5 else (0, 1)
-        for (cell_a, local_index), key_a in list(unmatched.items()):
+        for cell_a, local_index in list(unmatched):
             if local_index != plus_local:
                 continue
 
-            _k_a, rest = divmod(cell_a, layer_size)
+            _k_a, rest = divmod(cell_a, layer_size)  # type: ignore[arg-type]
             j_a, i_a = divmod(rest, nx)
             if i_a + step_i >= nx or j_a + step_j >= ny:
                 continue
 
-            pillar_1 = coord[j_a + offset_1[0], i_a + offset_1[1]]
-            pillar_2 = coord[j_a + offset_2[0], i_a + offset_2[1]]
+            pillar_1 = typing.cast(
+                NumberArray[OneDimension], coord[j_a + offset_1[0], i_a + offset_1[1]]
+            )
+            pillar_2 = typing.cast(
+                NumberArray[OneDimension], coord[j_a + offset_2[0], i_a + offset_2[1]]
+            )
             polygon_a = lateral_polygon(cell_a, a_corners)
-            area_a = abs(polygon_signed_area(polygon_a))
+            area_a = abs(compute_polygon_signed_area(polygon_a))
             if area_a <= 0.0:
                 continue
             face_geometry[cell_a, plus_local] = (polygon_a, pillar_1, pillar_2)
@@ -769,11 +735,12 @@ def connect_unmatched_faces(
                 if (cell_b, minus_local) not in unmatched:
                     continue
                 polygon_b = lateral_polygon(cell_b, b_corners)
-                area_b = abs(polygon_signed_area(polygon_b))
+                area_b = abs(compute_polygon_signed_area(polygon_b))
                 if area_b <= 0.0:
                     continue
+
                 overlap = clip_convex_polygon(polygon_a, polygon_b)
-                if len(overlap) < 3 or abs(polygon_signed_area(overlap)) <= (
+                if overlap.shape[0] < 3 or abs(compute_polygon_signed_area(overlap)) <= (
                     MINIMUM_RELATIVE_OVERLAP_AREA * min(area_a, area_b)
                 ):
                     continue
@@ -781,7 +748,7 @@ def connect_unmatched_faces(
                 face_geometry[cell_b, minus_local] = (polygon_b, pillar_1, pillar_2)
                 add_face(
                     [
-                        _point_on_pillar_pair(pillar_1, pillar_2, s_value, z_value)
+                        _get_point_on_pillar_pair(pillar_1, pillar_2, s_value, z_value)
                         for s_value, z_value in overlap
                     ],
                     owner=cell_a,
@@ -792,15 +759,15 @@ def connect_unmatched_faces(
 
     for (cell, local_index), overlaps in covers.items():
         polygon, pillar_1, pillar_2 = face_geometry[cell, local_index]
-        full_area = abs(polygon_signed_area(polygon))
+        full_area = abs(compute_polygon_signed_area(polygon))
         pieces = [polygon]
         for overlap in overlaps:
             pieces = [rest for piece in pieces for rest in subtract_convex_polygon(piece, overlap)]
         for piece in pieces:
-            if abs(polygon_signed_area(piece)) > MINIMUM_RELATIVE_OVERLAP_AREA * full_area:
+            if abs(compute_polygon_signed_area(piece)) > MINIMUM_RELATIVE_OVERLAP_AREA * full_area:
                 add_face(
                     [
-                        _point_on_pillar_pair(pillar_1, pillar_2, s_value, z_value)
+                        _get_point_on_pillar_pair(pillar_1, pillar_2, s_value, z_value)
                         for s_value, z_value in piece
                     ],
                     owner=cell,
@@ -810,7 +777,7 @@ def connect_unmatched_faces(
         if key is not None:
             replaced.add(key)
 
-    used_tops: set[int] = set()
+    used_tops: set[Integer] = set()
     for (cell_a, local_index), key_a in list(unmatched.items()):
         if local_index != BOTTOM_FACE_LOCAL:
             continue
@@ -850,14 +817,18 @@ def connect_unmatched_faces(
         face_registry.pop(key, None)
     if not new_points:
         return vertex_coordinates
-    return np.vstack([vertex_coordinates, np.asarray(new_points, dtype=np.float64)])
+    return typing.cast(
+        VertexCoordinates,
+        np.vstack([vertex_coordinates, np.asarray(new_points, dtype=np.float64)]),
+    )
 
 
-def _point_on_pillar_pair(
+@numba.njit(cache=True)
+def _get_point_on_pillar_pair(
     pillar_1: NumberArray[OneDimension],
     pillar_2: NumberArray[OneDimension],
-    s_value: float,
-    z_value: float,
+    s_value: Number,
+    z_value: Number,
 ) -> NumberArray[OneDimension]:
     """
     Point at fractional position `s_value` between two pillars, at depth `z_value`.
@@ -868,9 +839,9 @@ def _point_on_pillar_pair(
     :param z_value: Depth of the point.
     :returns: Shape `(3,)` coordinates.
     """
-    p1 = _interpolate_pillar_point(pillar_1[:3], pillar_1[3:], z_value)
-    p2 = _interpolate_pillar_point(pillar_2[:3], pillar_2[3:], z_value)
-    return p1 + s_value * (p2 - p1)
+    p1 = _interpolate_pillar_point(pillar_1[:3], pillar_1[3:], z_value)  # type: ignore[arg-type]
+    p2 = _interpolate_pillar_point(pillar_2[:3], pillar_2[3:], z_value)  # type: ignore[arg-type]
+    return p1 + s_value * (p2 - p1)  # type: ignore[return-value]
 
 
 def compute_corner_point_geometry(
@@ -884,10 +855,8 @@ def compute_corner_point_geometry(
     IntArray[OneDimension],
     IntArray[OneDimension],
     IntArray[TwoDimensions],
-    npt.NDArray[np.int8],
-    npt.NDArray[np.int32] | None,
-    npt.NDArray[np.int8],
-    npt.NDArray[np.int8],
+    IntArray[OneDimension],
+    IntArray[OneDimension],
     NumberArray[OneDimension],
     NumberArray[TwoDimensions],
 ]:
@@ -900,8 +869,8 @@ def compute_corner_point_geometry(
     :param vertex_tolerance: Vertex merge distance.
     :param pinch_tolerance: Average thickness threshold for pinch detection.
     :returns: 10-tuple `(vertex_coordinates, face_vertex_indices,
-        face_vertex_offsets, face_cell_indices, face_connection_types, geometric_nnc_pairs,
-        geometric_nnc_connection_types, cell_statuses, cell_volumes, cell_centroids)`. Cells are
+        face_vertex_offsets, face_cell_indices, face_connection_types, cell_statuses,
+        cell_volumes, cell_centroids)`. Cells are
         numbered by their full-grid flat index `i + j * nx + k * nx * ny`. Inactive cells
         keep their index, have status `INACTIVE`, zero volume and no faces.
     :raises InvalidGridError: If no active cells are found.
@@ -924,22 +893,20 @@ def compute_corner_point_geometry(
     _, unique_indices, inverse = np.unique(
         quantized, axis=0, return_index=True, return_inverse=True
     )
-    vertex_coordinates = flat_corners[unique_indices]
+    vertex_coordinates = typing.cast(VertexCoordinates, flat_corners[unique_indices])
     n_cells = len(all_cells)
     corner_global = inverse.reshape(n_cells, 8)
 
     vtk_to_corner = [0, 1, 3, 2, 4, 5, 7, 6]
 
     face_registry: dict[FaceKey, FaceRecord] = {}
-    nnc_pairs: list[tuple[Integer, Integer]] = []
-    nnc_pair_types: list[int] = []
-    nnc_face_keys: set[FaceKey] = set()
+    n_ignored_third_claims = 0
 
     n_pinched = 0
     n_degenerate = 0
-    face_local_index: dict[FaceKey, int] = {}
-    degenerate_faces: list[tuple[int, int]] = []
-    pinched_cells: set[int] = set()
+    face_local_index: dict[FaceKey, Integer] = {}
+    degenerate_faces: list[tuple[Integer, Integer]] = []
+    pinched_cells: set[Integer] = set()
 
     for cell_idx in np.flatnonzero(active_mask):
         vtk_vertices = [corner_global[cell_idx, vtk_to_corner[v]] for v in range(8)]
@@ -974,10 +941,7 @@ def compute_corner_point_geometry(
             elif face_registry[key].neighbour_cell_index == -1:
                 face_registry[key].neighbour_cell_index = cell_idx
             else:
-                existing = face_registry[key]
-                nnc_pairs.append((existing.owner_cell_index, cell_idx))
-                nnc_pair_types.append(int(ConnectionType.PINCHOUT_NNC))
-                nnc_face_keys.add(key)
+                n_ignored_third_claims += 1
 
     nz_cells, ny_cells, nx_cells = actnum.shape
     vertex_coordinates = connect_unmatched_faces(
@@ -993,13 +957,10 @@ def compute_corner_point_geometry(
     )
 
     if n_pinched > 0:
-        n_pinchout_nncs = sum(
-            1 for typ in nnc_pair_types if typ == int(ConnectionType.PINCHOUT_NNC)
-        )
         warnings.warn(
             f"{n_pinched} pinched-out cell(s) detected "
             f"(pinch_tolerance={pinch_tolerance:.3g}). "
-            f"{n_pinchout_nncs} PINCHOUT NNC pair(s) recorded.",
+            f"{n_ignored_third_claims} face(s) claimed by a third cell were ignored.",
             stacklevel=4,
         )
 
@@ -1018,12 +979,6 @@ def compute_corner_point_geometry(
         else:
             face_connection_types.append(int(ConnectionType.INTERIOR_FACE))
 
-    nnc_array: npt.NDArray[np.int32] | None = None
-    nnc_connection_types_array: npt.NDArray[np.int8] = np.empty(0, dtype=np.int8)
-    if nnc_pairs:
-        nnc_array = np.asarray(nnc_pairs, dtype=np.int32).reshape(-1, 2)
-        nnc_connection_types_array = np.asarray(nnc_pair_types, dtype=np.int8)
-
     vtk_corner_indices = np.empty((n_cells, 8), dtype=np.int32)
     for cell_idx in range(n_cells):
         for vertex in range(8):
@@ -1033,18 +988,17 @@ def compute_corner_point_geometry(
         vtk_corner_indices=vtk_corner_indices,
         vertex_coordinates=vertex_coordinates,  # type: ignore[arg-type]
     )
-    cell_volumes = np.where(active_mask, cell_volumes, 0.0)
-    cell_statuses = np.where(active_mask, int(CellStatus.ACTIVE), int(CellStatus.INACTIVE)).astype(
-        np.int8
+    cell_volumes = typing.cast(NumberArray[OneDimension], np.where(active_mask, cell_volumes, 0.0))
+    cell_statuses = typing.cast(
+        IntArray[OneDimension],
+        np.where(active_mask, int(CellStatus.ACTIVE), int(CellStatus.INACTIVE)).astype(np.int8),
     )
-    return (  # type: ignore[return-value]
+    return (
         vertex_coordinates,
-        np.asarray(flat_face_vertex_indices, dtype=np.int32),
-        np.asarray(face_vertex_offsets, dtype=np.int32),
-        np.asarray(face_cell_pairs, dtype=np.int32),
-        np.asarray(face_connection_types, dtype=np.int8),
-        nnc_array,
-        nnc_connection_types_array,
+        typing.cast(IntArray[OneDimension], np.asarray(flat_face_vertex_indices, dtype=np.int32)),
+        typing.cast(IntArray[OneDimension], np.asarray(face_vertex_offsets, dtype=np.int32)),
+        typing.cast(IntArray[TwoDimensions], np.asarray(face_cell_pairs, dtype=np.int32)),
+        typing.cast(IntArray[OneDimension], np.asarray(face_connection_types, dtype=np.int8)),
         cell_statuses,
         cell_volumes,
         cell_centroids,
@@ -1056,23 +1010,21 @@ def resolve_fault_face_indices(
     dimensions: tuple[Integer, Integer, Integer],
     actnum: ActNumArray,
     face_cell_indices: IntArray[TwoDimensions],
-) -> tuple[
-    dict[str, IntArray[OneDimension]],
-    list[tuple[int, int, str]],
-]:
+) -> dict[str, IntArray[OneDimension]]:
     """
     Resolve `FaultRecord` IJK ranges to unstructured face index arrays.
 
-    Cell pairs in the fault range that have no shared geometric face are returned
-    as NNC pairs of type `FAULT` instead of being silently skipped.
+    For `X` and `Y` records every face between a cell and the cells of the adjacent column
+    is part of the fault, since an offset fault faces several cells across it. Cell pairs that
+    share no geometric face are not connected and are skipped.
 
     :param fault_records: Sequence of `FaultRecord` objects.
     :param dimensions: Grid extents `(nx, ny, nz)`.
     :param actnum: Shape `(nz, ny, nx)` activation mask.
     :param face_cell_indices: Shape `(n_faces, 2)`.
-    :returns: Tuple `(fault_face_index_dict, fault_nnc_pairs)`.
+    :returns: Mapping from fault name to the indices of its faces.
     """
-    nx, ny, _ = dimensions
+    nx, ny, nz = dimensions
     kji_to_cell: dict[tuple[int, int, int], int] = {}
     for k, j, i in np.argwhere(actnum > 0):
         kji_to_cell[int(k), int(j), int(i)] = int(i) + int(j) * nx + int(k) * nx * ny
@@ -1082,8 +1034,7 @@ def resolve_fault_face_indices(
         if owner >= 0 and neighbour >= 0:
             cell_pair_to_face[frozenset((int(owner), int(neighbour)))] = face_idx
 
-    result: dict[str, list[int]] = {}
-    fault_nnc_pairs: list[tuple[int, int, str]] = []
+    result: dict[str, list[Integer]] = {}
 
     for record in fault_records:
         face_direction = record.face_direction.upper()
@@ -1104,25 +1055,30 @@ def resolve_fault_face_indices(
         else:
             di, dj, dk = 0, 0, step
 
-        face_indices: list[int] = []
+        face_indices: list[Integer] = []
         n_inactive = 0
 
         for k in range(record.k1 - 1, record.k2):
             for j in range(record.j1 - 1, record.j2):
                 for i in range(record.i1 - 1, record.i2):
                     cell_a = kji_to_cell.get((k, j, i))
-                    cell_b = kji_to_cell.get((k + dk, j + dj, i + di))
-
-                    if cell_a is None or cell_b is None:
+                    if cell_a is None:
                         n_inactive += 1
                         continue
 
-                    face_idx = cell_pair_to_face.get(frozenset((cell_a, cell_b)))
-                    if face_idx is not None:
-                        face_indices.append(face_idx)
-                    else:
-                        # No shared geometric face -> record as fault NNC
-                        fault_nnc_pairs.append((cell_a, cell_b, record.name))
+                    lateral = di != 0 or dj != 0
+                    neighbour_ks = range(nz) if lateral else (k + dk,)
+                    found_neighbour = False
+                    for neighbour_k in neighbour_ks:
+                        cell_b = kji_to_cell.get((neighbour_k, j + dj, i + di))
+                        if cell_b is None:
+                            continue
+                        found_neighbour = True
+                        face_idx = cell_pair_to_face.get(frozenset((cell_a, cell_b)))
+                        if face_idx is not None:
+                            face_indices.append(face_idx)
+                    if not found_neighbour:
+                        n_inactive += 1
 
         if n_inactive > 0:
             warnings.warn(
@@ -1138,10 +1094,10 @@ def resolve_fault_face_indices(
             else:
                 result[record.name] = face_indices
 
-    return (  # type: ignore[return-value]
-        {name: np.unique(np.asarray(idxs, dtype=np.int32)) for name, idxs in result.items()},
-        fault_nnc_pairs,
-    )
+    return {
+        name: typing.cast(IntArray[OneDimension], np.unique(np.asarray(idxs, dtype=np.int32)))
+        for name, idxs in result.items()
+    }
 
 
 @numba.njit(cache=True)

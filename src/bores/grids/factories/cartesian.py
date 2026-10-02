@@ -59,8 +59,7 @@ def make_cartesian_grid(
     Cell counts `nx`, `ny`, `nz` may be inferred from array-valued spacing.
 
     Fault records whose IJK range resolves to cell pairs sharing no geometric
-    face (e.g. boundary cells) are recorded as NNCs of type `FAULT` rather
-    than silently dropped.
+    face (e.g. boundary cells) are skipped.
 
     :param nx: Number of cells in x.
     :param ny: Number of cells in y.
@@ -96,12 +95,19 @@ def make_cartesian_grid(
     :param positive_z_transmissibility_multipliers: Per-cell MULTZ.
     :param negative_z_transmissibility_multipliers: Per-cell MULTZ-.
     :param nnc_cell_indices: Shape `(n_nnc, 2)` user-declared NNC pairs.
-    :param nnc_transmissibilities: Shape `(n_nnc,)` user-declared NNC T.
+    :param nnc_transmissibilities: Shape `(n_nnc,)` flow transmissibility of each NNC pair.
+        Required with `nnc_cell_indices`.
     :returns: Fully initialised `Grid`.
     :raises ValidationError: If spacing or NNC arrays are inconsistent.
     """
     if nnc_transmissibilities is not None and nnc_cell_indices is None:
         raise ValidationError("`nnc_transmissibilities` was given without `nnc_cell_indices`.")
+    if (
+        nnc_cell_indices is not None
+        and len(nnc_cell_indices) > 0
+        and nnc_transmissibilities is None
+    ):
+        raise ValidationError("`nnc_cell_indices` was given without `nnc_transmissibilities`.")
     if nnc_cell_indices is not None and nnc_transmissibilities is not None:
         if len(nnc_cell_indices) != len(nnc_transmissibilities):
             raise ValidationError(
@@ -150,9 +156,8 @@ def make_cartesian_grid(
     ).astype(np.int8)
 
     fault_face_indices: dict[str, IntArray[OneDimension]] | None = None
-    fault_nnc_pairs: list[tuple[int, int, str]] = []
     if fault_records:
-        fault_face_indices, fault_nnc_pairs = resolve_fault_face_indices(
+        fault_face_indices = resolve_fault_face_indices(
             fault_records=fault_records,
             nx=nx,
             ny=ny,
@@ -170,71 +175,16 @@ def make_cartesian_grid(
             face_connection_types[interior_fault_faces] = int(ConnectionType.INTERIOR_FAULT_FACE)
             face_connection_types[boundary_fault_faces] = int(ConnectionType.BOUNDARY_FAULT_FACE)
 
-    # Merge all NNC sources: [fault NNCs] + [user NNCs]
-    all_nnc_parts: list[
-        tuple[
-            npt.NDArray[np.int32],
-            npt.NDArray[np.int8],
-            npt.NDArray[np.float64],
-        ]
-    ] = []
-
-    fault_nnc_indices: dict[str, list[int]] = {}
-    if fault_nnc_pairs:
-        fault_pairs = np.asarray([(a, b) for a, b, _ in fault_nnc_pairs], dtype=np.int32).reshape(
-            -1, 2
-        )
-        fault_nnc_connection_types = np.full(
-            len(fault_nnc_pairs), int(ConnectionType.FAULT_NNC), dtype=np.int8
-        )
-        fault_nnc_transmissibilities = np.full(len(fault_nnc_pairs), np.nan, dtype=np.float64)
-        all_nnc_parts.append((
-            fault_pairs,
-            fault_nnc_connection_types,
-            fault_nnc_transmissibilities,
-        ))
-        fault_nnc_offset = sum(len(p) for p, _, _ in all_nnc_parts[:-1])
-        for local_idx, (_, _, name) in enumerate(fault_nnc_pairs):
-            fault_nnc_indices.setdefault(name, []).append(fault_nnc_offset + local_idx)
-
-    if nnc_cell_indices is not None and len(nnc_cell_indices) > 0:
-        user_nnc_pairs = np.asarray(nnc_cell_indices, dtype=np.int32)
-        user_nnc_connection_types = np.full(
-            len(user_nnc_pairs), int(ConnectionType.USER_NNC), dtype=np.int8
-        )
-        user_nnc_transmissibilities = (
-            np.asarray(nnc_transmissibilities, dtype=np.float64)
-            if nnc_transmissibilities is not None
-            else np.full(len(user_nnc_pairs), np.nan, dtype=np.float64)
-        )
-        all_nnc_parts.append((
-            user_nnc_pairs,
-            user_nnc_connection_types,
-            user_nnc_transmissibilities,
-        ))
-
-    merged_nnc_pairs: npt.NDArray[np.int32] | None = None
-    merged_nnc_connection_types: npt.NDArray[np.int8] | None = None
-    merged_nnc_transmissibilities: npt.NDArray[np.float64] | None = None
-    merged_nnc_fault_indices: dict[str, IntArray[OneDimension]] | None = None
-
-    if all_nnc_parts:
-        merged_nnc_pairs = np.vstack([p for p, _, _ in all_nnc_parts]).astype(np.int32)
-        merged_nnc_connection_types = np.concatenate([t for _, t, _ in all_nnc_parts]).astype(
-            np.int8, copy=False
-        )
-        merged_transmissibilities = np.concatenate([t for _, _, t in all_nnc_parts])
-        merged_nnc_transmissibilities = (
-            merged_transmissibilities if np.any(np.isfinite(merged_transmissibilities)) else None
-        )
-        if fault_nnc_pairs:
-            merged_nnc_fault_indices = typing.cast(
-                dict[str, IntArray[OneDimension]],
-                {
-                    name: np.asarray(idxs, dtype=np.int32)
-                    for name, idxs in fault_nnc_indices.items()
-                },
-            )
+    nnc_pairs = (
+        np.asarray(nnc_cell_indices, dtype=np.int32).reshape(-1, 2)
+        if nnc_cell_indices is not None and len(nnc_cell_indices) > 0
+        else None
+    )
+    nnc_flow_transmissibilities = (
+        np.asarray(nnc_transmissibilities, dtype=np.float64)
+        if nnc_pairs is not None and nnc_transmissibilities is not None
+        else None
+    )
 
     return Grid(
         vertex_coordinates=vertex_coordinates.astype(np.float64, copy=False),
@@ -245,10 +195,8 @@ def make_cartesian_grid(
         dimensions=GridDimensions(nx, ny, nz),
         metadata=metadata,
         face_connection_types=face_connection_types,  # type: ignore[arg-type]
-        nnc_cell_indices=merged_nnc_pairs,  # type: ignore[arg-type]
-        nnc_connection_types=merged_nnc_connection_types,  # type: ignore[arg-type]
-        nnc_transmissibilities=merged_nnc_transmissibilities,  # type: ignore[arg-type]
-        nnc_fault_indices=merged_nnc_fault_indices,
+        nnc_cell_indices=nnc_pairs,  # type: ignore[arg-type]
+        nnc_transmissibilities=nnc_flow_transmissibilities,  # type: ignore[arg-type]
         fault_face_indices=fault_face_indices,
         fault_transmissibility_multipliers=(
             dict(fault_transmissibility_multipliers)
@@ -271,10 +219,7 @@ def resolve_fault_face_indices(
     nz: Integer,
     n_x_faces: Integer,
     n_y_faces: Integer,
-) -> tuple[
-    dict[str, IntArray[OneDimension]],
-    list[tuple[int, int, str]],
-]:
+) -> dict[str, IntArray[OneDimension]]:
     """
     Resolve `FaultRecord` IJK ranges to Cartesian face index arrays.
 
@@ -290,7 +235,6 @@ def resolve_fault_face_indices(
     `X`, `Y` and `Z` select the face on the positive side of each cell in the
     record's range; `X-`, `Y-` and `Z-` select the face on its negative side.
     Faces on the outer edge of the grid have no neighbour and are skipped.
-    The returned fault NNC list is always empty for a Cartesian grid.
 
     :param fault_records: Sequence of `FaultRecord`.
     :param nx: Grid dimension x.
@@ -298,10 +242,9 @@ def resolve_fault_face_indices(
     :param nz: Grid dimension z.
     :param n_x_faces: Total X-normal face count.
     :param n_y_faces: Total Y-normal face count.
-    :returns: Tuple `(fault_face_dict, fault_nnc_pairs)`.
+    :returns: Mapping from fault name to the indices of its faces.
     """
     result: dict[str, list[int]] = {}
-    fault_nnc_pairs: list[tuple[int, int, str]] = []
 
     for record in fault_records:
         face_dir = record.face_direction.upper()
@@ -347,10 +290,10 @@ def resolve_fault_face_indices(
             else:
                 result[record.name] = face_indices
 
-    return (  # type: ignore[return-value]
-        {name: np.unique(np.asarray(idxs, dtype=np.int32)) for name, idxs in result.items()},
-        fault_nnc_pairs,
-    )
+    return {
+        name: typing.cast(IntArray[OneDimension], np.unique(np.asarray(idxs, dtype=np.int32)))
+        for name, idxs in result.items()
+    }
 
 
 def resolve_spacing(
