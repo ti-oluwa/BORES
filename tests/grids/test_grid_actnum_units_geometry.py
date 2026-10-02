@@ -4,12 +4,10 @@ import numpy as np
 import pytest
 
 from bores.errors import InvalidFaceConnectivityError, ValidationError
-from bores.grids import Grid
 from bores.grids.factories.cartesian import make_cartesian_grid
 from bores.grids.factories.corner_point import make_corner_point_grid
 from bores.grids.factories.polyhedral import make_polyhedral_grid
-from bores.grids.io.grdecl import build_grdecl_text, load_grdecl
-from bores.grids.io.grdecl import GridImportError
+from bores.grids.io.grdecl import GridImportError, build_grdecl_text, load_grdecl
 from bores.types import UnitSystem
 
 warnings.simplefilter("ignore")
@@ -49,7 +47,10 @@ def test_user_nnc_on_inactive_cell_is_dropped():
     actnum = np.ones((2, 2, 3), dtype=np.int32)
     actnum[0, 0, 0] = 0
     grid = corner_point(
-        3, 2, 2, actnum,
+        3,
+        2,
+        2,
+        actnum,
         nnc_cell_indices=np.array([[0, 11], [1, 11]]),
         nnc_transmissibilities=np.array([1.0, 2.0]),
     )
@@ -59,7 +60,10 @@ def test_user_nnc_on_inactive_cell_is_dropped():
 def test_face_centroid_is_area_weighted():
     # Trapezoid in the z=0 plane with parallel sides 4 and 1 (height 3); the area-weighted
     # centroid sits at y = 3 * (4 + 2 * 1) / (3 * (4 + 1)) = 1.2, not at the vertex mean 1.5.
-    points = np.array([[0, 0, 0], [4, 0, 0], [3, 3, 0], [2, 3, 0], [0, 0, 1], [4, 0, 1], [3, 3, 1], [2, 3, 1]], float)
+    points = np.array(
+        [[0, 0, 0], [4, 0, 0], [3, 3, 0], [2, 3, 0], [0, 0, 1], [4, 0, 1], [3, 3, 1], [2, 3, 1]],
+        float,
+    )
     grid = make_polyhedral_grid(
         vertex_coordinates=points,
         cell_blocks=[{"cell_type": "hexahedron", "connectivity": [list(range(8))]}],
@@ -90,15 +94,29 @@ def test_convert_scales_explicit_nnc_flow_transmissibility(target, eclipse_darcy
     from bores.constants import get_conversion_factors
 
     grid = make_cartesian_grid(
-        nx=4, ny=3, nz=2, dx=10.0, dy=10.0, dz=1.0,
+        nx=4,
+        ny=3,
+        nz=2,
+        dx=10.0,
+        dy=10.0,
+        dz=1.0,
         nnc_cell_indices=np.array([[0, 23], [1, 22]]),
         nnc_transmissibilities=np.array([5.0, np.nan]),
     )
     converted = grid.convert(target)
     factors = get_conversion_factors(UnitSystem.FIELD, target)
-    # T_eclipse = darcy_constant * perm * length, so the ratio between systems follows from it.
-    expected = (eclipse_darcy_constant / 0.00112712) * factors["permeability"] * factors["length"]
-    assert converted.nnc_transmissibilities[0] == pytest.approx(5.0 * expected, rel=1e-4)
+    # A deck value d in FIELD is d rb-based; internally it is d * 5.614583 (ft3-based). The
+    # equivalent deck value in the target system follows from T_eclipse = constant * perm * length.
+    from bores.constants import c
+
+    deck_value = 5.0 / c.BARRELS_TO_CUBIC_FEET
+    expected = (
+        deck_value
+        * (eclipse_darcy_constant / 0.00112712)
+        * factors["permeability"]
+        * factors["length"]
+    )
+    assert converted.nnc_transmissibilities[0] == pytest.approx(expected, rel=1e-4)
     assert np.isnan(converted.nnc_transmissibilities[1])
 
 
@@ -134,18 +152,26 @@ def test_uniform_deck_stays_a_cartesian_grid(tmp_path):
 def test_dipping_tops_and_varying_dz_are_kept_and_connected(tmp_path):
     tops = [2000 + 5 * i + 3 * j for j in range(NY) for i in range(NX)]
     dz = [1 + 0.2 * i + 0.1 * k for k in range(NZ) for j in range(NY) for i in range(NX)]
-    grid = load_grdecl(write_deck(tmp_path, cartesian_deck(dz=dz, tops=tops)), unit_system=UnitSystem.FIELD)
+    grid = load_grdecl(
+        write_deck(tmp_path, cartesian_deck(dz=dz, tops=tops)), unit_system=UnitSystem.FIELD
+    )
     expected_interior = (NX - 1) * NY * NZ + NX * (NY - 1) * NZ + NX * NY * (NZ - 1)
     assert len(grid.interior_face_indices) == expected_interior
     assert grid.cell_volumes.sum() == pytest.approx(sum(dz) * 10 * 12, rel=0.02)
-    assert grid.cell_center_depths.min() >= min(tops) and grid.cell_center_depths.max() <= max(tops) + sum(dz)
-    assert grid.cell_thickness.min() >= min(dz) - 1e-9 and grid.cell_thickness.max() <= max(dz) + 1e-9
+    assert grid.cell_center_depths.min() >= min(tops) and grid.cell_center_depths.max() <= max(
+        tops
+    ) + sum(dz)
+    assert (
+        grid.cell_thickness.min() >= min(dz) - 1e-9 and grid.cell_thickness.max() <= max(dz) + 1e-9
+    )
 
 
 def test_actnum_in_a_cartesian_deck_is_applied(tmp_path):
     actnum = [1] * N
     actnum[4] = 0
-    grid = load_grdecl(write_deck(tmp_path, cartesian_deck(actnum=actnum)), unit_system=UnitSystem.FIELD)
+    grid = load_grdecl(
+        write_deck(tmp_path, cartesian_deck(actnum=actnum)), unit_system=UnitSystem.FIELD
+    )
     assert grid.cell_statuses[grid.flat_index(0, 1, 0)] == 0
     assert grid.cell_statuses.sum() == N - 1
 
@@ -156,27 +182,38 @@ def test_dx_varying_across_rows_is_rejected(tmp_path):
         load_grdecl(write_deck(tmp_path, cartesian_deck(dx=dx)), unit_system=UnitSystem.FIELD)
 
 
-def test_deck_nnc_flow_transmissibility_is_kept_verbatim_and_round_trips(tmp_path):
+def test_deck_nnc_flow_transmissibility_is_rescaled_to_cubic_feet_and_round_trips(tmp_path):
     deck = cartesian_deck(extra="NNC\n1 1 1 4 3 3 0.5 /\n/\n")
     grid = load_grdecl(write_deck(tmp_path, deck), unit_system=UnitSystem.FIELD)
-    assert grid.nnc_transmissibilities[-1] == pytest.approx(0.5)
+    from bores.constants import c
+
+    assert grid.nnc_transmissibilities[-1] == pytest.approx(0.5 * c.BARRELS_TO_CUBIC_FEET)
     path = tmp_path / "out.grdecl"
     path.write_text(build_grdecl_text(grid))
     reloaded = load_grdecl(path, unit_system=UnitSystem.FIELD)
-    assert reloaded.nnc_transmissibilities[-1] == pytest.approx(0.5, rel=1e-5)
+    assert reloaded.nnc_transmissibilities[-1] == pytest.approx(
+        0.5 * c.BARRELS_TO_CUBIC_FEET, rel=1e-5
+    )
 
 
 def test_explicit_and_computed_nnc_are_reported_separately():
-    from bores.reservoir.transmissibility import compute_connection_transmissibilities
     import bores.reservoir.rock as rock_module
+    from bores.reservoir.transmissibility import compute_connection_transmissibilities
 
     n = 4 * 3 * 2
     grid = make_cartesian_grid(
-        nx=4, ny=3, nz=2, dx=10.0, dy=10.0, dz=1.0,
+        nx=4,
+        ny=3,
+        nz=2,
+        dx=10.0,
+        dy=10.0,
+        dz=1.0,
         nnc_cell_indices=np.array([[0, 23], [1, 22]]),
         nnc_transmissibilities=np.array([5.0, np.nan]),
     )
-    permeability_type = next(getattr(rock_module, name) for name in dir(rock_module) if "Permeab" in name)
+    permeability_type = next(
+        getattr(rock_module, name) for name in dir(rock_module) if "Permeab" in name
+    )
     ones = np.ones(n)
     rock = rock_module.Rock(
         porosity=ones * 0.2,
@@ -197,7 +234,9 @@ def test_export_round_trip_with_inactive_cells(tmp_path):
     actnum = [1] * N
     actnum[4] = actnum[20] = 0
     dz = [1 + 0.1 * k + 0.05 * i for k in range(NZ) for j in range(NY) for i in range(NX)]
-    grid = load_grdecl(write_deck(tmp_path, cartesian_deck(dz=dz, actnum=actnum)), unit_system=UnitSystem.FIELD)
+    grid = load_grdecl(
+        write_deck(tmp_path, cartesian_deck(dz=dz, actnum=actnum)), unit_system=UnitSystem.FIELD
+    )
     path = tmp_path / "out.grdecl"
     path.write_text(build_grdecl_text(grid))
     reloaded = load_grdecl(path, unit_system=UnitSystem.FIELD)
@@ -235,7 +274,9 @@ def test_boundary_transmissibility_uses_the_adjacent_cell_permeability():
     n = nx * ny * nz
     grid = make_cartesian_grid(nx=nx, ny=ny, nz=nz, dx=10.0, dy=10.0, dz=5.0)
     kx = np.arange(1, n + 1, dtype=float) * 10
-    permeability_type = next(getattr(rock_module, name) for name in dir(rock_module) if "Permeab" in name)
+    permeability_type = next(
+        getattr(rock_module, name) for name in dir(rock_module) if "Permeab" in name
+    )
     ones = np.ones(n)
     rock = rock_module.Rock(
         porosity=ones * 0.2,
@@ -251,6 +292,10 @@ def test_boundary_transmissibility_uses_the_adjacent_cell_permeability():
     assert transmissibilities.nnc is None
     for position, face in enumerate(grid.boundary_face_indices):
         cell = grid.face_cell_indices[face, 0]
-        distance = abs(np.dot(grid.face_centroids[face] - grid.cell_centroids[cell], grid.face_unit_normals[face]))
+        distance = abs(
+            np.dot(
+                grid.face_centroids[face] - grid.cell_centroids[cell], grid.face_unit_normals[face]
+            )
+        )
         expected = kx[cell] * grid.face_areas[face] / distance
         assert transmissibilities.boundary[position] == pytest.approx(expected)

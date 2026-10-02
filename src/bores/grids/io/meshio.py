@@ -9,7 +9,7 @@ converting each `meshio` cell block to a `{"cell_type": ..., "connectivity": ...
 `meshio` must be installed (`pip install meshio`).
 """
 
-import io
+import tempfile
 import typing
 from pathlib import Path
 
@@ -29,7 +29,7 @@ except ImportError as exc:
 
 
 from bores.errors import GridExportError, GridImportError
-from bores.grids.base import Grid
+from bores.grids.base import CellStatus, Grid
 from bores.grids.factories.polyhedral import make_polyhedral_grid
 from bores.types import PathOrStr, TextOrPath
 
@@ -98,14 +98,14 @@ def load_mesh(
     :param file_format: Explicit `meshio` format string (e.g.
         `"abaqus"`, `"medit"`). If `None`, `meshio` auto-detects
         from the file extension.
+    :param unit_system: Unit system the mesh coordinates are expressed in (default `FIELD`).
     :returns: A fully initialised `bores.grids.base.Grid`.
     :raises GridImportError: If the mesh cannot be read or contains no
         supported 3-D cells.
     :raises UnsupportedGridFormatError: If `meshio` is not installed or
         the format is not recognised.
     """
-    grid = _load(source, file_format=file_format, metadata=metadata)
-    return grid.convert(unit_system) if unit_system is not None else grid
+    return _load(source, file_format=file_format, metadata=metadata, unit_system=unit_system)
 
 
 @typing.overload
@@ -177,6 +177,7 @@ def _load(
     *,
     file_format: str | None = None,
     metadata: typing.Mapping[str, typing.Any] | None = None,
+    unit_system: UnitSystem | None = None,
 ) -> Grid:
     """
     Load any `meshio`-supported mesh and convert to a
@@ -195,11 +196,14 @@ def _load(
                 "(e.g. file_format='vtk' or 'vtu')."
             )
 
-        buffer = io.BytesIO(source)
-        try:
-            mesh = meshio.read(buffer, file_format=file_format)
-        except Exception as exc:
-            raise GridImportError(f"meshio failed to read bytes: {exc}") from exc
+        # `meshio` readers need a real path; they cannot read from an in-memory buffer.
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory) / f"grid.{file_format}"
+            temporary_path.write_bytes(source)
+            try:
+                mesh = meshio.read(str(temporary_path), file_format=file_format)
+            except Exception as exc:
+                raise GridImportError(f"meshio failed to read bytes: {exc}") from exc
     else:
         path = Path(source)  # type: ignore[arg-type]
         if not path.is_file():
@@ -209,11 +213,13 @@ def _load(
         except Exception as exc:
             raise GridImportError(f"meshio failed to read {path!r}: {exc}") from exc
 
-    return _mesh_to_grid(mesh, metadata=metadata)
+    return _mesh_to_grid(mesh, metadata=metadata, unit_system=unit_system)
 
 
 def _mesh_to_grid(
-    mesh: meshio.Mesh, metadata: typing.Mapping[str, typing.Any] | None = None
+    mesh: meshio.Mesh,
+    metadata: typing.Mapping[str, typing.Any] | None = None,
+    unit_system: UnitSystem | None = None,
 ) -> Grid:
     """
     Convert a `meshio.Mesh` object to a `bores.grids.base.Grid`.
@@ -222,6 +228,7 @@ def _mesh_to_grid(
     reduced to their linear counterparts by discarding mid-side nodes.
 
     :param mesh: A `meshio.Mesh` instance.
+    :param unit_system: Unit system the coordinates are expressed in (default `FIELD`).
     :returns: A fully initialised `bores.grids.base.Grid`.
     :raises GridImportError: If no supported 3-D cell blocks are found.
     """
@@ -259,6 +266,7 @@ def _mesh_to_grid(
             vertex_coordinates=points,  # type: ignore[arg-type]
             cell_blocks=cell_blocks,
             metadata=meta,
+            unit_system=unit_system if unit_system is not None else UnitSystem.FIELD,
         )
     except Exception as exc:
         raise GridImportError(f"Failed to build Grid from meshio cell blocks: {exc}") from exc
@@ -271,8 +279,8 @@ def _grid_to_mesh(grid: Grid, *, cell_data: dict[str, npt.NDArray] | None) -> ty
     Since `bores.grids.base.Grid` stores faces rather than cells
     directly, we reconstruct an approximate hexahedral cell mesh where each
     grid cell is represented by a single hex cell derived from its bounding
-    box.  This preserves cell count and approximate geometry for
-    visualisation purposes.
+    box.  Only active cells are exported; the `cell_index` cell field holds each exported
+    cell's index in the grid. This preserves approximate geometry for visualisation purposes.
 
     For grids produced by the Cartesian factory, the bounding-box hex will
     exactly match the original cell.  For Voronoi / polyhedral grids, the hex
@@ -283,16 +291,19 @@ def _grid_to_mesh(grid: Grid, *, cell_data: dict[str, npt.NDArray] | None) -> ty
     :returns: A `meshio.Mesh` instance.
     """
     n_cells = grid.n_cells
+    assert grid.cell_statuses is not None
+    exported_cells = np.flatnonzero(grid.cell_statuses == int(CellStatus.ACTIVE))
+    n_exported = len(exported_cells)
 
-    # Build 8 bounding-box vertices per cell: (n_cells * 8, 3)
+    # Build 8 bounding-box vertices per exported cell: (n_exported * 8, 3)
     vertices_per_cell = 8
-    all_vertices = np.empty((n_cells * vertices_per_cell, 3), dtype=np.float64)
-    connectivity = np.empty((n_cells, vertices_per_cell), dtype=np.int32)
+    all_vertices = np.empty((n_exported * vertices_per_cell, 3), dtype=np.float64)
+    connectivity = np.empty((n_exported, vertices_per_cell), dtype=np.int32)
 
-    for cell_idx in range(n_cells):
+    for position, cell_idx in enumerate(exported_cells):
         low = grid.cell_min_xyz[cell_idx]
         high = grid.cell_max_xyz[cell_idx]
-        base = cell_idx * vertices_per_cell
+        base = position * vertices_per_cell
         # VTK hex vertex order: bottom face CCW then top face CCW
         all_vertices[base + 0] = [low[0], low[1], low[2]]
         all_vertices[base + 1] = [high[0], low[1], low[2]]
@@ -302,7 +313,7 @@ def _grid_to_mesh(grid: Grid, *, cell_data: dict[str, npt.NDArray] | None) -> ty
         all_vertices[base + 5] = [high[0], low[1], high[2]]
         all_vertices[base + 6] = [high[0], high[1], high[2]]
         all_vertices[base + 7] = [low[0], high[1], high[2]]
-        connectivity[cell_idx] = np.arange(base, base + vertices_per_cell, dtype=np.int32)
+        connectivity[position] = np.arange(base, base + vertices_per_cell, dtype=np.int32)
 
     meshio_cell_data: dict[str, list[np.ndarray]] = {}
     if cell_data:
@@ -313,12 +324,13 @@ def _grid_to_mesh(grid: Grid, *, cell_data: dict[str, npt.NDArray] | None) -> ty
                     f"cell_data[{field_name!r}] has {array.shape[0]} entries "
                     f"but grid has {n_cells} cells."
                 )
-            meshio_cell_data[field_name] = [array]
+            meshio_cell_data[field_name] = [array[exported_cells]]
+    meshio_cell_data["cell_index"] = [exported_cells.astype(np.int64)]
 
     return meshio.Mesh(
         points=all_vertices,
         cells=[("hexahedron", connectivity)],
-        cell_data=meshio_cell_data if meshio_cell_data else {},  # type: ignore
+        cell_data=meshio_cell_data,  # type: ignore
     )
 
 
@@ -347,14 +359,14 @@ def _dump(
         raise GridExportError(f"Failed to convert grid to meshio.Mesh: {exc}") from exc
 
     if destination is None:
-        buf = io.BytesIO()
-        try:
-            meshio.write(buf, mesh, file_format=file_format)
-        except Exception as exc:
-            raise GridExportError(
-                f"meshio failed to write {file_format!r} to buffer: {exc}"
-            ) from exc
-        return buf.getvalue()
+        # meshio writers need a real path; they cannot write to an in-memory buffer.
+        with tempfile.TemporaryDirectory() as directory:
+            temporary_path = Path(directory) / f"grid.{file_format}"
+            try:
+                meshio.write(str(temporary_path), mesh, file_format=file_format)
+            except Exception as exc:
+                raise GridExportError(f"meshio failed to write {file_format!r}: {exc}") from exc
+            return temporary_path.read_bytes()
 
     path = Path(destination)
     try:

@@ -511,10 +511,11 @@ class Grid(
 
     nnc_transmissibilities: NumberArray[OneDimension] | None = attrs.field(default=None)
     """
-    Shape `(n_nnc,)` - explicitly supplied flow transmissibility of each NNC pair, exactly as
-    given in a deck's `NNC` keyword (cP.rb/day/psi in FIELD units). It already includes the
-    unit conversion constant, so it multiplies mobility and pressure difference directly.
-    `None` when not supplied; NaN entries mean no explicit value was given.
+    Shape `(n_nnc,)` - explicitly supplied flow transmissibility of each NNC pair: volumetric
+    rate x viscosity / pressure, in the grid's unit system (ft3.cP/day/psi in FIELD units).
+    It already includes the Darcy unit conversion constant, so it multiplies mobility and
+    pressure difference directly. `None` when not supplied; NaN entries mean no explicit value
+    was given.
     """
 
     nnc_fault_indices: typing.Mapping[str, IntArray[OneDimension]] | None = attrs.field(
@@ -807,18 +808,22 @@ class Grid(
         n_faces = self.face_cell_indices.shape[0]
 
         assert self.cell_statuses is not None
-        if self.cell_statuses.shape != (n_cells,) or not np.isin(
-            self.cell_statuses, [int(CellStatus.ACTIVE), int(CellStatus.INACTIVE)]
-        ).all():
+        if (
+            self.cell_statuses.shape != (n_cells,)
+            or not np.isin(
+                self.cell_statuses, [int(CellStatus.ACTIVE), int(CellStatus.INACTIVE)]
+            ).all()
+        ):
             raise ValidationError(
                 f"`cell_statuses` must have shape ({n_cells},) with values 0 (inactive) or 1 (active)."
             )
 
         assert self.face_connection_types is not None
         valid_face_types = [int(member) for member in ConnectionType]
-        if self.face_connection_types.shape != (n_faces,) or not np.isin(
-            self.face_connection_types, valid_face_types
-        ).all():
+        if (
+            self.face_connection_types.shape != (n_faces,)
+            or not np.isin(self.face_connection_types, valid_face_types).all()
+        ):
             raise ValidationError(
                 f"`face_connection_types` must have shape ({n_faces},) and hold valid `ConnectionType` values."
             )
@@ -871,7 +876,10 @@ class Grid(
                     f"`cell_volumes` must have shape ({n_cells},) and be finite and non-negative."
                 )
         if self.cell_centroids is not None:
-            if self.cell_centroids.shape != (n_cells, 3) or not np.isfinite(self.cell_centroids).all():
+            if (
+                self.cell_centroids.shape != (n_cells, 3)
+                or not np.isfinite(self.cell_centroids).all()
+            ):
                 raise InvalidPointArrayError(
                     f"`cell_centroids` must have shape ({n_cells}, 3) and be finite."
                 )
@@ -1550,7 +1558,9 @@ class Grid(
         """
         assert self.cell_volumes is not None
         assert self.cell_statuses is not None
-        invalid_volume = ~(self.cell_volumes > 0.0) & (self.cell_statuses == int(CellStatus.ACTIVE))
+        invalid_volume = ~(self.cell_volumes > 0.0) & (
+            self.cell_statuses == int(CellStatus.ACTIVE)
+        )
         if invalid_volume.any():
             bad = np.where(invalid_volume)[0]
             raise InvalidVolumeError(
@@ -1666,11 +1676,7 @@ class Grid(
         # Flow transmissibility has units of volumetric rate x viscosity / pressure.
         nnc_transmissibilities = (
             self.nnc_transmissibilities
-            * (
-                factors["liquid_surface_volume"]
-                * factors["viscosity"]
-                / (factors["pressure"] * factors["time"])
-            )
+            * (factors["reservoir_rate"] * factors["viscosity"] / factors["pressure"])
             if self.nnc_transmissibilities is not None
             else None
         )

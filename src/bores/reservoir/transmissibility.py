@@ -84,9 +84,7 @@ class ConnectionTransmissibilities(typing.NamedTuple):
                 if self.nnc_flow is None
                 else scale(
                     self.nnc_flow,
-                    factors["liquid_surface_volume"]
-                    * factors["viscosity"]
-                    / (factors["pressure"] * factors["time"]),
+                    factors["reservoir_rate"] * factors["viscosity"] / factors["pressure"],
                 )
             ),
             unit_system=target,
@@ -249,14 +247,20 @@ def compute_connection_transmissibilities(
             dtype=dtype,
         )
 
-        nnc_flow_transmissibilities = (
-            grid.nnc_transmissibilities.astype(dtype, copy=True)
-            if grid.nnc_transmissibilities is not None
-            else np.full(grid.n_nnc, np.nan, dtype=dtype)
+        nnc_flow_transmissibilities = typing.cast(
+            NumberArray[OneDimension],
+            (
+                grid.nnc_transmissibilities.astype(dtype, copy=True)
+                if grid.nnc_transmissibilities is not None
+                else np.full(grid.n_nnc, np.nan, dtype=dtype)
+            ),
         )
-        nnc_transmissibilities = np.where(
-            np.isnan(nnc_flow_transmissibilities), nnc_transmissibilities, np.nan
-        ).astype(dtype, copy=False)
+        nnc_transmissibilities = typing.cast(
+            NumberArray[OneDimension],
+            np.where(np.isnan(nnc_flow_transmissibilities), nnc_transmissibilities, np.nan).astype(
+                dtype, copy=False
+            ),
+        )
 
         # Apply MULTFLT to fault-type NNCs only
         if (
@@ -265,7 +269,7 @@ def compute_connection_transmissibilities(
         ):
             for values in (nnc_transmissibilities, nnc_flow_transmissibilities):
                 apply_nnc_fault_multipliers(
-                    nnc_transmissibilities=values,
+                    nnc_transmissibilities=typing.cast(NumberArray[OneDimension], values),
                     nnc_fault_indices=grid.nnc_fault_indices,
                     fault_transmissibility_multipliers=grid.fault_transmissibility_multipliers,
                 )
@@ -292,7 +296,9 @@ def compute_connection_transmissibilities(
         nnc_flow=(
             None
             if nnc_flow_transmissibilities is None
-            else nnc_flow_transmissibilities.astype(dtype, copy=False)
+            else typing.cast(
+                NumberArray[OneDimension], nnc_flow_transmissibilities.astype(dtype, copy=False)
+            )
         ),
         unit_system=target_unit_system,
     )

@@ -31,6 +31,7 @@ import numba
 import numpy as np
 import numpy.typing as npt
 
+from bores.constants import c
 from bores.datastructures import MapAxes
 from bores.deck.core import DeckParseError
 from bores.deck.file import DeckFile
@@ -132,11 +133,24 @@ def build_map_axes(deck_file: DeckFile) -> MapAxes | None:
     )
 
 
+def get_deck_nnc_volume_factor(unit_system: UnitSystem) -> float:
+    """
+    Factor that converts a deck's `NNC` transmissibility into the internal volume basis.
+
+    A FIELD deck expresses reservoir volume in barrels (cP.rb/day/psi) while BORES uses cubic
+    feet. METRIC (m3) and LAB (cm3) decks already match the internal volume unit.
+    """
+    if unit_system == UnitSystem.FIELD:
+        return float(c.BARRELS_TO_CUBIC_FEET)
+    return 1.0
+
+
 def build_nnc_arrays(
     deck_file: DeckFile,
     nx: Integer,
     ny: Integer,
     nz: Integer,
+    unit_system: UnitSystem,
 ) -> tuple[
     IntArray[TwoDimensions] | None,
     NumberArray[OneDimension] | None,
@@ -144,10 +158,14 @@ def build_nnc_arrays(
     """
     Convert parsed `NNC` keyword records to flat cell-index arrays.
 
+    Transmissibilities stay flow transmissibilities (they include the Darcy constant) and are
+    only rescaled to the internal reservoir volume unit.
+
     :param deck_file: Parsed deck (`NNC` keyword already registered).
     :param nx: Grid extent in x.
     :param ny: Grid extent in y.
     :param nz: Grid extent in z.
+    :param unit_system: Unit system of the deck.
     :returns: `(pairs, transmissibilities)` - shape `(n_nnc, 2)` int32
         and shape `(n_nnc,)` float64 arrays, or `(None, None)` if the
         keyword is absent.
@@ -157,6 +175,7 @@ def build_nnc_arrays(
     if not nnc_records:
         return None, None
 
+    volume_factor = get_deck_nnc_volume_factor(unit_system)
     pairs: list[tuple[int, int]] = []
     transmissibilities: list[float] = []
 
@@ -176,7 +195,7 @@ def build_nnc_arrays(
         c1 = (i1 - 1) + (j1 - 1) * nx + (k1 - 1) * nx * ny
         c2 = (i2 - 1) + (j2 - 1) * nx + (k2 - 1) * nx * ny
         pairs.append((c1, c2))
-        transmissibilities.append(transmissibility)
+        transmissibilities.append(transmissibility * volume_factor)
 
     if not pairs:
         return None, None
@@ -539,7 +558,7 @@ def assemble_corner_point(
     meta["coord"] = np.asarray(coord, dtype=np.float64).ravel()
     meta["zcorn"] = np.asarray(zcorn, dtype=np.float64).ravel()
 
-    nnc_pairs, nnc_transmissibilities = build_nnc_arrays(deck_file, nx, ny, nz)
+    nnc_pairs, nnc_transmissibilities = build_nnc_arrays(deck_file, nx, ny, nz, unit_system)
     fault_records = build_fault_records(deck_file)
     multflt = build_multflt(deck_file)
     return make_corner_point_grid(
@@ -639,7 +658,7 @@ def assemble_cartesian(
         else None
     )
 
-    nnc_pairs, nnc_transmissibilities = build_nnc_arrays(deck_file, nx, ny, nz)
+    nnc_pairs, nnc_transmissibilities = build_nnc_arrays(deck_file, nx, ny, nz, unit_system)
     fault_records = build_fault_records(deck_file)
     multflt = build_multflt(deck_file)
     multipliers = {
@@ -971,7 +990,9 @@ def _emit_nnc(lines: list[str], grid: Grid, nx: Integer, ny: Integer) -> None:
             # No explicit value: the transmissibility is computed from rock properties, and
             # writing 0.0 would make the connection closed when the deck is read back.
             continue
-        transmissibility_str = f"{transmissibility:.6e}"
+        transmissibility_str = (
+            f"{transmissibility / get_deck_nnc_volume_factor(grid.unit_system):.6e}"
+        )
         user_nnc_lines.append(f"  {i1}  {j1}  {k1}  {i2}  {j2}  {k2}  {transmissibility_str}  /")
 
     if not user_nnc_lines:
