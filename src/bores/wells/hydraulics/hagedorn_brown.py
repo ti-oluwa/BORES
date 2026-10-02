@@ -95,6 +95,14 @@ class HagedornBrownWellbore(typing.NamedTuple):
     for SI) to the coherent unit the Reynolds number needs.
     """
 
+    field_length_factor: Number
+    """
+    Multiplies a length in this model's own unit system to get feet.
+    `1.0` for a FIELD model. Used only by `is_griffith_bubble_flow`,
+    whose empirical flow-regime boundary is a dimensional fit valid
+    only in ft/s and ft.
+    """
+
     hydrostatic_scale: Number
     """
     Unit-conversion factor converting a `density * velocity-squared` or
@@ -135,6 +143,9 @@ class HagedornBrownWellbore(typing.NamedTuple):
                 prefix="RATE_TIME_FACTOR", unit_system=target
             ),
             viscosity_scale=get_unit_system_constant(prefix="VISCOSITY_SCALE", unit_system=target),
+            field_length_factor=get_conversion_factors(target, UnitSystem.FIELD, table=table)[
+                "length"
+            ],
             hydrostatic_scale=1.0
             / (
                 get_unit_system_constant(prefix="GRAVITATIONAL_FACTOR", unit_system=target)
@@ -228,6 +239,7 @@ def hagedorn_brown_wellbore(
         viscosity_scale=get_unit_system_constant(
             prefix="VISCOSITY_SCALE", unit_system=unit_system
         ),
+        field_length_factor=get_conversion_factors(unit_system, UnitSystem.FIELD)["length"],
         hydrostatic_scale=1.0
         / (
             get_unit_system_constant(prefix="GRAVITATIONAL_FACTOR", unit_system=unit_system)
@@ -383,19 +395,38 @@ def is_griffith_bubble_flow(
     superficial_liquid_velocity: Number,
     superficial_gas_velocity: Number,
     tubing_inner_diameter: Number,
+    field_length_factor: Number,
 ) -> Boolean:
     """
     Checks whether flow falls in the bubble-flow regime Griffith's
     correlation applies to, per the boundary Hagedorn & Brown adopted for it.
 
-    :param superficial_liquid_velocity: Liquid rate divided by cross-sectional area.
-    :param superficial_gas_velocity: Gas rate divided by cross-sectional area.
-    :param tubing_inner_diameter: Tubing inner diameter.
+    The `1.071`/`0.2218` boundary is a dimensional empirical fit from the
+    original paper, only valid with velocity in ft/s and diameter in ft -
+    unlike every other quantity in this module, it isn't something a
+    unit-system scale *factor* can fix, since the coefficients themselves
+    carry implicit units. `field_length_factor` converts the velocity and
+    diameter to ft/s and ft for this one check; the boolean result needs
+    no converting back.
+
+    :param superficial_liquid_velocity: Liquid rate divided by
+        cross-sectional area, in this model's own unit system.
+    :param superficial_gas_velocity: Gas rate divided by cross-sectional
+        area, in this model's own unit system.
+    :param tubing_inner_diameter: Tubing inner diameter, in this model's
+        own unit system.
+    :param field_length_factor: `HagedornBrownWellbore.field_length_factor` -
+        multiplies a length (or, here, a velocity - both scale the same
+        way under a pure length-unit change) in this model's own unit
+        system to get feet (or ft/s). `1.0` for a FIELD model.
     :returns: Whether the bubble-flow correction applies.
     """
-    mixture_velocity = superficial_liquid_velocity + superficial_gas_velocity
-    no_slip_gas_fraction = superficial_gas_velocity / mixture_velocity
-    bubble_flow_boundary = max(1.071 - 0.2218 * mixture_velocity**2 / tubing_inner_diameter, 0.13)
+    liquid_velocity_fps = superficial_liquid_velocity * field_length_factor
+    gas_velocity_fps = superficial_gas_velocity * field_length_factor
+    diameter_ft = tubing_inner_diameter * field_length_factor
+    mixture_velocity_fps = liquid_velocity_fps + gas_velocity_fps
+    no_slip_gas_fraction = gas_velocity_fps / mixture_velocity_fps
+    bubble_flow_boundary = max(1.071 - 0.2218 * mixture_velocity_fps**2 / diameter_ft, 0.13)
     return no_slip_gas_fraction < bubble_flow_boundary
 
 
@@ -477,6 +508,7 @@ def compute_segment_drop(
         superficial_liquid_velocity=superficial_liquid_velocity,
         superficial_gas_velocity=superficial_gas_velocity,
         tubing_inner_diameter=model.tubing_inner_diameter,
+        field_length_factor=model.field_length_factor,
     )
     if bubble_flow:
         in_situ_holdup = compute_griffith_holdup(

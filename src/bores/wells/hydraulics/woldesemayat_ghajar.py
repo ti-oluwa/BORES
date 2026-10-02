@@ -129,13 +129,15 @@ class WoldesemayatGhajarWellbore(typing.NamedTuple):
     unit system, the same assumption Hagedorn & Brown makes elsewhere."""
 
     centipoise_to_pascal_second: Number
-    """`c.CENTIPOISE_TO_PASCAL_SECONDS`, resolved here for the same reason
-    as `standard_gravity_si`. Viscosity is always in cP in this package,
-    regardless of this model's own unit system, the same assumption
-    Hagedorn & Brown makes elsewhere. Used only for `compute_segment_drop`'s
-    own Reynolds number, which must be genuinely dimensionless; the
-    friction and hydrostatic terms themselves stay in this model's native
-    units throughout, converted by `hydrostatic_scale` as usual."""
+    """Multiplies a viscosity in this model's own unit system's reporting
+    unit (cP for FIELD/METRIC/LAB, already Pa*s for SI) to get Pa*s,
+    matching `si_length_factor`/`si_density_factor`. `1.0` for an SI
+    model - treating it as always-cP regardless of unit system double
+    converts an SI model's viscosity, which is already Pa*s. Used only
+    for `compute_segment_drop`'s own Reynolds number, which must be
+    genuinely dimensionless; the friction and hydrostatic terms
+    themselves stay in this model's native units throughout, converted
+    by `hydrostatic_scale` as usual."""
 
     unit_system: UnitSystem
     """This model's unit system."""
@@ -175,6 +177,7 @@ class WoldesemayatGhajarWellbore(typing.NamedTuple):
             si_length_factor=si_factors["length"],
             si_density_factor=si_factors["density"],
             si_pressure_factor=si_factors["pressure"],
+            centipoise_to_pascal_second=si_factors["viscosity"],
             unit_system=target,
         )
 
@@ -276,7 +279,7 @@ def woldesemayat_ghajar_wellbore(
         standard_gravity_si=c.ACCELERATION_DUE_TO_GRAVITY_METER_PER_SECONDS_SQUARE,
         standard_atmosphere_si=c.STANDARD_PRESSURE_PASCAL,
         dyne_per_cm_to_newton_per_m=c.DYNE_PER_CENTIMETER_TO_NEWTON_PER_METER,
-        centipoise_to_pascal_second=c.CENTIPOISE_TO_PASCAL_SECONDS,
+        centipoise_to_pascal_second=si_factors["viscosity"],
         unit_system=unit_system,
     )
     return WellBoreModel(name="woldesemayat_ghajar", options=options)
@@ -455,14 +458,14 @@ def compute_segment_drop(
     # what compute_friction_factor's laminar/turbulent thresholds and Darcy/Colebrook
     # formulas are calibrated against - none of that has any unit-system slack built
     # in. density/velocity/diameter are already correctly rescaled between unit
-    # systems by model construction, but viscosity is always cP (see
-    # compute_woldesemayat_ghajar_void_fraction's own docstring on this), so computing
-    # the ratio directly in native units would silently pick up a spurious unit-system
-    # dependence: only the mass/length units of density*velocity*diameter change
-    # between systems, cP does not, so the ratio isn't actually dimensionless unless
+    # systems by model construction, and viscosity needs its own conversion too,
+    # since it's reported in a different unit (cP) than the mass/length/time units
+    # density/velocity/diameter are built from - computing the ratio directly in
+    # native units would silently pick up a spurious unit-system dependence unless
     # everything is converted to one consistent system first. SI is the one already
     # available via si_length_factor/si_density_factor; centipoise_to_pascal_second
-    # (cP -> Pa*s) is the same fixed, unit-system-independent conversion
+    # converts viscosity the same way, per `unit_system` (1.0 for an SI model, since
+    # SI already reports viscosity in Pa*s, not cP).
     # dyne_per_cm_to_newton_per_m already applies to surface tension.
     reynolds_number = (
         (in_situ_density * model.si_density_factor)
