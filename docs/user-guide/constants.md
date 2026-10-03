@@ -57,7 +57,7 @@ if const is not None:
 | `STANDARD_PRESSURE_IMPERIAL` | 14.696 | psi | Standard atmospheric pressure (Imperial) |
 | `STANDARD_TEMPERATURE_SI` | 288.7056 | K | Standard temperature 15.6C (SI) |
 | `STANDARD_TEMPERATURE_IMPERIAL` | 60.0 | F | Standard temperature (Imperial) |
-| `STANDARD_TEMPERATURE_RANKINE` | 518.67 | R | Standard temperature (Rankine) |
+| `STANDARD_TEMPERATURE_RANKINE` | 519.67 | R | Standard temperature (Rankine) |
 | `STANDARD_TEMPERATURE_CELSIUS` | 15.6 | C | Standard temperature (Celsius) |
 
 ### Standard Densities

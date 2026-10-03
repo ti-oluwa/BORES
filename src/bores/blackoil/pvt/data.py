@@ -7,7 +7,7 @@ import numpy as np
 import numpy.typing as npt
 from typing_extensions import Self
 
-from bores.constants import UnitConversionTable, get_conversion_factors
+from bores.constants import UnitConversionTable, c, get_conversion_factors
 from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.serde.stores import StoreSerializable
@@ -19,11 +19,32 @@ from bores.types import (
     TwoDimensions,
     UnitSystem,
 )
-from bores.utils import scale
+from bores.utils import scale, scale_and_offset
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["PVTData", "PVTDataSet"]
+
+
+def get_stb_to_volume_factor(unit_system: UnitSystem) -> float:
+    """
+    Return the factor that reconciles gas-oil ratio units with density units.
+
+    In FIELD units `Rs` and `Rsw` (SCF/STB) and `Rv` (STB/SCF) are per barrel of
+    stock-tank liquid, while densities are per cubic foot. Mass balances such as
+    `ρo = (ρo,SC + Rs·ρg,SC) / Bo` are therefore only dimensionally consistent once
+    `1 STB = 5.614583 ft³` is applied to the dissolved-gas / vaporized-oil term. In
+    METRIC, SI and LAB the ratios are volume/volume (Sm³/Sm³, scc/scc) and need none.
+
+    - Oil / water: `ρ = (ρ,SC + Rs·ρg,SC / f) / B`
+    - Wet gas: `ρg = (ρg,SC + Rv·ρo,SC · f) / Bg`
+
+    :param unit_system: Unit system the ratios and densities are expressed in.
+    :returns: `f` in ft³/STB for FIELD, `1.0` otherwise.
+    """
+    if unit_system == UnitSystem.FIELD:
+        return c.STB_TO_CUBIC_FEET
+    return 1.0
 
 
 @attrs.frozen(slots=True)
@@ -120,7 +141,7 @@ class PVTData(StoreSerializable):
     vaporized_oil_ratio_table: NumberArray[TwoDimensions] | None = None
     """
     Vaporised oil ratio Rv(P, T). Gas / condensate phase only. Shape `(n_p, n_t)`.
-    Units: STB/scf (FIELD), Sm³/Sm³ (METRIC/SI), scc/scc (LAB). Dimensionless ratios are unit-system independent.
+    Units: STB/scf (FIELD), Sm³/Sm³ (METRIC/SI), scc/scc (LAB).
     Rv is capped at Rv_sat above dew point (analogous to Rs being capped at Rsb above bubble point for oil).
     """
 
@@ -153,6 +174,10 @@ class PVTData(StoreSerializable):
             ρg = ρg,SC / Bg                  [dry gas]
     - Water: ρw = ρw,SC / Bw
 
+    In FIELD units the `Rs` term is divided, and the `Rv` term multiplied, by
+    5.614583 ft³/STB (see `get_stb_to_volume_factor`) so that every term is in
+    lbm per cubic foot.
+
     Set automatically by `PVTTable` if absent and reference densities are
     provided.
     """
@@ -173,7 +198,7 @@ class PVTData(StoreSerializable):
 
     # Oil-only primary
     solution_gor_table: NumberArray[TwoDimensions] | None = None
-    """Solution GOR Rs(P, T). Oil phase only. Units: SCF/STB (FIELD), Sm³/Sm³ (METRIC/SI), scc/scc (LAB). Dimensionless ratios are unit-system independent."""
+    """Solution GOR Rs(P, T). Oil phase only. Units: SCF/STB (FIELD), Sm³/Sm³ (METRIC/SI), scc/scc (LAB)."""
 
     # Gas-only primary
     compressibility_factor_table: NumberArray[TwoDimensions] | None = None
@@ -198,7 +223,9 @@ class PVTData(StoreSerializable):
     Used internally to compute `density_table` and `compressibility_table`
     for the water phase; not exposed as a direct query method on `PVTTable`.
     """
+
     dtype: npt.DTypeLike = None
+    """Floating-point dtype of all arrays. Defaults to the active `BORES` precision."""
 
     unit_system: UnitSystem = attrs.field(default=UnitSystem.FIELD)
     """
@@ -262,6 +289,21 @@ class PVTData(StoreSerializable):
         if self.dtype != dtype:
             object.__setattr__(self, "dtype", dtype if dtype is not None else None)
 
+    def has_rv_axis(self) -> bool:
+        """
+        Whether the `temperatures` axis actually carries Rv values (wet-gas `PVTG` tables).
+
+        Those tables store Rv on the second axis and a `vaporized_oil_ratio_table` that is
+        just that axis tiled over pressure, so the axis converts as a vaporized oil ratio
+        rather than as a temperature.
+        """
+        table = self.vaporized_oil_ratio_table
+        if typing.cast(FluidPhase, self.phase) != FluidPhase.GAS or table is None:
+            return False
+        if table.shape != (len(self.pressures), len(self.temperatures)):
+            return False
+        return bool(np.array_equal(table, np.broadcast_to(self.temperatures, table.shape)))
+
     def convert(
         self,
         target: UnitSystem,
@@ -272,12 +314,14 @@ class PVTData(StoreSerializable):
         """
         Return a new `PVTData` with all dimensional quantities rescaled to *target*.
 
-        Dimensionless properties (specific gravity, compressibility factor,
-        vaporized oil ratio, solution GOR ratio) and multiplier-type quantities
-        are copied unchanged. Pressure axes, densities, FVFs, and viscosities
-        are rescaled using appropriate factors.
+        Pressure and temperature axes, bubble/dew point pressures, densities, FVFs,
+        viscosities, compressibilities, and the gas-oil / oil-gas ratios (Rs, Rv, Rsw)
+        are rescaled using `get_conversion_factors`. Temperatures use the affine map
+        (`T * scale + offset`). Dimensionless quantities (compressibility factor) and
+        salinities (ppm) are copied unchanged.
 
         :param target: Target `UnitSystem`.
+        :param table: Optional custom conversion table; `None` uses the default.
         :returns `PVTData`: New `PVTData` in *target* units.
         """
         if target == self.unit_system:
@@ -289,18 +333,34 @@ class PVTData(StoreSerializable):
         viscosity_factor = factors["viscosity"]
         liquid_fvf_factor = factors["liquid_fvf"]
         gas_fvf_factor = factors["gas_fvf"]
+        gas_oil_ratio_factor = factors["gas_oil_ratio"]
+        oil_gas_ratio_factor = factors["oil_gas_ratio"]
         fvf_factor = gas_fvf_factor if self.phase == FluidPhase.GAS else liquid_fvf_factor
         # Compressibility is 1/pressure
         compressibility_factor = 1.0 / pressure_factor
+        if self.has_rv_axis():
+            temperatures = scale(self.temperatures, oil_gas_ratio_factor)
+        else:
+            temperatures = scale_and_offset(
+                self.temperatures, factors["temperature"], factors["temperature_offset"]
+            )
         return attrs.evolve(
             self,
             pressures=scale(self.pressures, pressure_factor),
+            temperatures=temperatures,
+            solution_gas_to_oil_ratios=scale(
+                self.solution_gas_to_oil_ratios, gas_oil_ratio_factor
+            ),
             bubble_point_pressures=scale(self.bubble_point_pressures, pressure_factor),
             dew_point_pressures=scale(self.dew_point_pressures, pressure_factor),
+            vaporized_oil_ratio_table=scale(self.vaporized_oil_ratio_table, oil_gas_ratio_factor),
             formation_volume_factor_table=scale(self.formation_volume_factor_table, fvf_factor),
             viscosity_table=scale(self.viscosity_table, viscosity_factor),
             density_table=scale(self.density_table, density_factor),
             compressibility_table=scale(self.compressibility_table, compressibility_factor),
+            solution_gor_table=scale(self.solution_gor_table, gas_oil_ratio_factor),
+            solubility_in_water_table=scale(self.solubility_in_water_table, gas_oil_ratio_factor),
+            bubble_point_pressure_table=scale(self.bubble_point_pressure_table, pressure_factor),
             gas_free_water_fvf_table=scale(self.gas_free_water_fvf_table, liquid_fvf_factor),
             unit_system=target,
         )

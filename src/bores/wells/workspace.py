@@ -444,6 +444,7 @@ def accumulate_phase_rates(
     relevant_water: Boolean,
     relevant_gas: Boolean,
     is_injector: Boolean,
+    radial_flow_constant: Number,
     out_connection_oil_rates: NumberArray[OneDimension],
     out_connection_water_rates: NumberArray[OneDimension],
     out_connection_gas_rates: NumberArray[OneDimension],
@@ -471,6 +472,10 @@ def accumulate_phase_rates(
     :param relevant_water: Whether water counts toward the primary target.
     :param relevant_gas: Whether gas counts toward the primary target.
     :param is_injector: Whether this well is an injector.
+    :param radial_flow_constant: `WellControlSpec.radial_flow_constant` -
+        converts `well_index * mobility * drawdown` (`compute_peaceman_well_index`'s
+        own units, which have no 2*pi built in) into a real reservoir-condition
+        rate in this simulation's own unit system.
     :param out_connection_oil_rates: Written in place with each
         connection's own reservoir-condition oil rate (`0.0` if
         `relevant_oil` is `False`). `PerforationWorkspace.connection_oil_rates`.
@@ -496,7 +501,7 @@ def accumulate_phase_rates(
         well_index = well_indices[i]
 
         if relevant_oil:
-            contribution = well_index * oil_mobilities[i] * drawdown
+            contribution = radial_flow_constant * well_index * oil_mobilities[i] * drawdown
             oil_rate += contribution
             surface_oil_rate += contribution / oil_formation_volume_factors[i]
             out_connection_oil_rates[i] = contribution
@@ -504,7 +509,7 @@ def accumulate_phase_rates(
             out_connection_oil_rates[i] = 0.0
 
         if relevant_water:
-            contribution = well_index * water_mobilities[i] * drawdown
+            contribution = radial_flow_constant * well_index * water_mobilities[i] * drawdown
             water_rate += contribution
             surface_water_rate += contribution / water_formation_volume_factors[i]
             out_connection_water_rates[i] = contribution
@@ -512,7 +517,7 @@ def accumulate_phase_rates(
             out_connection_water_rates[i] = 0.0
 
         if relevant_gas:
-            contribution = well_index * gas_mobilities[i] * drawdown
+            contribution = radial_flow_constant * well_index * gas_mobilities[i] * drawdown
             gas_rate += contribution
             surface_gas_rate += contribution / gas_formation_volume_factors[i]
             out_connection_gas_rates[i] = contribution

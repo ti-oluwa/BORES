@@ -14,7 +14,7 @@ from scipy.interpolate import (  # type: ignore[import-untyped]
 )
 from typing_extensions import Self
 
-from bores.blackoil.pvt.data import PVTData, PVTDataSet
+from bores.blackoil.pvt.data import PVTData, PVTDataSet, get_stb_to_volume_factor
 from bores.blackoil.pvt.static import StaticPVT
 from bores.constants import UnitConversionTable, get_conversion_factors
 from bores.deck.file import DeckFile
@@ -401,13 +401,16 @@ def build_derived_tables(data: PVTData, pvt: StaticPVT, dtype: npt.DTypeLike = N
     stock_tank_oil_density = pvt.stock_tank_oil_density
     stock_tank_gas_density = pvt.stock_tank_gas_density
     stock_tank_water_density = pvt.stock_tank_water_density
+    # ft³/STB in FIELD units (1 otherwise); reconciles Rs/Rsw (SCF/STB) and Rv (STB/SCF)
+    # with the density units
+    stb_to_volume = get_stb_to_volume_factor(data.unit_system)
 
     # Oil Phase
     if phase == FluidPhase.OIL:
         oil_fvf_table = data.formation_volume_factor_table
         solution_gor_table = data.solution_gor_table
 
-        # Density: ρo = (ρo,SC + Rs·ρg,SC) / Bo
+        # Density: ρo = (ρo,SC + Rs·ρg,SC / f) / Bo
         if (
             data.density_table is None
             and oil_fvf_table is not None
@@ -416,7 +419,8 @@ def build_derived_tables(data: PVTData, pvt: StaticPVT, dtype: npt.DTypeLike = N
             and stock_tank_gas_density is not None
         ):
             density_table = (
-                stock_tank_oil_density + solution_gor_table * stock_tank_gas_density
+                stock_tank_oil_density
+                + solution_gor_table * stock_tank_gas_density / stb_to_volume
             ) / oil_fvf_table
             updates["density_table"] = density_table.astype(dtype, copy=False)
 
@@ -442,7 +446,7 @@ def build_derived_tables(data: PVTData, pvt: StaticPVT, dtype: npt.DTypeLike = N
         vaporized_oil_ratio_table = data.vaporized_oil_ratio_table
         compressibility_factor_table = data.compressibility_factor_table
 
-        # Density: ρg = (ρg,SC + Rv·ρo,SC) / Bg  [wet] or ρg,SC / Bg [dry]
+        # Density: ρg = (ρg,SC + Rv·ρo,SC · f) / Bg  [wet] or ρg,SC / Bg [dry]
         if (
             data.density_table is None
             and gas_fvf_table is not None
@@ -451,7 +455,8 @@ def build_derived_tables(data: PVTData, pvt: StaticPVT, dtype: npt.DTypeLike = N
         ):
             if vaporized_oil_ratio_table is not None:
                 density = (
-                    stock_tank_gas_density + vaporized_oil_ratio_table * stock_tank_oil_density
+                    stock_tank_gas_density
+                    + vaporized_oil_ratio_table * stock_tank_oil_density * stb_to_volume
                 ) / gas_fvf_table
             else:
                 density = stock_tank_gas_density / gas_fvf_table
@@ -520,7 +525,8 @@ def build_derived_tables(data: PVTData, pvt: StaticPVT, dtype: npt.DTypeLike = N
                     ):
                         rsw_slice = data.solubility_in_water_table[:, :, s_idx]
                         density_3d_table[:, :, s_idx] = (
-                            stock_tank_water_density + rsw_slice * stock_tank_gas_density
+                            stock_tank_water_density
+                            + rsw_slice * stock_tank_gas_density / stb_to_volume
                         ) / gas_free_water_fvf_table
                     else:
                         density_3d_table[:, :, s_idx] = (
@@ -627,6 +633,25 @@ def validate_pvt_data(data: PVTData) -> None:
                 raise ValidationError(
                     f"`{table_name}` shape {array.shape} must be "
                     f"(n_p={n_p}, n_t={n_t}, n_s={n_s})."
+                )
+
+    if phase == FluidPhase.WATER:
+        # Water property tables are always 3-D: (n_pressures, n_temperatures, n_salinities)
+        for table_name in (
+            "viscosity_table",
+            "density_table",
+            "formation_volume_factor_table",
+            "compressibility_table",
+        ):
+            array = getattr(data, table_name, None)
+            if array is None:
+                continue
+            if n_s is None:
+                raise ValidationError(f"`{table_name}` requires `salinities` for the water phase.")
+            if array.shape != (n_p, n_t, n_s):
+                raise ValidationError(
+                    f"`{table_name}` shape {array.shape} must be "
+                    f"(n_p={n_p}, n_t={n_t}, n_s={n_s}) for the water phase."
                 )
 
     if data.solubility_in_water_table is not None and salinities is None:
@@ -738,7 +763,10 @@ class PVTTable(StoreSerializable):
         :param pvt: Optional `StaticPVT` carrying stock-tank reference densities
             (`stock_tank_oil_density`, `stock_tank_gas_density`, `stock_tank_water_density`).
             When provided, missing `density_table` and `compressibility_table` entries are
-            built automatically. Units must match the `data.unit_system`.
+            built automatically, and the stock-tank densities are used to recompute oil
+            density above the bubble point. Converted to `data.unit_system` if they differ.
+        :param dtype: Floating-point dtype of the tables and interpolators. Defaults to the
+            dtype of `data`, or the active `BORES` precision.
         """
         if interpolation_method not in INTERPOLATION_DEGREES:
             raise ValidationError(
@@ -755,6 +783,10 @@ class PVTTable(StoreSerializable):
         self.interpolation_method: InterpolationMethod = interpolation_method
         self.validate = validate
         self.warn_on_extrapolation = warn_on_extrapolation
+        # Multiplier from this table's pressure unit to psi, for correlations fitted in psia
+        self._pressure_to_psi = get_conversion_factors(data.unit_system, UnitSystem.FIELD)[
+            "pressure"
+        ]
 
         if interpolation_method != "linear":
             if len(data.pressures) < 4:
@@ -807,14 +839,18 @@ class PVTTable(StoreSerializable):
             data.ensure_dtype(self.dtype, force=False)
 
         # Potentially augment data with derived tables before building interpolators
+        self._pvt: StaticPVT | None = None
         self._stock_tank_oil_density: Number | None = None
         self._stock_tank_gas_density: Number | None = None
+        # ft³/STB in FIELD units (1 otherwise); reconciles Rs (SCF/STB) with density units
+        self._stb_to_volume = get_stb_to_volume_factor(data.unit_system)
         if pvt is not None:
             if pvt.unit_system != data.unit_system:
-                pvt = pvt.convert(self.unit_system)
+                pvt = pvt.convert(data.unit_system)
+            self._pvt = pvt
             self._stock_tank_oil_density = pvt.stock_tank_oil_density
             self._stock_tank_gas_density = pvt.stock_tank_gas_density
-            data = build_derived_tables(data, pvt, dtype)
+            data = build_derived_tables(data, pvt, self.dtype)
 
         self._data = data
         self._interpolatants: dict[str, typing.Any] = {}
@@ -979,21 +1015,26 @@ class PVTTable(StoreSerializable):
             register_2d("gas_free_fvf", data.gas_free_water_fvf_table)
 
     def __dump__(self) -> dict[str, typing.Any]:
-        return {
+        dumped: dict[str, typing.Any] = {
             "data": self._data.dump(),
             "interpolation_method": self.interpolation_method,
             "validate": self.validate,
             "warn_on_extrapolation": self.warn_on_extrapolation,
         }
+        if self._pvt is not None:
+            dumped["pvt"] = self._pvt.dump()
+        return dumped
 
     @classmethod
     def __load__(cls, data: typing.Mapping[str, typing.Any]) -> "PVTTable":
         pvt_data = PVTData.load(data["data"])
+        static_pvt = StaticPVT.load(data["pvt"]) if data.get("pvt") is not None else None
         return cls(
             data=pvt_data,
             interpolation_method=data.get("interpolation_method", "linear"),
             validate=data.get("validate", True),
             warn_on_extrapolation=data.get("warn_on_extrapolation", False),
+            pvt=static_pvt,
         )
 
     @property
@@ -1016,12 +1057,13 @@ class PVTTable(StoreSerializable):
         """
         Return a new `PVTTable` with all dimensional quantities rescaled to *target*.
 
-        Dimensionless properties (specific gravity, compressibility factor,
-        vaporized oil ratio, solution GOR ratio) and multiplier-type quantities
-        are copied unchanged. Pressure axes, densities, FVFs, and viscosities
-        are rescaled using `get_conversion_factors`.
+        The underlying `PVTData` (pressure and temperature axes, densities, FVFs,
+        viscosities, compressibilities, gas-oil and oil-gas ratios) and the optional
+        `StaticPVT` are rescaled using `get_conversion_factors`. Dimensionless
+        quantities (e.g. the z-factor) and salinities (ppm) are copied unchanged.
 
         :param target: Target `UnitSystem`.
+        :param table: Optional custom conversion table; `None` uses the default.
         :returns `PVTTable`: New `PVTTable` in *target* units.
         """
         if target == self.unit_system:
@@ -1032,6 +1074,7 @@ class PVTTable(StoreSerializable):
             interpolation_method=self.interpolation_method,
             validate=False,  # already validated at construction
             warn_on_extrapolation=self.warn_on_extrapolation,
+            pvt=self._pvt.convert(target, table=table) if self._pvt is not None else None,
             dtype=self.dtype,
         )
 
@@ -1466,7 +1509,9 @@ class PVTTable(StoreSerializable):
         Get fluid viscosity `μ`. Units depend on `unit_system` (cP in FIELD/METRIC/LAB, Pa·s in SI).
 
         **Oil phase** - saturated / undersaturated switching using the
-        Beggs-Robinson undersaturated correction above bubble point.
+        Vazquez-Beggs undersaturated correction above bubble point
+        (`μo = μob · (P / Pb)^m`; the exponent's psia correlation is evaluated on the
+        pressure converted to psi, whatever the table's unit system).
 
         **Water / gas** - direct table interpolation.
 
@@ -1525,7 +1570,9 @@ class PVTTable(StoreSerializable):
             )
             p_undersaturated = pressure_array[undersaturated]
             pb_undersaturated = bubble_point_array[undersaturated]
-            X = 2.6 * (p_undersaturated**1.187) * np.exp(-11.513 - 8.98e-5 * p_undersaturated)
+            # The Vazquez-Beggs exponent is fitted in psia, whatever the table's unit system
+            p_psi = p_undersaturated * self._pressure_to_psi
+            X = 2.6 * (p_psi**1.187) * np.exp(-11.513 - 8.98e-5 * p_psi)
             X = np.clip(X, 0.0, 5.0, dtype=dtype)
             ratio = np.clip(p_undersaturated / pb_undersaturated, 1.0, None, dtype=dtype)
             result[undersaturated] = np.clip(mu_ob * (ratio**X), mu_ob, mu_ob * 100.0, dtype=dtype)
@@ -1556,15 +1603,12 @@ class PVTTable(StoreSerializable):
         above the bubble point):
 
         - Saturated: the raw table interpolant's own derivative.
-        - Undersaturated: central finite-difference of `viscosity` itself,
-          not a hand-differentiated closed form. The Beggs-Robinson
-          correction `viscosity` evaluates there has two separately clipped
-          terms (the exponent and the final ratio), and differentiating
-          that piecewise by hand risks getting a kink wrong silently;
-          central-differencing the already-correct value function sidesteps
-          that entirely and stays exactly consistent with what `viscosity`
-          actually returns, at the cost of ordinary finite-difference
-          truncation error rather than an exact analytical derivative.
+        - Undersaturated: analytically differentiated from the Vazquez-Beggs
+          correction `viscosity` evaluates there, `μ = μob · (P / Pb)^X(P)`,
+          including the pressure dependence of the exponent `X`. The slope is zero
+          wherever `viscosity` itself clips (exponent at its bounds, or the final
+          `100 · μob` ceiling). Evaluated in float64: differencing float32
+          viscosities loses most of its digits at any reasonable step.
 
         **Gas and water** - unchanged, direct table derivative; no switching.
 
@@ -1621,25 +1665,27 @@ class PVTTable(StoreSerializable):
             )
 
         if np.any(undersaturated):
-            p_undersaturated = pressure_array[undersaturated]
+            p_undersaturated = pressure_array[undersaturated].astype(np.float64)
             t_undersaturated = temperature_array[undersaturated]
-            pb_undersaturated = bubble_point_array[undersaturated]
-            step = np.maximum(np.abs(p_undersaturated) * 1e-6, 1e-6).astype(dtype)
-            mu_plus = np.asarray(
-                self.viscosity(
-                    p_undersaturated + step,
-                    t_undersaturated,
-                    bubble_point_pressure=pb_undersaturated,
-                )
+            pb_undersaturated = bubble_point_array[undersaturated].astype(np.float64)
+            mu_at_bubble_point = np.asarray(
+                self.query("viscosity", pb_undersaturated, t_undersaturated), dtype=np.float64
             )
-            mu_minus = np.asarray(
-                self.viscosity(
-                    p_undersaturated - step,
-                    t_undersaturated,
-                    bubble_point_pressure=pb_undersaturated,
-                )
+            # d(mu)/dP of `mu = mu_ob * (P / Pb)**X(P)` with the same clipping as `viscosity`
+            p_psi = p_undersaturated * self._pressure_to_psi
+            x_raw = 2.6 * (p_psi**1.187) * np.exp(-11.513 - 8.98e-5 * p_psi)
+            x_clipped = np.clip(x_raw, 0.0, 5.0)
+            dx_dp = np.where(
+                (x_raw > 0.0) & (x_raw < 5.0),
+                x_raw * (1.187 / p_undersaturated - 8.98e-5 * self._pressure_to_psi),
+                0.0,
             )
-            result[undersaturated] = (mu_plus - mu_minus) / (2 * step)
+            ratio = np.maximum(p_undersaturated / pb_undersaturated, 1.0)
+            mu_unclipped = mu_at_bubble_point * ratio**x_clipped
+            dmu_dp = mu_unclipped * (x_clipped / p_undersaturated + np.log(ratio) * dx_dp)
+            result[undersaturated] = np.where(
+                mu_unclipped < mu_at_bubble_point * 100.0, dmu_dp, 0.0
+            )
 
         return typing.cast(
             TableResult[NDimension],
@@ -1732,19 +1778,36 @@ class PVTTable(StoreSerializable):
                 "density", pressure_array[saturated], temperature_array[saturated]
             )
         if np.any(undersaturated):
-            # Rs is fixed at its bubble-point value above Pb - by
-            # construction, that value is exactly the `solution_gor` this
-            # cell's own bubble point was computed from.
-            solution_gor_array = np.broadcast_to(np.atleast_1d(solution_gor), pressure_array.shape)  # type: ignore[arg-type]
-            undersaturated_fvf = self.formation_volume_factor(
-                pressure_array[undersaturated],
-                temperature_array[undersaturated],
-                bubble_point_pressure=bubble_point_array[undersaturated],
-            )
-            result[undersaturated] = (
-                self._stock_tank_oil_density
-                + solution_gor_array[undersaturated] * self._stock_tank_gas_density
-            ) / np.asarray(undersaturated_fvf)
+            p_undersaturated = pressure_array[undersaturated]
+            t_undersaturated = temperature_array[undersaturated]
+            pb_undersaturated = bubble_point_array[undersaturated]
+            # Rs is frozen at its bubble-point value above Pb. Use the cell's own
+            # `solution_gor` when given (2-D Pb tables); otherwise read Rs at Pb off the
+            # Rs table (1-D Pb tables, or callers that only pass `bubble_point_pressure`).
+            if solution_gor is not None:
+                solution_gor_undersaturated = np.broadcast_to(
+                    np.atleast_1d(solution_gor), pressure_array.shape
+                )[undersaturated]
+            else:
+                solution_gor_undersaturated = self.query(
+                    "solution_gor", pb_undersaturated, t_undersaturated
+                )
+
+            if solution_gor_undersaturated is None:
+                # No Rs table to freeze at Pb, so fall back to the raw (saturated-curve) table
+                result[undersaturated] = self.query(  # type: ignore[index]
+                    "density", p_undersaturated, t_undersaturated
+                )
+            else:
+                undersaturated_fvf = self.formation_volume_factor(
+                    p_undersaturated, t_undersaturated, bubble_point_pressure=pb_undersaturated
+                )
+                result[undersaturated] = (
+                    self._stock_tank_oil_density
+                    + np.asarray(solution_gor_undersaturated)
+                    * self._stock_tank_gas_density
+                    / self._stb_to_volume
+                ) / np.asarray(undersaturated_fvf)
 
         return typing.cast(
             TableResult[NDimension],
@@ -2081,7 +2144,7 @@ class PVTTable(StoreSerializable):
             pressure_array, temperature_array, bubble_point_array
         )
 
-        result = np.zeros_like(pressure_array)
+        result = np.zeros_like(pressure_array, dtype=dtype)
         saturated = pressure_array <= bubble_point_array
         undersaturated = ~saturated
 
@@ -2137,9 +2200,9 @@ class PVTTable(StoreSerializable):
         :param pressure: Pressure.
         :param temperature: Temperature.
         :param solution_gor: Solution GOR. Required for 2-D bubble_point_array table.
-        :returns: Boolean mask (True = saturated), or `None` for gas.
+        :returns: Boolean mask (True = saturated), or `None` for gas / water.
         """
-        if self._phase == FluidPhase.GAS:
+        if self._phase != FluidPhase.OIL:
             return None
 
         bubble_point_array = self.bubble_point_pressure(
@@ -2471,7 +2534,7 @@ class PVTTables(StoreSerializable):
         :param interpolation_method: `"linear"` or `"cubic"`.
         :param validate: Run physical-consistency checks.
         :param warn_on_extrapolation: Log warnings on extrapolation.
-        :param pvt: Reference densities for derived table derivation.
+        :param dtype: Floating-point dtype of the tables.
         :returns: `PVTTables` for the specified region.
         """
         from bores.blackoil.pvt.regions import PVT
@@ -2484,7 +2547,7 @@ class PVTTables(StoreSerializable):
             warn_on_extrapolation=warn_on_extrapolation,
             dtype=dtype,
         )
-        return typing.cast(Self, regions.region(pvtnum))
+        return typing.cast(Self, regions.region(pvtnum).tables)
 
     @property
     def dataset(self) -> PVTDataSet:

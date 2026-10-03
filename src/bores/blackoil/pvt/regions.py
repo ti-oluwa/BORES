@@ -11,7 +11,7 @@ from scipy.interpolate import (  # type: ignore[import-untyped]
 )
 from typing_extensions import Self
 
-from bores.blackoil.pvt.data import PVTData, PVTDataSet
+from bores.blackoil.pvt.data import PVTData, PVTDataSet, get_stb_to_volume_factor
 from bores.blackoil.pvt.static import StaticPVT
 from bores.blackoil.pvt.tables import PVTTables, clip_compressibility
 from bores.constants import c
@@ -85,7 +85,7 @@ class PVTRegion(Serializable):
             self,
             static=self.static.convert(target, table=table),
             tables=self.tables.convert(target, table=table),
-            unit_system=self.unit_system,
+            unit_system=target,
         )
 
 
@@ -440,12 +440,12 @@ def build_oil_data_from_pvto(
     )
     n_t = len(temperatures)
 
-    # Group records by Rs value
+    # Group records by Rs value. Rows are copied so the deck's own records are never
+    # rescaled in place (a second load of the same deck would otherwise rescale twice).
     solution_gor_to_rows: dict[float, list[dict]] = {}
-    for row in pvto_records:
-        row["solution_gor"] *= mscf_to_scf
-        solution_gor = row["solution_gor"]
-        solution_gor_to_rows.setdefault(solution_gor, []).append(row)
+    for record in pvto_records:
+        row = {**record, "solution_gor": record["solution_gor"] * mscf_to_scf}
+        solution_gor_to_rows.setdefault(row["solution_gor"], []).append(row)
 
     if len(solution_gor_to_rows) < 2:
         raise ValidationError(
@@ -630,11 +630,13 @@ def build_oil_data_from_pvto(
         stock_tank_oil_density = density_record.get("oil")
         stock_tank_gas_density = density_record.get("gas")
 
-    # Density: ρo = (ρo,SC + Rs·ρg,SC) / Bo
+    # Density: ρo = (ρo,SC + Rs·ρg,SC / f) / Bo, with f = ft³/STB in FIELD units (1 otherwise)
     oil_density_2d: npt.NDArray | None = None
     if stock_tank_oil_density is not None and stock_tank_gas_density is not None:
+        stb_to_volume = get_stb_to_volume_factor(unit_system)
         oil_density_2d = (
-            (stock_tank_oil_density + solution_gor_2d * stock_tank_gas_density) / oil_fvf_2d
+            (stock_tank_oil_density + solution_gor_2d * stock_tank_gas_density / stb_to_volume)
+            / oil_fvf_2d
         ).astype(dtype, copy=False)
 
     # Compressibility: co = -(1/Bo)·(∂Bo/∂P) via PCHIP derivative
@@ -868,9 +870,9 @@ def build_gas_data_from_pvtg(
     scf_to_mscf = c.SCF_TO_MSCF if unit_system == UnitSystem.FIELD else 1.0
 
     pressure_to_rows: dict[float, list[dict]] = {}
-    for row in pvtg_records:
-        # Apply the factor once here
-        row["vaporized_ogr"] *= scf_to_mscf
+    for record in pvtg_records:
+        # Copy the row so the deck's own record is never rescaled in place
+        row = {**record, "vaporized_ogr": record["vaporized_ogr"] * scf_to_mscf}
         pressure_to_rows.setdefault(row["pressure"], []).append(row)
 
     if len(pressure_to_rows) < 2:
@@ -982,14 +984,16 @@ def build_gas_data_from_pvtg(
         stock_tank_gas_density = density_record.get("gas")
         stock_tank_oil_density = density_record.get("oil")
 
-    # Density: ρg = (ρg,SC + Rv·ρo,SC) / Bg  [wet gas]
+    # Density: ρg = (ρg,SC + Rv·ρo,SC · f) / Bg  [wet gas], f = ft³/STB in FIELD units
     #          ρg = ρg,SC / Bg                  [dry gas, Rv = 0 column]
     gas_density_2d: npt.NDArray | None = None
     if stock_tank_gas_density is not None:
         rv_grid = np.tile(rv_values[np.newaxis, :], (n_p, 1))
         if stock_tank_oil_density is not None:
+            stb_to_volume = get_stb_to_volume_factor(unit_system)
             gas_density_2d = (
-                (stock_tank_gas_density + rv_grid * stock_tank_oil_density) / gas_fvf_2d
+                (stock_tank_gas_density + rv_grid * stock_tank_oil_density * stb_to_volume)
+                / gas_fvf_2d
             ).astype(dtype, copy=False)
         else:
             gas_density_2d = (stock_tank_gas_density / gas_fvf_2d).astype(dtype, copy=False)
@@ -1169,8 +1173,8 @@ def load_pvt_regions(
     - Water: `PVTW` (always analytical; converted to a table internally).
 
     `DENSITY` records supply the stock-tank reference densities used to
-    derive density tables. When `pvt` is also provided it
-    takes precedence.
+    derive density tables and, through each region's `StaticPVT`, to recompute
+    undersaturated oil density at simulation time.
 
     :param deck_file: Parsed `DeckFile` containing PROPS-section keywords.
     :param temperature: `Temperature` instance.
@@ -1354,7 +1358,7 @@ def load_pvt_regions(
 
         # Assemble `PVTRegion`
         dataset = PVTDataSet(oil=oil_data, gas=gas_data, water=water_data)
-        tables = PVTTables.from_dataset(dataset, **table_kwargs)
+        tables = PVTTables.from_dataset(dataset, pvt=static, **table_kwargs)
         regions[pvtnum] = PVTRegion(static=static, tables=tables, unit_system=unit_system)
 
         logger.debug(

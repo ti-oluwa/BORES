@@ -222,6 +222,7 @@ def solve_connection_pressures_and_rates(
             relevant_water=relevant_water,
             relevant_gas=relevant_gas,
             is_injector=is_injector,
+            radial_flow_constant=control_spec.radial_flow_constant,
             out_connection_oil_rates=workspace.connection_oil_rates,
             out_connection_water_rates=workspace.connection_water_rates,
             out_connection_gas_rates=workspace.connection_gas_rates,

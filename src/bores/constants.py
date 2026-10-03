@@ -257,7 +257,7 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         aliases=("STANDARD_TEMPERATURE_IMPERIAL",),
     ),
     "STANDARD_TEMPERATURE_RANKINE": Constant(
-        value=518.67, description="Standard temperature (15.6°C) in Rankine", unit="°R"
+        value=519.67, description="Standard temperature (60°F) in Rankine", unit="°R"
     ),
     "STANDARD_TEMPERATURE_CELSIUS": Constant(
         value=15.6, description="Standard temperature in Celsius", unit="°C"
@@ -826,6 +826,44 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
     "VISCOSITY_SCALE_SI": Constant(
         value=1.0,
         description="SI already reports viscosity in the coherent unit (Pa*s) its Reynolds-number calculation needs - no conversion.",
+        unit="dimensionless",
+    ),
+    "RADIAL_FLOW_CONSTANT_FIELD": Constant(
+        value=0.039761801434461244,
+        description=(
+            "Multiplies a FIELD well index (mD*ft) times mobility (1/cP) "
+            "times drawdown (psi) to get reservoir-condition rate "
+            "(ft3/day). compute_peaceman_well_index's own W = (k*h*N/G) / "
+            "(ln(re/rw)+C+s) has no 2*pi in it, unlike the textbook radial "
+            "Darcy equation, so this constant carries it: 2*pi times the "
+            "material-property conversion from mD*ft/cP to ft3/(psi*day) "
+            "(itself derived via the SI pivot - permeability, length, "
+            "viscosity, and pressure factors to SI, divided by the "
+            "reservoir_rate factor to SI - rather than reused from the "
+            "nearby MILLIDARCIES_FT_PER_CENTIPOISE_TO_CUBIC_FEET_PER_PSI_PER_DAY, "
+            "which despite its name is actually calibrated for bbl/day, "
+            "not ft3/day; this value matches it multiplied by the bbl-to-ft3 "
+            "factor, 5.614583)."
+        ),
+        unit="(ft3/(psi*day))/(mD*ft/cP)",
+    ),
+    "RADIAL_FLOW_CONSTANT_METRIC": Constant(
+        value=0.05357680657684692,
+        description="Same reasoning as RADIAL_FLOW_CONSTANT_FIELD, derived the same way for METRIC's own units (m3/day).",
+        unit="(m3/(bar*day))/(mD*m/cP)",
+    ),
+    "RADIAL_FLOW_CONSTANT_LAB": Constant(
+        value=22.619467868688037,
+        description="Same reasoning as RADIAL_FLOW_CONSTANT_FIELD, derived the same way for LAB's own units (cm3/hr).",
+        unit="(cm3/(atm*hr))/(mD*cm/cP)",
+    ),
+    "RADIAL_FLOW_CONSTANT_SI": Constant(
+        value=6.283185307179586,
+        description=(
+            "2*pi exactly - SI's own material-property factors are all "
+            "1.0 (coherent by construction), so only the geometric 2*pi "
+            "compute_peaceman_well_index omits remains."
+        ),
         unit="dimensionless",
     ),
     # Reservoir `Fluid` Defaults

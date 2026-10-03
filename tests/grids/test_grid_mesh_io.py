@@ -131,7 +131,7 @@ def test_meshio_warns_when_a_cell_has_to_be_approximated():
         bounding_box=(0.0, 100.0, 0.0, 100.0, 0.0, 50.0),
     )
     with pytest.warns(UserWarning, match="bounding box"):
-        mesh_io.dump_mesh(grid, file_format="vtu")
+        mesh_io.dump_mesh(grid, file_format="vtk")
 
 
 def test_cell_bounding_boxes_ignore_the_connection_across_a_layer_gap():

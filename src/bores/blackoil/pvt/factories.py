@@ -7,7 +7,7 @@ import numpy.typing as npt
 from scipy.interpolate import RectBivariateSpline  # type: ignore[import-untyped]
 
 from bores.blackoil.fluids.simple import Fluid
-from bores.blackoil.pvt.data import PVTData, PVTDataSet
+from bores.blackoil.pvt.data import PVTData, PVTDataSet, get_stb_to_volume_factor
 from bores.blackoil.pvt.tables import PVTTable
 from bores.constants import c
 from bores.correlations import arrays, scalars
@@ -412,11 +412,16 @@ def build_oil_pvt_data(
             ),
         )
 
-    # Derived density table using the formula ρo = (ρo,SC + Rs·ρg,SC) / Bo
+    # Derived density table using the formula ρo = (ρo,SC + Rs·ρg,SC / f) / Bo,
+    # where f = ft³/STB in FIELD units (Rs in SCF/STB) and 1 otherwise.
     if density_table is None:
         if stock_tank_oil_density is not None and stock_tank_gas_density is not None:
+            stb_to_volume = get_stb_to_volume_factor(unit_system)
             density_table = (
-                (stock_tank_oil_density + solution_gas_to_oil_ratio_table * stock_tank_gas_density)
+                (
+                    stock_tank_oil_density
+                    + solution_gas_to_oil_ratio_table * stock_tank_gas_density / stb_to_volume
+                )
                 / formation_volume_factor_table  # type: ignore
             ).astype(dtype)
         else:
@@ -507,7 +512,7 @@ def build_gas_pvt_data(
     :param stock_tank_gas_density: Stock-tank gas density (lbm/ft³) for density derivation.
     :param stock_tank_oil_density: Stock-tank oil density (lbm/ft³) for wet-gas density
         derivation when `vaporized_oil_ratio_table` is provided.
-    :param vaporized_oil_ratio_table: Pre-computed Rv(P, T) (n_p, n_t) in STB/Mscf.
+    :param vaporized_oil_ratio_table: Pre-computed Rv(P, T) (n_p, n_t) in STB/SCF.
     :returns: `PVTData` with `phase=GAS`.
     """
     if pressures.ndim != 1 or not np.all(np.diff(pressures) > 0):
@@ -600,8 +605,12 @@ def build_gas_pvt_data(
     if density_table is None:
         if stock_tank_gas_density is not None:
             if vaporized_oil_ratio_table is not None and stock_tank_oil_density is not None:
+                stb_to_volume = get_stb_to_volume_factor(unit_system)
                 density_table = (  # type: ignore[assignment]
-                    (stock_tank_gas_density + vaporized_oil_ratio_table * stock_tank_oil_density)
+                    (
+                        stock_tank_gas_density
+                        + vaporized_oil_ratio_table * stock_tank_oil_density * stb_to_volume
+                    )
                     / formation_volume_factor_table
                 ).astype(dtype, copy=False)
             else:

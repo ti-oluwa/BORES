@@ -1,4 +1,5 @@
 import enum
+import typing
 
 import attrs
 from typing_extensions import Self
@@ -72,6 +73,18 @@ class WellControlSpec(Serializable):
 
     connection_pressure_mode: ConnectionPressureMode = ConnectionPressureMode.HYDRAULIC
     """How to treat a well with no `WellBoreModel`/`VFPTable` assigned."""
+
+    @property
+    def radial_flow_constant(self) -> Number:
+        """
+        `c.RADIAL_FLOW_CONSTANT_<unit_system>` - multiplies a well index
+        (`compute_peaceman_well_index`'s own units, which have no 2*pi
+        built in) times mobility times drawdown to get a real
+        reservoir-condition rate in this spec's own `unit_system`.
+        Derived, not stored, so it always matches `unit_system` without
+        needing to be recomputed by `convert()`.
+        """
+        return typing.cast(Number, getattr(c, f"RADIAL_FLOW_CONSTANT_{self.unit_system.name}"))
 
     def __attrs_post_init__(self) -> None:
         if self.max_fixed_point_iterations < 1:

@@ -32,6 +32,7 @@ except ImportError as exc:
 from bores.errors import GridExportError, GridImportError
 from bores.grids.base import CellStatus, Grid
 from bores.grids.factories.polyhedral import make_polyhedral_grid
+from bores.grids.io.vtu import dump_polyhedral, get_outward_face_loops, load_polyhedral
 from bores.types import PathOrStr, TextOrPath
 
 __all__ = ["dump_mesh", "load_mesh"]
@@ -193,9 +194,14 @@ def _load(
     if isinstance(source, bytes):
         if file_format is None:
             raise GridImportError(
-                "file_format must be specified when loading from raw bytes "
+                "`file_format` must be specified when loading from raw bytes "
                 "(e.g. file_format='vtk' or 'vtu')."
             )
+
+        if file_format == "vtu":
+            polyhedral = load_polyhedral(source, metadata=metadata, unit_system=unit_system)
+            if polyhedral is not None:
+                return polyhedral
 
         # `meshio` readers need a real path; they cannot read from an in-memory buffer.
         with tempfile.TemporaryDirectory() as directory:
@@ -204,15 +210,21 @@ def _load(
             try:
                 mesh = meshio.read(str(temporary_path), file_format=file_format)
             except Exception as exc:
-                raise GridImportError(f"meshio failed to read bytes: {exc}") from exc
+                raise GridImportError(f"`meshio` failed to read bytes: {exc}") from exc
     else:
         path = Path(source)  # type: ignore[arg-type]
         if not path.is_file():
             raise GridImportError(f"Mesh file not found: {path!r}")
+        if file_format == "vtu" or (file_format is None and path.suffix.lower() == ".vtu"):
+            polyhedral = load_polyhedral(
+                path.read_bytes(), metadata=metadata, unit_system=unit_system
+            )
+            if polyhedral is not None:
+                return polyhedral
         try:
             mesh = meshio.read(str(path), file_format=file_format)
         except Exception as exc:
-            raise GridImportError(f"meshio failed to read {path!r}: {exc}") from exc
+            raise GridImportError(f"`meshio` failed to read {path!r}: {exc}") from exc
 
     return _mesh_to_grid(mesh, metadata=metadata, unit_system=unit_system)
 
@@ -270,24 +282,7 @@ def _mesh_to_grid(
             unit_system=unit_system if unit_system is not None else UnitSystem.FIELD,
         )
     except Exception as exc:
-        raise GridImportError(f"Failed to build Grid from meshio cell blocks: {exc}") from exc
-
-
-def _get_outward_face_loops(grid: Grid, cell: Integer) -> list[IntArray[OneDimension]]:
-    """
-    Get vertex loops of every face of a cell, each wound so the face normal points out of the cell.
-
-    :param grid: Source grid.
-    :param cell: Cell index.
-    :returns: One vertex index array per face.
-    """
-    loops = []
-    for face in grid.get_cell_face_indices(cell):
-        start = grid.face_vertex_offsets[face]
-        end = grid.face_vertex_offsets[face + 1]
-        loop = grid.face_vertex_indices[start:end]
-        loops.append(loop if grid.face_cell_indices[face, 0] == cell else loop[::-1])
-    return typing.cast(list[IntArray[OneDimension]], loops)
+        raise GridImportError(f"Failed to build Grid from `meshio` cell blocks: {exc}") from exc
 
 
 def _get_vtk_cell_nodes(grid: Grid, cell: Integer) -> tuple[str, IntArray[OneDimension]] | None:
@@ -299,9 +294,9 @@ def _get_vtk_cell_nodes(grid: Grid, cell: Integer) -> tuple[str, IntArray[OneDim
 
     :param grid: Source grid.
     :param cell: Cell index.
-    :returns: `(meshio cell type, node indices)`, or `None` for any other cell shape.
+    :returns: `(`meshio` cell type, node indices)`, or `None` for any other cell shape.
     """
-    loops = _get_outward_face_loops(grid, cell)
+    loops = get_outward_face_loops(grid, cell)
     unique = np.unique(np.concatenate(loops)) if loops else np.empty(0, dtype=np.int32)
 
     if len(loops) == 4 and all(len(loop) == 3 for loop in loops) and len(unique) == 4:
@@ -315,28 +310,46 @@ def _get_vtk_cell_nodes(grid: Grid, cell: Integer) -> tuple[str, IntArray[OneDim
         faces_per_vertex = np.bincount(np.concatenate(loops), minlength=int(unique.max()) + 1)
         if not (faces_per_vertex[unique] == 3).all():
             return None
+
         base = loops[0]
         opposite = next((loop for loop in loops[1:] if not set(loop) & set(base)), None)
         if opposite is None:
             return None
+
         edges: set[tuple[int, int]] = set()
         for loop in loops:
             for index, vertex in enumerate(loop):
                 following = loop[(index + 1) % 4]
                 edges.add((int(vertex), int(following)))
                 edges.add((int(following), int(vertex)))
+
         top = []
         for vertex in base:
             partners = [w for w in opposite if (int(vertex), int(w)) in edges]
             if len(partners) != 1:
                 return None
             top.append(partners[0])
+
         # The outward winding of the base points away from the top; VTK wants it toward the top.
         order = [3, 2, 1, 0]
         nodes = [base[i] for i in order] + [top[i] for i in order]
         return "hexahedron", typing.cast(IntArray[OneDimension], np.array(nodes, dtype=np.int32))
 
     return None
+
+
+def _has_cells_needing_polyhedra(grid: Grid) -> bool:
+    """
+    Whether any active cell is neither a hexahedron nor a tetrahedron.
+
+    :param grid: Source grid.
+    :returns: `True` if the grid cannot be written exactly with standard VTK cell types.
+    """
+    assert grid.cell_statuses is not None
+    return any(
+        _get_vtk_cell_nodes(grid, int(cell)) is None
+        for cell in np.flatnonzero(grid.cell_statuses == int(CellStatus.ACTIVE))
+    )
 
 
 def _grid_to_mesh(grid: Grid, *, cell_data: dict[str, npt.NDArray] | None) -> typing.Any:
@@ -346,7 +359,8 @@ def _grid_to_mesh(grid: Grid, *, cell_data: dict[str, npt.NDArray] | None) -> ty
     Cells whose faces form a hexahedron or a tetrahedron are exported exactly, sharing the
     grid's own vertices. Any other cell (for example a Voronoi polyhedron, or a hexahedron cut
     by a fault into more than six faces) is exported as the hexahedron of its bounding box and
-    a warning reports how many there were. Only active cells are exported; the `cell_index`
+    a warning reports how many there were. Writing such a grid as `vtu` bypasses this and
+    exports every cell exactly as a polyhedron. Only active cells are exported; the `cell_index`
     cell field holds each exported cell's index in the grid.
 
     :param grid: Source grid.
@@ -388,6 +402,7 @@ def _grid_to_mesh(grid: Grid, *, cell_data: dict[str, npt.NDArray] | None) -> ty
             nodes = np.arange(next_point, next_point + 8, dtype=np.int32)
             next_point += 8
             cell_type = "hexahedron"
+
         blocks[cell_type][0].append(int(cell))
         blocks[cell_type][1].append(nodes)
 
@@ -412,6 +427,7 @@ def _grid_to_mesh(grid: Grid, *, cell_data: dict[str, npt.NDArray] | None) -> ty
                     f"but grid has {n_cells} cells."
                 )
             fields[field_name] = array
+
     fields["cell_index"] = np.arange(n_cells, dtype=np.int64)
 
     cells = []
@@ -447,21 +463,28 @@ def _dump(
     :returns: `bytes` if `destination` is `None`; `None` otherwise.
     :raises GridExportError: If serialisation fails.
     """
+    if file_format == "vtu" and _has_cells_needing_polyhedra(grid):
+        payload = dump_polyhedral(grid, cell_data=cell_data)
+        if destination is None:
+            return payload
+        Path(destination).write_bytes(payload)
+        return None
+
     try:
         mesh = _grid_to_mesh(grid, cell_data=cell_data)
     except GridExportError:
         raise
     except Exception as exc:
-        raise GridExportError(f"Failed to convert grid to meshio.Mesh: {exc}") from exc
+        raise GridExportError(f"Failed to convert grid to `meshio.Mesh`: {exc}") from exc
 
     if destination is None:
-        # meshio writers need a real path; they cannot write to an in-memory buffer.
+        # `meshio` writers need a real path; they cannot write to an in-memory buffer.
         with tempfile.TemporaryDirectory() as directory:
             temporary_path = Path(directory) / f"grid.{file_format}"
             try:
                 meshio.write(str(temporary_path), mesh, file_format=file_format)
             except Exception as exc:
-                raise GridExportError(f"meshio failed to write {file_format!r}: {exc}") from exc
+                raise GridExportError(f"`meshio` failed to write {file_format!r}: {exc}") from exc
             return temporary_path.read_bytes()
 
     path = Path(destination)
@@ -469,6 +492,6 @@ def _dump(
         meshio.write(str(path), mesh, file_format=file_format)
     except Exception as exc:
         raise GridExportError(
-            f"meshio failed to write {file_format!r} to {path!r}: {exc}"
+            f"`meshio` failed to write {file_format!r} to {path!r}: {exc}"
         ) from exc
     return None

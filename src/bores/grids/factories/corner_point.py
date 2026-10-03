@@ -652,6 +652,7 @@ def connect_unmatched_faces(
         record = face_registry[key]
         if record.neighbour_cell_index == -1:
             unmatched[record.owner_cell_index, local_index] = key
+
     for cell, local_index in degenerate_faces:
         unmatched[cell, local_index] = None
     if not unmatched:
@@ -802,15 +803,19 @@ def connect_unmatched_faces(
         for corner in (0, 1, 3, 2):
             if not footprint or float(np.linalg.norm(middle[corner] - footprint[-1])) > 1e-9:
                 footprint.append(middle[corner])
+
         if len(footprint) > 1 and float(np.linalg.norm(footprint[0] - footprint[-1])) <= 1e-9:
             footprint.pop()
         if len(footprint) < 3:
             continue
+
         normal = np.zeros(3)
         for index, point in enumerate(footprint):
             normal += np.cross(point, footprint[(index + 1) % len(footprint)])
+
         if float(np.linalg.norm(normal)) <= 0.0:
             continue
+
         add_face(footprint, owner=cell_a, neighbour=cell_b)
         used_tops.add(cell_b)
         for key in (key_a, unmatched[cell_b, TOP_FACE_LOCAL]):
@@ -819,6 +824,7 @@ def connect_unmatched_faces(
 
     for key in replaced:
         face_registry.pop(key, None)
+
     if not new_points:
         return vertex_coordinates
     return typing.cast(
@@ -991,7 +997,7 @@ def compute_corner_point_geometry(
         for vertex in range(8):
             vtk_corner_indices[cell_idx, vertex] = corner_global[cell_idx, vtk_to_corner[vertex]]
 
-    cell_volumes, cell_centroids = _compute_hex_volumes_and_centroids(
+    cell_volumes, cell_centroids = compute_hex_volumes_and_centroids(
         vtk_corner_indices=vtk_corner_indices,
         vertex_coordinates=vertex_coordinates,  # type: ignore[arg-type]
     )
@@ -1005,6 +1011,7 @@ def compute_corner_point_geometry(
             f"{len(bad)} active cell(s) have negative volume (inverted geometry): "
             f"{bad[:5].tolist()}{'...' if len(bad) > 5 else ''}."
         )
+
     cell_volumes = typing.cast(NumberArray[OneDimension], np.where(active_mask, cell_volumes, 0.0))
     cell_statuses = typing.cast(
         IntArray[OneDimension],
@@ -1212,7 +1219,7 @@ def _fill_zcorn(
 
 
 @numba.njit(parallel=True, cache=True)
-def _compute_hex_volumes_and_centroids(
+def compute_hex_volumes_and_centroids(
     vtk_corner_indices: IntArray[TwoDimensions],
     vertex_coordinates: NumberArray[TwoDimensions],
 ) -> tuple[NumberArray[OneDimension], NumberArray[TwoDimensions]]:
@@ -1313,7 +1320,7 @@ def rederive_corner_point_arrays(
     grid: Grid,
 ) -> tuple[CoordArray, ZCornArray, Integer, Integer, Integer]:
     """
-    Reconstruct approximate COORD and ZCORN arrays from a `Grid`.
+    Reconstruct approximate `COORD` and `ZCORN` arrays from a `Grid`.
 
     The reconstruction uses each cell's AABB. Pillars are assumed straight
     and vertical, so this is lossy for grids with lateral pillar displacement.
