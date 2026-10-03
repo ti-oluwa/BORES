@@ -6,8 +6,8 @@ import pytest
 from bores.grids.factories.base import FaultRecord
 from bores.grids.factories.corner_point import (
     clip_convex_polygon,
-    make_corner_point_grid,
     compute_polygon_signed_area,
+    make_corner_point_grid,
     subtract_convex_polygon,
 )
 

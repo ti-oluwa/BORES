@@ -997,7 +997,7 @@ def compute_hydrocarbon_in_place(
     acre_ft_to_ft3: Number = 43560.0,
 ) -> Number:
     """
-    Computes the (free) hydrocarbon (or free water) in place (HCIP or FWIP) in stock tank 
+    Computes the (free) hydrocarbon (or free water) in place (HCIP or FWIP) in stock tank
     barrels (STB) or standard cubic feet (SCF) using the volumetric method.
 
     The formula for oil in place (OIP) is:

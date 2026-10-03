@@ -53,6 +53,7 @@ def make_voronoi_grid(
     layer_thicknesses: Number | npt.ArrayLike = 1.0,
     unit_system: UnitSystem = UnitSystem.FIELD,
     metadata: typing.Mapping[str, typing.Any] | None = None,
+    cell_statuses: IntArray[OneDimension] | None = None,
     nnc_cell_indices: IntArray[TwoDimensions] | None = None,
     nnc_transmissibilities: NumberArray[OneDimension] | None = None,
     positive_x_transmissibility_multipliers: NumberArray[OneDimension] | None = None,
@@ -88,6 +89,8 @@ def make_voronoi_grid(
         (multiple layers stacked downward from `z_top`).
         **2-D extruded mode only** - ignored for 3-D seeds.
     :param metadata: Optional free-form metadata dictionary attached to the grid.
+    :param cell_statuses: Optional shape `(n_cells,)` activation flags (1 active, 0 inactive).
+        Faces that touch an inactive cell are dropped.
     :returns: A fully initialised, immutable `bores.grids.base.Grid`.
     :raises ValidationError: If fewer than 4 seeds are provided, any thickness
         is non-positive, bounding box is degenerate, or the seed array has the
@@ -171,6 +174,7 @@ def make_voronoi_grid(
         face_cell_indices=face_cell_indices,
         unit_system=unit_system,
         metadata=metadata,
+        cell_statuses=cell_statuses,
         nnc_cell_indices=nnc_cell_indices,
         nnc_transmissibilities=nnc_transmissibilities,
         positive_x_transmissibility_multipliers=positive_x_transmissibility_multipliers,

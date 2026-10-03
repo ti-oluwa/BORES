@@ -995,6 +995,16 @@ def compute_corner_point_geometry(
         vtk_corner_indices=vtk_corner_indices,
         vertex_coordinates=vertex_coordinates,  # type: ignore[arg-type]
     )
+    box_volume = np.prod(corner_coordinates.max(axis=1) - corner_coordinates.min(axis=1), axis=1)
+    round_off = (cell_volumes < 0.0) & (cell_volumes >= -1e-9 * box_volume)
+    cell_volumes = typing.cast(NumberArray[OneDimension], np.where(round_off, 0.0, cell_volumes))
+    inverted = active_mask & (cell_volumes < 0.0)
+    if inverted.any():
+        bad = np.flatnonzero(inverted)
+        raise InvalidGridError(
+            f"{len(bad)} active cell(s) have negative volume (inverted geometry): "
+            f"{bad[:5].tolist()}{'...' if len(bad) > 5 else ''}."
+        )
     cell_volumes = typing.cast(NumberArray[OneDimension], np.where(active_mask, cell_volumes, 0.0))
     cell_statuses = typing.cast(
         IntArray[OneDimension],
@@ -1207,19 +1217,19 @@ def _compute_hex_volumes_and_centroids(
     vertex_coordinates: NumberArray[TwoDimensions],
 ) -> tuple[NumberArray[OneDimension], NumberArray[TwoDimensions]]:
     """
-    Compute hexahedral cell volumes and centroids via 5-tetrahedron decomposition.
+    Compute signed hexahedral cell volumes and centroids from the trilinear cell map.
 
-    VTK hexahedron corner ordering:
+    A corner-point cell has bilinear faces, so its volume is the integral of the Jacobian
+    determinant of the trilinear map from the unit cube. The determinant is quadratic in each
+    local coordinate (and the centroid integrand cubic), so 2 x 2 x 2 Gauss quadrature is
+    exact. Unlike a tetrahedral split, the result does not depend on how a warped face is
+    divided, and an inverted cell gets a negative volume.
+
+    VTK hexahedron corner ordering, with `x` along `0 -> 1`, `y` along `0 -> 3` and depth along
+    `0 -> 4` (so a regular cell has a positive volume):
 
         0=(x0,y0,zt)  1=(x1,y0,zt)  2=(x1,y1,zt)  3=(x0,y1,zt)
         4=(x0,y0,zb)  5=(x1,y0,zb)  6=(x1,y1,zb)  7=(x0,y1,zb)
-
-    5-tet decomposition:
-
-        T0: [0,1,3,4]  T1: [1,4,5,6]  T2: [1,3,4,6]
-        T3: [1,2,3,6]  T4: [3,4,6,7]
-
-    Uses absolute scalar triple product - robust for distorted/inverted cells.
 
     :param vtk_corner_indices: Shape `(n_cells, 8)` global vertex indices.
     :param vertex_coordinates: Shape `(n_verts, 3)` world coordinates.
@@ -1228,80 +1238,73 @@ def _compute_hex_volumes_and_centroids(
     n_cells = vtk_corner_indices.shape[0]
     cell_volumes = np.zeros(n_cells, dtype=np.float64)
     cell_centroids = np.zeros((n_cells, 3), dtype=np.float64)
+    gauss_point = 0.5773502691896257
+    node_signs = np.array([
+        [-1.0, -1.0, -1.0],
+        [1.0, -1.0, -1.0],
+        [1.0, 1.0, -1.0],
+        [-1.0, 1.0, -1.0],
+        [-1.0, -1.0, 1.0],
+        [1.0, -1.0, 1.0],
+        [1.0, 1.0, 1.0],
+        [-1.0, 1.0, 1.0],
+    ])
 
     for cell_idx in numba.prange(n_cells):  # type: ignore
+        # Coordinates relative to the first corner keep the arithmetic well conditioned.
+        corners = np.empty((8, 3), dtype=np.float64)
+        for node in range(8):
+            for axis in range(3):
+                corners[node, axis] = (
+                    vertex_coordinates[vtk_corner_indices[cell_idx, node], axis]
+                    - vertex_coordinates[vtk_corner_indices[cell_idx, 0], axis]
+                )
+
         total_volume = 0.0
-        wcx = 0.0
-        wcy = 0.0
-        wcz = 0.0
-
-        for t in range(5):
-            if t == 0:
-                l0, l1, l2, l3 = 0, 1, 3, 4
-            elif t == 1:
-                l0, l1, l2, l3 = 1, 4, 5, 6
-            elif t == 2:
-                l0, l1, l2, l3 = 1, 3, 4, 6
-            elif t == 3:
-                l0, l1, l2, l3 = 1, 2, 3, 6
-            else:
-                l0, l1, l2, l3 = 3, 4, 6, 7
-
-            g0 = vtk_corner_indices[cell_idx, l0]
-            g1 = vtk_corner_indices[cell_idx, l1]
-            g2 = vtk_corner_indices[cell_idx, l2]
-            g3 = vtk_corner_indices[cell_idx, l3]
-
-            x0 = vertex_coordinates[g0, 0]
-            y0 = vertex_coordinates[g0, 1]
-            z0 = vertex_coordinates[g0, 2]
-
-            ax = vertex_coordinates[g1, 0] - x0
-            ay = vertex_coordinates[g1, 1] - y0
-            az = vertex_coordinates[g1, 2] - z0
-
-            bx = vertex_coordinates[g2, 0] - x0
-            by = vertex_coordinates[g2, 1] - y0
-            bz = vertex_coordinates[g2, 2] - z0
-
-            cx = vertex_coordinates[g3, 0] - x0
-            cy = vertex_coordinates[g3, 1] - y0
-            cz = vertex_coordinates[g3, 2] - z0
-
-            cross_x = by * cz - bz * cy
-            cross_y = bz * cx - bx * cz
-            cross_z = bx * cy - by * cx
-            tetrahedron_volume = abs(ax * cross_x + ay * cross_y + az * cross_z) / 6.0
-
-            tetrahedron_cx = (
-                x0
-                + vertex_coordinates[g1, 0]
-                + vertex_coordinates[g2, 0]
-                + vertex_coordinates[g3, 0]
-            ) * 0.25
-            tetrahedron_cy = (
-                y0
-                + vertex_coordinates[g1, 1]
-                + vertex_coordinates[g2, 1]
-                + vertex_coordinates[g3, 1]
-            ) * 0.25
-            tetrahedron_cz = (
-                z0
-                + vertex_coordinates[g1, 2]
-                + vertex_coordinates[g2, 2]
-                + vertex_coordinates[g3, 2]
-            ) * 0.25
-
-            total_volume += tetrahedron_volume
-            wcx += tetrahedron_volume * tetrahedron_cx
-            wcy += tetrahedron_volume * tetrahedron_cy
-            wcz += tetrahedron_volume * tetrahedron_cz
+        weighted = np.zeros(3, dtype=np.float64)
+        for i in range(2):
+            xi = (2 * i - 1) * gauss_point
+            for j in range(2):
+                eta = (2 * j - 1) * gauss_point
+                for k in range(2):
+                    zeta = (2 * k - 1) * gauss_point
+                    jacobian = np.zeros((3, 3), dtype=np.float64)
+                    position = np.zeros(3, dtype=np.float64)
+                    for node in range(8):
+                        sx = node_signs[node, 0]
+                        sy = node_signs[node, 1]
+                        sz = node_signs[node, 2]
+                        shape = (1 + sx * xi) * (1 + sy * eta) * (1 + sz * zeta) / 8.0
+                        d_xi = sx * (1 + sy * eta) * (1 + sz * zeta) / 8.0
+                        d_eta = sy * (1 + sx * xi) * (1 + sz * zeta) / 8.0
+                        d_zeta = sz * (1 + sx * xi) * (1 + sy * eta) / 8.0
+                        for axis in range(3):
+                            jacobian[axis, 0] += d_xi * corners[node, axis]
+                            jacobian[axis, 1] += d_eta * corners[node, axis]
+                            jacobian[axis, 2] += d_zeta * corners[node, axis]
+                            position[axis] += shape * corners[node, axis]
+                    determinant = (
+                        jacobian[0, 0]
+                        * (jacobian[1, 1] * jacobian[2, 2] - jacobian[1, 2] * jacobian[2, 1])
+                        - jacobian[0, 1]
+                        * (jacobian[1, 0] * jacobian[2, 2] - jacobian[1, 2] * jacobian[2, 0])
+                        + jacobian[0, 2]
+                        * (jacobian[1, 0] * jacobian[2, 1] - jacobian[1, 1] * jacobian[2, 0])
+                    )
+                    total_volume += determinant
+                    for axis in range(3):
+                        weighted[axis] += determinant * position[axis]
 
         cell_volumes[cell_idx] = total_volume
-        if total_volume > 0.0:
-            cell_centroids[cell_idx, 0] = wcx / total_volume
-            cell_centroids[cell_idx, 1] = wcy / total_volume
-            cell_centroids[cell_idx, 2] = wcz / total_volume
+        for axis in range(3):
+            origin = vertex_coordinates[vtk_corner_indices[cell_idx, 0], axis]
+            if abs(total_volume) > 0.0:
+                cell_centroids[cell_idx, axis] = origin + weighted[axis] / total_volume
+            else:
+                mean = 0.0
+                for node in range(8):
+                    mean += corners[node, axis]
+                cell_centroids[cell_idx, axis] = origin + mean / 8.0
 
     return cell_volumes, cell_centroids
 

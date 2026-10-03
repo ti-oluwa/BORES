@@ -31,6 +31,7 @@ def make_polyhedral_grid(
     custom_cell_faces: dict[str, ElementFaces] | None = None,
     unit_system: UnitSystem = UnitSystem.FIELD,
     metadata: typing.Mapping[str, typing.Any] | None = None,
+    cell_statuses: IntArray[OneDimension] | None = None,
     nnc_cell_indices: IntArray[TwoDimensions] | None = None,
     nnc_transmissibilities: NumberArray[OneDimension] | None = None,
     positive_x_transmissibility_multipliers: NumberArray[OneDimension] | None = None,
@@ -89,6 +90,8 @@ def make_polyhedral_grid(
         table, extending or overriding `ELEMENTS_FACES`.
         Use this for non-standard polyhedral element types.
     :param metadata: Optional metadata dictionary.
+    :param cell_statuses: Optional shape `(n_cells,)` activation flags (1 active, 0 inactive).
+        Faces that touch an inactive cell are dropped.
     :returns: A fully initialised `bores.grids.base.Grid`.
     :raises ValidationError: If a cell block contains an unrecognised element type.
     :raises InvalidPointArrayError: If `vertex_coordinates` is not `(N, 3)`.
@@ -144,6 +147,7 @@ def make_polyhedral_grid(
         face_cell_indices=face_cell_indices,
         unit_system=unit_system,
         metadata=metadata,
+        cell_statuses=cell_statuses,
         nnc_cell_indices=nnc_cell_indices,
         nnc_transmissibilities=nnc_transmissibilities,
         positive_x_transmissibility_multipliers=positive_x_transmissibility_multipliers,

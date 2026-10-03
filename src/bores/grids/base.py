@@ -607,6 +607,7 @@ class Grid(
 
         self._validate_inputs()
         self._canonicalize_boundary_faces()
+        self._remove_faces_of_inactive_cells()
         self._classify_faces()
         self._populate_defaults()
         self._validate_consistency()
@@ -898,6 +899,69 @@ class Grid(
 
         object.__setattr__(self, "face_cell_indices", face_cell_indices)
         object.__setattr__(self, "face_vertex_indices", face_vertex_indices)
+
+    def _remove_faces_of_inactive_cells(self) -> None:
+        """
+        Drop every face that touches an inactive cell, so inactive cells have no connections.
+
+        Cell volumes, centroids and bounding boxes are taken from the full face set first when
+        they were not supplied, so an inactive cell keeps its geometry (with zero volume).
+        Face indices after the dropped ones shift down and `fault_face_indices` is renumbered.
+        """
+        if self.cell_statuses is None:
+            return
+        inactive = self.cell_statuses == int(CellStatus.INACTIVE)
+        if not inactive.any():
+            return
+        owners = self.face_cell_indices[:, 0]
+        neighbours = self.face_cell_indices[:, 1]
+        touches_inactive = ((owners >= 0) & inactive[np.maximum(owners, 0)]) | (
+            (neighbours >= 0) & inactive[np.maximum(neighbours, 0)]
+        )
+        if not touches_inactive.any():
+            return
+
+        if self.cell_volumes is None or self.cell_centroids is None:
+            self._compute_cell_geometry()
+        if self.cell_min_xyz is None or self.cell_max_xyz is None:
+            cell_min, cell_max = compute_cell_bounding_boxes(
+                face_cell_indices=self.face_cell_indices,
+                face_vertex_indices=self.face_vertex_indices,
+                face_vertex_offsets=self.face_vertex_offsets,
+                vertex_coordinates=self.vertex_coordinates,
+                n_cells=self._get_cell_count(),
+            )
+            object.__setattr__(self, "cell_min_xyz", cell_min)
+            object.__setattr__(self, "cell_max_xyz", cell_max)
+        assert self.cell_volumes is not None
+        object.__setattr__(self, "cell_volumes", np.where(inactive, 0.0, self.cell_volumes))
+
+        keep = ~touches_inactive
+        new_face_index = np.cumsum(keep) - 1
+        lengths = np.diff(self.face_vertex_offsets)
+        kept_vertex_entries = np.repeat(keep, lengths)
+        kept_lengths = lengths[keep]
+        object.__setattr__(self, "face_cell_indices", self.face_cell_indices[keep])
+        object.__setattr__(
+            self, "face_vertex_indices", self.face_vertex_indices[kept_vertex_entries]
+        )
+        object.__setattr__(
+            self,
+            "face_vertex_offsets",
+            np.concatenate([[0], np.cumsum(kept_lengths)]).astype(self.face_vertex_offsets.dtype),
+        )
+        if self.face_connection_types is not None:
+            object.__setattr__(self, "face_connection_types", self.face_connection_types[keep])
+        if self.fault_face_indices:
+            renumbered = {
+                name: new_face_index[faces[keep[faces]]].astype(faces.dtype)
+                for name, faces in self.fault_face_indices.items()
+            }
+            object.__setattr__(
+                self,
+                "fault_face_indices",
+                {name: faces for name, faces in renumbered.items() if len(faces)} or None,
+            )
 
     def _classify_faces(self) -> None:
         owner_cells = self.face_cell_indices[:, 0]
