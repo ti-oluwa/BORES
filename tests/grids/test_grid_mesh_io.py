@@ -84,3 +84,70 @@ def test_corner_point_depth_beyond_a_tilted_pillar_extrapolates_along_the_pillar
     assert _interpolate_pillar_point(top, bottom, 150.0)[0] == pytest.approx(15.0)
     assert _interpolate_pillar_point(top, bottom, -50.0)[0] == pytest.approx(-5.0)
     assert _interpolate_pillar_point(top, bottom, 50.0)[0] == pytest.approx(5.0)
+
+
+def skewed_corner_point_grid():
+    nx, ny, nz = 3, 3, 2
+    coord = np.zeros((ny + 1, nx + 1, 6))
+    for j in range(ny + 1):
+        for i in range(nx + 1):
+            coord[j, i] = [i * 10, j * 10, 0, i * 10, j * 10, 100]
+    zcorn = np.zeros((2 * nz, 2 * ny, 2 * nx))
+    for k in range(nz):
+        zcorn[2 * k] = k * 10
+        zcorn[2 * k + 1] = (k + 1) * 10
+    pillar_x = (np.arange(2 * nx) + 1) // 2
+    pillar_y = (np.arange(2 * ny) + 1) // 2
+    zcorn += 4.0 * pillar_x[None, None, :] + 2.5 * pillar_y[None, :, None]
+    from bores.grids.factories.corner_point import make_corner_point_grid
+
+    return make_corner_point_grid(coord=coord, zcorn=zcorn, metadata={"dimensions": (nx, ny, nz)})
+
+
+@pytest.mark.parametrize("file_format", ["vtk", "vtu"])
+def test_meshio_exports_skewed_hexahedra_exactly(file_format, recwarn):
+    pytest.importorskip("meshio")
+    from bores.grids.io import meshio as mesh_io
+
+    grid = skewed_corner_point_grid()
+    assert grid.cell_length_z[4] > grid.cell_thickness[4] + 1.0
+    loaded = mesh_io.load_mesh(
+        mesh_io.dump_mesh(grid, file_format=file_format), file_format=file_format
+    )
+    assert loaded.n_cells == grid.n_cells
+    assert loaded.n_faces == grid.n_faces
+    assert np.allclose(np.sort(loaded.cell_volumes), np.sort(grid.cell_volumes))
+    assert not [w for w in recwarn if "bounding box" in str(w.message)]
+
+
+def test_meshio_warns_when_a_cell_has_to_be_approximated():
+    pytest.importorskip("meshio")
+    from bores.grids.factories.voronoi import make_voronoi_grid
+    from bores.grids.io import meshio as mesh_io
+
+    rng = np.random.default_rng(3)
+    grid = make_voronoi_grid(
+        rng.random((12, 3)) * np.array([100, 100, 50]),
+        bounding_box=(0.0, 100.0, 0.0, 100.0, 0.0, 50.0),
+    )
+    with pytest.warns(UserWarning, match="bounding box"):
+        mesh_io.dump_mesh(grid, file_format="vtu")
+
+
+def test_cell_bounding_boxes_ignore_the_connection_across_a_layer_gap():
+    from bores.grids.factories.corner_point import make_corner_point_grid
+
+    coord = np.zeros((2, 2, 6))
+    for j in range(2):
+        for i in range(2):
+            coord[j, i] = [i * 10, j * 10, 0, i * 10, j * 10, 100]
+    zcorn = np.zeros((4, 2, 2))
+    zcorn[0], zcorn[1], zcorn[2], zcorn[3] = 0.0, 10.0, 14.0, 24.0  # a 4-unit gap between layers
+    grid = make_corner_point_grid(coord=coord, zcorn=zcorn, metadata={"dimensions": (1, 1, 2)})
+    assert grid.cell_min_xyz[0, 2] == pytest.approx(0.0) and grid.cell_max_xyz[
+        0, 2
+    ] == pytest.approx(10.0)
+    assert grid.cell_min_xyz[1, 2] == pytest.approx(14.0) and grid.cell_max_xyz[
+        1, 2
+    ] == pytest.approx(24.0)
+    assert any(abs(grid.face_unit_normals[f][2]) > 0.9 for f in grid.interior_face_indices)

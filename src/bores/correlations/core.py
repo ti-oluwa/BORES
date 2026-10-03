@@ -87,7 +87,7 @@ def validate_input_pressure(pressure: NumberOrArray[NDimension]) -> None:
 
 
 @functools.lru_cache(maxsize=64)
-def is_CoolProp_supported_fluid(fluid: str) -> bool:
+def is_CoolProp_fluid(fluid: str) -> bool:
     """
     Check if the fluid is supported by CoolProp.
 
@@ -161,7 +161,7 @@ def fahrenheit_to_rankine(
     return temp_F + 459.67  # type: ignore[return-value]
 
 
-# Henry's constants (Sander, 2020) — ln(H) = A + B/T + C*ln(T)
+# Henry's constants (Sander, 2020) - ln(H) = A + B/T + C*ln(T)
 # H in mol/(m³·Pa), will be inverted to Pa·m³/mol
 HENRY_COEFFICIENTS = {
     "co2": (-58.0931, 90.5069, 0.027766),

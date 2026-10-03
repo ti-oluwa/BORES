@@ -359,7 +359,7 @@ def compute_water_viscosity(
 
 
 @numba.njit(cache=True)
-def _gas_solubility_in_water_mccain_methane(
+def compute_gas_solubility_in_water_mccain_methane(
     pressure: NumberArray[NDimension],
     temperature: NumberArray[NDimension],
     salinity: NumberOrArray[NDimension] = 0.0,
@@ -393,7 +393,8 @@ def _gas_solubility_in_water_mccain_methane(
 
     if min_(temperature) < 100 or max_(temperature) > 400:
         raise ValidationError(
-            f"Temperature {min_(temperature)}°F - {max_(temperature)}°F out of valid range for McCain's Rsw correlation (100°F to 400°F) (311 K to 478 K)."
+            f"Temperature {min_(temperature)}°F - {max_(temperature)}°F out of valid range "
+            "for McCain's Rsw correlation (100°F to 400°F) (311 K to 478 K)."
         )
 
     # A(T_F) term from McCain
@@ -410,7 +411,7 @@ def _gas_solubility_in_water_mccain_methane(
 
 
 @numba.njit(cache=True)
-def _gas_solubility_in_water_duan_sun_co2(
+def compute_gas_solubility_in_water_duan_sun_co2(
     pressure: NumberArray[NDimension],
     temperature: NumberArray[NDimension],
     salinity: NumberOrArray[NDimension] = 0.0,
@@ -500,7 +501,7 @@ def _gas_solubility_in_water_duan_sun_co2(
     return rsw.astype(dtype)  # type: ignore[return-value]
 
 
-def _gas_solubility_in_water_henry_law(
+def compute_gas_solubility_in_water_henry_law(
     pressure: NumberArray[NDimension],
     temperature: NumberArray[NDimension],
     gas: str,
@@ -595,7 +596,7 @@ def compute_gas_solubility_in_water(
 
         # Apply McCain correlation where applicable
         if np.any(mccain_mask):
-            mccain_result = _gas_solubility_in_water_mccain_methane(
+            mccain_result = compute_gas_solubility_in_water_mccain_methane(
                 get_mask(pressure, mccain_mask),
                 get_mask(temperature, mccain_mask),
                 salinity,
@@ -608,7 +609,7 @@ def compute_gas_solubility_in_water(
                 "methane": c.MOLECULAR_WEIGHtemperature_in_celsiusH4
                 / 1000,  # Convert g/mol to kg/mol
             }
-            henry_result = _gas_solubility_in_water_henry_law(
+            henry_result = compute_gas_solubility_in_water_henry_law(
                 pressure=get_mask(pressure, henry_mask),
                 temperature=get_mask(temperature, henry_mask),
                 gas=gas,
@@ -625,7 +626,7 @@ def compute_gas_solubility_in_water(
 
         # Apply Duan correlation where applicable
         if np.any(duan_mask):
-            duan_result = _gas_solubility_in_water_duan_sun_co2(
+            duan_result = compute_gas_solubility_in_water_duan_sun_co2(
                 pressure=get_mask(pressure, duan_mask),
                 temperature=get_mask(temperature, duan_mask),
                 salinity=salinity,
@@ -639,7 +640,7 @@ def compute_gas_solubility_in_water(
             molar_masses = {
                 "co2": c.MOLECULAR_WEIGHT_CO2 / 1000,  # Convert g/mol to kg/mol
             }
-            henry_result = _gas_solubility_in_water_henry_law(
+            henry_result = compute_gas_solubility_in_water_henry_law(
                 pressure=get_mask(pressure, henry_mask),
                 temperature=get_mask(temperature, henry_mask),
                 gas=gas,
@@ -660,7 +661,7 @@ def compute_gas_solubility_in_water(
             "he": c.MOLECULAR_WEIGHT_HELIUM / 1000,
             "h2": c.MOLECULAR_WEIGHT_H2 / 1000,
         }
-        result = _gas_solubility_in_water_henry_law(
+        result = compute_gas_solubility_in_water_henry_law(
             pressure=pressure,
             temperature=temperature,
             gas=gas,
@@ -794,14 +795,8 @@ def compute_water_compressibility(
     :return: Water compressibility (C_w) in (psi⁻¹).
     """
     gas_fvf_in_bbl_per_scf = gas_formation_volume_factor * c.CUBIC_FEET_TO_BARRELS
-    dBw_gas_free_dP = _compute_dBw_gas_free_dp_mccain(
-        pressure=pressure,
-        temperature=temperature,
-    )
-    dRsw_dP = _compute_dRsw_dP_mccain(
-        temperature=temperature,
-        salinity=salinity,
-    )
+    dBw_gas_free_dP = _compute_dBw_gas_free_dp_mccain(pressure=pressure, temperature=temperature)
+    dRsw_dP = _compute_dRsw_dP_mccain(temperature=temperature, salinity=salinity)
 
     # Handle array case - compute only where needed
     result = np.empty_like(pressure)

@@ -82,7 +82,7 @@ def compute_fluid_viscosity(
     temperature_array = fahrenheit_to_kelvin(temperature)  # type: ignore[arg-type]
     pressure_array = np.multiply(pressure, c.PSI_TO_PASCAL, dtype=dtype)
 
-    def _compute_viscosity(pressure_in_pascals, temperature_in_kelvin, fluid: str):
+    def compute_viscosity(pressure_in_pascals, temperature_in_kelvin, fluid: str):
         viscosity = PropsSI(
             "V",
             "P",
@@ -95,7 +95,7 @@ def compute_fluid_viscosity(
 
     viscosity_array = np.empty_like(pressure_array)
     for idx in np.ndindex(pressure_array.shape):
-        viscosity_array[idx] = _compute_viscosity(
+        viscosity_array[idx] = compute_viscosity(
             pressure_in_pascals=pressure_array[idx],  # type: ignore
             temperature_in_kelvin=temperature_array[idx],  # type: ignore
             fluid=fluid,
@@ -120,7 +120,7 @@ def compute_fluid_compressibility_factor(
     temperature_array = fahrenheit_to_kelvin(temperature)  # type: ignore[arg-type]
     pressure_array = np.multiply(pressure, c.PSI_TO_PASCAL, dtype=dtype)
 
-    def _compute_z(pressure_in_pascals, temperature_in_kelvin, fluid: str):
+    def compute_z_factor(pressure_in_pascals, temperature_in_kelvin, fluid: str):
         return PropsSI(
             "Z",
             "P",
@@ -132,7 +132,7 @@ def compute_fluid_compressibility_factor(
 
     z_array = np.empty_like(pressure_array)
     for idx in np.ndindex(pressure_array.shape):
-        z_array[idx] = _compute_z(
+        z_array[idx] = compute_z_factor(
             pressure_in_pascals=pressure_array[idx],
             temperature_in_kelvin=temperature_array[idx],  # type: ignore
             fluid=fluid,
@@ -161,7 +161,7 @@ def compute_fluid_compressibility(
     temperature_array = fahrenheit_to_kelvin(temperature)  # type: ignore[arg-type]
     pressure_array = np.multiply(pressure, c.PSI_TO_PASCAL, dtype=dtype)
 
-    def _compute_compressibility(pressure_in_pascals, temperature_in_kelvin, fluid: str):
+    def compute_compressibility(pressure_in_pascals, temperature_in_kelvin, fluid: str):
         return (
             PropsSI(
                 "ISOTHERMAL_COMPRESSIBILITY",
@@ -176,7 +176,7 @@ def compute_fluid_compressibility(
 
     compressibility_array = np.empty_like(pressure_array)
     for idx in np.ndindex(pressure_array.shape):
-        compressibility_array[idx] = _compute_compressibility(
+        compressibility_array[idx] = compute_compressibility(
             pressure_in_pascals=pressure_array[idx],
             temperature_in_kelvin=temperature_array[idx],  # type: ignore
             fluid=fluid,

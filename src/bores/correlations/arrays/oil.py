@@ -139,7 +139,7 @@ def compute_oil_formation_volume_factor_standing(
 
 
 @numba.njit(cache=True)
-def _get_vazquez_beggs_oil_fvf_coefficients(
+def get_vazquez_beggs_oil_fvf_coefficients(
     oil_api_gravity: NumberArray[NDimension],
 ) -> tuple[
     NumberArray[NDimension],
@@ -188,7 +188,7 @@ def compute_oil_formation_volume_factor_vazquez_and_beggs(
     """
     dtype = oil_specific_gravity.dtype
     oil_api_gravity = compute_oil_api_gravity(oil_specific_gravity)
-    a1, a2, a3 = _get_vazquez_beggs_oil_fvf_coefficients(oil_api_gravity)
+    a1, a2, a3 = get_vazquez_beggs_oil_fvf_coefficients(oil_api_gravity)
     oil_fvf = (
         1
         + (a1 * gas_to_oil_ratio)
@@ -320,7 +320,7 @@ def compute_oil_api_gravity(
 
 
 @numba.njit(cache=True)
-def _get_vazquez_beggs_oil_bubble_point_pressure_coefficients(
+def get_vazquez_beggs_oil_bubble_point_pressure_coefficients(
     oil_api_gravity: NumberArray[NDimension],
 ) -> tuple[
     NumberArray[NDimension],
@@ -391,7 +391,7 @@ def compute_oil_bubble_point_pressure(
     if min_(gas_to_oil_ratio) < 0:
         raise ValidationError("Gas-to-oil ratio must be non-negative.")
 
-    c1, c2, c3 = _get_vazquez_beggs_oil_bubble_point_pressure_coefficients(oil_api_gravity)
+    c1, c2, c3 = get_vazquez_beggs_oil_bubble_point_pressure_coefficients(oil_api_gravity)
     temperature_rankine = temperature + 459.67
     dtype = gas_to_oil_ratio.dtype
     pressure = (
@@ -402,14 +402,14 @@ def compute_oil_bubble_point_pressure(
 
 
 @numba.njit(cache=True)
-def _compute_gor_vasquez_beggs(
+def compute_gor_vasquez_beggs(
     pressure: NumberArray[NDimension],
     gas_gravity: NumberArray[NDimension],
     oil_api_gravity: NumberArray[NDimension],
     temperature_in_rankine: NumberArray[NDimension],
 ) -> NumberArray[NDimension]:
     """Implementation of the Vazquez-Beggs GOR correlation."""
-    c1, c2, c3 = _get_vazquez_beggs_oil_bubble_point_pressure_coefficients(oil_api_gravity)
+    c1, c2, c3 = get_vazquez_beggs_oil_bubble_point_pressure_coefficients(oil_api_gravity)
     dtype = pressure.dtype
     return (  # type: ignore[return-value]
         (pressure**c2) * c1 * gas_gravity * np.exp((c3 * oil_api_gravity) / temperature_in_rankine)
@@ -469,7 +469,7 @@ def compute_gas_to_oil_ratio(
     if gor_at_bubble_point_pressure is not None:
         gor_at_bp = gor_at_bubble_point_pressure.astype(dtype)
     else:
-        gor_at_bp = _compute_gor_vasquez_beggs(
+        gor_at_bp = compute_gor_vasquez_beggs(
             pressure=bubble_point_pressure,
             gas_gravity=gas_gravity,
             oil_api_gravity=oil_api_gravity,
@@ -487,7 +487,7 @@ def compute_gas_to_oil_ratio(
     # Saturated: compute GOR at current pressure
     if np.any(saturated_mask):
         saturated_pressure = get_mask(pressure, saturated_mask)
-        saturated_gor = _compute_gor_vasquez_beggs(
+        saturated_gor = compute_gor_vasquez_beggs(
             pressure=saturated_pressure,
             gas_gravity=gas_gravity,
             oil_api_gravity=oil_api_gravity,
@@ -666,7 +666,7 @@ def compute_oil_viscosity(
 
 
 @numba.njit(cache=True)
-def _compute_oil_compressibility_liberation_correction_term(
+def compute_oil_compressibility_liberation_correction_term(
     pressure: NumberArray[NDimension],
     temperature: NumberArray[NDimension],
     bubble_point_pressure: NumberArray[NDimension],
@@ -845,7 +845,7 @@ def compute_oil_compressibility(
             gor_at_bubble_point_pressure=gor_at_bubble_point_pressure,
         )
 
-        correction_term = _compute_oil_compressibility_liberation_correction_term(
+        correction_term = compute_oil_compressibility_liberation_correction_term(
             pressure=pressure_saturated,
             temperature=temperature,
             gas_gravity=gas_gravity,
@@ -1038,7 +1038,7 @@ def _standing_oil_bubble_point_residual(
     target_rs: Number,
 ) -> Number:
     """
-    Scalar residual for Standing correlation: Rs(P) - Rs_target
+    Computes scalar residual for Standing correlation: Rs(P) - Rs_target
     """
     gor = soil.compute_gas_to_oil_ratio_standing(
         pressure=pressure,
@@ -1057,9 +1057,9 @@ def estimate_bubble_point_pressure_standing(
     Estimate bubble point pressure (Pb) using Standing's correlation
     given observed Rs and known oil API gravity and gas gravity.
 
-    THIS FUNCTION ESTIMATES THE BUBBLE POINT PRESSURE AND IS NOT A DIRECT
-    MEASUREMENT. It is only valid for light soil (API > 10) and may not be accurate
-    for heavy soil or high pressures.
+    **THIS FUNCTION ESTIMATES THE BUBBLE POINT PRESSURE AND IS NOT A DIRECT
+    MEASUREMENT**. It is only valid for light oil (API > 10) and may not be accurate
+    for heavy oil or high pressures.
 
     This assumes the oil is at or below bubble point pressure, and temperature
     is not used (approximation based only on pressure, API gravity, and gas gravity).

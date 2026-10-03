@@ -162,7 +162,7 @@ def compute_water_bubble_point_pressure(
     lower_bound_pressure = c.MINIMUM_VALID_PRESSURE
     upper_bound_pressure = c.MAXIMUM_VALID_PRESSURE
 
-    lower_boundsolubility = (
+    lower_bound_solubility = (
         compute_gas_solubility_in_water(
             pressure=lower_bound_pressure,
             temperature=temperature,
@@ -181,10 +181,10 @@ def compute_water_bubble_point_pressure(
         + c.GAS_SOLUBILITY_TOLERANCE
     )
 
-    if not (lower_boundsolubility <= gas_solubility_in_water <= upper_boundsolubility):
+    if not (lower_bound_solubility <= gas_solubility_in_water <= upper_boundsolubility):
         raise ComputationError(
             f"Target gas solubility {gas_solubility_in_water}SCF/STB is outside the range "
-            f"[{lower_boundsolubility:.6f}, {upper_boundsolubility:.6f}] "
+            f"[{lower_bound_solubility:.6f}, {upper_boundsolubility:.6f}] "
             f"for gas '{gas}' at T={temperature}°F and salinity={salinity}ppm."
         )
 
@@ -210,23 +210,6 @@ def compute_water_bubble_point_pressure(
         full_output=False,
     )
     return bubble_point_pressure  # type: ignore[return-value]
-
-
-def _compute_water_viscosity(
-    temperature: Number,
-    salinity: Number,
-    pressure: Number,
-    ppm_to_weight_fraction: Number,
-) -> Number:
-    salinity_fraction = salinity * ppm_to_weight_fraction
-    A = 1.0 + 1.17 * salinity_fraction + 3.15e-6 * salinity_fraction**2
-    B = 1.48e-3 - 1.8e-7 * salinity_fraction
-    C = 2.94e-6
-
-    viscosity_at_standard_pressure = A - (B * temperature) + (C * temperature**2)
-    pressure_correction_factor = 0.9994 + (4.0295e-5 * pressure) + (3.1062e-9 * pressure**2)
-    viscosity_at_pressure = viscosity_at_standard_pressure * pressure_correction_factor
-    return max(viscosity_at_pressure, 1e-6)
 
 
 def compute_water_viscosity(
@@ -288,15 +271,19 @@ def compute_water_viscosity(
             f"Pressure {pressure:.6f}psi is unusually high for McCain's water viscosity correlation.",
             stacklevel=2,
         )
-    return _compute_water_viscosity(
-        temperature=temperature,
-        salinity=salinity,
-        pressure=pressure,
-        ppm_to_weight_fraction=c.PPM_TO_WEIGHT_FRACTION,
-    )
+
+    salinity_fraction = salinity * c.PPM_TO_WEIGHT_FRACTION
+    A = 1.0 + 1.17 * salinity_fraction + 3.15e-6 * salinity_fraction**2
+    B = 1.48e-3 - 1.8e-7 * salinity_fraction
+    C = 2.94e-6
+
+    viscosity_at_standard_pressure = A - (B * temperature) + (C * temperature**2)
+    pressure_correction_factor = 0.9994 + (4.0295e-5 * pressure) + (3.1062e-9 * pressure**2)
+    viscosity_at_pressure = viscosity_at_standard_pressure * pressure_correction_factor
+    return max(viscosity_at_pressure, 1e-6)
 
 
-def _gas_solubility_in_water_mccain_methane(
+def compute_gas_solubility_in_water_mccain_methane(
     pressure: Number, temperature: Number, salinity: Number = 0.0
 ) -> Number:
     """
@@ -343,7 +330,7 @@ def _gas_solubility_in_water_mccain_methane(
     return max(0.0, gas_solubility)
 
 
-def _gas_solubility_in_water_duan_sun_co2(
+def compute_gas_solubility_in_water_duan_sun_co2(
     pressure: Number,
     temperature: Number,
     salinity: Number = 0.0,
@@ -429,7 +416,7 @@ def _gas_solubility_in_water_duan_sun_co2(
     return rsw  # type: ignore
 
 
-def _gas_solubility_in_water_henry_law(
+def compute_gas_solubility_in_water_henry_law(
     pressure: Number,
     temperature: Number,
     gas: str,
@@ -516,11 +503,11 @@ def compute_gas_solubility_in_water(
     gas = get_gas_symbol(gas)
     if gas == "ch4" and 100.0 <= temperature <= 400.0:
         # For methane, we use McCain's correlation for gas solubility in water
-        return _gas_solubility_in_water_mccain_methane(pressure, temperature, salinity)
+        return compute_gas_solubility_in_water_mccain_methane(pressure, temperature, salinity)
 
     elif gas == "co2" and 32 <= temperature <= 572:
         # For CO2, we use Duan's correlation for higher accuracy
-        return _gas_solubility_in_water_duan_sun_co2(
+        return compute_gas_solubility_in_water_duan_sun_co2(
             pressure=pressure,
             temperature=temperature,
             salinity=salinity,
@@ -537,7 +524,7 @@ def compute_gas_solubility_in_water(
         "he": c.MOLECULAR_WEIGHT_HELIUM / 1000,
         "h2": c.MOLECULAR_WEIGHT_H2 / 1000,
     }
-    return _gas_solubility_in_water_henry_law(
+    return compute_gas_solubility_in_water_henry_law(
         pressure=pressure,
         temperature=temperature,
         gas=gas,
@@ -659,18 +646,12 @@ def compute_water_compressibility(
     :return: Water compressibility (C_w) in (psi⁻¹).
     """
     gas_fvf_in_bbl_per_scf = gas_formation_volume_factor * c.CUBIC_FEET_TO_BARRELS
-    dBw_gas_free_dP = _compute_dBw_gas_free_dp_mccain(
-        pressure=pressure,
-        temperature=temperature,
-    )
-    dRsw_dP = _compute_dRsw_dP_mccain(
-        temperature=temperature,
-        salinity=salinity,
-    )
+    dBw_gas_free_dP = _compute_dBw_gas_free_dp_mccain(pressure=pressure, temperature=temperature)
+    dRsw_dP = _compute_dRsw_dP_mccain(temperature=temperature, salinity=salinity)
 
     if pressure >= bubble_point_pressure:
         # Undersaturated Water (P >= Pwb)
-        if np.any(gas_free_water_formation_volume_factor <= 0):
+        if gas_free_water_formation_volume_factor <= 0:
             raise ValidationError("Calculated Bw for undersaturated water is non-positive.")
         c_w = -(1.0 / gas_free_water_formation_volume_factor) * dBw_gas_free_dP
     else:
@@ -678,7 +659,7 @@ def compute_water_compressibility(
         water_fvf_in_bbl_per_stb = gas_free_water_formation_volume_factor + (
             gas_solubility_in_water * gas_fvf_in_bbl_per_scf
         )
-        if np.any(water_fvf_in_bbl_per_stb <= 0):
+        if water_fvf_in_bbl_per_stb <= 0:
             raise ValidationError("Calculated Bw for saturated water is non-positive.")
 
         c_w_gas_free_component = -(1.0 / water_fvf_in_bbl_per_stb) * dBw_gas_free_dP

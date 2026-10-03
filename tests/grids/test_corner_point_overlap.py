@@ -7,7 +7,7 @@ from bores.grids.factories.base import FaultRecord
 from bores.grids.factories.corner_point import (
     clip_convex_polygon,
     make_corner_point_grid,
-    polygon_signed_area,
+    compute_polygon_signed_area,
     subtract_convex_polygon,
 )
 
@@ -49,7 +49,7 @@ def lateral_connection_areas(grid):
 def test_polygon_clipping_returns_the_intersection():
     square = np.array([(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0)])
     shifted = np.array([(1.0, 1.0), (3.0, 1.0), (3.0, 3.0), (1.0, 3.0)])
-    assert polygon_signed_area(clip_convex_polygon(square, shifted)) == pytest.approx(1.0)
+    assert compute_polygon_signed_area(clip_convex_polygon(square, shifted)) == pytest.approx(1.0)
     far = np.array([(5.0, 5.0), (6.0, 5.0), (6.0, 6.0), (5.0, 6.0)])
     assert clip_convex_polygon(square, far).shape[0] == 0
 
@@ -58,7 +58,7 @@ def test_polygon_subtraction_returns_the_remaining_pieces():
     square = np.array([(0.0, 0.0), (4.0, 0.0), (4.0, 4.0), (0.0, 4.0)])
     middle = np.array([(1.0, 1.0), (3.0, 1.0), (3.0, 3.0), (1.0, 3.0)])
     pieces = subtract_convex_polygon(square, middle)
-    assert sum(polygon_signed_area(piece) for piece in pieces) == pytest.approx(12.0)
+    assert sum(compute_polygon_signed_area(piece) for piece in pieces) == pytest.approx(12.0)
 
 
 def test_offset_fault_connects_cells_across_the_fault_with_partial_areas():

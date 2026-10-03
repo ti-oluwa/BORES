@@ -11,12 +11,13 @@ converting each `meshio` cell block to a `{"cell_type": ..., "connectivity": ...
 
 import tempfile
 import typing
+import warnings
 from pathlib import Path
 
 import numpy as np
 import numpy.typing as npt
 
-from bores.types import UnitSystem
+from bores.types import IntArray, Integer, NumberArray, OneDimension, UnitSystem
 
 try:
     import meshio  # type: ignore[import-untyped]
@@ -272,19 +273,81 @@ def _mesh_to_grid(
         raise GridImportError(f"Failed to build Grid from meshio cell blocks: {exc}") from exc
 
 
+def _get_outward_face_loops(grid: Grid, cell: Integer) -> list[IntArray[OneDimension]]:
+    """
+    Get vertex loops of every face of a cell, each wound so the face normal points out of the cell.
+
+    :param grid: Source grid.
+    :param cell: Cell index.
+    :returns: One vertex index array per face.
+    """
+    loops = []
+    for face in grid.get_cell_face_indices(cell):
+        start = grid.face_vertex_offsets[face]
+        end = grid.face_vertex_offsets[face + 1]
+        loop = grid.face_vertex_indices[start:end]
+        loops.append(loop if grid.face_cell_indices[face, 0] == cell else loop[::-1])
+    return typing.cast(list[IntArray[OneDimension]], loops)
+
+
+def _get_vtk_cell_nodes(grid: Grid, cell: Integer) -> tuple[str, IntArray[OneDimension]] | None:
+    """
+    Get vertex indices of a cell in VTK node order, if the cell is a hexahedron or a tetrahedron.
+
+    A hexahedron has six quadrilateral faces over eight vertices, each shared by three faces;
+    a tetrahedron has four triangular faces over four vertices.
+
+    :param grid: Source grid.
+    :param cell: Cell index.
+    :returns: `(meshio cell type, node indices)`, or `None` for any other cell shape.
+    """
+    loops = _get_outward_face_loops(grid, cell)
+    unique = np.unique(np.concatenate(loops)) if loops else np.empty(0, dtype=np.int32)
+
+    if len(loops) == 4 and all(len(loop) == 3 for loop in loops) and len(unique) == 4:
+        base = loops[0]
+        apex = next(vertex for vertex in unique if vertex not in base)
+        return "tetra", typing.cast(
+            IntArray[OneDimension], np.array([base[2], base[1], base[0], apex], dtype=np.int32)
+        )
+
+    if len(loops) == 6 and all(len(loop) == 4 for loop in loops) and len(unique) == 8:
+        faces_per_vertex = np.bincount(np.concatenate(loops), minlength=int(unique.max()) + 1)
+        if not (faces_per_vertex[unique] == 3).all():
+            return None
+        base = loops[0]
+        opposite = next((loop for loop in loops[1:] if not set(loop) & set(base)), None)
+        if opposite is None:
+            return None
+        edges: set[tuple[int, int]] = set()
+        for loop in loops:
+            for index, vertex in enumerate(loop):
+                following = loop[(index + 1) % 4]
+                edges.add((int(vertex), int(following)))
+                edges.add((int(following), int(vertex)))
+        top = []
+        for vertex in base:
+            partners = [w for w in opposite if (int(vertex), int(w)) in edges]
+            if len(partners) != 1:
+                return None
+            top.append(partners[0])
+        # The outward winding of the base points away from the top; VTK wants it toward the top.
+        order = [3, 2, 1, 0]
+        nodes = [base[i] for i in order] + [top[i] for i in order]
+        return "hexahedron", typing.cast(IntArray[OneDimension], np.array(nodes, dtype=np.int32))
+
+    return None
+
+
 def _grid_to_mesh(grid: Grid, *, cell_data: dict[str, npt.NDArray] | None) -> typing.Any:
     """
     Convert a `bores.grids.base.Grid` to a `meshio.Mesh`.
 
-    Since `bores.grids.base.Grid` stores faces rather than cells
-    directly, we reconstruct an approximate hexahedral cell mesh where each
-    grid cell is represented by a single hex cell derived from its bounding
-    box.  Only active cells are exported; the `cell_index` cell field holds each exported
-    cell's index in the grid. This preserves approximate geometry for visualisation purposes.
-
-    For grids produced by the Cartesian factory, the bounding-box hex will
-    exactly match the original cell.  For Voronoi / polyhedral grids, the hex
-    is an axis-aligned approximation.
+    Cells whose faces form a hexahedron or a tetrahedron are exported exactly, sharing the
+    grid's own vertices. Any other cell (for example a Voronoi polyhedron, or a hexahedron cut
+    by a fault into more than six faces) is exported as the hexahedron of its bounding box and
+    a warning reports how many there were. Only active cells are exported; the `cell_index`
+    cell field holds each exported cell's index in the grid.
 
     :param grid: Source grid.
     :param cell_data: Optional per-cell data fields.
@@ -293,29 +356,53 @@ def _grid_to_mesh(grid: Grid, *, cell_data: dict[str, npt.NDArray] | None) -> ty
     n_cells = grid.n_cells
     assert grid.cell_statuses is not None
     exported_cells = np.flatnonzero(grid.cell_statuses == int(CellStatus.ACTIVE))
-    n_exported = len(exported_cells)
 
-    # Build 8 bounding-box vertices per exported cell: (n_exported * 8, 3)
-    vertices_per_cell = 8
-    all_vertices = np.empty((n_exported * vertices_per_cell, 3), dtype=np.float64)
-    connectivity = np.empty((n_exported, vertices_per_cell), dtype=np.int32)
+    blocks: dict[str, tuple[list[Integer], list[IntArray[OneDimension]]]] = {
+        "hexahedron": ([], []),
+        "tetra": ([], []),
+    }
+    extra_points: list[NumberArray[OneDimension]] = []
+    next_point = len(grid.vertex_coordinates)
+    n_approximated = 0
+    for cell in exported_cells:
+        exact = _get_vtk_cell_nodes(grid, int(cell))
+        if exact is not None:
+            cell_type, nodes = exact
+        else:
+            n_approximated += 1
+            low, high = grid.cell_min_xyz[cell], grid.cell_max_xyz[cell]
+            corners = [
+                (low[0], low[1], low[2]),
+                (high[0], low[1], low[2]),
+                (high[0], high[1], low[2]),
+                (low[0], high[1], low[2]),
+                (low[0], low[1], high[2]),
+                (high[0], low[1], high[2]),
+                (high[0], high[1], high[2]),
+                (low[0], high[1], high[2]),
+            ]
+            extra_points.extend(
+                typing.cast(NumberArray[OneDimension], np.array(corner, dtype=np.float64))
+                for corner in corners
+            )
+            nodes = np.arange(next_point, next_point + 8, dtype=np.int32)
+            next_point += 8
+            cell_type = "hexahedron"
+        blocks[cell_type][0].append(int(cell))
+        blocks[cell_type][1].append(nodes)
 
-    for position, cell_idx in enumerate(exported_cells):
-        low = grid.cell_min_xyz[cell_idx]
-        high = grid.cell_max_xyz[cell_idx]
-        base = position * vertices_per_cell
-        # VTK hex vertex order: bottom face CCW then top face CCW
-        all_vertices[base + 0] = [low[0], low[1], low[2]]
-        all_vertices[base + 1] = [high[0], low[1], low[2]]
-        all_vertices[base + 2] = [high[0], high[1], low[2]]
-        all_vertices[base + 3] = [low[0], high[1], low[2]]
-        all_vertices[base + 4] = [low[0], low[1], high[2]]
-        all_vertices[base + 5] = [high[0], low[1], high[2]]
-        all_vertices[base + 6] = [high[0], high[1], high[2]]
-        all_vertices[base + 7] = [low[0], high[1], high[2]]
-        connectivity[position] = np.arange(base, base + vertices_per_cell, dtype=np.int32)
+    if n_approximated:
+        warnings.warn(
+            f"{n_approximated} cell(s) are not hexahedra or tetrahedra and were exported as "
+            "the hexahedron of their bounding box.",
+            stacklevel=3,
+        )
 
-    meshio_cell_data: dict[str, list[np.ndarray]] = {}
+    points = grid.vertex_coordinates
+    if extra_points:
+        points = np.vstack([points, np.asarray(extra_points)])
+
+    fields: dict[str, npt.NDArray] = {}
     if cell_data:
         for field_name, field_array in cell_data.items():
             array = np.asarray(field_array, dtype=np.float64)
@@ -324,12 +411,21 @@ def _grid_to_mesh(grid: Grid, *, cell_data: dict[str, npt.NDArray] | None) -> ty
                     f"cell_data[{field_name!r}] has {array.shape[0]} entries "
                     f"but grid has {n_cells} cells."
                 )
-            meshio_cell_data[field_name] = [array[exported_cells]]
-    meshio_cell_data["cell_index"] = [exported_cells.astype(np.int64)]
+            fields[field_name] = array
+    fields["cell_index"] = np.arange(n_cells, dtype=np.int64)
+
+    cells = []
+    meshio_cell_data: dict[str, list[npt.NDArray]] = {name: [] for name in fields}
+    for cell_type, (indices, nodes_list) in blocks.items():
+        if not indices:
+            continue
+        cells.append((cell_type, np.asarray(nodes_list, dtype=np.int32)))
+        for name, array in fields.items():
+            meshio_cell_data[name].append(array[np.asarray(indices)])
 
     return meshio.Mesh(
-        points=all_vertices,
-        cells=[("hexahedron", connectivity)],
+        points=points,
+        cells=cells,
         cell_data=meshio_cell_data,  # type: ignore
     )
 

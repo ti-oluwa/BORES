@@ -51,7 +51,7 @@ These functions validate or constrain pressure and temperature inputs to physica
 | `validate_input_pressure(pressure)` | `pressure`: Pressure (psi) | Raises `ValidationError` if pressure is outside the valid reservoir range |
 | `clip_pressure(pressure, fluid)` | `pressure`: Pressure (psi), `fluid`: CoolProp fluid name | Clips pressure to CoolProp's valid range for the given fluid |
 | `clip_temperature(temperature, fluid)` | `temperature`: Temperature (K), `fluid`: CoolProp fluid name | Clips temperature to CoolProp's valid range for the given fluid |
-| `is_CoolProp_supported_fluid(fluid)` | `fluid`: Fluid name string | Returns `True` if the fluid is supported by CoolProp (cached) |
+| `is_CoolProp_fluid(fluid)` | `fluid`: Fluid name string | Returns `True` if the fluid is supported by CoolProp (cached) |
 
 ---
 

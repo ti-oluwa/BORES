@@ -126,7 +126,7 @@ def compute_oil_formation_volume_factor_standing(
     return oil_fvf
 
 
-def _get_vazquez_beggs_oil_fvf_coefficients(
+def get_vazquez_beggs_oil_fvf_coefficients(
     oil_api_gravity: Number,
 ) -> tuple[Number, Number, Number]:
     """
@@ -166,7 +166,7 @@ def compute_oil_formation_volume_factor_vazquez_and_beggs(
     :return: Formation volume factor (Bo) in bbl/STB
     """
     oil_api_gravity = compute_oil_api_gravity(oil_specific_gravity)
-    a1, a2, a3 = _get_vazquez_beggs_oil_fvf_coefficients(oil_api_gravity)
+    a1, a2, a3 = get_vazquez_beggs_oil_fvf_coefficients(oil_api_gravity)
     oil_fvf = (
         1
         + (a1 * gas_to_oil_ratio)
@@ -270,7 +270,7 @@ def compute_oil_api_gravity(oil_specific_gravity: Number) -> Number:
     return (141.5 / oil_specific_gravity) - 131.5
 
 
-def _get_vazquez_beggs_oil_bubble_point_pressure_coefficients(
+def get_vazquez_beggs_oil_bubble_point_pressure_coefficients(
     oil_api_gravity: Number,
 ) -> tuple[Number, Number, Number]:
     """
@@ -333,7 +333,7 @@ def compute_oil_bubble_point_pressure(
     if gas_to_oil_ratio < 0:
         raise ValidationError("Gas-to-oil ratio must be non-negative.")
 
-    c1, c2, c3 = _get_vazquez_beggs_oil_bubble_point_pressure_coefficients(oil_api_gravity)
+    c1, c2, c3 = get_vazquez_beggs_oil_bubble_point_pressure_coefficients(oil_api_gravity)
     temperature_rankine = temperature + 459.67
     pressure = (
         gas_to_oil_ratio
@@ -388,7 +388,7 @@ def compute_gas_to_oil_ratio(
         raise ValidationError("Pressure must be greater than zero.")
 
     temperature_in_rankine = temperature + 459.67
-    c1, c2, c3 = _get_vazquez_beggs_oil_bubble_point_pressure_coefficients(oil_api_gravity)
+    c1, c2, c3 = get_vazquez_beggs_oil_bubble_point_pressure_coefficients(oil_api_gravity)
 
     def compute_gor_vasquez_beggs(pressure: Number) -> Number:
         """Implementation of the Vazquez-Beggs GOR correlation."""
@@ -410,22 +410,6 @@ def compute_gas_to_oil_ratio(
     return max(0.0, gor)
 
 
-def _compute_dead_oil_viscosity_modified_beggs(
-    temperature: Number, oil_api_gravity: Number
-) -> Number:
-    if temperature <= 0:
-        raise ValidationError("Temperature (°F) must be > 0 for this correlation.")
-
-    temperature_rankine = temperature + 459.67
-    oil_specific_gravity = 141.5 / (131.5 + oil_api_gravity)
-
-    log_viscosity = (
-        1.8653 - 0.025086 * oil_specific_gravity - 0.5644 * np.log10(temperature_rankine)
-    )
-    viscosity = (10**log_viscosity) - 1
-    return max(0.0, viscosity)
-
-
 def compute_dead_oil_viscosity_modified_beggs(
     temperature: Number,
     oil_specific_gravity: Number,
@@ -445,6 +429,9 @@ def compute_dead_oil_viscosity_modified_beggs(
     :param oil_specific_gravity: Specific gravity of the oil (dimensionless)
     :return: Dead oil viscosity in cP
     """
+    if temperature <= 0:
+        raise ValidationError("Temperature (°F) must be > 0 for this correlation.")
+
     oil_api_gravity = compute_oil_api_gravity(oil_specific_gravity)
     if not (5 <= oil_api_gravity <= 75):
         warnings.warn(
@@ -452,30 +439,13 @@ def compute_dead_oil_viscosity_modified_beggs(
             f"Dead oil viscosity may be inaccurate.",
             stacklevel=2,
         )
-    return _compute_dead_oil_viscosity_modified_beggs(temperature, oil_api_gravity)
 
-
-def _compute_oil_viscosity(
-    pressure: Number,
-    bubble_point_pressure: Number,
-    dead_oil_viscosity: Number,
-    gas_to_oil_ratio: Number,
-    gor_at_bubble_point_pressure: Number,
-) -> Number:
-    if pressure <= bubble_point_pressure:
-        # Saturated case: compute viscosity using current GOR
-        X = 10.715 * (gas_to_oil_ratio + 100) ** -0.515
-        Y = 5.44 * (gas_to_oil_ratio + 150) ** -0.338
-        return max(X * (dead_oil_viscosity**Y), 1e-6)
-
-    # Undersaturated case: compute mu_ob at Pb first
-    X_bp = 10.715 * (gor_at_bubble_point_pressure + 100) ** -0.515
-    Y_bp = 5.44 * (gor_at_bubble_point_pressure + 150) ** -0.338
-    mu_ob = X_bp * (dead_oil_viscosity**Y_bp)
-
-    # Apply undersaturated viscosity correlation
-    X_under = 2.6 * pressure**1.187 * np.exp(-11.513 - 8.98e-5 * pressure)
-    return max(mu_ob * ((pressure / bubble_point_pressure) ** X_under), 1e-6)
+    temperature_rankine = temperature + 459.67
+    log_viscosity = (
+        1.8653 - 0.025086 * oil_specific_gravity - 0.5644 * np.log10(temperature_rankine)
+    )
+    viscosity = (10**log_viscosity) - 1
+    return max(0.0, viscosity)
 
 
 def compute_oil_viscosity(
@@ -532,16 +502,23 @@ def compute_oil_viscosity(
     dead_oil_viscosity = compute_dead_oil_viscosity_modified_beggs(
         temperature=temperature, oil_specific_gravity=oil_specific_gravity
     )
-    return _compute_oil_viscosity(
-        pressure=pressure,
-        bubble_point_pressure=bubble_point_pressure,
-        dead_oil_viscosity=dead_oil_viscosity,
-        gas_to_oil_ratio=gas_to_oil_ratio,
-        gor_at_bubble_point_pressure=gor_at_bubble_point_pressure,
-    )
+    if pressure <= bubble_point_pressure:
+        # Saturated case: compute viscosity using current GOR
+        X = 10.715 * (gas_to_oil_ratio + 100) ** -0.515
+        Y = 5.44 * (gas_to_oil_ratio + 150) ** -0.338
+        return max(X * (dead_oil_viscosity**Y), 1e-6)
+
+    # Undersaturated case: compute mu_ob at Pb first
+    X_bp = 10.715 * (gor_at_bubble_point_pressure + 100) ** -0.515
+    Y_bp = 5.44 * (gor_at_bubble_point_pressure + 150) ** -0.338
+    mu_ob = X_bp * (dead_oil_viscosity**Y_bp)
+
+    # Apply undersaturated viscosity correlation
+    X_under = 2.6 * pressure**1.187 * np.exp(-11.513 - 8.98e-5 * pressure)
+    return max(mu_ob * ((pressure / bubble_point_pressure) ** X_under), 1e-6)
 
 
-def _compute_oil_compressibility_liberation_correction_term(
+def compute_oil_compressibility_liberation_correction_term(
     pressure: Number,
     temperature: Number,
     gas_gravity: Number,
@@ -692,7 +669,7 @@ def compute_oil_compressibility(
         return compute_base_compressibility(pressure)
 
     base_comp = compute_base_compressibility(pressure)
-    correction_term = _compute_oil_compressibility_liberation_correction_term(
+    correction_term = compute_oil_compressibility_liberation_correction_term(
         pressure=pressure,
         temperature=temperature,
         gas_gravity=gas_gravity,
@@ -802,8 +779,8 @@ def estimate_bubble_point_pressure_standing(
     Estimate bubble point pressure (Pb) using Standing's correlation
     given observed Rs and known oil API gravity and gas gravity.
 
-    THIS FUNCTION ESTIMATES THE BUBBLE POINT PRESSURE AND IS NOT A DIRECT
-    MEASUREMENT. It is only valid for light oils (API > 10) and may not be accurate
+    **THIS FUNCTION ESTIMATES THE BUBBLE POINT PRESSURE AND IS NOT A DIRECT
+    MEASUREMENT**. It is only valid for light oils (API > 10) and may not be accurate
     for heavy oils or high pressures.
 
     This assumes the oil is at or below bubble point pressure, and temperature
@@ -841,7 +818,7 @@ def estimate_bubble_point_pressure_standing(
     return bubble_point_pressure
 
 
-def _compute_bubble_point_pressure_vazquez_beggs(
+def compute_bubble_point_pressure_vazquez_beggs(
     gas_gravity: Number,
     oil_api_gravity: Number,
     temperature: Number,
@@ -873,12 +850,10 @@ def _compute_bubble_point_pressure_vazquez_beggs(
     return pressure
 
 
-def _compute_gas_to_oil_ratio_standing_internal(
+def _compute_gas_to_oil_ratio_standing(
     pressure: Number, oil_api_gravity: Number, gas_gravity: Number
 ) -> Number:
     """
-    Internal njit version of Standing correlation for Rs.
-
     Same as `compute_gas_to_oil_ratio_standing` but without input validation.
 
     :param pressure: Pressure (psi)
@@ -935,7 +910,7 @@ def estimate_solution_gor(
         - Handles both saturated and undersaturated conditions
     """
     # Initial guess from Standing correlation
-    rs_current = _compute_gas_to_oil_ratio_standing_internal(
+    rs_current = _compute_gas_to_oil_ratio_standing(
         pressure=pressure,
         oil_api_gravity=oil_api_gravity,
         gas_gravity=gas_gravity,
@@ -948,7 +923,7 @@ def estimate_solution_gor(
 
     for _ in range(maximum_iterations):
         # Compute bubble point pressure from current Rs estimate
-        pb_current = _compute_bubble_point_pressure_vazquez_beggs(
+        pb_current = compute_bubble_point_pressure_vazquez_beggs(
             gas_gravity=gas_gravity,
             oil_api_gravity=oil_api_gravity,
             temperature=temperature,
@@ -969,7 +944,7 @@ def estimate_solution_gor(
             # Bisection to find Rs where Pb(Rs, T) = P
             for _ in range(50):  # Inner bisection iterations
                 rs_mid = (rs_lo + rs_hi) / 2.0
-                pb_mid = _compute_bubble_point_pressure_vazquez_beggs(
+                pb_mid = compute_bubble_point_pressure_vazquez_beggs(
                     gas_gravity=gas_gravity,
                     oil_api_gravity=oil_api_gravity,
                     temperature=temperature,
@@ -993,7 +968,7 @@ def estimate_solution_gor(
 
             # For saturated oil below bubble point, Rs increases with P
             # Use the current Standing estimate as is, since it's pressure-based
-            rs_new = _compute_gas_to_oil_ratio_standing_internal(
+            rs_new = _compute_gas_to_oil_ratio_standing(
                 pressure=pressure,
                 oil_api_gravity=oil_api_gravity,
                 gas_gravity=gas_gravity,
@@ -1022,8 +997,8 @@ def compute_hydrocarbon_in_place(
     acre_ft_to_ft3: Number = 43560.0,
 ) -> Number:
     """
-    Computes the (free) hydrocarbon (or free water) in place (HCIP or FWIP) in stock tank barrels (STB) or standard cubic feet (SCF)
-    using the volumetric method.
+    Computes the (free) hydrocarbon (or free water) in place (HCIP or FWIP) in stock tank 
+    barrels (STB) or standard cubic feet (SCF) using the volumetric method.
 
     The formula for oil in place (OIP) is:
         OIP = 7758 * A * h * φ * S_o * N/G / B_o

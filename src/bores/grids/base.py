@@ -368,6 +368,8 @@ class Grid(
         "face_connection_types": IntArray[OneDimension] | None,
         "cell_volumes": NumberArray[OneDimension] | None,
         "cell_centroids": NumberArray[TwoDimensions] | None,
+        "cell_min_xyz": NumberArray[TwoDimensions] | None,
+        "cell_max_xyz": NumberArray[TwoDimensions] | None,
         "nnc_cell_indices": IntArray[TwoDimensions] | None,
         "nnc_transmissibilities": NumberArray[OneDimension] | None,
         "fault_face_indices": typing.Mapping[str, IntArray[OneDimension]] | None,
@@ -551,11 +553,17 @@ class Grid(
     face_unit_normals: NumberArray[TwoDimensions] = attrs.field(init=False)
     """Shape `(n_faces, 3)` - unit outward normal from the owner cell."""
 
-    cell_min_xyz: NumberArray[TwoDimensions] = attrs.field(init=False)
-    """Shape `(n_cells, 3)` - AABB minimum corner per cell."""
+    cell_min_xyz: NumberArray[TwoDimensions] = attrs.field(default=None)  # type: ignore[assignment]
+    """
+    Shape `(n_cells, 3)` - AABB minimum corner per cell. A factory can pass the exact boxes
+    (together with `cell_max_xyz`); otherwise they are taken from the cell's face vertices.
+    """
 
-    cell_max_xyz: NumberArray[TwoDimensions] = attrs.field(init=False)
-    """Shape `(n_cells, 3)` - AABB maximum corner per cell."""
+    cell_max_xyz: NumberArray[TwoDimensions] = attrs.field(default=None)  # type: ignore[assignment]
+    """
+    Shape `(n_cells, 3)` - AABB maximum corner per cell. Must be provided together with
+    `cell_min_xyz`.
+    """
 
     bounding_box: tuple[Float, Float, Float, Float, Float, Float] = attrs.field(init=False)
     """Global AABB: `(x_min, x_max, y_min, y_max, z_min, z_max)`."""
@@ -803,6 +811,22 @@ class Grid(
                 raise InvalidVolumeError(
                     f"`cell_volumes` must have shape ({n_cells},) and be finite and non-negative."
                 )
+        if (self.cell_min_xyz is None) != (self.cell_max_xyz is None):
+            raise InvalidPointArrayError(
+                "`cell_min_xyz` and `cell_max_xyz` must be provided together."
+            )
+        if self.cell_min_xyz is not None and self.cell_max_xyz is not None:
+            if (
+                self.cell_min_xyz.shape != (n_cells, 3)
+                or self.cell_max_xyz.shape != (n_cells, 3)
+                or not np.isfinite(self.cell_min_xyz).all()
+                or not np.isfinite(self.cell_max_xyz).all()
+                or (self.cell_min_xyz > self.cell_max_xyz).any()
+            ):
+                raise InvalidPointArrayError(
+                    f"`cell_min_xyz` and `cell_max_xyz` must have shape ({n_cells}, 3), be finite "
+                    "and satisfy min <= max."
+                )
         if self.cell_centroids is not None:
             if (
                 self.cell_centroids.shape != (n_cells, 3)
@@ -983,18 +1007,21 @@ class Grid(
 
     def _compute_bounding_boxes(self) -> None:
         n_cells = self._get_cell_count()
-        cell_min, cell_max = compute_cell_bounding_boxes(
-            face_cell_indices=self.face_cell_indices,
-            face_vertex_indices=self.face_vertex_indices,
-            face_vertex_offsets=self.face_vertex_offsets,
-            vertex_coordinates=self.vertex_coordinates,
-            n_cells=n_cells,
-        )
-        if self.cell_centroids is not None:
-            no_face_mask = ~np.isfinite(cell_min).all(axis=1)
-            if no_face_mask.any():
-                cell_min[no_face_mask] = self.cell_centroids[no_face_mask]
-                cell_max[no_face_mask] = self.cell_centroids[no_face_mask]
+        if self.cell_min_xyz is not None and self.cell_max_xyz is not None:
+            cell_min, cell_max = self.cell_min_xyz, self.cell_max_xyz
+        else:
+            cell_min, cell_max = compute_cell_bounding_boxes(
+                face_cell_indices=self.face_cell_indices,
+                face_vertex_indices=self.face_vertex_indices,
+                face_vertex_offsets=self.face_vertex_offsets,
+                vertex_coordinates=self.vertex_coordinates,
+                n_cells=n_cells,
+            )
+            if self.cell_centroids is not None:
+                no_face_mask = ~np.isfinite(cell_min).all(axis=1)
+                if no_face_mask.any():
+                    cell_min[no_face_mask] = self.cell_centroids[no_face_mask]
+                    cell_max[no_face_mask] = self.cell_centroids[no_face_mask]
 
         bounding_box = (
             cell_min[:, 0].min(),

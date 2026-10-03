@@ -210,6 +210,8 @@ def make_corner_point_grid(
         cell_statuses,
         cell_volumes,
         cell_centroids,
+        cell_min_xyz,
+        cell_max_xyz,
     ) = compute_corner_point_geometry(
         coord=coord_array,  # type: ignore[arg-type]
         zcorn=zcorn_array,  # type: ignore[arg-type]
@@ -277,6 +279,8 @@ def make_corner_point_grid(
         face_cell_indices=face_cell_indices,
         cell_volumes=cell_volumes,
         cell_centroids=cell_centroids,
+        cell_min_xyz=cell_min_xyz,
+        cell_max_xyz=cell_max_xyz,
         unit_system=unit_system,
         dimensions=GridDimensions(nx, ny, nz),
         metadata=metadata,
@@ -859,6 +863,8 @@ def compute_corner_point_geometry(
     IntArray[OneDimension],
     NumberArray[OneDimension],
     NumberArray[TwoDimensions],
+    NumberArray[TwoDimensions],
+    NumberArray[TwoDimensions],
 ]:
     """
     Compute 3-D corner coordinates and build face arrays for a corner-point grid.
@@ -870,7 +876,8 @@ def compute_corner_point_geometry(
     :param pinch_tolerance: Average thickness threshold for pinch detection.
     :returns: 10-tuple `(vertex_coordinates, face_vertex_indices,
         face_vertex_offsets, face_cell_indices, face_connection_types, cell_statuses,
-        cell_volumes, cell_centroids)`. Cells are
+        cell_volumes, cell_centroids, cell_min_xyz, cell_max_xyz)`. The last two are the
+        bounding box of each cell's own corners. Cells are
         numbered by their full-grid flat index `i + j * nx + k * nx * ny`. Inactive cells
         keep their index, have status `INACTIVE`, zero volume and no faces.
     :raises InvalidGridError: If no active cells are found.
@@ -1002,6 +1009,8 @@ def compute_corner_point_geometry(
         cell_statuses,
         cell_volumes,
         cell_centroids,
+        corner_coordinates.min(axis=1),
+        corner_coordinates.max(axis=1),
     )
 
 
