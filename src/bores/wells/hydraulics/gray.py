@@ -9,7 +9,6 @@ import numpy.typing as npt
 from typing_extensions import Self
 
 from bores.constants import c, get_conversion_factors
-from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.types import (
     FrictionMethod,
@@ -98,6 +97,20 @@ class GrayWellbore(typing.NamedTuple):
     too large relative to hydrostatic in field units.
     """
 
+    field_length_factor: Number
+    """
+    Multiplies a length in this model's own unit system to get feet.
+    `1.0` for a FIELD model. Used only by `compute_gray_holdup`/
+    `compute_gray_effective_roughness`, whose empirical correlations are
+    dimensional fits valid only in ft/s, lbm/ft3, and ft.
+    """
+
+    field_density_factor: Number
+    """
+    Multiplies a density in this model's own unit system to get lbm/ft3.
+    `1.0` for a FIELD model. Same reason as `field_length_factor`.
+    """
+
     unit_system: UnitSystem
     """This model's unit system."""
 
@@ -114,18 +127,13 @@ class GrayWellbore(typing.NamedTuple):
         :param target: Target unit system.
         :param table: Optional custom unit-conversion table.
         :returns: This model, converted to `target`.
-        :raises ValidationError: If `target` isn't `UnitSystem.FIELD` - see `gray_wellbore`.
         """
         if target == self.unit_system:
             return self
-        if target != UnitSystem.FIELD:
-            raise ValidationError(
-                f"`GrayWellbore` only supports UnitSystem.FIELD; got {target!r}. See "
-                "`gray_wellbore`'s own docstring for why."
-            )
 
         factors = get_conversion_factors(self.unit_system, target, table=table)
         length_factor = factors["length"]
+        field_factors = get_conversion_factors(target, UnitSystem.FIELD, table=table)
         return self._replace(
             tubing_inner_diameter=self.tubing_inner_diameter * length_factor,
             tubing_roughness=self.tubing_roughness * length_factor,
@@ -139,6 +147,8 @@ class GrayWellbore(typing.NamedTuple):
                 get_unit_system_constant(prefix="GRAVITATIONAL_FACTOR", unit_system=target)
                 * get_unit_system_constant(prefix="HYDROSTATIC_AREA_FACTOR", unit_system=target)
             ),
+            field_length_factor=field_factors["length"],
+            field_density_factor=field_factors["density"],
             unit_system=target,
         )
 
@@ -160,13 +170,15 @@ def gray_wellbore(
 
     Gray (1974) is an empirical correlation for vertical gas and gas
     condensate wells carrying a light liquid load, developed as part of
-    API 14B and widely used for mist-flow gas wells. Field units only -
-    unlike Woldesemayat and Ghajar elsewhere in this package, Gray's
-    holdup and effective-roughness correlations have no general
-    unit-system conversion available: their constants are calibrated
+    API 14B and widely used for mist-flow gas wells. Its holdup and
+    effective-roughness correlations are dimensional fits, calibrated
     for velocities in ft/s, densities in lbm/ft3, surface tension in
-    dyne/cm, and diameter in ft, the same limitation Hagedorn & Brown
-    has elsewhere in this package. `unit_system` must be `FIELD`.
+    dyne/cm, and diameter in ft, the same limitation Hagedorn & Brown's
+    Griffith correction has elsewhere in this package - for any other
+    `unit_system`, the relevant inputs are converted to those units for
+    just those two correlations, and the (already unit-invariant)
+    results used directly; nothing else in this model needs converting
+    back.
 
     Unlike Beggs & Brill or Hagedorn & Brown, Gray does not carry
     gas/liquid slip into the friction term. Friction uses the no-slip
@@ -180,7 +192,7 @@ def gray_wellbore(
     :param tubing_roughness: Absolute dry-pipe roughness. `None` for a smooth pipe.
     :param friction_method: Which single-phase friction-factor correlation
         to apply, using Gray's own effective roughness.
-    :param unit_system: This model's unit system. Must be `UnitSystem.FIELD`.
+    :param unit_system: This model's unit system.
     :param gravitational_acceleration: Acceleration due to gravity. Resolved
         from `unit_system`'s standard gravity if not given.
     :param laminar_reynolds_limit: Reynolds number below which flow is
@@ -193,20 +205,14 @@ def gray_wellbore(
     :param friction_tolerance: Colebrook convergence tolerance.
         `c.COLEBROOK_TOLERANCE` if not given.
     :returns: `WellBoreModel(name="gray", options=<GrayWellbore>)`.
-    :raises ValidationError: If `unit_system` isn't `UnitSystem.FIELD`.
     """
-    if unit_system != UnitSystem.FIELD:
-        raise ValidationError(
-            f"`GrayWellbore` only supports UnitSystem.FIELD; got {unit_system!r}. Gray's own "
-            "holdup and effective-roughness correlations are calibrated to specific field "
-            "units (ft/s, lbm/ft3, dyne/cm, ft), with no general unit-system conversion "
-            "available for them, the same limitation Hagedorn & Brown has elsewhere in this "
-            "package."
-        )
     if gravitational_acceleration is None:
         gravitational_acceleration = typing.cast(
             Number, c.ACCELERATION_DUE_TO_GRAVITY_FEET_PER_SECONDS_SQUARE
         )
+        if unit_system != UnitSystem.FIELD:
+            factors = get_conversion_factors(UnitSystem.FIELD, unit_system)
+            gravitational_acceleration = gravitational_acceleration * factors["length"]
 
     options = GrayWellbore(
         tubing_inner_diameter=tubing_inner_diameter,
@@ -242,6 +248,8 @@ def gray_wellbore(
             get_unit_system_constant(prefix="GRAVITATIONAL_FACTOR", unit_system=unit_system)
             * get_unit_system_constant(prefix="HYDROSTATIC_AREA_FACTOR", unit_system=unit_system)
         ),
+        field_length_factor=get_conversion_factors(unit_system, UnitSystem.FIELD)["length"],
+        field_density_factor=get_conversion_factors(unit_system, UnitSystem.FIELD)["density"],
         unit_system=unit_system,
     )
     return WellBoreModel(name="gray", options=options)
@@ -400,13 +408,18 @@ def compute_segment_drop(
     no_slip_density = liquid_density * no_slip_holdup + gas_density * (1.0 - no_slip_holdup)
     no_slip_viscosity = liquid_viscosity * no_slip_holdup + gas_viscosity * (1.0 - no_slip_holdup)
 
+    # compute_gray_holdup's own correlation is a dimensional fit (ft/s,
+    # lbm/ft3, dyne/cm, ft); convert just its inputs to those units for
+    # this one call. gas_liquid_surface_tension is always dyne/cm
+    # already, regardless of unit_system. The result (a 0-1 holdup
+    # fraction) needs no converting back.
     in_situ_holdup = compute_gray_holdup(
-        superficial_liquid_velocity=superficial_liquid_velocity,
-        superficial_gas_velocity=superficial_gas_velocity,
-        liquid_density=liquid_density,
-        gas_density=gas_density,
+        superficial_liquid_velocity=superficial_liquid_velocity * model.field_length_factor,
+        superficial_gas_velocity=superficial_gas_velocity * model.field_length_factor,
+        liquid_density=liquid_density * model.field_density_factor,
+        gas_density=gas_density * model.field_density_factor,
         gas_liquid_surface_tension=gas_liquid_surface_tension,
-        tubing_inner_diameter=model.tubing_inner_diameter,
+        tubing_inner_diameter=model.tubing_inner_diameter * model.field_length_factor,
     )
     in_situ_density = liquid_density * in_situ_holdup + gas_density * (1.0 - in_situ_holdup)
 
@@ -418,14 +431,21 @@ def compute_segment_drop(
         * model.hydrostatic_scale
     )
 
-    effective_roughness = compute_gray_effective_roughness(
-        tubing_roughness=model.tubing_roughness,
+    # Same dimensional-fit situation as compute_gray_holdup above.
+    # effective_roughness comes back in feet; rather than converting it
+    # back to this model's own length unit, divide it by the diameter
+    # in the same feet (also already needed above), since only the
+    # (unit-invariant) ratio is used from here on.
+    effective_roughness_ft = compute_gray_effective_roughness(
+        tubing_roughness=model.tubing_roughness * model.field_length_factor,
         gas_liquid_surface_tension=gas_liquid_surface_tension,
-        no_slip_density=no_slip_density,
-        superficial_liquid_velocity=superficial_liquid_velocity,
-        superficial_gas_velocity=superficial_gas_velocity,
+        no_slip_density=no_slip_density * model.field_density_factor,
+        superficial_liquid_velocity=superficial_liquid_velocity * model.field_length_factor,
+        superficial_gas_velocity=superficial_gas_velocity * model.field_length_factor,
     )
-    relative_roughness = effective_roughness / model.tubing_inner_diameter
+    relative_roughness = effective_roughness_ft / (
+        model.tubing_inner_diameter * model.field_length_factor
+    )
     no_slip_reynolds_number = (
         no_slip_density
         * mixture_velocity
