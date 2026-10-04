@@ -49,46 +49,93 @@ def build_pchip_2d_interpolator(
     temperatures: NumberArray[NDimension],
     table: NumberArray[NDimension],
     dtype: npt.DTypeLike,
+    *,
+    derivative: bool = False,
 ) -> typing.Callable[
-    [NumberArray[NDimension], NumberArray[NDimension]], NumberArray[OneDimension]
+    [NumberArray[NDimension], NumberArray[NDimension]], NumberArray[NDimension]
 ]:
     """
     Build a two-stage PCHIP 2-D interpolator for a property table.
 
     Fits independent PCHIP interpolants along the pressure axis at each
-    temperature knot, then re-interpolates along temperature for each query
-    point. Preserves monotonicity along each axis independently.
+    temperature knot (one vectorised fit for all of them), then re-interpolates
+    along temperature for each query point. Preserves monotonicity along each axis
+    independently.
 
     The returned callable has the same interface as
-    `RectBivariateSpline.ev`: `(pressure_points, temperature_points) -> values`.
+    `RectBivariateSpline.ev`: `(pressure_points, temperature_points) -> values`, and
+    returns an array with the shape of its inputs.
 
     :param pressures: 1-D array of pressure knots, strictly increasing.
     :param temperatures: 1-D array of temperature knots, strictly increasing.
     :param table: 2-D array of shape `(n_p, n_t)` containing property values.
+    :param dtype: dtype of the returned values.
+    :param derivative: If `True`, interpolate `∂table/∂P` (the analytical derivative of
+        the pressure PCHIP at each temperature knot) instead of the table values.
     :returns: Callable with signature `(p, t) -> values`.
     """
-    p_interps: list[PchipInterpolator] = [
-        PchipInterpolator(pressures, table[:, j], extrapolate=True)
-        for j in range(len(temperatures))
-    ]
+    temperature_knots = np.asarray(temperatures, dtype=np.float64)
+    pressure_spline = PchipInterpolator(
+        np.asarray(pressures, dtype=np.float64),
+        np.asarray(table, dtype=np.float64),
+        axis=0,
+        extrapolate=True,
+    )
+    if derivative:
+        pressure_spline = pressure_spline.derivative(1)
 
     def interpolator(
         p: NumberArray[NDimension], t: NumberArray[NDimension]
-    ) -> NumberArray[OneDimension]:
-        p = p.astype(dtype, copy=False).ravel()  # type: ignore
-        t = t.astype(dtype, copy=False).ravel()  # type: ignore
-        n = len(p)
-
-        values = np.empty((len(temperatures), n), dtype=dtype)
-        for j, interp in enumerate(p_interps):
-            values[j] = interp(p)
-
-        result = np.empty(n, dtype=dtype)
-        for i in range(n):
-            result[i] = PchipInterpolator(temperatures, values[:, i], extrapolate=True)(t[i])
-        return result
+    ) -> NumberArray[NDimension]:
+        shape = np.shape(p)
+        p_flat = np.asarray(p, dtype=np.float64).ravel()
+        t_flat = np.asarray(t, dtype=np.float64).ravel()
+        result = np.empty(p_flat.size, dtype=dtype)
+        for start in range(0, p_flat.size, PCHIP_CHUNK_SIZE):
+            chunk = slice(start, start + PCHIP_CHUNK_SIZE)
+            over_pressure = pressure_spline(p_flat[chunk])
+            result[chunk] = evaluate_pchip_columns(
+                temperature_knots, over_pressure.T, t_flat[chunk]
+            )
+        return result.reshape(shape)
 
     return interpolator
+
+
+PCHIP_CHUNK_SIZE = 65_536
+"""Query points per vectorised PCHIP evaluation. Bounds the peak memory of large lookups."""
+
+
+def evaluate_pchip_columns(
+    knots: NumberArray[OneDimension],
+    columns: NumberArray[TwoDimensions],
+    query: NumberArray[OneDimension],
+) -> NumberArray[OneDimension]:
+    """
+    Evaluate one PCHIP per column of *columns*, each at its own query point.
+
+    A single `PchipInterpolator` is fitted to all columns at once (`axis=0`), and every
+    column's cubic piece is then evaluated at its own *query* value straight from the
+    piecewise-polynomial coefficients. This returns exactly what
+    `PchipInterpolator(knots, columns[:, i], extrapolate=True)(query[i])` would for every
+    `i` (including end-piece extrapolation), without building one interpolator per query
+    point.
+
+    :param knots: 1-D array of knots shared by every column, strictly increasing.
+    :param columns: 2-D array of shape `(len(knots), n)`. Column `i` holds the data of
+        interpolant `i`.
+    :param query: 1-D array of length `n`. Interpolant `i` is evaluated at `query[i]`.
+    :returns: 1-D float64 array of length `n`.
+    """
+    spline = PchipInterpolator(knots, columns, axis=0, extrapolate=True)
+    interval = np.clip(np.searchsorted(knots, query, side="right") - 1, 0, len(knots) - 2)
+    offset = query - knots[interval]
+    column_index = np.arange(columns.shape[1])
+    # `spline.c[k, i, j]` multiplies `(x - knots[i])**(3 - k)` for column `j` (Horner form)
+    result = np.zeros(columns.shape[1], dtype=np.float64)
+    for coefficient in spline.c:
+        result = result * offset + coefficient[interval, column_index]
+    return result
 
 
 def build_pchip_2d_derivative_interpolator(
@@ -97,7 +144,7 @@ def build_pchip_2d_derivative_interpolator(
     table: NumberArray[NDimension],
     dtype: npt.DTypeLike,
 ) -> typing.Callable[
-    [NumberArray[NDimension], NumberArray[NDimension]], NumberArray[OneDimension]
+    [NumberArray[NDimension], NumberArray[NDimension]], NumberArray[NDimension]
 ]:
     """
     Build a two-stage PCHIP interpolator for `∂table/∂P`.
@@ -111,28 +158,7 @@ def build_pchip_2d_derivative_interpolator(
     :param table: 2-D array of shape `(n_p, n_t)`.
     :returns: Callable `(p, t) -> ∂table/∂P`.
     """
-    dp_interps: list[PchipInterpolator] = [
-        PchipInterpolator(pressures, table[:, j], extrapolate=True).derivative(1)
-        for j in range(len(temperatures))
-    ]
-
-    def interpolator(
-        p: NumberArray[NDimension], t: NumberArray[NDimension]
-    ) -> NumberArray[OneDimension]:
-        p = p.astype(dtype, copy=False).ravel()  # type: ignore
-        t = t.astype(dtype, copy=False).ravel()  # type: ignore
-        n = len(p)
-
-        values = np.empty((len(temperatures), n), dtype=dtype)
-        for j, d_interp in enumerate(dp_interps):
-            values[j] = d_interp(p)
-
-        result = np.empty(n, dtype=dtype)
-        for i in range(n):
-            result[i] = PchipInterpolator(temperatures, values[:, i], extrapolate=True)(t[i])
-        return result
-
-    return interpolator
+    return build_pchip_2d_interpolator(pressures, temperatures, table, dtype, derivative=True)
 
 
 def build_bilinear_2d_derivative_interpolator(
@@ -213,38 +239,67 @@ def build_pchip_3d_derivative_interpolator(
     :returns: Callable `(points) -> ∂table/∂P`, where `points` is an
         `(n, 3)` array with columns `(pressure, temperature, salinity)`.
     """
-    n_t = len(temperatures)
-    n_s = len(salinities)
-    dp_interps = [
-        [
-            PchipInterpolator(pressures, table[:, j, k], extrapolate=True).derivative(1)
-            for k in range(n_s)
-        ]
-        for j in range(n_t)
-    ]
+    return build_pchip_3d_interpolator(
+        pressures, temperatures, salinities, table, dtype, derivative=True
+    )
+
+
+def build_pchip_3d_interpolator(
+    pressures: NumberArray[NDimension],
+    temperatures: NumberArray[NDimension],
+    salinities: NumberArray[NDimension],
+    table: NumberArray[NDimension],
+    dtype: npt.DTypeLike,
+    *,
+    derivative: bool = False,
+) -> typing.Callable[[NumberArray[NDimension]], NumberArray[OneDimension]]:
+    """
+    Build a three-stage PCHIP interpolator over `(pressure, temperature, salinity)`.
+
+    At every `(temperature, salinity)` grid node a PCHIP along pressure is fitted (one
+    vectorised fit for all nodes) and evaluated at each query point's own pressure. The
+    values are then re-interpolated over salinity and finally over temperature, each
+    with PCHIP, so monotonicity is preserved along every axis. Because the pressure
+    PCHIPs are the ones `derivative=True` differentiates, the value and derivative
+    surfaces are consistent with each other.
+
+    :param pressures: 1-D array of pressure knots, strictly increasing.
+    :param temperatures: 1-D array of temperature knots, strictly increasing.
+    :param salinities: 1-D array of salinity knots, strictly increasing (at least two).
+    :param table: 3-D array of shape `(n_p, n_t, n_s)`.
+    :param dtype: dtype of the returned values.
+    :param derivative: If `True`, interpolate `∂table/∂P` instead of the table values.
+    :returns: Callable `(points) -> values`, where `points` is an `(n, 3)` array with
+        columns `(pressure, temperature, salinity)`.
+    """
+    temperature_knots = np.asarray(temperatures, dtype=np.float64)
+    salinity_knots = np.asarray(salinities, dtype=np.float64)
+    n_p = len(pressures)
+    n_t = len(temperature_knots)
+    n_s = len(salinity_knots)
+    pressure_spline = PchipInterpolator(
+        np.asarray(pressures, dtype=np.float64),
+        np.asarray(table, dtype=np.float64).reshape(n_p, n_t * n_s),
+        axis=0,
+        extrapolate=True,
+    )
+    if derivative:
+        pressure_spline = pressure_spline.derivative(1)
 
     def interpolator(points: NumberArray[NDimension]) -> NumberArray[OneDimension]:
-        points = typing.cast(NumberArray[TwoDimensions], np.atleast_2d(points))  # type: ignore
-        p = points[:, 0].astype(dtype, copy=False)
-        t = points[:, 1].astype(dtype, copy=False)
-        s = points[:, 2].astype(dtype, copy=False)
-        n = len(p)
-
-        # ∂/∂P at every (temperature, salinity) grid node, at each query
-        # point's own pressure.
-        values = np.empty((n_t, n_s, n), dtype=dtype)
-        for j in range(n_t):
-            for k in range(n_s):
-                values[j, k] = dp_interps[j][k](p)
-
-        result = np.empty(n, dtype=dtype)
-        for i in range(n):
-            over_salinity = np.empty(n_t, dtype=dtype)
-            for j in range(n_t):
-                over_salinity[j] = PchipInterpolator(
-                    salinities, values[j, :, i], extrapolate=True
-                )(s[i])
-            result[i] = PchipInterpolator(temperatures, over_salinity, extrapolate=True)(t[i])
+        points = np.atleast_2d(np.asarray(points, dtype=np.float64))  # type: ignore
+        result = np.empty(len(points), dtype=dtype)
+        for start in range(0, len(points), PCHIP_CHUNK_SIZE):
+            chunk = points[start : start + PCHIP_CHUNK_SIZE]
+            n = len(chunk)
+            # Pressure stage at every (temperature, salinity) node, then salinity, then temperature
+            values = pressure_spline(chunk[:, 0]).reshape(n, n_t, n_s)
+            over_salinity = evaluate_pchip_columns(
+                salinity_knots, values.reshape(n * n_t, n_s).T, np.repeat(chunk[:, 2], n_t)
+            ).reshape(n, n_t)
+            result[start : start + n] = evaluate_pchip_columns(
+                temperature_knots, over_salinity.T, chunk[:, 1]
+            )
         return result
 
     return interpolator
@@ -397,15 +452,10 @@ TWO_DIMENSIONAL_TABLES = (
     "gas_free_water_fvf_table",
     "vaporized_oil_ratio_table",
 )
-COMMON_THREE_DIMENSIONAL_TABLES = (
+THREE_DIMENSIONAL_TABLES = (
     "solubility_in_water_table",
     "bubble_point_pressure_table",
 )
-SHARED_THREE_DIMENSIONAL_TABLES = (
-    "solubility_in_water_table",
-    "bubble_point_pressure_table",
-)
-THREE_DIMENSIONAL_TABLES = COMMON_THREE_DIMENSIONAL_TABLES + SHARED_THREE_DIMENSIONAL_TABLES
 
 
 def build_derived_tables(data: PVTData, pvt: StaticPVT, dtype: npt.DTypeLike = None) -> PVTData:
@@ -607,6 +657,11 @@ def validate_pvt_data(data: PVTData) -> None:
     n_t = len(temperatures)
     n_s = len(salinities) if salinities is not None else None
 
+    for field in attrs.fields(type(data)):
+        value = getattr(data, field.name)
+        if isinstance(value, np.ndarray) and not np.all(np.isfinite(value)):
+            raise ValidationError(f"`{field.name}` contains NaN or infinite values.")
+
     if pressures.ndim != 1:
         raise ValidationError("`pressures` must be 1-dimensional.")
     if temperatures.ndim != 1:
@@ -657,8 +712,7 @@ def validate_pvt_data(data: PVTData) -> None:
             )
 
     phase = typing.cast(FluidPhase, data.phase)
-    shared_3d_tables = SHARED_THREE_DIMENSIONAL_TABLES if phase == FluidPhase.WATER else ()
-    for table_name in COMMON_THREE_DIMENSIONAL_TABLES + shared_3d_tables:
+    for table_name in THREE_DIMENSIONAL_TABLES:
         array = getattr(data, table_name, None)
         if array is None:
             continue
@@ -947,24 +1001,26 @@ class PVTTable(StoreSerializable):
 
             if self._water_constant_salinity:
                 register_2d(name, table[:, :, 0])
+            elif use_pchip:
+                # PCHIP for the values too, so they are consistent with the derivative
+                # (`RegularGridInterpolator("cubic")` is a different, tensor-product spline).
+                self._interpolatants[name] = build_pchip_3d_interpolator(
+                    pressures, temperatures, salinities, table, dtype=self.dtype
+                )
+                self._derivative_interpolatants[name] = build_pchip_3d_derivative_interpolator(
+                    pressures, temperatures, salinities, table, dtype=self.dtype
+                )
             else:
                 self._interpolatants[name] = RegularGridInterpolator(
                     points=(pressures, temperatures, salinities),
                     values=table,
-                    method=self.interpolation_method,
+                    method="linear",
                     bounds_error=False,
                     fill_value=None,
                 )
-                if use_pchip:
-                    self._derivative_interpolatants[name] = build_pchip_3d_derivative_interpolator(
-                        pressures, temperatures, salinities, table, dtype=self.dtype
-                    )
-                else:
-                    self._derivative_interpolatants[name] = (
-                        build_bilinear_3d_derivative_interpolator(
-                            pressures, temperatures, salinities, table, dtype=self.dtype
-                        )
-                    )
+                self._derivative_interpolatants[name] = build_bilinear_3d_derivative_interpolator(
+                    pressures, temperatures, salinities, table, dtype=self.dtype
+                )
 
         # Shared properties
         if phase == FluidPhase.WATER:
@@ -1224,6 +1280,9 @@ class PVTTable(StoreSerializable):
                 if hasattr(interp, "ev")
                 else interp(pressure_array, temperature_array)
             )
+            if isinstance(result, np.ndarray) and result.shape != pressure_array.shape:
+                # Some interpolators flatten their inputs
+                result = result.reshape(pressure_array.shape)
 
         if (is_array := isinstance(result, np.ndarray)) and result.ndim == 0:
             return typing.cast(Number, dtype.type(result))  # type: ignore[attr-defined]
