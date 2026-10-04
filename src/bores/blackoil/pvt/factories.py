@@ -1,3 +1,4 @@
+import inspect
 import logging
 import typing
 import warnings
@@ -290,7 +291,10 @@ def build_oil_pvt_data(
                     tolerance=1e-4,
                 ),
             )
-        assert solution_gas_to_oil_ratios is not None
+        if solution_gas_to_oil_ratios is None:
+            raise ValidationError(
+                "2-D `bubble_point_pressures` requires `solution_gas_to_oil_ratios`."
+            )
         pb_interp = RectBivariateSpline(
             x=solution_gas_to_oil_ratios,
             y=temperatures,
@@ -925,6 +929,9 @@ def build_pvt_dataset(
     :param stock_tank_gas_density: Stock-tank gas density (lbm/ft³).
     :param stock_tank_water_density: Stock-tank water density (lbm/ft³).
     :returns: `PVTDataSet`.
+    :raises ValidationError: If a keyword argument is not accepted by the builder it is
+        routed to (the builders themselves ignore unknown keywords, so a typo would
+        otherwise vanish silently).
     """
     oil_kwargs: dict[str, typing.Any] = {}
     gas_kwargs: dict[str, typing.Any] = {}
@@ -943,6 +950,26 @@ def build_pvt_dataset(
             water_kwargs[key[6:]] = val
         else:
             shared_kwargs[key] = val
+
+    builder_parameters = {
+        "oil": set(inspect.signature(build_oil_pvt_data).parameters),
+        "gas": set(inspect.signature(build_gas_pvt_data).parameters),
+        "water": set(inspect.signature(build_water_pvt_data).parameters),
+    }
+    unknown = {
+        *(f"oil_{key}" for key in oil_kwargs if key not in builder_parameters["oil"]),
+        *(f"gas_{key}" for key in gas_kwargs if key not in builder_parameters["gas"]),
+        *(f"water_{key}" for key in water_kwargs if key not in builder_parameters["water"]),
+        *(
+            key
+            for key in shared_kwargs
+            if not any(key in parameters for parameters in builder_parameters.values())
+        ),
+    }
+    if unknown:
+        raise ValidationError(
+            f"Unknown keyword argument(s) for `build_pvt_dataset`: {sorted(unknown)}."
+        )
 
     oil_data = (
         build_oil_pvt_data(

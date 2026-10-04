@@ -836,13 +836,13 @@ class RegionInPlace(SerializableSummary["CompiledBlackOilModel"]):
         """
         reservoir = model.reservoir
         pore_volumes = reservoir.pore_volumes
-        region_numbers = (
+        fluid_in_place_regions = (
             reservoir.regions.fluid_in_place_region if reservoir.regions is not None else None
         )
-        if region_numbers is None:
+        if fluid_in_place_regions is None:
             region_mask = np.full(pore_volumes.shape, self.region == 1)
         else:
-            region_mask = np.asarray(region_numbers) == self.region
+            region_mask = np.asarray(fluid_in_place_regions) == self.region
 
         if not region_mask.any():
             raise SummaryError(
@@ -858,7 +858,7 @@ class RegionInPlace(SerializableSummary["CompiledBlackOilModel"]):
 
 def get_volume_factor(unit_system: UnitSystem) -> Number:
     """
-    Factor from a stock-tank volume in the internal volume unit 
+    Factor from a stock-tank volume in the internal volume unit
     to the reported oil/water unit.
 
     :param unit_system: The model's unit system.
@@ -888,10 +888,16 @@ class RegionOilInPlace(RegionInPlace):
         workspace: "SimulationWorkspace",
         unit_system: UnitSystem,
     ) -> Number:
-        oil_volume = (
-            workspace.reservoir.oil_saturation
-            * pore_volumes
-            / workspace.physics.pvt.oil_formation_volume_factor
+        oil_volume = np.empty_like(pore_volumes)
+        np.multiply(
+            workspace.reservoir.oil_saturation,
+            pore_volumes,
+            out=oil_volume,
+        )
+        np.divide(
+            oil_volume,
+            workspace.physics.pvt.oil_formation_volume_factor,
+            out=oil_volume,
         )
         return oil_volume[region_mask].sum() * get_volume_factor(unit_system)
 
@@ -913,10 +919,16 @@ class RegionWaterInPlace(RegionInPlace):
         workspace: "SimulationWorkspace",
         unit_system: UnitSystem,
     ) -> Number:
-        water_volume = (
-            workspace.reservoir.water_saturation
-            * pore_volumes
-            / workspace.physics.pvt.water_formation_volume_factor
+        water_volume = np.empty_like(pore_volumes)
+        np.multiply(
+            workspace.reservoir.water_saturation,
+            pore_volumes,
+            out=water_volume,
+        )
+        np.divide(
+            water_volume,
+            workspace.physics.pvt.water_formation_volume_factor,
+            out=water_volume,
         )
         return water_volume[region_mask].sum() * get_volume_factor(unit_system)
 
@@ -944,9 +956,19 @@ class RegionGasInPlace(RegionInPlace):
     ) -> Number:
         state = workspace.reservoir
         pvt = workspace.physics.pvt
-        free_gas = state.gas_saturation * pore_volumes / pvt.gas_formation_volume_factor
-        stock_tank_oil = state.oil_saturation * pore_volumes / pvt.oil_formation_volume_factor
-        dissolved_gas = state.solution_gor * stock_tank_oil * get_volume_factor(unit_system)
+
+        free_gas = np.empty_like(pore_volumes)
+        np.multiply(state.gas_saturation, pore_volumes, out=free_gas)
+        np.divide(free_gas, pvt.gas_formation_volume_factor, out=free_gas)
+
+        stock_tank_oil = np.empty_like(pore_volumes)
+        np.multiply(state.oil_saturation, pore_volumes, out=stock_tank_oil)
+        np.divide(stock_tank_oil, pvt.oil_formation_volume_factor, out=stock_tank_oil)
+
+        dissolved_gas = np.empty_like(pore_volumes)
+        np.multiply(state.solution_gor, stock_tank_oil, out=dissolved_gas)
+        np.multiply(dissolved_gas, get_volume_factor(unit_system), out=dissolved_gas)
+
         return (free_gas + dissolved_gas)[region_mask].sum()
 
 

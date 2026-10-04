@@ -29,7 +29,8 @@ class StaticPVT(StoreSerializable):
 
     Units: lbm/ft³ (FIELD), kg/m³ (METRIC), g/cm³ (LAB).
     Read from the DENSITY keyword (column 1).
-    Used in: ρo,res = (stock_tank_oil_density + Rs · stock_tank_gas_density) / Bo
+    Used in: ρo,res = (stock_tank_oil_density + Rs · stock_tank_gas_density / f) / Bo,
+    where `f` is ft³/STB in FIELD units and 1 otherwise (see `get_stb_to_volume_factor`).
     """
 
     # Water
@@ -83,8 +84,9 @@ class StaticPVT(StoreSerializable):
 
     Units: same as `stock_tank_oil_density`.
     Read from the DENSITY keyword (column 3).
-    Used in: ρg,res = (stock_tank_gas_density + Rv · stock_tank_oil_density) / Bg  [wet gas]
-            ρg,res = stock_tank_gas_density / Bg                           [dry gas]
+    Used in: ρg,res = (stock_tank_gas_density + Rv · stock_tank_oil_density · f) / Bg  [wet gas]
+            ρg,res = stock_tank_gas_density / Bg                                   [dry gas]
+    where `f` is ft³/STB in FIELD units and 1 otherwise (see `get_stb_to_volume_factor`).
     """
 
     water_viscosibility: Number | None = None
@@ -108,8 +110,7 @@ class StaticPVT(StoreSerializable):
     """
     Unit system in which all dimensional quantities are expressed.
 
-    Dimensionless fields (specific gravity, API, gas gravity, molecular
-    weight, miscibility_model, reservoir_gas) are unaffected by unit
+    Unit-independent fields (e.g. `water_salinity`, in ppm) are unaffected by unit
     conversion.
     """
 
@@ -158,18 +159,20 @@ class StaticPVT(StoreSerializable):
 
         Provided for convenience; redundant with `oil_specific_gravity`.
         """
-        if self.oil_specific_gravity is None:
+        oil_specific_gravity = self.oil_specific_gravity
+        if oil_specific_gravity is None:
             return None
-        return scalars.compute_oil_api_gravity(self.oil_specific_gravity)
+        return scalars.compute_oil_api_gravity(oil_specific_gravity)
 
     @property
     def gas_molecular_weight(self) -> Number | None:
         """
         Gas molecular weight (g/mol) computed from the gas gravity.
         """
-        if self.gas_gravity is None:
+        gas_gravity = self.gas_gravity
+        if gas_gravity is None:
             return None
-        return scalars.compute_gas_molecular_weight(self.gas_gravity)
+        return scalars.compute_gas_molecular_weight(gas_gravity)
 
     @classmethod
     def from_deck(
@@ -187,7 +190,8 @@ class StaticPVT(StoreSerializable):
         water reference properties.
 
         :param deck_file: Parsed `DeckFile` containing `PROPS`-section keywords.
-        :param pvtnum: 1-based PVT region index (matches Eclipse `PVTNUM`).
+        :param pvtnum: 1-based PVT region index (matches Eclipse `PVTNUM`). Values below 1
+            (including the default `0`) select the first region.
         :param salinity: Water salinity in ppm NaCl (default 0).
         :returns: New `StaticPVT` instance populated from deck data.
         :raises ValidationError: If required `PVTW` record is missing for the region.
@@ -253,14 +257,14 @@ class StaticPVT(StoreSerializable):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `PVT` with dimensional quantities rescaled to
+        Return a new `StaticPVT` with dimensional quantities rescaled to
         *target*.
 
-        Dimensionless fields are copied unchanged.
+        Unit-independent fields (e.g. `water_salinity`) are copied unchanged.
 
         :param target: Desired `UnitSystem`.
         :param table: Optional custom conversion table; `None` uses the default.
-        :returns: New `PVT` in *target* units.
+        :returns: New `StaticPVT` in *target* units.
         """
         if target == self.unit_system:
             return self

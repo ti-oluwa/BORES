@@ -13,6 +13,7 @@ from bores.precision import get_dtype
 from bores.serde.stores import StoreSerializable
 from bores.types import (
     FluidPhase,
+    Number,
     NumberArray,
     OneDimension,
     ThreeDimensions,
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 __all__ = ["PVTData", "PVTDataSet"]
 
 
-def get_stb_to_volume_factor(unit_system: UnitSystem) -> float:
+def get_stb_to_volume_factor(unit_system: UnitSystem) -> Number:
     """
     Return the factor that reconciles gas-oil ratio units with density units.
 
@@ -239,31 +240,33 @@ class PVTData(StoreSerializable):
     """
 
     def __attrs_post_init__(self) -> None:
-        self._warn_phase_mismatches()
+        self._check_phase_fields()
         self.ensure_dtype(self.dtype, force=True)
 
-    def _warn_phase_mismatches(self) -> None:
+    def _check_phase_fields(self) -> None:
+        """Warn about fields that do not apply to the phase, and require the Rs axis of a 2-D Pb table."""
         phase = typing.cast(FluidPhase, self.phase)
+        # `stacklevel=4`: this method -> `__attrs_post_init__` -> attrs' `__init__` -> the caller
         if phase == FluidPhase.GAS and self.solution_gor_table is not None:
             warnings.warn(
                 f"{type(self).__name__}: `solution_gor_table` is oil-only and will "
                 "be ignored for GAS phase.",
                 UserWarning,
-                stacklevel=3,
+                stacklevel=4,
             )
         if phase == FluidPhase.OIL and self.compressibility_factor_table is not None:
             warnings.warn(
                 f"{type(self).__name__}: `compressibility_factor_table` is gas-only "
                 "and will be ignored for OIL phase.",
                 UserWarning,
-                stacklevel=3,
+                stacklevel=4,
             )
         if phase == FluidPhase.WATER and self.bubble_point_pressures is not None:
             warnings.warn(
                 f"{type(self).__name__}: `bubble_point_pressures` is oil-only. For "
                 "water bubble point use `bubble_point_pressure_table` (3-D).",
                 UserWarning,
-                stacklevel=3,
+                stacklevel=4,
             )
         if (
             self.bubble_point_pressures is not None
@@ -277,6 +280,13 @@ class PVTData(StoreSerializable):
             )
 
     def ensure_dtype(self, dtype: npt.DTypeLike = None, force: bool = True) -> None:
+        """
+        Cast every array field to *dtype*, in place (the instance is frozen, so this
+        bypasses attrs).
+
+        :param dtype: Target dtype. Defaults to the active `BORES` precision.
+        :param force: If `False`, do nothing when the data is already stored as *dtype*.
+        """
         if not force and self.dtype is not None and self.dtype == np.dtype(dtype):
             return
 
@@ -287,7 +297,7 @@ class PVTData(StoreSerializable):
                 object.__setattr__(self, field.name, value.astype(dtype, copy=False))
 
         if self.dtype != dtype:
-            object.__setattr__(self, "dtype", dtype if dtype is not None else None)
+            object.__setattr__(self, "dtype", dtype)
 
     def has_rv_axis(self) -> bool:
         """
@@ -437,10 +447,11 @@ class PVTDataSet(StoreSerializable):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `PVTDataset` with all pvt data converted to *target*.
+        Return a new `PVTDataSet` with all pvt data converted to *target*.
 
         :param target: Target `UnitSystem`.
-        :returns: New `PVTDataset` in *target* units.
+        :param table: Optional custom conversion table; `None` uses the default.
+        :returns: New `PVTDataSet` in *target* units.
         """
         return self.__class__(
             oil=self.oil.convert(target, table=table) if self.oil is not None else None,

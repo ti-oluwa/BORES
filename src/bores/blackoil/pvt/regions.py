@@ -156,11 +156,11 @@ class PVT(StoreSerializable):
         :returns: `PVTRegion` for that region.
         :raises KeyError: If the region index does not exist.
         """
-        regions = self.regions.get(pvtnum)
-        if regions is None:
+        region = self.regions.get(pvtnum)
+        if region is None:
             available = sorted(self.regions.keys())
             raise KeyError(f"PVT region {pvtnum} not found. Available regions: {available}.")
-        return regions
+        return region
 
     @property
     def n_regions(self) -> int:
@@ -645,7 +645,12 @@ def build_oil_data_from_pvto(
         dbo_dp = PchipInterpolator(pressures, oil_fvf_2d[:, j]).derivative(1)(pressures)
         oil_compressibility_2d[:, j] = -(1.0 / oil_fvf_2d[:, j]) * dbo_dp
     # Compressibility must be non-negative; clamp to physical range
-    clip_compressibility(oil_compressibility_2d, dtype=dtype, context="`PVTO` oil compressibility")
+    clip_compressibility(
+        oil_compressibility_2d,
+        dtype=dtype,
+        unit_system=unit_system,
+        context="`PVTO` oil compressibility",
+    )
     return PVTData(
         phase=FluidPhase.OIL,
         pressures=typing.cast(FloatArray[OneDimension], pressures),
@@ -731,7 +736,12 @@ def build_oil_data_from_pvdo(
     for j in range(n_t):
         dbo_dp = PchipInterpolator(pressures, oil_fvf_2d[:, j]).derivative(1)(pressures)
         oil_compressibility_2d[:, j] = -(1.0 / oil_fvf_2d[:, j]) * dbo_dp
-    clip_compressibility(oil_compressibility_2d, dtype=dtype, context="`PVDO` oil compressibility")
+    clip_compressibility(
+        oil_compressibility_2d,
+        dtype=dtype,
+        unit_system=unit_system,
+        context="`PVDO` oil compressibility",
+    )
 
     return PVTData(
         phase=FluidPhase.OIL,
@@ -746,6 +756,75 @@ def build_oil_data_from_pvdo(
         compressibility_table=typing.cast(FloatArray[TwoDimensions], oil_compressibility_2d),
         dtype=dtype,
         unit_system=unit_system,
+    )
+
+
+def build_oil_data_from_pvco(
+    pvco_record: dict[str, Number],
+    density_record: dict[str, Number] | None,
+    temperature: TemperatureSpec,
+    unit_system: UnitSystem,
+    n_pressure_points: int = 40,
+    interpolation_method: InterpolationMethod = "linear",
+    depth_range: tuple[Number, Number] | None = None,
+    dtype: npt.DTypeLike = None,
+) -> PVTData:
+    """
+    Build dead-oil `PVTData` from a `PVCO` analytical record.
+
+    The record holds `(reference_pressure, fvf, compressibility, viscosity, viscosibility)`,
+    the layout of Eclipse's `PVCDO`: oil without dissolved gas, with constant compressibility
+    `co` and viscosibility `cv`. Like `PVTW` for water, `Bo(P)` and `μo(P)` are evaluated
+    with Eclipse's second-order series on a synthetic pressure grid and handed to
+    `build_oil_data_from_pvdo`. With `X = co · (P - P_ref)` and `Y = (co - cv) · (P - P_ref)`:
+
+    - `Bo(P) = Bo_ref / (1 + X + X²/2)`
+    - `μo(P) = μo_ref · (1 + X + X²/2) / (1 + Y + Y²/2)`
+
+    The pressure grid spans `[P_ref/5, P_ref x 5]`.
+
+    :param pvco_record: Dict with keys `"reference_pressure"`, `"fvf"`, `"compressibility"`,
+        `"viscosity"`, and optionally `"viscosibility"` (default 0).
+    :param density_record: `DENSITY` record; `"oil"` key used for ρo,SC.
+    :param temperature: Reservoir temperature.
+    :param n_pressure_points: Points in the synthetic pressure grid.
+    :param dtype: Array dtype; defaults to `get_dtype()`.
+    :returns: `PVTData` for the oil phase.
+    """
+    reference_pressure = pvco_record["reference_pressure"]
+    reference_oil_fvf = pvco_record["fvf"]
+    oil_compressibility = pvco_record["compressibility"]
+    reference_viscosity = pvco_record["viscosity"]
+    oil_viscosibility = pvco_record.get("viscosibility", 0.0)
+
+    if reference_oil_fvf <= 0:
+        raise ValidationError("`PVCO` Bo must be positive.")
+    if oil_compressibility < 0:
+        raise ValidationError("`PVCO` co (compressibility) must be non-negative.")
+    if reference_viscosity <= 0:
+        raise ValidationError("`PVCO` viscosity must be positive.")
+
+    pressures = np.linspace(
+        max(0.0, reference_pressure / 5.0), reference_pressure * 5.0, n_pressure_points
+    )
+    delta_p = pressures - reference_pressure
+    x = oil_compressibility * delta_p
+    y = (oil_compressibility - oil_viscosibility) * delta_p
+    series_x = 1.0 + x + 0.5 * x * x
+    oil_fvf = reference_oil_fvf / series_x
+    oil_viscosity = reference_viscosity * series_x / (1.0 + y + 0.5 * y * y)
+    synthetic_rows = [
+        {"pressure": pressure, "fvf": fvf, "viscosity": viscosity}
+        for pressure, fvf, viscosity in zip(pressures, oil_fvf, oil_viscosity, strict=False)
+    ]
+    return build_oil_data_from_pvdo(
+        pvdo_records=synthetic_rows,
+        density_record=density_record,
+        temperature=temperature,
+        unit_system=unit_system,
+        interpolation_method=interpolation_method,
+        depth_range=depth_range,
+        dtype=dtype,
     )
 
 
@@ -819,7 +898,13 @@ def build_gas_data_from_pvdg(
     for j in range(n_t):
         dbg_dp = PchipInterpolator(pressures, gas_fvf_2d[:, j]).derivative(1)(pressures)
         gas_compressibility_2d[:, j] = -(1.0 / gas_fvf_2d[:, j]) * dbg_dp
-    clip_compressibility(gas_compressibility_2d, dtype=dtype, context="`PVDG` gas compressibility")
+    clip_compressibility(
+        gas_compressibility_2d,
+        dtype=dtype,
+        unit_system=unit_system,
+        pressure=pressures[:, np.newaxis],
+        context="`PVDG` gas compressibility",
+    )
 
     return PVTData(
         phase=FluidPhase.GAS,
@@ -1005,7 +1090,13 @@ def build_gas_data_from_pvtg(
             pressure_values
         )
         gas_compressibility_2d[:, j] = -(1.0 / gas_fvf_2d[:, j]) * dbg_dp
-    clip_compressibility(gas_compressibility_2d, dtype=dtype, context="`PVTG` gas compressibility")
+    clip_compressibility(
+        gas_compressibility_2d,
+        dtype=dtype,
+        unit_system=unit_system,
+        pressure=pressure_values[:, np.newaxis],
+        context="`PVTG` gas compressibility",
+    )
 
     # Rv table: shape (n_p, n_rv) - same Rv values at every pressure
     vaporized_oil_ratio_table = np.tile(rv_values[np.newaxis, :], (n_p, 1)).astype(
@@ -1050,12 +1141,17 @@ def build_water_data_from_pvtw(
     analytically on a pressure grid and stored as tables so all subsequent
     lookups are interpolator calls.
 
-    The exponential models used are:
+    The models used are Eclipse's second-order series (in place of the exponential, which
+    it approximates). With `X = cw · (P - P_ref)` and `Y = (cw - cv) · (P - P_ref)`:
 
-    - `Bw(P) = Bw_ref · exp(-cw · (P - P_ref))`
-    - `μw(P) = μw_ref · exp(-cv · (P - P_ref))`
+    - `Bw(P) = Bw_ref / (1 + X + X²/2)`
+    - `μw(P) = μw_ref · (1 + X + X²/2) / (1 + Y + Y²/2)`
 
-    The pressure grid spans `[max(14.696, P_ref/10), P_ref x 10]` so that
+    The viscosity form follows from Eclipse evaluating the product `μw · Bw` as
+    `(μw_ref · Bw_ref) / (1 + Y + Y²/2)`. It gives `cv = (1/μw) · (dμw/dP)` at the
+    reference pressure, and a constant viscosity when `cv = 0`.
+
+    The pressure grid spans `[P_ref/10, P_ref x 10]` so that
     the reference pressure always sits comfortably within the table bounds.
 
     :param pvtw_record: Dict with keys `"reference_pressure"`, `"fvf"`, `"compressibility"`,
@@ -1105,16 +1201,13 @@ def build_water_data_from_pvtw(
     x = water_compressibility * delta_p
     water_fvf_1d = (reference_water_fvf / (1.0 + x + 0.5 * x * x)).astype(dtype, copy=False)
 
-    # True Exponential approach (May give negatives by more accurate)
-    # water_viscosity_1d = (
-    #     reference_water_viscosity * np.exp(-water_viscosibility * delta_p)
-    # ).astype(dtype, copy=False)
-
-    # Taylor's exponential approximation (more stable). Used by Eclipse.
-    y = water_viscosibility * delta_p
-    water_viscosity_1d = (reference_water_viscosity / (1.0 + y + 0.5 * y * y)).astype(
-        dtype, copy=False
-    )
+    # Eclipse evaluates the product μw·Bw as (μw_ref·Bw_ref) / (1 + Y + Y²/2) with
+    # Y = (cw - cv)·ΔP; dividing by Bw(P) = Bw_ref / (1 + X + X²/2) gives μw.
+    # cv = 0 leaves μw constant and cv is the true (1/μw)·(dμw/dP) at the reference pressure.
+    y = (water_compressibility - water_viscosibility) * delta_p
+    water_viscosity_1d = (
+        reference_water_viscosity * (1.0 + x + 0.5 * x * x) / (1.0 + y + 0.5 * y * y)
+    ).astype(dtype, copy=False)
 
     water_fvf_2d = _broadcast_to_2d(water_fvf_1d, n_t)
     water_viscosity_2d = _broadcast_to_2d(water_viscosity_1d, n_t)
@@ -1168,7 +1261,7 @@ def load_pvt_regions(
     `PVTRegion` per `PVTNUM` region:
 
     - Oil: `PVTO` (live oil, preferred) -> `PVDO` (dead oil) -> `PVCO`
-      (analytical; treated as dead oil with constant Bo).
+      (analytical dead oil with constant compressibility and viscosibility).
     - Gas: `PVTG` (wet gas, preferred) -> `PVDG` (dry gas).
     - Water: `PVTW` (always analytical; converted to a table internally).
 
@@ -1256,29 +1349,11 @@ def load_pvt_regions(
                 dtype=dtype,
             )
         elif pvco_records is not None and region_idx < len(pvco_records):
-            # PVCO: single-record analytical model - treat as a two-point PVDO
+            # PVCO: single-record analytical model (constant compressibility / viscosibility)
             pvco_record = pvco_records[region_idx]
             if pvco_record:
-                record = pvco_record[0]
-                reference_pressure = record["reference_pressure"]
-                reference_oil_fvf = record["fvf"]
-                oil_compressibility = record["compressibility"]
-                reference_viscosity = record["viscosity"]
-                # Build a small synthetic pressure grid around the reference
-                min_pressure = max(0.0, reference_pressure / 5.0)
-                max_pressure = reference_pressure * 5.0
-                pvco_pressures = np.linspace(min_pressure, max_pressure, 40)
-                delta_p = pvco_pressures - reference_pressure
-                oil_fvf = reference_oil_fvf * np.exp(-oil_compressibility * delta_p)
-                oil_viscosity = np.full_like(pvco_pressures, reference_viscosity)
-                synthetic_rows = [
-                    {"pressure": pressure, "fvf": fvf, "viscosity": viscosity}
-                    for pressure, fvf, viscosity in zip(
-                        pvco_pressures, oil_fvf, oil_viscosity, strict=False
-                    )
-                ]
-                oil_data = build_oil_data_from_pvdo(
-                    pvdo_records=synthetic_rows,
+                oil_data = build_oil_data_from_pvco(
+                    pvco_record=pvco_record[0],
                     density_record=density_record,
                     temperature=temperature.region(pvtnum),
                     unit_system=unit_system,

@@ -306,11 +306,23 @@ def build_bilinear_3d_derivative_interpolator(
     return interpolator
 
 
+DEFAULT_MAX_COMPRESSIBILITY = 1e-1
+"""Compressibility ceiling in FIELD units (1/psi). Converted to the table's unit system."""
+
+GAS_COMPRESSIBILITY_PRESSURE_FACTOR = 2.0
+"""
+Gas compressibility ceiling as a multiple of `1/P`. Ideal-gas `cg = 1/P` already exceeds
+`DEFAULT_MAX_COMPRESSIBILITY` at low pressure, so a fixed ceiling alone would clip valid gas data.
+"""
+
+
 def clip_compressibility(
     values: NumberArray[NDimension],
     *,
     dtype: npt.DTypeLike,
-    max_value: Number = 1e-1,
+    unit_system: UnitSystem = UnitSystem.FIELD,
+    pressure: NumberArray[NDimension] | None = None,
+    max_value: Number | None = None,
     context: str = "compressibility",
 ) -> NumberArray[NDimension]:
     """
@@ -329,10 +341,28 @@ def clip_compressibility(
 
     :param values: Raw compressibility array before clipping.
     :param dtype: Output dtype.
-    :param max_value: Upper clip bound (1/psi or 1/bar, matching *values*' unit system).
+    :param unit_system: Unit system *values* are expressed in. The default ceiling
+        (`DEFAULT_MAX_COMPRESSIBILITY`, 1/psi) is converted to it with
+        `get_conversion_factors`.
+    :param pressure: Pressure of each value, broadcastable to *values*. Gas only: the
+        ceiling is raised to `GAS_COMPRESSIBILITY_PRESSURE_FACTOR / P` wherever that
+        exceeds the default, since `cg ≈ 1/P` is legitimately large at low pressure.
+    :param max_value: Upper clip bound in *unit_system* (1/pressure-unit). Defaults to
+        `DEFAULT_MAX_COMPRESSIBILITY` converted to *unit_system*.
     :param context: Label used in the warning/log message (e.g. `"PVTO oil compressibility"`).
     :returns: Clipped array, dtype *dtype*.
     """
+    if max_value is None:
+        factors = get_conversion_factors(UnitSystem.FIELD, unit_system)
+        max_value = DEFAULT_MAX_COMPRESSIBILITY * factors["compressibility"]
+
+    ceiling = max_value
+    if pressure is not None:
+        ceiling = np.maximum(
+            max_value,
+            GAS_COMPRESSIBILITY_PRESSURE_FACTOR / np.maximum(pressure, np.finfo(np.float64).tiny),
+        )
+
     n_negative = int(np.count_nonzero(values < 0.0))
     if n_negative:
         logger.debug(
@@ -344,17 +374,17 @@ def clip_compressibility(
             float(np.min(values)),
         )
 
-    n_excess = int(np.count_nonzero(values > max_value))
+    n_excess = int(np.count_nonzero(values > ceiling))
     if n_excess:
         warnings.warn(
-            f"{context}: {n_excess} value(s) exceeded the {max_value:g} ceiling "
+            f"{context}: {n_excess} value(s) exceeded the {float(np.min(ceiling)):g} ceiling "
             f"(max {float(np.max(values)):.4g}) and were clipped. This usually "
             "indicates a noisy or sparsely-tabulated PVT table rather than "
             "physical compressibility. Consider checking the source table.",
             UserWarning,
             stacklevel=3,
         )
-    return np.clip(values, 0.0, max_value, dtype=dtype, out=values)
+    return np.clip(values, 0.0, ceiling, dtype=dtype, out=values)
 
 
 TWO_DIMENSIONAL_TABLES = (
@@ -436,6 +466,7 @@ def build_derived_tables(data: PVTData, pvt: StaticPVT, dtype: npt.DTypeLike = N
             clip_compressibility(
                 oil_compressibility_table,
                 dtype=dtype,
+                unit_system=data.unit_system,
                 context="PVT table derived oil compressibility",
             )
             updates["compressibility_table"] = oil_compressibility_table.astype(dtype, copy=False)
@@ -478,6 +509,8 @@ def build_derived_tables(data: PVTData, pvt: StaticPVT, dtype: npt.DTypeLike = N
                 clip_compressibility(
                     gas_compressibility_table,
                     dtype=dtype,
+                    unit_system=data.unit_system,
+                    pressure=pressure_table,
                     context="PVT table derived gas compressibility",
                 )
                 updates["compressibility_table"] = gas_compressibility_table.astype(
@@ -495,6 +528,8 @@ def build_derived_tables(data: PVTData, pvt: StaticPVT, dtype: npt.DTypeLike = N
                 clip_compressibility(
                     gas_compressibility_table,
                     dtype=dtype,
+                    unit_system=data.unit_system,
+                    pressure=pressure_table,
                     context="PVT table derived gas compressibility",
                 )
                 updates["compressibility_table"] = gas_compressibility_table.astype(
@@ -545,6 +580,7 @@ def build_derived_tables(data: PVTData, pvt: StaticPVT, dtype: npt.DTypeLike = N
             clip_compressibility(
                 water_compressibility_2d_table,
                 dtype=dtype,
+                unit_system=data.unit_system,
                 context="PVT table derived water compressibility",
             )
             if data.salinities is not None:
@@ -2494,6 +2530,7 @@ class PVTTables(StoreSerializable):
         :param warn_on_extrapolation: Log warnings when queries exceed table bounds.
         :param pvt: Reference densities for derived table construction
             (`stock_tank_oil_density`, `stock_tank_gas_density`, `stock_tank_water_density`).
+        :param dtype: Floating-point dtype of the tables.
         :returns: `PVTTables` ready for simulation.
         """
         base_kwargs: dict[str, typing.Any] = dict(
