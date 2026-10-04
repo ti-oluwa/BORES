@@ -5,6 +5,7 @@ Utilities for building well model definition objects from parsed Eclipse deck re
 import typing
 
 import attrs
+import numpy as np
 
 from bores.constants import c
 from bores.deck.core import DeckParseError
@@ -41,6 +42,7 @@ from bores.wells.groups import (
     WellGroup,
     WellGroups,
 )
+from bores.wells.hydraulics.vfp import VFPData, VFPTable, VFPTables
 from bores.wells.mappings import (
     DIRECTION_MAP,
     ECONOMIC_MIN_RATE_QUANTITY_FIELDS,
@@ -77,6 +79,7 @@ __all__ = [
     "apply_guide_rates",
     "apply_well_segments",
     "from_deck_gas_rate",
+    "get_fluid_in_place_regions",
     "load_controls_from_records",
     "load_economic_limits_from_record",
     "load_group_control_from_record",
@@ -88,6 +91,9 @@ __all__ = [
     "load_producer_control_from_record",
     "load_schedule",
     "load_summary_items",
+    "load_vfp_data",
+    "load_vfp_table",
+    "load_vfp_tables",
     "load_well_controls",
     "load_well_from_records",
     "load_well_segments",
@@ -647,7 +653,8 @@ def load_producer_control_from_record(
 
     :param record: One parsed `WCONPROD` record.
     :param unit_system: The deck's unit system.
-    :returns: Constructed `ProducerControl`. Adds an implicit `BHPLimit(min_value=bhp)`
+    :returns: Constructed `ProducerControl`, with the `WCONPROD` VFP table number and ALQ. Adds an
+        implicit `BHPLimit(min_value=bhp)`
         when `bhp` is given and mode isn't `BHP`, and an implicit
         `THPLimit(min_value=thp)` when `thp` is given and mode isn't `THP`.
     """
@@ -674,12 +681,15 @@ def load_producer_control_from_record(
     else:
         target_rate = None
 
+    vfp_table = record.get("vfp_table")
     return ProducerControl(
         mode=mode,
         target_rate=target_rate,
         target_bhp=bhp,
         target_thp=record.get("thp"),
         limits=tuple(limits),
+        vfp_table=int(vfp_table) if vfp_table else None,
+        artificial_lift_quantity=record.get("alq") or 0.0,
         unit_system=unit_system,
     )
 
@@ -1349,6 +1359,76 @@ WELL_SUMMARY_VECTORS: dict[str, type[ws.WellVector]] = {
 }
 """Deck mnemonic to the `bores.wells.summary` class it requests. One instance per named well."""
 
+REGION_SUMMARY_VECTORS: dict[str, type[ws.RegionInPlace]] = {
+    "ROIP": ws.RegionOilInPlace,
+    "RGIP": ws.RegionGasInPlace,
+    "RWIP": ws.RegionWaterInPlace,
+}
+"""Deck mnemonic to the `bores.wells.summary` class it requests. One instance per `FIPNUM` region."""
+
+
+def get_fluid_in_place_regions(deck_file: DeckFile) -> list[int]:
+    """
+    Every fluid-in-place region number a deck defines.
+
+    :param deck_file: The deck to read `FIPNUM` from.
+    :returns: The distinct `FIPNUM` values in ascending order, or `[1]` if the deck has none.
+    """
+    fip_numbers = deck_file.get("FIPNUM")
+    if fip_numbers is None:
+        return [1]
+    return sorted(int(region) for region in np.unique(np.asarray(fip_numbers)))
+
+
+def load_vfp_data(deck_file: DeckFile) -> list[VFPData]:
+    """
+    Loads every `VFPPROD` and `VFPINJ` table in a deck as `VFPData`, producers first.
+
+    :param deck_file: The deck to read the tables from.
+    :returns: One `VFPData` per table occurrence, in deck order within each keyword.
+    :raises ValidationError: If a table cannot be mapped (see `VFPData.from_deck`).
+    """
+    deck_tables = [*(deck_file.get("VFPPROD") or []), *(deck_file.get("VFPINJ") or [])]
+    return [
+        VFPData.from_deck(table, deck_unit_system=deck_file.unit_system) for table in deck_tables
+    ]
+
+
+def load_vfp_table(deck_file: DeckFile, table_number: int) -> VFPTable:
+    """
+    Loads the `VFPTable` a deck defines under one table number.
+
+    A table number defined more than once keeps its last definition, as in a deck.
+
+    :param deck_file: The deck to read the table from.
+    :param table_number: The table number wells select through `WCONPROD` / `WCONINJE`.
+    :returns: The table.
+    :raises ValidationError: If the deck defines no such table or it cannot be mapped.
+    """
+    for table in reversed([*(deck_file.get("VFPPROD") or []), *(deck_file.get("VFPINJ") or [])]):
+        if table.table_number == table_number:
+            return VFPTable.from_deck(table, deck_unit_system=deck_file.unit_system)
+    raise ValidationError(f"The deck defines no VFP table number {table_number}.")
+
+
+def load_vfp_tables(deck_file: DeckFile) -> VFPTables:
+    """
+    Loads every `VFPPROD` and `VFPINJ` table in a deck into one number-indexed collection.
+
+    :param deck_file: The deck to read the tables from.
+    :returns: The collection, empty if the deck defines no tables.
+    :raises ValidationError: If a table cannot be mapped, or a producer and an injector table
+        share a number (the collection is keyed by number alone).
+    """
+    producers = deck_file.get("VFPPROD") or []
+    injectors = deck_file.get("VFPINJ") or []
+    shared = {t.table_number for t in producers} & {t.table_number for t in injectors}
+    if shared:
+        raise ValidationError(
+            f"VFP table number(s) {sorted(shared)} are defined by both `VFPPROD` and `VFPINJ`."
+        )
+    return VFPTables.from_deck([*producers, *injectors], deck_unit_system=deck_file.unit_system)
+
 
 def load_summary_items(
     deck_file: DeckFile, *, compiled_at: float = 0.0
@@ -1365,9 +1445,9 @@ def load_summary_items(
     keyword with no object list (`WOPR` alone, say) requests every well
     ever mentioned via `WELSPECS`, matching Eclipse's own default.
 
-    `ROIP`/`RGIP`/`RWIP` (region in-place volumes) are recognized by
-    `FIELD_SUMMARY_VECTORS`/`WELL_SUMMARY_VECTORS`'s absence, not read:
-    no `bores.wells.summary` implementation exists for them yet.
+    `ROIP`/`RGIP`/`RWIP` (region in-place volumes) request one vector per listed fluid-in-place
+    region. With no region list they request every `FIPNUM` region in the deck (region 1 if the
+    deck has no `FIPNUM`), matching Eclipse's own default.
 
     :param deck_file: The deck to read the `SUMMARY` section from.
     :param compiled_at: The point on the schedule clock the model this
@@ -1389,6 +1469,15 @@ def load_summary_items(
         if requested is None:
             continue
         quantities.extend(well_summary_cls(well_name=name) for name in (requested or well_names))
+
+    for mnemonic, region_summary_cls in REGION_SUMMARY_VECTORS.items():
+        requested = deck_file.get(mnemonic)
+        if requested is None:
+            continue
+        regions = [int(float(region)) for region in requested] or get_fluid_in_place_regions(
+            deck_file
+        )
+        quantities.extend(region_summary_cls(region=region) for region in regions)
 
     if not quantities:
         return []

@@ -37,7 +37,10 @@ file order alongside the `DATES`/`TSTEP` timeline.
 - `WTEST` - automatic well re-opening / testing schedule.
 """
 
+import typing
+
 import numpy as np
+import numpy.typing as npt
 
 from bores.datastructures import GridDimensions
 from bores.deck.core import Deck, DeckParseError, tokenize
@@ -61,6 +64,8 @@ __all__ = [
     "GECON",
     "GRUPTREE",
     "TSTEP",
+    "VFPINJ",
+    "VFPPROD",
     "WCONHIST",
     "WCONINJE",
     "WCONINJH",
@@ -73,9 +78,12 @@ __all__ = [
     "WELSPECS",
     "WELTARG",
     "WGRUPCON",
+    "WLIFT",
     "WPAVE",
     "WPIMULT",
     "WTEST",
+    "VFPInjectorDeckTable",
+    "VFPProducerDeckTable",
 ]
 
 
@@ -432,6 +440,7 @@ WCONPROD = ScheduledRecordKeyword[str | float](
         Field("bhp", np.float64, required=False, default=None),
         Field("thp", np.float64, required=False, default=None),
         Field("vfp_table", int, required=False, default=0),
+        Field("alq", np.float64, required=False, default=0.0),
     ],
 )
 """
@@ -452,6 +461,9 @@ Fields:
   `None` means no limit.
 - `vfp_table`    - VFP (vertical flow performance) table number for
   THP-to-BHP conversion (`0` = none assigned).
+- `alq`          - artificial lift quantity the well currently operates at, used with the
+  VFP table's own ALQ axis (`0` = no artificial lift). The `VFPPROD` table only defines
+  how BHP varies with ALQ; this item is the value the well actually runs at.
 """
 
 WCONINJE = ScheduledRecordKeyword[str | float](
@@ -1048,4 +1060,322 @@ Fields:
 
 - `well`     - well name.
 - `d_factor` - non-Darcy flow coefficient assigned to the well.
+"""
+
+
+WLIFT = ScheduledRecordKeyword[str | float](
+    "WLIFT",
+    fields=[
+        Field("well", str),
+        Field("trigger_limit", np.float64, required=False, default=0.0),
+        Field(
+            "trigger_phase",
+            lambda v: str(v).upper(),
+            required=False,
+            default="OIL",
+            options={"OIL", "GAS", "WATER", "LIQ"},
+        ),
+        Field("new_vfp_table", int, required=False, default=0),
+        Field("new_alq", np.float64, required=False, default=0.0),
+        Field("new_efficiency_factor", np.float64, required=False, default=0.0),
+        Field("water_cut_limit", np.float64, required=False, default=0.0),
+        Field("new_thp_limit", np.float64, required=False, default=0.0),
+        Field("gas_oil_ratio_limit", np.float64, required=False, default=0.0),
+        Field("alq_shift", np.float64, required=False, default=1.0e20),
+        Field("thp_shift", np.float64, required=False, default=1.0e20),
+    ],
+)
+"""
+`WLIFT 'WELL' [trigger_limit] [trigger_phase] [new_vfp_table] [new_alq] [new_efficiency_factor]
+[water_cut_limit] [new_thp_limit] [gas_oil_ratio_limit] [alq_shift] [thp_shift] / ... /`
+- re-tubing, THP and lift-switching workover: replace a well's VFP table and artificial lift
+quantity once a trigger is met.
+
+Item order and defaults follow OPM Flow's `WLIFT`.
+
+Fields:
+
+- `well`                  - well name or template.
+- `trigger_limit`         - rate of `trigger_phase` below which the workover is triggered
+  (`0` = no rate trigger).
+- `trigger_phase`         - phase whose rate is tested against `trigger_limit`.
+- `new_vfp_table`         - VFP table number to switch to (`0` = keep the current table).
+- `new_alq`               - ALQ to apply (`0` = unchanged).
+- `new_efficiency_factor` - well efficiency factor after the workover (`0` = unchanged).
+- `water_cut_limit`       - water cut above which the workover is triggered (`0` = none).
+- `new_thp_limit`         - THP limit applied after the workover (`0` = unchanged).
+- `gas_oil_ratio_limit`   - gas-oil ratio above which the workover is triggered (`0` = none).
+- `alq_shift`             - ALQ change applied if the well still violates after the workover.
+- `thp_shift`             - THP change applied if the well still violates after the workover.
+
+A deck's `WLIFT` is an update to a well's lift settings, so (like `WELTARG`) it is a
+scheduled record: it takes effect at the schedule time it appears at.
+"""
+
+
+class VFPProducerDeckTable(typing.NamedTuple):
+    """One `VFPPROD` table exactly as the deck declares it, before any unit or axis mapping."""
+
+    table_number: int
+    """Table number wells refer to through `WCONPROD`'s `vfp_table` item."""
+
+    datum_depth: float | None
+    """Depth the BHP values refer to, or `None` if defaulted."""
+
+    flow_type: str
+    """Meaning of the flow axis: `OIL`, `LIQ`, `GAS`, `WG` or `TM`."""
+
+    water_fraction_type: str
+    """Meaning of the water axis: `WOR`, `WCT` or `WGR`."""
+
+    gas_fraction_type: str
+    """Meaning of the gas axis: `GOR`, `GLR` or `OGR`."""
+
+    thp_type: str
+    """Meaning of the pressure axis (`THP`)."""
+
+    alq_type: str
+    """Meaning of the artificial lift axis: `GRAT`, `IGLR`, `TGLR`, `PUMP`, `COMP`, `BEAN` or blank."""
+
+    units: str | None
+    """Unit system the table is written in (`METRIC`, `FIELD`, `LAB`, `PVT-M`), or `None` if defaulted."""
+
+    bhp_type: str
+    """What the table values are (`BHP`)."""
+
+    flow: npt.NDArray[np.float64]
+    """Flow axis values."""
+
+    thp: npt.NDArray[np.float64]
+    """Tubing head pressure axis values."""
+
+    water_fraction: npt.NDArray[np.float64]
+    """Water axis values, in the units of `water_fraction_type`."""
+
+    gas_fraction: npt.NDArray[np.float64]
+    """Gas axis values, in the units of `gas_fraction_type`."""
+
+    alq: npt.NDArray[np.float64]
+    """Artificial lift axis values."""
+
+    bhps: npt.NDArray[np.float64]
+    """BHP values shaped `(len(flow), len(thp), len(water_fraction), len(gas_fraction), len(alq))`."""
+
+
+class VFPInjectorDeckTable(typing.NamedTuple):
+    """One `VFPINJ` table exactly as the deck declares it, before any unit mapping."""
+
+    table_number: int
+    """Table number wells refer to through `WCONINJE`'s `vfp_table` item."""
+
+    datum_depth: float | None
+    """Depth the BHP values refer to, or `None` if defaulted."""
+
+    flow_type: str
+    """Injected phase the flow axis refers to: `OIL`, `WAT` or `GAS`."""
+
+    thp_type: str
+    """Meaning of the pressure axis (`THP`)."""
+
+    units: str | None
+    """Unit system the table is written in, or `None` if defaulted."""
+
+    bhp_type: str
+    """What the table values are (`BHP`)."""
+
+    flow: npt.NDArray[np.float64]
+    """Flow axis values."""
+
+    thp: npt.NDArray[np.float64]
+    """Tubing head pressure axis values."""
+
+    bhps: npt.NDArray[np.float64]
+    """BHP values shaped `(len(flow), len(thp))`."""
+
+
+class VFPKeyword(Keyword[list[VFPProducerDeckTable] | list[VFPInjectorDeckTable]]):
+    """
+    A `VFPPROD` or `VFPINJ` keyword: one vertical-flow-performance table per occurrence.
+
+    A table has no terminating record. Its length follows from its axes: a header record,
+    one record per axis, then one record per combination of the non-flow axes holding the BHP
+    values along the flow axis. Each such record starts with the 1-based positions on those axes.
+    """
+
+    __slots__ = ("injector",)
+
+    def __init__(self, name: str, *, injector: bool) -> None:
+        """
+        :param name: `"VFPPROD"` or `"VFPINJ"`.
+        :param injector: `True` for `VFPINJ` (flow and pressure axes only).
+        """
+        super().__init__(name)
+        self.injector = injector
+
+    def parse(
+        self,
+        deck: Deck,
+        dims: GridDimensions | None,
+        *,
+        operations: list[Operation] | None = None,
+        schedule_times: dict[int, float] | None = None,
+    ) -> list[VFPProducerDeckTable] | list[VFPInjectorDeckTable] | None:
+        records = deck.get_records_for(self.name)
+        if not records:
+            return None
+        tables = [self.parse_table(record.body) for record in records]
+        return tables  # type: ignore[return-value]
+
+    def parse_table(self, body: str) -> VFPProducerDeckTable | VFPInjectorDeckTable:
+        """
+        Parse one table's body.
+
+        :param body: The text between this occurrence's keyword line and the next keyword.
+        :returns: The table as declared.
+        :raises DeckParseError: If the axes and rows are inconsistent.
+        """
+        segments: list[list[str]] = [[]]
+        for token in tokenize(body.replace("/", " / ")):
+            if token == "/":
+                segments.append([])
+            else:
+                segments[-1].append(token)
+
+        segments = [segment for segment in segments if segment]
+        n_axes = 2 if self.injector else 5
+        if len(segments) < 1 + n_axes + 1:
+            raise DeckParseError(f"{self.name}: a table needs a header, its axes and data rows.")
+
+        def item(segment: list[str], index: int, default: str | None = None) -> str | None:
+            if index >= len(segment) or segment[index] == "1*":
+                return default
+            return segment[index].upper()
+
+        def numbers(segment: list[str], label: str) -> npt.NDArray[np.float64]:
+            try:
+                return np.array(segment, dtype=np.float64)
+            except ValueError as exc:
+                raise DeckParseError(f"{self.name}: bad {label} axis values {segment}.") from exc
+
+        header = segments[0]
+        table_number = int(float(header[0]))
+        datum_text = item(header, 1)
+        datum_depth = float(datum_text) if datum_text is not None else None
+        axes = [numbers(segments[1 + i], f"axis {i + 1}") for i in range(n_axes)]
+        rows = segments[1 + n_axes :]
+
+        try:
+            if self.injector:
+                flow, thp = axes
+                bhps = np.full((len(flow), len(thp)), np.nan)
+                for row in rows:
+                    thp_index = int(float(row[0])) - 1
+                    values = np.array(row[1:], dtype=np.float64)
+                    if values.size != len(flow) or not 0 <= thp_index < len(thp):
+                        raise DeckParseError(
+                            f"{self.name} table {table_number}: bad data row {row}."
+                        )
+                    bhps[:, thp_index] = values
+
+                if np.isnan(bhps).any():
+                    raise DeckParseError(
+                        f"{self.name} table {table_number}: the data rows do not cover every THP."
+                    )
+                return VFPInjectorDeckTable(
+                    table_number=table_number,
+                    datum_depth=datum_depth,
+                    flow_type=item(header, 2, "") or "",
+                    thp_type=item(header, 3, "THP") or "THP",
+                    units=item(header, 4),
+                    bhp_type=item(header, 5, "BHP") or "BHP",
+                    flow=flow,
+                    thp=thp,
+                    bhps=bhps,
+                )
+
+            flow, thp, water_fraction, gas_fraction, alq = axes
+            shape = (len(flow), len(thp), len(water_fraction), len(gas_fraction), len(alq))
+            bhps = np.full(shape, np.nan)
+            for row in rows:
+                indices = [int(float(value)) - 1 for value in row[:4]]
+                values = np.array(row[4:], dtype=np.float64)
+                limits = shape[1:]
+                if values.size != len(flow) or any(
+                    not 0 <= index < limit for index, limit in zip(indices, limits, strict=True)
+                ):
+                    raise DeckParseError(f"{self.name} table {table_number}: bad data row {row}.")
+
+                bhps[:, indices[0], indices[1], indices[2], indices[3]] = values
+
+            if np.isnan(bhps).any():
+                raise DeckParseError(
+                    f"{self.name} table {table_number}: the data rows do not cover every "
+                    "combination of the THP, water, gas and ALQ axes."
+                )
+            return VFPProducerDeckTable(
+                table_number=table_number,
+                datum_depth=datum_depth,
+                flow_type=item(header, 2, "") or "",
+                water_fraction_type=item(header, 3, "") or "",
+                gas_fraction_type=item(header, 4, "") or "",
+                thp_type=item(header, 5, "THP") or "THP",
+                alq_type=item(header, 6, "") or "",
+                units=item(header, 7),
+                bhp_type=item(header, 8, "BHP") or "BHP",
+                flow=flow,
+                thp=thp,
+                water_fraction=water_fraction,
+                gas_fraction=gas_fraction,
+                alq=alq,
+                bhps=bhps,
+            )
+        except ValueError as exc:
+            raise DeckParseError(f"{self.name} table {table_number}: {exc}") from exc
+
+
+VFPPROD = VFPKeyword("VFPPROD", injector=False)
+"""
+`VFPPROD` - a producer vertical flow performance table: BHP as a function of flow rate, THP,
+water fraction, gas fraction and artificial lift quantity (ALQ).
+
+`parse` returns a list of `VFPProducerDeckTable`, one per occurrence, or `None` if absent. The table
+only defines how BHP varies with ALQ; the ALQ a well actually runs at comes from `WCONPROD`
+(or `WLIFT`).
+
+Fields:
+
+- `table_number`         - table ID referenced by `WCONPROD` / `WLIFT` via `vfp_table`.
+- `datum_depth`          - reference depth for the reported BHP values, or `None` if defaulted.
+- `flow_type`            - meaning of the flow axis (`OIL`, `LIQ`, `GAS`, `WG`, `TM`, etc.).
+- `water_fraction_type`   - meaning of the water-fraction axis (`WOR`, `WCT`, `WGR`, etc.).
+- `gas_fraction_type`    - meaning of the gas-fraction axis (`GOR`, `GLR`, `OGR`, etc.).
+- `thp_type`             - meaning of the THP axis (`THP`).
+- `alq_type`             - meaning of the ALQ axis (`GRAT`, `IGLR`, `TGLR`, `PUMP`, `COMP`, `BEAN`, or blank).
+- `units`                - unit system declared for the table (`FIELD`, `METRIC`, `LAB`, `PVT-M`, or `None`).
+- `bhp_type`             - what the table values represent (`BHP`).
+- `flow`                 - flow-rate axis values.
+- `thp`                  - tubing-head pressure axis values.
+- `water_fraction`       - water-fraction axis values.
+- `gas_fraction`         - gas-fraction axis values.
+- `alq`                  - artificial-lift axis values.
+- `bhps`                 - BHP table values shaped by the flow / THP / water / gas / ALQ axes.
+"""
+
+VFPINJ = VFPKeyword("VFPINJ", injector=True)
+"""
+`VFPINJ` - an injector vertical flow performance table: BHP as a function of flow rate and THP.
+
+`parse` returns a list of `VFPInjectorDeckTable`, one per occurrence, or `None` if absent.
+
+Fields:
+
+- `table_number`     - table ID referenced by `WCONINJE` via `vfp_table`.
+- `datum_depth`      - reference depth for the reported BHP values, or `None` if defaulted.
+- `flow_type`        - meaning of the flow axis (`OIL`, `WAT`, `GAS`, etc.).
+- `thp_type`         - meaning of the THP axis (`THP`).
+- `units`            - unit system declared for the table (`FIELD`, `METRIC`, `LAB`, `PVT-M`, or `None`).
+- `bhp_type`         - what the table values represent (`BHP`).
+- `flow`             - flow-rate axis values.
+- `thp`              - tubing-head pressure axis values.
+- `bhps`             - BHP table values shaped by the flow and THP axes.
 """

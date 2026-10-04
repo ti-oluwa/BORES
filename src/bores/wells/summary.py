@@ -15,10 +15,11 @@ import attrs
 import numpy as np
 from typing_extensions import Self
 
+from bores.constants import c
 from bores.errors import SummaryError
 from bores.schedule.base import ScheduleContext
 from bores.schedule.summary import SerializableSummary, summary_type
-from bores.types import Integer, Number
+from bores.types import CellArray, IntCellArray, Integer, Number, UnitSystem
 from bores.wells.compile import CompiledWellSystem, WellKind
 from bores.wells.schedule import resolve_well
 
@@ -42,6 +43,9 @@ __all__ = [
     "FWIT",
     "FWPR",
     "FWPT",
+    "RGIP",
+    "ROIP",
+    "RWIP",
     "WBHP",
     "WGIR",
     "WGIT",
@@ -74,6 +78,10 @@ __all__ = [
     "FieldWaterInjectionTotal",
     "FieldWaterProductionRate",
     "FieldWaterProductionTotal",
+    "RegionGasInPlace",
+    "RegionInPlace",
+    "RegionOilInPlace",
+    "RegionWaterInPlace",
     "WellBottomHolePressure",
     "WellGasInjectionRate",
     "WellGasInjectionTotal",
@@ -773,6 +781,175 @@ class WellGasInjectionTotal(WellRate):
     array_name = "cumulative_gas_volumes"
 
 
+@attrs.frozen(kw_only=True, slots=True)
+class RegionInPlace(SerializableSummary["CompiledBlackOilModel"]):
+    """
+    Base for a fluid-in-place vector over one fluid-in-place region (`FIPNUM`).
+
+    Subclasses set `mnemonic` and implement `get_value`. A model with no fluid-in-place regions
+    has a single region, number 1, covering every cell.
+    """
+
+    __abstract_serializable__ = True
+
+    mnemonic = ""
+
+    region: Integer = 1
+    """The fluid-in-place region number to report on."""
+
+    @property
+    def key(self) -> str:
+        """
+        This vector's report key.
+
+        :returns: The Eclipse mnemonic and region number, e.g. `"ROIP:2"`.
+        """
+        return f"{self.mnemonic}:{self.region}"
+
+    def get_value(
+        self,
+        *,
+        region_mask: IntCellArray,
+        pore_volumes: CellArray,
+        workspace: "SimulationWorkspace",
+        unit_system: UnitSystem,
+    ) -> Number:
+        """
+        Reads this vector's value over the cells of the region. Must be overridden.
+
+        :param region_mask: Shape `(n_cells,)` boolean mask of the region's cells.
+        :param pore_volumes: Shape `(n_cells,)` pore volume of every cell.
+        :param workspace: The run's workspace.
+        :param unit_system: The model's unit system.
+        :returns: The in-place volume.
+        """
+        raise NotImplementedError
+
+    def __call__(self, model: "CompiledBlackOilModel", context: ScheduleContext) -> Number:
+        """
+        Reads this vector's value over the cells of `region`.
+
+        :param model: The model to read the regions and pore volumes from.
+        :param context: The current moment's context, carrying the workspace.
+        :returns: The in-place volume of the region.
+        :raises SummaryError: If the region has no cells.
+        """
+        reservoir = model.reservoir
+        pore_volumes = reservoir.pore_volumes
+        region_numbers = (
+            reservoir.regions.fluid_in_place_region if reservoir.regions is not None else None
+        )
+        if region_numbers is None:
+            region_mask = np.full(pore_volumes.shape, self.region == 1)
+        else:
+            region_mask = np.asarray(region_numbers) == self.region
+
+        if not region_mask.any():
+            raise SummaryError(
+                f"{self.mnemonic}: fluid-in-place region {self.region} has no cells."
+            )
+        return self.get_value(
+            region_mask=region_mask,
+            pore_volumes=pore_volumes,
+            workspace=get_workspace(context=context),
+            unit_system=model.unit_system,
+        )
+
+
+def get_volume_factor(unit_system: UnitSystem) -> Number:
+    """
+    Factor from a stock-tank volume in the internal volume unit 
+    to the reported oil/water unit.
+
+    :param unit_system: The model's unit system.
+    :returns: Cubic feet to barrels for FIELD, `1` for every other unit system.
+    """
+    return c.CUBIC_FEET_TO_BARRELS if unit_system == UnitSystem.FIELD else 1.0
+
+
+@summary_type
+@attrs.frozen(kw_only=True, slots=True)
+class RegionOilInPlace(RegionInPlace):
+    """
+    Oil in place in a fluid-in-place region (`ROIP`), as stock-tank oil.
+
+    Counts oil in the oil phase only (`So * PV / Bo`); oil vaporized in free gas is not included.
+    """
+
+    __type__: typing.ClassVar[str] = "region_oil_in_place"
+
+    mnemonic = "ROIP"
+
+    def get_value(
+        self,
+        *,
+        region_mask: IntCellArray,
+        pore_volumes: CellArray,
+        workspace: "SimulationWorkspace",
+        unit_system: UnitSystem,
+    ) -> Number:
+        oil_volume = (
+            workspace.reservoir.oil_saturation
+            * pore_volumes
+            / workspace.physics.pvt.oil_formation_volume_factor
+        )
+        return oil_volume[region_mask].sum() * get_volume_factor(unit_system)
+
+
+@summary_type
+@attrs.frozen(kw_only=True, slots=True)
+class RegionWaterInPlace(RegionInPlace):
+    """Water in place in a fluid-in-place region (`RWIP`), as stock-tank water."""
+
+    __type__: typing.ClassVar[str] = "region_water_in_place"
+
+    mnemonic = "RWIP"
+
+    def get_value(
+        self,
+        *,
+        region_mask: IntCellArray,
+        pore_volumes: CellArray,
+        workspace: "SimulationWorkspace",
+        unit_system: UnitSystem,
+    ) -> Number:
+        water_volume = (
+            workspace.reservoir.water_saturation
+            * pore_volumes
+            / workspace.physics.pvt.water_formation_volume_factor
+        )
+        return water_volume[region_mask].sum() * get_volume_factor(unit_system)
+
+
+@summary_type
+@attrs.frozen(kw_only=True, slots=True)
+class RegionGasInPlace(RegionInPlace):
+    """
+    Gas in place in a fluid-in-place region (`RGIP`): free gas plus gas dissolved in the oil.
+
+    Reported in standard cubic feet for FIELD units (cubic metres for METRIC).
+    """
+
+    __type__: typing.ClassVar[str] = "region_gas_in_place"
+
+    mnemonic = "RGIP"
+
+    def get_value(
+        self,
+        *,
+        region_mask: IntCellArray,
+        pore_volumes: CellArray,
+        workspace: "SimulationWorkspace",
+        unit_system: UnitSystem,
+    ) -> Number:
+        state = workspace.reservoir
+        pvt = workspace.physics.pvt
+        free_gas = state.gas_saturation * pore_volumes / pvt.gas_formation_volume_factor
+        stock_tank_oil = state.oil_saturation * pore_volumes / pvt.oil_formation_volume_factor
+        dissolved_gas = state.solution_gor * stock_tank_oil * get_volume_factor(unit_system)
+        return (free_gas + dissolved_gas)[region_mask].sum()
+
+
 FOPR = FieldOilProductionRate
 FWPR = FieldWaterProductionRate
 FGPR = FieldGasProductionRate
@@ -805,3 +982,6 @@ WGPT = WellGasProductionTotal
 WWIT = WellWaterInjectionTotal
 WOIT = WellOilInjectionTotal
 WGIT = WellGasInjectionTotal
+ROIP = RegionOilInPlace
+RWIP = RegionWaterInPlace
+RGIP = RegionGasInPlace

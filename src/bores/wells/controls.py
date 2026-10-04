@@ -5,6 +5,7 @@ import threading
 import typing
 
 import attrs
+import numpy as np
 from typing_extensions import Self
 
 from bores.constants import get_conversion_factors
@@ -13,7 +14,7 @@ from bores.errors import ValidationError
 from bores.serde.base import Serializable
 from bores.serde.registry import make_serializable_type_registrar
 from bores.serde.stores.base import StoreSerializable
-from bores.types import FluidPhase, Number, UnitConversionTable, UnitSystem
+from bores.types import FluidPhase, Integer, Number, UnitConversionTable, UnitSystem
 from bores.utils import scale
 
 __all__ = [
@@ -557,9 +558,27 @@ class ProducerControl(WellControl):
     Weight used by group-target allocation (deck `WGRUPCON` item 3).
     `None` falls back to equal-weight allocation among eligible wells.
     """
+    vfp_table: Integer | None = None
+    """
+    Number of the VFP table that converts this well's THP to a BHP (deck `WCONPROD` item 11).
+    `None` when no table is assigned.
+    """
+    artificial_lift_quantity: Number = 0.0
+    """
+    Artificial lift quantity the well currently operates at (deck `WCONPROD` item 12): gas-lift
+    injection rate, pump power and so on, in the units of the VFP table's own ALQ axis. A VFP
+    table only defines how BHP varies with ALQ; this is the value looked up on that axis.
+    """
     unit_system: UnitSystem = UnitSystem.FIELD
 
     def __attrs_post_init__(self) -> None:
+        if not (
+            self.artificial_lift_quantity >= 0.0 and np.isfinite(self.artificial_lift_quantity)
+        ):
+            raise ValidationError(
+                f"`artificial_lift_quantity` must be finite and non-negative; got "
+                f"{self.artificial_lift_quantity}."
+            )
         if self.mode in PRODUCER_RATE_MODES and self.target_rate is None:
             raise ValidationError(f"`target_rate` is required when `mode` is {self.mode}.")
         if self.mode is ProducerControlMode.BHP and self.target_bhp is None:
@@ -714,10 +733,7 @@ class InjectorControl(WellControl):
 
 class WellControls(
     StoreSerializable,
-    fields={
-        "controls": typing.Mapping[str, WellControl],
-        "unit_system": typing.Optional[UnitSystem],  # noqa: UP045
-    },
+    fields={"controls": typing.Mapping[str, WellControl], "unit_system": UnitSystem | None},
 ):
     """Name-keyed, mutable mapping from well name to its current `WellControl`."""
 

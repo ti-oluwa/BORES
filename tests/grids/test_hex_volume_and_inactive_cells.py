@@ -10,7 +10,7 @@ from bores.grids import Grid
 from bores.grids.factories.base import FaultRecord
 from bores.grids.factories.cartesian import make_cartesian_grid
 from bores.grids.factories.corner_point import (
-    _compute_hex_volumes_and_centroids,
+    compute_hex_volumes_and_centroids,
     make_corner_point_grid,
 )
 from bores.grids.factories.polyhedral import make_polyhedral_grid
@@ -76,7 +76,7 @@ def test_hex_kernel_matches_the_exact_trilinear_integral_for_warped_cells(seed):
     shifted = BOX + rng.uniform(-2.5, 2.5, (8, 3)) + offset
     # The reference sees the same (rounded) coordinates the kernel receives.
     expected_volume, expected_centroid = reference_volume_and_centroid(shifted - offset)
-    volumes, centroids = _compute_hex_volumes_and_centroids(
+    volumes, centroids = compute_hex_volumes_and_centroids(
         np.arange(8, dtype=np.int32)[None, :], shifted
     )
     assert volumes[0] == pytest.approx(expected_volume, rel=1e-12)
@@ -84,7 +84,7 @@ def test_hex_kernel_matches_the_exact_trilinear_integral_for_warped_cells(seed):
 
 
 def test_hex_kernel_reports_an_inverted_cell_as_negative():
-    volumes, _ = _compute_hex_volumes_and_centroids(
+    volumes, _ = compute_hex_volumes_and_centroids(
         np.arange(8, dtype=np.int32)[None, :], BOX[[4, 5, 6, 7, 0, 1, 2, 3]]
     )
     assert volumes[0] == pytest.approx(-1000.0)

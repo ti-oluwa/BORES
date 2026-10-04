@@ -17,6 +17,7 @@ from scipy.interpolate import RegularGridInterpolator  # type: ignore[import-unt
 from typing_extensions import Self
 
 from bores.constants import UnitConversionTable, get_conversion_factors
+from bores.deck.keywords.schedule import VFPInjectorDeckTable, VFPProducerDeckTable
 from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.serde.base import Serializable
@@ -46,6 +47,14 @@ __all__ = ["VFPData", "VFPTable", "VFPTables", "as_vfp_table"]
 logger = logging.getLogger(__name__)
 
 FiveDimensions: typing.TypeAlias = tuple[int, int, int, int, int]
+
+DECK_UNIT_SYSTEMS: typing.Mapping[str, UnitSystem] = {
+    "METRIC": UnitSystem.METRIC,
+    "FIELD": UnitSystem.FIELD,
+    "LAB": UnitSystem.LAB,
+    "PVT-M": UnitSystem.METRIC,
+}
+"""Deck unit keyword to the unit system a `VFPPROD` / `VFPINJ` table is written in."""
 
 AXIS_NAMES = ("flow_rate", "thp", "water_cut", "gas_oil_ratio", "artificial_lift_quantity")
 """Order `VFPData`'s five axes are always addressed in, internally."""
@@ -180,6 +189,85 @@ class VFPData(Serializable):
             datum_depth=scale(self.datum_depth, factors["length"]),
             bhps=scale(self.bhps, factors["pressure"]),
             unit_system=target,
+        )
+
+    @classmethod
+    def from_deck(
+        cls,
+        table: VFPProducerDeckTable | VFPInjectorDeckTable,
+        *,
+        deck_unit_system: UnitSystem = UnitSystem.FIELD,
+    ) -> Self:
+        """
+        Build the table data from one parsed `VFPPROD` / `VFPINJ` table.
+
+        A producer table maps exactly when it is written in terms of liquid rate (`LIQ`), water
+        cut (`WCT`) or water-oil ratio (`WOR`, converted to water cut) and gas-oil ratio (`GOR`),
+        with `THP` pressures and `BHP` values. An injector table maps with any injected phase.
+        Gas-oil ratios and injected gas rates are rescaled from the deck's thousands of standard
+        cubic feet to standard cubic feet for FIELD tables.
+
+        :param table: The table as parsed by `bores.deck.keywords.schedule.VFPPROD` / `VFPINJ`.
+        :param deck_unit_system: Unit system of the deck, used when the table does not state one.
+        :returns: The table data.
+        :raises ValidationError: If the table uses an axis definition that cannot be mapped
+            without approximation, has no datum depth, or its axes are invalid.
+        """
+        units = (table.units or "").upper()
+        unit_system = DECK_UNIT_SYSTEMS.get(units, deck_unit_system) if units else deck_unit_system
+        label = f"VFP table {table.table_number}"
+        if table.datum_depth is None:
+            raise ValidationError(f"{label}: the datum depth is required.")
+        if table.thp_type != "THP" or table.bhp_type != "BHP":
+            raise ValidationError(
+                f"{label}: only THP pressures and BHP values are supported; got "
+                f"{table.thp_type!r} / {table.bhp_type!r}."
+            )
+
+        if isinstance(table, VFPInjectorDeckTable):
+            scale_gas = unit_system == UnitSystem.FIELD and table.flow_type == "GAS"
+            return cls(
+                table_number=table.table_number,
+                well_type=WellType.INJECTOR,
+                datum_depth=table.datum_depth,
+                flow_rates=typing.cast(
+                    NumberArray[OneDimension], table.flow * (1000.0 if scale_gas else 1.0)
+                ),
+                thps=typing.cast(NumberArray[OneDimension], table.thp),
+                bhps=typing.cast(NumberArray[FiveDimensions], table.bhps[:, :, None, None, None]),
+                unit_system=unit_system,
+            )
+
+        if table.flow_type != "LIQ":
+            raise ValidationError(
+                f"{label}: the flow axis is {table.flow_type!r}, but only liquid rate (`LIQ`) maps "
+                "exactly. An oil or gas rate axis would need re-gridding onto a liquid-rate axis."
+            )
+        if table.water_fraction_type == "WCT":
+            water_cuts = table.water_fraction
+        elif table.water_fraction_type == "WOR":
+            water_cuts = table.water_fraction / (1.0 + table.water_fraction)
+        else:
+            raise ValidationError(
+                f"{label}: the water axis is {table.water_fraction_type!r}; only `WCT` and `WOR` "
+                "are supported."
+            )
+        if table.gas_fraction_type != "GOR":
+            raise ValidationError(
+                f"{label}: the gas axis is {table.gas_fraction_type!r}; only `GOR` is supported."
+            )
+        gas_oil_ratios = table.gas_fraction * (1000.0 if unit_system == UnitSystem.FIELD else 1.0)
+        return cls(
+            table_number=table.table_number,
+            well_type=WellType.PRODUCER,
+            datum_depth=table.datum_depth,
+            flow_rates=typing.cast(NumberArray[OneDimension], table.flow),
+            thps=typing.cast(NumberArray[OneDimension], table.thp),
+            water_cuts=typing.cast(NumberArray[OneDimension], water_cuts),
+            gas_oil_ratios=typing.cast(NumberArray[OneDimension], gas_oil_ratios),
+            artificial_lift_quantities=typing.cast(NumberArray[OneDimension], table.alq),
+            bhps=typing.cast(NumberArray[FiveDimensions], table.bhps),
+            unit_system=unit_system,
         )
 
 
@@ -319,6 +407,7 @@ class VFPTable(StoreSerializable):
             bounds = self._extrapolation_bounds.get(name)
             if bounds is None:
                 continue
+
             min_value, max_value = bounds
             value_array = np.atleast_1d(value)
             if np.any(value_array < min_value) or np.any(value_array > max_value):
@@ -379,6 +468,31 @@ class VFPTable(StoreSerializable):
         if is_scalar:
             return typing.cast(Number, result.astype(dtype, copy=False).item())
         return typing.cast(NumberArray[NDimension], result.astype(dtype, copy=False))
+
+    @classmethod
+    def from_deck(
+        cls,
+        table: VFPProducerDeckTable | VFPInjectorDeckTable,
+        *,
+        deck_unit_system: UnitSystem = UnitSystem.FIELD,
+        warn_on_extrapolation: bool = False,
+        dtype: npt.DTypeLike = None,
+    ) -> Self:
+        """
+        Build a table from one parsed `VFPPROD` / `VFPINJ` table.
+
+        :param table: The table as parsed by `bores.deck.keywords.schedule.VFPPROD` / `VFPINJ`.
+        :param deck_unit_system: Unit system of the deck, used when the table does not state one.
+        :param warn_on_extrapolation: Log a warning when a query falls outside the table's bounds.
+        :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
+        :returns: The table.
+        :raises ValidationError: If the table cannot be mapped (see `VFPData.from_deck`).
+        """
+        return cls(
+            VFPData.from_deck(table, deck_unit_system=deck_unit_system),
+            warn_on_extrapolation=warn_on_extrapolation,
+            dtype=dtype,
+        )
 
 
 @attrs.frozen(kw_only=True, slots=True)
@@ -442,6 +556,39 @@ class VFPTables(StoreSerializable):
                 number: vfp_table.convert(target, table=table)
                 for number, vfp_table in self.tables.items()
             },
+        )
+
+    @classmethod
+    def from_deck(
+        cls,
+        tables: typing.Iterable[VFPProducerDeckTable | VFPInjectorDeckTable],
+        *,
+        deck_unit_system: UnitSystem = UnitSystem.FIELD,
+        warn_on_extrapolation: bool = False,
+        dtype: npt.DTypeLike = None,
+    ) -> Self:
+        """
+        Build a collection from parsed `VFPPROD` / `VFPINJ` tables.
+
+        A table number that appears more than once keeps its last definition, as in a deck.
+
+        :param tables: The tables as parsed by `VFPPROD` / `VFPINJ`.
+        :param deck_unit_system: Unit system of the deck, used for tables that do not state one.
+        :param warn_on_extrapolation: Log a warning when a query falls outside a table's bounds.
+        :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
+        :returns: The collection, keyed by table number.
+        :raises ValidationError: If any table cannot be mapped (see `VFPData.from_deck`).
+        """
+        return cls(
+            tables={
+                table.table_number: VFPTable.from_deck(
+                    table,
+                    deck_unit_system=deck_unit_system,
+                    warn_on_extrapolation=warn_on_extrapolation,
+                    dtype=dtype,
+                )
+                for table in tables
+            }
         )
 
 
