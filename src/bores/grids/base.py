@@ -1581,6 +1581,7 @@ class Grid(
         *,
         unit_system: UnitSystem | None = None,
         metadata: typing.Mapping[str, typing.Any] | None = None,
+        **kwargs: typing.Any,
     ) -> Self:
         """
         Build a `Grid` from a parsed `DeckFile`.
@@ -1609,7 +1610,7 @@ class Grid(
 
         return typing.cast(
             Self,
-            load_grdecl(source=deck_file, unit_system=unit_system, metadata=metadata),
+            load_grdecl(source=deck_file, unit_system=unit_system, metadata=metadata, **kwargs),
         )
 
     def convert(

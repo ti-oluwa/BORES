@@ -66,10 +66,17 @@ class InvertedCellPolicy(enum.Enum):
     `DEACTIVATE`
         Mark the inverted cells inactive, as if `ACTNUM` were zero for them, and warn
         with the number of cells removed.
+
+    `ABSOLUTE`
+        Keep the inverted cells active and use the magnitude of their computed volume,
+        and warn with the number of cells affected. The face areas, face normals and
+        centroids of these cells are not repaired, so transmissibilities across a folded
+        cell are only approximate.
     """
 
     RAISE = "raise"
     DEACTIVATE = "deactivate"
+    ABSOLUTE = "absolute"
 
     def __str__(self) -> str:
         return self.value
@@ -161,7 +168,8 @@ def make_corner_point_grid(
         resolved `map_axes` is still stored on `grid.metadata` either way.
     :param on_inverted_cells: What to do with active cells whose corners fold the cell
         inside out. `"raise"` (the default) refuses to build the grid, `"deactivate"`
-        marks those cells inactive and warns with how many were removed.
+        marks those cells inactive and `"absolute"` keeps them with the magnitude of their
+        volume. Both of the latter warn with how many cells were affected.
     :param nnc_cell_indices: Shape `(n_nnc, 2)` user-declared NNC cell pairs.
     :param nnc_transmissibilities: Shape `(n_nnc,)` flow transmissibility of each NNC pair.
         Required with `nnc_cell_indices`.
@@ -942,7 +950,8 @@ def compute_corner_point_geometry(
     :param mirrored: Whether `coord` is a mirror image of a right-handed `(x, y, depth)`
         frame, as when a `MAPAXES` with a south-pointing Y axis has been applied. Cell
         volumes and face winding are reported as they would be for the unmirrored grid.
-    :param on_inverted_cells: Whether inverted active cells raise or are deactivated.
+    :param on_inverted_cells: Whether inverted active cells raise, are deactivated, or are
+        kept with the magnitude of their volume.
     :returns: 10-tuple `(vertex_coordinates, face_vertex_indices,
         face_vertex_offsets, face_cell_indices, face_connection_types, cell_statuses,
         cell_volumes, cell_centroids, cell_min_xyz, cell_max_xyz)`. The last two are the
@@ -1085,7 +1094,14 @@ def compute_corner_point_geometry(
         mirrored=mirrored,
     )
     inverted = active_mask & (cell_volumes < 0.0)
-    if inverted.any():
+    if inverted.any() and on_inverted_cells is InvertedCellPolicy.ABSOLUTE:
+        warnings.warn(
+            f"{int(inverted.sum())} active cell(s) have inverted geometry; their volumes "
+            f"were set to the magnitude of the computed volume.",
+            stacklevel=4,
+        )
+        cell_volumes = np.where(inverted, -cell_volumes, cell_volumes)
+    elif inverted.any():
         bad = np.flatnonzero(inverted)
         raise InvalidGridError(
             f"{len(bad)} active cell(s) have negative volume (inverted geometry): "

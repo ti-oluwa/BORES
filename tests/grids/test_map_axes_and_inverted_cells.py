@@ -125,8 +125,38 @@ def test_inverted_cell_can_be_deactivated():
     assert grid.cell_volumes[1] == pytest.approx(0.0)
 
 
+def test_inverted_cell_can_keep_the_magnitude_of_its_volume():
+    coord, zcorn = build_arrays(nx=3, ny=1, nz=1)
+    zcorn[1, :, 2:4] = zcorn[0, :, 2:4] - 5.0
+    with pytest.warns(UserWarning, match="1 active cell.*magnitude"):
+        grid = make_corner_point_grid(
+            coord=coord,
+            zcorn=zcorn,
+            unit_system=UnitSystem.METRIC,
+            on_inverted_cells="absolute",
+        )
+    assert grid.cell_statuses.tolist() == [1, 1, 1]
+    assert (grid.cell_volumes > 0.0).all()
+    assert grid.cell_volumes[1] == pytest.approx(100.0 * 80.0 * 5.0)
+
+
+def test_absolute_policy_leaves_valid_grids_untouched():
+    coord, zcorn = build_arrays()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        kept = make_corner_point_grid(
+            coord=coord,
+            zcorn=zcorn,
+            unit_system=UnitSystem.METRIC,
+            on_inverted_cells="absolute",
+        )
+    default = make_corner_point_grid(coord=coord, zcorn=zcorn, unit_system=UnitSystem.METRIC)
+    np.testing.assert_array_equal(kept.cell_volumes, default.cell_volumes)
+
+
 def test_inverted_cell_policy_accepts_any_letter_case_and_rejects_unknown_values():
     assert InvertedCellPolicy("DEACTIVATE") is InvertedCellPolicy.DEACTIVATE
+    assert InvertedCellPolicy("Absolute") is InvertedCellPolicy.ABSOLUTE
     with pytest.raises(ValueError):
         InvertedCellPolicy("ignore")
 

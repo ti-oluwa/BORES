@@ -401,7 +401,8 @@ def load_grdecl(
         `Grid.metadata` dict.
     :param on_inverted_cells: What to do with active corner-point cells whose corners fold
         the cell inside out. `"raise"` (the default) refuses to load the grid,
-        `"deactivate"` marks those cells inactive and warns with how many were removed.
+        `"deactivate"` marks those cells inactive and `"absolute"` keeps them with the
+        magnitude of their volume. Both of the latter warn with how many cells were affected.
     :returns: A fully initialised `bores.grids.base.Grid`.
     :raises GridImportError: If required keywords are missing or malformed, or if active
         cells are inverted and `on_inverted_cells` is `"raise"`.
