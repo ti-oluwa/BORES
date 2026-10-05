@@ -9,6 +9,7 @@ pressure distribution below the datum is unaffected by whether a table is assign
 
 import logging
 import typing
+import warnings
 
 import attrs
 import numpy as np
@@ -17,12 +18,14 @@ from scipy.interpolate import RegularGridInterpolator  # type: ignore[import-unt
 from typing_extensions import Self
 
 from bores.constants import UnitConversionTable, get_conversion_factors
+from bores.deck.file import DeckFile
 from bores.deck.keywords.schedule import VFPInjectorDeckTable, VFPProducerDeckTable
 from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.serde.base import Serializable
 from bores.serde.stores.base import StoreSerializable
 from bores.types import (
+    FiveDimensions,
     FluidPhase,
     Integer,
     NDimension,
@@ -45,8 +48,6 @@ from bores.wells.state import PhaseValues
 __all__ = ["VFPData", "VFPTable", "VFPTables", "as_vfp_table"]
 
 logger = logging.getLogger(__name__)
-
-FiveDimensions: typing.TypeAlias = tuple[int, int, int, int, int]
 
 DECK_UNIT_SYSTEMS: typing.Mapping[str, UnitSystem] = {
     "METRIC": UnitSystem.METRIC,
@@ -191,83 +192,41 @@ class VFPData(Serializable):
             unit_system=target,
         )
 
+    @typing.overload
+    @classmethod
+    def from_deck(
+        cls, deck_file: DeckFile, *, table_number: Integer, well_type: WellType | None = None
+    ) -> Self: ...
+    @typing.overload
+    @classmethod
+    def from_deck(
+        cls, deck_file: DeckFile, *, table_number: None = None, well_type: WellType | None = None
+    ) -> list[Self]: ...
+
     @classmethod
     def from_deck(
         cls,
-        table: VFPProducerDeckTable | VFPInjectorDeckTable,
+        deck_file: DeckFile,
         *,
-        deck_unit_system: UnitSystem = UnitSystem.FIELD,
-    ) -> Self:
+        table_number: Integer | None = None,
+        well_type: WellType | None = None,
+    ) -> Self | list[Self]:
         """
-        Build the table data from one parsed `VFPPROD` / `VFPINJ` table.
+        Construct one or all `VFPData` objects from a parsed `DeckFile`.
 
-        A producer table maps exactly when it is written in terms of liquid rate (`LIQ`), water
-        cut (`WCT`) or water-oil ratio (`WOR`, converted to water cut) and gas-oil ratio (`GOR`),
-        with `THP` pressures and `BHP` values. An injector table maps with any injected phase.
-        Gas-oil ratios and injected gas rates are rescaled from the deck's thousands of standard
-        cubic feet to standard cubic feet for FIELD tables.
+        Reads the `VFPPROD` and `VFPINJ` keywords (see `load_vfp_data`).
 
-        :param table: The table as parsed by `bores.deck.keywords.schedule.VFPPROD` / `VFPINJ`.
-        :param deck_unit_system: Unit system of the deck, used when the table does not state one.
-        :returns: The table data.
-        :raises ValidationError: If the table uses an axis definition that cannot be mapped
-            without approximation, has no datum depth, or its axes are invalid.
+        :param deck_file: Parsed `bores.deck.file.DeckFile`.
+        :param table_number: Number of a specific table to extract, or `None` for all.
+        :param well_type: Read only producer (`VFPPROD`) or injector (`VFPINJ`) tables. `None`
+            reads both, and is then ambiguous only if `table_number` exists under both.
+        :returns: A single `VFPData` if `table_number` is given, otherwise a list.
+        :raises ValidationError: If the deck has no matching table, `table_number` is not found
+            or is ambiguous, or a table cannot be mapped.
         """
-        units = (table.units or "").upper()
-        unit_system = DECK_UNIT_SYSTEMS.get(units, deck_unit_system) if units else deck_unit_system
-        label = f"VFP table {table.table_number}"
-        if table.datum_depth is None:
-            raise ValidationError(f"{label}: the datum depth is required.")
-        if table.thp_type != "THP" or table.bhp_type != "BHP":
-            raise ValidationError(
-                f"{label}: only THP pressures and BHP values are supported; got "
-                f"{table.thp_type!r} / {table.bhp_type!r}."
-            )
-
-        if isinstance(table, VFPInjectorDeckTable):
-            scale_gas = unit_system == UnitSystem.FIELD and table.flow_type == "GAS"
-            return cls(
-                table_number=table.table_number,
-                well_type=WellType.INJECTOR,
-                datum_depth=table.datum_depth,
-                flow_rates=typing.cast(
-                    NumberArray[OneDimension], table.flow * (1000.0 if scale_gas else 1.0)
-                ),
-                thps=typing.cast(NumberArray[OneDimension], table.thp),
-                bhps=typing.cast(NumberArray[FiveDimensions], table.bhps[:, :, None, None, None]),
-                unit_system=unit_system,
-            )
-
-        if table.flow_type != "LIQ":
-            raise ValidationError(
-                f"{label}: the flow axis is {table.flow_type!r}, but only liquid rate (`LIQ`) maps "
-                "exactly. An oil or gas rate axis would need re-gridding onto a liquid-rate axis."
-            )
-        if table.water_fraction_type == "WCT":
-            water_cuts = table.water_fraction
-        elif table.water_fraction_type == "WOR":
-            water_cuts = table.water_fraction / (1.0 + table.water_fraction)
-        else:
-            raise ValidationError(
-                f"{label}: the water axis is {table.water_fraction_type!r}; only `WCT` and `WOR` "
-                "are supported."
-            )
-        if table.gas_fraction_type != "GOR":
-            raise ValidationError(
-                f"{label}: the gas axis is {table.gas_fraction_type!r}; only `GOR` is supported."
-            )
-        gas_oil_ratios = table.gas_fraction * (1000.0 if unit_system == UnitSystem.FIELD else 1.0)
-        return cls(
-            table_number=table.table_number,
-            well_type=WellType.PRODUCER,
-            datum_depth=table.datum_depth,
-            flow_rates=typing.cast(NumberArray[OneDimension], table.flow),
-            thps=typing.cast(NumberArray[OneDimension], table.thp),
-            water_cuts=typing.cast(NumberArray[OneDimension], water_cuts),
-            gas_oil_ratios=typing.cast(NumberArray[OneDimension], gas_oil_ratios),
-            artificial_lift_quantities=typing.cast(NumberArray[OneDimension], table.alq),
-            bhps=typing.cast(NumberArray[FiveDimensions], table.bhps),
-            unit_system=unit_system,
+        return typing.cast(
+            Self | list[Self],
+            load_vfp_data(deck_file, table_number=table_number, well_type=well_type),
         )
 
 
@@ -469,70 +428,121 @@ class VFPTable(StoreSerializable):
             return typing.cast(Number, result.astype(dtype, copy=False).item())
         return typing.cast(NumberArray[NDimension], result.astype(dtype, copy=False))
 
+    @typing.overload
     @classmethod
     def from_deck(
         cls,
-        table: VFPProducerDeckTable | VFPInjectorDeckTable,
+        deck_file: DeckFile,
         *,
-        deck_unit_system: UnitSystem = UnitSystem.FIELD,
+        table_number: Integer,
+        well_type: WellType | None = None,
         warn_on_extrapolation: bool = False,
         dtype: npt.DTypeLike = None,
-    ) -> Self:
-        """
-        Build a table from one parsed `VFPPROD` / `VFPINJ` table.
+    ) -> Self: ...
+    @typing.overload
+    @classmethod
+    def from_deck(
+        cls,
+        deck_file: DeckFile,
+        *,
+        table_number: None = None,
+        well_type: WellType | None = None,
+        warn_on_extrapolation: bool = False,
+        dtype: npt.DTypeLike = None,
+    ) -> list[Self]: ...
 
-        :param table: The table as parsed by `bores.deck.keywords.schedule.VFPPROD` / `VFPINJ`.
-        :param deck_unit_system: Unit system of the deck, used when the table does not state one.
-        :param warn_on_extrapolation: Log a warning when a query falls outside the table's bounds.
-        :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
-        :returns: The table.
-        :raises ValidationError: If the table cannot be mapped (see `VFPData.from_deck`).
+    @classmethod
+    def from_deck(
+        cls,
+        deck_file: DeckFile,
+        *,
+        table_number: Integer | None = None,
+        well_type: WellType | None = None,
+        warn_on_extrapolation: bool = False,
+        dtype: npt.DTypeLike = None,
+    ) -> Self | list[Self]:
         """
-        return cls(
-            VFPData.from_deck(table, deck_unit_system=deck_unit_system),
-            warn_on_extrapolation=warn_on_extrapolation,
-            dtype=dtype,
+        Construct one or all `VFPTable` objects from a parsed `DeckFile`.
+
+        Reads the `VFPPROD` and `VFPINJ` keywords (see `load_vfp_table`).
+
+        :param deck_file: Parsed `bores.deck.file.DeckFile`.
+        :param table_number: Number of a specific table to extract, or `None` for all.
+        :param well_type: Read only producer or injector tables, or both if `None`.
+        :param warn_on_extrapolation: Log a warning when a query falls outside a table's bounds.
+        :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
+        :returns: A single `VFPTable` if `table_number` is given, otherwise a list.
+        :raises ValidationError: As for `VFPData.from_deck`.
+        """
+        return typing.cast(
+            Self | list[Self],
+            load_vfp_table(
+                deck_file,
+                table_number=table_number,
+                well_type=well_type,
+                warn_on_extrapolation=warn_on_extrapolation,
+                dtype=dtype,
+            ),
         )
 
 
 @attrs.frozen(kw_only=True, slots=True)
 class VFPTables(StoreSerializable):
     """
-    Number-indexed collection of `VFPTable`s.
+    Number-indexed collections of producer and injector `VFPTable`s.
 
-    Wells select a table by number, via `WCONPROD`/`WCONINJE`'s
-    `vfp_table` item. Several wells commonly share one table.
+    Wells select a table by number, via `WCONPROD`/`WCONINJE`'s `vfp_table` item. Several wells
+    commonly share one table. Producer and injector tables are numbered independently, as in a
+    deck, so the same number can exist in both.
     """
 
-    tables: typing.Mapping[Integer, VFPTable] = attrs.field(factory=dict)
-    """VFP table, keyed by its own `table_number`."""
+    producers: typing.Mapping[Integer, VFPTable] = attrs.field(factory=dict)
+    """Producer (`VFPPROD`) tables, keyed by their own `table_number`."""
+
+    injectors: typing.Mapping[Integer, VFPTable] = attrs.field(factory=dict)
+    """Injector (`VFPINJ`) tables, keyed by their own `table_number`."""
 
     def __attrs_post_init__(self) -> None:
-        for table_number, table in self.tables.items():
-            if table.table_number != table_number:
-                raise ValidationError(
-                    f"`tables[{table_number!r}].table_number` is "
-                    f"{table.table_number!r}, not {table_number!r}."
-                )
+        for well_type, tables in (
+            (WellType.PRODUCER, self.producers),
+            (WellType.INJECTOR, self.injectors),
+        ):
+            for table_number, table in tables.items():
+                if table.table_number != table_number:
+                    raise ValidationError(
+                        f"`{well_type.value}` table keyed {table_number!r} has `table_number` "
+                        f"{table.table_number!r}."
+                    )
+                if table.well_type != well_type:
+                    raise ValidationError(
+                        f"VFP table {table_number!r} is a {table.well_type.value} table but is "
+                        f"held with the {well_type.value} tables."
+                    )
 
     @property
     def unit_system(self) -> UnitSystem | None:
         """Unit system shared by every table, or `None` if empty."""
-        return next((table.unit_system for table in self.tables.values()), None)
+        return next(
+            (table.unit_system for table in (*self.producers.values(), *self.injectors.values())),
+            None,
+        )
 
-    def table(self, table_number: Integer, /) -> VFPTable:
+    def table(self, table_number: Integer, /, *, well_type: WellType) -> VFPTable:
         """
         Gets a table by number.
 
         :param table_number: The table's number, deck `VFPPROD`/`VFPINJ` item 1.
+        :param well_type: Whether to look among producer or injector tables.
         :returns: The matching `VFPTable`.
-        :raises ValidationError: If no table with that number exists.
+        :raises ValidationError: If no such table exists.
         """
-        if table_number not in self.tables:
+        tables = self.producers if well_type == WellType.PRODUCER else self.injectors
+        if table_number not in tables:
             raise ValidationError(
-                f"No VFP table numbered {table_number!r}. Available: {sorted(self.tables.keys())}."
+                f"No {well_type.value} VFP table numbered {table_number!r}. "
+                f"Available: {sorted(tables.keys())}."
             )
-        return self.tables[table_number]
+        return tables[table_number]
 
     def convert(
         self,
@@ -552,44 +562,364 @@ class VFPTables(StoreSerializable):
             return self
         return attrs.evolve(
             self,
-            tables={
+            producers={
                 number: vfp_table.convert(target, table=table)
-                for number, vfp_table in self.tables.items()
+                for number, vfp_table in self.producers.items()
+            },
+            injectors={
+                number: vfp_table.convert(target, table=table)
+                for number, vfp_table in self.injectors.items()
             },
         )
 
     @classmethod
     def from_deck(
         cls,
-        tables: typing.Iterable[VFPProducerDeckTable | VFPInjectorDeckTable],
+        deck_file: DeckFile,
         *,
-        deck_unit_system: UnitSystem = UnitSystem.FIELD,
+        well_type: WellType | None = None,
         warn_on_extrapolation: bool = False,
         dtype: npt.DTypeLike = None,
     ) -> Self:
         """
-        Build a collection from parsed `VFPPROD` / `VFPINJ` tables.
+        Construct a `VFPTables` collection from a parsed `DeckFile`.
 
-        A table number that appears more than once keeps its last definition, as in a deck.
+        Reads the `VFPPROD` and `VFPINJ` keywords (see `load_vfp_tables`).
 
-        :param tables: The tables as parsed by `VFPPROD` / `VFPINJ`.
-        :param deck_unit_system: Unit system of the deck, used for tables that do not state one.
+        :param deck_file: Parsed `bores.deck.file.DeckFile`.
+        :param well_type: Read only producer or injector tables, or both if `None`.
         :param warn_on_extrapolation: Log a warning when a query falls outside a table's bounds.
         :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
-        :returns: The collection, keyed by table number.
-        :raises ValidationError: If any table cannot be mapped (see `VFPData.from_deck`).
+        :returns: The collection.
+        :raises ValidationError: If the deck has no matching table or a table cannot be mapped.
         """
-        return cls(
-            tables={
-                table.table_number: VFPTable.from_deck(
-                    table,
-                    deck_unit_system=deck_unit_system,
-                    warn_on_extrapolation=warn_on_extrapolation,
-                    dtype=dtype,
-                )
-                for table in tables
-            }
+        return typing.cast(
+            Self,
+            load_vfp_tables(
+                deck_file,
+                well_type=well_type,
+                warn_on_extrapolation=warn_on_extrapolation,
+                dtype=dtype,
+            ),
         )
+
+
+VFP_KEYWORDS: typing.Mapping[WellType, str] = {
+    WellType.PRODUCER: "VFPPROD",
+    WellType.INJECTOR: "VFPINJ",
+}
+"""Deck keyword that defines the VFP tables of each well type."""
+
+
+def regrid_oil_flow_to_liquid_flow(
+    flow_rates: NumberArray[OneDimension],
+    water_cuts: NumberArray[OneDimension],
+    bhps: NumberArray[FiveDimensions],
+) -> tuple[NumberArray[OneDimension], NumberArray[FiveDimensions]]:
+    """
+    Re-express a table written against oil rate as one written against liquid rate.
+
+    At water cut `w`, an oil rate `q` is a liquid rate `q / (1 - w)`, so every water cut has its
+    own native liquid-rate axis. The result uses the union of all of them as its flow axis. Each
+    water cut's BHP values are exact at its own native points and are interpolated linearly
+    between them (and extended linearly beyond its ends) at the other points, which makes the
+    result an approximation away from the original grid points.
+
+    :param flow_rates: Oil rate axis.
+    :param water_cuts: Water cut axis (fraction).
+    :param bhps: BHP values shaped `(flow, thp, water_cut, gas_oil_ratio, alq)`.
+    :returns: `(liquid_rate_axis, bhps)`, with the BHPs shaped against the new axis.
+    :raises ValidationError: If a water cut is 1 or more, or the flow axis has a single value.
+    """
+    if (water_cuts >= 1.0).any():
+        raise ValidationError(
+            "A water cut of 1 or more has no finite liquid rate for a given oil rate, so the "
+            "table cannot be re-expressed against liquid rate."
+        )
+    if len(flow_rates) < 2:
+        raise ValidationError("Re-gridding needs at least two values on the flow axis.")
+
+    native = flow_rates[:, None] / (1.0 - water_cuts[None, :])
+    liquid_rates = np.unique(native.ravel())
+    regridded = np.empty((len(liquid_rates), *bhps.shape[1:]), dtype=np.float64)
+    for index in range(len(water_cuts)):
+        axis = native[:, index]
+        upper = np.clip(np.searchsorted(axis, liquid_rates), 1, len(axis) - 1)
+        lower = upper - 1
+        fraction = (liquid_rates - axis[lower]) / (axis[upper] - axis[lower])
+        values = bhps[:, :, index, :, :]
+        regridded[:, :, index, :, :] = values[lower] + fraction[:, None, None, None] * (
+            values[upper] - values[lower]
+        )
+    return typing.cast(NumberArray[OneDimension], liquid_rates), typing.cast(
+        NumberArray[FiveDimensions], regridded
+    )
+
+
+def load_vfp_data_from_record(
+    record: VFPProducerDeckTable | VFPInjectorDeckTable,
+    *,
+    well_type: WellType,
+    deck_unit_system: UnitSystem,
+) -> VFPData:
+    """
+    Build a `VFPData` from one parsed `VFPPROD` / `VFPINJ` table.
+
+    A producer table maps exactly when it is written in terms of liquid rate (`LIQ`), water cut
+    (`WCT`) or water-oil ratio (`WOR`, converted to water cut) and gas-oil ratio (`GOR`), with
+    `THP` pressures and `BHP` values. An oil-rate table (`OIL`) is re-expressed against liquid
+    rate, which is approximate (see `regrid_oil_flow_to_liquid_flow`) and warns. An injector
+    table maps with any injected phase. Gas-oil ratios and injected gas rates are rescaled from
+    the deck's thousands of standard cubic feet to standard cubic feet for FIELD tables.
+
+    :param record: One parsed `VFPPROD` / `VFPINJ` table.
+    :param well_type: Whether the record is a producer or an injector table.
+    :param deck_unit_system: Unit system of the deck, used when the table does not state one.
+    :returns: The table data.
+    :raises ValidationError: If the table uses an axis definition that cannot be mapped, has no
+        datum depth, or its axes are invalid.
+    """
+    units = (record["units"] or "").upper()
+    unit_system = DECK_UNIT_SYSTEMS.get(units, deck_unit_system) if units else deck_unit_system
+    table_number = record["table_number"]
+    label = f"VFP table {table_number}"
+    datum_depth = record["datum_depth"]
+    if datum_depth is None:
+        raise ValidationError(f"{label}: the datum depth is required.")
+    if record["thp_type"] != "THP" or record["bhp_type"] != "BHP":
+        raise ValidationError(
+            f"{label}: only THP pressures and BHP values are supported; got "
+            f"{record['thp_type']!r} / {record['bhp_type']!r}."
+        )
+
+    if well_type == WellType.INJECTOR:
+        injector = typing.cast(VFPInjectorDeckTable, record)
+        scale_gas = unit_system == UnitSystem.FIELD and injector["flow_type"] == "GAS"
+        return VFPData(
+            table_number=table_number,
+            well_type=WellType.INJECTOR,
+            datum_depth=datum_depth,
+            flow_rates=typing.cast(
+                NumberArray[OneDimension], injector["flow"] * (1000.0 if scale_gas else 1.0)
+            ),
+            thps=typing.cast(NumberArray[OneDimension], injector["thp"]),
+            bhps=typing.cast(
+                NumberArray[FiveDimensions], injector["bhps"][:, :, None, None, None]
+            ),
+            unit_system=unit_system,
+        )
+
+    producer = typing.cast(VFPProducerDeckTable, record)
+    water_fraction = producer["water_fraction"]
+    if producer["water_fraction_type"] == "WCT":
+        water_cuts = water_fraction
+    elif producer["water_fraction_type"] == "WOR":
+        water_cuts = typing.cast(
+            NumberArray[OneDimension], water_fraction / (1.0 + water_fraction)
+        )
+    else:
+        raise ValidationError(
+            f"{label}: the water axis is {producer['water_fraction_type']!r}; only `WCT` and "
+            "`WOR` are supported."
+        )
+
+    if producer["gas_fraction_type"] != "GOR":
+        raise ValidationError(
+            f"{label}: the gas axis is {producer['gas_fraction_type']!r}; only `GOR` is supported."
+        )
+
+    flow_rates = producer["flow"]
+    bhps = producer["bhps"]
+    if producer["flow_type"] == "OIL":
+        warnings.warn(
+            f"{label}: the oil-rate flow axis was re-expressed against liquid rate; BHPs away "
+            "from the original grid points are interpolated.",
+            stacklevel=3,
+        )
+        flow_rates, bhps = regrid_oil_flow_to_liquid_flow(flow_rates, water_cuts, bhps)
+    elif producer["flow_type"] != "LIQ":
+        raise ValidationError(
+            f"{label}: the flow axis is {producer['flow_type']!r}; only liquid rate (`LIQ`) and "
+            "oil rate (`OIL`) are supported."
+        )
+
+    gas_oil_ratios = producer["gas_fraction"] * (
+        1000.0 if unit_system == UnitSystem.FIELD else 1.0
+    )
+    return VFPData(
+        table_number=table_number,
+        well_type=WellType.PRODUCER,
+        datum_depth=datum_depth,
+        flow_rates=typing.cast(NumberArray[OneDimension], flow_rates),
+        thps=typing.cast(NumberArray[OneDimension], producer["thp"]),
+        water_cuts=typing.cast(NumberArray[OneDimension], water_cuts),
+        gas_oil_ratios=typing.cast(NumberArray[OneDimension], gas_oil_ratios),
+        artificial_lift_quantities=typing.cast(NumberArray[OneDimension], producer["alq"]),
+        bhps=typing.cast(NumberArray[FiveDimensions], bhps),
+        unit_system=unit_system,
+    )
+
+
+def select_vfp_records(
+    deck_file: DeckFile,
+    *,
+    table_number: Integer | None,
+    well_type: WellType | None,
+) -> list[tuple[WellType, VFPProducerDeckTable | VFPInjectorDeckTable]]:
+    """
+    The `VFPPROD` / `VFPINJ` tables of a deck that match a selection.
+
+    A table number defined more than once within one keyword keeps its last definition, as in a
+    deck. Producer and injector tables are numbered independently.
+
+    :param deck_file: Parsed deck.
+    :param table_number: The table to select, or `None` for every table.
+    :param well_type: Select only producer or injector tables, or both if `None`.
+    :returns: `(well_type, record)` pairs in deck order.
+    :raises ValidationError: If the deck has no matching keyword, `table_number` is not found,
+        or it exists as both a producer and an injector table and `well_type` was not given.
+    """
+    kinds = (well_type,) if well_type is not None else tuple(VFP_KEYWORDS)
+    latest: dict[tuple[WellType, Integer], VFPProducerDeckTable | VFPInjectorDeckTable] = {}
+    for kind in kinds:
+        for record in deck_file.get(VFP_KEYWORDS[kind]) or []:
+            latest[kind, record["table_number"]] = record
+
+    if not latest:
+        names = " or ".join(f"`{VFP_KEYWORDS[kind]}`" for kind in kinds)
+        raise ValidationError(f"No {names} keyword found in the provided deck.")
+
+    selected = [(kind, record) for (kind, _), record in latest.items()]
+    if table_number is None:
+        return selected
+
+    matching = [
+        (kind, record) for kind, record in selected if record["table_number"] == table_number
+    ]
+    if not matching:
+        available = sorted({number for _, number in latest})
+        raise ValidationError(f"VFP table {table_number!r} not found. Available: {available}.")
+    if len(matching) > 1:
+        raise ValidationError(
+            f"VFP table {table_number!r} is defined by both `VFPPROD` and `VFPINJ`; pass "
+            "`well_type` to choose one."
+        )
+    return matching
+
+
+@typing.overload
+def load_vfp_data(
+    deck_file: DeckFile, *, table_number: Integer, well_type: WellType | None = None
+) -> VFPData: ...
+@typing.overload
+def load_vfp_data(
+    deck_file: DeckFile, *, table_number: None = None, well_type: WellType | None = None
+) -> list[VFPData]: ...
+
+
+def load_vfp_data(
+    deck_file: DeckFile,
+    *,
+    table_number: Integer | None = None,
+    well_type: WellType | None = None,
+) -> VFPData | list[VFPData]:
+    """
+    Load one or all `VFPPROD` / `VFPINJ` tables of a deck as `VFPData`.
+
+    :param deck_file: Parsed `bores.deck.file.DeckFile`.
+    :param table_number: Number of a specific table to load, or `None` for all.
+    :param well_type: Load only producer or injector tables, or both if `None`.
+    :returns: A single `VFPData` if `table_number` is given, otherwise a list in deck order.
+    :raises ValidationError: If the deck has no matching table, `table_number` is not found or
+        is ambiguous, or a table cannot be mapped (see `load_vfp_data_from_record`).
+    """
+    loaded = [
+        load_vfp_data_from_record(record, well_type=kind, deck_unit_system=deck_file.unit_system)
+        for kind, record in select_vfp_records(
+            deck_file, table_number=table_number, well_type=well_type
+        )
+    ]
+    return loaded[0] if table_number is not None else loaded
+
+
+@typing.overload
+def load_vfp_table(
+    deck_file: DeckFile,
+    *,
+    table_number: Integer,
+    well_type: WellType | None = None,
+    warn_on_extrapolation: bool = False,
+    dtype: npt.DTypeLike = None,
+) -> VFPTable: ...
+@typing.overload
+def load_vfp_table(
+    deck_file: DeckFile,
+    *,
+    table_number: None = None,
+    well_type: WellType | None = None,
+    warn_on_extrapolation: bool = False,
+    dtype: npt.DTypeLike = None,
+) -> list[VFPTable]: ...
+
+
+def load_vfp_table(
+    deck_file: DeckFile,
+    *,
+    table_number: Integer | None = None,
+    well_type: WellType | None = None,
+    warn_on_extrapolation: bool = False,
+    dtype: npt.DTypeLike = None,
+) -> VFPTable | list[VFPTable]:
+    """
+    Load one or all `VFPPROD` / `VFPINJ` tables of a deck as `VFPTable`s.
+
+    :param deck_file: Parsed `bores.deck.file.DeckFile`.
+    :param table_number: Number of a specific table to load, or `None` for all.
+    :param well_type: Load only producer or injector tables, or both if `None`.
+    :param warn_on_extrapolation: Log a warning when a query falls outside a table's bounds.
+    :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
+    :returns: A single `VFPTable` if `table_number` is given, otherwise a list in deck order.
+    :raises ValidationError: As for `load_vfp_data`.
+    """
+    data = load_vfp_data(deck_file, table_number=table_number, well_type=well_type)
+    if table_number is not None:
+        return VFPTable(
+            typing.cast(VFPData, data), warn_on_extrapolation=warn_on_extrapolation, dtype=dtype
+        )
+    return [
+        VFPTable(item, warn_on_extrapolation=warn_on_extrapolation, dtype=dtype)
+        for item in typing.cast(list[VFPData], data)
+    ]
+
+
+def load_vfp_tables(
+    deck_file: DeckFile,
+    *,
+    well_type: WellType | None = None,
+    warn_on_extrapolation: bool = False,
+    dtype: npt.DTypeLike = None,
+) -> VFPTables:
+    """
+    Load the `VFPPROD` / `VFPINJ` tables of a deck into one `VFPTables` collection.
+
+    Producer and injector tables are held separately, so the same number can exist in both.
+
+    :param deck_file: Parsed `bores.deck.file.DeckFile`.
+    :param well_type: Load only producer or injector tables, or both if `None`.
+    :param warn_on_extrapolation: Log a warning when a query falls outside a table's bounds.
+    :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
+    :returns: The collection.
+    :raises ValidationError: If the deck has no matching table or a table cannot be mapped.
+    """
+    producers: dict[Integer, VFPTable] = {}
+    injectors: dict[Integer, VFPTable] = {}
+    for kind, record in select_vfp_records(deck_file, table_number=None, well_type=well_type):
+        data = load_vfp_data_from_record(
+            record, well_type=kind, deck_unit_system=deck_file.unit_system
+        )
+        vfp_table = VFPTable(data, warn_on_extrapolation=warn_on_extrapolation, dtype=dtype)
+        (producers if kind == WellType.PRODUCER else injectors)[data.table_number] = vfp_table
+    return VFPTables(producers=producers, injectors=injectors)
 
 
 def compute_reservoir_phase_rates(

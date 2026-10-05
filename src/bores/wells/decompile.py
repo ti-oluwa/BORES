@@ -385,6 +385,7 @@ def decompile_control(
     target_thp = none_if_nan(controls.target_thps[well_row])
     efficiency_factor = controls.efficiency_factors[well_row]
     guide_rate = none_if_nan(controls.guide_rates[well_row])
+    vfp_table = controls.get_vfp_table_number(well_row=well_row)
 
     if controls.well_kinds[well_row] == WellKind.INJECTOR:
         return InjectorControl(
@@ -396,6 +397,7 @@ def decompile_control(
             limits=all_limits,
             efficiency_factor=efficiency_factor,
             guide_rate=guide_rate,
+            vfp_table=vfp_table,
             unit_system=unit_system,
         )
     return ProducerControl(
@@ -406,6 +408,8 @@ def decompile_control(
         limits=all_limits,
         efficiency_factor=efficiency_factor,
         guide_rate=guide_rate,
+        vfp_table=vfp_table,
+        artificial_lift_quantity=controls.artificial_lift_quantities[well_row],
         unit_system=unit_system,
     )
 

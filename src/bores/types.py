@@ -14,6 +14,7 @@ __all__ = [
     "CapillaryPressures",
     "Coordinates",
     "DiscretizationMethod",
+    "FiveDimensions",
     "FluidPhase",
     "Interpolator",
     "MiscibilityModel",
@@ -81,6 +82,8 @@ TwoDimensions: TypeAlias = tuple[int, int]
 """2D indices"""
 OneDimension: TypeAlias = tuple[int]
 """1D index"""
+FiveDimensions: TypeAlias = tuple[int, int, int, int, int]
+"""5D index"""
 
 Integer: TypeAlias = int | np.integer
 Float: TypeAlias = float | np.floating

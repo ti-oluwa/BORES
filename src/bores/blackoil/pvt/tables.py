@@ -51,9 +51,7 @@ def build_pchip_2d_interpolator(
     dtype: npt.DTypeLike,
     *,
     derivative: bool = False,
-) -> typing.Callable[
-    [NumberArray[NDimension], NumberArray[NDimension]], NumberArray[NDimension]
-]:
+) -> typing.Callable[[NumberArray[NDimension], NumberArray[NDimension]], NumberArray[NDimension]]:
     """
     Build a two-stage PCHIP 2-D interpolator for a property table.
 
@@ -143,9 +141,7 @@ def build_pchip_2d_derivative_interpolator(
     temperatures: NumberArray[NDimension],
     table: NumberArray[NDimension],
     dtype: npt.DTypeLike,
-) -> typing.Callable[
-    [NumberArray[NDimension], NumberArray[NDimension]], NumberArray[NDimension]
-]:
+) -> typing.Callable[[NumberArray[NDimension], NumberArray[NDimension]], NumberArray[NDimension]]:
     """
     Build a two-stage PCHIP interpolator for `∂table/∂P`.
 

@@ -22,6 +22,7 @@ from bores.types import (
 )
 from bores.wells.base import CompletionStatus, WellStatus
 from bores.wells.compile import (
+    UNSET_INT,
     CompiledGroupLimits,
     CompiledLimits,
     CompiledPerforations,
@@ -65,6 +66,7 @@ __all__ = [
     "SetLimits",
     "SetWellControl",
     "SetWellControls",
+    "SetWellLift",
     "SetWellTarget",
     "SetWellTargets",
     "ShutInWell",
@@ -1571,3 +1573,78 @@ class RateThreshold(ThresholdEvent["CompiledBlackOilModel"]):
                 f"surface={self.surface!r}."
             )
         return getattr(workspace.wells, array_name)[well_row]
+
+
+@action_type
+@attrs.frozen(kw_only=True, slots=True)
+class SetWellLift(SerializableAction["CompiledBlackOilModel"]):
+    """
+    Changes a well's VFP table, artificial lift quantity (ALQ) and efficiency factor.
+
+    Each setting that is `None` is left as it is. Build this directly for a manual lift change;
+    it is also what a deck `WLIFT` becomes under `load_schedule`, and what the lift items of a
+    `WCONPROD`/`WCONINJE` reissue become.
+    """
+
+    __type__: typing.ClassVar[str] = "set_well_lift"
+
+    well_name: str
+    """The well to act on."""
+
+    vfp_table: Integer | None = None
+    """The VFP table number to switch to, or `0` for no table. `None` keeps the current table."""
+
+    artificial_lift_quantity: Number | None = None
+    """
+    The ALQ to operate at, in the units of the table's ALQ axis. Producers only. `None`
+    keeps the current value.
+    """
+
+    efficiency_factor: Number | None = None
+    """The well's new efficiency factor, in `(0, 1]`. `None` keeps the current value."""
+
+    def __call__(
+        self, model: "CompiledBlackOilModel", context: ScheduleContext
+    ) -> "CompiledBlackOilModel":
+        """
+        Applies the lift settings that were given.
+
+        :param model: The model to change.
+        :param context: The current moment's context. Unused.
+        :returns: `model`, with the well's lift settings patched.
+        :raises ValidationError: If an ALQ is given for an injector, or a value is invalid.
+        """
+        well_row, wells = resolve_well(model=model, well_name=self.well_name)
+        controls = wells.controls
+        if (
+            self.artificial_lift_quantity is not None
+            and controls.well_kinds[well_row] == WellKind.INJECTOR
+        ):
+            raise ValidationError(
+                f"{type(self).__name__}: well {self.well_name!r} is an injector, which has no "
+                "artificial lift quantity."
+            )
+        if self.artificial_lift_quantity is not None and not (
+            np.isfinite(self.artificial_lift_quantity) and self.artificial_lift_quantity >= 0.0
+        ):
+            raise ValidationError(
+                f"{type(self).__name__}: the artificial lift quantity must be finite and "
+                f"non-negative; got {self.artificial_lift_quantity}."
+            )
+        if self.efficiency_factor is not None and not (0.0 < self.efficiency_factor <= 1.0):
+            raise ValidationError(
+                f"{type(self).__name__}: the efficiency factor must be in (0, 1]; got "
+                f"{self.efficiency_factor}."
+            )
+
+        if self.vfp_table is not None:
+            controls.set_vfp_table_number(
+                well_row=well_row, value=UNSET_INT if self.vfp_table == 0 else self.vfp_table
+            )
+        if self.artificial_lift_quantity is not None:
+            controls.set_artificial_lift_quantity(
+                well_row=well_row, value=self.artificial_lift_quantity
+            )
+        if self.efficiency_factor is not None:
+            controls.set_efficiency_factor(well_row=well_row, value=self.efficiency_factor)
+        return model

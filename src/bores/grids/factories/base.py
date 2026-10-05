@@ -222,11 +222,11 @@ def validate_map_axes(map_axes: MapAxes) -> None:
     """
     x_vector = map_axes.map_x_axis_point - map_axes.origin
     y_vector = map_axes.map_y_axis_point - map_axes.origin
-    x_length = float(np.linalg.norm(x_vector))
-    y_length = float(np.linalg.norm(y_vector))
+    x_length = np.linalg.norm(x_vector)
+    y_length = np.linalg.norm(y_vector)
     if x_length < 1e-14 or y_length < 1e-14:
         return
-    cosine = float(x_vector @ y_vector) / (x_length * y_length)
+    cosine = x_vector @ y_vector / (x_length * y_length)
     if abs(cosine) > MAP_AXES_PERPENDICULAR_TOLERANCE:
         angle = float(np.degrees(np.arccos(np.clip(cosine, -1.0, 1.0))))
         raise ValidationError(

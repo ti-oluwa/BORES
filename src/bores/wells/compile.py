@@ -905,6 +905,12 @@ class CompiledWellControls(typing.NamedTuple):
     guide_rates: NumberArray[OneDimension]
     """Shape `(n_wells,)`. `NaN` where unset."""
 
+    vfp_table_numbers: IntArray[OneDimension]
+    """Shape `(n_wells,)`. Number of each well's VFP table, `UNSET_INT` where none is assigned."""
+
+    artificial_lift_quantities: NumberArray[OneDimension]
+    """Shape `(n_wells,)`. Artificial lift quantity each well operates at (`0` = no lift)."""
+
     limits: CompiledLimits
 
     @typing.overload
@@ -1159,6 +1165,64 @@ class CompiledWellControls(typing.NamedTuple):
             every row in `well_row`; an array sets each row to its own value.
         """
         self.guide_rates[well_row] = value
+
+    @typing.overload
+    def get_vfp_table_number(self, *, well_row: Integer) -> Integer | None: ...
+    @typing.overload
+    def get_vfp_table_number(
+        self, *, well_row: IntArray[OneDimension]
+    ) -> IntArray[OneDimension]: ...
+    def get_vfp_table_number(
+        self, *, well_row: IntOrArray[OneDimension]
+    ) -> Integer | IntArray[OneDimension] | None:
+        """
+        :param well_row: One well's row, or an array of them.
+        :returns: Each well's VFP table number. For a single `well_row`, an int or `None` if no
+            table is assigned. For an array, the raw array (`UNSET_INT` means none).
+        """
+        if np.isscalar(well_row):
+            number = self.vfp_table_numbers[typing.cast(Integer, well_row)]
+            return None if number == UNSET_INT else int(number)
+        return self.vfp_table_numbers[well_row]  # type: ignore[index]
+
+    def set_vfp_table_number(
+        self, *, well_row: IntOrArray[OneDimension], value: IntOrArray[OneDimension]
+    ) -> None:
+        """
+        Overwrites one or more wells' VFP table number in place.
+
+        :param well_row: One well's row, or an array of them.
+        :param value: The new table number (`UNSET_INT` for none). A single value applies to
+            every row in `well_row`; an array sets each row to its own value.
+        """
+        self.vfp_table_numbers[well_row] = value
+
+    @typing.overload
+    def get_artificial_lift_quantity(self, *, well_row: Integer) -> Number: ...
+    @typing.overload
+    def get_artificial_lift_quantity(
+        self, *, well_row: IntArray[OneDimension]
+    ) -> NumberArray[OneDimension]: ...
+    def get_artificial_lift_quantity(
+        self, *, well_row: IntOrArray[OneDimension]
+    ) -> NumberOrArray[OneDimension]:
+        """
+        :param well_row: One well's row, or an array of them.
+        :returns: Each well's artificial lift quantity. Matches `well_row`'s own shape.
+        """
+        return self.artificial_lift_quantities[well_row]  # type: ignore[index]
+
+    def set_artificial_lift_quantity(
+        self, *, well_row: IntOrArray[OneDimension], value: NumberOrArray[OneDimension]
+    ) -> None:
+        """
+        Overwrites one or more wells' artificial lift quantity in place.
+
+        :param well_row: One well's row, or an array of them.
+        :param value: The new artificial lift quantity. A single value applies to every row in
+            `well_row`; an array sets each row to its own value.
+        """
+        self.artificial_lift_quantities[well_row] = value
 
 
 class CompiledGroupLimits(typing.NamedTuple):
@@ -1831,6 +1895,8 @@ def compile_well_controls(
     target_thps: list[Number] = []
     efficiency_factors: list[Number] = []
     guide_rates: list[Number] = []
+    vfp_table_numbers: list[Integer] = []
+    artificial_lift_quantities: list[Number] = []
 
     limits_well_offsets = [0]
     limits_kinds: list[Integer] = []
@@ -1858,6 +1924,8 @@ def compile_well_controls(
             target_thps.append(np.nan)
             efficiency_factors.append(1.0)
             guide_rates.append(np.nan)
+            vfp_table_numbers.append(UNSET_INT)
+            artificial_lift_quantities.append(0.0)
             limits_well_offsets.append(len(limits_kinds))
             continue
 
@@ -1870,6 +1938,9 @@ def compile_well_controls(
 
         efficiency_factors.append(efficiency_factor)
         guide_rates.append(guide_rate if guide_rate is not None else np.nan)
+        vfp_table = getattr(control, "vfp_table", None)
+        vfp_table_numbers.append(vfp_table if vfp_table is not None else UNSET_INT)
+        artificial_lift_quantities.append(getattr(control, "artificial_lift_quantity", 0.0))
         target_bhps.append(target_bhp if target_bhp is not None else np.nan)
         target_thps.append(target_thp if target_thp is not None else np.nan)
         target_rates.append(target_rate if target_rate is not None else np.nan)
@@ -1931,6 +2002,12 @@ def compile_well_controls(
             NumberArray[OneDimension], np.asarray(efficiency_factors, dtype=dtype)
         ),
         guide_rates=typing.cast(NumberArray[OneDimension], np.asarray(guide_rates, dtype=dtype)),
+        vfp_table_numbers=typing.cast(
+            IntArray[OneDimension], np.asarray(vfp_table_numbers, dtype=np.int32)
+        ),
+        artificial_lift_quantities=typing.cast(
+            NumberArray[OneDimension], np.asarray(artificial_lift_quantities, dtype=dtype)
+        ),
         limits=limits,
     )
 

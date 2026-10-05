@@ -30,7 +30,7 @@ from bores.units import UNIT_SYSTEM
 # Load
 grdecl_path = pathlib.Path("data/cartesian.grdecl")
 
-print(f"Loading {grdecl_path.name} …")
+print(f"Loading {grdecl_path.name} ...")
 grid = load_grdecl(grdecl_path, encoding="ascii", unit_system=UNIT_SYSTEM.value)
 
 print(f"  cells        : {grid.n_cells}")
@@ -90,7 +90,7 @@ if grid.fault_face_indices:
                     fault_flag[cell_idx] = 1.0
 
 # Convert to PyVista grid
-print("\nConverting to PyVista …")
+print("\nConverting to PyVista ...")
 pore_volume_grid = make_pyvista_grid(
     grid,
     cell_data={
@@ -127,7 +127,7 @@ for row, col, scalar, cmap, title, clim in panel_cfg:
     pl.set_scale(zscale=3)  # type: ignore
     pl.view_isometric()  # type: ignore
 
-print("Rendering …  (close window to exit)")
+print("Rendering ...  (close window to exit)")
 pl.show()
 
 # Summary

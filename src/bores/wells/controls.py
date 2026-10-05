@@ -668,6 +668,11 @@ class InjectorControl(WellControl):
 
     See `wells.resolution.groups.allocation`.
     """
+    vfp_table: Integer | None = None
+    """
+    Number of the VFP table that converts this well's THP to a BHP (deck `WCONINJE` item 9).
+    `None` when no table is assigned.
+    """
     unit_system: UnitSystem = UnitSystem.FIELD
 
     def __attrs_post_init__(self) -> None:

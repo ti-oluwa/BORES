@@ -42,7 +42,6 @@ from bores.wells.groups import (
     WellGroup,
     WellGroups,
 )
-from bores.wells.hydraulics.vfp import VFPData, VFPTable, VFPTables
 from bores.wells.mappings import (
     DIRECTION_MAP,
     ECONOMIC_MIN_RATE_QUANTITY_FIELDS,
@@ -61,6 +60,7 @@ from bores.wells.schedule import (
     SetGroupLimit,
     SetLimit,
     SetWellControl,
+    SetWellLift,
     SetWellTarget,
     UpdateWellStatus,
 )
@@ -91,9 +91,6 @@ __all__ = [
     "load_producer_control_from_record",
     "load_schedule",
     "load_summary_items",
-    "load_vfp_data",
-    "load_vfp_table",
-    "load_vfp_tables",
     "load_well_controls",
     "load_well_from_records",
     "load_well_segments",
@@ -721,6 +718,7 @@ def load_injector_control_from_record(
     if phase is FluidPhase.GAS:
         rate = from_deck_gas_rate(rate, unit_system)
 
+    vfp_table = record.get("vfp_table")
     return InjectorControl(
         injected_phase=phase,
         mode=mode,
@@ -728,6 +726,7 @@ def load_injector_control_from_record(
         target_bhp=bhp,
         target_thp=record.get("thp"),
         limits=tuple(limits),
+        vfp_table=int(vfp_table) if vfp_table else None,
         unit_system=unit_system,
     )
 
@@ -1380,56 +1379,6 @@ def get_fluid_in_place_regions(deck_file: DeckFile) -> list[int]:
     return sorted(int(region) for region in np.unique(np.asarray(fip_numbers)))
 
 
-def load_vfp_data(deck_file: DeckFile) -> list[VFPData]:
-    """
-    Loads every `VFPPROD` and `VFPINJ` table in a deck as `VFPData`, producers first.
-
-    :param deck_file: The deck to read the tables from.
-    :returns: One `VFPData` per table occurrence, in deck order within each keyword.
-    :raises ValidationError: If a table cannot be mapped (see `VFPData.from_deck`).
-    """
-    deck_tables = [*(deck_file.get("VFPPROD") or []), *(deck_file.get("VFPINJ") or [])]
-    return [
-        VFPData.from_deck(table, deck_unit_system=deck_file.unit_system) for table in deck_tables
-    ]
-
-
-def load_vfp_table(deck_file: DeckFile, table_number: int) -> VFPTable:
-    """
-    Loads the `VFPTable` a deck defines under one table number.
-
-    A table number defined more than once keeps its last definition, as in a deck.
-
-    :param deck_file: The deck to read the table from.
-    :param table_number: The table number wells select through `WCONPROD` / `WCONINJE`.
-    :returns: The table.
-    :raises ValidationError: If the deck defines no such table or it cannot be mapped.
-    """
-    for table in reversed([*(deck_file.get("VFPPROD") or []), *(deck_file.get("VFPINJ") or [])]):
-        if table.table_number == table_number:
-            return VFPTable.from_deck(table, deck_unit_system=deck_file.unit_system)
-    raise ValidationError(f"The deck defines no VFP table number {table_number}.")
-
-
-def load_vfp_tables(deck_file: DeckFile) -> VFPTables:
-    """
-    Loads every `VFPPROD` and `VFPINJ` table in a deck into one number-indexed collection.
-
-    :param deck_file: The deck to read the tables from.
-    :returns: The collection, empty if the deck defines no tables.
-    :raises ValidationError: If a table cannot be mapped, or a producer and an injector table
-        share a number (the collection is keyed by number alone).
-    """
-    producers = deck_file.get("VFPPROD") or []
-    injectors = deck_file.get("VFPINJ") or []
-    shared = {t.table_number for t in producers} & {t.table_number for t in injectors}
-    if shared:
-        raise ValidationError(
-            f"VFP table number(s) {sorted(shared)} are defined by both `VFPPROD` and `VFPINJ`."
-        )
-    return VFPTables.from_deck([*producers, *injectors], deck_unit_system=deck_file.unit_system)
-
-
 def load_summary_items(
     deck_file: DeckFile, *, compiled_at: float = 0.0
 ) -> list[ScheduleItem["CompiledBlackOilModel"]]:
@@ -1617,6 +1566,46 @@ def load_schedule(
             )
         )
 
+    for record in deck_file.get("WLIFT") or empty:
+        if not is_due(record):
+            continue
+        schedule_time = record["schedule_time"]
+        unsupported = [
+            name
+            for name, value in (
+                ("rate trigger (`trigger_limit`)", record["trigger_limit"]),
+                ("water cut trigger (`water_cut_limit`)", record["water_cut_limit"]),
+                ("gas-oil ratio trigger (`gas_oil_ratio_limit`)", record["gas_oil_ratio_limit"]),
+                ("`new_thp_limit`", record["new_thp_limit"]),
+            )
+            if not np.isclose(value, 0.0)
+        ] + [
+            name
+            for name, value in (
+                ("`alq_shift`", record["alq_shift"]),
+                ("`thp_shift`", record["thp_shift"]),
+            )
+            if not np.isclose(value, 1.0e20)
+        ]
+        if unsupported:
+            raise NotSupportedError(
+                f"`WLIFT` for well {record['well']!r} uses {', '.join(unsupported)}, which is not "
+                "supported yet. Only an unconditional change of VFP table, ALQ and efficiency "
+                "factor is."
+            )
+        items.append(
+            ScheduleItem(
+                event=TimeEvent(at=schedule_time),
+                action=SetWellLift(
+                    well_name=record["well"],
+                    vfp_table=record["new_vfp_table"] or None,
+                    artificial_lift_quantity=record["new_alq"] or None,
+                    efficiency_factor=record["new_efficiency_factor"] or None,
+                ),
+                name=f"wlift:{record['well']}@{schedule_time}",
+            )
+        )
+
     for record in deck_file.get("WCONPROD") or empty:
         if not is_due(record):
             continue
@@ -1634,6 +1623,17 @@ def load_schedule(
                 event=TimeEvent(at=schedule_time),
                 action=action,
                 name=f"wconprod:{record['well']}@{schedule_time}",
+            )
+        )
+        items.append(
+            ScheduleItem(
+                event=TimeEvent(at=schedule_time),
+                action=SetWellLift(
+                    well_name=record["well"],
+                    vfp_table=control.vfp_table or 0,
+                    artificial_lift_quantity=control.artificial_lift_quantity,
+                ),
+                name=f"wconprod-lift:{record['well']}@{schedule_time}",
             )
         )
         for limit in control.limits:
@@ -1675,6 +1675,13 @@ def load_schedule(
                 event=TimeEvent(at=schedule_time),
                 action=action,
                 name=f"wconinje:{record['well']}@{schedule_time}",
+            )
+        )
+        items.append(
+            ScheduleItem(
+                event=TimeEvent(at=schedule_time),
+                action=SetWellLift(well_name=record["well"], vfp_table=control.vfp_table or 0),
+                name=f"wconinje-lift:{record['well']}@{schedule_time}",
             )
         )
         for limit in control.limits:

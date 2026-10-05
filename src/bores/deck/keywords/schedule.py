@@ -40,7 +40,6 @@ file order alongside the `DATES`/`TSTEP` timeline.
 import typing
 
 import numpy as np
-import numpy.typing as npt
 
 from bores.datastructures import GridDimensions
 from bores.deck.core import Deck, DeckParseError, tokenize
@@ -54,6 +53,7 @@ from bores.deck.keywords.base import (
 )
 from bores.deck.operators import Operation
 from bores.errors import ValidationError
+from bores.types import FiveDimensions, Integer, Number, NumberArray, OneDimension, TwoDimensions
 
 __all__ = [
     "COMPDAT",
@@ -1113,13 +1113,13 @@ scheduled record: it takes effect at the schedule time it appears at.
 """
 
 
-class VFPProducerDeckTable(typing.NamedTuple):
+class VFPProducerDeckTable(typing.TypedDict):
     """One `VFPPROD` table exactly as the deck declares it, before any unit or axis mapping."""
 
     table_number: int
     """Table number wells refer to through `WCONPROD`'s `vfp_table` item."""
 
-    datum_depth: float | None
+    datum_depth: Number | None
     """Depth the BHP values refer to, or `None` if defaulted."""
 
     flow_type: str
@@ -1143,32 +1143,32 @@ class VFPProducerDeckTable(typing.NamedTuple):
     bhp_type: str
     """What the table values are (`BHP`)."""
 
-    flow: npt.NDArray[np.float64]
+    flow: NumberArray[OneDimension]
     """Flow axis values."""
 
-    thp: npt.NDArray[np.float64]
+    thp: NumberArray[OneDimension]
     """Tubing head pressure axis values."""
 
-    water_fraction: npt.NDArray[np.float64]
+    water_fraction: NumberArray[OneDimension]
     """Water axis values, in the units of `water_fraction_type`."""
 
-    gas_fraction: npt.NDArray[np.float64]
+    gas_fraction: NumberArray[OneDimension]
     """Gas axis values, in the units of `gas_fraction_type`."""
 
-    alq: npt.NDArray[np.float64]
+    alq: NumberArray[OneDimension]
     """Artificial lift axis values."""
 
-    bhps: npt.NDArray[np.float64]
+    bhps: NumberArray[FiveDimensions]
     """BHP values shaped `(len(flow), len(thp), len(water_fraction), len(gas_fraction), len(alq))`."""
 
 
-class VFPInjectorDeckTable(typing.NamedTuple):
+class VFPInjectorDeckTable(typing.TypedDict):
     """One `VFPINJ` table exactly as the deck declares it, before any unit mapping."""
 
     table_number: int
     """Table number wells refer to through `WCONINJE`'s `vfp_table` item."""
 
-    datum_depth: float | None
+    datum_depth: Number | None
     """Depth the BHP values refer to, or `None` if defaulted."""
 
     flow_type: str
@@ -1183,13 +1183,13 @@ class VFPInjectorDeckTable(typing.NamedTuple):
     bhp_type: str
     """What the table values are (`BHP`)."""
 
-    flow: npt.NDArray[np.float64]
+    flow: NumberArray[OneDimension]
     """Flow axis values."""
 
-    thp: npt.NDArray[np.float64]
+    thp: NumberArray[OneDimension]
     """Tubing head pressure axis values."""
 
-    bhps: npt.NDArray[np.float64]
+    bhps: NumberArray[TwoDimensions]
     """BHP values shaped `(len(flow), len(thp))`."""
 
 
@@ -1246,14 +1246,14 @@ class VFPKeyword(Keyword[list[VFPProducerDeckTable] | list[VFPInjectorDeckTable]
         if len(segments) < 1 + n_axes + 1:
             raise DeckParseError(f"{self.name}: a table needs a header, its axes and data rows.")
 
-        def item(segment: list[str], index: int, default: str | None = None) -> str | None:
+        def item(segment: list[str], index: Integer, default: str | None = None) -> str | None:
             if index >= len(segment) or segment[index] == "1*":
                 return default
             return segment[index].upper()
 
-        def numbers(segment: list[str], label: str) -> npt.NDArray[np.float64]:
+        def numbers(segment: list[str], label: str) -> NumberArray[OneDimension]:
             try:
-                return np.array(segment, dtype=np.float64)
+                return typing.cast(NumberArray[OneDimension], np.array(segment, dtype=np.float64))
             except ValueError as exc:
                 raise DeckParseError(f"{self.name}: bad {label} axis values {segment}.") from exc
 
