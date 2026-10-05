@@ -21,7 +21,6 @@ from bores.errors import (
     InvalidVolumeError,
     ValidationError,
 )
-from bores.serde.base import Serializable
 from bores.types import (
     Float,
     IntArray,
@@ -277,11 +276,11 @@ def compute_cell_volumes_and_centroids(
 
     cell_centroids = np.zeros((n_cells, 3), dtype=np.float64)
     for cell_idx in range(n_cells):
-        vol = cell_volumes[cell_idx]
-        if abs(vol) > 0.0:
-            cell_centroids[cell_idx, 0] = centroid_accumulators[cell_idx, 0] / vol
-            cell_centroids[cell_idx, 1] = centroid_accumulators[cell_idx, 1] / vol
-            cell_centroids[cell_idx, 2] = centroid_accumulators[cell_idx, 2] / vol
+        cell_volume = cell_volumes[cell_idx]
+        if abs(cell_volume) > 0.0:
+            cell_centroids[cell_idx, 0] = centroid_accumulators[cell_idx, 0] / cell_volume
+            cell_centroids[cell_idx, 1] = centroid_accumulators[cell_idx, 1] / cell_volume
+            cell_centroids[cell_idx, 2] = centroid_accumulators[cell_idx, 2] / cell_volume
 
     return cell_volumes, cell_centroids
 
@@ -354,34 +353,7 @@ def compute_cell_bounding_boxes(
 
 @typing.final
 @attrs.frozen(slots=True, kw_only=True)
-class Grid(
-    Serializable,
-    fields={
-        "vertex_coordinates": NumberArray[TwoDimensions],
-        "face_vertex_indices": IntArray[OneDimension],
-        "face_vertex_offsets": IntArray[OneDimension],
-        "face_cell_indices": IntArray[TwoDimensions],
-        "unit_system": UnitSystem,
-        "dimensions": GridDimensions | None,
-        "metadata": typing.Mapping[str, typing.Any] | None,
-        "cell_statuses": IntArray[OneDimension] | None,
-        "face_connection_types": IntArray[OneDimension] | None,
-        "cell_volumes": NumberArray[OneDimension] | None,
-        "cell_centroids": NumberArray[TwoDimensions] | None,
-        "cell_min_xyz": NumberArray[TwoDimensions] | None,
-        "cell_max_xyz": NumberArray[TwoDimensions] | None,
-        "nnc_cell_indices": IntArray[TwoDimensions] | None,
-        "nnc_transmissibilities": NumberArray[OneDimension] | None,
-        "fault_face_indices": typing.Mapping[str, IntArray[OneDimension]] | None,
-        "fault_transmissibility_multipliers": typing.Mapping[str, Number] | None,
-        "positive_x_transmissibility_multipliers": NumberArray[OneDimension] | None,
-        "negative_x_transmissibility_multipliers": NumberArray[OneDimension] | None,
-        "positive_y_transmissibility_multipliers": NumberArray[OneDimension] | None,
-        "negative_y_transmissibility_multipliers": NumberArray[OneDimension] | None,
-        "positive_z_transmissibility_multipliers": NumberArray[OneDimension] | None,
-        "negative_z_transmissibility_multipliers": NumberArray[OneDimension] | None,
-    },
-):
+class Grid:
     """
     Immutable face-based unstructured polyhedral grid.
 

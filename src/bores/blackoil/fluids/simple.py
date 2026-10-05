@@ -14,7 +14,6 @@ from bores.blackoil.pseudo_pressure import (
 from bores.blackoil.pvt.tables import PVTTable, PVTTables
 from bores.correlations import arrays
 from bores.errors import ValidationError
-from bores.serde.stores import StoreSerializable
 from bores.types import FluidPhase, Number, UnitSystem
 
 logger = logging.getLogger(__name__)
@@ -40,7 +39,7 @@ def _validate_pseudo_pressure_phase(
 
 
 @attrs.frozen(slots=True)
-class Fluid(StoreSerializable):
+class Fluid:
     """
     Black-oil physics based fluid.
 

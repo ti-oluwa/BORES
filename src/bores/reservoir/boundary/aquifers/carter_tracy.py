@@ -14,7 +14,6 @@ from bores.errors import ValidationError
 from bores.reservoir.boundary.base import (
     BoundaryCondition,
     BoundaryConditionType,
-    boundary_condition,
 )
 from bores.types import Number, NumberArray, OneDimension, UnitConversionTable, UnitSystem
 
@@ -287,7 +286,6 @@ def compute_incremental_influx(
     return previous_cumulative_influx + delta_t_d * (numerator_bracket / denominator)
 
 
-@boundary_condition
 @attrs.frozen(slots=True)
 class CarterTracyAquifer(BoundaryCondition):
     """
@@ -374,8 +372,6 @@ class CarterTracyAquifer(BoundaryCondition):
     - Ahmed, T. (2010). *Reservoir Engineering Handbook*, 4th ed.
       Gulf Professional Publishing. (Carter-Tracy chapter.)
     """
-
-    __type__: typing.ClassVar[str] = "carter_tracy_aquifer"
 
     condition_type: typing.ClassVar[BoundaryConditionType] = BoundaryConditionType.FLUX
 

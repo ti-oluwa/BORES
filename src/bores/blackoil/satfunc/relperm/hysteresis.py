@@ -27,8 +27,6 @@ from bores.blackoil.satfunc.relperm.tables import (
     TwoPhaseRelPermTable,
     get_mixing_rule,
     get_mixing_rule_partial_derivatives,
-    relperm_table,
-    serialize_mixing_rule,
 )
 from bores.blackoil.satfunc.utils import (
     compute_killough_scanning_curve,
@@ -404,15 +402,8 @@ def get_gas_oil_relative_permeability_derivatives(
     return derivatives["dkro_dsg"], derivatives["dkrg_dsg"]
 
 
-@relperm_table
 @attrs.frozen(slots=True)
-class KilloughLandRelPermTable(
-    RelativePermeabilityTable,
-    serializers={"mixing_rule": serialize_mixing_rule},
-    deserializers={"mixing_rule": get_mixing_rule},
-    load_exclude={"supports_vector"},
-    dump_exclude={"supports_vector"},
-):
+class KilloughLandRelPermTable:
     """
     Implements the Killough relative permeability hysteresis model/table with Land trapping.
 

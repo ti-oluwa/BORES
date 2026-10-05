@@ -9,8 +9,6 @@ from typing_extensions import Self
 from bores.constants import get_conversion_factors
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
-from bores.serde.base import Serializable
-from bores.serde.stores import StoreSerializable
 from bores.types import FluidPhase, Number, UnitConversionTable, UnitSystem
 from bores.wells.controls import EconomicLimit
 
@@ -29,7 +27,7 @@ FIELD_GROUP = "FIELD"
 
 
 @attrs.frozen(kw_only=True, slots=True, hash=True)
-class WellGroup(Serializable):
+class WellGroup:
     """One node in the group hierarchy - deck `GRUPTREE` child/parent link."""
 
     name: str
@@ -54,10 +52,7 @@ class WellGroup(Serializable):
 WellGroupTree = dict[str | WellGroup, "WellGroupTree"]
 
 
-class WellGroups(
-    StoreSerializable,
-    fields={"groups": typing.Mapping[str, WellGroup]},
-):
+class WellGroups:
     """Name-keyed group hierarchy. Lookup and traversal only."""
 
     def __init__(self, groups: typing.Mapping[str, WellGroup]) -> None:
@@ -301,7 +296,7 @@ class GroupInjectorControlMode(enum.Enum):
 
 
 @attrs.frozen(kw_only=True, slots=True)
-class GroupControl(Serializable):
+class GroupControl:
     """
     A group's production or injection target.
 
@@ -359,13 +354,7 @@ class GroupControl(Serializable):
         return attrs.evolve(self, target_rate=self.target_rate * factor, unit_system=target)
 
 
-class GroupControls(
-    StoreSerializable,
-    fields={
-        "controls": typing.Mapping[str, GroupControl],
-        "unit_system": typing.Optional[UnitSystem],  # noqa: UP045
-    },
-):
+class GroupControls:
     """
     Name-keyed, mutable mapping from group name to its current `GroupControl`.
     """

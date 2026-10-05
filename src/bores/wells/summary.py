@@ -18,7 +18,7 @@ from typing_extensions import Self
 from bores.constants import c
 from bores.errors import SummaryError
 from bores.schedule.base import ScheduleContext
-from bores.schedule.summary import SerializableSummary, summary_type
+from bores.schedule.summary import Summary
 from bores.types import CellArray, IntCellArray, Integer, Number, UnitSystem
 from bores.wells.compile import CompiledWellSystem, WellKind
 from bores.wells.schedule import resolve_well
@@ -167,10 +167,8 @@ def divide(*, numerator: Number, denominator: Number) -> Number:
 
 
 @attrs.frozen(kw_only=True, slots=True)
-class FieldRate(SerializableSummary["CompiledBlackOilModel"]):
+class FieldRate(Summary["CompiledBlackOilModel"]):
     """Base for a field-wide surface rate. Subclasses set `mnemonic`, `array_name`, and `kind`."""
-
-    __abstract_serializable__ = True
 
     mnemonic = ""
     array_name = ""
@@ -219,88 +217,60 @@ class FieldRate(SerializableSummary["CompiledBlackOilModel"]):
         )
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class FieldOilProductionRate(FieldRate):
     """Field oil production rate (`FOPR`)."""
-
-    __abstract_serializable__ = True
-    __type__: typing.ClassVar[str] = "field_oil_production_rate"
 
     mnemonic = "FOPR"
     array_name = "surface_oil_rates"
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class FieldWaterProductionRate(FieldRate):
     """Field water production rate (`FWPR`)."""
-
-    __abstract_serializable__ = True
-    __type__: typing.ClassVar[str] = "field_water_production_rate"
 
     mnemonic = "FWPR"
     array_name = "surface_water_rates"
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class FieldGasProductionRate(FieldRate):
     """Field gas production rate (`FGPR`)."""
-
-    __abstract_serializable__ = True
-    __type__: typing.ClassVar[str] = "field_gas_production_rate"
 
     mnemonic = "FGPR"
     array_name = "surface_gas_rates"
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class FieldWaterInjectionRate(FieldRate):
     """Field water injection rate (`FWIR`)."""
-
-    __abstract_serializable__ = True
-    __type__: typing.ClassVar[str] = "field_water_injection_rate"
 
     mnemonic = "FWIR"
     array_name = "surface_water_rates"
     kind = WellKind.INJECTOR
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class FieldOilInjectionRate(FieldRate):
     """Field oil injection rate (`FOIR`). Rare in practice; Eclipse still defines it."""
-
-    __abstract_serializable__ = True
-    __type__: typing.ClassVar[str] = "field_oil_injection_rate"
 
     mnemonic = "FOIR"
     array_name = "surface_oil_rates"
     kind = WellKind.INJECTOR
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class FieldGasInjectionRate(FieldRate):
     """Field gas injection rate (`FGIR`)."""
-
-    __abstract_serializable__ = True
-    __type__: typing.ClassVar[str] = "field_gas_injection_rate"
 
     mnemonic = "FGIR"
     array_name = "surface_gas_rates"
     kind = WellKind.INJECTOR
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class FieldLiquidProductionRate(FieldRate):
     """Field liquid (oil plus water) production rate (`FLPR`)."""
-
-    __abstract_serializable__ = True
-    __type__: typing.ClassVar[str] = "field_liquid_production_rate"
 
     mnemonic = "FLPR"
 
@@ -329,13 +299,9 @@ class FieldLiquidProductionRate(FieldRate):
         return oil_rate + water_rate
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class FieldWaterCut(FieldRate):
     """Field water cut (`FWCT`): water over total liquid production, `0` with no liquid."""
-
-    __abstract_serializable__ = True
-    __type__: typing.ClassVar[str] = "field_water_cut"
 
     mnemonic = "FWCT"
 
@@ -364,13 +330,9 @@ class FieldWaterCut(FieldRate):
         return divide(numerator=water_rate, denominator=oil_rate + water_rate)
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class FieldGasOilRatio(FieldRate):
     """Field gas-oil ratio (`FGOR`): gas over oil production, `0` with no oil."""
-
-    __abstract_serializable__ = True
-    __type__: typing.ClassVar[str] = "field_gas_oil_ratio"
 
     mnemonic = "FGOR"
 
@@ -400,10 +362,8 @@ class FieldGasOilRatio(FieldRate):
 
 
 @attrs.frozen(kw_only=True, slots=True)
-class WellVector(SerializableSummary["CompiledBlackOilModel"]):
+class WellVector(Summary["CompiledBlackOilModel"]):
     """Base for a per-well vector. Subclasses set `mnemonic` and implement `get_value`."""
-
-    __abstract_serializable__ = True
 
     mnemonic = ""
 
@@ -451,8 +411,6 @@ class WellVector(SerializableSummary["CompiledBlackOilModel"]):
 class WellRate(WellVector):
     """Base for a per-well surface rate. Subclasses set `mnemonic` and `array_name`."""
 
-    __abstract_serializable__ = True
-
     array_name = ""
 
     def get_value(self, *, well_row: Integer, workspace: "SimulationWorkspace") -> Number:
@@ -466,78 +424,57 @@ class WellRate(WellVector):
         return getattr(workspace.wells, self.array_name)[well_row]
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class WellOilProductionRate(WellRate):
     """Well oil production rate (`WOPR`)."""
-
-    __type__: typing.ClassVar[str] = "well_oil_production_rate"
 
     mnemonic = "WOPR"
     array_name = "surface_oil_rates"
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class WellWaterProductionRate(WellRate):
     """Well water production rate (`WWPR`)."""
-
-    __type__: typing.ClassVar[str] = "well_water_production_rate"
 
     mnemonic = "WWPR"
     array_name = "surface_water_rates"
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class WellGasProductionRate(WellRate):
     """Well gas production rate (`WGPR`)."""
-
-    __type__: typing.ClassVar[str] = "well_gas_production_rate"
 
     mnemonic = "WGPR"
     array_name = "surface_gas_rates"
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class WellWaterInjectionRate(WellRate):
     """Well water injection rate (`WWIR`)."""
-
-    __type__: typing.ClassVar[str] = "well_water_injection_rate"
 
     mnemonic = "WWIR"
     array_name = "surface_water_rates"
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class WellOilInjectionRate(WellRate):
     """Well oil injection rate (`WOIR`). Rare in practice; Eclipse still defines it."""
-
-    __type__: typing.ClassVar[str] = "well_oil_injection_rate"
 
     mnemonic = "WOIR"
     array_name = "surface_oil_rates"
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class WellGasInjectionRate(WellRate):
     """Well gas injection rate (`WGIR`)."""
-
-    __type__: typing.ClassVar[str] = "well_gas_injection_rate"
 
     mnemonic = "WGIR"
     array_name = "surface_gas_rates"
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class WellLiquidProductionRate(WellVector):
     """Well liquid (oil plus water) production rate (`WLPR`)."""
-
-    __type__: typing.ClassVar[str] = "well_liquid_production_rate"
 
     mnemonic = "WLPR"
 
@@ -555,12 +492,9 @@ class WellLiquidProductionRate(WellVector):
         )
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class WellWaterCut(WellVector):
     """Well water cut (`WWCT`): water over total liquid, `0` with no liquid."""
-
-    __type__: typing.ClassVar[str] = "well_water_cut"
 
     mnemonic = "WWCT"
 
@@ -577,12 +511,9 @@ class WellWaterCut(WellVector):
         return divide(numerator=water_rate, denominator=oil_rate + water_rate)
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class WellGasOilRatio(WellVector):
     """Well gas-oil ratio (`WGOR`): gas over oil, `0` with no oil."""
-
-    __type__: typing.ClassVar[str] = "well_gas_oil_ratio"
 
     mnemonic = "WGOR"
 
@@ -600,12 +531,9 @@ class WellGasOilRatio(WellVector):
         )
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class WellBottomHolePressure(WellVector):
     """Well bottom-hole pressure (`WBHP`). `NaN` for a well not yet resolved."""
-
-    __type__: typing.ClassVar[str] = "well_bottom_hole_pressure"
 
     mnemonic = "WBHP"
 
@@ -620,12 +548,9 @@ class WellBottomHolePressure(WellVector):
         return workspace.wells.bhps[well_row]
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class WellTubingHeadPressure(WellVector):
     """Well tubing-head pressure (`WTHP`). `NaN` where it wasn't computed."""
-
-    __type__: typing.ClassVar[str] = "well_tubing_head_pressure"
 
     mnemonic = "WTHP"
 
@@ -640,126 +565,89 @@ class WellTubingHeadPressure(WellVector):
         return workspace.wells.thps[well_row]
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class FieldOilProductionTotal(FieldRate):
     """Field cumulative oil production (`FOPT`)."""
-
-    __abstract_serializable__ = True
-    __type__: typing.ClassVar[str] = "field_oil_production_total"
 
     mnemonic = "FOPT"
     array_name = "cumulative_oil_volumes"
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class FieldWaterProductionTotal(FieldRate):
     """Field cumulative water production (`FWPT`)."""
-
-    __abstract_serializable__ = True
-    __type__: typing.ClassVar[str] = "field_water_production_total"
 
     mnemonic = "FWPT"
     array_name = "cumulative_water_volumes"
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class FieldGasProductionTotal(FieldRate):
     """Field cumulative gas production (`FGPT`)."""
-
-    __abstract_serializable__ = True
-    __type__: typing.ClassVar[str] = "field_gas_production_total"
 
     mnemonic = "FGPT"
     array_name = "cumulative_gas_volumes"
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class FieldWaterInjectionTotal(FieldRate):
     """Field cumulative water injection (`FWIT`)."""
-
-    __abstract_serializable__ = True
-    __type__: typing.ClassVar[str] = "field_water_injection_total"
 
     mnemonic = "FWIT"
     array_name = "cumulative_water_volumes"
     kind = WellKind.INJECTOR
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class FieldOilInjectionTotal(FieldRate):
     """Field cumulative oil injection (`FOIT`). Rare in practice; Eclipse still defines it."""
-
-    __abstract_serializable__ = True
-    __type__: typing.ClassVar[str] = "field_oil_injection_total"
 
     mnemonic = "FOIT"
     array_name = "cumulative_oil_volumes"
     kind = WellKind.INJECTOR
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class FieldGasInjectionTotal(FieldRate):
     """Field cumulative gas injection (`FGIT`)."""
-
-    __abstract_serializable__ = True
-    __type__: typing.ClassVar[str] = "field_gas_injection_total"
 
     mnemonic = "FGIT"
     array_name = "cumulative_gas_volumes"
     kind = WellKind.INJECTOR
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class WellOilProductionTotal(WellRate):
     """Well cumulative oil production (`WOPT`)."""
-
-    __type__: typing.ClassVar[str] = "well_oil_production_total"
 
     mnemonic = "WOPT"
     array_name = "cumulative_oil_volumes"
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class WellWaterProductionTotal(WellRate):
     """Well cumulative water production (`WWPT`)."""
-
-    __type__: typing.ClassVar[str] = "well_water_production_total"
 
     mnemonic = "WWPT"
     array_name = "cumulative_water_volumes"
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class WellGasProductionTotal(WellRate):
     """Well cumulative gas production (`WGPT`)."""
-
-    __type__: typing.ClassVar[str] = "well_gas_production_total"
 
     mnemonic = "WGPT"
     array_name = "cumulative_gas_volumes"
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class WellWaterInjectionTotal(WellRate):
     """Well cumulative water injection (`WWIT`)."""
-
-    __type__: typing.ClassVar[str] = "well_water_injection_total"
 
     mnemonic = "WWIT"
     array_name = "cumulative_water_volumes"
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class WellOilInjectionTotal(WellRate):
     """Well cumulative oil injection (`WOIT`). Rare in practice; Eclipse still defines it."""
@@ -770,27 +658,22 @@ class WellOilInjectionTotal(WellRate):
     array_name = "cumulative_oil_volumes"
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class WellGasInjectionTotal(WellRate):
     """Well cumulative gas injection (`WGIT`)."""
-
-    __type__: typing.ClassVar[str] = "well_gas_injection_total"
 
     mnemonic = "WGIT"
     array_name = "cumulative_gas_volumes"
 
 
 @attrs.frozen(kw_only=True, slots=True)
-class RegionInPlace(SerializableSummary["CompiledBlackOilModel"]):
+class RegionInPlace(Summary["CompiledBlackOilModel"]):
     """
     Base for a fluid-in-place vector over one fluid-in-place region (`FIPNUM`).
 
     Subclasses set `mnemonic` and implement `get_value`. A model with no fluid-in-place regions
     has a single region, number 1, covering every cell.
     """
-
-    __abstract_serializable__ = True
 
     mnemonic = ""
 
@@ -867,7 +750,6 @@ def get_volume_factor(unit_system: UnitSystem) -> Number:
     return c.CUBIC_FEET_TO_BARRELS if unit_system == UnitSystem.FIELD else 1.0
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class RegionOilInPlace(RegionInPlace):
     """
@@ -875,8 +757,6 @@ class RegionOilInPlace(RegionInPlace):
 
     Counts oil in the oil phase only (`So * PV / Bo`); oil vaporized in free gas is not included.
     """
-
-    __type__: typing.ClassVar[str] = "region_oil_in_place"
 
     mnemonic = "ROIP"
 
@@ -902,12 +782,9 @@ class RegionOilInPlace(RegionInPlace):
         return oil_volume[region_mask].sum() * get_volume_factor(unit_system)
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class RegionWaterInPlace(RegionInPlace):
     """Water in place in a fluid-in-place region (`RWIP`), as stock-tank water."""
-
-    __type__: typing.ClassVar[str] = "region_water_in_place"
 
     mnemonic = "RWIP"
 
@@ -933,7 +810,6 @@ class RegionWaterInPlace(RegionInPlace):
         return water_volume[region_mask].sum() * get_volume_factor(unit_system)
 
 
-@summary_type
 @attrs.frozen(kw_only=True, slots=True)
 class RegionGasInPlace(RegionInPlace):
     """
@@ -941,8 +817,6 @@ class RegionGasInPlace(RegionInPlace):
 
     Reported in standard cubic feet for FIELD units (cubic metres for METRIC).
     """
-
-    __type__: typing.ClassVar[str] = "region_gas_in_place"
 
     mnemonic = "RGIP"
 

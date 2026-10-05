@@ -22,7 +22,6 @@ import numpy.typing as npt
 from bores.blackoil.satfunc.capillary_pressure.tables import (
     CapillaryPressureTable,
     TwoPhaseCapillaryPressureTable,
-    capillary_pressure_table,
 )
 from bores.blackoil.satfunc.utils import (
     compute_killough_scanning_curve,
@@ -214,13 +213,8 @@ def get_gas_oil_capillary_pressure_derivative(
     return derivatives["dpcgo_dsg"]
 
 
-@capillary_pressure_table
 @attrs.frozen(slots=True)
-class KilloughCapillaryPressureTable(
-    CapillaryPressureTable,
-    load_exclude={"supports_vector"},
-    dump_exclude={"supports_vector"},
-):
+class KilloughCapillaryPressureTable(CapillaryPressureTable):
     """
     Implements the Killough capillary pressure hysteresis model/table.
 

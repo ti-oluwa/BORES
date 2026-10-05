@@ -298,8 +298,5 @@ def commit_boundary_conditions(
     :param time: Time being committed to.
     """
     advance_aquifer_workspace(
-        aquifers=compiled.aquifers,
-        workspace=aquifer_workspace,
-        pressure=pressure,
-        time=time,
+        aquifers=compiled.aquifers, workspace=aquifer_workspace, pressure=pressure, time=time
     )

@@ -24,7 +24,6 @@ from bores.blackoil.satfunc.utils import (
 from bores.constants import UnitConversionTable
 from bores.errors import ValidationError
 from bores.precision import get_dtype
-from bores.serde.stores import StoreSerializable
 from bores.types import (
     FluidPhase,
     Number,
@@ -42,7 +41,7 @@ __all__ = [
 
 
 @attrs.frozen(slots=True)
-class SatFuncTables(StoreSerializable):
+class SatFuncTables:
     """
     Saturation function table(s) defining rock-fluid interactions in the reservoir.
 

@@ -8,8 +8,8 @@ import numpy as np
 
 from bores.errors import ValidationError
 from bores.grids.base import Grid
-from bores.schedule.base import ScheduleContext, SerializableAction, action_type
-from bores.schedule.events import ThresholdEvent, event_type
+from bores.schedule.base import Action, ScheduleContext
+from bores.schedule.events import ThresholdEvent
 from bores.types import (
     Boolean,
     FluidPhase,
@@ -277,9 +277,8 @@ def get_many_matching_connection_rows(
     return np.concatenate(rows_per_well), counts  # type: ignore[return-value]
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
-class UpdateWellStatus(SerializableAction["CompiledBlackOilModel"]):
+class UpdateWellStatus(Action["CompiledBlackOilModel"]):
     """
     Opens or shuts a whole well, or specific connections on it. Build
     this directly for a manual shut-in exactly as freely as any other
@@ -332,7 +331,6 @@ class UpdateWellStatus(SerializableAction["CompiledBlackOilModel"]):
         return model
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
 class OpenWell(UpdateWellStatus):
     """Sets a well's targeted completion status to `OPEN`."""
@@ -345,7 +343,6 @@ class OpenWell(UpdateWellStatus):
     )
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
 class ShutInWell(UpdateWellStatus):
     """Sets a well's targeted completion status to `SHUT`."""
@@ -358,9 +355,8 @@ class ShutInWell(UpdateWellStatus):
     )
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
-class MultiplyConnectionFactor(SerializableAction["CompiledBlackOilModel"]):
+class MultiplyConnectionFactor(Action["CompiledBlackOilModel"]):
     """
     Multiplies a well's existing connection factor(s) in place - a
     whole-well or per-connection productivity adjustment, constructed
@@ -427,9 +423,8 @@ TARGET_SETTERS = {
 """Maps a `WELTARG_TARGET_FIELD` entry to the `CompiledWellControls` setter it calls."""
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
-class SetWellTarget(SerializableAction["CompiledBlackOilModel"]):
+class SetWellTarget(Action["CompiledBlackOilModel"]):
     """
     Changes a well's control mode, and the one target value that mode
     names, in one step. Build this directly for a manual control change
@@ -491,9 +486,8 @@ class SetWellTarget(SerializableAction["CompiledBlackOilModel"]):
         return model
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
-class SetWellControl(SerializableAction["CompiledBlackOilModel"]):
+class SetWellControl(Action["CompiledBlackOilModel"]):
     """
     Redefines a well's control mode and targets in one go. Just as
     valid to build directly for a manual control change as it is to
@@ -555,9 +549,8 @@ class SetWellControl(SerializableAction["CompiledBlackOilModel"]):
         return model
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
-class ActivateCompletion(SerializableAction["CompiledBlackOilModel"]):
+class ActivateCompletion(Action["CompiledBlackOilModel"]):
     """
     Activates a well's connection(s), flipping their schedule status
     from `PENDING` to `ACTIVE`. Every connection is compiled up front,
@@ -609,9 +602,8 @@ class ActivateCompletion(SerializableAction["CompiledBlackOilModel"]):
         return model
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
-class ActivateWell(SerializableAction["CompiledBlackOilModel"]):
+class ActivateWell(Action["CompiledBlackOilModel"]):
     """
     Activates a well, flipping its schedule status from `PENDING` to
     `ACTIVE`. Every well is compiled up front, the moment it's first
@@ -644,9 +636,8 @@ class ActivateWell(SerializableAction["CompiledBlackOilModel"]):
         return model
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
-class SetLimit(SerializableAction["CompiledBlackOilModel"]):
+class SetLimit(Action["CompiledBlackOilModel"]):
     """
     Updates one of a well's existing limit rows in place - build this
     directly for a manual limit change exactly as freely as any other
@@ -736,9 +727,8 @@ class ApplicationMode(enum.Enum):
     """
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
-class ActivateWells(SerializableAction["CompiledBlackOilModel"]):
+class ActivateWells(Action["CompiledBlackOilModel"]):
     """`ActivateWell`, applied to several wells at once."""
 
     __type__: typing.ClassVar[str] = "bulk_activate_well"
@@ -763,9 +753,8 @@ class ActivateWells(SerializableAction["CompiledBlackOilModel"]):
         return model
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
-class UpdateWellStatuses(SerializableAction["CompiledBlackOilModel"]):
+class UpdateWellStatuses(Action["CompiledBlackOilModel"]):
     """
     `UpdateWellStatus`, applied to several wells at once, all against the same
     targeted connection(s).
@@ -825,7 +814,6 @@ class UpdateWellStatuses(SerializableAction["CompiledBlackOilModel"]):
         return model
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
 class OpenWells(UpdateWellStatuses):
     """Sets the targeted completions on several wells to `OPEN`."""
@@ -838,7 +826,6 @@ class OpenWells(UpdateWellStatuses):
     )
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
 class ShutInWells(UpdateWellStatuses):
     """Sets the targeted completions on several wells to `SHUT`."""
@@ -851,9 +838,8 @@ class ShutInWells(UpdateWellStatuses):
     )
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
-class MultiplyConnectionFactors(SerializableAction["CompiledBlackOilModel"]):
+class MultiplyConnectionFactors(Action["CompiledBlackOilModel"]):
     """
     `MultiplyConnectionFactor`, applied to several wells at once, all
     against the same targeted connection(s).
@@ -915,9 +901,8 @@ class MultiplyConnectionFactors(SerializableAction["CompiledBlackOilModel"]):
         return model
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
-class ActivateCompletions(SerializableAction["CompiledBlackOilModel"]):
+class ActivateCompletions(Action["CompiledBlackOilModel"]):
     """
     `ActivateCompletion`, applied to several wells at once, all
     against the same targeted connection(s).
@@ -968,9 +953,8 @@ class ActivateCompletions(SerializableAction["CompiledBlackOilModel"]):
         return model
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
-class SetWellControls(SerializableAction["CompiledBlackOilModel"]):
+class SetWellControls(Action["CompiledBlackOilModel"]):
     """`SetWellControl`, applied to several wells at once."""
 
     __type__: typing.ClassVar[str] = "bulk_set_well_control"
@@ -1072,9 +1056,8 @@ class SetWellControls(SerializableAction["CompiledBlackOilModel"]):
         return model
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
-class SetWellTargets(SerializableAction["CompiledBlackOilModel"]):
+class SetWellTargets(Action["CompiledBlackOilModel"]):
     """
     `SetWellTarget`, applied to several wells at once. Each well's own
     kind (producer or injector) still picks which of
@@ -1285,9 +1268,8 @@ def apply_limit_values(
         limits.set_end_run(row=rows, end_run=resolved_end_run)
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
-class SetLimits(SerializableAction["CompiledBlackOilModel"]):
+class SetLimits(Action["CompiledBlackOilModel"]):
     """
     `SetLimit`, applied across several `(well, limit)` targets in one bulk write.
 
@@ -1458,9 +1440,8 @@ class SetLimits(SerializableAction["CompiledBlackOilModel"]):
             )
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
-class SetGroupLimit(SerializableAction["CompiledBlackOilModel"]):
+class SetGroupLimit(Action["CompiledBlackOilModel"]):
     """
     Updates one of a group's existing `GECON` limit rows in place, the
     group-level counterpart of `SetLimit`. A `GECON` reissue.
@@ -1530,7 +1511,6 @@ RATE_ARRAYS: dict[tuple[RateQuantity, Boolean], str] = {
 """Maps a `(quantity, surface)` pair to the `WellsWorkspace` array it reads from."""
 
 
-@event_type
 @attrs.frozen(kw_only=True, slots=True)
 class RateThreshold(ThresholdEvent["CompiledBlackOilModel"]):
     """Fires when a well's phase rate, from the latest solve, crosses `threshold`."""
@@ -1575,9 +1555,8 @@ class RateThreshold(ThresholdEvent["CompiledBlackOilModel"]):
         return getattr(workspace.wells, array_name)[well_row]
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
-class SetWellLift(SerializableAction["CompiledBlackOilModel"]):
+class SetWellLift(Action["CompiledBlackOilModel"]):
     """
     Changes a well's VFP table, artificial lift quantity (ALQ) and efficiency factor.
 

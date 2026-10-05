@@ -10,7 +10,6 @@ from typing_extensions import Self, TypedDict
 
 from bores.constants import c, get_conversion_factors
 from bores.errors import TimingError, ValidationError
-from bores.serde.stores import StoreSerializable
 from bores.types import Number, UnitConversionTable, UnitSystem
 from bores.utils import scale
 
@@ -150,7 +149,7 @@ def compute_utilization(actual: float | None, limit: float | None) -> float | No
 
 
 @attrs.mutable(kw_only=True, slots=True)
-class Timer(StoreSerializable):
+class Timer:
     """
     Simulation time manager for smart and adaptive time stepping.
     """
@@ -1313,10 +1312,3 @@ class Timer(StoreSerializable):
             timer.step_size,
         )
         return timer
-
-    def __dump__(self) -> dict[str, typing.Any]:
-        return typing.cast(dict[str, typing.Any], self.dump_state())
-
-    @classmethod
-    def __load__(cls, data: typing.Mapping[str, typing.Any]) -> Self:
-        return cls.load_state(typing.cast(TimerState, data))

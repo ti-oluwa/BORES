@@ -1,17 +1,11 @@
 import enum
-import threading
 import typing
 
 from typing_extensions import Self
 
-from bores.serde.registry import make_serializable_type_registrar
-from bores.serde.stores import StoreSerializable
 from bores.types import UnitConversionTable, UnitSystem
 
-__all__ = [
-    "BoundaryCondition",
-    "BoundaryConditionType",
-]
+__all__ = ["BoundaryCondition", "BoundaryConditionType"]
 
 
 class BoundaryConditionType(enum.Enum):
@@ -35,7 +29,7 @@ class BoundaryConditionType(enum.Enum):
     FLUX = "flux"
 
 
-class BoundaryCondition(StoreSerializable):
+class BoundaryCondition:
     """
     Base class for every boundary-condition parameter container.
 
@@ -52,8 +46,6 @@ class BoundaryCondition(StoreSerializable):
     rates, permeabilities) must implement the `SupportsUnitSystem` protocol.
     """
 
-    __abstract_serializable__ = True
-
     unit_system: UnitSystem
     condition_type: typing.ClassVar[BoundaryConditionType]
 
@@ -65,21 +57,3 @@ class BoundaryCondition(StoreSerializable):
         table: UnitConversionTable | None = None,
     ) -> Self:
         raise NotImplementedError
-
-
-# Registry of concrete boundary condition classes
-BOUNDARY_CONDITIONS: dict[str, type[BoundaryCondition]] = {}
-boundary_condition = make_serializable_type_registrar(
-    base_cls=BoundaryCondition,
-    registry=BOUNDARY_CONDITIONS,
-    lock=threading.Lock(),
-    key_attr="__type__",
-    override=False,
-    auto_register_serializer=True,
-    auto_register_deserializer=True,
-)
-"""
-Class decorator that registers a `BoundaryCondition` subclass for
-serialisation. Must be applied to every concrete condition class that needs
-to survive a `dump`/`load` cycle.
-"""

@@ -8,18 +8,15 @@ import numpy as np
 
 from bores.blackoil.satfunc.relperm.mixing_rules import (
     MixingRule,
-    deserialize_mixing_rule,
     eclipse_rule,
     get_mixing_rule,
     get_mixing_rule_partial_derivatives,
-    serialize_mixing_rule,
 )
 from bores.blackoil.satfunc.relperm.tables import (
     MinimumRelPerm,
     RelativePermeabilityTable,
     clamp_relperm,
     clamp_relperm_derivative,
-    relperm_table,
     resolve_min_relperm,
     show_invalid_saturation,
 )
@@ -318,15 +315,8 @@ def compute_brookes_corey_relative_permeabilities(
     return krw, kro, krg  # type: ignore[return-value]
 
 
-@relperm_table
 @attrs.frozen(slots=True)
-class BrooksCoreyRelPermTable(
-    RelativePermeabilityTable,
-    serializers={"mixing_rule": serialize_mixing_rule},
-    deserializers={"mixing_rule": deserialize_mixing_rule},
-    load_exclude={"supports_vector"},
-    dump_exclude={"supports_vector"},
-):
+class BrooksCoreyRelPermTable(RelativePermeabilityTable):
     """
     Implements the Brooks-Corey-type three-phase relative permeability model.
 
@@ -343,8 +333,6 @@ class BrooksCoreyRelPermTable(
     zeroed out in the min_value region, so the Jacobian is always consistent
     with the kr value (no MBE from mismatched kr/derivative pairs).
     """
-
-    __type__ = "brooks_corey_three_phase_relperm_model"
 
     irreducible_water_saturation: Number | None = None
     """(Default) Irreducible water saturation (swc)."""
@@ -1659,15 +1647,8 @@ def compute_let_curve_slope_wrt_normalized_saturation(
     return slope  # type: ignore[return-value]
 
 
-@relperm_table
 @attrs.frozen(slots=True)
-class LETThreePhaseRelPermTable(
-    RelativePermeabilityTable,
-    serializers={"mixing_rule": serialize_mixing_rule},
-    deserializers={"mixing_rule": deserialize_mixing_rule},
-    load_exclude={"supports_vector"},
-    dump_exclude={"supports_vector"},
-):
+class LETThreePhaseRelPermTable(RelativePermeabilityTable):
     """
     Implements the LET (Lomeland-Ebeltoft-Thomas) three-phase relative permeability model.
 
@@ -1691,8 +1672,6 @@ class LETThreePhaseRelPermTable(
     **Minimum relperm min_values** (`minimum_water_relperm`, `minimum_oil_relperm`,
     `minimum_gas_relperm`): same semantics as `BrooksCoreyRelPermTable`.
     """
-
-    __type__ = "let_three_phase_relperm_model"
 
     irreducible_water_saturation: Number | None = None
     """(Default) Irreducible water saturation (swc)."""

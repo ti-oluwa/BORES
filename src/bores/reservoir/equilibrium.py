@@ -10,6 +10,7 @@ from bores.constants import UnitConversionTable, c, get_conversion_factors
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.precision import get_dtype
+from bores.serde.base import Serializable
 from bores.serde.stores import StoreSerializable
 from bores.types import (
     Number,
@@ -162,7 +163,7 @@ def load_depth_tables(
 
 
 @attrs.frozen(slots=True)
-class EquilibriumRegion(StoreSerializable):
+class EquilibriumRegion(Serializable):
     """
     Gravity/capillary equilibration data for a single `EQLNUM` region -
     one record of the Eclipse `EQUIL` keyword.
@@ -343,11 +344,11 @@ class EquilibriumRegion(StoreSerializable):
         )
 
 
-class Equilibrium(StoreSerializable):
+class Equilibrium:
     """
     Container mapping 1-based `EQLNUM` region index to `EquilibriumRegion`.
 
-    Maps EQLNUM -> `EquilibriumRegion`, provides lookup and
+    Maps `EQLNUM` -> `EquilibriumRegion`, provides lookup and
     iteration, supports (de)serialization and Eclipse loading.
 
     Use `region(eqlnum)` to retrieve a region's data, and `from_deck`
@@ -361,7 +362,6 @@ class Equilibrium(StoreSerializable):
     ```
     """
 
-    __abstract_serializable__ = True
     __slots__ = ("regions", "rsvd_tables", "rvvd_tables", "unit_system")
 
     def __init__(
@@ -440,52 +440,6 @@ class Equilibrium(StoreSerializable):
         self.rsvd_tables = rsvd_tables
         self.rvvd_tables = rvvd_tables
         self.unit_system = expected_unit_system
-
-    def __dump__(self) -> dict[str, typing.Any]:
-        """Serialize `Equilibrium` to a dictionary."""
-        return {
-            "regions": {str(num): region.dump() for num, region in self.regions.items()},
-            "rsvd_tables": {
-                str(num): table.dump() for num, table in (self.rsvd_tables or {}).items()
-            }
-            if self.rsvd_tables
-            else None,
-            "rvvd_tables": {
-                str(num): table.dump() for num, table in (self.rvvd_tables or {}).items()
-            }
-            if self.rvvd_tables
-            else None,
-            "unit_system": self.unit_system.value,
-        }
-
-    @classmethod
-    def __load__(cls, data: typing.Mapping[str, typing.Any]) -> Self:
-        """Deserialize `Equilibrium` from a dictionary."""
-        unit_system = UnitSystem(data["unit_system"])
-        regions = {
-            int(num): EquilibriumRegion.load(region_data)
-            for num, region_data in data["regions"].items()
-        }
-
-        rsvd_tables = None
-        if data.get("rsvd_tables"):
-            rsvd_tables = {
-                int(num): DepthTable.load(table_data)
-                for num, table_data in data["rsvd_tables"].items()
-            }
-
-        rvvd_tables = None
-        if data.get("rvvd_tables"):
-            rvvd_tables = {
-                int(num): DepthTable.load(table_data)
-                for num, table_data in data["rvvd_tables"].items()
-            }
-        return cls(
-            regions=regions,
-            rsvd_tables=rsvd_tables,
-            rvvd_tables=rvvd_tables,
-            unit_system=unit_system,
-        )
 
     @property
     def n_regions(self) -> int:

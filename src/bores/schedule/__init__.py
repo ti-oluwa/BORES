@@ -7,8 +7,6 @@ from bores.schedule.base import (
     Schedule,
     ScheduleContext,
     ScheduleItem,
-    SerializableAction,
-    SerializableEvent,
     action_type,
     event_type,
 )
@@ -23,7 +21,6 @@ from bores.schedule.events import (
 )
 from bores.schedule.summary import (
     RecordSummary,
-    SerializableSummary,
     Summary,
     SummaryRecord,
     SummaryReport,
@@ -46,9 +43,6 @@ __all__ = [
     "Schedule",
     "ScheduleContext",
     "ScheduleItem",
-    "SerializableAction",
-    "SerializableEvent",
-    "SerializableSummary",
     "Summary",
     "SummaryRecord",
     "SummaryReport",

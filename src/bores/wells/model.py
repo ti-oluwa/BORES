@@ -8,7 +8,6 @@ from typing_extensions import Self
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.grids.base import Grid
-from bores.serde.stores.base import StoreSerializable
 from bores.types import UnitConversionTable, UnitSystem
 from bores.wells.base import Wells
 from bores.wells.controls import WellControls
@@ -20,7 +19,7 @@ __all__ = ["WellSystem"]
 
 
 @attrs.frozen(kw_only=True, slots=True)
-class WellSystem(StoreSerializable):
+class WellSystem:
     """A complete wells sub-system: wells, controls, hydraulics, and groups."""
 
     wells: Wells

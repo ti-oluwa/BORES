@@ -11,8 +11,6 @@ from typing_extensions import Self
 
 from bores.errors import ValidationError
 from bores.precision import get_floating_point_info
-from bores.serde.base import Serializable
-from bores.serde.stores import StoreSerializable
 from bores.types import UnitConversionFactors, UnitConversionTable, UnitSystem
 
 __all__ = [
@@ -34,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 @typing.final
 @attrs.frozen(slots=True)
-class Constant(Serializable):
+class Constant:
     """
     A constant value with optional description and metadata.
 
@@ -76,7 +74,7 @@ class Constant(Serializable):
 
 @typing.final
 @attrs.frozen(slots=True)
-class ConstantFactory(Serializable):
+class ConstantFactory:
     """
     A lazily-evaluated constant whose value is produced by a factory callable
     at access time.
@@ -144,24 +142,6 @@ class ConstantFactory(Serializable):
         if self.aliases:
             parts.append(f"aliases={self.aliases!r}")
         return f"{self.__class__.__name__}({', '.join(parts)})"
-
-    def __dump__(self) -> dict[str, typing.Any]:
-        """Serialize by evaluating the factory - produces a plain value snapshot."""
-        evaluated = Constant(
-            value=self.value,
-            description=self.description,
-            unit=self.unit,
-            aliases=self.aliases,
-        )
-        return evaluated.dump()
-
-    @classmethod
-    def __load__(cls, data: typing.Mapping[str, typing.Any]) -> Constant:
-        """
-        Deserialization always produces a plain ``Constant`` - a factory
-        function cannot be reconstructed from serialized data.
-        """
-        return Constant.load(data)
 
 
 def _get_saturation_epsilon() -> float:
@@ -1066,10 +1046,7 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
 
 
 @typing.final
-class Constants(
-    StoreSerializable,
-    fields={"_store": dict[str, Constant]},
-):
+class Constants:
     """
     Physical constants and conversion factors.
 
@@ -1235,20 +1212,6 @@ class Constants(
 
     def __len__(self) -> int:
         return len(self._store)
-
-    @classmethod
-    def __load__(cls, data: typing.Mapping[str, typing.Any]) -> Self:
-        """Load constants from dict, re-deriving the alias index from each entry."""
-        constants = cls(defaults={})  # type: ignore[arg-type]
-        for name, val in data.items():
-            wrapped = (
-                Constant.load(val)
-                if isinstance(val, dict) and "value" in val
-                else Constant(value=val)
-            )
-            constants._store[name] = wrapped
-            constants._register_aliases(name, wrapped)
-        return constants
 
 
 DEFAULT_CONTEXT_ID = uuid4().hex

@@ -6,7 +6,6 @@ from typing_extensions import Self
 
 from bores.constants import UnitConversionTable, c, get_conversion_factors
 from bores.errors import ValidationError
-from bores.serde.base import Serializable
 from bores.types import Integer, Number, UnitSystem
 from bores.utils import scale
 
@@ -41,7 +40,7 @@ class ConnectionPressureMode(enum.Enum):
 
 
 @attrs.frozen(kw_only=True, slots=True)
-class WellControlSpec(Serializable):
+class WellControlSpec:
     """
     Numerical tuning for well-control resolution.
 

@@ -13,7 +13,6 @@ return in a `SummaryReport`.
 """
 
 import datetime
-import threading
 import typing
 
 import attrs
@@ -21,30 +20,25 @@ import numpy as np
 
 from bores.errors import SummaryError, ValidationError
 from bores.schedule.base import (
+    Action,
     ModelT,
     ModelTcon,
     ScheduleContext,
     ScheduleItem,
-    SerializableAction,
-    action_type,
 )
 from bores.schedule.events import IntervalEvent, TimeEvent, TimeStepEvent
 from bores.serde.base import Serializable
-from bores.serde.registry import make_serializable_type_registrar
 from bores.serde.stores.base import StoreSerializable
 from bores.types import Number, NumberArray, OneDimension
 from bores.utils import get_current_date
 
 __all__ = [
-    "SUMMARY_TYPES",
     "RecordSummary",
-    "SerializableSummary",
     "Summary",
     "SummaryRecord",
     "SummaryReport",
     "record_at",
     "record_every",
-    "summary_type",
 ]
 
 
@@ -56,11 +50,13 @@ class Summary(typing.Protocol[ModelTcon]):
     Any callable matching this signature, with a `key` attribute, satisfies it.
     """
 
-    key: str
-    """
-    This vector's identifier in a `SummaryReport`, in Eclipse's own
-    `MNEMONIC` or `MNEMONIC:QUALIFIER` form (`"FOPR"`, `"WBHP:PROD1"`).
-    """
+    @property
+    def key(self) -> str:
+        """
+        This vector's identifier in a `SummaryReport`, in Eclipse's own
+        `MNEMONIC` or `MNEMONIC:QUALIFIER` form (`"FOPR"`, `"WBHP:PROD1"`).
+        """
+        ...
 
     def __call__(self, model: ModelTcon, context: ScheduleContext) -> Number:
         """
@@ -71,40 +67,6 @@ class Summary(typing.Protocol[ModelTcon]):
         :returns: This vector's value at `context.time`.
         """
         ...
-
-
-class SerializableSummary(Serializable, typing.Generic[ModelT]):
-    """Base for `Summary` implementations that support `dump`/`load`."""
-
-    __abstract_serializable__ = True
-
-    @property
-    def key(self) -> str:
-        """
-        This vector's identifier in a `SummaryReport`. Must be overridden.
-
-        :returns: This vector's key.
-        """
-        raise NotImplementedError
-
-    def __call__(self, model: ModelT, context: ScheduleContext) -> Number:
-        """
-        Reads this vector's current value. Must be overridden.
-
-        :param model: The model being scheduled against.
-        :param context: The current moment's context.
-        :returns: This vector's value at `context.time`.
-        """
-        raise NotImplementedError
-
-
-SUMMARY_TYPES: dict[str, type[SerializableSummary]] = {}
-summary_type = make_serializable_type_registrar(
-    base_cls=SerializableSummary,
-    registry=SUMMARY_TYPES,
-    lock=threading.Lock(),
-    key_attr="__type__",
-)
 
 
 @attrs.frozen(kw_only=True, slots=True)
@@ -325,9 +287,8 @@ class SummaryReport(
         return key in self.key_indices
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
-class RecordSummary(SerializableAction[ModelT]):
+class RecordSummary(Action[ModelT]):
     """
     Evaluates `quantities` and records what they return to the run's `SummaryReport`.
 
@@ -337,7 +298,7 @@ class RecordSummary(SerializableAction[ModelT]):
 
     __type__: typing.ClassVar[str] = "record_summary"
 
-    quantities: tuple[SerializableSummary[ModelT], ...] = attrs.field(converter=tuple)
+    quantities: tuple[Summary[ModelT], ...] = attrs.field(converter=tuple)
     """Every vector to evaluate and record when this action fires."""
 
     def __call__(self, model: ModelT, context: ScheduleContext) -> ModelT:
@@ -381,7 +342,7 @@ class RecordSummary(SerializableAction[ModelT]):
 def record_every(
     *,
     every: Number,
-    quantities: typing.Sequence[SerializableSummary[ModelT]],
+    quantities: typing.Sequence[Summary[ModelT]],
     start: Number = 0.0,
     name: str | None = None,
 ) -> ScheduleItem[ModelT]:
@@ -406,7 +367,7 @@ def record_every(
 
 def record_at(
     *,
-    quantities: typing.Sequence[SerializableSummary[ModelT]],
+    quantities: typing.Sequence[Summary[ModelT]],
     time: Number | None = None,
     time_step: int | None = None,
     name: str | None = None,

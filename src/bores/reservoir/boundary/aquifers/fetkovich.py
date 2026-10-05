@@ -11,7 +11,6 @@ from bores.errors import ValidationError
 from bores.reservoir.boundary.base import (
     BoundaryCondition,
     BoundaryConditionType,
-    boundary_condition,
 )
 from bores.types import Number, UnitConversionTable, UnitSystem
 
@@ -80,7 +79,6 @@ def compute_incremental_influx(
     return new_cumulative_influx, new_aquifer_pressure
 
 
-@boundary_condition
 @attrs.frozen(slots=True)
 class FetkovichAquifer(BoundaryCondition):
     """
@@ -175,8 +173,6 @@ class FetkovichAquifer(BoundaryCondition):
     - Ahmed, T. (2010). *Reservoir Engineering Handbook*, 4th ed.
       Gulf Professional Publishing. (Fetkovich chapter.)
     """
-
-    __type__: typing.ClassVar[str] = "fetkovich_aquifer"
 
     condition_type: typing.ClassVar[BoundaryConditionType] = BoundaryConditionType.FLUX
 

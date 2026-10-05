@@ -8,12 +8,7 @@ from datetime import datetime
 import attrs
 
 from bores.errors import ValidationError
-from bores.schedule.base import (
-    ModelT,
-    ScheduleContext,
-    SerializableEvent,
-    event_type,
-)
+from bores.schedule.base import Event, ModelT, ScheduleContext
 from bores.types import Boolean, Number
 from bores.utils import get_current_date
 
@@ -50,9 +45,8 @@ COMPARISON_FUNCTIONS: dict[ComparisonOperator, typing.Callable[[Number, Number],
 """Maps each `ComparisonOperator` to the function it applies."""
 
 
-@event_type
 @attrs.frozen(kw_only=True, slots=True)
-class TimeEvent(SerializableEvent[ModelT]):
+class TimeEvent(Event[ModelT]):
     """Fires once, the first time the schedule is advanced past `at`."""
 
     at: Number
@@ -70,9 +64,8 @@ class TimeEvent(SerializableEvent[ModelT]):
         return (previous_time is None or previous_time < self.at) and self.at <= context.time
 
 
-@event_type
 @attrs.frozen(kw_only=True, slots=True)
-class TimeStepEvent(SerializableEvent[ModelT]):
+class TimeStepEvent(Event[ModelT]):
     """Fires once, the first time the schedule is advanced past step `at`."""
 
     at: int
@@ -94,9 +87,8 @@ class TimeStepEvent(SerializableEvent[ModelT]):
         return (previous_step is None or previous_step < self.at) and self.at <= context.time_step
 
 
-@event_type
 @attrs.frozen(kw_only=True, slots=True)
-class DateEvent(SerializableEvent[ModelT]):
+class DateEvent(Event[ModelT]):
     """Fires once, the first time the schedule is advanced past `at`."""
 
     at: str | datetime
@@ -136,9 +128,8 @@ class DateEvent(SerializableEvent[ModelT]):
         return (previous_date is None or previous_date < at) and at <= current_date
 
 
-@event_type
 @attrs.frozen(kw_only=True, slots=True)
-class IntervalEvent(SerializableEvent[ModelT]):
+class IntervalEvent(Event[ModelT]):
     """Fires every `every` time units, starting at `start`."""
 
     every: Number
@@ -178,7 +169,7 @@ class IntervalEvent(SerializableEvent[ModelT]):
 
 
 @attrs.frozen(kw_only=True, slots=True)
-class ThresholdEvent(SerializableEvent[ModelT]):
+class ThresholdEvent(Event[ModelT]):
     """Fires when `get_value` crosses `threshold`, per `op`. Subclass and implement `get_value`."""
 
     __abstract_serializable__ = True
@@ -213,12 +204,11 @@ class ThresholdEvent(SerializableEvent[ModelT]):
         return COMPARISON_FUNCTIONS[self.op](value, self.threshold)
 
 
-@event_type
 @attrs.frozen(kw_only=True, slots=True)
-class AllOf(SerializableEvent[ModelT]):
+class AllOf(Event[ModelT]):
     """Fires only when every one of `events` fires."""
 
-    events: tuple[SerializableEvent[ModelT], ...] = attrs.field(converter=tuple)
+    events: tuple[Event[ModelT], ...] = attrs.field(converter=tuple)
     """Every event that must fire for this one to fire."""
 
     def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:
@@ -232,12 +222,11 @@ class AllOf(SerializableEvent[ModelT]):
         return all(event(model, context) for event in self.events)
 
 
-@event_type
 @attrs.frozen(kw_only=True, slots=True)
-class AnyOf(SerializableEvent[ModelT]):
+class AnyOf(Event[ModelT]):
     """Fires when any one of `events` fires."""
 
-    events: tuple[SerializableEvent[ModelT], ...] = attrs.field(converter=tuple)
+    events: tuple[Event[ModelT], ...] = attrs.field(converter=tuple)
     """Every event checked; any one firing is enough."""
 
     def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:

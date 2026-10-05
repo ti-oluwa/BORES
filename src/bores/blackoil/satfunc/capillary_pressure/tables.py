@@ -1,6 +1,5 @@
 """Base capillary pressure tables for multi-phase flow simulations."""
 
-import threading
 import typing
 import warnings
 
@@ -15,8 +14,6 @@ from bores.constants import UnitConversionTable, get_conversion_factors
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.precision import get_dtype
-from bores.serde.registry import make_serializable_type_registrar
-from bores.serde.stores import StoreSerializable
 from bores.types import (
     CapillaryPressureDerivatives,
     CapillaryPressures,
@@ -30,20 +27,14 @@ from bores.types import (
     UnitSystem,
 )
 
-__all__ = [
-    "ThreePhaseCapillaryPressureTable",
-    "TwoPhaseCapillaryPressureTable",
-    "capillary_pressure_table",
-]
+__all__ = ["ThreePhaseCapillaryPressureTable", "TwoPhaseCapillaryPressureTable"]
 
 
-class CapillaryPressureTable(StoreSerializable):
+class CapillaryPressureTable:
     """
-    Protocol for a capillary pressure model that computes
-    capillary pressures based on fluid saturations.
+    Base class for a capillary pressure model that computes capillary pressures
+    based on fluid saturations.
     """
-
-    __abstract_serializable__ = True
 
     unit_system: UnitSystem
 
@@ -123,55 +114,8 @@ class CapillaryPressureTable(StoreSerializable):
         raise NotImplementedError
 
 
-CAPILLARY_PRESSURE_TABLES: dict[str, type[CapillaryPressureTable]] = {}
-"""Registry for capillary pressure table types."""
-_capillary_pressure_table_lock = threading.Lock()
-capillary_pressure_table = make_serializable_type_registrar(
-    base_cls=CapillaryPressureTable,
-    registry=CAPILLARY_PRESSURE_TABLES,
-    key_attr="__type__",
-    lock=_capillary_pressure_table_lock,
-    override=False,
-    auto_register_serializer=True,
-    auto_register_deserializer=True,
-)
-
-
-def list_capillary_pressure_tables() -> list[str]:
-    """
-    List all registered capillary pressure table types.
-
-    :return: List of capillary pressure table type names.
-    """
-    with _capillary_pressure_table_lock:
-        return list(CAPILLARY_PRESSURE_TABLES.keys())
-
-
-def get_capillary_pressure_table(name: str) -> type[CapillaryPressureTable]:
-    """
-    Get a registered capillary pressure table type by name.
-
-    :param name: Name of the capillary pressure table type.
-    :return: Capillary pressure table class.
-    :raises KeyError: If the type name is not registered.
-    """
-    with _capillary_pressure_table_lock:
-        if name not in CAPILLARY_PRESSURE_TABLES:
-            raise ValidationError(
-                f"Capillary pressure table type '{name}' is not registered. "
-                f"Use `@capillary_pressure_table` to register it. "
-                f"Available types: {list(CAPILLARY_PRESSURE_TABLES.keys())}"
-            )
-        return CAPILLARY_PRESSURE_TABLES[name]
-
-
-@capillary_pressure_table
 @attrs.frozen(slots=True)
-class TwoPhaseCapillaryPressureTable(
-    CapillaryPressureTable,
-    load_exclude={"_interp", "_d_interp"},
-    dump_exclude={"_interp", "_d_interp"},
-):
+class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
     """
     Two-phase capillary pressure lookup table backed by a PCHIP interpolant.
 
@@ -223,8 +167,6 @@ class TwoPhaseCapillaryPressureTable(
     axis, use `get_capillary_pressure`/`get_capillary_pressure_derivative`
     instead.
     """
-
-    __type__ = "two_phase_capillary_pressure_table"
 
     wetting_phase: FluidPhase | str = attrs.field(converter=FluidPhase)
     """The wetting fluid phase, e.g. WATER (oil-water system) or OIL (gas-oil system)."""
@@ -818,13 +760,8 @@ class TwoPhaseCapillaryPressureTable(
         raise ValidationError(f"`system` must be 'oil_water' or 'gas_oil'; got {system!r}.")
 
 
-@capillary_pressure_table
 @attrs.frozen(slots=True)
-class ThreePhaseCapillaryPressureTable(
-    CapillaryPressureTable,
-    load_exclude={"supports_vector"},
-    dump_exclude={"supports_vector"},
-):
+class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
     """
     Three-phase capillary pressure lookup table.
 
@@ -847,8 +784,6 @@ class ThreePhaseCapillaryPressureTable(
     to produce a copy of this table (and both sub-tables) rescaled to another
     `UnitSystem`.
     """
-
-    __type__ = "three_phase_capillary_pressure_table"
 
     oil_water_table: TwoPhaseCapillaryPressureTable
     """

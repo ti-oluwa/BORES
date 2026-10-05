@@ -11,8 +11,6 @@ from bores.constants import get_conversion_factors
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.grids.base import Grid
-from bores.serde.base import Serializable
-from bores.serde.stores import StoreSerializable
 from bores.types import (
     FluidPhase,
     Integer,
@@ -122,7 +120,7 @@ class WellStatus(enum.Enum):
 
 
 @attrs.frozen(kw_only=True, slots=True)
-class Perforation(Serializable):
+class Perforation:
     """
     A single completion interval on a well, defined by true vertical
     depth, measured depth, or both.
@@ -302,7 +300,7 @@ class Perforation(Serializable):
 
 
 @attrs.frozen(kw_only=True, slots=True)
-class Well(Serializable):
+class Well:
     """Static well identity and configuration."""
 
     name: str
@@ -533,13 +531,7 @@ class Well(Serializable):
         )
 
 
-class Wells(
-    StoreSerializable,
-    fields={
-        "wells": typing.Mapping[str, Well],
-        "unit_system": typing.Optional[UnitSystem],  # noqa: UP045
-    },
-):
+class Wells:
     """Name-keyed container of `Well` objects"""
 
     __slots__ = ("unit_system", "wells")
@@ -731,14 +723,6 @@ class Wells(
 
     def __contains__(self, name: object) -> bool:
         return name in self.wells
-
-    def __dump__(self) -> dict[str, typing.Any]:
-        return {"wells": {name: well.dump() for name, well in self.wells.items()}}
-
-    @classmethod
-    def __load__(cls, data: typing.Mapping[str, typing.Any]) -> Self:
-        wells = {name: Well.load(well_data) for name, well_data in data["wells"].items()}
-        return cls(wells=wells)
 
     def convert(
         self,

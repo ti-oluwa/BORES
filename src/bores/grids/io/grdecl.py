@@ -510,11 +510,11 @@ def assemble_grid(
 
     try:
         if has_coord:
-            return assemble_corner_point(
+            return assemble_corner_point_grid(
                 deck_file, nx, ny, nz, unit_system, meta, on_inverted_cells=on_inverted_cells
             )
         if has_tops:
-            return assemble_cartesian(
+            return assemble_cartesian_grid(
                 deck_file, nx, ny, nz, unit_system, meta, on_inverted_cells=on_inverted_cells
             )
     except GridImportError:
@@ -530,7 +530,7 @@ def assemble_grid(
     )
 
 
-def assemble_corner_point(
+def assemble_corner_point_grid(
     deck_file: DeckFile,
     nx: Integer,
     ny: Integer,
@@ -595,7 +595,7 @@ def assemble_corner_point(
     )
 
 
-def assemble_cartesian(
+def assemble_cartesian_grid(
     deck_file: DeckFile,
     nx: Integer,
     ny: Integer,

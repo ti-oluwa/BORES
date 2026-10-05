@@ -19,7 +19,6 @@ from bores.reservoir.transmissibility import (
     compute_connection_transmissibilities,
     get_face_transmissibility_map,
 )
-from bores.serde.base import Serializable
 from bores.types import CellArray, Number, UnitSystem
 
 __all__ = ["Reservoir"]
@@ -51,16 +50,7 @@ def validate_rock(rock: Rock, n_cells: int) -> Rock:
     return rock
 
 
-class Reservoir(
-    Serializable,
-    fields={
-        "grid": Grid,
-        "rock": Rock,
-        "regions": Regions | None,
-        "faults": typing.Collection[Fault] | None,
-        "unit_system": UnitSystem | None,
-    },
-):
+class Reservoir:
     """
     Reservoir characterization.
 

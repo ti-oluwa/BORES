@@ -24,7 +24,6 @@ from typing_extensions import Self
 from bores.constants import get_conversion_factors
 from bores.errors import ValidationError
 from bores.grids.base import Grid
-from bores.serde.base import Serializable
 from bores.types import (
     GridIntersectionMethod,
     Integer,
@@ -60,7 +59,7 @@ __all__ = [
 
 
 @attrs.frozen(kw_only=True, slots=True)
-class WellIndex(Serializable):
+class WellIndex:
     """Computed well indices for all perforations of a single well."""
 
     well_name: str

@@ -14,7 +14,6 @@ from typing_extensions import Self
 from bores.constants import UnitConversionTable, c, get_conversion_factors
 from bores.errors import ValidationError
 from bores.precision import get_dtype
-from bores.serde.stores import StoreSerializable
 from bores.types import (
     FloatArray,
     NDimension,
@@ -435,18 +434,7 @@ def build_pchip_interpolants_from_points(
 
 
 @typing.final
-class PseudoPressureTable(
-    StoreSerializable,
-    fields={
-        "pressures": npt.NDArray,
-        "pseudo_pressures": npt.NDArray,
-        "reference_pressure": Number | None,
-        "number_of_base_points": int,
-        "number_of_endpoint_extra_points": int,
-        "dtype": npt.DTypeLike | None,
-        "unit_system": UnitSystem,
-    },
-):
+class PseudoPressureTable:
     """
     Pre-computed gas pseudo-pressure table for fast lookup during simulation.
 

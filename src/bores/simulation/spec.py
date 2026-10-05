@@ -9,7 +9,6 @@ from typing_extensions import Self
 
 from bores.constants import Constants, get_conversion_factors
 from bores.errors import ValidationError
-from bores.serde.stores import StoreSerializable
 from bores.simulation.timestep import Timer
 from bores.types import (
     DiscretizationMethod,
@@ -26,7 +25,7 @@ __all__ = ["RunSpec"]
 
 
 @attrs.frozen(kw_only=True, slots=True, frozen=True)
-class RunSpec(StoreSerializable):
+class RunSpec:
     """Run-level configuration for a simulation."""
 
     unit_system: UnitSystem = UnitSystem.FIELD

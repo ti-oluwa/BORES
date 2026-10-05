@@ -2024,7 +2024,8 @@ class PVTTable(StoreSerializable):
         salinity: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Get fluid compressibility `c`. Units depend on `unit_system` (1/psi in FIELD, 1/bar in METRIC, 1/atm in LAB, 1/Pa in SI).
+        Get fluid compressibility `c`. Units depend on `unit_system` (1/psi in FIELD,
+        1/bar in METRIC, 1/atm in LAB, 1/Pa in SI).
 
         Returned from the pre-built compressibility table constructed at
         `PVTTable` initialisation time using:

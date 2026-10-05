@@ -7,23 +7,13 @@ from bores.constants import UnitConversionTable, build_unit_conversion_table
 from bores.errors import ValidationError
 from bores.reservoir.boundary.conditions import BoundaryConditions
 from bores.reservoir.model import Reservoir
-from bores.serde.stores import StoreSerializable
 from bores.types import UnitSystem
 from bores.wells.model import WellSystem
 
 __all__ = ["BlackOilModel"]
 
 
-class BlackOilModel(
-    StoreSerializable,
-    fields={
-        "reservoir": Reservoir,
-        "fluid": BlackOil,
-        "wells": WellSystem | None,
-        "boundary_conditions": BoundaryConditions | None,
-        "unit_system": UnitSystem,
-    },
-):
+class BlackOilModel:
     """
     Black-oil model characterization.
 

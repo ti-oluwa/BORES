@@ -3,14 +3,13 @@
 import attrs
 
 from bores.errors import StopSimulation
-from bores.schedule.base import ModelT, ScheduleContext, SerializableAction, action_type
+from bores.schedule.base import Action, ModelT, ScheduleContext
 
 __all__ = ["EndRun", "NoOp", "RunSequence"]
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
-class EndRun(SerializableAction[ModelT]):
+class EndRun(Action[ModelT]):
     """
     Ends the simulation unconditionally when applied. Pair with an event
     for a manual stop condition, the schedule-driven equivalent of
@@ -32,9 +31,8 @@ class EndRun(SerializableAction[ModelT]):
         raise StopSimulation(self.reason)
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
-class NoOp(SerializableAction[ModelT]):
+class NoOp(Action[ModelT]):
     """Does nothing. Useful as a placeholder, or to pair with an event you only want logged."""
 
     label: str | None = None
@@ -51,12 +49,11 @@ class NoOp(SerializableAction[ModelT]):
         return model
 
 
-@action_type
 @attrs.frozen(kw_only=True, slots=True)
-class RunSequence(SerializableAction[ModelT]):
+class RunSequence(Action[ModelT]):
     """Applies `actions` in order, threading the model through each in turn."""
 
-    actions: tuple[SerializableAction[ModelT], ...] = attrs.field(converter=tuple)
+    actions: tuple[Action[ModelT], ...] = attrs.field(converter=tuple)
     """Every action to apply, in order."""
 
     def __call__(self, model: ModelT, context: ScheduleContext) -> ModelT:

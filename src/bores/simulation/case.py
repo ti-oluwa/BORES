@@ -16,6 +16,7 @@ from bores.blackoil.satfunc.relperm.tables import MinimumRelPerm
 from bores.deck.file import DeckFile
 from bores.errors import CaseLoadError, CaseValidationError
 from bores.grids.base import Grid
+from bores.grids.factories.corner_point import InvertedCellPolicy
 from bores.initialization import N_SATURATION_SAMPLES, initialize_reservoir_state
 from bores.precision import get_dtype
 from bores.reservoir.boundary.conditions import BoundaryConditions
@@ -28,7 +29,6 @@ from bores.reservoir.state import Hysteresis, ReservoirState
 from bores.reservoir.temperature import Temperature
 from bores.schedule.base import Schedule
 from bores.schedule.summary import SummaryReport
-from bores.serde.base import Serializable
 from bores.simulation.spec import RunSpec
 from bores.simulation.workspace import SimulationWorkspace, build_simulation_workspace
 from bores.types import CellArray, InterpolationMethod, Number, UnitSystem
@@ -40,7 +40,7 @@ __all__ = ["SimulationCase", "load_case"]
 
 
 @attrs.define(kw_only=True, slots=True, frozen=True)
-class SimulationCase(Serializable):
+class SimulationCase:
     """A black-oil simulation case."""
 
     model: CompiledBlackOilModel
@@ -173,6 +173,7 @@ class SimulationCase(Serializable):
         interpolation_method: InterpolationMethod = "linear",
         boundary_conditions: BoundaryConditions | None = None,
         unit_system: UnitSystem | None = None,
+        on_inverted_cells: InvertedCellPolicy | str = InvertedCellPolicy.RAISE,
         dtype: npt.DTypeLike = None,
     ) -> Self:
         """
@@ -200,6 +201,8 @@ class SimulationCase(Serializable):
             Forwarded to `initialize_reservoir_state`.
         :param interpolation_method: Interpolation method for `Rock.from_deck` and `PVT.from_deck`.
         :param unit_system: Unit system for the case. Defaults to the deck's unit system.
+        :param on_inverted_cells: Policy to apply when the deck grid contains inverted cells.
+            Forwarded to `Grid.from_deck`.
         :param dtype: Array dtype for every buffer. Defaults to `bores.precision.get_dtype()`.
         :returns: The loaded `SimulationCase`.
         """
@@ -219,6 +222,7 @@ class SimulationCase(Serializable):
             interpolation_method=interpolation_method,
             boundary_conditions=boundary_conditions,
             unit_system=unit_system,
+            on_inverted_cells=on_inverted_cells,
             dtype=dtype,
         )
         return typing.cast(Self, case)
@@ -241,6 +245,7 @@ def load_case(
     interpolation_method: InterpolationMethod = "linear",
     boundary_conditions: BoundaryConditions | None = None,
     unit_system: UnitSystem | None = None,
+    on_inverted_cells: InvertedCellPolicy | str = InvertedCellPolicy.RAISE,
     dtype: npt.DTypeLike = None,
 ) -> SimulationCase:
     """
@@ -269,6 +274,8 @@ def load_case(
         Forwarded to `initialize_reservoir_state`.
     :param interpolation_method: Interpolation method for `Rock.from_deck` and `PVT.from_deck`.
     :param unit_system: Unit system for the case. Defaults to the deck's unit system.
+    :param on_inverted_cells: Policy to apply when the deck grid contains inverted cells.
+        Forwarded to `Grid.from_deck`.
     :param dtype: Array dtype for every buffer. Defaults to `bores.precision.get_dtype()`.
     :param boundary_conditions: Updates or overrides the boundary conditions
         loaded from the deck's `AQUCT`/`AQUFETP`/`AQUFLUX`/`AQUANCON` keywords.
@@ -295,7 +302,7 @@ def load_case(
         )
 
     try:
-        grid = Grid.from_deck(deck_file)
+        grid = Grid.from_deck(deck_file, on_inverted_cells=on_inverted_cells)
     except Exception as exc:
         raise CaseLoadError(f"Failed to load grid from {deck_file!r}.") from exc
 

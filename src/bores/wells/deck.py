@@ -15,7 +15,7 @@ from bores.errors import NotSupportedError, ValidationError
 from bores.grids.base import Grid
 from bores.schedule.base import Schedule, ScheduleItem
 from bores.schedule.events import TimeEvent
-from bores.schedule.summary import RecordSummary, SerializableSummary
+from bores.schedule.summary import RecordSummary, Summary
 from bores.types import FluidPhase, UnitSystem
 from bores.utils import TIME_UNIT_PER_UNIT_SYSTEM
 from bores.wells import summary as ws
@@ -1408,7 +1408,7 @@ def load_summary_items(
     """
     well_names = [record["well"] for record in deck_file.get("WELSPECS") or []]
 
-    quantities: list[SerializableSummary[CompiledBlackOilModel]] = []
+    quantities: list[Summary[CompiledBlackOilModel]] = []
     for mnemonic, field_summary_cls in FIELD_SUMMARY_VECTORS.items():
         if deck_file.get(mnemonic) is not None:
             quantities.append(field_summary_cls())

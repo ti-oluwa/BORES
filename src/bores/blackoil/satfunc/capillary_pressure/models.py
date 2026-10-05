@@ -9,7 +9,6 @@ from typing_extensions import Self
 
 from bores.blackoil.satfunc.capillary_pressure.tables import (
     CapillaryPressureTable,
-    capillary_pressure_table,
 )
 from bores.constants import c, get_conversion_factors
 from bores.errors import ValidationError
@@ -704,13 +703,8 @@ def compute_brooks_corey_capillary_pressure_derivatives(
     )
 
 
-@capillary_pressure_table
 @attrs.frozen(slots=True)
-class BrooksCoreyCapillaryPressureTable(
-    CapillaryPressureTable,
-    load_exclude={"supports_vector"},
-    dump_exclude={"supports_vector"},
-):
+class BrooksCoreyCapillaryPressureTable(CapillaryPressureTable):
     """
     Implements the Brooks-Corey capillary pressure model for three-phase systems.
 
@@ -718,8 +712,6 @@ class BrooksCoreyCapillaryPressureTable(
 
     Supports water-wet, oil-wet, and mixed-wet systems.
     """
-
-    __type__ = "brooks_corey_capillary_pressure_model"
 
     irreducible_water_saturation: Number | None = None
     """Default irreducible water saturation (swc). Can be overridden per call."""
@@ -1822,13 +1814,8 @@ def compute_van_genuchten_derivatives(
     )
 
 
-@capillary_pressure_table
 @attrs.frozen(slots=True)
-class VanGenuchtenCapillaryPressureTable(
-    CapillaryPressureTable,
-    load_exclude={"supports_vector"},
-    dump_exclude={"supports_vector"},
-):
+class VanGenuchtenCapillaryPressureTable(CapillaryPressureTable):
     """
     Implements the van Genuchten capillary pressure model for three-phase systems.
 
@@ -2880,13 +2867,8 @@ def convert_dyne_per_cm_to_pressure_unit(unit_system: UnitSystem) -> Number:
     return dyne_per_cm_to_psi * factors["pressure"]
 
 
-@capillary_pressure_table
 @attrs.frozen(slots=True)
-class LeverettJCapillaryPressureTable(
-    CapillaryPressureTable,
-    load_exclude={"supports_vector"},
-    dump_exclude={"supports_vector"},
-):
+class LeverettJCapillaryPressureTable(CapillaryPressureTable):
     """
     Implements the Leverett J-function capillary pressure model for three-phase systems.
 
@@ -2896,8 +2878,6 @@ class LeverettJCapillaryPressureTable(
     Useful when capillary pressure data needs to be scaled across different
     rock types or fluid systems.
     """
-
-    __type__ = "leverett_j_capillary_pressure_model"
 
     irreducible_water_saturation: Number | None = None
     """Default irreducible water saturation (swc). Can be overridden per call."""

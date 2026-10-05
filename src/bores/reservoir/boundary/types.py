@@ -7,7 +7,6 @@ from bores.constants import get_conversion_factors
 from bores.reservoir.boundary.base import (
     BoundaryCondition,
     BoundaryConditionType,
-    boundary_condition,
 )
 from bores.types import Number, UnitConversionTable, UnitSystem
 
@@ -18,7 +17,6 @@ __all__ = [
 ]
 
 
-@boundary_condition
 @attrs.frozen(slots=True)
 class ConstantFluxBoundary(BoundaryCondition):
     """
@@ -47,7 +45,6 @@ class ConstantFluxBoundary(BoundaryCondition):
     :param unit_system: Unit system for `flux`. Default `FIELD` (ft³/day).
     """
 
-    __type__: typing.ClassVar[str] = "constant_flux_boundary"
     condition_type: typing.ClassVar[BoundaryConditionType] = BoundaryConditionType.FLUX
 
     flux: Number = 0.0
@@ -80,7 +77,6 @@ class ConstantFluxBoundary(BoundaryCondition):
         return self.flux == 0
 
 
-@boundary_condition
 @attrs.frozen(slots=True)
 class ConstantPressureBoundary(BoundaryCondition):
     """
@@ -116,7 +112,6 @@ class ConstantPressureBoundary(BoundaryCondition):
     :param unit_system: Unit system for `pressure`.
     """
 
-    __type__: typing.ClassVar[str] = "constant_pressure_boundary"
     condition_type: typing.ClassVar[BoundaryConditionType] = BoundaryConditionType.PRESSURE
 
     pressure: Number
@@ -145,7 +140,6 @@ class ConstantPressureBoundary(BoundaryCondition):
         return attrs.evolve(self, pressure=self.pressure * factors["pressure"], unit_system=target)
 
 
-@boundary_condition
 @attrs.frozen(slots=True)
 class ProductivityIndexBoundary(BoundaryCondition):
     """
@@ -184,8 +178,6 @@ class ProductivityIndexBoundary(BoundaryCondition):
     - `productivity_index` - volume/(time·pressure) in `unit_system`
       (ft³/day/psi, m³/day/bar, etc.).
     """
-
-    __type__: typing.ClassVar[str] = "productivity_index_boundary"
 
     condition_type: typing.ClassVar[BoundaryConditionType] = BoundaryConditionType.FLUX
 

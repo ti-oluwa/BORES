@@ -1,7 +1,6 @@
 """Event-driven scheduling: `Event`/`Action` protocols, `Rule`, `Schedule`."""
 
 import datetime
-import threading
 import typing
 from uuid import uuid4
 
@@ -9,17 +8,9 @@ import attrs
 from typing_extensions import Self
 
 from bores.errors import ActionError, EventError, StopSimulation
-from bores.serde.base import Serializable
-from bores.serde.registry import (
-    make_registry_deserializer,
-    make_registry_serializer,
-    make_serializable_type_registrar,
-)
 from bores.types import Boolean, Number, UnitSystem
 
 __all__ = [
-    "ACTION_TYPES",
-    "EVENT_TYPES",
     "PASSTHROUGH_EXCEPTIONS",
     "Action",
     "Event",
@@ -27,10 +18,6 @@ __all__ = [
     "Schedule",
     "ScheduleContext",
     "ScheduleItem",
-    "SerializableAction",
-    "SerializableEvent",
-    "action_type",
-    "event_type",
 ]
 
 ModelT = typing.TypeVar("ModelT")
@@ -102,71 +89,8 @@ class Action(typing.Protocol[ModelT]):
         ...
 
 
-class SerializableEvent(Serializable, typing.Generic[ModelT]):
-    """Base for `Event` implementations that support `dump`/`load`."""
-
-    __abstract_serializable__ = True
-
-    def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:
-        """
-        Evaluates whether the paired action should fire. Must be overridden.
-
-        :param model: The model being scheduled against.
-        :param context: The current moment's context.
-        :returns: Whether the paired action should fire.
-        """
-        raise NotImplementedError
-
-
-class SerializableAction(Serializable, typing.Generic[ModelT]):
-    """Base for `Action` implementations that support `dump`/`load`."""
-
-    __abstract_serializable__ = True
-
-    def __call__(self, model: ModelT, context: ScheduleContext) -> ModelT:
-        """
-        Applies this action to `model`. Must be overridden.
-
-        :param model: The model to change.
-        :param context: The current moment's context.
-        :returns: The changed model.
-        """
-        raise NotImplementedError
-
-
-EVENT_TYPES: dict[str, type[SerializableEvent]] = {}
-ACTION_TYPES: dict[str, type[SerializableAction]] = {}
-event_type = make_serializable_type_registrar(
-    base_cls=SerializableEvent,
-    registry=EVENT_TYPES,
-    lock=threading.Lock(),
-    key_attr="__type__",
-)
-action_type = make_serializable_type_registrar(
-    base_cls=SerializableAction,
-    registry=ACTION_TYPES,
-    lock=threading.Lock(),
-    key_attr="__type__",
-)
-
-
-dump_event = make_registry_serializer(
-    base_cls=SerializableEvent, registry=EVENT_TYPES, key_attr="__type__"
-)
-load_event = make_registry_deserializer(base_cls=SerializableEvent, registry=EVENT_TYPES)
-dump_action = make_registry_serializer(
-    base_cls=SerializableAction, registry=ACTION_TYPES, key_attr="__type__"
-)
-load_action = make_registry_deserializer(base_cls=SerializableAction, registry=ACTION_TYPES)
-
-
 @attrs.frozen(kw_only=True, slots=True, repr=False, hash=True, unsafe_hash=True)
-class ScheduleItem(
-    Serializable,
-    typing.Generic[ModelT],
-    serializers={"event": dump_event, "action": dump_action},
-    deserializers={"event": load_event, "action": load_action},
-):
+class ScheduleItem(typing.Generic[ModelT]):
     """One `(Event, Action)` pairing: `action` fires whenever `event` occurs."""
 
     event: Event[ModelT] = attrs.field(hash=False)
@@ -183,12 +107,7 @@ class ScheduleItem(
 
 
 @attrs.frozen(slots=True)
-class Schedule(
-    Serializable,
-    typing.Generic[ModelT],
-    dump_exclude={"_items_map"},
-    load_exclude={"_items_map"},
-):
+class Schedule(typing.Generic[ModelT]):
     """Every rule for a run. Advances a model by applying whichever items fire."""
 
     items: tuple[ScheduleItem[ModelT], ...] = attrs.field(converter=tuple, factory=tuple)

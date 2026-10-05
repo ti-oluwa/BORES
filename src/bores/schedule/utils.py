@@ -1,6 +1,6 @@
 """Convenience factories for `ScheduleItem`s/`Schedule`s."""
 
-from bores.schedule.base import Action, Event, ModelT, Schedule, ScheduleItem, SerializableEvent
+from bores.schedule.base import Action, Event, ModelT, Schedule, ScheduleItem
 from bores.schedule.events import AllOf, AnyOf, TimeEvent
 
 __all__ = ["all_of", "any_of", "at", "item", "schedule"]
@@ -44,7 +44,7 @@ def schedule(*rules: ScheduleItem[ModelT]) -> Schedule[ModelT]:
     return Schedule(items=tuple(rules))
 
 
-def all_of(*events: SerializableEvent[ModelT]) -> AllOf[ModelT]:
+def all_of(*events: Event[ModelT]) -> AllOf[ModelT]:
     """
     Builds an `AllOf` from a set of events.
 
@@ -54,7 +54,7 @@ def all_of(*events: SerializableEvent[ModelT]) -> AllOf[ModelT]:
     return AllOf(events=tuple(events))
 
 
-def any_of(*events: SerializableEvent[ModelT]) -> AnyOf[ModelT]:
+def any_of(*events: Event[ModelT]) -> AnyOf[ModelT]:
     """
     Builds an `AnyOf` from a set of events.
 

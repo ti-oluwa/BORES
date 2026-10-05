@@ -9,7 +9,6 @@ from typing_extensions import Self
 from bores.errors import ValidationError
 from bores.reservoir.boundary.base import BoundaryCondition
 from bores.reservoir.boundary.types import ConstantFluxBoundary
-from bores.serde.stores import StoreSerializable
 from bores.types import IntArray, NDimension, OneDimension, UnitConversionTable, UnitSystem
 
 logger = logging.getLogger(__name__)
@@ -18,7 +17,7 @@ __all__ = ["BoundaryConditions", "BoundaryRegion"]
 
 
 @attrs.frozen(slots=True, kw_only=True)
-class BoundaryRegion(StoreSerializable):
+class BoundaryRegion:
     """
     Associates a named `BoundaryCondition` with a set of boundary faces.
 
@@ -115,24 +114,6 @@ class BoundaryRegion(StoreSerializable):
             condition=ConstantFluxBoundary(flux=0.0, unit_system=unit_system),
         )
 
-    def __dump__(self) -> dict[str, typing.Any]:
-        return {
-            "name": self.name,
-            "face_positions": self.face_positions.tolist(),
-            "condition": self.condition.dump(),
-        }
-
-    @classmethod
-    def __load__(cls, data: typing.Mapping[str, typing.Any]) -> Self:
-        return cls(
-            name=data["name"],
-            face_positions=typing.cast(
-                IntArray[OneDimension],
-                np.asarray(data["face_positions"], dtype=np.int32),
-            ),
-            condition=BoundaryCondition.load(data["condition"]),
-        )
-
     def __repr__(self) -> str:
         return (
             f"{self.__class__.__name__}("
@@ -145,7 +126,7 @@ class BoundaryRegion(StoreSerializable):
 
 
 @attrs.frozen(slots=True)
-class BoundaryConditions(StoreSerializable):
+class BoundaryConditions:
     """
     Ordered collection of `BoundaryRegion` objects governing all boundary
     faces of a reservoir model.

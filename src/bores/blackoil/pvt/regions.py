@@ -24,8 +24,6 @@ from bores.reservoir.temperature import (
     TemperatureSpec,
     TemperatureTable,
 )
-from bores.serde.base import Serializable
-from bores.serde.stores import StoreSerializable
 from bores.types import (
     FloatArray,
     FluidPhase,
@@ -44,7 +42,7 @@ __all__ = ["PVT", "load_pvt_regions"]
 
 
 @attrs.frozen(slots=True)
-class PVTRegion(Serializable):
+class PVTRegion:
     """A collection of PVT tables and static properties for a single Eclipse PVT region."""
 
     static: StaticPVT
@@ -89,7 +87,7 @@ class PVTRegion(Serializable):
         )
 
 
-class PVT(StoreSerializable):
+class PVT:
     """
     Multi-region PVT tables keyed by 1-based `PVTNUM` region index.
 
@@ -109,7 +107,6 @@ class PVT(StoreSerializable):
     ```
     """
 
-    __abstract_serializable__ = True
     __slots__ = ("regions", "unit_system")
 
     def __init__(
@@ -247,17 +244,6 @@ class PVT(StoreSerializable):
 
     def __contains__(self, key: object) -> bool:
         return key in self.regions
-
-    def __dump__(self) -> dict[str, typing.Any]:
-        return {"regions": {str(pvtnum): region.dump() for pvtnum, region in self.regions.items()}}
-
-    @classmethod
-    def __load__(cls, data: typing.Mapping[str, typing.Any]) -> Self:
-        regions = {
-            int(pvtnum): PVTRegion.load(region_data)
-            for pvtnum, region_data in data["regions"].items()
-        }
-        return cls(regions=regions)
 
 
 def get_min_temperature_points(interpolation_method: InterpolationMethod) -> int:

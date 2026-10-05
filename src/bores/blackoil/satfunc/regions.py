@@ -18,7 +18,6 @@ from bores.constants import UnitConversionTable
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.precision import get_dtype
-from bores.serde.stores import StoreSerializable
 from bores.types import Spacing, UnitSystem
 
 logger = logging.getLogger(__name__)
@@ -26,7 +25,7 @@ logger = logging.getLogger(__name__)
 __all__ = ["SatFunc"]
 
 
-class SatFunc(StoreSerializable):
+class SatFunc:
     """
     Multi-region saturation-function tables keyed by 1-based `SATNUM` region index.
 
@@ -39,7 +38,6 @@ class SatFunc(StoreSerializable):
     `from_deck` to construct from a deck.
     """
 
-    __abstract_serializable__ = True
     __slots__ = ("tables", "unit_system")
 
     def __init__(
@@ -251,14 +249,3 @@ class SatFunc(StoreSerializable):
 
     def __contains__(self, key: object) -> bool:
         return key in self.tables
-
-    def __dump__(self) -> dict[str, typing.Any]:
-        return {"tables": {str(satnum): tables.dump() for satnum, tables in self.tables.items()}}
-
-    @classmethod
-    def __load__(cls, data: typing.Mapping[str, typing.Any]) -> Self:
-        tables = {
-            int(satnum): SatFuncTables.load(table_data)
-            for satnum, table_data in data["tables"].items()
-        }
-        return cls(tables=tables)

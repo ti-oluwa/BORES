@@ -1,6 +1,5 @@
 """Base relative permeability tables for multi-phase flow simulations."""
 
-import threading
 import typing
 import warnings
 
@@ -13,18 +12,14 @@ from typing_extensions import Self
 
 from bores.blackoil.satfunc.relperm.mixing_rules import (
     MixingRule,
-    deserialize_mixing_rule,
     get_mixing_rule,
     get_mixing_rule_partial_derivatives,
-    serialize_mixing_rule,
 )
 from bores.blackoil.satfunc.utils import build_pchip_interpolant
 from bores.constants import c
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.precision import get_dtype, get_floating_point_info
-from bores.serde.registry import make_serializable_type_registrar
-from bores.serde.stores import StoreSerializable
 from bores.types import (
     FluidPhase,
     NDimension,
@@ -38,14 +33,7 @@ from bores.types import (
 )
 from bores.utils import is_scalar_like
 
-__all__ = [
-    "RelPermEndpoints",
-    "ThreePhaseRelPermTable",
-    "TwoPhaseRelPermTable",
-    "get_relperm_table",
-    "list_relperm_tables",
-    "relperm_table",
-]
+__all__ = ["RelPermEndpoints", "ThreePhaseRelPermTable", "TwoPhaseRelPermTable"]
 
 
 def show_invalid_saturation(val: NumberOrArray[NDimension], *, max_display: int = 20) -> str:
@@ -209,13 +197,11 @@ class SaturationEndpoints:
     """Residual/critical gas saturation (sgr) below which gas is immobile."""
 
 
-class RelativePermeabilityTable(StoreSerializable):
+class RelativePermeabilityTable:
     """
-    Protocol for a relative permeability model/table that
+    Base class for a relative permeability model/table that
     computes relative permeabilities based on fluid saturations.
     """
-
-    __abstract_serializable__ = True
 
     def get_oil_water_wetting_phase(self) -> FluidPhase:
         raise NotImplementedError
@@ -371,66 +357,8 @@ class RelativePermeabilityTable(StoreSerializable):
         )
 
 
-RELPERM_TABLES: dict[str, type[RelativePermeabilityTable]] = {}
-"""Registry of relative permeability table types."""
-
-_relperm_tables_lock = threading.Lock()
-relperm_table = make_serializable_type_registrar(
-    base_cls=RelativePermeabilityTable,
-    registry=RELPERM_TABLES,
-    key_attr="__type__",
-    lock=_relperm_tables_lock,
-    override=False,
-    auto_register_serializer=True,
-    auto_register_deserializer=True,
-)
-
-
-def list_relperm_tables() -> list[str]:
-    """
-    List all registered relative permeability table types.
-
-    :return: List of registered relative permeability table type names.
-    """
-    with _relperm_tables_lock:
-        return list(RELPERM_TABLES.keys())
-
-
-def get_relperm_table(name: str) -> type[RelativePermeabilityTable]:
-    """
-    Get a registered relative permeability table type by name.
-
-    :param name: Registered name of the relative permeability table type.
-    :return: Relative permeability table class.
-    :raises ValidationError: If the relative permeability table type is not registered.
-    """
-    with _relperm_tables_lock:
-        if name not in RELPERM_TABLES:
-            raise ValidationError(
-                f"Relative permeability table type '{name}' is not registered. "
-                f"Use `@relperm_table` to register it. "
-                f"Available types: {list(RELPERM_TABLES.keys())}"
-            )
-        return RELPERM_TABLES[name]
-
-
-@relperm_table
 @attrs.frozen(slots=True)
-class TwoPhaseRelPermTable(
-    RelativePermeabilityTable,
-    load_exclude={
-        "_wetting_interp",
-        "_wetting_d_interp",
-        "_non_wetting_interp",
-        "_non_wetting_d_interp",
-    },
-    dump_exclude={
-        "_wetting_interp",
-        "_wetting_d_interp",
-        "_non_wetting_interp",
-        "_non_wetting_d_interp",
-    },
-):
+class TwoPhaseRelPermTable(RelativePermeabilityTable):
     """
     Two-phase relative permeability lookup table backed by a PCHIP interpolant.
 
@@ -477,8 +405,6 @@ class TwoPhaseRelPermTable(
     methods always cast their output to `dtype` before returning. Defaults to
     `get_dtype()` when not specified.
     """
-
-    __type__ = "two_phase_relperm_table"
 
     wetting_phase: FluidPhase | str = attrs.field(converter=FluidPhase)
     """The wetting fluid phase, e.g. WATER (oil-water) or OIL (gas-oil)."""
@@ -1442,15 +1368,8 @@ class TwoPhaseRelPermTable(
         raise ValidationError(f"`system` must be 'oil_water' or 'gas_oil'; got {system!r}.")
 
 
-@relperm_table
 @attrs.frozen(slots=True)
-class ThreePhaseRelPermTable(
-    RelativePermeabilityTable,
-    serializers={"mixing_rule": serialize_mixing_rule},
-    deserializers={"mixing_rule": deserialize_mixing_rule},
-    load_exclude={"supports_vector"},
-    dump_exclude={"supports_vector"},
-):
+class ThreePhaseRelPermTable(RelativePermeabilityTable):
     """
     Three-phase relative permeability lookup table, with mixing rules.
 
@@ -1477,8 +1396,6 @@ class ThreePhaseRelPermTable(
 
     Supported mixing rules: `max_rule`, `stone_I_rule`, `stone_II_rule`, etc.
     """
-
-    __type__ = "three_phase_relperm_table"
 
     oil_water_table: TwoPhaseRelPermTable
     """Relative permeability table for the oil-water system."""

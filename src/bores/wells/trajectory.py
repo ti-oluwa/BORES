@@ -12,14 +12,13 @@ import math
 import attrs
 
 from bores.errors import ValidationError
-from bores.serde.base import Serializable
 from bores.types import Number
 
 __all__ = ["TrajectoryStation", "WellTrajectory"]
 
 
 @attrs.frozen(kw_only=True, slots=True)
-class TrajectoryStation(Serializable):
+class TrajectoryStation:
     """One survey station: position along the wellbore at a given measured depth."""
 
     measured_depth: Number
@@ -37,7 +36,7 @@ class TrajectoryStation(Serializable):
 
 
 @attrs.frozen(kw_only=True, slots=True)
-class WellTrajectory(Serializable):
+class WellTrajectory:
     """
     A well's 3-D path: an ordered, piecewise-linear polyline of `TrajectoryStation`.
 

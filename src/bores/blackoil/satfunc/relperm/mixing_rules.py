@@ -39,7 +39,6 @@ from bores.types import (
     NDimension,
     Number,
     NumberOrArray,
-    T,
 )
 
 __all__ = [
@@ -498,34 +497,18 @@ def compute_central_difference_partial_derivatives(
 
 MIXING_RULES: dict[str, MixingRule] = {}
 """Registry of mixing rule functions."""
-MIXING_RULE_SERIALIZERS: dict[MixingRule, typing.Callable[[MixingRule, bool], typing.Any]] = {}
-"""Registry of mixing rule serializers."""
-MIXING_RULE_DESERIALIZERS: dict[str, typing.Callable[[typing.Any], MixingRule]] = {}
-"""Registry of mixing rule deserializers."""
 _lock = threading.Lock()
 
 
 @typing.overload
 def mixing_rule(func: MixingRuleFunc | MixingRule) -> MixingRule: ...
-
-
 @typing.overload
 def mixing_rule(
-    func: None = None,
-    name: str | None = None,
-    override: bool = False,
-    serializer: typing.Callable[[MixingRule, bool], T] | None = None,
-    deserializer: typing.Callable[[T], MixingRule] | None = None,
+    func: None = None, name: str | None = None, override: bool = False
 ) -> typing.Callable[[MixingRuleFunc | MixingRule], MixingRule]: ...
-
-
 @typing.overload
 def mixing_rule(
-    func: MixingRuleFunc | MixingRule,
-    name: str | None = None,
-    override: bool = False,
-    serializer: typing.Callable[[MixingRule, bool], T] | None = None,
-    deserializer: typing.Callable[[T], MixingRule] | None = None,
+    func: MixingRuleFunc | MixingRule, name: str | None = None, override: bool = False
 ) -> MixingRule: ...
 
 
@@ -533,8 +516,6 @@ def mixing_rule(
     func: MixingRuleFunc | MixingRule | None = None,
     name: str | None = None,
     override: bool = False,
-    serializer: typing.Callable[[MixingRule, bool], T] | None = None,
-    deserializer: typing.Callable[[T], MixingRule] | None = None,
 ) -> MixingRule | typing.Callable[[MixingRuleFunc | MixingRule], MixingRule]:
     """
     Decorator that registers a mixing rule function or `MixingRule` instance.
@@ -577,8 +558,6 @@ def mixing_rule(
         decorator is called with keyword arguments and returns a one-argument decorator.
     :param name: Registry key. Defaults to `func.__name__`.
     :param override: If `False` (default), raises on duplicate names.
-    :param serializer: Optional serializer for parameterised rules (e.g. `aziz_settari_rule`).
-    :param deserializer: Optional deserializer for parameterised rules.
     :return: The registered `MixingRule` instance.
     """
 
@@ -605,52 +584,11 @@ def mixing_rule(
                     "Use `override=True` or provide a different name."
                 )
             MIXING_RULES[rule_name] = rule
-            if serializer is not None:
-                MIXING_RULE_SERIALIZERS[rule] = serializer
-            if deserializer is not None:
-                MIXING_RULE_DESERIALIZERS[rule_name] = deserializer
-
         return rule
 
     if func is None:
         return register
     return register(func)
-
-
-def serialize_mixing_rule(rule: MixingRule, recurse: bool = True) -> typing.Any:
-    """
-    Serialize a mixing rule function to its registered name.
-
-    :param rule: Mixing rule function.
-    :return: Registered name of the mixing rule.
-    """
-    with _lock:
-        if rule in MIXING_RULE_SERIALIZERS:
-            return MIXING_RULE_SERIALIZERS[rule](rule, recurse)
-
-        for name, registered_rule in MIXING_RULES.items():
-            if registered_rule == rule:
-                return name
-    raise ValidationError(
-        f"Mixing rule {rule!r} is not registered. Use `@mixing_rule` to register."
-    )
-
-
-def deserialize_mixing_rule(name: str) -> MixingRule:
-    """
-    Deserialize a mixing rule function from its registered name.
-
-    :param name: Registered name of the mixing rule.
-    :return: Mixing rule function.
-    """
-    with _lock:
-        if name in MIXING_RULE_DESERIALIZERS:
-            return MIXING_RULE_DESERIALIZERS[name](name)
-        elif name in MIXING_RULES:
-            return MIXING_RULES[name]
-    raise ValidationError(
-        f"Mixing rule '{name}' is not registered. Use `@mixing_rule` to register."
-    )
 
 
 def list_mixing_rules() -> list[str]:
@@ -1354,14 +1292,6 @@ def aziz_settari_rule(a: Number = 0.5, b: Number = 0.5) -> MixingRule:
     :return: A mixing rule function implementing the Aziz-Settari correlation.
     """
 
-    def _aziz_settari_serializer(rule: MixingRule, recurse: bool = True) -> dict[str, Number]:
-        return {"a": a, "b": b}
-
-    def _aziz_settari_deserializer(data: typing.Any) -> MixingRule:
-        if not isinstance(data, dict) or "a" not in data or "b" not in data:
-            raise ValidationError("Invalid data for Aziz-Settari deserialization.")
-        return aziz_settari_rule(a=data["a"], b=data["b"])
-
     @numba.njit(cache=True)
     def _func(
         kro_w: NumberOrArray[NDimension],
@@ -1376,12 +1306,7 @@ def aziz_settari_rule(a: Number = 0.5, b: Number = 0.5) -> MixingRule:
         result = kro_w**a * kro_g**b
         return np.where((kro_w <= 0.0) | (kro_g <= 0.0), 0.0, result)  # type: ignore[return-value]
 
-    rule: MixingRule = mixing_rule(
-        _func,
-        name=f"aziz_settari(a={a!r}, b={b!r})",
-        serializer=_aziz_settari_serializer,
-        deserializer=_aziz_settari_deserializer,
-    )
+    rule: MixingRule = mixing_rule(_func, name=f"aziz_settari(a={a!r}, b={b!r})")
 
     @rule.dfunc
     @numba.njit(cache=True)
