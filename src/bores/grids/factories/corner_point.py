@@ -15,11 +15,13 @@ shared face indices. Cell pairs in the fault IJK range that share no geometric
 face are not connected and are skipped.
 """
 
+import enum
 import typing
 import warnings
 
 import numba
 import numpy as np
+from typing_extensions import Self
 
 from bores.datastructures import GridDimensions, MapAxes
 from bores.errors import GridExportError, InvalidGridError, ValidationError
@@ -31,6 +33,7 @@ from bores.grids.factories.base import (
     FaultRecord,
     VertexCoordinates,
     map_xy_to_map_space,
+    validate_map_axes,
 )
 from bores.types import (
     Boolean,
@@ -46,7 +49,39 @@ from bores.types import (
     UnitSystem,
 )
 
-__all__ = ["make_corner_point_grid", "rederive_corner_point_arrays"]
+__all__ = [
+    "InvertedCellPolicy",
+    "make_corner_point_grid",
+    "rederive_corner_point_arrays",
+]
+
+
+class InvertedCellPolicy(enum.Enum):
+    """
+    What to do when active cells have inverted (negative volume) geometry.
+
+    `RAISE`
+        Refuse to build the grid and report how many cells are inverted.
+
+    `DEACTIVATE`
+        Mark the inverted cells inactive, as if `ACTNUM` were zero for them, and warn
+        with the number of cells removed.
+    """
+
+    RAISE = "raise"
+    DEACTIVATE = "deactivate"
+
+    def __str__(self) -> str:
+        return self.value
+
+    @classmethod
+    def _missing_(cls, value: object) -> Self | None:
+        lowered = str(value).lower()
+        for member in cls:
+            if member.value == lowered:
+                return member
+        return None
+
 
 CoordArray: typing.TypeAlias = NumberArray[ThreeDimensions]
 """Corner-point COORD array, shape `(NY+1, NX+1, 6)`."""
@@ -91,6 +126,7 @@ def make_corner_point_grid(
     metadata: typing.Mapping[str, typing.Any] | None = None,
     map_axes: MapAxes | None = None,
     apply_map_axes: bool = True,
+    on_inverted_cells: InvertedCellPolicy | str = InvertedCellPolicy.RAISE,
     nnc_cell_indices: IntArray[TwoDimensions] | None = None,
     nnc_transmissibilities: NumberArray[OneDimension] | None = None,
     fault_records: typing.Sequence[FaultRecord] | None = None,
@@ -123,6 +159,9 @@ def make_corner_point_grid(
         returned `Grid`'s coordinates are already correctly positioned.
         Set `False` to keep the grid in local (pre-`MAPAXES`) space - the
         resolved `map_axes` is still stored on `grid.metadata` either way.
+    :param on_inverted_cells: What to do with active cells whose corners fold the cell
+        inside out. `"raise"` (the default) refuses to build the grid, `"deactivate"`
+        marks those cells inactive and warns with how many were removed.
     :param nnc_cell_indices: Shape `(n_nnc, 2)` user-declared NNC cell pairs.
     :param nnc_transmissibilities: Shape `(n_nnc,)` flow transmissibility of each NNC pair.
         Required with `nnc_cell_indices`.
@@ -135,8 +174,10 @@ def make_corner_point_grid(
     :param positive_z_transmissibility_multipliers: Per-cell MULTZ. `None` if absent.
     :param negative_z_transmissibility_multipliers: Per-cell MULTZ-. `None` if absent.
     :returns: Fully initialised `Grid`.
-    :raises ValidationError: On array shape mismatches or inconsistent NNC lengths.
-    :raises InvalidGridError: If no active cells are found.
+    :raises ValidationError: On array shape mismatches, inconsistent NNC lengths, or `MAPAXES`
+        axes that are not perpendicular.
+    :raises InvalidGridError: If no active cells are found, or if active cells are inverted
+        and `on_inverted_cells` is `"raise"`.
     """
     if (
         nnc_cell_indices is not None
@@ -162,6 +203,7 @@ def make_corner_point_grid(
         resolved_map_axes = resolved_map_axes.convert(unit_system)
 
     if resolved_map_axes is not None and apply_map_axes:
+        validate_map_axes(resolved_map_axes)
         coord_array = apply_map_axes_to_coord(coord_array, map_axes=resolved_map_axes)  # type: ignore[arg-type]
 
     if resolved_map_axes is not None:
@@ -201,6 +243,15 @@ def make_corner_point_grid(
     if pinch_tolerance is None:
         pinch_tolerance = float((metadata or {}).get("pinch", None) or 0.0)
 
+    inverted_cell_policy = InvertedCellPolicy(on_inverted_cells)
+    # A `MAPAXES` whose Y axis points against the right-handed direction (the usual
+    # Eclipse convention, with Y pointing south) reflects the grid when it is applied.
+    mirrored = (
+        resolved_map_axes is not None
+        and apply_map_axes
+        and float(np.linalg.det(resolved_map_axes.rotation_matrix)) < 0.0
+    )
+
     (
         vertex_coordinates,
         face_vertex_indices,
@@ -218,7 +269,14 @@ def make_corner_point_grid(
         actnum=actnum_array,
         vertex_tolerance=vertex_tolerance,
         pinch_tolerance=pinch_tolerance,
+        mirrored=mirrored,
+        on_inverted_cells=inverted_cell_policy,
     )
+    if inverted_cell_policy is InvertedCellPolicy.DEACTIVATE:
+        actnum_array = typing.cast(
+            ActNumArray,
+            (cell_statuses == int(CellStatus.ACTIVE)).reshape(nz, ny, nx).astype(np.int32),
+        )
 
     # Resolve fault face indices; cell pairs with no shared face are skipped.
     fault_face_indices: dict[str, IntArray[OneDimension]] | None = None
@@ -325,15 +383,14 @@ def get_map_axes_xy_inverse(
 
 def apply_map_axes_to_coord(coord: CoordArray, map_axes: MapAxes) -> CoordArray:
     """
-    Rotate and translate a COORD pillar array's `(x, y)` pairs into map space.
+    Rotate, translate and, when the Y axis points the other way, reflect a COORD pillar
+    array's `(x, y)` pairs into map space.
 
-    Applied once, upstream of pillar interpolation (`coord` is the only
-    array `compute_cell_corner_coordinates` reads for areal
-    position), so every derived quantity - `vertex_coordinates`,
-    `cell_centroids`, face geometry, comes out already correctly
-    positioned; `cell_volumes` are unaffected, being invariant under
-    rotation/translation. `z` (pillar depth, columns 2 and 5) is untouched,
-    since `MAPAXES` is a purely areal transform.
+    Applied once, before pillar interpolation, so the vertex coordinates, cell centroids
+    and face geometry all come out positioned in map space. Pillar depth (columns 2 and
+    5) is untouched. A reflection turns the grid into a mirror image, which
+    `compute_corner_point_geometry` accounts for through its `mirrored` argument so that
+    cell volumes stay positive.
 
     :param coord: Shape `(NY+1, NX+1, 6)` - `[x_top, y_top, z_top,
         x_bottom, y_bottom, z_bottom]` per pillar, in local (pre-`MAPAXES`)
@@ -860,6 +917,8 @@ def compute_corner_point_geometry(
     actnum: ActNumArray,
     vertex_tolerance: Number = 1e-8,
     pinch_tolerance: Number = 0.0,
+    mirrored: bool = False,
+    on_inverted_cells: InvertedCellPolicy = InvertedCellPolicy.RAISE,
 ) -> tuple[
     VertexCoordinates,
     IntArray[OneDimension],
@@ -880,13 +939,18 @@ def compute_corner_point_geometry(
     :param actnum: Shape `(NZ, NY, NX)`.
     :param vertex_tolerance: Vertex merge distance.
     :param pinch_tolerance: Average thickness threshold for pinch detection.
+    :param mirrored: Whether `coord` is a mirror image of a right-handed `(x, y, depth)`
+        frame, as when a `MAPAXES` with a south-pointing Y axis has been applied. Cell
+        volumes and face winding are reported as they would be for the unmirrored grid.
+    :param on_inverted_cells: Whether inverted active cells raise or are deactivated.
     :returns: 10-tuple `(vertex_coordinates, face_vertex_indices,
         face_vertex_offsets, face_cell_indices, face_connection_types, cell_statuses,
         cell_volumes, cell_centroids, cell_min_xyz, cell_max_xyz)`. The last two are the
         bounding box of each cell's own corners. Cells are
         numbered by their full-grid flat index `i + j * nx + k * nx * ny`. Inactive cells
         keep their index, have status `INACTIVE`, zero volume and no faces.
-    :raises InvalidGridError: If no active cells are found.
+    :raises InvalidGridError: If no active cells are found, or if active cells are inverted
+        and `on_inverted_cells` is `RAISE`.
     """
     active_mask = (actnum > 0).ravel()
     if not active_mask.any():
@@ -912,6 +976,25 @@ def compute_corner_point_geometry(
 
     vtk_to_corner = [0, 1, 3, 2, 4, 5, 7, 6]
 
+    if on_inverted_cells is InvertedCellPolicy.DEACTIVATE:
+        trial_volumes = compute_oriented_cell_volumes(
+            corner_global=corner_global,
+            vtk_to_corner=vtk_to_corner,
+            vertex_coordinates=vertex_coordinates,
+            corner_coordinates=corner_coordinates,
+            mirrored=mirrored,
+        )[0]
+        trial_inverted = active_mask & (trial_volumes < 0.0)
+        if trial_inverted.any():
+            warnings.warn(
+                f"{int(trial_inverted.sum())} active cell(s) have inverted geometry and "
+                f"were deactivated.",
+                stacklevel=4,
+            )
+            active_mask = active_mask & ~trial_inverted
+            if not active_mask.any():
+                raise InvalidGridError("Every active cell has inverted geometry.")
+
     face_registry: dict[FaceKey, FaceRecord] = {}
     n_ignored_third_claims = 0
 
@@ -934,6 +1017,8 @@ def compute_corner_point_geometry(
 
         for local_idx, local_face in enumerate(HEXAHEDRON_FACES_ZDOWN):
             face_vertex_indices = [vtk_vertices[v] for v in local_face]
+            if mirrored:
+                face_vertex_indices.reverse()
 
             if len(set(face_vertex_indices)) < len(face_vertex_indices):
                 n_degenerate += 1
@@ -962,7 +1047,7 @@ def compute_corner_point_geometry(
         face_local_index=face_local_index,
         degenerate_faces=degenerate_faces,
         pinched_cells=pinched_cells,
-        active_mask=active_mask,
+        active_mask=typing.cast(BooleanArray[OneDimension], active_mask),
         corner_coordinates=corner_coordinates,
         coord=coord,
         dimensions=(nx_cells, ny_cells, nz_cells),
@@ -992,18 +1077,13 @@ def compute_corner_point_geometry(
         else:
             face_connection_types.append(int(ConnectionType.INTERIOR_FACE))
 
-    vtk_corner_indices = np.empty((n_cells, 8), dtype=np.int32)
-    for cell_idx in range(n_cells):
-        for vertex in range(8):
-            vtk_corner_indices[cell_idx, vertex] = corner_global[cell_idx, vtk_to_corner[vertex]]
-
-    cell_volumes, cell_centroids = compute_hex_volumes_and_centroids(
-        vtk_corner_indices=vtk_corner_indices,
-        vertex_coordinates=vertex_coordinates,  # type: ignore[arg-type]
+    cell_volumes, cell_centroids = compute_oriented_cell_volumes(
+        corner_global=corner_global,
+        vtk_to_corner=vtk_to_corner,
+        vertex_coordinates=vertex_coordinates,
+        corner_coordinates=corner_coordinates,
+        mirrored=mirrored,
     )
-    box_volume = np.prod(corner_coordinates.max(axis=1) - corner_coordinates.min(axis=1), axis=1)
-    round_off = (cell_volumes < 0.0) & (cell_volumes >= -1e-9 * box_volume)
-    cell_volumes = typing.cast(NumberArray[OneDimension], np.where(round_off, 0.0, cell_volumes))
     inverted = active_mask & (cell_volumes < 0.0)
     if inverted.any():
         bad = np.flatnonzero(inverted)
@@ -1216,6 +1296,42 @@ def _fill_zcorn(
                 zcorn[2 * k + 1, 2 * j, 2 * i + 1] = z_bottom
                 zcorn[2 * k + 1, 2 * j + 1, 2 * i] = z_bottom
                 zcorn[2 * k + 1, 2 * j + 1, 2 * i + 1] = z_bottom
+
+
+def compute_oriented_cell_volumes(
+    *,
+    corner_global: IntArray[TwoDimensions],
+    vtk_to_corner: typing.Sequence[int],
+    vertex_coordinates: VertexCoordinates,
+    corner_coordinates: NumberArray[ThreeDimensions],
+    mirrored: bool,
+) -> tuple[NumberArray[OneDimension], NumberArray[TwoDimensions]]:
+    """
+    Cell volumes and centroids with the sign of the unmirrored `(x, y, depth)` frame.
+
+    A cell is inverted when its volume is negative. Volumes within round-off of zero are
+    set to exactly zero.
+
+    :param corner_global: Shape `(n_cells, 8)` global vertex index of each cell corner.
+    :param vtk_to_corner: Corner order that maps VTK hexahedron order to `corner_global`.
+    :param vertex_coordinates: Shape `(n_verts, 3)` world coordinates.
+    :param corner_coordinates: Shape `(n_cells, 8, 3)` coordinates of each cell's corners.
+    :param mirrored: Whether the coordinates are a mirror image of the right-handed frame.
+    :returns: `(cell_volumes, cell_centroids)`.
+    """
+    vtk_corner_indices = typing.cast(
+        IntArray[TwoDimensions], corner_global[:, list(vtk_to_corner)].astype(np.int32)
+    )
+    cell_volumes, cell_centroids = compute_hex_volumes_and_centroids(
+        vtk_corner_indices=vtk_corner_indices,
+        vertex_coordinates=vertex_coordinates,  # type: ignore[arg-type]
+    )
+    if mirrored:
+        cell_volumes = -cell_volumes
+    box_volume = np.prod(corner_coordinates.max(axis=1) - corner_coordinates.min(axis=1), axis=1)
+    round_off = (cell_volumes < 0.0) & (cell_volumes >= -1e-9 * box_volume)
+    cell_volumes = typing.cast(NumberArray[OneDimension], np.where(round_off, 0.0, cell_volumes))
+    return cell_volumes, cell_centroids
 
 
 @numba.njit(parallel=True, cache=True)

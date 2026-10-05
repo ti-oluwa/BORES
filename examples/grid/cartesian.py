@@ -85,9 +85,9 @@ if grid.fault_face_indices:
     for face_idxs in grid.fault_face_indices.values():
         for face_idx in face_idxs:
             for side in range(2):
-                ci = int(grid.face_cell_indices[face_idx, side])
-                if ci >= 0:
-                    fault_flag[ci] = 1.0
+                cell_idx = int(grid.face_cell_indices[face_idx, side])
+                if cell_idx >= 0:
+                    fault_flag[cell_idx] = 1.0
 
 # Convert to PyVista grid
 print("\nConverting to PyVista …")
@@ -124,7 +124,7 @@ for row, col, scalar, cmap, title, clim in panel_cfg:
         kwargs["clim"] = clim  # type: ignore
     pl.add_mesh(pore_volume_grid, **kwargs)  # type: ignore
     # flip z (depth down → screen up) and exaggerate
-    pl.set_scale(zscale=-3)  # type: ignore
+    pl.set_scale(zscale=3)  # type: ignore
     pl.view_isometric()  # type: ignore
 
 print("Rendering …  (close window to exit)")

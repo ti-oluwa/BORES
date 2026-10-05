@@ -4,7 +4,7 @@ from typing import TypeAlias
 import numpy as np
 
 from bores.datastructures import MapAxes
-from bores.errors import InvalidFaceConnectivityError
+from bores.errors import InvalidFaceConnectivityError, ValidationError
 from bores.types import IntArray, Integer, NumberArray, OneDimension, TwoDimensions
 
 VertexCoordinates: TypeAlias = NumberArray[TwoDimensions]
@@ -204,6 +204,35 @@ VALID_FAULT_FACE_DIRECTIONS: frozenset[str] = frozenset({
     "Z",
     "Z-",
 })
+
+
+MAP_AXES_PERPENDICULAR_TOLERANCE = 1e-3
+"""Largest accepted cosine of the angle between the two `MAPAXES` axes."""
+
+
+def validate_map_axes(map_axes: MapAxes) -> None:
+    """
+    Check that the two `MAPAXES` axes are perpendicular, as a map placement requires.
+
+    Axes that are not perpendicular shear the grid and change cell volumes, so they are
+    refused instead of applied.
+
+    :param map_axes: Map axes to check.
+    :raises ValidationError: If the axes are not perpendicular.
+    """
+    x_vector = map_axes.map_x_axis_point - map_axes.origin
+    y_vector = map_axes.map_y_axis_point - map_axes.origin
+    x_length = float(np.linalg.norm(x_vector))
+    y_length = float(np.linalg.norm(y_vector))
+    if x_length < 1e-14 or y_length < 1e-14:
+        return
+    cosine = float(x_vector @ y_vector) / (x_length * y_length)
+    if abs(cosine) > MAP_AXES_PERPENDICULAR_TOLERANCE:
+        angle = float(np.degrees(np.arccos(np.clip(cosine, -1.0, 1.0))))
+        raise ValidationError(
+            f"The `MAPAXES` axes are {angle:.1f} degrees apart but must be perpendicular. "
+            f"The six values are the Y-axis point, the origin, then the X-axis point."
+        )
 
 
 def map_xy_to_map_space(

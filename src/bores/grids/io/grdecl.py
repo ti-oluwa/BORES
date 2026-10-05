@@ -41,6 +41,7 @@ from bores.grids.factories.cartesian import make_cartesian_grid
 from bores.grids.factories.corner_point import (
     ActNumArray,
     FaultRecord,
+    InvertedCellPolicy,
     get_map_axes_xy_inverse,
     make_corner_point_grid,
     rederive_corner_point_arrays,
@@ -362,6 +363,7 @@ def load_grdecl(
     encoding: str = "ascii",
     unit_system: UnitSystem | None = None,
     metadata: typing.Mapping[str, typing.Any] | None = None,
+    on_inverted_cells: InvertedCellPolicy | str = InvertedCellPolicy.RAISE,
 ) -> Grid:
     """
     Load a GRDECL corner-point (or Cartesian) grid from a `DeckFile`, file path, raw
@@ -397,8 +399,12 @@ def load_grdecl(
         after loading.
     :param metadata: Optional extra key/value pairs merged into the
         `Grid.metadata` dict.
+    :param on_inverted_cells: What to do with active corner-point cells whose corners fold
+        the cell inside out. `"raise"` (the default) refuses to load the grid,
+        `"deactivate"` marks those cells inactive and warns with how many were removed.
     :returns: A fully initialised `bores.grids.base.Grid`.
-    :raises GridImportError: If required keywords are missing or malformed.
+    :raises GridImportError: If required keywords are missing or malformed, or if active
+        cells are inverted and `on_inverted_cells` is `"raise"`.
     """
     if isinstance(source, DeckFile):
         deck_file = source
@@ -408,7 +414,7 @@ def load_grdecl(
         except DeckParseError as exc:
             raise GridImportError(f"Failed to parse GRDECL deck: {exc}") from exc
 
-    grid = assemble_grid(deck_file, metadata=metadata)
+    grid = assemble_grid(deck_file, metadata=metadata, on_inverted_cells=on_inverted_cells)
     return grid.convert(unit_system) if unit_system is not None else grid
 
 
@@ -463,6 +469,7 @@ def dump_grdecl(
 def assemble_grid(
     deck_file: DeckFile,
     metadata: typing.Mapping[str, typing.Any] | None = None,
+    on_inverted_cells: InvertedCellPolicy | str = InvertedCellPolicy.RAISE,
 ) -> Grid:
     """
     Assemble a `bores.grids.base.Grid` from a parsed `bores.deck.file`.
@@ -502,9 +509,13 @@ def assemble_grid(
 
     try:
         if has_coord:
-            return assemble_corner_point(deck_file, nx, ny, nz, unit_system, meta)
+            return assemble_corner_point(
+                deck_file, nx, ny, nz, unit_system, meta, on_inverted_cells=on_inverted_cells
+            )
         if has_tops:
-            return assemble_cartesian(deck_file, nx, ny, nz, unit_system, meta)
+            return assemble_cartesian(
+                deck_file, nx, ny, nz, unit_system, meta, on_inverted_cells=on_inverted_cells
+            )
     except GridImportError:
         raise
     except Exception as exc:
@@ -525,6 +536,7 @@ def assemble_corner_point(
     nz: Integer,
     unit_system: UnitSystem,
     meta: dict[str, typing.Any],
+    on_inverted_cells: InvertedCellPolicy | str = InvertedCellPolicy.RAISE,
 ) -> Grid:
     """
     Build a corner-point `bores.grids.base.Grid` from a parsed deck.
@@ -535,6 +547,7 @@ def assemble_corner_point(
     :param nz: Grid extent in z.
     :param unit_system: Detected unit system.
     :param meta: Metadata dict (augmented in-place and passed to factory).
+    :param on_inverted_cells: What to do with inverted active cells.
     :returns: Fully initialised `bores.grids.base.Grid`.
     :raises GridImportError: If `COORD` or `ZCORN` are missing or
         malformed.
@@ -562,6 +575,7 @@ def assemble_corner_point(
     fault_records = build_fault_records(deck_file)
     multflt = build_multflt(deck_file)
     return make_corner_point_grid(
+        on_inverted_cells=on_inverted_cells,
         coord=coord,
         zcorn=zcorn,
         actnum=actnum,
@@ -587,6 +601,7 @@ def assemble_cartesian(
     nz: Integer,
     unit_system: UnitSystem,
     meta: dict[str, typing.Any],
+    on_inverted_cells: InvertedCellPolicy | str = InvertedCellPolicy.RAISE,
 ) -> Grid:
     """
     Build a `bores.grids.base.Grid` from `TOPS` / `DX` / `DY` / `DZ` (per-cell) or
@@ -606,6 +621,7 @@ def assemble_cartesian(
     :param nz: Grid extent in z.
     :param unit_system: Detected unit system.
     :param meta: Metadata dict passed to the factory.
+    :param on_inverted_cells: What to do with inverted active cells.
     :returns: Fully initialised `bores.grids.base.Grid`.
     :raises GridImportError: If required keywords are missing or malformed, or `DX` / `DY`
         vary in a way vertical pillars cannot represent.
@@ -702,6 +718,7 @@ def assemble_cartesian(
     meta["coord"] = coord.ravel()
     meta["zcorn"] = zcorn.ravel()
     return make_corner_point_grid(
+        on_inverted_cells=on_inverted_cells,
         coord=coord,  # type: ignore[arg-type]
         zcorn=zcorn,  # type: ignore[arg-type]
         actnum=actnum,
