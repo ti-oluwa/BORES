@@ -82,7 +82,8 @@ def resolve_source(source: TextOrPath, *, encoding: str) -> str:
     Coerce `source` (path, raw text, or bytes) to a single fully
     `INCLUDE`-resolved, comment-stripped text blob.
 
-    :param source: Path, raw deck text string, or raw bytes.
+    :param source: Path, raw deck text string, or raw bytes. A `str` that spans more than one
+        line is raw deck text. A single-line `str` is a file path.
     :param encoding: Character encoding for file/bytes input.
     :returns: Clean text ready for `Deck` scanning.
     :raises DeckParseError: If a file cannot be read.
@@ -97,16 +98,24 @@ def resolve_source(source: TextOrPath, *, encoding: str) -> str:
             text = source.read_text(encoding=encoding)
         except OSError as exc:
             raise DeckParseError(f"Cannot read deck file {source!r}: {exc}") from exc
+    elif "\n" in source or "\r" in source:  # type: ignore[operator]
+        text = typing.cast(str, source)
     else:
         candidate = Path(source)  # type: ignore[arg-type]
-        if candidate.is_file():
-            source_dir = candidate.parent
-            try:
-                text = candidate.read_text(encoding=encoding)
-            except (OSError, UnicodeDecodeError) as exc:
-                raise DeckParseError(f"Cannot read deck file {source!r}: {exc}") from exc
-        else:
-            raise DeckParseError(f"Cannot read deck file. Invalid source: {source!r}")
+        try:
+            is_file = candidate.is_file()
+        except (OSError, ValueError):
+            is_file = False
+        if not is_file:
+            raise DeckParseError(
+                f"Cannot read deck file. No file exists at {source[:80]!r}. A `str` is treated "
+                "as raw deck text only when it spans more than one line."
+            )
+        source_dir = candidate.parent
+        try:
+            text = candidate.read_text(encoding=encoding)
+        except (OSError, UnicodeDecodeError) as exc:
+            raise DeckParseError(f"Cannot read deck file {source!r}: {exc}") from exc
 
     return resolve_includes(text, source_dir)
 

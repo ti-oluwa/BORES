@@ -137,7 +137,7 @@ def test_inverted_cell_policy_accepts_any_letter_case_and_rejects_unknown_values
         ("cartesian", UnitSystem.METRIC),
         ("dome", UnitSystem.FIELD),
         ("snarkgrid", UnitSystem.FIELD),
-        ("40X48x1_3faults", UnitSystem.FIELD),
+        ("40X48X13_faults", UnitSystem.FIELD),
     ],
 )
 def test_bundled_decks_with_map_axes_load(name, unit_system):
