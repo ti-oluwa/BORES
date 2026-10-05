@@ -14,7 +14,7 @@ from bores.types import UnitSystem
 from bores.wells.hydraulics.homogeneous import homogeneous_wellbore
 
 df = DeckFile(
-    "/home/tioluwa/Projects/nagcsu/runs_new/auto_final/NigerDelta UGH1 Composite Field.DATA",
+    "/home/tioluwa/Projects/nagcsu/Data/NigerDelta UGH1 Composite Field v2.DATA",
     encoding="utf-8",
     unit_system=UnitSystem.FIELD,
 )

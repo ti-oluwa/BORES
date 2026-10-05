@@ -171,7 +171,7 @@ from bores.deck.keywords.summary import (
     WWPR,
     WWPT,
 )
-from bores.deck.operators import Operation, resolve_operations
+from bores.deck.operators import resolve_operations
 from bores.types import TextOrPath, UnitSystem
 
 __all__ = ["DataFile", "DeckFile"]
@@ -418,11 +418,9 @@ class DeckFile:
         clean_text = strip_comments(text)
         self._deck = Deck(clean_text)
 
-        self._registry: dict[str, Keyword[typing.Any]] = {
-            keyword.name: keyword for keyword in keywords
-        }
+        self._registry = {keyword.name: keyword for keyword in keywords}
         self._cache: dict[str, typing.Any] = {}
-        self.dimensions: GridDimensions | None = self._resolve_dimensions()
+        self.dimensions = self._resolve_dimensions()
         deck_unit_system = unit_system or self._resolve_unit_system()
         if deck_unit_system is None:
             raise DeckParseError(
@@ -430,8 +428,8 @@ class DeckFile:
                 "Provide `unit_system` on instantiation."
             )
 
-        self.unit_system: UnitSystem = deck_unit_system
-        self._operations: list[Operation] | None = (
+        self.unit_system = deck_unit_system
+        self._operations = (
             resolve_operations(self._deck, self.dimensions)
             if self.dimensions is not None
             else None
@@ -447,9 +445,7 @@ class DeckFile:
             time_unit = "hours"
         elif deck_unit_system == UnitSystem.SI:
             time_unit = "seconds"
-        self._schedule_times: dict[int, float] = get_schedule_times(
-            self._deck, time_unit=time_unit
-        )
+        self._schedule_times = get_schedule_times(self._deck, time_unit=time_unit)
 
     def _resolve_dimensions(self) -> GridDimensions | None:
         """
