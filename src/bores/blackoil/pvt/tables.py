@@ -97,7 +97,7 @@ def build_pchip_2d_interpolator(
             result[chunk] = evaluate_pchip_columns(
                 temperature_knots, over_pressure.T, t_flat[chunk]
             )
-        return result.reshape(shape)
+        return typing.cast(NumberArray[NDimension], result.reshape(shape))
 
     return interpolator
 
@@ -107,10 +107,10 @@ PCHIP_CHUNK_SIZE = 65_536
 
 
 def evaluate_pchip_columns(
-    knots: NumberArray[OneDimension],
-    columns: NumberArray[TwoDimensions],
-    query: NumberArray[OneDimension],
-) -> NumberArray[OneDimension]:
+    knots: npt.NDArray[np.floating],
+    columns: npt.NDArray[np.floating],
+    query: npt.NDArray[np.floating],
+) -> npt.NDArray[np.float64]:
     """
     Evaluate one PCHIP per column of *columns*, each at its own query point.
 
@@ -300,7 +300,7 @@ def build_pchip_3d_interpolator(
             result[start : start + n] = evaluate_pchip_columns(
                 temperature_knots, over_salinity.T, chunk[:, 1]
             )
-        return result
+        return typing.cast(NumberArray[OneDimension], result)
 
     return interpolator
 

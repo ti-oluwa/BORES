@@ -11,7 +11,8 @@ and relative permeability / capillary pressure curves.
 - `PVTW`     - water PVT table (ref pressure, Bw, Cw, viscosity, Cv)
 - `PVDO`     - dead-oil PVT (pressure, Bo, viscosity) tabulated
 - `PVTO`     - live-oil PVT (Rs-bracketed) tabulated
-- `PVCO`     - compressible-oil PVT shorthand
+- `PVCO`     - live-oil PVT with constant compressibility / viscosibility (row per bubble point)
+- `PVCDO`    - dead-oil PVT with constant compressibility / viscosibility (single record)
 - `PVDG`     - dry-gas PVT (pressure, Bg, viscosity) tabulated
 - `PVTG`     - wet-gas PVT (Rv-bracketed) tabulated
 - `ROCK`     - rock compressibility (ref pressure, compressibility)
@@ -33,6 +34,7 @@ from bores.deck.keywords.base import Field, TableKeyword
 
 __all__ = [
     "DENSITY",
+    "PVCDO",
     "PVCO",
     "PVDG",
     "PVDO",
@@ -148,8 +150,8 @@ bracketing primary-key line):
 """
 
 
-PVCO = TableKeyword(
-    "PVCO",
+PVCDO = TableKeyword(
+    "PVCDO",
     columns=[
         Field("reference_pressure", np.float64),
         Field("fvf", np.float64),
@@ -159,18 +161,50 @@ PVCO = TableKeyword(
     ],
 )
 """
-`PVCO` - compressible-oil PVT shorthand table (single-row format).
+`PVCDO` - dead oil (no dissolved gas) with constant compressibility and viscosibility.
 
-Alternative to `PVTO` for oil above bubble point. One record per
-PVT region.
+One record per PVT region (single-row format), evaluated like `PVTW` is for water.
 
 Columns:
 
-- `reference_pressure`       - reference (bubble-point) pressure.
+- `reference_pressure`       - reference pressure.
 - `fvf`          - FVF at `reference_pressure`.
 - `compressibility`          - oil compressibility (1/psi / 1/bar).
 - `viscosity`   - oil viscosity at `reference_pressure`.
 - `viscosibility`          - viscosibility (optional, default 0).
+"""
+
+
+PVCO = TableKeyword(
+    "PVCO",
+    columns=[
+        Field("bubble_point_pressure", np.float64),
+        Field("solution_gor", np.float64),
+        Field("fvf", np.float64),
+        Field("viscosity", np.float64),
+        Field("compressibility", np.float64),
+        Field("viscosibility", np.float64, required=False, default=0.0),
+    ],
+)
+"""
+`PVCO` - live-oil (dissolved-gas) PVT table with constant compressibility / viscosibility.
+
+Each table (one per PVT region) is a sequence of rows, one per bubble point, terminated
+by `/`. Every row is a saturated state. Unlike `PVTO`, the undersaturated behaviour at that
+Rs is not tabulated: it follows from the row's own compressibility and viscosibility.
+
+Columns:
+
+- `bubble_point_pressure` - bubble-point pressure (psi / bar).
+- `solution_gor`          - solution gas-oil ratio at that bubble point (Mscf/stb / sm³/sm³).
+- `fvf`                   - oil FVF at the bubble point (rb/stb / rm³/sm³).
+- `viscosity`             - oil viscosity at the bubble point (cP).
+- `compressibility`       - undersaturated oil compressibility `-(1/Bo)·(dBo/dP)` (1/psi / 1/bar).
+- `viscosibility`         - undersaturated oil viscosibility `(1/μ)·(dμ/dP)` (1/psi / 1/bar),
+    optional (default 0).
+
+Rows must be in ascending bubble-point-pressure order. For the single-record dead-oil layout
+(reference pressure, Bo, compressibility, viscosity, viscosibility) use `PVCDO`.
 """
 
 

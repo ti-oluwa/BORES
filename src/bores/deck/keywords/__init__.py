@@ -47,6 +47,7 @@ from bores.deck.keywords.grid import (
 )
 from bores.deck.keywords.props import (
     DENSITY,
+    PVCDO,
     PVCO,
     PVDG,
     PVDO,
@@ -249,6 +250,7 @@ __all__ = [
     "PORO",
     "PORV",
     "PRESSURE",
+    "PVCDO",
     "PVCO",
     "PVDG",
     "PVDO",

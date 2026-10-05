@@ -193,7 +193,7 @@ class PVT(StoreSerializable):
         """
         Build all PVT regions' tables from a parsed `DeckFile`.
 
-        Detects which Eclipse PVT keywords are present (`PVTO` > `PVDO` > `PVCO` for oil;
+        Detects which Eclipse PVT keywords are present (`PVTO` > `PVCO` > `PVDO` > `PVCDO` for oil;
         `PVTG` > `PVDG` for gas; `PVTW` for water) and builds one `PVTRegion` per `PVTNUM` region.
 
         :param deck_file: Parsed `DeckFile` containing PROPS-section keywords.
@@ -759,8 +759,8 @@ def build_oil_data_from_pvdo(
     )
 
 
-def build_oil_data_from_pvco(
-    pvco_record: dict[str, Number],
+def build_oil_data_from_pvcdo(
+    pvcdo_record: dict[str, Number],
     density_record: dict[str, Number] | None,
     temperature: TemperatureSpec,
     unit_system: UnitSystem,
@@ -770,11 +770,11 @@ def build_oil_data_from_pvco(
     dtype: npt.DTypeLike = None,
 ) -> PVTData:
     """
-    Build dead-oil `PVTData` from a `PVCO` analytical record.
+    Build dead-oil `PVTData` from a `PVCDO` analytical record.
 
-    The record holds `(reference_pressure, fvf, compressibility, viscosity, viscosibility)`,
-    the layout of Eclipse's `PVCDO`: oil without dissolved gas, with constant compressibility
-    `co` and viscosibility `cv`. Like `PVTW` for water, `Bo(P)` and `μo(P)` are evaluated
+    The record holds `(reference_pressure, fvf, compressibility, viscosity, viscosibility)`:
+    oil without dissolved gas, with constant compressibility `co` and viscosibility `cv`.
+    Like `PVTW` for water, `Bo(P)` and `μo(P)` are evaluated
     with Eclipse's second-order series on a synthetic pressure grid and handed to
     `build_oil_data_from_pvdo`. With `X = co · (P - P_ref)` and `Y = (co - cv) · (P - P_ref)`:
 
@@ -783,7 +783,7 @@ def build_oil_data_from_pvco(
 
     The pressure grid spans `[P_ref/5, P_ref x 5]`.
 
-    :param pvco_record: Dict with keys `"reference_pressure"`, `"fvf"`, `"compressibility"`,
+    :param pvcdo_record: Dict with keys `"reference_pressure"`, `"fvf"`, `"compressibility"`,
         `"viscosity"`, and optionally `"viscosibility"` (default 0).
     :param density_record: `DENSITY` record; `"oil"` key used for ρo,SC.
     :param temperature: Reservoir temperature.
@@ -791,18 +791,18 @@ def build_oil_data_from_pvco(
     :param dtype: Array dtype; defaults to `get_dtype()`.
     :returns: `PVTData` for the oil phase.
     """
-    reference_pressure = pvco_record["reference_pressure"]
-    reference_oil_fvf = pvco_record["fvf"]
-    oil_compressibility = pvco_record["compressibility"]
-    reference_viscosity = pvco_record["viscosity"]
-    oil_viscosibility = pvco_record.get("viscosibility", 0.0)
+    reference_pressure = pvcdo_record["reference_pressure"]
+    reference_oil_fvf = pvcdo_record["fvf"]
+    oil_compressibility = pvcdo_record["compressibility"]
+    reference_viscosity = pvcdo_record["viscosity"]
+    oil_viscosibility = pvcdo_record.get("viscosibility", 0.0)
 
     if reference_oil_fvf <= 0:
-        raise ValidationError("`PVCO` Bo must be positive.")
+        raise ValidationError("`PVCDO` Bo must be positive.")
     if oil_compressibility < 0:
-        raise ValidationError("`PVCO` co (compressibility) must be non-negative.")
+        raise ValidationError("`PVCDO` co (compressibility) must be non-negative.")
     if reference_viscosity <= 0:
-        raise ValidationError("`PVCO` viscosity must be positive.")
+        raise ValidationError("`PVCDO` viscosity must be positive.")
 
     pressures = np.linspace(
         max(0.0, reference_pressure / 5.0), reference_pressure * 5.0, n_pressure_points
@@ -819,6 +819,97 @@ def build_oil_data_from_pvco(
     ]
     return build_oil_data_from_pvdo(
         pvdo_records=synthetic_rows,
+        density_record=density_record,
+        temperature=temperature,
+        unit_system=unit_system,
+        interpolation_method=interpolation_method,
+        depth_range=depth_range,
+        dtype=dtype,
+    )
+
+
+def build_oil_data_from_pvco(
+    pvco_records: list[dict[str, typing.Any]],
+    density_record: dict[str, Number] | None,
+    temperature: TemperatureSpec,
+    unit_system: UnitSystem,
+    n_undersaturated_points: int = 10,
+    pressure_span_factor: Number = 3.0,
+    interpolation_method: InterpolationMethod = "linear",
+    depth_range: tuple[Number, Number] | None = None,
+    dtype: npt.DTypeLike = None,
+) -> PVTData:
+    """
+    Build live-oil `PVTData` from a parsed `PVCO` record set.
+
+    `PVCO` format: one row per bubble point, `(bubble_point_pressure, solution_gor, fvf,
+    viscosity, compressibility, viscosibility)`. Each row is a saturated state. The undersaturated
+    branch at that Rs follows from the row's own compressibility `co` and viscosibility `cv`, with
+    Eclipse's second-order series (as for `PVTW` / `PVCDO`). With `X = co · (P - Pb)` and
+    `Y = (co - cv) · (P - Pb)`:
+
+    - `Bo(P) = Bob / (1 + X + X²/2)`
+    - `μo(P) = μob · (1 + X + X²/2) / (1 + Y + Y²/2)`
+
+    Every row is expanded into the equivalent `PVTO` group (the saturated point plus
+    `n_undersaturated_points` points up to `pressure_span_factor x` the highest bubble point) and
+    handed to `build_oil_data_from_pvto`, so the saturated envelope, bubble-point table and
+    derived tables are built exactly as for `PVTO`.
+
+    :param pvco_records: List of row dicts with keys `"bubble_point_pressure"`, `"solution_gor"`,
+        `"fvf"`, `"viscosity"`, `"compressibility"` and optionally `"viscosibility"` (default 0).
+        `"solution_gor"` is in deck units (Mscf/stb under FIELD), like `PVTO`.
+    :param density_record: `DENSITY` record dict with `"oil"` and `"gas"` keys.
+    :param temperature: Reservoir temperature.
+    :param n_undersaturated_points: Undersaturated pressure points generated per bubble point.
+    :param pressure_span_factor: The undersaturated branches extend to this multiple of the
+        highest bubble-point pressure.
+    :param dtype: Array dtype; defaults to `get_dtype()`.
+    :returns: `PVTData` for the oil phase.
+    """
+    if len(pvco_records) < 2:
+        raise ValidationError(
+            f"`PVCO` table requires at least 2 rows (bubble points); got {len(pvco_records)}."
+        )
+
+    rows = sorted(pvco_records, key=lambda row: row["bubble_point_pressure"])
+    maximum_pressure = pressure_span_factor * rows[-1]["bubble_point_pressure"]
+    synthetic_rows: list[dict[str, typing.Any]] = []
+    for row in rows:
+        bubble_point_pressure = row["bubble_point_pressure"]
+        bubble_point_fvf = row["fvf"]
+        bubble_point_viscosity = row["viscosity"]
+        oil_compressibility = row["compressibility"]
+        oil_viscosibility = row.get("viscosibility", 0.0)
+
+        if bubble_point_pressure <= 0:
+            raise ValidationError("`PVCO` bubble-point pressures must be positive.")
+        if bubble_point_fvf <= 0:
+            raise ValidationError("`PVCO` Bo values must be positive.")
+        if oil_compressibility < 0:
+            raise ValidationError("`PVCO` co (compressibility) values must be non-negative.")
+        if bubble_point_viscosity <= 0:
+            raise ValidationError("`PVCO` viscosity values must be positive.")
+
+        pressures = np.linspace(bubble_point_pressure, maximum_pressure, n_undersaturated_points)
+        delta_p = pressures - bubble_point_pressure
+        x = oil_compressibility * delta_p
+        y = (oil_compressibility - oil_viscosibility) * delta_p
+        series_x = 1.0 + x + 0.5 * x * x
+        oil_fvf = bubble_point_fvf / series_x
+        oil_viscosity = bubble_point_viscosity * series_x / (1.0 + y + 0.5 * y * y)
+        synthetic_rows.extend(
+            {
+                "solution_gor": row["solution_gor"],
+                "pressure": pressure,
+                "fvf": fvf,
+                "viscosity": viscosity,
+            }
+            for pressure, fvf, viscosity in zip(pressures, oil_fvf, oil_viscosity, strict=False)
+        )
+
+    return build_oil_data_from_pvto(
+        pvto_records=synthetic_rows,
         density_record=density_record,
         temperature=temperature,
         unit_system=unit_system,
@@ -1260,8 +1351,9 @@ def load_pvt_regions(
     Detects which Eclipse PVT keywords are present and builds one
     `PVTRegion` per `PVTNUM` region:
 
-    - Oil: `PVTO` (live oil, preferred) -> `PVDO` (dead oil) -> `PVCO`
-      (analytical dead oil with constant compressibility and viscosibility).
+    - Oil: `PVTO` (live oil, tabulated) -> `PVCO` (live oil, constant undersaturated
+      compressibility and viscosibility) -> `PVDO` (dead oil, tabulated) -> `PVCDO`
+      (dead oil, constant compressibility and viscosibility).
     - Gas: `PVTG` (wet gas, preferred) -> `PVDG` (dry gas).
     - Water: `PVTW` (always analytical; converted to a table internally).
 
@@ -1283,14 +1375,21 @@ def load_pvt_regions(
     pvto_records: list | None = deck_file.get("PVTO")
     pvdo_records: list | None = deck_file.get("PVDO")
     pvco_records: list | None = deck_file.get("PVCO")
+    pvcdo_records: list | None = deck_file.get("PVCDO")
     pvtg_records: list | None = deck_file.get("PVTG")
     pvdg_records: list | None = deck_file.get("PVDG")
     pvtw_records: list | None = deck_file.get("PVTW")
     density_records: list | None = deck_file.get("DENSITY")
 
-    if pvto_records is None and pvdo_records is None and pvco_records is None:
+    if (
+        pvto_records is None
+        and pvdo_records is None
+        and pvco_records is None
+        and pvcdo_records is None
+    ):
         raise ValidationError(
-            "No oil PVT keyword found in DeckFile. Expected one of: `PVTO`, `PVDO`, `PVCO`."
+            "No oil PVT keyword found in DeckFile. "
+            "Expected one of: `PVTO`, `PVDO`, `PVCO`, `PVCDO`."
         )
 
     # Number of regions is the maximum length across all keyword lists
@@ -1300,6 +1399,7 @@ def load_pvt_regions(
             pvto_records,
             pvdo_records,
             pvco_records,
+            pvcdo_records,
             pvtg_records,
             pvdg_records,
             pvtw_records,
@@ -1339,6 +1439,16 @@ def load_pvt_regions(
                 interpolation_method=interpolation_method,
                 dtype=dtype,
             )
+        elif pvco_records is not None and region_idx < len(pvco_records):
+            # PVCO: live oil, one row per bubble point (constant undersaturated co / cv)
+            oil_data = build_oil_data_from_pvco(
+                pvco_records=pvco_records[region_idx],
+                density_record=density_record,
+                temperature=temperature.region(pvtnum),
+                unit_system=unit_system,
+                interpolation_method=interpolation_method,
+                dtype=dtype,
+            )
         elif pvdo_records is not None and region_idx < len(pvdo_records):
             oil_data = build_oil_data_from_pvdo(
                 pvdo_records=pvdo_records[region_idx],
@@ -1348,12 +1458,12 @@ def load_pvt_regions(
                 interpolation_method=interpolation_method,
                 dtype=dtype,
             )
-        elif pvco_records is not None and region_idx < len(pvco_records):
-            # PVCO: single-record analytical model (constant compressibility / viscosibility)
-            pvco_record = pvco_records[region_idx]
-            if pvco_record:
-                oil_data = build_oil_data_from_pvco(
-                    pvco_record=pvco_record[0],
+        elif pvcdo_records is not None and region_idx < len(pvcdo_records):
+            # PVCDO: single-record dead oil (constant compressibility / viscosibility)
+            pvcdo_record = pvcdo_records[region_idx]
+            if pvcdo_record:
+                oil_data = build_oil_data_from_pvcdo(
+                    pvcdo_record=pvcdo_record[0],
                     density_record=density_record,
                     temperature=temperature.region(pvtnum),
                     unit_system=unit_system,
@@ -1441,10 +1551,12 @@ def load_pvt_regions(
             pvtnum,
             "`PVTO`"
             if pvto_records and region_idx < len(pvto_records)
-            else "`PVDO`"
-            if pvdo_records and region_idx < len(pvdo_records)
             else "`PVCO`"
             if pvco_records and region_idx < len(pvco_records)
+            else "`PVDO`"
+            if pvdo_records and region_idx < len(pvdo_records)
+            else "`PVCDO`"
+            if pvcdo_records and region_idx < len(pvcdo_records)
             else "none",
             "`PVTG`"
             if pvtg_records and region_idx < len(pvtg_records)
