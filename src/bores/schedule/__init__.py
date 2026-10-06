@@ -7,8 +7,6 @@ from bores.schedule.base import (
     Schedule,
     ScheduleContext,
     ScheduleItem,
-    action_type,
-    event_type,
 )
 from bores.schedule.events import (
     AllOf,
@@ -26,7 +24,6 @@ from bores.schedule.summary import (
     SummaryReport,
     record_at,
     record_every,
-    summary_type,
 )
 from bores.schedule.utils import all_of, any_of, at, item, schedule
 
@@ -49,14 +46,11 @@ __all__ = [
     "ThresholdEvent",
     "TimeEvent",
     "TimeStepEvent",
-    "action_type",
     "all_of",
     "any_of",
     "at",
-    "event_type",
     "item",
     "record_at",
     "record_every",
     "schedule",
-    "summary_type",
 ]

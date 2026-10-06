@@ -320,9 +320,23 @@ def initialize_center_point_equilibrium(
         return np.interp(depth, sorted_depths, sorted_temperature)
 
     def compute_oil_density(pressure: Number, depth: Number) -> Number:
-        return oil_table.density(pressure, get_temperature_at(depth)).astype(  # type: ignore[union-attr, return-value]
-            dtype, copy=False
-        )
+        temperature_at_depth = get_temperature_at(depth)
+        if rsvd_table is not None:
+            # `Rs(depth)` from `RSVD`: oil is undersaturated wherever `P` exceeds the
+            # bubble point of that Rs
+            density = oil_table.density(
+                pressure,
+                temperature_at_depth,
+                solution_gor=rsvd_table.at_depth(depth),  # type: ignore[arg-type]
+            )
+        else:
+            # No `RSVD`: assume saturated oil (`Pb = P`) everywhere in the oil zone, the same
+            # assumption used for `Rs` below. `bubble_point_pressure=pressure` selects the
+            # saturated branch, which reads the density straight off the table at `P`.
+            density = oil_table.density(
+                pressure, temperature_at_depth, bubble_point_pressure=pressure
+            )
+        return density.astype(dtype, copy=False)  # type: ignore[union-attr, return-value]
 
     def compute_gas_density(pressure: Number, depth: Number) -> Number:
         assert gas_table is not None

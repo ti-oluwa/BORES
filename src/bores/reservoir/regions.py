@@ -6,7 +6,6 @@ from typing_extensions import Self
 
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
-from bores.serde.stores import StoreSerializable
 from bores.types import IntCellArray
 
 __all__ = ["Regions"]
@@ -28,11 +27,11 @@ def load_region_array(
 
 
 @attrs.frozen(slots=True)
-class Regions(StoreSerializable):
+class Regions:
     """
     Reservoir per-cell region assignments metadata.
 
-    Populated from the REGIONS section of an Eclipse deck, or supplied
+    Populated from the `REGIONS` section of an Eclipse deck, or supplied
     directly by the user. All region arrays are 1-based integer indices
     selecting which PVT, saturation-function, equilibration, or rock
     compaction table applies to each cell.

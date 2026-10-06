@@ -52,7 +52,7 @@ __all__ = [
 
 
 @attrs.frozen(slots=True)
-class RockCompressibility(StoreSerializable):
+class RockCompressibility:
     reference_pressure: CellArray
     """
     Shape (n_cells,) - reference pressure at which each cell's pore volume equals the

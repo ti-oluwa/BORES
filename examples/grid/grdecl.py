@@ -6,7 +6,7 @@ from bores.grids.utils import make_pyvista_grid
 from bores.types import UnitSystem
 
 df = DeckFile("data/Norne.grdecl", unit_system=UnitSystem.FIELD)
-grid = load_grdecl(source=df, encoding="utf-8", on_inverted_cells="deactivate")
+grid = load_grdecl(source=df, encoding="utf-8", on_inverted_cells="absolute")
 print(f"cells   : {grid.n_cells}")
 print(f"faces   : {grid.n_faces}")
 # print(f"volumes : {grid.cell_volumes}")

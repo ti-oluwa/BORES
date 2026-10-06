@@ -11,14 +11,13 @@ from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.grids.base import ConnectionType, Grid
 from bores.grids.factories.base import VALID_FAULT_FACE_DIRECTIONS
-from bores.serde.base import Serializable
 from bores.types import Integer, Number
 
 __all__ = ["Fault", "apply_faults", "remove_faults"]
 
 
 @attrs.frozen(slots=True, unsafe_hash=True)
-class Fault(Serializable):
+class Fault:
     """
     Definition of a single named fault and its optional transmissibility multiplier.
 

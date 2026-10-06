@@ -10,7 +10,6 @@ from bores.constants import UnitConversionTable, c, get_conversion_factors
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.precision import get_dtype
-from bores.serde.base import Serializable
 from bores.serde.stores import StoreSerializable
 from bores.types import (
     Number,
@@ -163,7 +162,7 @@ def load_depth_tables(
 
 
 @attrs.frozen(slots=True)
-class EquilibriumRegion(Serializable):
+class EquilibriumRegion:
     """
     Gravity/capillary equilibration data for a single `EQLNUM` region -
     one record of the Eclipse `EQUIL` keyword.

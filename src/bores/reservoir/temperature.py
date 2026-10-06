@@ -9,7 +9,6 @@ from bores.constants import UnitConversionTable, get_conversion_factors
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.precision import get_dtype
-from bores.serde.base import Serializable
 from bores.serde.stores import StoreSerializable
 from bores.types import (
     CellArray,
@@ -26,7 +25,7 @@ __all__ = ["Temperature", "TemperatureGradient", "TemperatureTable"]
 
 
 @attrs.frozen(slots=True)
-class TemperatureGradient(Serializable):
+class TemperatureGradient:
     """
     A linear temperature-depth gradient for a single PVT region.
 
@@ -198,7 +197,7 @@ TemperatureSpec = Number | TemperatureGradient | TemperatureTable
 
 
 @attrs.frozen(slots=True)
-class Temperature(StoreSerializable):
+class Temperature:
     """
     Reservoir temperature specification supporting per-region scalars,
     gradients, and depth-indexed tables.

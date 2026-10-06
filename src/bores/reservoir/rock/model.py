@@ -19,7 +19,6 @@ from bores.reservoir.rock.compressibility import (
     RockCompressibility,
     RockCompressibilityTables,
 )
-from bores.serde.stores import StoreSerializable
 from bores.types import (
     CellArray,
     IntCellArray,
@@ -46,7 +45,7 @@ def load_cell_array(
 
 
 @attrs.frozen(slots=True)
-class Permeability(StoreSerializable):
+class Permeability:
     """
     Absolute permeability tensor stored as three orthogonal components.
 
@@ -180,7 +179,7 @@ class Permeability(StoreSerializable):
 
 
 @attrs.frozen(slots=True)
-class Rock(StoreSerializable):
+class Rock:
     """
     Static petrophysical properties of the reservoir rock.
 
