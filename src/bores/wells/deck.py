@@ -13,10 +13,11 @@ from bores.deck.file import DeckFile
 from bores.deck.keywords.base import get_schedule_times
 from bores.errors import NotSupportedError, ValidationError
 from bores.grids.base import Grid
-from bores.schedule.base import Schedule, ScheduleItem
-from bores.schedule.events import TimeEvent
+from bores.schedule.actions import RunSequence
+from bores.schedule.base import Action, Event, Schedule, ScheduleItem
+from bores.schedule.events import AllOf, AnyOf, ComparisonOperator, TimeEvent, TimeWindowEvent
 from bores.schedule.summary import RecordSummary, Summary
-from bores.types import FluidPhase, UnitSystem
+from bores.types import FluidPhase, Number, UnitSystem
 from bores.utils import TIME_UNIT_PER_UNIT_SYSTEM
 from bores.wells import summary as ws
 from bores.wells.base import CompletionStatus, Perforation, Well, Wells, WellStatus, WellType
@@ -30,6 +31,7 @@ from bores.wells.controls import (
     Limit,
     ProducerControl,
     ProducerControlMode,
+    RateQuantity,
     THPLimit,
     WellControl,
     WellControls,
@@ -56,13 +58,16 @@ from bores.wells.mappings import (
 from bores.wells.schedule import (
     ActivateCompletion,
     ActivateWell,
+    GasOilRatioThreshold,
     MultiplyConnectionFactor,
+    RateThreshold,
     SetGroupLimit,
     SetLimit,
     SetWellControl,
     SetWellLift,
     SetWellTarget,
     UpdateWellStatus,
+    WaterCutThreshold,
 )
 from bores.wells.trajectory import TrajectoryStation, WellTrajectory
 
@@ -1441,6 +1446,31 @@ def load_summary_items(
     ]
 
 
+WLIFT_TRIGGER_QUANTITIES: dict[str, RateQuantity] = {
+    "OIL": RateQuantity.OIL,
+    "GAS": RateQuantity.GAS,
+    "WATER": RateQuantity.WATER,
+    "LIQ": RateQuantity.LIQUID,
+}
+"""Deck `WLIFT` trigger phase to the rate quantity its rate trigger watches."""
+
+
+def get_item_start_time(item: ScheduleItem) -> Number:
+    """
+    The elapsed time a schedule item first becomes live.
+
+    :param item: A schedule item whose event is a `TimeEvent`, an interval event, or a
+        `TimeWindowEvent` combined with a condition by `AllOf`.
+    :returns: The event's time, or the start of its time window.
+    """
+    event = item.event
+    if isinstance(event, AllOf):
+        event = next(inner for inner in event.events if isinstance(inner, TimeWindowEvent))
+    if isinstance(event, TimeWindowEvent):
+        return event.start
+    return event.at  # type: ignore[attr-defined]
+
+
 def load_schedule(
     deck_file: DeckFile, *, compiled_at: float = 0.0
 ) -> Schedule["CompiledBlackOilModel"]:
@@ -1570,16 +1600,8 @@ def load_schedule(
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
+        well_name = record["well"]
         unsupported = [
-            name
-            for name, value in (
-                ("rate trigger (`trigger_limit`)", record["trigger_limit"]),
-                ("water cut trigger (`water_cut_limit`)", record["water_cut_limit"]),
-                ("gas-oil ratio trigger (`gas_oil_ratio_limit`)", record["gas_oil_ratio_limit"]),
-                ("`new_thp_limit`", record["new_thp_limit"]),
-            )
-            if not np.isclose(value, 0.0)
-        ] + [
             name
             for name, value in (
                 ("`alq_shift`", record["alq_shift"]),
@@ -1589,21 +1611,78 @@ def load_schedule(
         ]
         if unsupported:
             raise NotSupportedError(
-                f"`WLIFT` for well {record['well']!r} uses {', '.join(unsupported)}, which is not "
-                "supported yet. Only an unconditional change of VFP table, ALQ and efficiency "
-                "factor is."
+                f"`WLIFT` for well {well_name!r} uses {', '.join(unsupported)}, which is not "
+                "supported yet."
+            )
+
+        actions: list[Action] = [
+            SetWellLift(
+                well_name=well_name,
+                vfp_table=record["new_vfp_table"] or None,
+                artificial_lift_quantity=record["new_alq"] or None,
+                efficiency_factor=record["new_efficiency_factor"] or None,
+            )
+        ]
+        if not np.isclose(record["new_thp_limit"], 0.0):
+            actions.append(
+                SetLimit(
+                    well_name=well_name, kind=LimitKind.THP, min_value=record["new_thp_limit"]
+                )
+            )
+        action = actions[0] if len(actions) == 1 else RunSequence(actions=tuple(actions))
+
+        triggers: list[Event] = []
+        if not np.isclose(record["trigger_limit"], 0.0):
+            triggers.append(
+                RateThreshold(
+                    well_name=well_name,
+                    quantity=WLIFT_TRIGGER_QUANTITIES[record["trigger_phase"]],
+                    surface=True,
+                    op=ComparisonOperator.LT,
+                    threshold=record["trigger_limit"],
+                )
+            )
+        if not np.isclose(record["water_cut_limit"], 0.0):
+            triggers.append(
+                WaterCutThreshold(
+                    well_name=well_name,
+                    op=ComparisonOperator.GT,
+                    threshold=record["water_cut_limit"],
+                )
+            )
+        if not np.isclose(record["gas_oil_ratio_limit"], 0.0):
+            triggers.append(
+                GasOilRatioThreshold(
+                    well_name=well_name,
+                    op=ComparisonOperator.GT,
+                    threshold=record["gas_oil_ratio_limit"],
+                )
+            )
+
+        event: Event
+        if not triggers:
+            event = TimeEvent(at=schedule_time)
+        else:
+            # A trigger is live from this record until the deck next changes the well's lift
+            # settings (a later `WLIFT` or `WCONPROD` for it). The new settings persist in the
+            # compiled arrays once applied, and re-applying them while the trigger holds is
+            # idempotent, so no one-shot state is needed.
+            later_changes = [
+                other["schedule_time"]
+                for keyword in ("WLIFT", "WCONPROD")
+                for other in deck_file.get(keyword) or empty
+                if other["well"] == well_name and other["schedule_time"] > schedule_time
+            ]
+            event = AllOf(
+                events=(
+                    TimeWindowEvent(
+                        start=schedule_time, end=min(later_changes) if later_changes else None
+                    ),
+                    triggers[0] if len(triggers) == 1 else AnyOf(events=tuple(triggers)),
+                )
             )
         items.append(
-            ScheduleItem(
-                event=TimeEvent(at=schedule_time),
-                action=SetWellLift(
-                    well_name=record["well"],
-                    vfp_table=record["new_vfp_table"] or None,
-                    artificial_lift_quantity=record["new_alq"] or None,
-                    efficiency_factor=record["new_efficiency_factor"] or None,
-                ),
-                name=f"wlift:{record['well']}@{schedule_time}",
-            )
+            ScheduleItem(event=event, action=action, name=f"wlift:{well_name}@{schedule_time}")
         )
 
     for record in deck_file.get("WCONPROD") or empty:
@@ -1768,5 +1847,5 @@ def load_schedule(
         )
 
     items.extend(load_summary_items(deck_file, compiled_at=compiled_at))
-    items.sort(key=lambda rule: rule.event.at)  # type: ignore[attr-defined]
+    items.sort(key=get_item_start_time)
     return Schedule(items=tuple(items))

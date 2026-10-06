@@ -421,10 +421,161 @@ def test_schedule_turns_wlift_and_reissued_controls_into_lift_actions(tmp_path):
     )
 
 
-def test_wlift_triggers_are_reported_as_unsupported_not_ignored(tmp_path):
-    from bores.errors import NotSupportedError
+class StubWorkspace:
+    """Stands in for `SimulationWorkspace`, which the rate events type-check their input against."""
+
+    def __init__(self, oil, water, gas):
+        self.wells = types.SimpleNamespace(
+            surface_oil_rates=np.array(oil, dtype=float),
+            surface_water_rates=np.array(water, dtype=float),
+            surface_gas_rates=np.array(gas, dtype=float),
+            oil_rates=np.array(oil, dtype=float),
+            water_rates=np.array(water, dtype=float),
+            gas_rates=np.array(gas, dtype=float),
+        )
+
+
+@pytest.fixture
+def stub_workspace_type(monkeypatch):
+    monkeypatch.setattr("bores.simulation.workspace.SimulationWorkspace", StubWorkspace)
+
+
+def event_context(time, oil=(0.0, 0.0, 0.0), water=(0.0, 0.0, 0.0), gas=(0.0, 0.0, 0.0)):
+    return types.SimpleNamespace(
+        time=time, previous_time=None, extra={"workspace": StubWorkspace(oil, water, gas)}
+    )
+
+
+def test_time_window_event_is_live_only_inside_the_window():
+    from bores.schedule.events import TimeWindowEvent
+
+    window = TimeWindowEvent(start=30.0, end=90.0)
+    assert [
+        window(None, types.SimpleNamespace(time=t)) for t in (10.0, 30.0, 60.0, 90.0, 120.0)
+    ] == [
+        False,
+        True,
+        True,
+        False,
+        False,
+    ]
+    assert TimeWindowEvent(start=30.0)(None, types.SimpleNamespace(time=1e9))
+
+
+def test_rate_water_cut_and_gas_oil_ratio_events_read_the_workspace(stub_workspace_type):
+    from bores.schedule.events import ComparisonOperator
+    from bores.wells.controls import RateQuantity
+    from bores.wells.schedule import GasOilRatioThreshold, RateThreshold, WaterCutThreshold
+
+    model = lift_model()
+    context = event_context(1.0, oil=(80.0, 0, 0), water=(20.0, 0, 0), gas=(40000.0, 0, 0))
+    liquid = RateThreshold(
+        well_name="P1",
+        quantity=RateQuantity.LIQUID,
+        surface=True,
+        op=ComparisonOperator.LT,
+        threshold=150.0,
+    )
+    oil = RateThreshold(
+        well_name="P1",
+        quantity=RateQuantity.OIL,
+        surface=True,
+        op=ComparisonOperator.LT,
+        threshold=50.0,
+    )
+    assert liquid(model, context) and not oil(model, context)
+    assert WaterCutThreshold(well_name="P1", op=ComparisonOperator.GT, threshold=0.15)(
+        model, context
+    )
+    assert not WaterCutThreshold(well_name="P1", op=ComparisonOperator.GT, threshold=0.25)(
+        model, context
+    )
+    assert GasOilRatioThreshold(well_name="P1", op=ComparisonOperator.GT, threshold=400.0)(
+        model, context
+    )
+    assert not GasOilRatioThreshold(well_name="P1", op=ComparisonOperator.GT, threshold=600.0)(
+        model, context
+    )
+
+
+def test_water_cut_and_gas_oil_ratio_are_safe_for_a_well_with_no_oil_or_liquid(
+    stub_workspace_type,
+):
+    from bores.schedule.events import ComparisonOperator
+    from bores.wells.schedule import GasOilRatioThreshold, WaterCutThreshold
+
+    model = lift_model()
+    assert not WaterCutThreshold(well_name="P2", op=ComparisonOperator.GT, threshold=0.0)(
+        model, event_context(1.0)
+    )
+    only_gas = event_context(1.0, gas=(0.0, 0.0, 500.0))
+    assert GasOilRatioThreshold(well_name="P2", op=ComparisonOperator.GT, threshold=1e9)(
+        model, only_gas
+    )
+
+
+WLIFT_SCHEDULE = (
+    "WCONPROD\n 'P1' OPEN LRAT 1* 1* 1* 500 1* 80 1* 3 250 /\n/\nTSTEP\n 30 /\n"
+    "WLIFT\n 'P1' 100 OIL 2 400 0.8 /\n/\nTSTEP\n 60 /\n"
+    "WCONPROD\n 'P1' OPEN LRAT 1* 1* 1* 500 1* 80 1* 6 0 /\n/\nTSTEP\n 30 /\n"
+)
+
+
+def wlift_item(tmp_path, text=WLIFT_SCHEDULE):
     from bores.wells.deck import load_schedule
 
-    deck = deck_from(tmp_path, "WLIFT\n 'P1' 100 OIL 2 400 /\n/\nTSTEP\n 30 /\n")
-    with pytest.raises(NotSupportedError, match="trigger_limit"):
+    deck = deck_from(tmp_path, text)
+    return next(
+        item for item in load_schedule(deck, compiled_at=-1.0) if item.name.startswith("wlift:")
+    )
+
+
+def test_triggered_wlift_is_live_between_the_record_and_the_next_lift_change(
+    tmp_path, stub_workspace_type
+):
+    item = wlift_item(tmp_path)
+    model = lift_model()
+    low, high = (50.0, 0, 0), (150.0, 0, 0)
+    assert not item.event(model, event_context(20.0, oil=low))  # before the WLIFT record
+    assert item.event(model, event_context(40.0, oil=low))  # inside the window, rate below limit
+    assert not item.event(model, event_context(40.0, oil=high))  # inside the window, rate fine
+    assert not item.event(model, event_context(95.0, oil=low))  # after the next WCONPROD
+
+
+def test_triggered_wlift_changes_persist_after_the_trigger_clears(tmp_path, stub_workspace_type):
+    item = wlift_item(tmp_path)
+    model = lift_model()
+    assert item.event(model, event_context(40.0, oil=(50.0, 0, 0)))
+    item.action(model, event_context(40.0))
+    controls = model.wells.controls
+    assert controls.get_vfp_table_number(well_row=0) == 2
+    assert controls.get_artificial_lift_quantity(well_row=0) == pytest.approx(400.0)
+    # The rate recovers, the trigger no longer holds, and the new settings stay.
+    assert not item.event(model, event_context(50.0, oil=(500.0, 0, 0)))
+    assert controls.get_vfp_table_number(well_row=0) == 2
+
+
+def test_wlift_combines_its_triggers_and_applies_a_new_thp_limit(tmp_path):
+    from bores.schedule.actions import RunSequence
+    from bores.schedule.events import AllOf, AnyOf
+
+    text = "WLIFT\n 'P1' 100 OIL 2 400 1* 0.7 5 3000 /\n/\nTSTEP\n 30 /\n"
+    item = wlift_item(tmp_path, text)
+    assert isinstance(item.event, AllOf) and isinstance(item.event.events[1], AnyOf)
+    kinds = {type(event).__name__ for event in item.event.events[1].events}
+    assert kinds == {"RateThreshold", "WaterCutThreshold", "GasOilRatioThreshold"}
+    assert isinstance(item.action, RunSequence) and len(item.action.actions) == 2
+    assert item.event.events[0].end is None  # nothing later changes this well's lift
+
+
+def test_wlift_with_no_trigger_applies_at_its_own_time_and_shifts_stay_unsupported(tmp_path):
+    from bores.errors import NotSupportedError
+    from bores.schedule.events import TimeEvent
+    from bores.wells.deck import load_schedule
+
+    assert isinstance(
+        wlift_item(tmp_path, "WLIFT\n 'P1' 1* 1* 2 400 /\n/\nTSTEP\n 30 /\n").event, TimeEvent
+    )
+    deck = deck_from(tmp_path, "WLIFT\n 'P1' 100 OIL 2 400 1* 1* 1* 1* 50 /\n/\nTSTEP\n 30 /\n")
+    with pytest.raises(NotSupportedError, match="alq_shift"):
         load_schedule(deck, compiled_at=-1.0)

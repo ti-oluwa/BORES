@@ -43,6 +43,7 @@ from bores.wells.mappings import (
     PRODUCER_CONTROL_MODE_MAP,
     WELTARG_TARGET_FIELD,
 )
+from bores.wells.workspace import WellsWorkspace
 
 if typing.TYPE_CHECKING:
     from bores.blackoil.compile import CompiledBlackOilModel
@@ -56,6 +57,7 @@ __all__ = [
     "ActivateWell",
     "ActivateWells",
     "ApplicationMode",
+    "GasOilRatioThreshold",
     "MultiplyConnectionFactor",
     "MultiplyConnectionFactors",
     "OpenWell",
@@ -73,6 +75,7 @@ __all__ = [
     "ShutInWells",
     "UpdateWellStatus",
     "UpdateWellStatuses",
+    "WaterCutThreshold",
     "as_number_or_array",
     "broadcast_or_match",
     "expand_values",
@@ -1511,9 +1514,34 @@ RATE_ARRAYS: dict[tuple[RateQuantity, Boolean], str] = {
 """Maps a `(quantity, surface)` pair to the `WellsWorkspace` array it reads from."""
 
 
+def get_well_rate_arrays(
+    *, model: "CompiledBlackOilModel", context: ScheduleContext, well_name: str, caller: str
+) -> tuple[Integer, "WellsWorkspace"]:
+    """
+    The well's row and the workspace's well arrays, for an event that reads solved rates.
+
+    :param model: The model being scheduled against.
+    :param context: The current moment's context.
+    :param well_name: The well to read.
+    :param caller: The reading event's name, for the error message.
+    :returns: `(well_row, workspace.wells)`.
+    :raises ValidationError: If `context.extra` has no `SimulationWorkspace` under `"workspace"`.
+    """
+    from bores.simulation.workspace import SimulationWorkspace
+
+    workspace = context.extra.get("workspace")
+    if not isinstance(workspace, SimulationWorkspace):
+        raise ValidationError(
+            f"{caller} needs key 'workspace' in `context.extra`, with a `SimulationWorkspace` "
+            f"value, to read the rates of well {well_name!r}, but got {workspace!r}."
+        )
+    well_row, _ = resolve_well(model=model, well_name=well_name)
+    return well_row, workspace.wells
+
+
 @attrs.frozen(kw_only=True, slots=True)
 class RateThreshold(ThresholdEvent["CompiledBlackOilModel"]):
-    """Fires when a well's phase rate, from the latest solve, crosses `threshold`."""
+    """Fires when a well's phase rate, from the latest solve, satisfies `op` against `threshold`."""
 
     __type__: typing.ClassVar[str] = "rate_threshold"
 
@@ -1521,38 +1549,90 @@ class RateThreshold(ThresholdEvent["CompiledBlackOilModel"]):
     """The well to watch."""
 
     quantity: RateQuantity
-    """Which phase rate to watch. Only `OIL`, `WATER`, `GAS` are supported."""
+    """Which rate to watch: `OIL`, `WATER`, `GAS`, or `LIQUID` (oil plus water)."""
 
     surface: Boolean = False
     """Surface-condition rate if `True`, reservoir-condition otherwise."""
 
     def get_value(self, *, model: "CompiledBlackOilModel", context: ScheduleContext) -> Number:
         """
-        Reads the well's own current rate from `context.state`.
+        Reads the well's own current rate from the workspace.
 
         :param model: The model being scheduled against.
         :param context: The current moment's context.
         :returns: The well's current rate for `quantity`/`surface`.
-        :raises ValidationError: If `context.extra` has no `workspace`,
-        or if `quantity`/`surface` isn't supported.
+        :raises ValidationError: If `context.extra` has no `workspace`, or if `quantity`/`surface`
+            isn't supported.
         """
-        from bores.simulation.workspace import SimulationWorkspace
-
-        workspace = context.extra.get("workspace")
-        if not isinstance(workspace, SimulationWorkspace):
-            raise ValidationError(
-                f"{type(self).__name__} needs key 'workspace' in `context.extra`, with a `SimulationWorkspace` value, to read "
-                f"{self.quantity!r} {self.surface!r} rate for well {self.well_name!r}, but got {workspace!r}."
-            )
-
-        well_row, _ = resolve_well(model=model, well_name=self.well_name)
+        well_row, wells = get_well_rate_arrays(
+            model=model, context=context, well_name=self.well_name, caller=type(self).__name__
+        )
+        if self.quantity == RateQuantity.LIQUID:
+            names = [
+                RATE_ARRAYS[RateQuantity.OIL, self.surface],
+                RATE_ARRAYS[RateQuantity.WATER, self.surface],
+            ]
+            return sum(getattr(wells, name)[well_row] for name in names)
         array_name = RATE_ARRAYS.get((self.quantity, self.surface))
         if array_name is None:
             raise ValidationError(
                 f"{type(self).__name__} doesn't support `quantity={self.quantity!r}`, "
                 f"surface={self.surface!r}."
             )
-        return getattr(workspace.wells, array_name)[well_row]
+        return getattr(wells, array_name)[well_row]
+
+
+@attrs.frozen(kw_only=True, slots=True)
+class WaterCutThreshold(ThresholdEvent["CompiledBlackOilModel"]):
+    """Fires when a well's surface water cut, from the latest solve, satisfies `op` against `threshold`."""
+
+    __type__: typing.ClassVar[str] = "water_cut_threshold"
+
+    well_name: str
+    """The well to watch."""
+
+    def get_value(self, *, model: "CompiledBlackOilModel", context: ScheduleContext) -> Number:
+        """
+        Reads the well's water cut: surface water rate over surface liquid rate.
+
+        :param model: The model being scheduled against.
+        :param context: The current moment's context.
+        :returns: The water cut, `0` when the well produces no liquid.
+        """
+        well_row, wells = get_well_rate_arrays(
+            model=model, context=context, well_name=self.well_name, caller=type(self).__name__
+        )
+        oil = wells.surface_oil_rates[well_row]
+        water = wells.surface_water_rates[well_row]
+        liquid = oil + water
+        return water / liquid if liquid > 0.0 else 0.0
+
+
+@attrs.frozen(kw_only=True, slots=True)
+class GasOilRatioThreshold(ThresholdEvent["CompiledBlackOilModel"]):
+    """Fires when a well's surface gas-oil ratio, from the latest solve, satisfies `op` against `threshold`."""
+
+    __type__: typing.ClassVar[str] = "gas_oil_ratio_threshold"
+
+    well_name: str
+    """The well to watch."""
+
+    def get_value(self, *, model: "CompiledBlackOilModel", context: ScheduleContext) -> Number:
+        """
+        Reads the well's gas-oil ratio: surface gas rate over surface oil rate.
+
+        :param model: The model being scheduled against.
+        :param context: The current moment's context.
+        :returns: The gas-oil ratio, infinite for gas with no oil, `0` for neither.
+        """
+        well_row, wells = get_well_rate_arrays(
+            model=model, context=context, well_name=self.well_name, caller=type(self).__name__
+        )
+        oil = wells.surface_oil_rates[well_row]
+        gas = wells.surface_gas_rates[well_row]
+        if oil > 0.0:
+            return gas / oil
+        return float("inf") if gas > 0.0 else 0.0
 
 
 @attrs.frozen(kw_only=True, slots=True)

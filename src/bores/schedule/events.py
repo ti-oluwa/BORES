@@ -22,6 +22,7 @@ __all__ = [
     "ThresholdEvent",
     "TimeEvent",
     "TimeStepEvent",
+    "TimeWindowEvent",
 ]
 
 
@@ -62,6 +63,32 @@ class TimeEvent(Event[ModelT]):
         """
         previous_time = context.previous_time
         return (previous_time is None or previous_time < self.at) and self.at <= context.time
+
+
+@attrs.frozen(kw_only=True, slots=True)
+class TimeWindowEvent(Event[ModelT]):
+    """
+    Fires on every advance while the schedule's time lies in `[start, end)`.
+
+    Unlike `TimeEvent` this stays true for the whole window, so combined with a condition
+    through `AllOf` it makes that condition live only between two moments.
+    """
+
+    start: Number
+    """Elapsed time the window opens at, in the schedule's unit system."""
+
+    end: Number | None = None
+    """Elapsed time the window closes at. `None` keeps it open for the rest of the run."""
+
+    def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:
+        """
+        Fires while `context.time` is inside the window.
+
+        :param model: The model being scheduled against. Unused.
+        :param context: The current moment's context.
+        :returns: Whether `start <= context.time < end`.
+        """
+        return self.start <= context.time and (self.end is None or context.time < self.end)
 
 
 @attrs.frozen(kw_only=True, slots=True)
