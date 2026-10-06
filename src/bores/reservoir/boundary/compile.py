@@ -7,6 +7,7 @@ import numpy as np
 import numpy.typing as npt
 
 from bores.constants import c
+from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.reservoir.boundary.aquifers.carter_tracy import CarterTracyAquifer
 from bores.reservoir.boundary.aquifers.fetkovich import FetkovichAquifer
@@ -93,10 +94,29 @@ class CompiledAquifers(typing.NamedTuple):
     face_positions: IntArray[OneDimension]
     """Shape `(n_faces,)`. Positions into `Grid.boundary_face_indices`, same order as `owner_cells`."""
 
+    face_weights: NumberArray[OneDimension]
+    """
+    Shape `(n_faces,)`, same order as `face_positions`. The share of its aquifer's influx
+    that each face takes. The shares of one aquifer's faces add up to `1.0`.
+    """
+
     initial_pressures: NumberArray[OneDimension]
     """Shape `(n_aquifers,)`. Both kinds' own `initial_pressure`."""
 
     # Carter-Tracy fields
+
+    influence_table_offsets: IntArray[OneDimension]
+    """
+    Shape `(n_aquifers + 1,)`. Row `r`'s `AQUTAB` influence table is
+    `influence_table_times[offsets[r]:offsets[r + 1]]`. A row with no table, which uses
+    the built-in influence function, has an empty slice.
+    """
+
+    influence_table_times: NumberArray[OneDimension]
+    """Every influence table's `tD` column, one table after another."""
+
+    influence_table_pressures: NumberArray[OneDimension]
+    """Every influence table's `pD` column, in the same order as `influence_table_times`."""
 
     aquifer_constants: NumberArray[OneDimension]
     """Shape `(n_aquifers,)`. Carter-Tracy only."""
@@ -229,7 +249,12 @@ def compile_boundary_conditions(
 
     pi_regions: list[tuple[str, IntArray[OneDimension], Number, Number]] = []
     aquifer_regions: list[
-        tuple[str, IntArray[OneDimension], CarterTracyAquifer | FetkovichAquifer]
+        tuple[
+            str,
+            IntArray[OneDimension],
+            NumberArray[OneDimension] | None,
+            CarterTracyAquifer | FetkovichAquifer,
+        ]
     ] = []
     face_pi_row: dict[int, int] = {}
     face_aquifer_row: dict[int, int] = {}
@@ -259,7 +284,7 @@ def compile_boundary_conditions(
             static_flux_values[face_positions] = condition.flux
         elif isinstance(condition, (CarterTracyAquifer, FetkovichAquifer)):
             row = len(aquifer_regions)
-            aquifer_regions.append((region.name, face_positions, condition))
+            aquifer_regions.append((region.name, face_positions, region.face_weights, condition))
             for position in face_positions.tolist():
                 face_aquifer_row[position] = row
         else:
@@ -337,6 +362,10 @@ def compile_boundary_conditions(
     aquifer_region_offsets = [0]
     aquifer_owner_cells: list[Integer] = []
     aquifer_face_positions: list[Integer] = []
+    aquifer_face_weights: list[Number] = []
+    aquifer_influence_table_offsets: list[Integer] = [0]
+    aquifer_influence_table_times: list[Number] = []
+    aquifer_influence_table_pressures: list[Number] = []
     aquifer_names: list[str] = []
     aquifer_kinds: list[Integer] = []
     aquifer_initial_pressures: list[Number] = []
@@ -352,30 +381,46 @@ def compile_boundary_conditions(
     aquifer_productivity_indices: list[Number] = []
     aquifer_encroachable_waters: list[Number] = []
 
-    for original_row, (name, face_positions, condition) in enumerate(aquifer_regions):
-        kept_positions = typing.cast(
-            IntArray[OneDimension],
-            np.array(
-                [
-                    position
-                    for position in face_positions.tolist()
-                    if position in live_aquifer_faces
-                    and face_aquifer_row[position] == original_row
-                ],
-                dtype=np.int64,
-            ),
+    for original_row, (name, face_positions, region_weights, condition) in enumerate(
+        aquifer_regions
+    ):
+        kept_mask = np.array(
+            [
+                position in live_aquifer_faces and face_aquifer_row[position] == original_row
+                for position in face_positions.tolist()
+            ],
+            dtype=np.bool_,
         )
+        kept_positions = typing.cast(IntArray[OneDimension], face_positions[kept_mask])
         if kept_positions.shape[0] == 0:
             continue
+        if region_weights is not None:
+            kept_weights = np.asarray(region_weights, dtype=np.float64)[kept_mask]
+        else:
+            kept_weights = reservoir.grid.face_areas[
+                reservoir.grid.boundary_face_indices[kept_positions]
+            ].astype(np.float64)
+        total_weight = float(kept_weights.sum())
+        if not total_weight > 0.0:
+            raise ValidationError(
+                f"Aquifer region {name!r}: the faces' influx weights add up to zero, so "
+                "there is nothing to share the aquifer's influx across."
+            )
         owner_cells = resolve_owner_cells(reservoir, kept_positions)
         aquifer_owner_cells.extend(owner_cells.tolist())
         aquifer_face_positions.extend(kept_positions.tolist())
+        aquifer_face_weights.extend((kept_weights / total_weight).tolist())
         aquifer_region_offsets.append(len(aquifer_owner_cells))
         aquifer_names.append(name)
         aquifer_initial_pressures.append(condition.initial_pressure)
 
         if isinstance(condition, CarterTracyAquifer):
             aquifer_kinds.append(AquiferKind.CARTER_TRACY)
+            if condition.influence_table is not None:
+                aquifer_influence_table_times.extend(condition.influence_table.times.tolist())
+                aquifer_influence_table_pressures.extend(
+                    condition.influence_table.pressures.tolist()
+                )
             aquifer_aquifer_constants.append(condition.resolved_aquifer_constant)
             if condition.hydraulic_diffusivity is not None:
                 assert condition.inner_radius is not None
@@ -416,12 +461,20 @@ def compile_boundary_conditions(
             aquifer_productivity_indices.append(condition.productivity_index)
             aquifer_encroachable_waters.append(condition.encroachable_water)
 
+        aquifer_influence_table_offsets.append(len(aquifer_influence_table_times))
+
     aquifers = CompiledAquifers(
         kinds=np.asarray(aquifer_kinds, dtype=np.int32),  # type: ignore[arg-type]
         region_offsets=np.asarray(aquifer_region_offsets, dtype=np.int64),  # type: ignore[arg-type]
         owner_cells=np.asarray(aquifer_owner_cells, dtype=np.int64),  # type: ignore[arg-type]
         face_positions=np.asarray(aquifer_face_positions, dtype=np.int64),  # type: ignore[arg-type]
+        face_weights=np.asarray(aquifer_face_weights, dtype=resolved_dtype),  # type: ignore[arg-type]
         initial_pressures=np.asarray(aquifer_initial_pressures, dtype=resolved_dtype),  # type: ignore[arg-type]
+        influence_table_offsets=np.asarray(aquifer_influence_table_offsets, dtype=np.int64),  # type: ignore[arg-type]
+        influence_table_times=np.asarray(aquifer_influence_table_times, dtype=resolved_dtype),  # type: ignore[arg-type]
+        influence_table_pressures=np.asarray(  # type: ignore[arg-type]
+            aquifer_influence_table_pressures, dtype=resolved_dtype
+        ),
         aquifer_constants=np.asarray(aquifer_aquifer_constants, dtype=resolved_dtype),  # type: ignore[arg-type]
         dimensionless_time_scales=np.asarray(  # type: ignore[arg-type]
             aquifer_dimensionless_time_scales, dtype=resolved_dtype

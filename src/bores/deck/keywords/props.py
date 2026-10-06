@@ -30,9 +30,14 @@ and relative permeability / capillary pressure curves.
 
 import numpy as np
 
-from bores.deck.keywords.base import Field, TableKeyword
+from bores.datastructures import GridDimensions
+from bores.deck.core import Deck, tokenize
+from bores.deck.keywords.base import Field, Table, TableKeyword
+from bores.deck.operators import Operation
+from bores.types import Number
 
 __all__ = [
+    "AQUTAB",
     "DENSITY",
     "PVCDO",
     "PVCO",
@@ -410,4 +415,53 @@ Each table contains rows:
 
 Used in three-phase runs with the second saturation-function family
 alongside `SWFN` and `SGFN`.
+"""
+
+
+class InfluenceTableKeyword(TableKeyword):
+    """
+    A keyword holding several tables in one block, each terminated by `/`.
+
+    The tables are numbered in the order they appear.
+    """
+
+    def parse(
+        self,
+        deck: Deck,
+        dims: GridDimensions | None,
+        *,
+        operations: list[Operation] | None = None,
+        schedule_times: dict[int, float] | None = None,
+    ) -> list[Table[Number]] | None:
+        records = deck.get_records_for(self.name)
+        if not records:
+            return None
+
+        tables: list[Table[Number]] = []
+        for record in records:
+            for segment in record.body.split("/"):
+                if tokenize(segment):
+                    tables.append(self._parse_flat(segment))
+        return tables or None
+
+
+AQUTAB = InfluenceTableKeyword(
+    "AQUTAB",
+    columns=[
+        Field("dimensionless_time", np.float64),
+        Field("dimensionless_pressure", np.float64),
+    ],
+)
+"""
+`AQUTAB  TD  PD /` - aquifer influence tables for `AQUCT` aquifers.
+
+Each table is a list of rows terminated by `/`. Tables are numbered from 2 in the
+order they appear, since table 1 is the built-in influence function that an `AQUCT`
+aquifer uses by default. An `AQUCT` record picks a table with its
+`aquifer_influence_table_number`.
+
+Columns:
+
+- `dimensionless_time`     - dimensionless time `tD`. Must increase down the table.
+- `dimensionless_pressure` - dimensionless pressure influence function `pD(tD)`.
 """

@@ -79,11 +79,12 @@ def apply_aquifer_rates(
     :param pressure: Current (trial or accepted) cell pressures.
     :param time: Current simulation time.
     :param out_flux_values: The full-length flux array, written into at
-        each aquifer's own `face_positions`.
+        each aquifer's own `face_positions` with that face's share of the aquifer's rate.
     """
     region_offsets = aquifers.region_offsets
     owner_cells = aquifers.owner_cells
     face_positions = aquifers.face_positions
+    face_weights = aquifers.face_weights
     kinds = aquifers.kinds
     initial_pressures = aquifers.initial_pressures
     aquifer_constants = aquifers.aquifer_constants
@@ -95,6 +96,9 @@ def apply_aquifer_rates(
     pd_prime_coefficients = aquifers.pd_prime_coefficients
     linear_coefficients = aquifers.linear_coefficients
     constant_coefficients = aquifers.constant_coefficients
+    influence_table_offsets = aquifers.influence_table_offsets
+    influence_table_times = aquifers.influence_table_times
+    influence_table_pressures = aquifers.influence_table_pressures
     productivity_indices = aquifers.productivity_indices
     encroachable_waters = aquifers.encroachable_waters
 
@@ -133,6 +137,18 @@ def apply_aquifer_rates(
                     pd_prime_coefficients=pd_prime_coefficients[row],
                     linear_coefficient=linear_coefficients[row],
                     constant_coefficient=constant_coefficients[row],
+                    influence_times=typing.cast(
+                        NumberArray[OneDimension],
+                        influence_table_times[
+                            influence_table_offsets[row] : influence_table_offsets[row + 1]
+                        ],
+                    ),
+                    influence_pressures=typing.cast(
+                        NumberArray[OneDimension],
+                        influence_table_pressures[
+                            influence_table_offsets[row] : influence_table_offsets[row + 1]
+                        ],
+                    ),
                 )
             else:
                 new_cumulative_influx, _ = fetkovich.compute_incremental_influx(
@@ -147,7 +163,7 @@ def apply_aquifer_rates(
             rate = (new_cumulative_influx - previous_cumulative_influx[row]) / elapsed_time
 
         for i in range(start, end):
-            out_flux_values[face_positions[i]] = rate
+            out_flux_values[face_positions[i]] = rate * face_weights[i]
 
 
 @numba.njit(cache=True, parallel=True)
@@ -179,6 +195,9 @@ def advance_aquifer_workspace(
     pd_prime_coefficients = aquifers.pd_prime_coefficients
     linear_coefficients = aquifers.linear_coefficients
     constant_coefficients = aquifers.constant_coefficients
+    influence_table_offsets = aquifers.influence_table_offsets
+    influence_table_times = aquifers.influence_table_times
+    influence_table_pressures = aquifers.influence_table_pressures
     productivity_indices = aquifers.productivity_indices
     encroachable_waters = aquifers.encroachable_waters
 
@@ -218,6 +237,18 @@ def advance_aquifer_workspace(
                 pd_prime_coefficients=pd_prime_coefficients[row],
                 linear_coefficient=linear_coefficients[row],
                 constant_coefficient=constant_coefficients[row],
+                influence_times=typing.cast(
+                    NumberArray[OneDimension],
+                    influence_table_times[
+                        influence_table_offsets[row] : influence_table_offsets[row + 1]
+                    ],
+                ),
+                influence_pressures=typing.cast(
+                    NumberArray[OneDimension],
+                    influence_table_pressures[
+                        influence_table_offsets[row] : influence_table_offsets[row + 1]
+                    ],
+                ),
             )
             previous_dimensionless_time[row] = current_dimensionless_time
         else:

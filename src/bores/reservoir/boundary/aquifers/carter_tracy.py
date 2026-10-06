@@ -21,9 +21,11 @@ if typing.TYPE_CHECKING:
     from bores.blackoil.pvt.regions import PVT
 
 __all__ = [
+    "AquiferInfluenceTable",
     "CarterTracyAquifer",
     "InitialPressureFactory",
     "compute_incremental_influx",
+    "compute_tabulated_dimensionless_pressure",
     "load_carter_tracy_aquifer",
 ]
 
@@ -210,6 +212,84 @@ def compute_finite_dimensionless_pressure_derivative(
     return linear_coefficient + series
 
 
+@attrs.frozen(slots=True)
+class AquiferInfluenceTable:
+    """
+    A user-supplied dimensionless influence function `pD(tD)` for a Carter-Tracy aquifer,
+    as given by the deck's `AQUTAB` keyword.
+    """
+
+    times: NumberArray[OneDimension]
+    """Dimensionless times `tD`, strictly increasing and positive."""
+
+    pressures: NumberArray[OneDimension]
+    """Dimensionless pressures `pD`, one for each entry of `times`."""
+
+    def __attrs_post_init__(self) -> None:
+        if self.times.ndim != 1 or self.times.shape != self.pressures.shape:
+            raise ValidationError("An influence table needs one `pD` for each `tD`.")
+        if self.times.shape[0] < 2:
+            raise ValidationError("An influence table needs at least two rows.")
+        if not (np.all(np.isfinite(self.times)) and np.all(np.isfinite(self.pressures))):
+            raise ValidationError("An influence table can only hold finite values.")
+        if self.times[0] <= 0.0 or np.any(np.diff(self.times) <= 0.0):
+            raise ValidationError(
+                "The `tD` column of an influence table must be positive and strictly increasing."
+            )
+
+    @classmethod
+    def from_rows(cls, rows: typing.Sequence[typing.Mapping[str, typing.Any]]) -> Self:
+        """
+        Build a table from the rows an `AQUTAB` table parses to.
+
+        :param rows: Rows with `dimensionless_time` and `dimensionless_pressure`.
+        :returns: The influence table.
+        """
+        return cls(
+            times=typing.cast(
+                NumberArray[OneDimension],
+                np.asarray([row["dimensionless_time"] for row in rows], dtype=np.float64),
+            ),
+            pressures=typing.cast(
+                NumberArray[OneDimension],
+                np.asarray([row["dimensionless_pressure"] for row in rows], dtype=np.float64),
+            ),
+        )
+
+
+@numba.njit(cache=True)
+def compute_tabulated_dimensionless_pressure(
+    t_d: Number,
+    times: NumberArray[OneDimension],
+    pressures: NumberArray[OneDimension],
+) -> tuple[Number, Number]:
+    """
+    `pD` and `pD'` at `tD`, read from a table by linear interpolation.
+
+    Before the first row the table is joined to the origin by a straight line. After the
+    last row the slope of the last two rows is continued.
+
+    :param t_d: Dimensionless time.
+    :param times: Table `tD` column, increasing.
+    :param pressures: Table `pD` column.
+    :returns: `(pD, pD')`, where `pD'` is the slope of the segment `tD` falls in.
+    """
+    n_rows = times.shape[0]
+    if t_d <= times[0]:
+        slope = pressures[0] / times[0]
+        return slope * t_d, slope
+    if t_d >= times[n_rows - 1]:
+        slope = (pressures[n_rows - 1] - pressures[n_rows - 2]) / (
+            times[n_rows - 1] - times[n_rows - 2]
+        )
+        return pressures[n_rows - 1] + slope * (t_d - times[n_rows - 1]), slope
+
+    upper = np.searchsorted(times, t_d)
+    lower = upper - 1
+    slope = (pressures[upper] - pressures[lower]) / (times[upper] - times[lower])
+    return pressures[lower] + slope * (t_d - times[lower]), slope
+
+
 @numba.njit(cache=True)
 def compute_incremental_influx(
     previous_cumulative_influx: Number,
@@ -224,6 +304,8 @@ def compute_incremental_influx(
     pd_prime_coefficients: NumberArray[OneDimension],
     linear_coefficient: Number,
     constant_coefficient: Number,
+    influence_times: NumberArray[OneDimension],
+    influence_pressures: NumberArray[OneDimension],
 ) -> Number:
     """
     One Carter-Tracy (1960) recursive step - Eq. 3:
@@ -254,13 +336,20 @@ def compute_incremental_influx(
     :param pd_prime_coefficients: Matching `pD'` coefficients. Zero-length when `bounded` is `False`.
     :param linear_coefficient: `2/(r_eD^2-1)`. Unused when `bounded` is `False`.
     :param constant_coefficient: The bounded series' constant term. Unused when `bounded` is `False`.
+    :param influence_times: The aquifer's `AQUTAB` table `tD` column. Zero-length when the
+        aquifer uses the built-in influence function. A table takes precedence over `bounded`.
+    :param influence_pressures: Matching `pD` column, zero-length with `influence_times`.
     :returns: `(We)_n`, computed from the last committed state, not written anywhere.
     """
     delta_t_d = current_dimensionless_time - previous_dimensionless_time
     if delta_t_d <= 0.0:
         return previous_cumulative_influx
 
-    if bounded and current_dimensionless_time >= compute_bounded_aquifer_threshold(
+    if influence_times.shape[0] > 0:
+        current_p_d, current_p_d_prime = compute_tabulated_dimensionless_pressure(
+            current_dimensionless_time, influence_times, influence_pressures
+        )
+    elif bounded and current_dimensionless_time >= compute_bounded_aquifer_threshold(
         r_ed=dimensionless_radius_ratio
     ):
         current_p_d = compute_finite_dimensionless_pressure(
@@ -456,6 +545,12 @@ class CarterTracyAquifer(BoundaryCondition):
     record's own `aquifer_id`, referenced by `AQUANCON` to attach this
     aquifer to grid connections. Record-keeping only; `None` when built
     directly rather than from a deck.
+    """
+
+    influence_table: AquiferInfluenceTable | None = attrs.field(default=None)
+    """
+    Dimensionless influence function from the deck's `AQUTAB` keyword. When set it is used
+    in place of the built-in infinite or bounded aquifer functions. `None` uses those.
     """
 
     pvt_table_number: int | None = attrs.field(default=None)
@@ -794,14 +889,20 @@ class CarterTracyAquifer(BoundaryCondition):
         """
         records = deck_file.get("AQUCT")
         if not records:
-            raise ValidationError("No AQUCT keyword found in the provided deck.")
+            raise ValidationError("No `AQUCT` keyword found in the provided deck.")
+
+        # Table 1 is the built-in influence function, so `AQUTAB` tables start at 2.
+        influence_tables = {
+            number: AquiferInfluenceTable.from_rows(rows)
+            for number, rows in enumerate(deck_file.get("AQUTAB") or [], start=2)
+        }
 
         if aquifer_id is not None:
             matching = [record for record in records if record["aquifer_id"] == aquifer_id]
             if not matching:
                 available = sorted(record["aquifer_id"] for record in records)
                 raise ValidationError(
-                    f"Aquifer {aquifer_id!r} not found in AQUCT. Available: {available}."
+                    f"Aquifer {aquifer_id!r} not found in `AQUCT`. Available: {available}."
                 )
             return typing.cast(
                 Self,
@@ -810,6 +911,7 @@ class CarterTracyAquifer(BoundaryCondition):
                     deck_file.unit_system,
                     pvt=pvt,
                     get_initial_pressure=get_initial_pressure,
+                    influence_tables=influence_tables,
                 ),
             )
 
@@ -821,6 +923,7 @@ class CarterTracyAquifer(BoundaryCondition):
                     deck_file.unit_system,
                     pvt=pvt,
                     get_initial_pressure=get_initial_pressure,
+                    influence_tables=influence_tables,
                 )
                 for record in records
             },
@@ -833,6 +936,7 @@ def load_carter_tracy_aquifer(
     *,
     pvt: "PVT",
     get_initial_pressure: InitialPressureFactory | None = None,
+    influence_tables: typing.Mapping[int, AquiferInfluenceTable] | None = None,
 ) -> CarterTracyAquifer:
     """
     Build a `CarterTracyAquifer` from one `AQUCT` record, in
@@ -853,24 +957,29 @@ def load_carter_tracy_aquifer(
         `record["pvt_table_number"]`'s region (e.g. `PVT.from_deck(deck_file, ...)`).
     :param get_initial_pressure: Called with `record` to get the initial pressure
         when the record defaults it (`1*`).
-    :returns: Constructed `CarterTracyAquifer`, always `bounded_aquifer=False`.
-        See the note on `aquifer_influence_table_number` below.
+    :param influence_tables: The deck's `AQUTAB` tables by table number, which starts at 2.
+        Needed when the record's `aquifer_influence_table_number` is not 1.
+    :returns: Constructed `CarterTracyAquifer`, always `bounded_aquifer=False`. It uses
+        the record's `AQUTAB` influence table when it names one, and the built-in
+        infinite-acting influence function otherwise.
     :raises ValidationError: If `pvt`'s region for `record["pvt_table_number"]`
-        has no `PVTW`-derived reference viscosity, or the record defaults its initial
-        pressure and `get_initial_pressure` is not given.
+        has no `PVTW`-derived reference viscosity, the record defaults its initial
+        pressure and `get_initial_pressure` is not given, or the record names an
+        influence table that `influence_tables` does not have.
     """
     aquifer_id = record["aquifer_id"]
     pvt_table_number = record["pvt_table_number"]
 
-    influence_table = record["aquifer_influence_table_number"]
-    if influence_table != 1:
-        warnings.warn(
-            f"`AQUCT` aquifer {aquifer_id!r} references `AQUTAB` table "
-            f"{influence_table!r}, but custom `AQUTAB` influence functions are "
-            "not parsed by this codebase yet. Building it as infinite-acting "
-            "(bounded_aquifer=False) instead of honouring that table.",
-            stacklevel=2,
-        )
+    influence_table_number = record["aquifer_influence_table_number"]
+    influence_table = None
+    if influence_table_number != 1:
+        if influence_tables is None or influence_table_number not in influence_tables:
+            raise ValidationError(
+                f"`AQUCT` aquifer {aquifer_id!r} uses influence table {influence_table_number!r}, "
+                "but the deck has no such `AQUTAB` table. Tables are numbered from 2 in the "
+                "order they appear, and table 1 is the built-in influence function."
+            )
+        influence_table = influence_tables[influence_table_number]
 
     water_viscosity = pvt.region(pvt_table_number).static.water_reference_viscosity
     if water_viscosity is None:
@@ -903,6 +1012,7 @@ def load_carter_tracy_aquifer(
         aquifer_thickness=record["thickness"],
         bounded_aquifer=False,
         angle=record["influence_angle"],
+        influence_table=influence_table,
         pvt_table_number=pvt_table_number,
         unit_system=unit_system,
     )

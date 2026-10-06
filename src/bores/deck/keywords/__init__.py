@@ -46,6 +46,7 @@ from bores.deck.keywords.grid import (
     ZCORN,
 )
 from bores.deck.keywords.props import (
+    AQUTAB,
     DENSITY,
     PVCDO,
     PVCO,
@@ -186,6 +187,7 @@ __all__ = [
     "AQUCT",
     "AQUFETP",
     "AQUFLUX",
+    "AQUTAB",
     "COMPDAT",
     "COMPSEGS",
     "COORD",

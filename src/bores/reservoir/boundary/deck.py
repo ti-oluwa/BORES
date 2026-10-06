@@ -14,22 +14,24 @@ from bores.reservoir.boundary.aquifers.fetkovich import FetkovichAquifer
 from bores.reservoir.boundary.base import BoundaryCondition
 from bores.reservoir.boundary.conditions import BoundaryConditions, BoundaryRegion
 from bores.reservoir.boundary.types import ConstantFluxBoundary
-from bores.types import IntArray, Integer, Number, NumberArray, OneDimension, UnitSystem
+from bores.types import IntArray, Number, NumberArray, OneDimension, UnitSystem
 from bores.utils import get_hydrostatic_gradient_factor
 
 if typing.TYPE_CHECKING:
     from bores.blackoil.pvt.regions import PVT
 
 __all__ = [
+    "AquiferConnections",
     "compute_default_aquifer_pressure",
     "load_boundary_conditions",
-    "load_flux_aquifer",
+    "load_flux_aquifer_from_record",
+    "resolve_aquancon_connections",
     "resolve_aquancon_face_positions",
     "resolve_aquancon_region",
 ]
 
 
-def load_flux_aquifer(
+def load_flux_aquifer_from_record(
     record: typing.Mapping[str, typing.Any], unit_system: UnitSystem
 ) -> ConstantFluxBoundary:
     """
@@ -44,44 +46,69 @@ def load_flux_aquifer(
     return ConstantFluxBoundary(flux=record["flux"], unit_system=unit_system)
 
 
-def resolve_aquancon_face_positions(
+class AquiferConnections(typing.NamedTuple):
+    """The boundary faces one aquifer is attached to by `AQUANCON`, with their weights."""
+
+    face_positions: IntArray[OneDimension]
+    """Sorted boundary face positions (into `Grid.boundary_face_indices`)."""
+
+    influx_coefficients: NumberArray[OneDimension]
+    """
+    Each face's influx coefficient, in the same order as `face_positions`. The
+    aquifer's influx is shared between its faces in proportion to these.
+    """
+
+
+def resolve_aquancon_connections(
     deck_file: DeckFile,
     grid: Grid,
     aquifer_id: int,
-) -> IntArray[OneDimension] | None:
+    *,
+    claimed_faces: typing.Mapping[int, int] | None = None,
+) -> AquiferConnections | None:
     """
-    Resolve the boundary face positions one aquifer is attached to by `AQUANCON`.
+    Resolve the boundary faces one aquifer is attached to by `AQUANCON`, and how much
+    of the aquifer's influx each face takes.
 
     Every `AQUANCON` record with a matching `aquifer_id` is resolved via
-    `resolve_boundary_faces_for_box` and unioned. See that function for what gets
-    skipped (out-of-bounds or inactive cells, and cells whose face in the given
-    direction isn't a genuine grid-boundary face).
+    `resolve_boundary_faces_for_box`. See that function for what gets skipped
+    (out-of-bounds or inactive cells, and cells whose face in the given direction isn't
+    a genuine grid-boundary face).
 
-    `allow_already_connected="YES"` on a record is not enforced as this function
-    doesn't track which faces other aquifers have already claimed, so a `YES` record is
-    treated the same as the `NO` default, with a warning.
+    A face's influx coefficient is the record's `influx_coefficient` when given, or the
+    face's own area when it is defaulted, multiplied by the record's
+    `connection_multiplier`. A face attached by more than one record of the same aquifer
+    adds the coefficients up.
+
+    A record with `allow_already_connected` set to `NO` leaves out every face that
+    `claimed_faces` says another aquifer already holds. A record set to `YES` keeps
+    them, but a face can only be held by one aquifer in the compiled model, so the
+    aquifer that is loaded last keeps it.
 
     :param deck_file: Parsed deck, read for its `AQUANCON` records.
     :param grid: Grid to resolve face positions against.
     :param aquifer_id: Aquifer id to collect `AQUANCON` records for.
-    :returns: Sorted boundary face positions (into `Grid.boundary_face_indices`), or
-        `None` if `AQUANCON` has no records for `aquifer_id` or none of them resolved
-        to a face.
+    :param claimed_faces: Face position to the id of the aquifer that already holds it.
+    :returns: The aquifer's connections, or `None` if `AQUANCON` has no records for
+        `aquifer_id` or none of them resolved to a face.
+    :raises ValidationError: If a record gives a negative influx coefficient or
+        connection multiplier.
     """
     records = deck_file.get("AQUANCON") or []
     matching = [record for record in records if record["aquifer_id"] == aquifer_id]
     if not matching:
         return None
 
-    positions: set[Integer] = set()
+    coefficients: dict[int, float] = {}
     for record in matching:
-        if record["allow_already_connected"] == "YES":
-            warnings.warn(
-                f"`AQUANCON` aquifer {aquifer_id!r}: `allow_already_connected=YES` "
-                "is not enforced. Connections aren't checked against other "
-                "aquifers' claimed faces.",
-                stacklevel=2,
+        explicit = record["influx_coefficient"]
+        multiplier = record["connection_multiplier"]
+        if (explicit is not None and explicit < 0.0) or multiplier < 0.0:
+            raise ValidationError(
+                f"`AQUANCON` aquifer {aquifer_id!r}: `influx_coefficient` and "
+                "`connection_multiplier` can not be negative."
             )
+
         box_positions = resolve_boundary_faces_for_box(
             grid,
             i1=record["i1"],
@@ -93,9 +120,38 @@ def resolve_aquancon_face_positions(
             face_direction=record["face"],
             label=f"AQUANCON aquifer {aquifer_id}",
         )
-        positions.update(box_positions)
+        positions = [int(position) for position in box_positions]
 
-    if not positions:
+        held_elsewhere = [
+            position
+            for position in positions
+            if claimed_faces is not None and claimed_faces.get(position, aquifer_id) != aquifer_id
+        ]
+        if held_elsewhere and record["allow_already_connected"] == "NO":
+            warnings.warn(
+                f"`AQUANCON` aquifer {aquifer_id!r}: {len(held_elsewhere)} face(s) are already "
+                "connected to another aquifer and `allow_already_connected` is `NO`. "
+                "Leaving them out.",
+                stacklevel=2,
+            )
+            skipped = set(held_elsewhere)
+            positions = [position for position in positions if position not in skipped]
+        elif held_elsewhere:
+            warnings.warn(
+                f"`AQUANCON` aquifer {aquifer_id!r}: {len(held_elsewhere)} face(s) are also "
+                "connected to another aquifer. A face can only be held by one aquifer, so "
+                "the one loaded last keeps it.",
+                stacklevel=2,
+            )
+
+        if not positions:
+            continue
+        areas = grid.face_areas[grid.boundary_face_indices[positions]]
+        for position, area in zip(positions, areas.tolist(), strict=True):
+            base = explicit if explicit is not None else area
+            coefficients[position] = coefficients.get(position, 0.0) + base * multiplier
+
+    if not coefficients:
         warnings.warn(
             f"`AQUANCON` aquifer {aquifer_id!r}: every record resolved to no "
             "boundary faces. Not attaching this aquifer.",
@@ -103,7 +159,33 @@ def resolve_aquancon_face_positions(
         )
         return None
 
-    return typing.cast(IntArray[OneDimension], np.asarray(sorted(positions), dtype=np.int32))
+    ordered = sorted(coefficients)
+    return AquiferConnections(
+        face_positions=typing.cast(IntArray[OneDimension], np.asarray(ordered, dtype=np.int32)),
+        influx_coefficients=typing.cast(
+            NumberArray[OneDimension],
+            np.asarray([coefficients[position] for position in ordered], dtype=np.float64),
+        ),
+    )
+
+
+def resolve_aquancon_face_positions(
+    deck_file: DeckFile,
+    grid: Grid,
+    aquifer_id: int,
+) -> IntArray[OneDimension] | None:
+    """
+    Resolve the boundary face positions one aquifer is attached to by `AQUANCON`.
+
+    :param deck_file: Parsed deck, read for its `AQUANCON` records.
+    :param grid: Grid to resolve face positions against.
+    :param aquifer_id: Aquifer id to collect `AQUANCON` records for.
+    :returns: Sorted boundary face positions (into `Grid.boundary_face_indices`), or
+        `None` if `AQUANCON` has no records for `aquifer_id` or none of them resolved
+        to a face.
+    """
+    connections = resolve_aquancon_connections(deck_file, grid, aquifer_id)
+    return connections.face_positions if connections is not None else None
 
 
 def resolve_aquancon_region(
@@ -113,7 +195,7 @@ def resolve_aquancon_region(
     condition: BoundaryCondition,
     *,
     region_name: str | None = None,
-    face_positions: IntArray[OneDimension] | None = None,
+    connections: AquiferConnections | None = None,
 ) -> BoundaryRegion | None:
     """
     Build a `BoundaryRegion` for one aquifer from its `AQUANCON` records.
@@ -123,17 +205,22 @@ def resolve_aquancon_region(
     :param aquifer_id: Aquifer id to collect `AQUANCON` records for.
     :param condition: The `BoundaryCondition` (aquifer or flux) to attach.
     :param region_name: `BoundaryRegion.name`. Defaults to `f"aquifer_{aquifer_id}"`.
-    :param face_positions: Face positions already resolved by
-        `resolve_aquancon_face_positions`, to avoid resolving them again.
+    :param connections: Connections already resolved by `resolve_aquancon_connections`,
+        to avoid resolving them again.
     :returns: A `BoundaryRegion`, or `None` if `AQUANCON` has no records
         for `aquifer_id`, or every one of them resolved to no faces.
     """
-    if face_positions is None:
-        face_positions = resolve_aquancon_face_positions(deck_file, grid, aquifer_id)
-    if face_positions is None:
+    if connections is None:
+        connections = resolve_aquancon_connections(deck_file, grid, aquifer_id)
+    if connections is None:
         return None
     label = region_name or f"aquifer_{aquifer_id}"
-    return BoundaryRegion(name=label, face_positions=face_positions, condition=condition)
+    return BoundaryRegion(
+        name=label,
+        face_positions=connections.face_positions,
+        condition=condition,
+        face_weights=connections.influx_coefficients,
+    )
 
 
 def compute_default_aquifer_pressure(
@@ -211,14 +298,20 @@ def load_boundary_conditions(
     """
     unit_system = deck_file.unit_system
     regions: list[BoundaryRegion] = []
-    resolved_positions: dict[int, IntArray[OneDimension] | None] = {}
+    resolved_connections: dict[int, AquiferConnections | None] = {}
+    claimed_faces: dict[int, int] = {}
 
-    def get_aquancon_positions(aquifer_id: int) -> IntArray[OneDimension] | None:
-        if aquifer_id not in resolved_positions:
-            resolved_positions[aquifer_id] = resolve_aquancon_face_positions(
-                deck_file, grid, aquifer_id
+    def get_aquancon_connections(aquifer_id: int) -> AquiferConnections | None:
+        if aquifer_id not in resolved_connections:
+            connections = resolve_aquancon_connections(
+                deck_file, grid, aquifer_id, claimed_faces=claimed_faces
             )
-        return resolved_positions[aquifer_id]
+            resolved_connections[aquifer_id] = connections
+            if connections is not None:
+                claimed_faces.update(
+                    dict.fromkeys(connections.face_positions.tolist(), aquifer_id)
+                )
+        return resolved_connections[aquifer_id]
 
     def get_initial_pressure(record: typing.Mapping[str, typing.Any]) -> Number:
         aquifer_id = record["aquifer_id"]
@@ -229,8 +322,8 @@ def load_boundary_conditions(
                 "`reservoir_pressure` to `load_boundary_conditions`."
             )
 
-        face_positions = get_aquancon_positions(aquifer_id)
-        if face_positions is None:
+        connections = get_aquancon_connections(aquifer_id)
+        if connections is None:
             raise ValidationError(
                 f"`AQUCT` aquifer {aquifer_id!r} defaults its initial pressure (`1*`) but "
                 "no `AQUANCON` record attaches it to any cell to take it from."
@@ -248,7 +341,7 @@ def load_boundary_conditions(
 
         return compute_default_aquifer_pressure(
             grid,
-            face_positions=face_positions,
+            face_positions=connections.face_positions,
             reservoir_pressure=reservoir_pressure,
             datum_depth=record["datum_depth"],
             water_gradient=water_density * get_hydrostatic_gradient_factor(unit_system),
@@ -271,6 +364,8 @@ def load_boundary_conditions(
                 "Deck defines an `AQUCT` keyword but no `pvt` was given to "
                 "resolve water viscosity from. See `load_carter_tracy_aquifer`."
             )
+        for record in deck_file.get("AQUCT") or []:
+            get_aquancon_connections(record["aquifer_id"])
         carter_tracy_aquifers = CarterTracyAquifer.from_deck(
             deck_file, pvt=pvt, get_initial_pressure=get_initial_pressure
         )
@@ -281,15 +376,24 @@ def load_boundary_conditions(
                 grid,
                 aquifer_id,
                 aquifer,
-                face_positions=get_aquancon_positions(aquifer_id),
+                connections=get_aquancon_connections(aquifer_id),
             )
             if region is not None:
                 regions.append(region)
 
     if deck_file.get("AQUFETP"):
-        for aquifer_id, aquifer in FetkovichAquifer.from_deck(deck_file).items():
+        fetkovich_aquifers = FetkovichAquifer.from_deck(deck_file)
+        for aquifer_id in fetkovich_aquifers:
+            get_aquancon_connections(aquifer_id)
+        for aquifer_id, aquifer in fetkovich_aquifers.items():
             check_id(aquifer_id, "AQUFETP")
-            region = resolve_aquancon_region(deck_file, grid, aquifer_id, aquifer)
+            region = resolve_aquancon_region(
+                deck_file,
+                grid,
+                aquifer_id,
+                aquifer,
+                connections=get_aquancon_connections(aquifer_id),
+            )
             if region is not None:
                 regions.append(region)
 
@@ -297,8 +401,14 @@ def load_boundary_conditions(
         for record in deck_file.get("AQUFLUX") or []:
             aquifer_id = record["aquifer_id"]
             check_id(aquifer_id, "AQUFLUX")
-            condition = load_flux_aquifer(record, unit_system)
-            region = resolve_aquancon_region(deck_file, grid, aquifer_id, condition)
+            condition = load_flux_aquifer_from_record(record, unit_system)
+            region = resolve_aquancon_region(
+                deck_file,
+                grid,
+                aquifer_id,
+                condition,
+                connections=get_aquancon_connections(aquifer_id),
+            )
             if region is not None:
                 regions.append(region)
 

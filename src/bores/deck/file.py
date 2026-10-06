@@ -48,6 +48,7 @@ from bores.deck.keywords.grid import (
     ZCORN,
 )
 from bores.deck.keywords.props import (
+    AQUTAB,
     DENSITY,
     PVCDO,
     PVCO,
@@ -247,6 +248,7 @@ DEFAULT_KEYWORDS = frozenset({
     PVDO,
     PVTG,
     PVTO,
+    AQUTAB,
     PVTW,
     ROCK,
     ROCKTAB,

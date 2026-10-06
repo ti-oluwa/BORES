@@ -778,14 +778,14 @@ class DatesKeyword(Keyword[list[datetime.date]]):
         return dates or None
 
 
-PVTRow = dict[str, T]
-"""One row of a PVT/saturation table: a `{column_name: value}` dict."""
+TableRow = dict[str, T]
+"""One row of a PVT/saturation/... table: a `{column_name: value}` dict."""
 
-PVTTable = list[PVTRow[T]]
-"""One saturation/PVT table: a list of row dicts in ascending primary-key order."""
+Table = list[TableRow[T]]
+"""One saturation/PVT/... table: a list of row dicts in ascending primary-key order."""
 
 
-class TableKeyword(Keyword[list[PVTTable[Number]]]):
+class TableKeyword(Keyword[list[Table[Number]]]):
     """
     A keyword whose body contains one or more tabulated data blocks,
     each terminated by `/`. Multiple keyword occurrences (e.g. one per
@@ -840,12 +840,12 @@ class TableKeyword(Keyword[list[PVTTable[Number]]]):
         *,
         operations: list[Operation] | None = None,
         schedule_times: dict[int, float] | None = None,
-    ) -> list[PVTTable[Number]] | None:
+    ) -> list[Table[Number]] | None:
         records = deck.get_records_for(self.name)
         if not records:
             return None
 
-        all_tables: list[PVTTable] = []
+        all_tables: list[Table] = []
         for record in records:
             if self.primary_key is not None:
                 tables = self._parse_miscible(record.body)
@@ -856,7 +856,7 @@ class TableKeyword(Keyword[list[PVTTable[Number]]]):
 
         return all_tables or None
 
-    def _row_from_tokens(self, tokens: typing.Sequence[str]) -> PVTRow[Number]:
+    def _row_from_tokens(self, tokens: typing.Sequence[str]) -> TableRow[Number]:
         """
         Convert a token list to a row dict using `self.columns`.
 
@@ -864,14 +864,14 @@ class TableKeyword(Keyword[list[PVTTable[Number]]]):
         to their declared `default` values.  The Eclipse `1*` default
         designator is treated as absent (falls back to `default`).
         """
-        row: PVTRow = {}
+        row: TableRow = {}
         n_tokens = len(tokens)
         for idx, column in enumerate(self.columns):
             raw = tokens[idx] if idx < n_tokens else None
             row[column.name] = column.parse(raw, self.name)
         return row
 
-    def _parse_flat(self, body: str) -> PVTTable[Number]:
+    def _parse_flat(self, body: str) -> Table[Number]:
         """
         Parse a flat (immiscible/simple) table body.
 
@@ -884,7 +884,7 @@ class TableKeyword(Keyword[list[PVTTable[Number]]]):
         is unambiguous here because every column in these tables is required
         (no optional trailing field to create row-width ambiguity).
         """
-        table: PVTTable = []
+        table: Table = []
         n_columns = len(self.columns)
         for segment in body.split("/"):
             tokens = tokenize(segment)
@@ -902,7 +902,7 @@ class TableKeyword(Keyword[list[PVTTable[Number]]]):
                 table.append(self._row_from_tokens(tokens[start : start + n_columns]))
         return table
 
-    def _parse_miscible(self, body: str) -> list[PVTTable[Number]]:
+    def _parse_miscible(self, body: str) -> list[Table[Number]]:
         """
         Parse a miscible (PVTO/PVTG-style) keyword body.
 
@@ -923,8 +923,8 @@ class TableKeyword(Keyword[list[PVTTable[Number]]]):
         zero rows - a standalone primary-key line with no row data on it,
         which some decks use instead of the inline form.
         """
-        tables: list[PVTTable] = []
-        current_table: PVTTable = []
+        tables: list[Table] = []
+        current_table: Table = []
         current_pk_value: float | None = None
         pk_column_name = self.primary_key
         assert pk_column_name is not None  # guarded by caller

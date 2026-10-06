@@ -9,7 +9,14 @@ from typing_extensions import Self
 from bores.errors import ValidationError
 from bores.reservoir.boundary.base import BoundaryCondition
 from bores.reservoir.boundary.types import ConstantFluxBoundary
-from bores.types import IntArray, NDimension, OneDimension, UnitConversionTable, UnitSystem
+from bores.types import (
+    IntArray,
+    NDimension,
+    NumberArray,
+    OneDimension,
+    UnitConversionTable,
+    UnitSystem,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,11 +65,27 @@ class BoundaryRegion:
     condition: BoundaryCondition
     """The boundary condition applied at the faces in this region."""
 
+    face_weights: NumberArray[OneDimension] | None = None
+    """
+    Shape `(n_faces,)`, same order as `face_positions`. How much of an aquifer's influx
+    each face takes, in proportion to these values (for example each face's open area).
+    `None` shares it in proportion to the faces' own areas. Only used by aquifer
+    conditions.
+    """
+
     def __attrs_post_init__(self) -> None:
         face_positions = np.asarray(self.face_positions, dtype=np.int32)
         if face_positions.ndim != 1:
             raise ValidationError("`face_positions` must be a 1-D array.")
         object.__setattr__(self, "face_positions", face_positions)
+
+        if self.face_weights is not None:
+            face_weights = np.asarray(self.face_weights, dtype=np.float64)
+            if face_weights.shape != face_positions.shape:
+                raise ValidationError("`face_weights` must have one value per face position.")
+            if np.any(face_weights < 0.0) or not np.all(np.isfinite(face_weights)):
+                raise ValidationError("`face_weights` must be finite and not negative.")
+            object.__setattr__(self, "face_weights", face_weights)
 
     @property
     def unit_system(self) -> UnitSystem:
@@ -87,6 +110,7 @@ class BoundaryRegion:
             name=self.name,
             face_positions=self.face_positions.copy(),
             condition=self.condition.convert(target, table=table),
+            face_weights=self.face_weights.copy() if self.face_weights is not None else None,
         )
 
     @classmethod

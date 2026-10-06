@@ -356,6 +356,7 @@ Fields:
 - `aquifer_influence_table_number` - `AQUTAB` table number giving a
   custom dimensionless pressure influence function. `1` selects the
   built-in infinite-acting Van Everdingen-Hurst behaviour, the default.
+  `AQUTAB` tables are numbered from 2 in the order they appear.
 """
 
 AQUFETP = RepeatedRecordKeyword[float](
@@ -440,10 +441,13 @@ Fields:
   `I+`, `I-`, `J+`, `J-`, `K+`, `K-`.
 - `influx_coefficient` - overrides the connection's face area for aquifer
   influence. `None` (Eclipse's own default) means use the face's own area.
+  An aquifer's influx is shared between its faces in proportion to these.
 - `connection_multiplier` - multiplies the resolved influx coefficient.
   `1.0` if omitted.
 - `allow_already_connected` - `YES`/`NO`, whether this connection may
-  reuse a face already connected to a different aquifer. `NO` if omitted.
+  reuse a face already connected to a different aquifer. `NO` if omitted, which
+  leaves out any face another aquifer already holds. With `YES` a face can only
+  be held by one aquifer, so the aquifer loaded last keeps it.
 """
 
 AQUFLUX = RepeatedRecordKeyword[float](
