@@ -1,6 +1,7 @@
 """Well control targets and secondary limits."""
 
 import enum
+import threading
 import typing
 
 import attrs
@@ -10,6 +11,8 @@ from typing_extensions import Self
 from bores.constants import get_conversion_factors
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
+from bores.serde.base import Serializable
+from bores.serde.registry import make_serializable_type_registrar
 from bores.types import FluidPhase, Integer, Number, UnitConversionTable, UnitSystem
 from bores.utils import scale
 
@@ -210,8 +213,10 @@ class WellTargetMode(enum.Enum):
         return None
 
 
-class Limit:
-    """Base for well-control secondary limits."""
+class Limit(Serializable):
+    """Abstract base for well-control secondary limits."""
+
+    __abstract_serializable__ = True
 
     unit_system: UnitSystem
 
@@ -225,6 +230,16 @@ class Limit:
         raise NotImplementedError
 
 
+LIMIT_TYPES: dict[str, type[Limit]] = {}
+limit_type = make_serializable_type_registrar(
+    base_cls=Limit,
+    registry=LIMIT_TYPES,
+    lock=threading.Lock(),
+    key_attr="__type__",
+)
+
+
+@limit_type
 @attrs.frozen(kw_only=True, slots=True)
 class RateLimit(Limit):
     """
@@ -235,6 +250,8 @@ class RateLimit(Limit):
     `InjectorControlMode`. A well on `BHP` control can still carry an
     `ORAT` `RateLimit` that forces a switch to rate control if exceeded.
     """
+
+    __type__ = "rate"
 
     quantity: RateQuantity
     max_value: Number
@@ -272,6 +289,7 @@ class RateLimit(Limit):
         return attrs.evolve(self, max_value=scale(self.max_value, factor), unit_system=target)
 
 
+@limit_type
 @attrs.frozen(kw_only=True, slots=True)
 class BHPLimit(Limit):
     """
@@ -282,6 +300,8 @@ class BHPLimit(Limit):
     BHP); for an injector, typically `max_value` only (don't exceed
     fracture pressure). Both may be set to bracket a range.
     """
+
+    __type__ = "bhp"
 
     min_value: Number | None = None
     max_value: Number | None = None
@@ -326,9 +346,12 @@ class BHPLimit(Limit):
         )
 
 
+@limit_type
 @attrs.frozen(kw_only=True, slots=True)
 class THPLimit(Limit):
     """A tubing-head (surface) pressure floor/ceiling."""
+
+    __type__ = "thp"
 
     min_value: Number | None = None
     max_value: Number | None = None
@@ -371,6 +394,7 @@ class THPLimit(Limit):
         )
 
 
+@limit_type
 @attrs.frozen(kw_only=True, slots=True)
 class EconomicLimit(Limit):
     """
@@ -382,6 +406,8 @@ class EconomicLimit(Limit):
     `min_value`, since these represent a minimum economic rate rather
     than an operational cap.
     """
+
+    __type__ = "economic"
 
     quantity: EconomicQuantity
     min_value: Number | None = None
@@ -444,8 +470,10 @@ class EconomicLimit(Limit):
         )
 
 
-class WellControl:
-    """Base for producer/injector control targets."""
+class WellControl(Serializable):
+    """Abstract base for producer/injector control targets."""
+
+    __abstract_serializable__ = True
 
     limits: tuple[Limit, ...]
     efficiency_factor: Number = 1.0
@@ -468,6 +496,15 @@ class WellControl:
         raise NotImplementedError
 
 
+CONTROL_TYPES: dict[str, type[WellControl]] = {}
+control_type = make_serializable_type_registrar(
+    base_cls=WellControl,
+    registry=CONTROL_TYPES,
+    lock=threading.Lock(),
+    key_attr="__type__",
+)
+
+
 PRODUCER_RATE_MODES = (
     ProducerControlMode.OIL_RATE,
     ProducerControlMode.WATER_RATE,
@@ -478,6 +515,7 @@ PRODUCER_RATE_MODES = (
 INJECTOR_RATE_MODES = (InjectorControlMode.RATE, InjectorControlMode.RESERVOIR_VOLUME_RATE)
 
 
+@control_type
 @attrs.frozen(kw_only=True, slots=True)
 class ProducerControl(WellControl):
     """
@@ -493,6 +531,8 @@ class ProducerControl(WellControl):
     switching `mode` at runtime (e.g. rate-to-BHP on limit violation) does
     not require re-supplying the other targets.
     """
+
+    __type__ = "producer"
 
     mode: ProducerControlMode
     target_rate: Number | None = None
@@ -590,6 +630,7 @@ class ProducerControl(WellControl):
         )
 
 
+@control_type
 @attrs.frozen(kw_only=True, slots=True)
 class InjectorControl(WellControl):
     """
@@ -597,6 +638,8 @@ class InjectorControl(WellControl):
 
     Deck `WCONINJE` item 2.
     """
+
+    __type__ = "injector"
 
     injected_phase: FluidPhase
     mode: InjectorControlMode

@@ -312,7 +312,7 @@ AQUCT = RepeatedRecordKeyword[float](
     fields=[
         Field("aquifer_id", int),
         Field("datum_depth", np.float64),
-        Field("initial_pressure", np.float64),
+        Field("initial_pressure", np.float64, required=False, default=None),
         Field("permeability", np.float64),
         Field("porosity", np.float64),
         Field("total_compressibility", np.float64),
@@ -338,7 +338,9 @@ Fields:
 - `aquifer_id`      - aquifer identification number, referenced later by
   `AQUANCON` to attach the aquifer to grid connections.
 - `datum_depth`      - depth at which `initial_pressure` applies.
-- `initial_pressure` - aquifer pressure at `datum_depth`.
+- `initial_pressure` - aquifer pressure at `datum_depth`. May be defaulted
+  with `1*`, in which case it is taken from the initial reservoir pressure of the
+  cells the aquifer is connected to.
 - `permeability`      - aquifer permeability.
 - `porosity`      - aquifer porosity (fraction).
 - `total_compressibility` - combined rock and water compressibility.

@@ -2,6 +2,7 @@
 
 import sys
 import threading
+import types
 import typing
 import warnings
 from collections.abc import Collection, Mapping, Sequence, Set
@@ -652,6 +653,26 @@ def build_deserializer(
     return deserializer
 
 
+def normalize_optional(typ: typing.Any) -> typing.Any:
+    """
+    Rewrite a `X | None` annotation as `typing.Optional[X]`.
+
+    Before Python 3.14 the two spellings have different runtime types, and the
+    serializer only recognises `typing.Optional`, so a field written `Limit | None`
+    would otherwise be passed through without being dumped. Unions with more than
+    one non-`None` member are left alone.
+
+    :param typ: A field annotation.
+    :returns: The annotation, rewritten if it was a single-member `X | None`.
+    """
+    if not isinstance(typ, types.UnionType):
+        return typ
+    members = [arg for arg in typing.get_args(typ) if arg is not type(None)]
+    if len(members) == 1 and len(members) < len(typing.get_args(typ)):
+        return typing.Optional[members[0]]  # noqa: UP045
+    return typ
+
+
 class SerializableMeta(type):
     """Metaclass for `Serializable` classes."""
 
@@ -703,7 +724,7 @@ class SerializableMeta(type):
         cls_fields = fields or annotations
         all_fields = {**parent_fields, **cls_fields}
         all_fields = {
-            key: value
+            key: normalize_optional(value)
             for key, value in all_fields.items()
             if value is not None and not key.startswith("__")
         }

@@ -373,7 +373,9 @@ def load_case(
         raise CaseLoadError(f"Failed to load wells from {deck_file!r}.") from exc
 
     try:
-        resolved_boundary_conditions = load_boundary_conditions(deck_file, grid, pvt=pvt)
+        resolved_boundary_conditions = load_boundary_conditions(
+            deck_file, grid, pvt=pvt, reservoir_pressure=initial_state.pressure
+        )
     except Exception as exc:
         raise CaseLoadError(f"Failed to load boundary conditions from {deck_file!r}.") from exc
 

@@ -22,9 +22,15 @@ if typing.TYPE_CHECKING:
 
 __all__ = [
     "CarterTracyAquifer",
+    "InitialPressureFactory",
     "compute_incremental_influx",
     "load_carter_tracy_aquifer",
 ]
+
+InitialPressureFactory: typing.TypeAlias = typing.Callable[
+    [typing.Mapping[str, typing.Any]], Number
+]
+"""Callable that computes the initial pressure for an `AQUCT` record that defaults it."""
 
 
 def compute_bessel_roots(r_ed: Number, n_max: int) -> NumberArray[OneDimension]:
@@ -738,11 +744,23 @@ class CarterTracyAquifer(BoundaryCondition):
 
     @typing.overload
     @classmethod
-    def from_deck(cls, deck_file: DeckFile, *, pvt: "PVT", aquifer_id: int) -> Self: ...
+    def from_deck(
+        cls,
+        deck_file: DeckFile,
+        *,
+        pvt: "PVT",
+        aquifer_id: int,
+        get_initial_pressure: InitialPressureFactory | None = None,
+    ) -> Self: ...
     @typing.overload
     @classmethod
     def from_deck(
-        cls, deck_file: DeckFile, *, pvt: "PVT", aquifer_id: None = None
+        cls,
+        deck_file: DeckFile,
+        *,
+        pvt: "PVT",
+        aquifer_id: None = None,
+        get_initial_pressure: InitialPressureFactory | None = None,
     ) -> dict[int, Self]: ...
 
     @classmethod
@@ -752,6 +770,7 @@ class CarterTracyAquifer(BoundaryCondition):
         *,
         pvt: "PVT",
         aquifer_id: int | None = None,
+        get_initial_pressure: InitialPressureFactory | None = None,
     ) -> Self | dict[int, Self]:
         """
         Construct one or all `CarterTracyAquifer` objects from a parsed `DeckFile`.
@@ -765,6 +784,9 @@ class CarterTracyAquifer(BoundaryCondition):
         :param pvt: The model's PVT tables - see `load_carter_tracy_aquifer`
             for how `water_viscosity` is resolved from it.
         :param aquifer_id: Id of a specific aquifer to extract, or `None` for all.
+        :param get_initial_pressure: Called with an `AQUCT` record whose initial
+            pressure was defaulted (`1*`) and returns the pressure to use. Without it,
+            a defaulted initial pressure is an error.
         :returns: A single `CarterTracyAquifer` if `aquifer_id` is given;
             a `dict[int, CarterTracyAquifer]` otherwise.
         :raises ValidationError: If the deck has no `AQUCT` keyword, or
@@ -782,14 +804,23 @@ class CarterTracyAquifer(BoundaryCondition):
                     f"Aquifer {aquifer_id!r} not found in AQUCT. Available: {available}."
                 )
             return typing.cast(
-                Self, load_carter_tracy_aquifer(matching[0], deck_file.unit_system, pvt=pvt)
+                Self,
+                load_carter_tracy_aquifer(
+                    matching[0],
+                    deck_file.unit_system,
+                    pvt=pvt,
+                    get_initial_pressure=get_initial_pressure,
+                ),
             )
 
         return typing.cast(
             dict[int, Self],
             {
                 record["aquifer_id"]: load_carter_tracy_aquifer(
-                    record, deck_file.unit_system, pvt=pvt
+                    record,
+                    deck_file.unit_system,
+                    pvt=pvt,
+                    get_initial_pressure=get_initial_pressure,
                 )
                 for record in records
             },
@@ -801,6 +832,7 @@ def load_carter_tracy_aquifer(
     unit_system: UnitSystem,
     *,
     pvt: "PVT",
+    get_initial_pressure: InitialPressureFactory | None = None,
 ) -> CarterTracyAquifer:
     """
     Build a `CarterTracyAquifer` from one `AQUCT` record, in
@@ -819,10 +851,13 @@ def load_carter_tracy_aquifer(
     :param unit_system: The deck's unit system.
     :param pvt: The model's PVT tables, covering at least
         `record["pvt_table_number"]`'s region (e.g. `PVT.from_deck(deck_file, ...)`).
+    :param get_initial_pressure: Called with `record` to get the initial pressure
+        when the record defaults it (`1*`).
     :returns: Constructed `CarterTracyAquifer`, always `bounded_aquifer=False`.
         See the note on `aquifer_influence_table_number` below.
     :raises ValidationError: If `pvt`'s region for `record["pvt_table_number"]`
-        has no `PVTW`-derived reference viscosity.
+        has no `PVTW`-derived reference viscosity, or the record defaults its initial
+        pressure and `get_initial_pressure` is not given.
     """
     aquifer_id = record["aquifer_id"]
     pvt_table_number = record["pvt_table_number"]
@@ -846,9 +881,20 @@ def load_carter_tracy_aquifer(
             "`PVTW` keyword doesn't cover it."
         )
 
+    initial_pressure = record["initial_pressure"]
+    if initial_pressure is None:
+        if get_initial_pressure is None:
+            raise ValidationError(
+                f"`AQUCT` aquifer {aquifer_id!r} defaults its initial pressure (`1*`), "
+                "which is taken from the initial reservoir pressure. Load it through "
+                "`load_boundary_conditions` with `reservoir_pressure`, or give the "
+                "pressure in the deck."
+            )
+        initial_pressure = get_initial_pressure(record)
+
     return CarterTracyAquifer(
         aquifer_id=aquifer_id,
-        initial_pressure=record["initial_pressure"],
+        initial_pressure=initial_pressure,
         aquifer_permeability=record["permeability"],
         aquifer_porosity=record["porosity"],
         aquifer_compressibility=record["total_compressibility"],
