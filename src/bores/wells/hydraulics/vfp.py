@@ -53,6 +53,7 @@ DECK_UNIT_SYSTEMS: typing.Mapping[str, UnitSystem] = {
     "METRIC": UnitSystem.METRIC,
     "FIELD": UnitSystem.FIELD,
     "LAB": UnitSystem.LAB,
+    "SI": UnitSystem.SI,
     "PVT-M": UnitSystem.METRIC,
 }
 """Deck unit keyword to the unit system a `VFPPROD` / `VFPINJ` table is written in."""
@@ -660,7 +661,7 @@ def load_vfp_data_from_record(
     record: VFPProducerDeckTable | VFPInjectorDeckTable,
     *,
     well_type: WellType,
-    deck_unit_system: UnitSystem,
+    unit_system: UnitSystem,
 ) -> VFPData:
     """
     Build a `VFPData` from one parsed `VFPPROD` / `VFPINJ` table.
@@ -674,13 +675,13 @@ def load_vfp_data_from_record(
 
     :param record: One parsed `VFPPROD` / `VFPINJ` table.
     :param well_type: Whether the record is a producer or an injector table.
-    :param deck_unit_system: Unit system of the deck, used when the table does not state one.
+    :param unit_system: Unit system of the deck, used when the table does not state one.
     :returns: The table data.
     :raises ValidationError: If the table uses an axis definition that cannot be mapped, has no
         datum depth, or its axes are invalid.
     """
     units = (record["units"] or "").upper()
-    unit_system = DECK_UNIT_SYSTEMS.get(units, deck_unit_system) if units else deck_unit_system
+    unit_system = DECK_UNIT_SYSTEMS.get(units, unit_system) if units else unit_system
     table_number = record["table_number"]
     label = f"VFP table {table_number}"
     datum_depth = record["datum_depth"]
@@ -834,7 +835,7 @@ def load_vfp_data(
         is ambiguous, or a table cannot be mapped (see `load_vfp_data_from_record`).
     """
     loaded = [
-        load_vfp_data_from_record(record, well_type=kind, deck_unit_system=deck_file.unit_system)
+        load_vfp_data_from_record(record, well_type=kind, unit_system=deck_file.unit_system)
         for kind, record in select_vfp_records(
             deck_file, table_number=table_number, well_type=well_type
         )
@@ -914,9 +915,7 @@ def load_vfp_tables(
     producers: dict[Integer, VFPTable] = {}
     injectors: dict[Integer, VFPTable] = {}
     for kind, record in select_vfp_records(deck_file, table_number=None, well_type=well_type):
-        data = load_vfp_data_from_record(
-            record, well_type=kind, deck_unit_system=deck_file.unit_system
-        )
+        data = load_vfp_data_from_record(record, well_type=kind, unit_system=deck_file.unit_system)
         vfp_table = VFPTable(data, warn_on_extrapolation=warn_on_extrapolation, dtype=dtype)
         (producers if kind == WellType.PRODUCER else injectors)[data.table_number] = vfp_table
     return VFPTables(producers=producers, injectors=injectors)

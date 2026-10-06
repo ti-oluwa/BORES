@@ -5,15 +5,15 @@ from bores.constants import UnitConversionTable, c, get_conversion_factors
 from bores.correlations import scalars
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
-from bores.serde.stores import StoreSerializable
+from bores.serde.base import Serializable
 from bores.types import Number, UnitSystem
 from bores.utils import scale
 
 __all__ = ["StaticPVT"]
 
 
-@attrs.frozen(slots=True)
-class StaticPVT(StoreSerializable):
+@attrs.frozen(slots=True, kw_only=True)
+class StaticPVT(Serializable):
     """
     Static/immutable fluid characterization. Pressure and temperature dependent
     properties are evaluated from the PVT tables or correlations during the simulation

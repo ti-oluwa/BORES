@@ -34,10 +34,10 @@ print(oil_table.viscosity([4700, 200, 3456, 10000, 4000], 200, solution_gor=800)
 wells = case.model.wells
 print(f"wells: {list(wells.names) if wells else []}")
 
-for item in case.schedule:
-    print(item, "\n")
+# for item in case.schedule:
+#     print(item, "\n")
 
-print(f"{len(case.schedule)} scheduled item(s)")
+# print(f"{len(case.schedule)} scheduled item(s)")
 
 # Plot the grid
 grid = case.model.reservoir.grid
