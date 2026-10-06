@@ -448,10 +448,7 @@ Fields:
 
 AQUFLUX = RepeatedRecordKeyword[float](
     "AQUFLUX",
-    fields=[
-        Field("aquifer_id", int),
-        Field("flux", np.float64),
-    ],
+    fields=[Field("aquifer_id", int), Field("flux", np.float64)],
 )
 """
 `AQUFLUX  AQUIFER_ID  FLUX /` (one record per aquifer) - flux-specified

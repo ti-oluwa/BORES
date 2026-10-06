@@ -14,7 +14,7 @@ from bores.reservoir.boundary.aquifers.fetkovich import FetkovichAquifer
 from bores.reservoir.boundary.base import BoundaryCondition
 from bores.reservoir.boundary.conditions import BoundaryConditions, BoundaryRegion
 from bores.reservoir.boundary.types import ConstantFluxBoundary
-from bores.types import IntArray, Number, NumberArray, OneDimension, UnitSystem
+from bores.types import IntArray, Integer, Number, NumberArray, OneDimension, UnitSystem
 from bores.utils import get_hydrostatic_gradient_factor
 
 if typing.TYPE_CHECKING:
@@ -73,7 +73,7 @@ def resolve_aquancon_face_positions(
     if not matching:
         return None
 
-    positions: set[int] = set()
+    positions: set[Integer] = set()
     for record in matching:
         if record["allow_already_connected"] == "YES":
             warnings.warn(
@@ -93,7 +93,7 @@ def resolve_aquancon_face_positions(
             face_direction=record["face"],
             label=f"AQUANCON aquifer {aquifer_id}",
         )
-        positions.update(int(p) for p in box_positions)
+        positions.update(box_positions)
 
     if not positions:
         warnings.warn(
