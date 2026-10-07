@@ -108,11 +108,11 @@ class PVTCache(typing.NamedTuple):
     """
     vaporized_oil_gas_ratio: CellArray
     """
-    Vaporized oil-gas ratio, $R_v$. `Rv`, evaluated along the dew curve
-    (`PVTTable.vaporized_oil_gas_ratio`). Unlike `Rs`, the underlying table has no
-    separate undersaturated-wet-gas correction exposed for `Bg`/`mu_g` - this
-    is always the dew-curve value, not a primary-variable override. `NaN` for
-    dry-gas models with no `Rv` table.
+    Vaporized oil-gas ratio, $R_v$. The effective `Rv` of each cell's gas
+    (`PVTTable.vaporized_oil_gas_ratio`): `Rv_sat(P, T)` on the dew curve when
+    no `vaporized_oil_ratio` state was passed to `compute_pvt_cache`; otherwise
+    `min(Rv, Rv_sat(P, T))`, the cell's own `Rv` while its gas is undersaturated.
+    `NaN` for dry-gas models with no `Rv` table.
     """
     drv_dp: CellArray
     """Pressure derivative of vaporized oil-gas ratio, $dR_v/dP$."""
@@ -136,7 +136,11 @@ class PVTCache(typing.NamedTuple):
     bubble-point table - `NaN` for a 1-D `Pb(T)` table or non-oil cells.
     """
     dew_point_pressure: CellArray
-    """Dew-point pressure, $P_{dew}(T)$. `NaN` for dry-gas models."""
+    """
+    Dew-point pressure, $P_{dew}$, of each cell's gas: `Pdew(Rv, T)` for a wet-gas
+    table (at the cell's `Rv`, or at `Rv_sat(P, T)`, i.e. `Pdew = P`, when no
+    `vaporized_oil_ratio` was passed), `Pdew(T)` for a 1-D table. `NaN` for dry-gas models.
+    """
 
     # Gas compressibility factor
     gas_compressibility_factor: CellArray
@@ -180,6 +184,7 @@ def compute_pvt_cache(
     salinity: CellArray | None = None,
     out: PVTCache | None = None,
     dtype: npt.DTypeLike = None,
+    vaporized_oil_ratio: CellArray | None = None,
 ) -> PVTCache:
     """
     Build (or refresh, in place) a `PVTCache` from the current cell state.
@@ -220,6 +225,13 @@ def compute_pvt_cache(
         `None` uses each table's own default salinity throughout.
     :param out: Previous `PVTCache` to overwrite in place, or `None` to
         allocate a new one.
+    :param dtype: Output array dtype for a newly allocated cache.
+        `bores.precision.get_dtype()` if not given.
+    :param vaporized_oil_ratio: Optional shape `(n_cells,)` current `Rv`, the
+        wet-gas counterpart of `solution_gas_oil_ratio`: authoritative for
+        undersaturated gas, capped at `Rv_sat(P, T)` for saturated gas. Gas
+        `Bg`, `mu_g`, density and their derivatives are evaluated at it. `None`
+        treats all gas as saturated (the dew-curve values). Ignored by dry-gas tables.
     :return: The populated `PVTCache` - `out` itself if given, otherwise a
         newly allocated one. Always returned, never `None`.
     :raises ValueError: If `out` is given but sized for a different cell
@@ -313,14 +325,17 @@ def compute_pvt_cache(
 
         gas = tables.gas
         if gas is not None:
-            cache.gas_formation_volume_factor[mask] = gas.formation_volume_factor(p, t)  # type: ignore[arg-type]
-            cache.dbg_dp[mask] = gas.db_dp(p, t)  # type: ignore[arg-type]
-            cache.gas_viscosity[mask] = gas.viscosity(p, t)  # type: ignore[arg-type]
-            cache.dμg_dp[mask] = gas.dμ_dp(p, t)  # type: ignore[arg-type]
-            cache.gas_density[mask] = gas.density(p, t)  # type: ignore[arg-type]
-            cache.dρg_dp[mask] = gas.dρ_dp(p, t)  # type: ignore[arg-type]
+            rv_state = vaporized_oil_ratio[mask] if vaporized_oil_ratio is not None else None
+            cache.gas_formation_volume_factor[mask] = gas.formation_volume_factor(  # type: ignore[arg-type]
+                p, t, vaporized_oil_ratio=rv_state
+            )
+            cache.dbg_dp[mask] = gas.db_dp(p, t, vaporized_oil_ratio=rv_state)  # type: ignore[arg-type]
+            cache.gas_viscosity[mask] = gas.viscosity(p, t, vaporized_oil_ratio=rv_state)  # type: ignore[arg-type]
+            cache.dμg_dp[mask] = gas.dμ_dp(p, t, vaporized_oil_ratio=rv_state)  # type: ignore[arg-type]
+            cache.gas_density[mask] = gas.density(p, t, vaporized_oil_ratio=rv_state)  # type: ignore[arg-type]
+            cache.dρg_dp[mask] = gas.dρ_dp(p, t, vaporized_oil_ratio=rv_state)  # type: ignore[arg-type]
 
-            compressibility = gas.compressibility(p, t)
+            compressibility = gas.compressibility(p, t, vaporized_oil_ratio=rv_state)
             if compressibility is not None:
                 cache.gas_compressibility[mask] = compressibility
 
@@ -331,14 +346,23 @@ def compute_pvt_cache(
             if z_dp is not None:
                 cache.dz_dp[mask] = z_dp
 
-            vaporized_oil_gas_ratio = gas.vaporized_oil_gas_ratio(p, t)
+            saturated_rv = gas.vaporized_oil_gas_ratio(p, t)
+            vaporized_oil_gas_ratio = (
+                gas.vaporized_oil_gas_ratio(p, t, vaporized_oil_ratio=rv_state)
+                if rv_state is not None
+                else saturated_rv
+            )
             if vaporized_oil_gas_ratio is not None:
                 cache.vaporized_oil_gas_ratio[mask] = vaporized_oil_gas_ratio
-            drv_dp = gas.drv_dp(p, t)
+            drv_dp = gas.drv_dp(p, t, vaporized_oil_ratio=rv_state)
             if drv_dp is not None:
                 cache.drv_dp[mask] = drv_dp
 
-            dew_point = gas.dew_point_pressure(t)
+            # A 2-D `Pdew(Rv, T)` table needs the gas's Rv: its own when given, else the
+            # saturated Rv at (P, T), whose dew point is the cell's pressure.
+            dew_point = gas.dew_point_pressure(
+                t, vaporized_oil_ratio=rv_state if rv_state is not None else saturated_rv
+            )
             if dew_point is not None:
                 cache.dew_point_pressure[mask] = dew_point
 

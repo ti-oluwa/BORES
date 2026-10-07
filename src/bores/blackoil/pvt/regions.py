@@ -1001,29 +1001,46 @@ def build_gas_data_from_pvdg(
 def build_gas_data_from_pvtg(
     pvtg_records: list[dict[str, typing.Any]],
     density_record: dict[str, Number] | None,
+    temperature: TemperatureSpec,
     unit_system: UnitSystem,
+    interpolation_method: InterpolationMethod = "linear",
+    depth_range: tuple[Number, Number] | None = None,
     dtype: npt.DTypeLike = None,
 ) -> PVTData:
     """
     Build wet-gas `PVTData` from a parsed `PVTG` record set.
 
     `PVTG` format: pressure is the outer key; each pressure group contains
-    rows of `(rv, bg, viscosity)` ordered by ascending Rv. The first row
-    in each group is the dry-gas value (Rv = 0).
+    rows of `(rv, bg, viscosity)` ordered by ascending Rv. The row with the largest Rv
+    in each group is the saturated (dew-point) state at that pressure.
 
-    The temperature axis of the returned `PVTData` carries Rv values rather
-    than temperatures, matching the wet-gas table convention used by `PVTTable`.
-    All Rv values from all pressure groups are unioned to form a common Rv grid;
-    missing values at a given pressure are linearly interpolated from the
-    group's own rows.
+    The returned data keeps the Rv axis in its own field, `vaporized_oil_ratios`, separate from
+    `temperatures` (the tables are isothermal, so they are broadcast over the temperature axis):
+
+    - Undersaturated gas: `undersaturated_formation_volume_factor_table` and
+      `undersaturated_viscosity_table`, shape `(n_p, n_t, n_rv)`. All Rv values from all
+      pressure groups are unioned into the common Rv grid; each group is linearly
+      interpolated onto it from its own rows (flat beyond the group's own Rv range).
+    - Saturated gas (on the dew curve): the 2-D `formation_volume_factor_table`,
+      `viscosity_table`, `density_table` and `compressibility_table`, evaluated at each
+      pressure's largest Rv, plus `vaporized_oil_ratio_table` (that Rv, Rv_sat(P)).
+    - `dew_point_pressures`: Pdew(Rv, T), the inverse of Rv_sat(P), shape `(n_rv, n_t)`.
 
     :param pvtg_records: List of row dicts with keys `"pressure"`, `"vaporized_ogr"`,
         `"fvf"`, `"viscosity"`.
     :param density_record: `DENSITY` record; `"gas"` and `"oil"` keys used.
+    :param temperature: Reservoir temperature.
     :param dtype: Array dtype; defaults to `get_dtype()`.
-    :returns: `PVTData` for the gas phase with Rv as the second (temperature) axis.
+    :returns: `PVTData` for the gas phase.
     """
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+    temperatures = generate_temperature_axis(
+        temperature,
+        dtype=dtype,
+        interpolation_method=interpolation_method,
+        depth_range=depth_range,
+    )
+    n_t = len(temperatures)
     # Eclipse reports Rv in STB/Mscf under FIELD units (see PVTG's deck docs);
     # internally we standardize on STB/SCF, matching the `vaporized_oil_gas_ratio`
     # convention `get_conversion_factors` assumes. METRIC/LAB decks already
@@ -1102,9 +1119,15 @@ def build_gas_data_from_pvtg(
                 fill_value=(gas_viscosity_arr[0], gas_viscosity_arr[-1]),
             )(rv_values)
 
-    # Dew-point curve: at each tabulated pressure, the largest listed Rv is the
-    # saturated (dew-point) value for that pressure - the (rv_max, P) pairs trace
-    # out the dew-point curve, the gas-side analogue of Pb(Rs) for oil.
+    if n_rv < 2:
+        raise ValidationError(
+            f"`PVTG` table requires at least 2 distinct Rv values; got {n_rv}."
+        )
+
+    # Saturated (dew-curve) state at each tabulated pressure: the largest Rv listed in a
+    # pressure group is that pressure's saturated Rv, so `(Rv_sat(P), P)` traces the dew-point
+    # curve, the gas-side analogue of Pb(Rs) for oil. The saturated FVF and viscosity are the
+    # group's values at that Rv, which the common Rv grid contains exactly.
     rv_max_per_pressure = np.array(
         [
             max(row["vaporized_ogr"] for row in pressure_to_rows[pressure_key])
@@ -1112,31 +1135,30 @@ def build_gas_data_from_pvtg(
         ],
         dtype=dtype,
     )
-    dew_sort_order = np.argsort(rv_max_per_pressure)
-    rv_max_sorted = rv_max_per_pressure[dew_sort_order]
-    dew_pressure_sorted = pressure_values[dew_sort_order]
+    saturated_column = np.searchsorted(rv_values, rv_max_per_pressure)
+    pressure_index = np.arange(n_p)
+    saturated_gas_fvf = gas_fvf_2d[pressure_index, saturated_column]
+    saturated_gas_viscosity = gas_viscosity_2d[pressure_index, saturated_column]
 
-    if not np.all(np.diff(rv_max_sorted) > 0):
+    # Pdew(Rv): invert Rv_sat(P) on its running maximum, taking the lowest pressure that
+    # reaches each Rv, so the inversion stays single-valued even if Rv_sat is not monotonic
+    # in P (retrograde behaviour). Gas with an Rv below the lowest Rv_sat is undersaturated
+    # over the whole table, so it maps to the lowest tabulated pressure.
+    if not np.all(np.diff(rv_max_per_pressure) > 0):
         warnings.warn(
-            "`PVTG` dew-point Rv envelope (max Rv per tabulated pressure) is not "
-            "strictly monotonic. Dew-point pressure lookups may be inaccurate "
-            "for some Rv values.",
+            "`PVTG` saturated Rv (largest Rv per tabulated pressure) does not increase "
+            "strictly with pressure. Dew-point pressure lookups use the lowest pressure "
+            "that reaches each Rv.",
             UserWarning,
             stacklevel=4,
         )
-        # interp1d requires a strictly increasing x-axis; keep the first-seen
-        # pressure for repeated rv_max values.
-        rv_max_sorted, unique_idx = np.unique(rv_max_sorted, return_index=True)
-        dew_pressure_sorted = dew_pressure_sorted[unique_idx]
-
-    dew_point_pressure_of_rv = interp1d(
-        rv_max_sorted,
-        dew_pressure_sorted,
-        kind="linear",
-        bounds_error=False,
-        fill_value=(dew_pressure_sorted[0], dew_pressure_sorted[-1]),
+    rv_envelope, first_index = np.unique(
+        np.maximum.accumulate(rv_max_per_pressure), return_index=True
     )
-    dew_point_pressure_table = dew_point_pressure_of_rv(rv_values).astype(dtype, copy=False)
+    dew_point_pressure_of_rv = np.interp(rv_values, rv_envelope, pressure_values[first_index])
+    dew_point_pressure_2d = np.tile(dew_point_pressure_of_rv[:, np.newaxis], (1, n_t)).astype(
+        dtype, copy=False
+    )
 
     # Resolve reference densities
     stock_tank_gas_density: Number | None = None
@@ -1146,27 +1168,25 @@ def build_gas_data_from_pvtg(
         stock_tank_gas_density = density_record.get("gas")
         stock_tank_oil_density = density_record.get("oil")
 
-    # Density: ρg = (ρg,SC + Rv·ρo,SC · f) / Bg  [wet gas], f = ft³/STB in FIELD units
-    #          ρg = ρg,SC / Bg                  [dry gas, Rv = 0 column]
+    # Density along the dew curve: ρg = (ρg,SC + Rv_sat·ρo,SC · f) / Bg_sat  [wet gas],
+    # f = ft³/STB in FIELD units; ρg = ρg,SC / Bg [no ρo,SC available]
     gas_density_2d: npt.NDArray | None = None
     if stock_tank_gas_density is not None:
-        rv_grid = np.tile(rv_values[np.newaxis, :], (n_p, 1))
         if stock_tank_oil_density is not None:
             stb_to_volume = get_stb_to_volume_factor(unit_system)
-            gas_density_2d = (
-                (stock_tank_gas_density + rv_grid * stock_tank_oil_density * stb_to_volume)
-                / gas_fvf_2d
-            ).astype(dtype, copy=False)
+            saturated_gas_density = (
+                stock_tank_gas_density
+                + rv_max_per_pressure * stock_tank_oil_density * stb_to_volume
+            ) / saturated_gas_fvf
         else:
-            gas_density_2d = (stock_tank_gas_density / gas_fvf_2d).astype(dtype, copy=False)
+            saturated_gas_density = stock_tank_gas_density / saturated_gas_fvf
+        gas_density_2d = _broadcast_to_2d(saturated_gas_density.astype(dtype, copy=False), n_t)
 
-    # Compressibility: cg ≈ -(1/Bg)·(∂Bg/∂P) along each Rv column
-    gas_compressibility_2d = np.empty((n_p, n_rv), dtype=dtype)
-    for j in range(n_rv):
-        dbg_dp = PchipInterpolator(pressure_values, gas_fvf_2d[:, j]).derivative(1)(
-            pressure_values
-        )
-        gas_compressibility_2d[:, j] = -(1.0 / gas_fvf_2d[:, j]) * dbg_dp
+    # Compressibility along the dew curve: cg = -(1/Bg_sat)·(dBg_sat/dP)
+    dbg_dp = PchipInterpolator(pressure_values, saturated_gas_fvf).derivative(1)(pressure_values)
+    gas_compressibility_2d = _broadcast_to_2d(
+        (-(1.0 / saturated_gas_fvf) * dbg_dp).astype(dtype, copy=False), n_t
+    )
     clip_compressibility(
         gas_compressibility_2d,
         dtype=dtype,
@@ -1175,25 +1195,34 @@ def build_gas_data_from_pvtg(
         context="`PVTG` gas compressibility",
     )
 
-    # Rv table: shape (n_p, n_rv) - same Rv values at every pressure
-    vaporized_oil_ratio_table = np.tile(rv_values[np.newaxis, :], (n_p, 1)).astype(
-        dtype, copy=False
-    )
+    # The tables are isothermal: broadcast over the temperature axis
+    undersaturated_gas_fvf_3d = np.repeat(gas_fvf_2d[:, np.newaxis, :], n_t, axis=1)
+    undersaturated_gas_viscosity_3d = np.repeat(gas_viscosity_2d[:, np.newaxis, :], n_t, axis=1)
     return PVTData(
         phase=FluidPhase.GAS,
         pressures=typing.cast(FloatArray[OneDimension], pressure_values),
-        # Rv axis stored here for wet-gas table - PVTTable is aware of this convention
-        temperatures=typing.cast(FloatArray[OneDimension], rv_values),
-        formation_volume_factor_table=typing.cast(FloatArray[TwoDimensions], gas_fvf_2d),
-        viscosity_table=typing.cast(FloatArray[TwoDimensions], gas_viscosity_2d),
+        temperatures=typing.cast(FloatArray[OneDimension], temperatures),
+        vaporized_oil_ratios=typing.cast(FloatArray[OneDimension], rv_values),
+        formation_volume_factor_table=typing.cast(
+            FloatArray[TwoDimensions], _broadcast_to_2d(saturated_gas_fvf, n_t)
+        ),
+        viscosity_table=typing.cast(
+            FloatArray[TwoDimensions], _broadcast_to_2d(saturated_gas_viscosity, n_t)
+        ),
         vaporized_oil_ratio_table=typing.cast(
-            FloatArray[TwoDimensions], vaporized_oil_ratio_table
+            FloatArray[TwoDimensions], _broadcast_to_2d(rv_max_per_pressure, n_t)
+        ),
+        undersaturated_formation_volume_factor_table=typing.cast(
+            FloatArray[ThreeDimensions], undersaturated_gas_fvf_3d
+        ),
+        undersaturated_viscosity_table=typing.cast(
+            FloatArray[ThreeDimensions], undersaturated_gas_viscosity_3d
         ),
         density_table=typing.cast(FloatArray[TwoDimensions], gas_density_2d)
         if gas_density_2d is not None
         else None,
         compressibility_table=typing.cast(FloatArray[TwoDimensions], gas_compressibility_2d),
-        dew_point_pressures=typing.cast(FloatArray[OneDimension], dew_point_pressure_table),
+        dew_point_pressures=typing.cast(FloatArray[TwoDimensions], dew_point_pressure_2d),
         dtype=dtype,
         unit_system=unit_system,
     )
@@ -1463,7 +1492,9 @@ def load_pvt_regions(
             gas_data = build_gas_data_from_pvtg(
                 pvtg_records=pvtg_records[region_idx],
                 density_record=density_record,
+                temperature=temperature.region(pvtnum),
                 unit_system=unit_system,
+                interpolation_method=interpolation_method,
                 dtype=dtype,
             )
         elif pvdg_records is not None and region_idx < len(pvdg_records):

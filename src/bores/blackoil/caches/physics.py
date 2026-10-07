@@ -65,6 +65,7 @@ def compute_physics_cache(
     hysteresis: Hysteresis | HysteresisWorkspace | None = None,
     out: PhysicsCache | None = None,
     dtype: npt.DTypeLike = None,
+    vaporized_oil_ratio: CellArray | None = None,
 ) -> PhysicsCache:
     """
     Build (or refresh, in place) a `PhysicsCache` from the current cell
@@ -111,6 +112,8 @@ def compute_physics_cache(
     :param dtype: Output array dtype for any newly allocated sub-cache.
         `bores.precision.get_dtype()` if not given. Ignored for a sub-cache
         supplied via `out` - that sub-cache keeps its existing dtype.
+    :param vaporized_oil_ratio: Optional shape `(n_cells,)` current `Rv` of the
+        gas (wet gas only). Forwarded to `compute_pvt_cache`.
     :return: The populated `PhysicsCache`. `out` itself if given, otherwise
         a newly allocated one. Always returned, never `None`.
     :raises ValueError: If `pressure`/`water_saturation` disagree on cell
@@ -132,6 +135,7 @@ def compute_physics_cache(
         salinity=salinity,
         out=out.pvt if out is not None else None,
         dtype=dtype,
+        vaporized_oil_ratio=vaporized_oil_ratio,
     )
     satfunc_cache = compute_satfunc_cache(
         water_saturation=water_saturation,

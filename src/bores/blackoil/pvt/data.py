@@ -62,9 +62,9 @@ class PVTData(StoreSerializable):
 
     - Oil / Gas: 2-D arrays with shape `(n_pressures, n_temperatures)`.
     - Water: 3-D arrays with shape `(n_pressures, n_temperatures, n_salinities)`.
-    - For wet-gas (PVTG) tables: `(n_pressures, n_rv)` where the Rv axis
-      replaces the temperature axis (`temperatures` carries the Rv values in
-      that case).
+    - Wet gas (PVTG): the saturated tables are 2-D like any gas (values along the dew
+      curve); the `undersaturated_*` tables are 3-D with shape
+      `(n_pressures, n_temperatures, n_rv)` over `vaporized_oil_ratios`.
 
     **Primary (interpolated) properties**
 
@@ -91,7 +91,8 @@ class PVTData(StoreSerializable):
 
     Gas-specific fields: `compressibility_factor_table`,
     `solubility_in_water_table`, `vaporized_oil_ratio_table`,
-    `dew_point_pressures`.
+    `vaporized_oil_ratios`, `dew_point_pressures`,
+    `undersaturated_formation_volume_factor_table`, `undersaturated_viscosity_table`.
 
     Water-specific fields: `salinities`, `bubble_point_pressure_table`,
     `gas_free_water_fvf_table`.
@@ -105,12 +106,7 @@ class PVTData(StoreSerializable):
     """1-D array of pressures, strictly increasing. Units depend on `unit_system`."""
 
     temperatures: NumberArray[OneDimension]
-    """
-    1-D array of temperatures, strictly increasing. Units depend on `unit_system`.
-
-    For wet-gas (PVTG) tables this axis carries Rv values instead of
-    temperatures; the `pvtg` flag on `PVTTable` signals this.
-    """
+    """1-D array of temperatures, strictly increasing. Units depend on `unit_system`."""
 
     # Water-only coordinate
     salinities: NumberArray[OneDimension] | None = None
@@ -132,18 +128,29 @@ class PVTData(StoreSerializable):
     is 2-D. Oil phase only. Units depend on `unit_system`.
     """
 
-    # Gas-only: dew point and Rv
-    dew_point_pressures: NumberArray[OneDimension] | None = None
+    # Gas-only: Rv axis, dew point and saturated Rv
+    vaporized_oil_ratios: NumberArray[OneDimension] | None = None
     """
-    Dew-point pressures Pdew(T). Gas / condensate phase only.
-    Shape `(n_t,)`. Units depend on `unit_system`.
+    1-D array of Rv values, strictly increasing: the third axis of the undersaturated wet-gas
+    tables and the first axis of a 2-D `dew_point_pressures` table. Gas / condensate phase
+    only. Units: STB/scf (FIELD), Sm³/Sm³ (METRIC/SI), scc/scc (LAB).
+    """
+
+    dew_point_pressures: NumberArray[OneDimension] | NumberArray[TwoDimensions] | None = None
+    """
+    Dew-point pressures. Gas / condensate phase only. Units depend on `unit_system`.
+
+    - 1-D shape `(n_t,)`      -> Pdew(T).
+    - 2-D shape `(n_rv, n_t)` -> Pdew(Rv, T); requires `vaporized_oil_ratios`.
     """
 
     vaporized_oil_ratio_table: NumberArray[TwoDimensions] | None = None
     """
-    Vaporised oil ratio Rv(P, T). Gas / condensate phase only. Shape `(n_p, n_t)`.
+    Saturated vaporised oil ratio Rv_sat(P, T): the Rv of gas on the dew curve at `(P, T)`.
+    Gas / condensate phase only. Shape `(n_p, n_t)`.
     Units: STB/scf (FIELD), Sm³/Sm³ (METRIC/SI), scc/scc (LAB).
-    Rv is capped at Rv_sat above dew point (analogous to Rs being capped at Rsb above bubble point for oil).
+    Gas whose Rv is below Rv_sat at the same pressure is undersaturated: its Rv is a state
+    variable held by the caller and looked up in the `undersaturated_*` tables.
     """
 
     # Shared primary tables (2-D for oil/gas; 3-D for water)
@@ -225,6 +232,22 @@ class PVTData(StoreSerializable):
     for the water phase; not exposed as a direct query method on `PVTTable`.
     """
 
+    # Undersaturated wet-gas tables (3-D over the Rv axis)
+    undersaturated_formation_volume_factor_table: NumberArray[ThreeDimensions] | None = None
+    """
+    FVF of undersaturated gas B(P, T, Rv), shape `(n_p, n_t, n_rv)`; requires
+    `vaporized_oil_ratios`. Gas / condensate phase only. Units as `formation_volume_factor_table`
+    (ft³/SCF in FIELD). The 2-D `formation_volume_factor_table` is the FVF of saturated gas
+    (on the dew curve).
+    """
+
+    undersaturated_viscosity_table: NumberArray[ThreeDimensions] | None = None
+    """
+    Viscosity of undersaturated gas μ(P, T, Rv), shape `(n_p, n_t, n_rv)`; requires
+    `vaporized_oil_ratios`. Gas / condensate phase only. Units as `viscosity_table`.
+    The 2-D `viscosity_table` is the viscosity of saturated gas (on the dew curve).
+    """
+
     dtype: npt.DTypeLike = None
     """Floating-point dtype of all arrays. Defaults to the active `BORES` precision."""
 
@@ -278,6 +301,16 @@ class PVTData(StoreSerializable):
                 f"{type(self).__name__}: 2-D `bubble_point_pressures` requires "
                 "`solution_gas_to_oil_ratios` to be provided."
             )
+        if (
+            self.dew_point_pressures is not None
+            and isinstance(self.dew_point_pressures, np.ndarray)
+            and self.dew_point_pressures.ndim == 2
+            and self.vaporized_oil_ratios is None
+        ):
+            raise ValidationError(
+                f"{type(self).__name__}: 2-D `dew_point_pressures` requires "
+                "`vaporized_oil_ratios` to be provided."
+            )
 
     def ensure_dtype(self, dtype: npt.DTypeLike = None, force: bool = True) -> None:
         """
@@ -298,21 +331,6 @@ class PVTData(StoreSerializable):
 
         if self.dtype != dtype:
             object.__setattr__(self, "dtype", dtype)
-
-    def has_rv_axis(self) -> bool:
-        """
-        Whether the `temperatures` axis actually carries Rv values (wet-gas `PVTG` tables).
-
-        Those tables store Rv on the second axis and a `vaporized_oil_ratio_table` that is
-        just that axis tiled over pressure, so the axis converts as a vaporized oil ratio
-        rather than as a temperature.
-        """
-        table = self.vaporized_oil_ratio_table
-        if typing.cast(FluidPhase, self.phase) != FluidPhase.GAS or table is None:
-            return False
-        if table.shape != (len(self.pressures), len(self.temperatures)):
-            return False
-        return bool(np.array_equal(table, np.broadcast_to(self.temperatures, table.shape)))
 
     def convert(
         self,
@@ -348,24 +366,27 @@ class PVTData(StoreSerializable):
         fvf_factor = gas_fvf_factor if self.phase == FluidPhase.GAS else liquid_fvf_factor
         # Compressibility is 1/pressure
         compressibility_factor = 1.0 / pressure_factor
-        if self.has_rv_axis():
-            temperatures = scale(self.temperatures, oil_gas_ratio_factor)
-        else:
-            temperatures = scale_and_offset(
-                self.temperatures, factors["temperature"], factors["temperature_offset"]
-            )
         return attrs.evolve(
             self,
             pressures=scale(self.pressures, pressure_factor),
-            temperatures=temperatures,
+            temperatures=scale_and_offset(
+                self.temperatures, factors["temperature"], factors["temperature_offset"]
+            ),
             solution_gas_to_oil_ratios=scale(
                 self.solution_gas_to_oil_ratios, gas_oil_ratio_factor
             ),
+            vaporized_oil_ratios=scale(self.vaporized_oil_ratios, oil_gas_ratio_factor),
             bubble_point_pressures=scale(self.bubble_point_pressures, pressure_factor),
             dew_point_pressures=scale(self.dew_point_pressures, pressure_factor),
             vaporized_oil_ratio_table=scale(self.vaporized_oil_ratio_table, oil_gas_ratio_factor),
             formation_volume_factor_table=scale(self.formation_volume_factor_table, fvf_factor),
             viscosity_table=scale(self.viscosity_table, viscosity_factor),
+            undersaturated_formation_volume_factor_table=scale(
+                self.undersaturated_formation_volume_factor_table, fvf_factor
+            ),
+            undersaturated_viscosity_table=scale(
+                self.undersaturated_viscosity_table, viscosity_factor
+            ),
             density_table=scale(self.density_table, density_factor),
             compressibility_table=scale(self.compressibility_table, compressibility_factor),
             solution_gor_table=scale(self.solution_gor_table, gas_oil_ratio_factor),

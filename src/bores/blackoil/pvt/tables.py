@@ -452,6 +452,10 @@ THREE_DIMENSIONAL_TABLES = (
     "solubility_in_water_table",
     "bubble_point_pressure_table",
 )
+UNDERSATURATED_TABLES = (
+    "undersaturated_formation_volume_factor_table",
+    "undersaturated_viscosity_table",
+)
 
 
 def build_derived_tables(data: PVTData, pvt: StaticPVT, dtype: npt.DTypeLike = None) -> PVTData:
@@ -740,6 +744,45 @@ def validate_pvt_data(data: PVTData) -> None:
                     f"(n_p={n_p}, n_t={n_t}, n_s={n_s}) for the water phase."
                 )
 
+    rv_axis = data.vaporized_oil_ratios
+    n_rv = len(rv_axis) if rv_axis is not None else None
+    if rv_axis is not None:
+        if rv_axis.ndim != 1:
+            raise ValidationError("`vaporized_oil_ratios` must be 1-dimensional.")
+        if not np.all(np.diff(rv_axis) > 0):
+            raise ValidationError(
+                "`vaporized_oil_ratios` must be strictly monotonically increasing."
+            )
+
+    dew_point_array = data.dew_point_pressures
+    if dew_point_array is not None:
+        if dew_point_array.ndim == 1:
+            if len(dew_point_array) != n_t:
+                raise ValidationError(
+                    f"`dew_point_pressures` 1-D length {len(dew_point_array)} must "
+                    f"match n_temperatures={n_t}."
+                )
+        elif dew_point_array.ndim == 2:
+            if rv_axis is None:
+                raise ValidationError("2-D `dew_point_pressures` requires `vaporized_oil_ratios`.")
+            if dew_point_array.shape != (n_rv, n_t):
+                raise ValidationError(
+                    f"`dew_point_pressures` shape {dew_point_array.shape} must be ({n_rv}, {n_t})."
+                )
+        else:
+            raise ValidationError("`dew_point_pressures` must be 1-D or 2-D.")
+
+    for table_name in UNDERSATURATED_TABLES:
+        array = getattr(data, table_name, None)
+        if array is None:
+            continue
+        if rv_axis is None:
+            raise ValidationError(f"`{table_name}` requires `vaporized_oil_ratios`.")
+        if array.shape != (n_p, n_t, n_rv):
+            raise ValidationError(
+                f"`{table_name}` shape {array.shape} must be (n_p={n_p}, n_t={n_t}, n_rv={n_rv})."
+            )
+
     if data.solubility_in_water_table is not None and salinities is None:
         raise ValidationError("`solubility_in_water_table` is 3-D and requires `salinities`.")
 
@@ -755,6 +798,10 @@ def check_physical_consistency(data: PVTData) -> None:
         data.formation_volume_factor_table <= 0
     ):
         raise ValidationError(f"{phase.value.upper()} FVF must be positive everywhere.")
+    for table_name in UNDERSATURATED_TABLES:
+        array = getattr(data, table_name, None)
+        if array is not None and np.any(array <= 0):
+            raise ValidationError(f"`{table_name}` must be positive everywhere.")
     if (
         phase == FluidPhase.GAS
         and data.compressibility_factor_table is not None
@@ -905,6 +952,10 @@ class PVTTable(StoreSerializable):
         if data.phase == FluidPhase.OIL and data.bubble_point_pressures is not None:
             self._bubble_point_ndim = data.bubble_point_pressures.ndim
 
+        self._dew_point_ndim: int | None = None
+        if data.phase == FluidPhase.GAS and data.dew_point_pressures is not None:
+            self._dew_point_ndim = data.dew_point_pressures.ndim
+
         self.default_salinity: Number | None = (
             data.salinities[0] if data.salinities is not None else None
         )
@@ -985,37 +1036,42 @@ class PVTTable(StoreSerializable):
                     pressures, temperatures, table, dtype=self.dtype
                 )
 
-        def register_3d(name: str, table: npt.NDArray | None) -> None:
+        def register_3d(
+            name: str, table: npt.NDArray | None, axis: npt.NDArray | None = None
+        ) -> None:
             """
-            Register a 3-D property interpolator.
+            Register a 3-D property interpolator over `(pressure, temperature, axis)`.
 
-            For single-salinity tables the 3-D array is pre-sliced to 2-D and
-            a fast 2-D interpolator is registered instead.
+            *axis* is the third coordinate: salinity by default (water, and gas solubility
+            in water), or the Rv axis of the undersaturated wet-gas tables. For
+            single-salinity tables the 3-D array is pre-sliced to 2-D and a fast 2-D
+            interpolator is registered instead.
             """
-            if table is None or salinities is None:
+            third_axis = salinities if axis is None else axis
+            if table is None or third_axis is None:
                 return
 
-            if self._water_constant_salinity:
+            if axis is None and self._water_constant_salinity:
                 register_2d(name, table[:, :, 0])
             elif use_pchip:
                 # PCHIP for the values too, so they are consistent with the derivative
                 # (`RegularGridInterpolator("cubic")` is a different, tensor-product spline).
                 self._interpolatants[name] = build_pchip_3d_interpolator(
-                    pressures, temperatures, salinities, table, dtype=self.dtype
+                    pressures, temperatures, third_axis, table, dtype=self.dtype
                 )
                 self._derivative_interpolatants[name] = build_pchip_3d_derivative_interpolator(
-                    pressures, temperatures, salinities, table, dtype=self.dtype
+                    pressures, temperatures, third_axis, table, dtype=self.dtype
                 )
             else:
                 self._interpolatants[name] = RegularGridInterpolator(
-                    points=(pressures, temperatures, salinities),
+                    points=(pressures, temperatures, third_axis),
                     values=table,
                     method="linear",
                     bounds_error=False,
                     fill_value=None,
                 )
                 self._derivative_interpolatants[name] = build_bilinear_3d_derivative_interpolator(
-                    pressures, temperatures, salinities, table, dtype=self.dtype
+                    pressures, temperatures, third_axis, table, dtype=self.dtype
                 )
 
         # Shared properties
@@ -1088,15 +1144,38 @@ class PVTTable(StoreSerializable):
             register_2d("vaporized_oil_gas_ratio", data.vaporized_oil_ratio_table)
             register_3d("solubility_in_water", data.solubility_in_water_table)
 
+            # Undersaturated wet gas: 3-D over `(pressure, temperature, Rv)`
+            rv_axis = data.vaporized_oil_ratios
+            register_3d(
+                "undersaturated_formation_volume_factor",
+                data.undersaturated_formation_volume_factor_table,
+                rv_axis,
+            )
+            register_3d("undersaturated_viscosity", data.undersaturated_viscosity_table, rv_axis)
+
             dp = data.dew_point_pressures
             if dp is not None:
-                self._interpolatants["dew_point_pressure"] = interp1d(
-                    x=temperatures,
-                    y=dp,
-                    kind=self.interpolation_method,
-                    bounds_error=False,
-                    fill_value="extrapolate",  # type: ignore[arg-type]
-                )
+                if dp.ndim == 1:
+                    self._interpolatants["dew_point_pressure"] = interp1d(
+                        x=temperatures,
+                        y=dp,
+                        kind=self.interpolation_method,
+                        bounds_error=False,
+                        fill_value="extrapolate",  # type: ignore[arg-type]
+                    )
+                elif rv_axis is not None:
+                    # Pdew(Rv, T), the gas-side analogue of Pb(Rs, T)
+                    if use_pchip:
+                        self._interpolatants["dew_point_pressure"] = build_pchip_2d_interpolator(
+                            rv_axis,
+                            temperatures,
+                            dp,  # type: ignore
+                            dtype=self.dtype,
+                        )
+                    else:
+                        self._interpolatants["dew_point_pressure"] = RectBivariateSpline(
+                            x=rv_axis, y=temperatures, z=dp, kx=k, ky=k
+                        )
 
         if phase == FluidPhase.WATER:
             register_3d("bubble_point_pressure", data.bubble_point_pressure_table)
@@ -1349,6 +1428,152 @@ class PVTTable(StoreSerializable):
             "and no default salinity is set."
         )
 
+    def _saturation_split_query(
+        self,
+        name: str,
+        pressure: TableQuery[NDimension],
+        temperature: TableQuery[NDimension],
+        state: TableQuery[NDimension],
+        saturation_pressure: TableResult[NDimension] | None,
+        *,
+        derivative: bool = False,
+    ) -> TableResult[NDimension] | None:
+        """
+        Evaluate a live-phase property across its saturated and undersaturated regimes.
+
+        Saturated states (`P <= saturation_pressure`) read the 2-D table *name*, which holds the
+        property along the saturation curve. Undersaturated states read the 3-D table
+        `undersaturated_<name>` at `(P, T, state)`, where *state* is the cell's own Rv (wet gas),
+        which stays fixed while the gas is undersaturated.
+
+        :param name: Property key (`"formation_volume_factor"` or `"viscosity"`).
+        :param pressure: Pressure.
+        :param temperature: Temperature.
+        :param state: Rv of the gas.
+        :param saturation_pressure: Dew-point pressure of each state. When `None` every state
+            is treated as saturated.
+        :param derivative: Return `∂/∂P` (at fixed Rv when undersaturated) instead of the value.
+        :returns: The property, or `None` when the table is absent.
+        """
+        if saturation_pressure is None:
+            return self.query(name, pressure, temperature, derivative=derivative)
+
+        dtype = self.dtype
+        pressure_array, temperature_array, state_array, saturation_array = np.broadcast_arrays(
+            np.atleast_1d(pressure),
+            np.atleast_1d(temperature),
+            np.atleast_1d(state),
+            np.atleast_1d(saturation_pressure),
+        )
+        result = np.zeros_like(pressure_array, dtype=dtype)
+        saturated = pressure_array <= saturation_array
+        undersaturated = ~saturated
+
+        if np.any(saturated):
+            result[saturated] = self.query(  # type: ignore[index]
+                name,
+                pressure_array[saturated],
+                temperature_array[saturated],
+                derivative=derivative,
+            )
+        if np.any(undersaturated):
+            result[undersaturated] = self.squery(  # type: ignore[index]
+                f"undersaturated_{name}",
+                pressure_array[undersaturated],
+                temperature_array[undersaturated],
+                state_array[undersaturated],
+                derivative=derivative,
+            )
+
+        return typing.cast(
+            TableResult[NDimension],
+            dtype.type(result.item())  # type: ignore[attr-defined]
+            if result.size == 1
+            else result.astype(dtype, copy=False),
+        )
+
+    def _wet_gas_density(
+        self,
+        pressure: TableQuery[NDimension],
+        temperature: TableQuery[NDimension],
+        vaporized_oil_ratio: TableQuery[NDimension],
+        *,
+        derivative: bool = False,
+    ) -> TableResult[NDimension] | None:
+        """
+        Density (or `∂ρ/∂P` at fixed Rv) of wet gas with its own Rv.
+
+        Saturated gas reads the dew-curve density table. Undersaturated gas is recomputed from
+        its own Rv, `ρg = (ρg,SC + Rv·ρo,SC · f) / Bg(P, T, Rv)` with `f` from
+        `get_stb_to_volume_factor`, whose pressure derivative at fixed Rv is `-ρg·(∂Bg/∂P)/Bg`.
+        """
+        dew_point_pressure = self.dew_point_pressure(
+            temperature, vaporized_oil_ratio=vaporized_oil_ratio
+        )
+        stock_tank_gas_density = self._stock_tank_gas_density
+        stock_tank_oil_density = self._stock_tank_oil_density
+        if (
+            dew_point_pressure is None
+            or stock_tank_gas_density is None
+            or stock_tank_oil_density is None
+        ):
+            return self.query("density", pressure, temperature, derivative=derivative)
+
+        dtype = self.dtype
+        pressure_array, temperature_array, state_array, dew_point_array = np.broadcast_arrays(
+            np.atleast_1d(pressure),
+            np.atleast_1d(temperature),
+            np.atleast_1d(vaporized_oil_ratio),
+            np.atleast_1d(dew_point_pressure),
+        )
+        result = np.zeros_like(pressure_array, dtype=dtype)
+        saturated = pressure_array <= dew_point_array
+        undersaturated = ~saturated
+
+        if np.any(saturated):
+            result[saturated] = self.query(  # type: ignore[index]
+                "density",
+                pressure_array[saturated],
+                temperature_array[saturated],
+                derivative=derivative,
+            )
+        if np.any(undersaturated):
+            p_undersaturated = pressure_array[undersaturated]
+            t_undersaturated = temperature_array[undersaturated]
+            rv_undersaturated = state_array[undersaturated]
+            gas_fvf = np.asarray(
+                self.squery(
+                    "undersaturated_formation_volume_factor",
+                    p_undersaturated,
+                    t_undersaturated,
+                    rv_undersaturated,
+                )
+            )
+            density = (
+                stock_tank_gas_density
+                + rv_undersaturated * stock_tank_oil_density * self._stb_to_volume
+            ) / gas_fvf
+            if derivative:
+                dgas_fvf_dp = np.asarray(
+                    self.squery(
+                        "undersaturated_formation_volume_factor",
+                        p_undersaturated,
+                        t_undersaturated,
+                        rv_undersaturated,
+                        derivative=True,
+                    )
+                )
+                result[undersaturated] = -density * dgas_fvf_dp / gas_fvf  # type: ignore[index]
+            else:
+                result[undersaturated] = density  # type: ignore[index]
+
+        return typing.cast(
+            TableResult[NDimension],
+            dtype.type(result.item())  # type: ignore[attr-defined]
+            if result.size == 1
+            else result.astype(dtype, copy=False),
+        )
+
     def formation_volume_factor(
         self,
         pressure: TableQuery[NDimension],
@@ -1356,6 +1581,7 @@ class PVTTable(StoreSerializable):
         salinity: TableQuery[NDimension] | None = None,
         solution_gor: TableQuery[NDimension] | None = None,
         bubble_point_pressure: TableQuery[NDimension] | None = None,
+        vaporized_oil_ratio: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
         Get formation volume factor `B`.
@@ -1371,14 +1597,20 @@ class PVTTable(StoreSerializable):
           `Bo = Bob · exp(-co · (P - bubble_point_array))`, where `compressibility` comes from the
           compressibility table. Falls back to `Bob` if unavailable.
 
-        **Gas and water** - direct table interpolation; no saturation switching.
+        **Wet gas** - saturated / undersaturated switching on the dew point: the 2-D table
+        (the dew curve) for saturated gas, the 3-D table at the gas's own Rv otherwise.
+
+        **Dry gas and water** - direct table interpolation; no saturation switching.
 
         :param pressure: Pressure.
         :param temperature: Temperature.
         :param salinity: Salinity (ppm NaCl). Water phase only.
-        :param solution_gor: Solution GOR. Oil, for 2-D `bubble_point_array` table only.
-        :param bubble_point_pressure: Pre-computed `bubble_point_array`. Oil only; skips
-            internal `bubble_point_array` lookup when supplied.
+        :param solution_gor: Solution GOR. Oil, for 2-D `Pb(Rs, T)` table only.
+        :param bubble_point_pressure: Pre-computed `Pb`. Oil only; skips the internal `Pb`
+            lookup when supplied.
+        :param vaporized_oil_ratio: Rv of the gas (wet gas only). Gas at or below its dew point
+            reads the saturated (dew-curve) table; gas above it is undersaturated and is looked
+            up at its own Rv. When omitted, gas is treated as saturated.
         :returns: FVF or `None` if the table is not present.
         """
         if self._phase == FluidPhase.WATER:
@@ -1389,6 +1621,16 @@ class PVTTable(StoreSerializable):
                 self.resolve_salinity(salinity),
             )
         if self._phase == FluidPhase.GAS:
+            if vaporized_oil_ratio is not None and self.has(
+                "undersaturated_formation_volume_factor"
+            ):
+                return self._saturation_split_query(
+                    "formation_volume_factor",
+                    pressure,
+                    temperature,
+                    vaporized_oil_ratio,
+                    self.dew_point_pressure(temperature, vaporized_oil_ratio=vaporized_oil_ratio),
+                )
             return self.query("formation_volume_factor", pressure, temperature)
 
         if not self.has("formation_volume_factor"):
@@ -1464,6 +1706,7 @@ class PVTTable(StoreSerializable):
         salinity: TableQuery[NDimension] | None = None,
         solution_gor: TableQuery[NDimension] | None = None,
         bubble_point_pressure: TableQuery[NDimension] | None = None,
+        vaporized_oil_ratio: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
         Return `∂B/∂P`. Units depend on `unit_system`.
@@ -1493,14 +1736,19 @@ class PVTTable(StoreSerializable):
           (~1e-9 relative error on a representative case) before writing
           this.
 
-        **Gas and water** - unchanged, direct table derivative; no switching.
+        **Wet gas** - matches `formation_volume_factor`'s split: the slope along the dew curve
+        for saturated gas, `∂B/∂P` at fixed Rv for undersaturated gas.
+
+        **Dry gas and water** - unchanged, direct table derivative; no switching.
 
         :param pressure: Pressure.
         :param temperature: Temperature.
         :param salinity: Salinity (ppm NaCl). Water phase only.
-        :param solution_gor: Solution GOR. Oil, for 2-D `bubble_point_array`
-            table only.
-        :param bubble_point_pressure: Pre-computed `bubble_point_array`. Oil only.
+        :param solution_gor: Solution GOR. Oil, for 2-D `Pb(Rs, T)` table only.
+        :param bubble_point_pressure: Pre-computed `Pb`. Oil only.
+        :param vaporized_oil_ratio: Rv of the gas (wet gas only). Gas at or below its dew point
+            reads the saturated (dew-curve) table; gas above it is undersaturated and is looked
+            up at its own Rv. When omitted, gas is treated as saturated.
         :returns: `∂B/∂P` or `None` if table is absent.
         """
         if self._phase == FluidPhase.WATER:
@@ -1512,6 +1760,17 @@ class PVTTable(StoreSerializable):
                 derivative=True,
             )
         if self._phase == FluidPhase.GAS:
+            if vaporized_oil_ratio is not None and self.has(
+                "undersaturated_formation_volume_factor"
+            ):
+                return self._saturation_split_query(
+                    "formation_volume_factor",
+                    pressure,
+                    temperature,
+                    vaporized_oil_ratio,
+                    self.dew_point_pressure(temperature, vaporized_oil_ratio=vaporized_oil_ratio),
+                    derivative=True,
+                )
             return self.query("formation_volume_factor", pressure, temperature, derivative=True)
 
         # Mirror `formation_volume_factor`'s own saturated/undersaturated
@@ -1595,6 +1854,7 @@ class PVTTable(StoreSerializable):
         salinity: TableQuery[NDimension] | None = None,
         solution_gor: TableQuery[NDimension] | None = None,
         bubble_point_pressure: TableQuery[NDimension] | None = None,
+        vaporized_oil_ratio: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
         Get fluid viscosity `μ`. Units depend on `unit_system` (cP in FIELD/METRIC/LAB, Pa·s in SI).
@@ -1604,13 +1864,19 @@ class PVTTable(StoreSerializable):
         (`μo = μob · (P / Pb)^m`; the exponent's psia correlation is evaluated on the
         pressure converted to psi, whatever the table's unit system).
 
-        **Water / gas** - direct table interpolation.
+        **Wet gas** - saturated / undersaturated switching on the dew point: the 2-D table
+        (the dew curve) for saturated gas, the 3-D table at the gas's own Rv otherwise.
+
+        **Dry gas and water** - direct table interpolation.
 
         :param pressure: Pressure.
         :param temperature: Temperature.
         :param salinity: Salinity (ppm NaCl). Water phase only.
-        :param solution_gor: Solution GOR. Oil, 2-D bubble_point_array table only.
-        :param bubble_point_pressure: Pre-computed bubble_point_array. Oil only.
+        :param solution_gor: Solution GOR. Oil, 2-D `Pb(Rs, T)` table only.
+        :param bubble_point_pressure: Pre-computed `Pb`. Oil only.
+        :param vaporized_oil_ratio: Rv of the gas (wet gas only). Gas at or below its dew point
+            reads the saturated (dew-curve) table; gas above it is undersaturated and is looked
+            up at its own Rv. When omitted, gas is treated as saturated.
         :returns: Viscosity in cP, or `None` if table is absent.
         """
         if self._phase == FluidPhase.WATER:
@@ -1621,6 +1887,14 @@ class PVTTable(StoreSerializable):
                 self.resolve_salinity(salinity),
             )
         if self._phase == FluidPhase.GAS:
+            if vaporized_oil_ratio is not None and self.has("undersaturated_viscosity"):
+                return self._saturation_split_query(
+                    "viscosity",
+                    pressure,
+                    temperature,
+                    vaporized_oil_ratio,
+                    self.dew_point_pressure(temperature, vaporized_oil_ratio=vaporized_oil_ratio),
+                )
             return self.query("viscosity", pressure, temperature)
 
         if not self.has("viscosity"):
@@ -1684,6 +1958,7 @@ class PVTTable(StoreSerializable):
         salinity: TableQuery[NDimension] | None = None,
         solution_gor: TableQuery[NDimension] | None = None,
         bubble_point_pressure: TableQuery[NDimension] | None = None,
+        vaporized_oil_ratio: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
         Return `∂μ/∂P` (viscosity-unit / pressure-unit, unit_system-dependent - cP/psi in FIELD).
@@ -1701,14 +1976,19 @@ class PVTTable(StoreSerializable):
           `100 · μob` ceiling). Evaluated in float64: differencing float32
           viscosities loses most of its digits at any reasonable step.
 
-        **Gas and water** - unchanged, direct table derivative; no switching.
+        **Wet gas** - matches `viscosity`'s split: the slope along the dew curve for saturated
+        gas, `∂μ/∂P` at fixed Rv for undersaturated gas.
+
+        **Dry gas and water** - unchanged, direct table derivative; no switching.
 
         :param pressure: Pressure.
         :param temperature: Temperature.
         :param salinity: Salinity (ppm NaCl). Water phase only.
-        :param solution_gor: Solution GOR. Oil, for 2-D `bubble_point_array`
-            table only.
-        :param bubble_point_pressure: Pre-computed `bubble_point_array`. Oil only.
+        :param solution_gor: Solution GOR. Oil, for 2-D `Pb(Rs, T)` table only.
+        :param bubble_point_pressure: Pre-computed `Pb`. Oil only.
+        :param vaporized_oil_ratio: Rv of the gas (wet gas only). Gas at or below its dew point
+            reads the saturated (dew-curve) table; gas above it is undersaturated and is looked
+            up at its own Rv. When omitted, gas is treated as saturated.
         :returns: `∂μ/∂P` or `None`.
         """
         if self._phase == FluidPhase.WATER:
@@ -1720,6 +2000,15 @@ class PVTTable(StoreSerializable):
                 derivative=True,
             )
         if self._phase == FluidPhase.GAS:
+            if vaporized_oil_ratio is not None and self.has("undersaturated_viscosity"):
+                return self._saturation_split_query(
+                    "viscosity",
+                    pressure,
+                    temperature,
+                    vaporized_oil_ratio,
+                    self.dew_point_pressure(temperature, vaporized_oil_ratio=vaporized_oil_ratio),
+                    derivative=True,
+                )
             return self.query("viscosity", pressure, temperature, derivative=True)
 
         # Mirror viscosity's own saturated/undersaturated split rather
@@ -1794,6 +2083,7 @@ class PVTTable(StoreSerializable):
         salinity: TableQuery[NDimension] | None = None,
         solution_gor: TableQuery[NDimension] | None = None,
         bubble_point_pressure: TableQuery[NDimension] | None = None,
+        vaporized_oil_ratio: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
         Get fluid density `ρ`. Units depend on `unit_system` (lbm/ft³ in FIELD, kg/m³ in METRIC/SI, g/cm³ in LAB).
@@ -1823,8 +2113,12 @@ class PVTTable(StoreSerializable):
         :param salinity: Salinity (ppm NaCl). Water phase only.
         :param solution_gor: Solution GOR. Oil, for 2-D `bubble_point_array`
             table only - also enables the undersaturated correction.
-        :param bubble_point_pressure: Pre-computed `bubble_point_array`. Oil
-            only; skips the internal `bubble_point_array` lookup when supplied.
+        :param bubble_point_pressure: Pre-computed `Pb`. Oil only; skips the internal `Pb`
+            lookup when supplied.
+        :param vaporized_oil_ratio: Rv of the gas (wet gas only). Saturated gas reads the dew-curve
+            density table; undersaturated gas is recomputed from its own Rv with
+            `ρg = (ρg,SC + Rv·ρo,SC · f) / Bg(P, T, Rv)` when the stock-tank densities were
+            supplied at construction (`pvt=`), and falls back to the dew-curve table otherwise.
         :returns: Density, or `None` if table not present.
         """
         if self._phase == FluidPhase.WATER:
@@ -1835,6 +2129,10 @@ class PVTTable(StoreSerializable):
                 self.resolve_salinity(salinity),
             )
         if self._phase == FluidPhase.GAS:
+            if vaporized_oil_ratio is not None and self.has(
+                "undersaturated_formation_volume_factor"
+            ):
+                return self._wet_gas_density(pressure, temperature, vaporized_oil_ratio)
             return self.query("density", pressure, temperature)
 
         # Mirror `formation_volume_factor`'s own saturated/undersaturated
@@ -1916,6 +2214,7 @@ class PVTTable(StoreSerializable):
         salinity: TableQuery[NDimension] | None = None,
         solution_gor: TableQuery[NDimension] | None = None,
         bubble_point_pressure: TableQuery[NDimension] | None = None,
+        vaporized_oil_ratio: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
         Return `∂ρ/∂P` (density-unit / pressure-unit, unit_system-dependent - lbm/ft³/psi in FIELD).
@@ -1940,7 +2239,10 @@ class PVTTable(StoreSerializable):
         :param salinity: Salinity (ppm NaCl). Water phase only.
         :param solution_gor: Solution GOR. Oil, for 2-D `bubble_point_array`
             table only - also enables the undersaturated correction.
-        :param bubble_point_pressure: Pre-computed `bubble_point_array`. Oil only.
+        :param bubble_point_pressure: Pre-computed `Pb`. Oil only.
+        :param vaporized_oil_ratio: Rv of the gas (wet gas only). Saturated gas: the slope of the
+            dew-curve density table. Undersaturated gas: `-ρ·(∂Bg/∂P)/Bg` at fixed Rv (see
+            `density`).
         :returns: `∂ρ/∂P` or `None`.
         """
         if self._phase == FluidPhase.WATER:
@@ -1952,6 +2254,12 @@ class PVTTable(StoreSerializable):
                 derivative=True,
             )
         if self._phase == FluidPhase.GAS:
+            if vaporized_oil_ratio is not None and self.has(
+                "undersaturated_formation_volume_factor"
+            ):
+                return self._wet_gas_density(
+                    pressure, temperature, vaporized_oil_ratio, derivative=True
+                )
             return self.query("density", pressure, temperature, derivative=True)
 
         if not self.has("density"):
@@ -2022,6 +2330,7 @@ class PVTTable(StoreSerializable):
         pressure: TableQuery[NDimension],
         temperature: TableQuery[NDimension],
         salinity: TableQuery[NDimension] | None = None,
+        vaporized_oil_ratio: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
         Get fluid compressibility `c`. Units depend on `unit_system` (1/psi in FIELD,
@@ -2036,6 +2345,9 @@ class PVTTable(StoreSerializable):
         :param pressure: Pressure. Units depend on `unit_system`.
         :param temperature: Temperature. Units depend on `unit_system`.
         :param salinity: Salinity (ppm NaCl). Water phase only.
+        :param vaporized_oil_ratio: Rv of the gas (wet gas only). Compressibility is then
+            `-(1/Bg)·(∂Bg/∂P)` from `formation_volume_factor` and `db_dp`, which are saturated /
+            undersaturated aware; otherwise the pre-built table is used.
         :returns: Compressibility. Units depend on `unit_system`, or `None`.
         """
         if self._phase == FluidPhase.WATER:
@@ -2044,6 +2356,24 @@ class PVTTable(StoreSerializable):
                 pressure,
                 temperature,
                 self.resolve_salinity(salinity),
+            )
+        if (
+            self._phase == FluidPhase.GAS
+            and vaporized_oil_ratio is not None
+            and self.has("undersaturated_formation_volume_factor")
+        ):
+            gas_fvf = self.formation_volume_factor(
+                pressure, temperature, vaporized_oil_ratio=vaporized_oil_ratio
+            )
+            dgas_fvf_dp = self.db_dp(
+                pressure, temperature, vaporized_oil_ratio=vaporized_oil_ratio
+            )
+            compressibility = -np.asarray(dgas_fvf_dp) / np.asarray(gas_fvf)
+            return typing.cast(
+                TableResult[NDimension],
+                self.dtype.type(compressibility.item())  # type: ignore[attr-defined]
+                if compressibility.size == 1
+                else compressibility.astype(self.dtype, copy=False),
             )
         return self.query("compressibility", pressure, temperature)
 
@@ -2285,27 +2615,34 @@ class PVTTable(StoreSerializable):
         pressure: TableQuery[NDimension],
         temperature: TableQuery[NDimension],
         solution_gor: TableQuery[NDimension] | None = None,
+        vaporized_oil_ratio: TableQuery[NDimension] | None = None,
     ) -> Boolean | BooleanArray[NDimension] | None:
         """
-        Determine whether conditions are saturated (P ≤ bubble_point_array). Oil phase only.
+        Determine whether conditions are saturated: `P ≤ Pb` for oil, `P ≤ Pdew` for wet gas.
 
         :param pressure: Pressure.
         :param temperature: Temperature.
-        :param solution_gor: Solution GOR. Required for 2-D bubble_point_array table.
-        :returns: Boolean mask (True = saturated), or `None` for gas / water.
+        :param solution_gor: Solution GOR. Oil; required for a 2-D `Pb(Rs, T)` table.
+        :param vaporized_oil_ratio: Rv of the gas. Wet gas; required for a 2-D `Pdew(Rv, T)` table.
+        :returns: Boolean mask (True = saturated), or `None` for water or when the table
+            is absent.
         """
-        if self._phase != FluidPhase.OIL:
+        if self._phase == FluidPhase.OIL:
+            saturation_pressure = self.bubble_point_pressure(
+                temperature=temperature, solution_gor=solution_gor
+            )
+        elif self._phase == FluidPhase.GAS:
+            saturation_pressure = self.dew_point_pressure(
+                temperature, vaporized_oil_ratio=vaporized_oil_ratio
+            )
+        else:
             return None
-
-        bubble_point_array = self.bubble_point_pressure(
-            temperature=temperature, solution_gor=solution_gor
-        )
-        if bubble_point_array is None:
+        if saturation_pressure is None:
             return None
 
         pressure_array = np.atleast_1d(pressure)
-        bubble_point_array = np.atleast_1d(bubble_point_array)
-        result = pressure_array <= bubble_point_array
+        saturation_array = np.atleast_1d(saturation_pressure)
+        result = pressure_array <= saturation_array
         return typing.cast(
             Boolean | BooleanArray[NDimension],
             bool(result.item()) if result.size == 1 else result,
@@ -2352,61 +2689,34 @@ class PVTTable(StoreSerializable):
         self,
         pressure: TableQuery[NDimension],
         temperature: TableQuery[NDimension],
-        dew_point_pressure: TableQuery[NDimension] | None = None,
+        vaporized_oil_ratio: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Get vaporized oil ratio `Rv` (unit_system-dependent - STB/scf in FIELD).
+        Get the vaporized oil ratio `Rv` (unit_system-dependent - STB/scf in FIELD).
         Gas / condensate phase only.
 
-        Rv is capped at Rv_sat (the value at dew-point pressure) above the dew
-        point, analogous to Rs being capped at Rsb above bubble point for oil.
+        Without *vaporized_oil_ratio* this is `Rv_sat(P, T)`, the Rv of saturated gas on the dew
+        curve. Undersaturated gas keeps its own Rv, a state variable held by the caller, so
+        with *vaporized_oil_ratio* the effective Rv is `min(Rv, Rv_sat(P, T))`: the gas's own Rv
+        while undersaturated, capped at `Rv_sat` once the pressure has fallen to its dew point.
 
         :param pressure: Pressure.
         :param temperature: Temperature.
-        :param dew_point_pressure: Pre-computed dew-point pressure. When
-            provided, skips the internal dew-point lookup.
+        :param vaporized_oil_ratio: Rv of the gas.
         :returns: Rv in STB/scf, or `None` if table is absent.
         """
         if self._phase != FluidPhase.GAS:
             return None
-        if not self.has("vaporized_oil_gas_ratio"):
-            return None
+        saturated_ratio = self.query("vaporized_oil_gas_ratio", pressure, temperature)
+        if vaporized_oil_ratio is None or saturated_ratio is None:
+            return saturated_ratio
 
-        dew_point_pressure = (
-            dew_point_pressure
-            if dew_point_pressure is not None
-            else self.dew_point_pressure(temperature=temperature)
-        )
-
-        dtype = self.dtype
-        pressure_array = np.atleast_1d(pressure)
-        temperature_array = np.atleast_1d(temperature)
-
-        if dew_point_pressure is None:
-            return self.query("vaporized_oil_gas_ratio", pressure_array, temperature_array)
-
-        dew_point_array = np.atleast_1d(dew_point_pressure)
-        pressure_array, temperature_array, dew_point_array = np.broadcast_arrays(
-            pressure_array, temperature_array, dew_point_array
-        )
-
-        result = np.zeros_like(pressure_array, dtype=dtype)
-        above = pressure_array >= dew_point_array  # above dew point: Rv = Rv_sat (frozen)
-        below = ~above
-
-        if np.any(below):
-            result[below] = self.query(  # type: ignore[index]
-                "vaporized_oil_gas_ratio", pressure_array[below], temperature_array[below]
-            )
-        if np.any(above):
-            result[above] = self.query(  # type: ignore[index]
-                "vaporized_oil_gas_ratio", dew_point_array[above], temperature_array[above]
-            )
+        result = np.minimum(np.asarray(vaporized_oil_ratio), np.asarray(saturated_ratio))
         return typing.cast(
             TableResult[NDimension],
-            dtype.type(result.item())  # type: ignore[attr-defined]
+            self.dtype.type(result.item())  # type: ignore[attr-defined]
             if result.size == 1
-            else result.astype(dtype, copy=False),
+            else result.astype(self.dtype, copy=False),
         )
 
     rv = Rv = vaporized_ogr = vaporized_oil_gas_ratio
@@ -2415,27 +2725,63 @@ class PVTTable(StoreSerializable):
         self,
         pressure: TableQuery[NDimension],
         temperature: TableQuery[NDimension],
+        vaporized_oil_ratio: TableQuery[NDimension] | None = None,
+        dew_point_pressure: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Return `∂Rv/∂P` (vaporized-oil-ratio-unit / pressure-unit, unit_system-dependent - STB/Mscf/psi in FIELD).
+        Return `∂Rv/∂P` (vaporized-oil-ratio-unit / pressure-unit, unit_system-dependent - STB/scf/psi in FIELD).
         Gas / condensate phase only.
+
+        Matches `vaporized_oil_gas_ratio`'s regime split: along the dew curve the slope of
+        `Rv_sat(P)`, and zero for undersaturated gas (`P > Pdew`), whose Rv does not change with
+        pressure. Without *vaporized_oil_ratio* or *dew_point_pressure* the gas is
+        treated as saturated.
 
         :param pressure: Pressure.
         :param temperature: Temperature.
+        :param vaporized_oil_ratio: Rv of the gas. Used to find the dew point when
+            *dew_point_pressure* is not given.
+        :param dew_point_pressure: Pre-computed dew-point pressure of the gas.
         :returns: `∂Rv/∂P` or `None`.
         """
         if self._phase != FluidPhase.GAS:
             return None
-        return self.query("vaporized_oil_gas_ratio", pressure, temperature, derivative=True)
+        slope = self.query("vaporized_oil_gas_ratio", pressure, temperature, derivative=True)
+        if slope is None or (vaporized_oil_ratio is None and dew_point_pressure is None):
+            return slope
+
+        if dew_point_pressure is None:
+            dew_point_pressure = self.dew_point_pressure(
+                temperature, vaporized_oil_ratio=vaporized_oil_ratio
+            )
+        if dew_point_pressure is None:
+            return slope
+
+        pressure_array, dew_point_array, slope_array = np.broadcast_arrays(
+            np.atleast_1d(pressure), np.atleast_1d(dew_point_pressure), np.atleast_1d(slope)
+        )
+        result = np.where(pressure_array <= dew_point_array, slope_array, 0.0)
+        return typing.cast(
+            TableResult[NDimension],
+            self.dtype.type(result.item())  # type: ignore[attr-defined]
+            if result.size == 1
+            else result.astype(self.dtype, copy=False),
+        )
 
     def dew_point_pressure(
         self,
         temperature: TableQuery[NDimension],
+        vaporized_oil_ratio: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Get gas dew-point pressure `Pdew(T)`. Gas phase only.
+        Get gas dew-point pressure. Gas phase only. Units depend on `unit_system`.
+
+        - 1-D table `Pdew(T)`: pass `temperature` only.
+        - 2-D table `Pdew(Rv, T)`: both `temperature` and `vaporized_oil_ratio` are required. Gas
+          at pressure `P` with that Rv is saturated when `P <= Pdew`.
 
         :param temperature: Temperature.
+        :param vaporized_oil_ratio: Rv of the gas. Required for a 2-D dew-point table.
         :returns: Dew-point pressure, or `None` if table is absent.
         """
         if self._phase != FluidPhase.GAS:
@@ -2446,11 +2792,32 @@ class PVTTable(StoreSerializable):
             return None
 
         dtype = self.dtype
-        result = interp(temperature)
-        return (
-            dtype.type(result)  # type: ignore[attr-defined]
-            if np.isscalar(temperature)
-            else result.astype(dtype, copy=False)
+        if self._dew_point_ndim == 1:
+            result = interp(temperature)
+            return (
+                dtype.type(result)  # type: ignore[attr-defined]
+                if np.isscalar(temperature)
+                else result.astype(dtype, copy=False)
+            )
+
+        if vaporized_oil_ratio is None:
+            raise ValidationError(
+                "2-D dew-point table requires the `vaporized_oil_ratio` argument."
+            )
+
+        rv_array, temperature_array = np.broadcast_arrays(
+            np.atleast_1d(vaporized_oil_ratio), np.atleast_1d(temperature)
+        )
+        result = (
+            interp.ev(rv_array, temperature_array)
+            if hasattr(interp, "ev")
+            else interp(rv_array, temperature_array)
+        )
+        return typing.cast(
+            TableResult[NDimension],
+            dtype.type(result.item())  # type: ignore[attr-defined]
+            if result.size == 1
+            else result.astype(dtype, copy=False),
         )
 
     pd = pdew = p_dew = dew_point_pressure

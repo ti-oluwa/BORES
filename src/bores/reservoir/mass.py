@@ -157,7 +157,9 @@ def compute_masses(
                     "but no gas PVT table is available."
                 )
 
-            bg = pvt_region.tables.gas.formation_volume_factor(pressure=p, temperature=t)
+            bg = pvt_region.tables.gas.formation_volume_factor(
+                pressure=p, temperature=t, vaporized_oil_ratio=rv
+            )
             if bg is None or rho_g_sc is None:
                 raise ValidationError(
                     f"`PVTNUM` {pvtnum}: gas FVF table or "

@@ -286,18 +286,12 @@ def initialize_center_point_equilibrium(
         when `capillary_pressure` is supplied; ignored for sharp-contact initialization.
     :raises ValidationError: If `datum_depth` is outside the oil zone, or a
         contact is present without its corresponding PVT table.
-    :raises NotImplementedError: If the gas table is wet-gas (`PVTG`-based)
-        and no `rvvd_table` is supplied.
+
+    For a wet-gas (`PVTG`-based) gas table the gas cap's `Rv(depth)` comes from `rvvd_table` when
+    one is supplied, and otherwise the gas is assumed saturated (`Rv = Rv_sat(P, T)`,
+    `Pdew = P`), the same default `EQUIL` applies to a defaulted `RVVD`.
     """
     is_wet_gas = gas_table is not None and gas_table.has("vaporized_oil_gas_ratio")
-    if is_wet_gas and rvvd_table is None:
-        raise NotImplementedError(
-            "Wet-gas / gas-condensate `EQUIL` initialization without an `RVVD` table "
-            "is not yet supported (no way to determine Rv(depth) to query the "
-            "gas PVT table's Rv-indexed axis). Supply an `RVVD` table for this "
-            "region, use a `PVDG` (dry-gas) table, or supply pressure/saturations "
-            "explicitly for this region."
-        )
 
     gradient_factor = get_hydrostatic_gradient_factor(unit_system)
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
@@ -340,9 +334,17 @@ def initialize_center_point_equilibrium(
 
     def compute_gas_density(pressure: Number, depth: Number) -> Number:
         assert gas_table is not None
-        return gas_table.density(pressure, get_temperature_at(depth)).astype(  # type: ignore[union-attr, return-value]
-            dtype, copy=False
+        # Wet gas: the gas's own `Rv(depth)` when `RVVD` is given, otherwise saturated gas
+        density = gas_table.density(
+            pressure,
+            get_temperature_at(depth),
+            vaporized_oil_ratio=(
+                rvvd_table.at_depth(depth)  # type: ignore[arg-type]
+                if rvvd_table is not None
+                else None
+            ),
         )
+        return density.astype(dtype, copy=False)  # type: ignore[union-attr, return-value]
 
     def compute_water_density(pressure: Number, depth: Number) -> Number:
         assert water_table is not None
@@ -510,7 +512,7 @@ def initialize_center_point_equilibrium(
         solution_gor[has_oil] = gor
         oil_bubble_point_pressure[has_oil] = bubble_point_pressure
 
-    # Vaporized oil ratio / dew-point pressure (dry-gas: Rv = 0 unless RVVD)
+    # Vaporized oil ratio / dew-point pressure (dry gas: Rv = 0 unless RVVD)
     vaporized_oil_gas_ratio = np.zeros(n, dtype=dtype)
     gas_dew_point_pressure = np.zeros(n, dtype=dtype)
     has_free_gas = gas_saturation > 0.0
@@ -520,11 +522,26 @@ def initialize_center_point_equilibrium(
         ).astype(dtype, copy=False)  # type: ignore[union-attr]
 
         if gas_table is not None:
-            dew_point = gas_table.dew_point_pressure(temperature=temperature[has_free_gas])
+            # A 2-D `Pdew(Rv, T)` table needs the gas's Rv
+            dew_point = gas_table.dew_point_pressure(
+                temperature=temperature[has_free_gas],
+                vaporized_oil_ratio=vaporized_oil_gas_ratio[has_free_gas],
+            )
             if dew_point is not None:
                 gas_dew_point_pressure[has_free_gas] = dew_point.astype(  # type: ignore[union-attr]
                     dtype, copy=False
                 )
+    elif is_wet_gas and gas_table is not None and np.any(has_free_gas):
+        # No `RVVD`: assume saturated gas (`Pdew = P`), so `Rv = Rv_sat(P, T)`
+        free_gas_pressure = pressure[has_free_gas]
+        saturated_rv = gas_table.vaporized_oil_gas_ratio(
+            free_gas_pressure, temperature[has_free_gas]
+        )
+        if saturated_rv is not None:
+            vaporized_oil_gas_ratio[has_free_gas] = saturated_rv.astype(  # type: ignore[union-attr]
+                dtype, copy=False
+            )
+            gas_dew_point_pressure[has_free_gas] = free_gas_pressure
 
     return EquilibriumArrays(
         pressure=typing.cast(CellArray, pressure),
@@ -1041,7 +1058,7 @@ def initialize_reservoir_state(
     involved), each `PVTNUM` region's own PVT tables are queried per-cell -
     `oil_bubble_point_pressure` from `PVTTable.bubble_point_pressure(temperature,
     solution_gor)` on the oil table, `gas_dew_point_pressure` from
-    `PVTTable.dew_point_pressure(temperature)` on the gas table - and only
+    `PVTTable.dew_point_pressure(temperature, vaporized_oil_ratio)` on the gas table - and only
     fall back to an assumption where a table has no such data: saturated oil
     (`oil_bubble_point_pressure = pressure`) and no free gas ever
     (`gas_dew_point_pressure = 0`).
@@ -1279,7 +1296,9 @@ def initialize_reservoir_state(
                 oil_bubble_point_pressure_array[mask] = oil_bubble_point
 
             if pvt_region.tables.gas is not None:
-                gas_dew_point = pvt_region.tables.gas.dew_point_pressure(temperature=t)
+                gas_dew_point = pvt_region.tables.gas.dew_point_pressure(
+                    temperature=t, vaporized_oil_ratio=vaporized_oil_ratio_array[mask]
+                )
                 if gas_dew_point is not None:
                     gas_dew_point_pressure_array[mask] = gas_dew_point
 
