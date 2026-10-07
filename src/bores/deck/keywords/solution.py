@@ -364,7 +364,7 @@ AQUFETP = RepeatedRecordKeyword[float](
     fields=[
         Field("aquifer_id", int),
         Field("datum_depth", np.float64),
-        Field("initial_pressure", np.float64),
+        Field("initial_pressure", np.float64, required=False, default=None),
         Field("initial_water_volume", np.float64),
         Field("total_compressibility", np.float64),
         Field("productivity_index", np.float64),
@@ -387,9 +387,9 @@ Fields:
 - `aquifer_id`      - aquifer identification number, referenced later by
   `AQUANCON` to attach the aquifer to grid connections.
 - `datum_depth`      - depth at which `initial_pressure` applies.
-- `initial_pressure` - aquifer pressure at `datum_depth`. Required here;
-  Eclipse's own equilibration-derived default when this is omitted or
-  given as `1*` is not supported.
+- `initial_pressure` - aquifer pressure at `datum_depth`. May be defaulted
+  with `1*`, in which case it is taken from the initial reservoir pressure of the
+  cells the aquifer is connected to.
 - `initial_water_volume` - `W_i`, the aquifer's initial water volume.
 - `total_compressibility` - combined rock and water compressibility.
 - `productivity_index` - aquifer productivity index `J`.

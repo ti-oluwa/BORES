@@ -101,7 +101,7 @@ class BoundaryRegion:
         """
         Return a new `BoundaryRegion` with the condition rescaled to *target*.
 
-        `face_positions` and `name` are copied unchanged.
+        `face_positions`, `face_weights` and `name` are copied unchanged.
 
         :param target: Target `UnitSystem`.
         :returns: New `BoundaryRegion` in *target* units.

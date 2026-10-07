@@ -14,25 +14,36 @@ from bores.errors import ValidationError
 from bores.reservoir.boundary.base import (
     BoundaryCondition,
     BoundaryConditionType,
+    InitialPressureFactory,
 )
-from bores.types import Number, NumberArray, OneDimension, UnitConversionTable, UnitSystem
+from bores.types import (
+    Integer,
+    Number,
+    NumberArray,
+    OneDimension,
+    UnitConversionTable,
+    UnitSystem,
+)
 
 if typing.TYPE_CHECKING:
     from bores.blackoil.pvt.regions import PVT
 
+BUILT_IN_INFLUENCE_TABLE_NUMBER = 1
+"""The influence table number that selects the built-in influence function."""
+
+FIRST_INFLUENCE_TABLE_NUMBER = 2
+"""The number of the first `AQUTAB` table, since table 1 is the built-in one."""
+
 __all__ = [
     "AquiferInfluenceTable",
     "CarterTracyAquifer",
-    "InitialPressureFactory",
     "compute_incremental_influx",
     "compute_tabulated_dimensionless_pressure",
+    "load_aquifer_influence_table",
+    "load_aquifer_influence_table_from_records",
     "load_carter_tracy_aquifer",
+    "load_carter_tracy_aquifer_from_record",
 ]
-
-InitialPressureFactory: typing.TypeAlias = typing.Callable[
-    [typing.Mapping[str, typing.Any]], Number
-]
-"""Callable that computes the initial pressure for an `AQUCT` record that defaults it."""
 
 
 def compute_bessel_roots(r_ed: Number, n_max: int) -> NumberArray[OneDimension]:
@@ -220,7 +231,7 @@ class AquiferInfluenceTable:
     """
 
     times: NumberArray[OneDimension]
-    """Dimensionless times `tD`, strictly increasing and positive."""
+    """Dimensionless times `tD`, not negative and strictly increasing."""
 
     pressures: NumberArray[OneDimension]
     """Dimensionless pressures `pD`, one for each entry of `times`."""
@@ -232,28 +243,40 @@ class AquiferInfluenceTable:
             raise ValidationError("An influence table needs at least two rows.")
         if not (np.all(np.isfinite(self.times)) and np.all(np.isfinite(self.pressures))):
             raise ValidationError("An influence table can only hold finite values.")
-        if self.times[0] <= 0.0 or np.any(np.diff(self.times) <= 0.0):
+        if self.times[0] < 0.0 or np.any(np.diff(self.times) <= 0.0):
             raise ValidationError(
-                "The `tD` column of an influence table must be positive and strictly increasing."
+                "The `tD` column of an influence table must not be negative and must "
+                "strictly increase."
             )
 
+    @typing.overload
     @classmethod
-    def from_rows(cls, rows: typing.Sequence[typing.Mapping[str, typing.Any]]) -> Self:
-        """
-        Build a table from the rows an `AQUTAB` table parses to.
+    def from_deck(cls, deck_file: DeckFile, *, table_number: Integer) -> Self: ...
+    @typing.overload
+    @classmethod
+    def from_deck(cls, deck_file: DeckFile, *, table_number: None = None) -> dict[int, Self]: ...
 
-        :param rows: Rows with `dimensionless_time` and `dimensionless_pressure`.
-        :returns: The influence table.
+    @classmethod
+    def from_deck(
+        cls, deck_file: DeckFile, *, table_number: Integer | None = None
+    ) -> Self | dict[int, Self]:
         """
-        return cls(
-            times=typing.cast(
-                NumberArray[OneDimension],
-                np.asarray([row["dimensionless_time"] for row in rows], dtype=np.float64),
-            ),
-            pressures=typing.cast(
-                NumberArray[OneDimension],
-                np.asarray([row["dimensionless_pressure"] for row in rows], dtype=np.float64),
-            ),
+        Construct one or all `AquiferInfluenceTable` objects from a parsed `DeckFile`.
+
+        Reads the `AQUTAB` keyword (see `load_aquifer_influence_table`).
+
+        :param deck_file: Parsed `bores.deck.file.DeckFile`.
+        :param table_number: Number of a specific table to extract, or `None` for all.
+            `AQUTAB` tables are numbered from 2 in the order they appear.
+        :returns: A single `AquiferInfluenceTable` if `table_number` is given; a
+            `dict[int, AquiferInfluenceTable]` keyed by table number otherwise, empty
+            if the deck has no `AQUTAB` keyword.
+        :raises ValidationError: If `table_number` is given but not found, or a table
+            is not valid.
+        """
+        return typing.cast(
+            Self | dict[int, Self],
+            load_aquifer_influence_table(deck_file, table_number=table_number),
         )
 
 
@@ -266,8 +289,9 @@ def compute_tabulated_dimensionless_pressure(
     """
     `pD` and `pD'` at `tD`, read from a table by linear interpolation.
 
-    Before the first row the table is joined to the origin by a straight line. After the
-    last row the slope of the last two rows is continued.
+    Before the first row the table is joined to the origin by a straight line, or if the
+    first row is at `tD = 0`, `pD` stays at its value there. After the last row the slope
+    of the last two rows is continued.
 
     :param t_d: Dimensionless time.
     :param times: Table `tD` column, increasing.
@@ -276,8 +300,12 @@ def compute_tabulated_dimensionless_pressure(
     """
     n_rows = times.shape[0]
     if t_d <= times[0]:
-        slope = pressures[0] / times[0]
-        return slope * t_d, slope
+        if times[0] > 0.0:
+            slope = pressures[0] / times[0]
+            return slope * t_d, slope
+        slope = (pressures[1] - pressures[0]) / (times[1] - times[0])
+        return pressures[0], slope
+
     if t_d >= times[n_rows - 1]:
         slope = (pressures[n_rows - 1] - pressures[n_rows - 2]) / (
             times[n_rows - 1] - times[n_rows - 2]
@@ -447,6 +475,11 @@ class CarterTracyAquifer(BoundaryCondition):
     `outer_radius`. Set `bounded_aquifer=True` to switch to the Klins,
     Bouchard & Cable (1988) finite-aquifer solution once dimensionless
     time passes `compute_bounded_aquifer_threshold(r_eD)`.
+
+    **Influence tables**: set `influence_table` to an `AquiferInfluenceTable` (the deck's
+    `AQUTAB` keyword) to use a user-supplied `pD(tD)` and its slope instead of the
+    built-in infinite or bounded functions. The table takes precedence over
+    `bounded_aquifer`. It is dimensionless, so unit conversion leaves it unchanged.
 
     **Unit system**: all user-supplied dimensional inputs must be in
     `unit_system`. Internally, the FIELD-unit constants (1.119, 6.328e-3)
@@ -844,7 +877,7 @@ class CarterTracyAquifer(BoundaryCondition):
         deck_file: DeckFile,
         *,
         pvt: "PVT",
-        aquifer_id: int,
+        aquifer_id: Integer,
         get_initial_pressure: InitialPressureFactory | None = None,
     ) -> Self: ...
     @typing.overload
@@ -864,73 +897,104 @@ class CarterTracyAquifer(BoundaryCondition):
         deck_file: DeckFile,
         *,
         pvt: "PVT",
-        aquifer_id: int | None = None,
+        aquifer_id: Integer | None = None,
         get_initial_pressure: InitialPressureFactory | None = None,
     ) -> Self | dict[int, Self]:
         """
         Construct one or all `CarterTracyAquifer` objects from a parsed `DeckFile`.
 
-        Reads the `AQUCT` keyword. When `aquifer_id` is given, returns a
-        single `CarterTracyAquifer` for that aquifer. When `aquifer_id` is
-        `None`, returns every aquifer the keyword defines, keyed by their
-        own `aquifer_id`.
+        Reads the `AQUCT` keyword, and the `AQUTAB` keyword for any aquifer that uses
+        a custom influence table (see `load_carter_tracy_aquifer`).
 
         :param deck_file: Parsed `bores.deck.file.DeckFile`.
-        :param pvt: The model's PVT tables - see `load_carter_tracy_aquifer`
-            for how `water_viscosity` is resolved from it.
+        :param pvt: The model's PVT tables, from which `water_viscosity` is resolved.
         :param aquifer_id: Id of a specific aquifer to extract, or `None` for all.
         :param get_initial_pressure: Called with an `AQUCT` record whose initial
             pressure was defaulted (`1*`) and returns the pressure to use. Without it,
             a defaulted initial pressure is an error.
         :returns: A single `CarterTracyAquifer` if `aquifer_id` is given;
             a `dict[int, CarterTracyAquifer]` otherwise.
-        :raises ValidationError: If the deck has no `AQUCT` keyword, or
-            `aquifer_id` is given but not found in it.
+        :raises ValidationError: If the deck has no `AQUCT` keyword, `aquifer_id` is
+            given but not found in it, or an aquifer cannot be built.
         """
-        records = deck_file.get("AQUCT")
-        if not records:
-            raise ValidationError("No `AQUCT` keyword found in the provided deck.")
-
-        # Table 1 is the built-in influence function, so `AQUTAB` tables start at 2.
-        influence_tables = {
-            number: AquiferInfluenceTable.from_rows(rows)
-            for number, rows in enumerate(deck_file.get("AQUTAB") or [], start=2)
-        }
-
-        if aquifer_id is not None:
-            matching = [record for record in records if record["aquifer_id"] == aquifer_id]
-            if not matching:
-                available = sorted(record["aquifer_id"] for record in records)
-                raise ValidationError(
-                    f"Aquifer {aquifer_id!r} not found in `AQUCT`. Available: {available}."
-                )
-            return typing.cast(
-                Self,
-                load_carter_tracy_aquifer(
-                    matching[0],
-                    deck_file.unit_system,
-                    pvt=pvt,
-                    get_initial_pressure=get_initial_pressure,
-                    influence_tables=influence_tables,
-                ),
-            )
-
         return typing.cast(
-            dict[int, Self],
-            {
-                record["aquifer_id"]: load_carter_tracy_aquifer(
-                    record,
-                    deck_file.unit_system,
-                    pvt=pvt,
-                    get_initial_pressure=get_initial_pressure,
-                    influence_tables=influence_tables,
-                )
-                for record in records
-            },
+            Self | dict[int, Self],
+            load_carter_tracy_aquifer(
+                deck_file,
+                pvt=pvt,
+                aquifer_id=aquifer_id,
+                get_initial_pressure=get_initial_pressure,
+            ),
         )
 
 
-def load_carter_tracy_aquifer(
+def load_aquifer_influence_table_from_records(
+    records: typing.Sequence[typing.Mapping[str, typing.Any]],
+) -> AquiferInfluenceTable:
+    """
+    Build an `AquiferInfluenceTable` from the rows of one `AQUTAB` table.
+
+    :param records: The table's rows, each with `dimensionless_time` and
+        `dimensionless_pressure`.
+    :returns: The influence table.
+    :raises ValidationError: If the rows do not make a valid table.
+    """
+    return AquiferInfluenceTable(
+        times=typing.cast(
+            NumberArray[OneDimension],
+            np.asarray([record["dimensionless_time"] for record in records], dtype=np.float64),
+        ),
+        pressures=typing.cast(
+            NumberArray[OneDimension],
+            np.asarray([record["dimensionless_pressure"] for record in records], dtype=np.float64),
+        ),
+    )
+
+
+@typing.overload
+def load_aquifer_influence_table(
+    deck_file: DeckFile, *, table_number: Integer
+) -> AquiferInfluenceTable: ...
+@typing.overload
+def load_aquifer_influence_table(
+    deck_file: DeckFile, *, table_number: None = None
+) -> dict[int, AquiferInfluenceTable]: ...
+
+
+def load_aquifer_influence_table(
+    deck_file: DeckFile, *, table_number: Integer | None = None
+) -> AquiferInfluenceTable | dict[int, AquiferInfluenceTable]:
+    """
+    Load one or all `AQUTAB` influence tables of a deck.
+
+    Table 1 is the built-in influence function, so `AQUTAB` tables are numbered from 2 in
+    the order they appear.
+
+    :param deck_file: Parsed `bores.deck.file.DeckFile`.
+    :param table_number: Number of a specific table to load, or `None` for all.
+    :returns: A single `AquiferInfluenceTable` if `table_number` is given; otherwise a
+        `dict[int, AquiferInfluenceTable]` keyed by table number, empty if the deck has
+        no `AQUTAB` keyword.
+    :raises ValidationError: If `table_number` is given but not found, or a table is not
+        valid.
+    """
+    deck_tables = deck_file.get("AQUTAB") or []
+    tables = {
+        number: load_aquifer_influence_table_from_records(records)
+        for number, records in enumerate(deck_tables, start=FIRST_INFLUENCE_TABLE_NUMBER)
+    }
+    if table_number is None:
+        return tables
+    if int(table_number) not in tables:
+        raise ValidationError(
+            f"Influence table {table_number!r} not found in `AQUTAB`. Available: "
+            f"{sorted(tables)}. Table 1 is the built-in influence function and has no "
+            "`AQUTAB` data."
+        )
+    return tables[int(table_number)]
+
+
+def load_carter_tracy_aquifer_from_record(
     record: typing.Mapping[str, typing.Any],
     unit_system: UnitSystem,
     *,
@@ -971,15 +1035,16 @@ def load_carter_tracy_aquifer(
     pvt_table_number = record["pvt_table_number"]
 
     influence_table_number = record["aquifer_influence_table_number"]
-    influence_table = None
-    if influence_table_number != 1:
+    influence_table: AquiferInfluenceTable | None = None
+    if influence_table_number != BUILT_IN_INFLUENCE_TABLE_NUMBER:
         if influence_tables is None or influence_table_number not in influence_tables:
             raise ValidationError(
                 f"`AQUCT` aquifer {aquifer_id!r} uses influence table {influence_table_number!r}, "
-                "but the deck has no such `AQUTAB` table. Tables are numbered from 2 in the "
-                "order they appear, and table 1 is the built-in influence function."
+                "but the deck has no such `AQUTAB` table. Tables are numbered from "
+                f"{FIRST_INFLUENCE_TABLE_NUMBER} in the order they appear, and table "
+                f"{BUILT_IN_INFLUENCE_TABLE_NUMBER} is the built-in influence function."
             )
-        influence_table = influence_tables[influence_table_number]
+        influence_table = influence_tables[typing.cast(int, influence_table_number)]
 
     water_viscosity = pvt.region(pvt_table_number).static.water_reference_viscosity
     if water_viscosity is None:
@@ -1016,3 +1081,79 @@ def load_carter_tracy_aquifer(
         pvt_table_number=pvt_table_number,
         unit_system=unit_system,
     )
+
+
+@typing.overload
+def load_carter_tracy_aquifer(
+    deck_file: DeckFile,
+    *,
+    pvt: "PVT",
+    aquifer_id: Integer,
+    get_initial_pressure: InitialPressureFactory | None = None,
+) -> CarterTracyAquifer: ...
+@typing.overload
+def load_carter_tracy_aquifer(
+    deck_file: DeckFile,
+    *,
+    pvt: "PVT",
+    aquifer_id: None = None,
+    get_initial_pressure: InitialPressureFactory | None = None,
+) -> dict[int, CarterTracyAquifer]: ...
+
+
+def load_carter_tracy_aquifer(
+    deck_file: DeckFile,
+    *,
+    pvt: "PVT",
+    aquifer_id: Integer | None = None,
+    get_initial_pressure: InitialPressureFactory | None = None,
+) -> CarterTracyAquifer | dict[int, CarterTracyAquifer]:
+    """
+    Load one or all `AQUCT` aquifers of a deck as `CarterTracyAquifer`s.
+
+    An aquifer whose record names an influence table other than 1 takes it from the
+    deck's `AQUTAB` keyword (see `load_aquifer_influence_table`).
+
+    :param deck_file: Parsed `bores.deck.file.DeckFile`.
+    :param pvt: The model's PVT tables, from which `water_viscosity` is resolved (see
+        `load_carter_tracy_aquifer_from_record`).
+    :param aquifer_id: Id of a specific aquifer to load, or `None` for all.
+    :param get_initial_pressure: Called with an `AQUCT` record whose initial pressure was
+        defaulted (`1*`) and returns the pressure to use. Without it, a defaulted initial
+        pressure is an error.
+    :returns: A single `CarterTracyAquifer` if `aquifer_id` is given; otherwise a
+        `dict[int, CarterTracyAquifer]` keyed by aquifer id.
+    :raises ValidationError: If the deck has no `AQUCT` keyword, `aquifer_id` is given but
+        not found in it, or an aquifer cannot be built (see
+        `load_carter_tracy_aquifer_from_record`).
+    """
+    records = deck_file.get("AQUCT")
+    if not records:
+        raise ValidationError("No `AQUCT` keyword found in the provided deck.")
+
+    influence_tables = load_aquifer_influence_table(deck_file)
+    if aquifer_id is not None:
+        matching = [record for record in records if record["aquifer_id"] == aquifer_id]
+        if not matching:
+            available = sorted(record["aquifer_id"] for record in records)
+            raise ValidationError(
+                f"Aquifer {aquifer_id!r} not found in `AQUCT`. Available: {available}."
+            )
+        return load_carter_tracy_aquifer_from_record(
+            matching[0],
+            deck_file.unit_system,
+            pvt=pvt,
+            get_initial_pressure=get_initial_pressure,
+            influence_tables=influence_tables,
+        )
+
+    return {
+        record["aquifer_id"]: load_carter_tracy_aquifer_from_record(
+            record,
+            deck_file.unit_system,
+            pvt=pvt,
+            get_initial_pressure=get_initial_pressure,
+            influence_tables=influence_tables,
+        )
+        for record in records
+    }

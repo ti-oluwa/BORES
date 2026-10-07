@@ -17,6 +17,7 @@ and relative permeability / capillary pressure curves.
 - `PVTG`     - wet-gas PVT (Rv-bracketed) tabulated
 - `ROCK`     - rock compressibility (ref pressure, compressibility)
 - `ROCKTAB`  - tabulated pore-volume vs. pressure compaction table
+- `AQUTAB`   - dimensionless influence function tables for `AQUCT` aquifers
 
 **Relative permeability / capillary pressure keywords**:
 

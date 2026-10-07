@@ -669,7 +669,7 @@ def normalize_optional(typ: typing.Any) -> typing.Any:
         return typ
     members = [arg for arg in typing.get_args(typ) if arg is not type(None)]
     if len(members) == 1 and len(members) < len(typing.get_args(typ)):
-        return typing.Optional[members[0]]  # noqa: UP045
+        return typing.cast(typing.Any, typing.Optional)[members[0]]
     return typ
 
 

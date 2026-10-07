@@ -1120,9 +1120,7 @@ def build_gas_data_from_pvtg(
             )(rv_values)
 
     if n_rv < 2:
-        raise ValidationError(
-            f"`PVTG` table requires at least 2 distinct Rv values; got {n_rv}."
-        )
+        raise ValidationError(f"`PVTG` table requires at least 2 distinct Rv values; got {n_rv}.")
 
     # Saturated (dew-curve) state at each tabulated pressure: the largest Rv listed in a
     # pressure group is that pressure's saturated Rv, so `(Rv_sat(P), P)` traces the dew-point

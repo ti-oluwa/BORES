@@ -137,18 +137,12 @@ def apply_aquifer_rates(
                     pd_prime_coefficients=pd_prime_coefficients[row],
                     linear_coefficient=linear_coefficients[row],
                     constant_coefficient=constant_coefficients[row],
-                    influence_times=typing.cast(
-                        NumberArray[OneDimension],
-                        influence_table_times[
-                            influence_table_offsets[row] : influence_table_offsets[row + 1]
-                        ],
-                    ),
-                    influence_pressures=typing.cast(
-                        NumberArray[OneDimension],
-                        influence_table_pressures[
-                            influence_table_offsets[row] : influence_table_offsets[row + 1]
-                        ],
-                    ),
+                    influence_times=influence_table_times[  # type: ignore[arg-type]
+                        influence_table_offsets[row] : influence_table_offsets[row + 1]
+                    ],
+                    influence_pressures=influence_table_pressures[  # type: ignore[arg-type]
+                        influence_table_offsets[row] : influence_table_offsets[row + 1]
+                    ],
                 )
             else:
                 new_cumulative_influx, _ = fetkovich.compute_incremental_influx(
@@ -237,18 +231,12 @@ def advance_aquifer_workspace(
                 pd_prime_coefficients=pd_prime_coefficients[row],
                 linear_coefficient=linear_coefficients[row],
                 constant_coefficient=constant_coefficients[row],
-                influence_times=typing.cast(
-                    NumberArray[OneDimension],
-                    influence_table_times[
-                        influence_table_offsets[row] : influence_table_offsets[row + 1]
-                    ],
-                ),
-                influence_pressures=typing.cast(
-                    NumberArray[OneDimension],
-                    influence_table_pressures[
-                        influence_table_offsets[row] : influence_table_offsets[row + 1]
-                    ],
-                ),
+                influence_times=influence_table_times[  # type: ignore[arg-type]
+                    influence_table_offsets[row] : influence_table_offsets[row + 1]
+                ],
+                influence_pressures=influence_table_pressures[  # type: ignore[arg-type]
+                    influence_table_offsets[row] : influence_table_offsets[row + 1]
+                ],
             )
             previous_dimensionless_time[row] = current_dimensionless_time
         else:

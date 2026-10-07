@@ -5,6 +5,7 @@ import warnings
 
 import numpy as np
 
+from bores.constants import get_conversion_factors
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.grids.base import Grid
@@ -14,7 +15,7 @@ from bores.reservoir.boundary.aquifers.fetkovich import FetkovichAquifer
 from bores.reservoir.boundary.base import BoundaryCondition
 from bores.reservoir.boundary.conditions import BoundaryConditions, BoundaryRegion
 from bores.reservoir.boundary.types import ConstantFluxBoundary
-from bores.types import IntArray, Number, NumberArray, OneDimension, UnitSystem
+from bores.types import IntArray, Integer, Number, NumberArray, OneDimension, UnitSystem
 from bores.utils import get_hydrostatic_gradient_factor
 
 if typing.TYPE_CHECKING:
@@ -24,6 +25,7 @@ __all__ = [
     "AquiferConnections",
     "compute_default_aquifer_pressure",
     "load_boundary_conditions",
+    "load_flux_aquifer",
     "load_flux_aquifer_from_record",
     "resolve_aquancon_connections",
     "resolve_aquancon_face_positions",
@@ -46,6 +48,46 @@ def load_flux_aquifer_from_record(
     return ConstantFluxBoundary(flux=record["flux"], unit_system=unit_system)
 
 
+@typing.overload
+def load_flux_aquifer(deck_file: DeckFile, *, aquifer_id: Integer) -> ConstantFluxBoundary: ...
+@typing.overload
+def load_flux_aquifer(
+    deck_file: DeckFile, *, aquifer_id: None = None
+) -> dict[int, ConstantFluxBoundary]: ...
+
+
+def load_flux_aquifer(
+    deck_file: DeckFile, *, aquifer_id: Integer | None = None
+) -> ConstantFluxBoundary | dict[int, ConstantFluxBoundary]:
+    """
+    Load one or all `AQUFLUX` aquifers of a deck as `ConstantFluxBoundary`s.
+
+    :param deck_file: Parsed `bores.deck.file.DeckFile`.
+    :param aquifer_id: Id of a specific aquifer to load, or `None` for all.
+    :returns: A single `ConstantFluxBoundary` if `aquifer_id` is given; otherwise a
+        `dict[int, ConstantFluxBoundary]` keyed by aquifer id.
+    :raises ValidationError: If the deck has no `AQUFLUX` keyword, or `aquifer_id` is
+        given but not found in it.
+    """
+    records = deck_file.get("AQUFLUX")
+    if not records:
+        raise ValidationError("No `AQUFLUX` keyword found in the provided deck.")
+
+    if aquifer_id is not None:
+        matching = [record for record in records if record["aquifer_id"] == aquifer_id]
+        if not matching:
+            available = sorted(record["aquifer_id"] for record in records)
+            raise ValidationError(
+                f"Aquifer {aquifer_id!r} not found in `AQUFLUX`. Available: {available}."
+            )
+        return load_flux_aquifer_from_record(matching[0], deck_file.unit_system)
+
+    return {
+        record["aquifer_id"]: load_flux_aquifer_from_record(record, deck_file.unit_system)
+        for record in records
+    }
+
+
 class AquiferConnections(typing.NamedTuple):
     """The boundary faces one aquifer is attached to by `AQUANCON`, with their weights."""
 
@@ -65,6 +107,7 @@ def resolve_aquancon_connections(
     aquifer_id: int,
     *,
     claimed_faces: typing.Mapping[int, int] | None = None,
+    length_factor: Number = 1.0,
 ) -> AquiferConnections | None:
     """
     Resolve the boundary faces one aquifer is attached to by `AQUANCON`, and how much
@@ -89,6 +132,9 @@ def resolve_aquancon_connections(
     :param grid: Grid to resolve face positions against.
     :param aquifer_id: Aquifer id to collect `AQUANCON` records for.
     :param claimed_faces: Face position to the id of the aquifer that already holds it.
+    :param length_factor: Multiplies lengths measured on `grid` to give the deck's length
+        unit, for a grid that is not in the deck's unit system. Face areas are scaled by
+        its square before they are compared with a record's `influx_coefficient`.
     :returns: The aquifer's connections, or `None` if `AQUANCON` has no records for
         `aquifer_id` or none of them resolved to a face.
     :raises ValidationError: If a record gives a negative influx coefficient or
@@ -146,7 +192,7 @@ def resolve_aquancon_connections(
 
         if not positions:
             continue
-        areas = grid.face_areas[grid.boundary_face_indices[positions]]
+        areas = grid.face_areas[grid.boundary_face_indices[positions]] * length_factor**2
         for position, area in zip(positions, areas.tolist(), strict=True):
             base = explicit if explicit is not None else area
             coefficients[position] = coefficients.get(position, 0.0) + base * multiplier
@@ -230,6 +276,7 @@ def compute_default_aquifer_pressure(
     reservoir_pressure: NumberArray[OneDimension],
     datum_depth: Number,
     water_gradient: Number,
+    length_factor: Number = 1.0,
 ) -> Number:
     """
     Initial aquifer pressure, at the aquifer's datum depth, that is in equilibrium with
@@ -243,6 +290,8 @@ def compute_default_aquifer_pressure(
     :param reservoir_pressure: Initial pressure of every cell, in the grid's unit system.
     :param datum_depth: Aquifer datum depth (positive down).
     :param water_gradient: Water pressure gradient, pressure per unit depth.
+    :param length_factor: Multiplies depths measured on `grid` to give the units of
+        `datum_depth`, for a grid that is not in the same unit system.
     :returns: Aquifer pressure at `datum_depth`.
     :raises ValidationError: If no attached cell is found.
     """
@@ -252,7 +301,7 @@ def compute_default_aquifer_pressure(
     if len(cell_indices) == 0:
         raise ValidationError("The aquifer is not attached to any cell.")
 
-    depths = grid.cell_center_depths[cell_indices]
+    depths = grid.cell_center_depths[cell_indices] * length_factor
     pressures = reservoir_pressure[cell_indices] + water_gradient * (datum_depth - depths)
     return np.mean(pressures)
 
@@ -278,13 +327,16 @@ def load_boundary_conditions(
     deck. Pass one in via `extra_regions` if the model needs it.
 
     :param deck_file: Parsed deck.
-    :param grid: The model's `Grid`, read for `AQUANCON`'s face resolution.
+    :param grid: The model's `Grid`, read for `AQUANCON`'s face resolution and for the
+        areas and depths of the faces and cells aquifers attach to. It may be in any unit
+        system, as these are converted to the deck's.
     :param pvt: The model's PVT tables. Required if the deck has an
-        `AQUCT` keyword. See `load_carter_tracy_aquifer` for why.
+        `AQUCT` keyword, and if an `AQUFETP` record defaults its initial pressure. See
+        `load_carter_tracy_aquifer_from_record` for why.
     :param reservoir_pressure: Initial pressure of every cell, in the deck's unit system.
-        Needed when an `AQUCT` record defaults its initial pressure (`1*`), which is then
-        set to the water-gradient-corrected average pressure of the cells the aquifer is
-        attached to, at the aquifer's datum depth.
+        Needed when an `AQUCT` or `AQUFETP` record defaults its initial pressure (`1*`),
+        which is then set to the water-gradient-corrected average pressure of the cells
+        the aquifer is attached to, at the aquifer's datum depth.
     :param extra_regions: Additional `BoundaryRegion`s to include as-is
         (e.g. a manually-built `ConstantPressureBoundary` region). Appended
         after every deck-sourced region, so they win on overlapping faces.
@@ -292,11 +344,12 @@ def load_boundary_conditions(
         region and `extra_regions`, or `None` if the deck defines no
         boundary conditions and `extra_regions` is empty.
     :raises ValidationError: If the deck has an `AQUCT` keyword but `pvt`
-        is `None`, if an `AQUCT` record defaults its initial pressure but
+        is `None`, if an `AQUCT` or `AQUFETP` record defaults its initial pressure but
         `reservoir_pressure` is `None`, or if the same `aquifer_id` is defined by more
         than one of `AQUCT`/`AQUFETP`/`AQUFLUX`.
     """
     unit_system = deck_file.unit_system
+    length_factor = get_conversion_factors(grid.unit_system, unit_system)["length"]
     regions: list[BoundaryRegion] = []
     resolved_connections: dict[int, AquiferConnections | None] = {}
     claimed_faces: dict[int, int] = {}
@@ -304,7 +357,11 @@ def load_boundary_conditions(
     def get_aquancon_connections(aquifer_id: int) -> AquiferConnections | None:
         if aquifer_id not in resolved_connections:
             connections = resolve_aquancon_connections(
-                deck_file, grid, aquifer_id, claimed_faces=claimed_faces
+                deck_file,
+                grid,
+                aquifer_id,
+                claimed_faces=claimed_faces,
+                length_factor=length_factor,
             )
             resolved_connections[aquifer_id] = connections
             if connections is not None:
@@ -317,7 +374,7 @@ def load_boundary_conditions(
         aquifer_id = record["aquifer_id"]
         if reservoir_pressure is None or pvt is None:
             raise ValidationError(
-                f"`AQUCT` aquifer {aquifer_id!r} defaults its initial pressure (`1*`), "
+                f"Aquifer {aquifer_id!r} defaults its initial pressure (`1*`), "
                 "which is taken from the initial reservoir pressure. Pass "
                 "`reservoir_pressure` to `load_boundary_conditions`."
             )
@@ -325,19 +382,20 @@ def load_boundary_conditions(
         connections = get_aquancon_connections(aquifer_id)
         if connections is None:
             raise ValidationError(
-                f"`AQUCT` aquifer {aquifer_id!r} defaults its initial pressure (`1*`) but "
+                f"Aquifer {aquifer_id!r} defaults its initial pressure (`1*`) but "
                 "no `AQUANCON` record attaches it to any cell to take it from."
             )
 
         static = pvt.region(record["pvt_table_number"]).static
-        water_density = static.stock_tank_water_density
-        if water_density is None:
+        stock_tank_water_density = static.stock_tank_water_density
+        if stock_tank_water_density is None:
             raise ValidationError(
-                f"`AQUCT` aquifer {aquifer_id!r} defaults its initial pressure (`1*`) but the "
+                f"Aquifer {aquifer_id!r} defaults its initial pressure (`1*`) but the "
                 "deck gives no water density (`DENSITY`) to correct it to the datum depth."
             )
+        water_density = float(stock_tank_water_density)
         if static.water_reference_fvf:
-            water_density = water_density / static.water_reference_fvf
+            water_density /= float(static.water_reference_fvf)
 
         return compute_default_aquifer_pressure(
             grid,
@@ -345,6 +403,7 @@ def load_boundary_conditions(
             reservoir_pressure=reservoir_pressure,
             datum_depth=record["datum_depth"],
             water_gradient=water_density * get_hydrostatic_gradient_factor(unit_system),
+            length_factor=length_factor,
         )
 
     defined_ids: dict[int, str] = {}
@@ -382,9 +441,11 @@ def load_boundary_conditions(
                 regions.append(region)
 
     if deck_file.get("AQUFETP"):
-        fetkovich_aquifers = FetkovichAquifer.from_deck(deck_file)
-        for aquifer_id in fetkovich_aquifers:
-            get_aquancon_connections(aquifer_id)
+        for record in deck_file.get("AQUFETP") or []:
+            get_aquancon_connections(record["aquifer_id"])
+        fetkovich_aquifers = FetkovichAquifer.from_deck(
+            deck_file, get_initial_pressure=get_initial_pressure
+        )
         for aquifer_id, aquifer in fetkovich_aquifers.items():
             check_id(aquifer_id, "AQUFETP")
             region = resolve_aquancon_region(
@@ -398,10 +459,11 @@ def load_boundary_conditions(
                 regions.append(region)
 
     if deck_file.get("AQUFLUX"):
-        for record in deck_file.get("AQUFLUX") or []:
-            aquifer_id = record["aquifer_id"]
+        flux_aquifers = load_flux_aquifer(deck_file)
+        for aquifer_id in flux_aquifers:
+            get_aquancon_connections(aquifer_id)
+        for aquifer_id, condition in flux_aquifers.items():
             check_id(aquifer_id, "AQUFLUX")
-            condition = load_flux_aquifer_from_record(record, unit_system)
             region = resolve_aquancon_region(
                 deck_file,
                 grid,

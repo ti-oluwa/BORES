@@ -3,9 +3,17 @@ import typing
 
 from typing_extensions import Self
 
-from bores.types import UnitConversionTable, UnitSystem
+from bores.types import Number, UnitConversionTable, UnitSystem
 
-__all__ = ["BoundaryCondition", "BoundaryConditionType"]
+__all__ = ["BoundaryCondition", "BoundaryConditionType", "InitialPressureFactory"]
+
+InitialPressureFactory: typing.TypeAlias = typing.Callable[
+    [typing.Mapping[str, typing.Any]], Number
+]
+"""
+Callable that works out the initial pressure of an aquifer whose deck record leaves it
+defaulted (`1*`), given that record.
+"""
 
 
 class BoundaryConditionType(enum.Enum):

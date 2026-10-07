@@ -11,13 +11,15 @@ from bores.errors import ValidationError
 from bores.reservoir.boundary.base import (
     BoundaryCondition,
     BoundaryConditionType,
+    InitialPressureFactory,
 )
-from bores.types import Number, UnitConversionTable, UnitSystem
+from bores.types import Integer, Number, UnitConversionTable, UnitSystem
 
 __all__ = [
     "FetkovichAquifer",
     "compute_incremental_influx",
     "load_fetkovich_aquifer",
+    "load_fetkovich_aquifer_from_record",
 ]
 
 
@@ -438,73 +440,152 @@ class FetkovichAquifer(BoundaryCondition):
 
     @typing.overload
     @classmethod
-    def from_deck(cls, deck_file: DeckFile, *, aquifer_id: int) -> Self: ...
+    def from_deck(
+        cls,
+        deck_file: DeckFile,
+        *,
+        aquifer_id: Integer,
+        get_initial_pressure: InitialPressureFactory | None = None,
+    ) -> Self: ...
     @typing.overload
     @classmethod
-    def from_deck(cls, deck_file: DeckFile, *, aquifer_id: None = None) -> dict[int, Self]: ...
+    def from_deck(
+        cls,
+        deck_file: DeckFile,
+        *,
+        aquifer_id: None = None,
+        get_initial_pressure: InitialPressureFactory | None = None,
+    ) -> dict[int, Self]: ...
 
     @classmethod
     def from_deck(
         cls,
         deck_file: DeckFile,
         *,
-        aquifer_id: int | None = None,
+        aquifer_id: Integer | None = None,
+        get_initial_pressure: InitialPressureFactory | None = None,
     ) -> Self | dict[int, Self]:
         """
         Construct one or all `FetkovichAquifer` objects from a parsed `DeckFile`.
 
-        Reads the `AQUFETP` keyword. When `aquifer_id` is given, returns a
-        single `FetkovichAquifer` for that aquifer. When `aquifer_id` is
-        `None`, returns every aquifer the keyword defines, keyed by their
-        own `aquifer_id`.
+        Reads the `AQUFETP` keyword (see `load_fetkovich_aquifer`). When `aquifer_id` is
+        given, returns a single `FetkovichAquifer` for that aquifer. When `aquifer_id` is
+        `None`, returns every aquifer the keyword defines, keyed by their own `aquifer_id`.
 
         :param deck_file: Parsed `bores.deck.file.DeckFile`.
         :param aquifer_id: Id of a specific aquifer to extract, or `None` for all.
+        :param get_initial_pressure: Called with an `AQUFETP` record whose initial
+            pressure was defaulted (`1*`) and returns the pressure to use. Without it,
+            a defaulted initial pressure is an error.
         :returns: A single `FetkovichAquifer` if `aquifer_id` is given;
             a `dict[int, FetkovichAquifer]` otherwise.
         :raises ValidationError: If the deck has no `AQUFETP` keyword, or
             `aquifer_id` is given but not found in it.
         """
-        records = deck_file.get("AQUFETP")
-        if not records:
-            raise ValidationError("No `AQUFETP` keyword found in the provided deck.")
-
-        if aquifer_id is not None:
-            matching = [record for record in records if record["aquifer_id"] == aquifer_id]
-            if not matching:
-                available = sorted(record["aquifer_id"] for record in records)
-                raise ValidationError(
-                    f"Aquifer {aquifer_id!r} not found in `AQUFETP`. Available: {available}."
-                )
-            return typing.cast(Self, load_fetkovich_aquifer(matching[0], deck_file.unit_system))
-
         return typing.cast(
-            dict[int, Self],
-            {
-                record["aquifer_id"]: load_fetkovich_aquifer(record, deck_file.unit_system)
-                for record in records
-            },
+            Self | dict[int, Self],
+            load_fetkovich_aquifer(
+                deck_file, aquifer_id=aquifer_id, get_initial_pressure=get_initial_pressure
+            ),
         )
 
 
-def load_fetkovich_aquifer(
-    record: typing.Mapping[str, typing.Any], unit_system: UnitSystem
+def load_fetkovich_aquifer_from_record(
+    record: typing.Mapping[str, typing.Any],
+    unit_system: UnitSystem,
+    *,
+    get_initial_pressure: InitialPressureFactory | None = None,
 ) -> FetkovichAquifer:
     """
     Build a `FetkovichAquifer` from one `AQUFETP` record.
 
     :param record: One parsed `AQUFETP` record.
     :param unit_system: The deck's unit system.
+    :param get_initial_pressure: Called with `record` to get the initial pressure
+        when the record defaults it (`1*`).
     :returns: Constructed `FetkovichAquifer`. `salt_concentration` is read
         by the deck parser but not consumed here as this codebase has no
         brine tracking wired into `FetkovichAquifer` yet.
+    :raises ValidationError: If the record defaults its initial pressure and
+        `get_initial_pressure` is not given.
     """
+    aquifer_id = record["aquifer_id"]
+    initial_pressure = record["initial_pressure"]
+    if initial_pressure is None:
+        if get_initial_pressure is None:
+            raise ValidationError(
+                f"`AQUFETP` aquifer {aquifer_id!r} defaults its initial pressure (`1*`), "
+                "which is taken from the initial reservoir pressure. Load it through "
+                "`load_boundary_conditions` with `reservoir_pressure`, or give the "
+                "pressure in the deck."
+            )
+        initial_pressure = get_initial_pressure(record)
+
     return FetkovichAquifer(
-        aquifer_id=record["aquifer_id"],
-        initial_pressure=record["initial_pressure"],
+        aquifer_id=aquifer_id,
+        initial_pressure=initial_pressure,
         aquifer_productivity_index=record["productivity_index"],
         aquifer_compressibility=record["total_compressibility"],
         initial_aquifer_water_volume=record["initial_water_volume"],
         pvt_table_number=record["pvt_table_number"],
         unit_system=unit_system,
     )
+
+
+@typing.overload
+def load_fetkovich_aquifer(
+    deck_file: DeckFile,
+    *,
+    aquifer_id: Integer,
+    get_initial_pressure: InitialPressureFactory | None = None,
+) -> FetkovichAquifer: ...
+@typing.overload
+def load_fetkovich_aquifer(
+    deck_file: DeckFile,
+    *,
+    aquifer_id: None = None,
+    get_initial_pressure: InitialPressureFactory | None = None,
+) -> dict[int, FetkovichAquifer]: ...
+
+
+def load_fetkovich_aquifer(
+    deck_file: DeckFile,
+    *,
+    aquifer_id: Integer | None = None,
+    get_initial_pressure: InitialPressureFactory | None = None,
+) -> FetkovichAquifer | dict[int, FetkovichAquifer]:
+    """
+    Load one or all `AQUFETP` aquifers of a deck as `FetkovichAquifer`s.
+
+    :param deck_file: Parsed `bores.deck.file.DeckFile`.
+    :param aquifer_id: Id of a specific aquifer to load, or `None` for all.
+    :param get_initial_pressure: Called with an `AQUFETP` record whose initial pressure
+        was defaulted (`1*`) and returns the pressure to use. Without it, a defaulted
+        initial pressure is an error.
+    :returns: A single `FetkovichAquifer` if `aquifer_id` is given; otherwise a
+        `dict[int, FetkovichAquifer]` keyed by aquifer id.
+    :raises ValidationError: If the deck has no `AQUFETP` keyword, `aquifer_id` is given
+        but not found in it, or an aquifer cannot be built (see
+        `load_fetkovich_aquifer_from_record`).
+    """
+    records = deck_file.get("AQUFETP")
+    if not records:
+        raise ValidationError("No `AQUFETP` keyword found in the provided deck.")
+
+    if aquifer_id is not None:
+        matching = [record for record in records if record["aquifer_id"] == aquifer_id]
+        if not matching:
+            available = sorted(record["aquifer_id"] for record in records)
+            raise ValidationError(
+                f"Aquifer {aquifer_id!r} not found in `AQUFETP`. Available: {available}."
+            )
+        return load_fetkovich_aquifer_from_record(
+            matching[0], deck_file.unit_system, get_initial_pressure=get_initial_pressure
+        )
+
+    return {
+        record["aquifer_id"]: load_fetkovich_aquifer_from_record(
+            record, deck_file.unit_system, get_initial_pressure=get_initial_pressure
+        )
+        for record in records
+    }

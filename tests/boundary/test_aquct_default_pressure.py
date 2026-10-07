@@ -9,7 +9,7 @@ from bores.errors import ValidationError
 from bores.grids.factories.corner_point import make_corner_point_grid
 from bores.reservoir.boundary.aquifers.carter_tracy import (
     CarterTracyAquifer,
-    load_carter_tracy_aquifer,
+    load_carter_tracy_aquifer_from_record,
 )
 from bores.reservoir.boundary.deck import compute_default_aquifer_pressure
 from bores.simulation.case import SimulationCase
@@ -72,7 +72,7 @@ def test_defaulted_pressure_comes_from_the_callable():
 def test_explicit_pressure_is_not_replaced_by_the_callable():
     deck = deck_with_aquct("4800")
     record = deck.get("AQUCT")[0]
-    aquifer = load_carter_tracy_aquifer(
+    aquifer = load_carter_tracy_aquifer_from_record(
         record,
         UnitSystem.FIELD,
         pvt=fake_pvt(),
