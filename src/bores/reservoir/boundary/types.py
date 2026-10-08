@@ -22,8 +22,9 @@ class ConstantFluxBoundary(BoundaryCondition):
     """
     Constant-flux (Neumann) boundary condition.
 
-    A uniform volumetric flow rate at every face in the region. This is a pure
-    parameter container, compiles directly into `CompiledBoundaryConditions.static_values`.
+    A uniform volumetric flow rate at every face in the region, unless the region's
+    `face_weights` scale it face by face. This is a pure parameter container, compiles
+    directly into `CompiledBoundaryConditions.static_values`.
 
     The default `flux=0.0` gives a **sealed (no-flow) boundary**; the most
     common boundary condition for reservoir flanks, top, and base. A positive

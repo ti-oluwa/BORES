@@ -412,7 +412,7 @@ AQUANCON = RepeatedRecordKeyword[typing.Any](
         Field("influx_coefficient", np.float64, required=False, default=None),
         Field("connection_multiplier", np.float64, required=False, default=1.0),
         Field(
-            "allow_already_connected",
+            "connect_adjoining_active_cell",
             lambda v: str(v).upper(),
             required=False,
             default="NO",
@@ -422,7 +422,7 @@ AQUANCON = RepeatedRecordKeyword[typing.Any](
 )
 """
 `AQUANCON  AQUIFER_ID  I1  I2  J1  J2  K1  K2  FACE  INFLUX_COEFFICIENT
-CONNECTION_MULTIPLIER  ALLOW_ALREADY_CONNECTED /` (one record per box) -
+CONNECTION_MULTIPLIER  CONNECT_ADJOINING_ACTIVE_CELL /` (one record per box) -
 attaches an analytic (`AQUCT`/`AQUFETP`) or flux (`AQUFLUX`) aquifer to a
 box of grid cells' faces. Several records for the same `aquifer_id` are
 unioned.
@@ -444,10 +444,13 @@ Fields:
   An aquifer's influx is shared between its faces in proportion to these.
 - `connection_multiplier` - multiplies the resolved influx coefficient.
   `1.0` if omitted.
-- `allow_already_connected` - `YES`/`NO`, whether this connection may
-  reuse a face already connected to a different aquifer. `NO` if omitted, which
-  leaves out any face another aquifer already holds. With `YES` a face can only
-  be held by one aquifer, so the aquifer loaded last keeps it.
+- `connect_adjoining_active_cell` - `YES`/`NO`, whether the aquifer may connect to a
+  cell face that adjoins another active cell. `NO` if omitted, which connects only
+  faces on the edge of the active grid. Only `NO` is supported, so with `YES` the faces
+  that adjoin an active cell are still left out.
+
+A face can only be connected to one aquifer. Connecting the same face to two different
+aquifers is an error.
 """
 
 AQUFLUX = RepeatedRecordKeyword[float](
@@ -458,7 +461,8 @@ AQUFLUX = RepeatedRecordKeyword[float](
 `AQUFLUX  AQUIFER_ID  FLUX /` (one record per aquifer) - flux-specified
 analytic aquifer: a fixed influx rate rather than one derived from
 pressure difference. Attached to grid cells the same way as `AQUCT`/
-`AQUFETP`, via `AQUANCON`.
+`AQUFETP`, via `AQUANCON`. The flux is per unit of face area, so each connected face
+takes `FLUX` times its own area times the `AQUANCON` connection multiplier.
 
 Multiple records (one per aquifer) are separated by `/` within a single
 `AQUFLUX` block, and multiple `AQUFLUX` blocks in the same deck are
@@ -468,7 +472,8 @@ Fields:
 
 - `aquifer_id`      - aquifer identification number, referenced by
   `AQUANCON` to attach the aquifer to grid connections.
-- `flux`      - constant influx rate, reservoir volume per day.
+- `flux`      - constant influx per unit of connected face area: liquid surface
+  volume per day per unit area (STB/day/ft² in FIELD units).
 """
 
 RESTART = RestartKeyword()

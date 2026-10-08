@@ -281,7 +281,9 @@ def compile_boundary_conditions(
             static_pressure_values[face_positions] = condition.pressure
             static_is_dirichlet[face_positions] = True
         elif isinstance(condition, ConstantFluxBoundary):
-            static_flux_values[face_positions] = condition.flux
+            static_flux_values[face_positions] = condition.flux * (
+                region.face_weights if region.face_weights is not None else 1.0
+            )
         elif isinstance(condition, (CarterTracyAquifer, FetkovichAquifer)):
             row = len(aquifer_regions)
             aquifer_regions.append((region.name, face_positions, region.face_weights, condition))

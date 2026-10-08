@@ -67,10 +67,17 @@ class BoundaryRegion:
 
     face_weights: NumberArray[OneDimension] | None = None
     """
-    Shape `(n_faces,)`, same order as `face_positions`. How much of an aquifer's influx
-    each face takes, in proportion to these values (for example each face's open area).
-    `None` shares it in proportion to the faces' own areas. Only used by aquifer
-    conditions.
+    Shape `(n_faces,)`, same order as `face_positions`, not negative.
+
+    For a `CarterTracyAquifer` or `FetkovichAquifer` it is how much of the aquifer's
+    influx each face takes, in proportion to these values (for example each face's open
+    area). `None` shares it in proportion to the faces' own areas.
+
+    For a `ConstantFluxBoundary` it multiplies the flux face by face, so a face's flux is
+    `condition.flux * face_weights[i]`. `None` gives every face the same flux. The
+    weights have no unit, so converting the region's unit system rescales only `flux`.
+
+    Other conditions ignore it.
     """
 
     def __attrs_post_init__(self) -> None:
