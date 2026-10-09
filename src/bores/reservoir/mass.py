@@ -84,8 +84,8 @@ def compute_masses(
         doesn't so it's optional. `dissolved_gas_mass_in_water` is zero
         wherever it isn't given, or a region has no `stock_tank_gas_density`.
     :param unit_system: Needed to apply the `FIELD`-only ft3<->bbl
-        correction between `Rs`/`Rv`/`Rsw` (SCF/STB) and oil/water/gas
-        volumes (STB/Mscf).
+        correction between `Rs`/`Rsw` (SCF/STB), `Rv` (STB/SCF) and the
+        oil/water/gas volumes they scale.
     :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
     :returns: `Masses` for every cell.
     :raises ValidationError: If a `PVTNUM` region needed by at least one
@@ -107,14 +107,17 @@ def compute_masses(
 
     # `UnitSystem.FIELD` mixes two volume "families": oil/water are barrels (STB), gas is
     # cubic feet (SCF), and 1 barrel = 5.614583 ft3 (`c.BARRELS_TO_CUBIC_FEET`).
-    # `solution_gor` (Rs), `vaporized_oil_gas_ratio` (Rv), and `gas_solubility_in_water`
-    # (Rsw) are all normalized to SCF/STB by this codebase, so each crosses those
-    # two families the same way: converting `Rs * rho_g_sc` into an oil-mass-basis
-    # term (or `Rv * rho_o_sc`/`Rsw * rho_g_sc` into a gas/water-mass-basis term)
-    # needs an explicit ft3<->bbl correction; skipping it overstates the mass by
-    # ~5.615x. `METRIC`/`SI`/`LAB` use a single volume unit throughout (m3/m3,
-    # cc/cc) so no such correction applies for them.
+    # `solution_gor` (Rs) and `gas_solubility_in_water` (Rsw) are in SCF/STB, while
+    # `vaporized_oil_gas_ratio` (Rv) is the inverse family, STB/SCF (the deck's STB/Mscf
+    # is rescaled by 1/1000 on load: see `build_gas_data_from_pvtg` and the `RVVD` handling
+    # in `reservoir.equilibrium`). Turning `Rs * rho_g_sc` (or `Rsw * rho_g_sc`) into a
+    # gas-mass-per-stock-tank-barrel term therefore divides by 5.614583 ft3/STB
+    # (`volume_correction`), and turning `Rv * rho_o_sc` into an oil-mass-per-SCF term
+    # multiplies by it (`inverse_volume_correction`). Skipping either misstates the mass by
+    # ~5.615x. `METRIC`/`SI`/`LAB` use a single volume unit throughout (m3/m3, cc/cc) so no
+    # such correction applies for them.
     volume_correction = c.CUBIC_FEET_TO_STB if unit_system is UnitSystem.FIELD else 1.0
+    inverse_volume_correction = c.STB_TO_CUBIC_FEET if unit_system is UnitSystem.FIELD else 1.0
 
     for pvtnum in np.unique(pvt_region_index):
         mask = pvt_region_index == pvtnum
@@ -167,7 +170,7 @@ def compute_masses(
                 )
             free_gas_mass[mask] = sg * pv / bg * rho_g_sc
             vaporized_oil_mass_in_gas[mask] = (
-                rv * free_gas_mass[mask] * (rho_o_sc / rho_g_sc) * volume_correction
+                rv * free_gas_mass[mask] * (rho_o_sc / rho_g_sc) * inverse_volume_correction
             )
 
         if np.any(sw > 0.0):

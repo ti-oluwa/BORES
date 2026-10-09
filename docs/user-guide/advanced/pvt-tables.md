@@ -50,7 +50,7 @@ oil_data = build_oil_pvt_data(
     temperatures=temperatures,
     oil_specific_gravity=0.87,
     gas_gravity=0.65,
-    estimatedsolution_gor=500.0,  # SCF/STB - helps estimate bubble point
+    estimated_solution_gor=500.0,  # SCF/STB - helps estimate bubble point
 )
 
 gas_data = build_gas_pvt_data(
@@ -66,7 +66,7 @@ water_data = build_water_pvt_data(
 )
 ```
 
-The `estimatedsolution_gor` parameter for the oil builder deserves attention. BORES uses it to estimate the bubble point pressure across the temperature range via Standing's correlation. If you leave it out, BORES will estimate a solution GOR from your API gravity, but you will see a warning. If you have any knowledge of your reservoir's GOR, pass it in here for better bubble point estimates.
+The `estimated_solution_gor` parameter for the oil builder deserves attention. BORES uses it to estimate the bubble point pressure across the temperature range via Standing's correlation. If you leave it out, BORES will estimate a solution GOR from your API gravity, but you will see a warning. If you have any knowledge of your reservoir's GOR, pass it in here for better bubble point estimates. (It was previously spelled `estimatedsolution_gor`; the old spelling still works but raises a `DeprecationWarning`.)
 
 ### Mixing Lab Data with Correlations
 

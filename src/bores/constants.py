@@ -927,6 +927,23 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         description="Tolerance for gas solubility calculations",
         unit="fraction",
     ),
+    "DEFAULT_MAX_COMPRESSIBILITY": Constant(
+        value=1e-1,
+        description=(
+            "Compressibility ceiling for derived PVT compressibility tables, in FIELD units. "
+            "Converted to the table's unit system with `get_conversion_factors`"
+        ),
+        unit="1/psi",
+    ),
+    "GAS_COMPRESSIBILITY_PRESSURE_FACTOR": Constant(
+        value=2.0,
+        description=(
+            "Gas compressibility ceiling as a multiple of `1/P`. Ideal-gas `cg = 1/P` already "
+            "exceeds `DEFAULT_MAX_COMPRESSIBILITY` at low pressure, so a fixed ceiling alone "
+            "would clip valid gas data"
+        ),
+        unit="dimensionless",
+    ),
     "DEFAULT_WATER_SALINITY_PPM": Constant(
         value=0,
         description="Default water salinity in parts per million (ppm)",

@@ -16,7 +16,7 @@ from typing_extensions import Self
 
 from bores.blackoil.pvt.data import PVTData, PVTDataSet, get_stb_to_volume_factor
 from bores.blackoil.pvt.static import StaticPVT
-from bores.constants import UnitConversionTable, get_conversion_factors
+from bores.constants import UnitConversionTable, c, get_conversion_factors
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.precision import get_dtype
@@ -357,16 +357,6 @@ def build_bilinear_3d_derivative_interpolator(
     return interpolator
 
 
-DEFAULT_MAX_COMPRESSIBILITY = 1e-1
-"""Compressibility ceiling in FIELD units (1/psi). Converted to the table's unit system."""
-
-GAS_COMPRESSIBILITY_PRESSURE_FACTOR = 2.0
-"""
-Gas compressibility ceiling as a multiple of `1/P`. Ideal-gas `cg = 1/P` already exceeds
-`DEFAULT_MAX_COMPRESSIBILITY` at low pressure, so a fixed ceiling alone would clip valid gas data.
-"""
-
-
 def clip_compressibility(
     values: NumberArray[NDimension],
     *,
@@ -393,25 +383,26 @@ def clip_compressibility(
     :param values: Raw compressibility array before clipping.
     :param dtype: Output dtype.
     :param unit_system: Unit system *values* are expressed in. The default ceiling
-        (`DEFAULT_MAX_COMPRESSIBILITY`, 1/psi) is converted to it with
+        (`c.DEFAULT_MAX_COMPRESSIBILITY`, 1/psi) is converted to it with
         `get_conversion_factors`.
     :param pressure: Pressure of each value, broadcastable to *values*. Gas only: the
-        ceiling is raised to `GAS_COMPRESSIBILITY_PRESSURE_FACTOR / P` wherever that
+        ceiling is raised to `c.GAS_COMPRESSIBILITY_PRESSURE_FACTOR / P` wherever that
         exceeds the default, since `cg ≈ 1/P` is legitimately large at low pressure.
     :param max_value: Upper clip bound in *unit_system* (1/pressure-unit). Defaults to
-        `DEFAULT_MAX_COMPRESSIBILITY` converted to *unit_system*.
+        `c.DEFAULT_MAX_COMPRESSIBILITY` converted to *unit_system*.
     :param context: Label used in the warning/log message (e.g. `"PVTO oil compressibility"`).
     :returns: Clipped array, dtype *dtype*.
     """
     if max_value is None:
         factors = get_conversion_factors(UnitSystem.FIELD, unit_system)
-        max_value = DEFAULT_MAX_COMPRESSIBILITY * factors["compressibility"]
+        max_value = c.DEFAULT_MAX_COMPRESSIBILITY * factors["compressibility"]
 
     ceiling = max_value
     if pressure is not None:
         ceiling = np.maximum(
             max_value,
-            GAS_COMPRESSIBILITY_PRESSURE_FACTOR / np.maximum(pressure, np.finfo(np.float64).tiny),
+            c.GAS_COMPRESSIBILITY_PRESSURE_FACTOR
+            / np.maximum(pressure, np.finfo(np.float64).tiny),
         )
 
     n_negative = int(np.count_nonzero(values < 0.0))

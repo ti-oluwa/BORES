@@ -139,7 +139,7 @@ def build_oil_pvt_data(
     temperatures: NumberArray[OneDimension],
     oil_specific_gravity: Number = 0.85,
     gas_gravity: Number | None = None,
-    estimatedsolution_gor: Number | None = None,
+    estimated_solution_gor: Number | None = None,
     bubble_point_pressures: NumberArray[OneDimension] | NumberArray[TwoDimensions] | None = None,
     solution_gas_to_oil_ratios: NumberArray[OneDimension] | None = None,
     gas: str | typing.Any | None = None,
@@ -166,8 +166,9 @@ def build_oil_pvt_data(
     :param temperatures: 1-D array of temperatures (°F), strictly increasing.
     :param oil_specific_gravity: Oil specific gravity (dimensionless, water=1).
     :param gas_gravity: Gas specific gravity (air=1). Derived from `gas` if absent.
-    :param estimatedsolution_gor: Estimated Rs (SCF/STB) for the 1-D Pb
-        correlation. Estimated from API if absent.
+    :param estimated_solution_gor: Estimated Rs (SCF/STB) for the 1-D Pb
+        correlation. Estimated from API if absent. (Formerly `estimatedsolution_gor`, which is
+        still accepted with a `DeprecationWarning`.)
     :param bubble_point_pressures: Pre-computed Pb array. 1-D Pb(T) or 2-D Pb(Rs, T).
     :param solution_gas_to_oil_ratios: Rs axis for the 2-D Pb table.
     :param gas: Gas identity (string name or `Fluid`).
@@ -182,6 +183,16 @@ def build_oil_pvt_data(
         `density_table` when absent.
     :returns: `PVTData` with `phase=OIL`.
     """
+    legacy_estimate = kwargs.pop("estimatedsolution_gor", None)
+    if legacy_estimate is not None:
+        warnings.warn(
+            "`estimatedsolution_gor` is deprecated, use `estimated_solution_gor`.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        if estimated_solution_gor is None:
+            estimated_solution_gor = legacy_estimate
+
     if pressures.ndim != 1 or not np.all(np.diff(pressures) > 0):
         raise ValidationError("`pressures` must be a strictly increasing 1-D array.")
     if temperatures.ndim != 1 or not np.all(np.diff(temperatures) > 0):
@@ -252,14 +263,14 @@ def build_oil_pvt_data(
             oil_api_gravity = typing.cast(
                 Number, scalars.compute_oil_api_gravity(oil_specific_gravity)
             )
-            if estimatedsolution_gor is None:
-                estimatedsolution_gor = np.clip(
+            if estimated_solution_gor is None:
+                estimated_solution_gor = np.clip(
                     10 ** (0.0125 * oil_api_gravity) * 50.0, 50.0, 2000.0
                 )
                 warnings.warn(
-                    f"No `estimatedsolution_gor` provided. Estimating Rs = "
-                    f"{estimatedsolution_gor:.1f} SCF/STB from API = {oil_api_gravity:.1f}°. "
-                    "Pass `estimatedsolution_gor` for best results.",
+                    f"No `estimated_solution_gor` provided. Estimating Rs = "
+                    f"{estimated_solution_gor:.1f} SCF/STB from API = {oil_api_gravity:.1f}°. "
+                    "Pass `estimated_solution_gor` for best results.",
                     UserWarning,
                     stacklevel=2,
                 )
@@ -269,7 +280,7 @@ def build_oil_pvt_data(
                     gas_gravity=gas_gravity_1d,
                     oil_api_gravity=oil_api_gravity_1d,
                     temperature=temperatures,
-                    gas_to_oil_ratio=np.full(n_t, estimatedsolution_gor, dtype=dtype),
+                    gas_to_oil_ratio=np.full(n_t, estimated_solution_gor, dtype=dtype),
                 ),
             )
 
@@ -891,7 +902,7 @@ def build_pvt_dataset(
     gas_gravity: Number | None = None,
     water_salinity: Number | None = None,
     salinities: NumberArray[OneDimension] | None = None,
-    estimatedsolution_gor: Number | None = None,
+    estimated_solution_gor: Number | None = None,
     bubble_point_pressures: NumberArray[OneDimension] | NumberArray[TwoDimensions] | None = None,
     solution_gas_to_oil_ratios: NumberArray[OneDimension] | None = None,
     gas: str | typing.Any | None = None,
@@ -918,7 +929,8 @@ def build_pvt_dataset(
     :param gas_gravity: Gas specific gravity (air=1).
     :param water_salinity: Single salinity scalar (ppm).
     :param salinities: 1-D salinity array (ppm).
-    :param estimatedsolution_gor: Estimated Rs (SCF/STB) for bubble-point correlation.
+    :param estimated_solution_gor: Estimated Rs (SCF/STB) for bubble-point correlation.
+        (Formerly `estimatedsolution_gor`, which is still accepted with a `DeprecationWarning`.)
     :param bubble_point_pressures: Pre-computed Pb array.
     :param solution_gas_to_oil_ratios: Rs axis for 2-D Pb table.
     :param gas: Gas identity (string or `Fluid`).
@@ -977,7 +989,7 @@ def build_pvt_dataset(
             temperatures=temperatures,
             oil_specific_gravity=oil_specific_gravity,
             gas_gravity=gas_gravity,
-            estimatedsolution_gor=estimatedsolution_gor,
+            estimated_solution_gor=estimated_solution_gor,
             bubble_point_pressures=bubble_point_pressures,
             solution_gas_to_oil_ratios=solution_gas_to_oil_ratios,
             gas=gas,
