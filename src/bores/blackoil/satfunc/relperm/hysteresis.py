@@ -120,7 +120,7 @@ def compute_land_residual_saturation_array(
                 1.0 + land_trapping_coefficient * non_negative_initial
             )
             result.flat[flat_idx] = min(dynamic_residual, non_negative_initial)
-    return typing.cast(NumberArray[NDimension], result)
+    return result  # type: ignore
 
 
 def compute_land_residual_saturation(

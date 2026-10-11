@@ -142,7 +142,7 @@ def load_spe1_with_aquifer(pressure):
     )
     return SimulationCase.from_deck(
         deck,
-        default_wellbore=homogeneous_wellbore(
+        tubing_performance=homogeneous_wellbore(
             tubing_inner_diameter=2.5, unit_system=UnitSystem.FIELD
         ),
         temperature=200.0,

@@ -511,7 +511,7 @@ def decompile_well_system(
 
     `wells`, `well_controls`, and `group_controls` are rebuilt entirely
     from `compiled_system`, so they reflect any in-place patch made to it
-    since compile time. `default_wellbore`, `wellbore_overrides`,
+    since compile time. `tubing_performance`,
     `groups`, and `control_spec` are carried over from `well_system`
     unchanged.
 

@@ -33,8 +33,7 @@ from bores.simulation.spec import RunSpec
 from bores.simulation.workspace import SimulationWorkspace, build_simulation_workspace
 from bores.types import CellArray, InterpolationMethod, Number, UnitSystem
 from bores.wells.deck import load_schedule
-from bores.wells.hydraulics.base import WellBoreModel
-from bores.wells.model import WellSystem
+from bores.wells.model import TubingPerformance, WellSystem
 
 __all__ = ["SimulationCase", "load_case"]
 
@@ -159,7 +158,9 @@ class SimulationCase:
         cls,
         deck_file: DeckFile,
         *,
-        default_wellbore: WellBoreModel | None = None,
+        tubing_performance: TubingPerformance
+        | typing.Mapping[str, TubingPerformance | None]
+        | None = None,
         temperature: Temperature | Number | None = None,
         mixing_rule: str = "eclipse_rule",
         compiled_at: float = 0.0,
@@ -180,9 +181,10 @@ class SimulationCase:
         Loads a `SimulationCase` from a deck. See `load_case`.
 
         :param deck_file: The deck to load from.
-        :param default_wellbore: Wellbore hydraulics model for every well
-            that doesn't override it. Omit if nothing in the deck needs
-            one. See `WellSystem.from_deck`.
+        :param tubing_performance: What relates each well's BHP to its THP: a `WellBoreModel` or
+            `VFPTables` for every well, or a per-well mapping of them. Omit if nothing in the
+            deck needs one; the deck's own `VFPPROD`/`VFPINJ` tables are then used if it has
+            any. See `WellSystem.from_deck`.
         :param temperature: Reservoir temperature, either a `Temperature` or
             a constant value in the deck's own unit system.
         :param mixing_rule: Three-phase relative permeability mixing rule for `SatFunc.from_deck`.
@@ -208,7 +210,7 @@ class SimulationCase:
         """
         case = load_case(
             deck_file,
-            default_wellbore=default_wellbore,
+            tubing_performance=tubing_performance,
             temperature=temperature,
             mixing_rule=mixing_rule,
             compiled_at=compiled_at,
@@ -231,7 +233,9 @@ class SimulationCase:
 def load_case(
     deck_file: DeckFile,
     *,
-    default_wellbore: WellBoreModel | None = None,
+    tubing_performance: TubingPerformance
+    | typing.Mapping[str, TubingPerformance | None]
+    | None = None,
     temperature: Temperature | Number | None = None,
     mixing_rule: str = "eclipse_rule",
     compiled_at: float = 0.0,
@@ -253,8 +257,9 @@ def load_case(
     state, wells, and schedule.
 
     :param deck_file: The deck to load from.
-    :param default_wellbore: Wellbore hydraulics model for every well
-        that doesn't override it. Omit if nothing in the deck needs one.
+    :param tubing_performance: What relates each well's BHP to its THP: a `WellBoreModel` or
+        `VFPTables` for every well, or a per-well mapping of them. Omit if nothing in the deck
+        needs one; the deck's own `VFPPROD`/`VFPINJ` tables are then used if it has any.
         See `WellSystem.from_deck`.
     :param temperature: Reservoir temperature, either a `Temperature` or
         a constant value in the deck's own unit system.
@@ -368,7 +373,7 @@ def load_case(
         raise CaseLoadError(f"Failed to initialize reservoir state from {deck_file!r}.") from exc
 
     try:
-        wells = WellSystem.from_deck(deck_file, grid=grid, default_wellbore=default_wellbore)
+        wells = WellSystem.from_deck(deck_file, grid=grid, tubing_performance=tubing_performance)
     except Exception as exc:
         raise CaseLoadError(f"Failed to load wells from {deck_file!r}.") from exc
 

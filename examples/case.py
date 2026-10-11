@@ -16,11 +16,11 @@ df = DeckFile(
     unit_system=UnitSystem.FIELD,
 )
 
-default_wellbore = homogeneous_wellbore(tubing_inner_diameter=2.5, unit_system=UnitSystem.FIELD)
+tubing_performance = homogeneous_wellbore(tubing_inner_diameter=2.5, unit_system=UnitSystem.FIELD)
 
 # One call gets you a compiled model, initial reservoir state, and schedule,
 # all read straight off the deck.
-case = SimulationCase.from_deck(df, default_wellbore=default_wellbore, temperature=200.0)
+case = SimulationCase.from_deck(df, tubing_performance=tubing_performance, temperature=200.0)
 
 grid = case.model.reservoir.grid
 print(f"cells: {grid.n_cells}, faces: {grid.n_faces}, bbox: {grid.bounding_box}")

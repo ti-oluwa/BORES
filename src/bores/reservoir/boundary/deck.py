@@ -449,7 +449,7 @@ def load_boundary_conditions(
             )
         for record in deck_file.get("AQUCT") or []:
             get_aquancon_connections(record["aquifer_id"])
-        
+
         carter_tracy_aquifers = CarterTracyAquifer.from_deck(
             deck_file, pvt=pvt, get_initial_pressure=get_initial_pressure
         )

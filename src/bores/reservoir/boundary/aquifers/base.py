@@ -1,7 +1,5 @@
 """Primitives shared by every analytic aquifer kind."""
 
-import typing
-
 import numba
 
 from bores.types import CellArray, IntArray, Number, OneDimension
@@ -25,4 +23,4 @@ def compute_average_boundary_pressure(
     total = 0.0
     for i in range(owner_cells.shape[0]):
         total += pressure[owner_cells[i]]
-    return typing.cast(Number, total / owner_cells.shape[0])
+    return total / owner_cells.shape[0]  # type: ignore

@@ -579,3 +579,62 @@ def test_wlift_with_no_trigger_applies_at_its_own_time_and_shifts_stay_unsupport
     deck = deck_from(tmp_path, "WLIFT\n 'P1' 100 OIL 2 400 1* 1* 1* 1* 50 /\n/\nTSTEP\n 30 /\n")
     with pytest.raises(NotSupportedError, match="alq_shift"):
         load_schedule(deck, compiled_at=-1.0)
+
+
+def build_well_system(**kwargs):
+    from bores.wells.factories import make_producer, make_well_controls, make_wells
+    from bores.wells.model import WellSystem
+
+    built = {
+        name: make_producer(
+            name, surface_location=(0.0, 0.0), perforation_depths=(0.0, 10.0), target_bhp=1000.0
+        )
+        for name in ("P1", "P2", "P3")
+    }
+    return WellSystem(
+        wells=make_wells(*(well for well, _ in built.values())),
+        well_controls=make_well_controls(**{
+            name: control for name, (_, control) in built.items()
+        }),
+        **kwargs,
+    )
+
+
+def test_tubing_performance_single_item_applies_to_every_well():
+    from bores.wells.hydraulics import homogeneous_wellbore
+
+    model = homogeneous_wellbore(tubing_inner_diameter=2.5, unit_system=UnitSystem.FIELD)
+    system = build_well_system(tubing_performance=model)
+    assert all(system.get_tubing_performance(name) is model for name in ("P1", "P2", "P3"))
+    assert build_well_system().get_tubing_performance("P1") is None
+
+
+def test_tubing_performance_mapping_uses_the_wildcard_as_the_fallback(tmp_path):
+    from bores.wells.hydraulics import homogeneous_wellbore
+
+    model = homogeneous_wellbore(tubing_inner_diameter=2.5, unit_system=UnitSystem.FIELD)
+    tables = VFPTables.from_deck(producer_table(tmp_path))
+    system = build_well_system(tubing_performance={"*": model, "P1": tables, "P2": None})
+    assert system.get_tubing_performance("P1") is tables
+    assert system.get_tubing_performance("P2") is None  # explicitly none, despite "*"
+    assert system.get_tubing_performance("P3") is model
+    assert build_well_system(tubing_performance={"P1": model}).get_tubing_performance("P3") is None
+
+
+def test_tubing_performance_rejects_wells_that_do_not_exist():
+    from bores.wells.hydraulics import homogeneous_wellbore
+
+    model = homogeneous_wellbore(tubing_inner_diameter=2.5, unit_system=UnitSystem.FIELD)
+    with pytest.raises(ValidationError, match="not in this system"):
+        build_well_system(tubing_performance={"NOPE": model})
+
+
+def test_tubing_performance_converts_with_the_system(tmp_path):
+    tables = VFPTables.from_deck(producer_table(tmp_path))
+    single = build_well_system(tubing_performance=tables).convert(UnitSystem.METRIC)
+    assert single.tubing_performance.unit_system == UnitSystem.METRIC
+    mapped = build_well_system(tubing_performance={"P1": tables, "P2": None}).convert(
+        UnitSystem.METRIC
+    )
+    assert mapped.tubing_performance["P1"].unit_system == UnitSystem.METRIC
+    assert mapped.tubing_performance["P2"] is None

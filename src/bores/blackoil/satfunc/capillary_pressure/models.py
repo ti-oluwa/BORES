@@ -325,9 +325,7 @@ def compute_brooks_corey_capillary_pressures_array(
             )
             gas_oil_capillary_pressure = np.where(is_undersaturated_gas, pcgo, zero)
 
-    return typing.cast(NumberArray[NDimension], oil_water_capillary_pressure), typing.cast(
-        NumberArray[NDimension], gas_oil_capillary_pressure
-    )
+    return oil_water_capillary_pressure, gas_oil_capillary_pressure  # type: ignore
 
 
 def compute_brooks_corey_capillary_pressures(
@@ -619,11 +617,11 @@ def compute_brooks_corey_derivatives_array(
     )
     dpcgo_dso = np.zeros_like(sg)
     return (
-        typing.cast(NumberArray[NDimension], dpcow_dsw),
-        typing.cast(NumberArray[NDimension], dpcow_dso),
-        typing.cast(NumberArray[NDimension], dpcgo_dsg),
-        typing.cast(NumberArray[NDimension], dpcgo_dso),
-    )
+        dpcow_dsw,
+        dpcow_dso,
+        dpcgo_dsg,
+        dpcgo_dso,
+    )  # type: ignore
 
 
 def compute_brooks_corey_capillary_pressure_derivatives(
@@ -1317,9 +1315,7 @@ def compute_van_genuchten_capillary_pressures_array(
         pcgo = (one / gas_oil_alpha) * term
         gas_oil_capillary_pressure = np.where(valid_gas, pcgo, zero)
 
-    return typing.cast(NumberArray[NDimension], oil_water_capillary_pressure), typing.cast(
-        NumberArray[NDimension], gas_oil_capillary_pressure
-    )
+    return oil_water_capillary_pressure, gas_oil_capillary_pressure  # type: ignore
 
 
 def compute_van_genuchten_capillary_pressures(
@@ -1730,11 +1726,11 @@ def compute_van_genuchten_derivatives_array(
     dpcgo_dso = np.zeros_like(sg)
 
     return (
-        typing.cast(NumberArray[NDimension], dpcow_dsw),
-        typing.cast(NumberArray[NDimension], dpcow_dso),
-        typing.cast(NumberArray[NDimension], dpcgo_dsg),
-        typing.cast(NumberArray[NDimension], dpcgo_dso),
-    )
+        dpcow_dsw,
+        dpcow_dso,
+        dpcgo_dsg,
+        dpcgo_dso,
+    )  # type: ignore
 
 
 def compute_van_genuchten_derivatives(
@@ -2764,11 +2760,11 @@ def compute_leverett_j_derivatives_array(
     )
     dpcgo_dso = np.zeros_like(sg)
     return (
-        typing.cast(NumberArray[NDimension], dpcow_dsw),
-        typing.cast(NumberArray[NDimension], dpcow_dso),
-        typing.cast(NumberArray[NDimension], dpcgo_dsg),
-        typing.cast(NumberArray[NDimension], dpcgo_dso),
-    )
+        dpcow_dsw,
+        dpcow_dso,
+        dpcgo_dsg,
+        dpcgo_dso,
+    )  # type: ignore
 
 
 def compute_leverett_j_derivatives(

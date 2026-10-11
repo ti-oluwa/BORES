@@ -1,5 +1,3 @@
-import typing
-
 import numba
 import numpy as np
 import numpy.typing as npt
@@ -383,7 +381,7 @@ def compute_killough_scanning_curve_array(
             result.flat[flat_idx] = imbibition_value_array.flat[flat_idx]
         else:
             result.flat[flat_idx] = scanning_curve_value
-    return typing.cast(NumberArray[NDimension], result)
+    return result  # type: ignore
 
 
 def compute_killough_scanning_curve(
@@ -593,7 +591,7 @@ def compute_killough_scanning_curve_derivative_array(
             scanning_exponent=scanning_exponent,
             numerical_epsilon=numerical_epsilon,
         )
-    return typing.cast(NumberArray[NDimension], result)
+    return result  # type: ignore
 
 
 def compute_killough_scanning_curve_derivative(
