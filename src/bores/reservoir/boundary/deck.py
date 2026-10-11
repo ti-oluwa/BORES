@@ -117,12 +117,31 @@ class AquiferConnections(typing.NamedTuple):
     """
 
 
+def count_active_cells_in_box(grid: Grid, record: typing.Mapping[str, typing.Any]) -> int:
+    """
+    Number of active cells in the IJK box of an `AQUANCON` record.
+
+    :param grid: Grid with structured dimensions and cell statuses. Without them nothing
+        can be counted and `0` is returned.
+    :param record: One parsed `AQUANCON` record, whose box is 1-based and inclusive.
+    :returns: How many of the box's cells are active.
+    """
+    if grid.dimensions is None or grid.cell_statuses is None:
+        return 0
+    nx, ny, nz = grid.dimensions
+    i = np.arange(max(record["i1"], 1) - 1, min(record["i2"], nx))
+    j = np.arange(max(record["j1"], 1) - 1, min(record["j2"], ny))
+    k = np.arange(max(record["k1"], 1) - 1, min(record["k2"], nz))
+    cells = (i[:, None, None] + nx * (j[None, :, None] + ny * k[None, None, :])).ravel()
+    return int(np.count_nonzero(grid.cell_statuses[cells] == 1))
+
+
 def resolve_aquancon_connections(
     deck_file: DeckFile,
     grid: Grid,
     aquifer_id: int,
     *,
-    claimed_faces: typing.Mapping[int, int] | None = None,
+    claimed_cells: typing.Mapping[int, int] | None = None,
     length_factor: Number = 1.0,
 ) -> AquiferConnections | None:
     """
@@ -141,21 +160,23 @@ def resolve_aquancon_connections(
 
     Only faces on the edge of the active grid can be connected, which is what
     `connect_adjoining_active_cell = NO` (the default) asks for. A record that sets it to
-    `YES` would also connect faces that adjoin an active cell, which is not supported, so
-    those faces are left out with a warning. A face that `claimed_faces` says another
-    aquifer already holds is an error.
+    `YES` and has cells in its box whose face adjoins another active cell is an error,
+    since connecting those faces is not supported. A cell that `claimed_cells` says another
+    aquifer already holds is also an error, whichever of its faces is connected.
 
     :param deck_file: Parsed deck, read for its `AQUANCON` records.
     :param grid: Grid to resolve face positions against.
     :param aquifer_id: Aquifer id to collect `AQUANCON` records for.
-    :param claimed_faces: Face position to the id of the aquifer that holds it.
+    :param claimed_cells: Cell index to the id of the aquifer that holds it.
     :param length_factor: Multiplies lengths measured on `grid` to give the deck's length
         unit, for a grid that is not in the deck's unit system. Face areas are scaled by
         its square before they are compared with a record's `influx_coefficient`.
     :returns: The aquifer's connections, or `None` if `AQUANCON` has no records for
         `aquifer_id` or none of them resolved to a face.
     :raises ValidationError: If a record gives a negative influx coefficient or
-        connection multiplier, or connects a face that another aquifer holds.
+        connection multiplier, sets `connect_adjoining_active_cell` to `YES` where that
+        would connect a face that adjoins an active cell, or connects a cell that another
+        aquifer holds.
     """
     records = deck_file.get("AQUANCON") or []
     matching = [record for record in records if record["aquifer_id"] == aquifer_id]
@@ -187,23 +208,26 @@ def resolve_aquancon_connections(
         positions = [int(position) for position in box_positions]
 
         if record["connect_adjoining_active_cell"] == "YES":
-            warnings.warn(
-                f"`AQUANCON` aquifer {aquifer_id!r}: `connect_adjoining_active_cell` is `YES`, "
-                "but connecting a face that adjoins an active cell is not supported. Only "
-                "faces on the edge of the active grid are connected.",
-                stacklevel=2,
-            )
+            n_adjoining = count_active_cells_in_box(grid, record) - len(positions)
+            if n_adjoining > 0:
+                raise ValidationError(
+                    f"`AQUANCON` aquifer {aquifer_id!r}: `connect_adjoining_active_cell` is `YES` "
+                    f"and {n_adjoining} face(s) in the box adjoin an active cell, but connecting "
+                    "those faces is not supported. Only faces on the edge of the active grid can "
+                    "be connected."
+                )
 
+        owner_cells = grid.face_cell_indices[grid.boundary_face_indices[positions], 0].tolist()
         holders = {
-            position: claimed_faces[position]
-            for position in positions
-            if claimed_faces is not None and claimed_faces.get(position, aquifer_id) != aquifer_id
+            cell: claimed_cells[cell]
+            for cell in owner_cells
+            if claimed_cells is not None and claimed_cells.get(cell, aquifer_id) != aquifer_id
         }
         if holders:
             raise ValidationError(
-                f"`AQUANCON` aquifer {aquifer_id!r} connects {len(holders)} face(s) that "
-                f"aquifer {sorted(set(holders.values()))} already holds. A face can only be "
-                "connected to one aquifer."
+                f"`AQUANCON` aquifer {aquifer_id!r} connects {len(holders)} cell(s) that "
+                f"aquifer {sorted(set(holders.values()))} is already connected to. A cell can "
+                "only be connected to one aquifer."
             )
 
         if not positions:
@@ -301,33 +325,47 @@ def compute_default_aquifer_pressure(
     datum_depth: Number,
     water_gradient: Number,
     length_factor: Number = 1.0,
+    weights: NumberArray[OneDimension] | None = None,
 ) -> Number:
     """
     Initial aquifer pressure, at the aquifer's datum depth, that is in equilibrium with
     the reservoir cells the aquifer is attached to.
 
-    Each attached cell's pressure is moved to the datum depth along the water pressure
-    gradient and the results are averaged.
+    Each attached cell's water-phase pressure is moved to the datum depth along the water
+    pressure gradient and the results are averaged, weighted by how much of the aquifer's
+    influx each connection takes.
 
     :param grid: The model's `Grid`.
     :param face_positions: Boundary face positions the aquifer is attached to.
-    :param reservoir_pressure: Initial pressure of every cell, in the grid's unit system.
+    :param reservoir_pressure: Initial water-phase pressure of every cell, in the deck's
+        unit system.
     :param datum_depth: Aquifer datum depth (positive down).
     :param water_gradient: Water pressure gradient, pressure per unit depth.
     :param length_factor: Multiplies depths measured on `grid` to give the units of
         `datum_depth`, for a grid that is not in the same unit system.
+    :param weights: One weight for each of `face_positions`, usually the connections'
+        influx coefficients. `None` weights every connection equally.
     :returns: Aquifer pressure at `datum_depth`.
     :raises ValidationError: If no attached cell is found.
     """
     face_indices = grid.boundary_face_indices[face_positions]
     cell_indices = grid.face_cell_indices[face_indices, 0]
-    cell_indices = np.unique(cell_indices[cell_indices >= 0])
-    if len(cell_indices) == 0:
+    attached = cell_indices >= 0
+    if not attached.any():
         raise ValidationError("The aquifer is not attached to any cell.")
+
+    cell_indices = cell_indices[attached]
+    connection_weights = (
+        np.ones(cell_indices.shape[0])
+        if weights is None
+        else np.asarray(weights, dtype=np.float64)[attached]
+    )
+    if not connection_weights.sum() > 0.0:
+        raise ValidationError("The aquifer's connection weights add up to zero.")
 
     depths = grid.cell_center_depths[cell_indices] * length_factor
     pressures = reservoir_pressure[cell_indices] + water_gradient * (datum_depth - depths)
-    return np.mean(pressures)
+    return np.average(pressures, weights=connection_weights)
 
 
 def load_boundary_conditions(
@@ -357,10 +395,12 @@ def load_boundary_conditions(
     :param pvt: The model's PVT tables. Required if the deck has an
         `AQUCT` keyword, and if an `AQUFETP` record defaults its initial pressure. See
         `load_carter_tracy_aquifer_from_record` for why.
-    :param reservoir_pressure: Initial pressure of every cell, in the deck's unit system.
-        Needed when an `AQUCT` or `AQUFETP` record defaults its initial pressure (`1*`),
-        which is then set to the water-gradient-corrected average pressure of the cells
-        the aquifer is attached to, at the aquifer's datum depth.
+    :param reservoir_pressure: Initial water-phase pressure of every cell, in the deck's
+        unit system (see `bores.initialization.compute_water_phase_pressure`). Needed when
+        an `AQUCT` or `AQUFETP` record defaults its initial pressure (`1*`), which is then
+        set to the water-gradient-corrected average pressure of the cells the aquifer is
+        attached to, at the aquifer's datum depth, weighted by the connections' influx
+        coefficients.
     :param extra_regions: Additional `BoundaryRegion`s to include as-is
         (e.g. a manually-built `ConstantPressureBoundary` region). Appended
         after every deck-sourced region, so they win on overlapping faces.
@@ -376,7 +416,7 @@ def load_boundary_conditions(
     length_factor = get_conversion_factors(grid.unit_system, unit_system)["length"]
     regions: list[BoundaryRegion] = []
     resolved_connections: dict[int, AquiferConnections | None] = {}
-    claimed_faces: dict[int, int] = {}
+    claimed_cells: dict[int, int] = {}
 
     def get_aquancon_connections(aquifer_id: int) -> AquiferConnections | None:
         if aquifer_id not in resolved_connections:
@@ -384,14 +424,15 @@ def load_boundary_conditions(
                 deck_file,
                 grid,
                 aquifer_id,
-                claimed_faces=claimed_faces,
+                claimed_cells=claimed_cells,
                 length_factor=length_factor,
             )
             resolved_connections[aquifer_id] = connections
             if connections is not None:
-                claimed_faces.update(
-                    dict.fromkeys(connections.face_positions.tolist(), aquifer_id)
-                )
+                owner_cells = grid.face_cell_indices[
+                    grid.boundary_face_indices[connections.face_positions], 0
+                ]
+                claimed_cells.update(dict.fromkeys(owner_cells.tolist(), aquifer_id))
         return resolved_connections[aquifer_id]
 
     def get_initial_pressure(record: typing.Mapping[str, typing.Any]) -> Number:
@@ -428,6 +469,7 @@ def load_boundary_conditions(
             datum_depth=record["datum_depth"],
             water_gradient=water_density * get_hydrostatic_gradient_factor(unit_system),
             length_factor=length_factor,
+            weights=connections.influx_coefficients,
         )
 
     defined_ids: dict[int, str] = {}

@@ -49,7 +49,12 @@ from bores.types import (
 )
 from bores.utils import get_hydrostatic_gradient_factor
 
-__all__ = ["EquilibriumArrays", "initialize_equilibrium_arrays", "initialize_reservoir_state"]
+__all__ = [
+    "EquilibriumArrays",
+    "compute_water_phase_pressure",
+    "initialize_equilibrium_arrays",
+    "initialize_reservoir_state",
+]
 
 N_SATURATION_SAMPLES = 100
 """
@@ -1023,6 +1028,53 @@ def resolve_temperature(
         depth=reservoir.depth,
         dtype=dtype,
     )
+
+
+def compute_water_phase_pressure(
+    reservoir: Reservoir,
+    state: ReservoirState,
+    satfunc: SatFunc | None = None,
+) -> CellArray:
+    """
+    Initial water-phase pressure of every cell, which is the oil-phase pressure less the
+    oil-water capillary pressure at the cell's saturations (`Pw = Po - Pcow`).
+
+    :param reservoir: Reservoir geometry and rock properties, which give each cell's
+        endpoint saturations and saturation region.
+    :param state: The reservoir state, whose `pressure` is the oil-phase pressure.
+    :param satfunc: The saturation functions. Without them, or for a region that has no
+        capillary pressure, `Pcow` is taken as zero.
+    :returns: Water-phase pressure of every cell, in the same unit system as `state`.
+    """
+    water_pressure = np.asarray(state.pressure).copy()
+    if satfunc is None:
+        return typing.cast(CellArray, water_pressure)
+
+    saturation_region = (
+        reservoir.regions.saturation_region if reservoir.regions is not None else None
+    )
+    if saturation_region is None:
+        saturation_region = typing.cast(
+            IntCellArray, np.ones(water_pressure.shape[0], dtype=np.int32)
+        )
+
+    rock = reservoir.rock
+    for satnum in np.unique(saturation_region):
+        capillary_pressure = satfunc.region(int(satnum)).capillary_pressure
+        if capillary_pressure is None:
+            continue
+        mask = saturation_region == satnum
+        oil_water = capillary_pressure.evaluate(
+            state.water_saturation[mask],
+            state.oil_saturation[mask],
+            state.gas_saturation[mask],
+            irreducible_water_saturation=rock.connate_water_saturation[mask],
+            residual_oil_saturation_water=rock.residual_oil_saturation_water[mask],
+            residual_oil_saturation_gas=rock.residual_oil_saturation_gas[mask],
+            residual_gas_saturation=rock.residual_gas_saturation[mask],
+        )["oil_water"]
+        water_pressure[mask] -= np.asarray(oil_water, dtype=water_pressure.dtype)
+    return typing.cast(CellArray, water_pressure)
 
 
 def initialize_reservoir_state(

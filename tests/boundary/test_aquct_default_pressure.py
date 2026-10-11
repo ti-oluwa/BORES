@@ -7,6 +7,7 @@ import pytest
 from bores.deck import DeckFile
 from bores.errors import ValidationError
 from bores.grids.factories.corner_point import make_corner_point_grid
+from bores.initialization import compute_water_phase_pressure
 from bores.reservoir.boundary.aquifers.carter_tracy import (
     CarterTracyAquifer,
     load_carter_tracy_aquifer_from_record,
@@ -163,12 +164,16 @@ def test_case_loads_with_a_defaulted_aquifer_pressure():
     water_density = static.stock_tank_water_density / static.water_reference_fvf
     gradient = water_density * get_hydrostatic_gradient_factor(UnitSystem.FIELD)
 
-    nx, ny, nz = 10, 10, 3
-    cells = np.array([nx - 1 + nx * (j + ny * k) for k in range(nz) for j in range(ny)])
-    expected = np.mean(
-        case.initial_state.pressure[cells] + gradient * (9035.0 - grid.cell_center_depths[cells])
+    aquifers = model.boundary_conditions.aquifers
+    cells = np.asarray(aquifers.owner_cells)
+    water_pressure = compute_water_phase_pressure(
+        model.reservoir, case.initial_state, model.fluid.satfunc
+    )
+    expected = np.average(
+        water_pressure[cells] + gradient * (9035.0 - grid.cell_center_depths[cells]),
+        weights=aquifers.face_weights,
     )
 
-    initial_pressures = model.boundary_conditions.aquifers.initial_pressures
+    initial_pressures = aquifers.initial_pressures
     assert initial_pressures[0] == pytest.approx(expected, rel=1e-5)
     assert 4800.0 < initial_pressures[0] < 5500.0

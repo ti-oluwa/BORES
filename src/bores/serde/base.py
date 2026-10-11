@@ -1,5 +1,6 @@
 """`Serializable` base API"""
 
+import datetime
 import sys
 import threading
 import types
@@ -86,7 +87,15 @@ def is_enum_type(typ: typing.Any) -> bool:
 
 def is_ndarray_type(typ: typing.Any) -> bool:
     origin = get_origin_class(typ)
-    return isinstance(origin, type) and issubclass(origin, np.ndarray)
+    if isinstance(origin, type) and issubclass(origin, np.ndarray):
+        return True
+    # A union of array types, such as `NumberArray`, with no `None` among its members.
+    if typing.get_origin(typ) in (typing.Union, types.UnionType):
+        members = typing.get_args(typ)
+        return bool(members) and all(
+            member is not type(None) and is_ndarray_type(member) for member in members
+        )
+    return False
 
 
 def unwrap_optional(typ: typing.Any) -> tuple[list[typing.Any], bool]:
@@ -806,3 +815,18 @@ def dump(o: Serializable, /) -> dict[str, typing.Any]:
 def load(cls: type[SerializableT], data: typing.Mapping[str, typing.Any]) -> SerializableT:
     """Load arg `Serializable` object from arg dictionary."""
     return cls.load(data)
+
+
+def unstructure_datetime(value: datetime.datetime) -> str:
+    return value.isoformat()
+
+
+def structure_datetime(data: typing.Any, typ: typing.Any) -> datetime.datetime:
+    if isinstance(data, datetime.datetime):
+        return data
+    return datetime.datetime.fromisoformat(data)
+
+
+converter.register_unstructure_hook(datetime.datetime, unstructure_datetime)
+converter.register_structure_hook(datetime.datetime, structure_datetime)
+register_ndarray_serializers()

@@ -411,11 +411,9 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
     def _get_chunks(self, shape: tuple[int, ...]) -> tuple[int, ...] | None:
         if self.chunks:
             return self.chunks
-        if len(shape) == 3:
-            return (min(20, shape[0]), min(20, shape[1]), min(20, shape[2]))
-        if len(shape) == 2:
-            return (min(100, shape[0]), min(100, shape[1]))
-        return (min(shape[0], 1024),)
+        limit = 1024 if len(shape) == 1 else 100 if len(shape) == 2 else 20
+        # A chunk can not be empty, even for an array that has no elements along an axis.
+        return tuple(max(1, min(limit, size)) for size in shape)
 
     def _create_dataset(self, group: zarr.Group, name: str, data: np.ndarray) -> zarr.Array:
         chunks = self._get_chunks(data.shape)

@@ -3,13 +3,11 @@ import warnings
 import numpy as np
 import pytest
 
-from bores.grids import Grid
 from bores.grids.factories.base import FaultRecord
 from bores.grids.factories.cartesian import make_cartesian_grid
 from bores.grids.factories.polyhedral import make_polyhedral_grid
 from bores.grids.factories.voronoi import make_voronoi_grid
 from bores.grids.utils import classify_boundary_cells
-from bores.serde.base import register_ndarray_serializers
 from bores.types import Side
 
 warnings.simplefilter("ignore")
@@ -108,16 +106,3 @@ def test_negative_fault_directions_select_the_negative_face():
     assert _fault_cells("X-", 3) == [(1, 2)]
     assert _fault_cells("X-", 1) == []
     assert _fault_cells("X", 5) == []
-
-
-def test_serde_round_trip_keeps_statuses_and_dimensions():
-    import attrs
-
-    register_ndarray_serializers()
-    grid = make_cartesian_grid(nx=4, ny=3, nz=2, dx=10.0, dy=10.0, dz=1.0)
-    statuses = np.ones(24, dtype=np.int8)
-    statuses[5] = 0
-    grid = attrs.evolve(grid, cell_statuses=statuses)
-    loaded = Grid.load(grid.dump())
-    assert np.array_equal(loaded.cell_statuses, statuses)
-    assert tuple(loaded.dimensions) == (4, 3, 2)

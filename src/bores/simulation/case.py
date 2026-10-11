@@ -17,7 +17,11 @@ from bores.deck.file import DeckFile
 from bores.errors import CaseLoadError, CaseValidationError
 from bores.grids.base import Grid
 from bores.grids.factories.corner_point import InvertedCellPolicy
-from bores.initialization import N_SATURATION_SAMPLES, initialize_reservoir_state
+from bores.initialization import (
+    N_SATURATION_SAMPLES,
+    compute_water_phase_pressure,
+    initialize_reservoir_state,
+)
 from bores.precision import get_dtype
 from bores.reservoir.boundary.conditions import BoundaryConditions
 from bores.reservoir.boundary.deck import load_boundary_conditions
@@ -379,7 +383,10 @@ def load_case(
 
     try:
         resolved_boundary_conditions = load_boundary_conditions(
-            deck_file, grid, pvt=pvt, reservoir_pressure=initial_state.pressure
+            deck_file,
+            grid,
+            pvt=pvt,
+            reservoir_pressure=compute_water_phase_pressure(reservoir, initial_state, satfunc),
         )
     except Exception as exc:
         raise CaseLoadError(f"Failed to load boundary conditions from {deck_file!r}.") from exc

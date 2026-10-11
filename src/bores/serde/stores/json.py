@@ -86,11 +86,8 @@ class JSONStore(DataStore[SerializableT, list[typing.Any]]):
                 self._handle = []
             else:
                 with open(self.filepath, "rb") as f:
-                    self._handle = orjson.loads(f.read()) if f.read(1) else []
-                    # Re-read properly
-                with open(self.filepath, "rb") as f:
                     content = f.read()
-                    self._handle = orjson.loads(content) if content.strip() else []
+                self._handle = orjson.loads(content) if content.strip() else []
             logger.debug(f"{self.__class__.__name__} opened (mode={mode!r}): {self.filepath}")
         except Exception as exc:
             self._handle = None

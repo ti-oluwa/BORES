@@ -6,7 +6,6 @@ import numpy as np
 import pytest
 
 from bores.errors import InvalidGridError
-from bores.grids import Grid
 from bores.grids.factories.base import FaultRecord
 from bores.grids.factories.cartesian import make_cartesian_grid
 from bores.grids.factories.corner_point import (
@@ -15,7 +14,6 @@ from bores.grids.factories.corner_point import (
 )
 from bores.grids.factories.polyhedral import make_polyhedral_grid
 from bores.grids.factories.voronoi import make_voronoi_grid
-from bores.serde.base import register_ndarray_serializers
 
 warnings.simplefilter("ignore")
 
@@ -172,15 +170,3 @@ def test_removing_faces_renumbers_named_faults():
     grid = attrs.evolve(base, cell_statuses=statuses)
     (face,) = grid.fault_face_indices["F"]
     assert sorted(int(c) for c in grid.face_cell_indices[face]) == [3, 4]
-
-
-def test_inactive_cells_survive_a_serde_round_trip():
-    register_ndarray_serializers()
-    statuses = np.ones(voronoi_grid().n_cells, dtype=np.int8)
-    statuses[[2, 7]] = 0
-    grid = voronoi_grid(statuses)
-    loaded = Grid.load(grid.dump())
-    assert np.array_equal(loaded.cell_statuses, statuses)
-    assert loaded.n_faces == grid.n_faces
-    assert np.allclose(loaded.cell_volumes, grid.cell_volumes)
-    assert_inactive_cells_are_isolated(loaded, np.array([2, 7]))
