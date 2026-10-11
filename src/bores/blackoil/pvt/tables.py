@@ -291,10 +291,14 @@ def build_pchip_3d_interpolator(
             # Pressure stage at every (temperature, salinity) node, then salinity, then temperature
             values = pressure_spline(chunk[:, 0]).reshape(n, n_t, n_s)
             over_salinity = evaluate_pchip_columns(
-                salinity_knots, values.reshape(n * n_t, n_s).T, np.repeat(chunk[:, 2], n_t)
+                salinity_knots,
+                values.reshape(n * n_t, n_s).T,
+                np.repeat(chunk[:, 2], n_t),  # type: ignore
             ).reshape(n, n_t)
             result[start : start + n] = evaluate_pchip_columns(
-                temperature_knots, over_salinity.T, chunk[:, 1]
+                temperature_knots,
+                over_salinity.T,
+                chunk[:, 1],  # type: ignore
             )
         return typing.cast(NumberArray[OneDimension], result)
 
@@ -395,7 +399,7 @@ def clip_compressibility(
     """
     if max_value is None:
         factors = get_conversion_factors(UnitSystem.FIELD, unit_system)
-        max_value = c.DEFAULT_MAX_COMPRESSIBILITY * factors["compressibility"]
+        max_value = typing.cast(Number, c.DEFAULT_MAX_COMPRESSIBILITY * factors["compressibility"])
 
     ceiling = max_value
     if pressure is not None:
@@ -1419,7 +1423,7 @@ class PVTTable(StoreSerializable):
             "and no default salinity is set."
         )
 
-    def _saturation_split_query(
+    def saturation_split_query(
         self,
         name: str,
         pressure: TableQuery[NDimension],
@@ -1483,7 +1487,7 @@ class PVTTable(StoreSerializable):
             else result.astype(dtype, copy=False),
         )
 
-    def _wet_gas_density(
+    def wet_gas_density(
         self,
         pressure: TableQuery[NDimension],
         temperature: TableQuery[NDimension],
@@ -1615,7 +1619,7 @@ class PVTTable(StoreSerializable):
             if vaporized_oil_ratio is not None and self.has(
                 "undersaturated_formation_volume_factor"
             ):
-                return self._saturation_split_query(
+                return self.saturation_split_query(
                     "formation_volume_factor",
                     pressure,
                     temperature,
@@ -1754,7 +1758,7 @@ class PVTTable(StoreSerializable):
             if vaporized_oil_ratio is not None and self.has(
                 "undersaturated_formation_volume_factor"
             ):
-                return self._saturation_split_query(
+                return self.saturation_split_query(
                     "formation_volume_factor",
                     pressure,
                     temperature,
@@ -1879,7 +1883,7 @@ class PVTTable(StoreSerializable):
             )
         if self._phase == FluidPhase.GAS:
             if vaporized_oil_ratio is not None and self.has("undersaturated_viscosity"):
-                return self._saturation_split_query(
+                return self.saturation_split_query(
                     "viscosity",
                     pressure,
                     temperature,
@@ -1992,7 +1996,7 @@ class PVTTable(StoreSerializable):
             )
         if self._phase == FluidPhase.GAS:
             if vaporized_oil_ratio is not None and self.has("undersaturated_viscosity"):
-                return self._saturation_split_query(
+                return self.saturation_split_query(
                     "viscosity",
                     pressure,
                     temperature,
@@ -2123,7 +2127,7 @@ class PVTTable(StoreSerializable):
             if vaporized_oil_ratio is not None and self.has(
                 "undersaturated_formation_volume_factor"
             ):
-                return self._wet_gas_density(pressure, temperature, vaporized_oil_ratio)
+                return self.wet_gas_density(pressure, temperature, vaporized_oil_ratio)
             return self.query("density", pressure, temperature)
 
         # Mirror `formation_volume_factor`'s own saturated/undersaturated
@@ -2248,7 +2252,7 @@ class PVTTable(StoreSerializable):
             if vaporized_oil_ratio is not None and self.has(
                 "undersaturated_formation_volume_factor"
             ):
-                return self._wet_gas_density(
+                return self.wet_gas_density(
                     pressure, temperature, vaporized_oil_ratio, derivative=True
                 )
             return self.query("density", pressure, temperature, derivative=True)
