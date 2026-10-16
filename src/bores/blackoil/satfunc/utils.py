@@ -22,6 +22,7 @@ def make_saturation_field(
     :param max_saturation: Physical saturation range. Must satisfy `0 ≤ min_saturation < max_saturation ≤ 1`.
     :param spacing: `"cosine"` (default) - Chebyshev-cosine spacing, denser at the
         endpoints. `"linear"` - uniform spacing.
+    :param dtype: Floating-point dtype of the returned field.
     :return: NDArray of shape `(n_points,)` with values in `[min_saturation, max_saturation]`,
     monotonically increasing.
     """
@@ -36,9 +37,9 @@ def make_saturation_field(
         i = np.arange(n_points, dtype=dtype)
         unit: npt.NDArray = 0.5 * (1.0 - np.cos(np.pi * i / (n_points - 1)))
     elif spacing == "linear":
-        unit: npt.NDArray = np.linspace(0.0, 1.0, n_points)
+        unit = np.linspace(0.0, 1.0, n_points, dtype=dtype)
     else:
-        raise ValueError(f"`spacing` must be 'cosine' or 'linspace', got '{spacing}'")
+        raise ValueError(f"`spacing` must be 'cosine' or 'linear', got '{spacing}'")
 
     return (min_saturation + unit * (max_saturation - min_saturation)).astype(dtype, copy=False)
 
@@ -55,16 +56,14 @@ def make_min_span_saturation_field(
     Build a saturation grid, enforcing a floor of `minimum_span` on the
     total range so the grid never collapses to a single point.
 
-    `minimum_span` is a plain positional argument rather than keyword-only
-    so that Numba can inline this function without a typing error.
-
     :param number_of_points: Number of points in the output grid.
     :param min_saturation: Lower bound of the saturation range.
     :param max_saturation: Upper bound of the saturation range.
-    :param spacing: Grid spacing strategy (e.g. `'cosine'`, `'linspace'`).
+    :param spacing: Grid spacing strategy (`'cosine'` or `'linear'`).
     :param minimum_span: Minimum permitted distance between the lower and upper
         bounds. When the natural span is smaller, the upper bound is extended to
-        `min_saturation + minimum_span`.
+        `min_saturation + minimum_span` and a two-point grid is returned.
+    :param dtype: Floating-point dtype of the returned grid.
     :return: 1-D array of saturation values.
     """
     if max_saturation - min_saturation < minimum_span:
@@ -93,12 +92,14 @@ def pchip_resample(
 ) -> tuple[npt.NDArray, npt.NDArray]:
     """
     Fit a PCHIP interpolant through (`source_saturations`, `source_values`),
-    resample at `number_of_output_points` and return the resampled values.
+    resample at `number_of_output_points` and return both the resampled
+    saturations and the interpolated values.
 
     :param source_saturations: Original saturation knots, strictly increasing.
     :param source_values: Function values at each knot (kr or Pc).
     :param number_of_output_points: Number of points in the resampled grid.
     :param spacing: Grid spacing strategy for the output grid.
+    :param dtype: Floating-point dtype of the resampled saturations.
     :return: Two-tuple of `(resampled_saturations, resampled_values)`.
     """
     interpolant = PchipInterpolator(source_saturations, source_values)
@@ -130,13 +131,18 @@ def build_saturation_reference_field(
     first and last 10 % of the range to capture the rapid variation of kr and
     Pc curves near residual saturations.
 
-    :param number_of_base_points: Number of evenly-spaced base knots.
+    :param number_of_base_points: Number of base knots, laid out per `spacing`.
     :param saturation_lower_bound: Left end of the saturation range.
     :param saturation_upper_bound: Right end of the saturation range.
-    :param spacing: Grid spacing strategy (e.g. `'cosine'`, `'linspace'`).
+    :param spacing: Grid spacing strategy (`'cosine'` or `'linear'`).
     :param number_of_endpoint_extra_points: Number of extra knots added inside
-        each boundary decade. Pass `0` to disable endpoint refinement.
-    :return: Sorted 1-D array of unique saturation values.
+        each end region (first and last 10 % of the range). Pass `0` to disable
+        endpoint refinement.
+    :param minimum_grid_span: Minimum saturation span. Below this the range is
+        treated as collapsed and no refinement is added.
+    :param dtype: Floating-point dtype of the returned field.
+    :return: Sorted 1-D array of saturation values, strictly increasing, with
+        knots closer than a few ulps merged.
     """
     base_field = make_min_span_saturation_field(
         number_of_base_points,
@@ -150,20 +156,20 @@ def build_saturation_reference_field(
     if saturation_span < minimum_grid_span or number_of_endpoint_extra_points <= 0:
         return base_field
 
-    endpoint_decade_width = 0.10 * saturation_span
+    endpoint_refinement_width = 0.10 * saturation_span
     lower_endpoint_refinement = np.linspace(
         saturation_lower_bound,
-        saturation_lower_bound + endpoint_decade_width,
+        saturation_lower_bound + endpoint_refinement_width,
         number_of_endpoint_extra_points + 2,
         dtype=dtype,
     )
     upper_endpoint_refinement = np.linspace(
-        saturation_upper_bound - endpoint_decade_width,
+        saturation_upper_bound - endpoint_refinement_width,
         saturation_upper_bound,
         number_of_endpoint_extra_points + 2,
         dtype=dtype,
     )
-    return np.unique(
+    merged_field = np.unique(
         np.concatenate(
             (
                 base_field,
@@ -173,6 +179,16 @@ def build_saturation_reference_field(
             dtype=dtype,
         )
     )
+    # `np.unique` only drops bit-identical values. Knots produced by different
+    # generators (e.g. a linear base field and an endpoint refinement) can land
+    # a few ulps apart, and PCHIP slopes are ill-conditioned across such a tiny
+    # interval. Collapse knots closer than a small tolerance, keeping the first
+    # of each cluster, then restore the exact upper bound.
+    tolerance = max(1e-9, 16.0 * float(np.finfo(dtype).eps)) * saturation_span  # type: ignore
+    keep = np.concatenate(([True], np.diff(merged_field) > tolerance))
+    deduplicated_field = merged_field[keep]
+    deduplicated_field[-1] = merged_field[-1]
+    return deduplicated_field
 
 
 def build_pchip_interpolant(
@@ -188,26 +204,23 @@ def build_pchip_interpolant(
     Build a PCHIP interpolant (and its derivative) for a two-phase kr or Pc
     curve, optionally after expanding the knot field.
 
-    When `number_of_base_points > 0` *and* the saturation range is wide enough,
-    the raw knots are first resampled to a denser field via
-    `_pchip_resample_with_derivative`. This is the same field-expansion
-    strategy used by `as_three_phase_relperm_table`.
-
-    When `derivative_values` are supplied they are used as the source for
-    the initial PCHIP fit (giving a C¹-consistent seed); otherwise the raw
-    `values` array is used directly.
+    The knot field is expanded only when `number_of_base_points > 0`, the raw
+    knots number fewer than `number_of_base_points`, *and* the saturation range
+    exceeds `minimum_scale_span`. In that case the expanded field is built with
+    `build_saturation_reference_field`, a temporary PCHIP fitted on the raw
+    knots is evaluated on it, and the returned interpolant is fitted on those
+    resampled values. Otherwise the raw knots are used as they are.
 
     :param reference_saturation: Monotonically increasing saturation knots.
     :param values: Function values (kr or Pc) at each knot.
-    :param derivative_values: Optional pre-computed derivative at each knot.
-        Used only as the source for the initial PCHIP when present.
-    :param number_of_base_points: Target number of base points for field expansion.
+    :param number_of_base_points: Target number of base knots for field expansion.
         Pass `0` to use the raw knots without expansion.
-    :param number_of_endpoint_extra_points: Extra knots in each boundary decade during
-        expansion.  Ignored when `number_of_base_points == 0`.
-    :param spacing: Grid spacing mode passed to
-        `_build_saturation_reference_grid`.
-    :param minimum_scale_span: Minimum saturation span required before field scaling is attempted.
+    :param number_of_endpoint_extra_points: Extra knots in each end region (first and
+        last 10 % of the range) during expansion. Ignored when `number_of_base_points == 0`.
+    :param spacing: Grid spacing mode (`'cosine'` or `'linear'`) for the expanded field.
+    :param minimum_scale_span: Minimum saturation span required before field expansion
+        is attempted. Also used as the minimum grid span of the expanded field.
+    :param dtype: Floating-point dtype of the expanded field.
     :return: Two-tuple `(interpolant, derivative_interpolant)` where
         `derivative_interpolant` is `interpolant.derivative()`.
     """
@@ -227,6 +240,7 @@ def build_pchip_interpolant(
             saturation_upper_bound=saturation_field[-1],
             spacing=spacing,
             number_of_endpoint_extra_points=number_of_endpoint_extra_points,
+            minimum_grid_span=minimum_scale_span,
             dtype=dtype,
         )
         # Fit a temporary PCHIP on the raw knots to resample onto the expanded field
@@ -261,7 +275,11 @@ def compute_killough_scanning_curve_scalar(
 
     where the interpolation factor is::
 
-        f(S) = clamp( ((S - S_rev) / (S_max - S_rev))^n , 0, 1 )
+        f(S) = clamp( (S - S_rev) / (S_max - S_rev), 0, 1 ) ^ n
+
+    The ratio is clamped *before* the exponent is applied, so saturations outside
+    `[S_rev, S_max]` sit on a primary curve (f = 0 or 1) for any exponent, and
+    this function stays consistent with its analytical derivative.
 
     :param saturation: Current saturation.
     :param drainage_curve_value: Value from the primary drainage curve.
@@ -269,17 +287,18 @@ def compute_killough_scanning_curve_scalar(
     :param reversal_saturation: Saturation at the last reversal point (S_rev).
     :param maximum_historical_saturation: Maximum saturation reached before the reversal (S_max).
     :param is_imbibition: 1.0 if currently on the imbibition path, 0.0 if drainage.
-    :param scanning_exponent: Killough interpolation exponent *n* (1 = linear).
+    :param scanning_exponent: Killough interpolation exponent *n* (> 0; 1 = linear).
     :param numerical_epsilon: Numerical stability tolerance.
     :return: Interpolated scanning-curve value.
     """
     saturation_span = maximum_historical_saturation - reversal_saturation
     if abs(saturation_span) > numerical_epsilon:
-        raw_interpolation_factor = (saturation - reversal_saturation) / saturation_span
+        raw_ratio = (saturation - reversal_saturation) / saturation_span
     else:
-        raw_interpolation_factor = 0.0
+        raw_ratio = 0.0
 
-    interpolation_factor = min(max(raw_interpolation_factor**scanning_exponent, 0.0), 1.0)
+    clamped_ratio = min(max(raw_ratio, 0.0), 1.0)
+    interpolation_factor = clamped_ratio**scanning_exponent
     scanning_curve_value = (
         drainage_curve_value
         + (imbibition_curve_value - drainage_curve_value) * interpolation_factor
@@ -320,7 +339,7 @@ def compute_killough_scanning_curve_array(
     :param reversal_saturation: Saturations at the last reversal points.
     :param maximum_historical_saturation: Maximum saturations reached before the reversals.
     :param is_imbibition: Per-cell imbibition flag (1.0 = imbibition, 0.0 = drainage).
-    :param scanning_exponent: Killough interpolation exponent *n* (1 = linear).
+    :param scanning_exponent: Killough interpolation exponent *n* (> 0; 1 = linear).
     :param numerical_epsilon: Numerical stability tolerance.
     :return: Interpolated scanning-curve values with the same shape as `saturation`.
     """
@@ -349,38 +368,17 @@ def compute_killough_scanning_curve_array(
     )
 
     result = np.empty_like(saturation_array)
-    for flat_idx in numba.prange(saturation_array.size):  # type: ignore
-        saturation_span = (
-            maximum_saturation_array.flat[flat_idx] - reversal_saturation_array.flat[flat_idx]
+    for flat_idx in range(saturation_array.size):
+        result.flat[flat_idx] = compute_killough_scanning_curve_scalar(
+            saturation=saturation_array.flat[flat_idx],
+            drainage_curve_value=drainage_value_array.flat[flat_idx],
+            imbibition_curve_value=imbibition_value_array.flat[flat_idx],
+            reversal_saturation=reversal_saturation_array.flat[flat_idx],
+            maximum_historical_saturation=maximum_saturation_array.flat[flat_idx],
+            is_imbibition=imbibition_flag_array.flat[flat_idx],
+            scanning_exponent=scanning_exponent,
+            numerical_epsilon=numerical_epsilon,
         )
-        if abs(saturation_span) > numerical_epsilon:
-            raw_interpolation_factor = (
-                saturation_array.flat[flat_idx] - reversal_saturation_array.flat[flat_idx]
-            ) / saturation_span
-        else:
-            raw_interpolation_factor = 0.0
-        interpolation_factor = min(max(raw_interpolation_factor**scanning_exponent, 0.0), 1.0)
-        scanning_curve_value = (
-            drainage_value_array.flat[flat_idx]
-            + (imbibition_value_array.flat[flat_idx] - drainage_value_array.flat[flat_idx])
-            * interpolation_factor
-        )
-
-        on_primary_drainage = (imbibition_flag_array.flat[flat_idx] < 0.5) and (
-            abs(saturation_array.flat[flat_idx] - maximum_saturation_array.flat[flat_idx])
-            < numerical_epsilon
-        )
-        on_primary_imbibition = (imbibition_flag_array.flat[flat_idx] >= 0.5) and (
-            abs(saturation_array.flat[flat_idx] - reversal_saturation_array.flat[flat_idx])
-            < numerical_epsilon
-        )
-
-        if on_primary_drainage:
-            result.flat[flat_idx] = drainage_value_array.flat[flat_idx]
-        elif on_primary_imbibition:
-            result.flat[flat_idx] = imbibition_value_array.flat[flat_idx]
-        else:
-            result.flat[flat_idx] = scanning_curve_value
     return result  # type: ignore
 
 
@@ -578,7 +576,7 @@ def compute_killough_scanning_curve_derivative_array(
     )
 
     result = np.empty_like(saturation_array)
-    for flat_idx in numba.prange(saturation_array.size):  # type: ignore
+    for flat_idx in range(saturation_array.size):
         result.flat[flat_idx] = compute_killough_scanning_curve_derivative_scalar(
             saturation=saturation_array.flat[flat_idx],
             drainage_curve_value=drainage_value_array.flat[flat_idx],
