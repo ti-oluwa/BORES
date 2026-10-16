@@ -638,3 +638,94 @@ def test_tubing_performance_converts_with_the_system(tmp_path):
     )
     assert mapped.tubing_performance["P1"].unit_system == UnitSystem.METRIC
     assert mapped.tubing_performance["P2"] is None
+
+
+def test_get_thp_inverts_the_table_and_extends_past_its_ends(tmp_path):
+    table = VFPTable.from_deck(producer_table(tmp_path), table_number=3)
+    args = {
+        "flow_rate": 100.0,
+        "water_cut": 0.0,
+        "gas_oil_ratio": 100.0,
+        "artificial_lift_quantity": 0.0,
+    }
+    low = float(table.query(thp=20.0, **args))
+    high = float(table.query(thp=40.0, **args))
+    assert table.get_thp(bhp=low, **args) == pytest.approx(20.0)
+    assert table.get_thp(bhp=high, **args) == pytest.approx(40.0)
+    assert table.get_thp(bhp=(low + high) / 2, **args) == pytest.approx(30.0)
+    assert table.get_thp(bhp=high + (high - low), **args) == pytest.approx(60.0)  # extended
+    assert table.get_thp(bhp=low - (high - low), **args) == pytest.approx(0.0)
+
+
+def tubing_stand_ins(tmp_path, *, vfp_number):
+    from bores.wells.compile import UNSET_INT
+
+    controls = types.SimpleNamespace(
+        artificial_lift_quantities=np.array([0.0, 25.0]),
+        well_kinds=np.array([0, 0]),
+        get_vfp_table_number=lambda *, well_row: (
+            None if vfp_number[well_row] == UNSET_INT else int(vfp_number[well_row])
+        ),
+    )
+    return types.SimpleNamespace(controls=controls), VFPTables.from_deck(producer_table(tmp_path))
+
+
+def test_tubing_is_resolved_from_the_compiled_controls_at_solve_time(tmp_path):
+    from bores.wells.compile import UNSET_INT
+    from bores.wells.resolution.tubing import resolve_well_tubing
+
+    system, tables = tubing_stand_ins(tmp_path, vfp_number=[3, UNSET_INT])
+    with_table = resolve_well_tubing(tubing_performance=tables, compiled_system=system, well_row=0)
+    assert with_table.vfp_table is tables.producers[3] and with_table.can_evaluate_thp
+    without = resolve_well_tubing(tubing_performance=tables, compiled_system=system, well_row=1)
+    assert without.vfp_table is None and not without.can_evaluate_thp
+    assert without.artificial_lift_quantity == pytest.approx(25.0)
+    none = resolve_well_tubing(tubing_performance=None, compiled_system=system, well_row=0)
+    assert not none.can_evaluate_thp
+
+
+def test_missing_table_number_in_the_collection_is_reported(tmp_path):
+    from bores.wells.resolution.tubing import resolve_well_tubing
+
+    system, tables = tubing_stand_ins(tmp_path, vfp_number=[9, 9])
+    with pytest.raises(ValidationError, match="No producer VFP table numbered 9"):
+        resolve_well_tubing(tubing_performance=tables, compiled_system=system, well_row=0)
+
+
+def test_vfp_thp_uses_surface_rates_and_refuses_a_datum_mismatch(tmp_path):
+    from bores.wells.hydraulics.base import PhaseValues
+    from bores.wells.resolution.tubing import WellTubing, compute_tubing_head_pressure
+
+    table = VFPTable.from_deck(producer_table(tmp_path), table_number=3)
+    tubing = WellTubing(None, table, 0.0)
+    rates = PhaseValues(oil=100.0, water=0.0, gas=10_000.0)  # gas-oil ratio 100
+    common = {
+        "tubing": tubing,
+        "phase_rates": rates,
+        "surface_phase_rates": rates,
+        "surface_fluid_properties": None,
+        "is_injector": False,
+    }
+    expected_bhp = float(
+        table.query(
+            flow_rate=100.0,
+            thp=30.0,
+            water_cut=0.0,
+            gas_oil_ratio=100.0,
+            artificial_lift_quantity=0.0,
+        )
+    )
+    thp = compute_tubing_head_pressure(
+        reference_depth=2000.0, reference_pressure=expected_bhp, **common
+    )
+    assert thp == pytest.approx(30.0)
+    with pytest.raises(ValidationError, match="datum depth"):
+        compute_tubing_head_pressure(
+            reference_depth=2100.0, reference_pressure=expected_bhp, **common
+        )
+    with pytest.raises(ValidationError, match="no `WellBoreModel` or VFP table"):
+        compute_tubing_head_pressure(
+            reference_depth=2000.0,
+            reference_pressure=1.0,
+            **{**common, "tubing": WellTubing(None, None, 0.0)},
+        )

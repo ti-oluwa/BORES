@@ -26,6 +26,7 @@ from bores.wells.compile import (
     WorkoverActionTag,
 )
 from bores.wells.hydraulics.base import SurfaceFluidProperties, WellBoreModel
+from bores.wells.hydraulics.vfp import VFPTables
 from bores.wells.resolution.engine import resolve_well_control
 from bores.wells.resolution.groups.allocation import allocate_group_targets
 from bores.wells.resolution.limits import check_economic_violation
@@ -113,7 +114,7 @@ def reallocate_and_reresolve(
     open_members: typing.Sequence[Integer],
     grup_mode_tag: Integer,
     grup_member_rows: typing.Sequence[Integer],
-    get_wellbore: typing.Callable[[Integer], WellBoreModel | None],
+    get_tubing_performance: typing.Callable[[Integer], WellBoreModel | VFPTables | None],
     get_connection_samples: typing.Callable[[Integer], typing.Sequence[ConnectionSample]],
     get_surface_fluid_properties: typing.Callable[[Integer], SurfaceFluidProperties | None],
 ) -> tuple[str, ...]:
@@ -139,8 +140,8 @@ def reallocate_and_reresolve(
         `enforce_group_economic_limits` was first called for this group,
         the members this group's own reallocation is meant to keep
         covering across every pass this call makes.
-    :param get_wellbore: Given a well row, its hydraulics correlation, or
-        `None` if it has none.
+    :param get_tubing_performance: Given a well row, what relates its BHP to its THP
+        (a `WellBoreModel` or a `VFPTables` collection), or `None` if it has none.
     :param get_connection_samples: Given a well row, its active, open
         connections' current reservoir samples.
     :param get_surface_fluid_properties: Given a well row, its surface
@@ -161,7 +162,7 @@ def reallocate_and_reresolve(
         resolve_well_control(
             compiled_system=well_system,
             well_row=well_row,
-            wellbore=get_wellbore(well_row),
+            tubing_performance=get_tubing_performance(well_row),
             connection_samples=get_connection_samples(well_row),
             workspace=workspace,
             control_spec=control_spec,
@@ -176,7 +177,7 @@ def enforce_group_economic_limits(
     well_system: CompiledWellSystem,
     workspace: WellsWorkspace,
     control_spec: WellControlSpec,
-    get_wellbore: typing.Callable[[Integer], WellBoreModel | None],
+    get_tubing_performance: typing.Callable[[Integer], WellBoreModel | VFPTables | None],
     get_connection_samples: typing.Callable[[Integer], typing.Sequence[ConnectionSample]],
     get_surface_fluid_properties: typing.Callable[[Integer], SurfaceFluidProperties | None]
     | None = None,
@@ -212,8 +213,8 @@ def enforce_group_economic_limits(
         membership) and `.controls`/`.well_kinds` (guide rates, read only).
     :param workspace: This run's `WellsWorkspace`, updated in place.
     :param control_spec: Supplies `group_rate_cutback_factor` and `max_fixed_point_iterations`.
-    :param get_wellbore: Given a well row, its hydraulics correlation,
-        or `None` if it has none. Only called for a member actually being
+    :param get_tubing_performance: Given a well row, what relates its BHP to its THP
+        (a `WellBoreModel` or a `VFPTables` collection), or `None` if it has none. Only called for a member actually being
         re-resolved.
     :param get_connection_samples: Given a well row, its active, open
         connections' current reservoir samples. Only called for a member
@@ -348,7 +349,7 @@ def enforce_group_economic_limits(
             open_members=open_members,
             grup_mode_tag=grup_mode_tag,
             grup_member_rows=grup_member_rows,
-            get_wellbore=get_wellbore,
+            get_tubing_performance=get_tubing_performance,
             get_connection_samples=get_connection_samples,
             get_surface_fluid_properties=get_resolved_surface_fluid_properties,
         )

@@ -10,13 +10,9 @@ from bores.wells.compile import (
     ProducerControlModeTag,
     RateQuantityTag,
 )
-from bores.wells.hydraulics.base import (
-    SurfaceFluidProperties,
-    WellBoreModel,
-    compute_perforation_pressures,
-    compute_tubing_head_pressure,
-)
+from bores.wells.hydraulics.base import SurfaceFluidProperties, compute_perforation_pressures
 from bores.wells.resolution.spec import ConnectionPressureMode, WellControlSpec
+from bores.wells.resolution.tubing import WellTubing, compute_tubing_head_pressure
 from bores.wells.state import ConnectionSample, PhaseValues
 from bores.wells.workspace import (
     PerforationWorkspace,
@@ -106,7 +102,7 @@ def get_default_pressure_bracket(
 
 def solve_connection_pressures_and_rates(
     *,
-    wellbore: WellBoreModel | None,
+    tubing: WellTubing,
     reference_depth: Number,
     workspace: PerforationWorkspace,
     connection_samples: typing.Sequence[ConnectionSample],
@@ -133,10 +129,10 @@ def solve_connection_pressures_and_rates(
     flow from `workspace.static_well_indices` and the previous
     iteration's gas rates, before computing this iteration's rates. A
     well with no `d_factor` set is unaffected. This still runs when
-    `wellbore` is `None`, since non-Darcy correction doesn't depend on
+    the well has no `WellBoreModel`, since non-Darcy correction doesn't depend on
     wellbore hydraulics.
 
-    :param wellbore: Hydraulics correlation for this well. If `None`,
+    :param tubing: Hydraulics correlation for this well. If `None`,
         behavior depends on `control_spec.connection_pressure_mode`: with
         `UNIFORM_BHP`, `reference_pressure` is applied unchanged at every
         connection and the hydraulics correlation is never called; with
@@ -150,18 +146,20 @@ def solve_connection_pressures_and_rates(
     :param control_spec: Supplies the iteration cap, convergence tolerance,
         and `connection_pressure_mode`.
     :returns: `(connection_pressures, phase_rates, surface_phase_rates)`.
-    :raises ValidationError: If `wellbore` is `None` and
+    :raises ValidationError: If the well has no `WellBoreModel` and
         `control_spec.connection_pressure_mode` isn't `UNIFORM_BHP`.
     """
+    wellbore = tubing.wellbore
     if (
         wellbore is None
         and control_spec.connection_pressure_mode != ConnectionPressureMode.UNIFORM_BHP
     ):
         raise ValidationError(
-            "This well has no `WellBoreModel` or VFP table assigned, and "
+            "This well has no `WellBoreModel` assigned, and "
             f"`control_spec.connection_pressure_mode` is "
             f"{control_spec.connection_pressure_mode!r}, not `UNIFORM_BHP`. "
-            "Assign a hydraulics model (or a VFP table) to this well, or "
+            "A VFP table relates BHP to THP only and can't distribute pressure across "
+            "connections. Assign a `WellBoreModel` to this well, or "
             "set `connection_pressure_mode=ConnectionPressureMode.UNIFORM_BHP` "
             "to apply the reference pressure unchanged at every connection instead."
         )
@@ -263,7 +261,7 @@ def solve_connection_pressures_and_rates(
 
 def compute_phase_rates(
     *,
-    wellbore: WellBoreModel | None,
+    tubing: WellTubing,
     reference_depth: Number,
     workspace: PerforationWorkspace,
     connection_samples: typing.Sequence[ConnectionSample],
@@ -281,7 +279,7 @@ def compute_phase_rates(
     an injector displaces reservoir fluid rather than having an
     IPR-driven rate of its own for the other two phases.
 
-    :param wellbore: Hydraulics correlation for this well.
+    :param tubing: Hydraulics correlation for this well.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
     :param connection_samples: Reservoir samples, same order as `workspace`'s arrays.
@@ -294,7 +292,7 @@ def compute_phase_rates(
         rates, and surface-condition phase rates.
     """
     return solve_connection_pressures_and_rates(
-        wellbore=wellbore,
+        tubing=tubing,
         reference_depth=reference_depth,
         workspace=workspace,
         connection_samples=connection_samples,
@@ -307,7 +305,7 @@ def compute_phase_rates(
 
 def bisect_bhp(
     *,
-    wellbore: WellBoreModel | None,
+    tubing: WellTubing,
     reference_depth: Number,
     workspace: PerforationWorkspace,
     connection_samples: typing.Sequence[ConnectionSample],
@@ -335,7 +333,7 @@ def bisect_bhp(
     (no exception) if `target` isn't achievable within the bracket.
     Returns the closest bound reached after `control_spec.max_bisection_iterations`.
 
-    :param wellbore: Hydraulics correlation for this well.
+    :param tubing: Hydraulics correlation for this well.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
     :param connection_samples: Reservoir samples, same order as `workspace`'s arrays.
@@ -357,7 +355,7 @@ def bisect_bhp(
         always reservoir-condition regardless of `target_rate_condition`.
     :raises ValidationError: If `metric="thp"` and `surface_fluid_properties` is `None`.
     """
-    if metric == "thp" and surface_fluid_properties is None:
+    if metric == "thp" and surface_fluid_properties is None and tubing.vfp_table is None:
         raise ValidationError("bisect_bhp(..., metric='thp') requires `surface_fluid_properties`.")
 
     low, high = min_pressure, max_pressure
@@ -368,7 +366,7 @@ def bisect_bhp(
     for _ in range(control_spec.max_bisection_iterations):
         average_pressure = 0.5 * (low + high)
         pressures, phase_rates, surface_phase_rates = solve_connection_pressures_and_rates(
-            wellbore=wellbore,
+            tubing=tubing,
             reference_depth=reference_depth,
             workspace=workspace,
             connection_samples=connection_samples,
@@ -385,12 +383,12 @@ def bisect_bhp(
             value = target_rates.oil + target_rates.water + target_rates.gas
             increasing_with_bhp = is_injector
         else:
-            assert surface_fluid_properties is not None
             value = compute_tubing_head_pressure(
-                wellbore=wellbore,
+                tubing=tubing,
                 reference_depth=reference_depth,
                 reference_pressure=average_pressure,
                 phase_rates=phase_rates,
+                surface_phase_rates=surface_phase_rates,
                 surface_fluid_properties=surface_fluid_properties,
                 is_injector=is_injector,
             )
@@ -412,7 +410,7 @@ def solve_producer_rate_mode(
     *,
     control_mode: Integer,
     target_rate: Number,
-    wellbore: WellBoreModel | None,
+    tubing: WellTubing,
     reference_depth: Number,
     workspace: PerforationWorkspace,
     connection_samples: typing.Sequence[ConnectionSample],
@@ -426,7 +424,7 @@ def solve_producer_rate_mode(
 
     :param control_mode: `ProducerControlModeTag` value.
     :param target_rate: The rate target.
-    :param wellbore: Hydraulics correlation for this well.
+    :param tubing: Hydraulics correlation for this well.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
     :param connection_samples: Reservoir samples, same order as `workspace`'s arrays.
@@ -439,7 +437,7 @@ def solve_producer_rate_mode(
         connection_samples, is_injector=False, control_spec=control_spec
     )
     bhp, _, _ = bisect_bhp(
-        wellbore=wellbore,
+        tubing=tubing,
         reference_depth=reference_depth,
         workspace=workspace,
         connection_samples=connection_samples,
@@ -454,7 +452,7 @@ def solve_producer_rate_mode(
         else "surface",
     )
     connection_pressures, phase_rates, surface_phase_rates = compute_phase_rates(
-        wellbore=wellbore,
+        tubing=tubing,
         reference_depth=reference_depth,
         workspace=workspace,
         connection_samples=connection_samples,
@@ -469,7 +467,7 @@ def solve_producer_rate_mode(
 def solve_producer_bhp_mode(
     *,
     target_bhp: Number,
-    wellbore: WellBoreModel | None,
+    tubing: WellTubing,
     reference_depth: Number,
     workspace: PerforationWorkspace,
     connection_samples: typing.Sequence[ConnectionSample],
@@ -481,7 +479,7 @@ def solve_producer_bhp_mode(
     Nominal resolution only. See `solve_producer_rate_mode`.
     """
     connection_pressures, phase_rates, surface_phase_rates = compute_phase_rates(
-        wellbore=wellbore,
+        tubing=tubing,
         reference_depth=reference_depth,
         workspace=workspace,
         connection_samples=connection_samples,
@@ -498,7 +496,7 @@ def solve_injector_rate_mode(
     control_mode: Integer,
     target_rate: Number,
     injected_phase: Integer,
-    wellbore: WellBoreModel | None,
+    tubing: WellTubing,
     reference_depth: Number,
     workspace: PerforationWorkspace,
     connection_samples: typing.Sequence[ConnectionSample],
@@ -513,7 +511,7 @@ def solve_injector_rate_mode(
     :param control_mode: `InjectorControlModeTag` value.
     :param target_rate: The rate target.
     :param injected_phase: `FluidPhaseTag` value of the injected phase.
-    :param wellbore: Hydraulics correlation for this well.
+    :param tubing: Hydraulics correlation for this well.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
     :param connection_samples: Reservoir samples, same order as `workspace`'s arrays.
@@ -526,7 +524,7 @@ def solve_injector_rate_mode(
         connection_samples, is_injector=True, control_spec=control_spec
     )
     bhp, _, _ = bisect_bhp(
-        wellbore=wellbore,
+        tubing=tubing,
         reference_depth=reference_depth,
         workspace=workspace,
         connection_samples=connection_samples,
@@ -541,7 +539,7 @@ def solve_injector_rate_mode(
         else "surface",
     )
     connection_pressures, phase_rates, surface_phase_rates = compute_phase_rates(
-        wellbore=wellbore,
+        tubing=tubing,
         reference_depth=reference_depth,
         workspace=workspace,
         connection_samples=connection_samples,
@@ -557,7 +555,7 @@ def solve_injector_bhp_mode(
     *,
     target_bhp: Number,
     injected_phase: Integer,
-    wellbore: WellBoreModel | None,
+    tubing: WellTubing,
     reference_depth: Number,
     workspace: PerforationWorkspace,
     connection_samples: typing.Sequence[ConnectionSample],
@@ -570,7 +568,7 @@ def solve_injector_bhp_mode(
     """
     relevant_phases = phase_mask(injected_phase)
     connection_pressures, phase_rates, surface_phase_rates = compute_phase_rates(
-        wellbore=wellbore,
+        tubing=tubing,
         reference_depth=reference_depth,
         workspace=workspace,
         connection_samples=connection_samples,

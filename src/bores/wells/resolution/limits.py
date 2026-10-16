@@ -13,7 +13,7 @@ from bores.wells.compile import (
     LimitKind,
     RateQuantityTag,
 )
-from bores.wells.hydraulics.base import SurfaceFluidProperties, WellBoreModel
+from bores.wells.hydraulics.base import SurfaceFluidProperties
 from bores.wells.resolution.solvers import (
     RATE_QUANTITY_PHASES,
     bisect_bhp,
@@ -22,6 +22,7 @@ from bores.wells.resolution.solvers import (
     solve_connection_pressures_and_rates,
 )
 from bores.wells.resolution.spec import WellControlSpec
+from bores.wells.resolution.tubing import WellTubing
 from bores.wells.state import ConnectionSample, PhaseValues
 from bores.wells.workspace import PerforationWorkspace
 
@@ -54,7 +55,7 @@ def get_rate_bound(
     quantity: Integer,
     max_value: Number,
     bhp: Number,
-    wellbore: WellBoreModel | None,
+    tubing: WellTubing,
     reference_depth: Number,
     workspace: PerforationWorkspace,
     connection_samples: typing.Sequence[ConnectionSample],
@@ -78,7 +79,7 @@ def get_rate_bound(
     :param quantity: `RateQuantityTag` value.
     :param max_value: The limit row's `max_value`.
     :param bhp: The nominal resolution's BHP.
-    :param wellbore: Hydraulics correlation for this well. May be `None`.
+    :param tubing: Hydraulics correlation for this well. May be `None`.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
     :param connection_samples: Reservoir samples, same order as `workspace`'s arrays.
@@ -94,7 +95,7 @@ def get_rate_bound(
     )
 
     _, reservoir_condition_rates, surface_condition_rates = solve_connection_pressures_and_rates(
-        wellbore=wellbore,
+        tubing=tubing,
         reference_depth=reference_depth,
         workspace=workspace,
         connection_samples=connection_samples,
@@ -113,7 +114,7 @@ def get_rate_bound(
         return None
 
     bound_bhp, _, _ = bisect_bhp(
-        wellbore=wellbore,
+        tubing=tubing,
         reference_depth=reference_depth,
         workspace=workspace,
         connection_samples=connection_samples,
@@ -135,7 +136,8 @@ def get_thp_bound(
     max_value: Number,
     bhp: Number,
     phase_rates: PhaseValues,
-    wellbore: WellBoreModel,
+    surface_phase_rates: PhaseValues,
+    tubing: WellTubing,
     reference_depth: Number,
     workspace: PerforationWorkspace,
     connection_samples: typing.Sequence[ConnectionSample],
@@ -144,7 +146,7 @@ def get_thp_bound(
     min_pressure: Number,
     max_pressure: Number,
     control_spec: WellControlSpec,
-    surface_fluid_properties: SurfaceFluidProperties,
+    surface_fluid_properties: SurfaceFluidProperties | None,
 ) -> Number | None:
     """
     Gets the bounding BHP for a `THPLimit` row, if violated.
@@ -156,7 +158,7 @@ def get_thp_bound(
     :param max_value: The limit row's `max_value`. `NaN` means no ceiling.
     :param bhp: The nominal resolution's BHP.
     :param phase_rates: The nominal resolution's reservoir-condition phase rates.
-    :param wellbore: Hydraulics correlation for this well. Required as a
+    :param tubing: Hydraulics correlation for this well. Required as a
         THP limit can't be evaluated without one, regardless of
         `control_spec.connection_pressure_mode`.
     :param reference_depth: The well's BHP/THP reporting datum.
@@ -170,13 +172,14 @@ def get_thp_bound(
     :param control_spec: Solver tunables.
     :param surface_fluid_properties: Fluid properties at surface conditions.
     :returns: Bounding BHP, or `None` if not violated.
-    :raises ValidationError: If `wellbore` is `None`.
+    :raises ValidationError: If the well can't evaluate a THP (no `WellBoreModel` or VFP table).
     """
     current_thp = compute_tubing_head_pressure(
-        wellbore=wellbore,
+        tubing=tubing,
         reference_depth=reference_depth,
         reference_pressure=bhp,
         phase_rates=phase_rates,
+        surface_phase_rates=surface_phase_rates,
         surface_fluid_properties=surface_fluid_properties,
         is_injector=is_injector,
     )
@@ -190,7 +193,7 @@ def get_thp_bound(
         return None
 
     bound_bhp, _, _ = bisect_bhp(
-        wellbore=wellbore,
+        tubing=tubing,
         reference_depth=reference_depth,
         workspace=workspace,
         connection_samples=connection_samples,
@@ -258,7 +261,7 @@ def apply_limits(
     limits: CompiledLimits,
     limits_start: Integer,
     limits_end: Integer,
-    wellbore: WellBoreModel | None,
+    tubing: WellTubing,
     reference_depth: Number,
     workspace: PerforationWorkspace,
     connection_samples: typing.Sequence[ConnectionSample],
@@ -296,7 +299,7 @@ def apply_limits(
     :param limits: The full system's `CompiledLimits`.
     :param limits_start: First row of this well's limit range.
     :param limits_end: One past the last row of this well's limit range.
-    :param wellbore: Hydraulics correlation for this well. May be `None`.
+    :param tubing: Hydraulics correlation for this well. May be `None`.
         A `THPLimit` row in range still requires one regardless.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
@@ -319,7 +322,8 @@ def apply_limits(
         are zeroed if `economic_shutin` is `True`; `connection_pressures`
         is not, as a shut-in well still has a real wellbore pressure profile.
     :raises ValidationError: If a `THPLimit` row is present but
-        `surface_fluid_properties` wasn't supplied, or `wellbore` is `None`.
+        `surface_fluid_properties` wasn't supplied for a correlation, or the well has neither a
+        `WellBoreModel` nor a VFP table.
     """
     candidates: list[tuple[Number, Integer]] = []
 
@@ -340,7 +344,7 @@ def apply_limits(
                 quantity=limits.quantities[row],
                 max_value=limits.max_values[row],
                 bhp=bhp,
-                wellbore=wellbore,
+                tubing=tubing,
                 reference_depth=reference_depth,
                 workspace=workspace,
                 connection_samples=connection_samples,
@@ -350,13 +354,13 @@ def apply_limits(
                 control_spec=control_spec,
             )
         elif kind == LimitKind.THP:
-            if surface_fluid_properties is None:
+            if surface_fluid_properties is None and tubing.vfp_table is None:
                 raise ValidationError(
                     "A THP limit is present but no `surface_fluid_properties` "
                     "was supplied to `apply_limits`. THP limits can't be "
-                    "evaluated without it."
+                    "evaluated with a hydraulics correlation without it."
                 )
-            if wellbore is None:
+            if not tubing.can_evaluate_thp:
                 raise ValidationError(
                     "A THP limit is present but no `WellBoreModel` or VFP table "
                     "is assigned to this well. THP limits can't be evaluated "
@@ -368,7 +372,8 @@ def apply_limits(
                 max_value=limits.max_values[row],
                 bhp=bhp,
                 phase_rates=phase_rates,
-                wellbore=wellbore,
+                surface_phase_rates=surface_phase_rates,
+                tubing=tubing,
                 reference_depth=reference_depth,
                 workspace=workspace,
                 connection_samples=connection_samples,
@@ -401,7 +406,7 @@ def apply_limits(
         )
         governing_connection_pressures, governing_phase_rates, governing_surface_phase_rates = (
             compute_phase_rates(
-                wellbore=wellbore,
+                tubing=tubing,
                 reference_depth=reference_depth,
                 workspace=workspace,
                 connection_samples=connection_samples,

@@ -15,6 +15,7 @@ from bores.errors import ValidationError
 from bores.types import Integer
 from bores.wells.compile import CompiledWellSystem
 from bores.wells.hydraulics.base import SurfaceFluidProperties, WellBoreModel
+from bores.wells.hydraulics.vfp import VFPTables
 from bores.wells.resolution.engine import resolve_well_control
 from bores.wells.resolution.groups.allocation import (
     allocate_group_targets,
@@ -36,7 +37,7 @@ def resolve_wells(
     compiled_system: CompiledWellSystem,
     workspace: WellsWorkspace,
     control_spec: WellControlSpec,
-    get_wellbore: typing.Callable[[Integer], WellBoreModel | None],
+    get_tubing_performance: typing.Callable[[Integer], WellBoreModel | VFPTables | None],
     get_connection_samples: typing.Callable[[Integer], typing.Sequence[ConnectionSample]],
     get_surface_fluid_properties: typing.Callable[[Integer], SurfaceFluidProperties | None]
     | None = None,
@@ -64,8 +65,8 @@ def resolve_wells(
     :param compiled_system: The compiled well system to resolve.
     :param workspace: This run's `WellsWorkspace`, updated in place.
     :param control_spec: Solver tunables, shared by every well and group.
-    :param get_wellbore: Given a well row, its hydraulics correlation, or
-        `None` if it has none.
+    :param get_tubing_performance: Given a well row, what relates its BHP to its THP
+        (a `WellBoreModel` or a `VFPTables` collection), or `None` if it has none.
     :param get_connection_samples: Given a well row, its active, open
         connections' current reservoir samples.
     :param get_surface_fluid_properties: Given a well row, its surface
@@ -95,7 +96,7 @@ def resolve_wells(
         resolve_well_control(
             compiled_system=compiled_system,
             well_row=well_row,
-            wellbore=get_wellbore(well_row),
+            tubing_performance=get_tubing_performance(well_row),
             connection_samples=get_connection_samples(well_row),
             workspace=workspace,
             control_spec=control_spec,
@@ -115,7 +116,7 @@ def resolve_wells(
                 well_system=compiled_system,
                 workspace=workspace,
                 control_spec=control_spec,
-                get_wellbore=get_wellbore,
+                get_tubing_performance=get_tubing_performance,
                 get_connection_samples=get_connection_samples,
                 get_surface_fluid_properties=get_surface_fluid_properties,
             )
@@ -132,7 +133,7 @@ def resolve_wells(
                 well_system=compiled_system,
                 workspace=workspace,
                 control_spec=control_spec,
-                get_wellbore=get_wellbore,
+                get_tubing_performance=get_tubing_performance,
                 get_connection_samples=get_connection_samples,
                 get_surface_fluid_properties=get_surface_fluid_properties,
             )

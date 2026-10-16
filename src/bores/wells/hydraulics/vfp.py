@@ -429,6 +429,67 @@ class VFPTable(StoreSerializable):
             return typing.cast(Number, result.astype(dtype, copy=False).item())
         return typing.cast(NumberArray[NDimension], result.astype(dtype, copy=False))
 
+    get_bhp = query
+
+    def get_thp(
+        self,
+        *,
+        flow_rate: Number,
+        bhp: Number,
+        water_cut: Number = 0.0,
+        gas_oil_ratio: Number = 0.0,
+        artificial_lift_quantity: Number = 0.0,
+    ) -> Number:
+        """
+        Finds the tubing head pressure that goes with a bottom-hole pressure.
+
+        The table gives BHP from THP, so this inverts it at fixed flow rate, water cut,
+        gas-oil ratio and artificial lift quantity: the BHP is evaluated at every point of the
+        THP axis, and the THP is interpolated linearly between the two points that bracket
+        `bhp`, or extended linearly past the first or last point.
+
+        :param flow_rate: Flow rate, in the table's own definition of it.
+        :param bhp: The bottom-hole pressure to find the THP of.
+        :param water_cut: Water cut. Ignored if `water_cuts` is single-valued.
+        :param gas_oil_ratio: Gas-oil ratio. Ignored if `gas_oil_ratios` is single-valued.
+        :param artificial_lift_quantity: Artificial lift quantity.
+            Ignored if `artificial_lift_quantities` is single-valued.
+        :returns: The tubing head pressure.
+        :raises ValidationError: If the table has fewer than two THP points, or its BHP does not
+            increase strictly with THP at these conditions, so there is no unique THP.
+        """
+        thps = self._data.thps
+        if len(thps) < 2:
+            raise ValidationError(
+                f"VFP table {self.table_number} has a single THP point, so a THP can't be "
+                "found from a BHP."
+            )
+        bhps = np.asarray(
+            self.query(
+                flow_rate=flow_rate,
+                thp=thps,
+                water_cut=water_cut,
+                gas_oil_ratio=gas_oil_ratio,
+                artificial_lift_quantity=artificial_lift_quantity,
+            ),
+            dtype=np.float64,
+        )
+        if not (np.diff(bhps) > 0.0).all():
+            raise ValidationError(
+                f"VFP table {self.table_number}: BHP does not increase strictly with THP at "
+                f"flow rate {flow_rate}, water cut {water_cut}, gas-oil ratio {gas_oil_ratio} and "
+                f"artificial lift quantity {artificial_lift_quantity}, so a THP can't be found "
+                "from a BHP."
+            )
+        if bhp <= bhps[0]:
+            lower, upper = 0, 1
+        elif bhp >= bhps[-1]:
+            lower, upper = len(thps) - 2, len(thps) - 1
+        else:
+            return float(np.interp(bhp, bhps, thps))
+        slope = (thps[upper] - thps[lower]) / (bhps[upper] - bhps[lower])
+        return float(thps[lower] + slope * (bhp - bhps[lower]))
+
     @typing.overload
     @classmethod
     def from_deck(
