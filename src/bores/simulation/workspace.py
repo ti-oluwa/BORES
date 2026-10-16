@@ -45,8 +45,7 @@ class SimulationWorkspace(typing.NamedTuple):
 
     transmissibilities: TransmissibilityCache
     """
-    Per-interior-connection upwinding, gravity, and transmissibility
-    at the current cell state. 
+    Per-interior-connection upwinding, gravity, and transmissibility at the current cell state. 
     
     Refreshed in place every timestep.
     """

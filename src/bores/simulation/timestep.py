@@ -1019,8 +1019,8 @@ class Timer:
         dt = self.next_step_size
 
         # Apply limiting factors (all must apply)
-        for f in limiting_factors:
-            dt *= f
+        for factor in limiting_factors:
+            dt *= factor
 
         # Apply the most conservative growth factor only (avoid compounding)
         if growth_factors and not limiting_factors:
@@ -1294,8 +1294,8 @@ class Timer:
         object.__setattr__(timer, "failed_step_sizes", failed_step_sizes)
 
         # Rebuild rolling windows from recent_metrics history
-        cfl_window: deque = deque(maxlen=timer.metrics_history_size)
-        newton_window: deque = deque(maxlen=timer.metrics_history_size)
+        cfl_window = deque(maxlen=timer.metrics_history_size)
+        newton_window = deque(maxlen=timer.metrics_history_size)
         for metrics in recent_metrics:
             if metrics.success:
                 if metrics.cfl is not None and metrics.cfl > 0.0:

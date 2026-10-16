@@ -147,6 +147,8 @@ def invert_interpolators(
 
     def derivative(*args: typing.Any) -> typing.Any:
         inverse = evaluate_interpolator(inverse_value, *args)
-        return -evaluate_interpolator(inverse_derivative, *args) / (inverse * inverse)
+        # Some derivative interpolators flatten their inputs; give the slope the value's shape
+        slope = np.reshape(evaluate_interpolator(inverse_derivative, *args), np.shape(inverse))
+        return -slope / (inverse * inverse)
 
     return value, derivative

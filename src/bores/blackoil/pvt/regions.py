@@ -12,6 +12,7 @@ from scipy.interpolate import (  # type: ignore[import-untyped]
 from typing_extensions import Self
 
 from bores.blackoil.pvt.data import PVTData, PVTDataSet, get_stb_to_volume_factor
+from bores.blackoil.pvt.live_oil import build_live_oil_branch_tables
 from bores.blackoil.pvt.static import StaticPVT
 from bores.blackoil.pvt.tables import PVTTables, clip_compressibility
 from bores.constants import c
@@ -393,14 +394,18 @@ def build_oil_data_from_pvto(
     The builder:
 
     1. Extracts the saturated branch `(Pb(Rs), Bo_sat(Rs), μo_sat(Rs))`.
-    2. Builds a regular pressure grid from the union of all bubble-point
-       pressures extended to cover the maximum undersaturated pressure seen.
-    3. At each pressure, interpolates Bo and μo from the appropriate Rs
-       group's undersaturated branch (or uses the saturated value when
-       P ≤ Pb).
-    4. Derives the density table using `ρo = (ρo,SC + Rs·ρg,SC) / Bo`
+    2. Builds a pressure grid from the union of all bubble-point pressures, every tabulated
+       row pressure and an extension to the maximum undersaturated pressure seen.
+    3. Evaluates every Rs group's own branch on that grid (linearly extrapolated beyond its
+       rows) into the 3-D `undersaturated_formation_volume_factor_table` and
+       `undersaturated_viscosity_table`, shape `(n_p, n_t, n_rs)`. Oil whose Rs lies between
+       two groups blends their branches linearly in Rs at the same pressure.
+    4. Builds the 2-D saturated tables along the bubble curve: `Bo`, `μo` and `Rs` interpolated
+       across the `(Pb, saturated value)` nodes up to the highest bubble point, and the
+       highest-Rs branch above it.
+    5. Derives the density table using `ρo = (ρo,SC + Rs·ρg,SC / f) / Bo`
        when reference densities are available.
-    5. Derives compressibility from `co = -(1/Bo)·(∂Bo/∂P)`.
+    6. Derives compressibility from `co = -(1/Bo)·(∂Bo/∂P)` along the saturated curve.
 
     :param pvto_records: List of row dicts from the parsed `PVTO` keyword.
         Each dict has keys `"solution_gor"`, `"pressure"`, `"fvf"`, `"viscosity"`.
@@ -454,10 +459,10 @@ def build_oil_data_from_pvto(
         saturated_oil_fvf[i] = saturated_row["fvf"]
         saturated_oil_viscosity[i] = saturated_row["viscosity"]
 
-    # Pressure grid: bubble-point pressures + extension to max undersaturated pressure.
-    # We do not merge all undersaturated rows into one flat grid - that would mix
-    # physically distinct branches. Instead we extend monotonically from the
-    # highest Pb to cover the undersaturated range.
+    # Pressure grid: every bubble-point pressure, every tabulated row pressure (so each Rs
+    # group's own branch is reproduced exactly by linear interpolation on the grid), and an
+    # extension from the highest Pb to the maximum pressure seen. The branches are still
+    # evaluated one group at a time (see `build_live_oil_branch_tables`), never merged.
     max_pressure = max(
         float(row["pressure"]) for rows in solution_gor_to_rows.values() for row in rows
     )
@@ -467,7 +472,12 @@ def build_oil_data_from_pvto(
         max(10, n_rs),
         dtype=dtype,
     )
-    pressures = np.unique(np.concatenate([bubble_point_pressure_values, extension])).astype(dtype)
+    row_pressures = np.array(
+        [row["pressure"] for rows in solution_gor_to_rows.values() for row in rows], dtype=dtype
+    )
+    pressures = np.unique(
+        np.concatenate([bubble_point_pressure_values, row_pressures, extension])
+    ).astype(dtype)
     n_p = len(pressures)
 
     # Reference undersaturated branch: most Eclipse decks only attach an
@@ -490,12 +500,12 @@ def build_oil_data_from_pvto(
             "single-row Rs groups."
         )
 
-    reference_pressure_arr = np.array([row["pressure"] for row in reference_rows], dtype=dtype)
-    reference_oil_fvf_arr = np.array([row["fvf"] for row in reference_rows], dtype=dtype)
-    reference_viscosity_arr = np.array([row["viscosity"] for row in reference_rows], dtype=dtype)
-    reference_delta_pressure = reference_pressure_arr - reference_pressure_arr[0]
-    reference_delta_oil_fvf = reference_oil_fvf_arr - reference_oil_fvf_arr[0]
-    reference_viscosity_ratio = reference_viscosity_arr / reference_viscosity_arr[0]
+    reference_pressure_array = np.array([row["pressure"] for row in reference_rows], dtype=dtype)
+    reference_oil_fvf_array = np.array([row["fvf"] for row in reference_rows], dtype=dtype)
+    reference_viscosity_array = np.array([row["viscosity"] for row in reference_rows], dtype=dtype)
+    reference_delta_pressure = reference_pressure_array - reference_pressure_array[0]
+    reference_delta_oil_fvf = reference_oil_fvf_array - reference_oil_fvf_array[0]
+    reference_viscosity_ratio = reference_viscosity_array / reference_viscosity_array[0]
 
     # ΔBo(ΔP) and viscosity-ratio(ΔP) relative to the reference branch's own
     # saturated point, so they can be applied to any other Rs group's
@@ -515,18 +525,19 @@ def build_oil_data_from_pvto(
         fill_value=(reference_viscosity_ratio[0], reference_viscosity_ratio[-1]),
     )
 
-    # Per-Rs interpolators for the full (saturated + undersaturated) branch
-    oil_fvf_interps: list[interp1d] = []
-    oil_viscosity_interps: list[interp1d] = []
+    # Per-Rs branches (saturated point + undersaturated rows), kept as arrays
+    group_pressures: list[npt.NDArray] = []
+    group_fvf: list[npt.NDArray] = []
+    group_viscosity: list[npt.NDArray] = []
 
     for solution_gor_key in solution_gor_keys:
         rows = sorted(solution_gor_to_rows[solution_gor_key], key=lambda row: row["pressure"])
-        pressure_arr = np.array([row["pressure"] for row in rows], dtype=dtype)
-        oil_fvf_arr = np.array([row["fvf"] for row in rows], dtype=dtype)
-        oil_viscosity_arr = np.array([row["viscosity"] for row in rows], dtype=dtype)
+        pressure_array = np.array([row["pressure"] for row in rows], dtype=dtype)
+        oil_fvf_array = np.array([row["fvf"] for row in rows], dtype=dtype)
+        oil_viscosity_array = np.array([row["viscosity"] for row in rows], dtype=dtype)
 
         if len(rows) < 2:
-            # No explicit undersaturated branch for this Rs value - borrow
+            # No explicit undersaturated branch for this Rs value, so borrow
             # the reference branch's ΔBo(ΔP) / viscosity-ratio(ΔP) and apply
             # them relative to this group's own saturated point, so this
             # group also ends up with >= 2 monotonically increasing
@@ -534,36 +545,21 @@ def build_oil_data_from_pvto(
             extra_dp = reference_delta_pressure[reference_delta_pressure > 0]
             if len(extra_dp) == 0:
                 extra_dp = np.array([1.0], dtype=dtype)
-            extra_pressures = pressure_arr[0] + extra_dp
-            extra_oil_fvf = oil_fvf_arr[0] + delta_oil_fvf_of_dp(extra_dp)
-            extra_viscosity = oil_viscosity_arr[0] * viscosity_ratio_of_dp(extra_dp)
+            extra_pressures = pressure_array[0] + extra_dp
+            extra_oil_fvf = oil_fvf_array[0] + delta_oil_fvf_of_dp(extra_dp)
+            extra_viscosity = oil_viscosity_array[0] * viscosity_ratio_of_dp(extra_dp)
 
-            pressure_arr = np.concatenate([pressure_arr, extra_pressures])
-            oil_fvf_arr = np.concatenate([oil_fvf_arr, extra_oil_fvf])
-            oil_viscosity_arr = np.concatenate([oil_viscosity_arr, extra_viscosity])
-            order = np.argsort(pressure_arr)
-            pressure_arr = pressure_arr[order]
-            oil_fvf_arr = oil_fvf_arr[order]
-            oil_viscosity_arr = oil_viscosity_arr[order]
+            pressure_array = np.concatenate([pressure_array, extra_pressures])
+            oil_fvf_array = np.concatenate([oil_fvf_array, extra_oil_fvf])
+            oil_viscosity_array = np.concatenate([oil_viscosity_array, extra_viscosity])
+            order = np.argsort(pressure_array)
+            pressure_array = pressure_array[order]
+            oil_fvf_array = oil_fvf_array[order]
+            oil_viscosity_array = oil_viscosity_array[order]
 
-        oil_fvf_interps.append(
-            interp1d(
-                pressure_arr,
-                oil_fvf_arr,
-                kind="linear",
-                bounds_error=False,
-                fill_value=(oil_fvf_arr[0], oil_fvf_arr[-1]),
-            )
-        )
-        oil_viscosity_interps.append(
-            interp1d(
-                pressure_arr,
-                oil_viscosity_arr,
-                kind="linear",
-                bounds_error=False,
-                fill_value=(oil_viscosity_arr[0], oil_viscosity_arr[-1]),
-            )
-        )
+        group_pressures.append(pressure_array)
+        group_fvf.append(oil_fvf_array)
+        group_viscosity.append(oil_viscosity_array)
 
     # Rs(P) on the saturated branch via inverse of Pb(Rs).
     # Pb must be monotonically increasing with Rs for a well-formed `PVTO` table.
@@ -576,40 +572,37 @@ def build_oil_data_from_pvto(
             stacklevel=4,
         )
 
-    solution_gor_of_pressure = interp1d(
-        bubble_point_pressure_values,
-        solution_gor_values,
-        kind="linear",
-        bounds_error=False,
-        fill_value=(solution_gor_values[0], solution_gor_values[-1]),
+    # Saturated envelope along the bubble curve, and every Rs group's own branch on the grid
+    (
+        envelope_fvf,
+        envelope_viscosity,
+        envelope_solution_gor,
+        branch_fvf,
+        branch_viscosity,
+    ) = build_live_oil_branch_tables(
+        rs_nodes=solution_gor_values,
+        group_pressures=group_pressures,
+        group_fvf=group_fvf,
+        group_viscosity=group_viscosity,
+        pressures=pressures,
     )
-
-    oil_fvf_2d = np.empty((n_p, n_t), dtype=dtype)
-    oil_viscosity_2d = np.empty((n_p, n_t), dtype=dtype)
-    solution_gor_2d = np.empty((n_p, n_t), dtype=dtype)
-
-    for i, pressure in enumerate(pressures):
-        # Determine which Rs group governs at this pressure:
-        # find the Rs group whose Pb is closest to (and ≤) this pressure.
-        rs_idx = int(np.searchsorted(bubble_point_pressure_values, pressure, side="right")) - 1
-        rs_idx = int(np.clip(rs_idx, 0, n_rs - 1))
-
-        # Rs at this pressure on the saturated envelope
-        rs_at_pressure = solution_gor_of_pressure(pressure)
-        solution_gor_2d[i, :] = rs_at_pressure
-
-        oil_fvf = oil_fvf_interps[rs_idx](pressure)
-        oil_viscosity = oil_viscosity_interps[rs_idx](pressure)
-
-        oil_fvf_2d[i, :] = oil_fvf
-        oil_viscosity_2d[i, :] = oil_viscosity
+    oil_fvf_2d = _broadcast_to_2d(envelope_fvf.astype(dtype, copy=False), n_t)
+    oil_viscosity_2d = _broadcast_to_2d(envelope_viscosity.astype(dtype, copy=False), n_t)
+    solution_gor_2d = _broadcast_to_2d(envelope_solution_gor.astype(dtype, copy=False), n_t)
+    # Undersaturated branches (one per Rs); isothermal, so broadcast over the temperature axis
+    undersaturated_fvf_3d = np.repeat(branch_fvf[:, np.newaxis, :], n_t, axis=1).astype(
+        dtype, copy=False
+    )
+    undersaturated_viscosity_3d = np.repeat(
+        branch_viscosity[:, np.newaxis, :], n_t, axis=1
+    ).astype(dtype, copy=False)
 
     # Bubble-point table: Pb(Rs, T) - 2-D, one Pb per Rs per temperature
     bubble_point_pressure_2d = np.tile(
         bubble_point_pressure_values[:, np.newaxis], (1, n_t)
     ).astype(dtype, copy=False)
 
-    # Resolve reference densities: pvt takes precedence over DENSITY record
+    # Resolve reference densities: pvt takes precedence over `DENSITY` record
     stock_tank_oil_density: Number | None = None
     stock_tank_gas_density: Number | None = None
     if density_record is not None:
@@ -645,6 +638,12 @@ def build_oil_data_from_pvto(
         solution_gas_to_oil_ratios=typing.cast(FloatArray[OneDimension], solution_gor_values),
         formation_volume_factor_table=typing.cast(FloatArray[TwoDimensions], oil_fvf_2d),
         viscosity_table=typing.cast(FloatArray[TwoDimensions], oil_viscosity_2d),
+        undersaturated_formation_volume_factor_table=typing.cast(
+            FloatArray[ThreeDimensions], undersaturated_fvf_3d
+        ),
+        undersaturated_viscosity_table=typing.cast(
+            FloatArray[ThreeDimensions], undersaturated_viscosity_3d
+        ),
         solution_gor_table=typing.cast(FloatArray[TwoDimensions], solution_gor_2d),
         density_table=typing.cast(FloatArray[TwoDimensions], oil_density_2d)
         if oil_density_2d is not None

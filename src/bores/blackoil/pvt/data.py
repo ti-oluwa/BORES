@@ -232,20 +232,24 @@ class PVTData(StoreSerializable):
     for the water phase; not exposed as a direct query method on `PVTTable`.
     """
 
-    # Undersaturated wet-gas tables (3-D over the Rv axis)
+    # Undersaturated live-phase tables: 3-D over the Rs axis (oil) or the Rv axis (wet gas)
     undersaturated_formation_volume_factor_table: NumberArray[ThreeDimensions] | None = None
     """
-    FVF of undersaturated gas B(P, T, Rv), shape `(n_p, n_t, n_rv)`; requires
-    `vaporized_oil_ratios`. Gas / condensate phase only. Units as `formation_volume_factor_table`
-    (ft³/SCF in FIELD). The 2-D `formation_volume_factor_table` is the FVF of saturated gas
-    (on the dew curve).
+    FVF of undersaturated oil B(P, T, Rs) or wet gas B(P, T, Rv), shape `(n_p, n_t, n_axis)`.
+    The third axis is `solution_gas_to_oil_ratios` (oil) or `vaporized_oil_ratios` (gas). Units as
+    `formation_volume_factor_table`. The 2-D `formation_volume_factor_table` is the FVF of
+    saturated fluid (on the bubble / dew curve).
+
+    For oil, slice `k` is the undersaturated branch at the `k`-th Rs node on the common pressure
+    axis; oil with an Rs between two nodes blends the two bounding branches linearly in Rs at the
+    same pressure, as Eclipse does.
     """
 
     undersaturated_viscosity_table: NumberArray[ThreeDimensions] | None = None
     """
-    Viscosity of undersaturated gas μ(P, T, Rv), shape `(n_p, n_t, n_rv)`; requires
-    `vaporized_oil_ratios`. Gas / condensate phase only. Units as `viscosity_table`.
-    The 2-D `viscosity_table` is the viscosity of saturated gas (on the dew curve).
+    Viscosity of undersaturated oil μ(P, T, Rs) or wet gas μ(P, T, Rv); same shape and axes as
+    `undersaturated_formation_volume_factor_table`. Units as `viscosity_table`. The 2-D
+    `viscosity_table` is the viscosity of saturated fluid (on the bubble / dew curve).
     """
 
     dtype: npt.DTypeLike = None

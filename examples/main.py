@@ -28,7 +28,7 @@ case = SimulationCase.from_deck(df, tubing_performance=wellbore, temperature=200
 pvt = case.model.fluid.pvt
 oil_table = pvt.region(1).tables.oil
 assert oil_table is not None, "`oil_table` should not be None"
-print(oil_table.viscosity([4700, 200, 3456, 10000, 4000], 200, solution_gor=800))
+print(oil_table.viscosity([4700, 200, 3456, 10000, 4000], 200, solution_gor=1800))
 
 # Wells and schedule
 wells = case.model.wells
@@ -37,7 +37,7 @@ print(f"wells: {list(wells.names) if wells else []}")
 # for item in case.schedule:
 #     print(item, "\n")
 
-# print(f"{len(case.schedule)} scheduled item(s)")
+print(f"{len(case.schedule)} scheduled item(s)")
 
 # Plot the grid
 grid = case.model.reservoir.grid

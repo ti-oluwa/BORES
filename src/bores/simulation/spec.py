@@ -67,7 +67,7 @@ class RunSpec:
     """
 
     gravity_enabled: bool = True
-    """Whether to disable structural dip effects in reservoir modeling/simulation."""
+    """Whether to disable structural dip effects in reservoir simulation."""
 
     miscibility: MiscibilityModel = "immiscible"
     """Miscibility model: 'immiscible', 'todd-longstaff'"""
