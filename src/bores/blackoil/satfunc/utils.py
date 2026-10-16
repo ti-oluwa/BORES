@@ -416,12 +416,12 @@ def compute_killough_scanning_curve(
     )
     if is_scalar:
         return compute_killough_scanning_curve_scalar(
-            saturation=float(saturation),  # type: ignore[arg-type]
-            drainage_curve_value=float(drainage_curve_value),  # type: ignore[arg-type]
-            imbibition_curve_value=float(imbibition_curve_value),  # type: ignore[arg-type]
-            reversal_saturation=float(reversal_saturation),  # type: ignore[arg-type]
-            maximum_historical_saturation=float(maximum_historical_saturation),  # type: ignore[arg-type]
-            is_imbibition=float(is_imbibition),  # type: ignore[arg-type]
+            saturation=saturation,  # type: ignore[arg-type]
+            drainage_curve_value=drainage_curve_value,  # type: ignore[arg-type]
+            imbibition_curve_value=imbibition_curve_value,  # type: ignore[arg-type]
+            reversal_saturation=reversal_saturation,  # type: ignore[arg-type]
+            maximum_historical_saturation=maximum_historical_saturation,  # type: ignore[arg-type]
+            is_imbibition=is_imbibition,  # type: ignore[arg-type]
             scanning_exponent=scanning_exponent,
             numerical_epsilon=numerical_epsilon,
         )
@@ -632,14 +632,14 @@ def compute_killough_scanning_curve_derivative(
     )
     if is_scalar:
         return compute_killough_scanning_curve_derivative_scalar(
-            saturation=float(saturation),  # type: ignore[arg-type]
-            drainage_curve_value=float(drainage_curve_value),  # type: ignore[arg-type]
-            imbibition_curve_value=float(imbibition_curve_value),  # type: ignore[arg-type]
-            drainage_curve_derivative=float(drainage_curve_derivative),  # type: ignore[arg-type]
-            imbibition_curve_derivative=float(imbibition_curve_derivative),  # type: ignore[arg-type]
-            reversal_saturation=float(reversal_saturation),  # type: ignore[arg-type]
-            maximum_historical_saturation=float(maximum_historical_saturation),  # type: ignore[arg-type]
-            is_imbibition=float(is_imbibition),  # type: ignore[arg-type]
+            saturation=saturation,  # type: ignore[arg-type]
+            drainage_curve_value=drainage_curve_value,  # type: ignore[arg-type]
+            imbibition_curve_value=imbibition_curve_value,  # type: ignore[arg-type]
+            drainage_curve_derivative=drainage_curve_derivative,  # type: ignore[arg-type]
+            imbibition_curve_derivative=imbibition_curve_derivative,  # type: ignore[arg-type]
+            reversal_saturation=reversal_saturation,  # type: ignore[arg-type]
+            maximum_historical_saturation=maximum_historical_saturation,  # type: ignore[arg-type]
+            is_imbibition=is_imbibition,  # type: ignore[arg-type]
             scanning_exponent=scanning_exponent,
             numerical_epsilon=numerical_epsilon,
         )
