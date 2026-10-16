@@ -127,23 +127,23 @@ def clamp_relperm_derivative(
 
     When `min_value` is `None` the derivative is returned unchanged.
 
-    The derivative of `max(kr, min_value)` w.row.t. any variable is:
+    `clamp_relperm` returns `sqrt(kr**2 + min_value**2)`, so by the chain rule its
+    derivative w.r.t. any variable is::
 
-    - `dkr / d(var)`  when `kr > min_value`  (active region)
-    - `kr / np.sqrt(kr**2 + min_value**2)`  when `kr <= min_value` (min_value / flat region)
+        dkr * kr / sqrt(kr**2 + min_value**2)
+
+    This tends to `dkr` where `kr >> min_value` and to zero where `kr` is at or below
+    the floor, matching the floored kr value exactly.
 
     :param dkr: Derivative of the raw (pre-min_value) kr w.row.t. some variable.
     :param kr_raw: Raw (pre-min_value) kr value(s), used to identify min_value cells.
     :param min_value: Resolved min_value/minimum value or `None`.
-    :return: Derivative with min_value cells zeroed out.
+    :return: Derivative of the floored kr.
     """
     if min_value is None:
         return dkr
-    return np.where(  # type: ignore[return-value]
-        kr_raw > min_value,
-        dkr,
-        kr_raw / np.sqrt(kr_raw**2 + min_value**2),  # type: ignore[operator]
-    ).astype(dkr.dtype)  # type: ignore[attr-defined]
+    floored_derivative = dkr * kr_raw / np.sqrt(kr_raw**2 + min_value**2)  # type: ignore[operator]
+    return floored_derivative.astype(dkr.dtype)  # type: ignore[attr-defined, return-value]
 
 
 @attrs.frozen
@@ -1343,11 +1343,23 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
                         "krog column. `SOF3` (and fallback `SOF2`) not found in the `DeckFile`."
                     )
 
-                # Invert So -> Sg: Sg = 1 - swc - So
-                # Without swc available here, use Sg = 1 - So as an approximation.
-                # Callers that know swc should build the table manually or pass connate
-                # water saturation as a column offset.
-                sg_from_so = (dtype.type(1) - so)[::-1]  # type: ignore[attr-defined]
+                # Invert So -> Sg: Sg = 1 - Swco - So. The `krog` column of `SOF3` is the
+                # gas-oil oil relative permeability at connate water, and the first `SWFN`
+                # row is the connate water saturation (swco).
+                swfn_rows = get_rows("SWFN")
+                if swfn_rows:
+                    connate_water_saturation = min(float(row["sw"]) for row in swfn_rows)
+                else:
+                    warnings.warn(
+                        "`SWFN` not found; assuming zero connate water saturation when "
+                        "converting the oil saturation axis to gas saturation. The gas-oil "
+                        "`krog` curve is shifted if the connate water is not zero.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                    connate_water_saturation = 0.0
+                swco = dtype.type(connate_water_saturation)  # type: ignore[attr-defined]
+                sg_from_so = (dtype.type(1) - swco - so)[::-1]  # type: ignore[attr-defined]
                 krog_on_sg = krog[::-1]
 
                 krog_interp = np.interp(sg, sg_from_so, krog_on_sg).astype(dtype, copy=False)
@@ -1782,8 +1794,10 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
         # Mixing rule partial derivatives
         mixing_rule = typing.cast(MixingRule | None, self.mixing_rule)
         if mixing_rule is None:
+            # Strict on one side so a tie (e.g. both zero below the residual oil) is
+            # not double counted
             dkro_dkro_w = np.where(kro_w <= kro_g, 1.0, 0.0)
-            dkro_dkro_g = np.where(kro_g <= kro_w, 1.0, 0.0)
+            dkro_dkro_g = np.where(kro_g < kro_w, 1.0, 0.0)
             dkro_dkrw = zeros.copy()
             dkro_dkrg = zeros.copy()
             dkro_dsw_explicit = zeros.copy()
@@ -1920,7 +1934,7 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
         instead.
 
         :param deck_file: Parsed `DeckFile` containing `PROPS`-section keywords.
-        :param region_index: 1-based saturation region number (default region = 1).
+        :param satnum: 1-based saturation region number (default region = 1).
             Region index is given as `region_index = max(satnum - 1, 0)`.
         :param mixing_rule: Three-phase oil mixing rule (name or callable).
             `None` falls back to `min(kro_w, kro_g)`.

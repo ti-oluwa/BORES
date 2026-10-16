@@ -367,7 +367,9 @@ def compute_killough_scanning_curve_array(
         imbibition_flag_array,
     )
 
-    result = np.empty_like(saturation_array)
+    # Curve values are floating point by nature, so the output follows their dtype
+    # rather than the saturation dtype (which would truncate if it were an integer array).
+    result = np.empty_like(drainage_value_array)
     for flat_idx in range(saturation_array.size):
         result.flat[flat_idx] = compute_killough_scanning_curve_scalar(
             saturation=saturation_array.flat[flat_idx],
@@ -575,7 +577,9 @@ def compute_killough_scanning_curve_derivative_array(
         imbibition_flag_array,
     )
 
-    result = np.empty_like(saturation_array)
+    # Derivatives are floating point by nature, so the output follows their dtype
+    # rather than the saturation dtype (which would truncate if it were an integer array).
+    result = np.empty_like(drainage_derivative_array)
     for flat_idx in range(saturation_array.size):
         result.flat[flat_idx] = compute_killough_scanning_curve_derivative_scalar(
             saturation=saturation_array.flat[flat_idx],
