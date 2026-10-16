@@ -38,60 +38,60 @@ class MobilityCache(typing.NamedTuple):
     """
 
     water_mobility: CellArray
-    """Water-phase mobility, lambda_w = k_rw / mu_w."""
+    """Water-phase mobility, λw = krw / μw."""
     oil_mobility: CellArray
-    """Oil-phase mobility, lambda_o = k_ro / mu_o."""
+    """Oil-phase mobility, λo = kro / μo."""
     gas_mobility: CellArray
-    """Gas-phase mobility, lambda_g = k_rg / mu_g."""
+    """Gas-phase mobility, λg = krg / μg."""
     total_mobility: CellArray
-    """Total mobility, lambda_T = lambda_w + lambda_o + lambda_g."""
+    """Total mobility, λT = λw + λo + λg."""
 
     water_fractional_flow: CellArray
-    """Water fractional flow, f_w = lambda_w / lambda_T."""
+    """Water fractional flow, fw = λw / λT."""
     oil_fractional_flow: CellArray
-    """Oil fractional flow, f_o = lambda_o / lambda_T."""
+    """Oil fractional flow, fo = λo / λT."""
     gas_fractional_flow: CellArray
-    """Gas fractional flow, f_g = lambda_g / lambda_T."""
+    """Gas fractional flow, fg = λg / λT."""
 
     dʎw_dP: CellArray
-    """Pressure derivative of water mobility, d(lambda_w)/dP."""
+    """Pressure derivative of water mobility, dλw/dP."""
     dʎo_dP: CellArray
-    """Pressure derivative of oil mobility, d(lambda_o)/dP."""
+    """Pressure derivative of oil mobility, dλo/dP."""
     dʎg_dP: CellArray
-    """Pressure derivative of gas mobility, d(lambda_g)/dP."""
+    """Pressure derivative of gas mobility, dλg/dP."""
     dʎT_dP: CellArray
-    """Pressure derivative of total mobility, d(lambda_T)/dP."""
+    """Pressure derivative of total mobility, dλT/dP."""
 
     # d(phase mobility)/d(water saturation)
     dʎw_dsw: CellArray
-    """Derivative of water mobility w.r.t. water saturation, d(lambda_w)/dS_w."""
+    """Derivative of water mobility w.r.t. water saturation, dλw/dSw."""
     dʎo_dsw: CellArray
-    """Derivative of oil mobility w.r.t. water saturation, d(lambda_o)/dS_w."""
+    """Derivative of oil mobility w.r.t. water saturation, dλo/dSw."""
     dʎg_dsw: CellArray
-    """Derivative of gas mobility w.r.t. water saturation, d(lambda_g)/dS_w."""
+    """Derivative of gas mobility w.r.t. water saturation, dλg/dSw."""
 
     # d(phase mobility)/d(oil saturation)
     dʎw_dso: CellArray
-    """Derivative of water mobility w.r.t. oil saturation, d(lambda_w)/dS_o."""
+    """Derivative of water mobility w.r.t. oil saturation, dλw/dSo."""
     dʎo_dso: CellArray
-    """Derivative of oil mobility w.r.t. oil saturation, d(lambda_o)/dS_o."""
+    """Derivative of oil mobility w.r.t. oil saturation, dλo/dSo."""
     dʎg_dso: CellArray
-    """Derivative of gas mobility w.r.t. oil saturation, d(lambda_g)/dS_o."""
+    """Derivative of gas mobility w.r.t. oil saturation, dλg/dSo."""
 
     # d(phase mobility)/d(gas saturation)
     dʎw_dsg: CellArray
-    """Derivative of water mobility w.r.t. gas saturation, d(lambda_w)/dS_g."""
+    """Derivative of water mobility w.r.t. gas saturation, dλw/dSg."""
     dʎo_dsg: CellArray
-    """Derivative of oil mobility w.r.t. gas saturation, d(lambda_o)/dS_g."""
+    """Derivative of oil mobility w.r.t. gas saturation, dλo/dSg."""
     dʎg_dsg: CellArray
-    """Derivative of gas mobility w.r.t. gas saturation, d(lambda_g)/dS_g."""
+    """Derivative of gas mobility w.r.t. gas saturation, dλg/dSg."""
 
     dʎT_dsw: CellArray
-    """Derivative of total mobility w.r.t. water saturation, d(lambda_T)/dS_w."""
+    """Derivative of total mobility w.r.t. water saturation, dλT/dSw."""
     dʎT_dso: CellArray
-    """Derivative of total mobility w.r.t. oil saturation, d(lambda_T)/dS_o."""
+    """Derivative of total mobility w.r.t. oil saturation, dλT/dSo."""
     dʎT_dsg: CellArray
-    """Derivative of total mobility w.r.t. gas saturation, d(lambda_T)/dS_g."""
+    """Derivative of total mobility w.r.t. gas saturation, dλT/dSg."""
 
 
 CACHE_FIELDS: tuple[str, ...] = MobilityCache._fields

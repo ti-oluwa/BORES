@@ -82,7 +82,7 @@ class WellIndex:
         ]
         if mismatched:
             raise ValidationError(
-                f"All `perforations` must share this WellIndex's unit_system "
+                f"All `perforations` must share this `WellIndex`'s `unit_system` "
                 f"({self.unit_system.value}); found {mismatched[0].unit_system.value}."
             )
 

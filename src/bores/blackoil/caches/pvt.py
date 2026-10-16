@@ -38,56 +38,56 @@ class PVTCache(typing.NamedTuple):
 
     # Formation volume factors
     oil_formation_volume_factor: CellArray
-    """Oil formation volume factor, $B_o$."""
+    """Oil formation volume factor, Bo."""
     dbo_dp: CellArray
-    """Pressure derivative of oil formation volume factor, $dB_o/dP$."""
+    """Pressure derivative of oil formation volume factor, dBo/dP."""
     water_formation_volume_factor: CellArray
-    """Water formation volume factor, $B_w$."""
+    """Water formation volume factor, Bw."""
     dbw_dp: CellArray
-    """Pressure derivative of water formation volume factor, $dB_w/dP$."""
+    """Pressure derivative of water formation volume factor, dBw/dP."""
     gas_formation_volume_factor: CellArray
-    """Gas formation volume factor, $B_g$."""
+    """Gas formation volume factor, Bg."""
     dbg_dp: CellArray
-    """Pressure derivative of gas formation volume factor, $dB_g/dP$."""
+    """Pressure derivative of gas formation volume factor, dBg/dP."""
 
     # Viscosities
     oil_viscosity: CellArray
-    r"""Oil viscosity, $\mu_o$."""
+    """Oil viscosity, μo."""
     dμo_dp: CellArray
-    r"""Pressure derivative of oil viscosity, $d\mu_o/dP$."""
+    """Pressure derivative of oil viscosity, dμo/dP."""
     water_viscosity: CellArray
-    r"""Water viscosity, $\mu_w$."""
+    """Water viscosity, μw."""
     dμw_dp: CellArray
-    r"""Pressure derivative of water viscosity, $d\mu_w/dP$."""
+    """Pressure derivative of water viscosity, dμw/dP."""
     gas_viscosity: CellArray
-    r"""Gas viscosity, $\mu_g$."""
+    """Gas viscosity, μg."""
     dμg_dp: CellArray
-    r"""Pressure derivative of gas viscosity, $d\mu_g/dP$."""
+    """Pressure derivative of gas viscosity, dμg/dP."""
 
     # Densities
     oil_density: CellArray
-    r"""Oil density, $\rho_o$."""
+    """Oil density, ρo."""
     dρo_dp: CellArray
-    r"""Pressure derivative of oil density, $d\rho_o/dP$."""
+    """Pressure derivative of oil density, dρo/dP."""
     water_density: CellArray
-    r"""Water density, $\rho_w$."""
+    """Water density, ρw."""
     dρw_dp: CellArray
-    r"""Pressure derivative of water density, $d\rho_w/dP$."""
+    """Pressure derivative of water density, dρw/dP."""
     gas_density: CellArray
-    r"""Gas density, $\rho_g$."""
+    """Gas density, ρg."""
     dρg_dp: CellArray
-    r"""Pressure derivative of gas density, $d\rho_g/dP$."""
+    """Pressure derivative of gas density, dρg/dP."""
 
     # Compressibilities (value only - c = -(1/B)(dB/dP) for oil/water,
     # 1/P - (1/z)(dz/dP) for gas; already what dB/dP-based Jacobian entries
     # would derive from, kept here mainly for output/diagnostics and timestep
     # heuristics rather than as a required Jacobian input)
     oil_compressibility: CellArray
-    """Oil compressibility, $c_o$."""
+    """Oil compressibility, co."""
     water_compressibility: CellArray
-    """Water compressibility, $c_w$."""
+    """Water compressibility, cw."""
     gas_compressibility: CellArray
-    """Gas compressibility, $c_g$."""
+    """Gas compressibility, cg."""
 
     # Dissolved/vaporized composition
     solution_gas_oil_ratio: CellArray
@@ -100,7 +100,7 @@ class PVTCache(typing.NamedTuple):
     """
     drs_dp: CellArray
     """
-    Pressure derivative of solution gas-oil ratio, $dR_s/dP$. `dRs/dP` along
+    Pressure derivative of solution gas-oil ratio, dRs/dP. `dRs/dP` along
     the bubble curve. Only meaningful for saturated cells - `Rs` isn't a
     function of `P` alone in the undersaturated regime (it's the independent
     primary variable there), so this is `NaN` where `is_saturated[i] ==
@@ -108,23 +108,23 @@ class PVTCache(typing.NamedTuple):
     """
     vaporized_oil_gas_ratio: CellArray
     """
-    Vaporized oil-gas ratio, $R_v$. The effective `Rv` of each cell's gas
+    Vaporized oil-gas ratio, Rv. The effective `Rv` of each cell's gas
     (`PVTTable.vaporized_oil_gas_ratio`): `Rv_sat(P, T)` on the dew curve when
     no `vaporized_oil_ratio` state was passed to `compute_pvt_cache`; otherwise
     `min(Rv, Rv_sat(P, T))`, the cell's own `Rv` while its gas is undersaturated.
     `NaN` for dry-gas models with no `Rv` table.
     """
     drv_dp: CellArray
-    """Pressure derivative of vaporized oil-gas ratio, $dR_v/dP$."""
+    """Pressure derivative of vaporized oil-gas ratio, dRv/dP."""
     water_gas_solubility_ratio: CellArray
     """`Rsw` - gas solubility in water. `NaN` unless the deck models it."""
     drsw_dp: CellArray
-    """Pressure derivative of water-gas solubility ratio, $dR_{sw}/dP$."""
+    """Pressure derivative of water-gas solubility ratio, dRsw/dP."""
 
     # Bubble/dew point
     bubble_point_pressure: CellArray
     """
-    Bubble-point pressure, $P_b$. `Pb`, evaluated at each cell's current `Rs`
+    Bubble-point pressure, Pb. `Pb`, evaluated at each cell's current `Rs`
     (`solution_gor=`, not the reported `solution_gas_oil_ratio` output - see
     `compute_pvt_cache`). For a saturated cell this equals the cell's own
     pressure; for an undersaturated one it's below it.
@@ -132,21 +132,21 @@ class PVTCache(typing.NamedTuple):
     dpb_drs: CellArray
     """
     Derivative of bubble-point pressure w.r.t. solution gas-oil ratio,
-    $dP_b/dR_s$. `dPb/dRs`. Only defined for a 2-D (`Rs`-dependent)
+    dPb/dRs. `dPb/dRs`. Only defined for a 2-D (`Rs`-dependent)
     bubble-point table - `NaN` for a 1-D `Pb(T)` table or non-oil cells.
     """
     dew_point_pressure: CellArray
     """
-    Dew-point pressure, $P_{dew}$, of each cell's gas: `Pdew(Rv, T)` for a wet-gas
+    Dew-point pressure, Pdew, of each cell's gas: `Pdew(Rv, T)` for a wet-gas
     table (at the cell's `Rv`, or at `Rv_sat(P, T)`, i.e. `Pdew = P`, when no
     `vaporized_oil_ratio` was passed), `Pdew(T)` for a 1-D table. `NaN` for dry-gas models.
     """
 
     # Gas compressibility factor
     gas_compressibility_factor: CellArray
-    """Gas compressibility factor, $z$."""
+    """Gas compressibility factor, z."""
     dz_dp: CellArray
-    """Pressure derivative of gas compressibility factor, $dz/dP$."""
+    """Pressure derivative of gas compressibility factor, dz/dP."""
 
     # Regime / bookkeeping
     is_saturated: BooleanCellArray
@@ -260,52 +260,58 @@ def compute_pvt_cache(
 
         p = pressure[mask]
         t = temperature[mask]
-        rs_estimate = solution_gas_oil_ratio[mask]
+        solution_gor_estimate = solution_gas_oil_ratio[mask]
         s = salinity[mask] if salinity is not None else None
 
         oil = tables.oil
         if oil is not None:
-            is_saturated = oil.is_saturated(p, t, solution_gor=rs_estimate)
+            is_saturated = oil.is_saturated(p, t, solution_gor=solution_gor_estimate)
             if is_saturated is not None:
                 cache.is_saturated[mask] = np.atleast_1d(is_saturated)
 
-            bubble_point = oil.bubble_point_pressure(temperature=t, solution_gor=rs_estimate)
+            bubble_point = oil.bubble_point_pressure(
+                temperature=t, solution_gor=solution_gor_estimate
+            )
 
             cache.oil_formation_volume_factor[mask] = oil.formation_volume_factor(  # type: ignore[arg-type]
-                p, t, solution_gor=rs_estimate, bubble_point_pressure=bubble_point
+                p, t, solution_gor=solution_gor_estimate, bubble_point_pressure=bubble_point
             )
             cache.dbo_dp[mask] = oil.db_dp(  # type: ignore[arg-type]
-                p, t, solution_gor=rs_estimate, bubble_point_pressure=bubble_point
+                p, t, solution_gor=solution_gor_estimate, bubble_point_pressure=bubble_point
             )
             cache.oil_viscosity[mask] = oil.viscosity(  # type: ignore[arg-type]
-                p, t, solution_gor=rs_estimate, bubble_point_pressure=bubble_point
+                p, t, solution_gor=solution_gor_estimate, bubble_point_pressure=bubble_point
             )
             cache.dμo_dp[mask] = oil.dμ_dp(  # type: ignore[arg-type]
-                p, t, solution_gor=rs_estimate, bubble_point_pressure=bubble_point
+                p, t, solution_gor=solution_gor_estimate, bubble_point_pressure=bubble_point
             )
             cache.oil_density[mask] = oil.density(  # type: ignore[arg-type]
-                p, t, solution_gor=rs_estimate, bubble_point_pressure=bubble_point
+                p, t, solution_gor=solution_gor_estimate, bubble_point_pressure=bubble_point
             )
             cache.dρo_dp[mask] = oil.dρ_dp(  # type: ignore[arg-type]
-                p, t, solution_gor=rs_estimate, bubble_point_pressure=bubble_point
+                p, t, solution_gor=solution_gor_estimate, bubble_point_pressure=bubble_point
             )
 
-            compressibility = oil.compressibility(p, t)
+            compressibility = oil.compressibility(
+                p, t, solution_gor=solution_gor_estimate, bubble_point_pressure=bubble_point
+            )
             if compressibility is not None:
                 cache.oil_compressibility[mask] = compressibility
 
             solution_gor = oil.solution_gas_to_oil_ratio(
-                p, t, solution_gor=rs_estimate, bubble_point_pressure=bubble_point
+                p, t, solution_gor=solution_gor_estimate, bubble_point_pressure=bubble_point
             )
             if solution_gor is not None:
                 cache.solution_gas_oil_ratio[mask] = solution_gor
-            solution_gor_dp = oil.drs_dp(p, t)
+            solution_gor_dp = oil.drs_dp(
+                p, t, solution_gor=solution_gor_estimate, bubble_point_pressure=bubble_point
+            )
             if solution_gor_dp is not None:
                 cache.drs_dp[mask] = solution_gor_dp
 
             if bubble_point is not None:
                 cache.bubble_point_pressure[mask] = bubble_point
-            bubble_point_drs = oil.dpb_drs(rs_estimate, t)
+            bubble_point_drs = oil.dpb_drs(solution_gor_estimate, t)
             if bubble_point_drs is not None:
                 cache.dpb_drs[mask] = bubble_point_drs
 
