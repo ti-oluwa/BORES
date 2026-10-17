@@ -712,11 +712,21 @@ def stone_I_rule(
     gas_saturation: NumberOrArray[NDimension],
 ) -> NumberOrArray[NDimension]:
     """
-    Stone I rule (1970) for 3-phase oil relative permeability.
-    kro = (kro_w * kro_g) / (kro_w + kro_g - kro_w * kro_g)
+    Normalized two-phase interpolation rule for 3-phase oil relative permeability.
+
+    With `a = kro_w / krocw` and `b = kro_g / krocw` (`krocw = kr_max`):
+
+        kro = krocw * (a * b) / (a + b - a * b)
+
+    This is not Stone's saturation-based first model. It only uses the two
+    two-phase oil relative permeabilities, and reduces to `kro_w` when `kro_g = krocw`
+    (no gas) and to `kro_g` when `kro_w = krocw` (connate water), for any `krocw`.
     """
-    denom = np.maximum(((kro_w + kro_g) - (kro_w * kro_g)), 1e-12)
-    result = (kro_w * kro_g) / denom
+    krocw = np.maximum(kr_max, 1e-12)
+    a = kro_w / krocw
+    b = kro_g / krocw
+    denom = np.maximum((a + b) - (a * b), 1e-12)
+    result = krocw * (a * b) / denom
     # Return 0 if both kro_w and kro_g are zero
     return np.where((kro_w <= 0.0) & (kro_g <= 0.0), 0.0, result)  # type: ignore[return-value]
 
@@ -742,23 +752,26 @@ def _(
     NumberOrArray[NDimension],
 ]:
     """
-    Analytical derivatives for Stone I.
+    Analytical derivatives for the normalized interpolation rule (see `stone_I_rule`).
 
-    Let D = kro_w + kro_g - kro_w * kro_g  (clamped >= ε)
-        N = kro_w * kro_g
+    With a = kro_w / krocw, b = kro_g / krocw, kro = krocw * f(a, b) and
+    D = a + b - a * b (clamped >= ε):
 
-    ∂kro/∂kro_w = (kro_g * D - N * (1 - kro_g)) / D²
-                = kro_g² / D²           (after simplification)
-    ∂kro/∂kro_g = kro_w² / D²          (by symmetry)
-    No dependence on krw, krg, or explicit saturations.
+    ∂kro/∂kro_w = f_a = b² / D²
+    ∂kro/∂kro_g = f_b = a² / D²
+
+    The `krocw` factors cancel. No dependence on krw, krg, or explicit saturations.
     """
     eps = 1e-12
+    krocw = np.maximum(np.asarray(kr_max, dtype=np.float64), eps)
     kw = np.asarray(kro_w, dtype=np.float64)
     kg = np.asarray(kro_g, dtype=np.float64)
-    D = np.maximum(kw + kg - kw * kg, eps)
+    a = kw / krocw
+    b = kg / krocw
+    D = np.maximum(a + b - a * b, eps)
     both_zero = (kw <= 0.0) & (kg <= 0.0)
-    dkro_dkro_w = np.where(both_zero, 0.0, kg**2 / D**2)
-    dkro_dkro_g = np.where(both_zero, 0.0, kw**2 / D**2)
+    dkro_dkro_w = np.where(both_zero, 0.0, b**2 / D**2)
+    dkro_dkro_g = np.where(both_zero, 0.0, a**2 / D**2)
     z = get_zeros_like_kro(kro_w)
     return (dkro_dkro_w, dkro_dkro_g, z, z, z, z, z)  # type: ignore[return-value]
 
@@ -801,9 +814,7 @@ def stone_II_rule(
     Science Publishers, London.
     """
     krocw = np.maximum(kr_max, 1e-12)
-    result = (
-        (kro_w / krocw + krw) * (kro_g / krocw + krg) - krw - krg
-    )  # Normalization should occur in caller
+    result = krocw * ((kro_w / krocw + krw) * (kro_g / krocw + krg) - krw - krg)
     # Clamp negative values (can occur when both kro_w and kro_g are small)
     result = np.maximum(result, 0.0)
     # Return zero if either two-phase oil relperm is zero (conservative)
