@@ -32,6 +32,7 @@ from bores.types import (
     Spacing,
     UnitSystem,
 )
+from bores.units import get_unit_system
 
 __all__ = [
     "SatFuncTables",
@@ -54,13 +55,19 @@ class SatFuncTables:
     capillary_pressure: CapillaryPressureTable | None = None
     """Capillary pressure table for the rock-fluid system, or `None` if not present."""
 
-    # Default to field, then let the capillary pressure table override it if available
-    unit_system: UnitSystem = attrs.field(default=UnitSystem.FIELD, init=False)
+    unit_system: UnitSystem = attrs.field(init=False)
+    """
+    Unit system of the tables. Taken from the capillary pressure table when there is one.
+    Otherwise (relative permeability is dimensionless) it is the unit system active in
+    the current `UnitSystemContext`.
+    """
 
     def __attrs_post_init__(self) -> None:
         unit_system = None
         if self.capillary_pressure is not None:
             unit_system = self.capillary_pressure.unit_system
+        if unit_system is None:
+            unit_system = get_unit_system()
         object.__setattr__(self, "unit_system", unit_system)
 
     def convert(
@@ -80,7 +87,10 @@ class SatFuncTables:
         :returns: New `SatFuncTables` in *target* units.
         """
         if self.capillary_pressure is None:
-            return self
+            # Nothing dimensional to rescale, but the declared unit system still changes
+            converted = attrs.evolve(self)
+            object.__setattr__(converted, "unit_system", target)
+            return converted
         return attrs.evolve(
             self,
             capillary_pressure=self.capillary_pressure.convert(target, table=table),

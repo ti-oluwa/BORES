@@ -4,9 +4,10 @@ import typing
 import warnings
 
 import attrs
-import numba
 import numpy as np
 import numpy.typing as npt
+from numba import types as nb_types
+from numba.extending import overload
 from scipy.interpolate import PchipInterpolator
 from typing_extensions import Self
 
@@ -90,8 +91,24 @@ def resolve_min_relperm(min_value: MinimumRelPerm) -> Number | None:
     return min_value
 
 
-# TODO: Add numba overload for the Number and NumberArray versions of this function
-@numba.njit(cache=True, inline="always")
+def _match_float_dtype(result: typing.Any, reference: typing.Any) -> typing.Any:
+    """
+    Cast `result` to the dtype of `reference` when that is a floating dtype.
+
+    A no-op for Python scalars and for integer `reference` arrays, whose floored result must
+    stay floating point.
+    """
+    dtype = getattr(reference, "dtype", None)
+    if dtype is None or not np.issubdtype(dtype, np.floating):
+        return result
+    return result.astype(dtype, copy=False)
+
+
+def _is_float_array(numba_type: typing.Any) -> bool:
+    """Whether a numba type is an array with a floating point dtype."""
+    return isinstance(numba_type, nb_types.Array) and isinstance(numba_type.dtype, nb_types.Float)
+
+
 def clamp_relperm(
     kr: NumberOrArray[NDimension],
     min_value: Number | None,
@@ -102,7 +119,10 @@ def clamp_relperm(
     Smoothly transitions from the raw `kr` values to the min_value value, avoiding
     non-differentiability and ensuring well-behaved derivatives for solvers.
 
-    When `min_value` is `None` the array is returned unchanged.
+    When `min_value` is `None` the input is returned unchanged.
+
+    Works on scalars and arrays, both from Python and from `numba.njit` code (see the
+    `overload` registered below, which provides the compiled implementations).
 
     :param kr: Relative permeability value(s).
     :param min_value: Resolved min_value/minimum value or `None`.
@@ -110,10 +130,28 @@ def clamp_relperm(
     """
     if min_value is None:
         return kr
-    return np.sqrt(kr**2 + min_value**2).astype(kr.dtype)  # type: ignore[return-value]
+    return _match_float_dtype(np.sqrt(kr**2 + min_value**2), kr)
 
 
-@numba.njit(cache=True, inline="always")
+@overload(clamp_relperm, inline="always")
+def _overload_clamp_relperm(kr, min_value):
+    """Compiled `clamp_relperm` for scalar and array `kr`, with `min_value` a number or `None`."""
+    if isinstance(min_value, nb_types.NoneType):
+        return lambda kr, min_value: kr
+
+    if _is_float_array(kr):
+
+        def impl(kr, min_value):
+            return np.sqrt(kr**2 + min_value**2).astype(kr.dtype)
+
+    else:
+        # Scalars, and integer arrays (the floored result must stay floating point)
+        def impl(kr, min_value):
+            return np.sqrt(kr**2 + min_value**2)
+
+    return impl
+
+
 def clamp_relperm_derivative(
     dkr: NumberOrArray[NDimension],
     kr_raw: NumberOrArray[NDimension],
@@ -143,7 +181,26 @@ def clamp_relperm_derivative(
     if min_value is None:
         return dkr
     floored_derivative = dkr * kr_raw / np.sqrt(kr_raw**2 + min_value**2)  # type: ignore[operator]
-    return floored_derivative.astype(dkr.dtype)  # type: ignore[attr-defined, return-value]
+    return _match_float_dtype(floored_derivative, dkr)
+
+
+@overload(clamp_relperm_derivative, inline="always")
+def _overload_clamp_relperm_derivative(dkr, kr_raw, min_value):
+    """Compiled `clamp_relperm_derivative` for scalar and array inputs."""
+    if isinstance(min_value, nb_types.NoneType):
+        return lambda dkr, kr_raw, min_value: dkr
+
+    if _is_float_array(dkr):
+
+        def impl(dkr, kr_raw, min_value):
+            return (dkr * kr_raw / np.sqrt(kr_raw**2 + min_value**2)).astype(dkr.dtype)
+
+    else:
+
+        def impl(dkr, kr_raw, min_value):
+            return dkr * kr_raw / np.sqrt(kr_raw**2 + min_value**2)
+
+    return impl
 
 
 @attrs.frozen
@@ -1508,6 +1565,60 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
         sg_max = float(gas_oil.reference_saturation[-1])
         return max(0.0, 1.0 - swco - sg_max)
 
+    @staticmethod
+    def _normalize_saturations(
+        water_saturation: NumberArray[NDimension],
+        oil_saturation: NumberArray[NDimension],
+        gas_saturation: NumberArray[NDimension],
+        saturation_epsilon: Number = 1e-6,
+    ) -> tuple[
+        NumberArray[NDimension],
+        NumberArray[NDimension],
+        NumberArray[NDimension],
+        NumberArray[NDimension] | None,
+    ]:
+        """
+        Rescale cells whose saturations do not sum to one beyond the supplied
+        saturation tolerance.
+
+        Shared by `evaluate` and `derivatives` so both are taken at the same point.
+
+        :param water_saturation: Water saturation array.
+        :param oil_saturation: Oil saturation array.
+        :param gas_saturation: Gas saturation array.
+        :param saturation_epsilon: Saturation-normalization tolerance.
+        :return: `(water_saturation, oil_saturation, gas_saturation, scale)`. `scale`
+            is the per-cell factor `1 / (Sw + So + Sg)` (`1` for cells that were not
+            rescaled), or `None` when nothing needed rescaling.
+        """
+        total_saturation = water_saturation + oil_saturation + gas_saturation
+        needs_norm = typing.cast(
+            NumberArray[NDimension],
+            (np.abs(total_saturation - 1.0) > saturation_epsilon) & (total_saturation > 0.0),
+        )
+        if not np.any(needs_norm):
+            return water_saturation, oil_saturation, gas_saturation, None
+
+        water_saturation = np.where(  # type: ignore
+            needs_norm, water_saturation / total_saturation, water_saturation
+        )
+        oil_saturation = np.where(needs_norm, oil_saturation / total_saturation, oil_saturation)  # type: ignore
+        gas_saturation = np.where(needs_norm, gas_saturation / total_saturation, gas_saturation)  # type: ignore
+        scale = np.where(
+            needs_norm,
+            1.0 / np.where(needs_norm, total_saturation, 1.0),
+            1.0,
+        )
+        return typing.cast(
+            tuple[
+                NumberArray[NDimension],
+                NumberArray[NDimension],
+                NumberArray[NDimension],
+                NumberArray[NDimension] | None,
+            ],
+            (water_saturation, oil_saturation, gas_saturation, scale),
+        )
+
     def evaluate(
         self,
         water_saturation: NumberOrArray[NDimension],
@@ -1552,12 +1663,12 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
                 f"Sg: {show_invalid_saturation(sg)}"
             )
 
-        total_saturation = sw + so + sg
-        needs_norm = (np.abs(total_saturation - 1.0) > 1e-6) & (total_saturation > 0.0)
-        if np.any(needs_norm):
-            sw = np.where(needs_norm, sw / total_saturation, sw)
-            so = np.where(needs_norm, so / total_saturation, so)
-            sg = np.where(needs_norm, sg / total_saturation, sg)
+        sw, so, sg, _ = self._normalize_saturations(
+            water_saturation=sw,
+            oil_saturation=so,
+            gas_saturation=sg,
+            saturation_epsilon=c.SATURATION_EPSILON,
+        )
 
         if self.oil_water_table.wetting_phase == FluidPhase.WATER:
             krw = self.oil_water_table.get_wetting_phase_relative_permeability(
@@ -1653,6 +1764,13 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
                          + (dkro/dkrg)   * (dkrg/d_Salpha)
                          + (dkro/d_Salpha)_explicit_in_mixing_rule
 
+        Saturations that do not sum to one are rescaled exactly as in `evaluate`. The solver
+        only uses differences of these partials along `Sw + So + Sg = const` (for example
+        `dkro_dsw - dkro_dso`), and along that direction the rescaling is a constant factor
+        `1 / (Sw + So + Sg)`. So the partials are taken at the normalised point and multiplied
+        by that factor, which makes those differences exact. Nothing changes when the
+        saturations already sum to one.
+
         All returned values are cast to `self.dtype`.
 
         :param water_saturation: Water saturation (fraction, 0 to 1).
@@ -1670,6 +1788,12 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
         so = np.atleast_1d(oil_saturation)
         sg = np.atleast_1d(gas_saturation)
         sw, so, sg = np.broadcast_arrays(sw, so, sg)
+        sw, so, sg, normalization_scale = self._normalize_saturations(
+            water_saturation=sw,
+            oil_saturation=so,
+            gas_saturation=sg,
+            saturation_epsilon=c.SATURATION_EPSILON,
+        )
         zeros = np.zeros(sw.shape, dtype=dtype)
 
         oil_water_table = self.oil_water_table
@@ -1858,6 +1982,11 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
             dkro_dsg,
             dkrg_dsg.astype(dtype, copy=False),  # type: ignore[attr-defined]
         )
+
+        if normalization_scale is not None:
+            results = tuple(
+                (row * normalization_scale).astype(dtype, copy=False) for row in results
+            )
 
         if is_scalar:
             results = tuple(dtype.type(row.item()) for row in results)  # type: ignore
