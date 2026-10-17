@@ -284,41 +284,149 @@ def check_gas_oil_sweep_axis_is_gas_saturation(
     return (wetting_phase == FluidPhase.GAS) == (reference_phase == "wetting")
 
 
-def _validate_tabular_source_orientation(
+def _resolve_system_orientation(
     *,
     system: str,
-    source_table: TwoPhaseRelPermTable,
-    requested_wetting_phase: FluidPhase,
-    source_sweep_axis_is_primary: bool,
-    requested_sweep_axis_is_primary: bool,
-) -> None:
+    source_table: TwoPhaseRelPermTable | TwoPhaseCapillaryPressureTable | None,
+    default_wetting_phase: FluidPhase,
+    default_reference_phase: typing.Literal["wetting", "non_wetting"],
+    wetting_phase: FluidPhase | str | None,
+    reference_phase: typing.Literal["wetting", "non_wetting"] | None,
+) -> tuple[FluidPhase, typing.Literal["wetting", "non_wetting"]]:
     """
-    Check that a requested orientation matches that of a tabular source table.
+    Resolve the wetting phase and reference phase of one two-phase system.
 
-    PCHIP resampling reuses the source saturation axis and kr arrays as they
-    are, so it cannot re-orient a table. A mismatch would not fail on its own,
-    it would silently relabel the data (e.g. an So-indexed table treated as Sg-indexed).
+    PCHIP resampling reuses the source saturation axis and value arrays, so it
+    cannot re-orient a tabular source. A mismatch would not fail on its own, it
+    would silently relabel the data (e.g. an So-indexed table treated as Sg-indexed).
+    So for a tabular source an omitted argument takes the source's value, and an
+    explicit argument that disagrees with the source is rejected.
+
+    For an analytical source (`source_table` is `None`) an omitted wetting phase
+    takes `default_wetting_phase` and an omitted reference phase takes
+    `default_reference_phase`.
 
     :param system: `"oil-water"` or `"gas-oil"`, for the error message.
-    :param source_table: Two-phase sub-table of the tabular source.
-    :param requested_wetting_phase: Wetting phase requested for the output table.
-    :param source_sweep_axis_is_primary: Whether the source table's axis is the
-        primary sweep saturation (Sw for oil-water, Sg for gas-oil).
-    :param requested_sweep_axis_is_primary: Same, for the requested output table.
-    :raises ValidationError: When the requested orientation differs from the source's.
+    :param source_table: Two-phase sub-table of a tabular source, or `None` for an
+        analytical source.
+    :param default_wetting_phase: Wetting phase the source reports for this system.
+    :param default_reference_phase: Reference phase used for an analytical source
+        when `reference_phase` is omitted.
+    :param wetting_phase: Requested wetting phase, or `None` to use the default.
+    :param reference_phase: Requested reference phase, or `None` to use the default.
+    :return: Two-tuple of `(wetting_phase, reference_phase)`.
+    :raises ValidationError: When a tabular source is given an explicit orientation
+        that differs from its own.
     """
-    if (
-        source_table.wetting_phase == requested_wetting_phase
-        and source_sweep_axis_is_primary == requested_sweep_axis_is_primary
-    ):
-        return
+    requested_wetting_phase = FluidPhase(wetting_phase) if wetting_phase is not None else None
 
-    raise ValidationError(
-        f"Cannot re-orient a tabular {system} table by resampling. The source has "
-        f"`wetting_phase={source_table.wetting_phase!r}` and "
-        f"`reference_phase={source_table.reference_phase!r}`, but a different orientation was "
-        f"requested (wetting phase {requested_wetting_phase!r}). Pass the matching "
-        f"`*_wetting_phase` and `*_reference_phase` arguments."
+    if source_table is None:
+        return (
+            requested_wetting_phase or default_wetting_phase,
+            reference_phase or default_reference_phase,
+        )
+
+    source_wetting_phase = FluidPhase(source_table.wetting_phase)
+    source_reference_phase = source_table.reference_phase
+    if (
+        requested_wetting_phase is not None and requested_wetting_phase != source_wetting_phase
+    ) or (reference_phase is not None and reference_phase != source_reference_phase):
+        raise ValidationError(
+            f"Cannot re-orient a tabular {system} table by resampling. The source has "
+            f"`wetting_phase={source_wetting_phase!r}` and "
+            f"`reference_phase={source_reference_phase!r}`, but "
+            f"`wetting_phase={requested_wetting_phase!r}` and "
+            f"`reference_phase={reference_phase!r}` were requested. Omit these arguments "
+            f"to keep the source orientation."
+        )
+    return source_wetting_phase, source_reference_phase
+
+
+def _build_tabular_reference_saturations(
+    *,
+    source_saturations: npt.NDArray,
+    custom_saturations: npt.ArrayLike | None,
+    n_points: int,
+    n_endpoint_extra: int,
+    spacing: Spacing,
+    dtype: npt.DTypeLike,
+) -> npt.NDArray:
+    """
+    Build the saturation axis a tabular source is resampled onto.
+
+    The axis spans the source table's own saturation range, since that is the only
+    range its data covers. Endpoint enrichment is applied inside that range.
+
+    :param source_saturations: Saturation axis of the source two-phase table.
+    :param custom_saturations: User-supplied axis, used as given when not `None`.
+    :param n_points: Number of base points.
+    :param n_endpoint_extra: Extra knots in each end region of the range.
+    :param spacing: Grid spacing strategy.
+    :param dtype: Floating-point dtype of the axis.
+    :return: Strictly increasing 1-D saturation axis.
+    """
+    if custom_saturations is not None:
+        return np.asarray(custom_saturations, dtype=dtype)
+    return build_saturation_reference_field(
+        number_of_base_points=n_points,
+        saturation_lower_bound=source_saturations[0],
+        saturation_upper_bound=source_saturations[-1],
+        spacing=spacing,
+        number_of_endpoint_extra_points=n_endpoint_extra,
+        dtype=dtype,
+    )
+
+
+def _resample_tabular_relperm(
+    *,
+    source_table: TwoPhaseRelPermTable,
+    reference_saturations: npt.NDArray,
+    dtype: npt.DTypeLike,
+) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
+    """
+    PCHIP-evaluate a tabular two-phase relative permeability table on a new axis.
+
+    :param source_table: Two-phase sub-table to resample.
+    :param reference_saturations: Saturation axis to evaluate on. Values outside the
+        source range take the nearest end value.
+    :param dtype: Floating-point dtype of the returned saturations.
+    :return: Three-tuple of `(reference_saturations, wetting_phase_kr, non_wetting_phase_kr)`.
+    """
+    resampled_saturations, wetting_phase_kr = pchip_resample(
+        source_saturations=source_table.reference_saturation,
+        source_values=source_table.wetting_phase_relative_permeability,
+        target_saturations=reference_saturations,
+        dtype=dtype,
+    )
+    _, non_wetting_phase_kr = pchip_resample(
+        source_saturations=source_table.reference_saturation,
+        source_values=source_table.non_wetting_phase_relative_permeability,
+        target_saturations=reference_saturations,
+        dtype=dtype,
+    )
+    return resampled_saturations, wetting_phase_kr, non_wetting_phase_kr
+
+
+def _resample_tabular_capillary_pressure(
+    *,
+    source_table: TwoPhaseCapillaryPressureTable,
+    reference_saturations: npt.NDArray,
+    dtype: npt.DTypeLike,
+) -> tuple[npt.NDArray, npt.NDArray]:
+    """
+    PCHIP-evaluate a tabular two-phase capillary pressure table on a new axis.
+
+    :param source_table: Two-phase sub-table to resample.
+    :param reference_saturations: Saturation axis to evaluate on. Values outside the
+        source range take the nearest end value.
+    :param dtype: Floating-point dtype of the returned saturations.
+    :return: Two-tuple of `(reference_saturations, capillary_pressure_values)`.
+    """
+    return pchip_resample(
+        source_saturations=source_table.reference_saturation,
+        source_values=source_table.capillary_pressure,
+        target_saturations=reference_saturations,
+        dtype=dtype,
     )
 
 
@@ -331,15 +439,12 @@ def sample_oil_water_relative_permeabilities(
     residual_oil_saturation_water: Number,
     model_kwargs: dict[str, typing.Any],
     oil_water_wetting_phase: FluidPhase,
-    number_of_output_points: int,
-    spacing: Spacing,
     dtype: npt.DTypeLike,
 ) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     """
     Sample oil-water relative permeability values across the oil-water saturation range.
 
-    For tabular source models (`ThreePhaseRelPermTable`) the existing knots
-    are PCHIP-resampled to the denser output grid.
+    The table is evaluated at every point of the reference axis.
 
     :param relperm_table: Relative permeability table to sample from.
     :param oil_water_reference_saturations: Saturation axis to sample along.
@@ -349,44 +454,11 @@ def sample_oil_water_relative_permeabilities(
     :param residual_oil_saturation_water: Residual oil saturation in a waterflood (sorw).
     :param model_kwargs: Extra keyword arguments forwarded to every table evaluation call.
     :param oil_water_wetting_phase: Wetting phase for the oil-water system.
-    :param number_of_output_points: Number of points used when PCHIP-resampling a tabular source table.
-    :param spacing: Grid spacing strategy used during PCHIP resampling.
+    :param dtype: Floating-point dtype of the returned arrays.
     :return: Three-tuple of `(reference_saturations, wetting_phase_kr, non_wetting_phase_kr)`.
     """
-    if isinstance(relperm_table, ThreePhaseRelPermTable):
-        oil_water_table = relperm_table.oil_water_table
-        _validate_tabular_source_orientation(
-            system="oil-water",
-            source_table=oil_water_table,
-            requested_wetting_phase=oil_water_wetting_phase,
-            source_sweep_axis_is_primary=check_oil_water_sweep_axis_is_water_saturation(
-                wetting_phase=oil_water_table.wetting_phase,  # type: ignore[arg-type]
-                reference_phase=oil_water_table.reference_phase,
-            ),
-            requested_sweep_axis_is_primary=sweep_axis_is_water_saturation,
-        )
-        resampled_saturations, wetting_phase_kr = pchip_resample(
-            source_saturations=oil_water_table.reference_saturation,
-            source_values=oil_water_table.wetting_phase_relative_permeability,
-            number_of_output_points=number_of_output_points,
-            spacing=spacing,
-            dtype=dtype,
-        )
-        _, non_wetting_phase_kr = pchip_resample(
-            source_saturations=oil_water_table.reference_saturation,
-            source_values=oil_water_table.non_wetting_phase_relative_permeability,
-            number_of_output_points=number_of_output_points,
-            spacing=spacing,
-            dtype=dtype,
-        )
-        return (
-            resampled_saturations,
-            wetting_phase_kr,
-            non_wetting_phase_kr,
-        )
-
-    water_relative_permeability = np.empty(len(oil_water_reference_saturations))
-    oil_relative_permeability = np.empty(len(oil_water_reference_saturations))
+    water_relative_permeability = np.empty(len(oil_water_reference_saturations), dtype=dtype)
+    oil_relative_permeability = np.empty(len(oil_water_reference_saturations), dtype=dtype)
 
     for index, reference_saturation_value in enumerate(oil_water_reference_saturations):
         if sweep_axis_is_water_saturation:
@@ -438,15 +510,12 @@ def sample_gas_oil_relative_permeabilities(
     residual_gas_saturation: Number,
     model_kwargs: dict[str, typing.Any],
     gas_oil_wetting_phase: FluidPhase,
-    number_of_output_points: int,
-    spacing: Spacing,
     dtype: npt.DTypeLike,
 ) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     """
     Sample gas-oil relative permeability values across the gas-oil saturation range.
 
-    For tabular source models (`ThreePhaseRelPermTable`) the existing knots
-    are PCHIP-resampled to the denser output grid.
+    The table is evaluated at every point of the reference axis.
 
     :param relperm_table: Relative permeability table to sample from.
     :param gas_oil_reference_saturations: Saturation axis to sample along.
@@ -457,44 +526,11 @@ def sample_gas_oil_relative_permeabilities(
     :param residual_gas_saturation: Residual gas saturation (sgr).
     :param model_kwargs: Extra keyword arguments forwarded to every table evaluation call.
     :param gas_oil_wetting_phase: Wetting phase for the gas-oil system.
-    :param number_of_output_points: Number of points used when PCHIP-resampling a tabular source table.
-    :param spacing: Grid spacing strategy used during PCHIP resampling.
+    :param dtype: Floating-point dtype of the returned arrays.
     :return: Three-tuple of `(reference_saturations, wetting_phase_kr, non_wetting_phase_kr)`.
     """
-    if isinstance(relperm_table, ThreePhaseRelPermTable):
-        gas_oil_table = relperm_table.gas_oil_table
-        _validate_tabular_source_orientation(
-            system="gas-oil",
-            source_table=gas_oil_table,
-            requested_wetting_phase=gas_oil_wetting_phase,
-            source_sweep_axis_is_primary=check_gas_oil_sweep_axis_is_gas_saturation(
-                wetting_phase=gas_oil_table.wetting_phase,  # type: ignore[arg-type]
-                reference_phase=gas_oil_table.reference_phase,
-            ),
-            requested_sweep_axis_is_primary=sweep_axis_is_gas_saturation,
-        )
-        resampled_saturations, wetting_phase_kr = pchip_resample(
-            source_saturations=gas_oil_table.reference_saturation,
-            source_values=gas_oil_table.wetting_phase_relative_permeability,
-            number_of_output_points=number_of_output_points,
-            spacing=spacing,
-            dtype=dtype,
-        )
-        _, non_wetting_phase_kr = pchip_resample(
-            source_saturations=gas_oil_table.reference_saturation,
-            source_values=gas_oil_table.non_wetting_phase_relative_permeability,
-            number_of_output_points=number_of_output_points,
-            spacing=spacing,
-            dtype=dtype,
-        )
-        return (
-            resampled_saturations,
-            wetting_phase_kr,
-            non_wetting_phase_kr,
-        )
-
-    gas_relative_permeability = np.empty(len(gas_oil_reference_saturations))
-    oil_relative_permeability = np.empty(len(gas_oil_reference_saturations))
+    gas_relative_permeability = np.empty(len(gas_oil_reference_saturations), dtype=dtype)
+    oil_relative_permeability = np.empty(len(gas_oil_reference_saturations), dtype=dtype)
 
     for index, reference_saturation_value in enumerate(gas_oil_reference_saturations):
         if sweep_axis_is_gas_saturation:
@@ -546,15 +582,12 @@ def sample_oil_water_capillary_pressure(
     irreducible_water_saturation: Number,
     residual_oil_saturation_water: Number,
     model_kwargs: dict[str, typing.Any],
-    number_of_output_points: int,
-    spacing: Spacing,
     dtype: npt.DTypeLike,
 ) -> tuple[npt.NDArray, npt.NDArray]:
     """
     Sample oil-water capillary pressure values across the oil-water saturation range.
 
-    For tabular source models (`ThreePhaseCapillaryPressureTable`) the
-    existing knots are PCHIP-resampled to the denser output grid (fast path).
+    The table is evaluated at every point of the reference axis.
 
     :param capillary_pressure_table: Capillary pressure table to sample from.
     :param oil_water_reference_saturations: Saturation axis to sample along.
@@ -564,23 +597,10 @@ def sample_oil_water_capillary_pressure(
     :param residual_oil_saturation_water: Residual oil saturation in a waterflood (sorw).
     :param model_kwargs: Extra keyword arguments forwarded to every table
         evaluation call.
-    :param number_of_output_points: Number of points used when PCHIP-resampling
-        a tabular source table.
-    :param spacing: Grid spacing strategy used during PCHIP resampling.
+    :param dtype: Floating-point dtype of the returned arrays.
     :return: Two-tuple of `(reference_saturations, capillary_pressure_values)`.
     """
-    if isinstance(capillary_pressure_table, ThreePhaseCapillaryPressureTable):
-        oil_water_table = capillary_pressure_table.oil_water_table
-        resampled_saturations, capillary_pressure_values = pchip_resample(
-            source_saturations=oil_water_table.reference_saturation,
-            source_values=oil_water_table.capillary_pressure,
-            number_of_output_points=number_of_output_points,
-            spacing=spacing,
-            dtype=dtype,
-        )
-        return resampled_saturations, capillary_pressure_values
-
-    capillary_pressure_values = np.empty(len(oil_water_reference_saturations))
+    capillary_pressure_values = np.empty(len(oil_water_reference_saturations), dtype=dtype)
     for index, reference_saturation_value in enumerate(oil_water_reference_saturations):
         if sweep_axis_is_water_saturation:
             water_saturation, oil_saturation, gas_saturation = (
@@ -619,15 +639,12 @@ def sample_gas_oil_capillary_pressure(
     residual_oil_saturation_gas: Number,
     residual_gas_saturation: Number,
     model_kwargs: dict[str, typing.Any],
-    number_of_output_points: int,
-    spacing: Spacing,
     dtype: npt.DTypeLike,
 ) -> tuple[npt.NDArray, npt.NDArray]:
     """
     Sample gas-oil capillary pressure values across the gas-oil saturation range.
 
-    For tabular source models (`ThreePhaseCapillaryPressureTable`) the
-    existing knots are PCHIP-resampled to the denser output grid.
+    The table is evaluated at every point of the reference axis.
 
     :param capillary_pressure_table: Capillary pressure table to sample from.
     :param gas_oil_reference_saturations: Saturation axis to sample along.
@@ -637,22 +654,10 @@ def sample_gas_oil_capillary_pressure(
     :param residual_oil_saturation_gas: Residual oil saturation in a gas flood (sorg).
     :param residual_gas_saturation: Residual gas saturation (sgr).
     :param model_kwargs: Extra keyword arguments forwarded to every table evaluation call.
-    :param number_of_output_points: Number of points used when PCHIP-resampling a tabular source table.
-    :param spacing: Grid spacing strategy used during PCHIP resampling.
+    :param dtype: Floating-point dtype of the returned arrays.
     :return: Two-tuple of `(reference_saturations, capillary_pressure_values)`.
     """
-    if isinstance(capillary_pressure_table, ThreePhaseCapillaryPressureTable):
-        gas_oil_table = capillary_pressure_table.gas_oil_table
-        resampled_saturations, capillary_pressure_values = pchip_resample(
-            source_saturations=gas_oil_table.reference_saturation,
-            source_values=gas_oil_table.capillary_pressure,
-            number_of_output_points=number_of_output_points,
-            spacing=spacing,
-            dtype=dtype,
-        )
-        return resampled_saturations, capillary_pressure_values
-
-    capillary_pressure_values = np.empty(len(gas_oil_reference_saturations))
+    capillary_pressure_values = np.empty(len(gas_oil_reference_saturations), dtype=dtype)
     for index, reference_saturation_value in enumerate(gas_oil_reference_saturations):
         if sweep_axis_is_gas_saturation:
             water_saturation, oil_saturation, gas_saturation = (
@@ -683,6 +688,112 @@ def sample_gas_oil_capillary_pressure(
     return gas_oil_reference_saturations, capillary_pressure_values
 
 
+def _resample_three_phase_relperm_table(
+    table: ThreePhaseRelPermTable,
+    *,
+    oil_water_wetting_phase: FluidPhase | str | None,
+    gas_oil_wetting_phase: FluidPhase | str | None,
+    oil_water_reference_phase: typing.Literal["wetting", "non_wetting"] | None,
+    gas_oil_reference_phase: typing.Literal["wetting", "non_wetting"] | None,
+    n_points: int,
+    n_endpoint_extra: int,
+    spacing: Spacing,
+    oil_water_reference_saturation: npt.ArrayLike | None,
+    gas_oil_reference_saturation: npt.ArrayLike | None,
+    mixing_rule: MixingRule | str | None,
+    dtype: np.dtype,
+) -> ThreePhaseRelPermTable:
+    """
+    Resample a tabular `ThreePhaseRelPermTable` onto a new saturation field.
+
+    Needs none of the saturation endpoints. The new field spans each sub-table's own
+    saturation range, with `n_endpoint_extra` extra knots in each end region, unless
+    a custom axis is given. Orientation and the minimum kr floors are taken from the source.
+
+    :raises ValidationError: When an explicit orientation differs from the source's.
+    """
+    oil_water_source = table.oil_water_table
+    gas_oil_source = table.gas_oil_table
+
+    oil_water_wetting, oil_water_reference = _resolve_system_orientation(
+        system="oil-water",
+        source_table=oil_water_source,
+        default_wetting_phase=table.get_oil_water_wetting_phase(),
+        default_reference_phase="wetting",
+        wetting_phase=oil_water_wetting_phase,
+        reference_phase=oil_water_reference_phase,
+    )
+    gas_oil_wetting, gas_oil_reference = _resolve_system_orientation(
+        system="gas-oil",
+        source_table=gas_oil_source,
+        default_wetting_phase=table.get_gas_oil_wetting_phase(),
+        default_reference_phase="non_wetting",
+        wetting_phase=gas_oil_wetting_phase,
+        reference_phase=gas_oil_reference_phase,
+    )
+
+    oil_water_axis, oil_water_wetting_kr, oil_water_non_wetting_kr = _resample_tabular_relperm(
+        source_table=oil_water_source,
+        reference_saturations=_build_tabular_reference_saturations(
+            source_saturations=oil_water_source.reference_saturation,
+            custom_saturations=oil_water_reference_saturation,
+            n_points=n_points,
+            n_endpoint_extra=n_endpoint_extra,
+            spacing=spacing,
+            dtype=dtype,
+        ),
+        dtype=dtype,
+    )
+    gas_oil_axis, gas_oil_wetting_kr, gas_oil_non_wetting_kr = _resample_tabular_relperm(
+        source_table=gas_oil_source,
+        reference_saturations=_build_tabular_reference_saturations(
+            source_saturations=gas_oil_source.reference_saturation,
+            custom_saturations=gas_oil_reference_saturation,
+            n_points=n_points,
+            n_endpoint_extra=n_endpoint_extra,
+            spacing=spacing,
+            dtype=dtype,
+        ),
+        dtype=dtype,
+    )
+
+    oil_water_table = TwoPhaseRelPermTable(
+        wetting_phase=oil_water_wetting,
+        non_wetting_phase=oil_water_source.non_wetting_phase,
+        reference_saturation=typing.cast(NumberArray[OneDimension], oil_water_axis),
+        wetting_phase_relative_permeability=typing.cast(
+            NumberArray[OneDimension], oil_water_wetting_kr
+        ),
+        non_wetting_phase_relative_permeability=typing.cast(
+            NumberArray[OneDimension], oil_water_non_wetting_kr
+        ),
+        reference_phase=oil_water_reference,
+        min_wetting_relperm=oil_water_source.min_wetting_relperm,
+        min_non_wetting_relperm=oil_water_source.min_non_wetting_relperm,
+        dtype=dtype,
+    )
+    gas_oil_table = TwoPhaseRelPermTable(
+        wetting_phase=gas_oil_wetting,
+        non_wetting_phase=gas_oil_source.non_wetting_phase,
+        reference_saturation=typing.cast(NumberArray[OneDimension], gas_oil_axis),
+        wetting_phase_relative_permeability=typing.cast(
+            NumberArray[OneDimension], gas_oil_wetting_kr
+        ),
+        non_wetting_phase_relative_permeability=typing.cast(
+            NumberArray[OneDimension], gas_oil_non_wetting_kr
+        ),
+        reference_phase=gas_oil_reference,
+        min_wetting_relperm=gas_oil_source.min_wetting_relperm,
+        min_non_wetting_relperm=gas_oil_source.min_non_wetting_relperm,
+        dtype=dtype,
+    )
+    return ThreePhaseRelPermTable(
+        oil_water_table=oil_water_table,
+        gas_oil_table=gas_oil_table,
+        mixing_rule=mixing_rule if mixing_rule is not None else table.mixing_rule,
+    )
+
+
 def as_three_phase_relperm_table(
     table: RelativePermeabilityTable,
     *,
@@ -693,8 +804,8 @@ def as_three_phase_relperm_table(
     model_kwargs: dict[str, typing.Any] | None = None,
     oil_water_wetting_phase: FluidPhase | str | None = None,
     gas_oil_wetting_phase: FluidPhase | str | None = None,
-    oil_water_reference_phase: typing.Literal["wetting", "non_wetting"] = "wetting",
-    gas_oil_reference_phase: typing.Literal["wetting", "non_wetting"] = "non_wetting",
+    oil_water_reference_phase: typing.Literal["wetting", "non_wetting"] | None = None,
+    gas_oil_reference_phase: typing.Literal["wetting", "non_wetting"] | None = None,
     n_points: int = 200,
     n_endpoint_extra: int = 20,
     spacing: Spacing = "cosine",
@@ -711,10 +822,14 @@ def as_three_phase_relperm_table(
     two-phase sub-tables so that `get_*_derivative` returns smooth,
     consistent values instead of piecewise-linear slopes.
 
-    For tabular source models (`ThreePhaseRelPermTable`) the existing knots
-    are PCHIP-resampled to the specified `n_points` and `spacing` field, recovering C¹-continuous
-    values and derivatives, and allowing efficient field refinement
-    and endpoint enrichment without any additional table calls.
+    For tabular source models (`ThreePhaseRelPermTable`) the existing knots are
+    PCHIP-resampled onto a new field spanning each sub-table's own saturation range,
+    built from `n_points`, `n_endpoint_extra` and `spacing` (or the custom
+    `*_reference_saturation` axes), recovering C¹-continuous values and derivatives
+    without any additional table calls. The saturation endpoints are not needed for a
+    tabular source and are ignored. Orientation and minimum kr floors are taken from the
+    source; an explicit wetting or reference phase that differs from the source's raises
+    a `ValidationError`, since resampling cannot re-orient a table.
 
     :param table: Source analytical or tabular relative permeability table.
     :param irreducible_water_saturation: Irreducible water saturation (swc).
@@ -725,7 +840,9 @@ def as_three_phase_relperm_table(
     :param oil_water_wetting_phase: Wetting phase for the oil-water sub-table.
     :param gas_oil_wetting_phase: Wetting phase for the gas-oil sub-table.
     :param oil_water_reference_phase: Reference saturation axis for the oil-water table.
+        Defaults to `"wetting"`, or to the source's for a tabular source.
     :param gas_oil_reference_phase: Reference saturation axis for the gas-oil table.
+        Defaults to `"non_wetting"`, or to the source's for a tabular source.
     :param n_points: Base number of sample points per sub-table.
     :param n_endpoint_extra: Extra knots in each end region (first and last 10 % of the
         range). Pass `0` to disable endpoint refinement.
@@ -740,6 +857,22 @@ def as_three_phase_relperm_table(
     :return: `ThreePhaseRelPermTable` with piecewise-linear sub-tables.
     """
     dtype = np.dtype(dtype if dtype is not None else getattr(table, "dtype", get_dtype()))
+    if isinstance(table, ThreePhaseRelPermTable):
+        return _resample_three_phase_relperm_table(
+            table,
+            oil_water_wetting_phase=oil_water_wetting_phase,
+            gas_oil_wetting_phase=gas_oil_wetting_phase,
+            oil_water_reference_phase=oil_water_reference_phase,
+            gas_oil_reference_phase=gas_oil_reference_phase,
+            n_points=n_points,
+            n_endpoint_extra=n_endpoint_extra,
+            spacing=spacing,
+            oil_water_reference_saturation=oil_water_reference_saturation,
+            gas_oil_reference_saturation=gas_oil_reference_saturation,
+            mixing_rule=mixing_rule,
+            dtype=dtype,
+        )
+
     resolved_irreducible_water_saturation = _resolve_saturation_endpoint(
         arg_value=irreducible_water_saturation,
         table=table,
@@ -773,15 +906,21 @@ def as_three_phase_relperm_table(
         **(model_kwargs or {}),
     }
 
-    oil_water_wetting_phase_resolved: FluidPhase = (
-        FluidPhase(oil_water_wetting_phase)
-        if oil_water_wetting_phase is not None
-        else table.get_oil_water_wetting_phase()
+    oil_water_wetting_phase_resolved, oil_water_reference_phase = _resolve_system_orientation(
+        system="oil-water",
+        source_table=None,
+        default_wetting_phase=table.get_oil_water_wetting_phase(),
+        default_reference_phase="wetting",
+        wetting_phase=oil_water_wetting_phase,
+        reference_phase=oil_water_reference_phase,
     )
-    gas_oil_wetting_phase_resolved: FluidPhase = (
-        FluidPhase(gas_oil_wetting_phase)
-        if gas_oil_wetting_phase is not None
-        else table.get_gas_oil_wetting_phase()
+    gas_oil_wetting_phase_resolved, gas_oil_reference_phase = _resolve_system_orientation(
+        system="gas-oil",
+        source_table=None,
+        default_wetting_phase=table.get_gas_oil_wetting_phase(),
+        default_reference_phase="non_wetting",
+        wetting_phase=gas_oil_wetting_phase,
+        reference_phase=gas_oil_reference_phase,
     )
     oil_water_non_wetting_phase = (
         FluidPhase.OIL
@@ -853,8 +992,6 @@ def as_three_phase_relperm_table(
         residual_oil_saturation_water=resolved_residual_oil_saturation_water,
         model_kwargs=model_kwargs,
         oil_water_wetting_phase=oil_water_wetting_phase_resolved,
-        number_of_output_points=n_points,
-        spacing=spacing,
         dtype=dtype,
     )
 
@@ -871,8 +1008,6 @@ def as_three_phase_relperm_table(
         residual_gas_saturation=resolved_residual_gas_saturation,
         model_kwargs=model_kwargs,
         gas_oil_wetting_phase=gas_oil_wetting_phase_resolved,
-        number_of_output_points=n_points,
-        spacing=spacing,
         dtype=dtype,
     )
 
@@ -914,6 +1049,98 @@ def as_three_phase_relperm_table(
     )
 
 
+def _resample_three_phase_capillary_pressure_table(
+    table: ThreePhaseCapillaryPressureTable,
+    *,
+    current_unit_system: UnitSystem,
+    oil_water_wetting_phase: FluidPhase | str | None,
+    gas_oil_wetting_phase: FluidPhase | str | None,
+    oil_water_reference_phase: typing.Literal["wetting", "non_wetting"] | None,
+    gas_oil_reference_phase: typing.Literal["wetting", "non_wetting"] | None,
+    n_points: int,
+    n_endpoint_extra: int,
+    spacing: Spacing,
+    oil_water_reference_saturation: npt.ArrayLike | None,
+    gas_oil_reference_saturation: npt.ArrayLike | None,
+    dtype: np.dtype,
+) -> ThreePhaseCapillaryPressureTable:
+    """
+    Resample a tabular `ThreePhaseCapillaryPressureTable` onto a new saturation field.
+
+    Needs none of the saturation endpoints. The new field spans each sub-table's own
+    saturation range, with `n_endpoint_extra` extra knots in each end region, unless
+    a custom axis is given. Orientation is taken from the source.
+
+    :param current_unit_system: Unit system of the source table, kept on the result.
+    :raises ValidationError: When an explicit orientation differs from the source's.
+    """
+    oil_water_source = table.oil_water_table
+    gas_oil_source = table.gas_oil_table
+
+    oil_water_wetting, oil_water_reference = _resolve_system_orientation(
+        system="oil-water",
+        source_table=oil_water_source,
+        default_wetting_phase=table.get_oil_water_wetting_phase(),
+        default_reference_phase="wetting",
+        wetting_phase=oil_water_wetting_phase,
+        reference_phase=oil_water_reference_phase,
+    )
+    gas_oil_wetting, gas_oil_reference = _resolve_system_orientation(
+        system="gas-oil",
+        source_table=gas_oil_source,
+        default_wetting_phase=table.get_gas_oil_wetting_phase(),
+        default_reference_phase="non_wetting",
+        wetting_phase=gas_oil_wetting_phase,
+        reference_phase=gas_oil_reference_phase,
+    )
+
+    oil_water_axis, oil_water_values = _resample_tabular_capillary_pressure(
+        source_table=oil_water_source,
+        reference_saturations=_build_tabular_reference_saturations(
+            source_saturations=oil_water_source.reference_saturation,
+            custom_saturations=oil_water_reference_saturation,
+            n_points=n_points,
+            n_endpoint_extra=n_endpoint_extra,
+            spacing=spacing,
+            dtype=dtype,
+        ),
+        dtype=dtype,
+    )
+    gas_oil_axis, gas_oil_values = _resample_tabular_capillary_pressure(
+        source_table=gas_oil_source,
+        reference_saturations=_build_tabular_reference_saturations(
+            source_saturations=gas_oil_source.reference_saturation,
+            custom_saturations=gas_oil_reference_saturation,
+            n_points=n_points,
+            n_endpoint_extra=n_endpoint_extra,
+            spacing=spacing,
+            dtype=dtype,
+        ),
+        dtype=dtype,
+    )
+
+    return ThreePhaseCapillaryPressureTable(
+        oil_water_table=TwoPhaseCapillaryPressureTable(
+            wetting_phase=oil_water_wetting,
+            non_wetting_phase=oil_water_source.non_wetting_phase,
+            reference_saturation=typing.cast(NumberArray[OneDimension], oil_water_axis),
+            capillary_pressure=typing.cast(NumberArray[OneDimension], oil_water_values),
+            reference_phase=oil_water_reference,
+            dtype=dtype,
+            unit_system=current_unit_system,
+        ),
+        gas_oil_table=TwoPhaseCapillaryPressureTable(
+            wetting_phase=gas_oil_wetting,
+            non_wetting_phase=gas_oil_source.non_wetting_phase,
+            reference_saturation=typing.cast(NumberArray[OneDimension], gas_oil_axis),
+            capillary_pressure=typing.cast(NumberArray[OneDimension], gas_oil_values),
+            reference_phase=gas_oil_reference,
+            dtype=dtype,
+            unit_system=current_unit_system,
+        ),
+    )
+
+
 def as_three_phase_capillary_pressure_table(
     table: CapillaryPressureTable,
     *,
@@ -924,8 +1151,8 @@ def as_three_phase_capillary_pressure_table(
     model_kwargs: dict[str, typing.Any] | None = None,
     oil_water_wetting_phase: FluidPhase | str | None = None,
     gas_oil_wetting_phase: FluidPhase | str | None = None,
-    oil_water_reference_phase: typing.Literal["wetting", "non_wetting"] = "wetting",
-    gas_oil_reference_phase: typing.Literal["wetting", "non_wetting"] = "non_wetting",
+    oil_water_reference_phase: typing.Literal["wetting", "non_wetting"] | None = None,
+    gas_oil_reference_phase: typing.Literal["wetting", "non_wetting"] | None = None,
     n_points: int = 200,
     n_endpoint_extra: int = 30,
     spacing: Spacing = "cosine",
@@ -943,10 +1170,14 @@ def as_three_phase_capillary_pressure_table(
     relperm) reflects that Pc curves are unbounded near residual saturation,
     making endpoint fidelity especially important for implicit convergence.
 
-    For tabular source models (`ThreePhaseCapillaryPressureTable`) the existing knots
-    are PCHIP-resampled to the specified `n_points` and `spacing` field, recovering C¹-continuous
-    values and derivatives, and allowing efficient field refinement
-    and endpoint enrichment without any additional table calls.
+    For tabular source models (`ThreePhaseCapillaryPressureTable`) the existing knots are
+    PCHIP-resampled onto a new field spanning each sub-table's own saturation range,
+    built from `n_points`, `n_endpoint_extra` and `spacing` (or the custom
+    `*_reference_saturation` axes), recovering C¹-continuous values and derivatives
+    without any additional table calls. The saturation endpoints are not needed for a
+    tabular source and are ignored. Orientation is taken from the source; an explicit
+    wetting or reference phase that differs from the source's raises a `ValidationError`,
+    since resampling cannot re-orient a table.
 
     :param table: Source analytical or tabular capillary pressure table.
     :param irreducible_water_saturation: Irreducible water saturation (swc).
@@ -957,7 +1188,9 @@ def as_three_phase_capillary_pressure_table(
     :param oil_water_wetting_phase: Wetting phase for the oil-water sub-table.
     :param gas_oil_wetting_phase: Wetting phase for the gas-oil sub-table.
     :param oil_water_reference_phase: Reference saturation axis for the oil-water table.
+        Defaults to `"wetting"`, or to the source's for a tabular source.
     :param gas_oil_reference_phase: Reference saturation axis for the gas-oil table.
+        Defaults to `"non_wetting"`, or to the source's for a tabular source.
     :param n_points: Base number of sample points per sub-table.
     :param n_endpoint_extra: Extra knots in each end region (first and last 10 % of the
         range). Pass `0` to disable endpoint refinement.
@@ -979,6 +1212,25 @@ def as_three_phase_capillary_pressure_table(
             "Cannot determine the unit system of the provided table. Pass `unit_system`."
         )
     should_convert = unit_system is not None and current_unit_system != unit_system
+
+    if isinstance(table, ThreePhaseCapillaryPressureTable):
+        resampled_table = _resample_three_phase_capillary_pressure_table(
+            table,
+            current_unit_system=current_unit_system,
+            oil_water_wetting_phase=oil_water_wetting_phase,
+            gas_oil_wetting_phase=gas_oil_wetting_phase,
+            oil_water_reference_phase=oil_water_reference_phase,
+            gas_oil_reference_phase=gas_oil_reference_phase,
+            n_points=n_points,
+            n_endpoint_extra=n_endpoint_extra,
+            spacing=spacing,
+            oil_water_reference_saturation=oil_water_reference_saturation,
+            gas_oil_reference_saturation=gas_oil_reference_saturation,
+            dtype=dtype,
+        )
+        if should_convert:
+            return resampled_table.convert(unit_system)  # type: ignore[arg-type]
+        return resampled_table
 
     resolved_irreducible_water_saturation = _resolve_saturation_endpoint(
         arg_value=irreducible_water_saturation,
@@ -1013,15 +1265,21 @@ def as_three_phase_capillary_pressure_table(
         **(model_kwargs or {}),
     }
 
-    oil_water_wetting_phase_resolved: FluidPhase = (
-        FluidPhase(oil_water_wetting_phase)
-        if oil_water_wetting_phase is not None
-        else table.get_oil_water_wetting_phase()
+    oil_water_wetting_phase_resolved, oil_water_reference_phase = _resolve_system_orientation(
+        system="oil-water",
+        source_table=None,
+        default_wetting_phase=table.get_oil_water_wetting_phase(),
+        default_reference_phase="wetting",
+        wetting_phase=oil_water_wetting_phase,
+        reference_phase=oil_water_reference_phase,
     )
-    gas_oil_wetting_phase_resolved: FluidPhase = (
-        FluidPhase(gas_oil_wetting_phase)
-        if gas_oil_wetting_phase is not None
-        else table.get_gas_oil_wetting_phase()
+    gas_oil_wetting_phase_resolved, gas_oil_reference_phase = _resolve_system_orientation(
+        system="gas-oil",
+        source_table=None,
+        default_wetting_phase=table.get_gas_oil_wetting_phase(),
+        default_reference_phase="non_wetting",
+        wetting_phase=gas_oil_wetting_phase,
+        reference_phase=gas_oil_reference_phase,
     )
     oil_water_non_wetting_phase = (
         FluidPhase.OIL
@@ -1091,8 +1349,6 @@ def as_three_phase_capillary_pressure_table(
         irreducible_water_saturation=resolved_irreducible_water_saturation,
         residual_oil_saturation_water=resolved_residual_oil_saturation_water,
         model_kwargs=model_kwargs,
-        number_of_output_points=n_points,
-        spacing=spacing,
         dtype=dtype,
     )
 
@@ -1107,8 +1363,6 @@ def as_three_phase_capillary_pressure_table(
         residual_oil_saturation_gas=resolved_residual_oil_saturation_gas,
         residual_gas_saturation=resolved_residual_gas_saturation,
         model_kwargs=model_kwargs,
-        number_of_output_points=n_points,
-        spacing=spacing,
         dtype=dtype,
     )
 

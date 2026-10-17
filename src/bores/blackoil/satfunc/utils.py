@@ -86,23 +86,47 @@ def make_min_span_saturation_field(
 def pchip_resample(
     source_saturations: npt.NDArray,
     source_values: npt.NDArray,
-    number_of_output_points: int,
-    spacing: Spacing,
+    number_of_output_points: int | None = None,
+    spacing: Spacing = "cosine",
     dtype: npt.DTypeLike = np.float64,
+    target_saturations: npt.ArrayLike | None = None,
 ) -> tuple[npt.NDArray, npt.NDArray]:
     """
     Fit a PCHIP interpolant through (`source_saturations`, `source_values`),
-    resample at `number_of_output_points` and return both the resampled
-    saturations and the interpolated values.
+    evaluate it on a new saturation grid and return both the grid and the
+    interpolated values.
+
+    The new grid is `target_saturations` when given, otherwise a field of
+    `number_of_output_points` spanning the source range, laid out per `spacing`.
+
+    Targets outside the source range are evaluated at the nearest source end
+    (the curve is held constant beyond its first and last knot) rather than
+    extrapolated, since PCHIP extrapolation of a kr or Pc curve is unbounded
+    and can leave the physical range. The returned saturations are the targets
+    as supplied.
 
     :param source_saturations: Original saturation knots, strictly increasing.
     :param source_values: Function values at each knot (kr or Pc).
-    :param number_of_output_points: Number of points in the resampled grid.
-    :param spacing: Grid spacing strategy for the output grid.
+    :param number_of_output_points: Number of points in the resampled grid. Required
+        unless `target_saturations` is given, in which case it is ignored.
+    :param spacing: Grid spacing strategy for the generated output grid. Ignored
+        when `target_saturations` is given.
     :param dtype: Floating-point dtype of the resampled saturations.
+    :param target_saturations: Explicit 1-D saturation grid to evaluate at.
     :return: Two-tuple of `(resampled_saturations, resampled_values)`.
+    :raises ValueError: When neither `target_saturations` nor `number_of_output_points`
+        is given.
     """
     interpolant = PchipInterpolator(source_saturations, source_values)
+    if target_saturations is not None:
+        resampled_saturations = np.asarray(target_saturations, dtype=dtype)
+        evaluation_points = np.clip(
+            resampled_saturations, source_saturations[0], source_saturations[-1]
+        )
+        return resampled_saturations, interpolant(evaluation_points)
+
+    if number_of_output_points is None:
+        raise ValueError("Provide either `number_of_output_points` or `target_saturations`.")
     resampled_saturations = make_saturation_field(
         n_points=number_of_output_points,
         min_saturation=source_saturations[0],
