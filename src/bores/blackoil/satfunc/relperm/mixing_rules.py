@@ -42,6 +42,9 @@ kro = rule(
 `rule(c*kro_w, c*kro_g, krw, krg, c*kr_max, ...) = c * rule(kro_w, kro_g, krw, krg, kr_max, ...)`.
 `krw` and `krg` are always the raw two-phase values.
 
+Divisions by saturation ranges, mobile saturation weights and `kr_max` are guarded with
+the dtype-aware `c.MINIMUM_MOBILE_PORE_SPACE`, read inside each rule.
+
 At points where a rule is not differentiable (the `min_rule` tie, the cap at `kr_max`),
 a one-sided or subgradient convention is used, documented on the rule.
 
@@ -51,13 +54,17 @@ arguments name: the wetting phase as "water", the intermediate phase as "oil", a
 wetting phase's irreducible saturation as `irreducible_water_saturation`.
 """
 
+import math
 import threading
 import typing
 from collections.abc import Mapping
 
 import attrs
+import numba
 import numpy as np
 
+from bores.blackoil.satfunc.utils import get_floating_dtype
+from bores.constants import c
 from bores.errors import ValidationError
 from bores.types import (
     MixingRuleDFunc,
@@ -65,7 +72,9 @@ from bores.types import (
     MixingRulePartialDerivatives,
     NDimension,
     Number,
+    NumberArray,
     NumberOrArray,
+    OneDimension,
 )
 
 __all__ = [
@@ -80,9 +89,6 @@ __all__ = [
     "stone_II_rule",
     "stone_I_rule",
 ]
-
-_EPS = 1e-12
-"""Guard for divisions by saturation ranges and weights."""
 
 
 @typing.final
@@ -562,28 +568,169 @@ def get_mixing_rule_partial_derivatives(
     )
 
 
-def _broadcast(*values: NumberOrArray) -> tuple[np.ndarray, ...]:
-    """Convert to float64 and broadcast to a common shape."""
-    return tuple(np.broadcast_arrays(*(np.asarray(v, dtype=np.float64) for v in values)))
+def _prepare_rule_inputs(
+    *values: NumberOrArray[NDimension],
+) -> tuple[tuple[int, ...], tuple[NumberArray[OneDimension], ...]]:
+    """
+    Broadcast the inputs of a rule to a common shape and flatten them to float64 arrays
+    for the jitted loops.
+
+    A single-element input (e.g. a scalar endpoint) is passed as a one-element array that
+    the loops read at index 0, so it is not copied to the full size.
+
+    :param values: Rule arguments.
+    :return: Two-tuple of the broadcast shape and the flattened arguments.
+    """
+    arrays = [np.asarray(value, dtype=np.float64) for value in values]
+    shape = np.broadcast_shapes(*(array.shape for array in arrays))
+    prepared = tuple(
+        array.reshape(1)
+        if array.size == 1
+        else np.ascontiguousarray(np.broadcast_to(array, shape)).ravel()
+        for array in arrays
+    )
+    return shape, prepared
 
 
-def _output(result: np.ndarray, like: NumberOrArray) -> NumberOrArray:
-    """Cast a rule result to the floating dtype of `like`, unwrapping 0-d arrays."""
-    dtype = (
-        like.dtype if hasattr(like, "dtype") and np.issubdtype(like.dtype, np.floating) else None
-    )  # type: ignore[union-attr]
-    result = result.astype(dtype, copy=False) if dtype is not None else result
-    return result[()] if result.ndim == 0 else result
+def _restore_shape(
+    flat: NumberArray[OneDimension],
+    shape: tuple[int, ...],
+    dtype: np.dtype | None = None,
+) -> NumberOrArray[NDimension]:
+    """Reshape a loop result to the broadcast shape (a scalar for scalar inputs)."""
+    result = flat.reshape(shape)
+    if dtype is not None:
+        result = result.astype(dtype, copy=False)
+    return result[()] if result.ndim == 0 else result  # type: ignore[return-value]
 
 
-def _safe(denominator: np.ndarray, valid: np.ndarray) -> np.ndarray:
-    """Denominator with a harmless value substituted where `valid` is False."""
-    return np.where(valid, denominator, 1.0)
+def run_rule(
+    loop: typing.Callable[..., NumberArray[OneDimension]],
+    like: NumberOrArray[NDimension],
+    *values: NumberOrArray[NDimension],
+) -> NumberOrArray[NDimension]:
+    """
+    Run a jitted value loop and return the result in the floating dtype of `like`.
+
+    The guard `c.MINIMUM_MOBILE_PORE_SPACE` is read here, at call time, so it follows the
+    active dtype, and is passed to the loop as a plain scalar.
+    """
+    shape, arrays = _prepare_rule_inputs(*values)
+    flat = loop(*arrays, math.prod(shape), c.MINIMUM_MOBILE_PORE_SPACE)
+    return _restore_shape(flat, shape, get_floating_dtype(like))
 
 
-# --------------------------------------------------------------------------------------
-# Minimum rule
-# --------------------------------------------------------------------------------------
+def run_rule_derivatives(
+    loop: typing.Callable[..., tuple[NumberArray[OneDimension], ...]],
+    *values: NumberOrArray[NDimension],
+) -> tuple[
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+]:
+    """Run a jitted derivative loop and return the seven partial derivatives."""
+    shape, arrays = _prepare_rule_inputs(*values)
+    outputs = loop(*arrays, math.prod(shape), c.MINIMUM_MOBILE_PORE_SPACE)
+    return typing.cast(
+        tuple[
+            NumberOrArray[NDimension],
+            NumberOrArray[NDimension],
+            NumberOrArray[NDimension],
+            NumberOrArray[NDimension],
+            NumberOrArray[NDimension],
+            NumberOrArray[NDimension],
+            NumberOrArray[NDimension],
+        ],
+        tuple(_restore_shape(output, shape) for output in outputs),
+    )
+
+
+@numba.njit(cache=True, inline="always")
+def element_at(array: NumberArray[OneDimension], index: int) -> Number:
+    """Element `index` of `array`, or its only element when it holds a single value."""
+    return array[0] if array.size == 1 else array[index]  # type: ignore[return-value]
+
+
+@numba.njit(cache=True, inline="always")
+def _min_value(kro_w: Number, kro_g: Number) -> Number:
+    return min(kro_w, kro_g)
+
+
+@numba.njit(cache=True, inline="always")
+def _min_derivatives(
+    kro_w: Number, kro_g: Number
+) -> tuple[Number, Number, Number, Number, Number, Number, Number]:
+    if kro_w < kro_g:
+        return 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    if kro_w > kro_g:
+        return 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0
+    return 0.5, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0
+
+
+@numba.njit(cache=True)
+def _min_value_loop(
+    kw: NumberArray[OneDimension],
+    kg: NumberArray[OneDimension],
+    rw: NumberArray[OneDimension],
+    rg: NumberArray[OneDimension],
+    km: NumberArray[OneDimension],
+    sw: NumberArray[OneDimension],
+    so: NumberArray[OneDimension],
+    sg: NumberArray[OneDimension],
+    swc: NumberArray[OneDimension],
+    sorw: NumberArray[OneDimension],
+    sorg: NumberArray[OneDimension],
+    size: int,
+    epsilon: Number,
+) -> NumberArray[OneDimension]:
+    result = np.empty(size, dtype=np.float64)
+    for i in range(size):
+        result[i] = _min_value(element_at(kw, i), element_at(kg, i))
+    return result
+
+
+@numba.njit(cache=True)
+def _min_derivative_loop(
+    kw: NumberArray[OneDimension],
+    kg: NumberArray[OneDimension],
+    rw: NumberArray[OneDimension],
+    rg: NumberArray[OneDimension],
+    km: NumberArray[OneDimension],
+    sw: NumberArray[OneDimension],
+    so: NumberArray[OneDimension],
+    sg: NumberArray[OneDimension],
+    swc: NumberArray[OneDimension],
+    sorw: NumberArray[OneDimension],
+    sorg: NumberArray[OneDimension],
+    size: int,
+    epsilon: Number,
+) -> tuple[
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+]:
+    d0 = np.empty(size, dtype=np.float64)
+    d1 = np.empty(size, dtype=np.float64)
+    d2 = np.empty(size, dtype=np.float64)
+    d3 = np.empty(size, dtype=np.float64)
+    d4 = np.empty(size, dtype=np.float64)
+    d5 = np.empty(size, dtype=np.float64)
+    d6 = np.empty(size, dtype=np.float64)
+    for i in range(size):
+        d0[i], d1[i], d2[i], d3[i], d4[i], d5[i], d6[i] = _min_derivatives(
+            element_at(kw, i), element_at(kg, i)
+        )
+    return d0, d1, d2, d3, d4, d5, d6
+
+
 @mixing_rule
 def min_rule(
     kro_w: NumberOrArray[NDimension],
@@ -605,45 +752,179 @@ def min_rule(
     honors the two-phase limits because `kro_g = kr_max >= kro_w` with no gas and
     `kro_w = kr_max >= kro_g` at connate water.
     """
-    return _output(np.minimum(*_broadcast(kro_w, kro_g)), kro_w)
+    return run_rule(  # type: ignore[arg-type]
+        _min_value_loop,
+        kro_w,
+        kro_w,
+        kro_g,
+        krw,
+        krg,
+        kr_max,
+        water_saturation,
+        oil_saturation,
+        gas_saturation,
+        irreducible_water_saturation,
+        residual_oil_saturation_water,
+        residual_oil_saturation_gas,
+    )
 
 
 @min_rule.dfunc
-def _min_rule_derivatives(
-    kro_w,
-    kro_g,
-    krw,
-    krg,
-    kr_max,
-    water_saturation,
-    oil_saturation,
-    gas_saturation,
-    irreducible_water_saturation,
-    residual_oil_saturation_water,
-    residual_oil_saturation_gas,
-):
+def _(
+    *,
+    kro_w: NumberOrArray[NDimension],
+    kro_g: NumberOrArray[NDimension],
+    krw: NumberOrArray[NDimension],
+    krg: NumberOrArray[NDimension],
+    kr_max: NumberOrArray[NDimension],
+    water_saturation: NumberOrArray[NDimension],
+    oil_saturation: NumberOrArray[NDimension],
+    gas_saturation: NumberOrArray[NDimension],
+    irreducible_water_saturation: NumberOrArray[NDimension],
+    residual_oil_saturation_water: NumberOrArray[NDimension],
+    residual_oil_saturation_gas: NumberOrArray[NDimension],
+) -> tuple[
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+]:
     """
     Derivatives of the minimum rule. At a tie (`kro_w == kro_g`) the subgradient
     convention is used: both derivatives are 0.5.
     """
-    kw, kg = _broadcast(kro_w, kro_g)
-    dkro_dkro_w = np.where(kw < kg, 1.0, np.where(kw == kg, 0.5, 0.0))
-    dkro_dkro_g = np.where(kg < kw, 1.0, np.where(kw == kg, 0.5, 0.0))
-    zeros = np.zeros_like(kw)
-    return (
-        dkro_dkro_w,
-        dkro_dkro_g,
-        zeros,
-        zeros.copy(),
-        zeros.copy(),
-        zeros.copy(),
-        zeros.copy(),
+    return run_rule_derivatives(  # type: ignore[arg-type]
+        _min_derivative_loop,
+        kro_w,
+        kro_g,
+        krw,
+        krg,
+        kr_max,
+        water_saturation,
+        oil_saturation,
+        gas_saturation,
+        irreducible_water_saturation,
+        residual_oil_saturation_water,
+        residual_oil_saturation_gas,
     )
 
 
-# --------------------------------------------------------------------------------------
-# Baker's saturation-weighted rule (the ECLIPSE default)
-# --------------------------------------------------------------------------------------
+@numba.njit(cache=True, inline="always")
+def _baker_value(
+    kro_w: Number,
+    kro_g: Number,
+    water_saturation: Number,
+    gas_saturation: Number,
+    irreducible_water_saturation: Number,
+    minimum_mobile_pore_space: Number,
+) -> Number:
+    gas = max(gas_saturation, 0.0)
+    mobile_water = max(water_saturation - irreducible_water_saturation, 0.0)
+    total = gas + mobile_water
+    if total <= minimum_mobile_pore_space:
+        return 0.5 * (kro_w + kro_g)
+    return (gas * kro_g + mobile_water * kro_w) / total
+
+
+@numba.njit(cache=True, inline="always")
+def _baker_derivatives(
+    kro_w: Number,
+    kro_g: Number,
+    water_saturation: Number,
+    gas_saturation: Number,
+    irreducible_water_saturation: Number,
+    minimum_mobile_pore_space: Number,
+) -> tuple[Number, Number, Number, Number, Number, Number, Number]:
+    gas = max(gas_saturation, 0.0)
+    mobile_water = max(water_saturation - irreducible_water_saturation, 0.0)
+    total = gas + mobile_water
+    if total <= minimum_mobile_pore_space:
+        return 0.5, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0
+
+    d_sw = (
+        gas * (kro_w - kro_g) / (total * total)
+        if water_saturation > irreducible_water_saturation
+        else 0.0
+    )
+    d_sg = mobile_water * (kro_g - kro_w) / (total * total)
+    return mobile_water / total, gas / total, 0.0, 0.0, d_sw, 0.0, d_sg
+
+
+@numba.njit(cache=True)
+def _baker_value_loop(
+    kw: NumberArray[OneDimension],
+    kg: NumberArray[OneDimension],
+    rw: NumberArray[OneDimension],
+    rg: NumberArray[OneDimension],
+    km: NumberArray[OneDimension],
+    sw: NumberArray[OneDimension],
+    so: NumberArray[OneDimension],
+    sg: NumberArray[OneDimension],
+    swc: NumberArray[OneDimension],
+    sorw: NumberArray[OneDimension],
+    sorg: NumberArray[OneDimension],
+    size: int,
+    epsilon: Number,
+) -> NumberArray[OneDimension]:
+    result = np.empty(size, dtype=np.float64)
+    for i in range(size):
+        result[i] = _baker_value(
+            element_at(kw, i),
+            element_at(kg, i),
+            element_at(sw, i),
+            element_at(sg, i),
+            element_at(swc, i),
+            epsilon,
+        )
+    return result
+
+
+@numba.njit(cache=True)
+def _baker_derivative_loop(
+    kw: NumberArray[OneDimension],
+    kg: NumberArray[OneDimension],
+    rw: NumberArray[OneDimension],
+    rg: NumberArray[OneDimension],
+    km: NumberArray[OneDimension],
+    sw: NumberArray[OneDimension],
+    so: NumberArray[OneDimension],
+    sg: NumberArray[OneDimension],
+    swc: NumberArray[OneDimension],
+    sorw: NumberArray[OneDimension],
+    sorg: NumberArray[OneDimension],
+    size: int,
+    epsilon: Number,
+) -> tuple[
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+]:
+    d0 = np.empty(size, dtype=np.float64)
+    d1 = np.empty(size, dtype=np.float64)
+    d2 = np.empty(size, dtype=np.float64)
+    d3 = np.empty(size, dtype=np.float64)
+    d4 = np.empty(size, dtype=np.float64)
+    d5 = np.empty(size, dtype=np.float64)
+    d6 = np.empty(size, dtype=np.float64)
+    for i in range(size):
+        d0[i], d1[i], d2[i], d3[i], d4[i], d5[i], d6[i] = _baker_derivatives(
+            element_at(kw, i),
+            element_at(kg, i),
+            element_at(sw, i),
+            element_at(sg, i),
+            element_at(swc, i),
+            epsilon,
+        )
+    return d0, d1, d2, d3, d4, d5, d6
+
+
 @mixing_rule
 def baker_linear_rule(
     kro_w: NumberOrArray[NDimension],
@@ -664,34 +945,49 @@ def baker_linear_rule(
         kro = (Sg * kro_g + (Sw - swc) * kro_w) / (Sg + (Sw - swc))
 
     with `Sw - swc` floored at zero. Honors the two-phase limits exactly. At the
-    corner `Sw = swc, Sg = 0` the weights vanish and the rule returns the mean of
-    `kro_w` and `kro_g`, which both equal `kr_max` there.
+    corner `Sw = swc, Sg = 0` the weights vanish (below `c.MINIMUM_MOBILE_PORE_SPACE`)
+    and the rule returns the mean of `kro_w` and `kro_g`, which both equal `kr_max` there.
     """
-    kw, kg, sw, sg, swc = _broadcast(
-        kro_w, kro_g, water_saturation, gas_saturation, irreducible_water_saturation
+    return run_rule(  # type: ignore[arg-type]
+        _baker_value_loop,
+        kro_w,
+        kro_w,
+        kro_g,
+        krw,
+        krg,
+        kr_max,
+        water_saturation,
+        oil_saturation,
+        gas_saturation,
+        irreducible_water_saturation,
+        residual_oil_saturation_water,
+        residual_oil_saturation_gas,
     )
-    sg = np.maximum(sg, 0.0)
-    mobile_water = np.maximum(sw - swc, 0.0)
-    total = sg + mobile_water
-    degenerate = total <= _EPS
-    weighted = (sg * kg + mobile_water * kw) / _safe(total, ~degenerate)
-    return _output(np.where(degenerate, 0.5 * (kw + kg), weighted), kro_w)
 
 
 @baker_linear_rule.dfunc
-def _baker_linear_rule_derivatives(
-    kro_w,
-    kro_g,
-    krw,
-    krg,
-    kr_max,
-    water_saturation,
-    oil_saturation,
-    gas_saturation,
-    irreducible_water_saturation,
-    residual_oil_saturation_water,
-    residual_oil_saturation_gas,
-):
+def _(
+    *,
+    kro_w: NumberOrArray[NDimension],
+    kro_g: NumberOrArray[NDimension],
+    krw: NumberOrArray[NDimension],
+    krg: NumberOrArray[NDimension],
+    kr_max: NumberOrArray[NDimension],
+    water_saturation: NumberOrArray[NDimension],
+    oil_saturation: NumberOrArray[NDimension],
+    gas_saturation: NumberOrArray[NDimension],
+    irreducible_water_saturation: NumberOrArray[NDimension],
+    residual_oil_saturation_water: NumberOrArray[NDimension],
+    residual_oil_saturation_gas: NumberOrArray[NDimension],
+) -> tuple[
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+]:
     """
     Derivatives of Baker's rule. With `W = Sw - swc` (floored at 0) and `T = Sg + W`:
 
@@ -700,28 +996,130 @@ def _baker_linear_rule_derivatives(
         d/dSg    = W (kro_g - kro_w) / T²
         d/dSo    = 0
 
-    At the degenerate corner (`T ~ 0`) the value is the mean of the two curves, so
-    the kr derivatives are 0.5 and the saturation derivatives are 0.
+    At the degenerate corner (`T` below `c.MINIMUM_MOBILE_PORE_SPACE`) the value is the
+    mean of the two curves, so the kr derivatives are 0.5 and the saturation derivatives
+    are 0.
     """
-    kw, kg, sw, sg, swc = _broadcast(
-        kro_w, kro_g, water_saturation, gas_saturation, irreducible_water_saturation
+    return run_rule_derivatives(  # type: ignore[arg-type]
+        _baker_derivative_loop,
+        kro_w,
+        kro_g,
+        krw,
+        krg,
+        kr_max,
+        water_saturation,
+        oil_saturation,
+        gas_saturation,
+        irreducible_water_saturation,
+        residual_oil_saturation_water,
+        residual_oil_saturation_gas,
     )
-    sg = np.maximum(sg, 0.0)
-    mobile_water = np.maximum(sw - swc, 0.0)
-    total = sg + mobile_water
-    degenerate = total <= _EPS
-    t = _safe(total, ~degenerate)
-    zeros = np.zeros_like(kw)
-    dkro_dkro_w = np.where(degenerate, 0.5, mobile_water / t)
-    dkro_dkro_g = np.where(degenerate, 0.5, sg / t)
-    dkro_dsw = np.where(degenerate | (sw <= swc), 0.0, sg * (kw - kg) / t**2)
-    dkro_dsg = np.where(degenerate, 0.0, mobile_water * (kg - kw) / t**2)
-    return (dkro_dkro_w, dkro_dkro_g, zeros, zeros.copy(), dkro_dsw, zeros.copy(), dkro_dsg)
 
 
-# --------------------------------------------------------------------------------------
-# Stone II
-# --------------------------------------------------------------------------------------
+@numba.njit(cache=True, inline="always")
+def _stone_II_value(
+    kro_w: Number,
+    kro_g: Number,
+    krw: Number,
+    krg: Number,
+    kr_max: Number,
+    minimum_mobile_pore_space: Number,
+) -> Number:
+    krocw = max(kr_max, minimum_mobile_pore_space)
+    raw = krocw * ((kro_w / krocw + krw) * (kro_g / krocw + krg) - krw - krg)
+    return min(max(raw, 0.0), krocw)
+
+
+@numba.njit(cache=True, inline="always")
+def _stone_II_derivatives(
+    kro_w: Number,
+    kro_g: Number,
+    krw: Number,
+    krg: Number,
+    kr_max: Number,
+    minimum_mobile_pore_space: Number,
+) -> tuple[Number, Number, Number, Number, Number, Number, Number]:
+    krocw = max(kr_max, minimum_mobile_pore_space)
+    a = kro_w / krocw + krw
+    b = kro_g / krocw + krg
+    raw = krocw * (a * b - krw - krg)
+    if raw > 0.0 and raw < krocw:
+        return b, a, krocw * (b - 1.0), krocw * (a - 1.0), 0.0, 0.0, 0.0
+    return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+
+
+@numba.njit(cache=True)
+def _stone_II_value_loop(
+    kw: NumberArray[OneDimension],
+    kg: NumberArray[OneDimension],
+    rw: NumberArray[OneDimension],
+    rg: NumberArray[OneDimension],
+    km: NumberArray[OneDimension],
+    sw: NumberArray[OneDimension],
+    so: NumberArray[OneDimension],
+    sg: NumberArray[OneDimension],
+    swc: NumberArray[OneDimension],
+    sorw: NumberArray[OneDimension],
+    sorg: NumberArray[OneDimension],
+    size: int,
+    epsilon: Number,
+) -> NumberArray[OneDimension]:
+    result = np.empty(size, dtype=np.float64)
+    for i in range(size):
+        result[i] = _stone_II_value(
+            element_at(kw, i),
+            element_at(kg, i),
+            element_at(rw, i),
+            element_at(rg, i),
+            element_at(km, i),
+            epsilon,
+        )
+    return result
+
+
+@numba.njit(cache=True)
+def _stone_II_derivative_loop(
+    kw: NumberArray[OneDimension],
+    kg: NumberArray[OneDimension],
+    rw: NumberArray[OneDimension],
+    rg: NumberArray[OneDimension],
+    km: NumberArray[OneDimension],
+    sw: NumberArray[OneDimension],
+    so: NumberArray[OneDimension],
+    sg: NumberArray[OneDimension],
+    swc: NumberArray[OneDimension],
+    sorw: NumberArray[OneDimension],
+    sorg: NumberArray[OneDimension],
+    size: int,
+    epsilon: Number,
+) -> tuple[
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+]:
+    d0 = np.empty(size, dtype=np.float64)
+    d1 = np.empty(size, dtype=np.float64)
+    d2 = np.empty(size, dtype=np.float64)
+    d3 = np.empty(size, dtype=np.float64)
+    d4 = np.empty(size, dtype=np.float64)
+    d5 = np.empty(size, dtype=np.float64)
+    d6 = np.empty(size, dtype=np.float64)
+    for i in range(size):
+        d0[i], d1[i], d2[i], d3[i], d4[i], d5[i], d6[i] = _stone_II_derivatives(
+            element_at(kw, i),
+            element_at(kg, i),
+            element_at(rw, i),
+            element_at(rg, i),
+            element_at(km, i),
+            epsilon,
+        )
+    return d0, d1, d2, d3, d4, d5, d6
+
+
 @mixing_rule
 def stone_II_rule(
     kro_w: NumberOrArray[NDimension],
@@ -744,26 +1142,46 @@ def stone_II_rule(
     The result is bounded to `[0, kr_max]`. Stone II can go negative at low oil
     saturation and can slightly exceed the oil endpoint, and neither is physical.
     """
-    kw, kg, rw, rg, km = _broadcast(kro_w, kro_g, krw, krg, kr_max)
-    km = np.maximum(km, _EPS)
-    raw = km * ((kw / km + rw) * (kg / km + rg) - rw - rg)
-    return _output(np.clip(raw, 0.0, km), kro_w)
+    return run_rule(  # type: ignore[arg-type]
+        _stone_II_value_loop,
+        kro_w,
+        kro_w,
+        kro_g,
+        krw,
+        krg,
+        kr_max,
+        water_saturation,
+        oil_saturation,
+        gas_saturation,
+        irreducible_water_saturation,
+        residual_oil_saturation_water,
+        residual_oil_saturation_gas,
+    )
 
 
 @stone_II_rule.dfunc
-def _stone_II_rule_derivatives(
-    kro_w,
-    kro_g,
-    krw,
-    krg,
-    kr_max,
-    water_saturation,
-    oil_saturation,
-    gas_saturation,
-    irreducible_water_saturation,
-    residual_oil_saturation_water,
-    residual_oil_saturation_gas,
-):
+def _(
+    *,
+    kro_w: NumberOrArray[NDimension],
+    kro_g: NumberOrArray[NDimension],
+    krw: NumberOrArray[NDimension],
+    krg: NumberOrArray[NDimension],
+    kr_max: NumberOrArray[NDimension],
+    water_saturation: NumberOrArray[NDimension],
+    oil_saturation: NumberOrArray[NDimension],
+    gas_saturation: NumberOrArray[NDimension],
+    irreducible_water_saturation: NumberOrArray[NDimension],
+    residual_oil_saturation_water: NumberOrArray[NDimension],
+    residual_oil_saturation_gas: NumberOrArray[NDimension],
+) -> tuple[
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+]:
     """
     Derivatives of Stone II. With `A = kro_w/krocw + krw` and `B = kro_g/krocw + krg`:
 
@@ -773,30 +1191,37 @@ def _stone_II_rule_derivatives(
     All are zero where the result is bounded (at 0 or at `krocw`). There is no explicit
     saturation dependence.
     """
-    kw, kg, rw, rg, km = _broadcast(kro_w, kro_g, krw, krg, kr_max)
-    km = np.maximum(km, _EPS)
-    a = kw / km + rw
-    b = kg / km + rg
-    raw = km * (a * b - rw - rg)
-    active = (raw > 0.0) & (raw < km)
-    zeros = np.zeros_like(kw)
-    return (
-        np.where(active, b, 0.0),
-        np.where(active, a, 0.0),
-        np.where(active, km * (b - 1.0), 0.0),
-        np.where(active, km * (a - 1.0), 0.0),
-        zeros,
-        zeros.copy(),
-        zeros.copy(),
+    return run_rule_derivatives(  # type: ignore[arg-type]
+        _stone_II_derivative_loop,
+        kro_w,
+        kro_g,
+        krw,
+        krg,
+        kr_max,
+        water_saturation,
+        oil_saturation,
+        gas_saturation,
+        irreducible_water_saturation,
+        residual_oil_saturation_water,
+        residual_oil_saturation_gas,
     )
 
 
-# --------------------------------------------------------------------------------------
-# Stone I
-# --------------------------------------------------------------------------------------
-def _stone_I_state(kw, kg, km, sw, so, sg, swc, sorw, sorg):
+@numba.njit(cache=True, inline="always")
+def _stone_I_terms(
+    kro_w: Number,
+    kro_g: Number,
+    kr_max: Number,
+    water_saturation: Number,
+    oil_saturation: Number,
+    gas_saturation: Number,
+    irreducible_water_saturation: Number,
+    residual_oil_saturation_water: Number,
+    residual_oil_saturation_gas: Number,
+    minimum_mobile_pore_space: Number,
+) -> tuple[bool, Number, Number, bool, Number, Number, Number, Number, Number, Number, Number]:
     """
-    Shared intermediate quantities of Stone I (Aziz-Settari normalization, with the
+    Intermediate quantities of Stone I (Aziz-Settari normalization, with the
     Fayers-Matthews minimum oil saturation).
 
         alpha = 1 - Sg / (1 - swc - sorg)              clipped to [0, 1]
@@ -807,37 +1232,201 @@ def _stone_I_state(kw, kg, km, sw, so, sg, swc, sorw, sorg):
         kro   = (kro_w * kro_g / krocw) * So* / (Y * Z)
 
     where `Sw - swc` is floored at zero.
+
+    :return: `(usable, krocw, gas_range, alpha_active, D, So*, Sw - swc, Y, Z, C, kro)`.
+        `usable` is False where `So <= Som` or a denominator is below
+        `minimum_mobile_pore_space`; `kro` is then 0.
     """
-    gas_range = np.maximum(1.0 - swc - sorg, _EPS)
-    alpha_raw = 1.0 - sg / gas_range
-    alpha = np.clip(alpha_raw, 0.0, 1.0)
-    alpha_active = (alpha_raw > 0.0) & (alpha_raw < 1.0)
-    som = sorg + alpha * (sorw - sorg)
-    d = 1.0 - swc - som
-    x = so - som
-    mobile_water = np.maximum(sw - swc, 0.0)
-    valid = (x > 0.0) & (d > _EPS)
-    d_safe = _safe(d, valid)
-    so_star = x / d_safe
-    y = 1.0 - mobile_water / d_safe
-    z = 1.0 - sg / d_safe
-    usable = valid & (y > _EPS) & (z > _EPS)
-    y_safe = _safe(y, usable)
-    z_safe = _safe(z, usable)
-    c = kw * kg / km
-    raw = np.where(usable, c * so_star / (y_safe * z_safe), 0.0)
-    return {
-        "gas_range": gas_range,
-        "alpha_active": alpha_active,
-        "d": d_safe,
-        "so_star": so_star,
-        "mobile_water": mobile_water,
-        "y": y_safe,
-        "z": z_safe,
-        "usable": usable,
-        "c": c,
-        "raw": raw,
-    }
+    krocw = max(kr_max, minimum_mobile_pore_space)
+    gas_range = max(
+        1.0 - irreducible_water_saturation - residual_oil_saturation_gas, minimum_mobile_pore_space
+    )
+    alpha_raw = 1.0 - gas_saturation / gas_range
+    alpha = min(max(alpha_raw, 0.0), 1.0)
+    alpha_active = bool(alpha_raw > 0.0 and alpha_raw < 1.0)
+    som = residual_oil_saturation_gas + alpha * (
+        residual_oil_saturation_water - residual_oil_saturation_gas
+    )
+    mobile_range = 1.0 - irreducible_water_saturation - som
+    excess_oil = oil_saturation - som
+    mobile_water = max(water_saturation - irreducible_water_saturation, 0.0)
+    if excess_oil > 0.0 and mobile_range > minimum_mobile_pore_space:
+        so_star = excess_oil / mobile_range
+        y = 1.0 - mobile_water / mobile_range
+        z = 1.0 - gas_saturation / mobile_range
+        if y > minimum_mobile_pore_space and z > minimum_mobile_pore_space:
+            c = kro_w * kro_g / krocw
+            return (
+                True,
+                krocw,
+                gas_range,
+                alpha_active,
+                mobile_range,
+                so_star,
+                mobile_water,
+                y,
+                z,
+                c,
+                c * so_star / (y * z),
+            )
+    return (False, krocw, gas_range, alpha_active, 1.0, 0.0, mobile_water, 1.0, 1.0, 0.0, 0.0)
+
+
+@numba.njit(cache=True, inline="always")
+def _stone_I_value(
+    kro_w: Number,
+    kro_g: Number,
+    kr_max: Number,
+    water_saturation: Number,
+    oil_saturation: Number,
+    gas_saturation: Number,
+    irreducible_water_saturation: Number,
+    residual_oil_saturation_water: Number,
+    residual_oil_saturation_gas: Number,
+    minimum_mobile_pore_space: Number,
+) -> Number:
+    terms = _stone_I_terms(
+        kro_w,
+        kro_g,
+        kr_max,
+        water_saturation,
+        oil_saturation,
+        gas_saturation,
+        irreducible_water_saturation,
+        residual_oil_saturation_water,
+        residual_oil_saturation_gas,
+        minimum_mobile_pore_space,
+    )
+    return min(max(terms[10], 0.0), terms[1])
+
+
+@numba.njit(cache=True, inline="always")
+def _stone_I_derivatives(
+    kro_w: Number,
+    kro_g: Number,
+    kr_max: Number,
+    water_saturation: Number,
+    oil_saturation: Number,
+    gas_saturation: Number,
+    irreducible_water_saturation: Number,
+    residual_oil_saturation_water: Number,
+    residual_oil_saturation_gas: Number,
+    minimum_mobile_pore_space: Number,
+) -> tuple[Number, Number, Number, Number, Number, Number, Number]:
+    usable, krocw, gas_range, alpha_active, d, so_star, mobile_water, y, z, c, raw = (
+        _stone_I_terms(
+            kro_w,
+            kro_g,
+            kr_max,
+            water_saturation,
+            oil_saturation,
+            gas_saturation,
+            irreducible_water_saturation,
+            residual_oil_saturation_water,
+            residual_oil_saturation_gas,
+            minimum_mobile_pore_space,
+        )
+    )
+    if not (usable and raw > 0.0 and raw < krocw):
+        return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
+
+    d_gas = (
+        (residual_oil_saturation_water - residual_oil_saturation_gas) / gas_range
+        if alpha_active
+        else 0.0
+    )
+    so_star_prime = d_gas * (1.0 - irreducible_water_saturation - oil_saturation) / (d * d)
+    y_prime = mobile_water * d_gas / (d * d)
+    z_prime = -1.0 / d + gas_saturation * d_gas / (d * d)
+    base = so_star / (y * z)
+    d_sw = (
+        c * so_star / (y * y * z * d) if water_saturation > irreducible_water_saturation else 0.0
+    )
+    d_so = c / (d * y * z)
+    d_sg = c * (
+        so_star_prime / (y * z) - so_star * y_prime / (y * y * z) - so_star * z_prime / (y * z * z)
+    )
+    return kro_g / krocw * base, kro_w / krocw * base, 0.0, 0.0, d_sw, d_so, d_sg
+
+
+@numba.njit(cache=True)
+def _stone_I_value_loop(
+    kw: NumberArray[OneDimension],
+    kg: NumberArray[OneDimension],
+    rw: NumberArray[OneDimension],
+    rg: NumberArray[OneDimension],
+    km: NumberArray[OneDimension],
+    sw: NumberArray[OneDimension],
+    so: NumberArray[OneDimension],
+    sg: NumberArray[OneDimension],
+    swc: NumberArray[OneDimension],
+    sorw: NumberArray[OneDimension],
+    sorg: NumberArray[OneDimension],
+    size: int,
+    epsilon: Number,
+) -> NumberArray[OneDimension]:
+    result = np.empty(size, dtype=np.float64)
+    for i in range(size):
+        result[i] = _stone_I_value(
+            element_at(kw, i),
+            element_at(kg, i),
+            element_at(km, i),
+            element_at(sw, i),
+            element_at(so, i),
+            element_at(sg, i),
+            element_at(swc, i),
+            element_at(sorw, i),
+            element_at(sorg, i),
+            epsilon,
+        )
+    return result
+
+
+@numba.njit(cache=True)
+def _stone_I_derivative_loop(
+    kw: NumberArray[OneDimension],
+    kg: NumberArray[OneDimension],
+    rw: NumberArray[OneDimension],
+    rg: NumberArray[OneDimension],
+    km: NumberArray[OneDimension],
+    sw: NumberArray[OneDimension],
+    so: NumberArray[OneDimension],
+    sg: NumberArray[OneDimension],
+    swc: NumberArray[OneDimension],
+    sorw: NumberArray[OneDimension],
+    sorg: NumberArray[OneDimension],
+    size: int,
+    epsilon: Number,
+) -> tuple[
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+]:
+    d0 = np.empty(size, dtype=np.float64)
+    d1 = np.empty(size, dtype=np.float64)
+    d2 = np.empty(size, dtype=np.float64)
+    d3 = np.empty(size, dtype=np.float64)
+    d4 = np.empty(size, dtype=np.float64)
+    d5 = np.empty(size, dtype=np.float64)
+    d6 = np.empty(size, dtype=np.float64)
+    for i in range(size):
+        d0[i], d1[i], d2[i], d3[i], d4[i], d5[i], d6[i] = _stone_I_derivatives(
+            element_at(kw, i),
+            element_at(kg, i),
+            element_at(km, i),
+            element_at(sw, i),
+            element_at(so, i),
+            element_at(sg, i),
+            element_at(swc, i),
+            element_at(sorw, i),
+            element_at(sorg, i),
+            epsilon,
+        )
+    return d0, d1, d2, d3, d4, d5, d6
 
 
 @mixing_rule
@@ -870,36 +1459,46 @@ def stone_I_rule(
     with `krocw = kr_max`. Honors the two-phase limits exactly. The result is zero at
     or below `Som` and is bounded to `[0, kr_max]`.
     """
-    kw, kg, sw, so, sg, swc, sorw, sorg, km = _broadcast(
+    return run_rule(  # type: ignore[arg-type]
+        _stone_I_value_loop,
+        kro_w,
         kro_w,
         kro_g,
+        krw,
+        krg,
+        kr_max,
         water_saturation,
         oil_saturation,
         gas_saturation,
         irreducible_water_saturation,
         residual_oil_saturation_water,
         residual_oil_saturation_gas,
-        kr_max,
     )
-    km = np.maximum(km, _EPS)
-    state = _stone_I_state(kw, kg, km, sw, so, sg, swc, sorw, sorg)
-    return _output(np.clip(state["raw"], 0.0, km), kro_w)
 
 
 @stone_I_rule.dfunc
-def _stone_I_rule_derivatives(
-    kro_w,
-    kro_g,
-    krw,
-    krg,
-    kr_max,
-    water_saturation,
-    oil_saturation,
-    gas_saturation,
-    irreducible_water_saturation,
-    residual_oil_saturation_water,
-    residual_oil_saturation_gas,
-):
+def _(
+    *,
+    kro_w: NumberOrArray[NDimension],
+    kro_g: NumberOrArray[NDimension],
+    krw: NumberOrArray[NDimension],
+    krg: NumberOrArray[NDimension],
+    kr_max: NumberOrArray[NDimension],
+    water_saturation: NumberOrArray[NDimension],
+    oil_saturation: NumberOrArray[NDimension],
+    gas_saturation: NumberOrArray[NDimension],
+    irreducible_water_saturation: NumberOrArray[NDimension],
+    residual_oil_saturation_water: NumberOrArray[NDimension],
+    residual_oil_saturation_gas: NumberOrArray[NDimension],
+) -> tuple[
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+    NumberOrArray[NDimension],
+]:
     """
     Exact gradient of `stone_I_rule` with respect to its arguments, treating the three
     saturations as independent. With `C = kro_w * kro_g / krocw` and `f = C * So* / (Y Z)`:
@@ -920,49 +1519,17 @@ def _stone_I_rule_derivatives(
     All are zero where the result is zero or bounded at `kr_max`. There is no
     dependence on `krw` or `krg`.
     """
-    kw, kg, sw, so, sg, swc, sorw, sorg, km = _broadcast(
+    return run_rule_derivatives(  # type: ignore[arg-type]
+        _stone_I_derivative_loop,
         kro_w,
         kro_g,
+        krw,
+        krg,
+        kr_max,
         water_saturation,
         oil_saturation,
         gas_saturation,
         irreducible_water_saturation,
         residual_oil_saturation_water,
         residual_oil_saturation_gas,
-        kr_max,
-    )
-    km = np.maximum(km, _EPS)
-    s = _stone_I_state(kw, kg, km, sw, so, sg, swc, sorw, sorg)
-    d, so_star, y, z, c = s["d"], s["so_star"], s["y"], s["z"], s["c"]
-    active = s["usable"] & (s["raw"] > 0.0) & (s["raw"] < km)
-
-    d_gas = np.where(s["alpha_active"], (sorw - sorg) / s["gas_range"], 0.0)
-    so_star_prime = d_gas * (1.0 - swc - so) / d**2
-    y_prime = s["mobile_water"] * d_gas / d**2
-    z_prime = -1.0 / d + sg * d_gas / d**2
-
-    base = so_star / (y * z)
-    dkro_dkro_w = np.where(active, kg / km * base, 0.0)
-    dkro_dkro_g = np.where(active, kw / km * base, 0.0)
-    dkro_dsw = np.where(active & (sw > swc), c * so_star / (y**2 * z * d), 0.0)
-    dkro_dso = np.where(active, c / (d * y * z), 0.0)
-    dkro_dsg = np.where(
-        active,
-        c
-        * (
-            so_star_prime / (y * z)
-            - so_star * y_prime / (y**2 * z)
-            - so_star * z_prime / (y * z**2)
-        ),
-        0.0,
-    )
-    zeros = np.zeros_like(kw)
-    return (
-        dkro_dkro_w,
-        dkro_dkro_g,
-        zeros,
-        zeros.copy(),
-        dkro_dsw,
-        dkro_dso,
-        dkro_dsg,
     )

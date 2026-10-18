@@ -5,7 +5,7 @@ import numpy as np
 import numpy.typing as npt
 from scipy.interpolate import PchipInterpolator
 
-from bores.types import NDimension, Number, NumberArray, NumberOrArray, Spacing
+from bores.types import NDimension, Number, NumberArray, NumberOrArray, OneDimension, Spacing
 from bores.utils import atleast_1d
 
 
@@ -344,7 +344,9 @@ def compute_killough_scanning_curve_scalar(
     return scanning_curve_value
 
 
-def _prepare_killough_arrays(*values: typing.Any) -> tuple[np.ndarray, ...]:
+def _prepare_killough_arrays(
+    *values: NumberOrArray[NDimension],
+) -> tuple[NumberArray[OneDimension], ...]:
     """
     Broadcast the inputs of a Killough array function to a common shape and convert them
     to contiguous float64 arrays.
@@ -353,10 +355,13 @@ def _prepare_killough_arrays(*values: typing.Any) -> tuple[np.ndarray, ...]:
     boolean imbibition flag against floating point curves).
     """
     broadcast = np.broadcast_arrays(*(np.atleast_1d(np.asarray(value)) for value in values))
-    return tuple(np.ascontiguousarray(array, dtype=np.float64) for array in broadcast)
+    return typing.cast(
+        tuple[NumberArray[OneDimension], ...],
+        tuple(np.ascontiguousarray(array, dtype=np.float64) for array in broadcast),
+    )
 
 
-def _floating_dtype_of(value: typing.Any) -> np.dtype:
+def get_floating_dtype(value: NumberOrArray[NDimension]) -> np.dtype:
     """Floating dtype of `value`, or float64 if it is not floating point."""
     dtype = np.asarray(value).dtype
     return dtype if np.issubdtype(dtype, np.floating) else np.dtype(np.float64)
@@ -462,24 +467,24 @@ def compute_killough_scanning_curve(
         maximum_array,
         flag_array,
     ) = _prepare_killough_arrays(
-        saturation,
-        drainage_curve_value,
-        imbibition_curve_value,
-        reversal_saturation,
-        maximum_historical_saturation,
-        is_imbibition,
+        saturation,  # type: ignore[arg-type]
+        drainage_curve_value,  # type: ignore[arg-type]
+        imbibition_curve_value,  # type: ignore[arg-type]
+        reversal_saturation,  # type: ignore[arg-type]
+        maximum_historical_saturation,  # type: ignore[arg-type]
+        is_imbibition,  # type: ignore[arg-type]
     )
-    result = compute_killough_scanning_curve_array(
-        saturation=saturation_array,
-        drainage_curve_value=drainage_array,
-        imbibition_curve_value=imbibition_array,
-        reversal_saturation=reversal_array,
-        maximum_historical_saturation=maximum_array,
-        is_imbibition=flag_array,
-        scanning_exponent=scanning_exponent,
-        numerical_epsilon=numerical_epsilon,
+    result: NumberArray[OneDimension] = compute_killough_scanning_curve_array(
+        saturation=saturation_array,  # type: ignore[arg-type]
+        drainage_curve_value=drainage_array,  # type: ignore[arg-type]
+        imbibition_curve_value=imbibition_array,  # type: ignore[arg-type]
+        reversal_saturation=reversal_array,  # type: ignore[arg-type]
+        maximum_historical_saturation=maximum_array,  # type: ignore[arg-type]
+        is_imbibition=flag_array,  # type: ignore[arg-type]
+        scanning_exponent=scanning_exponent,  # type: ignore[arg-type]
+        numerical_epsilon=numerical_epsilon,  # type: ignore[arg-type]
     )
-    return result.astype(_floating_dtype_of(drainage_curve_value), copy=False)  # type: ignore[return-value]
+    return result.astype(get_floating_dtype(drainage_curve_value), copy=False)  # type: ignore[return-value]
 
 
 @numba.njit(cache=True, inline="always")
@@ -680,25 +685,25 @@ def compute_killough_scanning_curve_derivative(
         maximum_array,
         flag_array,
     ) = _prepare_killough_arrays(
-        saturation,
-        drainage_curve_value,
-        imbibition_curve_value,
-        drainage_curve_derivative,
-        imbibition_curve_derivative,
-        reversal_saturation,
-        maximum_historical_saturation,
-        is_imbibition,
+        saturation,  # type: ignore[arg-type]
+        drainage_curve_value,  # type: ignore[arg-type]
+        imbibition_curve_value,  # type: ignore[arg-type]
+        drainage_curve_derivative,  # type: ignore[arg-type]
+        imbibition_curve_derivative,  # type: ignore[arg-type]
+        reversal_saturation,  # type: ignore[arg-type]
+        maximum_historical_saturation,  # type: ignore[arg-type]
+        is_imbibition,  # type: ignore[arg-type]
     )
-    result = compute_killough_scanning_curve_derivative_array(
-        saturation=saturation_array,
-        drainage_curve_value=drainage_value_array,
-        imbibition_curve_value=imbibition_value_array,
-        drainage_curve_derivative=drainage_derivative_array,
-        imbibition_curve_derivative=imbibition_derivative_array,
-        reversal_saturation=reversal_array,
-        maximum_historical_saturation=maximum_array,
-        is_imbibition=flag_array,
-        scanning_exponent=scanning_exponent,
-        numerical_epsilon=numerical_epsilon,
+    result: NumberArray[OneDimension] = compute_killough_scanning_curve_derivative_array(
+        saturation=saturation_array,  # type: ignore[arg-type]
+        drainage_curve_value=drainage_value_array,  # type: ignore[arg-type]
+        imbibition_curve_value=imbibition_value_array,  # type: ignore[arg-type]
+        drainage_curve_derivative=drainage_derivative_array,  # type: ignore[arg-type]
+        imbibition_curve_derivative=imbibition_derivative_array,  # type: ignore[arg-type]
+        reversal_saturation=reversal_array,  # type: ignore[arg-type]
+        maximum_historical_saturation=maximum_array,  # type: ignore[arg-type]
+        is_imbibition=flag_array,  # type: ignore[arg-type]
+        scanning_exponent=scanning_exponent,  # type: ignore[arg-type]
+        numerical_epsilon=numerical_epsilon,  # type: ignore[arg-type]
     )
-    return result.astype(_floating_dtype_of(drainage_curve_derivative), copy=False)  # type: ignore[return-value]
+    return result.astype(get_floating_dtype(drainage_curve_derivative), copy=False)  # type: ignore[return-value]

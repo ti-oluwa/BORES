@@ -155,6 +155,37 @@ class TestRuleContract:
             assert float(result[cell]) == pytest.approx(float(rule(**single)), abs=1e-12)
 
 
+@pytest.mark.parametrize("rule_name", RULES)
+class TestInputHandling:
+    def test_scalar_inputs_give_a_scalar(self, rule_name):
+        rule = get_mixing_rule(rule_name)
+        result = rule(**_rule_inputs(0.4, 0.2, 1.0))
+        assert np.ndim(result) == 0
+
+    def test_multidimensional_inputs_keep_their_shape(self, rule_name):
+        rule = get_mixing_rule(rule_name)
+        sw = np.linspace(0.3, 0.5, 6).reshape(2, 3)
+        sg = np.linspace(0.1, 0.25, 6).reshape(2, 3)
+        inputs = {
+            key: np.array([
+                [_rule_inputs(a, b, 1.0)[key] for a, b in zip(ra, rb, strict=True)]
+                for ra, rb in zip(sw, sg, strict=True)
+            ])
+            for key in ("kro_w", "kro_g", "krw", "krg", "oil_saturation")
+        }
+        inputs.update(
+            kr_max=1.0,
+            water_saturation=sw,
+            gas_saturation=sg,
+            irreducible_water_saturation=SWC,
+            residual_oil_saturation_water=SORW,
+            residual_oil_saturation_gas=SORG,
+        )
+        assert rule(**inputs).shape == (2, 3)
+        for derivative in rule.partial_derivatives(**inputs).values():
+            assert np.asarray(derivative).shape == (2, 3)
+
+
 class TestRuleFormulas:
     def test_baker_is_the_eclipse_saturation_weighted_interpolation(self):
         inputs = _rule_inputs(0.4, 0.2, 1.0)
