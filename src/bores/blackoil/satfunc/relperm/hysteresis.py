@@ -907,8 +907,8 @@ class KilloughLandRelPermTable:
         oil_relperm_endpoint = self.get_oil_relperm_endpoint()
 
         # Three-phase oil via mixing rule
-        three_phase_mixing_rule = typing.cast(MixingRule, self.mixing_rule)
-        oil_relative_permeability = three_phase_mixing_rule(
+        mixing_rule = typing.cast(MixingRule, self.mixing_rule)
+        oil_relative_permeability = mixing_rule(
             kro_w=oil_relative_permeability_water,
             kro_g=oil_relative_permeability_gas,
             krw=water_relative_permeability,
@@ -1228,9 +1228,9 @@ class KilloughLandRelPermTable:
         oil_relperm_endpoint = self.get_oil_relperm_endpoint()
 
         # Three-phase oil mixing rule - chain rule
-        three_phase_mixing_rule = typing.cast(MixingRule, self.mixing_rule)
+        mixing_rule = typing.cast(MixingRule, self.mixing_rule)
         mixing_rule_partial_derivatives = get_mixing_rule_partial_derivatives(
-            rule=three_phase_mixing_rule,
+            rule=mixing_rule,
             kro_w=oil_relative_permeability_water,
             kro_g=oil_relative_permeability_gas,
             krw=water_relative_permeability,
