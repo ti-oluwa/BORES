@@ -1126,7 +1126,9 @@ def test_attached_flowing_fluid_records_densities_and_a_zero_flow_density():
     assert untouched.flowing_fluid is None
 
 
-def resolve_producer(*, limits=None, vfp_tables=None, vfp_number=None, mode=None):
+def resolve_producer(
+    *, limits=None, vfp_tables=None, vfp_number=None, mode=None, target_rate=None
+):
     """Resolves a three-connection producer on a real compiled system, and returns the workspace."""
     import attrs
 
@@ -1145,7 +1147,8 @@ def resolve_producer(*, limits=None, vfp_tables=None, vfp_number=None, mode=None
         "P1",
         surface_location=(25.0, 25.0),
         perforation_depths=(0.0, 150.0),
-        target_bhp=1000.0,
+        target_bhp=None if target_rate else 1000.0,
+        target_rate=target_rate,
         reference_depth=75.0,
         limits=limits,
     )
@@ -1523,3 +1526,63 @@ def test_hydrostatic_pressures_keep_the_dtype_they_are_given():
     )
     assert single.dtype == np.float32 and double.dtype == np.float64
     assert single == pytest.approx(double, rel=1e-5)
+
+
+WELLBORE_FACTORIES = [
+    ("homogeneous", "homogeneous_wellbore"),
+    ("beggs_and_brill", "beggs_and_brill_wellbore"),
+    ("hagedorn_brown", "hagedorn_brown_wellbore"),
+    ("gray", "gray_wellbore"),
+    ("woldesemayat_ghajar", "woldesemayat_ghajar_wellbore"),
+]
+
+
+@pytest.mark.parametrize("module, factory", WELLBORE_FACTORIES)
+def test_wellbore_options_hold_only_numbers_so_jitted_calls_stay_cheap(module, factory):
+    import importlib
+
+    make = getattr(importlib.import_module(f"bores.wells.hydraulics.{module}"), factory)
+    options = make(tubing_inner_diameter=0.25).options
+    assert all(isinstance(value, int | float) for value in options)
+
+
+@pytest.mark.parametrize("module, factory", WELLBORE_FACTORIES)
+@pytest.mark.parametrize("unit_system", list(UnitSystem))
+def test_wellbore_unit_system_survives_the_numeric_tag_and_conversion(
+    module, factory, unit_system
+):
+    import importlib
+
+    make = getattr(importlib.import_module(f"bores.wells.hydraulics.{module}"), factory)
+    model = make(tubing_inner_diameter=0.25, unit_system=unit_system)
+    assert model.options.unit_system == unit_system
+    converted = model.convert(UnitSystem.METRIC)
+    assert converted.options.unit_system == UnitSystem.METRIC
+
+
+def test_a_rate_target_is_met_when_the_pressure_profile_depends_on_every_phase():
+    from bores.wells.hydraulics.homogeneous import homogeneous_wellbore
+    from bores.wells.resolution.spec import ConnectionPressureMode
+
+    workspace, _ = resolve_producer(
+        vfp_tables=homogeneous_wellbore(tubing_inner_diameter=0.25),
+        target_rate=1000.0,
+        mode=ConnectionPressureMode.HYDRAULIC,
+    )
+    assert workspace.surface_oil_rates[0] == pytest.approx(1000.0, rel=1e-3)
+    # Water and gas flow too, so their rates are recorded at every connection.
+    assert np.all(workspace.connection_water_rates > 0.0)
+    assert np.all(workspace.connection_gas_rates > 0.0)
+
+
+def test_a_rate_target_is_met_with_hydrostatic_connection_pressures(tmp_path):
+    from bores.wells.resolution.spec import ConnectionPressureMode
+
+    tables = VFPTables.from_deck(producer_table(tmp_path))
+    workspace, _ = resolve_producer(
+        vfp_tables=tables,
+        vfp_number=3,
+        target_rate=1000.0,
+        mode=ConnectionPressureMode.HYDROSTATIC,
+    )
+    assert workspace.surface_oil_rates[0] == pytest.approx(1000.0, rel=1e-3)

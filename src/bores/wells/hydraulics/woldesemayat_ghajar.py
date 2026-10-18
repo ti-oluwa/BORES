@@ -19,6 +19,8 @@ from bores.types import (
     UnitSystem,
 )
 from bores.wells.hydraulics.base import (
+    UNIT_SYSTEM_TAGS,
+    UNIT_SYSTEMS_BY_TAG,
     PressureDrop,
     SurfaceFluidProperties,
     WellBoreModel,
@@ -140,8 +142,16 @@ class WoldesemayatGhajarWellbore(typing.NamedTuple):
     themselves stay in this model's native units throughout, converted
     by `hydrostatic_scale` as usual."""
 
-    unit_system: UnitSystem
-    """This model's unit system."""
+    unit_system_tag: int
+    """
+    Tag of this model's unit system in `UNIT_SYSTEM_TAGS`. Held as a number so the model stays
+    cheap to pass to jitted functions; read it as `unit_system`.
+    """
+
+    @property
+    def unit_system(self) -> UnitSystem:
+        """This model's unit system."""
+        return UNIT_SYSTEMS_BY_TAG[self.unit_system_tag]
 
     def convert(
         self,
@@ -179,7 +189,7 @@ class WoldesemayatGhajarWellbore(typing.NamedTuple):
             si_density_factor=si_factors["density"],
             si_pressure_factor=si_factors["pressure"],
             centipoise_to_pascal_second=si_factors["viscosity"],
-            unit_system=target,
+            unit_system_tag=UNIT_SYSTEM_TAGS[target],
         )
 
 
@@ -281,7 +291,7 @@ def woldesemayat_ghajar_wellbore(
         standard_atmosphere_si=c.STANDARD_PRESSURE_PASCAL,
         dyne_per_cm_to_newton_per_m=c.DYNE_PER_CENTIMETER_TO_NEWTON_PER_METER,
         centipoise_to_pascal_second=si_factors["viscosity"],
-        unit_system=unit_system,
+        unit_system_tag=UNIT_SYSTEM_TAGS[unit_system],
     )
     return WellBoreModel(name="woldesemayat_ghajar", options=options)
 

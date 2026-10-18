@@ -338,10 +338,17 @@ A rule is a function of the two-phase oil curves, the water and gas curves, the 
 import numpy as np
 import bores
 
+
 @bores.mixing_rule
 def my_rule(
-    kro_w, kro_g, krw, krg, kr_max,
-    water_saturation, oil_saturation, gas_saturation,
+    kro_w,
+    kro_g,
+    krw,
+    krg,
+    kr_max,
+    water_saturation,
+    oil_saturation,
+    gas_saturation,
     irreducible_water_saturation,
     residual_oil_saturation_water,
     residual_oil_saturation_gas,

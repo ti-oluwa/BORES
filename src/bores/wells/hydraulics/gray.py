@@ -19,6 +19,8 @@ from bores.types import (
     UnitSystem,
 )
 from bores.wells.hydraulics.base import (
+    UNIT_SYSTEM_TAGS,
+    UNIT_SYSTEMS_BY_TAG,
     PressureDrop,
     SurfaceFluidProperties,
     WellBoreModel,
@@ -112,8 +114,16 @@ class GrayWellbore(typing.NamedTuple):
     `1.0` for a FIELD model. Same reason as `field_length_factor`.
     """
 
-    unit_system: UnitSystem
-    """This model's unit system."""
+    unit_system_tag: int
+    """
+    Tag of this model's unit system in `UNIT_SYSTEM_TAGS`. Held as a number so the model stays
+    cheap to pass to jitted functions; read it as `unit_system`.
+    """
+
+    @property
+    def unit_system(self) -> UnitSystem:
+        """This model's unit system."""
+        return UNIT_SYSTEMS_BY_TAG[self.unit_system_tag]
 
     def convert(
         self,
@@ -150,7 +160,7 @@ class GrayWellbore(typing.NamedTuple):
             ),
             field_length_factor=field_factors["length"],
             field_density_factor=field_factors["density"],
-            unit_system=target,
+            unit_system_tag=UNIT_SYSTEM_TAGS[target],
         )
 
 
@@ -251,7 +261,7 @@ def gray_wellbore(
         ),
         field_length_factor=get_conversion_factors(unit_system, UnitSystem.FIELD)["length"],
         field_density_factor=get_conversion_factors(unit_system, UnitSystem.FIELD)["density"],
-        unit_system=unit_system,
+        unit_system_tag=UNIT_SYSTEM_TAGS[unit_system],
     )
     return WellBoreModel(name="gray", options=options)
 

@@ -150,7 +150,10 @@ def solve_connection_pressures_and_rates(
     :param workspace: This well's `PerforationWorkspace`.
     :param connection_samples: Reservoir samples, same order as `workspace`'s arrays.
     :param reference_pressure: BHP held fixed while iterating.
-    :param relevant_phases: Mask of which phases to accumulate rates for.
+    :param relevant_phases: Mask of the phases whose totals are returned, which are the ones
+        counting toward the controlled quantity. A producer's per-connection rates, and so its
+        pressure profile, always include every phase, since all of them flow. An injector
+        flows only the phases in the mask.
     :param is_injector: Selects the drawdown sign convention.
     :param control_spec: Supplies the iteration cap, convergence tolerance,
         and `connection_pressure_mode`.
@@ -243,22 +246,26 @@ def solve_connection_pressures_and_rates(
             oil_formation_volume_factors=workspace.oil_formation_volume_factors,
             water_formation_volume_factors=workspace.water_formation_volume_factors,
             gas_formation_volume_factors=workspace.gas_formation_volume_factors,
-            relevant_oil=relevant_oil,
-            relevant_water=relevant_water,
-            relevant_gas=relevant_gas,
+            relevant_oil=relevant_oil or not is_injector,
+            relevant_water=relevant_water or not is_injector,
+            relevant_gas=relevant_gas or not is_injector,
             is_injector=is_injector,
             radial_flow_constant=control_spec.radial_flow_constant,
             out_connection_oil_rates=workspace.connection_oil_rates,
             out_connection_water_rates=workspace.connection_water_rates,
             out_connection_gas_rates=workspace.connection_gas_rates,
         )
-        phase_rates = PhaseValues(oil=oil_rate, water=water_rate, gas=gas_rate)
-        surface_phase_rates = PhaseValues(
-            oil=surface_oil_rate,
-            water=surface_water_rate,
-            gas=surface_gas_rate,
+        phase_rates = PhaseValues(
+            oil=oil_rate if relevant_oil else 0.0,
+            water=water_rate if relevant_water else 0.0,
+            gas=gas_rate if relevant_gas else 0.0,
         )
-        new_total_rate = oil_rate + water_rate + gas_rate
+        surface_phase_rates = PhaseValues(
+            oil=surface_oil_rate if relevant_oil else 0.0,
+            water=surface_water_rate if relevant_water else 0.0,
+            gas=surface_gas_rate if relevant_gas else 0.0,
+        )
+        new_total_rate = phase_rates.oil + phase_rates.water + phase_rates.gas
         if hydrostatic_connection_pressure:
             connection_pressures = compute_hydrostatic_connection_pressures(
                 reference_depth=reference_depth,

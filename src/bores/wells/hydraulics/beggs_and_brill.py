@@ -20,6 +20,8 @@ from bores.types import (
 )
 from bores.utils import scale
 from bores.wells.hydraulics.base import (
+    UNIT_SYSTEM_TAGS,
+    UNIT_SYSTEMS_BY_TAG,
     PressureDrop,
     SurfaceFluidProperties,
     WellBoreModel,
@@ -99,8 +101,16 @@ class BeggsAndBrillWellbore(typing.NamedTuple):
     conversion.
     """
 
-    unit_system: UnitSystem
-    """This model's unit system."""
+    unit_system_tag: int
+    """
+    Tag of this model's unit system in `UNIT_SYSTEM_TAGS`. Held as a number so the model stays
+    cheap to pass to jitted functions; read it as `unit_system`.
+    """
+
+    @property
+    def unit_system(self) -> UnitSystem:
+        """This model's unit system."""
+        return UNIT_SYSTEMS_BY_TAG[self.unit_system_tag]
 
     def convert(
         self,
@@ -134,7 +144,7 @@ class BeggsAndBrillWellbore(typing.NamedTuple):
                 get_unit_system_constant(prefix="GRAVITATIONAL_FACTOR", unit_system=target)
                 * get_unit_system_constant(prefix="HYDROSTATIC_AREA_FACTOR", unit_system=target)
             ),
-            unit_system=target,
+            unit_system_tag=UNIT_SYSTEM_TAGS[target],
         )
 
 
@@ -213,7 +223,7 @@ def beggs_and_brill_wellbore(
             get_unit_system_constant(prefix="GRAVITATIONAL_FACTOR", unit_system=unit_system)
             * get_unit_system_constant(prefix="HYDROSTATIC_AREA_FACTOR", unit_system=unit_system)
         ),
-        unit_system=unit_system,
+        unit_system_tag=UNIT_SYSTEM_TAGS[unit_system],
     )
     return WellBoreModel(name="beggs_and_brill", options=options)
 

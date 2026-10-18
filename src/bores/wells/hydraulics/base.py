@@ -13,6 +13,8 @@ from bores.wells.state import PhaseValues
 
 __all__ = [
     "MINIMUM_INCLINATION_COSINE",
+    "UNIT_SYSTEMS_BY_TAG",
+    "UNIT_SYSTEM_TAGS",
     "ConnectionStep",
     "PressureDrop",
     "SurfaceFluidProperties",
@@ -318,6 +320,18 @@ def get_unit_system_constant(prefix: str, unit_system: UnitSystem) -> Number:
     :returns: `f"{prefix}_{unit_system.name}"` from `bores.constants.c`.
     """
     return getattr(c, f"{prefix}_{unit_system.name.upper()}")
+
+
+UNIT_SYSTEM_TAGS: typing.Mapping[UnitSystem, int] = {
+    unit_system: tag for tag, unit_system in enumerate(UnitSystem)
+}
+"""
+Integer tag of each unit system. A wellbore model keeps its unit system as this tag so that the
+tuple passed to jitted functions holds only numbers, which numba reads far faster than an enum.
+"""
+
+UNIT_SYSTEMS_BY_TAG: tuple[UnitSystem, ...] = tuple(UnitSystem)
+"""Unit system of each tag in `UNIT_SYSTEM_TAGS`."""
 
 
 def get_gravitational_acceleration(unit_system: UnitSystem) -> Number:
