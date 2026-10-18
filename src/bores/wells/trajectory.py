@@ -118,6 +118,34 @@ class WellTrajectory:
             TrajectoryStation(measured_depth=end_md, x=end_x, y=end_y, z=end_z),
         )
 
+    def get_measured_depth_at_depth(self, true_vertical_depth: Number) -> Number:
+        """
+        Returns the measured depth of the first point along the path, from the top, at
+        `true_vertical_depth`.
+
+        A horizontal or S-shaped section reaches the same true vertical depth at more than one
+        measured depth. This returns the shallowest of them, which is where a well that descends
+        to its depth first reaches it.
+
+        :param true_vertical_depth: Positive-down true vertical depth.
+        :returns: The measured depth.
+        :raises ValidationError: If the path never reaches `true_vertical_depth`.
+        """
+        for previous, current in zip(self.stations, self.stations[1:], strict=False):
+            low, high = sorted((previous.z, current.z))
+            if not low <= true_vertical_depth <= high:
+                continue
+            span = current.z - previous.z
+            fraction = 0.0 if span == 0 else (true_vertical_depth - previous.z) / span
+            return previous.measured_depth + fraction * (
+                current.measured_depth - previous.measured_depth
+            )
+        raise ValidationError(
+            f"This trajectory never reaches a true vertical depth of {true_vertical_depth}; it "
+            f"spans [{min(station.z for station in self.stations)}, "
+            f"{max(station.z for station in self.stations)}]."
+        )
+
     def position_at(self, measured_depth: Number) -> tuple[Number, Number, Number]:
         """
         Returns a linearly-interpolated `(x, y, z)` at `measured_depth`.

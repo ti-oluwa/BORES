@@ -649,18 +649,18 @@ def run_rule_derivatives(
     )
 
 
-@numba.njit(cache=True, inline="always")
+@numba.njit(cache=True, inline="always", error_model="numpy")
 def element_at(array: NumberArray[OneDimension], index: int) -> Number:
     """Element `index` of `array`, or its only element when it holds a single value."""
     return array[0] if array.size == 1 else array[index]  # type: ignore[return-value]
 
 
-@numba.njit(cache=True, inline="always")
+@numba.njit(cache=True, inline="always", error_model="numpy")
 def _min_value(kro_w: Number, kro_g: Number) -> Number:
     return min(kro_w, kro_g)
 
 
-@numba.njit(cache=True, inline="always")
+@numba.njit(cache=True, inline="always", error_model="numpy")
 def _min_derivatives(
     kro_w: Number, kro_g: Number
 ) -> tuple[Number, Number, Number, Number, Number, Number, Number]:
@@ -671,7 +671,7 @@ def _min_derivatives(
     return 0.5, 0.5, 0.0, 0.0, 0.0, 0.0, 0.0
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, error_model="numpy")
 def _min_value_loop(
     kw: NumberArray[OneDimension],
     kg: NumberArray[OneDimension],
@@ -693,7 +693,7 @@ def _min_value_loop(
     return result
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, error_model="numpy")
 def _min_derivative_loop(
     kw: NumberArray[OneDimension],
     kg: NumberArray[OneDimension],
@@ -812,7 +812,7 @@ def _(
     )
 
 
-@numba.njit(cache=True, inline="always")
+@numba.njit(cache=True, inline="always", error_model="numpy")
 def _baker_value(
     kro_w: Number,
     kro_g: Number,
@@ -829,7 +829,7 @@ def _baker_value(
     return (gas * kro_g + mobile_water * kro_w) / total
 
 
-@numba.njit(cache=True, inline="always")
+@numba.njit(cache=True, inline="always", error_model="numpy")
 def _baker_derivatives(
     kro_w: Number,
     kro_g: Number,
@@ -853,7 +853,7 @@ def _baker_derivatives(
     return mobile_water / total, gas / total, 0.0, 0.0, d_sw, 0.0, d_sg
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, error_model="numpy")
 def _baker_value_loop(
     kw: NumberArray[OneDimension],
     kg: NumberArray[OneDimension],
@@ -882,7 +882,7 @@ def _baker_value_loop(
     return result
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, error_model="numpy")
 def _baker_derivative_loop(
     kw: NumberArray[OneDimension],
     kg: NumberArray[OneDimension],
@@ -1016,7 +1016,7 @@ def _(
     )
 
 
-@numba.njit(cache=True, inline="always")
+@numba.njit(cache=True, inline="always", error_model="numpy")
 def _stone_II_value(
     kro_w: Number,
     kro_g: Number,
@@ -1030,7 +1030,7 @@ def _stone_II_value(
     return min(max(raw, 0.0), krocw)
 
 
-@numba.njit(cache=True, inline="always")
+@numba.njit(cache=True, inline="always", error_model="numpy")
 def _stone_II_derivatives(
     kro_w: Number,
     kro_g: Number,
@@ -1048,7 +1048,7 @@ def _stone_II_derivatives(
     return 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, error_model="numpy")
 def _stone_II_value_loop(
     kw: NumberArray[OneDimension],
     kg: NumberArray[OneDimension],
@@ -1077,7 +1077,7 @@ def _stone_II_value_loop(
     return result
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, error_model="numpy")
 def _stone_II_derivative_loop(
     kw: NumberArray[OneDimension],
     kg: NumberArray[OneDimension],
@@ -1207,7 +1207,7 @@ def _(
     )
 
 
-@numba.njit(cache=True, inline="always")
+@numba.njit(cache=True, inline="always", error_model="numpy")
 def _stone_I_terms(
     kro_w: Number,
     kro_g: Number,
@@ -1272,7 +1272,7 @@ def _stone_I_terms(
     return (False, krocw, gas_range, alpha_active, 1.0, 0.0, mobile_water, 1.0, 1.0, 0.0, 0.0)
 
 
-@numba.njit(cache=True, inline="always")
+@numba.njit(cache=True, inline="always", error_model="numpy")
 def _stone_I_value(
     kro_w: Number,
     kro_g: Number,
@@ -1300,7 +1300,7 @@ def _stone_I_value(
     return min(max(terms[10], 0.0), terms[1])
 
 
-@numba.njit(cache=True, inline="always")
+@numba.njit(cache=True, inline="always", error_model="numpy")
 def _stone_I_derivatives(
     kro_w: Number,
     kro_g: Number,
@@ -1349,7 +1349,7 @@ def _stone_I_derivatives(
     return kro_g / krocw * base, kro_w / krocw * base, 0.0, 0.0, d_sw, d_so, d_sg
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, error_model="numpy")
 def _stone_I_value_loop(
     kw: NumberArray[OneDimension],
     kg: NumberArray[OneDimension],
@@ -1382,7 +1382,7 @@ def _stone_I_value_loop(
     return result
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, error_model="numpy")
 def _stone_I_derivative_loop(
     kw: NumberArray[OneDimension],
     kg: NumberArray[OneDimension],

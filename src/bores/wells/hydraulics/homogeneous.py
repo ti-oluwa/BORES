@@ -277,9 +277,11 @@ def compute_segment_drop(
 def compute_perforation_pressures(
     model: HomogeneousWellbore,
     reference_depth: Number,
+    reference_measured_depth: Number,
     reference_pressure: Number,
     connection_phase_rates: typing.Sequence[PhaseValues],
     representative_depths: NumberArray[OneDimension],
+    representative_measured_depths: NumberArray[OneDimension],
     inclinations_from_vertical: NumberArray[OneDimension],
     connection_samples: typing.Sequence[ConnectionSample],
     is_injector: bool,
@@ -303,11 +305,14 @@ def compute_perforation_pressures(
 
     :param model: This well's `HomogeneousWellbore`.
     :param reference_depth: The well's BHP/THP reporting datum.
+    :param reference_measured_depth: Measured depth along the wellbore of `reference_depth`.
     :param reference_pressure: Pressure at `reference_depth`.
     :param connection_phase_rates: Each connection's own rate of each
         phase, at reservoir conditions - not the well total. Same order
         as `connection_samples`.
     :param representative_depths: One depth per connection, same order as `connection_samples`.
+    :param representative_measured_depths: One measured depth along the wellbore per connection,
+        same order as `connection_samples`.
     :param inclinations_from_vertical: One inclination per connection, in
         radians, same order as `connection_samples`.
     :param connection_samples: Reservoir conditions at each connection.
@@ -343,9 +348,10 @@ def compute_perforation_pressures(
 
     for step in plan_connection_walk(
         reference_depth=reference_depth,
+        reference_measured_depth=reference_measured_depth,
         representative_depths=typing.cast(typing.Sequence[Number], representative_depths),
-        inclinations_from_vertical=typing.cast(
-            typing.Sequence[Number], inclinations_from_vertical
+        representative_measured_depths=typing.cast(
+            typing.Sequence[Number], representative_measured_depths
         ),
         connection_phase_rates=connection_phase_rates,
     ):

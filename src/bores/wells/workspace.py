@@ -102,6 +102,12 @@ class PerforationWorkspace(typing.NamedTuple):
     representative_depths: NumberArray[OneDimension]
     """Representative depth of each connection, for hydrostatic pressure correction."""
 
+    representative_measured_depths: NumberArray[OneDimension]
+    """Representative measured depth of each connection along the wellbore, for friction."""
+
+    reference_measured_depth: Number
+    """Measured depth along the wellbore of this well's reference depth."""
+
     inclinations_from_vertical: NumberArray[OneDimension]
     """Inclination of each connection from vertical, for hydrostatic pressure correction."""
 
@@ -130,8 +136,10 @@ class PerforationWorkspace(typing.NamedTuple):
 def build_perforation_workspace(
     well_indices: NumberArray[OneDimension],
     representative_depths: NumberArray[OneDimension],
+    representative_measured_depths: NumberArray[OneDimension],
     inclinations_from_vertical: NumberArray[OneDimension],
     connection_samples: typing.Sequence[ConnectionSample],
+    reference_measured_depth: Number,
     connection_conductivities: NumberArray[OneDimension] | None = None,
     d_factor: Number = math.nan,
     dtype: npt.DTypeLike = None,
@@ -142,8 +150,12 @@ def build_perforation_workspace(
     :param well_indices: This well's active connections' connection
         factors, at zero rate. Becomes `static_well_indices`.
     :param representative_depths: Matching depths, same order as `well_indices`.
+    :param representative_measured_depths: Matching measured depths along the wellbore, same
+        order as `well_indices`.
     :param inclinations_from_vertical: Matching inclinations, same order as `well_indices`.
     :param connection_samples: Matching reservoir conditions, same order as `well_indices`.
+    :param reference_measured_depth: Measured depth along the wellbore of this well's reference
+        depth.
     :param connection_conductivities: Matching Peaceman numerators, same
         order as `well_indices`, `NaN` at an overridden connection. All
         `NaN` (the default) if this well has no non-Darcy correction to apply.
@@ -197,6 +209,11 @@ def build_perforation_workspace(
             NumberArray[OneDimension],
             np.asarray(representative_depths, dtype=resolved_dtype),
         ),
+        representative_measured_depths=typing.cast(
+            NumberArray[OneDimension],
+            np.asarray(representative_measured_depths, dtype=resolved_dtype),
+        ),
+        reference_measured_depth=reference_measured_depth,
         inclinations_from_vertical=typing.cast(
             NumberArray[OneDimension],
             np.asarray(inclinations_from_vertical, dtype=resolved_dtype),

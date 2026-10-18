@@ -192,7 +192,7 @@ class WellState(StoreSerializable):
 
     def get_perforation_state(self, cell_index: int) -> PerforationState:
         """
-        Look up and return the `PerforationState` connected to a given cell.
+        Look up and return the first `PerforationState` connected to a given cell.
 
         :param cell_index: 0-based `Grid` cell index.
         :returns: Matching `PerforationState`.

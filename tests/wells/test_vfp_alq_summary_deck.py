@@ -1240,7 +1240,7 @@ def test_resolved_thp_with_a_vfp_table_accounts_for_the_datum_depth(tmp_path):
     assert workspace.thps[0] == pytest.approx(expected)
 
 
-def hydrostatic_samples(oil_densities=(40.0, 50.0, 60.0)):
+def hydrostatic_samples(oil_densities=(40.0, 50.0, 60.0), mobility=1.0):
     from bores.wells.hydraulics.base import PhaseValues
     from bores.wells.state import ConnectionSample
 
@@ -1250,7 +1250,7 @@ def hydrostatic_samples(oil_densities=(40.0, 50.0, 60.0)):
             pressure=3000.0,
             temperature=200.0,
             phase_saturations=PhaseValues(0.5, 0.3, 0.2),
-            phase_mobilities=PhaseValues(1.0, 1.0, 1.0),
+            phase_mobilities=PhaseValues(mobility, mobility, mobility),
             phase_densities=PhaseValues(oil_density, 60.0, 10.0),
             phase_viscosities=PhaseValues(1.0, 1.0, 1.0),
             gas_liquid_surface_tension=20.0,
@@ -1379,13 +1379,16 @@ def test_a_vfp_well_resolves_with_hydrostatic_connection_pressures(tmp_path):
     assert not np.allclose(workspace.connection_gas_rates, uniform.connection_gas_rates)
 
 
-def walk(*, reference_depth, depths, oil, inclinations=None):
+def walk(*, reference_depth, depths, oil, measured_depths=None, reference_measured_depth=None):
     from bores.wells.hydraulics.base import PhaseValues, plan_connection_walk
 
     return plan_connection_walk(
         reference_depth=reference_depth,
+        reference_measured_depth=(
+            reference_depth if reference_measured_depth is None else reference_measured_depth
+        ),
         representative_depths=depths,
-        inclinations_from_vertical=inclinations or [0.0] * len(depths),
+        representative_measured_depths=depths if measured_depths is None else measured_depths,
         connection_phase_rates=[PhaseValues(oil=q, water=0.0, gas=0.0) for q in oil],
     )
 
@@ -1419,36 +1422,49 @@ def test_walk_with_every_connection_above_the_reference_carries_nothing_into_the
     assert second.carried_rates.oil == pytest.approx(5.0)
 
 
-def test_segment_length_follows_the_inclination_and_degrades_to_vertical_at_horizontal():
-    import math
+def test_segment_length_is_the_distance_along_the_wellbore():
+    # A 60 degree section: 100 ft of vertical distance is 200 ft along the hole.
+    steps = walk(
+        reference_depth=100.0,
+        depths=[100.0, 200.0],
+        measured_depths=[1000.0, 1200.0],
+        oil=[1, 1],
+    )
+    assert steps[1].vertical_distance == pytest.approx(100.0)
+    assert steps[1].segment_length == pytest.approx(200.0)
 
-    from bores.wells.hydraulics.base import get_segment_length
 
-    assert get_segment_length(
-        vertical_distance=100.0, inclination_from_vertical=0.0
-    ) == pytest.approx(100.0)
-    assert get_segment_length(
-        vertical_distance=100.0, inclination_from_vertical=math.radians(60.0)
-    ) == pytest.approx(200.0)
-    assert get_segment_length(
-        vertical_distance=7.0, inclination_from_vertical=math.pi / 2
-    ) == pytest.approx(7.0)
+def test_a_horizontal_segment_has_length_but_no_vertical_extent():
+    steps = walk(
+        reference_depth=5000.0,
+        depths=[5000.0, 5000.0, 5000.0],
+        measured_depths=[8000.0, 8400.0, 8900.0],
+        reference_measured_depth=7800.0,
+        oil=[1, 1, 1],
+    )
+    by_connection = {step.connection_index: step for step in steps}
+    assert all(step.vertical_distance == pytest.approx(0.0) for step in steps)
+    assert by_connection[0].segment_length == pytest.approx(200.0)  # reference to the heel
+    assert by_connection[1].segment_length == pytest.approx(400.0)
+    assert by_connection[2].segment_length == pytest.approx(500.0)
+
+
+def test_a_segment_is_never_shorter_than_its_vertical_extent():
+    steps = walk(
+        reference_depth=100.0, depths=[100.0, 200.0], measured_depths=[1000.0, 1050.0], oil=[1, 1]
+    )
+    assert steps[1].segment_length == pytest.approx(100.0)
 
 
 def test_hydrostatic_head_of_an_inclined_segment_is_its_vertical_extent():
-    import math
-
-    from bores.wells.hydraulics.base import get_segment_length
     from bores.wells.hydraulics.homogeneous import compute_segment_drop, homogeneous_wellbore
 
     model = homogeneous_wellbore(tubing_inner_diameter=0.25).options
 
-    def hydrostatic(inclination):
+    def hydrostatic(*, length, inclination):
         return compute_segment_drop(
             model=model,
-            length=get_segment_length(
-                vertical_distance=100.0, inclination_from_vertical=inclination
-            ),
+            length=length,
             inclination_from_vertical=inclination,
             mixture_density=50.0,
             mixture_viscosity=1.0,
@@ -1456,10 +1472,23 @@ def test_hydrostatic_head_of_an_inclined_segment_is_its_vertical_extent():
             mixture_velocity_out=1.0,
         ).hydrostatic
 
-    assert hydrostatic(math.radians(60.0)) == pytest.approx(hydrostatic(0.0))
+    import math
+
+    vertical = hydrostatic(length=100.0, inclination=0.0)
+    inclined = hydrostatic(length=200.0, inclination=math.radians(60.0))  # 100 ft vertical
+    assert inclined == pytest.approx(vertical)
 
 
-def correlation_pressures(*, is_injector, depths=(100.0, 200.0), reference_depth=150.0, **kwargs):
+def correlation_pressures(
+    *,
+    is_injector,
+    depths=(100.0, 200.0),
+    reference_depth=150.0,
+    measured_depths=None,
+    reference_measured_depth=None,
+    inclinations=None,
+    **kwargs,
+):
     from bores.wells.hydraulics.base import PhaseValues
     from bores.wells.hydraulics.homogeneous import (
         compute_perforation_pressures,
@@ -1471,10 +1500,18 @@ def correlation_pressures(*, is_injector, depths=(100.0, 200.0), reference_depth
     return compute_perforation_pressures(
         model=model,
         reference_depth=reference_depth,
+        reference_measured_depth=(
+            reference_depth if reference_measured_depth is None else reference_measured_depth
+        ),
         reference_pressure=1000.0,
         connection_phase_rates=[PhaseValues(oil=100.0, water=0.0, gas=0.0)] * count,
         representative_depths=np.array(depths),
-        inclinations_from_vertical=np.zeros(count),
+        representative_measured_depths=np.array(
+            depths if measured_depths is None else measured_depths
+        ),
+        inclinations_from_vertical=np.zeros(count)
+        if inclinations is None
+        else np.array(inclinations),
         connection_samples=hydrostatic_samples()[:count],
         is_injector=is_injector,
         **kwargs,
@@ -1586,3 +1623,123 @@ def test_a_rate_target_is_met_with_hydrostatic_connection_pressures(tmp_path):
         mode=ConnectionPressureMode.HYDROSTATIC,
     )
     assert workspace.surface_oil_rates[0] == pytest.approx(1000.0, rel=1e-3)
+
+
+def test_a_horizontal_section_loses_pressure_to_friction_along_the_wellbore():
+    import math
+
+    # Three connections at one true vertical depth, spread along 1000 ft of horizontal hole, with
+    # the reference at the heel: no head differences, only friction.
+    kwargs = dict(
+        depths=(5000.0, 5000.0, 5000.0),
+        measured_depths=(8200.0, 8700.0, 9200.0),
+        reference_depth=5000.0,
+        reference_measured_depth=8000.0,
+        inclinations=[math.pi / 2] * 3,
+    )
+    producer = correlation_pressures(is_injector=False, **kwargs)
+    injector = correlation_pressures(is_injector=True, **kwargs)
+    # Against the flow of a producer, pressure rises moving away from the heel; along the flow
+    # of an injector it falls.
+    assert np.all(np.diff(producer) > 0.0) and producer[0] > 1000.0
+    assert np.all(np.diff(injector) < 0.0) and injector[0] < 1000.0
+    # Friction scales with the length it acts over: doubling every distance along the hole
+    # doubles it.
+    doubled = dict(kwargs)
+    doubled["measured_depths"] = (8400.0, 9400.0, 10400.0)
+    doubled["reference_measured_depth"] = 8000.0
+    longer = correlation_pressures(is_injector=False, **doubled)
+    assert (longer[2] - 1000.0) == pytest.approx(2.0 * (producer[2] - 1000.0), rel=1e-3)
+
+
+def trajectory(*points):
+    from bores.wells.trajectory import TrajectoryStation, WellTrajectory
+
+    return WellTrajectory(
+        stations=[TrajectoryStation(measured_depth=md, x=0.0, y=0.0, z=z) for md, z in points]
+    )
+
+
+def test_a_reference_depth_maps_to_the_shallowest_matching_measured_depth():
+    # Straight down to 5000 ft, then 1000 ft horizontally.
+    well_path = trajectory((0.0, 0.0), (5000.0, 5000.0), (6000.0, 5000.0))
+    assert well_path.get_measured_depth_at_depth(2500.0) == pytest.approx(2500.0)
+    assert well_path.get_measured_depth_at_depth(5000.0) == pytest.approx(5000.0)  # the heel
+
+
+def test_a_reference_depth_follows_an_inclined_section():
+    well_path = trajectory((0.0, 0.0), (1000.0, 1000.0), (2000.0, 1500.0))
+    assert well_path.get_measured_depth_at_depth(1250.0) == pytest.approx(1500.0)
+
+
+def test_a_reference_depth_the_path_never_reaches_is_rejected():
+    with pytest.raises(ValidationError, match="never reaches"):
+        trajectory((0.0, 0.0), (1000.0, 1000.0)).get_measured_depth_at_depth(2000.0)
+
+
+def resolve_horizontal_producer(*, bhp):
+    from bores.grids.factories.cartesian import make_cartesian_grid
+    from bores.types import Orientation
+    from bores.wells.base import Perforation
+    from bores.wells.compile import compile_well_system
+    from bores.wells.factories import make_producer, make_well_controls, make_wells
+    from bores.wells.hydraulics.homogeneous import homogeneous_wellbore
+    from bores.wells.resolution.engine import resolve_well_control
+    from bores.wells.resolution.spec import ConnectionPressureMode, WellControlSpec
+    from bores.wells.workspace import build_wells_workspace
+
+    grid = make_cartesian_grid(nx=5, ny=1, nz=1, dx=100.0, dy=100.0, dz=20.0)
+    well_path = trajectory((0.0, 0.0), (10.0, 10.0), (460.0, 10.0))
+    well_path = type(well_path)(
+        stations=[
+            type(station)(
+                measured_depth=station.measured_depth,
+                x=50.0 + max(station.measured_depth - 10.0, 0.0),
+                y=50.0,
+                z=station.z,
+            )
+            for station in well_path.stations
+        ]
+    )
+    well, control = make_producer(
+        "H1",
+        surface_location=(50.0, 50.0),
+        trajectory=well_path,
+        perforations=[Perforation(top_md=60.0, bottom_md=450.0)],
+        target_bhp=bhp,
+        reference_depth=10.0,
+    )
+    compiled = compile_well_system(
+        make_wells(well),
+        make_well_controls(H1=control),
+        grid,
+        permeabilities={orientation: np.full(5, 100.0) for orientation in Orientation},
+    )
+    count = len(compiled.perforations.well_indices)
+    workspace = build_wells_workspace(n_wells=1, n_connections=count)
+    resolve_well_control(
+        compiled_system=compiled,
+        well_row=0,
+        tubing_performance=homogeneous_wellbore(tubing_inner_diameter=0.25),
+        connection_samples=hydrostatic_samples(oil_densities=(50.0,) * count, mobility=1e-4),
+        workspace=workspace,
+        control_spec=WellControlSpec(connection_pressure_mode=ConnectionPressureMode.HYDRAULIC),
+    )
+    return compiled, workspace
+
+
+def test_a_horizontal_well_records_measured_depths_and_a_reference_at_its_heel():
+    compiled, _ = resolve_horizontal_producer(bhp=1000.0)
+    perforations = compiled.perforations
+    assert np.all(np.diff(perforations.representative_measured_depths) > 0.0)
+    assert np.allclose(perforations.representative_depths, 10.0)
+    assert compiled.reference_measured_depths[0] == pytest.approx(10.0)
+
+
+def test_a_horizontal_well_has_friction_pressure_loss_along_its_length():
+    _, workspace = resolve_horizontal_producer(bhp=1000.0)
+    pressures = workspace.connection_pressures
+    # One true vertical depth, so there is no head: the whole difference is friction, and a
+    # producer's pressure rises moving away from the heel against its flow.
+    assert pressures[0] > 1000.0
+    assert np.all(np.diff(pressures) > 0.0)

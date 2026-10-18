@@ -12,7 +12,6 @@ from bores.types import Number, NumberArray, OneDimension, UnitConversionTable, 
 from bores.wells.state import PhaseValues
 
 __all__ = [
-    "MINIMUM_INCLINATION_COSINE",
     "UNIT_SYSTEMS_BY_TAG",
     "UNIT_SYSTEM_TAGS",
     "ConnectionStep",
@@ -34,7 +33,6 @@ __all__ = [
     "compute_surface_mixture_viscosity",
     "compute_tubing_head_pressure",
     "get_gravitational_acceleration",
-    "get_segment_length",
     "get_unit_system_constant",
     "plan_connection_walk",
     "split_liquid_gas",
@@ -382,13 +380,6 @@ def compute_hydrostatic_pressure(
     )
 
 
-MINIMUM_INCLINATION_COSINE = 1e-6
-"""
-Below this cosine of inclination from vertical, a segment is horizontal for practical purposes:
-its along-hole length can't be recovered from its vertical extent.
-"""
-
-
 class ConnectionStep(typing.NamedTuple):
     """One segment of the walk outward from a well's reference depth to a connection."""
 
@@ -402,7 +393,7 @@ class ConnectionStep(typing.NamedTuple):
     """Vertical extent of the segment."""
 
     segment_length: Number
-    """Along-hole length of the segment, from its vertical extent and the connection's inclination."""
+    """Length of the segment along the wellbore. Never less than its vertical extent."""
 
     geometric_sign: Number
     """`1` if the segment ends deeper than it starts, `-1` if shallower."""
@@ -411,28 +402,12 @@ class ConnectionStep(typing.NamedTuple):
     """Reservoir-condition phase rates flowing through the segment."""
 
 
-def get_segment_length(*, vertical_distance: Number, inclination_from_vertical: Number) -> Number:
-    """
-    Along-hole length of a segment from its vertical extent.
-
-    A horizontal segment's length can't be recovered from its vertical extent, so its vertical
-    extent is returned.
-
-    :param vertical_distance: Vertical extent of the segment.
-    :param inclination_from_vertical: Segment inclination, in radians. `0` is vertical.
-    :returns: The along-hole length.
-    """
-    cosine = math.cos(inclination_from_vertical)
-    if cosine <= MINIMUM_INCLINATION_COSINE:
-        return vertical_distance
-    return vertical_distance / cosine
-
-
 def plan_connection_walk(
     *,
     reference_depth: Number,
+    reference_measured_depth: Number,
     representative_depths: typing.Sequence[Number],
-    inclinations_from_vertical: typing.Sequence[Number],
+    representative_measured_depths: typing.Sequence[Number],
     connection_phase_rates: typing.Sequence[PhaseValues],
 ) -> list[ConnectionStep]:
     """
@@ -445,8 +420,9 @@ def plan_connection_walk(
     already passed. A connection exactly at the reference depth belongs to the downward walk.
 
     :param reference_depth: The well's BHP/THP reporting datum.
+    :param reference_measured_depth: Measured depth along the wellbore of `reference_depth`.
     :param representative_depths: One vertical depth per connection.
-    :param inclinations_from_vertical: One inclination per connection, in radians.
+    :param representative_measured_depths: One measured depth along the wellbore per connection.
     :param connection_phase_rates: Each connection's own rate of each phase, at reservoir
         conditions.
     :returns: The segments, each after the one it starts from, downward walk first.
@@ -470,6 +446,7 @@ def plan_connection_walk(
     below_total = carried
     previous_index: int | None = None
     previous_depth = reference_depth
+    previous_measured_depth = reference_measured_depth
     for i in below:
         vertical_distance = abs(representative_depths[i] - previous_depth)
         steps.append(
@@ -477,9 +454,9 @@ def plan_connection_walk(
                 connection_index=i,
                 previous_index=previous_index,
                 vertical_distance=vertical_distance,
-                segment_length=get_segment_length(
-                    vertical_distance=vertical_distance,
-                    inclination_from_vertical=inclinations_from_vertical[i],
+                segment_length=max(
+                    abs(representative_measured_depths[i] - previous_measured_depth),
+                    vertical_distance,
                 ),
                 geometric_sign=1.0,
                 carried_rates=carried,
@@ -491,10 +468,12 @@ def plan_connection_walk(
             gas=carried.gas - connection_phase_rates[i].gas,
         )
         previous_index, previous_depth = i, representative_depths[i]
+        previous_measured_depth = representative_measured_depths[i]
 
     carried = below_total
     previous_index = None
     previous_depth = reference_depth
+    previous_measured_depth = reference_measured_depth
     for i in above:
         vertical_distance = abs(representative_depths[i] - previous_depth)
         steps.append(
@@ -502,9 +481,9 @@ def plan_connection_walk(
                 connection_index=i,
                 previous_index=previous_index,
                 vertical_distance=vertical_distance,
-                segment_length=get_segment_length(
-                    vertical_distance=vertical_distance,
-                    inclination_from_vertical=inclinations_from_vertical[i],
+                segment_length=max(
+                    abs(representative_measured_depths[i] - previous_measured_depth),
+                    vertical_distance,
                 ),
                 geometric_sign=-1.0,
                 carried_rates=carried,
@@ -516,6 +495,7 @@ def plan_connection_walk(
             gas=carried.gas + connection_phase_rates[i].gas,
         )
         previous_index, previous_depth = i, representative_depths[i]
+        previous_measured_depth = representative_measured_depths[i]
     return steps
 
 

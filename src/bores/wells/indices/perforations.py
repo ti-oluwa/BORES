@@ -57,6 +57,13 @@ class PerforationIndex:
     interval and this cell.
     """
 
+    representative_measured_depth: Number
+    """
+    Midpoint measured depth of the overlap between `perforation`'s interval and this cell, along
+    the wellbore. Equals `representative_depth` for a vertical well. The distance between two
+    connections along the wellbore is the difference of these.
+    """
+
     inclination_from_vertical: Number
     """
     Angle in radians between this connection's local wellbore direction
@@ -103,6 +110,7 @@ class PerforationIndex:
         return attrs.evolve(
             self,
             representative_depth=self.representative_depth * factors["length"],
+            representative_measured_depth=self.representative_measured_depth * factors["length"],
             well_index=self.well_index * well_index_factor
             if self.well_index is not None
             else None,
@@ -380,6 +388,11 @@ def resolve_known_cell_perforations_indices(
         assert perforation.cell_index is not None
         assert perforation.top_depth is not None and perforation.bottom_depth is not None
         representative_depth = 0.5 * (perforation.top_depth + perforation.bottom_depth)
+        representative_measured_depth = (
+            0.5 * (perforation.top_md + perforation.bottom_md)  # type: ignore[operator]
+            if perforation.top_md is not None
+            else representative_depth
+        )
         if perforation.top_md is not None:
             # A `WELSEGS`-derived trajectory only carries measured depth and
             # true vertical depth, no azimuth, so its position/tangent along
@@ -405,6 +418,7 @@ def resolve_known_cell_perforations_indices(
                 cell_index=perforation.cell_index,
                 partial_penetration_fraction=1.0,
                 representative_depth=representative_depth,
+                representative_measured_depth=representative_measured_depth,
                 inclination_from_vertical=inclination,
                 unit_system=well.unit_system,
             )
@@ -491,6 +505,7 @@ def resolve_perforations_indices(
                             cell_index=cell_index,
                             partial_penetration_fraction=1.0,
                             representative_depth=depth,
+                            representative_measured_depth=depth,
                             inclination_from_vertical=inclination,
                             unit_system=well.unit_system,
                         )
@@ -514,6 +529,7 @@ def resolve_perforations_indices(
                         cell_index=cell_index,
                         partial_penetration_fraction=length / perforation.length,
                         representative_depth=0.5 * (overlap_top + overlap_bottom),
+                        representative_measured_depth=0.5 * (overlap_top + overlap_bottom),
                         inclination_from_vertical=inclination,
                         unit_system=well.unit_system,
                     )
@@ -829,6 +845,7 @@ def resolve_md_perforations_indices(
                             else sub_length / (true_bottom_md - top_md)
                         ),
                         representative_depth=trajectory.position_at(0.5 * (entry_md + exit_md))[2],
+                        representative_measured_depth=0.5 * (entry_md + exit_md),
                         inclination_from_vertical=inclination,
                         unit_system=well.unit_system,
                     )

@@ -122,11 +122,15 @@ def resolve_well_control(
         representative_depths=typing.cast(
             NumberArray[OneDimension], perforations.representative_depths[active_open]
         ),
+        representative_measured_depths=typing.cast(
+            NumberArray[OneDimension], perforations.representative_measured_depths[active_open]
+        ),
         inclinations_from_vertical=typing.cast(
             NumberArray[OneDimension],
             perforations.inclinations_from_vertical[active_open],
         ),
         connection_samples=connection_samples,
+        reference_measured_depth=compiled_system.reference_measured_depths[well_row],
         connection_conductivities=typing.cast(
             NumberArray[OneDimension],
             perforations.connection_conductivities[active_open],

@@ -363,6 +363,9 @@ class CompiledPerforations(typing.NamedTuple):
     representative_depths: NumberArray[OneDimension]
     """Shape `(n_rows,)`. For the hydrostatic term in wellbore pressure-drop."""
 
+    representative_measured_depths: NumberArray[OneDimension]
+    """Shape `(n_rows,)`. Along the wellbore, for the friction term in wellbore pressure-drop."""
+
     inclinations_from_vertical: NumberArray[OneDimension]
     """Shape `(n_rows,)`, radians. For `wells.hydraulics`."""
 
@@ -1431,6 +1434,13 @@ class CompiledWellSystem(typing.NamedTuple):
     reference_depths: NumberArray[OneDimension]
     """Shape `(n_wells,)`."""
 
+    reference_measured_depths: NumberArray[OneDimension]
+    """
+    Shape `(n_wells,)`. Measured depth along the wellbore of each well's reference depth. Equal
+    to the reference depth for a vertical well; for a well with a trajectory, the shallowest
+    point along it at that depth.
+    """
+
     d_factors: NumberArray[OneDimension]
     """Shape `(n_wells,)`. Non-Darcy flow coefficient. `NaN` where unset."""
 
@@ -1725,6 +1735,7 @@ def compile_perforations(
     skins: list[Number] = []
     partial_penetration_fractions: list[Number] = []
     representative_depths: list[Number] = []
+    representative_measured_depths: list[Number] = []
     inclinations_from_vertical: list[Number] = []
     completion_statuses: list[Integer] = []
     schedule_statuses: list[Integer] = []
@@ -1761,6 +1772,7 @@ def compile_perforations(
             skins.append(original.skin)
             partial_penetration_fractions.append(perforation_index.partial_penetration_fraction)
             representative_depths.append(perforation_index.representative_depth)
+            representative_measured_depths.append(perforation_index.representative_measured_depth)
             inclinations_from_vertical.append(perforation_index.inclination_from_vertical)
             completion_statuses.append(get_completion_status_tag(status=original.status))
             schedule_statuses.append(get_well_status_tag(status=original.schedule_status))
@@ -1790,6 +1802,9 @@ def compile_perforations(
         ),
         representative_depths=typing.cast(
             NumberArray[OneDimension], np.asarray(representative_depths, dtype=dtype)
+        ),
+        representative_measured_depths=typing.cast(
+            NumberArray[OneDimension], np.asarray(representative_measured_depths, dtype=dtype)
         ),
         inclinations_from_vertical=typing.cast(
             NumberArray[OneDimension],
@@ -2226,6 +2241,20 @@ def compile_well_system(
         NumberArray[OneDimension],
         np.asarray([wells[name].reference_depth for name in names], dtype=dtype),
     )
+    reference_measured_depths = typing.cast(
+        NumberArray[OneDimension],
+        np.asarray(
+            [
+                wells[name].trajectory.get_measured_depth_at_depth(  # type: ignore[attr-defined]
+                    wells[name].reference_depth
+                )
+                if wells[name].trajectory is not None
+                else wells[name].reference_depth
+                for name in names
+            ],
+            dtype=dtype,
+        ),
+    )
     d_factors = typing.cast(
         NumberArray[OneDimension],
         np.asarray(
@@ -2241,6 +2270,7 @@ def compile_well_system(
         well_kinds=well_controls.well_kinds,
         schedule_statuses=schedule_statuses,
         reference_depths=reference_depths,
+        reference_measured_depths=reference_measured_depths,
         d_factors=d_factors,
         perforations=perforations,
         controls=well_controls,
