@@ -4,7 +4,7 @@ import typing
 
 import numpy as np
 
-from bores.errors import ValidationError
+from bores.errors import ValidationError, WellConvergenceError
 from bores.types import Integer, Number, NumberArray, OneDimension
 from bores.wells.compile import (
     FluidPhaseTag,
@@ -217,6 +217,7 @@ def solve_connection_pressures_and_rates(
         )
 
     total_rate = 0.0
+    previous_total_rate = 0.0
     phase_rates = zero_rates
     surface_phase_rates = zero_rates
 
@@ -303,7 +304,17 @@ def solve_connection_pressures_and_rates(
         ):
             total_rate = new_total_rate
             break
+        previous_total_rate = total_rate
         total_rate = new_total_rate
+    else:
+        raise WellConvergenceError(
+            "The connection pressures and rates did not converge in "
+            f"{control_spec.max_fixed_point_iterations} iterations at a reference pressure of "
+            f"{reference_pressure}: on the last iteration the total rate went from "
+            f"{previous_total_rate} to {total_rate}, against a relative tolerance of "
+            f"{control_spec.rate_convergence_tolerance}. A rate high enough that friction or "
+            "head takes the connection pressures past reservoir pressure can cause this."
+        )
 
     return connection_pressures, phase_rates, surface_phase_rates
 

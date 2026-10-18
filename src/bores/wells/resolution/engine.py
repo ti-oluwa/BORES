@@ -1,10 +1,11 @@
 """Top-level well-control resolution. One well's row per call."""
 
+import functools
 import typing
 
 import numpy as np
 
-from bores.errors import StopSimulation, ValidationError
+from bores.errors import StopSimulation, ValidationError, WellConvergenceError
 from bores.types import Integer, NumberArray, OneDimension
 from bores.wells.compile import (
     CompiledWellSystem,
@@ -43,6 +44,29 @@ from bores.wells.workspace import (
 __all__ = ["resolve_well_control"]
 
 
+def name_well_in_convergence_errors(
+    function: typing.Callable[..., None],
+) -> typing.Callable[..., None]:
+    """
+    Wraps a keyword-only well resolution function so that a `WellConvergenceError` it raises
+    names the well it was resolving.
+
+    :param function: A function taking `compiled_system` and `well_row` as keyword arguments.
+    :returns: The wrapped function.
+    """
+
+    @functools.wraps(function)
+    def wrapper(**kwargs: typing.Any) -> None:
+        try:
+            return function(**kwargs)
+        except WellConvergenceError as exc:
+            name = kwargs["compiled_system"].names[kwargs["well_row"]]
+            raise WellConvergenceError(f"Well {name!r}: {exc}") from exc
+
+    return wrapper
+
+
+@name_well_in_convergence_errors
 def resolve_well_control(
     *,
     compiled_system: CompiledWellSystem,

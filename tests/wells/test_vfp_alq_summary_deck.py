@@ -1677,7 +1677,7 @@ def test_a_reference_depth_the_path_never_reaches_is_rejected():
         trajectory((0.0, 0.0), (1000.0, 1000.0)).get_measured_depth_at_depth(2000.0)
 
 
-def resolve_horizontal_producer(*, bhp):
+def resolve_horizontal_producer(*, bhp, mobility=1e-4, max_fixed_point_iterations=None):
     from bores.grids.factories.cartesian import make_cartesian_grid
     from bores.types import Orientation
     from bores.wells.base import Perforation
@@ -1721,9 +1721,16 @@ def resolve_horizontal_producer(*, bhp):
         compiled_system=compiled,
         well_row=0,
         tubing_performance=homogeneous_wellbore(tubing_inner_diameter=0.25),
-        connection_samples=hydrostatic_samples(oil_densities=(50.0,) * count, mobility=1e-4),
+        connection_samples=hydrostatic_samples(oil_densities=(50.0,) * count, mobility=mobility),
         workspace=workspace,
-        control_spec=WellControlSpec(connection_pressure_mode=ConnectionPressureMode.HYDRAULIC),
+        control_spec=WellControlSpec(
+            connection_pressure_mode=ConnectionPressureMode.HYDRAULIC,
+            **(
+                {}
+                if max_fixed_point_iterations is None
+                else {"max_fixed_point_iterations": max_fixed_point_iterations}
+            ),
+        ),
     )
     return compiled, workspace
 
@@ -1743,3 +1750,22 @@ def test_a_horizontal_well_has_friction_pressure_loss_along_its_length():
     # producer's pressure rises moving away from the heel against its flow.
     assert pressures[0] > 1000.0
     assert np.all(np.diff(pressures) > 0.0)
+
+
+def test_a_well_whose_rates_never_settle_raises_instead_of_returning_a_state():
+    from bores.errors import SolverError, WellConvergenceError
+
+    # A mobility of 1 gives millions of rb/d; friction at that rate takes the connection
+    # pressures past reservoir pressure, so the drawdown and the rate flip between two states.
+    with pytest.raises(WellConvergenceError, match="Well 'H1'") as raised:
+        resolve_horizontal_producer(bhp=1000.0, mobility=1.0)
+    assert "did not converge in 20 iterations" in str(raised.value)
+    assert isinstance(raised.value, SolverError)
+
+
+def test_the_iteration_limit_is_enforced():
+    from bores.errors import WellConvergenceError
+
+    with pytest.raises(WellConvergenceError, match="did not converge in 1 iterations"):
+        resolve_horizontal_producer(bhp=1000.0, max_fixed_point_iterations=1)
+    resolve_horizontal_producer(bhp=1000.0, max_fixed_point_iterations=20)

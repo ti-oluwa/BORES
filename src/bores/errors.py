@@ -21,6 +21,7 @@ __all__ = [
     "SummaryError",
     "TimingError",
     "ValidationError",
+    "WellConvergenceError",
 ]
 
 
@@ -51,6 +52,12 @@ class PreconditionerError(BORESError):
 
 class SolverError(BORESError):
     """Raised when a solver fails to solve the given matrix system either due to convergence or other issues."""
+
+    pass
+
+
+class WellConvergenceError(SolverError):
+    """Raised when a well's connection pressures and rates don't settle within the iteration limit."""
 
     pass
 
