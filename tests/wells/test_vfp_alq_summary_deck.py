@@ -983,55 +983,66 @@ def test_injector_table_is_sampled_in_the_injected_phase():
         )
 
 
-def flowing_fluid(*, fractions=(1.0, 0.0, 0.0)):
-    from bores.wells.hydraulics.base import PhaseValues
+def flowing_fluid(*, zero_flow_density=50.0):
     from bores.wells.resolution.tubing import FlowingFluid
 
     return FlowingFluid(
-        phase_densities=PhaseValues(oil=50.0, water=62.4, gas=5.0),
-        fallback_fractions=PhaseValues(*fractions),
+        oil_densities=np.array([50.0, 50.0]),
+        water_densities=np.array([62.4, 62.4]),
+        gas_densities=np.array([5.0, 5.0]),
+        zero_flow_density=zero_flow_density,
     )
 
 
+def connection_rates(*, oil, water=(0.0, 0.0), gas=(0.0, 0.0)):
+    from bores.wells.workspace import ConnectionRates
+
+    return ConnectionRates(oil=np.array(oil), water=np.array(water), gas=np.array(gas))
+
+
 def test_datum_shift_is_the_weight_of_the_flowing_column(tmp_path):
-    from bores.wells.hydraulics.base import PhaseValues
     from bores.wells.resolution.tubing import compute_datum_pressure_shift
 
     table = VFPTable.from_deck(producer_table(tmp_path), table_number=3)  # datum 2000 ft
-    oil_only = PhaseValues(oil=100.0, water=0.0, gas=0.0)
+    rates = connection_rates(oil=(60.0, 40.0))
     shift = compute_datum_pressure_shift(
         table=table,
         reference_depth=1900.0,
         flowing_fluid=flowing_fluid(),
-        phase_rates=oil_only,
+        connection_rates=rates,
     )
     assert shift == pytest.approx(50.0 * 100.0 / 144.0)  # psi: density 50 lb/ft3 over 100 ft
     shallower = compute_datum_pressure_shift(
         table=table,
         reference_depth=2100.0,
         flowing_fluid=flowing_fluid(),
-        phase_rates=oil_only,
+        connection_rates=rates,
     )
     assert shallower == pytest.approx(-50.0 * 100.0 / 144.0)
     same = compute_datum_pressure_shift(
-        table=table, reference_depth=2000.0, flowing_fluid=None, phase_rates=oil_only
+        table=table, reference_depth=2000.0, flowing_fluid=None, connection_rates=None
     )
     assert same == pytest.approx(0.0)
 
 
-def test_flowing_density_is_mass_rate_over_volume_rate():
-    from bores.wells.hydraulics.base import PhaseValues
-    from bores.wells.resolution.tubing import compute_flowing_density
+def test_flowing_density_is_mass_rate_over_volume_rate_across_connections():
+    from bores.wells.resolution.tubing import FlowingFluid, compute_flowing_density
 
-    fluid = flowing_fluid(fractions=(0.5, 0.5, 0.0))
-    mixed = compute_flowing_density(
-        flowing_fluid=fluid, phase_rates=PhaseValues(oil=60.0, water=-20.0, gas=20.0)
+    fluid = FlowingFluid(
+        oil_densities=np.array([40.0, 60.0]),
+        water_densities=np.array([62.4, 62.4]),
+        gas_densities=np.array([4.0, 6.0]),
+        zero_flow_density=55.0,
     )
-    assert mixed == pytest.approx((60 * 50.0 + 20 * 62.4 + 20 * 5.0) / 100.0)
-    idle = compute_flowing_density(
-        flowing_fluid=fluid, phase_rates=PhaseValues(oil=0.0, water=0.0, gas=0.0)
+    rates = connection_rates(oil=(10.0, 30.0), water=(0.0, -20.0), gas=(20.0, 20.0))
+    expected = (10 * 40.0 + 30 * 60.0 + 20 * 62.4 + 20 * 4.0 + 20 * 6.0) / 100.0
+    assert compute_flowing_density(flowing_fluid=fluid, connection_rates=rates) == pytest.approx(
+        expected
     )
-    assert idle == pytest.approx(0.5 * 50.0 + 0.5 * 62.4)
+    idle = connection_rates(oil=(0.0, 0.0))
+    assert compute_flowing_density(flowing_fluid=fluid, connection_rates=idle) == pytest.approx(
+        55.0
+    )
 
 
 def test_thp_is_found_through_a_datum_shift(tmp_path):
@@ -1044,6 +1055,7 @@ def test_thp_is_found_through_a_datum_shift(tmp_path):
 
     table = VFPTable.from_deck(producer_table(tmp_path), table_number=3)
     rates = PhaseValues(oil=100.0, water=0.0, gas=10_000.0)
+    rates_by_connection = connection_rates(oil=(60.0, 40.0), gas=(6000.0, 4000.0))
     tubing = WellTubing(None, table, 0.0, flowing_fluid())
     datum_bhp = float(
         table.query(
@@ -1055,21 +1067,27 @@ def test_thp_is_found_through_a_datum_shift(tmp_path):
         )
     )
     shift = compute_datum_pressure_shift(
-        table=table, reference_depth=1900.0, flowing_fluid=flowing_fluid(), phase_rates=rates
-    )
-    thp = compute_tubing_head_pressure(
-        tubing=tubing,
+        table=table,
         reference_depth=1900.0,
-        reference_pressure=datum_bhp - shift,
-        phase_rates=rates,
-        surface_phase_rates=rates,
-        surface_fluid_properties=None,
-        is_injector=False,
+        flowing_fluid=flowing_fluid(),
+        connection_rates=rates_by_connection,
     )
+    kwargs = {
+        "tubing": tubing,
+        "reference_depth": 1900.0,
+        "reference_pressure": datum_bhp - shift,
+        "phase_rates": rates,
+        "surface_phase_rates": rates,
+        "surface_fluid_properties": None,
+        "is_injector": False,
+    }
+    thp = compute_tubing_head_pressure(**kwargs, connection_rates=rates_by_connection)
     assert thp == pytest.approx(30.0)
+    with pytest.raises(ValidationError, match="datum depth"):
+        compute_tubing_head_pressure(**kwargs)
 
 
-def test_flowing_fluid_is_weighted_by_each_connections_deliverability():
+def test_attached_flowing_fluid_records_densities_and_a_zero_flow_density():
     from bores.wells.hydraulics.base import PhaseValues
     from bores.wells.resolution.tubing import WellTubing, attach_flowing_fluid
 
@@ -1096,10 +1114,9 @@ def test_flowing_fluid_is_weighted_by_each_connections_deliverability():
         relevant_phases=PhaseValues(oil=1.0, water=1.0, gas=1.0),
     )
     fluid = tubing.flowing_fluid
-    assert fluid.phase_densities.oil == pytest.approx(55.0)  # (1*40 + 3*60) / 4
-    assert fluid.phase_densities.water == pytest.approx(62.4)  # no deliverability: plain mean
-    # oil 4 : gas 8, water 0
-    assert tuple(fluid.fallback_fractions) == pytest.approx((1 / 3, 0.0, 2 / 3))
+    assert fluid.oil_densities.tolist() == [40.0, 60.0]
+    # Deliverability is oil 4 : gas 8, so the idle column is 1/3 oil (mean 55) and 2/3 gas.
+    assert fluid.zero_flow_density == pytest.approx(55.0 / 3 + 2 * 5.0 / 3)
     untouched = attach_flowing_fluid(
         tubing=WellTubing(None, None, 0.0),
         workspace=workspace,
@@ -1107,3 +1124,253 @@ def test_flowing_fluid_is_weighted_by_each_connections_deliverability():
         relevant_phases=PhaseValues(oil=1.0, water=1.0, gas=1.0),
     )
     assert untouched.flowing_fluid is None
+
+
+def resolve_producer(*, limits=None, vfp_tables=None, vfp_number=None, mode=None):
+    """Resolves a three-connection producer on a real compiled system, and returns the workspace."""
+    import attrs
+
+    from bores.grids.factories.cartesian import make_cartesian_grid
+    from bores.types import Orientation
+    from bores.wells.compile import compile_well_system
+    from bores.wells.factories import make_producer, make_well_controls, make_wells
+    from bores.wells.hydraulics.base import PhaseValues
+    from bores.wells.resolution.engine import resolve_well_control
+    from bores.wells.resolution.spec import ConnectionPressureMode, WellControlSpec
+    from bores.wells.state import ConnectionSample
+    from bores.wells.workspace import build_wells_workspace
+
+    grid = make_cartesian_grid(nx=1, ny=1, nz=3, dx=50.0, dy=50.0, dz=50.0)
+    well, control = make_producer(
+        "P1",
+        surface_location=(25.0, 25.0),
+        perforation_depths=(0.0, 150.0),
+        target_bhp=1000.0,
+        reference_depth=75.0,
+        limits=limits,
+    )
+    if vfp_number is not None:
+        control = attrs.evolve(control, vfp_table=vfp_number)
+    compiled = compile_well_system(
+        make_wells(well),
+        make_well_controls(P1=control),
+        grid,
+        permeabilities={orientation: np.full(3, 100.0) for orientation in Orientation},
+    )
+    samples = [
+        ConnectionSample(
+            cell_index=i,
+            pressure=3000.0 + 10.0 * i,
+            temperature=200.0,
+            phase_saturations=PhaseValues(0.6, 0.3, 0.1),
+            phase_mobilities=PhaseValues(2.0, 1.0, 5.0),
+            phase_densities=PhaseValues(50.0 + i, 62.4, 5.0),
+            phase_viscosities=PhaseValues(1.0, 0.5, 0.02),
+            gas_liquid_surface_tension=20.0,
+            phase_fvfs=PhaseValues(1.2, 1.0, 0.01),
+        )
+        for i in range(3)
+    ]
+    workspace = build_wells_workspace(n_wells=1, n_connections=3)
+    resolve_well_control(
+        compiled_system=compiled,
+        well_row=0,
+        tubing_performance=vfp_tables,
+        connection_samples=samples,
+        workspace=workspace,
+        control_spec=WellControlSpec(
+            connection_pressure_mode=mode or ConnectionPressureMode.UNIFORM_BHP
+        ),
+    )
+    return workspace, samples
+
+
+def test_a_limit_that_is_not_violated_leaves_the_connection_rates_unchanged():
+    from bores.wells.controls import RateLimit, RateQuantity
+
+    plain, _ = resolve_producer()
+    limited, _ = resolve_producer(limits=[RateLimit(quantity=RateQuantity.OIL, max_value=1e12)])
+    for name in ("connection_oil_rates", "connection_water_rates", "connection_gas_rates"):
+        assert np.all(getattr(plain, name) > 0.0)
+        assert np.allclose(getattr(limited, name), getattr(plain, name))
+    assert np.allclose(limited.connection_pressures, plain.connection_pressures)
+
+
+def test_resolved_thp_with_a_vfp_table_accounts_for_the_datum_depth(tmp_path):
+    from bores.wells.workspace import ConnectionRates
+
+    tables = VFPTables.from_deck(producer_table(tmp_path))
+    from bores.wells.controls import RateLimit, RateQuantity
+
+    # The rate limit is never violated; it is there to prove the THP uses the nominal rates.
+    workspace, samples = resolve_producer(
+        vfp_tables=tables,
+        vfp_number=3,
+        limits=[RateLimit(quantity=RateQuantity.OIL, max_value=1e12)],
+    )
+    table = tables.table(3, well_type=WellType.PRODUCER)
+    rates = ConnectionRates(
+        oil=workspace.connection_oil_rates,
+        water=workspace.connection_water_rates,
+        gas=workspace.connection_gas_rates,
+    )
+    densities = {
+        "oil": np.array([s.phase_densities.oil for s in samples]),
+        "water": np.array([s.phase_densities.water for s in samples]),
+        "gas": np.array([s.phase_densities.gas for s in samples]),
+    }
+    mass = sum(float(np.dot(getattr(rates, p), densities[p])) for p in densities)
+    volume = sum(float(getattr(rates, p).sum()) for p in densities)
+    datum_bhp = workspace.bhps[0] + (mass / volume) * (table.datum_depth - 75.0) / 144.0
+    lookup = table.get_lookup_variables(
+        oil_rate=workspace.surface_oil_rates[0],
+        water_rate=workspace.surface_water_rates[0],
+        gas_rate=workspace.surface_gas_rates[0],
+    )
+    expected = table.get_thp(
+        flow_rate=lookup.flow_rate,
+        bhp=datum_bhp,
+        water_fraction=lookup.water_fraction,
+        gas_fraction=lookup.gas_fraction,
+        artificial_lift_quantity=0.0,
+    )
+    assert workspace.thps[0] == pytest.approx(expected)
+
+
+def hydrostatic_samples(oil_densities=(40.0, 50.0, 60.0)):
+    from bores.wells.hydraulics.base import PhaseValues
+    from bores.wells.state import ConnectionSample
+
+    return [
+        ConnectionSample(
+            cell_index=i,
+            pressure=3000.0,
+            temperature=200.0,
+            phase_saturations=PhaseValues(0.5, 0.3, 0.2),
+            phase_mobilities=PhaseValues(1.0, 1.0, 1.0),
+            phase_densities=PhaseValues(oil_density, 60.0, 10.0),
+            phase_viscosities=PhaseValues(1.0, 1.0, 1.0),
+            gas_liquid_surface_tension=20.0,
+            phase_fvfs=PhaseValues(1.0, 1.0, 1.0),
+        )
+        for i, oil_density in enumerate(oil_densities)
+    ]
+
+
+def hydrostatic_pressures(*, reference_depth, oil, depths=(100.0, 200.0, 400.0), **kwargs):
+    from bores.wells.resolution.hydrostatic import compute_hydrostatic_connection_pressures
+
+    count = len(depths)
+    return compute_hydrostatic_connection_pressures(
+        reference_depth=reference_depth,
+        reference_pressure=1000.0,
+        representative_depths=np.array(depths),
+        connection_samples=hydrostatic_samples()[:count],
+        connection_rates=connection_rates(
+            oil=oil,
+            water=kwargs.get("water", (0.0,) * count),
+            gas=kwargs.get("gas", (0.0,) * count),
+        ),
+        unit_system=UnitSystem.FIELD,
+    )
+
+
+PSI_PER_LB_FT2 = 1.0 / 144.0
+
+
+def test_hydrostatic_segments_carry_the_mixture_of_every_connection_beneath():
+    # Reference at the top connection (100 ft). A segment carries only the connections beneath
+    # it: 100-200 ft the middle and bottom ones (oil densities 50, 60 at rates 20, 30), and
+    # 200-400 ft only the bottom one.
+    pressures = hydrostatic_pressures(reference_depth=100.0, oil=(10.0, 20.0, 30.0))
+    top_to_middle = (20 * 50.0 + 30 * 60.0) / 50.0
+    middle_to_bottom = 60.0
+    assert pressures[0] == pytest.approx(1000.0)
+    assert pressures[1] == pytest.approx(1000.0 + top_to_middle * 100.0 * PSI_PER_LB_FT2)
+    assert pressures[2] == pytest.approx(pressures[1] + middle_to_bottom * 200.0 * PSI_PER_LB_FT2)
+
+
+def test_hydrostatic_pressure_falls_above_the_reference_depth():
+    # Reference between the first and second connection: the first is above it.
+    pressures = hydrostatic_pressures(reference_depth=150.0, oil=(10.0, 20.0, 30.0))
+    above = (20 * 50.0 + 30 * 60.0) / 50.0  # everything at or below the reference depth
+    assert pressures[0] == pytest.approx(1000.0 - above * 50.0 * PSI_PER_LB_FT2)
+    below = above  # segment 150-200 carries connections 2 and 3
+    assert pressures[1] == pytest.approx(1000.0 + below * 50.0 * PSI_PER_LB_FT2)
+    assert pressures[2] > pressures[1]
+
+
+def test_hydrostatic_pressure_with_no_flow_uses_the_static_reservoir_fluid():
+    pressures = hydrostatic_pressures(reference_depth=100.0, oil=(0.0, 0.0, 0.0))
+    # Saturation-weighted densities: 0.5*d + 0.3*60 + 0.2*10 for oil densities 40, 50, 60.
+    # The 100-200 ft segment has the middle and bottom connections beneath it.
+    static = [0.5 * oil + 0.3 * 60.0 + 0.2 * 10.0 for oil in (50.0, 60.0)]
+    top_to_middle = sum(static) / 2
+    assert pressures[1] == pytest.approx(1000.0 + top_to_middle * 100.0 * PSI_PER_LB_FT2)
+
+
+def test_hydrostatic_pressure_is_independent_of_connection_order_and_rate_sign():
+    forward = hydrostatic_pressures(reference_depth=100.0, oil=(10.0, 20.0, 30.0))
+    reverse = hydrostatic_pressures(
+        reference_depth=100.0, oil=(-30.0, -20.0, -10.0), depths=(400.0, 200.0, 100.0)
+    )
+    # Reversed list reverses which sample belongs to which depth, so only the depth order
+    # and the rate sign are being exercised here: pressure still rises with depth.
+    assert np.all(np.diff(forward) > 0.0)
+    assert reverse[2] == pytest.approx(1000.0) and reverse[0] > reverse[1] > reverse[2]
+
+
+def test_hydrostatic_mode_is_refused_with_mismatched_lengths():
+    from bores.wells.resolution.hydrostatic import compute_hydrostatic_connection_pressures
+
+    with pytest.raises(ValidationError, match="same length"):
+        compute_hydrostatic_connection_pressures(
+            reference_depth=0.0,
+            reference_pressure=1000.0,
+            representative_depths=np.array([1.0, 2.0]),
+            connection_samples=hydrostatic_samples()[:3],
+            connection_rates=connection_rates(oil=(1.0, 1.0, 1.0), water=(0, 0, 0), gas=(0, 0, 0)),
+            unit_system=UnitSystem.FIELD,
+        )
+
+
+def test_a_vfp_well_needs_a_connection_pressure_mode_that_does_not_need_hydraulics(tmp_path):
+    from bores.wells.resolution.spec import ConnectionPressureMode
+
+    tables = VFPTables.from_deck(producer_table(tmp_path))
+    with pytest.raises(ValidationError, match="HYDROSTATIC"):
+        resolve_producer(vfp_tables=tables, vfp_number=3, mode=ConnectionPressureMode.HYDRAULIC)
+
+
+def test_a_vfp_well_resolves_with_hydrostatic_connection_pressures(tmp_path):
+    from bores.wells.resolution.hydrostatic import compute_hydrostatic_connection_pressures
+    from bores.wells.resolution.spec import ConnectionPressureMode
+    from bores.wells.workspace import ConnectionRates
+
+    tables = VFPTables.from_deck(producer_table(tmp_path))
+    workspace, samples = resolve_producer(
+        vfp_tables=tables, vfp_number=3, mode=ConnectionPressureMode.HYDROSTATIC
+    )
+    uniform, _ = resolve_producer(
+        vfp_tables=tables, vfp_number=3, mode=ConnectionPressureMode.UNIFORM_BHP
+    )
+    assert workspace.bhps[0] == pytest.approx(1000.0)  # BHP control, held at the reference depth
+    assert np.allclose(uniform.connection_pressures, 1000.0)
+
+    # Connections are at 25, 75 and 125 ft, with the reference depth at 75 ft.
+    expected = compute_hydrostatic_connection_pressures(
+        reference_depth=75.0,
+        reference_pressure=1000.0,
+        representative_depths=np.array([25.0, 75.0, 125.0]),
+        connection_samples=samples,
+        connection_rates=ConnectionRates(
+            oil=workspace.connection_oil_rates,
+            water=workspace.connection_water_rates,
+            gas=workspace.connection_gas_rates,
+        ),
+        unit_system=UnitSystem.FIELD,
+    )
+    assert workspace.connection_pressures == pytest.approx(expected, rel=1e-4)
+    assert workspace.connection_pressures[0] < 1000.0 < workspace.connection_pressures[2]
+    # The profile feeds back into the rates: a flat profile at the same BHP gives different ones.
+    assert not np.allclose(workspace.connection_gas_rates, uniform.connection_gas_rates)

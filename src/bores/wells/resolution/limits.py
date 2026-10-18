@@ -3,6 +3,8 @@
 import math
 import typing
 
+import numpy as np
+
 from bores.errors import ValidationError
 from bores.types import Integer, Number, NumberArray, OneDimension
 from bores.wells.compile import (
@@ -24,7 +26,12 @@ from bores.wells.resolution.solvers import (
 from bores.wells.resolution.spec import WellControlSpec
 from bores.wells.resolution.tubing import WellTubing
 from bores.wells.state import ConnectionSample, PhaseValues
-from bores.wells.workspace import PerforationWorkspace
+from bores.wells.workspace import (
+    ConnectionRates,
+    PerforationWorkspace,
+    get_connection_rates,
+    restore_connection_rates,
+)
 
 __all__ = ["apply_limits"]
 
@@ -137,6 +144,7 @@ def get_thp_bound(
     bhp: Number,
     phase_rates: PhaseValues,
     surface_phase_rates: PhaseValues,
+    connection_rates: ConnectionRates,
     tubing: WellTubing,
     reference_depth: Number,
     workspace: PerforationWorkspace,
@@ -158,6 +166,9 @@ def get_thp_bound(
     :param max_value: The limit row's `max_value`. `NaN` means no ceiling.
     :param bhp: The nominal resolution's BHP.
     :param phase_rates: The nominal resolution's reservoir-condition phase rates.
+    :param connection_rates: The nominal resolution's reservoir-condition phase rates at each
+        connection. Saved by the caller, since `workspace`'s own arrays may have been
+        overwritten by the solves of limits checked earlier.
     :param tubing: Hydraulics correlation for this well. Required as a
         THP limit can't be evaluated without one, regardless of
         `control_spec.connection_pressure_mode`.
@@ -182,6 +193,7 @@ def get_thp_bound(
         surface_phase_rates=surface_phase_rates,
         surface_fluid_properties=surface_fluid_properties,
         is_injector=is_injector,
+        connection_rates=connection_rates,
     )
     if is_injector:
         violated = not math.isnan(max_value) and current_thp > max_value
@@ -324,8 +336,15 @@ def apply_limits(
     :raises ValidationError: If a `THPLimit` row is present but
         `surface_fluid_properties` wasn't supplied for a correlation, or the well has neither a
         `WellBoreModel` nor a VFP table.
+
+    On return, `workspace`'s per-connection rate arrays and `connection_pressures` hold the
+    governing resolution's values, whichever it is. Checking a limit re-solves the well and
+    overwrites them, so the nominal values are saved first and put back if the nominal
+    resolution governs.
     """
     candidates: list[tuple[Number, Integer]] = []
+    nominal_connection_rates = get_connection_rates(workspace=workspace, copy=True)
+    nominal_connection_pressures = np.array(connection_pressures, copy=True)
 
     for row in range(limits_start, limits_end):
         kind = limits.kinds[row]
@@ -373,6 +392,7 @@ def apply_limits(
                 bhp=bhp,
                 phase_rates=phase_rates,
                 surface_phase_rates=surface_phase_rates,
+                connection_rates=nominal_connection_rates,
                 tubing=tubing,
                 reference_depth=reference_depth,
                 workspace=workspace,
@@ -392,6 +412,8 @@ def apply_limits(
 
     if not candidates:
         governing_bhp, governing_row = bhp, UNSET_INT
+        restore_connection_rates(workspace=workspace, rates=nominal_connection_rates)
+        connection_pressures[:] = nominal_connection_pressures
         governing_connection_pressures = connection_pressures
         governing_phase_rates = phase_rates
         governing_surface_phase_rates = surface_phase_rates

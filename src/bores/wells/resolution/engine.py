@@ -2,6 +2,8 @@
 
 import typing
 
+import numpy as np
+
 from bores.errors import StopSimulation, ValidationError
 from bores.types import Integer, NumberArray, OneDimension
 from bores.wells.compile import (
@@ -31,7 +33,12 @@ from bores.wells.resolution.tubing import (
     resolve_well_tubing,
 )
 from bores.wells.state import ConnectionSample
-from bores.wells.workspace import WellsWorkspace, build_perforation_workspace
+from bores.wells.workspace import (
+    ConnectionRates,
+    WellsWorkspace,
+    build_perforation_workspace,
+    get_connection_rates,
+)
 
 __all__ = ["resolve_well_control"]
 
@@ -59,8 +66,8 @@ def resolve_well_control(
     :param tubing_performance: What relates this well's BHP to its THP: a `WellBoreModel`,
         a `VFPTables` collection (the well's control selects its table by number), or `None`.
         THP control, a `THPLimit`, and THP reporting require one, regardless of
-        `control_spec.connection_pressure_mode`. Only a `WellBoreModel` distributes pressure
-        across connections.
+        `control_spec.connection_pressure_mode`. A `WellBoreModel` distributes pressure across
+        connections; a well without one follows `control_spec.connection_pressure_mode`.
     :param connection_samples: Reservoir samples for this well's active,
         open connections, in the same order `compiled_system.perforations`'
         rows for this well appear (after filtering to
@@ -74,7 +81,7 @@ def resolve_well_control(
         recognized tag for this well's `well_kinds[well_row]`, if this
         well is under THP control or has a `THPLimit`/THP reporting
         requested and it has neither a `WellBoreModel` nor a VFP table, or if it has no
-        `WellBoreModel` and `control_spec.connection_pressure_mode` isn't `UNIFORM_BHP`
+        `WellBoreModel` and `control_spec.connection_pressure_mode` is `HYDRAULIC`
         while this well still needs connection-pressure distribution.
     """
     if compiled_system.schedule_statuses[well_row] == 0:
@@ -364,5 +371,12 @@ def resolve_well_control(
             surface_phase_rates=surface_phase_rates,
             surface_fluid_properties=surface_fluid_properties,
             is_injector=is_injector,
+            connection_rates=ConnectionRates(
+                oil=np.zeros_like(perforation_workspace.connection_oil_rates),
+                water=np.zeros_like(perforation_workspace.connection_water_rates),
+                gas=np.zeros_like(perforation_workspace.connection_gas_rates),
+            )
+            if economic_shutin
+            else get_connection_rates(workspace=perforation_workspace),
         )
     return None

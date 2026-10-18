@@ -2,6 +2,8 @@
 
 import typing
 
+import numpy as np
+
 from bores.errors import ValidationError
 from bores.types import Integer, Number, NumberArray, OneDimension
 from bores.wells.compile import (
@@ -11,14 +13,17 @@ from bores.wells.compile import (
     RateQuantityTag,
 )
 from bores.wells.hydraulics.base import SurfaceFluidProperties, compute_perforation_pressures
+from bores.wells.resolution.hydrostatic import compute_hydrostatic_connection_pressures
 from bores.wells.resolution.spec import ConnectionPressureMode, WellControlSpec
 from bores.wells.resolution.tubing import WellTubing, compute_tubing_head_pressure
 from bores.wells.state import ConnectionSample, PhaseValues
 from bores.wells.workspace import (
+    ConnectionRates,
     PerforationWorkspace,
     accumulate_phase_rates,
     build_connection_phase_rates,
     correct_well_indices_for_non_darcy,
+    get_connection_rates,
 )
 
 __all__ = [
@@ -132,11 +137,11 @@ def solve_connection_pressures_and_rates(
     the well has no `WellBoreModel`, since non-Darcy correction doesn't depend on
     wellbore hydraulics.
 
-    :param tubing: Hydraulics correlation for this well. If `None`,
+    :param tubing: Hydraulics correlation for this well. If it has none,
         behavior depends on `control_spec.connection_pressure_mode`: with
         `UNIFORM_BHP`, `reference_pressure` is applied unchanged at every
-        connection and the hydraulics correlation is never called; with
-        `HYDRAULIC` (the default), raises.
+        connection; with `HYDROSTATIC`, pressure follows the weight of the fluid
+        between connections; with `HYDRAULIC` (the default), raises.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
     :param connection_samples: Reservoir samples, same order as `workspace`'s arrays.
@@ -147,23 +152,27 @@ def solve_connection_pressures_and_rates(
         and `connection_pressure_mode`.
     :returns: `(connection_pressures, phase_rates, surface_phase_rates)`.
     :raises ValidationError: If the well has no `WellBoreModel` and
-        `control_spec.connection_pressure_mode` isn't `UNIFORM_BHP`.
+        `control_spec.connection_pressure_mode` is `HYDRAULIC`.
     """
     wellbore = tubing.wellbore
-    if (
-        wellbore is None
-        and control_spec.connection_pressure_mode != ConnectionPressureMode.UNIFORM_BHP
-    ):
+    pressure_mode = control_spec.connection_pressure_mode
+    if wellbore is None and pressure_mode == ConnectionPressureMode.HYDRAULIC:
         raise ValidationError(
             "This well has no `WellBoreModel` assigned, and "
-            f"`control_spec.connection_pressure_mode` is "
-            f"{control_spec.connection_pressure_mode!r}, not `UNIFORM_BHP`. "
+            "`control_spec.connection_pressure_mode` is `HYDRAULIC`. "
             "A VFP table relates BHP to THP only and can't distribute pressure across "
-            "connections. Assign a `WellBoreModel` to this well, or "
-            "set `connection_pressure_mode=ConnectionPressureMode.UNIFORM_BHP` "
-            "to apply the reference pressure unchanged at every connection instead."
+            "connections. Assign a `WellBoreModel` to this well, or set "
+            "`connection_pressure_mode` to `ConnectionPressureMode.HYDROSTATIC` to distribute "
+            "pressure by the weight of the fluid between connections, or to "
+            "`ConnectionPressureMode.UNIFORM_BHP` to apply the reference pressure unchanged "
+            "at every connection."
         )
-    uniform_connection_pressure = wellbore is None
+    uniform_connection_pressure = (
+        wellbore is None and pressure_mode == ConnectionPressureMode.UNIFORM_BHP
+    )
+    hydrostatic_connection_pressure = (
+        wellbore is None and pressure_mode == ConnectionPressureMode.HYDROSTATIC
+    )
 
     zero_rates = PhaseValues(oil=0.0, water=0.0, gas=0.0)
     n_connections = len(connection_samples)
@@ -171,6 +180,20 @@ def solve_connection_pressures_and_rates(
     if uniform_connection_pressure:
         connection_pressures = workspace.connection_pressures
         connection_pressures[:] = reference_pressure
+    elif hydrostatic_connection_pressure:
+        connection_pressures = compute_hydrostatic_connection_pressures(
+            reference_depth=reference_depth,
+            reference_pressure=reference_pressure,
+            representative_depths=workspace.representative_depths,
+            connection_samples=connection_samples,
+            connection_rates=ConnectionRates(
+                oil=np.zeros(n_connections),
+                water=np.zeros(n_connections),
+                gas=np.zeros(n_connections),
+            ),
+            unit_system=control_spec.unit_system,
+            out=workspace.connection_pressures,
+        )
     else:
         connection_pressures = compute_perforation_pressures(
             wellbore=wellbore,
@@ -232,7 +255,17 @@ def solve_connection_pressures_and_rates(
             gas=surface_gas_rate,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
-        if not uniform_connection_pressure:
+        if hydrostatic_connection_pressure:
+            connection_pressures = compute_hydrostatic_connection_pressures(
+                reference_depth=reference_depth,
+                reference_pressure=reference_pressure,
+                representative_depths=workspace.representative_depths,
+                connection_samples=connection_samples,
+                connection_rates=get_connection_rates(workspace=workspace),
+                unit_system=control_spec.unit_system,
+                out=workspace.connection_pressures,
+            )
+        elif not uniform_connection_pressure:
             connection_phase_rates = build_connection_phase_rates(
                 connection_oil_rates=workspace.connection_oil_rates,
                 connection_water_rates=workspace.connection_water_rates,
@@ -391,6 +424,7 @@ def bisect_bhp(
                 surface_phase_rates=surface_phase_rates,
                 surface_fluid_properties=surface_fluid_properties,
                 is_injector=is_injector,
+                connection_rates=get_connection_rates(workspace=workspace),
             )
             increasing_with_bhp = True
 

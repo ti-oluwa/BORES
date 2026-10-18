@@ -12,9 +12,8 @@ import typing
 
 import numpy as np
 
-from bores.constants import c, get_conversion_factors
 from bores.errors import ValidationError
-from bores.types import Integer, Number, UnitSystem
+from bores.types import Integer, Number, NumberArray, OneDimension
 from bores.wells.base import WellType
 from bores.wells.compile import CompiledWellSystem, WellKind
 from bores.wells.hydraulics.base import (
@@ -22,11 +21,12 @@ from bores.wells.hydraulics.base import (
     SurfaceFluidProperties,
     WellBoreModel,
     compute_hydrostatic_pressure,
+    get_gravitational_acceleration,
 )
 from bores.wells.hydraulics.base import compute_tubing_head_pressure as compute_correlation_thp
 from bores.wells.hydraulics.vfp import VFPTable, VFPTables
 from bores.wells.state import ConnectionSample
-from bores.wells.workspace import PerforationWorkspace
+from bores.wells.workspace import ConnectionRates, PerforationWorkspace
 
 __all__ = [
     "FlowingFluid",
@@ -39,18 +39,21 @@ __all__ = [
 
 
 class FlowingFluid(typing.NamedTuple):
-    """The fluid a well flows, characterised well enough to find the weight of a fluid column."""
+    """What a well's connections hold, characterised well enough to weigh a column of what it flows."""
 
-    phase_densities: PhaseValues
-    """
-    Reservoir-condition density of each phase, averaged over the well's connections
-    in proportion to how much of that phase each connection can deliver.
-    """
+    oil_densities: NumberArray[OneDimension]
+    """Reservoir-condition oil density at each connection."""
 
-    fallback_fractions: PhaseValues
+    water_densities: NumberArray[OneDimension]
+    """Reservoir-condition water density at each connection."""
+
+    gas_densities: NumberArray[OneDimension]
+    """Reservoir-condition gas density at each connection."""
+
+    zero_flow_density: Number
     """
-    Volume fraction of each phase, used for the column's density when the well flows
-    nothing. Proportional to each flowing phase's total deliverability.
+    Density of the column when the well flows nothing: each flowing phase's density, weighted by
+    that phase's share of the well's total deliverability.
     """
 
 
@@ -123,12 +126,10 @@ def attach_flowing_fluid(
     relevant_phases: PhaseValues,
 ) -> WellTubing:
     """
-    Characterises the fluid a well flows, for a well whose tubing is a VFP table.
+    Records the densities at a well's connections, for a well whose tubing is a VFP table.
 
-    Each phase's density is the average over the connections, weighted by the connection's
-    well index times that phase's mobility, which is each connection's share of that phase's
-    deliverability. A well with a correlation is returned unchanged, since the correlation
-    works from the connection samples itself.
+    A well with a correlation is returned unchanged, since the correlation works from the
+    connection samples itself.
 
     :param tubing: The well's tubing performance.
     :param workspace: The well's perforation workspace.
@@ -142,20 +143,20 @@ def attach_flowing_fluid(
 
     mobilities = (workspace.oil_mobilities, workspace.water_mobilities, workspace.gas_mobilities)
     flags = (relevant_phases.oil > 0.0, relevant_phases.water > 0.0, relevant_phases.gas > 0.0)
-    sample_densities = (
+    densities = (
         np.array([sample.phase_densities.oil for sample in connection_samples]),
         np.array([sample.phase_densities.water for sample in connection_samples]),
         np.array([sample.phase_densities.gas for sample in connection_samples]),
     )
-    densities = []
     deliverabilities = []
-    for mobility, sample_density, flag in zip(mobilities, sample_densities, flags, strict=True):
+    phase_means = []
+    for mobility, phase_densities, flag in zip(mobilities, densities, flags, strict=True):
         weights = workspace.well_indices * mobility
         total = float(weights.sum())
-        densities.append(
-            float(np.dot(weights, sample_density) / total)
+        phase_means.append(
+            float(np.dot(weights, phase_densities) / total)
             if total > 0.0
-            else float(sample_density.mean())
+            else float(phase_densities.mean())
         )
         deliverabilities.append(total if flag else 0.0)
 
@@ -163,37 +164,43 @@ def attach_flowing_fluid(
     if total_deliverability > 0.0:
         fractions = [value / total_deliverability for value in deliverabilities]
     else:
-        count = sum(flags)
-        fractions = [1.0 / count if flag else 0.0 for flag in flags]
+        flowing = sum(flags)
+        fractions = [1.0 / flowing if flag else 0.0 for flag in flags]
     return tubing._replace(
         flowing_fluid=FlowingFluid(
-            phase_densities=PhaseValues(*densities),
-            fallback_fractions=PhaseValues(*fractions),
+            oil_densities=densities[0],
+            water_densities=densities[1],
+            gas_densities=densities[2],
+            zero_flow_density=sum(
+                fraction * mean for fraction, mean in zip(fractions, phase_means, strict=True)
+            ),
         )
     )
 
 
-def compute_flowing_density(*, flowing_fluid: FlowingFluid, phase_rates: PhaseValues) -> Number:
+def compute_flowing_density(
+    *, flowing_fluid: FlowingFluid, connection_rates: ConnectionRates
+) -> Number:
     """
-    Density of the mixture a well flows: its total mass rate over its total volume rate, both
-    at reservoir conditions.
+    Density of the mixture a well flows: its total mass rate over its total volume rate, both at
+    reservoir conditions, summed over every phase at every connection.
 
-    A well flowing nothing is given the density of its fallback phase fractions instead.
+    A well flowing nothing is given `flowing_fluid.zero_flow_density`.
 
-    :param flowing_fluid: The fluid the well flows.
-    :param phase_rates: Reservoir-condition phase rates.
+    :param flowing_fluid: What the well's connections hold.
+    :param connection_rates: Reservoir-condition rate of each phase at each connection.
     :returns: The mixture density.
     """
-    rates = (abs(phase_rates.oil), abs(phase_rates.water), abs(phase_rates.gas))
-    densities = flowing_fluid.phase_densities
-    volume = sum(rates)
-    if volume > 0.0:
-        mass = sum(rate * density for rate, density in zip(rates, densities, strict=True))
-        return mass / volume
-    return sum(
-        fraction * density
-        for fraction, density in zip(flowing_fluid.fallback_fractions, densities, strict=True)
+    oil, water, gas = (np.abs(rates) for rates in connection_rates)
+    volume = float(oil.sum() + water.sum() + gas.sum())
+    if volume <= 0.0:
+        return flowing_fluid.zero_flow_density
+    mass = float(
+        np.dot(oil, flowing_fluid.oil_densities)
+        + np.dot(water, flowing_fluid.water_densities)
+        + np.dot(gas, flowing_fluid.gas_densities)
     )
+    return mass / volume
 
 
 def compute_datum_pressure_shift(
@@ -201,7 +208,7 @@ def compute_datum_pressure_shift(
     table: VFPTable,
     reference_depth: Number,
     flowing_fluid: FlowingFluid | None,
-    phase_rates: PhaseValues,
+    connection_rates: ConnectionRates | None,
 ) -> Number:
     """
     The pressure to add to the BHP at the well's reference depth to get the BHP at a VFP
@@ -213,28 +220,29 @@ def compute_datum_pressure_shift(
 
     :param table: The VFP table.
     :param reference_depth: The well's reference depth.
-    :param flowing_fluid: The fluid the well flows. Not needed if the depths match.
-    :param phase_rates: Reservoir-condition phase rates.
+    :param flowing_fluid: What the well's connections hold. Not needed if the depths match.
+    :param connection_rates: Reservoir-condition phase rates at each connection, at the BHP
+        being evaluated. Not needed if the depths match.
     :returns: The pressure shift, in the table's unit system.
-    :raises ValidationError: If the depths differ and `flowing_fluid` is `None`.
+    :raises ValidationError: If the depths differ and `flowing_fluid` or `connection_rates` is
+        `None`.
     """
     depth_difference = table.datum_depth - reference_depth
     if math.isclose(depth_difference, 0.0, abs_tol=1e-6):
         return 0.0
-    if flowing_fluid is None:
+    if flowing_fluid is None or connection_rates is None:
         raise ValidationError(
             f"VFP table {table.table_number} refers to a datum depth of {table.datum_depth}, but "
-            f"this well's reference depth is {reference_depth}, and the fluid the well flows isn't "
-            "known, so the table's BHP can't be moved between the two depths."
+            f"this well's reference depth is {reference_depth}, and the fluid it flows isn't "
+            "known at this point, so the table's BHP can't be moved between the two depths."
         )
 
     unit_system = table.unit_system
-    gravity = typing.cast(Number, c.ACCELERATION_DUE_TO_GRAVITY_FEET_PER_SECONDS_SQUARE)
-    if unit_system != UnitSystem.FIELD:
-        gravity = gravity * get_conversion_factors(UnitSystem.FIELD, unit_system)["length"]
     return compute_hydrostatic_pressure(
-        density=compute_flowing_density(flowing_fluid=flowing_fluid, phase_rates=phase_rates),
-        gravitational_acceleration=gravity,
+        density=compute_flowing_density(
+            flowing_fluid=flowing_fluid, connection_rates=connection_rates
+        ),
+        gravitational_acceleration=get_gravitational_acceleration(unit_system),
         length=depth_difference,
         unit_system=unit_system,
     )
@@ -249,6 +257,7 @@ def compute_tubing_head_pressure(
     surface_phase_rates: PhaseValues,
     surface_fluid_properties: SurfaceFluidProperties | None,
     is_injector: bool,
+    connection_rates: ConnectionRates | None = None,
 ) -> Number:
     """
     Finds the tubing head pressure for a bottom-hole pressure and the rates it produces.
@@ -264,10 +273,13 @@ def compute_tubing_head_pressure(
     :param surface_phase_rates: Surface-condition phase rates (used by a VFP table).
     :param surface_fluid_properties: Surface fluid properties. Only a correlation needs them.
     :param is_injector: Whether the well is an injector.
+    :param connection_rates: Reservoir-condition phase rates at each connection, at
+        `reference_pressure`. Needed only for a VFP table whose datum depth differs from
+        `reference_depth`, to weigh the fluid column between them.
     :returns: The tubing head pressure.
     :raises ValidationError: If the well has no tubing performance, a correlation is needed but
         `surface_fluid_properties` is `None`, or a VFP table's datum depth differs from
-        `reference_depth` and the well's `flowing_fluid` isn't set.
+        `reference_depth` and the well's `flowing_fluid` or `connection_rates` isn't given.
     """
     if tubing.vfp_table is not None:
         table = tubing.vfp_table
@@ -275,7 +287,7 @@ def compute_tubing_head_pressure(
             table=table,
             reference_depth=reference_depth,
             flowing_fluid=tubing.flowing_fluid,
-            phase_rates=phase_rates,
+            connection_rates=connection_rates,
         )
         lookup = table.get_lookup_variables(
             oil_rate=surface_phase_rates.oil,

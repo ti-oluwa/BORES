@@ -25,9 +25,20 @@ class ConnectionPressureMode(enum.Enum):
 
     HYDRAULIC = "hydraulic"
     """
-    Require a real `WellBoreModel`/`VFPTable` for any well whose
-    connections need pressure distributed across them. Raises clearly
-    if one isn't assigned. The rigorous default.
+    Require a real `WellBoreModel` for any well whose connections need pressure distributed
+    across them. A VFP table relates BHP to THP at its datum only, so it can't distribute
+    pressure; a well with only one raises, asking for another mode. The rigorous default.
+    """
+
+    HYDROSTATIC = "hydrostatic"
+    """
+    Distribute pressure across connections by the weight of the fluid between them, with no
+    friction, working outward from the well's reference depth. The fluid in each segment is
+    the commingled mixture of every connection beneath it: its total mass rate over its total
+    volume rate, at reservoir conditions. A well flowing nothing uses the saturation-weighted
+    density of the reservoir fluid at those connections. This is the usual choice for a well
+    with a VFP table, and the simplest one that still keeps the pressure difference between
+    connections.
     """
 
     UNIFORM_BHP = "uniform_bhp"
@@ -71,7 +82,7 @@ class WellControlSpec:
     """Unit system for pressure-valued control limits."""
 
     connection_pressure_mode: ConnectionPressureMode = ConnectionPressureMode.HYDRAULIC
-    """How to treat a well with no `WellBoreModel`/`VFPTable` assigned."""
+    """How to distribute pressure across the connections of a well with no `WellBoreModel`."""
 
     @property
     def radial_flow_constant(self) -> Number:

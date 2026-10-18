@@ -6,7 +6,7 @@ import typing
 import numba
 from typing_extensions import Self
 
-from bores.constants import c
+from bores.constants import c, get_conversion_factors
 from bores.errors import ValidationError
 from bores.types import Number, NumberArray, OneDimension, UnitConversionTable, UnitSystem
 from bores.wells.state import PhaseValues
@@ -29,6 +29,7 @@ __all__ = [
     "compute_surface_mixture_density",
     "compute_surface_mixture_viscosity",
     "compute_tubing_head_pressure",
+    "get_gravitational_acceleration",
     "get_unit_system_constant",
     "split_liquid_gas",
 ]
@@ -313,6 +314,19 @@ def get_unit_system_constant(prefix: str, unit_system: UnitSystem) -> Number:
     :returns: `f"{prefix}_{unit_system.name}"` from `bores.constants.c`.
     """
     return getattr(c, f"{prefix}_{unit_system.name.upper()}")
+
+
+def get_gravitational_acceleration(unit_system: UnitSystem) -> Number:
+    """
+    Standard gravity in a unit system's length and time units.
+
+    :param unit_system: The unit system to express it in.
+    :returns: Acceleration due to gravity.
+    """
+    gravity = typing.cast(Number, c.ACCELERATION_DUE_TO_GRAVITY_FEET_PER_SECONDS_SQUARE)
+    if unit_system != UnitSystem.FIELD:
+        gravity = gravity * get_conversion_factors(UnitSystem.FIELD, unit_system)["length"]
+    return gravity
 
 
 def compute_hydrostatic_pressure(
@@ -603,8 +617,8 @@ def compute_tubing_head_pressure(
         raise ValidationError(
             "Tubing head pressure requires a `WellBoreModel` or VFP table "
             "assigned to this well; THP control, a `THPLimit`, and THP "
-            "reporting all need one. `ConnectionPressureMode.UNIFORM_BHP` "
-            "only covers connection-to-connection pressure distribution, "
+            "reporting all need one. `ConnectionPressureMode` only covers "
+            "connection-to-connection pressure distribution, "
             "not the datum-to-surface relationship."
         )
     if wellbore.name == "homogeneous":

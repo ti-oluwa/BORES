@@ -22,6 +22,7 @@ from bores.wells.state import (
 )
 
 __all__ = [
+    "ConnectionRates",
     "PerforationWorkspace",
     "WellsWorkspace",
     "accumulate_phase_rates",
@@ -31,7 +32,9 @@ __all__ = [
     "build_wells_workspace",
     "compute_perforation_drawdown",
     "correct_well_indices_for_non_darcy",
+    "get_connection_rates",
     "load_wells_states",
+    "restore_connection_rates",
 ]
 
 
@@ -343,6 +346,56 @@ def build_wells_workspace(
     )
 
 
+class ConnectionRates(typing.NamedTuple):
+    """Reservoir-condition rate of each phase at every one of a well's connections."""
+
+    oil: NumberArray[OneDimension]
+    """Oil rate at each connection."""
+
+    water: NumberArray[OneDimension]
+    """Water rate at each connection."""
+
+    gas: NumberArray[OneDimension]
+    """Gas rate at each connection."""
+
+
+def get_connection_rates(
+    *, workspace: PerforationWorkspace, copy: bool = False
+) -> ConnectionRates:
+    """
+    The per-connection rates the most recent solve left in a well's `PerforationWorkspace`.
+
+    The workspace's rate arrays are overwritten by every solve, so the values only stay valid
+    until the next one. Take a copy to keep them past it.
+
+    :param workspace: The well's perforation workspace.
+    :param copy: Whether to copy the arrays instead of returning the workspace's own.
+    :returns: The connection rates.
+    """
+    rates = ConnectionRates(
+        oil=workspace.connection_oil_rates,
+        water=workspace.connection_water_rates,
+        gas=workspace.connection_gas_rates,
+    )
+    if copy:
+        return ConnectionRates(
+            oil=rates.oil.copy(), water=rates.water.copy(), gas=rates.gas.copy()
+        )
+    return rates
+
+
+def restore_connection_rates(*, workspace: PerforationWorkspace, rates: ConnectionRates) -> None:
+    """
+    Writes saved per-connection rates back into a well's `PerforationWorkspace`.
+
+    :param workspace: The well's perforation workspace.
+    :param rates: Rates saved with `get_connection_rates(..., copy=True)`.
+    """
+    workspace.connection_oil_rates[:] = rates.oil
+    workspace.connection_water_rates[:] = rates.water
+    workspace.connection_gas_rates[:] = rates.gas
+
+
 def accumulate_well_volumes(*, workspace: WellsWorkspace, step_size: Number) -> None:
     """
     Adds one accepted time step's surface volumes to every well's running totals, in place.
@@ -419,11 +472,13 @@ def correct_well_indices_for_non_darcy(
     if math.isnan(d_factor):
         out_well_indices[:] = static_well_indices
         return
+
     for i in range(static_well_indices.shape[0]):
         conductivity = connection_conductivities[i]
         if math.isnan(conductivity):
             out_well_indices[i] = static_well_indices[i]
             continue
+        
         out_well_indices[i] = 1.0 / (
             1.0 / static_well_indices[i] + d_factor * abs(connection_gas_rates[i]) / conductivity
         )
