@@ -45,8 +45,9 @@ class ConnectionTransmissibilities(typing.NamedTuple):
     Shape `(n_nnc,)` float64 or `None` - flow transmissibility of each non-neighbour connection,
     exactly as supplied on the grid. Unlike `interior` and `boundary`, which are geometric
     (permeability x area / length), it already includes the Darcy unit conversion constant, so
-    it multiplies mobility and pressure difference directly. Same order as
-    `Grid.nnc_cell_indices`; `None` when the grid has no NNCs.
+    it multiplies mobility and pressure difference directly. 
+    
+    Same order as `Grid.nnc_cell_indices`; `None` when the grid has no NNCs.
     """
     unit_system: UnitSystem
 

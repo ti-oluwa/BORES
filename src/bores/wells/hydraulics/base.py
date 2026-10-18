@@ -584,8 +584,7 @@ def compute_tubing_head_pressure(
     *, wellbore: WellBoreModel | None, **kwargs: typing.Any
 ) -> Number:
     """
-    Dispatches to the `compute_tubing_head_pressure` of whichever module
-    `wellbore.name` selects.
+    Computes the tubing head pressure based on `wellbore.name`.
 
     Unlike the connection-distribution leg, this has no fallback for a
     missing `wellbore`; converting between BHP and THP is meaningless

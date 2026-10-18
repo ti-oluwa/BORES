@@ -885,3 +885,99 @@ def test_vfp_thp_follows_an_oil_rate_table_with_no_gas(tmp_path):
         is_injector=False,
     )
     assert thp == pytest.approx(30.0)
+
+
+ALL_TYPE_COMBINATIONS = [
+    (flow, water, gas)
+    for flow in (VFPFlowType.OIL, VFPFlowType.LIQUID, VFPFlowType.GAS)
+    for water in VFPWaterFractionType
+    for gas in VFPGasFractionType
+]
+
+
+@pytest.mark.parametrize("flow_type, water_type, gas_type", ALL_TYPE_COMBINATIONS)
+def test_sampled_rates_reproduce_the_lookup_values_for_every_definition(
+    flow_type, water_type, gas_type
+):
+    from bores.wells.hydraulics.vfp import compute_surface_phase_rates
+
+    table = lookup_table(flow_type=flow_type, water_type=water_type, gas_type=gas_type)
+    rates = compute_surface_phase_rates(
+        flow_type=flow_type,
+        water_fraction_type=water_type,
+        gas_fraction_type=gas_type,
+        flow_rate=300.0,
+        water_fraction=0.4,
+        gas_fraction=0.3,
+    )
+    lookup = table.get_lookup_variables(
+        oil_rate=rates.oil, water_rate=rates.water, gas_rate=rates.gas
+    )
+    assert tuple(lookup) == pytest.approx((300.0, 0.4, 0.3))
+
+
+def test_values_that_describe_no_rates_are_rejected():
+    from bores.wells.hydraulics.vfp import compute_surface_phase_rates
+
+    with pytest.raises(ValidationError, match="non-negative"):
+        compute_surface_phase_rates(
+            flow_type=VFPFlowType.OIL,
+            water_fraction_type=VFPWaterFractionType.WATER_CUT,
+            gas_fraction_type=VFPGasFractionType.GAS_OIL_RATIO,
+            flow_rate=100.0,
+            water_fraction=1.0,  # all water, so no oil rate to speak of
+            gas_fraction=0.0,
+        )
+
+
+def sampled_table(**kwargs):
+    from bores.wells.hydraulics.base import SurfaceFluidProperties
+    from bores.wells.hydraulics.homogeneous import homogeneous_wellbore
+    from bores.wells.hydraulics.vfp import as_vfp_table
+
+    return as_vfp_table(
+        homogeneous_wellbore(tubing_inner_diameter=0.25),
+        table_number=1,
+        reference_depth=5000.0,
+        thps=np.array([100.0, 300.0]),
+        surface_fluid_properties=SurfaceFluidProperties(density=50.0, viscosity=1.0),
+        min_bhp=0.0,
+        max_bhp=20000.0,
+        **kwargs,
+    )
+
+
+def test_correlation_is_sampled_in_the_declared_terms():
+    table = sampled_table(
+        well_type=WellType.PRODUCER,
+        flow_rates=np.array([100.0, 400.0]),
+        flow_type=VFPFlowType.OIL,
+        water_fraction_type=VFPWaterFractionType.WATER_OIL_RATIO,
+        gas_fraction_type=VFPGasFractionType.GAS_LIQUID_RATIO,
+        water_fractions=np.array([0.0, 1.0]),
+        gas_fractions=np.array([0.0, 100.0]),
+    )
+    assert table.flow_type == VFPFlowType.OIL
+    assert table.water_fraction_type == VFPWaterFractionType.WATER_OIL_RATIO
+    assert table.gas_fraction_type == VFPGasFractionType.GAS_LIQUID_RATIO
+    bhps = table._data.bhps
+    assert bhps.shape == (2, 2, 2, 2, 1)
+    assert (bhps < 20000.0).all()
+    assert (np.diff(bhps, axis=1) > 150.0).all()  # THP rises 200, so BHP does
+
+
+def test_injector_table_is_sampled_in_the_injected_phase():
+    from bores.types import FluidPhase
+
+    table = sampled_table(
+        well_type=WellType.INJECTOR,
+        flow_rates=np.array([100.0, 1000.0]),
+        injected_phase=FluidPhase.WATER,
+    )
+    assert table.flow_type == VFPFlowType.WATER
+    with pytest.raises(ValidationError, match="water or gas"):
+        sampled_table(
+            well_type=WellType.INJECTOR,
+            flow_rates=np.array([100.0, 1000.0]),
+            flow_type=VFPFlowType.OIL,
+        )

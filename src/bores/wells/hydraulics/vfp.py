@@ -2,9 +2,9 @@
 VFP (vertical flow performance) tables.
 
 Interpolates bottomhole pressure at a well's datum depth as a function of flow rate,
-tubing head pressure, water fraction, gas fraction, and artificial lift quantity. 
+tubing head pressure, water fraction, gas fraction, and artificial lift quantity.
 
-Each table keeps the definitions of its own flow, water and gas axes, and the values it 
+Each table keeps the definitions of its own flow, water and gas axes, and the values it
 is looked up with are computed from a well's rates according to them.
 This is the datum-to-surface leg of well hydraulics only; connection-level
 pressure distribution below the datum is unaffected by whether a table is assigned.
@@ -1219,44 +1219,84 @@ def load_vfp_tables(
     return VFPTables(producers=producers, injectors=injectors)
 
 
-def compute_reservoir_phase_rates(
+FLOW_ROW: typing.Mapping[VFPFlowType, tuple[float, float, float]] = {
+    VFPFlowType.OIL: (1.0, 0.0, 0.0),
+    VFPFlowType.LIQUID: (1.0, 1.0, 0.0),
+    VFPFlowType.WATER: (0.0, 1.0, 0.0),
+    VFPFlowType.GAS: (0.0, 0.0, 1.0),
+}
+"""Coefficients of `(oil, water, gas)` rates that equal the flow axis value, by flow type."""
+
+
+def compute_surface_phase_rates(
     *,
+    flow_type: VFPFlowType,
+    water_fraction_type: VFPWaterFractionType,
+    gas_fraction_type: VFPGasFractionType,
     flow_rate: Number,
     water_fraction: Number,
     gas_fraction: Number,
-    well_type: WellType,
-    injected_phase: FluidPhase | None,
+) -> PhaseValues:
+    """
+    Surface oil, water and gas rates that a table's lookup values describe.
+
+    This is the inverse of `VFPTable.get_lookup_variables`: the three definitions each give
+    one linear equation in the three rates, which are solved together.
+
+    :param flow_type: What `flow_rate` measures.
+    :param water_fraction_type: What `water_fraction` measures.
+    :param gas_fraction_type: What `gas_fraction` measures.
+    :param flow_rate: Value on the flow axis.
+    :param water_fraction: Value on the water axis.
+    :param gas_fraction: Value on the gas axis.
+    :returns: Surface-condition phase rates.
+    :raises ValidationError: If the three values and definitions don't determine a single
+        non-negative set of rates, such as a water cut of 1 against an oil rate.
+    """
+    if water_fraction_type == VFPWaterFractionType.WATER_CUT:
+        water_row = (-water_fraction, 1.0 - water_fraction, 0.0)
+    elif water_fraction_type == VFPWaterFractionType.WATER_OIL_RATIO:
+        water_row = (-water_fraction, 1.0, 0.0)
+    else:
+        water_row = (0.0, 1.0, -water_fraction)
+
+    if gas_fraction_type == VFPGasFractionType.GAS_OIL_RATIO:
+        gas_row = (-gas_fraction, 0.0, 1.0)
+    elif gas_fraction_type == VFPGasFractionType.GAS_LIQUID_RATIO:
+        gas_row = (-gas_fraction, -gas_fraction, 1.0)
+    else:
+        gas_row = (1.0, 0.0, -gas_fraction)
+
+    matrix = np.array([FLOW_ROW[flow_type], water_row, gas_row], dtype=np.float64)
+    try:
+        oil, water, gas = np.linalg.solve(matrix, np.array([flow_rate, 0.0, 0.0]))
+    except np.linalg.LinAlgError:
+        oil = water = gas = np.nan
+    if not (np.isfinite([oil, water, gas]).all() and min(oil, water, gas) >= -1e-9):
+        raise ValidationError(
+            f"A {flow_type} flow of {flow_rate}, {water_fraction_type} of {water_fraction} and "
+            f"{gas_fraction_type} of {gas_fraction} don't describe one set of non-negative "
+            "phase rates."
+        )
+    return PhaseValues(oil=max(oil, 0.0), water=max(water, 0.0), gas=max(gas, 0.0))
+
+
+def compute_reservoir_phase_rates(
+    *,
+    surface_phase_rates: PhaseValues,
     formation_volume_factors: PhaseValues,
 ) -> PhaseValues:
     """
-    Reservoir-condition phase rates for a flow rate, water cut and gas-oil ratio.
+    Reservoir-condition phase rates from surface-condition ones.
 
-    :param flow_rate: Surface liquid rate for a producer; the injected phase's surface rate
-        for an injector.
-    :param water_fraction: Water cut. Unused for an injector.
-    :param gas_fraction: Gas-oil ratio. Unused for an injector.
-    :param well_type: Producer or injector.
-    :param injected_phase: The injected phase, for an injector.
+    :param surface_phase_rates: Surface-condition oil, water and gas rates.
     :param formation_volume_factors: Oil, water and gas formation volume factors.
     :returns: Reservoir-condition phase rates.
-    :raises ValidationError: If an injector's `injected_phase` is not water or gas.
     """
-    if well_type == WellType.INJECTOR:
-        if injected_phase == FluidPhase.WATER:
-            return PhaseValues(oil=0.0, water=flow_rate * formation_volume_factors.water, gas=0.0)
-        if injected_phase == FluidPhase.GAS:
-            return PhaseValues(oil=0.0, water=0.0, gas=flow_rate * formation_volume_factors.gas)
-        raise ValidationError(
-            f"`injected_phase` must be `FluidPhase.WATER` or `FluidPhase.GAS` "
-            f"for an injector table, got {injected_phase!r}."
-        )
-    water_rate = flow_rate * water_fraction
-    oil_rate = flow_rate - water_rate
-    gas_rate = oil_rate * gas_fraction
     return PhaseValues(
-        oil=oil_rate * formation_volume_factors.oil,
-        water=water_rate * formation_volume_factors.water,
-        gas=gas_rate * formation_volume_factors.gas,
+        oil=surface_phase_rates.oil * formation_volume_factors.oil,
+        water=surface_phase_rates.water * formation_volume_factors.water,
+        gas=surface_phase_rates.gas * formation_volume_factors.gas,
     )
 
 
@@ -1304,6 +1344,9 @@ def as_vfp_table(
     flow_rates: NumberArray[OneDimension],
     thps: NumberArray[OneDimension],
     surface_fluid_properties: SurfaceFluidProperties,
+    flow_type: VFPFlowType | None = None,
+    water_fraction_type: VFPWaterFractionType = VFPWaterFractionType.WATER_CUT,
+    gas_fraction_type: VFPGasFractionType = VFPGasFractionType.GAS_OIL_RATIO,
     water_fractions: NumberArray[OneDimension] | None = None,
     gas_fractions: NumberArray[OneDimension] | None = None,
     formation_volume_factors: PhaseValues | None = None,
@@ -1319,14 +1362,13 @@ def as_vfp_table(
     """
     Samples a `WellBoreModel` correlation into a `VFPTable`.
 
-    A producer table is liquid rate, water cut and gas-oil ratio based; an injector table's flow
-    is the injected phase.
-
-    For each grid point, finds the BHP that makes the correlation's THP
-    match that point's `thps` value, by bisection. This resamples the
-    same datum-to-surface relationship `compute_tubing_head_pressure`
-    computes analytically, once per grid point, so later lookups are a
-    single interpolation instead of a bisection.
+    The table's axes are written in whatever terms are declared by `flow_type`,
+    `water_fraction_type` and `gas_fraction_type`. For each grid point, the surface
+    oil, water and gas rates those values describe are found, converted to reservoir
+    conditions, and the BHP that makes the correlation's THP match that point's `thps`
+    value is found by bisection. This resamples the same datum-to-surface relationship
+    `compute_tubing_head_pressure` computes analytically, once per grid point, so later
+    lookups are a single interpolation instead of a bisection.
 
     `formation_volume_factors` and `surface_fluid_properties` are held
     fixed across the whole grid; this doesn't vary either with pressure
@@ -1341,18 +1383,24 @@ def as_vfp_table(
     :param table_number: Table number for the resulting `VFPData`.
     :param well_type: Producer or injector.
     :param reference_depth: The well's BHP/THP reporting datum.
-    :param flow_rates: Flow rate axis, at surface conditions.
+    :param flow_rates: Flow rate axis, at surface conditions, in the terms of `flow_type`.
     :param thps: Tubing head pressure axis to solve BHP for.
     :param surface_fluid_properties: Fixed surface fluid properties used
         for every grid point.
-    :param water_fractions: Water cut axis. Ignored for an injector. `[0.0]` if not given.
-    :param gas_fractions: Gas-oil ratio axis. Ignored for an injector. `[0.0]` if not given.
+    :param flow_type: What `flow_rates` measures. For a producer, liquid rate if not given.
+        For an injector, the phase of `injected_phase`.
+    :param water_fraction_type: What `water_fractions` measures. Ignored for an injector.
+    :param gas_fraction_type: What `gas_fractions` measures. Ignored for an injector.
+    :param water_fractions: Water axis, in the terms of `water_fraction_type`. Ignored for an
+        injector. `[0.0]` if not given.
+    :param gas_fractions: Gas axis, in the terms of `gas_fraction_type`. Ignored for an
+        injector. `[0.0]` if not given.
     :param formation_volume_factors: Fixed oil/water/gas FVFs, converting
-        `flow_rates`/`water_fractions`/`gas_fractions` (surface conditions) to
-        the reservoir-condition rates `wellbore`'s correlation needs.
+        the surface-condition rates the axes describe to the reservoir-condition rates
+        `wellbore`'s correlation needs.
         `PhaseValues(oil=1.0, water=1.0, gas=1.0)` (no conversion) if not given.
-    :param injected_phase: Which phase `flow_rates` is, for an injector.
-        Required if `well_type` is `WellType.INJECTOR`.
+    :param injected_phase: The injected phase, for an injector. Used to choose `flow_type` if
+        that is not given.
     :param min_bhp: Lower bisection bracket bound, covering every grid point.
     :param max_bhp: Upper bisection bracket bound, covering every grid point.
     :param max_bisection_iterations: Per grid point.
@@ -1363,8 +1411,8 @@ def as_vfp_table(
     :param dtype: Output array dtype for the resulting `VFPTable`.
     :param warn_on_extrapolation: Forwarded to `VFPTable`.
     :returns: A `VFPTable` covering `flow_rates` x `thps` x `water_fractions` x `gas_fractions`.
-    :raises ValidationError: If `well_type` is `WellType.INJECTOR` and
-        `injected_phase` isn't `FluidPhase.WATER` or `FluidPhase.GAS`.
+    :raises ValidationError: If an injector's flow is not water or gas, or a grid point's values
+        don't describe non-negative phase rates.
     """
     is_injector = well_type == WellType.INJECTOR
     resolved_formation_volume_factors = (
@@ -1377,6 +1425,22 @@ def as_vfp_table(
     if is_injector:
         resolved_water_fractions = np.array([0.0])
         resolved_gas_fractions = np.array([0.0])
+        water_fraction_type = VFPWaterFractionType.WATER_CUT
+        gas_fraction_type = VFPGasFractionType.GAS_OIL_RATIO
+        if flow_type is None:
+            if injected_phase == FluidPhase.WATER:
+                flow_type = VFPFlowType.WATER
+            elif injected_phase == FluidPhase.GAS:
+                flow_type = VFPFlowType.GAS
+
+        if flow_type not in (VFPFlowType.WATER, VFPFlowType.GAS):
+            raise ValidationError(
+                "An injector table's `flow_type` must be water or gas, or `injected_phase` must "
+                f"be `FluidPhase.WATER` or `FluidPhase.GAS`; got {flow_type!r} and "
+                f"{injected_phase!r}."
+            )
+    elif flow_type is None:
+        flow_type = VFPFlowType.LIQUID
 
     bhps = np.empty((
         len(flow_rates),
@@ -1388,12 +1452,24 @@ def as_vfp_table(
     for i, flow_rate in enumerate(flow_rates):
         for k, water_fraction in enumerate(resolved_water_fractions):
             for m, gas_fraction in enumerate(resolved_gas_fractions):
+                if is_injector:
+                    surface_phase_rates = PhaseValues(
+                        oil=0.0,
+                        water=flow_rate if flow_type == VFPFlowType.WATER else 0.0,
+                        gas=flow_rate if flow_type == VFPFlowType.GAS else 0.0,
+                    )
+                else:
+                    surface_phase_rates = compute_surface_phase_rates(
+                        flow_type=flow_type,
+                        water_fraction_type=water_fraction_type,
+                        gas_fraction_type=gas_fraction_type,
+                        flow_rate=flow_rate,
+                        water_fraction=water_fraction,
+                        gas_fraction=gas_fraction,
+                    )
+
                 phase_rates = compute_reservoir_phase_rates(
-                    flow_rate=flow_rate,
-                    water_fraction=water_fraction,
-                    gas_fraction=gas_fraction,
-                    well_type=well_type,
-                    injected_phase=injected_phase,
+                    surface_phase_rates=surface_phase_rates,
                     formation_volume_factors=resolved_formation_volume_factors,
                 )
                 for j, thp in enumerate(thps):
@@ -1410,14 +1486,13 @@ def as_vfp_table(
                         convergence_tolerance=bhp_convergence_tolerance,
                     )
 
-    flow_type = VFPFlowType.LIQUID
-    if is_injector:
-        flow_type = VFPFlowType.WATER if injected_phase == FluidPhase.WATER else VFPFlowType.GAS
     data = VFPData(
         table_number=table_number,
         well_type=well_type,
         datum_depth=reference_depth,
         flow_type=flow_type,
+        water_fraction_type=water_fraction_type,
+        gas_fraction_type=gas_fraction_type,
         flow_rates=flow_rates,
         thps=thps,
         water_fractions=typing.cast(NumberArray[OneDimension], resolved_water_fractions),
