@@ -73,28 +73,35 @@ def compute_hydrostatic_connection_pressures(
     if count == 0:
         return pressures
 
-    order = np.argsort(np.asarray(representative_depths), kind="stable")
-    depths = np.asarray(representative_depths, dtype=np.float64)[order]
+    working_dtype = pressures.dtype
+    order = np.argsort(representative_depths, kind="stable")
+    depths = representative_depths[order]
     samples = [connection_samples[i] for i in order]
-    oil = np.abs(np.asarray(connection_rates.oil, dtype=np.float64))[order]
-    water = np.abs(np.asarray(connection_rates.water, dtype=np.float64))[order]
-    gas = np.abs(np.asarray(connection_rates.gas, dtype=np.float64))[order]
+    oil = np.abs(connection_rates.oil[order])
+    water = np.abs(connection_rates.water[order])
+    gas = np.abs(connection_rates.gas[order])
 
     mass = (
-        oil * np.array([sample.phase_densities.oil for sample in samples])
-        + water * np.array([sample.phase_densities.water for sample in samples])
-        + gas * np.array([sample.phase_densities.gas for sample in samples])
+        oil * np.fromiter((sample.phase_densities.oil for sample in samples), working_dtype, count)
+        + water
+        * np.fromiter((sample.phase_densities.water for sample in samples), working_dtype, count)
+        + gas
+        * np.fromiter((sample.phase_densities.gas for sample in samples), working_dtype, count)
     )
     volume = oil + water + gas
-    static = np.array([
-        compute_static_mixture_density(
-            phase_saturations=sample.phase_saturations, phase_densities=sample.phase_densities
-        )
-        for sample in samples
-    ])
-    mass_beneath = np.append(np.cumsum(mass[::-1])[::-1], 0.0)
-    volume_beneath = np.append(np.cumsum(volume[::-1])[::-1], 0.0)
-    static_beneath = np.append(np.cumsum(static[::-1])[::-1], 0.0)
+    static = np.fromiter(
+        (
+            compute_static_mixture_density(
+                phase_saturations=sample.phase_saturations, phase_densities=sample.phase_densities
+            )
+            for sample in samples
+        ),
+        working_dtype,
+        count,
+    )
+    mass_beneath = np.cumsum(mass[::-1])[::-1]
+    volume_beneath = np.cumsum(volume[::-1])[::-1]
+    static_beneath = np.cumsum(static[::-1])[::-1]
 
     def get_segment_density(first_beneath: Integer) -> Number:
         """Compute the density of the fluid carried past connection `first_beneath` and every one deeper."""
@@ -125,7 +132,9 @@ def compute_hydrostatic_connection_pressures(
     previous_depth = reference_depth
     for k in range(first_below - 1, -1, -1):
         pressure -= (
-            get_segment_density(k + 1) * (previous_depth - depths[k]) * pressure_per_density_and_depth
+            get_segment_density(k + 1)
+            * (previous_depth - depths[k])
+            * pressure_per_density_and_depth
         )
         pressures[order[k]] = pressure
         previous_depth = depths[k]

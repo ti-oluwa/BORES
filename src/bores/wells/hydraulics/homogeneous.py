@@ -30,6 +30,7 @@ from bores.wells.hydraulics.base import (
     compute_surface_mixture_density,
     compute_surface_mixture_viscosity,
     get_unit_system_constant,
+    plan_connection_walk,
 )
 from bores.wells.state import ConnectionSample, PhaseValues
 
@@ -280,18 +281,15 @@ def compute_perforation_pressures(
     the wellbore sequentially from `reference_depth` rather than treating
     each connection as an independent path from the reference.
 
-    The wellbore is split at `reference_depth` into up to two branches -
-    connections at or below it, and connections above it - each walked
-    independently outward from the reference, nearest connection first.
-    The segment feeding into a connection carries the combined rate of
-    that connection and every connection beyond it on the same branch
-    (not yet joined/still to be added to the branch's cumulative flow);
-    once a connection is passed, its own rate is removed from the running
-    total for the next segment. This holds for both production (rate
-    accumulates as segments approach the reference) and injection (rate
-    depletes as segments move away from the reference) under the same
-    walk, since both describe a monotonically decreasing carried rate
-    with distance from the reference.
+    The wellbore is walked outward from `reference_depth`, first down through the connections
+    at or below it, then up through the connections above it, nearest connection first. Each
+    segment carries the combined rate of every connection beneath it, since a producer's flow
+    rises past them and an injector's falls to them. Going down, that is the connection the
+    segment ends at and every deeper one. Going up, it is every connection at or below the
+    reference depth plus every connection above it that has already been passed. Friction acts
+    against the flow, so it adds to the pressure going against the flow and subtracts going
+    with it. Hydrostatic head follows each segment's vertical extent, and friction its
+    along-hole length.
 
     :param model: This well's `HomogeneousWellbore`.
     :param reference_depth: The well's BHP/THP reporting datum.
@@ -333,85 +331,67 @@ def compute_perforation_pressures(
 
     friction_sign = -1.0 if is_injector else 1.0
 
-    below = sorted(
-        (i for i in range(n_samples) if representative_depths[i] >= reference_depth),
-        key=lambda i: representative_depths[i],
-    )
-    above = sorted(
-        (i for i in range(n_samples) if representative_depths[i] < reference_depth),
-        key=lambda i: -representative_depths[i],
-    )
-
-    for branch in (below, above):
-        if not branch:
-            continue
-
-        remaining_rates = PhaseValues(
-            oil=sum(connection_phase_rates[i].oil for i in branch),
-            water=sum(connection_phase_rates[i].water for i in branch),
-            gas=sum(connection_phase_rates[i].gas for i in branch),
+    for step in plan_connection_walk(
+        reference_depth=reference_depth,
+        representative_depths=typing.cast(typing.Sequence[Number], representative_depths),
+        inclinations_from_vertical=typing.cast(
+            typing.Sequence[Number], inclinations_from_vertical
+        ),
+        connection_phase_rates=connection_phase_rates,
+    ):
+        i = step.connection_index
+        remaining_rates = step.carried_rates
+        geometric_sign = step.geometric_sign
+        previous_pressure = (
+            reference_pressure if step.previous_index is None else pressures[step.previous_index]
         )
-        current_depth = reference_depth
-        current_pressure = reference_pressure
+        sample = connection_samples[i]
+        remaining_total = remaining_rates.oil + remaining_rates.water + remaining_rates.gas
 
-        for i in branch:
-            length = abs(representative_depths[i] - current_depth)
-            geometric_sign = 1.0 if representative_depths[i] >= current_depth else -1.0
-            sample = connection_samples[i]
-            remaining_total = remaining_rates.oil + remaining_rates.water + remaining_rates.gas
-
-            if remaining_total == 0:
-                drop = compute_static_hydrostatic_drop(
-                    mixture_density=compute_static_mixture_density(
-                        phase_saturations=sample.phase_saturations,
-                        phase_densities=sample.phase_densities,
-                    ),
-                    length=length,
-                    gravitational_acceleration=model.gravitational_acceleration,
-                    unit_system=model.unit_system,
-                )
-                current_pressure = current_pressure + geometric_sign * drop.total
-            else:
-                mixture_density = compute_mixture_density(
-                    phase_rates=remaining_rates, phase_densities=sample.phase_densities
-                )
-                mixture_viscosity = compute_mixture_viscosity(
-                    phase_rates=remaining_rates,
-                    phase_viscosities=sample.phase_viscosities,
-                )
-                velocity = compute_mixture_velocity(
-                    phase_rates=remaining_rates,
-                    tubing_inner_diameter=model.tubing_inner_diameter,
-                    rate_time_factor=model.rate_time_factor,
-                )
-                # Velocity is only ever set at a connection, where a
-                # perforation's own rate joins or leaves the flow (see the
-                # walk above). Within one segment there is no other
-                # source of velocity change (constant PVT properties are
-                # assumed along the segment), so passing the same value
-                # in and out here means the acceleration term always
-                # comes out to zero.
-                drop = compute_segment_drop(
-                    model=model,
-                    length=length,
-                    inclination_from_vertical=inclinations_from_vertical[i],
-                    mixture_density=mixture_density,
-                    mixture_viscosity=mixture_viscosity,
-                    mixture_velocity_in=velocity,
-                    mixture_velocity_out=velocity,
-                )
-                current_pressure = (
-                    current_pressure
-                    + geometric_sign * (drop.hydrostatic + drop.acceleration)
-                    + friction_sign * drop.friction
-                )
-
-            pressures[i] = current_pressure
-            current_depth = representative_depths[i]
-            remaining_rates = PhaseValues(
-                oil=remaining_rates.oil - connection_phase_rates[i].oil,
-                water=remaining_rates.water - connection_phase_rates[i].water,
-                gas=remaining_rates.gas - connection_phase_rates[i].gas,
+        if remaining_total == 0:
+            drop = compute_static_hydrostatic_drop(
+                mixture_density=compute_static_mixture_density(
+                    phase_saturations=sample.phase_saturations,
+                    phase_densities=sample.phase_densities,
+                ),
+                length=step.vertical_distance,
+                gravitational_acceleration=model.gravitational_acceleration,
+                unit_system=model.unit_system,
+            )
+            pressures[i] = previous_pressure + geometric_sign * drop.total
+        else:
+            mixture_density = compute_mixture_density(
+                phase_rates=remaining_rates, phase_densities=sample.phase_densities
+            )
+            mixture_viscosity = compute_mixture_viscosity(
+                phase_rates=remaining_rates,
+                phase_viscosities=sample.phase_viscosities,
+            )
+            velocity = compute_mixture_velocity(
+                phase_rates=remaining_rates,
+                tubing_inner_diameter=model.tubing_inner_diameter,
+                rate_time_factor=model.rate_time_factor,
+            )
+            # Velocity is only ever set at a connection, where a
+            # perforation's own rate joins or leaves the flow (see the
+            # walk above). Within one segment there is no other
+            # source of velocity change (constant PVT properties are
+            # assumed along the segment), so passing the same value
+            # in and out here means the acceleration term always
+            # comes out to zero.
+            drop = compute_segment_drop(
+                model=model,
+                length=step.segment_length,
+                inclination_from_vertical=inclinations_from_vertical[i],
+                mixture_density=mixture_density,
+                mixture_viscosity=mixture_viscosity,
+                mixture_velocity_in=velocity,
+                mixture_velocity_out=velocity,
+            )
+            pressures[i] = (
+                previous_pressure
+                + geometric_sign * (drop.hydrostatic + drop.acceleration)
+                + friction_sign * geometric_sign * drop.friction
             )
 
     return pressures

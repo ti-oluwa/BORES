@@ -143,10 +143,21 @@ def attach_flowing_fluid(
 
     mobilities = (workspace.oil_mobilities, workspace.water_mobilities, workspace.gas_mobilities)
     flags = (relevant_phases.oil > 0.0, relevant_phases.water > 0.0, relevant_phases.gas > 0.0)
-    densities = (
-        np.array([sample.phase_densities.oil for sample in connection_samples]),
-        np.array([sample.phase_densities.water for sample in connection_samples]),
-        np.array([sample.phase_densities.gas for sample in connection_samples]),
+    dtype = workspace.well_indices.dtype
+    count = len(connection_samples)
+    densities = typing.cast(
+        tuple[NumberArray[OneDimension], NumberArray[OneDimension], NumberArray[OneDimension]],
+        (
+            np.fromiter(
+                (sample.phase_densities.oil for sample in connection_samples), dtype, count
+            ),
+            np.fromiter(
+                (sample.phase_densities.water for sample in connection_samples), dtype, count
+            ),
+            np.fromiter(
+                (sample.phase_densities.gas for sample in connection_samples), dtype, count
+            ),
+        ),
     )
     deliverabilities = []
     phase_means = []
@@ -166,6 +177,7 @@ def attach_flowing_fluid(
     else:
         flowing = sum(flags)
         fractions = [1.0 / flowing if flag else 0.0 for flag in flags]
+
     return tubing._replace(
         flowing_fluid=FlowingFluid(
             oil_densities=densities[0],

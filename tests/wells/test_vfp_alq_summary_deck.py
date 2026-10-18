@@ -1374,3 +1374,152 @@ def test_a_vfp_well_resolves_with_hydrostatic_connection_pressures(tmp_path):
     assert workspace.connection_pressures[0] < 1000.0 < workspace.connection_pressures[2]
     # The profile feeds back into the rates: a flat profile at the same BHP gives different ones.
     assert not np.allclose(workspace.connection_gas_rates, uniform.connection_gas_rates)
+
+
+def walk(*, reference_depth, depths, oil, inclinations=None):
+    from bores.wells.hydraulics.base import PhaseValues, plan_connection_walk
+
+    return plan_connection_walk(
+        reference_depth=reference_depth,
+        representative_depths=depths,
+        inclinations_from_vertical=inclinations or [0.0] * len(depths),
+        connection_phase_rates=[PhaseValues(oil=q, water=0.0, gas=0.0) for q in oil],
+    )
+
+
+def test_walk_segments_carry_every_connection_beneath_them():
+    # Connections at 50, 100, 200 and 400 ft with rates 1, 2, 4, 8 and the reference at 150 ft.
+    steps = {
+        step.connection_index: step
+        for step in walk(
+            reference_depth=150.0, depths=[50.0, 100.0, 200.0, 400.0], oil=[1, 2, 4, 8]
+        )
+    }
+    # Downward: the 200 ft connection's segment carries it and the 400 ft one; then only 400 ft.
+    assert steps[2].carried_rates.oil == pytest.approx(4 + 8)
+    assert steps[3].carried_rates.oil == pytest.approx(8)
+    assert steps[2].previous_index is None and steps[3].previous_index == 2
+    assert steps[2].geometric_sign == pytest.approx(1.0)
+    # Upward: from the reference to 100 ft the flow is everything at or below the reference;
+    # past the 100 ft connection it has gained that connection's rate.
+    assert steps[1].carried_rates.oil == pytest.approx(4 + 8)
+    assert steps[0].carried_rates.oil == pytest.approx(2 + 4 + 8)
+    assert steps[1].previous_index is None and steps[0].previous_index == 1
+    assert steps[0].geometric_sign == pytest.approx(-1.0)
+    assert steps[0].vertical_distance == pytest.approx(50.0)
+
+
+def test_walk_with_every_connection_above_the_reference_carries_nothing_into_the_first_segment():
+    steps = walk(reference_depth=500.0, depths=[100.0, 200.0], oil=[3, 5])
+    first, second = steps  # nearest the reference first: 200 ft, then 100 ft
+    assert first.connection_index == 1 and first.carried_rates.oil == pytest.approx(0.0)
+    assert second.carried_rates.oil == pytest.approx(5.0)
+
+
+def test_segment_length_follows_the_inclination_and_degrades_to_vertical_at_horizontal():
+    import math
+
+    from bores.wells.hydraulics.base import get_segment_length
+
+    assert get_segment_length(
+        vertical_distance=100.0, inclination_from_vertical=0.0
+    ) == pytest.approx(100.0)
+    assert get_segment_length(
+        vertical_distance=100.0, inclination_from_vertical=math.radians(60.0)
+    ) == pytest.approx(200.0)
+    assert get_segment_length(
+        vertical_distance=7.0, inclination_from_vertical=math.pi / 2
+    ) == pytest.approx(7.0)
+
+
+def test_hydrostatic_head_of_an_inclined_segment_is_its_vertical_extent():
+    import math
+
+    from bores.wells.hydraulics.base import get_segment_length
+    from bores.wells.hydraulics.homogeneous import compute_segment_drop, homogeneous_wellbore
+
+    model = homogeneous_wellbore(tubing_inner_diameter=0.25).options
+
+    def hydrostatic(inclination):
+        return compute_segment_drop(
+            model=model,
+            length=get_segment_length(
+                vertical_distance=100.0, inclination_from_vertical=inclination
+            ),
+            inclination_from_vertical=inclination,
+            mixture_density=50.0,
+            mixture_viscosity=1.0,
+            mixture_velocity_in=1.0,
+            mixture_velocity_out=1.0,
+        ).hydrostatic
+
+    assert hydrostatic(math.radians(60.0)) == pytest.approx(hydrostatic(0.0))
+
+
+def correlation_pressures(*, is_injector, depths=(100.0, 200.0), reference_depth=150.0, **kwargs):
+    from bores.wells.hydraulics.base import PhaseValues
+    from bores.wells.hydraulics.homogeneous import (
+        compute_perforation_pressures,
+        homogeneous_wellbore,
+    )
+
+    model = homogeneous_wellbore(tubing_inner_diameter=0.25).options
+    count = len(depths)
+    return compute_perforation_pressures(
+        model=model,
+        reference_depth=reference_depth,
+        reference_pressure=1000.0,
+        connection_phase_rates=[PhaseValues(oil=100.0, water=0.0, gas=0.0)] * count,
+        representative_depths=np.array(depths),
+        inclinations_from_vertical=np.zeros(count),
+        connection_samples=hydrostatic_samples()[:count],
+        is_injector=is_injector,
+        **kwargs,
+    )
+
+
+def test_friction_opposes_the_flow_on_both_sides_of_the_reference_depth():
+    producer = correlation_pressures(is_injector=False)
+    injector = correlation_pressures(is_injector=True)
+    # Same carried rates and densities, so both have the same head; friction is what differs,
+    # and it adds against the flow and subtracts along it. Connection 0 is above the reference
+    # depth and connection 1 below it.
+    friction_below = (producer[1] - injector[1]) / 2.0
+    friction_above = (injector[0] - producer[0]) / 2.0
+    assert friction_below > 0.0
+    assert friction_above > 0.0
+
+
+def test_correlation_pressure_rises_with_depth_when_the_reference_is_the_shallowest_depth():
+    # There is no upward branch, so the downward walk is the whole well.
+    for is_injector in (False, True):
+        pressures = correlation_pressures(
+            is_injector=is_injector, depths=(100.0, 200.0, 300.0), reference_depth=100.0
+        )
+        assert pressures[0] == pytest.approx(1000.0)
+        assert np.all(np.diff(pressures) > 0.0)
+
+
+def test_hydrostatic_pressures_keep_the_dtype_they_are_given():
+    from bores.wells.resolution.hydrostatic import compute_hydrostatic_connection_pressures
+
+    kwargs = dict(
+        reference_depth=100.0,
+        reference_pressure=1000.0,
+        connection_samples=hydrostatic_samples(),
+        unit_system=UnitSystem.FIELD,
+    )
+    depths = np.array([100.0, 200.0, 400.0], dtype=np.float32)
+    rates = connection_rates(oil=(10.0, 20.0, 30.0), water=(0.0,) * 3, gas=(0.0,) * 3)
+    rates32 = type(rates)(*(array.astype(np.float32) for array in rates))
+    single = compute_hydrostatic_connection_pressures(
+        representative_depths=depths, connection_rates=rates32, dtype=np.float32, **kwargs
+    )
+    double = compute_hydrostatic_connection_pressures(
+        representative_depths=depths.astype(np.float64),
+        connection_rates=rates,
+        dtype=np.float64,
+        **kwargs,
+    )
+    assert single.dtype == np.float32 and double.dtype == np.float64
+    assert single == pytest.approx(double, rel=1e-5)

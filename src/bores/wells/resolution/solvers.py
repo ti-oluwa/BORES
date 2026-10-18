@@ -12,7 +12,11 @@ from bores.wells.compile import (
     ProducerControlModeTag,
     RateQuantityTag,
 )
-from bores.wells.hydraulics.base import SurfaceFluidProperties, compute_perforation_pressures
+from bores.wells.hydraulics.base import (
+    SurfaceFluidProperties,
+    WellBoreModel,
+    compute_perforation_pressures,
+)
 from bores.wells.resolution.hydrostatic import compute_hydrostatic_connection_pressures
 from bores.wells.resolution.spec import ConnectionPressureMode, WellControlSpec
 from bores.wells.resolution.tubing import WellTubing, compute_tubing_head_pressure
@@ -187,16 +191,16 @@ def solve_connection_pressures_and_rates(
             representative_depths=workspace.representative_depths,
             connection_samples=connection_samples,
             connection_rates=ConnectionRates(
-                oil=np.zeros(n_connections),
-                water=np.zeros(n_connections),
-                gas=np.zeros(n_connections),
+                oil=np.zeros_like(workspace.connection_oil_rates),
+                water=np.zeros_like(workspace.connection_water_rates),
+                gas=np.zeros_like(workspace.connection_gas_rates),
             ),
             unit_system=control_spec.unit_system,
             out=workspace.connection_pressures,
         )
     else:
         connection_pressures = compute_perforation_pressures(
-            wellbore=wellbore,
+            wellbore=typing.cast(WellBoreModel, wellbore),
             reference_depth=reference_depth,
             reference_pressure=reference_pressure,
             connection_phase_rates=zero_connection_phase_rates,
@@ -272,7 +276,7 @@ def solve_connection_pressures_and_rates(
                 connection_gas_rates=workspace.connection_gas_rates,
             )
             connection_pressures = compute_perforation_pressures(
-                wellbore=wellbore,
+                wellbore=typing.cast(WellBoreModel, wellbore),
                 reference_depth=reference_depth,
                 reference_pressure=reference_pressure,
                 connection_phase_rates=connection_phase_rates,

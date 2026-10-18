@@ -12,6 +12,8 @@ from bores.types import Number, NumberArray, OneDimension, UnitConversionTable, 
 from bores.wells.state import PhaseValues
 
 __all__ = [
+    "MINIMUM_INCLINATION_COSINE",
+    "ConnectionStep",
     "PressureDrop",
     "SurfaceFluidProperties",
     "WellBoreModel",
@@ -30,7 +32,9 @@ __all__ = [
     "compute_surface_mixture_viscosity",
     "compute_tubing_head_pressure",
     "get_gravitational_acceleration",
+    "get_segment_length",
     "get_unit_system_constant",
+    "plan_connection_walk",
     "split_liquid_gas",
 ]
 
@@ -364,6 +368,143 @@ def compute_hydrostatic_pressure(
     )
 
 
+MINIMUM_INCLINATION_COSINE = 1e-6
+"""
+Below this cosine of inclination from vertical, a segment is horizontal for practical purposes:
+its along-hole length can't be recovered from its vertical extent.
+"""
+
+
+class ConnectionStep(typing.NamedTuple):
+    """One segment of the walk outward from a well's reference depth to a connection."""
+
+    connection_index: int
+    """Index of the connection this segment ends at."""
+
+    previous_index: int | None
+    """Index of the connection this segment starts at, or `None` if it starts at the reference depth."""
+
+    vertical_distance: Number
+    """Vertical extent of the segment."""
+
+    segment_length: Number
+    """Along-hole length of the segment, from its vertical extent and the connection's inclination."""
+
+    geometric_sign: Number
+    """`1` if the segment ends deeper than it starts, `-1` if shallower."""
+
+    carried_rates: PhaseValues
+    """Reservoir-condition phase rates flowing through the segment."""
+
+
+def get_segment_length(*, vertical_distance: Number, inclination_from_vertical: Number) -> Number:
+    """
+    Along-hole length of a segment from its vertical extent.
+
+    A horizontal segment's length can't be recovered from its vertical extent, so its vertical
+    extent is returned.
+
+    :param vertical_distance: Vertical extent of the segment.
+    :param inclination_from_vertical: Segment inclination, in radians. `0` is vertical.
+    :returns: The along-hole length.
+    """
+    cosine = math.cos(inclination_from_vertical)
+    if cosine <= MINIMUM_INCLINATION_COSINE:
+        return vertical_distance
+    return vertical_distance / cosine
+
+
+def plan_connection_walk(
+    *,
+    reference_depth: Number,
+    representative_depths: typing.Sequence[Number],
+    inclinations_from_vertical: typing.Sequence[Number],
+    connection_phase_rates: typing.Sequence[PhaseValues],
+) -> list[ConnectionStep]:
+    """
+    Plans the walk outward from a well's reference depth to every connection, both down and up.
+
+    Each segment carries the flow of every connection beneath it: a producer's flow rises past
+    them, and an injector's falls to them. So moving down from the reference depth, a segment
+    carries the connection it ends at and every deeper one. Moving up, it carries every
+    connection at or below the reference depth, plus every connection above it that the walk has
+    already passed. A connection exactly at the reference depth belongs to the downward walk.
+
+    :param reference_depth: The well's BHP/THP reporting datum.
+    :param representative_depths: One vertical depth per connection.
+    :param inclinations_from_vertical: One inclination per connection, in radians.
+    :param connection_phase_rates: Each connection's own rate of each phase, at reservoir
+        conditions.
+    :returns: The segments, each after the one it starts from, downward walk first.
+    """
+    count = len(representative_depths)
+    below = sorted(
+        (i for i in range(count) if representative_depths[i] >= reference_depth),
+        key=lambda i: representative_depths[i],
+    )
+    above = sorted(
+        (i for i in range(count) if representative_depths[i] < reference_depth),
+        key=lambda i: -representative_depths[i],
+    )
+
+    steps: list[ConnectionStep] = []
+    carried = PhaseValues(
+        oil=sum(connection_phase_rates[i].oil for i in below),
+        water=sum(connection_phase_rates[i].water for i in below),
+        gas=sum(connection_phase_rates[i].gas for i in below),
+    )
+    below_total = carried
+    previous_index: int | None = None
+    previous_depth = reference_depth
+    for i in below:
+        vertical_distance = abs(representative_depths[i] - previous_depth)
+        steps.append(
+            ConnectionStep(
+                connection_index=i,
+                previous_index=previous_index,
+                vertical_distance=vertical_distance,
+                segment_length=get_segment_length(
+                    vertical_distance=vertical_distance,
+                    inclination_from_vertical=inclinations_from_vertical[i],
+                ),
+                geometric_sign=1.0,
+                carried_rates=carried,
+            )
+        )
+        carried = PhaseValues(
+            oil=carried.oil - connection_phase_rates[i].oil,
+            water=carried.water - connection_phase_rates[i].water,
+            gas=carried.gas - connection_phase_rates[i].gas,
+        )
+        previous_index, previous_depth = i, representative_depths[i]
+
+    carried = below_total
+    previous_index = None
+    previous_depth = reference_depth
+    for i in above:
+        vertical_distance = abs(representative_depths[i] - previous_depth)
+        steps.append(
+            ConnectionStep(
+                connection_index=i,
+                previous_index=previous_index,
+                vertical_distance=vertical_distance,
+                segment_length=get_segment_length(
+                    vertical_distance=vertical_distance,
+                    inclination_from_vertical=inclinations_from_vertical[i],
+                ),
+                geometric_sign=-1.0,
+                carried_rates=carried,
+            )
+        )
+        carried = PhaseValues(
+            oil=carried.oil + connection_phase_rates[i].oil,
+            water=carried.water + connection_phase_rates[i].water,
+            gas=carried.gas + connection_phase_rates[i].gas,
+        )
+        previous_index, previous_depth = i, representative_depths[i]
+    return steps
+
+
 @numba.njit(cache=True)
 def compute_segment_pressure_drop(
     length: Number,
@@ -555,8 +696,7 @@ def compute_perforation_pressures(
     *, wellbore: WellBoreModel, **kwargs: typing.Any
 ) -> NumberArray[OneDimension]:
     """
-    Dispatches to the `compute_perforation_pressures` of whichever module
-    `wellbore.name` selects.
+    Compute perforation pressures using model/correlation defined by `wellbore.name`.
 
     :param wellbore: `WellBoreModel` naming a hydraulics correlation.
     :param kwargs: Forwarded to that correlation's `compute_perforation_pressures`.
