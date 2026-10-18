@@ -981,3 +981,129 @@ def test_injector_table_is_sampled_in_the_injected_phase():
             flow_rates=np.array([100.0, 1000.0]),
             flow_type=VFPFlowType.OIL,
         )
+
+
+def flowing_fluid(*, fractions=(1.0, 0.0, 0.0)):
+    from bores.wells.hydraulics.base import PhaseValues
+    from bores.wells.resolution.tubing import FlowingFluid
+
+    return FlowingFluid(
+        phase_densities=PhaseValues(oil=50.0, water=62.4, gas=5.0),
+        fallback_fractions=PhaseValues(*fractions),
+    )
+
+
+def test_datum_shift_is_the_weight_of_the_flowing_column(tmp_path):
+    from bores.wells.hydraulics.base import PhaseValues
+    from bores.wells.resolution.tubing import compute_datum_pressure_shift
+
+    table = VFPTable.from_deck(producer_table(tmp_path), table_number=3)  # datum 2000 ft
+    oil_only = PhaseValues(oil=100.0, water=0.0, gas=0.0)
+    shift = compute_datum_pressure_shift(
+        table=table,
+        reference_depth=1900.0,
+        flowing_fluid=flowing_fluid(),
+        phase_rates=oil_only,
+    )
+    assert shift == pytest.approx(50.0 * 100.0 / 144.0)  # psi: density 50 lb/ft3 over 100 ft
+    shallower = compute_datum_pressure_shift(
+        table=table,
+        reference_depth=2100.0,
+        flowing_fluid=flowing_fluid(),
+        phase_rates=oil_only,
+    )
+    assert shallower == pytest.approx(-50.0 * 100.0 / 144.0)
+    same = compute_datum_pressure_shift(
+        table=table, reference_depth=2000.0, flowing_fluid=None, phase_rates=oil_only
+    )
+    assert same == pytest.approx(0.0)
+
+
+def test_flowing_density_is_mass_rate_over_volume_rate():
+    from bores.wells.hydraulics.base import PhaseValues
+    from bores.wells.resolution.tubing import compute_flowing_density
+
+    fluid = flowing_fluid(fractions=(0.5, 0.5, 0.0))
+    mixed = compute_flowing_density(
+        flowing_fluid=fluid, phase_rates=PhaseValues(oil=60.0, water=-20.0, gas=20.0)
+    )
+    assert mixed == pytest.approx((60 * 50.0 + 20 * 62.4 + 20 * 5.0) / 100.0)
+    idle = compute_flowing_density(
+        flowing_fluid=fluid, phase_rates=PhaseValues(oil=0.0, water=0.0, gas=0.0)
+    )
+    assert idle == pytest.approx(0.5 * 50.0 + 0.5 * 62.4)
+
+
+def test_thp_is_found_through_a_datum_shift(tmp_path):
+    from bores.wells.hydraulics.base import PhaseValues
+    from bores.wells.resolution.tubing import (
+        WellTubing,
+        compute_datum_pressure_shift,
+        compute_tubing_head_pressure,
+    )
+
+    table = VFPTable.from_deck(producer_table(tmp_path), table_number=3)
+    rates = PhaseValues(oil=100.0, water=0.0, gas=10_000.0)
+    tubing = WellTubing(None, table, 0.0, flowing_fluid())
+    datum_bhp = float(
+        table.query(
+            flow_rate=100.0,
+            thp=30.0,
+            water_fraction=0.0,
+            gas_fraction=100.0,
+            artificial_lift_quantity=0.0,
+        )
+    )
+    shift = compute_datum_pressure_shift(
+        table=table, reference_depth=1900.0, flowing_fluid=flowing_fluid(), phase_rates=rates
+    )
+    thp = compute_tubing_head_pressure(
+        tubing=tubing,
+        reference_depth=1900.0,
+        reference_pressure=datum_bhp - shift,
+        phase_rates=rates,
+        surface_phase_rates=rates,
+        surface_fluid_properties=None,
+        is_injector=False,
+    )
+    assert thp == pytest.approx(30.0)
+
+
+def test_flowing_fluid_is_weighted_by_each_connections_deliverability():
+    from bores.wells.hydraulics.base import PhaseValues
+    from bores.wells.resolution.tubing import WellTubing, attach_flowing_fluid
+
+    def sample(oil_density):
+        return types.SimpleNamespace(
+            phase_densities=PhaseValues(oil=oil_density, water=62.4, gas=5.0)
+        )
+
+    workspace = types.SimpleNamespace(
+        well_indices=np.array([1.0, 3.0]),
+        oil_mobilities=np.array([1.0, 1.0]),
+        water_mobilities=np.array([0.0, 0.0]),
+        gas_mobilities=np.array([2.0, 2.0]),
+    )
+    table = lookup_table(
+        flow_type=VFPFlowType.LIQUID,
+        water_type=VFPWaterFractionType.WATER_CUT,
+        gas_type=VFPGasFractionType.GAS_OIL_RATIO,
+    )
+    tubing = attach_flowing_fluid(
+        tubing=WellTubing(None, table, 0.0),
+        workspace=workspace,
+        connection_samples=[sample(40.0), sample(60.0)],
+        relevant_phases=PhaseValues(oil=1.0, water=1.0, gas=1.0),
+    )
+    fluid = tubing.flowing_fluid
+    assert fluid.phase_densities.oil == pytest.approx(55.0)  # (1*40 + 3*60) / 4
+    assert fluid.phase_densities.water == pytest.approx(62.4)  # no deliverability: plain mean
+    # oil 4 : gas 8, water 0
+    assert tuple(fluid.fallback_fractions) == pytest.approx((1 / 3, 0.0, 2 / 3))
+    untouched = attach_flowing_fluid(
+        tubing=WellTubing(None, None, 0.0),
+        workspace=workspace,
+        connection_samples=[],
+        relevant_phases=PhaseValues(oil=1.0, water=1.0, gas=1.0),
+    )
+    assert untouched.flowing_fluid is None

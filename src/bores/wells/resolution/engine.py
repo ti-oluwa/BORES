@@ -25,7 +25,11 @@ from bores.wells.resolution.solvers import (
     solve_producer_rate_mode,
 )
 from bores.wells.resolution.spec import WellControlSpec
-from bores.wells.resolution.tubing import compute_tubing_head_pressure, resolve_well_tubing
+from bores.wells.resolution.tubing import (
+    attach_flowing_fluid,
+    compute_tubing_head_pressure,
+    resolve_well_tubing,
+)
 from bores.wells.state import ConnectionSample
 from bores.wells.workspace import WellsWorkspace, build_perforation_workspace
 
@@ -128,6 +132,12 @@ def resolve_well_control(
             return
         injected_phase = controls.injected_phases[well_row]
         relevant_phases = phase_mask(injected_phase)
+        tubing = attach_flowing_fluid(
+            tubing=tubing,
+            workspace=perforation_workspace,
+            connection_samples=connection_samples,
+            relevant_phases=relevant_phases,
+        )
         if control_mode in (
             InjectorControlModeTag.RATE,
             InjectorControlModeTag.RESERVOIR_VOLUME_RATE,
@@ -200,6 +210,12 @@ def resolve_well_control(
             return
 
         relevant_phases = ALL_PHASES
+        tubing = attach_flowing_fluid(
+            tubing=tubing,
+            workspace=perforation_workspace,
+            connection_samples=connection_samples,
+            relevant_phases=relevant_phases,
+        )
         if control_mode in (
             ProducerControlModeTag.OIL_RATE,
             ProducerControlModeTag.WATER_RATE,
