@@ -3,7 +3,7 @@ import types
 import numpy as np
 import pytest
 
-from bores.constants import c
+from bores.constants import c, get_conversion_factors
 from bores.deck import DeckFile
 from bores.errors import ValidationError
 from bores.types import UnitSystem
@@ -16,8 +16,11 @@ from bores.wells.deck import (
 )
 from bores.wells.hydraulics.vfp import (
     VFPData,
+    VFPFlowType,
+    VFPGasFractionType,
     VFPTable,
     VFPTables,
+    VFPWaterFractionType,
     load_vfp_data,
     load_vfp_table,
     load_vfp_tables,
@@ -114,35 +117,183 @@ def test_field_vfp_table_rescales_gas_oil_ratio_and_queries_exactly(tmp_path):
     deck = producer_table(tmp_path)
     data = load_vfp_data(deck, table_number=3)
     assert data.unit_system == UnitSystem.FIELD
-    assert np.allclose(data.gas_oil_ratios, [100.0, 500.0])  # Mscf/STB -> scf/STB
+    assert np.allclose(data.gas_fractions, [100.0, 500.0])  # Mscf/STB -> scf/STB
     table = VFPTable.from_deck(deck, table_number=3)
     bhp = table.query(
         flow_rate=500.0,
         thp=40.0,
-        water_cut=1.0,
-        gas_oil_ratio=500.0,
+        water_fraction=1.0,
+        gas_fraction=500.0,
         artificial_lift_quantity=1000.0,
     )
     assert float(bhp) == pytest.approx(100 + 10 * 2 + 2 + 2 + 2)
 
 
-def test_water_oil_ratio_axis_is_converted_to_water_cut(tmp_path):
+def test_water_oil_ratio_axis_is_kept_as_a_water_oil_ratio(tmp_path):
     data = load_vfp_data(producer_table(tmp_path, wfr="WOR"), table_number=3)
-    assert np.allclose(data.water_cuts, [0.0, 0.5])  # WOR 0 and 1
+    assert data.water_fraction_type == VFPWaterFractionType.WATER_OIL_RATIO
+    assert np.allclose(data.water_fractions, [0.0, 1.0])
 
 
 def test_metric_tables_keep_their_gas_oil_ratio(tmp_path):
     deck = producer_table(tmp_path, units="METRIC", unit="METRIC")
-    assert np.allclose(load_vfp_data(deck, table_number=3).gas_oil_ratios, [0.1, 0.5])
+    assert np.allclose(load_vfp_data(deck, table_number=3).gas_fractions, [0.1, 0.5])
+
+
+@pytest.mark.parametrize("flow", ["WG", "TM"])
+def test_flow_definitions_with_no_single_rate_are_rejected_clearly(tmp_path, flow):
+    with pytest.raises(ValidationError, match="flow axis"):
+        load_vfp_data(producer_table(tmp_path, flo=flow), table_number=3)
+
+
+def test_table_keeps_the_definitions_its_deck_declares(tmp_path):
+    deck = producer_table(tmp_path, wfr="WOR", gfr="GLR", flo="OIL")
+    data = load_vfp_data(deck, table_number=3)
+    assert data.flow_type == VFPFlowType.OIL
+    assert data.water_fraction_type == VFPWaterFractionType.WATER_OIL_RATIO
+    assert data.gas_fraction_type == VFPGasFractionType.GAS_LIQUID_RATIO
+    assert np.allclose(data.flow_rates, [100.0, 500.0])
+    assert np.allclose(data.water_fractions, [0.0, 1.0])
+    assert np.allclose(data.gas_fractions, [100.0, 500.0])
+
+
+def test_field_gas_axes_are_rescaled_per_their_definition(tmp_path):
+    gas_flow = load_vfp_data(
+        producer_table(tmp_path, flo="GAS", wfr="WGR", gfr="OGR"), table_number=3
+    )
+    assert np.allclose(gas_flow.flow_rates, [100_000.0, 500_000.0])  # Mscf/d -> scf/d
+    assert np.allclose(gas_flow.water_fractions, [0.0, 0.001])  # STB/Mscf -> STB/scf
+    assert np.allclose(gas_flow.gas_fractions, [0.0001, 0.0005])  # STB/Mscf -> STB/scf
+    liquid = load_vfp_data(producer_table(tmp_path, gfr="GLR"), table_number=3)
+    assert np.allclose(liquid.gas_fractions, [100.0, 500.0])  # Mscf/STB -> scf/STB
+
+
+def test_metric_tables_are_not_rescaled(tmp_path):
+    deck = producer_table(tmp_path, units="METRIC", unit="METRIC", flo="GAS", wfr="WGR", gfr="OGR")
+    data = load_vfp_data(deck, table_number=3)
+    assert np.allclose(data.flow_rates, [100.0, 500.0])
+    assert np.allclose(data.water_fractions, [0.0, 1.0])
+    assert np.allclose(data.gas_fractions, [0.1, 0.5])
 
 
 @pytest.mark.parametrize(
-    "kwargs, message",
-    [({"flo": "GAS"}, "liquid rate"), ({"gfr": "GLR"}, "GOR"), ({"wfr": "WGR"}, "WCT")],
+    "flow, expected",
+    [("OIL", VFPFlowType.OIL), ("WAT", VFPFlowType.WATER), ("GAS", VFPFlowType.GAS)],
 )
-def test_vfp_tables_that_cannot_map_exactly_are_rejected_clearly(tmp_path, kwargs, message):
-    with pytest.raises(ValidationError, match=message):
-        load_vfp_data(producer_table(tmp_path, **kwargs), table_number=3)
+def test_injector_table_flow_type_is_the_injected_phase(tmp_path, flow, expected):
+    deck = deck_from(
+        tmp_path,
+        f"VFPINJ\n 5 2000 {flow} THP FIELD BHP /\n 100 200 /\n 20 40 /\n 1  50 60 /\n 2  80 90 /\n",
+    )
+    assert load_vfp_data(deck, table_number=5).flow_type == expected
+
+
+def lookup_table(*, flow_type, water_type, gas_type):
+    return VFPTable(
+        VFPData(
+            table_number=1,
+            well_type=WellType.PRODUCER,
+            datum_depth=2000.0,
+            flow_type=flow_type,
+            water_fraction_type=water_type,
+            gas_fraction_type=gas_type,
+            flow_rates=np.array([1.0, 10.0]),
+            thps=np.array([10.0, 20.0]),
+            water_fractions=np.array([0.0, 2.0]),
+            gas_fractions=np.array([0.0, 7.0]),
+            bhps=np.zeros((2, 2, 2, 2, 1)),
+        )
+    )
+
+
+@pytest.mark.parametrize(
+    "flow_type, water_type, gas_type, expected",
+    [
+        (
+            VFPFlowType.OIL,
+            VFPWaterFractionType.WATER_CUT,
+            VFPGasFractionType.GAS_OIL_RATIO,
+            (100.0, 0.2, 50.0),
+        ),
+        (
+            VFPFlowType.LIQUID,
+            VFPWaterFractionType.WATER_OIL_RATIO,
+            VFPGasFractionType.GAS_LIQUID_RATIO,
+            (125.0, 0.25, 40.0),
+        ),
+        (
+            VFPFlowType.GAS,
+            VFPWaterFractionType.WATER_GAS_RATIO,
+            VFPGasFractionType.OIL_GAS_RATIO,
+            (5000.0, 0.005, 0.02),
+        ),
+    ],
+)
+def test_lookup_variables_follow_the_table_definitions(flow_type, water_type, gas_type, expected):
+    table = lookup_table(flow_type=flow_type, water_type=water_type, gas_type=gas_type)
+    lookup = table.get_lookup_variables(oil_rate=100.0, water_rate=-25.0, gas_rate=5000.0)
+    assert tuple(lookup) == pytest.approx(expected)
+
+
+def test_lookup_variables_with_a_zero_denominator_stay_finite():
+    table = lookup_table(
+        flow_type=VFPFlowType.OIL,
+        water_type=VFPWaterFractionType.WATER_OIL_RATIO,
+        gas_type=VFPGasFractionType.GAS_OIL_RATIO,
+    )
+    no_oil = table.get_lookup_variables(oil_rate=0.0, water_rate=5.0, gas_rate=10.0)
+    assert no_oil.water_fraction == pytest.approx(2.0)  # axis maximum
+    assert no_oil.gas_fraction == pytest.approx(7.0)
+    nothing = table.get_lookup_variables(oil_rate=0.0, water_rate=0.0, gas_rate=0.0)
+    assert tuple(nothing) == (0.0, 0.0, 0.0)
+
+
+def test_injector_lookup_uses_the_injected_phase_only():
+    table = VFPTable(
+        VFPData(
+            table_number=1,
+            well_type=WellType.INJECTOR,
+            datum_depth=2000.0,
+            flow_type=VFPFlowType.WATER,
+            flow_rates=np.array([1.0, 10.0]),
+            thps=np.array([10.0, 20.0]),
+            bhps=np.zeros((2, 2, 1, 1, 1)),
+        )
+    )
+    lookup = table.get_lookup_variables(oil_rate=0.0, water_rate=7.0, gas_rate=900.0)
+    assert tuple(lookup) == (7.0, 0.0, 0.0)
+
+
+def test_producer_table_rejects_an_injector_flow_type():
+    with pytest.raises(ValidationError, match="flow type"):
+        lookup_table(
+            flow_type=VFPFlowType.WATER,
+            water_type=VFPWaterFractionType.WATER_CUT,
+            gas_type=VFPGasFractionType.GAS_OIL_RATIO,
+        )
+
+
+def test_conversion_follows_what_each_axis_measures():
+    data = lookup_table(
+        flow_type=VFPFlowType.GAS,
+        water_type=VFPWaterFractionType.WATER_GAS_RATIO,
+        gas_type=VFPGasFractionType.OIL_GAS_RATIO,
+    )._data
+    factors = get_conversion_factors(UnitSystem.FIELD, UnitSystem.METRIC)
+    converted = data.convert(UnitSystem.METRIC)
+    assert np.allclose(converted.flow_rates, data.flow_rates * factors["gas_surface_rate"])
+    ratio = factors["liquid_surface_volume"] / factors["gas_surface_volume"]
+    assert np.allclose(converted.water_fractions, data.water_fractions * ratio)
+    assert np.allclose(converted.gas_fractions, data.gas_fractions * ratio)
+
+    liquid = lookup_table(
+        flow_type=VFPFlowType.OIL,
+        water_type=VFPWaterFractionType.WATER_OIL_RATIO,
+        gas_type=VFPGasFractionType.GAS_LIQUID_RATIO,
+    )._data.convert(UnitSystem.METRIC)
+    assert np.allclose(liquid.flow_rates, data.flow_rates * factors["liquid_surface_rate"])
+    assert np.allclose(liquid.water_fractions, data.water_fractions)
+    assert np.allclose(liquid.gas_fractions, data.gas_fractions * factors["gas_oil_ratio"])
 
 
 def test_injector_table_becomes_a_five_axis_table_and_gas_flow_is_rescaled(tmp_path):
@@ -188,28 +339,6 @@ def test_later_definition_of_a_table_number_replaces_the_earlier_one(tmp_path):
     deck = deck_from(tmp_path, first + second)
     assert load_vfp_data(deck, table_number=3).datum_depth == pytest.approx(2500.0)
     assert len(load_vfp_data(deck)) == 1
-
-
-def test_oil_rate_table_is_re_expressed_against_liquid_rate(tmp_path):
-    deck = producer_table(tmp_path, wfr="WOR", flo="OIL")
-    with pytest.warns(UserWarning, match="re-expressed"):
-        data = VFPData.from_deck(deck, table_number=3)
-    table = VFPTable(data)
-    # Oil rates 100 and 500 at WOR 0 and 1 (water cut 0 and 0.5) are liquid rates
-    # 100/500 and 200/1000, so the union of those is the new flow axis and each water cut's
-    # original points are reproduced exactly.
-    assert np.allclose(data.flow_rates, [100.0, 200.0, 500.0, 1000.0])
-    args = {"thp": 20.0, "gas_oil_ratio": 100.0, "artificial_lift_quantity": 0.0}
-    assert float(table.query(flow_rate=100.0, water_cut=0.0, **args)) == pytest.approx(13.0)
-    assert float(table.query(flow_rate=500.0, water_cut=0.0, **args)) == pytest.approx(113.0)
-    assert float(table.query(flow_rate=200.0, water_cut=0.5, **args)) == pytest.approx(14.0)
-    assert float(table.query(flow_rate=1000.0, water_cut=0.5, **args)) == pytest.approx(114.0)
-
-
-def test_oil_rate_table_with_a_water_cut_of_one_is_rejected(tmp_path):
-    deck = producer_table(tmp_path, wfr="WCT", flo="OIL")  # the template's water axis is 0 and 1
-    with pytest.raises(ValidationError, match="water cut of 1"):
-        load_vfp_data(deck, table_number=3)
 
 
 def test_vfp_classes_build_from_a_parsed_table(tmp_path):
@@ -644,8 +773,8 @@ def test_get_thp_inverts_the_table_and_extends_past_its_ends(tmp_path):
     table = VFPTable.from_deck(producer_table(tmp_path), table_number=3)
     args = {
         "flow_rate": 100.0,
-        "water_cut": 0.0,
-        "gas_oil_ratio": 100.0,
+        "water_fraction": 0.0,
+        "gas_fraction": 100.0,
         "artificial_lift_quantity": 0.0,
     }
     low = float(table.query(thp=20.0, **args))
@@ -710,8 +839,8 @@ def test_vfp_thp_uses_surface_rates_and_refuses_a_datum_mismatch(tmp_path):
         table.query(
             flow_rate=100.0,
             thp=30.0,
-            water_cut=0.0,
-            gas_oil_ratio=100.0,
+            water_fraction=0.0,
+            gas_fraction=100.0,
             artificial_lift_quantity=0.0,
         )
     )
@@ -729,3 +858,30 @@ def test_vfp_thp_uses_surface_rates_and_refuses_a_datum_mismatch(tmp_path):
             reference_pressure=1.0,
             **{**common, "tubing": WellTubing(None, None, 0.0)},
         )
+
+
+def test_vfp_thp_follows_an_oil_rate_table_with_no_gas(tmp_path):
+    from bores.wells.hydraulics.base import PhaseValues
+    from bores.wells.resolution.tubing import WellTubing, compute_tubing_head_pressure
+
+    table = VFPTable.from_deck(producer_table(tmp_path, wfr="WOR", flo="OIL"), table_number=3)
+    rates = PhaseValues(oil=100.0, water=100.0, gas=0.0)  # liquid 200, water-oil ratio 1
+    expected_bhp = float(
+        table.query(
+            flow_rate=100.0,  # oil rate, not oil plus water
+            thp=30.0,
+            water_fraction=1.0,
+            gas_fraction=0.0,
+            artificial_lift_quantity=0.0,
+        )
+    )
+    thp = compute_tubing_head_pressure(
+        tubing=WellTubing(None, table, 0.0),
+        reference_depth=2000.0,
+        reference_pressure=expected_bhp,
+        phase_rates=rates,
+        surface_phase_rates=rates,
+        surface_fluid_properties=None,
+        is_injector=False,
+    )
+    assert thp == pytest.approx(30.0)

@@ -112,19 +112,16 @@ def compute_tubing_head_pressure(
                 "between depths isn't supported, so they must match."
             )
 
-        if is_injector:
-            flow_rate = abs(surface_phase_rates.water) + abs(surface_phase_rates.gas)
-            water_cut, gas_oil_ratio = 0.0, 0.0
-        else:
-            oil_rate, water_rate = abs(surface_phase_rates.oil), abs(surface_phase_rates.water)
-            flow_rate = oil_rate + water_rate
-            water_cut = water_rate / flow_rate if flow_rate > 0.0 else 0.0
-            gas_oil_ratio = abs(surface_phase_rates.gas) / oil_rate if oil_rate > 0.0 else 0.0
+        lookup = table.get_lookup_variables(
+            oil_rate=surface_phase_rates.oil,
+            water_rate=surface_phase_rates.water,
+            gas_rate=surface_phase_rates.gas,
+        )
         return table.get_thp(
-            flow_rate=flow_rate,
+            flow_rate=lookup.flow_rate,
             bhp=reference_pressure,
-            water_cut=water_cut,
-            gas_oil_ratio=gas_oil_ratio,
+            water_fraction=lookup.water_fraction,
+            gas_fraction=lookup.gas_fraction,
             artificial_lift_quantity=tubing.artificial_lift_quantity,
         )
 

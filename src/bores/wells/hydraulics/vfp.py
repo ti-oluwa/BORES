@@ -2,14 +2,17 @@
 VFP (vertical flow performance) tables.
 
 Interpolates bottomhole pressure at a well's datum depth as a function of flow rate,
-tubing head pressure, water cut, gas-oil ratio, and artificial lift quantity.
+tubing head pressure, water fraction, gas fraction, and artificial lift quantity. 
+
+Each table keeps the definitions of its own flow, water and gas axes, and the values it 
+is looked up with are computed from a well's rates according to them.
 This is the datum-to-surface leg of well hydraulics only; connection-level
 pressure distribution below the datum is unaffected by whether a table is assigned.
 """
 
+import enum
 import logging
 import typing
-import warnings
 
 import attrs
 import numpy as np
@@ -45,7 +48,16 @@ from bores.wells.hydraulics.base import (
 )
 from bores.wells.state import PhaseValues
 
-__all__ = ["VFPData", "VFPTable", "VFPTables", "as_vfp_table"]
+__all__ = [
+    "VFPData",
+    "VFPFlowType",
+    "VFPGasFractionType",
+    "VFPLookupVariables",
+    "VFPTable",
+    "VFPTables",
+    "VFPWaterFractionType",
+    "as_vfp_table",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -58,8 +70,101 @@ DECK_UNIT_SYSTEMS: typing.Mapping[str, UnitSystem] = {
 }
 """Deck unit keyword to the unit system a `VFPPROD` / `VFPINJ` table is written in."""
 
-AXIS_NAMES = ("flow_rate", "thp", "water_cut", "gas_oil_ratio", "artificial_lift_quantity")
+
+class VFPFlowType(enum.Enum):
+    """What a VFP table's flow axis measures, in surface-condition volumes per time."""
+
+    OIL = "oil"
+    """Oil rate."""
+
+    LIQUID = "liquid"
+    """Oil plus water rate."""
+
+    WATER = "water"
+    """Water rate. Only for injector tables."""
+
+    GAS = "gas"
+    """Gas rate."""
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class VFPWaterFractionType(enum.Enum):
+    """What a producer table's water axis measures."""
+
+    WATER_CUT = "water_cut"
+    """Water rate over liquid rate."""
+
+    WATER_OIL_RATIO = "water_oil_ratio"
+    """Water rate over oil rate."""
+
+    WATER_GAS_RATIO = "water_gas_ratio"
+    """Water rate over gas rate."""
+
+    def __str__(self) -> str:
+        return self.value
+
+
+class VFPGasFractionType(enum.Enum):
+    """What a producer table's gas axis measures."""
+
+    GAS_OIL_RATIO = "gas_oil_ratio"
+    """Gas rate over oil rate."""
+
+    GAS_LIQUID_RATIO = "gas_liquid_ratio"
+    """Gas rate over liquid rate."""
+
+    OIL_GAS_RATIO = "oil_gas_ratio"
+    """Oil rate over gas rate."""
+
+    def __str__(self) -> str:
+        return self.value
+
+
+PRODUCER_FLOW_TYPE_MAP: typing.Mapping[str, VFPFlowType] = {
+    "OIL": VFPFlowType.OIL,
+    "LIQ": VFPFlowType.LIQUID,
+    "GAS": VFPFlowType.GAS,
+}
+"""Deck `VFPPROD` flow axis definition to `VFPFlowType`."""
+
+INJECTOR_FLOW_TYPE_MAP: typing.Mapping[str, VFPFlowType] = {
+    "OIL": VFPFlowType.OIL,
+    "WAT": VFPFlowType.WATER,
+    "GAS": VFPFlowType.GAS,
+}
+"""Deck `VFPINJ` flow axis definition to `VFPFlowType`."""
+
+WATER_FRACTION_TYPE_MAP: typing.Mapping[str, VFPWaterFractionType] = {
+    "WCT": VFPWaterFractionType.WATER_CUT,
+    "WOR": VFPWaterFractionType.WATER_OIL_RATIO,
+    "WGR": VFPWaterFractionType.WATER_GAS_RATIO,
+}
+"""Deck water axis definition to `VFPWaterFractionType`."""
+
+GAS_FRACTION_TYPE_MAP: typing.Mapping[str, VFPGasFractionType] = {
+    "GOR": VFPGasFractionType.GAS_OIL_RATIO,
+    "GLR": VFPGasFractionType.GAS_LIQUID_RATIO,
+    "OGR": VFPGasFractionType.OIL_GAS_RATIO,
+}
+"""Deck gas axis definition to `VFPGasFractionType`."""
+
+AXIS_NAMES = ("flow_rate", "thp", "water_fraction", "gas_fraction", "artificial_lift_quantity")
 """Order `VFPData`'s five axes are always addressed in, internally."""
+
+
+class VFPLookupVariables(typing.NamedTuple):
+    """The values a `VFPTable` is looked up with, computed from a well's rates."""
+
+    flow_rate: Number
+    """Value on the table's flow axis."""
+
+    water_fraction: Number
+    """Value on the table's water axis."""
+
+    gas_fraction: Number
+    """Value on the table's gas axis."""
 
 
 @attrs.frozen(kw_only=True, slots=True)
@@ -69,8 +174,13 @@ class VFPData(Serializable):
 
     A producer table typically varies over all five axes. An injector
     table usually varies only with `flow_rates` and `thps`; leave
-    `water_cuts`, `gas_oil_ratios`, and `artificial_lift_quantities` at
+    `water_fractions`, `gas_fractions`, and `artificial_lift_quantities` at
     their single-value defaults in that case.
+
+    `flow_type`, `water_fraction_type` and `gas_fraction_type` state what the
+    corresponding axes measure. A table is never re-expressed in other terms;
+    `VFPTable.get_lookup_variables` computes the values to look it up with from
+    a well's rates.
     """
 
     table_number: Integer
@@ -88,29 +198,46 @@ class VFPData(Serializable):
     matching the owning well's `reference_depth`.
     """
 
+    flow_type: VFPFlowType = attrs.field(
+        default=attrs.Factory(
+            lambda self: (
+                VFPFlowType.GAS if self.well_type == WellType.INJECTOR else VFPFlowType.LIQUID
+            ),
+            takes_self=True,
+        )
+    )
+    """
+    What `flow_rates` measures. Oil, liquid or gas for a producer table; for an
+    injector table, the injected phase. Liquid for a producer and gas for an
+    injector if not given.
+    """
+
+    water_fraction_type: VFPWaterFractionType = VFPWaterFractionType.WATER_CUT
+    """What `water_fractions` measures. Unused by an injector table."""
+
+    gas_fraction_type: VFPGasFractionType = VFPGasFractionType.GAS_OIL_RATIO
+    """What `gas_fractions` measures. Unused by an injector table."""
+
     flow_rates: NumberArray[OneDimension]
-    """
-    Flow rate axis, strictly ascending. Liquid rate for most producer
-    tables; the injected phase's rate for an injector table.
-    """
+    """Flow rate axis, strictly ascending, in the terms of `flow_type`."""
 
     thps: NumberArray[OneDimension]
     """Tubing head pressure axis, strictly ascending."""
 
-    water_cuts: NumberArray[OneDimension] = attrs.field(
+    water_fractions: NumberArray[OneDimension] = attrs.field(
         factory=lambda: typing.cast(NumberArray[OneDimension], np.array([0.0]))
     )
     """
-    Water cut axis, strictly ascending. A single value (the default)
-    for a table with no water-cut dependence.
+    Water axis, strictly ascending, in the terms of `water_fraction_type`. A single
+    value (the default) for a table with no water dependence.
     """
 
-    gas_oil_ratios: NumberArray[OneDimension] = attrs.field(
+    gas_fractions: NumberArray[OneDimension] = attrs.field(
         factory=lambda: typing.cast(NumberArray[OneDimension], np.array([0.0]))
     )
     """
-    Gas-oil ratio axis, strictly ascending. A single value (the
-    default) for a table with no GOR dependence.
+    Gas axis, strictly ascending, in the terms of `gas_fraction_type`. A single value
+    (the default) for a table with no gas dependence.
     """
 
     artificial_lift_quantities: NumberArray[OneDimension] = attrs.field(
@@ -125,7 +252,7 @@ class VFPData(Serializable):
     bhps: NumberArray[FiveDimensions]
     """
     Bottomhole pressure at `datum_depth`, shaped `(len(flow_rates),
-    len(thps), len(water_cuts), len(gas_oil_ratios),
+    len(thps), len(water_fractions), len(gas_fractions),
     len(artificial_lift_quantities))`.
     """
 
@@ -136,10 +263,21 @@ class VFPData(Serializable):
         axes = (
             self.flow_rates,
             self.thps,
-            self.water_cuts,
-            self.gas_oil_ratios,
+            self.water_fractions,
+            self.gas_fractions,
             self.artificial_lift_quantities,
         )
+        valid_flow_types = (
+            (VFPFlowType.OIL, VFPFlowType.WATER, VFPFlowType.GAS)
+            if self.well_type == WellType.INJECTOR
+            else (VFPFlowType.OIL, VFPFlowType.LIQUID, VFPFlowType.GAS)
+        )
+        if self.flow_type not in valid_flow_types:
+            raise ValidationError(
+                f"A {self.well_type.value} table can't have flow type {self.flow_type}; "
+                f"expected one of {[str(flow_type) for flow_type in valid_flow_types]}."
+            )
+
         expected_shape = tuple(len(axis) for axis in axes)
         if self.bhps.shape != expected_shape:
             raise ValidationError(
@@ -162,6 +300,11 @@ class VFPData(Serializable):
         """
         Converts every dimensioned axis and `bhps` to a different unit system.
 
+        Each axis is converted according to what it measures: a flow axis by its
+        phase, a water-oil ratio or water cut not at all, a water-gas or oil-gas ratio
+        by the ratio of surface volumes, and a gas-oil or gas-liquid ratio by the
+        gas-oil ratio factor.
+
         `artificial_lift_quantities` is left unconverted, since its
         physical quantity depends on the lift method and this data
         structure doesn't know which. Build or load `VFPData` already
@@ -176,18 +319,27 @@ class VFPData(Serializable):
         if target == self.unit_system:
             return self
         factors = get_conversion_factors(self.unit_system, target, table=table)
+        volume_ratio_factor = factors["liquid_surface_volume"] / factors["gas_surface_volume"]
+        if self.flow_type == VFPFlowType.GAS:
+            flow_factor = factors["gas_surface_rate"]
+        else:
+            flow_factor = factors["liquid_surface_rate"]
+
+        if self.water_fraction_type == VFPWaterFractionType.WATER_GAS_RATIO:
+            water_factor = volume_ratio_factor
+        else:
+            water_factor = 1.0
+
+        if self.gas_fraction_type == VFPGasFractionType.OIL_GAS_RATIO:
+            gas_factor = volume_ratio_factor
+        else:
+            gas_factor = factors["gas_oil_ratio"]
         return attrs.evolve(
             self,
-            flow_rates=scale(
-                self.flow_rates,
-                factors[
-                    "gas_surface_rate"
-                    if self.well_type == WellType.INJECTOR
-                    else "liquid_surface_rate"
-                ],
-            ),
+            flow_rates=scale(self.flow_rates, flow_factor),
             thps=scale(self.thps, factors["pressure"]),
-            gas_oil_ratios=scale(self.gas_oil_ratios, factors["gas_oil_ratio"]),
+            water_fractions=scale(self.water_fractions, water_factor),
+            gas_fractions=scale(self.gas_fractions, gas_factor),
             datum_depth=scale(self.datum_depth, factors["length"]),
             bhps=scale(self.bhps, factors["pressure"]),
             unit_system=target,
@@ -265,8 +417,8 @@ class VFPTable(StoreSerializable):
         axes = (
             data.flow_rates,
             data.thps,
-            data.water_cuts,
-            data.gas_oil_ratios,
+            data.water_fractions,
+            data.gas_fractions,
             data.artificial_lift_quantities,
         )
         self._active = tuple(len(axis) > 1 for axis in axes)
@@ -330,6 +482,104 @@ class VFPTable(StoreSerializable):
         """Unit system of the underlying table data."""
         return self._data.unit_system
 
+    @property
+    def flow_type(self) -> VFPFlowType:
+        """What this table's flow axis measures."""
+        return self._data.flow_type
+
+    @property
+    def water_fraction_type(self) -> VFPWaterFractionType:
+        """What this table's water axis measures."""
+        return self._data.water_fraction_type
+
+    @property
+    def gas_fraction_type(self) -> VFPGasFractionType:
+        """What this table's gas axis measures."""
+        return self._data.gas_fraction_type
+
+    def get_lookup_variables(
+        self,
+        *,
+        oil_rate: Number,
+        water_rate: Number,
+        gas_rate: Number,
+    ) -> VFPLookupVariables:
+        """
+        Computes the flow, water and gas values to look this table up with from a well's rates.
+
+        Each value is built from the surface-condition phase rates according to what the
+        table's own axes measure. Rates are taken as magnitudes. A ratio whose denominator
+        is zero is zero if its numerator is also zero, and otherwise the largest value of
+        that axis, so the interpolator never sees an infinite value. An injector table has
+        no water or gas dependence, so both are zero.
+
+        :param oil_rate: Surface oil rate.
+        :param water_rate: Surface water rate.
+        :param gas_rate: Surface gas rate.
+        :returns: The `flow_rate`, `water_fraction` and `gas_fraction` to query with.
+        """
+        oil, water, gas = abs(oil_rate), abs(water_rate), abs(gas_rate)
+        liquid = oil + water
+
+        if self.flow_type == VFPFlowType.OIL:
+            flow_rate = oil
+        elif self.flow_type == VFPFlowType.LIQUID:
+            flow_rate = liquid
+        elif self.flow_type == VFPFlowType.WATER:
+            flow_rate = water
+        else:
+            flow_rate = gas
+
+        if self.well_type == WellType.INJECTOR:
+            return VFPLookupVariables(flow_rate=flow_rate, water_fraction=0.0, gas_fraction=0.0)
+
+        if self.water_fraction_type == VFPWaterFractionType.WATER_CUT:
+            water_numerator, water_denominator = water, liquid
+        elif self.water_fraction_type == VFPWaterFractionType.WATER_OIL_RATIO:
+            water_numerator, water_denominator = water, oil
+        else:
+            water_numerator, water_denominator = water, gas
+
+        if self.gas_fraction_type == VFPGasFractionType.GAS_OIL_RATIO:
+            gas_numerator, gas_denominator = gas, oil
+        elif self.gas_fraction_type == VFPGasFractionType.GAS_LIQUID_RATIO:
+            gas_numerator, gas_denominator = gas, liquid
+        else:
+            gas_numerator, gas_denominator = oil, gas
+
+        return VFPLookupVariables(
+            flow_rate=flow_rate,
+            water_fraction=self.safe_ratio(
+                numerator=water_numerator,
+                denominator=water_denominator,
+                axis=self._data.water_fractions,
+            ),
+            gas_fraction=self.safe_ratio(
+                numerator=gas_numerator,
+                denominator=gas_denominator,
+                axis=self._data.gas_fractions,
+            ),
+        )
+
+    @staticmethod
+    def safe_ratio(
+        *, numerator: Number, denominator: Number, axis: NumberArray[OneDimension]
+    ) -> Number:
+        """
+        A ratio for a table lookup: zero for `0/0`, and the axis maximum for a nonzero
+        numerator over a zero denominator.
+
+        :param numerator: Ratio numerator.
+        :param denominator: Ratio denominator.
+        :param axis: The table axis the ratio is looked up on.
+        :returns: The ratio.
+        """
+        if denominator > 0.0:
+            return numerator / denominator
+        if numerator > 0.0:
+            return axis[-1]
+        return 0.0
+
     def convert(
         self,
         target: UnitSystem,
@@ -356,13 +606,13 @@ class VFPTable(StoreSerializable):
         self,
         flow_rate: TableQuery[NDimension],
         thp: TableQuery[NDimension],
-        water_cut: TableQuery[NDimension],
-        gas_oil_ratio: TableQuery[NDimension],
+        water_fraction: TableQuery[NDimension],
+        gas_fraction: TableQuery[NDimension],
         artificial_lift_quantity: TableQuery[NDimension],
     ) -> None:
         if not self.warn_on_extrapolation:
             return
-        values = (flow_rate, thp, water_cut, gas_oil_ratio, artificial_lift_quantity)
+        values = (flow_rate, thp, water_fraction, gas_fraction, artificial_lift_quantity)
         for name, value in zip(AXIS_NAMES, values, strict=True):
             bounds = self._extrapolation_bounds.get(name)
             if bounds is None:
@@ -386,8 +636,8 @@ class VFPTable(StoreSerializable):
         *,
         flow_rate: TableQuery[NDimension],
         thp: TableQuery[NDimension],
-        water_cut: TableQuery[NDimension] = 0.0,
-        gas_oil_ratio: TableQuery[NDimension] = 0.0,
+        water_fraction: TableQuery[NDimension] = 0.0,
+        gas_fraction: TableQuery[NDimension] = 0.0,
         artificial_lift_quantity: TableQuery[NDimension] = 0.0,
     ) -> TableResult[NDimension]:
         """
@@ -398,8 +648,8 @@ class VFPTable(StoreSerializable):
 
         :param flow_rate: Flow rate.
         :param thp: Tubing head pressure.
-        :param water_cut: Water cut. Ignored if `water_cuts` is single-valued.
-        :param gas_oil_ratio: Gas-oil ratio. Ignored if `gas_oil_ratios` is single-valued.
+        :param water_fraction: Water axis value. Ignored if `water_fractions` is single-valued.
+        :param gas_fraction: Gas axis value. Ignored if `gas_fractions` is single-valued.
         :param artificial_lift_quantity: Artificial lift quantity.
             Ignored if `artificial_lift_quantities` is single-valued.
         :returns: Interpolated bottomhole pressure, matching the input shape.
@@ -407,12 +657,12 @@ class VFPTable(StoreSerializable):
         self._warn_extrapolation(
             flow_rate=flow_rate,
             thp=thp,
-            water_cut=water_cut,
-            gas_oil_ratio=gas_oil_ratio,
+            water_fraction=water_fraction,
+            gas_fraction=gas_fraction,
             artificial_lift_quantity=artificial_lift_quantity,
         )
 
-        full_point = (flow_rate, thp, water_cut, gas_oil_ratio, artificial_lift_quantity)
+        full_point = (flow_rate, thp, water_fraction, gas_fraction, artificial_lift_quantity)
         active_point = tuple(
             value for value, active in zip(full_point, self._active, strict=True) if active
         )
@@ -436,22 +686,22 @@ class VFPTable(StoreSerializable):
         *,
         flow_rate: Number,
         bhp: Number,
-        water_cut: Number = 0.0,
-        gas_oil_ratio: Number = 0.0,
+        water_fraction: Number = 0.0,
+        gas_fraction: Number = 0.0,
         artificial_lift_quantity: Number = 0.0,
     ) -> Number:
         """
         Finds the tubing head pressure that goes with a bottom-hole pressure.
 
-        The table gives BHP from THP, so this inverts it at fixed flow rate, water cut,
-        gas-oil ratio and artificial lift quantity: the BHP is evaluated at every point of the
+        The table gives BHP from THP, so this inverts it at fixed flow rate, water fraction,
+        gas fraction and artificial lift quantity: the BHP is evaluated at every point of the
         THP axis, and the THP is interpolated linearly between the two points that bracket
         `bhp`, or extended linearly past the first or last point.
 
         :param flow_rate: Flow rate, in the table's own definition of it.
         :param bhp: The bottom-hole pressure to find the THP of.
-        :param water_cut: Water cut. Ignored if `water_cuts` is single-valued.
-        :param gas_oil_ratio: Gas-oil ratio. Ignored if `gas_oil_ratios` is single-valued.
+        :param water_fraction: Water axis value. Ignored if `water_fractions` is single-valued.
+        :param gas_fraction: Gas axis value. Ignored if `gas_fractions` is single-valued.
         :param artificial_lift_quantity: Artificial lift quantity.
             Ignored if `artificial_lift_quantities` is single-valued.
         :returns: The tubing head pressure.
@@ -464,12 +714,13 @@ class VFPTable(StoreSerializable):
                 f"VFP table {self.table_number} has a single THP point, so a THP can't be "
                 "found from a BHP."
             )
+
         bhps = np.asarray(
             self.query(
                 flow_rate=flow_rate,
                 thp=thps,
-                water_cut=water_cut,
-                gas_oil_ratio=gas_oil_ratio,
+                water_fraction=water_fraction,
+                gas_fraction=gas_fraction,
                 artificial_lift_quantity=artificial_lift_quantity,
             ),
             dtype=np.float64,
@@ -477,18 +728,20 @@ class VFPTable(StoreSerializable):
         if not (np.diff(bhps) > 0.0).all():
             raise ValidationError(
                 f"VFP table {self.table_number}: BHP does not increase strictly with THP at "
-                f"flow rate {flow_rate}, water cut {water_cut}, gas-oil ratio {gas_oil_ratio} and "
+                f"flow rate {flow_rate}, water fraction {water_fraction}, gas fraction {gas_fraction} and "
                 f"artificial lift quantity {artificial_lift_quantity}, so a THP can't be found "
                 "from a BHP."
             )
+
         if bhp <= bhps[0]:
             lower, upper = 0, 1
         elif bhp >= bhps[-1]:
             lower, upper = len(thps) - 2, len(thps) - 1
         else:
-            return float(np.interp(bhp, bhps, thps))
+            return np.interp(bhp, bhps, thps)
+
         slope = (thps[upper] - thps[lower]) / (bhps[upper] - bhps[lower])
-        return float(thps[lower] + slope * (bhp - bhps[lower]))
+        return thps[lower] + slope * (bhp - bhps[lower])
 
     @typing.overload
     @classmethod
@@ -673,49 +926,29 @@ VFP_KEYWORDS: typing.Mapping[WellType, str] = {
 """Deck keyword that defines the VFP tables of each well type."""
 
 
-def regrid_oil_flow_to_liquid_flow(
-    flow_rates: NumberArray[OneDimension],
-    water_cuts: NumberArray[OneDimension],
-    bhps: NumberArray[FiveDimensions],
-) -> tuple[NumberArray[OneDimension], NumberArray[FiveDimensions]]:
+def map_deck_definition(
+    *,
+    label: str,
+    axis: str,
+    declared: str,
+    mapping: typing.Mapping[str, typing.Any],
+) -> typing.Any:
     """
-    Re-express a table written against oil rate as one written against liquid rate.
+    Maps the definition a deck declares for a table axis to its enum.
 
-    At water cut `w`, an oil rate `q` is a liquid rate `q / (1 - w)`, so every water cut has its
-    own native liquid-rate axis. The result uses the union of all of them as its flow axis. Each
-    water cut's BHP values are exact at its own native points and are interpolated linearly
-    between them (and extended linearly beyond its ends) at the other points, which makes the
-    result an approximation away from the original grid points.
-
-    :param flow_rates: Oil rate axis.
-    :param water_cuts: Water cut axis (fraction).
-    :param bhps: BHP values shaped `(flow, thp, water_cut, gas_oil_ratio, alq)`.
-    :returns: `(liquid_rate_axis, bhps)`, with the BHPs shaped against the new axis.
-    :raises ValidationError: If a water cut is 1 or more, or the flow axis has a single value.
+    :param label: The table's name, for the error message.
+    :param axis: The axis's name, for the error message.
+    :param declared: The deck's definition of the axis, such as `LIQ` or `WCT`.
+    :param mapping: Deck definition to enum.
+    :returns: The enum member.
+    :raises ValidationError: If the deck's definition is not one of `mapping`'s keys.
     """
-    if (water_cuts >= 1.0).any():
+    member = mapping.get(declared.upper())
+    if member is None:
         raise ValidationError(
-            "A water cut of 1 or more has no finite liquid rate for a given oil rate, so the "
-            "table cannot be re-expressed against liquid rate."
+            f"{label}: the {axis} axis is {declared!r}; supported: {sorted(mapping)}."
         )
-    if len(flow_rates) < 2:
-        raise ValidationError("Re-gridding needs at least two values on the flow axis.")
-
-    native = flow_rates[:, None] / (1.0 - water_cuts[None, :])
-    liquid_rates = np.unique(native.ravel())
-    regridded = np.empty((len(liquid_rates), *bhps.shape[1:]), dtype=np.float64)
-    for index in range(len(water_cuts)):
-        axis = native[:, index]
-        upper = np.clip(np.searchsorted(axis, liquid_rates), 1, len(axis) - 1)
-        lower = upper - 1
-        fraction = (liquid_rates - axis[lower]) / (axis[upper] - axis[lower])
-        values = bhps[:, :, index, :, :]
-        regridded[:, :, index, :, :] = values[lower] + fraction[:, None, None, None] * (
-            values[upper] - values[lower]
-        )
-    return typing.cast(NumberArray[OneDimension], liquid_rates), typing.cast(
-        NumberArray[FiveDimensions], regridded
-    )
+    return member
 
 
 def load_vfp_data_from_record(
@@ -727,19 +960,19 @@ def load_vfp_data_from_record(
     """
     Build a `VFPData` from one parsed `VFPPROD` / `VFPINJ` table.
 
-    A producer table maps exactly when it is written in terms of liquid rate (`LIQ`), water cut
-    (`WCT`) or water-oil ratio (`WOR`, converted to water cut) and gas-oil ratio (`GOR`), with
-    `THP` pressures and `BHP` values. An oil-rate table (`OIL`) is re-expressed against liquid
-    rate, which is approximate (see `regrid_oil_flow_to_liquid_flow`) and warns. An injector
-    table maps with any injected phase. Gas-oil ratios and injected gas rates are rescaled from
-    the deck's thousands of standard cubic feet to standard cubic feet for FIELD tables.
+    The table keeps the definitions its deck gives its axes. Only the units are brought to
+    the ones used internally: a FIELD table writes gas rates and gas-oil and gas-liquid
+    ratios per thousand standard cubic feet, and water-gas and oil-gas ratios per
+    thousand standard cubic feet in the denominator, so those are rescaled to standard
+    cubic feet. METRIC and LAB tables need no rescaling.
 
     :param record: One parsed `VFPPROD` / `VFPINJ` table.
     :param well_type: Whether the record is a producer or an injector table.
     :param unit_system: Unit system of the deck, used when the table does not state one.
     :returns: The table data.
-    :raises ValidationError: If the table uses an axis definition that cannot be mapped, has no
-        datum depth, or its axes are invalid.
+    :raises ValidationError: If the table has no datum depth, uses a pressure definition
+        other than `THP` and `BHP`, declares an axis definition that is not supported
+        (including the `WG` and `TM` flow definitions), or its axes are invalid.
     """
     units = (record["units"] or "").upper()
     unit_system = DECK_UNIT_SYSTEMS.get(units, unit_system) if units else unit_system
@@ -754,16 +987,22 @@ def load_vfp_data_from_record(
             f"{record['thp_type']!r} / {record['bhp_type']!r}."
         )
 
+    is_field = unit_system == UnitSystem.FIELD
     if well_type == WellType.INJECTOR:
         injector = typing.cast(VFPInjectorDeckTable, record)
-        scale_gas = unit_system == UnitSystem.FIELD and injector["flow_type"] == "GAS"
+        flow_type = map_deck_definition(
+            label=label,
+            axis="flow",
+            declared=injector["flow_type"],
+            mapping=INJECTOR_FLOW_TYPE_MAP,
+        )
+        gas_flow_scale = 1000.0 if is_field and flow_type == VFPFlowType.GAS else 1.0
         return VFPData(
             table_number=table_number,
             well_type=WellType.INJECTOR,
             datum_depth=datum_depth,
-            flow_rates=typing.cast(
-                NumberArray[OneDimension], injector["flow"] * (1000.0 if scale_gas else 1.0)
-            ),
+            flow_type=flow_type,
+            flow_rates=typing.cast(NumberArray[OneDimension], injector["flow"] * gas_flow_scale),
             thps=typing.cast(NumberArray[OneDimension], injector["thp"]),
             bhps=typing.cast(
                 NumberArray[FiveDimensions], injector["bhps"][:, :, None, None, None]
@@ -772,52 +1011,50 @@ def load_vfp_data_from_record(
         )
 
     producer = typing.cast(VFPProducerDeckTable, record)
-    water_fraction = producer["water_fraction"]
-    if producer["water_fraction_type"] == "WCT":
-        water_cuts = water_fraction
-    elif producer["water_fraction_type"] == "WOR":
-        water_cuts = typing.cast(
-            NumberArray[OneDimension], water_fraction / (1.0 + water_fraction)
-        )
-    else:
-        raise ValidationError(
-            f"{label}: the water axis is {producer['water_fraction_type']!r}; only `WCT` and "
-            "`WOR` are supported."
-        )
-
-    if producer["gas_fraction_type"] != "GOR":
-        raise ValidationError(
-            f"{label}: the gas axis is {producer['gas_fraction_type']!r}; only `GOR` is supported."
-        )
-
-    flow_rates = producer["flow"]
-    bhps = producer["bhps"]
-    if producer["flow_type"] == "OIL":
-        warnings.warn(
-            f"{label}: the oil-rate flow axis was re-expressed against liquid rate; BHPs away "
-            "from the original grid points are interpolated.",
-            stacklevel=3,
-        )
-        flow_rates, bhps = regrid_oil_flow_to_liquid_flow(flow_rates, water_cuts, bhps)
-    elif producer["flow_type"] != "LIQ":
-        raise ValidationError(
-            f"{label}: the flow axis is {producer['flow_type']!r}; only liquid rate (`LIQ`) and "
-            "oil rate (`OIL`) are supported."
-        )
-
-    gas_oil_ratios = producer["gas_fraction"] * (
-        1000.0 if unit_system == UnitSystem.FIELD else 1.0
+    flow_type = map_deck_definition(
+        label=label,
+        axis="flow",
+        declared=producer["flow_type"],
+        mapping=PRODUCER_FLOW_TYPE_MAP,
     )
+    water_fraction_type = map_deck_definition(
+        label=label,
+        axis="water",
+        declared=producer["water_fraction_type"],
+        mapping=WATER_FRACTION_TYPE_MAP,
+    )
+    gas_fraction_type = map_deck_definition(
+        label=label,
+        axis="gas",
+        declared=producer["gas_fraction_type"],
+        mapping=GAS_FRACTION_TYPE_MAP,
+    )
+
+    flow_scale = 1000.0 if is_field and flow_type == VFPFlowType.GAS else 1.0
+    water_scale = (
+        1e-3 if is_field and water_fraction_type == VFPWaterFractionType.WATER_GAS_RATIO else 1.0
+    )
+    if not is_field:
+        gas_scale = 1.0
+    elif gas_fraction_type == VFPGasFractionType.OIL_GAS_RATIO:
+        gas_scale = 1e-3
+    else:
+        gas_scale = 1000.0
     return VFPData(
         table_number=table_number,
         well_type=WellType.PRODUCER,
         datum_depth=datum_depth,
-        flow_rates=typing.cast(NumberArray[OneDimension], flow_rates),
+        flow_type=flow_type,
+        water_fraction_type=water_fraction_type,
+        gas_fraction_type=gas_fraction_type,
+        flow_rates=typing.cast(NumberArray[OneDimension], producer["flow"] * flow_scale),
         thps=typing.cast(NumberArray[OneDimension], producer["thp"]),
-        water_cuts=typing.cast(NumberArray[OneDimension], water_cuts),
-        gas_oil_ratios=typing.cast(NumberArray[OneDimension], gas_oil_ratios),
+        water_fractions=typing.cast(
+            NumberArray[OneDimension], producer["water_fraction"] * water_scale
+        ),
+        gas_fractions=typing.cast(NumberArray[OneDimension], producer["gas_fraction"] * gas_scale),
         artificial_lift_quantities=typing.cast(NumberArray[OneDimension], producer["alq"]),
-        bhps=typing.cast(NumberArray[FiveDimensions], bhps),
+        bhps=typing.cast(NumberArray[FiveDimensions], producer["bhps"]),
         unit_system=unit_system,
     )
 
@@ -985,12 +1222,25 @@ def load_vfp_tables(
 def compute_reservoir_phase_rates(
     *,
     flow_rate: Number,
-    water_cut: Number,
-    gas_oil_ratio: Number,
+    water_fraction: Number,
+    gas_fraction: Number,
     well_type: WellType,
     injected_phase: FluidPhase | None,
     formation_volume_factors: PhaseValues,
 ) -> PhaseValues:
+    """
+    Reservoir-condition phase rates for a flow rate, water cut and gas-oil ratio.
+
+    :param flow_rate: Surface liquid rate for a producer; the injected phase's surface rate
+        for an injector.
+    :param water_fraction: Water cut. Unused for an injector.
+    :param gas_fraction: Gas-oil ratio. Unused for an injector.
+    :param well_type: Producer or injector.
+    :param injected_phase: The injected phase, for an injector.
+    :param formation_volume_factors: Oil, water and gas formation volume factors.
+    :returns: Reservoir-condition phase rates.
+    :raises ValidationError: If an injector's `injected_phase` is not water or gas.
+    """
     if well_type == WellType.INJECTOR:
         if injected_phase == FluidPhase.WATER:
             return PhaseValues(oil=0.0, water=flow_rate * formation_volume_factors.water, gas=0.0)
@@ -1000,9 +1250,9 @@ def compute_reservoir_phase_rates(
             f"`injected_phase` must be `FluidPhase.WATER` or `FluidPhase.GAS` "
             f"for an injector table, got {injected_phase!r}."
         )
-    water_rate = flow_rate * water_cut
+    water_rate = flow_rate * water_fraction
     oil_rate = flow_rate - water_rate
-    gas_rate = oil_rate * gas_oil_ratio
+    gas_rate = oil_rate * gas_fraction
     return PhaseValues(
         oil=oil_rate * formation_volume_factors.oil,
         water=water_rate * formation_volume_factors.water,
@@ -1054,8 +1304,8 @@ def as_vfp_table(
     flow_rates: NumberArray[OneDimension],
     thps: NumberArray[OneDimension],
     surface_fluid_properties: SurfaceFluidProperties,
-    water_cuts: NumberArray[OneDimension] | None = None,
-    gas_oil_ratios: NumberArray[OneDimension] | None = None,
+    water_fractions: NumberArray[OneDimension] | None = None,
+    gas_fractions: NumberArray[OneDimension] | None = None,
     formation_volume_factors: PhaseValues | None = None,
     injected_phase: FluidPhase | None = None,
     min_bhp: Number,
@@ -1069,6 +1319,9 @@ def as_vfp_table(
     """
     Samples a `WellBoreModel` correlation into a `VFPTable`.
 
+    A producer table is liquid rate, water cut and gas-oil ratio based; an injector table's flow
+    is the injected phase.
+
     For each grid point, finds the BHP that makes the correlation's THP
     match that point's `thps` value, by bisection. This resamples the
     same datum-to-surface relationship `compute_tubing_head_pressure`
@@ -1077,7 +1330,7 @@ def as_vfp_table(
 
     `formation_volume_factors` and `surface_fluid_properties` are held
     fixed across the whole grid; this doesn't vary either with pressure
-    or with the `water_cuts`/`gas_oil_ratios` sweep. Build separate
+    or with the `water_fractions`/`gas_fractions` sweep. Build separate
     tables if a wider composition range needs its own PVT behavior.
 
     No artificial-lift correlation exists in `wells.hydraulics` yet, so
@@ -1092,10 +1345,10 @@ def as_vfp_table(
     :param thps: Tubing head pressure axis to solve BHP for.
     :param surface_fluid_properties: Fixed surface fluid properties used
         for every grid point.
-    :param water_cuts: Water cut axis. Ignored for an injector. `[0.0]` if not given.
-    :param gas_oil_ratios: Gas-oil ratio axis. Ignored for an injector. `[0.0]` if not given.
+    :param water_fractions: Water cut axis. Ignored for an injector. `[0.0]` if not given.
+    :param gas_fractions: Gas-oil ratio axis. Ignored for an injector. `[0.0]` if not given.
     :param formation_volume_factors: Fixed oil/water/gas FVFs, converting
-        `flow_rates`/`water_cuts`/`gas_oil_ratios` (surface conditions) to
+        `flow_rates`/`water_fractions`/`gas_fractions` (surface conditions) to
         the reservoir-condition rates `wellbore`'s correlation needs.
         `PhaseValues(oil=1.0, water=1.0, gas=1.0)` (no conversion) if not given.
     :param injected_phase: Which phase `flow_rates` is, for an injector.
@@ -1109,7 +1362,7 @@ def as_vfp_table(
         expressed in.
     :param dtype: Output array dtype for the resulting `VFPTable`.
     :param warn_on_extrapolation: Forwarded to `VFPTable`.
-    :returns: A `VFPTable` covering `flow_rates` x `thps` x `water_cuts` x `gas_oil_ratios`.
+    :returns: A `VFPTable` covering `flow_rates` x `thps` x `water_fractions` x `gas_fractions`.
     :raises ValidationError: If `well_type` is `WellType.INJECTOR` and
         `injected_phase` isn't `FluidPhase.WATER` or `FluidPhase.GAS`.
     """
@@ -1119,26 +1372,26 @@ def as_vfp_table(
         if formation_volume_factors is not None
         else PhaseValues(oil=1.0, water=1.0, gas=1.0)
     )
-    resolved_water_cuts = water_cuts if water_cuts is not None else np.array([0.0])
-    resolved_gas_oil_ratios = gas_oil_ratios if gas_oil_ratios is not None else np.array([0.0])
+    resolved_water_fractions = water_fractions if water_fractions is not None else np.array([0.0])
+    resolved_gas_fractions = gas_fractions if gas_fractions is not None else np.array([0.0])
     if is_injector:
-        resolved_water_cuts = np.array([0.0])
-        resolved_gas_oil_ratios = np.array([0.0])
+        resolved_water_fractions = np.array([0.0])
+        resolved_gas_fractions = np.array([0.0])
 
     bhps = np.empty((
         len(flow_rates),
         len(thps),
-        len(resolved_water_cuts),
-        len(resolved_gas_oil_ratios),
+        len(resolved_water_fractions),
+        len(resolved_gas_fractions),
         1,
     ))
     for i, flow_rate in enumerate(flow_rates):
-        for k, water_cut in enumerate(resolved_water_cuts):
-            for m, gas_oil_ratio in enumerate(resolved_gas_oil_ratios):
+        for k, water_fraction in enumerate(resolved_water_fractions):
+            for m, gas_fraction in enumerate(resolved_gas_fractions):
                 phase_rates = compute_reservoir_phase_rates(
                     flow_rate=flow_rate,
-                    water_cut=water_cut,
-                    gas_oil_ratio=gas_oil_ratio,
+                    water_fraction=water_fraction,
+                    gas_fraction=gas_fraction,
                     well_type=well_type,
                     injected_phase=injected_phase,
                     formation_volume_factors=resolved_formation_volume_factors,
@@ -1157,14 +1410,18 @@ def as_vfp_table(
                         convergence_tolerance=bhp_convergence_tolerance,
                     )
 
+    flow_type = VFPFlowType.LIQUID
+    if is_injector:
+        flow_type = VFPFlowType.WATER if injected_phase == FluidPhase.WATER else VFPFlowType.GAS
     data = VFPData(
         table_number=table_number,
         well_type=well_type,
         datum_depth=reference_depth,
+        flow_type=flow_type,
         flow_rates=flow_rates,
         thps=thps,
-        water_cuts=typing.cast(NumberArray[OneDimension], resolved_water_cuts),
-        gas_oil_ratios=typing.cast(NumberArray[OneDimension], resolved_gas_oil_ratios),
+        water_fractions=typing.cast(NumberArray[OneDimension], resolved_water_fractions),
+        gas_fractions=typing.cast(NumberArray[OneDimension], resolved_gas_fractions),
         bhps=bhps,
         unit_system=unit_system,
     )
