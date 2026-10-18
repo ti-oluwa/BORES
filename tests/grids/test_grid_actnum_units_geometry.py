@@ -91,7 +91,7 @@ def test_cell_thickness_is_vertical_not_bounding_box_height():
     [(UnitSystem.METRIC, 0.00852702), (UnitSystem.LAB, 3.6)],
 )
 def test_convert_scales_explicit_nnc_flow_transmissibility(target, eclipse_darcy_constant):
-    from bores.constants import get_conversion_factors
+    from bores.units import get_conversion_factors
 
     grid = make_cartesian_grid(
         nx=4,

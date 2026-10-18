@@ -6,7 +6,6 @@ import attrs
 import numpy as np
 from typing_extensions import NamedTuple, Self
 
-from bores.constants import get_conversion_factors
 from bores.types import (
     Integer,
     NumberArray,
@@ -17,6 +16,7 @@ from bores.types import (
     UnitConversionTable,
     UnitSystem,
 )
+from bores.units import get_conversion_factors
 
 DType = typing.TypeVar("DType", float, np.floating)
 ShapeT = typing.TypeVar("ShapeT", bound=tuple[int, ...])

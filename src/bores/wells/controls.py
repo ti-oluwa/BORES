@@ -8,12 +8,12 @@ import attrs
 import numpy as np
 from typing_extensions import Self
 
-from bores.constants import get_conversion_factors
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.serde.base import Serializable
 from bores.serde.registry import make_serializable_type_registrar
 from bores.types import FluidPhase, Integer, Number, UnitConversionTable, UnitSystem
+from bores.units import get_conversion_factors
 from bores.utils import scale
 
 __all__ = [

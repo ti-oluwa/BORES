@@ -3,12 +3,12 @@ import typing
 import attrs
 from typing_extensions import Self
 
-from bores.constants import get_conversion_factors
 from bores.reservoir.boundary.base import (
     BoundaryCondition,
     BoundaryConditionType,
 )
 from bores.types import Number, UnitConversionTable, UnitSystem
+from bores.units import get_conversion_factors
 
 __all__ = [
     "ConstantFluxBoundary",

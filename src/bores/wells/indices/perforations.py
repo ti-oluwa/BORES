@@ -8,7 +8,6 @@ import attrs
 import numpy as np
 from typing_extensions import Self
 
-from bores.constants import get_conversion_factors
 from bores.errors import ValidationError
 from bores.grids.base import Grid
 from bores.types import (
@@ -24,6 +23,7 @@ from bores.types import (
     UnitConversionTable,
     UnitSystem,
 )
+from bores.units import get_conversion_factors
 from bores.wells.base import Perforation, Well
 
 __all__ = [

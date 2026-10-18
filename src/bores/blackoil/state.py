@@ -8,12 +8,12 @@ from typing_extensions import Self
 
 from bores.blackoil.compile import CompiledBlackOilModel
 from bores.blackoil.model import BlackOilModel
-from bores.constants import get_conversion_factors
 from bores.errors import ValidationError
 from bores.reservoir.state import Hysteresis, ReservoirState
 from bores.reservoir.workspace import HysteresisWorkspace, load_reservoir_state
 from bores.serde.base import Serializable
 from bores.types import CellArray, Number, UnitConversionTable, UnitSystem
+from bores.units import get_conversion_factors
 from bores.utils import scale
 from bores.wells.state import WellStates
 from bores.wells.workspace import load_wells_states

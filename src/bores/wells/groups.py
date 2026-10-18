@@ -6,10 +6,10 @@ import typing
 import attrs
 from typing_extensions import Self
 
-from bores.constants import get_conversion_factors
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.types import FluidPhase, Number, UnitConversionTable, UnitSystem
+from bores.units import get_conversion_factors
 from bores.wells.controls import EconomicLimit
 
 __all__ = [
