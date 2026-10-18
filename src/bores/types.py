@@ -39,6 +39,8 @@ __all__ = [
 T = typing.TypeVar("T")
 Tco = typing.TypeVar("Tco", covariant=True)
 S = typing.TypeVar("S")
+P = typing.ParamSpec("P")
+R = typing.TypeVar("R")
 
 
 class UnitSystem(enum.Enum):

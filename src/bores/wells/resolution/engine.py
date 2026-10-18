@@ -6,7 +6,7 @@ import typing
 import numpy as np
 
 from bores.errors import StopSimulation, ValidationError, WellConvergenceError
-from bores.types import Integer, NumberArray, OneDimension
+from bores.types import Integer, NumberArray, OneDimension, P, R
 from bores.wells.compile import (
     CompiledWellSystem,
     InjectorControlModeTag,
@@ -44,23 +44,21 @@ from bores.wells.workspace import (
 __all__ = ["resolve_well_control"]
 
 
-def name_well_in_convergence_errors(
-    function: typing.Callable[..., None],
-) -> typing.Callable[..., None]:
+def name_well_in_convergence_errors(func: typing.Callable[P, R]) -> typing.Callable[P, R]:
     """
     Wraps a keyword-only well resolution function so that a `WellConvergenceError` it raises
     names the well it was resolving.
 
-    :param function: A function taking `compiled_system` and `well_row` as keyword arguments.
+    :param func: A function taking `compiled_system` and `well_row` as keyword arguments.
     :returns: The wrapped function.
     """
 
-    @functools.wraps(function)
-    def wrapper(**kwargs: typing.Any) -> None:
+    @functools.wraps(func)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         try:
-            return function(**kwargs)
+            return func(*args, **kwargs)
         except WellConvergenceError as exc:
-            name = kwargs["compiled_system"].names[kwargs["well_row"]]
+            name = kwargs["compiled_system"].names[kwargs["well_row"]]  # type: ignore[attr-defined]
             raise WellConvergenceError(f"Well {name!r}: {exc}") from exc
 
     return wrapper
