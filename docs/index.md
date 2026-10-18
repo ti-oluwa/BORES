@@ -153,7 +153,7 @@ rock_fluid_tables = bores.RockFluidTables(
         oil_exponent=1.0,
         gas_exponent=1.0,
         wettability=bores.Wettability.WATER_WET,
-        mixing_rule="eclipse_rule",
+        mixing_rule="baker_linear_rule",
     ),
     capillary_pressure_table=bores.BrooksCoreyCapillaryPressureModel(
         wettability=bores.Wettability.WATER_WET,

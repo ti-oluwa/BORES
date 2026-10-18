@@ -78,7 +78,7 @@ The model computes relative permeability at every grid cell from the current sat
 | `oil_exponent` | `2.0` | Corey exponent for oil phase $n_o$ |
 | `gas_exponent` | `2.0` | Corey exponent for gas phase $n_g$ |
 | `wettability` | `WATER_WET` | Rock wettability (`WATER_WET` or `OIL_WET`) |
-| `mixing_rule` | `eclipse_rule` | Three-phase oil relative permeability mixing rule |
+| `mixing_rule` | `baker_linear_rule` | Three-phase oil relative permeability mixing rule |
 
 ---
 
@@ -242,7 +242,7 @@ relperm = bores.LETThreePhaseRelPermModel(
     max_gas_relperm=0.75,
     # Same wettability and mixing rule options as Brooks-Corey
     wettability=bores.Wettability.WATER_WET,
-    mixing_rule="eclipse_rule",
+    mixing_rule="baker_linear_rule",
 )
 ```
 
@@ -283,28 +283,27 @@ These are starting points for history matching. Always calibrate to your specifi
 
 In a three-phase system (oil, water, and gas present simultaneously), BORES needs a way to compute the oil relative permeability $k_{ro}$ from the two-phase curves $k_{ro,w}(S_w)$ and $k_{ro,g}(S_g)$. This is done through a mixing rule that interpolates between the two-phase oil curves.
 
-BORES provides several mixing rules, selectable by name or by passing the function directly. The choice of mixing rule can significantly affect results in regions where all three phases are mobile (near wells, at gas-oil-water contacts, and during WAG injection).
+BORES provides four mixing rules, selectable by name or by passing the function directly. The choice of mixing rule can significantly affect results in regions where all three phases are mobile (near wells, at gas-oil-water contacts, and during WAG injection).
+
+Every rule reduces to the two-phase curves at the limits, for any oil endpoint $k_{ro}^{cw}$:
+
+- with no gas ($S_g = 0$): $k_{ro} = k_{ro,w}$
+- at connate water ($S_w = S_{wc}$): $k_{ro} = k_{ro,g}$
+- both: $k_{ro} = k_{ro}^{cw}$
 
 ### Available Mixing Rules
 
 | Rule | String Name | Description |
 | --- | --- | --- |
-| Eclipse rule | `"eclipse_rule"` | Industry standard default. Conservative, well-tested. |
-| Stone I | `"stone_I_rule"` | Stone's first model. Good for water-wet systems. |
-| Stone II | `"stone_II_rule"` | Stone's second model. More conservative than Stone I. |
-| Baker linear | `"baker_linear_rule"` | Linear saturation-weighted interpolation. Simple and stable. |
-| Blunt rule | `"blunt_rule"` | Conservative, designed for strongly water-wet rocks. |
-| Harmonic mean | `"harmonic_mean_rule"` | Very conservative. Good for tight rocks, series flow. |
-| Geometric mean | `"geometric_mean_rule"` | Moderately conservative. General purpose. |
-| Arithmetic mean | `"arithmetic_mean_rule"` | Optimistic upper bound estimate. |
-| Min rule | `"min_rule"` | Most conservative. Lower bound on oil mobility. |
-| Max rule | `"max_rule"` | Most optimistic. Upper bound on oil mobility. |
-| Aziz-Settari | `"aziz_settari_rule"` | Empirical, tunable for specific reservoirs. |
+| Baker linear | `"baker_linear_rule"` | Saturation-weighted interpolation (Baker, 1988). The ECLIPSE default, and the default here. |
+| Stone I | `"stone_I_rule"` | Stone's first model in the Aziz-Settari normalization, with the Fayers-Matthews minimum oil saturation. |
+| Stone II | `"stone_II_rule"` | Stone's second model, normalized by the oil endpoint. Uses the water and gas curves too. |
+| Min rule | `"min_rule"` | $\min(k_{ro,w}, k_{ro,g})$. A conservative lower bound on oil mobility. |
 
 ```python
 import bores
 
-# Using the default Eclipse rule
+# Using the default rule (Baker's saturation-weighted interpolation)
 relperm = bores.BrooksCoreyRelPermModel(
     irreducible_water_saturation=0.25,
     residual_oil_saturation_water=0.30,
@@ -313,7 +312,7 @@ relperm = bores.BrooksCoreyRelPermModel(
     water_exponent=2.0,
     oil_exponent=2.0,
     gas_exponent=2.0,
-    mixing_rule="eclipse_rule",
+    mixing_rule="baker_linear_rule",
 )
 
 # Using Stone I for a water-wet carbonate
@@ -329,7 +328,28 @@ relperm_stone = bores.BrooksCoreyRelPermModel(
 )
 ```
 
-The Eclipse rule is the default and recommended starting point. It is the same approach used by the Schlumberger Eclipse commercial simulator and has been validated against decades of field data. Stone I and Stone II are classical alternatives from the petroleum engineering literature and are appropriate when you need to match specific laboratory three-phase relative permeability data.
+Baker's saturation-weighted interpolation is the default and the recommended starting point. It is the ECLIPSE default: the oil relative permeability is the average of $k_{ro,w}$ and $k_{ro,g}$, weighted by $S_w - S_{wc}$ and $S_g$ respectively. Stone I and Stone II are classical alternatives from the petroleum engineering literature and are appropriate when you need to match specific laboratory three-phase relative permeability data.
+
+### Writing a Custom Mixing Rule
+
+A rule is a function of the two-phase oil curves, the water and gas curves, the saturations and the saturation endpoints. Register it with `@bores.mixing_rule`:
+
+```python
+import numpy as np
+import bores
+
+@bores.mixing_rule
+def my_rule(
+    kro_w, kro_g, krw, krg, kr_max,
+    water_saturation, oil_saturation, gas_saturation,
+    irreducible_water_saturation,
+    residual_oil_saturation_water,
+    residual_oil_saturation_gas,
+):
+    return np.minimum(kro_w, kro_g)
+```
+
+`kro_w`, `kro_g` and `kr_max` must share one scale, and the rule must be positively homogeneous in them. A rule should honor the two-phase limits above. Derivatives are estimated by central differences unless you attach an analytical one with `@my_rule.dfunc`, which returns the seven partial derivatives with respect to `kro_w`, `kro_g`, `krw`, `krg` and the three saturations.
 
 !!! warning "Mixing Rule Sensitivity"
 
@@ -539,7 +559,7 @@ relperm = bores.BrooksCoreyRelPermModel(
     water_exponent=2.5,
     oil_exponent=2.0,
     gas_exponent=2.0,
-    mixing_rule="eclipse_rule",
+    mixing_rule="baker_linear_rule",
 )
 
 rock_fluid_tables = bores.RockFluidTables(

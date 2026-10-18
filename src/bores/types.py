@@ -296,7 +296,11 @@ class MixingRuleFunc(typing.Protocol):
     Protocol for a mixing rule function that combines two-phase oil relative
     permeabilities into a three-phase estimate.
 
-    Parameters that a simple rules does not need can simply be ignored in the implementation.
+    `kro_w`, `kro_g` and `kr_max` must be on the same scale, and a rule must be
+    positively homogeneous in them. A rule should honor the two-phase limits: `kro = kro_w`
+    with no gas, `kro = kro_g` at connate water, and `kro = kr_max` for both.
+
+    Parameters that a simple rule does not need can simply be ignored in the implementation.
     """
 
     def __call__(
@@ -310,6 +314,9 @@ class MixingRuleFunc(typing.Protocol):
         water_saturation: NumberOrArray[NDimension],
         oil_saturation: NumberOrArray[NDimension],
         gas_saturation: NumberOrArray[NDimension],
+        irreducible_water_saturation: NumberOrArray[NDimension],
+        residual_oil_saturation_water: NumberOrArray[NDimension],
+        residual_oil_saturation_gas: NumberOrArray[NDimension],
     ) -> NumberOrArray[NDimension]:
         """
         Compute the three-phase oil relative permeability.
@@ -327,6 +334,12 @@ class MixingRuleFunc(typing.Protocol):
         :param water_saturation: Current water saturation.
         :param oil_saturation: Current oil saturation.
         :param gas_saturation: Current gas saturation.
+        :param irreducible_water_saturation: Connate/irreducible water saturation
+            (`swc`).
+        :param residual_oil_saturation_water: Residual oil saturation to water flood
+            (`sorw`).
+        :param residual_oil_saturation_gas: Residual oil saturation to gas flood
+            (`sorg`).
         :return: Three-phase oil relative permeability.
         """
         ...
@@ -341,7 +354,10 @@ class MixingRulePartialDerivatives(TypedDict):
     The mixing rule signature is:
 
         kro = rule(kro_w, kro_g, krw, krg, kr_max,
-                   water_saturation, oil_saturation, gas_saturation)
+                   water_saturation, oil_saturation, gas_saturation,
+                   irreducible_water_saturation,
+                   residual_oil_saturation_water,
+                   residual_oil_saturation_gas)
 
     The derivatives here are taken with respect to the *inputs that vary
     with saturation* in a way that is explicit in the mixing rule itself.
@@ -363,7 +379,7 @@ class MixingRulePartialDerivatives(TypedDict):
         Zero for rules that do not use `krg` directly (most simple rules).
     dkro_dsw_explicit :
         ∂kro / ∂Sw  through the explicit water-saturation argument of the
-        mixing rule (e.g. saturation weighting in `eclipse_rule`).
+        mixing rule (e.g. the saturation weights in `baker_linear_rule`).
         Zero for rules that do not depend directly on saturation.
     dkro_dso_explicit :
         ∂kro / ∂So  through the explicit oil-saturation argument.
@@ -396,6 +412,9 @@ class MixingRuleDFunc(typing.Protocol):
         water_saturation: NumberOrArray[NDimension],
         oil_saturation: NumberOrArray[NDimension],
         gas_saturation: NumberOrArray[NDimension],
+        irreducible_water_saturation: NumberOrArray[NDimension],
+        residual_oil_saturation_water: NumberOrArray[NDimension],
+        residual_oil_saturation_gas: NumberOrArray[NDimension],
     ) -> (
         MixingRulePartialDerivatives
         | tuple[
@@ -424,6 +443,12 @@ class MixingRuleDFunc(typing.Protocol):
         :param water_saturation: Current water saturation.
         :param oil_saturation: Current oil saturation.
         :param gas_saturation: Current gas saturation.
+        :param irreducible_water_saturation: Connate/irreducible water saturation
+            (`swc`).
+        :param residual_oil_saturation_water: Residual oil saturation to water flood
+            (`sorw`).
+        :param residual_oil_saturation_gas: Residual oil saturation to gas flood
+            (`sorg`).
         :return: The seven partial derivatives, either as a
             `MixingRulePartialDerivatives` dict or a 7-tuple.
         """

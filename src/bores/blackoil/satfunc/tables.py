@@ -1041,7 +1041,7 @@ def as_three_phase_relperm_table(
     )
 
     if mixing_rule is None:
-        mixing_rule = getattr(table, "mixing_rule", "eclipse_rule")
+        mixing_rule = getattr(table, "mixing_rule", "baker_linear_rule")
     return ThreePhaseRelPermTable(
         oil_water_table=oil_water_table,
         gas_oil_table=gas_oil_table,

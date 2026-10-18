@@ -166,7 +166,7 @@ class SimulationCase:
         | typing.Mapping[str, TubingPerformance | None]
         | None = None,
         temperature: Temperature | Number | None = None,
-        mixing_rule: str = "eclipse_rule",
+        mixing_rule: str = "baker_linear_rule",
         compiled_at: float = 0.0,
         runspec: RunSpec | None = None,
         summary: SummaryReport | None = None,
@@ -241,7 +241,7 @@ def load_case(
     | typing.Mapping[str, TubingPerformance | None]
     | None = None,
     temperature: Temperature | Number | None = None,
-    mixing_rule: str = "eclipse_rule",
+    mixing_rule: str = "baker_linear_rule",
     compiled_at: float = 0.0,
     runspec: RunSpec | None = None,
     summary: SummaryReport | None = None,

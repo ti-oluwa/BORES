@@ -912,15 +912,21 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
 
     def get_connate_water_saturation(self) -> Number:
         """
-        Connate/critical water saturation (swco), read directly off this
-        table's own saturation axis (its minimum, by construction) when
-        that axis represents water. `0.0` if this table doesn't have water
-        as one of its two phases at all, or water isn't the axis phase (no
-        water-saturation information to read off the axis in that case).
+        Connate/critical water saturation (swco), read off this table's own
+        saturation axis. `0.0` if this table doesn't have water as one of its two
+        phases (a table with no water has no water-saturation information).
+
+        - Water axis: the axis minimum, `swco = Sw_min`.
+        - Oil axis (oil-water table): the oil saturation is largest at connate water,
+          so `swco = 1 - So_max`.
+        - Gas axis (gas-water table): the gas saturation is largest at connate water,
+          so `swco = 1 - Sg_max`.
         """
-        if self.get_reference_axis_phase() != FluidPhase.WATER:
+        if FluidPhase.WATER not in {self.wetting_phase, self.non_wetting_phase}:
             return 0.0
-        return float(self.reference_saturation[0])
+        if self.get_reference_axis_phase() == FluidPhase.WATER:
+            return float(self.reference_saturation[0])
+        return float(1.0 - self.reference_saturation[-1])
 
     def get_residual_oil_saturation_water(self) -> Number:
         """
@@ -1437,6 +1443,118 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
         raise ValidationError(f"`system` must be 'oil_water' or 'gas_oil'; got {system!r}.")
 
 
+def resolve_residual_oil_saturation_gas(
+    gas_oil_table: "RelativePermeabilityTable",
+    connate_water_saturation: Number,
+) -> Number:
+    """
+    Residual oil saturation after gas flood (`sorg`) of a gas-oil table, accounting for
+    the connate water saturation.
+
+    A gas-oil table has no water information of its own. When it is indexed by gas
+    saturation, its largest gas saturation is `Sg_max = 1 - swc - sorg`, so reading `sorg`
+    from the table alone (`1 - Sg_max`) would overstate it by `swc`. Here `swc` is supplied.
+    A table indexed by oil saturation reports `sorg` directly as the axis minimum.
+
+    :param gas_oil_table: Gas-oil table (two-phase tabular, or a parametric model).
+    :param connate_water_saturation: Connate water saturation of the system.
+    :return: Residual oil saturation to gas flood.
+    """
+    phases = {gas_oil_table.wetting_phase, gas_oil_table.non_wetting_phase}  # type: ignore[union-attr]
+    if FluidPhase.GAS not in phases or not isinstance(gas_oil_table, TwoPhaseRelPermTable):
+        return gas_oil_table.get_residual_oil_saturation_gas()
+    if gas_oil_table.get_reference_axis_phase() != FluidPhase.GAS:
+        return gas_oil_table.get_residual_oil_saturation_gas()
+    sg_max = float(gas_oil_table.reference_saturation[-1])
+    return max(0.0, 1.0 - connate_water_saturation - sg_max)
+
+
+def _query_two_phase_pair(
+    table: "TwoPhaseRelPermTable",
+    wetting_saturation: NumberOrArray[NDimension],
+    non_wetting_saturation: NumberOrArray[NDimension],
+    derivative: bool = False,
+) -> tuple[NumberOrArray[NDimension], NumberOrArray[NDimension]]:
+    """
+    Query a two-phase table for its wetting and non-wetting phase relative permeability
+    (or their derivatives with respect to the table's reference-axis saturation).
+
+    :param table: Two-phase table.
+    :param wetting_saturation: Saturation of the table's wetting phase in its own system.
+    :param non_wetting_saturation: Saturation of the table's non-wetting phase in its own system.
+    :param derivative: Return the derivatives instead of the values.
+    :return: Two-tuple of `(wetting_phase, non_wetting_phase)` values or derivatives.
+    """
+    if derivative:
+        return (
+            table.get_wetting_phase_relative_permeability_derivative(
+                wetting_saturation, non_wetting_saturation=non_wetting_saturation
+            ),
+            table.get_non_wetting_phase_relative_permeability_derivative(
+                wetting_saturation, non_wetting_saturation=non_wetting_saturation
+            ),
+        )
+    return (
+        table.get_wetting_phase_relative_permeability(
+            wetting_saturation, non_wetting_saturation=non_wetting_saturation
+        ),
+        table.get_non_wetting_phase_relative_permeability(
+            wetting_saturation, non_wetting_saturation=non_wetting_saturation
+        ),
+    )
+
+
+def _query_oil_water_system(
+    table: "TwoPhaseRelPermTable",
+    water_saturation: NumberOrArray[NDimension],
+    derivative: bool = False,
+) -> tuple[NumberOrArray[NDimension], NumberOrArray[NDimension]]:
+    """
+    Query an oil-water table at the current water saturation, with the oil saturation
+    of the two-phase system `So = 1 - Sw`.
+
+    With `derivative=True`, the result is the derivative with respect to `Sw`, with the
+    sign handled for a table whose reference axis is oil.
+
+    :return: Two-tuple of `(water_kr, oil_kr)` values or `Sw` derivatives.
+    """
+    oil_saturation = np.clip(1.0 - water_saturation, 0.0, 1.0)
+    if table.wetting_phase == FluidPhase.WATER:
+        krw, kro = _query_two_phase_pair(table, water_saturation, oil_saturation, derivative)
+    else:
+        kro, krw = _query_two_phase_pair(table, oil_saturation, water_saturation, derivative)
+    if derivative and table.get_reference_axis_phase() != FluidPhase.WATER:
+        # The table's axis is So = 1 - Sw
+        return -krw, -kro  # type: ignore[operator]
+    return krw, kro
+
+
+def _query_gas_oil_system(
+    table: "TwoPhaseRelPermTable",
+    gas_saturation: NumberOrArray[NDimension],
+    connate_water_saturation: Number,
+    derivative: bool = False,
+) -> tuple[NumberOrArray[NDimension], NumberOrArray[NDimension]]:
+    """
+    Query a gas-oil table at the current gas saturation, with the oil saturation of the
+    two-phase system at connate water, `So = 1 - swc - Sg`.
+
+    With `derivative=True`, the result is the derivative with respect to `Sg`, with the
+    sign handled for a table whose reference axis is oil.
+
+    :return: Two-tuple of `(gas_kr, oil_kr)` values or `Sg` derivatives.
+    """
+    oil_saturation = np.clip(1.0 - connate_water_saturation - gas_saturation, 0.0, 1.0)
+    if table.wetting_phase == FluidPhase.OIL:
+        kro, krg = _query_two_phase_pair(table, oil_saturation, gas_saturation, derivative)
+    else:
+        krg, kro = _query_two_phase_pair(table, gas_saturation, oil_saturation, derivative)
+    if derivative and table.get_reference_axis_phase() != FluidPhase.GAS:
+        # The table's axis is So = 1 - swc - Sg
+        return -krg, -kro  # type: ignore[operator]
+    return krg, kro
+
+
 @attrs.frozen(slots=True)
 class ThreePhaseRelPermTable(RelativePermeabilityTable):
     """
@@ -1463,7 +1581,7 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
     derivative (zeroed in the flat region) is also used consistently, so the
     assembled Jacobian never disagrees with the kr values.
 
-    Supported mixing rules: `max_rule`, `stone_I_rule`, `stone_II_rule`, etc.
+    Supported mixing rules: `baker_linear_rule`, `stone_I_rule`, `stone_II_rule` and `min_rule`.
     """
 
     oil_water_table: TwoPhaseRelPermTable
@@ -1543,27 +1661,13 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
 
     def get_residual_oil_saturation_gas(self) -> Number:
         """
-        Residual oil saturation after gas flood (sorg), combining the
-        gas-oil table's own gas-saturation axis with the oil-water table's
-        connate water saturation: `sorg = 1 - swco - Sg_max`. This is more
-        accurate than `gas_oil_table.get_residual_oil_saturation_gas()`
-        alone, which (used standalone) has no connate-water information and
-        implicitly assumes `swco = 0`.
+        Residual oil saturation after gas flood (sorg), combining the gas-oil table
+        with the oil-water table's connate water saturation. See
+        `resolve_residual_oil_saturation_gas`.
         """
-        gas_oil = self.gas_oil_table
-        phases = {gas_oil.wetting_phase, gas_oil.non_wetting_phase}  # type: ignore[union-attr]
-        if FluidPhase.GAS not in phases or not isinstance(gas_oil, TwoPhaseRelPermTable):
-            return gas_oil.get_residual_oil_saturation_gas()
-        axis_phase = (
-            gas_oil.wetting_phase
-            if gas_oil.reference_phase == "wetting"
-            else gas_oil.non_wetting_phase
+        return resolve_residual_oil_saturation_gas(
+            self.gas_oil_table, self.oil_water_table.get_connate_water_saturation()
         )
-        if axis_phase != FluidPhase.GAS:
-            return gas_oil.get_residual_oil_saturation_gas()
-        swco = self.oil_water_table.get_connate_water_saturation()
-        sg_max = float(gas_oil.reference_saturation[-1])
-        return max(0.0, 1.0 - swco - sg_max)
 
     @staticmethod
     def _normalize_saturations(
@@ -1670,35 +1774,9 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
             saturation_epsilon=c.SATURATION_EPSILON,
         )
 
-        if self.oil_water_table.wetting_phase == FluidPhase.WATER:
-            krw = self.oil_water_table.get_wetting_phase_relative_permeability(
-                sw, non_wetting_saturation=so
-            )
-            kro_w = self.oil_water_table.get_non_wetting_phase_relative_permeability(
-                sw, non_wetting_saturation=so
-            )
-        else:
-            kro_w = self.oil_water_table.get_wetting_phase_relative_permeability(
-                so, non_wetting_saturation=sw
-            )
-            krw = self.oil_water_table.get_non_wetting_phase_relative_permeability(
-                so, non_wetting_saturation=sw
-            )
-
-        if self.gas_oil_table.wetting_phase == FluidPhase.OIL:
-            kro_g = self.gas_oil_table.get_wetting_phase_relative_permeability(
-                so, non_wetting_saturation=sg
-            )
-            krg = self.gas_oil_table.get_non_wetting_phase_relative_permeability(
-                so, non_wetting_saturation=sg
-            )
-        else:
-            krg = self.gas_oil_table.get_wetting_phase_relative_permeability(
-                sg, non_wetting_saturation=so
-            )
-            kro_g = self.gas_oil_table.get_non_wetting_phase_relative_permeability(
-                sg, non_wetting_saturation=so
-            )
+        connate_water_saturation = self.get_connate_water_saturation()
+        krw, kro_w = _query_oil_water_system(self.oil_water_table, sw)
+        krg, kro_g = _query_gas_oil_system(self.gas_oil_table, sg, connate_water_saturation)
 
         kr_max = self.get_oil_relperm_endpoint()
         if self.mixing_rule is not None:
@@ -1711,6 +1789,9 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
                 water_saturation=sw,
                 oil_saturation=so,
                 gas_saturation=sg,
+                irreducible_water_saturation=connate_water_saturation,
+                residual_oil_saturation_water=self.get_residual_oil_saturation_water(),
+                residual_oil_saturation_gas=self.get_residual_oil_saturation_gas(),
             )
         else:
             kro = np.minimum(kro_w, kro_g)
@@ -1798,121 +1879,21 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
 
         oil_water_table = self.oil_water_table
         gas_oil_table = self.gas_oil_table
+        connate_water_saturation = self.get_connate_water_saturation()
 
-        # Oil-water table derivatives: krw and kro_w
-        if oil_water_table.wetting_phase == FluidPhase.WATER:
-            if oil_water_table.reference_phase == "wetting":
-                dkrw_dsw = oil_water_table.get_wetting_phase_relative_permeability_derivative(
-                    sw, non_wetting_saturation=so
-                )
-                dkrw_dso, dkrw_dsg = zeros.copy(), zeros.copy()
-                dkro_w_dsw = (
-                    oil_water_table.get_non_wetting_phase_relative_permeability_derivative(
-                        sw, non_wetting_saturation=so
-                    )
-                )
-                dkro_w_dso, dkro_w_dsg = zeros.copy(), zeros.copy()
-            else:
-                dkrw_dsw, dkrw_dsg = zeros.copy(), zeros.copy()
-                dkrw_dso = oil_water_table.get_wetting_phase_relative_permeability_derivative(
-                    sw, non_wetting_saturation=so
-                )
-                dkro_w_dsw, dkro_w_dsg = zeros.copy(), zeros.copy()
-                dkro_w_dso = (
-                    oil_water_table.get_non_wetting_phase_relative_permeability_derivative(
-                        sw, non_wetting_saturation=so
-                    )
-                )
-        else:
-            if oil_water_table.reference_phase == "wetting":
-                dkrw_dsw, dkrw_dsg = zeros.copy(), zeros.copy()
-                dkrw_dso = oil_water_table.get_non_wetting_phase_relative_permeability_derivative(
-                    so, non_wetting_saturation=sw
-                )
-                dkro_w_dsw, dkro_w_dsg = zeros.copy(), zeros.copy()
-                dkro_w_dso = oil_water_table.get_wetting_phase_relative_permeability_derivative(
-                    so, non_wetting_saturation=sw
-                )
-            else:
-                dkrw_dso, dkrw_dsg = zeros.copy(), zeros.copy()
-                dkrw_dsw = oil_water_table.get_non_wetting_phase_relative_permeability_derivative(
-                    so, non_wetting_saturation=sw
-                )
-                dkro_w_dso, dkro_w_dsg = zeros.copy(), zeros.copy()
-                dkro_w_dsw = oil_water_table.get_wetting_phase_relative_permeability_derivative(
-                    so, non_wetting_saturation=sw
-                )
-
-        # Gas-oil table derivatives: krg and kro_g
-        if gas_oil_table.wetting_phase == FluidPhase.OIL:
-            if gas_oil_table.reference_phase == "wetting":
-                dkrg_dsw, dkrg_dsg = zeros.copy(), zeros.copy()
-                dkrg_dso = gas_oil_table.get_non_wetting_phase_relative_permeability_derivative(
-                    so, non_wetting_saturation=sg
-                )
-                dkro_g_dsw, dkro_g_dsg = zeros.copy(), zeros.copy()
-                dkro_g_dso = gas_oil_table.get_wetting_phase_relative_permeability_derivative(
-                    so, non_wetting_saturation=sg
-                )
-            else:
-                dkrg_dsw, dkrg_dso = zeros.copy(), zeros.copy()
-                dkrg_dsg = gas_oil_table.get_non_wetting_phase_relative_permeability_derivative(
-                    so, non_wetting_saturation=sg
-                )
-                dkro_g_dsw, dkro_g_dso = zeros.copy(), zeros.copy()
-                dkro_g_dsg = gas_oil_table.get_wetting_phase_relative_permeability_derivative(
-                    so, non_wetting_saturation=sg
-                )
-        else:
-            if gas_oil_table.reference_phase == "wetting":
-                dkrg_dsw, dkrg_dso = zeros.copy(), zeros.copy()
-                dkrg_dsg = gas_oil_table.get_wetting_phase_relative_permeability_derivative(
-                    sg, non_wetting_saturation=so
-                )
-                dkro_g_dsw, dkro_g_dso = zeros.copy(), zeros.copy()
-                dkro_g_dsg = gas_oil_table.get_non_wetting_phase_relative_permeability_derivative(
-                    sg, non_wetting_saturation=so
-                )
-            else:
-                dkrg_dsw, dkrg_dsg = zeros.copy(), zeros.copy()
-                dkrg_dso = gas_oil_table.get_wetting_phase_relative_permeability_derivative(
-                    sg, non_wetting_saturation=so
-                )
-                dkro_g_dsw, dkro_g_dsg = zeros.copy(), zeros.copy()
-                dkro_g_dso = gas_oil_table.get_non_wetting_phase_relative_permeability_derivative(
-                    sg, non_wetting_saturation=so
-                )
+        # krw and kro_w depend on Sw only. krg and kro_g depend on Sg only.
+        dkrw_dsw, dkro_w_dsw = _query_oil_water_system(oil_water_table, sw, derivative=True)
+        dkrw_dso, dkrw_dsg = zeros.copy(), zeros.copy()
+        dkro_w_dso, dkro_w_dsg = zeros.copy(), zeros.copy()
+        dkrg_dsg, dkro_g_dsg = _query_gas_oil_system(
+            gas_oil_table, sg, connate_water_saturation, derivative=True
+        )
+        dkrg_dsw, dkrg_dso = zeros.copy(), zeros.copy()
+        dkro_g_dsw, dkro_g_dso = zeros.copy(), zeros.copy()
 
         # Forward two-phase kr values for mixing rule
-        if oil_water_table.wetting_phase == FluidPhase.WATER:
-            kro_w = oil_water_table.get_non_wetting_phase_relative_permeability(
-                sw, non_wetting_saturation=so
-            )
-            krw = oil_water_table.get_wetting_phase_relative_permeability(
-                sw, non_wetting_saturation=so
-            )
-        else:
-            kro_w = oil_water_table.get_wetting_phase_relative_permeability(
-                so, non_wetting_saturation=sw
-            )
-            krw = oil_water_table.get_non_wetting_phase_relative_permeability(
-                so, non_wetting_saturation=sw
-            )
-
-        if gas_oil_table.wetting_phase == FluidPhase.OIL:
-            kro_g = gas_oil_table.get_wetting_phase_relative_permeability(
-                so, non_wetting_saturation=sg
-            )
-            krg = gas_oil_table.get_non_wetting_phase_relative_permeability(
-                so, non_wetting_saturation=sg
-            )
-        else:
-            kro_g = gas_oil_table.get_non_wetting_phase_relative_permeability(
-                sg, non_wetting_saturation=so
-            )
-            krg = gas_oil_table.get_wetting_phase_relative_permeability(
-                sg, non_wetting_saturation=so
-            )
+        krw, kro_w = _query_oil_water_system(oil_water_table, sw)
+        krg, kro_g = _query_gas_oil_system(gas_oil_table, sg, connate_water_saturation)
 
         kr_max = self.get_oil_relperm_endpoint()
         # Mixing rule partial derivatives
@@ -1938,6 +1919,9 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
                 water_saturation=sw,
                 oil_saturation=so,
                 gas_saturation=sg,
+                irreducible_water_saturation=connate_water_saturation,
+                residual_oil_saturation_water=self.get_residual_oil_saturation_water(),
+                residual_oil_saturation_gas=self.get_residual_oil_saturation_gas(),
                 epsilon=c.FINITE_DIFFERENCE_EPSILON,
             )
             dkro_dkro_w = derivatives["dkro_dkro_w"]

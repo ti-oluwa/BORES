@@ -27,6 +27,7 @@ from bores.blackoil.satfunc.relperm.tables import (
     TwoPhaseRelPermTable,
     get_mixing_rule,
     get_mixing_rule_partial_derivatives,
+    resolve_residual_oil_saturation_gas,
 )
 from bores.blackoil.satfunc.utils import (
     compute_killough_scanning_curve,
@@ -477,7 +478,7 @@ class KilloughLandRelPermTable:
     scanning_interpolation_exponent: Number = 1.0
     """Killough scanning curve interpolation exponent *n* (1 = linear)."""
 
-    mixing_rule: MixingRule | str = "eclipse_rule"
+    mixing_rule: MixingRule | str = "baker_linear_rule"
     """Three-phase oil relative permeability mixing rule."""
 
     supports_vector: bool = attrs.field(init=False, repr=False, default=True)
@@ -566,8 +567,13 @@ class KilloughLandRelPermTable:
         return self.oil_water_drainage_table.get_residual_oil_saturation_water()
 
     def get_residual_oil_saturation_gas(self) -> Number:
-        """Static (drainage-table) residual oil to gas; see `get_residual_oil_saturation_water`."""
-        return self.gas_oil_drainage_table.get_residual_oil_saturation_gas()
+        """
+        Static (drainage-table) residual oil to gas; see `get_residual_oil_saturation_water`.
+        The connate water saturation of the system is accounted for.
+        """
+        return resolve_residual_oil_saturation_gas(
+            self.gas_oil_drainage_table, self.get_connate_water_saturation()
+        )
 
     def get_residual_gas_saturation(self) -> Number:
         """Static (drainage-table) residual/critical gas saturation; see `get_residual_oil_saturation_water`."""
@@ -911,6 +917,9 @@ class KilloughLandRelPermTable:
             water_saturation=water_saturation,
             oil_saturation=oil_saturation,
             gas_saturation=gas_saturation,
+            irreducible_water_saturation=self.get_connate_water_saturation(),
+            residual_oil_saturation_water=self.get_residual_oil_saturation_water(),
+            residual_oil_saturation_gas=self.get_residual_oil_saturation_gas(),
         )
 
         if is_scalar:
@@ -1230,12 +1239,16 @@ class KilloughLandRelPermTable:
             water_saturation=water_saturation,
             oil_saturation=oil_saturation,
             gas_saturation=gas_saturation,
+            irreducible_water_saturation=self.get_connate_water_saturation(),
+            residual_oil_saturation_water=self.get_residual_oil_saturation_water(),
+            residual_oil_saturation_gas=self.get_residual_oil_saturation_gas(),
             epsilon=c.FINITE_DIFFERENCE_EPSILON,
         )
 
         oil_relative_permeability_derivative_water = (
             mixing_rule_partial_derivatives["dkro_dkro_w"]
             * oil_relative_permeability_water_derivative
+            + mixing_rule_partial_derivatives["dkro_dkrw"] * water_relative_permeability_derivative
             + mixing_rule_partial_derivatives["dkro_dsw_explicit"]
         )
         oil_relative_permeability_derivative_oil = mixing_rule_partial_derivatives[
@@ -1244,6 +1257,7 @@ class KilloughLandRelPermTable:
         oil_relative_permeability_derivative_gas = (
             mixing_rule_partial_derivatives["dkro_dkro_g"]
             * oil_relative_permeability_gas_derivative
+            + mixing_rule_partial_derivatives["dkro_dkrg"] * gas_relative_permeability_derivative
             + mixing_rule_partial_derivatives["dkro_dsg_explicit"]
         )
 

@@ -284,20 +284,10 @@ These functions compute oil relative permeability in three-phase flow from two-p
 | Name | Type | Description |
 | --- | --- | --- |
 | `mixing_rule()` | decorator | Register a custom three-phase mixing rule. |
-| `stone_I_rule()` | function | Stone's first model. |
-| `stone_II_rule()` | function | Stone's second model. |
-| `baker_linear_rule()` | function | Baker's linear interpolation. |
-| `eclipse_rule()` | function | Eclipse-style modified Stone I. |
-| `blunt_rule()` | function | Blunt's saturation-weighted model. |
-| `arithmetic_mean_rule()` | function | Simple arithmetic average. |
-| `geometric_mean_rule()` | function | Geometric average. |
-| `harmonic_mean_rule()` | function | Harmonic average. |
-| `max_rule()` | function | Maximum of oil-water and gas-oil curves. |
-| `min_rule()` | function | Minimum of oil-water and gas-oil curves. |
-| `aziz_settari_rule()` | function | Aziz and Settari's model. |
-| `hustad_hansen_rule()` | function | Hustad-Hansen model. |
-| `linear_interpolation_rule()` | function | Linear interpolation between two-phase curves. |
-| `saturation_weighted_interpolation_rule()` | function | Saturation-weighted interpolation. |
+| `baker_linear_rule()` | function | Baker's saturation-weighted interpolation. The ECLIPSE default. |
+| `stone_I_rule()` | function | Stone's first model (Aziz-Settari normalization, Fayers-Matthews `Som`). |
+| `stone_II_rule()` | function | Stone's second model, normalized by the oil endpoint. |
+| `min_rule()` | function | Minimum of the oil-water and gas-oil curves. A conservative lower bound. |
 | `product_saturation_weighted_rule()` | function | Product of saturation-weighted curves. |
 | `compute_corey_three_phase_relative_permeabilities()` | function | Compute all three-phase kr values from Corey parameters directly. |
 | `compute_let_three_phase_relative_permeabilities()` | function | Compute all three-phase kr values from LET parameters directly. |
