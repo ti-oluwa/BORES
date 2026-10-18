@@ -121,7 +121,7 @@ def solve_connection_pressures_and_rates(
     control_spec: WellControlSpec,
 ) -> tuple[NumberArray[OneDimension], PhaseValues, PhaseValues]:
     """
-    Does fixed-point iterations of connection flowing pressures against IPR-derived
+    Runs fixed-point iterations of connection flowing pressures against IPR-derived
     rates at a fixed `reference_pressure` (BHP), until the well-total
     relevant-phase rate stabilizes.
 
@@ -213,6 +213,7 @@ def solve_connection_pressures_and_rates(
             is_injector=is_injector,
             out=workspace.connection_pressures,
         )
+
     total_rate = 0.0
     phase_rates = zero_rates
     surface_phase_rates = zero_rates

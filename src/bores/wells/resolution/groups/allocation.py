@@ -96,14 +96,14 @@ def allocate_group_targets(
     member_end = group_controls.member_offsets[group_index + 1]
     member_indices = group_controls.member_well_indices[member_start:member_end]
 
-    grup_mode_tag = InjectorControlModeTag.GROUP if is_injection else ProducerControlModeTag.GROUP
+    group_mode_tag = InjectorControlModeTag.GROUP if is_injection else ProducerControlModeTag.GROUP
     expected_well_kind = WellKind.INJECTOR if is_injection else WellKind.PRODUCER
     controls = well_system.controls
     eligible = [
         i
         for i in member_indices
         if well_system.well_kinds[i] == expected_well_kind
-        and controls.control_modes[i] == grup_mode_tag
+        and controls.control_modes[i] == group_mode_tag
         and workspace.economic_shutins[i] == 0
     ]
     if not eligible:
@@ -201,7 +201,7 @@ def redistribute_group_shortfall(
     `allocate_group_targets` only does a first-pass proportional split.
     A member that can't actually reach its own share (its own BHP floor
     binds it first, say) leaves the group short of its real target, with
-    nothing correcting for it. This looks for exactly that: a bound
+    nothing correcting for it. This looks for exactly that; a bound
     member has its own target capped down to what it actually delivered
     (so the same gap isn't counted again next pass), and its unmet share
     is added to this pass's total shortfall. Any member already sitting
@@ -212,7 +212,7 @@ def redistribute_group_shortfall(
     left, or `control_spec.max_fixed_point_iterations` passes are used.
 
     Requires `allocate_group_targets` and an initial resolve of every
-    member in `allocated_wells` to have already run this timestep - reads
+    member in `allocated_wells` to have already run this timestep. Reads
     their current resolved rates via `get_group_controlled_rate`, it
     doesn't resolve anything itself before its own first pass.
 
@@ -244,16 +244,17 @@ def redistribute_group_shortfall(
     group_controls = well_system.group_controls
     if group_controls is None:
         raise ValidationError("`well_system.group_controls` is not set.")
-    # Resolve group_name up front, purely to validate it, mirroring every
-    # other function in this module - group_row itself is unused below,
-    # since eligibility comes from allocated_wells, not group membership.
+
+    # Resolve `group_name` up front, purely to validate it, mirroring every
+    # other function in this module - `group_row` itself is unused below,
+    # since eligibility comes from `allocated_wells`, not group membership.
     group_controls.group_row(name=group_name)
 
     if not allocated_wells:
         return ()
 
     controls = well_system.controls
-    grup_derived = [well_system.well_row(name=name) for name in allocated_wells]
+    group_derived = [well_system.well_row(name=name) for name in allocated_wells]
 
     resolved_get_surface_fluid_properties = get_surface_fluid_properties or (lambda well_row: None)
     reresolved: list[str] = []
@@ -261,27 +262,28 @@ def redistribute_group_shortfall(
     for _ in range(control_spec.max_fixed_point_iterations):
         headroom_rows: list[Integer] = []
         total_shortfall = 0.0
-        for i in grup_derived:
-            target = controls.target_rates[i]
-            if math.isnan(target):
+        for i in group_derived:
+            target_rate = controls.target_rates[i]
+            if math.isnan(target_rate):
                 continue
-            actual = get_group_controlled_rate(
+
+            actual_rate = get_group_controlled_rate(
                 well_system=well_system, workspace=workspace, well_row=i
             )
-            gap = target - actual
+            gap = target_rate - actual_rate
             tolerance = (
-                abs(target) * control_spec.rate_convergence_tolerance
-                if target != 0
+                abs(target_rate) * control_spec.rate_convergence_tolerance
+                if target_rate != 0
                 else control_spec.rate_convergence_tolerance
             )
             if gap > tolerance:
                 # This well is bound below its own target (its BHP floor,
-                # say) - cap its target down to what it actually
+                # say), cap its target down to what it actually
                 # delivered, so this same gap isn't counted again next
                 # pass. Its unmet share becomes this pass's shortfall to
                 # redistribute, once, not every remaining iteration.
                 total_shortfall += gap
-                controls.target_rates[i] = actual
+                controls.target_rates[i] = actual_rate
             elif gap <= tolerance:
                 headroom_rows.append(i)
 

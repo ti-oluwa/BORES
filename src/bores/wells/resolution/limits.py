@@ -101,7 +101,7 @@ def get_rate_bound(
         "reservoir" if quantity == RateQuantityTag.RESERVOIR else "surface"
     )
 
-    _, reservoir_condition_rates, surface_condition_rates = solve_connection_pressures_and_rates(
+    _, reservoir_rates, surface_rates = solve_connection_pressures_and_rates(
         tubing=tubing,
         reference_depth=reference_depth,
         workspace=workspace,
@@ -111,13 +111,9 @@ def get_rate_bound(
         is_injector=is_injector,
         control_spec=control_spec,
     )
-    rates_to_check = (
-        reservoir_condition_rates
-        if target_rate_condition == "reservoir"
-        else surface_condition_rates
-    )
-    current = rates_to_check.oil + rates_to_check.water + rates_to_check.gas
-    if current <= max_value:
+    target_rates = reservoir_rates if target_rate_condition == "reservoir" else surface_rates
+    current_rate = target_rates.oil + target_rates.water + target_rates.gas
+    if current_rate <= max_value:
         return None
 
     bound_bhp, _, _ = bisect_bhp(
@@ -201,6 +197,7 @@ def get_thp_bound(
     else:
         violated = not math.isnan(min_value) and current_thp < min_value
         target = min_value
+
     if not violated:
         return None
 
@@ -243,26 +240,32 @@ def check_economic_violation(
     :param phase_rates: Well-total phase rates to check.
     :returns: The violated row's index, or `UNSET_INT` if none is violated.
     """
-    oil, water, gas = phase_rates.oil, phase_rates.water, phase_rates.gas
+    oil_rate, water_rate, gas_rate = phase_rates.oil, phase_rates.water, phase_rates.gas
 
     for row in range(limits_start, limits_end):
         if limits.kinds[row] != LimitKind.ECONOMIC:
             continue
+
         quantity = limits.quantities[row]
         if quantity == EconomicQuantityTag.OIL_RATE:
-            if oil < limits.min_values[row]:
+            if oil_rate < limits.min_values[row]:
                 return row
             continue
+
         if quantity == EconomicQuantityTag.GAS_RATE:
-            if gas < limits.min_values[row]:
+            if gas_rate < limits.min_values[row]:
                 return row
             continue
+
         if quantity == EconomicQuantityTag.WATER_CUT:
-            ratio = water / (oil + water) if (oil + water) > 0 else 0.0
+            ratio = water_rate / (oil_rate + water_rate) if (oil_rate + water_rate) > 0 else 0.0
         elif quantity == EconomicQuantityTag.GOR:
-            ratio = (gas / oil) if oil > 0 else (math.inf if gas > 0 else 0.0)
+            ratio = (gas_rate / oil_rate) if oil_rate > 0 else (math.inf if gas_rate > 0 else 0.0)
         else:
-            ratio = (water / gas) if gas > 0 else (math.inf if water > 0 else 0.0)
+            ratio = (
+                (water_rate / gas_rate) if gas_rate > 0 else (math.inf if water_rate > 0 else 0.0)
+            )
+
         if ratio > limits.max_values[row]:
             return row
     return UNSET_INT
@@ -294,7 +297,7 @@ def apply_limits(
     whichever implies the most restrictive BHP and returns that as the
     governing resolution.
 
-    "Most restrictive wins", not "first in list wins": every limit kind
+    Most restrictive limit wins, not the first limit. Every limit kind
     here reduces to "the BHP that exactly satisfies this limit", a scalar
     on the same axis every mode solver already searches. Because total
     rate and THP are both monotonic in BHP, the single most extreme

@@ -564,14 +564,14 @@ class Wells:
             all_wells = {well.name: well for well in wells}
 
         if unit_system is None:
-            systems = {well.unit_system for well in all_wells.values()}
-            if len(systems) > 1:
+            unit_systems = {well.unit_system for well in all_wells.values()}
+            if len(unit_systems) > 1:
                 raise ValidationError(
                     "All wells must share the same unit system when "
                     "`unit_system` is not explicitly provided. Found: "
-                    f"{sorted(s.value for s in systems)}."
+                    f"{sorted(unit_system.value for unit_system in unit_systems)}."
                 )
-            unit_system = systems.pop()
+            unit_system = unit_systems.pop()
             all_wells = dict(all_wells)
         else:
             all_wells = {
@@ -646,7 +646,7 @@ class Wells:
         return tuple(well for well in self.wells.values() if not well.is_active)
 
     @classmethod
-    def from_deck(cls, deck_file: DeckFile, *, grid: Grid) -> Self:
+    def from_deck(cls, deck_file: DeckFile, *, grid: Grid, current_time: float = 0) -> Self:
         """
         Load the `Wells` object from a parsed `DeckFile`.
 
@@ -658,7 +658,7 @@ class Wells:
         """
         from bores.wells.deck import load_wells
 
-        return typing.cast(Self, load_wells(deck_file, grid))
+        return typing.cast(Self, load_wells(deck_file, grid=grid, current_time=current_time))
 
     def __getitem__(self, name: str) -> Well:
         return self.get(name)

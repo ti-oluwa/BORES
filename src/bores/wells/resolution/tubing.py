@@ -99,7 +99,7 @@ def resolve_well_tubing(
     :raises ValidationError: If the well's table number is not in the collection.
     """
     controls = compiled_system.controls
-    artificial_lift_quantity = float(controls.artificial_lift_quantities[well_row])
+    artificial_lift_quantity = controls.artificial_lift_quantities[well_row]
     if isinstance(tubing_performance, VFPTables):
         table_number = controls.get_vfp_table_number(well_row=well_row)
         if table_number is None:
@@ -160,20 +160,18 @@ def attach_flowing_fluid(
         ),
     )
     deliverabilities = []
-    phase_means = []
+    phase_averages = []
     for mobility, phase_densities, flag in zip(mobilities, densities, flags, strict=True):
         weights = workspace.well_indices * mobility
-        total = float(weights.sum())
-        phase_means.append(
-            float(np.dot(weights, phase_densities) / total)
-            if total > 0.0
-            else float(phase_densities.mean())
+        total = weights.sum()
+        phase_averages.append(
+            np.dot(weights, phase_densities) / total if total > 0.0 else phase_densities.mean()
         )
         deliverabilities.append(total if flag else 0.0)
 
     total_deliverability = sum(deliverabilities)
     if total_deliverability > 0.0:
-        fractions = [value / total_deliverability for value in deliverabilities]
+        fractions = [deliverability / total_deliverability for deliverability in deliverabilities]
     else:
         flowing = sum(flags)
         fractions = [1.0 / flowing if flag else 0.0 for flag in flags]
@@ -184,7 +182,8 @@ def attach_flowing_fluid(
             water_densities=densities[1],
             gas_densities=densities[2],
             zero_flow_density=sum(
-                fraction * mean for fraction, mean in zip(fractions, phase_means, strict=True)
+                fraction * average
+                for fraction, average in zip(fractions, phase_averages, strict=True)
             ),
         )
     )
@@ -194,8 +193,8 @@ def compute_flowing_density(
     *, flowing_fluid: FlowingFluid, connection_rates: ConnectionRates
 ) -> Number:
     """
-    Density of the mixture a well flows: its total mass rate over its total volume rate, both at
-    reservoir conditions, summed over every phase at every connection.
+    Computes the density of the mixture a well flows as its total mass rate over its total volume rate,
+    both at reservoir conditions, summed over every phase at every connection.
 
     A well flowing nothing is given `flowing_fluid.zero_flow_density`.
 
@@ -203,31 +202,32 @@ def compute_flowing_density(
     :param connection_rates: Reservoir-condition rate of each phase at each connection.
     :returns: The mixture density.
     """
-    oil, water, gas = (np.abs(rates) for rates in connection_rates)
-    volume = float(oil.sum() + water.sum() + gas.sum())
-    if volume <= 0.0:
+    oil_rate, water_rate, gas_rate = (np.abs(rates) for rates in connection_rates)
+    volumetric_rate = oil_rate.sum() + water_rate.sum() + gas_rate.sum()
+    if volumetric_rate <= 0.0:
         return flowing_fluid.zero_flow_density
-    mass = float(
-        np.dot(oil, flowing_fluid.oil_densities)
-        + np.dot(water, flowing_fluid.water_densities)
-        + np.dot(gas, flowing_fluid.gas_densities)
+
+    mass_rate = (
+        np.dot(oil_rate, flowing_fluid.oil_densities)
+        + np.dot(water_rate, flowing_fluid.water_densities)
+        + np.dot(gas_rate, flowing_fluid.gas_densities)
     )
-    return mass / volume
+    return mass_rate / volumetric_rate
 
 
 def compute_datum_pressure_shift(
     *,
     table: VFPTable,
     reference_depth: Number,
-    flowing_fluid: FlowingFluid | None,
-    connection_rates: ConnectionRates | None,
+    flowing_fluid: FlowingFluid | None = None,
+    connection_rates: ConnectionRates | None = None,
 ) -> Number:
     """
-    The pressure to add to the BHP at the well's reference depth to get the BHP at a VFP
+    Computes the pressure to add to the BHP at the well's reference depth to get the BHP at a VFP
     table's datum depth.
 
     The fluid column between the two depths is the flowing mixture, with no friction, so the
-    shift is its weight: positive when the datum is deeper than the reference depth, negative
+    shift is its weight. It is positive when the datum is deeper than the reference depth, negative
     when it is shallower.
 
     :param table: The VFP table.
@@ -242,6 +242,7 @@ def compute_datum_pressure_shift(
     depth_difference = table.datum_depth - reference_depth
     if math.isclose(depth_difference, 0.0, abs_tol=1e-6):
         return 0.0
+
     if flowing_fluid is None or connection_rates is None:
         raise ValidationError(
             f"VFP table {table.table_number} refers to a datum depth of {table.datum_depth}, but "

@@ -77,19 +77,20 @@ def compute_hydrostatic_connection_pressures(
     order = np.argsort(representative_depths, kind="stable")
     depths = representative_depths[order]
     samples = [connection_samples[i] for i in order]
-    oil = np.abs(connection_rates.oil[order])
-    water = np.abs(connection_rates.water[order])
-    gas = np.abs(connection_rates.gas[order])
+    oil_rate = np.abs(connection_rates.oil[order])
+    water_rate = np.abs(connection_rates.water[order])
+    gas_rate = np.abs(connection_rates.gas[order])
 
-    mass = (
-        oil * np.fromiter((sample.phase_densities.oil for sample in samples), working_dtype, count)
-        + water
+    mass_rate = (
+        oil_rate
+        * np.fromiter((sample.phase_densities.oil for sample in samples), working_dtype, count)
+        + water_rate
         * np.fromiter((sample.phase_densities.water for sample in samples), working_dtype, count)
-        + gas
+        + gas_rate
         * np.fromiter((sample.phase_densities.gas for sample in samples), working_dtype, count)
     )
-    volume = oil + water + gas
-    static = np.fromiter(
+    volumetric_rate = oil_rate + water_rate + gas_rate
+    static_density = np.fromiter(
         (
             compute_static_mixture_density(
                 phase_saturations=sample.phase_saturations, phase_densities=sample.phase_densities
@@ -99,17 +100,17 @@ def compute_hydrostatic_connection_pressures(
         working_dtype,
         count,
     )
-    mass_beneath = np.cumsum(mass[::-1])[::-1]
-    volume_beneath = np.cumsum(volume[::-1])[::-1]
-    static_beneath = np.cumsum(static[::-1])[::-1]
+    mass_rate_beneath = np.cumsum(mass_rate[::-1])[::-1]
+    volume_rate_beneath = np.cumsum(volumetric_rate[::-1])[::-1]
+    static_rate_beneath = np.cumsum(static_density[::-1])[::-1]
 
     def get_segment_density(first_beneath: Integer) -> Number:
         """Compute the density of the fluid carried past connection `first_beneath` and every one deeper."""
         if first_beneath >= count:
-            return static[-1]
-        if volume_beneath[first_beneath] > 0.0:
-            return mass_beneath[first_beneath] / volume_beneath[first_beneath]
-        return static_beneath[first_beneath] / (count - first_beneath)
+            return static_density[-1]
+        if volume_rate_beneath[first_beneath] > 0.0:
+            return mass_rate_beneath[first_beneath] / volume_rate_beneath[first_beneath]
+        return static_rate_beneath[first_beneath] / (count - first_beneath)
 
     pressure_per_density_and_depth = compute_hydrostatic_pressure(
         density=1.0,
