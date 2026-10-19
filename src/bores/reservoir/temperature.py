@@ -5,7 +5,6 @@ import numpy as np
 import numpy.typing as npt
 from typing_extensions import Self
 
-from bores.constants import UnitConversionTable, get_conversion_factors
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.precision import get_dtype
@@ -19,6 +18,7 @@ from bores.types import (
     OneDimension,
     UnitSystem,
 )
+from bores.units import UnitConversionTable, get_conversion_factors
 from bores.utils import scale, scale_and_offset
 
 __all__ = ["Temperature", "TemperatureGradient", "TemperatureTable"]

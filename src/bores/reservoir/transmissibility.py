@@ -7,7 +7,6 @@ import numpy as np
 import numpy.typing as npt
 from typing_extensions import Self
 
-from bores.constants import build_unit_conversion_table, get_conversion_factors
 from bores.grids.base import Grid
 from bores.precision import get_dtype
 from bores.reservoir.rock import Rock
@@ -21,6 +20,7 @@ from bores.types import (
     UnitConversionTable,
     UnitSystem,
 )
+from bores.units import build_unit_conversion_table, get_conversion_factors
 from bores.utils import scale
 
 __all__ = ["ConnectionTransmissibilities", "compute_connection_transmissibilities"]

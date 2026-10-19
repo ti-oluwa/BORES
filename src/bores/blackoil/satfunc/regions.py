@@ -14,11 +14,11 @@ from bores.blackoil.satfunc.relperm.tables import (
     ThreePhaseRelPermTable,
 )
 from bores.blackoil.satfunc.tables import SatFuncTables
-from bores.constants import UnitConversionTable
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.types import Spacing, UnitSystem
+from bores.units import UnitConversionTable
 
 logger = logging.getLogger(__name__)
 

@@ -6,9 +6,10 @@ import typing
 import numba
 from typing_extensions import Self
 
-from bores.constants import c, get_conversion_factors
+from bores.constants import c
 from bores.errors import ValidationError
 from bores.types import Number, NumberArray, OneDimension, UnitConversionTable, UnitSystem
+from bores.units import get_conversion_factors
 from bores.wells.state import PhaseValues
 
 __all__ = [

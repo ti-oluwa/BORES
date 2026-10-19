@@ -4,9 +4,9 @@ import typing
 import attrs
 from typing_extensions import Self
 
-from bores.constants import UnitConversionTable, c, get_conversion_factors
 from bores.errors import ValidationError
 from bores.types import Integer, Number, UnitSystem
+from bores.units import UnitConversionTable, c, get_conversion_factors
 from bores.utils import scale
 
 __all__ = ["ConnectionPressureMode", "WellControlSpec"]

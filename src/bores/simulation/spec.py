@@ -7,7 +7,7 @@ from collections.abc import Iterable
 import attrs
 from typing_extensions import Self
 
-from bores.constants import Constants, get_conversion_factors
+from bores.constants import Constants
 from bores.errors import ValidationError
 from bores.simulation.timestep import Timer
 from bores.types import (
@@ -18,6 +18,7 @@ from bores.types import (
     UnitConversionTable,
     UnitSystem,
 )
+from bores.units import get_conversion_factors
 from bores.utils import scale
 from bores.wells.resolution.spec import WellControlSpec
 

@@ -11,7 +11,7 @@ from scipy.interpolate import PchipInterpolator  # type: ignore[import-untyped]
 from scipy.optimize import brentq
 from typing_extensions import Self
 
-from bores.constants import UnitConversionTable, c, get_conversion_factors
+from bores.constants import c
 from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.types import (
@@ -22,6 +22,7 @@ from bores.types import (
     NumberOrArray,
     UnitSystem,
 )
+from bores.units import UnitConversionTable, get_conversion_factors
 from bores.utils import scale
 
 logger = logging.getLogger(__name__)

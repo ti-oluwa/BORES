@@ -8,7 +8,7 @@ from scipy.optimize import root_scalar
 from scipy.special import j1, y1
 from typing_extensions import Self
 
-from bores.constants import c, get_conversion_factors
+from bores.constants import c
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.reservoir.boundary.base import (
@@ -24,6 +24,7 @@ from bores.types import (
     UnitConversionTable,
     UnitSystem,
 )
+from bores.units import get_conversion_factors
 
 if typing.TYPE_CHECKING:
     from bores.blackoil.pvt.regions import PVT

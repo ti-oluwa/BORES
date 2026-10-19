@@ -1,12 +1,13 @@
 import attrs
 from typing_extensions import Self
 
-from bores.constants import UnitConversionTable, c, get_conversion_factors
+from bores.constants import c
 from bores.correlations import scalars
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.serde.base import Serializable
 from bores.types import Number, UnitSystem
+from bores.units import UnitConversionTable, get_conversion_factors
 from bores.utils import scale
 
 __all__ = ["StaticPVT"]

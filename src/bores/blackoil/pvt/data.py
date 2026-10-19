@@ -7,7 +7,7 @@ import numpy as np
 import numpy.typing as npt
 from typing_extensions import Self
 
-from bores.constants import UnitConversionTable, c, get_conversion_factors
+from bores.constants import c
 from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.serde.stores import StoreSerializable
@@ -20,6 +20,7 @@ from bores.types import (
     TwoDimensions,
     UnitSystem,
 )
+from bores.units import UnitConversionTable, get_conversion_factors
 from bores.utils import scale, scale_and_offset
 
 logger = logging.getLogger(__name__)

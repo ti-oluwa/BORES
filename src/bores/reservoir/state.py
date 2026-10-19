@@ -5,7 +5,6 @@ import numpy as np
 import numpy.typing as npt
 from typing_extensions import Self
 
-from bores.constants import UnitConversionTable, get_conversion_factors
 from bores.precision import get_dtype
 from bores.serde.stores import StoreSerializable
 from bores.types import (
@@ -13,6 +12,7 @@ from bores.types import (
     CellArray,
     UnitSystem,
 )
+from bores.units import UnitConversionTable, get_conversion_factors
 from bores.utils import scale, scale_and_offset
 
 __all__ = ["Hysteresis", "ReservoirState"]

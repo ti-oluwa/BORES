@@ -9,7 +9,6 @@ import numpy as np
 from scipy.spatial import cKDTree
 from typing_extensions import Self
 
-from bores.constants import UnitConversionTable, get_conversion_factors
 from bores.datastructures import GridDimensions, MapAxes
 from bores.deck.file import DeckFile
 from bores.errors import (
@@ -32,6 +31,7 @@ from bores.types import (
     TwoDimensions,
     UnitSystem,
 )
+from bores.units import UnitConversionTable, get_conversion_factors
 
 __all__ = ["CellStatus", "ConnectionType", "Grid"]
 

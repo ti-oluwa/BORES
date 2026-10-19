@@ -16,12 +16,7 @@ import numpy.typing as npt
 from scipy.interpolate import PchipInterpolator, interp1d
 from typing_extensions import Self
 
-from bores.constants import (
-    UnitConversionTable,
-    build_unit_conversion_table,
-    c,
-    get_conversion_factors,
-)
+from bores.constants import c
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.precision import get_dtype
@@ -38,6 +33,11 @@ from bores.types import (
     TableQuery,
     TableResult,
     UnitSystem,
+)
+from bores.units import (
+    UnitConversionTable,
+    build_unit_conversion_table,
+    get_conversion_factors,
 )
 from bores.utils import scale
 

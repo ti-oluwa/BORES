@@ -10,7 +10,7 @@ from typing_extensions import Self
 from bores.blackoil.satfunc.capillary_pressure.tables import (
     CapillaryPressureTable,
 )
-from bores.constants import c, get_conversion_factors
+from bores.constants import c
 from bores.errors import ValidationError
 from bores.types import (
     CapillaryPressureDerivatives,
@@ -24,6 +24,7 @@ from bores.types import (
     UnitSystem,
     Wettability,
 )
+from bores.units import get_conversion_factors
 from bores.utils import atleast_1d
 
 __all__ = [

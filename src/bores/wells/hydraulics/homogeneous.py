@@ -7,7 +7,7 @@ import numpy as np
 import numpy.typing as npt
 from typing_extensions import Self
 
-from bores.constants import c, get_conversion_factors
+from bores.constants import c
 from bores.precision import get_dtype
 from bores.types import (
     FrictionMethod,
@@ -17,6 +17,7 @@ from bores.types import (
     UnitConversionTable,
     UnitSystem,
 )
+from bores.units import get_conversion_factors
 from bores.wells.hydraulics.base import (
     UNIT_SYSTEM_TAGS,
     UNIT_SYSTEMS_BY_TAG,

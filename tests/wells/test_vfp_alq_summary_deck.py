@@ -3,10 +3,11 @@ import types
 import numpy as np
 import pytest
 
-from bores.constants import c, get_conversion_factors
+from bores.constants import c
 from bores.deck import DeckFile
 from bores.errors import ValidationError
 from bores.types import UnitSystem
+from bores.units import get_conversion_factors
 from bores.wells import summary as well_summary
 from bores.wells.base import WellType
 from bores.wells.deck import (

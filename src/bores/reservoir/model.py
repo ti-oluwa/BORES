@@ -4,11 +4,6 @@ import typing
 
 from typing_extensions import Self
 
-from bores.constants import (
-    UnitConversionTable,
-    build_unit_conversion_table,
-    get_conversion_factors,
-)
 from bores.errors import ValidationError
 from bores.grids.base import Grid
 from bores.reservoir.faults import Fault, apply_faults
@@ -20,6 +15,11 @@ from bores.reservoir.transmissibility import (
     get_face_transmissibility_map,
 )
 from bores.types import CellArray, Number, UnitSystem
+from bores.units import (
+    UnitConversionTable,
+    build_unit_conversion_table,
+    get_conversion_factors,
+)
 
 __all__ = ["Reservoir"]
 

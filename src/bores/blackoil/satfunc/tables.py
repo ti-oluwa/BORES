@@ -21,7 +21,6 @@ from bores.blackoil.satfunc.utils import (
     build_saturation_reference_field,
     pchip_resample,
 )
-from bores.constants import UnitConversionTable
 from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.types import (
@@ -32,7 +31,7 @@ from bores.types import (
     Spacing,
     UnitSystem,
 )
-from bores.units import get_unit_system
+from bores.units import UnitConversionTable, get_unit_system
 
 __all__ = [
     "SatFuncTables",

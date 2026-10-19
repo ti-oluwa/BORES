@@ -4,9 +4,9 @@ from typing_extensions import Self
 
 from bores.blackoil.pvt.regions import PVT
 from bores.blackoil.satfunc.regions import SatFunc
-from bores.constants import UnitConversionTable, build_unit_conversion_table
 from bores.errors import ValidationError
 from bores.types import UnitSystem
+from bores.units import UnitConversionTable, build_unit_conversion_table
 
 __all__ = ["BlackOil"]
 

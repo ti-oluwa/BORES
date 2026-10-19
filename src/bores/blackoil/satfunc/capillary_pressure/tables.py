@@ -10,7 +10,6 @@ from scipy.interpolate import PchipInterpolator
 from typing_extensions import Self
 
 from bores.blackoil.satfunc.utils import build_pchip_interpolant
-from bores.constants import UnitConversionTable, get_conversion_factors
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.precision import get_dtype
@@ -26,6 +25,7 @@ from bores.types import (
     Spacing,
     UnitSystem,
 )
+from bores.units import UnitConversionTable, get_conversion_factors
 
 __all__ = ["ThreePhaseCapillaryPressureTable", "TwoPhaseCapillaryPressureTable"]
 

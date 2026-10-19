@@ -8,9 +8,10 @@ from datetime import timedelta
 import attrs
 from typing_extensions import Self, TypedDict
 
-from bores.constants import c, get_conversion_factors
+from bores.constants import c
 from bores.errors import TimingError, ValidationError
 from bores.types import Number, UnitConversionTable, UnitSystem
+from bores.units import get_conversion_factors
 from bores.utils import scale
 
 __all__ = ["Time", "Timer", "TimerState"]

@@ -3,11 +3,11 @@
 from typing_extensions import Self
 
 from bores.blackoil.fluids.model import BlackOil
-from bores.constants import UnitConversionTable, build_unit_conversion_table
 from bores.errors import ValidationError
 from bores.reservoir.boundary.conditions import BoundaryConditions
 from bores.reservoir.model import Reservoir
 from bores.types import UnitSystem
+from bores.units import UnitConversionTable, build_unit_conversion_table
 from bores.wells.model import WellSystem
 
 __all__ = ["BlackOilModel"]

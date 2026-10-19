@@ -5,7 +5,7 @@ import warnings
 
 import numpy as np
 
-from bores.constants import c, get_conversion_factors
+from bores.constants import c
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.grids.base import Grid
@@ -16,6 +16,7 @@ from bores.reservoir.boundary.base import BoundaryCondition
 from bores.reservoir.boundary.conditions import BoundaryConditions, BoundaryRegion
 from bores.reservoir.boundary.types import ConstantFluxBoundary
 from bores.types import IntArray, Integer, Number, NumberArray, OneDimension, UnitSystem
+from bores.units import get_conversion_factors
 from bores.utils import get_hydrostatic_gradient_factor
 
 if typing.TYPE_CHECKING:

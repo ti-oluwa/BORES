@@ -12,10 +12,11 @@ import numpy.typing as npt
 
 from bores.blackoil.caches.mobility import MobilityCache
 from bores.blackoil.caches.pvt import PVTCache
-from bores.constants import c, get_conversion_factors
+from bores.constants import c
 from bores.precision import get_dtype
 from bores.reservoir.model import Reservoir
 from bores.types import CellArray, IntCellArray, UnitSystem
+from bores.units import get_conversion_factors
 
 __all__ = ["TransmissibilityCache", "compute_transmissibility_cache"]
 

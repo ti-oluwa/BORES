@@ -5,7 +5,7 @@ import numba
 import numpy as np
 from typing_extensions import Self
 
-from bores.constants import c, get_conversion_factors
+from bores.constants import c
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.reservoir.boundary.base import (
@@ -14,6 +14,7 @@ from bores.reservoir.boundary.base import (
     InitialPressureFactory,
 )
 from bores.types import Integer, Number, UnitConversionTable, UnitSystem
+from bores.units import get_conversion_factors
 
 __all__ = [
     "FetkovichAquifer",

@@ -10,6 +10,7 @@ import numpy.typing as npt
 import orjson
 from numba.extending import overload  # type: ignore[import-untyped]
 
+from bores.constants import c
 from bores.precision import get_dtype
 from bores.types import (
     NDimension,
@@ -22,9 +23,6 @@ from bores.types import (
 logger = logging.getLogger(__name__)
 
 __all__ = ["array", "clip", "is_array"]
-
-
-# NOTE: Future me! Do not import `bores.constant` at top level in this file. It leads to a circular import issue.
 
 
 def array(obj: typing.Any, **kwargs: typing.Any):
@@ -438,8 +436,6 @@ def get_hydrostatic_gradient_factor(unit_system: UnitSystem) -> float:
     The returned value is the multiplier used to convert density into the
     local pressure gradient in each unit system.
     """
-    from bores.constants import c
-
     if unit_system == UnitSystem.FIELD:
         return c.HYDROSTATIC_GRADIENT_FACTOR_FIELD  # psi per (lbm/ft^3 * ft)
     elif unit_system == UnitSystem.METRIC:
@@ -487,8 +483,6 @@ def get_current_time(
         `FIELD`/`METRIC`, hours for `LAB`, seconds for `SI`).
     :returns: `current_date - start_date`, in `unit_system`'s own time unit.
     """
-    from bores.constants import c
-
     total_seconds = (current_date - start_date).total_seconds()
     if unit_system is UnitSystem.SI:
         return total_seconds

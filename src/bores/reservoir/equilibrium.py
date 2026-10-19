@@ -6,7 +6,6 @@ import attrs
 import numpy as np
 from typing_extensions import Self
 
-from bores.constants import UnitConversionTable, c, get_conversion_factors
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.precision import get_dtype
@@ -18,6 +17,7 @@ from bores.types import (
     OneDimension,
     UnitSystem,
 )
+from bores.units import UnitConversionTable, c, get_conversion_factors
 
 __all__ = [
     "DepthTable",

@@ -20,7 +20,6 @@ import numpy.typing as npt
 from scipy.interpolate import RegularGridInterpolator  # type: ignore[import-untyped]
 from typing_extensions import Self
 
-from bores.constants import UnitConversionTable, get_conversion_factors
 from bores.deck.file import DeckFile
 from bores.deck.keywords.schedule import VFPInjectorDeckTable, VFPProducerDeckTable
 from bores.errors import ValidationError
@@ -39,6 +38,7 @@ from bores.types import (
     TableResult,
     UnitSystem,
 )
+from bores.units import UnitConversionTable, get_conversion_factors
 from bores.utils import scale
 from bores.wells.base import WellType
 from bores.wells.hydraulics.base import (

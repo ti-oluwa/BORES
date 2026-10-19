@@ -6,12 +6,12 @@ import numpy as np
 import numpy.typing as npt
 from typing_extensions import Self
 
-from bores.constants import UnitConversionTable, get_conversion_factors
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.grids.base import Grid
 from bores.precision import get_dtype
 from bores.reservoir.regions import load_region_array
+from bores.units import UnitConversionTable, get_conversion_factors
 
 if typing.TYPE_CHECKING:
     from bores.blackoil.satfunc.regions import SatFunc

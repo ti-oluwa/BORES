@@ -17,7 +17,7 @@ from typing_extensions import Self
 from bores.blackoil.pvt.data import PVTData, PVTDataSet, get_stb_to_volume_factor
 from bores.blackoil.pvt.live_oil import invert_interpolators
 from bores.blackoil.pvt.static import StaticPVT
-from bores.constants import UnitConversionTable, c, get_conversion_factors
+from bores.constants import c
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.precision import get_dtype
@@ -37,6 +37,7 @@ from bores.types import (
     TwoDimensions,
     UnitSystem,
 )
+from bores.units import UnitConversionTable, get_conversion_factors
 
 logger = logging.getLogger(__name__)
 
