@@ -111,7 +111,7 @@ def compute_masses(
     # `vaporized_oil_gas_ratio` (Rv) is the inverse family, STB/SCF (the deck's STB/Mscf
     # is rescaled by 1/1000 on load: see `build_gas_data_from_pvtg` and the `RVVD` handling
     # in `reservoir.equilibrium`). Turning `Rs * rho_g_sc` (or `Rsw * rho_g_sc`) into a
-    # gas-mass-per-stock-tank-barrel term therefore divides by 5.614583 ft3/STB
+    # gas-mass-per-STB term therefore divides by 5.614583 ft3/STB
     # (`volume_correction`), and turning `Rv * rho_o_sc` into an oil-mass-per-SCF term
     # multiplies by it (`inverse_volume_correction`). Skipping either misstates the mass by
     # ~5.615x. `METRIC`/`SI`/`LAB` use a single volume unit throughout (m3/m3, cc/cc) so no
@@ -144,6 +144,7 @@ def compute_masses(
 
         if pvt_region.tables.oil is None:
             raise ValidationError(f"`PVTNUM` {pvtnum}: oil PVT table is unavailable.")
+        
         bo = pvt_region.tables.oil.formation_volume_factor(
             pressure=p, temperature=t, solution_gor=rs
         )

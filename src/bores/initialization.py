@@ -58,8 +58,7 @@ __all__ = [
 
 N_SATURATION_SAMPLES = 100
 """
-Default sample count for the capillary-pressure inversion grid (see
-`_invert_monotonic_curve`); overridable per-call via `saturation_samples`.
+Default sample count for the capillary-pressure inversion grid.
 """
 
 
@@ -233,7 +232,9 @@ def get_saturations_from_capillary_pressure(
             )["oil_water"]
             pcow_grid = typing.cast(NumberArray[OneDimension], pcow_grid)
             water_saturation[i] = _invert_monotonic_curve(
-                water_saturation_grid[i], pcow_grid, target_pcow[i]
+                saturation_grid=water_saturation_grid[i],
+                capillary_pressure_grid=pcow_grid,
+                target_capillary_pressure=target_pcow[i],
             )
 
     if gas_profile is not None:
@@ -253,7 +254,9 @@ def get_saturations_from_capillary_pressure(
             )["gas_oil"]
             pcgo_grid = typing.cast(NumberArray[OneDimension], pcgo_grid)
             gas_saturation[i] = _invert_monotonic_curve(
-                gas_saturation_grid[i], pcgo_grid, target_pcgo[i]
+                saturation_grid=gas_saturation_grid[i],
+                capillary_pressure_grid=pcgo_grid,
+                target_capillary_pressure=target_pcgo[i],
             )
 
     return (
@@ -574,7 +577,7 @@ def initialize_horizontal_subdivision_equilibrium(
     Samples `N` depths between each cell's top/bottom (from the grid's
     per-cell AABB), evaluates `initialize_center_point_equilibrium` at all
     of them, and averages back down to one value per cell. Arithmetic mean
-    assumes uniform cross-sectional area across depth - doesn't account for
+    assumes uniform cross-sectional area across depth and doesn't account for
     cell dip (see the tilted variant).
     """
     n_sub = n_subdivisions or abs(region.accuracy_flag)
@@ -642,7 +645,7 @@ def get_dip_aware_top_bottom_faces(
     """
     n = len(cell_indices)
     # Use float64 here since the grid arrays are mostly in float64
-    # also the logic here is precision snensitive. W ecan cast to
+    # also the logic here is precision sensitive. We can cast to
     # the preferred dtype in the caller
     top_depth = np.empty(n, dtype=np.float64)
     bottom_depth = np.empty(n, dtype=np.float64)
@@ -823,6 +826,7 @@ def initialize_equilibrium_arrays(
             f"`reservoir.unit_system` ({reservoir.unit_system.value!r}) does not "
             f"match `satfunc.unit_system` ({satfunc.unit_system.value!r})."
         )
+
     equilibrium_region_index: IntCellArray = (
         reservoir.regions.equilibrium_region
         if reservoir.regions is not None and reservoir.regions.equilibrium_region is not None
@@ -833,10 +837,10 @@ def initialize_equilibrium_arrays(
         if reservoir.regions is not None and reservoir.regions.pvt_region is not None
         else typing.cast(IntCellArray, np.ones(n_cells, dtype=np.int32))
     )
-    saturation_region: IntCellArray | None = (
+    saturation_region_index: IntCellArray | None = (
         reservoir.regions.saturation_region if reservoir.regions is not None else None
     )
-    if satfunc is not None and saturation_region is None:
+    if satfunc is not None and saturation_region_index is None:
         warnings.warn(
             "`satfunc` was supplied but `reservoir.regions.saturation_region` "
             "(`SATNUM`) is unavailable; defaulting every cell to saturation region 1. "
@@ -846,7 +850,7 @@ def initialize_equilibrium_arrays(
             UserWarning,
             stacklevel=2,
         )
-        saturation_region = typing.cast(IntCellArray, np.ones(n_cells, dtype=np.int32))
+        saturation_region_index = typing.cast(IntCellArray, np.ones(n_cells, dtype=np.int32))
 
     depth = reservoir.depth
     connate_water_saturation = reservoir.rock.connate_water_saturation
@@ -880,8 +884,8 @@ def initialize_equilibrium_arrays(
         if satfunc is not None:
             # Guaranteed non-`None` here: defaulted to region 1 (with a
             # warning) above whenever `satfunc` is supplied.
-            assert saturation_region is not None
-            region_satnum = np.unique(saturation_region[mask])
+            assert saturation_region_index is not None
+            region_satnum = np.unique(saturation_region_index[mask])
             if len(region_satnum) != 1:
                 raise ValidationError(
                     f"`EQLNUM` {eqlnum} cells span multiple `SATNUM` regions "
@@ -902,7 +906,7 @@ def initialize_equilibrium_arrays(
             else None
         )
 
-        common_kwargs: dict[str, typing.Any] = dict(
+        initialization_kwargs: dict[str, typing.Any] = dict(
             region=equilibrium_region,
             connate_water_saturation=connate_water_saturation[mask],
             oil_table=pvt_region.tables.oil,
@@ -924,19 +928,19 @@ def initialize_equilibrium_arrays(
         if equilibrium_region.accuracy_flag == 0:
             region_arrays = initialize_center_point_equilibrium(
                 depths=depth[mask],  # type: ignore[arg-type]
-                **common_kwargs,
+                **initialization_kwargs,
             )
         elif equilibrium_region.accuracy_flag > 0:
             region_arrays = initialize_horizontal_subdivision_equilibrium(
                 cell_top=reservoir.grid.cell_min_xyz[mask, 2],  # type: ignore[arg-type]
                 cell_bottom=reservoir.grid.cell_max_xyz[mask, 2],  # type: ignore[arg-type]
-                **common_kwargs,
+                **initialization_kwargs,
             )
         else:
             region_arrays = initialize_tilted_subdivision_equilibrium(
                 grid=reservoir.grid,
                 cell_indices=np.nonzero(mask)[0],  # type: ignore[arg-type]
-                **common_kwargs,
+                **initialization_kwargs,
             )
 
         pressure[mask] = region_arrays.pressure
@@ -977,7 +981,7 @@ def get_temperature_array_from_regions(
     result = np.empty(len(pvt_region_index), dtype=dtype)
     for pvtnum in np.unique(pvt_region_index):
         mask = pvt_region_index == pvtnum
-        spec = temperature.region(int(pvtnum))
+        spec = temperature.region(pvtnum)
         if isinstance(spec, (TemperatureGradient, TemperatureTable)):
             result[mask] = spec.at_depth(depth[mask]).astype(dtype, copy=False)  # type: ignore[union-attr]
         else:
@@ -1060,7 +1064,7 @@ def compute_water_phase_pressure(
 
     rock = reservoir.rock
     for satnum in np.unique(saturation_region):
-        capillary_pressure = satfunc.region(int(satnum)).capillary_pressure
+        capillary_pressure = satfunc.region(satnum).capillary_pressure
         if capillary_pressure is None:
             continue
         mask = saturation_region == satnum
@@ -1246,16 +1250,16 @@ def initialize_reservoir_state(
         )
 
         # `pressure` and `solution_gor`/`vaporized_oil_gas_ratio` are physically
-        # coupled through the oil bubble-point / gas dew-point curve. EQUIL
+        # coupled through the oil bubble-point / gas dew-point curve. `EQUIL`
         # derives Rs/Rv from its own internally-integrated hydrostatic
         # pressure profile, not from an explicit `pressure` override, so
-        # taking exactly one of the pair from EQUIL and the other from an
+        # taking exactly one of the pair from `EQUIL` and the other from an
         # explicit array/keyword can silently produce a state that isn't on
         # that curve (e.g. an Rs inconsistent with the stored pressure).
         # Supplying both explicitly, or neither, keeps them consistent by
         # construction; this only warns (rather than raising) since a
-        # deliberately mismatched pair - e.g. a measured `pressure` history-
-        # matched against an EQUIL-only Rs/Rv profile, is a legitimate,
+        # deliberately mismatched pair, e.g. a measured `pressure` history-
+        # matched against an `EQUIL`-only Rs/Rv profile, is a legitimate,
         # if unusual, use of the per-field override contract above.
         pressure_is_explicit = explicit["pressure"] is not None
         for gas_ratio_field in ("solution_gor", "vaporized_oil_gas_ratio"):
@@ -1282,7 +1286,7 @@ def initialize_reservoir_state(
                     f"Explicit `{field}` has shape {array.shape}; expected ({n_cells},)."
                 )
             return typing.cast(CellArray, array)
-        assert equilibrium_value is not None  # guaranteed by the branch above
+        assert equilibrium_value is not None  # Guaranteed by the branch above
         return equilibrium_value
 
     pressure_array = resolve(

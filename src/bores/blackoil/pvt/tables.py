@@ -2934,8 +2934,8 @@ class PVTTable(StoreSerializable):
         Get the vaporized oil ratio `Rv` (unit_system-dependent - STB/scf in FIELD).
         Gas / condensate phase only.
 
-        Without *vaporized_oil_ratio* this is `Rv_sat(P, T)`, the Rv of saturated gas on the dew
-        curve. Undersaturated gas keeps its own Rv, a state variable held by the caller, so
+        Without `vaporized_oil_ratio` this is `Rv_sat(P, T)`, the Rv of saturated gas on the dew
+        point curve. Undersaturated gas keeps its own Rv, a state variable held by the caller, so
         with *vaporized_oil_ratio* the effective Rv is `min(Rv, Rv_sat(P, T))`: the gas's own Rv
         while undersaturated, capped at `Rv_sat` once the pressure has fallen to its dew point.
 
@@ -2968,7 +2968,7 @@ class PVTTable(StoreSerializable):
         dew_point_pressure: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Return `∂Rv/∂P` (vaporized-oil-ratio-unit / pressure-unit, unit_system-dependent - STB/scf/psi in FIELD).
+        Return `∂Rv/∂P` (vaporized-oil-ratio-unit / pressure-unit, `unit_system`-dependent - STB/scf/psi in FIELD).
         Gas / condensate phase only.
 
         Matches `vaporized_oil_gas_ratio`'s regime split: along the dew curve the slope of

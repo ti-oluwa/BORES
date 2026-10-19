@@ -17,7 +17,7 @@ from bores.blackoil.satfunc.tables import SatFuncTables
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.precision import get_dtype
-from bores.types import Spacing, UnitSystem
+from bores.types import Integer, Spacing, UnitSystem
 from bores.units import UnitConversionTable
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ class SatFunc:
 
     def __init__(
         self,
-        tables: dict[int, SatFuncTables],
+        tables: dict[Integer, SatFuncTables],
         *,
         unit_system: UnitSystem | None = None,
     ) -> None:
@@ -81,7 +81,7 @@ class SatFunc:
         """Number of saturation function regions."""
         return len(self.tables)
 
-    def region(self, satnum: int) -> SatFuncTables:
+    def region(self, satnum: Integer) -> SatFuncTables:
         """
         Return the `SatFuncTables` for a given 1-based region index.
 
@@ -199,7 +199,7 @@ class SatFunc:
                 "(second family)."
             )
 
-        tables: dict[int, SatFuncTables] = {}
+        tables: dict[Integer, SatFuncTables] = {}
         for region_index in range(n_regions):
             satnum = region_index + 1  # 1-based
 
@@ -241,7 +241,7 @@ class SatFunc:
     def __getitem__(self, key: int) -> SatFuncTables:
         return self.region(key)
 
-    def __iter__(self) -> typing.Iterator[int]:
+    def __iter__(self) -> typing.Iterator[Integer]:
         return iter(self.tables)
 
     def __len__(self) -> int:

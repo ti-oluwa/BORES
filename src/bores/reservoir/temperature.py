@@ -12,6 +12,7 @@ from bores.serde.stores import StoreSerializable
 from bores.types import (
     CellArray,
     IntCellArray,
+    Integer,
     Number,
     NumberArray,
     NumberOrArray,
@@ -254,7 +255,7 @@ class Temperature:
     supplied when `regions` is `None` or empty.
     """
 
-    regions: dict[int, TemperatureSpec] | None = None
+    regions: dict[Integer, TemperatureSpec] | None = None
     """
     Mapping from 1-based PVT/EQL region index to a temperature specification.
     Key `-1` is reserved as the internal fallback; it is set automatically
@@ -269,20 +270,20 @@ class Temperature:
         if self.default is None and not self.regions:
             raise ValidationError("Either `default` or `regions` must be provided.")
 
-        regions: dict[int, TemperatureSpec] = dict(self.regions or {})
+        regions = dict(self.regions or {})
 
         # Resolve the fallback (-1 key)
         if -1 not in regions:
             if self.default is not None:
                 regions[-1] = self.default
             else:
-                # No explicit default - use the first region's spec as fallback
+                # No explicit default so we use the first region's spec as fallback
                 first = next(iter(regions.values()))
                 regions[-1] = first
 
         object.__setattr__(self, "regions", regions)
 
-    def region(self, num: int) -> TemperatureSpec:
+    def region(self, num: Integer) -> TemperatureSpec:
         """
         Return the temperature specification for the given 1-based region index.
 
@@ -384,7 +385,7 @@ class Temperature:
             return scale_and_offset(spec, factor=factor, offset=offset)
 
         new_default = convert_spec(self.default) if self.default is not None else None
-        new_regions: dict[int, TemperatureSpec] | None = None
+        new_regions: dict[Integer, TemperatureSpec] | None = None
         if self.regions is not None:
             new_regions = {k: convert_spec(v) for k, v in self.regions.items()}
 
@@ -425,7 +426,7 @@ class Temperature:
         # `TEMPVD`: one `TemperatureTable` per equilibration or PVT region,
         # depending on whether it is regioned by `PVTNUM` or `EQLNUM`
         if tempvd_records:
-            regions: dict[int, TemperatureSpec] = {}
+            regions: dict[Integer, TemperatureSpec] = {}
             for region_idx, rows in enumerate(tempvd_records):
                 if not rows:
                     continue

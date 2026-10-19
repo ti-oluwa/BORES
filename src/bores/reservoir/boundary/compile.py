@@ -291,7 +291,7 @@ def compile_boundary_conditions(
                 face_aquifer_row[position] = row
         else:
             # `ProductivityIndexBoundary`, or any other FLUX/PRESSURE kind
-            # not covered above - resolved generically via its own
+            # not covered above. Resolved generically via its own
             # `pressure_boundary`/`productivity_index` fields.
             pi_condition = typing.cast(ProductivityIndexBoundary, condition)
             row = len(pi_regions)
@@ -402,7 +402,8 @@ def compile_boundary_conditions(
             kept_weights = reservoir.grid.face_areas[
                 reservoir.grid.boundary_face_indices[kept_positions]
             ].astype(np.float64)
-        total_weight = float(kept_weights.sum())
+
+        total_weight = kept_weights.sum()
         if not total_weight > 0.0:
             raise ValidationError(
                 f"Aquifer region {name!r}: the faces' influx weights add up to zero, so "
