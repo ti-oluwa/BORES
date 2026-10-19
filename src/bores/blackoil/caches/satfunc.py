@@ -205,41 +205,35 @@ def compute_satfunc_cache(
         # Values come from the caller's reservoir state, not this cache.
         # Only included when the caller actually supplied that array, so a
         # table's own fallback applies otherwise.
-        saturation_state_kwargs = {}
+        state_kwargs = {}
         if irreducible_water_saturation is not None:
-            saturation_state_kwargs["irreducible_water_saturation"] = irreducible_water_saturation[
-                mask
-            ]
+            state_kwargs["irreducible_water_saturation"] = irreducible_water_saturation[mask]
         if residual_oil_saturation_water is not None:
-            saturation_state_kwargs["residual_oil_saturation_water"] = (
-                residual_oil_saturation_water[mask]
-            )
+            state_kwargs["residual_oil_saturation_water"] = residual_oil_saturation_water[mask]
         if residual_oil_saturation_gas is not None:
-            saturation_state_kwargs["residual_oil_saturation_gas"] = residual_oil_saturation_gas[
-                mask
-            ]
+            state_kwargs["residual_oil_saturation_gas"] = residual_oil_saturation_gas[mask]
         if residual_gas_saturation is not None:
-            saturation_state_kwargs["residual_gas_saturation"] = residual_gas_saturation[mask]
+            state_kwargs["residual_gas_saturation"] = residual_gas_saturation[mask]
         if max_water_saturation is not None:
-            saturation_state_kwargs["max_water_saturation"] = max_water_saturation[mask]
+            state_kwargs["max_water_saturation"] = max_water_saturation[mask]
         if max_gas_saturation is not None:
-            saturation_state_kwargs["max_gas_saturation"] = max_gas_saturation[mask]
+            state_kwargs["max_gas_saturation"] = max_gas_saturation[mask]
         if water_imbibition_flag is not None:
-            saturation_state_kwargs["water_imbibition_flag"] = water_imbibition_flag[mask]
+            state_kwargs["water_imbibition_flag"] = water_imbibition_flag[mask]
         if gas_imbibition_flag is not None:
-            saturation_state_kwargs["gas_imbibition_flag"] = gas_imbibition_flag[mask]
+            state_kwargs["gas_imbibition_flag"] = gas_imbibition_flag[mask]
         if water_reversal_saturation is not None:
-            saturation_state_kwargs["water_reversal_saturation"] = water_reversal_saturation[mask]
+            state_kwargs["water_reversal_saturation"] = water_reversal_saturation[mask]
         if gas_reversal_saturation is not None:
-            saturation_state_kwargs["gas_reversal_saturation"] = gas_reversal_saturation[mask]
+            state_kwargs["gas_reversal_saturation"] = gas_reversal_saturation[mask]
 
         relperm_table = tables.relative_permeability
-        relperm = relperm_table.evaluate(sw, so, sg, **saturation_state_kwargs)
+        relperm = relperm_table.evaluate(sw, so, sg, **state_kwargs)
         cache.water_relative_permeability[mask] = relperm["water"]
         cache.oil_relative_permeability[mask] = relperm["oil"]
         cache.gas_relative_permeability[mask] = relperm["gas"]
 
-        relperm_derivatives = relperm_table.derivatives(sw, so, sg, **saturation_state_kwargs)
+        relperm_derivatives = relperm_table.derivatives(sw, so, sg, **state_kwargs)
         cache.dkrw_dsw[mask] = relperm_derivatives["dkrw_dsw"]
         cache.dkro_dsw[mask] = relperm_derivatives["dkro_dsw"]
         cache.dkrg_dsw[mask] = relperm_derivatives["dkrg_dsw"]
@@ -252,14 +246,12 @@ def compute_satfunc_cache(
 
         capillary_pressure_table = tables.capillary_pressure
         if capillary_pressure_table is not None:
-            capillary_pressure = capillary_pressure_table.evaluate(
-                sw, so, sg, **saturation_state_kwargs
-            )
+            capillary_pressure = capillary_pressure_table.evaluate(sw, so, sg, **state_kwargs)
             cache.oil_water_capillary_pressure[mask] = capillary_pressure["oil_water"]
             cache.gas_oil_capillary_pressure[mask] = capillary_pressure["gas_oil"]
 
             capillary_pressure_derivatives = capillary_pressure_table.derivatives(
-                sw, so, sg, **saturation_state_kwargs
+                sw, so, sg, **state_kwargs
             )
             cache.dpcow_dsw[mask] = capillary_pressure_derivatives["dpcow_dsw"]
             cache.dpcow_dso[mask] = capillary_pressure_derivatives["dpcow_dso"]

@@ -319,7 +319,7 @@ class PVTData(StoreSerializable):
 
     def ensure_dtype(self, dtype: npt.DTypeLike = None, force: bool = True) -> None:
         """
-        Cast every array field to *dtype*, in place (the instance is frozen, so this
+        Cast every array field to `dtype`, in place (the instance is frozen, so this
         bypasses attrs).
 
         :param dtype: Target dtype. Defaults to the active `BORES` precision.

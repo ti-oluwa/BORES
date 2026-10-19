@@ -1855,8 +1855,10 @@ class PVTTable(StoreSerializable):
                     "formation_volume_factor",
                     pressure,
                     temperature,
-                    vaporized_oil_ratio,
-                    self.dew_point_pressure(temperature, vaporized_oil_ratio=vaporized_oil_ratio),
+                    state=vaporized_oil_ratio,
+                    saturation_pressure=self.dew_point_pressure(
+                        temperature, vaporized_oil_ratio=vaporized_oil_ratio
+                    ),
                     derivative=True,
                 )
             return self.query("formation_volume_factor", pressure, temperature, derivative=True)
@@ -1883,8 +1885,8 @@ class PVTTable(StoreSerializable):
                     "formation_volume_factor",
                     pressure,
                     temperature,
-                    solution_gor_state,
-                    bubble_point_array,  # type: ignore[arg-type]
+                    state=solution_gor_state,
+                    saturation_pressure=bubble_point_array,  # type: ignore[arg-type]
                     derivative=True,
                 )
 
@@ -1915,7 +1917,9 @@ class PVTTable(StoreSerializable):
 
             bo_at_pressure = np.asarray(
                 self.formation_volume_factor(
-                    p_undersaturated, t_undersaturated, bubble_point_pressure=pb_undersaturated
+                    p_undersaturated,
+                    t_undersaturated,
+                    bubble_point_pressure=pb_undersaturated,
                 )
             )
             c_at_bubble_point = np.asarray(
@@ -1925,7 +1929,10 @@ class PVTTable(StoreSerializable):
                 self.query("compressibility", p_undersaturated, t_undersaturated)
             )
             dc_dp_at_pressure = self.query(
-                "compressibility", p_undersaturated, t_undersaturated, derivative=True
+                "compressibility",
+                p_undersaturated,
+                t_undersaturated,
+                derivative=True,
             )
             dc_dp_at_pressure = (
                 np.zeros_like(p_undersaturated)
@@ -1997,8 +2004,10 @@ class PVTTable(StoreSerializable):
                     "viscosity",
                     pressure,
                     temperature,
-                    vaporized_oil_ratio,
-                    self.dew_point_pressure(temperature, vaporized_oil_ratio=vaporized_oil_ratio),
+                    state=vaporized_oil_ratio,
+                    saturation_pressure=self.dew_point_pressure(
+                        temperature, vaporized_oil_ratio=vaporized_oil_ratio
+                    ),
                 )
             return self.query("viscosity", pressure, temperature)
 
@@ -2022,8 +2031,8 @@ class PVTTable(StoreSerializable):
                     "viscosity",
                     pressure,
                     temperature,
-                    solution_gor_state,
-                    bubble_point_array,  # type: ignore[arg-type]
+                    state=solution_gor_state,
+                    saturation_pressure=bubble_point_array,  # type: ignore[arg-type]
                 )
 
         dtype = self.dtype
@@ -2127,8 +2136,10 @@ class PVTTable(StoreSerializable):
                     "viscosity",
                     pressure,
                     temperature,
-                    vaporized_oil_ratio,
-                    self.dew_point_pressure(temperature, vaporized_oil_ratio=vaporized_oil_ratio),
+                    state=vaporized_oil_ratio,
+                    saturation_pressure=self.dew_point_pressure(
+                        temperature, vaporized_oil_ratio=vaporized_oil_ratio
+                    ),
                     derivative=True,
                 )
             return self.query("viscosity", pressure, temperature, derivative=True)
@@ -2155,8 +2166,8 @@ class PVTTable(StoreSerializable):
                     "viscosity",
                     pressure,
                     temperature,
-                    solution_gor_state,
-                    bubble_point_array,  # type: ignore[arg-type]
+                    state=solution_gor_state,
+                    saturation_pressure=bubble_point_array,  # type: ignore[arg-type]
                     derivative=True,
                 )
 
@@ -2532,6 +2543,7 @@ class PVTTable(StoreSerializable):
                 if compressibility.size == 1
                 else compressibility.astype(self.dtype, copy=False),
             )
+
         if (
             self._phase == FluidPhase.OIL
             and self.has("undersaturated_formation_volume_factor")
@@ -2946,6 +2958,7 @@ class PVTTable(StoreSerializable):
         """
         if self._phase != FluidPhase.GAS:
             return None
+
         saturated_ratio = self.query("vaporized_oil_gas_ratio", pressure, temperature)
         if vaporized_oil_ratio is None or saturated_ratio is None:
             return saturated_ratio
@@ -2985,6 +2998,7 @@ class PVTTable(StoreSerializable):
         """
         if self._phase != FluidPhase.GAS:
             return None
+
         slope = self.query("vaporized_oil_gas_ratio", pressure, temperature, derivative=True)
         if slope is None or (vaporized_oil_ratio is None and dew_point_pressure is None):
             return slope
@@ -2997,7 +3011,9 @@ class PVTTable(StoreSerializable):
             return slope
 
         pressure_array, dew_point_array, slope_array = np.broadcast_arrays(
-            np.atleast_1d(pressure), np.atleast_1d(dew_point_pressure), np.atleast_1d(slope)
+            np.atleast_1d(pressure),
+            np.atleast_1d(dew_point_pressure),
+            np.atleast_1d(slope),
         )
         result = np.where(pressure_array <= dew_point_array, slope_array, 0.0)
         return typing.cast(

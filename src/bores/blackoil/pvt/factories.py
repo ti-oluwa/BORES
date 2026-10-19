@@ -72,19 +72,19 @@ def _resolve_gas(
             pvt_table = gas.pvt
 
     if gas_gravity is None and pvt_table is not None:
-        avg_pressure = np.mean(pvt_table._extrapolation_bounds["pressure"])  # type: ignore[arg-type]
-        avg_temperature = np.mean(pvt_table._extrapolation_bounds["temperature"])  # type: ignore[arg-type]
-        avg_density = typing.cast(
+        average_pressure = np.mean(pvt_table._extrapolation_bounds["pressure"])  # type: ignore[arg-type]
+        average_temperature = np.mean(pvt_table._extrapolation_bounds["temperature"])  # type: ignore[arg-type]
+        average_density = typing.cast(
             Number | None,
-            pvt_table.density(avg_pressure, avg_temperature),
+            pvt_table.density(average_pressure, average_temperature),
         )
-        if avg_density is not None:
+        if average_density is not None:
             gas_gravity = typing.cast(
                 Number,
                 scalars.compute_gas_gravity_from_density(
-                    pressure=avg_pressure,
-                    temperature=avg_temperature,
-                    density=avg_density,
+                    pressure=average_pressure,
+                    temperature=average_temperature,
+                    density=average_density,
                 ),
             )
 
@@ -112,7 +112,7 @@ def get_gas_tables_from_pvt_table(
     flat_temperature = temperature.ravel()
     shape = pressure.shape
 
-    def _eval(method_name: str) -> NumberArray[NDimension] | None:
+    def eval(method_name: str) -> NumberArray[NDimension] | None:
         method = getattr(pvt_table, method_name, None)
         if method is None:
             return None
@@ -126,11 +126,11 @@ def get_gas_tables_from_pvt_table(
         )
 
     return {
-        "viscosity_table": _eval("viscosity"),
-        "density_table": _eval("density"),
-        "formation_volume_factor_table": _eval("formation_volume_factor"),
-        "compressibility_table": _eval("compressibility"),
-        "compressibility_factor_table": _eval("compressibility_factor"),
+        "viscosity_table": eval("viscosity"),
+        "density_table": eval("density"),
+        "formation_volume_factor_table": eval("formation_volume_factor"),
+        "compressibility_table": eval("compressibility"),
+        "compressibility_factor_table": eval("compressibility_factor"),
     }
 
 
@@ -183,16 +183,6 @@ def build_oil_pvt_data(
         `density_table` when absent.
     :returns: `PVTData` with `phase=OIL`.
     """
-    legacy_estimate = kwargs.pop("estimatedsolution_gor", None)
-    if legacy_estimate is not None:
-        warnings.warn(
-            "`estimatedsolution_gor` is deprecated, use `estimated_solution_gor`.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        if estimated_solution_gor is None:
-            estimated_solution_gor = legacy_estimate
-
     if pressures.ndim != 1 or not np.all(np.diff(pressures) > 0):
         raise ValidationError("`pressures` must be a strictly increasing 1-D array.")
     if temperatures.ndim != 1 or not np.all(np.diff(temperatures) > 0):
@@ -211,7 +201,10 @@ def build_oil_pvt_data(
     gas_fvf_table: NumberArray[TwoDimensions] | None = None
     if pvt_table is not None:
         gas_tables = get_gas_tables_from_pvt_table(
-            pvt_table, pressure_table, temperature_table, dtype=dtype
+            pvt_table,
+            pressure=pressure_table,
+            temperature=temperature_table,
+            dtype=dtype,
         )
         gas_fvf_table = typing.cast(
             NumberArray[TwoDimensions] | None,
@@ -408,11 +401,6 @@ def build_oil_pvt_data(
 
     elif needs_co:
         assert formation_volume_factor_table is not None
-        # NOTE: previously called with `oil_api_gravity_grid=`/`gas_gravity_grid=`,
-        # which are not parameters of `compute_oil_compressibility` (it takes
-        # `oil_api_gravity`/`gas_gravity`) - this branch raised `TypeError` any
-        # time a caller supplied `formation_volume_factor_table` without also
-        # supplying `compressibility_table`. Fixed to use the real parameter names.
         compressibility_table = typing.cast(
             NumberArray[TwoDimensions],
             arrays.compute_oil_compressibility(
@@ -504,7 +492,7 @@ def build_gas_pvt_data(
     Build a `PVTData` for the gas phase using empirical correlations.
 
     Computes missing tables from correlations (DAK z-factor, Lee-Gonzalez-Eakin
-    viscosity, etc.).  Density is derived from `ρg = ρg,SC / Bg` (dry gas)
+    viscosity, etc.). Density is derived from `ρg = ρg,SC / Bg` (dry gas)
     or `ρg = (ρg,SC + Rv·ρo,SC) / Bg` (wet gas) when reference densities
     are provided; otherwise falls back to the correlation-based grid builder.
 
@@ -546,7 +534,10 @@ def build_gas_pvt_data(
 
     if pvt_table is not None:
         gas_tables = get_gas_tables_from_pvt_table(
-            pvt_table, pressure_table, temperature_table, dtype=dtype
+            pvt_table,
+            pressure=pressure_table,
+            temperature=temperature_table,
+            dtype=dtype,
         )
 
         if viscosity_table is None:
@@ -718,7 +709,7 @@ def build_water_pvt_data(
     :param temperatures: 1-D array of temperatures (°F), strictly increasing.
     :param salinities: 1-D array of salinities (ppm NaCl), strictly increasing.
         Falls back to `[water_salinity]` or library default when absent.
-    :param water_salinity: Single salinity scalar (ppm).  Used when `salinities`
+    :param water_salinity: Single salinity scalar (ppm). Used when `salinities`
         is absent.
     :param gas_gravity: Gas specific gravity for compressibility liberation correction.
     :param gas: Gas identity (string or `Fluid`).

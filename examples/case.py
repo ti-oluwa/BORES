@@ -1,10 +1,3 @@
-"""
-Quick start: load a full simulation case from a deck in one call.
-
-This is the same example as the README's Quick Example. See main.py for a
-fuller walkthrough that also plots the grid.
-"""
-
 from bores.deck import DeckFile
 from bores.simulation.case import SimulationCase
 from bores.types import UnitSystem
@@ -15,15 +8,13 @@ df = DeckFile(
     encoding="utf-8",
     unit_system=UnitSystem.FIELD,
 )
+wellbore = homogeneous_wellbore(tubing_inner_diameter=2.5, unit_system=UnitSystem.FIELD)
 
-tubing_performance = homogeneous_wellbore(tubing_inner_diameter=2.5, unit_system=UnitSystem.FIELD)
-
-# One call gets you a compiled model, initial reservoir state, and schedule,
-# all read straight off the deck.
-case = SimulationCase.from_deck(df, tubing_performance=tubing_performance, temperature=200.0)
+# One call loads a compiled model, initial reservoir state, and schedule, read from the deck.
+case = SimulationCase.from_deck(df, tubing_performance=wellbore, temperature=200.0)
 
 grid = case.model.reservoir.grid
-print(f"cells: {grid.n_cells}, faces: {grid.n_faces}, bbox: {grid.bounding_box}")
-print(f"mean initial pressure: {case.initial_state.pressure.mean():.1f}")
-print(f"wells: {list(case.model.wells.names) if case.model.wells else []}")
-print(f"scheduled items: {len(case.schedule)}")
+print(f"Cells: {grid.n_cells}, Faces: {grid.n_faces}, Bounding box: {grid.bounding_box}")
+print(f"Mean initial pressure: {case.initial_state.pressure.mean():.1f}")
+print(f"Wells: {list(case.model.wells.names) if case.model.wells else []}")
+print(f"Scheduled items: {len(case.schedule)}")

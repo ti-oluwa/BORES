@@ -144,7 +144,7 @@ def compute_masses(
 
         if pvt_region.tables.oil is None:
             raise ValidationError(f"`PVTNUM` {pvtnum}: oil PVT table is unavailable.")
-        
+
         bo = pvt_region.tables.oil.formation_volume_factor(
             pressure=p, temperature=t, solution_gor=rs
         )

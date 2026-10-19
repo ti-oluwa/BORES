@@ -1,11 +1,7 @@
 """
 Composed physics property cache for black-oil simulation.
 
-Bundles `PVTCache`, `SatFuncCache`, and `MobilityCache` behind a single
-call: the three property groups a per-Newton-iteration cell update always
-needs together, computed in the correct dependency order (`MobilityCache`
-consumes both of the other two) without the caller wiring that dependency
-itself each time.
+Bundles `PVTCache`, `SatFuncCache`, and `MobilityCache`.
 """
 
 import typing
@@ -28,23 +24,16 @@ class PhysicsCache(typing.NamedTuple):
     Every per-cell physics property a black-oil cell update needs, for one
     point in the simulation: PVT properties, saturation-function properties,
     and the phase mobilities/fractional-flows derived from both.
-
-    A thin composition, not a flattened merge - `pvt`/`satfunc`/`mobility`
-    stay as their own `PVTCache`/`SatFuncCache`/`MobilityCache` so each
-    keeps its own field names, docstrings, and NaN-for-absent-data
-    convention rather than colliding in one combined namespace.
     """
 
     pvt: PVTCache
-    """This cell state's PVT properties - `caches.pvt.compute_pvt_cache`'s output."""
+    """This cell state's PVT properties."""
 
     satfunc: SatFuncCache
-    """This cell state's saturation-function properties -
-    `caches.satfunc.compute_satfunc_cache`'s output."""
+    """This cell state's saturation-function properties."""
 
     mobility: MobilityCache
-    """Phase mobilities/fractional-flows derived from `pvt` and `satfunc` -
-    `caches.mobility.compute_mobility_cache`'s output."""
+    """Phase mobilities/fractional-flows derived from `pvt` and `satfunc`."""
 
 
 def compute_physics_cache(

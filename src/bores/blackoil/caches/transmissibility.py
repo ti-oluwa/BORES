@@ -300,7 +300,7 @@ def compute_transmissibility_cache(
     Water/gas pressures are derived here from `oil_pressure` and the
     capillary pressures already sitting in a `SatFuncCache`
     (`Pw = Po - Pcow`, `Pg = Po + Pcgo`) - pass
-    `saturation_function_cache.oil_water_capillary_pressure`/
+    `satfunc_cache.oil_water_capillary_pressure`/
     `.gas_oil_capillary_pressure` directly rather than recomputing them.
 
     **Reuse**: pass a previous call's returned `TransmissibilityCache` as
@@ -308,8 +308,7 @@ def compute_transmissibility_cache(
     in that case.
 
     :param reservoir: Provides `grid` (face/cell connectivity, cell depths)
-        and `transmissibilities.interior` (geometric TPFA transmissibility -
-        not recomputed here).
+        and `transmissibilities.interior` (geometric TPFA transmissibility).
     :param pvt_cache: Current `PVTCache`, same cell count/ordering as `reservoir.grid`.
     :param mobility_cache: Current `MobilityCache`, same cell count/ordering.
     :param oil_pressure: Shape `(n_cells,)` reference/oil pressure - the same

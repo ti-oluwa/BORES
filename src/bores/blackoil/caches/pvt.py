@@ -31,9 +31,8 @@ class PVTCache(typing.NamedTuple):
 
     Every field is shape `(n_cells,)`. Absent quantities (a phase not
     present in the model, or a table not provided for it, e.g. no `Rv`/wet-gas
-    table) are `numpy.nan`, never a silently-plausible zero: a stray `NaN`
-    reaching arithmetic downstream is loud and fails fast; a stray zero
-    viscosity or formation volume factor is not.
+    table) are `numpy.nan` - a stray `NaN` reaching arithmetic downstream fails fast and loud;
+    a stray zero viscosity or formation volume factor is not.
     """
 
     # Formation volume factors
@@ -154,8 +153,7 @@ class PVTCache(typing.NamedTuple):
     Per-cell oil regime: `True` = saturated (free gas present, `Sg` is the
     natural primary variable, `Rs` is bubble-curve-determined), `False` =
     undersaturated (`Rs` is itself a primary variable). This is the
-    primary-variable-switching indicator - computed from
-    `PVTTable.is_saturated`, not supplied by the caller.
+    primary-variable switching indicator - computed from `PVTTable.is_saturated`.
     """
     pvt_region: IntCellArray
     """The 1-based PVTNUM each cell was evaluated against."""

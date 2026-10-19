@@ -343,8 +343,10 @@ def generate_temperature_axis(
                 UserWarning,
                 stacklevel=3,
             )
-            ref = temperature.reference_depth
-            depths = np.linspace(ref - 1.0, ref + 1.0, max(min_points, 2), dtype=dtype)
+            reference_depth = temperature.reference_depth
+            depths = np.linspace(
+                reference_depth - 1.0, reference_depth + 1.0, max(min_points, 2), dtype=dtype
+            )
         temperatures = temperature.at_depth(depths).astype(dtype, copy=False)  # type: ignore[arg-type]
         return ensure_strictly_increasing(temperatures, min_points, dtype)
 
@@ -1084,39 +1086,39 @@ def build_gas_data_from_pvtg(
 
     for i, pressure_key in enumerate(pressure_keys):
         rows = sorted(pressure_to_rows[pressure_key], key=lambda row: row["vaporized_ogr"])
-        rv_arr = np.array([row["vaporized_ogr"] for row in rows], dtype=dtype)
-        gas_fvf_arr = np.array(
+        rv_array = np.array([row["vaporized_ogr"] for row in rows], dtype=dtype)
+        gas_fvf_array = np.array(
             [row["fvf"] * bbl_to_ft3 / mscf_to_scf for row in rows], dtype=dtype
         )
-        gas_viscosity_arr = np.array([row["viscosity"] for row in rows], dtype=dtype)
+        gas_viscosity_array = np.array([row["viscosity"] for row in rows], dtype=dtype)
 
-        if np.any(gas_fvf_arr <= 0):
+        if np.any(gas_fvf_array <= 0):
             raise ValidationError(
                 f"`PVTG` Bg values must be positive at pressure {pressure_key} psi."
             )
-        if np.any(gas_viscosity_arr <= 0):
+        if np.any(gas_viscosity_array <= 0):
             raise ValidationError(
                 f"`PVTG` viscosity values must be positive at pressure {pressure_key} psi."
             )
 
         # If this pressure group has only one Rv point, broadcast it
-        if len(rv_arr) == 1:
-            gas_fvf_2d[i, :] = gas_fvf_arr[0]
-            gas_viscosity_2d[i, :] = gas_viscosity_arr[0]
+        if len(rv_array) == 1:
+            gas_fvf_2d[i, :] = gas_fvf_array[0]
+            gas_viscosity_2d[i, :] = gas_viscosity_array[0]
         else:
             gas_fvf_2d[i, :] = interp1d(
-                rv_arr,
-                gas_fvf_arr,
+                rv_array,
+                gas_fvf_array,
                 kind="linear",
                 bounds_error=False,
-                fill_value=(gas_fvf_arr[0], gas_fvf_arr[-1]),
+                fill_value=(gas_fvf_array[0], gas_fvf_array[-1]),
             )(rv_values)
             gas_viscosity_2d[i, :] = interp1d(
-                rv_arr,
-                gas_viscosity_arr,
+                rv_array,
+                gas_viscosity_array,
                 kind="linear",
                 bounds_error=False,
-                fill_value=(gas_viscosity_arr[0], gas_viscosity_arr[-1]),
+                fill_value=(gas_viscosity_array[0], gas_viscosity_array[-1]),
             )(rv_values)
 
     if n_rv < 2:
@@ -1126,14 +1128,14 @@ def build_gas_data_from_pvtg(
     # pressure group is that pressure's saturated Rv, so `(Rv_sat(P), P)` traces the dew-point
     # curve, the gas-side analogue of Pb(Rs) for oil. The saturated FVF and viscosity are the
     # group's values at that Rv, which the common Rv grid contains exactly.
-    rv_max_per_pressure = np.array(
+    max_rv_per_pressure = np.array(
         [
             max(row["vaporized_ogr"] for row in pressure_to_rows[pressure_key])
             for pressure_key in pressure_keys
         ],
         dtype=dtype,
     )
-    saturated_column = np.searchsorted(rv_values, rv_max_per_pressure)
+    saturated_column = np.searchsorted(rv_values, max_rv_per_pressure)
     pressure_index = np.arange(n_p)
     saturated_gas_fvf = gas_fvf_2d[pressure_index, saturated_column]
     saturated_gas_viscosity = gas_viscosity_2d[pressure_index, saturated_column]
@@ -1142,7 +1144,7 @@ def build_gas_data_from_pvtg(
     # reaches each Rv, so the inversion stays single-valued even if Rv_sat is not monotonic
     # in P (retrograde behaviour). Gas with an Rv below the lowest Rv_sat is undersaturated
     # over the whole table, so it maps to the lowest tabulated pressure.
-    if not np.all(np.diff(rv_max_per_pressure) > 0):
+    if not np.all(np.diff(max_rv_per_pressure) > 0):
         warnings.warn(
             "`PVTG` saturated Rv (largest Rv per tabulated pressure) does not increase "
             "strictly with pressure. Dew-point pressure lookups use the lowest pressure "
@@ -1151,7 +1153,7 @@ def build_gas_data_from_pvtg(
             stacklevel=4,
         )
     rv_envelope, first_index = np.unique(
-        np.maximum.accumulate(rv_max_per_pressure), return_index=True
+        np.maximum.accumulate(max_rv_per_pressure), return_index=True
     )
     dew_point_pressure_of_rv = np.interp(rv_values, rv_envelope, pressure_values[first_index])
     dew_point_pressure_2d = np.tile(dew_point_pressure_of_rv[:, np.newaxis], (1, n_t)).astype(
@@ -1174,7 +1176,7 @@ def build_gas_data_from_pvtg(
             stb_to_volume = get_stb_to_volume_factor(unit_system)
             saturated_gas_density = (
                 stock_tank_gas_density
-                + rv_max_per_pressure * stock_tank_oil_density * stb_to_volume
+                + max_rv_per_pressure * stock_tank_oil_density * stb_to_volume
             ) / saturated_gas_fvf
         else:
             saturated_gas_density = stock_tank_gas_density / saturated_gas_fvf
@@ -1208,7 +1210,7 @@ def build_gas_data_from_pvtg(
             FloatArray[TwoDimensions], _broadcast_to_2d(saturated_gas_viscosity, n_t)
         ),
         vaporized_oil_ratio_table=typing.cast(
-            FloatArray[TwoDimensions], _broadcast_to_2d(rv_max_per_pressure, n_t)
+            FloatArray[TwoDimensions], _broadcast_to_2d(max_rv_per_pressure, n_t)
         ),
         undersaturated_formation_volume_factor_table=typing.cast(
             FloatArray[ThreeDimensions], undersaturated_gas_fvf_3d
@@ -1436,7 +1438,7 @@ def load_pvt_regions(
         # Density record for this region
         density_record: dict[str, Number] | None = None
         if density_records is not None and region_idx < len(density_records):
-            # Each DENSITY region entry is a list containing one row dict
+            # Each `DENSITY` region entry is a list containing one row dict
             region_rows = density_records[region_idx]
             if region_rows:
                 density_record = region_rows[0]

@@ -1,10 +1,10 @@
 """
 Per-Rs undersaturated branches for live oil (`PVTO` / `PVCO`) and reciprocal (`1/B`) interpolation.
 
-Eclipse (and OPM's `LiveOilPvt`) keep one undersaturated branch per Rs node and, for oil with an Rs
-between two nodes, blend the two bounding branches linearly in Rs at the *same pressure*. Putting every
-branch on a common pressure grid turns that into a plain trilinear lookup over
-`(pressure, temperature, Rs)`, which `PVTTable` already does for the wet-gas tables.
+Keeps one undersaturated branch per Rs node and, for oil with an Rs between two nodes, blend the two
+bounding branches linearly in Rs at the *same pressure*. Putting every branch on a common pressure
+grid turns that into a plain trilinear lookup over `(pressure, temperature, Rs)`, which `PVTTable`
+already does for the wet-gas tables.
 """
 
 import typing
@@ -42,9 +42,11 @@ def linear_extrapolate(
     result = np.interp(x, xp, fp)
     if len(xp) < 2:
         return result
+
     below = x < xp[0]
     if np.any(below):
         result[below] = fp[0] + (fp[1] - fp[0]) / (xp[1] - xp[0]) * (x[below] - xp[0])
+
     above = x > xp[-1]
     if np.any(above):
         result[above] = fp[-1] + (fp[-1] - fp[-2]) / (xp[-1] - xp[-2]) * (x[above] - xp[-1])
@@ -96,18 +98,24 @@ def build_live_oil_branch_tables(
     branch_fvf = np.empty((n_p, n_rs))
     branch_viscosity = np.empty((n_p, n_rs))
     for k in range(n_rs):
-        bo = np.asarray(group_fvf[k], dtype=np.float64)
-        mu = np.asarray(group_viscosity[k], dtype=np.float64)
+        oil_fvf = np.asarray(group_fvf[k], dtype=np.float64)
+        viscosity = np.asarray(group_viscosity[k], dtype=np.float64)
         branch_fvf[:, k] = np.maximum(
-            linear_extrapolate(pressures, group_pressures[k], bo), floor_fraction * bo.min()
+            linear_extrapolate(pressures, group_pressures[k], oil_fvf),
+            floor_fraction * oil_fvf.min(),
         )
         branch_viscosity[:, k] = np.maximum(
-            linear_extrapolate(pressures, group_pressures[k], mu), floor_fraction * mu.min()
+            linear_extrapolate(pressures, group_pressures[k], viscosity),
+            floor_fraction * viscosity.min(),
         )
 
-    bubble_points = np.array([np.asarray(p, dtype=np.float64)[0] for p in group_pressures])
-    saturated_fvf = np.array([np.asarray(b, dtype=np.float64)[0] for b in group_fvf])
-    saturated_viscosity = np.array([np.asarray(m, dtype=np.float64)[0] for m in group_viscosity])
+    bubble_points = np.array([
+        np.asarray(pressure, dtype=np.float64)[0] for pressure in group_pressures
+    ])
+    saturated_fvf = np.array([np.asarray(fvf, dtype=np.float64)[0] for fvf in group_fvf])
+    saturated_viscosity = np.array([
+        np.asarray(viscosity, dtype=np.float64)[0] for viscosity in group_viscosity
+    ])
 
     on_envelope = pressures <= bubble_points[-1]
     envelope_fvf = np.where(

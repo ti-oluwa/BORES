@@ -637,7 +637,7 @@ class PseudoPressureTable:
             dtype=dtype,
         )
 
-    def interpolate(self, pressure: NumberOrArray[NDimension]) -> NumberOrArray[NDimension]:
+    def query(self, pressure: NumberOrArray[NDimension]) -> NumberOrArray[NDimension]:
         """
         Interpolate pseudo-pressure at given pressure.
 
@@ -711,7 +711,7 @@ class PseudoPressureTable:
         :param pressure: Pressure (psi) - scalar or array.
         :return: Pseudo-pressure m(P) (psi²/cP).
         """
-        return self.interpolate(pressure)
+        return self.query(pressure)
 
     def gradient(self, pressure: NumberOrArray[NDimension]) -> NumberOrArray[NDimension]:
         """

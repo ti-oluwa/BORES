@@ -124,7 +124,7 @@ class StaticPVT(Serializable):
             return None
 
         # Derive oil specific gravity from stock-tank oil density relative to
-        # fresh water at standard conditions in unit_system.
+        # fresh water at standard conditions in `unit_system`.
         if self.unit_system == UnitSystem.FIELD:
             reference_water_density = c.STANDARD_WATER_DENSITY_IMPERIAL
         elif self.unit_system == UnitSystem.METRIC:
@@ -208,7 +208,7 @@ class StaticPVT(Serializable):
             if region_density_rows:
                 density_record = region_density_rows[0]
 
-        # Extract PVTW record for this region
+        # Extract `PVTW` record for this region
         pvtw_record: dict[str, Number] | None = None
         pvtw_all = deck_file.get("PVTW")
         if pvtw_all is not None and region_idx < len(pvtw_all):
@@ -218,8 +218,8 @@ class StaticPVT(Serializable):
 
         if pvtw_record is None:
             raise ValidationError(
-                f"PVTW record not found for region {pvtnum}. "
-                "PVTW is required to specify water reference properties."
+                f"`PVTW` record not found for region {pvtnum}. "
+                "`PVTW` is required to specify water reference properties."
             )
 
         # Extract stock-tank densities from DENSITY record
