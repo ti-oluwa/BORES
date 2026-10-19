@@ -597,12 +597,12 @@ class RockCompressibilityTable(StoreSerializable):
         """
         Build a `RockCompressibilityTable` from parsed `ROCKTAB` records.
 
-        `ROCKTAB` provides explicit `(pressure, pore_volume_multiplier, transimissibility_multiplier)` rows.
+        `ROCKTAB` provides explicit `(pressure, pore_volume_multiplier, transmissibility_multiplier)` rows.
         The reference pressure is the pressure where `pore_volume_multiplier` is closest to
         1.0 - per the Eclipse spec, exactly one row should have `pore_volume_multiplier = 1`.
 
         :param rocktab_records: List of row dicts with keys `"pressure"`,
-            `"pore_volume_multiplier"`, and optionally `"transimissibility_multiplier"` (default 1.0 when absent).
+            `"pore_volume_multiplier"`, and optionally `"transmissibility_multiplier"` (default 1.0 when absent).
         :param interpolation_method: `"linear"` or `"cubic"`.
         :param unit_system: Unit system for the pressures in *rocktab_records*.
         :param dtype: Array dtype.
@@ -620,7 +620,7 @@ class RockCompressibilityTable(StoreSerializable):
             [row["pore_volume_multiplier"] for row in rows], dtype=dtype
         )
         transmissibility_multipliers = np.array(
-            [row.get("transimissibility_multiplier", 1.0) for row in rows], dtype=dtype
+            [row.get("transmissibility_multiplier", 1.0) for row in rows], dtype=dtype
         )
 
         # Reference pressure: row where pore_volume_multiplier is nearest to 1.0
@@ -865,10 +865,12 @@ class RockCompressibilityTables(StoreSerializable):
                 region_pressures = pressure[mask]
                 pore_volume_multiplier = table._pore_volume_interp(region_pressures)
                 dpv_dp = table._pore_volume_dp_interp(region_pressures)
-                effective_compressibility = np.where(
+                region_compressibility = np.where(
                     pore_volume_multiplier > 0.0, dpv_dp / pore_volume_multiplier, 0.0
                 )
-                reference_pressure = np.full(mask.sum(), table.reference_pressure)
+                region_reference_pressure = np.full(
+                    region_pressures.shape[0], table.reference_pressure, dtype=dtype
+                )
 
                 if target_unit_system != table.unit_system:
                     factors = get_conversion_factors(
@@ -876,11 +878,11 @@ class RockCompressibilityTables(StoreSerializable):
                         target_unit_system,
                         table=unit_conversion_table,
                     )
-                    reference_pressure *= factors["pressure"]
-                    effective_compressibility *= factors["compressibility"]
+                    region_reference_pressure *= factors["pressure"]
+                    region_compressibility *= factors["compressibility"]
 
-                effective_compressibility[mask] = effective_compressibility
-                reference_pressure[mask] = reference_pressure
+                effective_compressibility[mask] = region_compressibility
+                reference_pressure[mask] = region_reference_pressure
 
         return RockCompressibility(
             reference_pressure=typing.cast(

@@ -36,7 +36,8 @@ class Fault:
     :param k1: Start of the fault's cell range in the K direction (1-based).
     :param k2: End of the fault's cell range in the K direction (1-based).
     :param face_direction: Face direction of the fault interface.
-        Must be one of `"I"`, `"I-"`, `"J"`, `"J-"`, `"K"`, `"K-"`.
+        Must be one of `"X"`, `"X-"`, `"Y"`, `"Y-"`, `"Z"`, `"Z-"`. A direction without a
+        minus sign selects the face on the positive side of each cell in the range.
     :param transmissibility_multiplier: MULTFLT value for this fault.
         `None` when no multiplier is declared.
     """
@@ -315,12 +316,12 @@ def resolve_fault_cell_pairs(
     for k in range(fault.k1, fault.k2 + 1):
         for j in range(fault.j1, fault.j2 + 1):
             for i in range(fault.i1, fault.i2 + 1):
-                if direction in ("I", "I-"):
-                    ni, nj, nk = (i + 1, j, k) if direction == "I" else (i - 1, j, k)
-                elif direction in ("J", "J-"):
-                    ni, nj, nk = (i, j + 1, k) if direction == "J" else (i, j - 1, k)
-                else:  # K or K-
-                    ni, nj, nk = (i, j, k + 1) if direction == "K" else (i, j, k - 1)
+                if direction in ("X", "X-"):
+                    ni, nj, nk = (i + 1, j, k) if direction == "X" else (i - 1, j, k)
+                elif direction in ("Y", "Y-"):
+                    ni, nj, nk = (i, j + 1, k) if direction == "Y" else (i, j - 1, k)
+                else:  # Z or Z-
+                    ni, nj, nk = (i, j, k + 1) if direction == "Z" else (i, j, k - 1)
 
                 if not (1 <= ni <= nx and 1 <= nj <= ny and 1 <= nk <= nz):
                     warnings.warn(

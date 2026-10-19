@@ -328,7 +328,7 @@ class Temperature:
             `unit_system` temperature units.
         """
         assert self.regions is not None
-        dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+        dtype = np.dtype(dtype if dtype is not None else get_dtype())
         n_cells = x_regions.size
         default_spec = self.regions[-1]
 
@@ -343,8 +343,7 @@ class Temperature:
             if region_idx == -1:
                 continue
 
-            xnum = region_idx + 1
-            mask = x_regions == xnum
+            mask = x_regions == region_idx
             if not np.any(mask):
                 continue
             if isinstance(spec, (TemperatureGradient, TemperatureTable)):

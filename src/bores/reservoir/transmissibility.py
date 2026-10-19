@@ -13,7 +13,6 @@ from bores.precision import get_dtype
 from bores.reservoir.rock import Rock
 from bores.types import (
     IntArray,
-    Integer,
     Number,
     NumberArray,
     NumberOrArray,
@@ -143,7 +142,8 @@ def compute_connection_transmissibilities(
         system.
 
     :param grid: Fully constructed `bores.grids.base.Grid`.
-    :param rock: `Rock` with `absolute_permeability` and `net_to_gross`.
+    :param rock: `Rock` with `absolute_permeability` and `net_to_gross`. Net-to-gross scales
+        Kx and Ky only, not Kz.
     :param net_to_gross: Optional override for the NTG array.
     :param dtype: NumPy floating dtype for output arrays. Defaults to `bores.get_dtype()`.
     :returns: `ConnectionTransmissibilities` named tuple.
@@ -170,9 +170,11 @@ def compute_connection_transmissibilities(
         if array.shape != (n_cells,):
             raise ValueError(f"{name} array has shape {array.shape}; expected ({n_cells},).")
 
+    # Net-to-gross reduces horizontal flow only. Vertical flow crosses the whole gross
+    # thickness of the cell, so Kz is not scaled (Eclipse convention).
     effective_kx = kx * ntg
     effective_ky = ky * ntg
-    effective_kz = kz * ntg
+    effective_kz = kz
 
     interior_face_indices = grid.interior_face_indices
     boundary_face_indices = grid.boundary_face_indices
@@ -398,9 +400,13 @@ def apply_directional_multipliers(
     """
     Scale face transmissibilities by per-cell directional MULT arrays (in-place).
 
-    For interior faces: `multiplier = MULT_forward(owner) x MULT_backward(neighbour)`.
-    For boundary faces: `multiplier = MULT_forward(owner)` (no neighbour).
-    Direction is the dominant component of the face unit normal.
+    The direction of a face is the dominant component of its unit normal, and the
+    normal points from the owner cell to the neighbour cell (outward from the owner for a
+    boundary face). When that component is positive, the owner sits on the negative side of
+    the face, so the owner's positive multiplier (`MULTX`) and the neighbour's negative
+    multiplier (`MULTX-`) apply. When it is negative the roles are swapped. A boundary
+    face uses the owner's positive multiplier when its normal points in the positive
+    direction and the owner's negative multiplier otherwise.
 
     NNCs are not affected.
 
@@ -426,54 +432,54 @@ def apply_directional_multipliers(
         owner = face_cell_indices[face_idx, 0]
         neighbour = face_cell_indices[face_idx, 1]
 
-        nx = abs(face_unit_normals[face_idx, 0])
-        ny = abs(face_unit_normals[face_idx, 1])
-        nz = abs(face_unit_normals[face_idx, 2])
+        nx = face_unit_normals[face_idx, 0]
+        ny = face_unit_normals[face_idx, 1]
+        nz = face_unit_normals[face_idx, 2]
+        ax = abs(nx)
+        ay = abs(ny)
+        az = abs(nz)
 
         multiplier = 1.0
-        if nx >= ny and nx >= nz:
-            if positive_x_multipliers is not None:
-                multiplier *= positive_x_multipliers[owner]
-            if negative_x_multipliers is not None:
-                multiplier *= negative_x_multipliers[neighbour]
-        elif ny >= nx and ny >= nz:
-            if positive_y_multipliers is not None:
-                multiplier *= positive_y_multipliers[owner]
-            if negative_y_multipliers is not None:
-                multiplier *= negative_y_multipliers[neighbour]
+        if ax >= ay and ax >= az:
+            owner_side = positive_x_multipliers if nx >= 0.0 else negative_x_multipliers
+            neighbour_side = negative_x_multipliers if nx >= 0.0 else positive_x_multipliers
+        elif ay >= ax and ay >= az:
+            owner_side = positive_y_multipliers if ny >= 0.0 else negative_y_multipliers
+            neighbour_side = negative_y_multipliers if ny >= 0.0 else positive_y_multipliers
         else:
-            if positive_z_multipliers is not None:
-                multiplier *= positive_z_multipliers[owner]
-            if negative_z_multipliers is not None:
-                multiplier *= negative_z_multipliers[neighbour]
+            owner_side = positive_z_multipliers if nz >= 0.0 else negative_z_multipliers
+            neighbour_side = negative_z_multipliers if nz >= 0.0 else positive_z_multipliers
 
+        if owner_side is not None:
+            multiplier *= owner_side[owner]
+        if neighbour_side is not None:
+            multiplier *= neighbour_side[neighbour]
         interior_transmissibilities[idx] *= multiplier
 
     for idx in range(n_boundary):
         face_idx = boundary_face_indices[idx]
         owner = face_cell_indices[face_idx, 0]
 
-        nx = abs(face_unit_normals[face_idx, 0])
-        ny = abs(face_unit_normals[face_idx, 1])
-        nz = abs(face_unit_normals[face_idx, 2])
+        nx = face_unit_normals[face_idx, 0]
+        ny = face_unit_normals[face_idx, 1]
+        nz = face_unit_normals[face_idx, 2]
+        ax = abs(nx)
+        ay = abs(ny)
+        az = abs(nz)
 
-        multiplier = 1.0
-        if nx >= ny and nx >= nz:
-            if positive_x_multipliers is not None:
-                multiplier *= positive_x_multipliers[owner]
-        elif ny >= nx and ny >= nz:
-            if positive_y_multipliers is not None:
-                multiplier *= positive_y_multipliers[owner]
+        if ax >= ay and ax >= az:
+            owner_side = positive_x_multipliers if nx >= 0.0 else negative_x_multipliers
+        elif ay >= ax and ay >= az:
+            owner_side = positive_y_multipliers if ny >= 0.0 else negative_y_multipliers
         else:
-            if positive_z_multipliers is not None:
-                multiplier *= positive_z_multipliers[owner]
+            owner_side = positive_z_multipliers if nz >= 0.0 else negative_z_multipliers
 
-        boundary_transmissibilities[idx] *= multiplier
+        if owner_side is not None:
+            boundary_transmissibilities[idx] *= owner_side[owner]
 
     return interior_transmissibilities, boundary_transmissibilities
 
 
-@numba.njit(cache=True)
 def apply_fault_face_multipliers(
     interior_transmissibilities: NumberArray[OneDimension],
     boundary_transmissibilities: NumberArray[OneDimension],
@@ -486,7 +492,8 @@ def apply_fault_face_multipliers(
     Apply `MULTFLT` multipliers to face-based fault connections (in-place).
 
     Only faces tagged with `ConnectionType.*_FAULT_FACE` (i.e. present in
-    `fault_face_indices`) are affected. NNCs are handled separately.
+    `fault_face_indices`) are affected. NNCs are handled separately. A face that belongs
+    to more than one fault is scaled by each fault's multiplier.
 
     :param interior_transmissibilities: Shape `(n_interior,)`.
     :param boundary_transmissibilities: Shape `(n_boundary,)`.
@@ -496,24 +503,38 @@ def apply_fault_face_multipliers(
     :param fault_transmissibility_multipliers: `{name: multiplier}`.
     :returns: Updated transmissibility arrays.
     """
-    global_to_interior: dict[Integer, int] = {
-        global_idx: position for position, global_idx in enumerate(interior_face_indices)
-    }
-    global_to_boundary: dict[Integer, int] = {
-        global_idx: position for position, global_idx in enumerate(boundary_face_indices)
-    }
+    # interior_face_indices = np.asarray(interior_face_indices)
+    # boundary_face_indices = np.asarray(boundary_face_indices)
+    interior_order = np.argsort(interior_face_indices, kind="stable")
+    boundary_order = np.argsort(boundary_face_indices, kind="stable")
+    sorted_interior = interior_face_indices[interior_order]
+    sorted_boundary = boundary_face_indices[boundary_order]
 
     for fault_name, face_indices in fault_face_indices.items():
         multiplier = fault_transmissibility_multipliers.get(fault_name, 1.0)
         if multiplier == 1:
             continue
-        for global_idx in face_indices:
-            interior_position = global_to_interior.get(global_idx)
-            if interior_position is not None:
-                interior_transmissibilities[interior_position] *= multiplier
-                continue
-            boundary_position = global_to_boundary.get(global_idx)
-            if boundary_position is not None:
-                boundary_transmissibilities[boundary_position] *= multiplier
+        faces = np.asarray(face_indices)
+        if faces.size == 0:
+            continue
+
+        if sorted_interior.size > 0:
+            found = np.searchsorted(sorted_interior, faces)
+            found = np.minimum(found, sorted_interior.size - 1)
+            is_interior = sorted_interior[found] == faces
+            np.multiply.at(
+                interior_transmissibilities, interior_order[found[is_interior]], multiplier
+            )
+        else:
+            is_interior = np.zeros(faces.shape, dtype=np.bool_)
+
+        remaining = faces[~is_interior]
+        if remaining.size > 0 and sorted_boundary.size > 0:
+            found = np.searchsorted(sorted_boundary, remaining)
+            found = np.minimum(found, sorted_boundary.size - 1)
+            is_boundary = sorted_boundary[found] == remaining
+            np.multiply.at(
+                boundary_transmissibilities, boundary_order[found[is_boundary]], multiplier
+            )
 
     return interior_transmissibilities, boundary_transmissibilities

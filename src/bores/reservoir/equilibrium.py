@@ -50,10 +50,13 @@ class DepthTable(StoreSerializable):
     """
 
     unit_system: UnitSystem = UnitSystem.FIELD
+    """Unit system for `depths` and, when `quantity` is given, for `values`."""
+
+    quantity: typing.Literal["gas_oil_ratio", "oil_gas_ratio"] | None = None
     """
-    Unit system for `depths`. `values` unit conversion is not handled
-    here - GOR-type quantities are converted by the caller (same factor
-    used for `ReservoirState.solution_gor` / `vaporized_oil_gas_ratio`).
+    Which unit conversion factor applies to `values`: `"gas_oil_ratio"` for Rs (SCF/STB),
+    `"oil_gas_ratio"` for Rv (STB/SCF). `None` leaves `values` unscaled when the unit
+    system changes, for a table whose values are dimensionless.
     """
 
     def __attrs_post_init__(self) -> None:
@@ -97,8 +100,8 @@ class DepthTable(StoreSerializable):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `DepthTable` with `depths` rescaled to *target*.
-        `values` are left unchanged.
+        Return a new `DepthTable` with `depths` rescaled to *target*, and `values`
+        rescaled too when `quantity` is set.
 
         :param target: Target `UnitSystem`.
         :param table: Optional custom conversion table.
@@ -109,8 +112,13 @@ class DepthTable(StoreSerializable):
         factors = get_conversion_factors(self.unit_system, target, table=table)
         return self.__class__(
             depths=typing.cast(NumberArray[OneDimension], self.depths * factors["length"]),
-            values=self.values,
+            values=(
+                self.values
+                if self.quantity is None
+                else typing.cast(NumberArray[OneDimension], self.values * factors[self.quantity])
+            ),
             unit_system=target,
+            quantity=self.quantity,
         )
 
 
@@ -120,6 +128,7 @@ def load_depth_tables(
     value_column: str,
     value_multiplier: Number = 1.0,
     dtype: typing.Any = None,
+    quantity: typing.Literal["gas_oil_ratio", "oil_gas_ratio"] | None = None,
 ) -> dict[int, DepthTable] | None:
     """
     Parse an `RSVD`/`RVVD`-shaped keyword into `{table_number: DepthTable}`.
@@ -130,6 +139,7 @@ def load_depth_tables(
     :param deck_file: Parsed `DeckFile`.
     :param keyword: `"RSVD"` or `"RVVD"`.
     :param value_column: `"solution_gor"` or `"vaporized_ogr"` - the column name to extract.
+    :param quantity: Which conversion factor the table's values follow on a unit change.
     :returns: `{1-based table number: DepthTable}`, or `None` if the
         keyword is absent from the deck.
     :raises ValidationError: If the keyword is present but a table has
@@ -154,6 +164,7 @@ def load_depth_tables(
                 depths=typing.cast(NumberArray[OneDimension], depths),
                 values=typing.cast(NumberArray[OneDimension], values),
                 unit_system=unit_system,
+                quantity=quantity,
             )
         except ValidationError as exc:
             raise ValidationError(f"{keyword} table {table_number}: {exc}") from exc
@@ -534,12 +545,14 @@ class Equilibrium:
             keyword="RSVD",
             value_column="solution_gor",
             value_multiplier=mscf_to_scf,
+            quantity="gas_oil_ratio",
         )
         rvvd_tables = load_depth_tables(
             deck_file,
             keyword="RVVD",
             value_column="vaporized_ogr",
             value_multiplier=scf_to_mscf,
+            quantity="oil_gas_ratio",
         )
         return cls(
             regions=regions,

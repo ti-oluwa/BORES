@@ -237,7 +237,7 @@ class ReservoirState(StoreSerializable):
     - `oil_saturation`, `water_saturation`, `gas_saturation` - phase
       saturations (must sum to 1 in every cell).
     - `solution_gor` (Rs) - gas dissolved in oil per unit stock-tank oil
-      volume.  *Primary variable in saturated cells* (Sg > 0); capped at
+      volume. *Primary variable in saturated cells* (Sg > 0); capped at
       bubble-point Rs in undersaturated cells.
     - `oil_bubble_point_pressure` - *primary variable in undersaturated oil
       cells* (Sg = 0, Po < Pbub is not possible, so here Pbub tracks the
@@ -247,7 +247,7 @@ class ReservoirState(StoreSerializable):
       standard gas volume. Primary variable for volatile-oil / gas-condensate
       models when So = 0.
     - `water_bubble_point_pressure` - bubble-point pressure of the water
-      phase with respect to dissolved gas (Rsw).  Relevant for CO₂ or sour-gas
+      phase with respect to dissolved gas (Rsw). Relevant for CO₂ or sour-gas
       reservoirs where gas solubility in water is non-negligible.
     - `gas_dew_point_pressure` - dew-point pressure of the gas phase; primary
       variable in condensate models when So = 0.
@@ -326,7 +326,7 @@ class ReservoirState(StoreSerializable):
 
     *In undersaturated cells* (Sg = 0): this IS a primary variable, tracking
     the evolving bubble-point as the reservoir depletes while remaining single-
-    phase.  Must be stored and checkpointed in this regime.
+    phase. Must be stored and checkpointed in this regime.
 
     The two-regime handling is the same saturated/undersaturated switching
     used by Eclipse E100 (PBPD switching logic).
@@ -336,7 +336,7 @@ class ReservoirState(StoreSerializable):
     """
     Shape (n_cells,) - vaporized oil ratio (Rv).
 
-    Units: STB/Mscf (FIELD), sm³/sm³ (METRIC / SI), scc/scc (LAB).
+    Units: STB/SCF (FIELD), sm³/sm³ (METRIC / SI), scc/scc (LAB).
 
     Stock-tank oil vaporized in gas per unit standard gas volume.
 
@@ -378,7 +378,7 @@ class ReservoirState(StoreSerializable):
     Units: same as `oil_bubble_point_pressure`.
 
     Tracks the pressure at which dissolved gas (Rsw) begins to exsolve from
-    water.  Relevant for CO₂ or sour-gas reservoirs.  In the undersaturated
+    water. Relevant for CO₂ or sour-gas reservoirs. In the undersaturated
     water regime (no free gas exsolving from water), this is a primary
     variable analogous to `oil_bubble_point_pressure`.
 
@@ -451,8 +451,8 @@ class ReservoirState(StoreSerializable):
     Shape (n_cells,) - solvent volume fraction in the oil-phase mixture
     (dimensionless, [0, 1]).
 
-    0 = pure oil; 1 = pure solvent.  Populated only for Todd-Longstaff or
-    similar EOR miscibility models.  Defaults to an empty array for standard
+    0 = pure oil; 1 = pure solvent. Populated only for Todd-Longstaff or
+    similar EOR miscibility models. Defaults to an empty array for standard
     black-oil (zero memory cost).
     """
 
@@ -534,9 +534,8 @@ class ReservoirState(StoreSerializable):
         to *target*.
 
         Dimensionless fields (saturations, `solvent_concentration`) are
-        copied unchanged.  Rs, Rv, and Rsw are scaled by the GOR factor.
-        Pressures use the pressure factor.  Masses use the combined density x
-        length³ factor.
+        copied unchanged. Rs and Rsw are scaled by the gas-oil ratio factor and Rv by the oil-gas ratio factor.
+        Pressures use the pressure factor. Masses use the combined density x length³ factor.
 
         :param target: Desired `UnitSystem`.
         :param table: Optional custom conversion table; `None` uses the default.
@@ -549,6 +548,7 @@ class ReservoirState(StoreSerializable):
         mass_factor = factors["mass"]
         pressure_factor = factors["pressure"]
         gor_factor = factors["gas_oil_ratio"]
+        ogr_factor = factors["oil_gas_ratio"]
         return attrs.evolve(
             self,
             pressure=scale(self.pressure, pressure_factor),
@@ -562,7 +562,7 @@ class ReservoirState(StoreSerializable):
             gas_saturation=self.gas_saturation,
             solution_gor=scale(self.solution_gor, gor_factor),
             oil_bubble_point_pressure=scale(self.oil_bubble_point_pressure, pressure_factor),
-            vaporized_oil_gas_ratio=scale(self.vaporized_oil_gas_ratio, gor_factor),
+            vaporized_oil_gas_ratio=scale(self.vaporized_oil_gas_ratio, ogr_factor),
             gas_dew_point_pressure=scale(self.gas_dew_point_pressure, pressure_factor),
             gas_solubility_in_water=scale(self.gas_solubility_in_water, gor_factor),
             water_bubble_point_pressure=scale(self.water_bubble_point_pressure, pressure_factor),
