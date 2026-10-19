@@ -428,6 +428,17 @@ def test_deck_loads_region_vectors_for_listed_and_all_regions(tmp_path):
     assert {"RegionOilInPlace:2", "RegionGasInPlace:1"} <= names
 
 
+def test_load_schedule_can_skip_summary_items(tmp_path):
+    from bores.wells.deck import load_schedule
+
+    path = tmp_path / "summary.DATA"
+    path.write_text("RUNSPEC\nFIELD\nSUMMARY\nFOPR\nSCHEDULE\nTSTEP\n 10 /\n")
+    deck = DeckFile.from_path(path) if hasattr(DeckFile, "from_path") else DeckFile(path)
+
+    assert [item.name for item in load_schedule(deck)] == ["summary@10.0"]
+    assert load_schedule(deck, load_summary=False).items == ()
+
+
 def build_compiled_controls():
     from bores.types import FluidPhase
     from bores.wells.compile import compile_well_controls

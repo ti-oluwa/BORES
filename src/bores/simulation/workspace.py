@@ -30,7 +30,7 @@ __all__ = ["SimulationWorkspace", "build_simulation_workspace"]
 
 class SimulationWorkspace(typing.NamedTuple):
     """
-    Reusable scratch buffer and ocomputed cache for one simulation run.
+    Reusable scratch buffer and precomputed cache for a simulation run.
 
     Allocated once per `SimulationCase`, mutated in place at every time step.
     """
@@ -112,6 +112,7 @@ def build_simulation_workspace(
         pressure=initial_state.pressure,
         temperature=initial_state.temperature,
         solution_gas_oil_ratio=initial_state.solution_gor,
+        vaporized_oil_ratio=initial_state.vaporized_oil_gas_ratio,
         water_saturation=initial_state.water_saturation,
         oil_saturation=initial_state.oil_saturation,
         gas_saturation=initial_state.gas_saturation,

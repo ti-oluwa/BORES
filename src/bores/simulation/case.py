@@ -35,7 +35,14 @@ from bores.schedule.base import Schedule
 from bores.schedule.summary import SummaryReport
 from bores.simulation.spec import RunSpec
 from bores.simulation.workspace import SimulationWorkspace, build_simulation_workspace
-from bores.types import CellArray, InterpolationMethod, Number, UnitSystem
+from bores.types import (
+    CellArray,
+    GridIntersectionMethod,
+    InterpolationMethod,
+    Number,
+    Spacing,
+    UnitSystem,
+)
 from bores.wells.deck import load_schedule
 from bores.wells.model import TubingPerformance, WellSystem
 
@@ -168,6 +175,12 @@ class SimulationCase:
         temperature: Temperature | Number | None = None,
         mixing_rule: str = "baker_linear_rule",
         compiled_at: float = 0.0,
+        load_summary: bool = True,
+        spacing: Spacing = "cosine",
+        warn_on_extrapolation: bool = False,
+        horizontal_tolerance: Number | None = None,
+        intersection_method: GridIntersectionMethod = "aabb",
+        search_radius: Number | None = None,
         runspec: RunSpec | None = None,
         summary: SummaryReport | None = None,
         min_wetting_relperm: MinimumRelPerm = None,
@@ -177,6 +190,8 @@ class SimulationCase:
         saturation_samples: int = N_SATURATION_SAMPLES,
         interpolation_method: InterpolationMethod = "linear",
         boundary_conditions: BoundaryConditions | None = None,
+        salinity: CellArray | None = None,
+        hysteresis: Hysteresis | None = None,
         unit_system: UnitSystem | None = None,
         on_inverted_cells: InvertedCellPolicy | str = InvertedCellPolicy.RAISE,
         dtype: npt.DTypeLike = None,
@@ -195,6 +210,16 @@ class SimulationCase:
         :param compiled_at: The point on the schedule clock this case's
             model reflects. Forwarded to `bores.wells.deck.load_schedule`.
             Only schedule events strictly after this remain as actions.
+        :param load_summary: Whether to add summary-vector recording items
+            from the deck's `SUMMARY` section to the schedule.
+        :param spacing: Saturation-function table grid spacing passed to `SatFunc.from_deck`.
+        :param warn_on_extrapolation: Whether PVT table extrapolation logs warnings.
+            Forwarded to `PVT.from_deck`.
+        :param horizontal_tolerance: Optional horizontal tolerance for well-grid intersection.
+            Forwarded to `compile_model`.
+        :param intersection_method: Well-grid intersection strategy passed to `compile_model`.
+        :param search_radius: Optional search radius for well-grid intersection.
+            Forwarded to `compile_model`.
         :param runspec: Run configuration. `RunSpec`'s own defaults if not given.
         :param summary: Summary-vector reports for the run. Empty if not given.
         :param min_wetting_relperm: Minimum wetting-phase relative permeability for `SatFunc.from_deck`.
@@ -206,6 +231,8 @@ class SimulationCase:
         :param saturation_samples: Number of saturation samples for the initial state.
             Forwarded to `initialize_reservoir_state`.
         :param interpolation_method: Interpolation method for `Rock.from_deck` and `PVT.from_deck`.
+        :param salinity: Optional per-cell water salinity (ppm NaCl) for the simulation.
+        :param hysteresis: Optional hysteresis history/configuration for the simulation workspace.
         :param unit_system: Unit system for the case. Defaults to the deck's unit system.
         :param on_inverted_cells: Policy to apply when the deck grid contains inverted cells.
             Forwarded to `Grid.from_deck`.
@@ -218,6 +245,12 @@ class SimulationCase:
             temperature=temperature,
             mixing_rule=mixing_rule,
             compiled_at=compiled_at,
+            load_summary=load_summary,
+            spacing=spacing,
+            warn_on_extrapolation=warn_on_extrapolation,
+            horizontal_tolerance=horizontal_tolerance,
+            intersection_method=intersection_method,
+            search_radius=search_radius,
             runspec=runspec,
             summary=summary,
             min_wetting_relperm=min_wetting_relperm,
@@ -227,6 +260,8 @@ class SimulationCase:
             saturation_samples=saturation_samples,
             interpolation_method=interpolation_method,
             boundary_conditions=boundary_conditions,
+            salinity=salinity,
+            hysteresis=hysteresis,
             unit_system=unit_system,
             on_inverted_cells=on_inverted_cells,
             dtype=dtype,
@@ -243,6 +278,12 @@ def load_case(
     temperature: Temperature | Number | None = None,
     mixing_rule: str = "baker_linear_rule",
     compiled_at: float = 0.0,
+    load_summary: bool = True,
+    spacing: Spacing = "cosine",
+    warn_on_extrapolation: bool = False,
+    horizontal_tolerance: Number | None = None,
+    intersection_method: GridIntersectionMethod = "aabb",
+    search_radius: Number | None = None,
     runspec: RunSpec | None = None,
     summary: SummaryReport | None = None,
     min_wetting_relperm: MinimumRelPerm = None,
@@ -252,6 +293,8 @@ def load_case(
     saturation_samples: int = N_SATURATION_SAMPLES,
     interpolation_method: InterpolationMethod = "linear",
     boundary_conditions: BoundaryConditions | None = None,
+    salinity: CellArray | None = None,
+    hysteresis: Hysteresis | None = None,
     unit_system: UnitSystem | None = None,
     on_inverted_cells: InvertedCellPolicy | str = InvertedCellPolicy.RAISE,
     dtype: npt.DTypeLike = None,
@@ -271,6 +314,16 @@ def load_case(
     :param compiled_at: The point on the schedule clock this case's
         model reflects. Forwarded to `bores.wells.deck.load_schedule`.
         Only schedule events strictly after this remain as actions.
+    :param load_summary: Whether to add summary-vector recording items
+        from the deck's `SUMMARY` section to the schedule.
+    :param spacing: Saturation-function table grid spacing passed to `SatFunc.from_deck`.
+    :param warn_on_extrapolation: Whether PVT table extrapolation logs warnings.
+        Forwarded to `PVT.from_deck`.
+    :param horizontal_tolerance: Optional horizontal tolerance for well-grid intersection.
+        Forwarded to `compile_model`.
+    :param intersection_method: Well-grid intersection strategy passed to `compile_model`.
+    :param search_radius: Optional search radius for well-grid intersection.
+        Forwarded to `compile_model`.
     :param runspec: Run configuration. `RunSpec`'s own defaults if not given.
     :param summary: Summary-vector reports for the run. Empty if not given.
     :param min_wetting_relperm: Minimum wetting-phase relative permeability for `SatFunc.from_deck`.
@@ -282,6 +335,8 @@ def load_case(
     :param saturation_samples: Number of saturation samples for the initial state.
         Forwarded to `initialize_reservoir_state`.
     :param interpolation_method: Interpolation method for `Rock.from_deck` and `PVT.from_deck`.
+    :param salinity: Optional per-cell water salinity (ppm NaCl) for the simulation.
+    :param hysteresis: Optional hysteresis history/configuration for the simulation workspace.
     :param unit_system: Unit system for the case. Defaults to the deck's unit system.
     :param on_inverted_cells: Policy to apply when the deck grid contains inverted cells.
         Forwarded to `Grid.from_deck`.
@@ -324,6 +379,7 @@ def load_case(
         satfunc = SatFunc.from_deck(
             deck_file,
             mixing_rule=mixing_rule,
+            spacing=spacing,
             min_wetting_relperm=min_wetting_relperm,
             min_non_wetting_relperm=min_non_wetting_relperm,
             include_capillary_pressure=include_capillary_pressure,
@@ -351,6 +407,7 @@ def load_case(
             deck_file,
             temperature=temperature,
             interpolation_method=interpolation_method,
+            warn_on_extrapolation=warn_on_extrapolation,
         )
     except Exception as exc:
         raise CaseLoadError(f"Failed to load PVT tables from {deck_file!r}.") from exc
@@ -376,7 +433,11 @@ def load_case(
         raise CaseLoadError(f"Failed to initialize reservoir state from {deck_file!r}.") from exc
 
     try:
-        wells = WellSystem.from_deck(deck_file, grid=grid, tubing_performance=tubing_performance)
+        wells = WellSystem.from_deck(
+            deck_file,
+            grid=grid,
+            tubing_performance=tubing_performance,
+        )
     except Exception as exc:
         raise CaseLoadError(f"Failed to load wells from {deck_file!r}.") from exc
 
@@ -407,15 +468,27 @@ def load_case(
     )
 
     try:
-        schedule = load_schedule(deck_file, compiled_at=compiled_at)
+        schedule = load_schedule(
+            deck_file,
+            compiled_at=compiled_at,
+            load_summary=load_summary,
+        )
     except Exception as exc:
         raise CaseLoadError(f"Failed to load schedule from {deck_file!r}.") from exc
 
     return SimulationCase(
-        model=compile_model(model, dtype=dtype),
+        model=compile_model(
+            model,
+            horizontal_tolerance=horizontal_tolerance,
+            intersection_method=intersection_method,
+            search_radius=search_radius,
+            dtype=dtype,
+        ),
         initial_state=initial_state,
         runspec=runspec,
         schedule=schedule,
         summary=summary if summary is not None else SummaryReport(),
+        salinity=salinity,
+        hysteresis=hysteresis,
         dtype=dtype,
     )

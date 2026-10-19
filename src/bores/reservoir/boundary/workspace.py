@@ -7,7 +7,7 @@ import numpy.typing as npt
 
 from bores.precision import get_dtype
 from bores.reservoir.boundary.compile import CompiledAquifers
-from bores.types import NumberArray, OneDimension
+from bores.types import Number, NumberArray, OneDimension
 
 __all__ = ["AquiferWorkspace", "build_aquifer_workspace"]
 
@@ -54,7 +54,7 @@ class AquiferWorkspace(typing.NamedTuple):
 
 
 def build_aquifer_workspace(
-    compiled: CompiledAquifers, dtype: npt.DTypeLike = None, start_time: float = 0.0
+    compiled: CompiledAquifers, dtype: npt.DTypeLike = None, start_time: Number = 0.0
 ) -> AquiferWorkspace:
     """
     Builds a fresh `AquiferWorkspace` for `compiled`, every row at its

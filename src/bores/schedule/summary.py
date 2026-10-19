@@ -99,8 +99,7 @@ class SummaryReport(
     A run's recorded summary vectors, in the order they were recorded.
 
     Mutable and append-only. Built empty and handed to a run through
-    `ScheduleContext.extra["summary_report"]`; `RecordSummary` is the
-    only thing that appends to it.
+    `ScheduleContext.extra["summary_report"]`.
 
     Keeps an index from each vector key to the positions of its records,
     so per-vector queries cost time proportional to that vector's own

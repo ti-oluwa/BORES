@@ -1017,23 +1017,27 @@ def load_controls_from_records(
     controls: dict[str, WellControl] = {}
     for well_name, events in events_by_well.items():
         events.sort(key=lambda event: (event[0], event[1]))
-        current: WellControl | None = None
+        current_control: WellControl | None = None
         for schedule_time, _, kind, record in events:
             if schedule_time > current_time:
                 continue
             if kind == "producer":
-                current = load_producer_control_from_record(record, unit_system=unit_system)
+                current_control = load_producer_control_from_record(
+                    record, unit_system=unit_system
+                )
             elif kind == "injector":
-                current = load_injector_control_from_record(record, unit_system=unit_system)
+                current_control = load_injector_control_from_record(
+                    record, unit_system=unit_system
+                )
             else:
-                if current is None:
+                if current_control is None:
                     raise ValidationError(
                         f"`WELTARG` references well {well_name!r} before it has any "
                         "`WCONPROD`/`WCONINJE` control to modify."
                     )
-                current = apply_weltarg(current, record)
-        if current is not None:
-            controls[well_name] = current
+                current_control = apply_weltarg(current_control, record)
+        if current_control is not None:
+            controls[well_name] = current_control
     return WellControls(controls=controls)
 
 
@@ -1428,9 +1432,7 @@ def load_summary_items(
         requested = deck_file.get(mnemonic)
         if requested is None:
             continue
-        regions = [int(float(region)) for region in requested] or get_fluid_in_place_regions(
-            deck_file
-        )
+        regions = [int(region) for region in requested] or get_fluid_in_place_regions(deck_file)
         quantities.extend(region_summary_cls(region=region) for region in regions)
 
     if not quantities:
@@ -1455,7 +1457,7 @@ WLIFT_TRIGGER_QUANTITIES: dict[str, RateQuantity] = {
 """Deck `WLIFT` trigger phase to the rate quantity its rate trigger watches."""
 
 
-def get_item_start_time(item: ScheduleItem) -> Number:
+def get_item_start_time(item: ScheduleItem["CompiledBlackOilModel"]) -> Number:
     """
     The elapsed time a schedule item first becomes live.
 
@@ -1472,7 +1474,10 @@ def get_item_start_time(item: ScheduleItem) -> Number:
 
 
 def load_schedule(
-    deck_file: DeckFile, *, compiled_at: float = 0.0
+    deck_file: DeckFile,
+    *,
+    compiled_at: float = 0.0,
+    load_summary: bool = True,
 ) -> Schedule["CompiledBlackOilModel"]:
     """
     Builds a `Schedule[CompiledBlackOilModel]` from every well-editing
@@ -1509,13 +1514,16 @@ def load_schedule(
     can grow a new row mid-schedule. `RateLimit` has no deck-record
     source in this codebase at all, so it's never emitted here.
 
-    Every requested `SUMMARY`-section vector (see `load_summary_items`)
-    is added too, one item per report time strictly after `compiled_at`.
+    When `load_summary` is `True`, every requested `SUMMARY`-section vector
+    (see `load_summary_items`) is added too, one item per report time
+    strictly after `compiled_at`.
 
     :param deck_file: The deck to read schedule keywords from.
     :param compiled_at: The point on the schedule clock the model this
         schedule will run against was compiled at, in the deck's time
         unit. Only events strictly after this become actions.
+    :param load_summary: Whether to add scheduled summary-vector recording
+        items from the deck's `SUMMARY` section.
     :returns: A `Schedule[CompiledBlackOilModel]`, one rule per
         qualifying record, sorted by `schedule_time`.
     """
@@ -1626,10 +1634,12 @@ def load_schedule(
         if not np.isclose(record["new_thp_limit"], 0.0):
             actions.append(
                 SetLimit(
-                    well_name=well_name, kind=LimitKind.THP, min_value=record["new_thp_limit"]
+                    well_name=well_name,
+                    kind=LimitKind.THP,
+                    min_value=record["new_thp_limit"],
                 )
             )
-        action = actions[0] if len(actions) == 1 else RunSequence(actions=tuple(actions))
+        action = actions[0] if len(actions) == 1 else RunSequence(actions=actions)
 
         triggers: list[Event] = []
         if not np.isclose(record["trigger_limit"], 0.0):
@@ -1663,7 +1673,7 @@ def load_schedule(
         if not triggers:
             event = TimeEvent(at=schedule_time)
         else:
-            # A trigger is live from this record until the deck next changes the well's lift
+            # A trigger is live from this record until the deck next changes to the well's lift
             # settings (a later `WLIFT` or `WCONPROD` for it). The new settings persist in the
             # compiled arrays once applied, and re-applying them while the trigger holds is
             # idempotent, so no one-shot state is needed.
@@ -1678,11 +1688,15 @@ def load_schedule(
                     TimeWindowEvent(
                         start=schedule_time, end=min(later_changes) if later_changes else None
                     ),
-                    triggers[0] if len(triggers) == 1 else AnyOf(events=tuple(triggers)),
+                    triggers[0] if len(triggers) == 1 else AnyOf(events=triggers),
                 )
             )
         items.append(
-            ScheduleItem(event=event, action=action, name=f"wlift:{well_name}@{schedule_time}")
+            ScheduleItem(
+                event=event,
+                action=action,
+                name=f"wlift:{well_name}@{schedule_time}",
+            )
         )
 
     for record in deck_file.get("WCONPROD") or empty:
@@ -1846,6 +1860,7 @@ def load_schedule(
             )
         )
 
-    items.extend(load_summary_items(deck_file, compiled_at=compiled_at))
+    if load_summary:
+        items.extend(load_summary_items(deck_file, compiled_at=compiled_at))
     items.sort(key=get_item_start_time)
     return Schedule(items=tuple(items))

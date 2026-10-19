@@ -675,7 +675,7 @@ def get_conversion_factors(
     `to_system` by **multiplication**, except temperature which uses an
     affine map stored as two keys:
 
-    - "temperature"  - multiplicative factor.
+    - "temperature" - multiplicative factor.
     - "temperature_offset" - additive delta (in target units) applied
     *after* scaling: T_to = T_from * scale + offset.
 

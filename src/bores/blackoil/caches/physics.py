@@ -51,10 +51,10 @@ def compute_physics_cache(
     residual_oil_saturation_water: CellArray | None = None,
     residual_oil_saturation_gas: CellArray | None = None,
     residual_gas_saturation: CellArray | None = None,
+    vaporized_oil_ratio: CellArray | None = None,
     hysteresis: Hysteresis | HysteresisWorkspace | None = None,
     out: PhysicsCache | None = None,
     dtype: npt.DTypeLike = None,
-    vaporized_oil_ratio: CellArray | None = None,
 ) -> PhysicsCache:
     """
     Build (or refresh, in place) a `PhysicsCache` from the current cell
