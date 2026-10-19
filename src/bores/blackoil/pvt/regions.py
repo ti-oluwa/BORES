@@ -28,6 +28,7 @@ from bores.reservoir.temperature import (
 from bores.types import (
     FloatArray,
     FluidPhase,
+    Integer,
     InterpolationMethod,
     Number,
     OneDimension,
@@ -112,7 +113,7 @@ class PVT:
 
     def __init__(
         self,
-        regions: dict[int, PVTRegion],
+        regions: dict[Integer, PVTRegion],
         *,
         unit_system: UnitSystem | None = None,
     ) -> None:
@@ -146,7 +147,7 @@ class PVT:
         self.regions = regions
         self.unit_system = expected_unit_system
 
-    def region(self, pvtnum: int) -> PVTRegion:
+    def region(self, pvtnum: Integer) -> PVTRegion:
         """
         Return the `PVTRegion` for a given 1-based region index.
 
@@ -237,7 +238,7 @@ class PVT:
     def __getitem__(self, key: int) -> PVTRegion:
         return self.region(key)
 
-    def __iter__(self) -> typing.Iterator[int]:
+    def __iter__(self) -> typing.Iterator[Integer]:
         return iter(self.regions)
 
     def __len__(self) -> int:
@@ -1356,7 +1357,7 @@ def load_pvt_regions(
     validate: bool = True,
     warn_on_extrapolation: bool = False,
     dtype: npt.DTypeLike = None,
-) -> dict[int, PVTRegion]:
+) -> dict[Integer, PVTRegion]:
     """
     Build a `PVT` object from a parsed `DeckFile`.
 
@@ -1425,7 +1426,7 @@ def load_pvt_regions(
         warn_on_extrapolation=warn_on_extrapolation,
         dtype=dtype,
     )
-    regions: dict[int, PVTRegion] = {}
+    regions: dict[Integer, PVTRegion] = {}
     if unit_system != temperature.unit_system:
         temperature = temperature.convert(unit_system)
 

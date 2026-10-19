@@ -89,7 +89,7 @@ What's sort-off working right now (not fully tested yet):
 - Eclipse/GRDECL-style deck parsing, including grid, PVT, saturation function, and region keywords, plus `BOX`/`EQUALS`/`ADD`/`MULTIPLY`/`COPY`/`MAXVALUE`/`MINVALUE` operators
 - Cartesian and corner-point (free-form) grid construction, with faults, NNCs, and transmissibility multipliers
 - Three-phase (oil, water, gas) black-oil PVT, both correlation-based (Standing, Vazquez-Beggs, Hall-Yarborough, and more) and table-based
-- Relative permeability models (Brooks-Corey, LET, tabular) with 15+ three-phase mixing rules
+- Relative permeability models (Brooks-Corey, LET, tabular) with three-phase mixing rules
 - Capillary pressure models (Brooks-Corey, Leverett J-function, Van Genuchten, tabular)
 - Reservoir initialization and equilibration (including capillary transition zones, wet-gas EQUIL support)
 - Boundary conditions, including Carter-Tracy and Fetkovich analytic aquifers and flux-specified aquifers, attached to grid faces through `AQUANCON`, fully compiled into the solver's data structures
