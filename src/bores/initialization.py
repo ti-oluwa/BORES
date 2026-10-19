@@ -1331,7 +1331,7 @@ def initialize_reservoir_state(
         1.0 - water_saturation_array - gas_saturation_array, 0.0, 1.0, dtype=dtype
     )
 
-    pore_volumes = reservoir.pore_volumes
+    pore_volumes = reservoir.compute_pore_volumes(pressure_array)
     pvt_region_index: IntCellArray = (
         reservoir.regions.pvt_region
         if reservoir.regions is not None and reservoir.regions.pvt_region is not None

@@ -94,7 +94,7 @@ def load_model_state(
         from. Supplies `wells.wells` (each well's own `Well`/`Perforation`
         objects), which the compiled layer doesn't retain a reference to.
     :param compiled_model: The compiled model `workspace` was built for.
-        Supplies `reservoir.pore_volumes`, `reservoir.regions.pvt_region`,
+        Supplies `reservoir.compute_pore_volumes`, `reservoir.regions.pvt_region`,
         `fluid.pvt`, and `wells` (for `load_wells_states`).
     :param workspace: The running simulation's workspace, read for
         `workspace.reservoir` and `workspace.wells`.
@@ -123,7 +123,7 @@ def load_model_state(
     reservoir_state = load_reservoir_state(
         workspace.reservoir,
         temperature=temperature,
-        pore_volumes=compiled_model.reservoir.pore_volumes,
+        pore_volumes=compiled_model.reservoir.compute_pore_volumes(workspace.reservoir.pressure),
         pvt=compiled_model.fluid.pvt,
         pvt_region_index=reservoir_regions.pvt_region if reservoir_regions is not None else None,
         unit_system=compiled_model.unit_system,

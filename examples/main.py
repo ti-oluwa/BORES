@@ -7,7 +7,7 @@ from bores.types import UnitSystem
 from bores.wells.hydraulics.homogeneous import homogeneous_wellbore
 
 df = DeckFile(
-    "data/SPE1CASE1.DATA",
+    "/home/tioluwa/Projects/nagcsu/Data/NigerDelta UGH1 Composite Field v2.DATA",
     encoding="utf-8",
     unit_system=UnitSystem.FIELD,
 )
@@ -41,5 +41,5 @@ print(f"bbox: {grid.bounding_box}")
 pv_grid = make_pyvista_grid(grid, cell_data={"pressure": case.initial_state.pressure})
 pl = pv.Plotter()
 pl.add_mesh(pv_grid, scalars="pressure", show_edges=True)
-pl.set_scale(zscale=15, xscale=2, yscale=2)  # type:ignore
+pl.set_scale(zscale=5, xscale=2, yscale=2)  # type:ignore
 pl.show()

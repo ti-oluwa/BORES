@@ -23,6 +23,12 @@ class AquiferWorkspace(typing.NamedTuple):
     advanced in place, once, on acceptance (`commit_boundary_conditions`).
     """
 
+    origin_time: NumberArray[OneDimension]
+    """
+    Shape `(n_aquifers,)`. Simulation time at which each aquifer starts responding, the
+    run's start time. Carter-Tracy's dimensionless time is measured from here.
+    """
+
     previous_time: NumberArray[OneDimension]
     """Shape `(n_aquifers,)`. Simulation time as of the last committed state."""
 
@@ -48,7 +54,7 @@ class AquiferWorkspace(typing.NamedTuple):
 
 
 def build_aquifer_workspace(
-    compiled: CompiledAquifers, dtype: npt.DTypeLike = None
+    compiled: CompiledAquifers, dtype: npt.DTypeLike = None, start_time: float = 0.0
 ) -> AquiferWorkspace:
     """
     Builds a fresh `AquiferWorkspace` for `compiled`, every row at its
@@ -56,18 +62,29 @@ def build_aquifer_workspace(
 
     :param compiled: The aquifer system to build a workspace for.
     :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
+    :param start_time: Simulation time the run starts at. Aquifers start responding then,
+        so a run that does not start at zero does not see a large first-step influx.
     :returns: `AquiferWorkspace` with every aquifer at its starting state.
     """
-    resolved_dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+    resolved_dtype = np.dtype(dtype if dtype is not None else get_dtype())
     n = compiled.kinds.shape[0]
     return AquiferWorkspace(
-        previous_time=np.zeros(n, dtype=resolved_dtype),
-        previous_cumulative_influx=np.zeros(n, dtype=resolved_dtype),
+        origin_time=typing.cast(
+            NumberArray[OneDimension], np.full(n, start_time, dtype=resolved_dtype)
+        ),
+        previous_time=typing.cast(
+            NumberArray[OneDimension], np.full(n, start_time, dtype=resolved_dtype)
+        ),
+        previous_cumulative_influx=typing.cast(
+            NumberArray[OneDimension], np.zeros(n, dtype=resolved_dtype)
+        ),
         previous_boundary_pressure=typing.cast(
             NumberArray[OneDimension],
             np.asarray(compiled.initial_pressures, dtype=resolved_dtype).copy(),
         ),
-        previous_dimensionless_time=np.zeros(n, dtype=resolved_dtype),
+        previous_dimensionless_time=typing.cast(
+            NumberArray[OneDimension], np.zeros(n, dtype=resolved_dtype)
+        ),
         previous_aquifer_pressure=typing.cast(
             NumberArray[OneDimension],
             np.asarray(compiled.initial_pressures, dtype=resolved_dtype).copy(),

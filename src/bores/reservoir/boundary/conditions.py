@@ -207,20 +207,36 @@ class BoundaryConditions:
     """
 
     def __attrs_post_init__(self) -> None:
-        # Warn on overlapping face assignments
-        seen: dict[int, str] = {}
-        for region in self.regions:
-            for position in region.face_positions:
-                position = int(position)
-                if position in seen:
-                    warnings.warn(
-                        f"Boundary face position {position} is assigned by both "
-                        f"region {seen[position]!r} and region {region.name!r}. "
-                        f"Region {region.name!r} (later in list) will take effect.",
-                        UserWarning,
-                        stacklevel=3,
-                    )
-                seen[position] = region.name
+        # Warn once per region that takes over faces an earlier region already assigned.
+        if self.regions:
+            all_positions = np.concatenate([
+                np.asarray(region.face_positions, dtype=np.int64) for region in self.regions
+            ])
+            unique_positions, counts = np.unique(all_positions, return_counts=True)
+            contested = unique_positions[counts > 1]
+            if contested.size > 0:
+                owner_of_contested: dict[int, str] = {}
+                for region in self.regions:
+                    positions = np.asarray(region.face_positions, dtype=np.int64)
+                    taken = positions[np.isin(positions, contested)]
+                    if taken.size > 0:
+                        earlier = sorted({
+                            owner_of_contested[int(p)]
+                            for p in taken.tolist()
+                            if int(p) in owner_of_contested
+                        })
+                        n_taken = sum(1 for p in taken.tolist() if int(p) in owner_of_contested)
+                        if n_taken > 0:
+                            warnings.warn(
+                                f"{n_taken} boundary face position(s) assigned by region "
+                                f"{region.name!r} are already assigned by region(s) "
+                                f"{earlier}. Region {region.name!r} (later in list) will "
+                                "take effect.",
+                                UserWarning,
+                                stacklevel=3,
+                            )
+                        for p in taken.tolist():
+                            owner_of_contested[int(p)] = region.name
 
         unit_system = self.unit_system
         if unit_system is None:

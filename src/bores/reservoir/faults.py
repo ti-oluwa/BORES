@@ -188,13 +188,14 @@ def apply_faults(grid: Grid, *faults: Fault) -> Grid:
       `INTERIOR_FAULT_FACE`/`BOUNDARY_FAULT_FACE`.
     - Fault cell pairs that share no geometric face are not connected and are skipped.
     - `grid.fault_transmissibility_multipliers` - updated from the
-      `transmissibility_multiplier` on each `Fault` (when not `None`).
+      `transmissibility_multiplier` on each `Fault`. A fault with no multiplier ends up with none,
+      including one that replaces an earlier fault of the same name.
 
     Faults already present on the grid with the same name are replaced. Faults
     with new names are merged in. To remove all existing faults first, call
     `remove_faults` before this function.
 
-    :param model: The `Grid` to apply faults to.
+    :param grid: The `Grid` to apply faults to.
     :param faults: One or more `Fault` objects.
     :returns: A new `Grid` with the faults applied.
     :raises ValidationError: If no faults are supplied, or if any fault record
@@ -418,11 +419,10 @@ def _apply_faults_to_grid(
     # Build updated fault_transmissibility_multipliers
     updated_multipliers: dict[str, Number] = dict(grid.fault_transmissibility_multipliers or {})
     for fault in faults:
+        # A replaced fault takes only the multiplier it now carries, never the old one.
+        updated_multipliers.pop(fault.name, None)
         if fault.transmissibility_multiplier is not None:
             updated_multipliers[fault.name] = fault.transmissibility_multiplier
-        else:
-            # If the old multiplier existed and user supplied None, preserve old value
-            pass
 
     merged_fault_face_indices = (
         {name: np.asarray(idxs, dtype=np.int32) for name, idxs in fault_face_indices.items()}

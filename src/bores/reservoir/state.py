@@ -5,11 +5,13 @@ import numpy as np
 import numpy.typing as npt
 from typing_extensions import Self
 
+from bores.constants import c
 from bores.precision import get_dtype
 from bores.serde.stores import StoreSerializable
 from bores.types import (
     BooleanCellArray,
     CellArray,
+    Number,
     UnitSystem,
 )
 from bores.units import UnitConversionTable, get_conversion_factors
@@ -19,23 +21,29 @@ __all__ = ["Hysteresis", "ReservoirState"]
 
 
 def advance_phase_hysteresis(
+    *,
     new_saturation: npt.NDArray,
     previous_saturation: npt.NDArray,
     max_saturation: npt.NDArray,
     imbibition_flag: npt.NDArray,
     reversal_saturation: npt.NDArray,
+    tolerance: Number | None = None,
+    out_max_saturation: npt.NDArray | None = None,
+    out_imbibition_flag: npt.NDArray | None = None,
+    out_reversal_saturation: npt.NDArray | None = None,
 ) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     """
     Updates one phase's tracked saturation history for one new saturation
     value, per cell.
 
     A phase is on its imbibition path when its saturation is moving from
-    `reversal_saturation` toward `max_saturation` (see
-    `Hysteresis.water_imbibition_flag`/`gas_imbibition_flag`). Comparing
-    the new saturation only against the historical maximum isn't enough to
-    catch every reversal: a phase can turn around well before it climbs
-    back past its own historical peak, so the previous saturation is
-    needed to tell which way it is actually moving right now.
+    `reversal_saturation` toward `max_saturation`. The previous saturation is
+    needed as well as the historical maximum, because a phase can turn around well
+    before it climbs back past its own peak. A change no larger than `tolerance`
+    counts as no movement, so solver round-off cannot flip the regime.
+
+    Passing the `out_*` arrays writes the result into them, which may be the input
+    arrays themselves, so no memory is allocated.
 
     :param new_saturation: This timestep's saturation, per cell.
     :param previous_saturation: The saturation this phase had before this update.
@@ -43,23 +51,40 @@ def advance_phase_hysteresis(
     :param imbibition_flag: Whether the phase was increasing before this update.
     :param reversal_saturation: The saturation at the last known reversal,
         before this update.
+    :param tolerance: Smallest saturation change that counts as movement.
+        `HYSTERESIS_SATURATION_TOLERANCE` if not given.
+    :param out_max_saturation: Receives the new historical maximum.
+    :param out_imbibition_flag: Receives the new imbibition flag.
+    :param out_reversal_saturation: Receives the new reversal saturation.
     :returns: `(new_max_saturation, new_imbibition_flag, new_reversal_saturation)`.
     """
-    increasing_now = new_saturation > previous_saturation
-    decreasing_now = new_saturation < previous_saturation
+    tolerance = typing.cast(
+        Number, c.HYSTERESIS_SATURATION_TOLERANCE if tolerance is None else tolerance
+    )
+    change = new_saturation - previous_saturation
+    increasing_now = change > tolerance
+    decreasing_now = change < -tolerance
     turned_to_drainage = imbibition_flag & decreasing_now
     turned_to_imbibition = ~imbibition_flag & increasing_now
 
-    new_max_saturation = np.maximum(max_saturation, new_saturation)
-    new_imbibition_flag = np.where(
-        increasing_now, True, np.where(decreasing_now, False, imbibition_flag)
+    new_max = np.empty_like(max_saturation) if out_max_saturation is None else out_max_saturation
+    new_flag = (
+        np.empty_like(imbibition_flag) if out_imbibition_flag is None else out_imbibition_flag
     )
-    new_reversal_saturation = np.where(
-        turned_to_drainage,
-        max_saturation,
-        np.where(turned_to_imbibition, previous_saturation, reversal_saturation),
+    new_reversal = (
+        np.empty_like(reversal_saturation)
+        if out_reversal_saturation is None
+        else out_reversal_saturation
     )
-    return new_max_saturation, new_imbibition_flag, new_reversal_saturation
+
+    np.copyto(new_reversal, reversal_saturation)
+    np.copyto(new_reversal, max_saturation, where=turned_to_drainage)
+    np.copyto(new_reversal, previous_saturation, where=turned_to_imbibition)
+    np.copyto(new_flag, imbibition_flag)
+    np.copyto(new_flag, True, where=increasing_now)
+    np.copyto(new_flag, False, where=decreasing_now)
+    np.maximum(max_saturation, new_saturation, out=new_max)
+    return new_max, new_flag, new_reversal
 
 
 @attrs.frozen(slots=True, kw_only=True)
@@ -165,6 +190,7 @@ class Hysteresis(StoreSerializable):
         gas_saturation: npt.ArrayLike,
         previous_water_saturation: npt.ArrayLike,
         previous_gas_saturation: npt.ArrayLike,
+        tolerance: Number | None = None,
         dtype: npt.DTypeLike = None,
     ) -> Self:
         """
@@ -189,6 +215,8 @@ class Hysteresis(StoreSerializable):
             which way it is currently moving.
         :param previous_gas_saturation: Array-like (n_cells,) - the gas
             saturation this cell had before this timestep.
+        :param tolerance: Smallest saturation change that counts as a phase moving.
+            `HYSTERESIS_SATURATION_TOLERANCE` if not given.
         :returns: New `Hysteresis` reflecting this timestep.
         """
         dtype = np.dtype(dtype) if dtype is not None else get_dtype()
@@ -197,28 +225,34 @@ class Hysteresis(StoreSerializable):
         previous_sw = np.asarray(previous_water_saturation, dtype=dtype)
         previous_sg = np.asarray(previous_gas_saturation, dtype=dtype)
 
-        new_max_water, new_water_flag, new_water_reversal = advance_phase_hysteresis(
-            new_saturation=sw,
-            previous_saturation=previous_sw,
-            max_saturation=self.max_water_saturation,
-            imbibition_flag=self.water_imbibition_flag,
-            reversal_saturation=self.water_reversal_saturation,
+        new_max_water_saturation, new_water_imbibition_flag, new_water_reversal_saturation = (
+            advance_phase_hysteresis(
+                new_saturation=sw,
+                previous_saturation=previous_sw,
+                max_saturation=self.max_water_saturation,
+                imbibition_flag=self.water_imbibition_flag,
+                reversal_saturation=self.water_reversal_saturation,
+                tolerance=tolerance,
+            )
         )
-        new_max_gas, new_gas_flag, new_gas_reversal = advance_phase_hysteresis(
-            new_saturation=sg,
-            previous_saturation=previous_sg,
-            max_saturation=self.max_gas_saturation,
-            imbibition_flag=self.gas_imbibition_flag,
-            reversal_saturation=self.gas_reversal_saturation,
+        new_max_gas_saturation, new_gas_imbibition_flag, new_gas_reversal_saturation = (
+            advance_phase_hysteresis(
+                new_saturation=sg,
+                previous_saturation=previous_sg,
+                max_saturation=self.max_gas_saturation,
+                imbibition_flag=self.gas_imbibition_flag,
+                reversal_saturation=self.gas_reversal_saturation,
+                tolerance=tolerance,
+            )
         )
         return attrs.evolve(
             self,
-            max_water_saturation=new_max_water,
-            max_gas_saturation=new_max_gas,
-            water_imbibition_flag=new_water_flag,
-            gas_imbibition_flag=new_gas_flag,
-            water_reversal_saturation=new_water_reversal,
-            gas_reversal_saturation=new_gas_reversal,
+            max_water_saturation=new_max_water_saturation,
+            max_gas_saturation=new_max_gas_saturation,
+            water_imbibition_flag=new_water_imbibition_flag,
+            gas_imbibition_flag=new_gas_imbibition_flag,
+            water_reversal_saturation=new_water_reversal_saturation,
+            gas_reversal_saturation=new_gas_reversal_saturation,
         )
 
 
@@ -240,9 +274,9 @@ class ReservoirState(StoreSerializable):
       volume. *Primary variable in saturated cells* (Sg > 0); capped at
       bubble-point Rs in undersaturated cells.
     - `oil_bubble_point_pressure` - *primary variable in undersaturated oil
-      cells* (Sg = 0, Po < Pbub is not possible, so here Pbub tracks the
-      evolving bubble-point as the reservoir depletes below saturation
-      pressure).
+      cells* (Sg = 0, where Po >= Pbub, so Pbub is the bubble-point the oil keeps).
+      In saturated cells (Sg > 0) it equals the oil pressure, and holds no information
+      of its own.
     - `vaporized_oil_gas_ratio` (Rv) - stock-tank oil vaporized in gas per unit
       standard gas volume. Primary variable for volatile-oil / gas-condensate
       models when So = 0.
@@ -254,7 +288,9 @@ class ReservoirState(StoreSerializable):
     - `gas_solubility_in_water` (Rsw) - gas dissolved in water per unit
       stock-tank water volume.
 
-    **Conserved component masses** (updated explicitly):
+    **Component masses**: computed from the variables above, the pore volume at the current
+    pressure and each PVT region's tables when a state is read out of a running simulation,
+    and are never advanced by the solver:
 
     - `oil_mass`, `water_mass`, `free_gas_mass`
     - `dissolved_gas_mass_in_oil`, `dissolved_gas_mass_in_water`

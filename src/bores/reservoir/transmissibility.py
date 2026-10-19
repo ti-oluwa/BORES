@@ -34,11 +34,13 @@ class ConnectionTransmissibilities(typing.NamedTuple):
     Shape `(n_interior_faces,)` float64 - TPFA transmissibility for
     every interior face (mD·ft in FIELD units).
     """
+
     boundary: NumberArray[OneDimension]
     """
     Shape `(n_boundary_faces,)` float64 - half-transmissibility for
     every boundary face.
     """
+
     nnc: NumberArray[OneDimension] | None
     """
     Shape `(n_nnc,)` float64 or `None` - flow transmissibility of each non-neighbour connection,
@@ -48,6 +50,7 @@ class ConnectionTransmissibilities(typing.NamedTuple):
     
     Same order as `Grid.nnc_cell_indices`; `None` when the grid has no NNCs.
     """
+
     unit_system: UnitSystem
 
     def convert(
@@ -85,27 +88,6 @@ class ConnectionTransmissibilities(typing.NamedTuple):
         )
 
 
-def get_face_transmissibility_map(
-    grid: Grid, transmissibilities: ConnectionTransmissibilities
-) -> dict[int, Number]:
-    """
-    Build a {global_face_index: transmissibility} dict for single-face lookups.
-
-    Interior faces map to their full harmonic-mean T.
-    Boundary faces map to their owner half-T.
-
-    :param grid: The grid whose face indices define the mapping.
-    :param transmissibilities: Precomputed transmissibilities for that grid.
-    :returns: Dict mapping global face index to transmissibility value.
-    """
-    result: dict[int, Number] = {}
-    for position, global_face_idx in enumerate(grid.interior_face_indices):
-        result[int(global_face_idx)] = transmissibilities.interior[position]
-    for position, global_face_idx in enumerate(grid.boundary_face_indices):
-        result[int(global_face_idx)] = transmissibilities.boundary[position]
-    return result
-
-
 def compute_connection_transmissibilities(
     grid: Grid,
     rock: Rock,
@@ -117,11 +99,10 @@ def compute_connection_transmissibilities(
     """
     Compute TPFA transmissibilities for all connections in an unstructured grid.
 
-    Permeability is projected onto each face normal:
-
-    ```text
-    K_proj = |nx|·Kx + |ny|·Ky + |nz|·Kz
-    ```
+    Each cell's half-transmissibility toward a face is
+    `A · |(K n) · c| / |c|²`, with `c` the vector from the cell centroid to the face centroid
+    and `K = diag(Kx, Ky, Kz)`. This is exact for orthogonal grids and stays consistent for
+    tilted and skewed faces.
 
     **Interior / boundary faces** use the standard harmonic-mean / half-T formulas.
 
@@ -246,6 +227,47 @@ def compute_connection_transmissibilities(
     )
 
 
+@numba.njit(cache=True, inline="always")
+def compute_half_transmissibility(
+    kx: Number,
+    ky: Number,
+    kz: Number,
+    normal_x: Number,
+    normal_y: Number,
+    normal_z: Number,
+    area: Number,
+    offset_x: Number,
+    offset_y: Number,
+    offset_z: Number,
+) -> Number:
+    """
+    One cell's half-transmissibility toward a face.
+
+    `T = A · |(K n) · c| / |c|²`, with `c` the vector from the cell centroid to the face
+    centroid and `n` the face normal. For a diagonal permeability tensor `K`. For a face
+    perpendicular to an axis through the cell centroid this reduces to `K A / d`; on a skewed
+    or tilted face it keeps the flow driven by the permeability along `c` and the distance
+    along `c`, rather than treating the normal as the flow direction.
+
+    :param kx: Effective permeability along x.
+    :param ky: Effective permeability along y.
+    :param kz: Effective permeability along z.
+    :param normal_x: x component of the face unit normal.
+    :param normal_y: y component of the face unit normal.
+    :param normal_z: z component of the face unit normal.
+    :param area: Face area.
+    :param offset_x: x of the vector from the cell centroid to the face centroid.
+    :param offset_y: y of that vector.
+    :param offset_z: z of that vector.
+    :returns: The half-transmissibility, zero for a cell centroid on its own face.
+    """
+    squared_distance = offset_x * offset_x + offset_y * offset_y + offset_z * offset_z
+    if squared_distance <= 0.0:
+        return 0.0
+    projected = kx * normal_x * offset_x + ky * normal_y * offset_y + kz * normal_z * offset_z
+    return area * abs(projected) / squared_distance
+
+
 @numba.njit(parallel=True, cache=True)
 def compute_interior_tpfa_transmissibilities(
     interior_face_indices: IntArray[OneDimension],
@@ -262,14 +284,7 @@ def compute_interior_tpfa_transmissibilities(
     """
     Harmonic-mean TPFA transmissibilities for all interior faces.
 
-    For each interior face the half-T of cell *c* is:
-
-    ```text
-    K_c = |nx|·Kx_c + |ny|·Ky_c + |nz|·Kz_c
-    T_c = K_c · area / d_c
-    ```
-
-    Full harmonic T: `T_A · T_B / (T_A + T_B)`.
+    The half-T of each cell comes from `compute_half_transmissibility`. Full harmonic T: `T_A · T_B / (T_A + T_B)`.
 
     :param interior_face_indices: Shape `(n_interior,)`.
     :param face_cell_indices: Shape `(n_faces, 2)`.
@@ -291,32 +306,39 @@ def compute_interior_tpfa_transmissibilities(
         owner = face_cell_indices[face_idx, 0]
         neighbour = face_cell_indices[face_idx, 1]
 
-        nx = abs(face_unit_normals[face_idx, 0])
-        ny = abs(face_unit_normals[face_idx, 1])
-        nz = abs(face_unit_normals[face_idx, 2])
+        nx = face_unit_normals[face_idx, 0]
+        ny = face_unit_normals[face_idx, 1]
+        nz = face_unit_normals[face_idx, 2]
         area = face_areas[face_idx]
 
         fx = face_centroids[face_idx, 0]
         fy = face_centroids[face_idx, 1]
         fz = face_centroids[face_idx, 2]
 
-        dx_a = fx - cell_centroids[owner, 0]
-        dy_a = fy - cell_centroids[owner, 1]
-        dz_a = fz - cell_centroids[owner, 2]
-        d_a = (dx_a * dx_a + dy_a * dy_a + dz_a * dz_a) ** 0.5
-        k_a = nx * effective_kx[owner] + ny * effective_ky[owner] + nz * effective_kz[owner]
-        T_a = k_a * area / d_a if d_a > 0.0 else 0.0
-
-        dx_b = fx - cell_centroids[neighbour, 0]
-        dy_b = fy - cell_centroids[neighbour, 1]
-        dz_b = fz - cell_centroids[neighbour, 2]
-        d_b = (dx_b * dx_b + dy_b * dy_b + dz_b * dz_b) ** 0.5
-        k_b = (
-            nx * effective_kx[neighbour]
-            + ny * effective_ky[neighbour]
-            + nz * effective_kz[neighbour]
+        T_a = compute_half_transmissibility(
+            kx=effective_kx[owner],  # type: ignore[arg-type]
+            ky=effective_ky[owner],  # type: ignore[arg-type]
+            kz=effective_kz[owner],  # type: ignore[arg-type]
+            normal_x=nx,
+            normal_y=ny,
+            normal_z=nz,
+            area=area,  # type: ignore[arg-type]
+            offset_x=fx - cell_centroids[owner, 0],
+            offset_y=fy - cell_centroids[owner, 1],
+            offset_z=fz - cell_centroids[owner, 2],
         )
-        T_b = k_b * area / d_b if d_b > 0.0 else 0.0
+        T_b = compute_half_transmissibility(
+            kx=effective_kx[neighbour],  # type: ignore[arg-type]
+            ky=effective_ky[neighbour],  # type: ignore[arg-type]
+            kz=effective_kz[neighbour],  # type: ignore[arg-type]
+            normal_x=nx,
+            normal_y=ny,
+            normal_z=nz,
+            area=area,  # type: ignore[arg-type]
+            offset_x=fx - cell_centroids[neighbour, 0],
+            offset_y=fy - cell_centroids[neighbour, 1],
+            offset_z=fz - cell_centroids[neighbour, 2],
+        )
 
         if T_a + T_b > 0.0:
             transmissibilities[idx] = (T_a * T_b) / (T_a + T_b)
@@ -340,7 +362,7 @@ def compute_boundary_half_transmissibilities(
     """
     Owner half-transmissibilities for all boundary faces.
 
-    Formula: `T_half = K_owner · area / d_owner`.
+    The half-T comes from `compute_half_transmissibility`.
 
     :param boundary_face_indices: Shape `(n_boundary,)`.
     :param face_cell_indices: Shape `(n_faces, 2)`.
@@ -361,23 +383,18 @@ def compute_boundary_half_transmissibilities(
         face_idx = boundary_face_indices[idx]
         owner = face_cell_indices[face_idx, 0]
 
-        nx = abs(face_unit_normals[face_idx, 0])
-        ny = abs(face_unit_normals[face_idx, 1])
-        nz = abs(face_unit_normals[face_idx, 2])
-        area = face_areas[face_idx]
-
-        fx = face_centroids[face_idx, 0]
-        fy = face_centroids[face_idx, 1]
-        fz = face_centroids[face_idx, 2]
-
-        dx = fx - cell_centroids[owner, 0]
-        dy = fy - cell_centroids[owner, 1]
-        dz = fz - cell_centroids[owner, 2]
-        d = (dx * dx + dy * dy + dz * dz) ** 0.5
-
-        k = nx * effective_kx[owner] + ny * effective_ky[owner] + nz * effective_kz[owner]
-        if d > 0.0:
-            transmissibilities[idx] = k * area / d
+        transmissibilities[idx] = compute_half_transmissibility(
+            kx=effective_kx[owner],  # type: ignore[arg-type]
+            ky=effective_ky[owner],  # type: ignore[arg-type]
+            kz=effective_kz[owner],  # type: ignore[arg-type]
+            normal_x=face_unit_normals[face_idx, 0],
+            normal_y=face_unit_normals[face_idx, 1],
+            normal_z=face_unit_normals[face_idx, 2],
+            area=face_areas[face_idx],  # type: ignore[arg-type]
+            offset_x=face_centroids[face_idx, 0] - cell_centroids[owner, 0],
+            offset_y=face_centroids[face_idx, 1] - cell_centroids[owner, 1],
+            offset_z=face_centroids[face_idx, 2] - cell_centroids[owner, 2],
+        )
 
     return transmissibilities
 

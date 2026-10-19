@@ -336,7 +336,6 @@ def load_case(
         rock = Rock.from_deck(
             deck_file,
             grid=grid,
-            rock_region=regions.rock_region,
             satfunc=satfunc,
             saturation_region=regions.saturation_region,
             interpolation_method=interpolation_method,

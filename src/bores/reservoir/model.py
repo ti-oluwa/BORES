@@ -2,6 +2,7 @@
 
 import typing
 
+import numpy as np
 from typing_extensions import Self
 
 from bores.errors import ValidationError
@@ -12,13 +13,11 @@ from bores.reservoir.rock import Rock
 from bores.reservoir.transmissibility import (
     ConnectionTransmissibilities,
     compute_connection_transmissibilities,
-    get_face_transmissibility_map,
 )
 from bores.types import CellArray, Number, UnitSystem
 from bores.units import (
     UnitConversionTable,
     build_unit_conversion_table,
-    get_conversion_factors,
 )
 
 __all__ = ["Reservoir"]
@@ -50,6 +49,35 @@ def validate_rock(rock: Rock, n_cells: int) -> Rock:
     return rock
 
 
+def validate_regions(regions: Regions, n_cells: int) -> Regions:
+    """
+    Verify that every region array in `regions` has length `n_cells` and holds region
+    numbers of at least 1.
+
+    :param regions: `Regions` to validate.
+    :param n_cells: Expected array length.
+    :raises ValidationError: On any mismatch or region number below 1.
+    """
+    for name in (
+        "pvt_region",
+        "saturation_region",
+        "imbibition_region",
+        "equilibrium_region",
+        "rock_region",
+        "fluid_in_place_region",
+    ):
+        array = getattr(regions, name)
+        if array is None:
+            continue
+        if array.shape != (n_cells,):
+            raise ValidationError(
+                f"`regions.{name}` has shape {array.shape}; expected ({n_cells},)."
+            )
+        if array.size > 0 and int(array.min()) < 1:
+            raise ValidationError(f"`regions.{name}` holds region numbers below 1.")
+    return regions
+
+
 class Reservoir:
     """
     Reservoir characterization.
@@ -60,7 +88,6 @@ class Reservoir:
     """
 
     __slots__ = (
-        "_face_transmissibility_map",
         "_transmissibilities",
         "faults",
         "grid",
@@ -68,9 +95,6 @@ class Reservoir:
         "rock",
         "unit_system",
     )
-
-    # TODO: Add flag to track fault application, so the
-    # same faults are not applied twice when the reservoir is dumped and loaded
 
     def __init__(
         self,
@@ -89,11 +113,13 @@ class Reservoir:
         :param faults: Optional collection of `Fault` objects to apply to the grid.
         :param unit_system: Target unit system for all property groups. When `None`, defaults
             to `grid.unit_system`.
-        :raises ValidationError: If any array length in `rock`, `state`, or `hysteresis` does not
-            match `grid.n_cells`, or if `datum_depth` is negative.
+        :raises ValidationError: If any array length in `rock` or `regions` does not match
+            `grid.n_cells`, or a region number is below 1.
         """
         n_cells = grid.n_cells
         validate_rock(rock, n_cells)
+        if regions is not None:
+            validate_regions(regions, n_cells)
 
         target_unit_system = unit_system if unit_system is not None else grid.unit_system
         unit_conversion_table = build_unit_conversion_table()
@@ -125,7 +151,6 @@ class Reservoir:
         Matches `grid.unit_system` by construction.
         """
         self._transmissibilities: ConnectionTransmissibilities | None = None
-        self._face_transmissibility_map: dict[int, Number] | None = None
 
     @property
     def n_cells(self) -> int:
@@ -175,7 +200,8 @@ class Reservoir:
         """
         Shape `(n_cells,)` - bulk pore volume of each active cell.
 
-        Computed as `φ x NTG x Vcell`.
+        Computed as `φ x NTG x Vcell`. This is the pore volume at the rock's reference
+        pressure. Use `compute_pore_volumes` for the pore volume at another pressure.
 
         Units: ft³ (FIELD), m³ (METRIC / SI), cm³ (LAB).
         """
@@ -186,6 +212,23 @@ class Reservoir:
         return (  # type: ignore[return-value]
             self.rock.porosity * self.rock.net_to_gross * self.grid.cell_volumes
         )
+
+    def compute_pore_volumes(self, pressure: CellArray) -> CellArray:
+        """
+        Computes pore volume of each cell at `pressure`, with rock compaction.
+
+        Returns `pore_volumes` times the rock's pore volume multiplier.
+        Equal to `pore_volumes` when the rock has no compressibility data.
+
+        :param pressure: Shape `(n_cells,)` cell pressures in `unit_system`.
+        :returns: Pore volumes in the same units as `pore_volumes`.
+        """
+        multiplier = self.rock.get_pore_volume_multiplier(
+            pressure=pressure,
+            rock_region=self.regions.rock_region if self.regions is not None else None,
+            dtype=self.pore_volumes.dtype,
+        )
+        return typing.cast(CellArray, self.pore_volumes * multiplier)
 
     @property
     def hydrocarbon_pore_volumes(self) -> CellArray:
@@ -212,8 +255,7 @@ class Reservoir:
         - `interior`      - shape `(n_interior,)` harmonic-mean T.
         - `boundary`      - shape `(n_boundary,)` owner half-T.
         - `nnc`           - shape `(n_nnc,)` or `None`.
-        - `interior_map`  - global face index for each interior entry.
-        - `boundary_map`  - global face index for each boundary entry.
+        - `unit_system`   - the unit system the values are in.
 
         To force recomputation (e.g. after updating `rock`), call
         `invalidate_transmissibilities()` first.
@@ -226,14 +268,6 @@ class Reservoir:
             self._transmissibilities = transmissibilities
         return self._transmissibilities
 
-    @property
-    def face_transmissibility_map(self) -> dict[int, Number]:
-        if self._face_transmissibility_map is None:
-            self._face_transmissibility_map = get_face_transmissibility_map(
-                self.grid, self.transmissibilities
-            )
-        return self._face_transmissibility_map
-
     def invalidate_transmissibilities(self) -> None:
         """
         Clear the cached transmissibilities.
@@ -243,7 +277,6 @@ class Reservoir:
         `transmissibilities` triggers a fresh computation.
         """
         self._transmissibilities = None
-        self._face_transmissibility_map = None
 
     def convert(
         self,
@@ -265,7 +298,6 @@ class Reservoir:
             return self
 
         table = table or build_unit_conversion_table()
-        get_conversion_factors(self.unit_system, target, table=table)
         new_model = self.__class__(
             grid=self.grid.convert(target, table=table),
             rock=self.rock.convert(target, table=table),
@@ -282,15 +314,17 @@ class Reservoir:
         Return the transmissibility (or half-transmissibility for boundary) of a single face.
 
         :param face_index: Index into `grid.face_cell_indices`.
-        :returns: Transmissibility in grid units (mD·ft in FIELD etc.).
+        :returns: Geometric transmissibility `K·A/d` (mD·ft in FIELD etc.), without the Darcy
+            unit constant.
         :raises KeyError: If `face_index` is not a valid face.
         """
-        t = self.face_transmissibility_map.get(face_index)
-        if t is None:
-            raise KeyError(
-                f"Face {face_index} not found in interior or boundary faces of this grid."
-            )
-        return t
+        position = np.flatnonzero(self.grid.interior_face_indices == face_index)
+        if position.size > 0:
+            return typing.cast(Number, self.transmissibilities.interior[position[0]])
+        position = np.flatnonzero(self.grid.boundary_face_indices == face_index)
+        if position.size > 0:
+            return typing.cast(Number, self.transmissibilities.boundary[position[0]])
+        raise KeyError(f"Face {face_index} not found in interior or boundary faces of this grid.")
 
     def summary(self) -> dict[str, typing.Any]:
         """

@@ -1050,6 +1050,16 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         ),
         unit="dimensionless",
     ),
+    "HYSTERESIS_SATURATION_TOLERANCE": Constant(
+        value=1e-6,
+        description=(
+            "Smallest saturation change between two time steps that counts as a phase "
+            "moving up or down for hysteresis tracking. Smaller changes are treated as no "
+            "movement, so solver round-off cannot flip a cell between drainage and "
+            "imbibition or move its reversal saturation."
+        ),
+        unit="dimensionless",
+    ),
     "AQUIFER_BESSEL_SERIES_TERMS": Constant(
         value=30,
         description=("Empirically validated safety margin for the Klins finite-aquifer series"),

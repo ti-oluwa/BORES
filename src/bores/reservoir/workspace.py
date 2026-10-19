@@ -8,11 +8,12 @@ from typing_extensions import Self
 
 from bores.precision import get_dtype
 from bores.reservoir.mass import compute_masses
-from bores.reservoir.state import Hysteresis, ReservoirState
+from bores.reservoir.state import Hysteresis, ReservoirState, advance_phase_hysteresis
 from bores.types import (
     BooleanCellArray,
     CellArray,
     IntCellArray,
+    Number,
     NumberArray,
     OneDimension,
     UnitSystem,
@@ -140,6 +141,7 @@ class HysteresisWorkspace(typing.NamedTuple):
         gas_saturation: CellArray,
         previous_water_saturation: CellArray,
         previous_gas_saturation: CellArray,
+        tolerance: Number | None = None,
     ) -> None:
         """
         Update the workspace in-place from current and previous saturations.
@@ -148,78 +150,31 @@ class HysteresisWorkspace(typing.NamedTuple):
         :param gas_saturation: Current gas saturation per cell (fraction).
         :param previous_water_saturation: Previous water saturation per cell (fraction).
         :param previous_gas_saturation: Previous gas saturation per cell (fraction).
+        :param tolerance: Smallest saturation change that counts as a phase moving.
+            `HYSTERESIS_SATURATION_TOLERANCE` if not given.
         """
-        update_hysteresis_workspace(
-            workspace=self,
-            water_saturation=water_saturation,
-            gas_saturation=gas_saturation,
-            previous_water_saturation=previous_water_saturation,
-            previous_gas_saturation=previous_gas_saturation,
+        advance_phase_hysteresis(
+            new_saturation=water_saturation,
+            previous_saturation=previous_water_saturation,
+            max_saturation=self.max_water_saturation,
+            imbibition_flag=self.water_imbibition_flag,
+            reversal_saturation=self.water_reversal_saturation,
+            tolerance=tolerance,
+            out_max_saturation=self.max_water_saturation,
+            out_imbibition_flag=self.water_imbibition_flag,
+            out_reversal_saturation=self.water_reversal_saturation,
         )
-
-
-def update_phase_hysteresis(
-    new_saturation: CellArray,
-    previous_saturation: CellArray,
-    max_saturation: CellArray,
-    imbibition_flag: BooleanCellArray,
-    reversal_saturation: CellArray,
-) -> None:
-    """
-    Update one phase's hysteresis arrays in place for every cell.
-
-    The reversal array is updated before the historical maximum so a
-    drainage reversal records the maximum from before this timestep.
-
-    :param new_saturation: Current phase saturation per cell.
-    :param previous_saturation: Previous phase saturation per cell.
-    :param max_saturation: Historical maximum, updated in place.
-    :param imbibition_flag: Imbibition flags, updated in place.
-    :param reversal_saturation: Reversal saturations, updated in place.
-    """
-    increasing = new_saturation > previous_saturation
-    decreasing = new_saturation < previous_saturation
-    turned_to_drainage = imbibition_flag & decreasing
-    turned_to_imbibition = ~imbibition_flag & increasing
-
-    np.copyto(reversal_saturation, max_saturation, where=turned_to_drainage)
-    np.copyto(reversal_saturation, previous_saturation, where=turned_to_imbibition)
-    np.maximum(max_saturation, new_saturation, out=max_saturation)
-    np.copyto(imbibition_flag, True, where=increasing)
-    np.copyto(imbibition_flag, False, where=decreasing)
-
-
-def update_hysteresis_workspace(
-    workspace: HysteresisWorkspace,
-    *,
-    water_saturation: CellArray,
-    gas_saturation: CellArray,
-    previous_water_saturation: CellArray,
-    previous_gas_saturation: CellArray,
-) -> None:
-    """
-    Update a `HysteresisWorkspace` in-place from current and previous saturations.
-
-    :param workspace: The hysteresis workspace to update.
-    :param water_saturation: Current water saturation per cell (fraction).
-    :param gas_saturation: Current gas saturation per cell (fraction).
-    :param previous_water_saturation: Previous water saturation per cell (fraction).
-    :param previous_gas_saturation: Previous gas saturation per cell (fraction).
-    """
-    update_phase_hysteresis(
-        new_saturation=water_saturation,
-        previous_saturation=previous_water_saturation,
-        max_saturation=workspace.max_water_saturation,
-        imbibition_flag=workspace.water_imbibition_flag,
-        reversal_saturation=workspace.water_reversal_saturation,
-    )
-    update_phase_hysteresis(
-        new_saturation=gas_saturation,
-        previous_saturation=previous_gas_saturation,
-        max_saturation=workspace.max_gas_saturation,
-        imbibition_flag=workspace.gas_imbibition_flag,
-        reversal_saturation=workspace.gas_reversal_saturation,
-    )
+        advance_phase_hysteresis(
+            new_saturation=gas_saturation,
+            previous_saturation=previous_gas_saturation,
+            max_saturation=self.max_gas_saturation,
+            imbibition_flag=self.gas_imbibition_flag,
+            reversal_saturation=self.gas_reversal_saturation,
+            tolerance=tolerance,
+            out_max_saturation=self.max_gas_saturation,
+            out_imbibition_flag=self.gas_imbibition_flag,
+            out_reversal_saturation=self.gas_reversal_saturation,
+        )
 
 
 class ReservoirWorkspace(typing.NamedTuple):

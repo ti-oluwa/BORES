@@ -33,7 +33,7 @@ def compute_incremental_influx(
     initial_encroachable_water: Number,
     initial_pressure: Number,
     elapsed_time: Number,
-) -> tuple[Number, Number]:
+) -> tuple[Number, Number, Number]:
     """
     One Fetkovich (1971) recursive step.
 
@@ -66,20 +66,20 @@ def compute_incremental_influx(
         encroachable capacity (reservoir volume).
     :param initial_pressure: `p_i`, the aquifer's initial pressure (pressure).
     :param elapsed_time: Time since the last committed state (time).
-    :returns: `(new_cumulative_influx, new_aquifer_pressure)`, computed
-        from the last committed state and `boundary_pressure`, not
-        written anywhere.
+    :returns: `(new_cumulative_influx, new_aquifer_pressure, d_influx_d_boundary_pressure)`,
+        computed from the last committed state and `boundary_pressure`, not written anywhere.
+        The last value is how much the cumulative influx changes per unit of boundary
+        pressure, for the Newton Jacobian.
     """
     pressure_drop = previous_aquifer_pressure - boundary_pressure
     exponent = -productivity_index * initial_pressure * elapsed_time / initial_encroachable_water
-    incremental_influx = (
-        (initial_encroachable_water / initial_pressure) * pressure_drop * (1.0 - np.exp(exponent))
-    )
+    capacity_factor = (initial_encroachable_water / initial_pressure) * (1.0 - np.exp(exponent))
+    incremental_influx = capacity_factor * pressure_drop
     new_cumulative_influx = previous_cumulative_influx + incremental_influx
     new_aquifer_pressure = initial_pressure * (
         1.0 - new_cumulative_influx / initial_encroachable_water
     )
-    return new_cumulative_influx, new_aquifer_pressure
+    return new_cumulative_influx, new_aquifer_pressure, -capacity_factor
 
 
 @attrs.frozen(slots=True)

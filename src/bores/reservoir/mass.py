@@ -20,7 +20,7 @@ class Masses(typing.NamedTuple):
     """Per-cell phase masses, one row per cell."""
 
     oil_mass: CellArray
-    """Shape `(n_cells,)`. Stock-tank oil mass in place, including dissolved gas."""
+    """Shape `(n_cells,)`. Stock-tank oil mass in place, excluding its dissolved gas."""
 
     water_mass: CellArray
     """Shape `(n_cells,)`. Stock-tank water mass in place."""
@@ -34,8 +34,7 @@ class Masses(typing.NamedTuple):
     dissolved_gas_mass_in_water: CellArray
     """
     Shape `(n_cells,)`. Gas mass dissolved in the water phase, `Rsw`-derived.
-    Zero wherever `gas_solubility_in_water` isn't given, or a `PVTNUM`
-    region has no `stock_tank_gas_density`.
+    Zero wherever `gas_solubility_in_water` isn't given.
     """
 
     vaporized_oil_mass_in_gas: CellArray
@@ -73,9 +72,8 @@ def compute_masses(
     :param gas_saturation: Shape `(n_cells,)`.
     :param solution_gor: `Rs`, shape `(n_cells,)`.
     :param vaporized_oil_gas_ratio: `Rv`, shape `(n_cells,)`.
-    :param pore_volumes: Pore volume at `pressure` (i.e. already scaled by
-        `rock.compressibility_table.pore_volume_multiplier(pressure)` where
-        rock compressibility applies), shape `(n_cells,)`.
+    :param pore_volumes: Pore volume at `pressure`, shape `(n_cells,)`. Use
+        `Reservoir.compute_pore_volumes(pressure)`, which applies rock compaction.
     :param pvt: PVT tables to evaluate `Bo`/`Bg`/`Bw` and stock-tank
         densities from, by `PVTNUM` region.
     :param pvt_region_index: `PVTNUM` per cell. All region `1` if not given.
@@ -89,9 +87,9 @@ def compute_masses(
     :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
     :returns: `Masses` for every cell.
     :raises ValidationError: If a `PVTNUM` region needed by at least one
-        cell has no oil PVT table, no `stock_tank_oil_density`, or is
+        cell has no oil PVT table, no `stock_tank_oil_density`, is
         missing a gas/water PVT table for a cell with nonzero gas/water
-        saturation.
+        saturation, or has no `stock_tank_gas_density` where gas is free or dissolved in oil.
     """
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
     n_cells = len(pressure)
@@ -195,7 +193,12 @@ def compute_masses(
                     rsw * water_mass[mask] * (rho_g_sc / rho_w_sc) * volume_correction
                 )
 
-        if rho_g_sc is not None:
+        if np.any(rs > 0.0):
+            if rho_g_sc is None:
+                raise ValidationError(
+                    f"`PVTNUM` {pvtnum}: `stock_tank_gas_density` is required to compute the "
+                    "mass of gas dissolved in oil, but solution gas-oil ratio is nonzero."
+                )
             dissolved_gas_mass_in_oil[mask] = (
                 rs * oil_mass[mask] * (rho_g_sc / rho_o_sc) * volume_correction
             )

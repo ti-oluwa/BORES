@@ -296,6 +296,31 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
     def get_gas_oil_wetting_phase(self) -> FluidPhase:
         return typing.cast(FluidPhase, self.wetting_phase)
 
+    def get_reference_axis_phase(self) -> FluidPhase:
+        """
+        The phase whose saturation is this table's reference axis: the wetting phase for
+        `reference_phase="wetting"`, otherwise the non-wetting phase.
+        """
+        return typing.cast(
+            FluidPhase,
+            self.wetting_phase if self.reference_phase == "wetting" else self.non_wetting_phase,
+        )
+
+    def get_connate_water_saturation(self) -> Number:
+        """
+        Connate water saturation (swco), read off this table's own saturation axis.
+        `0.0` if water is not one of the table's two phases.
+
+        - Water axis: the axis minimum, `swco = Sw_min`.
+        - Oil or gas axis: that phase's saturation is largest at connate water, so
+          `swco = 1 - S_max`.
+        """
+        if FluidPhase.WATER not in {self.wetting_phase, self.non_wetting_phase}:
+            return 0.0
+        if self.get_reference_axis_phase() == FluidPhase.WATER:
+            return float(self.reference_saturation[0])
+        return float(1.0 - self.reference_saturation[-1])
+
     def resolve_reference_saturation(
         self,
         wetting_saturation: NumberOrArray[NDimension],
@@ -760,6 +785,86 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
         raise ValidationError(f"`system` must be 'oil_water' or 'gas_oil'; got {system!r}.")
 
 
+def query_oil_water_capillary_pressure(
+    table: TwoPhaseCapillaryPressureTable,
+    water_saturation: NumberOrArray[NDimension],
+    derivative: bool = False,
+) -> NumberOrArray[NDimension]:
+    """
+    Query an oil-water table at the current water saturation, with the oil saturation of
+    the two-phase system `So = 1 - Sw`. `Pcow` is a function of `Sw` only.
+
+    With `derivative=True`, the result is the derivative with respect to `Sw`, with the sign
+    handled for a table whose reference axis is oil.
+
+    :param table: Oil-water capillary pressure table.
+    :param water_saturation: Water saturation.
+    :param derivative: Return `dPcow/dSw` instead of `Pcow`.
+    :return: Oil-water capillary pressure or its derivative with respect to `Sw`.
+    """
+    oil_saturation: NumberOrArray[NDimension] = np.clip(1.0 - water_saturation, 0.0, 1.0)  # type: ignore[assignment]
+    wetting_saturation: NumberOrArray[NDimension]
+    non_wetting_saturation: NumberOrArray[NDimension]
+    if table.wetting_phase == FluidPhase.WATER:
+        wetting_saturation, non_wetting_saturation = water_saturation, oil_saturation
+    else:
+        wetting_saturation, non_wetting_saturation = oil_saturation, water_saturation
+
+    if not derivative:
+        return table.get_capillary_pressure(
+            wetting_saturation=wetting_saturation,  # type: ignore[arg-type]
+            non_wetting_saturation=non_wetting_saturation,  # type: ignore[arg-type]
+        )
+    slope = table.get_capillary_pressure_derivative(
+        wetting_saturation=wetting_saturation,  # type: ignore[arg-type]
+        non_wetting_saturation=non_wetting_saturation,  # type: ignore[arg-type]
+    )
+    # The table's axis is So = 1 - Sw when it is not water
+    return slope if table.get_reference_axis_phase() == FluidPhase.WATER else -slope
+
+
+def query_gas_oil_capillary_pressure(
+    table: TwoPhaseCapillaryPressureTable,
+    gas_saturation: NumberOrArray[NDimension],
+    connate_water_saturation: Number,
+    derivative: bool = False,
+) -> NumberOrArray[NDimension]:
+    """
+    Query a gas-oil table at the current gas saturation, with the oil saturation of the
+    two-phase system at connate water, `So = 1 - swc - Sg`. `Pcgo` is a function of `Sg` only.
+
+    With `derivative=True`, the result is the derivative with respect to `Sg`, with the sign
+    handled for a table whose reference axis is oil.
+
+    :param table: Gas-oil capillary pressure table.
+    :param gas_saturation: Gas saturation.
+    :param connate_water_saturation: Connate water saturation of the system.
+    :param derivative: Return `dPcgo/dSg` instead of `Pcgo`.
+    :return: Gas-oil capillary pressure or its derivative with respect to `Sg`.
+    """
+    oil_saturation: NumberOrArray[NDimension] = np.clip(  # type: ignore[assignment]
+        1.0 - connate_water_saturation - gas_saturation, 0.0, 1.0
+    )
+    wetting_saturation: NumberOrArray[NDimension]
+    non_wetting_saturation: NumberOrArray[NDimension]
+    if table.wetting_phase == FluidPhase.OIL:
+        wetting_saturation, non_wetting_saturation = oil_saturation, gas_saturation
+    else:
+        wetting_saturation, non_wetting_saturation = gas_saturation, oil_saturation
+
+    if not derivative:
+        return table.get_capillary_pressure(
+            wetting_saturation=wetting_saturation,  # type: ignore[arg-type]
+            non_wetting_saturation=non_wetting_saturation,  # type: ignore[arg-type]
+        )
+    slope = table.get_capillary_pressure_derivative(
+        wetting_saturation=wetting_saturation,  # type: ignore[arg-type]
+        non_wetting_saturation=non_wetting_saturation,  # type: ignore[arg-type]
+    )
+    # The table's axis is So = 1 - swc - Sg when it is not gas
+    return slope if table.get_reference_axis_phase() == FluidPhase.GAS else -slope
+
+
 @attrs.frozen(slots=True)
 class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
     """
@@ -854,6 +959,10 @@ class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
     def get_gas_oil_wetting_phase(self) -> FluidPhase:
         return typing.cast(FluidPhase, self.gas_oil_table.wetting_phase)
 
+    def get_connate_water_saturation(self) -> Number:
+        """Connate water saturation, read off the oil-water table's saturation axis."""
+        return self.oil_water_table.get_connate_water_saturation()
+
     def evaluate(
         self,
         water_saturation: NumberOrArray[NDimension],
@@ -864,16 +973,10 @@ class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
         """
         Compute capillary pressures for the three-phase system.
 
-        Each sub-table is queried using its declared `reference_phase`:
-
-        - `reference_phase="wetting"` - the wetting-phase saturation is passed.
-        - `reference_phase="non_wetting"` - the non-wetting-phase saturation is
-        passed.
-
-        For the oil-water table the wetting phase is either WATER or OIL.
-        For the gas-oil table the wetting phase is always OIL, but the table may
-        be indexed by So (`reference_phase="wetting"`) or by Sg
-        (`reference_phase="non_wetting"`).
+        `Pcow` is a function of `Sw` only and `Pcgo` of `Sg` only: each two-phase table is
+        queried at its own system's saturations (`So = 1 - Sw` for oil-water and
+        `So = 1 - swc - Sg` for gas-oil), whichever phase its reference axis uses. The
+        connate water saturation is read off the oil-water table's axis.
 
         Returned values are in the shared `self.dtype` and `self.unit_system`.
 
@@ -882,36 +985,11 @@ class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
         :param gas_saturation: Gas saturation (fraction, 0-1).
         :return: `CapillaryPressures` dictionary.
         """
-        oil_water_table = self.oil_water_table
-        gas_oil_table = self.gas_oil_table
-
-        # Oil-water capillary pressure. Dispatch to the wetting-phase saturation
-        if oil_water_table.wetting_phase == FluidPhase.WATER:
-            pcow = oil_water_table.get_capillary_pressure(
-                wetting_saturation=water_saturation,
-                non_wetting_saturation=oil_saturation,
-            )
-        else:
-            # Oil is the wetting phase
-            pcow = oil_water_table.get_capillary_pressure(
-                wetting_saturation=oil_saturation,
-                non_wetting_saturation=water_saturation,
-            )
-
-        # Gas-oil capillary pressure. Dispatch to the correct saturation
-        # depending on the table's reference_phase axis.
-        if gas_oil_table.wetting_phase == FluidPhase.OIL:
-            pcgo = gas_oil_table.get_capillary_pressure(
-                wetting_saturation=oil_saturation,
-                non_wetting_saturation=gas_saturation,
-            )
-        else:
-            # Gas is the wetting phase (uncommon but supported)
-            pcgo = gas_oil_table.get_capillary_pressure(
-                wetting_saturation=gas_saturation,
-                non_wetting_saturation=oil_saturation,
-            )
-
+        # Pcow depends on Sw only and Pcgo on Sg only (see the query helpers)
+        pcow = query_oil_water_capillary_pressure(self.oil_water_table, water_saturation)
+        pcgo = query_gas_oil_capillary_pressure(
+            self.gas_oil_table, gas_saturation, self.get_connate_water_saturation()
+        )
         return CapillaryPressures(oil_water=pcow, gas_oil=pcgo)  # type: ignore[typeddict-item]
 
     def derivatives(
@@ -925,26 +1003,11 @@ class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
         Compute the partial derivatives of the oil-water and gas-oil capillary
         pressures with respect to saturation.
 
-        Returns a `CapillaryPressureDerivatives` dictionary with four entries:
+        `Pcow` depends on `Sw` only and `Pcgo` on `Sg` only (see `evaluate`), so
+        `dpcow_dso` and `dpcgo_dso` are zero and the returned `dpcow_dsw` and `dpcgo_dsg` are
+        the exact PCHIP slopes of the two-phase tables with respect to `Sw` and `Sg`, with the
+        sign handled for a table indexed by oil saturation. All are cast to `self.dtype`.
 
-        - `dpcow_dsw`: non-zero when the oil-water table's reference axis is
-        water saturation (`wetting_phase=WATER, reference_phase="wetting"`).
-        - `dpcow_dso`: non-zero when the oil-water table's reference axis is oil
-        saturation (`wetting_phase=OIL, reference_phase="wetting"`).
-        - `dpcgo_dso`: non-zero when the gas-oil table's reference axis is oil
-        saturation (`reference_phase="wetting"`, the wetting phase being OIL).
-        - `dpcgo_dsg`: non-zero when the gas-oil table's reference axis is gas
-        saturation (`reference_phase="non_wetting"`, or gas is the wetting
-        phase with `reference_phase="wetting"`).
-
-        At most one of `dpcow_dsw` / `dpcow_dso` is non-zero, and at most one
-        of `dpcgo_dso` / `dpcgo_dsg` is non-zero, for a given table
-        configuration. All derivatives are exact PCHIP slopes from the
-        underlying two-phase tables, cast to the shared `self.dtype`.
-
-        :param water_saturation: Water saturation (scalar or array).
-        :param oil_saturation: Oil saturation (scalar or array).
-        :param gas_saturation: Gas saturation (scalar or array).
         :return: `CapillaryPressureDerivatives` dictionary in `self.dtype`.
         """
         dtype = self.dtype
@@ -959,76 +1022,20 @@ class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
         sw = np.atleast_1d(water_saturation)
         zero = dtype.type(0) if is_scalar else np.zeros(sw.shape, dtype=dtype)  # type: ignore
 
-        # Oil-water derivatives
-        if oil_water_table.wetting_phase == FluidPhase.WATER:
-            if oil_water_table.reference_phase == "wetting":
-                # Table indexed by Sw (wetting phase) -> derivative is dpcow/dsw
-                dpcow_dsw = oil_water_table.get_capillary_pressure_derivative(
-                    wetting_saturation=water_saturation,  # type: ignore[arg-type]
-                    non_wetting_saturation=oil_saturation,  # type: ignore[arg-type]
-                )
-                dpcow_dso = zero
-            else:
-                # reference_phase="non_wetting" and wetting_phase=WATER means
-                # table is indexed by So (non-wetting phase) -> derivative is dpcow/dso
-                dpcow_dsw = zero
-                dpcow_dso = oil_water_table.get_capillary_pressure_derivative(
-                    wetting_saturation=water_saturation,  # type: ignore[arg-type]
-                    non_wetting_saturation=oil_saturation,  # type: ignore[arg-type]
-                )
-        else:
-            # Oil is the wetting phase.  The reference_phase attribute then
-            # controls whether the table is indexed by So ("wetting") or Sw
-            # ("non_wetting").  Either way the derivative is with respect to
-            # whichever saturation is the reference axis.
-            if oil_water_table.reference_phase == "wetting":
-                # Table indexed by So -> derivative is dpcow/dso
-                dpcow_dsw = zero
-                dpcow_dso = oil_water_table.get_capillary_pressure_derivative(
-                    wetting_saturation=oil_saturation,  # type: ignore[arg-type]
-                    non_wetting_saturation=water_saturation,  # type: ignore[arg-type]
-                )
-            else:
-                # reference_phase="non_wetting" and wetting_phase=OIL means the
-                # table is indexed by water saturation (the non-wetting phase here
-                # is water) -> derivative is dpcow/dsw
-                dpcow_dsw = oil_water_table.get_capillary_pressure_derivative(
-                    wetting_saturation=oil_saturation,  # type: ignore[arg-type]
-                    non_wetting_saturation=water_saturation,  # type: ignore[arg-type]
-                )
-                dpcow_dso = zero
-
-        # Gas-oil derivatives
-        if gas_oil_table.wetting_phase == FluidPhase.OIL:
-            if gas_oil_table.reference_phase == "wetting":
-                # Table indexed by So -> derivative is dpcgo/dso
-                dpcgo_dso = gas_oil_table.get_capillary_pressure_derivative(
-                    wetting_saturation=oil_saturation,  # type: ignore[arg-type]
-                    non_wetting_saturation=gas_saturation,  # type: ignore[arg-type]
-                )
-                dpcgo_dsg = zero
-            else:
-                # reference_phase="non_wetting" -> table indexed by Sg
-                dpcgo_dso = zero
-                dpcgo_dsg = gas_oil_table.get_capillary_pressure_derivative(
-                    wetting_saturation=oil_saturation,  # type: ignore[arg-type]
-                    non_wetting_saturation=gas_saturation,  # type: ignore[arg-type]
-                )
-        else:
-            # Gas is the wetting phase (uncommon). reference_phase="wetting"
-            # means indexed by Sg, "non_wetting" means indexed by So.
-            if gas_oil_table.reference_phase == "wetting":
-                dpcgo_dso = zero
-                dpcgo_dsg = gas_oil_table.get_capillary_pressure_derivative(
-                    wetting_saturation=gas_saturation,  # type: ignore[arg-type]
-                    non_wetting_saturation=oil_saturation,  # type: ignore[arg-type]
-                )
-            else:
-                dpcgo_dso = gas_oil_table.get_capillary_pressure_derivative(
-                    wetting_saturation=gas_saturation,  # type: ignore[arg-type]
-                    non_wetting_saturation=oil_saturation,  # type: ignore[arg-type]
-                )
-                dpcgo_dsg = zero
+        # Pcow depends on Sw only and Pcgo on Sg only, so the other partials are zero
+        dpcow_dsw = query_oil_water_capillary_pressure(
+            oil_water_table,
+            water_saturation=water_saturation,  # type: ignore[arg-type]
+            derivative=True,
+        )
+        dpcow_dso = zero
+        dpcgo_dsg = query_gas_oil_capillary_pressure(
+            gas_oil_table,
+            gas_saturation=gas_saturation,  # type: ignore[arg-type]
+            connate_water_saturation=self.get_connate_water_saturation(),
+            derivative=True,
+        )
+        dpcgo_dso = zero
 
         return CapillaryPressureDerivatives(
             dpcow_dsw=dpcow_dsw,

@@ -235,12 +235,15 @@ def compile_boundary_conditions(
     `ConstantPressureBoundary` region appearing after an aquifer region
     on the same faces correctly overrides it, and vice versa.
 
-    :param boundary_conditions: The rich boundary condition set to compile.
+    :param boundary_conditions: The rich boundary condition set to compile. Converted to
+        the reservoir's unit system first when the two differ.
     :param reservoir: Supplies `.grid`, for resolving owner cells once.
     :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
     :returns: `CompiledBoundaryConditions`.
     """
-    resolved_dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+    resolved_dtype = np.dtype(dtype if dtype is not None else get_dtype())
+    if boundary_conditions.unit_system != reservoir.unit_system:
+        boundary_conditions = boundary_conditions.convert(reservoir.unit_system)
     n_boundary_faces = len(reservoir.grid.boundary_face_indices)
 
     static_pressure_values = np.zeros(n_boundary_faces, dtype=resolved_dtype)
@@ -256,8 +259,8 @@ def compile_boundary_conditions(
             CarterTracyAquifer | FetkovichAquifer,
         ]
     ] = []
-    face_pi_row: dict[int, int] = {}
-    face_aquifer_row: dict[int, int] = {}
+    face_pi_row = np.full(n_boundary_faces, -1, dtype=np.int64)
+    face_aquifer_row = np.full(n_boundary_faces, -1, dtype=np.int64)
 
     for region in boundary_conditions.regions:
         face_positions = typing.cast(
@@ -273,9 +276,8 @@ def compile_boundary_conditions(
         static_pressure_values[face_positions] = 0.0
         static_flux_values[face_positions] = 0.0
         static_is_dirichlet[face_positions] = False
-        for position in face_positions.tolist():
-            face_pi_row.pop(position, None)
-            face_aquifer_row.pop(position, None)
+        face_pi_row[face_positions] = -1
+        face_aquifer_row[face_positions] = -1
 
         if isinstance(condition, ConstantPressureBoundary):
             static_pressure_values[face_positions] = condition.pressure
@@ -287,13 +289,9 @@ def compile_boundary_conditions(
         elif isinstance(condition, (CarterTracyAquifer, FetkovichAquifer)):
             row = len(aquifer_regions)
             aquifer_regions.append((region.name, face_positions, region.face_weights, condition))
-            for position in face_positions.tolist():
-                face_aquifer_row[position] = row
-        else:
-            # `ProductivityIndexBoundary`, or any other FLUX/PRESSURE kind
-            # not covered above. Resolved generically via its own
-            # `pressure_boundary`/`productivity_index` fields.
-            pi_condition = typing.cast(ProductivityIndexBoundary, condition)
+            face_aquifer_row[face_positions] = row
+        elif isinstance(condition, ProductivityIndexBoundary):
+            pi_condition = condition
             row = len(pi_regions)
             pi_regions.append((
                 region.name,
@@ -301,13 +299,12 @@ def compile_boundary_conditions(
                 pi_condition.pressure_boundary,
                 pi_condition.productivity_index,
             ))
-            for position in face_positions.tolist():
-                face_pi_row[position] = row
-
-    # A region overridden by a later, different-kind region on some of its
-    # own faces should keep only the faces it still actually owns.
-    live_pi_faces = set(face_pi_row)
-    live_aquifer_faces = set(face_aquifer_row)
+            face_pi_row[face_positions] = row
+        else:
+            raise ValidationError(
+                f"Boundary region {region.name!r} has an unsupported condition type "
+                f"{type(condition).__name__!r}."
+            )
 
     # Productivity index table
     pi_owner_cells: list[Integer] = []
@@ -319,16 +316,10 @@ def compile_boundary_conditions(
     for original_row, (name, face_positions, pressure_boundary, productivity_index) in enumerate(
         pi_regions
     ):
+        # A region overridden by a later region on some of its faces keeps only the
+        # faces it still owns.
         kept_positions = typing.cast(
-            IntArray[OneDimension],
-            np.array(
-                [
-                    position
-                    for position in face_positions.tolist()
-                    if position in live_pi_faces and face_pi_row[position] == original_row
-                ],
-                dtype=np.int64,
-            ),
+            IntArray[OneDimension], face_positions[face_pi_row[face_positions] == original_row]
         )
         if kept_positions.shape[0] == 0:
             continue
@@ -386,13 +377,7 @@ def compile_boundary_conditions(
     for original_row, (name, face_positions, region_weights, condition) in enumerate(
         aquifer_regions
     ):
-        kept_mask = np.array(
-            [
-                position in live_aquifer_faces and face_aquifer_row[position] == original_row
-                for position in face_positions.tolist()
-            ],
-            dtype=np.bool_,
-        )
+        kept_mask = face_aquifer_row[face_positions] == original_row
         kept_positions = typing.cast(IntArray[OneDimension], face_positions[kept_mask])
         if kept_positions.shape[0] == 0:
             continue
@@ -508,8 +493,8 @@ def compile_boundary_conditions(
     )
     return CompiledBoundaryConditions(
         n_boundary_faces=n_boundary_faces,
-        static_pressure_values=static_pressure_values,
-        static_flux_values=static_flux_values,
+        static_pressure_values=typing.cast(NumberArray[OneDimension], static_pressure_values),
+        static_flux_values=typing.cast(NumberArray[OneDimension], static_flux_values),
         static_is_dirichlet=static_is_dirichlet,
         productivity_indices=productivity_indices,
         productivity_index_names=tuple(pi_names),

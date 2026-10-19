@@ -22,7 +22,7 @@ from bores.reservoir.workspace import (
     ReservoirWorkspace,
 )
 from bores.simulation.spec import RunSpec
-from bores.types import CellArray, Integer
+from bores.types import CellArray, Integer, Number
 from bores.wells.workspace import WellsWorkspace, build_wells_workspace
 
 __all__ = ["SimulationWorkspace", "build_simulation_workspace"]
@@ -75,6 +75,7 @@ def build_simulation_workspace(
     boundary_conditions: CompiledBoundaryConditions | None = None,
     hysteresis: Hysteresis | HysteresisWorkspace | None = None,
     salinity: CellArray | None = None,
+    start_time: Number = 0.0,
     dtype: npt.DTypeLike = None,
 ) -> SimulationWorkspace:
     """
@@ -89,6 +90,7 @@ def build_simulation_workspace(
     :param n_connections: Total active connections across every well.
     :param runspec: Simulation run settings controlling enabled physics terms such as gravity and capillary effects.
     :param boundary_conditions: The run's compiled boundary conditions, if any.
+    :param start_time: Simulation time the run starts at. Aquifers start responding then.
     :param dtype: Output array dtype for every buffer. `bores.precision.get_dtype()` if not given.
     :returns: The assembled `SimulationWorkspace`.
     """
@@ -140,7 +142,7 @@ def build_simulation_workspace(
         n_wells=n_wells, n_connections=n_connections, dtype=dtype
     )
     aquifer_workspace = (
-        build_aquifer_workspace(boundary_conditions.aquifers, dtype=dtype)
+        build_aquifer_workspace(boundary_conditions.aquifers, dtype=dtype, start_time=start_time)
         if boundary_conditions is not None
         else None
     )

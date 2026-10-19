@@ -269,6 +269,38 @@ class Rock:
     """
 
     def __attrs_post_init__(self) -> None:
+        for name, array, upper in (
+            ("porosity", self.porosity, 1.0),
+            ("net_to_gross", self.net_to_gross, 1.0),
+            ("connate_water_saturation", self.connate_water_saturation, 1.0),
+            ("irreducible_water_saturation", self.irreducible_water_saturation, 1.0),
+            ("residual_oil_saturation_water", self.residual_oil_saturation_water, 1.0),
+            ("residual_oil_saturation_gas", self.residual_oil_saturation_gas, 1.0),
+            ("residual_gas_saturation", self.residual_gas_saturation, 1.0),
+            ("absolute_permeability.x", self.absolute_permeability.x, None),
+            ("absolute_permeability.y", self.absolute_permeability.y, None),
+            ("absolute_permeability.z", self.absolute_permeability.z, None),
+        ):
+            if array.size == 0:
+                continue
+            if not np.all(np.isfinite(array)):
+                raise ValidationError(f"`{name}` contains NaN or infinite values.")
+            if float(array.min()) < 0.0 or (upper is not None and float(array.max()) > upper):
+                bound = "" if upper is None else f" and {upper}"
+                raise ValidationError(
+                    f"`{name}` must lie between 0{bound}; found range "
+                    f"[{float(array.min()):.6g}, {float(array.max()):.6g}]."
+                )
+
+        if (
+            self.irreducible_water_saturation.shape == self.connate_water_saturation.shape
+            and np.any(self.irreducible_water_saturation < self.connate_water_saturation - 1e-6)
+        ):
+            raise ValidationError(
+                "`irreducible_water_saturation` is below `connate_water_saturation` in at "
+                "least one cell."
+            )
+
         if (
             self.compressibility is not None
             and self.compressibility.unit_system != self.unit_system
@@ -307,6 +339,89 @@ class Rock:
             dtype=dtype,
         )
         return compressibility
+
+    def get_pore_volume_multiplier(
+        self,
+        *,
+        pressure: CellArray,
+        rock_region: IntCellArray | None = None,
+        dtype: npt.DTypeLike = None,
+    ) -> CellArray:
+        """
+        Pore volume at `pressure` divided by pore volume at the rock's reference pressure.
+
+        Rock compaction here is reversible and depends on pressure alone, so the compacted
+        pore volume never has to be stored. Multiply the reference pore volume by this.
+        All ones when the rock has no compressibility data.
+
+        :param pressure: Shape `(n_cells,)` pressures in `unit_system`.
+        :param rock_region: Shape `(n_cells,)` 1-based `ROCKNUM` values, region 1 when `None`.
+        :param dtype: Output dtype. `bores.precision.get_dtype()` if not given.
+        :returns: Shape `(n_cells,)` multipliers.
+        """
+        dtype = np.dtype(dtype if dtype is not None else get_dtype())
+        if self.compressibility is None:
+            return typing.cast(CellArray, np.ones(np.shape(pressure), dtype=dtype))
+        return typing.cast(
+            CellArray,
+            self.compressibility.evaluate(
+                quantity="pore_volume_multiplier", pressure=pressure, rock_region=rock_region
+            ).astype(dtype, copy=False),
+        )
+
+    def get_pore_volume_multiplier_derivative(
+        self,
+        *,
+        pressure: CellArray,
+        rock_region: IntCellArray | None = None,
+        dtype: npt.DTypeLike = None,
+    ) -> CellArray:
+        """
+        Derivative of `get_pore_volume_multiplier` with respect to pressure, per unit of
+        pressure in `unit_system`. Zeros when the rock has no compressibility data.
+
+        :param pressure: Shape `(n_cells,)` pressures in `unit_system`.
+        :param rock_region: Shape `(n_cells,)` 1-based `ROCKNUM` values, region 1 when `None`.
+        :param dtype: Output dtype. `bores.precision.get_dtype()` if not given.
+        :returns: Shape `(n_cells,)` derivatives.
+        """
+        dtype = np.dtype(dtype if dtype is not None else get_dtype())
+        if self.compressibility is None:
+            return typing.cast(CellArray, np.zeros(np.shape(pressure), dtype=dtype))
+        return typing.cast(
+            CellArray,
+            self.compressibility.evaluate(
+                quantity="pore_volume_multiplier_dp", pressure=pressure, rock_region=rock_region
+            ).astype(dtype, copy=False),
+        )
+
+    def get_transmissibility_multiplier(
+        self,
+        *,
+        pressure: CellArray,
+        rock_region: IntCellArray | None = None,
+        dtype: npt.DTypeLike = None,
+    ) -> CellArray:
+        """
+        Pressure-dependent transmissibility multiplier (`ROCKTAB`), all ones when the rock
+        has no compressibility data.
+
+        :param pressure: Shape `(n_cells,)` pressures in `unit_system`.
+        :param rock_region: Shape `(n_cells,)` 1-based `ROCKNUM` values, region 1 when `None`.
+        :param dtype: Output dtype. `bores.precision.get_dtype()` if not given.
+        :returns: Shape `(n_cells,)` multipliers.
+        """
+        dtype = np.dtype(dtype if dtype is not None else get_dtype())
+        if self.compressibility is None:
+            return typing.cast(CellArray, np.ones(np.shape(pressure), dtype=dtype))
+        return typing.cast(
+            CellArray,
+            self.compressibility.evaluate(
+                quantity="transmissibility_multiplier",
+                pressure=pressure,
+                rock_region=rock_region,
+            ).astype(dtype, copy=False),
+        )
 
     def convert(
         self,
@@ -401,7 +516,6 @@ class Rock:
         deck_file: DeckFile,
         *,
         grid: Grid,
-        rock_region: IntCellArray | None = None,
         satfunc: "SatFunc | None" = None,
         saturation_region: IntCellArray | None = None,
         interpolation_method: InterpolationMethod = "linear",
@@ -411,7 +525,8 @@ class Rock:
         Build a `Rock` from a parsed `DeckFile` and an already-loaded `Grid`.
 
         Reads `PORO`, `PERMX/Y/Z`, `NTG`, `SWCON`, `SWCRIT`, `SOWCR`,
-        `SOGCR`, `SGCR`, `ROCK`/`ROCKTAB`, and `TEMPVD`/`RTEMP`.
+        `SOGCR`, `SGCR`, and `ROCK`/`ROCKTAB`. Rock regions (`ROCKNUM`) are carried by
+        `Regions`, not by `Rock`.
 
         `SWCON`/`SWCRIT`/`SOWCR`/`SOGCR`/`SGCR` are per-cell saturation
         *endpoint* arrays. This is relatively uncommon in hand-built decks, which
@@ -422,7 +537,9 @@ class Rock:
         `satfunc`'s per-SATNUM tables when `satfunc` is supplied (see
         `get_saturation_endpoints`); only truly defaults to `0.0`
         if `satfunc` isn't given either. Explicit deck arrays always take
-        precedence, per keyword independently.
+        precedence, per keyword independently. An absent `SWCRIT` defaults to the connate
+        saturation when `SWCON` is given or no `satfunc` is, and to the tables' own
+        critical water saturation otherwise.
 
         :param deck_file: Parsed `DeckFile` containing PROPS/GRID keywords.
         :param grid: Already-loaded `Grid` (provides `n_cells` and cell
@@ -476,9 +593,6 @@ class Rock:
                 deck_file, interpolation_method=interpolation_method, dtype=dtype
             )
 
-        if rock_region is None:
-            rock_region = load_region_array(deck_file, "ROCKNUM", n_cells)
-
         table_derived_endpoints: dict[str, CellArray] | None = None
         if satfunc is not None:
             if saturation_region is None:
@@ -497,17 +611,25 @@ class Rock:
                     category=UserWarning,
                     stacklevel=3,
                 )
+        connate_water_saturation = get_saturation_endpoint(
+            "SWCON", "connate_water_saturation", table_derived_endpoints
+        )
+        irreducible_water_saturation = load_cell_array(deck_file, "SWCRIT", n_cells, dtype=dtype)
+        if irreducible_water_saturation is None:
+            if deck_file.has("SWCON") or table_derived_endpoints is None:
+                # An absent `SWCRIT` defaults to the connate saturation.
+                irreducible_water_saturation = connate_water_saturation
+            else:
+                irreducible_water_saturation = table_derived_endpoints[
+                    "irreducible_water_saturation"
+                ]
         return cls(
             porosity=required("PORO"),
             absolute_permeability=permeability,
             net_to_gross=optional("NTG", 1.0),
             compressibility=compressibility,
-            connate_water_saturation=get_saturation_endpoint(
-                "SWCON", "connate_water_saturation", table_derived_endpoints
-            ),
-            irreducible_water_saturation=get_saturation_endpoint(
-                "SWCRIT", "irreducible_water_saturation", table_derived_endpoints
-            ),
+            connate_water_saturation=connate_water_saturation,
+            irreducible_water_saturation=irreducible_water_saturation,
             residual_oil_saturation_water=get_saturation_endpoint(
                 "SOWCR", "residual_oil_saturation_water", table_derived_endpoints
             ),

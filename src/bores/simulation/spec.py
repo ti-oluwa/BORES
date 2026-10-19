@@ -125,6 +125,15 @@ class RunSpec:
     with saturations below this threshold as absent from the system.
     """
 
+    hysteresis_saturation_tolerance: float | None = attrs.field(
+        default=None,
+        validator=attrs.validators.optional(attrs.validators.ge(0)),  # type: ignore[arg-type]
+    )
+    """
+    Smallest saturation change between time steps that counts as a phase moving up or down
+    when tracking relative permeability hysteresis. `None` uses the
+    `HYSTERESIS_SATURATION_TOLERANCE` constant of `constants`.
+    """
     pressure_solver: SolverStr | Iterable[SolverStr] = "bicgstab"
     """Pressure system solver(s) (can be a list of solver to use in sequence)."""
 
