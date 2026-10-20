@@ -1813,7 +1813,7 @@ def test_a_connection_with_nothing_beneath_it_carries_exactly_zero():
     # subtracted from as the walk goes would leave a spurious rate on the deepest idle connection.
     steps = walk(reference_depth=0.0, depths=[10.0, 20.0, 30.0, 40.0], oil=[0.1, 0.2, 0.3, 0.0])
     deepest = next(step for step in steps if step.connection_index == 3)
-    assert deepest.carried_rates.oil == 0.0
+    assert deepest.carried_rates.oil == pytest.approx(0.0, abs=0.0)
     assert tuple(deepest.carried_rates) == (0.0, 0.0, 0.0)
 
 
@@ -2088,3 +2088,46 @@ def test_per_connection_inputs_of_different_lengths_are_rejected():
             case.fluids,
             False,
         )
+
+
+@pytest.mark.parametrize("unit_system", list(UnitSystem))
+def test_a_given_hydrostatic_divisor_is_used_and_matches_the_default(unit_system):
+    from bores.wells.hydraulics.base import get_hydrostatic_divisor
+    from bores.wells.hydraulics.homogeneous import (
+        compute_perforation_pressures_from_fluids,
+        homogeneous_wellbore,
+    )
+
+    case = scenario(
+        unit_system=unit_system,
+        geometry="vertical",
+        reference_kind="top",
+        rate_kind="zero",
+        dtype=np.float64,
+    )
+    model = homogeneous_wellbore(
+        tubing_inner_diameter=case.diameter, unit_system=unit_system
+    ).options
+
+    def pressures(**kwargs):
+        return compute_perforation_pressures_from_fluids(
+            model,
+            case.reference_depth,
+            case.reference_measured_depth,
+            case.reference_pressure,
+            case.oil,
+            case.water,
+            case.gas,
+            case.depths,
+            case.measured_depths,
+            case.inclinations,
+            case.fluids,
+            False,
+            **kwargs,
+        )
+
+    divisor = get_hydrostatic_divisor(unit_system)
+    assert pressures(hydrostatic_divisor=divisor) == pytest.approx(pressures(), rel=0, abs=0)
+    head = pressures()[1:] - case.reference_pressure
+    doubled = pressures(hydrostatic_divisor=2.0 * divisor)[1:] - case.reference_pressure
+    assert doubled == pytest.approx(head / 2.0, rel=1e-12)

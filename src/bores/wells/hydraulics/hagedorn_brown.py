@@ -768,6 +768,7 @@ def compute_perforation_pressures_from_fluids(
     is_injector: bool,
     out: NumberArray[OneDimension] | None = None,
     dtype: npt.DTypeLike = None,
+    hydrostatic_divisor: Number | None = None,
 ) -> NumberArray[OneDimension]:
     """
     Computes the flowing pressure at each connection, from per-connection arrays.
@@ -789,6 +790,9 @@ def compute_perforation_pressures_from_fluids(
     :param out: Optional preallocated output array, one entry per connection.
     :param dtype: Optional output array data type. Ignored if `out` is given. The data type of
         `representative_depths` if not given.
+    :param hydrostatic_divisor: The model's unit system's gravitational factor times its
+        hydrostatic area factor, as `get_hydrostatic_divisor` gives it. Read from the constants if
+        not given; pass it when calling repeatedly for the same well.
     :returns: Pressure at each connection.
     :raises ValueError: If the per-connection inputs don't all have the same length, or `out`
         is the wrong length.
@@ -834,7 +838,11 @@ def compute_perforation_pressures_from_fluids(
         inclinations_from_vertical=inclinations_from_vertical,
         connection_fluids=connection_fluids,
         is_injector=is_injector,
-        hydrostatic_divisor=get_hydrostatic_divisor(model.unit_system),
+        hydrostatic_divisor=(
+            hydrostatic_divisor
+            if hydrostatic_divisor is not None
+            else get_hydrostatic_divisor(model.unit_system)
+        ),
         pressures=pressures,
     )
     return pressures

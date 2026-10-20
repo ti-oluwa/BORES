@@ -16,6 +16,7 @@ from bores.wells.hydraulics.base import (
     SurfaceFluidProperties,
     WellBoreModel,
     compute_perforation_pressures_from_fluids,
+    get_hydrostatic_divisor,
 )
 from bores.wells.resolution.hydrostatic import compute_hydrostatic_connection_pressures
 from bores.wells.resolution.spec import ConnectionPressureMode, WellControlSpec
@@ -181,6 +182,10 @@ def solve_connection_pressures_and_rates(
     )
 
     zero_rates = PhaseValues(oil=0.0, water=0.0, gas=0.0)
+    radial_flow_constant = control_spec.radial_flow_constant
+    hydrostatic_divisor = (
+        get_hydrostatic_divisor(wellbore.options.unit_system) if wellbore is not None else None
+    )
     if uniform_connection_pressure:
         connection_pressures = workspace.connection_pressures
         connection_pressures[:] = reference_pressure
@@ -213,6 +218,7 @@ def solve_connection_pressures_and_rates(
             connection_fluids=workspace.connection_fluids,
             is_injector=is_injector,
             out=workspace.connection_pressures,
+            hydrostatic_divisor=hydrostatic_divisor,
         )
 
     total_rate = 0.0
@@ -253,7 +259,7 @@ def solve_connection_pressures_and_rates(
             relevant_water=relevant_water or not is_injector,
             relevant_gas=relevant_gas or not is_injector,
             is_injector=is_injector,
-            radial_flow_constant=control_spec.radial_flow_constant,
+            radial_flow_constant=radial_flow_constant,
             out_connection_oil_rates=workspace.connection_oil_rates,
             out_connection_water_rates=workspace.connection_water_rates,
             out_connection_gas_rates=workspace.connection_gas_rates,
@@ -294,6 +300,7 @@ def solve_connection_pressures_and_rates(
                 connection_fluids=workspace.connection_fluids,
                 is_injector=is_injector,
                 out=workspace.connection_pressures,
+                hydrostatic_divisor=hydrostatic_divisor,
             )
         if abs(new_total_rate - total_rate) <= control_spec.rate_convergence_tolerance * max(
             abs(new_total_rate), 1.0

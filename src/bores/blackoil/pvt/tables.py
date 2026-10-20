@@ -844,6 +844,38 @@ def check_physical_consistency(data: PVTData) -> None:
         )
 
 
+def broadcast_query_arrays(
+    **inputs: TableQuery[NDimension],
+) -> tuple[npt.NDArray[np.floating], ...]:
+    """
+    Broadcast the inputs of a PVT query against each other, element by element.
+
+    A query pairs its inputs: `pressure[i]` is evaluated at `temperature[i]` (and so on), so
+    the inputs must have the same shape, or be scalars or otherwise broadcastable to a
+    common shape. To evaluate a pressure x temperature grid, reshape one input to a column
+    and the other to a row, e.g. `pressure[:, None]` and `temperature[None, :]`.
+
+    :param inputs: The named query inputs, in the order they are returned.
+    :return: The inputs as arrays of a common shape, in the order given.
+    :raises ValidationError: When the inputs cannot be broadcast to a common shape.
+    """
+    arrays = [np.atleast_1d(value) for value in inputs.values()]
+    try:
+        return typing.cast(
+            tuple[npt.NDArray[np.floating], ...], tuple(np.broadcast_arrays(*arrays))
+        )
+    except ValueError:
+        shapes = ", ".join(
+            f"{name} {array.shape}" for name, array in zip(inputs, arrays, strict=True)
+        )
+        raise ValidationError(
+            f"PVT query inputs are paired element by element, but their shapes cannot be "
+            f"broadcast to a common shape: {shapes}. Pass inputs of the same shape, or a "
+            f"scalar for any input that is constant. To evaluate a grid, reshape one input to "
+            f"a column and the other to a row, e.g. `pressure[:, None]` and `temperature[None, :]`."
+        ) from None
+
+
 class PVTTable(StoreSerializable):
     """
     Phase-aware PVT property lookup with pre-built interpolators.
@@ -1449,8 +1481,8 @@ class PVTTable(StoreSerializable):
         pressure_array = np.atleast_1d(pressure)
         temperature_array = np.atleast_1d(temperature)
         salinity_array = np.atleast_1d(salinity)
-        pressure_array, temperature_array, salinity_array = np.broadcast_arrays(
-            pressure_array, temperature_array, salinity_array
+        pressure_array, temperature_array, salinity_array = broadcast_query_arrays(
+            pressure=pressure_array, temperature=temperature_array, salinity=salinity_array
         )
         points = np.column_stack([
             pressure_array.ravel(),
@@ -1527,11 +1559,11 @@ class PVTTable(StoreSerializable):
             return self.query(name, pressure, temperature, derivative=derivative)
 
         dtype = self.dtype
-        pressure_array, temperature_array, state_array, saturation_array = np.broadcast_arrays(
-            np.atleast_1d(pressure),
-            np.atleast_1d(temperature),
-            np.atleast_1d(state),
-            np.atleast_1d(saturation_pressure),
+        pressure_array, temperature_array, state_array, saturation_array = broadcast_query_arrays(
+            pressure=np.atleast_1d(pressure),
+            temperature=np.atleast_1d(temperature),
+            state=np.atleast_1d(state),
+            saturation=np.atleast_1d(saturation_pressure),
         )
         result = np.zeros_like(pressure_array, dtype=dtype)
         saturated = pressure_array <= saturation_array
@@ -1588,11 +1620,11 @@ class PVTTable(StoreSerializable):
             return self.query("density", pressure, temperature, derivative=derivative)
 
         dtype = self.dtype
-        pressure_array, temperature_array, state_array, dew_point_array = np.broadcast_arrays(
-            np.atleast_1d(pressure),
-            np.atleast_1d(temperature),
-            np.atleast_1d(vaporized_oil_ratio),
-            np.atleast_1d(dew_point_pressure),
+        pressure_array, temperature_array, state_array, dew_point_array = broadcast_query_arrays(
+            pressure=np.atleast_1d(pressure),
+            temperature=np.atleast_1d(temperature),
+            state=np.atleast_1d(vaporized_oil_ratio),
+            dew_point=np.atleast_1d(dew_point_pressure),
         )
         result = np.zeros_like(pressure_array, dtype=dtype)
         saturated = pressure_array <= dew_point_array
@@ -1732,8 +1764,8 @@ class PVTTable(StoreSerializable):
         pressure_array = np.atleast_1d(pressure)
         temperature_array = np.atleast_1d(temperature)
         bubble_point_array = np.atleast_1d(bubble_point_array)
-        pressure_array, temperature_array, bubble_point_array = np.broadcast_arrays(
-            pressure_array, temperature_array, bubble_point_array
+        pressure_array, temperature_array, bubble_point_array = broadcast_query_arrays(
+            pressure=pressure_array, temperature=temperature_array, bubble_point=bubble_point_array
         )
 
         result = np.zeros_like(pressure_array, dtype=dtype)
@@ -1894,8 +1926,8 @@ class PVTTable(StoreSerializable):
         pressure_array = np.atleast_1d(pressure)
         temperature_array = np.atleast_1d(temperature)
         bubble_point_array = np.atleast_1d(bubble_point_array)
-        pressure_array, temperature_array, bubble_point_array = np.broadcast_arrays(
-            pressure_array, temperature_array, bubble_point_array
+        pressure_array, temperature_array, bubble_point_array = broadcast_query_arrays(
+            pressure=pressure_array, temperature=temperature_array, bubble_point=bubble_point_array
         )
 
         result = np.zeros_like(pressure_array, dtype=dtype)
@@ -2039,8 +2071,8 @@ class PVTTable(StoreSerializable):
         pressure_array = np.atleast_1d(pressure)
         temperature_array = np.atleast_1d(temperature)
         bubble_point_array = np.atleast_1d(bubble_point_array)
-        pressure_array, temperature_array, bubble_point_array = np.broadcast_arrays(
-            pressure_array, temperature_array, bubble_point_array
+        pressure_array, temperature_array, bubble_point_array = broadcast_query_arrays(
+            pressure=pressure_array, temperature=temperature_array, bubble_point=bubble_point_array
         )
 
         result = np.zeros_like(pressure_array, dtype=dtype)
@@ -2175,8 +2207,8 @@ class PVTTable(StoreSerializable):
         pressure_array = np.atleast_1d(pressure)
         temperature_array = np.atleast_1d(temperature)
         bubble_point_array = np.atleast_1d(bubble_point_array)
-        pressure_array, temperature_array, bubble_point_array = np.broadcast_arrays(
-            pressure_array, temperature_array, bubble_point_array
+        pressure_array, temperature_array, bubble_point_array = broadcast_query_arrays(
+            pressure=pressure_array, temperature=temperature_array, bubble_point=bubble_point_array
         )
 
         result = np.zeros_like(pressure_array, dtype=dtype)
@@ -2301,8 +2333,8 @@ class PVTTable(StoreSerializable):
         pressure_array = np.atleast_1d(pressure)
         temperature_array = np.atleast_1d(temperature)
         bubble_point_array = np.atleast_1d(bubble_point_array)
-        pressure_array, temperature_array, bubble_point_array = np.broadcast_arrays(
-            pressure_array, temperature_array, bubble_point_array
+        pressure_array, temperature_array, bubble_point_array = broadcast_query_arrays(
+            pressure=pressure_array, temperature=temperature_array, bubble_point=bubble_point_array
         )
 
         result = np.zeros_like(pressure_array, dtype=dtype)
@@ -2429,8 +2461,8 @@ class PVTTable(StoreSerializable):
         pressure_array = np.atleast_1d(pressure)
         temperature_array = np.atleast_1d(temperature)
         bubble_point_array = np.atleast_1d(bubble_point_array)
-        pressure_array, temperature_array, bubble_point_array = np.broadcast_arrays(
-            pressure_array, temperature_array, bubble_point_array
+        pressure_array, temperature_array, bubble_point_array = broadcast_query_arrays(
+            pressure=pressure_array, temperature=temperature_array, bubble_point=bubble_point_array
         )
 
         result = np.zeros_like(pressure_array, dtype=dtype)
@@ -2555,10 +2587,10 @@ class PVTTable(StoreSerializable):
                 else self.bubble_point_pressure(temperature=temperature, solution_gor=solution_gor)
             )
             if bubble_point_array is not None:
-                pressure_array, temperature_array, bubble_point_array = np.broadcast_arrays(
-                    np.atleast_1d(pressure),
-                    np.atleast_1d(temperature),
-                    np.atleast_1d(bubble_point_array),
+                pressure_array, temperature_array, bubble_point_array = broadcast_query_arrays(
+                    pressure=np.atleast_1d(pressure),
+                    temperature=np.atleast_1d(temperature),
+                    bubble_point=np.atleast_1d(bubble_point_array),
                 )
                 result = np.zeros_like(pressure_array, dtype=self.dtype)
                 saturated = pressure_array <= bubble_point_array
@@ -2785,8 +2817,8 @@ class PVTTable(StoreSerializable):
             return self.query("solution_gor", pressure_array, temperature_array)
 
         bubble_point_array = np.atleast_1d(bubble_point_array)
-        pressure_array, temperature_array, bubble_point_array = np.broadcast_arrays(
-            pressure_array, temperature_array, bubble_point_array
+        pressure_array, temperature_array, bubble_point_array = broadcast_query_arrays(
+            pressure=pressure_array, temperature=temperature_array, bubble_point=bubble_point_array
         )
 
         result = np.zeros_like(pressure_array, dtype=dtype)
@@ -2845,10 +2877,10 @@ class PVTTable(StoreSerializable):
                 )
             slope = self.query("solution_gor", pressure, temperature, derivative=True)
             if bubble_point_pressure is not None and slope is not None:
-                pressure_array, bubble_point_array, slope_array = np.broadcast_arrays(
-                    np.atleast_1d(pressure),
-                    np.atleast_1d(bubble_point_pressure),
-                    np.atleast_1d(slope),
+                pressure_array, bubble_point_array, slope_array = broadcast_query_arrays(
+                    pressure=np.atleast_1d(pressure),
+                    bubble_point=np.atleast_1d(bubble_point_pressure),
+                    slope=np.atleast_1d(slope),
                 )
                 result = np.where(pressure_array <= bubble_point_array, slope_array, 0.0)
                 return typing.cast(
@@ -3010,10 +3042,10 @@ class PVTTable(StoreSerializable):
         if dew_point_pressure is None:
             return slope
 
-        pressure_array, dew_point_array, slope_array = np.broadcast_arrays(
-            np.atleast_1d(pressure),
-            np.atleast_1d(dew_point_pressure),
-            np.atleast_1d(slope),
+        pressure_array, dew_point_array, slope_array = broadcast_query_arrays(
+            pressure=np.atleast_1d(pressure),
+            dew_point=np.atleast_1d(dew_point_pressure),
+            slope=np.atleast_1d(slope),
         )
         result = np.where(pressure_array <= dew_point_array, slope_array, 0.0)
         return typing.cast(
@@ -3060,8 +3092,8 @@ class PVTTable(StoreSerializable):
                 "2-D dew-point table requires the `vaporized_oil_ratio` argument."
             )
 
-        rv_array, temperature_array = np.broadcast_arrays(
-            np.atleast_1d(vaporized_oil_ratio), np.atleast_1d(temperature)
+        rv_array, temperature_array = broadcast_query_arrays(
+            rv=np.atleast_1d(vaporized_oil_ratio), temperature=np.atleast_1d(temperature)
         )
         result = (
             interp.ev(rv_array, temperature_array)
