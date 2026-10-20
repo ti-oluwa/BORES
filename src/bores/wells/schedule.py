@@ -236,6 +236,7 @@ def get_matching_connection_rows(
 
     if grid is None or grid.dimensions is None:
         raise ValidationError("A grid with dimensions is required to target specific connections.")
+
     dims = grid.dimensions
     target_cells = {dims.flat_index(i=i - 1, j=j - 1, k=k - 1) for k in range(k1, k2 + 1)}
     cell_indices = perforations.get_cell_index(row=np.arange(all_rows.start, all_rows.stop))
@@ -270,7 +271,13 @@ def get_many_matching_connection_rows(
     """
     rows_per_well = [
         get_matching_connection_rows(
-            perforations=perforations, well_row=well_row, i=i, j=j, k1=k1, k2=k2, grid=grid
+            perforations=perforations,
+            well_row=well_row,
+            i=i,
+            j=j,
+            k1=k1,
+            k2=k2,
+            grid=grid,
         )
         for well_row in well_rows
     ]
@@ -288,8 +295,6 @@ class UpdateWellStatus(Action["CompiledBlackOilModel"]):
     action; it also happens to be what a deck `WELOPEN` record becomes
     when `load_schedule` reads one.
     """
-
-    __type__: typing.ClassVar[str] = "open_well"
 
     well_name: str
     """The well to act on."""
@@ -338,8 +343,6 @@ class UpdateWellStatus(Action["CompiledBlackOilModel"]):
 class OpenWell(UpdateWellStatus):
     """Sets a well's targeted completion status to `OPEN`."""
 
-    __type__: typing.ClassVar[str] = "open_well_completion"
-
     status: CompletionStatus = attrs.field(
         default=CompletionStatus.OPEN,
         validator=attrs.validators.in_((CompletionStatus.OPEN,)),
@@ -349,8 +352,6 @@ class OpenWell(UpdateWellStatus):
 @attrs.frozen(kw_only=True, slots=True)
 class ShutInWell(UpdateWellStatus):
     """Sets a well's targeted completion status to `SHUT`."""
-
-    __type__: typing.ClassVar[str] = "shut_in_well_completion"
 
     status: CompletionStatus = attrs.field(
         default=CompletionStatus.SHUT,
@@ -366,8 +367,6 @@ class MultiplyConnectionFactor(Action["CompiledBlackOilModel"]):
     directly or, equally, produced from a deck `WPIMULT` record by
     `load_schedule`.
     """
-
-    __type__: typing.ClassVar[str] = "multiply_connection_factor"
 
     well_name: str
     """The well to act on."""
@@ -435,19 +434,21 @@ class SetWellTarget(Action["CompiledBlackOilModel"]):
     deck `WELTARG` record becomes when `load_schedule` reads one.
     """
 
-    __type__: typing.ClassVar[str] = "set_well_target"
-
     well_name: str
     """The well to act on."""
 
     control_mode: WellTargetMode
-    """The mode to switch to. Must apply to this well's own kind (a
-    producer or an injector) - see `WellTargetMode`."""
+    """
+    The mode to switch to. Must apply to this well's own kind (a
+    producer or an injector). See `WellTargetMode`.
+    """
 
     value: Number | None = None
-    """The new value for whichever field `control_mode` names (a rate,
+    """
+    The new value for whichever field `control_mode` names (a rate,
     BHP, or THP). `None` is only valid when `control_mode` is `GROUP`,
-    which takes no value."""
+    which takes no value.
+    """
 
     def __call__(
         self, model: "CompiledBlackOilModel", context: ScheduleContext
@@ -497,8 +498,6 @@ class SetWellControl(Action["CompiledBlackOilModel"]):
     load from a deck - `load_schedule` produces one from each
     `WCONPROD`/`WCONINJE` record it reads.
     """
-
-    __type__: typing.ClassVar[str] = "set_well_control"
 
     well_name: str
     """The well to act on."""
@@ -563,8 +562,6 @@ class ActivateCompletion(Action["CompiledBlackOilModel"]):
     by `load_schedule`.
     """
 
-    __type__: typing.ClassVar[str] = "activate_completion"
-
     well_name: str
     """The well to act on."""
 
@@ -619,8 +616,6 @@ class ActivateWell(Action["CompiledBlackOilModel"]):
     `load_schedule` emits separately for a real `COMPDAT` record.
     """
 
-    __type__: typing.ClassVar[str] = "activate_well"
-
     well_name: str
     """The well to activate."""
 
@@ -658,8 +653,6 @@ class SetLimit(Action["CompiledBlackOilModel"]):
     `load_schedule` emits one `SetLimit` per quantity in that case, not
     one per record.
     """
-
-    __type__: typing.ClassVar[str] = "set_limit"
 
     well_name: str
     """The well to act on."""
@@ -734,8 +727,6 @@ class ApplicationMode(enum.Enum):
 class ActivateWells(Action["CompiledBlackOilModel"]):
     """`ActivateWell`, applied to several wells at once."""
 
-    __type__: typing.ClassVar[str] = "bulk_activate_well"
-
     well_names: tuple[str, ...] = attrs.field(
         converter=tuple, validator=attrs.validators.min_len(1)
     )
@@ -762,8 +753,6 @@ class UpdateWellStatuses(Action["CompiledBlackOilModel"]):
     `UpdateWellStatus`, applied to several wells at once, all against the same
     targeted connection(s).
     """
-
-    __type__: typing.ClassVar[str] = "bulk_open_well"
 
     well_names: tuple[str, ...] = attrs.field(
         converter=tuple, validator=attrs.validators.min_len(1)
@@ -821,8 +810,6 @@ class UpdateWellStatuses(Action["CompiledBlackOilModel"]):
 class OpenWells(UpdateWellStatuses):
     """Sets the targeted completions on several wells to `OPEN`."""
 
-    __type__: typing.ClassVar[str] = "bulk_open_wells"
-
     status: CompletionStatus = attrs.field(
         default=CompletionStatus.OPEN,
         validator=attrs.validators.in_((CompletionStatus.OPEN,)),
@@ -832,8 +819,6 @@ class OpenWells(UpdateWellStatuses):
 @attrs.frozen(kw_only=True, slots=True)
 class ShutInWells(UpdateWellStatuses):
     """Sets the targeted completions on several wells to `SHUT`."""
-
-    __type__: typing.ClassVar[str] = "bulk_shut_in_wells"
 
     status: CompletionStatus = attrs.field(
         default=CompletionStatus.SHUT,
@@ -847,8 +832,6 @@ class MultiplyConnectionFactors(Action["CompiledBlackOilModel"]):
     `MultiplyConnectionFactor`, applied to several wells at once, all
     against the same targeted connection(s).
     """
-
-    __type__: typing.ClassVar[str] = "bulk_multiply_connection_factor"
 
     well_names: tuple[str, ...] = attrs.field(
         converter=tuple, validator=attrs.validators.min_len(1)
@@ -911,8 +894,6 @@ class ActivateCompletions(Action["CompiledBlackOilModel"]):
     against the same targeted connection(s).
     """
 
-    __type__: typing.ClassVar[str] = "bulk_activate_completion"
-
     well_names: tuple[str, ...] = attrs.field(
         converter=tuple, validator=attrs.validators.min_len(1)
     )
@@ -959,8 +940,6 @@ class ActivateCompletions(Action["CompiledBlackOilModel"]):
 @attrs.frozen(kw_only=True, slots=True)
 class SetWellControls(Action["CompiledBlackOilModel"]):
     """`SetWellControl`, applied to several wells at once."""
-
-    __type__: typing.ClassVar[str] = "bulk_set_well_control"
 
     well_names: tuple[str, ...] = attrs.field(
         converter=tuple, validator=attrs.validators.min_len(1)
@@ -1068,8 +1047,6 @@ class SetWellTargets(Action["CompiledBlackOilModel"]):
     to, so a mixed set of producers and injectors is fine even when
     `control_mode` is broadcast to all of them.
     """
-
-    __type__: typing.ClassVar[str] = "bulk_set_well_target"
 
     well_names: tuple[str, ...] = attrs.field(
         converter=tuple, validator=attrs.validators.min_len(1)
@@ -1291,8 +1268,6 @@ class SetLimits(Action["CompiledBlackOilModel"]):
     target, the same as the single-well `SetLimit`.
     """
 
-    __type__: typing.ClassVar[str] = "bulk_set_limit"
-
     well_names: tuple[str, ...] = attrs.field(
         converter=tuple, validator=attrs.validators.min_len(1)
     )
@@ -1452,8 +1427,6 @@ class SetGroupLimit(Action["CompiledBlackOilModel"]):
     Only an already-compiled limit row matching `quantity` can be patched.
     """
 
-    __type__: typing.ClassVar[str] = "set_group_limit"
-
     group_name: str
     """The group to act on."""
 
@@ -1543,8 +1516,6 @@ def get_well_rate_arrays(
 class RateThreshold(ThresholdEvent["CompiledBlackOilModel"]):
     """Fires when a well's phase rate, from the latest solve, satisfies `op` against `threshold`."""
 
-    __type__: typing.ClassVar[str] = "rate_threshold"
-
     well_name: str
     """The well to watch."""
 
@@ -1586,8 +1557,6 @@ class RateThreshold(ThresholdEvent["CompiledBlackOilModel"]):
 class WaterCutThreshold(ThresholdEvent["CompiledBlackOilModel"]):
     """Fires when a well's surface water cut, from the latest solve, satisfies `op` against `threshold`."""
 
-    __type__: typing.ClassVar[str] = "water_cut_threshold"
-
     well_name: str
     """The well to watch."""
 
@@ -1611,8 +1580,6 @@ class WaterCutThreshold(ThresholdEvent["CompiledBlackOilModel"]):
 @attrs.frozen(kw_only=True, slots=True)
 class GasOilRatioThreshold(ThresholdEvent["CompiledBlackOilModel"]):
     """Fires when a well's surface gas-oil ratio, from the latest solve, satisfies `op` against `threshold`."""
-
-    __type__: typing.ClassVar[str] = "gas_oil_ratio_threshold"
 
     well_name: str
     """The well to watch."""
@@ -1644,8 +1611,6 @@ class SetWellLift(Action["CompiledBlackOilModel"]):
     it is also what a deck `WLIFT` becomes under `load_schedule`, and what the lift items of a
     `WCONPROD`/`WCONINJE` reissue become.
     """
-
-    __type__: typing.ClassVar[str] = "set_well_lift"
 
     well_name: str
     """The well to act on."""

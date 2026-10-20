@@ -2,7 +2,7 @@
 Well index (connection factor) computation.
 
 Resolves each open perforation to a connection factor (index) per cell it
-intersects. The pipeline is three steps.
+intersects.
 
 First, an effective (direction-aware, geometric-mean) permeability is
 derived first, then an effective drainage radius from that permeability

@@ -1700,18 +1700,18 @@ def trajectory(*points):
 def test_a_reference_depth_maps_to_the_shallowest_matching_measured_depth():
     # Straight down to 5000 ft, then 1000 ft horizontally.
     well_path = trajectory((0.0, 0.0), (5000.0, 5000.0), (6000.0, 5000.0))
-    assert well_path.get_measured_depth_at_depth(2500.0) == pytest.approx(2500.0)
-    assert well_path.get_measured_depth_at_depth(5000.0) == pytest.approx(5000.0)  # the heel
+    assert well_path.get_measured_depth_at(2500.0) == pytest.approx(2500.0)
+    assert well_path.get_measured_depth_at(5000.0) == pytest.approx(5000.0)  # the heel
 
 
 def test_a_reference_depth_follows_an_inclined_section():
     well_path = trajectory((0.0, 0.0), (1000.0, 1000.0), (2000.0, 1500.0))
-    assert well_path.get_measured_depth_at_depth(1250.0) == pytest.approx(1500.0)
+    assert well_path.get_measured_depth_at(1250.0) == pytest.approx(1500.0)
 
 
 def test_a_reference_depth_the_path_never_reaches_is_rejected():
     with pytest.raises(ValidationError, match="never reaches"):
-        trajectory((0.0, 0.0), (1000.0, 1000.0)).get_measured_depth_at_depth(2000.0)
+        trajectory((0.0, 0.0), (1000.0, 1000.0)).get_measured_depth_at(2000.0)
 
 
 def resolve_horizontal_producer(*, bhp, mobility=1e-4, max_fixed_point_iterations=None):

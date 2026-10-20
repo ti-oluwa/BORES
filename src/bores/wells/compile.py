@@ -2245,7 +2245,7 @@ def compile_well_system(
         NumberArray[OneDimension],
         np.asarray(
             [
-                wells[name].trajectory.get_measured_depth_at_depth(  # type: ignore[attr-defined]
+                wells[name].trajectory.get_measured_depth_at(  # type: ignore[attr-defined]
                     wells[name].reference_depth
                 )
                 if wells[name].trajectory is not None

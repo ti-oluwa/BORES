@@ -183,8 +183,8 @@ def get_vertical_column_candidates(
     assert grid.cell_centroids is not None
     centroids_xy = grid.cell_centroids[raw_candidates, :2]
     horizontal_distances = np.sqrt((centroids_xy[:, 0] - x) ** 2 + (centroids_xy[:, 1] - y) ** 2)
-    filtered = raw_candidates[horizontal_distances <= tolerance]
-    return typing.cast(IntArray[OneDimension], np.sort(filtered))
+    filtered_candidates = raw_candidates[horizontal_distances <= tolerance]
+    return typing.cast(IntArray[OneDimension], np.sort(filtered_candidates))
 
 
 def compute_local_vertical_extent_aabb(

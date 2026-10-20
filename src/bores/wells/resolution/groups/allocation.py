@@ -1,6 +1,6 @@
 """
 `CompiledGroupControls` target allocation. Splits a group's target rate
-across its eligible member wells by guide rate, writing concrete per-well
+across its eligible_member_indices member wells by guide rate, writing concrete per-well
 `target_rates`/`control_modes` directly into `CompiledWellControls` in
 place for wells whose mode is `GRUP`.
 
@@ -16,6 +16,7 @@ the group's real target is met or no member has any headroom left.
 import math
 import typing
 
+import numba
 import numpy as np
 
 from bores.errors import ValidationError
@@ -63,8 +64,8 @@ def allocate_group_targets(
         membership) and `.controls`/`.well_kinds` (written to in place).
     :param workspace: This run's `WellsWorkspace`. Read only, for each
         member's current `economic_shutins` flag.
-    :returns: Names of the wells actually allocated, for the eligible
-        member wells (empty if none are eligible).
+    :returns: Names of the wells actually allocated, for the eligible_member_indices
+        member wells (empty if none are eligible_member_indices).
     :raises ValidationError: If `well_system.group_controls` is `None`, or
         `group_name` isn't one of its rows, or its `mode` has no
         allocatable target (`FLD`/`NONE`/`VREP`/`REIN`).
@@ -73,10 +74,10 @@ def allocate_group_targets(
     if group_controls is None:
         raise ValidationError("`well_system.group_controls` is not set.")
 
-    group_index = group_controls.group_row(name=group_name)
+    group_row = group_controls.group_row(name=group_name)
 
-    group_kind = group_controls.group_kinds[group_index]
-    group_mode = group_controls.control_modes[group_index]
+    group_kind = group_controls.group_kinds[group_row]
+    group_mode = group_controls.control_modes[group_row]
     is_injection = group_kind == GroupKind.INJECTOR
     target_mode_tag = (
         GROUP_TO_INJECTOR_MODE_TAG.get(group_mode)
@@ -88,45 +89,46 @@ def allocate_group_targets(
             f"Group {group_name!r}'s control mode has no directly allocatable rate target."
         )
 
-    target_rate = group_controls.target_rates[group_index]
+    target_rate = group_controls.target_rates[group_row]
     if np.isnan(target_rate):
         raise ValidationError(f"Group {group_name!r}'s control has no `target_rate`.")
 
-    member_start = group_controls.member_offsets[group_index]
-    member_end = group_controls.member_offsets[group_index + 1]
+    member_start = group_controls.member_offsets[group_row]
+    member_end = group_controls.member_offsets[group_row + 1]
     member_indices = group_controls.member_well_indices[member_start:member_end]
 
     group_mode_tag = InjectorControlModeTag.GROUP if is_injection else ProducerControlModeTag.GROUP
     expected_well_kind = WellKind.INJECTOR if is_injection else WellKind.PRODUCER
     controls = well_system.controls
-    eligible = [
-        i
-        for i in member_indices
-        if well_system.well_kinds[i] == expected_well_kind
-        and controls.control_modes[i] == group_mode_tag
-        and workspace.economic_shutins[i] == 0
+    eligible_member_indices = [
+        idx
+        for idx in member_indices
+        if well_system.well_kinds[idx] == expected_well_kind
+        and controls.control_modes[idx] == group_mode_tag
+        and workspace.economic_shutins[idx] == 0
     ]
-    if not eligible:
+    if not eligible_member_indices:
         return ()
 
-    guide_rates = controls.guide_rates[eligible]
+    guide_rates = controls.guide_rates[eligible_member_indices]
     weights = np.where(np.isnan(guide_rates), 1.0, guide_rates)
     total_weight = weights.sum()
 
-    for i, weight in zip(eligible, weights, strict=False):
-        controls.target_rates[i] = target_rate * (weight / total_weight)
-        controls.control_modes[i] = target_mode_tag
+    for idx, weight in zip(eligible_member_indices, weights, strict=False):
+        controls.target_rates[idx] = target_rate * (weight / total_weight)
+        controls.control_modes[idx] = target_mode_tag
 
-    return tuple(well_system.names[i] for i in eligible)
+    return tuple(well_system.names[idx] for idx in eligible_member_indices)
 
 
+@numba.njit(cache=True)
 def get_group_controlled_rate(
     *, well_system: CompiledWellSystem, workspace: WellsWorkspace, well_row: Integer
 ) -> Number:
     """
     A member well's own resolved rate, in whatever quantity and
     condition (surface or reservoir) its current concrete control mode
-    actually targets - the one value directly comparable against
+    actually targets. This is the one value directly comparable against
     `CompiledWellControls.target_rates[well_row]` once
     `allocate_group_targets` has converted it from `GRUP`.
 
@@ -148,12 +150,12 @@ def get_group_controlled_rate(
 
     if well_system.well_kinds[well_row] == WellKind.INJECTOR:
         if mode == InjectorControlModeTag.RATE:
-            phase_array = {
+            phase_surface_rates = {
                 FluidPhaseTag.OIL: workspace.surface_oil_rates,
                 FluidPhaseTag.WATER: workspace.surface_water_rates,
                 FluidPhaseTag.GAS: workspace.surface_gas_rates,
             }[FluidPhaseTag(controls.injected_phases[well_row])]
-            return phase_array[well_row]
+            return phase_surface_rates[well_row]
         if mode == InjectorControlModeTag.RESERVOIR_VOLUME_RATE:
             return (
                 workspace.oil_rates[well_row]
@@ -226,8 +228,8 @@ def redistribute_group_shortfall(
     :param workspace: This run's `WellsWorkspace`, updated in place.
     :param control_spec: Supplies `max_fixed_point_iterations` and `rate_convergence_tolerance`.
     :param get_tubing_performance: Given a well row, what relates its BHP to its THP
-        (a `WellBoreModel` or a `VFPTables` collection), or `None` if it has none. Only called for a member actually being
-        re-resolved.
+        (a `WellBoreModel` or a `VFPTables` collection), or `None` if it has none. Only called
+        for a member actually being re-resolved.
     :param get_connection_samples: Given a well row, its active, open
         connections' current reservoir samples. Only called for a member
         actually being re-resolved.
@@ -245,9 +247,7 @@ def redistribute_group_shortfall(
     if group_controls is None:
         raise ValidationError("`well_system.group_controls` is not set.")
 
-    # Resolve `group_name` up front, purely to validate it, mirroring every
-    # other function in this module - `group_row` itself is unused below,
-    # since eligibility comes from `allocated_wells`, not group membership.
+    # Resolve `group_name` up front, purely to validate it.
     group_controls.group_row(name=group_name)
 
     if not allocated_wells:
@@ -262,13 +262,13 @@ def redistribute_group_shortfall(
     for _ in range(control_spec.max_fixed_point_iterations):
         headroom_rows: list[Integer] = []
         total_shortfall = 0.0
-        for i in group_derived:
-            target_rate = controls.target_rates[i]
+        for idx in group_derived:
+            target_rate = controls.target_rates[idx]
             if math.isnan(target_rate):
                 continue
 
             actual_rate = get_group_controlled_rate(
-                well_system=well_system, workspace=workspace, well_row=i
+                well_system=well_system, workspace=workspace, well_row=idx
             )
             gap = target_rate - actual_rate
             tolerance = (
@@ -283,9 +283,9 @@ def redistribute_group_shortfall(
                 # pass. Its unmet share becomes this pass's shortfall to
                 # redistribute, once, not every remaining iteration.
                 total_shortfall += gap
-                controls.target_rates[i] = actual_rate
+                controls.target_rates[idx] = actual_rate
             elif gap <= tolerance:
-                headroom_rows.append(i)
+                headroom_rows.append(idx)
 
         if total_shortfall <= 0 or not headroom_rows:
             break
@@ -294,18 +294,18 @@ def redistribute_group_shortfall(
         weights = np.where(np.isnan(guide_rates), 1.0, guide_rates)
         total_weight = weights.sum()
 
-        for i, weight in zip(headroom_rows, weights, strict=False):
-            controls.target_rates[i] += total_shortfall * (weight / total_weight)
+        for idx, weight in zip(headroom_rows, weights, strict=False):
+            controls.target_rates[idx] += total_shortfall * (weight / total_weight)
             resolve_well_control(
                 compiled_system=well_system,
-                well_row=i,
-                tubing_performance=get_tubing_performance(i),
-                connection_samples=get_connection_samples(i),
+                well_row=idx,
+                tubing_performance=get_tubing_performance(idx),
+                connection_samples=get_connection_samples(idx),
                 workspace=workspace,
                 control_spec=control_spec,
-                surface_fluid_properties=resolved_get_surface_fluid_properties(i),
+                surface_fluid_properties=resolved_get_surface_fluid_properties(idx),
             )
-            name = well_system.names[i]
+            name = well_system.names[idx]
             if name in reresolved:
                 reresolved.remove(name)
             reresolved.append(name)

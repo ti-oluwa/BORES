@@ -501,8 +501,7 @@ def correct_well_indices_for_non_darcy(
     out_well_indices: NumberArray[OneDimension],
 ) -> None:
     """
-    Corrects each connection's well index in place for non-Darcy
-    (rate-dependent) skin.
+    Corrects each connection's well index in place for non-Darcy (rate-dependent) skin.
 
     Recomputes from `static_well_indices` every call rather than
     compounding a previous correction, using `connection_gas_rates` from
@@ -600,37 +599,37 @@ def accumulate_phase_rates(
     surface_water_rate = 0.0
     surface_gas_rate = 0.0
 
-    for i in range(well_indices.shape[0]):
+    for idx in range(well_indices.shape[0]):
         drawdown = compute_perforation_drawdown(
-            reservoir_pressure=reservoir_pressures[i],
-            connection_pressure=connection_pressures[i],
+            reservoir_pressure=reservoir_pressures[idx],
+            connection_pressure=connection_pressures[idx],
             is_injector=is_injector,
         )
-        well_index = well_indices[i]
+        well_index = well_indices[idx]
 
         if relevant_oil:
-            contribution = radial_flow_constant * well_index * oil_mobilities[i] * drawdown
+            contribution = radial_flow_constant * well_index * oil_mobilities[idx] * drawdown
             oil_rate += contribution
-            surface_oil_rate += contribution / oil_formation_volume_factors[i]
-            out_connection_oil_rates[i] = contribution
+            surface_oil_rate += contribution / oil_formation_volume_factors[idx]
+            out_connection_oil_rates[idx] = contribution
         else:
-            out_connection_oil_rates[i] = 0.0
+            out_connection_oil_rates[idx] = 0.0
 
         if relevant_water:
-            contribution = radial_flow_constant * well_index * water_mobilities[i] * drawdown
+            contribution = radial_flow_constant * well_index * water_mobilities[idx] * drawdown
             water_rate += contribution
-            surface_water_rate += contribution / water_formation_volume_factors[i]
-            out_connection_water_rates[i] = contribution
+            surface_water_rate += contribution / water_formation_volume_factors[idx]
+            out_connection_water_rates[idx] = contribution
         else:
-            out_connection_water_rates[i] = 0.0
+            out_connection_water_rates[idx] = 0.0
 
         if relevant_gas:
-            contribution = radial_flow_constant * well_index * gas_mobilities[i] * drawdown
+            contribution = radial_flow_constant * well_index * gas_mobilities[idx] * drawdown
             gas_rate += contribution
-            surface_gas_rate += contribution / gas_formation_volume_factors[i]
-            out_connection_gas_rates[i] = contribution
+            surface_gas_rate += contribution / gas_formation_volume_factors[idx]
+            out_connection_gas_rates[idx] = contribution
         else:
-            out_connection_gas_rates[i] = 0.0
+            out_connection_gas_rates[idx] = 0.0
 
     return (
         oil_rate,
@@ -668,7 +667,7 @@ def load_wells_states(
     for well_row, well_name in enumerate(compiled_system.names):
         bhp = workspace.bhps[well_row]
         if math.isnan(bhp):
-            continue  # not resolved this pass (PENDING, or UNSET control)
+            continue  # Not resolved this pass (PENDING, or UNSET control)
 
         row_start = perforations.well_offsets[well_row]
         rich_perforations = decompile_perforations(wells, well_name, perforations, well_row)
@@ -682,7 +681,7 @@ def load_wells_states(
             perforation_states.append(
                 PerforationState(
                     perforation=rich_perforations[row - row_start],
-                    cell_index=int(perforations.cell_indices[row]),
+                    cell_index=perforations.cell_indices[row],
                     flowing_pressure=pressure,
                     phase_rates=PhaseValues(
                         oil=workspace.connection_oil_rates[row],
@@ -702,7 +701,7 @@ def load_wells_states(
 
         states[well_name] = WellState(
             well_name=well_name,
-            is_open=not bool(workspace.economic_shutins[well_row]),
+            is_open=not workspace.economic_shutins[well_row],
             active_control=decompile_well_control(controls, well_row, unit_system),
             bhp=bhp,
             perforation_states=tuple(perforation_states),

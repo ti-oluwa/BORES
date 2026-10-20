@@ -38,7 +38,7 @@ class TrajectoryStation:
 @attrs.frozen(kw_only=True, slots=True)
 class WellTrajectory:
     """
-    A well's 3-D path: an ordered, piecewise-linear polyline of `TrajectoryStation`.
+    A well's 3-D path. An ordered, piecewise-linear polyline of `TrajectoryStation`.
 
     `Perforation` intervals on a well with this trajectory are defined
     against its measured depth, not true vertical depth, as TVD is not
@@ -118,7 +118,7 @@ class WellTrajectory:
             TrajectoryStation(measured_depth=end_md, x=end_x, y=end_y, z=end_z),
         )
 
-    def get_measured_depth_at_depth(self, true_vertical_depth: Number) -> Number:
+    def get_measured_depth_at(self, true_vertical_depth: Number) -> Number:
         """
         Returns the measured depth of the first point along the path, from the top, at
         `true_vertical_depth`.

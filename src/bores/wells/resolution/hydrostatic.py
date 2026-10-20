@@ -93,7 +93,8 @@ def compute_hydrostatic_connection_pressures(
     static_density = np.fromiter(
         (
             compute_static_mixture_density(
-                phase_saturations=sample.phase_saturations, phase_densities=sample.phase_densities
+                phase_saturations=sample.phase_saturations,
+                phase_densities=sample.phase_densities,
             )
             for sample in samples
         ),

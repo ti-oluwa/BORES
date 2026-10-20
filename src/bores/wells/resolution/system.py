@@ -82,7 +82,7 @@ def resolve_wells(
         for group_name in group_controls.names:
             try:
                 allocated_wells_by_group[group_name] = allocate_group_targets(
-                    group_name, compiled_system, workspace
+                    group_name, well_system=compiled_system, workspace=workspace
                 )
             except ValidationError:
                 # This group's own control mode has no directly

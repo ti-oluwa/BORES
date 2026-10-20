@@ -7,7 +7,7 @@ from typing_extensions import Self
 
 from bores.errors import ValidationError
 from bores.serde.stores import StoreSerializable
-from bores.types import Number, UnitConversionTable, UnitSystem
+from bores.types import Integer, Number, UnitConversionTable, UnitSystem
 from bores.units import get_conversion_factors
 from bores.utils import scale
 from bores.wells.base import Perforation
@@ -76,7 +76,7 @@ class PerforationState(StoreSerializable):
     perforation: Perforation
     """The perforation this snapshot is for."""
 
-    cell_index: int
+    cell_index: Integer
     """The grid cell this perforation connects to."""
 
     flowing_pressure: Number
