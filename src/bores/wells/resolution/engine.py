@@ -168,7 +168,6 @@ def resolve_well_control(
         tubing = attach_flowing_fluid(
             tubing=tubing,
             workspace=perforation_workspace,
-            connection_samples=connection_samples,
             relevant_phases=relevant_phases,
         )
         if control_mode in (
@@ -246,7 +245,6 @@ def resolve_well_control(
         tubing = attach_flowing_fluid(
             tubing=tubing,
             workspace=perforation_workspace,
-            connection_samples=connection_samples,
             relevant_phases=relevant_phases,
         )
         if control_mode in (

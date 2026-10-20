@@ -4,28 +4,34 @@ import math
 import typing
 
 import numba
+import numpy as np
+import numpy.typing as npt
 from typing_extensions import Self
 
 from bores.constants import c
 from bores.errors import ValidationError
+from bores.precision import get_dtype
 from bores.types import Number, NumberArray, OneDimension, UnitConversionTable, UnitSystem
 from bores.units import get_conversion_factors
-from bores.wells.state import PhaseValues
+from bores.wells.state import ConnectionSample, PhaseValues
 
 __all__ = [
     "UNIT_SYSTEMS_BY_TAG",
     "UNIT_SYSTEM_TAGS",
-    "ConnectionStep",
+    "ConnectionFluids",
+    "ConnectionWalk",
     "PressureDrop",
     "SurfaceFluidProperties",
     "WellBoreModel",
     "WellBoreModelOptions",
+    "build_connection_fluids",
     "compute_friction_factor",
     "compute_hydrostatic_pressure",
     "compute_mixture_density",
     "compute_mixture_velocity",
     "compute_mixture_viscosity",
     "compute_perforation_pressures",
+    "compute_perforation_pressures_from_fluids",
     "compute_segment_pressure_drop",
     "compute_static_hydrostatic_drop",
     "compute_static_mixture_density",
@@ -34,6 +40,7 @@ __all__ = [
     "compute_surface_mixture_viscosity",
     "compute_tubing_head_pressure",
     "get_gravitational_acceleration",
+    "get_hydrostatic_divisor",
     "get_unit_system_constant",
     "plan_connection_walk",
     "split_liquid_gas",
@@ -194,6 +201,7 @@ def compute_superficial_velocity(
     return (rate * rate_time_factor) / cross_sectional_area
 
 
+@numba.njit(cache=True)
 def compute_mixture_velocity(
     phase_rates: PhaseValues, tubing_inner_diameter: Number, rate_time_factor: Number
 ) -> Number:
@@ -381,36 +389,132 @@ def compute_hydrostatic_pressure(
     )
 
 
-class ConnectionStep(typing.NamedTuple):
-    """One segment of the walk outward from a well's reference depth to a connection."""
+class ConnectionFluids(typing.NamedTuple):
+    """Reservoir conditions at every connection of a well, one array per property."""
 
-    connection_index: int
-    """Index of the connection this segment ends at."""
+    pressures: NumberArray[OneDimension]
+    """Pressure at each connection."""
 
-    previous_index: int | None
-    """Index of the connection this segment starts at, or `None` if it starts at the reference depth."""
+    gas_liquid_surface_tensions: NumberArray[OneDimension]
+    """Gas-liquid surface tension at each connection."""
 
-    vertical_distance: Number
-    """Vertical extent of the segment."""
+    oil_densities: NumberArray[OneDimension]
+    """Oil density at each connection."""
 
-    segment_length: Number
-    """Length of the segment along the wellbore. Never less than its vertical extent."""
+    water_densities: NumberArray[OneDimension]
+    """Water density at each connection."""
 
-    geometric_sign: Number
-    """`1` if the segment ends deeper than it starts, `-1` if shallower."""
+    gas_densities: NumberArray[OneDimension]
+    """Gas density at each connection."""
 
-    carried_rates: PhaseValues
-    """Reservoir-condition phase rates flowing through the segment."""
+    oil_viscosities: NumberArray[OneDimension]
+    """Oil viscosity at each connection."""
+
+    water_viscosities: NumberArray[OneDimension]
+    """Water viscosity at each connection."""
+
+    gas_viscosities: NumberArray[OneDimension]
+    """Gas viscosity at each connection."""
+
+    oil_saturations: NumberArray[OneDimension]
+    """Oil saturation at each connection."""
+
+    water_saturations: NumberArray[OneDimension]
+    """Water saturation at each connection."""
+
+    gas_saturations: NumberArray[OneDimension]
+    """Gas saturation at each connection."""
 
 
+class ConnectionWalk(typing.NamedTuple):
+    """
+    The segments of the walk outward from a well's reference depth to every connection, one entry
+    per segment, downward walk first.
+    """
+
+    connection_indices: NumberArray[OneDimension]
+    """Index of the connection each segment ends at."""
+
+    previous_indices: NumberArray[OneDimension]
+    """Index of the connection each segment starts at, or `-1` if it starts at the reference depth."""
+
+    vertical_distances: NumberArray[OneDimension]
+    """Vertical extent of each segment."""
+
+    segment_lengths: NumberArray[OneDimension]
+    """Length of each segment along the wellbore. Never less than its vertical extent."""
+
+    geometric_signs: NumberArray[OneDimension]
+    """`1` where a segment ends deeper than it starts, `-1` where shallower."""
+
+    carried_oil_rates: NumberArray[OneDimension]
+    """Oil rate flowing through each segment, at reservoir conditions."""
+
+    carried_water_rates: NumberArray[OneDimension]
+    """Water rate flowing through each segment, at reservoir conditions."""
+
+    carried_gas_rates: NumberArray[OneDimension]
+    """Gas rate flowing through each segment, at reservoir conditions."""
+
+
+def build_connection_fluids(
+    *, connection_samples: typing.Sequence[ConnectionSample], dtype: npt.DTypeLike = None
+) -> ConnectionFluids:
+    """
+    Gathers the reservoir conditions of a well's connection samples into arrays.
+
+    :param connection_samples: One `ConnectionSample` per connection.
+    :param dtype: Array data type. `bores.precision.get_dtype()` if not given.
+    :returns: The conditions at every connection.
+    """
+    resolved_dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+    count = len(connection_samples)
+
+    def gather(read: typing.Callable[[ConnectionSample], Number]) -> NumberArray[OneDimension]:
+        return typing.cast(
+            NumberArray[OneDimension],
+            np.fromiter((read(sample) for sample in connection_samples), resolved_dtype, count),
+        )
+
+    return ConnectionFluids(
+        pressures=gather(lambda sample: sample.pressure),
+        gas_liquid_surface_tensions=gather(lambda sample: sample.gas_liquid_surface_tension),
+        oil_densities=gather(lambda sample: sample.phase_densities.oil),
+        water_densities=gather(lambda sample: sample.phase_densities.water),
+        gas_densities=gather(lambda sample: sample.phase_densities.gas),
+        oil_viscosities=gather(lambda sample: sample.phase_viscosities.oil),
+        water_viscosities=gather(lambda sample: sample.phase_viscosities.water),
+        gas_viscosities=gather(lambda sample: sample.phase_viscosities.gas),
+        oil_saturations=gather(lambda sample: sample.phase_saturations.oil),
+        water_saturations=gather(lambda sample: sample.phase_saturations.water),
+        gas_saturations=gather(lambda sample: sample.phase_saturations.gas),
+    )
+
+
+def get_hydrostatic_divisor(unit_system: UnitSystem) -> Number:
+    """
+    The divisor that turns `density * gravity * length` into a pressure in `unit_system`: the
+    product of its gravitational factor and hydrostatic area factor, as the constants are set
+    now.
+
+    :param unit_system: The unit system the column is in.
+    :returns: The divisor.
+    """
+    return get_unit_system_constant(
+        prefix="GRAVITATIONAL_FACTOR", unit_system=unit_system
+    ) * get_unit_system_constant(prefix="HYDROSTATIC_AREA_FACTOR", unit_system=unit_system)
+
+
+@numba.njit(cache=True)
 def plan_connection_walk(
-    *,
     reference_depth: Number,
     reference_measured_depth: Number,
-    representative_depths: typing.Sequence[Number],
-    representative_measured_depths: typing.Sequence[Number],
-    connection_phase_rates: typing.Sequence[PhaseValues],
-) -> list[ConnectionStep]:
+    representative_depths: NumberArray[OneDimension],
+    representative_measured_depths: NumberArray[OneDimension],
+    connection_oil_rates: NumberArray[OneDimension],
+    connection_water_rates: NumberArray[OneDimension],
+    connection_gas_rates: NumberArray[OneDimension],
+) -> ConnectionWalk:
     """
     Plans the walk outward from a well's reference depth to every connection, both down and up.
 
@@ -419,85 +523,105 @@ def plan_connection_walk(
     carries the connection it ends at and every deeper one. Moving up, it carries every
     connection at or below the reference depth, plus every connection above it that the walk has
     already passed. A connection exactly at the reference depth belongs to the downward walk.
+    Connections at the same depth are visited in index order.
+
+    The reference depths are taken in the data type of the depth arrays, so a connection at the
+    reference depth is at it exactly, whatever precision the reference was given in.
 
     :param reference_depth: The well's BHP/THP reporting datum.
     :param reference_measured_depth: Measured depth along the wellbore of `reference_depth`.
     :param representative_depths: One vertical depth per connection.
     :param representative_measured_depths: One measured depth along the wellbore per connection.
-    :param connection_phase_rates: Each connection's own rate of each phase, at reservoir
-        conditions.
-    :returns: The segments, each after the one it starts from, downward walk first.
+    :param connection_oil_rates: Each connection's own oil rate, at reservoir conditions.
+    :param connection_water_rates: Each connection's own water rate, at reservoir conditions.
+    :param connection_gas_rates: Each connection's own gas rate, at reservoir conditions.
+    :returns: The segments.
     """
-    count = len(representative_depths)
-    below = sorted(
-        (i for i in range(count) if representative_depths[i] >= reference_depth),
-        key=lambda i: representative_depths[i],
-    )
-    above = sorted(
-        (i for i in range(count) if representative_depths[i] < reference_depth),
-        key=lambda i: -representative_depths[i],
-    )
+    reference_depth = representative_depths.dtype.type(reference_depth)
+    reference_measured_depth = representative_measured_depths.dtype.type(reference_measured_depth)
+    count = representative_depths.shape[0]
+    ascending = np.argsort(representative_depths, kind="mergesort")
+    descending = np.argsort(-representative_depths, kind="mergesort")
+    below_count = 0
+    for k in range(count):
+        if representative_depths[k] >= reference_depth:
+            below_count += 1
 
-    steps: list[ConnectionStep] = []
-    carried = PhaseValues(
-        oil=sum(connection_phase_rates[i].oil for i in below),
-        water=sum(connection_phase_rates[i].water for i in below),
-        gas=sum(connection_phase_rates[i].gas for i in below),
-    )
-    below_total = carried
-    previous_index: int | None = None
+    connection_indices = np.empty(count, dtype=np.int64)
+    previous_indices = np.empty(count, dtype=np.int64)
+    vertical_distances = np.empty(count, dtype=representative_depths.dtype)
+    segment_lengths = np.empty(count, dtype=representative_depths.dtype)
+    geometric_signs = np.empty(count, dtype=representative_depths.dtype)
+    carried_oil_rates = np.empty(count, dtype=connection_oil_rates.dtype)
+    carried_water_rates = np.empty(count, dtype=connection_water_rates.dtype)
+    carried_gas_rates = np.empty(count, dtype=connection_gas_rates.dtype)
+
+    below_start = count - below_count
+    oil_beneath = connection_oil_rates.dtype.type(0.0)
+    water_beneath = connection_water_rates.dtype.type(0.0)
+    gas_beneath = connection_gas_rates.dtype.type(0.0)
+    for step in range(below_count - 1, -1, -1):
+        i = ascending[below_start + step]
+        oil_beneath = oil_beneath + connection_oil_rates[i]
+        water_beneath = water_beneath + connection_water_rates[i]
+        gas_beneath = gas_beneath + connection_gas_rates[i]
+        carried_oil_rates[step] = oil_beneath
+        carried_water_rates[step] = water_beneath
+        carried_gas_rates[step] = gas_beneath
+
+    previous_index = -1
     previous_depth = reference_depth
     previous_measured_depth = reference_measured_depth
-    for i in below:
+    for step in range(below_count):
+        i = ascending[below_start + step]
         vertical_distance = abs(representative_depths[i] - previous_depth)
-        steps.append(
-            ConnectionStep(
-                connection_index=i,
-                previous_index=previous_index,
-                vertical_distance=vertical_distance,
-                segment_length=max(
-                    abs(representative_measured_depths[i] - previous_measured_depth),
-                    vertical_distance,
-                ),
-                geometric_sign=1.0,
-                carried_rates=carried,
-            )
+        connection_indices[step] = i
+        previous_indices[step] = previous_index
+        vertical_distances[step] = vertical_distance
+        segment_lengths[step] = max(
+            abs(representative_measured_depths[i] - previous_measured_depth), vertical_distance
         )
-        carried = PhaseValues(
-            oil=carried.oil - connection_phase_rates[i].oil,
-            water=carried.water - connection_phase_rates[i].water,
-            gas=carried.gas - connection_phase_rates[i].gas,
-        )
-        previous_index, previous_depth = i, representative_depths[i]
+        geometric_signs[step] = 1.0
+        previous_index = i
+        previous_depth = representative_depths[i]
         previous_measured_depth = representative_measured_depths[i]
 
-    carried = below_total
-    previous_index = None
+    oil_carried = oil_beneath
+    water_carried = water_beneath
+    gas_carried = gas_beneath
+    previous_index = -1
     previous_depth = reference_depth
     previous_measured_depth = reference_measured_depth
-    for i in above:
+    for step in range(below_count, count):
+        i = descending[step]
         vertical_distance = abs(representative_depths[i] - previous_depth)
-        steps.append(
-            ConnectionStep(
-                connection_index=i,
-                previous_index=previous_index,
-                vertical_distance=vertical_distance,
-                segment_length=max(
-                    abs(representative_measured_depths[i] - previous_measured_depth),
-                    vertical_distance,
-                ),
-                geometric_sign=-1.0,
-                carried_rates=carried,
-            )
+        connection_indices[step] = i
+        previous_indices[step] = previous_index
+        vertical_distances[step] = vertical_distance
+        segment_lengths[step] = max(
+            abs(representative_measured_depths[i] - previous_measured_depth), vertical_distance
         )
-        carried = PhaseValues(
-            oil=carried.oil + connection_phase_rates[i].oil,
-            water=carried.water + connection_phase_rates[i].water,
-            gas=carried.gas + connection_phase_rates[i].gas,
-        )
-        previous_index, previous_depth = i, representative_depths[i]
+        geometric_signs[step] = -1.0
+        carried_oil_rates[step] = oil_carried
+        carried_water_rates[step] = water_carried
+        carried_gas_rates[step] = gas_carried
+        oil_carried = oil_carried + connection_oil_rates[i]
+        water_carried = water_carried + connection_water_rates[i]
+        gas_carried = gas_carried + connection_gas_rates[i]
+        previous_index = i
+        previous_depth = representative_depths[i]
         previous_measured_depth = representative_measured_depths[i]
-    return steps
+
+    return ConnectionWalk(
+        connection_indices=connection_indices,
+        previous_indices=previous_indices,
+        vertical_distances=typing.cast(NumberArray[OneDimension], vertical_distances),
+        segment_lengths=typing.cast(NumberArray[OneDimension], segment_lengths),
+        geometric_signs=typing.cast(NumberArray[OneDimension], geometric_signs),
+        carried_oil_rates=typing.cast(NumberArray[OneDimension], carried_oil_rates),
+        carried_water_rates=typing.cast(NumberArray[OneDimension], carried_water_rates),
+        carried_gas_rates=typing.cast(NumberArray[OneDimension], carried_gas_rates),
+    )
 
 
 @numba.njit(cache=True)
@@ -594,6 +718,7 @@ def compute_segment_pressure_drop(
     )
 
 
+@numba.njit(cache=True)
 def split_liquid_gas(
     phase_rates: PhaseValues,
     phase_densities: PhaseValues,
@@ -723,6 +848,51 @@ def compute_perforation_pressures(
     if wellbore.name == "woldesemayat_ghajar":
         from bores.wells.hydraulics.woldesemayat_ghajar import (
             compute_perforation_pressures as compute,
+        )
+
+        return compute(model=wellbore.options, **kwargs)
+    raise ValidationError(f"Unknown `WellBoreModel` name: {wellbore.name!r}")
+
+
+def compute_perforation_pressures_from_fluids(
+    *, wellbore: WellBoreModel, **kwargs: typing.Any
+) -> NumberArray[OneDimension]:
+    """
+    Compute perforation pressures from per-connection arrays, using the model/correlation defined
+    by `wellbore.name`.
+
+    :param wellbore: `WellBoreModel` naming a hydraulics correlation.
+    :param kwargs: Forwarded to that correlation's `compute_perforation_pressures_from_fluids`.
+    :returns: Pressure at each connection.
+    :raises ValidationError: If `wellbore.name` isn't recognized.
+    """
+    if wellbore.name == "homogeneous":
+        from bores.wells.hydraulics.homogeneous import (
+            compute_perforation_pressures_from_fluids as compute,
+        )
+
+        return compute(model=wellbore.options, **kwargs)
+    if wellbore.name in ("beggs_brill", "beggs_and_brill"):
+        from bores.wells.hydraulics.beggs_and_brill import (
+            compute_perforation_pressures_from_fluids as compute,
+        )
+
+        return compute(model=wellbore.options, **kwargs)
+    if wellbore.name == "hagedorn_brown":
+        from bores.wells.hydraulics.hagedorn_brown import (
+            compute_perforation_pressures_from_fluids as compute,
+        )
+
+        return compute(model=wellbore.options, **kwargs)
+    if wellbore.name == "gray":
+        from bores.wells.hydraulics.gray import (
+            compute_perforation_pressures_from_fluids as compute,
+        )
+
+        return compute(model=wellbore.options, **kwargs)
+    if wellbore.name == "woldesemayat_ghajar":
+        from bores.wells.hydraulics.woldesemayat_ghajar import (
+            compute_perforation_pressures_from_fluids as compute,
         )
 
         return compute(model=wellbore.options, **kwargs)

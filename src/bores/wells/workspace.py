@@ -13,6 +13,7 @@ from bores.utils import none_if_nan
 from bores.wells.base import Wells
 from bores.wells.compile import UNSET_INT, CompiledWellSystem
 from bores.wells.decompile import decompile_limit, decompile_perforations, decompile_well_control
+from bores.wells.hydraulics.base import ConnectionFluids
 from bores.wells.state import (
     ConnectionSample,
     PerforationState,
@@ -27,7 +28,6 @@ __all__ = [
     "WellsWorkspace",
     "accumulate_phase_rates",
     "accumulate_well_volumes",
-    "build_connection_phase_rates",
     "build_perforation_workspace",
     "build_wells_workspace",
     "compute_perforation_drawdown",
@@ -80,6 +80,9 @@ class PerforationWorkspace(typing.NamedTuple):
 
     reservoir_pressures: NumberArray[OneDimension]
     """Matching reservoir pressure at each connection."""
+
+    connection_fluids: ConnectionFluids
+    """Matching reservoir conditions at each connection, as the hydraulics correlations read them."""
 
     oil_mobilities: NumberArray[OneDimension]
     """Matching reservoir-condition oil mobility at each connection."""
@@ -173,9 +176,29 @@ def build_perforation_workspace(
     oil_fvf = np.empty(n, dtype=resolved_dtype)
     water_fvf = np.empty(n, dtype=resolved_dtype)
     gas_fvf = np.empty(n, dtype=resolved_dtype)
+    surface_tensions = np.empty(n, dtype=resolved_dtype)
+    oil_densities = np.empty(n, dtype=resolved_dtype)
+    water_densities = np.empty(n, dtype=resolved_dtype)
+    gas_densities = np.empty(n, dtype=resolved_dtype)
+    oil_viscosities = np.empty(n, dtype=resolved_dtype)
+    water_viscosities = np.empty(n, dtype=resolved_dtype)
+    gas_viscosities = np.empty(n, dtype=resolved_dtype)
+    oil_saturations = np.empty(n, dtype=resolved_dtype)
+    water_saturations = np.empty(n, dtype=resolved_dtype)
+    gas_saturations = np.empty(n, dtype=resolved_dtype)
 
     for i, sample in enumerate(connection_samples):
         reservoir_pressures[i] = sample.pressure
+        surface_tensions[i] = sample.gas_liquid_surface_tension
+        oil_densities[i] = sample.phase_densities.oil
+        water_densities[i] = sample.phase_densities.water
+        gas_densities[i] = sample.phase_densities.gas
+        oil_viscosities[i] = sample.phase_viscosities.oil
+        water_viscosities[i] = sample.phase_viscosities.water
+        gas_viscosities[i] = sample.phase_viscosities.gas
+        oil_saturations[i] = sample.phase_saturations.oil
+        water_saturations[i] = sample.phase_saturations.water
+        gas_saturations[i] = sample.phase_saturations.gas
         oil_mobilities[i] = sample.phase_mobilities.oil
         water_mobilities[i] = sample.phase_mobilities.water
         gas_mobilities[i] = sample.phase_mobilities.gas
@@ -199,6 +222,19 @@ def build_perforation_workspace(
         ),
         d_factor=d_factor,
         reservoir_pressures=reservoir_pressures,
+        connection_fluids=ConnectionFluids(
+            pressures=reservoir_pressures,
+            gas_liquid_surface_tensions=surface_tensions,
+            oil_densities=oil_densities,
+            water_densities=water_densities,
+            gas_densities=gas_densities,
+            oil_viscosities=oil_viscosities,
+            water_viscosities=water_viscosities,
+            gas_viscosities=gas_viscosities,
+            oil_saturations=oil_saturations,
+            water_saturations=water_saturations,
+            gas_saturations=gas_saturations,
+        ),
         oil_mobilities=oil_mobilities,
         water_mobilities=water_mobilities,
         gas_mobilities=gas_mobilities,
@@ -604,31 +640,6 @@ def accumulate_phase_rates(
         surface_water_rate,
         surface_gas_rate,
     )
-
-
-def build_connection_phase_rates(
-    connection_oil_rates: NumberArray[OneDimension],
-    connection_water_rates: NumberArray[OneDimension],
-    connection_gas_rates: NumberArray[OneDimension],
-) -> list[PhaseValues]:
-    """
-    Builds the per-connection `PhaseValues` sequence the segmented
-    hydraulics walk (`compute_perforation_pressures`'
-    `connection_phase_rates` parameter) needs, from `accumulate_phase_rates`'
-    per-connection output buffers.
-
-    :param connection_oil_rates: `PerforationWorkspace.connection_oil_rates`,
-        already populated by `accumulate_phase_rates`.
-    :param connection_water_rates: Water analogue of `connection_oil_rates`.
-    :param connection_gas_rates: Gas analogue of `connection_oil_rates`.
-    :returns: One `PhaseValues` per connection, same order as the inputs.
-    """
-    return [
-        PhaseValues(oil=oil, water=water, gas=gas)
-        for oil, water, gas in zip(
-            connection_oil_rates, connection_water_rates, connection_gas_rates, strict=False
-        )
-    ]
 
 
 def load_wells_states(

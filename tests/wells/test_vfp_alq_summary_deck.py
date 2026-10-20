@@ -1100,19 +1100,18 @@ def test_thp_is_found_through_a_datum_shift(tmp_path):
 
 
 def test_attached_flowing_fluid_records_densities_and_a_zero_flow_density():
-    from bores.wells.hydraulics.base import PhaseValues
+    from bores.wells.hydraulics.base import PhaseValues, build_connection_fluids
     from bores.wells.resolution.tubing import WellTubing, attach_flowing_fluid
-
-    def sample(oil_density):
-        return types.SimpleNamespace(
-            phase_densities=PhaseValues(oil=oil_density, water=62.4, gas=5.0)
-        )
 
     workspace = types.SimpleNamespace(
         well_indices=np.array([1.0, 3.0]),
         oil_mobilities=np.array([1.0, 1.0]),
         water_mobilities=np.array([0.0, 0.0]),
         gas_mobilities=np.array([2.0, 2.0]),
+        connection_fluids=build_connection_fluids(
+            connection_samples=hydrostatic_samples(oil_densities=(40.0, 60.0)),
+            dtype=np.float64,
+        ),
     )
     table = lookup_table(
         flow_type=VFPFlowType.LIQUID,
@@ -1122,17 +1121,15 @@ def test_attached_flowing_fluid_records_densities_and_a_zero_flow_density():
     tubing = attach_flowing_fluid(
         tubing=WellTubing(None, table, 0.0),
         workspace=workspace,
-        connection_samples=[sample(40.0), sample(60.0)],
         relevant_phases=PhaseValues(oil=1.0, water=1.0, gas=1.0),
     )
     fluid = tubing.flowing_fluid
     assert fluid.oil_densities.tolist() == [40.0, 60.0]
-    # Deliverability is oil 4 : gas 8, so the idle column is 1/3 oil (mean 55) and 2/3 gas.
-    assert fluid.zero_flow_density == pytest.approx(55.0 / 3 + 2 * 5.0 / 3)
+    # Deliverability is oil 4 : gas 8, so the idle column is 1/3 oil (mean 55) and 2/3 gas (10).
+    assert fluid.zero_flow_density == pytest.approx(55.0 / 3 + 2 * 10.0 / 3)
     untouched = attach_flowing_fluid(
         tubing=WellTubing(None, None, 0.0),
         workspace=workspace,
-        connection_samples=[],
         relevant_phases=PhaseValues(oil=1.0, water=1.0, gas=1.0),
     )
     assert untouched.flowing_fluid is None
@@ -1391,18 +1388,46 @@ def test_a_vfp_well_resolves_with_hydrostatic_connection_pressures(tmp_path):
     assert not np.allclose(workspace.connection_gas_rates, uniform.connection_gas_rates)
 
 
-def walk(*, reference_depth, depths, oil, measured_depths=None, reference_measured_depth=None):
+def walk(
+    *,
+    reference_depth,
+    depths,
+    oil,
+    measured_depths=None,
+    reference_measured_depth=None,
+    dtype=np.float64,
+):
     from bores.wells.hydraulics.base import PhaseValues, plan_connection_walk
 
-    return plan_connection_walk(
-        reference_depth=reference_depth,
-        reference_measured_depth=(
-            reference_depth if reference_measured_depth is None else reference_measured_depth
-        ),
-        representative_depths=depths,
-        representative_measured_depths=depths if measured_depths is None else measured_depths,
-        connection_phase_rates=[PhaseValues(oil=q, water=0.0, gas=0.0) for q in oil],
+    depth_array = np.array(depths, dtype=dtype)
+    oil_array = np.array(oil, dtype=dtype)
+    zeros = np.zeros_like(oil_array)
+    planned = plan_connection_walk(
+        reference_depth,
+        reference_depth if reference_measured_depth is None else reference_measured_depth,
+        depth_array,
+        depth_array if measured_depths is None else np.array(measured_depths, dtype=dtype),
+        oil_array,
+        zeros,
+        zeros,
     )
+    return [
+        types.SimpleNamespace(
+            connection_index=int(planned.connection_indices[k]),
+            previous_index=None
+            if planned.previous_indices[k] < 0
+            else int(planned.previous_indices[k]),
+            vertical_distance=planned.vertical_distances[k],
+            segment_length=planned.segment_lengths[k],
+            geometric_sign=planned.geometric_signs[k],
+            carried_rates=PhaseValues(
+                oil=planned.carried_oil_rates[k],
+                water=planned.carried_water_rates[k],
+                gas=planned.carried_gas_rates[k],
+            ),
+        )
+        for k in range(len(planned.connection_indices))
+    ]
 
 
 def test_walk_segments_carry_every_connection_beneath_them():
@@ -1781,3 +1806,285 @@ def test_the_iteration_limit_is_enforced():
     with pytest.raises(WellConvergenceError, match="did not converge in 1 iterations"):
         resolve_horizontal_producer(bhp=1000.0, max_fixed_point_iterations=1)
     resolve_horizontal_producer(bhp=1000.0, max_fixed_point_iterations=20)
+
+
+def test_a_connection_with_nothing_beneath_it_carries_exactly_zero():
+    # 0.1 + 0.2 + 0.3 - 0.1 - 0.2 - 0.3 is not exactly zero in floating point, so a total that is
+    # subtracted from as the walk goes would leave a spurious rate on the deepest idle connection.
+    steps = walk(reference_depth=0.0, depths=[10.0, 20.0, 30.0, 40.0], oil=[0.1, 0.2, 0.3, 0.0])
+    deepest = next(step for step in steps if step.connection_index == 3)
+    assert deepest.carried_rates.oil == 0.0  # ruff: ignore[float-equality-comparison]
+    assert tuple(deepest.carried_rates) == (0.0, 0.0, 0.0)
+
+
+def test_a_reference_depth_in_another_precision_still_matches_a_connection_at_that_depth():
+    # float32(152.4) is a little less than the float64 152.4. The reference is taken in the depth
+    # arrays' data type, so the connection is at the reference depth, not above it.
+    steps = walk(
+        reference_depth=152.4,
+        depths=[152.4, 152.4, 152.4],
+        oil=[1, 1, 1],
+        measured_depths=[274.32, 335.28, 396.24],
+        reference_measured_depth=274.32,
+        dtype=np.float32,
+    )
+    assert all(step.geometric_sign == pytest.approx(1.0) for step in steps)
+    first = next(step for step in steps if step.connection_index == 0)
+    assert first.vertical_distance == pytest.approx(0.0)
+    assert first.segment_length == pytest.approx(0.0)
+
+
+def scenario(*, unit_system, geometry, reference_kind, rate_kind, dtype):
+    """Per-connection inputs for one well in `unit_system`, consistent in its units."""
+    import math
+
+    from bores.units import get_conversion_factors
+    from bores.wells.hydraulics.base import build_connection_fluids
+    from bores.wells.state import ConnectionSample, PhaseValues
+
+    count = 6
+    rng = np.random.RandomState(7)
+    if geometry == "vertical":
+        depth = np.linspace(100.0, 600.0, count)
+        measured, inclination = depth.copy(), np.zeros(count)
+    elif geometry == "horizontal":
+        depth = np.full(count, 500.0)
+        measured, inclination = np.linspace(900.0, 1900.0, count), np.full(count, math.pi / 2)
+    else:
+        depth = np.array([300.0, 250.0, 320.0, 310.0, 280.0, 340.0])
+        measured = np.array([1000.0, 1100.0, 1230.0, 1330.0, 1450.0, 1580.0])
+        inclination = np.full(count, 1.3)
+    reference_depth = {
+        "top": depth.min(),
+        "middle": np.median(depth) + 3.0,
+        "below": depth.max() + 60.0,
+    }[reference_kind]
+    reference_measured = {
+        "top": measured.min(),
+        "middle": np.median(measured) + 3.0,
+        "below": measured.max() + 60.0,
+    }[reference_kind]
+    oil, water, gas = (
+        np.zeros(count) if rate_kind == "zero" else rng.uniform(50.0, 900.0, count)
+        for _ in range(3)
+    )
+    raw = [
+        ConnectionSample(
+            cell_index=i,
+            pressure=float(rng.uniform(1500, 3500)),
+            temperature=200.0,
+            phase_saturations=PhaseValues(0.5, 0.3, 0.2),
+            phase_mobilities=PhaseValues(1.0, 1.0, 1.0),
+            phase_densities=PhaseValues(
+                float(rng.uniform(40, 55)), 62.0, float(rng.uniform(2, 12))
+            ),
+            phase_viscosities=PhaseValues(float(rng.uniform(0.3, 3)), 0.5, 0.02),
+            gas_liquid_surface_tension=20.0,
+            phase_fvfs=PhaseValues(1.2, 1.0, 0.01),
+        )
+        for i in range(count)
+    ]
+    factors = get_conversion_factors(UnitSystem.FIELD, unit_system)
+    tension = 1e-3 if unit_system is UnitSystem.SI else 1.0
+    samples = [
+        ConnectionSample(
+            cell_index=s.cell_index,
+            pressure=s.pressure * factors["pressure"],
+            temperature=s.temperature,
+            phase_saturations=s.phase_saturations,
+            phase_mobilities=s.phase_mobilities,
+            phase_densities=PhaseValues(*(v * factors["density"] for v in s.phase_densities)),
+            phase_viscosities=PhaseValues(
+                *(v * factors["viscosity"] for v in s.phase_viscosities)
+            ),
+            gas_liquid_surface_tension=s.gas_liquid_surface_tension * tension,
+            phase_fvfs=s.phase_fvfs,
+        )
+        for s in raw
+    ]
+    rate_factor = factors["reservoir_rate"]
+    length = factors["length"]
+    return types.SimpleNamespace(
+        reference_depth=float(reference_depth * length),
+        reference_measured_depth=float(reference_measured * length),
+        reference_pressure=1000.0 * factors["pressure"],
+        depths=(depth * length).astype(dtype),
+        measured_depths=(measured * length).astype(dtype),
+        inclinations=inclination.astype(dtype),
+        oil=(oil * rate_factor).astype(dtype),
+        water=(water * rate_factor).astype(dtype),
+        gas=(gas * rate_factor).astype(dtype),
+        fluids=build_connection_fluids(connection_samples=samples, dtype=dtype),
+        samples=samples,
+        diameter=0.25 * length,
+    )
+
+
+KERNELS = [
+    ("homogeneous", "homogeneous_wellbore"),
+    ("beggs_and_brill", "beggs_and_brill_wellbore"),
+    ("hagedorn_brown", "hagedorn_brown_wellbore"),
+    ("gray", "gray_wellbore"),
+    ("woldesemayat_ghajar", "woldesemayat_ghajar_wellbore"),
+]
+
+
+@pytest.mark.parametrize("module, factory", KERNELS)
+@pytest.mark.parametrize("unit_system", list(UnitSystem))
+@pytest.mark.parametrize("geometry", ["vertical", "horizontal", "undulating"])
+@pytest.mark.parametrize("rate_kind", ["zero", "flowing"])
+@pytest.mark.parametrize("is_injector", [False, True])
+def test_the_compiled_walk_matches_the_same_code_run_as_python(
+    module, factory, unit_system, geometry, rate_kind, is_injector
+):
+    import importlib
+
+    from bores.wells.hydraulics.base import get_hydrostatic_divisor
+
+    case = scenario(
+        unit_system=unit_system,
+        geometry=geometry,
+        reference_kind="middle",
+        rate_kind=rate_kind,
+        dtype=np.float64,
+    )
+    target = importlib.import_module(f"bores.wells.hydraulics.{module}")
+    model = getattr(target, factory)(
+        tubing_inner_diameter=case.diameter, unit_system=unit_system
+    ).options
+    arguments = (
+        model,
+        case.reference_depth,
+        case.reference_measured_depth,
+        case.reference_pressure,
+        case.oil,
+        case.water,
+        case.gas,
+        case.depths,
+        case.measured_depths,
+        case.inclinations,
+        case.fluids,
+        is_injector,
+        get_hydrostatic_divisor(unit_system),
+    )
+    compiled, interpreted = np.zeros(6), np.zeros(6)
+    target.walk_perforation_pressures(*arguments, compiled)
+    target.walk_perforation_pressures.py_func(*arguments, interpreted)
+    assert compiled == pytest.approx(interpreted, rel=1e-10)
+
+
+@pytest.mark.parametrize("unit_system", list(UnitSystem))
+def test_a_static_column_follows_the_unit_systems_own_constants(unit_system):
+    from bores.wells.hydraulics.base import (
+        compute_hydrostatic_pressure,
+        compute_static_mixture_density,
+        get_gravitational_acceleration,
+    )
+    from bores.wells.hydraulics.homogeneous import (
+        compute_perforation_pressures_from_fluids,
+        homogeneous_wellbore,
+    )
+
+    case = scenario(
+        unit_system=unit_system,
+        geometry="vertical",
+        reference_kind="top",
+        rate_kind="zero",
+        dtype=np.float64,
+    )
+    model = homogeneous_wellbore(tubing_inner_diameter=case.diameter, unit_system=unit_system)
+    pressures = compute_perforation_pressures_from_fluids(
+        model.options,
+        case.reference_depth,
+        case.reference_measured_depth,
+        case.reference_pressure,
+        case.oil,
+        case.water,
+        case.gas,
+        case.depths,
+        case.measured_depths,
+        case.inclinations,
+        case.fluids,
+        False,
+    )
+    expected = case.reference_pressure
+    previous_depth = case.reference_depth
+    for i in range(1, 6):
+        sample = case.samples[i]
+        expected += compute_hydrostatic_pressure(
+            density=compute_static_mixture_density(
+                phase_saturations=sample.phase_saturations, phase_densities=sample.phase_densities
+            ),
+            gravitational_acceleration=get_gravitational_acceleration(unit_system),
+            length=case.depths[i] - case.depths[i - 1]
+            if i > 1
+            else case.depths[i] - previous_depth,
+            unit_system=unit_system,
+        )
+        assert pressures[i] == pytest.approx(expected, rel=1e-9)
+
+
+@pytest.mark.parametrize("module, factory", KERNELS)
+def test_the_walk_keeps_the_precision_it_is_given(module, factory):
+    import importlib
+
+    target = importlib.import_module(f"bores.wells.hydraulics.{module}")
+    results = {}
+    for dtype in (np.float32, np.float64):
+        case = scenario(
+            unit_system=UnitSystem.FIELD,
+            geometry="vertical",
+            reference_kind="middle",
+            rate_kind="flowing",
+            dtype=dtype,
+        )
+        model = getattr(target, factory)(tubing_inner_diameter=case.diameter).options
+        results[dtype] = target.compute_perforation_pressures_from_fluids(
+            model,
+            dtype(case.reference_depth),
+            dtype(case.reference_measured_depth),
+            dtype(case.reference_pressure),
+            case.oil,
+            case.water,
+            case.gas,
+            case.depths,
+            case.measured_depths,
+            case.inclinations,
+            case.fluids,
+            False,
+            dtype=dtype,
+        )
+    assert results[np.float32].dtype == np.float32
+    assert results[np.float64].dtype == np.float64
+    assert results[np.float32] == pytest.approx(results[np.float64], rel=1e-4)
+
+
+def test_per_connection_inputs_of_different_lengths_are_rejected():
+    from bores.wells.hydraulics.homogeneous import (
+        compute_perforation_pressures_from_fluids,
+        homogeneous_wellbore,
+    )
+
+    case = scenario(
+        unit_system=UnitSystem.FIELD,
+        geometry="vertical",
+        reference_kind="top",
+        rate_kind="flowing",
+        dtype=np.float64,
+    )
+    model = homogeneous_wellbore(tubing_inner_diameter=case.diameter).options
+    with pytest.raises(ValueError, match="same length"):
+        compute_perforation_pressures_from_fluids(
+            model,
+            case.reference_depth,
+            case.reference_measured_depth,
+            case.reference_pressure,
+            case.oil[:-1],
+            case.water,
+            case.gas,
+            case.depths,
+            case.measured_depths,
+            case.inclinations,
+            case.fluids,
+            False,
+        )

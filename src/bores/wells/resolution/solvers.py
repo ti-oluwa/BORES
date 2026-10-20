@@ -15,7 +15,7 @@ from bores.wells.compile import (
 from bores.wells.hydraulics.base import (
     SurfaceFluidProperties,
     WellBoreModel,
-    compute_perforation_pressures,
+    compute_perforation_pressures_from_fluids,
 )
 from bores.wells.resolution.hydrostatic import compute_hydrostatic_connection_pressures
 from bores.wells.resolution.spec import ConnectionPressureMode, WellControlSpec
@@ -25,7 +25,6 @@ from bores.wells.workspace import (
     ConnectionRates,
     PerforationWorkspace,
     accumulate_phase_rates,
-    build_connection_phase_rates,
     correct_well_indices_for_non_darcy,
     get_connection_rates,
 )
@@ -182,8 +181,6 @@ def solve_connection_pressures_and_rates(
     )
 
     zero_rates = PhaseValues(oil=0.0, water=0.0, gas=0.0)
-    n_connections = len(connection_samples)
-    zero_connection_phase_rates = [zero_rates] * n_connections
     if uniform_connection_pressure:
         connection_pressures = workspace.connection_pressures
         connection_pressures[:] = reference_pressure
@@ -202,16 +199,18 @@ def solve_connection_pressures_and_rates(
             out=workspace.connection_pressures,
         )
     else:
-        connection_pressures = compute_perforation_pressures(
+        connection_pressures = compute_perforation_pressures_from_fluids(
             wellbore=typing.cast(WellBoreModel, wellbore),
             reference_depth=reference_depth,
             reference_pressure=reference_pressure,
-            connection_phase_rates=zero_connection_phase_rates,
+            connection_oil_rates=np.zeros_like(workspace.connection_oil_rates),
+            connection_water_rates=np.zeros_like(workspace.connection_water_rates),
+            connection_gas_rates=np.zeros_like(workspace.connection_gas_rates),
             reference_measured_depth=workspace.reference_measured_depth,
             representative_depths=workspace.representative_depths,
             representative_measured_depths=workspace.representative_measured_depths,
             inclinations_from_vertical=workspace.inclinations_from_vertical,
-            connection_samples=connection_samples,
+            connection_fluids=workspace.connection_fluids,
             is_injector=is_injector,
             out=workspace.connection_pressures,
         )
@@ -281,21 +280,18 @@ def solve_connection_pressures_and_rates(
                 out=workspace.connection_pressures,
             )
         elif not uniform_connection_pressure:
-            connection_phase_rates = build_connection_phase_rates(
-                connection_oil_rates=workspace.connection_oil_rates,
-                connection_water_rates=workspace.connection_water_rates,
-                connection_gas_rates=workspace.connection_gas_rates,
-            )
-            connection_pressures = compute_perforation_pressures(
+            connection_pressures = compute_perforation_pressures_from_fluids(
                 wellbore=typing.cast(WellBoreModel, wellbore),
                 reference_depth=reference_depth,
                 reference_pressure=reference_pressure,
-                connection_phase_rates=connection_phase_rates,
+                connection_oil_rates=workspace.connection_oil_rates,
+                connection_water_rates=workspace.connection_water_rates,
+                connection_gas_rates=workspace.connection_gas_rates,
                 reference_measured_depth=workspace.reference_measured_depth,
                 representative_depths=workspace.representative_depths,
                 representative_measured_depths=workspace.representative_measured_depths,
                 inclinations_from_vertical=workspace.inclinations_from_vertical,
-                connection_samples=connection_samples,
+                connection_fluids=workspace.connection_fluids,
                 is_injector=is_injector,
                 out=workspace.connection_pressures,
             )

@@ -25,7 +25,6 @@ from bores.wells.hydraulics.base import (
 )
 from bores.wells.hydraulics.base import compute_tubing_head_pressure as compute_correlation_thp
 from bores.wells.hydraulics.vfp import VFPTable, VFPTables
-from bores.wells.state import ConnectionSample
 from bores.wells.workspace import ConnectionRates, PerforationWorkspace
 
 __all__ = [
@@ -122,7 +121,6 @@ def attach_flowing_fluid(
     *,
     tubing: WellTubing,
     workspace: PerforationWorkspace,
-    connection_samples: typing.Sequence[ConnectionSample],
     relevant_phases: PhaseValues,
 ) -> WellTubing:
     """
@@ -133,7 +131,6 @@ def attach_flowing_fluid(
 
     :param tubing: The well's tubing performance.
     :param workspace: The well's perforation workspace.
-    :param connection_samples: The well's connection samples, in the workspace's order.
     :param relevant_phases: Mask of the phases the well flows: all three for a producer, only
         the injected phase for an injector.
     :returns: `tubing`, with its `flowing_fluid` set if it has a VFP table.
@@ -143,22 +140,8 @@ def attach_flowing_fluid(
 
     mobilities = (workspace.oil_mobilities, workspace.water_mobilities, workspace.gas_mobilities)
     flags = (relevant_phases.oil > 0.0, relevant_phases.water > 0.0, relevant_phases.gas > 0.0)
-    dtype = workspace.well_indices.dtype
-    count = len(connection_samples)
-    densities = typing.cast(
-        tuple[NumberArray[OneDimension], NumberArray[OneDimension], NumberArray[OneDimension]],
-        (
-            np.fromiter(
-                (sample.phase_densities.oil for sample in connection_samples), dtype, count
-            ),
-            np.fromiter(
-                (sample.phase_densities.water for sample in connection_samples), dtype, count
-            ),
-            np.fromiter(
-                (sample.phase_densities.gas for sample in connection_samples), dtype, count
-            ),
-        ),
-    )
+    fluids = workspace.connection_fluids
+    densities = (fluids.oil_densities, fluids.water_densities, fluids.gas_densities)
     deliverabilities = []
     phase_averages = []
     for mobility, phase_densities, flag in zip(mobilities, densities, flags, strict=True):
