@@ -1,6 +1,6 @@
-"""Event-driven scheduling framework"""
+"""Event-driven scheduling API"""
 
-from bores.schedule.actions import NoOp, RunSequence
+from bores.schedule.actions import EndRun, NoOp, RunSequence
 from bores.schedule.base import (
     Action,
     Event,
@@ -12,10 +12,12 @@ from bores.schedule.events import (
     AllOf,
     AnyOf,
     ComparisonOperator,
+    DateEvent,
     IntervalEvent,
     ThresholdEvent,
     TimeEvent,
     TimeStepEvent,
+    TimeWindowEvent,
 )
 from bores.schedule.summary import (
     RecordSummary,
@@ -32,6 +34,8 @@ __all__ = [
     "AllOf",
     "AnyOf",
     "ComparisonOperator",
+    "DateEvent",
+    "EndRun",
     "Event",
     "IntervalEvent",
     "NoOp",
@@ -46,6 +50,7 @@ __all__ = [
     "ThresholdEvent",
     "TimeEvent",
     "TimeStepEvent",
+    "TimeWindowEvent",
     "all_of",
     "any_of",
     "at",

@@ -1,4 +1,4 @@
-"""Event-driven scheduling: `Event`/`Action` protocols, `Rule`, `Schedule`."""
+"""Event-driven scheduling: `Event`/`Action` protocols, `ScheduleItem`, `Schedule`."""
 
 import datetime
 import typing
@@ -24,10 +24,10 @@ ModelT = typing.TypeVar("ModelT")
 ModelTcon = typing.TypeVar("ModelTcon", contravariant=True)
 
 PASSTHROUGH_EXCEPTIONS: tuple[type[BaseException], ...] = (StopSimulation,)
-"""Exceptions `Schedule.apply` never wraps in `EventError`/`ActionError` - re-raised as is."""
+"""Exceptions `Schedule.apply` re-raises as they are, never wrapping them in `EventError`/`ActionError`."""
 
 
-@attrs.frozen(kw_only=True, slots=True, frozen=True)
+@attrs.frozen(kw_only=True, slots=True)
 class ScheduleContext:
     """Context passed to every `Event`/`Action` call alongside the model."""
 
@@ -108,7 +108,7 @@ class ScheduleItem(typing.Generic[ModelT]):
 
 @attrs.frozen(slots=True)
 class Schedule(typing.Generic[ModelT]):
-    """Every rule for a run. Advances a model by applying whichever items fire."""
+    """Every item for a run. Advances a model by applying whichever items fire."""
 
     items: tuple[ScheduleItem[ModelT], ...] = attrs.field(converter=tuple, factory=tuple)
     """The `(Event, Action)` pairings to apply, in order."""
@@ -120,14 +120,14 @@ class Schedule(typing.Generic[ModelT]):
 
     def apply(self, model: ModelT, context: ScheduleContext) -> ModelT:
         """
-        Applies every rule whose event fires, in `items` order.
+        Applies every item whose event fires, in `items` order.
 
         :param model: The model to advance.
         :param context: The current moment's context.
-        :returns: The model after every firing rule's action has run.
-        :raises EventError: If a rule's event raises anything other than
+        :returns: The model after every firing item's action has run.
+        :raises EventError: If an item's event raises anything other than
             a `PASSTHROUGH_EXCEPTIONS` member.
-        :raises ActionError: If a rule's action raises anything other
+        :raises ActionError: If an item's action raises anything other
             than a `PASSTHROUGH_EXCEPTIONS` member.
         """
         for rule in self.items:
@@ -136,7 +136,7 @@ class Schedule(typing.Generic[ModelT]):
             except PASSTHROUGH_EXCEPTIONS:
                 raise
             except Exception as exc:
-                raise EventError(f"Event failed for rule {rule.name!r}.") from exc
+                raise EventError(f"Event failed for schedule item {rule.name!r}.") from exc
 
             if not occurred:
                 continue
@@ -146,7 +146,7 @@ class Schedule(typing.Generic[ModelT]):
             except PASSTHROUGH_EXCEPTIONS:
                 raise
             except Exception as exc:
-                raise ActionError(f"Action failed for rule {rule.name!r}.") from exc
+                raise ActionError(f"Action failed for schedule item {rule.name!r}.") from exc
         return model
 
     def advance(
@@ -174,7 +174,7 @@ class Schedule(typing.Generic[ModelT]):
         :param step_size: The current time-step's size, if tracked.
         :param start_date: The simulation's start date, if tracked.
         :param extra: Additional domain-specific context.
-        :returns: The model after every firing rule's action has run.
+        :returns: The model after every firing item's action has run.
         """
         context = ScheduleContext(
             time=time,

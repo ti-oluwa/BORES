@@ -351,8 +351,9 @@ class WellsWorkspace(typing.NamedTuple):
     cumulative_oil_volumes: NumberArray[OneDimension]
     """
     Shape `(n_wells,)`. Surface-condition oil volume each well has produced
-    or injected since the start of the run. Never `NaN`. Advanced by
-    `accumulate_well_volumes`, never by control resolution itself.
+    or injected since the start of the run. Never `NaN`. Always double
+    precision, whatever the run's working precision, so a small step's volume is
+    not lost against a large running total. Advanced by `accumulate_well_volumes`.
     """
 
     cumulative_water_volumes: NumberArray[OneDimension]
@@ -393,9 +394,9 @@ def build_wells_workspace(
         connection_oil_rates=np.full(n_connections, np.nan, dtype=dtype),
         connection_water_rates=np.full(n_connections, np.nan, dtype=dtype),
         connection_gas_rates=np.full(n_connections, np.nan, dtype=dtype),
-        cumulative_oil_volumes=np.zeros(n_wells, dtype=dtype),
-        cumulative_water_volumes=np.zeros(n_wells, dtype=dtype),
-        cumulative_gas_volumes=np.zeros(n_wells, dtype=dtype),
+        cumulative_oil_volumes=np.zeros(n_wells, dtype=np.float64),
+        cumulative_water_volumes=np.zeros(n_wells, dtype=np.float64),
+        cumulative_gas_volumes=np.zeros(n_wells, dtype=np.float64),
     )
 
 

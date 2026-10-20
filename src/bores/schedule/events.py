@@ -1,6 +1,7 @@
 """Builtin `Event` implementations."""
 
 import enum
+import math
 import operator
 import typing
 from datetime import datetime
@@ -118,8 +119,10 @@ class TimeStepEvent(Event[ModelT]):
 class DateEvent(Event[ModelT]):
     """Fires once, the first time the schedule is advanced past `at`."""
 
-    at: str | datetime
-    """The date this event fires at, in ISO 8601 format or as a `datetime.datetime`."""
+    at: datetime = attrs.field(
+        converter=lambda value: datetime.fromisoformat(value) if isinstance(value, str) else value
+    )
+    """The date this event fires at, given in ISO 8601 format or as a `datetime.datetime`."""
 
     def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:
         """
@@ -148,19 +151,15 @@ class DateEvent(Event[ModelT]):
             if context.previous_time is not None
             else None
         )
-        if isinstance(self.at, str):
-            at = datetime.fromisoformat(self.at)
-        else:
-            at = self.at
-        return (previous_date is None or previous_date < at) and at <= current_date
+        return (previous_date is None or previous_date < self.at) and self.at <= current_date
 
 
 @attrs.frozen(kw_only=True, slots=True)
 class IntervalEvent(Event[ModelT]):
     """Fires every `every` time units, starting at `start`."""
 
-    every: Number
-    """How often this event fires."""
+    every: Number = attrs.field(validator=attrs.validators.gt(0))
+    """How often this event fires. Must be positive."""
 
     start: Number = 0.0
     """The first time this event is eligible to fire."""
@@ -192,14 +191,14 @@ class IntervalEvent(Event[ModelT]):
         """
         if time < self.start:
             return 0
-        return int((time - self.start) // self.every) + 1
+        # The tiny tolerance keeps a boundary from being missed when an accumulated
+        # floating-point time lands just below it, e.g. `0.1 + 0.1 + 0.1 + 0.1 + 0.1`.
+        return math.floor((time - self.start) / self.every + 1e-9) + 1
 
 
 @attrs.frozen(kw_only=True, slots=True)
 class ThresholdEvent(Event[ModelT]):
     """Fires when `get_value` crosses `threshold`, per `op`. Subclass and implement `get_value`."""
-
-    __abstract_serializable__ = True
 
     op: ComparisonOperator
     """How `get_value(...)` is compared against `threshold`."""
@@ -212,9 +211,8 @@ class ThresholdEvent(Event[ModelT]):
         Reads the value this event watches. Must be overridden.
 
         :param model: The model being scheduled against.
-        :param context: The current moment's context. `context.state`
-            carries the latest solved values, if `get_value` needs one
-            that isn't part of the static `model` itself.
+        :param context: The current moment's context. `context.extra` carries
+            anything the caller supplied that is not part of `model` itself.
         :returns: The current value of whatever this event watches.
         """
         raise NotImplementedError

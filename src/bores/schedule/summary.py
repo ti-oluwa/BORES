@@ -3,7 +3,7 @@ Summary-vector recording API.
 
 A summary vector (Eclipse's own term: `FOPR`, `WBHP`, `WWCT`, and so on) is
 just another thing a schedule can read at a point in time. It fires on the
-same `Event`s as any other scheduled item, and the values it reads a recorded in
+same `Event`s as any other scheduled item, and the values it reads are recorded in
 a `SummaryReport` rather than mutating the model.
 
 `Summary` is the read-only counterpart to `Action`. An `Action` changes the model
@@ -295,8 +295,6 @@ class RecordSummary(Action[ModelT]):
     for "every N time units", `TimeStepEvent` for "every timestep", and so on).
     """
 
-    __type__: typing.ClassVar[str] = "record_summary"
-
     quantities: tuple[Summary[ModelT], ...] = attrs.field(converter=tuple)
     """Every vector to evaluate and record when this action fires."""
 
@@ -360,7 +358,8 @@ def record_every(
     return ScheduleItem(
         event=IntervalEvent(every=every, start=start),
         action=RecordSummary(quantities=tuple(quantities)),
-        name=name or f"record_every(every={every!r})",
+        name=name
+        or f"record_every(every={every!r}, {','.join(quantity.key for quantity in quantities)})",
     )
 
 
@@ -396,5 +395,5 @@ def record_at(
     return ScheduleItem(
         event=event,
         action=RecordSummary(quantities=tuple(quantities)),
-        name=name or label,
+        name=name or f"{label[:-1]}, {','.join(quantity.key for quantity in quantities)})",
     )

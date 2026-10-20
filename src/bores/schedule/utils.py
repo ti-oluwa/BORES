@@ -8,12 +8,12 @@ __all__ = ["all_of", "any_of", "at", "item", "schedule"]
 
 def at(*, time: float, action: Action[ModelT], name: str | None = None) -> ScheduleItem[ModelT]:
     """
-    Builds a `Rule` that runs `action` once, at `time`.
+    Builds a `ScheduleItem` that runs `action` once, at `time`.
 
     :param time: Elapsed time to fire at.
     :param action: The action to run.
-    :param name: Optional label for the rule.
-    :returns: A `Rule` pairing a `TimeEvent` with `action`.
+    :param name: Optional label for the item.
+    :returns: A `ScheduleItem` pairing a `TimeEvent` with `action`.
     """
     return ScheduleItem(
         event=TimeEvent(at=time), action=action, name=name or f"at({time!r}, {action!r})"
@@ -29,16 +29,16 @@ def item(
     :param event: Fires (or not) to decide whether `action` runs.
     :param action: Runs when `event` fires.
     :param name: Optional label for the item.
-    :returns: The `Rule`.
+    :returns: The `ScheduleItem`.
     """
     return ScheduleItem(event=event, action=action, name=name or f"item({event!r}, {action!r})")
 
 
 def schedule(*rules: ScheduleItem[ModelT]) -> Schedule[ModelT]:
     """
-    Builds a `Schedule` from a set of rules.
+    Builds a `Schedule` from a set of items.
 
-    :param rules: Every rule for the schedule, in firing-check order.
+    :param rules: Every item for the schedule, in firing-check order.
     :returns: The `Schedule`.
     """
     return Schedule(items=tuple(rules))

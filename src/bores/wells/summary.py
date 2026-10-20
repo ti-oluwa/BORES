@@ -1,10 +1,12 @@
 """
 Well and field summary vectors, built on `bores.schedule.summary`.
 
-Names follow Eclipse's own summary mnemonics. a leading `F` is a field-wide
+Names follow Eclipse's own summary mnemonics. A leading `F` is a field-wide
 total, a leading `W` is one well. Every class has a short alias
-(`FOPR = FieldOilProductionRate`). All rates are surface-condition, and
-production/injection totals only count wells of the matching kind. Cumulative totals
+(`FOPR = FieldOilProductionRate`). All rates are surface-condition. Production
+vectors only count producers and injection vectors only count injectors, so a
+well's injection vectors read zero for a producer and its production vectors read
+zero for an injector. Cumulative totals
 (`FOPT`, `WWIT`, ...) read the workspace's running volumes, which the run advances every
 accepted step with `bores.wells.workspace.accumulate_well_volumes`.
 """
@@ -13,13 +15,12 @@ import typing
 
 import attrs
 import numpy as np
-from typing_extensions import Self
 
 from bores.constants import c
 from bores.errors import SummaryError
 from bores.schedule.base import ScheduleContext
 from bores.schedule.summary import Summary
-from bores.types import CellArray, IntCellArray, Integer, Number, UnitSystem
+from bores.types import BooleanCellArray, CellArray, Integer, Number, UnitSystem
 from bores.wells.compile import CompiledWellSystem, WellKind
 from bores.wells.schedule import resolve_well
 
@@ -182,24 +183,6 @@ class FieldRate(Summary["CompiledBlackOilModel"]):
         :returns: The Eclipse mnemonic, e.g. `"FOPR"`.
         """
         return self.mnemonic
-
-    def __dump__(self) -> dict[str, typing.Any]:
-        """
-        Dumps this vector. A field-wide vector has nothing to configure.
-
-        :returns: An empty mapping.
-        """
-        return {}
-
-    @classmethod
-    def __load__(cls, data: typing.Mapping[str, typing.Any]) -> Self:
-        """
-        Loads this vector. A field-wide vector has nothing to configure.
-
-        :param data: Ignored.
-        :returns: A new instance.
-        """
-        return cls()
 
     def __call__(self, model: "CompiledBlackOilModel", context: ScheduleContext) -> Number:
         """
@@ -367,6 +350,12 @@ class WellVector(Summary["CompiledBlackOilModel"]):
 
     mnemonic = ""
 
+    kind: typing.ClassVar[WellKind | None] = None
+    """
+    The kind of well this vector reports on. A well of any other kind reads `0`.
+    `None` reports every well, whatever its kind.
+    """
+
     well_name: str
     """The well to report on."""
 
@@ -400,10 +389,12 @@ class WellVector(Summary["CompiledBlackOilModel"]):
 
         :param model: The model to look the well up in.
         :param context: The current moment's context, carrying the workspace.
-        :returns: The well's value.
+        :returns: The well's value, or `0` if the well is not of this vector's kind.
         :raises ValidationError: If the model has no well named `well_name`.
         """
-        well_row, _ = resolve_well(model=model, well_name=self.well_name)
+        well_row, wells = resolve_well(model=model, well_name=self.well_name)
+        if self.kind is not None and wells.well_kinds[well_row] != self.kind:
+            return 0.0
         return self.get_value(well_row=well_row, workspace=get_workspace(context=context))
 
 
@@ -429,6 +420,7 @@ class WellOilProductionRate(WellRate):
     """Well oil production rate (`WOPR`)."""
 
     mnemonic = "WOPR"
+    kind = WellKind.PRODUCER
     array_name = "surface_oil_rates"
 
 
@@ -437,6 +429,7 @@ class WellWaterProductionRate(WellRate):
     """Well water production rate (`WWPR`)."""
 
     mnemonic = "WWPR"
+    kind = WellKind.PRODUCER
     array_name = "surface_water_rates"
 
 
@@ -445,6 +438,7 @@ class WellGasProductionRate(WellRate):
     """Well gas production rate (`WGPR`)."""
 
     mnemonic = "WGPR"
+    kind = WellKind.PRODUCER
     array_name = "surface_gas_rates"
 
 
@@ -453,6 +447,7 @@ class WellWaterInjectionRate(WellRate):
     """Well water injection rate (`WWIR`)."""
 
     mnemonic = "WWIR"
+    kind = WellKind.INJECTOR
     array_name = "surface_water_rates"
 
 
@@ -461,6 +456,7 @@ class WellOilInjectionRate(WellRate):
     """Well oil injection rate (`WOIR`). Rare in practice; Eclipse still defines it."""
 
     mnemonic = "WOIR"
+    kind = WellKind.INJECTOR
     array_name = "surface_oil_rates"
 
 
@@ -469,6 +465,7 @@ class WellGasInjectionRate(WellRate):
     """Well gas injection rate (`WGIR`)."""
 
     mnemonic = "WGIR"
+    kind = WellKind.INJECTOR
     array_name = "surface_gas_rates"
 
 
@@ -477,6 +474,7 @@ class WellLiquidProductionRate(WellVector):
     """Well liquid (oil plus water) production rate (`WLPR`)."""
 
     mnemonic = "WLPR"
+    kind = WellKind.PRODUCER
 
     def get_value(self, *, well_row: Integer, workspace: "SimulationWorkspace") -> Number:
         """
@@ -497,6 +495,7 @@ class WellWaterCut(WellVector):
     """Well water cut (`WWCT`): water over total liquid, `0` with no liquid."""
 
     mnemonic = "WWCT"
+    kind = WellKind.PRODUCER
 
     def get_value(self, *, well_row: Integer, workspace: "SimulationWorkspace") -> Number:
         """
@@ -516,6 +515,7 @@ class WellGasOilRatio(WellVector):
     """Well gas-oil ratio (`WGOR`): gas over oil, `0` with no oil."""
 
     mnemonic = "WGOR"
+    kind = WellKind.PRODUCER
 
     def get_value(self, *, well_row: Integer, workspace: "SimulationWorkspace") -> Number:
         """
@@ -621,6 +621,7 @@ class WellOilProductionTotal(WellRate):
     """Well cumulative oil production (`WOPT`)."""
 
     mnemonic = "WOPT"
+    kind = WellKind.PRODUCER
     array_name = "cumulative_oil_volumes"
 
 
@@ -629,6 +630,7 @@ class WellWaterProductionTotal(WellRate):
     """Well cumulative water production (`WWPT`)."""
 
     mnemonic = "WWPT"
+    kind = WellKind.PRODUCER
     array_name = "cumulative_water_volumes"
 
 
@@ -637,6 +639,7 @@ class WellGasProductionTotal(WellRate):
     """Well cumulative gas production (`WGPT`)."""
 
     mnemonic = "WGPT"
+    kind = WellKind.PRODUCER
     array_name = "cumulative_gas_volumes"
 
 
@@ -645,6 +648,7 @@ class WellWaterInjectionTotal(WellRate):
     """Well cumulative water injection (`WWIT`)."""
 
     mnemonic = "WWIT"
+    kind = WellKind.INJECTOR
     array_name = "cumulative_water_volumes"
 
 
@@ -652,9 +656,8 @@ class WellWaterInjectionTotal(WellRate):
 class WellOilInjectionTotal(WellRate):
     """Well cumulative oil injection (`WOIT`). Rare in practice; Eclipse still defines it."""
 
-    __type__: typing.ClassVar[str] = "well_oil_injection_total"
-
     mnemonic = "WOIT"
+    kind = WellKind.INJECTOR
     array_name = "cumulative_oil_volumes"
 
 
@@ -663,6 +666,7 @@ class WellGasInjectionTotal(WellRate):
     """Well cumulative gas injection (`WGIT`)."""
 
     mnemonic = "WGIT"
+    kind = WellKind.INJECTOR
     array_name = "cumulative_gas_volumes"
 
 
@@ -692,7 +696,7 @@ class RegionInPlace(Summary["CompiledBlackOilModel"]):
     def get_value(
         self,
         *,
-        region_mask: IntCellArray,
+        region_mask: BooleanCellArray,
         pore_volumes: CellArray,
         workspace: "SimulationWorkspace",
         unit_system: UnitSystem,
@@ -701,7 +705,7 @@ class RegionInPlace(Summary["CompiledBlackOilModel"]):
         Reads this vector's value over the cells of the region. Must be overridden.
 
         :param region_mask: Shape `(n_cells,)` boolean mask of the region's cells.
-        :param pore_volumes: Shape `(n_cells,)` pore volume of every cell.
+        :param pore_volumes: Shape `(n_cells,)` pore volume of every cell at the current pressure.
         :param workspace: The run's workspace.
         :param unit_system: The model's unit system.
         :returns: The in-place volume.
@@ -714,11 +718,12 @@ class RegionInPlace(Summary["CompiledBlackOilModel"]):
 
         :param model: The model to read the regions and pore volumes from.
         :param context: The current moment's context, carrying the workspace.
-        :returns: The in-place volume of the region.
+        :returns: The in-place volume of the region, at the pore volume the run holds now.
         :raises SummaryError: If the region has no cells.
         """
+        workspace = get_workspace(context=context)
         reservoir = model.reservoir
-        pore_volumes = reservoir.pore_volumes
+        pore_volumes = reservoir.compute_pore_volumes(workspace.reservoir.pressure)
         fluid_in_place_regions = (
             reservoir.regions.fluid_in_place_region if reservoir.regions is not None else None
         )
@@ -734,7 +739,7 @@ class RegionInPlace(Summary["CompiledBlackOilModel"]):
         return self.get_value(
             region_mask=region_mask,
             pore_volumes=pore_volumes,
-            workspace=get_workspace(context=context),
+            workspace=workspace,
             unit_system=model.unit_system,
         )
 
@@ -763,7 +768,7 @@ class RegionOilInPlace(RegionInPlace):
     def get_value(
         self,
         *,
-        region_mask: IntCellArray,
+        region_mask: BooleanCellArray,
         pore_volumes: CellArray,
         workspace: "SimulationWorkspace",
         unit_system: UnitSystem,
@@ -791,7 +796,7 @@ class RegionWaterInPlace(RegionInPlace):
     def get_value(
         self,
         *,
-        region_mask: IntCellArray,
+        region_mask: BooleanCellArray,
         pore_volumes: CellArray,
         workspace: "SimulationWorkspace",
         unit_system: UnitSystem,
@@ -823,7 +828,7 @@ class RegionGasInPlace(RegionInPlace):
     def get_value(
         self,
         *,
-        region_mask: IntCellArray,
+        region_mask: BooleanCellArray,
         pore_volumes: CellArray,
         workspace: "SimulationWorkspace",
         unit_system: UnitSystem,
