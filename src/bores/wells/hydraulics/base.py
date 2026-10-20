@@ -615,12 +615,12 @@ def plan_connection_walk(
     return ConnectionWalk(
         connection_indices=connection_indices,
         previous_indices=previous_indices,
-        vertical_distances=typing.cast(NumberArray[OneDimension], vertical_distances),
-        segment_lengths=typing.cast(NumberArray[OneDimension], segment_lengths),
-        geometric_signs=typing.cast(NumberArray[OneDimension], geometric_signs),
-        carried_oil_rates=typing.cast(NumberArray[OneDimension], carried_oil_rates),
-        carried_water_rates=typing.cast(NumberArray[OneDimension], carried_water_rates),
-        carried_gas_rates=typing.cast(NumberArray[OneDimension], carried_gas_rates),
+        vertical_distances=vertical_distances,  # type: ignore[arg-type]
+        segment_lengths=segment_lengths,  # type: ignore[arg-type]
+        geometric_signs=geometric_signs,  # type: ignore[arg-type]
+        carried_oil_rates=carried_oil_rates,  # type: ignore[arg-type]
+        carried_water_rates=carried_water_rates,  # type: ignore[arg-type]
+        carried_gas_rates=carried_gas_rates,  # type: ignore[arg-type]
     )
 
 

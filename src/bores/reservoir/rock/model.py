@@ -49,9 +49,8 @@ class Permeability:
     """
     Absolute permeability tensor stored as three orthogonal components.
 
-    If only `x` is supplied, `y` and `z` default to `x` (isotropic
-    assumption). The geometric-mean `mean` is computed automatically when
-    not provided.
+    If only `x` is supplied, `y` and `z` default to copies of `x` (isotropic assumption).
+    The geometric-mean `mean` is computed automatically when not provided.
 
     Units should follow the parent `Rock.unit_system`.
     """
@@ -95,12 +94,12 @@ class Permeability:
 
     def __attrs_post_init__(self) -> None:
         if self.y.size == 0:
-            object.__setattr__(self, "y", self.x)
+            object.__setattr__(self, "y", self.x.copy())
         if self.z.size == 0:
-            object.__setattr__(self, "z", self.x)
+            object.__setattr__(self, "z", self.x.copy())
         if self.mean.size == 0:
             if np.array_equal(self.x, self.y) and np.array_equal(self.x, self.z):
-                object.__setattr__(self, "mean", self.x)
+                object.__setattr__(self, "mean", self.x.copy())
             else:
                 object.__setattr__(self, "mean", (self.x * self.y * self.z) ** (1.0 / 3.0))
 
@@ -166,16 +165,15 @@ class Permeability:
         if permx is None:
             raise ValidationError("`PERMX` is required but not found in the DeckFile.")
 
+        # An absent `PERMY`/`PERMZ` is left out so the class gives it its own copy of `PERMX`.
         permy = load_cell_array(deck_file, "PERMY", n_cells, dtype=dtype)
-        # We do not copy here to save memory, since permeability is a static prop through out any simulation
-        # Except the user then tries to modify it. Then its up to them as its already indicated that the class'
-        # attributes are immutable and should be treated as such.
-        if permy is None:
-            permy = permx
         permz = load_cell_array(deck_file, "PERMZ", n_cells, dtype=dtype)
-        if permz is None:
-            permz = permx
-        return cls(x=permx, y=permy, z=permz, unit_system=unit_system)
+        return cls(
+            x=permx,
+            **({"y": permy} if permy is not None else {}),
+            **({"z": permz} if permz is not None else {}),
+            unit_system=unit_system,
+        )
 
 
 @attrs.frozen(slots=True)
@@ -618,7 +616,7 @@ class Rock:
         if irreducible_water_saturation is None:
             if deck_file.has("SWCON") or table_derived_endpoints is None:
                 # An absent `SWCRIT` defaults to the connate saturation.
-                irreducible_water_saturation = connate_water_saturation
+                irreducible_water_saturation = connate_water_saturation.copy()
             else:
                 irreducible_water_saturation = table_derived_endpoints[
                     "irreducible_water_saturation"

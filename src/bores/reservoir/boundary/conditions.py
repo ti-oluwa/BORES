@@ -73,9 +73,12 @@ class BoundaryRegion:
     influx each face takes, in proportion to these values (for example each face's open
     area). `None` shares it in proportion to the faces' own areas.
 
-    For a `ConstantFluxBoundary` it multiplies the flux face by face, so a face's flux is
-    `condition.flux * face_weights[i]`. `None` gives every face the same flux. The
-    weights have no unit, so converting the region's unit system rescales only `flux`.
+    For a `ConstantFluxBoundary` what it does depends on the condition's `basis`. With
+    `TOTAL` the region's flux is shared between the faces in proportion to these values
+    (the faces' own areas when `None`). With `PER_FACE` a face's flux is
+    `condition.flux * face_weights[i]`, and with `PER_AREA` it is
+    `condition.flux * face_area * face_weights[i]`, where `None` weights every face by 1.
+    The weights have no unit, so converting the region's unit system rescales only `flux`.
 
     Other conditions ignore it.
     """

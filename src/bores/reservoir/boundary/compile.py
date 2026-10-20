@@ -11,6 +11,7 @@ from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.reservoir.boundary.aquifers.carter_tracy import CarterTracyAquifer
 from bores.reservoir.boundary.aquifers.fetkovich import FetkovichAquifer
+from bores.reservoir.boundary.base import FluxBasis
 from bores.reservoir.boundary.conditions import BoundaryConditions
 from bores.reservoir.boundary.types import (
     ConstantFluxBoundary,
@@ -205,6 +206,48 @@ class CompiledBoundaryConditions(typing.NamedTuple):
     """Each `aquifers` region's own name, same row order. Reporting and `decompile_aquifer` only."""
 
 
+def compute_constant_flux_values(
+    *,
+    condition: ConstantFluxBoundary,
+    region_name: str,
+    face_weights: NumberArray[OneDimension] | None,
+    face_areas: NumberArray[OneDimension],
+) -> NumberArray[OneDimension]:
+    """
+    The flux through each face of a `ConstantFluxBoundary` region, according to its `basis`.
+
+    :param condition: The condition, already in the reservoir's unit system.
+    :param region_name: The region's name, for error messages.
+    :param face_weights: The region's `face_weights`, or `None`.
+    :param face_areas: Shape `(n_faces,)`. The area of each of the region's faces.
+    :returns: Shape `(n_faces,)` flux of each face. The faces add up to `condition.flux` for a
+        `TOTAL` basis.
+    :raises ValidationError: If a `TOTAL` basis has weights, or areas, that add up to zero.
+    """
+    if condition.basis is FluxBasis.PER_FACE:
+        weights = 1.0 if face_weights is None else face_weights
+        return typing.cast(
+            NumberArray[OneDimension],
+            np.asarray(condition.flux * weights * np.ones(face_areas.shape[0])),
+        )
+    if condition.basis is FluxBasis.PER_AREA:
+        weights = 1.0 if face_weights is None else face_weights
+        return typing.cast(
+            NumberArray[OneDimension], np.asarray(condition.flux * face_areas * weights)
+        )
+
+    shares = face_areas if face_weights is None else face_weights
+    total_share = float(np.sum(shares))
+    if not total_share > 0.0:
+        raise ValidationError(
+            f"Boundary region {region_name!r}: a total flux needs faces whose weights or areas "
+            "add up to more than zero to share it between."
+        )
+    return typing.cast(
+        NumberArray[OneDimension], np.asarray(condition.flux * shares / total_share)
+    )
+
+
 def resolve_owner_cells(
     reservoir: Reservoir, face_positions: IntArray[OneDimension]
 ) -> IntArray[OneDimension]:
@@ -283,8 +326,16 @@ def compile_boundary_conditions(
             static_pressure_values[face_positions] = condition.pressure
             static_is_dirichlet[face_positions] = True
         elif isinstance(condition, ConstantFluxBoundary):
-            static_flux_values[face_positions] = condition.flux * (
-                region.face_weights if region.face_weights is not None else 1.0
+            static_flux_values[face_positions] = compute_constant_flux_values(
+                condition=condition,
+                region_name=region.name,
+                face_weights=region.face_weights,
+                face_areas=typing.cast(
+                    NumberArray[OneDimension],
+                    reservoir.grid.face_areas[
+                        reservoir.grid.boundary_face_indices[face_positions]
+                    ],
+                ),
             )
         elif isinstance(condition, (CarterTracyAquifer, FetkovichAquifer)):
             row = len(aquifer_regions)

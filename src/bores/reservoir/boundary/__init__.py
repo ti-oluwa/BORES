@@ -1,7 +1,7 @@
 """Boundary system for unstructured polyhedral reservoir grids."""
 
 from bores.reservoir.boundary.aquifers import CarterTracyAquifer, FetkovichAquifer
-from bores.reservoir.boundary.base import BoundaryCondition, BoundaryConditionType
+from bores.reservoir.boundary.base import BoundaryCondition, BoundaryConditionType, FluxBasis
 from bores.reservoir.boundary.conditions import BoundaryConditions, BoundaryRegion
 from bores.reservoir.boundary.deck import load_boundary_conditions
 from bores.reservoir.boundary.factories import (
@@ -23,6 +23,7 @@ __all__ = [
     "ConstantFluxBoundary",
     "ConstantPressureBoundary",
     "FetkovichAquifer",
+    "FluxBasis",
     "ProductivityIndexBoundary",
     "load_boundary_conditions",
     "make_boundary_conditions",

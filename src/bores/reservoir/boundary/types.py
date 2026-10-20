@@ -6,6 +6,7 @@ from typing_extensions import Self
 from bores.reservoir.boundary.base import (
     BoundaryCondition,
     BoundaryConditionType,
+    FluxBasis,
 )
 from bores.types import Number, UnitConversionTable, UnitSystem
 from bores.units import get_conversion_factors
@@ -22,34 +23,38 @@ class ConstantFluxBoundary(BoundaryCondition):
     """
     Constant-flux (Neumann) boundary condition.
 
-    A uniform volumetric flow rate at every face in the region, unless the region's
-    `face_weights` scale it face by face. This is a pure parameter container, compiles
-    directly into `CompiledBoundaryConditions.static_values`.
+    A fixed flow rate through the faces of a region. `basis` says what the rate is measured
+    against: the whole region (the default), each face, or each unit of face area. This is a
+    pure parameter container that compiles into the static flux of each face.
 
-    The default `flux=0.0` gives a **sealed (no-flow) boundary**; the most
-    common boundary condition for reservoir flanks, top, and base. A positive
-    `flux` represents flow into the reservoir (injection or aquifer
-    influx); a negative `flux` represents production or efflux.
+    The default `flux=0.0` gives a **sealed (no-flow) boundary**, the most common boundary
+    condition for reservoir flanks, top, and base. A positive `flux` is flow into the
+    reservoir (injection or aquifer influx) and a negative `flux` is production or efflux.
 
     **Unit system**
 
-    The `flux` value is interpreted in the *volume-per-time* unit of
-    `unit_system`:
+    A `TOTAL` or `PER_FACE` `flux` is a *volume-per-time* in the unit system:
 
     - `FIELD` - ft³/day
     - `METRIC` - m³/day
     - `LAB` - cm³/hour
     - `SI` - m³/s
 
-    :param flux: Volumetric flow rate applied uniformly across the region
-        (volume/time in `unit_system`). Default is 0 (no-flow).
-    :param unit_system: Unit system for `flux`. Default `FIELD` (ft³/day).
+    A `PER_AREA` `flux` is that per unit of area, for example ft³/day/ft² in `FIELD`.
+
+    :param flux: The flow rate, measured against what `basis` says. Default is 0 (no-flow).
+    :param basis: Whether `flux` is the rate of the whole region, of each face, or per unit of
+        face area. See `FluxBasis`.
+    :param unit_system: Unit system for `flux`. Default `FIELD`.
     """
 
     condition_type: typing.ClassVar[BoundaryConditionType] = BoundaryConditionType.FLUX
 
     flux: Number = 0.0
-    """Volumetric flux (volume/time in `unit_system`). Positive = into reservoir."""
+    """The flow rate in `unit_system`, measured against `basis`. Positive = into reservoir."""
+
+    basis: FluxBasis = FluxBasis.TOTAL
+    """What `flux` is measured against: the whole region, each face, or each unit of face area."""
 
     unit_system: UnitSystem = UnitSystem.FIELD
     """Unit system for `flux`."""
@@ -71,7 +76,10 @@ class ConstantFluxBoundary(BoundaryCondition):
         if target == self.unit_system:
             return self
         factors = get_conversion_factors(self.unit_system, target, table=table)
-        return attrs.evolve(self, flux=self.flux * factors["reservoir_rate"], unit_system=target)
+        flux_factor = factors["reservoir_rate"]
+        if self.basis is FluxBasis.PER_AREA:
+            flux_factor = flux_factor / factors["length"] ** 2
+        return attrs.evolve(self, flux=self.flux * flux_factor, unit_system=target)
 
     def is_no_flow(self) -> bool:
         """Return `True` if `flux == 0` (sealed boundary)."""

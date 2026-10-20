@@ -12,7 +12,7 @@ from bores.grids.base import Grid
 from bores.grids.utils import resolve_boundary_faces_for_box
 from bores.reservoir.boundary.aquifers.carter_tracy import CarterTracyAquifer
 from bores.reservoir.boundary.aquifers.fetkovich import FetkovichAquifer
-from bores.reservoir.boundary.base import BoundaryCondition
+from bores.reservoir.boundary.base import BoundaryCondition, FluxBasis
 from bores.reservoir.boundary.conditions import BoundaryConditions, BoundaryRegion
 from bores.reservoir.boundary.types import ConstantFluxBoundary
 from bores.types import IntArray, Integer, Number, NumberArray, OneDimension, UnitSystem
@@ -41,20 +41,19 @@ def load_flux_aquifer_from_record(
     Build a `ConstantFluxBoundary` from one `AQUFLUX` record.
 
     `AQUFLUX` gives the influx per unit of face area, as liquid surface volume per time.
-    The returned boundary's `flux` is that value as reservoir volume per time for one unit
-    of area, so it is only the rate of a face when multiplied by the face's area.
-    `load_boundary_conditions` does that, through the `face_weights` of the region it
-    builds.
+    The returned boundary has a `PER_AREA` basis, so each face passes that rate times its
+    own area. `load_boundary_conditions` scales it to each connection's `AQUANCON` influx
+    coefficient (its area, unless given) through the `face_weights` of the region it builds.
 
     :param record: One parsed `AQUFLUX` record.
     :param unit_system: The deck's unit system.
-    :returns: `ConstantFluxBoundary` whose `flux` is the record's flux, with
-        stock-tank barrels turned into cubic feet in the field unit system.
+    :returns: `ConstantFluxBoundary` with a `PER_AREA` basis whose `flux` is the record's
+        flux, with stock-tank barrels turned into cubic feet in the field unit system.
     """
     flux = record["flux"]
     if unit_system is UnitSystem.FIELD:
         flux = flux * c.STB_TO_CUBIC_FEET
-    return ConstantFluxBoundary(flux=flux, unit_system=unit_system)
+    return ConstantFluxBoundary(flux=flux, basis=FluxBasis.PER_AREA, unit_system=unit_system)
 
 
 @typing.overload
@@ -110,11 +109,13 @@ class AquiferConnections(typing.NamedTuple):
     to these.
     """
 
-    face_areas: NumberArray[OneDimension]
+    area_ratios: NumberArray[OneDimension]
     """
-    Each face's own area times its connection multiplier, in the same order as
-    `face_positions` and in the deck's area unit. An `AQUFLUX` aquifer's rate through a
-    face is its flux times this.
+    Each face's influx coefficient divided by the face's own area, in the same order as
+    `face_positions`. This is the connection multiplier when the coefficient is defaulted
+    to the face's area, and otherwise the explicit coefficient replaces the area. An `AQUFLUX`
+    aquifer's rate through a face is its flux times the face's area times this, which is its
+    flux times the influx coefficient.
     """
 
 
@@ -185,7 +186,7 @@ def resolve_aquancon_connections(
         return None
 
     coefficients: dict[int, float] = {}
-    effective_areas: dict[int, float] = {}
+    face_areas: dict[int, float] = {}
     for record in matching:
         explicit = record["influx_coefficient"]
         multiplier = record["connection_multiplier"]
@@ -237,7 +238,7 @@ def resolve_aquancon_connections(
         for position, area in zip(positions, areas.tolist(), strict=True):
             base = explicit if explicit is not None else area
             coefficients[position] = coefficients.get(position, 0.0) + base * multiplier
-            effective_areas[position] = effective_areas.get(position, 0.0) + area * multiplier
+            face_areas[position] = area
 
     if not coefficients:
         warnings.warn(
@@ -254,9 +255,12 @@ def resolve_aquancon_connections(
             NumberArray[OneDimension],
             np.asarray([coefficients[position] for position in ordered], dtype=np.float64),
         ),
-        face_areas=typing.cast(
+        area_ratios=typing.cast(
             NumberArray[OneDimension],
-            np.asarray([effective_areas[position] for position in ordered], dtype=np.float64),
+            np.asarray(
+                [coefficients[position] / face_areas[position] for position in ordered],
+                dtype=np.float64,
+            ),
         ),
     )
 
@@ -539,7 +543,9 @@ def load_boundary_conditions(
                 aquifer_id,
                 condition,
                 connections=flux_connections,
-                face_weights=flux_connections.face_areas if flux_connections is not None else None,
+                face_weights=(
+                    flux_connections.area_ratios if flux_connections is not None else None
+                ),
             )
             if region is not None:
                 regions.append(region)

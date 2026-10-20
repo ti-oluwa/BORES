@@ -37,6 +37,29 @@ class BoundaryConditionType(enum.Enum):
     FLUX = "flux"
 
 
+class FluxBasis(enum.Enum):
+    """
+    What the `flux` of a `ConstantFluxBoundary` is measured against.
+
+    `TOTAL`
+        `flux` is the rate through the whole region. It is split between the region's faces in
+        proportion to the region's `face_weights`, or to the faces' own areas when there are none,
+        so the faces add up to `flux` whatever the grid's resolution.
+
+    `PER_FACE`
+        `flux` is the rate through each face, multiplied by that face's `face_weight` when the
+        region has them. The region's total changes with the number of faces.
+
+    `PER_AREA`
+        `flux` is a rate per unit of face area, so each face passes `flux` times its own area,
+        times its `face_weight` when the region has them. The region's total follows the area.
+    """
+
+    TOTAL = "total"
+    PER_FACE = "per_face"
+    PER_AREA = "per_area"
+
+
 class BoundaryCondition:
     """
     Base class for every boundary-condition parameter container.
