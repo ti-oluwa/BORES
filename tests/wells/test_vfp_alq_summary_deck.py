@@ -357,12 +357,17 @@ def region_model(region_numbers, unit_system=UnitSystem.FIELD):
         if region_numbers is None
         else types.SimpleNamespace(fluid_in_place_region=np.asarray(region_numbers))
     )
-    reservoir = types.SimpleNamespace(pore_volumes=pore_volumes, regions=regions)
+    reservoir = types.SimpleNamespace(
+        pore_volumes=pore_volumes,
+        compute_pore_volumes=lambda pressure: pore_volumes * (1.0 + 1e-5 * (pressure - 3000.0)),
+        regions=regions,
+    )
     return types.SimpleNamespace(reservoir=reservoir, unit_system=unit_system)
 
 
 def region_workspace():
     state = types.SimpleNamespace(
+        pressure=np.full(4, 3000.0),
         oil_saturation=np.array([0.5, 0.6, 0.4, 0.3]),
         water_saturation=np.array([0.3, 0.3, 0.3, 0.3]),
         gas_saturation=np.array([0.2, 0.1, 0.3, 0.4]),
@@ -2131,3 +2136,170 @@ def test_a_given_hydrostatic_divisor_is_used_and_matches_the_default(unit_system
     head = pressures()[1:] - case.reference_pressure
     doubled = pressures(hydrostatic_divisor=2.0 * divisor)[1:] - case.reference_pressure
     assert doubled == pytest.approx(head / 2.0, rel=1e-12)
+
+
+def test_region_in_place_uses_the_pore_volume_at_the_current_pressure(monkeypatch):
+    workspace = region_workspace()
+    workspace.reservoir.pressure = np.full(4, 4000.0)
+    monkeypatch.setattr(well_summary, "get_workspace", lambda *, context: workspace)
+    reference = well_summary.RegionWaterInPlace(region=1)(region_model(None), None)
+    compressed = (0.3 * 1000 + 0.3 * 2000 + 0.3 * 3000 + 0.3 * 4000) * c.CUBIC_FEET_TO_STB
+    assert reference == pytest.approx(compressed * 1.01)
+
+
+def well_vector_context():
+    from bores.schedule.base import ScheduleContext
+    from bores.simulation.workspace import SimulationWorkspace
+    from bores.wells.compile import WellKind
+    from bores.wells.workspace import accumulate_well_volumes, build_wells_workspace
+
+    rows = {"P1": 0, "I1": 1}
+    wells = types.SimpleNamespace(
+        names=("P1", "I1"),
+        well_kinds=np.array([WellKind.PRODUCER, WellKind.INJECTOR], dtype=np.int32),
+        well_row=lambda *, name: rows[name],
+    )
+    workspace = build_wells_workspace(n_wells=2, n_connections=2)
+    workspace.surface_oil_rates[:] = [1000.0, 0.0]
+    workspace.surface_water_rates[:] = [400.0, 1200.0]
+    workspace.surface_gas_rates[:] = [5e5, 0.0]
+    accumulate_well_volumes(workspace=workspace, step_size=10.0)
+    context = ScheduleContext(
+        time=10.0,
+        extra={"workspace": SimulationWorkspace(None, None, None, workspace, None, None, None)},
+    )
+    return types.SimpleNamespace(wells=wells, unit_system=UnitSystem.FIELD), context
+
+
+@pytest.mark.parametrize(
+    ("vector", "well_name", "expected"),
+    [
+        (well_summary.WellWaterProductionRate, "P1", 400.0),
+        (well_summary.WellWaterProductionRate, "I1", 0.0),
+        (well_summary.WellWaterInjectionRate, "I1", 1200.0),
+        (well_summary.WellWaterInjectionRate, "P1", 0.0),
+        (well_summary.WellWaterProductionTotal, "I1", 0.0),
+        (well_summary.WellWaterInjectionTotal, "P1", 0.0),
+        (well_summary.WellWaterInjectionTotal, "I1", 12000.0),
+        (well_summary.WellWaterCut, "I1", 0.0),
+    ],
+)
+def test_per_well_vectors_only_report_wells_of_their_own_kind(vector, well_name, expected):
+    model, context = well_vector_context()
+    assert vector(well_name=well_name)(model, context) == pytest.approx(expected)
+
+
+def test_cumulative_well_volumes_are_double_precision():
+    from bores.wells.workspace import build_wells_workspace
+
+    workspace = build_wells_workspace(n_wells=1, n_connections=1)
+    assert workspace.cumulative_gas_volumes.dtype == np.float64
+
+
+def test_interval_event_does_not_miss_a_boundary_to_floating_point_error():
+    from bores.schedule.base import ScheduleContext
+    from bores.schedule.events import IntervalEvent
+
+    event = IntervalEvent(every=0.1)
+    time, fired = 0.0, []
+    for _ in range(10):
+        previous, time = time, time + 0.1
+        fired.append(bool(event(None, ScheduleContext(time=time, previous_time=previous))))
+    assert all(fired)
+    with pytest.raises(ValueError):
+        IntervalEvent(every=0.0)
+
+
+def test_default_record_item_names_tell_different_quantities_apart():
+    from bores.schedule import record_every
+
+    first = types.SimpleNamespace(key="FOPR")
+    second = types.SimpleNamespace(key="FWPR")
+    assert (
+        record_every(every=30, quantities=[first]).name
+        != record_every(every=30, quantities=[second]).name
+    )
+
+
+def control_model():
+    rows = {"P1": 0, "I1": 1, "P2": 2}
+
+    def well_row(*, name):
+        return [rows[one] for one in name] if isinstance(name, (list, tuple)) else rows[name]
+
+    return types.SimpleNamespace(
+        wells=types.SimpleNamespace(controls=build_compiled_controls(), well_row=well_row)
+    )
+
+
+def test_control_mode_of_the_wrong_kind_is_rejected_before_anything_changes():
+    from bores.wells.controls import ProducerControlMode
+    from bores.wells.schedule import SetWellControl, SetWellControls
+
+    model = control_model()
+    before = model.wells.controls.control_modes.copy()
+    with pytest.raises(ValidationError):
+        SetWellControl(well_name="I1", mode=ProducerControlMode.OIL_RATE)(model, None)
+    with pytest.raises(ValidationError):
+        SetWellControls(well_names=("P1", "I1"), mode=ProducerControlMode.OIL_RATE)(model, None)
+    assert model.wells.controls.control_modes.tolist() == before.tolist()
+
+
+def test_set_well_target_without_a_needed_value_changes_nothing():
+    from bores.wells.controls import WellTargetMode
+    from bores.wells.schedule import SetWellTarget
+
+    model = control_model()
+    before = model.wells.controls.control_modes.copy()
+    with pytest.raises(ValidationError):
+        SetWellTarget(well_name="P1", control_mode=WellTargetMode.OIL_RATE)(model, None)
+    assert model.wells.controls.control_modes.tolist() == before.tolist()
+
+
+def test_negative_vfp_table_number_is_rejected():
+    from bores.wells.schedule import SetWellLift
+
+    with pytest.raises(ValidationError):
+        SetWellLift(well_name="P1", vfp_table=-5)(lift_model(), None)
+
+
+def connection_target(**target):
+    from bores.datastructures import GridDimensions
+    from bores.wells.schedule import get_matching_connection_rows
+
+    dims = GridDimensions(nx=5, ny=5, nz=3)
+    cells = np.array([dims.flat_index(2, 3, layer) for layer in range(3)])
+    perforations = types.SimpleNamespace(
+        connection_rows=lambda *, well_row: range(0, 3), get_cell_index=lambda *, row: cells[row]
+    )
+    grid = types.SimpleNamespace(dimensions=dims)
+    return get_matching_connection_rows(
+        perforations=perforations, well_row=0, grid=grid, well_name="P1", **target
+    ).tolist()
+
+
+@pytest.mark.parametrize(
+    ("target", "expected"),
+    [
+        ({"i": 3, "j": 4, "k1": 1, "k2": 3}, [0, 1, 2]),
+        ({"i": 3, "j": 4, "k1": 2, "k2": 2}, [1]),
+        ({"i": 3, "j": 4, "k1": 0, "k2": 0}, [0, 1, 2]),
+        ({"i": 0, "j": 4, "k1": 1, "k2": 2}, [0, 1]),
+        ({"i": 0, "j": 0, "k1": 3, "k2": 3}, [2]),
+    ],
+)
+def test_connection_targets_treat_zero_as_any(target, expected):
+    assert connection_target(**target) == expected
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        {"i": 9, "j": 9, "k1": 1, "k2": 1},
+        {"i": 3, "j": 4, "k1": 3, "k2": 1},
+        {"i": 3, "j": 4, "k1": 0, "k2": 2},
+    ],
+)
+def test_connection_target_that_selects_nothing_or_is_malformed_is_an_error(target):
+    with pytest.raises(ValidationError):
+        connection_target(**target)

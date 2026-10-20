@@ -26,6 +26,7 @@ from bores.wells.compile import (
     CompiledGroupLimits,
     CompiledLimits,
     CompiledPerforations,
+    CompiledWellControls,
     CompiledWellSystem,
     LimitKind,
     WellKind,
@@ -213,35 +214,59 @@ def get_matching_connection_rows(
     k1: Integer,
     k2: Integer,
     grid: Grid | None = None,
+    well_name: str | None = None,
+    require_match: Boolean = True,
 ) -> IntArray[OneDimension]:
     """
-    Resolves which of a well's connection rows a deck targeting tuple selects.
+    Selects the connections of a well that a deck-style `(i, j, k1, k2)` target names.
 
-    `(0, 0, 0, 0)` means every connection. A targeted `(i, j, k1, k2)`
-    needs `grid` to translate 1-based deck indices to flat cell indices.
+    `(0, 0, 0, 0)` selects every connection. Otherwise a `0` for `i` or `j` matches any
+    column, and `k1`/`k2` give an inclusive layer range, which must either both be given
+    or both be `0` (any layer). Indices are 1-based, as in a deck.
 
     :param perforations: `CompiledPerforations` for the whole system.
     :param well_row: The well's row.
-    :param i: 1-based deck index, or `0` for whole-well.
-    :param j: 1-based deck index, or `0`.
-    :param k1: 1-based deck index, or `0`.
-    :param k2: 1-based deck index, or `0`.
-    :param grid: Required only when `(i, j, k1, k2)` targets specific connections.
-    :returns: The matching row indices, as an array (bulk-accessor-ready).
-    :raises ValidationError: If connections are targeted but `grid` wasn't given.
+    :param i: 1-based I index, or `0` for any.
+    :param j: 1-based J index, or `0` for any.
+    :param k1: 1-based first layer of the range, or `0` for any layer.
+    :param k2: 1-based last layer of the range, or `0` for any layer.
+    :param grid: Required when `(i, j, k1, k2)` targets specific connections.
+    :param well_name: The well's name, for an error message.
+    :param require_match: Whether a target that selects no connection is an error.
+    :returns: The selected connection rows.
+    :raises ValidationError: If connections are targeted but `grid` wasn't given, the layer
+        range is incomplete or reversed, or `require_match` is set and nothing is selected.
     """
     all_rows = perforations.connection_rows(well_row=well_row)
+    rows = np.arange(all_rows.start, all_rows.stop)
     if i == 0 and j == 0 and k1 == 0 and k2 == 0:
-        return np.arange(all_rows.start, all_rows.stop)
+        return typing.cast(IntArray[OneDimension], rows)
 
     if grid is None or grid.dimensions is None:
         raise ValidationError("A grid with dimensions is required to target specific connections.")
+    if (k1 == 0) != (k2 == 0) or (k1 and k1 > k2):
+        raise ValidationError(
+            f"The layer range k1={k1}, k2={k2} is invalid. Give both as 1-based layers with "
+            "`k1 <= k2`, or both as `0` for every layer."
+        )
 
     dims = grid.dimensions
-    target_cells = {dims.flat_index(i=i - 1, j=j - 1, k=k - 1) for k in range(k1, k2 + 1)}
-    cell_indices = perforations.get_cell_index(row=np.arange(all_rows.start, all_rows.stop))
-    mask = np.isin(cell_indices, list(target_cells))  # type: ignore[arg-type]
-    return typing.cast(IntArray[OneDimension], np.arange(all_rows.start, all_rows.stop)[mask])
+    cells = np.asarray(perforations.get_cell_index(row=rows))
+    mask = np.ones(len(rows), dtype=bool)
+    if i:
+        mask &= cells % dims.nx == i - 1
+    if j:
+        mask &= (cells // dims.nx) % dims.ny == j - 1
+    if k1:
+        layers = cells // (dims.nx * dims.ny)
+        mask &= (layers >= k1 - 1) & (layers <= k2 - 1)
+    selected = typing.cast(IntArray[OneDimension], rows[mask])
+    if require_match and selected.size == 0:
+        raise ValidationError(
+            f"Well {well_name if well_name is not None else well_row!r} has no connection "
+            f"at i={i}, j={j}, k1={k1}, k2={k2}."
+        )
+    return selected
 
 
 def get_many_matching_connection_rows(
@@ -253,21 +278,26 @@ def get_many_matching_connection_rows(
     k1: Integer,
     k2: Integer,
     grid: Grid | None,
+    well_names: typing.Sequence[str] | None = None,
 ) -> tuple[IntArray[OneDimension], list[int]]:
     """
-    Resolves matching connection rows across several wells at once.
+    Selects matching connections across several wells at once.
+
+    A well with no connection at the target simply contributes none, but it is an
+    error if no well at all has one.
 
     :param perforations: `CompiledPerforations` for the whole system.
     :param well_rows: Every well's own row.
-    :param i: 1-based deck index, or `0` for whole-well.
-    :param j: 1-based deck index, or `0`.
-    :param k1: 1-based deck index, or `0`.
-    :param k2: 1-based deck index, or `0`.
-    :param grid: Required only when `(i, j, k1, k2)` targets specific connections.
-    :returns: Every well's matching rows, concatenated in `well_rows`'
-        order, and, in the same order, how many rows each well
-        contributed (to later align a per-well value with the
-        concatenated rows via `expand_values`).
+    :param i: 1-based I index, or `0` for any.
+    :param j: 1-based J index, or `0` for any.
+    :param k1: 1-based first layer of the range, or `0` for any layer.
+    :param k2: 1-based last layer of the range, or `0` for any layer.
+    :param grid: Required when `(i, j, k1, k2)` targets specific connections.
+    :param well_names: The wells' names, for an error message.
+    :returns: Every well's selected rows, concatenated in `well_rows`' order, and, in the
+        same order, how many rows each well contributed (to later align a per-well value
+        with the concatenated rows via `expand_values`).
+    :raises ValidationError: If the target is invalid, or selects no connection on any well.
     """
     rows_per_well = [
         get_matching_connection_rows(
@@ -278,22 +308,26 @@ def get_many_matching_connection_rows(
             k1=k1,
             k2=k2,
             grid=grid,
+            require_match=False,
         )
         for well_row in well_rows
     ]
     counts = [len(rows) for rows in rows_per_well]
     if not rows_per_well:
         return np.empty(0, dtype=np.intp), counts  # type: ignore[return-value]
+    if sum(counts) == 0:
+        raise ValidationError(
+            f"None of the wells {list(well_names) if well_names is not None else ''} has a "
+            f"connection at i={i}, j={j}, k1={k1}, k2={k2}."
+        )
     return np.concatenate(rows_per_well), counts  # type: ignore[return-value]
 
 
 @attrs.frozen(kw_only=True, slots=True)
 class UpdateWellStatus(Action["CompiledBlackOilModel"]):
     """
-    Opens or shuts a whole well, or specific connections on it. Build
-    this directly for a manual shut-in exactly as freely as any other
-    action; it also happens to be what a deck `WELOPEN` record becomes
-    when `load_schedule` reads one.
+    Opens or shuts a whole well, or specific connections on it. A deck
+    `WELOPEN` record loads as one of these.
     """
 
     well_name: str
@@ -334,6 +368,7 @@ class UpdateWellStatus(Action["CompiledBlackOilModel"]):
             k1=self.k1,
             k2=self.k2,
             grid=grid,
+            well_name=self.well_name,
         )
         wells.perforations.set_completion_status(row=rows, status=self.status)
         return model
@@ -362,10 +397,8 @@ class ShutInWell(UpdateWellStatus):
 @attrs.frozen(kw_only=True, slots=True)
 class MultiplyConnectionFactor(Action["CompiledBlackOilModel"]):
     """
-    Multiplies a well's existing connection factor(s) in place - a
-    whole-well or per-connection productivity adjustment, constructed
-    directly or, equally, produced from a deck `WPIMULT` record by
-    `load_schedule`.
+    Multiplies a well's connection factors, for the whole well or for specific
+    connections. A deck `WPIMULT` record loads as one of these.
     """
 
     well_name: str
@@ -406,6 +439,7 @@ class MultiplyConnectionFactor(Action["CompiledBlackOilModel"]):
             k1=self.k1,
             k2=self.k2,
             grid=grid,
+            well_name=self.well_name,
         )
         wells.perforations.multiply_well_index(row=rows, factor=self.multiplier)
         return model
@@ -429,9 +463,7 @@ TARGET_SETTERS = {
 class SetWellTarget(Action["CompiledBlackOilModel"]):
     """
     Changes a well's control mode, and the one target value that mode
-    names, in one step. Build this directly for a manual control change
-    exactly as freely as any other action; it also happens to be what a
-    deck `WELTARG` record becomes when `load_schedule` reads one.
+    names, in one step. A deck `WELTARG` record loads as one of these.
     """
 
     well_name: str
@@ -475,28 +507,51 @@ class SetWellTarget(Action["CompiledBlackOilModel"]):
                 f"{type(self).__name__} control mode {self.control_mode.name} doesn't apply to "
                 f"{'an injector' if is_injector else 'a producer'} ({self.well_name!r})."
             ) from None
-        controls.set_control_mode(well_row=well_row, mode=new_mode)
-
         target_field = WELTARG_TARGET_FIELD[deck_mode]
-        if target_field is None:
-            return model  # GROUP: only the mode changes
-        if self.value is None:
+        if target_field is not None and self.value is None:
             raise ValidationError(
                 f"{type(self).__name__} on well {self.well_name!r} names control mode "
                 f"{self.control_mode.name}, which needs a value, but none was given."
             )
-        setter = TARGET_SETTERS[target_field]
-        setter(controls, well_row, self.value)
+        controls.set_control_mode(well_row=well_row, mode=new_mode)
+        if target_field is not None:
+            TARGET_SETTERS[target_field](controls, well_row, self.value)
         return model
+
+
+def check_control_mode_kind(
+    *,
+    controls: CompiledWellControls,
+    well_rows: typing.Sequence[Integer],
+    well_names: typing.Sequence[str],
+    modes: typing.Sequence[ProducerControlMode | InjectorControlMode],
+    action_name: str,
+) -> None:
+    """
+    Checks that every well's control mode is one its own kind (producer or injector) can use.
+
+    :param controls: The compiled well controls.
+    :param well_rows: Each well's row.
+    :param well_names: Each well's name, for the error message.
+    :param modes: Each well's new control mode.
+    :param action_name: The calling action's class name, for the error message.
+    :raises ValidationError: If a mode does not suit its well's kind. Nothing has been written.
+    """
+    for well_row, well_name, mode in zip(well_rows, well_names, modes, strict=True):
+        is_injector = controls.well_kinds[well_row] == WellKind.INJECTOR
+        expected = InjectorControlMode if is_injector else ProducerControlMode
+        if not isinstance(mode, expected):
+            raise ValidationError(
+                f"{action_name} control mode {mode!r} doesn't apply to "
+                f"{'an injector' if is_injector else 'a producer'} ({well_name!r})."
+            )
 
 
 @attrs.frozen(kw_only=True, slots=True)
 class SetWellControl(Action["CompiledBlackOilModel"]):
     """
-    Redefines a well's control mode and targets in one go. Just as
-    valid to build directly for a manual control change as it is to
-    load from a deck - `load_schedule` produces one from each
-    `WCONPROD`/`WCONINJE` record it reads.
+    Redefines a well's control mode and targets in one go. Each deck
+    `WCONPROD` or `WCONINJE` record loads as one of these.
     """
 
     well_name: str
@@ -532,9 +587,17 @@ class SetWellControl(Action["CompiledBlackOilModel"]):
         :param model: The model to change.
         :param context: The current moment's context. Unused.
         :returns: `model`, with the well's control patched.
+        :raises ValidationError: If `mode` doesn't apply to this well's kind. Nothing is changed.
         """
         well_row, wells = resolve_well(model=model, well_name=self.well_name)
         controls = wells.controls
+        check_control_mode_kind(
+            controls=controls,
+            well_rows=[well_row],
+            well_names=[self.well_name],
+            modes=[self.mode],
+            action_name=type(self).__name__,
+        )
         controls.set_control_mode(well_row=well_row, mode=self.mode)
         if self.target_rate is not None:
             controls.set_target_rate(well_row=well_row, value=self.target_rate)
@@ -554,12 +617,9 @@ class SetWellControl(Action["CompiledBlackOilModel"]):
 @attrs.frozen(kw_only=True, slots=True)
 class ActivateCompletion(Action["CompiledBlackOilModel"]):
     """
-    Activates a well's connection(s), flipping their schedule status
-    from `PENDING` to `ACTIVE`. Every connection is compiled up front,
-    at compile time, regardless of when it actually starts flowing -
-    this is what brings one online, whether built by hand for a
-    scripted/manual schedule or produced from a deck `COMPDAT` record
-    by `load_schedule`.
+    Brings a well's connection(s) online, changing their schedule status
+    from `PENDING` to `ACTIVE`. A deck `COMPDAT` record that starts after
+    the run begins loads as one of these.
     """
 
     well_name: str
@@ -597,6 +657,7 @@ class ActivateCompletion(Action["CompiledBlackOilModel"]):
             k1=self.k1,
             k2=self.k2,
             grid=grid,
+            well_name=self.well_name,
         )
         wells.perforations.set_schedule_status(row=rows, status=WellStatus.ACTIVE)
         return model
@@ -605,15 +666,12 @@ class ActivateCompletion(Action["CompiledBlackOilModel"]):
 @attrs.frozen(kw_only=True, slots=True)
 class ActivateWell(Action["CompiledBlackOilModel"]):
     """
-    Activates a well, flipping its schedule status from `PENDING` to
-    `ACTIVE`. Every well is compiled up front, the moment it's first
-    mentioned anywhere in the deck, regardless of when it actually
-    starts - this is what brings one online, whether built by hand or
-    produced from a deck `WELSPECS` record by `load_schedule`.
+    Brings a well online, changing its schedule status from `PENDING` to
+    `ACTIVE`. A deck `WELSPECS` record that starts after the run begins loads
+    as one of these.
 
-    This only flips the well-level status; each of its connections
-    still activates on its own schedule via `ActivateCompletion`, which
-    `load_schedule` emits separately for a real `COMPDAT` record.
+    Only the well itself is activated. Each of its connections comes online
+    separately, through `ActivateCompletion`.
     """
 
     well_name: str
@@ -637,21 +695,14 @@ class ActivateWell(Action["CompiledBlackOilModel"]):
 @attrs.frozen(kw_only=True, slots=True)
 class SetLimit(Action["CompiledBlackOilModel"]):
     """
-    Updates one of a well's existing limit rows in place - build this
-    directly for a manual limit change exactly as freely as any other
-    action. `load_schedule` also produces one from a `WECON` reissue
-    (`kind=ECONOMIC`), or from the implicit `BHPLimit` a `WCONPROD`/
-    `WCONINJE` record's own `bhp` item carries when its control mode
-    isn't `BHP` (`kind=BHP`).
+    Changes one of a well's existing limits. A deck `WECON` reissue loads as
+    one of these per quantity (`kind=ECONOMIC`), and so does the BHP limit
+    carried by a `WCONPROD` or `WCONINJE` record whose control mode is not
+    `BHP` (`kind=BHP`).
 
-    Only an already-compiled limit row matching `kind` (and `quantity`,
-    for `RATE`/`ECONOMIC`) can be patched. `CompiledLimits`' CSR table
-    has no slack to grow a brand new row for a well with no such limit at
-    compile time; that needs Step 7's unsolved CSR-growth problem, not
-    this action. A single `WECON` record can define several economic
-    limits at once (a max water cut and a max GOR, say) -
-    `load_schedule` emits one `SetLimit` per quantity in that case, not
-    one per record.
+    Only a limit the well already had when the run began, matching `kind`
+    (and `quantity`, for `RATE` and `ECONOMIC`), can be changed. A limit a
+    well never had cannot be added mid-run.
     """
 
     well_name: str
@@ -684,7 +735,7 @@ class SetLimit(Action["CompiledBlackOilModel"]):
         :param model: The model to change.
         :param context: The current moment's context. Unused.
         :returns: `model`, with the well's limit patched.
-        :raises ValidationError: If the well has no matching limit at compile time.
+        :raises ValidationError: If the well had no matching limit from the start of the run.
         """
         well_row, wells = resolve_well(model=model, well_name=self.well_name)
         limits = wells.controls.limits
@@ -692,9 +743,8 @@ class SetLimit(Action["CompiledBlackOilModel"]):
         if row is None:
             raise ValidationError(
                 f"Well {self.well_name!r} has no {self.kind!r} limit"
-                f"{f' for {self.quantity!r}' if self.quantity is not None else ''} at compile "
-                "time. Adding one mid-schedule needs `CompiledLimits`' CSR table to grow, "
-                "which is not supported."
+                f"{f' for {self.quantity!r}' if self.quantity is not None else ''} from the "
+                "start of the run, and a limit cannot be added mid-run."
             )
         if self.min_value is not None:
             limits.set_min_value(row=row, value=self.min_value)
@@ -761,7 +811,7 @@ class UpdateWellStatuses(Action["CompiledBlackOilModel"]):
 
     status: CompletionStatus | tuple[CompletionStatus, ...]
     """
-    The new open/shut status. A single value applies to every well; 
+    The new open/shut status. A single value applies to every well;
     a sequence matching `well_names` sets each well to its own status.
     """
 
@@ -799,6 +849,7 @@ class UpdateWellStatuses(Action["CompiledBlackOilModel"]):
             k1=self.k1,
             k2=self.k2,
             grid=grid,
+            well_names=self.well_names,
         )
         if isinstance(status, (list, tuple, np.ndarray)):
             status = expand_values(status, counts=counts)
@@ -840,7 +891,7 @@ class MultiplyConnectionFactors(Action["CompiledBlackOilModel"]):
 
     multiplier: float | tuple[float, ...]
     """
-    The multiplier to apply. A single value applies to every well; 
+    The multiplier to apply. A single value applies to every well;
     a sequence matching `well_names` gives each well its own multiplier.
     """
 
@@ -880,6 +931,7 @@ class MultiplyConnectionFactors(Action["CompiledBlackOilModel"]):
             k1=self.k1,
             k2=self.k2,
             grid=grid,
+            well_names=self.well_names,
         )
         if isinstance(multiplier, (list, tuple, np.ndarray)):
             multiplier = expand_values(multiplier, counts=counts)
@@ -932,6 +984,7 @@ class ActivateCompletions(Action["CompiledBlackOilModel"]):
             k1=self.k1,
             k2=self.k2,
             grid=grid,
+            well_names=self.well_names,
         )
         wells.perforations.set_schedule_status(row=rows, status=WellStatus.ACTIVE)
         return model
@@ -984,39 +1037,46 @@ class SetWellControls(Action["CompiledBlackOilModel"]):
         :param model: The model to change.
         :param context: The current moment's context. Unused.
         :returns: `model`, with every named well's control patched.
+        :raises ValidationError: If a mode doesn't apply to its well's kind. Nothing is changed.
         """
         well_rows, wells = resolve_wells(model=model, well_names=self.well_names)
         controls = wells.controls
-        n = len(self.well_names)
-        controls.set_control_mode(
-            well_row=well_rows, mode=broadcast_or_match(self.mode, count=n, field_name="mode")
+        count = len(self.well_names)
+        modes = as_list(self.mode, count=count, field_name="mode")
+        check_control_mode_kind(
+            controls=controls,
+            well_rows=typing.cast(typing.Sequence[Integer], well_rows),
+            well_names=self.well_names,
+            modes=modes,
+            action_name=type(self).__name__,
         )
+        controls.set_control_mode(well_row=well_rows, mode=modes)
         if self.target_rate is not None:
             controls.set_target_rate(
                 well_row=well_rows,
                 value=as_number_or_array(
-                    broadcast_or_match(self.target_rate, count=n, field_name="target_rate")
+                    broadcast_or_match(self.target_rate, count=count, field_name="target_rate")
                 ),
             )
         if self.target_bhp is not None:
             controls.set_target_bhp(
                 well_row=well_rows,
                 value=as_number_or_array(
-                    broadcast_or_match(self.target_bhp, count=n, field_name="target_bhp")
+                    broadcast_or_match(self.target_bhp, count=count, field_name="target_bhp")
                 ),
             )
         if self.target_thp is not None:
             controls.set_target_thp(
                 well_row=well_rows,
                 value=as_number_or_array(
-                    broadcast_or_match(self.target_thp, count=n, field_name="target_thp")
+                    broadcast_or_match(self.target_thp, count=count, field_name="target_thp")
                 ),
             )
         if self.injected_phase is not None:
             controls.set_injected_phase(
                 well_row=well_rows,
                 phase=broadcast_or_match(
-                    self.injected_phase, count=n, field_name="injected_phase"
+                    self.injected_phase, count=count, field_name="injected_phase"
                 ),
             )
         if self.efficiency_factor is not None:
@@ -1024,7 +1084,7 @@ class SetWellControls(Action["CompiledBlackOilModel"]):
                 well_row=well_rows,
                 value=as_number_or_array(
                     broadcast_or_match(
-                        self.efficiency_factor, count=n, field_name="efficiency_factor"
+                        self.efficiency_factor, count=count, field_name="efficiency_factor"
                     )
                 ),
             )
@@ -1032,7 +1092,7 @@ class SetWellControls(Action["CompiledBlackOilModel"]):
             controls.set_guide_rate(
                 well_row=well_rows,
                 value=as_number_or_array(
-                    broadcast_or_match(self.guide_rate, count=n, field_name="guide_rate")
+                    broadcast_or_match(self.guide_rate, count=count, field_name="guide_rate")
                 ),
             )
         return model
@@ -1054,7 +1114,7 @@ class SetWellTargets(Action["CompiledBlackOilModel"]):
     """The wells to act on."""
 
     control_mode: WellTargetMode | tuple[WellTargetMode, ...]
-    """The mode(s) to switch to - see `WellTargetMode`. A single value
+    """The mode(s) to switch to, as a `WellTargetMode`. A single value
     applies to every well; a sequence matching `well_names` gives each
     well its own mode."""
 
@@ -1086,9 +1146,11 @@ class SetWellTargets(Action["CompiledBlackOilModel"]):
         """
         well_rows, wells = resolve_wells(model=model, well_names=self.well_names)
         controls = wells.controls
-        n = len(self.well_names)
-        control_modes = broadcast_or_match(self.control_mode, count=n, field_name="control_mode")
-        values = broadcast_or_match(self.value, count=n, field_name="value")
+        count = len(self.well_names)
+        control_modes = broadcast_or_match(
+            self.control_mode, count=count, field_name="control_mode"
+        )
+        values = broadcast_or_match(self.value, count=count, field_name="value")
         per_well_mode = isinstance(control_modes, (list, tuple, np.ndarray))
         per_well_value = isinstance(values, (list, tuple, np.ndarray))
 
@@ -1168,7 +1230,7 @@ def find_limit_rows(
     :param quantities: Each target's quantity, positionally matched with `well_names`.
     :param action_name: The calling action's class name, for a validation message.
     :returns: Each target's own limit row, in the same order.
-    :raises ValidationError: If any target has no matching limit at compile time.
+    :raises ValidationError: If any target had no matching limit from the start of the run.
     """
     rows: list[Integer] = []
     missing: list[str] = []
@@ -1184,9 +1246,8 @@ def find_limit_rows(
             rows.append(row)
     if missing:
         raise ValidationError(
-            f"{action_name} found no matching limit at compile time for: {', '.join(missing)}. "
-            "Adding one mid-schedule needs `CompiledLimits`' CSR table to grow, which is not "
-            "supported."
+            f"{action_name} found no matching limit from the start of the run for: "
+            f"{', '.join(missing)}. A limit cannot be added mid-run."
         )
     return np.asarray(rows, dtype=np.intp)  # type: ignore[return-value]
 
@@ -1314,7 +1375,7 @@ class SetLimits(Action["CompiledBlackOilModel"]):
         :returns: `model`, with every target's limit patched.
         :raises ValidationError: If `kinds`/`quantities` don't line up
             with `well_names` per `mode`, or a target has no matching
-            limit at compile time.
+            limit from the start of the run.
         """
         well_rows, wells = resolve_wells(model=model, well_names=self.well_names)
         limits = wells.controls.limits
@@ -1333,15 +1394,15 @@ class SetLimits(Action["CompiledBlackOilModel"]):
         :param limits: The compiled limits table to patch.
         :param well_rows: Every well's own row, same order as `well_names`.
         :raises ValidationError: If `kinds` isn't the same length as
-            `well_names`, or a target has no matching limit at compile time.
+            `well_names`, or a target had no matching limit from the start of the run.
         """
-        n = len(self.well_names)
-        if len(self.kinds) != n:
+        count = len(self.well_names)
+        if len(self.kinds) != count:
             raise ValidationError(
-                f"{type(self).__name__} in `ONE_TO_ONE` mode needs exactly {n} `kinds` (one per "
+                f"{type(self).__name__} in `ONE_TO_ONE` mode needs exactly {count} `kinds` (one per "
                 f"well in `well_names`); got {len(self.kinds)}."
             )
-        quantities = as_list(self.quantities, count=n, field_name="quantities")
+        quantities = as_list(self.quantities, count=count, field_name="quantities")
         rows = find_limit_rows(
             limits=limits,
             well_names=self.well_names,
@@ -1353,7 +1414,7 @@ class SetLimits(Action["CompiledBlackOilModel"]):
         apply_limit_values(
             limits=limits,
             rows=rows,
-            count=n,
+            count=count,
             min_values=self.min_values,
             max_values=self.max_values,
             workover_actions=self.workover_actions,
@@ -1370,29 +1431,29 @@ class SetLimits(Action["CompiledBlackOilModel"]):
 
         :param limits: The compiled limits table to patch.
         :param well_rows: Every well's own row, same order as `well_names`.
-        :raises ValidationError: If a target has no matching limit at compile time.
+        :raises ValidationError: If a target had no matching limit from the start of the run.
         """
-        m = len(self.kinds)
-        quantities = as_list(self.quantities, count=m, field_name="quantities")
+        count = len(self.kinds)
+        quantities = as_list(self.quantities, count=count, field_name="quantities")
         min_values = (
             None
             if self.min_values is None
-            else as_list(self.min_values, count=m, field_name="min_values")
+            else as_list(self.min_values, count=count, field_name="min_values")
         )
         max_values = (
             None
             if self.max_values is None
-            else as_list(self.max_values, count=m, field_name="max_values")
+            else as_list(self.max_values, count=count, field_name="max_values")
         )
         workover_actions = (
             None
             if self.workover_actions is None
-            else as_list(self.workover_actions, count=m, field_name="workover_actions")
+            else as_list(self.workover_actions, count=count, field_name="workover_actions")
         )
         end_runs = (
             None
             if self.end_runs is None
-            else as_list(self.end_runs, count=m, field_name="end_runs")
+            else as_list(self.end_runs, count=count, field_name="end_runs")
         )
 
         rows_per_spec = [
@@ -1454,16 +1515,15 @@ class SetGroupLimit(Action["CompiledBlackOilModel"]):
         :param model: The model to change.
         :param context: The current moment's context. Unused.
         :returns: `model`, with the group's limit patched.
-        :raises ValidationError: If the group has no matching limit at compile time.
+        :raises ValidationError: If the group had no matching limit from the start of the run.
         """
         group_row, wells = resolve_group(model=model, group_name=self.group_name)
         limits: CompiledGroupLimits = wells.group_controls.limits  # type: ignore[union-attr]
         row = limits.find_limit_row(group_row=group_row, quantity=self.quantity)
         if row is None:
             raise ValidationError(
-                f"Group {self.group_name!r} has no `ECONOMIC` limit for {self.quantity!r} at "
-                "compile time. Adding one mid-schedule needs `CompiledGroupLimits`' CSR table "
-                "to grow, which is not supported."
+                f"Group {self.group_name!r} has no `ECONOMIC` limit for {self.quantity!r} from "
+                "the start of the run, and a limit cannot be added mid-run."
             )
         if self.min_value is not None:
             limits.set_min_value(row=row, value=self.min_value)
@@ -1569,12 +1629,15 @@ class WaterCutThreshold(ThresholdEvent["CompiledBlackOilModel"]):
         :returns: The water cut, `0` when the well produces no liquid.
         """
         well_row, wells = get_well_rate_arrays(
-            model=model, context=context, well_name=self.well_name, caller=type(self).__name__
+            model=model,
+            context=context,
+            well_name=self.well_name,
+            caller=type(self).__name__,
         )
-        oil = wells.surface_oil_rates[well_row]
-        water = wells.surface_water_rates[well_row]
-        liquid = oil + water
-        return water / liquid if liquid > 0.0 else 0.0
+        oil_rate = wells.surface_oil_rates[well_row]
+        water_rate = wells.surface_water_rates[well_row]
+        liquid_rate = oil_rate + water_rate
+        return water_rate / liquid_rate if liquid_rate > 0.0 else 0.0
 
 
 @attrs.frozen(kw_only=True, slots=True)
@@ -1593,13 +1656,16 @@ class GasOilRatioThreshold(ThresholdEvent["CompiledBlackOilModel"]):
         :returns: The gas-oil ratio, infinite for gas with no oil, `0` for neither.
         """
         well_row, wells = get_well_rate_arrays(
-            model=model, context=context, well_name=self.well_name, caller=type(self).__name__
+            model=model,
+            context=context,
+            well_name=self.well_name,
+            caller=type(self).__name__,
         )
-        oil = wells.surface_oil_rates[well_row]
-        gas = wells.surface_gas_rates[well_row]
-        if oil > 0.0:
-            return gas / oil
-        return float("inf") if gas > 0.0 else 0.0
+        oil_rate = wells.surface_oil_rates[well_row]
+        gas_rate = wells.surface_gas_rates[well_row]
+        if oil_rate > 0.0:
+            return gas_rate / oil_rate
+        return float("inf") if gas_rate > 0.0 else 0.0
 
 
 @attrs.frozen(kw_only=True, slots=True)
@@ -1607,9 +1673,8 @@ class SetWellLift(Action["CompiledBlackOilModel"]):
     """
     Changes a well's VFP table, artificial lift quantity (ALQ) and efficiency factor.
 
-    Each setting that is `None` is left as it is. Build this directly for a manual lift change;
-    it is also what a deck `WLIFT` becomes under `load_schedule`, and what the lift items of a
-    `WCONPROD`/`WCONINJE` reissue become.
+    Each setting that is `None` is left as it is. A deck `WLIFT` record loads as one of these,
+    and so do the lift items of a `WCONPROD` or `WCONINJE` reissue.
     """
 
     well_name: str
@@ -1654,6 +1719,11 @@ class SetWellLift(Action["CompiledBlackOilModel"]):
             raise ValidationError(
                 f"{type(self).__name__}: the artificial lift quantity must be finite and "
                 f"non-negative; got {self.artificial_lift_quantity}."
+            )
+        if self.vfp_table is not None and self.vfp_table < 0:
+            raise ValidationError(
+                f"{type(self).__name__}: the VFP table number must be `0` (no table) or "
+                f"positive; got {self.vfp_table}."
             )
         if self.efficiency_factor is not None and not (0.0 < self.efficiency_factor <= 1.0):
             raise ValidationError(
