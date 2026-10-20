@@ -409,9 +409,9 @@ def _minres(
     """
     MINRES solver wrapper compatible with the standard `SolverFunction` interface.
 
-    MINRES is only suitable for symmetric (possibly indefinite) systems.  It
+    MINRES is only suitable for symmetric (possibly indefinite) systems. It
     does **not** accept `atol` directly; instead convergence is declared when
-    the *relative* residual `||r_k|| / ||b||` drops below `rtol`.  To
+    the *relative* residual `||r_k|| / ||b||` drops below `rtol`. To
     honour the caller's `atol` we tighten `rtol` whenever the absolute
     criterion is the binding one:
 
@@ -469,13 +469,13 @@ def _qmr(
     * If `M` is `None`, both `M1` and `M2` are left as `None`
       (no preconditioning).
     * If `M` is provided, it is supplied as `M1`; `M2` is set to the
-      identity.  This matches the "left-preconditioned" convention used by the
+      identity. This matches the "left-preconditioned" convention used by the
       rest of the solver infrastructure and keeps the residual norms comparable
       with those reported by other solvers.
 
     **`atol` handling**:
 
-    Like MINRES, QMR has no native `atol` parameter.  We fold it into a
+    Like MINRES, QMR has no native `atol` parameter. We fold it into a
     tightened `rtol` using the same formula:
 
         effective_rtol = min(rtol, atol / max(||b||, ε))

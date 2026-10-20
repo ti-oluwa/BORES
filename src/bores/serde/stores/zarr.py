@@ -70,7 +70,7 @@ def _sequence_to_ndarray(value: Sequence, path: str) -> npt.NDArray:
 **Encoding contract**
 Path segments are percent-encoded so that the separator character (``->``,
 U+2192) and the escape character (``%``) can never appear unescaped in a
-segment.  This makes path encoding injective: two distinct nested paths can
+segment. This makes path encoding injective: two distinct nested paths can
 never produce the same flat key.
 
     encode: "%" -> "%25",  "->" -> "%E2%86%92"
@@ -92,7 +92,7 @@ array-vs-scalar distinction is preserved.
 
 **Collision detection**
 A debug-mode assertion checks that no two source paths produce the same
-encoded flat key.  This is a safeguard; in practice attrs field names cannot
+encoded flat key. This is a safeguard; in practice attrs field names cannot
 collide after encoding.
 """
 
@@ -327,7 +327,7 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
         :param compressor: Compression algorithm - `'lz4'`, `'zstd'`, or
             `'blosclz'`.
         :param compression_level: Compression level (1-9).
-        :param chunks: Optional explicit chunk shape.  When `None` the store
+        :param chunks: Optional explicit chunk shape. When `None` the store
             picks sensible defaults based on array rank.
         :raises StorageError: If the path is invalid or has an incompatible
             extension.

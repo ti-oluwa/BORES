@@ -127,7 +127,7 @@ for row, col, scalar, cmap, title, clim in panel_cfg:
     pl.set_scale(zscale=3)  # type: ignore
     pl.view_isometric()  # type: ignore
 
-print("Rendering ...  (close window to exit)")
+print("Rendering ... (close window to exit)")
 pl.show()
 
 # Summary

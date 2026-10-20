@@ -51,7 +51,7 @@ class UnitSystem(enum.Enum):
 
     ```
     =========  =======  ======  =======  =========  =======  ========  ========
-    System     Length   Area    Volume   Perm.      Press.   Temp.     Rates (/day)
+    System     Length   Area    Volume   Perm.     Press.  Temp.    Rates (/day)
     =========  =======  ======  =======  =========  =======  ========  ========
     FIELD      ft       ft²     ft³      mD         psi      °F        STB/SCF
     METRIC     m        m²      m³       mD         bar      °C        Sm³
@@ -151,9 +151,10 @@ class FluidPhase(enum.Enum):
 
     WATER = "water"
     GAS = "gas"
-    OIL = "oil"
     DISSOLVED_GAS = "disgas"
+    OIL = "oil"
     LIQUID_OIL = "lio"
+    VAPOURIZED_OIL = "vapoil"
 
     def __str__(self) -> str:
         return self.value

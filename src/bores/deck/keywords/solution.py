@@ -1,7 +1,7 @@
 """
-SOLUTION section keyword implementations.
+`SOLUTION` section keyword implementations.
 
-The SOLUTION section specifies initial reservoir conditions: either as
+The `SOLUTION` section specifies initial reservoir conditions: either as
 explicit per-cell arrays (`PRESSURE`, `SWAT`, `SGAS`, `RS`,
 `RV`) or via gravity/capillary equilibration (`EQUIL`), or by
 restarting from a previously saved state (`RESTART`).

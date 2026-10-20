@@ -49,7 +49,7 @@ class Field(typing.Generic[T]):
     :param name: Field name (used as key in the returned `dict`).
     :param type: Callable that converts the raw token string to the field
         value (e.g. `int`, `float`, `str`, or a function/validator).
-    :param required: Whether this field must be present.  Trailing optional
+    :param required: Whether this field must be present. Trailing optional
         fields fall back to `default` when the record has fewer tokens.
     :param default: Default value when the field is absent and
         `required=False`.
@@ -311,11 +311,11 @@ class ArrayKeyword(Keyword[FloatArray[OneDimension]]):
             block or operator is applied.
         :param is_multiplier: Convenience flag; when `True`, overrides
             `default_value` to `1.0` (the multiplicative identity)
-            regardless of what was passed for `default_value`.  Use for
+            regardless of what was passed for `default_value`. Use for
             `MULTX`, `MULTY`, `MULTZ`, and their `-` variants.
         :param column_shape: Optional tuple of dimension-name strings declaring
-            a valid "short form" token count for this keyword.  Each string
-            must be one of `"nx"`, `"ny"`, `"nz"`.  When the token count
+            a valid "short form" token count for this keyword. Each string
+            must be one of `"nx"`, `"ny"`, `"nz"`. When the token count
             equals the product of the named dimensions, the parsed values are
             broadcast (tiled) along the remaining axes to fill `n_cells`.
 
@@ -689,7 +689,7 @@ class FlagKeyword(Keyword[bool]):
     `FIELD`, `METRIC`, `LAB`, `NOSIM`, `UNIFIN`, `UNIFOUT`.
 
     `parse` returns `True` when the keyword appears anywhere in
-    the deck, `False` otherwise.  It never returns `None` so callers
+    the deck, `False` otherwise. It never returns `None` so callers
     can always do a truthiness test.
     """
 
@@ -861,7 +861,7 @@ class TableKeyword(Keyword[list[Table[Number]]]):
         Convert a token list to a row dict using `self.columns`.
 
         Trailing optional columns that are absent from `tokens` fall back
-        to their declared `default` values.  The Eclipse `1*` default
+        to their declared `default` values. The Eclipse `1*` default
         designator is treated as absent (falls back to `default`).
         """
         row: TableRow = {}
@@ -1031,7 +1031,7 @@ def get_schedule_times(deck: Deck, time_unit: TimeUnit = "days") -> dict[int, fl
 
         elif record.keyword == "DATES":
             # A single `DATES` block may carry multiple date entries, each
-            # terminated by its own '/'.  Walk every segment that has tokens.
+            # terminated by its own '/'. Walk every segment that has tokens.
             for segment in record.body.split("/"):
                 tokens = tokenize(segment, expand_repeats=True)
                 if not tokens:

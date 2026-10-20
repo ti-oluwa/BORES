@@ -96,7 +96,7 @@ __all__ = [
 
 class SummaryVectorKeyword(Keyword[list[str]]):
     """
-    A SUMMARY-section vector selector (`FOPR`, `WOPR`, `ROIP`, ...).
+    A `SUMMARY`-section vector selector (`FOPR`, `WOPR`, `ROIP`, ...).
 
     Eclipse allows an optional list of object names/numbers (well names for
     `W*` vectors, region numbers for `R*` vectors) immediately following the

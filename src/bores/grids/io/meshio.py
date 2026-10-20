@@ -146,13 +146,13 @@ def dump_mesh(
     """
     Write a `bores.grids.base.Grid` to any format supported by `meshio`.
 
-    This is the most general export path.  `meshio` supports over 20
+    This is the most general export path. `meshio` supports over 20
     formats including Abaqus, Ansys, MEDIT, OpenFOAM, etc.
 
     Note:
         `file_format` is mandatory here (unlike `load_mesh`) because
         when `destination` is `None` there is no file extension for
-        `meshio` to infer from.  Being explicit also avoids surprises when
+        `meshio` to infer from. Being explicit also avoids surprises when
         writing to a path with an unusual or missing extension.
 
     :param grid: The grid to serialise.
@@ -237,7 +237,7 @@ def _mesh_to_grid(
     """
     Convert a `meshio.Mesh` object to a `bores.grids.base.Grid`.
 
-    Only volumetric (3-D) cell types are retained.  Quadratic elements are
+    Only volumetric (3-D) cell types are retained. Quadratic elements are
     reduced to their linear counterparts by discarding mid-side nodes.
 
     :param mesh: A `meshio.Mesh` instance.

@@ -76,7 +76,7 @@ def make_voronoi_grid(
     additional dependencies beyond `scipy`.
 
     :param seed_coordinates: Shape `(N, 2)` or `(N, 3)` array of Voronoi
-        generator points.  At least 4 seeds are required (3 are needed for a
+        generator points. At least 4 seeds are required (3 are needed for a
         non-degenerate 2-D tessellation, but 4 ensures numerical stability).
     :param bounding_box: Axis-aligned bounding box for the grid domain.
         For 2-D seeds: `(x_min, x_max, y_min, y_max)`.
@@ -428,7 +428,7 @@ def make_3d_voronoi_grid(
     Build a 3-D native polyhedral Voronoi grid.
 
     Each ridge in the 3-D Voronoi tessellation is a polygonal face (with 3+
-    vertices) shared between two cells.  The mirror-seed strategy converts all
+    vertices) shared between two cells. The mirror-seed strategy converts all
     domain-interior ridges to finite faces and all boundary ridges to faces
     between an original seed and its mirror.
 

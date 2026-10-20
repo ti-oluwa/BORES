@@ -133,7 +133,7 @@ class YAMLStore(DataStore[SerializableT, list[typing.Any]]):
 
     Like `JSONStore`, YAML files must be read/written as a whole.
     `open()` deserialises the file into `self._handle` (a list) and
-    `close()` serialises it back.  All mutations happen in memory; the file
+    `close()` serialises it back. All mutations happen in memory; the file
     is touched only on `close()`:
 
     ```python

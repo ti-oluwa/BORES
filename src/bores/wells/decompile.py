@@ -362,7 +362,7 @@ def decompile_limit(controls: CompiledWellControls, row: int, unit_system: UnitS
 def decompile_control(
     controls: CompiledWellControls,
     well_row: int,
-    all_limits: tuple[Limit, ...],
+    well_limits: tuple[Limit, ...],
     unit_system: UnitSystem,
 ) -> WellControl:
     """
@@ -376,7 +376,7 @@ def decompile_control(
 
     :param controls: `CompiledWellControls` for the whole system.
     :param well_row: This well's row.
-    :param all_limits: This well's already-rebuilt limits, in `CompiledLimits` row order.
+    :param well_limits: This well's already-rebuilt limits, in `CompiledLimits` row order.
     :param unit_system: Unit system to tag the rebuilt control with.
     :returns: The rebuilt `ProducerControl` or `InjectorControl`.
     """
@@ -394,7 +394,7 @@ def decompile_control(
             target_rate=target_rate,
             target_bhp=target_bhp,
             target_thp=target_thp,
-            limits=all_limits,
+            limits=well_limits,
             efficiency_factor=efficiency_factor,
             guide_rate=guide_rate,
             vfp_table=vfp_table,
@@ -405,7 +405,7 @@ def decompile_control(
         target_rate=target_rate,
         target_bhp=target_bhp,
         target_thp=target_thp,
-        limits=all_limits,
+        limits=well_limits,
         efficiency_factor=efficiency_factor,
         guide_rate=guide_rate,
         vfp_table=vfp_table,
@@ -476,7 +476,10 @@ def decompile_well(wells: Wells, compiled_system: CompiledWellSystem, well_row: 
     well_name = compiled_system.names[well_row]
     well = wells[well_name]
     perforations = decompile_well_perforations(
-        wells, well_name, compiled_system.perforations, well_row
+        wells,
+        well_name=well_name,
+        perforations=compiled_system.perforations,
+        well_row=well_row,
     )
     return attrs.evolve(
         well,

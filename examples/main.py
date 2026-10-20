@@ -21,7 +21,13 @@ case = SimulationCase.from_deck(df, tubing_performance=wellbore, temperature=200
 pvt = case.model.fluid.pvt
 oil_table = pvt.region(1).tables.oil
 assert oil_table is not None, "`oil_table` should not be None"
-print(oil_table.viscosity([4700, 200, 3456, 10000, 4000], [200, 400, 600], solution_gor=800))
+print(
+    oil_table.density(
+        pressure=[4700, 200, 3456, 10000, 4000],
+        temperature=[[200] * 5, [400] * 5],
+        solution_gor=[[800] * 5, [1270] * 5],
+    )
+)
 
 # Wells and schedule
 wells = case.model.wells

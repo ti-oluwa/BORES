@@ -1,7 +1,7 @@
 """
 RUNSPEC section keyword implementations.
 
-The RUNSPEC section is the first section in an Eclipse black-oil data file.
+The `RUNSPEC` section is the first section in an Eclipse black-oil data file.
 It declares the run's meta-data: grid dimensions, active phases, unit system,
 table-sizing hints, well/group dimensioning, and the simulation start date.
 """
@@ -66,7 +66,7 @@ DISGAS = FlagKeyword("DISGAS")
 """
 `DISGAS` - enable dissolved-gas-in-oil modelling (live oil).
 
-Requires `OIL` and `GAS` to also be active.  Live-oil PVT data
+Requires `OIL` and `GAS` to also be active. Live-oil PVT data
 must be supplied via `PVTO` (or `PVCO`) in the PROPS section.
 """
 
@@ -74,7 +74,7 @@ VAPOIL = FlagKeyword("VAPOIL")
 """
 `VAPOIL` - enable vaporized-oil-in-gas modelling (wet gas / condensate).
 
-Requires `OIL` and `GAS` to also be active.  Wet-gas PVT data
+Requires `OIL` and `GAS` to also be active. Wet-gas PVT data
 must be supplied via `PVTG` in the PROPS section.
 """
 
@@ -163,7 +163,7 @@ TITLE = TitleKeyword()
 `TITLE` - free-text simulation case label.
 
 The value on the line immediately following `TITLE` is used as a
-header on Eclipse print-file output.  No `/` terminator is required.
+header on Eclipse print-file output. No `/` terminator is required.
 
 `parse` returns the stripped title string, or `None` if the
 keyword is absent.

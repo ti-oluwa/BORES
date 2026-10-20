@@ -196,7 +196,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
       This is the standard convention for oil-water tables (Sw axis) and for
       gas-oil tables indexed by So.
     - `"non_wetting"` - the x-axis holds non-wetting-phase saturation
-      values.  Use this for gas-oil tables indexed by Sg.
+      values. Use this for gas-oil tables indexed by Sg.
 
     This attribute does not change the interpolation mechanics. It only
     records which physical saturation must be supplied by the caller so that
@@ -256,7 +256,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
         if len(self.reference_saturation) != len(self.capillary_pressure):
             raise ValidationError(
                 f"`reference_saturation` and `capillary_pressure` arrays must have "
-                f"the same length.  Got {len(self.reference_saturation)} vs "
+                f"the same length. Got {len(self.reference_saturation)} vs "
                 f"{len(self.capillary_pressure)}"
             )
         if len(self.reference_saturation) < 2:

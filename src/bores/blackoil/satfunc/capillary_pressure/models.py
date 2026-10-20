@@ -1017,7 +1017,7 @@ class BrooksCoreyCapillaryPressureTable(CapillaryPressureTable):
         Entry pressures (`oil_water_entry_pressure_water_wet`,
         `oil_water_entry_pressure_oil_wet`, `gas_oil_entry_pressure`) are
         multiplied by the pressure conversion factor from `self.unit_system`
-        to *target*.  Saturation parameters, pore-size distribution indices,
+        to *target*. Saturation parameters, pore-size distribution indices,
         wettability, and `mixed_wet_water_fraction` are dimensionless and
         are copied unchanged.
 
@@ -1425,7 +1425,7 @@ def compute_van_genuchten_pc_slope_wrt_effective_saturation(
     where m = 1 - 1/n
     ```
 
-    Let u = Se^(-1/m) - 1.  By the chain rule:
+    Let u = Se^(-1/m) - 1. By the chain rule:
 
     ```
     dPc/dSe = (dPc/du) * (du/dSe)
@@ -2103,7 +2103,7 @@ class VanGenuchtenCapillaryPressureTable(CapillaryPressureTable):
 
         The alpha parameters have units of `1/[pressure]`, so they are
         divided by the pressure conversion factor (equivalently, multiplied
-        by `1 / pressure_factor`).  The `n` parameters and saturation
+        by `1 / pressure_factor`). The `n` parameters and saturation
         parameters are dimensionless and are copied unchanged.
 
         :param target: Target `UnitSystem`.

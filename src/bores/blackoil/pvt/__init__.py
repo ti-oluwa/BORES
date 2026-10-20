@@ -7,15 +7,15 @@ This module provides three layers:
 
 **Data layer** - `PVTData`, `PVTDataSet`
     Raw tabulated arrays exactly as read from a deck or built by a correlation
-    builder.  No interpolators.  Fully serialisable.  Units are always FIELD
+    builder. No interpolators. Fully serialisable. Units are always FIELD
     (psi, °F, bbl/STB, ft³/SCF, cP, lbm/ft³, SCF/STB) unless documented
     otherwise.
 
 **Table layer** - `PVTTable`, `PVTTables`, `PVT`
-    Wraps `PVTData` with fast scipy / PCHIP interpolators.  Every primary
+    Wraps `PVTData` with fast scipy / PCHIP interpolators. Every primary
     property (Bo, μo, Rs, Bg, μg, z, Bw, μw) has a matching `*_dp` method
     that returns ∂/∂P via the derivative of the same interpolator - no
-    second table lookup, no finite differences.  Derived properties (ρ, c)
+    second table lookup, no finite differences. Derived properties (ρ, c)
     are pre-built into their own tables at construction time so simulation
     evaluation is a single interpolator call.
 

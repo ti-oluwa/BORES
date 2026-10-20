@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 class JSONStore(DataStore[SerializableT, list[typing.Any]]):
     """
-    JSON-based storage.  Human-readable, no compression.  Good for configs.
+    JSON-based storage. Human-readable, no compression. Good for configs.
 
     **Persistent-handle notes**
 
@@ -35,7 +35,7 @@ class JSONStore(DataStore[SerializableT, list[typing.Any]]):
     serialises that list back to disk.
 
     While the handle is open, `dump` replaces `_handle` in memory and
-    `append` pushes a new entry onto `_handle`.  Neither touches the
+    `append` pushes a new entry onto `_handle`. Neither touches the
     file until `close()` is called, so you get one write per session
     instead of one write per append:
 

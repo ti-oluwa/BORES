@@ -712,7 +712,7 @@ class KilloughLandRelPermTable:
         :param gas_imbibition_flag: Boolean / float flag per cell - 1 if gas
             saturation is currently increasing, 0 if decreasing.
         :param water_reversal_saturation: Water saturation at the last oil-water
-            reversal.  Defaults to `max_water_saturation` when not supplied.
+            reversal. Defaults to `max_water_saturation` when not supplied.
         :param gas_reversal_saturation: Gas saturation at the last gas-oil reversal.
             Defaults to `max_gas_saturation` when not supplied.
         :param kwargs: Additional keyword arguments forwarded to the underlying

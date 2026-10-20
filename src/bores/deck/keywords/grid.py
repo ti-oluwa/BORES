@@ -473,7 +473,7 @@ FAULTS = RepeatedRecordKeyword[str | int](
 `FAULTS 'NAME' I1 I2 J1 J2 K1 K2 FACE / ... /` - named fault planes.
 
 Multiple `FAULTS` keyword blocks in the same deck are concatenated in
-file order.  Indices `I1`/`I2`/`J1`/`J2`/`K1`/`K2` are
+file order. Indices `I1`/`I2`/`J1`/`J2`/`K1`/`K2` are
 *1-based* Eclipse IJK indices, passed through unchanged to the caller.
 
 :raises DeckParseError: If `FACE` is not one of `X`, `X-`, `Y`,

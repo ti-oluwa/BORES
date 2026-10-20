@@ -3,7 +3,7 @@ REGIONS section keyword implementations.
 
 The REGIONS section assigns each grid cell to one or more numbered
 regions that control which PVT, saturation-function, equilibration, or
-rock-compaction table applies to that cell.  Every keyword here is a
+rock-compaction table applies to that cell. Every keyword here is a
 per-cell integer array (dtype int32) whose value selects the 1-based
 table index for the corresponding cell.
 

@@ -94,9 +94,9 @@ class HDF5Store(DataStore[SerializableT, h5py.File]):
     **Persistent-handle notes**
 
     `open(mode="a")` opens the HDF5 file once via `h5py.File` and stores
-    the file object in `self._handle`.  All subsequent `append` /
+    the file object in `self._handle`. All subsequent `append` /
     `load` / `entries` calls reuse the same open file descriptor, avoiding
-    the open/close cost on every call.  `close()` flushes and closes the
+    the open/close cost on every call. `close()` flushes and closes the
     `h5py.File` and sets `self._handle = None`.
 
     Typical high-throughput usage:

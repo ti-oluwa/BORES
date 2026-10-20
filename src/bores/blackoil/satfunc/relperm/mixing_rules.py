@@ -16,8 +16,8 @@ Every registered rule honors the two-phase limits, for any oil endpoint `kr_max`
 |-----------------------|--------------------|-------------------------------------------------|
 | `baker_linear_rule`   | Moderate (default) | Saturation-weighted interpolation (Baker, 1988). The ECLIPSE default. |
 | `stone_I_rule`        | Moderate           | Stone's first model, Aziz-Settari normalization, Fayers-Matthews `Som`. |
-| `stone_II_rule`       | Moderate           | Stone's second model, normalized.               |
-| `min_rule`            | Very conservative  | Lower bound: `min(kro_w, kro_g)`.               |
+| `stone_II_rule`       | Moderate           | Stone's second model, normalized.              |
+| `min_rule`            | Very conservative  | Lower bound: `min(kro_w, kro_g)`.              |
 
 **Rule signature**
 

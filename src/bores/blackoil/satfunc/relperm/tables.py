@@ -442,7 +442,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
     base points (plus `number_of_endpoint_extra_points` extra knots in each boundary
     decade) before fitting the PCHIP interpolant. This gives smoother curves
     and better derivative accuracy near residual saturations without requiring
-    the caller to pre-supply a dense grid.  Pass `number_of_base_points=0` to
+    the caller to pre-supply a dense grid. Pass `number_of_base_points=0` to
     disable scaling entirely and use the raw knots directly.
 
     **Minimum relperm min_values** (`min_wetting_relperm` / `min_non_wetting_relperm`):
@@ -487,10 +487,10 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
     Which phase the `reference_saturation` axis represents.
 
     - `"wetting"` - `reference_saturation` holds wetting phase saturation
-      values.  krw increases and krnw decreases as `reference_saturation`
+      values. krw increases and krnw decreases as `reference_saturation`
       increases.
     - `"non_wetting"` - `reference_saturation` holds non-wetting phase
-      saturation values.  krnw increases and krw decreases as
+      saturation values. krnw increases and krw decreases as
       `reference_saturation` increases.
 
     This does not change the interpolation mechanics. It only records which

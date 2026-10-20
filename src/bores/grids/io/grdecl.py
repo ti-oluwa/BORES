@@ -445,7 +445,7 @@ def dump_grdecl(
         * `None` - return the GRDECL text as a `str`.
 
     :param actnum: Optional shape `(n_cells,)` integer array of
-        active-cell flags (1 = active, 0 = inactive).  If `None`, the
+        active-cell flags (1 = active, 0 = inactive). If `None`, the
         value stored in `grid.metadata["actnum"]` is used; if that is
         also absent, all cells are written as active.
     :param encoding: Encoding used when writing to a file (default
@@ -742,7 +742,7 @@ def build_grdecl_text(grid: Grid, *, actnum: ActNumArray | None = None) -> str:
     if source_format not in GRDECL_SOURCES:
         raise GridExportError(
             f"Cannot export a `Grid` with `source_format={source_format!r}` to GRDECL. "
-            "Only grids originally loaded by `load_grdecl()` support GRDECL export.  "
+            "Only grids originally loaded by `load_grdecl()` support GRDECL export. "
             f"Supported source formats: {sorted(GRDECL_SOURCES)}."
         )
     if source_format == "grdecl_cartesian":
