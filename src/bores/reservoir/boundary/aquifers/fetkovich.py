@@ -328,6 +328,7 @@ class FetkovichAquifer(BoundaryCondition):
                 from_field = None
 
             angle_fraction = self.angle / 360.0
+            bbl_to_ft3 = c.BARRELS_TO_CUBIC_FEET
 
             # J = 0.00708*k*h*f / [μ*(ln(re/rw) - 0.75)]  [bbl/day/psi, FIELD]
             productivity_index_bbl_per_day_psi = (
@@ -341,28 +342,21 @@ class FetkovichAquifer(BoundaryCondition):
                 * height_ft
                 * self.aquifer_porosity
                 * angle_fraction
-                / c.BARRELS_TO_CUBIC_FEET
+                / bbl_to_ft3
             )
             # We_i = ct * W_i * p_i  [bbl, FIELD]
             encroachable_water_bbl = (
                 compressibility_psi * initial_water_volume_bbl * initial_pressure_psi
             )
 
+            # `FIELD` volumes in this codebase are cubic feet, not barrels.
+            productivity_index = productivity_index_bbl_per_day_psi * bbl_to_ft3
+            encroachable_water = encroachable_water_bbl * bbl_to_ft3
             if from_field is not None:
-                productivity_index = (
-                    productivity_index_bbl_per_day_psi
-                    * c.BARRELS_TO_CUBIC_FEET
-                    * from_field["volume"]
-                    / from_field["time"]
-                    / from_field["pressure"]
+                productivity_index *= from_field["volume"] / (
+                    from_field["time"] * from_field["pressure"]
                 )
-                encroachable_water = (
-                    encroachable_water_bbl * c.BARRELS_TO_CUBIC_FEET * from_field["volume"]
-                )
-            else:
-                productivity_index = productivity_index_bbl_per_day_psi
-                encroachable_water = encroachable_water_bbl
-
+                encroachable_water *= from_field["volume"]
             object.__setattr__(self, "productivity_index", productivity_index)
             object.__setattr__(self, "encroachable_water", encroachable_water)
 
@@ -486,7 +480,9 @@ class FetkovichAquifer(BoundaryCondition):
         return typing.cast(
             Self | dict[int, Self],
             load_fetkovich_aquifer(
-                deck_file, aquifer_id=aquifer_id, get_initial_pressure=get_initial_pressure
+                deck_file,
+                aquifer_id=aquifer_id,
+                get_initial_pressure=get_initial_pressure,
             ),
         )
 
@@ -504,7 +500,8 @@ def load_fetkovich_aquifer_from_record(
     :param unit_system: The deck's unit system.
     :param get_initial_pressure: Called with `record` to get the initial pressure
         when the record defaults it (`1*`).
-    :returns: Constructed `FetkovichAquifer`. `salt_concentration` is read
+    :returns: Constructed `FetkovichAquifer`, with a `FIELD` deck's barrels converted to cubic
+        feet. `salt_concentration` is read
         by the deck parser but not consumed here as this codebase has no
         brine tracking wired into `FetkovichAquifer` yet.
     :raises ValidationError: If the record defaults its initial pressure and
@@ -522,12 +519,15 @@ def load_fetkovich_aquifer_from_record(
             )
         initial_pressure = get_initial_pressure(record)
 
+    # A `FIELD` deck gives the water volume in reservoir barrels and the productivity index in
+    # barrels per day per psi, while `FIELD` volumes in this codebase are cubic feet.
+    volume_factor = c.BARRELS_TO_CUBIC_FEET if unit_system is UnitSystem.FIELD else 1.0
     return FetkovichAquifer(
         aquifer_id=aquifer_id,
         initial_pressure=initial_pressure,
-        aquifer_productivity_index=record["productivity_index"],
+        aquifer_productivity_index=record["productivity_index"] * volume_factor,
         aquifer_compressibility=record["total_compressibility"],
-        initial_aquifer_water_volume=record["initial_water_volume"],
+        initial_aquifer_water_volume=record["initial_water_volume"] * volume_factor,
         pvt_table_number=record["pvt_table_number"],
         unit_system=unit_system,
     )

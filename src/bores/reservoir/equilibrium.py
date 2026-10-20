@@ -11,6 +11,7 @@ from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.serde.stores import StoreSerializable
 from bores.types import (
+    Integer,
     Number,
     NumberArray,
     NumberOrArray,
@@ -182,11 +183,10 @@ class EquilibriumRegion:
     unit conversion and (de)serialization, and support loading from an
     Eclipse deck.
 
-    **Convention**: `woc_depth` / `goc_depth` of `0.0` (the Eclipse default
-    when the corresponding `EQUIL` item is defaulted via `1*`) is
-    treated as "no such contact in this region" rather than a literal
-    zero-depth contact - use `has_woc` / `has_goc` rather than comparing
-    the raw depth to zero directly.
+    **Convention**: a `woc_depth` / `goc_depth` of `None` means there is no such contact in
+    this region. Any number, including zero and negative depths above the reference level, is a
+    real contact depth. A deck gives `0.0` for a defaulted contact, which `from_deck` turns into
+    `None`.
     """
 
     datum_depth: Number
@@ -195,18 +195,18 @@ class EquilibriumRegion:
     datum_pressure: Number
     """Reservoir pressure at `datum_depth`."""
 
-    woc_depth: Number = 0.0
+    woc_depth: Number | None = None
     """
-    Water-oil contact depth. `0.0` means no WOC in this region (e.g. an
+    Water-oil contact depth. `None` means no WOC in this region (e.g. an
     all-oil column with no underlying aquifer, or fully water-saturated).
     """
 
     pcow_at_woc: Number = 0.0
     """Oil-water capillary pressure at the WOC (usually `0`)."""
 
-    goc_depth: Number = 0.0
+    goc_depth: Number | None = None
     """
-    Gas-oil contact depth. `0.0` means no GOC in this region (no gas
+    Gas-oil contact depth. `None` means no GOC in this region (no gas
     cap - oil is at or below its bubble point everywhere, or absent).
     """
 
@@ -243,14 +243,11 @@ class EquilibriumRegion:
     """Unit system for all dimensional fields."""
 
     def __attrs_post_init__(self) -> None:
-        if self.datum_depth < 0:
-            raise ValidationError(f"`datum_depth` must be non-negative; got {self.datum_depth}.")
-        if self.woc_depth < 0 or self.goc_depth < 0:
-            raise ValidationError(
-                "`woc_depth` / `goc_depth` must be non-negative; got "
-                f"`woc_depth={self.woc_depth}`, `goc_depth={self.goc_depth}`."
-            )
-        if self.has_woc and self.has_goc and self.goc_depth > self.woc_depth:
+        if (
+            self.woc_depth is not None
+            and self.goc_depth is not None
+            and self.goc_depth > self.woc_depth
+        ):
             raise ValidationError(
                 f"`goc_depth` ({self.goc_depth}) must be shallower than or "
                 f"equal to `woc_depth` ({self.woc_depth}) when both contacts "
@@ -266,12 +263,12 @@ class EquilibriumRegion:
     @property
     def has_woc(self) -> bool:
         """Whether this region has an explicit water-oil contact."""
-        return bool(self.woc_depth > 0.0)
+        return self.woc_depth is not None
 
     @property
     def has_goc(self) -> bool:
         """Whether this region has an explicit gas-oil contact (gas cap)."""
-        return bool(self.goc_depth > 0.0)
+        return self.goc_depth is not None
 
     @property
     def uses_rsvd(self) -> bool:
@@ -313,9 +310,9 @@ class EquilibriumRegion:
             self,
             datum_depth=self.datum_depth * length_factor,
             datum_pressure=self.datum_pressure * pressure_factor,
-            woc_depth=self.woc_depth * length_factor,
+            woc_depth=None if self.woc_depth is None else self.woc_depth * length_factor,
             pcow_at_woc=self.pcow_at_woc * pressure_factor,
-            goc_depth=self.goc_depth * length_factor,
+            goc_depth=None if self.goc_depth is None else self.goc_depth * length_factor,
             pcgo_at_goc=self.pcgo_at_goc * pressure_factor,
             rsvd_table=self.rsvd_table,
             rvvd_table=self.rvvd_table,
@@ -324,7 +321,7 @@ class EquilibriumRegion:
         )
 
     @classmethod
-    def from_deck(cls, deck_file: DeckFile, *, eqlnum: int = 1) -> Self:
+    def from_deck(cls, deck_file: DeckFile, *, eqlnum: Integer = 1) -> Self:
         """
         Build a single `EquilibriumRegion` from a parsed `DeckFile`.
 
@@ -564,7 +561,7 @@ class Equilibrium:
 
 def load_equilibrium_region(
     equil_record: typing.Mapping[str, typing.Any],
-    eqlnum: int,
+    eqlnum: Integer,
     unit_system: UnitSystem,
 ) -> EquilibriumRegion:
     """
@@ -581,9 +578,9 @@ def load_equilibrium_region(
         return EquilibriumRegion(
             datum_depth=equil_record["datum_depth"],
             datum_pressure=equil_record["datum_pressure"],
-            woc_depth=equil_record["woc_depth"] or 0.0,
+            woc_depth=equil_record["woc_depth"] or None,
             pcow_at_woc=equil_record["pcow_at_woc"] or 0.0,
-            goc_depth=equil_record["goc_depth"] or 0.0,
+            goc_depth=equil_record["goc_depth"] or None,
             pcgo_at_goc=equil_record["pcgo_at_goc"] or 0.0,
             rsvd_table=equil_record["rsvd_table"] or 0,
             rvvd_table=equil_record["rvvd_table"] or 0,

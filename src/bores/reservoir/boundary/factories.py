@@ -6,8 +6,11 @@ objects from a `Grid`, without hand-deriving boundary face positions.
 import logging
 import typing
 
+import numpy as np
+
 from bores.grids.base import Grid
 from bores.grids.utils import classify_boundary_faces, resolve_side
+from bores.reservoir.boundary.aquifers import CarterTracyAquifer, FetkovichAquifer
 from bores.reservoir.boundary.base import BoundaryCondition
 from bores.reservoir.boundary.conditions import BoundaryConditions, BoundaryRegion
 from bores.types import IntArray, OneDimension, Side, UnitSystem
@@ -103,7 +106,9 @@ def make_boundary_conditions(
     :returns: `BoundaryConditions` with one `BoundaryRegion` per side that
         has a condition (from `sides` or `default`) and at least one
         classified face. Sides with zero classified faces are skipped with
-        a warning rather than added as an empty region.
+        a warning rather than added as an empty region. An aquifer given for several sides is
+        one aquifer: its sides share one region named after them joined by `+`, so its
+        influx is shared across them instead of being repeated on each.
     :raises ValidationError: If any key in `sides` doesn't resolve to a
         known `Side`, or the regions end up with mismatched unit systems
         and `unit_system` is `None`.
@@ -111,24 +116,41 @@ def make_boundary_conditions(
     classified = classify_boundary_faces(grid)
     resolved_sides = {resolve_side(key): condition for key, condition in sides.items()}
 
-    regions: list[BoundaryRegion] = []
+    sides_with_faces: list[tuple[Side, BoundaryCondition]] = []
     for side in Side:
         condition = resolved_sides.get(side, default)
         if condition is None:
             continue
-
-        positions = classified[side]
-        if len(positions) == 0:
+        if len(classified[side]) == 0:
             logger.warning(
                 "No boundary faces classified for side %r on this grid; skipping region for it.",
                 side.value,
             )
             continue
+        sides_with_faces.append((side, condition))
 
+    # One aquifer object given for several sides (through `default` or the same object under
+    # several keys) is one aquifer, so its sides form one region. Separate regions would each
+    # become their own aquifer with the whole aquifer constant, multiplying the influx.
+    regions: list[BoundaryRegion] = []
+    merged: dict[int, tuple[list[Side], BoundaryCondition]] = {}
+    for side, condition in sides_with_faces:
+        if isinstance(condition, (CarterTracyAquifer, FetkovichAquifer)):
+            merged.setdefault(id(condition), ([], condition))[0].append(side)
+        else:
+            regions.append(
+                BoundaryRegion(
+                    name=side.value, face_positions=classified[side], condition=condition
+                )
+            )
+    for shared_sides, condition in merged.values():
         regions.append(
             BoundaryRegion(
-                name=side.value,
-                face_positions=positions,
+                name="+".join(side.value for side in shared_sides),
+                face_positions=typing.cast(
+                    IntArray[OneDimension],
+                    np.concatenate([classified[side] for side in shared_sides]),
+                ),
                 condition=condition,
             )
         )
