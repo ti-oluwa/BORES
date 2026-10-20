@@ -167,3 +167,82 @@ def test_connate_water_is_recovered_from_either_axis(oil_water_reference_phase):
     )
     assert table.get_connate_water_saturation() == pytest.approx(SWC)
     assert table.oil_water_table.get_connate_water_saturation() == pytest.approx(SWC)
+
+
+# --------------------------------------------------------------------------------------
+# Gas-oil capillary pressure and clipped regions
+# --------------------------------------------------------------------------------------
+SGR = ENDPOINTS["residual_gas_saturation"]
+SORG = ENDPOINTS["residual_oil_saturation_gas"]
+MOBILE_GAS_MAX = 1.0 - SWC - SORG  # gas saturation at which the liquid is exhausted
+
+
+@pytest.mark.parametrize("name", list(MODEL_OPTIONS))
+class TestGasOilCapillaryPressure:
+    def test_rises_with_gas_saturation(self, name):
+        """Pcgo = Pg - Po grows as gas displaces oil (it is driven by the liquid saturation)."""
+        model = _model(name)
+        gas_saturations = np.linspace(SGR + 0.01, MOBILE_GAS_MAX - 0.02, 25)
+        pcgo = np.array([_pressures(model, SWC, 1.0 - SWC - sg, sg)[1] for sg in gas_saturations])
+        assert np.all(np.diff(pcgo) > 0.0)
+
+    def test_is_largest_where_the_oil_is_nearly_exhausted(self, name):
+        model = _model(name)
+        low = _pressures(model, SWC, 1.0 - SWC - 0.1, 0.1)[1]
+        high = _pressures(model, SWC, 1.0 - SWC - 0.6, 0.6)[1]
+        assert high > 3.0 * low > 0.0
+
+    def test_does_not_depend_on_water_saturation(self, name):
+        model = _model(name)
+        assert _pressures(model, 0.3, 0.5, 0.2)[1] == pytest.approx(
+            _pressures(model, 0.45, 0.35, 0.2)[1]
+        )
+
+    def test_brooks_corey_is_zero_without_mobile_gas(self, name):
+        if name != "brooks_corey":
+            pytest.skip("Only the Brooks-Corey model sets Pc to zero at full liquid saturation")
+        assert _pressures(_model(name), 0.4, 0.57, 0.03)[1] == pytest.approx(0.0, abs=1e-12)
+
+
+@pytest.mark.parametrize("name", list(MODEL_OPTIONS))
+@pytest.mark.parametrize(
+    ("label", "point"),
+    [
+        ("no mobile gas", (0.4, 0.57, 0.03)),
+        ("gas above the mobile range", (0.3, 0.01, 0.69)),
+        ("water below connate", (0.15, 0.55, 0.3)),
+        ("water above the mobile range", (0.76, 0.2, 0.04)),
+    ],
+)
+def test_derivative_vanishes_where_the_value_is_clipped(name, label, point):
+    """
+    Where the saturation is clipped the curve is flat, so its slope is exactly zero. A slope
+    taken at the clipping value would be enormous (e.g. -5e9 for Brooks-Corey at connate water).
+    """
+    model = _model(name)
+    derivatives = {k: float(v) for k, v in model.derivatives(*point).items()}
+    sw, so, sg = point
+    step = 1e-6
+    numerical_sw = (
+        _pressures(model, sw + step, so - step, sg) - _pressures(model, sw - step, so + step, sg)
+    ) / (2 * step)
+    numerical_sg = (
+        _pressures(model, sw, so - step, sg + step) - _pressures(model, sw, so + step, sg - step)
+    ) / (2 * step)
+    analytical_sw = (
+        derivatives["dpcow_dsw"] - derivatives["dpcow_dso"],
+        -derivatives["dpcgo_dso"],
+    )
+    analytical_sg = (
+        -derivatives["dpcow_dso"],
+        derivatives["dpcgo_dsg"] - derivatives["dpcgo_dso"],
+    )
+    np.testing.assert_allclose(analytical_sw, numerical_sw, atol=1e-6, err_msg=label)
+    np.testing.assert_allclose(analytical_sg, numerical_sg, atol=1e-6, err_msg=label)
+
+
+def test_derivative_at_exactly_connate_water_is_finite_and_flat():
+    """A cell at connate water (the usual initial state) must not feed a huge slope to the Jacobian."""
+    for name in MODEL_OPTIONS:
+        derivatives = _model(name).derivatives(SWC, 0.5, 0.3)
+        assert float(derivatives["dpcow_dsw"]) == pytest.approx(0.0, abs=1e-12)

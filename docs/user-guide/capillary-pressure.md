@@ -31,6 +31,8 @@ $$P_c = P_d \cdot S_e^{-1/\lambda}$$
 
 where $P_d$ is the entry (or displacement) pressure in psi, $S_e$ is the effective (normalized) saturation, and $\lambda$ is the pore size distribution index. The entry pressure $P_d$ represents the minimum capillary pressure needed for the non-wetting phase to enter the largest pore throats. Rocks with large, well-connected pores have low entry pressures (1-5 psi), while tight rocks with small pore throats have high entry pressures (10-50+ psi).
 
+For the gas-oil system, $S_e$ is the effective saturation of the wetting liquid: $S_{e} = \dfrac{1 - S_{wc} - S_g - S_{or,g}}{1 - S_{wc} - S_{gr} - S_{or,g}}$. It falls as gas displaces oil, so $P_{cgo}$ rises with gas saturation (and is zero for Brooks-Corey where there is no mobile gas). The capillary pressure has no slope where $S_e$ is clipped.
+
 The pore size distribution index $\lambda$ controls how rapidly capillary pressure changes with saturation. A large $\lambda$ (say 4-6) means the pore sizes are narrowly distributed (uniform rock), so capillary pressure changes gradually and the transition zone is narrow. A small $\lambda$ (say 0.5-1.5) means the pore sizes vary widely, producing a broad transition zone where capillary pressure changes steeply near residual saturation. Most reservoir sandstones have $\lambda$ values between 1.5 and 4.0, while carbonates tend to have lower values due to their more heterogeneous pore structure.
 
 ### Basic Usage
@@ -304,7 +306,7 @@ three_phase_capillary_pressure = bores.ThreePhaseCapillaryPressureTable(
 
 The `ThreePhaseCapillaryPressureTable` validates the phase assignments on construction. The oil-water table must have water and oil as its phases, the gas-oil table must have oil and gas. If any of these constraints are violated, BORES raises a `ValidationError`.
 
-When computing capillary pressures during simulation, the three-phase table looks up $P_{cow}$ from the oil-water table using the wetting phase saturation and $P_{cgo}$ from the gas-oil table using the oil saturation. The two capillary pressures are independent (no mixing rule is needed, unlike relative permeability).
+When computing capillary pressures during simulation, the three-phase table looks up $P_{cow}$ from the oil-water table using the wetting phase saturation and $P_{cgo}$ from the gas-oil table using the oil saturation of the gas-oil system. Each table is queried at its own system's saturations, whichever phase its reference axis uses: $S_o = 1 - S_w$ for the oil-water table and $S_o = 1 - S_{wc} - S_g$ for the gas-oil table, so $P_{cow}$ depends on $S_w$ only and $P_{cgo}$ on $S_g$ only. The two capillary pressures are independent (no mixing rule is needed, unlike relative permeability).
 
 !!! tip "When to Use Tables vs. Analytical Models"
 

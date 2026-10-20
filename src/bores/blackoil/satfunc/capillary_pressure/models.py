@@ -149,12 +149,14 @@ def compute_brooks_corey_capillary_pressures_scalar(
     # Pcgo (Pg - Po)
     gas_oil_capillary_pressure: Number = 0.0
     if total_mobile_pore_space_gas > minimum_mobile_pore_space:
-        effective_gas_saturation = (sg - sgr) / total_mobile_pore_space_gas
-        effective_gas_saturation = min(max(effective_gas_saturation, saturation_epsilon), 1.0)
+        effective_liquid_saturation = (1.0 - swc - sg - sorg) / total_mobile_pore_space_gas
+        effective_liquid_saturation = min(
+            max(effective_liquid_saturation, saturation_epsilon), 1.0
+        )
 
-        if effective_gas_saturation < 1.0 - saturation_epsilon:
+        if effective_liquid_saturation < 1.0 - saturation_epsilon:
             gas_oil_capillary_pressure = gas_oil_entry_pressure * (
-                effective_gas_saturation ** (-1.0 / gas_oil_pore_size_distribution_index)
+                effective_liquid_saturation ** (-1.0 / gas_oil_pore_size_distribution_index)
             )
 
     return oil_water_capillary_pressure, gas_oil_capillary_pressure
@@ -310,19 +312,21 @@ def compute_brooks_corey_capillary_pressures_array(
     valid_gas = total_mobile_pore_space_gas > minimum_mobile_pore_space
 
     if np.any(valid_gas):
-        effective_gas_saturation = np.where(
-            valid_gas, (sg - sgr) / total_mobile_pore_space_gas, zero
+        effective_liquid_saturation = np.where(
+            valid_gas, (one - swc - sg - sorg) / total_mobile_pore_space_gas, zero
         )
         np.clip(
-            effective_gas_saturation,
+            effective_liquid_saturation,
             saturation_epsilon,
             one,
-            out=effective_gas_saturation,
+            out=effective_liquid_saturation,
         )
-        is_undersaturated_gas = valid_gas & (effective_gas_saturation < one - saturation_epsilon)
+        is_undersaturated_gas = valid_gas & (
+            effective_liquid_saturation < one - saturation_epsilon
+        )
         if np.any(is_undersaturated_gas):
             pcgo = gas_oil_entry_pressure * (
-                effective_gas_saturation ** (-one / gas_oil_pore_size_distribution_index)
+                effective_liquid_saturation ** (-one / gas_oil_pore_size_distribution_index)
             )
             gas_oil_capillary_pressure = np.where(is_undersaturated_gas, pcgo, zero)
 
@@ -463,8 +467,10 @@ def compute_brooks_corey_derivatives_scalar(
     se_w = min(max((sw - swc) / mobile_water_range, saturation_epsilon), one)
     valid_water = mobile_water_range > minimum_mobile_pore_space
 
+    # No slope where the value is clipped (flat) or set to zero
+    raw_se_w = (sw - swc) / mobile_water_range
     dpcow_dsw = zero
-    if valid_water and se_w < one - saturation_epsilon:
+    if valid_water and raw_se_w > saturation_epsilon and raw_se_w < one - saturation_epsilon:
         if wettability == Wettability.MIXED_WET:
             exp_ww = -one / oil_water_pore_size_distribution_index_water_wet
             exp_ow = -one / oil_water_pore_size_distribution_index_oil_wet
@@ -491,14 +497,17 @@ def compute_brooks_corey_derivatives_scalar(
 
     # Gas-oil derivatives
     mobile_gas_range = one - swc - sorg - sgr
-    se_g = min(max((sg - sgr) / mobile_gas_range, saturation_epsilon), one)
     valid_gas = mobile_gas_range > minimum_mobile_pore_space
 
+    # Pcgo depends on the effective liquid saturation of the gas-oil system, which falls as
+    # Sg rises. It has no slope where the value is clipped or set to zero.
     dpcgo_dsg = zero
     if valid_gas:
-        exp_gas_oil = -one / gas_oil_pore_size_distribution_index
-        dpcgo_dse_g = gas_oil_entry_pressure * exp_gas_oil * (se_g ** (exp_gas_oil - one))
-        dpcgo_dsg = dpcgo_dse_g / mobile_gas_range
+        se_l = (one - swc - sg - sorg) / mobile_gas_range
+        if se_l > saturation_epsilon and se_l < one - saturation_epsilon:
+            exp_gas_oil = -one / gas_oil_pore_size_distribution_index
+            dpcgo_dse_l = gas_oil_entry_pressure * exp_gas_oil * (se_l ** (exp_gas_oil - one))
+            dpcgo_dsg = -dpcgo_dse_l / mobile_gas_range
 
     dpcgo_dso = zero
 
@@ -568,11 +577,8 @@ def compute_brooks_corey_derivatives_array(
     # Oil-water derivatives
     mobile_water_range = one - swc - sorw
     valid_water = mobile_water_range > minimum_mobile_pore_space
-    se_w = np.clip(
-        (sw - swc) / np.where(valid_water, mobile_water_range, one),
-        saturation_epsilon,
-        one,
-    )
+    raw_se_w = (sw - swc) / np.where(valid_water, mobile_water_range, one)
+    se_w = np.clip(raw_se_w, saturation_epsilon, one)
 
     if wettability == Wettability.MIXED_WET:
         water_wet_fraction = dtype(mixed_wet_water_fraction)
@@ -593,8 +599,9 @@ def compute_brooks_corey_derivatives_array(
         exp = -one / pore_distribution_index
         dpcow_dse_w = sign * entry_pressure * exp * (se_w ** (exp - one))
 
+    # No slope where the value is clipped (flat) or set to zero
     dpcow_dsw = np.where(
-        valid_water & (se_w < one - saturation_epsilon),
+        valid_water & (raw_se_w > saturation_epsilon) & (raw_se_w < one - saturation_epsilon),
         dpcow_dse_w / mobile_water_range,
         np.zeros_like(sw),
     )
@@ -603,19 +610,19 @@ def compute_brooks_corey_derivatives_array(
     # Gas-oil derivatives
     mobile_gas_range = one - swc - sorg - sgr
     valid_gas = mobile_gas_range > minimum_mobile_pore_space
-    se_g = np.clip(
-        (sg - sgr) / np.where(valid_gas, mobile_gas_range, one),
-        saturation_epsilon,
-        one,
+    safe_gas_range = np.where(valid_gas, mobile_gas_range, one)
+
+    # Pcgo depends on the effective liquid saturation of the gas-oil system, which falls as
+    # Sg rises. It has no slope where the value is clipped or set to zero.
+    raw_se_l = (one - swc - sg - sorg) / safe_gas_range
+    active_gas = (
+        valid_gas & (raw_se_l > saturation_epsilon) & (raw_se_l < one - saturation_epsilon)
     )
+    se_l = np.clip(raw_se_l, saturation_epsilon, one - saturation_epsilon)
 
     exp_gas_oil = -one / dtype(gas_oil_pore_size_distribution_index)
-    dpcgo_dse_g = dtype(gas_oil_entry_pressure) * exp_gas_oil * (se_g ** (exp_gas_oil - one))
-    dpcgo_dsg = np.where(
-        valid_gas,
-        dpcgo_dse_g / mobile_gas_range,
-        np.zeros_like(sg),
-    )
+    dpcgo_dse_l = dtype(gas_oil_entry_pressure) * exp_gas_oil * (se_l ** (exp_gas_oil - one))
+    dpcgo_dsg = np.where(active_gas, -dpcgo_dse_l / safe_gas_range, np.zeros_like(sg))
     dpcgo_dso = np.zeros_like(sg)
     return (
         dpcow_dsw,
@@ -892,7 +899,7 @@ class BrooksCoreyCapillaryPressureTable(CapillaryPressureTable):
         ```
         Pcow = Pd_ow * Se_w ^ (-1 / lambda_ow)(water - wet)
         Pcow = -Pd_ow * Se_w ^ (-1 / lambda_ow)(oil - wet)
-        Pcgo = Pd_go * Se_g ^ (-1 / lambda_go)
+        Pcgo = Pd_go * Se_l ^ (-1 / lambda_go)
         ```
 
         where effective water saturation:
@@ -902,14 +909,19 @@ class BrooksCoreyCapillaryPressureTable(CapillaryPressureTable):
                     - residual oil saturation to water flooding)
         ```
 
-        and effective gas saturation:
+        and effective liquid saturation of the gas-oil system (the wetting liquid, oil at
+        connate water, against the gas):
 
         ```
-        Se_g = (Sg - residual gas saturation)
+        Se_l = (1 - irreducible water saturation - Sg
+                    - residual oil saturation to gas flooding)
             / (1 - irreducible water saturation
                     - residual gas saturation
                     - residual oil saturation to gas flooding)
         ```
+
+        `Se_l` falls as gas displaces oil, so `Pcgo` rises with `Sg`. It is a function of `Sg`
+        only, and has no slope where it is clipped (no mobile gas, or the oil exhausted).
 
         `Pd` is the displacement entry pressure and `lambda` is the pore
         size distribution index.
@@ -1148,14 +1160,14 @@ def compute_van_genuchten_capillary_pressures_scalar(
     # Pcgo (Pg - Po)
     gas_oil_capillary_pressure: Number = 0.0
     if total_mobile_pore_space_gas > minimum_mobile_pore_space:
-        effective_gas_saturation = (sg - sgr) / total_mobile_pore_space_gas
-        effective_gas_saturation = min(
-            max(effective_gas_saturation, saturation_epsilon),
+        effective_liquid_saturation = (1.0 - swc - sg - sorg) / total_mobile_pore_space_gas
+        effective_liquid_saturation = min(
+            max(effective_liquid_saturation, saturation_epsilon),
             1.0 - saturation_epsilon,
         )
 
         m_gas_oil = 1.0 - 1.0 / gas_oil_n
-        term = (effective_gas_saturation ** (-1.0 / m_gas_oil) - 1.0) ** (1.0 / gas_oil_n)
+        term = (effective_liquid_saturation ** (-1.0 / m_gas_oil) - 1.0) ** (1.0 / gas_oil_n)
         gas_oil_capillary_pressure = (1.0 / gas_oil_alpha) * term
 
     return oil_water_capillary_pressure, gas_oil_capillary_pressure
@@ -1304,15 +1316,15 @@ def compute_van_genuchten_capillary_pressures_array(
     valid_gas = total_mobile_pore_space_gas > minimum_mobile_pore_space
 
     if np.any(valid_gas):
-        effective_gas_saturation = np.where(
-            valid_gas, (sg - sgr) / total_mobile_pore_space_gas, zero
+        effective_liquid_saturation = np.where(
+            valid_gas, (one - swc - sg - sorg) / total_mobile_pore_space_gas, zero
         )
-        effective_gas_saturation = np.clip(
-            effective_gas_saturation, saturation_epsilon, one - saturation_epsilon
+        effective_liquid_saturation = np.clip(
+            effective_liquid_saturation, saturation_epsilon, one - saturation_epsilon
         )
 
         m_gas_oil = one - one / gas_oil_n
-        term = (effective_gas_saturation ** (-one / m_gas_oil) - one) ** (one / gas_oil_n)
+        term = (effective_liquid_saturation ** (-one / m_gas_oil) - one) ** (one / gas_oil_n)
         pcgo = (one / gas_oil_alpha) * term
         gas_oil_capillary_pressure = np.where(valid_gas, pcgo, zero)
 
@@ -1496,8 +1508,10 @@ def compute_van_genuchten_derivatives_scalar(
         one - saturation_epsilon,
     )
 
+    # No slope where the value is clipped (flat)
+    raw_se_w = (sw - swc) / mobile_water_range
     dpcow_dsw = zero
-    if valid_water:
+    if valid_water and raw_se_w > saturation_epsilon and raw_se_w < one - saturation_epsilon:
         if wettability == Wettability.WATER_WET:
             m_ww = one - one / oil_water_n_water_wet
             u = se_w ** (-one / m_ww) - one
@@ -1554,20 +1568,22 @@ def compute_van_genuchten_derivatives_scalar(
     # Gas-oil derivatives
     mobile_gas_range = one - swc - sorg - sgr
     valid_gas = mobile_gas_range > minimum_mobile_pore_space
-    se_g = min(
-        max((sg - sgr) / mobile_gas_range, saturation_epsilon),
-        one - saturation_epsilon,
-    )
 
+    # Pcgo depends on the effective liquid saturation of the gas-oil system, which falls as
+    # Sg rises. It has no slope where the value is clipped.
     dpcgo_dsg = zero
     if valid_gas:
-        m_gas_oil = one - one / gas_oil_n
-        u = se_g ** (-one / m_gas_oil) - one
-        u_safe = max(u, 1e-30)
-        dpc_du = (one / gas_oil_alpha) * (one / gas_oil_n) * (u_safe ** (one / gas_oil_n - one))
-        du_dse = (-one / m_gas_oil) * (se_g ** (-one / m_gas_oil - one))
-        dpcgo_dse_g = dpc_du * du_dse
-        dpcgo_dsg = dpcgo_dse_g / mobile_gas_range
+        se_l = (one - swc - sg - sorg) / mobile_gas_range
+        if se_l > saturation_epsilon and se_l < one - saturation_epsilon:
+            m_gas_oil = one - one / gas_oil_n
+            u = se_l ** (-one / m_gas_oil) - one
+            u_safe = max(u, 1e-30)
+            dpc_du = (
+                (one / gas_oil_alpha) * (one / gas_oil_n) * (u_safe ** (one / gas_oil_n - one))
+            )
+            du_dse = (-one / m_gas_oil) * (se_l ** (-one / m_gas_oil - one))
+            dpcgo_dse_l = dpc_du * du_dse
+            dpcgo_dsg = -dpcgo_dse_l / mobile_gas_range
 
     dpcgo_dso = zero
     return dpcow_dsw, dpcow_dso, dpcgo_dsg, dpcgo_dso
@@ -1636,11 +1652,8 @@ def compute_van_genuchten_derivatives_array(
     # Oil-water derivatives
     mobile_water_range = one - swc - sorw
     valid_water = mobile_water_range > minimum_mobile_pore_space
-    se_w = np.clip(
-        (sw - swc) / np.where(valid_water, mobile_water_range, one),
-        saturation_epsilon,
-        one - saturation_epsilon,
-    )
+    raw_se_w = (sw - swc) / np.where(valid_water, mobile_water_range, one)
+    se_w = np.clip(raw_se_w, saturation_epsilon, one - saturation_epsilon)
 
     if wettability == Wettability.WATER_WET:
         m_ww = one - one / dtype(oil_water_n_water_wet)
@@ -1693,8 +1706,9 @@ def compute_van_genuchten_derivatives_array(
 
         dpcow_dse_w = water_wet_fraction * d_ww + (one - water_wet_fraction) * d_ow
 
+    # No slope where the value is clipped (flat)
     dpcow_dsw = np.where(
-        valid_water,
+        valid_water & (raw_se_w > saturation_epsilon) & (raw_se_w < one - saturation_epsilon),
         dpcow_dse_w / mobile_water_range,
         np.zeros_like(sw),
     )
@@ -1703,27 +1717,27 @@ def compute_van_genuchten_derivatives_array(
     # Gas-oil derivatives
     mobile_gas_range = one - swc - sorg - sgr
     valid_gas = mobile_gas_range > minimum_mobile_pore_space
-    se_g = np.clip(
-        (sg - sgr) / np.where(valid_gas, mobile_gas_range, one),
-        saturation_epsilon,
-        one - saturation_epsilon,
+    safe_gas_range = np.where(valid_gas, mobile_gas_range, one)
+
+    # Pcgo depends on the effective liquid saturation of the gas-oil system, which falls as
+    # Sg rises. It has no slope where the value is clipped.
+    raw_se_l = (one - swc - sg - sorg) / safe_gas_range
+    active_gas = (
+        valid_gas & (raw_se_l > saturation_epsilon) & (raw_se_l < one - saturation_epsilon)
     )
+    se_l = np.clip(raw_se_l, saturation_epsilon, one - saturation_epsilon)
 
     m_gas_oil = one - one / dtype(gas_oil_n)
-    u = se_g ** (-one / m_gas_oil) - one
+    u = se_l ** (-one / m_gas_oil) - one
     u_safe = np.where(u > 1e-30, u, 1e-30)
     dpc_du = (
         (one / dtype(gas_oil_alpha))
         * (one / dtype(gas_oil_n))
         * (u_safe ** (one / dtype(gas_oil_n) - one))
     )
-    du_dse = (-one / m_gas_oil) * (se_g ** (-one / m_gas_oil - one))
-    dpcgo_dse_g = dpc_du * du_dse
-    dpcgo_dsg = np.where(
-        valid_gas,
-        dpcgo_dse_g / mobile_gas_range,
-        np.zeros_like(sg),
-    )
+    du_dse = (-one / m_gas_oil) * (se_l ** (-one / m_gas_oil - one))
+    dpcgo_dse_l = dpc_du * du_dse
+    dpcgo_dsg = np.where(active_gas, -dpcgo_dse_l / safe_gas_range, np.zeros_like(sg))
     dpcgo_dso = np.zeros_like(sg)
 
     return (
@@ -1994,7 +2008,8 @@ class VanGenuchtenCapillaryPressureTable(CapillaryPressureTable):
         - `dpcow/dsw`: analytically derived via the chain rule through effective water saturation.
         - `dpcow/dso`: zero - the oil-water capillary pressure depends only
         on water saturation in this model.
-        - `dpcgo/dsg`: analytically derived via the chain rule through effective gas saturation.
+        - `dpcgo/dsg`: analytically derived via the chain rule through the effective liquid saturation,
+        and zero where it is clipped.
 
         The van Genuchten model is:
         ```
@@ -2230,14 +2245,14 @@ def compute_leverett_j_capillary_pressures_scalar(
     valid_gas = total_mobile_pore_space_gas > minimum_mobile_pore_space and valid_rock
 
     if valid_gas:
-        effective_gas_saturation = (sg - sgr) / total_mobile_pore_space_gas
-        effective_gas_saturation = min(
-            max(effective_gas_saturation, saturation_epsilon),
+        effective_liquid_saturation = (1.0 - swc - sg - sorg) / total_mobile_pore_space_gas
+        effective_liquid_saturation = min(
+            max(effective_liquid_saturation, saturation_epsilon),
             1.0 - saturation_epsilon,
         )
 
         j_value_gas_oil = j_function_coefficient * (
-            effective_gas_saturation ** (-j_function_exponent)
+            effective_liquid_saturation ** (-j_function_exponent)
         )
         gas_oil_capillary_pressure = (
             gas_oil_interfacial_tension
@@ -2392,14 +2407,14 @@ def compute_leverett_j_capillary_pressures_array(
     valid_gas = (total_mobile_pore_space_gas > minimum_mobile_pore_space) & valid_rock
 
     if np.any(valid_gas):
-        effective_gas_saturation = np.where(
-            valid_gas, (sg - sgr) / total_mobile_pore_space_gas, zero
+        effective_liquid_saturation = np.where(
+            valid_gas, (one - swc - sg - sorg) / total_mobile_pore_space_gas, zero
         )
-        effective_gas_saturation = np.clip(
-            effective_gas_saturation, saturation_epsilon, one - saturation_epsilon
+        effective_liquid_saturation = np.clip(
+            effective_liquid_saturation, saturation_epsilon, one - saturation_epsilon
         )
         j_value_gas_oil = j_function_coefficient * (
-            effective_gas_saturation ** (-j_function_exponent)
+            effective_liquid_saturation ** (-j_function_exponent)
         )
         pcgo = (
             gas_oil_interfacial_tension
@@ -2572,8 +2587,10 @@ def compute_leverett_j_derivatives_scalar(
         one - saturation_epsilon,
     )
 
+    # No slope where the value is clipped (flat)
+    raw_se_w = (sw - swc) / mobile_water_range
     dpcow_dsw = zero
-    if valid_water:
+    if valid_water and raw_se_w > saturation_epsilon and raw_se_w < one - saturation_epsilon:
         dj_dse_w = (
             -j_function_coefficient * j_function_exponent * (se_w ** (-j_function_exponent - one))
         )
@@ -2599,24 +2616,26 @@ def compute_leverett_j_derivatives_scalar(
     # Gas-oil derivatives
     mobile_gas_range = one - swc - sorg - sgr
     valid_gas = (mobile_gas_range > minimum_mobile_pore_space) and (leverett_rock_factor > 0.0)
-    se_g = min(
-        max((sg - sgr) / mobile_gas_range, saturation_epsilon),
-        one - saturation_epsilon,
-    )
 
+    # Pcgo depends on the effective liquid saturation of the gas-oil system, which falls as
+    # Sg rises. It has no slope where the value is clipped.
     dpcgo_dsg = zero
     if valid_gas:
-        dj_dse_g = (
-            -j_function_coefficient * j_function_exponent * (se_g ** (-j_function_exponent - one))
-        )
-        cos_gas_oil_angle = np.cos(np.deg2rad(gas_oil_contact_angle))
-        gas_oil_scale = (
-            gas_oil_interfacial_tension
-            * dyne_per_cm_to_pressure_unit
-            * cos_gas_oil_angle
-            * leverett_rock_factor
-        )
-        dpcgo_dsg = gas_oil_scale * dj_dse_g / mobile_gas_range
+        se_l = (one - swc - sg - sorg) / mobile_gas_range
+        if se_l > saturation_epsilon and se_l < one - saturation_epsilon:
+            dj_dse_l = (
+                -j_function_coefficient
+                * j_function_exponent
+                * (se_l ** (-j_function_exponent - one))
+            )
+            cos_gas_oil_angle = np.cos(np.deg2rad(gas_oil_contact_angle))
+            gas_oil_scale = (
+                gas_oil_interfacial_tension
+                * dyne_per_cm_to_pressure_unit
+                * cos_gas_oil_angle
+                * leverett_rock_factor
+            )
+            dpcgo_dsg = -gas_oil_scale * dj_dse_l / mobile_gas_range
 
     dpcgo_dso = zero
     return dpcow_dsw, dpcow_dso, dpcgo_dsg, dpcgo_dso
@@ -2700,11 +2719,8 @@ def compute_leverett_j_derivatives_array(
     # Oil-water derivatives
     mobile_water_range = one - swc - sorw
     valid_water = (mobile_water_range > minimum_mobile_pore_space) & valid_rock
-    se_w = np.clip(
-        (sw - swc) / np.where(valid_water, mobile_water_range, one),
-        saturation_epsilon,
-        one - saturation_epsilon,
-    )
+    raw_se_w = (sw - swc) / np.where(valid_water, mobile_water_range, one)
+    se_w = np.clip(raw_se_w, saturation_epsilon, one - saturation_epsilon)
 
     dj_dse_w = (
         -dtype(j_function_coefficient)
@@ -2726,8 +2742,9 @@ def compute_leverett_j_derivatives_array(
     else:  # MIXED_WET
         wettability_sign = dtype(2.0) * dtype(mixed_wet_water_fraction) - one
 
+    # No slope where the value is clipped (flat)
     dpcow_dsw = np.where(
-        valid_water,
+        valid_water & (raw_se_w > saturation_epsilon) & (raw_se_w < one - saturation_epsilon),
         wettability_sign * oil_water_scale * dj_dse_w / mobile_water_range,
         np.zeros_like(sw),
     )
@@ -2736,16 +2753,20 @@ def compute_leverett_j_derivatives_array(
     # Gas-oil derivatives
     mobile_gas_range = one - swc - sorg - sgr
     valid_gas = (mobile_gas_range > minimum_mobile_pore_space) & valid_rock
-    se_g = np.clip(
-        (sg - sgr) / np.where(valid_gas, mobile_gas_range, one),
-        saturation_epsilon,
-        one - saturation_epsilon,
-    )
+    safe_gas_range = np.where(valid_gas, mobile_gas_range, one)
 
-    dj_dse_g = (
+    # Pcgo depends on the effective liquid saturation of the gas-oil system, which falls as
+    # Sg rises. It has no slope where the value is clipped.
+    raw_se_l = (one - swc - sg - sorg) / safe_gas_range
+    active_gas = (
+        valid_gas & (raw_se_l > saturation_epsilon) & (raw_se_l < one - saturation_epsilon)
+    )
+    se_l = np.clip(raw_se_l, saturation_epsilon, one - saturation_epsilon)
+
+    dj_dse_l = (
         -dtype(j_function_coefficient)
         * dtype(j_function_exponent)
-        * (se_g ** (-dtype(j_function_exponent) - one))
+        * (se_l ** (-dtype(j_function_exponent) - one))
     )
     cos_gas_oil_angle = np.cos(np.deg2rad(dtype(gas_oil_contact_angle)))
     gas_oil_scale = (
@@ -2754,11 +2775,7 @@ def compute_leverett_j_derivatives_array(
         * cos_gas_oil_angle
         * leverett_rock_factor
     )
-    dpcgo_dsg = np.where(
-        valid_gas,
-        gas_oil_scale * dj_dse_g / mobile_gas_range,
-        np.zeros_like(sg),
-    )
+    dpcgo_dsg = np.where(active_gas, -gas_oil_scale * dj_dse_l / safe_gas_range, np.zeros_like(sg))
     dpcgo_dso = np.zeros_like(sg)
     return (
         dpcow_dsw,
@@ -3062,8 +3079,8 @@ class LeverettJCapillaryPressureTable(CapillaryPressureTable):
         effective water saturation.
         - `dpcow/dso`: zero - the oil-water capillary pressure depends only on
         water saturation in this model.
-        - `dpcgo/dsg`: analytically derived via the chain rule through
-        effective gas saturation.
+        - `dpcgo/dsg`: analytically derived via the chain rule through the effective
+        liquid saturation, and zero where that saturation is clipped.
 
         The Leverett J-function model is:
 

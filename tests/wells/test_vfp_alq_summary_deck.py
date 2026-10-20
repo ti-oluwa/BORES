@@ -1813,7 +1813,7 @@ def test_a_connection_with_nothing_beneath_it_carries_exactly_zero():
     # subtracted from as the walk goes would leave a spurious rate on the deepest idle connection.
     steps = walk(reference_depth=0.0, depths=[10.0, 20.0, 30.0, 40.0], oil=[0.1, 0.2, 0.3, 0.0])
     deepest = next(step for step in steps if step.connection_index == 3)
-    assert deepest.carried_rates.oil == 0.0  # ruff: ignore[float-equality-comparison]
+    assert deepest.carried_rates.oil == 0.0
     assert tuple(deepest.carried_rates) == (0.0, 0.0, 0.0)
 
 
