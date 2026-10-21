@@ -13,7 +13,7 @@ import typing
 import numpy as np
 
 from bores.errors import ValidationError
-from bores.types import Integer, Number, NumberArray, OneDimension
+from bores.types import Boolean, Integer, Number, NumberArray, OneDimension
 from bores.wells.base import WellType
 from bores.wells.compile import CompiledWellSystem, WellKind
 from bores.wells.hydraulics.base import (
@@ -23,7 +23,9 @@ from bores.wells.hydraulics.base import (
     compute_hydrostatic_pressure,
     get_gravitational_acceleration,
 )
-from bores.wells.hydraulics.base import compute_tubing_head_pressure as compute_correlation_thp
+from bores.wells.hydraulics.base import (
+    compute_tubing_head_pressure as compute_wellbore_tubing_head_pressure,
+)
 from bores.wells.hydraulics.vfp import VFPTable, VFPTables
 from bores.wells.workspace import ConnectionRates, PerforationWorkspace
 
@@ -252,7 +254,7 @@ def compute_tubing_head_pressure(
     phase_rates: PhaseValues,
     surface_phase_rates: PhaseValues,
     surface_fluid_properties: SurfaceFluidProperties | None,
-    is_injector: bool,
+    is_injector: Boolean,
     connection_rates: ConnectionRates | None = None,
 ) -> Number:
     """
@@ -307,7 +309,7 @@ def compute_tubing_head_pressure(
             "A hydraulics correlation needs `surface_fluid_properties` to find a tubing head "
             "pressure."
         )
-    return compute_correlation_thp(
+    return compute_wellbore_tubing_head_pressure(
         wellbore=tubing.wellbore,
         reference_depth=reference_depth,
         reference_pressure=reference_pressure,

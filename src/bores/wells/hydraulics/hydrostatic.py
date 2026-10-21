@@ -21,8 +21,8 @@ from bores.wells.state import ConnectionSample
 from bores.wells.workspace import ConnectionRates
 
 __all__ = [
-    "compute_hydrostatic_connection_pressures",
-    "compute_hydrostatic_pressures_from_fluids",
+    "compute_perforation_pressures",
+    "compute_perforation_pressures_from_fluids",
     "get_pressure_per_density_and_depth",
     "walk_hydrostatic_pressures",
 ]
@@ -111,14 +111,14 @@ def walk_hydrostatic_pressures(
         volumetric_rate[k] = oil_rate + water_rate + gas_rate
         static_density[k] = compute_static_mixture_density(
             phase_saturations=PhaseValues(
-                connection_fluids.oil_saturations[i],
-                connection_fluids.water_saturations[i],
-                connection_fluids.gas_saturations[i],
+                oil=connection_fluids.oil_saturations[i],  # type: ignore[arg-type]
+                water=connection_fluids.water_saturations[i],  # type: ignore[arg-type]
+                gas=connection_fluids.gas_saturations[i],  # type: ignore[arg-type]
             ),
             phase_densities=PhaseValues(
-                connection_fluids.oil_densities[i],
-                connection_fluids.water_densities[i],
-                connection_fluids.gas_densities[i],
+                oil=connection_fluids.oil_densities[i],  # type: ignore[arg-type]
+                water=connection_fluids.water_densities[i],  # type: ignore[arg-type]
+                gas=connection_fluids.gas_densities[i],  # type: ignore[arg-type]
             ),
         )
 
@@ -141,7 +141,11 @@ def walk_hydrostatic_pressures(
     for k in range(first_below, count):
         pressure = pressure + (
             get_segment_density(
-                k, static_density, mass_rate_beneath, volume_rate_beneath, static_rate_beneath
+                first_beneath=k,
+                static_density=static_density,  # type: ignore[arg-type]
+                mass_rate_beneath=mass_rate_beneath,  # type: ignore[arg-type]
+                volume_rate_beneath=volume_rate_beneath,  # type: ignore[arg-type]
+                static_rate_beneath=static_rate_beneath,  # type: ignore[arg-type]
             )
             * (depths[k] - previous_depth)
             * scale
@@ -154,7 +158,11 @@ def walk_hydrostatic_pressures(
     for k in range(first_below - 1, -1, -1):
         pressure = pressure - (
             get_segment_density(
-                k + 1, static_density, mass_rate_beneath, volume_rate_beneath, static_rate_beneath
+                first_beneath=k + 1,
+                static_density=static_density,  # type: ignore[arg-type]
+                mass_rate_beneath=mass_rate_beneath,  # type: ignore[arg-type]
+                volume_rate_beneath=volume_rate_beneath,  # type: ignore[arg-type]
+                static_rate_beneath=static_rate_beneath,  # type: ignore[arg-type]
             )
             * (previous_depth - depths[k])
             * scale
@@ -179,7 +187,7 @@ def get_pressure_per_density_and_depth(unit_system: UnitSystem) -> Number:
     )
 
 
-def compute_hydrostatic_pressures_from_fluids(
+def compute_perforation_pressures_from_fluids(
     reference_depth: Number,
     reference_pressure: Number,
     representative_depths: NumberArray[OneDimension],
@@ -195,7 +203,7 @@ def compute_hydrostatic_pressures_from_fluids(
     connections, working outward from the well's reference depth, with no friction, from
     per-connection arrays.
 
-    See `compute_hydrostatic_connection_pressures` for how the fluid in each segment is found.
+    See `compute_perforation_pressures` for how the fluid in each segment is found.
 
     :param reference_depth: The well's BHP/THP reporting datum.
     :param reference_pressure: Pressure at `reference_depth`.
@@ -230,25 +238,27 @@ def compute_hydrostatic_pressures_from_fluids(
         pressures = np.empty(
             count, dtype=np.dtype(dtype) if dtype is not None else representative_depths.dtype
         )
+
+    pressures = typing.cast(NumberArray[OneDimension], pressures)
     walk_hydrostatic_pressures(
-        reference_depth,
-        reference_pressure,
-        representative_depths,
-        connection_fluids,
-        connection_rates.oil,
-        connection_rates.water,
-        connection_rates.gas,
-        (
+        reference_depth=reference_depth,
+        reference_pressure=reference_pressure,
+        representative_depths=representative_depths,
+        connection_fluids=connection_fluids,
+        connection_oil_rates=connection_rates.oil,
+        connection_water_rates=connection_rates.water,
+        connection_gas_rates=connection_rates.gas,
+        pressure_per_density_and_depth=(
             pressure_per_density_and_depth
             if pressure_per_density_and_depth is not None
             else get_pressure_per_density_and_depth(unit_system)
         ),
-        pressures,
+        pressures=pressures,
     )
     return pressures
 
 
-def compute_hydrostatic_connection_pressures(
+def compute_perforation_pressures(
     *,
     reference_depth: Number,
     reference_pressure: Number,
@@ -298,13 +308,15 @@ def compute_hydrostatic_connection_pressures(
         array_dtype = np.dtype(dtype)
     else:
         array_dtype = get_dtype()
-    return compute_hydrostatic_pressures_from_fluids(
-        reference_depth,
-        reference_pressure,
-        representative_depths,
-        build_connection_fluids(connection_samples=connection_samples, dtype=array_dtype),
-        connection_rates,
-        unit_system,
+    return compute_perforation_pressures_from_fluids(
+        reference_depth=reference_depth,
+        reference_pressure=reference_pressure,
+        representative_depths=representative_depths,
+        connection_fluids=build_connection_fluids(
+            connection_samples=connection_samples, dtype=array_dtype
+        ),
+        connection_rates=connection_rates,
+        unit_system=unit_system,
         out=out,
         dtype=array_dtype,
     )

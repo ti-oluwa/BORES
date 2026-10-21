@@ -103,10 +103,7 @@ class WellBoreModel(typing.NamedTuple):
     """Which correlation this is: `"homogeneous"`, `"beggs_and_brill"`, or `"hagedorn_brown"`."""
 
     options: typing.Any
-    """
-    This correlation's own configuration. `HomogeneousWellbore`,
-    `BeggsAndBrillWellbore`, `HagedornBrownWellbore`, or any other correlation's own `NamedTuple`.
-    """
+    """Wellbore model's/correlation's configuration."""
 
     def convert(
         self,

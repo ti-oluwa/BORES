@@ -1275,10 +1275,10 @@ def hydrostatic_samples(oil_densities=(40.0, 50.0, 60.0), mobility=1.0):
 
 
 def hydrostatic_pressures(*, reference_depth, oil, depths=(100.0, 200.0, 400.0), **kwargs):
-    from bores.wells.resolution.hydrostatic import compute_hydrostatic_connection_pressures
+    from bores.wells.hydraulics.hydrostatic import compute_perforation_pressures
 
     count = len(depths)
-    return compute_hydrostatic_connection_pressures(
+    return compute_perforation_pressures(
         reference_depth=reference_depth,
         reference_pressure=1000.0,
         representative_depths=np.array(depths),
@@ -1338,10 +1338,10 @@ def test_hydrostatic_pressure_is_independent_of_connection_order_and_rate_sign()
 
 
 def test_hydrostatic_mode_is_refused_with_mismatched_lengths():
-    from bores.wells.resolution.hydrostatic import compute_hydrostatic_connection_pressures
+    from bores.wells.hydraulics.hydrostatic import compute_perforation_pressures
 
     with pytest.raises(ValidationError, match="same length"):
-        compute_hydrostatic_connection_pressures(
+        compute_perforation_pressures(
             reference_depth=0.0,
             reference_pressure=1000.0,
             representative_depths=np.array([1.0, 2.0]),
@@ -1360,7 +1360,7 @@ def test_a_vfp_well_needs_a_connection_pressure_mode_that_does_not_need_hydrauli
 
 
 def test_a_vfp_well_resolves_with_hydrostatic_connection_pressures(tmp_path):
-    from bores.wells.resolution.hydrostatic import compute_hydrostatic_connection_pressures
+    from bores.wells.hydraulics.hydrostatic import compute_perforation_pressures
     from bores.wells.resolution.spec import ConnectionPressureMode
     from bores.wells.workspace import ConnectionRates
 
@@ -1375,7 +1375,7 @@ def test_a_vfp_well_resolves_with_hydrostatic_connection_pressures(tmp_path):
     assert np.allclose(uniform.connection_pressures, 1000.0)
 
     # Connections are at 25, 75 and 125 ft, with the reference depth at 75 ft.
-    expected = compute_hydrostatic_connection_pressures(
+    expected = compute_perforation_pressures(
         reference_depth=75.0,
         reference_pressure=1000.0,
         representative_depths=np.array([25.0, 75.0, 125.0]),
@@ -1583,7 +1583,7 @@ def test_correlation_pressure_rises_with_depth_when_the_reference_is_the_shallow
 
 
 def test_hydrostatic_pressures_keep_the_dtype_they_are_given():
-    from bores.wells.resolution.hydrostatic import compute_hydrostatic_connection_pressures
+    from bores.wells.hydraulics.hydrostatic import compute_perforation_pressures
 
     kwargs = dict(
         reference_depth=100.0,
@@ -1594,10 +1594,10 @@ def test_hydrostatic_pressures_keep_the_dtype_they_are_given():
     depths = np.array([100.0, 200.0, 400.0], dtype=np.float32)
     rates = connection_rates(oil=(10.0, 20.0, 30.0), water=(0.0,) * 3, gas=(0.0,) * 3)
     rates32 = type(rates)(*(array.astype(np.float32) for array in rates))
-    single = compute_hydrostatic_connection_pressures(
+    single = compute_perforation_pressures(
         representative_depths=depths, connection_rates=rates32, dtype=np.float32, **kwargs
     )
-    double = compute_hydrostatic_connection_pressures(
+    double = compute_perforation_pressures(
         representative_depths=depths.astype(np.float64),
         connection_rates=rates,
         dtype=np.float64,
@@ -2737,7 +2737,7 @@ def copy_workspace(workspace):
 def solver_arguments(solver_name, case, workspace, unit_system):
     from bores.units import get_conversion_factors
     from bores.wells.hydraulics.base import get_hydrostatic_divisor
-    from bores.wells.resolution.hydrostatic import get_pressure_per_density_and_depth
+    from bores.wells.hydraulics.hydrostatic import get_pressure_per_density_and_depth
     from bores.wells.resolution.spec import WellControlSpec
 
     spec = WellControlSpec(unit_system=unit_system)

@@ -10,6 +10,7 @@ from typing_extensions import Self
 
 from bores.constants import c
 from bores.types import (
+    Boolean,
     FrictionMethod,
     Number,
     NumberArray,
@@ -300,7 +301,7 @@ def compute_beggs_brill_holdup(
     liquid_surface_tension: Number,
     tubing_inner_diameter: Number,
     inclination_from_vertical: Number,
-    is_injector: bool,
+    is_injector: Boolean,
     gravitational_acceleration: Number,
 ) -> Number:
     """
@@ -441,7 +442,7 @@ def compute_segment_drop(
     liquid_viscosity: Number,
     gas_viscosity: Number,
     liquid_surface_tension: Number,
-    is_injector: bool,
+    is_injector: Boolean,
 ) -> PressureDrop:
     """
     Computes the pressure drop across one tubing segment.
@@ -540,7 +541,7 @@ def walk_perforation_pressures(
     representative_measured_depths: NumberArray[OneDimension],
     inclinations_from_vertical: NumberArray[OneDimension],
     connection_fluids: ConnectionFluids,
-    is_injector: bool,
+    is_injector: Boolean,
     hydrostatic_divisor: Number,
     pressures: NumberArray[OneDimension],
 ) -> None:
@@ -574,13 +575,13 @@ def walk_perforation_pressures(
     :raises ValueError: If a connection with no flow beneath it has saturations that sum to zero.
     """
     walk = plan_connection_walk(
-        reference_depth,
-        reference_measured_depth,
-        representative_depths,
-        representative_measured_depths,
-        connection_oil_rates,
-        connection_water_rates,
-        connection_gas_rates,
+        reference_depth=reference_depth,
+        reference_measured_depth=reference_measured_depth,
+        representative_depths=representative_depths,
+        representative_measured_depths=representative_measured_depths,
+        connection_oil_rates=connection_oil_rates,
+        connection_water_rates=connection_water_rates,
+        connection_gas_rates=connection_gas_rates,
     )
     friction_sign = -1.0 if is_injector else 1.0
     for step in range(walk.connection_indices.shape[0]):
@@ -589,27 +590,27 @@ def walk_perforation_pressures(
         previous_pressure = reference_pressure if previous < 0 else pressures[previous]
         geometric_sign = walk.geometric_signs[step]
         remaining_rates = PhaseValues(
-            walk.carried_oil_rates[step],
-            walk.carried_water_rates[step],
-            walk.carried_gas_rates[step],
+            oil=walk.carried_oil_rates[step],
+            water=walk.carried_water_rates[step],
+            gas=walk.carried_gas_rates[step],
         )
         phase_densities = PhaseValues(
-            connection_fluids.oil_densities[i],  # type: ignore[arg-type]
-            connection_fluids.water_densities[i],  # type: ignore[arg-type]
-            connection_fluids.gas_densities[i],  # type: ignore[arg-type]
+            oil=connection_fluids.oil_densities[i],  # type: ignore[arg-type]
+            water=connection_fluids.water_densities[i],  # type: ignore[arg-type]
+            gas=connection_fluids.gas_densities[i],  # type: ignore[arg-type]
         )
         phase_viscosities = PhaseValues(
-            connection_fluids.oil_viscosities[i],  # type: ignore[arg-type]
-            connection_fluids.water_viscosities[i],  # type: ignore[arg-type]
-            connection_fluids.gas_viscosities[i],  # type: ignore[arg-type]
+            oil=connection_fluids.oil_viscosities[i],  # type: ignore[arg-type]
+            water=connection_fluids.water_viscosities[i],  # type: ignore[arg-type]
+            gas=connection_fluids.gas_viscosities[i],  # type: ignore[arg-type]
         )
 
         if remaining_rates.oil + remaining_rates.water + remaining_rates.gas == 0:
             mixture_density = compute_static_mixture_density(
                 phase_saturations=PhaseValues(
-                    connection_fluids.oil_saturations[i],  # type: ignore[arg-type]
-                    connection_fluids.water_saturations[i],  # type: ignore[arg-type]
-                    connection_fluids.gas_saturations[i],  # type: ignore[arg-type]
+                    oil=connection_fluids.oil_saturations[i],  # type: ignore[arg-type]
+                    water=connection_fluids.water_saturations[i],  # type: ignore[arg-type]
+                    gas=connection_fluids.gas_saturations[i],  # type: ignore[arg-type]
                 ),
                 phase_densities=phase_densities,
             )
@@ -670,7 +671,7 @@ def compute_perforation_pressures_from_fluids(
     representative_measured_depths: NumberArray[OneDimension],
     inclinations_from_vertical: NumberArray[OneDimension],
     connection_fluids: ConnectionFluids,
-    is_injector: bool,
+    is_injector: Boolean,
     out: NumberArray[OneDimension] | None = None,
     dtype: npt.DTypeLike = None,
     hydrostatic_divisor: Number | None = None,
@@ -759,7 +760,7 @@ def compute_perforation_pressures(
     representative_measured_depths: NumberArray[OneDimension],
     inclinations_from_vertical: NumberArray[OneDimension],
     connection_samples: typing.Sequence[ConnectionSample],
-    is_injector: bool,
+    is_injector: Boolean,
     out: NumberArray[OneDimension] | None = None,
     dtype: npt.DTypeLike = None,
 ) -> NumberArray[OneDimension]:
@@ -845,7 +846,7 @@ def compute_tubing_head_pressure(
     reference_pressure: Number,
     phase_rates: PhaseValues,
     surface_fluid_properties: SurfaceFluidProperties,
-    is_injector: bool,
+    is_injector: Boolean,
 ) -> Number:
     """
     Computes tubing head pressure at surface.

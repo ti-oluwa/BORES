@@ -39,7 +39,7 @@ from bores.utils import scale
 from bores.wells.base import Perforation, Wells
 from bores.wells.indices.perforations import (
     PerforationIndex,
-    resolve_known_cell_perforations_indices,
+    resolve_known_perforations_indices,
     resolve_md_perforations_indices,
     resolve_perforations_indices,
 )
@@ -496,7 +496,7 @@ def build_wells_indices(
     for name in wells:
         well = wells[name]
         if all(perforation.cell_index is not None for perforation in well.open_perforations):
-            perforation_indices = resolve_known_cell_perforations_indices(grid=grid, well=well)
+            perforation_indices = resolve_known_perforations_indices(grid=grid, well=well)
         elif well.trajectory is None:
             perforation_indices = resolve_perforations_indices(
                 grid=grid,

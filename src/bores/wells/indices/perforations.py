@@ -28,7 +28,7 @@ from bores.wells.base import Perforation, Well
 
 __all__ = [
     "PerforationIndex",
-    "resolve_known_cell_perforations_indices",
+    "resolve_known_perforations_indices",
     "resolve_md_perforations_indices",
     "resolve_perforation_orientation",
     "resolve_perforations_indices",
@@ -275,7 +275,7 @@ def check_point_in_polygon_3d(
     already known to lie on (or very near) the polygon's plane.
 
     Projects both the polygon and the point onto whichever pair of axes
-    `normal` is *least* aligned with (drops the axis `normal` is most
+    `normal` is least aligned with (drops the axis `normal` is most
     aligned with), then runs `check_point_in_polygon_2d` on that projection.
 
     Dropping a fixed axis (as the purely-vertical-line special case could
@@ -350,9 +350,7 @@ def compute_local_vertical_extent_exact(
     return min(crossings), max(crossings)
 
 
-def resolve_known_cell_perforations_indices(
-    *, grid: Grid, well: Well
-) -> tuple[PerforationIndex, ...]:
+def resolve_known_perforations_indices(*, grid: Grid, well: Well) -> tuple[PerforationIndex, ...]:
     """
     Resolve every open perforation on `well` straight to its own
     `Perforation.cell_index`, skipping geometric derivation entirely.

@@ -1,12 +1,4 @@
-"""
-Wellbore hydraulics: shared primitives plus per-correlation models.
-
-`compute_perforation_pressures`, `compute_segment_drop`, and
-`compute_tubing_head_pressure` are defined once per correlation module
-(`beggs_and_brill`, `hagedorn_brown`, `homogeneous`, `gray`,
-`woldesemayat_ghajar`) and are not re-exported here, since the five
-definitions collide on name. Import them from their own submodule.
-"""
+"""Wellbore hydraulics API. Shared primitives and  models."""
 
 from bores.wells.hydraulics.base import (
     PressureDrop,

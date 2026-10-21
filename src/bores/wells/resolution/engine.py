@@ -18,14 +18,14 @@ from bores.wells.hydraulics.vfp import VFPTables
 from bores.wells.resolution.limits import apply_limits
 from bores.wells.resolution.solvers import (
     ALL_PHASES,
-    bisect_bhp,
-    compute_phase_rates,
-    get_default_pressure_bracket,
+    get_pressure_bracket,
     phase_mask,
-    solve_injector_bhp_mode,
-    solve_injector_rate_mode,
-    solve_producer_bhp_mode,
-    solve_producer_rate_mode,
+    solve_bhp,
+    solve_bhp_injector,
+    solve_bhp_producer,
+    solve_connection_pressures_and_rates,
+    solve_rate_injector,
+    solve_rate_producer,
 )
 from bores.wells.resolution.spec import WellControlSpec
 from bores.wells.resolution.tubing import (
@@ -174,24 +174,22 @@ def resolve_well_control(
             InjectorControlModeTag.RATE,
             InjectorControlModeTag.RESERVOIR_VOLUME_RATE,
         ):
-            bhp, connection_pressures, phase_rates, surface_phase_rates = solve_injector_rate_mode(
+            bhp, connection_pressures, phase_rates, surface_phase_rates = solve_rate_injector(
                 control_mode=control_mode,
                 target_rate=controls.target_rates[well_row],
                 injected_phase=injected_phase,
                 tubing=tubing,
                 reference_depth=reference_depth,
                 workspace=perforation_workspace,
-                connection_samples=connection_samples,
                 control_spec=control_spec,
             )
         elif control_mode == InjectorControlModeTag.BHP:
-            bhp, connection_pressures, phase_rates, surface_phase_rates = solve_injector_bhp_mode(
+            bhp, connection_pressures, phase_rates, surface_phase_rates = solve_bhp_injector(
                 target_bhp=controls.target_bhps[well_row],
                 injected_phase=injected_phase,
                 tubing=tubing,
                 reference_depth=reference_depth,
                 workspace=perforation_workspace,
-                connection_samples=connection_samples,
                 control_spec=control_spec,
             )
         elif control_mode == InjectorControlModeTag.THP:
@@ -202,14 +200,13 @@ def resolve_well_control(
                     "A THP-mode injector requires a `WellBoreModel` or VFP table, "
                     "regardless of `control_spec.connection_pressure_mode`."
                 )
-            min_pressure, max_pressure = get_default_pressure_bracket(
-                connection_samples, is_injector=True, control_spec=control_spec
+            min_pressure, max_pressure = get_pressure_bracket(
+                workspace=perforation_workspace, is_injector=True, control_spec=control_spec
             )
-            bhp, _, _ = bisect_bhp(
+            bhp, _, _ = solve_bhp(
                 tubing=tubing,
                 reference_depth=reference_depth,
                 workspace=perforation_workspace,
-                connection_samples=connection_samples,
                 relevant_phases=relevant_phases,
                 is_injector=True,
                 target=controls.target_thps[well_row],
@@ -219,15 +216,16 @@ def resolve_well_control(
                 metric="thp",
                 surface_fluid_properties=surface_fluid_properties,
             )
-            connection_pressures, phase_rates, surface_phase_rates = compute_phase_rates(
-                tubing=tubing,
-                reference_depth=reference_depth,
-                workspace=perforation_workspace,
-                connection_samples=connection_samples,
-                reference_pressure=bhp,
-                relevant_phases=relevant_phases,
-                is_injector=True,
-                control_spec=control_spec,
+            connection_pressures, phase_rates, surface_phase_rates = (
+                solve_connection_pressures_and_rates(
+                    tubing=tubing,
+                    reference_depth=reference_depth,
+                    workspace=perforation_workspace,
+                    reference_pressure=bhp,
+                    relevant_phases=relevant_phases,
+                    is_injector=True,
+                    control_spec=control_spec,
+                )
             )
         elif control_mode == InjectorControlModeTag.GROUP:
             raise ValidationError(
@@ -254,22 +252,20 @@ def resolve_well_control(
             ProducerControlModeTag.LIQUID_RATE,
             ProducerControlModeTag.RESERVOIR_VOLUME_RATE,
         ):
-            bhp, connection_pressures, phase_rates, surface_phase_rates = solve_producer_rate_mode(
+            bhp, connection_pressures, phase_rates, surface_phase_rates = solve_rate_producer(
                 control_mode=control_mode,
                 target_rate=controls.target_rates[well_row],
                 tubing=tubing,
                 reference_depth=reference_depth,
                 workspace=perforation_workspace,
-                connection_samples=connection_samples,
                 control_spec=control_spec,
             )
         elif control_mode == ProducerControlModeTag.BHP:
-            bhp, connection_pressures, phase_rates, surface_phase_rates = solve_producer_bhp_mode(
+            bhp, connection_pressures, phase_rates, surface_phase_rates = solve_bhp_producer(
                 target_bhp=controls.target_bhps[well_row],
                 tubing=tubing,
                 reference_depth=reference_depth,
                 workspace=perforation_workspace,
-                connection_samples=connection_samples,
                 control_spec=control_spec,
             )
         elif control_mode == ProducerControlModeTag.THP:
@@ -280,14 +276,13 @@ def resolve_well_control(
                     "A THP-mode producer requires a `WellBoreModel` or VFP table, "
                     "regardless of `control_spec.connection_pressure_mode`."
                 )
-            min_pressure, max_pressure = get_default_pressure_bracket(
-                connection_samples, is_injector=False, control_spec=control_spec
+            min_pressure, max_pressure = get_pressure_bracket(
+                workspace=perforation_workspace, is_injector=False, control_spec=control_spec
             )
-            bhp, _, _ = bisect_bhp(
+            bhp, _, _ = solve_bhp(
                 tubing=tubing,
                 reference_depth=reference_depth,
                 workspace=perforation_workspace,
-                connection_samples=connection_samples,
                 relevant_phases=relevant_phases,
                 is_injector=False,
                 target=controls.target_thps[well_row],
@@ -297,15 +292,16 @@ def resolve_well_control(
                 metric="thp",
                 surface_fluid_properties=surface_fluid_properties,
             )
-            connection_pressures, phase_rates, surface_phase_rates = compute_phase_rates(
-                tubing=tubing,
-                reference_depth=reference_depth,
-                workspace=perforation_workspace,
-                connection_samples=connection_samples,
-                reference_pressure=bhp,
-                relevant_phases=relevant_phases,
-                is_injector=False,
-                control_spec=control_spec,
+            connection_pressures, phase_rates, surface_phase_rates = (
+                solve_connection_pressures_and_rates(
+                    tubing=tubing,
+                    reference_depth=reference_depth,
+                    workspace=perforation_workspace,
+                    reference_pressure=bhp,
+                    relevant_phases=relevant_phases,
+                    is_injector=False,
+                    control_spec=control_spec,
+                )
             )
         elif control_mode == ProducerControlModeTag.GROUP:
             raise ValidationError(
@@ -321,8 +317,8 @@ def resolve_well_control(
         limits.well_offsets[well_row],
         limits.well_offsets[well_row + 1],
     )
-    min_pressure, max_pressure = get_default_pressure_bracket(
-        connection_samples, is_injector=is_injector, control_spec=control_spec
+    min_pressure, max_pressure = get_pressure_bracket(
+        workspace=perforation_workspace, is_injector=is_injector, control_spec=control_spec
     )
     (
         bhp,
@@ -338,7 +334,6 @@ def resolve_well_control(
         tubing=tubing,
         reference_depth=reference_depth,
         workspace=perforation_workspace,
-        connection_samples=connection_samples,
         relevant_phases=relevant_phases,
         is_injector=is_injector,
         bhp=bhp,

@@ -18,14 +18,13 @@ from bores.wells.compile import (
 from bores.wells.hydraulics.base import SurfaceFluidProperties
 from bores.wells.resolution.solvers import (
     RATE_QUANTITY_PHASES,
-    bisect_bhp,
-    compute_phase_rates,
     compute_tubing_head_pressure,
+    solve_bhp,
     solve_connection_pressures_and_rates,
 )
 from bores.wells.resolution.spec import WellControlSpec
 from bores.wells.resolution.tubing import WellTubing
-from bores.wells.state import ConnectionSample, PhaseValues
+from bores.wells.state import PhaseValues
 from bores.wells.workspace import (
     ConnectionRates,
     PerforationWorkspace,
@@ -65,7 +64,6 @@ def get_rate_bound(
     tubing: WellTubing,
     reference_depth: Number,
     workspace: PerforationWorkspace,
-    connection_samples: typing.Sequence[ConnectionSample],
     is_injector: bool,
     min_pressure: Number,
     max_pressure: Number,
@@ -89,7 +87,6 @@ def get_rate_bound(
     :param tubing: Hydraulics correlation for this well. May be `None`.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
-    :param connection_samples: Reservoir samples, same order as `workspace`'s arrays.
     :param is_injector: Whether this well is an injector.
     :param min_pressure: Lower bisection bracket bound.
     :param max_pressure: Upper bisection bracket bound.
@@ -115,11 +112,10 @@ def get_rate_bound(
     if current_rate <= max_value:
         return None
 
-    bound_bhp, _, _ = bisect_bhp(
+    bound_bhp, _, _ = solve_bhp(
         tubing=tubing,
         reference_depth=reference_depth,
         workspace=workspace,
-        connection_samples=connection_samples,
         relevant_phases=quantity_phases,
         is_injector=is_injector,
         target=max_value,
@@ -143,7 +139,6 @@ def get_thp_bound(
     tubing: WellTubing,
     reference_depth: Number,
     workspace: PerforationWorkspace,
-    connection_samples: typing.Sequence[ConnectionSample],
     relevant_phases: PhaseValues,
     is_injector: bool,
     min_pressure: Number,
@@ -169,9 +164,8 @@ def get_thp_bound(
         `control_spec.connection_pressure_mode`.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
-    :param connection_samples: Reservoir samples, same order as `workspace`'s arrays.
     :param relevant_phases: Mask the `"rate"` metric would sum over
-        (unused for the THP check itself; forwarded to `bisect_bhp`).
+        (unused for the THP check itself; forwarded to `solve_bhp`).
     :param is_injector: Whether this well is an injector.
     :param min_pressure: Lower bisection bracket bound.
     :param max_pressure: Upper bisection bracket bound.
@@ -200,11 +194,10 @@ def get_thp_bound(
     if not violated:
         return None
 
-    bound_bhp, _, _ = bisect_bhp(
+    bound_bhp, _, _ = solve_bhp(
         tubing=tubing,
         reference_depth=reference_depth,
         workspace=workspace,
-        connection_samples=connection_samples,
         relevant_phases=relevant_phases,
         is_injector=is_injector,
         target=target,
@@ -278,7 +271,6 @@ def apply_limits(
     tubing: WellTubing,
     reference_depth: Number,
     workspace: PerforationWorkspace,
-    connection_samples: typing.Sequence[ConnectionSample],
     relevant_phases: PhaseValues,
     is_injector: bool,
     bhp: Number,
@@ -317,7 +309,6 @@ def apply_limits(
         A `THPLimit` row in range still requires one regardless.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
-    :param connection_samples: Reservoir samples, same order as `workspace`'s arrays.
     :param relevant_phases: `solvers.ALL_PHASES` for a producer;
         `solvers.phase_mask(injected_phase)` for an injector.
     :param is_injector: Whether this well is an injector.
@@ -368,7 +359,6 @@ def apply_limits(
                 tubing=tubing,
                 reference_depth=reference_depth,
                 workspace=workspace,
-                connection_samples=connection_samples,
                 is_injector=is_injector,
                 min_pressure=min_pressure,
                 max_pressure=max_pressure,
@@ -398,7 +388,6 @@ def apply_limits(
                 tubing=tubing,
                 reference_depth=reference_depth,
                 workspace=workspace,
-                connection_samples=connection_samples,
                 relevant_phases=relevant_phases,
                 is_injector=is_injector,
                 min_pressure=min_pressure,
@@ -429,11 +418,10 @@ def apply_limits(
             else max(candidates, key=lambda pair: pair[0])
         )
         governing_connection_pressures, governing_phase_rates, governing_surface_phase_rates = (
-            compute_phase_rates(
+            solve_connection_pressures_and_rates(
                 tubing=tubing,
                 reference_depth=reference_depth,
                 workspace=workspace,
-                connection_samples=connection_samples,
                 reference_pressure=governing_bhp,
                 relevant_phases=relevant_phases,
                 is_injector=is_injector,

@@ -10,6 +10,7 @@ from typing_extensions import Self
 
 from bores.constants import c
 from bores.types import (
+    Boolean,
     FrictionMethod,
     Number,
     NumberArray,
@@ -532,7 +533,7 @@ def walk_perforation_pressures(
     representative_measured_depths: NumberArray[OneDimension],
     inclinations_from_vertical: NumberArray[OneDimension],
     connection_fluids: ConnectionFluids,
-    is_injector: bool,
+    is_injector: Boolean,
     hydrostatic_divisor: Number,
     pressures: NumberArray[OneDimension],
 ) -> None:
@@ -566,13 +567,13 @@ def walk_perforation_pressures(
     :raises ValueError: If a connection with no flow beneath it has saturations that sum to zero.
     """
     walk = plan_connection_walk(
-        reference_depth,
-        reference_measured_depth,
-        representative_depths,
-        representative_measured_depths,
-        connection_oil_rates,
-        connection_water_rates,
-        connection_gas_rates,
+        reference_depth=reference_depth,
+        reference_measured_depth=reference_measured_depth,
+        representative_depths=representative_depths,
+        representative_measured_depths=representative_measured_depths,
+        connection_oil_rates=connection_oil_rates,
+        connection_water_rates=connection_water_rates,
+        connection_gas_rates=connection_gas_rates,
     )
     friction_sign = -1.0 if is_injector else 1.0
     for step in range(walk.connection_indices.shape[0]):
@@ -581,27 +582,27 @@ def walk_perforation_pressures(
         previous_pressure = reference_pressure if previous < 0 else pressures[previous]
         geometric_sign = walk.geometric_signs[step]
         remaining_rates = PhaseValues(
-            walk.carried_oil_rates[step],
-            walk.carried_water_rates[step],
-            walk.carried_gas_rates[step],
+            oil=walk.carried_oil_rates[step],
+            water=walk.carried_water_rates[step],
+            gas=walk.carried_gas_rates[step],
         )
         phase_densities = PhaseValues(
-            connection_fluids.oil_densities[i],  # type: ignore
-            connection_fluids.water_densities[i],  # type: ignore
-            connection_fluids.gas_densities[i],  # type: ignore
+            oil=connection_fluids.oil_densities[i],  # type: ignore
+            water=connection_fluids.water_densities[i],  # type: ignore
+            gas=connection_fluids.gas_densities[i],  # type: ignore
         )
         phase_viscosities = PhaseValues(
-            connection_fluids.oil_viscosities[i],  # type: ignore
-            connection_fluids.water_viscosities[i],  # type: ignore
-            connection_fluids.gas_viscosities[i],  # type: ignore
+            oil=connection_fluids.oil_viscosities[i],  # type: ignore
+            water=connection_fluids.water_viscosities[i],  # type: ignore
+            gas=connection_fluids.gas_viscosities[i],  # type: ignore
         )
 
         if remaining_rates.oil + remaining_rates.water + remaining_rates.gas == 0:
             mixture_density = compute_static_mixture_density(
                 phase_saturations=PhaseValues(
-                    connection_fluids.oil_saturations[i],  # type: ignore
-                    connection_fluids.water_saturations[i],  # type: ignore
-                    connection_fluids.gas_saturations[i],  # type: ignore
+                    oil=connection_fluids.oil_saturations[i],  # type: ignore
+                    water=connection_fluids.water_saturations[i],  # type: ignore
+                    gas=connection_fluids.gas_saturations[i],  # type: ignore
                 ),
                 phase_densities=phase_densities,
             )

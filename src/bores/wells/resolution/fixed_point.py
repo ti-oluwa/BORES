@@ -1,11 +1,5 @@
 """
-The fixed-point iteration between a well's connection pressures and its connection rates, compiled.
-
-Each solver is a single compiled call. They share one structure: set an initial pressure profile
-from zero flow, then repeat: update the connection rates from the profile, update the profile from
-the rates, and stop when the total rate stops changing. They differ only in how the profile is
-updated, which is why each refers directly to its own kernel. Referring to it directly keeps the
-solver cacheable between runs.
+Fixed-point iteration between a well's connection pressures and its connection rates.
 """
 
 import math
@@ -14,7 +8,7 @@ import typing
 import numba
 import numpy as np
 
-from bores.types import Boolean, Number
+from bores.types import Boolean, Integer, Number
 from bores.wells.hydraulics.beggs_and_brill import (
     BeggsAndBrillWellbore,
 )
@@ -31,11 +25,11 @@ from bores.wells.hydraulics.homogeneous import HomogeneousWellbore
 from bores.wells.hydraulics.homogeneous import (
     walk_perforation_pressures as walk_homogeneous,
 )
+from bores.wells.hydraulics.hydrostatic import walk_hydrostatic_pressures
 from bores.wells.hydraulics.woldesemayat_ghajar import WoldesemayatGhajarWellbore
 from bores.wells.hydraulics.woldesemayat_ghajar import (
     walk_perforation_pressures as walk_woldesemayat_ghajar,
 )
-from bores.wells.resolution.hydrostatic import walk_hydrostatic_pressures
 from bores.wells.workspace import (
     PerforationWorkspace,
     accumulate_phase_rates,
@@ -58,7 +52,7 @@ __all__ = [
 class FixedPointResult(typing.NamedTuple):
     """What a fixed-point solve ended with."""
 
-    converged: bool
+    converged: Boolean
     """Whether the total rate stopped changing within the iteration limit."""
 
     previous_total_rate: Number
@@ -89,10 +83,10 @@ class FixedPointResult(typing.NamedTuple):
 @numba.njit(cache=True)
 def accumulate_rates(
     workspace: PerforationWorkspace,
-    relevant_oil: bool,
-    relevant_water: bool,
-    relevant_gas: bool,
-    is_injector: bool,
+    relevant_oil: Boolean,
+    relevant_water: Boolean,
+    relevant_gas: Boolean,
+    is_injector: Boolean,
     radial_flow_constant: Number,
 ) -> tuple[Number, Number, Number, Number, Number, Number]:
     """
@@ -178,13 +172,13 @@ def solve_homogeneous(
     reference_depth: Number,
     reference_pressure: Number,
     workspace: PerforationWorkspace,
-    relevant_oil: bool,
-    relevant_water: bool,
-    relevant_gas: bool,
-    is_injector: bool,
+    relevant_oil: Boolean,
+    relevant_water: Boolean,
+    relevant_gas: Boolean,
+    is_injector: Boolean,
     hydrostatic_divisor: Number,
     radial_flow_constant: Number,
-    max_iterations: int,
+    max_iterations: Integer,
     tolerance: Number,
 ) -> FixedPointResult:
     """
@@ -211,20 +205,20 @@ def solve_homogeneous(
     :returns: What the solve ended with.
     """
     walk_homogeneous(
-        model,
-        reference_depth,
-        workspace.reference_measured_depth,
-        reference_pressure,
-        np.zeros_like(workspace.connection_oil_rates),
-        np.zeros_like(workspace.connection_water_rates),
-        np.zeros_like(workspace.connection_gas_rates),
-        workspace.representative_depths,
-        workspace.representative_measured_depths,
-        workspace.inclinations_from_vertical,
-        workspace.connection_fluids,
-        is_injector,
-        hydrostatic_divisor,
-        workspace.connection_pressures,
+        model=model,
+        reference_depth=reference_depth,
+        reference_measured_depth=workspace.reference_measured_depth,
+        reference_pressure=reference_pressure,
+        connection_oil_rates=np.zeros_like(workspace.connection_oil_rates),
+        connection_water_rates=np.zeros_like(workspace.connection_water_rates),
+        connection_gas_rates=np.zeros_like(workspace.connection_gas_rates),
+        representative_depths=workspace.representative_depths,
+        representative_measured_depths=workspace.representative_measured_depths,
+        inclinations_from_vertical=workspace.inclinations_from_vertical,
+        connection_fluids=workspace.connection_fluids,
+        is_injector=is_injector,
+        hydrostatic_divisor=hydrostatic_divisor,
+        pressures=workspace.connection_pressures,
     )
 
     total_rate = 0.0
@@ -245,29 +239,29 @@ def solve_homogeneous(
             surface_water_rate,
             surface_gas_rate,
         ) = accumulate_rates(
-            workspace,
-            relevant_oil,
-            relevant_water,
-            relevant_gas,
-            is_injector,
-            radial_flow_constant,
+            workspace=workspace,
+            relevant_oil=relevant_oil,
+            relevant_water=relevant_water,
+            relevant_gas=relevant_gas,
+            is_injector=is_injector,
+            radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
         walk_homogeneous(
-            model,
-            reference_depth,
-            workspace.reference_measured_depth,
-            reference_pressure,
-            workspace.connection_oil_rates,
-            workspace.connection_water_rates,
-            workspace.connection_gas_rates,
-            workspace.representative_depths,
-            workspace.representative_measured_depths,
-            workspace.inclinations_from_vertical,
-            workspace.connection_fluids,
-            is_injector,
-            hydrostatic_divisor,
-            workspace.connection_pressures,
+            model=model,
+            reference_depth=reference_depth,
+            reference_measured_depth=workspace.reference_measured_depth,
+            reference_pressure=reference_pressure,
+            connection_oil_rates=workspace.connection_oil_rates,
+            connection_water_rates=workspace.connection_water_rates,
+            connection_gas_rates=workspace.connection_gas_rates,
+            representative_depths=workspace.representative_depths,
+            representative_measured_depths=workspace.representative_measured_depths,
+            inclinations_from_vertical=workspace.inclinations_from_vertical,
+            connection_fluids=workspace.connection_fluids,
+            is_injector=is_injector,
+            hydrostatic_divisor=hydrostatic_divisor,
+            pressures=workspace.connection_pressures,
         )
         if has_settled(new_total_rate, total_rate, tolerance):
             total_rate = new_total_rate
@@ -277,15 +271,15 @@ def solve_homogeneous(
         total_rate = new_total_rate
 
     return FixedPointResult(
-        converged,
-        previous_total_rate,
-        total_rate,
-        oil_rate,
-        water_rate,
-        gas_rate,
-        surface_oil_rate,
-        surface_water_rate,
-        surface_gas_rate,
+        converged=converged,
+        previous_total_rate=previous_total_rate,
+        total_rate=total_rate,
+        oil_rate=oil_rate,
+        water_rate=water_rate,
+        gas_rate=gas_rate,
+        surface_oil_rate=surface_oil_rate,
+        surface_water_rate=surface_water_rate,
+        surface_gas_rate=surface_gas_rate,
     )
 
 
@@ -295,13 +289,13 @@ def solve_beggs_and_brill(
     reference_depth: Number,
     reference_pressure: Number,
     workspace: PerforationWorkspace,
-    relevant_oil: bool,
-    relevant_water: bool,
-    relevant_gas: bool,
-    is_injector: bool,
+    relevant_oil: Boolean,
+    relevant_water: Boolean,
+    relevant_gas: Boolean,
+    is_injector: Boolean,
     hydrostatic_divisor: Number,
     radial_flow_constant: Number,
-    max_iterations: int,
+    max_iterations: Integer,
     tolerance: Number,
 ) -> FixedPointResult:
     """
@@ -328,20 +322,20 @@ def solve_beggs_and_brill(
     :returns: What the solve ended with.
     """
     walk_beggs_and_brill(
-        model,
-        reference_depth,
-        workspace.reference_measured_depth,
-        reference_pressure,
-        np.zeros_like(workspace.connection_oil_rates),
-        np.zeros_like(workspace.connection_water_rates),
-        np.zeros_like(workspace.connection_gas_rates),
-        workspace.representative_depths,
-        workspace.representative_measured_depths,
-        workspace.inclinations_from_vertical,
-        workspace.connection_fluids,
-        is_injector,
-        hydrostatic_divisor,
-        workspace.connection_pressures,
+        model=model,
+        reference_depth=reference_depth,
+        reference_measured_depth=workspace.reference_measured_depth,
+        reference_pressure=reference_pressure,
+        connection_oil_rates=np.zeros_like(workspace.connection_oil_rates),
+        connection_water_rates=np.zeros_like(workspace.connection_water_rates),
+        connection_gas_rates=np.zeros_like(workspace.connection_gas_rates),
+        representative_depths=workspace.representative_depths,
+        representative_measured_depths=workspace.representative_measured_depths,
+        inclinations_from_vertical=workspace.inclinations_from_vertical,
+        connection_fluids=workspace.connection_fluids,
+        is_injector=is_injector,
+        hydrostatic_divisor=hydrostatic_divisor,
+        pressures=workspace.connection_pressures,
     )
 
     total_rate = 0.0
@@ -362,29 +356,29 @@ def solve_beggs_and_brill(
             surface_water_rate,
             surface_gas_rate,
         ) = accumulate_rates(
-            workspace,
-            relevant_oil,
-            relevant_water,
-            relevant_gas,
-            is_injector,
-            radial_flow_constant,
+            workspace=workspace,
+            relevant_oil=relevant_oil,
+            relevant_water=relevant_water,
+            relevant_gas=relevant_gas,
+            is_injector=is_injector,
+            radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
         walk_beggs_and_brill(
-            model,
-            reference_depth,
-            workspace.reference_measured_depth,
-            reference_pressure,
-            workspace.connection_oil_rates,
-            workspace.connection_water_rates,
-            workspace.connection_gas_rates,
-            workspace.representative_depths,
-            workspace.representative_measured_depths,
-            workspace.inclinations_from_vertical,
-            workspace.connection_fluids,
-            is_injector,
-            hydrostatic_divisor,
-            workspace.connection_pressures,
+            model=model,
+            reference_depth=reference_depth,
+            reference_measured_depth=workspace.reference_measured_depth,
+            reference_pressure=reference_pressure,
+            connection_oil_rates=workspace.connection_oil_rates,
+            connection_water_rates=workspace.connection_water_rates,
+            connection_gas_rates=workspace.connection_gas_rates,
+            representative_depths=workspace.representative_depths,
+            representative_measured_depths=workspace.representative_measured_depths,
+            inclinations_from_vertical=workspace.inclinations_from_vertical,
+            connection_fluids=workspace.connection_fluids,
+            is_injector=is_injector,
+            hydrostatic_divisor=hydrostatic_divisor,
+            pressures=workspace.connection_pressures,
         )
         if has_settled(new_total_rate, total_rate, tolerance):
             total_rate = new_total_rate
@@ -394,15 +388,15 @@ def solve_beggs_and_brill(
         total_rate = new_total_rate
 
     return FixedPointResult(
-        converged,
-        previous_total_rate,
-        total_rate,
-        oil_rate,
-        water_rate,
-        gas_rate,
-        surface_oil_rate,
-        surface_water_rate,
-        surface_gas_rate,
+        converged=converged,
+        previous_total_rate=previous_total_rate,
+        total_rate=total_rate,
+        oil_rate=oil_rate,
+        water_rate=water_rate,
+        gas_rate=gas_rate,
+        surface_oil_rate=surface_oil_rate,
+        surface_water_rate=surface_water_rate,
+        surface_gas_rate=surface_gas_rate,
     )
 
 
@@ -412,13 +406,13 @@ def solve_hagedorn_brown(
     reference_depth: Number,
     reference_pressure: Number,
     workspace: PerforationWorkspace,
-    relevant_oil: bool,
-    relevant_water: bool,
-    relevant_gas: bool,
-    is_injector: bool,
+    relevant_oil: Boolean,
+    relevant_water: Boolean,
+    relevant_gas: Boolean,
+    is_injector: Boolean,
     hydrostatic_divisor: Number,
     radial_flow_constant: Number,
-    max_iterations: int,
+    max_iterations: Integer,
     tolerance: Number,
 ) -> FixedPointResult:
     """
@@ -445,20 +439,20 @@ def solve_hagedorn_brown(
     :returns: What the solve ended with.
     """
     walk_hagedorn_brown(
-        model,
-        reference_depth,
-        workspace.reference_measured_depth,
-        reference_pressure,
-        np.zeros_like(workspace.connection_oil_rates),
-        np.zeros_like(workspace.connection_water_rates),
-        np.zeros_like(workspace.connection_gas_rates),
-        workspace.representative_depths,
-        workspace.representative_measured_depths,
-        workspace.inclinations_from_vertical,
-        workspace.connection_fluids,
-        is_injector,
-        hydrostatic_divisor,
-        workspace.connection_pressures,
+        model=model,
+        reference_depth=reference_depth,
+        reference_measured_depth=workspace.reference_measured_depth,
+        reference_pressure=reference_pressure,
+        connection_oil_rates=np.zeros_like(workspace.connection_oil_rates),
+        connection_water_rates=np.zeros_like(workspace.connection_water_rates),
+        connection_gas_rates=np.zeros_like(workspace.connection_gas_rates),
+        representative_depths=workspace.representative_depths,
+        representative_measured_depths=workspace.representative_measured_depths,
+        inclinations_from_vertical=workspace.inclinations_from_vertical,
+        connection_fluids=workspace.connection_fluids,
+        is_injector=is_injector,
+        hydrostatic_divisor=hydrostatic_divisor,
+        pressures=workspace.connection_pressures,
     )
 
     total_rate = 0.0
@@ -479,29 +473,29 @@ def solve_hagedorn_brown(
             surface_water_rate,
             surface_gas_rate,
         ) = accumulate_rates(
-            workspace,
-            relevant_oil,
-            relevant_water,
-            relevant_gas,
-            is_injector,
-            radial_flow_constant,
+            workspace=workspace,
+            relevant_oil=relevant_oil,
+            relevant_water=relevant_water,
+            relevant_gas=relevant_gas,
+            is_injector=is_injector,
+            radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
         walk_hagedorn_brown(
-            model,
-            reference_depth,
-            workspace.reference_measured_depth,
-            reference_pressure,
-            workspace.connection_oil_rates,
-            workspace.connection_water_rates,
-            workspace.connection_gas_rates,
-            workspace.representative_depths,
-            workspace.representative_measured_depths,
-            workspace.inclinations_from_vertical,
-            workspace.connection_fluids,
-            is_injector,
-            hydrostatic_divisor,
-            workspace.connection_pressures,
+            model=model,
+            reference_depth=reference_depth,
+            reference_measured_depth=workspace.reference_measured_depth,
+            reference_pressure=reference_pressure,
+            connection_oil_rates=workspace.connection_oil_rates,
+            connection_water_rates=workspace.connection_water_rates,
+            connection_gas_rates=workspace.connection_gas_rates,
+            representative_depths=workspace.representative_depths,
+            representative_measured_depths=workspace.representative_measured_depths,
+            inclinations_from_vertical=workspace.inclinations_from_vertical,
+            connection_fluids=workspace.connection_fluids,
+            is_injector=is_injector,
+            hydrostatic_divisor=hydrostatic_divisor,
+            pressures=workspace.connection_pressures,
         )
         if has_settled(new_total_rate, total_rate, tolerance):
             total_rate = new_total_rate
@@ -511,15 +505,15 @@ def solve_hagedorn_brown(
         total_rate = new_total_rate
 
     return FixedPointResult(
-        converged,
-        previous_total_rate,
-        total_rate,
-        oil_rate,
-        water_rate,
-        gas_rate,
-        surface_oil_rate,
-        surface_water_rate,
-        surface_gas_rate,
+        converged=converged,
+        previous_total_rate=previous_total_rate,
+        total_rate=total_rate,
+        oil_rate=oil_rate,
+        water_rate=water_rate,
+        gas_rate=gas_rate,
+        surface_oil_rate=surface_oil_rate,
+        surface_water_rate=surface_water_rate,
+        surface_gas_rate=surface_gas_rate,
     )
 
 
@@ -529,13 +523,13 @@ def solve_gray(
     reference_depth: Number,
     reference_pressure: Number,
     workspace: PerforationWorkspace,
-    relevant_oil: bool,
-    relevant_water: bool,
-    relevant_gas: bool,
-    is_injector: bool,
+    relevant_oil: Boolean,
+    relevant_water: Boolean,
+    relevant_gas: Boolean,
+    is_injector: Boolean,
     hydrostatic_divisor: Number,
     radial_flow_constant: Number,
-    max_iterations: int,
+    max_iterations: Integer,
     tolerance: Number,
 ) -> FixedPointResult:
     """
@@ -562,20 +556,20 @@ def solve_gray(
     :returns: What the solve ended with.
     """
     walk_gray(
-        model,
-        reference_depth,
-        workspace.reference_measured_depth,
-        reference_pressure,
-        np.zeros_like(workspace.connection_oil_rates),
-        np.zeros_like(workspace.connection_water_rates),
-        np.zeros_like(workspace.connection_gas_rates),
-        workspace.representative_depths,
-        workspace.representative_measured_depths,
-        workspace.inclinations_from_vertical,
-        workspace.connection_fluids,
-        is_injector,
-        hydrostatic_divisor,
-        workspace.connection_pressures,
+        model=model,
+        reference_depth=reference_depth,
+        reference_measured_depth=workspace.reference_measured_depth,
+        reference_pressure=reference_pressure,
+        connection_oil_rates=np.zeros_like(workspace.connection_oil_rates),
+        connection_water_rates=np.zeros_like(workspace.connection_water_rates),
+        connection_gas_rates=np.zeros_like(workspace.connection_gas_rates),
+        representative_depths=workspace.representative_depths,
+        representative_measured_depths=workspace.representative_measured_depths,
+        inclinations_from_vertical=workspace.inclinations_from_vertical,
+        connection_fluids=workspace.connection_fluids,
+        is_injector=is_injector,
+        hydrostatic_divisor=hydrostatic_divisor,
+        pressures=workspace.connection_pressures,
     )
 
     total_rate = 0.0
@@ -596,29 +590,29 @@ def solve_gray(
             surface_water_rate,
             surface_gas_rate,
         ) = accumulate_rates(
-            workspace,
-            relevant_oil,
-            relevant_water,
-            relevant_gas,
-            is_injector,
-            radial_flow_constant,
+            workspace=workspace,
+            relevant_oil=relevant_oil,
+            relevant_water=relevant_water,
+            relevant_gas=relevant_gas,
+            is_injector=is_injector,
+            radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
         walk_gray(
-            model,
-            reference_depth,
-            workspace.reference_measured_depth,
-            reference_pressure,
-            workspace.connection_oil_rates,
-            workspace.connection_water_rates,
-            workspace.connection_gas_rates,
-            workspace.representative_depths,
-            workspace.representative_measured_depths,
-            workspace.inclinations_from_vertical,
-            workspace.connection_fluids,
-            is_injector,
-            hydrostatic_divisor,
-            workspace.connection_pressures,
+            model=model,
+            reference_depth=reference_depth,
+            reference_measured_depth=workspace.reference_measured_depth,
+            reference_pressure=reference_pressure,
+            connection_oil_rates=workspace.connection_oil_rates,
+            connection_water_rates=workspace.connection_water_rates,
+            connection_gas_rates=workspace.connection_gas_rates,
+            representative_depths=workspace.representative_depths,
+            representative_measured_depths=workspace.representative_measured_depths,
+            inclinations_from_vertical=workspace.inclinations_from_vertical,
+            connection_fluids=workspace.connection_fluids,
+            is_injector=is_injector,
+            hydrostatic_divisor=hydrostatic_divisor,
+            pressures=workspace.connection_pressures,
         )
         if has_settled(new_total_rate, total_rate, tolerance):
             total_rate = new_total_rate
@@ -628,15 +622,15 @@ def solve_gray(
         total_rate = new_total_rate
 
     return FixedPointResult(
-        converged,
-        previous_total_rate,
-        total_rate,
-        oil_rate,
-        water_rate,
-        gas_rate,
-        surface_oil_rate,
-        surface_water_rate,
-        surface_gas_rate,
+        converged=converged,
+        previous_total_rate=previous_total_rate,
+        total_rate=total_rate,
+        oil_rate=oil_rate,
+        water_rate=water_rate,
+        gas_rate=gas_rate,
+        surface_oil_rate=surface_oil_rate,
+        surface_water_rate=surface_water_rate,
+        surface_gas_rate=surface_gas_rate,
     )
 
 
@@ -646,13 +640,13 @@ def solve_woldesemayat_ghajar(
     reference_depth: Number,
     reference_pressure: Number,
     workspace: PerforationWorkspace,
-    relevant_oil: bool,
-    relevant_water: bool,
-    relevant_gas: bool,
-    is_injector: bool,
+    relevant_oil: Boolean,
+    relevant_water: Boolean,
+    relevant_gas: Boolean,
+    is_injector: Boolean,
     hydrostatic_divisor: Number,
     radial_flow_constant: Number,
-    max_iterations: int,
+    max_iterations: Integer,
     tolerance: Number,
 ) -> FixedPointResult:
     """
@@ -679,20 +673,20 @@ def solve_woldesemayat_ghajar(
     :returns: What the solve ended with.
     """
     walk_woldesemayat_ghajar(
-        model,
-        reference_depth,
-        workspace.reference_measured_depth,
-        reference_pressure,
-        np.zeros_like(workspace.connection_oil_rates),
-        np.zeros_like(workspace.connection_water_rates),
-        np.zeros_like(workspace.connection_gas_rates),
-        workspace.representative_depths,
-        workspace.representative_measured_depths,
-        workspace.inclinations_from_vertical,
-        workspace.connection_fluids,
-        is_injector,
-        hydrostatic_divisor,
-        workspace.connection_pressures,
+        model=model,
+        reference_depth=reference_depth,
+        reference_measured_depth=workspace.reference_measured_depth,
+        reference_pressure=reference_pressure,
+        connection_oil_rates=np.zeros_like(workspace.connection_oil_rates),
+        connection_water_rates=np.zeros_like(workspace.connection_water_rates),
+        connection_gas_rates=np.zeros_like(workspace.connection_gas_rates),
+        representative_depths=workspace.representative_depths,
+        representative_measured_depths=workspace.representative_measured_depths,
+        inclinations_from_vertical=workspace.inclinations_from_vertical,
+        connection_fluids=workspace.connection_fluids,
+        is_injector=is_injector,
+        hydrostatic_divisor=hydrostatic_divisor,
+        pressures=workspace.connection_pressures,
     )
 
     total_rate = 0.0
@@ -713,29 +707,29 @@ def solve_woldesemayat_ghajar(
             surface_water_rate,
             surface_gas_rate,
         ) = accumulate_rates(
-            workspace,
-            relevant_oil,
-            relevant_water,
-            relevant_gas,
-            is_injector,
-            radial_flow_constant,
+            workspace=workspace,
+            relevant_oil=relevant_oil,
+            relevant_water=relevant_water,
+            relevant_gas=relevant_gas,
+            is_injector=is_injector,
+            radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
         walk_woldesemayat_ghajar(
-            model,
-            reference_depth,
-            workspace.reference_measured_depth,
-            reference_pressure,
-            workspace.connection_oil_rates,
-            workspace.connection_water_rates,
-            workspace.connection_gas_rates,
-            workspace.representative_depths,
-            workspace.representative_measured_depths,
-            workspace.inclinations_from_vertical,
-            workspace.connection_fluids,
-            is_injector,
-            hydrostatic_divisor,
-            workspace.connection_pressures,
+            model=model,
+            reference_depth=reference_depth,
+            reference_measured_depth=workspace.reference_measured_depth,
+            reference_pressure=reference_pressure,
+            connection_oil_rates=workspace.connection_oil_rates,
+            connection_water_rates=workspace.connection_water_rates,
+            connection_gas_rates=workspace.connection_gas_rates,
+            representative_depths=workspace.representative_depths,
+            representative_measured_depths=workspace.representative_measured_depths,
+            inclinations_from_vertical=workspace.inclinations_from_vertical,
+            connection_fluids=workspace.connection_fluids,
+            is_injector=is_injector,
+            hydrostatic_divisor=hydrostatic_divisor,
+            pressures=workspace.connection_pressures,
         )
         if has_settled(new_total_rate, total_rate, tolerance):
             total_rate = new_total_rate
@@ -745,15 +739,15 @@ def solve_woldesemayat_ghajar(
         total_rate = new_total_rate
 
     return FixedPointResult(
-        converged,
-        previous_total_rate,
-        total_rate,
-        oil_rate,
-        water_rate,
-        gas_rate,
-        surface_oil_rate,
-        surface_water_rate,
-        surface_gas_rate,
+        converged=converged,
+        previous_total_rate=previous_total_rate,
+        total_rate=total_rate,
+        oil_rate=oil_rate,
+        water_rate=water_rate,
+        gas_rate=gas_rate,
+        surface_oil_rate=surface_oil_rate,
+        surface_water_rate=surface_water_rate,
+        surface_gas_rate=surface_gas_rate,
     )
 
 
@@ -762,13 +756,13 @@ def solve_hydrostatic(
     reference_depth: Number,
     reference_pressure: Number,
     workspace: PerforationWorkspace,
-    relevant_oil: bool,
-    relevant_water: bool,
-    relevant_gas: bool,
-    is_injector: bool,
+    relevant_oil: Boolean,
+    relevant_water: Boolean,
+    relevant_gas: Boolean,
+    is_injector: Boolean,
     pressure_per_density_and_depth: Number,
     radial_flow_constant: Number,
-    max_iterations: int,
+    max_iterations: Integer,
     tolerance: Number,
 ) -> FixedPointResult:
     """
@@ -793,15 +787,15 @@ def solve_hydrostatic(
     :returns: What the solve ended with.
     """
     walk_hydrostatic_pressures(
-        reference_depth,
-        reference_pressure,
-        workspace.representative_depths,
-        workspace.connection_fluids,
-        np.zeros_like(workspace.connection_oil_rates),
-        np.zeros_like(workspace.connection_water_rates),
-        np.zeros_like(workspace.connection_gas_rates),
-        pressure_per_density_and_depth,
-        workspace.connection_pressures,
+        reference_depth=reference_depth,
+        reference_pressure=reference_pressure,
+        representative_depths=workspace.representative_depths,
+        connection_fluids=workspace.connection_fluids,
+        connection_oil_rates=np.zeros_like(workspace.connection_oil_rates),
+        connection_water_rates=np.zeros_like(workspace.connection_water_rates),
+        connection_gas_rates=np.zeros_like(workspace.connection_gas_rates),
+        pressure_per_density_and_depth=pressure_per_density_and_depth,
+        pressures=workspace.connection_pressures,
     )
 
     total_rate = 0.0
@@ -822,24 +816,24 @@ def solve_hydrostatic(
             surface_water_rate,
             surface_gas_rate,
         ) = accumulate_rates(
-            workspace,
-            relevant_oil,
-            relevant_water,
-            relevant_gas,
-            is_injector,
-            radial_flow_constant,
+            workspace=workspace,
+            relevant_oil=relevant_oil,
+            relevant_water=relevant_water,
+            relevant_gas=relevant_gas,
+            is_injector=is_injector,
+            radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
         walk_hydrostatic_pressures(
-            reference_depth,
-            reference_pressure,
-            workspace.representative_depths,
-            workspace.connection_fluids,
-            workspace.connection_oil_rates,
-            workspace.connection_water_rates,
-            workspace.connection_gas_rates,
-            pressure_per_density_and_depth,
-            workspace.connection_pressures,
+            reference_depth=reference_depth,
+            reference_pressure=reference_pressure,
+            representative_depths=workspace.representative_depths,
+            connection_fluids=workspace.connection_fluids,
+            connection_oil_rates=workspace.connection_oil_rates,
+            connection_water_rates=workspace.connection_water_rates,
+            connection_gas_rates=workspace.connection_gas_rates,
+            pressure_per_density_and_depth=pressure_per_density_and_depth,
+            pressures=workspace.connection_pressures,
         )
         if has_settled(new_total_rate, total_rate, tolerance):
             total_rate = new_total_rate
@@ -849,15 +843,15 @@ def solve_hydrostatic(
         total_rate = new_total_rate
 
     return FixedPointResult(
-        converged,
-        previous_total_rate,
-        total_rate,
-        oil_rate,
-        water_rate,
-        gas_rate,
-        surface_oil_rate,
-        surface_water_rate,
-        surface_gas_rate,
+        converged=converged,
+        previous_total_rate=previous_total_rate,
+        total_rate=total_rate,
+        oil_rate=oil_rate,
+        water_rate=water_rate,
+        gas_rate=gas_rate,
+        surface_oil_rate=surface_oil_rate,
+        surface_water_rate=surface_water_rate,
+        surface_gas_rate=surface_gas_rate,
     )
 
 
@@ -865,12 +859,12 @@ def solve_hydrostatic(
 def solve_uniform(
     reference_pressure: Number,
     workspace: PerforationWorkspace,
-    relevant_oil: bool,
-    relevant_water: bool,
-    relevant_gas: bool,
-    is_injector: bool,
+    relevant_oil: Boolean,
+    relevant_water: Boolean,
+    relevant_gas: Boolean,
+    is_injector: Boolean,
     radial_flow_constant: Number,
-    max_iterations: int,
+    max_iterations: Integer,
     tolerance: Number,
 ) -> FixedPointResult:
     """
@@ -910,12 +904,12 @@ def solve_uniform(
             surface_water_rate,
             surface_gas_rate,
         ) = accumulate_rates(
-            workspace,
-            relevant_oil,
-            relevant_water,
-            relevant_gas,
-            is_injector,
-            radial_flow_constant,
+            workspace=workspace,
+            relevant_oil=relevant_oil,
+            relevant_water=relevant_water,
+            relevant_gas=relevant_gas,
+            is_injector=is_injector,
+            radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
         if has_settled(new_total_rate, total_rate, tolerance):
@@ -926,15 +920,15 @@ def solve_uniform(
         total_rate = new_total_rate
 
     return FixedPointResult(
-        converged,
-        previous_total_rate,
-        total_rate,
-        oil_rate,
-        water_rate,
-        gas_rate,
-        surface_oil_rate,
-        surface_water_rate,
-        surface_gas_rate,
+        converged=converged,
+        previous_total_rate=previous_total_rate,
+        total_rate=total_rate,
+        oil_rate=oil_rate,
+        water_rate=water_rate,
+        gas_rate=gas_rate,
+        surface_oil_rate=surface_oil_rate,
+        surface_water_rate=surface_water_rate,
+        surface_gas_rate=surface_gas_rate,
     )
 
 
