@@ -4,6 +4,7 @@ from bores.schedule.actions import EndRun, NoOp, RunSequence
 from bores.schedule.base import (
     Action,
     Event,
+    Firings,
     Schedule,
     ScheduleContext,
     ScheduleItem,
@@ -37,6 +38,7 @@ __all__ = [
     "DateEvent",
     "EndRun",
     "Event",
+    "Firings",
     "IntervalEvent",
     "NoOp",
     "RecordSummary",

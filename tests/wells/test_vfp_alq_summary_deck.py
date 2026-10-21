@@ -2234,12 +2234,12 @@ def control_model():
 
 def test_control_mode_of_the_wrong_kind_is_rejected_before_anything_changes():
     from bores.wells.controls import ProducerControlMode
-    from bores.wells.schedule import SetWellControl, SetWellControls
+    from bores.wells.schedule import SetWellControls
 
     model = control_model()
     before = model.wells.controls.control_modes.copy()
     with pytest.raises(ValidationError):
-        SetWellControl(well_name="I1", mode=ProducerControlMode.OIL_RATE)(model, None)
+        SetWellControls(well_names=("I1",), mode=ProducerControlMode.OIL_RATE)(model, None)
     with pytest.raises(ValidationError):
         SetWellControls(well_names=("P1", "I1"), mode=ProducerControlMode.OIL_RATE)(model, None)
     assert model.wells.controls.control_modes.tolist() == before.tolist()
@@ -2247,12 +2247,12 @@ def test_control_mode_of_the_wrong_kind_is_rejected_before_anything_changes():
 
 def test_set_well_target_without_a_needed_value_changes_nothing():
     from bores.wells.controls import WellTargetMode
-    from bores.wells.schedule import SetWellTarget
+    from bores.wells.schedule import SetWellTargets
 
     model = control_model()
     before = model.wells.controls.control_modes.copy()
     with pytest.raises(ValidationError):
-        SetWellTarget(well_name="P1", control_mode=WellTargetMode.OIL_RATE)(model, None)
+        SetWellTargets(well_names=("P1",), control_mode=WellTargetMode.OIL_RATE)(model, None)
     assert model.wells.controls.control_modes.tolist() == before.tolist()
 
 
@@ -2303,41 +2303,6 @@ def test_connection_targets_treat_zero_as_any(target, expected):
 def test_connection_target_that_selects_nothing_or_is_malformed_is_an_error(target):
     with pytest.raises(ValidationError):
         connection_target(**target)
-
-
-def test_singular_actions_behave_exactly_like_their_one_well_bulk_forms():
-    from bores.types import FluidPhase
-    from bores.wells.controls import InjectorControlMode, ProducerControlMode, WellTargetMode
-    from bores.wells.schedule import (
-        SetWellControl,
-        SetWellControls,
-        SetWellTarget,
-        SetWellTargets,
-    )
-
-    single, bulk = control_model(), control_model()
-    SetWellControl(
-        well_name="P1", mode=ProducerControlMode.OIL_RATE, target_rate=800.0, guide_rate=2.0
-    )(single, None)
-    SetWellControls(
-        well_names=("P1",), mode=ProducerControlMode.OIL_RATE, target_rate=800.0, guide_rate=2.0
-    )(bulk, None)
-    SetWellTarget(well_name="I1", control_mode=WellTargetMode.BHP, value=4500.0)(single, None)
-    SetWellTargets(well_names=("I1",), control_mode=WellTargetMode.BHP, value=4500.0)(bulk, None)
-    SetWellControl(
-        well_name="I1",
-        mode=InjectorControlMode.RATE,
-        injected_phase=FluidPhase.GAS,
-    )(single, None)
-    SetWellControls(
-        well_names=("I1",),
-        mode=InjectorControlMode.RATE,
-        injected_phase=FluidPhase.GAS,
-    )(bulk, None)
-    for name in ("control_modes", "target_rates", "target_bhps", "guide_rates"):
-        np.testing.assert_array_equal(
-            getattr(single.wells.controls, name), getattr(bulk.wells.controls, name)
-        )
 
 
 def test_welopen_with_defaulted_layers_or_no_match_in_the_deck_loader():
@@ -2399,3 +2364,99 @@ def test_deck_welopen_shuts_only_the_connections_it_targets():
 def test_deck_welopen_that_matches_no_connection_is_an_error():
     with pytest.raises(ValidationError, match="matches no connection"):
         welopen_well([{"status": "SHUT", "i": 1, "j": 1, "k1": 1, "k2": 1}])
+
+
+class FiringProbe:
+    """Counts how many times it has run."""
+
+    def __init__(self):
+        self.runs = 0
+
+    def __call__(self, model, context):
+        self.runs += 1
+        return model
+
+
+def always_high_threshold():
+    from bores.schedule import ComparisonOperator, ThresholdEvent
+
+    class Always(ThresholdEvent):
+        def get_value(self, *, model, context):
+            return 10.0
+
+    return Always(op=ComparisonOperator.GT, threshold=1.0)
+
+
+def run_checks(schedule, *, times, firings):
+    for time in times:
+        schedule.advance(None, time=time, firings=firings)
+
+
+def test_a_threshold_item_runs_its_action_once_by_default():
+    from bores.schedule import Firings, Schedule, ScheduleItem
+
+    probe, firings = FiringProbe(), Firings()
+    item = ScheduleItem(event=always_high_threshold(), action=probe, name="cut")
+    run_checks(Schedule(items=(item,)), times=[1.0, 2.0, 3.0, 4.0], firings=firings)
+    assert probe.runs == 1
+    assert firings.count("cut") == 1
+    assert firings.last_time("cut") == pytest.approx(1.0)
+
+
+def test_an_item_can_be_told_to_repeat_or_to_wait_between_runs():
+    import math
+
+    from bores.schedule import Firings, Schedule, ScheduleItem
+
+    probe, firings = FiringProbe(), Firings()
+    repeat = ScheduleItem(
+        event=always_high_threshold(), action=probe, name="repeat", max_firings=math.inf
+    )
+    run_checks(Schedule(items=(repeat,)), times=[1.0, 2.0, 3.0], firings=firings)
+    assert probe.runs == 3
+
+    spaced_probe, spaced_firings = FiringProbe(), Firings()
+    spaced = ScheduleItem(
+        event=always_high_threshold(),
+        action=spaced_probe,
+        name="spaced",
+        max_firings=math.inf,
+        min_interval=5.0,
+    )
+    run_checks(
+        Schedule(items=(spaced,)), times=[1.0, 2.0, 5.0, 6.0, 7.0, 11.0], firings=spaced_firings
+    )
+    assert spaced_probe.runs == 3  # at 1.0, 6.0 and 11.0
+
+
+def test_events_that_fire_once_by_nature_are_not_limited():
+    from bores.schedule import AllOf, ScheduleItem, TimeEvent
+
+    plain = ScheduleItem(event=TimeEvent(at=5.0), action=FiringProbe())
+    assert not plain.is_limited
+    wrapped = ScheduleItem(
+        event=AllOf(events=(TimeEvent(at=5.0), always_high_threshold())), action=FiringProbe()
+    )
+    assert wrapped.max_firings == 1
+
+
+def test_a_limited_item_needs_firings_and_a_distinct_name():
+    from bores.errors import ValidationError
+    from bores.schedule import Schedule, ScheduleItem
+
+    item = ScheduleItem(event=always_high_threshold(), action=FiringProbe(), name="cut")
+    with pytest.raises(ValidationError, match="firings"):
+        Schedule(items=(item,)).advance(None, time=1.0)
+    with pytest.raises(ValidationError, match="distinct names"):
+        Schedule(items=(item, item))
+
+
+def test_firings_survive_a_save_and_load():
+    from bores.schedule import Firings
+
+    firings = Firings()
+    firings.record(name="cut", time=3.0)
+    firings.record(name="cut", time=8.0)
+    restored = Firings.load(firings.dump())
+    assert restored.count("cut") == 2
+    assert restored.last_time("cut") == pytest.approx(8.0)

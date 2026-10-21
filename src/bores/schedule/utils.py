@@ -21,7 +21,12 @@ def at(*, time: float, action: Action[ModelT], name: str | None = None) -> Sched
 
 
 def item(
-    *, event: Event[ModelT], action: Action[ModelT], name: str | None = None
+    *,
+    event: Event[ModelT],
+    action: Action[ModelT],
+    name: str | None = None,
+    max_firings: float | None = None,
+    min_interval: float = 0.0,
 ) -> ScheduleItem[ModelT]:
     """
     Builds a `ScheduleItem` from an event and an action.
@@ -29,9 +34,19 @@ def item(
     :param event: Fires (or not) to decide whether `action` runs.
     :param action: Runs when `event` fires.
     :param name: Optional label for the item.
+    :param max_firings: The most times `action` may run. By default once if `event` holds
+        across checks (a threshold, for example), otherwise unlimited. Use `math.inf` for
+        no limit.
+    :param min_interval: The least elapsed time allowed between two runs of `action`.
     :returns: The `ScheduleItem`.
     """
-    return ScheduleItem(event=event, action=action, name=name or f"item({event!r}, {action!r})")
+    return ScheduleItem(
+        event=event,
+        action=action,
+        name=name or f"item({event!r}, {action!r})",
+        max_firings=max_firings,
+        min_interval=min_interval,
+    )
 
 
 def schedule(*rules: ScheduleItem[ModelT]) -> Schedule[ModelT]:

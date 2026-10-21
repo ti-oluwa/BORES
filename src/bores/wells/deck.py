@@ -56,17 +56,17 @@ from bores.wells.mappings import (
     WELTARG_TARGET_FIELD,
 )
 from bores.wells.schedule import (
-    ActivateCompletion,
-    ActivateWell,
+    ActivateCompletions,
+    ActivateWells,
     GasOilRatioThreshold,
-    MultiplyConnectionFactor,
+    MultiplyConnectionFactors,
     RateThreshold,
     SetGroupLimit,
-    SetLimit,
-    SetWellControl,
+    SetLimits,
+    SetWellControls,
     SetWellLift,
-    SetWellTarget,
-    UpdateWellStatus,
+    SetWellTargets,
+    UpdateWellStatuses,
     WaterCutThreshold,
     match_connection_target,
 )
@@ -1505,15 +1505,15 @@ def load_schedule(
     compiles the whole roster up front, tagging a well or completion not
     yet due as `PENDING` rather than leaving it out (see
     `compile_well_system`'s own docstring). A `WELSPECS` after
-    `compiled_at` becomes an `ActivateWell` action, and a `COMPDAT` after
-    `compiled_at` becomes an `ActivateCompletion` action. Both are just
+    `compiled_at` becomes an `ActivateWells` action, and a `COMPDAT` after
+    `compiled_at` becomes an `ActivateCompletions` action. Both are just
     status flips against rows that already exist, and not a new-row
     allocation. Nothing here reloads or recompiles anything.
 
     Every `WECON` record with `schedule_time <= compiled_at` is assumed
     already baked into the model's economic limits at compile time (see
     `apply_economic_limits`), and is skipped. A `WECON` reissue after
-    `compiled_at` becomes one `SetLimit` action per quantity the record
+    `compiled_at` becomes one `SetLimits` action per quantity the record
     defines (a single record can set several at once, a max water cut
     and a max GOR together, say). `GECON` (a group's own economic
     limits) works the same way, one `SetGroupLimit` action per quantity,
@@ -1522,13 +1522,16 @@ def load_schedule(
     A `WCONPROD`/`WCONINJE` reissue sets the well's control mode and
     targets. When its own `bhp`/`thp` item is given and the mode isn't
     that item, it also patches the well's implicit `BHPLimit`/`THPLimit`
-    via an additional `SetLimit` action.
+    via an additional `SetLimits` action.
 
-    Every `SetLimit`/`SetGroupLimit` action here can only patch a limit
+    Every `SetLimits`/`SetGroupLimit` action here can only patch a limit
     row the well/group already had for that kind/quantity at compile
     time. Neither `CompiledLimits`' nor `CompiledGroupLimits`' CSR table
     can grow a new row mid-schedule. `RateLimit` has no deck-record
     source in this codebase at all, so it's never emitted here.
+
+    A `WLIFT` item with trigger conditions holds across checks, so it runs once by default.
+    Advance the returned schedule with a `Firings` to count that.
 
     When `load_summary` is `True`, every requested `SUMMARY`-section vector
     (see `load_summary_items`) is added too, one item per report time
@@ -1554,7 +1557,7 @@ def load_schedule(
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
-        action = ActivateWell(well_name=record["well"])
+        action = ActivateWells(well_names=(record["well"],))
         items.append(
             ScheduleItem(
                 event=TimeEvent(at=schedule_time),
@@ -1567,8 +1570,8 @@ def load_schedule(
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
-        action = UpdateWellStatus(
-            well_name=record["well"],
+        action = UpdateWellStatuses(
+            well_names=(record["well"],),
             status=WELOPEN_STATUS_MAP[record["status"]],
             i=record.get("i", 0),
             j=record.get("j", 0),
@@ -1587,8 +1590,8 @@ def load_schedule(
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
-        action = MultiplyConnectionFactor(
-            well_name=record["well"],
+        action = MultiplyConnectionFactors(
+            well_names=(record["well"],),
             multiplier=record["multiplier"],
             i=record.get("i", 0),
             j=record.get("j", 0),
@@ -1607,8 +1610,8 @@ def load_schedule(
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
-        action = SetWellTarget(
-            well_name=record["well"],
+        action = SetWellTargets(
+            well_names=(record["well"],),
             control_mode=WellTargetMode(record["control_mode"]),
             value=record.get("value"),
         )
@@ -1649,10 +1652,10 @@ def load_schedule(
         ]
         if not np.isclose(record["new_thp_limit"], 0.0):
             actions.append(
-                SetLimit(
-                    well_name=well_name,
-                    kind=LimitKind.THP,
-                    min_value=record["new_thp_limit"],
+                SetLimits(
+                    well_names=(well_name,),
+                    kinds=(LimitKind.THP,),
+                    min_values=record["new_thp_limit"],
                 )
             )
         action = actions[0] if len(actions) == 1 else RunSequence(actions=actions)
@@ -1720,8 +1723,8 @@ def load_schedule(
             continue
         schedule_time = record["schedule_time"]
         control = load_producer_control_from_record(record, unit_system=unit_system)
-        action = SetWellControl(
-            well_name=record["well"],
+        action = SetWellControls(
+            well_names=(record["well"],),
             mode=control.mode,
             target_rate=control.target_rate,
             target_bhp=control.target_bhp,
@@ -1752,11 +1755,11 @@ def load_schedule(
                 kind = LimitKind.THP
             else:
                 continue
-            limit_action = SetLimit(
-                well_name=record["well"],
-                kind=kind,
-                min_value=limit.min_value,
-                max_value=limit.max_value,
+            limit_action = SetLimits(
+                well_names=(record["well"],),
+                kinds=(kind,),
+                min_values=limit.min_value,
+                max_values=limit.max_value,
             )
             items.append(
                 ScheduleItem(
@@ -1771,8 +1774,8 @@ def load_schedule(
             continue
         schedule_time = record["schedule_time"]
         control = load_injector_control_from_record(record, unit_system=unit_system)
-        action = SetWellControl(
-            well_name=record["well"],
+        action = SetWellControls(
+            well_names=(record["well"],),
             mode=control.mode,
             target_rate=control.target_rate,
             target_bhp=control.target_bhp,
@@ -1800,11 +1803,11 @@ def load_schedule(
                 kind = LimitKind.THP
             else:
                 continue
-            limit_action = SetLimit(
-                well_name=record["well"],
-                kind=kind,
-                min_value=limit.min_value,
-                max_value=limit.max_value,
+            limit_action = SetLimits(
+                well_names=(record["well"],),
+                kinds=(kind,),
+                min_values=limit.min_value,
+                max_values=limit.max_value,
             )
             items.append(
                 ScheduleItem(
@@ -1819,14 +1822,14 @@ def load_schedule(
             continue
         schedule_time = record["schedule_time"]
         for limit in load_economic_limits_from_record(record, unit_system=unit_system):
-            action = SetLimit(
-                well_name=record["well"],
-                kind=LimitKind.ECONOMIC,
-                quantity=limit.quantity,
-                min_value=limit.min_value,
-                max_value=limit.max_value,
-                workover_action=limit.workover_action,
-                end_run=limit.end_run,
+            action = SetLimits(
+                well_names=(record["well"],),
+                kinds=(LimitKind.ECONOMIC,),
+                quantities=limit.quantity,
+                min_values=limit.min_value,
+                max_values=limit.max_value,
+                workover_actions=limit.workover_action,
+                end_runs=limit.end_run,
             )
             items.append(
                 ScheduleItem(
@@ -1861,8 +1864,8 @@ def load_schedule(
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
-        action = ActivateCompletion(
-            well_name=record["well"],
+        action = ActivateCompletions(
+            well_names=(record["well"],),
             i=record["i"],
             j=record["j"],
             k1=record["k1"],

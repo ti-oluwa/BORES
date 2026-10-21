@@ -53,28 +53,19 @@ if typing.TYPE_CHECKING:
 __all__ = [
     "RATE_ARRAYS",
     "TARGET_SETTERS",
-    "ActivateCompletion",
     "ActivateCompletions",
-    "ActivateWell",
     "ActivateWells",
     "ApplicationMode",
     "GasOilRatioThreshold",
-    "MultiplyConnectionFactor",
     "MultiplyConnectionFactors",
-    "OpenWell",
     "OpenWells",
     "RateThreshold",
     "SetGroupLimit",
-    "SetLimit",
     "SetLimits",
-    "SetWellControl",
     "SetWellControls",
     "SetWellLift",
-    "SetWellTarget",
     "SetWellTargets",
-    "ShutInWell",
     "ShutInWells",
-    "UpdateWellStatus",
     "UpdateWellStatuses",
     "WaterCutThreshold",
     "as_number_or_array",
@@ -240,6 +231,7 @@ def match_connection_target(
             f"The layer range k1={k1}, k2={k2} is invalid. Give both as 1-based layers with "
             "`k1 <= k2`, or both as `0` for every layer."
         )
+    
     selected = np.ones(np.shape(connection_i), dtype=bool)
     if i:
         selected &= np.asarray(connection_i) == i
@@ -366,118 +358,6 @@ def get_many_matching_connection_rows(
     return np.concatenate(rows_per_well), counts  # type: ignore[return-value]
 
 
-@attrs.frozen(kw_only=True, slots=True)
-class UpdateWellStatus(Action["CompiledBlackOilModel"]):
-    """
-    Opens or shuts a whole well, or specific connections on it. A deck
-    `WELOPEN` record loads as one of these.
-    """
-
-    well_name: str
-    """The well to act on."""
-
-    status: CompletionStatus
-    """The new open/shut status."""
-
-    i: Integer = 0
-    """The connection's grid I index (1-based), or `0` to target every connection on the well."""
-
-    j: Integer = 0
-    """The connection's grid J index (1-based), or `0`. Only meaningful together with `i`."""
-
-    k1: Integer = 0
-    """The starting grid K index (1-based) of the targeted layer range, or `0`."""
-
-    k2: Integer = 0
-    """The ending grid K index (1-based) of the targeted layer range, or `0`."""
-
-    def __call__(
-        self, model: "CompiledBlackOilModel", context: ScheduleContext
-    ) -> "CompiledBlackOilModel":
-        """
-        Sets the targeted connection(s)' open/shut status.
-
-        :param model: The model to change.
-        :param context: The current moment's context. Unused.
-        :returns: `model`, with the targeted connections patched.
-        :raises ValidationError: If the target selects no connection.
-        """
-        return UpdateWellStatuses(
-            well_names=(self.well_name,),
-            status=self.status,
-            i=self.i,
-            j=self.j,
-            k1=self.k1,
-            k2=self.k2,
-        )(model, context)
-
-
-@attrs.frozen(kw_only=True, slots=True)
-class OpenWell(UpdateWellStatus):
-    """Sets a well's targeted completion status to `OPEN`."""
-
-    status: CompletionStatus = attrs.field(
-        default=CompletionStatus.OPEN,
-        validator=attrs.validators.in_((CompletionStatus.OPEN,)),
-    )
-
-
-@attrs.frozen(kw_only=True, slots=True)
-class ShutInWell(UpdateWellStatus):
-    """Sets a well's targeted completion status to `SHUT`."""
-
-    status: CompletionStatus = attrs.field(
-        default=CompletionStatus.SHUT,
-        validator=attrs.validators.in_((CompletionStatus.SHUT,)),
-    )
-
-
-@attrs.frozen(kw_only=True, slots=True)
-class MultiplyConnectionFactor(Action["CompiledBlackOilModel"]):
-    """
-    Multiplies a well's connection factors, for the whole well or for specific
-    connections. A deck `WPIMULT` record loads as one of these.
-    """
-
-    well_name: str
-    """The well to act on."""
-
-    multiplier: float
-    """The multiplier to apply."""
-
-    i: Integer = 0
-    """The connection's grid I index (1-based), or `0` to target every connection on the well."""
-
-    j: Integer = 0
-    """The connection's grid J index (1-based), or `0`. Only meaningful together with `i`."""
-
-    k1: Integer = 0
-    """The starting grid K index (1-based) of the targeted layer range, or `0`."""
-
-    k2: Integer = 0
-    """The ending grid K index (1-based) of the targeted layer range, or `0`."""
-
-    def __call__(
-        self, model: "CompiledBlackOilModel", context: ScheduleContext
-    ) -> "CompiledBlackOilModel":
-        """
-        Multiplies the targeted connection(s)' connection factor.
-
-        :param model: The model to change.
-        :param context: The current moment's context. Unused.
-        :returns: `model`, with the targeted connections patched.
-        :raises ValidationError: If the target selects no connection.
-        """
-        return MultiplyConnectionFactors(
-            well_names=(self.well_name,),
-            multiplier=self.multiplier,
-            i=self.i,
-            j=self.j,
-            k1=self.k1,
-            k2=self.k2,
-        )(model, context)
-
-
 TARGET_SETTERS = {
     "target_rate": lambda controls, well_row, value: controls.set_target_rate(
         well_row=well_row, value=value
@@ -490,46 +370,6 @@ TARGET_SETTERS = {
     ),
 }
 """Maps a `WELTARG_TARGET_FIELD` entry to the `CompiledWellControls` setter it calls."""
-
-
-@attrs.frozen(kw_only=True, slots=True)
-class SetWellTarget(Action["CompiledBlackOilModel"]):
-    """
-    Changes a well's control mode, and the one target value that mode
-    names, in one step. A deck `WELTARG` record loads as one of these.
-    """
-
-    well_name: str
-    """The well to act on."""
-
-    control_mode: WellTargetMode
-    """
-    The mode to switch to. Must apply to this well's own kind (a
-    producer or an injector). See `WellTargetMode`.
-    """
-
-    value: Number | None = None
-    """
-    The new value for whichever field `control_mode` names (a rate,
-    BHP, or THP). `None` is only valid when `control_mode` is `GROUP`,
-    which takes no value.
-    """
-
-    def __call__(
-        self, model: "CompiledBlackOilModel", context: ScheduleContext
-    ) -> "CompiledBlackOilModel":
-        """
-        Sets the well's control mode, and its named target value if it has one.
-
-        :param model: The model to change.
-        :param context: The current moment's context. Unused.
-        :returns: `model`, with the well's control patched.
-        :raises ValidationError: If `control_mode` doesn't apply to this well's kind, or names a target with no
-            `value` given. Nothing is changed.
-        """
-        return SetWellTargets(
-            well_names=(self.well_name,), control_mode=self.control_mode, value=self.value
-        )(model, context)
 
 
 def check_control_mode_kind(
@@ -558,186 +398,6 @@ def check_control_mode_kind(
             )
 
 
-@attrs.frozen(kw_only=True, slots=True)
-class SetWellControl(Action["CompiledBlackOilModel"]):
-    """
-    Redefines a well's control mode and targets in one go. Each deck
-    `WCONPROD` or `WCONINJE` record loads as one of these.
-    """
-
-    well_name: str
-    """The well to act on."""
-
-    mode: ProducerControlMode | InjectorControlMode
-    """The new control mode. Must match the well's own kind."""
-
-    target_rate: Number | None = None
-    """The new target rate, if given."""
-
-    target_bhp: Number | None = None
-    """The new target BHP, if given."""
-
-    target_thp: Number | None = None
-    """The new target THP, if given."""
-
-    injected_phase: FluidPhase | None = None
-    """The new injected phase, if given. Only meaningful on an injector."""
-
-    efficiency_factor: Number | None = None
-    """The new efficiency factor, if given."""
-
-    guide_rate: Number | None = None
-    """The new guide rate, if given."""
-
-    def __call__(
-        self, model: "CompiledBlackOilModel", context: ScheduleContext
-    ) -> "CompiledBlackOilModel":
-        """
-        Overwrites every field given on the well's control.
-
-        :param model: The model to change.
-        :param context: The current moment's context. Unused.
-        :returns: `model`, with the well's control patched.
-        :raises ValidationError: If `mode` doesn't apply to this well's kind. Nothing is changed.
-        """
-        return SetWellControls(
-            well_names=(self.well_name,),
-            mode=self.mode,
-            target_rate=self.target_rate,
-            target_bhp=self.target_bhp,
-            target_thp=self.target_thp,
-            injected_phase=self.injected_phase,
-            efficiency_factor=self.efficiency_factor,
-            guide_rate=self.guide_rate,
-        )(model, context)
-
-
-@attrs.frozen(kw_only=True, slots=True)
-class ActivateCompletion(Action["CompiledBlackOilModel"]):
-    """
-    Brings a well's connection(s) online, changing their schedule status
-    from `PENDING` to `ACTIVE`. A deck `COMPDAT` record that starts after
-    the run begins loads as one of these.
-    """
-
-    well_name: str
-    """The well to act on."""
-
-    i: Integer = 0
-    """The connection's grid I index (1-based), or `0` to target every connection on the well."""
-
-    j: Integer = 0
-    """The connection's grid J index (1-based), or `0`. Only meaningful together with `i`."""
-
-    k1: Integer = 0
-    """The starting grid K index (1-based) of the targeted layer range, or `0`."""
-
-    k2: Integer = 0
-    """The ending grid K index (1-based) of the targeted layer range, or `0`."""
-
-    def __call__(
-        self, model: "CompiledBlackOilModel", context: ScheduleContext
-    ) -> "CompiledBlackOilModel":
-        """
-        Brings the targeted connection(s) online.
-
-        :param model: The model to change.
-        :param context: The current moment's context. Unused.
-        :returns: `model`, with the targeted connections activated.
-        :raises ValidationError: If the target selects no connection.
-        """
-        return ActivateCompletions(
-            well_names=(self.well_name,),
-            i=self.i,
-            j=self.j,
-            k1=self.k1,
-            k2=self.k2,
-        )(model, context)
-
-
-@attrs.frozen(kw_only=True, slots=True)
-class ActivateWell(Action["CompiledBlackOilModel"]):
-    """
-    Brings a well online, changing its schedule status from `PENDING` to
-    `ACTIVE`. A deck `WELSPECS` record that starts after the run begins loads
-    as one of these.
-
-    Only the well itself is activated. Each of its connections comes online
-    separately, through `ActivateCompletion`.
-    """
-
-    well_name: str
-    """The well to activate."""
-
-    def __call__(
-        self, model: "CompiledBlackOilModel", context: ScheduleContext
-    ) -> "CompiledBlackOilModel":
-        """
-        Brings the well online.
-
-        :param model: The model to change.
-        :param context: The current moment's context. Unused.
-        :returns: `model`, with the well activated.
-        """
-        return ActivateWells(well_names=(self.well_name,))(model, context)
-
-
-@attrs.frozen(kw_only=True, slots=True)
-class SetLimit(Action["CompiledBlackOilModel"]):
-    """
-    Changes one of a well's existing limits. A deck `WECON` reissue loads as
-    one of these per quantity (`kind=ECONOMIC`), and so does the BHP limit
-    carried by a `WCONPROD` or `WCONINJE` record whose control mode is not
-    `BHP` (`kind=BHP`).
-
-    Only a limit the well already had when the run began, matching `kind`
-    (and `quantity`, for `RATE` and `ECONOMIC`), can be changed. A limit a
-    well never had cannot be added mid-run.
-    """
-
-    well_name: str
-    """The well to act on."""
-
-    kind: LimitKind
-    """Which kind of limit to update."""
-
-    quantity: RateQuantity | EconomicQuantity | None = None
-    """Which quantity to update, for `kind=RATE` or `kind=ECONOMIC`. Ignored for `BHP`/`THP`."""
-
-    min_value: Number | None = None
-    """The new floor, if given."""
-
-    max_value: Number | None = None
-    """The new ceiling, if given."""
-
-    workover_action: WorkoverAction | None = None
-    """The new workover action, if given. Only meaningful for `kind=ECONOMIC`."""
-
-    end_run: Boolean | None = None
-    """The new end-run flag, if given. Only meaningful for `kind=ECONOMIC`."""
-
-    def __call__(
-        self, model: "CompiledBlackOilModel", context: ScheduleContext
-    ) -> "CompiledBlackOilModel":
-        """
-        Overwrites every field given on the well's matching limit.
-
-        :param model: The model to change.
-        :param context: The current moment's context. Unused.
-        :returns: `model`, with the well's limit patched.
-        :raises ValidationError: If the well had no matching limit from the start of the run.
-        """
-        return SetLimits(
-            well_names=(self.well_name,),
-            kinds=(self.kind,),
-            quantities=self.quantity,
-            min_values=self.min_value,
-            max_values=self.max_value,
-            workover_actions=self.workover_action,
-            end_runs=self.end_run,
-        )(model, context)
-
-
 class ApplicationMode(enum.Enum):
     """How `SetLimits`'s well-targeting field pairs with its limit-targeting field(s)."""
 
@@ -756,7 +416,13 @@ class ApplicationMode(enum.Enum):
 
 @attrs.frozen(kw_only=True, slots=True)
 class ActivateWells(Action["CompiledBlackOilModel"]):
-    """`ActivateWell`, applied to several wells at once."""
+    """
+    Brings wells online, changing their schedule status from `PENDING` to `ACTIVE`. A deck
+    `WELSPECS` record that starts after the run begins loads as one of these.
+
+    Only the wells themselves are activated. Each well's connections come online
+    separately, through `ActivateCompletions`.
+    """
 
     well_names: tuple[str, ...] = attrs.field(
         converter=tuple, validator=attrs.validators.min_len(1)
@@ -781,8 +447,8 @@ class ActivateWells(Action["CompiledBlackOilModel"]):
 @attrs.frozen(kw_only=True, slots=True)
 class UpdateWellStatuses(Action["CompiledBlackOilModel"]):
     """
-    `UpdateWellStatus`, applied to several wells at once, all against the same
-    targeted connection(s).
+    Opens or shuts wells, or specific connections on them, all against the same targeted
+    connection(s). A deck `WELOPEN` record loads as one of these.
     """
 
     well_names: tuple[str, ...] = attrs.field(
@@ -861,8 +527,8 @@ class ShutInWells(UpdateWellStatuses):
 @attrs.frozen(kw_only=True, slots=True)
 class MultiplyConnectionFactors(Action["CompiledBlackOilModel"]):
     """
-    `MultiplyConnectionFactor`, applied to several wells at once, all
-    against the same targeted connection(s).
+    Multiplies the connection factors of wells, or of specific connections on them, all
+    against the same targeted connection(s). A deck `WPIMULT` record loads as one of these.
     """
 
     well_names: tuple[str, ...] = attrs.field(
@@ -923,8 +589,9 @@ class MultiplyConnectionFactors(Action["CompiledBlackOilModel"]):
 @attrs.frozen(kw_only=True, slots=True)
 class ActivateCompletions(Action["CompiledBlackOilModel"]):
     """
-    `ActivateCompletion`, applied to several wells at once, all
-    against the same targeted connection(s).
+    Brings connections online, changing their schedule status from `PENDING` to `ACTIVE`,
+    all against the same targeted connection(s). A deck `COMPDAT` record that starts after
+    the run begins loads as one of these.
     """
 
     well_names: tuple[str, ...] = attrs.field(
@@ -973,7 +640,10 @@ class ActivateCompletions(Action["CompiledBlackOilModel"]):
 
 @attrs.frozen(kw_only=True, slots=True)
 class SetWellControls(Action["CompiledBlackOilModel"]):
-    """`SetWellControl`, applied to several wells at once."""
+    """
+    Changes wells' control mode and whichever targets are given. A deck `WCONPROD` or
+    `WCONINJE` record loads as one of these.
+    """
 
     well_names: tuple[str, ...] = attrs.field(
         converter=tuple, validator=attrs.validators.min_len(1)
@@ -1081,8 +751,9 @@ class SetWellControls(Action["CompiledBlackOilModel"]):
 @attrs.frozen(kw_only=True, slots=True)
 class SetWellTargets(Action["CompiledBlackOilModel"]):
     """
-    `SetWellTarget`, applied to several wells at once. Each well's own
-    kind (producer or injector) still picks which of
+    Changes wells' control mode and the one target value that mode names. A deck `WELTARG`
+    record loads as one of these. Each well's own
+    kind (producer or injector) picks which of
     `ProducerControlMode`/`InjectorControlMode` `control_mode` resolves
     to, so a mixed set of producers and injectors is fine even when
     `control_mode` is broadcast to all of them.
@@ -1290,7 +961,9 @@ def apply_limit_values(
 @attrs.frozen(kw_only=True, slots=True)
 class SetLimits(Action["CompiledBlackOilModel"]):
     """
-    `SetLimit`, applied across several `(well, limit)` targets in one bulk write.
+    Changes existing limits across several `(well, limit)` targets in one bulk write. A deck
+    `WECON` reissue loads as one of these per quantity, and so does the BHP or THP limit
+    carried by a `WCONPROD` or `WCONINJE` record.
 
     `mode=ONE_TO_ONE` pairs `well_names[i]` with `kinds[i]` (and
     `quantities[i]`, when given) position by position: each index names
@@ -1303,8 +976,7 @@ class SetLimits(Action["CompiledBlackOilModel"]):
     then vary by spec, not by well: give one value per entry in
     `kinds`, or a single value to apply to every spec.
 
-    In either mode, a value field left `None` is not touched on any
-    target, the same as the single-well `SetLimit`.
+    In either mode, a value field left `None` is not touched on any target.
     """
 
     well_names: tuple[str, ...] = attrs.field(
@@ -1459,7 +1131,7 @@ class SetLimits(Action["CompiledBlackOilModel"]):
 class SetGroupLimit(Action["CompiledBlackOilModel"]):
     """
     Updates one of a group's existing `GECON` limit rows in place, the
-    group-level counterpart of `SetLimit`. A `GECON` reissue.
+    group-level counterpart of `SetLimits`. A `GECON` reissue loads as one of these.
 
     Only an already-compiled limit row matching `quantity` can be patched.
     """

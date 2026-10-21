@@ -176,7 +176,7 @@ class InjectorControlMode(enum.Enum):
 class WellTargetMode(enum.Enum):
     """
     A `WELTARG` record's own control mode, spelled out so a caller
-    building `SetWellTarget`/`SetWellTargets` by hand doesn't need
+    building `SetWellTargets` by hand doesn't need
     Eclipse's abbreviated deck vocabulary (`ORAT`, `WRAT`, and so on)
     memorized. Every member's own value is that deck string.
 

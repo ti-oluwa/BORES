@@ -201,8 +201,12 @@ class ThresholdEvent(Event[ModelT]):
     """
     Fires whenever `get_value` satisfies `op` against `threshold`. Subclass and implement `get_value`.
 
-    The event fires at every check while the comparison holds, not only when it first becomes true.
+    The event fires at every check while the comparison holds, not only when it first becomes
+    true. A `ScheduleItem` built on it therefore runs its action once unless told otherwise.
     """
+
+    level_triggered: typing.ClassVar[bool] = True
+    """Marks an event that holds across many checks, so its item defaults to a single run."""
 
     op: ComparisonOperator
     """How `get_value(...)` is compared against `threshold`."""
@@ -240,6 +244,11 @@ class AllOf(Event[ModelT]):
     events: tuple[Event[ModelT], ...] = attrs.field(converter=tuple)
     """Every event that must fire for this one to fire."""
 
+    @property
+    def level_triggered(self) -> bool:
+        """Whether any sub-event holds across many checks."""
+        return any(getattr(event, "level_triggered", False) for event in self.events)
+
     def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:
         """
         Fires when every one of `events` fires.
@@ -257,6 +266,11 @@ class AnyOf(Event[ModelT]):
 
     events: tuple[Event[ModelT], ...] = attrs.field(converter=tuple)
     """Every event checked; any one firing is enough."""
+
+    @property
+    def level_triggered(self) -> bool:
+        """Whether any sub-event holds across many checks."""
+        return any(getattr(event, "level_triggered", False) for event in self.events)
 
     def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:
         """

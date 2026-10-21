@@ -1,19 +1,22 @@
 """Event-driven scheduling: `Event`/`Action` protocols, `ScheduleItem`, `Schedule`."""
 
 import datetime
+import math
 import typing
 from uuid import uuid4
 
 import attrs
 from typing_extensions import Self
 
-from bores.errors import ActionError, EventError, StopSimulation
+from bores.errors import ActionError, EventError, StopSimulation, ValidationError
+from bores.serde.base import Serializable
 from bores.types import Boolean, Number, UnitSystem
 
 __all__ = [
     "PASSTHROUGH_EXCEPTIONS",
     "Action",
     "Event",
+    "Firings",
     "ModelT",
     "Schedule",
     "ScheduleContext",
@@ -25,6 +28,44 @@ ModelTcon = typing.TypeVar("ModelTcon", contravariant=True)
 
 PASSTHROUGH_EXCEPTIONS: tuple[type[BaseException], ...] = (StopSimulation,)
 """Exceptions `Schedule.apply` re-raises as they are, never wrapping them in `EventError`/`ActionError`."""
+
+
+@attrs.define(kw_only=True, slots=True)
+class Firings(Serializable):
+    """
+    How often, and when last, each limited `ScheduleItem` has fired. Create one per run, pass it
+    to every `Schedule.advance` call, and save it with the run so a restart picks up the counts.
+    """
+
+    counts: dict[str, int] = attrs.field(factory=dict)
+    """How many times each limited item, by name, has fired."""
+
+    last_times: dict[str, Number] = attrs.field(factory=dict)
+    """The elapsed time each limited item, by name, last fired at."""
+
+    def count(self, name: str, /) -> int:
+        """
+        :param name: The item's name.
+        :returns: How many times the item has fired.
+        """
+        return self.counts.get(name, 0)
+
+    def last_time(self, name: str, /) -> Number | None:
+        """
+        :param name: The item's name.
+        :returns: The elapsed time the item last fired at, or `None` if it never has.
+        """
+        return self.last_times.get(name)
+
+    def record(self, *, name: str, time: Number) -> None:
+        """
+        Notes that an item has fired.
+
+        :param name: The item's name.
+        :param time: The elapsed time it fired at.
+        """
+        self.counts[name] = self.count(name) + 1
+        self.last_times[name] = time
 
 
 @attrs.frozen(kw_only=True, slots=True)
@@ -57,6 +98,12 @@ class ScheduleContext:
 
     extra: typing.Mapping[str, object] = attrs.field(factory=dict)
     """Additional domain-specific context."""
+
+    firings: Firings | None = None
+    """
+    Counts how often limited items have fired. Required whenever the schedule has an item
+    with a `max_firings` or `min_interval` limit.
+    """
 
 
 @typing.runtime_checkable
@@ -91,7 +138,13 @@ class Action(typing.Protocol[ModelT]):
 
 @attrs.frozen(kw_only=True, slots=True, repr=False, hash=True, unsafe_hash=True)
 class ScheduleItem(typing.Generic[ModelT]):
-    """One `(Event, Action)` pairing: `action` fires whenever `event` occurs."""
+    """
+    One `(Event, Action)` pairing: `action` runs whenever `event` occurs.
+
+    An event that holds across many checks, such as a rate threshold, would run its action at
+    every check while it holds. `max_firings` and `min_interval` keep that from repeating a
+    change that should happen once, like multiplying a connection factor.
+    """
 
     event: Event[ModelT] = attrs.field(hash=False)
     """Decides whether and when `action` runs."""
@@ -101,6 +154,39 @@ class ScheduleItem(typing.Generic[ModelT]):
 
     name: str = attrs.field(factory=lambda: uuid4().hex, validator=attrs.validators.min_len(1))
     """Optional label. If not provided, a random UUID is generated."""
+
+    max_firings: Number | None = attrs.field(
+        default=None, validator=attrs.validators.optional(attrs.validators.ge(1))
+    )
+    """
+    The most times `action` may run over a run. Leave it `None` for the default: once if
+    `event` holds across checks (a threshold, for example), otherwise unlimited. Give
+    `math.inf` to let such an event run its action at every check.
+    """
+
+    min_interval: Number = attrs.field(default=0.0, validator=attrs.validators.ge(0))
+    """The least elapsed time allowed between two runs of `action`."""
+
+    def __attrs_post_init__(self) -> None:
+        if self.max_firings is None:
+            held = getattr(self.event, "level_triggered", False)
+            object.__setattr__(self, "max_firings", 1 if held else math.inf)
+
+    @property
+    def is_limited(self) -> Boolean:
+        """Whether this item's runs are capped or spaced out, so `Firings` must track it."""
+        return self.max_firings != math.inf or self.min_interval > 0
+
+    def may_fire(self, *, firings: Firings, time: Number) -> Boolean:
+        """
+        :param firings: The run's record of past firings.
+        :param time: The elapsed time being advanced to.
+        :returns: Whether this item still has runs left and enough time has passed since its last.
+        """
+        if firings.count(self.name) >= typing.cast(Number, self.max_firings):
+            return False
+        last_time = firings.last_time(self.name)
+        return last_time is None or (time - last_time) >= self.min_interval
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}({self.name!r}, when={self.event!r}, do={self.action!r})"
@@ -117,6 +203,13 @@ class Schedule(typing.Generic[ModelT]):
 
     def __attrs_post_init__(self) -> None:
         object.__setattr__(self, "_items_map", {item.name: item for item in self.items})
+        limited = [item.name for item in self.items if item.is_limited]
+        repeated = sorted({name for name in limited if limited.count(name) > 1})
+        if repeated:
+            raise ValidationError(
+                f"Items that limit how often they fire must have distinct names, but {repeated} "
+                "each appear more than once. Give each its own `name`."
+            )
 
     def apply(self, model: ModelT, context: ScheduleContext) -> ModelT:
         """
@@ -129,24 +222,41 @@ class Schedule(typing.Generic[ModelT]):
             a `PASSTHROUGH_EXCEPTIONS` member.
         :raises ActionError: If an item's action raises anything other
             than a `PASSTHROUGH_EXCEPTIONS` member.
+        :raises ValidationError: If an item limits how often it fires and the context
+            has no `firings`.
         """
-        for rule in self.items:
+        firings = context.firings
+        for item in self.items:
+            limited = item.is_limited
+            if limited:
+                if firings is None:
+                    raise ValidationError(
+                        f"Schedule item {item.name!r} limits how often it fires, so the context "
+                        "must carry `firings` to count them. Create one `Firings()` per run and "
+                        "pass it to every `advance` call."
+                    )
+                if not item.may_fire(firings=firings, time=context.time):
+                    continue
+
             try:
-                occurred = rule.event(model, context)
+                occurred = item.event(model, context)
             except PASSTHROUGH_EXCEPTIONS:
                 raise
             except Exception as exc:
-                raise EventError(f"Event failed for schedule item {rule.name!r}.") from exc
+                raise EventError(f"Event failed for schedule item {item.name!r}.") from exc
 
             if not occurred:
                 continue
 
             try:
-                model = rule.action(model, context)
+                model = item.action(model, context)
             except PASSTHROUGH_EXCEPTIONS:
                 raise
             except Exception as exc:
-                raise ActionError(f"Action failed for schedule item {rule.name!r}.") from exc
+                raise ActionError(f"Action failed for schedule item {item.name!r}.") from exc
+
+            if limited:
+                firings.record(name=item.name, time=context.time)  # type: ignore[union-attr]
         return model
 
     def advance(
@@ -161,6 +271,7 @@ class Schedule(typing.Generic[ModelT]):
         step_size: Number | None = None,
         start_date: datetime.datetime | None = None,
         extra: typing.Mapping[str, object] | None = None,
+        firings: Firings | None = None,
     ) -> ModelT:
         """
         Builds a `ScheduleContext` and calls `apply`.
@@ -174,6 +285,8 @@ class Schedule(typing.Generic[ModelT]):
         :param step_size: The current time-step's size, if tracked.
         :param start_date: The simulation's start date, if tracked.
         :param extra: Additional domain-specific context.
+        :param firings: The run's record of past firings. Required if any item limits how
+            often it fires, which is the default for an item whose event holds across checks.
         :returns: The model after every firing item's action has run.
         """
         context = ScheduleContext(
@@ -185,6 +298,7 @@ class Schedule(typing.Generic[ModelT]):
             step_size=step_size,
             start_date=start_date,
             extra=extra or {},
+            firings=firings,
         )
         return self.apply(model=model, context=context)
 
