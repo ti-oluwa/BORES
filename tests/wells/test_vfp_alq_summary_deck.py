@@ -2625,3 +2625,47 @@ def test_a_connection_factor_multiplier_also_scales_a_connection_factor_override
         permeabilities={orientation: np.full(1, 100.0) for orientation in Orientation},
     )
     assert compiled.perforations.well_indices[0] == pytest.approx(5.0)
+
+
+def wpimult_perforations(wpimult_records, *, current_time):
+    from bores.datastructures import GridDimensions
+    from bores.wells.deck import load_well_from_records
+
+    dims = GridDimensions(nx=3, ny=3, nz=3)
+    cell_count = dims.nx * dims.ny * dims.nz
+    depths = np.zeros((cell_count, 3))
+    depths[:, 2] = np.arange(cell_count, dtype=float)
+    grid = types.SimpleNamespace(
+        dimensions=dims,
+        cell_min_xyz=depths,
+        cell_max_xyz=depths + 1.0,
+        get_cell_center_at=lambda i, j, k: np.array([0.0, 0.0, 0.0]),
+    )
+    welspecs = {"well": "P1", "inflow_equation": "STD", "i": 2, "j": 2}
+    compdat = [
+        {"well": "P1", "i": 2, "j": 2, "k1": layer, "k2": layer, "status": "OPEN", "diameter": 0.5}
+        for layer in (1, 2, 3)
+    ]
+    well = load_well_from_records(
+        grid, welspecs, compdat, wpimult_records=wpimult_records, current_time=current_time
+    )
+    return [perforation.connection_factor_multiplier for perforation in well.perforations]
+
+
+def test_deck_wpimult_accumulates_and_only_applies_up_to_the_load_time():
+    records = [
+        {"well": "P1", "multiplier": 0.5, "schedule_time": 0.0},
+        {"well": "P1", "multiplier": 0.5, "i": 2, "j": 2, "k1": 2, "k2": 2, "schedule_time": 5.0},
+        {"well": "P1", "multiplier": 3.0, "schedule_time": 10.0},
+    ]
+    assert wpimult_perforations(records, current_time=7.0) == pytest.approx([0.5, 0.25, 0.5])
+    assert wpimult_perforations(records, current_time=10.0) == pytest.approx([1.5, 0.75, 1.5])
+    assert wpimult_perforations(records, current_time=-1.0) == [None, None, None]
+
+
+def test_deck_wpimult_that_matches_no_connection_is_an_error():
+    records = [
+        {"well": "P1", "multiplier": 2.0, "i": 1, "j": 1, "k1": 1, "k2": 1, "schedule_time": 0.0}
+    ]
+    with pytest.raises(ValidationError, match="matches no connection"):
+        wpimult_perforations(records, current_time=1.0)

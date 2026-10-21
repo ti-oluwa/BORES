@@ -164,24 +164,6 @@ def load_well_from_records(
             "Only the standard inflow equation ('STD') is currently supported."
         )
 
-    whole_well_multiplier: float | None = None
-    multiplier_by_ijk: dict[tuple[int, int, int, int], float] = {}
-    if wpimult_records:
-        for record in wpimult_records:
-            i, j = record.get("i", 0), record.get("j", 0)
-            k1, k2 = record.get("k1", 0), record.get("k2", 0)
-            if i == 0 and j == 0 and k1 == 0 and k2 == 0:
-                # `WPIMULT`'s own schema defaults I/J/K1/K2 to 0, meaning
-                # "every connection on this well", that key would never
-                # match any COMPDAT's real (nonzero) indices below, so a
-                # whole-well multiplier (the common case) needs its own
-                # fallback slot rather than living in multiplier_by_ijk.
-                # Later `WPIMULT` reissues overwrite earlier ones, matching
-                # this file's other reissue semantics (`WCONPROD`/`WCONINJE`).
-                whole_well_multiplier = record["multiplier"]
-            else:
-                multiplier_by_ijk[i, j, k1, k2] = record["multiplier"]
-
     for record in compdat_records:
         # Minus 1, to move from 1-based to 0-based indexing used internally
         i, j = record["i"], record["j"]
@@ -190,7 +172,6 @@ def load_well_from_records(
         bottom_cell = dims.flat_index(i - 1, j - 1, k2 - 1)
         top_depth = grid.cell_min_xyz[top_cell, 2]
         bottom_depth = grid.cell_max_xyz[bottom_cell, 2]
-        multiplier_key = (i, j, k1, k2)
         direction = record.get("direction")
         saturation_region = record.get("saturation_table") or None  # 0 should map to None too
         radius = (record.get("diameter") or 0) * 0.5
@@ -218,12 +199,44 @@ def load_well_from_records(
             "status": status,
             "saturation_region": saturation_region,
             "connection_factor_override": record.get("connection_factor"),
-            "connection_factor_multiplier": multiplier_by_ijk.get(
-                multiplier_key, whole_well_multiplier
-            ),
+            "connection_factor_multiplier": None,
             "direction": DIRECTION_MAP.get(direction) if direction else None,
             "schedule_status": schedule_status,
         })
+
+    if wpimult_records:
+        # Every `WPIMULT` up to `current_time` scales the connections it targets, and they
+        # accumulate: two of 0.5 on one connection leave it at 0.25. Later ones are left to
+        # the schedule, which applies them at their own time.
+        for record in sorted(
+            (r for r in wpimult_records if r.get("schedule_time", 0.0) <= current_time),
+            key=lambda r: r.get("schedule_time", 0.0),
+        ):
+            i, j = record.get("i", 0), record.get("j", 0)
+            k1, k2 = record.get("k1", 0), record.get("k2", 0)
+            matched = [
+                spec
+                for spec in perforation_specs
+                if match_connection_target(
+                    i=i,
+                    j=j,
+                    k1=k1,
+                    k2=k2,
+                    connection_i=spec["i"],
+                    connection_j=spec["j"],
+                    connection_k1=spec["k1"],
+                    connection_k2=spec["k2"],
+                )
+            ]
+            if not matched:
+                raise ValidationError(
+                    f"`WPIMULT` for well {welspecs_record['well']!r} at i={i}, j={j}, "
+                    f"k1={k1}, k2={k2} matches no connection of the well."
+                )
+            for spec in matched:
+                spec["connection_factor_multiplier"] = (
+                    spec["connection_factor_multiplier"] or 1.0
+                ) * record["multiplier"]
 
     if welopen_records:
         # Whole-well or per-connection open/shut events, replayed in
