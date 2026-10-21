@@ -68,6 +68,7 @@ from bores.wells.schedule import (
     SetWellTarget,
     UpdateWellStatus,
     WaterCutThreshold,
+    match_connection_target,
 )
 from bores.wells.trajectory import TrajectoryStation, WellTrajectory
 
@@ -237,12 +238,27 @@ def load_well_from_records(
             new_status = WELOPEN_STATUS_MAP[record["status"]]
             i, j = record.get("i", 0), record.get("j", 0)
             k1, k2 = record.get("k1", 0), record.get("k2", 0)
-            whole_well = i == 0 and j == 0 and k1 == 0 and k2 == 0
-            for spec in perforation_specs:
-                if whole_well or (
-                    spec["i"] == i and spec["j"] == j and spec["k1"] <= k2 and spec["k2"] >= k1
-                ):
-                    spec["status"] = new_status
+            matched = [
+                spec
+                for spec in perforation_specs
+                if match_connection_target(
+                    i=i,
+                    j=j,
+                    k1=k1,
+                    k2=k2,
+                    connection_i=spec["i"],
+                    connection_j=spec["j"],
+                    connection_k1=spec["k1"],
+                    connection_k2=spec["k2"],
+                )
+            ]
+            if not matched:
+                raise ValidationError(
+                    f"`WELOPEN` for well {welspecs_record['well']!r} at i={i}, j={j}, "
+                    f"k1={k1}, k2={k2} matches no connection of the well."
+                )
+            for spec in matched:
+                spec["status"] = new_status
 
     perforations = [
         Perforation(

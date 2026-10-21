@@ -198,7 +198,11 @@ class IntervalEvent(Event[ModelT]):
 
 @attrs.frozen(kw_only=True, slots=True)
 class ThresholdEvent(Event[ModelT]):
-    """Fires when `get_value` crosses `threshold`, per `op`. Subclass and implement `get_value`."""
+    """
+    Fires whenever `get_value` satisfies `op` against `threshold`. Subclass and implement `get_value`.
+
+    The event fires at every check while the comparison holds, not only when it first becomes true.
+    """
 
     op: ComparisonOperator
     """How `get_value(...)` is compared against `threshold`."""

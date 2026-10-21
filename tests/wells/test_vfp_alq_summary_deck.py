@@ -2303,3 +2303,99 @@ def test_connection_targets_treat_zero_as_any(target, expected):
 def test_connection_target_that_selects_nothing_or_is_malformed_is_an_error(target):
     with pytest.raises(ValidationError):
         connection_target(**target)
+
+
+def test_singular_actions_behave_exactly_like_their_one_well_bulk_forms():
+    from bores.types import FluidPhase
+    from bores.wells.controls import InjectorControlMode, ProducerControlMode, WellTargetMode
+    from bores.wells.schedule import (
+        SetWellControl,
+        SetWellControls,
+        SetWellTarget,
+        SetWellTargets,
+    )
+
+    single, bulk = control_model(), control_model()
+    SetWellControl(
+        well_name="P1", mode=ProducerControlMode.OIL_RATE, target_rate=800.0, guide_rate=2.0
+    )(single, None)
+    SetWellControls(
+        well_names=("P1",), mode=ProducerControlMode.OIL_RATE, target_rate=800.0, guide_rate=2.0
+    )(bulk, None)
+    SetWellTarget(well_name="I1", control_mode=WellTargetMode.BHP, value=4500.0)(single, None)
+    SetWellTargets(well_names=("I1",), control_mode=WellTargetMode.BHP, value=4500.0)(bulk, None)
+    SetWellControl(
+        well_name="I1",
+        mode=InjectorControlMode.RATE,
+        injected_phase=FluidPhase.GAS,
+    )(single, None)
+    SetWellControls(
+        well_names=("I1",),
+        mode=InjectorControlMode.RATE,
+        injected_phase=FluidPhase.GAS,
+    )(bulk, None)
+    for name in ("control_modes", "target_rates", "target_bhps", "guide_rates"):
+        np.testing.assert_array_equal(
+            getattr(single.wells.controls, name), getattr(bulk.wells.controls, name)
+        )
+
+
+def test_welopen_with_defaulted_layers_or_no_match_in_the_deck_loader():
+    from bores.datastructures import GridDimensions
+    from bores.wells.schedule import match_connection_target
+
+    # specs span layers, the same matcher the runtime actions use
+    spec = {"connection_i": 3, "connection_j": 4, "connection_k1": 1, "connection_k2": 3}
+    assert match_connection_target(i=3, j=4, k1=0, k2=0, **spec)
+    assert match_connection_target(i=0, j=0, k1=2, k2=2, **spec)
+    assert not match_connection_target(i=3, j=5, k1=0, k2=0, **spec)
+    assert not match_connection_target(i=3, j=4, k1=4, k2=5, **spec)
+    with pytest.raises(ValidationError):
+        match_connection_target(i=3, j=4, k1=2, k2=0, **spec)
+    assert GridDimensions(nx=1, ny=1, nz=1)
+
+
+def welopen_well(welopen_records):
+    from bores.datastructures import GridDimensions
+    from bores.wells.deck import load_well_from_records
+
+    dims = GridDimensions(nx=3, ny=3, nz=3)
+    cell_count = dims.nx * dims.ny * dims.nz
+    depths = np.zeros((cell_count, 3))
+    depths[:, 2] = np.arange(cell_count, dtype=float)
+    grid = types.SimpleNamespace(
+        dimensions=dims,
+        cell_min_xyz=depths,
+        cell_max_xyz=depths + 1.0,
+        get_cell_center_at=lambda i, j, k: np.array([0.0, 0.0, 0.0]),
+    )
+    welspecs = {"well": "P1", "inflow_equation": "STD", "i": 2, "j": 2}
+    compdat = [
+        {"well": "P1", "i": 2, "j": 2, "k1": layer, "k2": layer, "status": "OPEN", "diameter": 0.5}
+        for layer in (1, 2, 3)
+    ]
+    return load_well_from_records(grid, welspecs, compdat, welopen_records=welopen_records)
+
+
+def test_deck_welopen_shuts_only_the_connections_it_targets():
+    from bores.wells.base import CompletionStatus
+
+    well = welopen_well([{"status": "SHUT", "i": 2, "j": 2, "k1": 2, "k2": 3}])
+    assert [perforation.status for perforation in well.perforations] == [
+        CompletionStatus.OPEN,
+        CompletionStatus.SHUT,
+        CompletionStatus.SHUT,
+    ]
+    every_layer = welopen_well([{"status": "SHUT", "i": 2, "j": 2, "k1": 0, "k2": 0}])
+    assert all(
+        perforation.status == CompletionStatus.SHUT for perforation in every_layer.perforations
+    )
+    whole_well = welopen_well([{"status": "SHUT"}])
+    assert all(
+        perforation.status == CompletionStatus.SHUT for perforation in whole_well.perforations
+    )
+
+
+def test_deck_welopen_that_matches_no_connection_is_an_error():
+    with pytest.raises(ValidationError, match="matches no connection"):
+        welopen_well([{"status": "SHUT", "i": 1, "j": 1, "k1": 1, "k2": 1}])
