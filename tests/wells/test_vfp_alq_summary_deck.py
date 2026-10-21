@@ -2669,3 +2669,199 @@ def test_deck_wpimult_that_matches_no_connection_is_an_error():
     ]
     with pytest.raises(ValidationError, match="matches no connection"):
         wpimult_perforations(records, current_time=1.0)
+
+
+def build_case_workspace(
+    *, unit_system, geometry="vertical", mobility=1e-4, d_factor=float("nan")
+):
+    """A real perforation workspace for six connections, with rates of an ordinary size."""
+    from bores.units import get_conversion_factors
+    from bores.wells.hydraulics.base import PhaseValues
+    from bores.wells.state import ConnectionSample
+    from bores.wells.workspace import build_perforation_workspace
+
+    case = scenario(
+        unit_system=unit_system,
+        geometry=geometry,
+        reference_kind="middle",
+        rate_kind="zero",
+        dtype=np.float64,
+    )
+    from bores.wells.resolution.spec import WellControlSpec
+
+    factors = get_conversion_factors(UnitSystem.FIELD, unit_system)
+    # The rate is well index * mobility * drawdown * the radial flow constant, so scaling the well
+    # index by the other factors keeps the rate the same size, in the unit system's own units, as
+    # it is in field units.
+    well_index_scale = (
+        factors["reservoir_rate"]
+        * factors["viscosity"]
+        * WellControlSpec(unit_system=UnitSystem.FIELD).radial_flow_constant
+        / (WellControlSpec(unit_system=unit_system).radial_flow_constant * factors["pressure"])
+    )
+    samples = [
+        ConnectionSample(
+            cell_index=s.cell_index,
+            pressure=s.pressure,
+            temperature=s.temperature,
+            phase_saturations=s.phase_saturations,
+            phase_mobilities=PhaseValues(*([mobility / factors["viscosity"]] * 3)),
+            phase_densities=s.phase_densities,
+            phase_viscosities=s.phase_viscosities,
+            gas_liquid_surface_tension=s.gas_liquid_surface_tension,
+            phase_fvfs=s.phase_fvfs,
+        )
+        for s in case.samples
+    ]
+    workspace = build_perforation_workspace(
+        well_indices=np.full(6, 400.0 * well_index_scale),
+        representative_depths=case.depths,
+        representative_measured_depths=case.measured_depths,
+        inclinations_from_vertical=case.inclinations,
+        connection_samples=samples,
+        reference_measured_depth=case.reference_measured_depth,
+        connection_conductivities=np.full(6, 4000.0 * well_index_scale),
+        d_factor=d_factor / factors["reservoir_rate"],
+        dtype=np.float64,
+    )
+    return case, workspace
+
+
+def copy_workspace(workspace):
+    """A deep copy of a perforation workspace, since solving updates its arrays in place."""
+    import copy
+
+    return copy.deepcopy(workspace)
+
+
+def solver_arguments(solver_name, case, workspace, unit_system):
+    from bores.units import get_conversion_factors
+    from bores.wells.hydraulics.base import get_hydrostatic_divisor
+    from bores.wells.resolution.hydrostatic import get_pressure_per_density_and_depth
+    from bores.wells.resolution.spec import WellControlSpec
+
+    spec = WellControlSpec(unit_system=unit_system)
+    pressure = 2000.0 * get_conversion_factors(UnitSystem.FIELD, unit_system)["pressure"]
+    common = (True, True, True, False)
+    tail = (spec.radial_flow_constant, 20, 1e-6)
+    if solver_name == "uniform":
+        return (pressure, workspace, *common, *tail)
+    if solver_name == "hydrostatic":
+        return (
+            case.reference_depth,
+            pressure,
+            workspace,
+            *common,
+            get_pressure_per_density_and_depth(unit_system),
+            *tail,
+        )
+    import importlib
+
+    factory = dict(KERNELS)[solver_name]
+    options = getattr(importlib.import_module(f"bores.wells.hydraulics.{solver_name}"), factory)(
+        tubing_inner_diameter=case.diameter, unit_system=unit_system
+    ).options
+    return (
+        options,
+        case.reference_depth,
+        pressure,
+        workspace,
+        *common,
+        get_hydrostatic_divisor(unit_system),
+        *tail,
+    )
+
+
+FIXED_POINT_DRIVERS = ["uniform", "hydrostatic", *[name for name, _ in KERNELS]]
+
+
+@pytest.mark.parametrize("solver_name", FIXED_POINT_DRIVERS)
+@pytest.mark.parametrize("unit_system", list(UnitSystem))
+@pytest.mark.parametrize("d_factor", [float("nan"), 0.002])
+def test_each_compiled_solver_matches_the_same_code_run_as_python(
+    solver_name, unit_system, d_factor
+):
+    from bores.wells.resolution import fixed_point
+
+    driver = {
+        "uniform": fixed_point.solve_uniform,
+        "hydrostatic": fixed_point.solve_hydrostatic,
+        "homogeneous": fixed_point.solve_homogeneous,
+        "beggs_and_brill": fixed_point.solve_beggs_and_brill,
+        "hagedorn_brown": fixed_point.solve_hagedorn_brown,
+        "gray": fixed_point.solve_gray,
+        "woldesemayat_ghajar": fixed_point.solve_woldesemayat_ghajar,
+    }[solver_name]
+    case, workspace = build_case_workspace(unit_system=unit_system, d_factor=d_factor)
+    compiled_workspace, python_workspace = copy_workspace(workspace), copy_workspace(workspace)
+    compiled = driver(*solver_arguments(solver_name, case, compiled_workspace, unit_system))
+    interpreted = driver.py_func(
+        *solver_arguments(solver_name, case, python_workspace, unit_system)
+    )
+    assert compiled.converged and interpreted.converged
+    assert tuple(compiled) == pytest.approx(tuple(interpreted), rel=1e-9)
+    for name in (
+        "connection_pressures",
+        "connection_oil_rates",
+        "connection_water_rates",
+        "connection_gas_rates",
+        "well_indices",
+    ):
+        assert getattr(compiled_workspace, name) == pytest.approx(
+            getattr(python_workspace, name), rel=1e-9
+        )
+    assert compiled.oil_rate > 0.0
+
+
+def test_a_total_rate_only_settles_when_it_is_finite():
+    from bores.wells.resolution.fixed_point import has_settled
+
+    assert has_settled(100.0, 100.0, 1e-6)
+    assert has_settled(100.0, 100.0000001, 1e-6)
+    assert not has_settled(100.0, 120.0, 1e-6)
+    assert not has_settled(float("inf"), float("inf"), 1e-6)
+    assert not has_settled(float("inf"), 0.0, 1e-6)
+    assert not has_settled(float("nan"), 0.0, 1e-6)
+
+
+def test_a_non_finite_rate_raises_instead_of_being_reported_as_converged():
+    from bores.errors import WellConvergenceError
+    from bores.wells.resolution.solvers import solve_connection_pressures_and_rates
+    from bores.wells.resolution.spec import ConnectionPressureMode, WellControlSpec
+    from bores.wells.resolution.tubing import WellTubing
+
+    case, workspace = build_case_workspace(unit_system=UnitSystem.FIELD, mobility=float("inf"))
+    with pytest.raises(WellConvergenceError, match="did not converge"):
+        solve_connection_pressures_and_rates(
+            tubing=WellTubing(None, None, 0.0),
+            reference_depth=case.reference_depth,
+            workspace=workspace,
+            reference_pressure=2000.0,
+            relevant_phases=types.SimpleNamespace(oil=1.0, water=1.0, gas=1.0),
+            is_injector=False,
+            control_spec=WellControlSpec(
+                connection_pressure_mode=ConnectionPressureMode.UNIFORM_BHP
+            ),
+        )
+
+
+def test_an_unknown_wellbore_model_is_rejected_by_name():
+    from bores.wells.hydraulics.homogeneous import homogeneous_wellbore
+    from bores.wells.resolution.solvers import solve_connection_pressures_and_rates
+    from bores.wells.resolution.spec import ConnectionPressureMode, WellControlSpec
+    from bores.wells.resolution.tubing import WellTubing
+
+    case, workspace = build_case_workspace(unit_system=UnitSystem.FIELD)
+    unknown = homogeneous_wellbore(tubing_inner_diameter=case.diameter)._replace(name="invented")
+    with pytest.raises(ValidationError, match="Unknown wellbore model 'invented'"):
+        solve_connection_pressures_and_rates(
+            tubing=WellTubing(unknown, None, 0.0),
+            reference_depth=case.reference_depth,
+            workspace=workspace,
+            reference_pressure=2000.0,
+            relevant_phases=types.SimpleNamespace(oil=1.0, water=1.0, gas=1.0),
+            is_injector=False,
+            control_spec=WellControlSpec(
+                connection_pressure_mode=ConnectionPressureMode.HYDRAULIC
+            ),
+        )

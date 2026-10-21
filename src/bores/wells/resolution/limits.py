@@ -105,7 +105,6 @@ def get_rate_bound(
         tubing=tubing,
         reference_depth=reference_depth,
         workspace=workspace,
-        connection_samples=connection_samples,
         reference_pressure=bhp,
         relevant_phases=quantity_phases,
         is_injector=is_injector,

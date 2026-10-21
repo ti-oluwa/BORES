@@ -2,8 +2,6 @@
 
 import typing
 
-import numpy as np
-
 from bores.errors import ValidationError, WellConvergenceError
 from bores.types import Integer, Number, NumberArray, OneDimension
 from bores.wells.compile import (
@@ -14,19 +12,19 @@ from bores.wells.compile import (
 )
 from bores.wells.hydraulics.base import (
     SurfaceFluidProperties,
-    WellBoreModel,
-    compute_perforation_pressures_from_fluids,
     get_hydrostatic_divisor,
 )
-from bores.wells.resolution.hydrostatic import compute_hydrostatic_connection_pressures
+from bores.wells.resolution.fixed_point import (
+    FIXED_POINT_SOLVERS,
+    solve_hydrostatic,
+    solve_uniform,
+)
+from bores.wells.resolution.hydrostatic import get_pressure_per_density_and_depth
 from bores.wells.resolution.spec import ConnectionPressureMode, WellControlSpec
 from bores.wells.resolution.tubing import WellTubing, compute_tubing_head_pressure
 from bores.wells.state import ConnectionSample, PhaseValues
 from bores.wells.workspace import (
-    ConnectionRates,
     PerforationWorkspace,
-    accumulate_phase_rates,
-    correct_well_indices_for_non_darcy,
     get_connection_rates,
 )
 
@@ -114,7 +112,6 @@ def solve_connection_pressures_and_rates(
     tubing: WellTubing,
     reference_depth: Number,
     workspace: PerforationWorkspace,
-    connection_samples: typing.Sequence[ConnectionSample],
     reference_pressure: Number,
     relevant_phases: PhaseValues,
     is_injector: bool,
@@ -130,7 +127,7 @@ def solve_connection_pressures_and_rates(
     hydraulics correlation for updated flowing pressures, and repeats
     until the relative change in total rate is within
     `control_spec.rate_convergence_tolerance`, or
-    `control_spec.max_fixed_point_iterations` is reached (best-effort).
+    `control_spec.max_fixed_point_iterations` is reached.
     `workspace.connection_pressures` is reused as the output buffer on
     every call rather than reallocated.
 
@@ -148,7 +145,6 @@ def solve_connection_pressures_and_rates(
         between connections; with `HYDRAULIC` (the default), raises.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
-    :param connection_samples: Reservoir samples, same order as `workspace`'s arrays.
     :param reference_pressure: BHP held fixed while iterating.
     :param relevant_phases: Mask of the phases whose totals are returned, which are the ones
         counting toward the controlled quantity. A producer's per-connection rates, and so its
@@ -159,7 +155,9 @@ def solve_connection_pressures_and_rates(
         and `connection_pressure_mode`.
     :returns: `(connection_pressures, phase_rates, surface_phase_rates)`.
     :raises ValidationError: If the well has no `WellBoreModel` and
-        `control_spec.connection_pressure_mode` is `HYDRAULIC`.
+        `control_spec.connection_pressure_mode` is `HYDRAULIC`, or its model is unknown.
+    :raises WellConvergenceError: If the connection pressures and rates don't settle within the
+        iteration limit.
     """
     wellbore = tubing.wellbore
     pressure_mode = control_spec.connection_pressure_mode
@@ -174,152 +172,81 @@ def solve_connection_pressures_and_rates(
             "`ConnectionPressureMode.UNIFORM_BHP` to apply the reference pressure unchanged "
             "at every connection."
         )
-    uniform_connection_pressure = (
-        wellbore is None and pressure_mode == ConnectionPressureMode.UNIFORM_BHP
-    )
-    hydrostatic_connection_pressure = (
-        wellbore is None and pressure_mode == ConnectionPressureMode.HYDROSTATIC
-    )
-
-    zero_rates = PhaseValues(oil=0.0, water=0.0, gas=0.0)
-    radial_flow_constant = control_spec.radial_flow_constant
-    hydrostatic_divisor = (
-        get_hydrostatic_divisor(wellbore.options.unit_system) if wellbore is not None else None
-    )
-    if uniform_connection_pressure:
-        connection_pressures = workspace.connection_pressures
-        connection_pressures[:] = reference_pressure
-    elif hydrostatic_connection_pressure:
-        connection_pressures = compute_hydrostatic_connection_pressures(
-            reference_depth=reference_depth,
-            reference_pressure=reference_pressure,
-            representative_depths=workspace.representative_depths,
-            connection_samples=connection_samples,
-            connection_rates=ConnectionRates(
-                oil=np.zeros_like(workspace.connection_oil_rates),
-                water=np.zeros_like(workspace.connection_water_rates),
-                gas=np.zeros_like(workspace.connection_gas_rates),
-            ),
-            unit_system=control_spec.unit_system,
-            out=workspace.connection_pressures,
-        )
-    else:
-        connection_pressures = compute_perforation_pressures_from_fluids(
-            wellbore=typing.cast(WellBoreModel, wellbore),
-            reference_depth=reference_depth,
-            reference_pressure=reference_pressure,
-            connection_oil_rates=np.zeros_like(workspace.connection_oil_rates),
-            connection_water_rates=np.zeros_like(workspace.connection_water_rates),
-            connection_gas_rates=np.zeros_like(workspace.connection_gas_rates),
-            reference_measured_depth=workspace.reference_measured_depth,
-            representative_depths=workspace.representative_depths,
-            representative_measured_depths=workspace.representative_measured_depths,
-            inclinations_from_vertical=workspace.inclinations_from_vertical,
-            connection_fluids=workspace.connection_fluids,
-            is_injector=is_injector,
-            out=workspace.connection_pressures,
-            hydrostatic_divisor=hydrostatic_divisor,
-        )
-
-    total_rate = 0.0
-    previous_total_rate = 0.0
-    phase_rates = zero_rates
-    surface_phase_rates = zero_rates
 
     relevant_oil = relevant_phases.oil > 0.0
     relevant_water = relevant_phases.water > 0.0
     relevant_gas = relevant_phases.gas > 0.0
+    radial_flow_constant = control_spec.radial_flow_constant
+    max_iterations = control_spec.max_fixed_point_iterations
+    tolerance = control_spec.rate_convergence_tolerance
 
-    for _ in range(control_spec.max_fixed_point_iterations):
-        correct_well_indices_for_non_darcy(
-            static_well_indices=workspace.static_well_indices,
-            connection_conductivities=workspace.connection_conductivities,
-            connection_gas_rates=workspace.connection_gas_rates,
-            d_factor=workspace.d_factor,
-            out_well_indices=workspace.well_indices,
-        )
-        (
-            oil_rate,
-            water_rate,
-            gas_rate,
-            surface_oil_rate,
-            surface_water_rate,
-            surface_gas_rate,
-        ) = accumulate_phase_rates(
-            connection_pressures=connection_pressures,
-            well_indices=workspace.well_indices,
-            reservoir_pressures=workspace.reservoir_pressures,
-            oil_mobilities=workspace.oil_mobilities,
-            water_mobilities=workspace.water_mobilities,
-            gas_mobilities=workspace.gas_mobilities,
-            oil_formation_volume_factors=workspace.oil_formation_volume_factors,
-            water_formation_volume_factors=workspace.water_formation_volume_factors,
-            gas_formation_volume_factors=workspace.gas_formation_volume_factors,
-            relevant_oil=relevant_oil or not is_injector,
-            relevant_water=relevant_water or not is_injector,
-            relevant_gas=relevant_gas or not is_injector,
-            is_injector=is_injector,
-            radial_flow_constant=radial_flow_constant,
-            out_connection_oil_rates=workspace.connection_oil_rates,
-            out_connection_water_rates=workspace.connection_water_rates,
-            out_connection_gas_rates=workspace.connection_gas_rates,
-        )
-        phase_rates = PhaseValues(
-            oil=oil_rate if relevant_oil else 0.0,
-            water=water_rate if relevant_water else 0.0,
-            gas=gas_rate if relevant_gas else 0.0,
-        )
-        surface_phase_rates = PhaseValues(
-            oil=surface_oil_rate if relevant_oil else 0.0,
-            water=surface_water_rate if relevant_water else 0.0,
-            gas=surface_gas_rate if relevant_gas else 0.0,
-        )
-        new_total_rate = phase_rates.oil + phase_rates.water + phase_rates.gas
-        if hydrostatic_connection_pressure:
-            connection_pressures = compute_hydrostatic_connection_pressures(
-                reference_depth=reference_depth,
-                reference_pressure=reference_pressure,
-                representative_depths=workspace.representative_depths,
-                connection_samples=connection_samples,
-                connection_rates=get_connection_rates(workspace=workspace),
-                unit_system=control_spec.unit_system,
-                out=workspace.connection_pressures,
+    if wellbore is not None:
+        solve = FIXED_POINT_SOLVERS.get(wellbore.name)
+        if solve is None:
+            raise ValidationError(
+                f"Unknown wellbore model {wellbore.name!r}; expected one of "
+                f"{sorted(FIXED_POINT_SOLVERS)}."
             )
-        elif not uniform_connection_pressure:
-            connection_pressures = compute_perforation_pressures_from_fluids(
-                wellbore=typing.cast(WellBoreModel, wellbore),
-                reference_depth=reference_depth,
-                reference_pressure=reference_pressure,
-                connection_oil_rates=workspace.connection_oil_rates,
-                connection_water_rates=workspace.connection_water_rates,
-                connection_gas_rates=workspace.connection_gas_rates,
-                reference_measured_depth=workspace.reference_measured_depth,
-                representative_depths=workspace.representative_depths,
-                representative_measured_depths=workspace.representative_measured_depths,
-                inclinations_from_vertical=workspace.inclinations_from_vertical,
-                connection_fluids=workspace.connection_fluids,
-                is_injector=is_injector,
-                out=workspace.connection_pressures,
-                hydrostatic_divisor=hydrostatic_divisor,
-            )
-        if abs(new_total_rate - total_rate) <= control_spec.rate_convergence_tolerance * max(
-            abs(new_total_rate), 1.0
-        ):
-            total_rate = new_total_rate
-            break
-        previous_total_rate = total_rate
-        total_rate = new_total_rate
+        result = solve(
+            wellbore.options,
+            reference_depth,
+            reference_pressure,
+            workspace,
+            relevant_oil,
+            relevant_water,
+            relevant_gas,
+            is_injector,
+            get_hydrostatic_divisor(wellbore.options.unit_system),
+            radial_flow_constant,
+            max_iterations,
+            tolerance,
+        )
+    elif pressure_mode == ConnectionPressureMode.HYDROSTATIC:
+        result = solve_hydrostatic(
+            reference_depth,
+            reference_pressure,
+            workspace,
+            relevant_oil,
+            relevant_water,
+            relevant_gas,
+            is_injector,
+            get_pressure_per_density_and_depth(control_spec.unit_system),
+            radial_flow_constant,
+            max_iterations,
+            tolerance,
+        )
     else:
+        result = solve_uniform(
+            reference_pressure,
+            workspace,
+            relevant_oil,
+            relevant_water,
+            relevant_gas,
+            is_injector,
+            radial_flow_constant,
+            max_iterations,
+            tolerance,
+        )
+
+    if not result.converged:
         raise WellConvergenceError(
             "The connection pressures and rates did not converge in "
-            f"{control_spec.max_fixed_point_iterations} iterations at a reference pressure of "
+            f"{max_iterations} iterations at a reference pressure of "
             f"{reference_pressure}: on the last iteration the total rate went from "
-            f"{previous_total_rate} to {total_rate}, against a relative tolerance of "
-            f"{control_spec.rate_convergence_tolerance}. A rate high enough that friction or "
+            f"{result.previous_total_rate} to {result.total_rate}, against a relative tolerance of "
+            f"{tolerance}. A rate high enough that friction or "
             "head takes the connection pressures past reservoir pressure can cause this."
         )
 
-    return connection_pressures, phase_rates, surface_phase_rates
+    return (
+        workspace.connection_pressures,
+        PhaseValues(oil=result.oil_rate, water=result.water_rate, gas=result.gas_rate),
+        PhaseValues(
+            oil=result.surface_oil_rate,
+            water=result.surface_water_rate,
+            gas=result.surface_gas_rate,
+        ),
+    )
 
 
 def compute_phase_rates(
@@ -358,7 +285,6 @@ def compute_phase_rates(
         tubing=tubing,
         reference_depth=reference_depth,
         workspace=workspace,
-        connection_samples=connection_samples,
         reference_pressure=reference_pressure,
         relevant_phases=relevant_phases,
         is_injector=is_injector,
@@ -432,7 +358,6 @@ def bisect_bhp(
             tubing=tubing,
             reference_depth=reference_depth,
             workspace=workspace,
-            connection_samples=connection_samples,
             reference_pressure=average_pressure,
             relevant_phases=relevant_phases,
             is_injector=is_injector,
