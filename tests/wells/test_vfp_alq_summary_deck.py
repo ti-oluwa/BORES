@@ -2865,3 +2865,153 @@ def test_an_unknown_wellbore_model_is_rejected_by_name():
                 connection_pressure_mode=ConnectionPressureMode.HYDRAULIC
             ),
         )
+
+
+def reentry_records():
+    base = {"well": "P1", "i": 2, "j": 2, "k1": 1, "k2": 1, "status": "OPEN", "diameter": 0.5}
+    return [
+        {**base, "skin": 0.0, "schedule_time": 0.0},
+        {**base, "skin": 5.0, "schedule_time": 10.0},
+    ]
+
+
+def load_reentered_well(*, current_time, compdat=None, wpimult=None):
+    from bores.datastructures import GridDimensions
+    from bores.wells.deck import load_well_from_records
+
+    dims = GridDimensions(nx=3, ny=3, nz=3)
+    depths = np.zeros((27, 3))
+    depths[:, 2] = np.arange(27, dtype=float)
+    grid = types.SimpleNamespace(
+        dimensions=dims,
+        cell_min_xyz=depths,
+        cell_max_xyz=depths + 1.0,
+        get_cell_center_at=lambda i, j, k: np.zeros(3),
+    )
+    return load_well_from_records(
+        grid,
+        {"well": "P1", "inflow_equation": "STD", "i": 2, "j": 2},
+        compdat or reentry_records(),
+        wpimult_records=wpimult,
+        current_time=current_time,
+    )
+
+
+def test_a_reentered_connection_is_one_connection_at_a_time():
+    from bores.wells.base import WellStatus
+
+    early = load_reentered_well(current_time=0.0)
+    assert [(p.schedule_status, p.skin) for p in early.perforations] == [
+        (WellStatus.ACTIVE, 0.0),
+        (WellStatus.PENDING, 5.0),
+    ]
+    for time in (10.0, 15.0):
+        later = load_reentered_well(current_time=time)
+        assert [(p.schedule_status, p.skin) for p in later.perforations] == [
+            (WellStatus.ACTIVE, 5.0)
+        ]
+
+
+def test_wpimult_applies_to_the_connection_version_in_effect_and_resets_on_reentry():
+    wpimult = [
+        {"well": "P1", "multiplier": 0.5, "schedule_time": 5.0},
+        {"well": "P1", "multiplier": 0.8, "schedule_time": 12.0},
+    ]
+    before = load_reentered_well(current_time=7.0, wpimult=wpimult)
+    assert [p.connection_factor_multiplier for p in before.perforations] == [0.5, None]
+    during = load_reentered_well(current_time=11.0, wpimult=wpimult)
+    assert [p.connection_factor_multiplier for p in during.perforations] == [None]
+    after = load_reentered_well(current_time=20.0, wpimult=wpimult)
+    assert [p.connection_factor_multiplier for p in after.perforations] == [pytest.approx(0.8)]
+
+
+def test_wpimult_before_a_connection_starts_is_an_error():
+    from bores.errors import ValidationError
+
+    compdat = [{**reentry_records()[0], "schedule_time": 20.0}]
+    wpimult = [{"well": "P1", "multiplier": 0.5, "schedule_time": 5.0}]
+    with pytest.raises(ValidationError, match="in effect"):
+        load_reentered_well(current_time=6.0, compdat=compdat, wpimult=wpimult)
+
+
+def test_overlapping_but_different_layer_ranges_cannot_be_reentered():
+    from bores.errors import NotSupportedError
+
+    base = reentry_records()[0]
+    compdat = [
+        {**base, "k1": 1, "k2": 3, "schedule_time": 0.0},
+        {**base, "k1": 2, "k2": 2, "schedule_time": 10.0},
+    ]
+    with pytest.raises(NotSupportedError, match="overlap"):
+        load_reentered_well(current_time=0.0, compdat=compdat)
+
+
+def reentered_compiled_system():
+    import attrs
+
+    from bores.grids.factories.cartesian import make_cartesian_grid
+    from bores.types import Orientation
+    from bores.wells.base import WellStatus
+    from bores.wells.compile import compile_well_system
+    from bores.wells.factories import make_producer, make_well_controls, make_wells
+
+    grid = make_cartesian_grid(nx=1, ny=1, nz=3, dx=50.0, dy=50.0, dz=50.0)
+    well, control = make_producer(
+        "P1", surface_location=(25.0, 25.0), perforation_depths=(0.0, 150.0), target_bhp=1000.0
+    )
+    first = well.perforations[0]
+    versions = (
+        first,
+        attrs.evolve(first, skin=5.0, schedule_status=WellStatus.PENDING),
+        attrs.evolve(first, skin=-2.0, schedule_status=WellStatus.PENDING),
+    )
+    compiled = compile_well_system(
+        make_wells(attrs.evolve(well, perforations=versions)),
+        make_well_controls(P1=control),
+        grid,
+        permeabilities={orientation: np.full(3, 100.0) for orientation in Orientation},
+    )
+    return types.SimpleNamespace(wells=compiled, reservoir=types.SimpleNamespace(grid=grid))
+
+
+def test_activating_a_reentered_connection_swaps_versions_in_order():
+    from bores.schedule.base import ScheduleContext
+    from bores.wells.schedule import ActivateCompletions
+
+    model = reentered_compiled_system()
+    statuses = model.wells.perforations.schedule_statuses
+    assert statuses.tolist() == [1, 1, 1, 0, 0, 0, 0, 0, 0]
+    swap = ActivateCompletions(well_names=("P1",), i=1, j=1, k1=1, k2=3)
+    swap(model, ScheduleContext(time=10.0))
+    assert statuses.tolist() == [0, 0, 0, 1, 1, 1, 0, 0, 0]
+    swap(model, ScheduleContext(time=20.0))
+    assert statuses.tolist() == [0, 0, 0, 0, 0, 0, 1, 1, 1]
+    swap(model, ScheduleContext(time=30.0))
+    assert statuses.tolist() == [0, 0, 0, 0, 0, 0, 1, 1, 1]
+
+
+def test_connection_multipliers_and_targeted_status_changes_skip_connections_not_in_effect():
+    from bores.schedule.base import ScheduleContext
+    from bores.wells.schedule import (
+        ActivateCompletions,
+        MultiplyConnectionFactors,
+        ShutInWells,
+    )
+
+    model = reentered_compiled_system()
+    perforations = model.wells.perforations
+    base_index = perforations.well_indices.copy()
+    MultiplyConnectionFactors(well_names=("P1",), multiplier=0.5)(model, ScheduleContext(time=5.0))
+    assert perforations.well_indices[:3].tolist() == pytest.approx((base_index[:3] * 0.5).tolist())
+    assert perforations.well_indices[3:].tolist() == pytest.approx(base_index[3:].tolist())
+
+    ShutInWells(well_names=("P1",), i=1, j=1, k1=1, k2=3)(model, ScheduleContext(time=6.0))
+    assert perforations.completion_statuses.tolist() == [0, 0, 0, 1, 1, 1, 1, 1, 1]
+
+    ShutInWells(well_names=("P1",))(model, ScheduleContext(time=7.0))
+    assert perforations.completion_statuses.tolist() == [0] * 9
+
+    ActivateCompletions(well_names=("P1",), i=1, j=1, k1=1, k2=3)(
+        model, ScheduleContext(time=10.0)
+    )
+    assert perforations.well_indices[3:6].tolist() == pytest.approx(base_index[3:6].tolist())

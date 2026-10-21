@@ -30,6 +30,7 @@ from bores.wells.compile import (
     CompiledWellSystem,
     LimitKind,
     WellKind,
+    get_well_status_tag,
 )
 from bores.wells.controls import (
     EconomicQuantity,
@@ -253,6 +254,7 @@ def get_matching_connection_rows(
     grid: Grid | None = None,
     well_name: str | None = None,
     require_match: Boolean = True,
+    active_only: Boolean = False,
 ) -> IntArray[OneDimension]:
     """
     Selects the connections of a well that a deck-style `(i, j, k1, k2)` target names.
@@ -270,12 +272,16 @@ def get_matching_connection_rows(
     :param grid: Required when `(i, j, k1, k2)` targets specific connections.
     :param well_name: The well's name, for an error message.
     :param require_match: Whether a target that selects no connection is an error.
+    :param active_only: Whether to leave out connections not yet in effect, such as one that
+        starts later or one a later `COMPDAT` has replaced.
     :returns: The selected connection rows.
     :raises ValidationError: If connections are targeted but `grid` wasn't given, the layer
         range is incomplete or reversed, or `require_match` is set and nothing is selected.
     """
     all_rows = perforations.connection_rows(well_row=well_row)
     rows = np.arange(all_rows.start, all_rows.stop)
+    if active_only:
+        rows = rows[perforations.schedule_statuses[rows] == get_well_status_tag(WellStatus.ACTIVE)]
     if i == 0 and j == 0 and k1 == 0 and k2 == 0:
         return typing.cast(IntArray[OneDimension], rows)
 
@@ -283,7 +289,7 @@ def get_matching_connection_rows(
         raise ValidationError("A grid with dimensions is required to target specific connections.")
 
     dims = grid.dimensions
-    cells = np.asarray(perforations.get_cell_index(row=rows))
+    cells = perforations.get_cell_index(row=typing.cast(IntArray[OneDimension], rows))
     layers = cells // (dims.nx * dims.ny) + 1
     mask = match_connection_target(
         i=i,
@@ -314,6 +320,7 @@ def get_many_matching_connection_rows(
     k2: Integer,
     grid: Grid | None,
     well_names: typing.Sequence[str] | None = None,
+    active_only: Boolean = False,
 ) -> tuple[IntArray[OneDimension], list[int]]:
     """
     Selects matching connections across several wells at once.
@@ -329,6 +336,7 @@ def get_many_matching_connection_rows(
     :param k2: 1-based last layer of the range, or `0` for any layer.
     :param grid: Required when `(i, j, k1, k2)` targets specific connections.
     :param well_names: The wells' names, for an error message.
+    :param active_only: Whether to leave out connections not yet in effect.
     :returns: Every well's selected rows, concatenated in `well_rows`' order, and, in the
         same order, how many rows each well contributed (to later align a per-well value
         with the concatenated rows via `expand_values`).
@@ -344,6 +352,7 @@ def get_many_matching_connection_rows(
             k2=k2,
             grid=grid,
             require_match=False,
+            active_only=active_only,
         )
         for well_row in well_rows
     ]
@@ -449,6 +458,10 @@ class UpdateWellStatuses(Action["CompiledBlackOilModel"]):
     """
     Opens or shuts wells, or specific connections on them, all against the same targeted
     connection(s). A deck `WELOPEN` record loads as one of these.
+
+    A change to specific connections only reaches connections already in effect. A change to
+    a whole well also reaches connections that start later, so a well that is shut in stays
+    shut when they come online.
     """
 
     well_names: tuple[str, ...] = attrs.field(
@@ -497,6 +510,7 @@ class UpdateWellStatuses(Action["CompiledBlackOilModel"]):
             k2=self.k2,
             grid=grid,
             well_names=self.well_names,
+            active_only=bool(grid),
         )
         if isinstance(status, (list, tuple, np.ndarray)):
             status = expand_values(status, counts=counts)
@@ -529,6 +543,9 @@ class MultiplyConnectionFactors(Action["CompiledBlackOilModel"]):
     """
     Multiplies the connection factors of wells, or of specific connections on them, all
     against the same targeted connection(s). A deck `WPIMULT` record loads as one of these.
+
+    Only connections already in effect are scaled. One that starts later, or that a `COMPDAT`
+    re-entry replaces, begins from its own factor.
     """
 
     well_names: tuple[str, ...] = attrs.field(
@@ -579,6 +596,7 @@ class MultiplyConnectionFactors(Action["CompiledBlackOilModel"]):
             k2=self.k2,
             grid=grid,
             well_names=self.well_names,
+            active_only=True,
         )
         if isinstance(multiplier, (list, tuple, np.ndarray)):
             multiplier = expand_values(multiplier, counts=counts)
@@ -589,9 +607,13 @@ class MultiplyConnectionFactors(Action["CompiledBlackOilModel"]):
 @attrs.frozen(kw_only=True, slots=True)
 class ActivateCompletions(Action["CompiledBlackOilModel"]):
     """
-    Brings connections online, changing their schedule status from `PENDING` to `ACTIVE`,
-    all against the same targeted connection(s). A deck `COMPDAT` record that starts after
-    the run begins loads as one of these.
+    Brings connections online, all against the same targeted connection(s). A deck `COMPDAT`
+    record that starts after the run begins loads as one of these.
+
+    A connection a well already has can be re-entered by a later `COMPDAT`. Each version of it
+    then waits as `PENDING` until its own start, when this takes the version that follows the
+    one in effect and puts it in effect, taking the earlier version out of effect. A re-entered
+    connection therefore starts from its own definition, with no multiplier carried over.
     """
 
     well_names: tuple[str, ...] = attrs.field(
@@ -623,18 +645,63 @@ class ActivateCompletions(Action["CompiledBlackOilModel"]):
         :returns: `model`, with the targeted connections activated.
         """
         well_rows, wells = resolve_wells(model=model, well_names=self.well_names)
+        perforations = wells.perforations
+        active = get_well_status_tag(WellStatus.ACTIVE)
         grid = model.reservoir.grid if (self.i or self.j or self.k1 or self.k2) else None
-        rows, _ = get_many_matching_connection_rows(
-            perforations=wells.perforations,
-            well_rows=well_rows,
-            i=self.i,
-            j=self.j,
-            k1=self.k1,
-            k2=self.k2,
-            grid=grid,
-            well_names=self.well_names,
-        )
-        wells.perforations.set_schedule_status(row=rows, status=WellStatus.ACTIVE)
+        matched_any = False
+        for well_row in well_rows:
+            rows = get_matching_connection_rows(
+                perforations=perforations,
+                well_row=well_row,
+                i=self.i,
+                j=self.j,
+                k1=self.k1,
+                k2=self.k2,
+                grid=grid,
+                require_match=False,
+            )
+            if rows.size == 0:
+                continue
+            matched_any = True
+
+            # Versions of one connection cover the same cells, so the cells identify it.
+            ordinals = perforations.perforation_indices[rows]
+            versions: dict[frozenset[int], dict[int, IntArray[OneDimension]]] = {}
+            for ordinal in np.unique(ordinals):
+                ordinal_rows = typing.cast(IntArray[OneDimension], rows[ordinals == ordinal])
+                cells = frozenset(
+                    int(cell) for cell in perforations.get_cell_index(row=ordinal_rows)
+                )
+                versions.setdefault(cells, {})[int(ordinal)] = ordinal_rows
+
+            for by_ordinal in versions.values():
+                in_effect = [
+                    ordinal
+                    for ordinal, ordinal_rows in by_ordinal.items()
+                    if perforations.schedule_statuses[ordinal_rows[0]] == active
+                ]
+                latest_in_effect = max(in_effect, default=-1)
+                waiting = [
+                    ordinal
+                    for ordinal, ordinal_rows in by_ordinal.items()
+                    if perforations.schedule_statuses[ordinal_rows[0]] != active
+                    and ordinal > latest_in_effect
+                ]
+                if not waiting:
+                    continue
+                for ordinal in in_effect:
+                    perforations.set_schedule_status(
+                        row=by_ordinal[ordinal], status=WellStatus.PENDING
+                    )
+                perforations.set_schedule_status(
+                    row=by_ordinal[min(waiting)], status=WellStatus.ACTIVE
+                )
+
+        if not matched_any:
+            raise ValidationError(
+                f"None of the wells {list(self.well_names)} has a connection at "
+                f"i={self.i}, j={self.j}, k1={self.k1}, k2={self.k2}."
+            )
         return model
 
 

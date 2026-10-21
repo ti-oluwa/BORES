@@ -2,6 +2,7 @@
 Utilities for building well model definition objects from parsed Eclipse deck records.
 """
 
+import itertools
 import typing
 
 import attrs
@@ -164,6 +165,9 @@ def load_well_from_records(
             "Only the standard inflow equation ('STD') is currently supported."
         )
 
+    # Records are replayed in schedule order, so a connection re-entered later is a later
+    # version of the same connection.
+    compdat_records = sorted(compdat_records, key=lambda r: r.get("schedule_time", 0.0))
     for record in compdat_records:
         # Minus 1, to move from 1-based to 0-based indexing used internally
         i, j = record["i"], record["j"]
@@ -181,11 +185,6 @@ def load_well_from_records(
             if record.get("status", "OPEN") == "OPEN"
             else CompletionStatus.SHUT
         )
-        schedule_status = (
-            WellStatus.ACTIVE
-            if record.get("schedule_time", 0.0) <= current_time
-            else WellStatus.PENDING
-        )
         perforation_specs.append({
             "i": i,
             "j": j,
@@ -201,37 +200,76 @@ def load_well_from_records(
             "connection_factor_override": record.get("connection_factor"),
             "connection_factor_multiplier": None,
             "direction": DIRECTION_MAP.get(direction) if direction else None,
-            "schedule_status": schedule_status,
+            "start_time": record.get("schedule_time", 0.0),
+            "end_time": float("inf"),
         })
 
+    # A `COMPDAT` for a connection the well already has replaces it, so each connection can
+    # have several versions, each in effect from its own start until the next one starts.
+    # Overlapping layer ranges that are not identical would need an existing completion split
+    # in two, which is not supported.
+    versions: dict[tuple[int, int, int, int], list[dict[str, typing.Any]]] = {}
+    ranges_by_column: dict[tuple[int, int], set[tuple[int, int]]] = {}
+    for spec in perforation_specs:
+        versions.setdefault((spec["i"], spec["j"], spec["k1"], spec["k2"]), []).append(spec)
+        ranges_by_column.setdefault((spec["i"], spec["j"]), set()).add((spec["k1"], spec["k2"]))
+
+    for (column_i, column_j), ranges in ranges_by_column.items():
+        for first, second in itertools.combinations(sorted(ranges), 2):
+            if first[0] <= second[1] and second[0] <= first[1]:
+                raise NotSupportedError(
+                    f"Well {welspecs_record['well']!r} has `COMPDAT` records at i={column_i}, "
+                    f"j={column_j} for the layers {first} and {second}, which overlap without "
+                    "being the same range. Re-enter a connection with its original layer range."
+                )
+    for group in versions.values():
+        for earlier, later in itertools.pairwise(group):
+            earlier["end_time"] = later["start_time"]
+
+    def in_effect(spec: typing.Mapping[str, typing.Any], time: float) -> bool:
+        return spec["start_time"] <= time < spec["end_time"]
+
+    def select(
+        record: typing.Mapping[str, typing.Any], *, whole_well_reaches_future: bool
+    ) -> list[dict[str, typing.Any]]:
+        """The specs a `WPIMULT` or `WELOPEN` record acts on, as of its own time."""
+        time = record.get("schedule_time", 0.0)
+        i, j = record.get("i", 0), record.get("j", 0)
+        k1, k2 = record.get("k1", 0), record.get("k2", 0)
+        if whole_well_reaches_future and i == 0 and j == 0 and k1 == 0 and k2 == 0:
+            # A shut-in well stays shut when a completion not yet started comes online.
+            return [spec for spec in perforation_specs if spec["end_time"] > time]
+        return [
+            spec
+            for spec in perforation_specs
+            if in_effect(spec, time)
+            and match_connection_target(
+                i=i,
+                j=j,
+                k1=k1,
+                k2=k2,
+                connection_i=spec["i"],
+                connection_j=spec["j"],
+                connection_k1=spec["k1"],
+                connection_k2=spec["k2"],
+            )
+        ]
+
     if wpimult_records:
-        # Every `WPIMULT` up to `current_time` scales the connections it targets, and they
-        # accumulate: two of 0.5 on one connection leave it at 0.25. Later ones are left to
-        # the schedule, which applies them at their own time.
+        # Every `WPIMULT` up to `current_time` scales the connections in effect at its time, and
+        # they accumulate: two of 0.5 on one connection leave it at 0.25. A connection that has
+        # not started yet is not scaled, and re-entering a connection starts it from a fresh
+        # factor. Later records are left to the schedule, which applies them at their own time.
         for record in sorted(
             (r for r in wpimult_records if r.get("schedule_time", 0.0) <= current_time),
             key=lambda r: r.get("schedule_time", 0.0),
         ):
-            i, j = record.get("i", 0), record.get("j", 0)
-            k1, k2 = record.get("k1", 0), record.get("k2", 0)
-            matched = [
-                spec
-                for spec in perforation_specs
-                if match_connection_target(
-                    i=i,
-                    j=j,
-                    k1=k1,
-                    k2=k2,
-                    connection_i=spec["i"],
-                    connection_j=spec["j"],
-                    connection_k1=spec["k1"],
-                    connection_k2=spec["k2"],
-                )
-            ]
+            matched = select(record, whole_well_reaches_future=False)
             if not matched:
                 raise ValidationError(
-                    f"`WPIMULT` for well {welspecs_record['well']!r} at i={i}, j={j}, "
-                    f"k1={k1}, k2={k2} matches no connection of the well."
+                    f"`WPIMULT` for well {welspecs_record['well']!r} at i={record.get('i', 0)}, "
+                    f"j={record.get('j', 0)}, k1={record.get('k1', 0)}, k2={record.get('k2', 0)} "
+                    "matches no connection of the well in effect at that time."
                 )
             for spec in matched:
                 spec["connection_factor_multiplier"] = (
@@ -239,39 +277,31 @@ def load_well_from_records(
                 ) * record["multiplier"]
 
     if welopen_records:
-        # Whole-well or per-connection open/shut events, replayed in
-        # schedule order up to current_time. A whole-well event
-        # (i=j=k1=k2=0) touches every completion; a targeted one only
-        # touches completions whose own (i, j) column and k-layer range
-        # overlap the event's k1-k2 range.
+        # Whole-well or per-connection open/shut events, replayed in schedule order up to
+        # `current_time`. A whole-well event (i=j=k1=k2=0) touches every connection, including
+        # ones that start later. A targeted one only touches connections in effect at its time
+        # whose own (i, j) column and k-layer range overlap the event's k1-k2 range.
         for record in sorted(
             (r for r in welopen_records if r.get("schedule_time", 0.0) <= current_time),
             key=lambda r: r.get("schedule_time", 0.0),
         ):
             new_status = WELOPEN_STATUS_MAP[record["status"]]
-            i, j = record.get("i", 0), record.get("j", 0)
-            k1, k2 = record.get("k1", 0), record.get("k2", 0)
-            matched = [
-                spec
-                for spec in perforation_specs
-                if match_connection_target(
-                    i=i,
-                    j=j,
-                    k1=k1,
-                    k2=k2,
-                    connection_i=spec["i"],
-                    connection_j=spec["j"],
-                    connection_k1=spec["k1"],
-                    connection_k2=spec["k2"],
-                )
-            ]
+            matched = select(record, whole_well_reaches_future=True)
             if not matched:
                 raise ValidationError(
-                    f"`WELOPEN` for well {welspecs_record['well']!r} at i={i}, j={j}, "
-                    f"k1={k1}, k2={k2} matches no connection of the well."
+                    f"`WELOPEN` for well {welspecs_record['well']!r} at i={record.get('i', 0)}, "
+                    f"j={record.get('j', 0)}, k1={record.get('k1', 0)}, k2={record.get('k2', 0)} "
+                    "matches no connection of the well in effect at that time."
                 )
             for spec in matched:
                 spec["status"] = new_status
+
+    # Versions already replaced by `current_time` are history, and are left out.
+    perforation_specs = [spec for spec in perforation_specs if spec["end_time"] > current_time]
+    for spec in perforation_specs:
+        spec["schedule_status"] = (
+            WellStatus.ACTIVE if spec["start_time"] <= current_time else WellStatus.PENDING
+        )
 
     perforations = [
         Perforation(
@@ -1519,9 +1549,11 @@ def load_schedule(
     yet due as `PENDING` rather than leaving it out (see
     `compile_well_system`'s own docstring). A `WELSPECS` after
     `compiled_at` becomes an `ActivateWells` action, and a `COMPDAT` after
-    `compiled_at` becomes an `ActivateCompletions` action. Both are just
-    status flips against rows that already exist, and not a new-row
-    allocation. Nothing here reloads or recompiles anything.
+    `compiled_at` becomes an `ActivateCompletions` action. Both act on rows
+    that already exist, and allocate no new ones. When the `COMPDAT` re-enters a
+    connection the well already has, the action takes that connection's earlier
+    version out of effect and puts the new one in. Nothing here reloads or
+    recompiles anything.
 
     Every `WECON` record with `schedule_time <= compiled_at` is assumed
     already baked into the model's economic limits at compile time (see

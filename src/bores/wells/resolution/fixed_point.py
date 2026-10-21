@@ -14,7 +14,7 @@ import typing
 import numba
 import numpy as np
 
-from bores.types import Number
+from bores.types import Boolean, Number
 from bores.wells.hydraulics.beggs_and_brill import (
     BeggsAndBrillWellbore,
 )
@@ -158,7 +158,7 @@ def accumulate_rates(
 
 
 @numba.njit(cache=True)
-def has_settled(new_total_rate: Number, total_rate: Number, tolerance: Number) -> bool:
+def has_settled(new_total_rate: Number, total_rate: Number, tolerance: Number) -> Boolean:
     """
     Whether a total rate has stopped changing.
 
