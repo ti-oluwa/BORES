@@ -6,12 +6,7 @@ from collections.abc import Collection
 from typing_extensions import TypeVar
 
 from bores.datastructures import GridDimensions
-from bores.deck.core import (
-    Deck,
-    DeckParseError,
-    resolve_source,
-    strip_comments,
-)
+from bores.deck.core import Deck, DeckParseError, resolve_source
 from bores.deck.keywords.base import Keyword, get_schedule_times
 from bores.deck.keywords.grid import (
     ACTNUM,
@@ -175,7 +170,7 @@ from bores.deck.keywords.summary import (
 from bores.deck.operators import resolve_operations
 from bores.types import TextOrPath, UnitSystem
 
-__all__ = ["DataFile", "DeckFile"]
+__all__ = ["DEFAULT_KEYWORDS", "DataFile", "DeckFile"]
 
 T = TypeVar("T")
 
@@ -364,7 +359,7 @@ class DeckFile:
     faults = df.get(k.FAULTS)  # list[dict[str, typing.Any]] or None (better typing support)
 
     # With extra keywords not in the default set:
-    df2 = DeckFile(text, keywords=DEFAULT_KEYWORDS | [MyCustomKeyword()])
+    df2 = DeckFile(text, keywords=DEFAULT_KEYWORDS | {MyCustomKeyword()})
     val = df2.get("MYCUSTOM")
     ```
 
@@ -416,9 +411,7 @@ class DeckFile:
             Do not provide this argument if you want the unit system to be auto-detected.
         :raises DeckParseError: If a file cannot be read.
         """
-        text = resolve_source(source, encoding=encoding)
-        clean_text = strip_comments(text)
-        self._deck = Deck(clean_text)
+        self._deck = Deck(resolve_source(source, encoding=encoding))
 
         self._registry = {keyword.name: keyword for keyword in keywords}
         self._cache: dict[str, typing.Any] = {}

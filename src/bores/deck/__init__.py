@@ -16,7 +16,7 @@ coord = df.get("COORD")  # ndarray (ny+1, nx+1, 6) or None
 """
 
 from bores.deck.core import Deck, DeckParseError, Record, parse_repeat_token, tokenize
-from bores.deck.file import DeckFile
+from bores.deck.file import DEFAULT_KEYWORDS, DeckFile
 from bores.deck.keywords import (
     ACTNUM,
     AQUANCON,
@@ -195,6 +195,7 @@ __all__ = [
     "COMPDAT",
     "COORD",
     "DATES",
+    "DEFAULT_KEYWORDS",
     "DENSITY",
     "DIMENS",
     "DISGAS",

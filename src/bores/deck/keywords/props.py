@@ -7,26 +7,30 @@ and relative permeability / capillary pressure curves.
 
 **PVT keywords** (return `List[List[Dict]]` - one inner list per PVT region):
 
-- `DENSITY`  - stock-tank densities (oil, water, gas) [one record per region]
-- `PVTW`     - water PVT table (ref pressure, Bw, Cw, viscosity, Cv)
-- `PVDO`     - dead-oil PVT (pressure, Bo, viscosity) tabulated
-- `PVTO`     - live-oil PVT (Rs-bracketed) tabulated
-- `PVCO`     - live-oil PVT with constant compressibility / viscosibility (row per bubble point)
-- `PVCDO`    - dead-oil PVT with constant compressibility / viscosibility (single record)
-- `PVDG`     - dry-gas PVT (pressure, Bg, viscosity) tabulated
-- `PVTG`     - wet-gas PVT (Rv-bracketed) tabulated
-- `ROCK`     - rock compressibility (ref pressure, compressibility)
-- `ROCKTAB`  - tabulated pore-volume vs. pressure compaction table
-- `AQUTAB`   - dimensionless influence function tables for `AQUCT` aquifers
+- `DENSITY`: stock-tank densities (oil, water, gas) [one record per region]
+- `PVTW`: water PVT table (ref pressure, Bw, Cw, viscosity, Cv)
+- `PVDO`: dead-oil PVT (pressure, Bo, viscosity) tabulated
+- `PVTO`: live-oil PVT (Rs-bracketed) tabulated
+- `PVCO`: live-oil PVT with constant compressibility / viscosibility (row per bubble point)
+- `PVCDO`: dead-oil PVT with constant compressibility / viscosibility (single record)
+- `PVDG`: dry-gas PVT (pressure, Bg, viscosity) tabulated
+- `PVTG`: wet-gas PVT (Rv-bracketed) tabulated
+- `ROCK`: rock compressibility (ref pressure, compressibility)
+- `ROCKTAB`: tabulated pore-volume vs. pressure compaction table
+- `AQUTAB`: dimensionless influence function tables for `AQUCT` aquifers
 
 **Relative permeability / capillary pressure keywords**:
 
-- `SWOF`  - Sw-indexed: Krw, Krow, Pcow
-- `SGOF`  - Sg-indexed: Krg, Krog, Pcog
-- `SWFN`  - Sw-indexed: Krw, Pcow (two-function family)
-- `SGFN`  - Sg-indexed: Krg, Pcog (two-function family)
-- `SOF2`  - So-indexed: Kro (two-phase oil)
-- `SOF3`  - So-indexed: Krow, Krog (three-phase oil)
+- `SWOF`: Sw-indexed: Krw, Krow, Pcow
+- `SGOF`: Sg-indexed: Krg, Krog, Pcog
+- `SWFN`: Sw-indexed: Krw, Pcow (two-function family)
+- `SGFN`: Sg-indexed: Krg, Pcog (two-function family)
+- `SOF2`: So-indexed: Kro (two-phase oil)
+- `SOF3`: So-indexed: Krow, Krog (three-phase oil)
+
+Saturation and relative permeability columns of these tables must lie in `[0, 1]`
+(capillary pressure columns are unrestricted); a value outside that range is
+rejected with a `DeckParseError` when the table is parsed.
 """
 
 import numpy as np
@@ -34,6 +38,7 @@ import numpy as np
 from bores.datastructures import GridDimensions
 from bores.deck.core import Deck, tokenize
 from bores.deck.keywords.base import Field, Table, TableKeyword
+from bores.deck.keywords.parsers import fraction
 from bores.deck.operators import Operation
 from bores.types import Number
 
@@ -78,9 +83,9 @@ system:
 
 Columns:
 
-- `oil`   - oil density at standard conditions.
-- `water` - water density at standard conditions.
-- `gas`   - gas density at standard conditions.
+- `oil`: oil density at standard conditions.
+- `water`: water density at standard conditions.
+- `gas`: gas density at standard conditions.
 
 `parse` returns `List[List[Dict]]` where each inner list
 contains a single-row table (one density record per PVT region).
@@ -101,11 +106,11 @@ PVTW = TableKeyword(
 
 Columns:
 
-- `reference_pressure`        - reference pressure (psi / bar).
-- `fvf`           - water formation volume factor at `reference_pressure` (rb/stb / rm³/sm³).
-- `compressibility`           - water compressibility (1/psi / 1/bar).
-- `viscosity`    - water viscosity at `reference_pressure` (cP).
-- `viscosibility`           - water viscosibility (1/psi / 1/bar), optional (default 0).
+- `reference_pressure`: reference pressure (psi / bar).
+- `fvf`: water formation volume factor at `reference_pressure` (rb/stb / rm³/sm³).
+- `compressibility`: water compressibility (1/psi / 1/bar).
+- `viscosity`: water viscosity at `reference_pressure` (cP).
+- `viscosibility`: water viscosibility (1/psi / 1/bar), optional (default 0).
 """
 
 
@@ -123,9 +128,9 @@ PVDO = TableKeyword(
 Each table (one per PVT region) is a sequence of rows terminated
 by `/`, with columns:
 
-- `pressure`  - oil pressure (psi / bar).
-- `fvf`        - oil formation volume factor (rb/stb / rm³/sm³).
-- `viscosity` - oil viscosity (cP).
+- `pressure`: oil pressure (psi / bar).
+- `fvf`: oil formation volume factor (rb/stb / rm³/sm³).
+- `viscosity`: oil viscosity (cP).
 
 Rows must be in ascending pressure order.
 """
@@ -149,10 +154,10 @@ Each Rs group is terminated by `/`; the table block ends with `/`.
 Columns in each data row (the `solution_gor` field is injected from the
 bracketing primary-key line):
 
-- `solution_gor`        - solution gas-oil ratio (scf/stb / sm³/sm³).
-- `pressure`  - oil pressure (psi / bar).
-- `fvf`        - oil FVF (rb/stb / rm³/sm³).
-- `viscosity` - oil viscosity (cP).
+- `solution_gor`: solution gas-oil ratio (scf/stb / sm³/sm³).
+- `pressure`: oil pressure (psi / bar).
+- `fvf`: oil FVF (rb/stb / rm³/sm³).
+- `viscosity`: oil viscosity (cP).
 """
 
 
@@ -173,11 +178,11 @@ One record per PVT region (single-row format), evaluated like `PVTW` is for wate
 
 Columns:
 
-- `reference_pressure`       - reference pressure.
-- `fvf`          - FVF at `reference_pressure`.
-- `compressibility`          - oil compressibility (1/psi / 1/bar).
-- `viscosity`   - oil viscosity at `reference_pressure`.
-- `viscosibility`          - viscosibility (optional, default 0).
+- `reference_pressure`: reference pressure.
+- `fvf`: FVF at `reference_pressure`.
+- `compressibility`: oil compressibility (1/psi / 1/bar).
+- `viscosity`: oil viscosity at `reference_pressure`.
+- `viscosibility`: viscosibility (optional, default 0).
 """
 
 
@@ -201,12 +206,12 @@ Rs is not tabulated: it follows from the row's own compressibility and viscosibi
 
 Columns:
 
-- `bubble_point_pressure` - bubble-point pressure (psi / bar).
-- `solution_gor`          - solution gas-oil ratio at that bubble point (Mscf/stb / sm³/sm³).
-- `fvf`                   - oil FVF at the bubble point (rb/stb / rm³/sm³).
-- `viscosity`             - oil viscosity at the bubble point (cP).
-- `compressibility`       - undersaturated oil compressibility `-(1/Bo)·(dBo/dP)` (1/psi / 1/bar).
-- `viscosibility`         - undersaturated oil viscosibility `(1/μ)·(dμ/dP)` (1/psi / 1/bar),
+- `bubble_point_pressure`: bubble-point pressure (psi / bar).
+- `solution_gor`: solution gas-oil ratio at that bubble point (Mscf/stb / sm³/sm³).
+- `fvf`: oil FVF at the bubble point (rb/stb / rm³/sm³).
+- `viscosity`: oil viscosity at the bubble point (cP).
+- `compressibility`: undersaturated oil compressibility `-(1/Bo)·(dBo/dP)` (1/psi / 1/bar).
+- `viscosibility`: undersaturated oil viscosibility `(1/μ)·(dμ/dP)` (1/psi / 1/bar),
     optional (default 0).
 
 Rows must be in ascending bubble-point-pressure order. For the single-record dead-oil layout
@@ -227,9 +232,9 @@ PVDG = TableKeyword(
 
 Each table (one per PVT region) contains rows:
 
-- `pressure`  - gas pressure (psi / bar).
-- `fvf`        - gas FVF (rb/Mscf / rm³/sm³).
-- `viscosity` - gas viscosity (cP).
+- `pressure`: gas pressure (psi / bar).
+- `fvf`: gas FVF (rb/Mscf / rm³/sm³).
+- `viscosity`: gas viscosity (cP).
 
 Rows must be in ascending pressure order.
 """
@@ -253,10 +258,10 @@ Mirrors the structure of `PVTO` but with pressure as the outer
 Columns in each data row (the `pressure` field is injected from the
 primary-key line):
 
-- `pressure`  - gas pressure (psi / bar).
-- `vaporized_ogr`        - vaporized oil-gas ratio (stb/Mscf / sm³/sm³).
-- `fvf`        - gas FVF (rb/Mscf / rm³/sm³).
-- `viscosity` - gas viscosity (cP).
+- `pressure`: gas pressure (psi / bar).
+- `vaporized_ogr`: vaporized oil-gas ratio (stb/Mscf / sm³/sm³).
+- `fvf`: gas FVF (rb/Mscf / rm³/sm³).
+- `viscosity`: gas viscosity (cP).
 """
 
 
@@ -270,9 +275,9 @@ ROCK = TableKeyword(
 
 Columns:
 
-- `reference_pressure` - reference pressure at which the pore volume equals the
+- `reference_pressure`: reference pressure at which the pore volume equals the
     geometrically calculated value (psi / bar).
-- `compressibility` - rock compressibility (1/psi / 1/bar).
+- `compressibility`: rock compressibility (1/psi / 1/bar).
 """
 
 ROCKTAB = TableKeyword(
@@ -289,17 +294,17 @@ ROCKTAB = TableKeyword(
 Used when rock compaction cannot be described by a single
 compressibility value. Each table (one per rock region) contains rows:
 
-- `pressure`  - pressure (psi / bar).
-- `pore_volume_multiplier`   - pore-volume multiplier at that pressure (dimensionless).
-- `transmissibility_multiplier` - transmissibility multiplier (optional, default 1.0).
+- `pressure`: pressure (psi / bar).
+- `pore_volume_multiplier`: pore-volume multiplier at that pressure (dimensionless).
+- `transmissibility_multiplier`: transmissibility multiplier (optional, default 1.0).
 """
 
 SWOF = TableKeyword(
     "SWOF",
     columns=[
-        Field("sw", np.float64),
-        Field("krw", np.float64),
-        Field("krow", np.float64),
+        Field("sw", fraction),
+        Field("krw", fraction),
+        Field("krow", fraction),
         Field("pcow", np.float64),
     ],
 )
@@ -308,10 +313,10 @@ SWOF = TableKeyword(
 
 Each table (one per saturation region) contains rows:
 
-- `sw`   - water saturation [-].
-- `krw`  - water relative permeability [-].
-- `krow` - oil relative permeability in presence of water [-].
-- `pcow` - oil-water capillary pressure Pcow = Po - Pw (psi / bar).
+- `sw`: water saturation [-].
+- `krw`: water relative permeability [-].
+- `krow`: oil relative permeability in presence of water [-].
+- `pcow`: oil-water capillary pressure Pcow = Po - Pw (psi / bar).
 
 Rows must be in ascending `sw` order.
 """
@@ -319,9 +324,9 @@ Rows must be in ascending `sw` order.
 SGOF = TableKeyword(
     "SGOF",
     columns=[
-        Field("sg", np.float64),
-        Field("krg", np.float64),
-        Field("krog", np.float64),
+        Field("sg", fraction),
+        Field("krg", fraction),
+        Field("krog", fraction),
         Field("pcog", np.float64),
     ],
 )
@@ -330,10 +335,10 @@ SGOF = TableKeyword(
 
 Each table (one per saturation region) contains rows:
 
-- `sg`   - gas saturation [-].
-- `krg`  - gas relative permeability [-].
-- `krog` - oil relative permeability in presence of gas [-].
-- `pcog` - gas-oil capillary pressure Pcog = Pg - Po (psi / bar).
+- `sg`: gas saturation [-].
+- `krg`: gas relative permeability [-].
+- `krog`: oil relative permeability in presence of gas [-].
+- `pcog`: gas-oil capillary pressure Pcog = Pg - Po (psi / bar).
 
 Rows must be in ascending `sg` order.
 """
@@ -341,8 +346,8 @@ Rows must be in ascending `sg` order.
 SWFN = TableKeyword(
     "SWFN",
     columns=[
-        Field("sw", np.float64),
-        Field("krw", np.float64),
+        Field("sw", fraction),
+        Field("krw", fraction),
         Field("pcow", np.float64),
     ],
 )
@@ -351,9 +356,9 @@ SWFN = TableKeyword(
 
 Each table contains rows:
 
-- `sw`   - water saturation [-].
-- `krw`  - water relative permeability [-].
-- `pcow` - oil-water capillary pressure (psi / bar).
+- `sw`: water saturation [-].
+- `krw`: water relative permeability [-].
+- `pcow`: oil-water capillary pressure (psi / bar).
 
 Used alongside `SOF2` or `SOF3` in the second saturation-function
 family (as opposed to the `SWOF`/`SGOF` first family).
@@ -362,8 +367,8 @@ family (as opposed to the `SWOF`/`SGOF` first family).
 SGFN = TableKeyword(
     "SGFN",
     columns=[
-        Field("sg", np.float64),
-        Field("krg", np.float64),
+        Field("sg", fraction),
+        Field("krg", fraction),
         Field("pcog", np.float64),
     ],
 )
@@ -372,17 +377,17 @@ SGFN = TableKeyword(
 
 Each table contains rows:
 
-- `sg`   - gas saturation [-].
-- `krg`  - gas relative permeability [-].
-- `pcog` - gas-oil capillary pressure (psi / bar).
+- `sg`: gas saturation [-].
+- `krg`: gas relative permeability [-].
+- `pcog`: gas-oil capillary pressure (psi / bar).
 """
 
 
 SOF2 = TableKeyword(
     "SOF2",
     columns=[
-        Field("so", np.float64),
-        Field("kro", np.float64),
+        Field("so", fraction),
+        Field("kro", fraction),
     ],
 )
 """
@@ -390,8 +395,8 @@ SOF2 = TableKeyword(
 
 Each table contains rows:
 
-- `so`  - oil saturation [-].
-- `kro` - oil relative permeability [-].
+- `so`: oil saturation [-].
+- `kro`: oil relative permeability [-].
 
 Used in two-phase (oil-water or oil-gas) runs with the second
 saturation-function family.
@@ -400,9 +405,9 @@ saturation-function family.
 SOF3 = TableKeyword(
     "SOF3",
     columns=[
-        Field("so", np.float64),
-        Field("krow", np.float64),
-        Field("krog", np.float64),
+        Field("so", fraction),
+        Field("krow", fraction),
+        Field("krog", fraction),
     ],
 )
 """
@@ -410,9 +415,9 @@ SOF3 = TableKeyword(
 
 Each table contains rows:
 
-- `so`   - oil saturation [-].
-- `krow` - oil relative permeability (water-oil system) [-].
-- `krog` - oil relative permeability (gas-oil system) [-].
+- `so`: oil saturation [-].
+- `krow`: oil relative permeability (water-oil system) [-].
+- `krog`: oil relative permeability (gas-oil system) [-].
 
 Used in three-phase runs with the second saturation-function family
 alongside `SWFN` and `SGFN`.
@@ -463,6 +468,6 @@ aquifer uses by default. An `AQUCT` record picks a table with its
 
 Columns:
 
-- `dimensionless_time`     - dimensionless time `tD`. Must increase down the table.
-- `dimensionless_pressure` - dimensionless pressure influence function `pD(tD)`.
+- `dimensionless_time`: dimensionless time `tD`. Must increase down the table.
+- `dimensionless_pressure`: dimensionless pressure influence function `pD(tD)`.
 """

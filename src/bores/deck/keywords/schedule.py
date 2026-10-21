@@ -11,30 +11,30 @@ file order alongside the `DATES`/`TSTEP` timeline.
 
 **Time advancement**:
 
-- `DATES` - see `bores.deck.keywords.base.DatesKeyword`, registered
+- `DATES`: see `bores.deck.keywords.base.DatesKeyword`, registered
   here as part of the SCHEDULE keyword set.
-- `TSTEP` - see `bores.deck.keywords.base.TStepKeyword`, likewise.
+- `TSTEP`: see `bores.deck.keywords.base.TStepKeyword`, likewise.
 
 **Well/group definition**:
 
-- `WELSPECS` - declare a well (location, group, preferred phase).
-- `COMPDAT`  - declare/modify well connections (completions).
-- `GRUPTREE` - declare the group hierarchy.
+- `WELSPECS`: declare a well (location, group, preferred phase).
+- `COMPDAT`: declare/modify well connections (completions).
+- `GRUPTREE`: declare the group hierarchy.
 
 **Well/group control**:
 
-- `WCONPROD` - producer rate/pressure targets.
-- `WCONINJE` - injector rate/pressure targets.
-- `WELOPEN`  - open/shut/stop a well or specific connections.
-- `WELTARG`  - modify a single control target on an existing well.
-- `WPIMULT`  - well productivity-index multiplier.
-- `GCONPROD` - group production targets/guide rates.
-- `GCONINJE` - group injection targets.
+- `WCONPROD`: producer rate/pressure targets.
+- `WCONINJE`: injector rate/pressure targets.
+- `WELOPEN`: open/shut/stop a well or specific connections.
+- `WELTARG`: modify a single control target on an existing well.
+- `WPIMULT`: well productivity-index multiplier.
+- `GCONPROD`: group production targets/guide rates.
+- `GCONINJE`: group injection targets.
 
 **Economic limits / well testing**:
 
-- `WECON` - well economic limits (auto-shut-in thresholds).
-- `WTEST` - automatic well re-opening / testing schedule.
+- `WECON`: well economic limits (auto-shut-in thresholds).
+- `WTEST`: automatic well re-opening / testing schedule.
 """
 
 import typing
@@ -51,8 +51,8 @@ from bores.deck.keywords.base import (
     RecordKeyword,
     ScheduledRecordKeyword,
 )
+from bores.deck.keywords.parsers import preferred_phase, uppercase, yes_no
 from bores.deck.operators import Operation
-from bores.errors import ValidationError
 from bores.types import FiveDimensions, Integer, Number, NumberArray, OneDimension, TwoDimensions
 
 __all__ = [
@@ -155,18 +155,6 @@ step sizes (in the deck's declared time unit, days for FIELD/METRIC).
 """
 
 
-def parse_bool(value) -> bool:
-    if isinstance(value, bool):
-        return value
-
-    value = str(value).upper()
-    if value == "YES":
-        return True
-    if value == "NO":
-        return False
-    raise ValidationError(f"Expected 'YES' or 'NO', got {value!r}")
-
-
 WELSPECS = ScheduledRecordKeyword[str | float | bool](
     "WELSPECS",
     fields=[
@@ -177,31 +165,31 @@ WELSPECS = ScheduledRecordKeyword[str | float | bool](
         Field("reference_depth", np.float64, required=False, default=None),
         Field(
             "phase",
-            lambda v: str(v).upper(),
+            preferred_phase,
             required=False,
             default="OIL",
-            options={"OIL", "WAT", "GAS", "LIO"},
+            options={"OIL", "WATER", "GAS", "LIQ"},
         ),
         Field("drainage_radius", np.float64, required=False, default=None),
         Field(
             "inflow_equation",
-            lambda v: str(v).upper(),
+            uppercase,
             required=False,
             default="STD",
-            options={"STD", "NO"},
+            options={"STD", "NO", "R-G", "P-P", "GPP"},
         ),
         Field(
             "auto_shut",
-            lambda v: str(v).upper(),
+            uppercase,
             required=False,
             default="SHUT",
             options={"SHUT", "STOP"},
         ),
-        Field("enable_crossflow", type=parse_bool, required=False, default="YES"),
+        Field("enable_crossflow", type=yes_no, required=False, default=True),
         Field("pvt_table", int, required=False, default=0),
         Field(
             "density_calculation_method",
-            lambda v: str(v).upper(),
+            uppercase,
             required=False,
             default="SEG",
             options={"SEG", "AVG"},
@@ -218,18 +206,20 @@ later blocks to add more wells as drilling progresses).
 
 Fields:
 
-- `well`            - well name.
-- `group`           - parent group name.
-- `i` / `j`         - 1-based structured grid location of the wellhead.
-- `reference_depth`       - BHP reference depth; defaults to the first
+- `well`: well name.
+- `group`: parent group name.
+- `i` / `j`: 1-based structured grid location of the wellhead.
+- `reference_depth`: BHP reference depth; defaults to the first
   completion's mid-perforation depth when absent (`None` here).
-- `phase`           - preferred phase (`OIL`, `WATER`, `GAS`).
-- `drainage_radius` - well drainage radius for PI calculations.
-- `inflow_equation`       - inflow equation type (`STD` or `NO`).
-- `auto_shut`       - automatic shut-in behaviour (`SHUT` or `STOP`).
-- `enable_crossflow`       - whether crossflow between completions is allowed.
-- `pvt_table`       - PVT region override (`0` = use cell's `PVTNUM`).
-- `density_calculation_method`    - wellbore density calculation method (`SEG` or `AVG`).
+- `phase`: preferred phase (`OIL`, `WATER`, `GAS`, `LIQ`). `WAT` is accepted
+  and returned as `WATER`.
+- `drainage_radius`: well drainage radius for PI calculations.
+- `inflow_equation`: inflow equation type (`STD`, `NO`, `R-G`, `P-P`, or `GPP`).
+- `auto_shut`: automatic shut-in behaviour (`SHUT` or `STOP`).
+- `enable_crossflow`: whether crossflow between completions is allowed (`YES` or
+  `NO`, returned as a `bool`). `True` if omitted.
+- `pvt_table`: PVT region override (`0` = use cell's `PVTNUM`).
+- `density_calculation_method`: wellbore density calculation method (`SEG` or `AVG`).
 """
 
 COMPDAT = ScheduledRecordKeyword[str | float](
@@ -242,10 +232,10 @@ COMPDAT = ScheduledRecordKeyword[str | float](
         Field("k2", int),
         Field(
             "status",
-            lambda v: str(v).upper(),
+            uppercase,
             required=False,
             default="OPEN",
-            options={"OPEN", "SHUT", "STOP", "AUTO"},
+            options={"OPEN", "SHUT", "AUTO"},
         ),
         Field("saturation_table", int, required=False, default=0),
         Field("connection_factor", np.float64, required=False, default=None),
@@ -255,12 +245,12 @@ COMPDAT = ScheduledRecordKeyword[str | float](
         Field("d_factor", np.float64, required=False, default=0.0),
         Field(
             "direction",
-            lambda v: str(v).upper(),
+            uppercase,
             required=False,
             default="Z",
             options={"X", "Y", "Z"},
         ),
-        Field("kh_multiplier", np.float64, required=False, default=1.0),
+        Field("pressure_equivalent_radius", np.float64, required=False, default=None),
     ],
 )
 """
@@ -274,22 +264,23 @@ schedule.
 
 Fields:
 
-- `well`                - well name.
-- `i` / `j`             - 1-based structured grid column of the connection.
-- `k1` / `k2`           - 1-based top/bottom layer of the connection
+- `well`: well name.
+- `i` / `j`: 1-based structured grid column of the connection.
+- `k1` / `k2`: 1-based top/bottom layer of the connection
   interval (a single-layer connection has `k1 == k2`).
-- `status`              - `OPEN` or `SHUT`.
-- `saturation_table`           - saturation table number override (`0` = use
+- `status`: `OPEN`, `SHUT`, or `AUTO`.
+- `saturation_table`: saturation table number override (`0` = use
   the cell's `SATNUM`).
-- `connection_factor`   - explicit transmissibility/connection factor;
+- `connection_factor`: explicit transmissibility/connection factor;
   `None` means Eclipse computes it from geometry and `PERMX`/`PERMY`.
-- `diameter`            - wellbore diameter at this connection.
-- `kh`                  - explicit permeability-thickness product;
+- `diameter`: wellbore diameter at this connection.
+- `kh`: explicit permeability-thickness product;
   `None` means Eclipse computes it from the grid.
-- `skin`                - mechanical skin factor.
-- `d_factor`            - non-Darcy (rate-dependent) skin factor.
-- `direction`           - completion direction (`X`, `Y`, or `Z`).
-- `kh_multiplier` - additional permeability-thickness multiplier.
+- `skin`: mechanical skin factor.
+- `d_factor`: non-Darcy (rate-dependent) skin factor.
+- `direction`: completion direction (`X`, `Y`, or `Z`).
+- `pressure_equivalent_radius`: pressure-equivalent radius of the connection's grid
+  block; `None` means Eclipse computes it from the grid.
 """
 
 WELSEGS = HeaderedScheduledRecordKeyword(
@@ -301,16 +292,24 @@ WELSEGS = HeaderedScheduledRecordKeyword(
         Field("first_segment_volume", np.float64, required=False, default=None),
         Field(
             "length_depth_mode",
-            lambda v: str(v).upper(),
+            uppercase,
             required=False,
             default="INC",
             options={"INC", "ABS"},
         ),
         Field(
             "pressure_drop_model",
-            lambda v: str(v).upper(),
+            uppercase,
             required=False,
             default="HFA",
+            options={"H--", "HF-", "HFA"},
+        ),
+        Field(
+            "flow_model",
+            uppercase,
+            required=False,
+            default="HO",
+            options={"HO", "DF"},
         ),
     ],
     detail_fields=[
@@ -322,6 +321,8 @@ WELSEGS = HeaderedScheduledRecordKeyword(
         Field("depth_change", np.float64),
         Field("diameter", np.float64),
         Field("roughness", np.float64, required=False, default=0.0),
+        Field("cross_sectional_area", np.float64, required=False, default=None),
+        Field("volume", np.float64, required=False, default=None),
     ],
 )
 """
@@ -336,34 +337,41 @@ of the keyword, but is rejected where it's actually used.
 
 Header fields:
 
-- `well`                          - well name.
-- `reference_depth`               - depth of the first segment node (deck
+- `well`: well name.
+- `reference_depth`: depth of the first segment node (deck
   item 2, `DEPTH1`) - the same BHP/THP reference `WELSPECS` establishes.
-- `tubing_length_to_first_segment` - along-hole length from the wellhead
+- `tubing_length_to_first_segment`: along-hole length from the wellhead
   to the first segment node (deck item 3, `TLEN1`).
-- `first_segment_volume`          - wellbore volume of the first segment
+- `first_segment_volume`: wellbore volume of the first segment
   (deck item 4, `VOL1`); `None` means Eclipse computes it from geometry.
-- `length_depth_mode`             - `INC`: each segment record's own
+- `length_depth_mode`: `INC`: each segment record's own
   `length`/`depth_change` are relative to its outlet segment. `ABS`:
   they're cumulative from the first segment node instead.
-- `pressure_drop_model`           - which pressure-drop components apply
-  (`H`ydrostatic/`F`riction/`A`cceleration, e.g. `HFA`, `HF-`, `H--`).
+- `pressure_drop_model`: which pressure-drop components apply
+  (`H`ydrostatic/`F`riction/`A`cceleration): `HFA`, `HF-`, or `H--`.
   Parsed through but not yet consumed by `load_well_segments`.
+- `flow_model`: multiphase flow model in the segments: `HO`
+  (homogeneous) or `DF` (drift flux). Parsed through but not yet consumed by
+  `load_well_segments`.
 
 Segment record fields:
 
-- `first_segment` / `last_segment` - segment number, or an inclusive
+- `first_segment` / `last_segment`: segment number, or an inclusive
   range of them sharing this record's own values.
-- `branch`                         - which branch this segment belongs
+- `branch`: which branch this segment belongs
   to (`1` is always the main bore).
-- `outlet_segment`                 - the segment this one flows into,
+- `outlet_segment`: the segment this one flows into,
   forming the tree; the main bore's own first segment outlets to `1`
   (the reference node itself).
-- `length` / `depth_change`        - this segment's own along-hole
+- `length` / `depth_change`: this segment's own along-hole
   length and true-vertical-depth change, interpreted per
   `length_depth_mode`.
-- `diameter` / `roughness`         - tubing inner diameter and absolute
+- `diameter` / `roughness`: tubing inner diameter and absolute
   roughness for this segment.
+- `cross_sectional_area`: flow area of this segment; `None` means
+  Eclipse computes it from `diameter`.
+- `volume`: wellbore volume of this segment; `None`
+  means Eclipse computes it from the area and length.
 """
 
 COMPSEGS = HeaderedScheduledRecordKeyword(
@@ -391,15 +399,15 @@ does not attempt to support yet (see its own docstring).
 
 Header field:
 
-- `well` - well name; the only thing on this record.
+- `well`: well name; the only thing on this record.
 
 Detail fields:
 
-- `i` / `j` / `k`         - the `COMPDAT` connection this record refines
+- `i` / `j` / `k`: the `COMPDAT` connection this record refines
   - must already exist.
-- `branch`                - which `WELSEGS` branch this connection maps
+- `branch`: which `WELSEGS` branch this connection maps
   onto; only `1` (the main bore) is supported by `load_well_segments` today.
-- `start_length` / `end_length` - along-branch length where this
+- `start_length` / `end_length`: along-branch length where this
   connection starts/ends. `None` (`1*`) means Eclipse would derive it
   from the connection's own grid-block geometry; `load_well_segments`
   requires both explicitly instead of attempting that derivation.
@@ -411,14 +419,14 @@ WCONPROD = ScheduledRecordKeyword[str | float](
         Field("well", str),
         Field(
             "status",
-            lambda v: str(v).upper(),
+            uppercase,
             required=False,
             default="OPEN",
             options={"OPEN", "SHUT", "STOP", "AUTO"},
         ),
         Field(
             "control_mode",
-            lambda v: str(v).upper(),
+            uppercase,
             required=False,
             default=None,
             options={
@@ -449,19 +457,19 @@ WCONPROD = ScheduledRecordKeyword[str | float](
 
 Fields:
 
-- `well`         - well name.
-- `status`       - `OPEN`, `SHUT`, `STOP`, or `AUTO`.
-- `control_mode` - the constraint Eclipse actively controls the well
+- `well`: well name.
+- `status`: `OPEN`, `SHUT`, `STOP`, or `AUTO`.
+- `control_mode`: the constraint Eclipse actively controls the well
   by (e.g. `ORAT`, `WRAT`, `GRAT`, `LRAT`, `RESV`, `BHP`, `THP`,
   `GRUP`); `None` is only valid if the well is shut/stopped.
-- `oil_rate` / `water_rate` / `gas_rate` / `liquid_rate` - oil/water/gas/liquid rate
+- `oil_rate` / `water_rate` / `gas_rate` / `liquid_rate`: oil/water/gas/liquid rate
   upper-limit targets.
-- `reservoir_volume_rate`         - reservoir-volume rate upper-limit target.
-- `bhp` / `thp`  - bottom-hole / tubing-head pressure limits;
+- `reservoir_volume_rate`: reservoir-volume rate upper-limit target.
+- `bhp` / `thp`: bottom-hole / tubing-head pressure limits;
   `None` means no limit.
-- `vfp_table`    - VFP (vertical flow performance) table number for
+- `vfp_table`: VFP (vertical flow performance) table number for
   THP-to-BHP conversion (`0` = none assigned).
-- `alq`          - artificial lift quantity the well currently operates at, used with the
+- `alq`: artificial lift quantity the well currently operates at, used with the
   VFP table's own ALQ axis (`0` = no artificial lift). The `VFPPROD` table only defines
   how BHP varies with ALQ; this item is the value the well actually runs at.
 """
@@ -472,19 +480,19 @@ WCONINJE = ScheduledRecordKeyword[str | float](
         Field("well", str),
         Field(
             "injector_type",
-            lambda v: str(v).upper(),
-            options={"OIL", "WATER", "GAS"},
+            uppercase,
+            options={"OIL", "WATER", "GAS", "MULTI"},
         ),
         Field(
             "status",
-            lambda v: str(v).upper(),
+            uppercase,
             required=False,
             default="OPEN",
             options={"OPEN", "SHUT", "STOP", "AUTO"},
         ),
         Field(
             "control_mode",
-            lambda v: str(v).upper(),
+            uppercase,
             required=False,
             default=None,
             options={
@@ -500,6 +508,7 @@ WCONINJE = ScheduledRecordKeyword[str | float](
         Field("bhp", np.float64, required=False, default=None),
         Field("thp", np.float64, required=False, default=None),
         Field("vfp_table", int, required=False, default=0),
+        Field("vaporized_oil_concentration", np.float64, required=False, default=None),
     ],
 )
 """
@@ -509,17 +518,19 @@ fluid type.
 
 Fields:
 
-- `well`          - well name.
-- `injector_type` - injected fluid: `WATER`, `GAS`, or `OIL`.
-- `status`        - `OPEN`, `SHUT`, `STOP`, or `AUTO`.
-- `control_mode`  - the constraint Eclipse actively controls the well
+- `well`: well name.
+- `injector_type`: injected fluid: `WATER`, `GAS`, `OIL`, or `MULTI`.
+- `status`: `OPEN`, `SHUT`, `STOP`, or `AUTO`.
+- `control_mode`: the constraint Eclipse actively controls the well
   by (`RATE`, `RESV`, `BHP`, `THP`, or `GRUP`).
-- `rate`          - surface injection rate upper-limit target.
-- `reservoir_volume_rate`          - reservoir-volume injection rate upper-limit target.
-- `bhp` / `thp`   - bottom-hole / tubing-head pressure limits;
+- `rate`: surface injection rate upper-limit target.
+- `reservoir_volume_rate`: reservoir-volume injection rate upper-limit target.
+- `bhp` / `thp`: bottom-hole / tubing-head pressure limits;
   `None` means no limit.
-- `vfp_table`     - VFP table number for THP-to-BHP conversion
+- `vfp_table`: VFP table number for THP-to-BHP conversion
   (`0` = none assigned).
+- `vaporized_oil_concentration`: vaporized oil concentration (`Rv`) of the injected
+  gas; `None` means Eclipse uses its default.
 """
 
 WELOPEN = ScheduledRecordKeyword[str | int](
@@ -528,8 +539,8 @@ WELOPEN = ScheduledRecordKeyword[str | int](
         Field("well", str),
         Field(
             "status",
-            lambda v: str(v).upper(),
-            options={"OPEN", "SHUT", "STOP", "AUTO"},
+            uppercase,
+            options={"OPEN", "SHUT", "STOP", "AUTO", "POPN"},
         ),
         Field("i", int, required=False, default=0),
         Field("j", int, required=False, default=0),
@@ -543,9 +554,10 @@ WELOPEN = ScheduledRecordKeyword[str | int](
 
 Fields:
 
-- `well`   - well name.
-- `status` - `OPEN`, `SHUT`, `STOP`, or `AUTO`.
-- `i` / `j` / `k1` / `k2` - optional connection location/layer range to
+- `well`: well name.
+- `status`: `OPEN`, `SHUT`, `STOP`, `AUTO`, or `POPN` (open, and put the well's
+  completions back on their own status).
+- `i` / `j` / `k1` / `k2`: optional connection location/layer range to
   restrict the action to a single connection (or range of layers) rather
   than the whole well; all default to `0`, meaning "whole well".
 
@@ -560,7 +572,7 @@ WELTARG = ScheduledRecordKeyword[str | float](
         Field("well", str),
         Field(
             "control_mode",
-            lambda v: str(v).upper(),
+            uppercase,
             options={
                 "ORAT",
                 "BHP",
@@ -568,7 +580,11 @@ WELTARG = ScheduledRecordKeyword[str | float](
                 "WRAT",
                 "LRAT",
                 "GRAT",
+                "CRAT",
                 "THP",
+                "VFP",
+                "LIFT",
+                "GUID",
                 "GRUP",
             },
         ),
@@ -582,9 +598,10 @@ its full `WCONPROD` / `WCONINJE` record.
 
 Fields:
 
-- `well`         - well name.
-- `control_mode` - target being modified (e.g. `ORAT`, `BHP`, `RESV`).
-- `value`        - new value for that target.
+- `well`: well name.
+- `control_mode`: target being modified: `ORAT`, `WRAT`, `GRAT`, `LRAT`, `CRAT`,
+  `RESV`, `BHP`, `THP`, `VFP`, `LIFT`, `GUID`, or `GRUP`.
+- `value`: new value for that target.
 """
 
 WPIMULT = ScheduledRecordKeyword[str | float](
@@ -604,9 +621,9 @@ WPIMULT = ScheduledRecordKeyword[str | float](
 
 Fields:
 
-- `well`       - well name.
-- `multiplier` - PI multiplier applied on top of the existing value.
-- `i` / `j` / `k1` / `k2` - optional connection location to restrict the
+- `well`: well name.
+- `multiplier`: PI multiplier applied on top of the existing value.
+- `i` / `j` / `k1` / `k2`: optional connection location to restrict the
   multiplier to a single connection; all default to `0`, meaning
   "every connection on this well".
 """
@@ -628,8 +645,8 @@ group; the implicit root group is always named `'FIELD'`. Multiple
 
 Fields:
 
-- `child`  - group (or sub-tree) name being attached.
-- `parent` - parent group name (`'FIELD'` for top-level groups).
+- `child`: group (or sub-tree) name being attached.
+- `parent`: parent group name (`'FIELD'` for top-level groups).
 """
 
 GCONPROD = ScheduledRecordKeyword[str | float](
@@ -638,14 +655,14 @@ GCONPROD = ScheduledRecordKeyword[str | float](
         Field("group", str),
         Field(
             "control_mode",
-            lambda v: str(v).upper(),
+            uppercase,
             options={
                 "ORAT",
-                "BHP",
                 "RESV",
                 "WRAT",
                 "LRAT",
                 "GRAT",
+                "PRBL",
                 "FLD",
                 "NONE",
             },
@@ -656,26 +673,29 @@ GCONPROD = ScheduledRecordKeyword[str | float](
         Field("liquid_rate", np.float64, required=False, default=0.0),
         Field(
             "exceed_action",
-            lambda v: str(v).upper(),
+            uppercase,
             required=False,
             default="NONE",
-            options={"RATE", "NONE", "CON"},
+            options={"NONE", "CON", "+CON", "WELL", "PLUG", "RATE"},
         ),
+        Field("apply_to_subordinates", yes_no, required=False, default=True),
     ],
 )
 """
-`GCONPROD 'GROUP' CONTROL_MODE [orat] [wrat] [grat] [lrat] [exceed_action] / ... /`
+`GCONPROD 'GROUP' CONTROL_MODE [orat] [wrat] [grat] [lrat] [exceed_action] [apply_to_subordinates] / ... /`
 - group-level production targets / guide-rate control.
 
 Fields:
 
-- `group`         - group name.
-- `control_mode`  - constraint the group is controlled by (`ORAT`,
-  `WRAT`, `GRAT`, `LRAT`, `RESV`, `FLD`, or `NONE`).
-- `oil_rate` / `water_rate` / `gas_rate` / `liquid_rate` - oil/water/gas/liquid rate
+- `group`: group name.
+- `control_mode`: constraint the group is controlled by (`ORAT`,
+  `WRAT`, `GRAT`, `LRAT`, `RESV`, `PRBL`, `FLD`, or `NONE`).
+- `oil_rate` / `water_rate` / `gas_rate` / `liquid_rate`: oil/water/gas/liquid rate
   upper-limit targets for the group.
-- `exceed_action` - action when an individual well in the group would
-  exceed its share of the group target (`NONE`, `RATE`, `CON`, ...).
+- `exceed_action`: action when the group exceeds its target (`NONE`, `CON`,
+  `+CON`, `WELL`, `PLUG`, or `RATE`).
+- `apply_to_subordinates`: whether the targets also apply to the groups below
+  this one (`YES` or `NO`, returned as a `bool`). `True` if omitted.
 """
 
 GCONINJE = ScheduledRecordKeyword[str | float](
@@ -684,12 +704,12 @@ GCONINJE = ScheduledRecordKeyword[str | float](
         Field("group", str),
         Field(
             "injector_type",
-            lambda v: str(v).upper(),
+            uppercase,
             options={"OIL", "WATER", "GAS"},
         ),
         Field(
             "control_mode",
-            lambda v: str(v).upper(),
+            uppercase,
             options={
                 "RATE",
                 "RESV",
@@ -701,6 +721,8 @@ GCONINJE = ScheduledRecordKeyword[str | float](
         ),
         Field("rate", np.float64, required=False, default=0.0),
         Field("reservoir_volume_rate", np.float64, required=False, default=0.0),
+        Field("reinjection_fraction", np.float64, required=False, default=None),
+        Field("voidage_replacement_fraction", np.float64, required=False, default=None),
     ],
 )
 """
@@ -709,14 +731,18 @@ GCONINJE = ScheduledRecordKeyword[str | float](
 
 Fields:
 
-- `group`         - group name.
-- `injector_type` - injected fluid: `WATER`, `GAS`, or `OIL`.
-- `control_mode`  - constraint the group is controlled by (`RATE`,
+- `group`: group name.
+- `injector_type`: injected fluid: `WATER`, `GAS`, or `OIL`.
+- `control_mode`: constraint the group is controlled by (`RATE`,
   `RESV`, `VREP`, `REIN`, or `FLD`).
-- `rate`          - surface injection rate upper-limit target for the
+- `rate`: surface injection rate upper-limit target for the
   group.
-- `reservoir_volume_rate`          - reservoir-volume injection rate upper-limit target
+- `reservoir_volume_rate`: reservoir-volume injection rate upper-limit target
   for the group.
+- `reinjection_fraction`: fraction of the produced fluid reinjected, used by `REIN`
+  control; `None` if omitted.
+- `voidage_replacement_fraction`: fraction of the produced reservoir voidage replaced,
+  used by `VREP` control; `None` if omitted.
 """
 
 WECON = ScheduledRecordKeyword[str | float | bool](
@@ -724,42 +750,45 @@ WECON = ScheduledRecordKeyword[str | float | bool](
     fields=[
         Field("well", str),
         Field("min_oil_rate", np.float64, required=False, default=0.0),
+        Field("min_gas_rate", np.float64, required=False, default=0.0),
         Field("max_water_cut", np.float64, required=False, default=None),
         Field("max_gor", np.float64, required=False, default=None),
         Field("max_wgr", np.float64, required=False, default=None),
         Field(
             "workover_action",
-            lambda v: str(v).upper(),
+            uppercase,
             required=False,
-            default="WELL",
-            options={"CON", "+CON", "WELL", "PLUG"},
+            default="NONE",
+            options={"NONE", "CON", "+CON", "WELL", "PLUG"},
         ),
         Field(
             "end_run",
-            type=parse_bool,
+            type=yes_no,
             required=False,
             default=False,
         ),
     ],
 )
 """
-`WECON 'WELL' [min_oil_rate] [max_water_cut] [max_gor] [max_wgr] [workover_action] [end_run] / ... /`
+`WECON 'WELL' [min_oil_rate] [min_gas_rate] [max_water_cut] [max_gor] [max_wgr] [workover_action] [end_run] / ... /`
 - economic limits that automatically shut in or work over a well.
 
 Fields:
 
-- `well`            - well name.
-- `min_oil_rate`    - minimum economic oil production rate; the well is
+- `well`: well name.
+- `min_oil_rate`: minimum economic oil production rate; the well is
   shut in (per `workover_action`) once production falls below this.
-- `max_water_cut`   - maximum water cut before workover/shut-in;
+- `min_gas_rate`: minimum economic gas production rate; handled the same way as
+  `min_oil_rate`.
+- `max_water_cut`: maximum water cut before workover/shut-in;
   `None` means no limit.
-- `max_gor`         - maximum gas-oil ratio before workover/shut-in;
+- `max_gor`: maximum gas-oil ratio before workover/shut-in;
   `None` means no limit.
-- `max_wgr`         - maximum water-gas ratio before workover/shut-in;
+- `max_wgr`: maximum water-gas ratio before workover/shut-in;
   `None` means no limit.
-- `workover_action` - action taken when a limit is breached (`NONE`,
-  `CON`, `+CON`, `WELL`, `PLUG`).
-- `end_run`    - whether breaching this limit should end the
+- `workover_action`: action taken when a limit is breached (`NONE`,
+  `CON`, `+CON`, `WELL`, `PLUG`). `NONE` if omitted.
+- `end_run`: whether breaching this limit should end the
   simulation run (`YES` or `NO`).
 """
 
@@ -768,7 +797,7 @@ WTEST = ScheduledRecordKeyword[str | float](
     fields=[
         Field("well", str),
         Field("interval", np.float64),
-        Field("reason", lambda v: str(v).upper(), required=False, default="PEW"),
+        Field("reason", uppercase, required=False, default="PEW"),
     ],
 )
 """
@@ -778,10 +807,10 @@ shut in for an economic or operational reason.
 
 Fields:
 
-- `well`     - well name.
-- `interval` - time between re-open attempts, in the deck's declared
+- `well`: well name.
+- `interval`: time between re-open attempts, in the deck's declared
   time unit.
-- `reason`   - which shut-in reason(s) this test schedule applies to,
+- `reason`: which shut-in reason(s) this test schedule applies to,
   as a string of one-letter codes: `P` (economic), `E` (group control
   efficiency), `W` (workover/economic limit, `WECON`); default `"PEW"`
   applies to all three.
@@ -793,22 +822,35 @@ WGRUPCON = ScheduledRecordKeyword[str | float](
         Field(name="well", type=str),
         Field(
             name="available_for_group_control",
-            type=lambda s: s.upper() == "YES",
+            type=yes_no,
             required=False,
             default=True,
         ),
         Field(name="guide_rate", type=np.float64, required=False, default=None),
         Field(
             name="guide_rate_phase",
-            type=lambda v: str(v).upper(),
+            type=uppercase,
             required=False,
             default=None,
-            options={"OIL", "WAT", "GAS", "LIQ", "RES", "COMB", "FORM"},
+            options={
+                "OIL",
+                "WAT",
+                "GAS",
+                "LIQ",
+                "RES",
+                "COMB",
+                "WGA",
+                "CVAL",
+                "RAT",
+                "FORM",
+                "UNDEFINED",
+            },
         ),
+        Field(name="scaling_factor", type=np.float64, required=False, default=1.0),
     ],
 )
 """
-`WGRUPCON 'WELL' [available_for_group_control] [guide_rate] [guide_rate_phase] / ... /`
+`WGRUPCON 'WELL' [available_for_group_control] [guide_rate] [guide_rate_phase] [scaling_factor] / ... /`
 - configure whether a well participates in group control and, optionally,
 assign an explicit guide rate.
 
@@ -819,13 +861,14 @@ controls.
 
 Fields:
 
-- `well`                        - well name.
-- `available_for_group_control` - whether the well may participate in
-  automatic group control (`YES`/`NO`); defaults to `YES`.
-- `guide_rate`                  - explicit guide rate used when allocating
+- `well`: well name.
+- `available_for_group_control`: whether the well may participate in
+  automatic group control (`YES`/`NO`, returned as a `bool`); `True` if omitted.
+- `guide_rate`: explicit guide rate used when allocating
   group targets; `None` means Eclipse computes or inherits the guide rate.
-- `guide_rate_phase`            - phase used for the guide rate (`OIL`,
-  `WAT`, `GAS`, `LIQ`, `RES`, `COMB`, or `FORM`).
+- `guide_rate_phase`: phase used for the guide rate (`OIL`,
+  `WAT`, `GAS`, `LIQ`, `RES`, `COMB`, `WGA`, `CVAL`, `RAT`, `FORM`, or `UNDEFINED`).
+- `scaling_factor`: multiplier applied to the guide rate. `1.0` if omitted.
 """
 
 GECON = ScheduledRecordKeyword[str | float | bool](
@@ -839,14 +882,14 @@ GECON = ScheduledRecordKeyword[str | float | bool](
         Field(name="max_wgr", type=np.float64, required=False, default=None),
         Field(
             name="workover_procedure",
-            type=lambda v: str(v).upper(),
+            type=uppercase,
             required=False,
             default="NONE",
             options={"NONE", "CON", "+CON", "WELL", "PLUG", "RATE"},
         ),
         Field(
             name="end_run",
-            type=lambda s: s.upper() == "YES",
+            type=yes_no,
             required=False,
             default=False,
         ),
@@ -862,15 +905,15 @@ workover action on wells within the group. These limits are analogous to
 
 Fields:
 
-- `group`                  - group name.
-- `min_oil_rate`           - minimum economic oil production rate.
-- `min_gas_rate`           - minimum economic gas production rate.
-- `max_water_cut`          - maximum allowable water cut.
-- `max_gor`                - maximum allowable gas-oil ratio.
-- `max_wgr`    - maximum allowable water-gas ratio.
-- `workover_procedure`     - action taken when a limit is exceeded
+- `group`: group name.
+- `min_oil_rate`: minimum economic oil production rate.
+- `min_gas_rate`: minimum economic gas production rate.
+- `max_water_cut`: maximum allowable water cut.
+- `max_gor`: maximum allowable gas-oil ratio.
+- `max_wgr`: maximum allowable water-gas ratio.
+- `workover_procedure`: action taken when a limit is exceeded
   (`NONE`, `CON`, `+CON`, `WELL`, `PLUG`, or `RATE`).
-- `end_run`                - whether exceeding the limit terminates the
+- `end_run`: whether exceeding the limit terminates the
   simulation (`YES` or `NO`).
 """
 
@@ -891,55 +934,50 @@ overrides that calculation with a user-specified target value.
 
 Fields:
 
-- `well`      - well name.
-- `productivity_index` - explicit productivity index assigned to the well.
+- `well`: well name.
+- `productivity_index`: explicit productivity index assigned to the well.
 """
 
 WPAVE = RecordKeyword[str | float | bool](
     "WPAVE",
     fields=[
         Field(name="f1", type=np.float64, required=False, default=1.0),
-        Field(
-            name="procedure",
-            type=lambda v: str(v).upper(),
-            required=False,
-            default="WBP4",
-            options={"WBP", "WBP4", "WBP5", "WBP9", "PBHP"},
-        ),
         Field(name="f2", type=np.float64, required=False, default=0.0),
         Field(
-            name="depth_correction",
-            type=lambda v: str(v).upper(),
+            name="connections",
+            type=uppercase,
             required=False,
-            default="WELL",
-            options={"WELL", "RES"},
+            default="OPEN",
+            options={"OPEN", "ALL"},
         ),
         Field(
-            name="open_connections_only",
-            type=parse_bool,
+            name="depth_correction",
+            type=uppercase,
             required=False,
-            default=True,
+            default="WELL",
+            options={"WELL", "RES", "NONE"},
         ),
     ],
 )
 """
-`WPAVE [f1] [procedure] [f2] [depth_correction] [open_connections_only] /`
-- configure how average well pressure is calculated.
+`WPAVE [f1] [f2] [connections] [depth_correction] /`
+- configure how the average pressure around a well is calculated.
 
-Average well pressure is used by several well-control algorithms and
-reporting functions. This keyword selects the averaging procedure and
-controls whether only open completions contribute to the calculation.
+The average well pressure is used by several well-control algorithms and
+reporting functions. This keyword sets the weighting between connection-factor and
+pore-volume averaging, and which connections contribute.
 
 Fields:
 
-- `f1`                    - procedure-specific weighting factor.
-- `procedure`             - averaging method (`WBP`, `WBP4`, `WBP5`,
-  `WBP9`, or `PBHP`).
-- `f2`                    - additional procedure-specific parameter.
-- `depth_correction`      - apply depth correction using either the well
-  reference depth (`WELL`) or reservoir depth (`RES`).
-- `open_connections_only` - whether only open completions contribute to the
-  average pressure (`YES` or `NO`); defaults to `YES`.
+- `f1`: weighting factor between connection-factor weighting and
+  pore-volume weighting. `1.0` if omitted.
+- `f2`: weighting factor applied to the connection-factor average
+  of the cells around each connection. `0.0` if omitted.
+- `connections`: which connections contribute to the average, `OPEN` for open
+  connections only or `ALL` for every connection. `OPEN` if omitted.
+- `depth_correction`: the depth the average pressure is corrected to: the well
+  reference depth (`WELL`), the reservoir depth (`RES`), or no correction (`NONE`).
+  `WELL` if omitted.
 """
 
 WCONHIST = ScheduledRecordKeyword[str | float](
@@ -948,17 +986,17 @@ WCONHIST = ScheduledRecordKeyword[str | float](
         Field(name="well", type=str),
         Field(
             name="status",
-            type=lambda v: str(v).upper(),
+            type=uppercase,
             required=False,
             default="OPEN",
-            options={"OPEN", "SHUT"},
+            options={"OPEN", "SHUT", "STOP", "AUTO"},
         ),
         Field(
             name="control_mode",
-            type=lambda v: str(v).upper(),
+            type=uppercase,
             required=False,
             default="RESV",
-            options={"ORAT", "WRAT", "GRAT", "RESV", "BHP"},
+            options={"ORAT", "WRAT", "GRAT", "LRAT", "RESV", "BHP"},
         ),
         Field(name="oil_rate", type=np.float64, required=False, default=0.0),
         Field(name="water_rate", type=np.float64, required=False, default=0.0),
@@ -979,17 +1017,17 @@ attempts to reproduce during history matching.
 
 Fields:
 
-- `well`         - well name.
-- `status`       - well status (`OPEN` or `SHUT`).
-- `control_mode` - historical control mode (`ORAT`, `WRAT`, `GRAT`,
+- `well`: well name.
+- `status`: well status (`OPEN`, `SHUT`, `STOP`, or `AUTO`).
+- `control_mode`: historical control mode (`ORAT`, `WRAT`, `GRAT`, `LRAT`,
   `RESV`, or `BHP`).
-- `oil_rate`         - observed oil production rate.
-- `water_rate`         - observed water production rate.
-- `gas_rate`         - observed gas production rate.
-- `vfp_table`    - VFP table used for THP/BHP calculations.
-- `alq`          - artificial lift quantity.
-- `thp`          - observed tubing-head pressure.
-- `bhp`          - observed bottom-hole pressure.
+- `oil_rate`: observed oil production rate.
+- `water_rate`: observed water production rate.
+- `gas_rate`: observed gas production rate.
+- `vfp_table`: VFP table used for THP/BHP calculations.
+- `alq`: artificial lift quantity.
+- `thp`: observed tubing-head pressure.
+- `bhp`: observed bottom-hole pressure.
 """
 
 WCONINJH = ScheduledRecordKeyword[str | float](
@@ -998,15 +1036,15 @@ WCONINJH = ScheduledRecordKeyword[str | float](
         Field(name="well", type=str),
         Field(
             name="phase",
-            type=lambda v: str(v).upper(),
-            options={"OIL", "WAT", "GAS"},
+            type=uppercase,
+            options={"OIL", "WAT", "WATER", "GAS"},
         ),
         Field(
             name="status",
-            type=lambda v: str(v).upper(),
+            type=uppercase,
             required=False,
             default="OPEN",
-            options={"OPEN", "SHUT"},
+            options={"OPEN", "SHUT", "STOP"},
         ),
         Field(name="rate", type=np.float64, required=False, default=0.0),
         Field(name="bhp", type=np.float64, required=False, default=None),
@@ -1014,7 +1052,7 @@ WCONINJH = ScheduledRecordKeyword[str | float](
         Field(name="vfp_table", type=int, required=False, default=None),
         Field(
             name="control_mode",
-            type=lambda v: str(v).upper(),
+            type=uppercase,
             required=False,
             default="RATE",
             options={"RATE", "BHP"},
@@ -1031,14 +1069,14 @@ during history matching.
 
 Fields:
 
-- `well`         - well name.
-- `phase`        - injected fluid (`OIL`, `WAT`, `GAS`, or `DISGAS`).
-- `status`       - injector status (`OPEN` or `SHUT`).
-- `rate`         - observed surface injection rate.
-- `bhp`          - observed bottom-hole pressure.
-- `thp`          - observed tubing-head pressure.
-- `vfp_table`    - VFP table used for THP/BHP calculations.
-- `control_mode` - historical injection control mode (`RATE` or `BHP`).
+- `well`: well name.
+- `phase`: injected fluid (`OIL`, `WAT` or `WATER`, or `GAS`).
+- `status`: injector status (`OPEN`, `SHUT`, or `STOP`).
+- `rate`: observed surface injection rate.
+- `bhp`: observed bottom-hole pressure.
+- `thp`: observed tubing-head pressure.
+- `vfp_table`: VFP table used for THP/BHP calculations.
+- `control_mode`: historical injection control mode (`RATE` or `BHP`).
 """
 
 WDFAC = ScheduledRecordKeyword[str | float](
@@ -1058,8 +1096,8 @@ and is primarily used for high-rate gas wells.
 
 Fields:
 
-- `well`     - well name.
-- `d_factor` - non-Darcy flow coefficient assigned to the well.
+- `well`: well name.
+- `d_factor`: non-Darcy flow coefficient assigned to the well.
 """
 
 
@@ -1070,7 +1108,7 @@ WLIFT = ScheduledRecordKeyword[str | float](
         Field("trigger_limit", np.float64, required=False, default=0.0),
         Field(
             "trigger_phase",
-            lambda v: str(v).upper(),
+            uppercase,
             required=False,
             default="OIL",
             options={"OIL", "GAS", "WATER", "LIQ"},
@@ -1095,18 +1133,18 @@ Item order and defaults follow OPM Flow's `WLIFT`.
 
 Fields:
 
-- `well`                  - well name or template.
-- `trigger_limit`         - rate of `trigger_phase` below which the workover is triggered
+- `well`: well name or template.
+- `trigger_limit`: rate of `trigger_phase` below which the workover is triggered
   (`0` = no rate trigger).
-- `trigger_phase`         - phase whose rate is tested against `trigger_limit`.
-- `new_vfp_table`         - VFP table number to switch to (`0` = keep the current table).
-- `new_alq`               - ALQ to apply (`0` = unchanged).
-- `new_efficiency_factor` - well efficiency factor after the workover (`0` = unchanged).
-- `water_cut_limit`       - water cut above which the workover is triggered (`0` = none).
-- `new_thp_limit`         - THP limit applied after the workover (`0` = unchanged).
-- `gas_oil_ratio_limit`   - gas-oil ratio above which the workover is triggered (`0` = none).
-- `alq_shift`             - ALQ change applied if the well still violates after the workover.
-- `thp_shift`             - THP change applied if the well still violates after the workover.
+- `trigger_phase`: phase whose rate is tested against `trigger_limit`.
+- `new_vfp_table`: VFP table number to switch to (`0` = keep the current table).
+- `new_alq`: ALQ to apply (`0` = unchanged).
+- `new_efficiency_factor`: well efficiency factor after the workover (`0` = unchanged).
+- `water_cut_limit`: water cut above which the workover is triggered (`0` = none).
+- `new_thp_limit`: THP limit applied after the workover (`0` = unchanged).
+- `gas_oil_ratio_limit`: gas-oil ratio above which the workover is triggered (`0` = none).
+- `alq_shift`: ALQ change applied if the well still violates after the workover.
+- `thp_shift`: THP change applied if the well still violates after the workover.
 
 A deck's `WLIFT` is an update to a well's lift settings, so (like `WELTARG`) it is a
 scheduled record: it takes effect at the schedule time it appears at.
@@ -1126,7 +1164,7 @@ class VFPProducerDeckTable(typing.TypedDict):
     """Meaning of the flow axis: `OIL`, `LIQ`, `GAS`, `WG` or `TM`."""
 
     water_fraction_type: str
-    """Meaning of the water axis: `WOR`, `WCT` or `WGR`."""
+    """Meaning of the water axis: `WOR`, `WCT`, `WGR` or `WWR`."""
 
     gas_fraction_type: str
     """Meaning of the gas axis: `GOR`, `GLR` or `OGR`."""
@@ -1344,21 +1382,21 @@ only defines how BHP varies with ALQ; the ALQ a well actually runs at comes from
 
 Fields:
 
-- `table_number`         - table ID referenced by `WCONPROD` / `WLIFT` via `vfp_table`.
-- `datum_depth`          - reference depth for the reported BHP values, or `None` if defaulted.
-- `flow_type`            - meaning of the flow axis (`OIL`, `LIQ`, `GAS`, `WG`, `TM`, etc.).
-- `water_fraction_type`   - meaning of the water-fraction axis (`WOR`, `WCT`, `WGR`, etc.).
-- `gas_fraction_type`    - meaning of the gas-fraction axis (`GOR`, `GLR`, `OGR`, etc.).
-- `thp_type`             - meaning of the THP axis (`THP`).
-- `alq_type`             - meaning of the ALQ axis (`GRAT`, `IGLR`, `TGLR`, `PUMP`, `COMP`, `BEAN`, or blank).
-- `units`                - unit system declared for the table (`FIELD`, `METRIC`, `LAB`, `PVT-M`, or `None`).
-- `bhp_type`             - what the table values represent (`BHP`).
-- `flow`                 - flow-rate axis values.
-- `thp`                  - tubing-head pressure axis values.
-- `water_fraction`       - water-fraction axis values.
-- `gas_fraction`         - gas-fraction axis values.
-- `alq`                  - artificial-lift axis values.
-- `bhps`                 - BHP table values shaped by the flow / THP / water / gas / ALQ axes.
+- `table_number`: table ID referenced by `WCONPROD` / `WLIFT` via `vfp_table`.
+- `datum_depth`: reference depth for the reported BHP values, or `None` if defaulted.
+- `flow_type`: meaning of the flow axis (`OIL`, `LIQ`, `GAS`, `WG`, `TM`, etc.).
+- `water_fraction_type`: meaning of the water-fraction axis (`WOR`, `WCT`, `WGR`, `WWR`, etc.).
+- `gas_fraction_type`: meaning of the gas-fraction axis (`GOR`, `GLR`, `OGR`, etc.).
+- `thp_type`: meaning of the THP axis (`THP`).
+- `alq_type`: meaning of the ALQ axis (`GRAT`, `IGLR`, `TGLR`, `PUMP`, `COMP`, `BEAN`, or blank).
+- `units`: unit system declared for the table (`FIELD`, `METRIC`, `LAB`, `PVT-M`, or `None`).
+- `bhp_type`: what the table values represent (`BHP`).
+- `flow`: flow-rate axis values.
+- `thp`: tubing-head pressure axis values.
+- `water_fraction`: water-fraction axis values.
+- `gas_fraction`: gas-fraction axis values.
+- `alq`: artificial-lift axis values.
+- `bhps`: BHP table values shaped by the flow / THP / water / gas / ALQ axes.
 """
 
 VFPINJ = VFPKeyword("VFPINJ", injector=True)
@@ -1369,13 +1407,13 @@ VFPINJ = VFPKeyword("VFPINJ", injector=True)
 
 Fields:
 
-- `table_number`     - table ID referenced by `WCONINJE` via `vfp_table`.
-- `datum_depth`      - reference depth for the reported BHP values, or `None` if defaulted.
-- `flow_type`        - meaning of the flow axis (`OIL`, `WAT`, `GAS`, etc.).
-- `thp_type`         - meaning of the THP axis (`THP`).
-- `units`            - unit system declared for the table (`FIELD`, `METRIC`, `LAB`, `PVT-M`, or `None`).
-- `bhp_type`         - what the table values represent (`BHP`).
-- `flow`             - flow-rate axis values.
-- `thp`              - tubing-head pressure axis values.
-- `bhps`             - BHP table values shaped by the flow and THP axes.
+- `table_number`: table ID referenced by `WCONINJE` via `vfp_table`.
+- `datum_depth`: reference depth for the reported BHP values, or `None` if defaulted.
+- `flow_type`: meaning of the flow axis (`OIL`, `WAT`, `GAS`, etc.).
+- `thp_type`: meaning of the THP axis (`THP`).
+- `units`: unit system declared for the table (`FIELD`, `METRIC`, `LAB`, `PVT-M`, or `None`).
+- `bhp_type`: what the table values represent (`BHP`).
+- `flow`: flow-rate axis values.
+- `thp`: tubing-head pressure axis values.
+- `bhps`: BHP table values shaped by the flow and THP axes.
 """

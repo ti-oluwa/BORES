@@ -10,23 +10,25 @@ named/numbered objects.
 
 **Field vectors** (whole-reservoir totals, no object list):
 
-- `FOPR` / `FWPR` / `FGPR` / `FLPR` - field oil/water/gas/liquid production rate.
-- `FWIR` / `FGIR` - field water/gas injection rate.
-- `FOPT` / `FWPT` / `FGPT` - field oil/water/gas production cumulative total.
-- `FWIT` / `FGIT` - field water/gas injection cumulative total.
-- `FWCT` - field water cut. `FGOR` - field gas-oil ratio.
-- `FOIR` / `FOIT` - field oil injection rate/total. Rare in practice; Eclipse still defines them.
+- `FOPR` / `FWPR` / `FGPR` / `FLPR`: field oil/water/gas/liquid production rate.
+- `FWIR` / `FGIR`: field water/gas injection rate.
+- `FOPT` / `FWPT` / `FGPT`: field oil/water/gas production cumulative total.
+- `FWIT` / `FGIT`: field water/gas injection cumulative total.
+- `FWCT`: field water cut.
+- `FGOR`: field gas-oil ratio.
+- `FOIR` / `FOIT`: field oil injection rate/total. Rare in practice; Eclipse still defines them.
 
 **Well vectors** (one series per well; optionally restricted to named wells):
 
-- `WOPR` / `WWPR` / `WGPR` / `WLPR` - well oil/water/gas/liquid production rate.
-- `WWIR` / `WGIR` - well water/gas injection rate.
-- `WOPT` / `WWPT` / `WGPT` - well oil/water/gas production cumulative total.
-- `WWIT` / `WGIT` - well water/gas injection cumulative total.
-- `WWCT` - well water cut. `WGOR` - well gas-oil ratio.
-- `WBHP` - well bottom-hole pressure.
-- `WTHP` - well tubing-head pressure.
-- `WOIR` / `WOIT` - well oil injection rate/total. Rare in practice; Eclipse still defines them.
+- `WOPR` / `WWPR` / `WGPR` / `WLPR`: well oil/water/gas/liquid production rate.
+- `WWIR` / `WGIR`: well water/gas injection rate.
+- `WOPT` / `WWPT` / `WGPT`: well oil/water/gas production cumulative total.
+- `WWIT` / `WGIT`: well water/gas injection cumulative total.
+- `WWCT`: well water cut.
+- `WGOR`: well gas-oil ratio.
+- `WBHP`: well bottom-hole pressure.
+- `WTHP`: well tubing-head pressure.
+- `WOIR` / `WOIT`: well oil injection rate/total. Rare in practice; Eclipse still defines them.
 
 Every vector above has a matching `bores.wells.summary` `Summary`
 implementation of the same mnemonic.
@@ -34,7 +36,7 @@ implementation of the same mnemonic.
 **Region vectors** (one series per FIP region; optionally restricted to
 named region numbers):
 
-- `ROIP` / `RGIP` / `RWIP` - reservoir oil/gas/water in place.
+- `ROIP` / `RGIP` / `RWIP`: reservoir oil/gas/water in place.
 
 No `Summary` implementation reads these yet: a correct one needs
 region-scoped, FVF-converted in-place volumes from pore volume and PVT
@@ -106,8 +108,8 @@ class SummaryVectorKeyword(Keyword[list[str]]):
 
     `parse` returns the requested object list (each entry as a string,
     since well names are strings and region numbers come through as
-    their original token text), or an empty list `[]` meaning "all
-    objects". It is never `None` when the keyword is merely unrestricted,
+    their original token text), joined across every occurrence of the keyword,
+    or an empty list `[]` meaning "all objects". It is never `None` when the keyword is merely unrestricted,
     since the keyword *is* present and the requested vector should still
     be activated. `None` is reserved for "keyword absent from the deck".
     """
@@ -120,10 +122,19 @@ class SummaryVectorKeyword(Keyword[list[str]]):
         operations: list[Operation] | None = None,
         schedule_times: dict[int, float] | None = None,
     ) -> list[str] | None:
-        record = deck.get_first_record_for(self.name)
-        if record is None:
+        records = deck.get_records_for(self.name)
+        if not records:
             return None
-        return tokenize(record.body.split("/", 1)[0])
+
+        # A vector may be requested more than once (e.g. one `WOPR` block per
+        # group of wells); every request counts.
+        names: list[str] = []
+        for record in records:
+            requested = tokenize(record.body.split("/", 1)[0])
+            if not requested:
+                return []  # An unrestricted request covers every object.
+            names.extend(requested)
+        return names
 
 
 FOPR = SummaryVectorKeyword("FOPR")

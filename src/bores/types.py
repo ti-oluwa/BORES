@@ -153,7 +153,7 @@ class FluidPhase(enum.Enum):
     GAS = "gas"
     DISSOLVED_GAS = "disgas"
     OIL = "oil"
-    LIQUID_OIL = "lio"
+    LIQUID_OIL = "liq"
     VAPOURIZED_OIL = "vapoil"
 
     def __str__(self) -> str:

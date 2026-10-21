@@ -43,8 +43,7 @@ OPERATOR_CONTROL_KEYWORDS: frozenset[str] = (
 )
 """
 Keywords that scope or drive operators rather than holding their own
-per-cell data; never matched as a plain
-`bores.deck.keywords.array.ArrayKeyword` value.
+per-cell data; never matched as a plain `bores.deck.keywords.base.ArrayKeyword` value.
 """
 
 
@@ -84,6 +83,7 @@ class Operation(typing.NamedTuple):
 
 
 def get_default_box(dims: GridDimensions) -> tuple[int, int, int, int, int, int]:
+    """Return the 0-based inclusive box covering every cell in the grid."""
     return (0, dims.nx - 1, 0, dims.ny - 1, 0, dims.nz - 1)
 
 
@@ -174,7 +174,8 @@ def parse_operator_records(
         terminating `/`), which may itself contain embedded `/`
         characters separating individual records.
     :param op: Operator name.
-    :param box: Ambient box active at this point in the deck.
+    :param box: Ambient box active at this point in the deck. A bound written as
+        `1*` in a record's own box takes the matching bound from this box.
     :param dims: Grid dimensions, used to clamp per-record box overrides.
     :yields: One `Operation` per record line (`order` field is
         a placeholder `(0, 0)` — the caller replaces it).
@@ -217,9 +218,13 @@ def parse_operator_records(
 
         if len(extra) >= 6:
             try:
-                # Minus 1, to move from 1-based to 0-based indexing used internally
-                ri1, ri2, rj1, rj2, rk1, rk2 = (int(t) - 1 for t in extra[:6])
-                record_box = clamp_box(ri1, ri2, rj1, rj2, rk1, rk2, dims)
+                # Minus 1, to move from 1-based to 0-based indexing used internally.
+                # A defaulted bound (`1*`) keeps the ambient box's own bound.
+                bounds = [
+                    ambient if token == "1*" else int(token) - 1
+                    for token, ambient in zip(extra[:6], box, strict=True)
+                ]
+                record_box = clamp_box(*bounds, dims=dims)
             except ValueError:
                 pass  # fall back to ambient box
 

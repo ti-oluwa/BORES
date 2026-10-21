@@ -18,6 +18,7 @@ from bores.deck.keywords.base import (
     RecordKeyword,
     RepeatedRecordKeyword,
 )
+from bores.deck.keywords.parsers import fault_face, uppercase
 from bores.deck.operators import Operation
 from bores.types import FloatArray, Integer, ThreeDimensions
 
@@ -64,10 +65,21 @@ SPECGRID = RecordKeyword[str | int](
         Field("ny", int),
         Field("nz", int),
         Field("numres", int, required=False, default=1),
-        Field("gflag", str, required=False, default="F"),
+        Field("gflag", uppercase, required=False, default="F", options={"F", "T"}),
     ],
 )
-"""`SPECGRID NX NY NZ [NUMRES [GFLAG]] /` - structured grid dimensions."""
+"""
+`SPECGRID NX NY NZ [NUMRES [GFLAG]] /` - structured grid dimensions.
+
+Fields:
+
+- `nx`: number of cells in the x (i) direction.
+- `ny`: number of cells in the y (j) direction.
+- `nz`: number of cells in the z (k) direction.
+- `numres`: number of reservoirs in the grid. `1` if omitted.
+- `gflag`: coordinate type of the grid, `F` for Cartesian or `T` for
+    radial (cylindrical). `F` if omitted.
+"""
 
 DIMENS = RecordKeyword(
     "DIMENS",
@@ -77,7 +89,15 @@ DIMENS = RecordKeyword(
         Field("nz", int),
     ],
 )
-"""`DIMENS NX NY NZ /` - structured grid dimensions (non-corner-point)."""
+"""
+`DIMENS NX NY NZ /` - structured grid dimensions (non-corner-point).
+
+Fields:
+
+- `nx`: number of cells in the x (i) direction.
+- `ny`: number of cells in the y (j) direction.
+- `nz`: number of cells in the z (k) direction.
+"""
 
 
 class CoordKeyword(Keyword[FloatArray[ThreeDimensions]]):
@@ -189,25 +209,46 @@ MAPAXES = RecordKeyword[float](
 `MAPAXES X_YAXIS Y_YAXIS X_ORIGIN Y_ORIGIN X_XAXIS Y_XAXIS /`
 - map coordinate system axes.
 
-Eclipse stores six floats in the order:
-`(Y-axis point X, Y-axis point Y, origin X, origin Y, X-axis point X, X-axis point Y)`.
+The parsed dict is returned as is, so callers can decide how to assemble
+their own `MapAxes` object.
 
-The parsed dict uses those field names verbatim so callers can decide
-how to assemble their own `MapAxes` object.
+Fields:
+
+- `y_axis_x`: map x coordinate of a point on the grid's y axis.
+- `y_axis_y`: map y coordinate of a point on the grid's y axis.
+- `origin_x`: map x coordinate of the grid origin.
+- `origin_y`: map y coordinate of the grid origin.
+- `x_axis_x`: map x coordinate of a point on the grid's x axis.
+- `x_axis_y`: map y coordinate of a point on the grid's x axis.
 """
 
 GRIDUNIT = RecordKeyword[str](
     "GRIDUNIT",
     fields=[
-        Field("unit", str),
-        Field("type", str, required=False, default=""),
+        Field("unit", uppercase, options={"METRES", "FEET", "CM"}),
+        Field("type", uppercase, required=False, default="", options={"MAP", ""}),
     ],
 )
-"""`GRIDUNIT 'UNIT' ['TYPE'] /` - geometry length unit declaration."""
+"""
+`GRIDUNIT 'UNIT' ['TYPE'] /` - geometry length unit declaration.
 
-MAPUNITS = RecordKeyword[str]("MAPUNITS", fields=[Field("unit", str)])
+Fields:
+
+- `unit`: length unit of the grid geometry, one of `METRES`, `FEET` or `CM`.
+- `type`: `MAP` if the grid coordinates are map coordinates, otherwise empty
+    (the grid is in local coordinates). Empty if omitted.
+"""
+
+MAPUNITS = RecordKeyword[str](
+    "MAPUNITS", fields=[Field("unit", uppercase, options={"METRES", "FEET", "CM"})]
+)
 """
 `MAPUNITS 'UNIT' /` - map coordinate unit declaration.
+
+Fields:
+
+- `unit`: length unit of the `MAPAXES` map coordinates, one of `METRES`,
+    `FEET` or `CM`.
 """
 
 PINCHOUT = FlagKeyword("PINCHOUT")
@@ -224,15 +265,35 @@ PINCH = RecordKeyword[str | float](
     "PINCH",
     fields=[
         Field("thickness", np.float64, required=False, default=1e-6),
-        Field("gap_mode", str, required=False, default="GAP"),
-        Field("pinchout_option", str, required=False, default="TOPBOT"),
-        Field("multz_option", str, required=False, default="TOP"),
-        Field("composition_option", str, required=False, default="COMPZ"),
+        Field("gap_mode", uppercase, required=False, default="GAP", options={"GAP", "NOGAP"}),
+        Field("max_empty_gap", np.float64, required=False, default=None),
+        Field(
+            "pinchout_option",
+            uppercase,
+            required=False,
+            default="TOPBOT",
+            options={"TOPBOT", "ALL"},
+        ),
+        Field("multz_option", uppercase, required=False, default="TOP", options={"TOP", "ALL"}),
     ],
 )
 """
-`PINCH thickness [gap_mode [pinchout_option [multz_option [comp_option]]]] /`
-    - pinchout handling parameters.
+`PINCH thickness [gap_mode [max_empty_gap [pinchout_option [multz_option]]]] /`
+- pinchout handling parameters.
+
+Fields:
+
+- `thickness`: cells thinner than this are treated as pinched out.
+- `gap_mode`: `GAP` lets a pinched-out cell sit between two active cells and
+    still connect them across the gap, `NOGAP` does not. `GAP` if omitted.
+- `max_empty_gap`: largest gap of pinched-out cells that may still be connected
+    across. `None` (no limit) if omitted.
+- `pinchout_option`: `TOPBOT` connects only across a pinched-out cell at the top
+    or bottom of a column of active cells, `ALL` connects across any. `TOPBOT`
+    if omitted.
+- `multz_option`: `TOP` takes the `MULTZ` multiplier of the upper cell across a
+    pinchout connection, `ALL` applies the `MULTZ` of every cell crossed. `TOP`
+    if omitted.
 """
 
 TOPS = ArrayKeyword(
@@ -248,7 +309,7 @@ non-uniform decks).
 
 In practice Eclipse accepts either `nx * ny` values (applying the same
 top to every layer) or `nx * ny * nz` values. The array length
-reported by `.ArrayKeyword.parse` matches `n_cells`;
+reported by `ArrayKeyword.parse` matches `n_cells`;
 callers should slice `[:nx*ny]` to get the top-layer tops.
 """
 
@@ -354,7 +415,7 @@ Default is `1` (all cells active) when the keyword is absent.
 
 Note:
     A missing `ACTNUM` keyword means all cells are active in Eclipse,
-    so `.ArrayKeyword.parse` returns `None` (keyword
+    so `ArrayKeyword.parse` returns `None` (keyword
     absent) rather than an all-ones array. Callers should treat
     `None` as "all active".
 """
@@ -420,6 +481,11 @@ class MultFLTKeyword(RepeatedRecordKeyword[np.float64 | str]):
     Eclipse semantics: when a fault name appears in multiple records
     across one or more `MULTFLT` blocks, the *last* value wins.
     `parse` enforces this automatically.
+
+    Fields:
+
+    - `name`: name of the fault, as declared by `FAULTS`.
+    - `multiplier`: transmissibility multiplier applied to the fault.
     """
 
     def __init__(self) -> None:
@@ -446,8 +512,6 @@ class MultFLTKeyword(RepeatedRecordKeyword[np.float64 | str]):
         # Last value for each fault name wins.
         by_name: dict[typing.Hashable, dict[str, typing.Any]] = {}
         for record in records:
-            if record is None:
-                continue
             by_name[record["name"]] = record
         return list(by_name.values())
 
@@ -462,11 +526,7 @@ FAULTS = RepeatedRecordKeyword[str | int](
         Field("j2", int),
         Field("k1", int),
         Field("k2", int),
-        Field(
-            "face",
-            lambda v: str(v).removesuffix("+").upper(),
-            options={"X", "X-", "Y", "Y-", "Z", "Z-"},
-        ),
+        Field("face", fault_face, options={"X", "X-", "Y", "Y-", "Z", "Z-"}),
     ],
 )
 """
@@ -476,8 +536,17 @@ Multiple `FAULTS` keyword blocks in the same deck are concatenated in
 file order. Indices `I1`/`I2`/`J1`/`J2`/`K1`/`K2` are
 *1-based* Eclipse IJK indices, passed through unchanged to the caller.
 
-:raises DeckParseError: If `FACE` is not one of `X`, `X-`, `Y`,
-    `Y-`, `Z`, `Z-`.
+Fields:
+
+- `name`: name of the fault.
+- `i1` / `i2`: first and last cell of the fault in the i direction.
+- `j1` / `j2`: first and last cell of the fault in the j direction.
+- `k1` / `k2`: first and last cell of the fault in the k direction.
+- `face`: the face of the cells the fault lies on, one of `X`, `X-`, `Y`, `Y-`,
+    `Z`, `Z-`. The Eclipse spellings `I`, `J`, `K` (and a trailing `+`) are
+    accepted and returned as the matching `X`, `Y`, `Z` form.
+
+:raises DeckParseError: If `FACE` is not a valid face.
 """
 
 MULTFLT = MultFLTKeyword()
@@ -487,6 +556,11 @@ MULTFLT = MultFLTKeyword()
 Eclipse semantics: when a fault name appears in multiple records
 across one or more `MULTFLT` blocks, the *last* value wins.
 `parse` enforces this automatically.
+
+Fields:
+
+- `name`: name of the fault, as declared by `FAULTS`.
+- `multiplier`: transmissibility multiplier applied to the fault.
 """
 
 NNC = RepeatedRecordKeyword[float](
@@ -504,11 +578,14 @@ NNC = RepeatedRecordKeyword[float](
 """
 `NNC I1 J1 K1 I2 J2 K2 T / ... /` - explicit non-neighbour connections.
 
-Indices `I1/J1/K1` and `I2/J2/K2` are *1-based* Eclipse IJK
-structured cell indices. `T` is the transmissibility value in the
-grid's declared unit system.
-
 Multiple `NNC` keyword blocks in the same deck are concatenated.
+
+Fields:
+
+- `i1` / `j1` / `k1`: 1-based IJK index of the first cell of the connection.
+- `i2` / `j2` / `k2`: 1-based IJK index of the second cell of the connection.
+- `transmissibility`: transmissibility of the connection, in the grid's
+    declared unit system.
 """
 
 PORV = ArrayKeyword("PORV", dtype=np.float64, default_value=0.0)

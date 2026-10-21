@@ -1,4 +1,4 @@
-from bores.types import Orientation
+from bores.types import FluidPhase, Orientation
 from bores.wells.base import CompletionStatus
 from bores.wells.controls import (
     EconomicQuantity,
@@ -9,6 +9,13 @@ from bores.wells.controls import (
 from bores.wells.groups import GroupInjectorControlMode, GroupProducerControlMode
 
 DIRECTION_MAP = {"X": Orientation.X, "Y": Orientation.Y, "Z": Orientation.Z}
+WELSPECS_PHASE_MAP = {
+    "OIL": FluidPhase.OIL,
+    "WATER": FluidPhase.WATER,
+    "GAS": FluidPhase.GAS,
+    "LIQ": FluidPhase.LIQUID_OIL,
+}
+"""Maps `WELSPECS` item 6's preferred phase to the internal `FluidPhase`."""
 PRODUCER_CONTROL_MODE_MAP = {
     "ORAT": ProducerControlMode.OIL_RATE,
     "WRAT": ProducerControlMode.WATER_RATE,

@@ -54,6 +54,7 @@ from bores.wells.mappings import (
     INJECTOR_CONTROL_MODE_MAP,
     PRODUCER_CONTROL_MODE_MAP,
     WELOPEN_STATUS_MAP,
+    WELSPECS_PHASE_MAP,
     WELTARG_TARGET_FIELD,
 )
 from bores.wells.schedule import (
@@ -333,7 +334,7 @@ def load_well_from_records(
     )[:2]
     pvt_region = welspecs_record.get("pvt_table") or None  # 0 should map to None too
     preferred_phase = (
-        FluidPhase(welspecs_record["phase"].lower()) if welspecs_record.get("phase") else None
+        WELSPECS_PHASE_MAP[welspecs_record["phase"]] if welspecs_record.get("phase") else None
     )
     well_schedule_status = (
         WellStatus.ACTIVE
@@ -808,7 +809,7 @@ def load_economic_limits_from_record(
         minimum oil rate of exactly zero is treated as "no limit", matching
         the deck's own default.
     """
-    workover_action = WorkoverAction(record.get("workover_action", "WELL"))
+    workover_action = WorkoverAction(record.get("workover_action", "NONE"))
     end_run = bool(record.get("end_run", False))
 
     limits = []

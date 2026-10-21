@@ -9,30 +9,30 @@ restarting from a previously saved state (`RESTART`).
 **Explicit initialisation keywords** (return shape `(n_cells,)`
 float64 arrays):
 
-- `PRESSURE` - initial reservoir pressure (psi in FIELD, bar in
+- `PRESSURE`: initial reservoir pressure (psi in FIELD, bar in
   METRIC).
-- `SWAT` / `SW` - initial water saturation.
-- `SOIL` / `SO` - initial oil saturation.
-- `SGAS` / `SG` - initial gas saturation.
-- `RS` - initial solution gas-oil ratio.
-- `RV` - initial vaporized oil-gas ratio.
+- `SWAT` / `SW`: initial water saturation.
+- `SOIL` / `SO`: initial oil saturation.
+- `SGAS` / `SG`: initial gas saturation.
+- `RS`: initial solution gas-oil ratio.
+- `RV`: initial vaporized oil-gas ratio.
 
 **Equilibration keyword**:
 
-- `EQUIL` - one record per equilibration region specifying datum
+- `EQUIL`: one record per equilibration region specifying datum
   depth/pressure, contact depths, and capillary pressure at contacts.
 
 **Restart keyword**:
 
-- `RESTART` - resumes from a previously written restart file instead
+- `RESTART`: resumes from a previously written restart file instead
   of explicit initial conditions.
 
 **Analytic aquifer keywords** (one record per aquifer):
 
-- `AQUCT` - Carter-Tracy analytic aquifer, given by physical properties
+- `AQUCT`: Carter-Tracy analytic aquifer, given by physical properties
   (permeability, porosity, compressibility, radius, thickness) plus a
   water PVT table reference.
-- `AQUFETP` - Fetkovich analytic aquifer, given directly by productivity
+- `AQUFETP`: Fetkovich analytic aquifer, given directly by productivity
   index, total compressibility, and initial water volume.
 """
 
@@ -49,6 +49,7 @@ from bores.deck.keywords.base import (
     RepeatedRecordKeyword,
     TableKeyword,
 )
+from bores.deck.keywords.parsers import uppercase
 from bores.deck.operators import Operation
 
 __all__ = [
@@ -120,22 +121,22 @@ blocks in the same deck are concatenated in file order.
  
 Fields:
  
-- `datum_depth`    - depth of the datum point at which `datum_pressure`
+- `datum_depth`: depth of the datum point at which `datum_pressure`
   applies.
-- `datum_pressure` - reservoir pressure at `datum_depth`.
-- `woc_depth`      - water-oil contact depth.
-- `pcow_at_woc`       - oil-water capillary pressure at the WOC (usually
+- `datum_pressure`: reservoir pressure at `datum_depth`.
+- `woc_depth`: water-oil contact depth.
+- `pcow_at_woc`: oil-water capillary pressure at the WOC (usually
   `0`).
-- `goc_depth`      - gas-oil contact depth.
-- `pcgo_at_goc`       - gas-oil capillary pressure at the GOC (usually
+- `goc_depth`: gas-oil contact depth.
+- `pcgo_at_goc`: gas-oil capillary pressure at the GOC (usually
   `0`).
-- `rsvd_table`      - `RSVD`-table number for depth-dependent solution
+- `rsvd_table`: `RSVD`-table number for depth-dependent solution
   GOR below the bubble point (`0` = use the `PVTO` bubble-point Rs
   instead, i.e. assume saturated oil).
-- `rvvd_table`      - `RVVD`-table number for depth-dependent
+- `rvvd_table`: `RVVD`-table number for depth-dependent
   vaporized-oil ratio above the dew point (`0` = use the `PVTG`
   dew-point Rv instead, i.e. assume saturated gas).
-- `accuracy_flag`   - initialization accuracy/option switch (e.g.
+- `accuracy_flag`: initialization accuracy/option switch (e.g.
   selecting compositional-vs-black-oil equilibration nuances); `0` is
   the simulator default behaviour.
  
@@ -160,7 +161,7 @@ are present, `TEMPVD` takes precedence.
 
 Columns:
 
-- `temperature` - reservoir temperature (°F in FIELD, °C in METRIC / LAB).
+- `temperature`: reservoir temperature (°F in FIELD, °C in METRIC / LAB).
 """
 
 TEMPVD = TableKeyword(
@@ -181,8 +182,8 @@ clamped to the endpoint value (no extrapolation).
 
 Each table (one per equilibration region) contains rows:
 
-- `depth`       - true vertical depth (ft in FIELD, m in METRIC).
-- `temperature` - reservoir temperature at that depth (°F in FIELD,
+- `depth`: true vertical depth (ft in FIELD, m in METRIC).
+- `temperature`: reservoir temperature at that depth (°F in FIELD,
   °C in METRIC / LAB).
 
 Rows must be in ascending depth order.
@@ -208,8 +209,8 @@ clamped to the endpoint value (no extrapolation).
 
 Each table (one per equilibration region) contains rows:
 
-- `depth`       - true vertical depth (ft in FIELD, m in METRIC).
-- `temperature` - reservoir temperature at that depth (°F in FIELD,
+- `depth`: true vertical depth (ft in FIELD, m in METRIC).
+- `temperature`: reservoir temperature at that depth (°F in FIELD,
   °C in METRIC / LAB).
 
 Rows must be in ascending depth order.
@@ -235,8 +236,8 @@ directly. Values outside the table range are clamped to the endpoint
 
 Columns:
 
-- `depth` - true vertical depth (ft in FIELD, m in METRIC).
-- `solution_gor`    - solution gas-oil ratio at that depth (scf/stb in FIELD).
+- `depth`: true vertical depth (ft in FIELD, m in METRIC).
+- `solution_gor`: solution gas-oil ratio at that depth (scf/stb in FIELD).
 """
 
 RVVD = TableKeyword(
@@ -254,8 +255,8 @@ gas-condensate columns.
 
 Columns:
 
-- `depth` - true vertical depth (ft in FIELD, m in METRIC).
-- `vaporized_ogr`    - vaporized oil-gas ratio at that depth (stb/scf in FIELD).
+- `depth`: true vertical depth (ft in FIELD, m in METRIC).
+- `vaporized_ogr`: vaporized oil-gas ratio at that depth (stb/scf in FIELD).
 """
 
 
@@ -335,25 +336,25 @@ concatenated in file order.
 
 Fields:
 
-- `aquifer_id`      - aquifer identification number, referenced later by
+- `aquifer_id`: aquifer identification number, referenced later by
   `AQUANCON` to attach the aquifer to grid connections.
-- `datum_depth`      - depth at which `initial_pressure` applies.
-- `initial_pressure` - aquifer pressure at `datum_depth`. May be defaulted
+- `datum_depth`: depth at which `initial_pressure` applies.
+- `initial_pressure`: aquifer pressure at `datum_depth`. May be defaulted
   with `1*`, in which case it is taken from the initial reservoir pressure of the
   cells the aquifer is connected to.
-- `permeability`      - aquifer permeability.
-- `porosity`      - aquifer porosity (fraction).
-- `total_compressibility` - combined rock and water compressibility.
-- `radius`      - radius of the reservoir, i.e. the aquifer's inner
+- `permeability`: aquifer permeability.
+- `porosity`: aquifer porosity (fraction).
+- `total_compressibility`: combined rock and water compressibility.
+- `radius`: radius of the reservoir, i.e. the aquifer's inner
   (reservoir-contact) radius. Used to derive dimensionless time; the
   aquifer's own outer extent is a separate quantity this keyword does
   not supply.
-- `thickness`      - aquifer thickness.
-- `influence_angle` - angle subtended by the aquifer at the reservoir,
+- `thickness`: aquifer thickness.
+- `influence_angle`: angle subtended by the aquifer at the reservoir,
   in degrees. `360` (a fully encircling aquifer) if omitted.
-- `pvt_table_number` - water PVT table number, for water viscosity and
+- `pvt_table_number`: water PVT table number, for water viscosity and
   formation volume factor at aquifer conditions. `1` if omitted.
-- `aquifer_influence_table_number` - `AQUTAB` table number giving a
+- `aquifer_influence_table_number`: `AQUTAB` table number giving a
   custom dimensionless pressure influence function. `1` selects the
   built-in infinite-acting Van Everdingen-Hurst behaviour, the default.
   `AQUTAB` tables are numbered from 2 in the order they appear.
@@ -384,17 +385,17 @@ concatenated in file order.
 
 Fields:
 
-- `aquifer_id`      - aquifer identification number, referenced later by
+- `aquifer_id`: aquifer identification number, referenced later by
   `AQUANCON` to attach the aquifer to grid connections.
-- `datum_depth`      - depth at which `initial_pressure` applies.
-- `initial_pressure` - aquifer pressure at `datum_depth`. May be defaulted
+- `datum_depth`: depth at which `initial_pressure` applies.
+- `initial_pressure`: aquifer pressure at `datum_depth`. May be defaulted
   with `1*`, in which case it is taken from the initial reservoir pressure of the
   cells the aquifer is connected to.
-- `initial_water_volume` - `W_i`, the aquifer's initial water volume.
-- `total_compressibility` - combined rock and water compressibility.
-- `productivity_index` - aquifer productivity index `J`.
-- `pvt_table_number` - water PVT table number. `1` if omitted.
-- `salt_concentration` - initial salt concentration, for brine tracking.
+- `initial_water_volume`: `W_i`, the aquifer's initial water volume.
+- `total_compressibility`: combined rock and water compressibility.
+- `productivity_index`: aquifer productivity index `J`.
+- `pvt_table_number`: water PVT table number. `1` if omitted.
+- `salt_concentration`: initial salt concentration, for brine tracking.
   `0` if omitted.
 """
 
@@ -408,12 +409,12 @@ AQUANCON = RepeatedRecordKeyword[typing.Any](
         Field("j2", int),
         Field("k1", int),
         Field("k2", int),
-        Field("face", lambda v: str(v).upper(), options={"I+", "I-", "J+", "J-", "K+", "K-"}),
+        Field("face", uppercase, options={"I+", "I-", "J+", "J-", "K+", "K-"}),
         Field("influx_coefficient", np.float64, required=False, default=None),
         Field("connection_multiplier", np.float64, required=False, default=1.0),
         Field(
             "connect_adjoining_active_cell",
-            lambda v: str(v).upper(),
+            uppercase,
             required=False,
             default="NO",
             options={"YES", "NO"},
@@ -433,18 +434,18 @@ order.
 
 Fields:
 
-- `aquifer_id`      - id of the `AQUCT`/`AQUFETP`/`AQUFLUX` aquifer this
+- `aquifer_id`: id of the `AQUCT`/`AQUFETP`/`AQUFLUX` aquifer this
   connection belongs to.
-- `i1`, `i2`, `j1`, `j2`, `k1`, `k2` - 1-based, inclusive IJK box of cells
+- `i1`, `i2`, `j1`, `j2`, `k1`, `k2`: 1-based, inclusive IJK box of cells
   to connect, passed through unchanged.
-- `face`      - which face of each cell in the box to connect, one of
+- `face`: which face of each cell in the box to connect, one of
   `I+`, `I-`, `J+`, `J-`, `K+`, `K-`.
-- `influx_coefficient` - overrides the connection's face area for aquifer
+- `influx_coefficient`: overrides the connection's face area for aquifer
   influence. `None` (Eclipse's own default) means use the face's own area.
   An aquifer's influx is shared between its faces in proportion to these.
-- `connection_multiplier` - multiplies the resolved influx coefficient.
+- `connection_multiplier`: multiplies the resolved influx coefficient.
   `1.0` if omitted.
-- `connect_adjoining_active_cell` - `YES`/`NO`, whether the aquifer may connect to a
+- `connect_adjoining_active_cell`: `YES`/`NO`, whether the aquifer may connect to a
   cell face that adjoins another active cell. `NO` if omitted, which connects only
   faces on the edge of the active grid. Only `NO` is supported, so with `YES` the faces
   that adjoin an active cell are still left out.
@@ -470,9 +471,9 @@ concatenated in file order.
 
 Fields:
 
-- `aquifer_id`      - aquifer identification number, referenced by
+- `aquifer_id`: aquifer identification number, referenced by
   `AQUANCON` to attach the aquifer to grid connections.
-- `flux`      - constant influx per unit of connected face area: liquid surface
+- `flux`: constant influx per unit of connected face area: liquid surface
   volume per day per unit area (STB/day/ft² in FIELD units).
 """
 
@@ -484,9 +485,9 @@ Fields (returned as a dict rather than via `Field`, since the second
 token's "is this required" rule depends only on simple positional
 arity, not Eclipse's usual optional/`1*` trailing-default convention):
  
-- `root_name`   - root filename (without extension) of the restart
+- `root_name`: root filename (without extension) of the restart
   case to resume from.
-- `report_step` - report step number within that case to resume from.
+- `report_step`: report step number within that case to resume from.
  
 `parse` returns `{"root_name": str, "report_step": int}`, or `None`
 if absent.

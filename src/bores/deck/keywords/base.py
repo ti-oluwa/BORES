@@ -52,7 +52,10 @@ class Field(typing.Generic[T]):
     :param required: Whether this field must be present. Trailing optional
         fields fall back to `default` when the record has fewer tokens.
     :param default: Default value when the field is absent and
-        `required=False`.
+        `required=False`. Must be one of `options` when `options` is given.
+    :param options: The complete set of values the field may take, compared
+        against the value *after* `type` has converted it. When given, any other
+        value is rejected with a `DeckParseError`.
     """
 
     name: str
@@ -69,7 +72,7 @@ class Field(typing.Generic[T]):
         if options and self.default is not None and self.default not in options:
             raise ValueError(
                 f"Invalid default value for {self.name!r} - {self.default!r}. "
-                f"Default should be one of {', '.join([str(option) for option in options])}"
+                f"Default should be one of {', '.join(sorted(map(str, options)))}"
             )
         object.__setattr__(self, "options", options)
 
@@ -112,7 +115,7 @@ class Field(typing.Generic[T]):
             raise DeckParseError(
                 f"{keyword} record: {self.name!r} got unrecognised value {raw!r}. "
                 f"Value should be one of "
-                f"{', '.join(map(str, self.options))}."
+                f"{', '.join(sorted(map(str, self.options)))}."
             )
         return value
 
@@ -593,13 +596,14 @@ class ArrayKeyword(Keyword[FloatArray[OneDimension]]):
             # (and then redundantly re-parsing) millions of identical
             # strings for e.g. a uniform full-field PORO/PERMX.
             raw_tokens = tokenize(record.body.split("/", 1)[0], expand_repeats=False)
-            # A bare "N*" (empty value) repeat group is dropped with a
-            # warning rather than crashing float() later.
+            # A bare "N*" repeat group (N defaulted values, which `parse_repeat_token`
+            # reports as the default designator "1*") is dropped with a warning
+            # rather than crashing float() later.
             clean_tokens = []
             dropped = 0
             for token in raw_tokens:
                 repeat = parse_repeat_token(token)
-                if repeat is not None and repeat[1] == "":
+                if repeat is not None and repeat[1] == "1*":
                     dropped += repeat[0]
                     continue
                 clean_tokens.append(token)
@@ -810,9 +814,6 @@ class TableKeyword(Keyword[list[Table[Number]]]):
         "outer" key used in miscible (bracketed) PVT tables such as
         `PVTO` / `PVTG`. When `None`, the table is flat (immiscible
         / simple-tabular).
-    :param table_terminator: The string that separates tables within one
-        keyword block (default `"/"`, i.e. every block is one table).
-        Pass `"//"` for the double-slash convention used by some keywords.
 
     The parsed value is `List[List[Dict]]`; a list of tables (one per
     keyword occurrence / PVT region), each table being a list of row dicts.
@@ -864,12 +865,7 @@ class TableKeyword(Keyword[list[Table[Number]]]):
         to their declared `default` values. The Eclipse `1*` default
         designator is treated as absent (falls back to `default`).
         """
-        row: TableRow = {}
-        n_tokens = len(tokens)
-        for idx, column in enumerate(self.columns):
-            raw = tokens[idx] if idx < n_tokens else None
-            row[column.name] = column.parse(raw, self.name)
-        return row
+        return typing.cast(TableRow[Number], parse_tokens(self.name, self.columns, tokens))
 
     def _parse_flat(self, body: str) -> Table[Number]:
         """
@@ -979,10 +975,19 @@ class TableKeyword(Keyword[list[Table[Number]]]):
 TimeUnit = typing.Literal["days", "hours", "seconds"]
 
 
-def timedelta_to_timeunit(delta: datetime.timedelta, time_unit: TimeUnit) -> int:
-    if time_unit in ("days", "seconds"):
-        return getattr(delta, time_unit)
-    return delta.days * c.HOURS_PER_DAY
+def timedelta_to_timeunit(delta: datetime.timedelta, time_unit: TimeUnit) -> float:
+    """
+    Convert the whole-day difference between two deck dates to `time_unit`.
+
+    :param delta: Difference between two calendar dates.
+    :param time_unit: Unit to express the difference in.
+    :returns: The difference in `time_unit`.
+    """
+    if time_unit == "days":
+        return float(delta.days)
+    if time_unit == "hours":
+        return delta.days * c.HOURS_PER_DAY
+    return delta.days * c.SECONDS_PER_DAY
 
 
 def get_schedule_times(deck: Deck, time_unit: TimeUnit = "days") -> dict[int, float]:
@@ -1047,7 +1052,7 @@ def get_schedule_times(deck: Deck, time_unit: TimeUnit = "days") -> dict[int, fl
                     current_time = 0.0
                 else:
                     delta = parsed_date - start_date
-                    current_time = float(timedelta_to_timeunit(delta, time_unit))
+                    current_time = timedelta_to_timeunit(delta, time_unit)
 
             # Stamp the record with the time of the *last* date in the block.
             # All records that follow in the deck occur after every date listed

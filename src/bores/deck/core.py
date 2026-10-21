@@ -50,9 +50,11 @@ def resolve_includes(text: str, source_dir: Path | None) -> str:
         text input with no filesystem anchor); directives are dropped with
         a warning in that case.
     :returns: Text with every `INCLUDE` block replaced by the referenced
-        file's (recursively resolved) contents.
+        file's (recursively resolved) contents, with comments removed.
     :raises DeckParseError: If an included file cannot be found or read.
     """
+    # A commented-out `INCLUDE` must not be followed, so comments go first.
+    text = strip_comments(text)
 
     def replace(match: re.Match[str]) -> str:
         relative_path = (match.group(1) or match.group(2)).strip()
@@ -178,9 +180,9 @@ def tokenize(text: str, *, expand_repeats: bool = True) -> list[str]:
         `False`, a repeat group is returned as a single unexpanded
         `"N*value"` token; use `parse_repeat_token` to inspect it. This
         exists for callers filling per-cell arrays that may be millions of
-        elements long from a handful of `N*value` groups (`GridArrayKeyword`),
+        elements long from a handful of `N*value` groups (`ArrayKeyword`),
         where expanding to `N` separate tokens, and then parsing the same
-        numeric string `N` redundant times which is just unnecessary overhead.
+        numeric string `N` redundant times, is unnecessary overhead.
     :returns: Flat list of tokens (quotes stripped; repeats expanded or not
         per `expand_repeats`).
     """
@@ -190,11 +192,13 @@ def tokenize(text: str, *, expand_repeats: bool = True) -> list[str]:
         placeholders.append(match.group(2))
         return f"\x00{len(placeholders) - 1}\x00"
 
-    stashed_text = QUOTED_RE.sub(stash, text)
+    has_quotes = "'" in text or '"' in text
+    stashed_text = QUOTED_RE.sub(stash, text) if has_quotes else text
 
     tokens: list[str] = []
     for raw_token in stashed_text.split():
-        repeat = parse_repeat_token(raw_token)
+        # Most tokens in a large array are plain numbers; skip the regex for them.
+        repeat = parse_repeat_token(raw_token) if "*" in raw_token else None
         if repeat is None:
             tokens.append(raw_token)
             continue
@@ -204,6 +208,9 @@ def tokenize(text: str, *, expand_repeats: bool = True) -> list[str]:
             tokens.extend([value] * count)
         else:
             tokens.append(raw_token)
+
+    if not has_quotes:
+        return tokens
 
     def unstash(token: str) -> str:
         if token.startswith("\x00") and token.endswith("\x00"):
@@ -319,7 +326,17 @@ class Deck:
         :param text: Clean Eclipse text (no comments, no `INCLUDE` directives).
         :returns: `ScanResult` containing records in file order and a keyword index.
         """
-        keyword_lines = list(KEYWORD_LINE_RE.finditer(text))
+        keyword_lines: list[re.Match[str]] = []
+        for match in KEYWORD_LINE_RE.finditer(text):
+            # The line right after a free-text keyword is that keyword's text
+            # (e.g. a title such as `SPE1`), even when it looks like a keyword.
+            if (
+                keyword_lines
+                and keyword_lines[-1].group("keyword") in FREE_TEXT_KEYWORDS
+                and not text[keyword_lines[-1].end() : match.start()].strip()
+            ):
+                continue
+            keyword_lines.append(match)
 
         records: list[Record] = []
         keyword_records: dict[str, list[Record]] = {}
@@ -407,6 +424,6 @@ class Deck:
 
     def __hash__(self) -> int:
         if self._hash is None:
-            # Record objects should be hashable as they are tuples of hashable fields
-            self._hash = hash((self.text, tuple(self.records)))
+            # `records` is derived entirely from `text`, so hashing the text is enough.
+            self._hash = hash(self.text)
         return self._hash

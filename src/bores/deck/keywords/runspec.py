@@ -176,7 +176,7 @@ START = DateKeyword("START")
 Sets the calendar date corresponding to time zero of the run.
 Affects how `DATES` entries are interpreted and how output is labelled.
 
-`parse` returns a :class:`datetime.date`, or `None` if absent.
+`parse` returns a `datetime.date`, or `None` if absent.
 
 Example:
 
@@ -205,12 +205,12 @@ six are parsed here (the most commonly needed ones).
 
 Fields:
 
-- `ntsfun` - number of saturation-function families / regions.
-- `ntpvt`  - number of PVT-function families / regions.
-- `nssfun` - max number of nodes in any saturation table.
-- `nppvt`  - max number of pressure nodes in any PVT table.
-- `ntfip`  - max number of FIP regions (`FIPNUM`).
-- `nrpvt`  - max number of Rs/Rv nodes in a live-oil / wet-gas table.
+- `ntsfun`: number of saturation-function families / regions.
+- `ntpvt`: number of PVT-function families / regions.
+- `nssfun`: max number of nodes in any saturation table.
+- `nppvt`: max number of pressure nodes in any PVT table.
+- `ntfip`: max number of FIP regions (`FIPNUM`).
+- `nrpvt`: max number of Rs/Rv nodes in a live-oil / wet-gas table.
 """
 
 WELLDIMS = RecordKeyword[int](
@@ -230,10 +230,10 @@ Provides upper bounds for well/group memory allocation.
 
 Fields:
 
-- `nwmaxz` - maximum number of wells.
-- `ncwmax` - maximum number of connections (completions) per well.
-- `ngmaxz` - maximum number of groups.
-- `nwgmax` - maximum number of wells in any one group.
+- `nwmaxz`: maximum number of wells.
+- `ncwmax`: maximum number of connections (completions) per well.
+- `ngmaxz`: maximum number of groups.
+- `nwgmax`: maximum number of wells in any one group.
 """
 
 EQLDIMS = RecordKeyword[int](
@@ -254,11 +254,11 @@ All parameters are optional with simulator defaults.
 
 Fields:
 
-- `ntequl` - maximum number of equilibration regions.
-- `ndprvd` - maximum number of depth nodes in pressure-depth tables.
-- `ndrxvd` - maximum number of depth nodes in Rs/Rv-depth tables.
-- `nttrvd` - maximum number of depth nodes in temp-depth tables.
-- `nstrvd` - maximum number of depth nodes in saturation-depth tables.
+- `ntequl`: maximum number of equilibration regions.
+- `ndprvd`: maximum number of depth nodes in pressure-depth tables.
+- `ndrxvd`: maximum number of depth nodes in Rs/Rv-depth tables.
+- `nttrvd`: maximum number of depth nodes in temp-depth tables.
+- `nstrvd`: maximum number of depth nodes in saturation-depth tables.
 """
 
 REGDIMS = RecordKeyword[int](
@@ -279,9 +279,9 @@ All parameters are optional with simulator defaults.
 
 Fields:
 
-- `ntfip`  - maximum number of FIP regions.
-- `nmfip`  - maximum number of multiply-defined FIP regions.
-- `nrfreg` - maximum number of reservoir fluid-in-place regions.
-- `ntfreg` - maximum number of tracer FIP regions.
-- `nplmix` - maximum number of polymer mixing regions.
+- `ntfip`: maximum number of FIP regions.
+- `nmfip`: maximum number of multiply-defined FIP regions.
+- `nrfreg`: maximum number of reservoir fluid-in-place regions.
+- `ntfreg`: maximum number of tracer FIP regions.
+- `nplmix`: maximum number of polymer mixing regions.
 """
