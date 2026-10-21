@@ -21,7 +21,10 @@ import numpy.typing as npt
 
 from bores.blackoil.satfunc.capillary_pressure.tables import (
     CapillaryPressureTable,
+    ThreePhaseCapillaryPressureTable,
     TwoPhaseCapillaryPressureTable,
+    query_gas_oil_capillary_pressure,
+    query_oil_water_capillary_pressure,
 )
 from bores.blackoil.satfunc.utils import (
     compute_killough_scanning_curve,
@@ -50,29 +53,23 @@ def get_oil_water_capillary_pressure(
     **kwargs: typing.Any,
 ) -> NumberOrArray[NDimension]:
     """
-    Extract Pcow from an oil-water capillary pressure table, dispatching
-    saturations correctly via the canonical wetting-phase API.
+    Extract Pcow from an oil-water capillary pressure table.
 
-    :param oil_water_capillary_pressure_table: Oil-water capillary pressure table (two-phase or three-phase).
-    :param water_saturation: Water saturation (scalar or array).
-    :param oil_saturation: Oil saturation (scalar or array).
-    :param gas_saturation: Gas saturation (scalar or array).
-    :param kwargs: Additional keyword arguments forwarded to parametric tables.
+    `Pcow` is a function of `Sw` only. A two-phase table is queried at the oil-water
+    system's own saturations (`So = 1 - Sw`), whichever phase its reference axis uses. A
+    three-phase table is evaluated at the three-phase point.
+
+    :param oil_water_capillary_pressure_table: Two-phase or three-phase capillary pressure table.
+    :param water_saturation: Water saturation.
+    :param oil_saturation: Oil saturation (used by three-phase tables only).
+    :param gas_saturation: Gas saturation (used by three-phase tables only).
+    :param kwargs: Extra arguments forwarded to a three-phase table's `evaluate`.
     :return: Oil-water capillary pressure Pcow = Po - Pw (scalar or array).
     """
-    oil_water_wetting_phase = oil_water_capillary_pressure_table.get_oil_water_wetting_phase()
     if isinstance(oil_water_capillary_pressure_table, TwoPhaseCapillaryPressureTable):
-        if oil_water_wetting_phase == FluidPhase.WATER:
-            wetting_saturation = water_saturation
-            non_wetting_saturation = oil_saturation
-        else:
-            wetting_saturation = oil_saturation
-            non_wetting_saturation = water_saturation
-        return oil_water_capillary_pressure_table.get_capillary_pressure(
-            wetting_saturation=wetting_saturation,
-            non_wetting_saturation=non_wetting_saturation,
+        return query_oil_water_capillary_pressure(
+            oil_water_capillary_pressure_table, water_saturation
         )
-
     result = oil_water_capillary_pressure_table.evaluate(
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
@@ -87,32 +84,28 @@ def get_gas_oil_capillary_pressure(
     water_saturation: NumberOrArray[NDimension],
     oil_saturation: NumberOrArray[NDimension],
     gas_saturation: NumberOrArray[NDimension],
+    connate_water_saturation: Number,
     **kwargs: typing.Any,
 ) -> NumberOrArray[NDimension]:
     """
-    Extract Pcgo from a gas-oil capillary pressure table, dispatching
-    saturations correctly via the canonical wetting-phase API.
+    Extract Pcgo from a gas-oil capillary pressure table.
 
-    :param gas_oil_capillary_pressure_table: Gas-oil capillary pressure table (two-phase or three-phase).
-    :param water_saturation: Water saturation (scalar or array).
-    :param oil_saturation: Oil saturation (scalar or array).
-    :param gas_saturation: Gas saturation (scalar or array).
-    :param kwargs: Additional keyword arguments forwarded to parametric tables.
+    `Pcgo` is a function of `Sg` only. A two-phase table is queried at the gas-oil system's
+    own saturations (`So = 1 - swc - Sg`), whichever phase its reference axis uses. A
+    three-phase table is evaluated at the three-phase point.
+
+    :param gas_oil_capillary_pressure_table: Two-phase or three-phase capillary pressure table.
+    :param water_saturation: Water saturation (used by three-phase tables only).
+    :param oil_saturation: Oil saturation (used by three-phase tables only).
+    :param gas_saturation: Gas saturation.
+    :param connate_water_saturation: Connate water saturation, which places the gas-oil system.
+    :param kwargs: Extra arguments forwarded to a three-phase table's `evaluate`.
     :return: Gas-oil capillary pressure Pcgo = Pg - Po (scalar or array).
     """
-    gas_oil_wetting_phase = gas_oil_capillary_pressure_table.get_gas_oil_wetting_phase()
     if isinstance(gas_oil_capillary_pressure_table, TwoPhaseCapillaryPressureTable):
-        if gas_oil_wetting_phase == FluidPhase.OIL:
-            wetting_saturation = oil_saturation
-            non_wetting_saturation = gas_saturation
-        else:
-            wetting_saturation = gas_saturation
-            non_wetting_saturation = oil_saturation
-        return gas_oil_capillary_pressure_table.get_capillary_pressure(
-            wetting_saturation=wetting_saturation,
-            non_wetting_saturation=non_wetting_saturation,
+        return query_gas_oil_capillary_pressure(
+            gas_oil_capillary_pressure_table, gas_saturation, connate_water_saturation
         )
-
     result = gas_oil_capillary_pressure_table.evaluate(
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
@@ -130,34 +123,22 @@ def get_oil_water_capillary_pressure_derivative(
     **kwargs: typing.Any,
 ) -> NumberOrArray[NDimension]:
     """
-    Return dpcow/d(reference_sat) for the oil-water capillary pressure table.
+    Return `dPcow/dSw`, the scanning variable of the oil-water hysteresis layer.
 
-    For `TwoPhaseCapillaryPressureTable` this is the derivative w.r.t. the
-    table's own reference saturation (Sw in water-wet, So in oil-wet). For
-    three-phase tables `dpcow/dsw` is returned to match the scanning variable
-    used by the hysteresis layer.
+    For a two-phase table this is the slope with respect to `Sw` (the sign is handled for a
+    table whose reference axis is oil). For a three-phase table it is `dpcow_dsw`.
 
-    :param oil_water_capillary_pressure_table: Oil-water capillary pressure table (two-phase or three-phase).
-    :param water_saturation: Water saturation (scalar or array).
-    :param oil_saturation: Oil saturation (scalar or array).
-    :param gas_saturation: Gas saturation (scalar or array).
-    :param kwargs: Additional keyword arguments forwarded to parametric tables.
-    :return: Derivative of Pcow w.r.t. the reference saturation axis (scalar or array).
+    :param oil_water_capillary_pressure_table: Two-phase or three-phase capillary pressure table.
+    :param water_saturation: Water saturation.
+    :param oil_saturation: Oil saturation (used by three-phase tables only).
+    :param gas_saturation: Gas saturation (used by three-phase tables only).
+    :param kwargs: Extra arguments forwarded to a three-phase table's `derivatives`.
+    :return: Derivative of Pcow with respect to the water saturation (scalar or array).
     """
-    oil_water_wetting_phase = oil_water_capillary_pressure_table.get_oil_water_wetting_phase()
-
     if isinstance(oil_water_capillary_pressure_table, TwoPhaseCapillaryPressureTable):
-        if oil_water_wetting_phase == FluidPhase.WATER:
-            wetting_saturation = water_saturation
-            non_wetting_saturation = oil_saturation
-        else:
-            wetting_saturation = oil_saturation
-            non_wetting_saturation = water_saturation
-        return oil_water_capillary_pressure_table.get_capillary_pressure_derivative(
-            wetting_saturation=wetting_saturation,
-            non_wetting_saturation=non_wetting_saturation,
+        return query_oil_water_capillary_pressure(
+            oil_water_capillary_pressure_table, water_saturation, derivative=True
         )
-
     derivatives = oil_water_capillary_pressure_table.derivatives(
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
@@ -172,38 +153,30 @@ def get_gas_oil_capillary_pressure_derivative(
     water_saturation: NumberOrArray[NDimension],
     oil_saturation: NumberOrArray[NDimension],
     gas_saturation: NumberOrArray[NDimension],
+    connate_water_saturation: Number,
     **kwargs: typing.Any,
 ) -> NumberOrArray[NDimension]:
     """
-    Return dpcgo/d(reference_sat) for the gas-oil capillary pressure table.
+    Return `dPcgo/dSg`, the scanning variable of the gas-oil hysteresis layer.
 
-    For `TwoPhaseCapillaryPressureTable` this is the derivative w.r.t. the
-    table's own reference saturation. For three-phase tables
-    `dpcgo/dsg` is returned to match the scanning variable used by the
-    hysteresis layer.
+    For a two-phase table this is the slope with respect to `Sg` (the sign is handled for a
+    table whose reference axis is oil). For a three-phase table it is `dpcgo_dsg`.
 
-    :param gas_oil_capillary_pressure_table: Gas-oil capillary pressure table (two-phase or three-phase).
-    :param water_saturation: Water saturation (scalar or array).
-    :param oil_saturation: Oil saturation (scalar or array).
-    :param gas_saturation: Gas saturation (scalar or array).
-    :param kwargs: Additional keyword arguments forwarded to parametric tables.
-    :return: Derivative of Pcgo w.r.t. the reference saturation axis
-        (scalar or array).
+    :param gas_oil_capillary_pressure_table: Two-phase or three-phase capillary pressure table.
+    :param water_saturation: Water saturation (used by three-phase tables only).
+    :param oil_saturation: Oil saturation (used by three-phase tables only).
+    :param gas_saturation: Gas saturation.
+    :param connate_water_saturation: Connate water saturation, which places the gas-oil system.
+    :param kwargs: Extra arguments forwarded to a three-phase table's `derivatives`.
+    :return: Derivative of Pcgo with respect to the gas saturation (scalar or array).
     """
-    gas_oil_wetting_phase = gas_oil_capillary_pressure_table.get_gas_oil_wetting_phase()
-
     if isinstance(gas_oil_capillary_pressure_table, TwoPhaseCapillaryPressureTable):
-        if gas_oil_wetting_phase == FluidPhase.OIL:
-            wetting_saturation = oil_saturation
-            non_wetting_saturation = gas_saturation
-        else:
-            wetting_saturation = gas_saturation
-            non_wetting_saturation = oil_saturation
-        return gas_oil_capillary_pressure_table.get_capillary_pressure_derivative(
-            wetting_saturation=wetting_saturation,
-            non_wetting_saturation=non_wetting_saturation,
+        return query_gas_oil_capillary_pressure(
+            gas_oil_capillary_pressure_table,
+            gas_saturation,
+            connate_water_saturation,
+            derivative=True,
         )
-
     derivatives = gas_oil_capillary_pressure_table.derivatives(
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
@@ -303,6 +276,19 @@ class KilloughCapillaryPressureTable(CapillaryPressureTable):
             oil-wet systems, as reported by the drainage table.
         """
         return self.oil_water_drainage_table.get_oil_water_wetting_phase()
+
+    def get_connate_water_saturation(self) -> Number:
+        """
+        Connate water saturation of the system, read off the oil-water drainage table. It
+        places the gas-oil system (`So = 1 - swc - Sg`) when the gas-oil table is a
+        two-phase table.
+
+        :return: Connate water saturation.
+        """
+        table = self.oil_water_drainage_table
+        if isinstance(table, TwoPhaseCapillaryPressureTable | ThreePhaseCapillaryPressureTable):
+            return table.get_connate_water_saturation()
+        return table.irreducible_water_saturation  # type: ignore[attr-defined]
 
     def get_gas_oil_wetting_phase(self) -> FluidPhase:
         """
@@ -475,6 +461,7 @@ class KilloughCapillaryPressureTable(CapillaryPressureTable):
         )
 
         oil_water_drainage_table = self.oil_water_drainage_table
+        connate_water_saturation = self.get_connate_water_saturation()
         oil_water_imbibition_table = self.oil_water_imbibition_table or oil_water_drainage_table
         gas_oil_drainage_table = self.gas_oil_drainage_table
         gas_oil_imbibition_table = self.gas_oil_imbibition_table or gas_oil_drainage_table
@@ -507,6 +494,7 @@ class KilloughCapillaryPressureTable(CapillaryPressureTable):
         # Gas-oil Pc: scan over gas saturation
         gas_oil_capillary_pressure_drainage = get_gas_oil_capillary_pressure(
             gas_oil_capillary_pressure_table=gas_oil_drainage_table,
+            connate_water_saturation=connate_water_saturation,
             water_saturation=water_saturation,
             oil_saturation=oil_saturation,
             gas_saturation=gas_saturation,
@@ -514,6 +502,7 @@ class KilloughCapillaryPressureTable(CapillaryPressureTable):
         )
         gas_oil_capillary_pressure_imbibition = get_gas_oil_capillary_pressure(
             gas_oil_capillary_pressure_table=gas_oil_imbibition_table,
+            connate_water_saturation=connate_water_saturation,
             water_saturation=water_saturation,
             oil_saturation=oil_saturation,
             gas_saturation=gas_saturation,
@@ -607,6 +596,7 @@ class KilloughCapillaryPressureTable(CapillaryPressureTable):
         )
 
         oil_water_drainage_table = self.oil_water_drainage_table
+        connate_water_saturation = self.get_connate_water_saturation()
         oil_water_imbibition_table = self.oil_water_imbibition_table or oil_water_drainage_table
         gas_oil_drainage_table = self.gas_oil_drainage_table
         gas_oil_imbibition_table = self.gas_oil_imbibition_table or gas_oil_drainage_table
@@ -660,6 +650,7 @@ class KilloughCapillaryPressureTable(CapillaryPressureTable):
         # Gas-oil
         gas_oil_capillary_pressure_drainage = get_gas_oil_capillary_pressure(
             gas_oil_capillary_pressure_table=gas_oil_drainage_table,
+            connate_water_saturation=connate_water_saturation,
             water_saturation=water_saturation,
             oil_saturation=oil_saturation,
             gas_saturation=gas_saturation,
@@ -667,6 +658,7 @@ class KilloughCapillaryPressureTable(CapillaryPressureTable):
         )
         gas_oil_capillary_pressure_imbibition = get_gas_oil_capillary_pressure(
             gas_oil_capillary_pressure_table=gas_oil_imbibition_table,
+            connate_water_saturation=connate_water_saturation,
             water_saturation=water_saturation,
             oil_saturation=oil_saturation,
             gas_saturation=gas_saturation,
@@ -674,6 +666,7 @@ class KilloughCapillaryPressureTable(CapillaryPressureTable):
         )
         gas_oil_capillary_pressure_drainage_derivative = get_gas_oil_capillary_pressure_derivative(
             gas_oil_capillary_pressure_table=gas_oil_drainage_table,
+            connate_water_saturation=connate_water_saturation,
             water_saturation=water_saturation,
             oil_saturation=oil_saturation,
             gas_saturation=gas_saturation,
@@ -682,6 +675,7 @@ class KilloughCapillaryPressureTable(CapillaryPressureTable):
         gas_oil_capillary_pressure_imbibition_derivative = (
             get_gas_oil_capillary_pressure_derivative(
                 gas_oil_capillary_pressure_table=gas_oil_imbibition_table,
+                connate_water_saturation=connate_water_saturation,
                 water_saturation=water_saturation,
                 oil_saturation=oil_saturation,
                 gas_saturation=gas_saturation,

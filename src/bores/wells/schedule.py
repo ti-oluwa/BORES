@@ -231,7 +231,7 @@ def match_connection_target(
             f"The layer range k1={k1}, k2={k2} is invalid. Give both as 1-based layers with "
             "`k1 <= k2`, or both as `0` for every layer."
         )
-    
+
     selected = np.ones(np.shape(connection_i), dtype=bool)
     if i:
         selected &= np.asarray(connection_i) == i
