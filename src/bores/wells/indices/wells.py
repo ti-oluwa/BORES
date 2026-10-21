@@ -365,8 +365,8 @@ def resolve_connection_factor(
     """
     Resolves the connection factor for one (perforation, cell) pair.
 
-    Resolution order: `perforation.connection_factor_override` if set;
-    otherwise Peaceman (`compute_peaceman_well_index`) if `is_locally_cartesian`;
+    Resolution order: `perforation.connection_factor_override` if set, scaled by
+    `connection_factor_multiplier` if that is set too; otherwise Peaceman (`compute_peaceman_well_index`) if `is_locally_cartesian`;
     otherwise the equivalent-radius fallback (`compute_equivalent_radius_well_index`).
 
     :param perforation: Source perforation (for skin, override).
@@ -382,6 +382,10 @@ def resolve_connection_factor(
     :returns: Connection factor / well index for this (perforation, cell) pair.
     """
     if perforation.connection_factor_override is not None:
+        if perforation.connection_factor_multiplier is not None:
+            return (
+                perforation.connection_factor_override * perforation.connection_factor_multiplier
+            )
         return perforation.connection_factor_override
 
     kx = permeabilities[Orientation.X]

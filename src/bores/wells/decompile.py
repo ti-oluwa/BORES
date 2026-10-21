@@ -8,6 +8,7 @@ from bores.wells.base import CompletionStatus, Perforation, Well, Wells, WellSta
 from bores.wells.compile import (
     UNSET_INT,
     CompiledGroupControls,
+    CompiledGroupLimits,
     CompiledPerforations,
     CompiledWellControls,
     CompiledWellSystem,
@@ -51,6 +52,7 @@ __all__ = [
     "decompile_control",
     "decompile_group_control",
     "decompile_group_controls",
+    "decompile_group_limit",
     "decompile_limit",
     "decompile_perforation",
     "decompile_perforations",
@@ -153,34 +155,44 @@ def get_completion_status(tag: int) -> CompletionStatus:
 
 
 def decompile_perforation(
-    original: Perforation, perforations: CompiledPerforations, row: int
+    perforation: Perforation,
+    perforations: CompiledPerforations,
+    row: int,
+    *,
+    include_connection_factor: bool = True,
 ) -> Perforation:
     """
     Rebuilds one rich perforation from a single compiled connection row.
 
-    `original` supplies every field the compiled layer doesn't carry (the
-    TVD range, or the measured-depth range, for a trajectory well).
-    `status`, `schedule_status`, `skin`,
-    `wellbore_radius`, and `saturation_region` are all overridden from the
-    compiled row instead, so this reflects any in-place patch applied to
-    the compiled layer since compile time (a `WELOPEN` event, a `WPIMULT`
-    reissue) rather than trusting a possibly-stale original.
+    `perforation` supplies every field the compiled layer doesn't carry, such as the depth range.
+    The open/shut status, schedule status, skin, wellbore radius and saturation region are read
+    from the compiled row, so the result shows any change made since the run began.
 
-    :param original: The source rich `Perforation`,
+    With `include_connection_factor`, the connection's current well index is given as
+    `connection_factor_override`, and the original `connection_factor_multiplier` is dropped
+    since the index already includes it. That shows what a connection is flowing with now,
+    including a `WPIMULT` applied during the run. Leave it off when the perforation stands for
+    a whole completion spanning several cells, since one index cannot describe all of them.
+
+    :param perforation: The source rich `Perforation`,
         matched via `CompiledPerforations.perforation_indices`.
     :param perforations: `CompiledPerforations` for the whole system.
     :param row: The compiled connection row to read current state from.
-    :returns: `original`, evolved with the compiled row's current state.
+    :param include_connection_factor: Whether to show the row's current well index.
+    :returns: `perforation`, evolved with the compiled row's current state.
     """
     saturation_region = perforations.saturation_regions[row]
-    return attrs.evolve(
-        original,
-        status=get_completion_status(perforations.completion_statuses[row]),
-        schedule_status=get_well_status(perforations.schedule_statuses[row]),
-        skin=perforations.skins[row],
-        wellbore_radius=perforations.wellbore_radii[row],
-        saturation_region=None if saturation_region == UNSET_INT else int(saturation_region),
-    )
+    changes: dict[str, object] = {
+        "status": get_completion_status(perforations.completion_statuses[row]),
+        "schedule_status": get_well_status(perforations.schedule_statuses[row]),
+        "skin": perforations.skins[row],
+        "wellbore_radius": perforations.wellbore_radii[row],
+        "saturation_region": None if saturation_region == UNSET_INT else int(saturation_region),
+    }
+    if include_connection_factor:
+        changes["connection_factor_override"] = float(perforations.well_indices[row])
+        changes["connection_factor_multiplier"] = None
+    return attrs.evolve(perforation, **changes)
 
 
 def decompile_perforations(
@@ -193,7 +205,7 @@ def decompile_perforations(
     Returns one entry per compiled connection row for this well, not one
     per rich perforation - a rich perforation whose trajectory crosses
     several grid cells produces several consecutive rows here, each
-    rebuilt from that row's own current state (see `decompile_perforation`).
+    rebuilt from that row's own current state, including its current well index.
     Matched through `CompiledPerforations.perforation_indices`, not row
     position, since a well with any multi-cell perforation would
     otherwise misalign. Use `decompile_well_perforations` instead when
@@ -235,9 +247,10 @@ def decompile_well_perforations(
     per-connection `WELOPEN` naming specific cells within one wide
     completion). This collapses each such group back to one
     representative perforation using its first row, so it cannot show
-    that kind of within-completion divergence. Use `decompile_perforations`
-    instead when that level of detail matters - it matches
-    `PerforationState`, one entry per connection.
+    that kind of within-completion divergence, nor a changed well index,
+    since one index cannot describe several cells. Use `decompile_perforations`
+    when that level of detail matters. It gives one entry per connection, as
+    `PerforationState` does.
 
     :param wells: The original rich `Wells` this system was compiled from.
     :param well_name: This well's name, to look it up in `wells`.
@@ -254,11 +267,39 @@ def decompile_well_perforations(
     row = row_start
     while row < row_end:
         ordinal = perforations.perforation_indices[row]
-        rebuilt.append(decompile_perforation(rich_perforations[ordinal], perforations, row))
+        rebuilt.append(
+            decompile_perforation(
+                rich_perforations[ordinal],
+                perforations,
+                row,
+                include_connection_factor=False,
+            )
+        )
         row += 1
         while row < row_end and perforations.perforation_indices[row] == ordinal:
             row += 1
     return tuple(rebuilt)
+
+
+def decompile_group_limit(
+    group_limits: CompiledGroupLimits, row: int, unit_system: UnitSystem
+) -> EconomicLimit:
+    """
+    Rebuilds one group's rich `EconomicLimit` from a single row of `CompiledGroupLimits`.
+
+    :param group_limits: The compiled group limits.
+    :param row: The row to rebuild.
+    :param unit_system: Unit system to tag the rebuilt limit with.
+    :returns: The rebuilt `EconomicLimit`.
+    """
+    return EconomicLimit(
+        quantity=ECONOMIC_QUANTITY_FROM_TAG[group_limits.quantities[row]],
+        min_value=none_if_nan(group_limits.min_values[row]),
+        max_value=none_if_nan(group_limits.max_values[row]),
+        workover_action=WORKOVER_ACTION_FROM_TAG[group_limits.workover_actions[row]],
+        end_run=bool(group_limits.end_run_flags[row]),
+        unit_system=unit_system,
+    )
 
 
 def decompile_group_control(
@@ -274,6 +315,12 @@ def decompile_group_control(
     """
     target_rate = none_if_nan(group_controls.target_rates[row])
     injected_phase_tag = group_controls.injected_phases[row]
+    limits_start = group_controls.limits.group_offsets[row]
+    limits_end = group_controls.limits.group_offsets[row + 1]
+    limits = tuple(
+        decompile_group_limit(group_controls.limits, limit_row, unit_system)
+        for limit_row in range(limits_start, limits_end)
+    )
 
     if group_controls.group_kinds[row] == GroupKind.INJECTOR:
         return GroupControl(
@@ -284,11 +331,13 @@ def decompile_group_control(
                 if injected_phase_tag != UNSET_INT
                 else None
             ),
+            limits=limits,
             unit_system=unit_system,
         )
     return GroupControl(
         mode=GROUP_PRODUCER_MODE_FROM_TAG[group_controls.control_modes[row]],
         target_rate=target_rate,
+        limits=limits,
         unit_system=unit_system,
     )
 
@@ -299,7 +348,7 @@ def decompile_group_controls(
     """
     Rebuilds a rich `GroupControls` from `CompiledGroupControls`.
 
-    Only rebuilds each group's control target, not its resolved
+    Rebuilds each group's control mode, target and economic limits, not its resolved
     membership - `CompiledGroupControls.member_well_indices` is a
     solve-time convenience (already-resolved well positions for
     allocation), not something a rich `GroupControl` itself carries. The

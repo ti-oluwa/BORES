@@ -2460,3 +2460,168 @@ def test_firings_survive_a_save_and_load():
     restored = Firings.load(firings.dump())
     assert restored.count("cut") == 2
     assert restored.last_time("cut") == pytest.approx(8.0)
+
+
+def changed_compiled_system():
+    """A compiled system whose controls, limits, connections and group limits have all been changed."""
+    import attrs
+
+    from bores.grids.factories.cartesian import make_cartesian_grid
+    from bores.schedule.base import ScheduleContext
+    from bores.types import FluidPhase, Orientation
+    from bores.wells.base import CompletionStatus
+    from bores.wells.compile import LimitKind, compile_well_system
+    from bores.wells.controls import (
+        BHPLimit,
+        EconomicLimit,
+        EconomicQuantity,
+        ProducerControlMode,
+    )
+    from bores.wells.factories import (
+        make_group_control,
+        make_injector,
+        make_producer,
+        make_well_controls,
+        make_wells,
+    )
+    from bores.wells.groups import GroupControls, WellGroup, WellGroups
+    from bores.wells.schedule import (
+        MultiplyConnectionFactors,
+        SetGroupLimit,
+        SetLimits,
+        SetWellControls,
+        SetWellLift,
+        UpdateWellStatuses,
+    )
+
+    grid = make_cartesian_grid(nx=2, ny=1, nz=3, dx=50.0, dy=50.0, dz=50.0)
+    producer, producer_control = make_producer(
+        "P1",
+        surface_location=(25.0, 25.0),
+        perforation_depths=(0.0, 150.0),
+        target_rate=500.0,
+        limits=[
+            BHPLimit(min_value=500.0),
+            EconomicLimit(quantity=EconomicQuantity.WATER_CUT, max_value=0.9),
+        ],
+        group="G1",
+    )
+    injector, injector_control = make_injector(
+        "I1",
+        injected_phase=FluidPhase.WATER,
+        surface_location=(75.0, 25.0),
+        perforation_depths=(0.0, 150.0),
+        target_rate=800.0,
+        group="G1",
+    )
+    wells = make_wells(producer, injector)
+    group_controls = GroupControls(
+        controls={
+            "G1": attrs.evolve(
+                make_group_control(target_rate=1000.0),
+                limits=(EconomicLimit(quantity=EconomicQuantity.OIL_RATE, min_value=50.0),),
+            )
+        },
+        unit_system=wells.unit_system,
+    )
+    compiled = compile_well_system(
+        wells,
+        make_well_controls(P1=producer_control, I1=injector_control),
+        grid,
+        permeabilities={orientation: np.full(6, 100.0) for orientation in Orientation},
+        group_controls=group_controls,
+        groups=WellGroups({"G1": WellGroup(name="G1", parent="FIELD")}),
+    )
+    model = types.SimpleNamespace(wells=compiled, reservoir=types.SimpleNamespace(grid=grid))
+    context = ScheduleContext(time=1.0)
+    for action in (
+        MultiplyConnectionFactors(well_names=("P1",), multiplier=0.5),
+        MultiplyConnectionFactors(well_names=("I1",), multiplier=2.0, i=2, j=1, k1=2, k2=2),
+        UpdateWellStatuses(well_names=("P1",), status=CompletionStatus.SHUT, i=1, j=1, k1=2, k2=2),
+        SetWellControls(
+            well_names=("P1",),
+            mode=ProducerControlMode.BHP,
+            target_bhp=900.0,
+            efficiency_factor=0.8,
+            guide_rate=3.0,
+        ),
+        SetLimits(
+            well_names=("P1", "P1"),
+            kinds=(LimitKind.BHP, LimitKind.ECONOMIC),
+            quantities=(None, EconomicQuantity.WATER_CUT),
+            min_values=(600.0, None),
+            max_values=(None, 0.7),
+        ),
+        SetGroupLimit(group_name="G1", quantity=EconomicQuantity.OIL_RATE, min_value=75.0),
+        SetWellLift(well_name="P1", artificial_lift_quantity=12.0),
+    ):
+        action(model, context)
+    return wells, compiled
+
+
+def test_decompile_shows_every_change_made_to_the_controls_limits_and_groups():
+    from bores.wells.controls import EconomicQuantity, ProducerControlMode
+    from bores.wells.decompile import decompile_group_controls, decompile_well_controls
+
+    _, compiled = changed_compiled_system()
+    control = decompile_well_controls(compiled)["P1"]
+    assert control.mode == ProducerControlMode.BHP
+    assert control.target_bhp == pytest.approx(900.0)
+    assert control.efficiency_factor == pytest.approx(0.8)
+    assert control.guide_rate == pytest.approx(3.0)
+    assert control.artificial_lift_quantity == pytest.approx(12.0)
+    bhp = next(limit for limit in control.limits if type(limit).__name__ == "BHPLimit")
+    economic = next(limit for limit in control.limits if type(limit).__name__ == "EconomicLimit")
+    assert bhp.min_value == pytest.approx(600.0)
+    assert economic.max_value == pytest.approx(0.7)
+
+    group = decompile_group_controls(compiled.group_controls, compiled.unit_system)["G1"]
+    (group_limit,) = group.limits
+    assert group_limit.quantity == EconomicQuantity.OIL_RATE
+    assert group_limit.min_value == pytest.approx(75.0)
+
+
+def test_decompiled_connections_show_their_own_status_and_current_well_index():
+    from bores.wells.base import CompletionStatus
+    from bores.wells.decompile import decompile_perforations
+
+    wells, compiled = changed_compiled_system()
+    producer_rows = decompile_perforations(wells, "P1", compiled.perforations, 0)
+    assert [row.status for row in producer_rows] == [
+        CompletionStatus.OPEN,
+        CompletionStatus.SHUT,
+        CompletionStatus.OPEN,
+    ]
+    assert [row.connection_factor_override for row in producer_rows] == pytest.approx(
+        compiled.perforations.well_indices[:3].tolist()
+    )
+    injector_rows = decompile_perforations(wells, "I1", compiled.perforations, 1)
+    middle, outer = injector_rows[1], injector_rows[0]
+    assert middle.connection_factor_override == pytest.approx(
+        2.0 * outer.connection_factor_override
+    )
+    assert all(row.connection_factor_multiplier is None for row in injector_rows)
+
+
+def test_a_connection_factor_multiplier_also_scales_a_connection_factor_override():
+    from bores.grids.factories.cartesian import make_cartesian_grid
+    from bores.types import Orientation
+    from bores.wells.compile import compile_well_system
+    from bores.wells.factories import make_producer, make_well_controls, make_wells
+
+    grid = make_cartesian_grid(nx=1, ny=1, nz=1, dx=50.0, dy=50.0, dz=50.0)
+    well, control = make_producer(
+        "P1",
+        surface_location=(25.0, 25.0),
+        perforation_depths=(0.0, 50.0),
+        target_bhp=1000.0,
+        connection_factor_override=10.0,
+        connection_factor_multiplier=0.5,
+    )
+    compiled = compile_well_system(
+        make_wells(well),
+        make_well_controls(P1=control),
+        grid,
+        permeabilities={orientation: np.full(1, 100.0) for orientation in Orientation},
+    )
+    assert compiled.perforations.well_indices[0] == pytest.approx(5.0)
