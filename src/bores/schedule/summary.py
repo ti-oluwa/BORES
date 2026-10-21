@@ -342,6 +342,7 @@ def record_every(
     quantities: typing.Sequence[Summary[ModelT]],
     start: Number = 0.0,
     name: str | None = None,
+    max_firings: Number | None = None,
 ) -> ScheduleItem[ModelT]:
     """
     Builds a `ScheduleItem` recording `quantities` every `every` time units.
@@ -353,13 +354,15 @@ def record_every(
     :param quantities: Every vector to record at each report time.
     :param start: The first time recording is eligible to fire.
     :param name: Optional label for the item.
+    :param max_firings: The most times to record. Defaults to no limit.
     :returns: A `ScheduleItem` pairing an `IntervalEvent` with `RecordSummary`.
     """
     return ScheduleItem(
         event=IntervalEvent(every=every, start=start),
-        action=RecordSummary(quantities=tuple(quantities)),
+        action=RecordSummary(quantities=quantities),
         name=name
         or f"record_every(every={every!r}, {','.join(quantity.key for quantity in quantities)})",
+        max_firings=max_firings,
     )
 
 
@@ -394,6 +397,6 @@ def record_at(
         label = f"record_at(time_step={time_step!r})"
     return ScheduleItem(
         event=event,
-        action=RecordSummary(quantities=tuple(quantities)),
+        action=RecordSummary(quantities=quantities),
         name=name or f"{label[:-1]}, {','.join(quantity.key for quantity in quantities)})",
     )

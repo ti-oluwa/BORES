@@ -1454,7 +1454,7 @@ def load_summary_items(
     if not quantities:
         return []
 
-    action = RecordSummary(quantities=tuple(quantities))
+    action = RecordSummary(quantities=quantities)
     time_unit = TIME_UNIT_PER_UNIT_SYSTEM[deck_file.unit_system]
     report_times = sorted(set(get_schedule_times(deck_file.deck, time_unit=time_unit).values()))
     return [
