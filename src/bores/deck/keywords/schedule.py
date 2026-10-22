@@ -544,12 +544,13 @@ WELOPEN = ScheduledRecordKeyword[str | int](
         ),
         Field("i", int, required=False, default=0),
         Field("j", int, required=False, default=0),
-        Field("k1", int, required=False, default=0),
-        Field("k2", int, required=False, default=0),
+        Field("k", int, required=False, default=0),
+        Field("c1", int, required=False, default=0),
+        Field("c2", int, required=False, default=0),
     ],
 )
 """
-`WELOPEN 'WELL' STATUS [I J K1 K2] ... / ... /`
+`WELOPEN 'WELL' STATUS [I J K C1 C2] ... / ... /`
 - open, shut, or stop a well, or one of its connections.
 
 Fields:
@@ -557,13 +558,13 @@ Fields:
 - `well`: well name.
 - `status`: `OPEN`, `SHUT`, `STOP`, `AUTO`, or `POPN` (open, and put the well's
   completions back on their own status).
-- `i` / `j` / `k1` / `k2`: optional connection location/layer range to
-  restrict the action to a single connection (or range of layers) rather
-  than the whole well; all default to `0`, meaning "whole well".
+- `i` / `j` / `k`: optional connection location to restrict the action to
+  the connection(s) at that cell; each defaults to `0`, meaning "any".
+- `c1` / `c2`: optional first and last completion number to restrict the
+  action to; each defaults to `0`, meaning "any".
 
-When `i`/`j`/`k1`/`k2` are all absent (or `0`), the action applies to
-the whole well; when given, it applies only to the connection(s) at
-that location (or layer range `k1`-`k2` at column `(i, j)`).
+When all of `i`, `j`, `k`, `c1` and `c2` are absent (or `0`), the action applies
+to the whole well; when given, it applies only to the connection(s) that match.
 """
 
 WELTARG = ScheduledRecordKeyword[str | float](
@@ -611,21 +612,26 @@ WPIMULT = ScheduledRecordKeyword[str | float](
         Field("multiplier", np.float64),
         Field("i", int, required=False, default=0),
         Field("j", int, required=False, default=0),
-        Field("k1", int, required=False, default=0),
-        Field("k2", int, required=False, default=0),
+        Field("k", int, required=False, default=0),
+        Field("c1", int, required=False, default=0),
+        Field("c2", int, required=False, default=0),
     ],
 )
 """
-`WPIMULT 'WELL' MULTIPLIER [I J K] / ... /`
+`WPIMULT 'WELL' MULTIPLIER [I J K C1 C2] / ... /`
 - multiply a well's (or a single connection's) productivity index.
 
 Fields:
 
 - `well`: well name.
 - `multiplier`: PI multiplier applied on top of the existing value.
-- `i` / `j` / `k1` / `k2`: optional connection location to restrict the
-  multiplier to a single connection; all default to `0`, meaning
-  "every connection on this well".
+- `i` / `j` / `k`: optional connection location to restrict the multiplier to
+  the connection(s) at that cell; each defaults to `0`, meaning "any".
+- `c1` / `c2`: optional first and last completion number to restrict the
+  multiplier to; each defaults to `0`, meaning "any".
+
+When all of `i`, `j`, `k`, `c1` and `c2` are absent (or `0`), the multiplier
+applies to every connection on the well.
 """
 
 GRUPTREE = ScheduledRecordKeyword[str](
@@ -797,11 +803,13 @@ WTEST = ScheduledRecordKeyword[str | float](
     fields=[
         Field("well", str),
         Field("interval", np.float64),
-        Field("reason", uppercase, required=False, default="PEW"),
+        Field("reason", uppercase, required=False, default=""),
+        Field("test_count", int, required=False, default=0),
+        Field("start_time", np.float64, required=False, default=0.0),
     ],
 )
 """
-`WTEST 'WELL' INTERVAL [reason] / ... /`
+`WTEST 'WELL' INTERVAL [reason] [test_count] [start_time] / ... /`
 - schedule automatic periodic re-opening ("testing") of a well that was
 shut in for an economic or operational reason.
 
@@ -810,10 +818,15 @@ Fields:
 - `well`: well name.
 - `interval`: time between re-open attempts, in the deck's declared
   time unit.
-- `reason`: which shut-in reason(s) this test schedule applies to,
-  as a string of one-letter codes: `P` (economic), `E` (group control
-  efficiency), `W` (workover/economic limit, `WECON`); default `"PEW"`
-  applies to all three.
+- `reason`: which shut-in reasons this test schedule applies to, as a string of
+  one-letter codes: `P` (physical limit, such as a minimum THP), `E` (economic
+  limit, `WECON`), `G` (group economic limit, `GECON`), `D` (THP design limit)
+  and `C` (connection closed by an economic limit). An empty string, the default,
+  stops testing the well.
+- `test_count`: how many times the well is tested. `0`, the default, means
+  there is no limit.
+- `start_time`: start-up time used by the test, in the deck's declared time
+  unit. `0.0` if omitted.
 """
 
 WGRUPCON = ScheduledRecordKeyword[str | float](
@@ -994,8 +1007,6 @@ WCONHIST = ScheduledRecordKeyword[str | float](
         Field(
             name="control_mode",
             type=uppercase,
-            required=False,
-            default="RESV",
             options={"ORAT", "WRAT", "GRAT", "LRAT", "RESV", "BHP"},
         ),
         Field(name="oil_rate", type=np.float64, required=False, default=0.0),
@@ -1008,7 +1019,7 @@ WCONHIST = ScheduledRecordKeyword[str | float](
     ],
 )
 """
-`WCONHIST 'WELL' [status] [control_mode] [orat] [wrat] [grat] [vfp_table] [alq] [thp] [bhp] / ... /`
+`WCONHIST 'WELL' [status] CONTROL_MODE [orat] [wrat] [grat] [vfp_table] [alq] [thp] [bhp] / ... /`
 - specify historical production data for history matching.
 
 Unlike `WCONPROD`, which defines simulation targets, `WCONHIST` supplies
@@ -1020,7 +1031,7 @@ Fields:
 - `well`: well name.
 - `status`: well status (`OPEN`, `SHUT`, `STOP`, or `AUTO`).
 - `control_mode`: historical control mode (`ORAT`, `WRAT`, `GRAT`, `LRAT`,
-  `RESV`, or `BHP`).
+  `RESV`, or `BHP`). Required; Eclipse does not allow it to be defaulted.
 - `oil_rate`: observed oil production rate.
 - `water_rate`: observed water production rate.
 - `gas_rate`: observed gas production rate.
@@ -1050,6 +1061,10 @@ WCONINJH = ScheduledRecordKeyword[str | float](
         Field(name="bhp", type=np.float64, required=False, default=None),
         Field(name="thp", type=np.float64, required=False, default=None),
         Field(name="vfp_table", type=int, required=False, default=None),
+        Field(name="vaporized_oil_concentration", type=np.float64, required=False, default=0.0),
+        Field(name="surface_oil_fraction", type=np.float64, required=False, default=0.0),
+        Field(name="surface_water_fraction", type=np.float64, required=False, default=0.0),
+        Field(name="surface_gas_fraction", type=np.float64, required=False, default=0.0),
         Field(
             name="control_mode",
             type=uppercase,
@@ -1060,7 +1075,7 @@ WCONINJH = ScheduledRecordKeyword[str | float](
     ],
 )
 """
-`WCONINJH 'WELL' PHASE [status] [rate] [bhp] [thp] [vfp_table] [control_mode] / ... /`
+`WCONINJH 'WELL' PHASE [status] [rate] [bhp] [thp] [vfp_table] [vaporized_oil_concentration] [surface_oil_fraction] [surface_water_fraction] [surface_gas_fraction] [control_mode] / ... /`
 - specify historical injection data for history matching.
 
 Unlike `WCONINJE`, which defines simulator control targets, `WCONINJH`
@@ -1076,7 +1091,16 @@ Fields:
 - `bhp`: observed bottom-hole pressure.
 - `thp`: observed tubing-head pressure.
 - `vfp_table`: VFP table used for THP/BHP calculations.
+- `vaporized_oil_concentration`: vaporized oil concentration (`Rv`) of the
+  injected gas. `0.0` if omitted.
+- `surface_oil_fraction`: oil fraction of the injected stream at surface
+  conditions. `0.0` if omitted.
+- `surface_water_fraction`: water fraction of the injected stream at surface
+  conditions. `0.0` if omitted.
+- `surface_gas_fraction`: gas fraction of the injected stream at surface
+  conditions. `0.0` if omitted.
 - `control_mode`: historical injection control mode (`RATE` or `BHP`).
+  `RATE` if omitted.
 """
 
 WDFAC = ScheduledRecordKeyword[str | float](

@@ -116,3 +116,53 @@ def test_tokenize_fast_path_matches_quoted_path():
     assert tokenize("3*1.5 2") == ["1.5", "1.5", "1.5", "2"]
     assert tokenize("2*'A B' C") == ["A B", "A B", "C"]
     assert np.allclose([float(t) for t in tokenize("1 2")], [1, 2])
+
+
+def test_welopen_and_wpimult_use_single_k_and_completion_range():
+    welopen = make("WELOPEN\n'W1' SHUT 2 3 4 1 5 /\n/").get("WELOPEN")[0]
+    assert (welopen["i"], welopen["j"], welopen["k"]) == (2, 3, 4)
+    assert (welopen["c1"], welopen["c2"]) == (1, 5)
+    wpimult = make("WPIMULT\n'W1' 0.5 2 3 4 1 5 /\n/").get("WPIMULT")[0]
+    assert (wpimult["k"], wpimult["c1"], wpimult["c2"]) == (4, 1, 5)
+
+
+def test_connection_layer_rejects_completion_numbers():
+    from bores.errors import NotSupportedError
+    from bores.wells.deck import connection_layers
+
+    assert connection_layers({"well": "W1", "k": 3}, keyword="WELOPEN") == (3, 3)
+    with pytest.raises(NotSupportedError):
+        connection_layers({"well": "W1", "k": 0, "c1": 2, "c2": 2}, keyword="WELOPEN")
+
+
+def test_wconinjh_control_mode_is_item_twelve():
+    deck_file = make("WCONINJH\n'I1' WATER OPEN 500 1* 1* 1* 1* 1* 1* 1* BHP /\n/")
+    (record,) = deck_file.get("WCONINJH")
+    assert record["control_mode"] == "BHP"
+    assert record["rate"] == pytest.approx(500)
+
+
+def test_wconhist_control_mode_cannot_be_defaulted():
+    with pytest.raises(DeckParseError):
+        make("WCONHIST\n'P1' OPEN 1* 100 /\n/").get("WCONHIST")
+
+
+def test_wtest_reason_and_extra_items():
+    (record,) = make("WTEST\n'P1' 30 PEGDC 3 5 /\n/").get("WTEST")
+    assert (record["reason"], record["test_count"]) == ("PEGDC", 3)
+    assert make("WTEST\n'P1' 30 /\n/").get("WTEST")[0]["reason"] == ""
+
+
+def test_gravity_regions_and_defaults():
+    first, second = make("GRAVITY\n35 1.02 0.8 /\n30 /\n/").get("GRAVITY")
+    assert first["gas_specific_gravity"] == pytest.approx(0.8)
+    assert second["water_specific_gravity"] == pytest.approx(1.0)
+    assert second["gas_specific_gravity"] == pytest.approx(0.7773)
+
+
+def test_ehystr_options():
+    record = make("EHYSTR\n0.2 1 1* 1* PC RETR IMBIB WATER /").get("EHYSTR")
+    assert record["limiting_curves"] == "PC"
+    assert record["wetting_phase"] == "WATER"
+    with pytest.raises(DeckParseError):
+        make("EHYSTR\n0.2 1 1* 1* BAD /").get("EHYSTR")

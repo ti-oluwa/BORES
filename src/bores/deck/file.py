@@ -45,6 +45,8 @@ from bores.deck.keywords.grid import (
 from bores.deck.keywords.props import (
     AQUTAB,
     DENSITY,
+    EHYSTR,
+    GRAVITY,
     PVCDO,
     PVCO,
     PVDG,
@@ -237,6 +239,8 @@ DEFAULT_KEYWORDS = frozenset({
     SATNUM,
     # PROPS ###
     DENSITY,
+    EHYSTR,
+    GRAVITY,
     PVCDO,
     PVCO,
     PVDG,

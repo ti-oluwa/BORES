@@ -108,6 +108,30 @@ __all__ = [
 ]
 
 
+def connection_layers(record: typing.Mapping[str, typing.Any], *, keyword: str) -> tuple[int, int]:
+    """
+    The first and last k layer a `WELOPEN` or `WPIMULT` record targets, with `0` meaning any.
+
+    A record parsed from a deck carries one `k`, so both layers are that value. A record
+    built in code may give a layer range as `k1` and `k2` instead.
+
+    :param record: `WELOPEN` or `WPIMULT` record.
+    :param keyword: Name of the keyword the record came from, for error messages.
+    :returns: The first and last layer.
+    :raises NotSupportedError: If the record selects connections by completion number
+        (`c1`/`c2`), which is not supported.
+    """
+    if record.get("c1", 0) or record.get("c2", 0):
+        raise NotSupportedError(
+            f"`{keyword}` for well {record['well']!r} selects connections by completion "
+            "number (items 6 and 7), which is not supported. Select them by i, j and k."
+        )
+    if "k" not in record and ("k1" in record or "k2" in record):
+        return record.get("k1", 0), record.get("k2", 0)
+    layer = record.get("k", 0)
+    return layer, layer
+
+
 def load_well_from_records(
     grid: Grid,
     welspecs_record: typing.Mapping[str, typing.Any],
@@ -231,12 +255,12 @@ def load_well_from_records(
         return spec["start_time"] <= time < spec["end_time"]
 
     def select(
-        record: typing.Mapping[str, typing.Any], *, whole_well_reaches_future: bool
+        record: typing.Mapping[str, typing.Any], *, keyword: str, whole_well_reaches_future: bool
     ) -> list[dict[str, typing.Any]]:
         """The specs a `WPIMULT` or `WELOPEN` record acts on, as of its own time."""
         time = record.get("schedule_time", 0.0)
         i, j = record.get("i", 0), record.get("j", 0)
-        k1, k2 = record.get("k1", 0), record.get("k2", 0)
+        k1, k2 = connection_layers(record, keyword=keyword)
         if whole_well_reaches_future and i == 0 and j == 0 and k1 == 0 and k2 == 0:
             # A shut-in well stays shut when a completion not yet started comes online.
             return [spec for spec in perforation_specs if spec["end_time"] > time]
@@ -265,11 +289,11 @@ def load_well_from_records(
             (r for r in wpimult_records if r.get("schedule_time", 0.0) <= current_time),
             key=lambda r: r.get("schedule_time", 0.0),
         ):
-            matched = select(record, whole_well_reaches_future=False)
+            matched = select(record, keyword="WPIMULT", whole_well_reaches_future=False)
             if not matched:
                 raise ValidationError(
                     f"`WPIMULT` for well {welspecs_record['well']!r} at i={record.get('i', 0)}, "
-                    f"j={record.get('j', 0)}, k1={record.get('k1', 0)}, k2={record.get('k2', 0)} "
+                    f"j={record.get('j', 0)}, k1={k1}, k2={k2} "
                     "matches no connection of the well in effect at that time."
                 )
             for spec in matched:
@@ -279,19 +303,19 @@ def load_well_from_records(
 
     if welopen_records:
         # Whole-well or per-connection open/shut events, replayed in schedule order up to
-        # `current_time`. A whole-well event (i=j=k1=k2=0) touches every connection, including
+        # `current_time`. A whole-well event (i=j=k=0) touches every connection, including
         # ones that start later. A targeted one only touches connections in effect at its time
-        # whose own (i, j) column and k-layer range overlap the event's k1-k2 range.
+        # whose own (i, j) column and k-layer range contain the event's k layer.
         for record in sorted(
             (r for r in welopen_records if r.get("schedule_time", 0.0) <= current_time),
             key=lambda r: r.get("schedule_time", 0.0),
         ):
             new_status = WELOPEN_STATUS_MAP[record["status"]]
-            matched = select(record, whole_well_reaches_future=True)
+            matched = select(record, keyword="WELOPEN", whole_well_reaches_future=True)
             if not matched:
                 raise ValidationError(
                     f"`WELOPEN` for well {welspecs_record['well']!r} at i={record.get('i', 0)}, "
-                    f"j={record.get('j', 0)}, k1={record.get('k1', 0)}, k2={record.get('k2', 0)} "
+                    f"j={record.get('j', 0)}, k1={k1}, k2={k2} "
                     "matches no connection of the well in effect at that time."
                 )
             for spec in matched:
@@ -1616,13 +1640,14 @@ def load_schedule(
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
+        welopen_layers = connection_layers(record, keyword="WELOPEN")
         action = UpdateWellStatuses(
             well_names=(record["well"],),
             status=WELOPEN_STATUS_MAP[record["status"]],
             i=record.get("i", 0),
             j=record.get("j", 0),
-            k1=record.get("k1", 0),
-            k2=record.get("k2", 0),
+            k1=welopen_layers[0],
+            k2=welopen_layers[1],
         )
         items.append(
             ScheduleItem(
@@ -1636,13 +1661,14 @@ def load_schedule(
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
+        wpimult_layers = connection_layers(record, keyword="WPIMULT")
         action = MultiplyConnectionFactors(
             well_names=(record["well"],),
             multiplier=record["multiplier"],
             i=record.get("i", 0),
             j=record.get("j", 0),
-            k1=record.get("k1", 0),
-            k2=record.get("k2", 0),
+            k1=wpimult_layers[0],
+            k2=wpimult_layers[1],
         )
         items.append(
             ScheduleItem(

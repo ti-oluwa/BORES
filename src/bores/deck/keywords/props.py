@@ -8,6 +8,8 @@ and relative permeability / capillary pressure curves.
 **PVT keywords** (return `List[List[Dict]]` - one inner list per PVT region):
 
 - `DENSITY`: stock-tank densities (oil, water, gas) [one record per region]
+- `GRAVITY`: stock-tank gravities (oil API, water and gas specific gravity) [one record per region]
+- `EHYSTR`: hysteresis model controls
 - `PVTW`: water PVT table (ref pressure, Bw, Cw, viscosity, Cv)
 - `PVDO`: dead-oil PVT (pressure, Bo, viscosity) tabulated
 - `PVTO`: live-oil PVT (Rs-bracketed) tabulated
@@ -37,14 +39,22 @@ import numpy as np
 
 from bores.datastructures import GridDimensions
 from bores.deck.core import Deck, tokenize
-from bores.deck.keywords.base import Field, Table, TableKeyword
-from bores.deck.keywords.parsers import fraction
+from bores.deck.keywords.base import (
+    Field,
+    RecordKeyword,
+    RepeatedRecordKeyword,
+    Table,
+    TableKeyword,
+)
+from bores.deck.keywords.parsers import fraction, uppercase
 from bores.deck.operators import Operation
 from bores.types import Number
 
 __all__ = [
     "AQUTAB",
     "DENSITY",
+    "EHYSTR",
+    "GRAVITY",
     "PVCDO",
     "PVCO",
     "PVDG",
@@ -89,6 +99,125 @@ Columns:
 
 `parse` returns `List[List[Dict]]` where each inner list
 contains a single-row table (one density record per PVT region).
+"""
+
+GRAVITY = RepeatedRecordKeyword[float](
+    "GRAVITY",
+    fields=[
+        Field("api_gravity", np.float64),
+        Field("water_specific_gravity", np.float64, required=False, default=1.0),
+        Field("gas_specific_gravity", np.float64, required=False, default=0.7773),
+    ],
+)
+"""
+`GRAVITY  OIL_API  WATER_SG  GAS_SG /`
+- stock-tank fluid gravities at standard conditions, an alternative to `DENSITY`.
+
+One record per PVT region, each ended by its own `/`. `parse` returns one
+`Dict` per region, in region order.
+
+Fields:
+
+- `api_gravity`: oil gravity in degrees API.
+- `water_specific_gravity`: water specific gravity relative to pure water.
+  `1.0` if omitted.
+- `gas_specific_gravity`: gas specific gravity relative to air. `0.7773` if
+  omitted.
+"""
+
+EHYSTR = RecordKeyword[float | int | str](
+    "EHYSTR",
+    fields=[
+        Field("capillary_pressure_curvature", np.float64, required=False, default=0.1),
+        Field("relative_permeability_model", int, required=False, default=0),
+        Field("killough_wetting_curvature", np.float64, required=False, default=1.0),
+        Field("killough_trapped_modifier", np.float64, required=False, default=0.1),
+        Field(
+            "limiting_curves",
+            uppercase,
+            required=False,
+            default="BOTH",
+            options={"BOTH", "KR", "PC"},
+        ),
+        Field(
+            "capillary_pressure_shape",
+            uppercase,
+            required=False,
+            default="RETR",
+            options={"RETR", "NEW"},
+        ),
+        Field(
+            "initial_mobility_curve",
+            uppercase,
+            required=False,
+            default="DRAIN",
+            options={"DRAIN", "IMBIB"},
+        ),
+        Field(
+            "wetting_phase",
+            uppercase,
+            required=False,
+            default="OIL",
+            options={"OIL", "GAS", "WATER"},
+        ),
+        Field(
+            "baker_oil",
+            uppercase,
+            required=False,
+            default="NO",
+            options={"YES", "NO"},
+        ),
+        Field(
+            "baker_gas",
+            uppercase,
+            required=False,
+            default="NO",
+            options={"YES", "NO"},
+        ),
+        Field(
+            "baker_water",
+            uppercase,
+            required=False,
+            default="NO",
+            options={"YES", "NO"},
+        ),
+        Field("threshold_saturation", np.float64, required=False, default=0.0),
+        Field("fix_killough_wetting_phase", int, required=False, default=0),
+        Field("scale_capillary_pressure", int, required=False, default=0),
+    ],
+)
+"""
+`EHYSTR [pc_curvature [kr_model [...]]] /` - hysteresis model controls.
+
+Fields:
+
+- `capillary_pressure_curvature`: curvature parameter of the capillary
+  pressure hysteresis model. `0.1` if omitted.
+- `relative_permeability_model`: relative permeability hysteresis model. `-1`
+  disables it, `0` uses the Carlson model for the non-wetting phase and the
+  drainage curve for the wetting phase, `1` uses the imbibition curve for the
+  wetting phase instead. `0` if omitted.
+- `killough_wetting_curvature`: curvature parameter of the Killough model for
+  the wetting phase. `1.0` if omitted.
+- `killough_trapped_modifier`: modification parameter of the Killough model for
+  the trapped non-wetting saturation. `0.1` if omitted.
+- `limiting_curves`: which curves hysteresis applies to, `BOTH`, `KR` (relative
+  permeability only) or `PC` (capillary pressure only). `BOTH` if omitted.
+- `capillary_pressure_shape`: shape of the capillary pressure scanning
+  curves, `RETR` (retraced) or `NEW`. `RETR` if omitted.
+- `initial_mobility_curve`: curve the fluid mobility starts on, `DRAIN` or
+  `IMBIB`. `DRAIN` if omitted.
+- `wetting_phase`: the wetting phase, `OIL`, `GAS` or `WATER`. `OIL` if omitted.
+- `baker_oil`: whether Baker's interpolation is used for oil relative
+  permeability, `YES` or `NO`. `NO` if omitted.
+- `baker_gas`: the same for gas. `NO` if omitted.
+- `baker_water`: the same for water. `NO` if omitted.
+- `threshold_saturation`: saturation change below which hysteresis is not
+  triggered. `0.0` if omitted.
+- `fix_killough_wetting_phase`: flag controlling the Killough wetting phase
+  correction. `0` if omitted.
+- `scale_capillary_pressure`: flag controlling capillary pressure scaling.
+  `0` if omitted.
 """
 
 PVTW = TableKeyword(
