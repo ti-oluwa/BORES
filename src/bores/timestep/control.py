@@ -11,7 +11,12 @@ from typing_extensions import Self, TypedDict
 
 from bores.constants import c
 from bores.errors import TimingError, ValidationError
-from bores.timestep.targets import PeriodicTarget, TimeTargets, build_time_targets
+from bores.timestep.targets import (
+    PeriodicTarget,
+    TimeTargets,
+    TimeTargetSource,
+    build_time_targets,
+)
 from bores.types import Boolean, Number, UnitConversionTable, UnitSystem
 from bores.units import get_conversion_factors
 from bores.utils import scale
@@ -182,7 +187,7 @@ def compute_utilization(actual: Number | None, limit: Number | None) -> Number |
     return actual / limit
 
 
-def check_same_source(old: typing.Any, new: typing.Any) -> bool:
+def check_same_source(old: TimeTargetSource, new: TimeTargetSource) -> bool:
     """Whether two time target sources are the same object, or equal plain values."""
     if old is new:
         return True
@@ -351,9 +356,9 @@ class Timer:
     _newton_window: deque[int] = attrs.field(init=False)
     """Sliding window of the last N successful Newton iteration counts."""
     _constant_step_warned: bool = attrs.field(init=False, default=False)
-    _target_sources: tuple[typing.Any, ...] | None = attrs.field(init=False, default=None)
+    _target_sources: tuple[TimeTargetSource, ...] | None = attrs.field(init=False, default=None)
     """What `update_time_targets` last built `time_targets` from, to spot when it has changed."""
-    _target_start_date: typing.Any = attrs.field(init=False, default=None)
+    _target_start_date: datetime.datetime | None = attrs.field(init=False, default=None)
 
     def __attrs_post_init__(self) -> None:
         self.validate()
@@ -524,7 +529,7 @@ class Timer:
 
         :return: `(any_violated, message_list)`.
         """
-        mbe_checks = [
+        mbe_checks: list[tuple[Number | None, Number | None, str]] = [
             (absolute_oil_mbe, self.maximum_absolute_oil_mbe, "abs oil MBE"),
             (absolute_water_mbe, self.maximum_absolute_water_mbe, "abs water MBE"),
             (absolute_gas_mbe, self.maximum_absolute_gas_mbe, "abs gas MBE"),
@@ -538,8 +543,8 @@ class Timer:
         for actual, limit, label in mbe_checks:
             if limit is None or actual is None:
                 continue
-            if abs(actual) > limit:
-                messages.append(f"{label}: |{abs(actual):.3e}| > {limit:.3e}")
+            if abs(float(actual)) > limit:
+                messages.append(f"{label}: |{abs(float(actual)):.3e}| > {limit:.3e}")
         return bool(messages), messages
 
     def propose_step_size(self) -> Number:
@@ -960,7 +965,9 @@ class Timer:
 
         return True, "Step acceptable"
 
-    def add_time_targets(self, *sources: typing.Any, start_date: typing.Any = None) -> None:
+    def add_time_targets(
+        self, *sources: TimeTargetSource, start_date: datetime.datetime | None = None
+    ) -> None:
         """
         Adds more times the timer must land on, to the ones it already has.
 
@@ -972,7 +979,9 @@ class Timer:
             *sources, start_date=start_date, unit_system=self.unit_system
         )
 
-    def update_time_targets(self, *sources: typing.Any, start_date: typing.Any = None) -> Boolean:
+    def update_time_targets(
+        self, *sources: TimeTargetSource, start_date: datetime.datetime | None = None
+    ) -> Boolean:
         """
         Makes the timer's time targets match `sources`, rebuilding them only if `sources` is not
         the same as in the previous call. Call it before every step of a run: a schedule is
@@ -1143,7 +1152,7 @@ class Timer:
             stress_ratios.append(cfl_limit * self.cfl_safety_margin / maximum_cfl_encountered)
             utilizations.append(maximum_cfl_encountered / cfl_limit)
 
-        signals = [
+        signals: list[tuple[Number | None, Number | None]] = [
             (maximum_saturation_change, maximum_allowed_saturation_change),
             (maximum_pressure_change, maximum_allowed_pressure_change),
         ]
@@ -1160,7 +1169,9 @@ class Timer:
             ])
 
         for actual, limit in signals:
-            utilization = compute_utilization(None if actual is None else abs(actual), limit)
+            utilization = compute_utilization(
+                None if actual is None else abs(float(actual)), limit
+            )
             if utilization is not None and utilization > 0.0:
                 stress_ratios.append(self.target_utilization / utilization)
                 utilizations.append(utilization)

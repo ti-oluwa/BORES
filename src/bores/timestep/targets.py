@@ -5,6 +5,7 @@ import math
 import numbers
 import typing
 from bisect import bisect_right
+from collections.abc import Iterable
 
 import attrs
 from typing_extensions import Self
@@ -14,7 +15,14 @@ from bores.types import Number, UnitSystem
 from bores.units import get_conversion_factors
 from bores.utils import get_current_time
 
-__all__ = ["PeriodicTarget", "TimeTargets", "build_time_targets"]
+__all__ = [
+    "PeriodicTarget",
+    "SupportsReportTimes",
+    "SupportsTimeTargets",
+    "TimeTargetSource",
+    "TimeTargets",
+    "build_time_targets",
+]
 
 
 @attrs.frozen(kw_only=True, slots=True)
@@ -68,6 +76,16 @@ class PeriodicTarget:
         return candidate
 
 
+def _sorted_unique(values: Iterable[Number]) -> tuple[Number, ...]:
+    """Sorts times and drops repeats."""
+    return tuple(sorted({float(value) for value in values}))
+
+
+def _as_periodic_tuple(values: Iterable[PeriodicTarget]) -> tuple[PeriodicTarget, ...]:
+    """Holds recurring targets as a tuple."""
+    return tuple(values)
+
+
 @attrs.frozen(slots=True)
 class TimeTargets:
     """
@@ -77,13 +95,10 @@ class TimeTargets:
     the model at a known moment. Immutable, so combine two with `|` rather than mutating.
     """
 
-    times: tuple[Number, ...] = attrs.field(
-        converter=lambda values: tuple(sorted(set(float(value) for value in values))),
-        factory=tuple,
-    )
+    times: tuple[Number, ...] = attrs.field(converter=_sorted_unique, factory=tuple)
     """Individual times, sorted and without repeats, in the run's own time unit."""
 
-    periodic: tuple[PeriodicTarget, ...] = attrs.field(converter=tuple, factory=tuple)
+    periodic: tuple[PeriodicTarget, ...] = attrs.field(converter=_as_periodic_tuple, factory=tuple)
     """Recurring targets, such as an event that fires every 30 days."""
 
     def __attrs_post_init__(self) -> None:
@@ -164,8 +179,48 @@ class TimeTargets:
         return best
 
 
+@typing.runtime_checkable
+class SupportsTimeTargets(typing.Protocol):
+    """Anything that can say which times it needs a time stepper to land on, such as a `Schedule`."""
+
+    def get_time_targets(
+        self, *, start_date: datetime.datetime | None = None, unit_system: UnitSystem = ...
+    ) -> TimeTargets:
+        """
+        :param start_date: The simulation's start date.
+        :param unit_system: Unit system the times are expressed in.
+        :returns: The times to land on.
+        """
+        ...
+
+
+@typing.runtime_checkable
+class SupportsReportTimes(typing.Protocol):
+    """Anything that carries report times, such as a `DeckFile`."""
+
+    @property
+    def report_times(self) -> typing.Sequence[Number]:
+        """Report times, in the source's own time unit."""
+        ...
+
+
+TimeTargetSource: typing.TypeAlias = (
+    TimeTargets
+    | PeriodicTarget
+    | datetime.datetime
+    | Number
+    | SupportsTimeTargets
+    | SupportsReportTimes
+    | Iterable["TimeTargetSource"]
+)
+"""
+Anything `build_time_targets` accepts: a schedule, a deck file, an elapsed time, a date, a
+`PeriodicTarget`, `TimeTargets`, or a collection of any of those.
+"""
+
+
 def build_time_targets(
-    *sources: typing.Any,
+    *sources: TimeTargetSource,
     start_date: datetime.datetime | None = None,
     unit_system: UnitSystem = UnitSystem.FIELD,
 ) -> TimeTargets:
@@ -181,7 +236,7 @@ def build_time_targets(
     - A `datetime`, which is converted to an elapsed time from `start_date`.
     - A `PeriodicTarget`, for a time that recurs at a fixed interval.
     - A `TimeTargets`, which is merged as it is.
-    - A list, tuple or set of any of the above.
+    - Any collection of the above, such as a list, tuple, set or generator.
 
     :param sources: What to collect times from.
     :param start_date: The simulation's start date. Required if a source is or contains a
@@ -194,7 +249,7 @@ def build_time_targets(
     times: list[Number] = []
     periodic: list[PeriodicTarget] = []
 
-    def collect(source: typing.Any) -> None:
+    def collect(source: TimeTargetSource) -> None:
         if isinstance(source, TimeTargets):
             times.extend(source.times)
             periodic.extend(source.periodic)
@@ -210,17 +265,17 @@ def build_time_targets(
                     start_date=start_date, current_date=source, unit_system=unit_system
                 )
             )
-        elif callable(getattr(source, "get_time_targets", None)):
+        elif isinstance(source, SupportsTimeTargets):
             targets = source.get_time_targets(start_date=start_date, unit_system=unit_system)
             times.extend(targets.times)
             periodic.extend(targets.periodic)
-        elif hasattr(source, "report_times"):
+        elif isinstance(source, SupportsReportTimes):
             source_unit_system = getattr(source, "unit_system", unit_system)
             factor = get_conversion_factors(source_unit_system, unit_system)["time"]
             times.extend(float(time) * factor for time in source.report_times)
         elif isinstance(source, numbers.Real) and not isinstance(source, bool):
             times.append(float(source))
-        elif isinstance(source, (list, tuple, set, frozenset)):
+        elif isinstance(source, Iterable) and not isinstance(source, (str, bytes)):
             for item in source:
                 collect(item)
         else:

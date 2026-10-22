@@ -36,7 +36,7 @@ from bores.schedule.base import Schedule
 from bores.schedule.summary import SummaryReport
 from bores.simulation.spec import RunSpec
 from bores.simulation.workspace import SimulationWorkspace, build_simulation_workspace
-from bores.timestep import TimeTargets, build_time_targets
+from bores.timestep import TimeTargets, TimeTargetSource, build_time_targets
 from bores.types import (
     Boolean,
     CellArray,
@@ -227,7 +227,7 @@ class SimulationCase:
         hysteresis: Hysteresis | None = None,
         unit_system: UnitSystem | None = None,
         on_inverted_cells: InvertedCellPolicy | str = InvertedCellPolicy.RAISE,
-        extra_time_targets: typing.Iterable[typing.Any] = (),
+        extra_time_targets: typing.Iterable[TimeTargetSource] = (),
         dtype: npt.DTypeLike = None,
     ) -> Self:
         """
@@ -337,7 +337,7 @@ def load_case(
     hysteresis: Hysteresis | None = None,
     unit_system: UnitSystem | None = None,
     on_inverted_cells: InvertedCellPolicy | str = InvertedCellPolicy.RAISE,
-    extra_time_targets: typing.Iterable[typing.Any] = (),
+    extra_time_targets: typing.Iterable[TimeTargetSource] = (),
     dtype: npt.DTypeLike = None,
 ) -> SimulationCase:
     """
