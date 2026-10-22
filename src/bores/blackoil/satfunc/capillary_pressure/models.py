@@ -282,7 +282,9 @@ def compute_brooks_corey_capillary_pressures_array(
                     effective_water_saturation
                     ** (-one / oil_water_pore_size_distribution_index_water_wet)
                 )
-                oil_water_capillary_pressure = np.where(undersaturated, pcow, zero).astype(sw.dtype)
+                oil_water_capillary_pressure = np.where(undersaturated, pcow, zero).astype(
+                    sw.dtype
+                )
 
             elif wettability == Wettability.OIL_WET:
                 pcow = -(
@@ -290,7 +292,9 @@ def compute_brooks_corey_capillary_pressures_array(
                     * effective_water_saturation
                     ** (-one / oil_water_pore_size_distribution_index_oil_wet)
                 )
-                oil_water_capillary_pressure = np.where(undersaturated, pcow, zero).astype(sw.dtype)
+                oil_water_capillary_pressure = np.where(undersaturated, pcow, zero).astype(
+                    sw.dtype
+                )
 
             elif wettability == Wettability.MIXED_WET:
                 pcow_ww = oil_water_entry_pressure_water_wet * (
@@ -305,7 +309,9 @@ def compute_brooks_corey_capillary_pressures_array(
                 pcow = (
                     mixed_wet_water_fraction * pcow_ww + (one - mixed_wet_water_fraction) * pcow_ow
                 )
-                oil_water_capillary_pressure = np.where(undersaturated, pcow, zero).astype(sw.dtype)
+                oil_water_capillary_pressure = np.where(undersaturated, pcow, zero).astype(
+                    sw.dtype
+                )
 
     # Pcgo (Pg - Po)
     gas_oil_capillary_pressure = np.zeros_like(sg)
@@ -328,7 +334,9 @@ def compute_brooks_corey_capillary_pressures_array(
             pcgo = gas_oil_entry_pressure * (
                 effective_liquid_saturation ** (-one / gas_oil_pore_size_distribution_index)
             )
-            gas_oil_capillary_pressure = np.where(is_undersaturated_gas, pcgo, zero).astype(sw.dtype)
+            gas_oil_capillary_pressure = np.where(is_undersaturated_gas, pcgo, zero).astype(
+                sw.dtype
+            )
 
     return oil_water_capillary_pressure, gas_oil_capillary_pressure  # type: ignore
 

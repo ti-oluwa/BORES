@@ -9,6 +9,7 @@ RESTART (not yet supported but planned) -> explicit array/keyword -> EQUIL
 ```
 """
 
+import functools
 import typing
 import warnings
 
@@ -126,6 +127,111 @@ def _rk4_march(
     return depths, pressures
 
 
+COLLOCATION_MAX_ITERATIONS = 60
+"""
+Most passes `integrate_hydrostatic_pressure` makes over a column before it gives up on the
+vectorized solve and integrates the column step by step instead.
+"""
+
+
+def integrate_hydrostatic_pressure(
+    density_fn: typing.Callable[[typing.Any, typing.Any], typing.Any],
+    reference_depth: Number,
+    reference_pressure: Number,
+    endpoint_depth: Number,
+    gradient_factor: Number,
+    step: Number = 1.0,
+    dtype: npt.DTypeLike = None,
+) -> tuple[npt.NDArray, npt.NDArray]:
+    """
+    Integrate `dP/dz = gradient_factor * density_fn(pressure, depth)` from `reference_depth`
+    to `endpoint_depth`, at the same depths a fixed-step RK4 march with `step` would visit.
+
+    The pressure at every depth is solved for together, so `density_fn` is called a handful of
+    times on whole columns instead of four times per step on single values, which is what
+    makes the cost of the PVT table lookups bearable on tall columns. Each pass evaluates the
+    density along the current pressure profile and integrates it with Simpson's rule, and
+    the passes stop once the profile no longer changes. The result has the same fourth-order
+    accuracy as RK4. If the passes do not settle (an extreme column), the march falls back to
+    `_rk4_march`.
+
+    :param density_fn: Fluid density at the given pressure and depth. It must accept arrays.
+    :returns: `(depths, pressures)`, both ascending in depth and spanning
+        `[min(reference_depth, endpoint_depth), max(reference_depth, endpoint_depth)]`.
+    """
+    dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+    fallback = functools.partial(
+        _rk4_march,
+        density_fn=density_fn,
+        reference_depth=reference_depth,
+        reference_pressure=reference_pressure,
+        endpoint_depth=endpoint_depth,
+        gradient_factor=gradient_factor,
+        step=step,
+        dtype=dtype,
+    )
+    if np.isclose(reference_depth, endpoint_depth):
+        return fallback()
+
+    direction = 1.0 if endpoint_depth > reference_depth else -1.0
+    n_steps = max(1, int(np.ceil(abs(endpoint_depth - reference_depth) / step)))
+    h = direction * abs(endpoint_depth - reference_depth) / n_steps
+    node_depths = reference_depth + h * np.arange(n_steps + 1, dtype=np.float64)
+    midpoint_depths = node_depths[:-1] + 0.5 * h
+
+    pressures = np.full(n_steps + 1, float(reference_pressure), dtype=np.float64)
+    reference_gradient = gradient_factor * float(
+        np.ravel(density_fn(np.array([reference_pressure]), np.array([reference_depth])))[0]
+    )
+    pressures += reference_gradient * (node_depths - reference_depth)
+
+    converged = False
+    with np.errstate(all="ignore"):
+        for _ in range(COLLOCATION_MAX_ITERATIONS):
+            node_gradient = gradient_factor * np.asarray(
+                density_fn(pressures, node_depths), dtype=np.float64
+            )
+            # Cubic Hermite estimate of the pressure at the middle of every step
+            midpoint_pressures = 0.5 * (pressures[:-1] + pressures[1:]) + (h / 8.0) * (
+                node_gradient[:-1] - node_gradient[1:]
+            )
+            midpoint_gradient = gradient_factor * np.asarray(
+                density_fn(midpoint_pressures, midpoint_depths), dtype=np.float64
+            )
+            increments = (h / 6.0) * (
+                node_gradient[:-1] + 4.0 * midpoint_gradient + node_gradient[1:]
+            )
+            updated = np.empty_like(pressures)
+            updated[0] = reference_pressure
+            np.cumsum(increments, out=updated[1:])
+            updated[1:] += reference_pressure
+            if not np.all(np.isfinite(updated)):
+                break
+            # The tolerance sits above the rounding noise of the density in the working dtype
+            tolerance = (
+                16.0
+                * np.finfo(dtype).eps  # type: ignore
+                * max(  # type: ignore
+                    float(np.ptp(updated)), 1e-3 * abs(float(reference_pressure))
+                )
+            )
+            change = float(np.max(np.abs(updated - pressures)))
+            pressures = updated
+            if change <= tolerance:
+                converged = True
+                break
+
+    if not converged:
+        return fallback()
+
+    depths_out = node_depths.astype(dtype)
+    pressures_out = pressures.astype(dtype)
+    if direction < 0:
+        depths_out = depths_out[::-1]
+        pressures_out = pressures_out[::-1]
+    return depths_out, pressures_out
+
+
 def _march_full_range(
     density_fn: typing.Callable[[Number, Number], Number],
     reference_depth: Number,
@@ -140,7 +246,7 @@ def _march_full_range(
     March `density_fn` outward from `reference_depth` in both directions, covering
     `[min_depth, max_depth]` in one sorted, concatenated profile.
     """
-    depths_up, pressures_up = _rk4_march(
+    depths_up, pressures_up = integrate_hydrostatic_pressure(
         density_fn=density_fn,
         reference_depth=reference_depth,
         reference_pressure=reference_pressure,
@@ -149,7 +255,7 @@ def _march_full_range(
         step=step,
         dtype=dtype,
     )
-    depths_down, pressures_down = _rk4_march(
+    depths_down, pressures_down = integrate_hydrostatic_pressure(
         density_fn=density_fn,
         reference_depth=reference_depth,
         reference_pressure=reference_pressure,
@@ -494,7 +600,7 @@ def initialize_center_point_equilibrium(
     max_depth = max(depths.max(), region.datum_depth, oil_zone_high)
 
     # Oil zone: integrate from datum outward to the zone edges.
-    oil_depths_up, oil_pressures_up = _rk4_march(
+    oil_depths_up, oil_pressures_up = integrate_hydrostatic_pressure(
         density_fn=compute_oil_density,
         reference_depth=region.datum_depth,
         reference_pressure=region.datum_pressure,
@@ -503,7 +609,7 @@ def initialize_center_point_equilibrium(
         step=depth_step,
         dtype=dtype,
     )
-    oil_depths_down, oil_pressures_down = _rk4_march(
+    oil_depths_down, oil_pressures_down = integrate_hydrostatic_pressure(
         density_fn=compute_oil_density,
         reference_depth=region.datum_depth,
         reference_pressure=region.datum_pressure,
@@ -521,7 +627,7 @@ def initialize_center_point_equilibrium(
     oil_column_pressures: list[npt.NDArray] = [oil_pressures_up[:-1], oil_pressures_down]
     if capillary_pressure is not None:
         if goc_depth is not None and min_depth < oil_zone_low:
-            cap_depths, cap_pressures = _rk4_march(
+            cap_depths, cap_pressures = integrate_hydrostatic_pressure(
                 density_fn=compute_oil_density,
                 reference_depth=oil_zone_low,
                 reference_pressure=oil_pressures_up[0],
@@ -534,7 +640,7 @@ def initialize_center_point_equilibrium(
             oil_column_pressures.insert(0, cap_pressures[:-1])
 
         if woc_depth is not None and max_depth > oil_zone_high:
-            base_depths, base_pressures = _rk4_march(
+            base_depths, base_pressures = integrate_hydrostatic_pressure(
                 density_fn=compute_oil_density,
                 reference_depth=oil_zone_high,
                 reference_pressure=oil_pressures_down[-1],
@@ -674,65 +780,48 @@ def initialize_center_point_equilibrium(
             water_saturation[in_aquifer] = 1.0
             gas_saturation[in_aquifer] = 0.0
 
-    has_oil = (1.0 - water_saturation - gas_saturation) > 0.0
+    # Solution GOR / bubble-point pressure. Every cell is given the oil properties of its depth
+    # and pressure, including gas cap and aquifer cells that hold no oil yet, so that oil
+    # arriving in one of them later starts from a defined, saturated state.
+    if rsvd_table is not None:
+        solution_gor = rsvd_table.at_depth(depths).astype(  # type: ignore[arg-type]
+            dtype, copy=False
+        )
+        oil_bubble_point_pressure = oil_table.bubble_point_pressure(
+            temperature=temperature, solution_gor=solution_gor
+        ).astype(dtype, copy=False)  # type: ignore[union-attr]
+    else:
+        # No RSVD: assume saturated oil (Pbub = P). Forcing `bubble_point_pressure=pressure`
+        # makes the saturated branch always trigger, reading Rs straight off the table at P.
+        solution_gor = oil_table.solution_gas_to_oil_ratio(
+            pressure=pressure,
+            temperature=temperature,
+            bubble_point_pressure=pressure,
+        ).astype(dtype, copy=False)  # type: ignore[union-attr]
+        oil_bubble_point_pressure = pressure.copy()
 
-    # Solution GOR / bubble-point pressure
-    solution_gor = np.zeros(n, dtype=dtype)
-    oil_bubble_point_pressure = np.zeros(n, dtype=dtype)
-    if np.any(has_oil):
-        oil_pressure = pressure[has_oil]
-        oil_temperature = temperature[has_oil]
-        if rsvd_table is not None:
-            gor = rsvd_table.at_depth(depths[has_oil]).astype(  # type: ignore[arg-type]
-                dtype, copy=False
-            )
-            bubble_point_pressure = oil_table.bubble_point_pressure(
-                temperature=oil_temperature, solution_gor=gor
-            ).astype(dtype, copy=False)  # type: ignore[union-attr]
-        else:
-            # No RSVD: assume saturated oil (Pbub = P) everywhere in the oil
-            # zone. Forcing `bubble_point_pressure=oil_pressure` makes the saturated
-            # branch always trigger, reading Rs straight off the table at P.
-            gor = oil_table.solution_gas_to_oil_ratio(
-                pressure=oil_pressure,
-                temperature=oil_temperature,
-                bubble_point_pressure=oil_pressure,
-            ).astype(dtype, copy=False)  # type: ignore[union-attr]
-            bubble_point_pressure = oil_pressure.copy()
-
-        solution_gor[has_oil] = gor
-        oil_bubble_point_pressure[has_oil] = bubble_point_pressure
-
-    # Vaporized oil ratio / dew-point pressure (dry gas: Rv = 0 unless RVVD)
+    # Vaporized oil ratio / dew-point pressure (dry gas: Rv = 0 unless RVVD). As for the oil,
+    # every cell is given the gas properties of its depth and pressure.
     vaporized_oil_gas_ratio = np.zeros(n, dtype=dtype)
     gas_dew_point_pressure = np.zeros(n, dtype=dtype)
-    has_free_gas = gas_saturation > 0.0
-    if rvvd_table is not None and np.any(has_free_gas):
-        vaporized_oil_gas_ratio[has_free_gas] = rvvd_table.at_depth(
-            depths[has_free_gas]  # type: ignore[arg-type]
-        ).astype(dtype, copy=False)  # type: ignore[union-attr]
-
+    if rvvd_table is not None:
+        vaporized_oil_gas_ratio = rvvd_table.at_depth(depths).astype(  # type: ignore[arg-type, union-attr]
+            dtype, copy=False
+        )
         if gas_table is not None:
             # A 2-D `Pdew(Rv, T)` table needs the gas's Rv
             dew_point = gas_table.dew_point_pressure(
-                temperature=temperature[has_free_gas],
-                vaporized_oil_ratio=vaporized_oil_gas_ratio[has_free_gas],
+                temperature=temperature,
+                vaporized_oil_ratio=vaporized_oil_gas_ratio,
             )
             if dew_point is not None:
-                gas_dew_point_pressure[has_free_gas] = dew_point.astype(  # type: ignore[union-attr]
-                    dtype, copy=False
-                )
-    elif is_wet_gas and gas_table is not None and np.any(has_free_gas):
+                gas_dew_point_pressure = dew_point.astype(dtype, copy=False)  # type: ignore[union-attr]
+    elif is_wet_gas and gas_table is not None:
         # No `RVVD`: assume saturated gas (`Pdew = P`), so `Rv = Rv_sat(P, T)`
-        free_gas_pressure = pressure[has_free_gas]
-        saturated_rv = gas_table.vaporized_oil_gas_ratio(
-            free_gas_pressure, temperature[has_free_gas]
-        )
+        saturated_rv = gas_table.vaporized_oil_gas_ratio(pressure, temperature)
         if saturated_rv is not None:
-            vaporized_oil_gas_ratio[has_free_gas] = saturated_rv.astype(  # type: ignore[union-attr]
-                dtype, copy=False
-            )
-            gas_dew_point_pressure[has_free_gas] = free_gas_pressure
+            vaporized_oil_gas_ratio = saturated_rv.astype(dtype, copy=False)  # type: ignore[union-attr]
+            gas_dew_point_pressure = pressure.copy()
 
     return EquilibriumArrays(
         pressure=typing.cast(CellArray, pressure),
@@ -760,6 +849,7 @@ def average_equilibrium_samples(
     (`vaporized_oil_gas_ratio` and `gas_dew_point_pressure`) is weighted by each sample's gas
     content. A cell that straddles a contact therefore keeps the dissolved ratio of the
     fluid that is actually in it, instead of one diluted by samples that hold none of that fluid.
+    A cell with none of the fluid in any sample takes the plain weighted average.
 
     :param sample_arrays: Arrays for every sample of every cell, cell-major, so that the samples of
         a cell are consecutive.
@@ -785,9 +875,11 @@ def average_equilibrium_samples(
     averages = {}
     for name in EquilibriumArrays._fields:
         weights = weights_by_field.get(name, sample_weights)
+        # No sample holds the fluid (e.g. a cell wholly in the gas cap has no oil), so the
+        # saturated value of the samples is averaged with their plain weights instead
+        weights = np.where(weights.sum(axis=1, keepdims=True) > 0.0, weights, sample_weights)
         total_weight = weights.sum(axis=1)
         weighted_sum = (to_samples(getattr(sample_arrays, name)) * weights).sum(axis=1)
-        # No oil (or gas) in any sample means the field is zero in every sample
         averages[name] = np.divide(
             weighted_sum,
             total_weight,

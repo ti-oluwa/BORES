@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import bores.initialization as initialization
 from bores.blackoil.satfunc.capillary_pressure.models import (
     BrooksCoreyCapillaryPressureTable,
     Wettability,
@@ -11,8 +12,10 @@ from bores.blackoil.satfunc.capillary_pressure.models import (
 from bores.deck import DeckFile
 from bores.errors import ValidationError
 from bores.initialization import (
+    get_hydrostatic_gradient_factor,
     initialize_horizontal_subdivision_equilibrium,
     initialize_reservoir_state,
+    integrate_hydrostatic_pressure,
     invert_capillary_pressure_curves,
 )
 from bores.reservoir.equilibrium import Equilibrium
@@ -40,7 +43,12 @@ def make_capillary_deck(path: Path) -> Path:
             mode = "gas"
         elif stripped.startswith("EQUIL"):
             mode = "equil"
-        elif stripped and not stripped.startswith("--") and mode in ("water", "gas") and re.match(r"^[0-9.]", stripped):
+        elif (
+            stripped
+            and not stripped.startswith("--")
+            and mode in ("water", "gas")
+            and re.match(r"^[0-9.]", stripped)
+        ):
             ends = stripped.endswith("/")
             tokens = stripped.replace("/", " ").split()
             if len(tokens) >= 4:
@@ -99,14 +107,20 @@ class TestInvertCapillaryPressureCurves:
     def test_interior_target_is_reproduced_for_either_direction(self):
         rising = np.tile(np.linspace(0.0, 10.0, 11), (3, 1))
         for grid, falls in ((rising, False), (rising[:, ::-1], True)):
-            saturation, pressure = self.invert(grid, [2.5, 5.0, 7.5], falls=falls, prefer_highest=False)
-            reproduced = np.array([np.interp(s, self.saturation[0], g) for s, g in zip(saturation, grid)])
+            saturation, pressure = self.invert(
+                grid, [2.5, 5.0, 7.5], falls=falls, prefer_highest=False
+            )
+            reproduced = np.array([
+                np.interp(s, self.saturation[0], g) for s, g in zip(saturation, grid, strict=False)
+            ])
             np.testing.assert_allclose(reproduced, [2.5, 5.0, 7.5], atol=1e-9)
             np.testing.assert_allclose(pressure, [2.5, 5.0, 7.5])
 
     def test_unreachable_target_is_clamped(self):
         falling = np.tile(np.linspace(10.0, 0.0, 11), (3, 1))
-        saturation, pressure = self.invert(falling, [50.0, -50.0, 5.0], falls=True, prefer_highest=True)
+        saturation, pressure = self.invert(
+            falling, [50.0, -50.0, 5.0], falls=True, prefer_highest=True
+        )
         assert saturation[0] == pytest.approx(0.12)
         assert saturation[1] == pytest.approx(1.0)
         np.testing.assert_allclose(pressure, [10.0, 0.0, 5.0])
@@ -139,7 +153,9 @@ class TestBrooksCoreyDtype:
     @pytest.mark.parametrize("wettability", list(Wettability))
     @pytest.mark.parametrize("dtype", [np.float32, np.float64])
     def test_array_evaluation_keeps_the_input_dtype(self, wettability, dtype):
-        table = BrooksCoreyCapillaryPressureTable(unit_system=UnitSystem.FIELD, wettability=wettability)
+        table = BrooksCoreyCapillaryPressureTable(
+            unit_system=UnitSystem.FIELD, wettability=wettability
+        )
         sw = np.linspace(0.2, 0.9, 7).astype(dtype)
         full = lambda value: np.full(7, value, dtype=dtype)  # noqa: E731
         result = table.evaluate(
@@ -179,7 +195,9 @@ class TestSubdivisionAveraging:
         )  # fmt: skip
         assert 0.0 < arrays.gas_saturation[0] < 0.88
         assert arrays.solution_gor[0] == pytest.approx(arrays.solution_gor[1])
-        assert arrays.oil_bubble_point_pressure[0] == pytest.approx(arrays.oil_bubble_point_pressure[1])
+        assert arrays.oil_bubble_point_pressure[0] == pytest.approx(
+            arrays.oil_bubble_point_pressure[1]
+        )
 
 
 class TestStateConsistency:
@@ -209,3 +227,73 @@ class TestStateConsistency:
                 reservoir, pvt, deck_file=deck_file, satfunc=None, temperature=200.0,
                 water_saturation=water,
             )  # fmt: skip
+
+
+class TestIntegrateHydrostaticPressure:
+    compressibility = 2.0e-6
+    gradient_factor = get_hydrostatic_gradient_factor(UnitSystem.FIELD)
+
+    def density(self, pressure, depth):
+        # Density proportional to pressure, which has the exact solution `P0 * exp(k * dz)`
+        return self.compressibility * np.asarray(pressure, dtype=np.float64)
+
+    @pytest.mark.parametrize("endpoint", [8000.0, 11000.0])
+    def test_matches_the_analytic_solution_in_both_directions(self, endpoint):
+        depths, pressures = integrate_hydrostatic_pressure(
+            self.density,
+            9000.0,
+            4800.0,
+            endpoint,
+            self.gradient_factor,
+            step=1.0,
+            dtype=np.float64,
+        )
+        assert np.all(np.diff(depths) > 0.0)
+        exact = 4800.0 * np.exp(self.gradient_factor * self.compressibility * (depths - 9000.0))
+        np.testing.assert_allclose(pressures, exact, rtol=1e-10)
+
+    def test_visits_the_same_depths_as_the_step_by_step_march(self):
+        reference = initialization._rk4_march(
+            self.density, 9000.0, 4800.0, 8333.3, self.gradient_factor, step=1.0, dtype=np.float64
+        )
+        result = integrate_hydrostatic_pressure(
+            self.density, 9000.0, 4800.0, 8333.3, self.gradient_factor, step=1.0, dtype=np.float64
+        )
+        np.testing.assert_allclose(result[0], reference[0])
+        np.testing.assert_allclose(result[1], reference[1], rtol=1e-9)
+
+    def test_falls_back_to_the_step_by_step_march_when_the_solve_does_not_settle(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(initialization, "COLLOCATION_MAX_ITERATIONS", 1)
+        reference = initialization._rk4_march(
+            self.density, 9000.0, 4800.0, 8000.0, self.gradient_factor, step=1.0, dtype=np.float64
+        )
+        result = integrate_hydrostatic_pressure(
+            self.density, 9000.0, 4800.0, 8000.0, self.gradient_factor, step=1.0, dtype=np.float64
+        )
+        np.testing.assert_array_equal(result[1], reference[1])
+
+
+class TestSaturatedDissolvedRatiosOutsideTheOilZone:
+    def test_gas_cap_and_aquifer_cells_carry_the_oil_properties_of_their_depth(
+        self, spe1_capillary
+    ):
+        _, case = spe1_capillary
+        state = case.initial_state
+        depth = case.model.reservoir.depth
+        oil_zone = (depth > 8350) & (depth < 8380)
+        for outside in (depth < 8350, depth > 8380):
+            assert np.all(state.solution_gor[outside] > 0.0)
+            assert np.all(state.oil_bubble_point_pressure[outside] > 0.0)
+        np.testing.assert_allclose(state.solution_gor, state.solution_gor[oil_zone][0], rtol=1e-5)
+
+    def test_sharp_contact_gas_cap_carries_them_too(self, spe1_capillary):
+        deck_file, case = spe1_capillary
+        reservoir, pvt = case.model.reservoir, case.model.fluid.pvt
+        state = initialize_reservoir_state(
+            reservoir, pvt, deck_file=deck_file, satfunc=None, temperature=200.0
+        )
+        gas_cap = reservoir.depth < 8350
+        assert np.all(state.gas_saturation[gas_cap] > 0.8)
+        assert np.all(state.solution_gor[gas_cap] > 0.0)
