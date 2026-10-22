@@ -8,6 +8,7 @@ import numpy as np
 
 from bores.errors import ValidationError
 from bores.grids.base import Grid
+from bores.schedule.actions import RunSequence
 from bores.schedule.base import Action, ScheduleContext
 from bores.schedule.events import ThresholdEvent
 from bores.types import (
@@ -40,6 +41,7 @@ from bores.wells.controls import (
     WellTargetMode,
     WorkoverAction,
 )
+from bores.wells.hydraulics.vfp import VFPTables
 from bores.wells.mappings import (
     INJECTOR_CONTROL_MODE_MAP,
     PRODUCER_CONTROL_MODE_MAP,
@@ -49,6 +51,8 @@ from bores.wells.workspace import WellsWorkspace
 
 if typing.TYPE_CHECKING:
     from bores.blackoil.compile import CompiledBlackOilModel
+    from bores.schedule.base import Schedule
+    from bores.wells.model import WellSystem
 
 
 __all__ = [
@@ -71,6 +75,7 @@ __all__ = [
     "WaterCutThreshold",
     "as_number_or_array",
     "broadcast_or_match",
+    "check_vfp_references",
     "expand_values",
     "get_many_matching_connection_rows",
     "get_matching_connection_rows",
@@ -1457,3 +1462,68 @@ class SetWellLift(Action["CompiledBlackOilModel"]):
         if self.efficiency_factor is not None:
             controls.set_efficiency_factor(well_row=well_row, value=self.efficiency_factor)
         return model
+
+
+def iter_actions(action: Action) -> typing.Iterator[Action]:
+    """
+    :param action: An action, which may be a `RunSequence` of others.
+    :returns: Every action it consists of, looking inside any `RunSequence`.
+    """
+    if isinstance(action, RunSequence):
+        for inner in action.actions:
+            yield from iter_actions(inner)
+    else:
+        yield action
+
+
+def check_vfp_references(*, well_system: "WellSystem", schedule: "Schedule | None" = None) -> None:
+    """
+    Checks, before a run, that every VFP table number a well uses exists.
+
+    A well uses a table number from its own control and from every `SetWellLift` in the
+    schedule that names it. Wells whose tubing performance is not a collection of VFP tables
+    are skipped, since they never look a table up. A table number is looked up among the
+    producer or the injector tables, according to the well's kind.
+
+    :param well_system: The wells, their controls and their tubing performance.
+    :param schedule: The run's schedule, if it has one.
+    :raises ValidationError: Listing every table number that is not found, with where it comes from.
+    """
+    references: dict[str, list[tuple[Integer, str]]] = {name: [] for name in well_system.wells}
+    for name in references:
+        control = well_system.well_controls.get(name)
+        number = getattr(control, "vfp_table", None)
+        if number:
+            references[name].append((number, "its initial control"))
+    if schedule is not None:
+        for item in schedule.items:
+            for action in iter_actions(item.action):
+                if (
+                    isinstance(action, SetWellLift)
+                    and action.vfp_table
+                    and action.well_name in references
+                ):
+                    references[action.well_name].append((
+                        action.vfp_table,
+                        f"schedule item {item.name!r}",
+                    ))
+
+    missing = []
+    for name, numbers in references.items():
+        tubing_performance = well_system.get_tubing_performance(name)
+        if not isinstance(tubing_performance, VFPTables):
+            continue
+        well = well_system.wells[name]
+        tables = tubing_performance.injectors if well.is_injector else tubing_performance.producers
+        kind = "injector" if well.is_injector else "producer"
+        missing.extend(
+            f"well {name!r} ({kind}) uses VFP table {number} from {source}"
+            for number, source in numbers
+            if number not in tables
+        )
+    if missing:
+        raise ValidationError(
+            "These VFP tables are not defined for the wells that use them: "
+            + "; ".join(missing)
+            + "."
+        )

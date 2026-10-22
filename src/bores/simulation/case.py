@@ -14,7 +14,7 @@ from bores.blackoil.pvt.regions import PVT
 from bores.blackoil.satfunc.regions import SatFunc
 from bores.blackoil.satfunc.relperm.tables import MinimumRelPerm
 from bores.deck.file import DeckFile
-from bores.errors import CaseLoadError, CaseValidationError
+from bores.errors import CaseLoadError, CaseValidationError, ValidationError
 from bores.grids.base import Grid
 from bores.grids.factories.corner_point import InvertedCellPolicy
 from bores.initialization import (
@@ -45,6 +45,7 @@ from bores.types import (
 )
 from bores.wells.deck import load_schedule
 from bores.wells.model import TubingPerformance, WellSystem
+from bores.wells.schedule import check_vfp_references
 
 __all__ = ["SimulationCase", "load_case"]
 
@@ -475,6 +476,11 @@ def load_case(
         )
     except Exception as exc:
         raise CaseLoadError(f"Failed to load schedule from {deck_file!r}.") from exc
+
+    try:
+        check_vfp_references(well_system=wells, schedule=schedule)
+    except ValidationError as exc:
+        raise CaseLoadError(f"Invalid VFP table reference in {deck_file!r}: {exc}") from exc
 
     return SimulationCase(
         model=compile_model(

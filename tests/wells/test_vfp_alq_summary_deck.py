@@ -372,11 +372,13 @@ def region_workspace():
         water_saturation=np.array([0.3, 0.3, 0.3, 0.3]),
         gas_saturation=np.array([0.2, 0.1, 0.3, 0.4]),
         solution_gor=np.array([500.0, 400.0, 300.0, 200.0]),
+        gas_solubility_in_water=np.array([20.0, 20.0, 10.0, 10.0]),
     )
     pvt = types.SimpleNamespace(
         oil_formation_volume_factor=np.array([1.2, 1.25, 1.3, 1.35]),
         water_formation_volume_factor=np.array([1.0, 1.0, 1.0, 1.0]),
         gas_formation_volume_factor=np.array([0.005, 0.005, 0.006, 0.006]),
+        vaporized_oil_gas_ratio=np.array([1e-4, 2e-4, np.nan, 5e-5]),
     )
     return types.SimpleNamespace(reservoir=state, physics=types.SimpleNamespace(pvt=pvt))
 
@@ -390,25 +392,61 @@ def test_region_in_place_matches_hand_calculation(with_workspace):
     model = region_model([1, 1, 2, 2])
     to_stb = c.CUBIC_FEET_TO_STB
     oil_ft3 = np.array([0.5 * 1000 / 1.2, 0.6 * 2000 / 1.25, 0.4 * 3000 / 1.3, 0.3 * 4000 / 1.35])
+    free_gas = np.array([0.2 * 1000 / 0.005, 0.1 * 2000 / 0.005, 0.3 * 3000 / 0.006])
+    water_ft3 = np.array([0.3 * 1000, 0.3 * 2000, 0.3 * 3000, 0.3 * 4000])
+
+    # Oil in the oil phase plus oil vaporized in the free gas, in cubic feet. Rv is in STB per scf.
+    vaporized = np.array([1e-4, 2e-4, 0.0]) * free_gas / to_stb
     roip = well_summary.RegionOilInPlace(region=1)(model, None)
-    assert roip == pytest.approx(oil_ft3[:2].sum() * to_stb)
-    rwip = well_summary.RegionWaterInPlace(region=2)(model, None)
-    assert rwip == pytest.approx((0.3 * 3000 + 0.3 * 4000) * to_stb)
-    free = np.array([0.2 * 1000 / 0.005, 0.1 * 2000 / 0.005])
-    dissolved = np.array([500.0, 400.0]) * oil_ft3[:2] * to_stb
+    assert roip == pytest.approx(oil_ft3[:2].sum() + vaporized[:2].sum())
+    assert well_summary.RegionOilInPlace(region=2)(model, None) == pytest.approx(
+        oil_ft3[2:].sum() + 5e-5 * (0.4 * 4000 / 0.006) / to_stb
+    )
+
+    assert well_summary.RegionWaterInPlace(region=2)(model, None) == pytest.approx(
+        water_ft3[2:].sum()
+    )
+
+    # Free gas, gas in the oil (Rs, scf/STB) and gas in the water (Rsw, scf/STB), in scf.
+    in_oil = np.array([500.0, 400.0]) * oil_ft3[:2] * to_stb
+    in_water = np.array([20.0, 20.0]) * water_ft3[:2] * to_stb
+    assert well_summary.RegionGasInPlace(region=1)(model, None) == pytest.approx(
+        (free_gas[:2] + in_oil + in_water).sum()
+    )
+
+
+def test_a_model_without_vaporized_oil_or_gas_in_water_reads_those_as_zero(monkeypatch):
+    workspace = region_workspace()
+    workspace.physics.pvt.vaporized_oil_gas_ratio = np.full(4, np.nan)
+    workspace.reservoir.gas_solubility_in_water = np.full(4, np.nan)
+    monkeypatch.setattr(well_summary, "get_workspace", lambda *, context: workspace)
+    model = region_model(None)
+    oil_ft3 = np.array([0.5 * 1000 / 1.2, 0.6 * 2000 / 1.25, 0.4 * 3000 / 1.3, 0.3 * 4000 / 1.35])
+    assert well_summary.RegionOilInPlace(region=1)(model, None) == pytest.approx(oil_ft3.sum())
+    free = np.array([
+        0.2 * 1000 / 0.005,
+        0.1 * 2000 / 0.005,
+        0.3 * 3000 / 0.006,
+        0.4 * 4000 / 0.006,
+    ])
+    dissolved = np.array([500.0, 400.0, 300.0, 200.0]) * oil_ft3 * c.CUBIC_FEET_TO_STB
     assert well_summary.RegionGasInPlace(region=1)(model, None) == pytest.approx(
         (free + dissolved).sum()
     )
 
 
-def test_regions_partition_the_field_and_metric_needs_no_barrel_conversion(with_workspace):
+def test_regions_partition_the_field_and_other_unit_systems_need_no_barrel_conversion(
+    with_workspace,
+):
     model = region_model([1, 2, 1, 2])
     total = sum(well_summary.RegionOilInPlace(region=r)(model, None) for r in (1, 2))
     assert total == pytest.approx(
         well_summary.RegionOilInPlace(region=1)(region_model(None), None)
     )
-    metric = well_summary.RegionOilInPlace(region=1)(region_model(None, UnitSystem.METRIC), None)
-    assert metric == pytest.approx(total / c.CUBIC_FEET_TO_STB)
+    metric_model = region_model(None, UnitSystem.METRIC)
+    metric_water = well_summary.RegionWaterInPlace(region=1)(metric_model, None)
+    field_water = well_summary.RegionWaterInPlace(region=1)(region_model(None), None)
+    assert metric_water == pytest.approx(field_water)
 
 
 def test_region_without_cells_and_keys(with_workspace):
@@ -2143,7 +2181,7 @@ def test_region_in_place_uses_the_pore_volume_at_the_current_pressure(monkeypatc
     workspace.reservoir.pressure = np.full(4, 4000.0)
     monkeypatch.setattr(well_summary, "get_workspace", lambda *, context: workspace)
     reference = well_summary.RegionWaterInPlace(region=1)(region_model(None), None)
-    compressed = (0.3 * 1000 + 0.3 * 2000 + 0.3 * 3000 + 0.3 * 4000) * c.CUBIC_FEET_TO_STB
+    compressed = 0.3 * 1000 + 0.3 * 2000 + 0.3 * 3000 + 0.3 * 4000
     assert reference == pytest.approx(compressed * 1.01)
 
 
@@ -3015,3 +3053,85 @@ def test_connection_multipliers_and_targeted_status_changes_skip_connections_not
         model, ScheduleContext(time=10.0)
     )
     assert perforations.well_indices[3:6].tolist() == pytest.approx(base_index[3:6].tolist())
+
+
+def vfp_system(tables, *, producer_table_number=3, injector_table_number=None):
+    controls = {
+        "P1": types.SimpleNamespace(vfp_table=producer_table_number),
+        "I1": types.SimpleNamespace(vfp_table=injector_table_number),
+    }
+    return types.SimpleNamespace(
+        wells={
+            "P1": types.SimpleNamespace(is_injector=False),
+            "I1": types.SimpleNamespace(is_injector=True),
+        },
+        well_controls=types.SimpleNamespace(get=controls.get),
+        get_tubing_performance=lambda name: tables,
+    )
+
+
+def test_vfp_preflight_accepts_tables_that_exist(tmp_path):
+    from bores.schedule import RunSequence, at, schedule
+    from bores.wells.schedule import SetWellLift, check_vfp_references
+
+    tables = VFPTables.from_deck(producer_table(tmp_path))
+    plan = schedule(
+        at(time=10.0, action=RunSequence(actions=(SetWellLift(well_name="P1", vfp_table=3),)))
+    )
+    check_vfp_references(well_system=vfp_system(tables), schedule=plan)
+    check_vfp_references(well_system=vfp_system(tables))
+
+
+def test_vfp_preflight_reports_every_missing_table_and_where_it_came_from(tmp_path):
+    from bores.errors import ValidationError
+    from bores.schedule import RunSequence, at, schedule
+    from bores.wells.schedule import SetWellLift, check_vfp_references
+
+    tables = VFPTables.from_deck(producer_table(tmp_path))
+    plan = schedule(
+        at(
+            time=10.0,
+            action=RunSequence(actions=(SetWellLift(well_name="P1", vfp_table=9),)),
+            name="swap",
+        )
+    )
+    system = vfp_system(tables, injector_table_number=3)
+    with pytest.raises(ValidationError) as caught:
+        check_vfp_references(well_system=system, schedule=plan)
+    message = str(caught.value)
+    assert "well 'P1' (producer) uses VFP table 9 from schedule item 'swap'" in message
+    assert "well 'I1' (injector) uses VFP table 3 from its initial control" in message
+
+
+def test_vfp_preflight_skips_wells_that_do_not_use_vfp_tables():
+    from bores.wells.schedule import check_vfp_references
+
+    check_vfp_references(well_system=vfp_system(None, producer_table_number=7))
+
+
+def test_schedule_names_may_repeat_but_lookup_by_name_must_be_unambiguous():
+    from bores.errors import ValidationError
+    from bores.schedule import Schedule, ScheduleItem, TimeEvent
+
+    first = ScheduleItem(event=TimeEvent(at=5.0), action=FiringProbe(), name="twice")
+    second = ScheduleItem(event=TimeEvent(at=5.0), action=FiringProbe(), name="twice")
+    other = ScheduleItem(event=TimeEvent(at=6.0), action=FiringProbe(), name="once")
+    plan = Schedule(items=(first, second, other))
+
+    assert len(plan) == 3
+    assert plan.get_all("twice") == (first, second)
+    assert plan.get("once") is other
+    assert plan.get("missing") is None
+    with pytest.raises(ValidationError, match="get_all"):
+        plan.get("twice")
+    with pytest.raises(ValidationError):
+        plan["twice"]
+    with pytest.raises(KeyError):
+        plan["missing"]
+    assert "twice" in plan
+
+    # `+` keeps both, `-` removes every item with the name, `|` replaces every item with it.
+    assert len(plan + first) == 4
+    assert (plan - second).items == (other,)
+    replacement = ScheduleItem(event=TimeEvent(at=9.0), action=FiringProbe(), name="twice")
+    assert (plan | replacement).items == (other, replacement)

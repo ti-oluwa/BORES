@@ -6,7 +6,8 @@ total, a leading `W` is one well. Every class has a short alias
 (`FOPR = FieldOilProductionRate`). All rates are surface-condition. Production
 vectors only count producers and injection vectors only count injectors, so a
 well's injection vectors read zero for a producer and its production vectors read
-zero for an injector. Cumulative totals
+zero for an injector. Every volume and rate is in the model's own unit system, so FIELD
+reports cubic feet and cubic feet per day, not barrels. Cumulative totals
 (`FOPT`, `WWIT`, ...) read the workspace's running volumes, which the run advances every
 accepted step with `bores.wells.workspace.accumulate_well_volumes`.
 """
@@ -744,15 +745,26 @@ class RegionInPlace(Summary["CompiledBlackOilModel"]):
         )
 
 
-def get_volume_factor(unit_system: UnitSystem) -> Number:
+def get_stock_tank_barrels_per_volume(unit_system: UnitSystem) -> Number:
     """
-    Factor from a stock-tank volume in the internal volume unit
-    to the reported oil/water unit.
+    The factor between a volume in the model's own volume unit and stock-tank barrels.
+
+    The gas-oil, oil-gas and gas-water ratios are per stock-tank barrel in FIELD units, while
+    the volumes the vectors report are in cubic feet. Every other unit system states these
+    ratios per unit of volume, so nothing needs converting.
 
     :param unit_system: The model's unit system.
-    :returns: Cubic feet to barrels for FIELD, `1` for every other unit system.
+    :returns: Stock-tank barrels per cubic foot for FIELD, `1` for every other unit system.
     """
-    return c.CUBIC_FEET_TO_BARRELS if unit_system == UnitSystem.FIELD else 1.0
+    return c.CUBIC_FEET_TO_STB if unit_system == UnitSystem.FIELD else 1.0
+
+
+def finite_or_zero(values: CellArray) -> CellArray:
+    """
+    :param values: A per-cell ratio that is `NaN` where the model doesn't track it.
+    :returns: `values`, with `NaN` read as `0`.
+    """
+    return typing.cast(CellArray, np.nan_to_num(values, nan=0.0))
 
 
 @attrs.frozen(kw_only=True, slots=True)
@@ -760,7 +772,8 @@ class RegionOilInPlace(RegionInPlace):
     """
     Oil in place in a fluid-in-place region (`ROIP`), as stock-tank oil.
 
-    Counts oil in the oil phase only (`So * PV / Bo`); oil vaporized in free gas is not included.
+    Counts the oil in the oil phase plus the oil vaporized in free gas, when the model has a
+    vaporized oil-gas ratio. Reported in the model's own volume unit.
     """
 
     mnemonic = "ROIP"
@@ -773,23 +786,26 @@ class RegionOilInPlace(RegionInPlace):
         workspace: "SimulationWorkspace",
         unit_system: UnitSystem,
     ) -> Number:
-        oil_volume = np.empty_like(pore_volumes)
-        np.multiply(
-            workspace.reservoir.oil_saturation,
-            pore_volumes,
-            out=oil_volume,
+        state = workspace.reservoir
+        pvt = workspace.physics.pvt
+
+        oil_in_oil_phase = state.oil_saturation * pore_volumes / pvt.oil_formation_volume_factor
+        free_gas = state.gas_saturation * pore_volumes / pvt.gas_formation_volume_factor
+        vaporized_oil = (
+            finite_or_zero(pvt.vaporized_oil_gas_ratio)
+            * free_gas
+            / get_stock_tank_barrels_per_volume(unit_system)
         )
-        np.divide(
-            oil_volume,
-            workspace.physics.pvt.oil_formation_volume_factor,
-            out=oil_volume,
-        )
-        return oil_volume[region_mask].sum() * get_volume_factor(unit_system)
+        return (oil_in_oil_phase + vaporized_oil)[region_mask].sum()
 
 
 @attrs.frozen(kw_only=True, slots=True)
 class RegionWaterInPlace(RegionInPlace):
-    """Water in place in a fluid-in-place region (`RWIP`), as stock-tank water."""
+    """
+    Water in place in a fluid-in-place region (`RWIP`), as stock-tank water.
+
+    Reported in the model's own volume unit.
+    """
 
     mnemonic = "RWIP"
 
@@ -801,26 +817,21 @@ class RegionWaterInPlace(RegionInPlace):
         workspace: "SimulationWorkspace",
         unit_system: UnitSystem,
     ) -> Number:
-        water_volume = np.empty_like(pore_volumes)
-        np.multiply(
-            workspace.reservoir.water_saturation,
-            pore_volumes,
-            out=water_volume,
+        water_volume = (
+            workspace.reservoir.water_saturation
+            * pore_volumes
+            / workspace.physics.pvt.water_formation_volume_factor
         )
-        np.divide(
-            water_volume,
-            workspace.physics.pvt.water_formation_volume_factor,
-            out=water_volume,
-        )
-        return water_volume[region_mask].sum() * get_volume_factor(unit_system)
+        return water_volume[region_mask].sum()
 
 
 @attrs.frozen(kw_only=True, slots=True)
 class RegionGasInPlace(RegionInPlace):
     """
-    Gas in place in a fluid-in-place region (`RGIP`): free gas plus gas dissolved in the oil.
+    Gas in place in a fluid-in-place region (`RGIP`): free gas, plus gas dissolved in the oil,
+    plus gas dissolved in the water when the model has a gas solubility in water.
 
-    Reported in standard cubic feet for FIELD units (cubic metres for METRIC).
+    Reported in the model's own volume unit, standard cubic feet for FIELD.
     """
 
     mnemonic = "RGIP"
@@ -835,20 +846,16 @@ class RegionGasInPlace(RegionInPlace):
     ) -> Number:
         state = workspace.reservoir
         pvt = workspace.physics.pvt
+        barrels_per_volume = get_stock_tank_barrels_per_volume(unit_system)
 
-        free_gas = np.empty_like(pore_volumes)
-        np.multiply(state.gas_saturation, pore_volumes, out=free_gas)
-        np.divide(free_gas, pvt.gas_formation_volume_factor, out=free_gas)
-
-        stock_tank_oil = np.empty_like(pore_volumes)
-        np.multiply(state.oil_saturation, pore_volumes, out=stock_tank_oil)
-        np.divide(stock_tank_oil, pvt.oil_formation_volume_factor, out=stock_tank_oil)
-
-        dissolved_gas = np.empty_like(pore_volumes)
-        np.multiply(state.solution_gor, stock_tank_oil, out=dissolved_gas)
-        np.multiply(dissolved_gas, get_volume_factor(unit_system), out=dissolved_gas)
-
-        return (free_gas + dissolved_gas)[region_mask].sum()
+        free_gas = state.gas_saturation * pore_volumes / pvt.gas_formation_volume_factor
+        oil_in_oil_phase = state.oil_saturation * pore_volumes / pvt.oil_formation_volume_factor
+        water_volume = state.water_saturation * pore_volumes / pvt.water_formation_volume_factor
+        gas_in_oil = state.solution_gor * oil_in_oil_phase * barrels_per_volume
+        gas_in_water = (
+            finite_or_zero(state.gas_solubility_in_water) * water_volume * barrels_per_volume
+        )
+        return (free_gas + gas_in_oil + gas_in_water)[region_mask].sum()
 
 
 FOPR = FieldOilProductionRate

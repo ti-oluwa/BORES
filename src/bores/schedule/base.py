@@ -194,15 +194,29 @@ class ScheduleItem(typing.Generic[ModelT]):
 
 @attrs.frozen(slots=True)
 class Schedule(typing.Generic[ModelT]):
-    """Every item for a run. Advances a model by applying whichever items fire."""
+    """
+    Every item for a run. Advances a model by applying whichever items fire.
+
+    An item's name is how it is looked up, removed and replaced. Names need not be unique,
+    since the same action may be scheduled twice on purpose. `get` and `[]` need a unique
+    name, `-` removes every item with a matching name, and `|` replaces them. An item that
+    limits how often it fires must have a name no other limited item shares.
+    """
 
     items: tuple[ScheduleItem[ModelT], ...] = attrs.field(converter=tuple, factory=tuple)
     """The `(Event, Action)` pairings to apply, in order."""
 
-    _items_map: dict[str, ScheduleItem[ModelT]] = attrs.field(init=False, hash=False, repr=False)
+    _items_by_name: dict[str, tuple[ScheduleItem[ModelT], ...]] = attrs.field(
+        init=False, hash=False, repr=False
+    )
 
     def __attrs_post_init__(self) -> None:
-        object.__setattr__(self, "_items_map", {item.name: item for item in self.items})
+        by_name: dict[str, list[ScheduleItem[ModelT]]] = {}
+        for item in self.items:
+            by_name.setdefault(item.name, []).append(item)
+        object.__setattr__(
+            self, "_items_by_name", {name: tuple(items) for name, items in by_name.items()}
+        )
         limited = [item.name for item in self.items if item.is_limited]
         repeated = sorted({name for name in limited if limited.count(name) > 1})
         if repeated:
@@ -302,14 +316,30 @@ class Schedule(typing.Generic[ModelT]):
         )
         return self.apply(model=model, context=context)
 
+    def get_all(self, name: str, /) -> tuple[ScheduleItem[ModelT], ...]:
+        """
+        Returns every `ScheduleItem` with the given name, in schedule order.
+
+        :param name: The name of the items to retrieve.
+        :returns: The items with that name, empty if there are none.
+        """
+        return self._items_by_name.get(name, ())
+
     def get(self, name: str, /) -> ScheduleItem[ModelT] | None:
         """
         Returns the `ScheduleItem` with the given name, if any.
 
         :param name: The name of the item to retrieve.
         :returns: The item with that name, or `None` if not found.
+        :raises ValidationError: If more than one item has that name. Use `get_all` for those.
         """
-        return self._items_map.get(name)
+        items = self.get_all(name)
+        if len(items) > 1:
+            raise ValidationError(
+                f"{len(items)} schedule items are named {name!r}, so the name does not pick one. "
+                "Use `get_all` to get them all."
+            )
+        return items[0] if items else None
 
     def __getitem__(self, name: str, /) -> ScheduleItem[ModelT]:
         """
@@ -318,11 +348,12 @@ class Schedule(typing.Generic[ModelT]):
         :param name: The name of the item to retrieve.
         :returns: The item with that name.
         :raises KeyError: If no item with that name exists.
+        :raises ValidationError: If more than one item has that name. Use `get_all` for those.
         """
-        try:
-            return self._items_map[name]
-        except KeyError as exc:
-            raise KeyError(f"No schedule item named {name!r}.") from exc
+        item = self.get(name)
+        if item is None:
+            raise KeyError(f"No schedule item named {name!r}.")
+        return item
 
     def __len__(self) -> int:
         return len(self.items)
@@ -332,12 +363,13 @@ class Schedule(typing.Generic[ModelT]):
 
     def __contains__(self, o: typing.Any, /) -> bool:
         if isinstance(o, str):
-            return o in self._items_map
+            return o in self._items_by_name
         return o in self.items
 
     def __add__(self, other: Self | ScheduleItem[ModelT]) -> Self:
         """
-        Concatenates two schedules' items, in order, keeping duplicates.
+        Concatenates two schedules' items, in order, keeping duplicates. Two items may share
+        a name, and both run, so the same action can be scheduled twice on purpose.
 
         :param other: The schedule to append.
         :returns: A new `Schedule` with `self`'s items followed by `other`'s.
@@ -352,7 +384,7 @@ class Schedule(typing.Generic[ModelT]):
 
     def __sub__(self, other: Self | ScheduleItem[ModelT]) -> Self:
         """
-        Removes any items from `self` that have the same name as an item in `other`.
+        Removes every item from `self` that has the same name as an item in `other`.
 
         :param other: The schedule whose item names to remove.
         :returns: A new `Schedule` with only items whose names are not in `other`.
@@ -360,7 +392,7 @@ class Schedule(typing.Generic[ModelT]):
         if isinstance(other, ScheduleItem):
             other_names = {other.name}
         elif isinstance(other, Schedule):
-            other_names = other._items_map
+            other_names = other._items_by_name
         else:
             return NotImplemented
         kept = tuple(item for item in self.items if item.name not in other_names)
@@ -368,8 +400,8 @@ class Schedule(typing.Generic[ModelT]):
 
     def __or__(self, other: Self | ScheduleItem[ModelT]) -> Self:
         """
-        Merges two schedules, `other`'s named items overriding `self`'s
-        own items of the same name. Unnamed items from both are kept, never merged.
+        Merges two schedules. Every item of `other` is kept, and every item of `self` that has
+        the same name as one of them is dropped, so `other` overrides `self` by name.
 
         :param other: The schedule to merge in.
         :returns: A new, merged `Schedule`.
@@ -379,7 +411,7 @@ class Schedule(typing.Generic[ModelT]):
             other_names = {other.name}
         elif isinstance(other, Schedule):
             other_items = other.items
-            other_names = other._items_map
+            other_names = other._items_by_name
         else:
             return NotImplemented
         kept = tuple(item for item in self.items if item.name not in other_names)
