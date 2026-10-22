@@ -21,6 +21,7 @@ from bores.errors import (
     ValidationError,
 )
 from bores.types import (
+    BooleanArray,
     Float,
     IntArray,
     Integer,
@@ -33,7 +34,7 @@ from bores.types import (
 )
 from bores.units import UnitConversionTable, get_conversion_factors
 
-__all__ = ["CellStatus", "ConnectionType", "Grid"]
+__all__ = ["CellStatus", "CellTopBottomFaces", "ConnectionType", "Grid"]
 
 
 class ConnectionType(enum.IntEnum):
@@ -349,6 +350,22 @@ def compute_cell_bounding_boxes(
                     cell_max[neighbour, 2] = vz
 
     return cell_min, cell_max
+
+
+class CellTopBottomFaces(typing.NamedTuple):
+    """Depth and area of the top and bottom of a set of cells, taken from their actual faces."""
+
+    top_depth: NumberArray[OneDimension]
+    """Area-weighted depth of the top of each cell."""
+
+    bottom_depth: NumberArray[OneDimension]
+    """Area-weighted depth of the bottom of each cell."""
+
+    top_area: NumberArray[OneDimension]
+    """Total area of the top of each cell."""
+
+    bottom_area: NumberArray[OneDimension]
+    """Total area of the bottom of each cell."""
 
 
 @typing.final
@@ -1326,6 +1343,99 @@ class Grid:
         raise ValidationError(
             f"Cell {cell_index} is not connected to face {face_index} "
             f"(owner={owner}, neighbour={neighbour})."
+        )
+
+    def get_cell_top_bottom_faces(
+        self, cell_indices: IntArray[OneDimension] | None = None
+    ) -> CellTopBottomFaces:
+        """
+        Find the depth and area of the top and bottom of cells from their actual faces rather
+        than from their bounding boxes.
+
+        A dipping cell is much thinner along its own vertical than its bounding box
+        suggests, because the box also spans the lateral spread of the cell's corners.
+        Every face of a cell whose normal is within 45 degrees of vertical is a candidate for
+        its top or bottom. The candidates are split into a shallow group (the top) and a deep
+        group (the bottom) at the midpoint of their depths, and each group's area-weighted
+        depth and total area become the cell's top and bottom. This works for a cell with a
+        single top and bottom face and for one whose top or bottom is made of several faces.
+
+        A cell with fewer than two near-horizontal faces, such as a sliver cell or a cell of a
+        2-D grid, takes the depth range of its bounding box and an area of 1 for both ends.
+        A cell whose top and bottom coincide in depth has zero thickness and gets the same
+        depth and area at both ends.
+
+        :param cell_indices: Cells to find the top and bottom of, in the order they should be
+            returned. Defaults to every cell.
+        :returns: The top and bottom depth and area of each requested cell, in float64.
+        :raises ValidationError: If a face listed for a cell is not connected to that cell.
+        """
+        if cell_indices is None:
+            cell_indices = np.arange(self.n_cells)
+        cells = np.asarray(cell_indices, dtype=np.int64)
+        n = len(cells)
+
+        # Gather the faces of every requested cell into flat arrays, `row` giving the position
+        # in `cells` that each face entry belongs to
+        offsets = self.cell_face_offsets.astype(np.int64)
+        first_face = offsets[cells]
+        face_counts = offsets[cells + 1] - first_face
+        first_entry = np.cumsum(face_counts) - face_counts
+        row = np.repeat(np.arange(n), face_counts)
+        within_cell = np.arange(row.size) - first_entry[row]
+        faces = self.cell_face_indices[first_face[row] + within_cell]
+
+        if not np.any(self.face_cell_indices[faces] == cells[row, None], axis=1).all():
+            raise ValidationError("A face listed for a cell is not connected to that cell.")
+
+        depth = self.face_centroids[faces, 2]
+        area = self.face_areas[faces]
+        is_candidate = np.abs(self.face_unit_normals[faces, 2]) >= np.cos(np.deg2rad(45.0))
+        candidate_counts = np.bincount(row, weights=is_candidate, minlength=n)
+
+        shallowest = np.full(n, np.inf)
+        deepest = np.full(n, -np.inf)
+        has_faces = face_counts > 0
+        if row.size:
+            segment_starts = first_entry[has_faces]
+            shallowest[has_faces] = np.minimum.reduceat(
+                np.where(is_candidate, depth, np.inf), segment_starts
+            )
+            deepest[has_faces] = np.maximum.reduceat(
+                np.where(is_candidate, depth, -np.inf), segment_starts
+            )
+        with np.errstate(invalid="ignore"):
+            midpoint = 0.5 * (shallowest + deepest)
+        in_top = is_candidate & (depth <= midpoint[row])
+        in_bottom = is_candidate & ~in_top
+
+        def summarize(in_group: BooleanArray) -> tuple[NumberArray, NumberArray]:
+            total_area = np.bincount(row, weights=area * in_group, minlength=n)
+            weighted_depth = np.bincount(row, weights=area * depth * in_group, minlength=n)
+            mean_depth = np.divide(
+                weighted_depth, total_area, out=np.zeros(n), where=total_area > 0.0
+            )
+            return mean_depth, total_area
+
+        top_depth, top_area = summarize(in_top)
+        bottom_depth, bottom_area = summarize(in_bottom)
+
+        has_no_bottom = (candidate_counts >= 2) & (
+            np.bincount(row, weights=in_bottom, minlength=n) == 0
+        )
+        bottom_depth = np.where(has_no_bottom, top_depth, bottom_depth)
+        bottom_area = np.where(has_no_bottom, top_area, bottom_area)
+
+        lacks_faces = candidate_counts < 2
+        top_depth = np.where(lacks_faces, self.cell_min_xyz[cells, 2], top_depth)
+        bottom_depth = np.where(lacks_faces, self.cell_max_xyz[cells, 2], bottom_depth)
+        top_area = np.where(lacks_faces, 1.0, top_area)
+        bottom_area = np.where(lacks_faces, 1.0, bottom_area)
+        return CellTopBottomFaces(
+            top_depth=typing.cast(NumberArray[OneDimension], top_depth),
+            bottom_depth=typing.cast(NumberArray[OneDimension], bottom_depth),
+            top_area=typing.cast(NumberArray[OneDimension], top_area),
+            bottom_area=typing.cast(NumberArray[OneDimension], bottom_area),
         )
 
     def get_boundary_cell_indices(self) -> IntArray[OneDimension]:

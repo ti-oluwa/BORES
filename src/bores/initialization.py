@@ -933,98 +933,6 @@ def initialize_horizontal_subdivision_equilibrium(
     )
 
 
-def get_dip_aware_top_bottom_faces(
-    grid: Grid, cell_indices: IntArray[OneDimension]
-) -> tuple[
-    NumberArray[OneDimension],
-    NumberArray[OneDimension],
-    NumberArray[OneDimension],
-    NumberArray[OneDimension],
-]:
-    """
-    For each cell, find its true top/bottom face depths and areas from grid
-    geometry, rather than the cell's axis-aligned bounding box.
-
-    Each cell's own faces are inspected (via `cell_face_offsets`/
-    `cell_face_indices`) and classified as top/bottom candidates by their
-    outward-normal z-component (`Grid.get_face_normal_for_cell`): a face
-    whose normal is within 45 degrees of vertical is a candidate, since
-    `z` is positive downward, an upward-pointing (negative-z) normal marks a
-    top face and a downward-pointing (positive-z) normal marks a bottom
-    face. Candidates are split into a shallow group and a deep group at
-    their midpoint depth, and each group's area-weighted centroid depth and
-    total area become that cell's top/bottom depth/area. This resolves
-    correctly for a single quad top/bottom face (structured/corner-point
-    hexahedra) as well as a top/bottom face triangulated into several
-    polygons (general unstructured cells).
-
-    A dipping cell's true top-to-bottom depth span (and area taper) along
-    its own face-normal direction can differ materially from its AABB span,
-    which is inflated by the lateral spread of all of its vertices; using
-    the actual faces is what makes this dip-aware.
-
-    Falls back to the cell's AABB z-range with equal top/bottom areas
-    (i.e. uniform-weighting downstream) for any cell with fewer than two
-    vertical-ish faces - e.g. a degenerate sliver cell, or a 2-D grid with
-    no k-direction faces at all.
-
-    :returns: `(top_depth, bottom_depth, top_area, bottom_area)`, each shape
-        `(len(cell_indices),)`, `float64`.
-    """
-    n = len(cell_indices)
-    # Use float64 here since the grid arrays are mostly in float64
-    # also the logic here is precision sensitive. We can cast to
-    # the preferred dtype in the caller
-    top_depth = np.empty(n, dtype=np.float64)
-    bottom_depth = np.empty(n, dtype=np.float64)
-    top_area = np.empty(n, dtype=np.float64)
-    bottom_area = np.empty(n, dtype=np.float64)
-
-    min_abs_normal_z = np.cos(np.deg2rad(45.0))
-
-    for i in range(n):
-        cell_index = int(cell_indices[i])
-        start = grid.cell_face_offsets[cell_index]
-        end = grid.cell_face_offsets[cell_index + 1]
-        faces = grid.cell_face_indices[start:end]
-
-        candidate_depths = []
-        candidate_areas = []
-        for face_index in faces:
-            face_index = int(face_index)
-            normal = grid.get_face_normal_for_cell(face_index, cell_index)
-            if abs(normal[2]) >= min_abs_normal_z:
-                candidate_depths.append(grid.face_centroids[face_index, 2])
-                candidate_areas.append(grid.face_areas[face_index])
-
-        if len(candidate_depths) >= 2:
-            depths_array = np.asarray(candidate_depths, dtype=np.float64)
-            areas_array = np.asarray(candidate_areas, dtype=np.float64)
-            midpoint = 0.5 * (depths_array.min() + depths_array.max())
-            is_top = depths_array <= midpoint
-            if not np.any(is_top) or np.all(is_top):
-                # All candidates landed on one side of the midpoint (e.g.
-                # a single degenerate face), so we split by the extremes instead.
-                is_top = depths_array == depths_array.min()
-            is_bottom = ~is_top
-
-            top_depth[i] = np.average(depths_array[is_top], weights=areas_array[is_top])
-            bottom_depth[i] = np.average(depths_array[is_bottom], weights=areas_array[is_bottom])
-            top_area[i] = areas_array[is_top].sum()
-            bottom_area[i] = areas_array[is_bottom].sum()
-        else:
-            top_depth[i] = grid.cell_min_xyz[cell_index, 2]
-            bottom_depth[i] = grid.cell_max_xyz[cell_index, 2]
-            top_area[i] = bottom_area[i] = 1.0
-
-    return (
-        typing.cast(NumberArray[OneDimension], top_depth),
-        typing.cast(NumberArray[OneDimension], bottom_depth),
-        typing.cast(NumberArray[OneDimension], top_area),
-        typing.cast(NumberArray[OneDimension], bottom_area),
-    )
-
-
 def initialize_tilted_subdivision_equilibrium(
     *,
     region: EquilibriumRegion,
@@ -1038,7 +946,7 @@ def initialize_tilted_subdivision_equilibrium(
     for cell dip (`region.accuracy_flag < 0`).
 
     Uses each cell's actual top/bottom face geometry (see
-    `get_dip_aware_top_bottom_faces`) rather than its AABB to get a
+    `Grid.get_cell_top_bottom_faces`) rather than its AABB to get a
     dip-aware depth range, then weights the `N` sub-samples by a linear
     taper between the top and bottom face areas instead of averaging them
     with equal weight. This is a volume-weighted average under a
@@ -1052,8 +960,8 @@ def initialize_tilted_subdivision_equilibrium(
     n_sub = n_subdivisions or abs(region.accuracy_flag)
     n_cells = len(cell_indices)
 
-    top_depth, bottom_depth, top_area, bottom_area = get_dip_aware_top_bottom_faces(
-        grid=grid, cell_indices=cell_indices
+    top_depth, bottom_depth, top_area, bottom_area = grid.get_cell_top_bottom_faces(
+        cell_indices=cell_indices
     )
     dtype = kwargs["dtype"]
     top_depth = top_depth.astype(dtype, copy=False)

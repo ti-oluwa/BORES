@@ -297,3 +297,41 @@ class TestSaturatedDissolvedRatiosOutsideTheOilZone:
         gas_cap = reservoir.depth < 8350
         assert np.all(state.gas_saturation[gas_cap] > 0.8)
         assert np.all(state.solution_gor[gas_cap] > 0.0)
+
+
+class TestTiltedSubdivision:
+    def test_a_flat_grid_gives_the_same_answer_as_horizontal_subdivision(self, spe1_capillary):
+        deck_file, case = spe1_capillary
+        reservoir = case.model.reservoir
+        equilibrium = Equilibrium.from_deck(deck_file)
+        region = equilibrium.region(1)
+        tables = case.model.fluid.pvt.region(1).tables
+        n = reservoir.n_cells
+        shared = dict(
+            region=region,
+            connate_water_saturation=np.full(n, 0.12),
+            oil_table=tables.oil,
+            gas_table=tables.gas,
+            water_table=tables.water,
+            rsvd_table=equilibrium.rsvd_tables.get(region.rsvd_table),
+            rvvd_table=None,
+            temperature=np.full(n, 200.0),
+            unit_system=UnitSystem.FIELD,
+            capillary_pressure=None,
+            residual_oil_saturation_water=None,
+            residual_oil_saturation_gas=None,
+            residual_gas_saturation=None,
+            dtype=np.float64,
+            n_subdivisions=6,
+        )  # fmt: skip
+        grid = reservoir.grid
+        tilted = initialization.initialize_tilted_subdivision_equilibrium(
+            grid=grid, cell_indices=np.arange(n), **shared
+        )
+        horizontal = initialize_horizontal_subdivision_equilibrium(
+            cell_top=grid.cell_min_xyz[:, 2], cell_bottom=grid.cell_max_xyz[:, 2], **shared
+        )
+        for name in tilted._fields:
+            np.testing.assert_allclose(
+                getattr(tilted, name), getattr(horizontal, name), rtol=1e-6, atol=1e-6
+            )
