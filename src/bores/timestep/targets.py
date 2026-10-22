@@ -39,7 +39,7 @@ class PeriodicTarget:
         else:
             count = math.floor((time + tolerance - self.start) / self.every) + 1
             candidate = self.start + count * self.every
-        
+
         if self.end is not None and candidate > self.end + tolerance:
             return None
         return candidate
@@ -54,7 +54,7 @@ class PeriodicTarget:
         """
         if time < self.start - tolerance:
             return None
-        
+
         count = round((time - self.start) / self.every)
         candidate = self.start + count * self.every
         if abs(candidate - time) > tolerance:
@@ -68,8 +68,8 @@ class PeriodicTarget:
 class TimeTargets:
     """
     Every time a time stepper must land on exactly.
-     
-    This includes the times events fire at, report times, and anything else that changes 
+
+    This includes the times events fire at, report times, and anything else that changes
     the model at a known moment. Immutable, so combine two with `|` rather than mutating.
     """
 

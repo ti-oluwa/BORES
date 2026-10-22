@@ -1493,6 +1493,7 @@ def check_vfp_references(*, well_system: "WellSystem", schedule: "Schedule | Non
         number = getattr(control, "vfp_table", None)
         if number:
             references[name].append((number, "its initial control"))
+
     if schedule is not None:
         for item in schedule.items:
             for action in iter_actions(item.action):

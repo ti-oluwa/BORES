@@ -1,10 +1,11 @@
 """
 Well and field summary vectors, built on `bores.schedule.summary`.
 
-Names follow Eclipse's own summary mnemonics. A leading `F` is a field-wide
+Names follow Eclipse's summary mnemonics. A leading `F` is a field-wide
 total, a leading `W` is one well. Every class has a short alias
-(`FOPR = FieldOilProductionRate`). All rates are surface-condition. Production
-vectors only count producers and injection vectors only count injectors, so a
+(`FOPR = FieldOilProductionRate`). All rates are surface-condition.
+
+Production vectors only count producers and injection vectors only count injectors, so a
 well's injection vectors read zero for a producer and its production vectors read
 zero for an injector. Every volume and rate is in the model's own unit system, so FIELD
 reports cubic feet and cubic feet per day, not barrels. Cumulative totals

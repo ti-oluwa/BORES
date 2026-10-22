@@ -10,7 +10,7 @@ import attrs
 
 from bores.errors import ValidationError
 from bores.schedule.base import Event, ModelT, ScheduleContext
-from bores.time_targets import PeriodicTarget, TimeTargets
+from bores.timestep.targets import PeriodicTarget, TimeTargets
 from bores.types import Boolean, Number, UnitSystem
 from bores.utils import get_current_date, get_current_time
 
@@ -55,10 +55,12 @@ class TimeEvent(Event[ModelT]):
     at: Number
     """Elapsed time this event fires at, in the schedule's unit system."""
 
-    def time_targets(
+    def get_time_targets(
         self, *, start_date: datetime | None = None, unit_system: UnitSystem = UnitSystem.FIELD
     ) -> TimeTargets:
         """
+        Return the time at which this event fires.
+
         :param start_date: The simulation's start date. Unused.
         :param unit_system: Unit system of the run's time. Unused, `at` is already in it.
         :returns: The time this event fires at, so a time stepper lands on it exactly.
@@ -92,10 +94,12 @@ class TimeWindowEvent(Event[ModelT]):
     end: Number | None = None
     """Elapsed time the window closes at. `None` keeps it open for the rest of the run."""
 
-    def time_targets(
+    def get_time_targets(
         self, *, start_date: datetime | None = None, unit_system: UnitSystem = UnitSystem.FIELD
     ) -> TimeTargets:
         """
+        Return the times at which this window opens and closes.
+
         :param start_date: The simulation's start date. Unused.
         :param unit_system: Unit system of the run's time. Unused, `start` and `end` are already in it.
         :returns: The times the window opens and closes at, so a time stepper lands on both.
@@ -146,10 +150,12 @@ class DateEvent(Event[ModelT]):
     )
     """The date this event fires at, given in ISO 8601 format or as a `datetime.datetime`."""
 
-    def time_targets(
+    def get_time_targets(
         self, *, start_date: datetime | None = None, unit_system: UnitSystem = UnitSystem.FIELD
     ) -> TimeTargets:
         """
+        Return the elapsed time at which this date event fires.
+
         :param start_date: The simulation's start date. Required.
         :param unit_system: Unit system the elapsed time is expressed in.
         :returns: The elapsed time of `at`, so a time stepper lands on it exactly.
@@ -202,10 +208,12 @@ class IntervalEvent(Event[ModelT]):
     start: Number = 0.0
     """The first time this event is eligible to fire."""
 
-    def time_targets(
+    def get_time_targets(
         self, *, start_date: datetime | None = None, unit_system: UnitSystem = UnitSystem.FIELD
     ) -> TimeTargets:
         """
+        Return every recurring time at which this event fires.
+
         :param start_date: The simulation's start date. Unused.
         :param unit_system: Unit system of the run's time. Unused, `every` and `start` are already in it.
         :returns: Every boundary this event fires at, so a time stepper lands on each.
@@ -297,10 +305,12 @@ class AllOf(Event[ModelT]):
         """Whether any sub-event holds across many checks."""
         return any(getattr(event, "level_triggered", False) for event in self.events)
 
-    def time_targets(
+    def get_time_targets(
         self, *, start_date: datetime | None = None, unit_system: UnitSystem = UnitSystem.FIELD
     ) -> TimeTargets:
         """
+        Return the combined time targets of all sub-events.
+
         :param start_date: The simulation's start date.
         :param unit_system: Unit system of the run's time.
         :returns: Every time any of the events needs landed on. Landing on more times than the combined event fires at is harmless.
@@ -308,7 +318,7 @@ class AllOf(Event[ModelT]):
         times: list[Number] = []
         periodic: list[PeriodicTarget] = []
         for event in self.events:
-            getter = getattr(event, "time_targets", None)
+            getter = getattr(event, "get_time_targets", None)
             if getter is None:
                 continue
 
@@ -340,10 +350,12 @@ class AnyOf(Event[ModelT]):
         """Whether any sub-event holds across many checks."""
         return any(getattr(event, "level_triggered", False) for event in self.events)
 
-    def time_targets(
+    def get_time_targets(
         self, *, start_date: datetime | None = None, unit_system: UnitSystem = UnitSystem.FIELD
     ) -> TimeTargets:
         """
+        Return the combined time targets of all sub-events.
+
         :param start_date: The simulation's start date.
         :param unit_system: Unit system of the run's time.
         :returns: Every time any of the events needs landed on.
@@ -351,7 +363,7 @@ class AnyOf(Event[ModelT]):
         times: list[Number] = []
         periodic: list[PeriodicTarget] = []
         for event in self.events:
-            getter = getattr(event, "time_targets", None)
+            getter = getattr(event, "get_time_targets", None)
             if getter is None:
                 continue
 

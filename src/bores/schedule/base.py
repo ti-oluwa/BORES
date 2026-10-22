@@ -10,7 +10,7 @@ from typing_extensions import Self
 
 from bores.errors import ActionError, EventError, StopSimulation, ValidationError
 from bores.serde.base import Serializable
-from bores.time_targets import PeriodicTarget, TimeTargets
+from bores.timestep.targets import PeriodicTarget, TimeTargets
 from bores.types import Boolean, Number, UnitSystem
 
 __all__ = [
@@ -317,7 +317,7 @@ class Schedule(typing.Generic[ModelT]):
         )
         return self.apply(model=model, context=context)
 
-    def time_targets(
+    def get_time_targets(
         self,
         *,
         start_date: datetime.datetime | None = None,
@@ -338,7 +338,7 @@ class Schedule(typing.Generic[ModelT]):
         times: list[Number] = []
         periodic: list[PeriodicTarget] = []
         for item in self.items:
-            getter = getattr(item.event, "time_targets", None)
+            getter = getattr(item.event, "get_time_targets", None)
             if getter is None:
                 continue
 

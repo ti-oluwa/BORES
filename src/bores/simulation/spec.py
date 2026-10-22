@@ -9,7 +9,7 @@ from typing_extensions import Self
 
 from bores.constants import Constants
 from bores.errors import ValidationError
-from bores.simulation.timestep import Timer
+from bores.timestep.control import Timer
 from bores.types import (
     DiscretizationMethod,
     MiscibilityModel,

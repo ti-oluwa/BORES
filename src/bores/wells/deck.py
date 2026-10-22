@@ -17,7 +17,7 @@ from bores.schedule.actions import RunSequence
 from bores.schedule.base import Action, Event, Schedule, ScheduleItem
 from bores.schedule.events import AllOf, AnyOf, ComparisonOperator, TimeEvent, TimeWindowEvent
 from bores.schedule.summary import RecordSummary, Summary
-from bores.time_targets import TimeTargets
+from bores.timestep.targets import TimeTargets
 from bores.types import FluidPhase, Number, UnitSystem
 from bores.wells import summary as ws
 from bores.wells.base import CompletionStatus, Perforation, Well, Wells, WellStatus, WellType

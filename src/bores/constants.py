@@ -623,8 +623,15 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         unit="(m³/s)/(scf/day)",
     ),
     # Time Conversions
+    "DAYS_PER_WEEK": Constant(value=7, description="Number of days in a week", unit="day/week"),
     "SECONDS_PER_DAY": Constant(
         value=86400.0, description="Number of seconds in a day", unit="s/day"
+    ),
+    "SECONDS_PER_HOUR": Constant(
+        value=3600.0, description="Number of seconds in an hour", unit="s/hr"
+    ),
+    "SECONDS_PER_MINUTE": Constant(
+        value=60.0, description="Number of seconds in a minute", unit="s/min"
     ),
     "DAYS_PER_SECOND": Constant(
         value=1 / 86400.0, description="Number of days in a second", unit="day/s"

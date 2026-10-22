@@ -1,4 +1,4 @@
-"""Simulation timestep management with smart and adaptive time stepping."""
+"""Simulation timestep controller with smart and adaptive time stepping."""
 
 import logging
 import math
@@ -10,8 +10,8 @@ from typing_extensions import Self, TypedDict
 
 from bores.constants import c
 from bores.errors import TimingError, ValidationError
-from bores.time_targets import TimeTargets
-from bores.types import Number, UnitConversionTable, UnitSystem
+from bores.timestep.targets import TimeTargets
+from bores.types import Boolean, Number, UnitConversionTable, UnitSystem
 from bores.units import get_conversion_factors
 from bores.utils import scale
 
@@ -53,13 +53,17 @@ def Time(
     :return: Total time, in `unit_system`'s native time unit, or in seconds
         if `unit_system` is `None`.
     """
+    days_per_year = c.DAYS_PER_YEAR
     total_days = (
-        days + weeks * 7 + years * c.DAYS_PER_YEAR + months * (c.DAYS_PER_YEAR / c.MONTHS_PER_YEAR)
+        days
+        + weeks * c.DAYS_PER_WEEK
+        + years * days_per_year
+        + months * (days_per_year / c.MONTHS_PER_YEAR)
     )
     total_seconds = (
         total_days * c.SECONDS_PER_DAY
-        + hours * 3600.0
-        + minutes * 60.0
+        + hours * c.SECONDS_PER_HOUR
+        + minutes * c.SECONDS_PER_MINUTE
         + seconds
         + milliseconds / 1000.0
     )
@@ -162,7 +166,7 @@ class StepMetrics:
     """The 1-indexed step count this metric belongs to."""
     step_size: Number
     """The step size attempted, in the owning `Timer`'s `unit_system` native time unit."""
-    cfl: float | None = None
+    cfl: Number | None = None
     """Maximum CFL number encountered during the step, if tracked."""
     newton_iterations: int | None = None
     """Number of Newton iterations taken by the transport solver, if tracked."""
@@ -170,7 +174,7 @@ class StepMetrics:
     """Whether the step was accepted."""
 
 
-def compute_utilization(actual: float | None, limit: float | None) -> float | None:
+def compute_utilization(actual: Number | None, limit: Number | None) -> Number | None:
     """Return actual/limit, or None if either is None/zero."""
     if actual is None or limit is None or limit <= 0.0:
         return None
@@ -212,22 +216,22 @@ class Timer:
     schedule and the deck's report times before the run starts. These are not saved by
     `dump_state`, since they are rebuilt from the schedule when a run is restarted.
     """
-    maximum_cfl: float = 0.9
+    maximum_cfl: Number = 0.9
     """Default CFL limit (max CFL number) for time step adjustments."""
-    ramp_up_factor: float | None = None
+    ramp_up_factor: Number | None = None
     """
     Largest growth factor per step while the solver is comfortable (every utilization below 50%
     and `growth_cooldown_steps` clean steps behind it). `None` uses `maximum_growth_per_step`.
     Set it above `maximum_growth_per_step` to recover faster through easy stretches of a run.
     """
-    backoff_factor: float = 0.5
+    backoff_factor: Number = 0.5
     """
     Default factor by which to reduce time step size on failed steps.
 
     Only used when there is not enough information to intelligently determine a
     suitable backoff factor.
     """
-    aggressive_backoff_factor: float = 0.25
+    aggressive_backoff_factor: Number = 0.25
     """Factor by which to aggressively reduce time step size on failed steps."""
     maximum_steps: int | None = None
     """Maximum number of time steps to run for."""
@@ -235,24 +239,24 @@ class Timer:
     # Adaptive parameters
     growth_cooldown_steps: int = 5
     """Number of clean steps required after a rejection before growth beyond 10% per step is allowed."""
-    maximum_growth_per_step: float = 1.3
+    maximum_growth_per_step: Number = 1.3
     """Maximum multiplicative growth allowed per step (e.g., 1.3 = 30% max growth)."""
-    cfl_safety_margin: float = 0.95
+    cfl_safety_margin: Number = 0.95
     """Fraction of the CFL limit the step size aims for."""
-    target_utilization: float = 0.8
+    target_utilization: Number = 0.8
     """
     Fraction of a saturation, pressure or material balance limit the step size aims for. A step
     that used less than this lets the step size grow, and one that used more than about 90% of
     the limit shrinks it.
     """
-    step_size_smoothing: float = 0.5
+    step_size_smoothing: Number = 0.5
     """
     How much of an allowed increase in step size is taken at once, from 0 (exclusive) to 1.
 
     Only growth is smoothed. A reduction is always applied in full, so that the timer never
     delays a cut the solver needs. Set to 1.0 to take every allowed increase immediately.
     """
-    target_stretch: float = 0.1
+    target_stretch: Number = 0.1
     """
     How far above the proposed size a step may stretch to land on the next time target instead
     of splitting the distance into more steps (0.1 allows 10%). Never exceeds `maximum_step_size`.
@@ -270,21 +274,21 @@ class Timer:
     """Number of recent failures to remember for adaptive behavior."""
 
     # MBE-based step control
-    maximum_absolute_oil_mbe: float | None = None
+    maximum_absolute_oil_mbe: Number | None = None
     """Absolute oil MBE threshold, in `unit_system`'s native volume unit. Reject step if exceeded."""
-    maximum_absolute_water_mbe: float | None = None
+    maximum_absolute_water_mbe: Number | None = None
     """Absolute water MBE threshold, in `unit_system`'s native volume unit. Reject step if exceeded."""
-    maximum_absolute_gas_mbe: float | None = None
+    maximum_absolute_gas_mbe: Number | None = None
     """Absolute gas MBE threshold, in `unit_system`'s native volume unit. Reject step if exceeded."""
-    maximum_total_absolute_mbe: float | None = None
+    maximum_total_absolute_mbe: Number | None = None
     """Total absolute MBE threshold, in `unit_system`'s native volume unit. Reject step if exceeded."""
-    maximum_relative_oil_mbe: float | None = None
+    maximum_relative_oil_mbe: Number | None = None
     """Relative oil MBE threshold (fraction, e.g. 0.01 = 1%). Reject step if exceeded."""
-    maximum_relative_water_mbe: float | None = None
+    maximum_relative_water_mbe: Number | None = None
     """Relative water MBE threshold (fraction). Reject step if exceeded."""
-    maximum_relative_gas_mbe: float | None = None
+    maximum_relative_gas_mbe: Number | None = None
     """Relative gas MBE threshold (fraction). Reject step if exceeded."""
-    maximum_total_relative_mbe: float | None = None
+    maximum_total_relative_mbe: Number | None = None
     """Total relative MBE threshold (fraction). Reject step if exceeded."""
     use_mbe_for_step_size: bool = False
     """
@@ -329,7 +333,7 @@ class Timer:
     failed_step_sizes: deque[Number] = attrs.field(init=False)
     """Recent failed step sizes, in `unit_system`'s native time unit."""
 
-    _cfl_window: deque[float] = attrs.field(init=False)
+    _cfl_window: deque[Number] = attrs.field(init=False)
     """Sliding window of the last N successful CFL values (N = metrics_history_size)."""
     _newton_window: deque[int] = attrs.field(init=False)
     """Sliding window of the last N successful Newton iteration counts."""
@@ -430,7 +434,7 @@ class Timer:
     @property
     def next_target_time(self) -> Number:
         """
-        The next time the clock must land on: the earliest time target after the current time,
+        The next time the clock must land on. The earliest time target after the current time,
         or `simulation_time` if that comes first. A constant step size with
         `enforce_constant_step_size` ignores `time_targets`.
         """
@@ -443,7 +447,7 @@ class Timer:
         return target
 
     @property
-    def average_cfl(self) -> float | None:
+    def average_cfl(self) -> Number | None:
         """Average CFL over the recent window, or None if no data."""
         if not self._cfl_window:
             return None
@@ -489,14 +493,14 @@ class Timer:
 
     def check_mbe_violations(
         self,
-        absolute_oil_mbe: float | None = None,
-        absolute_water_mbe: float | None = None,
-        absolute_gas_mbe: float | None = None,
-        total_absolute_mbe: float | None = None,
-        relative_oil_mbe: float | None = None,
-        relative_water_mbe: float | None = None,
-        relative_gas_mbe: float | None = None,
-        total_relative_mbe: float | None = None,
+        absolute_oil_mbe: Number | None = None,
+        absolute_water_mbe: Number | None = None,
+        absolute_gas_mbe: Number | None = None,
+        total_absolute_mbe: Number | None = None,
+        relative_oil_mbe: Number | None = None,
+        relative_water_mbe: Number | None = None,
+        relative_gas_mbe: Number | None = None,
+        total_relative_mbe: Number | None = None,
     ) -> tuple[bool, list[str]]:
         """
         Check if any MBE limits are violated. Errors are compared by magnitude, so a
@@ -577,22 +581,22 @@ class Timer:
         self,
         step_size: Number,
         *,
-        aggressive: bool = False,
-        maximum_cfl_encountered: float | None = None,
-        cfl_threshold: float | None = None,
+        maximum_cfl_encountered: Number | None = None,
+        cfl_threshold: Number | None = None,
         newton_iterations: int | None = None,
-        maximum_saturation_change: float | None = None,
-        maximum_allowed_saturation_change: float | None = None,
-        maximum_pressure_change: float | None = None,
-        maximum_allowed_pressure_change: float | None = None,
-        absolute_oil_mbe: float | None = None,
-        absolute_water_mbe: float | None = None,
-        absolute_gas_mbe: float | None = None,
-        total_absolute_mbe: float | None = None,
-        relative_oil_mbe: float | None = None,
-        relative_water_mbe: float | None = None,
-        relative_gas_mbe: float | None = None,
-        total_relative_mbe: float | None = None,
+        maximum_saturation_change: Number | None = None,
+        maximum_allowed_saturation_change: Number | None = None,
+        maximum_pressure_change: Number | None = None,
+        maximum_allowed_pressure_change: Number | None = None,
+        absolute_oil_mbe: Number | None = None,
+        absolute_water_mbe: Number | None = None,
+        absolute_gas_mbe: Number | None = None,
+        total_absolute_mbe: Number | None = None,
+        relative_oil_mbe: Number | None = None,
+        relative_water_mbe: Number | None = None,
+        relative_gas_mbe: Number | None = None,
+        total_relative_mbe: Number | None = None,
+        aggressive: Boolean = False,
     ) -> Number:
         """
         Register a rejected time step and compute a smaller step size from the specific failure
@@ -732,28 +736,28 @@ class Timer:
     def compute_backoff_factor(
         self,
         *,
-        maximum_cfl_encountered: float | None = None,
-        cfl_threshold: float | None = None,
+        maximum_cfl_encountered: Number | None = None,
+        cfl_threshold: Number | None = None,
         newton_iterations: int | None = None,
-        maximum_saturation_change: float | None = None,
-        maximum_allowed_saturation_change: float | None = None,
-        maximum_pressure_change: float | None = None,
-        maximum_allowed_pressure_change: float | None = None,
-        absolute_oil_mbe: float | None = None,
-        absolute_water_mbe: float | None = None,
-        absolute_gas_mbe: float | None = None,
-        total_absolute_mbe: float | None = None,
-        relative_oil_mbe: float | None = None,
-        relative_water_mbe: float | None = None,
-        relative_gas_mbe: float | None = None,
-        total_relative_mbe: float | None = None,
-        aggressive: bool = False,
+        maximum_saturation_change: Number | None = None,
+        maximum_allowed_saturation_change: Number | None = None,
+        maximum_pressure_change: Number | None = None,
+        maximum_allowed_pressure_change: Number | None = None,
+        absolute_oil_mbe: Number | None = None,
+        absolute_water_mbe: Number | None = None,
+        absolute_gas_mbe: Number | None = None,
+        total_absolute_mbe: Number | None = None,
+        relative_oil_mbe: Number | None = None,
+        relative_water_mbe: Number | None = None,
+        relative_gas_mbe: Number | None = None,
+        total_relative_mbe: Number | None = None,
+        aggressive: Boolean = False,
     ) -> Number:
         """
         Compute the most conservative (smallest) backoff factor from all
         failure signals. Returns a value in (0, 1].
         """
-        factors: list[float] = []
+        factors: list[Number] = []
 
         # CFL
         cfl_limit = (
@@ -838,20 +842,20 @@ class Timer:
     def is_acceptable(
         self,
         *,
-        maximum_cfl_encountered: float | None = None,
-        cfl_threshold: float | None = None,
-        maximum_saturation_change: float | None = None,
-        maximum_allowed_saturation_change: float | None = None,
-        maximum_pressure_change: float | None = None,
-        maximum_allowed_pressure_change: float | None = None,
-        absolute_oil_mbe: float | None = None,
-        absolute_water_mbe: float | None = None,
-        absolute_gas_mbe: float | None = None,
-        total_absolute_mbe: float | None = None,
-        relative_oil_mbe: float | None = None,
-        relative_water_mbe: float | None = None,
-        relative_gas_mbe: float | None = None,
-        total_relative_mbe: float | None = None,
+        maximum_cfl_encountered: Number | None = None,
+        cfl_threshold: Number | None = None,
+        maximum_saturation_change: Number | None = None,
+        maximum_allowed_saturation_change: Number | None = None,
+        maximum_pressure_change: Number | None = None,
+        maximum_allowed_pressure_change: Number | None = None,
+        absolute_oil_mbe: Number | None = None,
+        absolute_water_mbe: Number | None = None,
+        absolute_gas_mbe: Number | None = None,
+        total_absolute_mbe: Number | None = None,
+        relative_oil_mbe: Number | None = None,
+        relative_water_mbe: Number | None = None,
+        relative_gas_mbe: Number | None = None,
+        total_relative_mbe: Number | None = None,
         **kwargs: typing.Any,
     ) -> tuple[bool, str]:
         """
@@ -964,21 +968,21 @@ class Timer:
         self,
         step_size: Number,
         *,
-        maximum_cfl_encountered: float | None = None,
-        cfl_threshold: float | None = None,
+        maximum_cfl_encountered: Number | None = None,
+        cfl_threshold: Number | None = None,
         newton_iterations: int | None = None,
-        maximum_saturation_change: float | None = None,
-        maximum_allowed_saturation_change: float | None = None,
-        maximum_pressure_change: float | None = None,
-        maximum_allowed_pressure_change: float | None = None,
-        absolute_oil_mbe: float | None = None,
-        absolute_water_mbe: float | None = None,
-        absolute_gas_mbe: float | None = None,
-        total_absolute_mbe: float | None = None,
-        relative_oil_mbe: float | None = None,
-        relative_water_mbe: float | None = None,
-        relative_gas_mbe: float | None = None,
-        total_relative_mbe: float | None = None,
+        maximum_saturation_change: Number | None = None,
+        maximum_allowed_saturation_change: Number | None = None,
+        maximum_pressure_change: Number | None = None,
+        maximum_allowed_pressure_change: Number | None = None,
+        absolute_oil_mbe: Number | None = None,
+        absolute_water_mbe: Number | None = None,
+        absolute_gas_mbe: Number | None = None,
+        total_absolute_mbe: Number | None = None,
+        relative_oil_mbe: Number | None = None,
+        relative_water_mbe: Number | None = None,
+        relative_gas_mbe: Number | None = None,
+        total_relative_mbe: Number | None = None,
     ) -> Number:
         """
         Register an accepted time step and work out the step size the solver can sustain next.
@@ -1071,8 +1075,8 @@ class Timer:
         # step of any length says how large a step the solver can sustain: the step taken scaled
         # by how far the signal sat from its target. That stays valid for a step that was
         # shortened to land on a time target.
-        stress_ratios: list[float] = []
-        utilizations: list[float] = []
+        stress_ratios: list[Number] = []
+        utilizations: list[Number] = []
 
         cfl_limit = cfl_threshold if cfl_threshold is not None else self.maximum_cfl
         if maximum_cfl_encountered is not None and maximum_cfl_encountered > 0.0:
@@ -1103,7 +1107,7 @@ class Timer:
 
         # Newton iteration counts and the recent trend do not scale with the step taken, so
         # they adjust the sustainable size directly.
-        sustainable_ratios: list[float] = []
+        sustainable_ratios: list[Number] = []
         clipped = step_size < sustainable * (1.0 - 1e-9)
         newton_is_easy = False
         if newton_iterations is not None:
@@ -1119,11 +1123,11 @@ class Timer:
         if performance_factor < 1.0:
             sustainable_ratios.append(performance_factor)
 
-        candidates: list[float] = []
+        candidates: list[Number] = []
         if stress_ratios:
-            candidates.append(float(step_size * min(stress_ratios)))
+            candidates.append(step_size * min(stress_ratios))
         if sustainable_ratios:
-            candidates.append(float(sustainable * min(sustainable_ratios)))
+            candidates.append(sustainable * min(sustainable_ratios))
 
         proposal = min(candidates) if candidates else sustainable
         if 0.9 * sustainable <= proposal < sustainable:
