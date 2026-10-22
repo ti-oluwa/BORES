@@ -990,25 +990,25 @@ def timedelta_to_timeunit(delta: datetime.timedelta, time_unit: TimeUnit) -> flo
     return delta.days * c.SECONDS_PER_DAY
 
 
-def get_schedule_times(deck: Deck, time_unit: TimeUnit = "days") -> dict[int, float]:
+def get_schedule_clock(
+    deck: Deck, time_unit: TimeUnit = "days"
+) -> tuple[dict[int, float], list[float]]:
     """
-    Takes one linear pass over `deck.records` (already in file order), mapping
-    each record's `.start` offset to the elapsed-time clock value in effect
-    at that point.
+    Takes one linear pass over `deck.records` (already in file order), tracking the elapsed-time
+    clock that `TSTEP` and `DATES` advance.
 
-    `TSTEP` advances the clock by the sum of its step values.
-    `DATES` jumps the clock to each listed calendar date in order; the
-    record's `.start` is assigned the time of the **last** date in the
-    block (since all subsequent records come after all those dates have
-    elapsed).
+    `TSTEP` advances the clock by each of its entries in turn, and every entry is a report time.
+    `DATES` jumps the clock to each listed calendar date in order, and every date is a report time.
 
-    Both keywords' own records get the new clock value (they are the
-    transition point). Records before the first `TSTEP`/`DATES` get `0.0`.
+    Each record's `.start` offset is mapped to the clock value in effect at that point. A `TSTEP`
+    or `DATES` record gets the clock value after its last entry, since every record that follows
+    comes after all of them. Records before the first `TSTEP` or `DATES` get `0.0`.
 
     :param deck: Scanned deck.
-    :param time_unit: Time unit for elapsed time values (`"days"`,
-        `"hours"`, or `"seconds"`). Defaults to `"days"`.
-    :returns: `{record.start: elapsed_time}` for every record in `deck`.
+    :param time_unit: Time unit for elapsed time values (`"days"`, `"hours"`, or `"seconds"`).
+        `TSTEP` entries are read in the deck's own time unit, which this must match.
+    :returns: `({record.start: elapsed_time}, report_times)`. `report_times` is sorted, has no
+        repeats, and always starts with `0.0`.
     """
     # Resolve the simulation start date from `START` keyword, if present.
     # This makes sure `DATES`-based elapsed time is correct even when the first `DATES`
@@ -1025,13 +1025,16 @@ def get_schedule_times(deck: Deck, time_unit: TimeUnit = "days") -> dict[int, fl
                 pass  # Malformed `START`. Fall back to lazy discovery
 
     times: dict[int, float] = {}
+    report_times: set[float] = {0.0}
     current_time = 0.0
 
     for record in deck.records:
         if record.keyword == "TSTEP":
             body = record.body.split("/", 1)[0]
-            step_sum = sum(float(token) for token in tokenize(body, expand_repeats=True) if token)
-            current_time += step_sum
+            for token in tokenize(body, expand_repeats=True):
+                if token:
+                    current_time += float(token)
+                    report_times.add(current_time)
             times[record.start] = current_time
 
         elif record.keyword == "DATES":
@@ -1053,15 +1056,38 @@ def get_schedule_times(deck: Deck, time_unit: TimeUnit = "days") -> dict[int, fl
                 else:
                     delta = parsed_date - start_date
                     current_time = timedelta_to_timeunit(delta, time_unit)
+                report_times.add(current_time)
 
-            # Stamp the record with the time of the *last* date in the block.
-            # All records that follow in the deck occur after every date listed
-            # here has elapsed.
             times[record.start] = current_time
 
         else:
             times[record.start] = current_time
-    return times
+    return times, sorted(report_times)
+
+
+def get_schedule_times(deck: Deck, time_unit: TimeUnit = "days") -> dict[int, float]:
+    """
+    Maps each record's `.start` offset to the elapsed-time clock value in effect at that point.
+    See `get_schedule_clock` for how `TSTEP` and `DATES` advance the clock.
+
+    :param deck: Scanned deck.
+    :param time_unit: Time unit for elapsed time values (`"days"`, `"hours"`, or `"seconds"`).
+    :returns: `{record.start: elapsed_time}` for every record in `deck`.
+    """
+    return get_schedule_clock(deck, time_unit)[0]
+
+
+def get_report_times(deck: Deck, time_unit: TimeUnit = "days") -> list[float]:
+    """
+    Every report time a deck asks for: each entry of every `TSTEP` and each date of every
+    `DATES`, as elapsed time since the start, and `0.0`. A `TSTEP 5*30 /` gives a report time
+    after each of its five 30 day entries, not only after their sum.
+
+    :param deck: Scanned deck.
+    :param time_unit: Time unit for elapsed time values (`"days"`, `"hours"`, or `"seconds"`).
+    :returns: Sorted report times without repeats, starting with `0.0`.
+    """
+    return get_schedule_clock(deck, time_unit)[1]
 
 
 class ScheduledRecordKeyword(RepeatedRecordKeyword[T | float]):

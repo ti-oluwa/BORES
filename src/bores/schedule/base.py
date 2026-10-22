@@ -10,6 +10,7 @@ from typing_extensions import Self
 
 from bores.errors import ActionError, EventError, StopSimulation, ValidationError
 from bores.serde.base import Serializable
+from bores.time_targets import PeriodicTarget, TimeTargets
 from bores.types import Boolean, Number, UnitSystem
 
 __all__ = [
@@ -315,6 +316,36 @@ class Schedule(typing.Generic[ModelT]):
             firings=firings,
         )
         return self.apply(model=model, context=context)
+
+    def time_targets(
+        self,
+        *,
+        start_date: datetime.datetime | None = None,
+        unit_system: UnitSystem = UnitSystem.FIELD,
+    ) -> TimeTargets:
+        """
+        Every time a time stepper must land on exactly for this schedule's events to fire at
+        the moment they say. An event that has a `time_targets` method contributes its
+        times. One that does not, such as a threshold or a time-step count, can only be checked
+        after each step and contributes nothing. Items that limit how often they fire still
+        contribute all their times, which only costs a few extra steps.
+
+        :param start_date: The simulation's start date. Required if the schedule has a `DateEvent`.
+        :param unit_system: Unit system the run's time is expressed in.
+        :returns: The combined times of every event.
+        :raises ValidationError: If an event needs `start_date` and none was given.
+        """
+        times: list[Number] = []
+        periodic: list[PeriodicTarget] = []
+        for item in self.items:
+            getter = getattr(item.event, "time_targets", None)
+            if getter is None:
+                continue
+
+            targets = getter(start_date=start_date, unit_system=unit_system)
+            times.extend(targets.times)
+            periodic.extend(targets.periodic)
+        return TimeTargets(times=times, periodic=periodic)
 
     def get_all(self, name: str, /) -> tuple[ScheduleItem[ModelT], ...]:
         """

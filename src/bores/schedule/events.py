@@ -10,8 +10,9 @@ import attrs
 
 from bores.errors import ValidationError
 from bores.schedule.base import Event, ModelT, ScheduleContext
-from bores.types import Boolean, Number
-from bores.utils import get_current_date
+from bores.time_targets import PeriodicTarget, TimeTargets
+from bores.types import Boolean, Number, UnitSystem
+from bores.utils import get_current_date, get_current_time
 
 __all__ = [
     "COMPARISON_FUNCTIONS",
@@ -54,6 +55,16 @@ class TimeEvent(Event[ModelT]):
     at: Number
     """Elapsed time this event fires at, in the schedule's unit system."""
 
+    def time_targets(
+        self, *, start_date: datetime | None = None, unit_system: UnitSystem = UnitSystem.FIELD
+    ) -> TimeTargets:
+        """
+        :param start_date: The simulation's start date. Unused.
+        :param unit_system: Unit system of the run's time. Unused, `at` is already in it.
+        :returns: The time this event fires at, so a time stepper lands on it exactly.
+        """
+        return TimeTargets(times=[self.at])
+
     def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:
         """
         Fires when `context.time` crosses `at` since `context.previous_time`.
@@ -80,6 +91,17 @@ class TimeWindowEvent(Event[ModelT]):
 
     end: Number | None = None
     """Elapsed time the window closes at. `None` keeps it open for the rest of the run."""
+
+    def time_targets(
+        self, *, start_date: datetime | None = None, unit_system: UnitSystem = UnitSystem.FIELD
+    ) -> TimeTargets:
+        """
+        :param start_date: The simulation's start date. Unused.
+        :param unit_system: Unit system of the run's time. Unused, `start` and `end` are already in it.
+        :returns: The times the window opens and closes at, so a time stepper lands on both.
+        """
+        times = [self.start] if self.end is None else [self.start, self.end]
+        return TimeTargets(times=times)
 
     def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:
         """
@@ -124,6 +146,22 @@ class DateEvent(Event[ModelT]):
     )
     """The date this event fires at, given in ISO 8601 format or as a `datetime.datetime`."""
 
+    def time_targets(
+        self, *, start_date: datetime | None = None, unit_system: UnitSystem = UnitSystem.FIELD
+    ) -> TimeTargets:
+        """
+        :param start_date: The simulation's start date. Required.
+        :param unit_system: Unit system the elapsed time is expressed in.
+        :returns: The elapsed time of `at`, so a time stepper lands on it exactly.
+        :raises ValidationError: If `start_date` is not given.
+        """
+        if start_date is None:
+            raise ValidationError(f"{type(self).__name__} needs `start_date` to find its time.")
+        elapsed = get_current_time(
+            start_date=start_date, current_date=self.at, unit_system=unit_system
+        )
+        return TimeTargets(times=[elapsed])
+
     def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:
         """
         Fires when `context.start_date + context.time` crosses `at` since
@@ -163,6 +201,16 @@ class IntervalEvent(Event[ModelT]):
 
     start: Number = 0.0
     """The first time this event is eligible to fire."""
+
+    def time_targets(
+        self, *, start_date: datetime | None = None, unit_system: UnitSystem = UnitSystem.FIELD
+    ) -> TimeTargets:
+        """
+        :param start_date: The simulation's start date. Unused.
+        :param unit_system: Unit system of the run's time. Unused, `every` and `start` are already in it.
+        :returns: Every boundary this event fires at, so a time stepper lands on each.
+        """
+        return TimeTargets(periodic=[PeriodicTarget(every=self.every, start=self.start)])
 
     def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:
         """
@@ -249,6 +297,26 @@ class AllOf(Event[ModelT]):
         """Whether any sub-event holds across many checks."""
         return any(getattr(event, "level_triggered", False) for event in self.events)
 
+    def time_targets(
+        self, *, start_date: datetime | None = None, unit_system: UnitSystem = UnitSystem.FIELD
+    ) -> TimeTargets:
+        """
+        :param start_date: The simulation's start date.
+        :param unit_system: Unit system of the run's time.
+        :returns: Every time any of the events needs landed on. Landing on more times than the combined event fires at is harmless.
+        """
+        times: list[Number] = []
+        periodic: list[PeriodicTarget] = []
+        for event in self.events:
+            getter = getattr(event, "time_targets", None)
+            if getter is None:
+                continue
+
+            targets = getter(start_date=start_date, unit_system=unit_system)
+            times.extend(targets.times)
+            periodic.extend(targets.periodic)
+        return TimeTargets(times=times, periodic=periodic)
+
     def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:
         """
         Fires when every one of `events` fires.
@@ -271,6 +339,26 @@ class AnyOf(Event[ModelT]):
     def level_triggered(self) -> bool:
         """Whether any sub-event holds across many checks."""
         return any(getattr(event, "level_triggered", False) for event in self.events)
+
+    def time_targets(
+        self, *, start_date: datetime | None = None, unit_system: UnitSystem = UnitSystem.FIELD
+    ) -> TimeTargets:
+        """
+        :param start_date: The simulation's start date.
+        :param unit_system: Unit system of the run's time.
+        :returns: Every time any of the events needs landed on.
+        """
+        times: list[Number] = []
+        periodic: list[PeriodicTarget] = []
+        for event in self.events:
+            getter = getattr(event, "time_targets", None)
+            if getter is None:
+                continue
+
+            targets = getter(start_date=start_date, unit_system=unit_system)
+            times.extend(targets.times)
+            periodic.extend(targets.periodic)
+        return TimeTargets(times=times, periodic=periodic)
 
     def __call__(self, model: ModelT, context: ScheduleContext) -> Boolean:
         """

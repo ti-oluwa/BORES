@@ -671,13 +671,11 @@ class ActivateCompletions(Action["CompiledBlackOilModel"]):
 
             # Versions of one connection cover the same cells, so the cells identify it.
             ordinals = perforations.perforation_indices[rows]
-            versions: dict[frozenset[int], dict[int, IntArray[OneDimension]]] = {}
+            versions: dict[frozenset[Integer], dict[Integer, IntArray[OneDimension]]] = {}
             for ordinal in np.unique(ordinals):
                 ordinal_rows = typing.cast(IntArray[OneDimension], rows[ordinals == ordinal])
-                cells = frozenset(
-                    int(cell) for cell in perforations.get_cell_index(row=ordinal_rows)
-                )
-                versions.setdefault(cells, {})[int(ordinal)] = ordinal_rows
+                cells = frozenset(cell for cell in perforations.get_cell_index(row=ordinal_rows))
+                versions.setdefault(cells, {})[ordinal] = ordinal_rows
 
             for by_ordinal in versions.values():
                 in_effect = [
@@ -824,10 +822,10 @@ class SetWellControls(Action["CompiledBlackOilModel"]):
 class SetWellTargets(Action["CompiledBlackOilModel"]):
     """
     Changes wells' control mode and the one target value that mode names. A deck `WELTARG`
-    record loads as one of these. Each well's own
-    kind (producer or injector) picks which of
-    `ProducerControlMode`/`InjectorControlMode` `control_mode` resolves
-    to, so a mixed set of producers and injectors is fine even when
+    record loads as one of these.
+
+    Each well's own kind (producer or injector) picks which of `ProducerControlMode`/`InjectorControlMode`
+    `control_mode` resolves to, so a mixed set of producers and injectors is fine even when
     `control_mode` is broadcast to all of them.
     """
 
@@ -1513,6 +1511,7 @@ def check_vfp_references(*, well_system: "WellSystem", schedule: "Schedule | Non
         tubing_performance = well_system.get_tubing_performance(name)
         if not isinstance(tubing_performance, VFPTables):
             continue
+
         well = well_system.wells[name]
         tables = tubing_performance.injectors if well.is_injector else tubing_performance.producers
         kind = "injector" if well.is_injector else "producer"

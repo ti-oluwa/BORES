@@ -11,15 +11,14 @@ import numpy as np
 from bores.constants import c
 from bores.deck.core import DeckParseError
 from bores.deck.file import DeckFile
-from bores.deck.keywords.base import get_schedule_times
 from bores.errors import NotSupportedError, ValidationError
 from bores.grids.base import Grid
 from bores.schedule.actions import RunSequence
 from bores.schedule.base import Action, Event, Schedule, ScheduleItem
 from bores.schedule.events import AllOf, AnyOf, ComparisonOperator, TimeEvent, TimeWindowEvent
 from bores.schedule.summary import RecordSummary, Summary
+from bores.time_targets import TimeTargets
 from bores.types import FluidPhase, Number, UnitSystem
-from bores.utils import TIME_UNIT_PER_UNIT_SYSTEM
 from bores.wells import summary as ws
 from bores.wells.base import CompletionStatus, Perforation, Well, Wells, WellStatus, WellType
 from bores.wells.compile import LimitKind
@@ -1523,13 +1522,25 @@ def load_summary_items(
         return []
 
     action = RecordSummary(quantities=quantities)
-    time_unit = TIME_UNIT_PER_UNIT_SYSTEM[deck_file.unit_system]
-    report_times = sorted(set(get_schedule_times(deck_file.deck, time_unit=time_unit).values()))
+    report_times = deck_file.report_times
     return [
         ScheduleItem(event=TimeEvent(at=time), action=action, name=f"summary@{time}")
         for time in report_times
         if time > compiled_at
     ]
+
+
+def load_report_times(deck_file: DeckFile) -> TimeTargets:
+    """
+    Every report time a deck asks for, as times a time stepper must land on, so the run reports
+    where the deck's `TSTEP` entries and `DATES` say it should. Combine with
+    `Schedule.time_targets` for the full set a `Timer` needs.
+
+    :param deck_file: The deck to read `TSTEP` and `DATES` from.
+    :returns: The deck's report times in the deck's own time unit. The last of them is where
+        the deck's schedule ends, which is the natural `simulation_time` of the run.
+    """
+    return TimeTargets(times=deck_file.report_times)
 
 
 WLIFT_TRIGGER_QUANTITIES: dict[str, RateQuantity] = {

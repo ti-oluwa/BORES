@@ -7,7 +7,7 @@ from typing_extensions import TypeVar
 
 from bores.datastructures import GridDimensions
 from bores.deck.core import Deck, DeckParseError, resolve_source
-from bores.deck.keywords.base import Keyword, get_schedule_times
+from bores.deck.keywords.base import Keyword, get_schedule_clock
 from bores.deck.keywords.grid import (
     ACTNUM,
     COORD,
@@ -388,6 +388,7 @@ class DeckFile:
         "_operation_targets",
         "_operations",
         "_registry",
+        "_report_times",
         "_schedule_times",
         "dimensions",
         "unit_system",
@@ -444,7 +445,19 @@ class DeckFile:
             time_unit = "hours"
         elif deck_unit_system == UnitSystem.SI:
             time_unit = "seconds"
-        self._schedule_times = get_schedule_times(self._deck, time_unit=time_unit)
+        self._schedule_times, self._report_times = get_schedule_clock(
+            self._deck, time_unit=time_unit
+        )
+
+    @property
+    def report_times(self) -> list[float]:
+        """
+        Every report time the deck asks for, in the deck's own time unit (days for `FIELD` and
+        `METRIC`, hours for `LAB`, seconds for `SI`): `0.0`, each entry of every `TSTEP` and each
+        date of every `DATES`, sorted and without repeats. The last one is where the deck's
+        schedule ends.
+        """
+        return list(self._report_times)
 
     def _resolve_dimensions(self) -> GridDimensions | None:
         """
