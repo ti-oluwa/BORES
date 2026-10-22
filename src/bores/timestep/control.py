@@ -1,5 +1,6 @@
 """Simulation timestep controller with smart and adaptive time stepping."""
 
+import datetime
 import logging
 import math
 import typing
@@ -10,7 +11,7 @@ from typing_extensions import Self, TypedDict
 
 from bores.constants import c
 from bores.errors import TimingError, ValidationError
-from bores.timestep.targets import TimeTargets
+from bores.timestep.targets import PeriodicTarget, TimeTargets, build_time_targets
 from bores.types import Boolean, Number, UnitConversionTable, UnitSystem
 from bores.units import get_conversion_factors
 from bores.utils import scale
@@ -181,6 +182,18 @@ def compute_utilization(actual: Number | None, limit: Number | None) -> Number |
     return actual / limit
 
 
+def check_same_source(old: typing.Any, new: typing.Any) -> bool:
+    """Whether two time target sources are the same object, or equal plain values."""
+    if old is new:
+        return True
+    if isinstance(old, (list, tuple)) and isinstance(new, (list, tuple)):
+        return len(old) == len(new) and all(
+            check_same_source(a, b) for a, b in zip(old, new, strict=True)
+        )
+    value_types = (int, float, str, datetime.datetime, TimeTargets, PeriodicTarget)
+    return isinstance(old, value_types) and type(old) is type(new) and old == new
+
+
 @attrs.mutable(kw_only=True, slots=True)
 class Timer:
     """
@@ -338,6 +351,9 @@ class Timer:
     _newton_window: deque[int] = attrs.field(init=False)
     """Sliding window of the last N successful Newton iteration counts."""
     _constant_step_warned: bool = attrs.field(init=False, default=False)
+    _target_sources: tuple[typing.Any, ...] | None = attrs.field(init=False, default=None)
+    """What `update_time_targets` last built `time_targets` from, to spot when it has changed."""
+    _target_start_date: typing.Any = attrs.field(init=False, default=None)
 
     def __attrs_post_init__(self) -> None:
         self.validate()
@@ -943,6 +959,50 @@ class Timer:
             return False, "MBE limits violated: " + "; ".join(mbe_messages)
 
         return True, "Step acceptable"
+
+    def add_time_targets(self, *sources: typing.Any, start_date: typing.Any = None) -> None:
+        """
+        Adds more times the timer must land on, to the ones it already has.
+
+        :param sources: Anything `build_time_targets` accepts: a schedule, a deck file, elapsed
+            times in `unit_system`'s native time unit, dates, `PeriodicTarget` or `TimeTargets`.
+        :param start_date: The simulation's start date, needed for dates and for `DateEvent`.
+        """
+        self.time_targets = self.time_targets | build_time_targets(
+            *sources, start_date=start_date, unit_system=self.unit_system
+        )
+
+    def update_time_targets(self, *sources: typing.Any, start_date: typing.Any = None) -> Boolean:
+        """
+        Makes the timer's time targets match `sources`, rebuilding them only if `sources` is not
+        the same as in the previous call. Call it before every step of a run: a schedule is
+        immutable, so editing one produces a new object, and passing that object is all it takes
+        for added events to be landed on and removed events to stop being landed on.
+
+        This replaces any targets the timer had, whether set directly or from an earlier call.
+        A source counts as unchanged if it is the very same object, or an equal number or date.
+
+        :param sources: Anything `build_time_targets` accepts.
+        :param start_date: The simulation's start date, needed for dates and for `DateEvent`.
+        :returns: `True` if the targets were rebuilt, `False` if nothing had changed.
+        """
+        previous = self._target_sources
+        if (
+            previous is not None
+            and self._target_start_date == start_date
+            and len(previous) == len(sources)
+            and all(
+                check_same_source(old, new) for old, new in zip(previous, sources, strict=True)
+            )
+        ):
+            return False
+
+        self.time_targets = build_time_targets(
+            *sources, start_date=start_date, unit_system=self.unit_system
+        )
+        self._target_sources = sources
+        self._target_start_date = start_date
+        return True
 
     def snap_time(self, time: Number) -> Number:
         """

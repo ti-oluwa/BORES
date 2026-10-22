@@ -685,6 +685,48 @@ def _parse_date(tokens: typing.Sequence[str], name: str) -> datetime.date:
         raise DeckParseError(f"{name}: invalid date {day}/{month}/{year}: {exc}") from exc
 
 
+def _parse_time_of_day(token: str, name: str) -> datetime.timedelta:
+    """
+    Parse an Eclipse time of day `HH:MM:SS` or `HH:MM:SS.SSS` into the time elapsed since
+    midnight.
+
+    :param token: The time token.
+    :param name: Keyword name for error messages.
+    :returns: Time since midnight.
+    :raises DeckParseError: If the token is not a valid time of day.
+    """
+    parts = token.split(":")
+    if len(parts) != 3:
+        raise DeckParseError(
+            f"{name}: time {token!r} is not of the form HH:MM:SS or HH:MM:SS.SSS."
+        )
+    try:
+        hours, minutes, seconds = int(parts[0]), int(parts[1]), float(parts[2])
+    except ValueError as exc:
+        raise DeckParseError(f"{name}: time {token!r} is not numeric.") from exc
+    if not (0 <= hours <= 24 and 0 <= minutes < 60 and 0 <= seconds < 60):
+        raise DeckParseError(f"{name}: time {token!r} is out of range.")
+    return datetime.timedelta(hours=hours, minutes=minutes, seconds=seconds)
+
+
+def _parse_datetime(tokens: typing.Sequence[str], name: str) -> datetime.datetime:
+    """
+    Parse an Eclipse date with an optional time of day, `[day, month, year]` or
+    `[day, month, year, time]`, into a `datetime.datetime`. A date without a time is midnight.
+
+    :param tokens: Three or four string tokens: day, month abbreviation, year and, optionally,
+        a time of day such as `12:00:00`.
+    :param name: Keyword name for error messages.
+    :returns: Parsed date and time.
+    :raises DeckParseError: If the tokens cannot be parsed.
+    """
+    date = _parse_date(tokens, name)
+    moment = datetime.datetime(date.year, date.month, date.day)
+    if len(tokens) >= 4:
+        moment += _parse_time_of_day(tokens[3], name)
+    return moment
+
+
 class FlagKeyword(Keyword[bool]):
     """
     A bare presence-only switch keyword that carries no data section.
@@ -712,15 +754,15 @@ class FlagKeyword(Keyword[bool]):
         return deck.has(self.name)
 
 
-class DateKeyword(Keyword[datetime.date]):
+class DateKeyword(Keyword[datetime.datetime]):
     """
     A keyword whose single record is an Eclipse-format date
-    `D MON YYYY /`.
+    `D MON YYYY /`, optionally followed by a time of day, `D MON YYYY HH:MM:SS /`.
 
     Used for `START`.
 
-    `parse` returns `datetime.date`, or `None` when the
-    keyword is absent.
+    `parse` returns a `datetime.datetime` (midnight if the deck gives no time), or `None`
+    when the keyword is absent.
     """
 
     def parse(
@@ -730,27 +772,27 @@ class DateKeyword(Keyword[datetime.date]):
         *,
         operations: list[Operation] | None = None,
         schedule_times: dict[int, float] | None = None,
-    ) -> datetime.date | None:
+    ) -> datetime.datetime | None:
         record = deck.get_first_record_for(self.name)
         if record is None:
             return None
 
         body = record.body.split("/", 1)[0]
         tokens = tokenize(body)
-        return _parse_date(tokens, self.name)
+        return _parse_datetime(tokens, self.name)
 
 
-class DatesKeyword(Keyword[list[datetime.date]]):
+class DatesKeyword(Keyword[list[datetime.datetime]]):
     """
     The `DATES` keyword: a sequence of one or more `/`-terminated
     date entries inside one `DATES … /` block, each of the form
-    `D MON YYYY /`.
+    `D MON YYYY /` or `D MON YYYY HH:MM:SS /`.
 
     Multiple `DATES` blocks in the same deck are concatenated in file
     order and returned as a single flat list.
 
-    `parse` returns a list of `datetime.date` objects, or
-    `None` when the keyword is absent.
+    `parse` returns a list of `datetime.datetime` objects (midnight for an entry with no time),
+    or `None` when the keyword is absent.
 
     Example deck fragment:
 
@@ -767,18 +809,18 @@ class DatesKeyword(Keyword[list[datetime.date]]):
         *,
         operations: list[Operation] | None = None,
         schedule_times: dict[int, float] | None = None,
-    ) -> list[datetime.date] | None:
+    ) -> list[datetime.datetime] | None:
         records = deck.get_records_for(self.name)
         if not records:
             return None
 
-        dates: list[datetime.date] = []
+        dates: list[datetime.datetime] = []
         for record in records:
             for segment in record.body.split("/"):
                 tokens = tokenize(segment)
                 if not tokens:
                     continue
-                dates.append(_parse_date(tokens, self.name))
+                dates.append(_parse_datetime(tokens, self.name))
         return dates or None
 
 
@@ -977,17 +1019,19 @@ TimeUnit = typing.Literal["days", "hours", "seconds"]
 
 def timedelta_to_timeunit(delta: datetime.timedelta, time_unit: TimeUnit) -> float:
     """
-    Convert the whole-day difference between two deck dates to `time_unit`.
+    Convert the difference between two deck dates, including any time of day, to `time_unit`.
 
-    :param delta: Difference between two calendar dates.
+    :param delta: Difference between two deck dates.
     :param time_unit: Unit to express the difference in.
     :returns: The difference in `time_unit`.
     """
+    seconds = delta.total_seconds()
+    if time_unit == "seconds":
+        return seconds
+    days = seconds / c.SECONDS_PER_DAY
     if time_unit == "days":
-        return float(delta.days)
-    if time_unit == "hours":
-        return delta.days * c.HOURS_PER_DAY
-    return delta.days * c.SECONDS_PER_DAY
+        return days
+    return days * c.HOURS_PER_DAY
 
 
 def get_schedule_clock(
@@ -1014,13 +1058,13 @@ def get_schedule_clock(
     # This makes sure `DATES`-based elapsed time is correct even when the first `DATES`
     # entry is not the same as `START`.
     start_record = deck.get_first_record_for("START")
-    start_date: datetime.date | None = None
+    start_date: datetime.datetime | None = None
     if start_record is not None:
         start_body = start_record.body.split("/", 1)[0]
         start_tokens = tokenize(start_body, expand_repeats=True)
         if len(start_tokens) >= 3:
             try:
-                start_date = _parse_date(start_tokens, "START")
+                start_date = _parse_datetime(start_tokens, "START")
             except DeckParseError:
                 pass  # Malformed `START`. Fall back to lazy discovery
 
@@ -1045,7 +1089,7 @@ def get_schedule_clock(
                 if not tokens:
                     continue
                 try:
-                    parsed_date = _parse_date(tokens, "DATES")
+                    parsed_date = _parse_datetime(tokens, "DATES")
                 except DeckParseError:
                     continue  # Skip malformed segments gracefully
 

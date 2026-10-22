@@ -1,6 +1,8 @@
 """Times a simulation must land on exactly, such as event times, report times and dates."""
 
+import datetime
 import math
+import numbers
 import typing
 from bisect import bisect_right
 
@@ -8,9 +10,11 @@ import attrs
 from typing_extensions import Self
 
 from bores.errors import ValidationError
-from bores.types import Number
+from bores.types import Number, UnitSystem
+from bores.units import get_conversion_factors
+from bores.utils import get_current_time
 
-__all__ = ["PeriodicTarget", "TimeTargets"]
+__all__ = ["PeriodicTarget", "TimeTargets", "build_time_targets"]
 
 
 @attrs.frozen(kw_only=True, slots=True)
@@ -158,3 +162,73 @@ class TimeTargets:
             if candidate is not None and (best is None or candidate > best):
                 best = candidate
         return best
+
+
+def build_time_targets(
+    *sources: typing.Any,
+    start_date: datetime.datetime | None = None,
+    unit_system: UnitSystem = UnitSystem.FIELD,
+) -> TimeTargets:
+    """
+    Combines every source of times a simulation must land on into one `TimeTargets`.
+
+    A source can be any of the following, and `sources` can mix them freely:
+
+    - A `Schedule`, which contributes the times its events fire at.
+    - A `DeckFile`, which contributes its report times (every `TSTEP` entry and `DATES` date).
+      They are converted from the deck's own unit system to `unit_system`.
+    - A number, which is an elapsed time in `unit_system`'s native time unit.
+    - A `datetime`, which is converted to an elapsed time from `start_date`.
+    - A `PeriodicTarget`, for a time that recurs at a fixed interval.
+    - A `TimeTargets`, which is merged as it is.
+    - A list, tuple or set of any of the above.
+
+    :param sources: What to collect times from.
+    :param start_date: The simulation's start date. Required if a source is or contains a
+        `datetime`, or if a schedule has a `DateEvent`.
+    :param unit_system: Unit system the result is expressed in.
+    :returns: Every time from every source, sorted and without repeats.
+    :raises ValidationError: If a source is not one of the kinds above, or a `datetime` is given
+        without `start_date`.
+    """
+    times: list[Number] = []
+    periodic: list[PeriodicTarget] = []
+
+    def collect(source: typing.Any) -> None:
+        if isinstance(source, TimeTargets):
+            times.extend(source.times)
+            periodic.extend(source.periodic)
+        elif isinstance(source, PeriodicTarget):
+            periodic.append(source)
+        elif isinstance(source, datetime.datetime):
+            if start_date is None:
+                raise ValidationError(
+                    f"`start_date` is needed to turn the date {source!r} into an elapsed time."
+                )
+            times.append(
+                get_current_time(
+                    start_date=start_date, current_date=source, unit_system=unit_system
+                )
+            )
+        elif callable(getattr(source, "get_time_targets", None)):
+            targets = source.get_time_targets(start_date=start_date, unit_system=unit_system)
+            times.extend(targets.times)
+            periodic.extend(targets.periodic)
+        elif hasattr(source, "report_times"):
+            source_unit_system = getattr(source, "unit_system", unit_system)
+            factor = get_conversion_factors(source_unit_system, unit_system)["time"]
+            times.extend(float(time) * factor for time in source.report_times)
+        elif isinstance(source, numbers.Real) and not isinstance(source, bool):
+            times.append(float(source))
+        elif isinstance(source, (list, tuple, set, frozenset)):
+            for item in source:
+                collect(item)
+        else:
+            raise ValidationError(
+                f"Cannot get time targets from {source!r}. Use a schedule, a deck file, a number, "
+                "a datetime, a `PeriodicTarget`, `TimeTargets`, or a list of those."
+            )
+
+    for source in sources:
+        collect(source)
+    return TimeTargets(times=times, periodic=periodic)

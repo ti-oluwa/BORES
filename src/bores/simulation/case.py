@@ -14,6 +14,7 @@ from bores.blackoil.pvt.regions import PVT
 from bores.blackoil.satfunc.regions import SatFunc
 from bores.blackoil.satfunc.relperm.tables import MinimumRelPerm
 from bores.deck.file import DeckFile
+from bores.deck.keywords.runspec import START
 from bores.errors import CaseLoadError, CaseValidationError, ValidationError
 from bores.grids.base import Grid
 from bores.grids.factories.corner_point import InvertedCellPolicy
@@ -35,7 +36,9 @@ from bores.schedule.base import Schedule
 from bores.schedule.summary import SummaryReport
 from bores.simulation.spec import RunSpec
 from bores.simulation.workspace import SimulationWorkspace, build_simulation_workspace
+from bores.timestep import TimeTargets, build_time_targets
 from bores.types import (
+    Boolean,
     CellArray,
     GridIntersectionMethod,
     InterpolationMethod,
@@ -67,6 +70,13 @@ class SimulationCase:
         factory=Schedule[CompiledBlackOilModel]
     )
     """Every scheduled well/model edit for the run."""
+
+    time_targets: TimeTargets = attrs.field(factory=TimeTargets)
+    """
+    Times the run must land on that do not come from the schedule: the deck's report times and
+    any custom ones, in the case's own time unit. The schedule's own event times are added by
+    `sync_timer`, since they change whenever the schedule does.
+    """
 
     summary: SummaryReport = attrs.field(factory=SummaryReport)
     """
@@ -105,6 +115,28 @@ class SimulationCase:
             raise CaseValidationError(
                 "Simulation case's model and initial state must share the same unit system."
             )
+        timer = self.runspec.timer
+        if timer is not None and timer.unit_system != self.runspec.unit_system:
+            raise CaseValidationError(
+                "Simulation case's timer and runspec must share the same unit system."
+            )
+
+    def sync_timer(self) -> Boolean:
+        """
+        Makes the run's timer land on this case's schedule events, report times and custom
+        times. It does nothing if the run has no timer, or if neither the schedule nor the
+        times have changed since the last call, so it is cheap to call before every step. A run
+        that swaps in an edited schedule, for example with `attrs.evolve(case, schedule=...)`,
+        only needs to call it again on the new case.
+
+        :returns: `True` if the timer's targets were rebuilt, `False` if nothing needed doing.
+        """
+        timer = self.runspec.timer
+        if timer is None:
+            return False
+        return timer.update_time_targets(
+            self.schedule, self.time_targets, start_date=self.runspec.start_date
+        )
 
     @property
     def unit_system(self) -> UnitSystem:
@@ -195,6 +227,7 @@ class SimulationCase:
         hysteresis: Hysteresis | None = None,
         unit_system: UnitSystem | None = None,
         on_inverted_cells: InvertedCellPolicy | str = InvertedCellPolicy.RAISE,
+        extra_time_targets: typing.Iterable[typing.Any] = (),
         dtype: npt.DTypeLike = None,
     ) -> Self:
         """
@@ -221,7 +254,9 @@ class SimulationCase:
         :param intersection_method: Well-grid intersection strategy passed to `compile_model`.
         :param search_radius: Optional search radius for well-grid intersection.
             Forwarded to `compile_model`.
-        :param runspec: Run configuration. `RunSpec`'s own defaults if not given.
+        :param runspec: Run configuration. `RunSpec`'s own defaults if not given. If it has no
+        `start_date`, the deck's `START` is used. If it has a timer, the timer is set up to land
+        on the deck's report times, the schedule's events and `extra_time_targets`.
         :param summary: Summary-vector reports for the run. Empty if not given.
         :param min_wetting_relperm: Minimum wetting-phase relative permeability for `SatFunc.from_deck`.
         :param min_non_wetting_relperm: Minimum non-wetting-phase relative permeability for `SatFunc.from_deck`.
@@ -237,6 +272,9 @@ class SimulationCase:
         :param unit_system: Unit system for the case. Defaults to the deck's unit system.
         :param on_inverted_cells: Policy to apply when the deck grid contains inverted cells.
             Forwarded to `Grid.from_deck`.
+        :param extra_time_targets: Custom times the run must land on, besides the deck's report
+            times and the schedule's event times. Elapsed times in the case's time unit, dates
+            (which need a start date), `PeriodicTarget`, or lists of those. See `build_time_targets`.
         :param dtype: Array dtype for every buffer. Defaults to `bores.precision.get_dtype()`.
         :returns: The loaded `SimulationCase`.
         """
@@ -265,6 +303,7 @@ class SimulationCase:
             hysteresis=hysteresis,
             unit_system=unit_system,
             on_inverted_cells=on_inverted_cells,
+            extra_time_targets=extra_time_targets,
             dtype=dtype,
         )
         return typing.cast(Self, case)
@@ -298,6 +337,7 @@ def load_case(
     hysteresis: Hysteresis | None = None,
     unit_system: UnitSystem | None = None,
     on_inverted_cells: InvertedCellPolicy | str = InvertedCellPolicy.RAISE,
+    extra_time_targets: typing.Iterable[typing.Any] = (),
     dtype: npt.DTypeLike = None,
 ) -> SimulationCase:
     """
@@ -482,7 +522,20 @@ def load_case(
     except ValidationError as exc:
         raise CaseLoadError(f"Invalid VFP table reference in {deck_file!r}: {exc}") from exc
 
-    return SimulationCase(
+    start_date = runspec.start_date
+    if start_date is None:
+        start_date = deck_file.get(START)
+        if start_date is not None:
+            runspec = attrs.evolve(runspec, start_date=start_date)
+
+    try:
+        time_targets = build_time_targets(
+            deck_file, list(extra_time_targets), start_date=start_date, unit_system=unit_system
+        )
+    except Exception as exc:
+        raise CaseLoadError(f"Failed to load time targets from {deck_file!r}.") from exc
+
+    case = SimulationCase(
         model=compile_model(
             model,
             horizontal_tolerance=horizontal_tolerance,
@@ -493,8 +546,16 @@ def load_case(
         initial_state=initial_state,
         runspec=runspec,
         schedule=schedule,
+        time_targets=time_targets,
         summary=summary if summary is not None else SummaryReport(),
         salinity=salinity,
         hysteresis=hysteresis,
         dtype=dtype,
     )
+    try:
+        case.sync_timer()
+    except Exception as exc:
+        raise CaseLoadError(
+            f"Failed to set up the timer's time targets for {deck_file!r}."
+        ) from exc
+    return case

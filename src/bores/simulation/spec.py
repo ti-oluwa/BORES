@@ -479,6 +479,7 @@ class RunSpec:
         return attrs.evolve(
             self,
             control_spec=self.control_spec.convert(target, table=table),
+            timer=self.timer.convert(target, table=table) if self.timer is not None else None,
             maximum_pressure_change=scale(self.maximum_pressure_change, pressure_factor),
             unit_system=target,
         )
