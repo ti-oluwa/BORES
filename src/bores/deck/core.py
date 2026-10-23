@@ -51,7 +51,7 @@ def resolve_includes(text: str, source_dir: Path | None, *, encoding: str = "asc
         a warning in that case.
     :returns: Text with every `INCLUDE` block replaced by the referenced
         file's (recursively resolved) contents, with comments removed.
-    :raises DeckParseError: If an included file cannot be found or read.
+    :raises DeckParseError: If an included file cannot be found, read, or decoded with `encoding`.
     """
     # A commented-out `INCLUDE` must not be followed, so comments go first.
     text = strip_comments(text)
@@ -70,10 +70,7 @@ def resolve_includes(text: str, source_dir: Path | None, *, encoding: str = "asc
         include_path = source_dir / relative_path
         if not include_path.is_file():
             raise DeckParseError(f"`INCLUDE` references {include_path!r}, which does not exist.")
-        try:
-            included_text = include_path.read_text(encoding=encoding, errors="replace")
-        except OSError as exc:
-            raise DeckParseError(f"Cannot read `INCLUDE` file {include_path!r}: {exc}") from exc
+        included_text = read_deck_file(include_path, encoding=encoding)
         return resolve_includes(included_text, include_path.parent, encoding=encoding)
 
     return INCLUDE_RE.sub(replace, text)

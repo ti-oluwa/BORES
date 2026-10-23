@@ -77,3 +77,14 @@ def test_wrong_encoding_error_says_what_to_do(tmp_path):
 def test_unknown_encoding_is_reported():
     with pytest.raises(DeckParseError, match="not a known text encoding"):
         DeckFile(b"RUNSPEC\n", encoding="no-such-codec")
+
+
+def test_included_file_in_the_wrong_encoding_raises_instead_of_being_corrupted(tmp_path):
+    (tmp_path / "inc.inc").write_bytes("PORO\n4*0.25 /\n-- caf\u00e9\n".encode("utf-8"))
+    main = tmp_path / "main.data"
+    main.write_text(
+        "RUNSPEC\nFIELD\nSPECGRID\n 2 2 1 1 F /\nGRID\nINCLUDE\n 'inc.inc' /\n", encoding="utf-8"
+    )
+    with pytest.raises(DeckParseError, match="inc.inc.*pass it as `encoding=`"):
+        DeckFile(main)
+    assert list(DeckFile(main, encoding="utf-8").get("PORO")) == [0.25] * 4
