@@ -193,12 +193,39 @@ def load_well_from_records(
     # Records are replayed in schedule order, so a connection re-entered later is a later
     # version of the same connection.
     compdat_records = sorted(compdat_records, key=lambda r: r.get("schedule_time", 0.0))
-    for record in compdat_records:
-        # Minus 1, to move from 1-based to 0-based indexing used internally
+
+    # A connection outside the grid is rejected here. Plain index arithmetic would put an `i`
+    # past the last column onto the next row, and a `j` past the last row onto the next layer.
+    connection_i = np.array([record["i"] for record in compdat_records])
+    connection_j = np.array([record["j"] for record in compdat_records])
+    connection_k1 = np.array([record["k1"] for record in compdat_records])
+    connection_k2 = np.array([record["k2"] for record in compdat_records])
+    outside = ~(
+        (connection_i >= 1)
+        & (connection_i <= dims.nx)
+        & (connection_j >= 1)
+        & (connection_j <= dims.ny)
+        & (connection_k1 >= 1)
+        & (connection_k2 <= dims.nz)
+        & (connection_k1 <= connection_k2)
+    )
+    if outside.any():
+        bad = int(np.flatnonzero(outside)[0])
+        raise ValidationError(
+            f"Well {welspecs_record['well']!r} has a `COMPDAT` connection at "
+            f"i={connection_i[bad]}, j={connection_j[bad]}, k={connection_k1[bad]}-"
+            f"{connection_k2[bad]}, which is not within the {dims.nx} x {dims.ny} x {dims.nz} "
+            "grid (indices start at 1 and `k1` must not exceed `k2`)."
+        )
+    # Minus 1, to move from 1-based to 0-based indexing used internally
+    top_cells = dims.flat_index(connection_i - 1, connection_j - 1, connection_k1 - 1)
+    bottom_cells = dims.flat_index(connection_i - 1, connection_j - 1, connection_k2 - 1)
+
+    for position, record in enumerate(compdat_records):
         i, j = record["i"], record["j"]
         k1, k2 = record["k1"], record["k2"]
-        top_cell = dims.flat_index(i - 1, j - 1, k1 - 1)
-        bottom_cell = dims.flat_index(i - 1, j - 1, k2 - 1)
+        top_cell = int(top_cells[position])
+        bottom_cell = int(bottom_cells[position])
         top_depth = grid.cell_min_xyz[top_cell, 2]
         bottom_depth = grid.cell_max_xyz[bottom_cell, 2]
         direction = record.get("direction")
@@ -348,9 +375,16 @@ def load_well_from_records(
         for perforation in perforations
         if perforation.bottom_depth is not None
     )
+    head_i, head_j = welspecs_record["i"], welspecs_record["j"]
+    if not (1 <= head_i <= dims.nx and 1 <= head_j <= dims.ny):
+        raise ValidationError(
+            f"Well {welspecs_record['well']!r} has its `WELSPECS` head at i={head_i}, j={head_j}, "
+            f"which is not within the {dims.nx} x {dims.ny} grid (indices start at 1)."
+        )
+
     surface_location = grid.get_cell_center_at(
-        welspecs_record["i"] - 1,
-        welspecs_record["j"] - 1,
+        head_i - 1,
+        head_j - 1,
         0,  # At surface
     )[:2]
     pvt_region = welspecs_record.get("pvt_table") or None  # 0 should map to None too

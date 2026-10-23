@@ -199,59 +199,79 @@ def resolve_boundary_faces_for_box(
         raise ValidationError(f"{label}: `grid` has no `dimensions`; cannot resolve an IJK box.")
     nx, ny, nz = dims
 
-    boundary_position_by_face: dict[int, int] = {
-        int(face_idx): position for position, face_idx in enumerate(grid.boundary_face_indices)
-    }
+    # Every cell of the box, in the order the records list them: `i` fastest, `k` slowest.
+    box_k, box_j, box_i = np.meshgrid(
+        np.arange(k1, k2 + 1), np.arange(j1, j2 + 1), np.arange(i1, i2 + 1), indexing="ij"
+    )
+    box_i, box_j, box_k = box_i.ravel(), box_j.ravel(), box_k.ravel()
+    n_box = len(box_i)
 
-    positions: set[int] = set()
-    for k in range(k1, k2 + 1):
-        for j in range(j1, j2 + 1):
-            for i in range(i1, i2 + 1):
-                if not (1 <= i <= nx and 1 <= j <= ny and 1 <= k <= nz):
-                    warnings.warn(
-                        f"{label}: cell ({i},{j},{k}) is outside grid bounds "
-                        f"({nx}x{ny}x{nz}). Skipping.",
-                        stacklevel=2,
-                    )
-                    continue
+    # Why a cell is skipped, per cell of the box. `None` means it is used.
+    skip_reason: list[str | None] = [None] * n_box
 
-                cell_flat = int(grid.flat_index(i - 1, j - 1, k - 1))
-                if not grid.is_cell_active(cell_flat):
-                    warnings.warn(
-                        f"{label}: cell ({i},{j},{k}) is inactive. Skipping connection.",
-                        stacklevel=2,
-                    )
-                    continue
+    inside = (
+        (box_i >= 1) & (box_i <= nx) & (box_j >= 1) & (box_j <= ny) & (box_k >= 1) & (box_k <= nz)
+    )
+    inside_rows = np.flatnonzero(inside)
+    for row in np.flatnonzero(~inside):
+        skip_reason[row] = (
+            f"{label}: cell ({box_i[row]},{box_j[row]},{box_k[row]}) is outside grid bounds "
+            f"({nx}x{ny}x{nz}). Skipping."
+        )
 
-                matched_face: int | None = None
-                for face_idx in grid.get_cell_face_indices(cell_flat):
-                    normal = grid.get_face_normal_for_cell(int(face_idx), cell_flat)
-                    dominant_axis = int(np.argmax(np.abs(normal)))
-                    dominant_sign = np.sign(normal[dominant_axis])
-                    if dominant_axis == axis and dominant_sign == sign:
-                        matched_face = int(face_idx)
-                        break
+    cells = grid.flat_indices(
+        box_i[inside_rows] - 1, box_j[inside_rows] - 1, box_k[inside_rows] - 1
+    )
+    active = grid.are_cells_active(cells)
+    for row in inside_rows[~active]:
+        skip_reason[row] = (
+            f"{label}: cell ({box_i[row]},{box_j[row]},{box_k[row]}) is inactive. "
+            "Skipping connection."
+        )
+    candidate_rows = inside_rows[active]
+    candidate_cells = cells[active]
 
-                if matched_face is None:
-                    warnings.warn(
-                        f"{label}: cell ({i},{j},{k}) has no {face_direction!r} face. Skipping.",
-                        stacklevel=2,
-                    )
-                    continue
+    # The first face of each cell whose outward normal points mostly along `axis` in the
+    # direction of `sign`. All the cells' faces are examined in one pass.
+    faces_of_cells = grid.get_cells_face_indices(candidate_cells)
+    faces_per_cell = np.diff(faces_of_cells.offsets)
+    face_owner_position = np.repeat(np.arange(len(candidate_cells)), faces_per_cell)
+    normals = grid.get_face_normals_for_cells(
+        faces_of_cells.values,  # type: ignore[arg-type]
+        candidate_cells[face_owner_position],
+    )
+    dominant_axis = np.argmax(np.abs(normals), axis=1)
+    dominant_sign = np.sign(normals[np.arange(len(normals)), dominant_axis])
+    faces_match = (dominant_axis == axis) & (dominant_sign == sign)
+    matching = np.flatnonzero(faces_match)
+    cells_with_a_match, first_match = np.unique(face_owner_position[matching], return_index=True)
+    matched_face = np.full(len(candidate_cells), -1, dtype=np.int64)
+    matched_face[cells_with_a_match] = faces_of_cells.values[matching[first_match]]
 
-                position = boundary_position_by_face.get(matched_face)
-                if position is None:
-                    warnings.warn(
-                        f"{label}: cell ({i},{j},{k})'s {face_direction!r} face is not a "
-                        "grid-boundary face. It has a real interior neighbour, active or "
-                        "not. Boundary conditions can only attach to genuine grid-edge "
-                        "faces. Skipping.",
-                        stacklevel=2,
-                    )
-                    continue
-                positions.add(position)
+    boundary_position_of_face = np.full(grid.n_faces, -1, dtype=np.int64)
+    boundary_position_of_face[grid.boundary_face_indices] = np.arange(
+        len(grid.boundary_face_indices)
+    )
+    position = np.where(matched_face >= 0, boundary_position_of_face[matched_face], -1)
 
-    return typing.cast(IntArray[OneDimension], np.asarray(sorted(positions), dtype=np.int32))
+    for row in candidate_rows[matched_face < 0]:
+        skip_reason[row] = (
+            f"{label}: cell ({box_i[row]},{box_j[row]},{box_k[row]}) has no "
+            f"{face_direction!r} face. Skipping."
+        )
+    for row in candidate_rows[(matched_face >= 0) & (position < 0)]:
+        skip_reason[row] = (
+            f"{label}: cell ({box_i[row]},{box_j[row]},{box_k[row]})'s {face_direction!r} "
+            "face is not a grid-boundary face. It has a real interior neighbour, active or "
+            "not. Boundary conditions can only attach to genuine grid-edge faces. Skipping."
+        )
+
+    # Warn in the order the cells are listed, as one cell at a time would.
+    for reason in skip_reason:
+        if reason is not None:
+            warnings.warn(reason, stacklevel=2)
+
+    return typing.cast(IntArray[OneDimension], np.unique(position[position >= 0]).astype(np.int32))
 
 
 def classify_boundary_cells(grid: Grid) -> dict[Side, IntArray[OneDimension]]:

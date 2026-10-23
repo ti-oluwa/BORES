@@ -3,6 +3,7 @@ import threading
 import typing
 import warnings
 
+import numba  # type: ignore[import-untyped]
 import numpy as np
 import numpy.typing as npt
 import pyamg  # type: ignore[import-untyped]
@@ -46,6 +47,7 @@ __all__ = [
     "RESIDUAL_VERIFICATION_FACTOR",
     "CachedPreconditionerFactory",
     "SystemScalingMethod",
+    "VariableOrdering",
     "get_preconditioner_factory",
     "get_solver_function",
     "invert_diagonal_blocks",
@@ -161,37 +163,131 @@ def invert_diagonal_blocks(
     number_of_blocks = -(-n // block_size)
     padded_size = number_of_blocks * block_size
 
-    coo = A_csr.tocoo()
-    row_block = coo.row // block_size
-    inside_block = row_block == (coo.col // block_size)
-    flat_position = (
-        row_block[inside_block] * block_size + coo.row[inside_block] % block_size
-    ) * block_size + coo.col[inside_block] % block_size
-    # Accumulating (rather than assigning) also handles matrices with duplicate entries.
-    flat_blocks = np.bincount(
-        flat_position,
-        weights=coo.data[inside_block],
-        minlength=number_of_blocks * block_size * block_size,
+    csr = A_csr.tocsr()
+    blocks = np.zeros((number_of_blocks, block_size, block_size), dtype=np.float64)
+    _gather_diagonal_blocks(
+        indptr=csr.indptr,
+        indices=csr.indices,
+        data=csr.data,
+        block_size=block_size,
+        blocks=blocks,
     )
-    blocks = flat_blocks.reshape(number_of_blocks, block_size, block_size)
     for padded_row in range(n, padded_size):
         blocks[padded_row // block_size, padded_row % block_size, padded_row % block_size] = 1.0
 
-    try:
-        inverses = np.linalg.inv(blocks)
-        failed = ~np.isfinite(inverses).all(axis=(1, 2))
-    except np.linalg.LinAlgError:
-        inverses = np.empty_like(blocks)
-        failed = np.zeros(number_of_blocks, dtype=bool)
-        for block_index in range(number_of_blocks):
-            try:
-                inverses[block_index] = np.linalg.inv(blocks[block_index])
-            except np.linalg.LinAlgError:
-                failed[block_index] = True
-
+    inverses = np.empty_like(blocks)
+    failed = np.zeros(number_of_blocks, dtype=np.bool_)
+    _invert_small_blocks(blocks=blocks, inverses=inverses, failed=failed)
     for failed_index in np.flatnonzero(failed):
         inverses[failed_index] = np.diag(_invert_diagonal(np.diag(blocks[failed_index])))
     return inverses.astype(A_csr.dtype, copy=False)
+
+
+@numba.njit(cache=True, error_model="numpy")
+def _gather_diagonal_blocks(
+    indptr: npt.NDArray,
+    indices: npt.NDArray,
+    data: npt.NDArray,
+    block_size: int,
+    blocks: npt.NDArray,
+) -> None:
+    """Adds the entries of a CSR matrix that lie inside its diagonal blocks to `blocks`."""
+    for row in range(indptr.shape[0] - 1):
+        block_index = row // block_size
+        first_column = block_index * block_size
+        for position in range(indptr[row], indptr[row + 1]):
+            column = indices[position]
+            if first_column <= column < first_column + block_size:
+                blocks[block_index, row - first_column, column - first_column] += data[position]
+
+
+@numba.njit(cache=True, parallel=True, error_model="numpy")
+def _invert_small_blocks(
+    blocks: npt.NDArray,
+    inverses: npt.NDArray,
+    failed: npt.NDArray,
+) -> None:
+    """
+    Inverts each small dense block by Gauss-Jordan elimination with partial pivoting.
+
+    A block is marked in `failed` when a pivot is not larger than the floating point
+    round-off of the block, which includes blocks with non-finite entries, and when its
+    inverse is not finite. The inverse of a failed block is not meaningful.
+    """
+    number_of_blocks, size, _ = blocks.shape
+    unit_roundoff = 2.220446049250313e-16
+    for block_index in numba.prange(number_of_blocks):
+        work = np.zeros((size, 2 * size))
+        largest = 0.0
+        for i in range(size):
+            for j in range(size):
+                work[i, j] = blocks[block_index, i, j]
+                magnitude = abs(work[i, j])
+                if magnitude > largest:
+                    largest = magnitude
+            work[i, size + i] = 1.0
+        tolerance = unit_roundoff * size * largest
+
+        valid = True
+        for column in range(size):
+            pivot_row = column
+            pivot_magnitude = abs(work[column, column])
+            for row in range(column + 1, size):
+                if abs(work[row, column]) > pivot_magnitude:
+                    pivot_row = row
+                    pivot_magnitude = abs(work[row, column])
+            if not pivot_magnitude > tolerance:
+                valid = False
+                break
+            if pivot_row != column:
+                for j in range(2 * size):
+                    swapped = work[column, j]
+                    work[column, j] = work[pivot_row, j]
+                    work[pivot_row, j] = swapped
+            pivot = work[column, column]
+            for j in range(2 * size):
+                work[column, j] /= pivot
+            for row in range(size):
+                if row != column:
+                    factor = work[row, column]
+                    for j in range(2 * size):
+                        work[row, j] -= factor * work[column, j]
+
+        if valid:
+            for i in range(size):
+                for j in range(size):
+                    inverses[block_index, i, j] = work[i, size + j]
+                    if not np.isfinite(work[i, size + j]):
+                        valid = False
+        failed[block_index] = not valid
+
+
+@numba.njit(cache=True, parallel=True, error_model="numpy")
+def _multiply_block_diagonal(
+    inverses: npt.NDArray,
+    vector: npt.NDArray,
+    out: npt.NDArray,
+    transpose: bool,
+) -> None:
+    """Multiplies `vector` by a block diagonal matrix, treating entries past its end as zero."""
+    number_of_blocks, size, _ = inverses.shape
+    n = vector.shape[0]
+    for block_index in numba.prange(number_of_blocks):
+        first = block_index * size
+        for i in range(size):
+            row = first + i
+            if row >= n:
+                continue
+            total = 0.0
+            for j in range(size):
+                column = first + j
+                if column >= n:
+                    continue
+                if transpose:
+                    total += inverses[block_index, j, i] * vector[column]
+                else:
+                    total += inverses[block_index, i, j] * vector[column]
+            out[row] = total
 
 
 def _apply_block_inverses(
@@ -201,18 +297,10 @@ def _apply_block_inverses(
     transpose: bool = False,
 ) -> npt.NDArray:
     """Multiplies `vector` by the block diagonal matrix whose blocks are `inverses`."""
-    number_of_blocks, block_size, _ = inverses.shape
-    flat = _flatten(vector)
-    n = flat.shape[0]
-    padded_size = number_of_blocks * block_size
-    if padded_size != n:
-        padded = np.zeros(padded_size, dtype=flat.dtype)
-        padded[:n] = flat
-        flat = padded
-
-    subscripts = "nji,nj->ni" if transpose else "nij,nj->ni"
-    result = np.einsum(subscripts, inverses, flat.reshape(number_of_blocks, block_size))
-    return result.reshape(-1)[:n].reshape(np.shape(vector))
+    flat = np.ascontiguousarray(_flatten(vector))
+    result = np.empty(flat.shape[0], dtype=np.result_type(inverses.dtype, flat.dtype))
+    _multiply_block_diagonal(inverses=inverses, vector=flat, out=result, transpose=transpose)
+    return result.reshape(np.shape(vector))
 
 
 def make_amg_preconditioner(
@@ -426,6 +514,41 @@ def make_polynomial_preconditioner(
     )
 
 
+VariableOrdering = typing.Literal["cell_major", "variable_major"]
+"""
+How the entries of a multi-variable system are laid out. With "cell_major", the entries
+of one cell are stored together, so entry `i` of cell `c` is at `c * n_variables_per_cell + i`.
+With "variable_major", all entries of one variable are stored together, so entry `i`
+of cell `c` is at `i * number_of_cells + c`.
+"""
+
+
+def _cell_major_permutation(
+    *,
+    number_of_cells: int,
+    n_variables_per_cell: int,
+    ordering: str,
+) -> npt.NDArray | None:
+    """
+    Returns the permutation that lists a system's entries in cell major order.
+
+    :return: `permutation` such that `permutation[k]` is the position, in the given
+        ordering, of the entry stored at position `k` in cell major order, or None
+        if the ordering already is cell major.
+    :raises ValidationError: If the ordering is unknown.
+    """
+    if ordering == "cell_major":
+        return None
+    if ordering == "variable_major":
+        return (
+            np
+            .arange(number_of_cells * n_variables_per_cell, dtype=np.int64)
+            .reshape(n_variables_per_cell, number_of_cells)
+            .T.reshape(-1)
+        )
+    raise ValidationError(f"Unknown ordering: {ordering!r}. Use 'cell_major' or 'variable_major'.")
+
+
 CPR_AMG_KWARGS = {
     "max_coarse": 500,
     "presmoother": ("gauss_seidel", {"sweep": "symmetric", "iterations": 1}),
@@ -444,6 +567,8 @@ def make_cpr_preconditioner(
     *,
     n_variables_per_cell: int = 3,
     pressure_variable_index: int = 0,
+    ordering: VariableOrdering = "cell_major",
+    equation_ordering: VariableOrdering | None = None,
     decouple_pressure: bool = True,
     smoother: typing.Literal["block_jacobi", "ilu"] = "block_jacobi",
     amg_kwargs: dict[str, typing.Any] | None = None,
@@ -463,15 +588,21 @@ def make_cpr_preconditioner(
     reservoir simulations where the Jacobian is strongly coupled but the pressure
     equation dominates the long-range behavior.
 
-    The unknowns must be ordered cell by cell, with the `n_variables_per_cell`
-    unknowns of each cell stored together, and the equations must be ordered the
-    same way.
+    The unknowns and equations may be laid out cell by cell or variable by variable, see
+    `ordering` and `equation_ordering`. The equations of a cell must be listed in the same
+    variable order as its unknowns, so that each cell's diagonal block is square and
+    invertible.
 
     :param A_csr: The full Jacobian matrix in CSR format.
     :param n_variables_per_cell: Number of unknowns per grid cell
         (e.g., pressure, saturation_o, saturation_g).
     :param pressure_variable_index: Index of the pressure unknown inside each cell's
         variable block. Example: if block = [pressure, So, Sg], then index = 0.
+    :param ordering: Layout of the unknowns. "cell_major" stores the unknowns of each cell
+        together, as in [p0, So0, Sg0, p1, So1, Sg1, ...]. "variable_major" stores each
+        variable for all cells together, as in [p0, p1, ..., So0, So1, ..., Sg0, Sg1, ...].
+    :param equation_ordering: Layout of the equations, with the same meaning as `ordering`.
+        Defaults to the same layout as the unknowns.
     :param decouple_pressure: Whether to form the pressure equation by combining each
         cell's equations so that the dependence on saturations in the cell's own
         block is eliminated (quasi-IMPES). When False, the pressure rows and columns
@@ -489,7 +620,8 @@ def make_cpr_preconditioner(
         x = M @ r approximately solves J^{-1} r. It does not support transposed
         products, so it cannot be used with the `bicg` and `qmr` solvers.
     :raises ValidationError: If the matrix is not square, its size is not a multiple of
-        `n_variables_per_cell`, or `pressure_variable_index` is out of range.
+        `n_variables_per_cell`, `pressure_variable_index` is out of range, or an ordering
+        is unknown.
     :raises PreconditionerError: If AMG or smoother construction fails.
     """
     A_csr = A_csr.tocsr()
@@ -516,6 +648,24 @@ def make_cpr_preconditioner(
     amg_kwargs = dict(CPR_AMG_KWARGS) if amg_kwargs is None else amg_kwargs
     ilu_kwargs = dict(CPR_ILU_KWARGS) if ilu_kwargs is None else ilu_kwargs
     number_of_cells = number_of_equations // n_variables_per_cell
+    unknown_permutation = _cell_major_permutation(
+        number_of_cells=number_of_cells,
+        n_variables_per_cell=n_variables_per_cell,
+        ordering=ordering,
+    )
+    equation_permutation = _cell_major_permutation(
+        number_of_cells=number_of_cells,
+        n_variables_per_cell=n_variables_per_cell,
+        ordering=ordering if equation_ordering is None else equation_ordering,
+    )
+    if unknown_permutation is not None or equation_permutation is not None:
+        # All work below is done on the system in cell major order.
+        if equation_permutation is not None:
+            A_csr = A_csr[equation_permutation, :]  # type: ignore
+        if unknown_permutation is not None:
+            A_csr = csr_matrix(A_csr)[:, unknown_permutation]
+        A_csr = A_csr.tocsr()
+
     pressure_dof_indices = np.arange(
         pressure_variable_index,
         number_of_equations,
@@ -567,6 +717,8 @@ def make_cpr_preconditioner(
     def matvec(residual: npt.NDArray) -> npt.NDArray:
         """CPR preconditioner application: x = M^{-1} r"""
         flat = _flatten(residual)
+        if equation_permutation is not None:
+            flat = flat[equation_permutation]
         if restriction is not None:
             pressure_residual = restriction @ flat
         else:
@@ -577,7 +729,12 @@ def make_cpr_preconditioner(
         correction[pressure_dof_indices] = pressure_correction
 
         remaining = flat - A_csr @ correction
-        return (correction + M_smoother.matvec(remaining)).reshape(np.shape(residual))
+        result = correction + M_smoother.matvec(remaining)
+        if unknown_permutation is not None:
+            reordered = np.empty_like(result)
+            reordered[unknown_permutation] = result
+            result = reordered
+        return result.reshape(np.shape(residual))
 
     return LinearOperator(  # type: ignore[arg-type]
         shape=matrix_shape, matvec=matvec, dtype=A_csr.dtype
@@ -1367,7 +1524,49 @@ def solve_linear_system(
     return np.ascontiguousarray(x), None
 
 
-SystemScalingMethod = typing.Literal["row", "diagonal"]
+@numba.njit(cache=True, error_model="numpy")
+def _scale_rows(
+    indptr: npt.NDArray,
+    data: npt.NDArray,
+    epsilon: float,
+    inverse_row_scale: npt.NDArray,
+) -> None:
+    """Divides each row of a CSR matrix by its sum of absolute values, in place."""
+    for row in range(indptr.shape[0] - 1):
+        total = 0.0
+        for position in range(indptr[row], indptr[row + 1]):
+            total += abs(data[position])
+        scale = 1.0 / total if total >= epsilon else 1.0
+        inverse_row_scale[row] = scale
+        for position in range(indptr[row], indptr[row + 1]):
+            data[position] *= scale
+
+
+@numba.njit(cache=True, error_model="numpy")
+def _largest_column_entries(
+    indices: npt.NDArray,
+    data: npt.NDArray,
+    largest: npt.NDArray,
+) -> None:
+    """Records the largest absolute entry of each column of a CSR matrix in `largest`."""
+    for position in range(data.shape[0]):
+        magnitude = abs(data[position])
+        if magnitude > largest[indices[position]]:
+            largest[indices[position]] = magnitude
+
+
+@numba.njit(cache=True, error_model="numpy")
+def _scale_columns(
+    indices: npt.NDArray,
+    data: npt.NDArray,
+    inverse_column_scale: npt.NDArray,
+) -> None:
+    """Multiplies each entry of a CSR matrix by the scale of its column, in place."""
+    for position in range(data.shape[0]):
+        data[position] *= inverse_column_scale[indices[position]]
+
+
+SystemScalingMethod = typing.Literal["row", "column", "diagonal"]
 
 
 def scale_linear_system(
@@ -1383,7 +1582,7 @@ def scale_linear_system(
     """
     Scale a linear system to improve numerical conditioning.
 
-    This function applies row scaling and/or column (diagonal) scaling to the
+    This function applies row scaling and/or column scaling to the
     Jacobian matrix and residual vector. It is designed for use in Newton-based
     solvers for nonlinear systems (e.g., multiphase flow transport equations).
     The inputs are not modified.
@@ -1393,31 +1592,34 @@ def scale_linear_system(
 
     Supported scaling methods:
     - "row": Row scaling by the sum of absolute values in each row (row 1-norm)
-    - "diagonal": Diagonal (column) scaling using Jacobian diagonal entries
+    - "column": Column scaling by the largest absolute value in each column
+    - "diagonal": Column scaling by the Jacobian diagonal entries, which gives the
+      scaled matrix a unit diagonal. This is only sound when every diagonal entry is a
+      good measure of the size of its column. A small diagonal entry makes its whole
+      column large, which can worsen conditioning by many orders of magnitude and make
+      preconditioned solvers fail, so "column" is the safer choice.
 
-    If no methods are provided, an automatic heuristic is used:
-    - If the Jacobian diagonal is sufficiently strong -> use ("row", "diagonal")
-    - Otherwise -> use ("row",) only
+    If no methods are provided, ("row", "column") is used.
 
     Notes:
     - Row scaling modifies both J and R
     - Column scaling modifies only J
     - Column scaling requires post-solve unscaling of the solution vector
-    - Methods are applied in the order given, and the diagonal used for column scaling
-      is the diagonal of the matrix at that point, so after row scaling when "row"
-      comes first.
+    - Methods are applied in the order given, and each method sees the matrix as left
+      by the previous one.
 
     :param jacobian_csr: Sparse Jacobian matrix in CSR format of shape (n, n)
     :param residual_vector: Residual vector of shape (n,)
     :param methods: Scaling methods to apply. Can be:
         - None (auto-select)
         - "row"
+        - "column"
         - "diagonal"
-        - Iterable like ("row", "diagonal")
+        - Iterable like ("row", "column")
         Order matters (applied sequentially)
 
-    :param epsilon: Rows with a sum of absolute values below this, and diagonal entries
-        with a magnitude below this, are left unscaled to avoid dividing by near-zero values.
+    :param epsilon: Rows, columns and diagonal entries with a magnitude below this are
+        left unscaled to avoid dividing by near-zero values.
     :return: Tuple of:
         - scaled jacobian (CSR matrix)
         - scaled residual (ndarray)
@@ -1433,44 +1635,42 @@ def scale_linear_system(
 
     R = residual_vector
     n = J.shape[0]
-    row_lengths = np.diff(J.indptr)
 
     if methods is None:
-        selected: tuple[str, ...] = (
-            ("row", "diagonal") if np.median(np.abs(J.diagonal())) > epsilon else ("row",)
-        )
+        selected: tuple[str, ...] = ("row", "column")
     elif isinstance(methods, str):
         selected = (methods,)
     else:
         selected = tuple(methods)
 
-    unknown = [method for method in selected if method not in ("row", "diagonal")]
+    unknown = [method for method in selected if method not in ("row", "column", "diagonal")]
     if unknown:
         raise ValidationError(
-            f"Unknown scaling method(s): {unknown}. Use 'row' and/or 'diagonal'."
+            f"Unknown scaling method(s): {unknown}. Use 'row', 'column' and/or 'diagonal'."
         )
 
     column_scaling_vector = None
     for method in selected:
         if method == "row":
-            row_sums = np.bincount(
-                np.repeat(np.arange(n), row_lengths),
-                weights=np.abs(J.data),
-                minlength=n,
+            inverse_row_scale = np.empty(n, dtype=J.dtype)
+            _scale_rows(
+                indptr=J.indptr, data=J.data, epsilon=epsilon, inverse_row_scale=inverse_row_scale
             )
-            row_sums[row_sums < epsilon] = 1.0
-            inverse_row_scale = (1.0 / row_sums).astype(J.dtype, copy=False)
-            J.data *= np.repeat(inverse_row_scale, row_lengths)
             R = R * inverse_row_scale
+            continue
+
+        if method == "column":
+            column_size = np.zeros(J.shape[1], dtype=J.dtype)  # type: ignore
+            _largest_column_entries(indices=J.indices, data=J.data, largest=column_size)
         else:
-            abs_diagonal = np.abs(J.diagonal())
-            abs_diagonal[abs_diagonal < epsilon] = 1.0
-            inverse_column_scale = (1.0 / abs_diagonal).astype(J.dtype, copy=False)
-            J.data *= inverse_column_scale[J.indices]
-            column_scaling_vector = (
-                inverse_column_scale
-                if column_scaling_vector is None
-                else column_scaling_vector * inverse_column_scale
-            )
+            column_size = np.abs(J.diagonal())
+        column_size[column_size < epsilon] = 1.0
+        inverse_column_scale = (1.0 / column_size).astype(J.dtype, copy=False)
+        _scale_columns(indices=J.indices, data=J.data, inverse_column_scale=inverse_column_scale)
+        column_scaling_vector = (
+            inverse_column_scale
+            if column_scaling_vector is None
+            else column_scaling_vector * inverse_column_scale
+        )
 
     return J, R, column_scaling_vector  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
