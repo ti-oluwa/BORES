@@ -335,3 +335,74 @@ class TestTiltedSubdivision:
             np.testing.assert_allclose(
                 getattr(tilted, name), getattr(horizontal, name), rtol=1e-6, atol=1e-6
             )
+
+
+class TestTiltedSubdivisionOnADippingGrid:
+    """Checked against a Monte Carlo average over the actual cells, which uses none of the grid's face geometry."""
+
+    def build(self, spe1_capillary, dip_degrees):
+        from bores.grids.factories.corner_point import make_corner_point_grid
+
+        deck_file, case = spe1_capillary
+        nx, ny, nz, dx, dy, dz = 8, 2, 4, 100.0, 100.0, 20.0
+        slope = np.tan(np.deg2rad(dip_degrees))
+        z0 = 8340.0 - slope * 300.0
+        coord = np.zeros((ny + 1, nx + 1, 6))
+        for j in range(ny + 1):
+            for i in range(nx + 1):
+                coord[j, i] = [i * dx, j * dy, 0.0, i * dx, j * dy, 1000.0]
+        zcorn = np.zeros((nz * 2, ny * 2, nx * 2))
+        for kk in range(nz * 2):
+            for ii in range(nx * 2):
+                zcorn[kk, :, ii] = z0 + slope * (((ii + 1) // 2) * dx) + ((kk + 1) // 2) * dz
+        grid = make_corner_point_grid(coord=coord, zcorn=zcorn, unit_system=UnitSystem.FIELD)
+
+        cells = np.arange(grid.n_cells)
+        i, _, k = grid.ijk_indices(cells)
+        rng = np.random.default_rng(0)
+        reference = np.empty(grid.n_cells)
+        for cell in cells:
+            u, w = rng.random((2, 20000))
+            z = z0 + slope * (i[cell] + u) * dx + (k[cell] + w) * dz
+            reference[cell] = np.where(
+                z < 8350.0, 1.0 - 0.12, 0.0
+            ).mean()  # sharp gas cap above 8350
+
+        equilibrium = Equilibrium.from_deck(deck_file)
+        region = equilibrium.region(1)
+        tables = case.model.fluid.pvt.region(1).tables
+        n = grid.n_cells
+        shared = dict(
+            region=region,
+            connate_water_saturation=np.full(n, 0.12),
+            oil_table=tables.oil,
+            gas_table=tables.gas,
+            water_table=tables.water,
+            rsvd_table=equilibrium.rsvd_tables.get(region.rsvd_table),
+            rvvd_table=None,
+            temperature=np.full(n, 200.0),
+            unit_system=UnitSystem.FIELD,
+            capillary_pressure=None,
+            residual_oil_saturation_water=None,
+            residual_oil_saturation_gas=None,
+            residual_gas_saturation=None,
+            dtype=np.float64,
+            n_subdivisions=20,
+        )  # fmt: skip
+        tilted = initialization.initialize_tilted_subdivision_equilibrium(
+            grid=grid, cell_indices=cells, **shared
+        )
+        horizontal = initialize_horizontal_subdivision_equilibrium(
+            cell_top=grid.cell_min_xyz[:, 2], cell_bottom=grid.cell_max_xyz[:, 2], **shared
+        )
+        return reference, tilted, horizontal
+
+    def test_a_moderate_dip_is_averaged_correctly_and_better_than_the_bounding_box(
+        self, spe1_capillary
+    ):
+        reference, tilted, horizontal = self.build(spe1_capillary, dip_degrees=5.0)
+        tilted_error = np.abs(tilted.gas_saturation - reference)
+        horizontal_error = np.abs(horizontal.gas_saturation - reference)
+        assert tilted_error.mean() < 0.005
+        assert tilted_error.max() < 0.03
+        assert tilted_error.mean() < horizontal_error.mean() / 2
