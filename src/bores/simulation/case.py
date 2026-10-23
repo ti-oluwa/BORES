@@ -530,7 +530,10 @@ def load_case(
 
     try:
         time_targets = build_time_targets(
-            deck_file, list(extra_time_targets), start_date=start_date, unit_system=unit_system
+            deck_file,
+            list(extra_time_targets),
+            start_date=start_date,
+            unit_system=unit_system,
         )
     except Exception as exc:
         raise CaseLoadError(f"Failed to load time targets from {deck_file!r}.") from exc

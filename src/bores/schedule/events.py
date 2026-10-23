@@ -10,7 +10,7 @@ import attrs
 
 from bores.errors import ValidationError
 from bores.schedule.base import Event, ModelT, ScheduleContext
-from bores.timestep.targets import PeriodicTarget, TimeTargets
+from bores.timestep.targets import PeriodicTarget, SupportsTimeTargets, TimeTargets
 from bores.types import Boolean, Number, UnitSystem
 from bores.utils import get_current_date, get_current_time
 
@@ -318,11 +318,10 @@ class AllOf(Event[ModelT]):
         times: list[Number] = []
         periodic: list[PeriodicTarget] = []
         for event in self.events:
-            getter = getattr(event, "get_time_targets", None)
-            if getter is None:
+            if not isinstance(event, SupportsTimeTargets):
                 continue
 
-            targets = getter(start_date=start_date, unit_system=unit_system)
+            targets = event.get_time_targets(start_date=start_date, unit_system=unit_system)
             times.extend(targets.times)
             periodic.extend(targets.periodic)
         return TimeTargets(times=times, periodic=periodic)
@@ -363,11 +362,10 @@ class AnyOf(Event[ModelT]):
         times: list[Number] = []
         periodic: list[PeriodicTarget] = []
         for event in self.events:
-            getter = getattr(event, "get_time_targets", None)
-            if getter is None:
+            if not isinstance(event, SupportsTimeTargets):
                 continue
 
-            targets = getter(start_date=start_date, unit_system=unit_system)
+            targets = event.get_time_targets(start_date=start_date, unit_system=unit_system)
             times.extend(targets.times)
             periodic.extend(targets.periodic)
         return TimeTargets(times=times, periodic=periodic)
