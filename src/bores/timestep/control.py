@@ -83,9 +83,9 @@ def Time(
 class StepMetricsDict(TypedDict):
     """Dictionary representation of step metrics."""
 
-    step_number: int
+    step: int
     step_size: Number
-    cfl: float | None
+    cfl: Number | None
     newton_iterations: int | None
     success: bool
 
@@ -98,29 +98,29 @@ class TimerState(TypedDict):
     minimum_step_size: Number
     simulation_time: Number
     unit_system: str
-    maximum_cfl: float
-    cfl_safety_margin: float
-    ramp_up_factor: float | None
-    backoff_factor: float
-    aggressive_backoff_factor: float
+    maximum_cfl: Number
+    cfl_safety_margin: Number
+    ramp_up_factor: Number | None
+    backoff_factor: Number
+    aggressive_backoff_factor: Number
     maximum_steps: int | None
-    maximum_absolute_oil_mbe: float | None
-    maximum_absolute_water_mbe: float | None
-    maximum_absolute_gas_mbe: float | None
-    maximum_total_absolute_mbe: float | None
-    maximum_relative_oil_mbe: float | None
-    maximum_relative_water_mbe: float | None
-    maximum_relative_gas_mbe: float | None
-    maximum_total_relative_mbe: float | None
+    maximum_absolute_oil_mbe: Number | None
+    maximum_absolute_water_mbe: Number | None
+    maximum_absolute_gas_mbe: Number | None
+    maximum_total_absolute_mbe: Number | None
+    maximum_relative_oil_mbe: Number | None
+    maximum_relative_water_mbe: Number | None
+    maximum_relative_gas_mbe: Number | None
+    maximum_total_relative_mbe: Number | None
     use_mbe_for_step_size: bool
     maximum_rejections: int
-    maximum_growth_per_step: float
-    step_size_smoothing: float
+    maximum_growth_per_step: Number
+    step_size_smoothing: Number
     growth_cooldown_steps: int
     failure_memory_window: int
     metrics_history_size: int
-    target_utilization: float
-    target_stretch: float
+    target_utilization: Number
+    target_stretch: Number
     enforce_constant_step_size: bool
     elapsed_time: Number
     step: int
@@ -168,7 +168,7 @@ TIMER_SETTING_NAMES: tuple[str, ...] = (
 class StepMetrics:
     """Metrics for a single time step."""
 
-    step_number: int
+    step: int
     """The 1-indexed step count this metric belongs to."""
     step_size: Number
     """The step size attempted, in the owning `Timer`'s `unit_system` native time unit."""
@@ -694,7 +694,7 @@ class Timer:
         self.failed_step_sizes.append(step_size)
         self.recent_metrics.append(
             StepMetrics(
-                step_number=self.next_step,
+                step=self.next_step,
                 step_size=step_size,
                 cfl=maximum_cfl_encountered,
                 newton_iterations=newton_iterations,
@@ -1122,7 +1122,7 @@ class Timer:
 
         self.recent_metrics.append(
             StepMetrics(
-                step_number=self.step,
+                step=self.step,
                 step_size=step_size,
                 cfl=maximum_cfl_encountered,
                 newton_iterations=newton_iterations,
