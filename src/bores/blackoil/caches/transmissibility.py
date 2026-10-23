@@ -105,6 +105,19 @@ class TransmissibilityCache(typing.NamedTuple):
     dTg_dsg: CellArray
     """Gas-transmissibility derivative w.r.t. gas saturation."""
 
+    dTo_drs: CellArray
+    """
+    Oil-transmissibility derivative w.r.t. the upstream cell's solution gas-oil ratio, for an
+    undersaturated upstream cell whose `Rs` is a primary variable. `NaN` where the PVT
+    derivative is `NaN` (saturated cell, or a frozen saturation pressure).
+    """
+    dTg_drv: CellArray
+    """
+    Gas-transmissibility derivative w.r.t. the upstream cell's vaporized oil-gas ratio, for an
+    undersaturated (wet) gas cell whose `Rv` is a primary variable. `NaN` where the PVT
+    derivative is `NaN` (saturated or dry gas, or a frozen saturation pressure).
+    """
+
 
 CACHE_INT_FIELDS = ("water_upstream_cell", "oil_upstream_cell", "gas_upstream_cell")
 CACHE_FLOAT_FIELDS = tuple(
@@ -188,7 +201,8 @@ def update_transmissibility_cache(
     dʎw_dsg = mobility_cache.dʎw_dsg
     dʎo_dsg = mobility_cache.dʎo_dsg
     dʎg_dsg = mobility_cache.dʎg_dsg
-
+    dʎo_drs = mobility_cache.dʎo_drs
+    dʎg_drv = mobility_cache.dʎg_drv
     out_water_upstream_cell = out.water_upstream_cell
     out_oil_upstream_cell = out.oil_upstream_cell
     out_gas_upstream_cell = out.gas_upstream_cell
@@ -217,7 +231,8 @@ def update_transmissibility_cache(
     out_dTw_dsg = out.dTw_dsg
     out_dTo_dsg = out.dTo_dsg
     out_dTg_dsg = out.dTg_dsg
-
+    out_dTo_drs = out.dTo_drs
+    out_dTg_drv = out.dTg_drv
     n_connections = owner_indices.shape[0]
     for i in numba.prange(n_connections):
         owner = owner_indices[i]
@@ -258,7 +273,7 @@ def update_transmissibility_cache(
         out_dTo_dsw[i] = geometric_t * dʎo_dsw[oil_upstream]
         out_dTo_dso[i] = geometric_t * dʎo_dso[oil_upstream]
         out_dTo_dsg[i] = geometric_t * dʎo_dsg[oil_upstream]
-
+        out_dTo_drs[i] = geometric_t * dʎo_drs[oil_upstream]
         # Gas
         average_gas_density = 0.5 * (gas_density[owner] + gas_density[neighbour])
         gas_potential_difference = (
@@ -275,7 +290,7 @@ def update_transmissibility_cache(
         out_dTg_dsw[i] = geometric_t * dʎg_dsw[gas_upstream]
         out_dTg_dso[i] = geometric_t * dʎg_dso[gas_upstream]
         out_dTg_dsg[i] = geometric_t * dʎg_dsg[gas_upstream]
-
+        out_dTg_drv[i] = geometric_t * dʎg_drv[gas_upstream]
         out_total_transmissibility[i] = (
             water_transmissibility + oil_transmissibility + gas_transmissibility
         )

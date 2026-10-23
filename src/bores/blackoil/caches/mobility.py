@@ -62,6 +62,20 @@ class MobilityCache(typing.NamedTuple):
     dʎT_dP: CellArray
     """Pressure derivative of total mobility, dλT/dP."""
 
+    # Derivatives w.r.t. the cell's own dissolved/vaporized state, at constant P and saturations:
+    # what an undersaturated cell needs when its `Rs` (oil) or `Rv` (wet gas) is a primary
+    # variable. Relative permeability does not depend on them, so, like the pressure
+    # derivative, each is a plain quotient rule. `NaN` where the PVT derivative is `NaN`
+    # (saturated cells, absent phases, or a frozen saturation pressure).
+    dʎo_drs: CellArray
+    """Derivative of oil mobility w.r.t. solution gas-oil ratio, dλo/dRs."""
+    dʎg_drv: CellArray
+    """Derivative of gas mobility w.r.t. vaporized oil-gas ratio, dλg/dRv."""
+    dʎT_drs: CellArray
+    """Derivative of total mobility w.r.t. `Rs`, dλT/dRs (only oil depends on it)."""
+    dʎT_drv: CellArray
+    """Derivative of total mobility w.r.t. `Rv`, dλT/dRv (only gas depends on it)."""
+
     # d(phase mobility)/d(water saturation)
     dʎw_dsw: CellArray
     """Derivative of water mobility w.r.t. water saturation, dλw/dSw."""
@@ -116,7 +130,8 @@ def update_mobility_cache(
     dμw_dp = pvt_cache.dμw_dp
     dμo_dp = pvt_cache.dμo_dp
     dμg_dp = pvt_cache.dμg_dp
-
+    dμo_drs = pvt_cache.dμo_drs
+    dμg_drv = pvt_cache.dμg_drv
     water_relative_permeability = satfunc_cache.water_relative_permeability
     oil_relative_permeability = satfunc_cache.oil_relative_permeability
     gas_relative_permeability = satfunc_cache.gas_relative_permeability
@@ -141,6 +156,10 @@ def update_mobility_cache(
     out_dʎo_dP = out.dʎo_dP
     out_dʎg_dP = out.dʎg_dP
     out_dʎT_dP = out.dʎT_dP
+    out_dʎo_drs = out.dʎo_drs
+    out_dʎg_drv = out.dʎg_drv
+    out_dʎT_drs = out.dʎT_drs
+    out_dʎT_drv = out.dʎT_drv
     out_dʎw_dsw = out.dʎw_dsw
     out_dʎo_dsw = out.dʎo_dsw
     out_dʎg_dsw = out.dʎg_dsw
@@ -194,6 +213,14 @@ def update_mobility_cache(
         out_dʎg_dP[i] = dʎg_dp
         out_dʎT_dP[i] = dʎw_dp + dʎo_dp + dʎg_dp
 
+        # State derivatives, same quotient rule with kr held constant:
+        # d(ʎ_oil)/dRs = -kro * d(μo)/dRs / μo**2, d(ʎ_gas)/dRv = -krg * d(μg)/dRv / μg**2
+        dʎo_drs = -kro * dμo_drs[i] / μo**2
+        dʎg_drv = -krg * dμg_drv[i] / μg**2
+        out_dʎo_drs[i] = dʎo_drs
+        out_dʎg_drv[i] = dʎg_drv
+        out_dʎT_drs[i] = dʎo_drs
+        out_dʎT_drv[i] = dʎg_drv
         # Saturation derivatives: viscosity doesn't depend on saturation, so this is
         # a plain chain rule: d(ʎ_phase)/dS_j = d(kr_phase)/dS_j / μ_phase
         dʎw_dsw = dkrw_dsw[i] / μw

@@ -6,6 +6,7 @@ import numpy as np
 import numpy.typing as npt
 
 from bores.blackoil.caches.physics import PhysicsCache, compute_physics_cache
+from bores.blackoil.caches.pvt import compute_saturation_pressures
 from bores.blackoil.caches.transmissibility import (
     TransmissibilityCache,
     compute_transmissibility_cache,
@@ -62,6 +63,19 @@ class SimulationWorkspace(typing.NamedTuple):
     salinity: CellArray | None
     """Optional cell-wise salinity field for salinity-dependent calculations."""
 
+    frozen_bubble_point_pressure: CellArray | None = None
+    """
+    Bubble-point pressure held for the run when `RunSpec.freeze_saturation_pressure` is set,
+    taken from the initial state. `None` when the saturation pressure follows the cell's `Rs`.
+    """
+
+    frozen_dew_point_pressure: CellArray | None = None
+    """
+    Dew-point pressure held for the run when `RunSpec.freeze_saturation_pressure` is set,
+    taken from the initial state (`NaN` for cells with no dew point). `None` when the
+    saturation pressure follows the cell's `Rv`.
+    """
+
 
 def build_simulation_workspace(
     *,
@@ -108,6 +122,17 @@ def build_simulation_workspace(
         else np.ones(n_cells, dtype=np.int32)
     )
     rock = reservoir.rock
+    frozen_bubble_point_pressure = None
+    frozen_dew_point_pressure = None
+    if runspec.freeze_saturation_pressure:
+        frozen_bubble_point_pressure, frozen_dew_point_pressure = compute_saturation_pressures(
+            temperature=initial_state.temperature,
+            solution_gas_oil_ratio=initial_state.solution_gor,
+            pvt_region=pvt_region,
+            pvt=fluid.pvt,
+            vaporized_oil_ratio=initial_state.vaporized_oil_gas_ratio,
+            dtype=dtype,
+        )
     physics_cache = compute_physics_cache(
         pressure=initial_state.pressure,
         temperature=initial_state.temperature,
@@ -125,6 +150,9 @@ def build_simulation_workspace(
         residual_gas_saturation=rock.residual_gas_saturation,
         residual_oil_saturation_water=rock.residual_oil_saturation_water,
         residual_oil_saturation_gas=rock.residual_oil_saturation_gas,
+        freeze_saturation_pressure=runspec.freeze_saturation_pressure,
+        frozen_bubble_point_pressure=frozen_bubble_point_pressure,
+        frozen_dew_point_pressure=frozen_dew_point_pressure,
         dtype=dtype,
     )
     transmissibility_cache = compute_transmissibility_cache(
@@ -155,4 +183,6 @@ def build_simulation_workspace(
         hysteresis=hysteresis,
         aquifers=aquifer_workspace,
         salinity=salinity,
+        frozen_bubble_point_pressure=frozen_bubble_point_pressure,
+        frozen_dew_point_pressure=frozen_dew_point_pressure,
     )

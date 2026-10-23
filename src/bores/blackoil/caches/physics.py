@@ -53,6 +53,9 @@ def compute_physics_cache(
     residual_gas_saturation: CellArray | None = None,
     vaporized_oil_ratio: CellArray | None = None,
     hysteresis: Hysteresis | HysteresisWorkspace | None = None,
+    freeze_saturation_pressure: bool = False,
+    frozen_bubble_point_pressure: CellArray | None = None,
+    frozen_dew_point_pressure: CellArray | None = None,
     out: PhysicsCache | None = None,
     dtype: npt.DTypeLike = None,
 ) -> PhysicsCache:
@@ -103,6 +106,13 @@ def compute_physics_cache(
         supplied via `out` - that sub-cache keeps its existing dtype.
     :param vaporized_oil_ratio: Optional shape `(n_cells,)` current `Rv` of the
         gas (wet gas only). Forwarded to `compute_pvt_cache`.
+    :param freeze_saturation_pressure: Hold the bubble and dew points at the frozen values
+        rather than following the cell's own `Rs`/`Rv`. Forwarded to `compute_pvt_cache`,
+        which describes both modes.
+    :param frozen_bubble_point_pressure: Shape `(n_cells,)` bubble point to hold. Forwarded to
+        `compute_pvt_cache`.
+    :param frozen_dew_point_pressure: Shape `(n_cells,)` dew point to hold. Forwarded to
+        `compute_pvt_cache`.
     :return: The populated `PhysicsCache`. `out` itself if given, otherwise
         a newly allocated one. Always returned, never `None`.
     :raises ValueError: If `pressure`/`water_saturation` disagree on cell
@@ -125,6 +135,9 @@ def compute_physics_cache(
         out=out.pvt if out is not None else None,
         dtype=dtype,
         vaporized_oil_ratio=vaporized_oil_ratio,
+        freeze_saturation_pressure=freeze_saturation_pressure,
+        frozen_bubble_point_pressure=frozen_bubble_point_pressure,
+        frozen_dew_point_pressure=frozen_dew_point_pressure,
     )
     satfunc_cache = compute_satfunc_cache(
         water_saturation=water_saturation,

@@ -2742,6 +2742,269 @@ class PVTTable(StoreSerializable):
 
     pb = pbub = p_bub = bubble_point_pressure
 
+    def _undersaturated_state_derivative(
+        self,
+        value: typing.Callable[[TableQuery[NDimension]], TableResult[NDimension] | None],
+        saturation_pressure: typing.Callable[
+            [TableQuery[NDimension]], TableResult[NDimension] | None
+        ],
+        pressure: TableQuery[NDimension],
+        state: TableQuery[NDimension],
+        state_floor: Number,
+    ) -> TableResult[NDimension] | None:
+        """
+        Derivative of an undersaturated live-phase property with respect to the cell's own
+        state (`Rs` for oil, `Rv` for gas) at constant pressure and temperature.
+
+        The derivative is taken on the table's own value function, so it is consistent with
+        it whichever way the value is built (a 3-D undersaturated table, or the formula from
+        the bubble-point value and compressibility). It stays on the undersaturated branch: a
+        step up in the state raises the saturation pressure, and where that would cross
+        `pressure` a backward difference is used instead of a central one.
+
+        The step is relative, `c.FINITE_DIFFERENCE_EPSILON * max(|state|, state_floor)`, and
+        the state is not stepped below zero.
+
+        :param value: The property as a function of the state, at the cell's pressure and
+            temperature, with the saturation pressure recomputed from that state.
+        :param saturation_pressure: The saturation pressure (bubble or dew point) as a
+            function of the state.
+        :param pressure: Pressure.
+        :param state: The cell's `Rs` or `Rv`.
+        :param state_floor: The smallest state magnitude the step is scaled by, so a state near
+            zero still gets a step that is meaningful on the table's state axis.
+        :returns: The derivative, `NaN` for saturated cells (their state is not independent),
+            or `None` when the table does not supply the value or the saturation pressure.
+        """
+        pressure_array, state_array = broadcast_query_arrays(pressure=pressure, state=state)
+        pressure_array = pressure_array.astype(np.float64)
+        state_array = state_array.astype(np.float64)
+        step = c.FINITE_DIFFERENCE_EPSILON * np.maximum(np.abs(state_array), state_floor)
+        lower = np.maximum(state_array - step, 0.0)
+        upper = state_array + step
+
+        def evaluate(
+            function: typing.Callable[[TableQuery[NDimension]], TableResult[NDimension] | None],
+            argument: TableQuery[NDimension],
+        ) -> npt.NDArray[np.float64] | None:
+            result = function(argument)
+            return None if result is None else np.asarray(result, dtype=np.float64)
+
+        saturation_pressure_at_state = evaluate(saturation_pressure, state_array)
+        saturation_pressure_at_upper = evaluate(saturation_pressure, upper)
+        value_at_state = evaluate(value, state_array)
+        value_at_lower = evaluate(value, lower)
+        value_at_upper = evaluate(value, upper)
+        if (
+            saturation_pressure_at_state is None
+            or saturation_pressure_at_upper is None
+            or value_at_state is None
+            or value_at_lower is None
+            or value_at_upper is None
+        ):
+            return None
+
+        undersaturated = pressure_array > saturation_pressure_at_state
+        central_stays_undersaturated = pressure_array > saturation_pressure_at_upper
+        can_step_back = state_array > lower
+        central = (value_at_upper - value_at_lower) / (upper - lower)
+        backward = (value_at_state - value_at_lower) / np.where(
+            can_step_back, state_array - lower, 1.0
+        )
+        result = np.where(
+            undersaturated & central_stays_undersaturated,
+            central,
+            np.where(undersaturated & can_step_back, backward, np.nan),
+        )
+        dtype = self.dtype  # type: ignore[has-type]
+        return typing.cast(
+            TableResult[NDimension],
+            dtype.type(result.item())  # type: ignore[attr-defined]
+            if result.size == 1
+            else result.astype(dtype, copy=False),
+        )
+
+    def _state_floor(self, axis: NumberArray[OneDimension] | None, default: Number) -> Number:
+        """
+        Smallest state magnitude the derivative step is scaled by: 1 % of the span of the
+        table's `Rs` or `Rv` axis, or `default` when the table has no such axis.
+        """
+        if axis is None or len(axis) < 2:
+            return default
+        span = float(np.max(axis) - np.min(axis))
+        return 0.01 * span if span > 0.0 else default
+
+    def db_drs(
+        self,
+        pressure: TableQuery[NDimension],
+        temperature: TableQuery[NDimension],
+        solution_gor: TableQuery[NDimension],
+    ) -> TableResult[NDimension] | None:
+        """
+        Oil formation volume factor derivative `∂Bo/∂Rs` at constant `P` and `T`, for
+        undersaturated oil whose `Rs` is a primary variable. See `_undersaturated_state_derivative`.
+
+        :param pressure: Pressure.
+        :param temperature: Temperature.
+        :param solution_gor: The oil's `Rs`.
+        :returns: `∂Bo/∂Rs` (`NaN` for saturated oil), or `None` for non-oil tables or when
+            there is no formation volume factor or bubble point.
+        """
+        if self._phase != FluidPhase.OIL or not self.has("formation_volume_factor"):
+            return None
+        return self._undersaturated_state_derivative(
+            value=lambda rs: self.formation_volume_factor(pressure, temperature, solution_gor=rs),
+            saturation_pressure=lambda rs: self.bubble_point_pressure(
+                temperature=temperature, solution_gor=rs
+            ),
+            pressure=pressure,
+            state=solution_gor,
+            state_floor=self._state_floor(self._data.solution_gas_to_oil_ratios, 1.0),
+        )
+
+    def dμ_drs(
+        self,
+        pressure: TableQuery[NDimension],
+        temperature: TableQuery[NDimension],
+        solution_gor: TableQuery[NDimension],
+    ) -> TableResult[NDimension] | None:
+        """
+        Oil viscosity derivative `∂μo/∂Rs` at constant `P` and `T`, for undersaturated oil
+        whose `Rs` is a primary variable. See `_undersaturated_state_derivative`.
+
+        :param pressure: Pressure.
+        :param temperature: Temperature.
+        :param solution_gor: The oil's `Rs`.
+        :returns: `∂μo/∂Rs` (`NaN` for saturated oil), or `None` for non-oil tables or when
+            there is no viscosity or bubble point.
+        """
+        if self._phase != FluidPhase.OIL or not self.has("viscosity"):
+            return None
+        return self._undersaturated_state_derivative(
+            value=lambda rs: self.viscosity(pressure, temperature, solution_gor=rs),
+            saturation_pressure=lambda rs: self.bubble_point_pressure(
+                temperature=temperature, solution_gor=rs
+            ),
+            pressure=pressure,
+            state=solution_gor,
+            state_floor=self._state_floor(self._data.solution_gas_to_oil_ratios, 1.0),
+        )
+
+    def dρ_drs(
+        self,
+        pressure: TableQuery[NDimension],
+        temperature: TableQuery[NDimension],
+        solution_gor: TableQuery[NDimension],
+    ) -> TableResult[NDimension] | None:
+        """
+        Oil density derivative `∂ρo/∂Rs` at constant `P` and `T`, for undersaturated oil whose
+        `Rs` is a primary variable. See `_undersaturated_state_derivative`.
+
+        :param pressure: Pressure.
+        :param temperature: Temperature.
+        :param solution_gor: The oil's `Rs`.
+        :returns: `∂ρo/∂Rs` (`NaN` for saturated oil), or `None` for non-oil tables or when
+            there is no density or bubble point.
+        """
+        if self._phase != FluidPhase.OIL or not self.has("density"):
+            return None
+        return self._undersaturated_state_derivative(
+            value=lambda rs: self.density(pressure, temperature, solution_gor=rs),
+            saturation_pressure=lambda rs: self.bubble_point_pressure(
+                temperature=temperature, solution_gor=rs
+            ),
+            pressure=pressure,
+            state=solution_gor,
+            state_floor=self._state_floor(self._data.solution_gas_to_oil_ratios, 1.0),
+        )
+
+    def db_drv(
+        self,
+        pressure: TableQuery[NDimension],
+        temperature: TableQuery[NDimension],
+        vaporized_oil_ratio: TableQuery[NDimension],
+    ) -> TableResult[NDimension] | None:
+        """
+        Gas formation volume factor derivative `∂Bg/∂Rv` at constant `P` and `T`, for
+        undersaturated (wet) gas whose `Rv` is a primary variable. See
+        `_undersaturated_state_derivative`.
+
+        :param pressure: Pressure.
+        :param temperature: Temperature.
+        :param vaporized_oil_ratio: The gas's `Rv`.
+        :returns: `∂Bg/∂Rv` (`NaN` for saturated gas), or `None` for non-gas tables or when
+            there is no formation volume factor or dew point.
+        """
+        if self._phase != FluidPhase.GAS or not self.has("formation_volume_factor"):
+            return None
+        return self._undersaturated_state_derivative(
+            value=lambda rv: self.formation_volume_factor(
+                pressure, temperature, vaporized_oil_ratio=rv
+            ),
+            saturation_pressure=lambda rv: self.dew_point_pressure(
+                temperature, vaporized_oil_ratio=rv
+            ),
+            pressure=pressure,
+            state=vaporized_oil_ratio,
+            state_floor=self._state_floor(self._data.vaporized_oil_ratios, 1e-6),
+        )
+
+    def dμ_drv(
+        self,
+        pressure: TableQuery[NDimension],
+        temperature: TableQuery[NDimension],
+        vaporized_oil_ratio: TableQuery[NDimension],
+    ) -> TableResult[NDimension] | None:
+        """
+        Gas viscosity derivative `∂μg/∂Rv` at constant `P` and `T`, for undersaturated (wet) gas
+        whose `Rv` is a primary variable. See `_undersaturated_state_derivative`.
+
+        :param pressure: Pressure.
+        :param temperature: Temperature.
+        :param vaporized_oil_ratio: The gas's `Rv`.
+        :returns: `∂μg/∂Rv` (`NaN` for saturated gas), or `None` for non-gas tables or when
+            there is no viscosity or dew point.
+        """
+        if self._phase != FluidPhase.GAS or not self.has("viscosity"):
+            return None
+        return self._undersaturated_state_derivative(
+            value=lambda rv: self.viscosity(pressure, temperature, vaporized_oil_ratio=rv),
+            saturation_pressure=lambda rv: self.dew_point_pressure(
+                temperature, vaporized_oil_ratio=rv
+            ),
+            pressure=pressure,
+            state=vaporized_oil_ratio,
+            state_floor=self._state_floor(self._data.vaporized_oil_ratios, 1e-6),
+        )
+
+    def dρ_drv(
+        self,
+        pressure: TableQuery[NDimension],
+        temperature: TableQuery[NDimension],
+        vaporized_oil_ratio: TableQuery[NDimension],
+    ) -> TableResult[NDimension] | None:
+        """
+        Gas density derivative `∂ρg/∂Rv` at constant `P` and `T`, for undersaturated (wet) gas
+        whose `Rv` is a primary variable. See `_undersaturated_state_derivative`.
+
+        :param pressure: Pressure.
+        :param temperature: Temperature.
+        :param vaporized_oil_ratio: The gas's `Rv`.
+        :returns: `∂ρg/∂Rv` (`NaN` for saturated gas), or `None` for non-gas tables or when
+            there is no density or dew point.
+        """
+        if self._phase != FluidPhase.GAS or not self.has("density"):
+            return None
+        return self._undersaturated_state_derivative(
+            value=lambda rv: self.density(pressure, temperature, vaporized_oil_ratio=rv),
+            saturation_pressure=lambda rv: self.dew_point_pressure(
+                temperature, vaporized_oil_ratio=rv
+            ),
+            pressure=pressure,
+            state=vaporized_oil_ratio,
+            state_floor=self._state_floor(self._data.vaporized_oil_ratios, 1e-6),
+        )
+
     def dpb_drs(
         self,
         solution_gor: TableQuery[NDimension],

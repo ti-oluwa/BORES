@@ -77,6 +77,23 @@ class PVTCache(typing.NamedTuple):
     dρg_dp: CellArray
     """Pressure derivative of gas density, dρg/dP."""
 
+    # Derivatives w.r.t. the cell's own dissolved/vaporized state, at constant P. They are what
+    # an undersaturated cell needs when its `Rs` (oil) or `Rv` (wet gas) is a primary variable.
+    # `NaN` for saturated cells (the state is not independent), for absent phases, and when the
+    # saturation pressure is frozen (the state is then not a variable).
+    dbo_drs: CellArray
+    """Derivative of oil formation volume factor w.r.t. `Rs`, dBo/dRs, at constant P."""
+    dμo_drs: CellArray
+    """Derivative of oil viscosity w.r.t. `Rs`, dμo/dRs, at constant P."""
+    dρo_drs: CellArray
+    """Derivative of oil density w.r.t. `Rs`, dρo/dRs, at constant P."""
+    dbg_drv: CellArray
+    """Derivative of gas formation volume factor w.r.t. `Rv`, dBg/dRv, at constant P."""
+    dμg_drv: CellArray
+    """Derivative of gas viscosity w.r.t. `Rv`, dμg/dRv, at constant P."""
+    dρg_drv: CellArray
+    """Derivative of gas density w.r.t. `Rv`, dρg/dRv, at constant P."""
+
     # Compressibilities (value only - c = -(1/B)(dB/dP) for oil/water,
     # 1/P - (1/z)(dz/dP) for gas; already what dB/dP-based Jacobian entries
     # would derive from, kept here mainly for output/diagnostics and timestep
@@ -183,6 +200,9 @@ def compute_pvt_cache(
     out: PVTCache | None = None,
     dtype: npt.DTypeLike = None,
     vaporized_oil_ratio: CellArray | None = None,
+    freeze_saturation_pressure: bool = False,
+    frozen_bubble_point_pressure: CellArray | None = None,
+    frozen_dew_point_pressure: CellArray | None = None,
 ) -> PVTCache:
     """
     Build (or refresh, in place) a `PVTCache` from the current cell state.
@@ -230,10 +250,23 @@ def compute_pvt_cache(
         undersaturated gas, capped at `Rv_sat(P, T)` for saturated gas. Gas
         `Bg`, `mu_g`, density and their derivatives are evaluated at it. `None`
         treats all gas as saturated (the dew-curve values). Ignored by dry-gas tables.
+    :param freeze_saturation_pressure: `False` (default): the saturation pressure follows the
+        cell's own `Rs` (`Pb(Rs, T)`) and `Rv` (`Pdew(Rv, T)`), which are primary variables
+        while undersaturated, so the `dBo/dRs`-style derivatives are filled in. `True`: the
+        saturation pressures are held at `frozen_bubble_point_pressure` and
+        `frozen_dew_point_pressure`; an undersaturated cell then keeps the `Rs`/`Rv` of its
+        frozen saturation pressure, `solution_gas_oil_ratio` and `vaporized_oil_ratio` are
+        ignored, and the `Rs`/`Rv` derivatives are `NaN` (they are not variables).
+    :param frozen_bubble_point_pressure: Shape `(n_cells,)` bubble-point pressure to hold when
+        `freeze_saturation_pressure`; required then if there is an oil table. See
+        `compute_saturation_pressures`.
+    :param frozen_dew_point_pressure: Shape `(n_cells,)` dew-point pressure to hold when
+        `freeze_saturation_pressure`. Without it the gas is treated as saturated (or dry).
     :return: The populated `PVTCache` - `out` itself if given, otherwise a
         newly allocated one. Always returned, never `None`.
     :raises ValueError: If `out` is given but sized for a different cell
-        count than `pressure`.
+        count than `pressure`, or if `freeze_saturation_pressure` is set without
+        `frozen_bubble_point_pressure` for a region with an oil table.
     """
     n_cells = len(pressure)
     if out is not None:
@@ -263,13 +296,24 @@ def compute_pvt_cache(
 
         oil = tables.oil
         if oil is not None:
-            is_saturated = oil.is_saturated(p, t, solution_gor=solution_gor_estimate)
-            if is_saturated is not None:
-                cache.is_saturated[mask] = np.atleast_1d(is_saturated)
-
-            bubble_point = oil.bubble_point_pressure(
-                temperature=t, solution_gor=solution_gor_estimate
-            )
+            if freeze_saturation_pressure:
+                if frozen_bubble_point_pressure is None:
+                    raise ValueError(
+                        "`frozen_bubble_point_pressure` is required when "
+                        "`freeze_saturation_pressure` is set."
+                    )
+                # The oil keeps the `Rs` of its frozen bubble point while undersaturated, which
+                # the tables derive from the bubble point when no `Rs` is given.
+                bubble_point = frozen_bubble_point_pressure[mask]
+                solution_gor_estimate = None  # type: ignore[assignment]
+                cache.is_saturated[mask] = p <= bubble_point
+            else:
+                is_saturated = oil.is_saturated(p, t, solution_gor=solution_gor_estimate)
+                if is_saturated is not None:
+                    cache.is_saturated[mask] = np.atleast_1d(is_saturated)
+                bubble_point = oil.bubble_point_pressure(
+                    temperature=t, solution_gor=solution_gor_estimate
+                )
 
             cache.oil_formation_volume_factor[mask] = oil.formation_volume_factor(  # type: ignore[arg-type]
                 p, t, solution_gor=solution_gor_estimate, bubble_point_pressure=bubble_point
@@ -309,9 +353,20 @@ def compute_pvt_cache(
 
             if bubble_point is not None:
                 cache.bubble_point_pressure[mask] = bubble_point
-            bubble_point_drs = oil.dpb_drs(solution_gor_estimate, t)
-            if bubble_point_drs is not None:
-                cache.dpb_drs[mask] = bubble_point_drs
+            if not freeze_saturation_pressure:
+                assert solution_gor_estimate is not None
+                bubble_point_drs = oil.dpb_drs(solution_gor_estimate, t)
+                if bubble_point_drs is not None:
+                    cache.dpb_drs[mask] = bubble_point_drs
+                # Undersaturated cells carry `Rs` as a primary variable: `NaN` for saturated ones
+                for field, derivative in (
+                    (cache.dbo_drs, oil.db_drs),
+                    (cache.dμo_drs, oil.dμ_drs),
+                    (cache.dρo_drs, oil.dρ_drs),
+                ):
+                    state_derivative = derivative(p, t, solution_gor_estimate)  # type: ignore[arg-type,var-annotated]
+                    if state_derivative is not None:
+                        field[mask] = state_derivative
 
         water = tables.water
         if water is not None:
@@ -329,7 +384,20 @@ def compute_pvt_cache(
 
         gas = tables.gas
         if gas is not None:
-            rv_state = vaporized_oil_ratio[mask] if vaporized_oil_ratio is not None else None
+            rv_state: CellArray | None
+            if freeze_saturation_pressure:
+                # An undersaturated gas keeps the `Rv` of its frozen dew point
+                rv_state = (
+                    gas.vaporized_oil_gas_ratio(frozen_dew_point_pressure[mask], t)  # type: ignore[assignment]
+                    if frozen_dew_point_pressure is not None
+                    else None
+                )
+            else:
+                rv_state = (
+                    typing.cast(CellArray, vaporized_oil_ratio[mask])
+                    if vaporized_oil_ratio is not None
+                    else None
+                )
             cache.gas_formation_volume_factor[mask] = gas.formation_volume_factor(  # type: ignore[arg-type]
                 p, t, vaporized_oil_ratio=rv_state
             )
@@ -370,6 +438,16 @@ def compute_pvt_cache(
             if dew_point is not None:
                 cache.dew_point_pressure[mask] = dew_point
 
+            if not freeze_saturation_pressure and rv_state is not None:
+                for gas_field, gas_derivative in (
+                    (cache.dbg_drv, gas.db_drv),
+                    (cache.dμg_drv, gas.dμ_drv),
+                    (cache.dρg_drv, gas.dρ_drv),
+                ):
+                    gas_state_derivative = gas_derivative(p, t, rv_state)  # type: ignore[arg-type,var-annotated]
+                    if gas_state_derivative is not None:
+                        gas_field[mask] = gas_state_derivative
+
             solubility = gas.solubility_in_water(p, t, salinity=s)
             if solubility is not None:
                 cache.water_gas_solubility_ratio[mask] = solubility
@@ -378,3 +456,52 @@ def compute_pvt_cache(
                 cache.drsw_dp[mask] = solubility_dp
 
     return cache
+
+
+def compute_saturation_pressures(
+    temperature: CellArray,
+    solution_gas_oil_ratio: CellArray,
+    pvt_region: npt.NDArray[np.integer],
+    pvt: PVT,
+    vaporized_oil_ratio: CellArray | None = None,
+    dtype: npt.DTypeLike | None = None,
+) -> tuple[CellArray, CellArray]:
+    """
+    Bubble-point and dew-point pressure of every cell at the given state, for use as the
+    frozen saturation pressures of `compute_pvt_cache(freeze_saturation_pressure=True)`.
+
+    Evaluate it once at the initial state. The bubble point is `Pb(Rs, T)` from the cell's
+    own `Rs`; the dew point is `Pdew(Rv, T)` from its own `Rv`.
+
+    :param temperature: Shape `(n_cells,)` cell temperature.
+    :param solution_gas_oil_ratio: Shape `(n_cells,)` `Rs`.
+    :param pvt_region: Shape `(n_cells,)` 1-based PVTNUM per cell.
+    :param pvt: `PVT` to evaluate against.
+    :param vaporized_oil_ratio: Optional shape `(n_cells,)` `Rv`. Without it there is no dew
+        point (`NaN`).
+    :param dtype: Output dtype. `bores.precision.get_dtype()` if not given.
+    :return: Two-tuple of the bubble-point and dew-point pressure arrays, `NaN` where a cell
+        has no such pressure (no oil or gas table, or no saturation-pressure table).
+    """
+    dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+    n_cells = len(temperature)
+    bubble_point = np.full(n_cells, np.nan, dtype=dtype)
+    dew_point = np.full(n_cells, np.nan, dtype=dtype)
+    for region in np.unique(pvt_region):
+        mask = pvt_region == region
+        tables = pvt.region(region).tables
+        t = temperature[mask]
+        if tables.oil is not None:
+            pb = tables.oil.bubble_point_pressure(  # type: ignore[var-annotated]
+                temperature=t, solution_gor=solution_gas_oil_ratio[mask]
+            )
+            if pb is not None:
+                bubble_point[mask] = pb
+
+        if tables.gas is not None and vaporized_oil_ratio is not None:
+            pdew = tables.gas.dew_point_pressure(  # type: ignore[var-annotated]
+                t, vaporized_oil_ratio=vaporized_oil_ratio[mask]
+            )
+            if pdew is not None:
+                dew_point[mask] = pdew
+    return bubble_point, dew_point
