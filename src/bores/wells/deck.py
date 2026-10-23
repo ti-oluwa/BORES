@@ -1556,7 +1556,9 @@ def load_summary_items(
             )
         for cell in requested:
             i, j, k = cell["i"], cell["j"], cell["k"]
-            if not (1 <= i <= dimensions.nx and 1 <= j <= dimensions.ny and 1 <= k <= dimensions.nz):
+            if not (
+                1 <= i <= dimensions.nx and 1 <= j <= dimensions.ny and 1 <= k <= dimensions.nz
+            ):
                 raise DeckParseError(
                     f"{mnemonic}: cell ({i}, {j}, {k}) is outside the {dimensions.nx} x "
                     f"{dimensions.ny} x {dimensions.nz} grid."

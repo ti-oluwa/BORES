@@ -910,9 +910,7 @@ class BlockVector(Summary["CompiledBlackOilModel"]):
         """
         return f"{self.mnemonic}:{self.i + 1},{self.j + 1},{self.k + 1}"
 
-    def get_value(
-        self, *, cell_index: Integer, workspace: "SimulationWorkspace"
-    ) -> Number:
+    def get_value(self, *, cell_index: Integer, workspace: "SimulationWorkspace") -> Number:
         """
         Reads this vector's value for one cell. Must be overridden.
 
@@ -935,7 +933,12 @@ class BlockVector(Summary["CompiledBlackOilModel"]):
         dimensions = model.reservoir.grid.dimensions
         if dimensions is None:
             raise SummaryError(f"{self.mnemonic}: the model's grid has no `i`, `j`, `k` layout.")
-        if not (0 <= self.i < dimensions.nx and 0 <= self.j < dimensions.ny and 0 <= self.k < dimensions.nz):
+        
+        if not (
+            0 <= self.i < dimensions.nx
+            and 0 <= self.j < dimensions.ny
+            and 0 <= self.k < dimensions.nz
+        ):
             raise SummaryError(
                 f"{self.key}: cell is outside the {dimensions.nx} x {dimensions.ny} x "
                 f"{dimensions.nz} grid."

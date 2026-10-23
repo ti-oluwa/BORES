@@ -86,7 +86,7 @@ solution reported as converged is checked against the true residual.
 """
 
 
-def _safe_inverse_diagonal(diagonal: npt.NDArray) -> npt.NDArray:
+def _invert_diagonal(diagonal: npt.NDArray) -> npt.NDArray:
     """
     Inverts a vector of diagonal entries, leaving unusable entries unscaled.
 
@@ -109,6 +109,27 @@ def _safe_inverse_diagonal(diagonal: npt.NDArray) -> npt.NDArray:
 def _flatten(vector: npt.NDArray) -> npt.NDArray:
     """Returns `vector` as one dimension, accepting the `(n, 1)` shape SciPy may pass."""
     return np.asarray(vector).reshape(-1)
+
+
+def _get_matrix_shape(A_csr: csr_array | csr_matrix) -> tuple[int, int]:
+    """Return the two-dimensional shape of a CSR matrix, validating its rank."""
+    shape = A_csr.shape
+    if len(shape) != 2:
+        raise ValidationError(f"Matrix must be two-dimensional, got shape {shape}.")
+    return typing.cast(tuple[int, int], shape)
+
+
+def _get_square_matrix_shape(A_csr: csr_array | csr_matrix) -> tuple[int, int]:
+    """Return a CSR matrix's shape, raising if it is not square."""
+    shape = _get_matrix_shape(A_csr)
+    if shape[0] != shape[1]:
+        raise ValidationError(f"Matrix must be square, got shape {shape}.")
+    return shape
+
+
+def _check_matrix_is_square(A_csr: csr_array | csr_matrix) -> None:
+    """Validate that a CSR matrix is square when its shape is not otherwise needed."""
+    _get_square_matrix_shape(A_csr)
 
 
 def invert_diagonal_blocks(
@@ -134,9 +155,8 @@ def invert_diagonal_blocks(
     if block_size < 1:
         raise ValidationError(f"`block_size` must be at least 1, got {block_size}.")
 
-    n = A_csr.shape[0]
-    if A_csr.shape[1] != n:
-        raise ValidationError(f"Matrix must be square, got shape {A_csr.shape}.")
+    shape = _get_square_matrix_shape(A_csr)
+    n = shape[0]
 
     number_of_blocks = -(-n // block_size)
     padded_size = number_of_blocks * block_size
@@ -170,7 +190,7 @@ def invert_diagonal_blocks(
                 failed[block_index] = True
 
     for failed_index in np.flatnonzero(failed):
-        inverses[failed_index] = np.diag(_safe_inverse_diagonal(np.diag(blocks[failed_index])))
+        inverses[failed_index] = np.diag(_invert_diagonal(np.diag(blocks[failed_index])))
     return inverses.astype(A_csr.dtype, copy=False)
 
 
@@ -189,14 +209,10 @@ def _apply_block_inverses(
         padded = np.zeros(padded_size, dtype=flat.dtype)
         padded[:n] = flat
         flat = padded
+
     subscripts = "nji,nj->ni" if transpose else "nij,nj->ni"
     result = np.einsum(subscripts, inverses, flat.reshape(number_of_blocks, block_size))
     return result.reshape(-1)[:n].reshape(np.shape(vector))
-
-
-def _check_square(A_csr: csr_array | csr_matrix) -> None:
-    if A_csr.shape[0] != A_csr.shape[1]:
-        raise ValidationError(f"Matrix must be square, got shape {A_csr.shape}.")
 
 
 def make_amg_preconditioner(
@@ -216,7 +232,7 @@ def make_amg_preconditioner(
     :param kwargs: Additional arguments for `pyamg.smoothed_aggregation_solver`.
     :return: A SciPy `LinearOperator` that represents the AMG preconditioner.
     """
-    _check_square(A_csr)
+    _check_matrix_is_square(A_csr)
     solver = pyamg.smoothed_aggregation_solver(A_csr.tocsr(), **kwargs)
     return solver.aspreconditioner(cycle=cycle)
 
@@ -233,14 +249,14 @@ def make_diagonal_preconditioner(
     :param A_csr: The coefficient matrix in CSR format.
     :return: A SciPy `LinearOperator` that represents the diagonal preconditioner.
     """
-    _check_square(A_csr)
-    inverse_diagonal = _safe_inverse_diagonal(A_csr.diagonal())
+    shape = _get_square_matrix_shape(A_csr)
+    inverse_diagonal = _invert_diagonal(A_csr.diagonal())
 
     def matvec(x: npt.NDArray) -> npt.NDArray:
         return (inverse_diagonal * _flatten(x)).reshape(np.shape(x))
 
     return LinearOperator(  # type: ignore[arg-type]
-        shape=A_csr.shape,
+        shape=shape,
         matvec=matvec,
         rmatvec=matvec,
         dtype=inverse_diagonal.dtype,
@@ -285,7 +301,7 @@ def make_block_jacobi_preconditioner(
     :raises ValidationError: If the matrix is not square or `block_size` is below one.
     """
     inverses = invert_diagonal_blocks(A_csr, block_size=block_size)
-    return _block_jacobi_operator(inverses, A_csr.shape)
+    return _block_jacobi_operator(inverses, _get_matrix_shape(A_csr))
 
 
 def make_ilu_preconditioner(A_csr: csr_array | csr_matrix, **kwargs: typing.Any) -> LinearOperator:
@@ -309,7 +325,7 @@ def make_ilu_preconditioner(A_csr: csr_array | csr_matrix, **kwargs: typing.Any)
     :raises ValidationError: If the matrix is not square.
     :raises PreconditionerError: If the factorization is numerically unusable.
     """
-    _check_square(A_csr)
+    shape = _get_square_matrix_shape(A_csr)
     A_csc = A_csr.tocsc()
     kwargs.setdefault("drop_tol", 1e-4)
     kwargs.setdefault("fill_factor", 10)
@@ -322,16 +338,16 @@ def make_ilu_preconditioner(A_csr: csr_array | csr_matrix, **kwargs: typing.Any)
         return ilu_factor.solve(_flatten(x)).reshape(np.shape(x))
 
     def rmatvec(x: npt.NDArray) -> npt.NDArray:
-        return ilu_factor.solve(_flatten(x), trans="T").reshape(np.shape(x))
+        return ilu_factor.solve(_flatten(x), trans="T").reshape(np.shape(x))  # type: ignore[arg-type]
 
     operator = LinearOperator(  # type: ignore[arg-type]
-        shape=A_csc.shape,
+        shape=shape,
         matvec=matvec,
         rmatvec=rmatvec,
         dtype=A_csc.dtype,
     )
 
-    probe = np.random.default_rng(0).standard_normal(A_csc.shape[0]).astype(A_csc.dtype)
+    probe = np.random.default_rng(0).standard_normal(shape[0]).astype(A_csc.dtype)
     probe_norm = np.linalg.norm(probe)
     with np.errstate(all="ignore"):
         correction = operator.matvec(probe)
@@ -370,12 +386,12 @@ def make_polynomial_preconditioner(
     :return: A SciPy `LinearOperator` that represents the polynomial preconditioner.
     :raises ValidationError: If the matrix is not square or `degree` is negative.
     """
-    _check_square(A_csr)
+    _check_matrix_is_square(A_csr)
     if degree < 0:
         raise ValidationError(f"`degree` must be zero or greater, got {degree}.")
 
     A = A_csr.tocsr()
-    inverse_diagonal = _safe_inverse_diagonal(A.diagonal())
+    inverse_diagonal = _invert_diagonal(A.diagonal())
     row_of_entry = np.repeat(np.arange(A.shape[0]), np.diff(A.indptr))
     scaled_row_sums = np.bincount(
         row_of_entry,
@@ -477,8 +493,8 @@ def make_cpr_preconditioner(
     :raises PreconditionerError: If AMG or smoother construction fails.
     """
     A_csr = A_csr.tocsr()
-    _check_square(A_csr)
-    number_of_equations = A_csr.shape[0]
+    matrix_shape = _get_square_matrix_shape(A_csr)
+    number_of_equations = matrix_shape[0]
     if n_variables_per_cell < 1:
         raise ValidationError(
             f"`n_variables_per_cell` must be at least 1, got {n_variables_per_cell}."
@@ -528,7 +544,9 @@ def make_cpr_preconditioner(
         )
         pressure_matrix = (restriction @ A_csr)[:, pressure_dof_indices].tocsr()
     else:
-        pressure_matrix = A_csr[pressure_dof_indices, :][:, pressure_dof_indices].tocsr()
+        pressure_matrix = csr_matrix(A_csr)[pressure_dof_indices, :][
+            :, pressure_dof_indices
+        ].tocsr()
 
     try:
         M_amg = make_amg_preconditioner(pressure_matrix, **amg_kwargs)  # type: ignore
@@ -537,7 +555,7 @@ def make_cpr_preconditioner(
 
     if smoother == "block_jacobi":
         assert block_inverses is not None
-        M_smoother = _block_jacobi_operator(block_inverses, A_csr.shape)
+        M_smoother = _block_jacobi_operator(block_inverses, matrix_shape)
     else:
         try:
             M_smoother = make_ilu_preconditioner(A_csr, **ilu_kwargs)
@@ -562,7 +580,7 @@ def make_cpr_preconditioner(
         return (correction + M_smoother.matvec(remaining)).reshape(np.shape(residual))
 
     return LinearOperator(  # type: ignore[arg-type]
-        shape=A_csr.shape, matvec=matvec, dtype=A_csr.dtype
+        shape=matrix_shape, matvec=matvec, dtype=A_csr.dtype
     )
 
 
@@ -590,6 +608,7 @@ def _spsolve(
             x = spsolve(A.tocsc(), b)
         except (MatrixRankWarning, RuntimeError):
             return np.full(np.shape(b), np.nan, dtype=np.result_type(b, np.float32)), 1
+
     if not np.all(np.isfinite(x)):
         return x, 1  # type: ignore[return-value]
     return x, 0  # type: ignore[return-value]
@@ -714,7 +733,7 @@ def _qmr(
         b,
         x0=x0,
         M1=M,
-        M2=right_preconditioner,
+        M2=right_preconditioner,  # type: ignore[arg-type]
         rtol=rtol,
         atol=atol,
         maxiter=1000 if maxiter is None else maxiter,
@@ -841,7 +860,7 @@ class CachedPreconditionerFactory:
                 self._cached_A_data = A_csr.data.copy()
                 self._cached_A_indices = A_csr.indices.copy()
                 self._cached_A_indptr = A_csr.indptr.copy()
-                self._cached_A_shape = A_csr.shape
+                self._cached_A_shape = _get_matrix_shape(A_csr)
                 self._call_count = 0
             else:
                 logger.debug(
@@ -874,7 +893,7 @@ class CachedPreconditionerFactory:
 
         # Different system: the cached preconditioner is meaningless for it
         if (
-            A_csr.shape != self._cached_A_shape
+            _get_matrix_shape(A_csr) != self._cached_A_shape
             or A_csr.data.shape != self._cached_A_data.shape
             or not np.array_equal(A_csr.indptr, self._cached_A_indptr)
             or not np.array_equal(A_csr.indices, self._cached_A_indices)
@@ -1244,11 +1263,11 @@ def solve_linear_system(
     solver_functions = _get_solver_function(solver)
 
     b = np.asarray(b)
-    if A_csr.shape[0] != A_csr.shape[1]:
-        raise ValidationError(f"Matrix must be square, got shape {A_csr.shape}.")
-    if b.shape != (A_csr.shape[0],):
+    matrix_shape = _get_square_matrix_shape(A_csr)
+    number_of_equations = matrix_shape[0]
+    if b.shape != (number_of_equations,):
         raise ValidationError(
-            f"Right-hand side has shape {b.shape}, expected {(A_csr.shape[0],)}."
+            f"Right-hand side has shape {b.shape}, expected {(number_of_equations,)}."
         )
     if not np.all(np.isfinite(b)):
         raise ValidationError("Right-hand side contains non-finite values.")
@@ -1325,11 +1344,10 @@ def solve_linear_system(
     if not fallback_to_direct or is_direct:
         raise SolverError("All solvers failed to produce an acceptable solution.")
 
-    n = A_csr.shape[0]
     logger.info("Falling back to direct solver (spsolve).")
-    if n > 100000:
+    if number_of_equations > 100000:
         logger.warning(
-            f"Direct solver on large system ({n:,} DOFs) may be slow and consume excessive "
+            f"Direct solver on large system ({number_of_equations:,} DOFs) may be slow and consume excessive "
             f"memory. Consider improving iterative solver settings or preconditioner."
         )
 
@@ -1405,13 +1423,14 @@ def scale_linear_system(
         - scaled residual (ndarray)
         - column scaling vector (ndarray or None)
 
-        The column_scaling_vector must be used to unscale the solution:
+        The `column_scaling_vector` must be used to unscale the solution:
             dx = dx_scaled * column_scaling_vector
     :raises ValidationError: If a scaling method is unknown.
     """
     J = jacobian_csr.tocsr(copy=True)
     if not np.issubdtype(J.dtype, np.floating):
         J = J.astype(np.float64)
+
     R = residual_vector
     n = J.shape[0]
     row_lengths = np.diff(J.indptr)
