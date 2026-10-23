@@ -269,7 +269,11 @@ class SimulationCase:
         :param interpolation_method: Interpolation method for `Rock.from_deck` and `PVT.from_deck`.
         :param salinity: Optional per-cell water salinity (ppm NaCl) for the simulation.
         :param hysteresis: Optional hysteresis history/configuration for the simulation workspace.
-        :param unit_system: Unit system for the case. Defaults to the deck's unit system.
+        :param unit_system: Unit system the case is expressed in: the model, the initial state, the
+            run spec, the schedule's event times and values, and the time targets. Defaults to the
+            deck's unit system. A different one converts everything read from the deck. Values you
+            pass in that are plain numbers, namely `temperature` and `compiled_at`, stay in the
+            deck's unit system. Objects that carry their own unit system are converted as needed.
         :param on_inverted_cells: Policy to apply when the deck grid contains inverted cells.
             Forwarded to `Grid.from_deck`.
         :param extra_time_targets: Custom times the run must land on, besides the deck's report
@@ -378,7 +382,11 @@ def load_case(
     :param interpolation_method: Interpolation method for `Rock.from_deck` and `PVT.from_deck`.
     :param salinity: Optional per-cell water salinity (ppm NaCl) for the simulation.
     :param hysteresis: Optional hysteresis history/configuration for the simulation workspace.
-    :param unit_system: Unit system for the case. Defaults to the deck's unit system.
+    :param unit_system: Unit system the case is expressed in: the model, the initial state, the
+        run spec, the schedule's event times and values, and the time targets. Defaults to the
+        deck's unit system. A different one converts everything read from the deck. Values you
+        pass in that are plain numbers, namely `temperature` and `compiled_at`, stay in the
+        deck's unit system. Objects that carry their own unit system are converted as needed.
     :param on_inverted_cells: Policy to apply when the deck grid contains inverted cells.
         Forwarded to `Grid.from_deck`.
     :param dtype: Array dtype for every buffer. Defaults to `bores.precision.get_dtype()`.
@@ -393,7 +401,8 @@ def load_case(
         original exception is chained as the cause.
     """
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
-    unit_system = unit_system if unit_system is not None else deck_file.unit_system
+    deck_unit_system = deck_file.unit_system
+    unit_system = unit_system if unit_system is not None else deck_unit_system
     runspec = (
         runspec.convert(unit_system) if runspec is not None else RunSpec(unit_system=unit_system)
     )
@@ -401,9 +410,9 @@ def load_case(
         temperature = Temperature.from_deck(deck_file, dtype=dtype)
     else:
         temperature = (
-            temperature.convert(unit_system)
+            temperature.convert(deck_unit_system)
             if isinstance(temperature, Temperature)
-            else Temperature(temperature, unit_system=unit_system)
+            else Temperature(temperature, unit_system=deck_unit_system)
         )
 
     try:
@@ -493,7 +502,7 @@ def load_case(
         raise CaseLoadError(f"Failed to load boundary conditions from {deck_file!r}.") from exc
 
     if boundary_conditions is not None:
-        boundary_conditions = boundary_conditions.convert(unit_system)
+        boundary_conditions = boundary_conditions.convert(deck_unit_system)
         resolved_boundary_conditions = (
             resolved_boundary_conditions.override(boundary_conditions)
             if resolved_boundary_conditions is not None
@@ -513,6 +522,7 @@ def load_case(
             deck_file,
             compiled_at=compiled_at,
             load_summary=load_summary,
+            unit_system=unit_system,
         )
     except Exception as exc:
         raise CaseLoadError(f"Failed to load schedule from {deck_file!r}.") from exc
@@ -546,7 +556,7 @@ def load_case(
             search_radius=search_radius,
             dtype=dtype,
         ),
-        initial_state=initial_state,
+        initial_state=initial_state.convert(unit_system),
         runspec=runspec,
         schedule=schedule,
         time_targets=time_targets,

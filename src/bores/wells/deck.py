@@ -19,6 +19,7 @@ from bores.schedule.events import AllOf, AnyOf, ComparisonOperator, TimeEvent, T
 from bores.schedule.summary import RecordSummary, Summary
 from bores.timestep.targets import TimeTargets
 from bores.types import FluidPhase, Number, UnitSystem
+from bores.units import get_conversion_factors
 from bores.wells import summary as ws
 from bores.wells.base import CompletionStatus, Perforation, Well, Wells, WellStatus, WellType
 from bores.wells.compile import LimitKind
@@ -1472,7 +1473,7 @@ def get_fluid_in_place_regions(deck_file: DeckFile) -> list[int]:
 
 
 def load_summary_items(
-    deck_file: DeckFile, *, compiled_at: float = 0.0
+    deck_file: DeckFile, *, compiled_at: float = 0.0, unit_system: UnitSystem | None = None
 ) -> list[ScheduleItem["CompiledBlackOilModel"]]:
     """
     Builds one `ScheduleItem` per report time from every summary-vector
@@ -1494,6 +1495,8 @@ def load_summary_items(
     :param compiled_at: The point on the schedule clock the model this
         schedule will run against was compiled at, in the deck's time
         unit. Only report times strictly after this become items.
+    :param unit_system: The unit system the items' times are expressed in. Defaults to the
+        deck's own.
     :returns: One `ScheduleItem` per qualifying report time, each
         wrapping the same `RecordSummary` action, carrying every
         requested vector.
@@ -1522,10 +1525,12 @@ def load_summary_items(
         return []
 
     action = RecordSummary(quantities=quantities)
-    report_times = deck_file.report_times
+    time_factor = get_conversion_factors(
+        deck_file.unit_system, unit_system or deck_file.unit_system
+    )["time"]
     return [
-        ScheduleItem(event=TimeEvent(at=time), action=action, name=f"summary@{time}")
-        for time in report_times
+        ScheduleItem(event=TimeEvent(at=time * time_factor), action=action, name=f"summary@{time}")
+        for time in deck_file.report_times
         if time > compiled_at
     ]
 
@@ -1573,6 +1578,7 @@ def load_schedule(
     *,
     compiled_at: float = 0.0,
     load_summary: bool = True,
+    unit_system: UnitSystem | None = None,
 ) -> Schedule["CompiledBlackOilModel"]:
     """
     Builds a `Schedule[CompiledBlackOilModel]` from every well-editing
@@ -1624,10 +1630,15 @@ def load_schedule(
         unit. Only events strictly after this become actions.
     :param load_summary: Whether to add scheduled summary-vector recording
         items from the deck's `SUMMARY` section.
+    :param unit_system: The unit system the schedule will run against. Every event time and every
+        rate, pressure and ratio the actions carry is expressed in it. Defaults to the deck's own.
     :returns: A `Schedule[CompiledBlackOilModel]`, one rule per
         qualifying record, sorted by `schedule_time`.
     """
-    unit_system = deck_file.unit_system
+    deck_unit_system = deck_file.unit_system
+    target_unit_system = unit_system if unit_system is not None else deck_unit_system
+    factors = get_conversion_factors(deck_unit_system, target_unit_system)
+    time_factor = factors["time"]
     items: list[ScheduleItem[CompiledBlackOilModel]] = []
     empty: list[dict[str, typing.Any]] = []
 
@@ -1641,7 +1652,7 @@ def load_schedule(
         action = ActivateWells(well_names=(record["well"],))
         items.append(
             ScheduleItem(
-                event=TimeEvent(at=schedule_time),
+                event=TimeEvent(at=schedule_time * time_factor),
                 action=action,
                 name=f"welspecs:{record['well']}@{schedule_time}",
             )
@@ -1662,7 +1673,7 @@ def load_schedule(
         )
         items.append(
             ScheduleItem(
-                event=TimeEvent(at=schedule_time),
+                event=TimeEvent(at=schedule_time * time_factor),
                 action=action,
                 name=f"welopen:{record['well']}@{schedule_time}",
             )
@@ -1683,7 +1694,7 @@ def load_schedule(
         )
         items.append(
             ScheduleItem(
-                event=TimeEvent(at=schedule_time),
+                event=TimeEvent(at=schedule_time * time_factor),
                 action=action,
                 name=f"wpimult:{record['well']}@{schedule_time}",
             )
@@ -1697,10 +1708,11 @@ def load_schedule(
             well_names=(record["well"],),
             control_mode=WellTargetMode(record["control_mode"]),
             value=record.get("value"),
+            unit_system=deck_unit_system,
         )
         items.append(
             ScheduleItem(
-                event=TimeEvent(at=schedule_time),
+                event=TimeEvent(at=schedule_time * time_factor),
                 action=action,
                 name=f"weltarg:{record['well']}@{schedule_time}",
             )
@@ -1738,7 +1750,7 @@ def load_schedule(
                 SetLimits(
                     well_names=(well_name,),
                     kinds=(LimitKind.THP,),
-                    min_values=record["new_thp_limit"],
+                    min_values=record["new_thp_limit"] * factors["pressure"],
                 )
             )
         action = actions[0] if len(actions) == 1 else RunSequence(actions=actions)
@@ -1751,7 +1763,12 @@ def load_schedule(
                     quantity=WLIFT_TRIGGER_QUANTITIES[record["trigger_phase"]],
                     surface=True,
                     op=ComparisonOperator.LT,
-                    threshold=record["trigger_limit"],
+                    threshold=record["trigger_limit"]
+                    * (
+                        factors["gas_surface_rate"]
+                        if WLIFT_TRIGGER_QUANTITIES[record["trigger_phase"]] is RateQuantity.GAS
+                        else factors["liquid_surface_rate"]
+                    ),
                 )
             )
         if not np.isclose(record["water_cut_limit"], 0.0):
@@ -1767,13 +1784,13 @@ def load_schedule(
                 GasOilRatioThreshold(
                     well_name=well_name,
                     op=ComparisonOperator.GT,
-                    threshold=record["gas_oil_ratio_limit"],
+                    threshold=record["gas_oil_ratio_limit"] * factors["gas_oil_ratio"],
                 )
             )
 
         event: Event
         if not triggers:
-            event = TimeEvent(at=schedule_time)
+            event = TimeEvent(at=schedule_time * time_factor)
         else:
             # A trigger is live from this record until the deck next changes to the well's lift
             # settings (a later `WLIFT` or `WCONPROD` for it). The new settings persist in the
@@ -1788,7 +1805,8 @@ def load_schedule(
             event = AllOf(
                 events=(
                     TimeWindowEvent(
-                        start=schedule_time, end=min(later_changes) if later_changes else None
+                        start=schedule_time * time_factor,
+                        end=min(later_changes) * time_factor if later_changes else None,
                     ),
                     triggers[0] if len(triggers) == 1 else AnyOf(events=triggers),
                 )
@@ -1805,7 +1823,9 @@ def load_schedule(
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
-        control = load_producer_control_from_record(record, unit_system=unit_system)
+        control = load_producer_control_from_record(record, unit_system=deck_unit_system).convert(
+            target_unit_system
+        )
         action = SetWellControls(
             well_names=(record["well"],),
             mode=control.mode,
@@ -1815,14 +1835,14 @@ def load_schedule(
         )
         items.append(
             ScheduleItem(
-                event=TimeEvent(at=schedule_time),
+                event=TimeEvent(at=schedule_time * time_factor),
                 action=action,
                 name=f"wconprod:{record['well']}@{schedule_time}",
             )
         )
         items.append(
             ScheduleItem(
-                event=TimeEvent(at=schedule_time),
+                event=TimeEvent(at=schedule_time * time_factor),
                 action=SetWellLift(
                     well_name=record["well"],
                     vfp_table=control.vfp_table or 0,
@@ -1846,7 +1866,7 @@ def load_schedule(
             )
             items.append(
                 ScheduleItem(
-                    event=TimeEvent(at=schedule_time),
+                    event=TimeEvent(at=schedule_time * time_factor),
                     action=limit_action,
                     name=f"wconprod-{kind.name.lower()}limit:{record['well']}@{schedule_time}",
                 )
@@ -1856,7 +1876,9 @@ def load_schedule(
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
-        control = load_injector_control_from_record(record, unit_system=unit_system)
+        control = load_injector_control_from_record(record, unit_system=deck_unit_system).convert(
+            target_unit_system
+        )
         action = SetWellControls(
             well_names=(record["well"],),
             mode=control.mode,
@@ -1867,14 +1889,14 @@ def load_schedule(
         )
         items.append(
             ScheduleItem(
-                event=TimeEvent(at=schedule_time),
+                event=TimeEvent(at=schedule_time * time_factor),
                 action=action,
                 name=f"wconinje:{record['well']}@{schedule_time}",
             )
         )
         items.append(
             ScheduleItem(
-                event=TimeEvent(at=schedule_time),
+                event=TimeEvent(at=schedule_time * time_factor),
                 action=SetWellLift(well_name=record["well"], vfp_table=control.vfp_table or 0),
                 name=f"wconinje-lift:{record['well']}@{schedule_time}",
             )
@@ -1894,7 +1916,7 @@ def load_schedule(
             )
             items.append(
                 ScheduleItem(
-                    event=TimeEvent(at=schedule_time),
+                    event=TimeEvent(at=schedule_time * time_factor),
                     action=limit_action,
                     name=f"wconinje-{kind.name.lower()}limit:{record['well']}@{schedule_time}",
                 )
@@ -1904,7 +1926,10 @@ def load_schedule(
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
-        for limit in load_economic_limits_from_record(record, unit_system=unit_system):
+        for limit in (
+            limit.convert(target_unit_system)
+            for limit in load_economic_limits_from_record(record, unit_system=deck_unit_system)
+        ):
             action = SetLimits(
                 well_names=(record["well"],),
                 kinds=(LimitKind.ECONOMIC,),
@@ -1916,7 +1941,7 @@ def load_schedule(
             )
             items.append(
                 ScheduleItem(
-                    event=TimeEvent(at=schedule_time),
+                    event=TimeEvent(at=schedule_time * time_factor),
                     action=action,
                     name=f"wecon:{record['well']}:{limit.quantity}@{schedule_time}",
                 )
@@ -1926,7 +1951,12 @@ def load_schedule(
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
-        for limit in load_group_economic_limits_from_record(record, unit_system=unit_system):
+        for limit in (
+            limit.convert(target_unit_system)
+            for limit in load_group_economic_limits_from_record(
+                record, unit_system=deck_unit_system
+            )
+        ):
             action = SetGroupLimit(
                 group_name=record["group"],
                 quantity=limit.quantity,
@@ -1937,7 +1967,7 @@ def load_schedule(
             )
             items.append(
                 ScheduleItem(
-                    event=TimeEvent(at=schedule_time),
+                    event=TimeEvent(at=schedule_time * time_factor),
                     action=action,
                     name=f"gecon:{record['group']}:{limit.quantity}@{schedule_time}",
                 )
@@ -1956,13 +1986,15 @@ def load_schedule(
         )
         items.append(
             ScheduleItem(
-                event=TimeEvent(at=schedule_time),
+                event=TimeEvent(at=schedule_time * time_factor),
                 action=action,
                 name=f"compdat:{record['well']}@{schedule_time}",
             )
         )
 
     if load_summary:
-        items.extend(load_summary_items(deck_file, compiled_at=compiled_at))
+        items.extend(
+            load_summary_items(deck_file, compiled_at=compiled_at, unit_system=target_unit_system)
+        )
     items.sort(key=get_item_start_time)
     return Schedule(items=tuple(items))

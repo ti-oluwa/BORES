@@ -7,7 +7,10 @@ import numpy as np
 from typing_extensions import NamedTuple, Self
 
 from bores.types import (
+    IntArray,
     Integer,
+    IntOrArray,
+    NDimension,
     NumberArray,
     OneDimension,
     T,
@@ -42,17 +45,38 @@ class GridDimensions(NamedTuple):
         """Total number of cells `nx * ny * nz`."""
         return self.nx * self.ny * self.nz
 
-    def flat_index(self, i: Integer, j: Integer, k: Integer) -> Integer:
+    @typing.overload
+    def flat_index(self, i: Integer, j: Integer, k: Integer) -> Integer: ...
+
+    @typing.overload
+    def flat_index(
+        self, i: IntArray[NDimension], j: IntOrArray[NDimension], k: IntOrArray[NDimension]
+    ) -> IntArray[NDimension]: ...
+
+    @typing.overload
+    def flat_index(
+        self, i: IntOrArray[NDimension], j: IntArray[NDimension], k: IntOrArray[NDimension]
+    ) -> IntArray[NDimension]: ...
+
+    @typing.overload
+    def flat_index(
+        self, i: IntOrArray[NDimension], j: IntOrArray[NDimension], k: IntArray[NDimension]
+    ) -> IntArray[NDimension]: ...
+
+    def flat_index(self, i, j, k):
         """
         Convert 0-based `(i, j, k)` to a flat index in Eclipse's natural
         ordering (`i` fastest, `k` slowest):
 
         `index = i + j*nx + k*nx*ny`.
 
-        :param i: 0-based x index.
-        :param j: 0-based y index.
-        :param k: 0-based z index.
-        :returns: Flat cell index.
+        Works on single indices and on arrays alike. When any of the three is an array, the
+        result is an array of the same shape.
+
+        :param i: 0-based x index or indices.
+        :param j: 0-based y index or indices.
+        :param k: 0-based z index or indices.
+        :returns: Flat cell index or indices.
         """
         return i + j * self.nx + k * self.nx * self.ny
 
@@ -72,6 +96,24 @@ class GridDimensions(NamedTuple):
         j = int((flat // self.nx) % self.ny)
         k = int(flat // (self.nx * self.ny))
         return i, j, k
+
+    def ijk_indices(
+        self, flat: IntArray[NDimension]
+    ) -> tuple[IntArray[NDimension], IntArray[NDimension], IntArray[NDimension]]:
+        """
+        Convert flat indices to 0-based `(i, j, k)` indices, for any number of cells at once.
+
+        Given the flat indices were generated in Eclipse's natural ordering
+        (`i` fastest, `k` slowest): `index = i + j*nx + k*nx*ny`.
+
+        :param flat: Flat cell indices, of any shape.
+        :returns: Arrays `(i, j, k)`, each with the shape of `flat`.
+        """
+        # Integer arithmetic keeps the shape of `flat`, which NumPy's type stubs do not express
+        return typing.cast(
+            tuple[IntArray[NDimension], IntArray[NDimension], IntArray[NDimension]],
+            (flat % self.nx, (flat // self.nx) % self.ny, flat // (self.nx * self.ny)),
+        )
 
 
 @attrs.frozen(slots=True)

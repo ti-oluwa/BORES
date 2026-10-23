@@ -10,6 +10,7 @@ from scipy.sparse.linalg import LinearOperator  # type: ignore[import-untyped]
 from typing_extensions import Self, TypedDict
 
 __all__ = [
+    "AnyDimensions",
     "ArrayLike",
     "CapillaryPressures",
     "Coordinates",
@@ -78,6 +79,8 @@ class UnitSystem(enum.Enum):
 NDimension = typing.TypeVar("NDimension", bound=tuple[int, ...])
 Coordinates = typing.TypeVar("Coordinates", bound=tuple[int, ...])
 
+AnyDimensions: TypeAlias = tuple[int, ...]
+"""Any number of dimensions, for arrays whose shape is not tied to that of an input"""
 ThreeDimensions: TypeAlias = tuple[int, int, int]
 """3D indices"""
 TwoDimensions: TypeAlias = tuple[int, int]

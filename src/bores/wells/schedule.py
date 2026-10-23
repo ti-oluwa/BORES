@@ -20,7 +20,10 @@ from bores.types import (
     NumberArray,
     NumberOrArray,
     OneDimension,
+    UnitConversionFactors,
+    UnitSystem,
 )
+from bores.units import get_conversion_factors
 from bores.wells.base import CompletionStatus, WellStatus
 from bores.wells.compile import (
     UNSET_INT,
@@ -818,6 +821,29 @@ class SetWellControls(Action["CompiledBlackOilModel"]):
         return model
 
 
+def get_target_conversion_factor(
+    *,
+    factors: UnitConversionFactors,
+    target_field: str,
+    deck_mode: str,
+    injected_phase: FluidPhase | None,
+) -> Number:
+    """
+    :param factors: Conversion factors from the unit system a value is in to the one it needs.
+    :param target_field: The control field the value is for: `target_rate`, `target_bhp` or `target_thp`.
+    :param deck_mode: The `WELTARG` control mode, such as `ORAT` or `RESV`.
+    :param injected_phase: The phase an injector injects, or `None` for a producer.
+    :returns: The factor that converts that value.
+    """
+    if target_field != "target_rate":
+        return factors["pressure"]
+    if deck_mode == "RESV":
+        return factors["reservoir_rate"]
+    if deck_mode == "GRAT" or (deck_mode == "RATE" and injected_phase is FluidPhase.GAS):
+        return factors["gas_surface_rate"]
+    return factors["liquid_surface_rate"]
+
+
 @attrs.frozen(kw_only=True, slots=True)
 class SetWellTargets(Action["CompiledBlackOilModel"]):
     """
@@ -845,6 +871,11 @@ class SetWellTargets(Action["CompiledBlackOilModel"]):
     sequence matching `well_names` gives each well its own value.
     `None` (for a well, or for all of them) is only valid when that
     well's own `control_mode` is `GROUP`."""
+
+    unit_system: UnitSystem | None = None
+    """The unit system `value` is expressed in. It is converted to the model's own unit system when
+    the action runs, so a value from a deck in one unit system works against a model in another.
+    `None` means `value` is already in the model's unit system."""
 
     def __call__(
         self, model: "CompiledBlackOilModel", context: ScheduleContext
@@ -895,13 +926,23 @@ class SetWellTargets(Action["CompiledBlackOilModel"]):
             target_field = WELTARG_TARGET_FIELD[deck_mode]
             if target_field is None:
                 continue  # GROUP: only the mode changes
-            one_value = values[index] if per_well_value else values
-            if one_value is None:
+
+            value = values[index] if per_well_value else values
+            if value is None:
                 raise ValidationError(
                     f"Well {well_name!r} names control mode {one_mode.name}, which needs "
                     "a value, but none was given."
                 )
-            by_target_field.setdefault(target_field, []).append((well_row, one_value))
+            if self.unit_system is not None and self.unit_system != model.unit_system:
+                value = float(typing.cast(Number, value)) * get_target_conversion_factor(
+                    factors=get_conversion_factors(self.unit_system, model.unit_system),
+                    target_field=target_field,
+                    deck_mode=deck_mode,
+                    injected_phase=controls.get_injected_phase(well_row=well_row)
+                    if is_injector
+                    else None,
+                )
+            by_target_field.setdefault(target_field, []).append((well_row, value))
 
         controls.set_control_mode(well_row=well_rows, mode=resolved_modes)
         for target_field, pairs in by_target_field.items():
