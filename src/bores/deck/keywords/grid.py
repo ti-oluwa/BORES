@@ -34,6 +34,7 @@ __all__ = [
     "DZV",
     "FAULTS",
     "GRIDUNIT",
+    "INIT",
     "MAPAXES",
     "MAPUNITS",
     "MULTFLT",
@@ -249,6 +250,15 @@ Fields:
 
 - `unit`: length unit of the `MAPAXES` map coordinates, one of `METRES`,
     `FEET` or `CM`.
+"""
+
+INIT = FlagKeyword("INIT")
+"""
+`INIT` - request the initial grid properties file (static cell properties such as
+porosity, permeability, and transmissibility multipliers) as simulation output.
+
+Bare/nullary keyword (no data section). `parse` returns `True` if present in the
+deck, `False` otherwise. It does not change the simulation itself.
 """
 
 PINCHOUT = FlagKeyword("PINCHOUT")

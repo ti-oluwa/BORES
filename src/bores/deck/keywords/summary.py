@@ -44,6 +44,16 @@ data, not just the wells workspace `bores.wells.summary` reads. Real
 reservoir-engineering work this module doesn't have the pieces for yet,
 flagged rather than rushed.
 
+**Block vectors** (one series per listed grid cell, given as `I J K /` lines closed
+by a final `/`):
+
+- `BPR` / `BPRESSUR`: oil phase pressure in the cell.
+- `BGSAT` / `BSGAS`: gas saturation in the cell.
+- `BOSAT` / `BSOIL`: oil saturation in the cell.
+- `BWSAT` / `BSWAT`: water saturation in the cell.
+- `BRS` / `BRV`: dissolved gas-oil ratio / vaporized oil-gas ratio in the cell.
+- `BOKR` / `BWKR` / `BGKR`: oil/water/gas relative permeability in the cell.
+
 **Reporting controls** (`RPTRST` / `RPTSCHED`) configure restart-file /
 print-summary mnemonics rather than naming a result vector; they are kept
 in this module because they only ever appear in the SUMMARY (and
@@ -52,10 +62,23 @@ SCHEDULE) sections and share no shape with the vector selectors above.
 
 from bores.datastructures import GridDimensions
 from bores.deck.core import Deck, DeckParseError, tokenize
-from bores.deck.keywords.base import Keyword
+from bores.deck.keywords.base import Field, Keyword, RepeatedRecordKeyword
 from bores.deck.operators import Operation
 
 __all__ = [
+    "BGKR",
+    "BGSAT",
+    "BOKR",
+    "BOSAT",
+    "BPR",
+    "BPRESSUR",
+    "BRS",
+    "BRV",
+    "BSGAS",
+    "BSOIL",
+    "BSWAT",
+    "BWKR",
+    "BWSAT",
     "FGIR",
     "FGIT",
     "FGOR",
@@ -253,6 +276,130 @@ RGIP = SummaryVectorKeyword("RGIP")
 
 RWIP = SummaryVectorKeyword("RWIP")
 """`RWIP [region1 ...] /` - reservoir water in place, per region (see `ROIP`)."""
+
+
+def block_vector(name: str) -> RepeatedRecordKeyword[int]:
+    """
+    Build a `SUMMARY`-section block vector selector.
+
+    Block vectors list the grid cells to report, one `I J K /` line per cell, closed
+    by a final `/`.
+
+    :param name: Keyword name (for example `"BPR"`).
+    :returns: A keyword whose `parse` returns one `{"i": ..., "j": ..., "k": ...}`
+        dict per listed cell, using the deck's own 1-based cell indices, in file order.
+        Repeated occurrences of the keyword are concatenated. `None` if the keyword is
+        absent.
+    """
+    return RepeatedRecordKeyword[int](
+        name,
+        fields=[Field("i", int), Field("j", int), Field("k", int)],
+    )
+
+
+BGKR = block_vector("BGKR")
+"""
+`BGKR` - gas relative permeability in each listed grid cell.
+
+Takes one `I J K /` line per cell, closed by a final `/`. `parse` returns a list of
+`{"i", "j", "k"}` dicts.
+"""
+
+BGSAT = block_vector("BGSAT")
+"""
+`BGSAT` - gas saturation in each listed grid cell.
+
+Takes one `I J K /` line per cell, closed by a final `/`. `parse` returns a list of
+`{"i", "j", "k"}` dicts.
+"""
+
+BOKR = block_vector("BOKR")
+"""
+`BOKR` - oil relative permeability in each listed grid cell.
+
+Takes one `I J K /` line per cell, closed by a final `/`. `parse` returns a list of
+`{"i", "j", "k"}` dicts.
+"""
+
+BOSAT = block_vector("BOSAT")
+"""
+`BOSAT` - oil saturation in each listed grid cell.
+
+Takes one `I J K /` line per cell, closed by a final `/`. `parse` returns a list of
+`{"i", "j", "k"}` dicts.
+"""
+
+BPR = block_vector("BPR")
+"""
+`BPR` - oil phase pressure in each listed grid cell.
+
+Takes one `I J K /` line per cell, closed by a final `/`. `parse` returns a list of
+`{"i", "j", "k"}` dicts.
+"""
+
+BPRESSUR = block_vector("BPRESSUR")
+"""
+`BPRESSUR` - oil phase pressure in each listed grid cell.
+
+Takes one `I J K /` line per cell, closed by a final `/`. `parse` returns a list of
+`{"i", "j", "k"}` dicts.
+"""
+
+BRS = block_vector("BRS")
+"""
+`BRS` - dissolved gas-oil ratio in each listed grid cell.
+
+Takes one `I J K /` line per cell, closed by a final `/`. `parse` returns a list of
+`{"i", "j", "k"}` dicts.
+"""
+
+BRV = block_vector("BRV")
+"""
+`BRV` - vaporized oil-gas ratio in each listed grid cell.
+
+Takes one `I J K /` line per cell, closed by a final `/`. `parse` returns a list of
+`{"i", "j", "k"}` dicts.
+"""
+
+BSGAS = block_vector("BSGAS")
+"""
+`BSGAS` - gas saturation in each listed grid cell.
+
+Takes one `I J K /` line per cell, closed by a final `/`. `parse` returns a list of
+`{"i", "j", "k"}` dicts.
+"""
+
+BSOIL = block_vector("BSOIL")
+"""
+`BSOIL` - oil saturation in each listed grid cell.
+
+Takes one `I J K /` line per cell, closed by a final `/`. `parse` returns a list of
+`{"i", "j", "k"}` dicts.
+"""
+
+BSWAT = block_vector("BSWAT")
+"""
+`BSWAT` - water saturation in each listed grid cell.
+
+Takes one `I J K /` line per cell, closed by a final `/`. `parse` returns a list of
+`{"i", "j", "k"}` dicts.
+"""
+
+BWKR = block_vector("BWKR")
+"""
+`BWKR` - water relative permeability in each listed grid cell.
+
+Takes one `I J K /` line per cell, closed by a final `/`. `parse` returns a list of
+`{"i", "j", "k"}` dicts.
+"""
+
+BWSAT = block_vector("BWSAT")
+"""
+`BWSAT` - water saturation in each listed grid cell.
+
+Takes one `I J K /` line per cell, closed by a final `/`. `parse` returns a list of
+`{"i", "j", "k"}` dicts.
+"""
 
 
 class MnemonicReportKeyword(Keyword[dict[str, int | None]]):

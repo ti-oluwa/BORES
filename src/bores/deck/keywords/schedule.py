@@ -59,6 +59,8 @@ __all__ = [
     "COMPDAT",
     "COMPSEGS",
     "DATES",
+    "DRSDT",
+    "DRVDT",
     "GCONINJE",
     "GCONPROD",
     "GECON",
@@ -603,6 +605,45 @@ Fields:
 - `control_mode`: target being modified: `ORAT`, `WRAT`, `GRAT`, `LRAT`, `CRAT`,
   `RESV`, `BHP`, `THP`, `VFP`, `LIFT`, `GUID`, or `GRUP`.
 - `value`: new value for that target.
+"""
+
+DRSDT = ScheduledRecordKeyword[str | float](
+    "DRSDT",
+    fields=[
+        Field("max_rate", float),
+        Field("option", uppercase, required=False, default="ALL", options={"ALL", "FREE"}),
+    ],
+)
+"""
+`DRSDT max_rate [option] /` - limit how fast the dissolved gas-oil ratio of oil may
+rise.
+
+Fields:
+
+- `max_rate`: maximum rate of increase of the dissolved gas-oil ratio, in gas volume
+  per oil volume per unit time. Setting it to `0` stops the dissolved gas-oil ratio
+  from rising, so free gas cannot dissolve into undersaturated oil and the bubble
+  point pressure stays constant.
+- `option`: `ALL` applies the limit to every cell, `FREE` applies it only to cells
+  that contain free gas. Defaults to `ALL`.
+
+Each occurrence takes effect from its `schedule_time` onwards.
+"""
+
+DRVDT = ScheduledRecordKeyword[float](
+    "DRVDT",
+    fields=[Field("max_rate", float)],
+)
+"""
+`DRVDT max_rate /` - limit how fast the vaporized oil-gas ratio of gas may rise.
+
+Fields:
+
+- `max_rate`: maximum rate of increase of the vaporized oil-gas ratio, in oil volume
+  per gas volume per unit time. Setting it to `0` stops oil from vaporizing into
+  undersaturated gas.
+
+Each occurrence takes effect from its `schedule_time` onwards.
 """
 
 WPIMULT = ScheduledRecordKeyword[str | float](

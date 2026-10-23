@@ -2404,6 +2404,12 @@ def test_deck_welopen_that_matches_no_connection_is_an_error():
         welopen_well([{"status": "SHUT", "i": 1, "j": 1, "k1": 1, "k2": 1}])
 
 
+def test_deck_welopen_no_match_error_names_the_layers_of_the_welopen_record():
+    # The layers named are the `WELOPEN`'s own, not those of the last `COMPDAT` of the well
+    with pytest.raises(ValidationError, match=r"i=1, j=1, k1=1, k2=1 "):
+        welopen_well([{"status": "SHUT", "i": 1, "j": 1, "k1": 1, "k2": 1}])
+
+
 class FiringProbe:
     """Counts how many times it has run."""
 
@@ -2706,6 +2712,14 @@ def test_deck_wpimult_that_matches_no_connection_is_an_error():
         {"well": "P1", "multiplier": 2.0, "i": 1, "j": 1, "k1": 1, "k2": 1, "schedule_time": 0.0}
     ]
     with pytest.raises(ValidationError, match="matches no connection"):
+        wpimult_perforations(records, current_time=1.0)
+
+
+def test_deck_wpimult_no_match_error_names_the_layers_of_the_wpimult_record():
+    records = [
+        {"well": "P1", "multiplier": 2.0, "i": 1, "j": 1, "k1": 1, "k2": 1, "schedule_time": 0.0}
+    ]
+    with pytest.raises(ValidationError, match=r"i=1, j=1, k1=1, k2=1 "):
         wpimult_perforations(records, current_time=1.0)
 
 

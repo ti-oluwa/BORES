@@ -257,28 +257,39 @@ def load_well_from_records(
     def select(
         record: typing.Mapping[str, typing.Any], *, keyword: str, whole_well_reaches_future: bool
     ) -> list[dict[str, typing.Any]]:
-        """The specs a `WPIMULT` or `WELOPEN` record acts on, as of its own time."""
+        """
+        The specs a `WPIMULT` or `WELOPEN` record acts on, as of its own time.
+
+        Raises `ValidationError` if the record matches none.
+        """
         time = record.get("schedule_time", 0.0)
         i, j = record.get("i", 0), record.get("j", 0)
         k1, k2 = connection_layers(record, keyword=keyword)
         if whole_well_reaches_future and i == 0 and j == 0 and k1 == 0 and k2 == 0:
             # A shut-in well stays shut when a completion not yet started comes online.
-            return [spec for spec in perforation_specs if spec["end_time"] > time]
-        return [
-            spec
-            for spec in perforation_specs
-            if in_effect(spec, time)
-            and match_connection_target(
-                i=i,
-                j=j,
-                k1=k1,
-                k2=k2,
-                connection_i=spec["i"],
-                connection_j=spec["j"],
-                connection_k1=spec["k1"],
-                connection_k2=spec["k2"],
+            matched = [spec for spec in perforation_specs if spec["end_time"] > time]
+        else:
+            matched = [
+                spec
+                for spec in perforation_specs
+                if in_effect(spec, time)
+                and match_connection_target(
+                    i=i,
+                    j=j,
+                    k1=k1,
+                    k2=k2,
+                    connection_i=spec["i"],
+                    connection_j=spec["j"],
+                    connection_k1=spec["k1"],
+                    connection_k2=spec["k2"],
+                )
+            ]
+        if not matched:
+            raise ValidationError(
+                f"`{keyword}` for well {welspecs_record['well']!r} at i={i}, j={j}, "
+                f"k1={k1}, k2={k2} matches no connection of the well in effect at that time."
             )
-        ]
+        return matched
 
     if wpimult_records:
         # Every `WPIMULT` up to `current_time` scales the connections in effect at its time, and
@@ -289,14 +300,7 @@ def load_well_from_records(
             (r for r in wpimult_records if r.get("schedule_time", 0.0) <= current_time),
             key=lambda r: r.get("schedule_time", 0.0),
         ):
-            matched = select(record, keyword="WPIMULT", whole_well_reaches_future=False)
-            if not matched:
-                raise ValidationError(
-                    f"`WPIMULT` for well {welspecs_record['well']!r} at i={record.get('i', 0)}, "
-                    f"j={record.get('j', 0)}, k1={k1}, k2={k2} "
-                    "matches no connection of the well in effect at that time."
-                )
-            for spec in matched:
+            for spec in select(record, keyword="WPIMULT", whole_well_reaches_future=False):
                 spec["connection_factor_multiplier"] = (
                     spec["connection_factor_multiplier"] or 1.0
                 ) * record["multiplier"]
@@ -311,14 +315,7 @@ def load_well_from_records(
             key=lambda r: r.get("schedule_time", 0.0),
         ):
             new_status = WELOPEN_STATUS_MAP[record["status"]]
-            matched = select(record, keyword="WELOPEN", whole_well_reaches_future=True)
-            if not matched:
-                raise ValidationError(
-                    f"`WELOPEN` for well {welspecs_record['well']!r} at i={record.get('i', 0)}, "
-                    f"j={record.get('j', 0)}, k1={k1}, k2={k2} "
-                    "matches no connection of the well in effect at that time."
-                )
-            for spec in matched:
+            for spec in select(record, keyword="WELOPEN", whole_well_reaches_future=True):
                 spec["status"] = new_status
 
     # Versions already replaced by `current_time` are history, and are left out.
