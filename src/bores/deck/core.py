@@ -40,7 +40,7 @@ def strip_comments(text: str) -> str:
     return COMMENT_RE.sub("", text)
 
 
-def resolve_includes(text: str, source_dir: Path | None) -> str:
+def resolve_includes(text: str, source_dir: Path | None, *, encoding: str = "ascii") -> str:
     """
     Recursively inline `INCLUDE 'path' /` directives.
 
@@ -71,12 +71,54 @@ def resolve_includes(text: str, source_dir: Path | None) -> str:
         if not include_path.is_file():
             raise DeckParseError(f"`INCLUDE` references {include_path!r}, which does not exist.")
         try:
-            included_text = include_path.read_text(encoding="ascii", errors="replace")
+            included_text = include_path.read_text(encoding=encoding, errors="replace")
         except OSError as exc:
             raise DeckParseError(f"Cannot read `INCLUDE` file {include_path!r}: {exc}") from exc
-        return resolve_includes(included_text, include_path.parent)
+        return resolve_includes(included_text, include_path.parent, encoding=encoding)
 
     return INCLUDE_RE.sub(replace, text)
+
+
+def decode_deck_bytes(data: bytes, *, source: str, encoding: str) -> str:
+    """
+    Decode raw deck bytes, turning a decoding failure into an error that says what to do.
+
+    :param data: The deck's raw bytes.
+    :param source: What `data` came from, for the error message (a file path, or `"bytes input"`).
+    :param encoding: Character encoding to decode with.
+    :returns: The decoded text.
+    :raises DeckParseError: If `encoding` is unknown or the bytes are not valid in it.
+    """
+    try:
+        return data.decode(encoding)
+    except LookupError as exc:
+        raise DeckParseError(
+            f"Cannot read deck {source}: {encoding!r} is not a known text encoding."
+        ) from exc
+    except UnicodeDecodeError as exc:
+        raise DeckParseError(
+            f"Cannot read deck {source} as {encoding!r}: {exc.reason} at byte {exc.start}. "
+            "The file is probably in a different encoding. Check the file's encoding and pass it "
+            "as `encoding=`, e.g. `'utf-8'` (the usual choice when the file has non-ASCII "
+            "characters in comments or names), `'utf-8-sig'` (when it starts with a byte order "
+            "mark) or `'latin-1'` (reads any file, but may show accented text wrongly)."
+        ) from exc
+
+
+def read_deck_file(path: Path, *, encoding: str) -> str:
+    """
+    Read a deck file's text.
+
+    :param path: The file to read.
+    :param encoding: Character encoding to read it with.
+    :returns: The file's text.
+    :raises DeckParseError: If the file cannot be read, or is not valid in `encoding`.
+    """
+    try:
+        data = path.read_bytes()
+    except OSError as exc:
+        raise DeckParseError(f"Cannot read deck file {path!r}: {exc}") from exc
+    return decode_deck_bytes(data, source=f"file {str(path)!r}", encoding=encoding)
 
 
 def resolve_source(source: TextOrPath, *, encoding: str) -> str:
@@ -93,13 +135,10 @@ def resolve_source(source: TextOrPath, *, encoding: str) -> str:
     source_dir: Path | None = None
 
     if isinstance(source, bytes):
-        text = source.decode(encoding)
+        text = decode_deck_bytes(source, source="bytes input", encoding=encoding)
     elif isinstance(source, Path):
         source_dir = source.parent
-        try:
-            text = source.read_text(encoding=encoding)
-        except OSError as exc:
-            raise DeckParseError(f"Cannot read deck file {source!r}: {exc}") from exc
+        text = read_deck_file(source, encoding=encoding)
     elif "\n" in source or "\r" in source:  # type: ignore[operator]
         text = typing.cast(str, source)
     else:
@@ -114,12 +153,9 @@ def resolve_source(source: TextOrPath, *, encoding: str) -> str:
                 "as raw deck text only when it spans more than one line."
             )
         source_dir = candidate.parent
-        try:
-            text = candidate.read_text(encoding=encoding)
-        except (OSError, UnicodeDecodeError) as exc:
-            raise DeckParseError(f"Cannot read deck file {source!r}: {exc}") from exc
+        text = read_deck_file(candidate, encoding=encoding)
 
-    return resolve_includes(text, source_dir)
+    return resolve_includes(text, source_dir, encoding=encoding)
 
 
 # Matches "N*value" repeat syntax. Value must be non-empty; a bare "N*" is
@@ -254,14 +290,16 @@ class Record(typing.NamedTuple):
     """
 
 
-# A keyword name is a bare uppercase token, 1-8 characters (Eclipse's own
-# limit), optionally ending in `-` (`MULTX-`, `MULTY-`, `MULTZ-`),
-# standing alone on its own line (only whitespace or end-of-line after it).
-# The underscore in `[A-Z0-9_]` is intentional because some simulator extensions
-# use keywords like `COORD_V`.
+# A keyword name is a bare token of letters, digits and underscores starting
+# with a letter, 1-8 characters (Eclipse's own limit), optionally ending in `-`
+# (`MULTX-`, `MULTY-`, `MULTZ-`), standing alone on its own line (only
+# whitespace or end-of-line after it). Eclipse keywords are case-insensitive, so
+# `poro` is the same keyword as `PORO`; `Deck` upper-cases every name it records.
+# The underscore is intentional because some simulator extensions use keywords
+# like `COORD_V`.
 KEYWORD_LINE_RE = re.compile(
     r"^[ \t]*(?P<keyword>[A-Z][A-Z0-9_]{0,7}-?)[ \t]*\r?$",
-    re.MULTILINE,
+    re.MULTILINE | re.IGNORECASE,
 )
 
 
@@ -332,7 +370,7 @@ class Deck:
             # (e.g. a title such as `SPE1`), even when it looks like a keyword.
             if (
                 keyword_lines
-                and keyword_lines[-1].group("keyword") in FREE_TEXT_KEYWORDS
+                and keyword_lines[-1].group("keyword").upper() in FREE_TEXT_KEYWORDS
                 and not text[keyword_lines[-1].end() : match.start()].strip()
             ):
                 continue

@@ -134,8 +134,16 @@ def spe1():
 def test_spe1_deck_keywords(spe1):
     deck, _, _ = spe1
     assert deck.get(k.INIT) is True
-    assert deck.get(k.RPTSCHED) == {"PRES": None, "SGAS": None, "RS": None, "WELLS": None}
-    assert deck.get(k.RPTRST) == {"BASIC": 1}
+    assert deck.get(k.RPTSCHED) == [
+        {
+            "mnemonics": {"PRES": None, "SGAS": None, "RS": None, "WELLS": None},
+            "flags": [],
+            "schedule_time": 0.0,
+        }
+    ]
+    assert deck.get(k.RPTRST) == [
+        {"mnemonics": {"BASIC": 1}, "flags": [], "schedule_time": 0.0}
+    ]
     assert deck.get(k.DRSDT) == [{"max_rate": 0.0, "option": "ALL", "schedule_time": 0.0}]
 
 

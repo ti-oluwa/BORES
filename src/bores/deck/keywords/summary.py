@@ -48,15 +48,25 @@ by a final `/`):
 - `BRS` / `BRV`: dissolved gas-oil ratio / vaporized oil-gas ratio in the cell.
 - `BOKR` / `BWKR` / `BGKR`: oil/water/gas relative permeability in the cell.
 
+Every block vector has a matching `bores.wells.summary` `Summary` implementation.
+
 **Reporting controls** (`RPTRST` / `RPTSCHED`) configure restart-file /
 print-summary mnemonics rather than naming a result vector; they are kept
 in this module because they only ever appear in the SUMMARY (and
 SCHEDULE) sections and share no shape with the vector selectors above.
 """
 
+import typing
+
 from bores.datastructures import GridDimensions
 from bores.deck.core import Deck, DeckParseError, tokenize
-from bores.deck.keywords.base import Field, Keyword, RepeatedRecordKeyword
+from bores.deck.keywords.base import (
+    Field,
+    Keyword,
+    RepeatedRecordKeyword,
+    TimeUnit,
+    get_schedule_times,
+)
 from bores.deck.operators import Operation
 
 __all__ = [
@@ -396,16 +406,23 @@ Takes one `I J K /` line per cell, closed by a final `/`. `parse` returns a list
 """
 
 
-class MnemonicReportKeyword(Keyword[dict[str, int | None]]):
+class MnemonicReportKeyword(Keyword[list[dict[str, typing.Any]]]):
     """
-    A reporting-control keyword whose body is a list of `MNEMONIC` or
-    `MNEMONIC=N` entries (`RPTRST`, `RPTSCHED`).
+    A reporting-control keyword (`RPTRST`, `RPTSCHED`) that may appear many times in the
+    `SCHEDULE` section, each occurrence replacing the settings from its `schedule_time` onwards.
 
-    Example body: `BASIC=2 FREQ=3 ALLPROPS`.
+    One occurrence is written either with mnemonics, `MNEMONIC` or `MNEMONIC=N` entries such as
+    `BASIC=2 FREQ=3 ALLPROPS`, or in the older form of positional integers such as `1 1 0 1`,
+    where `1*` (or `N*`) leaves a position at its default. The two forms cannot be mixed.
 
-    `parse` returns `{mnemonic: level_or_None}`, mapping each mnemonic
-    to its integer level (e.g. `2` for `BASIC=2`) or `None` for a
-    bare flag mnemonic with no `=value` (e.g. `ALLPROPS`).
+    `parse` returns one dict per occurrence, in file order:
+
+    - `"mnemonics"`: `{mnemonic: level_or_None}`, the integer level (e.g. `2` for `BASIC=2`),
+      or `None` for a flag with no `=value` (e.g. `ALLPROPS`). Empty for the integer form.
+    - `"flags"`: the positional integers, `None` where a position is defaulted. Empty for the
+      mnemonic form. Their meaning depends on their position, which is kept as written.
+    - `"schedule_time"`: elapsed time at which the occurrence takes effect, in the deck's time
+      unit.
     """
 
     def parse(
@@ -415,42 +432,71 @@ class MnemonicReportKeyword(Keyword[dict[str, int | None]]):
         *,
         operations: list[Operation] | None = None,
         schedule_times: dict[int, float] | None = None,
-    ) -> dict[str, int | None] | None:
-        record = deck.get_first_record_for(self.name)
-        if record is None:
+        time_unit: TimeUnit = "days",
+    ) -> list[dict[str, typing.Any]] | None:
+        records = deck.get_records_for(self.name)
+        if not records:
             return None
 
-        tokens = tokenize(record.body.split("/", 1)[0])
-        result: dict[str, int | None] = {}
+        times = (
+            schedule_times if schedule_times is not None else get_schedule_times(deck, time_unit)
+        )
+        return [
+            {
+                **self.parse_tokens(tokenize(record.body.split("/", 1)[0])),
+                "schedule_time": times.get(record.start, 0.0),
+            }
+            for record in records
+        ]
+
+    def parse_tokens(self, tokens: list[str]) -> dict[str, typing.Any]:
+        """
+        Reads the entries of one occurrence.
+
+        :param tokens: The occurrence's entries.
+        :returns: Its `"mnemonics"` and `"flags"`.
+        :raises DeckParseError: If a level is not an integer, or the two forms are mixed.
+        """
+        is_flag = [token == "1*" or token.lstrip("+-").isdigit() for token in tokens]
+        if tokens and all(is_flag):
+            return {
+                "mnemonics": {},
+                "flags": [None if token == "1*" else int(token) for token in tokens],
+            }
+        if any(is_flag):
+            raise DeckParseError(
+                f"{self.name}: positional integers cannot be mixed with mnemonics, got {tokens}."
+            )
+
+        mnemonics: dict[str, int | None] = {}
         for token in tokens:
-            if "=" in token:
-                mnemonic, _, raw_value = token.partition("=")
-                try:
-                    result[mnemonic.upper()] = int(raw_value)
-                except ValueError as exc:
-                    raise DeckParseError(
-                        f"{self.name}: mnemonic {mnemonic!r} has non-integer "
-                        f"level {raw_value!r}: {exc}"
-                    ) from exc
-            else:
-                result[token.upper()] = None
-        return result
+            mnemonic, equals, raw_level = token.partition("=")
+            if not equals:
+                mnemonics[mnemonic.upper()] = None
+                continue
+            try:
+                mnemonics[mnemonic.upper()] = int(raw_level)
+            except ValueError as exc:
+                raise DeckParseError(
+                    f"{self.name}: mnemonic {mnemonic!r} has non-integer level {raw_level!r}."
+                ) from exc
+        return {"mnemonics": mnemonics, "flags": []}
 
 
 RPTRST = MnemonicReportKeyword("RPTRST")
 """
 `RPTRST  MNEMONIC[=N] ... /` - restart-file output control.
 
-Selects which arrays are written to the restart file and at what detail
-level. `parse` returns `{mnemonic: level_or_None}`, e.g.
-`{"BASIC": 2}` for `RPTRST BASIC=2 /`.
+Selects which arrays are written to the restart file and at what detail level. It may appear
+many times in `SCHEDULE`. `parse` returns one dict per occurrence, e.g.
+`[{"mnemonics": {"BASIC": 2}, "flags": [], "schedule_time": 0.0}]` for `RPTRST BASIC=2 /`.
 """
 
 RPTSCHED = MnemonicReportKeyword("RPTSCHED")
 """
-`RPTSCHED  MNEMONIC[=N] ... /` - print-summary (.PRT file) output control
-for the SCHEDULE section.
+`RPTSCHED  MNEMONIC[=N] ... /` - print-summary (`.PRT` file) output control for the
+`SCHEDULE` section.
 
-Same mnemonic/level shape as `RPTRST`, but governs printed report
-content rather than the binary restart file.
+Same shape as `RPTRST`, but governs printed report content rather than the binary restart
+file.
 """
