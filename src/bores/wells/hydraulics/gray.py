@@ -24,9 +24,8 @@ from bores.wells.hydraulics.base import (
     UNIT_SYSTEMS_BY_TAG,
     ConnectionFluids,
     PressureDrop,
-    SurfaceFluidProperties,
+    SurfaceSample,
     WellBoreModel,
-    build_connection_fluids,
     compute_friction_factor,
     compute_static_hydrostatic_drop,
     compute_static_mixture_density,
@@ -36,7 +35,7 @@ from bores.wells.hydraulics.base import (
     plan_connection_walk,
     split_liquid_gas,
 )
-from bores.wells.state import ConnectionSample, PhaseValues
+from bores.wells.state import PhaseValues
 
 __all__ = [
     "GrayWellbore",
@@ -629,7 +628,7 @@ def walk_perforation_pressures(
             )
 
 
-def compute_perforation_pressures_from_fluids(
+def compute_perforation_pressures(
     model: GrayWellbore,
     reference_depth: Number,
     reference_measured_depth: Number,
@@ -644,10 +643,9 @@ def compute_perforation_pressures_from_fluids(
     is_injector: bool,
     out: NumberArray[OneDimension] | None = None,
     dtype: npt.DTypeLike = None,
-    hydrostatic_divisor: Number | None = None,
 ) -> NumberArray[OneDimension]:
     """
-    Computes the flowing pressure at each connection, from per-connection arrays.
+    Computes the flowing pressure at each connection.
 
     See `walk_perforation_pressures` for how the wellbore is walked.
 
@@ -666,9 +664,6 @@ def compute_perforation_pressures_from_fluids(
     :param out: Optional preallocated output array, one entry per connection.
     :param dtype: Optional output array data type. Ignored if `out` is given. The data type of
         `representative_depths` if not given.
-    :param hydrostatic_divisor: The model's unit system's gravitational factor times its
-        hydrostatic area factor, as `get_hydrostatic_divisor` gives it. Read from the constants if
-        not given; pass it when calling repeatedly for the same well.
     :returns: Pressure at each connection.
     :raises ValueError: If the per-connection inputs don't all have the same length, or `out`
         is the wrong length.
@@ -714,104 +709,10 @@ def compute_perforation_pressures_from_fluids(
         inclinations_from_vertical=inclinations_from_vertical,
         connection_fluids=connection_fluids,
         is_injector=is_injector,
-        hydrostatic_divisor=(
-            hydrostatic_divisor
-            if hydrostatic_divisor is not None
-            else get_hydrostatic_divisor(model.unit_system)
-        ),
+        hydrostatic_divisor=get_hydrostatic_divisor(model.unit_system),
         pressures=pressures,
     )
     return pressures
-
-
-def compute_perforation_pressures(
-    model: GrayWellbore,
-    reference_depth: Number,
-    reference_measured_depth: Number,
-    reference_pressure: Number,
-    connection_phase_rates: typing.Sequence[PhaseValues],
-    representative_depths: NumberArray[OneDimension],
-    representative_measured_depths: NumberArray[OneDimension],
-    inclinations_from_vertical: NumberArray[OneDimension],
-    connection_samples: typing.Sequence[ConnectionSample],
-    is_injector: bool,
-    out: NumberArray[OneDimension] | None = None,
-    dtype: npt.DTypeLike = None,
-) -> NumberArray[OneDimension]:
-    """
-    Computes the flowing pressure at each connection, from per-connection samples.
-
-    See `walk_perforation_pressures` for how the wellbore is walked.
-
-    :param model: This well's `GrayWellbore`.
-    :param reference_depth: The well's BHP/THP reporting datum.
-    :param reference_measured_depth: Measured depth along the wellbore of `reference_depth`.
-    :param reference_pressure: Pressure at `reference_depth`.
-    :param connection_phase_rates: Each connection's own rate of each phase, at reservoir
-        conditions, same order as `connection_samples`.
-    :param representative_depths: One vertical depth per connection, same order as
-        `connection_samples`.
-    :param representative_measured_depths: One measured depth along the wellbore per connection,
-        same order as `connection_samples`.
-    :param inclinations_from_vertical: One inclination per connection, in radians, same order as
-        `connection_samples`.
-    :param connection_samples: Reservoir conditions at each connection.
-    :param is_injector: Whether this well is an injector.
-    :param out: Optional preallocated output array. If given, must have the same length as
-        `connection_samples`.
-    :param dtype: Optional output array data type. Ignored if `out` is given. The data type of
-        `representative_depths` if not given.
-    :returns: Pressure at each connection, same order as `connection_samples`.
-    :raises ValueError: If `representative_depths`, `representative_measured_depths`,
-        `inclinations_from_vertical`, `connection_phase_rates`, and `connection_samples` don't
-        all have the same length, or `out` is the wrong length.
-    """
-    count = len(connection_samples)
-    if out is not None and len(out) != count:
-        raise ValueError("If given, `out` must have the same length as `connection_samples`.")
-    if not (
-        len(representative_depths)
-        == len(representative_measured_depths)
-        == len(inclinations_from_vertical)
-        == len(connection_phase_rates)
-        == count
-    ):
-        raise ValueError(
-            "`representative_depths`, `representative_measured_depths`, "
-            "`inclinations_from_vertical`, `connection_phase_rates`, and `connection_samples` "
-            "must all have the same length."
-        )
-
-    array_dtype = (
-        out.dtype
-        if out is not None
-        else (np.dtype(dtype) if dtype is not None else np.asarray(representative_depths).dtype)
-    )
-
-    def read_rates(read: typing.Callable[[PhaseValues], Number]) -> NumberArray[OneDimension]:
-        return typing.cast(
-            NumberArray[OneDimension],
-            np.fromiter((read(rates) for rates in connection_phase_rates), array_dtype, count),
-        )
-
-    return compute_perforation_pressures_from_fluids(
-        model=model,
-        reference_depth=reference_depth,
-        reference_measured_depth=reference_measured_depth,
-        reference_pressure=reference_pressure,
-        connection_oil_rates=read_rates(lambda rates: rates.oil),
-        connection_water_rates=read_rates(lambda rates: rates.water),
-        connection_gas_rates=read_rates(lambda rates: rates.gas),
-        representative_depths=representative_depths,
-        representative_measured_depths=representative_measured_depths,
-        inclinations_from_vertical=inclinations_from_vertical,
-        connection_fluids=build_connection_fluids(
-            connection_samples=connection_samples, dtype=array_dtype
-        ),
-        is_injector=is_injector,
-        out=out,
-        dtype=array_dtype,
-    )
 
 
 def compute_tubing_head_pressure(
@@ -819,7 +720,7 @@ def compute_tubing_head_pressure(
     reference_depth: Number,
     reference_pressure: Number,
     phase_rates: PhaseValues,
-    surface_fluid_properties: SurfaceFluidProperties,
+    surface_sample: SurfaceSample,
     is_injector: bool,
 ) -> Number:
     """
@@ -829,27 +730,26 @@ def compute_tubing_head_pressure(
     :param reference_depth: The well's BHP/THP reporting datum.
     :param reference_pressure: Pressure at `reference_depth`.
     :param phase_rates: Rate of each phase, at reservoir conditions.
-    :param surface_fluid_properties: Fluid properties at surface
+    :param surface_sample: Fluid properties at surface
         conditions. `phase_densities`, `phase_viscosities`, and
         `gas_liquid_surface_tension` are all required, as Gray needs a
         real liquid/gas split, not just a single mixture value.
     :param is_injector: Whether this well is an injector.
     :returns: Tubing head pressure.
     :raises ValueError: If `phase_densities`, `phase_viscosities`, or
-        `gas_liquid_surface_tension` isn't set on `surface_fluid_properties`.
+        `gas_liquid_surface_tension` isn't set on `surface_sample`.
     """
-    if surface_fluid_properties.phase_densities is None:
+    if surface_sample.phase_densities is None:
         raise ValueError(
-            "`SurfaceFluidProperties.phase_densities` is required for the Gray wellbore model."
+            "`SurfaceSample.phase_densities` is required for the Gray wellbore model."
         )
-    if surface_fluid_properties.phase_viscosities is None:
+    if surface_sample.phase_viscosities is None:
         raise ValueError(
-            "`SurfaceFluidProperties.phase_viscosities` is required for the Gray wellbore model."
+            "`SurfaceSample.phase_viscosities` is required for the Gray wellbore model."
         )
-    if surface_fluid_properties.gas_liquid_surface_tension is None:
+    if surface_sample.gas_liquid_surface_tension is None:
         raise ValueError(
-            "`SurfaceFluidProperties.gas_liquid_surface_tension` is required for the "
-            "Gray wellbore model."
+            "`SurfaceSample.gas_liquid_surface_tension` is required for the Gray wellbore model."
         )
 
     dz = 0.0 - reference_depth
@@ -862,7 +762,7 @@ def compute_tubing_head_pressure(
                 phase_saturations=PhaseValues(
                     oil=phase_rates.oil, water=phase_rates.water, gas=phase_rates.gas
                 ),
-                phase_densities=surface_fluid_properties.phase_densities,
+                phase_densities=surface_sample.phase_densities,
             ),
             length=abs(dz),
             gravitational_acceleration=model.gravitational_acceleration,
@@ -879,8 +779,8 @@ def compute_tubing_head_pressure(
         gas_viscosity,
     ) = split_liquid_gas(
         phase_rates=phase_rates,
-        phase_densities=surface_fluid_properties.phase_densities,
-        phase_viscosities=surface_fluid_properties.phase_viscosities,
+        phase_densities=surface_sample.phase_densities,
+        phase_viscosities=surface_sample.phase_viscosities,
     )
     drop = compute_segment_drop(
         model=model,
@@ -900,7 +800,7 @@ def compute_tubing_head_pressure(
         gas_density=gas_density,
         liquid_viscosity=liquid_viscosity,
         gas_viscosity=gas_viscosity,
-        gas_liquid_surface_tension=surface_fluid_properties.gas_liquid_surface_tension,
+        gas_liquid_surface_tension=surface_sample.gas_liquid_surface_tension,
     )
     return (
         reference_pressure - (drop.hydrostatic + drop.acceleration) - friction_sign * drop.friction

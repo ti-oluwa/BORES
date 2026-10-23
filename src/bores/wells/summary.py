@@ -933,7 +933,7 @@ class BlockVector(Summary["CompiledBlackOilModel"]):
         dimensions = model.reservoir.grid.dimensions
         if dimensions is None:
             raise SummaryError(f"{self.mnemonic}: the model's grid has no `i`, `j`, `k` layout.")
-        
+
         if not (
             0 <= self.i < dimensions.nx
             and 0 <= self.j < dimensions.ny

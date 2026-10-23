@@ -14,7 +14,7 @@ import typing
 from bores.errors import ValidationError
 from bores.types import Integer
 from bores.wells.compile import CompiledWellSystem
-from bores.wells.hydraulics.base import SurfaceFluidProperties, WellBoreModel
+from bores.wells.hydraulics.base import ConnectionFluids, SurfaceSample, WellBoreModel
 from bores.wells.hydraulics.vfp import VFPTables
 from bores.wells.resolution.engine import resolve_well_control
 from bores.wells.resolution.groups.allocation import (
@@ -26,7 +26,6 @@ from bores.wells.resolution.groups.limits import (
     enforce_group_economic_limits,
 )
 from bores.wells.resolution.spec import WellControlSpec
-from bores.wells.state import ConnectionSample
 from bores.wells.workspace import WellsWorkspace
 
 __all__ = ["resolve_wells"]
@@ -38,9 +37,8 @@ def resolve_wells(
     workspace: WellsWorkspace,
     control_spec: WellControlSpec,
     get_tubing_performance: typing.Callable[[Integer], WellBoreModel | VFPTables | None],
-    get_connection_samples: typing.Callable[[Integer], typing.Sequence[ConnectionSample]],
-    get_surface_fluid_properties: typing.Callable[[Integer], SurfaceFluidProperties | None]
-    | None = None,
+    get_connection_fluids: typing.Callable[[Integer], ConnectionFluids],
+    get_surface_sample: typing.Callable[[Integer], SurfaceSample | None] | None = None,
 ) -> dict[str, GroupEconomicLimitOutcome]:
     """
     Resolves every well in `compiled_system` for one timestep, in the
@@ -67,9 +65,9 @@ def resolve_wells(
     :param control_spec: Solver tunables, shared by every well and group.
     :param get_tubing_performance: Given a well row, what relates its BHP to its THP
         (a `WellBoreModel` or a `VFPTables` collection), or `None` if it has none.
-    :param get_connection_samples: Given a well row, its active, open
-        connections' current reservoir samples.
-    :param get_surface_fluid_properties: Given a well row, its surface
+    :param get_connection_fluids: Given a well row, its active, open
+        connections' current reservoir conditions.
+    :param get_surface_sample: Given a well row, its surface
         fluid properties, or `None` if it has no THP control/limit to
         check. Omit if no well in the system ever needs this.
     :returns: Each group's own `enforce_group_economic_limits` outcome,
@@ -97,12 +95,10 @@ def resolve_wells(
             compiled_system=compiled_system,
             well_row=well_row,
             tubing_performance=get_tubing_performance(well_row),
-            connection_samples=get_connection_samples(well_row),
+            connection_fluids=get_connection_fluids(well_row),
             workspace=workspace,
             control_spec=control_spec,
-            surface_fluid_properties=(
-                get_surface_fluid_properties(well_row) if get_surface_fluid_properties else None
-            ),
+            surface_sample=(get_surface_sample(well_row) if get_surface_sample else None),
         )
 
     outcomes: dict[str, GroupEconomicLimitOutcome] = {}
@@ -117,8 +113,8 @@ def resolve_wells(
                 workspace=workspace,
                 control_spec=control_spec,
                 get_tubing_performance=get_tubing_performance,
-                get_connection_samples=get_connection_samples,
-                get_surface_fluid_properties=get_surface_fluid_properties,
+                get_connection_fluids=get_connection_fluids,
+                get_surface_sample=get_surface_sample,
             )
 
         group_limits = group_controls.limits
@@ -134,7 +130,7 @@ def resolve_wells(
                 workspace=workspace,
                 control_spec=control_spec,
                 get_tubing_performance=get_tubing_performance,
-                get_connection_samples=get_connection_samples,
-                get_surface_fluid_properties=get_surface_fluid_properties,
+                get_connection_fluids=get_connection_fluids,
+                get_surface_sample=get_surface_sample,
             )
     return outcomes

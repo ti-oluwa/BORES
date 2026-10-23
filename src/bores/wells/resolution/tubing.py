@@ -18,7 +18,7 @@ from bores.wells.base import WellType
 from bores.wells.compile import CompiledWellSystem, WellKind
 from bores.wells.hydraulics.base import (
     PhaseValues,
-    SurfaceFluidProperties,
+    SurfaceSample,
     WellBoreModel,
     compute_hydrostatic_pressure,
     get_gravitational_acceleration,
@@ -140,9 +140,9 @@ def attach_flowing_fluid(
     if tubing.vfp_table is None:
         return tubing
 
-    mobilities = (workspace.oil_mobilities, workspace.water_mobilities, workspace.gas_mobilities)
-    flags = (relevant_phases.oil > 0.0, relevant_phases.water > 0.0, relevant_phases.gas > 0.0)
     fluids = workspace.connection_fluids
+    mobilities = (fluids.oil_mobilities, fluids.water_mobilities, fluids.gas_mobilities)
+    flags = (relevant_phases.oil > 0.0, relevant_phases.water > 0.0, relevant_phases.gas > 0.0)
     densities = (fluids.oil_densities, fluids.water_densities, fluids.gas_densities)
     deliverabilities = []
     phase_averages = []
@@ -253,7 +253,7 @@ def compute_tubing_head_pressure(
     reference_pressure: Number,
     phase_rates: PhaseValues,
     surface_phase_rates: PhaseValues,
-    surface_fluid_properties: SurfaceFluidProperties | None,
+    surface_sample: SurfaceSample | None,
     is_injector: Boolean,
     connection_rates: ConnectionRates | None = None,
 ) -> Number:
@@ -269,14 +269,14 @@ def compute_tubing_head_pressure(
     :param reference_pressure: The bottom-hole pressure.
     :param phase_rates: Reservoir-condition phase rates (used by a correlation).
     :param surface_phase_rates: Surface-condition phase rates (used by a VFP table).
-    :param surface_fluid_properties: Surface fluid properties. Only a correlation needs them.
+    :param surface_sample: Surface fluid properties. Only a correlation needs them.
     :param is_injector: Whether the well is an injector.
     :param connection_rates: Reservoir-condition phase rates at each connection, at
         `reference_pressure`. Needed only for a VFP table whose datum depth differs from
         `reference_depth`, to weigh the fluid column between them.
     :returns: The tubing head pressure.
     :raises ValidationError: If the well has no tubing performance, a correlation is needed but
-        `surface_fluid_properties` is `None`, or a VFP table's datum depth differs from
+        `surface_sample` is `None`, or a VFP table's datum depth differs from
         `reference_depth` and the well's `flowing_fluid` or `connection_rates` isn't given.
     """
     if tubing.vfp_table is not None:
@@ -304,16 +304,15 @@ def compute_tubing_head_pressure(
         raise ValidationError(
             "This well has no `WellBoreModel` or VFP table to find a tubing head pressure with."
         )
-    if surface_fluid_properties is None:
+    if surface_sample is None:
         raise ValidationError(
-            "A hydraulics correlation needs `surface_fluid_properties` to find a tubing head "
-            "pressure."
+            "A hydraulics correlation needs `surface_sample` to find a tubing head pressure."
         )
     return compute_wellbore_tubing_head_pressure(
         wellbore=tubing.wellbore,
         reference_depth=reference_depth,
         reference_pressure=reference_pressure,
         phase_rates=phase_rates,
-        surface_fluid_properties=surface_fluid_properties,
+        surface_sample=surface_sample,
         is_injector=is_injector,
     )

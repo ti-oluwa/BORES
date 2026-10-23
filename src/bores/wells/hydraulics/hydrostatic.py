@@ -7,22 +7,17 @@ import numpy as np
 import numpy.typing as npt
 
 from bores.errors import ValidationError
-from bores.precision import get_dtype
 from bores.types import Integer, Number, NumberArray, OneDimension, UnitSystem
 from bores.wells.hydraulics.base import (
     ConnectionFluids,
     PhaseValues,
-    build_connection_fluids,
     compute_hydrostatic_pressure,
     compute_static_mixture_density,
     get_gravitational_acceleration,
 )
-from bores.wells.state import ConnectionSample
-from bores.wells.workspace import ConnectionRates
 
 __all__ = [
     "compute_perforation_pressures",
-    "compute_perforation_pressures_from_fluids",
     "get_pressure_per_density_and_depth",
     "walk_hydrostatic_pressures",
 ]
@@ -187,35 +182,40 @@ def get_pressure_per_density_and_depth(unit_system: UnitSystem) -> Number:
     )
 
 
-def compute_perforation_pressures_from_fluids(
+def compute_perforation_pressures(
     reference_depth: Number,
     reference_pressure: Number,
     representative_depths: NumberArray[OneDimension],
+    connection_oil_rates: NumberArray[OneDimension],
+    connection_water_rates: NumberArray[OneDimension],
+    connection_gas_rates: NumberArray[OneDimension],
     connection_fluids: ConnectionFluids,
-    connection_rates: ConnectionRates,
     unit_system: UnitSystem,
     out: NumberArray[OneDimension] | None = None,
     dtype: npt.DTypeLike = None,
-    pressure_per_density_and_depth: Number | None = None,
 ) -> NumberArray[OneDimension]:
     """
     Computes the flowing pressure at each connection from the weight of the fluid between
-    connections, working outward from the well's reference depth, with no friction, from
-    per-connection arrays.
+    connections, working outward from the well's reference depth, with no friction.
 
-    See `compute_perforation_pressures` for how the fluid in each segment is found.
+    The fluid in a segment is the commingled mixture of every connection beneath it, whether
+    the well produces (it flows up past them) or injects (it flows down to them): the total mass
+    rate of those connections over their total volume rate, at reservoir conditions. A
+    segment with no flow beneath it holds the saturation-weighted reservoir fluid of the
+    connections beneath it instead, or of the nearest connection if none is beneath it.
+    Only vertical depth difference matters, so connection inclination plays no part.
 
     :param reference_depth: The well's BHP/THP reporting datum.
     :param reference_pressure: Pressure at `reference_depth`.
     :param representative_depths: One depth per connection.
+    :param connection_oil_rates: Each connection's own oil rate, at reservoir conditions.
+    :param connection_water_rates: Each connection's own water rate, at reservoir conditions.
+    :param connection_gas_rates: Each connection's own gas rate, at reservoir conditions.
     :param connection_fluids: Reservoir conditions at each connection.
-    :param connection_rates: Each connection's own reservoir-condition rate of each phase.
     :param unit_system: The unit system the depths, densities and pressure are in.
     :param out: Optional preallocated output array, one entry per connection.
     :param dtype: Optional output array data type. Ignored if `out` is given. The data type of
         `representative_depths` if not given.
-    :param pressure_per_density_and_depth: As `get_pressure_per_density_and_depth` gives it. Read
-        from the constants if not given; pass it when calling repeatedly for the same well.
     :returns: Pressure at each connection.
     :raises ValidationError: If the per-connection inputs don't all have the same length, or `out`
         is the wrong length.
@@ -223,9 +223,9 @@ def compute_perforation_pressures_from_fluids(
     count = len(representative_depths)
     if not (
         len(connection_fluids.pressures)
-        == len(connection_rates.oil)
-        == len(connection_rates.water)
-        == len(connection_rates.gas)
+        == len(connection_oil_rates)
+        == len(connection_water_rates)
+        == len(connection_gas_rates)
         == count
     ):
         raise ValidationError("All per-connection inputs must have the same length.")
@@ -245,78 +245,10 @@ def compute_perforation_pressures_from_fluids(
         reference_pressure=reference_pressure,
         representative_depths=representative_depths,
         connection_fluids=connection_fluids,
-        connection_oil_rates=connection_rates.oil,
-        connection_water_rates=connection_rates.water,
-        connection_gas_rates=connection_rates.gas,
-        pressure_per_density_and_depth=(
-            pressure_per_density_and_depth
-            if pressure_per_density_and_depth is not None
-            else get_pressure_per_density_and_depth(unit_system)
-        ),
+        connection_oil_rates=connection_oil_rates,
+        connection_water_rates=connection_water_rates,
+        connection_gas_rates=connection_gas_rates,
+        pressure_per_density_and_depth=get_pressure_per_density_and_depth(unit_system),
         pressures=pressures,
     )
     return pressures
-
-
-def compute_perforation_pressures(
-    *,
-    reference_depth: Number,
-    reference_pressure: Number,
-    representative_depths: NumberArray[OneDimension],
-    connection_samples: typing.Sequence[ConnectionSample],
-    connection_rates: ConnectionRates,
-    unit_system: UnitSystem,
-    out: NumberArray[OneDimension] | None = None,
-    dtype: npt.DTypeLike = None,
-) -> NumberArray[OneDimension]:
-    """
-    Computes the flowing pressure at each connection from the weight of the fluid between
-    connections, working outward from the well's reference depth, with no friction.
-
-    The fluid in a segment is the commingled mixture of every connection beneath it, whether
-    the well produces (it flows up past them) or injects (it flows down to them): the total mass
-    rate of those connections over their total volume rate, at reservoir conditions. A
-    segment with no flow beneath it holds the saturation-weighted reservoir fluid of the
-    connections beneath it instead, or of the nearest connection if none is beneath it.
-    Only vertical depth difference matters, so connection inclination plays no part.
-
-    :param reference_depth: The well's BHP/THP reporting datum.
-    :param reference_pressure: Pressure at `reference_depth`.
-    :param representative_depths: One depth per connection, same order as `connection_samples`.
-    :param connection_samples: Reservoir conditions at each connection.
-    :param connection_rates: Each connection's own reservoir-condition rate of each phase.
-        Same order as `connection_samples`.
-    :param unit_system: The unit system the depths, densities and pressure are in.
-    :param out: Optional preallocated output array, the length of `connection_samples`.
-    :param dtype: Output array data type. Ignored if `out` is given.
-    :returns: Pressure at each connection, same order as `connection_samples`.
-    :raises ValidationError: If the lengths of `representative_depths`, `connection_samples`
-        and `connection_rates` differ, or `out` is the wrong length.
-    """
-    count = len(connection_samples)
-    if len(representative_depths) != count:
-        raise ValidationError(
-            "`representative_depths`, `connection_samples` and `connection_rates` must all "
-            "have the same length."
-        )
-    if out is not None and len(out) != count:
-        raise ValidationError("If given, `out` must have the same length as `connection_samples`.")
-
-    if out is not None:
-        array_dtype = out.dtype
-    elif dtype is not None:
-        array_dtype = np.dtype(dtype)
-    else:
-        array_dtype = get_dtype()
-    return compute_perforation_pressures_from_fluids(
-        reference_depth=reference_depth,
-        reference_pressure=reference_pressure,
-        representative_depths=representative_depths,
-        connection_fluids=build_connection_fluids(
-            connection_samples=connection_samples, dtype=array_dtype
-        ),
-        connection_rates=connection_rates,
-        unit_system=unit_system,
-        out=out,
-        dtype=array_dtype,
-    )

@@ -31,11 +31,10 @@ from bores.wells.compile import (
     ProducerControlModeTag,
     WellKind,
 )
-from bores.wells.hydraulics.base import SurfaceFluidProperties, WellBoreModel
+from bores.wells.hydraulics.base import ConnectionFluids, SurfaceSample, WellBoreModel
 from bores.wells.hydraulics.vfp import VFPTables
 from bores.wells.resolution.engine import resolve_well_control
 from bores.wells.resolution.spec import WellControlSpec
-from bores.wells.state import ConnectionSample
 from bores.wells.workspace import WellsWorkspace
 
 __all__ = ["allocate_group_targets", "get_group_controlled_rate", "redistribute_group_shortfall"]
@@ -193,9 +192,8 @@ def redistribute_group_shortfall(
     workspace: WellsWorkspace,
     control_spec: WellControlSpec,
     get_tubing_performance: typing.Callable[[Integer], WellBoreModel | VFPTables | None],
-    get_connection_samples: typing.Callable[[Integer], typing.Sequence[ConnectionSample]],
-    get_surface_fluid_properties: typing.Callable[[Integer], SurfaceFluidProperties | None]
-    | None = None,
+    get_connection_fluids: typing.Callable[[Integer], ConnectionFluids],
+    get_surface_sample: typing.Callable[[Integer], SurfaceSample | None] | None = None,
 ) -> tuple[str, ...]:
     """
     Redistributes a group's shortfall across members with headroom.
@@ -230,10 +228,10 @@ def redistribute_group_shortfall(
     :param get_tubing_performance: Given a well row, what relates its BHP to its THP
         (a `WellBoreModel` or a `VFPTables` collection), or `None` if it has none. Only called
         for a member actually being re-resolved.
-    :param get_connection_samples: Given a well row, its active, open
-        connections' current reservoir samples. Only called for a member
+    :param get_connection_fluids: Given a well row, its active, open
+        connections' current reservoir conditions. Only called for a member
         actually being re-resolved.
-    :param get_surface_fluid_properties: Given a well row, its surface
+    :param get_surface_sample: Given a well row, its surface
         fluid properties, or `None` if it has no THP control/limit to
         check. Omit if no affected member ever needs this.
     :returns: Names of the members actually re-resolved with a boosted
@@ -256,7 +254,7 @@ def redistribute_group_shortfall(
     controls = well_system.controls
     group_derived = [well_system.well_row(name=name) for name in allocated_wells]
 
-    resolved_get_surface_fluid_properties = get_surface_fluid_properties or (lambda well_row: None)
+    resolved_get_surface_sample = get_surface_sample or (lambda well_row: None)
     reresolved: list[str] = []
 
     for _ in range(control_spec.max_fixed_point_iterations):
@@ -300,10 +298,10 @@ def redistribute_group_shortfall(
                 compiled_system=well_system,
                 well_row=idx,
                 tubing_performance=get_tubing_performance(idx),
-                connection_samples=get_connection_samples(idx),
+                connection_fluids=get_connection_fluids(idx),
                 workspace=workspace,
                 control_spec=control_spec,
-                surface_fluid_properties=resolved_get_surface_fluid_properties(idx),
+                surface_sample=resolved_get_surface_sample(idx),
             )
             name = well_system.names[idx]
             if name in reresolved:

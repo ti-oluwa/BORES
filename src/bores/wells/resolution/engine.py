@@ -13,7 +13,7 @@ from bores.wells.compile import (
     ProducerControlModeTag,
     WellKind,
 )
-from bores.wells.hydraulics.base import SurfaceFluidProperties, WellBoreModel
+from bores.wells.hydraulics.base import ConnectionFluids, SurfaceSample, WellBoreModel
 from bores.wells.hydraulics.vfp import VFPTables
 from bores.wells.resolution.limits import apply_limits
 from bores.wells.resolution.solvers import (
@@ -33,7 +33,6 @@ from bores.wells.resolution.tubing import (
     compute_tubing_head_pressure,
     resolve_well_tubing,
 )
-from bores.wells.state import ConnectionSample
 from bores.wells.workspace import (
     ConnectionRates,
     WellsWorkspace,
@@ -70,10 +69,10 @@ def resolve_well_control(
     compiled_system: CompiledWellSystem,
     well_row: Integer,
     tubing_performance: WellBoreModel | VFPTables | None,
-    connection_samples: typing.Sequence[ConnectionSample],
+    connection_fluids: ConnectionFluids,
     workspace: WellsWorkspace,
     control_spec: WellControlSpec,
-    surface_fluid_properties: SurfaceFluidProperties | None = None,
+    surface_sample: SurfaceSample | None = None,
 ) -> None:
     """
     Resolves one well's control and writes the result into `resolution`'s
@@ -90,13 +89,12 @@ def resolve_well_control(
         THP control, a `THPLimit`, and THP reporting require one, regardless of
         `control_spec.connection_pressure_mode`. A `WellBoreModel` distributes pressure across
         connections; a well without one follows `control_spec.connection_pressure_mode`.
-    :param connection_samples: Reservoir samples for this well's active,
-        open connections, in the same order `compiled_system.perforations`'
-        rows for this well appear (after filtering to
-        `completion_statuses == 1` and `schedule_statuses == 1`).
+    :param connection_fluids: Reservoir conditions at this well's active, open connections,
+        in the same order `compiled_system.perforations`' rows for this well appear (after
+        filtering to `completion_statuses == 1` and `schedule_statuses == 1`).
     :param workspace: The system-wide `WellsWorkspace` to update in place.
     :param control_spec: Solver tunables.
-    :param surface_fluid_properties: Required to compute THP with a `WellBoreModel`, or to
+    :param surface_sample: Required to compute THP with a `WellBoreModel`, or to
         resolve a `THP`-mode control or check a `THPLimit` with one. A VFP table doesn't need
         it. Omit if none of those apply to this well.
     :raises ValidationError: If `control_modes[well_row]` isn't a
@@ -130,11 +128,11 @@ def resolve_well_control(
         for i in range(perforation_start, perforation_end)
         if perforations.completion_statuses[i] == 1 and perforations.schedule_statuses[i] == 1
     ]
-    if not active_open or len(active_open) != len(connection_samples):
+    if not active_open or len(active_open) != len(connection_fluids.pressures):
         raise ValidationError(
             f"`resolve_well_control`: `well_row` {well_row} has {len(active_open)} "
-            f"active/open connections but was given {len(connection_samples)} "
-            "`connection_samples`. These must match 1:1."
+            f"active/open connections but was given {len(connection_fluids.pressures)} "
+            "connections in `connection_fluids`. These must match 1:1."
         )
 
     perforation_workspace = build_perforation_workspace(
@@ -151,7 +149,7 @@ def resolve_well_control(
             NumberArray[OneDimension],
             perforations.inclinations_from_vertical[active_open],
         ),
-        connection_samples=connection_samples,
+        connection_fluids=connection_fluids,
         reference_measured_depth=compiled_system.reference_measured_depths[well_row],
         connection_conductivities=typing.cast(
             NumberArray[OneDimension],
@@ -193,8 +191,8 @@ def resolve_well_control(
                 control_spec=control_spec,
             )
         elif control_mode == InjectorControlModeTag.THP:
-            if surface_fluid_properties is None:
-                raise ValidationError("A THP-mode injector requires `surface_fluid_properties`.")
+            if surface_sample is None:
+                raise ValidationError("A THP-mode injector requires `surface_sample`.")
             if not tubing.can_evaluate_thp:
                 raise ValidationError(
                     "A THP-mode injector requires a `WellBoreModel` or VFP table, "
@@ -214,7 +212,7 @@ def resolve_well_control(
                 max_pressure=max_pressure,
                 control_spec=control_spec,
                 metric="thp",
-                surface_fluid_properties=surface_fluid_properties,
+                surface_sample=surface_sample,
             )
             connection_pressures, phase_rates, surface_phase_rates = (
                 solve_connection_pressures_and_rates(
@@ -269,8 +267,8 @@ def resolve_well_control(
                 control_spec=control_spec,
             )
         elif control_mode == ProducerControlModeTag.THP:
-            if surface_fluid_properties is None:
-                raise ValidationError("A THP-mode producer requires `surface_fluid_properties`.")
+            if surface_sample is None:
+                raise ValidationError("A THP-mode producer requires `surface_sample`.")
             if not tubing.can_evaluate_thp:
                 raise ValidationError(
                     "A THP-mode producer requires a `WellBoreModel` or VFP table, "
@@ -290,7 +288,7 @@ def resolve_well_control(
                 max_pressure=max_pressure,
                 control_spec=control_spec,
                 metric="thp",
-                surface_fluid_properties=surface_fluid_properties,
+                surface_sample=surface_sample,
             )
             connection_pressures, phase_rates, surface_phase_rates = (
                 solve_connection_pressures_and_rates(
@@ -343,7 +341,7 @@ def resolve_well_control(
         min_pressure=min_pressure,
         max_pressure=max_pressure,
         control_spec=control_spec,
-        surface_fluid_properties=surface_fluid_properties,
+        surface_sample=surface_sample,
     )
 
     workspace.bhps[well_row] = bhp
@@ -380,7 +378,7 @@ def resolve_well_control(
         )
 
     if tubing.vfp_table is not None or (
-        tubing.wellbore is not None and surface_fluid_properties is not None
+        tubing.wellbore is not None and surface_sample is not None
     ):
         workspace.thps[well_row] = compute_tubing_head_pressure(
             tubing=tubing,
@@ -388,7 +386,7 @@ def resolve_well_control(
             reference_pressure=bhp,
             phase_rates=phase_rates,
             surface_phase_rates=surface_phase_rates,
-            surface_fluid_properties=surface_fluid_properties,
+            surface_sample=surface_sample,
             is_injector=is_injector,
             connection_rates=ConnectionRates(
                 oil=np.zeros_like(perforation_workspace.connection_oil_rates),

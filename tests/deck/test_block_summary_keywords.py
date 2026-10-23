@@ -141,9 +141,7 @@ def test_spe1_deck_keywords(spe1):
             "schedule_time": 0.0,
         }
     ]
-    assert deck.get(k.RPTRST) == [
-        {"mnemonics": {"BASIC": 1}, "flags": [], "schedule_time": 0.0}
-    ]
+    assert deck.get(k.RPTRST) == [{"mnemonics": {"BASIC": 1}, "flags": [], "schedule_time": 0.0}]
     assert deck.get(k.DRSDT) == [{"max_rate": 0.0, "option": "ALL", "schedule_time": 0.0}]
 
 

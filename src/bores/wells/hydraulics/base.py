@@ -21,17 +21,16 @@ __all__ = [
     "ConnectionFluids",
     "ConnectionWalk",
     "PressureDrop",
-    "SurfaceFluidProperties",
+    "SurfaceSample",
     "WellBoreModel",
     "WellBoreModelOptions",
-    "build_connection_fluids",
+    "compile_connection_fluids",
     "compute_friction_factor",
     "compute_hydrostatic_pressure",
     "compute_mixture_density",
     "compute_mixture_velocity",
     "compute_mixture_viscosity",
     "compute_perforation_pressures",
-    "compute_perforation_pressures_from_fluids",
     "compute_segment_pressure_drop",
     "compute_static_hydrostatic_drop",
     "compute_static_mixture_density",
@@ -68,7 +67,7 @@ class PressureDrop(typing.NamedTuple):
         return self.hydrostatic + self.friction + self.acceleration
 
 
-class SurfaceFluidProperties(typing.NamedTuple):
+class SurfaceSample(typing.NamedTuple):
     """Fluid properties at surface conditions, for computing tubing head pressure."""
 
     density: Number | None = None
@@ -220,9 +219,7 @@ def compute_mixture_velocity(
     )
 
 
-def compute_surface_mixture_density(
-    properties: SurfaceFluidProperties, phase_rates: PhaseValues
-) -> Number:
+def compute_surface_mixture_density(properties: SurfaceSample, phase_rates: PhaseValues) -> Number:
     """
     Gets the surface mixture density from `properties`, computing it from
     per-phase data if it wasn't supplied directly.
@@ -236,14 +233,14 @@ def compute_surface_mixture_density(
     if properties.density is not None:
         return properties.density
     if properties.phase_densities is None:
-        raise ValueError("`SurfaceFluidProperties` needs density or `phase_densities`")
+        raise ValueError("`SurfaceSample` needs density or `phase_densities`")
     return compute_mixture_density(
         phase_rates=phase_rates, phase_densities=properties.phase_densities
     )
 
 
 def compute_surface_mixture_viscosity(
-    properties: SurfaceFluidProperties, phase_rates: PhaseValues
+    properties: SurfaceSample, phase_rates: PhaseValues
 ) -> Number:
     """
     Gets the surface mixture viscosity from `properties`, computing it
@@ -258,7 +255,7 @@ def compute_surface_mixture_viscosity(
     if properties.viscosity is not None:
         return properties.viscosity
     if properties.phase_viscosities is None:
-        raise ValueError("`SurfaceFluidProperties` needs viscosity or `phase_viscosities`")
+        raise ValueError("`SurfaceSample` needs viscosity or `phase_viscosities`")
     return compute_mixture_viscosity(
         phase_rates=phase_rates, phase_viscosities=properties.phase_viscosities
     )
@@ -387,7 +384,13 @@ def compute_hydrostatic_pressure(
 
 
 class ConnectionFluids(typing.NamedTuple):
-    """Reservoir conditions at every connection of a well, one array per property."""
+    """
+    Reservoir conditions at every connection of a well, one array per property, in the order of
+    the well's connections.
+
+    This is what a well is resolved against. `compile_connection_fluids` builds it from
+    `ConnectionSample` objects, one per connection, when that is how the conditions are at hand.
+    """
 
     pressures: NumberArray[OneDimension]
     """Pressure at each connection."""
@@ -422,6 +425,24 @@ class ConnectionFluids(typing.NamedTuple):
     gas_saturations: NumberArray[OneDimension]
     """Gas saturation at each connection."""
 
+    oil_mobilities: NumberArray[OneDimension]
+    """Reservoir-condition oil mobility at each connection."""
+
+    water_mobilities: NumberArray[OneDimension]
+    """Reservoir-condition water mobility at each connection."""
+
+    gas_mobilities: NumberArray[OneDimension]
+    """Reservoir-condition gas mobility at each connection."""
+
+    oil_formation_volume_factors: NumberArray[OneDimension]
+    """Oil formation volume factor at each connection's current pressure."""
+
+    water_formation_volume_factors: NumberArray[OneDimension]
+    """Water formation volume factor at each connection's current pressure."""
+
+    gas_formation_volume_factors: NumberArray[OneDimension]
+    """Gas formation volume factor at each connection's current pressure."""
+
 
 class ConnectionWalk(typing.NamedTuple):
     """
@@ -454,11 +475,11 @@ class ConnectionWalk(typing.NamedTuple):
     """Gas rate flowing through each segment, at reservoir conditions."""
 
 
-def build_connection_fluids(
+def compile_connection_fluids(
     *, connection_samples: typing.Sequence[ConnectionSample], dtype: npt.DTypeLike = None
 ) -> ConnectionFluids:
     """
-    Gathers the reservoir conditions of a well's connection samples into arrays.
+    Compiles a well's connection samples into the arrays it is resolved against.
 
     :param connection_samples: One `ConnectionSample` per connection.
     :param dtype: Array data type. `bores.precision.get_dtype()` if not given.
@@ -485,6 +506,12 @@ def build_connection_fluids(
         oil_saturations=gather(lambda sample: sample.phase_saturations.oil),
         water_saturations=gather(lambda sample: sample.phase_saturations.water),
         gas_saturations=gather(lambda sample: sample.phase_saturations.gas),
+        oil_mobilities=gather(lambda sample: sample.phase_mobilities.oil),
+        water_mobilities=gather(lambda sample: sample.phase_mobilities.water),
+        gas_mobilities=gather(lambda sample: sample.phase_mobilities.gas),
+        oil_formation_volume_factors=gather(lambda sample: sample.phase_fvfs.oil),
+        water_formation_volume_factors=gather(lambda sample: sample.phase_fvfs.water),
+        gas_formation_volume_factors=gather(lambda sample: sample.phase_fvfs.gas),
     )
 
 
@@ -813,7 +840,7 @@ def compute_perforation_pressures(
     *, wellbore: WellBoreModel, **kwargs: typing.Any
 ) -> NumberArray[OneDimension]:
     """
-    Compute perforation pressures using model/correlation defined by `wellbore.name`.
+    Compute perforation pressures using the model/correlation defined by `wellbore.name`.
 
     :param wellbore: `WellBoreModel` naming a hydraulics correlation.
     :param kwargs: Forwarded to that correlation's `compute_perforation_pressures`.
@@ -839,57 +866,14 @@ def compute_perforation_pressures(
 
         return compute(model=wellbore.options, **kwargs)
     if wellbore.name == "gray":
-        from bores.wells.hydraulics.gray import compute_perforation_pressures as compute
+        from bores.wells.hydraulics.gray import (
+            compute_perforation_pressures as compute,
+        )
 
         return compute(model=wellbore.options, **kwargs)
     if wellbore.name == "woldesemayat_ghajar":
         from bores.wells.hydraulics.woldesemayat_ghajar import (
             compute_perforation_pressures as compute,
-        )
-
-        return compute(model=wellbore.options, **kwargs)
-    raise ValidationError(f"Unknown `WellBoreModel` name: {wellbore.name!r}")
-
-
-def compute_perforation_pressures_from_fluids(
-    *, wellbore: WellBoreModel, **kwargs: typing.Any
-) -> NumberArray[OneDimension]:
-    """
-    Compute perforation pressures from per-connection arrays, using the model/correlation defined
-    by `wellbore.name`.
-
-    :param wellbore: `WellBoreModel` naming a hydraulics correlation.
-    :param kwargs: Forwarded to that correlation's `compute_perforation_pressures_from_fluids`.
-    :returns: Pressure at each connection.
-    :raises ValidationError: If `wellbore.name` isn't recognized.
-    """
-    if wellbore.name == "homogeneous":
-        from bores.wells.hydraulics.homogeneous import (
-            compute_perforation_pressures_from_fluids as compute,
-        )
-
-        return compute(model=wellbore.options, **kwargs)
-    if wellbore.name in ("beggs_brill", "beggs_and_brill"):
-        from bores.wells.hydraulics.beggs_and_brill import (
-            compute_perforation_pressures_from_fluids as compute,
-        )
-
-        return compute(model=wellbore.options, **kwargs)
-    if wellbore.name == "hagedorn_brown":
-        from bores.wells.hydraulics.hagedorn_brown import (
-            compute_perforation_pressures_from_fluids as compute,
-        )
-
-        return compute(model=wellbore.options, **kwargs)
-    if wellbore.name == "gray":
-        from bores.wells.hydraulics.gray import (
-            compute_perforation_pressures_from_fluids as compute,
-        )
-
-        return compute(model=wellbore.options, **kwargs)
-    if wellbore.name == "woldesemayat_ghajar":
-        from bores.wells.hydraulics.woldesemayat_ghajar import (
-            compute_perforation_pressures_from_fluids as compute,
         )
 
         return compute(model=wellbore.options, **kwargs)

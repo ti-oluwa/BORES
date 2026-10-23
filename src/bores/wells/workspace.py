@@ -7,6 +7,7 @@ import numba
 import numpy as np
 import numpy.typing as npt
 
+from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.types import Boolean, IntArray, Integer, Number, NumberArray, OneDimension
 from bores.utils import none_if_nan
@@ -15,7 +16,6 @@ from bores.wells.compile import UNSET_INT, CompiledWellSystem
 from bores.wells.decompile import decompile_limit, decompile_perforations, decompile_well_control
 from bores.wells.hydraulics.base import ConnectionFluids
 from bores.wells.state import (
-    ConnectionSample,
     PerforationState,
     PhaseValues,
     WellState,
@@ -78,29 +78,8 @@ class PerforationWorkspace(typing.NamedTuple):
     d_factor: Number
     """This well's non-Darcy flow coefficient. `NaN` disables the correction."""
 
-    reservoir_pressures: NumberArray[OneDimension]
-    """Matching reservoir pressure at each connection."""
-
     connection_fluids: ConnectionFluids
-    """Matching reservoir conditions at each connection, as the hydraulics correlations read them."""
-
-    oil_mobilities: NumberArray[OneDimension]
-    """Matching reservoir-condition oil mobility at each connection."""
-
-    water_mobilities: NumberArray[OneDimension]
-    """Matching reservoir-condition water mobility at each connection."""
-
-    gas_mobilities: NumberArray[OneDimension]
-    """Matching reservoir-condition gas mobility at each connection."""
-
-    oil_formation_volume_factors: NumberArray[OneDimension]
-    """Matching oil formation volume factor at each connection."""
-
-    water_formation_volume_factors: NumberArray[OneDimension]
-    """Matching water formation volume factor at each connection."""
-
-    gas_formation_volume_factors: NumberArray[OneDimension]
-    """Matching gas formation volume factor at each connection."""
+    """Matching reservoir conditions at each connection."""
 
     representative_depths: NumberArray[OneDimension]
     """Representative depth of each connection, for hydrostatic pressure correction."""
@@ -141,7 +120,7 @@ def build_perforation_workspace(
     representative_depths: NumberArray[OneDimension],
     representative_measured_depths: NumberArray[OneDimension],
     inclinations_from_vertical: NumberArray[OneDimension],
-    connection_samples: typing.Sequence[ConnectionSample],
+    connection_fluids: ConnectionFluids,
     reference_measured_depth: Number,
     connection_conductivities: NumberArray[OneDimension] | None = None,
     d_factor: Number = math.nan,
@@ -156,7 +135,7 @@ def build_perforation_workspace(
     :param representative_measured_depths: Matching measured depths along the wellbore, same
         order as `well_indices`.
     :param inclinations_from_vertical: Matching inclinations, same order as `well_indices`.
-    :param connection_samples: Matching reservoir conditions, same order as `well_indices`.
+    :param connection_fluids: Matching reservoir conditions, same order as `well_indices`.
     :param reference_measured_depth: Measured depth along the wellbore of this well's reference
         depth.
     :param connection_conductivities: Matching Peaceman numerators, same
@@ -169,42 +148,14 @@ def build_perforation_workspace(
     """
     resolved_dtype = np.dtype(dtype) if dtype is not None else get_dtype()
     n = len(well_indices)
-    reservoir_pressures = np.empty(n, dtype=resolved_dtype)
-    oil_mobilities = np.empty(n, dtype=resolved_dtype)
-    water_mobilities = np.empty(n, dtype=resolved_dtype)
-    gas_mobilities = np.empty(n, dtype=resolved_dtype)
-    oil_fvf = np.empty(n, dtype=resolved_dtype)
-    water_fvf = np.empty(n, dtype=resolved_dtype)
-    gas_fvf = np.empty(n, dtype=resolved_dtype)
-    surface_tensions = np.empty(n, dtype=resolved_dtype)
-    oil_densities = np.empty(n, dtype=resolved_dtype)
-    water_densities = np.empty(n, dtype=resolved_dtype)
-    gas_densities = np.empty(n, dtype=resolved_dtype)
-    oil_viscosities = np.empty(n, dtype=resolved_dtype)
-    water_viscosities = np.empty(n, dtype=resolved_dtype)
-    gas_viscosities = np.empty(n, dtype=resolved_dtype)
-    oil_saturations = np.empty(n, dtype=resolved_dtype)
-    water_saturations = np.empty(n, dtype=resolved_dtype)
-    gas_saturations = np.empty(n, dtype=resolved_dtype)
-
-    for i, sample in enumerate(connection_samples):
-        reservoir_pressures[i] = sample.pressure
-        surface_tensions[i] = sample.gas_liquid_surface_tension
-        oil_densities[i] = sample.phase_densities.oil
-        water_densities[i] = sample.phase_densities.water
-        gas_densities[i] = sample.phase_densities.gas
-        oil_viscosities[i] = sample.phase_viscosities.oil
-        water_viscosities[i] = sample.phase_viscosities.water
-        gas_viscosities[i] = sample.phase_viscosities.gas
-        oil_saturations[i] = sample.phase_saturations.oil
-        water_saturations[i] = sample.phase_saturations.water
-        gas_saturations[i] = sample.phase_saturations.gas
-        oil_mobilities[i] = sample.phase_mobilities.oil
-        water_mobilities[i] = sample.phase_mobilities.water
-        gas_mobilities[i] = sample.phase_mobilities.gas
-        oil_fvf[i] = sample.phase_fvfs.oil
-        water_fvf[i] = sample.phase_fvfs.water
-        gas_fvf[i] = sample.phase_fvfs.gas
+    resolved_fluids = ConnectionFluids(
+        *(np.asarray(array, dtype=resolved_dtype) for array in connection_fluids)  # type: ignore[arg-type]
+    )
+    if len(resolved_fluids.pressures) != n:
+        raise ValidationError(
+            f"`connection_fluids` has {len(resolved_fluids.pressures)} connections but "
+            f"`well_indices` has {n}; they must match 1:1."
+        )
 
     static_well_indices = typing.cast(
         NumberArray[OneDimension], np.asarray(well_indices, dtype=resolved_dtype)
@@ -221,26 +172,7 @@ def build_perforation_workspace(
             NumberArray[OneDimension], resolved_connection_conductivities
         ),
         d_factor=d_factor,
-        reservoir_pressures=reservoir_pressures,
-        connection_fluids=ConnectionFluids(
-            pressures=reservoir_pressures,
-            gas_liquid_surface_tensions=surface_tensions,
-            oil_densities=oil_densities,
-            water_densities=water_densities,
-            gas_densities=gas_densities,
-            oil_viscosities=oil_viscosities,
-            water_viscosities=water_viscosities,
-            gas_viscosities=gas_viscosities,
-            oil_saturations=oil_saturations,
-            water_saturations=water_saturations,
-            gas_saturations=gas_saturations,
-        ),
-        oil_mobilities=oil_mobilities,
-        water_mobilities=water_mobilities,
-        gas_mobilities=gas_mobilities,
-        oil_formation_volume_factors=oil_fvf,
-        water_formation_volume_factors=water_fvf,
-        gas_formation_volume_factors=gas_fvf,
+        connection_fluids=resolved_fluids,
         representative_depths=typing.cast(
             NumberArray[OneDimension],
             np.asarray(representative_depths, dtype=resolved_dtype),

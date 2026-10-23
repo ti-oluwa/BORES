@@ -42,7 +42,7 @@ from bores.units import UnitConversionTable, get_conversion_factors
 from bores.utils import scale
 from bores.wells.base import WellType
 from bores.wells.hydraulics.base import (
-    SurfaceFluidProperties,
+    SurfaceSample,
     WellBoreModel,
     compute_tubing_head_pressure,
 )
@@ -1305,7 +1305,7 @@ def bisect_bhp_for_thp(
     wellbore: WellBoreModel,
     reference_depth: Number,
     phase_rates: PhaseValues,
-    surface_fluid_properties: SurfaceFluidProperties,
+    surface_sample: SurfaceSample,
     is_injector: bool,
     target_thp: Number,
     min_bhp: Number,
@@ -1322,7 +1322,7 @@ def bisect_bhp_for_thp(
             reference_depth=reference_depth,
             reference_pressure=bhp,
             phase_rates=phase_rates,
-            surface_fluid_properties=surface_fluid_properties,
+            surface_sample=surface_sample,
             is_injector=is_injector,
         )
         if abs(thp - target_thp) <= convergence_tolerance * max(abs(target_thp), 1.0):
@@ -1343,7 +1343,7 @@ def as_vfp_table(
     reference_depth: Number,
     flow_rates: NumberArray[OneDimension],
     thps: NumberArray[OneDimension],
-    surface_fluid_properties: SurfaceFluidProperties,
+    surface_sample: SurfaceSample,
     flow_type: VFPFlowType | None = None,
     water_fraction_type: VFPWaterFractionType = VFPWaterFractionType.WATER_CUT,
     gas_fraction_type: VFPGasFractionType = VFPGasFractionType.GAS_OIL_RATIO,
@@ -1370,7 +1370,7 @@ def as_vfp_table(
     `compute_tubing_head_pressure` computes analytically, once per grid point, so later
     lookups are a single interpolation instead of a bisection.
 
-    `formation_volume_factors` and `surface_fluid_properties` are held
+    `formation_volume_factors` and `surface_sample` are held
     fixed across the whole grid; this doesn't vary either with pressure
     or with the `water_fractions`/`gas_fractions` sweep. Build separate
     tables if a wider composition range needs its own PVT behavior.
@@ -1385,7 +1385,7 @@ def as_vfp_table(
     :param reference_depth: The well's BHP/THP reporting datum.
     :param flow_rates: Flow rate axis, at surface conditions, in the terms of `flow_type`.
     :param thps: Tubing head pressure axis to solve BHP for.
-    :param surface_fluid_properties: Fixed surface fluid properties used
+    :param surface_sample: Fixed surface fluid properties used
         for every grid point.
     :param flow_type: What `flow_rates` measures. For a producer, liquid rate if not given.
         For an injector, the phase of `injected_phase`.
@@ -1477,7 +1477,7 @@ def as_vfp_table(
                         wellbore=wellbore,
                         reference_depth=reference_depth,
                         phase_rates=phase_rates,
-                        surface_fluid_properties=surface_fluid_properties,
+                        surface_sample=surface_sample,
                         is_injector=is_injector,
                         target_thp=thp,
                         min_bhp=min_bhp,

@@ -11,7 +11,7 @@ from bores.wells.compile import (
     RateQuantityTag,
 )
 from bores.wells.hydraulics.base import (
-    SurfaceFluidProperties,
+    SurfaceSample,
     get_hydrostatic_divisor,
 )
 from bores.wells.hydraulics.hydrostatic import get_pressure_per_density_and_depth
@@ -98,7 +98,7 @@ def get_pressure_bracket(
     :param control_spec: Supplies `producer_bhp_floor`/`injector_bhp_bracket_multiplier`.
     :returns: `(min_pressure, max_pressure)`.
     """
-    cell_pressures = workspace.reservoir_pressures
+    cell_pressures = workspace.connection_fluids.pressures
     if is_injector:
         return min(cell_pressures), control_spec.injector_bhp_bracket_multiplier * max(
             cell_pressures
@@ -263,7 +263,7 @@ def solve_bhp(
     control_spec: WellControlSpec,
     metric: typing.Literal["rate", "thp"] = "rate",
     target_rate_condition: typing.Literal["surface", "reservoir"] = "surface",
-    surface_fluid_properties: SurfaceFluidProperties | None = None,
+    surface_sample: SurfaceSample | None = None,
 ) -> tuple[Number, NumberArray[OneDimension], PhaseValues]:
     """
     Bisects `reference_pressure` in `[min_pressure, max_pressure]` until
@@ -291,17 +291,17 @@ def solve_bhp(
     :param control_spec: Supplies the iteration cap and convergence tolerance.
     :param metric: `"rate"` (default) matches `relevant_phases`' total
         rate against `target`; `"thp"` matches tubing head pressure
-        against `target` instead (requires `surface_fluid_properties`).
+        against `target` instead (requires `surface_sample`).
     :param target_rate_condition: `"surface"` (default) bisects against
         the surface-condition total; `"reservoir"` bisects against the
         raw reservoir-condition total instead. Ignored when `metric="thp"`.
-    :param surface_fluid_properties: Required if `metric="thp"`.
+    :param surface_sample: Required if `metric="thp"`.
     :returns: `(bhp, connection_pressures, phase_rates)`, `phase_rates`
         always reservoir-condition regardless of `target_rate_condition`.
-    :raises ValidationError: If `metric="thp"` and `surface_fluid_properties` is `None`.
+    :raises ValidationError: If `metric="thp"` and `surface_sample` is `None`.
     """
-    if metric == "thp" and surface_fluid_properties is None and tubing.vfp_table is None:
-        raise ValidationError("solve_bhp(..., metric='thp') requires `surface_fluid_properties`.")
+    if metric == "thp" and surface_sample is None and tubing.vfp_table is None:
+        raise ValidationError("solve_bhp(..., metric='thp') requires `surface_sample`.")
 
     low, high = min_pressure, max_pressure
     average_pressure = 0.5 * (low + high)
@@ -333,7 +333,7 @@ def solve_bhp(
                 reference_pressure=average_pressure,
                 phase_rates=phase_rates,
                 surface_phase_rates=surface_phase_rates,
-                surface_fluid_properties=surface_fluid_properties,
+                surface_sample=surface_sample,
                 is_injector=is_injector,
                 connection_rates=get_connection_rates(workspace=workspace),
             )

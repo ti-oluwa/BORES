@@ -15,7 +15,7 @@ from bores.wells.compile import (
     LimitKind,
     RateQuantityTag,
 )
-from bores.wells.hydraulics.base import SurfaceFluidProperties
+from bores.wells.hydraulics.base import SurfaceSample
 from bores.wells.resolution.solvers import (
     RATE_QUANTITY_PHASES,
     compute_tubing_head_pressure,
@@ -144,7 +144,7 @@ def get_thp_bound(
     min_pressure: Number,
     max_pressure: Number,
     control_spec: WellControlSpec,
-    surface_fluid_properties: SurfaceFluidProperties | None,
+    surface_sample: SurfaceSample | None,
 ) -> Number | None:
     """
     Gets the bounding BHP for a `THPLimit` row, if violated.
@@ -170,7 +170,7 @@ def get_thp_bound(
     :param min_pressure: Lower bisection bracket bound.
     :param max_pressure: Upper bisection bracket bound.
     :param control_spec: Solver tunables.
-    :param surface_fluid_properties: Fluid properties at surface conditions.
+    :param surface_sample: Fluid properties at surface conditions.
     :returns: Bounding BHP, or `None` if not violated.
     :raises ValidationError: If the well can't evaluate a THP (no `WellBoreModel` or VFP table).
     """
@@ -180,7 +180,7 @@ def get_thp_bound(
         reference_pressure=bhp,
         phase_rates=phase_rates,
         surface_phase_rates=surface_phase_rates,
-        surface_fluid_properties=surface_fluid_properties,
+        surface_sample=surface_sample,
         is_injector=is_injector,
         connection_rates=connection_rates,
     )
@@ -205,7 +205,7 @@ def get_thp_bound(
         max_pressure=max_pressure,
         control_spec=control_spec,
         metric="thp",
-        surface_fluid_properties=surface_fluid_properties,
+        surface_sample=surface_sample,
     )
     return bound_bhp
 
@@ -280,7 +280,7 @@ def apply_limits(
     min_pressure: Number,
     max_pressure: Number,
     control_spec: WellControlSpec,
-    surface_fluid_properties: SurfaceFluidProperties | None = None,
+    surface_sample: SurfaceSample | None = None,
 ) -> tuple[Number, NumberArray[OneDimension], PhaseValues, PhaseValues, Integer, bool]:
     """
     Evaluates every limit row in `[limits_start, limits_end)` against a
@@ -320,14 +320,14 @@ def apply_limits(
     :param min_pressure: Lower bisection bracket bound.
     :param max_pressure: Upper bisection bracket bound.
     :param control_spec: Solver tunables.
-    :param surface_fluid_properties: Required if any row in range is a `THPLimit`.
+    :param surface_sample: Required if any row in range is a `THPLimit`.
     :returns: `(bhp, connection_pressures, phase_rates, surface_phase_rates,
         active_limit_row, economic_shutin)`. `active_limit_row` is
         `UNSET_INT` if nothing is binding. `phase_rates`/`surface_phase_rates`
         are zeroed if `economic_shutin` is `True`; `connection_pressures`
         is not, as a shut-in well still has a real wellbore pressure profile.
     :raises ValidationError: If a `THPLimit` row is present but
-        `surface_fluid_properties` wasn't supplied for a correlation, or the well has neither a
+        `surface_sample` wasn't supplied for a correlation, or the well has neither a
         `WellBoreModel` nor a VFP table.
 
     On return, `workspace`'s per-connection rate arrays and `connection_pressures` hold the
@@ -365,9 +365,9 @@ def apply_limits(
                 control_spec=control_spec,
             )
         elif kind == LimitKind.THP:
-            if surface_fluid_properties is None and tubing.vfp_table is None:
+            if surface_sample is None and tubing.vfp_table is None:
                 raise ValidationError(
-                    "A THP limit is present but no `surface_fluid_properties` "
+                    "A THP limit is present but no `surface_sample` "
                     "was supplied to `apply_limits`. THP limits can't be "
                     "evaluated with a hydraulics correlation without it."
                 )
@@ -393,7 +393,7 @@ def apply_limits(
                 min_pressure=min_pressure,
                 max_pressure=max_pressure,
                 control_spec=control_spec,
-                surface_fluid_properties=surface_fluid_properties,
+                surface_sample=surface_sample,
             )
         else:
             raise ValidationError(f"Unknown `LimitKind`: {kind!r}.")

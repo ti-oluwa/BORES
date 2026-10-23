@@ -26,7 +26,9 @@ def reference(grid, *, i1, i2, j1, j2, k1, k2, face_direction, label):
             for i in range(i1, i2 + 1):
                 cell_label = f"{label}: cell ({i},{j},{k})"
                 if not (1 <= i <= nx and 1 <= j <= ny and 1 <= k <= nz):
-                    messages.append(f"{cell_label} is outside grid bounds ({nx}x{ny}x{nz}). Skipping.")
+                    messages.append(
+                        f"{cell_label} is outside grid bounds ({nx}x{ny}x{nz}). Skipping."
+                    )
                     continue
                 cell = int(grid.flat_index(i - 1, j - 1, k - 1))
                 if not grid.is_cell_active(cell):

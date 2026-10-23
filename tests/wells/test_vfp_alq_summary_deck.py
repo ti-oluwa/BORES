@@ -15,6 +15,7 @@ from bores.wells.deck import (
     load_producer_control_from_record,
     load_summary_items,
 )
+from bores.wells.hydraulics.base import compile_connection_fluids
 from bores.wells.hydraulics.vfp import (
     VFPData,
     VFPFlowType,
@@ -887,7 +888,7 @@ def test_vfp_thp_uses_surface_rates_and_refuses_a_datum_mismatch(tmp_path):
         "tubing": tubing,
         "phase_rates": rates,
         "surface_phase_rates": rates,
-        "surface_fluid_properties": None,
+        "surface_sample": None,
         "is_injector": False,
     }
     expected_bhp = float(
@@ -936,7 +937,7 @@ def test_vfp_thp_follows_an_oil_rate_table_with_no_gas(tmp_path):
         reference_pressure=expected_bhp,
         phase_rates=rates,
         surface_phase_rates=rates,
-        surface_fluid_properties=None,
+        surface_sample=None,
         is_injector=False,
     )
     assert thp == pytest.approx(30.0)
@@ -986,7 +987,7 @@ def test_values_that_describe_no_rates_are_rejected():
 
 
 def sampled_table(**kwargs):
-    from bores.wells.hydraulics.base import SurfaceFluidProperties
+    from bores.wells.hydraulics.base import SurfaceSample
     from bores.wells.hydraulics.homogeneous import homogeneous_wellbore
     from bores.wells.hydraulics.vfp import as_vfp_table
 
@@ -995,7 +996,7 @@ def sampled_table(**kwargs):
         table_number=1,
         reference_depth=5000.0,
         thps=np.array([100.0, 300.0]),
-        surface_fluid_properties=SurfaceFluidProperties(density=50.0, viscosity=1.0),
+        surface_sample=SurfaceSample(density=50.0, viscosity=1.0),
         min_bhp=0.0,
         max_bhp=20000.0,
         **kwargs,
@@ -1133,7 +1134,7 @@ def test_thp_is_found_through_a_datum_shift(tmp_path):
         "reference_pressure": datum_bhp - shift,
         "phase_rates": rates,
         "surface_phase_rates": rates,
-        "surface_fluid_properties": None,
+        "surface_sample": None,
         "is_injector": False,
     }
     thp = compute_tubing_head_pressure(**kwargs, connection_rates=rates_by_connection)
@@ -1143,18 +1144,16 @@ def test_thp_is_found_through_a_datum_shift(tmp_path):
 
 
 def test_attached_flowing_fluid_records_densities_and_a_zero_flow_density():
-    from bores.wells.hydraulics.base import PhaseValues, build_connection_fluids
+    from bores.wells.hydraulics.base import PhaseValues
     from bores.wells.resolution.tubing import WellTubing, attach_flowing_fluid
 
+    samples = [
+        sample._replace(phase_mobilities=PhaseValues(1.0, 0.0, 2.0))
+        for sample in hydrostatic_samples(oil_densities=(40.0, 60.0))
+    ]
     workspace = types.SimpleNamespace(
         well_indices=np.array([1.0, 3.0]),
-        oil_mobilities=np.array([1.0, 1.0]),
-        water_mobilities=np.array([0.0, 0.0]),
-        gas_mobilities=np.array([2.0, 2.0]),
-        connection_fluids=build_connection_fluids(
-            connection_samples=hydrostatic_samples(oil_densities=(40.0, 60.0)),
-            dtype=np.float64,
-        ),
+        connection_fluids=compile_connection_fluids(connection_samples=samples, dtype=np.float64),
     )
     table = lookup_table(
         flow_type=VFPFlowType.LIQUID,
@@ -1231,7 +1230,7 @@ def resolve_producer(
         compiled_system=compiled,
         well_row=0,
         tubing_performance=vfp_tables,
-        connection_samples=samples,
+        connection_fluids=compile_connection_fluids(connection_samples=samples),
         workspace=workspace,
         control_spec=WellControlSpec(
             connection_pressure_mode=mode or ConnectionPressureMode.UNIFORM_BHP
@@ -1316,15 +1315,20 @@ def hydrostatic_pressures(*, reference_depth, oil, depths=(100.0, 200.0, 400.0),
     from bores.wells.hydraulics.hydrostatic import compute_perforation_pressures
 
     count = len(depths)
+    rates = connection_rates(
+        oil=oil,
+        water=kwargs.get("water", (0.0,) * count),
+        gas=kwargs.get("gas", (0.0,) * count),
+    )
     return compute_perforation_pressures(
         reference_depth=reference_depth,
         reference_pressure=1000.0,
         representative_depths=np.array(depths),
-        connection_samples=hydrostatic_samples()[:count],
-        connection_rates=connection_rates(
-            oil=oil,
-            water=kwargs.get("water", (0.0,) * count),
-            gas=kwargs.get("gas", (0.0,) * count),
+        connection_oil_rates=rates.oil,
+        connection_water_rates=rates.water,
+        connection_gas_rates=rates.gas,
+        connection_fluids=compile_connection_fluids(
+            connection_samples=hydrostatic_samples()[:count], dtype=np.float64
         ),
         unit_system=UnitSystem.FIELD,
     )
@@ -1383,8 +1387,12 @@ def test_hydrostatic_mode_is_refused_with_mismatched_lengths():
             reference_depth=0.0,
             reference_pressure=1000.0,
             representative_depths=np.array([1.0, 2.0]),
-            connection_samples=hydrostatic_samples()[:3],
-            connection_rates=connection_rates(oil=(1.0, 1.0, 1.0), water=(0, 0, 0), gas=(0, 0, 0)),
+            connection_oil_rates=np.ones(3),
+            connection_water_rates=np.zeros(3),
+            connection_gas_rates=np.zeros(3),
+            connection_fluids=compile_connection_fluids(
+                connection_samples=hydrostatic_samples()[:3], dtype=np.float64
+            ),
             unit_system=UnitSystem.FIELD,
         )
 
@@ -1400,7 +1408,6 @@ def test_a_vfp_well_needs_a_connection_pressure_mode_that_does_not_need_hydrauli
 def test_a_vfp_well_resolves_with_hydrostatic_connection_pressures(tmp_path):
     from bores.wells.hydraulics.hydrostatic import compute_perforation_pressures
     from bores.wells.resolution.spec import ConnectionPressureMode
-    from bores.wells.workspace import ConnectionRates
 
     tables = VFPTables.from_deck(producer_table(tmp_path))
     workspace, samples = resolve_producer(
@@ -1417,12 +1424,10 @@ def test_a_vfp_well_resolves_with_hydrostatic_connection_pressures(tmp_path):
         reference_depth=75.0,
         reference_pressure=1000.0,
         representative_depths=np.array([25.0, 75.0, 125.0]),
-        connection_samples=samples,
-        connection_rates=ConnectionRates(
-            oil=workspace.connection_oil_rates,
-            water=workspace.connection_water_rates,
-            gas=workspace.connection_gas_rates,
-        ),
+        connection_oil_rates=workspace.connection_oil_rates,
+        connection_water_rates=workspace.connection_water_rates,
+        connection_gas_rates=workspace.connection_gas_rates,
+        connection_fluids=compile_connection_fluids(connection_samples=samples),
         unit_system=UnitSystem.FIELD,
     )
     assert workspace.connection_pressures == pytest.approx(expected, rel=1e-4)
@@ -1569,7 +1574,6 @@ def correlation_pressures(
     inclinations=None,
     **kwargs,
 ):
-    from bores.wells.hydraulics.base import PhaseValues
     from bores.wells.hydraulics.homogeneous import (
         compute_perforation_pressures,
         homogeneous_wellbore,
@@ -1584,7 +1588,9 @@ def correlation_pressures(
             reference_depth if reference_measured_depth is None else reference_measured_depth
         ),
         reference_pressure=1000.0,
-        connection_phase_rates=[PhaseValues(oil=100.0, water=0.0, gas=0.0)] * count,
+        connection_oil_rates=np.full(count, 100.0),
+        connection_water_rates=np.zeros(count),
+        connection_gas_rates=np.zeros(count),
         representative_depths=np.array(depths),
         representative_measured_depths=np.array(
             depths if measured_depths is None else measured_depths
@@ -1592,7 +1598,9 @@ def correlation_pressures(
         inclinations_from_vertical=np.zeros(count)
         if inclinations is None
         else np.array(inclinations),
-        connection_samples=hydrostatic_samples()[:count],
+        connection_fluids=compile_connection_fluids(
+            connection_samples=hydrostatic_samples()[:count], dtype=np.float64
+        ),
         is_injector=is_injector,
         **kwargs,
     )
@@ -1623,21 +1631,28 @@ def test_correlation_pressure_rises_with_depth_when_the_reference_is_the_shallow
 def test_hydrostatic_pressures_keep_the_dtype_they_are_given():
     from bores.wells.hydraulics.hydrostatic import compute_perforation_pressures
 
-    kwargs = dict(
-        reference_depth=100.0,
-        reference_pressure=1000.0,
-        connection_samples=hydrostatic_samples(),
-        unit_system=UnitSystem.FIELD,
-    )
+    kwargs = dict(reference_depth=100.0, reference_pressure=1000.0, unit_system=UnitSystem.FIELD)
     depths = np.array([100.0, 200.0, 400.0], dtype=np.float32)
     rates = connection_rates(oil=(10.0, 20.0, 30.0), water=(0.0,) * 3, gas=(0.0,) * 3)
-    rates32 = type(rates)(*(array.astype(np.float32) for array in rates))
     single = compute_perforation_pressures(
-        representative_depths=depths, connection_rates=rates32, dtype=np.float32, **kwargs
+        representative_depths=depths,
+        connection_oil_rates=rates.oil.astype(np.float32),
+        connection_water_rates=rates.water.astype(np.float32),
+        connection_gas_rates=rates.gas.astype(np.float32),
+        connection_fluids=compile_connection_fluids(
+            connection_samples=hydrostatic_samples(), dtype=np.float32
+        ),
+        dtype=np.float32,
+        **kwargs,
     )
     double = compute_perforation_pressures(
         representative_depths=depths.astype(np.float64),
-        connection_rates=rates,
+        connection_oil_rates=rates.oil,
+        connection_water_rates=rates.water,
+        connection_gas_rates=rates.gas,
+        connection_fluids=compile_connection_fluids(
+            connection_samples=hydrostatic_samples(), dtype=np.float64
+        ),
         dtype=np.float64,
         **kwargs,
     )
@@ -1801,7 +1816,11 @@ def resolve_horizontal_producer(*, bhp, mobility=1e-4, max_fixed_point_iteration
         compiled_system=compiled,
         well_row=0,
         tubing_performance=homogeneous_wellbore(tubing_inner_diameter=0.25),
-        connection_samples=hydrostatic_samples(oil_densities=(50.0,) * count, mobility=mobility),
+        connection_fluids=compile_connection_fluids(
+            connection_samples=hydrostatic_samples(
+                oil_densities=(50.0,) * count, mobility=mobility
+            )
+        ),
         workspace=workspace,
         control_spec=WellControlSpec(
             connection_pressure_mode=ConnectionPressureMode.HYDRAULIC,
@@ -1882,7 +1901,7 @@ def scenario(*, unit_system, geometry, reference_kind, rate_kind, dtype):
     import math
 
     from bores.units import get_conversion_factors
-    from bores.wells.hydraulics.base import build_connection_fluids
+    from bores.wells.hydraulics.base import compile_connection_fluids
     from bores.wells.state import ConnectionSample, PhaseValues
 
     count = 6
@@ -1957,7 +1976,7 @@ def scenario(*, unit_system, geometry, reference_kind, rate_kind, dtype):
         oil=(oil * rate_factor).astype(dtype),
         water=(water * rate_factor).astype(dtype),
         gas=(gas * rate_factor).astype(dtype),
-        fluids=build_connection_fluids(connection_samples=samples, dtype=dtype),
+        fluids=compile_connection_fluids(connection_samples=samples, dtype=dtype),
         samples=samples,
         diameter=0.25 * length,
     )
@@ -2024,7 +2043,7 @@ def test_a_static_column_follows_the_unit_systems_own_constants(unit_system):
         get_gravitational_acceleration,
     )
     from bores.wells.hydraulics.homogeneous import (
-        compute_perforation_pressures_from_fluids,
+        compute_perforation_pressures,
         homogeneous_wellbore,
     )
 
@@ -2036,7 +2055,7 @@ def test_a_static_column_follows_the_unit_systems_own_constants(unit_system):
         dtype=np.float64,
     )
     model = homogeneous_wellbore(tubing_inner_diameter=case.diameter, unit_system=unit_system)
-    pressures = compute_perforation_pressures_from_fluids(
+    pressures = compute_perforation_pressures(
         model.options,
         case.reference_depth,
         case.reference_measured_depth,
@@ -2082,7 +2101,7 @@ def test_the_walk_keeps_the_precision_it_is_given(module, factory):
             dtype=dtype,
         )
         model = getattr(target, factory)(tubing_inner_diameter=case.diameter).options
-        results[dtype] = target.compute_perforation_pressures_from_fluids(
+        results[dtype] = target.compute_perforation_pressures(
             model,
             dtype(case.reference_depth),
             dtype(case.reference_measured_depth),
@@ -2104,7 +2123,7 @@ def test_the_walk_keeps_the_precision_it_is_given(module, factory):
 
 def test_per_connection_inputs_of_different_lengths_are_rejected():
     from bores.wells.hydraulics.homogeneous import (
-        compute_perforation_pressures_from_fluids,
+        compute_perforation_pressures,
         homogeneous_wellbore,
     )
 
@@ -2117,7 +2136,7 @@ def test_per_connection_inputs_of_different_lengths_are_rejected():
     )
     model = homogeneous_wellbore(tubing_inner_diameter=case.diameter).options
     with pytest.raises(ValueError, match="same length"):
-        compute_perforation_pressures_from_fluids(
+        compute_perforation_pressures(
             model,
             case.reference_depth,
             case.reference_measured_depth,
@@ -2131,49 +2150,6 @@ def test_per_connection_inputs_of_different_lengths_are_rejected():
             case.fluids,
             False,
         )
-
-
-@pytest.mark.parametrize("unit_system", list(UnitSystem))
-def test_a_given_hydrostatic_divisor_is_used_and_matches_the_default(unit_system):
-    from bores.wells.hydraulics.base import get_hydrostatic_divisor
-    from bores.wells.hydraulics.homogeneous import (
-        compute_perforation_pressures_from_fluids,
-        homogeneous_wellbore,
-    )
-
-    case = scenario(
-        unit_system=unit_system,
-        geometry="vertical",
-        reference_kind="top",
-        rate_kind="zero",
-        dtype=np.float64,
-    )
-    model = homogeneous_wellbore(
-        tubing_inner_diameter=case.diameter, unit_system=unit_system
-    ).options
-
-    def pressures(**kwargs):
-        return compute_perforation_pressures_from_fluids(
-            model,
-            case.reference_depth,
-            case.reference_measured_depth,
-            case.reference_pressure,
-            case.oil,
-            case.water,
-            case.gas,
-            case.depths,
-            case.measured_depths,
-            case.inclinations,
-            case.fluids,
-            False,
-            **kwargs,
-        )
-
-    divisor = get_hydrostatic_divisor(unit_system)
-    assert pressures(hydrostatic_divisor=divisor) == pytest.approx(pressures(), rel=0, abs=0)
-    head = pressures()[1:] - case.reference_pressure
-    doubled = pressures(hydrostatic_divisor=2.0 * divisor)[1:] - case.reference_pressure
-    assert doubled == pytest.approx(head / 2.0, rel=1e-12)
 
 
 def test_region_in_place_uses_the_pore_volume_at_the_current_pressure(monkeypatch):
@@ -2770,7 +2746,7 @@ def build_case_workspace(
         representative_depths=case.depths,
         representative_measured_depths=case.measured_depths,
         inclinations_from_vertical=case.inclinations,
-        connection_samples=samples,
+        connection_fluids=compile_connection_fluids(connection_samples=samples, dtype=np.float64),
         reference_measured_depth=case.reference_measured_depth,
         connection_conductivities=np.full(6, 4000.0 * well_index_scale),
         d_factor=d_factor / factors["reservoir_rate"],
