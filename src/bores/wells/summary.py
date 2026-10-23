@@ -11,6 +11,10 @@ zero for an injector. Every volume and rate is in the model's own unit system, s
 reports cubic feet and cubic feet per day, not barrels. Cumulative totals
 (`FOPT`, `WWIT`, ...) read the workspace's running volumes, which the run advances every
 accepted step with `bores.wells.workspace.accumulate_well_volumes`.
+
+Block vectors (`BPR`, `BGSAT`, ...) report one grid cell. They take the cell as 0-based
+`i`, `j`, `k`, like `Grid.flat_index`, and name it with Eclipse's 1-based indices in their
+report key, e.g. `"BPR:1,1,1"` for the first cell.
 """
 
 import typing
@@ -31,6 +35,19 @@ if typing.TYPE_CHECKING:
     from bores.simulation.workspace import SimulationWorkspace
 
 __all__ = [
+    "BGKR",
+    "BGSAT",
+    "BOKR",
+    "BOSAT",
+    "BPR",
+    "BPRESSUR",
+    "BRS",
+    "BRV",
+    "BSGAS",
+    "BSOIL",
+    "BSWAT",
+    "BWKR",
+    "BWSAT",
     "FGIR",
     "FGIT",
     "FGOR",
@@ -66,6 +83,16 @@ __all__ = [
     "WWIT",
     "WWPR",
     "WWPT",
+    "BlockGasOilRatio",
+    "BlockGasRelativePermeability",
+    "BlockGasSaturation",
+    "BlockOilRelativePermeability",
+    "BlockOilSaturation",
+    "BlockPressure",
+    "BlockVaporizedOilGasRatio",
+    "BlockVector",
+    "BlockWaterRelativePermeability",
+    "BlockWaterSaturation",
     "FieldGasInjectionRate",
     "FieldGasInjectionTotal",
     "FieldGasOilRatio",
@@ -859,6 +886,157 @@ class RegionGasInPlace(RegionInPlace):
         return (free_gas + gas_in_oil + gas_in_water)[region_mask].sum()
 
 
+@attrs.frozen(kw_only=True, slots=True)
+class BlockVector(Summary["CompiledBlackOilModel"]):
+    """Base for a per-cell vector. Subclasses set `mnemonic` and implement `get_value`."""
+
+    mnemonic = ""
+
+    i: Integer
+    """The cell's 0-based x index."""
+
+    j: Integer
+    """The cell's 0-based y index."""
+
+    k: Integer
+    """The cell's 0-based z index."""
+
+    @property
+    def key(self) -> str:
+        """
+        This vector's report key.
+
+        :returns: The Eclipse mnemonic and the cell's 1-based indices, e.g. `"BPR:1,1,1"`.
+        """
+        return f"{self.mnemonic}:{self.i + 1},{self.j + 1},{self.k + 1}"
+
+    def get_value(
+        self, *, cell_index: Integer, workspace: "SimulationWorkspace"
+    ) -> Number:
+        """
+        Reads this vector's value for one cell. Must be overridden.
+
+        :param cell_index: The cell's flat index.
+        :param workspace: The run's workspace.
+        :returns: The cell's value.
+        """
+        raise NotImplementedError
+
+    def __call__(self, model: "CompiledBlackOilModel", context: ScheduleContext) -> Number:
+        """
+        Reads this vector's value for the cell at `i`, `j`, `k`.
+
+        :param model: The model to look the cell up in.
+        :param context: The current moment's context, carrying the workspace.
+        :returns: The cell's value.
+        :raises SummaryError: If the cell is outside the model's grid, or the grid has no
+            `i`, `j`, `k` layout.
+        """
+        dimensions = model.reservoir.grid.dimensions
+        if dimensions is None:
+            raise SummaryError(f"{self.mnemonic}: the model's grid has no `i`, `j`, `k` layout.")
+        if not (0 <= self.i < dimensions.nx and 0 <= self.j < dimensions.ny and 0 <= self.k < dimensions.nz):
+            raise SummaryError(
+                f"{self.key}: cell is outside the {dimensions.nx} x {dimensions.ny} x "
+                f"{dimensions.nz} grid."
+            )
+        return self.get_value(
+            cell_index=dimensions.flat_index(self.i, self.j, self.k),
+            workspace=get_workspace(context=context),
+        )
+
+
+@attrs.frozen(kw_only=True, slots=True)
+class BlockPressure(BlockVector):
+    """Oil phase pressure in a cell (`BPR`, also written `BPRESSUR`)."""
+
+    mnemonic = "BPR"
+
+    def get_value(self, *, cell_index: Integer, workspace: "SimulationWorkspace") -> Number:
+        return workspace.reservoir.pressure[cell_index]
+
+
+@attrs.frozen(kw_only=True, slots=True)
+class BlockGasSaturation(BlockVector):
+    """Gas saturation in a cell (`BGSAT`, also written `BSGAS`)."""
+
+    mnemonic = "BGSAT"
+
+    def get_value(self, *, cell_index: Integer, workspace: "SimulationWorkspace") -> Number:
+        return workspace.reservoir.gas_saturation[cell_index]
+
+
+@attrs.frozen(kw_only=True, slots=True)
+class BlockOilSaturation(BlockVector):
+    """Oil saturation in a cell (`BOSAT`, also written `BSOIL`)."""
+
+    mnemonic = "BOSAT"
+
+    def get_value(self, *, cell_index: Integer, workspace: "SimulationWorkspace") -> Number:
+        return workspace.reservoir.oil_saturation[cell_index]
+
+
+@attrs.frozen(kw_only=True, slots=True)
+class BlockWaterSaturation(BlockVector):
+    """Water saturation in a cell (`BWSAT`, also written `BSWAT`)."""
+
+    mnemonic = "BWSAT"
+
+    def get_value(self, *, cell_index: Integer, workspace: "SimulationWorkspace") -> Number:
+        return workspace.reservoir.water_saturation[cell_index]
+
+
+@attrs.frozen(kw_only=True, slots=True)
+class BlockGasOilRatio(BlockVector):
+    """Gas dissolved in the oil of a cell (`BRS`), per unit of stock-tank oil."""
+
+    mnemonic = "BRS"
+
+    def get_value(self, *, cell_index: Integer, workspace: "SimulationWorkspace") -> Number:
+        return workspace.reservoir.solution_gor[cell_index]
+
+
+@attrs.frozen(kw_only=True, slots=True)
+class BlockVaporizedOilGasRatio(BlockVector):
+    """Oil vaporized in the gas of a cell (`BRV`), per unit of gas. `0` where the model doesn't track it."""
+
+    mnemonic = "BRV"
+
+    def get_value(self, *, cell_index: Integer, workspace: "SimulationWorkspace") -> Number:
+        value = workspace.reservoir.vaporized_oil_gas_ratio[cell_index]
+        return 0.0 if np.isnan(value) else value
+
+
+@attrs.frozen(kw_only=True, slots=True)
+class BlockOilRelativePermeability(BlockVector):
+    """Oil relative permeability in a cell (`BOKR`)."""
+
+    mnemonic = "BOKR"
+
+    def get_value(self, *, cell_index: Integer, workspace: "SimulationWorkspace") -> Number:
+        return workspace.physics.satfunc.oil_relative_permeability[cell_index]
+
+
+@attrs.frozen(kw_only=True, slots=True)
+class BlockWaterRelativePermeability(BlockVector):
+    """Water relative permeability in a cell (`BWKR`)."""
+
+    mnemonic = "BWKR"
+
+    def get_value(self, *, cell_index: Integer, workspace: "SimulationWorkspace") -> Number:
+        return workspace.physics.satfunc.water_relative_permeability[cell_index]
+
+
+@attrs.frozen(kw_only=True, slots=True)
+class BlockGasRelativePermeability(BlockVector):
+    """Gas relative permeability in a cell (`BGKR`)."""
+
+    mnemonic = "BGKR"
+
+    def get_value(self, *, cell_index: Integer, workspace: "SimulationWorkspace") -> Number:
+        return workspace.physics.satfunc.gas_relative_permeability[cell_index]
+
+
 FOPR = FieldOilProductionRate
 FWPR = FieldWaterProductionRate
 FGPR = FieldGasProductionRate
@@ -894,3 +1072,16 @@ WGIT = WellGasInjectionTotal
 ROIP = RegionOilInPlace
 RWIP = RegionWaterInPlace
 RGIP = RegionGasInPlace
+BPR = BlockPressure
+BPRESSUR = BlockPressure
+BGSAT = BlockGasSaturation
+BSGAS = BlockGasSaturation
+BOSAT = BlockOilSaturation
+BSOIL = BlockOilSaturation
+BWSAT = BlockWaterSaturation
+BSWAT = BlockWaterSaturation
+BRS = BlockGasOilRatio
+BRV = BlockVaporizedOilGasRatio
+BOKR = BlockOilRelativePermeability
+BWKR = BlockWaterRelativePermeability
+BGKR = BlockGasRelativePermeability

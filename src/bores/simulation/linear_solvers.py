@@ -1,6 +1,7 @@
 import logging
 import threading
 import typing
+import warnings
 
 import numpy as np
 import numpy.typing as npt
@@ -8,11 +9,10 @@ import pyamg  # type: ignore[import-untyped]
 from scipy.sparse import (  # type: ignore[import-untyped]
     csr_array,
     csr_matrix,
-    diags,
-    isspmatrix_csr,
 )
 from scipy.sparse.linalg import (  # type: ignore[import-untyped]
     LinearOperator,
+    MatrixRankWarning,
     bicg,
     bicgstab,
     cg,
@@ -28,7 +28,6 @@ from scipy.sparse.linalg import (  # type: ignore[import-untyped]
 )
 
 from bores.errors import PreconditionerError, SolverError, ValidationError
-from bores.precision import get_floating_point_info
 from bores.types import (
     Preconditioner,
     PreconditionerFactory,
@@ -40,9 +39,16 @@ logger = logging.getLogger(__name__)
 
 
 __all__ = [
+    "CPR_AMG_KWARGS",
+    "CPR_ILU_KWARGS",
+    "ILU_QUALITY_ERROR_THRESHOLD",
+    "ILU_QUALITY_WARNING_THRESHOLD",
+    "RESIDUAL_VERIFICATION_FACTOR",
     "CachedPreconditionerFactory",
+    "SystemScalingMethod",
     "get_preconditioner_factory",
     "get_solver_function",
+    "invert_diagonal_blocks",
     "list_preconditioner_factories",
     "list_solver_functions",
     "make_amg_preconditioner",
@@ -52,9 +58,145 @@ __all__ = [
     "make_ilu_preconditioner",
     "make_polynomial_preconditioner",
     "preconditioner_factory",
+    "scale_linear_system",
     "solve_linear_system",
     "solver_function",
 ]
+
+
+ILU_QUALITY_WARNING_THRESHOLD = 1e3
+"""
+Relative error of an ILU factorization applied to a probe vector above which a warning
+is logged. The error is `||A·M·v - v|| / ||v||`, which is close to zero for an accurate
+factorization.
+"""
+
+ILU_QUALITY_ERROR_THRESHOLD = 1e6
+"""
+Relative error of an ILU factorization applied to a probe vector above which the
+factorization is rejected as numerically meaningless.
+"""
+
+RESIDUAL_VERIFICATION_FACTOR = 10.0
+"""
+How much larger than the requested tolerance the true residual `||b - A·x||` of an
+iterative solution may be before the solution is rejected. Iterative solvers decide
+convergence from internal estimates, which can differ from the true residual, so every
+solution reported as converged is checked against the true residual.
+"""
+
+
+def _safe_inverse_diagonal(diagonal: npt.NDArray) -> npt.NDArray:
+    """
+    Inverts a vector of diagonal entries, leaving unusable entries unscaled.
+
+    An entry is unusable when it is not finite or when its magnitude is below the
+    floating point precision of its dtype relative to the largest entry. Such entries
+    are treated as one, so that they neither amplify the residual nor divide by zero.
+
+    :param diagonal: The diagonal entries to invert.
+    :return: The element-wise inverse, with unusable entries replaced by one.
+    """
+    diagonal = np.asarray(diagonal)
+    magnitude = np.abs(diagonal)
+    finite = np.isfinite(magnitude)
+    largest = magnitude[finite].max() if finite.any() else 0.0
+    threshold = np.finfo(diagonal.dtype).eps * largest
+    unusable = ~finite | (magnitude <= threshold)
+    return 1.0 / np.where(unusable, 1.0, diagonal)
+
+
+def _flatten(vector: npt.NDArray) -> npt.NDArray:
+    """Returns `vector` as one dimension, accepting the `(n, 1)` shape SciPy may pass."""
+    return np.asarray(vector).reshape(-1)
+
+
+def invert_diagonal_blocks(
+    A_csr: csr_array | csr_matrix,
+    *,
+    block_size: int,
+) -> npt.NDArray:
+    """
+    Inverts every dense diagonal block of a block-structured sparse matrix.
+
+    The matrix is split into consecutive square blocks of `block_size` rows and
+    columns along its diagonal. When the matrix dimension is not a multiple of
+    `block_size`, the last block is smaller, and it is padded with an identity so all
+    blocks can be inverted together. A block that cannot be inverted is replaced by
+    the inverse of its diagonal, with unusable diagonal entries treated as one.
+
+    :param A_csr: The coefficient matrix in CSR format.
+    :param block_size: Number of rows and columns in each diagonal block.
+    :return: Array of shape `(number_of_blocks, block_size, block_size)` holding the
+        inverse of each diagonal block.
+    :raises ValidationError: If the matrix is not square or `block_size` is below one.
+    """
+    if block_size < 1:
+        raise ValidationError(f"`block_size` must be at least 1, got {block_size}.")
+
+    n = A_csr.shape[0]
+    if A_csr.shape[1] != n:
+        raise ValidationError(f"Matrix must be square, got shape {A_csr.shape}.")
+
+    number_of_blocks = -(-n // block_size)
+    padded_size = number_of_blocks * block_size
+
+    coo = A_csr.tocoo()
+    row_block = coo.row // block_size
+    inside_block = row_block == (coo.col // block_size)
+    flat_position = (
+        row_block[inside_block] * block_size + coo.row[inside_block] % block_size
+    ) * block_size + coo.col[inside_block] % block_size
+    # Accumulating (rather than assigning) also handles matrices with duplicate entries.
+    flat_blocks = np.bincount(
+        flat_position,
+        weights=coo.data[inside_block],
+        minlength=number_of_blocks * block_size * block_size,
+    )
+    blocks = flat_blocks.reshape(number_of_blocks, block_size, block_size)
+    for padded_row in range(n, padded_size):
+        blocks[padded_row // block_size, padded_row % block_size, padded_row % block_size] = 1.0
+
+    try:
+        inverses = np.linalg.inv(blocks)
+        failed = ~np.isfinite(inverses).all(axis=(1, 2))
+    except np.linalg.LinAlgError:
+        inverses = np.empty_like(blocks)
+        failed = np.zeros(number_of_blocks, dtype=bool)
+        for block_index in range(number_of_blocks):
+            try:
+                inverses[block_index] = np.linalg.inv(blocks[block_index])
+            except np.linalg.LinAlgError:
+                failed[block_index] = True
+
+    for failed_index in np.flatnonzero(failed):
+        inverses[failed_index] = np.diag(_safe_inverse_diagonal(np.diag(blocks[failed_index])))
+    return inverses.astype(A_csr.dtype, copy=False)
+
+
+def _apply_block_inverses(
+    inverses: npt.NDArray,
+    vector: npt.NDArray,
+    *,
+    transpose: bool = False,
+) -> npt.NDArray:
+    """Multiplies `vector` by the block diagonal matrix whose blocks are `inverses`."""
+    number_of_blocks, block_size, _ = inverses.shape
+    flat = _flatten(vector)
+    n = flat.shape[0]
+    padded_size = number_of_blocks * block_size
+    if padded_size != n:
+        padded = np.zeros(padded_size, dtype=flat.dtype)
+        padded[:n] = flat
+        flat = padded
+    subscripts = "nji,nj->ni" if transpose else "nij,nj->ni"
+    result = np.einsum(subscripts, inverses, flat.reshape(number_of_blocks, block_size))
+    return result.reshape(-1)[:n].reshape(np.shape(vector))
+
+
+def _check_square(A_csr: csr_array | csr_matrix) -> None:
+    if A_csr.shape[0] != A_csr.shape[1]:
+        raise ValidationError(f"Matrix must be square, got shape {A_csr.shape}.")
 
 
 def make_amg_preconditioner(
@@ -63,13 +205,19 @@ def make_amg_preconditioner(
     """
     Creates an Algebraic Multigrid (AMG) preconditioner using PyAMG.
 
+    Smoothed aggregation AMG works best for matrices that resemble a diffusion
+    operator, such as the pressure block of a reservoir Jacobian. It is a poor choice
+    for a full multi-variable Jacobian. The returned operator does not support
+    transposed products, so it cannot be used with the `bicg` and `qmr` solvers.
+
     :param A_csr: The coefficient matrix in CSR format.
     :param cycle: Multigrid cycle type ('V', 'W', 'F'). V-cycle is standard,
         W-cycle offers better convergence for difficult problems but is more expensive.
     :param kwargs: Additional arguments for `pyamg.smoothed_aggregation_solver`.
     :return: A SciPy `LinearOperator` that represents the AMG preconditioner.
     """
-    solver = pyamg.smoothed_aggregation_solver(A_csr, **kwargs)
+    _check_square(A_csr)
+    solver = pyamg.smoothed_aggregation_solver(A_csr.tocsr(), **kwargs)
     return solver.aspreconditioner(cycle=cycle)
 
 
@@ -77,19 +225,46 @@ def make_diagonal_preconditioner(
     A_csr: csr_array | csr_matrix,
 ) -> LinearOperator:
     """
-    Creates a diagonal preconditioner from the coefficient matrix.
+    Creates a diagonal (Jacobi) preconditioner from the coefficient matrix.
+
+    Diagonal entries that are not finite, or that are negligible compared with the
+    largest diagonal entry at the matrix precision, are treated as one.
 
     :param A_csr: The coefficient matrix in CSR format.
     :return: A SciPy `LinearOperator` that represents the diagonal preconditioner.
     """
-    diagonal_elements = A_csr.diagonal()
-    # Avoid division by zero by replacing zeros with a small number
-    # Use precision-adaptive threshold for float32/float64 compatibility
-    epsilon = get_floating_point_info().eps
-    threshold = max(1e-10, 100 * epsilon)
-    diagonal_elements = np.where(np.abs(diagonal_elements) < threshold, 1.0, diagonal_elements)
-    M_diagional = diags(1.0 / diagonal_elements, format="csr")
-    return LinearOperator(shape=A_csr.shape, matvec=M_diagional.dot)  # type: ignore[arg-type]
+    _check_square(A_csr)
+    inverse_diagonal = _safe_inverse_diagonal(A_csr.diagonal())
+
+    def matvec(x: npt.NDArray) -> npt.NDArray:
+        return (inverse_diagonal * _flatten(x)).reshape(np.shape(x))
+
+    return LinearOperator(  # type: ignore[arg-type]
+        shape=A_csr.shape,
+        matvec=matvec,
+        rmatvec=matvec,
+        dtype=inverse_diagonal.dtype,
+    )
+
+
+def _block_jacobi_operator(
+    inverses: npt.NDArray,
+    shape: tuple[int, int],
+) -> LinearOperator:
+    """Wraps precomputed diagonal block inverses as a Block Jacobi `LinearOperator`."""
+
+    def matvec(x: npt.NDArray) -> npt.NDArray:
+        return _apply_block_inverses(inverses, x)
+
+    def rmatvec(x: npt.NDArray) -> npt.NDArray:
+        return _apply_block_inverses(inverses, x, transpose=True)
+
+    return LinearOperator(  # type: ignore[arg-type]
+        shape=shape,
+        matvec=matvec,
+        rmatvec=rmatvec,
+        dtype=inverses.dtype,
+    )
 
 
 def make_block_jacobi_preconditioner(
@@ -100,88 +275,77 @@ def make_block_jacobi_preconditioner(
     Creates a Block Jacobi preconditioner for block-structured systems.
 
     For black-oil reservoir simulation with 3 variables per cell (pressure, So, Sg),
-    this preconditioner is more effective than diagonal for coupled systems.
+    this preconditioner is more effective than diagonal for coupled systems. When the
+    matrix dimension is not a multiple of `block_size`, the last block is smaller.
+    A block that cannot be inverted is replaced by the inverse of its diagonal.
 
     :param A_csr: The coefficient matrix in CSR format.
     :param block_size: Size of each block (e.g., 3 for black-oil: pressure, So, Sg).
     :return: A SciPy `LinearOperator` that represents the Block Jacobi preconditioner.
+    :raises ValidationError: If the matrix is not square or `block_size` is below one.
     """
-    n = A_csr.shape[0]
-    n_blocks = n // block_size
-
-    # Pre-compute inverse of diagonal blocks
-    block_inverses = []
-    epsilon = get_floating_point_info().eps
-    threshold = max(1e-10, 100 * epsilon)
-
-    for i in range(n_blocks):
-        start_idx = i * block_size
-        end_idx = start_idx + block_size
-
-        # Extract diagonal block
-        block = A_csr[start_idx:end_idx, start_idx:end_idx].toarray()  # type: ignore
-
-        try:
-            # Try to invert the block
-            block_inverse = np.linalg.inv(block)
-            block_inverses.append(block_inverse)
-        except np.linalg.LinAlgError:
-            # Block is singular, fall back to diagonal approximation
-            diagonal = np.diag(block)
-            diagonal = np.where(np.abs(diagonal) < threshold, 1.0, diagonal)
-            block_inverse = np.diag(1.0 / diagonal)
-            block_inverses.append(block_inverse)
-
-    # Handle remainder cells (if n is not divisible by block_size)
-    remainder_start = n_blocks * block_size
-    if remainder_start < n:
-        remainder_block = A_csr[remainder_start:n, remainder_start:n].toarray()  # type: ignore
-        try:
-            remainder_inv = np.linalg.inv(remainder_block)
-            block_inverses.append(remainder_inv)
-        except np.linalg.LinAlgError:
-            diagonal = np.diag(remainder_block)
-            diagonal = np.where(np.abs(diagonal) < threshold, 1.0, diagonal)
-            remainder_inverse = np.diag(1.0 / diagonal)
-            block_inverses.append(remainder_inverse)
-
-    def matvec(x: npt.NDArray) -> npt.NDArray:
-        """Apply Block Jacobi preconditioner."""
-        y = np.zeros_like(x)
-
-        # Apply block inversions
-        for i in range(n_blocks):
-            start_idx = i * block_size
-            end_idx = start_idx + block_size
-            y[start_idx:end_idx] = block_inverses[i] @ x[start_idx:end_idx]
-
-        # Handle remainder
-        if remainder_start < n:
-            y[remainder_start:n] = block_inverses[n_blocks] @ x[remainder_start:n]
-        return y
-
-    return LinearOperator(shape=A_csr.shape, matvec=matvec)  # type: ignore[arg-type]
+    inverses = invert_diagonal_blocks(A_csr, block_size=block_size)
+    return _block_jacobi_operator(inverses, A_csr.shape)
 
 
 def make_ilu_preconditioner(A_csr: csr_array | csr_matrix, **kwargs: typing.Any) -> LinearOperator:
     """
     Creates an Incomplete LU (ILU) preconditioner using `spilu`.
 
-    :param A_csr: The coefficient matrix in CSR format. It will be
-        converted to CSC for efficiency with `spilu`.
-    :return: A SciPy `LinearOperator` that solves the preconditioned system.
-    """
-    # spilu works most efficiently with the CSC matrix format.
-    A_csc = A_csr.tocsc()
+    The quality of the factorization is checked by applying it to a fixed probe vector
+    `v` and measuring `||A·M·v - v|| / ||v||`. An error above
+    `ILU_QUALITY_WARNING_THRESHOLD` is logged as a warning. A factorization that
+    produces non-finite values, or an error above `ILU_QUALITY_ERROR_THRESHOLD`, is
+    rejected, since it would only feed meaningless corrections to the iterative solver.
+    Incomplete factorizations of strongly coupled, non-symmetric reservoir Jacobians
+    can be unreliable, so a block Jacobi preconditioner is the safer alternative when
+    this check fails.
 
-    # Compute the Incomplete LU factorization
-    # You can tune 'drop_tol' and 'fill_factor' for better performance/accuracy trade-offs
-    # spilu returns a SuperLU object which has a .solve() method
-    kwargs.setdefault("drop_tol", 1e-4)  # Drop tolerance (controls sparsity/accuracy)
-    kwargs.setdefault("fill_factor", 10)  # Memory allocation factor
-    ilu_factor = spilu(A_csc, **kwargs)
-    # Create a `LinearOperator` that uses the .solve() method as the preconditioning step
-    return LinearOperator(shape=A_csc.shape, matvec=ilu_factor.solve)  # type: ignore[arg-type]
+    :param A_csr: The coefficient matrix in CSR format.
+    :param kwargs: Additional arguments for `scipy.sparse.linalg.spilu`. `drop_tol`
+        defaults to 1e-4 (smaller values keep more entries and are more accurate) and
+        `fill_factor` defaults to 10 (the memory allowed relative to the matrix).
+    :return: A SciPy `LinearOperator` that applies the incomplete factorization.
+    :raises ValidationError: If the matrix is not square.
+    :raises PreconditionerError: If the factorization is numerically unusable.
+    """
+    _check_square(A_csr)
+    A_csc = A_csr.tocsc()
+    kwargs.setdefault("drop_tol", 1e-4)
+    kwargs.setdefault("fill_factor", 10)
+    try:
+        ilu_factor = spilu(A_csc, **kwargs)
+    except RuntimeError as exc:
+        raise PreconditionerError(f"ILU factorization failed: {exc}") from exc
+
+    def matvec(x: npt.NDArray) -> npt.NDArray:
+        return ilu_factor.solve(_flatten(x)).reshape(np.shape(x))
+
+    def rmatvec(x: npt.NDArray) -> npt.NDArray:
+        return ilu_factor.solve(_flatten(x), trans="T").reshape(np.shape(x))
+
+    operator = LinearOperator(  # type: ignore[arg-type]
+        shape=A_csc.shape,
+        matvec=matvec,
+        rmatvec=rmatvec,
+        dtype=A_csc.dtype,
+    )
+
+    probe = np.random.default_rng(0).standard_normal(A_csc.shape[0]).astype(A_csc.dtype)
+    probe_norm = np.linalg.norm(probe)
+    with np.errstate(all="ignore"):
+        correction = operator.matvec(probe)
+        error = np.linalg.norm(A_csc @ correction - probe) / probe_norm
+    if not np.isfinite(error) or error > ILU_QUALITY_ERROR_THRESHOLD:
+        raise PreconditionerError(
+            f"ILU factorization is numerically unusable (probe error {error:.3e}). "
+            f"Use a smaller `drop_tol`, a larger `fill_factor`, or a different preconditioner."
+        )
+    if error > ILU_QUALITY_WARNING_THRESHOLD:
+        logger.warning(
+            f"ILU factorization is a poor approximation of the inverse (probe error {error:.3e})."
+        )
+    return operator
 
 
 def make_polynomial_preconditioner(
@@ -189,43 +353,61 @@ def make_polynomial_preconditioner(
     degree: int = 2,
 ) -> LinearOperator:
     """
-    Creates a polynomial preconditioner M = I + αA + α²A².
+    Creates a damped Neumann series polynomial preconditioner.
 
-    Cheap and effective for well-conditioned systems. Uses Neumann series approximation
-    of (I - A)^{-1} for properly scaled A.
+    The operator approximates the inverse of A with the truncated series
+    `(I + G + G² + ... + Gᵈ)·ω·D⁻¹`, where `D` is the diagonal of A, `G = I - ω·D⁻¹·A`,
+    and `d` is the degree. The damping factor `ω` is the reciprocal of the largest row
+    sum of `|D⁻¹·A|`, which keeps the series from diverging. A degree of zero gives a
+    damped diagonal preconditioner.
+
+    This preconditioner is cheap and helps on diagonally dominant systems. It does not
+    help on strongly coupled multiphase reservoir Jacobians, where block Jacobi or CPR
+    should be used instead.
 
     :param A_csr: The coefficient matrix in CSR format.
-    :param degree: Polynomial degree (1, 2, or 3 recommended).
+    :param degree: Polynomial degree, zero or greater (1, 2, or 3 recommended).
     :return: A SciPy `LinearOperator` that represents the polynomial preconditioner.
+    :raises ValidationError: If the matrix is not square or `degree` is negative.
     """
-    # Estimate spectral radius for scaling (simple approximation)
-    # Use inverse of diagonal norm as scaling factor
-    diagional = A_csr.diagonal()
-    normalized_diagonal = np.max(np.abs(diagional))
-    alpha = 1.0 / normalized_diagonal if normalized_diagonal > 1e-10 else 1.0
+    _check_square(A_csr)
+    if degree < 0:
+        raise ValidationError(f"`degree` must be zero or greater, got {degree}.")
 
-    # Pre-compute polynomial terms: I, αA, α²A², ...
-    identity_term = np.ones(A_csr.shape[0])
-    terms = [identity_term]
-
-    current_term = alpha
-    A_power = A_csr
-    for i in range(degree):
-        terms.append(current_term)  # type: ignore
-        current_term *= alpha
-        if i < degree - 1:
-            A_power = A_power @ A_csr
+    A = A_csr.tocsr()
+    inverse_diagonal = _safe_inverse_diagonal(A.diagonal())
+    row_of_entry = np.repeat(np.arange(A.shape[0]), np.diff(A.indptr))
+    scaled_row_sums = np.bincount(
+        row_of_entry,
+        weights=np.abs(A.data) * np.abs(inverse_diagonal)[row_of_entry],
+        minlength=A.shape[0],
+    )
+    largest_row_sum = float(scaled_row_sums.max()) if A.shape[0] > 0 else 0.0
+    damping = 1.0 / largest_row_sum if largest_row_sum > 0.0 else 1.0
+    damped_inverse_diagonal = damping * inverse_diagonal
+    A_transpose = A.T.tocsr()
 
     def matvec(x: npt.NDArray) -> npt.NDArray:
-        """Apply polynomial preconditioner: (I + αA + α²A² + ...) x"""
-        result = terms[0] * x  # Identity term
-        A_x = x
-        for i in range(1, degree + 1):
-            A_x = A_csr @ A_x
-            result = result + terms[i] * A_x
-        return result
+        flat = _flatten(x)
+        first_term = damped_inverse_diagonal * flat
+        result = first_term
+        for _ in range(degree):
+            result = first_term + result - damped_inverse_diagonal * (A @ result)
+        return result.reshape(np.shape(x))
 
-    return LinearOperator(shape=A_csr.shape, matvec=matvec)  # type: ignore[arg-type]
+    def rmatvec(x: npt.NDArray) -> npt.NDArray:
+        flat = _flatten(x)
+        result = flat
+        for _ in range(degree):
+            result = flat + result - A_transpose @ (damped_inverse_diagonal * result)
+        return (damped_inverse_diagonal * result).reshape(np.shape(x))
+
+    return LinearOperator(  # type: ignore[arg-type]
+        shape=A.shape,
+        matvec=matvec,
+        rmatvec=rmatvec,
+        dtype=A.dtype,
+    )
 
 
 CPR_AMG_KWARGS = {
@@ -246,6 +428,8 @@ def make_cpr_preconditioner(
     *,
     n_variables_per_cell: int = 3,
     pressure_variable_index: int = 0,
+    decouple_pressure: bool = True,
+    smoother: typing.Literal["block_jacobi", "ilu"] = "block_jacobi",
     amg_kwargs: dict[str, typing.Any] | None = None,
     ilu_kwargs: dict[str, typing.Any] | None = None,
 ) -> LinearOperator:
@@ -255,94 +439,131 @@ def make_cpr_preconditioner(
 
     CPR is a two-stage preconditioner:
 
-        Stage 1 (global): AMG solve of the pressure-pressure sub-block A_pp.
-        Stage 2 (local): ILU solve on the full system to smooth high-frequency errors.
+        Stage 1 (global): AMG solve of the pressure equation.
+        Stage 2 (local): a smoother on the full system that removes the error the
+        pressure solve leaves behind.
 
     This preconditioner significantly improves convergence for 3D multiphase
     reservoir simulations where the Jacobian is strongly coupled but the pressure
     equation dominates the long-range behavior.
+
+    The unknowns must be ordered cell by cell, with the `n_variables_per_cell`
+    unknowns of each cell stored together, and the equations must be ordered the
+    same way.
 
     :param A_csr: The full Jacobian matrix in CSR format.
     :param n_variables_per_cell: Number of unknowns per grid cell
         (e.g., pressure, saturation_o, saturation_g).
     :param pressure_variable_index: Index of the pressure unknown inside each cell's
         variable block. Example: if block = [pressure, So, Sg], then index = 0.
+    :param decouple_pressure: Whether to form the pressure equation by combining each
+        cell's equations so that the dependence on saturations in the cell's own
+        block is eliminated (quasi-IMPES). When False, the pressure rows and columns
+        of the Jacobian are used directly, which is simpler but is a weaker pressure
+        equation.
+    :param smoother: The second stage smoother. "block_jacobi" inverts each cell's
+        diagonal block and is robust and cheap. "ilu" uses an incomplete LU
+        factorization of the full Jacobian, which is more expensive and can be
+        unreliable for strongly coupled Jacobians.
     :param amg_kwargs: Keyword arguments for `pyamg.smoothed_aggregation_solver`.
-    :param ilu_kwargs: Keyword arguments for `scipy.sparse.linalg.spilu`.
+        Defaults to `CPR_AMG_KWARGS`.
+    :param ilu_kwargs: Keyword arguments for `scipy.sparse.linalg.spilu`, used only when
+        `smoother` is "ilu". Defaults to `CPR_ILU_KWARGS`.
     :return: A SciPy `LinearOperator` implementing the CPR preconditioner M such that
-        x = M @ r approximately solves J^{-1} r.
-    :raises ValidationError: If no pressure DOFs are found.
-    :raises RuntimeError: If AMG or ILU construction fails.
-
-    *Notes*
-    CPR workflow:
-
-    1. Restrict residual to pressure DOFs:      r_p = R * r
-    2. Solve pressure block:                    z_p = A_pp^{-1} * r_p   (AMG)
-    3. Prolongate correction to full space:     z = P * z_p
-    4. Compute remaining residual:              w = r - A * z
-    5. Smooth locally:                          y = ILU^{-1} * w
-    6. Final CPR output:                        x = z + y
+        x = M @ r approximately solves J^{-1} r. It does not support transposed
+        products, so it cannot be used with the `bicg` and `qmr` solvers.
+    :raises ValidationError: If the matrix is not square, its size is not a multiple of
+        `n_variables_per_cell`, or `pressure_variable_index` is out of range.
+    :raises PreconditionerError: If AMG or smoother construction fails.
     """
-    if not isspmatrix_csr(A_csr):
-        A_csr = csr_matrix(A_csr)
-
-    amg_kwargs = amg_kwargs or dict(CPR_AMG_KWARGS)
-    ilu_kwargs = ilu_kwargs or dict(CPR_ILU_KWARGS)
+    A_csr = A_csr.tocsr()
+    _check_square(A_csr)
     number_of_equations = A_csr.shape[0]
-    # Identify the pressure DOFs: [p_i, So_i, Sg_i, ...]
+    if n_variables_per_cell < 1:
+        raise ValidationError(
+            f"`n_variables_per_cell` must be at least 1, got {n_variables_per_cell}."
+        )
+    if not 0 <= pressure_variable_index < n_variables_per_cell:
+        raise ValidationError(
+            f"`pressure_variable_index` must be in [0, {n_variables_per_cell}), "
+            f"got {pressure_variable_index}."
+        )
+    if number_of_equations == 0 or number_of_equations % n_variables_per_cell != 0:
+        raise ValidationError(
+            f"Matrix size {number_of_equations} is not a positive multiple of "
+            f"`n_variables_per_cell` ({n_variables_per_cell})."
+        )
+
+    if smoother not in ("block_jacobi", "ilu"):
+        raise ValidationError(f"Unknown CPR smoother: {smoother!r}. Use 'block_jacobi' or 'ilu'.")
+
+    amg_kwargs = dict(CPR_AMG_KWARGS) if amg_kwargs is None else amg_kwargs
+    ilu_kwargs = dict(CPR_ILU_KWARGS) if ilu_kwargs is None else ilu_kwargs
+    number_of_cells = number_of_equations // n_variables_per_cell
     pressure_dof_indices = np.arange(
         pressure_variable_index,
         number_of_equations,
         n_variables_per_cell,
         dtype=np.int64,
     )
-    if pressure_dof_indices.size == 0:
-        raise ValidationError(
-            "No pressure DOFs found. Check `n_variables_per_cell` or `pressure_variable_index`."
+
+    block_inverses = None
+    if decouple_pressure or smoother == "block_jacobi":
+        block_inverses = invert_diagonal_blocks(A_csr, block_size=n_variables_per_cell)
+
+    # Restriction: maps a full residual to the pressure equation residual.
+    restriction = None
+    if decouple_pressure:
+        assert block_inverses is not None
+        weights = block_inverses[:, pressure_variable_index, :]
+        restriction = csr_matrix(
+            (
+                weights.reshape(-1),
+                (
+                    np.repeat(np.arange(number_of_cells), n_variables_per_cell),
+                    np.arange(number_of_equations),
+                ),
+            ),
+            shape=(number_of_cells, number_of_equations),
         )
+        pressure_matrix = (restriction @ A_csr)[:, pressure_dof_indices].tocsr()
+    else:
+        pressure_matrix = A_csr[pressure_dof_indices, :][:, pressure_dof_indices].tocsr()
 
-    # Extract the pressure-pressure block (A_pp)
-    A_pp = A_csr[pressure_dof_indices, :][:, pressure_dof_indices].tocsr()
-
-    # Build AMG preconditioner for A_pp
     try:
-        M_amg = make_amg_preconditioner(A_pp, **amg_kwargs)  # type: ignore
+        M_amg = make_amg_preconditioner(pressure_matrix, **amg_kwargs)  # type: ignore
     except Exception as exc:
         raise PreconditionerError(f"AMG construction for pressure block failed: {exc}") from exc
 
-    # Build ILU preconditioner for the full matrix
-    try:
-        M_ilu = make_ilu_preconditioner(A_csr, **ilu_kwargs)
-    except Exception as exc:
-        raise PreconditionerError(f"ILU factorization failed for CPR: {exc}") from exc
-
-    # Restriction and prolongation operators (implicit)
-    def restrict_to_pressure(vector: npt.NDArray) -> npt.NDArray:
-        return vector[pressure_dof_indices]
-
-    def prolongate_to_full(pressure_vector: npt.NDArray) -> npt.NDArray:
-        out = np.zeros(number_of_equations, dtype=pressure_vector.dtype)
-        out[pressure_dof_indices] = pressure_vector
-        return out
+    if smoother == "block_jacobi":
+        assert block_inverses is not None
+        M_smoother = _block_jacobi_operator(block_inverses, A_csr.shape)
+    else:
+        try:
+            M_smoother = make_ilu_preconditioner(A_csr, **ilu_kwargs)
+        except PreconditionerError:
+            raise
+        except Exception as exc:
+            raise PreconditionerError(f"ILU factorization failed for CPR: {exc}") from exc
 
     def matvec(residual: npt.NDArray) -> npt.NDArray:
         """CPR preconditioner application: x = M^{-1} r"""
-        # Stage 1: pressure solve
-        r_p = restrict_to_pressure(residual)
-        try:
-            z_p = M_amg.dot(r_p)
-        except TypeError:
-            z_p = M_amg(r_p)
+        flat = _flatten(residual)
+        if restriction is not None:
+            pressure_residual = restriction @ flat
+        else:
+            pressure_residual = flat[pressure_dof_indices]
 
-        z = prolongate_to_full(z_p)  # type: ignore[arg-type]  # ty:ignore[invalid-argument-type]
+        pressure_correction = M_amg.matvec(pressure_residual)
+        correction = np.zeros(number_of_equations, dtype=pressure_correction.dtype)
+        correction[pressure_dof_indices] = pressure_correction
 
-        # Stage 2: ILU correction
-        w = residual - A_csr.dot(z)
-        y = M_ilu.dot(w)
-        return z + y
+        remaining = flat - A_csr @ correction
+        return (correction + M_smoother.matvec(remaining)).reshape(np.shape(residual))
 
-    return LinearOperator(shape=A_csr.shape, matvec=matvec)  # type: ignore[arg-type]
+    return LinearOperator(  # type: ignore[arg-type]
+        shape=A_csr.shape, matvec=matvec, dtype=A_csr.dtype
+    )
 
 
 def _spsolve(
@@ -356,8 +577,22 @@ def _spsolve(
     M: typing.Any | None,
     callback: typing.Callable[[npt.NDArray], None] | None,
 ) -> tuple[npt.NDArray, int]:
-    """Direct (SPSOLVE) solver wrapper compatible with the standard `SolverFunction` interface"""
-    return spsolve(A, b), 0  # type: ignore[return-value]
+    """
+    Direct sparse solver wrapper compatible with the standard `SolverFunction` interface.
+
+    The tolerances, iteration limit, preconditioner and callback are ignored since the
+    solution is exact up to rounding. A singular or otherwise unsolvable system is
+    reported through a non-zero status instead of a solution containing NaN values.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", MatrixRankWarning)
+        try:
+            x = spsolve(A.tocsc(), b)
+        except (MatrixRankWarning, RuntimeError):
+            return np.full(np.shape(b), np.nan, dtype=np.result_type(b, np.float32)), 1
+    if not np.all(np.isfinite(x)):
+        return x, 1  # type: ignore[return-value]
+    return x, 0  # type: ignore[return-value]
 
 
 def _lgmres(
@@ -377,6 +612,9 @@ def _lgmres(
     LGMRES solver wrapper compatible with the standard `SolverFunction` interface,
     with configurable inner/outer iteration parameters.
 
+    `maxiter` counts outer iterations. Each outer iteration performs up to `inner_m`
+    inner GMRES iterations. When `maxiter` is not given, 1000 outer iterations are allowed.
+
     :param inner_m: Number of inner GMRES iterations per restart.
     :param outer_k: Number of vectors to carry between inner GMRES iterations.
     """
@@ -387,7 +625,7 @@ def _lgmres(
         M=M,
         rtol=rtol,
         atol=atol,
-        maxiter=maxiter or 1000,
+        maxiter=1000 if maxiter is None else maxiter,
         callback=callback,
         inner_m=inner_m,
         outer_k=outer_k,
@@ -409,16 +647,12 @@ def _minres(
     """
     MINRES solver wrapper compatible with the standard `SolverFunction` interface.
 
-    MINRES is only suitable for symmetric (possibly indefinite) systems. It
-    does **not** accept `atol` directly; instead convergence is declared when
-    the *relative* residual `||r_k|| / ||b||` drops below `rtol`. To
-    honour the caller's `atol` we tighten `rtol` whenever the absolute
-    criterion is the binding one:
-
-        effective_rtol = min(rtol, atol / max(||b||, ε))
-
-    This guarantees the returned solution satisfies *both* tolerances without
-    exposing the mismatch to callers.
+    MINRES is only suitable for symmetric (possibly indefinite) systems, and a
+    preconditioner for it must be symmetric positive definite. It does **not** accept
+    `atol` directly. SciPy stops when its estimate of the residual falls below `rtol`
+    times an estimate of `||A||·||x||`. To approximate the caller's `atol`, `rtol` is
+    tightened to the smaller of `rtol` and `atol / ||b||`. The result is only
+    approximately bound by `atol`, so the final residual should be verified by the caller.
 
     :param shift: Solves `(A - shift·I) x = b` instead of `A x = b`.
         Useful when A is nearly singular or when targeting a shifted system
@@ -428,10 +662,7 @@ def _minres(
     b_norm = np.linalg.norm(b_array)
     eps = np.finfo(b_array.dtype).eps if np.issubdtype(b_array.dtype, np.floating) else 1e-15
 
-    # Derive a single effective rtol that covers both the relative and
-    # absolute stopping criterion requested by the caller.
-    denominator = max(b_norm, eps)
-    effective_rtol = min(rtol, atol / denominator)
+    effective_rtol = min(rtol, atol / max(b_norm, eps))
     # MINRES requires rtol > 0; clamp to a safe floor.
     effective_rtol = max(effective_rtol, eps * 10)
     return minres(  # type: ignore[return-value]
@@ -441,7 +672,7 @@ def _minres(
         shift=shift,
         M=M,
         rtol=effective_rtol,
-        maxiter=maxiter or 1000,
+        maxiter=1000 if maxiter is None else maxiter,
         callback=callback,
     )
 
@@ -462,46 +693,31 @@ def _qmr(
 
     SciPy's `~scipy.sparse.linalg.qmr` uses a *split* preconditioner
     `(M1, M2)` rather than the single `M` used by every other solver here.
-    The combined effect is equivalent to `M ≈ M1 @ M2`.
+    The preconditioner `M` is supplied as `M1` and `M2` is left as the identity.
+    QMR multiplies by the transpose of the preconditioner, so `M` must support
+    transposed products. The diagonal, block Jacobi, ILU and polynomial
+    preconditioners do, while AMG and CPR do not.
 
-    **Mapping strategy**:
-
-    * If `M` is `None`, both `M1` and `M2` are left as `None`
-      (no preconditioning).
-    * If `M` is provided, it is supplied as `M1`; `M2` is set to the
-      identity. This matches the "left-preconditioned" convention used by the
-      rest of the solver infrastructure and keeps the residual norms comparable
-      with those reported by other solvers.
-
-    **`atol` handling**:
-
-    Like MINRES, QMR has no native `atol` parameter. We fold it into a
-    tightened `rtol` using the same formula:
-
-        effective_rtol = min(rtol, atol / max(||b||, ε))
+    When `maxiter` is not given, 1000 iterations are allowed.
     """
-    b_array: npt.NDArray = np.asarray(b)
-    b_norm = np.linalg.norm(b_array)
-    eps = np.finfo(b_array.dtype).eps if np.issubdtype(b_array.dtype, np.floating) else 1e-15
-
-    denominator = max(b_norm, eps)
-    effective_rtol = min(rtol, atol / denominator)
-    effective_rtol = max(effective_rtol, eps * 10)
-
-    # Split the single preconditioner into the (M1, M2) pair expected by QMR.
-    # Using M as M1 (left preconditioner) and leaving M2=None (identity) is the
-    # conventional choice and ensures the *left*-preconditioned residual is
-    # what gets driven to zero, consistent with the rest of this codebase.
-    M1: typing.Any | None = M
-    M2: typing.Any | None = None
+    right_preconditioner = None
+    if M is not None:
+        # SciPy requires both halves of the split preconditioner whenever one is given.
+        right_preconditioner = LinearOperator(  # type: ignore[arg-type]
+            shape=M.shape,
+            matvec=lambda x: x,
+            rmatvec=lambda x: x,
+            dtype=M.dtype,
+        )
     return qmr(  # type: ignore[return-value]
         A,
         b,
         x0=x0,
-        M1=M1,
-        M2=M2,
-        rtol=effective_rtol,
-        maxiter=maxiter or 1000,
+        M1=M,
+        M2=right_preconditioner,
+        rtol=rtol,
+        atol=atol,
+        maxiter=1000 if maxiter is None else maxiter,
         callback=callback,
     )
 
@@ -518,6 +734,14 @@ class CachedPreconditionerFactory:
     1. Caches expensive preconditioner setup (ILU, AMG)
     2. Reuses preconditioner across multiple timesteps
     3. Rebuilds only when matrix changes significantly
+
+    The preconditioner is always rebuilt when the matrix has a different shape or
+    sparsity pattern from the one it was built for, or when its values are not finite.
+
+    A cached factory holds the state of one sequence of related matrices. Registering
+    it under a name shared by solves of unrelated systems makes those solves rebuild
+    the preconditioner on every call, so use a separate instance for each system.
+    Calls are serialized, so one instance can be used from several threads.
 
     **Usage:**
     ```python
@@ -560,76 +784,115 @@ class CachedPreconditionerFactory:
         Initialize cached preconditioner.
 
         :param factory: Preconditioner factory function or string name (e.g., "ilu", "amg", "block_jacobi")
-        :param name: The name of the preconditioner factory been cached or a new name for the cahed version of the factory.
-        :param update_frequency: Rebuild preconditioner every N calls (0 = never auto-rebuild)
-        :param recompute_threshold: Rebuild if ||A_new - A_old||/||A_old|| > threshold.
-            Basically the absolute relative change must be greater than the threshold for a rebuild.
+        :param name: The name of the preconditioner factory been cached or a new name for the cached version of the factory.
+        :param update_frequency: Rebuild the preconditioner after it has been used for this
+            many calls (0 = never rebuild because of the call count).
+        :param recompute_threshold: Rebuild if ||A_new - A_old||/||A_old|| > threshold, where
+            the norm is taken over the stored matrix values (0 = never rebuild because of
+            matrix changes).
+        :raises ValidationError: If `update_frequency` or `recompute_threshold` is negative.
         """
+        if update_frequency < 0:
+            raise ValidationError(
+                f"`update_frequency` must be zero or greater, got {update_frequency}."
+            )
+        if recompute_threshold < 0:
+            raise ValidationError(
+                f"`recompute_threshold` must be zero or greater, got {recompute_threshold}."
+            )
+
         if isinstance(factory, str):
             self.factory = get_preconditioner_factory(factory)
             self._name = name or factory
         else:
             self.factory = factory
-            self._name = name or getattr(factory, "__name__", repr(factory))
+            self._name = name or str(getattr(factory, "__name__", repr(factory)))
 
         self.update_frequency = update_frequency
         self.recompute_threshold = recompute_threshold
 
+        self._lock = threading.Lock()
         self._cached_M: LinearOperator | None = None
         self._cached_A_data: npt.NDArray | None = None
+        self._cached_A_indices: npt.NDArray | None = None
+        self._cached_A_indptr: npt.NDArray | None = None
+        self._cached_A_shape: tuple[int, int] | None = None
         self._call_count = 0
 
     @property
     def name(self) -> str:
+        """The name this preconditioner factory is registered under."""
         return self._name
 
-    def __call__(self, A_csr: csr_array | csr_matrix) -> LinearOperator | None:
+    def __call__(self, A_csr: csr_array | csr_matrix) -> LinearOperator:
         """
         Get preconditioner, reusing cache if possible.
 
         :param A_csr: Current coefficient matrix
         :return: Preconditioner (cached or newly built)
         """
-        should_rebuild = self.should_recompute(A_csr)
-        if should_rebuild:
-            logger.debug(
-                f"Rebuilding {self._name} preconditioner (call #{self._call_count}, "
-                f"threshold={self.recompute_threshold:.2%})"
-            )
-            self._cached_M = self.factory(A_csr)
-            self._cached_A_data = A_csr.data.copy()
-            self._call_count = 0
-        else:
-            logger.debug(
-                f"Reusing cached {self._name} preconditioner (call #{self._call_count}/"
-                f"{self.update_frequency})"
-            )
+        with self._lock:
+            if self._should_recompute(A_csr):
+                logger.debug(
+                    f"Rebuilding {self._name} preconditioner "
+                    f"(reused {self._call_count} times, threshold={self.recompute_threshold:.2%})"
+                )
+                self._cached_M = self.factory(A_csr)
+                self._cached_A_data = A_csr.data.copy()
+                self._cached_A_indices = A_csr.indices.copy()
+                self._cached_A_indptr = A_csr.indptr.copy()
+                self._cached_A_shape = A_csr.shape
+                self._call_count = 0
+            else:
+                logger.debug(
+                    f"Reusing cached {self._name} preconditioner "
+                    f"(call #{self._call_count}/{self.update_frequency})"
+                )
 
-        self._call_count += 1
-        return self._cached_M
+            self._call_count += 1
+            return typing.cast(LinearOperator, self._cached_M)
 
     def should_recompute(self, A_csr: csr_array | csr_matrix) -> bool:
-        """Determine if preconditioner should be rebuilt."""
+        """
+        Determine if preconditioner should be rebuilt.
+
+        :param A_csr: Current coefficient matrix
+        :return: True if the next call would rebuild the preconditioner.
+        """
+        with self._lock:
+            return self._should_recompute(A_csr)
+
+    def _should_recompute(self, A_csr: csr_array | csr_matrix) -> bool:
         # First call - must build
-        if self._cached_M is None:
+        if (
+            self._cached_M is None
+            or self._cached_A_data is None
+            or self._cached_A_indices is None
+            or self._cached_A_indptr is None
+        ):
+            return True
+
+        # Different system: the cached preconditioner is meaningless for it
+        if (
+            A_csr.shape != self._cached_A_shape
+            or A_csr.data.shape != self._cached_A_data.shape
+            or not np.array_equal(A_csr.indptr, self._cached_A_indptr)
+            or not np.array_equal(A_csr.indices, self._cached_A_indices)
+        ):
             return True
 
         # Frequency-based rebuild
         if self.update_frequency > 0 and self._call_count >= self.update_frequency:
             return True
 
-        # Change-based rebuild (compare matrix coefficients)
-        if self._cached_A_data is not None and self.recompute_threshold > 0:
-            # Check if matrix data has changed significantly
-            # Use Frobenius norm of difference
-            if A_csr.data.shape != self._cached_A_data.shape:
-                # Structure changed (shouldn't happen in reservoir sim, but handle it)
-                return True
-
+        # Change-based rebuild (compare matrix coefficients with the Frobenius norm of the difference)
+        if self.recompute_threshold > 0:
             diff_norm = np.linalg.norm(A_csr.data - self._cached_A_data)
             old_norm = np.linalg.norm(self._cached_A_data)
+            if not np.isfinite(diff_norm) or not np.isfinite(old_norm):
+                return True
 
-            if old_norm > 1e-10:
+            if old_norm > 0:
                 relative_change = diff_norm / old_norm
                 if relative_change > self.recompute_threshold:
                     logger.debug(
@@ -642,21 +905,25 @@ class CachedPreconditionerFactory:
 
     def reset(self) -> None:
         """Clear cache and force rebuild on next call."""
-        self._cached_M = None
-        self._cached_A_data = None
-        self._call_count = 0
+        with self._lock:
+            self._cached_M = None
+            self._cached_A_data = None
+            self._cached_A_indices = None
+            self._cached_A_indptr = None
+            self._cached_A_shape = None
+            self._call_count = 0
 
     def register(self, override: bool = False) -> None:
         """
-        Register this cached preconditioner (factory) in the preconditioner faactory registry
+        Register this cached preconditioner (factory) in the preconditioner factory registry
 
-        :param override: Whether to override exisiting factories with the same name in the registry
+        :param override: Whether to override existing factories with the same name in the registry
         """
         factory = typing.cast(PreconditionerFactory, self)
         preconditioner_factory(factory, name=self._name, override=override)
 
 
-_preconditoner_registry_lock = threading.Lock()
+_preconditioner_registry_lock = threading.Lock()
 PRECONDITIONER_FACTORIES = {
     "cpr": make_cpr_preconditioner,
     "amg": make_amg_preconditioner,
@@ -720,16 +987,16 @@ def preconditioner_factory(
     """
 
     def decorator(func: PreconditionerFactory) -> PreconditionerFactory:
-        with _preconditoner_registry_lock:
+        with _preconditioner_registry_lock:
             key = name or getattr(func, "__name__", None)
             if not key:
                 raise ValueError(
-                    "Preconditioner factory  must have a `__name__` attribute or a name must be provided."
+                    "Preconditioner factory must have a `__name__` attribute or a name must be provided."
                 )
 
             if not override and key in PRECONDITIONER_FACTORIES:
                 raise ValueError(
-                    f"Preconditioner factory '{name}' is already registered. "
+                    f"Preconditioner factory '{key}' is already registered. "
                     f"Use `override=True` to replace it."
                 )
             PRECONDITIONER_FACTORIES[key] = func  # type: ignore
@@ -746,7 +1013,7 @@ def list_preconditioner_factories() -> list[str]:
 
     :return: List of registered preconditioner factory names.
     """
-    with _preconditoner_registry_lock:
+    with _preconditioner_registry_lock:
         return list(PRECONDITIONER_FACTORIES.keys())
 
 
@@ -758,7 +1025,7 @@ def get_preconditioner_factory(name: str) -> PreconditionerFactory:
     :return: The corresponding preconditioner factory function.
     :raises ValidationError: If the preconditioner factory is unknown.
     """
-    with _preconditoner_registry_lock:
+    with _preconditioner_registry_lock:
         if name not in PRECONDITIONER_FACTORIES:
             raise ValidationError(
                 f"Unknown preconditioner factory: {name!r}. "
@@ -807,15 +1074,15 @@ def solver_function(
             key = name or getattr(func, "__name__", None)
             if not key:
                 raise ValueError(
-                    "Solver function  must have a `__name__` attribute or a name must be provided."
+                    "Solver function must have a `__name__` attribute or a name must be provided."
                 )
 
             if not override and key in SOLVER_FUNCTIONS:
                 raise ValueError(
-                    f"Solver function '{name}' is already registered. "
+                    f"Solver function '{key}' is already registered. "
                     f"Use `override=True` to replace it."
                 )
-            SOLVER_FUNCTIONS[key] = func  # ty:ignore[invalid-assignment]
+            SOLVER_FUNCTIONS[key] = func  # type: ignore[assignment]  # ty:ignore[invalid-assignment]
         return func
 
     if func is not None:
@@ -833,12 +1100,13 @@ def list_solver_functions() -> list[str]:
         return list(SOLVER_FUNCTIONS.keys())
 
 
-def get_solver_function(name: str) -> SolverFunction | None:
+def get_solver_function(name: str) -> SolverFunction:
     """
     Get a registered solver function by name.
 
     :param name: Name of the solver function.
     :return: The corresponding solver function.
+    :raises ValidationError: If the solver function is unknown.
     """
     with _solver_registry_lock:
         if name not in SOLVER_FUNCTIONS:
@@ -862,22 +1130,20 @@ def _get_preconditioner(
     :return: A SciPy `LinearOperator` representing the preconditioner, or None.
     :raises ValidationError: If the preconditioner type is unknown.
     """
-    if isinstance(preconditioner, (type(None), LinearOperator)):
+    if preconditioner is None or isinstance(preconditioner, LinearOperator):
         return preconditioner
     elif isinstance(preconditioner, str):
         if preconditioner in PRECONDITIONER_FACTORIES:
-            preconditioner_factory = PRECONDITIONER_FACTORIES[preconditioner]
-            M = preconditioner_factory(A_csr)  # type: ignore[operator]
-            return M
-        else:
-            raise ValidationError(
-                f"Unknown preconditioner type: {preconditioner!r}. Available preconditioners: {list(PRECONDITIONER_FACTORIES.keys())}"
-            )
+            return PRECONDITIONER_FACTORIES[preconditioner](A_csr)  # type: ignore[operator]
+        raise ValidationError(
+            f"Unknown preconditioner type: {preconditioner!r}. Available preconditioners: {list(PRECONDITIONER_FACTORIES.keys())}"
+        )
     elif callable(preconditioner):
-        preconditioner_factory = typing.cast(PreconditionerFactory, preconditioner)
-        M = preconditioner_factory(A_csr)
-        return M
-    return preconditioner  # type: ignore[return-value]
+        return typing.cast(PreconditionerFactory, preconditioner)(A_csr)
+    raise ValidationError(
+        f"`preconditioner` must be None, a name, a `LinearOperator` or a factory function, "
+        f"got {type(preconditioner).__name__}."
+    )
 
 
 def _get_solver_function(
@@ -886,33 +1152,47 @@ def _get_solver_function(
     """
     Get solver functions from a solver specification.
 
-    :param solver: Solver specification as a string or sequence of strings/callables.
-    :return: List of solver functions corresponding to the specification.
-    :raises ValidationError: If any solver type is unknown.
+    :param solver: Solver specification as a string, a callable, or an ordered sequence of
+        strings and callables.
+    :return: List of solver functions corresponding to the specification, in order.
+    :raises ValidationError: If any solver type is unknown, the sequence is empty, or the
+        sequence is unordered.
     :raises TypeError: If the solver specification is of an invalid type.
     """
-    if isinstance(solver, str):
-        if solver in SOLVER_FUNCTIONS:
-            solver_function = SOLVER_FUNCTIONS[solver]
-            if isinstance(solver_function, (list, tuple)):
-                return list(solver_function)  # type: ignore[return-value]  # ty:ignore[invalid-return-type, invalid-argument-type]
-            return [solver_function]  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
+
+    def resolve(item: typing.Any) -> SolverFunction:
+        if isinstance(item, str):
+            if item in SOLVER_FUNCTIONS:
+                return SOLVER_FUNCTIONS[item]  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
+            raise ValidationError(
+                f"Unknown solver type: {item!r}. Available solvers: {list(SOLVER_FUNCTIONS.keys())}"
+            )
+        if callable(item):
+            return item  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
+        raise ValidationError(f"Unknown solver type: {item!r}")
+
+    if isinstance(solver, str) or callable(solver):
+        return [resolve(solver)]
+    if isinstance(solver, (set, frozenset)):
         raise ValidationError(
-            f"Unknown solver type: {solver!r}. Available solvers: {list(SOLVER_FUNCTIONS.keys())}"
+            "`solver` must be an ordered sequence, since solvers are tried in order. "
+            "Use a list or tuple instead of a set."
         )
-    elif callable(solver):
-        return [solver]  # type: ignore[return-value]  # ty:ignore[invalid-return-type]
-    elif isinstance(solver, (list, tuple, set)):
-        solver_functions = []
-        for s in solver:
-            if isinstance(s, str) and s in SOLVER_FUNCTIONS:
-                solver_functions.append(SOLVER_FUNCTIONS[s])
-            elif callable(s):
-                solver_functions.append(s)
-            else:
-                raise ValidationError(f"Unknown solver type in sequence: {s!r}")
+    if isinstance(solver, typing.Iterable):
+        solver_functions = [resolve(item) for item in solver]
+        if not solver_functions:
+            raise ValidationError("`solver` must contain at least one solver.")
         return solver_functions
-    raise TypeError("`solver` must be a string, callable, or a sequence of strings.")
+    raise TypeError("`solver` must be a string, callable, or a sequence of strings or callables.")
+
+
+def _supports_transpose(operator: LinearOperator) -> bool:
+    """Whether `operator` can multiply by its transpose, which `bicg` and `qmr` require."""
+    try:
+        operator.rmatvec(np.zeros(operator.shape[0], dtype=operator.dtype))
+    except NotImplementedError:
+        return False
+    return True
 
 
 def solve_linear_system(
@@ -928,35 +1208,74 @@ def solve_linear_system(
     """
     Solves the linear system A·x = b using an (iterative) solver with a fallback strategy.
 
-    Preconditioning is applied using a diagonal preconditioner derived from the diagonal
-    elements of matrix A to improve convergence.
+    A solver is accepted only if it reports convergence, its solution is finite, and the
+    true residual `||b - A·x||` is within `RESIDUAL_VERIFICATION_FACTOR` times the
+    requested tolerance `max(rtol·||b||, atol)`. Otherwise the next solver is tried. The
+    preconditioner is built once and shared by all iterative solvers in the sequence.
 
-    :param A: Coefficient matrix in CSR format.
+    :param A_csr: Coefficient matrix in CSR format.
     :param b: Right-hand side vector.
-    :param maximum_iterations: Maximum number of iterations for each solver.
+    :param maximum_iterations: Iteration limit passed to each solver. Most solvers count
+        single iterations. "gmres", "lgmres" and "gcrotmk" count outer (restart) cycles,
+        each of which performs many inner iterations.
+    :param rtol: Relative tolerance for convergence. Defaults to 1e-6.
+    :param atol: Absolute tolerance for convergence. Defaults to the larger of 1e-8 and
+        1e-6 times the norm of `b`.
     :param solver: (Iterative) solver or sequence of solvers to use ("bicgstab", "gmres",
-        "lgmres", "tfqmr"), or custom callable(s). If a sequence is provided, solvers will
-        be tried in order until one converges.
-    :param preconditioner: Type of preconditioner to use ("ilu", "amg", "diagonal"), or None.
-        Can also be a preconditioner factory function, that takes A and returns a preconditioner.
-        If None, no preconditioning is applied.
-    :param rtol: Relative tolerance for convergence (optional).
-    :param atol: Absolute tolerance for convergence (optional).
+        "lgmres", "tfqmr", "direct", and the other registered names), or custom
+        callable(s). If a sequence is provided, solvers will be tried in order until one
+        converges. "cg" and "minres" require a symmetric matrix and a symmetric positive
+        definite preconditioner. "bicg" and "qmr" require a preconditioner that supports
+        transposed products, which the "amg" and "cpr" preconditioners do not, so those
+        solvers are skipped when used with them.
+    :param preconditioner: Type of preconditioner to use ("ilu", "amg", "diagonal",
+        "block_jacobi", "polynomial", "cpr"), or None. Can also be a `LinearOperator`, or
+        a preconditioner factory function that takes A and returns a preconditioner.
+        If None, no preconditioning is applied. It is ignored by the "direct" solver.
     :param fallback_to_direct: Whether to fall back to a direct solver if all iterative solvers fail.
         Not suitable for large or production use cases due to performance and memory constraints.
     :return: A tuple (x, M) where x is the solution vector and M is the preconditioner used,
-    :raises RuntimeError: If both solvers fail to converge.
+        or None if none was used.
+    :raises ValidationError: If the inputs are inconsistent, a solver or preconditioner
+        name is unknown, or no solver in the sequence can use the preconditioner.
+    :raises PreconditionerError: If the preconditioner cannot be built.
+    :raises SolverError: If every solver fails to produce an acceptable solution.
     """
     solver_functions = _get_solver_function(solver)
-    is_direct = _spsolve in solver_functions
-    if is_direct:
-        # No need to build preconditioner for direct solver
-        M = None
-    else:
+
+    b = np.asarray(b)
+    if A_csr.shape[0] != A_csr.shape[1]:
+        raise ValidationError(f"Matrix must be square, got shape {A_csr.shape}.")
+    if b.shape != (A_csr.shape[0],):
+        raise ValidationError(
+            f"Right-hand side has shape {b.shape}, expected {(A_csr.shape[0],)}."
+        )
+    if not np.all(np.isfinite(b)):
+        raise ValidationError("Right-hand side contains non-finite values.")
+
+    M = None
+    if any(function is not _spsolve for function in solver_functions):
         try:
             M = _get_preconditioner(A_csr, preconditioner)
+        except ValidationError:
+            raise
         except Exception as exc:
             raise PreconditionerError(f"Error building preconditioner: {exc}") from exc
+
+        if M is not None and not _supports_transpose(M):
+            usable = [function for function in solver_functions if function not in (bicg, _qmr)]
+            if not usable:
+                raise ValidationError(
+                    "The 'bicg' and 'qmr' solvers need a preconditioner that supports transposed "
+                    "products, which the chosen preconditioner does not. Use a different solver "
+                    "or preconditioner."
+                )
+            if len(usable) != len(solver_functions):
+                logger.warning(
+                    "Skipping the 'bicg' and 'qmr' solvers since the preconditioner does not "
+                    "support transposed products."
+                )
+            solver_functions = usable
 
     b_norm = np.linalg.norm(b)
     # Too strict
@@ -965,60 +1284,81 @@ def solve_linear_system(
     # atol = atol if atol is not None else float(max(1e-8, 20 * epsilon * b_norm))
     rtol = rtol if rtol is not None else 1e-6
     atol = atol if atol is not None else float(max(1e-8, 1e-6 * b_norm))
+    accepted_residual = max(rtol * b_norm, atol) * RESIDUAL_VERIFICATION_FACTOR
 
-    for solver_function in solver_functions:
-        x, info = solver_function(
+    is_direct = all(function is _spsolve for function in solver_functions)
+    for current_solver in solver_functions:
+        function_name = getattr(current_solver, "__name__", repr(current_solver))
+        x, info = current_solver(
             A=A_csr,
             b=b,
             x0=None,
-            M=M,
+            M=None if current_solver is _spsolve else M,
             rtol=rtol,
             atol=atol,
             maxiter=maximum_iterations,
             callback=None,
         )
-        if info == 0:
-            return np.ascontiguousarray(x), M
-        else:
+        if info > 0:
             logger.warning(
-                f"Solver {solver_function!r} failed to converge within {maximum_iterations} iterations. Info: {info}"
+                f"Solver {function_name!r} did not converge within {maximum_iterations} iterations. Info: {info}"
             )
+            continue
+        if info < 0:
+            logger.warning(
+                f"Solver {function_name!r} broke down or received illegal input. Info: {info}"
+            )
+            continue
+        if not np.all(np.isfinite(x)):
+            logger.warning(f"Solver {function_name!r} returned a non-finite solution.")
+            continue
+
+        residual_norm = np.linalg.norm(b - A_csr @ x)
+        if residual_norm > accepted_residual:
+            logger.warning(
+                f"Solver {function_name!r} reported convergence but its true residual "
+                f"{residual_norm:.3e} exceeds the accepted residual {accepted_residual:.3e}."
+            )
+            continue
+        return np.ascontiguousarray(x), M
 
     if not fallback_to_direct or is_direct:
-        raise SolverError(
-            f"All solvers failed to converge within {maximum_iterations} iterations."
-        )
+        raise SolverError("All solvers failed to produce an acceptable solution.")
 
-    logger.info("Falling back to direct solver (spsolve).")
     n = A_csr.shape[0]
+    logger.info("Falling back to direct solver (spsolve).")
     if n > 100000:
         logger.warning(
-            f"Direct solver on large system ({n:,} DOFs) may consume excessive memory "
-            f"(estimated: {n * n * 8 / 1e9:.2f} GB for dense factorization). "
-            f"Consider improving iterative solver settings or preconditioner."
+            f"Direct solver on large system ({n:,} DOFs) may be slow and consume excessive "
+            f"memory. Consider improving iterative solver settings or preconditioner."
         )
 
-    try:
-        x = spsolve(A_csr, b)
-    except Exception as exc:
-        logger.error(f"Direct solver failed: {exc}")
-        raise SolverError(
-            "All iterative solvers and direct solver failed to solve the system."
-        ) from exc
-
-    return np.ascontiguousarray(x), None  # type: ignore[return-value]
+    x, info = _spsolve(
+        A=A_csr,
+        b=b,
+        x0=None,
+        M=None,
+        rtol=rtol,
+        atol=atol,
+        maxiter=maximum_iterations,
+        callback=None,
+    )
+    if info != 0:
+        logger.error("Direct solver failed: the matrix is singular or the solution is not finite.")
+        raise SolverError("All iterative solvers and direct solver failed to solve the system.")
+    return np.ascontiguousarray(x), None
 
 
 SystemScalingMethod = typing.Literal["row", "diagonal"]
 
 
 def scale_linear_system(
-    jacobian_csr: csr_matrix,
+    jacobian_csr: csr_array | csr_matrix,
     residual_vector: npt.NDArray[np.floating],
-    methods: SystemScalingMethod | list[SystemScalingMethod] | None = None,
+    methods: SystemScalingMethod | typing.Iterable[SystemScalingMethod] | None = None,
     epsilon: float = 1e-12,
 ) -> tuple[
-    csr_matrix,
+    csr_array | csr_matrix,
     npt.NDArray[np.floating],
     npt.NDArray[np.floating] | None,
 ]:
@@ -1028,12 +1368,13 @@ def scale_linear_system(
     This function applies row scaling and/or column (diagonal) scaling to the
     Jacobian matrix and residual vector. It is designed for use in Newton-based
     solvers for nonlinear systems (e.g., multiphase flow transport equations).
+    The inputs are not modified.
 
     Scaling improves solver stability by normalizing equation magnitudes
     (row scaling) and/or variable sensitivities (column scaling).
 
     Supported scaling methods:
-    - "row": Row-infinity norm scaling (max absolute value per row)
+    - "row": Row scaling by the sum of absolute values in each row (row 1-norm)
     - "diagonal": Diagonal (column) scaling using Jacobian diagonal entries
 
     If no methods are provided, an automatic heuristic is used:
@@ -1044,6 +1385,9 @@ def scale_linear_system(
     - Row scaling modifies both J and R
     - Column scaling modifies only J
     - Column scaling requires post-solve unscaling of the solution vector
+    - Methods are applied in the order given, and the diagonal used for column scaling
+      is the diagonal of the matrix at that point, so after row scaling when "row"
+      comes first.
 
     :param jacobian_csr: Sparse Jacobian matrix in CSR format of shape (n, n)
     :param residual_vector: Residual vector of shape (n,)
@@ -1054,7 +1398,8 @@ def scale_linear_system(
         - Iterable like ("row", "diagonal")
         Order matters (applied sequentially)
 
-    :param epsilon: Small threshold to prevent division by zero or near-zero values
+    :param epsilon: Rows with a sum of absolute values below this, and diagonal entries
+        with a magnitude below this, are left unscaled to avoid dividing by near-zero values.
     :return: Tuple of:
         - scaled jacobian (CSR matrix)
         - scaled residual (ndarray)
@@ -1062,40 +1407,51 @@ def scale_linear_system(
 
         The column_scaling_vector must be used to unscale the solution:
             dx = dx_scaled * column_scaling_vector
+    :raises ValidationError: If a scaling method is unknown.
     """
-    J = jacobian_csr
+    J = jacobian_csr.tocsr(copy=True)
+    if not np.issubdtype(J.dtype, np.floating):
+        J = J.astype(np.float64)
     R = residual_vector
+    n = J.shape[0]
+    row_lengths = np.diff(J.indptr)
 
-    # Auto method selection
-    abs_diagonal = None
     if methods is None:
-        abs_diagonal = np.abs(J.diagonal())
-        if np.median(abs_diagonal) > epsilon:
-            methods = ("row", "diagonal")  # type: ignore
-        else:
-            methods = ("row",)  # type: ignore
+        selected: tuple[str, ...] = (
+            ("row", "diagonal") if np.median(np.abs(J.diagonal())) > epsilon else ("row",)
+        )
+    elif isinstance(methods, str):
+        selected = (methods,)
+    else:
+        selected = tuple(methods)
 
-    if isinstance(methods, str):
-        methods = (methods,)  # type: ignore
+    unknown = [method for method in selected if method not in ("row", "diagonal")]
+    if unknown:
+        raise ValidationError(
+            f"Unknown scaling method(s): {unknown}. Use 'row' and/or 'diagonal'."
+        )
 
     column_scaling_vector = None
-
-    # Row scaling (D_r * J, D_r * R)
-    if "row" in methods:  # type: ignore
-        row_max = np.abs(J).sum(axis=1).A.ravel()  # type: ignore
-        row_max[row_max < epsilon] = 1.0
-        inv_row = 1.0 / row_max
-
-        J = diags(inv_row) @ J
-        R = R * inv_row
-
-    # Column (diagonal) scaling (J * D_c)
-    if "diagonal" in methods:  # type: ignore
-        abs_diagonal = abs_diagonal if abs_diagonal is not None else np.abs(J.diagonal())
-        abs_diagonal[abs_diagonal < epsilon] = 1.0
-        inverse_diagional_scale = 1.0 / abs_diagonal
-
-        J = J @ diags(inverse_diagional_scale)
-        column_scaling_vector = inverse_diagional_scale
+    for method in selected:
+        if method == "row":
+            row_sums = np.bincount(
+                np.repeat(np.arange(n), row_lengths),
+                weights=np.abs(J.data),
+                minlength=n,
+            )
+            row_sums[row_sums < epsilon] = 1.0
+            inverse_row_scale = (1.0 / row_sums).astype(J.dtype, copy=False)
+            J.data *= np.repeat(inverse_row_scale, row_lengths)
+            R = R * inverse_row_scale
+        else:
+            abs_diagonal = np.abs(J.diagonal())
+            abs_diagonal[abs_diagonal < epsilon] = 1.0
+            inverse_column_scale = (1.0 / abs_diagonal).astype(J.dtype, copy=False)
+            J.data *= inverse_column_scale[J.indices]
+            column_scaling_vector = (
+                inverse_column_scale
+                if column_scaling_vector is None
+                else column_scaling_vector * inverse_column_scale
+            )
 
     return J, R, column_scaling_vector  # type: ignore[return-value]  # ty:ignore[invalid-return-type]

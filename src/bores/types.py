@@ -291,7 +291,7 @@ class SolverFunction(typing.Protocol):
         maxiter: int | None,
         M: typing.Any | None,
         callback: typing.Callable[[npt.NDArray], None] | None,
-    ) -> npt.NDArray: ...
+    ) -> tuple[npt.NDArray, int]: ...
 
 
 Solver = SolverFunction | SolverStr

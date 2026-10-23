@@ -1455,6 +1455,26 @@ REGION_SUMMARY_VECTORS: dict[str, type[ws.RegionInPlace]] = {
 }
 """Deck mnemonic to the `bores.wells.summary` class it requests. One instance per `FIPNUM` region."""
 
+BLOCK_SUMMARY_VECTORS: dict[str, type[ws.BlockVector]] = {
+    "BPR": ws.BlockPressure,
+    "BPRESSUR": ws.BlockPressure,
+    "BGSAT": ws.BlockGasSaturation,
+    "BSGAS": ws.BlockGasSaturation,
+    "BOSAT": ws.BlockOilSaturation,
+    "BSOIL": ws.BlockOilSaturation,
+    "BWSAT": ws.BlockWaterSaturation,
+    "BSWAT": ws.BlockWaterSaturation,
+    "BRS": ws.BlockGasOilRatio,
+    "BRV": ws.BlockVaporizedOilGasRatio,
+    "BOKR": ws.BlockOilRelativePermeability,
+    "BWKR": ws.BlockWaterRelativePermeability,
+    "BGKR": ws.BlockGasRelativePermeability,
+}
+"""
+Deck mnemonic to the `bores.wells.summary` class it requests. One instance per listed cell.
+Mnemonics that Eclipse treats as the same vector (`BPR` and `BPRESSUR`) map to the same class.
+"""
+
 
 def get_fluid_in_place_regions(deck_file: DeckFile) -> list[int]:
     """
@@ -1488,6 +1508,10 @@ def load_summary_items(
     region. With no region list they request every `FIPNUM` region in the deck (region 1 if the
     deck has no `FIPNUM`), matching Eclipse's own default.
 
+    `BPR`, `BGSAT`, `BOSAT`, `BWSAT`, `BRS`, `BRV`, `BOKR`, `BWKR`, `BGKR` (and `BPRESSUR`, `BSGAS`,
+    `BSOIL`, `BSWAT`, the names Eclipse gives the same vectors) request one vector per listed cell.
+    A cell listed more than once for the same vector is recorded once.
+
     :param deck_file: The deck to read the `SUMMARY` section from.
     :param compiled_at: The point on the schedule clock the model this
         schedule will run against was compiled at, in the deck's time
@@ -1497,6 +1521,7 @@ def load_summary_items(
     :returns: One `ScheduleItem` per qualifying report time, each
         wrapping the same `RecordSummary` action, carrying every
         requested vector.
+    :raises DeckParseError: If a block vector lists a cell outside the deck's grid.
     """
     well_names = [record["well"] for record in deck_file.get("WELSPECS") or []]
 
@@ -1517,6 +1542,31 @@ def load_summary_items(
             continue
         regions = [int(region) for region in requested] or get_fluid_in_place_regions(deck_file)
         quantities.extend(region_summary_cls(region=region) for region in regions)
+
+    dimensions = deck_file.dimensions
+    block_keys: set[str] = set()
+    for mnemonic, block_summary_cls in BLOCK_SUMMARY_VECTORS.items():
+        requested = deck_file.get(mnemonic)
+        if requested is None:
+            continue
+        if dimensions is None:
+            raise DeckParseError(
+                f"{mnemonic}: cannot place block vectors without grid dimensions "
+                "(`SPECGRID`/`DIMENS` not found)."
+            )
+        for cell in requested:
+            i, j, k = cell["i"], cell["j"], cell["k"]
+            if not (1 <= i <= dimensions.nx and 1 <= j <= dimensions.ny and 1 <= k <= dimensions.nz):
+                raise DeckParseError(
+                    f"{mnemonic}: cell ({i}, {j}, {k}) is outside the {dimensions.nx} x "
+                    f"{dimensions.ny} x {dimensions.nz} grid."
+                )
+            quantity = block_summary_cls(i=i - 1, j=j - 1, k=k - 1)
+            # A cell listed twice, or under two names for the same vector, is recorded once.
+            if quantity.key in block_keys:
+                continue
+            block_keys.add(quantity.key)
+            quantities.append(quantity)
 
     if not quantities:
         return []

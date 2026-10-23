@@ -38,12 +38,6 @@ named region numbers):
 
 - `ROIP` / `RGIP` / `RWIP`: reservoir oil/gas/water in place.
 
-No `Summary` implementation reads these yet: a correct one needs
-region-scoped, FVF-converted in-place volumes from pore volume and PVT
-data, not just the wells workspace `bores.wells.summary` reads. Real
-reservoir-engineering work this module doesn't have the pieces for yet,
-flagged rather than rushed.
-
 **Block vectors** (one series per listed grid cell, given as `I J K /` lines closed
 by a final `/`):
 
