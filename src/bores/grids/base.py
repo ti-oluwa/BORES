@@ -403,6 +403,7 @@ def validate_indices(
     array = np.asarray(indices)
     if array.dtype.kind not in "iu":
         raise ValidationError(f"{label} indices must be integers, got dtype {array.dtype}.")
+
     out_of_range = (array < 0) | (array >= upper)
     if np.any(out_of_range):
         raise error(
@@ -423,9 +424,8 @@ def gather_ragged_positions(
         for every gathered entry, `entry_row` is the index in `rows` that the entry belongs to,
         and `gathered_offsets` are the row boundaries of the gathered entries.
     """
-    offsets = offsets.astype(np.int64, copy=False)
-    first = offsets[rows]
-    counts = offsets[rows + 1] - first
+    first = offsets[rows].astype(np.int64)
+    counts = offsets[rows + 1].astype(np.int64) - first
     gathered_offsets = typing.cast(
         IntArray[OneDimension], np.concatenate([[0], np.cumsum(counts)])
     )
@@ -1437,12 +1437,18 @@ class Grid:
         :param cell_indices: Cells to find the top and bottom of, in the order they should be
             returned. Defaults to every cell.
         :returns: The top and bottom depth and area of each requested cell, in float64.
+        :raises CellNotFoundError: If a cell index is out of range.
         :raises ValidationError: If a face listed for a cell is not connected to that cell.
         """
         if cell_indices is None:
             cell_indices = np.arange(self.n_cells)
 
-        cells = typing.cast(IntArray[OneDimension], np.asarray(cell_indices, dtype=np.int64))
+        cells = typing.cast(
+            IntArray[OneDimension],
+            validate_indices(
+                cell_indices, upper=self.n_cells, label="Cell", error=CellNotFoundError
+            ),
+        )
         n = len(cells)
 
         # Gather the faces of every requested cell into flat arrays, `row` giving the position
@@ -1708,6 +1714,7 @@ class Grid:
             raise ValidationError(
                 f"Cell {int(cells[cells < 0].flat[0])} is not a valid cell index."
             )
+
         faces, cells = np.broadcast_arrays(faces, cells)
         owners = self.face_cell_indices[faces, 0]
         neighbours = self.face_cell_indices[faces, 1]
@@ -1758,17 +1765,17 @@ class Grid:
         :raises ValidationError: If `points` does not end in an axis of length 3, or any point
             has no cell center within `max_distance`.
         """
-        points = np.asarray(points, dtype=np.float64)
-        if points.ndim == 0 or points.shape[-1] != 3:
-            raise ValidationError(f"`points` must have shape (..., 3), got {points.shape}.")
+        query_points = np.asarray(points)
+        if query_points.ndim == 0 or query_points.shape[-1] != 3:
+            raise ValidationError(f"`points` must have shape (..., 3), got {query_points.shape}.")
 
-        distance, cell_indices = self._spatial_index.query(points)  # type: ignore[union-attr]
+        distance, cell_indices = self._spatial_index.query(query_points)  # type: ignore[union-attr]
         if max_distance is not None and np.any(distance > max_distance):
             raise ValidationError(
                 f"{int(np.count_nonzero(distance > max_distance))} of {distance.size} points have "  # type: ignore[attr-defined]
                 f"no cell center within the requested distance ({max_distance})."
             )
-        return typing.cast(IntArray[AnyDimensions], np.asarray(cell_indices, dtype=np.int64))
+        return typing.cast(IntArray[AnyDimensions], np.asarray(cell_indices))
 
     def find_cells_at_positions(
         self, points: NumberArray[AnyDimensions], *, max_distance: Number | None = None
@@ -1795,15 +1802,16 @@ class Grid:
         :returns: The cells found for each point, one row per point and sorted within a row.
         :raises ValidationError: If `points` does not end in an axis of length 3.
         """
-        points = np.asarray(points, dtype=np.float64)
-        if points.ndim == 0 or points.shape[-1] != 3:
-            raise ValidationError(f"`points` must have shape (..., 3), got {points.shape}.")
-        flat_points = points.reshape(-1, 3)
-        radii = np.broadcast_to(np.asarray(radius, dtype=np.float64), points.shape[:-1]).ravel()
+        query_points = np.asarray(points)
+        if query_points.ndim == 0 or query_points.shape[-1] != 3:
+            raise ValidationError(f"`points` must have shape (..., 3), got {query_points.shape}.")
+
+        flat_points = query_points.reshape(-1, 3)
+        radii = np.broadcast_to(np.asarray(radius), query_points.shape[:-1]).ravel()
         found = self._spatial_index.query_ball_point(  # type: ignore[union-attr]
             flat_points, r=radii, return_sorted=True
         )
-        counts = np.fromiter((len(row) for row in found), dtype=np.int64, count=len(found))
+        counts = np.fromiter((len(row) for row in found), dtype=np.intp, count=len(found))
         values = (
             np.concatenate([np.asarray(row, dtype=np.int32) for row in found])
             if counts.sum()
@@ -1902,6 +1910,7 @@ class Grid:
         """
         if self.fault_transmissibility_multipliers is None:
             raise ValidationError("No fault transmissibility multipliers available on this grid.")
+
         if fault_name not in self.fault_transmissibility_multipliers:
             available = sorted(self.fault_transmissibility_multipliers.keys())
             raise KeyError(

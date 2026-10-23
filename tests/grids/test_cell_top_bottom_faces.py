@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from bores.errors import ValidationError
+from bores.errors import CellNotFoundError, ValidationError
 from bores.grids import Grid
 from bores.grids.io.grdecl import load_grdecl
 from bores.types import UnitSystem
@@ -108,3 +108,10 @@ def test_a_face_not_connected_to_its_cell_is_rejected():
     grid.face_cell_indices[0] = [9, -1]
     with pytest.raises(ValidationError):
         Grid.get_cell_top_bottom_faces(grid, cell_indices=np.array([0]))
+
+
+def test_an_out_of_range_cell_is_rejected_with_a_clear_error():
+    grid = load_grdecl(DATA / "cp.grdecl", unit_system=UnitSystem.FIELD)
+    for bad in (-1, grid.n_cells):
+        with pytest.raises(CellNotFoundError):
+            grid.get_cell_top_bottom_faces(cell_indices=np.array([bad]))

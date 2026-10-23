@@ -25,7 +25,9 @@ def sample(grid, count, upper, seed=0):
 
 
 def split_rows(ragged):
-    return [ragged.values[a:b] for a, b in zip(ragged.offsets[:-1], ragged.offsets[1:], strict=False)]
+    return [
+        ragged.values[a:b] for a, b in zip(ragged.offsets[:-1], ragged.offsets[1:], strict=False)
+    ]
 
 
 class TestIndexConversion:
@@ -48,6 +50,16 @@ class TestIndexConversion:
         plane_i, plane_j = np.meshgrid(np.arange(2), np.arange(3), indexing="ij")
         assert grid.flat_indices(plane_i, plane_j, 0).shape == (2, 3)
 
+    @pytest.mark.parametrize("small", [np.int8, np.int16, np.uint8, np.uint16])
+    def test_small_integer_inputs_do_not_overflow(self, grid, small):
+        dims = grid.dimensions
+        largest = np.iinfo(small).max
+        i = np.array([min(dims.nx - 1, largest)], dtype=small)
+        j = np.array([min(dims.ny - 1, largest)], dtype=small)
+        k = np.array([min(dims.nz - 1, largest)], dtype=small)
+        expected = int(i[0]) + int(j[0]) * dims.nx + int(k[0]) * dims.nx * dims.ny
+        assert int(grid.flat_indices(i, j, k)[0]) == expected
+
     def test_out_of_range_indices_are_rejected(self, grid):
         for bad in (-1, grid.n_cells):
             with pytest.raises(CellNotFoundError):
@@ -63,7 +75,8 @@ class TestIndexConversion:
         centers = grid.get_cell_centers_at(i, j, k)
         assert centers.shape == (50, 3)
         expected = np.array([
-            grid.get_cell_center_at(int(a), int(b), int(c)) for a, b, c in zip(i, j, k, strict=False)
+            grid.get_cell_center_at(int(a), int(b), int(c))
+            for a, b, c in zip(i, j, k, strict=False)
         ])
         np.testing.assert_allclose(centers, expected)
 
