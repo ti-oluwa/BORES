@@ -582,10 +582,10 @@ def plan_connection_walk(
     water_beneath = connection_water_rates.dtype.type(0.0)
     gas_beneath = connection_gas_rates.dtype.type(0.0)
     for step in range(below_count - 1, -1, -1):
-        i = ascending[below_start + step]
-        oil_beneath = oil_beneath + connection_oil_rates[i]
-        water_beneath = water_beneath + connection_water_rates[i]
-        gas_beneath = gas_beneath + connection_gas_rates[i]
+        idx = ascending[below_start + step]
+        oil_beneath = oil_beneath + connection_oil_rates[idx]
+        water_beneath = water_beneath + connection_water_rates[idx]
+        gas_beneath = gas_beneath + connection_gas_rates[idx]
         carried_oil_rates[step] = oil_beneath
         carried_water_rates[step] = water_beneath
         carried_gas_rates[step] = gas_beneath
@@ -594,18 +594,18 @@ def plan_connection_walk(
     previous_depth = reference_depth
     previous_measured_depth = reference_measured_depth
     for step in range(below_count):
-        i = ascending[below_start + step]
-        vertical_distance = abs(representative_depths[i] - previous_depth)
-        connection_indices[step] = i
+        idx = ascending[below_start + step]
+        vertical_distance = abs(representative_depths[idx] - previous_depth)
+        connection_indices[step] = idx
         previous_indices[step] = previous_index
         vertical_distances[step] = vertical_distance
         segment_lengths[step] = max(
-            abs(representative_measured_depths[i] - previous_measured_depth), vertical_distance
+            abs(representative_measured_depths[idx] - previous_measured_depth), vertical_distance
         )
         geometric_signs[step] = 1.0
-        previous_index = i
-        previous_depth = representative_depths[i]
-        previous_measured_depth = representative_measured_depths[i]
+        previous_index = idx
+        previous_depth = representative_depths[idx]
+        previous_measured_depth = representative_measured_depths[idx]
 
     oil_carried = oil_beneath
     water_carried = water_beneath
@@ -614,24 +614,24 @@ def plan_connection_walk(
     previous_depth = reference_depth
     previous_measured_depth = reference_measured_depth
     for step in range(below_count, count):
-        i = descending[step]
-        vertical_distance = abs(representative_depths[i] - previous_depth)
-        connection_indices[step] = i
+        idx = descending[step]
+        vertical_distance = abs(representative_depths[idx] - previous_depth)
+        connection_indices[step] = idx
         previous_indices[step] = previous_index
         vertical_distances[step] = vertical_distance
         segment_lengths[step] = max(
-            abs(representative_measured_depths[i] - previous_measured_depth), vertical_distance
+            abs(representative_measured_depths[idx] - previous_measured_depth), vertical_distance
         )
         geometric_signs[step] = -1.0
         carried_oil_rates[step] = oil_carried
         carried_water_rates[step] = water_carried
         carried_gas_rates[step] = gas_carried
-        oil_carried = oil_carried + connection_oil_rates[i]
-        water_carried = water_carried + connection_water_rates[i]
-        gas_carried = gas_carried + connection_gas_rates[i]
-        previous_index = i
-        previous_depth = representative_depths[i]
-        previous_measured_depth = representative_measured_depths[i]
+        oil_carried = oil_carried + connection_oil_rates[idx]
+        water_carried = water_carried + connection_water_rates[idx]
+        gas_carried = gas_carried + connection_gas_rates[idx]
+        previous_index = idx
+        previous_depth = representative_depths[idx]
+        previous_measured_depth = representative_measured_depths[idx]
 
     return ConnectionWalk(
         connection_indices=connection_indices,
