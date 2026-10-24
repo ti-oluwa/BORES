@@ -2133,6 +2133,9 @@ class Grid:
         cell_centroids = (
             self.cell_centroids * length_factor if self.cell_centroids is not None else None
         )
+        # The cell bounding boxes set the cell lengths, so they scale with the vertices.
+        cell_min_xyz = self.cell_min_xyz * length_factor if self.cell_min_xyz is not None else None
+        cell_max_xyz = self.cell_max_xyz * length_factor if self.cell_max_xyz is not None else None
         # Flow transmissibility has units of volumetric rate x viscosity / pressure.
         nnc_transmissibilities = (
             self.nnc_transmissibilities
@@ -2151,6 +2154,8 @@ class Grid:
             vertex_coordinates=vertex_coordinates,
             cell_volumes=cell_volumes,
             cell_centroids=cell_centroids,
+            cell_min_xyz=cell_min_xyz,
+            cell_max_xyz=cell_max_xyz,
             nnc_transmissibilities=nnc_transmissibilities,
             metadata=metadata,
             unit_system=target,

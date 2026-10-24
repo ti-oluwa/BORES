@@ -10,6 +10,7 @@ from typing_extensions import Self
 
 from bores.errors import ValidationError
 from bores.grids.base import Grid
+from bores.grids.containment import cell_contains_point, first_cell_containing_point
 from bores.types import (
     Boolean,
     GridIntersectionMethod,
@@ -551,41 +552,18 @@ def check_cell_contains_point(
     tolerance: Number = 1e-6,
 ) -> bool:
     """
-    `True` if `point` lies inside (or on the boundary of, within
-    `tolerance`) cell `cell_index`'s convex hull as every face's outward
-    normal points away from `point`.
+    `True` if `point` lies inside cell `cell_index`, or on its boundary within `tolerance`.
 
-    A cell with no faces (an inactive or pinched-out cell) has no geometry to
-    contain anything, so it never contains a point.
+    The test follows the cell's own faces, so it stays correct for warped and non-convex cells.
+    A cell with no faces (an inactive or pinched-out cell) contains nothing.
 
     :param grid: Grid providing face geometry.
     :param cell_index: Cell to test.
-    :param point: Point to test.
-    :param tolerance: Signed-distance tolerance for the boundary case.
-    :returns: `True` if inside.
+    :param point: `(x, y, z)` to test.
+    :param tolerance: Distance from the cell's surface up to which a point still counts as inside.
+    :returns: Whether the cell contains the point.
     """
-    faces = grid.get_cell_face_indices(cell_index)
-    if len(faces) == 0:
-        return False
-    for face_idx in faces:
-        normal = grid.get_face_normal_for_cell(face_idx, cell_index)
-        centroid = grid.face_centroids[face_idx]
-        signed_distance = (
-            normal[0] * (point[0] - centroid[0])
-            + normal[1] * (point[1] - centroid[1])
-            + normal[2] * (point[2] - centroid[2])
-        )
-        if signed_distance > tolerance:
-            return False
-    return True
-
-
-BATCHED_CONTAINMENT_MIN_CANDIDATES = 30
-"""
-Number of candidate cells from which `find_first_containing_cell` tests all of them in one
-vectorized pass. With fewer, testing one cell at a time and stopping at the first match is
-cheaper than the fixed cost of a vectorized grid call.
-"""
+    return cell_contains_point(grid, cell_index, point, tolerance)
 
 
 def find_first_containing_cell(
@@ -597,39 +575,16 @@ def find_first_containing_cell(
     """
     Find the first of `candidates` whose cell contains `point`.
 
-    Gives the same answer as testing the candidates one at a time with
-    `check_cell_contains_point` and stopping at the first match, so a cell with no faces is
-    never returned. A long list is tested in one vectorized pass instead.
+    A cell with no faces (an inactive or pinched-out cell) contains nothing, so it is never
+    returned.
 
     :param grid: Grid providing face geometry.
     :param candidates: Cell indices to test, in priority order.
     :param point: Point to locate.
-    :param tolerance: Signed-distance tolerance for the boundary case.
+    :param tolerance: Distance from a cell's surface up to which a point still counts as inside.
     :returns: The first containing cell, or `None` if none of them contains `point`.
     """
-    if len(candidates) < BATCHED_CONTAINMENT_MIN_CANDIDATES:
-        for candidate in candidates:
-            if check_cell_contains_point(grid, candidate, point, tolerance):
-                return candidate
-        return None
-
-    faces_of_candidates = grid.get_cells_face_indices(candidates)
-    faces_per_cell = np.diff(faces_of_candidates.offsets)
-    owner_position = np.repeat(np.arange(len(candidates)), faces_per_cell)
-    faces = faces_of_candidates.values
-    normals = grid.get_face_normals_for_cells(faces, np.asarray(candidates)[owner_position])  # type: ignore[arg-type]
-    signed_distances = np.einsum(
-        "fd,fd->f",
-        normals,
-        np.asarray(point) - grid.face_centroids[faces],  # type: ignore
-    )
-    # A cell contains the point unless one of its faces has the point on its outer side
-    outside_faces_per_cell = np.bincount(
-        owner_position[signed_distances > tolerance], minlength=len(candidates)
-    )
-    # A cell with no faces has no geometry to contain anything
-    containing = np.flatnonzero((outside_faces_per_cell == 0) & (faces_per_cell > 0))
-    return typing.cast(Integer, candidates[containing[0]]) if len(containing) else None
+    return first_cell_containing_point(grid, candidates, point, tolerance)
 
 
 def locate_cell(
