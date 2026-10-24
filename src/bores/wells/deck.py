@@ -3,6 +3,7 @@ Utilities for building well model definition objects from parsed Eclipse deck re
 """
 
 import itertools
+import logging
 import typing
 
 import attrs
@@ -80,6 +81,8 @@ from bores.wells.trajectory import TrajectoryStation, WellTrajectory
 # in the `wells` module
 if typing.TYPE_CHECKING:
     from bores.blackoil.compile import CompiledBlackOilModel
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "apply_d_factors",
@@ -765,20 +768,19 @@ def select_current_records(
 
 def check_well_status_supported(record: typing.Mapping[str, typing.Any], *, keyword: str) -> None:
     """
-    Rejects a `WCONPROD`/`WCONINJE` record that shuts or stops its well.
+    Warns about a `WCONPROD`/`WCONINJE` record that shuts or stops its well.
 
-    The status item of these records is not applied, so a well it shuts would stay open and
-    flow. Shut a well with `WELOPEN` instead.
+    The status item of these records is not applied, so a well it shuts stays open and flows.
+    The deck still loads. Shut a well with `WELOPEN` for it to take effect.
 
     :param record: One parsed `WCONPROD` or `WCONINJE` record.
-    :param keyword: The record's keyword, for the error message.
-    :raises NotSupportedError: If the record's status is `SHUT` or `STOP`.
+    :param keyword: The record's keyword, for the warning message.
     """
     status = str(record.get("status") or "OPEN").upper()
     if status in ("SHUT", "STOP"):
-        raise NotSupportedError(
+        logger.warning(
             f"`{keyword}` for well {record.get('well')!r} sets its status to {status}, which is "
-            "not supported yet. Shut the well with `WELOPEN` instead."
+            "not applied, so the well stays open. Shut it with `WELOPEN` instead."
         )
 
 
@@ -794,9 +796,8 @@ def load_producer_control_from_record(
         implicit `BHPLimit(min_value=bhp)`
         when `bhp` is given and mode isn't `BHP`, and an implicit
         `THPLimit(min_value=thp)` when `thp` is given and mode isn't `THP`.
-    :raises NotSupportedError: If the record's status is `SHUT` or `STOP`.
     """
-    # check_well_status_supported(record, keyword="WCONPROD")
+    check_well_status_supported(record, keyword="WCONPROD")
     mode = PRODUCER_CONTROL_MODE_MAP[record["control_mode"]]
     limits: list[Limit] = []
     bhp = record.get("bhp")
@@ -844,9 +845,8 @@ def load_injector_control_from_record(
     :returns: Constructed `InjectorControl`. Adds an implicit `BHPLimit(max_value=bhp)`
         when `bhp` is given and mode isn't `BHP`, and an implicit
         `THPLimit(max_value=thp)` when `thp` is given and mode isn't `THP`.
-    :raises NotSupportedError: If the record's status is `SHUT` or `STOP`.
     """
-    # check_well_status_supported(record, keyword="WCONINJE")
+    check_well_status_supported(record, keyword="WCONINJE")
     mode = INJECTOR_CONTROL_MODE_MAP[record["control_mode"]]
     phase = FluidPhase(record["injector_type"].lower())
     limits: list[Limit] = []
