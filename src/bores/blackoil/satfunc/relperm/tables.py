@@ -2111,7 +2111,7 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
         if not has_oil_water_table:
             oil_water_keyword = "`SWOF`" if family == "first" else "`SWFN` + `SOF3`/`SOF2`"
             warnings.warn(
-                f"Oil-water keyword(s) `{oil_water_keyword}` not found for `SATNUM` "
+                f"Oil-water keyword(s) {oil_water_keyword} not found for `SATNUM` "
                 f"{satnum}. Cannot build a three-phase table. "
                 "Use `TwoPhaseRelPermTable.from_deck(..., system='gas_oil')` "
                 "to build a gas-oil only table.",
@@ -2119,14 +2119,14 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
                 stacklevel=2,
             )
             raise ValidationError(
-                f"Oil-water keyword(s) `{oil_water_keyword}` required for {cls.__name__} "
+                f"Oil-water keyword(s) {oil_water_keyword} required for {cls.__name__} "
                 f"not found at SATNUM {satnum}."
             )
 
         if not has_gas_oil_table:
             gas_oil_keyword = "`SGOF`" if family == "first" else "`SGFN` + `SOF3`"
             warnings.warn(
-                f"Gas-oil keyword(s) `{gas_oil_keyword}` not found for `SATNUM` "
+                f"Gas-oil keyword(s) {gas_oil_keyword} not found for `SATNUM` "
                 f"{satnum}. Cannot build a three-phase table. "
                 "Use `TwoPhaseRelPermTable.from_deck(..., system='oil_water')` "
                 "to build an oil-water only table.",
@@ -2134,7 +2134,7 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
                 stacklevel=2,
             )
             raise ValidationError(
-                f"Gas-oil keyword(s) `{gas_oil_keyword}` required for {cls.__name__} "
+                f"Gas-oil keyword(s) {gas_oil_keyword} required for {cls.__name__} "
                 f"not found at `SATNUM` {satnum}."
             )
 

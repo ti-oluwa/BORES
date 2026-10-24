@@ -401,6 +401,12 @@ def load_case(
         original exception is chained as the cause.
     """
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+    deck_title = deck_file.get("TITLE")
+    if not deck_title:
+        deck_title = "deck file"
+    else:
+        deck_title = f"deck file: {deck_title!r}"
+
     deck_unit_system = deck_file.unit_system
     unit_system = unit_system if unit_system is not None else deck_unit_system
     runspec = (
@@ -418,12 +424,12 @@ def load_case(
     try:
         grid = Grid.from_deck(deck_file, on_inverted_cells=on_inverted_cells)
     except Exception as exc:
-        raise CaseLoadError(f"Failed to load grid from {deck_file!r}.") from exc
+        raise CaseLoadError(f"Failed to load grid from {deck_title}.") from exc
 
     try:
         regions = Regions.from_deck(deck_file, n_cells=grid.n_cells, use_default=True)
     except Exception as exc:
-        raise CaseLoadError(f"Failed to load regions from {deck_file!r}.") from exc
+        raise CaseLoadError(f"Failed to load regions from {deck_title}.") from exc
 
     try:
         satfunc = SatFunc.from_deck(
@@ -436,7 +442,7 @@ def load_case(
             dtype=dtype,
         )
     except Exception as exc:
-        raise CaseLoadError(f"Failed to load saturation functions from {deck_file!r}.") from exc
+        raise CaseLoadError(f"Failed to load saturation functions from {deck_title}.") from exc
 
     try:
         rock = Rock.from_deck(
@@ -448,7 +454,7 @@ def load_case(
             dtype=dtype,
         )
     except Exception as exc:
-        raise CaseLoadError(f"Failed to load rock properties from {deck_file!r}.") from exc
+        raise CaseLoadError(f"Failed to load rock properties from {deck_title}.") from exc
 
     reservoir = Reservoir(grid=grid, rock=rock, regions=regions)
 
@@ -460,7 +466,7 @@ def load_case(
             warn_on_extrapolation=warn_on_extrapolation,
         )
     except Exception as exc:
-        raise CaseLoadError(f"Failed to load PVT tables from {deck_file!r}.") from exc
+        raise CaseLoadError(f"Failed to load PVT tables from {deck_title}.") from exc
 
     fluid = BlackOil(pvt=pvt, satfunc=satfunc)
 
@@ -480,7 +486,7 @@ def load_case(
             dtype=dtype,
         )
     except Exception as exc:
-        raise CaseLoadError(f"Failed to initialize reservoir state from {deck_file!r}.") from exc
+        raise CaseLoadError(f"Failed to initialize reservoir state from {deck_title}.") from exc
 
     try:
         wells = WellSystem.from_deck(
@@ -489,7 +495,7 @@ def load_case(
             tubing_performance=tubing_performance,
         )
     except Exception as exc:
-        raise CaseLoadError(f"Failed to load wells from {deck_file!r}.") from exc
+        raise CaseLoadError(f"Failed to load wells from {deck_title}.") from exc
 
     try:
         resolved_boundary_conditions = load_boundary_conditions(
@@ -499,7 +505,7 @@ def load_case(
             reservoir_pressure=compute_water_phase_pressure(reservoir, initial_state, satfunc),
         )
     except Exception as exc:
-        raise CaseLoadError(f"Failed to load boundary conditions from {deck_file!r}.") from exc
+        raise CaseLoadError(f"Failed to load boundary conditions from {deck_title}.") from exc
 
     if boundary_conditions is not None:
         boundary_conditions = boundary_conditions.convert(deck_unit_system)
@@ -525,12 +531,12 @@ def load_case(
             unit_system=unit_system,
         )
     except Exception as exc:
-        raise CaseLoadError(f"Failed to load schedule from {deck_file!r}.") from exc
+        raise CaseLoadError(f"Failed to load schedule from {deck_title}.") from exc
 
     try:
         check_vfp_references(well_system=wells, schedule=schedule)
     except ValidationError as exc:
-        raise CaseLoadError(f"Invalid VFP table reference in {deck_file!r}: {exc}") from exc
+        raise CaseLoadError(f"Invalid VFP table reference in {deck_title}: {exc}") from exc
 
     start_date = runspec.start_date
     if start_date is None:
@@ -546,7 +552,7 @@ def load_case(
             unit_system=unit_system,
         )
     except Exception as exc:
-        raise CaseLoadError(f"Failed to load time targets from {deck_file!r}.") from exc
+        raise CaseLoadError(f"Failed to load time targets from {deck_title}.") from exc
 
     case = SimulationCase(
         model=compile_model(
@@ -569,6 +575,6 @@ def load_case(
         case.sync_timer()
     except Exception as exc:
         raise CaseLoadError(
-            f"Failed to set up the timer's time targets for {deck_file!r}."
+            f"Failed to set up the timer's time targets for {deck_title}."
         ) from exc
     return case
