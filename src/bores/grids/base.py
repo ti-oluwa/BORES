@@ -109,6 +109,110 @@ class CellStatus(enum.IntEnum):
 GEOMETRY_TOLERANCE: float = 1e-14
 
 
+@numba.njit(cache=True)
+def build_cell_face_csr(
+    face_cell_indices: IntArray[TwoDimensions],
+    n_cells: Integer,
+) -> tuple[IntArray[OneDimension], IntArray[OneDimension]]:
+    """
+    Build the cell-to-face CSR arrays with a single counting sort.
+
+    Faces of a cell appear in ascending face index order.
+
+    :param face_cell_indices: Shape `(n_faces, 2)` owner and neighbour cell of each face,
+        with `-1` marking a missing cell.
+    :param n_cells: Number of cells.
+    :returns: `(face_indices, offsets)` where `face_indices[offsets[c]:offsets[c + 1]]` are the
+        faces of cell `c`.
+    """
+    n_faces = face_cell_indices.shape[0]
+    offsets = np.zeros(n_cells + 1, dtype=np.int64)
+    for face in range(n_faces):
+        for side in range(2):
+            cell = face_cell_indices[face, side]
+            if cell >= 0:
+                if cell >= n_cells:
+                    raise ValueError("`face_cell_indices` refers to a cell outside the grid.")
+                offsets[cell + 1] += 1
+    for cell in range(n_cells):
+        offsets[cell + 1] += offsets[cell]
+
+    cursor = offsets[:-1].copy()
+    face_indices = np.empty(offsets[n_cells], dtype=np.int32)
+    for face in range(n_faces):
+        for side in range(2):
+            cell = face_cell_indices[face, side]
+            if cell >= 0:
+                face_indices[cursor[cell]] = face
+                cursor[cell] += 1
+    return face_indices, offsets.astype(np.int32)
+
+
+@numba.njit(cache=True)
+def build_cell_neighbor_csr(
+    face_cell_indices: IntArray[TwoDimensions],
+    n_cells: Integer,
+) -> tuple[IntArray[OneDimension], IntArray[OneDimension]]:
+    """
+    Build the cell-to-neighbour CSR arrays: the sorted, de-duplicated cells that share an
+    interior face with each cell.
+
+    :param face_cell_indices: Shape `(n_faces, 2)` owner and neighbour cell of each face,
+        with `-1` marking a missing cell.
+    :param n_cells: Number of cells.
+    :returns: `(neighbour_indices, offsets)` where `neighbour_indices[offsets[c]:offsets[c + 1]]`
+        are the ascending neighbours of cell `c`.
+    """
+    n_faces = face_cell_indices.shape[0]
+    starts = np.zeros(n_cells + 1, dtype=np.int64)
+    for face in range(n_faces):
+        owner = face_cell_indices[face, 0]
+        neighbour = face_cell_indices[face, 1]
+        if owner >= 0 and neighbour >= 0:
+            if owner >= n_cells or neighbour >= n_cells:
+                raise ValueError("`face_cell_indices` refers to a cell outside the grid.")
+            starts[owner + 1] += 1
+            starts[neighbour + 1] += 1
+    for cell in range(n_cells):
+        starts[cell + 1] += starts[cell]
+
+    cursor = starts[:-1].copy()
+    targets = np.empty(starts[n_cells], dtype=np.int32)
+    for face in range(n_faces):
+        owner = face_cell_indices[face, 0]
+        neighbour = face_cell_indices[face, 1]
+        if owner >= 0 and neighbour >= 0:
+            targets[cursor[owner]] = neighbour
+            cursor[owner] += 1
+            targets[cursor[neighbour]] = owner
+            cursor[neighbour] += 1
+
+    offsets = np.zeros(n_cells + 1, dtype=np.int64)
+    write = 0
+    for cell in range(n_cells):
+        begin = starts[cell]
+        end = starts[cell + 1]
+        if end - begin <= 24:
+            for position in range(begin + 1, end):
+                value = targets[position]
+                hole = position - 1
+                while hole >= begin and targets[hole] > value:
+                    targets[hole + 1] = targets[hole]
+                    hole -= 1
+                targets[hole + 1] = value
+        else:
+            targets[begin:end].sort()
+        previous = -1
+        for position in range(begin, end):
+            value = targets[position]
+            if value != previous:
+                targets[write] = value
+                write += 1
+                previous = value
+        offsets[cell + 1] = write
+    return targets[:write].copy(), offsets.astype(np.int32)
+
+
 @numba.njit(parallel=True, cache=True)
 def compute_face_geometry(
     face_vertex_indices: IntArray[OneDimension],
@@ -675,7 +779,6 @@ class Grid:
         self._compute_cell_geometry()
         self._compute_bounding_boxes()
         self._compute_derived_dimensions()
-        self._build_spatial_index()
 
     def _validate_inputs(self) -> None:
         if self.vertex_coordinates.ndim != 2 or self.vertex_coordinates.shape[1] != 3:
@@ -1066,32 +1169,20 @@ class Grid:
             object.__setattr__(self, "cell_statuses", cell_statuses)
 
     def _build_cell_face_connectivity(self) -> None:
-        n_cells = self._get_cell_count()
-        n_faces = self.face_cell_indices.shape[0]
-        cells = self.face_cell_indices.reshape(-1).astype(np.int64)
-        faces = np.repeat(np.arange(n_faces, dtype=np.int64), 2)
-        present = cells >= 0
-        cells = cells[present]
-        faces = faces[present]
-        order = np.argsort(cells, kind="stable")
-        counts = np.bincount(cells, minlength=n_cells)
-        offsets = np.concatenate([[0], np.cumsum(counts)])
-        object.__setattr__(self, "cell_face_indices", faces[order].astype(np.int32))
-        object.__setattr__(self, "cell_face_offsets", offsets.astype(np.int32))
+        face_indices, offsets = build_cell_face_csr(
+            face_cell_indices=self.face_cell_indices,
+            n_cells=self._get_cell_count(),
+        )
+        object.__setattr__(self, "cell_face_indices", face_indices)
+        object.__setattr__(self, "cell_face_offsets", offsets)
 
     def _build_cell_neighbor_connectivity(self) -> None:
-        n_cells = self._get_cell_count()
-        interior = (self.face_cell_indices[:, 0] >= 0) & (self.face_cell_indices[:, 1] >= 0)
-        owners = self.face_cell_indices[interior, 0].astype(np.int64)
-        neighbours = self.face_cell_indices[interior, 1].astype(np.int64)
-        sources = np.concatenate([owners, neighbours])
-        targets = np.concatenate([neighbours, owners])
-        keys = np.unique(sources * n_cells + targets)
-        source_cells = keys // n_cells
-        counts = np.bincount(source_cells, minlength=n_cells)
-        offsets = np.concatenate([[0], np.cumsum(counts)])
-        object.__setattr__(self, "cell_neighbor_indices", (keys % n_cells).astype(np.int32))
-        object.__setattr__(self, "cell_neighbor_offsets", offsets.astype(np.int32))
+        neighbour_indices, offsets = build_cell_neighbor_csr(
+            face_cell_indices=self.face_cell_indices,
+            n_cells=self._get_cell_count(),
+        )
+        object.__setattr__(self, "cell_neighbor_indices", neighbour_indices)
+        object.__setattr__(self, "cell_neighbor_offsets", offsets)
 
     def _compute_face_geometry(self) -> None:
         face_centroids, face_areas, face_unit_normals = compute_face_geometry(
@@ -1191,9 +1282,14 @@ class Grid:
         np.divide(self.cell_volumes, projected_area, out=thickness, where=projected_area > 0.0)
         return thickness
 
-    def _build_spatial_index(self) -> None:
-        assert self.cell_centroids is not None
-        object.__setattr__(self, "_spatial_index", cKDTree(self.cell_centroids))
+    def _get_spatial_index(self) -> cKDTree:
+        """KD-tree of the cell centroids, built on first use because most grids never query it."""
+        index = self._spatial_index
+        if index is None:
+            assert self.cell_centroids is not None
+            index = cKDTree(self.cell_centroids)
+            object.__setattr__(self, "_spatial_index", index)
+        return index
 
     @property
     def n_cells(self) -> int:
@@ -1769,7 +1865,7 @@ class Grid:
         if query_points.ndim == 0 or query_points.shape[-1] != 3:
             raise ValidationError(f"`points` must have shape (..., 3), got {query_points.shape}.")
 
-        distance, cell_indices = self._spatial_index.query(query_points)  # type: ignore[union-attr]
+        distance, cell_indices = self._get_spatial_index().query(query_points)
         if max_distance is not None and np.any(distance > max_distance):
             raise ValidationError(
                 f"{int(np.count_nonzero(distance > max_distance))} of {distance.size} points have "  # type: ignore[attr-defined]
@@ -1808,7 +1904,7 @@ class Grid:
 
         flat_points = query_points.reshape(-1, 3)
         radii = np.broadcast_to(np.asarray(radius), query_points.shape[:-1]).ravel()
-        found = self._spatial_index.query_ball_point(  # type: ignore[union-attr]
+        found = self._get_spatial_index().query_ball_point(
             flat_points, r=radii, return_sorted=True
         )
         counts = np.fromiter((len(row) for row in found), dtype=np.intp, count=len(found))
@@ -1970,7 +2066,7 @@ class Grid:
             and the query coordinates.
         :returns: 0-based index of the nearest cell.
         """
-        distance, cell_index = self._spatial_index.query([x, y, z])  # type: ignore
+        distance, cell_index = self._get_spatial_index().query([x, y, z])
         if max_distance is not None and distance > max_distance:
             raise ValidationError(
                 f"No cell center lies within the requested distance ({max_distance})."
@@ -1989,7 +2085,7 @@ class Grid:
         :param radius: Search radius in grid length units.
         :returns: 1-D array of matching cell indices.
         """
-        raw = self._spatial_index.query_ball_point([x, y, z], r=radius)  # type: ignore
+        raw = self._get_spatial_index().query_ball_point([x, y, z], r=radius)
         return typing.cast(IntArray[OneDimension], np.asarray(raw, dtype=np.int32))
 
     def compute_pore_volume(

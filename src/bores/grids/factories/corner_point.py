@@ -958,28 +958,69 @@ def register_cell_faces(
     )
 
 
+INITIAL_POLYGON_CAPACITY = 64
+"""Initial rows of each polygon scratch buffer used by the overlap kernel; doubled on overflow."""
+
+INITIAL_POLYGON_PIECES = 256
+"""Initial number of pieces one lateral face may be split into; doubled on overflow."""
+
+MAX_POLYGON_CAPACITY = 8192
+"""Polygon rows beyond which an overlap is considered too intricate to resolve."""
+
+
+@numba.njit(cache=True, inline="always")
+def _kernel_failure(
+    status: Integer,
+    new_points: NumberArray[TwoDimensions],
+    new_point_offsets: IntArray[OneDimension],
+    new_owners: IntArray[OneDimension],
+    new_neighbours: IntArray[OneDimension],
+    replaced: BooleanArray[OneDimension],
+) -> tuple[
+    Integer,
+    Integer,
+    Integer,
+    NumberArray[TwoDimensions],
+    IntArray[OneDimension],
+    IntArray[OneDimension],
+    IntArray[OneDimension],
+    BooleanArray[OneDimension],
+]:
+    """Empty kernel result carrying a non-zero `status`."""
+    return (  # type: ignore[return-value]
+        status,
+        0,
+        0,
+        new_points[:0],
+        new_point_offsets[:1],
+        new_owners[:0],
+        new_neighbours[:0],
+        replaced,
+    )
+
+
 @numba.njit(cache=True)
 def build_lateral_polygon(
     corner_coordinates: NumberArray[ThreeDimensions],
     cell: Integer,
     local_index: Integer,
     lateral_face_corners: IntArray[TwoDimensions],
-) -> NumberArray[TwoDimensions]:
+    polygon: NumberArray[TwoDimensions],
+) -> None:
     """
-    Polygon of a lateral face in the `(s, depth)` plane spanned by its two pillars, wound
-    counter-clockwise.
+    Write the polygon of a lateral face in the `(s, depth)` plane spanned by its two pillars,
+    wound counter-clockwise, into `polygon`.
 
     :param corner_coordinates: Shape `(n_cells, 8, 3)` corner coordinates of every cell.
     :param cell: Flat index of the cell.
     :param local_index: Local index of the lateral face (2 to 5).
     :param lateral_face_corners: Shape `(6, 4)` corners spanning each lateral face.
-    :returns: Shape `(4, 2)` polygon.
+    :param polygon: Shape `(>= 4, 2)` output buffer; only the first four rows are written.
     """
     c0 = lateral_face_corners[local_index, 0]
     c1 = lateral_face_corners[local_index, 1]
     c2 = lateral_face_corners[local_index, 2]
     c3 = lateral_face_corners[local_index, 3]
-    polygon = np.empty((4, 2), dtype=np.float64)
     polygon[0, 0] = 0.0
     polygon[0, 1] = corner_coordinates[cell, c0, 2]
     polygon[1, 0] = 1.0
@@ -988,11 +1029,187 @@ def build_lateral_polygon(
     polygon[2, 1] = corner_coordinates[cell, c3, 2]
     polygon[3, 0] = 0.0
     polygon[3, 1] = corner_coordinates[cell, c2, 2]
-    if compute_polygon_signed_area(polygon) < 0.0:
+    if compute_polygon_signed_area(polygon[:4]) < 0.0:  # type: ignore[arg-type]
         for axis in range(2):
             polygon[0, axis], polygon[3, axis] = polygon[3, axis], polygon[0, axis]
             polygon[1, axis], polygon[2, axis] = polygon[2, axis], polygon[1, axis]
-    return polygon
+
+
+@numba.njit(cache=True)
+def clip_half_plane_into(
+    polygon: NumberArray[TwoDimensions],
+    n_vertices: Integer,
+    a: NumberArray[OneDimension],
+    b: NumberArray[OneDimension],
+    keep_inside: Boolean,
+    output: NumberArray[TwoDimensions],
+) -> Integer:
+    """
+    Allocation-free `clip_half_plane`: clip the first `n_vertices` rows of `polygon` against
+    the half-plane to the left (or right) of `a -> b` and write the result to `output`.
+
+    :param polygon: Shape `(>= n_vertices, 2)` polygon vertices.
+    :param n_vertices: Number of valid rows of `polygon`.
+    :param a: Shape `(2,)` first point of the line.
+    :param b: Shape `(2,)` second point of the line.
+    :param keep_inside: Keep the part to the left of `a -> b` when `True`, else the right.
+    :param output: Shape `(>= 2 * n_vertices + 2, 2)` output buffer, distinct from `polygon`.
+    :returns: Number of vertices written to `output`, or `-1` if `output` is too small.
+    """
+    if 2 * n_vertices + 2 > output.shape[0]:
+        return -1
+    if n_vertices == 0:
+        return 0
+
+    sign = 1.0 if keep_inside else -1.0
+    count = 0
+    previous = n_vertices - 1
+    previous_distance = sign * (
+        (b[0] - a[0]) * (polygon[previous, 1] - a[1])
+        - (b[1] - a[1]) * (polygon[previous, 0] - a[0])
+    )
+    for current in range(n_vertices):
+        current_distance = sign * (
+            (b[0] - a[0]) * (polygon[current, 1] - a[1])
+            - (b[1] - a[1]) * (polygon[current, 0] - a[0])
+        )
+        crosses = (current_distance >= 0.0) != (previous_distance >= 0.0)
+        if crosses:
+            t = previous_distance / (previous_distance - current_distance)
+            output[count, 0] = polygon[previous, 0] + t * (
+                polygon[current, 0] - polygon[previous, 0]
+            )
+            output[count, 1] = polygon[previous, 1] + t * (
+                polygon[current, 1] - polygon[previous, 1]
+            )
+            count += 1
+        if current_distance >= 0.0:
+            output[count, 0] = polygon[current, 0]
+            output[count, 1] = polygon[current, 1]
+            count += 1
+        previous = current
+        previous_distance = current_distance
+    return count
+
+
+@numba.njit(cache=True)
+def clip_convex_polygon_into(
+    subject: NumberArray[TwoDimensions],
+    n_subject: Integer,
+    clip: NumberArray[TwoDimensions],
+    n_clip: Integer,
+    work: NumberArray[ThreeDimensions],
+) -> tuple[Integer, Integer]:
+    """
+    Allocation-free `clip_convex_polygon` (Sutherland-Hodgman clipping).
+
+    :param subject: Shape `(>= n_subject, 2)` polygon to clip, vertices counter-clockwise.
+    :param n_subject: Number of valid rows of `subject`.
+    :param clip: Shape `(>= n_clip, 2)` convex clipping polygon, vertices counter-clockwise.
+    :param n_clip: Number of valid rows of `clip`.
+    :param work: Shape `(2, capacity, 2)` scratch buffers, `capacity >= 2 * n + 2` for the
+        largest intermediate polygon.
+    :returns: `(buffer, n_vertices)`; the intersection is `work[buffer, :n_vertices]`.
+        `n_vertices` is `-1` if `work` was too small.
+    """
+    if n_subject + 2 > work.shape[1]:
+        return 0, -1
+    for row in range(n_subject):
+        work[0, row, 0] = subject[row, 0]
+        work[0, row, 1] = subject[row, 1]
+    current = 0
+    n_vertices = n_subject
+    for index in range(n_clip):
+        n_vertices = clip_half_plane_into(
+            polygon=work[current],
+            n_vertices=n_vertices,
+            a=clip[index],
+            b=clip[(index + 1) % n_clip],
+            keep_inside=True,
+            output=work[1 - current],
+        )
+        if n_vertices < 0:
+            return current, -1
+        current = 1 - current
+        if n_vertices == 0:
+            break
+    return current, n_vertices
+
+
+@numba.njit(cache=True)
+def subtract_overlap_from_pieces(
+    pieces: NumberArray[ThreeDimensions],
+    n_pieces: IntArray[OneDimension],
+    count: Integer,
+    overlap: NumberArray[TwoDimensions],
+    n_overlap: Integer,
+    next_pieces: NumberArray[ThreeDimensions],
+    next_n_pieces: IntArray[OneDimension],
+    work: NumberArray[ThreeDimensions],
+    minimum_area: Number,
+) -> Integer:
+    """
+    Allocation-free subtraction of a convex polygon from a set of convex pieces; the buffer
+    form of calling `subtract_convex_polygon` on every piece and concatenating the results.
+
+    :param pieces: Shape `(max_pieces, capacity, 2)` input polygons.
+    :param n_pieces: Shape `(max_pieces,)` vertex count of each input polygon.
+    :param count: Number of input polygons.
+    :param overlap: Shape `(>= n_overlap, 2)` convex polygon to remove, counter-clockwise.
+    :param n_overlap: Number of valid rows of `overlap`.
+    :param next_pieces: Output polygons, same shape as `pieces`.
+    :param next_n_pieces: Output vertex counts.
+    :param work: Shape `(2, capacity, 2)` scratch buffers.
+    :param minimum_area: Output polygons whose area is at most this are dropped. Slivers that
+        can never become a face would otherwise keep intersecting later overlaps and multiply.
+    :returns: Number of output polygons, or `-1` if a buffer was too small.
+    """
+    max_pieces = pieces.shape[0]
+    capacity = pieces.shape[1]
+    n_out = 0
+    for piece in range(count):
+        n_vertices = n_pieces[piece]
+        if n_vertices + 2 > work.shape[1]:
+            return -1
+        for row in range(n_vertices):
+            work[0, row, 0] = pieces[piece, row, 0]
+            work[0, row, 1] = pieces[piece, row, 1]
+        current = 0
+        for index in range(n_overlap):
+            a = overlap[index]
+            b = overlap[(index + 1) % n_overlap]
+            # The part of the remaining polygon outside this clip edge is a finished piece.
+            if n_out >= max_pieces:
+                return -1
+            n_outside = clip_half_plane_into(
+                polygon=work[current],
+                n_vertices=n_vertices,
+                a=a,
+                b=b,
+                keep_inside=False,
+                output=next_pieces[n_out],
+            )
+            if n_outside < 0 or n_outside > capacity:
+                return -1
+            if n_outside >= 3 and (
+                abs(compute_polygon_signed_area(next_pieces[n_out, :n_outside])) > minimum_area  # type: ignore[arg-type]
+            ):
+                next_n_pieces[n_out] = n_outside
+                n_out += 1
+            n_vertices = clip_half_plane_into(
+                polygon=work[current],
+                n_vertices=n_vertices,
+                a=a,
+                b=b,
+                keep_inside=True,
+                output=work[1 - current],
+            )
+            if n_vertices < 0:
+                return -1
+            current = 1 - current
+            if n_vertices < 3:
+                break
+    return n_out
 
 
 @numba.njit(cache=True)
@@ -1123,6 +1340,8 @@ def connect_unmatched_faces_kernel(
     minimum_relative_overlap_area: Number,
     max_new_faces: Integer,
     max_new_points: Integer,
+    polygon_capacity: Integer,
+    max_polygon_pieces: Integer,
 ) -> tuple[
     Integer,
     Integer,
@@ -1155,9 +1374,11 @@ def connect_unmatched_faces_kernel(
         facing face are ignored.
     :param max_new_faces: Capacity of the new-face buffers.
     :param max_new_points: Capacity of the new-point buffer.
+    :param polygon_capacity: Rows of each polygon scratch buffer.
+    :param max_polygon_pieces: Number of pieces one lateral face may be split into.
     :returns: `(status, n_faces, n_points, points, point_offsets, owners, neighbours, replaced)`.
-        `status` is `0` on success and `1` when a buffer was too small, in which case the call
-        should be repeated with larger capacities.
+        `status` is `0` on success, `1` when a face buffer was too small and `2` when a polygon
+        buffer was too small; the call should then be repeated with larger capacities.
     """
     n_cells = nx * ny * nz
     layer_size = nx * ny
@@ -1224,6 +1445,10 @@ def connect_unmatched_faces_kernel(
 
     scratch = np.empty((32, 3), dtype=np.float64)
     pillars = np.empty(4, dtype=np.int64)
+    face_pillars = np.empty(4, dtype=np.int64)
+    polygon_a = np.empty((4, 2), dtype=np.float64)
+    polygon_b = np.empty((4, 2), dtype=np.float64)
+    polygon_work = np.empty((2, polygon_capacity, 2), dtype=np.float64)
 
     for direction in range(2):
         if direction == 0:
@@ -1255,11 +1480,12 @@ def connect_unmatched_faces_kernel(
             if i_a + step_i >= nx or j_a + step_j >= ny:
                 continue
 
-            polygon_a = build_lateral_polygon(
+            build_lateral_polygon(
                 corner_coordinates=corner_coordinates,
                 cell=cell_a,
                 local_index=plus_local,
                 lateral_face_corners=lateral_face_corners,
+                polygon=polygon_a,
             )
             area_a = abs(compute_polygon_signed_area(polygon_a))
             if area_a <= 0.0:
@@ -1267,7 +1493,6 @@ def connect_unmatched_faces_kernel(
             a_z_min = min(polygon_a[0, 1], polygon_a[1, 1], polygon_a[2, 1], polygon_a[3, 1])
             a_z_max = max(polygon_a[0, 1], polygon_a[1, 1], polygon_a[2, 1], polygon_a[3, 1])
 
-            face_pillars = np.empty(4, dtype=np.int64)
             face_pillars[0] = j_a + pillars[0]
             face_pillars[1] = i_a + pillars[1]
             face_pillars[2] = j_a + pillars[2]
@@ -1277,11 +1502,12 @@ def connect_unmatched_faces_kernel(
                 cell_b = (i_a + step_i) + (j_a + step_j) * nx + k_b * layer_size
                 if lookup[cell_b * 6 + minus_local] == -1:
                     continue
-                polygon_b = build_lateral_polygon(
+                build_lateral_polygon(
                     corner_coordinates=corner_coordinates,
                     cell=cell_b,
                     local_index=minus_local,
                     lateral_face_corners=lateral_face_corners,
+                    polygon=polygon_b,
                 )
                 area_b = abs(compute_polygon_signed_area(polygon_b))
                 if area_b <= 0.0:
@@ -1291,14 +1517,33 @@ def connect_unmatched_faces_kernel(
                 if a_z_max <= b_z_min or b_z_max <= a_z_min:
                     continue
 
-                overlap = clip_convex_polygon(subject=polygon_a, clip=polygon_b)
-                if overlap.shape[0] < 3 or abs(compute_polygon_signed_area(overlap)) <= (
+                work_index, n_overlap_vertices = clip_convex_polygon_into(
+                    subject=polygon_a,
+                    n_subject=4,
+                    clip=polygon_b,
+                    n_clip=4,
+                    work=polygon_work,  # type: ignore[arg-type]
+                )
+                if n_overlap_vertices < 0:
+                    return _kernel_failure(
+                        2,
+                        new_points,  # type: ignore[arg-type]
+                        new_point_offsets,
+                        new_owners,
+                        new_neighbours,
+                        replaced,
+                    )
+                overlap = polygon_work[work_index, :n_overlap_vertices]
+                if n_overlap_vertices < 3 or abs(compute_polygon_signed_area(overlap)) <= (  # type: ignore[arg-type]
                     minimum_relative_overlap_area * min(area_a, area_b)
                 ):
                     continue
 
                 n_points = polygon_to_pillar_points(
-                    polygon=overlap, coord=coord, pillars=face_pillars, points=scratch
+                    polygon=overlap,  # type: ignore[arg-type]
+                    coord=coord,
+                    pillars=face_pillars,
+                    points=scratch,
                 )
                 n_new_faces, n_new_points = append_face(  # type: ignore
                     points=scratch,
@@ -1362,38 +1607,73 @@ def connect_unmatched_faces_kernel(
                     n_entries += 1
                 n_overlaps += 1
 
+    pieces = np.empty((max_polygon_pieces, polygon_capacity, 2), dtype=np.float64)
+    n_piece_vertices = np.zeros(max_polygon_pieces, dtype=np.int64)
+    next_pieces = np.empty((max_polygon_pieces, polygon_capacity, 2), dtype=np.float64)
+    next_piece_vertices = np.zeros(max_polygon_pieces, dtype=np.int64)
+    polygon_c = np.empty((4, 2), dtype=np.float64)
     for cover in range(n_covers):
         slot = cover_slots[cover]
         cell = slot // 6
         local = slot % 6
-        polygon = build_lateral_polygon(
+        build_lateral_polygon(
             corner_coordinates=corner_coordinates,
             cell=cell,
             local_index=local,
             lateral_face_corners=lateral_face_corners,
+            polygon=polygon_c,
         )
-        full_area = abs(compute_polygon_signed_area(polygon))
-        pieces = [polygon]
+        full_area = abs(compute_polygon_signed_area(polygon_c))
+        for row in range(4):
+            pieces[0, row, 0] = polygon_c[row, 0]
+            pieces[0, row, 1] = polygon_c[row, 1]
+        n_piece_vertices[0] = 4
+        n_pieces = 1
         entry = cover_head[cover]
         while entry >= 0:
             overlap_index = entry_overlaps[entry]
             start = overlap_offsets[overlap_index]
             stop = overlap_offsets[overlap_index + 1]
-            overlap = np.ascontiguousarray(overlap_points[start:stop])
-            next_pieces = []
-            for piece in pieces:
-                for rest_piece in subtract_convex_polygon_pieces(  # type: ignore
-                    subject=piece,
-                    clip=overlap,  # type: ignore
-                ):
-                    next_pieces.append(rest_piece)
-            pieces = next_pieces
+            n_next = subtract_overlap_from_pieces(
+                pieces=pieces,  # type: ignore[arg-type]
+                n_pieces=n_piece_vertices,
+                count=n_pieces,
+                overlap=overlap_points[start:stop],  # type: ignore[arg-type]
+                n_overlap=stop - start,  # type: ignore[arg-type]
+                next_pieces=next_pieces,  # type: ignore[arg-type]
+                next_n_pieces=next_piece_vertices,
+                work=polygon_work,  # type: ignore[arg-type]
+                minimum_area=0.5 * minimum_relative_overlap_area * full_area,
+            )
+            if n_next < 0:
+                return _kernel_failure(
+                    2,
+                    new_points,  # type: ignore[arg-type]
+                    new_point_offsets,
+                    new_owners,
+                    new_neighbours,
+                    replaced,
+                )
+            for piece in range(n_next):
+                n_vertices = next_piece_vertices[piece]
+                n_piece_vertices[piece] = n_vertices
+                for row in range(n_vertices):
+                    pieces[piece, row, 0] = next_pieces[piece, row, 0]
+                    pieces[piece, row, 1] = next_pieces[piece, row, 1]
+            n_pieces = n_next
             entry = entry_next[entry]
 
-        for piece in pieces:
-            if abs(compute_polygon_signed_area(piece)) > minimum_relative_overlap_area * full_area:
+        for piece in range(n_pieces):
+            piece_polygon = pieces[piece, : n_piece_vertices[piece]]
+            if (
+                abs(compute_polygon_signed_area(piece_polygon))  # type: ignore[arg-type]
+                > minimum_relative_overlap_area * full_area
+            ):
                 n_points = polygon_to_pillar_points(
-                    polygon=piece, coord=coord, pillars=cover_pillars[cover], points=scratch
+                    polygon=piece_polygon,  # type: ignore[arg-type]
+                    coord=coord,
+                    pillars=cover_pillars[cover],
+                    points=scratch,
                 )
                 n_new_faces, n_new_points = append_face(  # type: ignore
                     points=scratch,
@@ -1409,14 +1689,12 @@ def connect_unmatched_faces_kernel(
                     n_stored_points=n_new_points,
                 )
                 if n_new_faces < 0:
-                    return (  # type: ignore[return-value]
+                    return _kernel_failure(
                         1,
-                        0,
-                        0,
-                        new_points[:0],
-                        new_point_offsets[:1],
-                        new_owners[:0],
-                        new_neighbours[:0],
+                        new_points,  # type: ignore[arg-type]
+                        new_point_offsets,
+                        new_owners,
+                        new_neighbours,
                         replaced,
                     )
         face = lookup[slot]
@@ -1570,7 +1848,9 @@ def connect_unmatched_faces(
     cell_centers = corner_coordinates.mean(axis=1)
     max_new_faces = 2 * n_unmatched_estimate + 64
     max_new_points = 6 * max_new_faces
-    for _ in range(12):
+    polygon_capacity = INITIAL_POLYGON_CAPACITY
+    max_polygon_pieces = INITIAL_POLYGON_PIECES
+    for _ in range(24):
         (
             status,
             n_faces,
@@ -1599,6 +1879,8 @@ def connect_unmatched_faces(
             minimum_relative_overlap_area=MINIMUM_RELATIVE_OVERLAP_AREA,
             max_new_faces=max_new_faces,
             max_new_points=max_new_points,
+            polygon_capacity=polygon_capacity,
+            max_polygon_pieces=max_polygon_pieces,
         )
         if status == 0:
             return NewFaces(
@@ -1609,9 +1891,109 @@ def connect_unmatched_faces(
                 neighbour_cells=neighbours,
                 replaced=replaced,
             )
-        max_new_faces *= 4
-        max_new_points *= 4
+        if status == 2:
+            if polygon_capacity >= MAX_POLYGON_CAPACITY:
+                raise InvalidGridError(
+                    "A lateral face of the corner-point grid is overlapped too intricately to resolve."
+                )
+            polygon_capacity *= 2
+            max_polygon_pieces *= 2
+        else:
+            max_new_faces *= 4
+            max_new_points *= 4
     raise InvalidGridError("Could not connect the unmatched faces of the corner-point grid.")
+
+
+@numba.njit(cache=True)
+def find_distinct_points(
+    points: NumberArray[TwoDimensions],
+    tolerance: Number,
+) -> tuple[
+    Integer,
+    IntArray[OneDimension],
+    IntArray[TwoDimensions],
+    IntArray[OneDimension],
+]:
+    """
+    Group points that fall on the same `tolerance`-sized lattice cell, using a hash table.
+
+    Points are quantised as `round(coordinate / tolerance)` (half to even) and two points
+    belong to the same group when all three quantised coordinates are equal.
+
+    :param points: Shape `(n_points, 3)` coordinates.
+    :param tolerance: Lattice spacing.
+    :returns: `(n_groups, first_index, lattice, group_of_point)`. Groups are numbered in the
+        order of their first point; `first_index[g]` is that point and `lattice[g]` its
+        quantised coordinates, both of length `n_groups`.
+    """
+    n_points = points.shape[0]
+    capacity = 16
+    while capacity < 2 * n_points:
+        capacity *= 2
+    mask = capacity - 1
+    table = np.full(capacity, -1, dtype=np.int64)
+    first_index = np.empty(n_points, dtype=np.int64)
+    lattice = np.empty((n_points, 3), dtype=np.int64)
+    group_of_point = np.empty(n_points, dtype=np.int64)
+    n_groups = 0
+    for point in range(n_points):
+        q0 = np.int64(np.rint(points[point, 0] / tolerance))
+        q1 = np.int64(np.rint(points[point, 1] / tolerance))
+        q2 = np.int64(np.rint(points[point, 2] / tolerance))
+        h = np.int64(1469598103934665603)
+        h = (h ^ q0) * np.int64(1099511628211)
+        h = (h ^ q1) * np.int64(1099511628211)
+        h = (h ^ q2) * np.int64(1099511628211)
+        h = h ^ (h >> 29)
+        slot = h & mask
+        while True:
+            group = table[slot]
+            if group < 0:
+                table[slot] = n_groups
+                first_index[n_groups] = point
+                lattice[n_groups, 0] = q0
+                lattice[n_groups, 1] = q1
+                lattice[n_groups, 2] = q2
+                group_of_point[point] = n_groups
+                n_groups += 1
+                break
+            if lattice[group, 0] == q0 and lattice[group, 1] == q1 and lattice[group, 2] == q2:
+                group_of_point[point] = group
+                break
+            slot = (slot + 1) & mask
+    return n_groups, first_index[:n_groups], lattice[:n_groups], group_of_point  # type: ignore[return-value]
+
+
+def merge_coincident_points(
+    points: NumberArray[TwoDimensions],
+    tolerance: Number,
+) -> tuple[IntArray[OneDimension], IntArray[OneDimension]]:
+    """
+    Merge points that quantise to the same `tolerance` lattice cell.
+
+    Equivalent to `np.unique(np.round(points / tolerance).astype(np.int64), axis=0,
+    return_index=True, return_inverse=True)` but without sorting every point: points are
+    grouped with a hash table and only the distinct ones are sorted, so merged vertices are
+    numbered in the same lexicographic order.
+
+    :param points: Shape `(n_points, 3)` coordinates.
+    :param tolerance: Lattice spacing.
+    :returns: `(first_index, merged_index)` where `points[first_index]` are the merged
+        points in lexicographic order of their lattice coordinates and `merged_index[p]` is
+        the position of point `p`'s merged point.
+    """
+    _, first_index, lattice, group_of_point = find_distinct_points(
+        points=typing.cast(
+            NumberArray[TwoDimensions], np.ascontiguousarray(points, dtype=np.float64)
+        ),
+        tolerance=float(tolerance),
+    )
+    order = np.lexsort((lattice[:, 2], lattice[:, 1], lattice[:, 0]))
+    rank = np.empty(len(order), dtype=np.intp)
+    rank[order] = np.arange(len(order), dtype=np.intp)
+    return typing.cast(IntArray[OneDimension], first_index[order]), typing.cast(
+        IntArray[OneDimension], rank[group_of_point]
+    )
 
 
 def compute_corner_point_geometry(
@@ -1670,9 +2052,9 @@ def compute_corner_point_geometry(
     )
 
     flat_corners = corner_coordinates.reshape(-1, 3)
-    quantized = np.round(flat_corners / vertex_tolerance).astype(np.int64, copy=False)
-    _, unique_indices, inverse = np.unique(
-        quantized, axis=0, return_index=True, return_inverse=True
+    unique_indices, inverse = merge_coincident_points(
+        points=flat_corners,
+        tolerance=vertex_tolerance,
     )
     vertex_coordinates = typing.cast(VertexCoordinates, flat_corners[unique_indices])
     n_cells = len(all_cells)
@@ -1827,16 +2209,41 @@ def resolve_fault_face_indices(
     :returns: Mapping from fault name to the indices of its faces.
     """
     nx, ny, nz = dimensions
-    kji_to_cell: dict[tuple[int, int, int], int] = {}
-    for k, j, i in np.argwhere(actnum > 0):
-        kji_to_cell[int(k), int(j), int(i)] = int(i) + int(j) * nx + int(k) * nx * ny
+    layer_size = nx * ny
+    n_cells = layer_size * nz
+    active = np.asarray(actnum > 0, dtype=bool).reshape(nz, ny, nx)
 
-    cell_pair_to_face: dict[frozenset[int], int] = {}
-    for face_idx, (owner, neighbour) in enumerate(face_cell_indices):
-        if owner >= 0 and neighbour >= 0:
-            cell_pair_to_face[frozenset((int(owner), int(neighbour)))] = face_idx
+    # Sorted keys of the cell pairs that share an interior face, with the index of the face
+    # connecting each pair; when several faces connect one pair the last one wins.
+    interior_faces = np.flatnonzero(
+        (face_cell_indices[:, 0] >= 0) & (face_cell_indices[:, 1] >= 0)
+    )
+    owners = face_cell_indices[interior_faces, 0].astype(np.int64)
+    neighbours = face_cell_indices[interior_faces, 1].astype(np.int64)
+    pair_keys = np.minimum(owners, neighbours) * n_cells + np.maximum(owners, neighbours)
+    order = np.argsort(pair_keys, kind="stable")
+    sorted_keys = pair_keys[order]
+    sorted_faces = interior_faces[order]
+    last_of_key = np.ones(len(sorted_keys), dtype=bool)
+    last_of_key[:-1] = sorted_keys[1:] != sorted_keys[:-1]
+    unique_keys = sorted_keys[last_of_key]
+    unique_faces = sorted_faces[last_of_key]
 
-    result: dict[str, list[Integer]] = {}
+    def is_active(k: IntArray[OneDimension], j: IntArray[OneDimension], i: IntArray[OneDimension]):
+        inside = (k >= 0) & (k < nz) & (j >= 0) & (j < ny) & (i >= 0) & (i < nx)
+        result = np.zeros(inside.shape, dtype=bool)
+        result[inside] = active[k[inside], j[inside], i[inside]]
+        return result
+
+    def face_of_pairs(cells_a: IntArray[OneDimension], cells_b: IntArray[OneDimension]):
+        """Face index of each cell pair, `-1` where the pair shares no face."""
+        keys = np.minimum(cells_a, cells_b) * n_cells + np.maximum(cells_a, cells_b)
+        position = np.searchsorted(unique_keys, keys)
+        position[position >= len(unique_keys)] = 0
+        found = (unique_keys[position] == keys) if len(unique_keys) else np.zeros_like(keys, bool)
+        return np.where(found, unique_faces[position] if len(unique_keys) else -1, -1)
+
+    result: dict[str, list[IntArray[OneDimension]]] = {}
 
     for record in fault_records:
         face_direction = record.face_direction.upper()
@@ -1857,31 +2264,36 @@ def resolve_fault_face_indices(
         else:
             di, dj, dk = 0, 0, step
 
-        face_indices: list[Integer] = []
-        n_inactive = 0
+        k_range = np.arange(record.k1 - 1, record.k2, dtype=np.int64)
+        j_range = np.arange(record.j1 - 1, record.j2, dtype=np.int64)
+        i_range = np.arange(record.i1 - 1, record.i2, dtype=np.int64)
+        if k_range.size == 0 or j_range.size == 0 or i_range.size == 0:
+            continue
+        kk, jj, ii = (
+            axis.ravel() for axis in np.meshgrid(k_range, j_range, i_range, indexing="ij")
+        )
 
-        for k in range(record.k1 - 1, record.k2):
-            for j in range(record.j1 - 1, record.j2):
-                for i in range(record.i1 - 1, record.i2):
-                    cell_a = kji_to_cell.get((k, j, i))
-                    if cell_a is None:
-                        n_inactive += 1
-                        continue
+        cell_a_active = is_active(kk, jj, ii)
+        cells_a = ii + jj * nx + kk * layer_size
+        lateral = di != 0 or dj != 0
+        has_neighbour = np.zeros(len(kk), dtype=bool)
+        found_faces: list[IntArray[OneDimension]] = []
+        for neighbour_offset in range(nz) if lateral else (None,):
+            neighbour_k = (
+                np.full(len(kk), neighbour_offset, dtype=np.int64)
+                if neighbour_offset is not None
+                else kk + dk
+            )
+            neighbour_active = is_active(neighbour_k, jj + dj, ii + di)
+            has_neighbour |= neighbour_active
+            connected = cell_a_active & neighbour_active
+            if not connected.any():
+                continue
+            cells_b = (ii + di) + (jj + dj) * nx + neighbour_k * layer_size
+            faces = face_of_pairs(cells_a[connected], cells_b[connected])  # type: ignore[arg-type]
+            found_faces.append(faces[faces >= 0])  # type: ignore[arg-type]
 
-                    lateral = di != 0 or dj != 0
-                    neighbour_ks = range(nz) if lateral else (k + dk,)
-                    found_neighbour = False
-                    for neighbour_k in neighbour_ks:
-                        cell_b = kji_to_cell.get((neighbour_k, j + dj, i + di))
-                        if cell_b is None:
-                            continue
-                        found_neighbour = True
-                        face_idx = cell_pair_to_face.get(frozenset((cell_a, cell_b)))
-                        if face_idx is not None:
-                            face_indices.append(face_idx)
-                    if not found_neighbour:
-                        n_inactive += 1
-
+        n_inactive = int((~(cell_a_active & has_neighbour)).sum())
         if n_inactive > 0:
             warnings.warn(
                 f"Fault {record.name!r}: {n_inactive} cell pair(s) skipped "
@@ -1889,16 +2301,14 @@ def resolve_fault_face_indices(
                 stacklevel=4,
             )
 
-        if face_indices:
-            existing = result.get(record.name)
-            if existing is not None:
-                existing.extend(face_indices)
-            else:
-                result[record.name] = face_indices
+        if found_faces and sum(len(faces) for faces in found_faces) > 0:
+            result.setdefault(record.name, []).extend(found_faces)
 
     return {
-        name: typing.cast(IntArray[OneDimension], np.unique(np.asarray(idxs, dtype=np.int32)))
-        for name, idxs in result.items()
+        name: typing.cast(
+            IntArray[OneDimension], np.unique(np.concatenate(chunks).astype(np.int32))
+        )
+        for name, chunks in result.items()
     }
 
 

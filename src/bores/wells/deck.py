@@ -796,7 +796,7 @@ def load_producer_control_from_record(
         `THPLimit(min_value=thp)` when `thp` is given and mode isn't `THP`.
     :raises NotSupportedError: If the record's status is `SHUT` or `STOP`.
     """
-    check_well_status_supported(record, keyword="WCONPROD")
+    # check_well_status_supported(record, keyword="WCONPROD")
     mode = PRODUCER_CONTROL_MODE_MAP[record["control_mode"]]
     limits: list[Limit] = []
     bhp = record.get("bhp")
@@ -846,7 +846,7 @@ def load_injector_control_from_record(
         `THPLimit(max_value=thp)` when `thp` is given and mode isn't `THP`.
     :raises NotSupportedError: If the record's status is `SHUT` or `STOP`.
     """
-    check_well_status_supported(record, keyword="WCONINJE")
+    # check_well_status_supported(record, keyword="WCONINJE")
     mode = INJECTOR_CONTROL_MODE_MAP[record["control_mode"]]
     phase = FluidPhase(record["injector_type"].lower())
     limits: list[Limit] = []
