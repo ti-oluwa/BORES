@@ -12,6 +12,12 @@ reports cubic feet and cubic feet per day, not barrels. Cumulative totals
 (`FOPT`, `WWIT`, ...) read the workspace's running volumes, which the run advances every
 accepted step with `bores.wells.workspace.accumulate_well_volumes`.
 
+A well that has not come into effect yet, or has no control, reads zero for every rate and
+total. A well with no open connection also reads zero. Reading a rate from a well that is in
+effect and has a control, but has not been resolved, is an error rather than a zero, so a well
+the run failed to resolve can not pass for one that is not flowing. Pressure vectors (`WBHP`,
+`WTHP`) read `NaN` for a well with no flowing pressure.
+
 Block vectors (`BPR`, `BGSAT`, ...) report one grid cell. They take the cell as 0-based
 `i`, `j`, `k`, like `Grid.flat_index`, and name it with Eclipse's 1-based indices in their
 report key, e.g. `"BPR:1,1,1"` for the first cell.
@@ -27,7 +33,12 @@ from bores.errors import SummaryError
 from bores.schedule.base import ScheduleContext
 from bores.schedule.summary import Summary
 from bores.types import BooleanCellArray, CellArray, Integer, Number, UnitSystem
-from bores.wells.compile import CompiledWellSystem, WellKind
+from bores.wells.compile import (
+    CompiledWellSystem,
+    InjectorControlModeTag,
+    ProducerControlModeTag,
+    WellKind,
+)
 from bores.wells.schedule import resolve_well
 
 if typing.TYPE_CHECKING:
@@ -167,6 +178,63 @@ def get_wells(*, model: "CompiledBlackOilModel") -> CompiledWellSystem:
     return model.wells
 
 
+def is_expected_to_flow(*, wells: CompiledWellSystem, well_row: Integer) -> bool:
+    """
+    :param wells: The compiled wells.
+    :param well_row: The well's row in the compiled well system.
+    :returns: Whether the well is in effect and has a control, so its rates should have been
+        resolved. A well that is not yet in effect, or has no control, has none to resolve.
+    """
+    unset_mode = (
+        InjectorControlModeTag.UNSET
+        if wells.well_kinds[well_row] == WellKind.INJECTOR
+        else ProducerControlModeTag.UNSET
+    )
+    return bool(
+        wells.schedule_statuses[well_row] == 1
+        and wells.controls.control_modes[well_row] != unset_mode
+    )
+
+
+def find_unresolved_wells(
+    *, wells: CompiledWellSystem, values: typing.Any, kind: WellKind | None = None
+) -> list[str]:
+    """
+    Finds the wells that should have a resolved value but still have `NaN`.
+
+    A well should have a value when it is in effect and has a control. A well that is not yet
+    in effect, or has no control, legitimately has none.
+
+    :param wells: The compiled wells.
+    :param values: Shape `(n_wells,)` array of one resolved quantity per well.
+    :param kind: Only wells of this kind are checked. Every well if not given.
+    :returns: The names of the wells that should have a value and do not.
+    """
+    well_kinds = wells.well_kinds
+    unset_modes = np.where(
+        well_kinds == WellKind.INJECTOR,
+        InjectorControlModeTag.UNSET,
+        ProducerControlModeTag.UNSET,
+    )
+    expected = (wells.schedule_statuses == 1) & (wells.controls.control_modes != unset_modes)
+    if kind is not None:
+        expected &= well_kinds == kind
+    return [str(wells.names[row]) for row in np.flatnonzero(expected & np.isnan(values))]
+
+
+def raise_for_unresolved_wells(*, names: typing.Sequence[str], array_name: str) -> None:
+    """
+    :param names: The wells that should have a value and do not.
+    :param array_name: The `WellsWorkspace` field that was read.
+    :raises SummaryError: If `names` is not empty.
+    """
+    if names:
+        raise SummaryError(
+            f"Wells {list(names)} are in effect and have a control, but `{array_name}` has no "
+            "value for them. The run has not resolved them yet, so no summary can be read."
+        )
+
+
 def sum_rates(
     *, wells: CompiledWellSystem, workspace: "SimulationWorkspace", array_name: str, kind: WellKind
 ) -> Number:
@@ -177,9 +245,13 @@ def sum_rates(
     :param workspace: The run's workspace, holding the rate arrays.
     :param array_name: The `WellsWorkspace` field to sum, e.g. `"surface_oil_rates"`.
     :param kind: Only wells of this kind are counted.
-    :returns: The total. A well not yet resolved (`NaN`) counts as zero.
+    :returns: The total. A well that is not yet in effect, or has no control, counts as zero.
+    :raises SummaryError: If a well that is in effect and has a control has not been resolved.
     """
     rates = getattr(workspace.wells, array_name)
+    raise_for_unresolved_wells(
+        names=find_unresolved_wells(wells=wells, values=rates, kind=kind), array_name=array_name
+    )
     return np.nansum(rates[wells.well_kinds == kind])
 
 
@@ -385,6 +457,13 @@ class WellVector(Summary["CompiledBlackOilModel"]):
     `None` reports every well, whatever its kind.
     """
 
+    is_rate: typing.ClassVar[bool] = False
+    """
+    Whether this vector is built from the wells' flow rates. A well that is not yet in effect,
+    or has no control, reads `0` for such a vector, and one that is in effect and has a control
+    but has not been resolved is an error.
+    """
+
     well_name: str
     """The well to report on."""
 
@@ -418,19 +497,31 @@ class WellVector(Summary["CompiledBlackOilModel"]):
 
         :param model: The model to look the well up in.
         :param context: The current moment's context, carrying the workspace.
-        :returns: The well's value, or `0` if the well is not of this vector's kind.
+        :returns: The well's value, or `0` if the well is not of this vector's kind, or if this
+            is a rate vector and the well is not yet in effect or has no control.
         :raises ValidationError: If the model has no well named `well_name`.
+        :raises SummaryError: If this is a rate vector and the well is in effect and has a
+            control but has not been resolved.
         """
         well_row, wells = resolve_well(model=model, well_name=self.well_name)
         if self.kind is not None and wells.well_kinds[well_row] != self.kind:
             return 0.0
-        return self.get_value(well_row=well_row, workspace=get_workspace(context=context))
+        value = self.get_value(well_row=well_row, workspace=get_workspace(context=context))
+        if self.is_rate and np.isnan(value):
+            if is_expected_to_flow(wells=wells, well_row=well_row):
+                raise SummaryError(
+                    f"Well {self.well_name!r} is in effect and has a control, but the run has "
+                    f"not resolved it, so {self.mnemonic} can not be read."
+                )
+            return 0.0
+        return value
 
 
 @attrs.frozen(kw_only=True, slots=True)
 class WellRate(WellVector):
     """Base for a per-well surface rate. Subclasses set `mnemonic` and `array_name`."""
 
+    is_rate = True
     array_name = ""
 
     def get_value(self, *, well_row: Integer, workspace: "SimulationWorkspace") -> Number:
@@ -503,6 +594,7 @@ class WellLiquidProductionRate(WellVector):
     """Well liquid (oil plus water) production rate (`WLPR`)."""
 
     mnemonic = "WLPR"
+    is_rate = True
     kind = WellKind.PRODUCER
 
     def get_value(self, *, well_row: Integer, workspace: "SimulationWorkspace") -> Number:
@@ -524,6 +616,7 @@ class WellWaterCut(WellVector):
     """Well water cut (`WWCT`): water over total liquid, `0` with no liquid."""
 
     mnemonic = "WWCT"
+    is_rate = True
     kind = WellKind.PRODUCER
 
     def get_value(self, *, well_row: Integer, workspace: "SimulationWorkspace") -> Number:
@@ -544,6 +637,7 @@ class WellGasOilRatio(WellVector):
     """Well gas-oil ratio (`WGOR`): gas over oil, `0` with no oil."""
 
     mnemonic = "WGOR"
+    is_rate = True
     kind = WellKind.PRODUCER
 
     def get_value(self, *, well_row: Integer, workspace: "SimulationWorkspace") -> Number:
@@ -562,7 +656,7 @@ class WellGasOilRatio(WellVector):
 
 @attrs.frozen(kw_only=True, slots=True)
 class WellBottomHolePressure(WellVector):
-    """Well bottom-hole pressure (`WBHP`). `NaN` for a well not yet resolved."""
+    """Well bottom-hole pressure (`WBHP`). `NaN` for a well that is not yet in effect, not yet resolved, or has no open connection."""
 
     mnemonic = "WBHP"
 

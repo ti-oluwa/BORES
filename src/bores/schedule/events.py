@@ -259,6 +259,10 @@ class ThresholdEvent(Event[ModelT]):
 
     The event fires at every check while the comparison holds, not only when it first becomes
     true. A `ScheduleItem` built on it therefore runs its action once unless told otherwise.
+
+    The value is read only when the schedule is advanced, so the event is noticed at the end of
+    the first step in which the comparison holds. It does not find the moment inside a step
+    that the value crossed the threshold, and it does not make the time stepper land there.
     """
 
     level_triggered: typing.ClassVar[bool] = True

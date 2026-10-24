@@ -101,6 +101,13 @@ class SummaryReport(
     Mutable and append-only. Built empty and handed to a run through
     `ScheduleContext.extra["summary_report"]`.
 
+    Each vector's values must be recorded at strictly increasing times, since `at` and
+    `between` search them by time. Recording a vector at or before the time of its latest
+    record is an error, which also catches a report time recorded twice, for example by two
+    items that record the same vector at the same time. To redo part of a run, such as after
+    a restart or a rejected step, first remove the records that no longer apply with
+    `discard_after`. A record added by appending to `records` directly is not checked.
+
     Keeps an index from each vector key to the positions of its records,
     so per-vector queries cost time proportional to that vector's own
     record count, not the whole report's. Records appended directly to
@@ -146,7 +153,15 @@ class SummaryReport(
         :param time_step: The time-step index this value was recorded at, if tracked.
         :param date: The calendar date this value was recorded at, if tracked.
         :returns: The `SummaryRecord` that was appended.
+        :raises SummaryError: If `key` already has a record at `time` or later.
         """
+        previous = self.last(key)
+        if previous is not None and time <= previous.time:
+            raise SummaryError(
+                f"Cannot record {key!r} at time {time}: it already has a record at time "
+                f"{previous.time}. A vector's records must be at strictly increasing times. "
+                "Use `discard_after` to remove records before recording them again."
+            )
         record = SummaryRecord(
             key=key,
             time=time,
@@ -157,6 +172,24 @@ class SummaryReport(
         self.records.append(record)
         self.update_index()
         return record
+
+    def discard_after(self, *, time: Number) -> int:
+        """
+        Removes every record made after `time`, of every vector, so that time can be recorded
+        again. Use it when a run goes back to an earlier time, such as a restart.
+
+        :param time: Elapsed time to keep records up to. A record at exactly `time` is kept.
+        :returns: How many records were removed.
+        """
+        kept = [record for record in self.records if record.time <= time]
+        removed = len(self.records) - len(kept)
+        if removed:
+            self.records[:] = kept
+            self.key_indices.clear()
+            self.series_cache.clear()
+            self.indexed_count = 0
+            self.update_index()
+        return removed
 
     def keys(self) -> frozenset[str]:
         """
@@ -193,8 +226,9 @@ class SummaryReport(
         This vector's full time series, in recording order.
 
         :param key: The vector to retrieve.
-        :returns: `(times, values)`, each shape `(n_records_for_key,)`.
-            Both empty if `key` was never recorded. Rebuilt only when
+        :returns: `(times, values)`, each shape `(n_records_for_key,)`, always in double
+            precision whatever the run's working precision, so reported values keep the precision
+            they were recorded with. Both empty if `key` was never recorded. Rebuilt only when
             `key` has gained records since the last call, so treat the
             returned arrays as read-only.
         """

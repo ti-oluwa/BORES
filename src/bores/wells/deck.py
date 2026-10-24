@@ -86,6 +86,7 @@ __all__ = [
     "apply_economic_limits",
     "apply_guide_rates",
     "apply_well_segments",
+    "check_well_status_supported",
     "from_deck_gas_rate",
     "get_fluid_in_place_regions",
     "load_controls_from_records",
@@ -762,6 +763,25 @@ def select_current_records(
     return current
 
 
+def check_well_status_supported(record: typing.Mapping[str, typing.Any], *, keyword: str) -> None:
+    """
+    Rejects a `WCONPROD`/`WCONINJE` record that shuts or stops its well.
+
+    The status item of these records is not applied, so a well it shuts would stay open and
+    flow. Shut a well with `WELOPEN` instead.
+
+    :param record: One parsed `WCONPROD` or `WCONINJE` record.
+    :param keyword: The record's keyword, for the error message.
+    :raises NotSupportedError: If the record's status is `SHUT` or `STOP`.
+    """
+    status = str(record.get("status") or "OPEN").upper()
+    if status in ("SHUT", "STOP"):
+        raise NotSupportedError(
+            f"`{keyword}` for well {record.get('well')!r} sets its status to {status}, which is "
+            "not supported yet. Shut the well with `WELOPEN` instead."
+        )
+
+
 def load_producer_control_from_record(
     record: typing.Mapping[str, typing.Any], unit_system: UnitSystem
 ) -> ProducerControl:
@@ -774,7 +794,9 @@ def load_producer_control_from_record(
         implicit `BHPLimit(min_value=bhp)`
         when `bhp` is given and mode isn't `BHP`, and an implicit
         `THPLimit(min_value=thp)` when `thp` is given and mode isn't `THP`.
+    :raises NotSupportedError: If the record's status is `SHUT` or `STOP`.
     """
+    check_well_status_supported(record, keyword="WCONPROD")
     mode = PRODUCER_CONTROL_MODE_MAP[record["control_mode"]]
     limits: list[Limit] = []
     bhp = record.get("bhp")
@@ -822,7 +844,9 @@ def load_injector_control_from_record(
     :returns: Constructed `InjectorControl`. Adds an implicit `BHPLimit(max_value=bhp)`
         when `bhp` is given and mode isn't `BHP`, and an implicit
         `THPLimit(max_value=thp)` when `thp` is given and mode isn't `THP`.
+    :raises NotSupportedError: If the record's status is `SHUT` or `STOP`.
     """
+    check_well_status_supported(record, keyword="WCONINJE")
     mode = INJECTOR_CONTROL_MODE_MAP[record["control_mode"]]
     phase = FluidPhase(record["injector_type"].lower())
     limits: list[Limit] = []
@@ -1703,6 +1727,14 @@ def load_schedule(
     A `WLIFT` item with trigger conditions holds across checks, so it runs once by default.
     Advance the returned schedule with a `Firings` to count that.
 
+    Items that fall at the same time run in a fixed order, by the keyword they came from:
+    `WELSPECS`, `WELOPEN`, `WPIMULT`, `WLIFT`, `WCONPROD`, `WCONINJE`, `WELTARG`, `WECON`,
+    `GECON`, `COMPDAT`, then summary recording. Records of the same keyword at the same
+    time run in deck order. A `WELTARG` therefore fine-tunes the control a `WCONPROD` or
+    `WCONINJE` at the same time sets, which is also how `load_controls_from_records` replays
+    them, and summary vectors are recorded last, after every change at that time. The order is
+    not the order different keywords appear in the deck.
+
     When `load_summary` is `True`, every requested `SUMMARY`-section vector
     (see `load_summary_items`) is added too, one item per report time
     strictly after `compiled_at`.
@@ -1780,24 +1812,6 @@ def load_schedule(
                 event=TimeEvent(at=schedule_time * time_factor),
                 action=action,
                 name=f"wpimult:{record['well']}@{schedule_time}",
-            )
-        )
-
-    for record in deck_file.get("WELTARG") or empty:
-        if not is_due(record):
-            continue
-        schedule_time = record["schedule_time"]
-        action = SetWellTargets(
-            well_names=(record["well"],),
-            control_mode=WellTargetMode(record["control_mode"]),
-            value=record.get("value"),
-            unit_system=deck_unit_system,
-        )
-        items.append(
-            ScheduleItem(
-                event=TimeEvent(at=schedule_time * time_factor),
-                action=action,
-                name=f"weltarg:{record['well']}@{schedule_time}",
             )
         )
 
@@ -2004,6 +2018,24 @@ def load_schedule(
                     name=f"wconinje-{kind.name.lower()}limit:{record['well']}@{schedule_time}",
                 )
             )
+
+    for record in deck_file.get("WELTARG") or empty:
+        if not is_due(record):
+            continue
+        schedule_time = record["schedule_time"]
+        action = SetWellTargets(
+            well_names=(record["well"],),
+            control_mode=WellTargetMode(record["control_mode"]),
+            value=record.get("value"),
+            unit_system=deck_unit_system,
+        )
+        items.append(
+            ScheduleItem(
+                event=TimeEvent(at=schedule_time * time_factor),
+                action=action,
+                name=f"weltarg:{record['well']}@{schedule_time}",
+            )
+        )
 
     for record in deck_file.get("WECON") or empty:
         if not is_due(record):

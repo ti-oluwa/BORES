@@ -8,6 +8,7 @@ import numpy as np
 from bores.errors import StopSimulation, ValidationError, WellConvergenceError
 from bores.types import Integer, NumberArray, OneDimension, P, R
 from bores.wells.compile import (
+    UNSET_INT,
     CompiledWellSystem,
     InjectorControlModeTag,
     ProducerControlModeTag,
@@ -40,7 +41,42 @@ from bores.wells.workspace import (
     get_connection_rates,
 )
 
-__all__ = ["resolve_well_control"]
+__all__ = ["record_shut_well", "resolve_well_control"]
+
+
+def record_shut_well(
+    *,
+    compiled_system: CompiledWellSystem,
+    well_row: Integer,
+    workspace: WellsWorkspace,
+) -> None:
+    """
+    Records a well that has no open connection as flowing nothing.
+
+    Every rate of the well, at reservoir and surface conditions, is zero. Its bottom-hole and
+    tubing-head pressures are `NaN`, since a well that is not connected to the reservoir has no
+    flowing pressure. Its connections carry zero rate and no pressure, and no limit binds.
+
+    :param compiled_system: The compiled well system.
+    :param well_row: Which well, by row index into `compiled_system`.
+    :param workspace: The system-wide `WellsWorkspace` to update in place.
+    """
+    workspace.bhps[well_row] = np.nan
+    workspace.thps[well_row] = np.nan
+    workspace.oil_rates[well_row] = 0.0
+    workspace.water_rates[well_row] = 0.0
+    workspace.gas_rates[well_row] = 0.0
+    workspace.surface_oil_rates[well_row] = 0.0
+    workspace.surface_water_rates[well_row] = 0.0
+    workspace.surface_gas_rates[well_row] = 0.0
+    workspace.active_limit_rows[well_row] = UNSET_INT
+    workspace.economic_shutins[well_row] = 0
+    perforations = compiled_system.perforations
+    start, end = perforations.well_offsets[well_row], perforations.well_offsets[well_row + 1]
+    workspace.connection_pressures[start:end] = np.nan
+    workspace.connection_oil_rates[start:end] = 0.0
+    workspace.connection_water_rates[start:end] = 0.0
+    workspace.connection_gas_rates[start:end] = 0.0
 
 
 def name_well_in_convergence_errors(func: typing.Callable[P, R]) -> typing.Callable[P, R]:
@@ -81,6 +117,11 @@ def resolve_well_control(
     A `PENDING` well (`compiled_system.schedule_statuses[well_row] == 0`)
     or an `UNSET`-mode well is left untouched (still `NaN`/`UNSET_INT`/`0`
     from `compile_well_resolution`) as there's nothing to resolve.
+
+    An active well with no open connection, because every one is shut, flows nothing, and
+    `record_shut_well` writes that. On every call, the connections of an active well that are
+    not open, whether shut or yet to come into effect, are given zero rate and no pressure, so
+    nothing from an earlier call lingers on them.
 
     :param compiled_system: The compiled well system.
     :param well_row: Which well, by row index into `compiled_system`.
@@ -128,12 +169,28 @@ def resolve_well_control(
         for i in range(perforation_start, perforation_end)
         if perforations.completion_statuses[i] == 1 and perforations.schedule_statuses[i] == 1
     ]
-    if not active_open or len(active_open) != len(connection_fluids.pressures):
+    if len(active_open) != len(connection_fluids.pressures):
         raise ValidationError(
             f"`resolve_well_control`: `well_row` {well_row} has {len(active_open)} "
             f"active/open connections but was given {len(connection_fluids.pressures)} "
             "connections in `connection_fluids`. These must match 1:1."
         )
+    if not active_open:
+        if control_mode != (
+            InjectorControlModeTag.UNSET if is_injector else ProducerControlModeTag.UNSET
+        ):
+            record_shut_well(
+                compiled_system=compiled_system, well_row=well_row, workspace=workspace
+            )
+        return
+
+    is_open = np.zeros(perforation_end - perforation_start, dtype=np.bool_)
+    is_open[np.asarray(active_open) - perforation_start] = True
+    not_open = np.flatnonzero(~is_open) + perforation_start
+    workspace.connection_pressures[not_open] = np.nan
+    workspace.connection_oil_rates[not_open] = 0.0
+    workspace.connection_water_rates[not_open] = 0.0
+    workspace.connection_gas_rates[not_open] = 0.0
 
     perforation_workspace = build_perforation_workspace(
         well_indices=typing.cast(

@@ -145,6 +145,17 @@ class ScheduleItem(typing.Generic[ModelT]):
     An event that holds across many checks, such as a rate threshold, would run its action at
     every check while it holds. `max_firings` and `min_interval` keep that from repeating a
     change that should happen once, like multiplying a connection factor.
+
+    For an event that holds across checks, these give the three behaviours a threshold
+    usually needs:
+
+    - Act once, the first time it holds: the default.
+    - Act again at most every `min_interval` while it keeps holding: set `min_interval`
+      together with `max_firings=math.inf`, or with a count.
+    - Act at every check while it holds: `max_firings=math.inf`, `min_interval=0`.
+
+    An item does not become eligible again when the condition stops holding and then holds
+    again. The count and the spacing are what limit it, not the condition's history.
     """
 
     event: Event[ModelT] = attrs.field(hash=False)
@@ -230,6 +241,10 @@ class Schedule(typing.Generic[ModelT]):
         """
         Applies every item whose event fires, in `items` order.
 
+        Items whose events fire at the same time run one after another in `items` order, and
+        each sees the changes the earlier ones made. That order is the only ordering rule, so
+        put the item that must run first before the one that depends on it.
+
         :param model: The model to advance.
         :param context: The current moment's context.
         :returns: The model after every firing item's action has run.
@@ -290,6 +305,19 @@ class Schedule(typing.Generic[ModelT]):
     ) -> ModelT:
         """
         Builds a `ScheduleContext` and calls `apply`.
+
+        Call this once for each time step the run accepts, with the time the step reached. An
+        action changes the model in place and `firings` keeps its count, and neither can be
+        undone, so do not advance for a step that may still be rejected and retried. An action
+        that fires at `time` changes the model for the steps after `time`, and a summary
+        recorded at `time` reads the state the accepted step ended in, before that change has
+        had any effect on the flow.
+
+        An event with a fixed time, such as a `TimeEvent` or `DateEvent`, is landed on exactly
+        when the time stepper uses `get_time_targets`. An event that depends on the model's
+        state, such as a `ThresholdEvent`, is checked only at the times advanced to, so it is
+        noticed at the end of the first step in which its condition holds, not at the moment
+        the condition began to hold.
 
         :param model: The model to advance.
         :param time: Elapsed time to advance to.
