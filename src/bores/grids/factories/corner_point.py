@@ -1,7 +1,7 @@
 """
 Corner-point (pillar) grid factory.
 
-Builds a `bores.grids.base.Grid` from ECLIPSE-style COORD / ZCORN / ACTNUM arrays.
+Builds a `bores.grids.base.Grid` from ECLIPSE-style `COORD` / `ZCORN` / `ACTNUM` arrays.
 
 **Coordinate convention**: z-axis positive downward.
 
@@ -27,9 +27,6 @@ from bores.datastructures import GridDimensions, MapAxes
 from bores.errors import GridExportError, InvalidGridError, ValidationError
 from bores.grids.base import CellStatus, ConnectionType, Grid
 from bores.grids.factories.base import (
-    FaceKey,
-    FaceRecord,
-    FaceVertexIndices,
     FaultRecord,
     VertexCoordinates,
     map_xy_to_map_space,
@@ -257,7 +254,7 @@ def make_corner_point_grid(
     mirrored = (
         resolved_map_axes is not None
         and apply_map_axes
-        and float(np.linalg.det(resolved_map_axes.rotation_matrix)) < 0.0
+        and np.linalg.det(resolved_map_axes.rotation_matrix) < 0
     )
 
     (
@@ -513,23 +510,64 @@ def compute_cell_corner_coordinates(
     return corners
 
 
+FACE_CORNER_TABLE: IntArray[TwoDimensions] = typing.cast(
+    IntArray[TwoDimensions], np.array(HEXAHEDRON_FACES_ZDOWN, dtype=np.int64)
+)
+"""Shape `(6, 4)` local hexahedron corner indices (VTK order) of each local face."""
+
+VTK_TO_CORNER_ORDER: IntArray[OneDimension] = np.array([0, 1, 3, 2, 4, 5, 7, 6], dtype=np.int64)  # type: ignore[assignment]
+"""Maps VTK hexahedron corner order to the corner order of `compute_cell_corner_coordinates`."""
+
+LATERAL_FACE_CORNERS: IntArray[TwoDimensions] = np.array(  # type: ignore[assignment]
+    [
+        [0, 0, 0, 0],
+        [0, 0, 0, 0],
+        [0, 1, 4, 5],  # -y
+        [2, 3, 6, 7],  # +y
+        [0, 2, 4, 6],  # -x
+        [1, 3, 5, 7],  # +x
+    ],
+    dtype=np.int64,
+)
+"""Shape `(6, 4)` corner indices (`compute_cell_corner_coordinates` order) spanning each lateral face."""
+
+
 @numba.njit(cache=True)
-def _is_cell_pinched(
-    vtk_vertices: list[Integer],
+def is_cell_pinched(
+    vtk_vertices: IntArray[OneDimension],
     vertex_coordinates: VertexCoordinates,
     pinch_tolerance: Number,
 ) -> Boolean:
     """
-    Return `True` if the cell's average thickness is at or below `pinch_tolerance`.
+    Return `True` if the cell's average thickness is at or below `pinch_tolerance`, or if
+    its top and bottom share the same four vertices.
 
-    :param vtk_vertices: 8 global vertex indices in VTK hex order.
+    :param vtk_vertices: Shape `(8,)` global vertex indices in VTK hexahedron order.
     :param vertex_coordinates: Shape `(n_verts, 3)` coordinate array.
     :param pinch_tolerance: Thickness threshold.
     :returns: `True` if the cell should be treated as pinched out.
     """
-    top_set = set(vtk_vertices[:4])
-    bottom_set = set(vtk_vertices[4:])
-    if top_set == bottom_set:
+    same_vertices = True
+    for top in range(4):
+        found = False
+        for bottom in range(4, 8):
+            if vtk_vertices[top] == vtk_vertices[bottom]:
+                found = True
+                break
+        if not found:
+            same_vertices = False
+            break
+    if same_vertices:
+        for bottom in range(4, 8):
+            found = False
+            for top in range(4):
+                if vtk_vertices[top] == vtk_vertices[bottom]:
+                    found = True
+                    break
+            if not found:
+                same_vertices = False
+                break
+    if same_vertices:
         return True
     if pinch_tolerance <= 0.0:
         return False
@@ -541,9 +579,6 @@ def _is_cell_pinched(
         total_dz += abs(z_bottom - z_top)
     return (total_dz / 4.0) <= pinch_tolerance
 
-
-LATERAL_FACE_LOCAL_INDICES: tuple[Integer, ...] = (2, 3, 4, 5)
-"""Local face indices of the four lateral faces (`-y`, `+y`, `-x`, `+x`)."""
 
 MINIMUM_RELATIVE_OVERLAP_AREA: Number = 1e-6
 """Overlaps smaller than this fraction of the smaller of the two facing faces are ignored."""
@@ -645,7 +680,8 @@ def clip_convex_polygon(
     return output
 
 
-def subtract_convex_polygon(
+@numba.njit(cache=True)
+def subtract_convex_polygon_pieces(
     subject: NumberArray[TwoDimensions],
     clip: NumberArray[TwoDimensions],
 ) -> list[NumberArray[TwoDimensions]]:
@@ -656,7 +692,7 @@ def subtract_convex_polygon(
     :param clip: Shape `(m, 2)` convex polygon to remove, vertices counter-clockwise.
     :returns: Disjoint pieces of `subject` that lie outside `clip`.
     """
-    pieces: list[NumberArray[TwoDimensions]] = []
+    pieces = []
     remaining = subject
     n_edges = clip.shape[0]
     for index in range(n_edges):
@@ -671,231 +707,24 @@ def subtract_convex_polygon(
     return pieces
 
 
-def connect_unmatched_faces(
-    *,
-    face_registry: dict[FaceKey, FaceRecord],
-    face_local_index: dict[FaceKey, Integer],
-    degenerate_faces: list[tuple[Integer, Integer]],
-    pinched_cells: set[Integer],
-    active_mask: BooleanArray[OneDimension],
-    corner_coordinates: NumberArray[ThreeDimensions],
-    coord: CoordArray,
-    dimensions: tuple[Integer, Integer, Integer],
-    vertex_coordinates: VertexCoordinates,
-) -> VertexCoordinates:
+def subtract_convex_polygon(
+    subject: NumberArray[TwoDimensions],
+    clip: NumberArray[TwoDimensions],
+) -> list[NumberArray[TwoDimensions]]:
     """
-    Connect cells whose facing faces do not share all four vertices.
+    Remove a convex polygon from a convex 2-D polygon.
 
-    **Lateral faces.** Across a fault the neighbouring column's cells may sit at a different
-    depth, so one lateral face can face several cells of the next column, each only partly. The
-    overlap with every facing cell of the adjacent column (any `k`) is computed as a polygon in
-    the surface spanned by the two shared pillars and becomes an interior face between the two
-    cells. The part of a face that no neighbour covers is kept as a boundary face.
-
-    **Vertical faces.** The bottom face of a cell and the top face of the next active,
-    non-pinched cell below it in the same column share a footprint but not necessarily their
-    corner depths (layer gaps or overlaps). They are replaced by one interior face halfway
-    between the two surfaces. An inactive cell between them blocks the connection.
-
-    :param face_registry: Face registry built from exact vertex matches; modified in place.
-    :param face_local_index: Local face index of each registered lateral or vertical face.
-    :param degenerate_faces: `(cell, local face index)` of lateral or vertical faces that collapse
-        to fewer than four distinct vertices and were not registered.
-    :param pinched_cells: Flat indices of pinched-out cells.
-    :param active_mask: Shape `(n_cells,)` activation mask.
-    :param corner_coordinates: Shape `(n_cells, 8, 3)` corner coordinates of every cell.
-    :param coord: Pillar array of shape `(ny + 1, nx + 1, 6)`.
-    :param dimensions: Grid extents `(nx, ny, nz)`.
-    :param vertex_coordinates: Existing merged vertex coordinates.
-    :returns: Vertex coordinates with the vertices of the new faces appended.
+    :param subject: Shape `(n, 2)` polygon to cut, vertices counter-clockwise.
+    :param clip: Shape `(m, 2)` convex polygon to remove, vertices counter-clockwise.
+    :returns: Disjoint pieces of `subject` that lie outside `clip`.
     """
-    nx, ny, nz = dimensions
-    layer_size = nx * ny
-
-    unmatched: dict[tuple[Integer, Integer], FaceKey | None] = {}
-    for key, local_index in face_local_index.items():
-        record = face_registry[key]
-        if record.neighbour_cell_index == -1:
-            unmatched[record.owner_cell_index, local_index] = key
-
-    for cell, local_index in degenerate_faces:
-        unmatched[cell, local_index] = None
-    if not unmatched:
-        return vertex_coordinates
-
-    new_points: list[NumberArray[OneDimension]] = []
-    next_vertex = len(vertex_coordinates)
-    replaced: set[FaceKey] = set()
-    cell_centers = corner_coordinates.mean(axis=1)
-
-    def add_face(
-        points: list[NumberArray[OneDimension]], owner: Integer, neighbour: Integer
-    ) -> None:
-        nonlocal next_vertex
-        normal = np.zeros(3)
-        for index, point in enumerate(points):
-            normal += np.cross(point, points[(index + 1) % len(points)])
-        face_center = np.mean(points, axis=0)
-        if float(np.dot(normal, face_center - cell_centers[owner])) < 0.0:
-            points = points[::-1]
-
-        indices = typing.cast(
-            FaceVertexIndices, list(range(next_vertex, next_vertex + len(points)))
-        )
-        next_vertex += len(points)
-        new_points.extend(points)
-        record = FaceRecord(owner_cell_index=owner, face_vertex_indices=indices)
-        record.neighbour_cell_index = neighbour
-        face_registry[tuple(sorted(indices))] = record
-
-    # (plus local face, minus local face, plus corners, minus corners, pillar 1, pillar 2)
-    directions = (
-        (5, 4, (1, 3, 5, 7), (0, 2, 4, 6), (0, 1), (1, 1)),
-        (3, 2, (2, 3, 6, 7), (0, 1, 4, 5), (1, 0), (1, 1)),
+    pieces = subtract_convex_polygon_pieces(
+        subject=typing.cast(
+            NumberArray[TwoDimensions], np.ascontiguousarray(subject, dtype=np.float64)
+        ),
+        clip=typing.cast(NumberArray[TwoDimensions], np.ascontiguousarray(clip, dtype=np.float64)),
     )
-    covers: dict[tuple[Integer, Integer], list[NumberArray[TwoDimensions]]] = {}
-    face_geometry: dict[
-        tuple[Integer, Integer],
-        tuple[NumberArray[TwoDimensions], NumberArray[OneDimension], NumberArray[OneDimension]],
-    ] = {}
-
-    def lateral_polygon(cell: Integer, corners: tuple[Integer, ...]) -> NumberArray[TwoDimensions]:
-        z = corner_coordinates[cell, :, 2]
-        polygon = typing.cast(
-            NumberArray[TwoDimensions],
-            np.array(
-                [
-                    (0.0, z[corners[0]]),
-                    (1.0, z[corners[1]]),
-                    (1.0, z[corners[3]]),
-                    (0.0, z[corners[2]]),
-                ],
-                dtype=np.float64,
-            ),
-        )
-        if compute_polygon_signed_area(polygon) < 0.0:
-            polygon = polygon[::-1].copy()
-        return typing.cast(VertexCoordinates, polygon)
-
-    for plus_local, minus_local, a_corners, b_corners, offset_1, offset_2 in directions:
-        step_i, step_j = (1, 0) if plus_local == 5 else (0, 1)
-        for cell_a, local_index in list(unmatched):
-            if local_index != plus_local:
-                continue
-
-            _k_a, rest = divmod(cell_a, layer_size)  # type: ignore[arg-type]
-            j_a, i_a = divmod(rest, nx)
-            if i_a + step_i >= nx or j_a + step_j >= ny:
-                continue
-
-            pillar_1 = typing.cast(
-                NumberArray[OneDimension], coord[j_a + offset_1[0], i_a + offset_1[1]]
-            )
-            pillar_2 = typing.cast(
-                NumberArray[OneDimension], coord[j_a + offset_2[0], i_a + offset_2[1]]
-            )
-            polygon_a = lateral_polygon(cell_a, a_corners)
-            area_a = abs(compute_polygon_signed_area(polygon_a))
-            if area_a <= 0.0:
-                continue
-            face_geometry[cell_a, plus_local] = (polygon_a, pillar_1, pillar_2)
-
-            for k_b in range(nz):
-                cell_b = (i_a + step_i) + (j_a + step_j) * nx + k_b * layer_size
-                if (cell_b, minus_local) not in unmatched:
-                    continue
-                polygon_b = lateral_polygon(cell_b, b_corners)
-                area_b = abs(compute_polygon_signed_area(polygon_b))
-                if area_b <= 0.0:
-                    continue
-
-                overlap = clip_convex_polygon(polygon_a, polygon_b)
-                if overlap.shape[0] < 3 or abs(compute_polygon_signed_area(overlap)) <= (
-                    MINIMUM_RELATIVE_OVERLAP_AREA * min(area_a, area_b)
-                ):
-                    continue
-
-                face_geometry[cell_b, minus_local] = (polygon_b, pillar_1, pillar_2)
-                add_face(
-                    [
-                        _get_point_on_pillar_pair(pillar_1, pillar_2, s_value, z_value)
-                        for s_value, z_value in overlap
-                    ],
-                    owner=cell_a,
-                    neighbour=cell_b,
-                )
-                covers.setdefault((cell_a, plus_local), []).append(overlap)
-                covers.setdefault((cell_b, minus_local), []).append(overlap)
-
-    for (cell, local_index), overlaps in covers.items():
-        polygon, pillar_1, pillar_2 = face_geometry[cell, local_index]
-        full_area = abs(compute_polygon_signed_area(polygon))
-        pieces = [polygon]
-        for overlap in overlaps:
-            pieces = [rest for piece in pieces for rest in subtract_convex_polygon(piece, overlap)]
-        for piece in pieces:
-            if abs(compute_polygon_signed_area(piece)) > MINIMUM_RELATIVE_OVERLAP_AREA * full_area:
-                add_face(
-                    [
-                        _get_point_on_pillar_pair(pillar_1, pillar_2, s_value, z_value)
-                        for s_value, z_value in piece
-                    ],
-                    owner=cell,
-                    neighbour=-1,
-                )
-        key = unmatched[cell, local_index]
-        if key is not None:
-            replaced.add(key)
-
-    used_tops: set[Integer] = set()
-    for (cell_a, local_index), key_a in list(unmatched.items()):
-        if local_index != BOTTOM_FACE_LOCAL:
-            continue
-        cell_b = cell_a + layer_size
-        while cell_b < nz * layer_size and active_mask[cell_b] and cell_b in pinched_cells:
-            cell_b += layer_size
-        if (
-            cell_b >= nz * layer_size
-            or not active_mask[cell_b]
-            or cell_b in used_tops
-            or (cell_b, TOP_FACE_LOCAL) not in unmatched
-        ):
-            continue
-        bottom_corners = corner_coordinates[cell_a, 4:8]
-        top_corners = corner_coordinates[cell_b, 0:4]
-        middle = 0.5 * (bottom_corners + top_corners)
-        footprint: list[NumberArray[OneDimension]] = []
-        for corner in (0, 1, 3, 2):
-            if not footprint or float(np.linalg.norm(middle[corner] - footprint[-1])) > 1e-9:
-                footprint.append(middle[corner])
-
-        if len(footprint) > 1 and float(np.linalg.norm(footprint[0] - footprint[-1])) <= 1e-9:
-            footprint.pop()
-        if len(footprint) < 3:
-            continue
-
-        normal = np.zeros(3)
-        for index, point in enumerate(footprint):
-            normal += np.cross(point, footprint[(index + 1) % len(footprint)])
-
-        if float(np.linalg.norm(normal)) <= 0.0:
-            continue
-
-        add_face(footprint, owner=cell_a, neighbour=cell_b)
-        used_tops.add(cell_b)
-        for key in (key_a, unmatched[cell_b, TOP_FACE_LOCAL]):
-            if key is not None:
-                replaced.add(key)
-
-    for key in replaced:
-        face_registry.pop(key, None)
-
-    if not new_points:
-        return vertex_coordinates
-    return typing.cast(
-        VertexCoordinates,
-        np.vstack([vertex_coordinates, np.asarray(new_points, dtype=np.float64)]),
-    )
+    return list(pieces)
 
 
 @numba.njit(cache=True)
@@ -917,6 +746,872 @@ def _get_point_on_pillar_pair(
     p1 = _interpolate_pillar_point(pillar_1[:3], pillar_1[3:], z_value)  # type: ignore[arg-type]
     p2 = _interpolate_pillar_point(pillar_2[:3], pillar_2[3:], z_value)  # type: ignore[arg-type]
     return p1 + s_value * (p2 - p1)  # type: ignore[return-value]
+
+
+class FaceRegistry(typing.NamedTuple):
+    """Faces of a corner-point grid that were matched by exact vertex ids, stored as arrays."""
+
+    n_faces: Integer
+    """Number of registered faces."""
+
+    vertices: IntArray[TwoDimensions]
+    """Shape `(n_faces, 4)` vertex ids of each face, wound outward from its owner."""
+
+    owner_cells: IntArray[OneDimension]
+    """Shape `(n_faces,)` flat index of the cell that registered the face first."""
+
+    neighbour_cells: IntArray[OneDimension]
+    """Shape `(n_faces,)` flat index of the second cell on the face, or `-1` for a boundary face."""
+
+    local_indices: IntArray[OneDimension]
+    """Shape `(n_faces,)` local face index (see `HEXAHEDRON_FACES_ZDOWN`) of the face on its owner."""
+
+    degenerate_cells: IntArray[OneDimension]
+    """Flat indices of cells owning a lateral or vertical face that collapsed to fewer than four vertices."""
+
+    degenerate_local_indices: IntArray[OneDimension]
+    """Local face index of each collapsed face, parallel to `degenerate_cells`."""
+
+    pinched: BooleanArray[OneDimension]
+    """Shape `(n_cells,)` flag of the cells that are pinched out."""
+
+    n_ignored_third_claims: Integer
+    """Number of faces claimed by a third cell and ignored."""
+
+
+class NewFaces(typing.NamedTuple):
+    """Faces created by `connect_unmatched_faces`, stored as arrays."""
+
+    n_faces: Integer
+    """Number of new faces."""
+
+    points: NumberArray[TwoDimensions]
+    """Shape `(n_points, 3)` coordinates of the new vertices; every new face owns its own vertices."""
+
+    point_offsets: IntArray[OneDimension]
+    """Shape `(n_faces + 1,)` offsets into `points` delimiting the vertices of each new face."""
+
+    owner_cells: IntArray[OneDimension]
+    """Shape `(n_faces,)` flat index of the owner cell of each new face."""
+
+    neighbour_cells: IntArray[OneDimension]
+    """Shape `(n_faces,)` flat index of the neighbour of each new face, `-1` for a boundary face."""
+
+    replaced: BooleanArray[OneDimension]
+    """Shape `(registry.n_faces,)` flag of the registered faces that the new faces supersede."""
+
+
+@numba.njit(cache=True)
+def register_cell_faces(
+    corner_global: IntArray[TwoDimensions],
+    active_cells: IntArray[OneDimension],
+    vertex_coordinates: VertexCoordinates,
+    pinch_tolerance: Number,
+    mirrored: Boolean,
+    face_corner_table: IntArray[TwoDimensions],
+    vtk_to_corner: IntArray[OneDimension],
+) -> tuple[
+    Integer,
+    IntArray[TwoDimensions],
+    IntArray[OneDimension],
+    IntArray[OneDimension],
+    IntArray[OneDimension],
+    IntArray[OneDimension],
+    IntArray[OneDimension],
+    BooleanArray[OneDimension],
+    Integer,
+]:
+    """
+    Register the six faces of every active cell, matching faces shared by two cells through
+    their sorted vertex ids with an open-addressing hash table.
+
+    The first cell to claim a face owns it, the second becomes its neighbour and any later
+    claim is ignored. Cells are visited in the order of `active_cells`, and faces in local
+    face order, so face numbering is deterministic. Collapsed (degenerate) faces are
+    recorded separately and top and bottom faces of pinched cells are not registered.
+
+    :param corner_global: Shape `(n_cells, 8)` global vertex id of each cell corner.
+    :param active_cells: Shape `(n_active,)` ascending flat indices of the active cells.
+    :param vertex_coordinates: Shape `(n_verts, 3)` merged vertex coordinates.
+    :param pinch_tolerance: Average-thickness threshold for pinch detection.
+    :param mirrored: Whether to reverse face winding for a mirrored coordinate frame.
+    :param face_corner_table: Shape `(6, 4)` local corners of each hexahedron face.
+    :param vtk_to_corner: Shape `(8,)` map from VTK corner order to `corner_global` order.
+    :returns: `(n_faces, vertices, owners, neighbours, local_indices, degenerate_cells,
+        degenerate_local_indices, pinched, n_ignored_third_claims)`, the first five trimmed
+        to the registered faces.
+    """
+    n_total_cells = corner_global.shape[0]
+    n_active = active_cells.shape[0]
+    max_faces = 6 * n_active
+
+    vertices = np.empty((max_faces, 4), dtype=np.int32)
+    keys = np.empty((max_faces, 4), dtype=np.int32)
+    owners = np.empty(max_faces, dtype=np.int32)
+    neighbours = np.empty(max_faces, dtype=np.int32)
+    local_indices = np.empty(max_faces, dtype=np.int8)
+    degenerate_cells = np.empty(max_faces, dtype=np.int32)
+    degenerate_locals = np.empty(max_faces, dtype=np.int8)
+    pinched = np.zeros(n_total_cells, dtype=np.bool_)
+
+    capacity = 16
+    while capacity < 2 * max_faces:
+        capacity *= 2
+    mask = capacity - 1
+    table = np.full(capacity, -1, dtype=np.int32)
+
+    n_faces = 0
+    n_degenerate = 0
+    n_third_claims = 0
+    vtk = np.empty(8, dtype=np.int64)
+    face = np.empty(4, dtype=np.int64)
+    key = np.empty(4, dtype=np.int64)
+
+    for position in range(n_active):
+        cell = active_cells[position]
+        for v in range(8):
+            vtk[v] = corner_global[cell, vtk_to_corner[v]]
+        cell_pinched = is_cell_pinched(
+            vtk_vertices=vtk,
+            vertex_coordinates=vertex_coordinates,
+            pinch_tolerance=pinch_tolerance,
+        )
+        if cell_pinched:
+            pinched[cell] = True
+
+        for local in range(6):
+            for q in range(4):
+                face[q] = vtk[face_corner_table[local, q]]
+            if mirrored:
+                face[0], face[3] = face[3], face[0]
+                face[1], face[2] = face[2], face[1]
+
+            vertical = local == TOP_FACE_LOCAL or local == BOTTOM_FACE_LOCAL
+            collapsed = (
+                face[0] == face[1]
+                or face[0] == face[2]
+                or face[0] == face[3]
+                or face[1] == face[2]
+                or face[1] == face[3]
+                or face[2] == face[3]
+            )
+            if collapsed:
+                if not vertical or not cell_pinched:
+                    degenerate_cells[n_degenerate] = cell
+                    degenerate_locals[n_degenerate] = local
+                    n_degenerate += 1
+                continue
+
+            if cell_pinched and vertical:
+                continue
+
+            for q in range(4):
+                key[q] = face[q]
+            for q in range(1, 4):
+                value = key[q]
+                p = q - 1
+                while p >= 0 and key[p] > value:
+                    key[p + 1] = key[p]
+                    p -= 1
+                key[p + 1] = value
+
+            h = np.int64(1469598103934665603)
+            for q in range(4):
+                h = (h ^ key[q]) * np.int64(1099511628211)
+            h = h ^ (h >> 29)
+            slot = h & mask
+            while True:
+                existing = table[slot]
+                if existing < 0:
+                    table[slot] = n_faces
+                    for q in range(4):
+                        vertices[n_faces, q] = face[q]
+                        keys[n_faces, q] = key[q]
+                    owners[n_faces] = cell
+                    neighbours[n_faces] = -1
+                    local_indices[n_faces] = local
+                    n_faces += 1
+                    break
+                if (
+                    keys[existing, 0] == key[0]
+                    and keys[existing, 1] == key[1]
+                    and keys[existing, 2] == key[2]
+                    and keys[existing, 3] == key[3]
+                ):
+                    if neighbours[existing] == -1:
+                        neighbours[existing] = cell
+                    else:
+                        n_third_claims += 1
+                    break
+                slot = (slot + 1) & mask
+
+    return (  # type: ignore[return-value]
+        n_faces,
+        vertices[:n_faces],
+        owners[:n_faces],
+        neighbours[:n_faces],
+        local_indices[:n_faces],
+        degenerate_cells[:n_degenerate],
+        degenerate_locals[:n_degenerate],
+        pinched,
+        n_third_claims,
+    )
+
+
+@numba.njit(cache=True)
+def build_lateral_polygon(
+    corner_coordinates: NumberArray[ThreeDimensions],
+    cell: Integer,
+    local_index: Integer,
+    lateral_face_corners: IntArray[TwoDimensions],
+) -> NumberArray[TwoDimensions]:
+    """
+    Polygon of a lateral face in the `(s, depth)` plane spanned by its two pillars, wound
+    counter-clockwise.
+
+    :param corner_coordinates: Shape `(n_cells, 8, 3)` corner coordinates of every cell.
+    :param cell: Flat index of the cell.
+    :param local_index: Local index of the lateral face (2 to 5).
+    :param lateral_face_corners: Shape `(6, 4)` corners spanning each lateral face.
+    :returns: Shape `(4, 2)` polygon.
+    """
+    c0 = lateral_face_corners[local_index, 0]
+    c1 = lateral_face_corners[local_index, 1]
+    c2 = lateral_face_corners[local_index, 2]
+    c3 = lateral_face_corners[local_index, 3]
+    polygon = np.empty((4, 2), dtype=np.float64)
+    polygon[0, 0] = 0.0
+    polygon[0, 1] = corner_coordinates[cell, c0, 2]
+    polygon[1, 0] = 1.0
+    polygon[1, 1] = corner_coordinates[cell, c1, 2]
+    polygon[2, 0] = 1.0
+    polygon[2, 1] = corner_coordinates[cell, c3, 2]
+    polygon[3, 0] = 0.0
+    polygon[3, 1] = corner_coordinates[cell, c2, 2]
+    if compute_polygon_signed_area(polygon) < 0.0:
+        for axis in range(2):
+            polygon[0, axis], polygon[3, axis] = polygon[3, axis], polygon[0, axis]
+            polygon[1, axis], polygon[2, axis] = polygon[2, axis], polygon[1, axis]
+    return polygon
+
+
+@numba.njit(cache=True)
+def polygon_to_pillar_points(
+    polygon: NumberArray[TwoDimensions],
+    coord: CoordArray,
+    pillars: IntArray[OneDimension],
+    points: NumberArray[TwoDimensions],
+) -> Integer:
+    """
+    Lift a polygon in the `(s, depth)` plane of a pillar pair to 3-D points.
+
+    :param polygon: Shape `(n, 2)` polygon.
+    :param coord: Shape `(NY+1, NX+1, 6)` pillar array.
+    :param pillars: Shape `(4,)` `(j, i)` of the first pillar followed by `(j, i)` of the second.
+    :param points: Shape `(>= n, 3)` output buffer.
+    :returns: Number of points written, `n`.
+    """
+    pillar_1 = coord[pillars[0], pillars[1]]
+    pillar_2 = coord[pillars[2], pillars[3]]
+    for row in range(polygon.shape[0]):
+        point = _get_point_on_pillar_pair(  # type: ignore
+            pillar_1,  # type: ignore[arg-type]
+            pillar_2,  # type: ignore[arg-type]
+            polygon[row, 0],
+            polygon[row, 1],  # type: ignore[arg-type]
+        )
+        points[row, 0] = point[0]
+        points[row, 1] = point[1]
+        points[row, 2] = point[2]
+    return polygon.shape[0]
+
+
+@numba.njit(cache=True)
+def append_face(
+    points: NumberArray[TwoDimensions],
+    n_points: Integer,
+    owner: Integer,
+    neighbour: Integer,
+    cell_centers: NumberArray[TwoDimensions],
+    new_points: NumberArray[TwoDimensions],
+    new_point_offsets: IntArray[OneDimension],
+    new_owners: IntArray[OneDimension],
+    new_neighbours: IntArray[OneDimension],
+    n_faces: Integer,
+    n_stored_points: Integer,
+) -> tuple[Integer, Integer]:
+    """
+    Append a face to the new-face buffers, winding its points so that the normal points out
+    of the owner cell.
+
+    :param points: Shape `(>= n_points, 3)` face points.
+    :param n_points: Number of points of the face.
+    :param owner: Flat index of the owner cell.
+    :param neighbour: Flat index of the neighbour cell, `-1` for a boundary face.
+    :param cell_centers: Shape `(n_cells, 3)` mean of each cell's corners.
+    :param new_points: Output point buffer.
+    :param new_point_offsets: Output offsets buffer.
+    :param new_owners: Output owner buffer.
+    :param new_neighbours: Output neighbour buffer.
+    :param n_faces: Faces stored so far.
+    :param n_stored_points: Points stored so far.
+    :returns: Updated `(n_faces, n_stored_points)`, or `(-1, -1)` if a buffer is full.
+    """
+    if n_faces >= new_owners.shape[0] or n_stored_points + n_points > new_points.shape[0]:
+        return -1, -1
+
+    normal_x = 0.0
+    normal_y = 0.0
+    normal_z = 0.0
+    center_x = 0.0
+    center_y = 0.0
+    center_z = 0.0
+    for index in range(n_points):
+        following = (index + 1) % n_points
+        ax = points[index, 0]
+        ay = points[index, 1]
+        az = points[index, 2]
+        bx = points[following, 0]
+        by = points[following, 1]
+        bz = points[following, 2]
+        normal_x += ay * bz - az * by
+        normal_y += az * bx - ax * bz
+        normal_z += ax * by - ay * bx
+        center_x += ax
+        center_y += ay
+        center_z += az
+    center_x /= n_points
+    center_y /= n_points
+    center_z /= n_points
+
+    alignment = (
+        normal_x * (center_x - cell_centers[owner, 0])
+        + normal_y * (center_y - cell_centers[owner, 1])
+        + normal_z * (center_z - cell_centers[owner, 2])
+    )
+    reverse = alignment < 0.0
+    for index in range(n_points):
+        source = n_points - 1 - index if reverse else index
+        new_points[n_stored_points + index, 0] = points[source, 0]
+        new_points[n_stored_points + index, 1] = points[source, 1]
+        new_points[n_stored_points + index, 2] = points[source, 2]
+
+    new_point_offsets[n_faces] = n_stored_points
+    new_point_offsets[n_faces + 1] = n_stored_points + n_points
+    new_owners[n_faces] = owner
+    new_neighbours[n_faces] = neighbour
+    return n_faces + 1, n_stored_points + n_points
+
+
+@numba.njit(cache=True)
+def connect_unmatched_faces_kernel(
+    registry_owners: IntArray[OneDimension],
+    registry_neighbours: IntArray[OneDimension],
+    registry_local_indices: IntArray[OneDimension],
+    n_registered: Integer,
+    degenerate_cells: IntArray[OneDimension],
+    degenerate_locals: IntArray[OneDimension],
+    pinched: BooleanArray[OneDimension],
+    active_mask: BooleanArray[OneDimension],
+    corner_coordinates: NumberArray[ThreeDimensions],
+    cell_centers: NumberArray[TwoDimensions],
+    coord: CoordArray,
+    nx: Integer,
+    ny: Integer,
+    nz: Integer,
+    lateral_face_corners: IntArray[TwoDimensions],
+    minimum_relative_overlap_area: Number,
+    max_new_faces: Integer,
+    max_new_points: Integer,
+) -> tuple[
+    Integer,
+    Integer,
+    Integer,
+    NumberArray[TwoDimensions],
+    IntArray[OneDimension],
+    IntArray[OneDimension],
+    IntArray[OneDimension],
+    BooleanArray[OneDimension],
+]:
+    """
+    Compiled implementation of `connect_unmatched_faces`.
+
+    :param registry_owners: Owner cell of each registered face.
+    :param registry_neighbours: Neighbour cell of each registered face, `-1` when unmatched.
+    :param registry_local_indices: Local face index of each registered face on its owner.
+    :param n_registered: Number of registered faces.
+    :param degenerate_cells: Cells owning a collapsed lateral or vertical face.
+    :param degenerate_locals: Local index of each collapsed face.
+    :param pinched: Shape `(n_cells,)` pinched-out flag.
+    :param active_mask: Shape `(n_cells,)` activation mask.
+    :param corner_coordinates: Shape `(n_cells, 8, 3)` corner coordinates.
+    :param cell_centers: Shape `(n_cells, 3)` mean of each cell's corners.
+    :param coord: Shape `(ny + 1, nx + 1, 6)` pillar array.
+    :param nx: Grid extent in x.
+    :param ny: Grid extent in y.
+    :param nz: Grid extent in z.
+    :param lateral_face_corners: Shape `(6, 4)` corners spanning each lateral face.
+    :param minimum_relative_overlap_area: Overlaps smaller than this fraction of the smaller
+        facing face are ignored.
+    :param max_new_faces: Capacity of the new-face buffers.
+    :param max_new_points: Capacity of the new-point buffer.
+    :returns: `(status, n_faces, n_points, points, point_offsets, owners, neighbours, replaced)`.
+        `status` is `0` on success and `1` when a buffer was too small, in which case the call
+        should be repeated with larger capacities.
+    """
+    n_cells = nx * ny * nz
+    layer_size = nx * ny
+
+    n_degenerate = degenerate_cells.shape[0]
+    lookup = np.full(n_cells * 6, -1, dtype=np.int32)
+    unmatched_cells = np.empty(n_registered + n_degenerate, dtype=np.int64)
+    unmatched_locals = np.empty(n_registered + n_degenerate, dtype=np.int64)
+    unmatched_faces = np.empty(n_registered + n_degenerate, dtype=np.int64)
+    n_unmatched = 0
+    for face in range(n_registered):
+        if registry_neighbours[face] == -1:
+            cell = registry_owners[face]
+            local = registry_local_indices[face]
+            unmatched_cells[n_unmatched] = cell
+            unmatched_locals[n_unmatched] = local
+            unmatched_faces[n_unmatched] = face
+            lookup[cell * 6 + local] = face
+            n_unmatched += 1
+    for index in range(n_degenerate):
+        cell = degenerate_cells[index]
+        local = degenerate_locals[index]
+        unmatched_cells[n_unmatched] = cell
+        unmatched_locals[n_unmatched] = local
+        unmatched_faces[n_unmatched] = -2
+        lookup[cell * 6 + local] = -2
+        n_unmatched += 1
+
+    replaced = np.zeros(n_registered, dtype=np.bool_)
+    new_points = np.empty((max_new_points, 3), dtype=np.float64)
+    new_point_offsets = np.zeros(max_new_faces + 1, dtype=np.int64)
+    new_owners = np.empty(max_new_faces, dtype=np.int32)
+    new_neighbours = np.empty(max_new_faces, dtype=np.int32)
+    n_new_faces = 0
+    n_new_points = 0
+    if n_unmatched == 0:
+        return (  # type: ignore[return-value]
+            0,
+            0,
+            0,
+            new_points[:0],
+            new_point_offsets[:1],
+            new_owners[:0],
+            new_neighbours[:0],
+            replaced,
+        )
+
+    # Overlap polygons found between facing lateral faces, and for each lateral face the
+    # linked list of the overlaps that cover it.
+    max_covers = 2 * max_new_faces + 2
+    overlap_points = np.empty((max_new_points, 2), dtype=np.float64)
+    overlap_offsets = np.zeros(max_new_faces + 2, dtype=np.int64)
+    entry_overlaps = np.empty(max_covers, dtype=np.int64)
+    entry_next = np.full(max_covers, -1, dtype=np.int64)
+    n_entries = 0
+    n_overlaps = 0
+    cover_of_slot = np.full(n_cells * 6, -1, dtype=np.int64)
+    cover_slots = np.empty(max_covers, dtype=np.int64)
+    cover_head = np.full(max_covers, -1, dtype=np.int64)
+    cover_tail = np.full(max_covers, -1, dtype=np.int64)
+    cover_pillars = np.empty((max_covers, 4), dtype=np.int64)
+    n_covers = 0
+    n_overlap_points = 0
+
+    scratch = np.empty((32, 3), dtype=np.float64)
+    pillars = np.empty(4, dtype=np.int64)
+
+    for direction in range(2):
+        if direction == 0:
+            plus_local = 5
+            minus_local = 4
+            step_i = 1
+            step_j = 0
+            pillars[0] = 0
+            pillars[1] = 1
+            pillars[2] = 1
+            pillars[3] = 1
+        else:
+            plus_local = 3
+            minus_local = 2
+            step_i = 0
+            step_j = 1
+            pillars[0] = 1
+            pillars[1] = 0
+            pillars[2] = 1
+            pillars[3] = 1
+
+        for entry in range(n_unmatched):
+            if unmatched_locals[entry] != plus_local:
+                continue
+            cell_a = unmatched_cells[entry]
+            rest = cell_a % layer_size
+            j_a = rest // nx
+            i_a = rest % nx
+            if i_a + step_i >= nx or j_a + step_j >= ny:
+                continue
+
+            polygon_a = build_lateral_polygon(
+                corner_coordinates=corner_coordinates,
+                cell=cell_a,
+                local_index=plus_local,
+                lateral_face_corners=lateral_face_corners,
+            )
+            area_a = abs(compute_polygon_signed_area(polygon_a))
+            if area_a <= 0.0:
+                continue
+            a_z_min = min(polygon_a[0, 1], polygon_a[1, 1], polygon_a[2, 1], polygon_a[3, 1])
+            a_z_max = max(polygon_a[0, 1], polygon_a[1, 1], polygon_a[2, 1], polygon_a[3, 1])
+
+            face_pillars = np.empty(4, dtype=np.int64)
+            face_pillars[0] = j_a + pillars[0]
+            face_pillars[1] = i_a + pillars[1]
+            face_pillars[2] = j_a + pillars[2]
+            face_pillars[3] = i_a + pillars[3]
+
+            for k_b in range(nz):
+                cell_b = (i_a + step_i) + (j_a + step_j) * nx + k_b * layer_size
+                if lookup[cell_b * 6 + minus_local] == -1:
+                    continue
+                polygon_b = build_lateral_polygon(
+                    corner_coordinates=corner_coordinates,
+                    cell=cell_b,
+                    local_index=minus_local,
+                    lateral_face_corners=lateral_face_corners,
+                )
+                area_b = abs(compute_polygon_signed_area(polygon_b))
+                if area_b <= 0.0:
+                    continue
+                b_z_min = min(polygon_b[0, 1], polygon_b[1, 1], polygon_b[2, 1], polygon_b[3, 1])
+                b_z_max = max(polygon_b[0, 1], polygon_b[1, 1], polygon_b[2, 1], polygon_b[3, 1])
+                if a_z_max <= b_z_min or b_z_max <= a_z_min:
+                    continue
+
+                overlap = clip_convex_polygon(subject=polygon_a, clip=polygon_b)
+                if overlap.shape[0] < 3 or abs(compute_polygon_signed_area(overlap)) <= (
+                    minimum_relative_overlap_area * min(area_a, area_b)
+                ):
+                    continue
+
+                n_points = polygon_to_pillar_points(
+                    polygon=overlap, coord=coord, pillars=face_pillars, points=scratch
+                )
+                n_new_faces, n_new_points = append_face(  # type: ignore
+                    points=scratch,
+                    n_points=n_points,
+                    owner=cell_a,
+                    neighbour=cell_b,
+                    cell_centers=cell_centers,
+                    new_points=new_points,  # type: ignore[arg-type]
+                    new_point_offsets=new_point_offsets,
+                    new_owners=new_owners,
+                    new_neighbours=new_neighbours,
+                    n_faces=n_new_faces,
+                    n_stored_points=n_new_points,
+                )
+                if n_new_faces < 0 or n_overlaps >= max_new_faces:
+                    return (  # type: ignore[return-value]
+                        1,
+                        0,
+                        0,
+                        new_points[:0],
+                        new_point_offsets[:1],
+                        new_owners[:0],
+                        new_neighbours[:0],
+                        replaced,
+                    )
+                if n_overlap_points + overlap.shape[0] > max_new_points:
+                    return (  # type: ignore[return-value]
+                        1,
+                        0,
+                        0,
+                        new_points[:0],
+                        new_point_offsets[:1],
+                        new_owners[:0],
+                        new_neighbours[:0],
+                        replaced,
+                    )
+
+                overlap_offsets[n_overlaps] = n_overlap_points
+                for row in range(overlap.shape[0]):
+                    overlap_points[n_overlap_points + row, 0] = overlap[row, 0]
+                    overlap_points[n_overlap_points + row, 1] = overlap[row, 1]
+                n_overlap_points += overlap.shape[0]
+                overlap_offsets[n_overlaps + 1] = n_overlap_points
+
+                for side in range(2):
+                    slot = cell_a * 6 + plus_local if side == 0 else cell_b * 6 + minus_local
+                    cover = cover_of_slot[slot]
+                    if cover < 0:
+                        cover = n_covers
+                        n_covers += 1
+                        cover_of_slot[slot] = cover
+                        cover_slots[cover] = slot
+                        for q in range(4):
+                            cover_pillars[cover, q] = face_pillars[q]
+                    entry_overlaps[n_entries] = n_overlaps
+                    if cover_head[cover] < 0:
+                        cover_head[cover] = n_entries
+                    else:
+                        entry_next[cover_tail[cover]] = n_entries
+                    cover_tail[cover] = n_entries
+                    n_entries += 1
+                n_overlaps += 1
+
+    for cover in range(n_covers):
+        slot = cover_slots[cover]
+        cell = slot // 6
+        local = slot % 6
+        polygon = build_lateral_polygon(
+            corner_coordinates=corner_coordinates,
+            cell=cell,
+            local_index=local,
+            lateral_face_corners=lateral_face_corners,
+        )
+        full_area = abs(compute_polygon_signed_area(polygon))
+        pieces = [polygon]
+        entry = cover_head[cover]
+        while entry >= 0:
+            overlap_index = entry_overlaps[entry]
+            start = overlap_offsets[overlap_index]
+            stop = overlap_offsets[overlap_index + 1]
+            overlap = np.ascontiguousarray(overlap_points[start:stop])
+            next_pieces = []
+            for piece in pieces:
+                for rest_piece in subtract_convex_polygon_pieces(  # type: ignore
+                    subject=piece,
+                    clip=overlap,  # type: ignore
+                ):
+                    next_pieces.append(rest_piece)
+            pieces = next_pieces
+            entry = entry_next[entry]
+
+        for piece in pieces:
+            if abs(compute_polygon_signed_area(piece)) > minimum_relative_overlap_area * full_area:
+                n_points = polygon_to_pillar_points(
+                    polygon=piece, coord=coord, pillars=cover_pillars[cover], points=scratch
+                )
+                n_new_faces, n_new_points = append_face(  # type: ignore
+                    points=scratch,
+                    n_points=n_points,
+                    owner=cell,
+                    neighbour=-1,
+                    cell_centers=cell_centers,
+                    new_points=new_points,  # type: ignore[arg-type]
+                    new_point_offsets=new_point_offsets,
+                    new_owners=new_owners,
+                    new_neighbours=new_neighbours,
+                    n_faces=n_new_faces,
+                    n_stored_points=n_new_points,
+                )
+                if n_new_faces < 0:
+                    return (  # type: ignore[return-value]
+                        1,
+                        0,
+                        0,
+                        new_points[:0],
+                        new_point_offsets[:1],
+                        new_owners[:0],
+                        new_neighbours[:0],
+                        replaced,
+                    )
+        face = lookup[slot]
+        if face >= 0:
+            replaced[face] = True
+
+    used_tops = np.zeros(n_cells, dtype=np.bool_)
+    footprint = np.empty((4, 3), dtype=np.float64)
+    for entry in range(n_unmatched):
+        if unmatched_locals[entry] != BOTTOM_FACE_LOCAL:
+            continue
+        cell_a = unmatched_cells[entry]
+        face_a = unmatched_faces[entry]
+        cell_b = cell_a + layer_size
+        while cell_b < nz * layer_size and active_mask[cell_b] and pinched[cell_b]:
+            cell_b += layer_size
+        if (
+            cell_b >= nz * layer_size
+            or not active_mask[cell_b]
+            or used_tops[cell_b]
+            or lookup[cell_b * 6 + TOP_FACE_LOCAL] == -1
+        ):
+            continue
+
+        n_points = 0
+        for corner in (0, 1, 3, 2):
+            mx = 0.5 * (
+                corner_coordinates[cell_a, 4 + corner, 0] + corner_coordinates[cell_b, corner, 0]
+            )
+            my = 0.5 * (
+                corner_coordinates[cell_a, 4 + corner, 1] + corner_coordinates[cell_b, corner, 1]
+            )
+            mz = 0.5 * (
+                corner_coordinates[cell_a, 4 + corner, 2] + corner_coordinates[cell_b, corner, 2]
+            )
+            keep = n_points == 0
+            if not keep:
+                dx = mx - footprint[n_points - 1, 0]
+                dy = my - footprint[n_points - 1, 1]
+                dz = mz - footprint[n_points - 1, 2]
+                keep = np.sqrt(dx * dx + dy * dy + dz * dz) > 1e-9
+            if keep:
+                footprint[n_points, 0] = mx
+                footprint[n_points, 1] = my
+                footprint[n_points, 2] = mz
+                n_points += 1
+
+        if n_points > 1:
+            dx = footprint[0, 0] - footprint[n_points - 1, 0]
+            dy = footprint[0, 1] - footprint[n_points - 1, 1]
+            dz = footprint[0, 2] - footprint[n_points - 1, 2]
+            if np.sqrt(dx * dx + dy * dy + dz * dz) <= 1e-9:
+                n_points -= 1
+        if n_points < 3:
+            continue
+
+        normal_x = 0.0
+        normal_y = 0.0
+        normal_z = 0.0
+        for index in range(n_points):
+            following = (index + 1) % n_points
+            ax = footprint[index, 0]
+            ay = footprint[index, 1]
+            az = footprint[index, 2]
+            bx = footprint[following, 0]
+            by = footprint[following, 1]
+            bz = footprint[following, 2]
+            normal_x += ay * bz - az * by
+            normal_y += az * bx - ax * bz
+            normal_z += ax * by - ay * bx
+        if np.sqrt(normal_x * normal_x + normal_y * normal_y + normal_z * normal_z) <= 0.0:
+            continue
+
+        n_new_faces, n_new_points = append_face(  # type: ignore
+            points=footprint,
+            n_points=n_points,
+            owner=cell_a,
+            neighbour=cell_b,
+            cell_centers=cell_centers,
+            new_points=new_points,  # type: ignore[arg-type]
+            new_point_offsets=new_point_offsets,
+            new_owners=new_owners,
+            new_neighbours=new_neighbours,
+            n_faces=n_new_faces,
+            n_stored_points=n_new_points,
+        )
+        if n_new_faces < 0:
+            return (  # type: ignore[return-value]
+                1,
+                0,
+                0,
+                new_points[:0],
+                new_point_offsets[:1],
+                new_owners[:0],
+                new_neighbours[:0],
+                replaced,
+            )
+        used_tops[cell_b] = True
+        if face_a >= 0:
+            replaced[face_a] = True
+        face_b = lookup[cell_b * 6 + TOP_FACE_LOCAL]
+        if face_b >= 0:
+            replaced[face_b] = True
+
+    return (  # type: ignore[return-value]
+        0,
+        n_new_faces,
+        n_new_points,
+        new_points[:n_new_points],
+        new_point_offsets[: n_new_faces + 1],
+        new_owners[:n_new_faces],
+        new_neighbours[:n_new_faces],
+        replaced,
+    )
+
+
+def connect_unmatched_faces(
+    *,
+    registry: FaceRegistry,
+    active_mask: BooleanArray[OneDimension],
+    corner_coordinates: NumberArray[ThreeDimensions],
+    coord: CoordArray,
+    dimensions: tuple[Integer, Integer, Integer],
+) -> NewFaces:
+    """
+    Connect cells whose facing faces do not share all four vertices.
+
+    **Lateral faces.** Across a fault the neighbouring column's cells may sit at a different
+    depth, so one lateral face can face several cells of the next column, each only partly. The
+    overlap with every facing cell of the adjacent column (any `k`) is computed as a polygon in
+    the surface spanned by the two shared pillars and becomes an interior face between the two
+    cells. The part of a face that no neighbour covers is kept as a boundary face.
+
+    **Vertical faces.** The bottom face of a cell and the top face of the next active,
+    non-pinched cell below it in the same column share a footprint but not necessarily their
+    corner depths (layer gaps or overlaps). They are replaced by one interior face halfway
+    between the two surfaces. An inactive cell between them blocks the connection.
+
+    :param registry: Faces registered by exact vertex matches.
+    :param active_mask: Shape `(n_cells,)` activation mask.
+    :param corner_coordinates: Shape `(n_cells, 8, 3)` corner coordinates of every cell.
+    :param coord: Pillar array of shape `(ny + 1, nx + 1, 6)`.
+    :param dimensions: Grid extents `(nx, ny, nz)`.
+    :returns: The faces to add and the registered faces they replace. The new faces
+        hold their own vertex coordinates; the caller appends them to the grid's vertices.
+    """
+    nx, ny, nz = dimensions
+    n_unmatched_estimate = int(np.count_nonzero(registry.neighbour_cells == -1)) + len(
+        registry.degenerate_cells
+    )
+    cell_centers = corner_coordinates.mean(axis=1)
+    max_new_faces = 2 * n_unmatched_estimate + 64
+    max_new_points = 6 * max_new_faces
+    for _ in range(12):
+        (
+            status,
+            n_faces,
+            _,
+            points,
+            point_offsets,
+            owners,
+            neighbours,
+            replaced,
+        ) = connect_unmatched_faces_kernel(
+            registry_owners=registry.owner_cells,
+            registry_neighbours=registry.neighbour_cells,
+            registry_local_indices=registry.local_indices,
+            n_registered=registry.n_faces,
+            degenerate_cells=registry.degenerate_cells,
+            degenerate_locals=registry.degenerate_local_indices,
+            pinched=registry.pinched,
+            active_mask=active_mask,
+            corner_coordinates=corner_coordinates,
+            cell_centers=cell_centers,
+            coord=coord,
+            nx=nx,
+            ny=ny,
+            nz=nz,
+            lateral_face_corners=LATERAL_FACE_CORNERS,
+            minimum_relative_overlap_area=MINIMUM_RELATIVE_OVERLAP_AREA,
+            max_new_faces=max_new_faces,
+            max_new_points=max_new_points,
+        )
+        if status == 0:
+            return NewFaces(
+                n_faces=n_faces,
+                points=points,
+                point_offsets=point_offsets,
+                owner_cells=owners,
+                neighbour_cells=neighbours,
+                replaced=replaced,
+            )
+        max_new_faces *= 4
+        max_new_points *= 4
+    raise InvalidGridError("Could not connect the unmatched faces of the corner-point grid.")
 
 
 def compute_corner_point_geometry(
@@ -1004,87 +1699,72 @@ def compute_corner_point_geometry(
             if not active_mask.any():
                 raise InvalidGridError("Every active cell has inverted geometry.")
 
-    face_registry: dict[FaceKey, FaceRecord] = {}
-    n_ignored_third_claims = 0
-
-    n_pinched = 0
-    n_degenerate = 0
-    face_local_index: dict[FaceKey, Integer] = {}
-    degenerate_faces: list[tuple[Integer, Integer]] = []
-    pinched_cells: set[Integer] = set()
-
-    for cell_idx in np.flatnonzero(active_mask):
-        vtk_vertices = [corner_global[cell_idx, vtk_to_corner[v]] for v in range(8)]
-        pinched = _is_cell_pinched(
-            vtk_vertices,
-            vertex_coordinates,  # type: ignore[arg-type]
-            pinch_tolerance,
-        )
-        if pinched:
-            n_pinched += 1
-            pinched_cells.add(int(cell_idx))
-
-        for local_idx, local_face in enumerate(HEXAHEDRON_FACES_ZDOWN):
-            face_vertex_indices = [vtk_vertices[v] for v in local_face]
-            if mirrored:
-                face_vertex_indices.reverse()
-
-            if len(set(face_vertex_indices)) < len(face_vertex_indices):
-                n_degenerate += 1
-                if local_idx in LATERAL_FACE_LOCAL_INDICES or not pinched:
-                    degenerate_faces.append((int(cell_idx), local_idx))
-                continue
-
-            if pinched and local_idx in (TOP_FACE_LOCAL, BOTTOM_FACE_LOCAL):
-                continue
-
-            key: FaceKey = tuple(sorted(face_vertex_indices))
-            if key not in face_registry:
-                face_registry[key] = FaceRecord(
-                    owner_cell_index=cell_idx,
-                    face_vertex_indices=face_vertex_indices,
-                )
-                face_local_index[key] = local_idx
-            elif face_registry[key].neighbour_cell_index == -1:
-                face_registry[key].neighbour_cell_index = cell_idx
-            else:
-                n_ignored_third_claims += 1
+    registry_arrays = register_cell_faces(
+        corner_global=corner_global,
+        active_cells=typing.cast(
+            IntArray[OneDimension], np.flatnonzero(active_mask).astype(np.int32, copy=False)
+        ),
+        vertex_coordinates=vertex_coordinates,  # type: ignore[arg-type]
+        pinch_tolerance=pinch_tolerance,
+        mirrored=mirrored,
+        face_corner_table=FACE_CORNER_TABLE,
+        vtk_to_corner=VTK_TO_CORNER_ORDER,
+    )
+    registry = FaceRegistry(
+        n_faces=registry_arrays[0],
+        vertices=registry_arrays[1],
+        owner_cells=registry_arrays[2],
+        neighbour_cells=registry_arrays[3],
+        local_indices=registry_arrays[4],
+        degenerate_cells=registry_arrays[5],
+        degenerate_local_indices=registry_arrays[6],
+        pinched=registry_arrays[7],
+        n_ignored_third_claims=registry_arrays[8],
+    )
+    n_pinched = registry.pinched.sum()
 
     nz_cells, ny_cells, nx_cells = actnum.shape
-    vertex_coordinates = connect_unmatched_faces(
-        face_registry=face_registry,
-        face_local_index=face_local_index,
-        degenerate_faces=degenerate_faces,
-        pinched_cells=pinched_cells,
+    new_faces = connect_unmatched_faces(
+        registry=registry,
         active_mask=typing.cast(BooleanArray[OneDimension], active_mask),
         corner_coordinates=corner_coordinates,
         coord=coord,
         dimensions=(nx_cells, ny_cells, nz_cells),
-        vertex_coordinates=vertex_coordinates,
     )
+    first_new_vertex = len(vertex_coordinates)
+    if len(new_faces.points) > 0:
+        vertex_coordinates = typing.cast(
+            VertexCoordinates, np.vstack([vertex_coordinates, new_faces.points])
+        )
 
     if n_pinched > 0:
         warnings.warn(
             f"{n_pinched} pinched-out cell(s) detected "
             f"(pinch_tolerance={pinch_tolerance:.3g}). "
-            f"{n_ignored_third_claims} face(s) claimed by a third cell were ignored.",
+            f"{registry.n_ignored_third_claims} face(s) claimed by a third cell were ignored.",
             stacklevel=4,
         )
 
-    flat_face_vertex_indices: list[Integer] = []
-    face_vertex_offsets: list[int] = [0]
-    face_cell_pairs: list[tuple[Integer, Integer]] = []
-    face_connection_types: list[int] = []
-
-    for record in face_registry.values():
-        flat_face_vertex_indices.extend(record.face_vertex_indices)
-        face_vertex_offsets.append(len(flat_face_vertex_indices))
-        face_cell_pairs.append((record.owner_cell_index, record.neighbour_cell_index))
-
-        if record.neighbour_cell_index < 0:
-            face_connection_types.append(int(ConnectionType.BOUNDARY_FACE))
-        else:
-            face_connection_types.append(int(ConnectionType.INTERIOR_FACE))
+    kept = ~new_faces.replaced
+    kept_vertices = registry.vertices[kept]
+    flat_face_vertex_indices = np.concatenate([
+        kept_vertices.ravel(),
+        first_new_vertex + np.arange(len(new_faces.points)),
+    ]).astype(np.int32)
+    face_lengths = np.concatenate([
+        np.full(len(kept_vertices), 4, dtype=np.int64),
+        np.diff(new_faces.point_offsets),
+    ])
+    face_vertex_offsets = np.concatenate([[0], np.cumsum(face_lengths)]).astype(np.int32)
+    face_cell_pairs = np.concatenate([
+        np.column_stack([registry.owner_cells[kept], registry.neighbour_cells[kept]]),
+        np.column_stack([new_faces.owner_cells, new_faces.neighbour_cells]).reshape(-1, 2),
+    ]).astype(np.int32)
+    face_connection_types = np.where(
+        face_cell_pairs[:, 1] < 0,
+        int(ConnectionType.BOUNDARY_FACE),
+        int(ConnectionType.INTERIOR_FACE),
+    ).astype(np.int8)
 
     cell_volumes, cell_centroids = compute_oriented_cell_volumes(
         corner_global=corner_global,
@@ -1115,10 +1795,10 @@ def compute_corner_point_geometry(
     )
     return (
         vertex_coordinates,
-        typing.cast(IntArray[OneDimension], np.asarray(flat_face_vertex_indices, dtype=np.int32)),
-        typing.cast(IntArray[OneDimension], np.asarray(face_vertex_offsets, dtype=np.int32)),
-        typing.cast(IntArray[TwoDimensions], np.asarray(face_cell_pairs, dtype=np.int32)),
-        typing.cast(IntArray[OneDimension], np.asarray(face_connection_types, dtype=np.int8)),
+        typing.cast(IntArray[OneDimension], flat_face_vertex_indices),
+        typing.cast(IntArray[OneDimension], face_vertex_offsets),
+        typing.cast(IntArray[TwoDimensions], face_cell_pairs),
+        typing.cast(IntArray[OneDimension], face_connection_types),
         cell_statuses,
         cell_volumes,
         cell_centroids,
