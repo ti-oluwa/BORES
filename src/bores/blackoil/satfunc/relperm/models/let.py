@@ -10,13 +10,20 @@ from bores.blackoil.satfunc.relperm.mixing_rules import (
     MixingRule,
     baker_linear_rule,
     get_mixing_rule,
-    get_mixing_rule_partial_derivatives,
+)
+from bores.blackoil.satfunc.relperm.models.derivatives import (
+    WettabilitySystem,
+    apply_oil_wet_mixing_rule,
+    apply_water_wet_mixing_rule,
+    broadcast_saturations,
+    finalize_mixed_wet_derivatives,
+    finalize_oil_wet_derivatives,
+    finalize_water_wet_derivatives,
 )
 from bores.blackoil.satfunc.relperm.tables import (
     MinimumRelPerm,
     RelativePermeabilityTable,
     clamp_relperm,
-    clamp_relperm_derivative,
     resolve_min_relperm,
     show_invalid_saturation,
 )
@@ -38,6 +45,7 @@ __all__ = [
     "LETParameters",
     "LETThreePhaseRelPermTable",
     "compute_let_relative_permeabilities",
+    "compute_let_relative_permeability_derivatives",
 ]
 
 
@@ -498,6 +506,517 @@ def compute_let_curve_slope_wrt_normalized_saturation(
     return slope  # type: ignore[return-value]
 
 
+def compute_let_phase_curve(
+    *,
+    saturation: NumberOrArray[NDimension],
+    lower_saturation: NumberOrArray[NDimension],
+    mobile_range: NumberOrArray[NDimension],
+    parameters: LETParameters,
+    maximum_relperm: Number,
+    minimum_mobile_pore_space: Number,
+    zeros: NumberArray[NDimension],
+) -> tuple[NumberArray[NDimension], NumberArray[NDimension]]:
+    """
+    LET relative permeability of one phase and its slope with respect to the
+    saturation of that phase.
+
+    The relative permeability is `maximum_relperm` times the LET curve of the
+    saturation scaled between `lower_saturation` and the top of the mobile range.
+    The slope is zero where the mobile range is smaller than
+    `minimum_mobile_pore_space`.
+
+    :param saturation: Saturation of the phase.
+    :param lower_saturation: Saturation below which the phase is immobile.
+    :param mobile_range: Width of the saturation interval over which the phase is mobile.
+    :param parameters: LET shape parameters of the phase.
+    :param maximum_relperm: Endpoint relative permeability of the phase.
+    :param minimum_mobile_pore_space: Smallest mobile range treated as valid.
+    :param zeros: Array of zeros with the shape of the saturations.
+    :return: Tuple of the relative permeability and its slope, both before the minimum
+        relative permeability is applied.
+    """
+    valid = mobile_range > minimum_mobile_pore_space
+    effective_saturation = np.clip(
+        (saturation - lower_saturation) / np.where(valid, mobile_range, 1.0),
+        0.0,
+        1.0,
+    )
+    relperm = maximum_relperm * _let_relperm(
+        normalized_saturation=effective_saturation,
+        L=parameters.L,
+        E=parameters.E,
+        T=parameters.T,
+    )
+    slope = np.where(
+        valid,
+        compute_let_curve_slope_wrt_normalized_saturation(
+            normalized_saturation=effective_saturation,
+            L=parameters.L,
+            E=parameters.E,
+            T=parameters.T,
+            kr_max=maximum_relperm,
+        )
+        / mobile_range,
+        zeros,
+    )
+    return relperm, slope  # type: ignore[return-value]
+
+
+def compute_let_declining_curve(
+    *,
+    remaining_saturation: NumberOrArray[NDimension],
+    mobile_range: NumberOrArray[NDimension],
+    parameters: LETParameters,
+    minimum_mobile_pore_space: Number,
+    zeros: NumberArray[NDimension],
+) -> tuple[NumberArray[NDimension], NumberArray[NDimension]]:
+    """
+    Unit-endpoint LET relative permeability of oil in a two-phase system, and its
+    slope with respect to the saturation of the displacing phase.
+
+    Oil relative permeability falls as the displacing phase advances, so the slope is
+    negative. It is zero where the mobile range is smaller than
+    `minimum_mobile_pore_space` and where the oil saturation lies outside its mobile
+    interval.
+
+    :param remaining_saturation: Oil saturation above its residual value, as a function
+        of the displacing phase saturation of the two-phase system.
+    :param mobile_range: Width of the saturation interval over which oil is mobile.
+    :param parameters: LET shape parameters of oil in the two-phase system.
+    :param minimum_mobile_pore_space: Smallest mobile range treated as valid.
+    :param zeros: Array of zeros with the shape of the saturations.
+    :return: Tuple of the oil relative permeability and its slope with respect to the
+        displacing phase saturation.
+    """
+    valid = mobile_range > minimum_mobile_pore_space
+    unclipped_effective_saturation = remaining_saturation / np.where(valid, mobile_range, 1.0)
+    effective_saturation = np.clip(unclipped_effective_saturation, 0.0, 1.0)
+    relperm = _let_relperm(
+        normalized_saturation=effective_saturation,
+        L=parameters.L,
+        E=parameters.E,
+        T=parameters.T,
+    )
+    slope = np.where(
+        valid & (unclipped_effective_saturation > 0.0) & (unclipped_effective_saturation < 1.0),
+        -compute_let_curve_slope_wrt_normalized_saturation(
+            normalized_saturation=effective_saturation,
+            L=parameters.L,
+            E=parameters.E,
+            T=parameters.T,
+            kr_max=1.0,
+        )
+        / mobile_range,
+        zeros,
+    )
+    return relperm, slope  # type: ignore[return-value]
+
+
+def compute_let_water_wet_system(
+    *,
+    sw: NumberArray[NDimension],
+    so: NumberArray[NDimension],
+    sg: NumberArray[NDimension],
+    irreducible_water_saturation: NumberOrArray[NDimension],
+    residual_oil_saturation_water: NumberOrArray[NDimension],
+    residual_oil_saturation_gas: NumberOrArray[NDimension],
+    residual_gas_saturation: NumberOrArray[NDimension],
+    water: LETParameters,
+    oil_water: LETParameters,
+    gas_oil: LETParameters,
+    gas: LETParameters,
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
+    mixing_rule: MixingRule,
+    minimum_mobile_pore_space: Number,
+    finite_difference_epsilon: Number,
+    zeros: NumberArray[NDimension],
+) -> WettabilitySystem:
+    """
+    LET relative permeabilities and derivatives of a water-wet system.
+
+    Water and gas follow LET curves of their own saturation. Oil follows the
+    three-phase mixing rule applied to the two-phase oil curves of the oil-water and
+    gas-oil systems, and its derivatives are completed by the chain rule through the
+    mixing rule.
+
+    :param sw: Water saturation array.
+    :param so: Oil saturation array.
+    :param sg: Gas saturation array.
+    :param irreducible_water_saturation: Irreducible water saturation.
+    :param residual_oil_saturation_water: Residual oil saturation to water flooding.
+    :param residual_oil_saturation_gas: Residual oil saturation to gas flooding.
+    :param residual_gas_saturation: Residual gas saturation.
+    :param water: LET parameters for water.
+    :param oil_water: LET parameters for oil in the oil-water system.
+    :param gas_oil: LET parameters for oil in the gas-oil system.
+    :param gas: LET parameters for gas.
+    :param maximum_water_relperm: Endpoint relative permeability of water.
+    :param maximum_oil_relperm: Endpoint relative permeability of oil.
+    :param maximum_gas_relperm: Endpoint relative permeability of gas.
+    :param mixing_rule: Three-phase oil relative permeability mixing rule.
+    :param minimum_mobile_pore_space: Smallest mobile range treated as valid.
+    :param finite_difference_epsilon: Step used when the mixing rule has no analytical derivative.
+    :param zeros: Array of zeros with the shape of the saturations.
+    :return: The water-wet `WettabilitySystem`.
+    """
+    swc = irreducible_water_saturation
+    sorw = residual_oil_saturation_water
+    sorg = residual_oil_saturation_gas
+    sgr = residual_gas_saturation
+
+    krw, dkrw_dsw = compute_let_phase_curve(
+        saturation=sw,
+        lower_saturation=swc,
+        mobile_range=1.0 - swc - sorw,  # type: ignore[operator]
+        parameters=water,
+        maximum_relperm=maximum_water_relperm,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+        zeros=zeros,
+    )
+    krg, dkrg_dsg = compute_let_phase_curve(
+        saturation=sg,
+        lower_saturation=sgr,
+        mobile_range=1.0 - swc - sgr - sorg,  # type: ignore[operator]
+        parameters=gas,
+        maximum_relperm=maximum_gas_relperm,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+        zeros=zeros,
+    )
+    # Two-phase oil inputs with unit endpoint. Oil in the oil-water system depends on
+    # Sw only (So = 1 - Sw - sorw above residual), and oil in the gas-oil system on Sg only.
+    kro_w, dkro_w_dsw = compute_let_declining_curve(
+        remaining_saturation=1.0 - sw - sorw,  # type: ignore[operator]
+        mobile_range=1.0 - swc - sorw,  # type: ignore[operator]
+        parameters=oil_water,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+        zeros=zeros,
+    )
+    kro_g, dkro_g_dsg = compute_let_declining_curve(
+        remaining_saturation=1.0 - swc - sg - sorg,  # type: ignore[operator]
+        mobile_range=1.0 - swc - sorg - sgr,  # type: ignore[operator]
+        parameters=gas_oil,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+        zeros=zeros,
+    )
+
+    mixed_oil, partials = apply_water_wet_mixing_rule(
+        mixing_rule=mixing_rule,
+        kro_w=kro_w,
+        kro_g=kro_g,
+        krw=krw,
+        krg=krg,
+        water_saturation=sw,
+        oil_saturation=so,
+        gas_saturation=sg,
+        irreducible_water_saturation=swc,
+        residual_oil_saturation_water=sorw,
+        residual_oil_saturation_gas=sorg,
+        finite_difference_epsilon=finite_difference_epsilon,
+    )
+    kro = maximum_oil_relperm * mixed_oil
+    dkro_dsw = maximum_oil_relperm * (
+        partials["dkro_dkro_w"] * dkro_w_dsw
+        + partials["dkro_dkrw"] * dkrw_dsw
+        + partials["dkro_dsw_explicit"]
+    )
+    dkro_dso = maximum_oil_relperm * partials["dkro_dso_explicit"]
+    dkro_dsg = maximum_oil_relperm * (
+        partials["dkro_dkro_g"] * dkro_g_dsg
+        + partials["dkro_dkrg"] * dkrg_dsg
+        + partials["dkro_dsg_explicit"]
+    )
+    return WettabilitySystem(
+        krw=krw,
+        kro=kro,
+        krg=krg,
+        dkrw_dsw=dkrw_dsw,
+        dkrw_dso=zeros.copy(),
+        dkrw_dsg=zeros.copy(),
+        dkro_dsw=dkro_dsw,
+        dkro_dso=dkro_dso,
+        dkro_dsg=dkro_dsg,
+        dkrg_dsg=dkrg_dsg,
+    )
+
+
+def compute_let_oil_wet_system(
+    *,
+    sw: NumberArray[NDimension],
+    so: NumberArray[NDimension],
+    sg: NumberArray[NDimension],
+    irreducible_water_saturation: NumberOrArray[NDimension],
+    residual_oil_saturation_water: NumberOrArray[NDimension],
+    residual_oil_saturation_gas: NumberOrArray[NDimension],
+    residual_gas_saturation: NumberOrArray[NDimension],
+    water: LETParameters,
+    oil_water: LETParameters,
+    gas: LETParameters,
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
+    mixing_rule: MixingRule,
+    minimum_mobile_pore_space: Number,
+    finite_difference_epsilon: Number,
+    zeros: NumberArray[NDimension],
+) -> WettabilitySystem:
+    """
+    LET relative permeabilities and derivatives of an oil-wet system.
+
+    Oil is the wetting phase, so oil follows the oil-water LET curve of oil saturation
+    and gas a LET curve of gas saturation. Water is the intermediate phase, so it
+    follows the three-phase mixing rule applied to the two-phase water curves, and its
+    derivatives are completed by the chain rule through the rule.
+
+    :param sw: Water saturation array.
+    :param so: Oil saturation array.
+    :param sg: Gas saturation array.
+    :param irreducible_water_saturation: Irreducible water saturation.
+    :param residual_oil_saturation_water: Residual oil saturation to water flooding.
+    :param residual_oil_saturation_gas: Residual oil saturation to gas flooding.
+    :param residual_gas_saturation: Residual gas saturation.
+    :param water: LET parameters for water.
+    :param oil_water: LET parameters for oil in the oil-water system.
+    :param gas: LET parameters for gas.
+    :param maximum_water_relperm: Endpoint relative permeability of water.
+    :param maximum_oil_relperm: Endpoint relative permeability of oil.
+    :param maximum_gas_relperm: Endpoint relative permeability of gas.
+    :param mixing_rule: Three-phase mixing rule.
+    :param minimum_mobile_pore_space: Smallest mobile range treated as valid.
+    :param finite_difference_epsilon: Step used when the mixing rule has no analytical derivative.
+    :param zeros: Array of zeros with the shape of the saturations.
+    :return: The oil-wet `WettabilitySystem`.
+    """
+    swc = irreducible_water_saturation
+    sorw = residual_oil_saturation_water
+    sorg = residual_oil_saturation_gas
+    sgr = residual_gas_saturation
+
+    kro, dkro_dso = compute_let_phase_curve(
+        saturation=so,
+        lower_saturation=np.minimum(sorw, sorg),
+        mobile_range=1.0 - sorw - sorg,  # type: ignore[operator]
+        parameters=oil_water,
+        maximum_relperm=maximum_oil_relperm,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+        zeros=zeros,
+    )
+    krg, dkrg_dsg = compute_let_phase_curve(
+        saturation=sg,
+        lower_saturation=sgr,
+        mobile_range=1.0 - sgr - swc,  # type: ignore[operator]
+        parameters=gas,
+        maximum_relperm=maximum_gas_relperm,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+        zeros=zeros,
+    )
+    # Two-phase water inputs with unit endpoint. Both depend on Sw only.
+    krw_oil_water, dkrw_oil_water_dsw = compute_let_phase_curve(
+        saturation=sw,
+        lower_saturation=swc,
+        mobile_range=1.0 - swc - sorw,  # type: ignore[operator]
+        parameters=water,
+        maximum_relperm=1.0,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+        zeros=zeros,
+    )
+    krw_gas_water, dkrw_gas_water_dsw = compute_let_phase_curve(
+        saturation=sw,
+        lower_saturation=swc,
+        mobile_range=1.0 - swc - sgr,  # type: ignore[operator]
+        parameters=water,
+        maximum_relperm=1.0,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+        zeros=zeros,
+    )
+
+    mixed_water, partials = apply_oil_wet_mixing_rule(
+        mixing_rule=mixing_rule,
+        krw_oil_water=krw_oil_water,
+        krw_gas_water=krw_gas_water,
+        kro=kro,
+        krg=krg,
+        water_saturation=sw,
+        oil_saturation=so,
+        gas_saturation=sg,
+        irreducible_water_saturation=swc,
+        residual_oil_saturation_water=sorw,
+        residual_oil_saturation_gas=sorg,
+        finite_difference_epsilon=finite_difference_epsilon,
+    )
+    krw = maximum_water_relperm * mixed_water
+    dkrw_dsw = maximum_water_relperm * (
+        partials["dkro_dkro_w"] * dkrw_oil_water_dsw
+        + partials["dkro_dkro_g"] * dkrw_gas_water_dsw
+        + partials["dkro_dso_explicit"]
+    )
+    dkrw_dso = maximum_water_relperm * (
+        partials["dkro_dkrw"] * dkro_dso + partials["dkro_dsw_explicit"]
+    )
+    dkrw_dsg = maximum_water_relperm * (
+        partials["dkro_dkrg"] * dkrg_dsg + partials["dkro_dsg_explicit"]
+    )
+    return WettabilitySystem(
+        krw=krw,
+        kro=kro,
+        krg=krg,
+        dkrw_dsw=dkrw_dsw,
+        dkrw_dso=dkrw_dso,
+        dkrw_dsg=dkrw_dsg,
+        dkro_dsw=zeros.copy(),
+        dkro_dso=dkro_dso,
+        dkro_dsg=zeros.copy(),
+        dkrg_dsg=dkrg_dsg,
+    )
+
+
+def compute_let_relative_permeability_derivatives(
+    water_saturation: NumberOrArray[NDimension],
+    oil_saturation: NumberOrArray[NDimension],
+    gas_saturation: NumberOrArray[NDimension],
+    irreducible_water_saturation: NumberOrArray[NDimension],
+    residual_oil_saturation_water: NumberOrArray[NDimension],
+    residual_oil_saturation_gas: NumberOrArray[NDimension],
+    residual_gas_saturation: NumberOrArray[NDimension],
+    water: LETParameters,
+    oil_water: LETParameters,
+    gas_oil: LETParameters,
+    gas: LETParameters,
+    minimum_mobile_pore_space: Number,
+    finite_difference_epsilon: Number,
+    maximum_water_relperm: Number = 1.0,
+    maximum_oil_relperm: Number = 1.0,
+    maximum_gas_relperm: Number = 1.0,
+    wettability: Wettability = Wettability.WATER_WET,
+    mixed_wet_water_fraction: Number = 0.5,
+    mixing_rule: MixingRule = baker_linear_rule,
+    minimum_water_relperm: Number | None = None,
+    minimum_oil_relperm: Number | None = None,
+    minimum_gas_relperm: Number | None = None,
+) -> RelativePermeabilityDerivatives:
+    """
+    Compute all nine partial derivatives of the three-phase relative permeabilities
+    with respect to water, oil and gas saturation using the LET model.
+
+    The two-phase LET derivatives are computed analytically through the effective
+    saturation, and the three-phase derivative of the intermediate phase is completed
+    by the chain rule through the mixing rule.
+
+    Wherever the minimum relative permeability is active the corresponding derivative
+    is smoothly reduced to zero, which keeps the Jacobian consistent with the floored
+    relative permeability values.
+
+    Supports scalar and array inputs.
+
+    :param water_saturation: Water saturation (fraction, 0 to 1).
+    :param oil_saturation: Oil saturation (fraction, 0 to 1).
+    :param gas_saturation: Gas saturation (fraction, 0 to 1).
+    :param irreducible_water_saturation: Irreducible water saturation.
+    :param residual_oil_saturation_water: Residual oil saturation to water flooding.
+    :param residual_oil_saturation_gas: Residual oil saturation to gas flooding.
+    :param residual_gas_saturation: Residual gas saturation.
+    :param water: LET parameters for water.
+    :param oil_water: LET parameters for oil in the oil-water system.
+    :param gas_oil: LET parameters for oil in the gas-oil system.
+    :param gas: LET parameters for gas.
+    :param minimum_mobile_pore_space: Smallest mobile range treated as valid.
+    :param finite_difference_epsilon: Step used when the mixing rule has no analytical derivative.
+    :param maximum_water_relperm: Endpoint relative permeability of water.
+    :param maximum_oil_relperm: Endpoint relative permeability of oil.
+    :param maximum_gas_relperm: Endpoint relative permeability of gas.
+    :param wettability: Wettability of the rock (water-wet, oil-wet or mixed-wet).
+    :param mixed_wet_water_fraction: Fraction of the pore space that is water-wet in a
+        mixed-wet rock (0 to 1).
+    :param mixing_rule: Three-phase oil relative permeability mixing rule.
+    :param minimum_water_relperm: Resolved minimum water relative permeability, or `None`.
+    :param minimum_oil_relperm: Resolved minimum oil relative permeability, or `None`.
+    :param minimum_gas_relperm: Resolved minimum gas relative permeability, or `None`.
+    :return: `RelativePermeabilityDerivatives` dictionary.
+    """
+    sw, so, sg, zeros, is_scalar = broadcast_saturations(
+        water_saturation,
+        oil_saturation,
+        gas_saturation,
+        irreducible_water_saturation,
+        residual_oil_saturation_water,
+        residual_oil_saturation_gas,
+        residual_gas_saturation,
+    )
+
+    def water_wet_system() -> WettabilitySystem:
+        return compute_let_water_wet_system(
+            sw=sw,
+            so=so,
+            sg=sg,
+            irreducible_water_saturation=irreducible_water_saturation,
+            residual_oil_saturation_water=residual_oil_saturation_water,
+            residual_oil_saturation_gas=residual_oil_saturation_gas,
+            residual_gas_saturation=residual_gas_saturation,
+            water=water,
+            oil_water=oil_water,
+            gas_oil=gas_oil,
+            gas=gas,
+            maximum_water_relperm=maximum_water_relperm,
+            maximum_oil_relperm=maximum_oil_relperm,
+            maximum_gas_relperm=maximum_gas_relperm,
+            mixing_rule=mixing_rule,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
+            finite_difference_epsilon=finite_difference_epsilon,
+            zeros=zeros,
+        )
+
+    def oil_wet_system() -> WettabilitySystem:
+        return compute_let_oil_wet_system(
+            sw=sw,
+            so=so,
+            sg=sg,
+            irreducible_water_saturation=irreducible_water_saturation,
+            residual_oil_saturation_water=residual_oil_saturation_water,
+            residual_oil_saturation_gas=residual_oil_saturation_gas,
+            residual_gas_saturation=residual_gas_saturation,
+            water=water,
+            oil_water=oil_water,
+            gas=gas,
+            maximum_water_relperm=maximum_water_relperm,
+            maximum_oil_relperm=maximum_oil_relperm,
+            maximum_gas_relperm=maximum_gas_relperm,
+            mixing_rule=mixing_rule,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
+            finite_difference_epsilon=finite_difference_epsilon,
+            zeros=zeros,
+        )
+
+    if wettability == Wettability.OIL_WET:
+        return finalize_oil_wet_derivatives(
+            system=oil_wet_system(),
+            minimum_water_relperm=minimum_water_relperm,
+            minimum_oil_relperm=minimum_oil_relperm,
+            minimum_gas_relperm=minimum_gas_relperm,
+            zeros=zeros,
+            is_scalar=is_scalar,
+        )
+    if wettability == Wettability.MIXED_WET:
+        return finalize_mixed_wet_derivatives(
+            water_wet=water_wet_system(),
+            oil_wet=oil_wet_system(),
+            water_wet_fraction=mixed_wet_water_fraction,
+            minimum_water_relperm=minimum_water_relperm,
+            minimum_oil_relperm=minimum_oil_relperm,
+            minimum_gas_relperm=minimum_gas_relperm,
+            zeros=zeros,
+            is_scalar=is_scalar,
+        )
+    return finalize_water_wet_derivatives(
+        system=water_wet_system(),
+        minimum_water_relperm=minimum_water_relperm,
+        minimum_oil_relperm=minimum_oil_relperm,
+        minimum_gas_relperm=minimum_gas_relperm,
+        zeros=zeros,
+        is_scalar=is_scalar,
+    )
+
+
 @attrs.frozen(slots=True)
 class LETThreePhaseRelPermTable(RelativePermeabilityTable):
     """
@@ -826,806 +1345,27 @@ class LETThreePhaseRelPermTable(RelativePermeabilityTable):
                 f"Missing: {', '.join(params_missing)}"
             )
 
-        wettability = self.wettability
-        mixing_rule = typing.cast(MixingRule, self.mixing_rule)
-        water_params = self.water
-        oil_water_params = self.oil_water
-        gas_oil_params = self.gas_oil
-        gas_params = self.gas
-        krw_max = self.get_water_relperm_endpoint()
-        kro_max = self.get_oil_relperm_endpoint()
-        krg_max = self.get_gas_relperm_endpoint()
-
-        # Resolve min_values once up front
-        krw_min = resolve_min_relperm(self.minimum_water_relperm)
-        kro_min = resolve_min_relperm(self.minimum_oil_relperm)
-        krg_min = resolve_min_relperm(self.minimum_gas_relperm)
-
-        is_scalar = (
-            np.isscalar(water_saturation)
-            and np.isscalar(oil_saturation)
-            and np.isscalar(gas_saturation)
-            and np.isscalar(swc)
-            and np.isscalar(sorw)
-            and np.isscalar(sorg)
-            and np.isscalar(sgr)
-        )
-        sw = np.atleast_1d(water_saturation)
-        so = np.atleast_1d(oil_saturation)
-        sg = np.atleast_1d(gas_saturation)
-        sw, so, sg = np.broadcast_arrays(sw, so, sg)
-        zeros = np.zeros_like(sw)
-        minimum_mobile_pore_space = c.MINIMUM_MOBILE_PORE_SPACE
-
-        if wettability == Wettability.OIL_WET:
-            # kro (wetting, depends on So)
-            movable_oil_range = 1.0 - sorw - sorg  # type: ignore[operator]
-            max_residual = np.minimum(sorw, sorg)  # type: ignore
-            valid_oil = movable_oil_range > minimum_mobile_pore_space
-            se_o = np.clip(
-                (so - max_residual) / np.where(valid_oil, movable_oil_range, 1.0),
-                0.0,
-                1.0,
-            )
-            kro_raw = kro_max * _let_relperm(
-                se_o,  # type: ignore[arg-type]
-                oil_water_params.L,
-                oil_water_params.E,
-                oil_water_params.T,
-            )
-
-            dkro_dso_raw = np.where(
-                valid_oil,
-                compute_let_curve_slope_wrt_normalized_saturation(
-                    se_o,
-                    oil_water_params.L,
-                    oil_water_params.E,
-                    oil_water_params.T,
-                    kro_max,
-                )
-                / movable_oil_range,
-                zeros,
-            )
-            dkro_dso = clamp_relperm_derivative(dkro_dso_raw, kro_raw, kro_min)
-            dkro_dsw = zeros.copy()
-            dkro_dsg = zeros.copy()
-
-            # krg (non-wetting, depends on Sg)
-            movable_gas_range = 1.0 - sgr - swc  # type: ignore[operator]
-            valid_gas = movable_gas_range > minimum_mobile_pore_space
-            se_g = np.clip(
-                (sg - sgr) / np.where(valid_gas, movable_gas_range, 1.0),
-                0.0,
-                1.0,
-            )
-            krg_raw = krg_max * _let_relperm(
-                se_g,  # type: ignore[arg-type]
-                gas_params.L,
-                gas_params.E,
-                gas_params.T,
-            )
-
-            dkrg_dsg_raw = np.where(
-                valid_gas,
-                compute_let_curve_slope_wrt_normalized_saturation(
-                    se_g,  # type: ignore[arg-type]
-                    gas_params.L,
-                    gas_params.E,
-                    gas_params.T,
-                    krg_max,
-                )
-                / movable_gas_range,
-                zeros,
-            )
-            dkrg_dsg = clamp_relperm_derivative(dkrg_dsg_raw, krg_raw, krg_min)
-            dkrg_dsw = zeros.copy()
-            dkrg_dso = zeros.copy()
-
-            # krw (intermediate phase, via mixing rule on two-phase water proxies)
-            movable_water_range_ow = 1.0 - swc - sorw  # type: ignore[operator]
-            valid_water_ow = movable_water_range_ow > minimum_mobile_pore_space
-            se_w_ow = np.clip(
-                (sw - swc) / np.where(valid_water_ow, movable_water_range_ow, 1.0),
-                0.0,
-                1.0,
-            )
-            krw_ow = _let_relperm(
-                se_w_ow,  # type: ignore[arg-type]
-                water_params.L,
-                water_params.E,
-                water_params.T,
-            )
-
-            movable_water_range_gw = 1.0 - swc - sgr  # type: ignore[operator]
-            valid_water_gw = movable_water_range_gw > minimum_mobile_pore_space
-            se_w_gw = np.clip(
-                (sw - swc) / np.where(valid_water_gw, movable_water_range_gw, 1.0),
-                0.0,
-                1.0,
-            )
-            krw_gw = _let_relperm(
-                se_w_gw,  # type: ignore[arg-type]
-                water_params.L,
-                water_params.E,
-                water_params.T,
-            )
-
-            # d(krw_ow)/dsw - depends only on Sw
-            dkrw_ow_dsw = np.where(
-                valid_water_ow,
-                compute_let_curve_slope_wrt_normalized_saturation(
-                    se_w_ow,  # type: ignore[arg-type]
-                    water_params.L,
-                    water_params.E,
-                    water_params.T,
-                    1.0,
-                )
-                / movable_water_range_ow,
-                zeros,
-            )
-            # d(krw_gw)/dsw - depends only on Sw
-            dkrw_gw_dsw = np.where(
-                valid_water_gw,
-                compute_let_curve_slope_wrt_normalized_saturation(
-                    se_w_gw,  # type: ignore[arg-type]
-                    water_params.L,
-                    water_params.E,
-                    water_params.T,
-                    1.0,
-                )
-                / movable_water_range_gw,
-                zeros,
-            )
-            # krw_ow and krw_gw have no So or Sg dependence
-            dkrw_ow_dso = zeros.copy()
-            dkrw_ow_dsg = zeros.copy()
-            dkrw_gw_dso = zeros.copy()
-            dkrw_gw_dsg = zeros.copy()
-
-            derivatives = get_mixing_rule_partial_derivatives(
-                rule=mixing_rule,
-                kro_w=krw_ow,
-                kro_g=krw_gw,
-                krw=kro_raw,
-                krg=krg_raw,
-                kr_max=1.0,
-                water_saturation=so,
-                oil_saturation=sw,
-                gas_saturation=sg,
-                irreducible_water_saturation=np.minimum(sorw, sorg),  # type: ignore[arg-type]
-                residual_oil_saturation_water=swc,  # type: ignore[arg-type]
-                residual_oil_saturation_gas=swc,  # type: ignore[arg-type]
-                epsilon=c.FINITE_DIFFERENCE_EPSILON,
-            )
-            dkrw_dkrw_ow = derivatives["dkro_dkro_w"]
-            dkrw_dkrw_gw = derivatives["dkro_dkro_g"]
-            dkrw_dsw_explicit = derivatives["dkro_dso_explicit"]
-            dkrw_dso_explicit = derivatives["dkro_dsw_explicit"]
-            dkrw_dsg_explicit = derivatives["dkro_dsg_explicit"]
-
-            # Forward evaluate krw for min_value masking
-            krw_raw = krw_max * np.clip(
-                mixing_rule(
-                    kro_w=krw_ow,
-                    kro_g=krw_gw,
-                    krw=kro_raw,
-                    krg=krg_raw,
-                    kr_max=1.0,
-                    water_saturation=so,
-                    oil_saturation=sw,
-                    gas_saturation=sg,
-                    irreducible_water_saturation=np.minimum(sorw, sorg),  # type: ignore[arg-type]
-                    residual_oil_saturation_water=swc,  # type: ignore[arg-type]
-                    residual_oil_saturation_gas=swc,  # type: ignore[arg-type]
-                ),
-                0.0,
-                1.0,
-            )
-
-            dkrw_dsw_raw = krw_max * (
-                dkrw_dkrw_ow * dkrw_ow_dsw + dkrw_dkrw_gw * dkrw_gw_dsw + dkrw_dsw_explicit
-            )
-            dkrw_dso_raw = krw_max * (
-                dkrw_dkrw_ow * dkrw_ow_dso
-                + dkrw_dkrw_gw * dkrw_gw_dso
-                + derivatives["dkro_dkrw"] * dkro_dso_raw
-                + dkrw_dso_explicit
-            )
-            dkrw_dsg_raw = krw_max * (
-                dkrw_dkrw_ow * dkrw_ow_dsg
-                + dkrw_dkrw_gw * dkrw_gw_dsg
-                + derivatives["dkro_dkrg"] * dkrg_dsg_raw
-                + dkrw_dsg_explicit
-            )
-            dkrw_dsw = clamp_relperm_derivative(dkrw_dsw_raw, krw_raw, krw_min)
-            dkrw_dso = clamp_relperm_derivative(dkrw_dso_raw, krw_raw, krw_min)
-            dkrw_dsg = clamp_relperm_derivative(dkrw_dsg_raw, krw_raw, krw_min)
-
-            results = (
-                dkrw_dsw,
-                dkro_dsw,
-                dkrg_dsw,
-                dkrw_dso,
-                dkro_dso,
-                dkrg_dso,
-                dkrw_dsg,
-                dkro_dsg,
-                dkrg_dsg,
-            )
-            if is_scalar:
-                results = tuple(r.item() for r in results)  # type: ignore[union-attr]
-            return RelativePermeabilityDerivatives(
-                dkrw_dsw=results[0],
-                dkro_dsw=results[1],
-                dkrg_dsw=results[2],
-                dkrw_dso=results[3],
-                dkro_dso=results[4],
-                dkrg_dso=results[5],
-                dkrw_dsg=results[6],
-                dkro_dsg=results[7],
-                dkrg_dsg=results[8],
-            )
-
-        if wettability == Wettability.MIXED_WET:
-            f = self.mixed_wet_water_fraction
-
-            # Water-wet sub-system
-            mobile_water_range = 1.0 - swc - sorw  # type: ignore[operator]
-            valid_water = mobile_water_range > minimum_mobile_pore_space
-            se_w = np.clip((sw - swc) / np.where(valid_water, mobile_water_range, 1.0), 0.0, 1.0)
-            krw_ww = krw_max * _let_relperm(
-                se_w,  # type: ignore[arg-type]
-                water_params.L,
-                water_params.E,
-                water_params.T,
-            )
-            dkrw_ww_dsw_raw = np.where(
-                valid_water,
-                compute_let_curve_slope_wrt_normalized_saturation(
-                    se_w,  # type: ignore[arg-type]
-                    water_params.L,
-                    water_params.E,
-                    water_params.T,
-                    krw_max,
-                )
-                / mobile_water_range,
-                zeros,
-            )
-
-            mobile_gas_range = 1.0 - swc - sgr - sorg  # type: ignore[operator]
-            valid_gas = mobile_gas_range > minimum_mobile_pore_space
-            se_g = np.clip((sg - sgr) / np.where(valid_gas, mobile_gas_range, 1.0), 0.0, 1.0)
-            krg_ww = krg_max * _let_relperm(
-                se_g,  # type: ignore[arg-type]
-                gas_params.L,
-                gas_params.E,
-                gas_params.T,
-            )
-            dkrg_ww_dsg_raw = np.where(
-                valid_gas,
-                compute_let_curve_slope_wrt_normalized_saturation(
-                    se_g,  # type: ignore[arg-type]
-                    gas_params.L,
-                    gas_params.E,
-                    gas_params.T,
-                    krg_max,
-                )
-                / mobile_gas_range,
-                zeros,
-            )
-
-            # Two-phase oil inputs (unit-endpoint): kro_w depends on Sw only (So = 1 - Sw)
-            # and kro_g on Sg only (So = 1 - swc - Sg)
-            mobile_oil_water_range = 1.0 - swc - sorw  # type: ignore[operator]
-            valid_ow = mobile_oil_water_range > minimum_mobile_pore_space
-            unclipped_se_o_w = (1.0 - sw - sorw) / np.where(valid_ow, mobile_oil_water_range, 1.0)  # type: ignore[operator]
-            se_o_w = np.clip(unclipped_se_o_w, 0.0, 1.0)
-            kro_w_ww = _let_relperm(
-                se_o_w,  # type: ignore[arg-type]
-                oil_water_params.L,
-                oil_water_params.E,
-                oil_water_params.T,
-            )
-            dkro_w_ww_dsw = np.where(
-                valid_ow & (unclipped_se_o_w > 0.0) & (unclipped_se_o_w < 1.0),
-                -compute_let_curve_slope_wrt_normalized_saturation(
-                    se_o_w,  # type: ignore[arg-type]
-                    oil_water_params.L,
-                    oil_water_params.E,
-                    oil_water_params.T,
-                    1.0,
-                )
-                / mobile_oil_water_range,
-                zeros,
-            )
-
-            mobile_gas_oil_range = 1.0 - swc - sorg - sgr  # type: ignore[operator]
-            valid_go = mobile_gas_oil_range > minimum_mobile_pore_space
-            unclipped_se_o_g = (1.0 - swc - sg - sorg) / np.where(  # type: ignore[operator]
-                valid_go, mobile_gas_oil_range, 1.0
-            )
-            se_o_g = np.clip(unclipped_se_o_g, 0.0, 1.0)
-            kro_g_ww = _let_relperm(
-                se_o_g,  # type: ignore[arg-type]
-                gas_oil_params.L,
-                gas_oil_params.E,
-                gas_oil_params.T,
-            )
-            dkro_g_ww_dsg = np.where(
-                valid_go & (unclipped_se_o_g > 0.0) & (unclipped_se_o_g < 1.0),
-                -compute_let_curve_slope_wrt_normalized_saturation(
-                    se_o_g,  # type: ignore[arg-type]
-                    gas_oil_params.L,
-                    gas_oil_params.E,
-                    gas_oil_params.T,
-                    1.0,
-                )
-                / mobile_gas_oil_range,
-                zeros,
-            )
-
-            derivs_ww = get_mixing_rule_partial_derivatives(
-                rule=mixing_rule,
-                kro_w=kro_w_ww,
-                kro_g=kro_g_ww,
-                krw=krw_ww,
-                krg=krg_ww,
-                kr_max=1.0,
-                water_saturation=sw,
-                oil_saturation=so,
-                gas_saturation=sg,
-                irreducible_water_saturation=swc,  # type: ignore[arg-type]
-                residual_oil_saturation_water=sorw,  # type: ignore[arg-type]
-                residual_oil_saturation_gas=sorg,  # type: ignore[arg-type]
-                epsilon=c.FINITE_DIFFERENCE_EPSILON,
-            )
-            kro_ww_raw = kro_max * np.clip(
-                mixing_rule(
-                    kro_w=kro_w_ww,
-                    kro_g=kro_g_ww,
-                    krw=krw_ww,
-                    krg=krg_ww,
-                    kr_max=1.0,
-                    water_saturation=sw,
-                    oil_saturation=so,
-                    gas_saturation=sg,
-                    irreducible_water_saturation=swc,  # type: ignore[arg-type]
-                    residual_oil_saturation_water=sorw,  # type: ignore[arg-type]
-                    residual_oil_saturation_gas=sorg,  # type: ignore[arg-type]
-                ),
-                0.0,
-                1.0,
-            )
-            dkro_ww_dsw = kro_max * (
-                derivs_ww["dkro_dkro_w"] * dkro_w_ww_dsw
-                + derivs_ww["dkro_dkrw"] * dkrw_ww_dsw_raw
-                + derivs_ww["dkro_dsw_explicit"]
-            )
-            dkro_ww_dso = kro_max * derivs_ww["dkro_dso_explicit"]
-            dkro_ww_dsg = kro_max * (
-                derivs_ww["dkro_dkro_g"] * dkro_g_ww_dsg
-                + derivs_ww["dkro_dkrg"] * dkrg_ww_dsg_raw
-                + derivs_ww["dkro_dsg_explicit"]
-            )
-
-            # Oil-wet sub-system
-            movable_oil_range_ow = 1.0 - sorw - sorg  # type: ignore[operator]
-            max_residual_ow = np.minimum(sorw, sorg)  # type: ignore[operator]
-            valid_oil_ow = movable_oil_range_ow > minimum_mobile_pore_space
-            se_o_ow = np.clip(
-                (so - max_residual_ow) / np.where(valid_oil_ow, movable_oil_range_ow, 1.0),
-                0.0,
-                1.0,
-            )
-            kro_ow = kro_max * _let_relperm(
-                se_o_ow,  # type: ignore[arg-type]
-                oil_water_params.L,
-                oil_water_params.E,
-                oil_water_params.T,
-            )
-            dkro_ow_dso = np.where(
-                valid_oil_ow,
-                kro_max
-                * compute_let_curve_slope_wrt_normalized_saturation(
-                    se_o_ow,
-                    oil_water_params.L,
-                    oil_water_params.E,
-                    oil_water_params.T,
-                    1.0,
-                )
-                / movable_oil_range_ow,
-                zeros,
-            )
-
-            movable_gas_range_ow = 1.0 - sgr - swc  # type: ignore[operator]
-            valid_gas_ow = movable_gas_range_ow > minimum_mobile_pore_space
-            se_g_ow = np.clip(
-                (sg - sgr) / np.where(valid_gas_ow, movable_gas_range_ow, 1.0), 0.0, 1.0
-            )
-            krg_ow = krg_max * _let_relperm(
-                se_g_ow,  # type: ignore[arg-type]
-                gas_params.L,
-                gas_params.E,
-                gas_params.T,
-            )
-            dkrg_ow_dsg = np.where(
-                valid_gas_ow,
-                krg_max
-                * compute_let_curve_slope_wrt_normalized_saturation(
-                    se_g_ow,  # type: ignore[arg-type]
-                    gas_params.L,
-                    gas_params.E,
-                    gas_params.T,
-                    1.0,
-                )
-                / movable_gas_range_ow,
-                zeros,
-            )
-
-            # krw_ow proxies and their Sw-derivatives
-            movable_water_range_ow = 1.0 - swc - sorw  # type: ignore[operator]
-            valid_w_ow = movable_water_range_ow > minimum_mobile_pore_space
-            se_w_ow = np.clip(
-                (sw - swc) / np.where(valid_w_ow, movable_water_range_ow, 1.0), 0.0, 1.0
-            )
-            krw_ow_proxy = _let_relperm(
-                se_w_ow,  # type: ignore[arg-type]
-                water_params.L,
-                water_params.E,
-                water_params.T,
-            )
-            dkrw_ow_proxy_dsw = np.where(
-                valid_w_ow,
-                compute_let_curve_slope_wrt_normalized_saturation(
-                    se_w_ow,  # type: ignore[arg-type]
-                    water_params.L,
-                    water_params.E,
-                    water_params.T,
-                    1.0,
-                )
-                / movable_water_range_ow,
-                zeros,
-            )
-
-            movable_water_range_gw = 1.0 - swc - sgr  # type: ignore[operator]
-            valid_w_gw = movable_water_range_gw > minimum_mobile_pore_space
-            se_w_gw = np.clip(
-                (sw - swc) / np.where(valid_w_gw, movable_water_range_gw, 1.0), 0.0, 1.0
-            )
-            krw_gw_proxy = _let_relperm(
-                se_w_gw,  # type: ignore[arg-type]
-                water_params.L,
-                water_params.E,
-                water_params.T,
-            )
-            dkrw_gw_proxy_dsw = np.where(
-                valid_w_gw,
-                compute_let_curve_slope_wrt_normalized_saturation(
-                    se_w_gw,  # type: ignore[arg-type]
-                    water_params.L,
-                    water_params.E,
-                    water_params.T,
-                    1.0,
-                )
-                / movable_water_range_gw,
-                zeros,
-            )
-
-            derivs_ow = get_mixing_rule_partial_derivatives(
-                rule=mixing_rule,
-                kro_w=krw_ow_proxy,
-                kro_g=krw_gw_proxy,
-                krw=kro_ow,
-                krg=krg_ow,
-                kr_max=1.0,
-                water_saturation=so,
-                oil_saturation=sw,
-                gas_saturation=sg,
-                irreducible_water_saturation=np.minimum(sorw, sorg),  # type: ignore[arg-type]
-                residual_oil_saturation_water=swc,  # type: ignore[arg-type]
-                residual_oil_saturation_gas=swc,  # type: ignore[arg-type]
-                epsilon=c.FINITE_DIFFERENCE_EPSILON,
-            )
-            krw_ow_raw = krw_max * np.clip(
-                mixing_rule(
-                    kro_w=krw_ow_proxy,
-                    kro_g=krw_gw_proxy,
-                    krw=kro_ow,
-                    krg=krg_ow,
-                    kr_max=1.0,
-                    water_saturation=so,
-                    oil_saturation=sw,
-                    gas_saturation=sg,
-                    irreducible_water_saturation=np.minimum(sorw, sorg),  # type: ignore[arg-type]
-                    residual_oil_saturation_water=swc,  # type: ignore[arg-type]
-                    residual_oil_saturation_gas=swc,  # type: ignore[arg-type]
-                ),
-                0.0,
-                1.0,
-            )
-            dkrw_ow_dsw = krw_max * (
-                derivs_ow["dkro_dkro_w"] * dkrw_ow_proxy_dsw
-                + derivs_ow["dkro_dkro_g"] * dkrw_gw_proxy_dsw
-                + derivs_ow["dkro_dso_explicit"]
-            )
-            dkrw_ow_dso = krw_max * (
-                derivs_ow["dkro_dkrw"] * dkro_ow_dso + derivs_ow["dkro_dsw_explicit"]
-            )
-            dkrw_ow_dsg = krw_max * (
-                derivs_ow["dkro_dkrg"] * dkrg_ow_dsg + derivs_ow["dkro_dsg_explicit"]
-            )
-
-            # Blend raw kr values for min_value masking
-            krw_blend_raw = f * krw_ww + (1.0 - f) * krw_ow_raw
-            kro_blend_raw = f * kro_ww_raw + (1.0 - f) * kro_ow
-            krg_blend_raw = f * krg_ww + (1.0 - f) * krg_ow
-
-            # Blend derivatives
-            dkrw_dsw_raw = f * dkrw_ww_dsw_raw + (1.0 - f) * dkrw_ow_dsw
-            dkrw_dso_raw = (1.0 - f) * dkrw_ow_dso
-            dkrw_dsg_raw = (1.0 - f) * dkrw_ow_dsg
-
-            dkro_dsw_raw = f * dkro_ww_dsw
-            dkro_dso_raw = f * dkro_ww_dso + (1.0 - f) * dkro_ow_dso
-            dkro_dsg_raw = f * dkro_ww_dsg
-
-            dkrg_dsg_raw = f * dkrg_ww_dsg_raw + (1.0 - f) * dkrg_ow_dsg
-
-            # Apply min_values to blended derivatives
-            dkrw_dsw = clamp_relperm_derivative(dkrw_dsw_raw, krw_blend_raw, krw_min)
-            dkrw_dso = clamp_relperm_derivative(dkrw_dso_raw, krw_blend_raw, krw_min)
-            dkrw_dsg = clamp_relperm_derivative(dkrw_dsg_raw, krw_blend_raw, krw_min)
-            dkro_dsw = clamp_relperm_derivative(dkro_dsw_raw, kro_blend_raw, kro_min)
-            dkro_dso = clamp_relperm_derivative(dkro_dso_raw, kro_blend_raw, kro_min)
-            dkro_dsg = clamp_relperm_derivative(dkro_dsg_raw, kro_blend_raw, kro_min)
-            dkrg_dsw = zeros.copy()
-            dkrg_dso = zeros.copy()
-            dkrg_dsg = clamp_relperm_derivative(dkrg_dsg_raw, krg_blend_raw, krg_min)
-
-            results = (
-                dkrw_dsw,
-                dkro_dsw,
-                dkrg_dsw,
-                dkrw_dso,
-                dkro_dso,
-                dkrg_dso,
-                dkrw_dsg,
-                dkro_dsg,
-                dkrg_dsg,
-            )
-            if is_scalar:
-                results = tuple(r.item() for r in results)  # type: ignore
-            return RelativePermeabilityDerivatives(
-                dkrw_dsw=results[0],
-                dkro_dsw=results[1],
-                dkrg_dsw=results[2],
-                dkrw_dso=results[3],
-                dkro_dso=results[4],
-                dkrg_dso=results[5],
-                dkrw_dsg=results[6],
-                dkro_dsg=results[7],
-                dkrg_dsg=results[8],
-            )
-
-        # Water-wet path
-        # krw
-        mobile_water_range = 1.0 - swc - sorw  # type: ignore[operator]
-        valid_water = mobile_water_range > minimum_mobile_pore_space
-        se_w_for_krw = np.clip(
-            (sw - swc) / np.where(valid_water, mobile_water_range, 1.0),
-            0.0,
-            1.0,
-        )
-        krw_raw = krw_max * _let_relperm(
-            se_w_for_krw,  # type: ignore[arg-type]
-            water_params.L,
-            water_params.E,
-            water_params.T,
-        )
-        dkrw_dsw_raw = np.where(
-            valid_water,
-            compute_let_curve_slope_wrt_normalized_saturation(
-                normalized_saturation=se_w_for_krw,  # type: ignore[arg-type]
-                L=water_params.L,
-                E=water_params.E,
-                T=water_params.T,
-                kr_max=krw_max,
-            )
-            / mobile_water_range,
-            zeros,
-        )
-        dkrw_dsw = clamp_relperm_derivative(dkrw_dsw_raw, krw_raw, krw_min)
-        dkrw_dso = zeros.copy()
-        dkrw_dsg = zeros.copy()
-
-        # krg
-        mobile_gas_range = 1.0 - swc - sgr - sorg  # type: ignore[operator]
-        valid_gas = mobile_gas_range > minimum_mobile_pore_space
-        se_g_for_krg = np.clip(
-            (sg - sgr) / np.where(valid_gas, mobile_gas_range, 1.0),
-            0.0,
-            1.0,
-        )
-        krg_raw = krg_max * _let_relperm(
-            se_g_for_krg,  # type: ignore[arg-type]
-            gas_params.L,
-            gas_params.E,
-            gas_params.T,
-        )
-        dkrg_dsg_raw = np.where(
-            valid_gas,
-            compute_let_curve_slope_wrt_normalized_saturation(
-                normalized_saturation=se_g_for_krg,  # type: ignore[arg-type]
-                L=gas_params.L,
-                E=gas_params.E,
-                T=gas_params.T,
-                kr_max=krg_max,
-            )
-            / mobile_gas_range,
-            zeros,
-        )
-        dkrg_dsg = clamp_relperm_derivative(dkrg_dsg_raw, krg_raw, krg_min)
-        dkrg_dsw = zeros.copy()
-        dkrg_dso = zeros.copy()
-
-        # kro_w (unit-endpoint oil kr of the oil-water system, a function of Sw only:
-        # the system's oil saturation is So = 1 - Sw)
-        mobile_oil_water_range = 1.0 - swc - sorw  # type: ignore[operator]
-        valid_oil_water = mobile_oil_water_range > minimum_mobile_pore_space
-        unclipped_se_o_water = (1.0 - sw - sorw) / np.where(  # type: ignore[operator]
-            valid_oil_water, mobile_oil_water_range, 1.0
-        )
-        se_o_water_system = np.clip(unclipped_se_o_water, 0.0, 1.0)
-        kro_w_vals = _let_relperm(
-            se_o_water_system,  # type: ignore[arg-type]
-            oil_water_params.L,
-            oil_water_params.E,
-            oil_water_params.T,
-        )
-        dkro_w_dsw = np.where(
-            valid_oil_water & (unclipped_se_o_water > 0.0) & (unclipped_se_o_water < 1.0),
-            -compute_let_curve_slope_wrt_normalized_saturation(
-                normalized_saturation=se_o_water_system,  # type: ignore[arg-type]
-                L=oil_water_params.L,
-                E=oil_water_params.E,
-                T=oil_water_params.T,
-                kr_max=1.0,
-            )
-            / mobile_oil_water_range,
-            zeros,
-        )
-        dkro_w_dso = zeros.copy()
-        dkro_w_dsg = zeros.copy()
-
-        # kro_g (unit-endpoint oil kr of the gas-oil system, a function of Sg only:
-        # the system's oil saturation is So = 1 - swc - Sg)
-        mobile_gas_oil_range = 1.0 - swc - sorg - sgr  # type: ignore
-        valid_gas_oil = mobile_gas_oil_range > minimum_mobile_pore_space
-        unclipped_se_o_gas = (1.0 - swc - sg - sorg) / np.where(  # type: ignore[operator]
-            valid_gas_oil, mobile_gas_oil_range, 1.0
-        )
-        se_o_gas_system = np.clip(unclipped_se_o_gas, 0.0, 1.0)
-        kro_g_vals = _let_relperm(
-            se_o_gas_system,  # type: ignore[arg-type]
-            gas_oil_params.L,
-            gas_oil_params.E,
-            gas_oil_params.T,
-        )
-        dkro_g_dsg = np.where(
-            valid_gas_oil & (unclipped_se_o_gas > 0.0) & (unclipped_se_o_gas < 1.0),
-            -compute_let_curve_slope_wrt_normalized_saturation(
-                normalized_saturation=se_o_gas_system,  # type: ignore[arg-type]
-                L=gas_oil_params.L,
-                E=gas_oil_params.E,
-                T=gas_oil_params.T,
-                kr_max=1.0,
-            )
-            / mobile_gas_oil_range,
-            zeros,
-        )
-        dkro_g_dsw = zeros.copy()
-        dkro_g_dso = zeros.copy()
-
-        derivatives = get_mixing_rule_partial_derivatives(
-            rule=mixing_rule,
-            kro_w=kro_w_vals,
-            kro_g=kro_g_vals,
-            krw=krw_raw,
-            krg=krg_raw,
-            kr_max=1.0,
-            water_saturation=sw,
-            oil_saturation=so,
-            gas_saturation=sg,
+        return compute_let_relative_permeability_derivatives(
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
             irreducible_water_saturation=swc,  # type: ignore[arg-type]
             residual_oil_saturation_water=sorw,  # type: ignore[arg-type]
             residual_oil_saturation_gas=sorg,  # type: ignore[arg-type]
-            epsilon=c.FINITE_DIFFERENCE_EPSILON,
-        )
-        dkro_dkro_w = derivatives["dkro_dkro_w"]
-        dkro_dkro_g = derivatives["dkro_dkro_g"]
-        dkro_dkrw_mix = derivatives["dkro_dkrw"]
-        dkro_dkrg_mix = derivatives["dkro_dkrg"]
-        dkro_dsw_explicit = derivatives["dkro_dsw_explicit"]
-        dkro_dso_explicit = derivatives["dkro_dso_explicit"]
-        dkro_dsg_explicit = derivatives["dkro_dsg_explicit"]
-
-        # Forward evaluate kro for min_value masking
-        kro_mixed_raw = kro_max * np.clip(
-            mixing_rule(
-                kro_w=kro_w_vals,
-                kro_g=kro_g_vals,
-                krw=krw_raw,
-                krg=krg_raw,
-                kr_max=1.0,
-                water_saturation=sw,
-                oil_saturation=so,
-                gas_saturation=sg,
-                irreducible_water_saturation=swc,  # type: ignore[arg-type]
-                residual_oil_saturation_water=sorw,  # type: ignore[arg-type]
-                residual_oil_saturation_gas=sorg,  # type: ignore[arg-type]
-            ),
-            0.0,
-            1.0,
-        )
-
-        dkro_dsw_raw = kro_max * (
-            dkro_dkro_w * dkro_w_dsw
-            + dkro_dkro_g * dkro_g_dsw
-            + dkro_dkrw_mix * dkrw_dsw_raw
-            + dkro_dkrg_mix * zeros
-            + dkro_dsw_explicit
-        )
-        dkro_dso_raw = kro_max * (
-            dkro_dkro_w * dkro_w_dso
-            + dkro_dkro_g * dkro_g_dso
-            + dkro_dkrw_mix * zeros
-            + dkro_dkrg_mix * zeros
-            + dkro_dso_explicit
-        )
-        dkro_dsg_raw = kro_max * (
-            dkro_dkro_w * dkro_w_dsg
-            + dkro_dkro_g * dkro_g_dsg
-            + dkro_dkrw_mix * zeros
-            + dkro_dkrg_mix * dkrg_dsg_raw
-            + dkro_dsg_explicit
-        )
-
-        dkro_dsw = clamp_relperm_derivative(dkro_dsw_raw, kro_mixed_raw, kro_min)
-        dkro_dso = clamp_relperm_derivative(dkro_dso_raw, kro_mixed_raw, kro_min)
-        dkro_dsg = clamp_relperm_derivative(dkro_dsg_raw, kro_mixed_raw, kro_min)
-
-        results = (
-            dkrw_dsw,
-            dkro_dsw,
-            dkrg_dsw,
-            dkrw_dso,
-            dkro_dso,
-            dkrg_dso,
-            dkrw_dsg,
-            dkro_dsg,
-            dkrg_dsg,
-        )
-        if is_scalar:
-            results = tuple(r.item() for r in results)  # type: ignore
-            return RelativePermeabilityDerivatives(
-                dkrw_dsw=results[0],
-                dkro_dsw=results[1],
-                dkrg_dsw=results[2],
-                dkrw_dso=results[3],
-                dkro_dso=results[4],
-                dkrg_dso=results[5],
-                dkrw_dsg=results[6],
-                dkro_dsg=results[7],
-                dkrg_dsg=results[8],
-            )
-        return RelativePermeabilityDerivatives(
-            dkrw_dsw=dkrw_dsw,
-            dkro_dsw=dkro_dsw,
-            dkrg_dsw=dkrg_dsw,
-            dkrw_dso=dkrw_dso,
-            dkro_dso=dkro_dso,
-            dkrg_dso=dkrg_dso,
-            dkrw_dsg=dkrw_dsg,
-            dkro_dsg=dkro_dsg,
-            dkrg_dsg=dkrg_dsg,
+            residual_gas_saturation=sgr,  # type: ignore[arg-type]
+            water=self.water,
+            oil_water=self.oil_water,
+            gas_oil=self.gas_oil,
+            gas=self.gas,
+            minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
+            finite_difference_epsilon=c.FINITE_DIFFERENCE_EPSILON,
+            maximum_water_relperm=self.get_water_relperm_endpoint(),
+            maximum_oil_relperm=self.get_oil_relperm_endpoint(),
+            maximum_gas_relperm=self.get_gas_relperm_endpoint(),
+            wettability=self.wettability,
+            mixed_wet_water_fraction=self.mixed_wet_water_fraction,
+            mixing_rule=typing.cast(MixingRule, self.mixing_rule),  # type: ignore[arg-type]
+            minimum_water_relperm=resolve_min_relperm(self.minimum_water_relperm),
+            minimum_oil_relperm=resolve_min_relperm(self.minimum_oil_relperm),
+            minimum_gas_relperm=resolve_min_relperm(self.minimum_gas_relperm),
         )
