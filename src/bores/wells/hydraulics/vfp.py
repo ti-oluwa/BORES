@@ -41,11 +41,8 @@ from bores.types import (
 from bores.units import UnitConversionTable, get_conversion_factors
 from bores.utils import scale
 from bores.wells.base import WellType
-from bores.wells.hydraulics.base import (
-    SurfaceSample,
-    WellBoreModel,
-    compute_tubing_head_pressure,
-)
+from bores.wells.hydraulics.base import SurfaceSample, WellBoreModel
+from bores.wells.hydraulics.dispatch import compute_tubing_head_pressure
 from bores.wells.state import PhaseValues
 
 __all__ = [

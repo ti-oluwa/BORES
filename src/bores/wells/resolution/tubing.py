@@ -23,7 +23,7 @@ from bores.wells.hydraulics.base import (
     compute_hydrostatic_pressure,
     get_gravitational_acceleration,
 )
-from bores.wells.hydraulics.base import (
+from bores.wells.hydraulics.dispatch import (
     compute_tubing_head_pressure as compute_wellbore_tubing_head_pressure,
 )
 from bores.wells.hydraulics.vfp import VFPTable, VFPTables

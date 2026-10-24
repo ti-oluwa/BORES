@@ -8,6 +8,7 @@ import types
 import numpy as np
 
 from bores.blackoil.pvt.data import PVTData
+from bores.blackoil.pvt.static import StaticPVT
 from bores.blackoil.pvt.tables import PVTTable, PVTTables
 from bores.types import FluidPhase
 
@@ -45,6 +46,20 @@ def _oil_viscosity_at_saturation(pressure, temperature):
     )
 
 
+def _static_pvt() -> StaticPVT:
+    """Stock-tank densities, which enable the undersaturated density correction."""
+    return StaticPVT(stock_tank_oil_density=53.0, stock_tank_gas_density=0.0494)
+
+
+def _oil_density_at_saturation(pressure, temperature):
+    return (
+        56.0
+        - 0.012 * solution_gor_at_saturation(pressure, temperature)
+        - 0.01 * (temperature - 150.0)
+        + 4e-4 * pressure
+    )
+
+
 def build_oil_table(with_undersaturated_tables: bool = False, dtype=None) -> PVTTable:
     """
     An oil table. With `with_undersaturated_tables` the undersaturated `Bo` and `μo` are read
@@ -64,6 +79,7 @@ def build_oil_table(with_undersaturated_tables: bool = False, dtype=None) -> PVT
         "formation_volume_factor_table": _oil_fvf_at_saturation(pressure_grid, temperature_grid),
         "solution_gor_table": solution_gor_at_saturation(pressure_grid, temperature_grid),
         "compressibility_table": np.full_like(pressure_grid, 1.5e-5),
+        "density_table": _oil_density_at_saturation(pressure_grid, temperature_grid),
         "dtype": dtype,
     }
     if with_undersaturated_tables:
@@ -77,7 +93,7 @@ def build_oil_table(with_undersaturated_tables: bool = False, dtype=None) -> PVT
                 viscosity[:, j, k] = _oil_viscosity_at_saturation(pb, t) * (1.0 + 4e-5 * excess)
         data["undersaturated_formation_volume_factor_table"] = fvf
         data["undersaturated_viscosity_table"] = viscosity
-    return PVTTable(data=PVTData(**data), validate=False)
+    return PVTTable(data=PVTData(**data), pvt=_static_pvt(), validate=False)
 
 
 def _vaporization_coefficient(temperature):
@@ -98,6 +114,12 @@ def _gas_fvf_dry(pressure, temperature):
 
 def _gas_viscosity_dry(pressure, temperature):
     return 0.012 + 2e-6 * pressure + 1e-5 * (temperature - 150.0)
+
+
+def _gas_density_at_saturation(pressure, temperature):
+    return 0.0283 * 0 + 0.0763 * pressure / (0.9 * (temperature + 460.0)) * (
+        1.0 + 800.0 * vaporized_oil_ratio_at_saturation(pressure, temperature)
+    )
 
 
 def build_gas_table(dtype=None) -> PVTTable:
@@ -125,11 +147,12 @@ def build_gas_table(dtype=None) -> PVTTable:
         "formation_volume_factor_table": _gas_fvf_dry(pressure_grid, temperature_grid)
         * (1.0 + 2000.0 * saturated_rv),
         "compressibility_factor_table": 0.95 - 4e-5 * pressure_grid,
+        "density_table": _gas_density_at_saturation(pressure_grid, temperature_grid),
         "undersaturated_formation_volume_factor_table": fvf,
         "undersaturated_viscosity_table": viscosity,
         "dtype": dtype,
     }
-    return PVTTable(data=PVTData(**data), validate=False)
+    return PVTTable(data=PVTData(**data), pvt=_static_pvt(), validate=False)
 
 
 class SingleRegionPVT:
@@ -138,5 +161,8 @@ class SingleRegionPVT:
     def __init__(self, oil: PVTTable | None = None, gas: PVTTable | None = None):
         self._region = types.SimpleNamespace(tables=PVTTables(oil=oil, gas=gas))
 
-    def __getitem__(self, key: int):
+    def region(self, pvtnum: int):
         return self._region
+
+    def __getitem__(self, key: int):
+        return self.region(key)

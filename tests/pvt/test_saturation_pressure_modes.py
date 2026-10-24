@@ -228,6 +228,52 @@ class TestTransmissibility:
         )
 
 
+class TestEndToEnd:
+    """Perturb `Rs` and `Rv` in the cache inputs, recompute PVT then mobility, and compare with the analytic term."""
+
+    PRESSURE = np.array([4000.0, 5000.0], dtype=DTYPE)
+    TEMPERATURE = np.full(2, 200.0, dtype=DTYPE)
+    SOLUTION_GOR = np.array([150.0, 200.0], dtype=DTYPE)
+    VAPORIZED_OIL_RATIO = np.array([2e-5, 3e-5], dtype=DTYPE)
+
+    def _mobility(self, pvt, solution_gor, vaporized_oil_ratio):
+        pvt_cache = compute_pvt_cache(
+            self.PRESSURE,
+            self.TEMPERATURE,
+            solution_gor,
+            np.ones(2, dtype=int),
+            pvt,
+            salinity=np.full(2, 35000.0, dtype=DTYPE),
+            vaporized_oil_ratio=vaporized_oil_ratio,
+            dtype=DTYPE,
+        )
+        satfunc = make_satfunc_cache(2, DTYPE)
+        satfunc.water_relative_permeability[:] = 0.2
+        satfunc.oil_relative_permeability[:] = 0.5
+        satfunc.gas_relative_permeability[:] = 0.1
+        return compute_mobility_cache(pvt_cache, satfunc, dtype=DTYPE)
+
+    def test_oil_mobility_derivative_with_respect_to_rs(self, pvt):
+        step = 1e-3 * self.SOLUTION_GOR
+        analytic = self._mobility(pvt, self.SOLUTION_GOR, self.VAPORIZED_OIL_RATIO).dʎo_drs
+        plus = self._mobility(pvt, self.SOLUTION_GOR + step, self.VAPORIZED_OIL_RATIO).oil_mobility
+        minus = self._mobility(
+            pvt, self.SOLUTION_GOR - step, self.VAPORIZED_OIL_RATIO
+        ).oil_mobility
+        assert np.isfinite(analytic).all()
+        np.testing.assert_allclose(analytic, (plus - minus) / (2.0 * step), rtol=1e-3)
+
+    def test_gas_mobility_derivative_with_respect_to_rv(self, pvt):
+        step = 1e-3 * self.VAPORIZED_OIL_RATIO
+        analytic = self._mobility(pvt, self.SOLUTION_GOR, self.VAPORIZED_OIL_RATIO).dʎg_drv
+        plus = self._mobility(pvt, self.SOLUTION_GOR, self.VAPORIZED_OIL_RATIO + step).gas_mobility
+        minus = self._mobility(
+            pvt, self.SOLUTION_GOR, self.VAPORIZED_OIL_RATIO - step
+        ).gas_mobility
+        assert np.isfinite(analytic).all()
+        np.testing.assert_allclose(analytic, (plus - minus) / (2.0 * step), rtol=1e-3)
+
+
 def _slice(cache, count):
     """The first `count` cells of a per-cell NamedTuple cache."""
     return type(cache)(*(np.asarray(field)[:count] for field in cache))

@@ -63,6 +63,19 @@ class TestOil:
             oil.dμ_drs(pressure, temperature, RS_UNDERSATURATED), expected, rtol=1e-4
         )
 
+    def test_density_derivative_matches_the_value_function(self, oil):
+        """The density depends on `Rs` directly and through `Bo`: `(rho_sto + Rs * rho_gas / f) / Bo`."""
+        pressure = self._undersaturated_pressure()
+        temperature = np.full(3, TEMPERATURE)
+        expected = _reference(
+            lambda rs: np.asarray(oil.density(pressure, temperature, solution_gor=rs)),
+            RS_UNDERSATURATED,
+            1e-4,
+        )
+        derivative = np.asarray(oil.dρ_drs(pressure, temperature, RS_UNDERSATURATED))
+        assert (np.abs(derivative) > 0.0).all()
+        np.testing.assert_allclose(derivative, expected, rtol=1e-4)
+
     def test_saturated_cells_have_no_derivative(self, oil):
         rs = RS_UNDERSATURATED
         pressure = bubble_point(rs, TEMPERATURE) - 50.0  # below the bubble point
@@ -141,6 +154,18 @@ class TestGas:
         # The 3-D table is linear in Rv: mu = mu_dry * (1 + 500 Rv)
         mu_dry = 0.012 + 2e-6 * float(pressure[0]) + 1e-5 * (TEMPERATURE - 150.0)
         assert derivative == pytest.approx(mu_dry * 500.0, rel=1e-3)
+
+    def test_density_derivative_matches_the_value_function(self, gas):
+        pressure = self._undersaturated_pressure()
+        temperature = np.full(3, TEMPERATURE)
+        expected = _reference(
+            lambda rv: np.asarray(gas.density(pressure, temperature, vaporized_oil_ratio=rv)),
+            RV_UNDERSATURATED,
+            1e-8,
+        )
+        derivative = np.asarray(gas.dρ_drv(pressure, temperature, RV_UNDERSATURATED))
+        assert (np.abs(derivative) > 0.0).all()
+        np.testing.assert_allclose(derivative, expected, rtol=1e-4)
 
     def test_saturated_gas_has_no_derivative(self, gas):
         pressure = dew_point(RV_UNDERSATURATED, TEMPERATURE) - 50.0

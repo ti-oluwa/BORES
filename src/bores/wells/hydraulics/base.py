@@ -9,7 +9,6 @@ import numpy.typing as npt
 from typing_extensions import Self
 
 from bores.constants import c
-from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.types import Number, NumberArray, OneDimension, UnitConversionTable, UnitSystem
 from bores.units import get_conversion_factors
@@ -30,14 +29,12 @@ __all__ = [
     "compute_mixture_density",
     "compute_mixture_velocity",
     "compute_mixture_viscosity",
-    "compute_perforation_pressures",
     "compute_segment_pressure_drop",
     "compute_static_hydrostatic_drop",
     "compute_static_mixture_density",
     "compute_superficial_velocity",
     "compute_surface_mixture_density",
     "compute_surface_mixture_viscosity",
-    "compute_tubing_head_pressure",
     "get_gravitational_acceleration",
     "get_hydrostatic_divisor",
     "get_unit_system_constant",
@@ -834,105 +831,3 @@ def compute_static_mixture_density(
         + phase_saturations.water * phase_densities.water
         + phase_saturations.gas * phase_densities.gas
     ) / total_saturation
-
-
-def compute_perforation_pressures(
-    *, wellbore: WellBoreModel, **kwargs: typing.Any
-) -> NumberArray[OneDimension]:
-    """
-    Compute perforation pressures using the model/correlation defined by `wellbore.name`.
-
-    :param wellbore: `WellBoreModel` naming a hydraulics correlation.
-    :param kwargs: Forwarded to that correlation's `compute_perforation_pressures`.
-    :returns: Pressure at each connection.
-    :raises ValidationError: If `wellbore.name` isn't recognized.
-    """
-    if wellbore.name == "homogeneous":
-        from bores.wells.hydraulics.homogeneous import (
-            compute_perforation_pressures as compute,
-        )
-
-        return compute(model=wellbore.options, **kwargs)
-    if wellbore.name in ("beggs_brill", "beggs_and_brill"):
-        from bores.wells.hydraulics.beggs_and_brill import (
-            compute_perforation_pressures as compute,
-        )
-
-        return compute(model=wellbore.options, **kwargs)
-    if wellbore.name == "hagedorn_brown":
-        from bores.wells.hydraulics.hagedorn_brown import (
-            compute_perforation_pressures as compute,
-        )
-
-        return compute(model=wellbore.options, **kwargs)
-    if wellbore.name == "gray":
-        from bores.wells.hydraulics.gray import (
-            compute_perforation_pressures as compute,
-        )
-
-        return compute(model=wellbore.options, **kwargs)
-    if wellbore.name == "woldesemayat_ghajar":
-        from bores.wells.hydraulics.woldesemayat_ghajar import (
-            compute_perforation_pressures as compute,
-        )
-
-        return compute(model=wellbore.options, **kwargs)
-    raise ValidationError(f"Unknown `WellBoreModel` name: {wellbore.name!r}")
-
-
-def compute_tubing_head_pressure(
-    *, wellbore: WellBoreModel | None, **kwargs: typing.Any
-) -> Number:
-    """
-    Computes the tubing head pressure based on `wellbore.name`.
-
-    Unlike the connection-distribution leg, this has no fallback for a
-    missing `wellbore`; converting between BHP and THP is meaningless
-    without a real hydraulics model or VFP table, so `ConnectionPressureMode`
-    doesn't apply here. Also used directly by `wells.hydraulics.vfp.as_vfp_table`
-    to sample a correlation while building a `VFPTable`.
-
-    :param wellbore: `WellBoreModel` naming a hydraulics correlation.
-        Required; `None` always raises.
-    :param kwargs: Forwarded to that correlation's `compute_tubing_head_pressure`.
-    :returns: Tubing head pressure.
-    :raises ValidationError: If `wellbore` is `None`, or `wellbore.name`
-        isn't recognized.
-    """
-    if wellbore is None:
-        raise ValidationError(
-            "Tubing head pressure requires a `WellBoreModel` or VFP table "
-            "assigned to this well; THP control, a `THPLimit`, and THP "
-            "reporting all need one. `ConnectionPressureMode` only covers "
-            "connection-to-connection pressure distribution, "
-            "not the datum-to-surface relationship."
-        )
-    if wellbore.name == "homogeneous":
-        from bores.wells.hydraulics.homogeneous import (
-            compute_tubing_head_pressure as compute,
-        )
-
-        return compute(model=wellbore.options, **kwargs)
-    if wellbore.name in ("beggs_brill", "beggs_and_brill"):
-        from bores.wells.hydraulics.beggs_and_brill import (
-            compute_tubing_head_pressure as compute,
-        )
-
-        return compute(model=wellbore.options, **kwargs)
-    if wellbore.name == "hagedorn_brown":
-        from bores.wells.hydraulics.hagedorn_brown import (
-            compute_tubing_head_pressure as compute,
-        )
-
-        return compute(model=wellbore.options, **kwargs)
-    if wellbore.name == "gray":
-        from bores.wells.hydraulics.gray import compute_tubing_head_pressure as compute
-
-        return compute(model=wellbore.options, **kwargs)
-    if wellbore.name == "woldesemayat_ghajar":
-        from bores.wells.hydraulics.woldesemayat_ghajar import (
-            compute_tubing_head_pressure as compute,
-        )
-
-        return compute(model=wellbore.options, **kwargs)
-    raise ValidationError(f"Unknown `WellBoreModel` name: {wellbore.name!r}")

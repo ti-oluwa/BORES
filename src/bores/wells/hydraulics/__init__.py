@@ -27,6 +27,10 @@ from bores.wells.hydraulics.beggs_and_brill import (
     compute_two_phase_friction_factor,
     get_flow_pattern,
 )
+from bores.wells.hydraulics.dispatch import (
+    compute_perforation_pressures,
+    compute_tubing_head_pressure,
+)
 from bores.wells.hydraulics.gray import (
     GrayWellbore,
     compute_gray_effective_roughness,
@@ -75,11 +79,13 @@ __all__ = [
     "compute_mixture_density",
     "compute_mixture_velocity",
     "compute_mixture_viscosity",
+    "compute_perforation_pressures",
     "compute_segment_pressure_drop",
     "compute_static_hydrostatic_drop",
     "compute_static_mixture_density",
     "compute_surface_mixture_density",
     "compute_surface_mixture_viscosity",
+    "compute_tubing_head_pressure",
     "compute_two_phase_friction_factor",
     "compute_woldesemayat_ghajar_void_fraction",
     "get_flow_pattern",
