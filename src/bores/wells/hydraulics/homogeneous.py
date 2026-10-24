@@ -334,7 +334,7 @@ def walk_perforation_pressures(
     )
     friction_sign = -1.0 if is_injector else 1.0
     for step in range(walk.connection_indices.shape[0]):
-        i = walk.connection_indices[step]
+        idx = walk.connection_indices[step]
         previous = walk.previous_indices[step]
         previous_pressure = reference_pressure if previous < 0 else pressures[previous]
         geometric_sign = walk.geometric_signs[step]
@@ -344,29 +344,29 @@ def walk_perforation_pressures(
             gas=walk.carried_gas_rates[step],
         )
         phase_densities = PhaseValues(
-            oil=connection_fluids.oil_densities[i],  # type: ignore
-            water=connection_fluids.water_densities[i],  # type: ignore
-            gas=connection_fluids.gas_densities[i],  # type: ignore
+            oil=connection_fluids.oil_densities[idx],  # type: ignore
+            water=connection_fluids.water_densities[idx],  # type: ignore
+            gas=connection_fluids.gas_densities[idx],  # type: ignore
         )
         phase_viscosities = PhaseValues(
-            oil=connection_fluids.oil_viscosities[i],  # type: ignore
-            water=connection_fluids.water_viscosities[i],  # type: ignore
-            gas=connection_fluids.gas_viscosities[i],  # type: ignore
+            oil=connection_fluids.oil_viscosities[idx],  # type: ignore
+            water=connection_fluids.water_viscosities[idx],  # type: ignore
+            gas=connection_fluids.gas_viscosities[idx],  # type: ignore
         )
 
         if remaining_rates.oil + remaining_rates.water + remaining_rates.gas == 0:
             mixture_density = compute_static_mixture_density(
                 phase_saturations=PhaseValues(
-                    oil=connection_fluids.oil_saturations[i],  # type: ignore
-                    water=connection_fluids.water_saturations[i],  # type: ignore
-                    gas=connection_fluids.gas_saturations[i],  # type: ignore
+                    oil=connection_fluids.oil_saturations[idx],  # type: ignore
+                    water=connection_fluids.water_saturations[idx],  # type: ignore
+                    gas=connection_fluids.gas_saturations[idx],  # type: ignore
                 ),
                 phase_densities=phase_densities,
             )
             hydrostatic = (
                 mixture_density * model.gravitational_acceleration * walk.vertical_distances[step]
             ) / hydrostatic_divisor
-            pressures[i] = previous_pressure + geometric_sign * hydrostatic
+            pressures[idx] = previous_pressure + geometric_sign * hydrostatic
         else:
             mixture_density = compute_mixture_density(
                 phase_rates=remaining_rates, phase_densities=phase_densities
@@ -386,13 +386,13 @@ def walk_perforation_pressures(
             drop = compute_segment_drop(
                 model=model,
                 length=walk.segment_lengths[step],
-                inclination_from_vertical=inclinations_from_vertical[i],  # type: ignore
+                inclination_from_vertical=inclinations_from_vertical[idx],  # type: ignore
                 mixture_density=mixture_density,
                 mixture_viscosity=mixture_viscosity,
                 mixture_velocity_in=velocity,
                 mixture_velocity_out=velocity,
             )
-            pressures[i] = (
+            pressures[idx] = (
                 previous_pressure
                 + geometric_sign * (drop.hydrostatic + drop.acceleration)
                 + friction_sign * geometric_sign * drop.friction

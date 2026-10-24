@@ -93,27 +93,27 @@ def walk_hydrostatic_pressures(
     mass_rate = np.empty(count, dtype=pressures.dtype)
     volumetric_rate = np.empty(count, dtype=pressures.dtype)
     for k in range(count):
-        i = order[k]
-        depths[k] = representative_depths[i]
-        oil_rate = abs(connection_oil_rates[i])
-        water_rate = abs(connection_water_rates[i])
-        gas_rate = abs(connection_gas_rates[i])
+        idx = order[k]
+        depths[k] = representative_depths[idx]
+        oil_rate = abs(connection_oil_rates[idx])
+        water_rate = abs(connection_water_rates[idx])
+        gas_rate = abs(connection_gas_rates[idx])
         mass_rate[k] = (
-            oil_rate * connection_fluids.oil_densities[i]
-            + water_rate * connection_fluids.water_densities[i]
-            + gas_rate * connection_fluids.gas_densities[i]
+            oil_rate * connection_fluids.oil_densities[idx]
+            + water_rate * connection_fluids.water_densities[idx]
+            + gas_rate * connection_fluids.gas_densities[idx]
         )
         volumetric_rate[k] = oil_rate + water_rate + gas_rate
         static_density[k] = compute_static_mixture_density(
             phase_saturations=PhaseValues(
-                oil=connection_fluids.oil_saturations[i],  # type: ignore[arg-type]
-                water=connection_fluids.water_saturations[i],  # type: ignore[arg-type]
-                gas=connection_fluids.gas_saturations[i],  # type: ignore[arg-type]
+                oil=connection_fluids.oil_saturations[idx],  # type: ignore[arg-type]
+                water=connection_fluids.water_saturations[idx],  # type: ignore[arg-type]
+                gas=connection_fluids.gas_saturations[idx],  # type: ignore[arg-type]
             ),
             phase_densities=PhaseValues(
-                oil=connection_fluids.oil_densities[i],  # type: ignore[arg-type]
-                water=connection_fluids.water_densities[i],  # type: ignore[arg-type]
-                gas=connection_fluids.gas_densities[i],  # type: ignore[arg-type]
+                oil=connection_fluids.oil_densities[idx],  # type: ignore[arg-type]
+                water=connection_fluids.water_densities[idx],  # type: ignore[arg-type]
+                gas=connection_fluids.gas_densities[idx],  # type: ignore[arg-type]
             ),
         )
 

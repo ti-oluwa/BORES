@@ -555,13 +555,19 @@ def check_cell_contains_point(
     `tolerance`) cell `cell_index`'s convex hull as every face's outward
     normal points away from `point`.
 
+    A cell with no faces (an inactive or pinched-out cell) has no geometry to
+    contain anything, so it never contains a point.
+
     :param grid: Grid providing face geometry.
     :param cell_index: Cell to test.
     :param point: Point to test.
     :param tolerance: Signed-distance tolerance for the boundary case.
     :returns: `True` if inside.
     """
-    for face_idx in grid.get_cell_face_indices(cell_index):
+    faces = grid.get_cell_face_indices(cell_index)
+    if len(faces) == 0:
+        return False
+    for face_idx in faces:
         normal = grid.get_face_normal_for_cell(face_idx, cell_index)
         centroid = grid.face_centroids[face_idx]
         signed_distance = (
@@ -592,8 +598,8 @@ def find_first_containing_cell(
     Find the first of `candidates` whose cell contains `point`.
 
     Gives the same answer as testing the candidates one at a time with
-    `check_cell_contains_point` and stopping at the first match. A long list is tested in one
-    vectorized pass instead.
+    `check_cell_contains_point` and stopping at the first match, so a cell with no faces is
+    never returned. A long list is tested in one vectorized pass instead.
 
     :param grid: Grid providing face geometry.
     :param candidates: Cell indices to test, in priority order.
@@ -621,7 +627,8 @@ def find_first_containing_cell(
     outside_faces_per_cell = np.bincount(
         owner_position[signed_distances > tolerance], minlength=len(candidates)
     )
-    containing = np.flatnonzero(outside_faces_per_cell == 0)
+    # A cell with no faces has no geometry to contain anything
+    containing = np.flatnonzero((outside_faces_per_cell == 0) & (faces_per_cell > 0))
     return typing.cast(Integer, candidates[containing[0]]) if len(containing) else None
 
 
@@ -642,7 +649,8 @@ def locate_cell(
     :param search_radius: Initial fallback search radius; doubles each
         retry, up to 6 attempts.
     :returns: Containing cell index, or `None` if not found within the
-        search budget (point outside the grid, or resolution too coarse).
+        search budget (point outside the grid, inside an inactive or
+        pinched-out cell, or resolution too coarse).
     """
     nearest = grid.find_nearest_cell(*point)
     if check_cell_contains_point(grid, nearest, point):
@@ -730,7 +738,8 @@ def walk_segment_through_grid(
     :param end_md: Measured depth at `end`.
     :param search_radius: Forwarded to `locate_cell` for the initial cell.
     :returns: Ordered list of `(cell_index, entry_md, exit_md)`. Empty if
-        `start` isn't inside any cell.
+        `start` isn't inside any active cell (outside the grid, or inside an
+        inactive or pinched-out cell).
     """
     direction = (end[0] - start[0], end[1] - start[1], end[2] - start[2])
     segment_length = math.sqrt(sum(component**2 for component in direction))
