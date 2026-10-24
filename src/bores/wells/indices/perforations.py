@@ -11,16 +11,14 @@ from typing_extensions import Self
 from bores.errors import ValidationError
 from bores.grids.base import Grid
 from bores.grids.containment import cell_contains_point, first_cell_containing_point
+from bores.grids.traversal import check_point_in_polygon_2d, walk_segment_cells
 from bores.types import (
-    Boolean,
     GridIntersectionMethod,
     IntArray,
     Integer,
     Number,
-    NumberArray,
     OneDimension,
     Orientation,
-    TwoDimensions,
     UnitConversionTable,
     UnitSystem,
 )
@@ -208,98 +206,6 @@ def compute_local_vertical_extent_aabb(
     return (
         grid.cell_min_xyz[cell_index, 2],
         grid.cell_max_xyz[cell_index, 2],
-    )
-
-
-def check_point_on_segment(
-    px: Number,
-    py: Number,
-    x1: Number,
-    y1: Number,
-    x2: Number,
-    y2: Number,
-    tolerance: Number,
-) -> Boolean:
-    """True if `(px, py)` lies on segment `(x1, y1)-(x2, y2)` within `tolerance`."""
-    segment_length = math.hypot(x2 - x1, y2 - y1)
-    if segment_length < tolerance:
-        return math.hypot(px - x1, py - y1) < tolerance
-
-    cross = (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1)
-    if abs(cross) / segment_length > tolerance:
-        return False
-    dot = (px - x1) * (x2 - x1) + (py - y1) * (y2 - y1)
-    return -tolerance <= dot <= (segment_length**2 + tolerance)
-
-
-def check_point_in_polygon_2d(
-    x: Number,
-    y: Number,
-    polygon_xy: NumberArray[TwoDimensions],
-    tolerance: Number = 1e-9,
-) -> bool:
-    """
-    Even-odd ray-casting point-in-polygon test, with a boundary tolerance
-    so a point falling exactly on a shared cell face is counted as inside
-    rather than dropped by floating-point roundoff.
-
-    :param x: Query x-coordinate.
-    :param y: Query y-coordinate.
-    :param polygon_xy: Shape `(n, 2)` polygon vertices, in order.
-    :param tolerance: Distance tolerance for the boundary case.
-    :returns: `True` if `(x, y)` is inside or on the boundary of the polygon.
-    """
-    n = polygon_xy.shape[0]
-    inside = False
-    j = n - 1
-    for i in range(n):
-        xi, yi = polygon_xy[i, 0], polygon_xy[i, 1]
-        xj, yj = polygon_xy[j, 0], polygon_xy[j, 1]
-        if check_point_on_segment(x, y, xi, yi, xj, yj, tolerance):
-            return True
-        if (yi > y) != (yj > y):
-            x_intersect = xi + (y - yi) * (xj - xi) / (yj - yi)
-            if x < x_intersect:
-                inside = not inside
-        j = i
-    return inside
-
-
-def check_point_in_polygon_3d(
-    point: tuple[Number, Number, Number],
-    polygon_xyz: NumberArray[TwoDimensions],
-    normal: NumberArray[OneDimension],
-    tolerance: Number = 1e-9,
-) -> bool:
-    """
-    Point-in-polygon test for a planar polygon in 3-D, given a point
-    already known to lie on (or very near) the polygon's plane.
-
-    Projects both the polygon and the point onto whichever pair of axes
-    `normal` is least aligned with (drops the axis `normal` is most
-    aligned with), then runs `check_point_in_polygon_2d` on that projection.
-
-    Dropping a fixed axis (as the purely-vertical-line special case could
-    get away with, since every face it tested was near-horizontal) would
-    collapse a steeply-tilted face's projection to near-zero area here,
-    since a general 3-D segment can exit through a face of any
-    orientation.
-
-    :param point: 3-D point on the polygon's plane.
-    :param polygon_xyz: Shape `(n, 3)` polygon vertices, in order.
-    :param normal: The polygon's (unit) normal.
-    :param tolerance: Forwarded to `check_point_in_polygon_2d`.
-    :returns: `True` if `point` is inside or on the boundary of the polygon.
-    """
-    abs_normal = (abs(float(normal[0])), abs(float(normal[1])), abs(float(normal[2])))
-    dominant_axis = abs_normal.index(max(abs_normal))
-    u_axis, v_axis = (axis for axis in (0, 1, 2) if axis != dominant_axis)
-    polygon_uv = polygon_xyz[:, [u_axis, v_axis]]
-    return check_point_in_polygon_2d(
-        point[u_axis],
-        point[v_axis],
-        polygon_xy=polygon_uv,  # type: ignore[arg-type]
-        tolerance=tolerance,
     )
 
 
@@ -621,51 +527,6 @@ def locate_cell(
     return None
 
 
-def get_segment_face_intersection(
-    start: tuple[Number, Number, Number],
-    direction: tuple[Number, Number, Number],
-    grid: Grid,
-    face_index: Integer,
-    cell_index: Integer,
-) -> Number | None:
-    """
-    Get a parameter `t` (`point = start + t * direction`) at which the ray from
-    `start` along `direction` crosses `face_index`'s plane *and* actually
-    lands within that face's polygon. Returns `None` if the ray is (near-)
-    parallel to the plane, or the crossing point falls outside the polygon.
-
-    :param start: Ray origin.
-    :param direction: Ray direction (any length. `t` is in units of
-        `direction`'s own length, i.e. `t=1` reaches `start + direction`).
-    :param grid: Grid providing face geometry.
-    :param face_index: Face to test.
-    :param cell_index: Cell `face_index` belongs to (for its outward normal).
-    :returns: `t`, or `None`.
-    """
-    normal = grid.get_face_normal_for_cell(face_index, cell_index)
-    denominator = normal[0] * direction[0] + normal[1] * direction[1] + normal[2] * direction[2]
-    if abs(denominator) < 1e-12:
-        return None
-
-    centroid = grid.face_centroids[face_index]
-    numerator = (
-        normal[0] * (centroid[0] - start[0])
-        + normal[1] * (centroid[1] - start[1])
-        + normal[2] * (centroid[2] - start[2])
-    )
-    t = numerator / denominator
-
-    point = (
-        start[0] + t * direction[0],
-        start[1] + t * direction[1],
-        start[2] + t * direction[2],
-    )
-    face_vertices = grid.get_face_vertex_coordinates(face_index)
-    if not check_point_in_polygon_3d(point, face_vertices, normal):
-        return None
-    return t
-
-
 def walk_segment_through_grid(
     grid: Grid,
     start: tuple[Number, Number, Number],
@@ -697,65 +558,25 @@ def walk_segment_through_grid(
         inactive or pinched-out cell).
     """
     direction = (end[0] - start[0], end[1] - start[1], end[2] - start[2])
-    segment_length = math.sqrt(sum(component**2 for component in direction))
-    if segment_length == 0:
+    if math.sqrt(sum(component**2 for component in direction)) == 0:
         return []
 
-    current_cell = locate_cell(grid, start, search_radius)
-    if current_cell is None:
+    first_cell = locate_cell(grid, start, search_radius)
+    if first_cell is None:
         return []
 
-    results: list[tuple[Integer, Number, Number]] = []
-    current_t = 0.0
+    cells, entry_fractions, exit_fractions = walk_segment_cells(
+        grid, start=start, end=end, first_cell=first_cell
+    )
     md_span = end_md - start_md
-    max_visits = 4 * grid.n_cells + 64
-
-    for _ in range(max_visits):
-        best_t: Number | None = None
-        best_face: Integer | None = None
-        for face_idx in grid.get_cell_face_indices(current_cell):
-            t = get_segment_face_intersection(
-                start=start,
-                direction=direction,
-                grid=grid,
-                face_index=face_idx,
-                cell_index=current_cell,
-            )
-            if t is None or t <= current_t + 1e-9 or t > 1.0 + 1e-9:
-                continue
-            if best_t is None or t < best_t:
-                best_t, best_face = t, face_idx
-
-        if best_t is None or best_face is None:
-            # Segment ends inside `current_cell` without crossing another face.
-            results.append((
-                current_cell,
-                start_md + current_t * md_span,
-                start_md + 1.0 * md_span,
-            ))
-            break
-
-        exit_t = min(best_t, 1.0)
-        results.append((
-            current_cell,
-            start_md + current_t * md_span,
-            start_md + exit_t * md_span,
-        ))
-        if best_t >= 1.0 - 1e-9:
-            break
-
-        owner, neighbour = (
-            grid.face_cell_indices[best_face, 0],
-            grid.face_cell_indices[best_face, 1],
+    return list(
+        zip(
+            cells.tolist(),
+            (start_md + entry_fractions * md_span).tolist(),
+            (start_md + exit_fractions * md_span).tolist(),
+            strict=True,
         )
-        next_cell = neighbour if owner == current_cell else owner
-        if next_cell < 0:
-            break  # boundary `face - segment` leaves the active grid domain
-
-        current_cell = next_cell
-        current_t = best_t
-
-    return results
+    )
 
 
 def resolve_md_perforations_indices(
