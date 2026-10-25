@@ -8,6 +8,12 @@ import numpy as np
 from typing_extensions import Self
 
 from bores.blackoil.satfunc.capillary_pressure.tables import CapillaryPressureTable
+from bores.blackoil.satfunc.utils import (
+    element_at,
+    get_floating_dtype,
+    prepare_kernel_inputs,
+    saturations_within_bounds,
+)
 from bores.constants import c
 from bores.errors import ValidationError
 from bores.types import (
@@ -18,20 +24,20 @@ from bores.types import (
     Number,
     NumberArray,
     NumberOrArray,
+    OneDimension,
     UnitConversionTable,
     UnitSystem,
     Wettability,
 )
 from bores.units import get_conversion_factors
-from bores.utils import atleast_1d
 
 __all__ = [
     "LeverettJCapillaryPressureTable",
 ]
 
 
-@numba.njit(cache=True)
-def compute_leverett_j_capillary_pressures_scalar(
+@numba.njit(cache=True, inline="always", error_model="numpy")
+def compute_leverett_j_capillary_pressures_cell(
     water_saturation: Number,
     oil_saturation: Number,
     gas_saturation: Number,
@@ -54,34 +60,12 @@ def compute_leverett_j_capillary_pressures_scalar(
     dyne_per_cm_to_pressure_unit: Number = 4.725e-4,
 ) -> tuple[Number, Number]:
     """
-    Scalar variant of Leverett J-function capillary pressure computation.
+    Capillary pressures of a single cell, without any validation of the inputs.
 
-    Computes capillary pressures using Leverett J-function approach.
+    This is the per-cell kernel shared by the scalar function and the array loop. It has the
+    same parameters as the scalar function.
 
-    Pc = σ * cos(θ) * sqrt(φ/k) * J(Se)
-
-    where J(Se) = a * Se^(-b) (power-law form).
-
-    :param water_saturation: Current water saturation (fraction, 0-1).
-    :param oil_saturation: Current oil saturation (fraction, 0-1).
-    :param gas_saturation: Current gas saturation (fraction, 0-1).
-    :param irreducible_water_saturation: Irreducible water saturation (swc).
-    :param residual_oil_saturation_water: Residual oil saturation during water flooding (sorw).
-    :param residual_oil_saturation_gas: Residual oil saturation during gas flooding (sorg).
-    :param residual_gas_saturation: Residual gas saturation (sgr).
-    :param permeability: Absolute permeability (mD).
-    :param porosity: Porosity (fraction, 0-1).
-    :param oil_water_interfacial_tension: Oil-water interfacial tension (dyne/cm).
-    :param gas_oil_interfacial_tension: Gas-oil interfacial tension (dyne/cm).
-    :param oil_water_contact_angle: Oil-water contact angle in degrees (0° = water-wet).
-    :param gas_oil_contact_angle: Gas-oil contact angle in degrees (0° = oil-wet).
-    :param j_function_coefficient: Empirical coefficient 'a' in J(Se) = a * Se^(-b).
-    :param j_function_exponent: Empirical exponent 'b' in J(Se) = a * Se^(-b).
-    :param mixed_wet_water_fraction: Fraction of pore space that is water-wet in mixed-wet systems (0-1).
-    :param wettability: Wettability type (affects sign of capillary pressure).
-    :param saturation_epsilon: Small value to avoid division by zero in saturation calculations.
-    :param minimum_mobile_pore_space: Minimum mobile pore space threshold below which Pc is set to zero.
-    :return: Tuple of (oil_water_capillary_pressure, gas_oil_capillary_pressure) in psi.
+    :return: Tuple of (oil_water_capillary_pressure, gas_oil_capillary_pressure).
     """
     sw: Number = water_saturation
     so: Number = oil_saturation
@@ -90,14 +74,6 @@ def compute_leverett_j_capillary_pressures_scalar(
     sorw: Number = residual_oil_saturation_water
     sorg: Number = residual_oil_saturation_gas
     sgr: Number = residual_gas_saturation
-
-    # Validate saturations
-    if sw < 0 or sw > 1 or so < 0 or so > 1 or sg < 0 or sg > 1:
-        raise ValidationError("Saturations must be between 0 and 1.")
-    if permeability < 0.0:
-        raise ValidationError("Permeability must be positive.")
-    if porosity < 0.0 or porosity > 1.0:
-        raise ValidationError("Porosity must be between 0 and 1.")
 
     # Normalize saturations if they do not sum to 1
     total_saturation = sw + so + sg
@@ -171,6 +147,149 @@ def compute_leverett_j_capillary_pressures_scalar(
 
 
 @numba.njit(cache=True)
+def compute_leverett_j_capillary_pressures_scalar(
+    water_saturation: Number,
+    oil_saturation: Number,
+    gas_saturation: Number,
+    irreducible_water_saturation: Number,
+    residual_oil_saturation_water: Number,
+    residual_oil_saturation_gas: Number,
+    residual_gas_saturation: Number,
+    permeability: Number,
+    porosity: Number,
+    oil_water_interfacial_tension: Number,
+    gas_oil_interfacial_tension: Number,
+    oil_water_contact_angle: Number = 0.0,
+    gas_oil_contact_angle: Number = 0.0,
+    j_function_coefficient: Number = 0.5,
+    j_function_exponent: Number = 0.5,
+    mixed_wet_water_fraction: Number = 0.5,
+    wettability: Wettability = Wettability.WATER_WET,
+    saturation_epsilon: Number = 1e-6,
+    minimum_mobile_pore_space: Number = 1e-9,
+    dyne_per_cm_to_pressure_unit: Number = 4.725e-4,
+) -> tuple[Number, Number]:
+    """
+    Scalar variant of Leverett J-function capillary pressure computation.
+
+    Computes capillary pressures using Leverett J-function approach.
+
+    Pc = σ * cos(θ) * sqrt(φ/k) * J(Se)
+
+    where J(Se) = a * Se^(-b) (power-law form).
+
+    :param water_saturation: Current water saturation (fraction, 0-1).
+    :param oil_saturation: Current oil saturation (fraction, 0-1).
+    :param gas_saturation: Current gas saturation (fraction, 0-1).
+    :param irreducible_water_saturation: Irreducible water saturation (swc).
+    :param residual_oil_saturation_water: Residual oil saturation during water flooding (sorw).
+    :param residual_oil_saturation_gas: Residual oil saturation during gas flooding (sorg).
+    :param residual_gas_saturation: Residual gas saturation (sgr).
+    :param permeability: Absolute permeability (mD).
+    :param porosity: Porosity (fraction, 0-1).
+    :param oil_water_interfacial_tension: Oil-water interfacial tension (dyne/cm).
+    :param gas_oil_interfacial_tension: Gas-oil interfacial tension (dyne/cm).
+    :param oil_water_contact_angle: Oil-water contact angle in degrees (0° = water-wet).
+    :param gas_oil_contact_angle: Gas-oil contact angle in degrees (0° = oil-wet).
+    :param j_function_coefficient: Empirical coefficient 'a' in J(Se) = a * Se^(-b).
+    :param j_function_exponent: Empirical exponent 'b' in J(Se) = a * Se^(-b).
+    :param mixed_wet_water_fraction: Fraction of pore space that is water-wet in mixed-wet systems (0-1).
+    :param wettability: Wettability type (affects sign of capillary pressure).
+    :param saturation_epsilon: Small value to avoid division by zero in saturation calculations.
+    :param minimum_mobile_pore_space: Minimum mobile pore space threshold below which Pc is set to zero.
+    :return: Tuple of (oil_water_capillary_pressure, gas_oil_capillary_pressure) in psi.
+    """
+    sw: Number = water_saturation
+    so: Number = oil_saturation
+    sg: Number = gas_saturation
+    if sw < 0 or sw > 1 or so < 0 or so > 1 or sg < 0 or sg > 1:
+        raise ValidationError("Saturations must be between 0 and 1.")
+    if permeability < 0.0:
+        raise ValidationError("Permeability must be positive.")
+    if porosity < 0.0 or porosity > 1.0:
+        raise ValidationError("Porosity must be between 0 and 1.")
+    return compute_leverett_j_capillary_pressures_cell(
+        water_saturation=water_saturation,
+        oil_saturation=oil_saturation,
+        gas_saturation=gas_saturation,
+        irreducible_water_saturation=irreducible_water_saturation,
+        residual_oil_saturation_water=residual_oil_saturation_water,
+        residual_oil_saturation_gas=residual_oil_saturation_gas,
+        residual_gas_saturation=residual_gas_saturation,
+        permeability=permeability,
+        porosity=porosity,
+        oil_water_interfacial_tension=oil_water_interfacial_tension,
+        gas_oil_interfacial_tension=gas_oil_interfacial_tension,
+        oil_water_contact_angle=oil_water_contact_angle,
+        gas_oil_contact_angle=gas_oil_contact_angle,
+        j_function_coefficient=j_function_coefficient,
+        j_function_exponent=j_function_exponent,
+        mixed_wet_water_fraction=mixed_wet_water_fraction,
+        wettability=wettability,
+        saturation_epsilon=saturation_epsilon,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+        dyne_per_cm_to_pressure_unit=dyne_per_cm_to_pressure_unit,
+    )
+
+
+@numba.njit(cache=True, parallel=True, error_model="numpy")
+def compute_leverett_j_capillary_pressures_loop(
+    water_saturation: NumberArray[OneDimension],
+    oil_saturation: NumberArray[OneDimension],
+    gas_saturation: NumberArray[OneDimension],
+    irreducible_water_saturation: NumberArray[OneDimension],
+    residual_oil_saturation_water: NumberArray[OneDimension],
+    residual_oil_saturation_gas: NumberArray[OneDimension],
+    residual_gas_saturation: NumberArray[OneDimension],
+    permeability: NumberArray[OneDimension],
+    porosity: NumberArray[OneDimension],
+    oil_water_interfacial_tension: Number,
+    gas_oil_interfacial_tension: Number,
+    oil_water_contact_angle: Number,
+    gas_oil_contact_angle: Number,
+    j_function_coefficient: Number,
+    j_function_exponent: Number,
+    mixed_wet_water_fraction: Number,
+    wettability: Wettability,
+    saturation_epsilon: Number,
+    minimum_mobile_pore_space: Number,
+    dyne_per_cm_to_pressure_unit: Number,
+    size: int,
+    oil_water_capillary_pressure: NumberArray[OneDimension],
+    gas_oil_capillary_pressure: NumberArray[OneDimension],
+) -> None:
+    """
+    Compute the capillary pressures of `size` cells in parallel and write them to the output arrays.
+
+    Per-cell inputs are flat arrays, or a single value shared by every cell.
+    """
+    for i in numba.prange(size):
+        oil_water, gas_oil = compute_leverett_j_capillary_pressures_cell(
+            water_saturation=np.float64(element_at(water_saturation, i)),
+            oil_saturation=np.float64(element_at(oil_saturation, i)),
+            gas_saturation=np.float64(element_at(gas_saturation, i)),
+            irreducible_water_saturation=np.float64(element_at(irreducible_water_saturation, i)),
+            residual_oil_saturation_water=np.float64(element_at(residual_oil_saturation_water, i)),
+            residual_oil_saturation_gas=np.float64(element_at(residual_oil_saturation_gas, i)),
+            residual_gas_saturation=np.float64(element_at(residual_gas_saturation, i)),
+            permeability=np.float64(element_at(permeability, i)),
+            porosity=np.float64(element_at(porosity, i)),
+            oil_water_interfacial_tension=oil_water_interfacial_tension,
+            gas_oil_interfacial_tension=gas_oil_interfacial_tension,
+            oil_water_contact_angle=oil_water_contact_angle,
+            gas_oil_contact_angle=gas_oil_contact_angle,
+            j_function_coefficient=j_function_coefficient,
+            j_function_exponent=j_function_exponent,
+            mixed_wet_water_fraction=mixed_wet_water_fraction,
+            wettability=wettability,
+            saturation_epsilon=saturation_epsilon,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
+            dyne_per_cm_to_pressure_unit=dyne_per_cm_to_pressure_unit,
+        )
+        oil_water_capillary_pressure[i] = oil_water
+        gas_oil_capillary_pressure[i] = gas_oil
+
+
 def compute_leverett_j_capillary_pressures_array(
     water_saturation: NumberOrArray[NDimension],
     oil_saturation: NumberOrArray[NDimension],
@@ -224,114 +343,74 @@ def compute_leverett_j_capillary_pressures_array(
     :param minimum_mobile_pore_space: Minimum mobile pore space threshold below which Pc is set to zero.
     :return: Tuple of (oil_water_capillary_pressure, gas_oil_capillary_pressure) NDArrays in psi.
     """
-    sw = atleast_1d(water_saturation)
-    so = atleast_1d(oil_saturation)
-    sg = atleast_1d(gas_saturation)
-    swc = atleast_1d(irreducible_water_saturation)
-    sorw = atleast_1d(residual_oil_saturation_water)
-    sorg = atleast_1d(residual_oil_saturation_gas)
-    sgr = atleast_1d(residual_gas_saturation)
-    perm = atleast_1d(permeability, sw.dtype)
-    phi = atleast_1d(porosity, sw.dtype)
-
-    # Broadcast all arrays to same shape
-    sw, so, sg, swc, sorw, sorg, sgr, perm, phi = np.broadcast_arrays(
-        sw, so, sg, swc, sorw, sorg, sgr, perm, phi
+    (
+        shape,
+        size,
+        (
+            water_saturation_flat,
+            oil_saturation_flat,
+            gas_saturation_flat,
+            irreducible_water_saturation_flat,
+            residual_oil_saturation_water_flat,
+            residual_oil_saturation_gas_flat,
+            residual_gas_saturation_flat,
+            permeability_flat,
+            porosity_flat,
+        ),
+    ) = prepare_kernel_inputs(
+        water_saturation,
+        oil_saturation,
+        gas_saturation,
+        irreducible_water_saturation,
+        residual_oil_saturation_water,
+        residual_oil_saturation_gas,
+        residual_gas_saturation,
+        permeability,
+        porosity,
     )
-    dtype = sw.dtype.type
-    oil_water_interfacial_tension = dtype(oil_water_interfacial_tension)
-    gas_oil_interfacial_tension = dtype(gas_oil_interfacial_tension)
-    oil_water_contact_angle = dtype(oil_water_contact_angle)
-    gas_oil_contact_angle = dtype(gas_oil_contact_angle)
-    j_function_coefficient = dtype(j_function_coefficient)
-    j_function_exponent = dtype(j_function_exponent)
-    mixed_wet_water_fraction = dtype(mixed_wet_water_fraction)
-    one = dtype(1.0)
-    zero = dtype(0.0)
-
-    # Validate saturations
-    if np.any((sw < 0) | (sw > 1) | (so < 0) | (so > 1) | (sg < 0) | (sg > 1)):
+    if not saturations_within_bounds(
+        water_saturation=water_saturation_flat,
+        oil_saturation=oil_saturation_flat,
+        gas_saturation=gas_saturation_flat,
+        size=size,
+    ):
         raise ValidationError("Saturations must be between 0 and 1.")
-    if np.any(perm < 0.0):
+    if np.any(permeability_flat < 0.0):
         raise ValidationError("Permeability must be positive.")
-    if np.any((phi < 0.0) | (phi > 1.0)):
+    if np.any((porosity_flat < 0.0) | (porosity_flat > 1.0)):
         raise ValidationError("Porosity must be between 0 and 1.")
 
-    # Normalize saturations if they do not sum to 1
-    total_saturation = sw + so + sg
-    needs_norm = (np.abs(total_saturation - 1.0) > saturation_epsilon) & (total_saturation > 0.0)
-    if np.any(needs_norm):
-        sw = np.where(needs_norm, sw / total_saturation, sw)
-        so = np.where(needs_norm, so / total_saturation, so)
-        sg = np.where(needs_norm, sg / total_saturation, sg)
-
-    total_mobile_pore_space_water = one - swc - sorw
-    total_mobile_pore_space_gas = one - swc - sorg - sgr
-
-    oil_water_angle_radians = np.deg2rad(oil_water_contact_angle)
-    gas_oil_angle_radians = np.deg2rad(gas_oil_contact_angle)
-
-    valid_rock = (perm > zero) & (phi > zero)
-    leverett_factor = np.where(valid_rock, np.sqrt(phi / perm), zero)
-
-    # Pcow (Po - Pw)
-    oil_water_capillary_pressure = np.zeros_like(sw)
-    valid_water = (total_mobile_pore_space_water > minimum_mobile_pore_space) & valid_rock
-
-    if np.any(valid_water):
-        effective_water_saturation = np.where(
-            valid_water, (sw - swc) / total_mobile_pore_space_water, zero
-        )
-        effective_water_saturation = np.clip(
-            effective_water_saturation, saturation_epsilon, one - saturation_epsilon
-        )
-        j_value_oil_water = j_function_coefficient * (
-            effective_water_saturation ** (-j_function_exponent)
-        )
-        pcow = (
-            oil_water_interfacial_tension
-            * np.cos(oil_water_angle_radians)
-            * leverett_factor
-            * j_value_oil_water
-            * dyne_per_cm_to_pressure_unit
-        )
-        pcow = pcow.astype(dtype)
-
-        if wettability == Wettability.WATER_WET:
-            oil_water_capillary_pressure = np.where(valid_water, pcow, zero)
-        elif wettability == Wettability.OIL_WET:
-            oil_water_capillary_pressure = np.where(valid_water, -pcow, zero)
-        else:  # MIXED_WET
-            mixedpcow = pcow * mixed_wet_water_fraction + (one - mixed_wet_water_fraction) * (
-                -pcow
-            )
-            oil_water_capillary_pressure = np.where(valid_water, mixedpcow, zero)
-
-    # Pcgo (Pg - Po)
-    gas_oil_capillary_pressure = np.zeros_like(sg)
-    valid_gas = (total_mobile_pore_space_gas > minimum_mobile_pore_space) & valid_rock
-
-    if np.any(valid_gas):
-        effective_liquid_saturation = np.where(
-            valid_gas, (one - swc - sg - sorg) / total_mobile_pore_space_gas, zero
-        )
-        effective_liquid_saturation = np.clip(
-            effective_liquid_saturation, saturation_epsilon, one - saturation_epsilon
-        )
-        j_value_gas_oil = j_function_coefficient * (
-            effective_liquid_saturation ** (-j_function_exponent)
-        )
-        pcgo = (
-            gas_oil_interfacial_tension
-            * np.cos(gas_oil_angle_radians)
-            * leverett_factor
-            * j_value_gas_oil
-            * dyne_per_cm_to_pressure_unit
-        )
-        pcgo = pcgo.astype(dtype)
-        gas_oil_capillary_pressure = np.where(valid_gas, pcgo, zero)
-
-    return oil_water_capillary_pressure, gas_oil_capillary_pressure  # type: ignore[return-value]
+    dtype = get_floating_dtype(water_saturation)
+    oil_water_capillary_pressure = np.empty(size, dtype=dtype)
+    gas_oil_capillary_pressure = np.empty(size, dtype=dtype)
+    compute_leverett_j_capillary_pressures_loop(
+        water_saturation=water_saturation_flat,
+        oil_saturation=oil_saturation_flat,
+        gas_saturation=gas_saturation_flat,
+        irreducible_water_saturation=irreducible_water_saturation_flat,
+        residual_oil_saturation_water=residual_oil_saturation_water_flat,
+        residual_oil_saturation_gas=residual_oil_saturation_gas_flat,
+        residual_gas_saturation=residual_gas_saturation_flat,
+        permeability=permeability_flat,
+        porosity=porosity_flat,
+        oil_water_interfacial_tension=oil_water_interfacial_tension,
+        gas_oil_interfacial_tension=gas_oil_interfacial_tension,
+        oil_water_contact_angle=oil_water_contact_angle,
+        gas_oil_contact_angle=gas_oil_contact_angle,
+        j_function_coefficient=j_function_coefficient,
+        j_function_exponent=j_function_exponent,
+        mixed_wet_water_fraction=mixed_wet_water_fraction,
+        wettability=wettability,
+        saturation_epsilon=saturation_epsilon,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+        dyne_per_cm_to_pressure_unit=dyne_per_cm_to_pressure_unit,
+        size=size,
+        oil_water_capillary_pressure=oil_water_capillary_pressure,
+        gas_oil_capillary_pressure=gas_oil_capillary_pressure,
+    )
+    return typing.cast(
+        NumberArray[NDimension], oil_water_capillary_pressure.reshape(shape)
+    ), typing.cast(NumberArray[NDimension], gas_oil_capillary_pressure.reshape(shape))
 
 
 def compute_leverett_j_capillary_pressures(
@@ -422,7 +501,7 @@ def compute_leverett_j_capillary_pressures(
     )
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, inline="always", error_model="numpy")
 def compute_leverett_j_derivatives_scalar(
     water_saturation: Number,
     gas_saturation: Number,
@@ -546,7 +625,67 @@ def compute_leverett_j_derivatives_scalar(
     return dpcow_dsw, dpcow_dso, dpcgo_dsg, dpcgo_dso
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True, error_model="numpy")
+def compute_leverett_j_derivatives_loop(
+    water_saturation: NumberArray[OneDimension],
+    gas_saturation: NumberArray[OneDimension],
+    irreducible_water_saturation: NumberArray[OneDimension],
+    residual_oil_saturation_water: NumberArray[OneDimension],
+    residual_oil_saturation_gas: NumberArray[OneDimension],
+    residual_gas_saturation: NumberArray[OneDimension],
+    permeability: NumberArray[OneDimension],
+    porosity: NumberArray[OneDimension],
+    wettability: Wettability,
+    oil_water_interfacial_tension: Number,
+    gas_oil_interfacial_tension: Number,
+    oil_water_contact_angle: Number,
+    gas_oil_contact_angle: Number,
+    j_function_coefficient: Number,
+    j_function_exponent: Number,
+    mixed_wet_water_fraction: Number,
+    saturation_epsilon: Number,
+    minimum_mobile_pore_space: Number,
+    dyne_per_cm_to_pressure_unit: Number,
+    size: int,
+    dpcow_dsw: NumberArray[OneDimension],
+    dpcow_dso: NumberArray[OneDimension],
+    dpcgo_dsg: NumberArray[OneDimension],
+    dpcgo_dso: NumberArray[OneDimension],
+) -> None:
+    """
+    Compute the capillary pressure derivatives of `size` cells in parallel and write them to the
+    output arrays.
+
+    Per-cell inputs are flat arrays, or a single value shared by every cell.
+    """
+    for i in numba.prange(size):
+        d_ow_sw, d_ow_so, d_go_sg, d_go_so = compute_leverett_j_derivatives_scalar(
+            water_saturation=np.float64(element_at(water_saturation, i)),
+            gas_saturation=np.float64(element_at(gas_saturation, i)),
+            irreducible_water_saturation=np.float64(element_at(irreducible_water_saturation, i)),
+            residual_oil_saturation_water=np.float64(element_at(residual_oil_saturation_water, i)),
+            residual_oil_saturation_gas=np.float64(element_at(residual_oil_saturation_gas, i)),
+            residual_gas_saturation=np.float64(element_at(residual_gas_saturation, i)),
+            permeability=np.float64(element_at(permeability, i)),
+            porosity=np.float64(element_at(porosity, i)),
+            wettability=wettability,
+            oil_water_interfacial_tension=oil_water_interfacial_tension,
+            gas_oil_interfacial_tension=gas_oil_interfacial_tension,
+            oil_water_contact_angle=oil_water_contact_angle,
+            gas_oil_contact_angle=gas_oil_contact_angle,
+            j_function_coefficient=j_function_coefficient,
+            j_function_exponent=j_function_exponent,
+            mixed_wet_water_fraction=mixed_wet_water_fraction,
+            saturation_epsilon=saturation_epsilon,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
+            dyne_per_cm_to_pressure_unit=dyne_per_cm_to_pressure_unit,
+        )
+        dpcow_dsw[i] = d_ow_sw
+        dpcow_dso[i] = d_ow_so
+        dpcgo_dsg[i] = d_go_sg
+        dpcgo_dso[i] = d_go_so
+
+
 def compute_leverett_j_derivatives_array(
     water_saturation: NumberOrArray[NDimension],
     gas_saturation: NumberOrArray[NDimension],
@@ -600,94 +739,66 @@ def compute_leverett_j_derivatives_array(
     :param dyne_per_cm_to_pressure_unit: Conversion factor from dyne/cm to psi.
     :return: Tuple of (dpcow_dsw, dpcow_dso, dpcgo_dsg, dpcgo_dso) as NDArrays.
     """
-    sw = atleast_1d(water_saturation)
-    sg = atleast_1d(gas_saturation)
-    swc = atleast_1d(irreducible_water_saturation)
-    sorw = atleast_1d(residual_oil_saturation_water)
-    sorg = atleast_1d(residual_oil_saturation_gas)
-    sgr = atleast_1d(residual_gas_saturation)
-    perm = atleast_1d(permeability, sw.dtype)
-    phi = atleast_1d(porosity, sw.dtype)
-
-    dtype = sw.dtype.type
-    one = dtype(1.0)
-    zero = dtype(0.0)
-
-    # Broadcast arrays
-    sw, sg, swc, sorw, sorg, sgr, perm, phi = np.broadcast_arrays(
-        sw, sg, swc, sorw, sorg, sgr, perm, phi
+    (
+        shape,
+        size,
+        (
+            water_saturation_flat,
+            gas_saturation_flat,
+            irreducible_water_saturation_flat,
+            residual_oil_saturation_water_flat,
+            residual_oil_saturation_gas_flat,
+            residual_gas_saturation_flat,
+            permeability_flat,
+            porosity_flat,
+        ),
+    ) = prepare_kernel_inputs(
+        water_saturation,
+        gas_saturation,
+        irreducible_water_saturation,
+        residual_oil_saturation_water,
+        residual_oil_saturation_gas,
+        residual_gas_saturation,
+        permeability,
+        porosity,
     )
-
-    valid_rock = (perm > zero) & (phi > zero)
-    leverett_rock_factor = np.where(valid_rock, np.sqrt(phi / perm), zero)
-
-    # Oil-water derivatives
-    mobile_water_range = one - swc - sorw
-    valid_water = (mobile_water_range > minimum_mobile_pore_space) & valid_rock
-    raw_se_w = (sw - swc) / np.where(valid_water, mobile_water_range, one)
-    se_w = np.clip(raw_se_w, saturation_epsilon, one - saturation_epsilon)
-
-    dj_dse_w = (
-        -dtype(j_function_coefficient)
-        * dtype(j_function_exponent)
-        * (se_w ** (-dtype(j_function_exponent) - one))
+    dtype = get_floating_dtype(water_saturation)
+    dpcow_dsw = np.empty(size, dtype=dtype)
+    dpcow_dso = np.empty(size, dtype=dtype)
+    dpcgo_dsg = np.empty(size, dtype=dtype)
+    dpcgo_dso = np.empty(size, dtype=dtype)
+    compute_leverett_j_derivatives_loop(
+        water_saturation=water_saturation_flat,
+        gas_saturation=gas_saturation_flat,
+        irreducible_water_saturation=irreducible_water_saturation_flat,
+        residual_oil_saturation_water=residual_oil_saturation_water_flat,
+        residual_oil_saturation_gas=residual_oil_saturation_gas_flat,
+        residual_gas_saturation=residual_gas_saturation_flat,
+        permeability=permeability_flat,
+        porosity=porosity_flat,
+        wettability=wettability,
+        oil_water_interfacial_tension=oil_water_interfacial_tension,
+        gas_oil_interfacial_tension=gas_oil_interfacial_tension,
+        oil_water_contact_angle=oil_water_contact_angle,
+        gas_oil_contact_angle=gas_oil_contact_angle,
+        j_function_coefficient=j_function_coefficient,
+        j_function_exponent=j_function_exponent,
+        mixed_wet_water_fraction=mixed_wet_water_fraction,
+        saturation_epsilon=saturation_epsilon,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+        dyne_per_cm_to_pressure_unit=dyne_per_cm_to_pressure_unit,
+        size=size,
+        dpcow_dsw=dpcow_dsw,
+        dpcow_dso=dpcow_dso,
+        dpcgo_dsg=dpcgo_dsg,
+        dpcgo_dso=dpcgo_dso,
     )
-    cos_oil_water_angle = np.cos(np.deg2rad(dtype(oil_water_contact_angle)))
-    oil_water_scale = (
-        dtype(oil_water_interfacial_tension)
-        * dtype(dyne_per_cm_to_pressure_unit)
-        * cos_oil_water_angle
-        * leverett_rock_factor
-    )
-
-    if wettability == Wettability.WATER_WET:
-        wettability_sign = one
-    elif wettability == Wettability.OIL_WET:
-        wettability_sign = -one
-    else:  # MIXED_WET
-        wettability_sign = dtype(2.0) * dtype(mixed_wet_water_fraction) - one
-
-    # No slope where the value is clipped (flat)
-    dpcow_dsw = np.where(
-        valid_water & (raw_se_w > saturation_epsilon) & (raw_se_w < one - saturation_epsilon),
-        wettability_sign * oil_water_scale * dj_dse_w / mobile_water_range,
-        np.zeros_like(sw),
-    )
-    dpcow_dso = np.zeros_like(sw)
-
-    # Gas-oil derivatives
-    mobile_gas_range = one - swc - sorg - sgr
-    valid_gas = (mobile_gas_range > minimum_mobile_pore_space) & valid_rock
-    safe_gas_range = np.where(valid_gas, mobile_gas_range, one)
-
-    # Pcgo depends on the effective liquid saturation of the gas-oil system, which falls as
-    # Sg rises. It has no slope where the value is clipped.
-    raw_se_l = (one - swc - sg - sorg) / safe_gas_range
-    active_gas = (
-        valid_gas & (raw_se_l > saturation_epsilon) & (raw_se_l < one - saturation_epsilon)
-    )
-    se_l = np.clip(raw_se_l, saturation_epsilon, one - saturation_epsilon)
-
-    dj_dse_l = (
-        -dtype(j_function_coefficient)
-        * dtype(j_function_exponent)
-        * (se_l ** (-dtype(j_function_exponent) - one))
-    )
-    cos_gas_oil_angle = np.cos(np.deg2rad(dtype(gas_oil_contact_angle)))
-    gas_oil_scale = (
-        dtype(gas_oil_interfacial_tension)
-        * dtype(dyne_per_cm_to_pressure_unit)
-        * cos_gas_oil_angle
-        * leverett_rock_factor
-    )
-    dpcgo_dsg = np.where(active_gas, -gas_oil_scale * dj_dse_l / safe_gas_range, np.zeros_like(sg))
-    dpcgo_dso = np.zeros_like(sg)
     return (
-        dpcow_dsw,
-        dpcow_dso,
-        dpcgo_dsg,
-        dpcgo_dso,
-    )  # type: ignore
+        typing.cast(NumberArray[NDimension], dpcow_dsw.reshape(shape)),
+        typing.cast(NumberArray[NDimension], dpcow_dso.reshape(shape)),
+        typing.cast(NumberArray[NDimension], dpcgo_dsg.reshape(shape)),
+        typing.cast(NumberArray[NDimension], dpcgo_dso.reshape(shape)),
+    )
 
 
 def compute_leverett_j_derivatives(

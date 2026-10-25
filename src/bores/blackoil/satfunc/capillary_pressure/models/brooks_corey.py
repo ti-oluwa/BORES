@@ -8,6 +8,12 @@ import numpy as np
 from typing_extensions import Self
 
 from bores.blackoil.satfunc.capillary_pressure.tables import CapillaryPressureTable
+from bores.blackoil.satfunc.utils import (
+    element_at,
+    get_floating_dtype,
+    prepare_kernel_inputs,
+    saturations_within_bounds,
+)
 from bores.constants import c
 from bores.errors import ValidationError
 from bores.types import (
@@ -18,16 +24,110 @@ from bores.types import (
     Number,
     NumberArray,
     NumberOrArray,
+    OneDimension,
     UnitConversionTable,
     UnitSystem,
     Wettability,
 )
 from bores.units import get_conversion_factors
-from bores.utils import atleast_1d
 
 __all__ = [
     "BrooksCoreyCapillaryPressureTable",
 ]
+
+
+@numba.njit(cache=True, inline="always", error_model="numpy")
+def compute_brooks_corey_capillary_pressures_cell(
+    water_saturation: Number,
+    oil_saturation: Number,
+    gas_saturation: Number,
+    irreducible_water_saturation: Number,
+    residual_oil_saturation_water: Number,
+    residual_oil_saturation_gas: Number,
+    residual_gas_saturation: Number,
+    wettability: Wettability,
+    oil_water_entry_pressure_water_wet: Number,
+    oil_water_entry_pressure_oil_wet: Number,
+    oil_water_pore_size_distribution_index_water_wet: Number,
+    oil_water_pore_size_distribution_index_oil_wet: Number,
+    gas_oil_entry_pressure: Number,
+    gas_oil_pore_size_distribution_index: Number,
+    mixed_wet_water_fraction: Number = 0.5,
+    saturation_epsilon: Number = 1e-12,
+    minimum_mobile_pore_space: Number = 1e-9,
+) -> tuple[Number, Number]:
+    """
+    Capillary pressures of a single cell, without any validation of the inputs.
+
+    This is the per-cell kernel shared by the scalar function and the array loop. It has the
+    same parameters as the scalar function.
+
+    :return: Tuple of (oil_water_capillary_pressure, gas_oil_capillary_pressure).
+    """
+    sw: Number = water_saturation
+    so: Number = oil_saturation
+    sg: Number = gas_saturation
+    swc: Number = irreducible_water_saturation
+    sorw: Number = residual_oil_saturation_water
+    sorg: Number = residual_oil_saturation_gas
+    sgr: Number = residual_gas_saturation
+
+    # Normalize saturations if they do not sum to 1
+    total_saturation = sw + so + sg
+    if abs(total_saturation - 1.0) > saturation_epsilon and total_saturation > 0.0:
+        sw = sw / total_saturation
+        sg = sg / total_saturation
+
+    # Effective pore spaces
+    total_mobile_pore_space_water = 1.0 - swc - sorw
+    total_mobile_pore_space_gas = 1.0 - swc - sorg - sgr
+
+    # Pcow (Po - Pw)
+    oil_water_capillary_pressure: Number = 0.0
+    if total_mobile_pore_space_water > minimum_mobile_pore_space:
+        effective_water_saturation = (sw - swc) / total_mobile_pore_space_water
+        effective_water_saturation = min(max(effective_water_saturation, saturation_epsilon), 1.0)
+
+        if effective_water_saturation < 1.0 - saturation_epsilon:
+            if wettability == Wettability.WATER_WET:
+                oil_water_capillary_pressure = oil_water_entry_pressure_water_wet * (
+                    effective_water_saturation
+                    ** (-1.0 / oil_water_pore_size_distribution_index_water_wet)
+                )
+            elif wettability == Wettability.OIL_WET:
+                oil_water_capillary_pressure = -(
+                    oil_water_entry_pressure_oil_wet
+                    * effective_water_saturation
+                    ** (-1.0 / oil_water_pore_size_distribution_index_oil_wet)
+                )
+            elif wettability == Wettability.MIXED_WET:
+                pcow_ww = oil_water_entry_pressure_water_wet * (
+                    effective_water_saturation
+                    ** (-1.0 / oil_water_pore_size_distribution_index_water_wet)
+                )
+                pcow_ow = -(
+                    oil_water_entry_pressure_oil_wet
+                    * effective_water_saturation
+                    ** (-1.0 / oil_water_pore_size_distribution_index_oil_wet)
+                )
+                oil_water_capillary_pressure = (
+                    mixed_wet_water_fraction * pcow_ww + (1.0 - mixed_wet_water_fraction) * pcow_ow
+                )
+
+    # Pcgo (Pg - Po)
+    gas_oil_capillary_pressure: Number = 0.0
+    if total_mobile_pore_space_gas > minimum_mobile_pore_space:
+        effective_liquid_saturation = (1.0 - swc - sg - sorg) / total_mobile_pore_space_gas
+        effective_liquid_saturation = min(
+            max(effective_liquid_saturation, saturation_epsilon), 1.0
+        )
+
+        if effective_liquid_saturation < 1.0 - saturation_epsilon:
+            gas_oil_capillary_pressure = gas_oil_entry_pressure * (
+                effective_liquid_saturation ** (-1.0 / gas_oil_pore_size_distribution_index)
+            )
+
+    return oil_water_capillary_pressure, gas_oil_capillary_pressure
 
 
 @numba.njit(cache=True)
@@ -91,74 +191,81 @@ def compute_brooks_corey_capillary_pressures_scalar(
     sw: Number = water_saturation
     so: Number = oil_saturation
     sg: Number = gas_saturation
-    swc: Number = irreducible_water_saturation
-    sorw: Number = residual_oil_saturation_water
-    sorg: Number = residual_oil_saturation_gas
-    sgr: Number = residual_gas_saturation
-
-    # Validate saturations
     if sw < 0 or sw > 1 or so < 0 or so > 1 or sg < 0 or sg > 1:
         raise ValidationError("Saturations must be between 0 and 1.")
+    return compute_brooks_corey_capillary_pressures_cell(
+        water_saturation=water_saturation,
+        oil_saturation=oil_saturation,
+        gas_saturation=gas_saturation,
+        irreducible_water_saturation=irreducible_water_saturation,
+        residual_oil_saturation_water=residual_oil_saturation_water,
+        residual_oil_saturation_gas=residual_oil_saturation_gas,
+        residual_gas_saturation=residual_gas_saturation,
+        wettability=wettability,
+        oil_water_entry_pressure_water_wet=oil_water_entry_pressure_water_wet,
+        oil_water_entry_pressure_oil_wet=oil_water_entry_pressure_oil_wet,
+        oil_water_pore_size_distribution_index_water_wet=oil_water_pore_size_distribution_index_water_wet,
+        oil_water_pore_size_distribution_index_oil_wet=oil_water_pore_size_distribution_index_oil_wet,
+        gas_oil_entry_pressure=gas_oil_entry_pressure,
+        gas_oil_pore_size_distribution_index=gas_oil_pore_size_distribution_index,
+        mixed_wet_water_fraction=mixed_wet_water_fraction,
+        saturation_epsilon=saturation_epsilon,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+    )
 
-    # Normalize saturations if they do not sum to 1
-    total_saturation = sw + so + sg
-    if abs(total_saturation - 1.0) > saturation_epsilon and total_saturation > 0.0:
-        sw = sw / total_saturation
-        sg = sg / total_saturation
 
-    # Effective pore spaces
-    total_mobile_pore_space_water = 1.0 - swc - sorw
-    total_mobile_pore_space_gas = 1.0 - swc - sorg - sgr
+@numba.njit(cache=True, parallel=True, error_model="numpy")
+def compute_brooks_corey_capillary_pressures_loop(
+    water_saturation: NumberArray[OneDimension],
+    oil_saturation: NumberArray[OneDimension],
+    gas_saturation: NumberArray[OneDimension],
+    irreducible_water_saturation: NumberArray[OneDimension],
+    residual_oil_saturation_water: NumberArray[OneDimension],
+    residual_oil_saturation_gas: NumberArray[OneDimension],
+    residual_gas_saturation: NumberArray[OneDimension],
+    wettability: Wettability,
+    oil_water_entry_pressure_water_wet: Number,
+    oil_water_entry_pressure_oil_wet: Number,
+    oil_water_pore_size_distribution_index_water_wet: Number,
+    oil_water_pore_size_distribution_index_oil_wet: Number,
+    gas_oil_entry_pressure: Number,
+    gas_oil_pore_size_distribution_index: Number,
+    mixed_wet_water_fraction: Number,
+    saturation_epsilon: Number,
+    minimum_mobile_pore_space: Number,
+    size: int,
+    oil_water_capillary_pressure: NumberArray[OneDimension],
+    gas_oil_capillary_pressure: NumberArray[OneDimension],
+) -> None:
+    """
+    Compute the capillary pressures of `size` cells in parallel and write them to the output arrays.
 
-    # Pcow (Po - Pw)
-    oil_water_capillary_pressure: Number = 0.0
-    if total_mobile_pore_space_water > minimum_mobile_pore_space:
-        effective_water_saturation = (sw - swc) / total_mobile_pore_space_water
-        effective_water_saturation = min(max(effective_water_saturation, saturation_epsilon), 1.0)
-
-        if effective_water_saturation < 1.0 - saturation_epsilon:
-            if wettability == Wettability.WATER_WET:
-                oil_water_capillary_pressure = oil_water_entry_pressure_water_wet * (
-                    effective_water_saturation
-                    ** (-1.0 / oil_water_pore_size_distribution_index_water_wet)
-                )
-            elif wettability == Wettability.OIL_WET:
-                oil_water_capillary_pressure = -(
-                    oil_water_entry_pressure_oil_wet
-                    * effective_water_saturation
-                    ** (-1.0 / oil_water_pore_size_distribution_index_oil_wet)
-                )
-            elif wettability == Wettability.MIXED_WET:
-                pcow_ww = oil_water_entry_pressure_water_wet * (
-                    effective_water_saturation
-                    ** (-1.0 / oil_water_pore_size_distribution_index_water_wet)
-                )
-                pcow_ow = -(
-                    oil_water_entry_pressure_oil_wet
-                    * effective_water_saturation
-                    ** (-1.0 / oil_water_pore_size_distribution_index_oil_wet)
-                )
-                oil_water_capillary_pressure = (
-                    mixed_wet_water_fraction * pcow_ww + (1.0 - mixed_wet_water_fraction) * pcow_ow
-                )
-
-    # Pcgo (Pg - Po)
-    gas_oil_capillary_pressure: Number = 0.0
-    if total_mobile_pore_space_gas > minimum_mobile_pore_space:
-        effective_liquid_saturation = (1.0 - swc - sg - sorg) / total_mobile_pore_space_gas
-        effective_liquid_saturation = min(
-            max(effective_liquid_saturation, saturation_epsilon), 1.0
+    Per-cell inputs are flat arrays, or a single value shared by every cell.
+    """
+    for i in numba.prange(size):
+        oil_water, gas_oil = compute_brooks_corey_capillary_pressures_cell(
+            water_saturation=np.float64(element_at(water_saturation, i)),
+            oil_saturation=np.float64(element_at(oil_saturation, i)),
+            gas_saturation=np.float64(element_at(gas_saturation, i)),
+            irreducible_water_saturation=np.float64(element_at(irreducible_water_saturation, i)),
+            residual_oil_saturation_water=np.float64(element_at(residual_oil_saturation_water, i)),
+            residual_oil_saturation_gas=np.float64(element_at(residual_oil_saturation_gas, i)),
+            residual_gas_saturation=np.float64(element_at(residual_gas_saturation, i)),
+            wettability=wettability,
+            oil_water_entry_pressure_water_wet=oil_water_entry_pressure_water_wet,
+            oil_water_entry_pressure_oil_wet=oil_water_entry_pressure_oil_wet,
+            oil_water_pore_size_distribution_index_water_wet=oil_water_pore_size_distribution_index_water_wet,
+            oil_water_pore_size_distribution_index_oil_wet=oil_water_pore_size_distribution_index_oil_wet,
+            gas_oil_entry_pressure=gas_oil_entry_pressure,
+            gas_oil_pore_size_distribution_index=gas_oil_pore_size_distribution_index,
+            mixed_wet_water_fraction=mixed_wet_water_fraction,
+            saturation_epsilon=saturation_epsilon,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
         )
-
-        if effective_liquid_saturation < 1.0 - saturation_epsilon:
-            gas_oil_capillary_pressure = gas_oil_entry_pressure * (
-                effective_liquid_saturation ** (-1.0 / gas_oil_pore_size_distribution_index)
-            )
-
-    return oil_water_capillary_pressure, gas_oil_capillary_pressure
+        oil_water_capillary_pressure[i] = oil_water
+        gas_oil_capillary_pressure[i] = gas_oil
 
 
-@numba.njit(cache=True)
 def compute_brooks_corey_capillary_pressures_array(
     water_saturation: NumberOrArray[NDimension],
     oil_saturation: NumberOrArray[NDimension],
@@ -217,124 +324,63 @@ def compute_brooks_corey_capillary_pressures_array(
     :param minimum_mobile_pore_space: Minimum mobile pore space threshold below which Pc is set to zero.
     :return: Tuple of (oil_water_capillary_pressure, gas_oil_capillary_pressure) NDArrays in psi.
     """
-    sw = atleast_1d(water_saturation)
-    so = atleast_1d(oil_saturation)
-    sg = atleast_1d(gas_saturation)
-    swc = atleast_1d(irreducible_water_saturation)
-    sorw = atleast_1d(residual_oil_saturation_water)
-    sorg = atleast_1d(residual_oil_saturation_gas)
-    sgr = atleast_1d(residual_gas_saturation)
-    dtype = sw.dtype.type
-    oil_water_entry_pressure_water_wet = dtype(oil_water_entry_pressure_water_wet)
-    oil_water_entry_pressure_oil_wet = dtype(oil_water_entry_pressure_oil_wet)
-    oil_water_pore_size_distribution_index_water_wet = dtype(
-        oil_water_pore_size_distribution_index_water_wet
+    (
+        shape,
+        size,
+        (
+            water_saturation_flat,
+            oil_saturation_flat,
+            gas_saturation_flat,
+            irreducible_water_saturation_flat,
+            residual_oil_saturation_water_flat,
+            residual_oil_saturation_gas_flat,
+            residual_gas_saturation_flat,
+        ),
+    ) = prepare_kernel_inputs(
+        water_saturation,
+        oil_saturation,
+        gas_saturation,
+        irreducible_water_saturation,
+        residual_oil_saturation_water,
+        residual_oil_saturation_gas,
+        residual_gas_saturation,
     )
-    oil_water_pore_size_distribution_index_oil_wet = dtype(
-        oil_water_pore_size_distribution_index_oil_wet
-    )
-    gas_oil_entry_pressure = dtype(gas_oil_entry_pressure)
-    gas_oil_pore_size_distribution_index = dtype(gas_oil_pore_size_distribution_index)
-    one = dtype(1.0)
-    zero = dtype(0.0)
-
-    # Broadcast all arrays to same shape
-    sw, so, sg, swc, sorw, sorg, sgr = np.broadcast_arrays(sw, so, sg, swc, sorw, sorg, sgr)
-    # Validate saturations
-    if np.any((sw < 0) | (sw > 1) | (so < 0) | (so > 1) | (sg < 0) | (sg > 1)):
+    if not saturations_within_bounds(
+        water_saturation=water_saturation_flat,
+        oil_saturation=oil_saturation_flat,
+        gas_saturation=gas_saturation_flat,
+        size=size,
+    ):
         raise ValidationError("Saturations must be between 0 and 1.")
 
-    # Normalize saturations if they do not sum to 1
-    total_saturation = sw + so + sg
-    needs_norm = (np.abs(total_saturation - 1.0) > saturation_epsilon) & (total_saturation > 0.0)
-    if np.any(needs_norm):
-        sw = np.where(needs_norm, sw / total_saturation, sw)
-        so = np.where(needs_norm, so / total_saturation, so)
-        sg = np.where(needs_norm, sg / total_saturation, sg)
-
-    # Effective pore spaces
-    total_mobile_pore_space_water = one - swc - sorw
-    total_mobile_pore_space_gas = one - swc - sorg - sgr
-
-    # Pcow (Po - Pw)
-    oil_water_capillary_pressure = np.zeros_like(sw)
-    valid_water = total_mobile_pore_space_water > minimum_mobile_pore_space
-
-    if np.any(valid_water):
-        effective_water_saturation = np.where(
-            valid_water, (sw - swc) / total_mobile_pore_space_water, zero
-        )
-        np.clip(
-            effective_water_saturation,
-            saturation_epsilon,
-            one,
-            out=effective_water_saturation,
-        )
-        undersaturated = valid_water & (effective_water_saturation < one - saturation_epsilon)
-
-        if np.any(undersaturated):
-            if wettability == Wettability.WATER_WET:
-                pcow = oil_water_entry_pressure_water_wet * (
-                    effective_water_saturation
-                    ** (-one / oil_water_pore_size_distribution_index_water_wet)
-                )
-                oil_water_capillary_pressure = np.where(undersaturated, pcow, zero).astype(
-                    sw.dtype
-                )
-
-            elif wettability == Wettability.OIL_WET:
-                pcow = -(
-                    oil_water_entry_pressure_oil_wet
-                    * effective_water_saturation
-                    ** (-one / oil_water_pore_size_distribution_index_oil_wet)
-                )
-                oil_water_capillary_pressure = np.where(undersaturated, pcow, zero).astype(
-                    sw.dtype
-                )
-
-            elif wettability == Wettability.MIXED_WET:
-                pcow_ww = oil_water_entry_pressure_water_wet * (
-                    effective_water_saturation
-                    ** (-one / oil_water_pore_size_distribution_index_water_wet)
-                )
-                pcow_ow = -(
-                    oil_water_entry_pressure_oil_wet
-                    * effective_water_saturation
-                    ** (-one / oil_water_pore_size_distribution_index_oil_wet)
-                )
-                pcow = (
-                    mixed_wet_water_fraction * pcow_ww + (one - mixed_wet_water_fraction) * pcow_ow
-                )
-                oil_water_capillary_pressure = np.where(undersaturated, pcow, zero).astype(
-                    sw.dtype
-                )
-
-    # Pcgo (Pg - Po)
-    gas_oil_capillary_pressure = np.zeros_like(sg)
-    valid_gas = total_mobile_pore_space_gas > minimum_mobile_pore_space
-
-    if np.any(valid_gas):
-        effective_liquid_saturation = np.where(
-            valid_gas, (one - swc - sg - sorg) / total_mobile_pore_space_gas, zero
-        )
-        np.clip(
-            effective_liquid_saturation,
-            saturation_epsilon,
-            one,
-            out=effective_liquid_saturation,
-        )
-        is_undersaturated_gas = valid_gas & (
-            effective_liquid_saturation < one - saturation_epsilon
-        )
-        if np.any(is_undersaturated_gas):
-            pcgo = gas_oil_entry_pressure * (
-                effective_liquid_saturation ** (-one / gas_oil_pore_size_distribution_index)
-            )
-            gas_oil_capillary_pressure = np.where(is_undersaturated_gas, pcgo, zero).astype(
-                sw.dtype
-            )
-
-    return oil_water_capillary_pressure, gas_oil_capillary_pressure  # type: ignore
+    dtype = get_floating_dtype(water_saturation)
+    oil_water_capillary_pressure = np.empty(size, dtype=dtype)
+    gas_oil_capillary_pressure = np.empty(size, dtype=dtype)
+    compute_brooks_corey_capillary_pressures_loop(
+        water_saturation=water_saturation_flat,
+        oil_saturation=oil_saturation_flat,
+        gas_saturation=gas_saturation_flat,
+        irreducible_water_saturation=irreducible_water_saturation_flat,
+        residual_oil_saturation_water=residual_oil_saturation_water_flat,
+        residual_oil_saturation_gas=residual_oil_saturation_gas_flat,
+        residual_gas_saturation=residual_gas_saturation_flat,
+        wettability=wettability,
+        oil_water_entry_pressure_water_wet=oil_water_entry_pressure_water_wet,
+        oil_water_entry_pressure_oil_wet=oil_water_entry_pressure_oil_wet,
+        oil_water_pore_size_distribution_index_water_wet=oil_water_pore_size_distribution_index_water_wet,
+        oil_water_pore_size_distribution_index_oil_wet=oil_water_pore_size_distribution_index_oil_wet,
+        gas_oil_entry_pressure=gas_oil_entry_pressure,
+        gas_oil_pore_size_distribution_index=gas_oil_pore_size_distribution_index,
+        mixed_wet_water_fraction=mixed_wet_water_fraction,
+        saturation_epsilon=saturation_epsilon,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+        size=size,
+        oil_water_capillary_pressure=oil_water_capillary_pressure,
+        gas_oil_capillary_pressure=gas_oil_capillary_pressure,
+    )
+    return typing.cast(
+        NumberArray[NDimension], oil_water_capillary_pressure.reshape(shape)
+    ), typing.cast(NumberArray[NDimension], gas_oil_capillary_pressure.reshape(shape))
 
 
 def compute_brooks_corey_capillary_pressures(
@@ -414,7 +460,7 @@ def compute_brooks_corey_capillary_pressures(
     )
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, inline="always", error_model="numpy")
 def compute_brooks_corey_derivatives_scalar(
     water_saturation: Number,
     gas_saturation: Number,
@@ -518,7 +564,61 @@ def compute_brooks_corey_derivatives_scalar(
     return dpcow_dsw, dpcow_dso, dpcgo_dsg, dpcgo_dso
 
 
-@numba.njit(cache=True)
+@numba.njit(cache=True, parallel=True, error_model="numpy")
+def compute_brooks_corey_derivatives_loop(
+    water_saturation: NumberArray[OneDimension],
+    gas_saturation: NumberArray[OneDimension],
+    irreducible_water_saturation: NumberArray[OneDimension],
+    residual_oil_saturation_water: NumberArray[OneDimension],
+    residual_oil_saturation_gas: NumberArray[OneDimension],
+    residual_gas_saturation: NumberArray[OneDimension],
+    wettability: Wettability,
+    oil_water_pore_size_distribution_index_water_wet: Number,
+    oil_water_pore_size_distribution_index_oil_wet: Number,
+    oil_water_entry_pressure_water_wet: Number,
+    oil_water_entry_pressure_oil_wet: Number,
+    gas_oil_pore_size_distribution_index: Number,
+    gas_oil_entry_pressure: Number,
+    mixed_wet_water_fraction: Number,
+    saturation_epsilon: Number,
+    minimum_mobile_pore_space: Number,
+    size: int,
+    dpcow_dsw: NumberArray[OneDimension],
+    dpcow_dso: NumberArray[OneDimension],
+    dpcgo_dsg: NumberArray[OneDimension],
+    dpcgo_dso: NumberArray[OneDimension],
+) -> None:
+    """
+    Compute the capillary pressure derivatives of `size` cells in parallel and write them to the
+    output arrays.
+
+    Per-cell inputs are flat arrays, or a single value shared by every cell.
+    """
+    for i in numba.prange(size):
+        d_ow_sw, d_ow_so, d_go_sg, d_go_so = compute_brooks_corey_derivatives_scalar(
+            water_saturation=np.float64(element_at(water_saturation, i)),
+            gas_saturation=np.float64(element_at(gas_saturation, i)),
+            irreducible_water_saturation=np.float64(element_at(irreducible_water_saturation, i)),
+            residual_oil_saturation_water=np.float64(element_at(residual_oil_saturation_water, i)),
+            residual_oil_saturation_gas=np.float64(element_at(residual_oil_saturation_gas, i)),
+            residual_gas_saturation=np.float64(element_at(residual_gas_saturation, i)),
+            wettability=wettability,
+            oil_water_pore_size_distribution_index_water_wet=oil_water_pore_size_distribution_index_water_wet,
+            oil_water_pore_size_distribution_index_oil_wet=oil_water_pore_size_distribution_index_oil_wet,
+            oil_water_entry_pressure_water_wet=oil_water_entry_pressure_water_wet,
+            oil_water_entry_pressure_oil_wet=oil_water_entry_pressure_oil_wet,
+            gas_oil_pore_size_distribution_index=gas_oil_pore_size_distribution_index,
+            gas_oil_entry_pressure=gas_oil_entry_pressure,
+            mixed_wet_water_fraction=mixed_wet_water_fraction,
+            saturation_epsilon=saturation_epsilon,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
+        )
+        dpcow_dsw[i] = d_ow_sw
+        dpcow_dso[i] = d_ow_so
+        dpcgo_dsg[i] = d_go_sg
+        dpcgo_dso[i] = d_go_so
+
+
 def compute_brooks_corey_derivatives_array(
     water_saturation: NumberOrArray[NDimension],
     gas_saturation: NumberOrArray[NDimension],
@@ -565,75 +665,59 @@ def compute_brooks_corey_derivatives_array(
     :param minimum_mobile_pore_space: Minimum mobile pore space threshold.
     :return: Tuple of (dpcow_dsw, dpcow_dso, dpcgo_dsg, dpcgo_dso) as NDArrays.
     """
-    sw = atleast_1d(water_saturation)
-    sg = atleast_1d(gas_saturation)
-    swc = atleast_1d(irreducible_water_saturation)
-    sorw = atleast_1d(residual_oil_saturation_water)
-    sorg = atleast_1d(residual_oil_saturation_gas)
-    sgr = atleast_1d(residual_gas_saturation)
-
-    dtype = sw.dtype.type
-    one = dtype(1.0)
-
-    # Broadcast arrays
-    sw, sg, swc, sorw, sorg, sgr = np.broadcast_arrays(sw, sg, swc, sorw, sorg, sgr)
-
-    # Oil-water derivatives
-    mobile_water_range = one - swc - sorw
-    valid_water = mobile_water_range > minimum_mobile_pore_space
-    raw_se_w = (sw - swc) / np.where(valid_water, mobile_water_range, one)
-    se_w = np.clip(raw_se_w, saturation_epsilon, one)
-
-    if wettability == Wettability.MIXED_WET:
-        water_wet_fraction = dtype(mixed_wet_water_fraction)
-        exp_ww = -one / dtype(oil_water_pore_size_distribution_index_water_wet)
-        exp_ow = -one / dtype(oil_water_pore_size_distribution_index_oil_wet)
-        dse_w_ww = dtype(oil_water_entry_pressure_water_wet) * exp_ww * (se_w ** (exp_ww - one))
-        dse_w_ow = -(dtype(oil_water_entry_pressure_oil_wet) * exp_ow * (se_w ** (exp_ow - one)))
-        dpcow_dse_w = water_wet_fraction * dse_w_ww + (one - water_wet_fraction) * dse_w_ow
-    else:
-        if wettability == Wettability.WATER_WET:
-            pore_distribution_index = dtype(oil_water_pore_size_distribution_index_water_wet)
-            entry_pressure = dtype(oil_water_entry_pressure_water_wet)
-            sign = one
-        else:  # OIL_WET
-            pore_distribution_index = dtype(oil_water_pore_size_distribution_index_oil_wet)
-            entry_pressure = dtype(oil_water_entry_pressure_oil_wet)
-            sign = -one
-        exp = -one / pore_distribution_index
-        dpcow_dse_w = sign * entry_pressure * exp * (se_w ** (exp - one))
-
-    # No slope where the value is clipped (flat) or set to zero
-    dpcow_dsw = np.where(
-        valid_water & (raw_se_w > saturation_epsilon) & (raw_se_w < one - saturation_epsilon),
-        dpcow_dse_w / mobile_water_range,
-        np.zeros_like(sw),
+    (
+        shape,
+        size,
+        (
+            water_saturation_flat,
+            gas_saturation_flat,
+            irreducible_water_saturation_flat,
+            residual_oil_saturation_water_flat,
+            residual_oil_saturation_gas_flat,
+            residual_gas_saturation_flat,
+        ),
+    ) = prepare_kernel_inputs(
+        water_saturation,
+        gas_saturation,
+        irreducible_water_saturation,
+        residual_oil_saturation_water,
+        residual_oil_saturation_gas,
+        residual_gas_saturation,
     )
-    dpcow_dso = np.zeros_like(sw)
-
-    # Gas-oil derivatives
-    mobile_gas_range = one - swc - sorg - sgr
-    valid_gas = mobile_gas_range > minimum_mobile_pore_space
-    safe_gas_range = np.where(valid_gas, mobile_gas_range, one)
-
-    # Pcgo depends on the effective liquid saturation of the gas-oil system, which falls as
-    # Sg rises. It has no slope where the value is clipped or set to zero.
-    raw_se_l = (one - swc - sg - sorg) / safe_gas_range
-    active_gas = (
-        valid_gas & (raw_se_l > saturation_epsilon) & (raw_se_l < one - saturation_epsilon)
+    dtype = get_floating_dtype(water_saturation)
+    dpcow_dsw = np.empty(size, dtype=dtype)
+    dpcow_dso = np.empty(size, dtype=dtype)
+    dpcgo_dsg = np.empty(size, dtype=dtype)
+    dpcgo_dso = np.empty(size, dtype=dtype)
+    compute_brooks_corey_derivatives_loop(
+        water_saturation=water_saturation_flat,
+        gas_saturation=gas_saturation_flat,
+        irreducible_water_saturation=irreducible_water_saturation_flat,
+        residual_oil_saturation_water=residual_oil_saturation_water_flat,
+        residual_oil_saturation_gas=residual_oil_saturation_gas_flat,
+        residual_gas_saturation=residual_gas_saturation_flat,
+        wettability=wettability,
+        oil_water_pore_size_distribution_index_water_wet=oil_water_pore_size_distribution_index_water_wet,
+        oil_water_pore_size_distribution_index_oil_wet=oil_water_pore_size_distribution_index_oil_wet,
+        oil_water_entry_pressure_water_wet=oil_water_entry_pressure_water_wet,
+        oil_water_entry_pressure_oil_wet=oil_water_entry_pressure_oil_wet,
+        gas_oil_pore_size_distribution_index=gas_oil_pore_size_distribution_index,
+        gas_oil_entry_pressure=gas_oil_entry_pressure,
+        mixed_wet_water_fraction=mixed_wet_water_fraction,
+        saturation_epsilon=saturation_epsilon,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+        size=size,
+        dpcow_dsw=dpcow_dsw,
+        dpcow_dso=dpcow_dso,
+        dpcgo_dsg=dpcgo_dsg,
+        dpcgo_dso=dpcgo_dso,
     )
-    se_l = np.clip(raw_se_l, saturation_epsilon, one - saturation_epsilon)
-
-    exp_gas_oil = -one / dtype(gas_oil_pore_size_distribution_index)
-    dpcgo_dse_l = dtype(gas_oil_entry_pressure) * exp_gas_oil * (se_l ** (exp_gas_oil - one))
-    dpcgo_dsg = np.where(active_gas, -dpcgo_dse_l / safe_gas_range, np.zeros_like(sg))
-    dpcgo_dso = np.zeros_like(sg)
     return (
-        dpcow_dsw,
-        dpcow_dso,
-        dpcgo_dsg,
-        dpcgo_dso,
-    )  # type: ignore
+        typing.cast(NumberArray[NDimension], dpcow_dsw.reshape(shape)),
+        typing.cast(NumberArray[NDimension], dpcow_dso.reshape(shape)),
+        typing.cast(NumberArray[NDimension], dpcgo_dsg.reshape(shape)),
+        typing.cast(NumberArray[NDimension], dpcgo_dso.reshape(shape)),
+    )
 
 
 def compute_brooks_corey_capillary_pressure_derivatives(

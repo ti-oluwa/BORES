@@ -361,6 +361,72 @@ def _prepare_killough_arrays(
     )
 
 
+@numba.njit(cache=True, inline="always", error_model="numpy")
+def element_at(array: NumberArray[OneDimension], index: int) -> Number:
+    """
+    Element `index` of `array`, or its only element when it holds a single value.
+
+    Lets a kernel read a per-cell array and a single value shared by every cell with the
+    same code.
+    """
+    return array[0] if array.size == 1 else array[index]  # type: ignore[return-value]
+
+
+def prepare_kernel_inputs(
+    *values: NumberOrArray[NDimension],
+) -> tuple[tuple[int, ...], int, tuple[NumberArray[OneDimension], ...]]:
+    """
+    Bring the inputs of a per-cell kernel to flat arrays that the kernel can read by index.
+
+    Inputs are broadcast to a common shape. An input that holds a single value is passed as
+    a one-element array, which the kernel reads with `element_at`, so a value shared by
+    every cell is never expanded to the full size. Arrays that are already contiguous with
+    the common shape are used as they are, without a copy. Inputs that are not floating
+    point are converted to float64.
+
+    :param values: Inputs of the kernel, scalars or arrays.
+    :return: Tuple of the broadcast shape (at least one-dimensional), the number of cells, and
+        the flattened inputs in the order given.
+    """
+    arrays = [np.asarray(value) for value in values]
+    shape = np.broadcast_shapes(*(array.shape for array in arrays)) or (1,)
+    size = int(np.prod(shape))
+    prepared = []
+    for array in arrays:
+        if array.dtype.kind != "f":
+            array = array.astype(np.float64)
+        if array.size == 1:
+            prepared.append(array.reshape(1))
+        else:
+            prepared.append(np.ascontiguousarray(np.broadcast_to(array, shape)).ravel())
+    return shape, size, tuple(prepared)
+
+
+@numba.njit(cache=True, error_model="numpy")
+def saturations_within_bounds(
+    water_saturation: NumberArray[OneDimension],
+    oil_saturation: NumberArray[OneDimension],
+    gas_saturation: NumberArray[OneDimension],
+    size: int,
+) -> bool:
+    """
+    Whether every water, oil and gas saturation lies between 0 and 1.
+
+    :param water_saturation: Flat water saturation array, or a single shared value.
+    :param oil_saturation: Flat oil saturation array, or a single shared value.
+    :param gas_saturation: Flat gas saturation array, or a single shared value.
+    :param size: Number of cells.
+    :return: `True` if all saturations are within bounds.
+    """
+    for i in range(size):
+        sw = element_at(water_saturation, i)
+        so = element_at(oil_saturation, i)
+        sg = element_at(gas_saturation, i)
+        if sw < 0 or sw > 1 or so < 0 or so > 1 or sg < 0 or sg > 1:
+            return False
+    return True
+
+
 def get_floating_dtype(value: NumberOrArray[NDimension]) -> np.dtype:
     """Floating dtype of `value`, or float64 if it is not floating point."""
     dtype = np.asarray(value).dtype
