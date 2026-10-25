@@ -57,6 +57,9 @@ __all__ = ["SimulationCase", "load_case"]
 class SimulationCase:
     """A black-oil simulation case."""
 
+    title: str
+    """A label for the case, such as the deck's `TITLE` or a name given when loading."""
+
     model: CompiledBlackOilModel
     """The black-oil model this case runs against."""
 
@@ -202,6 +205,7 @@ class SimulationCase:
         cls,
         deck_file: DeckFile,
         *,
+        title: str | None = None,
         tubing_performance: TubingPerformance
         | typing.Mapping[str, TubingPerformance | None]
         | None = None,
@@ -234,6 +238,8 @@ class SimulationCase:
         Loads a `SimulationCase` from a deck. See `load_case`.
 
         :param deck_file: The deck to load from.
+        :param title: A label for the case. The deck's `TITLE` is used if not given. Required
+            when the deck has no `TITLE`.
         :param tubing_performance: What relates each well's BHP to its THP: a `WellBoreModel` or
             `VFPTables` for every well, or a per-well mapping of them. Omit if nothing in the
             deck needs one; the deck's own `VFPPROD`/`VFPINJ` tables are then used if it has
@@ -284,6 +290,7 @@ class SimulationCase:
         """
         case = load_case(
             deck_file,
+            title=title,
             tubing_performance=tubing_performance,
             temperature=temperature,
             mixing_rule=mixing_rule,
@@ -316,6 +323,7 @@ class SimulationCase:
 def load_case(
     deck_file: DeckFile,
     *,
+    title: str | None = None,
     tubing_performance: TubingPerformance
     | typing.Mapping[str, TubingPerformance | None]
     | None = None,
@@ -349,6 +357,8 @@ def load_case(
     state, wells, and schedule.
 
     :param deck_file: The deck to load from.
+    :param title: A label for the case. The deck's `TITLE` is used if not given. Required when
+        the deck has no `TITLE`.
     :param tubing_performance: What relates each well's BHP to its THP: a `WellBoreModel` or
         `VFPTables` for every well, or a per-well mapping of them. Omit if nothing in the deck
         needs one; the deck's own `VFPPROD`/`VFPINJ` tables are then used if it has any.
@@ -397,15 +407,23 @@ def load_case(
         Converted to `unit_system` if given in a different one. If the
         deck defines no boundary conditions, this is used as-is.
     :returns: The loaded `SimulationCase`.
-    :raises CaseLoadError: If any loading stage fails. The
-        original exception is chained as the cause.
+    :raises CaseLoadError: If the deck has no `TITLE` and no `title` is given, or if any
+        loading stage fails. For a failed stage, the original exception is chained as the cause.
     """
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
-    deck_title = deck_file.get("TITLE")
-    if not deck_title:
-        deck_title = "deck file"
+    raw_deck_title = deck_file.get("TITLE")
+    raw_deck_title = raw_deck_title.strip() if isinstance(raw_deck_title, str) else None
+    if title is not None and not title.strip():
+        raise CaseLoadError("`title` must not be empty. Omit it to use the deck's `TITLE`.")
+    if title is not None:
+        title = title.strip()
+    elif raw_deck_title:
+        title = raw_deck_title
     else:
-        deck_title = f"deck file: {deck_title!r}"
+        raise CaseLoadError(
+            "The deck has no `TITLE`, so a case title is required. Pass `title` to name the case."
+        )
+    deck_title = f"deck file: {raw_deck_title!r}" if raw_deck_title else "deck file"
 
     deck_unit_system = deck_file.unit_system
     unit_system = unit_system if unit_system is not None else deck_unit_system
@@ -555,6 +573,7 @@ def load_case(
         raise CaseLoadError(f"Failed to load time targets from {deck_title}.") from exc
 
     case = SimulationCase(
+        title=title,
         model=compile_model(
             model,
             horizontal_tolerance=horizontal_tolerance,

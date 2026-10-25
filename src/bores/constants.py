@@ -144,8 +144,8 @@ def _get_saturation_epsilon() -> float:
     """
     Saturation clamp epsilon, scaled to the active floating-point dtype.
 
-    Target: 8 * machine_epsilon, floored at sqrt(float32 eps) ~ 1e-7 so the
-    clamp is always meaningful even if the context dtype is float64.
+    Target: 8 * machine_epsilon, floored at 1e-7 (about the float32 machine epsilon)
+    so the clamp is always meaningful even if the context dtype is float64.
     """
     info = get_floating_point_info()
     dtype_based = 8.0 * float(info.eps)
@@ -183,10 +183,10 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         aliases=("STANDARD_PRESSURE_SI",),
     ),
     "STANDARD_PRESSURE_PSI": Constant(
-        value=14.6959,
+        value=101325.0 / (0.45359237 * 9.80665 / 0.0254**2),
         description="Standard atmospheric pressure in Pound-per-Square-Inch (psi)",
         unit="psi",
-        aliases=("STANDARD_PRESSURE_IMPERIAL",),
+        aliases=('STANDARD_PRESSURE_IMPERIAL',),
     ),
     "STANDARD_PRESSURE_BAR": Constant(
         value=1.01325,
@@ -210,7 +210,7 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         unit="bar / (kg/m³ * m)",
     ),
     "HYDROSTATIC_GRADIENT_FACTOR_LAB": Constant(
-        value=9.6787e-4,
+        value=9.80665 * 100.0 / (101325.0 * 10.0),
         description="Hydrostatic gradient factor for LAB units: atm per (g/cm³ * cm)",
         unit="atm / (g/cm³ * cm)",
     ),
@@ -221,10 +221,10 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
     ),
     # Temperature
     "STANDARD_TEMPERATURE_KELVIN": Constant(
-        value=288.7056,
-        description="Standard temperature in Kelvin",
+        value=(60.0 - 32.0) * 5.0 / 9.0 + 273.15,
+        description="Standard temperature (60°F) in Kelvin",
         unit="K",
-        aliases=("STANDARD_TEMPERATURE_SI",),
+        aliases=('STANDARD_TEMPERATURE_SI',),
     ),
     "STANDARD_TEMPERATURE_FAHRENHEIT": Constant(
         value=60.0,
@@ -236,7 +236,9 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         value=519.67, description="Standard temperature (60°F) in Rankine", unit="°R"
     ),
     "STANDARD_TEMPERATURE_CELSIUS": Constant(
-        value=15.6, description="Standard temperature in Celsius", unit="°C"
+        value=(60.0 - 32.0) * 5.0 / 9.0,
+        description="Standard temperature (60°F) in Celsius",
+        unit="°C",
     ),
     # Thermal and Compressibility Properties
     # Oil
@@ -250,11 +252,13 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
     ),
     # Water
     "WATER_THERMAL_EXPANSION_COEFFICIENT": Constant(
-        value=3.0e-4, description="Thermal expansion coefficient for water", unit="1/K"
+        value=1.57e-4,
+        description="Thermal expansion coefficient for water at Standard temperature (60°F)",
+        unit="1/K",
     ),
     "WATER_THERMAL_EXPANSION_COEFFICIENT_IMPERIAL": Constant(
-        value=1.67e-4,
-        description="Thermal expansion coefficient for water (Imperial units)",
+        value=1.57e-4 / 1.8,
+        description="Thermal expansion coefficient for water at Standard temperature (60°F) (Imperial units)",
         unit="1/°F",
     ),
     "WATER_ISOTHERMAL_COMPRESSIBILITY": Constant(
@@ -275,14 +279,14 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         unit="lbm/ft³",
     ),
     "STANDARD_WATER_DENSITY_METRIC": Constant(
-        value=998.2,
-        description="Standard water density at Standard temperature (15.6°C) (Metric units)",
+        value=999.0,
+        description="Standard water density at Standard temperature (60°F, 15.6°C) (Metric units)",
         unit="kg/m³",
-        aliases=("STANDARD_WATER_DENSITY_SI",),
+        aliases=('STANDARD_WATER_DENSITY_SI',),
     ),
     "STANDARD_WATER_DENSITY_LAB": Constant(
-        value=0.9982,
-        description="Standard water density at Standard temperature (15.6°C) (Lab units)",
+        value=0.9990,
+        description="Standard water density at Standard temperature (60°F, 15.6°C) (Lab units)",
         unit="g/cm³",
     ),
     # Air
@@ -338,22 +342,24 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
     ),
     # Pressure Conversions
     "PSI_TO_PASCAL": Constant(
-        value=6894.757,
-        description="Conversion factor from psi to Pascals",
+        value=(0.45359237 * 9.80665 / 0.0254**2),
+        description="Conversion factor from psi to Pascals (lbf/in2, from the exact lbm, g0 and inch definitions)",
         unit="Pa/psi",
     ),
     "PASCAL_TO_PSI": Constant(
-        value=1 / 6894.757,
+        value=1.0 / (0.45359237 * 9.80665 / 0.0254**2),
         description="Conversion factor from Pascals to psi",
         unit="psi/Pa",
     ),
     "PSI_TO_BAR": Constant(
-        value=0.0689476, description="Conversion factor from psi to bar", unit="bar/psi"
+        value=(0.45359237 * 9.80665 / 0.0254**2) / 1e5,
+        description="Conversion factor from psi to bar",
+        unit="bar/psi",
     ),
     "ATM_TO_PASCAL": Constant(
         value=101325.0,
         description="Conversion factor from atm to Pascals",
-        unit="atm/Pa",
+        unit="Pa/atm",
     ),
     # Temperature Conversions
     "RANKINE_TO_KELVIN": Constant(
@@ -379,29 +385,29 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
     ),
     # Permeability Conversions
     "MILLIDARCY_TO_SQUARE_METER": Constant(
-        value=9.869233e-16,
-        description="Conversion factor from millidarcies to square meters",
+        value=(1e-10 / 101325.0),
+        description="Conversion factor from millidarcies to square meters (1 D = 1 cP * 1 cm/s / (1 atm/cm))",
         unit="m²/mD",
     ),
     # Gas-Oil Ratio Conversions
     "SCF_PER_STB_TO_CUBIC_METER_PER_CUBIC_METER": Constant(
-        value=0.1781076,
+        value=0.3048**3 / (42.0 * 0.003785411784),
         description="Conversion factor from scf/STB to m³/m³",
         unit="(m³/m³)/(scf/STB)",
     ),
     "CUBIC_METER_PER_CUBIC_METER_TO_SCF_PER_STB": Constant(
-        value=1 / 0.1781076,
+        value=(42.0 * 0.003785411784) / 0.3048**3,
         description="Conversion factor from m³/m³ to scf/STB",
         unit="(scf/STB)/(m³/m³)",
     ),
     # Formation Volume Factor Conversions
     "CUBIC_METER_PER_CUBIC_METER_TO_BARRELS_PER_SCF": Constant(
-        value=5.614583,
+        value=0.3048**3 / (42.0 * 0.003785411784),
         description="Conversion factor from m³/m³ to BBL/scf",
         unit="(BBL/scf)/(m³/m³)",
     ),
     "BARRELS_PER_SCF_TO_CUBIC_METER_PER_CUBIC_METER": Constant(
-        value=1 / 5.614583,
+        value=(42.0 * 0.003785411784) / 0.3048**3,
         description="Conversion factor from BBL/scf to m³/m³",
         unit="(m³/m³)/(BBL/scf)",
     ),
@@ -427,64 +433,64 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         unit="Mscf/scf",
     ),
     "CUBIC_METER_TO_SCF": Constant(
-        value=35.3147,
+        value=1.0 / 0.3048**3,
         description="Conversion factor from cubic meters to standard cubic feet",
         unit="scf/m³",
     ),
     "SCF_TO_BARRELS": Constant(
-        value=0.1781076,
+        value=0.3048**3 / (42.0 * 0.003785411784),
         description="Conversion factor from standard cubic feet to barrels",
         unit="BBL/scf",
     ),
     "BARRELS_TO_CUBIC_FEET": Constant(
-        value=5.614583,
+        value=(42.0 * 0.003785411784) / 0.3048**3,
         description="Conversion factor from barrels to cubic feet",
         unit="ft³/BBL",
     ),
     "CUBIC_FEET_TO_BARRELS": Constant(
-        value=1 / 5.614583,
+        value=0.3048**3 / (42.0 * 0.003785411784),
         description="Conversion factor from cubic feet to barrels",
         unit="BBL/ft³",
     ),
     "STB_TO_CUBIC_FEET": Constant(
-        value=5.614583,
+        value=(42.0 * 0.003785411784) / 0.3048**3,
         description="Conversion factor from stock tank barrels to (standard) cubic feet",
         unit="ft³/STB",
     ),
     "CUBIC_FEET_TO_STB": Constant(
-        value=1 / 5.614583,
+        value=0.3048**3 / (42.0 * 0.003785411784),
         description="Conversion factor from (standard) cubic feet to stock tank barrels",
         unit="STB/ft³",
     ),
     "STB_TO_CUBIC_METER": Constant(
-        value=0.158987,
-        description="Conversion factor from stock tank barrels to (standard) cubic meters",
+        value=(42.0 * 0.003785411784),
+        description="Conversion factor from stock tank barrels to (standard) cubic meters (42 US gal)",
         unit="m³/STB",
     ),
     "CUBIC_METER_TO_STB": Constant(
-        value=1 / 0.158987,
+        value=1.0 / (42.0 * 0.003785411784),
         description="Conversion factor from (standard) cubic meters to stock tank barrels",
         unit="STB/m³",
     ),
     "BARRELS_TO_CUBIC_METER": Constant(
-        value=0.158987,
-        description="Conversion factor from barrels to cubic meters",
+        value=(42.0 * 0.003785411784),
+        description="Conversion factor from barrels to cubic meters (42 US gal)",
         unit="m³/BBL",
     ),
     "CUBIC_METER_TO_BARRELS": Constant(
-        value=1 / 0.158987,
+        value=1.0 / (42.0 * 0.003785411784),
         description="Conversion factor from cubic meters to barrels",
         unit="BBL/m³",
     ),
     "SCF_TO_SCM": Constant(
-        value=0.0283168,
+        value=0.3048**3,
         description="Conversion factor from standard cubic feet to standard cubic meters",
         unit="m³/scf",
     ),
     "DYNE_PER_CENTIMETER_TO_PSI": Constant(
-        value=4.621,
-        description="Conversion factor from dyne per centimeter to pounds per square inch",
-        unit="dyne/cm·psi",
+        value=1e-3 / (1e-10 / 101325.0) ** 0.5 / (0.45359237 * 9.80665 / 0.0254**2),
+        description="Leverett J-function scaling factor: capillary pressure in psi from an interfacial tension of 1 dyne/cm, with permeability in mD and porosity as a fraction (sigma * sqrt(phi / k)). Its reciprocal is the 0.2166 in the field-unit J-function definition",
+        unit="psi / ((dyne/cm) * sqrt(1/mD))",
     ),
     "DYNE_PER_CENTIMETER_TO_NEWTON_PER_METER": Constant(
         value=0.001,
@@ -503,26 +509,27 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         unit="kJ/(mol·K)",
     ),
     "IDEAL_GAS_CONSTANT_FIELD": Constant(
-        value=10.73159,
+        value=8.31446261815324 * 1000.0 * 0.45359237 / 1.8 / (0.45359237 * 9.80665 / 0.0254**2) / 0.3048**3,
         description="Universal gas constant (Imperial units)",
         unit="ft³·psi/(lb·mol·°R)",
-        aliases=("IDEAL_GAS_CONSTANT_IMPERIAL",),
+        aliases=('IDEAL_GAS_CONSTANT_IMPERIAL',),
     ),
     # Density Conversions
     "POUNDS_PER_CUBIC_FEET_TO_KILOGRAM_PER_CUBIC_METER": Constant(
-        value=16.0185,
+        value=0.45359237 / 0.3048**3,
         description="Conversion factor from lb/ft³ to kg/m³",
         unit="(kg/m³)/(lb/ft³)",
     ),
     "KILOGRAM_PER_CUBIC_METER_TO_POUNDS_PER_CUBIC_FEET": Constant(
-        value=1 / 16.0185,
+        value=0.3048**3 / 0.45359237,
         description="Conversion factor from kg/m³ to lb/ft³",
         unit="(lb/ft³)/(kg/m³)",
     ),
     "POUNDS_PER_CUBIC_FEET_TO_GRAMS_PER_CUBIC_METER": Constant(
-        value=0.01601846,
+        value=0.45359237 / 0.3048**3 / 1000.0,
         description="Conversion factor from lb/ft³ to g/cm³",
         unit="(g/cm³)/(lb/ft³)",
+        aliases=('POUNDS_PER_CUBIC_FEET_TO_GRAMS_PER_CUBIC_CENTIMETER',),
     ),
     # Concentration Conversions
     "PPM_TO_GRAMS_PER_LITER": Constant(
@@ -603,22 +610,22 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
     ),
     # Flow Rate Conversions
     "CUBIC_METER_PER_SECOND_TO_STB_PER_DAY": Constant(
-        value=543168.384,
+        value=86400.0 / (42.0 * 0.003785411784),
         description="Conversion factor from m³/s to STB/day",
         unit="(STB/day)/(m³/s)",
     ),
     "STB_PER_DAY_TO_CUBIC_METER_PER_SECOND": Constant(
-        value=1 / 543168.384,
+        value=(42.0 * 0.003785411784) / 86400.0,
         description="Conversion factor from STB/day to m³/s",
         unit="(m³/s)/(STB/day)",
     ),
     "CUBIC_METER_PER_SECOND_TO_SCF_PER_DAY": Constant(
-        value=3049492.8,
+        value=86400.0 / 0.3048**3,
         description="Conversion factor from m³/s to scf/day",
         unit="(scf/day)/(m³/s)",
     ),
     "SCF_PER_DAY_TO_CUBIC_METER_PER_SECOND": Constant(
-        value=1 / 3049492.8,
+        value=0.3048**3 / 86400.0,
         description="Conversion factor from scf/day to m³/s",
         unit="(m³/s)/(scf/day)",
     ),
@@ -651,19 +658,19 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
     ),
     # Transmissibility Conversions
     "MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_DAY": Constant(
-        value=1.127e-3,
+        value=(1e-10 / 101325.0) / 1e-3 * (0.45359237 * 9.80665 / 0.0254**2) * 86400.0 / 0.3048**2,
         description="Conversion factor from mD/cP to ft²/(psi·day)",
         unit="(ft²/(psi·day))/(mD/cP)",
     ),
     "MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_SECOND": Constant(
-        value=1.127e-3 / 86400.0,
+        value=((1e-10 / 101325.0) / 1e-3 * (0.45359237 * 9.80665 / 0.0254**2) * 86400.0 / 0.3048**2) / 86400.0,
         description="Conversion factor from mD/cP to ft²/(psi·s)",
         unit="(ft²/(psi·s))/(mD/cP)",
     ),
     "MILLIDARCIES_FT_PER_CENTIPOISE_TO_CUBIC_FEET_PER_PSI_PER_DAY": Constant(
-        value=1.127e-3,
+        value=(1e-10 / 101325.0) / 1e-3 * (0.45359237 * 9.80665 / 0.0254**2) * 86400.0 / 0.3048**2,
+        description="Conversion factor from mD·ft/cP to ft³/(psi·day). The well-known 1.127e-3 is this value divided by 5.614583, i.e. the same factor for bbl/day",
         unit="(ft³/(psi·day))/(mD·ft/cP)",
-        description="Conversion factor from mD·ft/cP to ft³/(psi·day)",
     ),
     # Gravity
     "ACCELERATION_DUE_TO_GRAVITY_METER_PER_SECONDS_SQUARE": Constant(
@@ -812,31 +819,25 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         unit="dimensionless",
     ),
     "RADIAL_FLOW_CONSTANT_FIELD": Constant(
-        value=0.039761801434461244,
+        value=0.03976180178418527,
         description=(
-            "Multiplies a FIELD well index (mD*ft) times mobility (1/cP) "
-            "times drawdown (psi) to get reservoir-condition rate "
-            "(ft3/day). compute_peaceman_well_index's own W = (k*h*N/G) / "
-            "(ln(re/rw)+C+s) has no 2*pi in it, unlike the textbook radial "
-            "Darcy equation, so this constant carries it: 2*pi times the "
-            "material-property conversion from mD*ft/cP to ft3/(psi*day) "
-            "(itself derived via the SI pivot - permeability, length, "
-            "viscosity, and pressure factors to SI, divided by the "
-            "reservoir_rate factor to SI - rather than reused from the "
-            "nearby MILLIDARCIES_FT_PER_CENTIPOISE_TO_CUBIC_FEET_PER_PSI_PER_DAY, "
-            "which despite its name is actually calibrated for bbl/day, "
-            "not ft3/day; this value matches it multiplied by the bbl-to-ft3 "
-            "factor, 5.614583)."
+            "Multiplies a FIELD well index (mD*ft) times mobility (1/cP) times drawdown (psi) to get "
+            "reservoir-condition rate (ft3/day). compute_peaceman_well_index's own W = (k*h*N/G) / "
+            "(ln(re/rw)+C+s) has no 2*pi in it, unlike the textbook radial Darcy equation, so this "
+            "constant carries it: 2*pi times MILLIDARCIES_FT_PER_CENTIPOISE_TO_CUBIC_FEET_PER_PSI_PER_DAY "
+            "(6.3283e-3, the ft3/day Darcy constant; the familiar 1.127e-3 is the same factor for bbl/day). "
+            "It also equals the SI-pivot derivation: 2*pi * (permeability, length, pressure factors to SI / "
+            "viscosity factor to SI) / reservoir_rate factor to SI."
         ),
         unit="(ft3/(psi*day))/(mD*ft/cP)",
     ),
     "RADIAL_FLOW_CONSTANT_METRIC": Constant(
-        value=0.05357680657684692,
+        value=0.05357682808194586,
         description="Same reasoning as RADIAL_FLOW_CONSTANT_FIELD, derived the same way for METRIC's own units (m3/day).",
         unit="(m3/(bar*day))/(mD*m/cP)",
     ),
     "RADIAL_FLOW_CONSTANT_LAB": Constant(
-        value=22.619467868688037,
+        value=22.619467105846507,
         description="Same reasoning as RADIAL_FLOW_CONSTANT_FIELD, derived the same way for LAB's own units (cm3/hr).",
         unit="(cm3/(atm*hr))/(mD*cm/cP)",
     ),
@@ -894,7 +895,7 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
             "power-law singularities at those boundaries (Brooks-Corey, van "
             "Genuchten, LET). Evaluated at access time from the active dtype "
             "context via `get_floating_point_info()`. "
-            "float64: ~1.78e-15 (8*eps) floored to ~1.49e-8 (sqrt(float32 eps)). "
+            "float64: ~1.78e-15 (8*eps) floored to 1e-7. "
             "float32: ~9.54e-7 (8*float32_eps)."
         ),
         unit="fraction",
@@ -1145,6 +1146,35 @@ class Constants:
         for alias in (a for a, c in self._aliases.items() if c == canonical):
             del self._aliases[alias]
 
+    def _wrap(self, canonical: str, value: typing.Any) -> Constant | ConstantFactory:
+        """
+        Wrap a value being assigned to `canonical`.
+
+        A `Constant` or `ConstantFactory` is stored as given. A bare value or a callable replaces
+        only the value of the constant already stored under `canonical`, so its description, unit and
+        aliases carry over.
+        """
+        if isinstance(value, (Constant, ConstantFactory)):
+            return value
+        existing = self._store.get(canonical)
+        if callable(value):
+            if existing is None:
+                return ConstantFactory(factory=value)
+            return ConstantFactory(
+                factory=value,
+                description=existing.description,
+                unit=existing.unit,
+                aliases=existing.aliases,
+            )
+        if existing is None:
+            return Constant(value=value)
+        return Constant(
+            value=value,
+            description=existing.description,
+            unit=existing.unit,
+            aliases=existing.aliases,
+        )
+
     def _resolve(self, name: str) -> str:
         """Resolve `name` to its canonical store key (identity if not an alias)."""
         return self._aliases.get(name, name)
@@ -1172,7 +1202,7 @@ class Constants:
             return
 
         canonical = self._resolve(name)
-        wrapped = value if isinstance(value, Constant) else Constant(value=value)
+        wrapped = self._wrap(canonical, value)
         self._store[canonical] = wrapped
         # A value set via `c.SOME_ALIAS = ...` doesn't retroactively rename
         # the canonical slot, it just updates the value living there. If the
@@ -1181,7 +1211,7 @@ class Constants:
 
     def __setitem__(self, name: str, value: typing.Any | Constant) -> None:
         canonical = self._resolve(name)
-        wrapped = value if isinstance(value, Constant) else Constant(value=value)
+        wrapped = self._wrap(canonical, value)
         self._store[canonical] = wrapped
         self._register_aliases(canonical, wrapped)
 
@@ -1228,7 +1258,7 @@ class Constants:
         constant = self._store.get(self._resolve(name))
         if constant is None:
             return default
-        return constant.value if isinstance(constant, Constant) else constant
+        return constant.value if isinstance(constant, (Constant, ConstantFactory)) else constant
 
     def get_constant(self, name: str, default: Constant | None = None) -> Constant | None:
         return self._store.get(self._resolve(name), default)

@@ -350,7 +350,7 @@ class WellStates(
     def __len__(self) -> int:
         return len(self.states)
 
-    def __contains__(self, well_name: object) -> bool:
+    def __contains__(self, well_name: typing.Any) -> bool:
         return well_name in self.states
 
     def convert(

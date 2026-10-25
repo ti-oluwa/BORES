@@ -167,7 +167,7 @@ def set_unit_system(unit_system: UnitSystem, /) -> None:
             "Cannot set unit system. Are you in a `UnitSystemContext`? "
             "Only call in default context"
         )
-    _unit_system_context.set((UnitSystem(unit_system), uuid4().hex))
+    _unit_system_context.set((UnitSystem(unit_system), DEFAULT_CONTEXT_ID))
 
 
 def build_unit_conversion_table(constants: Constants | None = None) -> UnitConversionTable:
@@ -214,10 +214,7 @@ def build_unit_conversion_table(constants: Constants | None = None) -> UnitConve
     cm_to_ft: Number = cm_to_m * m_to_ft
     kg_m3_to_g_cm3: Number = 1000.0 * cm_to_m**3  # kg/m3 -> g/cm3 (1e-3)
 
-    bar_to_pascal: Number = psi_to_pa / (psi_to_pa / atm_to_pa * (1.0 / psi_to_bar) * psi_to_bar)
-    # Simpler: bar_to_pascal = 1e5; but derive from constants to stay consistent
-    # 1 bar = 14.5038 psi; bar_to_pascal = 14.5038 * psi_to_pa / 14.5038... just:
-    bar_to_pascal = 1.0 / psi_to_bar * psi_to_pa  # 100 000 Pa/bar
+    bar_to_pascal: Number = psi_to_pa / psi_to_bar  # 100 000 Pa/bar
     psi_to_atm: Number = psi_to_pa / atm_to_pa
     bar_to_atm: Number = bar_to_pascal / atm_to_pa
 
