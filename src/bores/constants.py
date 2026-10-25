@@ -687,17 +687,17 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         unit="m/s²",
     ),
     "ACCELERATION_DUE_TO_GRAVITY_FEET_PER_SECONDS_SQUARE": Constant(
-        value=32.174,
+        value=9.80665 / 0.3048,
         description="Standard acceleration due to gravity (on preferred planet - default is Earth) in ft/s²",
         unit="ft/s²",
     ),
     "ACCELERATION_DUE_TO_GRAVITY_FEET_PER_DAY_SQUARE": Constant(
-        value=32.174 * 86400.0**2,
+        value=9.80665 / 0.3048 * 86400.0**2,
         description="Standard acceleration due to gravity (on preferred planet - default is Earth) in ft/day²",
         unit="ft/day²",
     ),
     "GRAVITATIONAL_FACTOR_FIELD": Constant(
-        value=32.174,
+        value=9.80665 / 0.3048,
         description="Gravitational conversion factor in lbm·ft/(lbf·s²). Conversion factor from pound-force to pound-mass or vice versa under Earth's gravity.",
         unit="lbm·ft/(lbf·s²)",
         aliases=("GRAVITATIONAL_FACTOR_LBM_FT_PER_LBF_S2",),
