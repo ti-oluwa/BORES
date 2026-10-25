@@ -242,8 +242,7 @@ def compute_segment_drop(
     inclination_from_vertical: Number,
     mixture_density: Number,
     mixture_viscosity: Number,
-    mixture_velocity_in: Number,
-    mixture_velocity_out: Number,
+    mixture_velocity: Number,
 ) -> PressureDrop:
     """
     Computes the pressure drop across one tubing segment.
@@ -253,8 +252,7 @@ def compute_segment_drop(
     :param inclination_from_vertical: Segment inclination, in radians. `0` is vertical.
     :param mixture_density: No-slip mixture density for this segment.
     :param mixture_viscosity: No-slip mixture viscosity for this segment.
-    :param mixture_velocity_in: Superficial mixture velocity entering the segment.
-    :param mixture_velocity_out: Superficial mixture velocity leaving the segment.
+    :param mixture_velocity: Superficial mixture velocity in the segment.
     :returns: Pressure drop for this segment.
     """
     return compute_segment_pressure_drop(
@@ -264,8 +262,7 @@ def compute_segment_drop(
         tubing_roughness=model.tubing_roughness,
         mixture_density=mixture_density,
         mixture_viscosity=mixture_viscosity,
-        mixture_velocity_in=mixture_velocity_in,
-        mixture_velocity_out=mixture_velocity_out,
+        mixture_velocity=mixture_velocity,
         gravitational_acceleration=model.gravitational_acceleration,
         hydrostatic_scale=model.hydrostatic_scale,
         viscosity_scale=model.viscosity_scale,
@@ -379,18 +376,13 @@ def walk_perforation_pressures(
                 tubing_inner_diameter=model.tubing_inner_diameter,
                 rate_time_factor=model.rate_time_factor,
             )
-            # Velocity is only ever set at a connection, where a perforation's own rate joins or
-            # leaves the flow. Within one segment there is no other source of velocity change
-            # (constant PVT properties are assumed along the segment), so passing the same value
-            # in and out means the acceleration term always comes out to zero.
             drop = compute_segment_drop(
                 model=model,
                 length=walk.segment_lengths[step],
                 inclination_from_vertical=inclinations_from_vertical[idx],  # type: ignore
                 mixture_density=mixture_density,
                 mixture_viscosity=mixture_viscosity,
-                mixture_velocity_in=velocity,
-                mixture_velocity_out=velocity,
+                mixture_velocity=velocity,
             )
             pressures[idx] = (
                 previous_pressure
@@ -529,17 +521,13 @@ def compute_tubing_head_pressure(
         tubing_inner_diameter=model.tubing_inner_diameter,
         rate_time_factor=model.rate_time_factor,
     )
-    # Same simplification as compute_perforation_pressures: velocity is
-    # held constant across this tubing segment, so the acceleration term
-    # always comes out to zero here too.
     drop = compute_segment_drop(
         model=model,
         length=abs(dz),
         inclination_from_vertical=0.0,
         mixture_density=mixture_density,
         mixture_viscosity=mixture_viscosity,
-        mixture_velocity_in=velocity,
-        mixture_velocity_out=velocity,
+        mixture_velocity=velocity,
     )
     return (
         reference_pressure - (drop.hydrostatic + drop.acceleration) - friction_sign * drop.friction

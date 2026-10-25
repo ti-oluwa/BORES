@@ -56,7 +56,8 @@ class PressureDrop(typing.NamedTuple):
     """Pressure loss from friction against the tubing wall."""
 
     acceleration: Number
-    """Pressure change from the fluid speeding up or slowing down along the segment."""
+    """Pressure change from the fluid speeding up or slowing down along the segment. Zero for a
+    correlation that neglects it, which is every one except Beggs & Brill."""
 
     @property
     def total(self) -> Number:
@@ -653,8 +654,7 @@ def compute_segment_pressure_drop(
     tubing_roughness: Number,
     mixture_density: Number,
     mixture_viscosity: Number,
-    mixture_velocity_in: Number,
-    mixture_velocity_out: Number,
+    mixture_velocity: Number,
     gravitational_acceleration: Number,
     hydrostatic_scale: Number,
     viscosity_scale: Number,
@@ -674,8 +674,7 @@ def compute_segment_pressure_drop(
     :param tubing_roughness: Absolute pipe roughness. `NaN` for a smooth pipe.
     :param mixture_density: No-slip mixture density for this segment.
     :param mixture_viscosity: No-slip mixture viscosity for this segment.
-    :param mixture_velocity_in: Superficial mixture velocity entering the segment.
-    :param mixture_velocity_out: Superficial mixture velocity leaving the segment.
+    :param mixture_velocity: Superficial mixture velocity in the segment.
     :param gravitational_acceleration: Acceleration due to gravity, already unit-resolved.
     :param hydrostatic_scale: Unit-conversion factor converting a
         `density * velocity-squared` or `density * gravitational_acceleration
@@ -702,7 +701,7 @@ def compute_segment_pressure_drop(
         mixture_density * gravitational_acceleration * vertical_length * hydrostatic_scale
     )
 
-    mean_velocity = 0.5 * (mixture_velocity_in + mixture_velocity_out)
+    mean_velocity = mixture_velocity
     relative_roughness = (
         0.0 if math.isnan(tubing_roughness) else tubing_roughness / tubing_inner_diameter
     )
@@ -731,11 +730,14 @@ def compute_segment_pressure_drop(
             * hydrostatic_scale
         )
 
-    acceleration_drop = mixture_density * (mixture_velocity_out**2 - mixture_velocity_in**2) / 2.0
+    # The acceleration (kinetic energy) term is neglected. Evaluating it needs the fluid's velocity at
+    # both ends of the segment, which means fluid properties at the flowing pressure at each end, and
+    # the connection fluids are only known at reservoir conditions. It is small for oil wells, but a
+    # high gas rate at a low wellhead pressure can make it matter.
     return PressureDrop(
         hydrostatic=hydrostatic_drop,
         friction=friction_drop,
-        acceleration=acceleration_drop,
+        acceleration=0.0,
     )
 
 

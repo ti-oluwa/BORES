@@ -608,15 +608,14 @@ def compute_segment_drop(
             * model.hydrostatic_scale
         )
 
-    # Velocity is only ever set at a connection, where a perforation's own
-    # rate joins or leaves the flow (see compute_perforation_pressures).
-    # Within one segment there is no other source of velocity change, so
-    # this term is always zero today.
-    acceleration_drop = in_situ_density * (mixture_velocity**2 - mixture_velocity**2) / 2.0
+    # The acceleration (kinetic energy) term is neglected. Evaluating it needs the fluid's velocity at
+    # both ends of the segment, which means fluid properties at the flowing pressure at each end, and
+    # the connection fluids are only known at reservoir conditions. It is small for oil wells, but a
+    # high gas rate at a low wellhead pressure can make it matter.
     return PressureDrop(
         hydrostatic=hydrostatic_drop,
         friction=friction_drop,
-        acceleration=acceleration_drop,
+        acceleration=0.0,
     )
 
 

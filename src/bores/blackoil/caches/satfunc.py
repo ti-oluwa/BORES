@@ -126,7 +126,8 @@ def compute_satfunc_cache(
 
     Groups cells by `saturation_region` and evaluates each region's
     `SatFuncTables` once per property, vectorised over that
-    region's cells.
+    region's cells. The relative permeabilities and their derivatives are
+    computed together, which analytical models do in a single pass.
 
     **Reuse**: pass a previous call's returned `SatFuncCache` as
     `out` to overwrite its arrays in place; the return value is `out` itself
@@ -193,8 +194,12 @@ def compute_satfunc_cache(
         cache = make_new_cache(n_cells, dtype=dtype)
 
     cache.saturation_region[:] = saturation_region
-    for region in np.unique(saturation_region):
-        mask = saturation_region == region
+    regions = np.unique(saturation_region)
+    # With a single saturation region every cell belongs to it, so views of the inputs and
+    # whole-array assignment replace the boolean-mask copies that several regions need.
+    single_region = len(regions) == 1
+    for region in regions:
+        mask = slice(None) if single_region else saturation_region == region
         tables = satfunc[region]
 
         sw = water_saturation[mask]
@@ -228,12 +233,13 @@ def compute_satfunc_cache(
             state_kwargs["gas_reversal_saturation"] = gas_reversal_saturation[mask]
 
         relperm_table = tables.relative_permeability
-        relperm = relperm_table.evaluate(sw, so, sg, **state_kwargs)
+        relperm, relperm_derivatives = relperm_table.evaluate_with_derivatives(
+            sw, so, sg, **state_kwargs
+        )
         cache.water_relative_permeability[mask] = relperm["water"]
         cache.oil_relative_permeability[mask] = relperm["oil"]
         cache.gas_relative_permeability[mask] = relperm["gas"]
 
-        relperm_derivatives = relperm_table.derivatives(sw, so, sg, **state_kwargs)
         cache.dkrw_dsw[mask] = relperm_derivatives["dkrw_dsw"]
         cache.dkro_dsw[mask] = relperm_derivatives["dkro_dsw"]
         cache.dkrg_dsw[mask] = relperm_derivatives["dkrg_dsw"]

@@ -9,6 +9,7 @@ import numpy as np
 from bores.blackoil.satfunc.relperm.mixing_rules import (
     MixingRule,
     baker_linear_rule,
+    get_builtin_rule_id,
     get_mixing_rule,
 )
 from bores.blackoil.satfunc.relperm.models.derivatives import (
@@ -19,6 +20,24 @@ from bores.blackoil.satfunc.relperm.models.derivatives import (
     finalize_mixed_wet_derivatives,
     finalize_oil_wet_derivatives,
     finalize_water_wet_derivatives,
+    validate_and_normalize_saturations,
+)
+from bores.blackoil.satfunc.relperm.models.kernels import (
+    RelPermCell,
+    blend_cells,
+    clip_unit,
+    finalize_mixed_wet_cell,
+    finalize_oil_wet_cell,
+    finalize_water_wet_cell,
+    floor_relperm,
+    normalize_cell_saturations,
+    prepare_relperm_inputs,
+    rule_derivatives,
+    rule_value,
+    to_kernel_minimum,
+)
+from bores.blackoil.satfunc.relperm.models.validation import (
+    validate_analytical_relperm_parameters,
 )
 from bores.blackoil.satfunc.relperm.tables import (
     MinimumRelPerm,
@@ -27,6 +46,7 @@ from bores.blackoil.satfunc.relperm.tables import (
     resolve_min_relperm,
     show_invalid_saturation,
 )
+from bores.blackoil.satfunc.utils import element_at, get_floating_dtype
 from bores.constants import c
 from bores.errors import ValidationError
 from bores.serde.base import Serializable
@@ -36,6 +56,7 @@ from bores.types import (
     Number,
     NumberArray,
     NumberOrArray,
+    OneDimension,
     RelativePermeabilities,
     RelativePermeabilityDerivatives,
     Wettability,
@@ -127,6 +148,1122 @@ def _let_relperm(
     return np.where(denominator > 0.0, numerator / denominator, 0.0)  # type: ignore[return-value]
 
 
+@numba.njit(cache=True, inline="always", error_model="numpy")
+def compute_let_curve_cell(normalized_saturation: float, L: float, E: float, T: float) -> float:
+    """LET relative permeability curve `S**L / (S**L + E * (1 - S)**T)` without endpoint scaling."""
+    numerator = normalized_saturation**L
+    denominator = numerator + E * (1.0 - normalized_saturation) ** T
+    if denominator > 0.0:
+        return numerator / denominator
+    return 0.0
+
+
+@numba.njit(cache=True, inline="always", error_model="numpy")
+def compute_let_curve_slope_cell(
+    normalized_saturation: float, L: float, E: float, T: float, kr_max: float
+) -> float:
+    """
+    Derivative of the LET curve scaled by `kr_max` with respect to the normalized saturation.
+
+    The slope is zero at normalized saturations of 0 and 1.
+    """
+    if normalized_saturation <= 0.0 or normalized_saturation >= 1.0:
+        return 0.0
+    s = normalized_saturation
+    if s < 1e-15:
+        s = 1e-15
+    elif s > 1.0 - 1e-15:
+        s = 1.0 - 1e-15
+    denominator = s**L + E * (1.0 - s) ** T
+    safe_denominator = denominator if denominator > 1e-30 else 1e-30
+    numerator = E * (s ** (L - 1.0)) * ((1.0 - s) ** (T - 1.0)) * (L * (1.0 - s) + T * s)
+    return kr_max * numerator / (safe_denominator**2)
+
+
+@numba.njit(cache=True, inline="always", error_model="numpy")
+def compute_let_effective_saturation(
+    numerator: float, mobile_range: float, minimum_mobile_pore_space: float
+) -> float:
+    """
+    Saturation scaled to the range 0 to 1, or zero when the mobile range is smaller than
+    `minimum_mobile_pore_space`.
+    """
+    if mobile_range <= minimum_mobile_pore_space:
+        return 0.0
+    return clip_unit(numerator / mobile_range)
+
+
+@numba.njit(cache=True, error_model="numpy")
+def compute_let_phase(
+    numerator: float,
+    mobile_range: float,
+    parameters: tuple[float, float, float],
+    maximum_relperm: float,
+    minimum_mobile_pore_space: float,
+) -> tuple[float, float]:
+    """
+    LET relative permeability of one phase and its slope with respect to the saturation of that
+    phase.
+
+    :param numerator: Saturation of the phase above the lower end of its mobile range.
+    :param mobile_range: Width of the saturation interval over which the phase is mobile.
+    :param parameters: LET parameters `(L, E, T)` of the phase.
+    """
+    L, E, T = parameters
+    effective = compute_let_effective_saturation(
+        numerator, mobile_range, minimum_mobile_pore_space
+    )
+    relperm = maximum_relperm * compute_let_curve_cell(effective, L, E, T)
+    if mobile_range > minimum_mobile_pore_space:
+        slope = compute_let_curve_slope_cell(effective, L, E, T, maximum_relperm) / mobile_range
+    else:
+        slope = 0.0
+    return relperm, slope
+
+
+@numba.njit(cache=True, error_model="numpy")
+def compute_let_declining(
+    remaining_saturation: float,
+    mobile_range: float,
+    parameters: tuple[float, float, float],
+    minimum_mobile_pore_space: float,
+) -> tuple[float, float]:
+    """
+    Unit-endpoint LET relative permeability of oil in a two-phase system, and its slope with
+    respect to the saturation of the displacing phase (negative, since oil relative
+    permeability falls as the displacing phase advances).
+    """
+    L, E, T = parameters
+    effective = compute_let_effective_saturation(
+        remaining_saturation, mobile_range, minimum_mobile_pore_space
+    )
+    relperm = compute_let_curve_cell(effective, L, E, T)
+    slope = 0.0
+    if mobile_range > minimum_mobile_pore_space:
+        unclipped = remaining_saturation / mobile_range
+        if unclipped > 0.0 and unclipped < 1.0:
+            slope = -compute_let_curve_slope_cell(effective, L, E, T, 1.0) / mobile_range
+    return relperm, slope
+
+
+@numba.njit(cache=True, error_model="numpy")
+def compute_let_water_wet_values(
+    sw: float,
+    so: float,
+    sg: float,
+    swc: float,
+    sorw: float,
+    sorg: float,
+    sgr: float,
+    water: tuple[float, float, float],
+    oil_water: tuple[float, float, float],
+    gas_oil: tuple[float, float, float],
+    gas: tuple[float, float, float],
+    maximum_water_relperm: float,
+    maximum_oil_relperm: float,
+    maximum_gas_relperm: float,
+    rule_id: int,
+    minimum_mobile_pore_space: float,
+    rule_minimum_mobile_pore_space: float,
+) -> tuple[float, float, float]:
+    """LET relative permeabilities of a water-wet cell, before limiting and flooring."""
+    wL, wE, wT = water
+    gL, gE, gT = gas
+    owL, owE, owT = oil_water
+    goL, goE, goT = gas_oil
+    krw = maximum_water_relperm * compute_let_curve_cell(
+        compute_let_effective_saturation(sw - swc, 1.0 - swc - sorw, minimum_mobile_pore_space),
+        wL,
+        wE,
+        wT,
+    )
+    krg = maximum_gas_relperm * compute_let_curve_cell(
+        compute_let_effective_saturation(
+            sg - sgr, 1.0 - swc - sgr - sorg, minimum_mobile_pore_space
+        ),
+        gL,
+        gE,
+        gT,
+    )
+    kro_w = compute_let_curve_cell(
+        compute_let_effective_saturation(
+            1.0 - sw - sorw, 1.0 - swc - sorw, minimum_mobile_pore_space
+        ),
+        owL,
+        owE,
+        owT,
+    )
+    kro_g = compute_let_curve_cell(
+        compute_let_effective_saturation(
+            1.0 - swc - sg - sorg, 1.0 - swc - sorg - sgr, minimum_mobile_pore_space
+        ),
+        goL,
+        goE,
+        goT,
+    )
+    kro = maximum_oil_relperm * rule_value(
+        rule_id, kro_w, kro_g, krw, krg, 1.0, sw, so, sg, swc, sorw, sorg,
+        rule_minimum_mobile_pore_space,
+    )  # fmt: skip
+    return krw, kro, krg
+
+
+@numba.njit(cache=True, error_model="numpy")
+def compute_let_oil_wet_values(
+    sw: float,
+    so: float,
+    sg: float,
+    swc: float,
+    sorw: float,
+    sorg: float,
+    sgr: float,
+    water: tuple[float, float, float],
+    oil_water: tuple[float, float, float],
+    gas_oil: tuple[float, float, float],
+    gas: tuple[float, float, float],
+    maximum_water_relperm: float,
+    maximum_oil_relperm: float,
+    maximum_gas_relperm: float,
+    rule_id: int,
+    minimum_mobile_pore_space: float,
+    rule_minimum_mobile_pore_space: float,
+) -> tuple[float, float, float]:
+    """LET relative permeabilities of an oil-wet cell, before limiting and flooring."""
+    wL, wE, wT = water
+    gL, gE, gT = gas
+    owL, owE, owT = oil_water
+    lowest_residual_oil = min(sorw, sorg)
+    kro = maximum_oil_relperm * compute_let_curve_cell(
+        compute_let_effective_saturation(
+            so - lowest_residual_oil, 1.0 - sorw - sorg, minimum_mobile_pore_space
+        ),
+        owL,
+        owE,
+        owT,
+    )
+    krg = maximum_gas_relperm * compute_let_curve_cell(
+        compute_let_effective_saturation(sg - sgr, 1.0 - sgr - swc, minimum_mobile_pore_space),
+        gL,
+        gE,
+        gT,
+    )
+    krw_oil_water = compute_let_curve_cell(
+        compute_let_effective_saturation(sw - swc, 1.0 - swc - sorw, minimum_mobile_pore_space),
+        wL,
+        wE,
+        wT,
+    )
+    krw_gas_water = compute_let_curve_cell(
+        compute_let_effective_saturation(sw - swc, 1.0 - swc - sgr, minimum_mobile_pore_space),
+        wL,
+        wE,
+        wT,
+    )
+    krw = maximum_water_relperm * rule_value(
+        rule_id, krw_oil_water, krw_gas_water, kro, krg, 1.0, so, sw, sg, lowest_residual_oil,
+        swc, swc, rule_minimum_mobile_pore_space,
+    )  # fmt: skip
+    return krw, kro, krg
+
+
+@numba.njit(cache=True, error_model="numpy")
+def compute_let_water_wet_cell(
+    sw: float,
+    so: float,
+    sg: float,
+    swc: float,
+    sorw: float,
+    sorg: float,
+    sgr: float,
+    water: tuple[float, float, float],
+    oil_water: tuple[float, float, float],
+    gas_oil: tuple[float, float, float],
+    gas: tuple[float, float, float],
+    maximum_water_relperm: float,
+    maximum_oil_relperm: float,
+    maximum_gas_relperm: float,
+    rule_id: int,
+    minimum_mobile_pore_space: float,
+    rule_minimum_mobile_pore_space: float,
+) -> RelPermCell:
+    """
+    LET relative permeabilities and derivatives of a water-wet cell.
+
+    Water and gas follow LET curves of their own saturation. Oil follows the three-phase mixing
+    rule applied to the two-phase oil curves of the oil-water and gas-oil systems, and its
+    derivatives are completed by the chain rule through the mixing rule.
+    """
+    krw, dkrw_dsw = compute_let_phase(
+        sw - swc, 1.0 - swc - sorw, water, maximum_water_relperm, minimum_mobile_pore_space
+    )
+    krg, dkrg_dsg = compute_let_phase(
+        sg - sgr, 1.0 - swc - sgr - sorg, gas, maximum_gas_relperm, minimum_mobile_pore_space
+    )
+    kro_w, dkro_w_dsw = compute_let_declining(
+        1.0 - sw - sorw, 1.0 - swc - sorw, oil_water, minimum_mobile_pore_space
+    )
+    kro_g, dkro_g_dsg = compute_let_declining(
+        1.0 - swc - sg - sorg, 1.0 - swc - sorg - sgr, gas_oil, minimum_mobile_pore_space
+    )
+    d_kro_w, d_kro_g, d_krw, d_krg, d_sw, d_so, d_sg = rule_derivatives(
+        rule_id, kro_w, kro_g, krw, krg, 1.0, sw, so, sg, swc, sorw, sorg,
+        rule_minimum_mobile_pore_space,
+    )  # fmt: skip
+    kro = maximum_oil_relperm * rule_value(
+        rule_id, kro_w, kro_g, krw, krg, 1.0, sw, so, sg, swc, sorw, sorg,
+        rule_minimum_mobile_pore_space,
+    )  # fmt: skip
+    return RelPermCell(
+        krw,
+        kro,
+        krg,
+        dkrw_dsw,
+        0.0,
+        0.0,
+        maximum_oil_relperm * (d_kro_w * dkro_w_dsw + d_krw * dkrw_dsw + d_sw),
+        maximum_oil_relperm * d_so,
+        maximum_oil_relperm * (d_kro_g * dkro_g_dsg + d_krg * dkrg_dsg + d_sg),
+        dkrg_dsg,
+    )
+
+
+@numba.njit(cache=True, error_model="numpy")
+def compute_let_oil_wet_cell(
+    sw: float,
+    so: float,
+    sg: float,
+    swc: float,
+    sorw: float,
+    sorg: float,
+    sgr: float,
+    water: tuple[float, float, float],
+    oil_water: tuple[float, float, float],
+    gas_oil: tuple[float, float, float],
+    gas: tuple[float, float, float],
+    maximum_water_relperm: float,
+    maximum_oil_relperm: float,
+    maximum_gas_relperm: float,
+    rule_id: int,
+    minimum_mobile_pore_space: float,
+    rule_minimum_mobile_pore_space: float,
+) -> RelPermCell:
+    """
+    LET relative permeabilities and derivatives of an oil-wet cell.
+
+    Oil is the wetting phase, so oil follows the oil-water LET curve of oil saturation and gas a
+    LET curve of gas saturation. Water is the intermediate phase, so it follows the three-phase
+    mixing rule applied to the two-phase water curves, and its derivatives are completed by the
+    chain rule through the rule. The rule is evaluated with the roles of water and oil exchanged.
+    """
+    lowest_residual_oil = min(sorw, sorg)
+    kro, dkro_dso = compute_let_phase(
+        so - lowest_residual_oil,
+        1.0 - sorw - sorg,
+        oil_water,
+        maximum_oil_relperm,
+        minimum_mobile_pore_space,
+    )
+    krg, dkrg_dsg = compute_let_phase(
+        sg - sgr, 1.0 - sgr - swc, gas, maximum_gas_relperm, minimum_mobile_pore_space
+    )
+    krw_oil_water, dkrw_oil_water_dsw = compute_let_phase(
+        sw - swc, 1.0 - swc - sorw, water, 1.0, minimum_mobile_pore_space
+    )
+    krw_gas_water, dkrw_gas_water_dsw = compute_let_phase(
+        sw - swc, 1.0 - swc - sgr, water, 1.0, minimum_mobile_pore_space
+    )
+    # The rule is evaluated with water and oil exchanged, so its "water saturation" slot is oil
+    # saturation and its "oil saturation" slot is water saturation.
+    d_krw_oil_water, d_krw_gas_water, d_kro, d_krg, d_slot_water, d_slot_oil, d_slot_gas = (
+        rule_derivatives(
+            rule_id, krw_oil_water, krw_gas_water, kro, krg, 1.0, so, sw, sg,
+            lowest_residual_oil, swc, swc, rule_minimum_mobile_pore_space,
+        )
+    )  # fmt: skip
+    krw = maximum_water_relperm * rule_value(
+        rule_id, krw_oil_water, krw_gas_water, kro, krg, 1.0, so, sw, sg, lowest_residual_oil,
+        swc, swc, rule_minimum_mobile_pore_space,
+    )  # fmt: skip
+    return RelPermCell(
+        krw,
+        kro,
+        krg,
+        maximum_water_relperm
+        * (
+            d_krw_oil_water * dkrw_oil_water_dsw
+            + d_krw_gas_water * dkrw_gas_water_dsw
+            + d_slot_oil
+        ),
+        maximum_water_relperm * (d_kro * dkro_dso + d_slot_water),
+        maximum_water_relperm * (d_krg * dkrg_dsg + d_slot_gas),
+        0.0,
+        dkro_dso,
+        0.0,
+        dkrg_dsg,
+    )
+
+
+@numba.njit(cache=True, error_model="numpy")
+def compute_let_values_cell(
+    sw: float,
+    so: float,
+    sg: float,
+    swc: float,
+    sorw: float,
+    sorg: float,
+    sgr: float,
+    water: tuple[float, float, float],
+    oil_water: tuple[float, float, float],
+    gas_oil: tuple[float, float, float],
+    gas: tuple[float, float, float],
+    maximum_water_relperm: float,
+    maximum_oil_relperm: float,
+    maximum_gas_relperm: float,
+    wettability: Wettability,
+    mixed_wet_water_fraction: float,
+    rule_id: int,
+    saturation_epsilon: float,
+    minimum_mobile_pore_space: float,
+    rule_minimum_mobile_pore_space: float,
+    minimum_water_relperm: float,
+    minimum_oil_relperm: float,
+    minimum_gas_relperm: float,
+) -> tuple[float, float, float]:
+    """
+    LET relative permeabilities of one cell.
+
+    The saturations are scaled to sum to 1 when they differ from 1 by more than
+    `saturation_epsilon`, and the results are limited to the range 0 to 1 and floored by the
+    minimum relative permeabilities. A minimum of `NO_MINIMUM` means no floor.
+
+    :return: Tuple of water, oil and gas relative permeability.
+    """
+    sw, so, sg = normalize_cell_saturations(sw, so, sg, saturation_epsilon)
+    if wettability == Wettability.WATER_WET:
+        krw, kro, krg = compute_let_water_wet_values(
+            sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
+            maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
+            minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+        )  # fmt: skip
+    elif wettability == Wettability.OIL_WET:
+        krw, kro, krg = compute_let_oil_wet_values(
+            sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
+            maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
+            minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+        )  # fmt: skip
+    else:
+        krw_ww, kro_ww, krg_ww = compute_let_water_wet_values(
+            sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
+            maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
+            minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+        )  # fmt: skip
+        krw_ow, kro_ow, krg_ow = compute_let_oil_wet_values(
+            sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
+            maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
+            minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+        )  # fmt: skip
+        fraction = mixed_wet_water_fraction
+        krw = fraction * krw_ww + (1.0 - fraction) * krw_ow
+        kro = fraction * kro_ww + (1.0 - fraction) * kro_ow
+        krg = fraction * krg_ww + (1.0 - fraction) * krg_ow
+    return (
+        floor_relperm(clip_unit(krw), minimum_water_relperm),
+        floor_relperm(clip_unit(kro), minimum_oil_relperm),
+        floor_relperm(clip_unit(krg), minimum_gas_relperm),
+    )
+
+
+@numba.njit(cache=True, error_model="numpy")
+def compute_let_derivatives_cell(
+    sw: float,
+    so: float,
+    sg: float,
+    swc: float,
+    sorw: float,
+    sorg: float,
+    sgr: float,
+    water: tuple[float, float, float],
+    oil_water: tuple[float, float, float],
+    gas_oil: tuple[float, float, float],
+    gas: tuple[float, float, float],
+    maximum_water_relperm: float,
+    maximum_oil_relperm: float,
+    maximum_gas_relperm: float,
+    wettability: Wettability,
+    mixed_wet_water_fraction: float,
+    rule_id: int,
+    saturation_epsilon: float,
+    minimum_mobile_pore_space: float,
+    rule_minimum_mobile_pore_space: float,
+    minimum_water_relperm: float,
+    minimum_oil_relperm: float,
+    minimum_gas_relperm: float,
+) -> tuple[float, float, float, float, float, float, float, float, float]:
+    """
+    LET partial derivatives of the relative permeabilities of one cell.
+
+    The saturations are scaled in the same way as in `compute_let_values_cell`, so the
+    derivatives belong to the same point as the values. A minimum of `NO_MINIMUM` means no floor.
+
+    :return: Tuple of `dkrw_dsw`, `dkro_dsw`, `dkrg_dsw`, `dkrw_dso`, `dkro_dso`, `dkrg_dso`,
+        `dkrw_dsg`, `dkro_dsg` and `dkrg_dsg`.
+    """
+    sw, so, sg = normalize_cell_saturations(sw, so, sg, saturation_epsilon)
+    if wettability == Wettability.WATER_WET:
+        return finalize_water_wet_cell(
+            compute_let_water_wet_cell(
+                sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
+                maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
+                minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+            ),
+            minimum_water_relperm, minimum_oil_relperm, minimum_gas_relperm,
+        )  # fmt: skip
+    if wettability == Wettability.OIL_WET:
+        return finalize_oil_wet_cell(
+            compute_let_oil_wet_cell(
+                sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
+                maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
+                minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+            ),
+            minimum_water_relperm, minimum_oil_relperm, minimum_gas_relperm,
+        )  # fmt: skip
+    return finalize_mixed_wet_cell(
+        blend_cells(
+            compute_let_water_wet_cell(
+                sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
+                maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
+                minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+            ),
+            compute_let_oil_wet_cell(
+                sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
+                maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
+                minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+            ),
+            mixed_wet_water_fraction,
+        ),
+        minimum_water_relperm, minimum_oil_relperm, minimum_gas_relperm,
+    )  # fmt: skip
+
+
+@numba.njit(cache=True, parallel=True, error_model="numpy")
+def compute_let_values_loop(
+    water_saturation: NumberArray[OneDimension],
+    oil_saturation: NumberArray[OneDimension],
+    gas_saturation: NumberArray[OneDimension],
+    irreducible_water_saturation: NumberArray[OneDimension],
+    residual_oil_saturation_water: NumberArray[OneDimension],
+    residual_oil_saturation_gas: NumberArray[OneDimension],
+    residual_gas_saturation: NumberArray[OneDimension],
+    water: tuple[float, float, float],
+    oil_water: tuple[float, float, float],
+    gas_oil: tuple[float, float, float],
+    gas: tuple[float, float, float],
+    maximum_water_relperm: float,
+    maximum_oil_relperm: float,
+    maximum_gas_relperm: float,
+    wettability: Wettability,
+    mixed_wet_water_fraction: float,
+    rule_id: int,
+    saturation_epsilon: float,
+    minimum_mobile_pore_space: float,
+    rule_minimum_mobile_pore_space: float,
+    minimum_water_relperm: float,
+    minimum_oil_relperm: float,
+    minimum_gas_relperm: float,
+    size: int,
+    water_relperm: NumberArray[OneDimension],
+    oil_relperm: NumberArray[OneDimension],
+    gas_relperm: NumberArray[OneDimension],
+) -> None:
+    """
+    Compute the LET relative permeabilities of `size` cells in parallel and write them
+    to the output arrays.
+
+    Per-cell inputs are flat arrays, or a single value shared by every cell.
+    """
+    for i in numba.prange(size):
+        krw, kro, krg = compute_let_values_cell(
+            np.float64(element_at(water_saturation, i)),
+            np.float64(element_at(oil_saturation, i)),
+            np.float64(element_at(gas_saturation, i)),
+            np.float64(element_at(irreducible_water_saturation, i)),
+            np.float64(element_at(residual_oil_saturation_water, i)),
+            np.float64(element_at(residual_oil_saturation_gas, i)),
+            np.float64(element_at(residual_gas_saturation, i)),
+            water,
+            oil_water,
+            gas_oil,
+            gas,
+            maximum_water_relperm,
+            maximum_oil_relperm,
+            maximum_gas_relperm,
+            wettability,
+            mixed_wet_water_fraction,
+            rule_id,
+            saturation_epsilon,
+            minimum_mobile_pore_space,
+            rule_minimum_mobile_pore_space,
+            minimum_water_relperm,
+            minimum_oil_relperm,
+            minimum_gas_relperm,
+        )
+        water_relperm[i] = krw
+        oil_relperm[i] = kro
+        gas_relperm[i] = krg
+
+
+@numba.njit(cache=True, parallel=True, error_model="numpy")
+def compute_let_derivatives_loop(
+    water_saturation: NumberArray[OneDimension],
+    oil_saturation: NumberArray[OneDimension],
+    gas_saturation: NumberArray[OneDimension],
+    irreducible_water_saturation: NumberArray[OneDimension],
+    residual_oil_saturation_water: NumberArray[OneDimension],
+    residual_oil_saturation_gas: NumberArray[OneDimension],
+    residual_gas_saturation: NumberArray[OneDimension],
+    water: tuple[float, float, float],
+    oil_water: tuple[float, float, float],
+    gas_oil: tuple[float, float, float],
+    gas: tuple[float, float, float],
+    maximum_water_relperm: float,
+    maximum_oil_relperm: float,
+    maximum_gas_relperm: float,
+    wettability: Wettability,
+    mixed_wet_water_fraction: float,
+    rule_id: int,
+    saturation_epsilon: float,
+    minimum_mobile_pore_space: float,
+    rule_minimum_mobile_pore_space: float,
+    minimum_water_relperm: float,
+    minimum_oil_relperm: float,
+    minimum_gas_relperm: float,
+    size: int,
+    dkrw_dsw: NumberArray[OneDimension],
+    dkro_dsw: NumberArray[OneDimension],
+    dkrg_dsw: NumberArray[OneDimension],
+    dkrw_dso: NumberArray[OneDimension],
+    dkro_dso: NumberArray[OneDimension],
+    dkrg_dso: NumberArray[OneDimension],
+    dkrw_dsg: NumberArray[OneDimension],
+    dkro_dsg: NumberArray[OneDimension],
+    dkrg_dsg: NumberArray[OneDimension],
+) -> None:
+    """
+    Compute the LET relative permeability derivatives of `size` cells in parallel and
+    write them to the output arrays.
+
+    Per-cell inputs are flat arrays, or a single value shared by every cell.
+    """
+    for i in numba.prange(size):
+        d = compute_let_derivatives_cell(
+            np.float64(element_at(water_saturation, i)),
+            np.float64(element_at(oil_saturation, i)),
+            np.float64(element_at(gas_saturation, i)),
+            np.float64(element_at(irreducible_water_saturation, i)),
+            np.float64(element_at(residual_oil_saturation_water, i)),
+            np.float64(element_at(residual_oil_saturation_gas, i)),
+            np.float64(element_at(residual_gas_saturation, i)),
+            water,
+            oil_water,
+            gas_oil,
+            gas,
+            maximum_water_relperm,
+            maximum_oil_relperm,
+            maximum_gas_relperm,
+            wettability,
+            mixed_wet_water_fraction,
+            rule_id,
+            saturation_epsilon,
+            minimum_mobile_pore_space,
+            rule_minimum_mobile_pore_space,
+            minimum_water_relperm,
+            minimum_oil_relperm,
+            minimum_gas_relperm,
+        )
+        dkrw_dsw[i] = d[0]
+        dkro_dsw[i] = d[1]
+        dkrg_dsw[i] = d[2]
+        dkrw_dso[i] = d[3]
+        dkro_dso[i] = d[4]
+        dkrg_dso[i] = d[5]
+        dkrw_dsg[i] = d[6]
+        dkro_dsg[i] = d[7]
+        dkrg_dsg[i] = d[8]
+
+
+def to_kernel_parameters(parameters: tuple[Number, Number, Number]) -> tuple[float, float, float]:
+    """
+    LET parameters `(L, E, T)` as the tuple of floats the compiled kernels take.
+
+    :param parameters: LET parameters of one phase.
+    :return: The parameters as a tuple of three floats.
+    """
+    shape_low, shape_elevation, shape_top = parameters
+    return float(shape_low), float(shape_elevation), float(shape_top)
+
+
+def compute_let_relative_permeabilities_compiled(
+    water_saturation: NumberOrArray[NDimension],
+    oil_saturation: NumberOrArray[NDimension],
+    gas_saturation: NumberOrArray[NDimension],
+    irreducible_water_saturation: NumberOrArray[NDimension],
+    residual_oil_saturation_water: NumberOrArray[NDimension],
+    residual_oil_saturation_gas: NumberOrArray[NDimension],
+    residual_gas_saturation: NumberOrArray[NDimension],
+    water: tuple[Number, Number, Number],
+    oil_water: tuple[Number, Number, Number],
+    gas_oil: tuple[Number, Number, Number],
+    gas: tuple[Number, Number, Number],
+    rule_id: int,
+    saturation_epsilon: Number,
+    minimum_mobile_pore_space: Number,
+    maximum_water_relperm: Number = 1.0,
+    maximum_oil_relperm: Number = 1.0,
+    maximum_gas_relperm: Number = 1.0,
+    wettability: Wettability = Wettability.WATER_WET,
+    mixed_wet_water_fraction: Number = 0.5,
+    minimum_water_relperm: Number | None = None,
+    minimum_oil_relperm: Number | None = None,
+    minimum_gas_relperm: Number | None = None,
+) -> tuple[NumberOrArray[NDimension], NumberOrArray[NDimension], NumberOrArray[NDimension]]:
+    """
+    LET relative permeabilities computed by the compiled parallel loop, for the
+    built-in mixing rule identified by `rule_id`.
+
+    The parameters match `compute_let_relative_permeabilities`, with the mixing rule replaced by
+    its identifier from `get_builtin_rule_id` and each phase's LET parameters given as a tuple
+    `(L, E, T)`.
+
+    :return: Tuple of water, oil and gas relative permeability, as scalars when every
+        saturation and endpoint is a scalar and as arrays otherwise.
+    """
+    if wettability not in tuple(Wettability):
+        raise ValidationError(f"Wettability {wettability!r} not implemented.")
+
+    is_scalar = all(
+        np.isscalar(value)
+        for value in (
+            water_saturation,
+            oil_saturation,
+            gas_saturation,
+            irreducible_water_saturation,
+            residual_oil_saturation_water,
+            residual_oil_saturation_gas,
+            residual_gas_saturation,
+        )
+    )
+    shape, size, inputs = prepare_relperm_inputs(
+        water_saturation,
+        oil_saturation,
+        gas_saturation,
+        irreducible_water_saturation,
+        residual_oil_saturation_water,
+        residual_oil_saturation_gas,
+        residual_gas_saturation,
+    )
+    dtype = get_floating_dtype(water_saturation)
+    water_relperm = np.empty(size, dtype=dtype)
+    oil_relperm = np.empty(size, dtype=dtype)
+    gas_relperm = np.empty(size, dtype=dtype)
+    compute_let_values_loop(
+        *inputs,
+        to_kernel_parameters(water),
+        to_kernel_parameters(oil_water),
+        to_kernel_parameters(gas_oil),
+        to_kernel_parameters(gas),
+        maximum_water_relperm,
+        maximum_oil_relperm,
+        maximum_gas_relperm,
+        wettability,
+        mixed_wet_water_fraction,
+        rule_id,
+        saturation_epsilon,
+        minimum_mobile_pore_space,
+        c.MINIMUM_MOBILE_PORE_SPACE,
+        to_kernel_minimum(minimum_water_relperm),
+        to_kernel_minimum(minimum_oil_relperm),
+        to_kernel_minimum(minimum_gas_relperm),
+        size,
+        water_relperm,
+        oil_relperm,
+        gas_relperm,
+    )
+    if is_scalar:
+        return water_relperm.item(), oil_relperm.item(), gas_relperm.item()
+    return (
+        water_relperm.reshape(shape),
+        oil_relperm.reshape(shape),
+        gas_relperm.reshape(shape),
+    )
+
+
+def compute_let_relative_permeability_derivatives_compiled(
+    water_saturation: NumberOrArray[NDimension],
+    oil_saturation: NumberOrArray[NDimension],
+    gas_saturation: NumberOrArray[NDimension],
+    irreducible_water_saturation: NumberOrArray[NDimension],
+    residual_oil_saturation_water: NumberOrArray[NDimension],
+    residual_oil_saturation_gas: NumberOrArray[NDimension],
+    residual_gas_saturation: NumberOrArray[NDimension],
+    water: tuple[Number, Number, Number],
+    oil_water: tuple[Number, Number, Number],
+    gas_oil: tuple[Number, Number, Number],
+    gas: tuple[Number, Number, Number],
+    rule_id: int,
+    saturation_epsilon: Number,
+    minimum_mobile_pore_space: Number,
+    maximum_water_relperm: Number = 1.0,
+    maximum_oil_relperm: Number = 1.0,
+    maximum_gas_relperm: Number = 1.0,
+    wettability: Wettability = Wettability.WATER_WET,
+    mixed_wet_water_fraction: Number = 0.5,
+    minimum_water_relperm: Number | None = None,
+    minimum_oil_relperm: Number | None = None,
+    minimum_gas_relperm: Number | None = None,
+) -> RelativePermeabilityDerivatives:
+    """
+    LET relative permeability derivatives computed by the compiled parallel loop, for
+    the built-in mixing rule identified by `rule_id`.
+
+    The parameters match `compute_let_relative_permeability_derivatives`, with the mixing rule
+    replaced by its identifier from `get_builtin_rule_id`, each phase's LET parameters given as a
+    tuple `(L, E, T)`, and the finite-difference step dropped because the built-in rules have
+    analytical derivatives.
+
+    :return: `RelativePermeabilityDerivatives` dictionary, with scalars when every saturation
+        and endpoint is a scalar and arrays otherwise.
+    """
+    if wettability not in tuple(Wettability):
+        raise ValidationError(f"Wettability {wettability!r} not implemented.")
+
+    is_scalar = all(
+        np.isscalar(value)
+        for value in (
+            water_saturation,
+            oil_saturation,
+            gas_saturation,
+            irreducible_water_saturation,
+            residual_oil_saturation_water,
+            residual_oil_saturation_gas,
+            residual_gas_saturation,
+        )
+    )
+    shape, size, inputs = prepare_relperm_inputs(
+        water_saturation,
+        oil_saturation,
+        gas_saturation,
+        irreducible_water_saturation,
+        residual_oil_saturation_water,
+        residual_oil_saturation_gas,
+        residual_gas_saturation,
+    )
+    dtype = get_floating_dtype(water_saturation)
+    outputs = tuple(np.empty(size, dtype=dtype) for _ in range(9))
+    compute_let_derivatives_loop(
+        *inputs,
+        to_kernel_parameters(water),
+        to_kernel_parameters(oil_water),
+        to_kernel_parameters(gas_oil),
+        to_kernel_parameters(gas),
+        maximum_water_relperm,
+        maximum_oil_relperm,
+        maximum_gas_relperm,
+        wettability,
+        mixed_wet_water_fraction,
+        rule_id,
+        saturation_epsilon,
+        minimum_mobile_pore_space,
+        c.MINIMUM_MOBILE_PORE_SPACE,
+        to_kernel_minimum(minimum_water_relperm),
+        to_kernel_minimum(minimum_oil_relperm),
+        to_kernel_minimum(minimum_gas_relperm),
+        size,
+        *outputs,
+    )
+    dkrw_dsw, dkro_dsw, dkrg_dsw, dkrw_dso, dkro_dso, dkrg_dso, dkrw_dsg, dkro_dsg, dkrg_dsg = (
+        output.item() if is_scalar else output.reshape(shape) for output in outputs
+    )
+    return RelativePermeabilityDerivatives(
+        dkrw_dsw=dkrw_dsw,
+        dkro_dsw=dkro_dsw,
+        dkrg_dsw=dkrg_dsw,
+        dkrw_dso=dkrw_dso,
+        dkro_dso=dkro_dso,
+        dkrg_dso=dkrg_dso,
+        dkrw_dsg=dkrw_dsg,
+        dkro_dsg=dkro_dsg,
+        dkrg_dsg=dkrg_dsg,
+    )
+
+
+@numba.njit(cache=True, error_model="numpy")
+def compute_let_values_and_derivatives_cell(
+    sw: float,
+    so: float,
+    sg: float,
+    swc: float,
+    sorw: float,
+    sorg: float,
+    sgr: float,
+    water: tuple[float, float, float],
+    oil_water: tuple[float, float, float],
+    gas_oil: tuple[float, float, float],
+    gas: tuple[float, float, float],
+    maximum_water_relperm: float,
+    maximum_oil_relperm: float,
+    maximum_gas_relperm: float,
+    wettability: Wettability,
+    mixed_wet_water_fraction: float,
+    rule_id: int,
+    saturation_epsilon: float,
+    minimum_mobile_pore_space: float,
+    rule_minimum_mobile_pore_space: float,
+    minimum_water_relperm: float,
+    minimum_oil_relperm: float,
+    minimum_gas_relperm: float,
+) -> tuple[float, float, float, float, float, float, float, float, float, float, float, float]:
+    """
+    LET relative permeabilities and all nine partial derivatives of one cell, from a
+    single evaluation of the underlying two-phase curves and mixing rule.
+
+    The results are identical to `compute_let_values_cell` and
+    `compute_let_derivatives_cell`. A minimum of `NO_MINIMUM` means no floor.
+
+    :return: Tuple of water, oil and gas relative permeability followed by `dkrw_dsw`,
+        `dkro_dsw`, `dkrg_dsw`, `dkrw_dso`, `dkro_dso`, `dkrg_dso`, `dkrw_dsg`, `dkro_dsg` and
+        `dkrg_dsg`.
+    """
+    sw, so, sg = normalize_cell_saturations(sw, so, sg, saturation_epsilon)
+    if wettability == Wettability.WATER_WET:
+        cell = compute_let_water_wet_cell(
+            sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
+            maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
+            minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+        )  # fmt: skip
+        d = finalize_water_wet_cell(
+            cell, minimum_water_relperm, minimum_oil_relperm, minimum_gas_relperm
+        )
+    elif wettability == Wettability.OIL_WET:
+        cell = compute_let_oil_wet_cell(
+            sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
+            maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
+            minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+        )  # fmt: skip
+        d = finalize_oil_wet_cell(
+            cell, minimum_water_relperm, minimum_oil_relperm, minimum_gas_relperm
+        )
+    else:
+        cell = blend_cells(
+            compute_let_water_wet_cell(
+                sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
+                maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
+                minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+            ),
+            compute_let_oil_wet_cell(
+                sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
+                maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
+                minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+            ),
+            mixed_wet_water_fraction,
+        )  # fmt: skip
+        d = finalize_mixed_wet_cell(
+            cell, minimum_water_relperm, minimum_oil_relperm, minimum_gas_relperm
+        )
+    return (
+        floor_relperm(clip_unit(cell.krw), minimum_water_relperm),
+        floor_relperm(clip_unit(cell.kro), minimum_oil_relperm),
+        floor_relperm(clip_unit(cell.krg), minimum_gas_relperm),
+        d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7], d[8],
+    )  # fmt: skip
+
+
+@numba.njit(cache=True, parallel=True, error_model="numpy")
+def compute_let_values_and_derivatives_loop(
+    water_saturation: NumberArray[OneDimension],
+    oil_saturation: NumberArray[OneDimension],
+    gas_saturation: NumberArray[OneDimension],
+    irreducible_water_saturation: NumberArray[OneDimension],
+    residual_oil_saturation_water: NumberArray[OneDimension],
+    residual_oil_saturation_gas: NumberArray[OneDimension],
+    residual_gas_saturation: NumberArray[OneDimension],
+    water: tuple[float, float, float],
+    oil_water: tuple[float, float, float],
+    gas_oil: tuple[float, float, float],
+    gas: tuple[float, float, float],
+    maximum_water_relperm: float,
+    maximum_oil_relperm: float,
+    maximum_gas_relperm: float,
+    wettability: Wettability,
+    mixed_wet_water_fraction: float,
+    rule_id: int,
+    saturation_epsilon: float,
+    minimum_mobile_pore_space: float,
+    rule_minimum_mobile_pore_space: float,
+    minimum_water_relperm: float,
+    minimum_oil_relperm: float,
+    minimum_gas_relperm: float,
+    size: int,
+    water_relperm: NumberArray[OneDimension],
+    oil_relperm: NumberArray[OneDimension],
+    gas_relperm: NumberArray[OneDimension],
+    dkrw_dsw: NumberArray[OneDimension],
+    dkro_dsw: NumberArray[OneDimension],
+    dkrg_dsw: NumberArray[OneDimension],
+    dkrw_dso: NumberArray[OneDimension],
+    dkro_dso: NumberArray[OneDimension],
+    dkrg_dso: NumberArray[OneDimension],
+    dkrw_dsg: NumberArray[OneDimension],
+    dkro_dsg: NumberArray[OneDimension],
+    dkrg_dsg: NumberArray[OneDimension],
+) -> None:
+    """
+    Compute the LET relative permeabilities and all nine derivatives of `size` cells in
+    parallel and write them to the output arrays.
+
+    Per-cell inputs are flat arrays, or a single value shared by every cell.
+    """
+    for i in numba.prange(size):
+        r = compute_let_values_and_derivatives_cell(
+            np.float64(element_at(water_saturation, i)),
+            np.float64(element_at(oil_saturation, i)),
+            np.float64(element_at(gas_saturation, i)),
+            np.float64(element_at(irreducible_water_saturation, i)),
+            np.float64(element_at(residual_oil_saturation_water, i)),
+            np.float64(element_at(residual_oil_saturation_gas, i)),
+            np.float64(element_at(residual_gas_saturation, i)),
+            water,
+            oil_water,
+            gas_oil,
+            gas,
+            maximum_water_relperm,
+            maximum_oil_relperm,
+            maximum_gas_relperm,
+            wettability,
+            mixed_wet_water_fraction,
+            rule_id,
+            saturation_epsilon,
+            minimum_mobile_pore_space,
+            rule_minimum_mobile_pore_space,
+            minimum_water_relperm,
+            minimum_oil_relperm,
+            minimum_gas_relperm,
+        )
+        water_relperm[i] = r[0]
+        oil_relperm[i] = r[1]
+        gas_relperm[i] = r[2]
+        dkrw_dsw[i] = r[3]
+        dkro_dsw[i] = r[4]
+        dkrg_dsw[i] = r[5]
+        dkrw_dso[i] = r[6]
+        dkro_dso[i] = r[7]
+        dkrg_dso[i] = r[8]
+        dkrw_dsg[i] = r[9]
+        dkro_dsg[i] = r[10]
+        dkrg_dsg[i] = r[11]
+
+
+def compute_let_relative_permeabilities_and_derivatives_compiled(
+    water_saturation: NumberOrArray[NDimension],
+    oil_saturation: NumberOrArray[NDimension],
+    gas_saturation: NumberOrArray[NDimension],
+    irreducible_water_saturation: NumberOrArray[NDimension],
+    residual_oil_saturation_water: NumberOrArray[NDimension],
+    residual_oil_saturation_gas: NumberOrArray[NDimension],
+    residual_gas_saturation: NumberOrArray[NDimension],
+    water: tuple[Number, Number, Number],
+    oil_water: tuple[Number, Number, Number],
+    gas_oil: tuple[Number, Number, Number],
+    gas: tuple[Number, Number, Number],
+    rule_id: int,
+    saturation_epsilon: Number,
+    minimum_mobile_pore_space: Number,
+    maximum_water_relperm: Number = 1.0,
+    maximum_oil_relperm: Number = 1.0,
+    maximum_gas_relperm: Number = 1.0,
+    wettability: Wettability = Wettability.WATER_WET,
+    mixed_wet_water_fraction: Number = 0.5,
+    minimum_water_relperm: Number | None = None,
+    minimum_oil_relperm: Number | None = None,
+    minimum_gas_relperm: Number | None = None,
+) -> tuple[RelativePermeabilities, RelativePermeabilityDerivatives]:
+    """
+    LET relative permeabilities and derivatives computed together by the compiled
+    parallel loop, for the built-in mixing rule identified by `rule_id`.
+
+    The parameters match `compute_let_relative_permeability_derivatives_compiled`. The
+    results are the same as calling the separate relative permeability and derivative functions,
+    at roughly the cost of the derivative call alone.
+
+    :return: Tuple of the `RelativePermeabilities` and `RelativePermeabilityDerivatives`
+        dictionaries, with scalars when every saturation and endpoint is a scalar.
+    """
+    if wettability not in tuple(Wettability):
+        raise ValidationError(f"Wettability {wettability!r} not implemented.")
+
+    is_scalar = all(
+        np.isscalar(value)
+        for value in (
+            water_saturation,
+            oil_saturation,
+            gas_saturation,
+            irreducible_water_saturation,
+            residual_oil_saturation_water,
+            residual_oil_saturation_gas,
+            residual_gas_saturation,
+        )
+    )
+    shape, size, inputs = prepare_relperm_inputs(
+        water_saturation,
+        oil_saturation,
+        gas_saturation,
+        irreducible_water_saturation,
+        residual_oil_saturation_water,
+        residual_oil_saturation_gas,
+        residual_gas_saturation,
+    )
+    dtype = get_floating_dtype(water_saturation)
+    outputs = tuple(np.empty(size, dtype=dtype) for _ in range(12))
+    compute_let_values_and_derivatives_loop(
+        *inputs,
+        to_kernel_parameters(water),
+        to_kernel_parameters(oil_water),
+        to_kernel_parameters(gas_oil),
+        to_kernel_parameters(gas),
+        maximum_water_relperm,
+        maximum_oil_relperm,
+        maximum_gas_relperm,
+        wettability,
+        mixed_wet_water_fraction,
+        rule_id,
+        saturation_epsilon,
+        minimum_mobile_pore_space,
+        c.MINIMUM_MOBILE_PORE_SPACE,
+        to_kernel_minimum(minimum_water_relperm),
+        to_kernel_minimum(minimum_oil_relperm),
+        to_kernel_minimum(minimum_gas_relperm),
+        size,
+        *outputs,
+    )
+    (
+        water_relperm, oil_relperm, gas_relperm,
+        dkrw_dsw, dkro_dsw, dkrg_dsw, dkrw_dso, dkro_dso, dkrg_dso, dkrw_dsg, dkro_dsg, dkrg_dsg,
+    ) = (output.item() if is_scalar else output.reshape(shape) for output in outputs)  # fmt: skip
+    return (
+        RelativePermeabilities(water=water_relperm, oil=oil_relperm, gas=gas_relperm),
+        RelativePermeabilityDerivatives(
+            dkrw_dsw=dkrw_dsw,
+            dkro_dsw=dkro_dsw,
+            dkrg_dsw=dkrg_dsw,
+            dkrw_dso=dkrw_dso,
+            dkro_dso=dkro_dso,
+            dkrg_dso=dkrg_dso,
+            dkrw_dsg=dkrw_dsg,
+            dkro_dsg=dkro_dsg,
+            dkrg_dsg=dkrg_dsg,
+        ),
+    )
+
+
 def compute_let_relative_permeabilities(
     water_saturation: NumberOrArray[NDimension],
     oil_saturation: NumberOrArray[NDimension],
@@ -200,6 +1337,33 @@ def compute_let_relative_permeabilities(
     :param minimum_gas_relperm: Resolved minimum min_value for gas kr (`None` = no min_value).
     :return: (krw, kro, krg) tuple of relative permeabilities.
     """
+    rule_id = get_builtin_rule_id(mixing_rule)
+    if rule_id is not None:
+        return compute_let_relative_permeabilities_compiled(
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+            irreducible_water_saturation=irreducible_water_saturation,
+            residual_oil_saturation_water=residual_oil_saturation_water,
+            residual_oil_saturation_gas=residual_oil_saturation_gas,
+            residual_gas_saturation=residual_gas_saturation,
+            water=(water_L, water_E, water_T),
+            oil_water=(oil_water_L, oil_water_E, oil_water_T),
+            gas_oil=(gas_oil_L, gas_oil_E, gas_oil_T),
+            gas=(gas_L, gas_E, gas_T),
+            rule_id=rule_id,
+            saturation_epsilon=saturation_epsilon,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
+            maximum_water_relperm=maximum_water_relperm,
+            maximum_oil_relperm=maximum_oil_relperm,
+            maximum_gas_relperm=maximum_gas_relperm,
+            wettability=wettability,
+            mixed_wet_water_fraction=mixed_wet_water_fraction,
+            minimum_water_relperm=minimum_water_relperm,
+            minimum_oil_relperm=minimum_oil_relperm,
+            minimum_gas_relperm=minimum_gas_relperm,
+        )
+
     sw = np.atleast_1d(water_saturation)
     so = np.atleast_1d(oil_saturation)
     sg = np.atleast_1d(gas_saturation)
@@ -536,10 +1700,10 @@ def compute_let_phase_curve(
         relative permeability is applied.
     """
     valid = mobile_range > minimum_mobile_pore_space
-    effective_saturation = np.clip(
-        (saturation - lower_saturation) / np.where(valid, mobile_range, 1.0),
+    effective_saturation = np.where(
+        valid,
+        np.clip((saturation - lower_saturation) / np.where(valid, mobile_range, 1.0), 0.0, 1.0),
         0.0,
-        1.0,
     )
     relperm = maximum_relperm * _let_relperm(
         normalized_saturation=effective_saturation,
@@ -590,7 +1754,7 @@ def compute_let_declining_curve(
     """
     valid = mobile_range > minimum_mobile_pore_space
     unclipped_effective_saturation = remaining_saturation / np.where(valid, mobile_range, 1.0)
-    effective_saturation = np.clip(unclipped_effective_saturation, 0.0, 1.0)
+    effective_saturation = np.where(valid, np.clip(unclipped_effective_saturation, 0.0, 1.0), 0.0)
     relperm = _let_relperm(
         normalized_saturation=effective_saturation,
         L=parameters.L,
@@ -885,6 +2049,7 @@ def compute_let_relative_permeability_derivatives(
     gas: LETParameters,
     minimum_mobile_pore_space: Number,
     finite_difference_epsilon: Number,
+    saturation_epsilon: Number,
     maximum_water_relperm: Number = 1.0,
     maximum_oil_relperm: Number = 1.0,
     maximum_gas_relperm: Number = 1.0,
@@ -934,6 +2099,35 @@ def compute_let_relative_permeability_derivatives(
     :param minimum_gas_relperm: Resolved minimum gas relative permeability, or `None`.
     :return: `RelativePermeabilityDerivatives` dictionary.
     """
+    rule_id = get_builtin_rule_id(mixing_rule)
+    if rule_id is not None:
+        return compute_let_relative_permeability_derivatives_compiled(
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+            irreducible_water_saturation=irreducible_water_saturation,
+            residual_oil_saturation_water=residual_oil_saturation_water,
+            residual_oil_saturation_gas=residual_oil_saturation_gas,
+            residual_gas_saturation=residual_gas_saturation,
+            water=(water.L, water.E, water.T),
+            oil_water=(oil_water.L, oil_water.E, oil_water.T),
+            gas_oil=(gas_oil.L, gas_oil.E, gas_oil.T),
+            gas=(gas.L, gas.E, gas.T),
+            rule_id=rule_id,
+            saturation_epsilon=saturation_epsilon,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
+            maximum_water_relperm=maximum_water_relperm,
+            maximum_oil_relperm=maximum_oil_relperm,
+            maximum_gas_relperm=maximum_gas_relperm,
+            wettability=wettability,
+            mixed_wet_water_fraction=mixed_wet_water_fraction,
+            minimum_water_relperm=minimum_water_relperm,
+            minimum_oil_relperm=minimum_oil_relperm,
+            minimum_gas_relperm=minimum_gas_relperm,
+        )
+    if wettability not in tuple(Wettability):
+        raise ValidationError(f"Wettability {wettability!r} not implemented.")
+
     sw, so, sg, zeros, is_scalar = broadcast_saturations(
         water_saturation,
         oil_saturation,
@@ -943,6 +2137,7 @@ def compute_let_relative_permeability_derivatives(
         residual_oil_saturation_gas,
         residual_gas_saturation,
     )
+    sw, so, sg = validate_and_normalize_saturations(sw, so, sg, saturation_epsilon)
 
     def water_wet_system() -> WettabilitySystem:
         return compute_let_water_wet_system(
@@ -1117,6 +2312,16 @@ class LETThreePhaseRelPermTable(RelativePermeabilityTable):
         if isinstance(mixing_rule, str):
             object.__setattr__(self, "mixing_rule", get_mixing_rule(mixing_rule))
 
+        validate_analytical_relperm_parameters(
+            irreducible_water_saturation=self.irreducible_water_saturation,
+            residual_oil_saturation_water=self.residual_oil_saturation_water,
+            residual_oil_saturation_gas=self.residual_oil_saturation_gas,
+            residual_gas_saturation=self.residual_gas_saturation,
+            maximum_water_relperm=self.maximum_water_relperm,
+            maximum_oil_relperm=self.maximum_oil_relperm,
+            maximum_gas_relperm=self.maximum_gas_relperm,
+            mixed_wet_water_fraction=self.mixed_wet_water_fraction,
+        )
         resolve_min_relperm(self.minimum_water_relperm)
         resolve_min_relperm(self.minimum_oil_relperm)
         resolve_min_relperm(self.minimum_gas_relperm)
@@ -1160,6 +2365,157 @@ class LETThreePhaseRelPermTable(RelativePermeabilityTable):
     def get_residual_gas_saturation(self) -> Number:
         return self.residual_gas_saturation or 0.0
 
+    def resolve_endpoint_saturations(
+        self,
+        irreducible_water_saturation: NumberOrArray[NDimension] | None = None,
+        residual_oil_saturation_water: NumberOrArray[NDimension] | None = None,
+        residual_oil_saturation_gas: NumberOrArray[NDimension] | None = None,
+        residual_gas_saturation: NumberOrArray[NDimension] | None = None,
+    ) -> tuple[
+        NumberOrArray[NDimension],
+        NumberOrArray[NDimension],
+        NumberOrArray[NDimension],
+        NumberOrArray[NDimension],
+    ]:
+        """
+        Endpoint saturations for an evaluation: each argument if given, otherwise the value set
+        on the model.
+
+        :param irreducible_water_saturation: Irreducible water saturation, or `None` to use the
+            model's value.
+        :param residual_oil_saturation_water: Residual oil saturation to water flooding, or
+            `None` to use the model's value.
+        :param residual_oil_saturation_gas: Residual oil saturation to gas flooding, or `None`
+            to use the model's value.
+        :param residual_gas_saturation: Residual gas saturation, or `None` to use the model's
+            value.
+        :raises ValidationError: If an endpoint is neither given nor set on the model.
+        :return: Tuple of irreducible water, residual oil to water, residual oil to gas and
+            residual gas saturation.
+        """
+        swc = (
+            irreducible_water_saturation
+            if irreducible_water_saturation is not None
+            else self.irreducible_water_saturation
+        )
+        sorw = (
+            residual_oil_saturation_water
+            if residual_oil_saturation_water is not None
+            else self.residual_oil_saturation_water
+        )
+        sorg = (
+            residual_oil_saturation_gas
+            if residual_oil_saturation_gas is not None
+            else self.residual_oil_saturation_gas
+        )
+        sgr = (
+            residual_gas_saturation
+            if residual_gas_saturation is not None
+            else self.residual_gas_saturation
+        )
+        params_missing = []
+        if swc is None:
+            params_missing.append("swc")
+        if sorw is None:
+            params_missing.append("sorw")
+        if sorg is None:
+            params_missing.append("sorg")
+        if sgr is None:
+            params_missing.append("sgr")
+        if params_missing:
+            raise ValidationError(
+                f"Residual saturations must be provided either as arguments or set in the model instance. "
+                f"Missing: {', '.join(params_missing)}"
+            )
+        return swc, sorw, sorg, sgr  # type: ignore[return-value]
+
+    def evaluate_with_derivatives(
+        self,
+        water_saturation: NumberOrArray[NDimension],
+        oil_saturation: NumberOrArray[NDimension],
+        gas_saturation: NumberOrArray[NDimension],
+        irreducible_water_saturation: NumberOrArray[NDimension] | None = None,
+        residual_oil_saturation_water: NumberOrArray[NDimension] | None = None,
+        residual_oil_saturation_gas: NumberOrArray[NDimension] | None = None,
+        residual_gas_saturation: NumberOrArray[NDimension] | None = None,
+        **kwargs: typing.Any,
+    ) -> tuple[RelativePermeabilities, RelativePermeabilityDerivatives]:
+        """
+        Compute the relative permeabilities and all nine partial derivatives together.
+
+        The results are the same as calling `evaluate` and `derivatives` separately. For the
+        built-in mixing rules the two share one pass over the cells, which is about as fast as
+        the derivative call alone. A custom mixing rule is evaluated by calling `evaluate` and
+        `derivatives` in turn.
+
+        :param water_saturation: Water saturation (fraction) - scalar or array.
+        :param oil_saturation: Oil saturation (fraction) - scalar or array.
+        :param gas_saturation: Gas saturation (fraction) - scalar or array.
+        :param irreducible_water_saturation: Irreducible water saturation, or `None` to use the
+            model's value.
+        :param residual_oil_saturation_water: Residual oil saturation to water flooding, or
+            `None` to use the model's value.
+        :param residual_oil_saturation_gas: Residual oil saturation to gas flooding, or `None`
+            to use the model's value.
+        :param residual_gas_saturation: Residual gas saturation, or `None` to use the model's
+            value.
+        :param kwargs: Other key word arguments, which this model does not use.
+        :return: Tuple of the `RelativePermeabilities` and `RelativePermeabilityDerivatives`
+            dictionaries.
+        """
+        swc, sorw, sorg, sgr = self.resolve_endpoint_saturations(
+            irreducible_water_saturation=irreducible_water_saturation,
+            residual_oil_saturation_water=residual_oil_saturation_water,
+            residual_oil_saturation_gas=residual_oil_saturation_gas,
+            residual_gas_saturation=residual_gas_saturation,
+        )
+        rule_id = get_builtin_rule_id(self.mixing_rule)
+        if rule_id is None:
+            return (
+                self.evaluate(
+                    water_saturation,
+                    oil_saturation,
+                    gas_saturation,
+                    irreducible_water_saturation=swc,
+                    residual_oil_saturation_water=sorw,
+                    residual_oil_saturation_gas=sorg,
+                    residual_gas_saturation=sgr,
+                ),
+                self.derivatives(
+                    water_saturation,
+                    oil_saturation,
+                    gas_saturation,
+                    irreducible_water_saturation=swc,
+                    residual_oil_saturation_water=sorw,
+                    residual_oil_saturation_gas=sorg,
+                    residual_gas_saturation=sgr,
+                ),
+            )
+        return compute_let_relative_permeabilities_and_derivatives_compiled(
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+            irreducible_water_saturation=swc,
+            residual_oil_saturation_water=sorw,
+            residual_oil_saturation_gas=sorg,
+            residual_gas_saturation=sgr,
+            water=(self.water.L, self.water.E, self.water.T),
+            oil_water=(self.oil_water.L, self.oil_water.E, self.oil_water.T),
+            gas_oil=(self.gas_oil.L, self.gas_oil.E, self.gas_oil.T),
+            gas=(self.gas.L, self.gas.E, self.gas.T),
+            rule_id=rule_id,
+            saturation_epsilon=c.SATURATION_EPSILON,
+            minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
+            maximum_water_relperm=self.get_water_relperm_endpoint(),
+            maximum_oil_relperm=self.get_oil_relperm_endpoint(),
+            maximum_gas_relperm=self.get_gas_relperm_endpoint(),
+            wettability=self.wettability,
+            mixed_wet_water_fraction=self.mixed_wet_water_fraction,
+            minimum_water_relperm=resolve_min_relperm(self.minimum_water_relperm),
+            minimum_oil_relperm=resolve_min_relperm(self.minimum_oil_relperm),
+            minimum_gas_relperm=resolve_min_relperm(self.minimum_gas_relperm),
+        )
+
     def evaluate(
         self,
         water_saturation: NumberOrArray[NDimension],
@@ -1186,40 +2542,12 @@ class LETThreePhaseRelPermTable(RelativePermeabilityTable):
         :param residual_gas_saturation: Optional override for sgr.
         :return: `RelativePermeabilities` dictionary.
         """
-        sorw = (
-            residual_oil_saturation_water
-            if residual_oil_saturation_water is not None
-            else self.residual_oil_saturation_water
+        swc, sorw, sorg, sgr = self.resolve_endpoint_saturations(
+            irreducible_water_saturation=irreducible_water_saturation,
+            residual_oil_saturation_water=residual_oil_saturation_water,
+            residual_oil_saturation_gas=residual_oil_saturation_gas,
+            residual_gas_saturation=residual_gas_saturation,
         )
-        sorg = (
-            residual_oil_saturation_gas
-            if residual_oil_saturation_gas is not None
-            else self.residual_oil_saturation_gas
-        )
-        sgr = (
-            residual_gas_saturation
-            if residual_gas_saturation is not None
-            else self.residual_gas_saturation
-        )
-        swc = (
-            irreducible_water_saturation
-            if irreducible_water_saturation is not None
-            else self.irreducible_water_saturation
-        )
-        params_missing = []
-        if swc is None:
-            params_missing.append("swc")
-        if sorw is None:
-            params_missing.append("sorw")
-        if sorg is None:
-            params_missing.append("sorg")
-        if sgr is None:
-            params_missing.append("sgr")
-        if params_missing:
-            raise ValidationError(
-                f"Residual saturations must be provided either as arguments or set in the model instance. "
-                f"Missing: {', '.join(params_missing)}"
-            )
 
         krw, kro, krg = compute_let_relative_permeabilities(
             water_saturation=water_saturation,
@@ -1309,41 +2637,12 @@ class LETThreePhaseRelPermTable(RelativePermeabilityTable):
             saturation. Uses the model default when not provided.
         :return: `RelativePermeabilityDerivatives` dictionary.
         """
-        swc = (
-            irreducible_water_saturation
-            if irreducible_water_saturation is not None
-            else self.irreducible_water_saturation
+        swc, sorw, sorg, sgr = self.resolve_endpoint_saturations(
+            irreducible_water_saturation=irreducible_water_saturation,
+            residual_oil_saturation_water=residual_oil_saturation_water,
+            residual_oil_saturation_gas=residual_oil_saturation_gas,
+            residual_gas_saturation=residual_gas_saturation,
         )
-        sorw = (
-            residual_oil_saturation_water
-            if residual_oil_saturation_water is not None
-            else self.residual_oil_saturation_water
-        )
-        sorg = (
-            residual_oil_saturation_gas
-            if residual_oil_saturation_gas is not None
-            else self.residual_oil_saturation_gas
-        )
-        sgr = (
-            residual_gas_saturation
-            if residual_gas_saturation is not None
-            else self.residual_gas_saturation
-        )
-
-        params_missing = []
-        if swc is None:
-            params_missing.append("swc")
-        if sorw is None:
-            params_missing.append("sorw")
-        if sorg is None:
-            params_missing.append("sorg")
-        if sgr is None:
-            params_missing.append("sgr")
-        if params_missing:
-            raise ValidationError(
-                f"Residual saturations must be provided either as arguments or set in the model instance. "
-                f"Missing: {', '.join(params_missing)}"
-            )
 
         return compute_let_relative_permeability_derivatives(
             water_saturation=water_saturation,
@@ -1359,6 +2658,7 @@ class LETThreePhaseRelPermTable(RelativePermeabilityTable):
             gas=self.gas,
             minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
             finite_difference_epsilon=c.FINITE_DIFFERENCE_EPSILON,
+            saturation_epsilon=c.SATURATION_EPSILON,
             maximum_water_relperm=self.get_water_relperm_endpoint(),
             maximum_oil_relperm=self.get_oil_relperm_endpoint(),
             maximum_gas_relperm=self.get_gas_relperm_endpoint(),

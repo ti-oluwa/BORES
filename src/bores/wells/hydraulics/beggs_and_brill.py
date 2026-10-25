@@ -441,10 +441,16 @@ def compute_segment_drop(
     liquid_viscosity: Number,
     gas_viscosity: Number,
     liquid_surface_tension: Number,
+    local_pressure: Number,
     is_injector: Boolean,
 ) -> PressureDrop:
     """
     Computes the pressure drop across one tubing segment.
+
+    The pressure gradient is the sum of the hydrostatic and friction gradients divided by
+    `1 - Ek`, where `Ek = slip density * mixture velocity * gas velocity / pressure` is the
+    correction for the gas speeding up as the pressure falls along the flow. The extra
+    pressure this adds is reported as the acceleration drop.
 
     :param model: This well's `BeggsAndBrillWellbore`.
     :param length: Along-wellbore segment length.
@@ -456,6 +462,8 @@ def compute_segment_drop(
     :param liquid_viscosity: Combined oil-and-water viscosity.
     :param gas_viscosity: Gas viscosity.
     :param liquid_surface_tension: Gas-liquid surface tension.
+    :param local_pressure: Pressure the velocities and densities refer to, used for the
+        acceleration correction. `NaN` leaves the correction out.
     :param is_injector: Whether this well is an injector.
     :returns: Pressure drop for this segment.
     """
@@ -511,15 +519,23 @@ def compute_segment_drop(
         * model.hydrostatic_scale
     )
 
-    # TODO: Look into this and if this is valid
-    # Velocity is only ever set at a connection, where a perforation's own
-    # rate joins or leaves the flow (see compute_perforation_pressures).
-    # Within one segment there is no other source of velocity change
-    # (constant PVT properties are assumed along the segment), so this
-    # term is always zero today. The density convention below still
-    # follows the correlation's own spec (slip density, matching the
-    # gravity term) for whenever that stops being true.
-    acceleration_drop = in_situ_density * (mixture_velocity**2 - mixture_velocity**2) / 2.0
+    acceleration_drop = 0.0
+    if not math.isnan(local_pressure):
+        # The correction factor stays below 1, as it reaches 1 where the flow would choke.
+        kinetic_ratio = min(
+            in_situ_density
+            * mixture_velocity
+            * superficial_gas_velocity
+            * model.hydrostatic_scale
+            / local_pressure,
+            0.95,
+        )
+        friction_sign = -1.0 if is_injector else 1.0
+        acceleration_drop = (
+            (hydrostatic_drop + friction_sign * friction_drop)
+            * kinetic_ratio
+            / (1.0 - kinetic_ratio)
+        )
     return PressureDrop(
         hydrostatic=hydrostatic_drop,
         friction=friction_drop,
@@ -649,6 +665,7 @@ def walk_perforation_pressures(
                 liquid_viscosity=liquid_viscosity,
                 gas_viscosity=gas_viscosity,
                 liquid_surface_tension=connection_fluids.gas_liquid_surface_tensions[idx],  # type: ignore[arg-type]
+                local_pressure=connection_fluids.pressures[idx],  # type: ignore[arg-type]
                 is_injector=is_injector,
             )
             pressures[idx] = (
@@ -761,7 +778,8 @@ def compute_tubing_head_pressure(
         are all required, as a two-phase correlation needs a real liquid/gas
         split, not just a single mixture value.
     :param is_injector: Whether this well is an injector.
-    :returns: Tubing head pressure.
+    :returns: Tubing head pressure. The acceleration correction is not applied here, since the tubing
+        is one segment at surface-sample properties, with no pressure along it to evaluate it at.
     :raises ValueError: If `phase_densities`, `phase_viscosities`, or
         `gas_liquid_surface_tension` isn't set on `surface_sample`.
     """
@@ -830,6 +848,7 @@ def compute_tubing_head_pressure(
         liquid_viscosity=liquid_viscosity,
         gas_viscosity=gas_viscosity,
         liquid_surface_tension=surface_sample.gas_liquid_surface_tension,
+        local_pressure=math.nan,
         is_injector=is_injector,
     )
     return (

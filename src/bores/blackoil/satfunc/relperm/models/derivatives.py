@@ -9,7 +9,8 @@ from bores.blackoil.satfunc.relperm.mixing_rules import (
     MixingRulePartialDerivatives,
     get_mixing_rule_partial_derivatives,
 )
-from bores.blackoil.satfunc.relperm.tables import clamp_relperm_derivative
+from bores.blackoil.satfunc.relperm.tables import clamp_relperm_derivative, show_invalid_saturation
+from bores.errors import ValidationError
 from bores.types import (
     Boolean,
     NDimension,
@@ -30,6 +31,7 @@ __all__ = [
     "finalize_oil_wet_derivatives",
     "finalize_water_wet_derivatives",
     "to_scalar",
+    "validate_and_normalize_saturations",
 ]
 
 
@@ -115,6 +117,38 @@ def broadcast_saturations(
     sw, so, sg = np.broadcast_arrays(sw, so, sg)
     zeros = np.zeros_like(sw)
     return sw, so, sg, zeros, is_scalar  # type: ignore[return-value]
+
+
+def validate_and_normalize_saturations(
+    water_saturation: NumberArray[NDimension],
+    oil_saturation: NumberArray[NDimension],
+    gas_saturation: NumberArray[NDimension],
+    saturation_epsilon: Number,
+) -> tuple[NumberArray[NDimension], NumberArray[NDimension], NumberArray[NDimension]]:
+    """
+    Check that the saturations lie between 0 and 1, and scale them to sum to 1 where they differ
+    from 1 by more than `saturation_epsilon`.
+
+    :param water_saturation: Water saturation array.
+    :param oil_saturation: Oil saturation array.
+    :param gas_saturation: Gas saturation array.
+    :param saturation_epsilon: Tolerance on the sum of the saturations.
+    :raises ValidationError: If any saturation is outside the range 0 to 1.
+    :return: Tuple of the water, oil and gas saturation arrays.
+    """
+    sw, so, sg = water_saturation, oil_saturation, gas_saturation
+    if np.any((sw < 0) | (sw > 1) | (so < 0) | (so > 1) | (sg < 0) | (sg > 1)):
+        raise ValidationError(
+            f"Saturations must be between 0 and 1. Sw: {show_invalid_saturation(sw)}, "
+            f"So: {show_invalid_saturation(so)}, Sg: {show_invalid_saturation(sg)}"
+        )
+    total_saturation = sw + so + sg
+    needs_norm = (np.abs(total_saturation - 1.0) > saturation_epsilon) & (total_saturation > 0.0)
+    if np.any(needs_norm):
+        sw = np.where(needs_norm, sw / total_saturation, sw)
+        so = np.where(needs_norm, so / total_saturation, so)
+        sg = np.where(needs_norm, sg / total_saturation, sg)
+    return sw, so, sg
 
 
 def apply_water_wet_mixing_rule(

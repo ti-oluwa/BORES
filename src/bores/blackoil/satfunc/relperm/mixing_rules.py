@@ -81,6 +81,7 @@ __all__ = [
     "MixingRule",
     "baker_linear_rule",
     "compute_central_difference_partial_derivatives",
+    "get_builtin_rule_id",
     "get_mixing_rule",
     "get_mixing_rule_partial_derivatives",
     "list_mixing_rules",
@@ -89,6 +90,18 @@ __all__ = [
     "stone_II_rule",
     "stone_I_rule",
 ]
+
+RULE_MIN = 0
+"""Identifier of `min_rule` in the compiled kernels."""
+
+RULE_BAKER_LINEAR = 1
+"""Identifier of `baker_linear_rule` in the compiled kernels."""
+
+RULE_STONE_II = 2
+"""Identifier of `stone_II_rule` in the compiled kernels."""
+
+RULE_STONE_I = 3
+"""Identifier of `stone_I_rule` in the compiled kernels."""
 
 
 @typing.final
@@ -1533,3 +1546,33 @@ def _(
         residual_oil_saturation_water,
         residual_oil_saturation_gas,
     )
+
+
+BUILTIN_RULES = tuple(
+    (rule, rule_id, rule.func, rule._dfunc)
+    for rule, rule_id in (
+        (min_rule, RULE_MIN),
+        (baker_linear_rule, RULE_BAKER_LINEAR),
+        (stone_II_rule, RULE_STONE_II),
+        (stone_I_rule, RULE_STONE_I),
+    )
+)
+
+
+def get_builtin_rule_id(rule: typing.Any) -> int | None:
+    """
+    Identifier that the compiled relative permeability kernels use for a built-in mixing rule.
+
+    Only the unmodified built-in rules have an identifier. A rule that is not a built-in, or a
+    built-in whose function or derivative function has been replaced (for example through
+    `rule.dfunc`), has none, so the caller must evaluate it as an ordinary Python callable.
+
+    :param rule: Mixing rule to look up.
+    :return: The rule identifier, or `None` if the rule must be evaluated as a Python callable.
+    """
+    for builtin, rule_id, func, dfunc in BUILTIN_RULES:
+        if rule is builtin:
+            if builtin.func is func and builtin._dfunc is dfunc:
+                return rule_id
+            return None
+    return None

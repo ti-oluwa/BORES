@@ -390,6 +390,32 @@ class RelativePermeabilityTable:
         """
         raise NotImplementedError
 
+    def evaluate_with_derivatives(
+        self,
+        water_saturation: NumberOrArray[NDimension],
+        oil_saturation: NumberOrArray[NDimension],
+        gas_saturation: NumberOrArray[NDimension],
+        **kwargs: typing.Any,
+    ) -> tuple[RelativePermeabilities, RelativePermeabilityDerivatives]:
+        """
+        Compute the relative permeabilities and their derivatives together.
+
+        Models that can share work between the two computations override this. The default
+        evaluates the relative permeabilities and then the derivatives, so it gives the same
+        results as calling `evaluate` and `derivatives` separately.
+
+        :param water_saturation: Water saturation (fraction) - scalar or array.
+        :param oil_saturation: Oil saturation (fraction) - scalar or array.
+        :param gas_saturation: Gas saturation (fraction) - scalar or array.
+        :param kwargs: Other key word arguments, passed to both `evaluate` and `derivatives`.
+        :return: Tuple of the `RelativePermeabilities` and `RelativePermeabilityDerivatives`
+            dictionaries.
+        """
+        return (
+            self.evaluate(water_saturation, oil_saturation, gas_saturation, **kwargs),
+            self.derivatives(water_saturation, oil_saturation, gas_saturation, **kwargs),
+        )
+
     def __call__(
         self,
         water_saturation: NumberOrArray[NDimension],

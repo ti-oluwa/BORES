@@ -1553,8 +1553,7 @@ def test_hydrostatic_head_of_an_inclined_segment_is_its_vertical_extent():
             inclination_from_vertical=inclination,
             mixture_density=50.0,
             mixture_viscosity=1.0,
-            mixture_velocity_in=1.0,
-            mixture_velocity_out=1.0,
+            mixture_velocity=1.0,
         ).hydrostatic
 
     import math
