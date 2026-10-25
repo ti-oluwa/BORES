@@ -18,6 +18,7 @@ import typing
 
 import numba
 import numpy as np
+import numpy.typing as npt
 
 from bores.errors import ValidationError
 from bores.types import Integer, Number
@@ -187,6 +188,84 @@ def get_group_controlled_rate(
     )
 
 
+@numba.njit(cache=True)
+def cap_unmet_targets(
+    *,
+    target_rates: npt.NDArray,
+    actual_rates: npt.NDArray,
+    members: npt.NDArray,
+    rate_tolerance: Number,
+    headroom_members: npt.NDArray,
+) -> tuple[Number, Integer]:
+    """
+    Finds which group members fell short of their own target rate and which did not.
+
+    A member that delivered less than its target, by more than the tolerance, is bound below it
+    (its BHP floor, say). Its target is lowered to what it delivered, so the same gap is not counted
+    again on the next pass, and the gap is added to the group's shortfall. Every other member with
+    a target has headroom. A member with no target (`NaN`) is skipped.
+
+    :param target_rates: Every well's target rate, indexed by well row. Lowered in place for
+        members that fell short.
+    :param actual_rates: The rate each member delivered, in the order of `members`. Only read for
+        a member with a target.
+    :param members: Well rows of the group's allocated members.
+    :param rate_tolerance: Relative tolerance on a member reaching its target. Used as an absolute
+        tolerance for a target of exactly zero.
+    :param headroom_members: Buffer the well rows of members with headroom are written to, from
+        the start. Must hold at least `len(members)` entries.
+    :returns: The group's total shortfall, and how many leading entries of `headroom_members`
+        were written.
+    """
+    total_shortfall = 0.0
+    n_headroom = 0
+    for position in range(len(members)):
+        well_row = members[position]
+        target_rate = target_rates[well_row]
+        if math.isnan(target_rate):
+            continue
+        actual_rate = actual_rates[position]
+        gap = target_rate - actual_rate
+        tolerance = abs(target_rate) * rate_tolerance if target_rate != 0 else rate_tolerance
+        if gap > tolerance:
+            total_shortfall += gap
+            target_rates[well_row] = actual_rate
+        elif gap <= tolerance:
+            headroom_members[n_headroom] = well_row
+            n_headroom += 1
+    return total_shortfall, n_headroom
+
+
+@numba.njit(cache=True)
+def boost_headroom_targets(
+    *,
+    target_rates: npt.NDArray,
+    guide_rates: npt.NDArray,
+    headroom_members: npt.NDArray,
+    n_headroom: Integer,
+    total_shortfall: Number,
+) -> None:
+    """
+    Adds a group's shortfall to the targets of the members with headroom, by guide rate.
+
+    :param target_rates: Every well's target rate, indexed by well row. Raised in place.
+    :param guide_rates: Every well's guide rate, indexed by well row. A `NaN` guide rate counts
+        as 1.
+    :param headroom_members: Well rows of the members with headroom, from the start.
+    :param n_headroom: How many leading entries of `headroom_members` to use.
+    :param total_shortfall: The shortfall to share out.
+    """
+    total_weight = 0.0
+    for position in range(n_headroom):
+        weight = guide_rates[headroom_members[position]]
+        total_weight += 1.0 if math.isnan(weight) else weight
+    for position in range(n_headroom):
+        well_row = headroom_members[position]
+        weight = guide_rates[well_row]
+        weight = 1.0 if math.isnan(weight) else weight
+        target_rates[well_row] += total_shortfall * (weight / total_weight)
+
+
 def redistribute_group_shortfall(
     *,
     group_name: str,
@@ -260,44 +339,37 @@ def redistribute_group_shortfall(
     resolved_get_surface_sample = get_surface_sample or (lambda well_row: None)
     reresolved: list[str] = []
 
-    # TODO: Can we extract this part downwards as a jitted kernel
+    members = np.asarray(group_derived, dtype=np.int64)
+    actual_rates = np.empty(len(members), dtype=np.float64)
+    headroom_members = np.empty(len(members), dtype=np.int64)
     for _ in range(control_spec.max_fixed_point_iterations):
-        headroom_rows: list[Integer] = []
-        total_shortfall = 0.0
-        for idx in group_derived:
-            target_rate = controls.target_rates[idx]
-            if math.isnan(target_rate):
-                continue
-
-            actual_rate = get_group_controlled_rate(
-                well_system=well_system, workspace=workspace, well_row=idx
+        for position, idx in enumerate(group_derived):
+            actual_rates[position] = (
+                math.nan
+                if math.isnan(controls.target_rates[idx])
+                else get_group_controlled_rate(
+                    well_system=well_system, workspace=workspace, well_row=idx
+                )
             )
-            gap = target_rate - actual_rate
-            tolerance = (
-                abs(target_rate) * control_spec.rate_convergence_tolerance
-                if target_rate != 0
-                else control_spec.rate_convergence_tolerance
-            )
-            if gap > tolerance:
-                # This well is bound below its own target (its BHP floor,
-                # say), cap its target down to what it actually
-                # delivered, so this same gap isn't counted again next
-                # pass. Its unmet share becomes this pass's shortfall to
-                # redistribute, once, not every remaining iteration.
-                total_shortfall += gap
-                controls.target_rates[idx] = actual_rate
-            elif gap <= tolerance:
-                headroom_rows.append(idx)
 
-        if total_shortfall <= 0 or not headroom_rows:
+        total_shortfall, n_headroom = cap_unmet_targets(
+            target_rates=controls.target_rates,
+            actual_rates=actual_rates,
+            members=members,
+            rate_tolerance=control_spec.rate_convergence_tolerance,
+            headroom_members=headroom_members,
+        )
+        if total_shortfall <= 0 or n_headroom == 0:
             break
 
-        guide_rates = controls.guide_rates[np.asarray(headroom_rows, dtype=np.int64)]
-        weights = np.where(np.isnan(guide_rates), 1.0, guide_rates)
-        total_weight = weights.sum()
-
-        for idx, weight in zip(headroom_rows, weights, strict=False):
-            controls.target_rates[idx] += total_shortfall * (weight / total_weight)
+        boost_headroom_targets(
+            target_rates=controls.target_rates,
+            guide_rates=controls.guide_rates,
+            headroom_members=headroom_members,
+            n_headroom=n_headroom,
+            total_shortfall=total_shortfall,
+        )
+        for idx in headroom_members[:n_headroom]:
             resolve_well_control(
                 compiled_system=well_system,
                 well_row=idx,

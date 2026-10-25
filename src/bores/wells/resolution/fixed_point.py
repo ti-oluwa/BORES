@@ -1003,7 +1003,17 @@ def bisect_homogeneous(
     :returns: The reference pressure of the last solve, and that solve.
     """
     average = 0.5 * (low + high)
-    result = FixedPointResult(converged=False, previous_total_rate=0.0, total_rate=0.0, oil_rate=0.0, water_rate=0.0, gas_rate=0.0, surface_oil_rate=0.0, surface_water_rate=0.0, surface_gas_rate=0.0)
+    result = FixedPointResult(
+        converged=False,
+        previous_total_rate=0.0,
+        total_rate=0.0,
+        oil_rate=0.0,
+        water_rate=0.0,
+        gas_rate=0.0,
+        surface_oil_rate=0.0,
+        surface_water_rate=0.0,
+        surface_gas_rate=0.0,
+    )
     for _ in range(max_bisections):
         average = 0.5 * (low + high)
         result = solve_homogeneous(
@@ -1087,7 +1097,17 @@ def bisect_beggs_and_brill(
     :returns: The reference pressure of the last solve, and that solve.
     """
     average = 0.5 * (low + high)
-    result = FixedPointResult(converged=False, previous_total_rate=0.0, total_rate=0.0, oil_rate=0.0, water_rate=0.0, gas_rate=0.0, surface_oil_rate=0.0, surface_water_rate=0.0, surface_gas_rate=0.0)
+    result = FixedPointResult(
+        converged=False,
+        previous_total_rate=0.0,
+        total_rate=0.0,
+        oil_rate=0.0,
+        water_rate=0.0,
+        gas_rate=0.0,
+        surface_oil_rate=0.0,
+        surface_water_rate=0.0,
+        surface_gas_rate=0.0,
+    )
     for _ in range(max_bisections):
         average = 0.5 * (low + high)
         result = solve_beggs_and_brill(
@@ -1171,7 +1191,17 @@ def bisect_hagedorn_brown(
     :returns: The reference pressure of the last solve, and that solve.
     """
     average = 0.5 * (low + high)
-    result = FixedPointResult(converged=False, previous_total_rate=0.0, total_rate=0.0, oil_rate=0.0, water_rate=0.0, gas_rate=0.0, surface_oil_rate=0.0, surface_water_rate=0.0, surface_gas_rate=0.0)
+    result = FixedPointResult(
+        converged=False,
+        previous_total_rate=0.0,
+        total_rate=0.0,
+        oil_rate=0.0,
+        water_rate=0.0,
+        gas_rate=0.0,
+        surface_oil_rate=0.0,
+        surface_water_rate=0.0,
+        surface_gas_rate=0.0,
+    )
     for _ in range(max_bisections):
         average = 0.5 * (low + high)
         result = solve_hagedorn_brown(
@@ -1255,7 +1285,17 @@ def bisect_gray(
     :returns: The reference pressure of the last solve, and that solve.
     """
     average = 0.5 * (low + high)
-    result = FixedPointResult(converged=False, previous_total_rate=0.0, total_rate=0.0, oil_rate=0.0, water_rate=0.0, gas_rate=0.0, surface_oil_rate=0.0, surface_water_rate=0.0, surface_gas_rate=0.0)
+    result = FixedPointResult(
+        converged=False,
+        previous_total_rate=0.0,
+        total_rate=0.0,
+        oil_rate=0.0,
+        water_rate=0.0,
+        gas_rate=0.0,
+        surface_oil_rate=0.0,
+        surface_water_rate=0.0,
+        surface_gas_rate=0.0,
+    )
     for _ in range(max_bisections):
         average = 0.5 * (low + high)
         result = solve_gray(
@@ -1339,7 +1379,17 @@ def bisect_woldesemayat_ghajar(
     :returns: The reference pressure of the last solve, and that solve.
     """
     average = 0.5 * (low + high)
-    result = FixedPointResult(converged=False, previous_total_rate=0.0, total_rate=0.0, oil_rate=0.0, water_rate=0.0, gas_rate=0.0, surface_oil_rate=0.0, surface_water_rate=0.0, surface_gas_rate=0.0)
+    result = FixedPointResult(
+        converged=False,
+        previous_total_rate=0.0,
+        total_rate=0.0,
+        oil_rate=0.0,
+        water_rate=0.0,
+        gas_rate=0.0,
+        surface_oil_rate=0.0,
+        surface_water_rate=0.0,
+        surface_gas_rate=0.0,
+    )
     for _ in range(max_bisections):
         average = 0.5 * (low + high)
         result = solve_woldesemayat_ghajar(
@@ -1418,7 +1468,17 @@ def bisect_hydrostatic(
     :returns: The reference pressure of the last solve, and that solve.
     """
     average = 0.5 * (low + high)
-    result = FixedPointResult(converged=False, previous_total_rate=0.0, total_rate=0.0, oil_rate=0.0, water_rate=0.0, gas_rate=0.0, surface_oil_rate=0.0, surface_water_rate=0.0, surface_gas_rate=0.0)
+    result = FixedPointResult(
+        converged=False,
+        previous_total_rate=0.0,
+        total_rate=0.0,
+        oil_rate=0.0,
+        water_rate=0.0,
+        gas_rate=0.0,
+        surface_oil_rate=0.0,
+        surface_water_rate=0.0,
+        surface_gas_rate=0.0,
+    )
     for _ in range(max_bisections):
         average = 0.5 * (low + high)
         result = solve_hydrostatic(
@@ -1492,7 +1552,17 @@ def bisect_uniform(
     :returns: The reference pressure of the last solve, and that solve.
     """
     average = 0.5 * (low + high)
-    result = FixedPointResult(converged=False, previous_total_rate=0.0, total_rate=0.0, oil_rate=0.0, water_rate=0.0, gas_rate=0.0, surface_oil_rate=0.0, surface_water_rate=0.0, surface_gas_rate=0.0)
+    result = FixedPointResult(
+        converged=False,
+        previous_total_rate=0.0,
+        total_rate=0.0,
+        oil_rate=0.0,
+        water_rate=0.0,
+        gas_rate=0.0,
+        surface_oil_rate=0.0,
+        surface_water_rate=0.0,
+        surface_gas_rate=0.0,
+    )
     for _ in range(max_bisections):
         average = 0.5 * (low + high)
         result = solve_uniform(
