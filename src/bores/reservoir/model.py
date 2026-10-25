@@ -321,6 +321,7 @@ class Reservoir:
         position = np.flatnonzero(self.grid.interior_face_indices == face_index)
         if position.size > 0:
             return typing.cast(Number, self.transmissibilities.interior[position[0]])
+        
         position = np.flatnonzero(self.grid.boundary_face_indices == face_index)
         if position.size > 0:
             return typing.cast(Number, self.transmissibilities.boundary[position[0]])

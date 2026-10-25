@@ -6,7 +6,7 @@ from typing_extensions import Self
 
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
-from bores.types import IntCellArray
+from bores.types import IntCellArray, Integer
 
 __all__ = ["Regions"]
 
@@ -113,48 +113,48 @@ class Regions:
             ),
         )
 
-    def get_pvt_region(self, cell_idx: int) -> int:
+    def get_pvt_region(self, cell_idx: Integer) -> Integer:
         """Return the PVT region for a cell, defaulting to 1."""
         if self.pvt_region is None:
             return 1
-        return int(self.pvt_region[cell_idx])
+        return self.pvt_region[cell_idx]
 
     get_pvtnum = get_pvt_region
 
-    def get_saturation_region(self, cell_idx: int) -> int:
+    def get_saturation_region(self, cell_idx: Integer) -> Integer:
         """Return the saturation function region for a cell, defaulting to 1."""
         if self.saturation_region is None:
             return 1
-        return int(self.saturation_region[cell_idx])
+        return self.saturation_region[cell_idx]
 
     get_satnum = get_saturation_region
 
-    def get_imbibition_region(self, cell_idx: int) -> int:
+    def get_imbibition_region(self, cell_idx: Integer) -> Integer:
         """Return the imbibition region for a cell, defaulting to 1."""
         if self.imbibition_region is None:
             return 1
-        return int(self.imbibition_region[cell_idx])
+        return self.imbibition_region[cell_idx]
 
-    def get_equilibration_region(self, cell_idx: int) -> int:
+    def get_equilibration_region(self, cell_idx: Integer) -> Integer:
         """Return the equilibration region for a cell, defaulting to 1."""
         if self.equilibrium_region is None:
             return 1
-        return int(self.equilibrium_region[cell_idx])
+        return self.equilibrium_region[cell_idx]
 
     get_eqlnum = get_equilibration_region
 
-    def get_fluid_in_place_region(self, cell_idx: int) -> int:
+    def get_fluid_in_place_region(self, cell_idx: Integer) -> Integer:
         """Return the fluid-in-place region for a cell, defaulting to 1."""
         if self.fluid_in_place_region is None:
             return 1
-        return int(self.fluid_in_place_region[cell_idx])
+        return self.fluid_in_place_region[cell_idx]
 
     get_fipnum = get_fluid_in_place_region
 
-    def get_rock_region(self, cell_idx: int) -> int:
+    def get_rock_region(self, cell_idx: Integer) -> Integer:
         """Return the rock function region for a cell, defaulting to 1."""
         if self.rock_region is None:
             return 1
-        return int(self.rock_region[cell_idx])
+        return self.rock_region[cell_idx]
 
     get_rocknum = get_rock_region

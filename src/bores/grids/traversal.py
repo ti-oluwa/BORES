@@ -4,9 +4,10 @@ import math
 
 import numba
 import numpy as np
+import numpy.typing as npt
 
 from bores.grids.base import Grid
-from bores.types import Integer, Number
+from bores.types import Boolean, Integer, Number
 
 __all__ = [
     "check_point_in_polygon_2d",
@@ -34,14 +35,14 @@ INITIAL_CELL_CAPACITY = 32
 
 @numba.njit(cache=True)
 def check_point_on_segment(
-    px: float,
-    py: float,
-    x1: float,
-    y1: float,
-    x2: float,
-    y2: float,
-    tolerance: float,
-) -> bool:
+    px: Number,
+    py: Number,
+    x1: Number,
+    y1: Number,
+    x2: Number,
+    y2: Number,
+    tolerance: Number,
+) -> Boolean:
     """
     Whether `(px, py)` lies on the segment `(x1, y1)` to `(x2, y2)`, within `tolerance`.
 
@@ -67,14 +68,14 @@ def check_point_on_segment(
 
 @numba.njit(cache=True)
 def point_in_indexed_polygon(
-    x: float,
-    y: float,
-    u_axis: int,
-    v_axis: int,
-    vertex_indices: np.ndarray,
-    vertex_coordinates: np.ndarray,
-    tolerance: float,
-) -> bool:
+    x: Number,
+    y: Number,
+    u_axis: Integer,
+    v_axis: Integer,
+    vertex_indices: npt.NDArray,
+    vertex_coordinates: npt.NDArray,
+    tolerance: Number,
+) -> Boolean:
     """
     Even-odd point-in-polygon test on two chosen coordinate axes, counting a point on the
     polygon's boundary as inside.
@@ -107,7 +108,7 @@ def point_in_indexed_polygon(
 
 
 @numba.njit(cache=True)
-def dominant_axis_of(nx: float, ny: float, nz: float) -> int:
+def dominant_axis_of(nx: Number, ny: Number, nz: Number) -> Integer:
     """The axis a normal is most aligned with, the lowest axis if several tie."""
     axis = 0
     largest = abs(nx)
@@ -121,11 +122,11 @@ def dominant_axis_of(nx: float, ny: float, nz: float) -> int:
 
 @numba.njit(cache=True)
 def check_point_in_polygon_2d(
-    x: float,
-    y: float,
-    polygon_xy: np.ndarray,
-    tolerance: float = 1e-9,
-) -> bool:
+    x: Number,
+    y: Number,
+    polygon_xy: npt.NDArray,
+    tolerance: Number = 1e-9,
+) -> Boolean:
     """
     Even-odd ray-casting point-in-polygon test, with a boundary tolerance so a point falling
     exactly on a shared cell face is counted as inside rather than dropped by roundoff.
@@ -149,11 +150,11 @@ def check_point_in_polygon_2d(
 
 @numba.njit(cache=True)
 def check_point_in_polygon_3d(
-    point: tuple[float, float, float],
-    polygon_xyz: np.ndarray,
-    normal: np.ndarray,
-    tolerance: float = 1e-9,
-) -> bool:
+    point: tuple[Integer, Integer, Integer],
+    polygon_xyz: npt.NDArray,
+    normal: npt.NDArray,
+    tolerance: Number = 1e-9,
+) -> Boolean:
     """
     Point-in-polygon test for a planar polygon in 3-D, given a point already known to lie on (or
     very near) the polygon's plane.
@@ -183,18 +184,18 @@ def check_point_in_polygon_3d(
 
 @numba.njit(cache=True)
 def face_plane_crossing(
-    sx: float,
-    sy: float,
-    sz: float,
-    dx: float,
-    dy: float,
-    dz: float,
-    face: int,
-    cell: int,
-    face_cell_indices: np.ndarray,
-    face_unit_normals: np.ndarray,
-    face_centroids: np.ndarray,
-) -> float:
+    sx: Number,
+    sy: Number,
+    sz: Number,
+    dx: Number,
+    dy: Number,
+    dz: Number,
+    face: Integer,
+    cell: Integer,
+    face_cell_indices: npt.NDArray,
+    face_unit_normals: npt.NDArray,
+    face_centroids: npt.NDArray,
+) -> Number:
     """
     Where a segment crosses a face's plane.
 
@@ -229,19 +230,19 @@ def face_plane_crossing(
 
 @numba.njit(cache=True)
 def crossing_is_inside_face(
-    sx: float,
-    sy: float,
-    sz: float,
-    dx: float,
-    dy: float,
-    dz: float,
-    t: float,
-    face: int,
-    face_vertex_offsets: np.ndarray,
-    face_vertex_indices: np.ndarray,
-    vertex_coordinates: np.ndarray,
-    face_unit_normals: np.ndarray,
-) -> bool:
+    sx: Number,
+    sy: Number,
+    sz: Number,
+    dx: Number,
+    dy: Number,
+    dz: Number,
+    t: Number,
+    face: Integer,
+    face_vertex_offsets: npt.NDArray,
+    face_vertex_indices: npt.NDArray,
+    vertex_coordinates: npt.NDArray,
+    face_unit_normals: npt.NDArray,
+) -> Boolean:
     """
     Whether the point a segment reaches at `t` lies within a face's polygon.
 
@@ -283,23 +284,23 @@ def crossing_is_inside_face(
 
 @numba.njit(cache=True)
 def walk_cells(
-    sx: float,
-    sy: float,
-    sz: float,
-    dx: float,
-    dy: float,
-    dz: float,
-    first_cell: int,
-    max_visits: int,
-    cell_face_offsets: np.ndarray,
-    cell_face_indices: np.ndarray,
-    face_vertex_offsets: np.ndarray,
-    face_vertex_indices: np.ndarray,
-    vertex_coordinates: np.ndarray,
-    face_cell_indices: np.ndarray,
-    face_unit_normals: np.ndarray,
-    face_centroids: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    sx: Number,
+    sy: Number,
+    sz: Number,
+    dx: Number,
+    dy: Number,
+    dz: Number,
+    first_cell: Integer,
+    max_visits: Integer,
+    cell_face_offsets: npt.NDArray,
+    cell_face_indices: npt.NDArray,
+    face_vertex_offsets: npt.NDArray,
+    face_vertex_indices: npt.NDArray,
+    vertex_coordinates: npt.NDArray,
+    face_cell_indices: npt.NDArray,
+    face_unit_normals: npt.NDArray,
+    face_centroids: npt.NDArray,
+) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     """
     Walk a segment through the grid from `first_cell`, crossing from cell to cell through the face
     it leaves each one by, until it ends or leaves the active grid.
@@ -408,7 +409,7 @@ def walk_cells(
     return cells[:count].copy(), entry_t[:count].copy(), exit_t[:count].copy()
 
 
-def traversal_arrays(grid: Grid) -> dict[str, np.ndarray]:
+def traversal_arrays(grid: Grid) -> dict[str, npt.NDArray]:
     """The grid arrays the walk reads."""
     return {
         "cell_face_offsets": grid.cell_face_offsets,
@@ -427,7 +428,7 @@ def walk_segment_cells(
     start: tuple[Number, Number, Number],
     end: tuple[Number, Number, Number],
     first_cell: Integer,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     """
     Walk the straight segment from `start` to `end` through `grid`, cell by cell.
 
@@ -447,13 +448,13 @@ def walk_segment_cells(
         empty = np.empty(0, dtype=np.float64)
         return np.empty(0, dtype=np.int64), empty, empty.copy()
     return walk_cells(
-        sx=float(start[0]),
-        sy=float(start[1]),
-        sz=float(start[2]),
-        dx=float(dx),
-        dy=float(dy),
-        dz=float(dz),
-        first_cell=int(first_cell),
+        sx=start[0],
+        sy=start[1],
+        sz=start[2],
+        dx=dx,
+        dy=dy,
+        dz=dz,
+        first_cell=first_cell,
         max_visits=4 * grid.n_cells + 64,
         **traversal_arrays(grid),
     )
@@ -480,14 +481,14 @@ def get_segment_face_intersection(
     """
     arrays = traversal_arrays(grid)
     t = face_plane_crossing(
-        sx=float(start[0]),
-        sy=float(start[1]),
-        sz=float(start[2]),
-        dx=float(direction[0]),
-        dy=float(direction[1]),
-        dz=float(direction[2]),
-        face=int(face_index),
-        cell=int(cell_index),
+        sx=start[0],
+        sy=start[1],
+        sz=start[2],
+        dx=direction[0],
+        dy=direction[1],
+        dz=direction[2],
+        face=face_index,
+        cell=cell_index,
         face_cell_indices=arrays["face_cell_indices"],
         face_unit_normals=arrays["face_unit_normals"],
         face_centroids=arrays["face_centroids"],
@@ -495,17 +496,17 @@ def get_segment_face_intersection(
     if np.isnan(t):
         return None
     inside = crossing_is_inside_face(
-        sx=float(start[0]),
-        sy=float(start[1]),
-        sz=float(start[2]),
-        dx=float(direction[0]),
-        dy=float(direction[1]),
-        dz=float(direction[2]),
+        sx=start[0],
+        sy=start[1],
+        sz=start[2],
+        dx=direction[0],
+        dy=direction[1],
+        dz=direction[2],
         t=t,
-        face=int(face_index),
+        face=face_index,
         face_vertex_offsets=arrays["face_vertex_offsets"],
         face_vertex_indices=arrays["face_vertex_indices"],
         vertex_coordinates=arrays["vertex_coordinates"],
         face_unit_normals=arrays["face_unit_normals"],
     )
-    return float(t) if inside else None
+    return t if inside else None

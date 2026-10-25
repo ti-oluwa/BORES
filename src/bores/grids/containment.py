@@ -5,9 +5,10 @@ import typing
 
 import numba
 import numpy as np
+import numpy.typing as npt
 
 from bores.grids.base import Grid
-from bores.types import IntArray, Integer, Number, OneDimension
+from bores.types import Boolean, IntArray, Integer, Number, OneDimension
 
 __all__ = [
     "INSIDE_FRACTION",
@@ -26,18 +27,18 @@ to the surface instead.
 
 @numba.njit(cache=True)
 def solid_angle_fraction(
-    x: float,
-    y: float,
-    z: float,
-    cell: int,
-    cell_face_offsets: np.ndarray,
-    cell_face_indices: np.ndarray,
-    face_vertex_offsets: np.ndarray,
-    face_vertex_indices: np.ndarray,
-    vertex_coordinates: np.ndarray,
-    face_cell_indices: np.ndarray,
-    face_unit_normals: np.ndarray,
-) -> float:
+    x: Number,
+    y: Number,
+    z: Number,
+    cell: Integer,
+    cell_face_offsets: npt.NDArray,
+    cell_face_indices: npt.NDArray,
+    face_vertex_offsets: npt.NDArray,
+    face_vertex_indices: npt.NDArray,
+    vertex_coordinates: npt.NDArray,
+    face_cell_indices: npt.NDArray,
+    face_unit_normals: npt.NDArray,
+) -> Number:
     """
     Fraction of a full turn of solid angle that the surface of a cell subtends at a point.
 
@@ -85,6 +86,7 @@ def solid_angle_fraction(
             area_x += by * cz - bz * cy
             area_y += bz * cx - bx * cz
             area_z += bx * cy - by * cx
+
         alignment = (
             area_x * face_unit_normals[face, 0]
             + area_y * face_unit_normals[face, 1]
@@ -123,19 +125,19 @@ def solid_angle_fraction(
 
 @numba.njit(cache=True)
 def triangle_distance_squared(
-    px: float,
-    py: float,
-    pz: float,
-    ax: float,
-    ay: float,
-    az: float,
-    bx: float,
-    by: float,
-    bz: float,
-    cx: float,
-    cy: float,
-    cz: float,
-) -> float:
+    px: Number,
+    py: Number,
+    pz: Number,
+    ax: Number,
+    ay: Number,
+    az: Number,
+    bx: Number,
+    by: Number,
+    bz: Number,
+    cx: Number,
+    cy: Number,
+    cz: Number,
+) -> Number:
     """
     Squared distance from a point to a triangle.
 
@@ -230,17 +232,17 @@ def triangle_distance_squared(
 
 @numba.njit(cache=True)
 def is_within_of_surface(
-    x: float,
-    y: float,
-    z: float,
-    cell: int,
-    distance: float,
-    cell_face_offsets: np.ndarray,
-    cell_face_indices: np.ndarray,
-    face_vertex_offsets: np.ndarray,
-    face_vertex_indices: np.ndarray,
-    vertex_coordinates: np.ndarray,
-) -> bool:
+    x: Number,
+    y: Number,
+    z: Number,
+    cell: Integer,
+    distance: Number,
+    cell_face_offsets: npt.NDArray,
+    cell_face_indices: npt.NDArray,
+    face_vertex_offsets: npt.NDArray,
+    face_vertex_indices: npt.NDArray,
+    vertex_coordinates: npt.NDArray,
+) -> Boolean:
     """
     Whether a point is no further than `distance` from the surface of a cell.
 
@@ -292,21 +294,21 @@ def is_within_of_surface(
 
 @numba.njit(cache=True)
 def contains_point(
-    x: float,
-    y: float,
-    z: float,
-    cell: int,
-    tolerance: float,
-    cell_face_offsets: np.ndarray,
-    cell_face_indices: np.ndarray,
-    face_vertex_offsets: np.ndarray,
-    face_vertex_indices: np.ndarray,
-    vertex_coordinates: np.ndarray,
-    face_cell_indices: np.ndarray,
-    face_unit_normals: np.ndarray,
-    cell_min_xyz: np.ndarray,
-    cell_max_xyz: np.ndarray,
-) -> bool:
+    x: Number,
+    y: Number,
+    z: Number,
+    cell: Integer,
+    tolerance: Number,
+    cell_face_offsets: npt.NDArray,
+    cell_face_indices: npt.NDArray,
+    face_vertex_offsets: npt.NDArray,
+    face_vertex_indices: npt.NDArray,
+    vertex_coordinates: npt.NDArray,
+    face_cell_indices: npt.NDArray,
+    face_unit_normals: npt.NDArray,
+    cell_min_xyz: npt.NDArray,
+    cell_max_xyz: npt.NDArray,
+) -> Boolean:
     """
     Whether a cell contains a point.
 
@@ -374,21 +376,21 @@ def contains_point(
 
 @numba.njit(cache=True)
 def first_containing_cell(
-    x: float,
-    y: float,
-    z: float,
-    candidates: np.ndarray,
-    tolerance: float,
-    cell_face_offsets: np.ndarray,
-    cell_face_indices: np.ndarray,
-    face_vertex_offsets: np.ndarray,
-    face_vertex_indices: np.ndarray,
-    vertex_coordinates: np.ndarray,
-    face_cell_indices: np.ndarray,
-    face_unit_normals: np.ndarray,
-    cell_min_xyz: np.ndarray,
-    cell_max_xyz: np.ndarray,
-) -> int:
+    x: Number,
+    y: Number,
+    z: Number,
+    candidates: npt.NDArray,
+    tolerance: Number,
+    cell_face_offsets: npt.NDArray,
+    cell_face_indices: npt.NDArray,
+    face_vertex_offsets: npt.NDArray,
+    face_vertex_indices: npt.NDArray,
+    vertex_coordinates: npt.NDArray,
+    face_cell_indices: npt.NDArray,
+    face_unit_normals: npt.NDArray,
+    cell_min_xyz: npt.NDArray,
+    cell_max_xyz: npt.NDArray,
+) -> Integer:
     """
     Position, in `candidates`, of the first cell that contains the point.
 
@@ -429,7 +431,7 @@ def first_containing_cell(
     return -1
 
 
-def geometry_arrays(grid: Grid) -> dict[str, np.ndarray]:
+def geometry_arrays(grid: Grid) -> dict[str, npt.NDArray]:
     """The grid arrays the containment kernels read."""
     return {
         "cell_face_offsets": grid.cell_face_offsets,
@@ -449,7 +451,7 @@ def cell_contains_point(
     cell_index: Integer,
     point: tuple[Number, Number, Number],
     tolerance: Number = 1e-6,
-) -> bool:
+) -> Boolean:
     """
     Whether a cell contains a point, judged from the cell's own faces.
 
@@ -464,11 +466,11 @@ def cell_contains_point(
     """
     return bool(
         contains_point(
-            x=float(point[0]),
-            y=float(point[1]),
-            z=float(point[2]),
-            cell=int(cell_index),
-            tolerance=float(tolerance),
+            x=point[0],
+            y=point[1],
+            z=point[2],
+            cell=cell_index,
+            tolerance=tolerance,
             **geometry_arrays(grid),
         )
     )
@@ -490,11 +492,11 @@ def first_cell_containing_point(
     :returns: The first containing cell, or `None` if none of them contains the point.
     """
     position = first_containing_cell(
-        x=float(point[0]),
-        y=float(point[1]),
-        z=float(point[2]),
+        x=point[0],
+        y=point[1],
+        z=point[2],
         candidates=np.ascontiguousarray(candidates),
-        tolerance=float(tolerance),
+        tolerance=tolerance,
         **geometry_arrays(grid),
     )
     return candidates[position] if position >= 0 else None

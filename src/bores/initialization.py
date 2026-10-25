@@ -179,9 +179,10 @@ def integrate_hydrostatic_pressure(
     node_depths = reference_depth + h * np.arange(n_steps + 1, dtype=np.float64)
     midpoint_depths = node_depths[:-1] + 0.5 * h
 
-    pressures = np.full(n_steps + 1, float(reference_pressure), dtype=np.float64)
-    reference_gradient = gradient_factor * float(
-        np.ravel(density_fn(np.array([reference_pressure]), np.array([reference_depth])))[0]
+    pressures = np.full(n_steps + 1, reference_pressure, dtype=np.float64)
+    reference_gradient = (
+        gradient_factor
+        * np.ravel(density_fn(np.array([reference_pressure]), np.array([reference_depth])))[0]
     )
     pressures += reference_gradient * (node_depths - reference_depth)
 
@@ -212,10 +213,10 @@ def integrate_hydrostatic_pressure(
                 16.0
                 * np.finfo(dtype).eps  # type: ignore
                 * max(  # type: ignore
-                    float(np.ptp(updated)), 1e-3 * abs(float(reference_pressure))
+                    np.ptp(updated), 1e-3 * abs(reference_pressure)
                 )
             )
-            change = float(np.max(np.abs(updated - pressures)))
+            change = np.max(np.abs(updated - pressures))
             pressures = updated
             if change <= tolerance:
                 converged = True

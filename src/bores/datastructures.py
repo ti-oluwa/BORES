@@ -47,17 +47,14 @@ class GridDimensions(NamedTuple):
 
     @typing.overload
     def flat_index(self, i: Integer, j: Integer, k: Integer) -> Integer: ...
-
     @typing.overload
     def flat_index(
         self, i: IntArray[NDimension], j: IntOrArray[NDimension], k: IntOrArray[NDimension]
     ) -> IntArray[NDimension]: ...
-
     @typing.overload
     def flat_index(
         self, i: IntOrArray[NDimension], j: IntArray[NDimension], k: IntOrArray[NDimension]
     ) -> IntArray[NDimension]: ...
-
     @typing.overload
     def flat_index(
         self, i: IntOrArray[NDimension], j: IntOrArray[NDimension], k: IntArray[NDimension]
