@@ -5,14 +5,23 @@ import typing
 import warnings
 from pathlib import Path
 
+import numpy as np
+
 from bores.errors import ValidationError
-from bores.types import TextOrPath
+from bores.types import FloatArray, OneDimension, TextOrPath
 
 __all__ = [
     "Deck",
     "DeckParseError",
+    "NumericRun",
     "Record",
+    "find_terminator",
+    "first_segment",
+    "parse_floats",
+    "parse_numeric_runs",
     "parse_repeat_token",
+    "report",
+    "split_segments",
     "tokenize",
 ]
 
@@ -21,7 +30,33 @@ class DeckParseError(ValidationError):
     """Raised when an Eclipse deck or one of its keyword records is malformed."""
 
 
+def report(message: str, *, strict: bool, stacklevel: int = 2) -> None:
+    """
+    Report a problem with the deck according to the parsing mode.
+
+    :param message: What is wrong, ending with a full stop. It should say what the parser did about
+        it (or would have done), because that is what a lenient parse falls back to.
+    :param strict: When `True` the problem is an error and `DeckParseError` is raised. When
+        `False` it is emitted as a warning and parsing carries on.
+    :param stacklevel: Stack level for the warning, relative to the caller of this function.
+    :raises DeckParseError: If `strict` is `True`.
+    """
+    if strict:
+        raise DeckParseError(
+            f"{message} This is an error because the deck is being parsed with `strict=True`."
+        )
+    warnings.warn(message, stacklevel=stacklevel + 1)
+
+
 COMMENT_RE = re.compile(r"--[^\n]*")
+QUOTED_OR_COMMENT_RE = re.compile(r"""('[^'\n]*'|"[^"\n]*")|--[^\n]*""")
+"""
+Matches a quoted string (kept, via group 1) or a `--` comment (dropped). Scanning left to right, a
+`--` that sits inside a quoted string is consumed by the string first, so it is never mistaken for
+the start of a comment.
+"""
+NON_SPACE_RE = re.compile(r"\S")
+SLASH_OR_QUOTED_RE = re.compile(r"""'[^'\n]*'|"[^"\n]*"|/""")
 INCLUDE_RE = re.compile(
     r"""\bINCLUDE\b\s*
         (?:
@@ -36,11 +71,106 @@ INCLUDE_RE = re.compile(
 
 
 def strip_comments(text: str) -> str:
-    """Remove `--` line comments from Eclipse text."""
-    return COMMENT_RE.sub("", text)
+    """
+    Remove `--` line comments from Eclipse text.
+
+    A `--` inside a quoted string (e.g. `'CASE--A'`) is part of the string, not a comment. A quote
+    only protects text up to the end of its own line, so an unclosed quote cannot swallow a comment.
+    Newlines are always kept, so line structure is unchanged.
+    """
+    if "--" not in text:
+        return text
+    if "'" not in text and '"' not in text:
+        return COMMENT_RE.sub("", text)
+    return QUOTED_OR_COMMENT_RE.sub(r"\1", text)
 
 
-def resolve_includes(text: str, source_dir: Path | None, *, encoding: str = "ascii") -> str:
+def find_terminator(text: str, start: int = 0, end: int | None = None) -> int:
+    """
+    Find the first `/` in `text[start:end]` that is not inside a quoted string.
+
+    :param text: Text to search.
+    :param start: Offset to start searching at.
+    :param end: Offset to stop searching at (exclusive). Defaults to the end of `text`.
+    :returns: Offset of the `/` in `text`, or `-1` if there is none.
+    """
+    if end is None:
+        end = len(text)
+    if text.find("'", start, end) == -1 and text.find('"', start, end) == -1:
+        return text.find("/", start, end)
+    for match in SLASH_OR_QUOTED_RE.finditer(text, start, end):
+        if match.group() == "/":
+            return match.start()
+    return -1
+
+
+def first_segment(body: str) -> str:
+    """
+    Return `body` up to its first `/` that is not inside a quoted string (all of `body` if there
+    is none). This is the first `/`-terminated record of a keyword body, without the `/`.
+    """
+    terminator = find_terminator(body)
+    return body if terminator == -1 else body[:terminator]
+
+
+def split_segments(body: str) -> list[str]:
+    """
+    Split `body` on every `/` that is not inside a quoted string.
+
+    Behaves like `body.split("/")`, except that a quoted value such as `'run/CASE1'` stays whole.
+    """
+    if "'" not in body and '"' not in body:
+        return body.split("/")
+
+    segments: list[str] = []
+    segment_start = 0
+    for match in SLASH_OR_QUOTED_RE.finditer(body):
+        if match.group() == "/":
+            segments.append(body[segment_start : match.start()])
+            segment_start = match.end()
+    segments.append(body[segment_start:])
+    return segments
+
+
+MAX_INCLUDE_DEPTH = 64
+"""How deeply `INCLUDE` directives may nest before the deck is rejected."""
+
+INCLUDE_SCAN_CHUNK = 1 << 24
+
+
+def may_contain_include(text: str) -> bool:
+    """
+    Cheaply tell whether `text` can contain an `INCLUDE` directive, in any letter case.
+
+    A case-insensitive regular expression over a large deck takes seconds even when there is
+    nothing to find, so this scans in bounded chunks with plain string search instead.
+    """
+    length = len(text)
+    if length <= INCLUDE_SCAN_CHUNK:
+        return "include" in text.lower()
+    for offset in range(0, length, INCLUDE_SCAN_CHUNK):
+        # The extra characters stop an `INCLUDE` that straddles two chunks from being missed.
+        if "include" in text[offset : offset + INCLUDE_SCAN_CHUNK + 7].lower():
+            return True
+    return False
+
+
+def canonical_path(path: Path) -> Path:
+    """Return the absolute, symlink-free form of `path`, for comparing files."""
+    try:
+        return path.resolve()
+    except OSError:
+        return path.absolute()
+
+
+def resolve_includes(
+    text: str,
+    source_dir: Path | None,
+    *,
+    encoding: str = "ascii",
+    strict: bool = False,
+    include_stack: tuple[Path, ...] = (),
+) -> str:
     """
     Recursively inline `INCLUDE 'path' /` directives.
 
@@ -48,21 +178,30 @@ def resolve_includes(text: str, source_dir: Path | None, *, encoding: str = "asc
     :param source_dir: Directory the current text was read from, used to
         resolve relative include paths. `None` disables resolution (raw
         text input with no filesystem anchor); directives are dropped with
-        a warning in that case.
+        a warning in that case (an error when `strict`).
+    :param encoding: Character encoding of included files.
+    :param strict: Treat an `INCLUDE` that cannot be followed (raw text input) as an error
+        instead of a warning.
+    :param include_stack: Files currently being expanded, outermost first. Used to detect a file
+        that includes itself, directly or through other files.
     :returns: Text with every `INCLUDE` block replaced by the referenced
         file's (recursively resolved) contents, with comments removed.
-    :raises DeckParseError: If an included file cannot be found, read, or decoded with `encoding`.
+    :raises DeckParseError: If an included file cannot be found, read, or decoded with `encoding`,
+        if `INCLUDE` directives form a cycle, or if they nest deeper than `MAX_INCLUDE_DEPTH`.
     """
     # A commented-out `INCLUDE` must not be followed, so comments go first.
     text = strip_comments(text)
+    if not may_contain_include(text):
+        return text
 
     def replace(match: re.Match[str]) -> str:
         relative_path = (match.group(1) or match.group(2)).strip()
         if source_dir is None:
-            warnings.warn(
+            report(
                 f"`INCLUDE` directive for {relative_path!r} encountered in raw-text "
-                "input with no source directory; ignoring. Load from a file path "
+                "input with no source directory; ignoring it. Load from a file path "
                 "to enable `INCLUDE` resolution.",
+                strict=strict,
                 stacklevel=6,
             )
             return ""
@@ -70,10 +209,151 @@ def resolve_includes(text: str, source_dir: Path | None, *, encoding: str = "asc
         include_path = source_dir / relative_path
         if not include_path.is_file():
             raise DeckParseError(f"`INCLUDE` references {include_path!r}, which does not exist.")
+
+        canonical = canonical_path(include_path)
+        if canonical in include_stack:
+            chain = " -> ".join(str(path) for path in (*include_stack, canonical))
+            raise DeckParseError(f"`INCLUDE` cycle detected: {chain}.")
+        if len(include_stack) >= MAX_INCLUDE_DEPTH:
+            raise DeckParseError(
+                f"`INCLUDE` directives nest deeper than {MAX_INCLUDE_DEPTH} levels, "
+                f"at {str(include_path)!r}."
+            )
+
         included_text = read_deck_file(include_path, encoding=encoding)
-        return resolve_includes(included_text, include_path.parent, encoding=encoding)
+        return resolve_includes(
+            included_text,
+            include_path.parent,
+            encoding=encoding,
+            strict=strict,
+            include_stack=(*include_stack, canonical),
+        )
 
     return INCLUDE_RE.sub(replace, text)
+
+
+class NumericRun(typing.NamedTuple):
+    """
+    A run of consecutive entries of a numeric record, as read by `parse_numeric_runs`.
+
+    A deck writes many equal values compactly as `N*value`, so a large uniform array is a handful
+    of runs rather than millions of tokens.
+    """
+
+    entry_count: int
+    """How many array entries the run stands for."""
+
+    values: FloatArray[OneDimension] | float | None
+    """
+    The entries: an array of `count` values written out one by one, a single `float` for an
+    `N*value` group (every entry is that value), or `None` for a bare `N*` group (`count`
+    defaulted entries, which have no value of their own).
+    """
+
+
+REPEAT_LOOKBACK = 32
+"""How far back from a `*` to look for the start of its token. Longer tokens are malformed."""
+
+NONSPACE_RE = re.compile(r"\S*")
+TRAILING_NONSPACE_RE = re.compile(r"\S*\Z")
+
+
+def parse_floats(text: str, name: str) -> FloatArray[OneDimension]:
+    """
+    Read whitespace-separated numbers into a `float64` array.
+
+    This is the fast path for the bulk of a large array: the text is parsed in one pass, with no
+    list of token strings built along the way.
+
+    :param text: Numbers separated by any whitespace, with no `N*` repeat groups.
+    :param name: Keyword name, for error messages.
+    :returns: The numbers in order (empty for empty or blank text).
+    :raises DeckParseError: If anything in `text` is not a number.
+    """
+    if not text or text.isspace():
+        # `numpy.fromstring` reads blank text as `[-1.0]`, so it must not be asked to.
+        return np.empty(0, dtype=np.float64)
+    try:
+        with warnings.catch_warnings():
+            # Older numpy only warns about, and stops at, text it cannot read.
+            warnings.simplefilter("error", DeprecationWarning)
+            return typing.cast(
+                FloatArray[OneDimension], np.fromstring(text, dtype=np.float64, sep=" ")
+            )
+    except (ValueError, DeprecationWarning, UnicodeEncodeError):
+        pass
+
+    # Something is not a number. Find it so the message can name it.
+    for token in text.split():
+        try:
+            float(token)
+        except ValueError:
+            raise DeckParseError(f"{name} contains a non-numeric value {token!r}.") from None
+    raise DeckParseError(f"{name} contains a value that could not be read as a number.")
+
+
+def parse_numeric_runs(text: str, *, name: str) -> list[NumericRun]:
+    """
+    Read the numbers of a record body, keeping `N*value` and `N*` groups as single runs.
+
+    :param text: Record body up to its terminating `/`.
+    :param name: Keyword name, for error messages.
+    :returns: The runs, in order. Groups of zero entries are left out.
+    :raises DeckParseError: If anything is not a number or a well-formed repeat group.
+    """
+    runs: list[NumericRun] = []
+    if "*" not in text:
+        values = parse_floats(text, name)
+        if values.size:
+            runs.append(NumericRun(int(values.size), values))
+        return runs
+
+    position = 0
+    star = text.find("*")
+    while star != -1:
+        window_start = max(position, star - REPEAT_LOOKBACK)
+        trailing = TRAILING_NONSPACE_RE.search(text[window_start:star])
+        assert trailing is not None  # `\S*\Z` always matches, if only the empty string
+        start = window_start + trailing.start()
+        end = NONSPACE_RE.match(text, star + 1).end()  # type: ignore[union-attr]
+        digits = text[start:star]
+        too_long = (
+            start == window_start
+            and window_start > position
+            and not text[window_start - 1].isspace()
+        )
+        if too_long or not (digits.isascii() and digits.isdigit()):
+            raise DeckParseError(
+                f"{name}: {text[start:end]!r} is not a valid repeat group "
+                "(expected N*value, or N* for N defaulted entries)."
+            )
+
+        if start > position:
+            values = parse_floats(text[position:start], name)
+            if values.size:
+                runs.append(NumericRun(int(values.size), values))
+
+        count = int(digits)
+        value_text = text[star + 1 : end]
+        if count > 0:
+            if not value_text:
+                runs.append(NumericRun(count, None))
+            else:
+                try:
+                    runs.append(NumericRun(count, float(value_text)))
+                except ValueError:
+                    raise DeckParseError(
+                        f"{name} contains a non-numeric value {value_text!r} "
+                        f"in the repeat group {text[start:end]!r}."
+                    ) from None
+        position = end
+        star = text.find("*", end)
+
+    if position < len(text):
+        values = parse_floats(text[position:], name)
+        if values.size:
+            runs.append(NumericRun(int(values.size), values))
+    return runs
 
 
 def decode_deck_bytes(data: bytes, *, source: str, encoding: str) -> str:
@@ -118,23 +398,33 @@ def read_deck_file(path: Path, *, encoding: str) -> str:
     return decode_deck_bytes(data, source=f"file {str(path)!r}", encoding=encoding)
 
 
-def resolve_source(source: TextOrPath, *, encoding: str) -> str:
+def is_lone_keyword(source: str) -> bool:
+    """Whether a single-line `str` is nothing but one keyword, such as `METRIC`."""
+    return KEYWORD_LINE_RE.fullmatch(source) is not None
+
+
+def resolve_source(source: TextOrPath, *, encoding: str, strict: bool = False) -> str:
     """
     Coerce `source` (path, raw text, or bytes) to a single fully
     `INCLUDE`-resolved, comment-stripped text blob.
 
     :param source: Path, raw deck text string, or raw bytes. A `str` that spans more than one
-        line is raw deck text. A single-line `str` is a file path.
+        line is raw deck text. A single-line `str` is a file path if a file exists there, and
+        otherwise raw deck text if it is a lone keyword (such as `METRIC`). Anything else is
+        taken to be a path to a file that does not exist, which is an error.
     :param encoding: Character encoding for file/bytes input.
+    :param strict: Treat problems that a lenient parse only warns about as errors.
     :returns: Clean text ready for `Deck` scanning.
     :raises DeckParseError: If a file cannot be read.
     """
     source_dir: Path | None = None
+    include_stack: tuple[Path, ...] = ()
 
     if isinstance(source, bytes):
         text = decode_deck_bytes(source, source="bytes input", encoding=encoding)
     elif isinstance(source, Path):
         source_dir = source.parent
+        include_stack = (canonical_path(source),)
         text = read_deck_file(source, encoding=encoding)
     elif "\n" in source or "\r" in source:  # type: ignore[operator]
         text = typing.cast(str, source)
@@ -144,15 +434,27 @@ def resolve_source(source: TextOrPath, *, encoding: str) -> str:
             is_file = candidate.is_file()
         except (OSError, ValueError):
             is_file = False
-        if not is_file:
-            raise DeckParseError(
-                f"Cannot read deck file. No file exists at {source[:80]!r}. A `str` is treated "
-                "as raw deck text only when it spans more than one line."
-            )
-        source_dir = candidate.parent
-        text = read_deck_file(candidate, encoding=encoding)
 
-    return resolve_includes(text, source_dir, encoding=encoding)
+        if is_file:
+            source_dir = candidate.parent
+            include_stack = (canonical_path(candidate),)
+            text = read_deck_file(candidate, encoding=encoding)
+        elif is_lone_keyword(source):  # type: ignore[arg-type]
+            text = typing.cast(str, source)
+        else:
+            raise DeckParseError(
+                f"Cannot read deck file. No file exists at {source[:80]!r}. A single-line `str` "
+                "that does not name an existing file is read as raw deck text only when it is a "
+                "lone keyword such as `METRIC`. Use `DeckFile.from_text` for raw text."
+            )
+
+    return resolve_includes(
+        text,
+        source_dir,
+        encoding=encoding,
+        strict=strict,
+        include_stack=include_stack,
+    )
 
 
 # Matches "N*value" repeat syntax. Value must be non-empty; a bare "N*" is
@@ -264,8 +566,11 @@ class Record(typing.NamedTuple):
 
     body: str
     """
-    Raw text between the keyword and its terminating `/` (untokenised),
-    or empty string for a bare/nullary keyword that takes no data section.
+    Raw text after the keyword (untokenised): up to, and not including, its terminating `/`
+    when that is the only `/` of the keyword, which is the case for every single-record keyword
+    such as `PORO` or `SPECGRID`. A keyword with several `/`-terminated records (a table, or an
+    operator block) keeps all of them, `/` included, up to the next keyword. Empty for a
+    bare/nullary keyword that takes no data section.
     """
     # NOTE: Record could essentially just store the start and end position of the
     # keyword record body in the original text buffer and not store `body` at all.
@@ -308,6 +613,19 @@ KEYWORD_LINE_RE = re.compile(
 FREE_TEXT_KEYWORDS = frozenset({"TITLE"})
 
 
+def has_unterminated_quote(text: str) -> bool:
+    """
+    Whether `text` has a `'` or `"` that is not closed on its own line.
+
+    Quoted strings never span lines in an Eclipse deck, so a quote character left over once every
+    complete quoted string is removed was opened and never closed.
+    """
+    if "'" not in text and '"' not in text:
+        return False
+    remainder = QUOTED_RE.sub("", text)
+    return "'" in remainder or '"' in remainder
+
+
 class ScanResult(typing.NamedTuple):
     """Result of scanning an Eclipse deck."""
 
@@ -328,37 +646,48 @@ class Deck:
     **Scanning strategy**: Eclipse keywords always start at the beginning
     of a line, alone (nothing else on that line). A keyword's data section
     is everything from there up to and including its terminating `/` -
-    *unless* another keyword line is encountered first, in which case the
+    unless another keyword line is encountered first, in which case the
     first keyword is treated as bare/nullary (e.g. `ENDBOX`, `ECHO`,
     `RUNSPEC`) with an empty body, and the second keyword line starts a
     new record. This mirrors Eclipse's own grammar without needing a
     hardcoded list of nullary keywords.
 
+    A `/` inside a quoted string (e.g. `'run/CASE1'`) is part of the string and does not end a
+    record.
+
     Note:
-        If the **last** keyword in a deck has data but no terminating
-        `/`, that data is silently dropped (the keyword becomes nullary).
-        Well-formed Eclipse decks always terminate data blocks with `/`;
-        this edge case only arises with truncated or hand-written files.
+        A keyword that has data but no terminating `/` before the next keyword (or the end of
+        the deck) cannot be read: its data is dropped and the keyword becomes nullary. Well-formed
+        Eclipse decks always terminate data blocks with `/`, so this only arises with truncated or
+        hand-written files. It is reported with a warning, or raised as a `DeckParseError` when
+        `strict`.
     """
 
-    __slots__ = ("_hash", "_keyword_records", "records", "text")
+    __slots__ = ("_keyword_records", "records", "strict")
 
-    def __init__(self, text: str) -> None:
+    def __init__(self, text: str, *, strict: bool = False) -> None:
         """
+        Initialize the deck.
+
         :param text: Fully comment-stripped, `INCLUDE`-resolved Eclipse
-            text.
+            text. It is scanned once and not kept: every record holds its own body, so the
+            deck's memory is the record bodies rather than those plus a second copy of the text.
+        :param strict: Raise a `DeckParseError` for malformed input that a lenient parse only
+            warns about (here: data without a terminating `/`, unterminated quotes). The keyword
+            parsers read this too, so one flag sets the mode for the whole deck.
+        :raises DeckParseError: If `strict` and the deck is malformed.
         """
-        self.text = text
-        self.records, self._keyword_records = self._scan(text)
-        self._hash: int | None = None
+        self.strict = strict
+        self.records, self._keyword_records = self._scan(text, strict)
 
     @staticmethod
-    def _scan(text: str) -> ScanResult:
+    def _scan(text: str, strict: bool = False) -> ScanResult:
         """
         Scan `text` into an ordered list of `Record` objects together with an
         index mapping upper-cased keywords to all matching records.
 
         :param text: Clean Eclipse text (no comments, no `INCLUDE` directives).
+        :param strict: Raise instead of warning about malformed records.
         :returns: `ScanResult` containing records in file order and a keyword index.
         """
         keyword_lines: list[re.Match[str]] = []
@@ -385,22 +714,44 @@ class Deck:
             next_keyword_start = (
                 keyword_lines[idx + 1].start() if idx + 1 < len(keyword_lines) else len(text)
             )
-            window = text[body_start:next_keyword_start]
-            slash_position = window.find("/")
+            terminator = find_terminator(text, body_start, next_keyword_start)
 
-            if slash_position == -1:
+            if terminator == -1:
                 if keyword in FREE_TEXT_KEYWORDS:
                     # No `/` at all, and none expected - the free text
                     # itself runs until the next keyword line.
                     record = Record(
                         keyword=keyword,
-                        body=window,
+                        body=text[body_start:next_keyword_start],
                         start=match.start(),
                         end=next_keyword_start,
                     )
                 else:
                     # No terminator before the next keyword line (or end of
-                    # file): treat as bare/nullary keyword.
+                    # file): treat as bare/nullary keyword. That is only right when there is
+                    # nothing between the two; data here has been left unterminated.
+                    if (
+                        next_keyword_start > body_start
+                        and not text[body_start:next_keyword_start].isspace()
+                    ):
+                        next_keyword = (
+                            keyword_lines[idx + 1].group("keyword").upper()
+                            if idx + 1 < len(keyword_lines)
+                            else None
+                        )
+                        before = (
+                            f"before the next keyword `{next_keyword}`"
+                            if next_keyword is not None
+                            else "before the end of the deck"
+                        )
+                        preview = " ".join(text[body_start : body_start + 200].split())[:60]
+                        report(
+                            f"`{keyword}` has data but no terminating '/' {before}. The data "
+                            f"is ignored and `{keyword}` is treated as having no data "
+                            f"(data starts with {preview!r}).",
+                            strict=strict,
+                            stacklevel=4,
+                        )
                     record = Record(
                         keyword=keyword,
                         body="",
@@ -408,7 +759,7 @@ class Deck:
                         end=body_start,
                     )
             else:
-                # Capture the *entire* span up to the next keyword line, not just
+                # Capture the entire span up to the next keyword line, not just
                 # up to the first `/`. Single-record keywords (SPECGRID, PORO, ...)
                 # only ever have one `/` in this span, so this changes nothing for
                 # them. Multi-row keywords (PVTO, PVTG, FAULTS, DENSITY with several
@@ -416,11 +767,29 @@ class Deck:
                 # `/`-terminated rows before the next keyword line, and their own
                 # `Keyword.parse()` already splits on `/` internally to walk them -
                 # truncating here silently dropped every row after the first.
+                #
+                # When nothing but whitespace follows that one `/` (every single-record
+                # keyword, which is where the large arrays are), the body stops before it.
+                # Parsers then take the body as is, instead of each cutting a second copy of a
+                # possibly huge array out of it.
+                only_record = (
+                    keyword not in FREE_TEXT_KEYWORDS
+                    and NON_SPACE_RE.search(text, terminator + 1, next_keyword_start) is None
+                )
                 record = Record(
                     keyword=keyword,
-                    body=window,
+                    body=text[body_start : terminator if only_record else next_keyword_start],
                     start=match.start(),
                     end=next_keyword_start,
+                )
+
+            if keyword not in FREE_TEXT_KEYWORDS and has_unterminated_quote(record.body):
+                report(
+                    f"`{keyword}` contains a quote that is never closed on its line, so the "
+                    "quoted value is read incorrectly "
+                    f"(near {' '.join(record.body.split())[:60]!r}).",
+                    strict=strict,
+                    stacklevel=4,
                 )
 
             records.append(record)
@@ -435,6 +804,25 @@ class Deck:
         """Return the first record for `keyword`, or `None` if absent."""
         records = self._keyword_records.get(keyword.upper())
         return records[0] if records else None
+
+    def get_single_record_for(self, keyword: str) -> Record | None:
+        """
+        Return the record for a keyword that may only appear once, or `None` if absent.
+
+        Only the first occurrence is ever read, so a repeat is reported (a warning, or a
+        `DeckParseError` when `strict`) instead of its data being silently ignored.
+        """
+        records = self._keyword_records.get(keyword.upper())
+        if not records:
+            return None
+        if len(records) > 1:
+            report(
+                f"`{keyword.upper()}` appears {len(records)} times in the deck but may only "
+                "appear once. Only the first occurrence is read.",
+                strict=self.strict,
+                stacklevel=3,
+            )
+        return records[0]
 
     @property
     def keywords(self) -> list[str]:
@@ -456,9 +844,3 @@ class Deck:
         layer up, in `bores.deck.file.DeckFile.has`, which checks both.
         """
         return keyword.upper() in self._keyword_records
-
-    def __hash__(self) -> int:
-        if self._hash is None:
-            # `records` is derived entirely from `text`, so hashing the text is enough.
-            self._hash = hash(self.text)
-        return self._hash

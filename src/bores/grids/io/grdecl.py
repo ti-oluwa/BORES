@@ -364,6 +364,7 @@ def load_grdecl(
     unit_system: UnitSystem | None = None,
     metadata: typing.Mapping[str, typing.Any] | None = None,
     on_inverted_cells: InvertedCellPolicy | str = InvertedCellPolicy.RAISE,
+    strict: bool = False,
 ) -> Grid:
     """
     Load a GRDECL corner-point (or Cartesian) grid from a `DeckFile`, file path, raw
@@ -403,6 +404,10 @@ def load_grdecl(
         the cell inside out. `"raise"` (the default) refuses to load the grid,
         `"deactivate"` marks those cells inactive and `"absolute"` keeps them with the
         magnitude of their volume. Both of the latter warn with how many cells were affected.
+    :param strict: Raise instead of warning when the deck is malformed or ambiguous (data without
+        a terminating `/`, an unclosed quote, a repeated single-use keyword, `SPECGRID` and
+        `DIMENS` disagreeing, several unit-system keywords, and so on; see `DeckFile`). Ignored
+        when `source` is already a `DeckFile`, which was built with its own setting.
     :returns: A fully initialised `bores.grids.base.Grid`.
     :raises GridImportError: If required keywords are missing or malformed, or if active
         cells are inverted and `on_inverted_cells` is `"raise"`.
@@ -411,7 +416,12 @@ def load_grdecl(
         deck_file = source
     else:
         try:
-            deck_file = DeckFile(source, encoding=encoding, unit_system=unit_system)
+            deck_file = DeckFile(
+                source,
+                encoding=encoding,
+                unit_system=unit_system,
+                strict=strict,
+            )
         except DeckParseError as exc:
             raise GridImportError(f"Failed to parse GRDECL deck: {exc}") from exc
 

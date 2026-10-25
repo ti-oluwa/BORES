@@ -42,7 +42,7 @@ import typing
 import numpy as np
 
 from bores.datastructures import GridDimensions
-from bores.deck.core import Deck, DeckParseError, tokenize
+from bores.deck.core import Deck, DeckParseError, first_segment, tokenize
 from bores.deck.keywords.base import (
     DatesKeyword,
     Field,
@@ -137,7 +137,7 @@ class TStepKeyword(Keyword[list[float]]):
 
         steps: list[float] = []
         for record in records:
-            body = record.body.split("/", 1)[0]
+            body = first_segment(record.body)
             tokens = tokenize(body)
             for token in tokens:
                 try:

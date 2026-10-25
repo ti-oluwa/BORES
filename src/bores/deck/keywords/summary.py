@@ -59,7 +59,7 @@ SCHEDULE) sections and share no shape with the vector selectors above.
 import typing
 
 from bores.datastructures import GridDimensions
-from bores.deck.core import Deck, DeckParseError, tokenize
+from bores.deck.core import Deck, DeckParseError, first_segment, tokenize
 from bores.deck.keywords.base import (
     Field,
     Keyword,
@@ -157,7 +157,7 @@ class SummaryVectorKeyword(Keyword[list[str]]):
         # group of wells); every request counts.
         names: list[str] = []
         for record in records:
-            requested = tokenize(record.body.split("/", 1)[0])
+            requested = tokenize(first_segment(record.body))
             if not requested:
                 return []  # An unrestricted request covers every object.
             names.extend(requested)
@@ -443,7 +443,7 @@ class MnemonicReportKeyword(Keyword[list[dict[str, typing.Any]]]):
         )
         return [
             {
-                **self.parse_tokens(tokenize(record.body.split("/", 1)[0])),
+                **self.parse_tokens(tokenize(first_segment(record.body))),
                 "schedule_time": times.get(record.start, 0.0),
             }
             for record in records

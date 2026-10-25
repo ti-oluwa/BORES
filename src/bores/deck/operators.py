@@ -17,8 +17,8 @@ import warnings
 import numpy as np
 
 from bores.datastructures import GridDimensions
-from bores.deck.core import Deck, tokenize
-from bores.types import FloatArray, IntArray, OneDimension
+from bores.deck.core import Deck, first_segment, report, split_segments, tokenize
+from bores.types import FloatArray, OneDimension, ThreeDimensions
 
 __all__ = [
     "OPERATOR_CONTROL_KEYWORDS",
@@ -81,6 +81,23 @@ class Operation(typing.NamedTuple):
     multiple operation lines within the same operator block.
     """
 
+    source_default: float | None = None
+    """
+    For `COPY`: the value cells of the source array have before anything is written to them (the
+    source keyword's own default, e.g. `1.0` for `NTG`). `None` when the source is not a known
+    array keyword, in which case a name-based guess is used.
+    """
+
+    source_column_shape: tuple[str, ...] | None = None
+    """For `COPY`: the short-form `column_shape` of the source array keyword, if it has one."""
+
+
+ArrayInfo = typing.Mapping[str, tuple[float, tuple[str, ...] | None]]
+"""
+What the operator resolver needs to know about array keywords, by name: `(default_value,
+column_shape)`. Built by `bores.deck.file.DeckFile` from its registry.
+"""
+
 
 def get_default_box(dims: GridDimensions) -> tuple[int, int, int, int, int, int]:
     """Return the 0-based inclusive box covering every cell in the grid."""
@@ -103,7 +120,72 @@ def clamp_box(
     return i1, i2, j1, j2, k1, k2
 
 
-def resolve_operations(deck: Deck, dims: GridDimensions) -> list[Operation]:
+def parse_box(
+    tokens: typing.Sequence[str],
+    fallback: tuple[int, int, int, int, int, int],
+    dims: GridDimensions,
+    *,
+    label: str,
+    strict: bool,
+) -> tuple[int, int, int, int, int, int] | None:
+    """
+    Turn up to six 1-based box tokens (`I1 I2 J1 J2 K1 K2`) into a 0-based inclusive box.
+
+    As in any Eclipse record, items left off the end are defaulted, and a bound written `1*` is
+    defaulted too. A defaulted bound takes the matching bound of `fallback`.
+
+    A box that does not fit the grid (a bound outside it, or a lower bound above its upper bound)
+    is reported, and in a lenient parse is then clamped to the grid and sorted.
+
+    :param tokens: Box tokens, as many as the record gave (extra tokens are ignored).
+    :param fallback: 0-based box that supplies defaulted bounds.
+    :param dims: Grid extent.
+    :param label: What the box belongs to, for messages (e.g. "`BOX` record").
+    :param strict: Raise instead of warning.
+    :returns: The box, or `None` if a bound is not an integer (reported first).
+    """
+    padded = [*tokens[:6], *["1*"] * (6 - len(tokens[:6]))]
+    bounds: list[int] = []
+    for token, default in zip(padded, fallback, strict=True):
+        if token == "1*":
+            bounds.append(default)
+            continue
+        try:
+            # Minus 1, to move from 1-based to 0-based indexing used internally.
+            bounds.append(int(token) - 1)
+        except ValueError:
+            report(
+                f"{label} has the non-integer box bound {token!r} (expected I1 I2 J1 J2 K1 K2).",
+                strict=strict,
+                stacklevel=3,
+            )
+            return None
+
+    problems: list[str] = []
+    for axis, (lower, upper), size in zip(
+        "IJK",
+        zip(bounds[0::2], bounds[1::2], strict=True),
+        (dims.nx, dims.ny, dims.nz),
+        strict=True,
+    ):
+        if lower < 0 or upper < 0 or lower >= size or upper >= size:
+            problems.append(f"{axis} bounds {lower + 1}-{upper + 1} fall outside 1-{size}")
+        elif lower > upper:
+            problems.append(f"{axis}1 ({lower + 1}) is above {axis}2 ({upper + 1})")
+
+    if problems:
+        report(
+            f"{label} does not fit the {dims.nx}x{dims.ny}x{dims.nz} grid: {'; '.join(problems)}. "
+            "The box is clamped to the grid and its bounds sorted.",
+            strict=strict,
+            stacklevel=3,
+        )
+    return clamp_box(*bounds, dims=dims)
+
+
+def resolve_operations(
+    deck: Deck, dims: GridDimensions, *, array_info: ArrayInfo | None = None
+) -> list[Operation]:
     """
     Walk every `BOX` / `ENDBOX` / operator record in deck order and
     resolve each operator record to a concrete `Operation`.
@@ -116,6 +198,8 @@ def resolve_operations(deck: Deck, dims: GridDimensions) -> list[Operation]:
     :param deck: Pre-scanned `bores.deck.core.Deck`.
     :param dims: Grid extent, needed to clamp/resolve box bounds and the
         default (whole-grid) box.
+    :param array_info: Default value and short form of known array keywords, by name. Lets a
+        `COPY` read its source array the way the source keyword itself would.
     :returns: Resolved operations in file order (by `order`).
     """
     default_box = get_default_box(dims)
@@ -124,36 +208,48 @@ def resolve_operations(deck: Deck, dims: GridDimensions) -> list[Operation]:
 
     for record in deck.records:
         if record.keyword == BOX_KEYWORD:
-            tokens = tokenize(record.body)
-            if len(tokens) < 6:
-                warnings.warn(
-                    f"`BOX` record has {len(tokens)} token(s); expected 6 "
-                    "(I1 I2 J1 J2 K1 K2). Ignoring.",
-                    stacklevel=4,
-                )
+            # A box that cannot be read must not be dropped quietly: the operators after it
+            # would then act on the previous box (usually the whole grid).
+            box = parse_box(
+                tokenize(first_segment(record.body)),
+                default_box,
+                dims,
+                label="`BOX` record",
+                strict=deck.strict,
+            )
+            if box is None:
+                warn_box_ignored(deck.strict)
                 continue
-
-            try:
-                # Minus 1, to move from 1-based to 0-based indexing used internally
-                i1, i2, j1, j2, k1, k2 = (int(t) - 1 for t in tokens[:6])
-            except ValueError:
-                warnings.warn(
-                    f"`BOX` record has non-integer tokens {tokens[:6]!r}; ignoring.",
-                    stacklevel=4,
-                )
-                continue
-            current_box = clamp_box(i1, i2, j1, j2, k1, k2, dims)
+            current_box = box
 
         elif record.keyword == ENDBOX_KEYWORD:
             current_box = default_box
 
         elif record.keyword in OPERATOR_KEYWORDS:
             for line_index, op in enumerate(
-                parse_operator_records(record.body, record.keyword, current_box, dims)
+                parse_operator_records(
+                    record.body,
+                    record.keyword,
+                    current_box,
+                    dims,
+                    strict=deck.strict,
+                    array_info=array_info,
+                )
             ):
                 operations.append(op._replace(order=(record.start, line_index)))
 
     return operations
+
+
+def warn_box_ignored(strict: bool) -> None:
+    """Warn that an unreadable `BOX` was ignored and the previous box stays in force."""
+    if not strict:
+        report(
+            "The unreadable `BOX` record is ignored, so the operators after it apply to the "
+            "previous box.",
+            strict=False,
+            stacklevel=3,
+        )
 
 
 def parse_operator_records(
@@ -161,6 +257,9 @@ def parse_operator_records(
     op: str,
     box: tuple[int, int, int, int, int, int],
     dims: GridDimensions,
+    *,
+    strict: bool = False,
+    array_info: ArrayInfo | None = None,
 ) -> typing.Iterator[Operation]:
     """
     Parse the (possibly multi-record) body of a single operator block.
@@ -177,10 +276,13 @@ def parse_operator_records(
     :param box: Ambient box active at this point in the deck. A bound written as
         `1*` in a record's own box takes the matching bound from this box.
     :param dims: Grid dimensions, used to clamp per-record box overrides.
+    :param strict: Raise a `DeckParseError` for a malformed record (or box) instead of skipping it
+        with a warning.
+    :param array_info: See `resolve_operations`.
     :yields: One `Operation` per record line (`order` field is
         a placeholder `(0, 0)` — the caller replaces it).
     """
-    for line in body.split("/"):
+    for line in split_segments(body):
         tokens = tokenize(line)
         if not tokens:
             continue
@@ -189,9 +291,10 @@ def parse_operator_records(
 
         if op == "COPY":
             if len(tokens) < 2:
-                warnings.warn(
-                    f"`COPY` record {tokens!r} needs a source and target keyword; skipping.",
-                    stacklevel=6,
+                report(
+                    f"`COPY` record {tokens!r} needs a source and target keyword; skipping it.",
+                    strict=strict,
+                    stacklevel=3,
                 )
                 continue
             source, target = tokens[0].upper(), tokens[1].upper()
@@ -199,9 +302,10 @@ def parse_operator_records(
             extra = tokens[2:]
         else:
             if len(tokens) < 2:
-                warnings.warn(
-                    f"{op} record {tokens!r} needs a target keyword and value; skipping.",
-                    stacklevel=6,
+                report(
+                    f"{op} record {tokens!r} needs a target keyword and value; skipping it.",
+                    strict=strict,
+                    stacklevel=3,
                 )
                 continue
             target = tokens[0].upper()
@@ -209,25 +313,31 @@ def parse_operator_records(
             try:
                 value = float(tokens[1])
             except ValueError:
-                warnings.warn(
-                    f"{op} record for {target!r} has non-numeric value {tokens[1]!r}; skipping.",
-                    stacklevel=6,
+                report(
+                    f"{op} record for {target!r} has non-numeric value {tokens[1]!r}; "
+                    "skipping it.",
+                    strict=strict,
+                    stacklevel=3,
                 )
                 continue
             extra = tokens[2:]
 
-        if len(extra) >= 6:
-            try:
-                # Minus 1, to move from 1-based to 0-based indexing used internally.
-                # A defaulted bound (`1*`) keeps the ambient box's own bound.
-                bounds = [
-                    ambient if token == "1*" else int(token) - 1
-                    for token, ambient in zip(extra[:6], box, strict=True)
-                ]
-                record_box = clamp_box(*bounds, dims=dims)
-            except ValueError:
-                pass  # fall back to ambient box
+        if extra:
+            # A defaulted bound (`1*`, or one left off the end) keeps the ambient box's own bound.
+            parsed = parse_box(
+                extra,
+                box,
+                dims,
+                label=f"{op} record for {target!r}",
+                strict=strict,
+            )
+            # An unreadable inline box was reported above; the record then uses the ambient box.
+            if parsed is not None:
+                record_box = parsed
 
+        source_default, source_column_shape = (
+            (array_info or {}).get(source, (None, None)) if source is not None else (None, None)
+        )
         yield Operation(
             op=op,
             target=target,
@@ -235,33 +345,32 @@ def parse_operator_records(
             source=source,
             box=record_box,
             order=(0, 0),
+            source_default=source_default,
+            source_column_shape=source_column_shape,
         )
 
 
-def get_box_indices(
-    box: tuple[int, int, int, int, int, int], dims: GridDimensions
-) -> IntArray[OneDimension]:
+def get_box_view(
+    array: FloatArray[OneDimension],
+    box: tuple[int, int, int, int, int, int],
+    dims: GridDimensions,
+) -> FloatArray[ThreeDimensions]:
     """
-    Return the flat cell indices covered by *box*, vectorized.
+    Return the cells of `box` as a writable 3-D view of the flat per-cell `array`.
 
-    Replaces a Python-level triple-nested loop calling `flat_index` once
-    per cell - which dominates runtime for large grids, since a full-grid
-    (un-boxed) operator is the common case, not the exception. Order of
-    the returned indices doesn't matter: every caller either broadcasts a
-    scalar across them (`EQUALS`/`ADD`/`MULTIPLY`/`MAXVALUE`/`MINVALUE`) or
-    uses the *same* index array on both sides of a copy
-    (`array[indices] = source_array[indices]`), so any consistent
-    flattening order is correct.
+    A flat array in Eclipse order (`i` fastest, then `j`, then `k`) is a `(nz, ny, nx)` array in
+    C order, so a box is a plain slice of it. Working on that view needs no index array and
+    copies nothing, however large the box: a full-grid operator is the common case, and an
+    index array for it would be as large as the grid itself.
+
+    :param array: Flat `(n_cells,)` array. It must be contiguous, as every array built here is.
+    :param box: **0-based** inclusive `(i1, i2, j1, j2, k1, k2)` box inside the grid.
+    :param dims: Grid extent.
+    :returns: A view of `array` over the box, indexed `[k, j, i]`.
     """
     i1, i2, j1, j2, k1, k2 = box
-    if (i1, i2, j1, j2, k1, k2) == (0, dims.nx - 1, 0, dims.ny - 1, 0, dims.nz - 1):
-        return np.arange(dims.n_cells, dtype=np.intp)
-
-    i = np.arange(i1, i2 + 1, dtype=np.intp)
-    j = np.arange(j1, j2 + 1, dtype=np.intp)
-    k = np.arange(k1, k2 + 1, dtype=np.intp)
-    flat = i[:, None, None] + j[None, :, None] * dims.nx + k[None, None, :] * dims.nx * dims.ny
-    return flat.ravel()
+    grid = array.reshape(dims.nz, dims.ny, dims.nx)
+    return typing.cast(FloatArray[ThreeDimensions], grid[k1 : k2 + 1, j1 : j2 + 1, i1 : i2 + 1])
 
 
 def apply_operation(
@@ -279,20 +388,20 @@ def apply_operation(
     :param dims: Grid extent (for IJK -> flat index mapping).
     :param resolve_source: Callback returning the current array for a given
         keyword name, used by `COPY` to fetch the source array. May
-        return `None` if the source keyword has no data yet.
+        return `None` if the source keyword has no data yet. The returned array is only read.
     """
-    indices = get_box_indices(operation.box, dims)
+    cells = get_box_view(array, operation.box, dims)
 
     if operation.op == "EQUALS":
-        array[indices] = operation.value
+        cells[...] = operation.value
     elif operation.op == "ADD":
-        array[indices] += operation.value  # type: ignore
+        cells += operation.value  # type: ignore
     elif operation.op == "MULTIPLY":
-        array[indices] *= operation.value  # type: ignore
+        cells *= operation.value  # type: ignore
     elif operation.op == "MAXVALUE":
-        array[indices] = np.maximum(array[indices], operation.value)  # type: ignore
+        np.maximum(cells, operation.value, out=cells)  # type: ignore
     elif operation.op == "MINVALUE":
-        array[indices] = np.minimum(array[indices], operation.value)  # type: ignore
+        np.minimum(cells, operation.value, out=cells)  # type: ignore
     elif operation.op == "COPY":
         assert operation.source is not None
         source_array = resolve_source(operation.source)
@@ -303,4 +412,4 @@ def apply_operation(
                 stacklevel=2,
             )
             return
-        array[indices] = source_array[indices]
+        cells[...] = get_box_view(source_array, operation.box, dims)

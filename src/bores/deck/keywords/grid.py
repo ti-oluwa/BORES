@@ -9,7 +9,7 @@ import typing
 import numpy as np
 
 from bores.datastructures import GridDimensions
-from bores.deck.core import Deck, DeckParseError, tokenize
+from bores.deck.core import Deck, DeckParseError, first_segment, parse_numeric_runs, tokenize
 from bores.deck.keywords.base import (
     ArrayKeyword,
     Field,
@@ -17,10 +17,11 @@ from bores.deck.keywords.base import (
     Keyword,
     RecordKeyword,
     RepeatedRecordKeyword,
+    fill_from_runs,
 )
 from bores.deck.keywords.parsers import fault_face, uppercase
 from bores.deck.operators import Operation
-from bores.types import FloatArray, Integer, ThreeDimensions
+from bores.types import FloatArray, Integer, OneDimension, ThreeDimensions
 
 __all__ = [
     "ACTNUM",
@@ -101,6 +102,38 @@ Fields:
 """
 
 
+def read_exact_values(
+    body: str, *, name: str, expected: int, describe: str
+) -> FloatArray[OneDimension]:
+    """
+    Read the numbers of a record body (`N*value` groups included) into one flat array of exactly
+    `expected` values.
+
+    The numbers are parsed in bulk, with no list of token strings in between, so a large
+    `COORD` or `ZCORN` costs little more than the array itself.
+
+    :param body: Record body up to its terminating `/`.
+    :param name: Keyword name, for error messages.
+    :param expected: How many values the record must hold.
+    :param describe: What `expected` follows from, for the count mismatch message.
+    :returns: A writable `float64` array of `expected` values.
+    :raises DeckParseError: If a value is not a number or defaulted (`N*`), or the count is wrong.
+    """
+    runs = parse_numeric_runs(body, name=name)
+    if any(run.values is None for run in runs):
+        raise DeckParseError(f"{name} contains a defaulted ('N*') entry, which it cannot take.")
+
+    total = sum(run.entry_count for run in runs)
+    if total != expected:
+        raise DeckParseError(f"{name} expected {expected} values for {describe}; got {total}.")
+
+    if len(runs) == 1 and isinstance(runs[0].values, np.ndarray):
+        return runs[0].values
+    values = np.empty(expected, dtype=np.float64)
+    fill_from_runs(values, runs)
+    return values
+
+
 class CoordKeyword(Keyword[FloatArray[ThreeDimensions]]):
     """
     `COORD` - corner-point pillar array.
@@ -125,26 +158,24 @@ class CoordKeyword(Keyword[FloatArray[ThreeDimensions]]):
         if dims is None:
             raise DeckParseError("`COORD` requires grid dimensions (`SPECGRID`/`DIMENS`).")
 
-        record = deck.get_first_record_for(self.name)
+        record = deck.get_single_record_for(self.name)
         if record is None:
             return None
 
         # `record.body` spans up to the next keyword line (some
         # keywords need multiple internal `/` segments); `COORD` is a
         # single `/`-terminated block, so take only the first one.
-        body = record.body.split("/", 1)[0]
-        tokens = tokenize(body)
-        expected = (dims.nx + 1) * (dims.ny + 1) * 6
-        if len(tokens) != expected:
-            raise DeckParseError(
-                f"`COORD` expected {expected} values for a {dims.nx}x{dims.ny} "
-                f"grid; got {len(tokens)}."
-            )
+        values = read_exact_values(
+            first_segment(record.body),
+            name="`COORD`",
+            expected=(dims.nx + 1) * (dims.ny + 1) * 6,
+            describe=f"a {dims.nx}x{dims.ny} grid",
+        )
 
         # Eclipse writes the coord array (pillars) with coord6 varying fastest
         # then i, and j (slowest), hence the corresponding C-order shape is (ny + 1, nx +1, 6)
         # Access: coord[j, i, :] == [x_top, y_top, z_top, x_bottom, y_bottom, z_bottom]
-        return np.array(tokens, dtype=np.float64).reshape(dims.ny + 1, dims.nx + 1, 6)
+        return values.reshape(dims.ny + 1, dims.nx + 1, 6)
 
 
 class ZCornKeyword(Keyword[FloatArray[ThreeDimensions]]):
@@ -170,23 +201,21 @@ class ZCornKeyword(Keyword[FloatArray[ThreeDimensions]]):
         if dims is None:
             raise DeckParseError("`ZCORN` requires grid dimensions (`SPECGRID`/`DIMENS`).")
 
-        record = deck.get_first_record_for(self.name)
+        record = deck.get_single_record_for(self.name)
         if record is None:
             return None
 
-        body = record.body.split("/", 1)[0]
-        tokens = tokenize(body)
-        expected = dims.nx * dims.ny * dims.nz * 8
-        if len(tokens) != expected:
-            raise DeckParseError(
-                f"`ZCORN` expected {expected} values for a "
-                f"{dims.nx}x{dims.ny}x{dims.nz} grid; got {len(tokens)}."
-            )
+        values = read_exact_values(
+            first_segment(record.body),
+            name="`ZCORN`",
+            expected=dims.nx * dims.ny * dims.nz * 8,
+            describe=f"a {dims.nx}x{dims.ny}x{dims.nz} grid",
+        )
 
         # Eclipse writes `ZCORN` in Fortran order with i varying fastest, then j, then k varying slowest,
         # hence in the corresponding shape in C-order with i-fastest is (nz*2, ny*2, nx*2)
         # Access: zcorn[2*k, 2*j, 2*i] for cell (i, j, k)
-        return np.array(tokens, dtype=np.float64).reshape(dims.nz * 2, dims.ny * 2, dims.nx * 2)
+        return values.reshape(dims.nz * 2, dims.ny * 2, dims.nx * 2)
 
 
 COORD = CoordKeyword()
@@ -374,11 +403,11 @@ class VectorDimsKeyword(Keyword[list[np.float64]]):
                 "dimensions (`SPECGRID`/`DIMENS` not found)."
             )
 
-        record = deck.get_first_record_for(self.name)
+        record = deck.get_single_record_for(self.name)
         if record is None:
             return None
 
-        body = record.body.split("/", 1)[0]
+        body = first_segment(record.body)
         tokens = tokenize(body)
         expected = self._axis_extent(dims)
         try:

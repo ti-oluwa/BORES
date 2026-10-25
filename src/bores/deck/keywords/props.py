@@ -38,7 +38,7 @@ rejected with a `DeckParseError` when the table is parsed.
 import numpy as np
 
 from bores.datastructures import GridDimensions
-from bores.deck.core import Deck, tokenize
+from bores.deck.core import Deck, split_segments, tokenize
 from bores.deck.keywords.base import (
     Field,
     RecordKeyword,
@@ -574,7 +574,7 @@ class InfluenceTableKeyword(TableKeyword):
 
         tables: list[Table[Number]] = []
         for record in records:
-            for segment in record.body.split("/"):
+            for segment in split_segments(record.body):
                 if tokenize(segment):
                     tables.append(self._parse_flat(segment))
         return tables or None

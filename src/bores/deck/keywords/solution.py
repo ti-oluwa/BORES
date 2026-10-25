@@ -41,7 +41,7 @@ import typing
 import numpy as np
 
 from bores.datastructures import GridDimensions
-from bores.deck.core import Deck, DeckParseError, tokenize
+from bores.deck.core import Deck, DeckParseError, first_segment, tokenize
 from bores.deck.keywords.base import (
     ArrayKeyword,
     Field,
@@ -286,11 +286,11 @@ class RestartKeyword(Keyword[dict[str, typing.Any]]):
         operations: list[Operation] | None = None,
         schedule_times: dict[int, float] | None = None,
     ) -> dict[str, typing.Any] | None:
-        record = deck.get_first_record_for(self.name)
+        record = deck.get_single_record_for(self.name)
         if record is None:
             return None
 
-        body = record.body.split("/", 1)[0]
+        body = first_segment(record.body)
         tokens = tokenize(body)
         if len(tokens) < 2:
             raise DeckParseError(

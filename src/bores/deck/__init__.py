@@ -12,6 +12,14 @@ from bores.deck import DeckFile
 df = DeckFile("model.DATA")
 poro = df.get("PORO")  # ndarray (n_cells,) or None
 coord = df.get("COORD")  # ndarray (ny+1, nx+1, 6) or None
+
+# Say what the source is, instead of letting the constructor work it out:
+DeckFile.from_file("model.DATA")
+DeckFile.from_text("METRIC\nSPECGRID\n 10 10 3 1 F /\n")
+DeckFile.from_bytes(raw_bytes)
+
+# Malformed or ambiguous input warns by default; `strict=True` raises `DeckParseError` instead.
+df = DeckFile("model.DATA", strict=True)
 ```
 """
 

@@ -6,7 +6,6 @@ for various common keyword patterns.
 import abc
 import datetime
 import typing
-import warnings
 from collections.abc import Collection
 
 import attrs
@@ -18,7 +17,12 @@ from bores.datastructures import GridDimensions
 from bores.deck.core import (
     Deck,
     DeckParseError,
-    parse_repeat_token,
+    NumericRun,
+    Record,
+    first_segment,
+    parse_numeric_runs,
+    report,
+    split_segments,
     tokenize,
 )
 from bores.deck.operators import Operation, apply_operation, resolve_operations
@@ -215,14 +219,14 @@ class RecordKeyword(Keyword[dict[str, T | None]]):
         operations: list[Operation] | None = None,
         schedule_times: dict[int, float] | None = None,
     ) -> dict[str, T | None] | None:
-        record = deck.get_first_record_for(self.name)
+        record = deck.get_single_record_for(self.name)
         if record is None:
             return None
 
         # `record.body` spans up to the next keyword line, since some
         # keywords need multiple internal `/` segments. We only
         # want the first (and only) `/`-terminated record here.
-        body = record.body.split("/", 1)[0]
+        body = first_segment(record.body)
         tokens = tokenize(body)
         return self.parse_tokens(tokens)
 
@@ -265,7 +269,7 @@ class RepeatedRecordKeyword(Keyword[list[dict[str, T | None]]]):
 
         results: list[dict[str, T | None]] = []
         for record in records:
-            for line in record.body.split("/"):
+            for line in split_segments(record.body):
                 tokens = tokenize(line)
                 if not tokens:
                     continue
@@ -387,6 +391,7 @@ class ArrayKeyword(Keyword[FloatArray[OneDimension]]):
         *,
         operations: list[Operation] | None = None,
         stop_before_order: tuple[int, int] | None,
+        source_states: dict[tuple[str, int], FloatArray[OneDimension]] | None = None,
     ) -> FloatArray[OneDimension] | None:
         """
         Replay every event affecting this keyword's array - its own
@@ -404,6 +409,9 @@ class ArrayKeyword(Keyword[FloatArray[OneDimension]]):
             `order < stop_before_order`. Used by `COPY` to resolve a
             source keyword's value *as of* the point in the file where the
             `COPY` record itself occurs.
+        :param source_states: Arrays already resolved for `COPY` sources during this parse, by
+            `(source name, number of that source's events replayed)`. Reading a source more than
+            once, or through a chain of copies, then costs one replay. The arrays are only read.
         :returns: The resolved array, or `None` if this keyword has no
             data block and no operator ever targets it.
         """
@@ -413,108 +421,152 @@ class ArrayKeyword(Keyword[FloatArray[OneDimension]]):
         if not events:
             return None
 
+        if source_states is None:
+            source_states = {}
         array = np.full(dims.n_cells, self.default_value, dtype=np.float64)
 
-        def _resolve_source_at(
-            name: str,
-            as_of_order: tuple[int, int],
-            *,
-            operations: list[Operation] | None = None,
-        ) -> FloatArray[OneDimension] | None:
-            # Guess the default_value for arbitrary source keywords:
-            # multiplier-style arrays default to 1.0, property arrays to 0.0.
-            # We cannot know for certain without a registered Keyword instance,
-            # but this heuristic is correct for all standard Eclipse arrays.
-            default = 1.0 if name.startswith("MULT") else 0.0
-            probe = ArrayKeyword(name, default_value=default)
-            return probe._resolve(deck, dims, operations=operations, stop_before_order=as_of_order)
-
-        for order, kind, payload in events:
+        for _, kind, payload in events:
             if kind == "assign":
-                tokens: list[str] = payload  # type: ignore[assignment]
-                if len(tokens) == 0:
-                    warnings.warn(
-                        f"{self.name}: assign event has zero tokens; skipping.",
-                        stacklevel=4,
-                    )
-                    continue
-
-                # Total element count this assign event actually represents,
-                # accounting for unexpanded "N*value" groups, without building the expanded list.
-                total_count = sum((parse_repeat_token(token) or (1, None))[0] for token in tokens)
-                if total_count == 1:
-                    try:
-                        array[:] = float(tokens[0])
-                    except ValueError as exc:
-                        raise DeckParseError(
-                            f"{self.name}: expected a numeric scalar, got {tokens[0]!r}: {exc}"
-                        ) from exc
-
-                elif total_count == dims.n_cells:
-                    try:
-                        position = 0
-                        for token in tokens:
-                            repeat = parse_repeat_token(token)
-                            if repeat is not None:
-                                count, value = repeat
-                                array[position : position + count] = float(value)
-                                position += count
-                            else:
-                                array[position] = float(token)
-                                position += 1
-                    except ValueError as exc:
-                        raise DeckParseError(
-                            f"{self.name} contains a non-numeric value: {exc}"
-                        ) from exc
-
-                else:
-                    # Try `column_shape` broadcast if declared. Short-form
-                    # arrays are small by construction (nx*ny at most), so
-                    # expanding here is cheap so we reuse the existing path via
-                    # a fully-expanded token list for this branch only.
-                    broadcast_ok = False
-                    if self.column_shape is not None:
-                        short_count = self._short_form_count(dims)
-                        if total_count == short_count:
-                            expanded: list[str] = []
-                            for token in tokens:
-                                repeat = parse_repeat_token(token)
-                                if repeat is not None:
-                                    expanded.extend([repeat[1]] * repeat[0])
-                                else:
-                                    expanded.append(token)
-                            try:
-                                array[:] = self._broadcast_short_form(
-                                    np.array(expanded, dtype=np.float64), dims
-                                )
-                                broadcast_ok = True
-                            except ValueError as exc:
-                                raise DeckParseError(
-                                    f"{self.name} contains a non-numeric value: {exc}"
-                                ) from exc
-
-                    if not broadcast_ok:
-                        expected_desc = f"1 or {dims.n_cells}"
-                        if self.column_shape is not None:
-                            short_count = self._short_form_count(dims)
-                            expected_desc += (
-                                f" or {short_count} (short form: {' * '.join(self.column_shape)})"
-                            )
-                        raise DeckParseError(
-                            f"{self.name} expected {expected_desc} value(s); got {total_count}."
-                        )
-
+                self._assign(array, payload, dims, strict=deck.strict)
             else:  # kind == "operate"
-                operation: Operation = payload  # type: ignore[assignment]
+                operation: Operation = payload
                 apply_operation(
                     array,
                     operation,
                     dims,
-                    resolve_source=lambda name, _order=order: _resolve_source_at(
-                        name, _order, operations=operations
+                    resolve_source=lambda _name, _operation=operation: self._resolve_source(
+                        deck, dims, _operation, operations, source_states
                     ),
                 )
         return array.astype(self.dtype, copy=False)  # type: ignore[return-value]
+
+    @staticmethod
+    def _resolve_source(
+        deck: Deck,
+        dims: GridDimensions,
+        operation: Operation,
+        operations: list[Operation] | None,
+        source_states: dict[tuple[str, int], FloatArray[OneDimension]],
+    ) -> FloatArray[OneDimension] | None:
+        """
+        Resolve the source array of a `COPY` *as of* the point in the file where the `COPY`
+        itself occurs, not as the source ends up after later events.
+
+        :param deck: Scanned deck.
+        :param dims: Resolved grid dimensions.
+        :param operation: The `COPY` operation.
+        :param operations: Every resolved operation in the deck.
+        :param source_states: See `_resolve`.
+        :returns: The source array (read-only, shared), or `None` if the source has no events
+            before the `COPY`.
+        """
+        name = operation.source
+        assert name is not None
+        # The source's own default and short form, when known from the keyword registry. The name
+        # based guess (multiplier arrays start at 1.0, others at 0.0) is only a fallback.
+        default = operation.source_default
+        if default is None:
+            default = 1.0 if name.startswith("MULT") else 0.0
+        probe = ArrayKeyword(
+            name, default_value=default, column_shape=operation.source_column_shape
+        )
+
+        replayed = sum(
+            1
+            for event in probe._timeline(deck, dims, operations=operations)
+            if event[0] < operation.order
+        )
+        if replayed == 0:
+            return None
+
+        key = (name, replayed)
+        state = source_states.get(key)
+        if state is None:
+            state = probe._resolve(
+                deck,
+                dims,
+                operations=operations,
+                stop_before_order=operation.order,
+                source_states=source_states,
+            )
+            assert state is not None
+            state.flags.writeable = False
+            source_states[key] = state
+        return state
+
+    def _assign(
+        self,
+        array: FloatArray[OneDimension],
+        record: Record,
+        dims: GridDimensions,
+        *,
+        strict: bool,
+    ) -> None:
+        """
+        Write one explicit data block of this keyword into `array`.
+
+        The block must hold one value per cell, or (when the keyword has a `column_shape`) one per
+        column. A single value standing for the whole array is accepted unless `strict`. Defaulted
+        (`N*`) entries cannot be given a value, so they are dropped from the block (which moves
+        every value after them) with a warning, or rejected when `strict`.
+
+        :param array: Flat `float64` working array, modified in place.
+        :param record: The record holding the data block.
+        :param dims: Resolved grid dimensions.
+        :param strict: Raise instead of warning.
+        :raises DeckParseError: If a value is not a number or the block has the wrong size.
+        """
+        runs = parse_numeric_runs(first_segment(record.body), name=self.name)
+
+        defaulted = sum(run.entry_count for run in runs if run.values is None)
+        if defaulted:
+            report(
+                f"{self.name}: record body contains bare 'N*' repeat(s) (empty-value tokens); "
+                f"{defaulted} token(s) dropped, which moves every value after them.",
+                strict=strict,
+                stacklevel=4,
+            )
+            runs = [run for run in runs if run.values is not None]
+
+        total_count = sum(run.entry_count for run in runs)
+        if total_count == 0:
+            report(
+                f"{self.name}: assign event has zero tokens; skipping.",
+                strict=strict,
+                stacklevel=4,
+            )
+            return
+
+        if total_count == dims.n_cells:
+            fill_from_runs(array, runs)
+            return
+
+        # A short form (one value per column) is small by construction, so it is cheap to
+        # expand before tiling it over the grid.
+        short_count = self._short_form_count(dims) if self.column_shape is not None else None
+        if short_count is not None and total_count == short_count:
+            short_array = np.empty(total_count, dtype=np.float64)
+            fill_from_runs(short_array, runs)
+            array[:] = self._broadcast_short_form(short_array, dims)
+            return
+
+        if total_count == 1:
+            # One value for the whole grid. Eclipse does not allow it (an array needs a value
+            # per cell), but it is unambiguous, so it is accepted unless asked to be strict.
+            if strict:
+                raise DeckParseError(
+                    f"{self.name} has a single value but the grid has {dims.n_cells} cells. "
+                    "Write one value per cell, or `N*value` to repeat a value. "
+                    "This is an error because the deck is being parsed with `strict=True`."
+                )
+            value = runs[0].values
+            array[:] = value if isinstance(value, float) else float(value[0])  # type: ignore[index]
+            return
+
+        expected_desc = f"1 or {dims.n_cells}"
+        if short_count is not None:
+            expected_desc += f" or {short_count} (short form: {' * '.join(self.column_shape)})"  # type: ignore[arg-type]
+        raise DeckParseError(f"{self.name} expected {expected_desc} value(s); got {total_count}.")
 
     def _short_form_count(self, dims: GridDimensions) -> int:
         """
@@ -578,44 +630,19 @@ class ArrayKeyword(Keyword[FloatArray[OneDimension]]):
     ) -> list[tuple[tuple[int, int], str, typing.Any]]:
         """
         Build the ordered `(order, kind, payload)` events affecting this
-        keyword: `("assign", tokens)` for each of its own explicit
+        keyword: `("assign", Record)` for each of its own explicit
         data-block records, interleaved with `("operate", Operation)`
         for every operator record that targets it.
 
         Both event kinds share one `order` namespace - a
-        `(record_start, line_index)` tuple.
+        `(record_start, line_index)` tuple. Nothing is parsed here: a data block is only read when
+        it is replayed.
 
         :returns: Events sorted ascending (earliest in file first).
         """
-        events: list[tuple[tuple[int, int], str, typing.Any]] = []
-
-        for record in deck.get_records_for(self.name):
-            # Compact tokens: an "N*value" repeat group stays as one token
-            # instead of expanding to N copies - large arrays are commonly
-            # one or a handful of such groups, so this avoids materializing
-            # (and then redundantly re-parsing) millions of identical
-            # strings for e.g. a uniform full-field PORO/PERMX.
-            raw_tokens = tokenize(record.body.split("/", 1)[0], expand_repeats=False)
-            # A bare "N*" repeat group (N defaulted values, which `parse_repeat_token`
-            # reports as the default designator "1*") is dropped with a warning
-            # rather than crashing float() later.
-            clean_tokens = []
-            dropped = 0
-            for token in raw_tokens:
-                repeat = parse_repeat_token(token)
-                if repeat is not None and repeat[1] == "1*":
-                    dropped += repeat[0]
-                    continue
-                clean_tokens.append(token)
-
-            if dropped:
-                warnings.warn(
-                    f"{self.name}: record body contains bare 'N*' repeat(s) "
-                    f"(empty-value tokens); {dropped} token(s) dropped.",
-                    stacklevel=6,
-                )
-            raw_tokens = clean_tokens
-            events.append(((record.start, 0), "assign", raw_tokens))
+        events: list[tuple[tuple[int, int], str, typing.Any]] = [
+            ((record.start, 0), "assign", record) for record in deck.get_records_for(self.name)
+        ]
 
         if operations is None:
             operations = resolve_operations(deck, dims)
@@ -626,6 +653,20 @@ class ArrayKeyword(Keyword[FloatArray[OneDimension]]):
 
         events.sort(key=lambda e: e[0])
         return events
+
+
+def fill_from_runs(array: FloatArray[OneDimension], runs: typing.Iterable[NumericRun]) -> None:
+    """
+    Write `runs` (as read by `parse_numeric_runs`, with no defaulted runs) into `array`, one
+    after another from its start.
+
+    :param array: Flat array with room for every run. Modified in place.
+    :param runs: The runs to write.
+    """
+    position = 0
+    for count, values in runs:
+        array[position : position + count] = values
+        position += count
 
 
 MONTH_MAP: dict[str, int] = {
@@ -773,11 +814,11 @@ class DateKeyword(Keyword[datetime.datetime]):
         operations: list[Operation] | None = None,
         schedule_times: dict[int, float] | None = None,
     ) -> datetime.datetime | None:
-        record = deck.get_first_record_for(self.name)
+        record = deck.get_single_record_for(self.name)
         if record is None:
             return None
 
-        body = record.body.split("/", 1)[0]
+        body = first_segment(record.body)
         tokens = tokenize(body)
         return _parse_datetime(tokens, self.name)
 
@@ -816,7 +857,7 @@ class DatesKeyword(Keyword[list[datetime.datetime]]):
 
         dates: list[datetime.datetime] = []
         for record in records:
-            for segment in record.body.split("/"):
+            for segment in split_segments(record.body):
                 tokens = tokenize(segment)
                 if not tokens:
                     continue
@@ -924,7 +965,7 @@ class TableKeyword(Keyword[list[Table[Number]]]):
         """
         table: Table = []
         n_columns = len(self.columns)
-        for segment in body.split("/"):
+        for segment in split_segments(body):
             tokens = tokenize(segment)
             if not tokens:
                 continue
@@ -969,7 +1010,7 @@ class TableKeyword(Keyword[list[Table[Number]]]):
         n_columns = len(self.columns)
         assert n_columns >= 2, f"{self.name}: miscible tables need >= 2 data columns."
 
-        for segment in body.split("/"):
+        for segment in split_segments(body):
             tokens = tokenize(segment)
             n_tokens = len(tokens)
 
@@ -1048,11 +1089,18 @@ def get_schedule_clock(
     or `DATES` record gets the clock value after its last entry, since every record that follows
     comes after all of them. Records before the first `TSTEP` or `DATES` get `0.0`.
 
+    A `TSTEP` entry that is not a number always raises. Other problems are reported with
+    `deck.strict` deciding between a warning and an error: a `START` that cannot be read (the
+    first `DATES` is then time zero), a `DATES` entry that is not a date (it is skipped), and a
+    `TSTEP` step or `DATES` entry that would move the clock backwards.
+
     :param deck: Scanned deck.
     :param time_unit: Time unit for elapsed time values (`"days"`, `"hours"`, or `"seconds"`).
         `TSTEP` entries are read in the deck's own time unit, which this must match.
     :returns: `({record.start: elapsed_time}, report_times)`. `report_times` is sorted, has no
         repeats, and always starts with `0.0`.
+    :raises DeckParseError: If a `TSTEP` entry is not a number, or (when `deck.strict`) for any of
+        the problems above.
     """
     # Resolve the simulation start date from `START` keyword, if present.
     # This makes sure `DATES`-based elapsed time is correct even when the first `DATES`
@@ -1060,13 +1108,17 @@ def get_schedule_clock(
     start_record = deck.get_first_record_for("START")
     start_date: datetime.datetime | None = None
     if start_record is not None:
-        start_body = start_record.body.split("/", 1)[0]
+        start_body = first_segment(start_record.body)
         start_tokens = tokenize(start_body, expand_repeats=True)
-        if len(start_tokens) >= 3:
-            try:
-                start_date = _parse_datetime(start_tokens, "START")
-            except DeckParseError:
-                pass  # Malformed `START`. Fall back to lazy discovery
+        try:
+            start_date = _parse_datetime(start_tokens, "START")
+        except DeckParseError as exc:
+            # Malformed `START`. Fall back to lazy discovery
+            report(
+                f"`START` cannot be read ({exc}). The first `DATES` entry is taken as time zero.",
+                strict=deck.strict,
+                stacklevel=3,
+            )
 
     times: dict[int, float] = {}
     report_times: set[float] = {0.0}
@@ -1074,24 +1126,44 @@ def get_schedule_clock(
 
     for record in deck.records:
         if record.keyword == "TSTEP":
-            body = record.body.split("/", 1)[0]
+            body = first_segment(record.body)
             for token in tokenize(body, expand_repeats=True):
                 if token:
-                    current_time += float(token)
+                    try:
+                        step = float(token)
+                    except ValueError:
+                        hint = (
+                            " A defaulted ('N*') step has no value." if token.endswith("*") else ""
+                        )
+                        raise DeckParseError(
+                            f"TSTEP: non-numeric time-step value {token!r}.{hint}"
+                        ) from None
+                    if step < 0:
+                        report(
+                            f"`TSTEP` step {token} moves the clock backwards.",
+                            strict=deck.strict,
+                            stacklevel=3,
+                        )
+                    current_time += step
                     report_times.add(current_time)
             times[record.start] = current_time
 
         elif record.keyword == "DATES":
             # A single `DATES` block may carry multiple date entries, each
             # terminated by its own '/'. Walk every segment that has tokens.
-            for segment in record.body.split("/"):
+            for segment in split_segments(record.body):
                 tokens = tokenize(segment, expand_repeats=True)
                 if not tokens:
                     continue
                 try:
                     parsed_date = _parse_datetime(tokens, "DATES")
-                except DeckParseError:
-                    continue  # Skip malformed segments gracefully
+                except DeckParseError as exc:
+                    report(
+                        f"`DATES` entry {tokens!r} cannot be read ({exc}). It is skipped.",
+                        strict=deck.strict,
+                        stacklevel=3,
+                    )
+                    continue
 
                 if start_date is None:
                     # First `DATES` seen with no `START`. We treat it as time-zero.
@@ -1099,7 +1171,15 @@ def get_schedule_clock(
                     current_time = 0.0
                 else:
                     delta = parsed_date - start_date
+                    previous_time = current_time
                     current_time = timedelta_to_timeunit(delta, time_unit)
+                    if current_time < previous_time:
+                        report(
+                            f"`DATES` entry {' '.join(tokens)} is earlier than the deck's clock "
+                            f"already reached. It is read as an earlier time.",
+                            strict=deck.strict,
+                            stacklevel=3,
+                        )
                 report_times.add(current_time)
 
             times[record.start] = current_time
@@ -1166,7 +1246,7 @@ class ScheduledRecordKeyword(RepeatedRecordKeyword[T | float]):
         results: list[dict[str, T | float | None]] = []
         for record in records:
             schedule_time = times.get(record.start, 0.0)
-            for line in record.body.split("/"):
+            for line in split_segments(record.body):
                 tokens = tokenize(line, expand_repeats=True)
                 if not tokens:
                     continue
@@ -1219,7 +1299,7 @@ class HeaderedScheduledRecordKeyword(Keyword[list[dict[str, typing.Any]]]):
         )
         results: list[dict[str, typing.Any]] = []
         for record in records:
-            lines = [tokenize(line) for line in record.body.split("/")]
+            lines = [tokenize(line) for line in split_segments(record.body)]
             lines = [line for line in lines if line]
             if not lines:
                 continue
