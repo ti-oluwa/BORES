@@ -394,60 +394,67 @@ def bisect_rate_bhp(
     max_iterations = control_spec.max_fixed_point_iterations
     tolerance = control_spec.rate_convergence_tolerance
     assert control_spec.max_bisection_iterations > 0
-    bisection = (
-        target,
-        min_pressure,
-        max_pressure,
-        target_rate_condition == "reservoir",
-        control_spec.max_bisection_iterations,
-        control_spec.rate_convergence_tolerance,
-    )
 
     if setup.kind == "hydraulic":
         assert setup.unit_scale is not None
         bisector = typing.cast(HydraulicBisector, setup.bisect)
         bisected = bisector(
-            setup.model,
-            reference_depth,
-            workspace,
-            relevant_oil,
-            relevant_water,
-            relevant_gas,
-            is_injector,
-            setup.unit_scale,
-            radial_flow_constant,
-            max_iterations,
-            tolerance,
-            *bisection,
+            model=setup.model,
+            reference_depth=reference_depth,
+            workspace=workspace,
+            relevant_oil=relevant_oil,
+            relevant_water=relevant_water,
+            relevant_gas=relevant_gas,
+            is_injector=is_injector,
+            hydrostatic_divisor=setup.unit_scale,
+            radial_flow_constant=radial_flow_constant,
+            max_iterations=max_iterations,
+            tolerance=tolerance,
+            target=target,
+            low=min_pressure,
+            high=max_pressure,
+            reservoir_condition=target_rate_condition == "reservoir",
+            max_bisections=control_spec.max_bisection_iterations,
+            rate_tolerance=control_spec.rate_convergence_tolerance,
         )
     elif setup.kind == "hydrostatic":
         assert setup.unit_scale is not None
         bisector = typing.cast(HydrostaticBisector, setup.bisect)
         bisected = bisector(
-            reference_depth,
-            workspace,
-            relevant_oil,
-            relevant_water,
-            relevant_gas,
-            is_injector,
-            setup.unit_scale,
-            radial_flow_constant,
-            max_iterations,
-            tolerance,
-            *bisection,
+            reference_depth=reference_depth,
+            workspace=workspace,
+            relevant_oil=relevant_oil,
+            relevant_water=relevant_water,
+            relevant_gas=relevant_gas,
+            is_injector=is_injector,
+            pressure_per_density_and_depth=setup.unit_scale,
+            radial_flow_constant=radial_flow_constant,
+            max_iterations=max_iterations,
+            tolerance=tolerance,
+            target=target,
+            low=min_pressure,
+            high=max_pressure,
+            reservoir_condition=target_rate_condition == "reservoir",
+            max_bisections=control_spec.max_bisection_iterations,
+            rate_tolerance=control_spec.rate_convergence_tolerance,
         )
     else:
         bisector = typing.cast(UniformBisector, setup.bisect)
         bisected = bisector(
-            workspace,
-            relevant_oil,
-            relevant_water,
-            relevant_gas,
-            is_injector,
-            radial_flow_constant,
-            max_iterations,
-            tolerance,
-            *bisection,
+            workspace=workspace,
+            relevant_oil=relevant_oil,
+            relevant_water=relevant_water,
+            relevant_gas=relevant_gas,
+            is_injector=is_injector,
+            radial_flow_constant=radial_flow_constant,
+            max_iterations=max_iterations,
+            tolerance=tolerance,
+            target=target,
+            low=min_pressure,
+            high=max_pressure,
+            reservoir_condition=target_rate_condition == "reservoir",
+            max_bisections=control_spec.max_bisection_iterations,
+            rate_tolerance=control_spec.rate_convergence_tolerance,
         )
 
     raise_if_not_converged(
@@ -690,7 +697,7 @@ def solve_rate_injector(
     :returns: `(bhp, connection_pressures, phase_rates, surface_phase_rates)` -
         reservoir- and surface-condition rates, `injected_phase` only nonzero.
     """
-    relevant_phases = phase_mask(injected_phase)
+    relevant_phases = phase_mask(phase_tag=injected_phase)
     min_pressure, max_pressure = get_pressure_bracket(
         workspace=workspace, is_injector=True, control_spec=control_spec
     )
@@ -749,7 +756,7 @@ def solve_bhp_injector(
         `target_bhp` and only the injected phase nonzero in the reservoir- and surface-condition
         rates.
     """
-    relevant_phases = phase_mask(injected_phase)
+    relevant_phases = phase_mask(phase_tag=injected_phase)
     connection_pressures, phase_rates, surface_phase_rates = solve_connection_pressures_and_rates(
         tubing=tubing,
         reference_depth=reference_depth,

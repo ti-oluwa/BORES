@@ -272,7 +272,7 @@ def solve_homogeneous(
             hydrostatic_divisor=hydrostatic_divisor,
             pressures=workspace.connection_pressures,
         )
-        if has_settled(new_total_rate, total_rate, tolerance):
+        if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
             converged = True
             break
@@ -389,7 +389,7 @@ def solve_beggs_and_brill(
             hydrostatic_divisor=hydrostatic_divisor,
             pressures=workspace.connection_pressures,
         )
-        if has_settled(new_total_rate, total_rate, tolerance):
+        if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
             converged = True
             break
@@ -506,7 +506,7 @@ def solve_hagedorn_brown(
             hydrostatic_divisor=hydrostatic_divisor,
             pressures=workspace.connection_pressures,
         )
-        if has_settled(new_total_rate, total_rate, tolerance):
+        if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
             converged = True
             break
@@ -623,7 +623,7 @@ def solve_gray(
             hydrostatic_divisor=hydrostatic_divisor,
             pressures=workspace.connection_pressures,
         )
-        if has_settled(new_total_rate, total_rate, tolerance):
+        if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
             converged = True
             break
@@ -740,7 +740,7 @@ def solve_woldesemayat_ghajar(
             hydrostatic_divisor=hydrostatic_divisor,
             pressures=workspace.connection_pressures,
         )
-        if has_settled(new_total_rate, total_rate, tolerance):
+        if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
             converged = True
             break
@@ -844,7 +844,7 @@ def solve_hydrostatic(
             pressure_per_density_and_depth=pressure_per_density_and_depth,
             pressures=workspace.connection_pressures,
         )
-        if has_settled(new_total_rate, total_rate, tolerance):
+        if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
             converged = True
             break
@@ -921,7 +921,7 @@ def solve_uniform(
             radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
-        if has_settled(new_total_rate, total_rate, tolerance):
+        if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
             converged = True
             break
@@ -1003,25 +1003,25 @@ def bisect_homogeneous(
     :returns: The reference pressure of the last solve, and that solve.
     """
     average = 0.5 * (low + high)
-    result = FixedPointResult(False, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    result = FixedPointResult(converged=False, previous_total_rate=0.0, total_rate=0.0, oil_rate=0.0, water_rate=0.0, gas_rate=0.0, surface_oil_rate=0.0, surface_water_rate=0.0, surface_gas_rate=0.0)
     for _ in range(max_bisections):
         average = 0.5 * (low + high)
         result = solve_homogeneous(
-            model,
-            reference_depth,
-            average,
-            workspace,
-            relevant_oil,
-            relevant_water,
-            relevant_gas,
-            is_injector,
-            hydrostatic_divisor,
-            radial_flow_constant,
-            max_iterations,
-            tolerance,
+            model=model,
+            reference_depth=reference_depth,
+            reference_pressure=average,
+            workspace=workspace,
+            relevant_oil=relevant_oil,
+            relevant_water=relevant_water,
+            relevant_gas=relevant_gas,
+            is_injector=is_injector,
+            hydrostatic_divisor=hydrostatic_divisor,
+            radial_flow_constant=radial_flow_constant,
+            max_iterations=max_iterations,
+            tolerance=tolerance,
         )
         if not result.converged:
-            return BisectionResult(average, result)
+            return BisectionResult(bhp=average, result=result)
         if reservoir_condition:
             value = result.oil_rate + result.water_rate + result.gas_rate
         else:
@@ -1032,7 +1032,7 @@ def bisect_homogeneous(
             low = average
         else:
             high = average
-    return BisectionResult(average, result)
+    return BisectionResult(bhp=average, result=result)
 
 
 @numba.njit(cache=True)
@@ -1087,25 +1087,25 @@ def bisect_beggs_and_brill(
     :returns: The reference pressure of the last solve, and that solve.
     """
     average = 0.5 * (low + high)
-    result = FixedPointResult(False, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    result = FixedPointResult(converged=False, previous_total_rate=0.0, total_rate=0.0, oil_rate=0.0, water_rate=0.0, gas_rate=0.0, surface_oil_rate=0.0, surface_water_rate=0.0, surface_gas_rate=0.0)
     for _ in range(max_bisections):
         average = 0.5 * (low + high)
         result = solve_beggs_and_brill(
-            model,
-            reference_depth,
-            average,
-            workspace,
-            relevant_oil,
-            relevant_water,
-            relevant_gas,
-            is_injector,
-            hydrostatic_divisor,
-            radial_flow_constant,
-            max_iterations,
-            tolerance,
+            model=model,
+            reference_depth=reference_depth,
+            reference_pressure=average,
+            workspace=workspace,
+            relevant_oil=relevant_oil,
+            relevant_water=relevant_water,
+            relevant_gas=relevant_gas,
+            is_injector=is_injector,
+            hydrostatic_divisor=hydrostatic_divisor,
+            radial_flow_constant=radial_flow_constant,
+            max_iterations=max_iterations,
+            tolerance=tolerance,
         )
         if not result.converged:
-            return BisectionResult(average, result)
+            return BisectionResult(bhp=average, result=result)
         if reservoir_condition:
             value = result.oil_rate + result.water_rate + result.gas_rate
         else:
@@ -1116,7 +1116,7 @@ def bisect_beggs_and_brill(
             low = average
         else:
             high = average
-    return BisectionResult(average, result)
+    return BisectionResult(bhp=average, result=result)
 
 
 @numba.njit(cache=True)
@@ -1171,25 +1171,25 @@ def bisect_hagedorn_brown(
     :returns: The reference pressure of the last solve, and that solve.
     """
     average = 0.5 * (low + high)
-    result = FixedPointResult(False, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    result = FixedPointResult(converged=False, previous_total_rate=0.0, total_rate=0.0, oil_rate=0.0, water_rate=0.0, gas_rate=0.0, surface_oil_rate=0.0, surface_water_rate=0.0, surface_gas_rate=0.0)
     for _ in range(max_bisections):
         average = 0.5 * (low + high)
         result = solve_hagedorn_brown(
-            model,
-            reference_depth,
-            average,
-            workspace,
-            relevant_oil,
-            relevant_water,
-            relevant_gas,
-            is_injector,
-            hydrostatic_divisor,
-            radial_flow_constant,
-            max_iterations,
-            tolerance,
+            model=model,
+            reference_depth=reference_depth,
+            reference_pressure=average,
+            workspace=workspace,
+            relevant_oil=relevant_oil,
+            relevant_water=relevant_water,
+            relevant_gas=relevant_gas,
+            is_injector=is_injector,
+            hydrostatic_divisor=hydrostatic_divisor,
+            radial_flow_constant=radial_flow_constant,
+            max_iterations=max_iterations,
+            tolerance=tolerance,
         )
         if not result.converged:
-            return BisectionResult(average, result)
+            return BisectionResult(bhp=average, result=result)
         if reservoir_condition:
             value = result.oil_rate + result.water_rate + result.gas_rate
         else:
@@ -1200,7 +1200,7 @@ def bisect_hagedorn_brown(
             low = average
         else:
             high = average
-    return BisectionResult(average, result)
+    return BisectionResult(bhp=average, result=result)
 
 
 @numba.njit(cache=True)
@@ -1255,25 +1255,25 @@ def bisect_gray(
     :returns: The reference pressure of the last solve, and that solve.
     """
     average = 0.5 * (low + high)
-    result = FixedPointResult(False, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    result = FixedPointResult(converged=False, previous_total_rate=0.0, total_rate=0.0, oil_rate=0.0, water_rate=0.0, gas_rate=0.0, surface_oil_rate=0.0, surface_water_rate=0.0, surface_gas_rate=0.0)
     for _ in range(max_bisections):
         average = 0.5 * (low + high)
         result = solve_gray(
-            model,
-            reference_depth,
-            average,
-            workspace,
-            relevant_oil,
-            relevant_water,
-            relevant_gas,
-            is_injector,
-            hydrostatic_divisor,
-            radial_flow_constant,
-            max_iterations,
-            tolerance,
+            model=model,
+            reference_depth=reference_depth,
+            reference_pressure=average,
+            workspace=workspace,
+            relevant_oil=relevant_oil,
+            relevant_water=relevant_water,
+            relevant_gas=relevant_gas,
+            is_injector=is_injector,
+            hydrostatic_divisor=hydrostatic_divisor,
+            radial_flow_constant=radial_flow_constant,
+            max_iterations=max_iterations,
+            tolerance=tolerance,
         )
         if not result.converged:
-            return BisectionResult(average, result)
+            return BisectionResult(bhp=average, result=result)
         if reservoir_condition:
             value = result.oil_rate + result.water_rate + result.gas_rate
         else:
@@ -1284,7 +1284,7 @@ def bisect_gray(
             low = average
         else:
             high = average
-    return BisectionResult(average, result)
+    return BisectionResult(bhp=average, result=result)
 
 
 @numba.njit(cache=True)
@@ -1339,25 +1339,25 @@ def bisect_woldesemayat_ghajar(
     :returns: The reference pressure of the last solve, and that solve.
     """
     average = 0.5 * (low + high)
-    result = FixedPointResult(False, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    result = FixedPointResult(converged=False, previous_total_rate=0.0, total_rate=0.0, oil_rate=0.0, water_rate=0.0, gas_rate=0.0, surface_oil_rate=0.0, surface_water_rate=0.0, surface_gas_rate=0.0)
     for _ in range(max_bisections):
         average = 0.5 * (low + high)
         result = solve_woldesemayat_ghajar(
-            model,
-            reference_depth,
-            average,
-            workspace,
-            relevant_oil,
-            relevant_water,
-            relevant_gas,
-            is_injector,
-            hydrostatic_divisor,
-            radial_flow_constant,
-            max_iterations,
-            tolerance,
+            model=model,
+            reference_depth=reference_depth,
+            reference_pressure=average,
+            workspace=workspace,
+            relevant_oil=relevant_oil,
+            relevant_water=relevant_water,
+            relevant_gas=relevant_gas,
+            is_injector=is_injector,
+            hydrostatic_divisor=hydrostatic_divisor,
+            radial_flow_constant=radial_flow_constant,
+            max_iterations=max_iterations,
+            tolerance=tolerance,
         )
         if not result.converged:
-            return BisectionResult(average, result)
+            return BisectionResult(bhp=average, result=result)
         if reservoir_condition:
             value = result.oil_rate + result.water_rate + result.gas_rate
         else:
@@ -1368,7 +1368,7 @@ def bisect_woldesemayat_ghajar(
             low = average
         else:
             high = average
-    return BisectionResult(average, result)
+    return BisectionResult(bhp=average, result=result)
 
 
 @numba.njit(cache=True)
@@ -1418,24 +1418,24 @@ def bisect_hydrostatic(
     :returns: The reference pressure of the last solve, and that solve.
     """
     average = 0.5 * (low + high)
-    result = FixedPointResult(False, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    result = FixedPointResult(converged=False, previous_total_rate=0.0, total_rate=0.0, oil_rate=0.0, water_rate=0.0, gas_rate=0.0, surface_oil_rate=0.0, surface_water_rate=0.0, surface_gas_rate=0.0)
     for _ in range(max_bisections):
         average = 0.5 * (low + high)
         result = solve_hydrostatic(
-            reference_depth,
-            average,
-            workspace,
-            relevant_oil,
-            relevant_water,
-            relevant_gas,
-            is_injector,
-            pressure_per_density_and_depth,
-            radial_flow_constant,
-            max_iterations,
-            tolerance,
+            reference_depth=reference_depth,
+            reference_pressure=average,
+            workspace=workspace,
+            relevant_oil=relevant_oil,
+            relevant_water=relevant_water,
+            relevant_gas=relevant_gas,
+            is_injector=is_injector,
+            pressure_per_density_and_depth=pressure_per_density_and_depth,
+            radial_flow_constant=radial_flow_constant,
+            max_iterations=max_iterations,
+            tolerance=tolerance,
         )
         if not result.converged:
-            return BisectionResult(average, result)
+            return BisectionResult(bhp=average, result=result)
         if reservoir_condition:
             value = result.oil_rate + result.water_rate + result.gas_rate
         else:
@@ -1446,7 +1446,7 @@ def bisect_hydrostatic(
             low = average
         else:
             high = average
-    return BisectionResult(average, result)
+    return BisectionResult(bhp=average, result=result)
 
 
 @numba.njit(cache=True)
@@ -1492,22 +1492,22 @@ def bisect_uniform(
     :returns: The reference pressure of the last solve, and that solve.
     """
     average = 0.5 * (low + high)
-    result = FixedPointResult(False, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    result = FixedPointResult(converged=False, previous_total_rate=0.0, total_rate=0.0, oil_rate=0.0, water_rate=0.0, gas_rate=0.0, surface_oil_rate=0.0, surface_water_rate=0.0, surface_gas_rate=0.0)
     for _ in range(max_bisections):
         average = 0.5 * (low + high)
         result = solve_uniform(
-            average,
-            workspace,
-            relevant_oil,
-            relevant_water,
-            relevant_gas,
-            is_injector,
-            radial_flow_constant,
-            max_iterations,
-            tolerance,
+            reference_pressure=average,
+            workspace=workspace,
+            relevant_oil=relevant_oil,
+            relevant_water=relevant_water,
+            relevant_gas=relevant_gas,
+            is_injector=is_injector,
+            radial_flow_constant=radial_flow_constant,
+            max_iterations=max_iterations,
+            tolerance=tolerance,
         )
         if not result.converged:
-            return BisectionResult(average, result)
+            return BisectionResult(bhp=average, result=result)
         if reservoir_condition:
             value = result.oil_rate + result.water_rate + result.gas_rate
         else:
@@ -1518,7 +1518,7 @@ def bisect_uniform(
             low = average
         else:
             high = average
-    return BisectionResult(average, result)
+    return BisectionResult(bhp=average, result=result)
 
 
 class HydraulicSolver(typing.Protocol):
@@ -1589,7 +1589,10 @@ class HydrostaticSolver(typing.Protocol):
 
 
 class HydrostaticBisector(typing.Protocol):
-    """"""
+    """
+    A bisection of a well's reference pressure to match a target total rate, with the pressure profile
+    from the weight of the fluid between connections.
+    """
 
     def __call__(
         self,
@@ -1613,7 +1616,9 @@ class HydrostaticBisector(typing.Protocol):
 
 
 class UniformSolver(typing.Protocol):
-    """"""
+    """
+    A fixed-point solver for a well's connection pressures and rates, assuming a uniform pressure profile.
+    """
 
     def __call__(
         self,
@@ -1630,7 +1635,10 @@ class UniformSolver(typing.Protocol):
 
 
 class UniformBisector(typing.Protocol):
-    """"""
+    """
+    A bisection of a well's reference pressure to match a target total rate, with the pressure profile
+    from the weight of the fluid between connections.
+    """
 
     def __call__(
         self,
