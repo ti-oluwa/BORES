@@ -11,7 +11,7 @@ from bores.wells.compile import (
     RateQuantityTag,
 )
 from bores.wells.hydraulics.base import (
-    SurfaceSample,
+    SurfaceFluids,
     get_hydrostatic_divisor,
 )
 from bores.wells.hydraulics.hydrostatic import get_pressure_per_density_and_depth
@@ -484,7 +484,7 @@ def solve_bhp(
     control_spec: WellControlSpec,
     metric: typing.Literal["rate", "thp"] = "rate",
     target_rate_condition: typing.Literal["surface", "reservoir"] = "surface",
-    surface_sample: SurfaceSample | None = None,
+    surface_sample: SurfaceFluids | None = None,
 ) -> tuple[Number, NumberArray[OneDimension], PhaseValues]:
     """
     Bisects `reference_pressure` in `[min_pressure, max_pressure]` until

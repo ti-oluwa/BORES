@@ -14,7 +14,7 @@ import typing
 from bores.errors import ValidationError
 from bores.types import Integer
 from bores.wells.compile import CompiledWellSystem
-from bores.wells.hydraulics.base import ConnectionFluids, SurfaceSample, WellBoreModel
+from bores.wells.hydraulics.base import ConnectionFluids, SurfaceFluids, WellBoreModel
 from bores.wells.hydraulics.vfp import VFPTables
 from bores.wells.resolution.engine import resolve_well_control
 from bores.wells.resolution.groups.allocation import (
@@ -38,7 +38,7 @@ def resolve_wells(
     control_spec: WellControlSpec,
     get_tubing_performance: typing.Callable[[Integer], WellBoreModel | VFPTables | None],
     get_connection_fluids: typing.Callable[[Integer], ConnectionFluids],
-    get_surface_sample: typing.Callable[[Integer], SurfaceSample | None] | None = None,
+    get_surface_sample: typing.Callable[[Integer], SurfaceFluids | None] | None = None,
 ) -> dict[str, GroupEconomicLimitOutcome]:
     """
     Resolves every well in `compiled_system` for one timestep, in the

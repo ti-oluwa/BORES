@@ -25,7 +25,7 @@ from bores.wells.compile import (
     WellKind,
     WorkoverActionTag,
 )
-from bores.wells.hydraulics.base import ConnectionFluids, SurfaceSample, WellBoreModel
+from bores.wells.hydraulics.base import ConnectionFluids, SurfaceFluids, WellBoreModel
 from bores.wells.hydraulics.vfp import VFPTables
 from bores.wells.resolution.engine import resolve_well_control
 from bores.wells.resolution.groups.allocation import allocate_group_targets
@@ -116,7 +116,7 @@ def reallocate_and_reresolve(
     grup_member_rows: typing.Sequence[Integer],
     get_tubing_performance: typing.Callable[[Integer], WellBoreModel | VFPTables | None],
     get_connection_fluids: typing.Callable[[Integer], ConnectionFluids],
-    get_surface_sample: typing.Callable[[Integer], SurfaceSample | None],
+    get_surface_sample: typing.Callable[[Integer], SurfaceFluids | None],
 ) -> tuple[str, ...]:
     """
     Reallocates `group_name`'s current target across `grup_member_rows`
@@ -179,7 +179,7 @@ def enforce_group_economic_limits(
     control_spec: WellControlSpec,
     get_tubing_performance: typing.Callable[[Integer], WellBoreModel | VFPTables | None],
     get_connection_fluids: typing.Callable[[Integer], ConnectionFluids],
-    get_surface_sample: typing.Callable[[Integer], SurfaceSample | None] | None = None,
+    get_surface_sample: typing.Callable[[Integer], SurfaceFluids | None] | None = None,
 ) -> GroupEconomicLimitOutcome:
     """
     Checks `group_name`'s own `GECON` limits against its member wells'

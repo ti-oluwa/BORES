@@ -18,7 +18,7 @@ from bores.wells.base import WellType
 from bores.wells.compile import CompiledWellSystem, WellKind
 from bores.wells.hydraulics.base import (
     PhaseValues,
-    SurfaceSample,
+    SurfaceFluids,
     WellBoreModel,
     compute_hydrostatic_pressure,
     get_gravitational_acceleration,
@@ -253,7 +253,7 @@ def compute_tubing_head_pressure(
     reference_pressure: Number,
     phase_rates: PhaseValues,
     surface_phase_rates: PhaseValues,
-    surface_sample: SurfaceSample | None,
+    surface_sample: SurfaceFluids | None,
     is_injector: Boolean,
     connection_rates: ConnectionRates | None = None,
 ) -> Number:

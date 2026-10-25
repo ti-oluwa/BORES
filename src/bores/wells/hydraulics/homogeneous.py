@@ -21,18 +21,19 @@ from bores.units import get_conversion_factors
 from bores.wells.hydraulics.base import (
     UNIT_SYSTEM_TAGS,
     UNIT_SYSTEMS_BY_TAG,
+    CompiledSurfaceFluids,
     ConnectionFluids,
     PressureDrop,
-    SurfaceSample,
+    SurfaceFluids,
     WellBoreModel,
+    compile_surface_fluids,
+    compute_compiled_surface_mixture_density,
+    compute_compiled_surface_mixture_viscosity,
     compute_mixture_density,
     compute_mixture_velocity,
     compute_mixture_viscosity,
     compute_segment_pressure_drop,
-    compute_static_hydrostatic_drop,
     compute_static_mixture_density,
-    compute_surface_mixture_density,
-    compute_surface_mixture_viscosity,
     get_hydrostatic_divisor,
     get_unit_system_constant,
     plan_connection_walk,
@@ -44,6 +45,7 @@ __all__ = [
     "compute_perforation_pressures",
     "compute_segment_drop",
     "compute_tubing_head_pressure",
+    "evaluate_tubing_head_pressure",
     "homogeneous_wellbore",
 ]
 
@@ -478,43 +480,47 @@ def compute_perforation_pressures(
     return pressures
 
 
-def compute_tubing_head_pressure(
+@numba.njit(cache=True)
+def evaluate_tubing_head_pressure(
     model: HomogeneousWellbore,
     reference_depth: Number,
     reference_pressure: Number,
     phase_rates: PhaseValues,
-    surface_sample: SurfaceSample,
-    is_injector: bool,
+    surface_fluids: CompiledSurfaceFluids,
+    is_injector: Boolean,
 ) -> Number:
     """
-    Computes tubing head pressure at surface.
+    Computes tubing head pressure at surface from compiled surface fluid properties.
 
     :param model: This well's `HomogeneousWellbore`.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param reference_pressure: Pressure at `reference_depth`.
     :param phase_rates: Rate of each phase, at reservoir conditions.
-    :param surface_sample: Fluid properties at surface conditions.
+    :param surface_fluids: Fluid properties at surface conditions. Needs a mixture density and
+        viscosity, or all three phase densities and viscosities.
     :param is_injector: Whether this well is an injector.
     :returns: Tubing head pressure.
+    :raises ValueError: If neither a surface mixture density nor all three phase densities, or
+        neither a mixture viscosity nor all three phase viscosities, were given.
     """
     dz = 0.0 - reference_depth
     total_rate = phase_rates.oil + phase_rates.water + phase_rates.gas
     friction_sign = -1.0 if is_injector else 1.0
-    mixture_density = compute_surface_mixture_density(
-        properties=surface_sample, phase_rates=phase_rates
+    mixture_density = compute_compiled_surface_mixture_density(
+        surface_fluids=surface_fluids, phase_rates=phase_rates
     )
 
     if total_rate == 0:
-        drop = compute_static_hydrostatic_drop(
-            mixture_density=mixture_density,
-            length=abs(dz),
-            gravitational_acceleration=model.gravitational_acceleration,
-            unit_system=model.unit_system,
+        return (
+            reference_pressure
+            - mixture_density
+            * model.gravitational_acceleration
+            * abs(dz)
+            * model.hydrostatic_scale
         )
-        return reference_pressure - drop.total
 
-    mixture_viscosity = compute_surface_mixture_viscosity(
-        properties=surface_sample, phase_rates=phase_rates
+    mixture_viscosity = compute_compiled_surface_mixture_viscosity(
+        surface_fluids=surface_fluids, phase_rates=phase_rates
     )
     velocity = compute_mixture_velocity(
         phase_rates=phase_rates,
@@ -531,4 +537,33 @@ def compute_tubing_head_pressure(
     )
     return (
         reference_pressure - (drop.hydrostatic + drop.acceleration) - friction_sign * drop.friction
+    )
+
+
+def compute_tubing_head_pressure(
+    model: HomogeneousWellbore,
+    reference_depth: Number,
+    reference_pressure: Number,
+    phase_rates: PhaseValues,
+    surface_sample: SurfaceFluids,
+    is_injector: bool,
+) -> Number:
+    """
+    Computes tubing head pressure at surface.
+
+    :param model: This well's `HomogeneousWellbore`.
+    :param reference_depth: The well's BHP/THP reporting datum.
+    :param reference_pressure: Pressure at `reference_depth`.
+    :param phase_rates: Rate of each phase, at reservoir conditions.
+    :param surface_sample: Fluid properties at surface conditions.
+    :param is_injector: Whether this well is an injector.
+    :returns: Tubing head pressure.
+    """
+    return evaluate_tubing_head_pressure(
+        model=model,
+        reference_depth=reference_depth,
+        reference_pressure=reference_pressure,
+        phase_rates=phase_rates,
+        surface_fluids=compile_surface_fluids(surface_sample=surface_sample),
+        is_injector=is_injector,
     )
