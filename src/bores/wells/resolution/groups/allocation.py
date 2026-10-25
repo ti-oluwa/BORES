@@ -260,7 +260,7 @@ def redistribute_group_shortfall(
     resolved_get_surface_sample = get_surface_sample or (lambda well_row: None)
     reresolved: list[str] = []
 
-    # TODO: Can we extract this part as a jitted kernel
+    # TODO: Can we extract this part downwards as a jitted kernel
     for _ in range(control_spec.max_fixed_point_iterations):
         headroom_rows: list[Integer] = []
         total_shortfall = 0.0
