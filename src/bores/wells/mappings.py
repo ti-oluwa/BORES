@@ -65,6 +65,8 @@ WELOPEN_STATUS_MAP = {
     "STOP": CompletionStatus.SHUT,
 }
 """
+Used for the status item of `WELOPEN`, `WCONPROD` and `WCONINJE` alike.
+
 `CompletionStatus` only distinguishes open from shut, so `WELOPEN`'s
 `STOP` (stop flow, but not the same as a deck author marking a completion
 as never meant to flow) is treated the same as `SHUT` here, and `AUTO`

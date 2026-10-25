@@ -197,6 +197,7 @@ def make_producer(
     preferred_phase: FluidPhase | None = None,
     pvt_region: int | None = None,
     group: str | None = None,
+    open_status: CompletionStatus = CompletionStatus.OPEN,
     schedule_status: WellStatus = WellStatus.ACTIVE,
     unit_system: UnitSystem = UnitSystem.FIELD,
     metadata: typing.Mapping[str, typing.Any] | None = None,
@@ -241,6 +242,7 @@ def make_producer(
     :param preferred_phase: `Well.preferred_phase`.
     :param pvt_region: `Well.pvt_region`.
     :param group: `Well.group`.
+    :param open_status: `Well.open_status`, whether the well is open or shut.
     :param schedule_status: `Well.schedule_status`, and the simple path's
         single `Perforation.schedule_status`.
     :param unit_system: `Well.unit_system` and `ProducerControl.unit_system`.
@@ -276,6 +278,7 @@ def make_producer(
         preferred_phase=preferred_phase,
         pvt_region=pvt_region,
         group=group,
+        open_status=open_status,
         schedule_status=schedule_status,
         unit_system=unit_system,
         metadata=metadata,
@@ -345,6 +348,7 @@ def make_injector(
     direction: Orientation | None = None,
     pvt_region: int | None = None,
     group: str | None = None,
+    open_status: CompletionStatus = CompletionStatus.OPEN,
     schedule_status: WellStatus = WellStatus.ACTIVE,
     unit_system: UnitSystem = UnitSystem.FIELD,
     metadata: typing.Mapping[str, typing.Any] | None = None,
@@ -388,6 +392,7 @@ def make_injector(
     :param direction: `Perforation.direction`.
     :param pvt_region: `Well.pvt_region`.
     :param group: `Well.group`.
+    :param open_status: `Well.open_status`, whether the well is open or shut.
     :param schedule_status: `Well.schedule_status`, and the simple path's
         single `Perforation.schedule_status`.
     :param unit_system: `Well.unit_system` and `InjectorControl.unit_system`.
@@ -423,6 +428,7 @@ def make_injector(
         preferred_phase=injected_phase,
         pvt_region=pvt_region,
         group=group,
+        open_status=open_status,
         schedule_status=schedule_status,
         unit_system=unit_system,
         metadata=metadata,

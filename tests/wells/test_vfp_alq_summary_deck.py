@@ -2369,9 +2369,11 @@ def test_deck_welopen_shuts_only_the_connections_it_targets():
     assert all(
         perforation.status == CompletionStatus.SHUT for perforation in every_layer.perforations
     )
+    # Naming no connection sets the well's own flag, and leaves its connections as they were
     whole_well = welopen_well([{"status": "SHUT"}])
+    assert whole_well.open_status == CompletionStatus.SHUT
     assert all(
-        perforation.status == CompletionStatus.SHUT for perforation in whole_well.perforations
+        perforation.status == CompletionStatus.OPEN for perforation in whole_well.perforations
     )
 
 
@@ -3037,7 +3039,8 @@ def test_connection_multipliers_and_targeted_status_changes_skip_connections_not
     assert perforations.completion_statuses.tolist() == [0, 0, 0, 1, 1, 1, 1, 1, 1]
 
     ShutInWells(well_names=("P1",))(model, ScheduleContext(time=7.0))
-    assert perforations.completion_statuses.tolist() == [0] * 9
+    assert model.wells.open_statuses.tolist() == [0]
+    assert perforations.completion_statuses.tolist() == [0, 0, 0, 1, 1, 1, 1, 1, 1]
 
     ActivateCompletions(well_names=("P1",), i=1, j=1, k1=1, k2=3)(
         model, ScheduleContext(time=10.0)

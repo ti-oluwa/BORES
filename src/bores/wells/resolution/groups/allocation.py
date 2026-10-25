@@ -56,7 +56,9 @@ def allocate_group_targets(
     since that's dynamic. A member currently shut in (`workspace.economic_shutins`)
     is excluded from both the weighting and the allocation, whatever its
     own `control_mode` still says, since it isn't actually available to
-    take a share of the group's target right now.
+    take a share of the group's target right now. The same goes for a member
+    that cannot flow: one not yet in effect, one that is shut, or one with no
+    open connection in effect.
 
     :param group_name: Group to allocate. A row in  `well_system.group_controls.names`.
     :param well_system: Supplies `.group_controls` (target and compiled
@@ -105,6 +107,7 @@ def allocate_group_targets(
         if well_system.well_kinds[idx] == expected_well_kind
         and controls.control_modes[idx] == group_mode_tag
         and workspace.economic_shutins[idx] == 0
+        and len(well_system.get_flowing_connection_rows(well_row=idx)) > 0
     ]
     if not eligible_member_indices:
         return ()
@@ -149,12 +152,12 @@ def get_group_controlled_rate(
 
     if well_system.well_kinds[well_row] == WellKind.INJECTOR:
         if mode == InjectorControlModeTag.RATE:
-            phase_surface_rates = {
-                FluidPhaseTag.OIL: workspace.surface_oil_rates,
-                FluidPhaseTag.WATER: workspace.surface_water_rates,
-                FluidPhaseTag.GAS: workspace.surface_gas_rates,
-            }[FluidPhaseTag(controls.injected_phases[well_row])]
-            return phase_surface_rates[well_row]
+            injected_phase = controls.injected_phases[well_row]
+            if injected_phase == FluidPhaseTag.OIL:
+                return workspace.surface_oil_rates[well_row]
+            elif injected_phase == FluidPhaseTag.WATER:
+                return workspace.surface_water_rates[well_row]
+            return workspace.surface_gas_rates[well_row]
         if mode == InjectorControlModeTag.RESERVOIR_VOLUME_RATE:
             return (
                 workspace.oil_rates[well_row]
@@ -257,6 +260,7 @@ def redistribute_group_shortfall(
     resolved_get_surface_sample = get_surface_sample or (lambda well_row: None)
     reresolved: list[str] = []
 
+    # TODO: Can we extract this part as a jitted kernel
     for _ in range(control_spec.max_fixed_point_iterations):
         headroom_rows: list[Integer] = []
         total_shortfall = 0.0

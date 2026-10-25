@@ -583,7 +583,9 @@ def load_wells_states(
     Only covers wells actually resolved this pass/step. A well whose
     `WellStatus` is still `PENDING` (its BHP is left `NaN` by
     `resolve_control`) is skipped rather than reported with meaningless
-    values.
+    values. A well that was resolved as shut, because it is shut or has no open
+    connection in effect, is reported with `is_open=False`, no perforation states, zero
+    rates, and a `NaN` bottom-hole pressure, since it has no flowing pressure.
 
     :param wells: The original rich `Wells` this system was compiled
         from. This supplies each `PerforationState.perforation`, which the
@@ -599,7 +601,10 @@ def load_wells_states(
     states: dict[str, WellState] = {}
     for well_row, well_name in enumerate(compiled_system.names):
         bhp = workspace.bhps[well_row]
-        if math.isnan(bhp):
+        # A well resolved as shut flowed nothing, which `record_shut_well` writes as zero rates
+        # with no flowing pressure. A well never resolved has no rates either.
+        is_shut = math.isnan(bhp) and not math.isnan(workspace.oil_rates[well_row])
+        if math.isnan(bhp) and not is_shut:
             continue  # Not resolved this pass (PENDING, or UNSET control)
 
         row_start = perforations.well_offsets[well_row]
@@ -634,7 +639,7 @@ def load_wells_states(
 
         states[well_name] = WellState(
             well_name=well_name,
-            is_open=not workspace.economic_shutins[well_row],
+            is_open=not is_shut and not workspace.economic_shutins[well_row],
             active_control=decompile_well_control(controls, well_row, unit_system),
             bhp=bhp,
             perforation_states=tuple(perforation_states),

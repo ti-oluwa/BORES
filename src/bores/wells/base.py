@@ -52,17 +52,20 @@ class WellType(enum.Enum):
 
 class CompletionStatus(enum.Enum):
     """
-    Static intent for a perforation (deck `COMPDAT` item 6 `OPEN`/`SHUT`).
+    Whether a connection, or a whole well, is open or shut.
 
-    This is not the same as a well being shut in by a control action at
-    runtime, that's `WellState.is_open`. `CompletionStatus.SHUT`
-    means **"this completion was never meant to flow"** (e.g. a deck author
-    disabling one layer of a multi-layer completion); `WellState.is_open =
-    False` means **"the whole well is currently shut for operational reasons"**.
+    As a perforation's `status`, it is whether that connection is meant to flow. It comes from
+    deck `COMPDAT` item 6, and from `WELOPEN` records that name the connection. As a well's
+    `open_status`, it is the well's own flag, set by `WELOPEN` records that name no connection
+    and by the status item of `WCONPROD` and `WCONINJE`.
 
-    A perforation with `CompletionStatus.SHUT` is excluded from
-    the perforation indices resolution output entirely; one with `OPEN` is still
-    subject to the well-level open/shut flag in `WellState` at simulation time.
+    The two are independent. A connection flows only while its well is open and the connection
+    itself is open, and both are in effect (see `WellStatus`). Shutting a well leaves the
+    status of each of its connections as it was, so opening the well again brings back the
+    connections that were open.
+
+    This is also not `WellState.is_open`, which reports whether a well is flowing at one time
+    step, and is false as well when an economic limit shut the well in.
     """
 
     OPEN = "open"
@@ -351,6 +354,14 @@ class Well:
 
     unit_system: UnitSystem = UnitSystem.FIELD
 
+    open_status: CompletionStatus = CompletionStatus.OPEN
+    """
+    The well's own open or shut flag. A shut well flows nothing, whatever the status of its
+    connections, and keeps them as they are for when it is opened again. Independent of
+    `schedule_status`: a well can be `ACTIVE` and shut, or `PENDING` and already shut for when
+    it comes online. See `CompletionStatus`.
+    """
+
     schedule_status: WellStatus = WellStatus.ACTIVE
     """
     See `WellStatus`. Under the load-once roster architecture, `Wells.from_deck`
@@ -440,6 +451,11 @@ class Well:
     def is_active(self) -> bool:
         """`True` if `schedule_status is WellStatus.ACTIVE`."""
         return self.schedule_status is WellStatus.ACTIVE
+
+    @property
+    def is_open(self) -> bool:
+        """`True` if `open_status is CompletionStatus.OPEN`."""
+        return self.open_status is CompletionStatus.OPEN
 
     @property
     def min_perforation_depth(self) -> Number:

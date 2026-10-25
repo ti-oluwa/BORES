@@ -512,9 +512,9 @@ def decompile_well(wells: Wells, compiled_system: CompiledWellSystem, well_row: 
     `pvt_region` are read straight from the matching original in `wells`,
     since the compiled layer carries no geometry or grouping data at all -
     there's nothing to rebuild them from. `well_type`, `reference_depth`,
-    and `schedule_status` come from `compiled_system` directly, and
+    `schedule_status`, and `open_status` come from `compiled_system` directly, and
     `perforations` is rebuilt via `decompile_well_perforations`, so all
-    four reflect any in-place patch made since compile time.
+    five reflect any in-place patch made since compile time.
 
     :param wells: The original rich `Wells` this system was compiled from.
     :param compiled_system: The compiled system to read from.
@@ -535,6 +535,7 @@ def decompile_well(wells: Wells, compiled_system: CompiledWellSystem, well_row: 
         well_type=WELL_TYPE_FROM_KIND[compiled_system.well_kinds[well_row]],
         reference_depth=compiled_system.reference_depths[well_row],
         schedule_status=get_well_status(compiled_system.schedule_statuses[well_row]),
+        open_status=get_completion_status(compiled_system.open_statuses[well_row]),
         perforations=perforations,
     )
 

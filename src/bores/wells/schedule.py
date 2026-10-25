@@ -464,12 +464,15 @@ class ActivateWells(Action["CompiledBlackOilModel"]):
 @attrs.frozen(kw_only=True, slots=True)
 class UpdateWellStatuses(Action["CompiledBlackOilModel"]):
     """
-    Opens or shuts wells, or specific connections on them, all against the same targeted
-    connection(s). A deck `WELOPEN` record loads as one of these.
+    Opens or shuts wells, or specific connections on them. A deck `WELOPEN` record loads as
+    one of these, and so does the status item of a `WCONPROD` or `WCONINJE` record.
 
-    A change to specific connections only reaches connections already in effect. A change to
-    a whole well also reaches connections that start later, so a well that is shut in stays
-    shut when they come online.
+    With no connection targeted (`i`, `j`, `k1` and `k2` all `0`), it sets each well's own
+    open or shut flag, and leaves the status of its connections as it is. A shut well
+    flows nothing, and when it is opened again its connections that were open flow again.
+
+    With connections targeted, it sets only the status of those connections, and only those
+    already in effect. The well's own flag is left as it is.
     """
 
     well_names: tuple[str, ...] = attrs.field(
@@ -499,16 +502,19 @@ class UpdateWellStatuses(Action["CompiledBlackOilModel"]):
         self, model: "CompiledBlackOilModel", context: ScheduleContext
     ) -> "CompiledBlackOilModel":
         """
-        Sets the targeted connection(s)' open/shut status across every
-        named well, in one bulk write.
+        Sets each named well's own open or shut flag when no connection is targeted, or the
+        status of the targeted connections otherwise, in one bulk write.
 
         :param model: The model to change.
         :param context: The current moment's context. Unused.
-        :returns: `model`, with the targeted connections patched.
+        :returns: `model`, with the wells or targeted connections patched.
         """
         well_rows, wells = resolve_wells(model=model, well_names=self.well_names)
         status = broadcast_or_match(self.status, count=len(self.well_names), field_name="status")
-        grid = model.reservoir.grid if (self.i or self.j or self.k1 or self.k2) else None
+        if not (self.i or self.j or self.k1 or self.k2):
+            wells.set_open_status(well_row=well_rows, status=status)
+            return model
+
         rows, counts = get_many_matching_connection_rows(
             perforations=wells.perforations,
             well_rows=well_rows,
@@ -516,9 +522,9 @@ class UpdateWellStatuses(Action["CompiledBlackOilModel"]):
             j=self.j,
             k1=self.k1,
             k2=self.k2,
-            grid=grid,
+            grid=model.reservoir.grid,
             well_names=self.well_names,
-            active_only=bool(grid),
+            active_only=True,
         )
         if isinstance(status, (list, tuple, np.ndarray)):
             status = expand_values(status, counts=counts)
@@ -528,7 +534,7 @@ class UpdateWellStatuses(Action["CompiledBlackOilModel"]):
 
 @attrs.frozen(kw_only=True, slots=True)
 class OpenWells(UpdateWellStatuses):
-    """Sets the targeted completions on several wells to `OPEN`."""
+    """Opens several wells, or the targeted connections on them."""
 
     status: CompletionStatus = attrs.field(
         default=CompletionStatus.OPEN,
@@ -538,7 +544,7 @@ class OpenWells(UpdateWellStatuses):
 
 @attrs.frozen(kw_only=True, slots=True)
 class ShutInWells(UpdateWellStatuses):
-    """Sets the targeted completions on several wells to `SHUT`."""
+    """Shuts in several wells, or the targeted connections on them."""
 
     status: CompletionStatus = attrs.field(
         default=CompletionStatus.SHUT,

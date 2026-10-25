@@ -376,7 +376,8 @@ class CompiledPerforations(typing.NamedTuple):
     """
     Shape `(n_rows,)`. `1` for `WellStatus.ACTIVE`, `0` for `PENDING`.
     A row with either this or `completion_statuses` at `0` is skipped by
-    every solver kernel.
+    every solver kernel, as is every row of a well that is pending or shut
+    (`CompiledWellSystem.schedule_statuses` and `CompiledWellSystem.open_statuses`).
     """
 
     saturation_regions: IntArray[OneDimension]
@@ -1429,7 +1430,14 @@ class CompiledWellSystem(typing.NamedTuple):
     """
 
     schedule_statuses: IntArray[OneDimension]
-    """Shape `(n_wells,)`."""
+    """Shape `(n_wells,)`. `1` for `WellStatus.ACTIVE`, `0` for `PENDING`."""
+
+    open_statuses: IntArray[OneDimension]
+    """
+    Shape `(n_wells,)`. `1` for a well whose `Well.open_status` is `OPEN`, `0` for `SHUT`.
+    A shut well flows nothing, whatever the status of its connections, which are left as they
+    are for when the well is opened again.
+    """
 
     reference_depths: NumberArray[OneDimension]
     """Shape `(n_wells,)`."""
@@ -1585,6 +1593,68 @@ class CompiledWellSystem(typing.NamedTuple):
             self.schedule_statuses[well_row] = [
                 get_well_status_tag(status=one_status) for one_status in status
             ]
+
+    @typing.overload
+    def get_open_status(self, *, well_row: Integer) -> CompletionStatus: ...
+    @typing.overload
+    def get_open_status(self, *, well_row: IntArray[OneDimension]) -> list[CompletionStatus]: ...
+    def get_open_status(
+        self, *, well_row: IntOrArray[OneDimension]
+    ) -> CompletionStatus | list[CompletionStatus]:
+        """
+        :param well_row: One well's row, or an array of them.
+        :returns: Each well's own open or shut status. A single `CompletionStatus` for a
+            single `well_row`, a list for an array.
+        """
+        if np.isscalar(well_row):
+            well_row = typing.cast(Integer, well_row)
+            return CompletionStatus.OPEN if self.open_statuses[well_row] else CompletionStatus.SHUT
+        return [
+            CompletionStatus.OPEN if tag else CompletionStatus.SHUT
+            for tag in self.open_statuses[well_row]  # type: ignore[index]
+        ]
+
+    def set_open_status(
+        self,
+        *,
+        well_row: IntOrArray[OneDimension],
+        status: CompletionStatus | typing.Sequence[CompletionStatus],
+    ) -> None:
+        """
+        Sets one or more wells' open or shut status in place. The status of each well's
+        connections is left as it is.
+
+        :param well_row: One well's row, or an array of them.
+        :param status: The new open or shut status. A single `CompletionStatus` applies to
+            every row in `well_row`; a sequence sets each row to its own status.
+        """
+        if isinstance(status, CompletionStatus):
+            self.open_statuses[well_row] = get_completion_status_tag(status=status)
+        else:
+            self.open_statuses[well_row] = [
+                get_completion_status_tag(status=one_status) for one_status in status
+            ]
+
+    def get_flowing_connection_rows(self, *, well_row: Integer) -> IntArray[OneDimension]:
+        """
+        The connections of a well that can flow right now: in effect, open, and on a well that
+        is itself in effect and open. This is the one place that decides it, so whatever
+        supplies a well's connection fluids must supply them for exactly these rows, in order.
+
+        :param well_row: The well's row in `names`.
+        :returns: The rows of the well's flowing connections, in order. Empty if the well is
+            pending or shut, or has no connection that is open and in effect.
+        """
+        if self.schedule_statuses[well_row] == 0 or self.open_statuses[well_row] == 0:
+            return np.empty(0, dtype=np.intp)  # type: ignore[return-value]
+
+        perforations = self.perforations
+        connection_rows = perforations.connection_rows(well_row=well_row)
+        rows = np.arange(connection_rows.start, connection_rows.stop)
+        flowing = (perforations.completion_statuses[rows] == 1) & (
+            perforations.schedule_statuses[rows] == 1
+        )
+        return rows[flowing]  # type: ignore[return-value]
 
     @typing.overload
     def get_reference_depth(self, *, well_row: Integer) -> Number: ...
@@ -2237,6 +2307,13 @@ def compile_well_system(
             dtype=np.int32,
         ),
     )
+    open_statuses = typing.cast(
+        IntArray[OneDimension],
+        np.asarray(
+            [get_completion_status_tag(status=wells[name].open_status) for name in names],
+            dtype=np.int32,
+        ),
+    )
     reference_depths = typing.cast(
         NumberArray[OneDimension],
         np.asarray([wells[name].reference_depth for name in names], dtype=dtype),
@@ -2269,6 +2346,7 @@ def compile_well_system(
         names=tuple(names),
         well_kinds=well_controls.well_kinds,
         schedule_statuses=schedule_statuses,
+        open_statuses=open_statuses,
         reference_depths=reference_depths,
         reference_measured_depths=reference_measured_depths,
         d_factors=d_factors,

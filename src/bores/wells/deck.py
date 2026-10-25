@@ -3,7 +3,6 @@ Utilities for building well model definition objects from parsed Eclipse deck re
 """
 
 import itertools
-import logging
 import typing
 
 import attrs
@@ -82,16 +81,14 @@ from bores.wells.trajectory import TrajectoryStation, WellTrajectory
 if typing.TYPE_CHECKING:
     from bores.blackoil.compile import CompiledBlackOilModel
 
-logger = logging.getLogger(__name__)
-
 __all__ = [
     "apply_d_factors",
     "apply_economic_limits",
     "apply_guide_rates",
     "apply_well_segments",
-    "check_well_status_supported",
     "from_deck_gas_rate",
     "get_fluid_in_place_regions",
+    "is_whole_well_record",
     "load_controls_from_records",
     "load_economic_limits_from_record",
     "load_group_control_from_record",
@@ -108,6 +105,7 @@ __all__ = [
     "load_well_segments",
     "load_wells",
     "load_wells_from_records",
+    "replay_open_status",
     "select_current_records",
 ]
 
@@ -136,6 +134,57 @@ def connection_layers(record: typing.Mapping[str, typing.Any], *, keyword: str) 
     return layer, layer
 
 
+def is_whole_well_record(record: typing.Mapping[str, typing.Any], *, keyword: str) -> bool:
+    """
+    :param record: A `WELOPEN` or `WPIMULT` record.
+    :param keyword: Name of the keyword the record came from, for error messages.
+    :returns: Whether the record names no connection, so it applies to the well as a whole.
+    :raises NotSupportedError: If the record selects connections by completion number.
+    """
+    first_layer, last_layer = connection_layers(record, keyword=keyword)
+    return not (record.get("i", 0) or record.get("j", 0) or first_layer or last_layer)
+
+
+def replay_open_status(
+    *,
+    control_records: typing.Sequence[typing.Mapping[str, typing.Any]] | None,
+    welopen_records: typing.Sequence[typing.Mapping[str, typing.Any]] | None,
+    current_time: float,
+) -> CompletionStatus:
+    """
+    A well's own open or shut flag at a point in the schedule, found by replaying every record
+    that sets it, in schedule order.
+
+    A `WCONPROD` or `WCONINJE` record sets it through its status item, and an omitted status
+    means `OPEN`. A `WELOPEN` record sets it when it names no connection. At the same time,
+    the `WELOPEN` is replayed last, so it has the last word, as it does in `load_schedule`.
+    A well that nothing sets is open.
+
+    :param control_records: The well's `WCONPROD` and `WCONINJE` records, from any point in
+        the schedule.
+    :param welopen_records: The well's `WELOPEN` records, from any point in the schedule.
+    :param current_time: Records scheduled after this time are not replayed yet.
+    :returns: The well's open or shut status as of `current_time`.
+    """
+    changes: list[tuple[float, int, CompletionStatus]] = []
+    for record in control_records or ():
+        time = record.get("schedule_time", 0.0)
+        if time <= current_time:
+            changes.append((
+                time,
+                0,
+                WELOPEN_STATUS_MAP[str(record.get("status") or "OPEN").upper()],
+            ))
+    for record in welopen_records or ():
+        time = record.get("schedule_time", 0.0)
+        if time <= current_time and is_whole_well_record(record, keyword="WELOPEN"):
+            changes.append((time, 1, WELOPEN_STATUS_MAP[record["status"]]))
+    status = CompletionStatus.OPEN
+    for *_, new_status in sorted(changes, key=lambda change: change[:2]):
+        status = new_status
+    return status
+
+
 def load_well_from_records(
     grid: Grid,
     welspecs_record: typing.Mapping[str, typing.Any],
@@ -143,6 +192,7 @@ def load_well_from_records(
     *,
     wpimult_records: typing.Sequence[typing.Mapping[str, typing.Any]] | None = None,
     welopen_records: typing.Sequence[typing.Mapping[str, typing.Any]] | None = None,
+    control_records: typing.Sequence[typing.Mapping[str, typing.Any]] | None = None,
     unit_system: UnitSystem = UnitSystem.FIELD,
     well_type: WellType = WellType.PRODUCER,
     current_time: float = 0.0,
@@ -158,10 +208,12 @@ def load_well_from_records(
     rather than being added on the fly. The well itself is marked the same
     way, based on when its `WELSPECS` record takes effect.
 
-    Any `WELOPEN` record for the well, up to `current_time`, is replayed
-    in schedule order afterwards, so a completion (or the whole well)
-    opened or shut later in the schedule without a fresh `COMPDAT` still
-    ends up with the right status.
+    Any `WELOPEN` record for the well that names connections, up to `current_time`, is
+    replayed in schedule order afterwards, so a completion opened or shut later in the
+    schedule without a fresh `COMPDAT` still ends up with the right status. The well's own
+    open or shut flag is found separately (`replay_open_status`), from the `WELOPEN` records
+    that name no connection and the status item of its `WCONPROD`/`WCONINJE` records. It does
+    not change the status of any connection.
 
     :param grid: Grid the well's completions are resolved against.
     :param welspecs_record: The well's `WELSPECS` record.
@@ -169,6 +221,9 @@ def load_well_from_records(
         point in the schedule.
     :param wpimult_records: Every `WPIMULT` record for this well, if any.
     :param welopen_records: Every `WELOPEN` record for this well, if any.
+    :param control_records: Every `WCONPROD` or `WCONINJE` record for this well, if any. Only
+        their status item is used here, for the well's open or shut flag. The controls
+        themselves are loaded by `load_controls_from_records`.
     :param unit_system: The deck's unit system.
     :param well_type: Whether this well is a producer or an injector. Not
         derivable from `WELSPECS`/`COMPDAT` alone.
@@ -286,7 +341,7 @@ def load_well_from_records(
         return spec["start_time"] <= time < spec["end_time"]
 
     def select(
-        record: typing.Mapping[str, typing.Any], *, keyword: str, whole_well_reaches_future: bool
+        record: typing.Mapping[str, typing.Any], *, keyword: str
     ) -> list[dict[str, typing.Any]]:
         """
         The specs a `WPIMULT` or `WELOPEN` record acts on, as of its own time.
@@ -296,25 +351,21 @@ def load_well_from_records(
         time = record.get("schedule_time", 0.0)
         i, j = record.get("i", 0), record.get("j", 0)
         k1, k2 = connection_layers(record, keyword=keyword)
-        if whole_well_reaches_future and i == 0 and j == 0 and k1 == 0 and k2 == 0:
-            # A shut-in well stays shut when a completion not yet started comes online.
-            matched = [spec for spec in perforation_specs if spec["end_time"] > time]
-        else:
-            matched = [
-                spec
-                for spec in perforation_specs
-                if in_effect(spec, time)
-                and match_connection_target(
-                    i=i,
-                    j=j,
-                    k1=k1,
-                    k2=k2,
-                    connection_i=spec["i"],
-                    connection_j=spec["j"],
-                    connection_k1=spec["k1"],
-                    connection_k2=spec["k2"],
-                )
-            ]
+        matched = [
+            spec
+            for spec in perforation_specs
+            if in_effect(spec, time)
+            and match_connection_target(
+                i=i,
+                j=j,
+                k1=k1,
+                k2=k2,
+                connection_i=spec["i"],
+                connection_j=spec["j"],
+                connection_k1=spec["k1"],
+                connection_k2=spec["k2"],
+            )
+        ]
         if not matched:
             raise ValidationError(
                 f"`{keyword}` for well {welspecs_record['well']!r} at i={i}, j={j}, "
@@ -331,22 +382,27 @@ def load_well_from_records(
             (r for r in wpimult_records if r.get("schedule_time", 0.0) <= current_time),
             key=lambda r: r.get("schedule_time", 0.0),
         ):
-            for spec in select(record, keyword="WPIMULT", whole_well_reaches_future=False):
+            for spec in select(record, keyword="WPIMULT"):
                 spec["connection_factor_multiplier"] = (
                     spec["connection_factor_multiplier"] or 1.0
                 ) * record["multiplier"]
 
     if welopen_records:
-        # Whole-well or per-connection open/shut events, replayed in schedule order up to
-        # `current_time`. A whole-well event (i=j=k=0) touches every connection, including
-        # ones that start later. A targeted one only touches connections in effect at its time
-        # whose own (i, j) column and k-layer range contain the event's k layer.
+        # Open/shut events that name connections, replayed in schedule order up to
+        # `current_time`. Each only touches connections in effect at its time whose own
+        # (i, j) column and k-layer range contain the event's k layer. An event that names
+        # no connection is the well's own flag, which is found by `replay_open_status`.
         for record in sorted(
-            (r for r in welopen_records if r.get("schedule_time", 0.0) <= current_time),
+            (
+                r
+                for r in welopen_records
+                if r.get("schedule_time", 0.0) <= current_time
+                and not is_whole_well_record(r, keyword="WELOPEN")
+            ),
             key=lambda r: r.get("schedule_time", 0.0),
         ):
             new_status = WELOPEN_STATUS_MAP[record["status"]]
-            for spec in select(record, keyword="WELOPEN", whole_well_reaches_future=True):
+            for spec in select(record, keyword="WELOPEN"):
                 spec["status"] = new_status
 
     # Versions already replaced by `current_time` are history, and are left out.
@@ -410,6 +466,11 @@ def load_well_from_records(
         group=welspecs_record.get("group"),
         pvt_region=pvt_region,
         unit_system=unit_system,
+        open_status=replay_open_status(
+            control_records=control_records,
+            welopen_records=welopen_records,
+            current_time=current_time,
+        ),
         schedule_status=well_schedule_status,
     )
 
@@ -657,6 +718,7 @@ def load_wells_from_records(
     *,
     wpimult_records: typing.Sequence[typing.Mapping[str, typing.Any]] | None = None,
     welopen_records: typing.Sequence[typing.Mapping[str, typing.Any]] | None = None,
+    control_records: typing.Sequence[typing.Mapping[str, typing.Any]] | None = None,
     unit_system: UnitSystem = UnitSystem.FIELD,
     injector_names: typing.Container[str] = (),
     current_time: float = 0.0,
@@ -677,6 +739,8 @@ def load_wells_from_records(
     :param compdat_records: Every `COMPDAT` record in the deck.
     :param wpimult_records: Every `WPIMULT` record in the deck, if any.
     :param welopen_records: Every `WELOPEN` record in the deck, if any.
+    :param control_records: Every `WCONPROD` and `WCONINJE` record in the deck, if any. Only
+        their status item is used here, for each well's open or shut flag.
     :param unit_system: The deck's unit system.
     :param injector_names: Names of wells that appear in `WCONINJE`. Every
         other well is built as a producer, since `WELSPECS` and `COMPDAT`
@@ -690,6 +754,7 @@ def load_wells_from_records(
     compdat_by_well: dict[str, list[typing.Mapping[str, typing.Any]]] = {}
     wpimult_by_well: dict[str, list[typing.Mapping[str, typing.Any]]] = {}
     welopen_by_well: dict[str, list[typing.Mapping[str, typing.Any]]] = {}
+    control_by_well: dict[str, list[typing.Mapping[str, typing.Any]]] = {}
     for record in compdat_records:
         compdat_by_well.setdefault(record["well"], []).append(record)
 
@@ -701,6 +766,10 @@ def load_wells_from_records(
         for record in welopen_records:
             welopen_by_well.setdefault(record["well"], []).append(record)
 
+    if control_records:
+        for record in control_records:
+            control_by_well.setdefault(record["well"], []).append(record)
+
     wells = {
         record["well"]: load_well_from_records(
             grid,
@@ -708,6 +777,7 @@ def load_wells_from_records(
             compdat_records=compdat_by_well.get(record["well"], []),
             wpimult_records=wpimult_by_well.get(record["well"]),
             welopen_records=welopen_by_well.get(record["well"]),
+            control_records=control_by_well.get(record["well"]),
             well_type=(
                 WellType.INJECTOR if record["well"] in injector_names else WellType.PRODUCER
             ),
@@ -766,24 +836,6 @@ def select_current_records(
     return current
 
 
-def check_well_status_supported(record: typing.Mapping[str, typing.Any], *, keyword: str) -> None:
-    """
-    Warns about a `WCONPROD`/`WCONINJE` record that shuts or stops its well.
-
-    The status item of these records is not applied, so a well it shuts stays open and flows.
-    The deck still loads. Shut a well with `WELOPEN` for it to take effect.
-
-    :param record: One parsed `WCONPROD` or `WCONINJE` record.
-    :param keyword: The record's keyword, for the warning message.
-    """
-    status = str(record.get("status") or "OPEN").upper()
-    if status in ("SHUT", "STOP"):
-        logger.warning(
-            f"`{keyword}` for well {record.get('well')!r} sets its status to {status}, which is "
-            "not applied, so the well stays open. Shut it with `WELOPEN` instead."
-        )
-
-
 def load_producer_control_from_record(
     record: typing.Mapping[str, typing.Any], unit_system: UnitSystem
 ) -> ProducerControl:
@@ -797,7 +849,6 @@ def load_producer_control_from_record(
         when `bhp` is given and mode isn't `BHP`, and an implicit
         `THPLimit(min_value=thp)` when `thp` is given and mode isn't `THP`.
     """
-    check_well_status_supported(record, keyword="WCONPROD")
     mode = PRODUCER_CONTROL_MODE_MAP[record["control_mode"]]
     limits: list[Limit] = []
     bhp = record.get("bhp")
@@ -846,7 +897,6 @@ def load_injector_control_from_record(
         when `bhp` is given and mode isn't `BHP`, and an implicit
         `THPLimit(max_value=thp)` when `thp` is given and mode isn't `THP`.
     """
-    check_well_status_supported(record, keyword="WCONINJE")
     mode = INJECTOR_CONTROL_MODE_MAP[record["control_mode"]]
     phase = FluidPhase(record["injector_type"].lower())
     limits: list[Limit] = []
@@ -1366,6 +1416,7 @@ def load_wells(deck_file: DeckFile, grid: Grid, current_time: float = 0.0) -> We
     welspecs = deck_file.get("WELSPECS") or []
     compdat = deck_file.get("COMPDAT") or []
     wconinje = deck_file.get("WCONINJE") or []
+    wconprod = deck_file.get("WCONPROD") or []
     wpimult = deck_file.get("WPIMULT")
     welopen = deck_file.get("WELOPEN")
     injector_names = {record["well"] for record in wconinje}
@@ -1375,6 +1426,7 @@ def load_wells(deck_file: DeckFile, grid: Grid, current_time: float = 0.0) -> We
         compdat_records=compdat,
         wpimult_records=wpimult,
         welopen_records=welopen,
+        control_records=[*wconprod, *wconinje],
         unit_system=deck_file.unit_system,
         injector_names=injector_names,
         current_time=current_time,
@@ -1727,13 +1779,20 @@ def load_schedule(
     A `WLIFT` item with trigger conditions holds across checks, so it runs once by default.
     Advance the returned schedule with a `Firings` to count that.
 
+    The status item of a `WCONPROD`/`WCONINJE` record, and a `WELOPEN` record that names no
+    connection, set the well's own open or shut flag (`UpdateWellStatuses`). A `WELOPEN` that names
+    connections sets only those connections' status. A `WCONPROD`/`WCONINJE` status of `OPEN`,
+    which is also what an omitted status means, opens the well again if it was shut.
+
     Items that fall at the same time run in a fixed order, by the keyword they came from:
-    `WELSPECS`, `WELOPEN`, `WPIMULT`, `WLIFT`, `WCONPROD`, `WCONINJE`, `WELTARG`, `WECON`,
-    `GECON`, `COMPDAT`, then summary recording. Records of the same keyword at the same
+    `WELSPECS`, `WPIMULT`, `WLIFT`, `WCONPROD`, `WCONINJE`, `WELTARG`, `WECON`, `GECON`,
+    `COMPDAT`, `WELOPEN`, then summary recording. Records of the same keyword at the same
     time run in deck order. A `WELTARG` therefore fine-tunes the control a `WCONPROD` or
     `WCONINJE` at the same time sets, which is also how `load_controls_from_records` replays
-    them, and summary vectors are recorded last, after every change at that time. The order is
-    not the order different keywords appear in the deck.
+    them. A `WELOPEN` comes after the `WCONPROD`/`WCONINJE` status and after `COMPDAT`, so it
+    has the last word on whether a well is open, and can target connections that a `COMPDAT`
+    at the same time brings into effect. Summary vectors are recorded last, after every change
+    at that time. The order is not the order different keywords appear in the deck.
 
     When `load_summary` is `True`, every requested `SUMMARY`-section vector
     (see `load_summary_items`) is added too, one item per report time
@@ -1770,27 +1829,6 @@ def load_schedule(
                 event=TimeEvent(at=schedule_time * time_factor),
                 action=action,
                 name=f"welspecs:{record['well']}@{schedule_time}",
-            )
-        )
-
-    for record in deck_file.get("WELOPEN") or empty:
-        if not is_due(record):
-            continue
-        schedule_time = record["schedule_time"]
-        welopen_layers = connection_layers(record, keyword="WELOPEN")
-        action = UpdateWellStatuses(
-            well_names=(record["well"],),
-            status=WELOPEN_STATUS_MAP[record["status"]],
-            i=record.get("i", 0),
-            j=record.get("j", 0),
-            k1=welopen_layers[0],
-            k2=welopen_layers[1],
-        )
-        items.append(
-            ScheduleItem(
-                event=TimeEvent(at=schedule_time * time_factor),
-                action=action,
-                name=f"welopen:{record['well']}@{schedule_time}",
             )
         )
 
@@ -1968,6 +2006,16 @@ def load_schedule(
                     name=f"wconprod-{kind.name.lower()}limit:{record['well']}@{schedule_time}",
                 )
             )
+        items.append(
+            ScheduleItem(
+                event=TimeEvent(at=schedule_time * time_factor),
+                action=UpdateWellStatuses(
+                    well_names=(record["well"],),
+                    status=WELOPEN_STATUS_MAP[str(record.get("status") or "OPEN").upper()],
+                ),
+                name=f"wconprod-status:{record['well']}@{schedule_time}",
+            )
+        )
 
     for record in deck_file.get("WCONINJE") or empty:
         if not is_due(record):
@@ -2018,6 +2066,16 @@ def load_schedule(
                     name=f"wconinje-{kind.name.lower()}limit:{record['well']}@{schedule_time}",
                 )
             )
+        items.append(
+            ScheduleItem(
+                event=TimeEvent(at=schedule_time * time_factor),
+                action=UpdateWellStatuses(
+                    well_names=(record["well"],),
+                    status=WELOPEN_STATUS_MAP[str(record.get("status") or "OPEN").upper()],
+                ),
+                name=f"wconinje-status:{record['well']}@{schedule_time}",
+            )
+        )
 
     for record in deck_file.get("WELTARG") or empty:
         if not is_due(record):
@@ -2104,6 +2162,27 @@ def load_schedule(
                 event=TimeEvent(at=schedule_time * time_factor),
                 action=action,
                 name=f"compdat:{record['well']}@{schedule_time}",
+            )
+        )
+
+    for record in deck_file.get("WELOPEN") or empty:
+        if not is_due(record):
+            continue
+        schedule_time = record["schedule_time"]
+        welopen_layers = connection_layers(record, keyword="WELOPEN")
+        action = UpdateWellStatuses(
+            well_names=(record["well"],),
+            status=WELOPEN_STATUS_MAP[record["status"]],
+            i=record.get("i", 0),
+            j=record.get("j", 0),
+            k1=welopen_layers[0],
+            k2=welopen_layers[1],
+        )
+        items.append(
+            ScheduleItem(
+                event=TimeEvent(at=schedule_time * time_factor),
+                action=action,
+                name=f"welopen:{record['well']}@{schedule_time}",
             )
         )
 

@@ -51,10 +51,10 @@ def record_shut_well(
     workspace: WellsWorkspace,
 ) -> None:
     """
-    Records a well that has no open connection as flowing nothing.
+    Records a well that is shut, or has no open connection in effect, as flowing nothing.
 
     Every rate of the well, at reservoir and surface conditions, is zero. Its bottom-hole and
-    tubing-head pressures are `NaN`, since a well that is not connected to the reservoir has no
+    tubing-head pressures are `NaN`, since a well that is not flowing from the reservoir has no
     flowing pressure. Its connections carry zero rate and no pressure, and no limit binds.
 
     :param compiled_system: The compiled well system.
@@ -118,10 +118,10 @@ def resolve_well_control(
     or an `UNSET`-mode well is left untouched (still `NaN`/`UNSET_INT`/`0`
     from `compile_well_resolution`) as there's nothing to resolve.
 
-    An active well with no open connection, because every one is shut, flows nothing, and
-    `record_shut_well` writes that. On every call, the connections of an active well that are
-    not open, whether shut or yet to come into effect, are given zero rate and no pressure, so
-    nothing from an earlier call lingers on them.
+    An active well that is shut (`compiled_system.open_statuses[well_row] == 0`), or has no
+    open connection in effect, flows nothing, and `record_shut_well` writes that. On every call,
+    the connections of an active well that are not flowing, whether shut or yet to come into
+    effect, are given zero rate and no pressure, so nothing from an earlier call lingers on them.
 
     :param compiled_system: The compiled well system.
     :param well_row: Which well, by row index into `compiled_system`.
@@ -130,9 +130,9 @@ def resolve_well_control(
         THP control, a `THPLimit`, and THP reporting require one, regardless of
         `control_spec.connection_pressure_mode`. A `WellBoreModel` distributes pressure across
         connections; a well without one follows `control_spec.connection_pressure_mode`.
-    :param connection_fluids: Reservoir conditions at this well's active, open connections,
-        in the same order `compiled_system.perforations`' rows for this well appear (after
-        filtering to `completion_statuses == 1` and `schedule_statuses == 1`).
+    :param connection_fluids: Reservoir conditions at this well's flowing connections, in the
+        order of `compiled_system.get_flowing_connection_rows(well_row=well_row)`. Empty for a
+        well that is shut or has no open connection in effect.
     :param workspace: The system-wide `WellsWorkspace` to update in place.
     :param control_spec: Solver tunables.
     :param surface_sample: Required to compute THP with a `WellBoreModel`, or to
@@ -164,18 +164,14 @@ def resolve_well_control(
         perforations.well_offsets[well_row],
         perforations.well_offsets[well_row + 1],
     )
-    active_open = [
-        i
-        for i in range(perforation_start, perforation_end)
-        if perforations.completion_statuses[i] == 1 and perforations.schedule_statuses[i] == 1
-    ]
+    active_open = compiled_system.get_flowing_connection_rows(well_row=well_row)
     if len(active_open) != len(connection_fluids.pressures):
         raise ValidationError(
             f"`resolve_well_control`: `well_row` {well_row} has {len(active_open)} "
-            f"active/open connections but was given {len(connection_fluids.pressures)} "
+            f"flowing connections but was given {len(connection_fluids.pressures)} "
             "connections in `connection_fluids`. These must match 1:1."
         )
-    if not active_open:
+    if len(active_open) == 0:
         if control_mode != (
             InjectorControlModeTag.UNSET if is_injector else ProducerControlModeTag.UNSET
         ):
@@ -185,7 +181,7 @@ def resolve_well_control(
         return
 
     is_open = np.zeros(perforation_end - perforation_start, dtype=np.bool_)
-    is_open[np.asarray(active_open) - perforation_start] = True
+    is_open[active_open - perforation_start] = True
     not_open = np.flatnonzero(~is_open) + perforation_start
     workspace.connection_pressures[not_open] = np.nan
     workspace.connection_oil_rates[not_open] = 0.0
