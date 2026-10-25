@@ -38,7 +38,16 @@ from bores.wells.workspace import (
 
 __all__ = [
     "FIXED_POINT_SOLVERS",
+    "RATE_BISECTORS",
+    "BisectionResult",
     "FixedPointResult",
+    "bisect_beggs_and_brill",
+    "bisect_gray",
+    "bisect_hagedorn_brown",
+    "bisect_homogeneous",
+    "bisect_hydrostatic",
+    "bisect_uniform",
+    "bisect_woldesemayat_ghajar",
     "solve_beggs_and_brill",
     "solve_gray",
     "solve_hagedorn_brown",
@@ -932,7 +941,721 @@ def solve_uniform(
     )
 
 
-FIXED_POINT_SOLVERS = {
+class BisectionResult(typing.NamedTuple):
+    """What a bisection of a well's reference pressure ended with."""
+
+    bhp: Number
+    """The reference pressure of the last solve."""
+
+    result: FixedPointResult
+    """The last solve. If it didn't converge, the bisection stopped there."""
+
+
+@numba.njit(cache=True)
+def bisect_homogeneous(
+    model: HomogeneousWellbore,
+    reference_depth: Number,
+    workspace: PerforationWorkspace,
+    relevant_oil: Boolean,
+    relevant_water: Boolean,
+    relevant_gas: Boolean,
+    is_injector: Boolean,
+    hydrostatic_divisor: Number,
+    radial_flow_constant: Number,
+    max_iterations: Integer,
+    tolerance: Number,
+    target: Number,
+    low: Number,
+    high: Number,
+    reservoir_condition: Boolean,
+    max_bisections: Integer,
+    rate_tolerance: Number,
+) -> BisectionResult:
+    """
+    Finds the reference pressure at which a well's total rate matches a target, with the pressure
+    profile from the homogeneous correlation.
+
+    The total rate falls as the reference pressure rises for a producer and rises with it for an
+    injector. Each step bisects the bounds and solves the connection pressures and rates there. If a
+    solve doesn't converge the bisection stops and returns it, for the caller to report.
+
+    :param model: The well's `HomogeneousWellbore`.
+    :param hydrostatic_divisor: The model's unit system's gravitational factor times its
+        hydrostatic area factor, as `get_hydrostatic_divisor` gives it.
+    :param reference_depth: The well's BHP/THP reporting datum.
+    :param workspace: The well's workspace. Its connection pressures, well indices and connection
+        rates are updated.
+    :param relevant_oil: Whether oil counts toward the controlled quantity.
+    :param relevant_water: Whether water counts toward the controlled quantity.
+    :param relevant_gas: Whether gas counts toward the controlled quantity.
+    :param is_injector: Whether the well is an injector.
+    :param radial_flow_constant: The constant in the radial flow equation, in the well's unit
+        system.
+    :param max_iterations: The most fixed-point iterations of each solve.
+    :param tolerance: Relative tolerance on the total rate of each solve.
+    :param target: The total rate to match.
+    :param low: Lower bound of the reference pressure.
+    :param high: Upper bound of the reference pressure.
+    :param reservoir_condition: Whether `target` is a reservoir-condition rate, instead of a
+        surface-condition one.
+    :param max_bisections: The most bisection steps to take.
+    :param rate_tolerance: Relative tolerance on the match to `target`.
+    :returns: The reference pressure of the last solve, and that solve.
+    """
+    average = 0.5 * (low + high)
+    result = FixedPointResult(False, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    for _ in range(max_bisections):
+        average = 0.5 * (low + high)
+        result = solve_homogeneous(
+            model,
+            reference_depth,
+            average,
+            workspace,
+            relevant_oil,
+            relevant_water,
+            relevant_gas,
+            is_injector,
+            hydrostatic_divisor,
+            radial_flow_constant,
+            max_iterations,
+            tolerance,
+        )
+        if not result.converged:
+            return BisectionResult(average, result)
+        if reservoir_condition:
+            value = result.oil_rate + result.water_rate + result.gas_rate
+        else:
+            value = result.surface_oil_rate + result.surface_water_rate + result.surface_gas_rate
+        if abs(value - target) <= rate_tolerance * max(abs(target), 1.0):
+            break
+        if (value < target) == is_injector:
+            low = average
+        else:
+            high = average
+    return BisectionResult(average, result)
+
+
+@numba.njit(cache=True)
+def bisect_beggs_and_brill(
+    model: BeggsAndBrillWellbore,
+    reference_depth: Number,
+    workspace: PerforationWorkspace,
+    relevant_oil: Boolean,
+    relevant_water: Boolean,
+    relevant_gas: Boolean,
+    is_injector: Boolean,
+    hydrostatic_divisor: Number,
+    radial_flow_constant: Number,
+    max_iterations: Integer,
+    tolerance: Number,
+    target: Number,
+    low: Number,
+    high: Number,
+    reservoir_condition: Boolean,
+    max_bisections: Integer,
+    rate_tolerance: Number,
+) -> BisectionResult:
+    """
+    Finds the reference pressure at which a well's total rate matches a target, with the pressure
+    profile from the Beggs and Brill correlation.
+
+    The total rate falls as the reference pressure rises for a producer and rises with it for an
+    injector. Each step bisects the bounds and solves the connection pressures and rates there. If a
+    solve doesn't converge the bisection stops and returns it, for the caller to report.
+
+    :param model: The well's `BeggsAndBrillWellbore`.
+    :param hydrostatic_divisor: The model's unit system's gravitational factor times its
+        hydrostatic area factor, as `get_hydrostatic_divisor` gives it.
+    :param reference_depth: The well's BHP/THP reporting datum.
+    :param workspace: The well's workspace. Its connection pressures, well indices and connection
+        rates are updated.
+    :param relevant_oil: Whether oil counts toward the controlled quantity.
+    :param relevant_water: Whether water counts toward the controlled quantity.
+    :param relevant_gas: Whether gas counts toward the controlled quantity.
+    :param is_injector: Whether the well is an injector.
+    :param radial_flow_constant: The constant in the radial flow equation, in the well's unit
+        system.
+    :param max_iterations: The most fixed-point iterations of each solve.
+    :param tolerance: Relative tolerance on the total rate of each solve.
+    :param target: The total rate to match.
+    :param low: Lower bound of the reference pressure.
+    :param high: Upper bound of the reference pressure.
+    :param reservoir_condition: Whether `target` is a reservoir-condition rate, instead of a
+        surface-condition one.
+    :param max_bisections: The most bisection steps to take.
+    :param rate_tolerance: Relative tolerance on the match to `target`.
+    :returns: The reference pressure of the last solve, and that solve.
+    """
+    average = 0.5 * (low + high)
+    result = FixedPointResult(False, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    for _ in range(max_bisections):
+        average = 0.5 * (low + high)
+        result = solve_beggs_and_brill(
+            model,
+            reference_depth,
+            average,
+            workspace,
+            relevant_oil,
+            relevant_water,
+            relevant_gas,
+            is_injector,
+            hydrostatic_divisor,
+            radial_flow_constant,
+            max_iterations,
+            tolerance,
+        )
+        if not result.converged:
+            return BisectionResult(average, result)
+        if reservoir_condition:
+            value = result.oil_rate + result.water_rate + result.gas_rate
+        else:
+            value = result.surface_oil_rate + result.surface_water_rate + result.surface_gas_rate
+        if abs(value - target) <= rate_tolerance * max(abs(target), 1.0):
+            break
+        if (value < target) == is_injector:
+            low = average
+        else:
+            high = average
+    return BisectionResult(average, result)
+
+
+@numba.njit(cache=True)
+def bisect_hagedorn_brown(
+    model: HagedornBrownWellbore,
+    reference_depth: Number,
+    workspace: PerforationWorkspace,
+    relevant_oil: Boolean,
+    relevant_water: Boolean,
+    relevant_gas: Boolean,
+    is_injector: Boolean,
+    hydrostatic_divisor: Number,
+    radial_flow_constant: Number,
+    max_iterations: Integer,
+    tolerance: Number,
+    target: Number,
+    low: Number,
+    high: Number,
+    reservoir_condition: Boolean,
+    max_bisections: Integer,
+    rate_tolerance: Number,
+) -> BisectionResult:
+    """
+    Finds the reference pressure at which a well's total rate matches a target, with the pressure
+    profile from the Hagedorn and Brown correlation.
+
+    The total rate falls as the reference pressure rises for a producer and rises with it for an
+    injector. Each step bisects the bounds and solves the connection pressures and rates there. If a
+    solve doesn't converge the bisection stops and returns it, for the caller to report.
+
+    :param model: The well's `HagedornBrownWellbore`.
+    :param hydrostatic_divisor: The model's unit system's gravitational factor times its
+        hydrostatic area factor, as `get_hydrostatic_divisor` gives it.
+    :param reference_depth: The well's BHP/THP reporting datum.
+    :param workspace: The well's workspace. Its connection pressures, well indices and connection
+        rates are updated.
+    :param relevant_oil: Whether oil counts toward the controlled quantity.
+    :param relevant_water: Whether water counts toward the controlled quantity.
+    :param relevant_gas: Whether gas counts toward the controlled quantity.
+    :param is_injector: Whether the well is an injector.
+    :param radial_flow_constant: The constant in the radial flow equation, in the well's unit
+        system.
+    :param max_iterations: The most fixed-point iterations of each solve.
+    :param tolerance: Relative tolerance on the total rate of each solve.
+    :param target: The total rate to match.
+    :param low: Lower bound of the reference pressure.
+    :param high: Upper bound of the reference pressure.
+    :param reservoir_condition: Whether `target` is a reservoir-condition rate, instead of a
+        surface-condition one.
+    :param max_bisections: The most bisection steps to take.
+    :param rate_tolerance: Relative tolerance on the match to `target`.
+    :returns: The reference pressure of the last solve, and that solve.
+    """
+    average = 0.5 * (low + high)
+    result = FixedPointResult(False, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    for _ in range(max_bisections):
+        average = 0.5 * (low + high)
+        result = solve_hagedorn_brown(
+            model,
+            reference_depth,
+            average,
+            workspace,
+            relevant_oil,
+            relevant_water,
+            relevant_gas,
+            is_injector,
+            hydrostatic_divisor,
+            radial_flow_constant,
+            max_iterations,
+            tolerance,
+        )
+        if not result.converged:
+            return BisectionResult(average, result)
+        if reservoir_condition:
+            value = result.oil_rate + result.water_rate + result.gas_rate
+        else:
+            value = result.surface_oil_rate + result.surface_water_rate + result.surface_gas_rate
+        if abs(value - target) <= rate_tolerance * max(abs(target), 1.0):
+            break
+        if (value < target) == is_injector:
+            low = average
+        else:
+            high = average
+    return BisectionResult(average, result)
+
+
+@numba.njit(cache=True)
+def bisect_gray(
+    model: GrayWellbore,
+    reference_depth: Number,
+    workspace: PerforationWorkspace,
+    relevant_oil: Boolean,
+    relevant_water: Boolean,
+    relevant_gas: Boolean,
+    is_injector: Boolean,
+    hydrostatic_divisor: Number,
+    radial_flow_constant: Number,
+    max_iterations: Integer,
+    tolerance: Number,
+    target: Number,
+    low: Number,
+    high: Number,
+    reservoir_condition: Boolean,
+    max_bisections: Integer,
+    rate_tolerance: Number,
+) -> BisectionResult:
+    """
+    Finds the reference pressure at which a well's total rate matches a target, with the pressure
+    profile from the Gray correlation.
+
+    The total rate falls as the reference pressure rises for a producer and rises with it for an
+    injector. Each step bisects the bounds and solves the connection pressures and rates there. If a
+    solve doesn't converge the bisection stops and returns it, for the caller to report.
+
+    :param model: The well's `GrayWellbore`.
+    :param hydrostatic_divisor: The model's unit system's gravitational factor times its
+        hydrostatic area factor, as `get_hydrostatic_divisor` gives it.
+    :param reference_depth: The well's BHP/THP reporting datum.
+    :param workspace: The well's workspace. Its connection pressures, well indices and connection
+        rates are updated.
+    :param relevant_oil: Whether oil counts toward the controlled quantity.
+    :param relevant_water: Whether water counts toward the controlled quantity.
+    :param relevant_gas: Whether gas counts toward the controlled quantity.
+    :param is_injector: Whether the well is an injector.
+    :param radial_flow_constant: The constant in the radial flow equation, in the well's unit
+        system.
+    :param max_iterations: The most fixed-point iterations of each solve.
+    :param tolerance: Relative tolerance on the total rate of each solve.
+    :param target: The total rate to match.
+    :param low: Lower bound of the reference pressure.
+    :param high: Upper bound of the reference pressure.
+    :param reservoir_condition: Whether `target` is a reservoir-condition rate, instead of a
+        surface-condition one.
+    :param max_bisections: The most bisection steps to take.
+    :param rate_tolerance: Relative tolerance on the match to `target`.
+    :returns: The reference pressure of the last solve, and that solve.
+    """
+    average = 0.5 * (low + high)
+    result = FixedPointResult(False, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    for _ in range(max_bisections):
+        average = 0.5 * (low + high)
+        result = solve_gray(
+            model,
+            reference_depth,
+            average,
+            workspace,
+            relevant_oil,
+            relevant_water,
+            relevant_gas,
+            is_injector,
+            hydrostatic_divisor,
+            radial_flow_constant,
+            max_iterations,
+            tolerance,
+        )
+        if not result.converged:
+            return BisectionResult(average, result)
+        if reservoir_condition:
+            value = result.oil_rate + result.water_rate + result.gas_rate
+        else:
+            value = result.surface_oil_rate + result.surface_water_rate + result.surface_gas_rate
+        if abs(value - target) <= rate_tolerance * max(abs(target), 1.0):
+            break
+        if (value < target) == is_injector:
+            low = average
+        else:
+            high = average
+    return BisectionResult(average, result)
+
+
+@numba.njit(cache=True)
+def bisect_woldesemayat_ghajar(
+    model: WoldesemayatGhajarWellbore,
+    reference_depth: Number,
+    workspace: PerforationWorkspace,
+    relevant_oil: Boolean,
+    relevant_water: Boolean,
+    relevant_gas: Boolean,
+    is_injector: Boolean,
+    hydrostatic_divisor: Number,
+    radial_flow_constant: Number,
+    max_iterations: Integer,
+    tolerance: Number,
+    target: Number,
+    low: Number,
+    high: Number,
+    reservoir_condition: Boolean,
+    max_bisections: Integer,
+    rate_tolerance: Number,
+) -> BisectionResult:
+    """
+    Finds the reference pressure at which a well's total rate matches a target, with the pressure
+    profile from the Woldesemayat and Ghajar correlation.
+
+    The total rate falls as the reference pressure rises for a producer and rises with it for an
+    injector. Each step bisects the bounds and solves the connection pressures and rates there. If a
+    solve doesn't converge the bisection stops and returns it, for the caller to report.
+
+    :param model: The well's `WoldesemayatGhajarWellbore`.
+    :param hydrostatic_divisor: The model's unit system's gravitational factor times its
+        hydrostatic area factor, as `get_hydrostatic_divisor` gives it.
+    :param reference_depth: The well's BHP/THP reporting datum.
+    :param workspace: The well's workspace. Its connection pressures, well indices and connection
+        rates are updated.
+    :param relevant_oil: Whether oil counts toward the controlled quantity.
+    :param relevant_water: Whether water counts toward the controlled quantity.
+    :param relevant_gas: Whether gas counts toward the controlled quantity.
+    :param is_injector: Whether the well is an injector.
+    :param radial_flow_constant: The constant in the radial flow equation, in the well's unit
+        system.
+    :param max_iterations: The most fixed-point iterations of each solve.
+    :param tolerance: Relative tolerance on the total rate of each solve.
+    :param target: The total rate to match.
+    :param low: Lower bound of the reference pressure.
+    :param high: Upper bound of the reference pressure.
+    :param reservoir_condition: Whether `target` is a reservoir-condition rate, instead of a
+        surface-condition one.
+    :param max_bisections: The most bisection steps to take.
+    :param rate_tolerance: Relative tolerance on the match to `target`.
+    :returns: The reference pressure of the last solve, and that solve.
+    """
+    average = 0.5 * (low + high)
+    result = FixedPointResult(False, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    for _ in range(max_bisections):
+        average = 0.5 * (low + high)
+        result = solve_woldesemayat_ghajar(
+            model,
+            reference_depth,
+            average,
+            workspace,
+            relevant_oil,
+            relevant_water,
+            relevant_gas,
+            is_injector,
+            hydrostatic_divisor,
+            radial_flow_constant,
+            max_iterations,
+            tolerance,
+        )
+        if not result.converged:
+            return BisectionResult(average, result)
+        if reservoir_condition:
+            value = result.oil_rate + result.water_rate + result.gas_rate
+        else:
+            value = result.surface_oil_rate + result.surface_water_rate + result.surface_gas_rate
+        if abs(value - target) <= rate_tolerance * max(abs(target), 1.0):
+            break
+        if (value < target) == is_injector:
+            low = average
+        else:
+            high = average
+    return BisectionResult(average, result)
+
+
+@numba.njit(cache=True)
+def bisect_hydrostatic(
+    reference_depth: Number,
+    workspace: PerforationWorkspace,
+    relevant_oil: Boolean,
+    relevant_water: Boolean,
+    relevant_gas: Boolean,
+    is_injector: Boolean,
+    pressure_per_density_and_depth: Number,
+    radial_flow_constant: Number,
+    max_iterations: Integer,
+    tolerance: Number,
+    target: Number,
+    low: Number,
+    high: Number,
+    reservoir_condition: Boolean,
+    max_bisections: Integer,
+    rate_tolerance: Number,
+) -> BisectionResult:
+    """
+    Finds the reference pressure at which a well's total rate matches a target, with the pressure
+    profile from the weight of the fluid between connections.
+
+    See `bisect_homogeneous` for how the bisection proceeds.
+
+    :param pressure_per_density_and_depth: As `get_pressure_per_density_and_depth` gives it.
+    :param reference_depth: The well's BHP/THP reporting datum.
+    :param workspace: The well's workspace. Its connection pressures, well indices and connection
+        rates are updated.
+    :param relevant_oil: Whether oil counts toward the controlled quantity.
+    :param relevant_water: Whether water counts toward the controlled quantity.
+    :param relevant_gas: Whether gas counts toward the controlled quantity.
+    :param is_injector: Whether the well is an injector.
+    :param radial_flow_constant: The constant in the radial flow equation, in the well's unit
+        system.
+    :param max_iterations: The most fixed-point iterations of each solve.
+    :param tolerance: Relative tolerance on the total rate of each solve.
+    :param target: The total rate to match.
+    :param low: Lower bound of the reference pressure.
+    :param high: Upper bound of the reference pressure.
+    :param reservoir_condition: Whether `target` is a reservoir-condition rate, instead of a
+        surface-condition one.
+    :param max_bisections: The most bisection steps to take.
+    :param rate_tolerance: Relative tolerance on the match to `target`.
+    :returns: The reference pressure of the last solve, and that solve.
+    """
+    average = 0.5 * (low + high)
+    result = FixedPointResult(False, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    for _ in range(max_bisections):
+        average = 0.5 * (low + high)
+        result = solve_hydrostatic(
+            reference_depth,
+            average,
+            workspace,
+            relevant_oil,
+            relevant_water,
+            relevant_gas,
+            is_injector,
+            pressure_per_density_and_depth,
+            radial_flow_constant,
+            max_iterations,
+            tolerance,
+        )
+        if not result.converged:
+            return BisectionResult(average, result)
+        if reservoir_condition:
+            value = result.oil_rate + result.water_rate + result.gas_rate
+        else:
+            value = result.surface_oil_rate + result.surface_water_rate + result.surface_gas_rate
+        if abs(value - target) <= rate_tolerance * max(abs(target), 1.0):
+            break
+        if (value < target) == is_injector:
+            low = average
+        else:
+            high = average
+    return BisectionResult(average, result)
+
+
+@numba.njit(cache=True)
+def bisect_uniform(
+    workspace: PerforationWorkspace,
+    relevant_oil: Boolean,
+    relevant_water: Boolean,
+    relevant_gas: Boolean,
+    is_injector: Boolean,
+    radial_flow_constant: Number,
+    max_iterations: Integer,
+    tolerance: Number,
+    target: Number,
+    low: Number,
+    high: Number,
+    reservoir_condition: Boolean,
+    max_bisections: Integer,
+    rate_tolerance: Number,
+) -> BisectionResult:
+    """
+    Finds the reference pressure at which a well's total rate matches a target, with that
+    pressure applied unchanged at every connection.
+
+    See `bisect_homogeneous` for how the bisection proceeds.
+
+    :param workspace: The well's workspace. Its connection pressures, well indices and connection
+        rates are updated.
+    :param relevant_oil: Whether oil counts toward the controlled quantity.
+    :param relevant_water: Whether water counts toward the controlled quantity.
+    :param relevant_gas: Whether gas counts toward the controlled quantity.
+    :param is_injector: Whether the well is an injector.
+    :param radial_flow_constant: The constant in the radial flow equation, in the well's unit
+        system.
+    :param max_iterations: The most fixed-point iterations of each solve.
+    :param tolerance: Relative tolerance on the total rate of each solve.
+    :param target: The total rate to match.
+    :param low: Lower bound of the reference pressure.
+    :param high: Upper bound of the reference pressure.
+    :param reservoir_condition: Whether `target` is a reservoir-condition rate, instead of a
+        surface-condition one.
+    :param max_bisections: The most bisection steps to take.
+    :param rate_tolerance: Relative tolerance on the match to `target`.
+    :returns: The reference pressure of the last solve, and that solve.
+    """
+    average = 0.5 * (low + high)
+    result = FixedPointResult(False, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    for _ in range(max_bisections):
+        average = 0.5 * (low + high)
+        result = solve_uniform(
+            average,
+            workspace,
+            relevant_oil,
+            relevant_water,
+            relevant_gas,
+            is_injector,
+            radial_flow_constant,
+            max_iterations,
+            tolerance,
+        )
+        if not result.converged:
+            return BisectionResult(average, result)
+        if reservoir_condition:
+            value = result.oil_rate + result.water_rate + result.gas_rate
+        else:
+            value = result.surface_oil_rate + result.surface_water_rate + result.surface_gas_rate
+        if abs(value - target) <= rate_tolerance * max(abs(target), 1.0):
+            break
+        if (value < target) == is_injector:
+            low = average
+        else:
+            high = average
+    return BisectionResult(average, result)
+
+
+class HydraulicSolver(typing.Protocol):
+    """A fixed-point solver for a well's connection pressures and rates."""
+
+    def __call__(
+        self,
+        model: typing.Any,
+        reference_depth: Number,
+        reference_pressure: Number,
+        workspace: PerforationWorkspace,
+        relevant_oil: Boolean,
+        relevant_water: Boolean,
+        relevant_gas: Boolean,
+        is_injector: Boolean,
+        hydrostatic_divisor: Number,
+        radial_flow_constant: Number,
+        max_iterations: Integer,
+        tolerance: Number,
+    ) -> FixedPointResult: ...
+
+
+class HydraulicBisector(typing.Protocol):
+    """A bisection of a well's reference pressure to match a target total rate."""
+
+    def __call__(
+        self,
+        model: typing.Any,
+        reference_depth: Number,
+        workspace: PerforationWorkspace,
+        relevant_oil: Boolean,
+        relevant_water: Boolean,
+        relevant_gas: Boolean,
+        is_injector: Boolean,
+        hydrostatic_divisor: Number,
+        radial_flow_constant: Number,
+        max_iterations: Integer,
+        tolerance: Number,
+        target: Number,
+        low: Number,
+        high: Number,
+        reservoir_condition: Boolean,
+        max_bisections: Integer,
+        rate_tolerance: Number,
+    ) -> BisectionResult: ...
+
+
+class HydrostaticSolver(typing.Protocol):
+    """
+    A fixed-point solver for a well's connection pressures and rates, with the pressure profile
+    from the weight of the fluid between connections.
+    """
+
+    def __call__(
+        self,
+        reference_depth: Number,
+        reference_pressure: Number,
+        workspace: PerforationWorkspace,
+        relevant_oil: Boolean,
+        relevant_water: Boolean,
+        relevant_gas: Boolean,
+        is_injector: Boolean,
+        pressure_per_density_and_depth: Number,
+        radial_flow_constant: Number,
+        max_iterations: Integer,
+        tolerance: Number,
+    ) -> FixedPointResult: ...
+
+
+class HydrostaticBisector(typing.Protocol):
+    """"""
+
+    def __call__(
+        self,
+        reference_depth: Number,
+        workspace: PerforationWorkspace,
+        relevant_oil: Boolean,
+        relevant_water: Boolean,
+        relevant_gas: Boolean,
+        is_injector: Boolean,
+        pressure_per_density_and_depth: Number,
+        radial_flow_constant: Number,
+        max_iterations: Integer,
+        tolerance: Number,
+        target: Number,
+        low: Number,
+        high: Number,
+        reservoir_condition: Boolean,
+        max_bisections: Integer,
+        rate_tolerance: Number,
+    ) -> BisectionResult: ...
+
+
+class UniformSolver(typing.Protocol):
+    """"""
+
+    def __call__(
+        self,
+        reference_pressure: Number,
+        workspace: PerforationWorkspace,
+        relevant_oil: Boolean,
+        relevant_water: Boolean,
+        relevant_gas: Boolean,
+        is_injector: Boolean,
+        radial_flow_constant: Number,
+        max_iterations: Integer,
+        tolerance: Number,
+    ) -> FixedPointResult: ...
+
+
+class UniformBisector(typing.Protocol):
+    """"""
+
+    def __call__(
+        self,
+        workspace: PerforationWorkspace,
+        relevant_oil: Boolean,
+        relevant_water: Boolean,
+        relevant_gas: Boolean,
+        is_injector: Boolean,
+        radial_flow_constant: Number,
+        max_iterations: Integer,
+        tolerance: Number,
+        target: Number,
+        low: Number,
+        high: Number,
+        reservoir_condition: Boolean,
+        max_bisections: Integer,
+        rate_tolerance: Number,
+    ) -> BisectionResult: ...
+
+
+FixedPointSolver = HydraulicSolver | HydrostaticSolver | UniformSolver
+FixedPointBisector = HydraulicBisector | HydrostaticBisector | UniformBisector
+
+
+FIXED_POINT_SOLVERS: dict[str, FixedPointSolver] = {
     "homogeneous": solve_homogeneous,
     "beggs_brill": solve_beggs_and_brill,
     "beggs_and_brill": solve_beggs_and_brill,
@@ -941,3 +1664,14 @@ FIXED_POINT_SOLVERS = {
     "woldesemayat_ghajar": solve_woldesemayat_ghajar,
 }
 """Fixed-point solver for each hydraulics correlation, by the name of its `WellBoreModel`."""
+
+
+RATE_BISECTORS: dict[str, FixedPointBisector] = {
+    "homogeneous": bisect_homogeneous,
+    "beggs_brill": bisect_beggs_and_brill,
+    "beggs_and_brill": bisect_beggs_and_brill,
+    "hagedorn_brown": bisect_hagedorn_brown,
+    "gray": bisect_gray,
+    "woldesemayat_ghajar": bisect_woldesemayat_ghajar,
+}
+"""Rate bisection for each hydraulics correlation, by the name of its `WellBoreModel`."""

@@ -17,6 +17,18 @@ from bores.wells.hydraulics.base import (
 from bores.wells.hydraulics.hydrostatic import get_pressure_per_density_and_depth
 from bores.wells.resolution.fixed_point import (
     FIXED_POINT_SOLVERS,
+    RATE_BISECTORS,
+    FixedPointBisector,
+    FixedPointResult,
+    FixedPointSolver,
+    HydraulicBisector,
+    HydraulicSolver,
+    HydrostaticBisector,
+    HydrostaticSolver,
+    UniformBisector,
+    UniformSolver,
+    bisect_hydrostatic,
+    bisect_uniform,
     solve_hydrostatic,
     solve_uniform,
 )
@@ -106,6 +118,116 @@ def get_pressure_bracket(
     return control_spec.producer_bhp_floor, max(cell_pressures)
 
 
+class FixedPointSetup(typing.NamedTuple):
+    """
+    What a well's fixed-point solve and rate bisection need, by how its connection pressures
+    are found.
+    """
+
+    kind: typing.Literal["hydraulic", "hydrostatic", "uniform"]
+    """
+    How the connection pressures are found: from a hydraulics correlation, from the weight of
+    the fluid between connections, or as the reference pressure unchanged.
+    """
+
+    model: typing.Any
+    """The correlation's options, for the `"hydraulic"` kind. `None` otherwise."""
+
+    unit_scale: Number | None
+    """
+    The hydrostatic divisor for `"hydraulic"`, or the pressure of a unit column for
+    `"hydrostatic"`. `None` for `"uniform"`.
+    """
+
+    solve: FixedPointSolver
+    """The compiled fixed-point solver."""
+
+    bisect: FixedPointBisector
+    """The compiled rate bisection, with the same pressure profile as `solve`."""
+
+
+def get_fixed_point_setup(*, tubing: WellTubing, control_spec: WellControlSpec) -> FixedPointSetup:
+    """
+    Chooses how a well's connection pressures are found, and the compiled solver for it.
+
+    :param tubing: This well's tubing performance.
+    :param control_spec: Supplies `connection_pressure_mode` and the unit system.
+    :returns: The kind, and what the compiled solvers need for it.
+    :raises ValidationError: If the well has no `WellBoreModel` and `connection_pressure_mode` is
+        `HYDRAULIC`, or its model is unknown.
+    """
+    wellbore = tubing.wellbore
+    pressure_mode = control_spec.connection_pressure_mode
+    if wellbore is not None:
+        solve = FIXED_POINT_SOLVERS.get(wellbore.name)
+        bisect = RATE_BISECTORS.get(wellbore.name)
+        if solve is None or bisect is None:
+            raise ValidationError(
+                f"Unknown wellbore model {wellbore.name!r}; expected one of "
+                f"{sorted(FIXED_POINT_SOLVERS)}."
+            )
+        return FixedPointSetup(
+            kind="hydraulic",
+            model=wellbore.options,
+            unit_scale=get_hydrostatic_divisor(wellbore.options.unit_system),
+            solve=solve,
+            bisect=bisect,
+        )
+    if pressure_mode == ConnectionPressureMode.HYDRAULIC:
+        raise ValidationError(
+            "This well has no `WellBoreModel` assigned, and "
+            "`control_spec.connection_pressure_mode` is `HYDRAULIC`. "
+            "A VFP table relates BHP to THP only and can't distribute pressure across "
+            "connections. Assign a `WellBoreModel` to this well, or set "
+            "`connection_pressure_mode` to `ConnectionPressureMode.HYDROSTATIC` to distribute "
+            "pressure by the weight of the fluid between connections, or to "
+            "`ConnectionPressureMode.UNIFORM_BHP` to apply the reference pressure unchanged "
+            "at every connection."
+        )
+    if pressure_mode == ConnectionPressureMode.HYDROSTATIC:
+        return FixedPointSetup(
+            kind="hydrostatic",
+            model=None,
+            unit_scale=get_pressure_per_density_and_depth(control_spec.unit_system),
+            solve=solve_hydrostatic,
+            bisect=bisect_hydrostatic,
+        )
+    return FixedPointSetup(
+        kind="uniform",
+        model=None,
+        unit_scale=None,
+        solve=solve_uniform,
+        bisect=bisect_uniform,
+    )
+
+
+def raise_if_not_converged(
+    *,
+    result: FixedPointResult,
+    reference_pressure: Number,
+    max_iterations: Integer,
+    tolerance: Number,
+) -> None:
+    """
+    Raises if a fixed-point solve didn't settle.
+
+    :param result: What the solve ended with.
+    :param reference_pressure: The reference pressure it was solved at.
+    :param max_iterations: The iteration limit it ran under.
+    :param tolerance: The relative tolerance it ran under.
+    :raises WellConvergenceError: If `result` didn't converge.
+    """
+    if not result.converged:
+        raise WellConvergenceError(
+            "The connection pressures and rates did not converge in "
+            f"{max_iterations} iterations at a reference pressure of "
+            f"{reference_pressure}: on the last iteration the total rate went from "
+            f"{result.previous_total_rate} to {result.total_rate}, against a relative tolerance of "
+            f"{tolerance}. A rate high enough that friction or "
+            "head takes the connection pressures past reservoir pressure can cause this."
+        )
+
+
 def solve_connection_pressures_and_rates(
     *,
     tubing: WellTubing,
@@ -158,20 +280,7 @@ def solve_connection_pressures_and_rates(
     :raises WellConvergenceError: If the connection pressures and rates don't settle within the
         iteration limit.
     """
-    wellbore = tubing.wellbore
-    pressure_mode = control_spec.connection_pressure_mode
-    if wellbore is None and pressure_mode == ConnectionPressureMode.HYDRAULIC:
-        raise ValidationError(
-            "This well has no `WellBoreModel` assigned, and "
-            "`control_spec.connection_pressure_mode` is `HYDRAULIC`. "
-            "A VFP table relates BHP to THP only and can't distribute pressure across "
-            "connections. Assign a `WellBoreModel` to this well, or set "
-            "`connection_pressure_mode` to `ConnectionPressureMode.HYDROSTATIC` to distribute "
-            "pressure by the weight of the fluid between connections, or to "
-            "`ConnectionPressureMode.UNIFORM_BHP` to apply the reference pressure unchanged "
-            "at every connection."
-        )
-
+    setup = get_fixed_point_setup(tubing=tubing, control_spec=control_spec)
     relevant_oil = relevant_phases.oil > 0.0
     relevant_water = relevant_phases.water > 0.0
     relevant_gas = relevant_phases.gas > 0.0
@@ -179,15 +288,11 @@ def solve_connection_pressures_and_rates(
     max_iterations = control_spec.max_fixed_point_iterations
     tolerance = control_spec.rate_convergence_tolerance
 
-    if wellbore is not None:
-        solver = FIXED_POINT_SOLVERS.get(wellbore.name)
-        if solver is None:
-            raise ValidationError(
-                f"Unknown wellbore model {wellbore.name!r}; expected one of "
-                f"{sorted(FIXED_POINT_SOLVERS)}."
-            )
+    if setup.kind == "hydraulic":
+        assert setup.unit_scale is not None
+        solver = typing.cast(HydraulicSolver, setup.solve)
         result = solver(
-            model=wellbore.options,
+            model=setup.model,
             reference_depth=reference_depth,
             reference_pressure=reference_pressure,
             workspace=workspace,
@@ -195,13 +300,15 @@ def solve_connection_pressures_and_rates(
             relevant_water=relevant_water,
             relevant_gas=relevant_gas,
             is_injector=is_injector,
-            hydrostatic_divisor=get_hydrostatic_divisor(wellbore.options.unit_system),
+            hydrostatic_divisor=setup.unit_scale,
             radial_flow_constant=radial_flow_constant,
             max_iterations=max_iterations,
             tolerance=tolerance,
         )
-    elif pressure_mode == ConnectionPressureMode.HYDROSTATIC:
-        result = solve_hydrostatic(
+    elif setup.kind == "hydrostatic":
+        assert setup.unit_scale is not None
+        solver = typing.cast(HydrostaticSolver, setup.solve)
+        result = solver(
             reference_depth=reference_depth,
             reference_pressure=reference_pressure,
             workspace=workspace,
@@ -209,15 +316,14 @@ def solve_connection_pressures_and_rates(
             relevant_water=relevant_water,
             relevant_gas=relevant_gas,
             is_injector=is_injector,
-            pressure_per_density_and_depth=get_pressure_per_density_and_depth(
-                control_spec.unit_system
-            ),
+            pressure_per_density_and_depth=setup.unit_scale,
             radial_flow_constant=radial_flow_constant,
             max_iterations=max_iterations,
             tolerance=tolerance,
         )
     else:
-        result = solve_uniform(
+        solver = typing.cast(UniformSolver, setup.solve)
+        result = solver(
             reference_pressure=reference_pressure,
             workspace=workspace,
             relevant_oil=relevant_oil,
@@ -229,16 +335,12 @@ def solve_connection_pressures_and_rates(
             tolerance=tolerance,
         )
 
-    if not result.converged:
-        raise WellConvergenceError(
-            "The connection pressures and rates did not converge in "
-            f"{max_iterations} iterations at a reference pressure of "
-            f"{reference_pressure}: on the last iteration the total rate went from "
-            f"{result.previous_total_rate} to {result.total_rate}, against a relative tolerance of "
-            f"{tolerance}. A rate high enough that friction or "
-            "head takes the connection pressures past reservoir pressure can cause this."
-        )
-
+    raise_if_not_converged(
+        result=result,
+        reference_pressure=reference_pressure,
+        max_iterations=max_iterations,
+        tolerance=tolerance,
+    )
     return (
         workspace.connection_pressures,
         PhaseValues(oil=result.oil_rate, water=result.water_rate, gas=result.gas_rate),
@@ -247,6 +349,118 @@ def solve_connection_pressures_and_rates(
             water=result.surface_water_rate,
             gas=result.surface_gas_rate,
         ),
+    )
+
+
+def bisect_rate_bhp(
+    *,
+    tubing: WellTubing,
+    reference_depth: Number,
+    workspace: PerforationWorkspace,
+    relevant_phases: PhaseValues,
+    is_injector: Boolean,
+    target: Number,
+    min_pressure: Number,
+    max_pressure: Number,
+    control_spec: WellControlSpec,
+    target_rate_condition: typing.Literal["surface", "reservoir"],
+) -> tuple[Number, NumberArray[OneDimension], PhaseValues]:
+    """
+    Bisects `reference_pressure` in `[min_pressure, max_pressure]` until the total rate of
+    `relevant_phases` matches `target`, in one compiled call.
+
+    See `solve_bhp` for what the bisection does and returns.
+
+    :param tubing: Hydraulics correlation for this well.
+    :param reference_depth: The well's BHP/THP reporting datum.
+    :param workspace: This well's `PerforationWorkspace`.
+    :param relevant_phases: Mask the rate is summed over.
+    :param is_injector: Selects the drawdown sign convention and the direction the rate moves in
+        as BHP changes.
+    :param target: The total rate to match.
+    :param min_pressure: Lower bracket bound.
+    :param max_pressure: Upper bracket bound.
+    :param control_spec: Supplies the iteration caps and convergence tolerances.
+    :param target_rate_condition: `"surface"` bisects against the surface-condition total,
+        `"reservoir"` against the reservoir-condition one.
+    :returns: `(bhp, connection_pressures, phase_rates)`, `phase_rates` reservoir-condition.
+    :raises WellConvergenceError: If a solve inside the bisection doesn't converge.
+    """
+    setup = get_fixed_point_setup(tubing=tubing, control_spec=control_spec)
+    relevant_oil = relevant_phases.oil > 0.0
+    relevant_water = relevant_phases.water > 0.0
+    relevant_gas = relevant_phases.gas > 0.0
+    radial_flow_constant = control_spec.radial_flow_constant
+    max_iterations = control_spec.max_fixed_point_iterations
+    tolerance = control_spec.rate_convergence_tolerance
+    assert control_spec.max_bisection_iterations > 0
+    bisection = (
+        target,
+        min_pressure,
+        max_pressure,
+        target_rate_condition == "reservoir",
+        control_spec.max_bisection_iterations,
+        control_spec.rate_convergence_tolerance,
+    )
+
+    if setup.kind == "hydraulic":
+        assert setup.unit_scale is not None
+        bisector = typing.cast(HydraulicBisector, setup.bisect)
+        bisected = bisector(
+            setup.model,
+            reference_depth,
+            workspace,
+            relevant_oil,
+            relevant_water,
+            relevant_gas,
+            is_injector,
+            setup.unit_scale,
+            radial_flow_constant,
+            max_iterations,
+            tolerance,
+            *bisection,
+        )
+    elif setup.kind == "hydrostatic":
+        assert setup.unit_scale is not None
+        bisector = typing.cast(HydrostaticBisector, setup.bisect)
+        bisected = bisector(
+            reference_depth,
+            workspace,
+            relevant_oil,
+            relevant_water,
+            relevant_gas,
+            is_injector,
+            setup.unit_scale,
+            radial_flow_constant,
+            max_iterations,
+            tolerance,
+            *bisection,
+        )
+    else:
+        bisector = typing.cast(UniformBisector, setup.bisect)
+        bisected = bisector(
+            workspace,
+            relevant_oil,
+            relevant_water,
+            relevant_gas,
+            is_injector,
+            radial_flow_constant,
+            max_iterations,
+            tolerance,
+            *bisection,
+        )
+
+    raise_if_not_converged(
+        result=bisected.result,
+        reference_pressure=bisected.bhp,
+        max_iterations=max_iterations,
+        tolerance=tolerance,
+    )
+    result = bisected.result
+    return (
+        bisected.bhp,
+        workspace.connection_pressures,
+        PhaseValues(oil=result.oil_rate, water=result.water_rate, gas=result.gas_rate),
     )
 
 
@@ -303,6 +517,20 @@ def solve_bhp(
     if metric == "thp" and surface_sample is None and tubing.vfp_table is None:
         raise ValidationError("solve_bhp(..., metric='thp') requires `surface_sample`.")
 
+    if metric == "rate":
+        return bisect_rate_bhp(
+            tubing=tubing,
+            reference_depth=reference_depth,
+            workspace=workspace,
+            relevant_phases=relevant_phases,
+            is_injector=is_injector,
+            target=target,
+            min_pressure=min_pressure,
+            max_pressure=max_pressure,
+            control_spec=control_spec,
+            target_rate_condition=target_rate_condition,
+        )
+
     low, high = min_pressure, max_pressure
     average_pressure = 0.5 * (low + high)
     pressures = None
@@ -320,29 +548,21 @@ def solve_bhp(
             control_spec=control_spec,
         )
 
-        if metric == "rate":
-            target_rates = (
-                phase_rates if target_rate_condition == "reservoir" else surface_phase_rates
-            )
-            value = target_rates.oil + target_rates.water + target_rates.gas
-            increasing_with_bhp = is_injector
-        else:
-            value = compute_tubing_head_pressure(
-                tubing=tubing,
-                reference_depth=reference_depth,
-                reference_pressure=average_pressure,
-                phase_rates=phase_rates,
-                surface_phase_rates=surface_phase_rates,
-                surface_sample=surface_sample,
-                is_injector=is_injector,
-                connection_rates=get_connection_rates(workspace=workspace),
-            )
-            increasing_with_bhp = True
+        value = compute_tubing_head_pressure(
+            tubing=tubing,
+            reference_depth=reference_depth,
+            reference_pressure=average_pressure,
+            phase_rates=phase_rates,
+            surface_phase_rates=surface_phase_rates,
+            surface_sample=surface_sample,
+            is_injector=is_injector,
+            connection_rates=get_connection_rates(workspace=workspace),
+        )
 
         if abs(value - target) <= control_spec.rate_convergence_tolerance * max(abs(target), 1.0):
             break
 
-        if (value < target) == increasing_with_bhp:
+        if value < target:
             low = average_pressure
         else:
             high = average_pressure
@@ -371,7 +591,7 @@ def solve_rate_producer(
     :param tubing: Hydraulics correlation for this well.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
-    :param control_spec: Solver tunables.
+    :param control_spec: FixedPointSolver tunables.
     :returns: `(bhp, connection_pressures, phase_rates, surface_phase_rates)`,
         reservoir- and surface-condition rates for every phase.
     """
@@ -426,7 +646,7 @@ def solve_bhp_producer(
     :param tubing: Hydraulics correlation for this well.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
-    :param control_spec: Solver tunables, including fixed-point convergence settings and
+    :param control_spec: FixedPointSolver tunables, including fixed-point convergence settings and
         connection-pressure mode.
     :returns: `(bhp, connection_pressures, phase_rates, surface_phase_rates)`, with `bhp` equal to
         `target_bhp` and rates for oil, water, and gas at reservoir and surface conditions.
@@ -466,7 +686,7 @@ def solve_rate_injector(
     :param tubing: Hydraulics correlation for this well.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
-    :param control_spec: Solver tunables.
+    :param control_spec: FixedPointSolver tunables.
     :returns: `(bhp, connection_pressures, phase_rates, surface_phase_rates)` -
         reservoir- and surface-condition rates, `injected_phase` only nonzero.
     """
@@ -523,7 +743,7 @@ def solve_bhp_injector(
     :param tubing: Hydraulics correlation for this well.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
-    :param control_spec: Solver tunables, including fixed-point convergence settings and
+    :param control_spec: FixedPointSolver tunables, including fixed-point convergence settings and
         connection-pressure mode.
     :returns: `(bhp, connection_pressures, phase_rates, surface_phase_rates)`, with `bhp` equal to
         `target_bhp` and only the injected phase nonzero in the reservoir- and surface-condition

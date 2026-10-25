@@ -186,7 +186,7 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         value=101325.0 / (0.45359237 * 9.80665 / 0.0254**2),
         description="Standard atmospheric pressure in Pound-per-Square-Inch (psi)",
         unit="psi",
-        aliases=('STANDARD_PRESSURE_IMPERIAL',),
+        aliases=("STANDARD_PRESSURE_IMPERIAL",),
     ),
     "STANDARD_PRESSURE_BAR": Constant(
         value=1.01325,
@@ -224,7 +224,7 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         value=(60.0 - 32.0) * 5.0 / 9.0 + 273.15,
         description="Standard temperature (60°F) in Kelvin",
         unit="K",
-        aliases=('STANDARD_TEMPERATURE_SI',),
+        aliases=("STANDARD_TEMPERATURE_SI",),
     ),
     "STANDARD_TEMPERATURE_FAHRENHEIT": Constant(
         value=60.0,
@@ -282,7 +282,7 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         value=999.0,
         description="Standard water density at Standard temperature (60°F, 15.6°C) (Metric units)",
         unit="kg/m³",
-        aliases=('STANDARD_WATER_DENSITY_SI',),
+        aliases=("STANDARD_WATER_DENSITY_SI",),
     ),
     "STANDARD_WATER_DENSITY_LAB": Constant(
         value=0.9990,
@@ -509,10 +509,15 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         unit="kJ/(mol·K)",
     ),
     "IDEAL_GAS_CONSTANT_FIELD": Constant(
-        value=8.31446261815324 * 1000.0 * 0.45359237 / 1.8 / (0.45359237 * 9.80665 / 0.0254**2) / 0.3048**3,
+        value=8.31446261815324
+        * 1000.0
+        * 0.45359237
+        / 1.8
+        / (0.45359237 * 9.80665 / 0.0254**2)
+        / 0.3048**3,
         description="Universal gas constant (Imperial units)",
         unit="ft³·psi/(lb·mol·°R)",
-        aliases=('IDEAL_GAS_CONSTANT_IMPERIAL',),
+        aliases=("IDEAL_GAS_CONSTANT_IMPERIAL",),
     ),
     # Density Conversions
     "POUNDS_PER_CUBIC_FEET_TO_KILOGRAM_PER_CUBIC_METER": Constant(
@@ -529,7 +534,7 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         value=0.45359237 / 0.3048**3 / 1000.0,
         description="Conversion factor from lb/ft³ to g/cm³",
         unit="(g/cm³)/(lb/ft³)",
-        aliases=('POUNDS_PER_CUBIC_FEET_TO_GRAMS_PER_CUBIC_CENTIMETER',),
+        aliases=("POUNDS_PER_CUBIC_FEET_TO_GRAMS_PER_CUBIC_CENTIMETER",),
     ),
     # Concentration Conversions
     "PPM_TO_GRAMS_PER_LITER": Constant(
@@ -663,7 +668,10 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         unit="(ft²/(psi·day))/(mD/cP)",
     ),
     "MILLIDARCIES_PER_CENTIPOISE_TO_SQUARE_FEET_PER_PSI_PER_SECOND": Constant(
-        value=((1e-10 / 101325.0) / 1e-3 * (0.45359237 * 9.80665 / 0.0254**2) * 86400.0 / 0.3048**2) / 86400.0,
+        value=(
+            (1e-10 / 101325.0) / 1e-3 * (0.45359237 * 9.80665 / 0.0254**2) * 86400.0 / 0.3048**2
+        )
+        / 86400.0,
         description="Conversion factor from mD/cP to ft²/(psi·s)",
         unit="(ft²/(psi·s))/(mD/cP)",
     ),

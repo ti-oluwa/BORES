@@ -158,7 +158,7 @@ def build_perforation_workspace(
         )
 
     static_well_indices = typing.cast(
-        NumberArray[OneDimension], np.asarray(well_indices, dtype=resolved_dtype)
+        "NumberArray[OneDimension]", np.asarray(well_indices, dtype=resolved_dtype)
     )
     resolved_connection_conductivities = (
         np.full(n, np.nan, dtype=resolved_dtype)
@@ -169,34 +169,34 @@ def build_perforation_workspace(
         well_indices=static_well_indices.copy(),
         static_well_indices=static_well_indices,
         connection_conductivities=typing.cast(
-            NumberArray[OneDimension], resolved_connection_conductivities
+            "NumberArray[OneDimension]", resolved_connection_conductivities
         ),
         d_factor=d_factor,
         connection_fluids=resolved_fluids,
         representative_depths=typing.cast(
-            NumberArray[OneDimension],
+            "NumberArray[OneDimension]",
             np.asarray(representative_depths, dtype=resolved_dtype),
         ),
         representative_measured_depths=typing.cast(
-            NumberArray[OneDimension],
+            "NumberArray[OneDimension]",
             np.asarray(representative_measured_depths, dtype=resolved_dtype),
         ),
         reference_measured_depth=reference_measured_depth,
         inclinations_from_vertical=typing.cast(
-            NumberArray[OneDimension],
+            "NumberArray[OneDimension]",
             np.asarray(inclinations_from_vertical, dtype=resolved_dtype),
         ),
         connection_pressures=typing.cast(
-            NumberArray[OneDimension], np.empty(n, dtype=resolved_dtype)
+            "NumberArray[OneDimension]", np.empty(n, dtype=resolved_dtype)
         ),
         connection_oil_rates=typing.cast(
-            NumberArray[OneDimension], np.empty(n, dtype=resolved_dtype)
+            "NumberArray[OneDimension]", np.empty(n, dtype=resolved_dtype)
         ),
         connection_water_rates=typing.cast(
-            NumberArray[OneDimension], np.empty(n, dtype=resolved_dtype)
+            "NumberArray[OneDimension]", np.empty(n, dtype=resolved_dtype)
         ),
         connection_gas_rates=typing.cast(
-            NumberArray[OneDimension], np.zeros(n, dtype=resolved_dtype)
+            "NumberArray[OneDimension]", np.zeros(n, dtype=resolved_dtype)
         ),
     )
 

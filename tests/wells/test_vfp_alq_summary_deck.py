@@ -3128,3 +3128,256 @@ def test_schedule_names_may_repeat_but_lookup_by_name_must_be_unambiguous():
     assert (plan - second).items == (other,)
     replacement = ScheduleItem(event=TimeEvent(at=9.0), action=FiringProbe(), name="twice")
     assert (plan | replacement).items == (other, replacement)
+
+
+def mode_setup(solver_name, case, unit_system):
+    """The tubing and control spec that select each of the seven fixed-point solvers."""
+    import importlib
+
+    from bores.wells.resolution.spec import ConnectionPressureMode, WellControlSpec
+    from bores.wells.resolution.tubing import WellTubing
+
+    if solver_name == "uniform":
+        mode, wellbore = ConnectionPressureMode.UNIFORM_BHP, None
+    elif solver_name == "hydrostatic":
+        mode, wellbore = ConnectionPressureMode.HYDROSTATIC, None
+    else:
+        mode = ConnectionPressureMode.HYDRAULIC
+        wellbore = getattr(
+            importlib.import_module(f"bores.wells.hydraulics.{solver_name}"),
+            dict(KERNELS)[solver_name],
+        )(tubing_inner_diameter=case.diameter, unit_system=unit_system)
+    return (
+        WellTubing(wellbore, None, 0.0),
+        WellControlSpec(connection_pressure_mode=mode, unit_system=unit_system),
+    )
+
+
+def reference_rate_bisection(
+    *, tubing, case, workspace, mask, is_injector, spec, target, low, high, condition
+):
+    """The rate bisection written as a plain Python loop over the compiled solve."""
+    from bores.wells.resolution.solvers import solve_connection_pressures_and_rates
+
+    average = 0.5 * (low + high)
+    for _ in range(spec.max_bisection_iterations):
+        average = 0.5 * (low + high)
+        pressures, reservoir, surface = solve_connection_pressures_and_rates(
+            tubing=tubing,
+            reference_depth=case.reference_depth,
+            workspace=workspace,
+            reference_pressure=average,
+            relevant_phases=mask,
+            is_injector=is_injector,
+            control_spec=spec,
+        )
+        rates = reservoir if condition == "reservoir" else surface
+        value = rates.oil + rates.water + rates.gas
+        if abs(value - target) <= spec.rate_convergence_tolerance * max(abs(target), 1.0):
+            break
+        if (value < target) == is_injector:
+            low = average
+        else:
+            high = average
+    return average, pressures, reservoir
+
+
+@pytest.mark.parametrize("solver_name", FIXED_POINT_DRIVERS)
+@pytest.mark.parametrize("is_injector", [False, True])
+@pytest.mark.parametrize("condition", ["surface", "reservoir"])
+@pytest.mark.parametrize("fraction", [0.4, 50.0])
+def test_the_rate_bisection_matches_a_python_loop_over_the_solve(
+    solver_name, is_injector, condition, fraction
+):
+    from bores.wells.hydraulics.base import PhaseValues
+    from bores.wells.resolution.solvers import (
+        get_pressure_bracket,
+        solve_bhp,
+        solve_connection_pressures_and_rates,
+    )
+
+    unit_system = UnitSystem.FIELD
+    case, workspace = build_case_workspace(unit_system=unit_system)
+    tubing, spec = mode_setup(solver_name, case, unit_system)
+    mask = PhaseValues(0.0, 1.0, 0.0) if is_injector else PhaseValues(1.0, 1.0, 1.0)
+    low, high = get_pressure_bracket(workspace, is_injector=is_injector, control_spec=spec)
+    _, _, probe = solve_connection_pressures_and_rates(
+        tubing=tubing,
+        reference_depth=case.reference_depth,
+        workspace=copy_workspace(workspace),
+        reference_pressure=0.5 * (low + high),
+        relevant_phases=mask,
+        is_injector=is_injector,
+        control_spec=spec,
+    )
+    # A fraction of the rate at the middle of the bracket is reachable; fifty times it is not, so
+    # the bisection runs out of steps at one end of the bracket.
+    target = fraction * (probe.oil + probe.water + probe.gas)
+
+    expected_bhp, expected_pressures, expected_rates = reference_rate_bisection(
+        tubing=tubing,
+        case=case,
+        workspace=copy_workspace(workspace),
+        mask=mask,
+        is_injector=is_injector,
+        spec=spec,
+        target=target,
+        low=low,
+        high=high,
+        condition=condition,
+    )
+    bhp, pressures, rates = solve_bhp(
+        tubing=tubing,
+        reference_depth=case.reference_depth,
+        workspace=copy_workspace(workspace),
+        relevant_phases=mask,
+        is_injector=is_injector,
+        target=target,
+        min_pressure=low,
+        max_pressure=high,
+        control_spec=spec,
+        target_rate_condition=condition,
+    )
+    assert bhp == pytest.approx(expected_bhp, rel=1e-12)
+    assert pressures == pytest.approx(expected_pressures, rel=1e-12)
+    assert tuple(rates) == pytest.approx(tuple(expected_rates), rel=1e-12)
+
+
+@pytest.mark.parametrize("solver_name", FIXED_POINT_DRIVERS)
+def test_each_compiled_bisection_matches_the_same_code_run_as_python(solver_name):
+    from bores.wells.resolution import fixed_point
+
+    bisector = {
+        "uniform": fixed_point.bisect_uniform,
+        "hydrostatic": fixed_point.bisect_hydrostatic,
+        "homogeneous": fixed_point.bisect_homogeneous,
+        "beggs_and_brill": fixed_point.bisect_beggs_and_brill,
+        "hagedorn_brown": fixed_point.bisect_hagedorn_brown,
+        "gray": fixed_point.bisect_gray,
+        "woldesemayat_ghajar": fixed_point.bisect_woldesemayat_ghajar,
+    }[solver_name]
+    unit_system = UnitSystem.FIELD
+    case, workspace = build_case_workspace(unit_system=unit_system)
+    # A solver takes its reference pressure after the model and depth. A bisection chooses its own.
+    reference_index = {"uniform": 0, "hydrostatic": 1}.get(solver_name, 2)
+    bisection = (1500.0, 800.0, 3100.0, False, 60, 1e-9)
+
+    def arguments(copy):
+        solver = list(solver_arguments(solver_name, case, copy, unit_system))
+        solver.pop(reference_index)
+        return (*solver, *bisection)
+
+    compiled = bisector(*arguments(copy_workspace(workspace)))
+    interpreted = bisector.py_func(*arguments(copy_workspace(workspace)))
+    assert compiled.result.converged and interpreted.result.converged
+    assert compiled.bhp == pytest.approx(interpreted.bhp, rel=1e-12)
+    assert tuple(compiled.result) == pytest.approx(tuple(interpreted.result), rel=1e-9)
+
+
+def build_group_system(*, wells_per_group=4, groups=2, connections=4, weak_well=None):
+    """
+    Resolves producers in group control, in several groups, each with an oil rate target, on a real
+    compiled system. A `weak_well` is given too little productivity to reach its share.
+    """
+    import attrs
+
+    from bores.grids.factories.cartesian import make_cartesian_grid
+    from bores.types import Orientation
+    from bores.wells.compile import compile_well_system
+    from bores.wells.controls import ProducerControlMode
+    from bores.wells.factories import (
+        make_group_control,
+        make_producer,
+        make_well_controls,
+        make_wells,
+    )
+    from bores.wells.groups import GroupControls, WellGroup, WellGroups
+    from bores.wells.hydraulics.base import PhaseValues
+    from bores.wells.hydraulics.homogeneous import homogeneous_wellbore
+    from bores.wells.resolution.spec import ConnectionPressureMode, WellControlSpec
+    from bores.wells.resolution.system import resolve_wells
+    from bores.wells.state import ConnectionSample
+    from bores.wells.workspace import build_wells_workspace
+
+    count = wells_per_group * groups
+    grid = make_cartesian_grid(nx=count, ny=1, nz=connections, dx=50.0, dy=50.0, dz=10.0)
+    wells, controls = [], {}
+    for i in range(count):
+        well, control = make_producer(
+            f"W{i}",
+            surface_location=(25.0 + 50.0 * i, 25.0),
+            perforation_depths=(0.0, 10.0 * connections),
+            target_bhp=1000.0,
+            reference_depth=5.0,
+            group=f"G{i % groups}",
+        )
+        wells.append(well)
+        controls[f"W{i}"] = attrs.evolve(
+            control, mode=ProducerControlMode.GROUP, guide_rate=1.0 + (i % 3) * 0.5
+        )
+    group_target = wells_per_group * 400.0
+    compiled = compile_well_system(
+        make_wells(*wells),
+        make_well_controls(**controls),
+        grid,
+        permeabilities={
+            orientation: np.full(count * connections, 100.0) for orientation in Orientation
+        },
+        group_controls=GroupControls({
+            f"G{g}": make_group_control(target_rate=group_target) for g in range(groups)
+        }),
+        groups=WellGroups({
+            f"G{g}": WellGroup(name=f"G{g}", parent="FIELD") for g in range(groups)
+        }),
+    )
+    if weak_well is not None:
+        offsets = compiled.perforations.well_offsets
+        compiled.perforations.well_indices[offsets[weak_well] : offsets[weak_well + 1]] *= 1e-4
+
+    samples = [
+        ConnectionSample(
+            cell_index=k,
+            pressure=3000.0 + 2.0 * k,
+            temperature=200.0,
+            phase_saturations=PhaseValues(0.6, 0.3, 0.1),
+            phase_mobilities=PhaseValues(0.2, 0.1, 0.5),
+            phase_densities=PhaseValues(50.0, 62.4, 5.0),
+            phase_viscosities=PhaseValues(1.0, 0.5, 0.02),
+            gas_liquid_surface_tension=20.0,
+            phase_fvfs=PhaseValues(1.2, 1.0, 0.01),
+        )
+        for k in range(connections)
+    ]
+    fluids = compile_connection_fluids(connection_samples=samples)
+    tubing = homogeneous_wellbore(tubing_inner_diameter=0.25)
+    workspace = build_wells_workspace(
+        n_wells=count, n_connections=int(compiled.perforations.well_indices.shape[0])
+    )
+    resolve_wells(
+        compiled_system=compiled,
+        workspace=workspace,
+        control_spec=WellControlSpec(connection_pressure_mode=ConnectionPressureMode.HYDRAULIC),
+        get_tubing_performance=lambda row: tubing,
+        get_connection_fluids=lambda row: fluids,
+    )
+    return workspace, group_target, groups, count
+
+
+def test_group_oil_rate_targets_are_met_across_the_wells_of_each_group():
+    workspace, group_target, groups, count = build_group_system()
+    for group in range(groups):
+        total = float(workspace.surface_oil_rates[group:count:groups].sum())
+        assert total == pytest.approx(group_target, rel=1e-3)
+    assert np.all(workspace.surface_oil_rates > 0.0)
+
+
+def test_a_well_that_cannot_reach_its_share_has_the_shortfall_taken_up_by_its_group():
+    even, group_target, groups, count = build_group_system()
+    workspace, _, _, _ = build_group_system(weak_well=0)
+    # The weak well falls short of what it produced with the others, and its group still makes
+    # its target, so the other wells in the group are producing more.
+    assert workspace.surface_oil_rates[0] < 0.5 * even.surface_oil_rates[0]
+    total = float(workspace.surface_oil_rates[0:count:groups].sum())
+    assert total == pytest.approx(group_target, rel=1e-3)
+    others = workspace.surface_oil_rates[groups:count:groups]
+    assert np.all(others > even.surface_oil_rates[groups:count:groups])
