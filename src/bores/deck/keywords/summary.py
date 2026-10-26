@@ -33,6 +33,12 @@ named/numbered objects.
 Every vector above has a matching `bores.wells.summary` `Summary`
 implementation of the same mnemonic.
 
+**Solver vectors** (whole run, no object list; they report on the solver itself, so there is no
+`bores.wells.summary` counterpart):
+
+- `NEWTON`: Newton iterations in each time step.
+- `MLINEARS`: linear solver iterations per Newton iteration.
+
 **Region vectors** (one series per FIP region; optionally restricted to
 named region numbers):
 
@@ -98,10 +104,14 @@ __all__ = [
     "FWIT",
     "FWPR",
     "FWPT",
+    "MLINEARS",
+    "NEWTON",
     "RGIP",
     "ROIP",
+    "RPTPROPS",
     "RPTRST",
     "RPTSCHED",
+    "RPTSOL",
     "RWIP",
     "WBHP",
     "WGIR",
@@ -499,4 +509,30 @@ RPTSCHED = MnemonicReportKeyword("RPTSCHED")
 
 Same shape as `RPTRST`, but governs printed report content rather than the binary restart
 file.
+"""
+
+RPTPROPS = MnemonicReportKeyword("RPTPROPS")
+"""
+`RPTPROPS  MNEMONIC[=N] ... /` - print-summary output control for the `PROPS` section.
+
+Same shape as `RPTRST`: written with mnemonics, or with the older positional integers
+(`RPTPROPS 1 1 1 5*0 0 /`). It appears in `PROPS`, so its `schedule_time` is always `0.0`.
+"""
+
+RPTSOL = MnemonicReportKeyword("RPTSOL")
+"""
+`RPTSOL  MNEMONIC[=N] ... /` - print-summary output control for the `SOLUTION` section (what is
+reported about the initial state).
+
+Same shape as `RPTRST`: `RPTSOL FIP=3 SWAT /` gives mnemonics `{"FIP": 3, "SWAT": None}`. It
+appears in `SOLUTION`, so its `schedule_time` is always `0.0`.
+"""
+
+NEWTON = SummaryVectorKeyword("NEWTON")
+"""`NEWTON` - number of Newton iterations in each time step. Takes no object list (whole run)."""
+
+MLINEARS = SummaryVectorKeyword("MLINEARS")
+"""
+`MLINEARS` - linear solver iterations per Newton iteration, for each time step. Takes no object
+list (whole run).
 """

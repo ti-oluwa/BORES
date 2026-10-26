@@ -28,6 +28,11 @@ file order alongside the `DATES`/`TSTEP` timeline.
 - `WELOPEN`: open/shut/stop a well or specific connections.
 - `WELTARG`: modify a single control target on an existing well.
 - `WPIMULT`: well productivity-index multiplier.
+
+**Simulator controls**:
+
+- `TUNING`: time step selection, convergence and iteration limits, from a point in time onwards.
+- `ZIPPY2`: simulator settings written as `NAME=VALUE`, from a point in time onwards.
 - `GCONPROD`: group production targets/guide rates.
 - `GCONINJE`: group injection targets.
 
@@ -48,8 +53,10 @@ from bores.deck.keywords.base import (
     Field,
     HeaderedScheduledRecordKeyword,
     Keyword,
+    MultiRecordScheduledKeyword,
     RecordKeyword,
     ScheduledRecordKeyword,
+    SettingsKeyword,
 )
 from bores.deck.keywords.parsers import preferred_phase, uppercase, yes_no
 from bores.deck.operators import Operation
@@ -66,6 +73,7 @@ __all__ = [
     "GECON",
     "GRUPTREE",
     "TSTEP",
+    "TUNING",
     "VFPINJ",
     "VFPPROD",
     "WCONHIST",
@@ -84,6 +92,7 @@ __all__ = [
     "WPAVE",
     "WPIMULT",
     "WTEST",
+    "ZIPPY2",
     "VFPInjectorDeckTable",
     "VFPProducerDeckTable",
 ]
@@ -1481,4 +1490,127 @@ Fields:
 - `flow`: flow-rate axis values.
 - `thp`: tubing-head pressure axis values.
 - `bhps`: BHP table values shaped by the flow and THP axes.
+"""
+
+TUNING = MultiRecordScheduledKeyword(
+    "TUNING",
+    records=[
+        (
+            "time_step",
+            [
+                Field("tsinit", np.float64, required=False),
+                Field("tsmaxz", np.float64, required=False),
+                Field("tsminz", np.float64, required=False),
+                Field("tsmchp", np.float64, required=False),
+                Field("tsfmax", np.float64, required=False),
+                Field("tsfmin", np.float64, required=False),
+                Field("tsfcnv", np.float64, required=False),
+                Field("tfdiff", np.float64, required=False),
+                Field("thrupt", np.float64, required=False),
+                Field("tmaxwc", np.float64, required=False),
+            ],
+        ),
+        (
+            "convergence",
+            [
+                Field("trgtte", np.float64, required=False),
+                Field("trgcnv", np.float64, required=False),
+                Field("trgmbe", np.float64, required=False),
+                Field("trglcv", np.float64, required=False),
+                Field("xxxtte", np.float64, required=False),
+                Field("xxxcnv", np.float64, required=False),
+                Field("xxxmbe", np.float64, required=False),
+                Field("xxxlcv", np.float64, required=False),
+                Field("xxxwfl", np.float64, required=False),
+                Field("trgfip", np.float64, required=False),
+                Field("trgsft", np.float64, required=False),
+                Field("thionx", np.float64, required=False),
+                Field("trwght", int, required=False, default=1),
+            ],
+        ),
+        (
+            "iteration",
+            [
+                Field("newtmx", int, required=False, default=12),
+                Field("newtmn", int, required=False, default=1),
+                Field("litmax", int, required=False, default=25),
+                Field("litmin", int, required=False, default=1),
+                Field("mxwsit", int, required=False, default=8),
+                Field("mxwpit", int, required=False, default=8),
+                Field("ddplim", np.float64, required=False),
+                Field("ddslim", np.float64, required=False),
+                Field("trgdpr", np.float64, required=False),
+                Field("xxxdpr", np.float64, required=False),
+                Field("mnwrfp", int, required=False, default=4),
+            ],
+        ),
+    ],
+)
+"""
+`TUNING` - time step selection, convergence criteria and iteration limits, taking effect from the
+point in the deck where it appears.
+
+Three `/`-terminated records, all positional and all optional: an empty record (a lone `/`) leaves
+every item in it at the simulator's default. `parse` returns one dict per occurrence, in file
+order, holding one dict of fields per record and the `schedule_time` the occurrence takes effect
+at:
+
+```python
+[{"time_step": {...}, "convergence": {...}, "iteration": {...}, "schedule_time": 0.0}]
+```
+
+An item left out (or written `1*`) is `None`, meaning the simulator's own default, unless it
+has a fixed default shown below. `5*` leaves five items at their default.
+
+Record 1, `time_step` (times in the deck's time unit):
+
+- `tsinit`: length of the first time step.
+- `tsmaxz`: maximum length of the next time step.
+- `tsminz`: minimum length of all time steps.
+- `tsmchp`: minimum length of the next time step after a time step was chopped.
+- `tsfmax`: maximum time step increase factor.
+- `tsfmin`: minimum time step cut factor.
+- `tsfcnv`: cut factor after a convergence failure.
+- `tfdiff`: maximum increase factor after a convergence failure.
+- `thrupt`: maximum throughput ratio.
+- `tmaxwc`: maximum length of a time step after a well modification.
+
+Record 2, `convergence`:
+
+- `trgtte`: target time truncation error.
+- `trgcnv`: target non-linear convergence error.
+- `trgmbe`: target material balance error.
+- `trglcv`: target linear convergence error.
+- `xxxtte`, `xxxcnv`, `xxxmbe`, `xxxlcv`: the corresponding maximum errors that are tolerated.
+- `xxxwfl`: maximum well flow convergence error.
+- `trgfip`: target of the change in fluid in place.
+- `trgsft`: target surfactant change.
+- `thionx`: threshold for ion exchange.
+- `trwght`: weighting of the error (default 1).
+
+Record 3, `iteration`:
+
+- `newtmx`: maximum number of Newton iterations in a time step (default 12).
+- `newtmn`: minimum number of Newton iterations in a time step (default 1).
+- `litmax`: maximum number of linear iterations in a Newton iteration (default 25).
+- `litmin`: minimum number of linear iterations in a Newton iteration (default 1).
+- `mxwsit`: maximum number of well-solution iterations (default 8).
+- `mxwpit`: maximum number of well-pressure iterations (default 8).
+- `ddplim`: maximum pressure change at a time step.
+- `ddslim`: maximum saturation change at a time step.
+- `trgdpr`: target pressure change at a time step.
+- `xxxdpr`: maximum pressure change tolerated at a time step.
+- `mnwrfp`: maximum number of well-rate-from-pressure iterations (default 4).
+
+An occurrence with fewer than three records is reported, and the missing ones are read as empty.
+"""
+
+ZIPPY2 = SettingsKeyword("ZIPPY2")
+"""
+`ZIPPY2 'NAME=VALUE' ... /` - simulator settings (for example `'SIM=4.2'` or `'MINSTEP=1E-6'`),
+taking effect from the point in the deck where it appears.
+
+`parse` returns one dict per occurrence, in file order:
+`{"settings": {"SIM": "4.2", "MINSTEP": "1E-6"}, "schedule_time": 0.0}`. Names are upper-cased
+and values are kept as the text written, for the caller to interpret.
 """

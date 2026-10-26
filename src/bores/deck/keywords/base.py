@@ -795,6 +795,33 @@ class FlagKeyword(Keyword[bool]):
         return deck.has(self.name)
 
 
+class OptionListKeyword(Keyword[list[str]]):
+    """
+    A keyword whose one record is a free-length list of option mnemonics (`SATOPTS`, `EQLOPTS`).
+
+    Which options are switched on is the whole content, so `parse` returns them as a list of
+    upper-case names in the order written, e.g. `["HYSTER"]` for `SATOPTS HYSTER /`. Defaulted
+    (`1*`) positions switch nothing on and are left out. The keyword being present with no options
+    gives `[]`, so it stays distinguishable from `None`, the keyword being absent.
+
+    The names are not checked against a list: the options an Eclipse version accepts differ, and
+    reading a deck is not the place to reject one.
+    """
+
+    def parse(
+        self,
+        deck: Deck,
+        dims: GridDimensions | None,
+        *,
+        operations: list[Operation] | None = None,
+        schedule_times: dict[int, float] | None = None,
+    ) -> list[str] | None:
+        record = deck.get_single_record_for(self.name)
+        if record is None:
+            return None
+        return [token.upper() for token in tokenize(first_segment(record.body)) if token != "1*"]
+
+
 class DateKeyword(Keyword[datetime.datetime]):
     """
     A keyword whose single record is an Eclipse-format date
@@ -897,6 +924,11 @@ class TableKeyword(Keyword[list[Table[Number]]]):
         "outer" key used in miscible (bracketed) PVT tables such as
         `PVTO` / `PVTG`. When `None`, the table is flat (immiscible
         / simple-tabular).
+    :param table_per_segment: Flat tables only. When `False` (default) all the `/`-terminated
+        segments of a keyword occurrence are rows of one table, which is right for keywords that
+        hold one row per region (`DENSITY`, `PVTW`). When `True` every non-empty segment is a table
+        of its own, which is right for keywords that hold one table per region, with the rows of a
+        table packed under a single closing `/` (`TVDPF<name>`).
 
     The parsed value is `List[List[Dict]]`; a list of tables (one per
     keyword occurrence / PVT region), each table being a list of row dicts.
@@ -904,7 +936,7 @@ class TableKeyword(Keyword[list[Table[Number]]]):
     inner-table row for convenience.
     """
 
-    __slots__ = ("columns", "primary_key")
+    __slots__ = ("columns", "primary_key", "table_per_segment")
 
     def __init__(
         self,
@@ -912,10 +944,12 @@ class TableKeyword(Keyword[list[Table[Number]]]):
         columns: typing.Sequence[Field[Number]],
         *,
         primary_key: str | None = None,
+        table_per_segment: bool = False,
     ) -> None:
         super().__init__(name)
         self.columns: list[Field] = list(columns)
         self.primary_key = primary_key
+        self.table_per_segment = table_per_segment
 
     def parse(
         self,
@@ -934,6 +968,11 @@ class TableKeyword(Keyword[list[Table[Number]]]):
             if self.primary_key is not None:
                 tables = self._parse_miscible(record.body)
                 all_tables.extend(tables)
+            elif self.table_per_segment:
+                for segment in split_segments(record.body):
+                    table = self._parse_flat(segment)
+                    if table:
+                        all_tables.append(table)
             else:
                 table = self._parse_flat(record.body)
                 all_tables.append(table)
@@ -1311,3 +1350,124 @@ class HeaderedScheduledRecordKeyword(Keyword[list[dict[str, typing.Any]]]):
             ]
             results.append(parsed)
         return results or None
+
+
+class SettingsKeyword(Keyword[list[dict[str, typing.Any]]]):
+    """
+    A keyword that may appear many times in the `SCHEDULE` section, each occurrence holding a list
+    of `NAME=VALUE` settings (`ZIPPY2`) that take effect from its `schedule_time` onwards.
+
+    `parse` returns one dict per occurrence, in file order:
+
+    - `"settings"`: `{NAME: value_or_None}`. `NAME` is upper-cased. The value is the text after the
+      `=`, exactly as written (so it is for the caller to turn into a number), or `None` for a name
+      written without `=value`. A later setting of the same name replaces an earlier one.
+    - `"schedule_time"`: elapsed time at which the occurrence takes effect, in the deck's time
+      unit.
+    """
+
+    def parse(
+        self,
+        deck: Deck,
+        dims: GridDimensions | None,
+        *,
+        operations: list[Operation] | None = None,
+        schedule_times: dict[int, float] | None = None,
+        time_unit: TimeUnit = "days",
+    ) -> list[dict[str, typing.Any]] | None:
+        records = deck.get_records_for(self.name)
+        if not records:
+            return None
+
+        times = (
+            schedule_times if schedule_times is not None else get_schedule_times(deck, time_unit)
+        )
+        results: list[dict[str, typing.Any]] = []
+        for record in records:
+            settings: dict[str, str | None] = {}
+            for token in tokenize(first_segment(record.body)):
+                if token == "1*":
+                    continue
+                name, equals, value = token.partition("=")
+                settings[name.strip().upper()] = value.strip() if equals else None
+            results.append({"settings": settings, "schedule_time": times.get(record.start, 0.0)})
+        return results
+
+
+class MultiRecordScheduledKeyword(Keyword[list[dict[str, typing.Any]]]):
+    """
+    A keyword that may appear many times in the `SCHEDULE` section, each occurrence being a fixed
+    sequence of differently laid out `/`-terminated records (`TUNING`).
+
+    Every record is positional and every item optional, so an empty record (a lone `/`) is the way
+    to leave the whole record at the simulator's defaults.
+
+    `parse` returns one dict per occurrence, in file order: one entry per record, keyed by the
+    record's name and holding that record's fields, plus `"schedule_time"` (elapsed time at which
+    the occurrence takes effect, in the deck's time unit).
+
+    An occurrence with fewer terminated records than the keyword has is reported (a warning, or a
+    `DeckParseError` when `deck.strict`), and the records it lacks are read as empty. Anything
+    after the last record that is not a lone `/` is reported the same way and ignored.
+    """
+
+    __slots__ = ("records",)
+
+    def __init__(
+        self,
+        name: str,
+        records: typing.Sequence[tuple[str, typing.Sequence[Field[typing.Any]]]],
+    ) -> None:
+        """
+        :param name: Keyword name.
+        :param records: `(record name, fields)` for each record, in the order they are written.
+        """
+        super().__init__(name)
+        self.records = [(record_name, list(fields)) for record_name, fields in records]
+
+    def parse(
+        self,
+        deck: Deck,
+        dims: GridDimensions | None,
+        *,
+        operations: list[Operation] | None = None,
+        schedule_times: dict[int, float] | None = None,
+        time_unit: TimeUnit = "days",
+    ) -> list[dict[str, typing.Any]] | None:
+        occurrences = deck.get_records_for(self.name)
+        if not occurrences:
+            return None
+
+        times = (
+            schedule_times if schedule_times is not None else get_schedule_times(deck, time_unit)
+        )
+        results: list[dict[str, typing.Any]] = []
+        for occurrence in occurrences:
+            # Everything before a `/` is a record; what follows the last `/` is not.
+            segments = split_segments(occurrence.body)[:-1]
+            if len(segments) < len(self.records):
+                report(
+                    f"{self.name} has {len(segments)} `/`-terminated record(s) but needs "
+                    f"{len(self.records)}. The missing record(s) are read as empty, so every item "
+                    "in them takes its default.",
+                    strict=deck.strict,
+                    stacklevel=3,
+                )
+            extra = [segment for segment in segments[len(self.records) :] if segment.strip()]
+            if extra:
+                report(
+                    f"{self.name} has data after its {len(self.records)} records, which is "
+                    "ignored.",
+                    strict=deck.strict,
+                    stacklevel=3,
+                )
+
+            parsed: dict[str, typing.Any] = {}
+            for index, (record_name, fields) in enumerate(self.records):
+                segment = segments[index] if index < len(segments) else ""
+                parsed[record_name] = parse_tokens(
+                    self.name, fields, tokenize(segment, expand_repeats=True)
+                )
+            parsed["schedule_time"] = times.get(occurrence.start, 0.0)
+            results.append(parsed)
+        return results

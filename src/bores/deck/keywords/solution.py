@@ -22,6 +22,13 @@ float64 arrays):
 - `EQUIL`: one record per equilibration region specifying datum
   depth/pressure, contact depths, and capillary pressure at contacts.
 
+**Tracer initialisation keywords** (`TVDPF<name>`, one per tracer declared with `TRACER`):
+
+- `TVDPF<name>`: initial tracer concentration versus depth, one table per equilibration region.
+  The name is part of the keyword, so each tracer is its own keyword: `TVDPF2FB`, `TVDPF4FB`,
+  `TVDPFDFB`, `TVDPFHTO`, `TVDPFS36`, `TVDPFSEA` and `TVDPFTFB` are registered, and `tvdpf`
+  builds the keyword for any other tracer name.
+
 **Restart keyword**:
 
 - `RESTART`: resumes from a previously written restart file instead
@@ -73,6 +80,14 @@ __all__ = [
     "SW",
     "SWAT",
     "TEMPVD",
+    "TVDPF2FB",
+    "TVDPF4FB",
+    "TVDPFDFB",
+    "TVDPFHTO",
+    "TVDPFS36",
+    "TVDPFSEA",
+    "TVDPFTFB",
+    "tvdpf",
 ]
 
 
@@ -258,6 +273,57 @@ Columns:
 - `depth`: true vertical depth (ft in FIELD, m in METRIC).
 - `vaporized_ogr`: vaporized oil-gas ratio at that depth (stb/scf in FIELD).
 """
+
+
+def tvdpf(tracer: str) -> TableKeyword:
+    """
+    Build the `TVDPF<tracer>` keyword: initial concentration of a tracer versus depth.
+
+    The tracer name is part of the keyword (`TVDPFSEA` for a tracer called `SEA`), so a deck's own
+    tracers need their keyword registered before they can be read:
+
+        deck_file.add_keywords(tvdpf("XYZ"))
+
+    One table per equilibration region, in the order the regions are numbered. A table is a list of
+    rows, each with:
+
+    - `depth`: true vertical depth (ft in FIELD, m in METRIC).
+    - `concentration`: free-phase tracer concentration at that depth (in the tracer's own unit).
+
+    :param tracer: Tracer name, as declared with `TRACER` (up to five characters, since a keyword
+        is at most eight characters long).
+    :returns: The table keyword.
+    """
+    return TableKeyword(
+        f"TVDPF{tracer.upper()}",
+        columns=[
+            Field("depth", np.float64),
+            Field("concentration", np.float64),
+        ],
+        table_per_segment=True,
+    )
+
+
+TVDPFSEA = tvdpf("SEA")
+"""`TVDPFSEA` - initial concentration of the tracer `SEA` versus depth. See `tvdpf`."""
+
+TVDPFHTO = tvdpf("HTO")
+"""`TVDPFHTO` - initial concentration of the tracer `HTO` versus depth. See `tvdpf`."""
+
+TVDPFS36 = tvdpf("S36")
+"""`TVDPFS36` - initial concentration of the tracer `S36` versus depth. See `tvdpf`."""
+
+TVDPF2FB = tvdpf("2FB")
+"""`TVDPF2FB` - initial concentration of the tracer `2FB` versus depth. See `tvdpf`."""
+
+TVDPF4FB = tvdpf("4FB")
+"""`TVDPF4FB` - initial concentration of the tracer `4FB` versus depth. See `tvdpf`."""
+
+TVDPFDFB = tvdpf("DFB")
+"""`TVDPFDFB` - initial concentration of the tracer `DFB` versus depth. See `tvdpf`."""
+
+TVDPFTFB = tvdpf("TFB")
+"""`TVDPFTFB` - initial concentration of the tracer `TFB` versus depth. See `tvdpf`."""
 
 
 class RestartKeyword(Keyword[dict[str, typing.Any]]):

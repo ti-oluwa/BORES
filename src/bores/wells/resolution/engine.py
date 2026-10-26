@@ -1,6 +1,7 @@
 """Top-level well-control resolution. One well's row per call."""
 
 import functools
+import math
 import typing
 
 import numpy as np
@@ -14,12 +15,7 @@ from bores.wells.compile import (
     ProducerControlModeTag,
     WellKind,
 )
-from bores.wells.hydraulics.base import (
-    ConnectionFluids,
-    SurfaceFluids,
-    WellBoreModel,
-    compile_surface_fluids,
-)
+from bores.wells.hydraulics.base import ConnectionFluids, SurfaceSample, WellBoreModel
 from bores.wells.hydraulics.vfp import VFPTables
 from bores.wells.resolution.limits import apply_limits
 from bores.wells.resolution.solvers import (
@@ -113,7 +109,7 @@ def resolve_well_control(
     connection_fluids: ConnectionFluids,
     workspace: WellsWorkspace,
     control_spec: WellControlSpec,
-    surface_sample: SurfaceFluids | None = None,
+    surface_sample: SurfaceSample | None = None,
 ) -> None:
     """
     Resolves one well's control and writes the result into `resolution`'s
@@ -152,9 +148,6 @@ def resolve_well_control(
     """
     if compiled_system.schedule_statuses[well_row] == 0:
         return
-
-    if surface_sample is not None:
-        surface_sample = compile_surface_fluids(surface_sample=surface_sample)
 
     controls = compiled_system.controls
     tubing = resolve_well_tubing(
@@ -441,6 +434,16 @@ def resolve_well_control(
     if tubing.vfp_table is not None or (
         tubing.wellbore is not None and surface_sample is not None
     ):
+        total_rate = phase_rates.oil + phase_rates.water + phase_rates.gas
+        if (
+            tubing.vfp_table is None
+            and total_rate == 0
+            and surface_sample is not None
+            and math.isnan(surface_sample.density)
+        ):
+            # With no flow, the fluid in the tubing is unknown unless the sample gives its density.
+            workspace.thps[well_row] = math.nan
+            return None
         workspace.thps[well_row] = compute_tubing_head_pressure(
             tubing=tubing,
             reference_depth=reference_depth,

@@ -22,20 +22,18 @@ from bores.units import get_conversion_factors
 from bores.wells.hydraulics.base import (
     UNIT_SYSTEM_TAGS,
     UNIT_SYSTEMS_BY_TAG,
-    CompiledSurfaceFluids,
     ConnectionFluids,
     PressureDrop,
-    SurfaceFluids,
+    SurfaceSample,
     WellBoreModel,
-    check_two_phase_surface_fluids,
-    compile_surface_fluids,
     compute_friction_factor,
     compute_static_mixture_density,
     compute_superficial_velocity,
     get_hydrostatic_divisor,
-    get_two_phase_surface_properties,
     get_unit_system_constant,
     plan_connection_walk,
+    require_static_column_density,
+    require_two_phase_surface_properties,
     split_liquid_gas,
 )
 from bores.wells.state import PhaseValues
@@ -47,7 +45,6 @@ __all__ = [
     "compute_perforation_pressures",
     "compute_segment_drop",
     "compute_tubing_head_pressure",
-    "evaluate_tubing_head_pressure",
     "gray_wellbore",
 ]
 
@@ -718,45 +715,49 @@ def compute_perforation_pressures(
 
 
 @numba.njit(cache=True)
-def evaluate_tubing_head_pressure(
+def compute_tubing_head_pressure(
     model: GrayWellbore,
     reference_depth: Number,
     reference_pressure: Number,
     phase_rates: PhaseValues,
-    surface_fluids: CompiledSurfaceFluids,
+    surface_sample: SurfaceSample,
     is_injector: Boolean,
 ) -> Number:
     """
-    Computes tubing head pressure at surface from compiled surface fluid properties.
+    Computes tubing head pressure at surface.
 
     :param model: This well's `GrayWellbore`.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param reference_pressure: Pressure at `reference_depth`.
     :param phase_rates: Rate of each phase, at reservoir conditions.
-    :param surface_fluids: Fluid properties at surface conditions. Needs the phase densities,
-        phase viscosities and gas-liquid surface tension.
+    :param surface_sample: Fluid properties at surface
+        conditions. `phase_densities`, `phase_viscosities`, and
+        `gas_liquid_surface_tension` are all required, as Gray needs a
+        real liquid/gas split, not just a single mixture value.
     :param is_injector: Whether this well is an injector.
     :returns: Tubing head pressure.
-    :raises ValueError: If a surface property the correlation needs is `NaN`.
+    :raises ValueError: If `phase_densities`, `phase_viscosities` or
+        `gas_liquid_surface_tension` is `NaN`, or if the well has no flow and `density` is `NaN`.
     """
-    phase_densities, phase_viscosities, gas_liquid_surface_tension = (
-        get_two_phase_surface_properties(surface_fluids=surface_fluids)
-    )
     dz = 0.0 - reference_depth
     total_rate = phase_rates.oil + phase_rates.water + phase_rates.gas
     friction_sign = -1.0 if is_injector else 1.0
 
     if total_rate == 0:
-        static_density = compute_static_mixture_density(
-            phase_saturations=PhaseValues(
-                oil=phase_rates.oil, water=phase_rates.water, gas=phase_rates.gas
-            ),
-            phase_densities=phase_densities,
-        )
+        static_density = require_static_column_density(density=surface_sample.density)
         return (
             reference_pressure
             - static_density * model.gravitational_acceleration * abs(dz) * model.hydrostatic_scale
         )
+
+    phase_densities = surface_sample.phase_densities
+    phase_viscosities = surface_sample.phase_viscosities
+    gas_liquid_surface_tension = surface_sample.gas_liquid_surface_tension
+    require_two_phase_surface_properties(
+        phase_densities=phase_densities,
+        phase_viscosities=phase_viscosities,
+        gas_liquid_surface_tension=gas_liquid_surface_tension,
+    )
 
     (
         liquid_rate,
@@ -792,40 +793,4 @@ def evaluate_tubing_head_pressure(
     )
     return (
         reference_pressure - (drop.hydrostatic + drop.acceleration) - friction_sign * drop.friction
-    )
-
-
-def compute_tubing_head_pressure(
-    model: GrayWellbore,
-    reference_depth: Number,
-    reference_pressure: Number,
-    phase_rates: PhaseValues,
-    surface_sample: SurfaceFluids,
-    is_injector: bool,
-) -> Number:
-    """
-    Computes tubing head pressure at surface.
-
-    :param model: This well's `GrayWellbore`.
-    :param reference_depth: The well's BHP/THP reporting datum.
-    :param reference_pressure: Pressure at `reference_depth`.
-    :param phase_rates: Rate of each phase, at reservoir conditions.
-    :param surface_sample: Fluid properties at surface
-        conditions. `phase_densities`, `phase_viscosities`, and
-        `gas_liquid_surface_tension` are all required, as Gray needs a
-        real liquid/gas split, not just a single mixture value.
-    :param is_injector: Whether this well is an injector.
-    :returns: Tubing head pressure.
-    :raises ValueError: If `phase_densities`, `phase_viscosities`, or
-        `gas_liquid_surface_tension` isn't set on `surface_sample`.
-    """
-    surface_fluids = compile_surface_fluids(surface_sample=surface_sample)
-    check_two_phase_surface_fluids(surface_fluids=surface_fluids, model_label="Gray")
-    return evaluate_tubing_head_pressure(
-        model=model,
-        reference_depth=reference_depth,
-        reference_pressure=reference_pressure,
-        phase_rates=phase_rates,
-        surface_fluids=surface_fluids,
-        is_injector=is_injector,
     )

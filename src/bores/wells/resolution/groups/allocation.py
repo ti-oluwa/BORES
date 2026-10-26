@@ -32,7 +32,7 @@ from bores.wells.compile import (
     ProducerControlModeTag,
     WellKind,
 )
-from bores.wells.hydraulics.base import ConnectionFluids, SurfaceFluids, WellBoreModel
+from bores.wells.hydraulics.base import ConnectionFluids, SurfaceSample, WellBoreModel
 from bores.wells.hydraulics.vfp import VFPTables
 from bores.wells.resolution.engine import resolve_well_control
 from bores.wells.resolution.spec import WellControlSpec
@@ -275,7 +275,7 @@ def redistribute_group_shortfall(
     control_spec: WellControlSpec,
     get_tubing_performance: typing.Callable[[Integer], WellBoreModel | VFPTables | None],
     get_connection_fluids: typing.Callable[[Integer], ConnectionFluids],
-    get_surface_sample: typing.Callable[[Integer], SurfaceFluids | None] | None = None,
+    get_surface_sample: typing.Callable[[Integer], SurfaceSample | None] | None = None,
 ) -> tuple[str, ...]:
     """
     Redistributes a group's shortfall across members with headroom.

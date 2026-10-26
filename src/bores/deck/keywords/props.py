@@ -30,6 +30,23 @@ and relative permeability / capillary pressure curves.
 - `SOF2`: So-indexed: Kro (two-phase oil)
 - `SOF3`: So-indexed: Krow, Krog (three-phase oil)
 
+**End-point scaling keywords** (enabled by `ENDSCALE`; each returns a `(n_cells,)` `float64` array):
+
+- `SWL`, `SWCR`, `SWU`: connate, critical and maximum water saturation.
+- `SGL`, `SGCR`, `SGU`: connate, critical and maximum gas saturation.
+- `SOWCR`, `SOGCR`: critical oil saturation in water, and in gas.
+- `ISGCR`: critical gas saturation of the imbibition curves (used with hysteresis).
+- `SCALECRS`: how the critical saturations are scaled.
+
+A cell that is never given a value by one of these arrays is `NaN`, not `0.0`: Eclipse then takes
+that cell's end-point from the saturation tables, and `0.0` would be a different (and wrong)
+end-point. Operators leave an unset cell unset, since `NaN` plus, times, or limited by a number is
+still `NaN`.
+
+**Tracer keywords**:
+
+- `TRACER`: declare tracers (name, carrying fluid, ...).
+
 Saturation and relative permeability columns of these tables must lie in `[0, 1]`
 (capillary pressure columns are unrestricted); a value outside that range is
 rejected with a `DeckParseError` when the table is parsed.
@@ -40,13 +57,14 @@ import numpy as np
 from bores.datastructures import GridDimensions
 from bores.deck.core import Deck, split_segments, tokenize
 from bores.deck.keywords.base import (
+    ArrayKeyword,
     Field,
     RecordKeyword,
     RepeatedRecordKeyword,
     Table,
     TableKeyword,
 )
-from bores.deck.keywords.parsers import fraction, uppercase
+from bores.deck.keywords.parsers import fraction, uppercase, yes_no
 from bores.deck.operators import Operation
 from bores.types import Number
 
@@ -55,6 +73,7 @@ __all__ = [
     "DENSITY",
     "EHYSTR",
     "GRAVITY",
+    "ISGCR",
     "PVCDO",
     "PVCO",
     "PVDG",
@@ -64,12 +83,22 @@ __all__ = [
     "PVTW",
     "ROCK",
     "ROCKTAB",
+    "SCALECRS",
+    "SGCR",
     "SGFN",
+    "SGL",
     "SGOF",
+    "SGU",
     "SOF2",
     "SOF3",
+    "SOGCR",
+    "SOWCR",
+    "SWCR",
     "SWFN",
+    "SWL",
     "SWOF",
+    "SWU",
+    "TRACER",
 ]
 
 DENSITY = TableKeyword(
@@ -599,4 +628,87 @@ Columns:
 
 - `dimensionless_time`: dimensionless time `tD`. Must increase down the table.
 - `dimensionless_pressure`: dimensionless pressure influence function `pD(tD)`.
+"""
+
+SCALECRS = RecordKeyword[bool](
+    "SCALECRS",
+    fields=[Field("enabled", yes_no, required=False, default=False)],
+)
+"""
+`SCALECRS YES|NO /` - select the alternative end-point scaling, which also honours the critical
+saturations.
+
+`parse` returns `{"enabled": bool}`; `enabled` is `False` (`NO`) when the item is left out.
+"""
+
+TRACER = RepeatedRecordKeyword[str | int](
+    "TRACER",
+    fields=[
+        Field("name", uppercase),
+        Field("fluid", uppercase, options={"WAT", "OIL", "GAS"}),
+        Field("unit", str, required=False, default=""),
+        Field("solution_phase", uppercase, required=False, default=""),
+        Field("num_part_table", int, required=False, default=0),
+        Field("adsorb_phase", uppercase, required=False, default=""),
+    ],
+)
+"""
+`TRACER NAME FLUID [UNIT [SOLUTION_PHASE [NUM_PART_TABLE [ADSORB_PHASE]]]] /` - declare passive
+tracers, one record per tracer, closed by a final `/`.
+
+The name is also what the tracer's concentration keywords carry as a suffix, e.g. `TVDPFSEA` for
+a tracer called `SEA`.
+
+Fields:
+
+- `name`: tracer name, upper-cased.
+- `fluid`: the phase that carries the tracer, one of `WAT`, `OIL` or `GAS`.
+- `unit`: unit of the tracer concentration (default empty).
+- `solution_phase`: the phase the tracer also dissolves in, if any (default empty).
+- `num_part_table`: number of the tracer partition table (default 0, none).
+- `adsorb_phase`: the phase whose adsorption the tracer follows, if any (default empty).
+"""
+
+
+def endpoint_array(name: str) -> ArrayKeyword:
+    """
+    Build the array keyword for a saturation end-point scaling array.
+
+    A cell that nothing assigns is `NaN` rather than `0.0`: it has no end-point of its own, and
+    Eclipse takes the end-point from the saturation table there.
+
+    :param name: Keyword name, e.g. `"SWL"`.
+    :returns: The array keyword.
+    """
+    return ArrayKeyword(name, default_value=float("nan"))
+
+
+SWL = endpoint_array("SWL")
+"""`SWL` - connate (irreducible) water saturation, per cell. `NaN` where never set."""
+
+SWCR = endpoint_array("SWCR")
+"""`SWCR` - critical water saturation, per cell. `NaN` where never set."""
+
+SWU = endpoint_array("SWU")
+"""`SWU` - maximum water saturation, per cell. `NaN` where never set."""
+
+SGL = endpoint_array("SGL")
+"""`SGL` - connate gas saturation, per cell. `NaN` where never set."""
+
+SGCR = endpoint_array("SGCR")
+"""`SGCR` - critical gas saturation, per cell. `NaN` where never set."""
+
+SGU = endpoint_array("SGU")
+"""`SGU` - maximum gas saturation, per cell. `NaN` where never set."""
+
+SOWCR = endpoint_array("SOWCR")
+"""`SOWCR` - critical oil-in-water saturation, per cell. `NaN` where never set."""
+
+SOGCR = endpoint_array("SOGCR")
+"""`SOGCR` - critical oil-in-gas saturation, per cell. `NaN` where never set."""
+
+ISGCR = endpoint_array("ISGCR")
+"""
+`ISGCR` - critical gas saturation of the imbibition curves, per cell (used with hysteresis).
+`NaN` where never set.
 """

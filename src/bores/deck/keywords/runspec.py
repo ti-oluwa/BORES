@@ -13,26 +13,40 @@ from bores.deck.keywords.base import (
     Field,
     FlagKeyword,
     Keyword,
+    OptionListKeyword,
     RecordKeyword,
 )
+from bores.deck.keywords.parsers import uppercase
 from bores.deck.operators import Operation
 
 __all__ = [
     "DISGAS",
+    "ENDSCALE",
     "EQLDIMS",
+    "EQLOPTS",
+    "FAULTDIM",
     "FIELD",
+    "FMTIN",
+    "FMTOUT",
     "GAS",
     "LAB",
+    "MESSAGES",
     "METRIC",
+    "NOECHO",
     "NOSIM",
+    "NSTACK",
     "OIL",
+    "PIMTDIMS",
     "REGDIMS",
+    "SATOPTS",
     "START",
     "TABDIMS",
     "TITLE",
     "UNIFIN",
     "UNIFOUT",
     "VAPOIL",
+    "VFPIDIMS",
+    "VFPPDIMS",
     "WATER",
     "WELLDIMS",
 ]
@@ -284,4 +298,179 @@ Fields:
 - `nrfreg`: maximum number of reservoir fluid-in-place regions.
 - `ntfreg`: maximum number of tracer FIP regions.
 - `nplmix`: maximum number of polymer mixing regions.
+"""
+
+ENDSCALE = RecordKeyword[int | str](
+    "ENDSCALE",
+    fields=[
+        Field(
+            "directional",
+            uppercase,
+            required=False,
+            default="NODIR",
+            options={"NODIR", "DIRECT"},
+        ),
+        Field(
+            "reversibility",
+            uppercase,
+            required=False,
+            default="REVERS",
+            options={"REVERS", "IRREVERS"},
+        ),
+        Field("ntendp", int, required=False, default=1),
+        Field("nsendp", int, required=False, default=20),
+        Field("combination_mode", int, required=False, default=0),
+    ],
+)
+"""
+`ENDSCALE DIRECT IRREVERS NTENDP NSENDP COMB_MODE /` - switch on saturation end-point scaling.
+
+Enables the end-point scaling arrays of the `PROPS` section (`SWL`, `SWCR`, `SGU`, ...).
+
+Fields:
+
+- `directional`: `"NODIR"` (default), one set of end-point arrays for all directions, or
+  `"DIRECT"`, a set per direction.
+- `reversibility`: `"REVERS"` (default), the scaling of an imbibition curve is reversible, or
+  `"IRREVERS"`.
+- `ntendp`: number of end-point versus depth tables (default 1).
+- `nsendp`: number of nodes in each of those tables (default 20).
+- `combination_mode`: end-point scaling combination mode (default 0).
+"""
+
+SATOPTS = OptionListKeyword("SATOPTS")
+"""
+`SATOPTS OPTION ... /` - switch on optional saturation function features.
+
+`parse` returns the options written, upper-cased, e.g. `["HYSTER"]` for `SATOPTS HYSTER /` (see
+`EHYSTR` for the hysteresis controls). Options are not checked against a list, since the set
+Eclipse accepts depends on its version.
+"""
+
+EQLOPTS = OptionListKeyword("EQLOPTS")
+"""
+`EQLOPTS OPTION ... /` - switch on optional equilibration features (`THPRES`, `QUIESC`,
+`MOBILE`, `IRREVERS`).
+
+`parse` returns the options written, upper-cased, e.g. `["THPRES"]` for `EQLOPTS 'THPRES' /`.
+Options are not checked against a list, since the set Eclipse accepts depends on its version.
+"""
+
+VFPIDIMS = RecordKeyword[int](
+    "VFPIDIMS",
+    fields=[
+        Field("mxmflo", int, required=False),
+        Field("mxmthp", int, required=False),
+        Field("nmmvft", int, required=False),
+    ],
+)
+"""
+`VFPIDIMS MXMFLO MXMTHP NMMVFT /` - injection well VFP table dimensioning.
+
+An item left out is `None`: the simulator's own default applies.
+
+Fields:
+
+- `mxmflo`: maximum number of flow-rate values in any table.
+- `mxmthp`: maximum number of tubing-head-pressure values in any table.
+- `nmmvft`: maximum number of injection VFP tables.
+"""
+
+VFPPDIMS = RecordKeyword[int](
+    "VFPPDIMS",
+    fields=[
+        Field("mxmflo", int, required=False),
+        Field("mxmthp", int, required=False),
+        Field("mxmwfr", int, required=False),
+        Field("mxmgfr", int, required=False),
+        Field("mxmalq", int, required=False),
+        Field("nmmvft", int, required=False),
+    ],
+)
+"""
+`VFPPDIMS MXMFLO MXMTHP MXMWFR MXMGFR MXMALQ NMMVFT /` - production well VFP table dimensioning.
+
+An item left out is `None`: the simulator's own default applies.
+
+Fields:
+
+- `mxmflo`: maximum number of flow-rate values in any table.
+- `mxmthp`: maximum number of tubing-head-pressure values in any table.
+- `mxmwfr`: maximum number of water-fraction values in any table.
+- `mxmgfr`: maximum number of gas-fraction values in any table.
+- `mxmalq`: maximum number of artificial-lift-quantity values in any table.
+- `nmmvft`: maximum number of production VFP tables.
+"""
+
+FAULTDIM = RecordKeyword[int](
+    "FAULTDIM",
+    fields=[Field("mfsegs", int, required=False)],
+)
+"""
+`FAULTDIM MFSEGS /` - fault dimensioning. `mfsegs` is the maximum number of fault segments (`None`
+when left out: the simulator's own default applies).
+"""
+
+PIMTDIMS = RecordKeyword[int](
+    "PIMTDIMS",
+    fields=[
+        Field("ntpimt", int, required=False),
+        Field("nppimt", int, required=False),
+    ],
+)
+"""
+`PIMTDIMS NTPIMT NPPIMT /` - dimensioning of the pressure-induced multiplier (`PIMULTAB`)
+tables. An item left out is `None`: the simulator's own default applies.
+
+Fields:
+
+- `ntpimt`: maximum number of multiplier tables.
+- `nppimt`: maximum number of rows in any multiplier table.
+"""
+
+NSTACK = RecordKeyword[int](
+    "NSTACK",
+    fields=[Field("nstack", int, required=False, default=10)],
+)
+"""
+`NSTACK N /` - size of the linear solver's search-direction stack (default 10).
+"""
+
+MESSAGES = RecordKeyword[int](
+    "MESSAGES",
+    fields=[
+        Field("message_print_limit", int, required=False, default=1000000),
+        Field("comment_print_limit", int, required=False, default=1000000),
+        Field("warning_print_limit", int, required=False, default=10000),
+        Field("problem_print_limit", int, required=False, default=100),
+        Field("error_print_limit", int, required=False, default=100),
+        Field("bug_print_limit", int, required=False, default=100),
+        Field("message_stop_limit", int, required=False, default=1000000),
+        Field("comment_stop_limit", int, required=False, default=1000000),
+        Field("warning_stop_limit", int, required=False, default=10000),
+        Field("problem_stop_limit", int, required=False, default=100),
+        Field("error_stop_limit", int, required=False, default=10),
+        Field("bug_stop_limit", int, required=False, default=1),
+        Field("group_print_limit", int, required=False, default=10),
+    ],
+)
+"""
+`MESSAGES ...  /` - limits on how many messages of each severity are printed, and at how many the
+run is stopped.
+
+Positional, in the order of the fields: a print limit for each of message, comment, warning,
+problem, error and bug, then a stop limit for each in the same order, then `group_print_limit`.
+Items left out (or written `1*`) take the defaults shown in the field definitions.
+"""
+
+FMTIN = FlagKeyword("FMTIN")
+"""`FMTIN` - read restart / initial files in formatted (text) form."""
+
+FMTOUT = FlagKeyword("FMTOUT")
+"""`FMTOUT` - write output files in formatted (text) form."""
+
+NOECHO = FlagKeyword("NOECHO")
+"""
+`NOECHO` - stop echoing the deck to the print file from here on. It has no effect on what is
+read; it may appear in any section.
 """

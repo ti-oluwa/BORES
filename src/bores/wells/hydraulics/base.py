@@ -17,19 +17,13 @@ from bores.wells.state import ConnectionSample, PhaseValues
 __all__ = [
     "UNIT_SYSTEMS_BY_TAG",
     "UNIT_SYSTEM_TAGS",
-    "CompiledSurfaceFluids",
     "ConnectionFluids",
     "ConnectionWalk",
     "PressureDrop",
-    "SurfaceFluids",
     "SurfaceSample",
     "WellBoreModel",
     "WellBoreModelOptions",
-    "check_two_phase_surface_fluids",
     "compile_connection_fluids",
-    "compile_surface_fluids",
-    "compute_compiled_surface_mixture_density",
-    "compute_compiled_surface_mixture_viscosity",
     "compute_friction_factor",
     "compute_hydrostatic_pressure",
     "compute_mixture_density",
@@ -43,9 +37,10 @@ __all__ = [
     "compute_surface_mixture_viscosity",
     "get_gravitational_acceleration",
     "get_hydrostatic_divisor",
-    "get_two_phase_surface_properties",
     "get_unit_system_constant",
     "plan_connection_walk",
+    "require_static_column_density",
+    "require_two_phase_surface_properties",
     "split_liquid_gas",
 ]
 
@@ -73,137 +68,33 @@ class PressureDrop(typing.NamedTuple):
 
 
 class SurfaceSample(typing.NamedTuple):
-    """Fluid properties at surface conditions, for computing tubing head pressure."""
+    """
+    Fluid properties at surface conditions, for computing tubing head pressure.
 
-    density: Number | None = None
+    Anything not given is `NaN`.
+    """
+
+    density: Number = math.nan
     """Mixture density at surface conditions. Required unless `phase_densities` is given."""
 
-    viscosity: Number | None = None
+    viscosity: Number = math.nan
     """Mixture viscosity at surface conditions. Required unless `phase_viscosities` is given."""
 
-    phase_densities: PhaseValues | None = None
+    phase_densities: PhaseValues = PhaseValues(oil=math.nan, water=math.nan, gas=math.nan)
     """Density of each phase at surface conditions. Required for a
     two-phase slip correlation such as Beggs & Brill."""
 
-    phase_viscosities: PhaseValues | None = None
+    phase_viscosities: PhaseValues = PhaseValues(oil=math.nan, water=math.nan, gas=math.nan)
     """
     Viscosity of each phase at surface conditions. Required for a
     two-phase slip correlation such as Beggs & Brill.
     """
 
-    gas_liquid_surface_tension: Number | None = None
+    gas_liquid_surface_tension: Number = math.nan
     """
     Surface tension between the gas and liquid phases. Required for a
     two-phase slip correlation such as Beggs & Brill.
     """
-
-
-class CompiledSurfaceFluids(typing.NamedTuple):
-    """
-    A `SurfaceSample` flattened into plain numbers, so tubing head pressure can be worked out
-    inside compiled code. Anything the sample did not give is `NaN`.
-    """
-
-    mixture_density: Number
-    """Mixture density at surface conditions."""
-
-    mixture_viscosity: Number
-    """Mixture viscosity at surface conditions."""
-
-    oil_density: Number
-    """Oil density at surface conditions."""
-
-    water_density: Number
-    """Water density at surface conditions."""
-
-    gas_density: Number
-    """Gas density at surface conditions."""
-
-    oil_viscosity: Number
-    """Oil viscosity at surface conditions."""
-
-    water_viscosity: Number
-    """Water viscosity at surface conditions."""
-
-    gas_viscosity: Number
-    """Gas viscosity at surface conditions."""
-
-    gas_liquid_surface_tension: Number
-    """Surface tension between the gas and liquid phases."""
-
-
-SurfaceFluids = SurfaceSample | CompiledSurfaceFluids
-"""Surface fluid properties, either as the user gave them or already compiled."""
-
-
-def compile_surface_fluids(*, surface_sample: SurfaceFluids) -> CompiledSurfaceFluids:
-    """
-    Flattens a surface sample into the form tubing head pressure is worked out from in compiled
-    code.
-
-    :param surface_sample: The surface fluid properties. An already compiled sample is returned as
-        it is.
-    :returns: The same properties as plain numbers, `NaN` where the sample gave none.
-    """
-    if isinstance(surface_sample, CompiledSurfaceFluids):
-        return surface_sample
-    nan = math.nan
-    densities = surface_sample.phase_densities
-    viscosities = surface_sample.phase_viscosities
-    return CompiledSurfaceFluids(
-        mixture_density=nan if surface_sample.density is None else surface_sample.density,
-        mixture_viscosity=nan if surface_sample.viscosity is None else surface_sample.viscosity,
-        oil_density=nan if densities is None else densities.oil,
-        water_density=nan if densities is None else densities.water,
-        gas_density=nan if densities is None else densities.gas,
-        oil_viscosity=nan if viscosities is None else viscosities.oil,
-        water_viscosity=nan if viscosities is None else viscosities.water,
-        gas_viscosity=nan if viscosities is None else viscosities.gas,
-        gas_liquid_surface_tension=(
-            nan
-            if surface_sample.gas_liquid_surface_tension is None
-            else surface_sample.gas_liquid_surface_tension
-        ),
-    )
-
-
-def check_two_phase_surface_fluids(
-    *, surface_fluids: CompiledSurfaceFluids, model_label: str
-) -> None:
-    """
-    Checks that a surface sample has what a two-phase slip correlation needs.
-
-    :param surface_fluids: The compiled surface fluid properties.
-    :param model_label: The correlation's name, for the error message.
-    :raises ValueError: If a phase density, a phase viscosity or the gas-liquid surface tension is
-        missing.
-    """
-    if any(
-        math.isnan(value)
-        for value in (
-            surface_fluids.oil_density,
-            surface_fluids.water_density,
-            surface_fluids.gas_density,
-        )
-    ):
-        raise ValueError(
-            f"`SurfaceSample.phase_densities` is required for the {model_label} wellbore model."
-        )
-    if any(
-        math.isnan(value)
-        for value in (
-            surface_fluids.oil_viscosity,
-            surface_fluids.water_viscosity,
-            surface_fluids.gas_viscosity,
-        )
-    ):
-        raise ValueError(
-            f"`SurfaceSample.phase_viscosities` is required for the {model_label} wellbore model."
-        )
-    if math.isnan(surface_fluids.gas_liquid_surface_tension):
-        raise ValueError(
-            f"`SurfaceSample.gas_liquid_surface_tension` is required for the {model_label} wellbore model."
-        )
 
 
 class WellBoreModel(typing.NamedTuple):
@@ -333,146 +224,109 @@ def compute_mixture_velocity(
 
 
 @numba.njit(cache=True)
-def compute_compiled_surface_mixture_density(
-    surface_fluids: CompiledSurfaceFluids, phase_rates: PhaseValues
+def compute_surface_mixture_density(
+    density: Number, phase_densities: PhaseValues, phase_rates: PhaseValues
 ) -> Number:
     """
     Gets the surface mixture density, working it out from the phase densities if no mixture
     density was given.
 
-    :param surface_fluids: Compiled surface fluid properties.
+    :param density: Mixture density at surface conditions, or `NaN` if not given.
+    :param phase_densities: Density of each phase at surface conditions, `NaN` if not given.
     :param phase_rates: Rate of each phase, at surface conditions.
     :returns: Mixture density at surface conditions.
     :raises ValueError: If neither a mixture density nor all three phase densities were given.
     """
-    if not math.isnan(surface_fluids.mixture_density):
-        return surface_fluids.mixture_density
+    if not math.isnan(density):
+        return density
     if (
-        math.isnan(surface_fluids.oil_density)
-        or math.isnan(surface_fluids.water_density)
-        or math.isnan(surface_fluids.gas_density)
+        math.isnan(phase_densities.oil)
+        or math.isnan(phase_densities.water)
+        or math.isnan(phase_densities.gas)
     ):
         raise ValueError("`SurfaceSample` needs density or `phase_densities`")
-    return compute_mixture_density(
-        phase_rates=phase_rates,
-        phase_densities=PhaseValues(
-            oil=surface_fluids.oil_density,
-            water=surface_fluids.water_density,
-            gas=surface_fluids.gas_density,
-        ),
-    )
+    return compute_mixture_density(phase_rates=phase_rates, phase_densities=phase_densities)
 
 
 @numba.njit(cache=True)
-def compute_compiled_surface_mixture_viscosity(
-    surface_fluids: CompiledSurfaceFluids, phase_rates: PhaseValues
+def compute_surface_mixture_viscosity(
+    viscosity: Number, phase_viscosities: PhaseValues, phase_rates: PhaseValues
 ) -> Number:
     """
     Gets the surface mixture viscosity, working it out from the phase viscosities if no mixture
     viscosity was given.
 
-    :param surface_fluids: Compiled surface fluid properties.
+    :param viscosity: Mixture viscosity at surface conditions, or `NaN` if not given.
+    :param phase_viscosities: Viscosity of each phase at surface conditions, `NaN` if not given.
     :param phase_rates: Rate of each phase, at surface conditions.
     :returns: Mixture viscosity at surface conditions.
     :raises ValueError: If neither a mixture viscosity nor all three phase viscosities were given.
     """
-    if not math.isnan(surface_fluids.mixture_viscosity):
-        return surface_fluids.mixture_viscosity
+    if not math.isnan(viscosity):
+        return viscosity
     if (
-        math.isnan(surface_fluids.oil_viscosity)
-        or math.isnan(surface_fluids.water_viscosity)
-        or math.isnan(surface_fluids.gas_viscosity)
+        math.isnan(phase_viscosities.oil)
+        or math.isnan(phase_viscosities.water)
+        or math.isnan(phase_viscosities.gas)
     ):
         raise ValueError("`SurfaceSample` needs viscosity or `phase_viscosities`")
-    return compute_mixture_viscosity(
-        phase_rates=phase_rates,
-        phase_viscosities=PhaseValues(
-            oil=surface_fluids.oil_viscosity,
-            water=surface_fluids.water_viscosity,
-            gas=surface_fluids.gas_viscosity,
-        ),
-    )
+    return compute_mixture_viscosity(phase_rates=phase_rates, phase_viscosities=phase_viscosities)
 
 
 @numba.njit(cache=True)
-def get_two_phase_surface_properties(
-    surface_fluids: CompiledSurfaceFluids,
-) -> tuple[PhaseValues, PhaseValues, Number]:
+def require_two_phase_surface_properties(
+    phase_densities: PhaseValues,
+    phase_viscosities: PhaseValues,
+    gas_liquid_surface_tension: Number,
+) -> None:
     """
-    Gets what a two-phase slip correlation needs from the surface fluid properties.
+    Checks that the surface properties a two-phase slip correlation needs were given.
 
-    :param surface_fluids: Compiled surface fluid properties.
-    :returns: The phase densities, the phase viscosities and the gas-liquid surface tension.
-    :raises ValueError: If any of them was not given.
+    :param phase_densities: Density of each phase at surface conditions.
+    :param phase_viscosities: Viscosity of each phase at surface conditions.
+    :param gas_liquid_surface_tension: Surface tension between the gas and liquid phases.
+    :raises ValueError: If any of them is `NaN`.
     """
     if (
-        math.isnan(surface_fluids.oil_density)
-        or math.isnan(surface_fluids.water_density)
-        or math.isnan(surface_fluids.gas_density)
-        or math.isnan(surface_fluids.oil_viscosity)
-        or math.isnan(surface_fluids.water_viscosity)
-        or math.isnan(surface_fluids.gas_viscosity)
-        or math.isnan(surface_fluids.gas_liquid_surface_tension)
+        math.isnan(phase_densities.oil)
+        or math.isnan(phase_densities.water)
+        or math.isnan(phase_densities.gas)
     ):
         raise ValueError(
-            "A two-phase wellbore model needs the surface phase densities, phase viscosities "
-            "and gas-liquid surface tension."
+            "`SurfaceSample.phase_densities` is required for a two-phase wellbore model."
         )
-    return (
-        PhaseValues(
-            oil=surface_fluids.oil_density,
-            water=surface_fluids.water_density,
-            gas=surface_fluids.gas_density,
-        ),
-        PhaseValues(
-            oil=surface_fluids.oil_viscosity,
-            water=surface_fluids.water_viscosity,
-            gas=surface_fluids.gas_viscosity,
-        ),
-        surface_fluids.gas_liquid_surface_tension,
-    )
+    if (
+        math.isnan(phase_viscosities.oil)
+        or math.isnan(phase_viscosities.water)
+        or math.isnan(phase_viscosities.gas)
+    ):
+        raise ValueError(
+            "`SurfaceSample.phase_viscosities` is required for a two-phase wellbore model."
+        )
+    if math.isnan(gas_liquid_surface_tension):
+        raise ValueError(
+            "`SurfaceSample.gas_liquid_surface_tension` is required for a two-phase wellbore model."
+        )
 
 
-def compute_surface_mixture_density(properties: SurfaceSample, phase_rates: PhaseValues) -> Number:
+@numba.njit(cache=True)
+def require_static_column_density(density: Number) -> Number:
     """
-    Gets the surface mixture density from `properties`, computing it from
-    per-phase data if it wasn't supplied directly.
+    Gets the density of the fluid column in a well with no flow.
 
-    :param properties: Surface fluid properties for the well.
-    :param phase_rates: Rate of each phase, at surface conditions.
-    :returns: Mixture density at surface conditions.
-    :raises ValueError: If neither `properties.density` nor
-        `properties.phase_densities` is set.
+    With no flow there are no rates to weight the phases by, so the column's density has to be
+    given directly.
+
+    :param density: Mixture density at surface conditions, `NaN` if not given.
+    :returns: The same density.
+    :raises ValueError: If no density was given.
     """
-    if properties.density is not None:
-        return properties.density
-    if properties.phase_densities is None:
-        raise ValueError("`SurfaceSample` needs density or `phase_densities`")
-    return compute_mixture_density(
-        phase_rates=phase_rates, phase_densities=properties.phase_densities
-    )
-
-
-def compute_surface_mixture_viscosity(
-    properties: SurfaceSample, phase_rates: PhaseValues
-) -> Number:
-    """
-    Gets the surface mixture viscosity from `properties`, computing it
-    from per-phase data if it wasn't supplied directly.
-
-    :param properties: Surface fluid properties for the well.
-    :param phase_rates: Rate of each phase, at surface conditions.
-    :returns: Mixture viscosity at surface conditions.
-    :raises ValueError: If neither `properties.viscosity` nor
-        `properties.phase_viscosities` is set.
-    """
-    if properties.viscosity is not None:
-        return properties.viscosity
-    if properties.phase_viscosities is None:
-        raise ValueError("`SurfaceSample` needs viscosity or `phase_viscosities`")
-    return compute_mixture_viscosity(
-        phase_rates=phase_rates, phase_viscosities=properties.phase_viscosities
-    )
+    if math.isnan(density):
+        raise ValueError(
+            "A well with no flow needs `SurfaceSample.density` to give the density of the "
+            "fluid column."
+        )
+    return density
 
 
 @numba.njit(cache=True)

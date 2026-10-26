@@ -34,10 +34,13 @@ __all__ = [
     "DZ",
     "DZV",
     "FAULTS",
+    "GDORIENT",
+    "GRIDFILE",
     "GRIDUNIT",
     "INIT",
     "MAPAXES",
     "MAPUNITS",
+    "MINPV",
     "MULTFLT",
     "MULTX",
     "MULTX_MINUS",
@@ -45,6 +48,7 @@ __all__ = [
     "MULTY_MINUS",
     "MULTZ",
     "MULTZ_MINUS",
+    "NEWTRAN",
     "NNC",
     "NTG",
     "PERMX",
@@ -288,6 +292,102 @@ porosity, permeability, and transmissibility multipliers) as simulation output.
 
 Bare/nullary keyword (no data section). `parse` returns `True` if present in the
 deck, `False` otherwise. It does not change the simulation itself.
+"""
+
+GDORIENT = RecordKeyword[str](
+    "GDORIENT",
+    fields=[
+        Field(
+            "i_direction",
+            uppercase,
+            required=False,
+            default="INC",
+            options={"INC", "DEC"},
+        ),
+        Field(
+            "j_direction",
+            uppercase,
+            required=False,
+            default="INC",
+            options={"INC", "DEC"},
+        ),
+        Field(
+            "k_direction",
+            uppercase,
+            required=False,
+            default="INC",
+            options={"INC", "DEC"},
+        ),
+        Field(
+            "z_direction",
+            uppercase,
+            required=False,
+            default="DOWN",
+            options={"DOWN", "UP"},
+        ),
+        Field(
+            "handedness",
+            uppercase,
+            required=False,
+            default="RIGHT",
+            options={"RIGHT", "LEFT"},
+        ),
+    ],
+)
+"""
+`GDORIENT I J K Z HAND /` - orientation of the grid axes.
+
+Says which way the cell indices run and how the depth axis points. Every item is optional and
+takes the default shown when left out.
+
+Fields:
+
+- `i_direction`, `j_direction`, `k_direction`: whether the `I`, `J` and `K` index increases
+  (`"INC"`, default) or decreases (`"DEC"`) along its coordinate axis.
+- `z_direction`: whether depth, the `Z` axis, points `"DOWN"` (default) or `"UP"`.
+- `handedness`: whether the axes form a `"RIGHT"` (default) or a `"LEFT"` handed system.
+
+`GDORIENT INC INC INC DOWN LEFT /` is therefore a left-handed grid whose indices all increase
+along their axes, with depth increasing downwards.
+"""
+
+GRIDFILE = RecordKeyword[int](
+    "GRIDFILE",
+    fields=[
+        Field("grid", int, required=False, default=0),
+        Field("egrid", int, required=False, default=1),
+    ],
+)
+"""
+`GRIDFILE GRID EGRID /` - which grid geometry files the run writes.
+
+Fields:
+
+- `grid`: `1` writes the `.GRID` file, `0` (default) does not.
+- `egrid`: `1` (default) writes the `.EGRID` file, `0` does not.
+
+`GRIDFILE 0 1 /` asks for an `.EGRID` file and no `.GRID` file. It only affects output, not the
+simulation.
+"""
+
+MINPV = RecordKeyword[float](
+    "MINPV",
+    fields=[Field("minpv", np.float64, required=False)],
+)
+"""
+`MINPV VALUE /` - minimum pore volume for a cell to be active.
+
+A cell whose pore volume is below `minpv` is made inactive. The value is a reservoir volume in
+the deck's unit system. It is `None` when left out: the simulator's own default applies.
+"""
+
+NEWTRAN = FlagKeyword("NEWTRAN")
+"""
+`NEWTRAN` - calculate transmissibilities with the newer method rather than the older one
+(`OLDTRAN`).
+
+Bare/nullary keyword (no data section). `parse` returns `True` if present in the deck, `False`
+otherwise.
 """
 
 PINCHOUT = FlagKeyword("PINCHOUT")

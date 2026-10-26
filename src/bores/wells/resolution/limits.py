@@ -15,7 +15,7 @@ from bores.wells.compile import (
     LimitKind,
     RateQuantityTag,
 )
-from bores.wells.hydraulics.base import SurfaceFluids
+from bores.wells.hydraulics.base import SurfaceSample
 from bores.wells.resolution.solvers import (
     RATE_QUANTITY_PHASES,
     compute_tubing_head_pressure,
@@ -144,7 +144,7 @@ def get_thp_bound(
     min_pressure: Number,
     max_pressure: Number,
     control_spec: WellControlSpec,
-    surface_sample: SurfaceFluids | None,
+    surface_sample: SurfaceSample | None,
 ) -> Number | None:
     """
     Gets the bounding BHP for a `THPLimit` row, if violated.
@@ -280,7 +280,7 @@ def apply_limits(
     min_pressure: Number,
     max_pressure: Number,
     control_spec: WellControlSpec,
-    surface_sample: SurfaceFluids | None = None,
+    surface_sample: SurfaceSample | None = None,
 ) -> tuple[Number, NumberArray[OneDimension], PhaseValues, PhaseValues, Integer, bool]:
     """
     Evaluates every limit row in `[limits_start, limits_end)` against a
