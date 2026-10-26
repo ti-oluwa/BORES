@@ -521,7 +521,7 @@ def solve_bhp(
         always reservoir-condition regardless of `target_rate_condition`.
     :raises ValidationError: If `metric="thp"` and `surface_sample` is `None`.
     """
-    if metric == "thp" and surface_sample is None and tubing.vfp_table is None:
+    if metric == "thp" and surface_sample is None and tubing.needs_surface_sample:
         raise ValidationError("solve_bhp(..., metric='thp') requires `surface_sample`.")
 
     if metric == "rate":

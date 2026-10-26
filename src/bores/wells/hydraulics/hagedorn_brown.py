@@ -37,6 +37,7 @@ from bores.wells.hydraulics.base import (
     require_two_phase_surface_properties,
     split_liquid_gas,
 )
+from bores.wells.hydraulics.tubing_fluids import TubingFluidTable, compute_two_phase_flow
 from bores.wells.state import PhaseValues
 
 __all__ = [
@@ -46,6 +47,7 @@ __all__ = [
     "compute_perforation_pressures",
     "compute_segment_drop",
     "compute_tubing_head_pressure",
+    "compute_tubing_head_pressure_from_table",
     "hagedorn_brown_wellbore",
     "is_griffith_bubble_flow",
 ]
@@ -526,7 +528,9 @@ def compute_segment_drop(
         tubing_inner_diameter=model.tubing_inner_diameter,
         field_length_factor=model.field_length_factor,
     )
-    if bubble_flow:
+    if superficial_liquid_velocity <= 0.0:
+        in_situ_holdup = 0.0
+    elif bubble_flow:
         in_situ_holdup = compute_griffith_holdup(
             superficial_liquid_velocity=superficial_liquid_velocity,
             superficial_gas_velocity=superficial_gas_velocity,
@@ -921,3 +925,110 @@ def compute_tubing_head_pressure(
     return (
         reference_pressure - (drop.hydrostatic + drop.acceleration) - friction_sign * drop.friction
     )
+
+
+@numba.njit(cache=True)
+def compute_tubing_head_pressure_from_table(
+    model: HagedornBrownWellbore,
+    reference_depth: Number,
+    reference_pressure: Number,
+    surface_phase_rates: PhaseValues,
+    tubing_fluids: TubingFluidTable,
+    is_injector: Boolean,
+    static_density: Number,
+) -> Number:
+    """
+    Computes tubing head pressure by marching up the tubing in segments, with the fluids of each
+    segment read from `tubing_fluids` at that segment's own pressure.
+
+    The kinetic energy term of the original 1965 correlation is applied in every segment,
+    from the mixture velocity at each end of it and the in-situ mixture density of the segment.
+
+    :param model: This well's `HagedornBrownWellbore`.
+    :param reference_depth: The well's BHP/THP reporting datum.
+    :param reference_pressure: Pressure at `reference_depth`.
+    :param surface_phase_rates: Rate of each phase at surface conditions. The gas rate is the
+        total, free and dissolved.
+    :param tubing_fluids: The well's fluid properties against pressure.
+    :param is_injector: Whether this well is an injector.
+    :param static_density: Density of the column when the well has no flow. `NaN` if unknown.
+    :returns: Tubing head pressure.
+    :raises ValueError: If the well has no flow and `static_density` is `NaN`.
+    """
+    length = abs(0.0 - reference_depth)
+    oil_rate = surface_phase_rates.oil
+    water_rate = surface_phase_rates.water
+    gas_rate = surface_phase_rates.gas
+    if oil_rate + water_rate + gas_rate == 0:
+        density = require_static_column_density(density=static_density)
+        return (
+            reference_pressure
+            - density * model.gravitational_acceleration * length * model.hydrostatic_scale
+        )
+
+    friction_sign = -1.0 if is_injector else 1.0
+    segment_length = length / tubing_fluids.segment_count
+    pressure = reference_pressure
+    for _ in range(tubing_fluids.segment_count):
+        end_pressure = pressure
+        for _ in range(3):
+            mean_pressure = 0.5 * (pressure + end_pressure)
+            # A pressure below the table's lowest is read as the lowest, which a THP search
+            # can probe when a candidate BHP is too low to lift the fluid.
+            local_pressure = max(mean_pressure, tubing_fluids.pressures[0])
+            flow = compute_two_phase_flow(
+                table=tubing_fluids,
+                pressure=local_pressure,
+                surface_oil_rate=oil_rate,
+                surface_water_rate=water_rate,
+                surface_gas_rate=gas_rate,
+                tubing_inner_diameter=model.tubing_inner_diameter,
+                rate_time_factor=model.rate_time_factor,
+            )
+            start = compute_two_phase_flow(
+                table=tubing_fluids,
+                pressure=pressure,
+                surface_oil_rate=oil_rate,
+                surface_water_rate=water_rate,
+                surface_gas_rate=gas_rate,
+                tubing_inner_diameter=model.tubing_inner_diameter,
+                rate_time_factor=model.rate_time_factor,
+            )
+            end = compute_two_phase_flow(
+                table=tubing_fluids,
+                pressure=end_pressure,
+                surface_oil_rate=oil_rate,
+                surface_water_rate=water_rate,
+                surface_gas_rate=gas_rate,
+                tubing_inner_diameter=model.tubing_inner_diameter,
+                rate_time_factor=model.rate_time_factor,
+            )
+            drop = compute_segment_drop(
+                model=model,
+                length=segment_length,
+                inclination_from_vertical=0.0,
+                superficial_liquid_velocity=flow.superficial_liquid_velocity,
+                superficial_gas_velocity=flow.superficial_gas_velocity,
+                liquid_density=flow.liquid_density,
+                gas_density=flow.gas_density,
+                liquid_viscosity=flow.liquid_viscosity,
+                gas_viscosity=flow.gas_viscosity,
+                liquid_surface_tension=flow.gas_liquid_surface_tension,
+                pressure=local_pressure,
+                is_injector=is_injector,
+            )
+            # The segment is vertical, so its hydrostatic drop gives back its in-situ mixture density.
+            in_situ_density = drop.hydrostatic / (
+                model.gravitational_acceleration * segment_length * model.hydrostatic_scale
+            )
+            start_velocity = start.superficial_liquid_velocity + start.superficial_gas_velocity
+            end_velocity = end.superficial_liquid_velocity + end.superficial_gas_velocity
+            kinetic = (
+                in_situ_density
+                * 0.5
+                * (end_velocity * end_velocity - start_velocity * start_velocity)
+                * model.hydrostatic_scale
+            )
+            end_pressure = pressure - drop.hydrostatic - friction_sign * (drop.friction + kinetic)
+        pressure = end_pressure
+    return pressure

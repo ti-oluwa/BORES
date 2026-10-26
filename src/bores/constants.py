@@ -991,6 +991,14 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         ),
         unit="dimensionless",
     ),
+    "TUBING_SEGMENT_COUNT": Constant(
+        value=20,
+        description=(
+            "Number of equal segments a tubing head pressure is marched up the tubing in, when "
+            "the well has a tubing fluid table."
+        ),
+        unit="segments",
+    ),
     "COLEBROOK_MAX_ITERATIONS": Constant(
         value=50,
         description=(

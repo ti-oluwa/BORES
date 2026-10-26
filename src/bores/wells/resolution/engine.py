@@ -136,9 +136,10 @@ def resolve_well_control(
         well that is shut or has no open connection in effect.
     :param workspace: The system-wide `WellsWorkspace` to update in place.
     :param control_spec: Solver tunables.
-    :param surface_sample: Required to compute THP with a `WellBoreModel`, or to
-        resolve a `THP`-mode control or check a `THPLimit` with one. A VFP table doesn't need
-        it. Omit if none of those apply to this well.
+    :param surface_sample: Required to compute THP with a `WellBoreModel` that has no
+        `tubing_fluids`, or to resolve a `THP`-mode control or check a `THPLimit` with one.
+        A VFP table, or a `WellBoreModel` with `tubing_fluids`, doesn't need it. Omit if none of
+        those apply to this well.
     :raises ValidationError: If `control_modes[well_row]` isn't a
         recognized tag for this well's `well_kinds[well_row]`, if this
         well is under THP control or has a `THPLimit`/THP reporting
@@ -245,7 +246,7 @@ def resolve_well_control(
                 control_spec=control_spec,
             )
         elif control_mode == InjectorControlModeTag.THP:
-            if surface_sample is None:
+            if surface_sample is None and tubing.needs_surface_sample:
                 raise ValidationError("A THP-mode injector requires `surface_sample`.")
             if not tubing.can_evaluate_thp:
                 raise ValidationError(
@@ -321,7 +322,7 @@ def resolve_well_control(
                 control_spec=control_spec,
             )
         elif control_mode == ProducerControlModeTag.THP:
-            if surface_sample is None:
+            if surface_sample is None and tubing.needs_surface_sample:
                 raise ValidationError("A THP-mode producer requires `surface_sample`.")
             if not tubing.can_evaluate_thp:
                 raise ValidationError(
@@ -431,12 +432,14 @@ def resolve_well_control(
             "flagged to end the run."
         )
 
-    if tubing.vfp_table is not None or (
-        tubing.wellbore is not None and surface_sample is not None
+    if (
+        tubing.vfp_table is not None
+        or tubing.uses_tubing_fluids
+        or (tubing.wellbore is not None and surface_sample is not None)
     ):
         total_rate = phase_rates.oil + phase_rates.water + phase_rates.gas
         if (
-            tubing.vfp_table is None
+            tubing.needs_surface_sample
             and total_rate == 0
             and surface_sample is not None
             and math.isnan(surface_sample.density)

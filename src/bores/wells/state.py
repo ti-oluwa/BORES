@@ -68,6 +68,13 @@ class ConnectionSample(typing.NamedTuple):
     connection's current pressure.
     """
 
+    solution_gas_oil_ratio: Number = 0.0
+    """
+    Gas the oil at this connected cell holds in solution, per stock-tank barrel of oil. Needed
+    to count the dissolved gas of a well's produced oil, when the tubing head pressure is found
+    from a table of tubing fluids. Zero if the oil is taken to hold no gas.
+    """
+
 
 @attrs.frozen(kw_only=True, slots=True)
 class PerforationState(StoreSerializable):

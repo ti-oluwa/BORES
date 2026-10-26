@@ -12,6 +12,7 @@ pressure distribution below the datum is unaffected by whether a table is assign
 
 import enum
 import logging
+import math
 import typing
 
 import attrs
@@ -42,7 +43,10 @@ from bores.units import UnitConversionTable, get_conversion_factors
 from bores.utils import scale
 from bores.wells.base import WellType
 from bores.wells.hydraulics.base import SurfaceSample, WellBoreModel
-from bores.wells.hydraulics.dispatch import compute_tubing_head_pressure
+from bores.wells.hydraulics.dispatch import (
+    compute_tubing_head_pressure,
+    compute_tubing_head_pressure_from_table,
+)
 from bores.wells.state import PhaseValues
 
 __all__ = [
@@ -1302,7 +1306,8 @@ def bisect_bhp_for_thp(
     wellbore: WellBoreModel,
     reference_depth: Number,
     phase_rates: PhaseValues,
-    surface_sample: SurfaceSample,
+    surface_phase_rates: PhaseValues,
+    surface_sample: SurfaceSample | None,
     is_injector: bool,
     target_thp: Number,
     min_bhp: Number,
@@ -1314,14 +1319,25 @@ def bisect_bhp_for_thp(
     bhp = 0.5 * (low + high)
     for _ in range(max_iterations):
         bhp = 0.5 * (low + high)
-        thp = compute_tubing_head_pressure(
-            wellbore=wellbore,
-            reference_depth=reference_depth,
-            reference_pressure=bhp,
-            phase_rates=phase_rates,
-            surface_sample=surface_sample,
-            is_injector=is_injector,
-        )
+        if wellbore.tubing_fluids is not None:
+            thp = compute_tubing_head_pressure_from_table(
+                wellbore=wellbore,
+                reference_depth=reference_depth,
+                reference_pressure=bhp,
+                surface_phase_rates=surface_phase_rates,
+                is_injector=is_injector,
+                static_density=surface_sample.density if surface_sample is not None else math.nan,
+            )
+        else:
+            assert surface_sample is not None
+            thp = compute_tubing_head_pressure(
+                wellbore=wellbore,
+                reference_depth=reference_depth,
+                reference_pressure=bhp,
+                phase_rates=phase_rates,
+                surface_sample=surface_sample,
+                is_injector=is_injector,
+            )
         if abs(thp - target_thp) <= convergence_tolerance * max(abs(target_thp), 1.0):
             break
         # Higher BHP means higher THP, for both well types.
@@ -1340,7 +1356,7 @@ def as_vfp_table(
     reference_depth: Number,
     flow_rates: NumberArray[OneDimension],
     thps: NumberArray[OneDimension],
-    surface_sample: SurfaceSample,
+    surface_sample: SurfaceSample | None = None,
     flow_type: VFPFlowType | None = None,
     water_fraction_type: VFPWaterFractionType = VFPWaterFractionType.WATER_CUT,
     gas_fraction_type: VFPGasFractionType = VFPGasFractionType.GAS_OIL_RATIO,
@@ -1382,8 +1398,9 @@ def as_vfp_table(
     :param reference_depth: The well's BHP/THP reporting datum.
     :param flow_rates: Flow rate axis, at surface conditions, in the terms of `flow_type`.
     :param thps: Tubing head pressure axis to solve BHP for.
-    :param surface_sample: Fixed surface fluid properties used
-        for every grid point.
+    :param surface_sample: Fixed surface fluid properties used for every grid point. Not needed
+        if `wellbore` has `tubing_fluids`, which then give the fluids at every pressure, and
+        the grid is sampled from surface-condition rates directly.
     :param flow_type: What `flow_rates` measures. For a producer, liquid rate if not given.
         For an injector, the phase of `injected_phase`.
     :param water_fraction_type: What `water_fractions` measures. Ignored for an injector.
@@ -1412,6 +1429,9 @@ def as_vfp_table(
         don't describe non-negative phase rates.
     """
     is_injector = well_type == WellType.INJECTOR
+    if surface_sample is None and wellbore.tubing_fluids is None:
+        raise ValidationError("`surface_sample` is needed when `wellbore` has no `tubing_fluids`.")
+
     resolved_formation_volume_factors = (
         formation_volume_factors
         if formation_volume_factors is not None
@@ -1474,6 +1494,7 @@ def as_vfp_table(
                         wellbore=wellbore,
                         reference_depth=reference_depth,
                         phase_rates=phase_rates,
+                        surface_phase_rates=surface_phase_rates,
                         surface_sample=surface_sample,
                         is_injector=is_injector,
                         target_thp=thp,

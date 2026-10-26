@@ -9,10 +9,14 @@ import numpy.typing as npt
 from typing_extensions import Self
 
 from bores.constants import c
+from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.types import Number, NumberArray, OneDimension, UnitConversionTable, UnitSystem
 from bores.units import get_conversion_factors
 from bores.wells.state import ConnectionSample, PhaseValues
+
+if typing.TYPE_CHECKING:
+    from bores.wells.hydraulics.tubing_fluids import TubingFluidTable
 
 __all__ = [
     "UNIT_SYSTEMS_BY_TAG",
@@ -108,6 +112,14 @@ class WellBoreModel(typing.NamedTuple):
     options: typing.Any
     """Wellbore model's/correlation's configuration."""
 
+    tubing_fluids: "TubingFluidTable | None" = None
+    """
+    The fluid properties of the tubing against pressure. With them, the tubing head pressure is
+    found by marching up the tubing with the fluids of each segment at its own pressure, from
+    surface-condition rates. Without them, the tubing is taken as one segment, with the surface
+    fluid properties of a `SurfaceSample`.
+    """
+
     def convert(
         self,
         target: UnitSystem,
@@ -122,11 +134,18 @@ class WellBoreModel(typing.NamedTuple):
         :param table: Optional custom unit-conversion table, forwarded to `options.convert`.
         :returns: This model, with `options` converted to `target`.
         :raises ValueError: If `options` has no `convert` method.
+        :raises ValidationError: If the model has `tubing_fluids` in another unit system. Build
+            them again for `target` with `compile_tubing_fluid_table`.
         """
         if not hasattr(self.options, "convert"):
             raise ValueError(
                 f"{self.__class__.__name__} {self.name!r}'s options ({type(self.options).__name__}) "
                 "has no convert method."
+            )
+        if self.tubing_fluids is not None and self.tubing_fluids.unit_system != target:
+            raise ValidationError(
+                f"This model's tubing fluids are in {self.tubing_fluids.unit_system.value} units. "
+                f"Build them again for {target.value} units with `compile_tubing_fluid_table`."
             )
         return self._replace(options=self.options.convert(target, table=table))  # type: ignore[attr-defined]
 
@@ -511,6 +530,9 @@ class ConnectionFluids(typing.NamedTuple):
     gas_formation_volume_factors: NumberArray[OneDimension]
     """Gas formation volume factor at each connection's current pressure."""
 
+    solution_gas_oil_ratios: NumberArray[OneDimension]
+    """Gas the oil holds in solution at each connection, per stock-tank barrel of oil."""
+
 
 class ConnectionWalk(typing.NamedTuple):
     """
@@ -580,6 +602,7 @@ def compile_connection_fluids(
         oil_formation_volume_factors=gather(lambda sample: sample.phase_fvfs.oil),
         water_formation_volume_factors=gather(lambda sample: sample.phase_fvfs.water),
         gas_formation_volume_factors=gather(lambda sample: sample.phase_fvfs.gas),
+        solution_gas_oil_ratios=gather(lambda sample: sample.solution_gas_oil_ratio),
     )
 
 

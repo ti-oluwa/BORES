@@ -365,7 +365,7 @@ def apply_limits(
                 control_spec=control_spec,
             )
         elif kind == LimitKind.THP:
-            if surface_sample is None and tubing.vfp_table is None:
+            if surface_sample is None and tubing.needs_surface_sample:
                 raise ValidationError(
                     "A THP limit is present but no `surface_sample` "
                     "was supplied to `apply_limits`. THP limits can't be "

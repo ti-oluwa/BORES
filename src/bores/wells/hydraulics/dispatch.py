@@ -11,11 +11,17 @@ from bores.wells.hydraulics.beggs_and_brill import (
 from bores.wells.hydraulics.beggs_and_brill import (
     compute_tubing_head_pressure as compute_beggs_brill_tubing_head_pressure,
 )
+from bores.wells.hydraulics.beggs_and_brill import (
+    compute_tubing_head_pressure_from_table as compute_beggs_and_brill_tubing_head_pressure_from_table,
+)
 from bores.wells.hydraulics.gray import (
     compute_perforation_pressures as compute_gray_perforation_pressures,
 )
 from bores.wells.hydraulics.gray import (
     compute_tubing_head_pressure as compute_gray_tubing_head_pressure,
+)
+from bores.wells.hydraulics.gray import (
+    compute_tubing_head_pressure_from_table as compute_gray_tubing_head_pressure_from_table,
 )
 from bores.wells.hydraulics.hagedorn_brown import (
     compute_perforation_pressures as compute_hagedorn_brown_perforation_pressures,
@@ -23,11 +29,17 @@ from bores.wells.hydraulics.hagedorn_brown import (
 from bores.wells.hydraulics.hagedorn_brown import (
     compute_tubing_head_pressure as compute_hagedorn_brown_tubing_head_pressure,
 )
+from bores.wells.hydraulics.hagedorn_brown import (
+    compute_tubing_head_pressure_from_table as compute_hagedorn_brown_tubing_head_pressure_from_table,
+)
 from bores.wells.hydraulics.homogeneous import (
     compute_perforation_pressures as compute_homogeneous_perforation_pressures,
 )
 from bores.wells.hydraulics.homogeneous import (
     compute_tubing_head_pressure as compute_homogeneous_tubing_head_pressure,
+)
+from bores.wells.hydraulics.homogeneous import (
+    compute_tubing_head_pressure_from_table as compute_homogeneous_tubing_head_pressure_from_table,
 )
 from bores.wells.hydraulics.woldesemayat_ghajar import (
     compute_perforation_pressures as compute_woldesemayat_ghajar_perforation_pressures,
@@ -35,8 +47,15 @@ from bores.wells.hydraulics.woldesemayat_ghajar import (
 from bores.wells.hydraulics.woldesemayat_ghajar import (
     compute_tubing_head_pressure as compute_woldesemayat_ghajar_tubing_head_pressure,
 )
+from bores.wells.hydraulics.woldesemayat_ghajar import (
+    compute_tubing_head_pressure_from_table as compute_woldesemayat_ghajar_tubing_head_pressure_from_table,
+)
 
-__all__ = ["compute_perforation_pressures", "compute_tubing_head_pressure"]
+__all__ = [
+    "compute_perforation_pressures",
+    "compute_tubing_head_pressure",
+    "compute_tubing_head_pressure_from_table",
+]
 
 
 class PerforationPressuresFunction(typing.Protocol):
@@ -77,6 +96,15 @@ TUBING_HEAD_PRESSURE_FUNCTIONS: dict[str, TubingHeadPressureFunction] = {
     "hagedorn_brown": compute_hagedorn_brown_tubing_head_pressure,
     "gray": compute_gray_tubing_head_pressure,
     "woldesemayat_ghajar": compute_woldesemayat_ghajar_tubing_head_pressure,
+}
+
+TUBING_HEAD_PRESSURE_FROM_TABLE_FUNCTIONS: dict[str, TubingHeadPressureFunction] = {
+    "homogeneous": compute_homogeneous_tubing_head_pressure_from_table,
+    "beggs_brill": compute_beggs_and_brill_tubing_head_pressure_from_table,
+    "beggs_and_brill": compute_beggs_and_brill_tubing_head_pressure_from_table,
+    "hagedorn_brown": compute_hagedorn_brown_tubing_head_pressure_from_table,
+    "gray": compute_gray_tubing_head_pressure_from_table,
+    "woldesemayat_ghajar": compute_woldesemayat_ghajar_tubing_head_pressure_from_table,
 }
 
 
@@ -125,3 +153,28 @@ def compute_tubing_head_pressure(
     if compute is None:
         raise ValidationError(f"Unknown `WellBoreModel` name: {wellbore.name!r}")
     return typing.cast(Number, compute(model=wellbore.options, **kwargs))
+
+
+def compute_tubing_head_pressure_from_table(
+    *, wellbore: WellBoreModel | None, **kwargs: typing.Any
+) -> Number:
+    """
+    Compute tubing head pressure by marching up the tubing with the fluids of `wellbore.tubing_fluids`,
+    using the correlation named by `wellbore.name`.
+
+    :param wellbore: `WellBoreModel` naming a hydraulics correlation, with `tubing_fluids`.
+    :param kwargs: Forwarded to that correlation's `compute_tubing_head_pressure_from_table`,
+        except for `tubing_fluids`, which is `wellbore.tubing_fluids`.
+    :returns: Tubing head pressure.
+    :raises ValidationError: If `wellbore` is `None` or has no `tubing_fluids`, or its name isn't
+        recognized.
+    """
+    if wellbore is None or wellbore.tubing_fluids is None:
+        raise ValidationError("This needs a `WellBoreModel` with `tubing_fluids`.")
+    compute = TUBING_HEAD_PRESSURE_FROM_TABLE_FUNCTIONS.get(wellbore.name)
+    if compute is None:
+        raise ValidationError(f"Unknown `WellBoreModel` name: {wellbore.name!r}")
+    return typing.cast(
+        Number,
+        compute(model=wellbore.options, tubing_fluids=wellbore.tubing_fluids, **kwargs),
+    )

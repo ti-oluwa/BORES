@@ -45,6 +45,11 @@ from bores.wells.hydraulics.hagedorn_brown import (
     is_griffith_bubble_flow,
 )
 from bores.wells.hydraulics.homogeneous import HomogeneousWellbore, homogeneous_wellbore
+from bores.wells.hydraulics.tubing_fluids import (
+    TubingFluidSample,
+    TubingFluidTable,
+    compile_tubing_fluid_table,
+)
 from bores.wells.hydraulics.vfp import VFPData, VFPTable, VFPTables
 from bores.wells.hydraulics.woldesemayat_ghajar import (
     WoldesemayatGhajarWellbore,
@@ -60,6 +65,8 @@ __all__ = [
     "HomogeneousWellbore",
     "PressureDrop",
     "SurfaceSample",
+    "TubingFluidSample",
+    "TubingFluidTable",
     "VFPData",
     "VFPTable",
     "VFPTables",
@@ -68,6 +75,7 @@ __all__ = [
     "WoldesemayatGhajarWellbore",
     "beggs_and_brill_wellbore",
     "compile_connection_fluids",
+    "compile_tubing_fluid_table",
     "compute_beggs_brill_holdup",
     "compute_friction_factor",
     "compute_gray_effective_roughness",

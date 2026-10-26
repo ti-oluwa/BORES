@@ -26,8 +26,14 @@ from bores.wells.hydraulics.base import (
 from bores.wells.hydraulics.dispatch import (
     compute_tubing_head_pressure as compute_wellbore_tubing_head_pressure,
 )
+from bores.wells.hydraulics.dispatch import (
+    compute_tubing_head_pressure_from_table as compute_wellbore_tubing_head_pressure_from_table,
+)
 from bores.wells.hydraulics.vfp import VFPTable, VFPTables
 from bores.wells.workspace import ConnectionRates, PerforationWorkspace
+
+if typing.TYPE_CHECKING:
+    from bores.wells.hydraulics.tubing_fluids import TubingFluidTable
 
 __all__ = [
     "FlowingFluid",
@@ -57,6 +63,12 @@ class FlowingFluid(typing.NamedTuple):
     that phase's share of the well's total deliverability.
     """
 
+    oil_formation_volume_factors: NumberArray[OneDimension] | None = None
+    """Oil formation volume factor at each connection."""
+
+    solution_gas_oil_ratios: NumberArray[OneDimension] | None = None
+    """Gas the oil holds in solution at each connection, per stock-tank barrel."""
+
 
 class WellTubing(typing.NamedTuple):
     """The tubing performance of one well, resolved for the current moment of a run."""
@@ -75,6 +87,20 @@ class WellTubing(typing.NamedTuple):
     The fluid the well flows. Needed to move a VFP table's BHP between its datum depth
     and the well's reference depth, when they differ.
     """
+
+    @property
+    def uses_tubing_fluids(self) -> bool:
+        """Whether the tubing head pressure is found by marching up the tubing with fluid tables."""
+        return self.wellbore is not None and self.wellbore.tubing_fluids is not None
+
+    @property
+    def needs_surface_sample(self) -> bool:
+        """Whether the tubing head pressure needs the surface fluid properties of a sample."""
+        return (
+            self.vfp_table is None
+            and self.wellbore is not None
+            and self.wellbore.tubing_fluids is None
+        )
 
     @property
     def can_evaluate_thp(self) -> bool:
@@ -126,18 +152,19 @@ def attach_flowing_fluid(
     relevant_phases: PhaseValues,
 ) -> WellTubing:
     """
-    Records the densities at a well's connections, for a well whose tubing is a VFP table.
+    Records the fluids at a well's connections, for a well whose tubing is a VFP table or has
+    tubing fluid tables.
 
-    A well with a correlation is returned unchanged, since the correlation works from the
-    connection samples itself.
+    A well with a correlation and no tubing fluid tables is returned unchanged, since the
+    correlation works from the connection samples itself.
 
     :param tubing: The well's tubing performance.
     :param workspace: The well's perforation workspace.
     :param relevant_phases: Mask of the phases the well flows: all three for a producer, only
         the injected phase for an injector.
-    :returns: `tubing`, with its `flowing_fluid` set if it has a VFP table.
+    :returns: `tubing`, with its `flowing_fluid` set if it has a VFP table or tubing fluids.
     """
-    if tubing.vfp_table is None:
+    if tubing.vfp_table is None and not tubing.uses_tubing_fluids:
         return tubing
 
     fluids = workspace.connection_fluids
@@ -166,6 +193,8 @@ def attach_flowing_fluid(
             oil_densities=densities[0],
             water_densities=densities[1],
             gas_densities=densities[2],
+            oil_formation_volume_factors=fluids.oil_formation_volume_factors,
+            solution_gas_oil_ratios=fluids.solution_gas_oil_ratios,
             zero_flow_density=sum(
                 fraction * average
                 for fraction, average in zip(fractions, phase_averages, strict=True)
@@ -198,6 +227,33 @@ def compute_flowing_density(
         + np.dot(gas_rate, flowing_fluid.gas_densities)
     )
     return mass_rate / volumetric_rate
+
+
+def compute_dissolved_gas_rate(
+    *,
+    flowing_fluid: FlowingFluid,
+    connection_rates: ConnectionRates,
+    stb_to_volume_factor: Number,
+) -> Number:
+    """
+    Computes the gas a well's oil carries in solution to the surface.
+
+    The resolver's surface gas rate counts only the gas that flows free at the connections.
+
+    :param flowing_fluid: What the well's connections hold.
+    :param connection_rates: Reservoir-condition phase rates at each connection.
+    :param stb_to_volume_factor: `TubingFluidTable.stb_to_volume_factor`.
+    :returns: The dissolved gas rate, at surface conditions.
+    """
+    if (
+        flowing_fluid.oil_formation_volume_factors is None
+        or flowing_fluid.solution_gas_oil_ratios is None
+    ):
+        return 0.0
+    surface_oil_rates = np.abs(connection_rates.oil) / flowing_fluid.oil_formation_volume_factors
+    return float(
+        np.dot(surface_oil_rates, flowing_fluid.solution_gas_oil_ratios) / stb_to_volume_factor
+    )
 
 
 def compute_datum_pressure_shift(
@@ -303,6 +359,33 @@ def compute_tubing_head_pressure(
     if tubing.wellbore is None:
         raise ValidationError(
             "This well has no `WellBoreModel` or VFP table to find a tubing head pressure with."
+        )
+    if tubing.uses_tubing_fluids:
+        tubing_fluids = typing.cast("TubingFluidTable", tubing.wellbore.tubing_fluids)
+        flowing_fluid = tubing.flowing_fluid
+        dissolved_gas_rate: Number = 0.0
+        if flowing_fluid is not None and connection_rates is not None:
+            dissolved_gas_rate = compute_dissolved_gas_rate(
+                flowing_fluid=flowing_fluid,
+                connection_rates=connection_rates,
+                stb_to_volume_factor=tubing_fluids.stb_to_volume_factor,
+            )
+        static_density = (
+            flowing_fluid.zero_flow_density
+            if flowing_fluid is not None
+            else (surface_sample.density if surface_sample is not None else math.nan)
+        )
+        return compute_wellbore_tubing_head_pressure_from_table(
+            wellbore=tubing.wellbore,
+            reference_depth=reference_depth,
+            reference_pressure=reference_pressure,
+            surface_phase_rates=PhaseValues(
+                oil=surface_phase_rates.oil,
+                water=surface_phase_rates.water,
+                gas=surface_phase_rates.gas + dissolved_gas_rate,
+            ),
+            is_injector=is_injector,
+            static_density=static_density,
         )
     if surface_sample is None:
         raise ValidationError(
