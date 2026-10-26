@@ -20,6 +20,7 @@ from bores.types import (
     CapillaryPressureDerivatives,
     CapillaryPressures,
     FluidPhase,
+    Integer,
     NDimension,
     Number,
     NumberArray,
@@ -233,7 +234,7 @@ def compute_brooks_corey_capillary_pressures_loop(
     mixed_wet_water_fraction: Number,
     saturation_epsilon: Number,
     minimum_mobile_pore_space: Number,
-    size: int,
+    size: Integer,
     oil_water_capillary_pressure: NumberArray[OneDimension],
     gas_oil_capillary_pressure: NumberArray[OneDimension],
 ) -> None:
@@ -244,13 +245,19 @@ def compute_brooks_corey_capillary_pressures_loop(
     """
     for i in numba.prange(size):
         oil_water, gas_oil = compute_brooks_corey_capillary_pressures_cell(
-            water_saturation=np.float64(element_at(water_saturation, i)),
-            oil_saturation=np.float64(element_at(oil_saturation, i)),
-            gas_saturation=np.float64(element_at(gas_saturation, i)),
-            irreducible_water_saturation=np.float64(element_at(irreducible_water_saturation, i)),
-            residual_oil_saturation_water=np.float64(element_at(residual_oil_saturation_water, i)),
-            residual_oil_saturation_gas=np.float64(element_at(residual_oil_saturation_gas, i)),
-            residual_gas_saturation=np.float64(element_at(residual_gas_saturation, i)),
+            water_saturation=np.float64(element_at(array=water_saturation, index=i)),
+            oil_saturation=np.float64(element_at(array=oil_saturation, index=i)),
+            gas_saturation=np.float64(element_at(array=gas_saturation, index=i)),
+            irreducible_water_saturation=np.float64(
+                element_at(array=irreducible_water_saturation, index=i)
+            ),
+            residual_oil_saturation_water=np.float64(
+                element_at(array=residual_oil_saturation_water, index=i)
+            ),
+            residual_oil_saturation_gas=np.float64(
+                element_at(array=residual_oil_saturation_gas, index=i)
+            ),
+            residual_gas_saturation=np.float64(element_at(array=residual_gas_saturation, index=i)),
             wettability=wettability,
             oil_water_entry_pressure_water_wet=oil_water_entry_pressure_water_wet,
             oil_water_entry_pressure_oil_wet=oil_water_entry_pressure_oil_wet,
@@ -463,6 +470,7 @@ def compute_brooks_corey_capillary_pressures(
 @numba.njit(cache=True, inline="always", error_model="numpy")
 def compute_brooks_corey_derivatives_scalar(
     water_saturation: Number,
+    oil_saturation: Number,
     gas_saturation: Number,
     irreducible_water_saturation: Number,
     residual_oil_saturation_water: Number,
@@ -485,6 +493,7 @@ def compute_brooks_corey_derivatives_scalar(
     Returns (dpcow_dsw, dpcow_dso, dpcgo_dsg, dpcgo_dso).
 
     :param water_saturation: Water saturation (fraction, 0-1).
+    :param oil_saturation: Oil saturation (fraction, 0 to 1).
     :param gas_saturation: Gas saturation (fraction, 0-1).
     :param irreducible_water_saturation: Irreducible water saturation (swc).
     :param residual_oil_saturation_water: Residual oil saturation during water flooding (sorw).
@@ -502,6 +511,11 @@ def compute_brooks_corey_derivatives_scalar(
     :param minimum_mobile_pore_space: Minimum mobile pore space threshold.
     :return: Tuple of (dpcow_dsw, dpcow_dso, dpcgo_dsg, dpcgo_dso).
     """
+    total_saturation = water_saturation + oil_saturation + gas_saturation
+    if abs(total_saturation - 1.0) > saturation_epsilon and total_saturation > 0.0:
+        water_saturation = water_saturation / total_saturation
+        gas_saturation = gas_saturation / total_saturation
+
     sw = water_saturation
     sg = gas_saturation
     swc = irreducible_water_saturation
@@ -567,6 +581,7 @@ def compute_brooks_corey_derivatives_scalar(
 @numba.njit(cache=True, parallel=True, error_model="numpy")
 def compute_brooks_corey_derivatives_loop(
     water_saturation: NumberArray[OneDimension],
+    oil_saturation: NumberArray[OneDimension],
     gas_saturation: NumberArray[OneDimension],
     irreducible_water_saturation: NumberArray[OneDimension],
     residual_oil_saturation_water: NumberArray[OneDimension],
@@ -582,7 +597,7 @@ def compute_brooks_corey_derivatives_loop(
     mixed_wet_water_fraction: Number,
     saturation_epsilon: Number,
     minimum_mobile_pore_space: Number,
-    size: int,
+    size: Integer,
     dpcow_dsw: NumberArray[OneDimension],
     dpcow_dso: NumberArray[OneDimension],
     dpcgo_dsg: NumberArray[OneDimension],
@@ -596,12 +611,19 @@ def compute_brooks_corey_derivatives_loop(
     """
     for i in numba.prange(size):
         d_ow_sw, d_ow_so, d_go_sg, d_go_so = compute_brooks_corey_derivatives_scalar(
-            water_saturation=np.float64(element_at(water_saturation, i)),
-            gas_saturation=np.float64(element_at(gas_saturation, i)),
-            irreducible_water_saturation=np.float64(element_at(irreducible_water_saturation, i)),
-            residual_oil_saturation_water=np.float64(element_at(residual_oil_saturation_water, i)),
-            residual_oil_saturation_gas=np.float64(element_at(residual_oil_saturation_gas, i)),
-            residual_gas_saturation=np.float64(element_at(residual_gas_saturation, i)),
+            water_saturation=np.float64(element_at(array=water_saturation, index=i)),
+            oil_saturation=np.float64(element_at(array=oil_saturation, index=i)),
+            gas_saturation=np.float64(element_at(array=gas_saturation, index=i)),
+            irreducible_water_saturation=np.float64(
+                element_at(array=irreducible_water_saturation, index=i)
+            ),
+            residual_oil_saturation_water=np.float64(
+                element_at(array=residual_oil_saturation_water, index=i)
+            ),
+            residual_oil_saturation_gas=np.float64(
+                element_at(array=residual_oil_saturation_gas, index=i)
+            ),
+            residual_gas_saturation=np.float64(element_at(array=residual_gas_saturation, index=i)),
             wettability=wettability,
             oil_water_pore_size_distribution_index_water_wet=oil_water_pore_size_distribution_index_water_wet,
             oil_water_pore_size_distribution_index_oil_wet=oil_water_pore_size_distribution_index_oil_wet,
@@ -621,6 +643,7 @@ def compute_brooks_corey_derivatives_loop(
 
 def compute_brooks_corey_derivatives_array(
     water_saturation: NumberOrArray[NDimension],
+    oil_saturation: NumberOrArray[NDimension],
     gas_saturation: NumberOrArray[NDimension],
     irreducible_water_saturation: NumberOrArray[NDimension],
     residual_oil_saturation_water: NumberOrArray[NDimension],
@@ -648,6 +671,7 @@ def compute_brooks_corey_derivatives_array(
     Returns (dpcow_dsw, dpcow_dso, dpcgo_dsg, dpcgo_dso) as NDArrays.
 
     :param water_saturation: Water saturation (fraction, 0-1) - scalar or array.
+    :param oil_saturation: Oil saturation (fraction, 0 to 1).
     :param gas_saturation: Gas saturation (fraction, 0-1) - scalar or array.
     :param irreducible_water_saturation: Irreducible water saturation (swc) - scalar or array.
     :param residual_oil_saturation_water: Residual oil saturation during water flooding (sorw) - scalar or array.
@@ -670,6 +694,7 @@ def compute_brooks_corey_derivatives_array(
         size,
         (
             water_saturation_flat,
+            oil_saturation_flat,
             gas_saturation_flat,
             irreducible_water_saturation_flat,
             residual_oil_saturation_water_flat,
@@ -678,6 +703,7 @@ def compute_brooks_corey_derivatives_array(
         ),
     ) = prepare_kernel_inputs(
         water_saturation,
+        oil_saturation,
         gas_saturation,
         irreducible_water_saturation,
         residual_oil_saturation_water,
@@ -691,6 +717,7 @@ def compute_brooks_corey_derivatives_array(
     dpcgo_dso = np.empty(size, dtype=dtype)
     compute_brooks_corey_derivatives_loop(
         water_saturation=water_saturation_flat,
+        oil_saturation=oil_saturation_flat,
         gas_saturation=gas_saturation_flat,
         irreducible_water_saturation=irreducible_water_saturation_flat,
         residual_oil_saturation_water=residual_oil_saturation_water_flat,
@@ -722,6 +749,7 @@ def compute_brooks_corey_derivatives_array(
 
 def compute_brooks_corey_capillary_pressure_derivatives(
     water_saturation: NumberOrArray[NDimension],
+    oil_saturation: NumberOrArray[NDimension],
     gas_saturation: NumberOrArray[NDimension],
     irreducible_water_saturation: NumberOrArray[NDimension],
     residual_oil_saturation_water: NumberOrArray[NDimension],
@@ -753,6 +781,7 @@ def compute_brooks_corey_capillary_pressure_derivatives(
     """
     if (
         np.isscalar(water_saturation)
+        and np.isscalar(oil_saturation)
         and np.isscalar(gas_saturation)
         and np.isscalar(irreducible_water_saturation)
         and np.isscalar(residual_oil_saturation_water)
@@ -761,6 +790,7 @@ def compute_brooks_corey_capillary_pressure_derivatives(
     ):
         return compute_brooks_corey_derivatives_scalar(
             water_saturation=water_saturation,  # type: ignore[arg-type]
+            oil_saturation=oil_saturation,  # type: ignore[arg-type]
             gas_saturation=gas_saturation,  # type: ignore[arg-type]
             irreducible_water_saturation=irreducible_water_saturation,  # type: ignore[arg-type]
             residual_oil_saturation_water=residual_oil_saturation_water,  # type: ignore[arg-type]
@@ -779,6 +809,7 @@ def compute_brooks_corey_capillary_pressure_derivatives(
         )
     return compute_brooks_corey_derivatives_array(
         water_saturation=water_saturation,  # type: ignore[arg-type]
+        oil_saturation=oil_saturation,  # type: ignore[arg-type]
         gas_saturation=gas_saturation,  # type: ignore[arg-type]
         irreducible_water_saturation=irreducible_water_saturation,  # type: ignore[arg-type]
         residual_oil_saturation_water=residual_oil_saturation_water,  # type: ignore[arg-type]
@@ -1067,6 +1098,7 @@ class BrooksCoreyCapillaryPressureTable(CapillaryPressureTable):
         dpcow_dsw, dpcow_dso, dpcgo_dsg, dpcgo_dso = (
             compute_brooks_corey_capillary_pressure_derivatives(
                 water_saturation=water_saturation,
+                oil_saturation=oil_saturation,
                 gas_saturation=gas_saturation,
                 irreducible_water_saturation=swc,  # type: ignore[arg-type]
                 residual_oil_saturation_water=sorw,  # type: ignore[arg-type]

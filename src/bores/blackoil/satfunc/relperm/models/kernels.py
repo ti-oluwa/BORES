@@ -260,16 +260,16 @@ def blend_cells(
     f = water_wet_fraction
     g = 1.0 - water_wet_fraction
     return RelPermCell(
-        f * water_wet.krw + g * oil_wet.krw,
-        f * water_wet.kro + g * oil_wet.kro,
-        f * water_wet.krg + g * oil_wet.krg,
-        f * water_wet.dkrw_dsw + g * oil_wet.dkrw_dsw,
-        f * water_wet.dkrw_dso + g * oil_wet.dkrw_dso,
-        f * water_wet.dkrw_dsg + g * oil_wet.dkrw_dsg,
-        f * water_wet.dkro_dsw + g * oil_wet.dkro_dsw,
-        f * water_wet.dkro_dso + g * oil_wet.dkro_dso,
-        f * water_wet.dkro_dsg + g * oil_wet.dkro_dsg,
-        f * water_wet.dkrg_dsg + g * oil_wet.dkrg_dsg,
+        krw=f * water_wet.krw + g * oil_wet.krw,
+        kro=f * water_wet.kro + g * oil_wet.kro,
+        krg=f * water_wet.krg + g * oil_wet.krg,
+        dkrw_dsw=f * water_wet.dkrw_dsw + g * oil_wet.dkrw_dsw,
+        dkrw_dso=f * water_wet.dkrw_dso + g * oil_wet.dkrw_dso,
+        dkrw_dsg=f * water_wet.dkrw_dsg + g * oil_wet.dkrw_dsg,
+        dkro_dsw=f * water_wet.dkro_dsw + g * oil_wet.dkro_dsw,
+        dkro_dso=f * water_wet.dkro_dso + g * oil_wet.dkro_dso,
+        dkro_dsg=f * water_wet.dkro_dsg + g * oil_wet.dkro_dsg,
+        dkrg_dsg=f * water_wet.dkrg_dsg + g * oil_wet.dkrg_dsg,
     )
 
 
@@ -287,15 +287,17 @@ def finalize_water_wet_cell(
         `dkrw_dsg`, `dkro_dsg` and `dkrg_dsg`.
     """
     return (
-        floor_relperm_derivative(cell.dkrw_dsw, cell.krw, minimum_water),
-        floor_relperm_derivative(cell.dkro_dsw, cell.kro, minimum_oil),
+        floor_relperm_derivative(
+            derivative=cell.dkrw_dsw, relperm=cell.krw, minimum=minimum_water
+        ),
+        floor_relperm_derivative(derivative=cell.dkro_dsw, relperm=cell.kro, minimum=minimum_oil),
         0.0,
         0.0,
-        floor_relperm_derivative(cell.dkro_dso, cell.kro, minimum_oil),
+        floor_relperm_derivative(derivative=cell.dkro_dso, relperm=cell.kro, minimum=minimum_oil),
         0.0,
         0.0,
-        floor_relperm_derivative(cell.dkro_dsg, cell.kro, minimum_oil),
-        floor_relperm_derivative(cell.dkrg_dsg, cell.krg, minimum_gas),
+        floor_relperm_derivative(derivative=cell.dkro_dsg, relperm=cell.kro, minimum=minimum_oil),
+        floor_relperm_derivative(derivative=cell.dkrg_dsg, relperm=cell.krg, minimum=minimum_gas),
     )
 
 
@@ -312,15 +314,21 @@ def finalize_oil_wet_cell(
     :return: Tuple of the nine derivatives in the order of `finalize_water_wet_cell`.
     """
     return (
-        floor_relperm_derivative(cell.dkrw_dsw, cell.krw, minimum_water),
+        floor_relperm_derivative(
+            derivative=cell.dkrw_dsw, relperm=cell.krw, minimum=minimum_water
+        ),
         0.0,
         0.0,
-        floor_relperm_derivative(cell.dkrw_dso, cell.krw, minimum_water),
-        floor_relperm_derivative(cell.dkro_dso, cell.kro, minimum_oil),
+        floor_relperm_derivative(
+            derivative=cell.dkrw_dso, relperm=cell.krw, minimum=minimum_water
+        ),
+        floor_relperm_derivative(derivative=cell.dkro_dso, relperm=cell.kro, minimum=minimum_oil),
         0.0,
-        floor_relperm_derivative(cell.dkrw_dsg, cell.krw, minimum_water),
+        floor_relperm_derivative(
+            derivative=cell.dkrw_dsg, relperm=cell.krw, minimum=minimum_water
+        ),
         0.0,
-        floor_relperm_derivative(cell.dkrg_dsg, cell.krg, minimum_gas),
+        floor_relperm_derivative(derivative=cell.dkrg_dsg, relperm=cell.krg, minimum=minimum_gas),
     )
 
 
@@ -334,15 +342,21 @@ def finalize_mixed_wet_cell(
     :return: Tuple of the nine derivatives in the order of `finalize_water_wet_cell`.
     """
     return (
-        floor_relperm_derivative(cell.dkrw_dsw, cell.krw, minimum_water),
-        floor_relperm_derivative(cell.dkro_dsw, cell.kro, minimum_oil),
+        floor_relperm_derivative(
+            derivative=cell.dkrw_dsw, relperm=cell.krw, minimum=minimum_water
+        ),
+        floor_relperm_derivative(derivative=cell.dkro_dsw, relperm=cell.kro, minimum=minimum_oil),
         0.0,
-        floor_relperm_derivative(cell.dkrw_dso, cell.krw, minimum_water),
-        floor_relperm_derivative(cell.dkro_dso, cell.kro, minimum_oil),
+        floor_relperm_derivative(
+            derivative=cell.dkrw_dso, relperm=cell.krw, minimum=minimum_water
+        ),
+        floor_relperm_derivative(derivative=cell.dkro_dso, relperm=cell.kro, minimum=minimum_oil),
         0.0,
-        floor_relperm_derivative(cell.dkrw_dsg, cell.krw, minimum_water),
-        floor_relperm_derivative(cell.dkro_dsg, cell.kro, minimum_oil),
-        floor_relperm_derivative(cell.dkrg_dsg, cell.krg, minimum_gas),
+        floor_relperm_derivative(
+            derivative=cell.dkrw_dsg, relperm=cell.krw, minimum=minimum_water
+        ),
+        floor_relperm_derivative(derivative=cell.dkro_dsg, relperm=cell.kro, minimum=minimum_oil),
+        floor_relperm_derivative(derivative=cell.dkrg_dsg, relperm=cell.krg, minimum=minimum_gas),
     )
 
 
@@ -354,7 +368,7 @@ def prepare_relperm_inputs(
     residual_oil_saturation_water: NumberOrArray[NDimension],
     residual_oil_saturation_gas: NumberOrArray[NDimension],
     residual_gas_saturation: NumberOrArray[NDimension],
-) -> tuple[tuple[int, ...], int, tuple[NumberArray[OneDimension], ...]]:
+) -> tuple[tuple[Integer, ...], Integer, tuple[NumberArray[OneDimension], ...]]:
     """
     Validate the saturations and bring all inputs of a relative permeability kernel to flat arrays.
 
@@ -372,7 +386,9 @@ def prepare_relperm_inputs(
         residual_oil_saturation_gas,
         residual_gas_saturation,
     )
-    if not saturations_within_bounds(arrays[0], arrays[1], arrays[2], size):
+    if not saturations_within_bounds(
+        water_saturation=arrays[0], oil_saturation=arrays[1], gas_saturation=arrays[2], size=size
+    ):
         sw, so, sg = np.broadcast_arrays(
             np.atleast_1d(water_saturation),
             np.atleast_1d(oil_saturation),

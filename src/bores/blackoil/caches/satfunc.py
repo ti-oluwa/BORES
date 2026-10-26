@@ -234,7 +234,7 @@ def compute_satfunc_cache(
 
         relperm_table = tables.relative_permeability
         relperm, relperm_derivatives = relperm_table.evaluate_with_derivatives(
-            sw, so, sg, **state_kwargs
+            water_saturation=sw, oil_saturation=so, gas_saturation=sg, **state_kwargs
         )
         cache.water_relative_permeability[mask] = relperm["water"]
         cache.oil_relative_permeability[mask] = relperm["oil"]

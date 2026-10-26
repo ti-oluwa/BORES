@@ -6,10 +6,12 @@ import pytest
 
 pv = pytest.importorskip("pyvista")
 
-from bores.grids.factories.cartesian import make_cartesian_grid  # ruff: ignore[module-import-not-at-top-of-file]
-from bores.grids.io.grdecl import load_grdecl  # ruff: ignore[module-import-not-at-top-of-file]
-from bores.grids.utils import make_pyvista_grid  # ruff: ignore[module-import-not-at-top-of-file]
-from bores.types import UnitSystem  # ruff: ignore[module-import-not-at-top-of-file]
+from bores.grids.factories.cartesian import (
+    make_cartesian_grid,
+)
+from bores.grids.io.grdecl import load_grdecl
+from bores.grids.utils import make_pyvista_grid
+from bores.types import UnitSystem
 
 DATA = Path(__file__).resolve().parents[2] / "data"
 VTK_HEXAHEDRON = 12

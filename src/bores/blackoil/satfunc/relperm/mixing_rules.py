@@ -630,7 +630,7 @@ def run_rule(
     """
     shape, arrays = _prepare_rule_inputs(*values)
     flat = loop(*arrays, math.prod(shape), c.MINIMUM_MOBILE_PORE_SPACE)
-    return _restore_shape(flat, shape, get_floating_dtype(like))
+    return _restore_shape(flat=flat, shape=shape, dtype=get_floating_dtype(like))
 
 
 def run_rule_derivatives(
@@ -658,7 +658,7 @@ def run_rule_derivatives(
             NumberOrArray[NDimension],
             NumberOrArray[NDimension],
         ],
-        tuple(_restore_shape(output, shape) for output in outputs),
+        tuple(_restore_shape(flat=output, shape=shape) for output in outputs),
     )
 
 
@@ -702,7 +702,9 @@ def _min_value_loop(
 ) -> NumberArray[OneDimension]:
     result = np.empty(size, dtype=np.float64)
     for i in range(size):
-        result[i] = _min_value(element_at(kw, i), element_at(kg, i))
+        result[i] = _min_value(
+            kro_w=element_at(array=kw, index=i), kro_g=element_at(array=kg, index=i)
+        )
     return result
 
 
@@ -739,7 +741,7 @@ def _min_derivative_loop(
     d6 = np.empty(size, dtype=np.float64)
     for i in range(size):
         d0[i], d1[i], d2[i], d3[i], d4[i], d5[i], d6[i] = _min_derivatives(
-            element_at(kw, i), element_at(kg, i)
+            kro_w=element_at(array=kw, index=i), kro_g=element_at(array=kg, index=i)
         )
     return d0, d1, d2, d3, d4, d5, d6
 
@@ -885,12 +887,12 @@ def _baker_value_loop(
     result = np.empty(size, dtype=np.float64)
     for i in range(size):
         result[i] = _baker_value(
-            element_at(kw, i),
-            element_at(kg, i),
-            element_at(sw, i),
-            element_at(sg, i),
-            element_at(swc, i),
-            epsilon,
+            kro_w=element_at(array=kw, index=i),
+            kro_g=element_at(array=kg, index=i),
+            water_saturation=element_at(array=sw, index=i),
+            gas_saturation=element_at(array=sg, index=i),
+            irreducible_water_saturation=element_at(array=swc, index=i),
+            minimum_mobile_pore_space=epsilon,
         )
     return result
 
@@ -928,12 +930,12 @@ def _baker_derivative_loop(
     d6 = np.empty(size, dtype=np.float64)
     for i in range(size):
         d0[i], d1[i], d2[i], d3[i], d4[i], d5[i], d6[i] = _baker_derivatives(
-            element_at(kw, i),
-            element_at(kg, i),
-            element_at(sw, i),
-            element_at(sg, i),
-            element_at(swc, i),
-            epsilon,
+            kro_w=element_at(array=kw, index=i),
+            kro_g=element_at(array=kg, index=i),
+            water_saturation=element_at(array=sw, index=i),
+            gas_saturation=element_at(array=sg, index=i),
+            irreducible_water_saturation=element_at(array=swc, index=i),
+            minimum_mobile_pore_space=epsilon,
         )
     return d0, d1, d2, d3, d4, d5, d6
 
@@ -1080,12 +1082,12 @@ def _stone_II_value_loop(
     result = np.empty(size, dtype=np.float64)
     for i in range(size):
         result[i] = _stone_II_value(
-            element_at(kw, i),
-            element_at(kg, i),
-            element_at(rw, i),
-            element_at(rg, i),
-            element_at(km, i),
-            epsilon,
+            kro_w=element_at(array=kw, index=i),
+            kro_g=element_at(array=kg, index=i),
+            krw=element_at(array=rw, index=i),
+            krg=element_at(array=rg, index=i),
+            kr_max=element_at(array=km, index=i),
+            minimum_mobile_pore_space=epsilon,
         )
     return result
 
@@ -1123,12 +1125,12 @@ def _stone_II_derivative_loop(
     d6 = np.empty(size, dtype=np.float64)
     for i in range(size):
         d0[i], d1[i], d2[i], d3[i], d4[i], d5[i], d6[i] = _stone_II_derivatives(
-            element_at(kw, i),
-            element_at(kg, i),
-            element_at(rw, i),
-            element_at(rg, i),
-            element_at(km, i),
-            epsilon,
+            kro_w=element_at(array=kw, index=i),
+            kro_g=element_at(array=kg, index=i),
+            krw=element_at(array=rw, index=i),
+            krg=element_at(array=rg, index=i),
+            kr_max=element_at(array=km, index=i),
+            minimum_mobile_pore_space=epsilon,
         )
     return d0, d1, d2, d3, d4, d5, d6
 
@@ -1299,16 +1301,16 @@ def _stone_I_value(
     minimum_mobile_pore_space: Number,
 ) -> Number:
     terms = _stone_I_terms(
-        kro_w,
-        kro_g,
-        kr_max,
-        water_saturation,
-        oil_saturation,
-        gas_saturation,
-        irreducible_water_saturation,
-        residual_oil_saturation_water,
-        residual_oil_saturation_gas,
-        minimum_mobile_pore_space,
+        kro_w=kro_w,
+        kro_g=kro_g,
+        kr_max=kr_max,
+        water_saturation=water_saturation,
+        oil_saturation=oil_saturation,
+        gas_saturation=gas_saturation,
+        irreducible_water_saturation=irreducible_water_saturation,
+        residual_oil_saturation_water=residual_oil_saturation_water,
+        residual_oil_saturation_gas=residual_oil_saturation_gas,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
     )
     return min(max(terms[10], 0.0), terms[1])
 
@@ -1328,16 +1330,16 @@ def _stone_I_derivatives(
 ) -> tuple[Number, Number, Number, Number, Number, Number, Number]:
     usable, krocw, gas_range, alpha_active, d, so_star, mobile_water, y, z, c, raw = (
         _stone_I_terms(
-            kro_w,
-            kro_g,
-            kr_max,
-            water_saturation,
-            oil_saturation,
-            gas_saturation,
-            irreducible_water_saturation,
-            residual_oil_saturation_water,
-            residual_oil_saturation_gas,
-            minimum_mobile_pore_space,
+            kro_w=kro_w,
+            kro_g=kro_g,
+            kr_max=kr_max,
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+            irreducible_water_saturation=irreducible_water_saturation,
+            residual_oil_saturation_water=residual_oil_saturation_water,
+            residual_oil_saturation_gas=residual_oil_saturation_gas,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
         )
     )
     if not (usable and raw > 0.0 and raw < krocw):
@@ -1381,16 +1383,16 @@ def _stone_I_value_loop(
     result = np.empty(size, dtype=np.float64)
     for i in range(size):
         result[i] = _stone_I_value(
-            element_at(kw, i),
-            element_at(kg, i),
-            element_at(km, i),
-            element_at(sw, i),
-            element_at(so, i),
-            element_at(sg, i),
-            element_at(swc, i),
-            element_at(sorw, i),
-            element_at(sorg, i),
-            epsilon,
+            kro_w=element_at(array=kw, index=i),
+            kro_g=element_at(array=kg, index=i),
+            kr_max=element_at(array=km, index=i),
+            water_saturation=element_at(array=sw, index=i),
+            oil_saturation=element_at(array=so, index=i),
+            gas_saturation=element_at(array=sg, index=i),
+            irreducible_water_saturation=element_at(array=swc, index=i),
+            residual_oil_saturation_water=element_at(array=sorw, index=i),
+            residual_oil_saturation_gas=element_at(array=sorg, index=i),
+            minimum_mobile_pore_space=epsilon,
         )
     return result
 
@@ -1428,16 +1430,16 @@ def _stone_I_derivative_loop(
     d6 = np.empty(size, dtype=np.float64)
     for i in range(size):
         d0[i], d1[i], d2[i], d3[i], d4[i], d5[i], d6[i] = _stone_I_derivatives(
-            element_at(kw, i),
-            element_at(kg, i),
-            element_at(km, i),
-            element_at(sw, i),
-            element_at(so, i),
-            element_at(sg, i),
-            element_at(swc, i),
-            element_at(sorw, i),
-            element_at(sorg, i),
-            epsilon,
+            kro_w=element_at(array=kw, index=i),
+            kro_g=element_at(array=kg, index=i),
+            kr_max=element_at(array=km, index=i),
+            water_saturation=element_at(array=sw, index=i),
+            oil_saturation=element_at(array=so, index=i),
+            gas_saturation=element_at(array=sg, index=i),
+            irreducible_water_saturation=element_at(array=swc, index=i),
+            residual_oil_saturation_water=element_at(array=sorw, index=i),
+            residual_oil_saturation_gas=element_at(array=sorg, index=i),
+            minimum_mobile_pore_space=epsilon,
         )
     return d0, d1, d2, d3, d4, d5, d6
 

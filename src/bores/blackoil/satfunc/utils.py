@@ -5,12 +5,20 @@ import numpy as np
 import numpy.typing as npt
 from scipy.interpolate import PchipInterpolator
 
-from bores.types import NDimension, Number, NumberArray, NumberOrArray, OneDimension, Spacing
+from bores.types import (
+    Integer,
+    NDimension,
+    Number,
+    NumberArray,
+    NumberOrArray,
+    OneDimension,
+    Spacing,
+)
 from bores.utils import atleast_1d
 
 
 def make_saturation_field(
-    n_points: int = 200,
+    n_points: Integer = 200,
     min_saturation: Number = 0.0,
     max_saturation: Number = 1.0,
     spacing: Spacing = "cosine",
@@ -47,7 +55,7 @@ def make_saturation_field(
 
 
 def make_min_span_saturation_field(
-    number_of_points: int,
+    number_of_points: Integer,
     min_saturation: Number,
     max_saturation: Number,
     spacing: Spacing,
@@ -88,7 +96,7 @@ def make_min_span_saturation_field(
 def pchip_resample(
     source_saturations: npt.NDArray,
     source_values: npt.NDArray,
-    number_of_output_points: int | None = None,
+    number_of_output_points: Integer | None = None,
     spacing: Spacing = "cosine",
     dtype: npt.DTypeLike = np.float64,
     target_saturations: npt.ArrayLike | None = None,
@@ -140,11 +148,11 @@ def pchip_resample(
 
 
 def build_saturation_reference_field(
-    number_of_base_points: int,
+    number_of_base_points: Integer,
     saturation_lower_bound: Number,
     saturation_upper_bound: Number,
     spacing: Spacing,
-    number_of_endpoint_extra_points: int,
+    number_of_endpoint_extra_points: Integer,
     minimum_grid_span: Number = 1e-6,
     dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray:
@@ -171,11 +179,11 @@ def build_saturation_reference_field(
         knots closer than a few ulps merged.
     """
     base_field = make_min_span_saturation_field(
-        number_of_base_points,
-        saturation_lower_bound,
-        saturation_upper_bound,
-        spacing,
-        minimum_grid_span,
+        number_of_points=number_of_base_points,
+        min_saturation=saturation_lower_bound,
+        max_saturation=saturation_upper_bound,
+        spacing=spacing,
+        minimum_span=minimum_grid_span,
         dtype=dtype,
     )
     saturation_span = saturation_upper_bound - saturation_lower_bound
@@ -220,8 +228,8 @@ def build_saturation_reference_field(
 def build_pchip_interpolant(
     reference_saturation: npt.NDArray,
     values: npt.NDArray,
-    number_of_base_points: int,
-    number_of_endpoint_extra_points: int,
+    number_of_base_points: Integer,
+    number_of_endpoint_extra_points: Integer,
     spacing: Spacing,
     minimum_scale_span: Number = 1e-6,
     dtype: npt.DTypeLike = np.float64,
@@ -362,7 +370,7 @@ def _prepare_killough_arrays(
 
 
 @numba.njit(cache=True, inline="always", error_model="numpy")
-def element_at(array: NumberArray[OneDimension], index: int) -> Number:
+def element_at(array: NumberArray[OneDimension], index: Integer) -> Number:
     """
     Element `index` of `array`, or its only element when it holds a single value.
 
@@ -374,7 +382,7 @@ def element_at(array: NumberArray[OneDimension], index: int) -> Number:
 
 def prepare_kernel_inputs(
     *values: NumberOrArray[NDimension],
-) -> tuple[tuple[int, ...], int, tuple[NumberArray[OneDimension], ...]]:
+) -> tuple[tuple[Integer, ...], Integer, tuple[NumberArray[OneDimension], ...]]:
     """
     Bring the inputs of a per-cell kernel to flat arrays that the kernel can read by index.
 
@@ -407,7 +415,7 @@ def saturations_within_bounds(
     water_saturation: NumberArray[OneDimension],
     oil_saturation: NumberArray[OneDimension],
     gas_saturation: NumberArray[OneDimension],
-    size: int,
+    size: Integer,
 ) -> bool:
     """
     Whether every water, oil and gas saturation lies between 0 and 1.
@@ -419,9 +427,9 @@ def saturations_within_bounds(
     :return: `True` if all saturations are within bounds.
     """
     for i in range(size):
-        sw = element_at(water_saturation, i)
-        so = element_at(oil_saturation, i)
-        sg = element_at(gas_saturation, i)
+        sw = element_at(array=water_saturation, index=i)
+        so = element_at(array=oil_saturation, index=i)
+        sg = element_at(array=gas_saturation, index=i)
         if sw < 0 or sw > 1 or so < 0 or so > 1 or sg < 0 or sg > 1:
             return False
     return True

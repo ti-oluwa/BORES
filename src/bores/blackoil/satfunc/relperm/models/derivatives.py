@@ -85,7 +85,10 @@ def broadcast_saturations(
     water_saturation: NumberOrArray[NDimension],
     oil_saturation: NumberOrArray[NDimension],
     gas_saturation: NumberOrArray[NDimension],
-    *endpoint_saturations: NumberOrArray[NDimension],
+    irreducible_water_saturation: NumberOrArray[NDimension],
+    residual_oil_saturation_water: NumberOrArray[NDimension],
+    residual_oil_saturation_gas: NumberOrArray[NDimension],
+    residual_gas_saturation: NumberOrArray[NDimension],
 ) -> tuple[
     NumberArray[NDimension],
     NumberArray[NDimension],
@@ -99,8 +102,11 @@ def broadcast_saturations(
     :param water_saturation: Water saturation, scalar or array.
     :param oil_saturation: Oil saturation, scalar or array.
     :param gas_saturation: Gas saturation, scalar or array.
-    :param endpoint_saturations: Endpoint saturations (connate water, residual oil and
-        residual gas). They only decide whether the call is a scalar call.
+    :param irreducible_water_saturation: Irreducible water saturation. Endpoint saturations only
+        decide whether the call is a scalar call.
+    :param residual_oil_saturation_water: Residual oil saturation to water flooding.
+    :param residual_oil_saturation_gas: Residual oil saturation to gas flooding.
+    :param residual_gas_saturation: Residual gas saturation.
     :return: Tuple of water saturation, oil saturation, gas saturation, an array of
         zeros with their common shape, and whether every input was a scalar. Callers
         should convert results back to scalars when the last item is `True`.
@@ -109,7 +115,10 @@ def broadcast_saturations(
         np.isscalar(water_saturation)
         and np.isscalar(oil_saturation)
         and np.isscalar(gas_saturation)
-        and all(np.isscalar(saturation) for saturation in endpoint_saturations)
+        and np.isscalar(irreducible_water_saturation)
+        and np.isscalar(residual_oil_saturation_water)
+        and np.isscalar(residual_oil_saturation_gas)
+        and np.isscalar(residual_gas_saturation)
     )
     sw = np.atleast_1d(water_saturation)
     so = np.atleast_1d(oil_saturation)
@@ -417,15 +426,25 @@ def finalize_water_wet_derivatives(
     :return: `RelativePermeabilityDerivatives` dictionary.
     """
     return build_relperm_derivatives(
-        dkrw_dsw=clamp_relperm_derivative(system.dkrw_dsw, system.krw, minimum_water_relperm),
-        dkro_dsw=clamp_relperm_derivative(system.dkro_dsw, system.kro, minimum_oil_relperm),
+        dkrw_dsw=clamp_relperm_derivative(
+            dkr=system.dkrw_dsw, kr_raw=system.krw, min_value=minimum_water_relperm
+        ),
+        dkro_dsw=clamp_relperm_derivative(
+            dkr=system.dkro_dsw, kr_raw=system.kro, min_value=minimum_oil_relperm
+        ),
         dkrg_dsw=zeros.copy(),
         dkrw_dso=zeros.copy(),
-        dkro_dso=clamp_relperm_derivative(system.dkro_dso, system.kro, minimum_oil_relperm),
+        dkro_dso=clamp_relperm_derivative(
+            dkr=system.dkro_dso, kr_raw=system.kro, min_value=minimum_oil_relperm
+        ),
         dkrg_dso=zeros.copy(),
         dkrw_dsg=zeros.copy(),
-        dkro_dsg=clamp_relperm_derivative(system.dkro_dsg, system.kro, minimum_oil_relperm),
-        dkrg_dsg=clamp_relperm_derivative(system.dkrg_dsg, system.krg, minimum_gas_relperm),
+        dkro_dsg=clamp_relperm_derivative(
+            dkr=system.dkro_dsg, kr_raw=system.kro, min_value=minimum_oil_relperm
+        ),
+        dkrg_dsg=clamp_relperm_derivative(
+            dkr=system.dkrg_dsg, kr_raw=system.krg, min_value=minimum_gas_relperm
+        ),
         is_scalar=is_scalar,
     )
 
@@ -455,15 +474,25 @@ def finalize_oil_wet_derivatives(
     :return: `RelativePermeabilityDerivatives` dictionary.
     """
     return build_relperm_derivatives(
-        dkrw_dsw=clamp_relperm_derivative(system.dkrw_dsw, system.krw, minimum_water_relperm),
+        dkrw_dsw=clamp_relperm_derivative(
+            dkr=system.dkrw_dsw, kr_raw=system.krw, min_value=minimum_water_relperm
+        ),
         dkro_dsw=zeros.copy(),
         dkrg_dsw=zeros.copy(),
-        dkrw_dso=clamp_relperm_derivative(system.dkrw_dso, system.krw, minimum_water_relperm),
-        dkro_dso=clamp_relperm_derivative(system.dkro_dso, system.kro, minimum_oil_relperm),
+        dkrw_dso=clamp_relperm_derivative(
+            dkr=system.dkrw_dso, kr_raw=system.krw, min_value=minimum_water_relperm
+        ),
+        dkro_dso=clamp_relperm_derivative(
+            dkr=system.dkro_dso, kr_raw=system.kro, min_value=minimum_oil_relperm
+        ),
         dkrg_dso=zeros.copy(),
-        dkrw_dsg=clamp_relperm_derivative(system.dkrw_dsg, system.krw, minimum_water_relperm),
+        dkrw_dsg=clamp_relperm_derivative(
+            dkr=system.dkrw_dsg, kr_raw=system.krw, min_value=minimum_water_relperm
+        ),
         dkro_dsg=zeros.copy(),
-        dkrg_dsg=clamp_relperm_derivative(system.dkrg_dsg, system.krg, minimum_gas_relperm),
+        dkrg_dsg=clamp_relperm_derivative(
+            dkr=system.dkrg_dsg, kr_raw=system.krg, min_value=minimum_gas_relperm
+        ),
         is_scalar=is_scalar,
     )
 
@@ -509,27 +538,41 @@ def finalize_mixed_wet_derivatives(
 
     return build_relperm_derivatives(
         dkrw_dsw=clamp_relperm_derivative(
-            blend(water_wet.dkrw_dsw, oil_wet.dkrw_dsw), krw, minimum_water_relperm
+            dkr=blend(water_wet.dkrw_dsw, oil_wet.dkrw_dsw),
+            kr_raw=krw,
+            min_value=minimum_water_relperm,
         ),
         dkro_dsw=clamp_relperm_derivative(
-            blend(water_wet.dkro_dsw, oil_wet.dkro_dsw), kro, minimum_oil_relperm
+            dkr=blend(water_wet.dkro_dsw, oil_wet.dkro_dsw),
+            kr_raw=kro,
+            min_value=minimum_oil_relperm,
         ),
         dkrg_dsw=zeros.copy(),
         dkrw_dso=clamp_relperm_derivative(
-            blend(water_wet.dkrw_dso, oil_wet.dkrw_dso), krw, minimum_water_relperm
+            dkr=blend(water_wet.dkrw_dso, oil_wet.dkrw_dso),
+            kr_raw=krw,
+            min_value=minimum_water_relperm,
         ),
         dkro_dso=clamp_relperm_derivative(
-            blend(water_wet.dkro_dso, oil_wet.dkro_dso), kro, minimum_oil_relperm
+            dkr=blend(water_wet.dkro_dso, oil_wet.dkro_dso),
+            kr_raw=kro,
+            min_value=minimum_oil_relperm,
         ),
         dkrg_dso=zeros.copy(),
         dkrw_dsg=clamp_relperm_derivative(
-            blend(water_wet.dkrw_dsg, oil_wet.dkrw_dsg), krw, minimum_water_relperm
+            dkr=blend(water_wet.dkrw_dsg, oil_wet.dkrw_dsg),
+            kr_raw=krw,
+            min_value=minimum_water_relperm,
         ),
         dkro_dsg=clamp_relperm_derivative(
-            blend(water_wet.dkro_dsg, oil_wet.dkro_dsg), kro, minimum_oil_relperm
+            dkr=blend(water_wet.dkro_dsg, oil_wet.dkro_dsg),
+            kr_raw=kro,
+            min_value=minimum_oil_relperm,
         ),
         dkrg_dsg=clamp_relperm_derivative(
-            blend(water_wet.dkrg_dsg, oil_wet.dkrg_dsg), krg, minimum_gas_relperm
+            dkr=blend(water_wet.dkrg_dsg, oil_wet.dkrg_dsg),
+            kr_raw=krg,
+            min_value=minimum_gas_relperm,
         ),
         is_scalar=is_scalar,
     )

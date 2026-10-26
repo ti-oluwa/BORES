@@ -412,8 +412,18 @@ class RelativePermeabilityTable:
             dictionaries.
         """
         return (
-            self.evaluate(water_saturation, oil_saturation, gas_saturation, **kwargs),
-            self.derivatives(water_saturation, oil_saturation, gas_saturation, **kwargs),
+            self.evaluate(
+                water_saturation=water_saturation,
+                oil_saturation=oil_saturation,
+                gas_saturation=gas_saturation,
+                **kwargs,
+            ),
+            self.derivatives(
+                water_saturation=water_saturation,
+                oil_saturation=oil_saturation,
+                gas_saturation=gas_saturation,
+                **kwargs,
+            ),
         )
 
     def __call__(
