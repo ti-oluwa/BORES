@@ -359,15 +359,15 @@ Options are not checked against a list, since the set Eclipse accepts depends on
 VFPIDIMS = RecordKeyword[int](
     "VFPIDIMS",
     fields=[
-        Field("mxmflo", int, required=False),
-        Field("mxmthp", int, required=False),
-        Field("nmmvft", int, required=False),
+        Field("mxmflo", int, required=False, default=0),
+        Field("mxmthp", int, required=False, default=0),
+        Field("nmmvft", int, required=False, default=0),
     ],
 )
 """
 `VFPIDIMS MXMFLO MXMTHP NMMVFT /` - injection well VFP table dimensioning.
 
-An item left out is `None`: the simulator's own default applies.
+Every item defaults to 0.
 
 Fields:
 
@@ -379,18 +379,18 @@ Fields:
 VFPPDIMS = RecordKeyword[int](
     "VFPPDIMS",
     fields=[
-        Field("mxmflo", int, required=False),
-        Field("mxmthp", int, required=False),
-        Field("mxmwfr", int, required=False),
-        Field("mxmgfr", int, required=False),
-        Field("mxmalq", int, required=False),
-        Field("nmmvft", int, required=False),
+        Field("mxmflo", int, required=False, default=0),
+        Field("mxmthp", int, required=False, default=0),
+        Field("mxmwfr", int, required=False, default=0),
+        Field("mxmgfr", int, required=False, default=0),
+        Field("mxmalq", int, required=False, default=0),
+        Field("nmmvft", int, required=False, default=0),
     ],
 )
 """
 `VFPPDIMS MXMFLO MXMTHP MXMWFR MXMGFR MXMALQ NMMVFT /` - production well VFP table dimensioning.
 
-An item left out is `None`: the simulator's own default applies.
+Every item defaults to 0.
 
 Fields:
 
@@ -404,23 +404,23 @@ Fields:
 
 FAULTDIM = RecordKeyword[int](
     "FAULTDIM",
-    fields=[Field("mfsegs", int, required=False)],
+    fields=[Field("mfsegs", int, required=False, default=0)],
 )
 """
-`FAULTDIM MFSEGS /` - fault dimensioning. `mfsegs` is the maximum number of fault segments (`None`
-when left out: the simulator's own default applies).
+`FAULTDIM MFSEGS /` - fault dimensioning. `mfsegs` is the maximum number of fault segments
+(default 0).
 """
 
 PIMTDIMS = RecordKeyword[int](
     "PIMTDIMS",
     fields=[
-        Field("ntpimt", int, required=False),
-        Field("nppimt", int, required=False),
+        Field("ntpimt", int, required=False, default=0),
+        Field("nppimt", int, required=False, default=0),
     ],
 )
 """
 `PIMTDIMS NTPIMT NPPIMT /` - dimensioning of the pressure-induced multiplier (`PIMULTAB`)
-tables. An item left out is `None`: the simulator's own default applies.
+tables. Every item defaults to 0.
 
 Fields:
 
@@ -433,7 +433,8 @@ NSTACK = RecordKeyword[int](
     fields=[Field("nstack", int, required=False, default=10)],
 )
 """
-`NSTACK N /` - size of the linear solver's search-direction stack (default 10).
+`NSTACK N /` - size of the linear solver's search-direction stack (default 10). It may also
+appear in `SCHEDULE` to change the size from that point on; only the first occurrence is read.
 """
 
 MESSAGES = RecordKeyword[int](
@@ -456,7 +457,7 @@ MESSAGES = RecordKeyword[int](
 )
 """
 `MESSAGES ...  /` - limits on how many messages of each severity are printed, and at how many the
-run is stopped.
+run is stopped. It may appear in any section; only the first occurrence is read.
 
 Positional, in the order of the fields: a print limit for each of message, comment, warning,
 problem, error and bug, then a stop limit for each in the same order, then `group_print_limit`.

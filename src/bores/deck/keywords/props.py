@@ -605,7 +605,7 @@ class InfluenceTableKeyword(TableKeyword):
         for record in records:
             for segment in split_segments(record.body):
                 if tokenize(segment):
-                    tables.append(self._parse_flat(segment))
+                    tables.extend(self._parse_flat_tables(segment))
         return tables or None
 
 

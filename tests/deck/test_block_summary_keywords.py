@@ -30,12 +30,20 @@ def test_every_block_mnemonic_parses_cells(mnemonic):
     assert cells == [{"i": 1, "j": 1, "k": 1}, {"i": 10, "j": 10, "k": 3}]
 
 
-def test_block_cells_may_share_a_line_and_repeat_across_blocks():
-    assert parse("BPR\n1 1 1 / 2 2 2 /\n/\nBPR\n3 3 3 /\n/\n", k.BPR) == [
+def test_block_cells_repeat_across_lines_and_blocks():
+    assert parse("BPR\n1 1 1 /\n2 2 2 /\n/\nBPR\n3 3 3 /\n/\n", k.BPR) == [
         {"i": 1, "j": 1, "k": 1},
         {"i": 2, "j": 2, "k": 2},
         {"i": 3, "j": 3, "k": 3},
     ]
+
+
+def test_a_second_cell_on_the_same_line_is_ignored_as_eclipse_does_with_a_warning():
+    # Whatever follows a record's closing `/` on its line is a note to Eclipse and to OPM, so a
+    # second cell written there is not read. Silently dropping it would be worse, so it is said.
+    with pytest.warns(UserWarning, match="'2 2 2 /' looks like another record"):
+        cells = parse("BPR\n1 1 1 / 2 2 2 /\n/\n", k.BPR)
+    assert cells == [{"i": 1, "j": 1, "k": 1}]
 
 
 def test_block_cell_missing_an_index_is_rejected():

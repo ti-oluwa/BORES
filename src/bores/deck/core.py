@@ -22,6 +22,7 @@ __all__ = [
     "parse_repeat_token",
     "report",
     "split_segments",
+    "strip_record_notes",
     "tokenize",
 ]
 
@@ -56,6 +57,13 @@ Matches a quoted string (kept, via group 1) or a `--` comment (dropped). Scannin
 the start of a comment.
 """
 NON_SPACE_RE = re.compile(r"\S")
+NOTE_RE = re.compile(r"[ \t\r]*[^\s/]")
+"""Matches the start of a note: text (not another `/`) following a closing `/` on its line."""
+QUOTED_OR_NOTE_RE = re.compile(r"""('[^'\n]*'|"[^"\n]*")|(/)[ \t\r]*[^\s/][^\n]*""")
+"""
+Matches a quoted string (kept, via group 1), or a `/` followed by a note up to the end of its
+line (the `/` is kept, via group 2, and the note dropped).
+"""
 SLASH_OR_QUOTED_RE = re.compile(r"""'[^'\n]*'|"[^"\n]*"|/""")
 INCLUDE_RE = re.compile(
     r"""\bINCLUDE\b\s*
@@ -65,6 +73,7 @@ INCLUDE_RE = re.compile(
             ([^\s/]+)          # unquoted filename
         )
         \s*/
+        [^\n]*             # anything after the closing slash on its line is a note
     """,
     re.IGNORECASE | re.DOTALL | re.VERBOSE,
 )
@@ -83,6 +92,56 @@ def strip_comments(text: str) -> str:
     if "'" not in text and '"' not in text:
         return COMMENT_RE.sub("", text)
     return QUOTED_OR_COMMENT_RE.sub(r"\1", text)
+
+
+RECORD_LIKE_RE = re.compile(r"""['"+\-.\d]""")
+
+
+def looks_like_record(note: str) -> bool:
+    """
+    Whether a note after a record's closing `/` looks like a second record written on the same
+    line, that is, begins like data and has a `/` of its own (`2 2 2 /`, `'B' 'G' 2 2 /`).
+
+    Eclipse ignores such a record along with any other note, so this is only used to say so.
+    """
+    note = note.strip()
+    return bool(note) and RECORD_LIKE_RE.match(note) is not None and find_terminator(note) != -1
+
+
+def strip_record_notes(body: str, *, records_lost: list[str] | None = None) -> str:
+    """
+    Drop the note after the closing `/` of each record in a keyword body.
+
+    Eclipse ignores whatever follows a record's closing `/` on the same line, and decks use that to
+    annotate records:
+
+        MULTIPLY
+         'PERMZ' 0.2  1 46 1 112 1 1 /  Garn 3
+         'PERMZ' 0.04 1 46 1 112 2 2 /  Garn 2
+        /
+
+    Without this, `Garn 3` would be read as the start of the next record. Only text is a note: a
+    second `/` (as in `/ /`, or the lone `/` that closes a keyword) is not, and is kept. A `/`
+    inside a quoted string is not a record end.
+
+    :param body: Keyword body, as found between two keywords.
+    :param records_lost: If given, each dropped note that `looks_like_record` is appended to it.
+    :returns: `body` without the notes (`body` itself if it has none).
+    """
+    if "/" not in body:
+        return body
+    if records_lost is None:
+        return QUOTED_OR_NOTE_RE.sub(r"\1\2", body)
+
+    def drop(match: re.Match[str]) -> str:
+        if match.group(1) is not None:
+            return match.group(1)
+        note = match.group(0)[1:]
+        if looks_like_record(note):
+            records_lost.append(note.strip())
+        return "/"
+
+    return QUOTED_OR_NOTE_RE.sub(drop, body)
 
 
 def find_terminator(text: str, start: int = 0, end: int | None = None) -> int:
@@ -772,13 +831,42 @@ class Deck:
                 # keyword, which is where the large arrays are), the body stops before it.
                 # Parsers then take the body as is, instead of each cutting a second copy of a
                 # possibly huge array out of it.
+                #
+                # A note after that `/` on its own line (`... / Garn 3`) is not data, so it
+                # does not make the keyword a multi-record one either.
+                free_text = keyword in FREE_TEXT_KEYWORDS
+                tail_start = terminator + 1
+                records_lost: list[str] = []
+                if not free_text:
+                    line_end = text.find("\n", tail_start, next_keyword_start)
+                    if line_end == -1:
+                        line_end = next_keyword_start
+                    if NOTE_RE.match(text, tail_start, line_end):
+                        if looks_like_record(text[tail_start:line_end]):
+                            records_lost.append(text[tail_start:line_end].strip())
+                        tail_start = line_end
+
                 only_record = (
-                    keyword not in FREE_TEXT_KEYWORDS
-                    and NON_SPACE_RE.search(text, terminator + 1, next_keyword_start) is None
+                    not free_text
+                    and NON_SPACE_RE.search(text, tail_start, next_keyword_start) is None
                 )
+                body = text[body_start : terminator if only_record else next_keyword_start]
+                if not (free_text or only_record):
+                    # The first note was looked at above, so only the later ones are collected.
+                    later_notes: list[str] = []
+                    body = strip_record_notes(body, records_lost=later_notes)
+                    records_lost.extend(later_notes[1:] if records_lost else later_notes)
+                for note in records_lost[:1]:
+                    report(
+                        f"`{keyword}`: text after a record's closing '/' is ignored, as Eclipse "
+                        f"does, but {note!r} looks like another record on the same line. Write "
+                        "each record on its own line.",
+                        strict=strict,
+                        stacklevel=4,
+                    )
                 record = Record(
                     keyword=keyword,
-                    body=text[body_start : terminator if only_record else next_keyword_start],
+                    body=body,
                     start=match.start(),
                     end=next_keyword_start,
                 )

@@ -372,13 +372,13 @@ simulation.
 
 MINPV = RecordKeyword[float](
     "MINPV",
-    fields=[Field("minpv", np.float64, required=False)],
+    fields=[Field("minpv", np.float64, required=False, default=1e-6)],
 )
 """
 `MINPV VALUE /` - minimum pore volume for a cell to be active.
 
 A cell whose pore volume is below `minpv` is made inactive. The value is a reservoir volume in
-the deck's unit system. It is `None` when left out: the simulator's own default applies.
+the deck's unit system, and defaults to `1e-6`.
 """
 
 NEWTRAN = FlagKeyword("NEWTRAN")

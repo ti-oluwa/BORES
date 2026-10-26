@@ -25,7 +25,7 @@ float64 arrays):
 
 **Tracer initialisation keywords** (`TVDPF<name>`, one per tracer declared with `TRACER`):
 
-- `TVDPF<name>`: initial tracer concentration versus depth, one table per equilibration region.
+- `TVDPF<name>`: initial tracer concentration versus depth, one table per region.
   The name is part of the keyword, so each tracer is its own keyword: `TVDPF2FB`, `TVDPF4FB`,
   `TVDPFDFB`, `TVDPFHTO`, `TVDPFS36`, `TVDPFSEA` and `TVDPFTFB` are registered, and `tvdpf`
   builds the keyword for any other tracer name.
@@ -289,8 +289,8 @@ def tvdpf(tracer: str) -> TableKeyword:
 
         deck_file.add_keywords(tvdpf("XYZ"))
 
-    One table per equilibration region, in the order the regions are numbered. A table is a list of
-    rows, each with:
+    One table per record, numbered in the order they are written (`EQLDIMS` gives the most there
+    can be, in its item `nttrvd`). Each table is a list of rows, each with:
 
     - `depth`: true vertical depth (ft in FIELD, m in METRIC).
     - `concentration`: free-phase tracer concentration at that depth (in the tracer's own unit).
@@ -305,7 +305,6 @@ def tvdpf(tracer: str) -> TableKeyword:
             Field("depth", np.float64),
             Field("concentration", np.float64),
         ],
-        table_per_segment=True,
     )
 
 

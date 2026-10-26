@@ -1498,33 +1498,33 @@ TUNING = MultiRecordScheduledKeyword(
         (
             "time_step",
             [
-                Field("tsinit", np.float64, required=False),
-                Field("tsmaxz", np.float64, required=False),
-                Field("tsminz", np.float64, required=False),
-                Field("tsmchp", np.float64, required=False),
-                Field("tsfmax", np.float64, required=False),
-                Field("tsfmin", np.float64, required=False),
-                Field("tsfcnv", np.float64, required=False),
-                Field("tfdiff", np.float64, required=False),
-                Field("thrupt", np.float64, required=False),
+                Field("tsinit", np.float64, required=False, default=1.0),
+                Field("tsmaxz", np.float64, required=False, default=365.0),
+                Field("tsminz", np.float64, required=False, default=0.1),
+                Field("tsmchp", np.float64, required=False, default=0.15),
+                Field("tsfmax", np.float64, required=False, default=3.0),
+                Field("tsfmin", np.float64, required=False, default=0.3),
+                Field("tsfcnv", np.float64, required=False, default=0.1),
+                Field("tfdiff", np.float64, required=False, default=1.25),
+                Field("thrupt", np.float64, required=False, default=1e20),
                 Field("tmaxwc", np.float64, required=False),
             ],
         ),
         (
             "convergence",
             [
-                Field("trgtte", np.float64, required=False),
-                Field("trgcnv", np.float64, required=False),
-                Field("trgmbe", np.float64, required=False),
-                Field("trglcv", np.float64, required=False),
-                Field("xxxtte", np.float64, required=False),
-                Field("xxxcnv", np.float64, required=False),
-                Field("xxxmbe", np.float64, required=False),
-                Field("xxxlcv", np.float64, required=False),
-                Field("xxxwfl", np.float64, required=False),
-                Field("trgfip", np.float64, required=False),
+                Field("trgtte", np.float64, required=False, default=0.1),
+                Field("trgcnv", np.float64, required=False, default=0.001),
+                Field("trgmbe", np.float64, required=False, default=1e-07),
+                Field("trglcv", np.float64, required=False, default=0.0001),
+                Field("xxxtte", np.float64, required=False, default=10.0),
+                Field("xxxcnv", np.float64, required=False, default=0.01),
+                Field("xxxmbe", np.float64, required=False, default=1e-06),
+                Field("xxxlcv", np.float64, required=False, default=0.001),
+                Field("xxxwfl", np.float64, required=False, default=0.001),
+                Field("trgfip", np.float64, required=False, default=0.025),
                 Field("trgsft", np.float64, required=False),
-                Field("thionx", np.float64, required=False),
+                Field("thionx", np.float64, required=False, default=0.01),
                 Field("trwght", int, required=False, default=1),
             ],
         ),
@@ -1537,9 +1537,9 @@ TUNING = MultiRecordScheduledKeyword(
                 Field("litmin", int, required=False, default=1),
                 Field("mxwsit", int, required=False, default=8),
                 Field("mxwpit", int, required=False, default=8),
-                Field("ddplim", np.float64, required=False),
-                Field("ddslim", np.float64, required=False),
-                Field("trgdpr", np.float64, required=False),
+                Field("ddplim", np.float64, required=False, default=1000000.0),
+                Field("ddslim", np.float64, required=False, default=1000000.0),
+                Field("trgdpr", np.float64, required=False, default=1000000.0),
                 Field("xxxdpr", np.float64, required=False),
                 Field("mnwrfp", int, required=False, default=4),
             ],
@@ -1559,33 +1559,35 @@ at:
 [{"time_step": {...}, "convergence": {...}, "iteration": {...}, "schedule_time": 0.0}]
 ```
 
-An item left out (or written `1*`) is `None`, meaning the simulator's own default, unless it
-has a fixed default shown below. `5*` leaves five items at their default.
+An item left out (or written `1*`) takes the default shown below; `5*` leaves five items at their
+default. Defaults for times and pressures are in the deck's unit system. Three items have no
+default and are `None` when left out: `tmaxwc`, `trgsft` and `xxxdpr`.
 
 Record 1, `time_step` (times in the deck's time unit):
 
-- `tsinit`: length of the first time step.
-- `tsmaxz`: maximum length of the next time step.
-- `tsminz`: minimum length of all time steps.
-- `tsmchp`: minimum length of the next time step after a time step was chopped.
-- `tsfmax`: maximum time step increase factor.
-- `tsfmin`: minimum time step cut factor.
-- `tsfcnv`: cut factor after a convergence failure.
-- `tfdiff`: maximum increase factor after a convergence failure.
-- `thrupt`: maximum throughput ratio.
+- `tsinit`: length of the first time step (default 1).
+- `tsmaxz`: maximum length of the next time step (default 365).
+- `tsminz`: minimum length of all time steps (default 0.1).
+- `tsmchp`: minimum length of the next time step after a time step was chopped (default 0.15).
+- `tsfmax`: maximum time step increase factor (default 3).
+- `tsfmin`: minimum time step cut factor (default 0.3).
+- `tsfcnv`: cut factor after a convergence failure (default 0.1).
+- `tfdiff`: maximum increase factor after a convergence failure (default 1.25).
+- `thrupt`: maximum throughput ratio (default 1e20).
 - `tmaxwc`: maximum length of a time step after a well modification.
 
 Record 2, `convergence`:
 
-- `trgtte`: target time truncation error.
-- `trgcnv`: target non-linear convergence error.
-- `trgmbe`: target material balance error.
-- `trglcv`: target linear convergence error.
-- `xxxtte`, `xxxcnv`, `xxxmbe`, `xxxlcv`: the corresponding maximum errors that are tolerated.
-- `xxxwfl`: maximum well flow convergence error.
-- `trgfip`: target of the change in fluid in place.
+- `trgtte`: target time truncation error (default 0.1).
+- `trgcnv`: target non-linear convergence error (default 0.001).
+- `trgmbe`: target material balance error (default 1e-7).
+- `trglcv`: target linear convergence error (default 1e-4).
+- `xxxtte`, `xxxcnv`, `xxxmbe`, `xxxlcv`: the corresponding maximum errors that are tolerated
+  (defaults 10, 0.01, 1e-6 and 0.001).
+- `xxxwfl`: maximum well flow convergence error (default 0.001).
+- `trgfip`: target of the change in fluid in place (default 0.025).
 - `trgsft`: target surfactant change.
-- `thionx`: threshold for ion exchange.
+- `thionx`: threshold for ion exchange (default 0.01).
 - `trwght`: weighting of the error (default 1).
 
 Record 3, `iteration`:
@@ -1596,9 +1598,9 @@ Record 3, `iteration`:
 - `litmin`: minimum number of linear iterations in a Newton iteration (default 1).
 - `mxwsit`: maximum number of well-solution iterations (default 8).
 - `mxwpit`: maximum number of well-pressure iterations (default 8).
-- `ddplim`: maximum pressure change at a time step.
-- `ddslim`: maximum saturation change at a time step.
-- `trgdpr`: target pressure change at a time step.
+- `ddplim`: maximum pressure change at a time step (default 1e6).
+- `ddslim`: maximum saturation change at a time step (default 1e6).
+- `trgdpr`: target pressure change at a time step (default 1e6).
 - `xxxdpr`: maximum pressure change tolerated at a time step.
 - `mnwrfp`: maximum number of well-rate-from-pressure iterations (default 4).
 

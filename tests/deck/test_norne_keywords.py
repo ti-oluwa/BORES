@@ -295,11 +295,14 @@ def test_tuning_and_zippy2(norne):
     time_step = tuning["time_step"]
     assert [time_step[k] for k in ("tsinit", "tsmaxz", "tsminz", "tsmchp")] == [1, 10, 0.1, 0.15]
     assert [time_step[k] for k in ("tsfmax", "tsfmin", "tsfcnv", "tfdiff")] == [3, 0.3, 0.3, 1.2]
-    assert time_step["thrupt"] is None and time_step["tmaxwc"] is None
+    assert time_step["thrupt"] == pytest.approx(1e20)  # defaulted
+    assert time_step["tmaxwc"] is None  # no default
     convergence = tuning["convergence"]
+    # The five items skipped with `5*` take their defaults.
     assert [convergence[k] for k in ("trgtte", "trgcnv", "trgmbe", "trglcv", "xxxtte")] == [
-        None
-    ] * 5
+        pytest.approx(v) for v in (0.1, 0.001, 1e-7, 1e-4, 10.0)
+    ]
+    assert convergence["trgsft"] is None
     assert [convergence[k] for k in ("xxxcnv", "xxxmbe", "xxxlcv", "xxxwfl")] == [
         0.1,
         0.0001,
@@ -411,16 +414,16 @@ def test_endscale_defaults_and_validation():
         make("ENDSCALE\n SIDEWAYS /\n").get("ENDSCALE")
 
 
-def test_dimension_records_leave_items_not_given_as_none():
-    assert make("VFPIDIMS\n 30 /\n").get("VFPIDIMS") == {
-        "mxmflo": 30,
-        "mxmthp": None,
-        "nmmvft": None,
-    }
-    assert make("FAULTDIM\n 1* /\n").get("FAULTDIM") == {"mfsegs": None}
-    assert make("PIMTDIMS\n /\n").get("PIMTDIMS") == {"ntpimt": None, "nppimt": None}
+def test_dimension_records_default_the_items_not_given():
+    # Defaults as declared in OPM's keyword definitions.
+    assert make("VFPIDIMS\n 30 /\n").get("VFPIDIMS") == {"mxmflo": 30, "mxmthp": 0, "nmmvft": 0}
+    assert make("VFPPDIMS\n /\n").get("VFPPDIMS") == dict.fromkeys(
+        ("mxmflo", "mxmthp", "mxmwfr", "mxmgfr", "mxmalq", "nmmvft"), 0
+    )
+    assert make("FAULTDIM\n 1* /\n").get("FAULTDIM") == {"mfsegs": 0}
+    assert make("PIMTDIMS\n /\n").get("PIMTDIMS") == {"ntpimt": 0, "nppimt": 0}
     assert make("NSTACK\n /\n").get("NSTACK") == {"nstack": 10}
-    assert make("MINPV\n /\n").get("MINPV") == {"minpv": None}
+    assert make("MINPV\n /\n").get("MINPV") == {"minpv": pytest.approx(1e-6)}
 
 
 def test_messages_defaults():
@@ -498,8 +501,22 @@ def test_tuning_is_stamped_with_the_time_it_takes_effect():
 
 def test_tuning_empty_records_leave_everything_at_its_default():
     (tuning,) = make("TUNING\n /\n /\n /\n").get("TUNING")
-    assert all(value is None for value in tuning["time_step"].values())
-    assert tuning["iteration"]["litmax"] == 25
+    time_step, convergence, iteration = (
+        tuning["time_step"],
+        tuning["convergence"],
+        tuning["iteration"],
+    )
+    assert [time_step[k] for k in ("tsinit", "tsmaxz", "tsminz", "tsmchp")] == [
+        pytest.approx(v) for v in (1.0, 365.0, 0.1, 0.15)
+    ]
+    assert time_step["tfdiff"] == pytest.approx(1.25)
+    assert time_step["tmaxwc"] is None  # no default
+    assert convergence["trgmbe"] == pytest.approx(1e-7)
+    assert convergence["trgsft"] is None
+    assert convergence["trwght"] == 1
+    assert iteration["ddplim"] == pytest.approx(1e6)
+    assert iteration["xxxdpr"] is None
+    assert iteration["litmax"] == 25
 
 
 def test_tuning_with_a_stray_closing_slash_is_read_without_complaint():

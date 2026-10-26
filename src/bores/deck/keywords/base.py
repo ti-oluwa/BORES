@@ -901,16 +901,24 @@ Table = list[TableRow[T]]
 
 class TableKeyword(Keyword[list[Table[Number]]]):
     """
-    A keyword whose body contains one or more tabulated data blocks,
-    each terminated by `/`. Multiple keyword occurrences (e.g. one per
-    PVT region) are collected in order.
+    A keyword whose body contains tabulated data, one `/`-terminated segment per region.
 
     This covers two sub-patterns:
 
-    **Simple (immiscible) tables**: every `/`-terminated segment is one
-    complete row; all rows in a block share the same column layout.
-    Examples: `SWOF`, `SGOF`, `PVDG`, `PVDO`, `SWFN`, `SGFN`,
-    `SOF2`, `SOF3`, `ROCK`, `DENSITY`, `PVTW`.
+    **Simple (immiscible) tables**: each non-empty `/`-terminated segment is one region's table,
+    and the table is the rows packed in that segment, `n_columns` values per row. The parsed value
+    has one entry per region, in order, so entry `i` belongs to region `i + 1`. That holds for
+    both layouts these keywords use:
+
+    - one table per region, rows separated only by whitespace and the whole table closed by one
+      `/` (`SWOF`, `SGOF`, `SWFN`, `SGFN`, `SOF2`, `SOF3`, `PVDG`, `PVDO`, `RSVD`, ...), and
+    - one row per region, each closed by its own `/` (`DENSITY`, `PVTW`, `ROCK`), which is the
+      same thing with a single-row table.
+
+    **Compact style**: rows that are each closed by their own `/`, with the table closed by a
+    lone `/` after them (`SWOF\n 0.2 0 1 0 /\n 1 1 0 0 /\n/`), are read as the rows of one
+    table. That is only done when the body ends in a lone `/` and every segment before it holds
+    exactly one row; anything else is read one table per segment.
 
     **Miscible (saturated/under-saturated) tables**: a single primary-key
     value on its own `/`-separated segment introduces a new "inner table",
@@ -924,19 +932,14 @@ class TableKeyword(Keyword[list[Table[Number]]]):
         "outer" key used in miscible (bracketed) PVT tables such as
         `PVTO` / `PVTG`. When `None`, the table is flat (immiscible
         / simple-tabular).
-    :param table_per_segment: Flat tables only. When `False` (default) all the `/`-terminated
-        segments of a keyword occurrence are rows of one table, which is right for keywords that
-        hold one row per region (`DENSITY`, `PVTW`). When `True` every non-empty segment is a table
-        of its own, which is right for keywords that hold one table per region, with the rows of a
-        table packed under a single closing `/` (`TVDPF<name>`).
 
-    The parsed value is `List[List[Dict]]`; a list of tables (one per
-    keyword occurrence / PVT region), each table being a list of row dicts.
+    The parsed value is `List[List[Dict]]`; a list of tables (one per region, in order across the
+    keyword occurrences), each table being a list of row dicts.
     For miscible tables the `primary_key` field is duplicated into every
     inner-table row for convenience.
     """
 
-    __slots__ = ("columns", "primary_key", "table_per_segment")
+    __slots__ = ("columns", "primary_key")
 
     def __init__(
         self,
@@ -944,12 +947,10 @@ class TableKeyword(Keyword[list[Table[Number]]]):
         columns: typing.Sequence[Field[Number]],
         *,
         primary_key: str | None = None,
-        table_per_segment: bool = False,
     ) -> None:
         super().__init__(name)
         self.columns: list[Field] = list(columns)
         self.primary_key = primary_key
-        self.table_per_segment = table_per_segment
 
     def parse(
         self,
@@ -968,14 +969,8 @@ class TableKeyword(Keyword[list[Table[Number]]]):
             if self.primary_key is not None:
                 tables = self._parse_miscible(record.body)
                 all_tables.extend(tables)
-            elif self.table_per_segment:
-                for segment in split_segments(record.body):
-                    table = self._parse_flat(segment)
-                    if table:
-                        all_tables.append(table)
             else:
-                table = self._parse_flat(record.body)
-                all_tables.append(table)
+                all_tables.extend(self._parse_flat_tables(record.body))
 
         return all_tables or None
 
@@ -989,36 +984,48 @@ class TableKeyword(Keyword[list[Table[Number]]]):
         """
         return typing.cast(TableRow[Number], parse_tokens(self.name, self.columns, tokens))
 
-    def _parse_flat(self, body: str) -> Table[Number]:
+    def _parse_flat_tables(self, body: str) -> list[Table[Number]]:
         """
-        Parse a flat (immiscible/simple) table body.
+        Parse a flat (immiscible/simple) keyword body into one table per region.
 
-        A `/`-delimited segment may hold exactly one row, or several rows
-        packed together under a single closing `/` for the whole table - both
-        conventions appear in real decks (`SWOF`/`SGOF` typically terminate
-        each row individually; `PVDO`/`PVDG` typically terminate the whole
-        table with one closing `/`, rows separated only by whitespace). Token
-        counts are chunked into `n_columns`-sized rows to handle both, which
-        is unambiguous here because every column in these tables is required
-        (no optional trailing field to create row-width ambiguity).
+        Each non-empty `/`-delimited segment is one table: its tokens are chunked into
+        `n_columns`-sized rows, which is unambiguous because every column in these tables is
+        required (no optional trailing field to create row-width ambiguity). The one exception is
+        the compact style, in which every segment is a single row and a lone `/` closes the
+        whole: those rows are one table (see the class documentation).
+
+        :param body: Keyword body.
+        :returns: The tables, in order. Segments without data are skipped.
+        :raises DeckParseError: If a segment does not hold a whole number of rows.
         """
-        table: Table = []
         n_columns = len(self.columns)
-        for segment in split_segments(body):
-            tokens = tokenize(segment)
-            if not tokens:
-                continue
-
-            n_tokens = len(tokens)
-            if n_tokens % n_columns != 0:
+        segments = split_segments(body)
+        token_lists = [tokenize(segment) for segment in segments]
+        for tokens in token_lists:
+            if len(tokens) % n_columns != 0:
                 raise DeckParseError(
-                    f"{self.name}: row segment has {n_tokens} token(s); "
+                    f"{self.name}: row segment has {len(tokens)} token(s); "
                     f"expected a multiple of {n_columns} (one row per "
                     f"{n_columns} tokens)."
                 )
-            for start in range(0, n_tokens, n_columns):
-                table.append(self._row_from_tokens(tokens[start : start + n_columns]))
-        return table
+
+        data = [tokens for tokens in token_lists if tokens]
+        # `[..., rows, "", remainder]`: the segment before the remainder is the lone `/`.
+        closed_by_lone_slash = len(token_lists) >= 2 and not token_lists[-2]
+        if (
+            closed_by_lone_slash
+            and len(data) >= 2
+            and all(len(tokens) == n_columns for tokens in data)
+        ):
+            data = [[token for tokens in data for token in tokens]]
+
+        return [
+            [
+                self._row_from_tokens(tokens[start : start + n_columns])
+                for start in range(0, len(tokens), n_columns)
+            ]
+            for tokens in data
+        ]
 
     def _parse_miscible(self, body: str) -> list[Table[Number]]:
         """
