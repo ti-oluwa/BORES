@@ -921,7 +921,7 @@ class RockCompressibilityTables(StoreSerializable):
         result = np.empty(pressure.shape, dtype=first.dtype)
         for rocknum in np.unique(rock_region):
             mask = rock_region == rocknum
-            result[mask] = getattr(self.region(int(rocknum)), quantity)(pressure[mask])
+            result[mask] = getattr(self.region(rocknum), quantity)(pressure[mask])
         return typing.cast(CellArray, result)
 
     def get_compressibility(
@@ -967,7 +967,7 @@ class RockCompressibilityTables(StoreSerializable):
             unit_conversion_table = build_unit_conversion_table()
             for rocknum in np.unique(rock_region):
                 mask = rock_region == rocknum
-                table = self.region(int(rocknum))
+                table = self.region(rocknum)
                 region_pressures = pressure[mask]
                 region_compressibility = table.effective_compressibility(region_pressures)  # type: ignore[arg-type]
                 region_reference_pressure = np.full(

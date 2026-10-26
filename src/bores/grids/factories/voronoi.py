@@ -53,7 +53,7 @@ def make_voronoi_grid(
     bounding_box: BoundingBox2D | BoundingBox3D | None = None,
     # 2-D extruded parameters (ignored for 3-D seeds)
     z_top: Number = 0.0,
-    layer_thicknesses: Number | npt.ArrayLike = 1.0,
+    layer_thickness: Number | npt.ArrayLike = 1.0,
     unit_system: UnitSystem = UnitSystem.FIELD,
     metadata: typing.Mapping[str, typing.Any] | None = None,
     cell_statuses: IntArray[OneDimension] | None = None,
@@ -87,7 +87,7 @@ def make_voronoi_grid(
         If `None`, inferred from seed extents padded by 5 % in each direction.
     :param z_top: Depth (positive downward) of the top surface of the first
         layer. **2-D extruded mode only** - ignored for 3-D seeds.
-    :param layer_thicknesses: Thickness of each vertical layer, in depth
+    :param layer_thickness: Thickness of each vertical layer, in depth
         units (positive). May be a scalar (single layer) or a 1-D array
         (multiple layers stacked downward from `z_top`).
         **2-D extruded mode only** - ignored for 3-D seeds.
@@ -113,7 +113,7 @@ def make_voronoi_grid(
         seeds,
         bounding_box=(0.0, 1000.0, 0.0, 1000.0),
         z_top=2000.0,
-        layer_thicknesses=10.0,
+        layer_thickness=10.0,
     )
     ```
 
@@ -123,7 +123,7 @@ def make_voronoi_grid(
         seeds,
         bounding_box=(0.0, 1000.0, 0.0, 1000.0),
         z_top=2000.0,
-        layer_thicknesses=np.array([5.0, 10.0, 5.0]),
+        layer_thickness=np.array([5.0, 10.0, 5.0]),
     )
     ```
 
@@ -156,7 +156,7 @@ def make_voronoi_grid(
             seeds=seeds,  # type: ignore[arg-type]
             bounding_box=resolve_2d_bounding_box(seeds, bounding_box),  # type: ignore[arg-type]
             z_top=z_top,
-            layer_thicknesses=resolve_layer_thicknesses(layer_thicknesses),
+            layer_thickness=resolve_layer_thickness(layer_thickness),
         )
     else:
         bounding_box = typing.cast(BoundingBox3D, bounding_box)
@@ -536,7 +536,7 @@ def make_2d_voronoi_grid(
     seeds: SeedCoordinates2D,
     bounding_box: BoundingBox2D,
     z_top: Number,
-    layer_thicknesses: LayerThicknessArray,
+    layer_thickness: LayerThicknessArray,
 ) -> tuple[
     NumberArray[TwoDimensions],
     IntArray[OneDimension],
@@ -554,14 +554,14 @@ def make_2d_voronoi_grid(
     :param seeds: Shape `(n_seeds, 2)` 2-D seed array.
     :param bounding_box: `(x_min, x_max, y_min, y_max)` bounding rectangle.
     :param z_top: Depth of the top node of the first layer.
-    :param layer_thicknesses: Shape `(n_layers,)` positive thickness per layer.
+    :param layer_thickness: Shape `(n_layers,)` positive thickness per layer.
     :param metadata: Optional metadata dictionary.
     :returns: Tuple `(vertex_coordinates, face_vertex_indices,
         face_vertex_offsets, face_cell_indices)` ready to be passed to
         `bores.grids.base.Grid`.
     """
     n_seeds = len(seeds)
-    n_layers = len(layer_thicknesses)
+    n_layers = len(layer_thickness)
 
     # Compute mirror seeds and run Voronoi. With the mirror trick, the regions of the original
     # seeds are finite.
@@ -576,7 +576,7 @@ def make_2d_voronoi_grid(
     keep &= ~(ridge_vertices == -1).any(axis=1)
 
     # Vertex `v` at depth level `lev` of the extruded grid is `v * n_z_levels + lev`.
-    z_nodes = compute_depth_nodes(z_top, layer_thicknesses)
+    z_nodes = compute_depth_nodes(z_top, layer_thickness)
     n_z_levels = len(z_nodes)
     n_voronoi_verts = len(voronoi.vertices)
     vertex_coordinates_3d = np.empty((n_voronoi_verts * n_z_levels, 3), dtype=np.float64)
@@ -801,16 +801,16 @@ def compute_2d_signed_area(
 
 
 def compute_depth_nodes(
-    z_top: Number, layer_thicknesses: LayerThicknessArray
+    z_top: Number, layer_thickness: LayerThicknessArray
 ) -> NumberArray[OneDimension]:
     """
     Compute the depth of every node surface from `z_top` downward.
 
     :param z_top: Depth of the topmost node surface (positive downward).
-    :param layer_thicknesses: Shape `(n_layers,)` positive thickness per layer.
+    :param layer_thickness: Shape `(n_layers,)` positive thickness per layer.
     :returns: Shape `(n_layers + 1,)` depth node array starting at `z_top`.
     """
-    return np.concatenate([[z_top], z_top + np.cumsum(layer_thicknesses)])  # type: ignore[return-value]
+    return np.concatenate([[z_top], z_top + np.cumsum(layer_thickness)])  # type: ignore[return-value]
 
 
 def resolve_2d_bounding_box(
@@ -882,19 +882,17 @@ def resolve_3d_bounding_box(
     return (x_min, x_max, y_min, y_max, z_min, z_max)
 
 
-def resolve_layer_thicknesses(
-    layer_thicknesses: Number | npt.ArrayLike,
-) -> LayerThicknessArray:
+def resolve_layer_thickness(layer_thickness: Number | npt.ArrayLike) -> LayerThicknessArray:
     """
     Convert a scalar or array layer thickness specification to a 1-D array.
 
-    :param layer_thicknesses: Scalar (single uniform layer) or 1-D array.
+    :param layer_thickness: Scalar (single uniform layer) or 1-D array.
     :returns: Shape `(n_layers,)` positive float64 array.
     :raises ValidationError: If any thickness is non-positive.
     """
-    array = np.atleast_1d(layer_thicknesses).astype(np.float64, copy=False).ravel()
+    array = np.atleast_1d(layer_thickness).astype(np.float64, copy=False).ravel()
     if np.any(array <= 0.0):
         raise ValidationError(
-            f"All `layer_thicknesses` must be strictly positive; got min={array.min():.6g}."
+            f"All `layer_thickness` must be strictly positive; got min={array.min():.6g}."
         )
     return array

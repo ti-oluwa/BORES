@@ -378,7 +378,7 @@ def face_has_vertex(
     face_vertex_offsets: IntArray[OneDimension],
     face_vertex_indices: IntArray[OneDimension],
 ) -> Boolean:
-    """Whether a face has a vertex among its corners."""
+    """Check whether a face has a vertex among its corners."""
     for slot in range(face_vertex_offsets[face], face_vertex_offsets[face + 1]):
         if face_vertex_indices[slot] == vertex:
             return True
@@ -386,7 +386,7 @@ def face_has_vertex(
 
 
 @numba.njit(cache=True)
-def side_top_vertices(
+def get_side_top_vertices(
     first_slot: Integer,
     top: Integer,
     corner: Integer,
@@ -400,7 +400,7 @@ def side_top_vertices(
     face_vertex_indices: IntArray[OneDimension],
 ) -> tuple[Boolean, Integer, Integer]:
     """
-    The two top corners of the side face that holds two neighbouring base corners.
+    Compute and return the two top corners of the side face that holds two neighbouring base corners.
 
     :param first_slot: Position of the cell's first face in `cell_face_indices`.
     :param top: The face opposite the base.
@@ -453,7 +453,7 @@ def side_top_vertices(
 
 
 @numba.njit(cache=True)
-def common_vertex(
+def get_common_vertex(
     first_a: Integer, first_b: Integer, second_a: Integer, second_b: Integer
 ) -> tuple[Boolean, Integer]:
     """The one vertex that two pairs of vertices have in common, if there is exactly one."""
@@ -469,7 +469,7 @@ def common_vertex(
 
 
 @numba.njit(cache=True)
-def hexahedron_corners(
+def compute_hexahedron_corners(
     cell: Integer,
     cell_face_offsets: IntArray[OneDimension],
     cell_face_indices: IntArray[OneDimension],
@@ -478,7 +478,7 @@ def hexahedron_corners(
     vertex_coordinates: NumberArray[TwoDimensions],
 ) -> tuple[Boolean, Integer, Integer, Integer, Integer, Integer, Integer, Integer, Integer]:
     """
-    The eight corners of a cell that is a hexahedron, in VTK hexahedron order.
+    Compute and return the eight corners of a cell that is a hexahedron, in VTK hexahedron order.
 
     A cell is a hexahedron if it has six faces, each with four vertices, and the faces pair up
     into a base, a top that shares no vertex with it, and four sides. The base corners come
@@ -560,7 +560,7 @@ def hexahedron_corners(
 
     # The side holding base corners i and i + 1 also holds the two top corners above them. The top
     # corner above base corner i is the one that side i - 1 and side i have in common.
-    ok0, s0a, s0b = side_top_vertices(
+    ok0, s0a, s0b = get_side_top_vertices(
         first_slot=first_slot,
         top=top,
         corner=base0,
@@ -573,7 +573,7 @@ def hexahedron_corners(
         face_vertex_offsets=face_vertex_offsets,
         face_vertex_indices=face_vertex_indices,
     )
-    ok1, s1a, s1b = side_top_vertices(
+    ok1, s1a, s1b = get_side_top_vertices(
         first_slot=first_slot,
         top=top,
         corner=base1,
@@ -586,7 +586,7 @@ def hexahedron_corners(
         face_vertex_offsets=face_vertex_offsets,
         face_vertex_indices=face_vertex_indices,
     )
-    ok2, s2a, s2b = side_top_vertices(
+    ok2, s2a, s2b = get_side_top_vertices(
         first_slot=first_slot,
         top=top,
         corner=base2,
@@ -599,7 +599,7 @@ def hexahedron_corners(
         face_vertex_offsets=face_vertex_offsets,
         face_vertex_indices=face_vertex_indices,
     )
-    ok3, s3a, s3b = side_top_vertices(
+    ok3, s3a, s3b = get_side_top_vertices(
         first_slot=first_slot,
         top=top,
         corner=base3,
@@ -614,10 +614,10 @@ def hexahedron_corners(
     )
     if not (ok0 and ok1 and ok2 and ok3):
         return none
-    found0, top0 = common_vertex(first_a=s3a, first_b=s3b, second_a=s0a, second_b=s0b)
-    found1, top1 = common_vertex(first_a=s0a, first_b=s0b, second_a=s1a, second_b=s1b)
-    found2, top2 = common_vertex(first_a=s1a, first_b=s1b, second_a=s2a, second_b=s2b)
-    found3, top3 = common_vertex(first_a=s2a, first_b=s2b, second_a=s3a, second_b=s3b)
+    found0, top0 = get_common_vertex(first_a=s3a, first_b=s3b, second_a=s0a, second_b=s0b)
+    found1, top1 = get_common_vertex(first_a=s0a, first_b=s0b, second_a=s1a, second_b=s1b)
+    found2, top2 = get_common_vertex(first_a=s1a, first_b=s1b, second_a=s2a, second_b=s2b)
+    found3, top3 = get_common_vertex(first_a=s2a, first_b=s2b, second_a=s3a, second_b=s3b)
     if not (found0 and found1 and found2 and found3):
         return none
     if (
@@ -763,7 +763,7 @@ def count_cell_entries(
         if n_faces == 0:
             continue
         if use_hexahedra:
-            is_hexahedron, _, _, _, _, _, _, _, _ = hexahedron_corners(
+            is_hexahedron, _, _, _, _, _, _, _, _ = compute_hexahedron_corners(
                 cell=cell,
                 cell_face_offsets=cell_face_offsets,
                 cell_face_indices=cell_face_indices,
@@ -823,7 +823,7 @@ def fill_cell_entries(
             continue
         position = cell_starts[cell]
         if use_hexahedra:
-            is_hexahedron, c0, c1, c2, c3, c4, c5, c6, c7 = hexahedron_corners(
+            is_hexahedron, c0, c1, c2, c3, c4, c5, c6, c7 = compute_hexahedron_corners(
                 cell=cell,
                 cell_face_offsets=cell_face_offsets,
                 cell_face_indices=cell_face_indices,
@@ -979,7 +979,7 @@ def make_pyvista_grid(
         render=render,
         use_hexahedra=use_hexahedra,
     )
-    valid_cell_mask = counts > 0
+    valid_mask = counts > 0
 
     # Where each cell's entries start: the running total of the entries before it. A cell with no
     # entries adds nothing, so unrendered cells do not move the start of the ones after them.
@@ -1002,15 +1002,15 @@ def make_pyvista_grid(
 
     # A hexahedron is the only cell that takes 9 entries, since the smallest polyhedron, a
     # tetrahedron, takes 18.
-    rendered_counts = counts[valid_cell_mask]
+    rendered_counts = counts[valid_mask]
     cell_types = np.where(rendered_counts == 9, VTK_HEXAHEDRON, VTK_POLYHEDRON).astype(np.uint8)
     del rendered_counts, cell_starts, counts
     pv_grid = pv.UnstructuredGrid(flat_cells, cell_types, all_points)
 
     # Attach built-in geometric arrays (filtered to rendered cells)
-    pv_grid.cell_data["cell_volume"] = grid.cell_volumes[valid_cell_mask]
-    pv_grid.cell_data["cell_depth"] = grid.cell_center_depths[valid_cell_mask]
-    pv_grid.cell_data["cell_thickness"] = grid.cell_thickness[valid_cell_mask]
+    pv_grid.cell_data["cell_volume"] = grid.cell_volumes[valid_mask]
+    pv_grid.cell_data["cell_depth"] = grid.cell_center_depths[valid_mask]
+    pv_grid.cell_data["cell_thickness"] = grid.cell_thickness[valid_mask]
 
     # Attach caller-supplied arrays
     if cell_data:
@@ -1020,5 +1020,5 @@ def make_pyvista_grid(
                 raise ValueError(
                     f"cell_data[{name!r}] has {array.shape[0]} entries but grid has {n_cells} cells."
                 )
-            pv_grid.cell_data[name] = array[valid_cell_mask]
+            pv_grid.cell_data[name] = array[valid_mask]
     return pv_grid

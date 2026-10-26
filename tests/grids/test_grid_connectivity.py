@@ -78,7 +78,7 @@ def test_per_cell_geometry_kernels_match_the_face_scatter_kernels():
     from bores.grids.factories.voronoi import make_voronoi_grid
 
     seeds = np.random.default_rng(2).random((60, 2)) * 500.0
-    grid = make_voronoi_grid(seeds, z_top=100.0, layer_thicknesses=np.array([4.0, 6.0]))
+    grid = make_voronoi_grid(seeds, z_top=100.0, layer_thickness=np.array([4.0, 6.0]))
     arguments = (
         grid.face_cell_indices,
         grid.face_vertex_indices,

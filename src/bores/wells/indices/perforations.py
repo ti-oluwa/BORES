@@ -10,7 +10,7 @@ from typing_extensions import Self
 
 from bores.errors import ValidationError
 from bores.grids.base import Grid
-from bores.grids.containment import cell_contains_point, first_cell_containing_point
+from bores.grids.containment import cell_contains_point, get_first_cell_containing_point
 from bores.grids.traversal import check_point_in_polygon_2d, walk_segment_cells
 from bores.types import (
     GridIntersectionMethod,
@@ -490,7 +490,7 @@ def find_first_containing_cell(
     :param tolerance: Distance from a cell's surface up to which a point still counts as inside.
     :returns: The first containing cell, or `None` if none of them contains `point`.
     """
-    return first_cell_containing_point(grid, candidates, point, tolerance)
+    return get_first_cell_containing_point(grid, candidates, point, tolerance)
 
 
 def locate_cell(

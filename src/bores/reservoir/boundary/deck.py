@@ -119,7 +119,7 @@ class AquiferConnections(typing.NamedTuple):
     """
 
 
-def count_active_cells_in_box(grid: Grid, record: typing.Mapping[str, typing.Any]) -> int:
+def count_active_cells_in_box(grid: Grid, record: typing.Mapping[str, typing.Any]) -> Integer:
     """
     Number of active cells in the IJK box of an `AQUANCON` record.
 
@@ -135,7 +135,7 @@ def count_active_cells_in_box(grid: Grid, record: typing.Mapping[str, typing.Any
     j = np.arange(max(record["j1"], 1) - 1, min(record["j2"], ny))
     k = np.arange(max(record["k1"], 1) - 1, min(record["k2"], nz))
     cells = (i[:, None, None] + nx * (j[None, :, None] + ny * k[None, None, :])).ravel()
-    return int(np.count_nonzero(grid.cell_statuses[cells] == 1))
+    return np.count_nonzero(grid.cell_statuses[cells] == 1)
 
 
 def resolve_aquancon_connections(

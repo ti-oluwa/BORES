@@ -311,7 +311,7 @@ class FaceLookup(typing.NamedTuple):
 
 
 @numba.njit(parallel=True, cache=True)
-def fault_pair_kernel(
+def fault_pair(
     i1: Integer,
     j1: Integer,
     k1: Integer,
@@ -377,7 +377,7 @@ def fault_pair_kernel(
 
 
 @numba.njit(parallel=True, cache=True)
-def find_faces_kernel(
+def find_faces(
     keys: IntArray[OneDimension],
     faces: IntArray[OneDimension],
     n_cells: Integer,
@@ -415,7 +415,7 @@ def find_faces_kernel(
 
 
 @numba.njit(cache=True)
-def reclassify_faces_kernel(
+def reclassify_faces(
     connection_types: IntArray[OneDimension],
     face_cell_indices: IntArray[TwoDimensions],
     face_indices: IntArray[OneDimension],
@@ -465,7 +465,7 @@ def resolve_fault_cell_pairs(
     lower = np.empty(total, dtype=np.int64)
     upper = np.empty(total, dtype=np.int64)
     in_bounds = np.empty(total, dtype=np.bool_)
-    fault_pair_kernel(
+    fault_pair(
         i1=fault.i1,
         j1=fault.j1,
         k1=fault.k1,
@@ -558,7 +558,7 @@ def apply_faults_to_grid(
         # A replaced fault gives up its old faces before the new ones are classified.
         replaced = fault_face_indices.pop(fault.name, None)
         if replaced is not None:
-            reclassify_faces_kernel(
+            reclassify_faces(
                 connection_types=typing.cast(IntArray[OneDimension], connection_types),
                 face_cell_indices=typing.cast(IntArray[TwoDimensions], face_cell_indices),
                 face_indices=typing.cast(IntArray[OneDimension], np.ascontiguousarray(replaced)),
@@ -569,7 +569,7 @@ def apply_faults_to_grid(
     for fault in faults:
         pairs = resolve_fault_cell_pairs(fault, nx, ny, nz)
         found = np.empty(pairs.lower.shape[0], dtype=np.int64)
-        find_faces_kernel(
+        find_faces(
             keys=lookup.keys,
             faces=lookup.faces,
             n_cells=lookup.n_cells,
@@ -580,7 +580,7 @@ def apply_faults_to_grid(
         found = found[found >= 0]
         if found.shape[0] == 0:
             continue
-        reclassify_faces_kernel(
+        reclassify_faces(
             connection_types=typing.cast(IntArray[OneDimension], connection_types),
             face_cell_indices=typing.cast(IntArray[TwoDimensions], face_cell_indices),
             face_indices=typing.cast(IntArray[OneDimension], found),
@@ -626,7 +626,7 @@ def remove_faults_from_grid(grid: Grid, names: frozenset[str]) -> Grid:
             face_indices = grid.fault_face_indices.get(name)
             if face_indices is None:
                 continue
-            reclassify_faces_kernel(
+            reclassify_faces(
                 connection_types=typing.cast(IntArray[OneDimension], connection_types),
                 face_cell_indices=typing.cast(IntArray[TwoDimensions], face_cell_indices),
                 face_indices=typing.cast(

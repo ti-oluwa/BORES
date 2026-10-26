@@ -41,7 +41,7 @@ seeds_2d = np.vstack([seeds_centre, seeds_inner, seeds_mid, seeds_outer, seeds_r
 
 # Layer definition
 z_top = 2100.0  # top of cap rock (m depth, positive down)
-layer_thicknesses = np.array([8.0, 15.0, 25.0, 20.0, 40.0])
+layer_thickness = np.array([8.0, 15.0, 25.0, 20.0, 40.0])
 layer_names = ["Cap rock", "Upper reservoir", "Main pay", "Lower reservoir", "Aquifer"]
 
 bounding_box = (-1000.0, 1000.0, -1000.0, 1000.0)
@@ -53,7 +53,7 @@ grid = make_voronoi_grid(
     seeds_2d,
     bounding_box=bounding_box,
     z_top=z_top,
-    layer_thicknesses=layer_thicknesses,
+    layer_thickness=layer_thickness,
 )
 
 print(f"  cells    : {grid.n_cells}")
@@ -61,7 +61,7 @@ print(f"  faces    : {grid.n_faces}")
 print(f"  vertices : {grid.n_vertices}")
 print(f"  bbox     : {grid.bounding_box}")
 
-n_layers = len(layer_thicknesses)
+n_layers = len(layer_thickness)
 n_cols = grid.n_cells // n_layers
 print(f"  columns  : {n_cols}  x  {n_layers} layers  = {grid.n_cells} cells")
 
@@ -87,7 +87,7 @@ perm *= np.exp(0.5 * rng.standard_normal(grid.n_cells))  # log-normal scatter
 perm = np.clip(perm, 0.1, 2000.0)
 
 # Water saturation: increases with depth and radius (oil in structural high)
-sw = 0.15 + 0.4 * (cz - z_top) / layer_thicknesses.sum() + 0.1 * r / 1000.0
+sw = 0.15 + 0.4 * (cz - z_top) / layer_thickness.sum() + 0.1 * r / 1000.0
 sw += 0.05 * rng.standard_normal(grid.n_cells)
 sw = np.clip(sw, 0.10, 0.95)
 

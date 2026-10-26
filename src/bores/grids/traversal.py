@@ -75,7 +75,7 @@ def check_point_on_segment(
 
 
 @numba.njit(cache=True)
-def point_in_indexed_polygon(
+def check_point_in_indexed_polygon(
     x: Number,
     y: Number,
     u_axis: Integer,
@@ -116,8 +116,8 @@ def point_in_indexed_polygon(
 
 
 @numba.njit(cache=True)
-def dominant_axis_of(nx: Number, ny: Number, nz: Number) -> Integer:
-    """The axis a normal is most aligned with, the lowest axis if several tie."""
+def get_dominant_axis_of(nx: Number, ny: Number, nz: Number) -> Integer:
+    """Returns the axis a normal is most aligned with, the lowest axis if several tie."""
     axis = 0
     largest = abs(nx)
     if abs(ny) > largest:
@@ -145,7 +145,7 @@ def check_point_in_polygon_2d(
     :param tolerance: Distance tolerance for the boundary case.
     :returns: `True` if `(x, y)` is inside or on the boundary of the polygon.
     """
-    return point_in_indexed_polygon(
+    return check_point_in_indexed_polygon(
         x=x,
         y=y,
         u_axis=0,
@@ -176,10 +176,10 @@ def check_point_in_polygon_3d(
     :param tolerance: Distance tolerance for the boundary case.
     :returns: `True` if `point` is inside or on the boundary of the polygon.
     """
-    dominant = dominant_axis_of(nx=normal[0], ny=normal[1], nz=normal[2])
+    dominant = get_dominant_axis_of(nx=normal[0], ny=normal[1], nz=normal[2])
     u_axis = 1 if dominant == 0 else 0
     v_axis = 1 if dominant == 2 else 2
-    return point_in_indexed_polygon(
+    return check_point_in_indexed_polygon(
         x=point[u_axis],
         y=point[v_axis],
         u_axis=u_axis,
@@ -191,7 +191,7 @@ def check_point_in_polygon_3d(
 
 
 @numba.njit(cache=True)
-def face_plane_crossing(
+def get_face_plane_crossing(
     sx: Number,
     sy: Number,
     sz: Number,
@@ -205,7 +205,7 @@ def face_plane_crossing(
     face_centroids: NumberArray[TwoDimensions],
 ) -> Number:
     """
-    Where a segment crosses a face's plane.
+    Return where a segment crosses a face's plane.
 
     :param sx: x coordinate of the segment's start.
     :param sy: y coordinate of the segment's start.
@@ -252,7 +252,7 @@ def crossing_is_inside_face(
     face_unit_normals: NumberArray[TwoDimensions],
 ) -> Boolean:
     """
-    Whether the point a segment reaches at `t` lies within a face's polygon.
+    Check whether the point a segment reaches at `t` lies within a face's polygon.
 
     :param sx: x coordinate of the segment's start.
     :param sy: y coordinate of the segment's start.
@@ -268,7 +268,7 @@ def crossing_is_inside_face(
     :param face_unit_normals: Shape `(n_faces, 3)` unit normals.
     :returns: `True` if the crossing is inside or on the boundary of the face.
     """
-    dominant = dominant_axis_of(
+    dominant = get_dominant_axis_of(
         nx=face_unit_normals[face, 0],
         ny=face_unit_normals[face, 1],
         nz=face_unit_normals[face, 2],
@@ -277,7 +277,7 @@ def crossing_is_inside_face(
     v_axis = 1 if dominant == 2 else 2
     start = (sx, sy, sz)
     direction = (dx, dy, dz)
-    return point_in_indexed_polygon(
+    return check_point_in_indexed_polygon(
         x=start[u_axis] + t * direction[u_axis],
         y=start[v_axis] + t * direction[v_axis],
         u_axis=u_axis,
@@ -349,7 +349,7 @@ def walk_cells(
         best_face = -1
         for slot in range(cell_face_offsets[current_cell], cell_face_offsets[current_cell + 1]):
             face = cell_face_indices[slot]
-            t = face_plane_crossing(
+            t = get_face_plane_crossing(
                 sx=sx,
                 sy=sy,
                 sz=sz,
@@ -476,7 +476,7 @@ def get_segment_face_intersection(
     cell_index: Integer,
 ) -> Number | None:
     """
-    Where a ray from `start` along `direction` crosses a face and lands within its polygon.
+    Computes and returns where a ray from `start` along `direction` crosses a face and lands within its polygon.
 
     :param start: Ray origin.
     :param direction: Ray direction, of any length. `t` is in units of its length, so `t = 1`
@@ -488,7 +488,7 @@ def get_segment_face_intersection(
         to the face's plane or crosses it outside the face's polygon.
     """
     arrays = traversal_arrays(grid)
-    t = face_plane_crossing(
+    t = get_face_plane_crossing(
         sx=start[0],
         sy=start[1],
         sz=start[2],

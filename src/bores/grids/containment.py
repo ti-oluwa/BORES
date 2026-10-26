@@ -20,7 +20,7 @@ from bores.types import (
 __all__ = [
     "INSIDE_FRACTION",
     "cell_contains_point",
-    "first_cell_containing_point",
+    "get_first_cell_containing_point",
 ]
 
 INSIDE_FRACTION = 0.75
@@ -33,7 +33,7 @@ to the surface instead.
 
 
 @numba.njit(cache=True)
-def solid_angle_fraction(
+def compute_solid_angle_fraction(
     x: Number,
     y: Number,
     z: Number,
@@ -47,7 +47,7 @@ def solid_angle_fraction(
     face_unit_normals: NumberArray[TwoDimensions],
 ) -> Number:
     """
-    Fraction of a full turn of solid angle that the surface of a cell subtends at a point.
+    Cmpute the fraction of a full turn of solid angle that the surface of a cell subtends at a point.
 
     The surface is every face polygon of the cell, split into triangles that fan out from the
     face's first vertex, which is also how the grid computes cell volumes. The result is `1` for a
@@ -131,7 +131,7 @@ def solid_angle_fraction(
 
 
 @numba.njit(cache=True)
-def triangle_distance_squared(
+def compute_triangle_distance_squared(
     px: Number,
     py: Number,
     pz: Number,
@@ -146,7 +146,7 @@ def triangle_distance_squared(
     cz: Number,
 ) -> Number:
     """
-    Squared distance from a point to a triangle.
+    Compute squared distance from a point to a triangle.
 
     :param px: x coordinate of the point.
     :param py: y coordinate of the point.
@@ -251,9 +251,9 @@ def is_within_of_surface(
     vertex_coordinates: NumberArray[TwoDimensions],
 ) -> Boolean:
     """
-    Whether a point is no further than `distance` from the surface of a cell.
+    Check whether a point is no further than `distance` from the surface of a cell.
 
-    The surface is the same fan of triangles that `solid_angle_fraction` uses.
+    The surface is the same fan of triangles that `compute_solid_angle_fraction` uses.
 
     :param x: x coordinate of the point.
     :param y: y coordinate of the point.
@@ -279,7 +279,7 @@ def is_within_of_surface(
             second = face_vertex_indices[start + position]
             third = face_vertex_indices[start + position + 1]
             if (
-                triangle_distance_squared(
+                compute_triangle_distance_squared(
                     px=x,
                     py=y,
                     pz=z,
@@ -317,7 +317,7 @@ def contains_point(
     cell_max_xyz: NumberArray[TwoDimensions],
 ) -> Boolean:
     """
-    Whether a cell contains a point.
+    Check whether a cell contains a point.
 
     A cell with no faces (an inactive or pinched-out cell) contains nothing. Otherwise the point
     is inside if the cell's faces surround it, or if it lies within `tolerance` of the surface.
@@ -352,7 +352,7 @@ def contains_point(
     ):
         return False
 
-    fraction = solid_angle_fraction(
+    fraction = compute_solid_angle_fraction(
         x=x,
         y=y,
         z=z,
@@ -382,7 +382,7 @@ def contains_point(
 
 
 @numba.njit(cache=True)
-def first_containing_cell(
+def get_first_containing_cell(
     x: Number,
     y: Number,
     z: Number,
@@ -399,7 +399,7 @@ def first_containing_cell(
     cell_max_xyz: NumberArray[TwoDimensions],
 ) -> Integer:
     """
-    Position, in `candidates`, of the first cell that contains the point.
+    Get the position, in `candidates`, of the first cell that contains the point.
 
     :param x: x coordinate of the point.
     :param y: y coordinate of the point.
@@ -483,7 +483,7 @@ def cell_contains_point(
     )
 
 
-def first_cell_containing_point(
+def get_first_cell_containing_point(
     grid: Grid,
     candidates: IntArray[OneDimension],
     point: tuple[Number, Number, Number],
@@ -498,7 +498,7 @@ def first_cell_containing_point(
     :param tolerance: Distance from a cell's surface up to which a point still counts as inside.
     :returns: The first containing cell, or `None` if none of them contains the point.
     """
-    position = first_containing_cell(
+    position = get_first_containing_cell(
         x=point[0],
         y=point[1],
         z=point[2],

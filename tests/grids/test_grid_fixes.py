@@ -58,7 +58,7 @@ def test_voronoi_2d_fills_the_box(seed):
         rng.random((int(rng.integers(8, 60)), 2)) * 1000,
         bounding_box=(0.0, 1000.0, 0.0, 1000.0),
         z_top=2000.0,
-        layer_thicknesses=thickness,
+        layer_thickness=thickness,
     )
     assert grid.cell_volumes.sum() == pytest.approx(1e6 * thickness.sum(), rel=1e-10)
 

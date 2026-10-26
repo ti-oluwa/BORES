@@ -6,7 +6,7 @@ import warnings
 import numpy as np
 import pytest
 
-from bores.grids.containment import cell_contains_point, first_cell_containing_point
+from bores.grids.containment import cell_contains_point, get_first_cell_containing_point
 from bores.grids.factories.cartesian import make_cartesian_grid
 from bores.grids.io.grdecl import load_grdecl
 from bores.types import UnitSystem
@@ -21,7 +21,7 @@ def load(name):
         return load_grdecl(DATA / f"{name}.grdecl", unit_system=UnitSystem.FIELD)
 
 
-def solid_angle_fraction(grid, cell, point):
+def compute_solid_angle_fraction(grid, cell, point):
     """Independent reference: the solid angle the cell's faces subtend at the point."""
     total = 0.0
     for face in grid.get_cell_face_indices(cell):
@@ -83,7 +83,7 @@ def test_agrees_with_the_independent_reference_on_warped_cells(name):
         low, high = grid.cell_min_xyz[cell], grid.cell_max_xyz[cell]
         for _ in range(10):
             point = low + rng.random(3) * (high - low)
-            fraction = solid_angle_fraction(grid, int(cell), point)
+            fraction = compute_solid_angle_fraction(grid, int(cell), point)
             if abs(fraction - 0.5) < 0.01:
                 continue  # on the surface, where either answer is acceptable
             expected = fraction > 0.5
@@ -106,27 +106,29 @@ def test_the_first_containing_candidate_in_order_wins(box):
     )
     cells = [int(box.flat_index(1, 1, 1)), int(box.flat_index(2, 1, 1))]
     point = tuple((box.cell_max_xyz[cells[0]] + box.cell_min_xyz[cells[0]]) / 2)
-    assert first_cell_containing_point(box, np.array(cells, dtype=np.int32), point) == cells[0]
+    assert get_first_cell_containing_point(box, np.array(cells, dtype=np.int32), point) == cells[0]
     assert shared_face is None or shared_face >= 0
     # the point also lies on the shared face of cell[0] and the next cell along x
     on_shared = list(point)
     on_shared[0] = box.cell_max_xyz[cells[0]][0]
     for order in (cells, cells[::-1]):
-        found = first_cell_containing_point(box, np.array(order, dtype=np.int32), tuple(on_shared))
+        found = get_first_cell_containing_point(
+            box, np.array(order, dtype=np.int32), tuple(on_shared)
+        )
         assert found == order[0]
 
 
 def test_no_candidate_containing_the_point_gives_none(box):
     candidates = np.arange(box.n_cells, dtype=np.int32)
-    assert first_cell_containing_point(box, candidates, (1e6, 1e6, 1e6)) is None
-    assert first_cell_containing_point(box, candidates[:0], (5.0, 5.0, 2.0)) is None
+    assert get_first_cell_containing_point(box, candidates, (1e6, 1e6, 1e6)) is None
+    assert get_first_cell_containing_point(box, candidates[:0], (5.0, 5.0, 2.0)) is None
 
 
 def test_candidates_may_be_any_integer_array(box):
     point = tuple((box.cell_min_xyz[7] + box.cell_max_xyz[7]) / 2)
     candidates = np.arange(box.n_cells, dtype=np.int64)
-    assert first_cell_containing_point(box, candidates[::-1], point) == 7
-    assert first_cell_containing_point(box, np.asarray(candidates[::2]), point) in (None, 7)
+    assert get_first_cell_containing_point(box, candidates[::-1], point) == 7
+    assert get_first_cell_containing_point(box, np.asarray(candidates[::2]), point) in (None, 7)
 
 
 def brute_force_triangle_distance_squared(point, a, b, c, samples=400):
@@ -139,13 +141,13 @@ def brute_force_triangle_distance_squared(point, a, b, c, samples=400):
 
 
 def test_triangle_distance_matches_a_brute_force_search():
-    from bores.grids.containment import triangle_distance_squared
+    from bores.grids.containment import compute_triangle_distance_squared
 
     rng = np.random.default_rng(3)
     for _ in range(200):
         a, b, c = rng.normal(size=(3, 3)) * 5.0
         point = rng.normal(size=3) * 8.0
-        exact = triangle_distance_squared(
+        exact = compute_triangle_distance_squared(
             px=point[0], py=point[1], pz=point[2],
             ax=a[0], ay=a[1], az=a[2], bx=b[0], by=b[1], bz=b[2], cx=c[0], cy=c[1], cz=c[2],
         )  # fmt: skip
@@ -155,7 +157,7 @@ def test_triangle_distance_matches_a_brute_force_search():
 
 
 def test_triangle_distance_copes_with_a_triangle_that_has_no_area():
-    from bores.grids.containment import triangle_distance_squared
+    from bores.grids.containment import compute_triangle_distance_squared
 
     corner = np.array([1.0, 2.0, 3.0])
     for corners in (
@@ -163,7 +165,7 @@ def test_triangle_distance_copes_with_a_triangle_that_has_no_area():
         [corner, corner, corner + np.array([1.0, 0.0, 0.0])],
     ):
         (a, b, c) = corners
-        distance = triangle_distance_squared(
+        distance = compute_triangle_distance_squared(
             px=0.0, py=0.0, pz=0.0,
             ax=a[0], ay=a[1], az=a[2], bx=b[0], by=b[1], bz=b[2], cx=c[0], cy=c[1], cz=c[2],
         )  # fmt: skip

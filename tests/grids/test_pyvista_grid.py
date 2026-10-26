@@ -48,7 +48,7 @@ def test_hexahedra_keep_cell_count_data_and_volumes_on_flat_cells(cartesian_grid
 
 
 def test_hexahedron_corners_follow_the_cell_faces(corner_point_grid):
-    from bores.grids.utils import hexahedron_corners
+    from bores.grids.utils import compute_hexahedron_corners
 
     grid = corner_point_grid
     points = grid.vertex_coordinates.copy()
@@ -56,7 +56,7 @@ def test_hexahedron_corners_follow_the_cell_faces(corner_point_grid):
     quads = [(0, 1, 2, 3), (4, 5, 6, 7), (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7)]
     found = 0
     for cell in range(grid.n_cells):
-        is_hexahedron, *corners = hexahedron_corners(
+        is_hexahedron, *corners = compute_hexahedron_corners(
             cell,
             grid.cell_face_offsets,
             grid.cell_face_indices,
