@@ -151,3 +151,10 @@ def test_invalid_explicit_rsw_is_rejected(spe1, bad):
 def test_wrong_shape_is_rejected(spe1):
     with pytest.raises(ValidationError):
         initialize(spe1, gas_solubility_in_water=np.zeros(3))
+
+
+def test_more_bisection_iterations_tighten_the_bubble_point(tables):
+    explicit = np.asarray(saturated_rsw(tables, 0.6 * PRESSURES))
+    _, coarse = run(tables, gas_solubility_in_water=explicit, iterations=3)
+    _, fine = run(tables, gas_solubility_in_water=explicit)
+    assert np.abs(coarse - 0.6 * PRESSURES).max() > np.abs(fine - 0.6 * PRESSURES).max()

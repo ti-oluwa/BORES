@@ -44,6 +44,7 @@ from bores.types import (
     CellArray,
     IntArray,
     IntCellArray,
+    Integer,
     Number,
     NumberArray,
     OneDimension,
@@ -1321,6 +1322,7 @@ def initialize_water_gas_state(
     temperature: CellArray,
     gas_solubility_in_water: CellArray | None = None,
     salinity: CellArray | None = None,
+    iterations: Integer = WATER_BUBBLE_POINT_ITERATIONS,
     dtype: npt.DTypeLike = None,
 ) -> tuple[CellArray, CellArray]:
     """
@@ -1351,6 +1353,7 @@ def initialize_water_gas_state(
     :param gas_solubility_in_water: Optional shape `(n_cells,)` explicit `Rsw`.
     :param salinity: Optional shape `(n_cells,)` water salinity (ppm NaCl). Each table's own
         default salinity is used where `None`.
+    :param iterations: Bisection steps used to find the bubble-point pressure of an explicit `Rsw`.
     :param dtype: Output dtype. `bores.precision.get_dtype()` if not given.
     :returns: The `Rsw` array and the water bubble-point pressure array.
     """
@@ -1397,10 +1400,10 @@ def initialize_water_gas_state(
         saturated = np.broadcast_to(saturated, p.shape)
         low = p * 1e-3
         high = np.array(p, dtype=dtype, copy=True)
-        for _ in range(WATER_BUBBLE_POINT_ITERATIONS):
+        for _ in range(iterations):
             middle = 0.5 * (low + high)
             holds = gas.solubility_in_water(middle, t, salinity=s)  # type: ignore[union-attr]
-            below = np.broadcast_to(holds, p.shape) < rsw
+            below = np.broadcast_to(holds, p.shape) < rsw  # type: ignore[arg-type]
             low = np.where(below, middle, low)
             high = np.where(below, high, middle)
         region_bubble_point = 0.5 * (low + high)
@@ -1746,17 +1749,17 @@ def initialize_reservoir_state(
                 "`gas_solubility_in_water` must be finite and non-negative in every cell."
             )
     if water_salinity is not None:
-        water_salinity = np.asarray(water_salinity, dtype=dtype)
-        if water_salinity.shape != (n_cells,):
+        water_salinity = np.asarray(water_salinity, dtype=dtype)  # type: ignore
+        if water_salinity.shape != (n_cells,):  # type: ignore[attr-defined]
             raise ValidationError(
-                f"`water_salinity` has shape {water_salinity.shape}; expected ({n_cells},)."
+                f"`water_salinity` has shape {water_salinity.shape}; expected ({n_cells},)."  # type: ignore[attr-defined]
             )
     gas_solubility_in_water_array, water_bubble_point_pressure_array = initialize_water_gas_state(
         pvt=pvt,
         pvt_region_index=pvt_region_index,
         pressure=pressure_array,
         temperature=temperature_array,
-        gas_solubility_in_water=solubility_in_water_input,
+        gas_solubility_in_water=typing.cast(CellArray | None, solubility_in_water_input),
         salinity=water_salinity,
         dtype=dtype,
     )
