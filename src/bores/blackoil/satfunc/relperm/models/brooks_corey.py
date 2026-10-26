@@ -1927,7 +1927,7 @@ def compute_brooks_corey_water_wet_system(
         dkrw_dso=zeros.copy(),
         dkrw_dsg=zeros.copy(),
         dkro_dsw=dkro_dsw,
-        dkro_dso=dkro_dso,
+        dkro_dso=dkro_dso,  # type: ignore[arg-type]
         dkro_dsg=dkro_dsg,
         dkrg_dsg=dkrg_dsg,
     )
@@ -2048,7 +2048,7 @@ def compute_brooks_corey_oil_wet_system(
         krw=krw,
         kro=kro,
         krg=krg,
-        dkrw_dsw=dkrw_dsw,
+        dkrw_dsw=dkrw_dsw,  # type: ignore[arg-type]
         dkrw_dso=dkrw_dso,
         dkrw_dsg=dkrw_dsg,
         dkro_dsw=zeros.copy(),

@@ -865,7 +865,7 @@ def make_pyvista_grid(
     grid: Grid,
     *,
     cell_data: Mapping[str, CellArray] | None = None,
-    exterior_only: bool = False,
+    hollow: bool = False,
     use_hexahedra: bool = False,
 ) -> typing.Any:
     """
@@ -892,7 +892,7 @@ def make_pyvista_grid(
       of any other shape stay polyhedra. VTK draws the faces of a hexahedron as smooth surfaces
       between its corners, so a strongly warped cell, whose faces are not flat, differs slightly in
       shape and computed volume from its polyhedron. Cells with flat faces are identical.
-    - `exterior_only` leaves out every cell that cannot be seen from outside the grid, meaning
+    - `hollow` leaves out every cell that cannot be seen from outside the grid, meaning
       cells whose faces all have an active, rendered neighbour and close up on their own. The
       outside of the model looks the same, but cutting into it (clipping, slicing or thresholding)
       reveals a hollow model.
@@ -913,7 +913,7 @@ def make_pyvista_grid(
         `pv_grid.plot(scalars="<scalar>")`. Arrays must have length
         `grid.n_cells`; they are automatically filtered to the cells that are rendered
         before attachment.
-    :param exterior_only: Whether to leave out the cells that cannot be seen from outside the grid.
+    :param hollow: Whether to leave out the cells that cannot be seen from outside the grid.
     :param use_hexahedra: Whether to store hexahedral cells in VTK's compact hexahedron form.
     :returns: A `pyvista.UnstructuredGrid` ready for rendering or
         further PyVista processing.
@@ -930,7 +930,7 @@ def make_pyvista_grid(
     pv_grid = make_pyvista_grid(
         grid,
         cell_data={"pressure": pressure},
-        exterior_only=True,
+        hollow=True,
         use_hexahedra=True,
     )
 
@@ -960,7 +960,7 @@ def make_pyvista_grid(
 
     # Cells with faces are the ones that can be drawn at all.
     render = typing.cast(BooleanArray[OneDimension], np.diff(grid.cell_face_offsets) > 0)
-    if exterior_only:
+    if hollow:
         render = find_exposed_cells(
             cell_face_offsets=grid.cell_face_offsets,
             cell_face_indices=grid.cell_face_indices,

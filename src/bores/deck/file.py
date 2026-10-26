@@ -781,7 +781,7 @@ class DeckFile:
         }
 
     def _resolve_operations(self) -> None:
-        """(Re)resolve the `BOX` / operator records, which depend on the grid dimensions."""
+        """(Re-)resolve the `BOX` / operator records, which depend on the grid dimensions."""
         self._operations = (
             resolve_operations(self._deck, self.dimensions, array_info=self._array_info())
             if self.dimensions is not None

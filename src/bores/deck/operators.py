@@ -303,7 +303,7 @@ def parse_operator_records(
         else:
             if len(tokens) < 2:
                 report(
-                    f"{op} record {tokens!r} needs a target keyword and value; skipping it.",
+                    f"`{op}` record {tokens!r} needs a target keyword and value; skipping it.",
                     strict=strict,
                     stacklevel=3,
                 )
@@ -314,7 +314,7 @@ def parse_operator_records(
                 value = float(tokens[1])
             except ValueError:
                 report(
-                    f"{op} record for {target!r} has non-numeric value {tokens[1]!r}; "
+                    f"`{op}` record for {target!r} has non-numeric value {tokens[1]!r}; "
                     "skipping it.",
                     strict=strict,
                     stacklevel=3,
@@ -328,7 +328,7 @@ def parse_operator_records(
                 extra,
                 box,
                 dims,
-                label=f"{op} record for {target!r}",
+                label=f"`{op}` record for {target!r}",
                 strict=strict,
             )
             # An unreadable inline box was reported above; the record then uses the ambient box.

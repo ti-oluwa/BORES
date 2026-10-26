@@ -1063,7 +1063,7 @@ def to_kernel_parameters(
     :return: The parameters as a tuple of three floats.
     """
     shape_low, shape_elevation, shape_top = parameters
-    return float(shape_low), float(shape_elevation), float(shape_top)
+    return shape_low, shape_elevation, shape_top
 
 
 def compute_let_relative_permeabilities_compiled(
@@ -2279,7 +2279,7 @@ def compute_let_water_wet_system(
         dkrw_dso=zeros.copy(),
         dkrw_dsg=zeros.copy(),
         dkro_dsw=dkro_dsw,
-        dkro_dso=dkro_dso,
+        dkro_dso=dkro_dso,  # type: ignore[arg-type]
         dkro_dsg=dkro_dsg,
         dkrg_dsg=dkrg_dsg,
     )
