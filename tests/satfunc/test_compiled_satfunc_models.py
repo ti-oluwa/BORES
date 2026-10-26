@@ -1,5 +1,7 @@
 """Tests for the compiled relative permeability models and their consistency guarantees."""
 
+import inspect
+
 import numpy as np
 import pytest
 
@@ -236,3 +238,55 @@ def test_capillary_derivatives_are_evaluated_at_the_normalised_saturations(
     normalised = table.derivatives(sw / total, so / total, sg / total)
     for key in raw:
         np.testing.assert_allclose(raw[key], normalised[key], rtol=1e-12, atol=1e-14)
+
+
+def test_leverett_j_functions_take_the_unit_conversion_without_a_default():
+    from bores.blackoil.satfunc.capillary_pressure.models import leverett_j
+
+    checked = 0
+    for name in dir(leverett_j):
+        function = getattr(leverett_j, name)
+        if not name.startswith("compute_leverett_j") or not callable(function):
+            continue
+        parameters = inspect.signature(getattr(function, "py_func", function)).parameters
+        if "dyne_per_cm_to_pressure_unit" in parameters:
+            default = parameters["dyne_per_cm_to_pressure_unit"].default
+            assert default is inspect.Parameter.empty, name
+            checked += 1
+    assert checked >= 8
+
+
+@pytest.mark.parametrize(
+    "unit_system", list(__import__("bores.units", fromlist=["UnitSystem"]).UnitSystem)
+)
+def test_leverett_j_table_uses_the_conversion_of_its_unit_system(unit_system):
+    from bores.blackoil.satfunc.capillary_pressure.models.leverett_j import (
+        compute_leverett_j_capillary_pressures,
+        convert_dyne_per_cm_to_pressure_unit,
+    )
+    from bores.constants import c
+
+    factor = convert_dyne_per_cm_to_pressure_unit(unit_system)
+    assert factor != 4.725e-4
+    if unit_system.name == "FIELD":
+        assert factor == c.DYNE_PER_CENTIMETER_TO_PSI
+    table = LeverettJCapillaryPressureTable(
+        wettability=Wettability.WATER_WET, unit_system=unit_system, **ENDPOINTS
+    )
+    sw, so, sg = np.array([0.35]), np.array([0.5]), np.array([0.15])
+    from_table = table.evaluate(sw, so, sg)["oil_water"]
+    doubled = compute_leverett_j_capillary_pressures(
+        water_saturation=sw,
+        oil_saturation=so,
+        gas_saturation=sg,
+        **ENDPOINTS,
+        wettability=Wettability.WATER_WET,
+        permeability=table.permeability,
+        porosity=table.porosity,
+        oil_water_interfacial_tension=table.oil_water_interfacial_tension,
+        gas_oil_interfacial_tension=table.gas_oil_interfacial_tension,
+        dyne_per_cm_to_pressure_unit=2.0 * factor,
+        saturation_epsilon=c.SATURATION_EPSILON,
+        minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
+    )[0]
+    np.testing.assert_allclose(doubled, 2.0 * from_table, rtol=1e-12)

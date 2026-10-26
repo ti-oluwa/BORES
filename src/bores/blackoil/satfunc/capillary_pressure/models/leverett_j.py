@@ -50,6 +50,7 @@ def compute_leverett_j_capillary_pressures_cell(
     porosity: Number,
     oil_water_interfacial_tension: Number,
     gas_oil_interfacial_tension: Number,
+    dyne_per_cm_to_pressure_unit: Number,
     oil_water_contact_angle: Number = 0.0,
     gas_oil_contact_angle: Number = 0.0,
     j_function_coefficient: Number = 0.5,
@@ -58,7 +59,6 @@ def compute_leverett_j_capillary_pressures_cell(
     wettability: Wettability = Wettability.WATER_WET,
     saturation_epsilon: Number = 1e-6,
     minimum_mobile_pore_space: Number = 1e-9,
-    dyne_per_cm_to_pressure_unit: Number = 4.725e-4,
 ) -> tuple[Number, Number]:
     """
     Capillary pressures of a single cell, without any validation of the inputs.
@@ -160,6 +160,7 @@ def compute_leverett_j_capillary_pressures_scalar(
     porosity: Number,
     oil_water_interfacial_tension: Number,
     gas_oil_interfacial_tension: Number,
+    dyne_per_cm_to_pressure_unit: Number,
     oil_water_contact_angle: Number = 0.0,
     gas_oil_contact_angle: Number = 0.0,
     j_function_coefficient: Number = 0.5,
@@ -168,7 +169,6 @@ def compute_leverett_j_capillary_pressures_scalar(
     wettability: Wettability = Wettability.WATER_WET,
     saturation_epsilon: Number = 1e-6,
     minimum_mobile_pore_space: Number = 1e-9,
-    dyne_per_cm_to_pressure_unit: Number = 4.725e-4,
 ) -> tuple[Number, Number]:
     """
     Scalar variant of Leverett J-function capillary pressure computation.
@@ -309,6 +309,7 @@ def compute_leverett_j_capillary_pressures_array(
     porosity: NumberOrArray[NDimension],
     oil_water_interfacial_tension: Number,
     gas_oil_interfacial_tension: Number,
+    dyne_per_cm_to_pressure_unit: Number,
     oil_water_contact_angle: Number = 0.0,
     gas_oil_contact_angle: Number = 0.0,
     j_function_coefficient: Number = 0.5,
@@ -317,7 +318,6 @@ def compute_leverett_j_capillary_pressures_array(
     wettability: Wettability = Wettability.WATER_WET,
     saturation_epsilon: Number = 1e-6,
     minimum_mobile_pore_space: Number = 1e-9,
-    dyne_per_cm_to_pressure_unit: Number = 4.725e-4,
 ) -> tuple[NumberArray[NDimension], NumberArray[NDimension]]:
     """
     Array variant of Leverett J-function capillary pressure computation.
@@ -432,6 +432,7 @@ def compute_leverett_j_capillary_pressures(
     porosity: NumberOrArray[NDimension],
     oil_water_interfacial_tension: Number,
     gas_oil_interfacial_tension: Number,
+    dyne_per_cm_to_pressure_unit: Number,
     oil_water_contact_angle: Number = 0.0,
     gas_oil_contact_angle: Number = 0.0,
     j_function_coefficient: Number = 0.5,
@@ -440,7 +441,6 @@ def compute_leverett_j_capillary_pressures(
     wettability: Wettability = Wettability.WATER_WET,
     saturation_epsilon: Number = 1e-6,
     minimum_mobile_pore_space: Number = 1e-9,
-    dyne_per_cm_to_pressure_unit: Number = 4.725e-4,
 ) -> tuple[NumberOrArray[NDimension], NumberOrArray[NDimension]]:
     """
     Dispatch function for Leverett J-function capillary pressure computation.
@@ -526,10 +526,10 @@ def compute_leverett_j_derivatives_scalar(
     gas_oil_contact_angle: Number,
     j_function_coefficient: Number,
     j_function_exponent: Number,
+    dyne_per_cm_to_pressure_unit: Number,
     mixed_wet_water_fraction: Number = 0.5,
     saturation_epsilon: Number = 1e-6,
     minimum_mobile_pore_space: Number = 1e-9,
-    dyne_per_cm_to_pressure_unit: Number = 4.725e-4,
 ) -> tuple[Number, Number, Number, Number]:
     """
     Scalar variant of Leverett J-function capillary pressure derivatives.
@@ -725,10 +725,10 @@ def compute_leverett_j_derivatives_array(
     gas_oil_contact_angle: Number,
     j_function_coefficient: Number,
     j_function_exponent: Number,
+    dyne_per_cm_to_pressure_unit: Number,
     mixed_wet_water_fraction: Number = 0.5,
     saturation_epsilon: Number = 1e-6,
     minimum_mobile_pore_space: Number = 1e-9,
-    dyne_per_cm_to_pressure_unit: Number = 4.725e-4,
 ) -> tuple[
     NumberArray[NDimension],
     NumberArray[NDimension],
@@ -845,10 +845,10 @@ def compute_leverett_j_derivatives(
     gas_oil_contact_angle: Number,
     j_function_coefficient: Number,
     j_function_exponent: Number,
+    dyne_per_cm_to_pressure_unit: Number,
     mixed_wet_water_fraction: Number = 0.5,
     saturation_epsilon: Number = 1e-6,
     minimum_mobile_pore_space: Number = 1e-9,
-    dyne_per_cm_to_pressure_unit: Number = 4.725e-4,
 ) -> tuple[
     NumberOrArray[NDimension],
     NumberOrArray[NDimension],
