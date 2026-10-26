@@ -459,6 +459,129 @@ def compute_cell_bounding_boxes(
     return cell_min, cell_max
 
 
+@numba.njit(parallel=True, cache=True)
+def compute_cell_volumes_and_centroids_by_cell(
+    cell_face_indices: IntArray[OneDimension],
+    cell_face_offsets: IntArray[OneDimension],
+    face_cell_indices: IntArray[TwoDimensions],
+    face_vertex_indices: IntArray[OneDimension],
+    face_vertex_offsets: IntArray[OneDimension],
+    vertex_coordinates: NumberArray[TwoDimensions],
+    n_cells: int,
+) -> tuple[NumberArray[OneDimension], NumberArray[TwoDimensions]]:
+    """
+    Cell volumes and centroids via the divergence theorem, one cell per parallel iteration.
+
+    Gives exactly the results of `compute_cell_volumes_and_centroids`: a cell reads its own faces
+    (ascending, as that function visits them) and writes only its own entries, so cells are
+    independent and nothing is shared between iterations.
+
+    :param cell_face_indices: Faces of every cell, one cell after another.
+    :param cell_face_offsets: Offsets into `cell_face_indices` for each cell.
+    :param face_cell_indices: Shape `(n_faces, 2)` owner and neighbour of every face.
+    :param face_vertex_indices: Flat CSR vertex index data array.
+    :param face_vertex_offsets: CSR offset array of length `n_faces + 1`.
+    :param vertex_coordinates: Shape `(n_vertices, 3)`.
+    :param n_cells: Total number of cells.
+    :returns: Tuple `(cell_volumes, cell_centroids)`.
+    """
+    cell_volumes = np.zeros(n_cells, dtype=np.float64)
+    cell_centroids = np.zeros((n_cells, 3), dtype=np.float64)
+
+    for cell_idx in numba.prange(n_cells):  # type: ignore
+        volume = 0.0
+        accumulated_x = 0.0
+        accumulated_y = 0.0
+        accumulated_z = 0.0
+        for position in range(cell_face_offsets[cell_idx], cell_face_offsets[cell_idx + 1]):
+            face_idx = cell_face_indices[position]
+            sign = 1.0 if face_cell_indices[face_idx, 0] == cell_idx else -1.0
+            start = face_vertex_offsets[face_idx]
+            end = face_vertex_offsets[face_idx + 1]
+            ax = vertex_coordinates[face_vertex_indices[start], 0]
+            ay = vertex_coordinates[face_vertex_indices[start], 1]
+            az = vertex_coordinates[face_vertex_indices[start], 2]
+
+            for fan_idx in range(start + 1, end - 1):
+                bx = vertex_coordinates[face_vertex_indices[fan_idx], 0]
+                by = vertex_coordinates[face_vertex_indices[fan_idx], 1]
+                bz = vertex_coordinates[face_vertex_indices[fan_idx], 2]
+                cx = vertex_coordinates[face_vertex_indices[fan_idx + 1], 0]
+                cy = vertex_coordinates[face_vertex_indices[fan_idx + 1], 1]
+                cz = vertex_coordinates[face_vertex_indices[fan_idx + 1], 2]
+
+                signed_tetrahedron_volume = (
+                    ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx)
+                ) / 6.0
+                volume += sign * signed_tetrahedron_volume
+
+                w = sign * signed_tetrahedron_volume
+                accumulated_x += w * ((ax + bx + cx) / 4.0)
+                accumulated_y += w * ((ay + by + cy) / 4.0)
+                accumulated_z += w * ((az + bz + cz) / 4.0)
+
+        cell_volumes[cell_idx] = volume
+        if abs(volume) > 0.0:
+            cell_centroids[cell_idx, 0] = accumulated_x / volume
+            cell_centroids[cell_idx, 1] = accumulated_y / volume
+            cell_centroids[cell_idx, 2] = accumulated_z / volume
+
+    return cell_volumes, cell_centroids
+
+
+@numba.njit(parallel=True, cache=True)
+def compute_cell_bounding_boxes_by_cell(
+    cell_face_indices: IntArray[OneDimension],
+    cell_face_offsets: IntArray[OneDimension],
+    face_vertex_indices: IntArray[OneDimension],
+    face_vertex_offsets: IntArray[OneDimension],
+    vertex_coordinates: NumberArray[TwoDimensions],
+    n_cells: int,
+) -> tuple[NumberArray[TwoDimensions], NumberArray[TwoDimensions]]:
+    """
+    Per-cell axis-aligned bounding boxes, one cell per parallel iteration.
+
+    Gives exactly the results of `compute_cell_bounding_boxes`; a cell without faces keeps
+    `+inf` / `-inf` bounds.
+
+    :param cell_face_indices: Faces of every cell, one cell after another.
+    :param cell_face_offsets: Offsets into `cell_face_indices` for each cell.
+    :param face_vertex_indices: Flat CSR vertex index data array.
+    :param face_vertex_offsets: CSR offset array.
+    :param vertex_coordinates: Shape `(n_vertices, 3)`.
+    :param n_cells: Total number of cells.
+    :returns: Tuple `(cell_min_xyz, cell_max_xyz)` each of shape `(n_cells, 3)`.
+    """
+    cell_min = np.full((n_cells, 3), np.inf, dtype=np.float64)
+    cell_max = np.full((n_cells, 3), -np.inf, dtype=np.float64)
+
+    for cell_idx in numba.prange(n_cells):  # type: ignore
+        low_x = np.inf
+        low_y = np.inf
+        low_z = np.inf
+        high_x = -np.inf
+        high_y = -np.inf
+        high_z = -np.inf
+        for position in range(cell_face_offsets[cell_idx], cell_face_offsets[cell_idx + 1]):
+            face_idx = cell_face_indices[position]
+            for i in range(face_vertex_offsets[face_idx], face_vertex_offsets[face_idx + 1]):
+                vid = face_vertex_indices[i]
+                low_x = min(low_x, vertex_coordinates[vid, 0])
+                low_y = min(low_y, vertex_coordinates[vid, 1])
+                low_z = min(low_z, vertex_coordinates[vid, 2])
+                high_x = max(high_x, vertex_coordinates[vid, 0])
+                high_y = max(high_y, vertex_coordinates[vid, 1])
+                high_z = max(high_z, vertex_coordinates[vid, 2])
+        cell_min[cell_idx, 0] = low_x
+        cell_min[cell_idx, 1] = low_y
+        cell_min[cell_idx, 2] = low_z
+        cell_max[cell_idx, 0] = high_x
+        cell_max[cell_idx, 1] = high_y
+        cell_max[cell_idx, 2] = high_z
+
+    return cell_min, cell_max
+
+
 class CellTopBottomFaces(typing.NamedTuple):
     """Depth and area of the top and bottom of a set of cells, taken from their actual faces."""
 
@@ -1200,13 +1323,26 @@ class Grid:
 
         n_cells = self._get_cell_count()
         origin = self.vertex_coordinates.mean(axis=0)
-        cell_volumes, cell_centroids = compute_cell_volumes_and_centroids(
-            face_cell_indices=self.face_cell_indices,
-            face_vertex_indices=self.face_vertex_indices,
-            face_vertex_offsets=self.face_vertex_offsets,
-            vertex_coordinates=self.vertex_coordinates - origin,
-            n_cells=n_cells,
-        )
+        if hasattr(self, "cell_face_indices"):
+            cell_volumes, cell_centroids = compute_cell_volumes_and_centroids_by_cell(
+                cell_face_indices=self.cell_face_indices,
+                cell_face_offsets=self.cell_face_offsets,
+                face_cell_indices=self.face_cell_indices,
+                face_vertex_indices=self.face_vertex_indices,
+                face_vertex_offsets=self.face_vertex_offsets,
+                vertex_coordinates=self.vertex_coordinates - origin,
+                n_cells=n_cells,
+            )
+        else:
+            # The cell-to-face connectivity is not built yet (faces of inactive cells are being
+            # removed), so go through the faces instead.
+            cell_volumes, cell_centroids = compute_cell_volumes_and_centroids(
+                face_cell_indices=self.face_cell_indices,
+                face_vertex_indices=self.face_vertex_indices,
+                face_vertex_offsets=self.face_vertex_offsets,
+                vertex_coordinates=self.vertex_coordinates - origin,
+                n_cells=n_cells,
+            )
         cell_centroids += origin
         invalid_mask = ~(cell_volumes > 0.0) & (self.cell_statuses == int(CellStatus.ACTIVE))
         if invalid_mask.any():
@@ -1223,8 +1359,9 @@ class Grid:
         if self.cell_min_xyz is not None and self.cell_max_xyz is not None:
             cell_min, cell_max = self.cell_min_xyz, self.cell_max_xyz
         else:
-            cell_min, cell_max = compute_cell_bounding_boxes(
-                face_cell_indices=self.face_cell_indices,
+            cell_min, cell_max = compute_cell_bounding_boxes_by_cell(
+                cell_face_indices=self.cell_face_indices,
+                cell_face_offsets=self.cell_face_offsets,
                 face_vertex_indices=self.face_vertex_indices,
                 face_vertex_offsets=self.face_vertex_offsets,
                 vertex_coordinates=self.vertex_coordinates,

@@ -66,3 +66,67 @@ def test_csr_builders_handle_cells_without_faces():
     assert neighbour_indices.tolist() == [2, 0]
     assert neighbour_offsets.tolist() == [0, 1, 1, 2, 2, 2]
     assert face_indices.tolist() == [0, 0]
+
+
+def test_per_cell_geometry_kernels_match_the_face_scatter_kernels():
+    from bores.grids.base import (
+        compute_cell_bounding_boxes,
+        compute_cell_bounding_boxes_by_cell,
+        compute_cell_volumes_and_centroids,
+        compute_cell_volumes_and_centroids_by_cell,
+    )
+    from bores.grids.factories.voronoi import make_voronoi_grid
+
+    seeds = np.random.default_rng(2).random((60, 2)) * 500.0
+    grid = make_voronoi_grid(seeds, z_top=100.0, layer_thicknesses=np.array([4.0, 6.0]))
+    arguments = (
+        grid.face_cell_indices,
+        grid.face_vertex_indices,
+        grid.face_vertex_offsets,
+        grid.vertex_coordinates,
+        grid.n_cells,
+    )
+    volumes, centroids = compute_cell_volumes_and_centroids(*arguments)
+    by_cell_volumes, by_cell_centroids = compute_cell_volumes_and_centroids_by_cell(
+        grid.cell_face_indices,
+        grid.cell_face_offsets,
+        grid.face_cell_indices,
+        grid.face_vertex_indices,
+        grid.face_vertex_offsets,
+        grid.vertex_coordinates,
+        grid.n_cells,
+    )
+    assert np.array_equal(volumes, by_cell_volumes)
+    assert np.array_equal(centroids, by_cell_centroids)
+
+    low, high = compute_cell_bounding_boxes(*arguments)
+    by_cell_low, by_cell_high = compute_cell_bounding_boxes_by_cell(
+        grid.cell_face_indices,
+        grid.cell_face_offsets,
+        grid.face_vertex_indices,
+        grid.face_vertex_offsets,
+        grid.vertex_coordinates,
+        grid.n_cells,
+    )
+    assert np.array_equal(low, by_cell_low)
+    assert np.array_equal(high, by_cell_high)
+
+
+def test_face_deduplication_numbers_faces_by_first_listing_and_rejects_a_third_cell():
+    import pytest
+
+    from bores.errors import InvalidFaceConnectivityError
+    from bores.grids.factories.base import build_csr_face_arrays
+
+    vertices = np.zeros((6, 3))
+    _, face_vertices, offsets, cells = build_csr_face_arrays(
+        vertices, [[[0, 1, 2], [3, 4, 5]], [[2, 1, 0]], []]
+    )
+    assert face_vertices.tolist() == [0, 1, 2, 3, 4, 5]  # the owner's winding is kept
+    assert offsets.tolist() == [0, 3, 6]
+    assert cells.tolist() == [[0, 1], [0, -1]]
+
+    with pytest.raises(
+        InvalidFaceConnectivityError, match="owner 0 and neighbour 1; tried to add cell 2"
+    ):
+        build_csr_face_arrays(vertices, [[[0, 1, 2]], [[2, 1, 0]], [[1, 0, 2]]])

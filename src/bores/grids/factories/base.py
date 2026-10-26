@@ -1,6 +1,8 @@
+import itertools
 import typing
 from typing import TypeAlias
 
+import numba
 import numpy as np
 
 from bores.datastructures import MapAxes
@@ -101,6 +103,174 @@ class FaceRecord:
         self.face_vertex_indices: FaceVertexIndices = face_vertex_indices
 
 
+@numba.njit(cache=True)
+def deduplicate_faces(
+    entry_cells: IntArray[OneDimension],
+    entry_offsets: IntArray[OneDimension],
+    entry_vertices: IntArray[OneDimension],
+) -> tuple[
+    Integer,
+    Integer,
+    Integer,
+    IntArray[OneDimension],
+    IntArray[OneDimension],
+    IntArray[OneDimension],
+]:
+    """
+    Match the face entries of every cell so a face shared by two cells is stored once.
+
+    An entry is one face of one cell, as the cell sees it: its vertices wound outward from that
+    cell. Entries must be ordered by cell, and each cell's entries in the order its faces were
+    listed. Two entries are the same face when they have the same vertices, in any order. The
+    first cell to list a face owns it and keeps its winding, the second becomes the neighbour.
+    Faces are numbered in the order they were first listed.
+
+    :param entry_cells: Shape `(n_entries,)` cell of each entry.
+    :param entry_offsets: Shape `(n_entries + 1,)` offsets into `entry_vertices`.
+    :param entry_vertices: Vertex indices of every entry, one entry after another.
+    :returns: `(status, bad_entry, bad_face, face_entries, owners, neighbours)`. `face_entries[f]`
+        is the entry that first listed face `f`, with the face's owner and neighbour (`-1` if
+        none). `status` is `0` on success, and `1` when a face turned up in a third cell, in which
+        case `bad_entry` is that entry, `bad_face` the face it matched, and the arrays hold the
+        faces found before it.
+    """
+    n_entries = entry_cells.shape[0]
+    sorted_vertices = entry_vertices.copy()
+    for entry in range(n_entries):
+        begin = entry_offsets[entry]
+        end = entry_offsets[entry + 1]
+        if end - begin <= 32:
+            for position in range(begin + 1, end):
+                value = sorted_vertices[position]
+                hole = position - 1
+                while hole >= begin and sorted_vertices[hole] > value:
+                    sorted_vertices[hole + 1] = sorted_vertices[hole]
+                    hole -= 1
+                sorted_vertices[hole + 1] = value
+        else:
+            sorted_vertices[begin:end].sort()
+
+    capacity = 16
+    while capacity < 2 * n_entries:
+        capacity *= 2
+    mask = capacity - 1
+    table = np.full(capacity, -1, dtype=np.int64)
+    face_entries = np.empty(n_entries, dtype=np.int64)
+    owners = np.empty(n_entries, dtype=np.int64)
+    neighbours = np.empty(n_entries, dtype=np.int64)
+    n_faces = 0
+
+    for entry in range(n_entries):
+        begin = entry_offsets[entry]
+        end = entry_offsets[entry + 1]
+        h = np.int64(1469598103934665603) ^ np.int64(end - begin)
+        for position in range(begin, end):
+            h = (h ^ sorted_vertices[position]) * np.int64(1099511628211)
+        h = h ^ (h >> 29)
+        slot = h & mask
+        while True:
+            face = table[slot]
+            if face < 0:
+                table[slot] = n_faces
+                face_entries[n_faces] = entry
+                owners[n_faces] = entry_cells[entry]
+                neighbours[n_faces] = -1
+                n_faces += 1
+                break
+            other = face_entries[face]
+            other_begin = entry_offsets[other]
+            if entry_offsets[other + 1] - other_begin == end - begin:
+                same = True
+                for offset in range(end - begin):
+                    if sorted_vertices[other_begin + offset] != sorted_vertices[begin + offset]:
+                        same = False
+                        break
+                if same:
+                    if neighbours[face] != -1:
+                        return (  # type: ignore[return-value]
+                            1,
+                            entry,
+                            face,
+                            face_entries[:n_faces],
+                            owners[:n_faces],
+                            neighbours[:n_faces],
+                        )
+                    neighbours[face] = entry_cells[entry]
+                    break
+            slot = (slot + 1) & mask
+
+    return 0, 0, 0, face_entries[:n_faces], owners[:n_faces], neighbours[:n_faces]  # type: ignore[return-value]
+
+
+def build_csr_face_arrays_from_entries(
+    vertex_coordinates: VertexCoordinates,
+    entry_cells: IntArray[OneDimension],
+    entry_offsets: IntArray[OneDimension],
+    entry_vertices: IntArray[OneDimension],
+) -> tuple[
+    VertexCoordinates,
+    IntArray[OneDimension],
+    IntArray[OneDimension],
+    IntArray[TwoDimensions],
+]:
+    """
+    Deduplicate the faces of every cell and build CSR face arrays, from flat arrays.
+
+    The array form of `build_csr_face_arrays`; see `deduplicate_faces` for what an entry is and
+    how faces are matched and numbered.
+
+    :param vertex_coordinates: Shape `(n_vertices, 3)` coordinate array.
+    :param entry_cells: Shape `(n_entries,)` cell of each face entry, in ascending cell order.
+    :param entry_offsets: Shape `(n_entries + 1,)` offsets into `entry_vertices`.
+    :param entry_vertices: Vertex indices of every entry, one entry after another.
+    :returns: Tuple `(vertex_coordinates, face_vertex_indices, face_vertex_offsets,
+        face_cell_indices)` ready to be passed to `bores.grids.base.Grid`.
+    :raises InvalidFaceConnectivityError: If any face is shared by more than two cells.
+    """
+    entry_cells = typing.cast(
+        IntArray[OneDimension], np.ascontiguousarray(entry_cells, dtype=np.int64)
+    )
+    entry_offsets = typing.cast(
+        IntArray[OneDimension], np.ascontiguousarray(entry_offsets, dtype=np.int64)
+    )
+    entry_vertices = typing.cast(
+        IntArray[OneDimension], np.ascontiguousarray(entry_vertices, dtype=np.int64)
+    )
+    status, bad_entry, bad_face, face_entries, owners, neighbours = deduplicate_faces(
+        entry_cells=entry_cells,
+        entry_offsets=entry_offsets,
+        entry_vertices=entry_vertices,
+    )
+    if status != 0:
+        key = tuple(
+            sorted(
+                int(v)
+                for v in entry_vertices[entry_offsets[bad_entry] : entry_offsets[bad_entry + 1]]
+            )
+        )
+        raise InvalidFaceConnectivityError(
+            f"Face with canonical key {key} is shared by "
+            f"more than two cells (already has owner "
+            f"{int(owners[bad_face])} and neighbour "
+            f"{int(neighbours[bad_face])}; tried to add cell {int(entry_cells[bad_entry])})."
+        )
+
+    lengths = entry_offsets[face_entries + 1] - entry_offsets[face_entries]
+    face_offsets = np.concatenate([[0], np.cumsum(lengths)])
+    total = int(face_offsets[-1])
+    source = np.repeat(entry_offsets[face_entries] - face_offsets[:-1], lengths) + np.arange(
+        total, dtype=np.int64
+    )
+    return (
+        vertex_coordinates,
+        typing.cast(IntArray[OneDimension], entry_vertices[source].astype(np.int32)),
+        typing.cast(IntArray[OneDimension], face_offsets.astype(np.int32)),
+        typing.cast(
+            IntArray[TwoDimensions], np.column_stack([owners, neighbours]).astype(np.int32)
+        ),
+    )
+
+
 def build_csr_face_arrays(
     vertex_coordinates: VertexCoordinates,
     per_cell_face_vertex_lists: list[list[FaceVertexIndices]],
@@ -127,44 +297,22 @@ def build_csr_face_arrays(
     :raises InvalidFaceConnectivityError: If any face is shared by more
         than two cells.
     """
-    face_registry: dict[FaceKey, FaceRecord] = {}
-    for cell_index, cell_faces in enumerate(per_cell_face_vertex_lists):
-        for face_vertex_indices in cell_faces:
-            key: FaceKey = tuple(sorted(face_vertex_indices))
-            if key not in face_registry:
-                # First time seen: this cell becomes the owner.
-                # Store the winding as-is (CCW from owner's outside = outward from owner).
-                face_registry[key] = FaceRecord(
-                    owner_cell_index=cell_index,
-                    face_vertex_indices=face_vertex_indices,
-                )
-            else:
-                record = face_registry[key]
-                if record.neighbour_cell_index != -1:
-                    raise InvalidFaceConnectivityError(
-                        f"Face with canonical key {key} is shared by "
-                        f"more than two cells (already has owner "
-                        f"{record.owner_cell_index} and neighbour "
-                        f"{record.neighbour_cell_index}; tried to add cell "
-                        f"{cell_index})."
-                    )
-                record.neighbour_cell_index = cell_index
-
-    # Flatten registry to CSR arrays
-    flat_face_vertex_indices: list[Integer] = []
-    face_vertex_offsets: list[int] = [0]
-    face_cell_pairs: list[tuple[Integer, Integer]] = []
-
-    for record in face_registry.values():
-        flat_face_vertex_indices.extend(record.face_vertex_indices)
-        face_vertex_offsets.append(len(flat_face_vertex_indices))
-        face_cell_pairs.append((record.owner_cell_index, record.neighbour_cell_index))
-
-    return (
+    faces_per_cell = np.fromiter(map(len, per_cell_face_vertex_lists), dtype=np.int64)
+    faces = list(itertools.chain.from_iterable(per_cell_face_vertex_lists))
+    face_sizes = np.fromiter(map(len, faces), dtype=np.int64, count=len(faces))
+    vertices = np.fromiter(
+        itertools.chain.from_iterable(faces), dtype=np.int64, count=int(face_sizes.sum())
+    )
+    return build_csr_face_arrays_from_entries(
         vertex_coordinates,
-        typing.cast(IntArray[OneDimension], np.asarray(flat_face_vertex_indices, dtype=np.int32)),
-        typing.cast(IntArray[OneDimension], np.asarray(face_vertex_offsets, dtype=np.int32)),
-        typing.cast(IntArray[TwoDimensions], np.asarray(face_cell_pairs, dtype=np.int32)),
+        entry_cells=typing.cast(
+            IntArray[OneDimension],
+            np.repeat(np.arange(len(faces_per_cell), dtype=np.int64), faces_per_cell),
+        ),
+        entry_offsets=typing.cast(
+            IntArray[OneDimension], np.concatenate([[0], np.cumsum(face_sizes)])
+        ),
+        entry_vertices=typing.cast(IntArray[OneDimension], vertices),
     )
 
 

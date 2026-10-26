@@ -1,5 +1,6 @@
 """Voronoi (PEBI) grid factory for both 2-D extruded and 3-D native tessellations."""
 
+import itertools
 import typing
 from typing import TypeAlias
 
@@ -10,9 +11,11 @@ from scipy.spatial import Voronoi
 
 from bores.errors import InvalidGridError, ValidationError
 from bores.grids.base import Grid
-from bores.grids.factories.base import FaceVertexIndices, build_csr_face_arrays
+from bores.grids.factories.base import FaceVertexIndices, build_csr_face_arrays_from_entries
 from bores.types import (
+    BooleanArray,
     IntArray,
+    Integer,
     Number,
     NumberArray,
     OneDimension,
@@ -186,6 +189,349 @@ def make_voronoi_grid(
     )
 
 
+def flatten_ragged(
+    rows: typing.Sequence[typing.Sequence[int]],
+) -> tuple[IntArray[OneDimension], IntArray[OneDimension]]:
+    """
+    Pack a list of integer lists into one flat array and its offsets.
+
+    :param rows: The lists, such as `scipy.spatial.Voronoi.regions`.
+    :returns: `(flat, offsets)` where `flat[offsets[i]:offsets[i + 1]]` is `rows[i]`.
+    """
+    lengths = np.fromiter(map(len, rows), dtype=np.int64, count=len(rows))
+    flat = np.fromiter(
+        itertools.chain.from_iterable(rows), dtype=np.int64, count=int(lengths.sum())
+    )
+    return flat, np.concatenate([[0], np.cumsum(lengths)])  # type: ignore[return-value]
+
+
+def resolve_ridge_owners(
+    ridge_points: IntArray[TwoDimensions],
+    n_seeds: int,
+) -> tuple[BooleanArray[OneDimension], IntArray[OneDimension], IntArray[OneDimension]]:
+    """
+    Decide, for every Voronoi ridge, which original seed owns it and which one it neighbours.
+
+    A ridge between two mirror seeds is dropped. A ridge between an original seed and a mirror
+    seed is a boundary face of the original seed; one between two original seeds is interior,
+    owned by the first of the pair.
+
+    :param ridge_points: Shape `(n_ridges, 2)` seed pair of each ridge.
+    :param n_seeds: Number of original seeds (mirror seeds come after them).
+    :returns: `(keep, owners, neighbours)` for every ridge; `neighbours` is `BOUNDARY_CELL` for a
+        boundary face, and `owners`/`neighbours` are only meaningful where `keep` is set.
+    """
+    first = ridge_points[:, 0].astype(np.int64)
+    second = ridge_points[:, 1].astype(np.int64)
+    first_original = first < n_seeds
+    second_original = second < n_seeds
+    keep = first_original | second_original
+    owners = np.where(first_original, first, second)
+    neighbours = np.where(first_original & second_original, second, BOUNDARY_CELL)
+    return (
+        typing.cast(BooleanArray[OneDimension], keep),
+        typing.cast(IntArray[OneDimension], owners),
+        typing.cast(IntArray[OneDimension], neighbours),
+    )
+
+
+@numba.njit(cache=True)
+def build_2d_prism_entries(
+    region_vertices: IntArray[OneDimension],
+    region_offsets: IntArray[OneDimension],
+    point_region: IntArray[OneDimension],
+    voronoi_vertices: NumberArray[TwoDimensions],
+    seeds: SeedCoordinates2D,
+    ridge_a: IntArray[OneDimension],
+    ridge_b: IntArray[OneDimension],
+    ridge_owner: IntArray[OneDimension],
+    ridge_neighbour: IntArray[OneDimension],
+    n_layers: Integer,
+    n_z_levels: Integer,
+) -> tuple[
+    Integer,
+    IntArray[OneDimension],
+    IntArray[OneDimension],
+    IntArray[OneDimension],
+    IntArray[OneDimension],
+]:
+    """
+    List the faces of every prism cell of an extruded 2-D Voronoi grid, cell by cell.
+
+    Cells are numbered column by column and, within a column, layer by layer. A cell lists the
+    lateral faces of the ridges of its column (in ridge order), then its top and bottom faces.
+    Each face is wound outward from the cell. Global vertex `(v, level)` of the extruded grid is
+    `v * n_z_levels + level`.
+
+    :param region_vertices: Vertex indices of every Voronoi region, one region after another.
+    :param region_offsets: Offsets into `region_vertices` for each region.
+    :param point_region: Region of each seed (original seeds first).
+    :param voronoi_vertices: Shape `(n_vertices, 2)` Voronoi vertex coordinates.
+    :param seeds: Shape `(n_seeds, 2)` original seeds.
+    :param ridge_a: First vertex of each kept ridge.
+    :param ridge_b: Second vertex of each kept ridge.
+    :param ridge_owner: Original seed owning each kept ridge.
+    :param ridge_neighbour: Original seed across each kept ridge, or `-1`.
+    :param n_layers: Number of layers.
+    :param n_z_levels: Number of depth levels (`n_layers + 1`).
+    :returns: `(n_columns, valid_seeds, entry_cells, entry_offsets, entry_vertices)`; see
+        `bores.grids.factories.base.deduplicate_faces` for the entry arrays.
+    """
+    n_seeds = seeds.shape[0]
+    column_of_seed = np.full(n_seeds, -1, dtype=np.int64)
+    valid_seeds = np.empty(n_seeds, dtype=np.int64)
+    n_columns = 0
+    for seed in range(n_seeds):
+        region = point_region[seed]
+        begin = region_offsets[region]
+        end = region_offsets[region + 1]
+        valid = end - begin >= 3
+        for position in range(begin, end):
+            if region_vertices[position] == -1:
+                valid = False
+                break
+        if valid:
+            column_of_seed[seed] = n_columns
+            valid_seeds[n_columns] = seed
+            n_columns += 1
+
+    n_cells = n_columns * n_layers
+    lateral_count = np.zeros(n_cells, dtype=np.int64)
+    n_ridges = ridge_a.shape[0]
+    for ridge in range(n_ridges):
+        owner_column = column_of_seed[ridge_owner[ridge]]
+        if owner_column < 0:
+            continue
+        neighbour_column = -1
+        if ridge_neighbour[ridge] != -1:
+            neighbour_column = column_of_seed[ridge_neighbour[ridge]]
+        for layer in range(n_layers):
+            lateral_count[owner_column * n_layers + layer] += 1
+            if neighbour_column >= 0:
+                lateral_count[neighbour_column * n_layers + layer] += 1
+
+    cell_start = np.zeros(n_cells + 1, dtype=np.int64)
+    for cell in range(n_cells):
+        cell_start[cell + 1] = cell_start[cell] + lateral_count[cell] + 2
+    n_entries = cell_start[n_cells]
+
+    # What each entry is: 0 lateral face seen from the ridge owner, 1 the same face seen from the
+    # neighbour, 2 top face, 3 bottom face; `reference` is its ridge (or column), `layer_of` its layer.
+    kind = np.empty(n_entries, dtype=np.int8)
+    reference = np.empty(n_entries, dtype=np.int64)
+    layer_of = np.empty(n_entries, dtype=np.int64)
+    cursor = cell_start[:-1].copy()
+    for ridge in range(n_ridges):
+        owner_column = column_of_seed[ridge_owner[ridge]]
+        if owner_column < 0:
+            continue
+        neighbour_column = -1
+        if ridge_neighbour[ridge] != -1:
+            neighbour_column = column_of_seed[ridge_neighbour[ridge]]
+        for layer in range(n_layers):
+            cell = owner_column * n_layers + layer
+            slot = cursor[cell]
+            kind[slot] = 0
+            reference[slot] = ridge
+            layer_of[slot] = layer
+            cursor[cell] += 1
+            if neighbour_column >= 0:
+                cell = neighbour_column * n_layers + layer
+                slot = cursor[cell]
+                kind[slot] = 1
+                reference[slot] = ridge
+                layer_of[slot] = layer
+                cursor[cell] += 1
+    for column in range(n_columns):
+        for layer in range(n_layers):
+            cell = column * n_layers + layer
+            slot = cursor[cell]
+            kind[slot] = 2
+            reference[slot] = column
+            layer_of[slot] = layer
+            kind[slot + 1] = 3
+            reference[slot + 1] = column
+            layer_of[slot + 1] = layer
+            cursor[cell] += 2
+
+    entry_cells = np.empty(n_entries, dtype=np.int64)
+    entry_offsets = np.zeros(n_entries + 1, dtype=np.int64)
+    for cell in range(n_cells):
+        for slot in range(cell_start[cell], cell_start[cell + 1]):
+            entry_cells[slot] = cell
+    for slot in range(n_entries):
+        size = 4
+        if kind[slot] >= 2:
+            region = point_region[valid_seeds[reference[slot]]]
+            size = region_offsets[region + 1] - region_offsets[region]
+        entry_offsets[slot + 1] = entry_offsets[slot] + size
+    entry_vertices = np.empty(entry_offsets[n_entries], dtype=np.int64)
+
+    for slot in range(n_entries):
+        begin = entry_offsets[slot]
+        layer = layer_of[slot]
+        if kind[slot] < 2:
+            ridge = reference[slot]
+            a_top = ridge_a[ridge] * n_z_levels + layer
+            a_bottom = a_top + 1
+            b_top = ridge_b[ridge] * n_z_levels + layer
+            b_bottom = b_top + 1
+            signed_area = compute_2d_signed_area(
+                a=voronoi_vertices[ridge_a[ridge]],  # type: ignore[arg-type]
+                b=voronoi_vertices[ridge_b[ridge]],  # type: ignore[arg-type]
+                point=seeds[ridge_owner[ridge]],  # type: ignore[arg-type]
+            )
+            if signed_area > 0:
+                lateral = (a_top, b_top, b_bottom, a_bottom)
+            else:
+                lateral = (a_top, a_bottom, b_bottom, b_top)
+            for corner in range(4):
+                if kind[slot] == 0:
+                    entry_vertices[begin + corner] = lateral[corner]
+                else:
+                    entry_vertices[begin + corner] = lateral[3 - corner]
+        else:
+            region = point_region[valid_seeds[reference[slot]]]
+            region_begin = region_offsets[region]
+            n_polygon_vertices = region_offsets[region + 1] - region_begin
+            forward = 0.0
+            backward = 0.0
+            for k in range(n_polygon_vertices):
+                current = region_vertices[region_begin + k]
+                following = region_vertices[region_begin + (k + 1) % n_polygon_vertices]
+                forward += voronoi_vertices[current, 0] * voronoi_vertices[following, 1]
+                backward += voronoi_vertices[following, 0] * voronoi_vertices[current, 1]
+            counter_clockwise = forward - backward >= 0.0
+            level = layer if kind[slot] == 2 else layer + 1
+            for k in range(n_polygon_vertices):
+                # Oriented polygon `o`: the region order when counter-clockwise, else reversed.
+                oriented = k if counter_clockwise else n_polygon_vertices - 1 - k
+                vertex = region_vertices[region_begin + oriented]
+                if kind[slot] == 2:
+                    # Top face: outward normal is up, so wind it the other way round.
+                    entry_vertices[begin + n_polygon_vertices - 1 - k] = (
+                        vertex * n_z_levels + level
+                    )
+                else:
+                    entry_vertices[begin + k] = vertex * n_z_levels + level
+
+    return (
+        n_columns,
+        valid_seeds[:n_columns],  # type: ignore[return-value]
+        entry_cells,
+        entry_offsets,
+        entry_vertices,
+    )
+
+
+@numba.njit(cache=True)
+def build_3d_cell_entries(
+    ridge_vertices: IntArray[OneDimension],
+    ridge_offsets: IntArray[OneDimension],
+    ridge_owner: IntArray[OneDimension],
+    ridge_neighbour: IntArray[OneDimension],
+    ridge_direction: NumberArray[TwoDimensions],
+    keep: npt.NDArray[np.bool_],
+    voronoi_vertices: NumberArray[TwoDimensions],
+    n_seeds: int,
+) -> tuple[
+    IntArray[OneDimension],
+    IntArray[OneDimension],
+    IntArray[OneDimension],
+    IntArray[OneDimension],
+]:
+    """
+    List the faces of every cell of a 3-D Voronoi grid, cell by cell.
+
+    A cell lists the faces of its ridges in ridge order. Each face is wound so that its normal
+    points from the ridge owner toward the neighbour (or mirror seed), and the neighbour lists
+    it reversed.
+
+    :param ridge_vertices: Vertex indices of every ridge, one ridge after another.
+    :param ridge_offsets: Offsets into `ridge_vertices` for each ridge.
+    :param ridge_owner: Original seed owning each ridge.
+    :param ridge_neighbour: Original seed across each ridge, or `-1`.
+    :param ridge_direction: Shape `(n_ridges, 3)` direction from the owner toward the neighbour.
+    :param keep: Whether each ridge is used.
+    :param voronoi_vertices: Shape `(n_vertices, 3)` Voronoi vertex coordinates.
+    :param n_seeds: Number of original seeds, which are the cells.
+    :returns: `(faces_per_cell, entry_cells, entry_offsets, entry_vertices)`.
+    """
+    n_ridges = ridge_offsets.shape[0] - 1
+    use = np.zeros(n_ridges, dtype=np.bool_)
+    faces_per_cell = np.zeros(n_seeds, dtype=np.int64)
+    for ridge in range(n_ridges):
+        if not keep[ridge]:
+            continue
+        has_infinite_vertex = False
+        for position in range(ridge_offsets[ridge], ridge_offsets[ridge + 1]):
+            if ridge_vertices[position] == -1:
+                has_infinite_vertex = True
+                break
+        if has_infinite_vertex:
+            continue
+        use[ridge] = True
+        faces_per_cell[ridge_owner[ridge]] += 1
+        if ridge_neighbour[ridge] != -1:
+            faces_per_cell[ridge_neighbour[ridge]] += 1
+
+    cell_start = np.zeros(n_seeds + 1, dtype=np.int64)
+    for cell in range(n_seeds):
+        cell_start[cell + 1] = cell_start[cell] + faces_per_cell[cell]
+    n_entries = cell_start[n_seeds]
+
+    entry_ridge = np.empty(n_entries, dtype=np.int64)
+    entry_reversed = np.empty(n_entries, dtype=np.bool_)
+    entry_cells = np.empty(n_entries, dtype=np.int64)
+    cursor = cell_start[:-1].copy()
+    for ridge in range(n_ridges):
+        if not use[ridge]:
+            continue
+        begin = ridge_offsets[ridge]
+        end = ridge_offsets[ridge + 1]
+        polygon = np.empty((end - begin, 3), dtype=np.float64)
+        for k in range(end - begin):
+            for axis in range(3):
+                polygon[k, axis] = voronoi_vertices[ridge_vertices[begin + k], axis]
+        normal = compute_newell_normal(polygon)
+        alignment = (
+            normal[0] * ridge_direction[ridge, 0]
+            + normal[1] * ridge_direction[ridge, 1]
+            + normal[2] * ridge_direction[ridge, 2]
+        )
+        reverse = alignment < 0.0
+
+        owner = ridge_owner[ridge]
+        slot = cursor[owner]
+        entry_ridge[slot] = ridge
+        entry_reversed[slot] = reverse
+        entry_cells[slot] = owner
+        cursor[owner] += 1
+        if ridge_neighbour[ridge] != -1:
+            neighbour = ridge_neighbour[ridge]
+            slot = cursor[neighbour]
+            entry_ridge[slot] = ridge
+            entry_reversed[slot] = not reverse
+            entry_cells[slot] = neighbour
+            cursor[neighbour] += 1
+
+    entry_offsets = np.zeros(n_entries + 1, dtype=np.int64)
+    for slot in range(n_entries):
+        ridge = entry_ridge[slot]
+        entry_offsets[slot + 1] = (
+            entry_offsets[slot] + ridge_offsets[ridge + 1] - ridge_offsets[ridge]
+        )
+    entry_vertices = np.empty(entry_offsets[n_entries], dtype=np.int64)
+    for slot in range(n_entries):
+        ridge = entry_ridge[slot]
+        begin = ridge_offsets[ridge]
+        size = ridge_offsets[ridge + 1] - begin
+        for k in range(size):
+            source = size - 1 - k if entry_reversed[slot] else k
+            entry_vertices[entry_offsets[slot] + k] = ridge_vertices[begin + source]
+    return faces_per_cell, entry_cells, entry_offsets, entry_vertices
+
+
 def make_2d_voronoi_grid(
     seeds: SeedCoordinates2D,
     bounding_box: BoundingBox2D,
@@ -217,203 +563,58 @@ def make_2d_voronoi_grid(
     n_seeds = len(seeds)
     n_layers = len(layer_thicknesses)
 
-    # Compute mirror seeds and run Voronoi
+    # Compute mirror seeds and run Voronoi. With the mirror trick, the regions of the original
+    # seeds are finite.
     mirror_seeds = build_2d_mirror_seeds(seeds, bounding_box)
     all_seeds = np.vstack([seeds, mirror_seeds])
     voronoi = Voronoi(all_seeds)
 
-    # Extract per-column 2-D polygons from Voronoi regions.
-    # With the mirror trick, regions for original seeds are guaranteed finite.
-    column_polygons: list[npt.NDArray[np.float64] | None] = []
-    for seed_idx in range(n_seeds):
-        region_idx = voronoi.point_region[seed_idx]
-        vertex_indices = voronoi.regions[region_idx]
-        if len(vertex_indices) < 3 or -1 in vertex_indices:
-            # Should not happen with mirror seeds, but be defensive
-            column_polygons.append(None)
-        else:
-            column_polygons.append(voronoi.vertices[vertex_indices])
+    # A ridge becomes one vertical face per layer. Ridges between two mirror seeds, and any ridge
+    # reaching infinity, take no part.
+    ridge_vertices = np.asarray(voronoi.ridge_vertices, dtype=np.int64).reshape(-1, 2)
+    keep, owners, neighbours = resolve_ridge_owners(voronoi.ridge_points, n_seeds)
+    keep &= ~(ridge_vertices == -1).any(axis=1)
 
-    valid_column_indices = [
-        column_idx for column_idx, polygon in enumerate(column_polygons) if polygon is not None
-    ]
-    if not valid_column_indices:
+    # Vertex `v` at depth level `lev` of the extruded grid is `v * n_z_levels + lev`.
+    z_nodes = compute_depth_nodes(z_top, layer_thicknesses)
+    n_z_levels = len(z_nodes)
+    n_voronoi_verts = len(voronoi.vertices)
+    vertex_coordinates_3d = np.empty((n_voronoi_verts * n_z_levels, 3), dtype=np.float64)
+    vertex_coordinates_3d[:, :2] = np.repeat(voronoi.vertices, n_z_levels, axis=0)
+    vertex_coordinates_3d[:, 2] = np.tile(z_nodes, n_voronoi_verts)
+
+    region_vertices, region_offsets = flatten_ragged(voronoi.regions)
+    n_columns, _, entry_cells, entry_offsets, entry_vertices = build_2d_prism_entries(
+        region_vertices=region_vertices,
+        region_offsets=region_offsets,
+        point_region=typing.cast(
+            IntArray[OneDimension], np.ascontiguousarray(voronoi.point_region, dtype=np.int64)
+        ),
+        voronoi_vertices=typing.cast(
+            NumberArray[TwoDimensions], np.ascontiguousarray(voronoi.vertices, dtype=np.float64)
+        ),
+        seeds=typing.cast(SeedCoordinates2D, np.ascontiguousarray(seeds, dtype=np.float64)),
+        ridge_a=typing.cast(IntArray[OneDimension], np.ascontiguousarray(ridge_vertices[keep, 0])),
+        ridge_b=typing.cast(IntArray[OneDimension], np.ascontiguousarray(ridge_vertices[keep, 1])),
+        ridge_owner=typing.cast(IntArray[OneDimension], np.ascontiguousarray(owners[keep])),
+        ridge_neighbour=typing.cast(
+            IntArray[OneDimension], np.ascontiguousarray(neighbours[keep])
+        ),
+        n_layers=n_layers,
+        n_z_levels=n_z_levels,
+    )
+    if n_columns == 0:
         raise InvalidGridError(
             "No valid Voronoi columns found within the bounding box. "
             "Verify that seed points lie within the bounding box."
         )
 
-    # Collect all valid 2-D ridges (line segments).
-    # Each ridge -> one vertical face per layer.
-    valid_ridges: list[
-        tuple[
-            int,  # a_vertex_idx  (index into voronoi.vertices)
-            int,  # b_vertex_idx
-            npt.NDArray[np.float64],  # a_xy  (for signed-area winding test only)
-            npt.NDArray[np.float64],  # b_xy
-            int,  # seed_owner
-            int,  # seed_neighbour  (-1 = boundary)
-        ]
-    ] = []
-
-    for ridge_vertex_indices, seed_pair in zip(
-        voronoi.ridge_vertices, voronoi.ridge_points, strict=False
-    ):
-        sa, sb = int(seed_pair[0]), int(seed_pair[1])
-        sa_original = sa < n_seeds
-        sb_original = sb < n_seeds
-
-        if (not sa_original and not sb_original) or (-1 in ridge_vertex_indices):
-            continue
-
-        # Store integer indices directly — no coordinate lookup needed later.
-        a_vi = int(ridge_vertex_indices[0])
-        b_vi = int(ridge_vertex_indices[1])
-        a_xy = voronoi.vertices[a_vi]
-        b_xy = voronoi.vertices[b_vi]
-
-        if sa_original and sb_original:
-            valid_ridges.append((a_vi, b_vi, a_xy, b_xy, sa, sb))
-        elif sa_original:
-            valid_ridges.append((a_vi, b_vi, a_xy, b_xy, sa, BOUNDARY_CELL))
-        else:
-            valid_ridges.append((a_vi, b_vi, a_xy, b_xy, sb, BOUNDARY_CELL))
-
-    # Build 3-D vertex array and CSR face arrays.
-    #
-    # Vertex indexing scheme for layered extrusion:
-    #   z_nodes[layer] = z_top + cumsum(layer_thicknesses)[layer]
-    #   There are n_layers + 1 depth levels (z_nodes has n_layers+1 entries).
-    #
-    # For each 2-D Voronoi vertex v, its 3-D counterpart at depth level lev is:
-    #   global_vertex_index = v * (n_layers + 1) + lev
-    #
-    # Column polygon vertices for top/bottom faces index into the same table.
-    z_nodes = compute_depth_nodes(z_top, layer_thicknesses)  # length n_layers + 1
-    n_z_levels = len(z_nodes)  # n_layers + 1
-
-    # All 3-D vertex coordinates: (n_voronoi_verts * n_z_levels, 3)
-    n_voronoi_verts = len(voronoi.vertices)
-    vertex_coordinates_3d = np.empty((n_voronoi_verts * n_z_levels, 3), dtype=np.float64)
-    for vert_idx in range(n_voronoi_verts):
-        for level in range(n_z_levels):
-            row = vert_idx * n_z_levels + level
-            vertex_coordinates_3d[row, 0] = voronoi.vertices[vert_idx, 0]
-            vertex_coordinates_3d[row, 1] = voronoi.vertices[vert_idx, 1]
-            vertex_coordinates_3d[row, 2] = z_nodes[level]
-
-    def get_global_vertex_index(voronoi_vertex_idx: int, z_level: int) -> int:
-        """
-        Map a 2-D Voronoi vertex index and depth level to a global 3-D index.
-
-        :param voronoi_vertex_idx: Index into `voronoi.vertices`.
-        :param z_level: Depth level index in `[0, n_layers]`.
-        :returns: Global vertex index into `vertex_coordinates_3d`.
-        """
-        return voronoi_vertex_idx * n_z_levels + z_level
-
-    # Cell index: cell_index(column_idx, layer) = column_idx * n_layers + layer
-    # where column_idx is the index into valid_column_indices
-    column_to_cell_column: dict[int, int] = {
-        original_column: cell_column
-        for cell_column, original_column in enumerate(valid_column_indices)
-    }
-    n_columns = len(valid_column_indices)
-    n_cells = n_columns * n_layers
-
-    # Build per-cell face lists.
-    # Cell ordering: for each valid column (outer), for each layer (inner).
-    per_cell_face_vertex_lists: PerCellFaceLists = [[] for _ in range(n_cells)]
-
-    def get_global_cell_index(column_idx: int, layer: int) -> int:
-        """
-        Global cell index from column and layer indices.
-
-        :param column_idx: Index into `valid_column_indices` (0-based).
-        :param layer: Layer index in `[0, n_layers - 1]`.
-        :returns: Flat cell index.
-        """
-        return column_idx * n_layers + layer
-
-    # Vertical (lateral) faces: one per 2-D ridge x n_layers
-    for a_vertex_idx, b_vertex_idx, a_xy, b_xy, seed_owner, seed_neighbour in valid_ridges:
-        # a_vertex_idx / b_vertex_idx are already the correct indices into
-        # voronoi.vertices — no coordinate search needed.
-        owner_seed_xy = seeds[seed_owner]
-
-        for layer in range(n_layers):
-            top_level = layer
-            bottom_level = layer + 1
-
-            a_top = get_global_vertex_index(a_vertex_idx, top_level)
-            a_bottom = get_global_vertex_index(a_vertex_idx, bottom_level)
-            b_top = get_global_vertex_index(b_vertex_idx, top_level)
-            b_bottom = get_global_vertex_index(b_vertex_idx, bottom_level)
-
-            signed_area = compute_2d_signed_area(a_xy, b_xy, owner_seed_xy)  # type: ignore[arg-type]
-            if signed_area > 0:
-                lateral_face: FaceVertexIndices = [a_top, b_top, b_bottom, a_bottom]
-            else:
-                lateral_face = [a_top, a_bottom, b_bottom, b_top]
-
-            owner_cell_column = column_to_cell_column.get(seed_owner)
-            if owner_cell_column is None:
-                continue
-            owner_cell_idx = get_global_cell_index(owner_cell_column, layer)
-            per_cell_face_vertex_lists[owner_cell_idx].append(lateral_face)
-
-            if seed_neighbour != BOUNDARY_CELL:
-                neighbour_cell_column = column_to_cell_column.get(seed_neighbour)
-                if neighbour_cell_column is not None:
-                    neighbour_cell_idx = get_global_cell_index(neighbour_cell_column, layer)
-                    per_cell_face_vertex_lists[neighbour_cell_idx].append(
-                        list(reversed(lateral_face))
-                    )
-
-    # Horizontal faces: top and bottom of each prism cell.
-    # Top face (normal = −z = upward): polygon CCW from above = reversed in xy.
-    # Bottom face (normal = +z = downward): polygon CCW from below = xy order.
-    for cell_column_idx, original_column_idx in enumerate(valid_column_indices):
-        polygon_2d = column_polygons[original_column_idx]
-        if polygon_2d is None:
-            continue
-        n_polygon_vertices = len(polygon_2d)
-
-        # Recover Voronoi vertex indices for each polygon vertex
-        region_idx = voronoi.point_region[original_column_idx]
-        region_vertex_indices = list(voronoi.regions[region_idx])
-        assert len(region_vertex_indices) == n_polygon_vertices
-        polygon_x = polygon_2d[:, 0]
-        polygon_y = polygon_2d[:, 1]
-        shoelace = np.dot(polygon_x, np.roll(polygon_y, -1)) - np.dot(
-            np.roll(polygon_x, -1), polygon_y
-        )
-        if shoelace < 0.0:
-            region_vertex_indices.reverse()
-
-        for layer in range(n_layers):
-            top_level = layer
-            bottom_level = layer + 1
-            cell_idx = get_global_cell_index(cell_column_idx, layer)
-
-            top_polygon_3d_indices = [
-                get_global_vertex_index(region_vertex_indices[k], top_level)
-                for k in range(n_polygon_vertices)
-            ]
-            bottom_polygon_3d_indices = [
-                get_global_vertex_index(region_vertex_indices[k], bottom_level)
-                for k in range(n_polygon_vertices)
-            ]
-
-            # Top face: outward normal = −z -> CCW from above = reversed xy order
-            top_face: FaceVertexIndices = list(reversed(top_polygon_3d_indices))
-            # Bottom face: outward normal = +z -> CCW from below = xy order
-            bottom_face: FaceVertexIndices = list(bottom_polygon_3d_indices)
-
-            per_cell_face_vertex_lists[cell_idx].append(top_face)
-            per_cell_face_vertex_lists[cell_idx].append(bottom_face)
-
-    return build_csr_face_arrays(vertex_coordinates_3d, per_cell_face_vertex_lists)
+    return build_csr_face_arrays_from_entries(
+        vertex_coordinates_3d,
+        entry_cells=entry_cells,
+        entry_offsets=entry_offsets,
+        entry_vertices=entry_vertices,
+    )
 
 
 def make_3d_voronoi_grid(
@@ -446,62 +647,42 @@ def make_3d_voronoi_grid(
     all_seeds = np.vstack([seeds, mirror_seeds])
     voronoi = Voronoi(all_seeds)
 
-    # Build per-cell face lists from Voronoi ridges.
-    # In 3-D, each "ridge" is a polygonal face between two seed regions.
-    per_cell_face_vertex_lists: PerCellFaceLists = [[] for _ in range(n_seeds)]
+    # In 3-D, each "ridge" is a polygonal face between two seed regions. Ridges between two
+    # mirror seeds take no part; the others are interior faces between two original seeds or
+    # boundary faces between an original seed and its mirror.
+    keep, owners, neighbours = resolve_ridge_owners(voronoi.ridge_points, n_seeds)
+    ridge_points = voronoi.ridge_points.astype(np.int64)
+    other = np.where(owners == ridge_points[:, 0], ridge_points[:, 1], ridge_points[:, 0])
+    direction = np.zeros((len(owners), 3), dtype=np.float64)
+    direction[keep] = all_seeds[other[keep]] - seeds[owners[keep]]
 
-    for ridge_vertex_indices, seed_pair in zip(
-        voronoi.ridge_vertices, voronoi.ridge_points, strict=False
-    ):
-        sa, sb = int(seed_pair[0]), int(seed_pair[1])
-        sa_original = sa < n_seeds
-        sb_original = sb < n_seeds
+    ridge_vertices, ridge_offsets = flatten_ragged(voronoi.ridge_vertices)
+    faces_per_cell, entry_cells, entry_offsets, entry_vertices = build_3d_cell_entries(
+        ridge_vertices=ridge_vertices,
+        ridge_offsets=ridge_offsets,
+        ridge_owner=typing.cast(IntArray[OneDimension], np.ascontiguousarray(owners)),
+        ridge_neighbour=typing.cast(IntArray[OneDimension], np.ascontiguousarray(neighbours)),
+        ridge_direction=direction,
+        keep=keep,
+        voronoi_vertices=typing.cast(
+            NumberArray[TwoDimensions], np.ascontiguousarray(voronoi.vertices, dtype=np.float64)
+        ),
+        n_seeds=n_seeds,
+    )
 
-        # Skip: both mirrors, or residual infinite ridge (should be zero with mirror trick)
-        if (not sa_original and not sb_original) or (-1 in ridge_vertex_indices):
-            continue
-
-        face_vertices_3d = voronoi.vertices[ridge_vertex_indices]
-
-        # Determine owner and the direction toward the neighbour
-        if sa_original and sb_original:
-            # Interior face: owner = sa, neighbour = sb
-            owner_idx = sa
-            neighbour_idx = sb
-            direction_to_neighbour = seeds[sb] - seeds[sa]
-        elif sa_original:
-            # Boundary face: owner = sa, neighbour = exterior (-1)
-            owner_idx = sa
-            neighbour_idx = BOUNDARY_CELL
-            direction_to_neighbour = all_seeds[sb] - seeds[sa]
-        else:
-            # Boundary face: owner = sb, neighbour = exterior (-1)
-            owner_idx = sb
-            neighbour_idx = BOUNDARY_CELL
-            direction_to_neighbour = all_seeds[sa] - seeds[sb]
-
-        # Orient face vertices CCW from owner (normal pointing toward neighbour)
-        oriented_vertex_indices = _orient_face_vertices(
-            vertex_indices=list(ridge_vertex_indices),
-            face_vertices_3d=face_vertices_3d,  # type: ignore[arg-type]
-            direction_to_neighbour=direction_to_neighbour,
-        )
-        per_cell_face_vertex_lists[owner_idx].append(oriented_vertex_indices)
-
-        if neighbour_idx != BOUNDARY_CELL:
-            # Neighbour also needs the face with reversed winding
-            per_cell_face_vertex_lists[neighbour_idx].append(
-                list(reversed(oriented_vertex_indices))
-            )
-
-    # Validate: every cell must have at least 4 faces (minimum for a 3-D cell)
-    empty_cells = [i for i, faces in enumerate(per_cell_face_vertex_lists) if len(faces) < 4]
+    # Every cell must have at least 4 faces (minimum for a 3-D cell)
+    empty_cells = np.flatnonzero(faces_per_cell < 4).tolist()
     if empty_cells:
         raise InvalidGridError(
             f"Cells {empty_cells[:5]} have fewer than 4 faces after Voronoi construction. "
             f"This may indicate seeds are coplanar, collinear, or outside the bounding box."
         )
-    return build_csr_face_arrays(voronoi.vertices, per_cell_face_vertex_lists)
+    return build_csr_face_arrays_from_entries(
+        voronoi.vertices,
+        entry_cells=entry_cells,
+        entry_offsets=entry_offsets,
+        entry_vertices=entry_vertices,
+    )
 
 
 @numba.njit(cache=True)

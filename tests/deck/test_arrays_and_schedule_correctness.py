@@ -22,7 +22,10 @@ def captured(function):
 
 def runs_of(text: str):
     return [
-        (run.count, run.values.tolist() if isinstance(run.values, np.ndarray) else run.values)
+        (
+            run.entry_count,
+            run.values.tolist() if isinstance(run.values, np.ndarray) else run.values,
+        )
         for run in parse_numeric_runs(text, name="X")
     ]
 

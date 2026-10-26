@@ -1149,14 +1149,14 @@ class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
         else:
             family = keyword_family  # type: ignore[assignment]
 
-        oil_water_keyword = "`SWOF`" if family == "first" else "`SWFN`"
-        gas_oil_keyword = "`SGOF`" if family == "first" else "`SGFN`"
+        oil_water_keyword = "SWOF" if family == "first" else "SWFN"
+        gas_oil_keyword = "SGOF" if family == "first" else "SGFN"
         has_oil_water_table = has(oil_water_keyword)
         has_gas_oil_table = has(gas_oil_keyword)
 
         if not has_oil_water_table:
             warnings.warn(
-                f"Oil-water keyword {oil_water_keyword} not found for `SATNUM` "
+                f"Oil-water keyword `{oil_water_keyword}` not found for `SATNUM` "
                 f"{satnum}. Cannot build a three-phase capillary pressure table. "
                 "Use `TwoPhaseCapillaryPressureTable.from_deck(..., system='gas_oil')` "
                 "to build a gas-oil only table.",
@@ -1164,13 +1164,13 @@ class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
                 stacklevel=2,
             )
             raise ValidationError(
-                f"Oil-water keyword {oil_water_keyword} required for "
+                f"Oil-water keyword `{oil_water_keyword}` required for "
                 f"`ThreePhaseCapillaryPressureTable` not found at `SATNUM` {satnum}."
             )
 
         if not has_gas_oil_table:
             warnings.warn(
-                f"Gas-oil keyword {gas_oil_keyword} not found for `SATNUM` "
+                f"Gas-oil keyword `{gas_oil_keyword}` not found for `SATNUM` "
                 f"{satnum}. Cannot build a three-phase capillary pressure table. "
                 "Use `TwoPhaseCapillaryPressureTable.from_deck(..., system='oil_water')` "
                 "to build an oil-water only table.",
@@ -1178,7 +1178,7 @@ class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
                 stacklevel=2,
             )
             raise ValidationError(
-                f"Gas-oil keyword {gas_oil_keyword} required for "
+                f"Gas-oil keyword `{gas_oil_keyword}` required for "
                 f"`ThreePhaseCapillaryPressureTable` not found at `SATNUM` {satnum}."
             )
 
