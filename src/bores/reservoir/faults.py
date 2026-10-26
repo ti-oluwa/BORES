@@ -4,6 +4,7 @@ import typing
 import warnings
 
 import attrs
+import numba
 import numpy as np
 from typing_extensions import Self
 
@@ -11,7 +12,7 @@ from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.grids.base import ConnectionType, Grid
 from bores.grids.factories.base import VALID_FAULT_FACE_DIRECTIONS
-from bores.types import Integer, Number
+from bores.types import BooleanArray, IntArray, Integer, Number, OneDimension, TwoDimensions
 
 __all__ = ["Fault", "apply_faults", "remove_faults"]
 
@@ -220,7 +221,7 @@ def apply_faults(grid: Grid, *faults: Fault) -> Grid:
         )
 
     validate_fault_bounds(faults, nx, ny, nz)
-    return _apply_faults_to_grid(grid, faults, nx, ny, nz)
+    return apply_faults_to_grid(grid, faults, nx, ny, nz)
 
 
 def remove_faults(grid: Grid, *names: str) -> Grid:
@@ -251,7 +252,7 @@ def remove_faults(grid: Grid, *names: str) -> Grid:
             f"Faults not found on grid: {sorted(unknown)}. "
             f"Available faults: {sorted(existing_names)}."
         )
-    return _remove_faults_from_grid(grid, names_to_remove)
+    return remove_faults_from_grid(grid, names_to_remove)
 
 
 def validate_fault_bounds(
@@ -275,91 +276,259 @@ def validate_fault_bounds(
             raise ValidationError(f"Fault {fault.name!r}: k2={fault.k2} exceeds grid nz={nz}.")
 
 
-def _ijk_to_flat(i: Integer, j: Integer, k: Integer, nx: Integer, ny: Integer) -> int:
+FACE_DIRECTION_AXIS_STEP: dict[str, tuple[int, int]] = {
+    "X": (0, 1),
+    "X-": (0, -1),
+    "Y": (1, 1),
+    "Y-": (1, -1),
+    "Z": (2, 1),
+    "Z-": (2, -1),
+}
+"""Axis (`0` for I, `1` for J, `2` for K) and step (`+1` or `-1`) that each fault face direction crosses."""
+
+
+class FaultCellPairs(typing.NamedTuple):
+    """Cell pairs on either side of a fault interface."""
+
+    lower: IntArray[OneDimension]
+    """Flat index of the lower-numbered cell of each pair."""
+
+    upper: IntArray[OneDimension]
+    """Flat index of the higher-numbered cell of each pair."""
+
+
+class FaceLookup(typing.NamedTuple):
+    """Interior faces of a grid, searchable by the pair of cells they separate."""
+
+    keys: IntArray[OneDimension]
+    """Ascending `lower_cell * n_cells + upper_cell` key of every interior face."""
+
+    faces: IntArray[OneDimension]
+    """Face index belonging to each entry of `keys`."""
+
+    n_cells: int
+    """Number of cells the keys were built with."""
+
+
+@numba.njit(parallel=True, cache=True)
+def fault_pair_kernel(
+    i1: Integer,
+    j1: Integer,
+    k1: Integer,
+    ni: Integer,
+    nj: Integer,
+    nk: Integer,
+    axis: Integer,
+    step: Integer,
+    nx: Integer,
+    ny: Integer,
+    nz: Integer,
+    lower: IntArray[OneDimension],
+    upper: IntArray[OneDimension],
+    in_bounds: BooleanArray[OneDimension],
+) -> None:
     """
-    Convert 1-based IJK to a 0-based flat cell index.
+    Fill the cell pair across a fault interface for every cell of a fault's IJK box.
 
-    Uses Eclipse ordering: I varies fastest, K slowest.
-    `cell_idx = (i-1) + (j-1)*nx + (k-1)*nx*ny`.
+    Position `p` of the box is cell `(i1 + p % ni, j1 + (p // ni) % nj, k1 + p // (ni * nj))`, so
+    `i` varies fastest and `k` slowest. Every position writes only its own slot of the outputs.
 
-    :param i: 1-based I index.
-    :param j: 1-based J index.
-    :param k: 1-based K index.
+    :param i1: First I index of the box (1-based).
+    :param j1: First J index of the box (1-based).
+    :param k1: First K index of the box (1-based).
+    :param ni: Number of cells of the box in I.
+    :param nj: Number of cells of the box in J.
+    :param nk: Number of cells of the box in K.
+    :param axis: Axis the fault face crosses, `0` for I, `1` for J and `2` for K.
+    :param step: `+1` if the neighbour is the next cell along `axis`, `-1` if it is the previous one.
     :param nx: Grid extent in x.
     :param ny: Grid extent in y.
-    :returns: 0-based flat cell index.
+    :param nz: Grid extent in z.
+    :param lower: Output, the lower flat index of each pair. Meaningful where `in_bounds` is set.
+    :param upper: Output, the higher flat index of each pair. Meaningful where `in_bounds` is set.
+    :param in_bounds: Output, whether the neighbour lies inside the grid.
     """
-    return (i - 1) + (j - 1) * nx + (k - 1) * nx * ny
+    total = ni * nj * nk
+    plane = ni * nj
+    for position in numba.prange(total):  # type: ignore[attr-defined]
+        i = i1 + position % ni
+        j = j1 + (position // ni) % nj
+        k = k1 + position // plane
+        neighbour_i = i + step if axis == 0 else i
+        neighbour_j = j + step if axis == 1 else j
+        neighbour_k = k + step if axis == 2 else k
+        if (
+            neighbour_i < 1
+            or neighbour_i > nx
+            or neighbour_j < 1
+            or neighbour_j > ny
+            or neighbour_k < 1
+            or neighbour_k > nz
+        ):
+            in_bounds[position] = False
+            lower[position] = 0
+            upper[position] = 0
+            continue
+        cell = (i - 1) + (j - 1) * nx + (k - 1) * nx * ny
+        neighbour = (neighbour_i - 1) + (neighbour_j - 1) * nx + (neighbour_k - 1) * nx * ny
+        in_bounds[position] = True
+        lower[position] = min(cell, neighbour)
+        upper[position] = max(cell, neighbour)
+
+
+@numba.njit(parallel=True, cache=True)
+def find_faces_kernel(
+    keys: IntArray[OneDimension],
+    faces: IntArray[OneDimension],
+    n_cells: Integer,
+    lower: IntArray[OneDimension],
+    upper: IntArray[OneDimension],
+    out: IntArray[OneDimension],
+) -> None:
+    """
+    Look up the interior face shared by each cell pair, `-1` where the pair shares none.
+
+    If several faces separate the same two cells, the one with the highest position in `keys` is
+    returned. Every pair writes only its own slot of `out`.
+
+    :param keys: Ascending face keys from `FaceLookup`.
+    :param faces: Face index of each entry of `keys`.
+    :param n_cells: Number of cells the keys were built with.
+    :param lower: Lower flat index of each pair.
+    :param upper: Higher flat index of each pair.
+    :param out: Output, the face index of each pair or `-1`.
+    """
+    for pair in numba.prange(lower.shape[0]):  # type: ignore[attr-defined]
+        target = lower[pair] * n_cells + upper[pair]
+        low = 0
+        high = keys.shape[0]
+        while low < high:
+            middle = (low + high) // 2
+            if keys[middle] <= target:
+                low = middle + 1
+            else:
+                high = middle
+        if low > 0 and keys[low - 1] == target:
+            out[pair] = faces[low - 1]
+        else:
+            out[pair] = -1
+
+
+@numba.njit(cache=True)
+def reclassify_faces_kernel(
+    connection_types: IntArray[OneDimension],
+    face_cell_indices: IntArray[TwoDimensions],
+    face_indices: IntArray[OneDimension],
+    interior_type: Integer,
+    boundary_type: Integer,
+) -> None:
+    """
+    Set the connection type of each listed face by whether it has a neighbouring cell.
+
+    :param connection_types: Connection type of every face, updated in place.
+    :param face_cell_indices: Shape `(n_faces, 2)` owner and neighbour of every face.
+    :param face_indices: Faces to reclassify.
+    :param interior_type: Type given to a face with a cell on both sides.
+    :param boundary_type: Type given to a face with no cell on one side.
+    """
+    for position in range(face_indices.shape[0]):
+        face = face_indices[position]
+        if face_cell_indices[face, 0] < 0 or face_cell_indices[face, 1] < 0:
+            connection_types[face] = boundary_type
+        else:
+            connection_types[face] = interior_type
 
 
 def resolve_fault_cell_pairs(
     fault: Fault, nx: Integer, ny: Integer, nz: Integer
-) -> list[tuple[int, int]]:
+) -> FaultCellPairs:
     """
     Enumerate all cell pairs across a fault interface.
 
     Iterates the IJK box defined by the fault record and, for each cell in the
-    box, finds its neighbour in the face direction. Returns pairs as
-    `(owner_flat, neighbour_flat)` in ascending order.
+    box, finds its neighbour in the face direction. Pairs are returned with the lower
+    flat index first, in the order of the box with `i` varying fastest and `k` slowest.
 
-    Pairs where either cell is outside the grid bounds are skipped with a
-    warning.
+    Pairs whose neighbour is outside the grid bounds are skipped with a warning.
 
     :param fault: The fault record to resolve.
     :param nx: Grid extent in x.
     :param ny: Grid extent in y.
     :param nz: Grid extent in z.
-    :returns: List of `(cell_a_flat, cell_b_flat)` pairs.
+    :returns: The lower and higher flat cell index of each pair.
     """
-    direction = fault.face_direction
-    pairs: list[tuple[int, int]] = []
+    axis, step = FACE_DIRECTION_AXIS_STEP[fault.face_direction]
+    ni = fault.i2 - fault.i1 + 1
+    nj = fault.j2 - fault.j1 + 1
+    nk = fault.k2 - fault.k1 + 1
+    total = ni * nj * nk
+    lower = np.empty(total, dtype=np.int64)
+    upper = np.empty(total, dtype=np.int64)
+    in_bounds = np.empty(total, dtype=np.bool_)
+    fault_pair_kernel(
+        i1=fault.i1,
+        j1=fault.j1,
+        k1=fault.k1,
+        ni=ni,
+        nj=nj,
+        nk=nk,
+        axis=axis,
+        step=step,
+        nx=nx,
+        ny=ny,
+        nz=nz,
+        lower=lower,
+        upper=upper,
+        in_bounds=in_bounds,
+    )
+    if in_bounds.all():
+        return FaultCellPairs(lower=lower, upper=upper)
 
-    for k in range(fault.k1, fault.k2 + 1):
-        for j in range(fault.j1, fault.j2 + 1):
-            for i in range(fault.i1, fault.i2 + 1):
-                if direction in ("X", "X-"):
-                    ni, nj, nk = (i + 1, j, k) if direction == "X" else (i - 1, j, k)
-                elif direction in ("Y", "Y-"):
-                    ni, nj, nk = (i, j + 1, k) if direction == "Y" else (i, j - 1, k)
-                else:  # Z or Z-
-                    ni, nj, nk = (i, j, k + 1) if direction == "Z" else (i, j, k - 1)
-
-                if not (1 <= ni <= nx and 1 <= nj <= ny and 1 <= nk <= nz):
-                    warnings.warn(
-                        f"Fault {fault.name!r}: neighbour cell ({ni},{nj},{nk}) is "
-                        f"outside grid bounds ({nx}x{ny}x{nz}). Skipping pair.",
-                        stacklevel=5,
-                    )
-                    continue
-
-                cell_a = _ijk_to_flat(i, j, k, nx, ny)
-                cell_b = _ijk_to_flat(ni, nj, nk, nx, ny)
-                # Normalise so lower index is always first
-                pairs.append((min(cell_a, cell_b), max(cell_a, cell_b)))
-    return pairs
+    for position in np.flatnonzero(~in_bounds):
+        i = fault.i1 + position % ni
+        j = fault.j1 + (position // ni) % nj
+        k = fault.k1 + position // (ni * nj)
+        neighbour = [i, j, k]
+        neighbour[axis] += step
+        warnings.warn(
+            f"Fault {fault.name!r}: neighbour cell ({neighbour[0]},{neighbour[1]},{neighbour[2]}) "
+            f"is outside grid bounds ({nx}x{ny}x{nz}). Skipping pair.",
+            stacklevel=5,
+        )
+    return FaultCellPairs(
+        lower=typing.cast(IntArray[OneDimension], lower[in_bounds]),
+        upper=typing.cast(IntArray[OneDimension], upper[in_bounds]),
+    )
 
 
-def _build_face_lookup(grid: Grid) -> dict[tuple[Integer, Integer], Integer]:
+def build_face_lookup(grid: Grid) -> FaceLookup:
     """
-    Build a `{(min_cell, max_cell): face_index}` lookup from `grid.face_cell_indices`.
+    Index the interior faces of `grid` by the pair of cells each one separates.
 
-    Only interior faces (where both owner and neighbour are >= 0) are included.
-    This is used to determine whether a fault cell pair has a shared geometric
-    face.
+    Only faces with a cell on both sides are included. The index is used to find whether a
+    fault's cell pair shares a geometric face.
 
     :param grid: The source grid.
-    :returns: Dict mapping sorted cell pairs to face indices.
+    :returns: The searchable index.
     """
-    lookup: dict[tuple[Integer, Integer], Integer] = {}
-    for face_idx in range(grid.n_faces):
-        owner = grid.face_cell_indices[face_idx, 0]
-        neighbour = grid.face_cell_indices[face_idx, 1]
-        if owner >= 0 and neighbour >= 0:
-            lookup[min(owner, neighbour), max(owner, neighbour)] = face_idx
-    return lookup
+    n_cells = int(grid.n_cells)
+    face_cells = grid.face_cell_indices
+    interior_faces = np.flatnonzero((face_cells[:, 0] >= 0) & (face_cells[:, 1] >= 0))
+    owners = face_cells[interior_faces, 0].astype(np.int64)
+    neighbours = face_cells[interior_faces, 1].astype(np.int64)
+    keys = np.minimum(owners, neighbours)
+    keys *= n_cells
+    keys += np.maximum(owners, neighbours)
+    del owners, neighbours
+    order = np.argsort(keys, kind="stable")
+    return FaceLookup(
+        keys=keys[order],
+        faces=typing.cast(IntArray[OneDimension], interior_faces[order]),
+        n_cells=n_cells,
+    )
 
 
-def _apply_faults_to_grid(
+def apply_faults_to_grid(
     grid: Grid, faults: tuple[Fault, ...], nx: Integer, ny: Integer, nz: Integer
 ) -> Grid:
     """
@@ -380,43 +549,48 @@ def _apply_faults_to_grid(
     :param nz: Grid extent in z.
     :returns: A new `Grid` with updated fault connectivity.
     """
-    face_lookup = _build_face_lookup(grid)
-    # Start from copies of existing fault data structures
-    fault_face_indices = typing.cast(
-        dict[str, list[Integer]],
-        {name: list(indices) for name, indices in (grid.fault_face_indices or {}).items()},
-    )
-
-    names_being_replaced: set[str] = {fault.name for fault in faults}
-    for name in names_being_replaced:
-        fault_face_indices.pop(name, None)
-
-    # New face_connection_types: start from grid's current array
     assert grid.face_connection_types is not None
-    new_face_connection_types = np.array(grid.face_connection_types, dtype=np.int8)
-
-    # Process each incoming fault
+    lookup = build_face_lookup(grid)
+    face_cell_indices = np.ascontiguousarray(grid.face_cell_indices)
+    fault_face_indices: dict[str, IntArray[OneDimension]] = dict(grid.fault_face_indices or {})
+    connection_types = np.array(grid.face_connection_types, dtype=np.int8)
     for fault in faults:
-        cell_pairs = resolve_fault_cell_pairs(fault, nx, ny, nz)
-        face_list: list[Integer] = []
+        # A replaced fault gives up its old faces before the new ones are classified.
+        replaced = fault_face_indices.pop(fault.name, None)
+        if replaced is not None:
+            reclassify_faces_kernel(
+                connection_types=typing.cast(IntArray[OneDimension], connection_types),
+                face_cell_indices=typing.cast(IntArray[TwoDimensions], face_cell_indices),
+                face_indices=typing.cast(IntArray[OneDimension], np.ascontiguousarray(replaced)),
+                interior_type=int(ConnectionType.INTERIOR_FACE),
+                boundary_type=int(ConnectionType.BOUNDARY_FACE),
+            )
 
-        for cell_a, cell_b in cell_pairs:
-            face_idx = face_lookup.get((cell_a, cell_b))
-            if face_idx is not None:
-                face_list.append(face_idx)
-                # Reclassify face
-                owner = grid.face_cell_indices[face_idx, 0]
-                neighbour = grid.face_cell_indices[face_idx, 1]
-                is_boundary = owner < 0 or neighbour < 0
-                new_face_connection_types[face_idx] = int(
-                    ConnectionType.BOUNDARY_FAULT_FACE
-                    if is_boundary
-                    else ConnectionType.INTERIOR_FAULT_FACE
-                )
-        if face_list:
-            fault_face_indices[fault.name] = face_list
+    for fault in faults:
+        pairs = resolve_fault_cell_pairs(fault, nx, ny, nz)
+        found = np.empty(pairs.lower.shape[0], dtype=np.int64)
+        find_faces_kernel(
+            keys=lookup.keys,
+            faces=lookup.faces,
+            n_cells=lookup.n_cells,
+            lower=pairs.lower,
+            upper=pairs.upper,
+            out=found,
+        )
+        found = found[found >= 0]
+        if found.shape[0] == 0:
+            continue
+        reclassify_faces_kernel(
+            connection_types=typing.cast(IntArray[OneDimension], connection_types),
+            face_cell_indices=typing.cast(IntArray[TwoDimensions], face_cell_indices),
+            face_indices=typing.cast(IntArray[OneDimension], found),
+            interior_type=int(ConnectionType.INTERIOR_FAULT_FACE),
+            boundary_type=int(ConnectionType.BOUNDARY_FAULT_FACE),
+        )
+        fault_face_indices[fault.name] = typing.cast(
+            IntArray[OneDimension], found.astype(np.int32)
+        )
 
-    # Build updated fault_transmissibility_multipliers
     updated_multipliers: dict[str, Number] = dict(grid.fault_transmissibility_multipliers or {})
     for fault in faults:
         # A replaced fault takes only the multiplier it now carries, never the old one.
@@ -424,20 +598,15 @@ def _apply_faults_to_grid(
         if fault.transmissibility_multiplier is not None:
             updated_multipliers[fault.name] = fault.transmissibility_multiplier
 
-    merged_fault_face_indices = (
-        {name: np.asarray(idxs, dtype=np.int32) for name, idxs in fault_face_indices.items()}
-        if fault_face_indices
-        else None
-    )
     return attrs.evolve(
         grid,
-        face_connection_types=new_face_connection_types,
-        fault_face_indices=merged_fault_face_indices,
+        face_connection_types=connection_types,
+        fault_face_indices=fault_face_indices or None,
         fault_transmissibility_multipliers=updated_multipliers or None,
     )
 
 
-def _remove_faults_from_grid(grid: Grid, names: frozenset[str]) -> Grid:
+def remove_faults_from_grid(grid: Grid, names: frozenset[str]) -> Grid:
     """
     Produce a new `Grid` with the specified faults stripped out.
 
@@ -449,23 +618,24 @@ def _remove_faults_from_grid(grid: Grid, names: frozenset[str]) -> Grid:
     :returns: A new `Grid` with those faults absent.
     """
     assert grid.face_connection_types is not None
-    new_face_connection_types = np.array(grid.face_connection_types, dtype=np.int8)
+    connection_types = np.array(grid.face_connection_types, dtype=np.int8)
 
-    # Revert face classifications for removed faults
     if grid.fault_face_indices:
+        face_cell_indices = np.ascontiguousarray(grid.face_cell_indices)
         for name in names:
             face_indices = grid.fault_face_indices.get(name)
             if face_indices is None:
                 continue
-            for face_idx in face_indices:
-                owner = grid.face_cell_indices[face_idx, 0]
-                neighbour = grid.face_cell_indices[face_idx, 1]
-                is_boundary = owner < 0 or neighbour < 0
-                new_face_connection_types[face_idx] = int(
-                    ConnectionType.BOUNDARY_FACE if is_boundary else ConnectionType.INTERIOR_FACE
-                )
+            reclassify_faces_kernel(
+                connection_types=typing.cast(IntArray[OneDimension], connection_types),
+                face_cell_indices=typing.cast(IntArray[TwoDimensions], face_cell_indices),
+                face_indices=typing.cast(
+                    IntArray[OneDimension], np.ascontiguousarray(face_indices)
+                ),
+                interior_type=int(ConnectionType.INTERIOR_FACE),
+                boundary_type=int(ConnectionType.BOUNDARY_FACE),
+            )
 
-    # Updated fault maps (minus removed faults)
     new_fault_face_indices = (
         {name: indices for name, indices in grid.fault_face_indices.items() if name not in names}
         if grid.fault_face_indices
@@ -482,7 +652,7 @@ def _remove_faults_from_grid(grid: Grid, names: frozenset[str]) -> Grid:
     )
     return attrs.evolve(
         grid,
-        face_connection_types=new_face_connection_types,
+        face_connection_types=connection_types,
         fault_face_indices=new_fault_face_indices or None,
         fault_transmissibility_multipliers=new_multipliers or None,
     )

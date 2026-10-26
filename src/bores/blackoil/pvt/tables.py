@@ -3372,6 +3372,11 @@ class PVTTable(StoreSerializable):
 
     pd = pdew = p_dew = dew_point_pressure
 
+    @property
+    def has_solubility_in_water(self) -> bool:
+        """Whether this table holds gas solubility in water (`Rsw`) data. Gas phase only."""
+        return self._phase == FluidPhase.GAS and "solubility_in_water" in self._interpolatants
+
     def solubility_in_water(
         self,
         pressure: TableQuery[NDimension],

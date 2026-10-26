@@ -57,6 +57,7 @@ __all__ = [
     "compute_water_phase_pressure",
     "initialize_equilibrium_arrays",
     "initialize_reservoir_state",
+    "initialize_water_gas_state",
 ]
 
 N_SATURATION_SAMPLES = 100
@@ -1308,6 +1309,106 @@ def compute_water_phase_pressure(
     return typing.cast(CellArray, water_pressure)
 
 
+WATER_BUBBLE_POINT_ITERATIONS = 60
+"""Bisection steps used to find the pressure at which saturated water holds a given `Rsw`."""
+
+
+def initialize_water_gas_state(
+    *,
+    pvt: PVT,
+    pvt_region_index: IntCellArray,
+    pressure: CellArray,
+    temperature: CellArray,
+    gas_solubility_in_water: CellArray | None = None,
+    salinity: CellArray | None = None,
+    dtype: npt.DTypeLike = None,
+) -> tuple[CellArray, CellArray]:
+    """
+    Initial gas dissolved in water (`Rsw`) and the water bubble-point pressure of every cell.
+
+    Each `PVTNUM` region's own tables are used, with `Rsw` read from its gas table:
+
+    - Without `gas_solubility_in_water`, the water is taken as saturated with gas, `Rsw` is the
+      saturated value at the cell's pressure and temperature, and the bubble-point pressure is the
+      water table's value at that pressure. This is what `solution_gor` and
+      `oil_bubble_point_pressure` do for oil when no `RS` is supplied.
+    - With `gas_solubility_in_water`, the bubble-point pressure is the pressure at which saturated
+      water holds that `Rsw`, capped at the cell's pressure since water cannot hold more gas than
+      saturation. An `Rsw` below what the table holds at the lowest pressure searched (0.1% of the
+      cell's pressure) gets that lowest pressure.
+
+    Looking up `Rsw` needs a salinity, so a region whose gas table holds `Rsw` data and has no
+    default salinity needs `salinity` to be given.
+
+    A region whose gas table has no `Rsw` data gets zero `Rsw` and zero bubble-point pressure when
+    `Rsw` is not supplied. When it is supplied there, the bubble-point pressure falls back to the
+    cell's pressure (saturated water).
+
+    :param pvt: PVT tables for all regions.
+    :param pvt_region_index: `PVTNUM` per cell.
+    :param pressure: Shape `(n_cells,)` cell pressure.
+    :param temperature: Shape `(n_cells,)` cell temperature.
+    :param gas_solubility_in_water: Optional shape `(n_cells,)` explicit `Rsw`.
+    :param salinity: Optional shape `(n_cells,)` water salinity (ppm NaCl). Each table's own
+        default salinity is used where `None`.
+    :param dtype: Output dtype. `bores.precision.get_dtype()` if not given.
+    :returns: The `Rsw` array and the water bubble-point pressure array.
+    """
+    dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+    n_cells = len(pressure)
+    solubility = np.zeros(n_cells, dtype=dtype)
+    bubble_point = np.zeros(n_cells, dtype=dtype)
+
+    for pvtnum in np.unique(pvt_region_index):
+        mask = pvt_region_index == pvtnum
+        tables = pvt.region(pvtnum).tables
+        p = pressure[mask]
+        t = temperature[mask]
+        s = salinity[mask] if salinity is not None else None
+        gas = tables.gas
+        water = tables.water
+
+        saturated = (
+            gas.solubility_in_water(p, t, salinity=s)
+            if gas is not None and gas.has_solubility_in_water
+            else None
+        )
+
+        if gas_solubility_in_water is None:
+            if saturated is None:
+                continue
+            solubility[mask] = saturated
+            region_bubble_point = (
+                water.bubble_point_pressure(t, pressure=p, salinity=s)
+                if water is not None
+                else None
+            )
+            bubble_point[mask] = region_bubble_point if region_bubble_point is not None else p
+            continue
+
+        rsw = np.asarray(gas_solubility_in_water[mask], dtype=dtype)
+        solubility[mask] = rsw
+        if saturated is None:
+            bubble_point[mask] = p
+            continue
+
+        # Saturated `Rsw` rises with pressure, so the bubble point is found by bisection between
+        # a pressure low enough to hold less than `rsw` and the cell's own pressure.
+        saturated = np.broadcast_to(saturated, p.shape)
+        low = p * 1e-3
+        high = np.array(p, dtype=dtype, copy=True)
+        for _ in range(WATER_BUBBLE_POINT_ITERATIONS):
+            middle = 0.5 * (low + high)
+            holds = gas.solubility_in_water(middle, t, salinity=s)  # type: ignore[union-attr]
+            below = np.broadcast_to(holds, p.shape) < rsw
+            low = np.where(below, middle, low)
+            high = np.where(below, high, middle)
+        region_bubble_point = 0.5 * (low + high)
+        # At or above the saturated value the water is saturated, so its bubble point is `p`.
+        bubble_point[mask] = np.where(rsw >= saturated, p, region_bubble_point)
+    return typing.cast(CellArray, solubility), typing.cast(CellArray, bubble_point)
+
+
 def initialize_reservoir_state(
     reservoir: Reservoir,
     pvt: PVT,
@@ -1321,6 +1422,8 @@ def initialize_reservoir_state(
     gas_saturation: CellArray | None = None,
     solution_gor: CellArray | None = None,
     vaporized_oil_gas_ratio: CellArray | None = None,
+    gas_solubility_in_water: CellArray | None = None,
+    water_salinity: CellArray | None = None,
     depth_step: Number = 1.0,
     hysteresis_enabled: bool = False,
     dtype: npt.DTypeLike = None,
@@ -1347,6 +1450,12 @@ def initialize_reservoir_state(
     (`oil_bubble_point_pressure = pressure`) and no free gas ever
     (`gas_dew_point_pressure = 0`).
 
+    Gas dissolved in water (`gas_solubility_in_water`) is never derived by equilibration. It is
+    taken from the `gas_solubility_in_water` kwarg, or the `RSW` keyword in `deck_file`, and
+    otherwise each `PVTNUM` region's gas table gives the value for water saturated with gas at the
+    cell's pressure and temperature, which is zero where that table has no `Rsw` data. The
+    `water_bubble_point_pressure` follows from it, see `initialize_water_gas_state`.
+
     Note:
     Ensure the unit system of all inputs (`reservoir`, `pvt`, ..., and any explicit arrays) is consistent.
     The function will raise a `ValidationError` if there is a detected mismatch.
@@ -1368,6 +1477,10 @@ def initialize_reservoir_state(
     :param gas_saturation: Optional explicit gas saturation array (overrides `SGAS` keyword).
     :param solution_gor: Optional explicit solution GOR array (overrides `RS` keyword).
     :param vaporized_oil_gas_ratio: Optional explicit vaporized oil ratio array (overrides `RV` keyword).
+    :param gas_solubility_in_water: Optional explicit gas solubility in water (`Rsw`) array, in the
+        same units as `solution_gor` (overrides `RSW` keyword).
+    :param water_salinity: Optional per-cell water salinity (ppm NaCl) used to look up `Rsw` and the
+        water bubble-point pressure. Each PVT table's own default salinity is used if `None`.
     :param depth_step: Step size for hydrostatic integration in equilibration.
     :param hysteresis_enabled: If `True`, initialize hysteresis state from the
         resolved saturations (`Hysteresis.from_saturation`) for
@@ -1614,6 +1727,40 @@ def initialize_reservoir_state(
                 if gas_dew_point is not None:
                     gas_dew_point_pressure_array[mask] = gas_dew_point
 
+    solubility_in_water_input = gas_solubility_in_water
+    if solubility_in_water_input is None and deck_file is not None:
+        deck_solubility = deck_file.get("RSW")
+        if deck_solubility is not None:
+            solubility_in_water_input = typing.cast(CellArray, deck_solubility)
+    if solubility_in_water_input is not None:
+        solubility_in_water_input = np.asarray(solubility_in_water_input, dtype=dtype)
+        if solubility_in_water_input.shape != (n_cells,):
+            raise ValidationError(
+                f"Explicit `gas_solubility_in_water` has shape {solubility_in_water_input.shape}; "
+                f"expected ({n_cells},)."
+            )
+        if not np.all(np.isfinite(solubility_in_water_input)) or np.any(
+            solubility_in_water_input < 0.0
+        ):
+            raise ValidationError(
+                "`gas_solubility_in_water` must be finite and non-negative in every cell."
+            )
+    if water_salinity is not None:
+        water_salinity = np.asarray(water_salinity, dtype=dtype)
+        if water_salinity.shape != (n_cells,):
+            raise ValidationError(
+                f"`water_salinity` has shape {water_salinity.shape}; expected ({n_cells},)."
+            )
+    gas_solubility_in_water_array, water_bubble_point_pressure_array = initialize_water_gas_state(
+        pvt=pvt,
+        pvt_region_index=pvt_region_index,
+        pressure=pressure_array,
+        temperature=temperature_array,
+        gas_solubility_in_water=solubility_in_water_input,
+        salinity=water_salinity,
+        dtype=dtype,
+    )
+
     masses = compute_masses(
         pressure=pressure_array,
         temperature=temperature_array,
@@ -1625,11 +1772,11 @@ def initialize_reservoir_state(
         pore_volumes=pore_volumes,
         pvt=pvt,
         pvt_region_index=pvt_region_index,
+        gas_solubility_in_water=gas_solubility_in_water_array,
         unit_system=unit_system,
         dtype=dtype,
     )
 
-    zeros = np.zeros(n_cells, dtype=dtype)
     hysteresis = (
         Hysteresis.from_saturation(
             water_saturation=water_saturation_array,
@@ -1649,8 +1796,8 @@ def initialize_reservoir_state(
         oil_bubble_point_pressure=typing.cast(CellArray, oil_bubble_point_pressure_array),
         vaporized_oil_gas_ratio=vaporized_oil_ratio_array,
         gas_dew_point_pressure=typing.cast(CellArray, gas_dew_point_pressure_array),
-        gas_solubility_in_water=zeros,
-        water_bubble_point_pressure=zeros,
+        gas_solubility_in_water=gas_solubility_in_water_array,
+        water_bubble_point_pressure=water_bubble_point_pressure_array,
         oil_mass=masses.oil_mass,
         water_mass=masses.water_mass,
         free_gas_mass=masses.free_gas_mass,

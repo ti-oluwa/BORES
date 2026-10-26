@@ -1,13 +1,21 @@
 """Walking a straight segment through a grid, cell by cell, using each cell's own faces."""
 
 import math
+import typing
 
 import numba
 import numpy as np
-import numpy.typing as npt
 
 from bores.grids.base import Grid
-from bores.types import Boolean, Integer, Number
+from bores.types import (
+    Boolean,
+    IntArray,
+    Integer,
+    Number,
+    NumberArray,
+    OneDimension,
+    TwoDimensions,
+)
 
 __all__ = [
     "check_point_in_polygon_2d",
@@ -72,8 +80,8 @@ def point_in_indexed_polygon(
     y: Number,
     u_axis: Integer,
     v_axis: Integer,
-    vertex_indices: npt.NDArray,
-    vertex_coordinates: npt.NDArray,
+    vertex_indices: IntArray[OneDimension],
+    vertex_coordinates: NumberArray[TwoDimensions],
     tolerance: Number,
 ) -> Boolean:
     """
@@ -124,7 +132,7 @@ def dominant_axis_of(nx: Number, ny: Number, nz: Number) -> Integer:
 def check_point_in_polygon_2d(
     x: Number,
     y: Number,
-    polygon_xy: npt.NDArray,
+    polygon_xy: NumberArray[TwoDimensions],
     tolerance: Number = 1e-9,
 ) -> Boolean:
     """
@@ -150,9 +158,9 @@ def check_point_in_polygon_2d(
 
 @numba.njit(cache=True)
 def check_point_in_polygon_3d(
-    point: tuple[Integer, Integer, Integer],
-    polygon_xyz: npt.NDArray,
-    normal: npt.NDArray,
+    point: tuple[Number, Number, Number],
+    polygon_xyz: NumberArray[TwoDimensions],
+    normal: NumberArray[OneDimension],
     tolerance: Number = 1e-9,
 ) -> Boolean:
     """
@@ -192,9 +200,9 @@ def face_plane_crossing(
     dz: Number,
     face: Integer,
     cell: Integer,
-    face_cell_indices: npt.NDArray,
-    face_unit_normals: npt.NDArray,
-    face_centroids: npt.NDArray,
+    face_cell_indices: IntArray[TwoDimensions],
+    face_unit_normals: NumberArray[TwoDimensions],
+    face_centroids: NumberArray[TwoDimensions],
 ) -> Number:
     """
     Where a segment crosses a face's plane.
@@ -238,10 +246,10 @@ def crossing_is_inside_face(
     dz: Number,
     t: Number,
     face: Integer,
-    face_vertex_offsets: npt.NDArray,
-    face_vertex_indices: npt.NDArray,
-    vertex_coordinates: npt.NDArray,
-    face_unit_normals: npt.NDArray,
+    face_vertex_offsets: IntArray[OneDimension],
+    face_vertex_indices: IntArray[OneDimension],
+    vertex_coordinates: NumberArray[TwoDimensions],
+    face_unit_normals: NumberArray[TwoDimensions],
 ) -> Boolean:
     """
     Whether the point a segment reaches at `t` lies within a face's polygon.
@@ -274,7 +282,7 @@ def crossing_is_inside_face(
         y=start[v_axis] + t * direction[v_axis],
         u_axis=u_axis,
         v_axis=v_axis,
-        vertex_indices=face_vertex_indices[
+        vertex_indices=face_vertex_indices[  # type: ignore[arg-type]
             face_vertex_offsets[face] : face_vertex_offsets[face + 1]
         ],
         vertex_coordinates=vertex_coordinates,
@@ -292,15 +300,15 @@ def walk_cells(
     dz: Number,
     first_cell: Integer,
     max_visits: Integer,
-    cell_face_offsets: npt.NDArray,
-    cell_face_indices: npt.NDArray,
-    face_vertex_offsets: npt.NDArray,
-    face_vertex_indices: npt.NDArray,
-    vertex_coordinates: npt.NDArray,
-    face_cell_indices: npt.NDArray,
-    face_unit_normals: npt.NDArray,
-    face_centroids: npt.NDArray,
-) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
+    cell_face_offsets: IntArray[OneDimension],
+    cell_face_indices: IntArray[OneDimension],
+    face_vertex_offsets: IntArray[OneDimension],
+    face_vertex_indices: IntArray[OneDimension],
+    vertex_coordinates: NumberArray[TwoDimensions],
+    face_cell_indices: IntArray[TwoDimensions],
+    face_unit_normals: NumberArray[TwoDimensions],
+    face_centroids: NumberArray[TwoDimensions],
+) -> tuple[IntArray[OneDimension], NumberArray[OneDimension], NumberArray[OneDimension]]:
     """
     Walk a segment through the grid from `first_cell`, crossing from cell to cell through the face
     it leaves each one by, until it ends or leaves the active grid.
@@ -406,10 +414,10 @@ def walk_cells(
         current_cell = next_cell
         current_t = best_t
 
-    return cells[:count].copy(), entry_t[:count].copy(), exit_t[:count].copy()
+    return cells[:count].copy(), entry_t[:count].copy(), exit_t[:count].copy()  # type: ignore[return-value]
 
 
-def traversal_arrays(grid: Grid) -> dict[str, npt.NDArray]:
+def traversal_arrays(grid: Grid) -> dict[str, IntArray | NumberArray]:
     """The grid arrays the walk reads."""
     return {
         "cell_face_offsets": grid.cell_face_offsets,
@@ -428,7 +436,7 @@ def walk_segment_cells(
     start: tuple[Number, Number, Number],
     end: tuple[Number, Number, Number],
     first_cell: Integer,
-) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
+) -> tuple[IntArray[OneDimension], NumberArray[OneDimension], NumberArray[OneDimension]]:
     """
     Walk the straight segment from `start` to `end` through `grid`, cell by cell.
 
@@ -456,7 +464,7 @@ def walk_segment_cells(
         dz=dz,
         first_cell=first_cell,
         max_visits=4 * grid.n_cells + 64,
-        **traversal_arrays(grid),
+        **traversal_arrays(grid),  # type: ignore[arg-type]
     )
 
 
@@ -489,7 +497,7 @@ def get_segment_face_intersection(
         dz=direction[2],
         face=face_index,
         cell=cell_index,
-        face_cell_indices=arrays["face_cell_indices"],
+        face_cell_indices=typing.cast(IntArray[TwoDimensions], arrays["face_cell_indices"]),
         face_unit_normals=arrays["face_unit_normals"],
         face_centroids=arrays["face_centroids"],
     )
@@ -504,8 +512,8 @@ def get_segment_face_intersection(
         dz=direction[2],
         t=t,
         face=face_index,
-        face_vertex_offsets=arrays["face_vertex_offsets"],
-        face_vertex_indices=arrays["face_vertex_indices"],
+        face_vertex_offsets=typing.cast(IntArray[OneDimension], arrays["face_vertex_offsets"]),
+        face_vertex_indices=typing.cast(IntArray[OneDimension], arrays["face_vertex_indices"]),
         vertex_coordinates=arrays["vertex_coordinates"],
         face_unit_normals=arrays["face_unit_normals"],
     )

@@ -15,6 +15,7 @@ float64 arrays):
 - `SOIL` / `SO`: initial oil saturation.
 - `SGAS` / `SG`: initial gas saturation.
 - `RS`: initial solution gas-oil ratio.
+- `RSW`: initial gas dissolved in water.
 - `RV`: initial vaporized oil-gas ratio.
 
 **Equilibration keyword**:
@@ -69,6 +70,7 @@ __all__ = [
     "RESTART",
     "RS",
     "RSVD",
+    "RSW",
     "RTEMP",
     "RTEMPVD",
     "RV",
@@ -105,6 +107,9 @@ PRESSURE = ArrayKeyword("PRESSURE", dtype=np.float64, default_value=0.0)
 
 RS = ArrayKeyword("RS", dtype=np.float64, default_value=0.0)
 """`RS` - initial solution gas-oil ratio (scf/stb in FIELD)."""
+
+RSW = ArrayKeyword("RSW", dtype=np.float64, default_value=0.0)
+"""`RSW` - initial gas dissolved in water, the water counterpart of `RS` (scf/stb in FIELD)."""
 
 RV = ArrayKeyword("RV", dtype=np.float64, default_value=0.0)
 """`RV` - initial vaporized oil-gas ratio (stb/scf in FIELD)."""

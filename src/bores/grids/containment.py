@@ -5,10 +5,17 @@ import typing
 
 import numba
 import numpy as np
-import numpy.typing as npt
 
 from bores.grids.base import Grid
-from bores.types import Boolean, IntArray, Integer, Number, OneDimension
+from bores.types import (
+    Boolean,
+    IntArray,
+    Integer,
+    Number,
+    NumberArray,
+    OneDimension,
+    TwoDimensions,
+)
 
 __all__ = [
     "INSIDE_FRACTION",
@@ -31,13 +38,13 @@ def solid_angle_fraction(
     y: Number,
     z: Number,
     cell: Integer,
-    cell_face_offsets: npt.NDArray,
-    cell_face_indices: npt.NDArray,
-    face_vertex_offsets: npt.NDArray,
-    face_vertex_indices: npt.NDArray,
-    vertex_coordinates: npt.NDArray,
-    face_cell_indices: npt.NDArray,
-    face_unit_normals: npt.NDArray,
+    cell_face_offsets: IntArray[OneDimension],
+    cell_face_indices: IntArray[OneDimension],
+    face_vertex_offsets: IntArray[OneDimension],
+    face_vertex_indices: IntArray[OneDimension],
+    vertex_coordinates: NumberArray[TwoDimensions],
+    face_cell_indices: IntArray[TwoDimensions],
+    face_unit_normals: NumberArray[TwoDimensions],
 ) -> Number:
     """
     Fraction of a full turn of solid angle that the surface of a cell subtends at a point.
@@ -237,11 +244,11 @@ def is_within_of_surface(
     z: Number,
     cell: Integer,
     distance: Number,
-    cell_face_offsets: npt.NDArray,
-    cell_face_indices: npt.NDArray,
-    face_vertex_offsets: npt.NDArray,
-    face_vertex_indices: npt.NDArray,
-    vertex_coordinates: npt.NDArray,
+    cell_face_offsets: IntArray[OneDimension],
+    cell_face_indices: IntArray[OneDimension],
+    face_vertex_offsets: IntArray[OneDimension],
+    face_vertex_indices: IntArray[OneDimension],
+    vertex_coordinates: NumberArray[TwoDimensions],
 ) -> Boolean:
     """
     Whether a point is no further than `distance` from the surface of a cell.
@@ -299,15 +306,15 @@ def contains_point(
     z: Number,
     cell: Integer,
     tolerance: Number,
-    cell_face_offsets: npt.NDArray,
-    cell_face_indices: npt.NDArray,
-    face_vertex_offsets: npt.NDArray,
-    face_vertex_indices: npt.NDArray,
-    vertex_coordinates: npt.NDArray,
-    face_cell_indices: npt.NDArray,
-    face_unit_normals: npt.NDArray,
-    cell_min_xyz: npt.NDArray,
-    cell_max_xyz: npt.NDArray,
+    cell_face_offsets: IntArray[OneDimension],
+    cell_face_indices: IntArray[OneDimension],
+    face_vertex_offsets: IntArray[OneDimension],
+    face_vertex_indices: IntArray[OneDimension],
+    vertex_coordinates: NumberArray[TwoDimensions],
+    face_cell_indices: IntArray[TwoDimensions],
+    face_unit_normals: NumberArray[TwoDimensions],
+    cell_min_xyz: NumberArray[TwoDimensions],
+    cell_max_xyz: NumberArray[TwoDimensions],
 ) -> Boolean:
     """
     Whether a cell contains a point.
@@ -379,17 +386,17 @@ def first_containing_cell(
     x: Number,
     y: Number,
     z: Number,
-    candidates: npt.NDArray,
+    candidates: IntArray[OneDimension],
     tolerance: Number,
-    cell_face_offsets: npt.NDArray,
-    cell_face_indices: npt.NDArray,
-    face_vertex_offsets: npt.NDArray,
-    face_vertex_indices: npt.NDArray,
-    vertex_coordinates: npt.NDArray,
-    face_cell_indices: npt.NDArray,
-    face_unit_normals: npt.NDArray,
-    cell_min_xyz: npt.NDArray,
-    cell_max_xyz: npt.NDArray,
+    cell_face_offsets: IntArray[OneDimension],
+    cell_face_indices: IntArray[OneDimension],
+    face_vertex_offsets: IntArray[OneDimension],
+    face_vertex_indices: IntArray[OneDimension],
+    vertex_coordinates: NumberArray[TwoDimensions],
+    face_cell_indices: IntArray[TwoDimensions],
+    face_unit_normals: NumberArray[TwoDimensions],
+    cell_min_xyz: NumberArray[TwoDimensions],
+    cell_max_xyz: NumberArray[TwoDimensions],
 ) -> Integer:
     """
     Position, in `candidates`, of the first cell that contains the point.
@@ -431,7 +438,7 @@ def first_containing_cell(
     return -1
 
 
-def geometry_arrays(grid: Grid) -> dict[str, npt.NDArray]:
+def geometry_arrays(grid: Grid) -> dict[str, IntArray | NumberArray]:
     """The grid arrays the containment kernels read."""
     return {
         "cell_face_offsets": grid.cell_face_offsets,
@@ -471,7 +478,7 @@ def cell_contains_point(
             z=point[2],
             cell=cell_index,
             tolerance=tolerance,
-            **geometry_arrays(grid),
+            **geometry_arrays(grid),  # type: ignore[arg-type]
         )
     )
 
@@ -481,7 +488,7 @@ def first_cell_containing_point(
     candidates: IntArray[OneDimension],
     point: tuple[Number, Number, Number],
     tolerance: Number = 1e-6,
-) -> typing.Any:
+) -> Integer | None:
     """
     The first of `candidates` that contains a point.
 
@@ -495,8 +502,8 @@ def first_cell_containing_point(
         x=point[0],
         y=point[1],
         z=point[2],
-        candidates=np.ascontiguousarray(candidates),
+        candidates=typing.cast(IntArray[OneDimension], np.ascontiguousarray(candidates)),
         tolerance=tolerance,
-        **geometry_arrays(grid),
+        **geometry_arrays(grid),  # type: ignore[arg-type]
     )
     return candidates[position] if position >= 0 else None
