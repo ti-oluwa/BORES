@@ -7,9 +7,9 @@ import numba
 import numpy as np
 
 from bores.blackoil.satfunc.relperm.mixing_rules import (
-    RULE_BAKER_LINEAR,
-    RULE_STONE_I,
-    RULE_STONE_II,
+    BAKER_LINEAR_RULE,
+    STONE_I_RULE,
+    STONE_II_RULE,
     _baker_derivatives,
     _baker_value,
     _min_derivatives,
@@ -25,7 +25,7 @@ from bores.blackoil.satfunc.utils import (
     saturations_within_bounds,
 )
 from bores.errors import ValidationError
-from bores.types import NDimension, Number, NumberArray, NumberOrArray, OneDimension
+from bores.types import Integer, NDimension, Number, NumberArray, NumberOrArray, OneDimension
 
 __all__ = [
     "NO_MINIMUM",
@@ -48,14 +48,14 @@ NO_MINIMUM = -1.0
 """Value that stands for "no minimum relative permeability" inside a compiled kernel."""
 
 
-def to_kernel_minimum(minimum: Number | None) -> float:
+def to_kernel_minimum(minimum: Number | None) -> Number:
     """
     Convert a resolved minimum relative permeability to the form the compiled kernels take.
 
     :param minimum: Resolved minimum relative permeability, or `None` for no minimum.
-    :return: The minimum as a float, or `NO_MINIMUM` when there is none.
+    :return: The minimum as a Number, or `NO_MINIMUM` when there is none.
     """
-    return NO_MINIMUM if minimum is None else float(minimum)
+    return NO_MINIMUM if minimum is None else minimum
 
 
 class RelPermCell(typing.NamedTuple):
@@ -68,39 +68,39 @@ class RelPermCell(typing.NamedTuple):
     because gas relative permeability depends on gas saturation only.
     """
 
-    krw: float
+    krw: Number
     """Water relative permeability."""
 
-    kro: float
+    kro: Number
     """Oil relative permeability."""
 
-    krg: float
+    krg: Number
     """Gas relative permeability."""
 
-    dkrw_dsw: float
+    dkrw_dsw: Number
     """Derivative of water relative permeability with respect to water saturation."""
 
-    dkrw_dso: float
+    dkrw_dso: Number
     """Derivative of water relative permeability with respect to oil saturation."""
 
-    dkrw_dsg: float
+    dkrw_dsg: Number
     """Derivative of water relative permeability with respect to gas saturation."""
 
-    dkro_dsw: float
+    dkro_dsw: Number
     """Derivative of oil relative permeability with respect to water saturation."""
 
-    dkro_dso: float
+    dkro_dso: Number
     """Derivative of oil relative permeability with respect to oil saturation."""
 
-    dkro_dsg: float
+    dkro_dsg: Number
     """Derivative of oil relative permeability with respect to gas saturation."""
 
-    dkrg_dsg: float
+    dkrg_dsg: Number
     """Derivative of gas relative permeability with respect to gas saturation."""
 
 
 @numba.njit(cache=True, inline="always", error_model="numpy")
-def clip_unit(value: float) -> float:
+def clip_unit(value: Number) -> Number:
     """Limit `value` to the range 0 to 1, leaving NaN unchanged."""
     if value < 0.0:
         return 0.0
@@ -110,7 +110,7 @@ def clip_unit(value: float) -> float:
 
 
 @numba.njit(cache=True, inline="always", error_model="numpy")
-def floor_relperm(relperm: float, minimum: float) -> float:
+def floor_relperm(relperm: Number, minimum: Number) -> Number:
     """Smooth floor `sqrt(kr**2 + minimum**2)` of a relative permeability, or `relperm` itself when there is no minimum."""
     if minimum < 0.0:
         return relperm
@@ -118,7 +118,7 @@ def floor_relperm(relperm: float, minimum: float) -> float:
 
 
 @numba.njit(cache=True, inline="always", error_model="numpy")
-def floor_relperm_derivative(derivative: float, relperm: float, minimum: float) -> float:
+def floor_relperm_derivative(derivative: Number, relperm: Number, minimum: Number) -> Number:
     """Derivative of the smooth floor, or `derivative` itself when there is no minimum."""
     if minimum < 0.0:
         return derivative
@@ -127,11 +127,11 @@ def floor_relperm_derivative(derivative: float, relperm: float, minimum: float) 
 
 @numba.njit(cache=True, inline="always", error_model="numpy")
 def normalize_cell_saturations(
-    water_saturation: float,
-    oil_saturation: float,
-    gas_saturation: float,
-    saturation_epsilon: float,
-) -> tuple[float, float, float]:
+    water_saturation: Number,
+    oil_saturation: Number,
+    gas_saturation: Number,
+    saturation_epsilon: Number,
+) -> tuple[Number, Number, Number]:
     """Scale the saturations of a cell to sum to 1 when they differ from 1 by more than `saturation_epsilon`."""
     total = water_saturation + oil_saturation + gas_saturation
     if abs(total - 1.0) > saturation_epsilon and total > 0.0:
@@ -145,102 +145,116 @@ def normalize_cell_saturations(
 
 @numba.njit(cache=True, error_model="numpy")
 def rule_value(
-    rule_id: int,
-    kro_w: float,
-    kro_g: float,
-    krw: float,
-    krg: float,
-    kr_max: float,
-    water_saturation: float,
-    oil_saturation: float,
-    gas_saturation: float,
-    irreducible_water_saturation: float,
-    residual_oil_saturation_water: float,
-    residual_oil_saturation_gas: float,
-    minimum_mobile_pore_space: float,
-) -> float:
+    rule_id: Integer,
+    kro_w: Number,
+    kro_g: Number,
+    krw: Number,
+    krg: Number,
+    kr_max: Number,
+    water_saturation: Number,
+    oil_saturation: Number,
+    gas_saturation: Number,
+    irreducible_water_saturation: Number,
+    residual_oil_saturation_water: Number,
+    residual_oil_saturation_gas: Number,
+    minimum_mobile_pore_space: Number,
+) -> Number:
     """Value of the built-in mixing rule identified by `rule_id`, limited to the range 0 to 1."""
-    if rule_id == RULE_BAKER_LINEAR:
+    if rule_id == BAKER_LINEAR_RULE:
         value = _baker_value(
-            kro_w,
-            kro_g,
-            water_saturation,
-            gas_saturation,
-            irreducible_water_saturation,
-            minimum_mobile_pore_space,
+            kro_w=kro_w,
+            kro_g=kro_g,
+            water_saturation=water_saturation,
+            gas_saturation=gas_saturation,
+            irreducible_water_saturation=irreducible_water_saturation,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
         )
-    elif rule_id == RULE_STONE_II:
-        value = _stone_II_value(kro_w, kro_g, krw, krg, kr_max, minimum_mobile_pore_space)
-    elif rule_id == RULE_STONE_I:
+    elif rule_id == STONE_II_RULE:
+        value = _stone_II_value(
+            kro_w=kro_w,
+            kro_g=kro_g,
+            krw=krw,
+            krg=krg,
+            kr_max=kr_max,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
+        )
+    elif rule_id == STONE_I_RULE:
         value = _stone_I_value(
-            kro_w,
-            kro_g,
-            kr_max,
-            water_saturation,
-            oil_saturation,
-            gas_saturation,
-            irreducible_water_saturation,
-            residual_oil_saturation_water,
-            residual_oil_saturation_gas,
-            minimum_mobile_pore_space,
+            kro_w=kro_w,
+            kro_g=kro_g,
+            kr_max=kr_max,
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+            irreducible_water_saturation=irreducible_water_saturation,
+            residual_oil_saturation_water=residual_oil_saturation_water,
+            residual_oil_saturation_gas=residual_oil_saturation_gas,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
         )
     else:
-        value = _min_value(kro_w, kro_g)
+        value = _min_value(kro_w=kro_w, kro_g=kro_g)
     return clip_unit(value)
 
 
 @numba.njit(cache=True, error_model="numpy")
 def rule_derivatives(
-    rule_id: int,
-    kro_w: float,
-    kro_g: float,
-    krw: float,
-    krg: float,
-    kr_max: float,
-    water_saturation: float,
-    oil_saturation: float,
-    gas_saturation: float,
-    irreducible_water_saturation: float,
-    residual_oil_saturation_water: float,
-    residual_oil_saturation_gas: float,
-    minimum_mobile_pore_space: float,
-) -> tuple[float, float, float, float, float, float, float]:
+    rule_id: Integer,
+    kro_w: Number,
+    kro_g: Number,
+    krw: Number,
+    krg: Number,
+    kr_max: Number,
+    water_saturation: Number,
+    oil_saturation: Number,
+    gas_saturation: Number,
+    irreducible_water_saturation: Number,
+    residual_oil_saturation_water: Number,
+    residual_oil_saturation_gas: Number,
+    minimum_mobile_pore_space: Number,
+) -> tuple[Number, Number, Number, Number, Number, Number, Number]:
     """
     Partial derivatives of the built-in mixing rule identified by `rule_id`.
 
     :return: Tuple of the derivatives with respect to `kro_w`, `kro_g`, `krw`, `krg`, water
         saturation, oil saturation and gas saturation, in that order.
     """
-    if rule_id == RULE_BAKER_LINEAR:
+    if rule_id == BAKER_LINEAR_RULE:
         return _baker_derivatives(
-            kro_w,
-            kro_g,
-            water_saturation,
-            gas_saturation,
-            irreducible_water_saturation,
-            minimum_mobile_pore_space,
+            kro_w=kro_w,
+            kro_g=kro_g,
+            water_saturation=water_saturation,
+            gas_saturation=gas_saturation,
+            irreducible_water_saturation=irreducible_water_saturation,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
         )
-    if rule_id == RULE_STONE_II:
-        return _stone_II_derivatives(kro_w, kro_g, krw, krg, kr_max, minimum_mobile_pore_space)
-    if rule_id == RULE_STONE_I:
+    if rule_id == STONE_II_RULE:
+        return _stone_II_derivatives(
+            kro_w=kro_w,
+            kro_g=kro_g,
+            krw=krw,
+            krg=krg,
+            kr_max=kr_max,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
+        )
+    if rule_id == STONE_I_RULE:
         return _stone_I_derivatives(
-            kro_w,
-            kro_g,
-            kr_max,
-            water_saturation,
-            oil_saturation,
-            gas_saturation,
-            irreducible_water_saturation,
-            residual_oil_saturation_water,
-            residual_oil_saturation_gas,
-            minimum_mobile_pore_space,
+            kro_w=kro_w,
+            kro_g=kro_g,
+            kr_max=kr_max,
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+            irreducible_water_saturation=irreducible_water_saturation,
+            residual_oil_saturation_water=residual_oil_saturation_water,
+            residual_oil_saturation_gas=residual_oil_saturation_gas,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
         )
-    return _min_derivatives(kro_w, kro_g)
+    return _min_derivatives(kro_w=kro_w, kro_g=kro_g)
 
 
 @numba.njit(cache=True, error_model="numpy")
 def blend_cells(
-    water_wet: RelPermCell, oil_wet: RelPermCell, water_wet_fraction: float
+    water_wet: RelPermCell, oil_wet: RelPermCell, water_wet_fraction: Number
 ) -> RelPermCell:
     """Blend the water-wet and oil-wet systems of a mixed-wet rock, weighting the water-wet system by `water_wet_fraction`."""
     f = water_wet_fraction
@@ -261,8 +275,8 @@ def blend_cells(
 
 @numba.njit(cache=True, error_model="numpy")
 def finalize_water_wet_cell(
-    cell: RelPermCell, minimum_water: float, minimum_oil: float, minimum_gas: float
-) -> tuple[float, float, float, float, float, float, float, float, float]:
+    cell: RelPermCell, minimum_water: Number, minimum_oil: Number, minimum_gas: Number
+) -> tuple[Number, Number, Number, Number, Number, Number, Number, Number, Number]:
     """
     Apply the minimum relative permeability to a purely water-wet cell.
 
@@ -287,8 +301,8 @@ def finalize_water_wet_cell(
 
 @numba.njit(cache=True, error_model="numpy")
 def finalize_oil_wet_cell(
-    cell: RelPermCell, minimum_water: float, minimum_oil: float, minimum_gas: float
-) -> tuple[float, float, float, float, float, float, float, float, float]:
+    cell: RelPermCell, minimum_water: Number, minimum_oil: Number, minimum_gas: Number
+) -> tuple[Number, Number, Number, Number, Number, Number, Number, Number, Number]:
     """
     Apply the minimum relative permeability to a purely oil-wet cell.
 
@@ -312,8 +326,8 @@ def finalize_oil_wet_cell(
 
 @numba.njit(cache=True, error_model="numpy")
 def finalize_mixed_wet_cell(
-    cell: RelPermCell, minimum_water: float, minimum_oil: float, minimum_gas: float
-) -> tuple[float, float, float, float, float, float, float, float, float]:
+    cell: RelPermCell, minimum_water: Number, minimum_oil: Number, minimum_gas: Number
+) -> tuple[Number, Number, Number, Number, Number, Number, Number, Number, Number]:
     """
     Apply the minimum relative permeability to an already blended mixed-wet cell.
 

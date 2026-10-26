@@ -49,9 +49,9 @@ from bores.blackoil.satfunc.relperm.tables import (
 from bores.blackoil.satfunc.utils import element_at, get_floating_dtype
 from bores.constants import c
 from bores.errors import ValidationError
-from bores.serde.base import Serializable
 from bores.types import (
     FluidPhase,
+    Integer,
     NDimension,
     Number,
     NumberArray,
@@ -71,7 +71,7 @@ __all__ = [
 
 
 @attrs.frozen
-class LETParameters(Serializable):
+class LETParameters:
     """
     LET curve-shape parameters for a single relative permeability curve.
 
@@ -149,7 +149,9 @@ def _let_relperm(
 
 
 @numba.njit(cache=True, inline="always", error_model="numpy")
-def compute_let_curve_cell(normalized_saturation: float, L: float, E: float, T: float) -> float:
+def compute_let_curve_cell(
+    normalized_saturation: Number, L: Number, E: Number, T: Number
+) -> Number:
     """LET relative permeability curve `S**L / (S**L + E * (1 - S)**T)` without endpoint scaling."""
     numerator = normalized_saturation**L
     denominator = numerator + E * (1.0 - normalized_saturation) ** T
@@ -160,8 +162,8 @@ def compute_let_curve_cell(normalized_saturation: float, L: float, E: float, T: 
 
 @numba.njit(cache=True, inline="always", error_model="numpy")
 def compute_let_curve_slope_cell(
-    normalized_saturation: float, L: float, E: float, T: float, kr_max: float
-) -> float:
+    normalized_saturation: Number, L: Number, E: Number, T: Number, kr_max: Number
+) -> Number:
     """
     Derivative of the LET curve scaled by `kr_max` with respect to the normalized saturation.
 
@@ -182,8 +184,8 @@ def compute_let_curve_slope_cell(
 
 @numba.njit(cache=True, inline="always", error_model="numpy")
 def compute_let_effective_saturation(
-    numerator: float, mobile_range: float, minimum_mobile_pore_space: float
-) -> float:
+    numerator: Number, mobile_range: Number, minimum_mobile_pore_space: Number
+) -> Number:
     """
     Saturation scaled to the range 0 to 1, or zero when the mobile range is smaller than
     `minimum_mobile_pore_space`.
@@ -195,12 +197,12 @@ def compute_let_effective_saturation(
 
 @numba.njit(cache=True, error_model="numpy")
 def compute_let_phase(
-    numerator: float,
-    mobile_range: float,
-    parameters: tuple[float, float, float],
-    maximum_relperm: float,
-    minimum_mobile_pore_space: float,
-) -> tuple[float, float]:
+    numerator: Number,
+    mobile_range: Number,
+    parameters: tuple[Number, Number, Number],
+    maximum_relperm: Number,
+    minimum_mobile_pore_space: Number,
+) -> tuple[Number, Number]:
     """
     LET relative permeability of one phase and its slope with respect to the saturation of that
     phase.
@@ -223,11 +225,11 @@ def compute_let_phase(
 
 @numba.njit(cache=True, error_model="numpy")
 def compute_let_declining(
-    remaining_saturation: float,
-    mobile_range: float,
-    parameters: tuple[float, float, float],
-    minimum_mobile_pore_space: float,
-) -> tuple[float, float]:
+    remaining_saturation: Number,
+    mobile_range: Number,
+    parameters: tuple[Number, Number, Number],
+    minimum_mobile_pore_space: Number,
+) -> tuple[Number, Number]:
     """
     Unit-endpoint LET relative permeability of oil in a two-phase system, and its slope with
     respect to the saturation of the displacing phase (negative, since oil relative
@@ -248,24 +250,24 @@ def compute_let_declining(
 
 @numba.njit(cache=True, error_model="numpy")
 def compute_let_water_wet_values(
-    sw: float,
-    so: float,
-    sg: float,
-    swc: float,
-    sorw: float,
-    sorg: float,
-    sgr: float,
-    water: tuple[float, float, float],
-    oil_water: tuple[float, float, float],
-    gas_oil: tuple[float, float, float],
-    gas: tuple[float, float, float],
-    maximum_water_relperm: float,
-    maximum_oil_relperm: float,
-    maximum_gas_relperm: float,
-    rule_id: int,
-    minimum_mobile_pore_space: float,
-    rule_minimum_mobile_pore_space: float,
-) -> tuple[float, float, float]:
+    sw: Number,
+    so: Number,
+    sg: Number,
+    swc: Number,
+    sorw: Number,
+    sorg: Number,
+    sgr: Number,
+    water: tuple[Number, Number, Number],
+    oil_water: tuple[Number, Number, Number],
+    gas_oil: tuple[Number, Number, Number],
+    gas: tuple[Number, Number, Number],
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
+    rule_id: Integer,
+    minimum_mobile_pore_space: Number,
+    rule_minimum_mobile_pore_space: Number,
+) -> tuple[Number, Number, Number]:
     """LET relative permeabilities of a water-wet cell, before limiting and flooring."""
     wL, wE, wT = water
     gL, gE, gT = gas
@@ -302,32 +304,43 @@ def compute_let_water_wet_values(
         goT,
     )
     kro = maximum_oil_relperm * rule_value(
-        rule_id, kro_w, kro_g, krw, krg, 1.0, sw, so, sg, swc, sorw, sorg,
+        rule_id,
+        kro_w,
+        kro_g,
+        krw,
+        krg,
+        1.0,
+        sw,
+        so,
+        sg,
+        swc,
+        sorw,
+        sorg,
         rule_minimum_mobile_pore_space,
-    )  # fmt: skip
+    )
     return krw, kro, krg
 
 
 @numba.njit(cache=True, error_model="numpy")
 def compute_let_oil_wet_values(
-    sw: float,
-    so: float,
-    sg: float,
-    swc: float,
-    sorw: float,
-    sorg: float,
-    sgr: float,
-    water: tuple[float, float, float],
-    oil_water: tuple[float, float, float],
-    gas_oil: tuple[float, float, float],
-    gas: tuple[float, float, float],
-    maximum_water_relperm: float,
-    maximum_oil_relperm: float,
-    maximum_gas_relperm: float,
-    rule_id: int,
-    minimum_mobile_pore_space: float,
-    rule_minimum_mobile_pore_space: float,
-) -> tuple[float, float, float]:
+    sw: Number,
+    so: Number,
+    sg: Number,
+    swc: Number,
+    sorw: Number,
+    sorg: Number,
+    sgr: Number,
+    water: tuple[Number, Number, Number],
+    oil_water: tuple[Number, Number, Number],
+    gas_oil: tuple[Number, Number, Number],
+    gas: tuple[Number, Number, Number],
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
+    rule_id: Integer,
+    minimum_mobile_pore_space: Number,
+    rule_minimum_mobile_pore_space: Number,
+) -> tuple[Number, Number, Number]:
     """LET relative permeabilities of an oil-wet cell, before limiting and flooring."""
     wL, wE, wT = water
     gL, gE, gT = gas
@@ -360,31 +373,42 @@ def compute_let_oil_wet_values(
         wT,
     )
     krw = maximum_water_relperm * rule_value(
-        rule_id, krw_oil_water, krw_gas_water, kro, krg, 1.0, so, sw, sg, lowest_residual_oil,
-        swc, swc, rule_minimum_mobile_pore_space,
-    )  # fmt: skip
+        rule_id,
+        krw_oil_water,
+        krw_gas_water,
+        kro,
+        krg,
+        1.0,
+        so,
+        sw,
+        sg,
+        lowest_residual_oil,
+        swc,
+        swc,
+        rule_minimum_mobile_pore_space,
+    )
     return krw, kro, krg
 
 
 @numba.njit(cache=True, error_model="numpy")
 def compute_let_water_wet_cell(
-    sw: float,
-    so: float,
-    sg: float,
-    swc: float,
-    sorw: float,
-    sorg: float,
-    sgr: float,
-    water: tuple[float, float, float],
-    oil_water: tuple[float, float, float],
-    gas_oil: tuple[float, float, float],
-    gas: tuple[float, float, float],
-    maximum_water_relperm: float,
-    maximum_oil_relperm: float,
-    maximum_gas_relperm: float,
-    rule_id: int,
-    minimum_mobile_pore_space: float,
-    rule_minimum_mobile_pore_space: float,
+    sw: Number,
+    so: Number,
+    sg: Number,
+    swc: Number,
+    sorw: Number,
+    sorg: Number,
+    sgr: Number,
+    water: tuple[Number, Number, Number],
+    oil_water: tuple[Number, Number, Number],
+    gas_oil: tuple[Number, Number, Number],
+    gas: tuple[Number, Number, Number],
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
+    rule_id: Integer,
+    minimum_mobile_pore_space: Number,
+    rule_minimum_mobile_pore_space: Number,
 ) -> RelPermCell:
     """
     LET relative permeabilities and derivatives of a water-wet cell.
@@ -406,13 +430,35 @@ def compute_let_water_wet_cell(
         1.0 - swc - sg - sorg, 1.0 - swc - sorg - sgr, gas_oil, minimum_mobile_pore_space
     )
     d_kro_w, d_kro_g, d_krw, d_krg, d_sw, d_so, d_sg = rule_derivatives(
-        rule_id, kro_w, kro_g, krw, krg, 1.0, sw, so, sg, swc, sorw, sorg,
+        rule_id,
+        kro_w,
+        kro_g,
+        krw,
+        krg,
+        1.0,
+        sw,
+        so,
+        sg,
+        swc,
+        sorw,
+        sorg,
         rule_minimum_mobile_pore_space,
-    )  # fmt: skip
+    )
     kro = maximum_oil_relperm * rule_value(
-        rule_id, kro_w, kro_g, krw, krg, 1.0, sw, so, sg, swc, sorw, sorg,
+        rule_id,
+        kro_w,
+        kro_g,
+        krw,
+        krg,
+        1.0,
+        sw,
+        so,
+        sg,
+        swc,
+        sorw,
+        sorg,
         rule_minimum_mobile_pore_space,
-    )  # fmt: skip
+    )
     return RelPermCell(
         krw,
         kro,
@@ -429,23 +475,23 @@ def compute_let_water_wet_cell(
 
 @numba.njit(cache=True, error_model="numpy")
 def compute_let_oil_wet_cell(
-    sw: float,
-    so: float,
-    sg: float,
-    swc: float,
-    sorw: float,
-    sorg: float,
-    sgr: float,
-    water: tuple[float, float, float],
-    oil_water: tuple[float, float, float],
-    gas_oil: tuple[float, float, float],
-    gas: tuple[float, float, float],
-    maximum_water_relperm: float,
-    maximum_oil_relperm: float,
-    maximum_gas_relperm: float,
-    rule_id: int,
-    minimum_mobile_pore_space: float,
-    rule_minimum_mobile_pore_space: float,
+    sw: Number,
+    so: Number,
+    sg: Number,
+    swc: Number,
+    sorw: Number,
+    sorg: Number,
+    sgr: Number,
+    water: tuple[Number, Number, Number],
+    oil_water: tuple[Number, Number, Number],
+    gas_oil: tuple[Number, Number, Number],
+    gas: tuple[Number, Number, Number],
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
+    rule_id: Integer,
+    minimum_mobile_pore_space: Number,
+    rule_minimum_mobile_pore_space: Number,
 ) -> RelPermCell:
     """
     LET relative permeabilities and derivatives of an oil-wet cell.
@@ -476,14 +522,36 @@ def compute_let_oil_wet_cell(
     # saturation and its "oil saturation" slot is water saturation.
     d_krw_oil_water, d_krw_gas_water, d_kro, d_krg, d_slot_water, d_slot_oil, d_slot_gas = (
         rule_derivatives(
-            rule_id, krw_oil_water, krw_gas_water, kro, krg, 1.0, so, sw, sg,
-            lowest_residual_oil, swc, swc, rule_minimum_mobile_pore_space,
+            rule_id,
+            krw_oil_water,
+            krw_gas_water,
+            kro,
+            krg,
+            1.0,
+            so,
+            sw,
+            sg,
+            lowest_residual_oil,
+            swc,
+            swc,
+            rule_minimum_mobile_pore_space,
         )
-    )  # fmt: skip
+    )
     krw = maximum_water_relperm * rule_value(
-        rule_id, krw_oil_water, krw_gas_water, kro, krg, 1.0, so, sw, sg, lowest_residual_oil,
-        swc, swc, rule_minimum_mobile_pore_space,
-    )  # fmt: skip
+        rule_id,
+        krw_oil_water,
+        krw_gas_water,
+        kro,
+        krg,
+        1.0,
+        so,
+        sw,
+        sg,
+        lowest_residual_oil,
+        swc,
+        swc,
+        rule_minimum_mobile_pore_space,
+    )
     return RelPermCell(
         krw,
         kro,
@@ -505,30 +573,30 @@ def compute_let_oil_wet_cell(
 
 @numba.njit(cache=True, error_model="numpy")
 def compute_let_values_cell(
-    sw: float,
-    so: float,
-    sg: float,
-    swc: float,
-    sorw: float,
-    sorg: float,
-    sgr: float,
-    water: tuple[float, float, float],
-    oil_water: tuple[float, float, float],
-    gas_oil: tuple[float, float, float],
-    gas: tuple[float, float, float],
-    maximum_water_relperm: float,
-    maximum_oil_relperm: float,
-    maximum_gas_relperm: float,
+    sw: Number,
+    so: Number,
+    sg: Number,
+    swc: Number,
+    sorw: Number,
+    sorg: Number,
+    sgr: Number,
+    water: tuple[Number, Number, Number],
+    oil_water: tuple[Number, Number, Number],
+    gas_oil: tuple[Number, Number, Number],
+    gas: tuple[Number, Number, Number],
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
     wettability: Wettability,
-    mixed_wet_water_fraction: float,
-    rule_id: int,
-    saturation_epsilon: float,
-    minimum_mobile_pore_space: float,
-    rule_minimum_mobile_pore_space: float,
-    minimum_water_relperm: float,
-    minimum_oil_relperm: float,
-    minimum_gas_relperm: float,
-) -> tuple[float, float, float]:
+    mixed_wet_water_fraction: Number,
+    rule_id: Integer,
+    saturation_epsilon: Number,
+    minimum_mobile_pore_space: Number,
+    rule_minimum_mobile_pore_space: Number,
+    minimum_water_relperm: Number,
+    minimum_oil_relperm: Number,
+    minimum_gas_relperm: Number,
+) -> tuple[Number, Number, Number]:
     """
     LET relative permeabilities of one cell.
 
@@ -541,27 +609,83 @@ def compute_let_values_cell(
     sw, so, sg = normalize_cell_saturations(sw, so, sg, saturation_epsilon)
     if wettability == Wettability.WATER_WET:
         krw, kro, krg = compute_let_water_wet_values(
-            sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
-            maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-            minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
-        )  # fmt: skip
+            sw,
+            so,
+            sg,
+            swc,
+            sorw,
+            sorg,
+            sgr,
+            water,
+            oil_water,
+            gas_oil,
+            gas,
+            maximum_water_relperm,
+            maximum_oil_relperm,
+            maximum_gas_relperm,
+            rule_id,
+            minimum_mobile_pore_space,
+            rule_minimum_mobile_pore_space,
+        )
     elif wettability == Wettability.OIL_WET:
         krw, kro, krg = compute_let_oil_wet_values(
-            sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
-            maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-            minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
-        )  # fmt: skip
+            sw,
+            so,
+            sg,
+            swc,
+            sorw,
+            sorg,
+            sgr,
+            water,
+            oil_water,
+            gas_oil,
+            gas,
+            maximum_water_relperm,
+            maximum_oil_relperm,
+            maximum_gas_relperm,
+            rule_id,
+            minimum_mobile_pore_space,
+            rule_minimum_mobile_pore_space,
+        )
     else:
         krw_ww, kro_ww, krg_ww = compute_let_water_wet_values(
-            sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
-            maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-            minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
-        )  # fmt: skip
+            sw,
+            so,
+            sg,
+            swc,
+            sorw,
+            sorg,
+            sgr,
+            water,
+            oil_water,
+            gas_oil,
+            gas,
+            maximum_water_relperm,
+            maximum_oil_relperm,
+            maximum_gas_relperm,
+            rule_id,
+            minimum_mobile_pore_space,
+            rule_minimum_mobile_pore_space,
+        )
         krw_ow, kro_ow, krg_ow = compute_let_oil_wet_values(
-            sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
-            maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-            minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
-        )  # fmt: skip
+            sw,
+            so,
+            sg,
+            swc,
+            sorw,
+            sorg,
+            sgr,
+            water,
+            oil_water,
+            gas_oil,
+            gas,
+            maximum_water_relperm,
+            maximum_oil_relperm,
+            maximum_gas_relperm,
+            rule_id,
+            minimum_mobile_pore_space,
+            rule_minimum_mobile_pore_space,
+        )
         fraction = mixed_wet_water_fraction
         krw = fraction * krw_ww + (1.0 - fraction) * krw_ow
         kro = fraction * kro_ww + (1.0 - fraction) * kro_ow
@@ -575,30 +699,30 @@ def compute_let_values_cell(
 
 @numba.njit(cache=True, error_model="numpy")
 def compute_let_derivatives_cell(
-    sw: float,
-    so: float,
-    sg: float,
-    swc: float,
-    sorw: float,
-    sorg: float,
-    sgr: float,
-    water: tuple[float, float, float],
-    oil_water: tuple[float, float, float],
-    gas_oil: tuple[float, float, float],
-    gas: tuple[float, float, float],
-    maximum_water_relperm: float,
-    maximum_oil_relperm: float,
-    maximum_gas_relperm: float,
+    sw: Number,
+    so: Number,
+    sg: Number,
+    swc: Number,
+    sorw: Number,
+    sorg: Number,
+    sgr: Number,
+    water: tuple[Number, Number, Number],
+    oil_water: tuple[Number, Number, Number],
+    gas_oil: tuple[Number, Number, Number],
+    gas: tuple[Number, Number, Number],
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
     wettability: Wettability,
-    mixed_wet_water_fraction: float,
-    rule_id: int,
-    saturation_epsilon: float,
-    minimum_mobile_pore_space: float,
-    rule_minimum_mobile_pore_space: float,
-    minimum_water_relperm: float,
-    minimum_oil_relperm: float,
-    minimum_gas_relperm: float,
-) -> tuple[float, float, float, float, float, float, float, float, float]:
+    mixed_wet_water_fraction: Number,
+    rule_id: Integer,
+    saturation_epsilon: Number,
+    minimum_mobile_pore_space: Number,
+    rule_minimum_mobile_pore_space: Number,
+    minimum_water_relperm: Number,
+    minimum_oil_relperm: Number,
+    minimum_gas_relperm: Number,
+) -> tuple[Number, Number, Number, Number, Number, Number, Number, Number, Number]:
     """
     LET partial derivatives of the relative permeabilities of one cell.
 
@@ -612,37 +736,99 @@ def compute_let_derivatives_cell(
     if wettability == Wettability.WATER_WET:
         return finalize_water_wet_cell(
             compute_let_water_wet_cell(
-                sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
-                maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-                minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+                sw,
+                so,
+                sg,
+                swc,
+                sorw,
+                sorg,
+                sgr,
+                water,
+                oil_water,
+                gas_oil,
+                gas,
+                maximum_water_relperm,
+                maximum_oil_relperm,
+                maximum_gas_relperm,
+                rule_id,
+                minimum_mobile_pore_space,
+                rule_minimum_mobile_pore_space,
             ),
-            minimum_water_relperm, minimum_oil_relperm, minimum_gas_relperm,
-        )  # fmt: skip
+            minimum_water_relperm,
+            minimum_oil_relperm,
+            minimum_gas_relperm,
+        )
     if wettability == Wettability.OIL_WET:
         return finalize_oil_wet_cell(
             compute_let_oil_wet_cell(
-                sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
-                maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-                minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+                sw,
+                so,
+                sg,
+                swc,
+                sorw,
+                sorg,
+                sgr,
+                water,
+                oil_water,
+                gas_oil,
+                gas,
+                maximum_water_relperm,
+                maximum_oil_relperm,
+                maximum_gas_relperm,
+                rule_id,
+                minimum_mobile_pore_space,
+                rule_minimum_mobile_pore_space,
             ),
-            minimum_water_relperm, minimum_oil_relperm, minimum_gas_relperm,
-        )  # fmt: skip
+            minimum_water_relperm,
+            minimum_oil_relperm,
+            minimum_gas_relperm,
+        )
     return finalize_mixed_wet_cell(
         blend_cells(
             compute_let_water_wet_cell(
-                sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
-                maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-                minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+                sw,
+                so,
+                sg,
+                swc,
+                sorw,
+                sorg,
+                sgr,
+                water,
+                oil_water,
+                gas_oil,
+                gas,
+                maximum_water_relperm,
+                maximum_oil_relperm,
+                maximum_gas_relperm,
+                rule_id,
+                minimum_mobile_pore_space,
+                rule_minimum_mobile_pore_space,
             ),
             compute_let_oil_wet_cell(
-                sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
-                maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-                minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+                sw,
+                so,
+                sg,
+                swc,
+                sorw,
+                sorg,
+                sgr,
+                water,
+                oil_water,
+                gas_oil,
+                gas,
+                maximum_water_relperm,
+                maximum_oil_relperm,
+                maximum_gas_relperm,
+                rule_id,
+                minimum_mobile_pore_space,
+                rule_minimum_mobile_pore_space,
             ),
             mixed_wet_water_fraction,
         ),
-        minimum_water_relperm, minimum_oil_relperm, minimum_gas_relperm,
-    )  # fmt: skip
+        minimum_water_relperm,
+        minimum_oil_relperm,
+        minimum_gas_relperm,
+    )
 
 
 @numba.njit(cache=True, parallel=True, error_model="numpy")
@@ -654,23 +840,23 @@ def compute_let_values_loop(
     residual_oil_saturation_water: NumberArray[OneDimension],
     residual_oil_saturation_gas: NumberArray[OneDimension],
     residual_gas_saturation: NumberArray[OneDimension],
-    water: tuple[float, float, float],
-    oil_water: tuple[float, float, float],
-    gas_oil: tuple[float, float, float],
-    gas: tuple[float, float, float],
-    maximum_water_relperm: float,
-    maximum_oil_relperm: float,
-    maximum_gas_relperm: float,
+    water: tuple[Number, Number, Number],
+    oil_water: tuple[Number, Number, Number],
+    gas_oil: tuple[Number, Number, Number],
+    gas: tuple[Number, Number, Number],
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
     wettability: Wettability,
-    mixed_wet_water_fraction: float,
-    rule_id: int,
-    saturation_epsilon: float,
-    minimum_mobile_pore_space: float,
-    rule_minimum_mobile_pore_space: float,
-    minimum_water_relperm: float,
-    minimum_oil_relperm: float,
-    minimum_gas_relperm: float,
-    size: int,
+    mixed_wet_water_fraction: Number,
+    rule_id: Integer,
+    saturation_epsilon: Number,
+    minimum_mobile_pore_space: Number,
+    rule_minimum_mobile_pore_space: Number,
+    minimum_water_relperm: Number,
+    minimum_oil_relperm: Number,
+    minimum_gas_relperm: Number,
+    size: Integer,
     water_relperm: NumberArray[OneDimension],
     oil_relperm: NumberArray[OneDimension],
     gas_relperm: NumberArray[OneDimension],
@@ -721,23 +907,23 @@ def compute_let_derivatives_loop(
     residual_oil_saturation_water: NumberArray[OneDimension],
     residual_oil_saturation_gas: NumberArray[OneDimension],
     residual_gas_saturation: NumberArray[OneDimension],
-    water: tuple[float, float, float],
-    oil_water: tuple[float, float, float],
-    gas_oil: tuple[float, float, float],
-    gas: tuple[float, float, float],
-    maximum_water_relperm: float,
-    maximum_oil_relperm: float,
-    maximum_gas_relperm: float,
+    water: tuple[Number, Number, Number],
+    oil_water: tuple[Number, Number, Number],
+    gas_oil: tuple[Number, Number, Number],
+    gas: tuple[Number, Number, Number],
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
     wettability: Wettability,
-    mixed_wet_water_fraction: float,
-    rule_id: int,
-    saturation_epsilon: float,
-    minimum_mobile_pore_space: float,
-    rule_minimum_mobile_pore_space: float,
-    minimum_water_relperm: float,
-    minimum_oil_relperm: float,
-    minimum_gas_relperm: float,
-    size: int,
+    mixed_wet_water_fraction: Number,
+    rule_id: Integer,
+    saturation_epsilon: Number,
+    minimum_mobile_pore_space: Number,
+    rule_minimum_mobile_pore_space: Number,
+    minimum_water_relperm: Number,
+    minimum_oil_relperm: Number,
+    minimum_gas_relperm: Number,
+    size: Integer,
     dkrw_dsw: NumberArray[OneDimension],
     dkro_dsw: NumberArray[OneDimension],
     dkrg_dsw: NumberArray[OneDimension],
@@ -791,7 +977,9 @@ def compute_let_derivatives_loop(
         dkrg_dsg[i] = d[8]
 
 
-def to_kernel_parameters(parameters: tuple[Number, Number, Number]) -> tuple[float, float, float]:
+def to_kernel_parameters(
+    parameters: tuple[Number, Number, Number],
+) -> tuple[Number, Number, Number]:
     """
     LET parameters `(L, E, T)` as the tuple of floats the compiled kernels take.
 
@@ -814,7 +1002,7 @@ def compute_let_relative_permeabilities_compiled(
     oil_water: tuple[Number, Number, Number],
     gas_oil: tuple[Number, Number, Number],
     gas: tuple[Number, Number, Number],
-    rule_id: int,
+    rule_id: Integer,
     saturation_epsilon: Number,
     minimum_mobile_pore_space: Number,
     maximum_water_relperm: Number = 1.0,
@@ -909,7 +1097,7 @@ def compute_let_relative_permeability_derivatives_compiled(
     oil_water: tuple[Number, Number, Number],
     gas_oil: tuple[Number, Number, Number],
     gas: tuple[Number, Number, Number],
-    rule_id: int,
+    rule_id: Integer,
     saturation_epsilon: Number,
     minimum_mobile_pore_space: Number,
     maximum_water_relperm: Number = 1.0,
@@ -998,29 +1186,29 @@ def compute_let_relative_permeability_derivatives_compiled(
 
 @numba.njit(cache=True, error_model="numpy")
 def compute_let_values_and_derivatives_cell(
-    sw: float,
-    so: float,
-    sg: float,
-    swc: float,
-    sorw: float,
-    sorg: float,
-    sgr: float,
-    water: tuple[float, float, float],
-    oil_water: tuple[float, float, float],
-    gas_oil: tuple[float, float, float],
-    gas: tuple[float, float, float],
-    maximum_water_relperm: float,
-    maximum_oil_relperm: float,
-    maximum_gas_relperm: float,
+    sw: Number,
+    so: Number,
+    sg: Number,
+    swc: Number,
+    sorw: Number,
+    sorg: Number,
+    sgr: Number,
+    water: tuple[Number, Number, Number],
+    oil_water: tuple[Number, Number, Number],
+    gas_oil: tuple[Number, Number, Number],
+    gas: tuple[Number, Number, Number],
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
     wettability: Wettability,
-    mixed_wet_water_fraction: float,
-    rule_id: int,
-    saturation_epsilon: float,
-    minimum_mobile_pore_space: float,
-    rule_minimum_mobile_pore_space: float,
-    minimum_water_relperm: float,
-    minimum_oil_relperm: float,
-    minimum_gas_relperm: float,
+    mixed_wet_water_fraction: Number,
+    rule_id: Integer,
+    saturation_epsilon: Number,
+    minimum_mobile_pore_space: Number,
+    rule_minimum_mobile_pore_space: Number,
+    minimum_water_relperm: Number,
+    minimum_oil_relperm: Number,
+    minimum_gas_relperm: Number,
 ) -> tuple[float, float, float, float, float, float, float, float, float, float, float, float]:
     """
     LET relative permeabilities and all nine partial derivatives of one cell, from a
@@ -1036,36 +1224,92 @@ def compute_let_values_and_derivatives_cell(
     sw, so, sg = normalize_cell_saturations(sw, so, sg, saturation_epsilon)
     if wettability == Wettability.WATER_WET:
         cell = compute_let_water_wet_cell(
-            sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
-            maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-            minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
-        )  # fmt: skip
+            sw,
+            so,
+            sg,
+            swc,
+            sorw,
+            sorg,
+            sgr,
+            water,
+            oil_water,
+            gas_oil,
+            gas,
+            maximum_water_relperm,
+            maximum_oil_relperm,
+            maximum_gas_relperm,
+            rule_id,
+            minimum_mobile_pore_space,
+            rule_minimum_mobile_pore_space,
+        )
         d = finalize_water_wet_cell(
             cell, minimum_water_relperm, minimum_oil_relperm, minimum_gas_relperm
         )
     elif wettability == Wettability.OIL_WET:
         cell = compute_let_oil_wet_cell(
-            sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
-            maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-            minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
-        )  # fmt: skip
+            sw,
+            so,
+            sg,
+            swc,
+            sorw,
+            sorg,
+            sgr,
+            water,
+            oil_water,
+            gas_oil,
+            gas,
+            maximum_water_relperm,
+            maximum_oil_relperm,
+            maximum_gas_relperm,
+            rule_id,
+            minimum_mobile_pore_space,
+            rule_minimum_mobile_pore_space,
+        )
         d = finalize_oil_wet_cell(
             cell, minimum_water_relperm, minimum_oil_relperm, minimum_gas_relperm
         )
     else:
         cell = blend_cells(
             compute_let_water_wet_cell(
-                sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
-                maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-                minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+                sw,
+                so,
+                sg,
+                swc,
+                sorw,
+                sorg,
+                sgr,
+                water,
+                oil_water,
+                gas_oil,
+                gas,
+                maximum_water_relperm,
+                maximum_oil_relperm,
+                maximum_gas_relperm,
+                rule_id,
+                minimum_mobile_pore_space,
+                rule_minimum_mobile_pore_space,
             ),
             compute_let_oil_wet_cell(
-                sw, so, sg, swc, sorw, sorg, sgr, water, oil_water, gas_oil, gas,
-                maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-                minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+                sw,
+                so,
+                sg,
+                swc,
+                sorw,
+                sorg,
+                sgr,
+                water,
+                oil_water,
+                gas_oil,
+                gas,
+                maximum_water_relperm,
+                maximum_oil_relperm,
+                maximum_gas_relperm,
+                rule_id,
+                minimum_mobile_pore_space,
+                rule_minimum_mobile_pore_space,
             ),
             mixed_wet_water_fraction,
-        )  # fmt: skip
+        )
         d = finalize_mixed_wet_cell(
             cell, minimum_water_relperm, minimum_oil_relperm, minimum_gas_relperm
         )
@@ -1073,8 +1317,16 @@ def compute_let_values_and_derivatives_cell(
         floor_relperm(clip_unit(cell.krw), minimum_water_relperm),
         floor_relperm(clip_unit(cell.kro), minimum_oil_relperm),
         floor_relperm(clip_unit(cell.krg), minimum_gas_relperm),
-        d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7], d[8],
-    )  # fmt: skip
+        d[0],
+        d[1],
+        d[2],
+        d[3],
+        d[4],
+        d[5],
+        d[6],
+        d[7],
+        d[8],
+    )
 
 
 @numba.njit(cache=True, parallel=True, error_model="numpy")
@@ -1086,23 +1338,23 @@ def compute_let_values_and_derivatives_loop(
     residual_oil_saturation_water: NumberArray[OneDimension],
     residual_oil_saturation_gas: NumberArray[OneDimension],
     residual_gas_saturation: NumberArray[OneDimension],
-    water: tuple[float, float, float],
-    oil_water: tuple[float, float, float],
-    gas_oil: tuple[float, float, float],
-    gas: tuple[float, float, float],
-    maximum_water_relperm: float,
-    maximum_oil_relperm: float,
-    maximum_gas_relperm: float,
+    water: tuple[Number, Number, Number],
+    oil_water: tuple[Number, Number, Number],
+    gas_oil: tuple[Number, Number, Number],
+    gas: tuple[Number, Number, Number],
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
     wettability: Wettability,
-    mixed_wet_water_fraction: float,
-    rule_id: int,
-    saturation_epsilon: float,
-    minimum_mobile_pore_space: float,
-    rule_minimum_mobile_pore_space: float,
-    minimum_water_relperm: float,
-    minimum_oil_relperm: float,
-    minimum_gas_relperm: float,
-    size: int,
+    mixed_wet_water_fraction: Number,
+    rule_id: Integer,
+    saturation_epsilon: Number,
+    minimum_mobile_pore_space: Number,
+    rule_minimum_mobile_pore_space: Number,
+    minimum_water_relperm: Number,
+    minimum_oil_relperm: Number,
+    minimum_gas_relperm: Number,
+    size: Integer,
     water_relperm: NumberArray[OneDimension],
     oil_relperm: NumberArray[OneDimension],
     gas_relperm: NumberArray[OneDimension],
@@ -1174,7 +1426,7 @@ def compute_let_relative_permeabilities_and_derivatives_compiled(
     oil_water: tuple[Number, Number, Number],
     gas_oil: tuple[Number, Number, Number],
     gas: tuple[Number, Number, Number],
-    rule_id: int,
+    rule_id: Integer,
     saturation_epsilon: Number,
     minimum_mobile_pore_space: Number,
     maximum_water_relperm: Number = 1.0,
@@ -1245,9 +1497,19 @@ def compute_let_relative_permeabilities_and_derivatives_compiled(
         *outputs,
     )
     (
-        water_relperm, oil_relperm, gas_relperm,
-        dkrw_dsw, dkro_dsw, dkrg_dsw, dkrw_dso, dkro_dso, dkrg_dso, dkrw_dsg, dkro_dsg, dkrg_dsg,
-    ) = (output.item() if is_scalar else output.reshape(shape) for output in outputs)  # fmt: skip
+        water_relperm,
+        oil_relperm,
+        gas_relperm,
+        dkrw_dsw,
+        dkro_dsw,
+        dkrg_dsw,
+        dkrw_dso,
+        dkro_dso,
+        dkrg_dso,
+        dkrw_dsg,
+        dkro_dsg,
+        dkrg_dsg,
+    ) = (output.item() if is_scalar else output.reshape(shape) for output in outputs)
     return (
         RelativePermeabilities(water=water_relperm, oil=oil_relperm, gas=gas_relperm),
         RelativePermeabilityDerivatives(

@@ -51,6 +51,7 @@ from bores.constants import c
 from bores.errors import ValidationError
 from bores.types import (
     FluidPhase,
+    Integer,
     NDimension,
     Number,
     NumberArray,
@@ -70,11 +71,11 @@ __all__ = [
 
 @numba.njit(cache=True, inline="always", error_model="numpy")
 def compute_corey_effective_saturation(
-    saturation: float,
-    lower_saturation: float,
-    mobile_range: float,
-    minimum_mobile_pore_space: float,
-) -> float:
+    saturation: Number,
+    lower_saturation: Number,
+    mobile_range: Number,
+    minimum_mobile_pore_space: Number,
+) -> Number:
     """
     Saturation of a phase scaled to the range 0 to 1 between `lower_saturation` and the top
     of its mobile range, or zero when the mobile range is smaller than `minimum_mobile_pore_space`.
@@ -86,12 +87,12 @@ def compute_corey_effective_saturation(
 
 @numba.njit(cache=True, inline="always", error_model="numpy")
 def compute_corey_slope(
-    effective_saturation: float,
-    mobile_range: float,
-    maximum_relperm: float,
-    exponent: float,
-    minimum_mobile_pore_space: float,
-) -> float:
+    effective_saturation: Number,
+    mobile_range: Number,
+    maximum_relperm: Number,
+    exponent: Number,
+    minimum_mobile_pore_space: Number,
+) -> Number:
     """Slope of a Corey power-law relative permeability with respect to the saturation of its phase."""
     if mobile_range > minimum_mobile_pore_space and effective_saturation > 0.0:
         return maximum_relperm * (
@@ -102,8 +103,8 @@ def compute_corey_slope(
 
 @numba.njit(cache=True, error_model="numpy")
 def compute_corey_complement(
-    relperm: float, maximum_relperm: float, relperm_slope: float, exponent: float
-) -> tuple[float, float]:
+    relperm: Number, maximum_relperm: Number, relperm_slope: Number, exponent: Number
+) -> tuple[Number, Number]:
     """
     Corey-shaped complement `(1 - kr / kr_max) ** exponent` of a phase relative permeability and
     its slope with respect to the saturation that drives `kr`.
@@ -125,23 +126,23 @@ def compute_corey_complement(
 
 @numba.njit(cache=True, error_model="numpy")
 def compute_brooks_corey_water_wet_values(
-    sw: float,
-    so: float,
-    sg: float,
-    swc: float,
-    sorw: float,
-    sorg: float,
-    sgr: float,
-    water_exponent: float,
-    oil_exponent: float,
-    gas_exponent: float,
-    maximum_water_relperm: float,
-    maximum_oil_relperm: float,
-    maximum_gas_relperm: float,
-    rule_id: int,
-    minimum_mobile_pore_space: float,
-    rule_minimum_mobile_pore_space: float,
-) -> tuple[float, float, float]:
+    sw: Number,
+    so: Number,
+    sg: Number,
+    swc: Number,
+    sorw: Number,
+    sorg: Number,
+    sgr: Number,
+    water_exponent: Number,
+    oil_exponent: Number,
+    gas_exponent: Number,
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
+    rule_id: Integer,
+    minimum_mobile_pore_space: Number,
+    rule_minimum_mobile_pore_space: Number,
+) -> tuple[Number, Number, Number]:
     """Brooks-Corey relative permeabilities of a water-wet cell, before limiting and flooring."""
     krw = maximum_water_relperm * (
         compute_corey_effective_saturation(sw, swc, 1.0 - swc - sorw, minimum_mobile_pore_space)
@@ -175,23 +176,23 @@ def compute_brooks_corey_water_wet_values(
 
 @numba.njit(cache=True, error_model="numpy")
 def compute_brooks_corey_oil_wet_values(
-    sw: float,
-    so: float,
-    sg: float,
-    swc: float,
-    sorw: float,
-    sorg: float,
-    sgr: float,
-    water_exponent: float,
-    oil_exponent: float,
-    gas_exponent: float,
-    maximum_water_relperm: float,
-    maximum_oil_relperm: float,
-    maximum_gas_relperm: float,
-    rule_id: int,
-    minimum_mobile_pore_space: float,
-    rule_minimum_mobile_pore_space: float,
-) -> tuple[float, float, float]:
+    sw: Number,
+    so: Number,
+    sg: Number,
+    swc: Number,
+    sorw: Number,
+    sorg: Number,
+    sgr: Number,
+    water_exponent: Number,
+    oil_exponent: Number,
+    gas_exponent: Number,
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
+    rule_id: Integer,
+    minimum_mobile_pore_space: Number,
+    rule_minimum_mobile_pore_space: Number,
+) -> tuple[Number, Number, Number]:
     """Brooks-Corey relative permeabilities of an oil-wet cell, before limiting and flooring."""
     lowest_residual_oil = min(sorw, sorg)
     kro = maximum_oil_relperm * (
@@ -226,22 +227,22 @@ def compute_brooks_corey_oil_wet_values(
 
 @numba.njit(cache=True, error_model="numpy")
 def compute_brooks_corey_water_wet_cell(
-    sw: float,
-    so: float,
-    sg: float,
-    swc: float,
-    sorw: float,
-    sorg: float,
-    sgr: float,
-    water_exponent: float,
-    oil_exponent: float,
-    gas_exponent: float,
-    maximum_water_relperm: float,
-    maximum_oil_relperm: float,
-    maximum_gas_relperm: float,
-    rule_id: int,
-    minimum_mobile_pore_space: float,
-    rule_minimum_mobile_pore_space: float,
+    sw: Number,
+    so: Number,
+    sg: Number,
+    swc: Number,
+    sorw: Number,
+    sorg: Number,
+    sgr: Number,
+    water_exponent: Number,
+    oil_exponent: Number,
+    gas_exponent: Number,
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
+    rule_id: Integer,
+    minimum_mobile_pore_space: Number,
+    rule_minimum_mobile_pore_space: Number,
 ) -> RelPermCell:
     """
     Brooks-Corey relative permeabilities and derivatives of a water-wet cell.
@@ -321,22 +322,22 @@ def compute_brooks_corey_water_wet_cell(
 
 @numba.njit(cache=True, error_model="numpy")
 def compute_brooks_corey_oil_wet_cell(
-    sw: float,
-    so: float,
-    sg: float,
-    swc: float,
-    sorw: float,
-    sorg: float,
-    sgr: float,
-    water_exponent: float,
-    oil_exponent: float,
-    gas_exponent: float,
-    maximum_water_relperm: float,
-    maximum_oil_relperm: float,
-    maximum_gas_relperm: float,
-    rule_id: int,
-    minimum_mobile_pore_space: float,
-    rule_minimum_mobile_pore_space: float,
+    sw: Number,
+    so: Number,
+    sg: Number,
+    swc: Number,
+    sorw: Number,
+    sorg: Number,
+    sgr: Number,
+    water_exponent: Number,
+    oil_exponent: Number,
+    gas_exponent: Number,
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
+    rule_id: Integer,
+    minimum_mobile_pore_space: Number,
+    rule_minimum_mobile_pore_space: Number,
 ) -> RelPermCell:
     """
     Brooks-Corey relative permeabilities and derivatives of an oil-wet cell.
@@ -422,29 +423,29 @@ def compute_brooks_corey_oil_wet_cell(
 
 @numba.njit(cache=True, error_model="numpy")
 def compute_brooks_corey_values_cell(
-    sw: float,
-    so: float,
-    sg: float,
-    swc: float,
-    sorw: float,
-    sorg: float,
-    sgr: float,
-    water_exponent: float,
-    oil_exponent: float,
-    gas_exponent: float,
-    maximum_water_relperm: float,
-    maximum_oil_relperm: float,
-    maximum_gas_relperm: float,
+    sw: Number,
+    so: Number,
+    sg: Number,
+    swc: Number,
+    sorw: Number,
+    sorg: Number,
+    sgr: Number,
+    water_exponent: Number,
+    oil_exponent: Number,
+    gas_exponent: Number,
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
     wettability: Wettability,
-    mixed_wet_water_fraction: float,
-    rule_id: int,
-    saturation_epsilon: float,
-    minimum_mobile_pore_space: float,
-    rule_minimum_mobile_pore_space: float,
-    minimum_water_relperm: float,
-    minimum_oil_relperm: float,
-    minimum_gas_relperm: float,
-) -> tuple[float, float, float]:
+    mixed_wet_water_fraction: Number,
+    rule_id: Integer,
+    saturation_epsilon: Number,
+    minimum_mobile_pore_space: Number,
+    rule_minimum_mobile_pore_space: Number,
+    minimum_water_relperm: Number,
+    minimum_oil_relperm: Number,
+    minimum_gas_relperm: Number,
+) -> tuple[Number, Number, Number]:
     """
     Brooks-Corey relative permeabilities of one cell.
 
@@ -457,27 +458,79 @@ def compute_brooks_corey_values_cell(
     sw, so, sg = normalize_cell_saturations(sw, so, sg, saturation_epsilon)
     if wettability == Wettability.WATER_WET:
         krw, kro, krg = compute_brooks_corey_water_wet_values(
-            sw, so, sg, swc, sorw, sorg, sgr, water_exponent, oil_exponent, gas_exponent,
-            maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-            minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
-        )  # fmt: skip
+            sw,
+            so,
+            sg,
+            swc,
+            sorw,
+            sorg,
+            sgr,
+            water_exponent,
+            oil_exponent,
+            gas_exponent,
+            maximum_water_relperm,
+            maximum_oil_relperm,
+            maximum_gas_relperm,
+            rule_id,
+            minimum_mobile_pore_space,
+            rule_minimum_mobile_pore_space,
+        )
     elif wettability == Wettability.OIL_WET:
         krw, kro, krg = compute_brooks_corey_oil_wet_values(
-            sw, so, sg, swc, sorw, sorg, sgr, water_exponent, oil_exponent, gas_exponent,
-            maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-            minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
-        )  # fmt: skip
+            sw,
+            so,
+            sg,
+            swc,
+            sorw,
+            sorg,
+            sgr,
+            water_exponent,
+            oil_exponent,
+            gas_exponent,
+            maximum_water_relperm,
+            maximum_oil_relperm,
+            maximum_gas_relperm,
+            rule_id,
+            minimum_mobile_pore_space,
+            rule_minimum_mobile_pore_space,
+        )
     else:
         krw_ww, kro_ww, krg_ww = compute_brooks_corey_water_wet_values(
-            sw, so, sg, swc, sorw, sorg, sgr, water_exponent, oil_exponent, gas_exponent,
-            maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-            minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
-        )  # fmt: skip
+            sw,
+            so,
+            sg,
+            swc,
+            sorw,
+            sorg,
+            sgr,
+            water_exponent,
+            oil_exponent,
+            gas_exponent,
+            maximum_water_relperm,
+            maximum_oil_relperm,
+            maximum_gas_relperm,
+            rule_id,
+            minimum_mobile_pore_space,
+            rule_minimum_mobile_pore_space,
+        )
         krw_ow, kro_ow, krg_ow = compute_brooks_corey_oil_wet_values(
-            sw, so, sg, swc, sorw, sorg, sgr, water_exponent, oil_exponent, gas_exponent,
-            maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-            minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
-        )  # fmt: skip
+            sw,
+            so,
+            sg,
+            swc,
+            sorw,
+            sorg,
+            sgr,
+            water_exponent,
+            oil_exponent,
+            gas_exponent,
+            maximum_water_relperm,
+            maximum_oil_relperm,
+            maximum_gas_relperm,
+            rule_id,
+            minimum_mobile_pore_space,
+            rule_minimum_mobile_pore_space,
+        )
         fraction = mixed_wet_water_fraction
         krw = fraction * krw_ww + (1.0 - fraction) * krw_ow
         kro = fraction * kro_ww + (1.0 - fraction) * kro_ow
@@ -491,29 +544,29 @@ def compute_brooks_corey_values_cell(
 
 @numba.njit(cache=True, error_model="numpy")
 def compute_brooks_corey_derivatives_cell(
-    sw: float,
-    so: float,
-    sg: float,
-    swc: float,
-    sorw: float,
-    sorg: float,
-    sgr: float,
-    water_exponent: float,
-    oil_exponent: float,
-    gas_exponent: float,
-    maximum_water_relperm: float,
-    maximum_oil_relperm: float,
-    maximum_gas_relperm: float,
+    sw: Number,
+    so: Number,
+    sg: Number,
+    swc: Number,
+    sorw: Number,
+    sorg: Number,
+    sgr: Number,
+    water_exponent: Number,
+    oil_exponent: Number,
+    gas_exponent: Number,
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
     wettability: Wettability,
-    mixed_wet_water_fraction: float,
-    rule_id: int,
-    saturation_epsilon: float,
-    minimum_mobile_pore_space: float,
-    rule_minimum_mobile_pore_space: float,
-    minimum_water_relperm: float,
-    minimum_oil_relperm: float,
-    minimum_gas_relperm: float,
-) -> tuple[float, float, float, float, float, float, float, float, float]:
+    mixed_wet_water_fraction: Number,
+    rule_id: Integer,
+    saturation_epsilon: Number,
+    minimum_mobile_pore_space: Number,
+    rule_minimum_mobile_pore_space: Number,
+    minimum_water_relperm: Number,
+    minimum_oil_relperm: Number,
+    minimum_gas_relperm: Number,
+) -> tuple[Number, Number, Number, Number, Number, Number, Number, Number, Number]:
     """
     Brooks-Corey partial derivatives of the relative permeabilities of one cell.
 
@@ -527,37 +580,95 @@ def compute_brooks_corey_derivatives_cell(
     if wettability == Wettability.WATER_WET:
         return finalize_water_wet_cell(
             compute_brooks_corey_water_wet_cell(
-                sw, so, sg, swc, sorw, sorg, sgr, water_exponent, oil_exponent, gas_exponent,
-                maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-                minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+                sw,
+                so,
+                sg,
+                swc,
+                sorw,
+                sorg,
+                sgr,
+                water_exponent,
+                oil_exponent,
+                gas_exponent,
+                maximum_water_relperm,
+                maximum_oil_relperm,
+                maximum_gas_relperm,
+                rule_id,
+                minimum_mobile_pore_space,
+                rule_minimum_mobile_pore_space,
             ),
-            minimum_water_relperm, minimum_oil_relperm, minimum_gas_relperm,
-        )  # fmt: skip
+            minimum_water_relperm,
+            minimum_oil_relperm,
+            minimum_gas_relperm,
+        )
     if wettability == Wettability.OIL_WET:
         return finalize_oil_wet_cell(
             compute_brooks_corey_oil_wet_cell(
-                sw, so, sg, swc, sorw, sorg, sgr, water_exponent, oil_exponent, gas_exponent,
-                maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-                minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+                sw,
+                so,
+                sg,
+                swc,
+                sorw,
+                sorg,
+                sgr,
+                water_exponent,
+                oil_exponent,
+                gas_exponent,
+                maximum_water_relperm,
+                maximum_oil_relperm,
+                maximum_gas_relperm,
+                rule_id,
+                minimum_mobile_pore_space,
+                rule_minimum_mobile_pore_space,
             ),
-            minimum_water_relperm, minimum_oil_relperm, minimum_gas_relperm,
-        )  # fmt: skip
+            minimum_water_relperm,
+            minimum_oil_relperm,
+            minimum_gas_relperm,
+        )
     return finalize_mixed_wet_cell(
         blend_cells(
             compute_brooks_corey_water_wet_cell(
-                sw, so, sg, swc, sorw, sorg, sgr, water_exponent, oil_exponent, gas_exponent,
-                maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-                minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+                sw,
+                so,
+                sg,
+                swc,
+                sorw,
+                sorg,
+                sgr,
+                water_exponent,
+                oil_exponent,
+                gas_exponent,
+                maximum_water_relperm,
+                maximum_oil_relperm,
+                maximum_gas_relperm,
+                rule_id,
+                minimum_mobile_pore_space,
+                rule_minimum_mobile_pore_space,
             ),
             compute_brooks_corey_oil_wet_cell(
-                sw, so, sg, swc, sorw, sorg, sgr, water_exponent, oil_exponent, gas_exponent,
-                maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-                minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+                sw,
+                so,
+                sg,
+                swc,
+                sorw,
+                sorg,
+                sgr,
+                water_exponent,
+                oil_exponent,
+                gas_exponent,
+                maximum_water_relperm,
+                maximum_oil_relperm,
+                maximum_gas_relperm,
+                rule_id,
+                minimum_mobile_pore_space,
+                rule_minimum_mobile_pore_space,
             ),
             mixed_wet_water_fraction,
         ),
-        minimum_water_relperm, minimum_oil_relperm, minimum_gas_relperm,
-    )  # fmt: skip
+        minimum_water_relperm,
+        minimum_oil_relperm,
+        minimum_gas_relperm,
+    )
 
 
 @numba.njit(cache=True, parallel=True, error_model="numpy")
@@ -569,22 +680,22 @@ def compute_brooks_corey_values_loop(
     residual_oil_saturation_water: NumberArray[OneDimension],
     residual_oil_saturation_gas: NumberArray[OneDimension],
     residual_gas_saturation: NumberArray[OneDimension],
-    water_exponent: float,
-    oil_exponent: float,
-    gas_exponent: float,
-    maximum_water_relperm: float,
-    maximum_oil_relperm: float,
-    maximum_gas_relperm: float,
+    water_exponent: Number,
+    oil_exponent: Number,
+    gas_exponent: Number,
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
     wettability: Wettability,
-    mixed_wet_water_fraction: float,
-    rule_id: int,
-    saturation_epsilon: float,
-    minimum_mobile_pore_space: float,
-    rule_minimum_mobile_pore_space: float,
-    minimum_water_relperm: float,
-    minimum_oil_relperm: float,
-    minimum_gas_relperm: float,
-    size: int,
+    mixed_wet_water_fraction: Number,
+    rule_id: Integer,
+    saturation_epsilon: Number,
+    minimum_mobile_pore_space: Number,
+    rule_minimum_mobile_pore_space: Number,
+    minimum_water_relperm: Number,
+    minimum_oil_relperm: Number,
+    minimum_gas_relperm: Number,
+    size: Integer,
     water_relperm: NumberArray[OneDimension],
     oil_relperm: NumberArray[OneDimension],
     gas_relperm: NumberArray[OneDimension],
@@ -634,22 +745,22 @@ def compute_brooks_corey_derivatives_loop(
     residual_oil_saturation_water: NumberArray[OneDimension],
     residual_oil_saturation_gas: NumberArray[OneDimension],
     residual_gas_saturation: NumberArray[OneDimension],
-    water_exponent: float,
-    oil_exponent: float,
-    gas_exponent: float,
-    maximum_water_relperm: float,
-    maximum_oil_relperm: float,
-    maximum_gas_relperm: float,
+    water_exponent: Number,
+    oil_exponent: Number,
+    gas_exponent: Number,
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
     wettability: Wettability,
-    mixed_wet_water_fraction: float,
-    rule_id: int,
-    saturation_epsilon: float,
-    minimum_mobile_pore_space: float,
-    rule_minimum_mobile_pore_space: float,
-    minimum_water_relperm: float,
-    minimum_oil_relperm: float,
-    minimum_gas_relperm: float,
-    size: int,
+    mixed_wet_water_fraction: Number,
+    rule_id: Integer,
+    saturation_epsilon: Number,
+    minimum_mobile_pore_space: Number,
+    rule_minimum_mobile_pore_space: Number,
+    minimum_water_relperm: Number,
+    minimum_oil_relperm: Number,
+    minimum_gas_relperm: Number,
+    size: Integer,
     dkrw_dsw: NumberArray[OneDimension],
     dkro_dsw: NumberArray[OneDimension],
     dkrg_dsw: NumberArray[OneDimension],
@@ -713,7 +824,7 @@ def compute_brooks_corey_relative_permeabilities_compiled(
     water_exponent: Number,
     oil_exponent: Number,
     gas_exponent: Number,
-    rule_id: int,
+    rule_id: Integer,
     saturation_epsilon: Number,
     minimum_mobile_pore_space: Number,
     maximum_water_relperm: Number = 1.0,
@@ -788,9 +899,9 @@ def compute_brooks_corey_relative_permeabilities_compiled(
     if is_scalar:
         return water_relperm.item(), oil_relperm.item(), gas_relperm.item()
     return (
-        water_relperm.reshape(shape),
-        oil_relperm.reshape(shape),
-        gas_relperm.reshape(shape),
+        typing.cast(NumberArray[NDimension], water_relperm.reshape(shape)),
+        typing.cast(NumberArray[NDimension], oil_relperm.reshape(shape)),
+        typing.cast(NumberArray[NDimension], gas_relperm.reshape(shape)),
     )
 
 
@@ -805,7 +916,7 @@ def compute_brooks_corey_relative_permeability_derivatives_compiled(
     water_exponent: Number,
     oil_exponent: Number,
     gas_exponent: Number,
-    rule_id: int,
+    rule_id: Integer,
     saturation_epsilon: Number,
     minimum_mobile_pore_space: Number,
     maximum_water_relperm: Number = 1.0,
@@ -892,29 +1003,31 @@ def compute_brooks_corey_relative_permeability_derivatives_compiled(
 
 @numba.njit(cache=True, error_model="numpy")
 def compute_brooks_corey_values_and_derivatives_cell(
-    sw: float,
-    so: float,
-    sg: float,
-    swc: float,
-    sorw: float,
-    sorg: float,
-    sgr: float,
-    water_exponent: float,
-    oil_exponent: float,
-    gas_exponent: float,
-    maximum_water_relperm: float,
-    maximum_oil_relperm: float,
-    maximum_gas_relperm: float,
+    sw: Number,
+    so: Number,
+    sg: Number,
+    swc: Number,
+    sorw: Number,
+    sorg: Number,
+    sgr: Number,
+    water_exponent: Number,
+    oil_exponent: Number,
+    gas_exponent: Number,
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
     wettability: Wettability,
-    mixed_wet_water_fraction: float,
-    rule_id: int,
-    saturation_epsilon: float,
-    minimum_mobile_pore_space: float,
-    rule_minimum_mobile_pore_space: float,
-    minimum_water_relperm: float,
-    minimum_oil_relperm: float,
-    minimum_gas_relperm: float,
-) -> tuple[float, float, float, float, float, float, float, float, float, float, float, float]:
+    mixed_wet_water_fraction: Number,
+    rule_id: Integer,
+    saturation_epsilon: Number,
+    minimum_mobile_pore_space: Number,
+    rule_minimum_mobile_pore_space: Number,
+    minimum_water_relperm: Number,
+    minimum_oil_relperm: Number,
+    minimum_gas_relperm: Number,
+) -> tuple[
+    Number, Number, Number, Number, Number, Number, Number, Number, Number, Number, Number, Number
+]:
     """
     Brooks-Corey relative permeabilities and all nine partial derivatives of one cell, from a
     single evaluation of the underlying two-phase curves and mixing rule.
@@ -929,36 +1042,88 @@ def compute_brooks_corey_values_and_derivatives_cell(
     sw, so, sg = normalize_cell_saturations(sw, so, sg, saturation_epsilon)
     if wettability == Wettability.WATER_WET:
         cell = compute_brooks_corey_water_wet_cell(
-            sw, so, sg, swc, sorw, sorg, sgr, water_exponent, oil_exponent, gas_exponent,
-            maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-            minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
-        )  # fmt: skip
+            sw,
+            so,
+            sg,
+            swc,
+            sorw,
+            sorg,
+            sgr,
+            water_exponent,
+            oil_exponent,
+            gas_exponent,
+            maximum_water_relperm,
+            maximum_oil_relperm,
+            maximum_gas_relperm,
+            rule_id,
+            minimum_mobile_pore_space,
+            rule_minimum_mobile_pore_space,
+        )
         d = finalize_water_wet_cell(
             cell, minimum_water_relperm, minimum_oil_relperm, minimum_gas_relperm
         )
     elif wettability == Wettability.OIL_WET:
         cell = compute_brooks_corey_oil_wet_cell(
-            sw, so, sg, swc, sorw, sorg, sgr, water_exponent, oil_exponent, gas_exponent,
-            maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-            minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
-        )  # fmt: skip
+            sw,
+            so,
+            sg,
+            swc,
+            sorw,
+            sorg,
+            sgr,
+            water_exponent,
+            oil_exponent,
+            gas_exponent,
+            maximum_water_relperm,
+            maximum_oil_relperm,
+            maximum_gas_relperm,
+            rule_id,
+            minimum_mobile_pore_space,
+            rule_minimum_mobile_pore_space,
+        )
         d = finalize_oil_wet_cell(
             cell, minimum_water_relperm, minimum_oil_relperm, minimum_gas_relperm
         )
     else:
         cell = blend_cells(
             compute_brooks_corey_water_wet_cell(
-                sw, so, sg, swc, sorw, sorg, sgr, water_exponent, oil_exponent, gas_exponent,
-                maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-                minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+                sw,
+                so,
+                sg,
+                swc,
+                sorw,
+                sorg,
+                sgr,
+                water_exponent,
+                oil_exponent,
+                gas_exponent,
+                maximum_water_relperm,
+                maximum_oil_relperm,
+                maximum_gas_relperm,
+                rule_id,
+                minimum_mobile_pore_space,
+                rule_minimum_mobile_pore_space,
             ),
             compute_brooks_corey_oil_wet_cell(
-                sw, so, sg, swc, sorw, sorg, sgr, water_exponent, oil_exponent, gas_exponent,
-                maximum_water_relperm, maximum_oil_relperm, maximum_gas_relperm, rule_id,
-                minimum_mobile_pore_space, rule_minimum_mobile_pore_space,
+                sw,
+                so,
+                sg,
+                swc,
+                sorw,
+                sorg,
+                sgr,
+                water_exponent,
+                oil_exponent,
+                gas_exponent,
+                maximum_water_relperm,
+                maximum_oil_relperm,
+                maximum_gas_relperm,
+                rule_id,
+                minimum_mobile_pore_space,
+                rule_minimum_mobile_pore_space,
             ),
             mixed_wet_water_fraction,
-        )  # fmt: skip
+        )
         d = finalize_mixed_wet_cell(
             cell, minimum_water_relperm, minimum_oil_relperm, minimum_gas_relperm
         )
@@ -966,8 +1131,16 @@ def compute_brooks_corey_values_and_derivatives_cell(
         floor_relperm(clip_unit(cell.krw), minimum_water_relperm),
         floor_relperm(clip_unit(cell.kro), minimum_oil_relperm),
         floor_relperm(clip_unit(cell.krg), minimum_gas_relperm),
-        d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7], d[8],
-    )  # fmt: skip
+        d[0],
+        d[1],
+        d[2],
+        d[3],
+        d[4],
+        d[5],
+        d[6],
+        d[7],
+        d[8],
+    )
 
 
 @numba.njit(cache=True, parallel=True, error_model="numpy")
@@ -979,22 +1152,22 @@ def compute_brooks_corey_values_and_derivatives_loop(
     residual_oil_saturation_water: NumberArray[OneDimension],
     residual_oil_saturation_gas: NumberArray[OneDimension],
     residual_gas_saturation: NumberArray[OneDimension],
-    water_exponent: float,
-    oil_exponent: float,
-    gas_exponent: float,
-    maximum_water_relperm: float,
-    maximum_oil_relperm: float,
-    maximum_gas_relperm: float,
+    water_exponent: Number,
+    oil_exponent: Number,
+    gas_exponent: Number,
+    maximum_water_relperm: Number,
+    maximum_oil_relperm: Number,
+    maximum_gas_relperm: Number,
     wettability: Wettability,
-    mixed_wet_water_fraction: float,
-    rule_id: int,
-    saturation_epsilon: float,
-    minimum_mobile_pore_space: float,
-    rule_minimum_mobile_pore_space: float,
-    minimum_water_relperm: float,
-    minimum_oil_relperm: float,
-    minimum_gas_relperm: float,
-    size: int,
+    mixed_wet_water_fraction: Number,
+    rule_id: Integer,
+    saturation_epsilon: Number,
+    minimum_mobile_pore_space: Number,
+    rule_minimum_mobile_pore_space: Number,
+    minimum_water_relperm: Number,
+    minimum_oil_relperm: Number,
+    minimum_gas_relperm: Number,
+    size: Integer,
     water_relperm: NumberArray[OneDimension],
     oil_relperm: NumberArray[OneDimension],
     gas_relperm: NumberArray[OneDimension],
@@ -1053,7 +1226,7 @@ def compute_brooks_corey_values_and_derivatives_loop(
         dkrg_dsg[i] = r[11]
 
 
-def compute_brooks_corey_relative_permeabilities_and_derivatives_compiled(
+def compute_brooks_corey_relative_permeabilities_and_derivatives(
     water_saturation: NumberOrArray[NDimension],
     oil_saturation: NumberOrArray[NDimension],
     gas_saturation: NumberOrArray[NDimension],
@@ -1064,7 +1237,7 @@ def compute_brooks_corey_relative_permeabilities_and_derivatives_compiled(
     water_exponent: Number,
     oil_exponent: Number,
     gas_exponent: Number,
-    rule_id: int,
+    rule_id: Integer,
     saturation_epsilon: Number,
     minimum_mobile_pore_space: Number,
     maximum_water_relperm: Number = 1.0,
@@ -1134,9 +1307,19 @@ def compute_brooks_corey_relative_permeabilities_and_derivatives_compiled(
         *outputs,
     )
     (
-        water_relperm, oil_relperm, gas_relperm,
-        dkrw_dsw, dkro_dsw, dkrg_dsw, dkrw_dso, dkro_dso, dkrg_dso, dkrw_dsg, dkro_dsg, dkrg_dsg,
-    ) = (output.item() if is_scalar else output.reshape(shape) for output in outputs)  # fmt: skip
+        water_relperm,
+        oil_relperm,
+        gas_relperm,
+        dkrw_dsw,
+        dkro_dsw,
+        dkrg_dsw,
+        dkrw_dso,
+        dkro_dso,
+        dkrg_dso,
+        dkrw_dsg,
+        dkro_dsg,
+        dkrg_dsg,
+    ) = (output.item() if is_scalar else output.reshape(shape) for output in outputs)
     return (
         RelativePermeabilities(water=water_relperm, oil=oil_relperm, gas=gas_relperm),
         RelativePermeabilityDerivatives(
@@ -2248,7 +2431,7 @@ class BrooksCoreyRelPermTable(RelativePermeabilityTable):
                     residual_gas_saturation=sgr,
                 ),
             )
-        return compute_brooks_corey_relative_permeabilities_and_derivatives_compiled(
+        return compute_brooks_corey_relative_permeabilities_and_derivatives(
             water_saturation=water_saturation,
             oil_saturation=oil_saturation,
             gas_saturation=gas_saturation,

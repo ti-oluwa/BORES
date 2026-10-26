@@ -91,16 +91,16 @@ __all__ = [
     "stone_I_rule",
 ]
 
-RULE_MIN = 0
+MIN_RULE = 0
 """Identifier of `min_rule` in the compiled kernels."""
 
-RULE_BAKER_LINEAR = 1
+BAKER_LINEAR_RULE = 1
 """Identifier of `baker_linear_rule` in the compiled kernels."""
 
-RULE_STONE_II = 2
+STONE_II_RULE = 2
 """Identifier of `stone_II_rule` in the compiled kernels."""
 
-RULE_STONE_I = 3
+STONE_I_RULE = 3
 """Identifier of `stone_I_rule` in the compiled kernels."""
 
 
@@ -1551,10 +1551,10 @@ def _(
 BUILTIN_RULES = tuple(
     (rule, rule_id, rule.func, rule._dfunc)
     for rule, rule_id in (
-        (min_rule, RULE_MIN),
-        (baker_linear_rule, RULE_BAKER_LINEAR),
-        (stone_II_rule, RULE_STONE_II),
-        (stone_I_rule, RULE_STONE_I),
+        (min_rule, MIN_RULE),
+        (baker_linear_rule, BAKER_LINEAR_RULE),
+        (stone_II_rule, STONE_II_RULE),
+        (stone_I_rule, STONE_I_RULE),
     )
 )
 

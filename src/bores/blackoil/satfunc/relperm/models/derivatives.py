@@ -148,7 +148,11 @@ def validate_and_normalize_saturations(
         sw = np.where(needs_norm, sw / total_saturation, sw)
         so = np.where(needs_norm, so / total_saturation, so)
         sg = np.where(needs_norm, sg / total_saturation, sg)
-    return sw, so, sg
+    return (
+        typing.cast(NumberArray[NDimension], sw),
+        typing.cast(NumberArray[NDimension], so),
+        typing.cast(NumberArray[NDimension], sg),
+    )
 
 
 def apply_water_wet_mixing_rule(

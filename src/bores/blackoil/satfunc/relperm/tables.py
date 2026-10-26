@@ -1495,8 +1495,8 @@ def resolve_residual_oil_saturation_gas(
     return max(0.0, 1.0 - connate_water_saturation - sg_max)
 
 
-def _query_two_phase_pair(
-    table: "TwoPhaseRelPermTable",
+def query_two_phase_pair(
+    table: TwoPhaseRelPermTable,
     wetting_saturation: NumberOrArray[NDimension],
     non_wetting_saturation: NumberOrArray[NDimension],
     derivative: bool = False,
@@ -1530,8 +1530,8 @@ def _query_two_phase_pair(
     )
 
 
-def _query_oil_water_system(
-    table: "TwoPhaseRelPermTable",
+def query_oil_water_system(
+    table: TwoPhaseRelPermTable,
     water_saturation: NumberOrArray[NDimension],
     derivative: bool = False,
 ) -> tuple[NumberOrArray[NDimension], NumberOrArray[NDimension]]:
@@ -1546,17 +1546,17 @@ def _query_oil_water_system(
     """
     oil_saturation = np.clip(1.0 - water_saturation, 0.0, 1.0)
     if table.wetting_phase == FluidPhase.WATER:
-        krw, kro = _query_two_phase_pair(table, water_saturation, oil_saturation, derivative)
+        krw, kro = query_two_phase_pair(table, water_saturation, oil_saturation, derivative)
     else:
-        kro, krw = _query_two_phase_pair(table, oil_saturation, water_saturation, derivative)
+        kro, krw = query_two_phase_pair(table, oil_saturation, water_saturation, derivative)
     if derivative and table.get_reference_axis_phase() != FluidPhase.WATER:
         # The table's axis is So = 1 - Sw
-        return -krw, -kro  # type: ignore[operator]
-    return krw, kro
+        return -krw, -kro  # type: ignore[operator,return-value]
+    return krw, kro  # type: ignore[return-value]
 
 
-def _query_gas_oil_system(
-    table: "TwoPhaseRelPermTable",
+def query_gas_oil_system(
+    table: TwoPhaseRelPermTable,
     gas_saturation: NumberOrArray[NDimension],
     connate_water_saturation: Number,
     derivative: bool = False,
@@ -1572,13 +1572,13 @@ def _query_gas_oil_system(
     """
     oil_saturation = np.clip(1.0 - connate_water_saturation - gas_saturation, 0.0, 1.0)
     if table.wetting_phase == FluidPhase.OIL:
-        kro, krg = _query_two_phase_pair(table, oil_saturation, gas_saturation, derivative)
+        kro, krg = query_two_phase_pair(table, oil_saturation, gas_saturation, derivative)
     else:
-        krg, kro = _query_two_phase_pair(table, gas_saturation, oil_saturation, derivative)
+        krg, kro = query_two_phase_pair(table, gas_saturation, oil_saturation, derivative)
     if derivative and table.get_reference_axis_phase() != FluidPhase.GAS:
         # The table's axis is So = 1 - swc - Sg
-        return -krg, -kro  # type: ignore[operator]
-    return krg, kro
+        return -krg, -kro  # type: ignore[operator,return-value]
+    return krg, kro  # type: ignore[return-value]
 
 
 @attrs.frozen(slots=True)
@@ -1801,8 +1801,8 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
         )
 
         connate_water_saturation = self.get_connate_water_saturation()
-        krw, kro_w = _query_oil_water_system(self.oil_water_table, sw)
-        krg, kro_g = _query_gas_oil_system(self.gas_oil_table, sg, connate_water_saturation)
+        krw, kro_w = query_oil_water_system(self.oil_water_table, sw)
+        krg, kro_g = query_gas_oil_system(self.gas_oil_table, sg, connate_water_saturation)
 
         kr_max = self.get_oil_relperm_endpoint()
         if self.mixing_rule is not None:
@@ -1908,18 +1908,18 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
         connate_water_saturation = self.get_connate_water_saturation()
 
         # krw and kro_w depend on Sw only. krg and kro_g depend on Sg only.
-        dkrw_dsw, dkro_w_dsw = _query_oil_water_system(oil_water_table, sw, derivative=True)
+        dkrw_dsw, dkro_w_dsw = query_oil_water_system(oil_water_table, sw, derivative=True)
         dkrw_dso, dkrw_dsg = zeros.copy(), zeros.copy()
         dkro_w_dso, dkro_w_dsg = zeros.copy(), zeros.copy()
-        dkrg_dsg, dkro_g_dsg = _query_gas_oil_system(
+        dkrg_dsg, dkro_g_dsg = query_gas_oil_system(
             gas_oil_table, sg, connate_water_saturation, derivative=True
         )
         dkrg_dsw, dkrg_dso = zeros.copy(), zeros.copy()
         dkro_g_dsw, dkro_g_dso = zeros.copy(), zeros.copy()
 
         # Forward two-phase kr values for mixing rule
-        krw, kro_w = _query_oil_water_system(oil_water_table, sw)
-        krg, kro_g = _query_gas_oil_system(gas_oil_table, sg, connate_water_saturation)
+        krw, kro_w = query_oil_water_system(oil_water_table, sw)
+        krg, kro_g = query_gas_oil_system(gas_oil_table, sg, connate_water_saturation)
 
         kr_max = self.get_oil_relperm_endpoint()
         # Mixing rule partial derivatives
