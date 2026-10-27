@@ -58,17 +58,12 @@ uv add "git+https://github.com/ti-oluwa/bores.git@main"
 ```python
 from bores.deck import DeckFile
 from bores.simulation.case import SimulationCase
-from bores.types import UnitSystem
 from bores.wells.hydraulics.homogeneous import homogeneous_wellbore
 
-df = DeckFile(
-    "path/to/model.DATA",
-    encoding="utf-8",
-    unit_system=UnitSystem.FIELD,
-)
+df = DeckFile("path/to/model.DATA", encoding="utf-8")
 
 # One call loads the compiled model, initial reservoir state, and schedule, all read from the deck.
-wellbore = homogeneous_wellbore(tubing_inner_diameter=2.5, unit_system=UnitSystem.FIELD)
+wellbore = homogeneous_wellbore(tubing_inner_diameter=2.5, unit_system=df.unit_system)
 case = SimulationCase.from_deck(df, tubing_performance=wellbore, temperature=200.0)
 
 grid = case.model.reservoir.grid
