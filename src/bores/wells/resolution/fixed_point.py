@@ -15,20 +15,38 @@ from bores.wells.hydraulics.beggs_and_brill import (
 from bores.wells.hydraulics.beggs_and_brill import (
     walk_perforation_pressures as walk_beggs_and_brill,
 )
+from bores.wells.hydraulics.beggs_and_brill import (
+    walk_perforation_pressures_from_table as walk_perforation_pressures_from_table_beggs_and_brill,
+)
 from bores.wells.hydraulics.gray import GrayWellbore
-from bores.wells.hydraulics.gray import walk_perforation_pressures as walk_gray
+from bores.wells.hydraulics.gray import (
+    walk_perforation_pressures as walk_gray,
+)
+from bores.wells.hydraulics.gray import (
+    walk_perforation_pressures_from_table as walk_perforation_pressures_from_table_gray,
+)
 from bores.wells.hydraulics.hagedorn_brown import HagedornBrownWellbore
 from bores.wells.hydraulics.hagedorn_brown import (
     walk_perforation_pressures as walk_hagedorn_brown,
+)
+from bores.wells.hydraulics.hagedorn_brown import (
+    walk_perforation_pressures_from_table as walk_perforation_pressures_from_table_hagedorn_brown,
 )
 from bores.wells.hydraulics.homogeneous import HomogeneousWellbore
 from bores.wells.hydraulics.homogeneous import (
     walk_perforation_pressures as walk_homogeneous,
 )
+from bores.wells.hydraulics.homogeneous import (
+    walk_perforation_pressures_from_table as walk_perforation_pressures_from_table_homogeneous,
+)
 from bores.wells.hydraulics.hydrostatic import walk_hydrostatic_pressures
+from bores.wells.hydraulics.tubing_fluids import TubingFluidTable
 from bores.wells.hydraulics.woldesemayat_ghajar import WoldesemayatGhajarWellbore
 from bores.wells.hydraulics.woldesemayat_ghajar import (
     walk_perforation_pressures as walk_woldesemayat_ghajar,
+)
+from bores.wells.hydraulics.woldesemayat_ghajar import (
+    walk_perforation_pressures_from_table as walk_perforation_pressures_from_table_woldesemayat_ghajar,
 )
 from bores.wells.workspace import (
     PerforationWorkspace,
@@ -141,6 +159,7 @@ def accumulate_rates(
         oil_formation_volume_factors=workspace.connection_fluids.oil_formation_volume_factors,
         water_formation_volume_factors=workspace.connection_fluids.water_formation_volume_factors,
         gas_formation_volume_factors=workspace.connection_fluids.gas_formation_volume_factors,
+        dissolved_gas_ratios=workspace.dissolved_gas_ratios,
         relevant_oil=count_oil,
         relevant_water=count_water,
         relevant_gas=count_gas,
@@ -189,6 +208,7 @@ def solve_homogeneous(
     radial_flow_constant: Number,
     max_iterations: Integer,
     tolerance: Number,
+    tubing_fluids: TubingFluidTable | None = None,
 ) -> FixedPointResult:
     """
     Solves a well's connection pressures and rates together, with the pressure profile from the
@@ -256,22 +276,40 @@ def solve_homogeneous(
             radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
-        walk_homogeneous(
-            model=model,
-            reference_depth=reference_depth,
-            reference_measured_depth=workspace.reference_measured_depth,
-            reference_pressure=reference_pressure,
-            connection_oil_rates=workspace.connection_oil_rates,
-            connection_water_rates=workspace.connection_water_rates,
-            connection_gas_rates=workspace.connection_gas_rates,
-            representative_depths=workspace.representative_depths,
-            representative_measured_depths=workspace.representative_measured_depths,
-            inclinations_from_vertical=workspace.inclinations_from_vertical,
-            connection_fluids=workspace.connection_fluids,
-            is_injector=is_injector,
-            hydrostatic_divisor=hydrostatic_divisor,
-            pressures=workspace.connection_pressures,
-        )
+        if tubing_fluids is None:
+            walk_homogeneous(
+                model=model,
+                reference_depth=reference_depth,
+                reference_measured_depth=workspace.reference_measured_depth,
+                reference_pressure=reference_pressure,
+                connection_oil_rates=workspace.connection_oil_rates,
+                connection_water_rates=workspace.connection_water_rates,
+                connection_gas_rates=workspace.connection_gas_rates,
+                representative_depths=workspace.representative_depths,
+                representative_measured_depths=workspace.representative_measured_depths,
+                inclinations_from_vertical=workspace.inclinations_from_vertical,
+                connection_fluids=workspace.connection_fluids,
+                is_injector=is_injector,
+                hydrostatic_divisor=hydrostatic_divisor,
+                pressures=workspace.connection_pressures,
+            )
+        else:
+            walk_perforation_pressures_from_table_homogeneous(
+                model=model,
+                reference_depth=reference_depth,
+                reference_measured_depth=workspace.reference_measured_depth,
+                reference_pressure=reference_pressure,
+                connection_oil_rates=workspace.connection_oil_rates,
+                connection_water_rates=workspace.connection_water_rates,
+                connection_gas_rates=workspace.connection_gas_rates,
+                representative_depths=workspace.representative_depths,
+                representative_measured_depths=workspace.representative_measured_depths,
+                inclinations_from_vertical=workspace.inclinations_from_vertical,
+                connection_fluids=workspace.connection_fluids,
+                is_injector=is_injector,
+                pressures=workspace.connection_pressures,
+                tubing_fluids=tubing_fluids,
+            )
         if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
             converged = True
@@ -306,6 +344,7 @@ def solve_beggs_and_brill(
     radial_flow_constant: Number,
     max_iterations: Integer,
     tolerance: Number,
+    tubing_fluids: TubingFluidTable | None = None,
 ) -> FixedPointResult:
     """
     Solves a well's connection pressures and rates together, with the pressure profile from the
@@ -373,22 +412,40 @@ def solve_beggs_and_brill(
             radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
-        walk_beggs_and_brill(
-            model=model,
-            reference_depth=reference_depth,
-            reference_measured_depth=workspace.reference_measured_depth,
-            reference_pressure=reference_pressure,
-            connection_oil_rates=workspace.connection_oil_rates,
-            connection_water_rates=workspace.connection_water_rates,
-            connection_gas_rates=workspace.connection_gas_rates,
-            representative_depths=workspace.representative_depths,
-            representative_measured_depths=workspace.representative_measured_depths,
-            inclinations_from_vertical=workspace.inclinations_from_vertical,
-            connection_fluids=workspace.connection_fluids,
-            is_injector=is_injector,
-            hydrostatic_divisor=hydrostatic_divisor,
-            pressures=workspace.connection_pressures,
-        )
+        if tubing_fluids is None:
+            walk_beggs_and_brill(
+                model=model,
+                reference_depth=reference_depth,
+                reference_measured_depth=workspace.reference_measured_depth,
+                reference_pressure=reference_pressure,
+                connection_oil_rates=workspace.connection_oil_rates,
+                connection_water_rates=workspace.connection_water_rates,
+                connection_gas_rates=workspace.connection_gas_rates,
+                representative_depths=workspace.representative_depths,
+                representative_measured_depths=workspace.representative_measured_depths,
+                inclinations_from_vertical=workspace.inclinations_from_vertical,
+                connection_fluids=workspace.connection_fluids,
+                is_injector=is_injector,
+                hydrostatic_divisor=hydrostatic_divisor,
+                pressures=workspace.connection_pressures,
+            )
+        else:
+            walk_perforation_pressures_from_table_beggs_and_brill(
+                model=model,
+                reference_depth=reference_depth,
+                reference_measured_depth=workspace.reference_measured_depth,
+                reference_pressure=reference_pressure,
+                connection_oil_rates=workspace.connection_oil_rates,
+                connection_water_rates=workspace.connection_water_rates,
+                connection_gas_rates=workspace.connection_gas_rates,
+                representative_depths=workspace.representative_depths,
+                representative_measured_depths=workspace.representative_measured_depths,
+                inclinations_from_vertical=workspace.inclinations_from_vertical,
+                connection_fluids=workspace.connection_fluids,
+                is_injector=is_injector,
+                pressures=workspace.connection_pressures,
+                tubing_fluids=tubing_fluids,
+            )
         if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
             converged = True
@@ -423,6 +480,7 @@ def solve_hagedorn_brown(
     radial_flow_constant: Number,
     max_iterations: Integer,
     tolerance: Number,
+    tubing_fluids: TubingFluidTable | None = None,
 ) -> FixedPointResult:
     """
     Solves a well's connection pressures and rates together, with the pressure profile from the
@@ -490,22 +548,40 @@ def solve_hagedorn_brown(
             radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
-        walk_hagedorn_brown(
-            model=model,
-            reference_depth=reference_depth,
-            reference_measured_depth=workspace.reference_measured_depth,
-            reference_pressure=reference_pressure,
-            connection_oil_rates=workspace.connection_oil_rates,
-            connection_water_rates=workspace.connection_water_rates,
-            connection_gas_rates=workspace.connection_gas_rates,
-            representative_depths=workspace.representative_depths,
-            representative_measured_depths=workspace.representative_measured_depths,
-            inclinations_from_vertical=workspace.inclinations_from_vertical,
-            connection_fluids=workspace.connection_fluids,
-            is_injector=is_injector,
-            hydrostatic_divisor=hydrostatic_divisor,
-            pressures=workspace.connection_pressures,
-        )
+        if tubing_fluids is None:
+            walk_hagedorn_brown(
+                model=model,
+                reference_depth=reference_depth,
+                reference_measured_depth=workspace.reference_measured_depth,
+                reference_pressure=reference_pressure,
+                connection_oil_rates=workspace.connection_oil_rates,
+                connection_water_rates=workspace.connection_water_rates,
+                connection_gas_rates=workspace.connection_gas_rates,
+                representative_depths=workspace.representative_depths,
+                representative_measured_depths=workspace.representative_measured_depths,
+                inclinations_from_vertical=workspace.inclinations_from_vertical,
+                connection_fluids=workspace.connection_fluids,
+                is_injector=is_injector,
+                hydrostatic_divisor=hydrostatic_divisor,
+                pressures=workspace.connection_pressures,
+            )
+        else:
+            walk_perforation_pressures_from_table_hagedorn_brown(
+                model=model,
+                reference_depth=reference_depth,
+                reference_measured_depth=workspace.reference_measured_depth,
+                reference_pressure=reference_pressure,
+                connection_oil_rates=workspace.connection_oil_rates,
+                connection_water_rates=workspace.connection_water_rates,
+                connection_gas_rates=workspace.connection_gas_rates,
+                representative_depths=workspace.representative_depths,
+                representative_measured_depths=workspace.representative_measured_depths,
+                inclinations_from_vertical=workspace.inclinations_from_vertical,
+                connection_fluids=workspace.connection_fluids,
+                is_injector=is_injector,
+                pressures=workspace.connection_pressures,
+                tubing_fluids=tubing_fluids,
+            )
         if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
             converged = True
@@ -540,6 +616,7 @@ def solve_gray(
     radial_flow_constant: Number,
     max_iterations: Integer,
     tolerance: Number,
+    tubing_fluids: TubingFluidTable | None = None,
 ) -> FixedPointResult:
     """
     Solves a well's connection pressures and rates together, with the pressure profile from the
@@ -607,22 +684,40 @@ def solve_gray(
             radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
-        walk_gray(
-            model=model,
-            reference_depth=reference_depth,
-            reference_measured_depth=workspace.reference_measured_depth,
-            reference_pressure=reference_pressure,
-            connection_oil_rates=workspace.connection_oil_rates,
-            connection_water_rates=workspace.connection_water_rates,
-            connection_gas_rates=workspace.connection_gas_rates,
-            representative_depths=workspace.representative_depths,
-            representative_measured_depths=workspace.representative_measured_depths,
-            inclinations_from_vertical=workspace.inclinations_from_vertical,
-            connection_fluids=workspace.connection_fluids,
-            is_injector=is_injector,
-            hydrostatic_divisor=hydrostatic_divisor,
-            pressures=workspace.connection_pressures,
-        )
+        if tubing_fluids is None:
+            walk_gray(
+                model=model,
+                reference_depth=reference_depth,
+                reference_measured_depth=workspace.reference_measured_depth,
+                reference_pressure=reference_pressure,
+                connection_oil_rates=workspace.connection_oil_rates,
+                connection_water_rates=workspace.connection_water_rates,
+                connection_gas_rates=workspace.connection_gas_rates,
+                representative_depths=workspace.representative_depths,
+                representative_measured_depths=workspace.representative_measured_depths,
+                inclinations_from_vertical=workspace.inclinations_from_vertical,
+                connection_fluids=workspace.connection_fluids,
+                is_injector=is_injector,
+                hydrostatic_divisor=hydrostatic_divisor,
+                pressures=workspace.connection_pressures,
+            )
+        else:
+            walk_perforation_pressures_from_table_gray(
+                model=model,
+                reference_depth=reference_depth,
+                reference_measured_depth=workspace.reference_measured_depth,
+                reference_pressure=reference_pressure,
+                connection_oil_rates=workspace.connection_oil_rates,
+                connection_water_rates=workspace.connection_water_rates,
+                connection_gas_rates=workspace.connection_gas_rates,
+                representative_depths=workspace.representative_depths,
+                representative_measured_depths=workspace.representative_measured_depths,
+                inclinations_from_vertical=workspace.inclinations_from_vertical,
+                connection_fluids=workspace.connection_fluids,
+                is_injector=is_injector,
+                pressures=workspace.connection_pressures,
+                tubing_fluids=tubing_fluids,
+            )
         if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
             converged = True
@@ -657,6 +752,7 @@ def solve_woldesemayat_ghajar(
     radial_flow_constant: Number,
     max_iterations: Integer,
     tolerance: Number,
+    tubing_fluids: TubingFluidTable | None = None,
 ) -> FixedPointResult:
     """
     Solves a well's connection pressures and rates together, with the pressure profile from the
@@ -724,22 +820,40 @@ def solve_woldesemayat_ghajar(
             radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
-        walk_woldesemayat_ghajar(
-            model=model,
-            reference_depth=reference_depth,
-            reference_measured_depth=workspace.reference_measured_depth,
-            reference_pressure=reference_pressure,
-            connection_oil_rates=workspace.connection_oil_rates,
-            connection_water_rates=workspace.connection_water_rates,
-            connection_gas_rates=workspace.connection_gas_rates,
-            representative_depths=workspace.representative_depths,
-            representative_measured_depths=workspace.representative_measured_depths,
-            inclinations_from_vertical=workspace.inclinations_from_vertical,
-            connection_fluids=workspace.connection_fluids,
-            is_injector=is_injector,
-            hydrostatic_divisor=hydrostatic_divisor,
-            pressures=workspace.connection_pressures,
-        )
+        if tubing_fluids is None:
+            walk_woldesemayat_ghajar(
+                model=model,
+                reference_depth=reference_depth,
+                reference_measured_depth=workspace.reference_measured_depth,
+                reference_pressure=reference_pressure,
+                connection_oil_rates=workspace.connection_oil_rates,
+                connection_water_rates=workspace.connection_water_rates,
+                connection_gas_rates=workspace.connection_gas_rates,
+                representative_depths=workspace.representative_depths,
+                representative_measured_depths=workspace.representative_measured_depths,
+                inclinations_from_vertical=workspace.inclinations_from_vertical,
+                connection_fluids=workspace.connection_fluids,
+                is_injector=is_injector,
+                hydrostatic_divisor=hydrostatic_divisor,
+                pressures=workspace.connection_pressures,
+            )
+        else:
+            walk_perforation_pressures_from_table_woldesemayat_ghajar(
+                model=model,
+                reference_depth=reference_depth,
+                reference_measured_depth=workspace.reference_measured_depth,
+                reference_pressure=reference_pressure,
+                connection_oil_rates=workspace.connection_oil_rates,
+                connection_water_rates=workspace.connection_water_rates,
+                connection_gas_rates=workspace.connection_gas_rates,
+                representative_depths=workspace.representative_depths,
+                representative_measured_depths=workspace.representative_measured_depths,
+                inclinations_from_vertical=workspace.inclinations_from_vertical,
+                connection_fluids=workspace.connection_fluids,
+                is_injector=is_injector,
+                pressures=workspace.connection_pressures,
+                tubing_fluids=tubing_fluids,
+            )
         if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
             converged = True
@@ -970,6 +1084,7 @@ def bisect_homogeneous(
     reservoir_condition: Boolean,
     max_bisections: Integer,
     rate_tolerance: Number,
+    tubing_fluids: TubingFluidTable | None = None,
 ) -> BisectionResult:
     """
     Finds the reference pressure at which a well's total rate matches a target, with the pressure
@@ -1029,6 +1144,7 @@ def bisect_homogeneous(
             radial_flow_constant=radial_flow_constant,
             max_iterations=max_iterations,
             tolerance=tolerance,
+            tubing_fluids=tubing_fluids,
         )
         if not result.converged:
             return BisectionResult(bhp=average, result=result)
@@ -1064,6 +1180,7 @@ def bisect_beggs_and_brill(
     reservoir_condition: Boolean,
     max_bisections: Integer,
     rate_tolerance: Number,
+    tubing_fluids: TubingFluidTable | None = None,
 ) -> BisectionResult:
     """
     Finds the reference pressure at which a well's total rate matches a target, with the pressure
@@ -1123,6 +1240,7 @@ def bisect_beggs_and_brill(
             radial_flow_constant=radial_flow_constant,
             max_iterations=max_iterations,
             tolerance=tolerance,
+            tubing_fluids=tubing_fluids,
         )
         if not result.converged:
             return BisectionResult(bhp=average, result=result)
@@ -1158,6 +1276,7 @@ def bisect_hagedorn_brown(
     reservoir_condition: Boolean,
     max_bisections: Integer,
     rate_tolerance: Number,
+    tubing_fluids: TubingFluidTable | None = None,
 ) -> BisectionResult:
     """
     Finds the reference pressure at which a well's total rate matches a target, with the pressure
@@ -1217,6 +1336,7 @@ def bisect_hagedorn_brown(
             radial_flow_constant=radial_flow_constant,
             max_iterations=max_iterations,
             tolerance=tolerance,
+            tubing_fluids=tubing_fluids,
         )
         if not result.converged:
             return BisectionResult(bhp=average, result=result)
@@ -1252,6 +1372,7 @@ def bisect_gray(
     reservoir_condition: Boolean,
     max_bisections: Integer,
     rate_tolerance: Number,
+    tubing_fluids: TubingFluidTable | None = None,
 ) -> BisectionResult:
     """
     Finds the reference pressure at which a well's total rate matches a target, with the pressure
@@ -1311,6 +1432,7 @@ def bisect_gray(
             radial_flow_constant=radial_flow_constant,
             max_iterations=max_iterations,
             tolerance=tolerance,
+            tubing_fluids=tubing_fluids,
         )
         if not result.converged:
             return BisectionResult(bhp=average, result=result)
@@ -1346,6 +1468,7 @@ def bisect_woldesemayat_ghajar(
     reservoir_condition: Boolean,
     max_bisections: Integer,
     rate_tolerance: Number,
+    tubing_fluids: TubingFluidTable | None = None,
 ) -> BisectionResult:
     """
     Finds the reference pressure at which a well's total rate matches a target, with the pressure
@@ -1405,6 +1528,7 @@ def bisect_woldesemayat_ghajar(
             radial_flow_constant=radial_flow_constant,
             max_iterations=max_iterations,
             tolerance=tolerance,
+            tubing_fluids=tubing_fluids,
         )
         if not result.converged:
             return BisectionResult(bhp=average, result=result)
@@ -1608,6 +1732,7 @@ class HydraulicSolver(typing.Protocol):
         radial_flow_constant: Number,
         max_iterations: Integer,
         tolerance: Number,
+        tubing_fluids: TubingFluidTable | None,
     ) -> FixedPointResult: ...
 
 
@@ -1633,6 +1758,7 @@ class HydraulicBisector(typing.Protocol):
         reservoir_condition: Boolean,
         max_bisections: Integer,
         rate_tolerance: Number,
+        tubing_fluids: TubingFluidTable | None,
     ) -> BisectionResult: ...
 
 

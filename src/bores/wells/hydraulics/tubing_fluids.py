@@ -18,7 +18,7 @@ import numpy.typing as npt
 from bores.constants import c
 from bores.errors import ValidationError
 from bores.precision import get_dtype
-from bores.types import Number, NumberArray, OneDimension, UnitSystem
+from bores.types import Boolean, Integer, Number, NumberArray, OneDimension, UnitSystem
 from bores.wells.hydraulics.base import (
     UNIT_SYSTEM_TAGS,
     UNIT_SYSTEMS_BY_TAG,
@@ -34,11 +34,13 @@ if typing.TYPE_CHECKING:
     from bores.blackoil.pvt.tables import PVTTables
 
 __all__ = [
+    "MARCH_ITERATIONS",
     "NoSlipMixture",
     "TubingFluidSample",
     "TubingFluidTable",
     "TwoPhaseFlow",
     "compile_tubing_fluid_table",
+    "compute_connection_surface_rates",
     "compute_in_situ_phase_rates",
     "compute_no_slip_mixture",
     "compute_produced_gas_oil_ratio",
@@ -49,6 +51,12 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+MARCH_ITERATIONS = 3
+"""
+Times a segment's end pressure is refined when marching up the tubing. A fixed count keeps the
+pressure a smooth function of the rates, which the rate iterations of a well rely on.
+"""
+
 
 class TubingFluidTable(typing.NamedTuple):
     """
@@ -57,8 +65,9 @@ class TubingFluidTable(typing.NamedTuple):
     Every column is given at the same ascending pressures. Oil is described along its saturated
     curve, that is, oil that holds as much dissolved gas as the pressure allows. Oil that holds
     less than that, because the well's produced gas-oil ratio is lower than the saturated
-    solution gas-oil ratio, is described by the same curve at its own bubble point pressure.
-    Above the highest bubble point pressure the oil properties stay at their values there.
+    solution gas-oil ratio, is described by the same curve at its own bubble point pressure, and
+    then carried to the actual pressure with the compressibility of the oil above its bubble point.
+    The same applies above the highest bubble point pressure.
     """
 
     pressures: NumberArray[OneDimension]
@@ -96,6 +105,27 @@ class TubingFluidTable(typing.NamedTuple):
 
     gas_liquid_surface_tensions: NumberArray[OneDimension]
     """Gas-liquid surface tension at each pressure."""
+
+    oil_density_compressibilities: NumberArray[OneDimension]
+    """
+    How fast the density of oil rises with pressure above its bubble point, as a fraction of its
+    density per unit of pressure, for oil that is saturated at each pressure.
+    """
+
+    oil_formation_volume_factor_compressibilities: NumberArray[OneDimension]
+    """
+    How fast the formation volume factor of oil falls with pressure above its bubble point, as a
+    fraction of its value per unit of pressure, for oil that is saturated at each pressure.
+    """
+
+    oil_viscosity_pressure_coefficients: NumberArray[OneDimension]
+    """
+    How fast the viscosity of oil rises with pressure above its bubble point, as a fraction of its
+    viscosity per unit of pressure, for oil that is saturated at each pressure.
+    """
+
+    highest_bubble_point_pressure: Number
+    """The highest bubble point pressure that the saturated oil columns reach."""
 
     stb_to_volume_factor: Number
     """
@@ -217,6 +247,37 @@ def compute_produced_gas_oil_ratio(
 
 
 @numba.njit(cache=True)
+def locate_in_axis(axis: NumberArray[OneDimension], x: Number) -> tuple[Integer, Number]:
+    """
+    Finds where `x` sits in an ascending axis.
+
+    :param axis: Ascending axis.
+    :param x: The value to place, held to the ends of `axis`.
+    :returns: Index of the lower neighbour, and the fraction of the way to the next point.
+    """
+    last = axis.shape[0] - 1
+    if x <= axis[0]:
+        return 0, 0.0
+    if x >= axis[last]:
+        return last - 1, 1.0
+    lower = np.searchsorted(axis, x, side="right") - 1
+    return lower, (x - axis[lower]) / (axis[lower + 1] - axis[lower])
+
+
+@numba.njit(cache=True)
+def read_column(values: NumberArray[OneDimension], lower: Integer, fraction: Number) -> Number:
+    """
+    Reads a column at a position found by `locate_in_axis`.
+
+    :param values: Column given at the axis the position was found in.
+    :param lower: Index of the lower neighbour.
+    :param fraction: Fraction of the way to the next point.
+    :returns: The interpolated value.
+    """
+    return values[lower] + fraction * (values[lower + 1] - values[lower])
+
+
+@numba.njit(cache=True)
 def evaluate_tubing_fluids(
     table: TubingFluidTable, pressure: Number, produced_gas_oil_ratio: Number
 ) -> TubingFluidSample:
@@ -225,51 +286,76 @@ def evaluate_tubing_fluids(
 
     The oil holds the lower of the produced gas-oil ratio and the saturated solution gas-oil
     ratio at this pressure. Oil that is not saturated is read from the table at its own bubble
-    point pressure, so it keeps the properties it has above its bubble point.
+    point pressure, then carried up to this pressure with its compressibility above the bubble
+    point.
 
     :param table: The well's `TubingFluidTable`.
-    :param pressure: Pressure to read the fluids at, held to the range of the table.
+    :param pressure: Pressure to read the fluids at.
     :param produced_gas_oil_ratio: The gas-oil ratio of what the well produces, from
         `compute_produced_gas_oil_ratio`. Infinite or `NaN` for a stream with no oil.
     :returns: The fluids at `pressure`.
     """
-    saturated_ratio = interpolate_column(table.pressures, table.solution_gas_oil_ratios, pressure)
+    lower, fraction = locate_in_axis(table.pressures, pressure)
+    saturated_ratio = read_column(table.solution_gas_oil_ratios, lower, fraction)
     ratio = produced_gas_oil_ratio
+    oil_lower, oil_fraction = lower, fraction
+    excess_pressure = 0.0
     if math.isnan(ratio) or ratio >= saturated_ratio:
         dissolved_ratio = saturated_ratio
-        oil_pressure = pressure
+        if pressure > table.highest_bubble_point_pressure:
+            excess_pressure = pressure - table.highest_bubble_point_pressure
+            oil_lower, oil_fraction = locate_in_axis(
+                table.pressures, table.highest_bubble_point_pressure
+            )
     else:
         dissolved_ratio = max(ratio, 0.0)
-        oil_pressure = find_bubble_point_pressure(
+        bubble_point_pressure = find_bubble_point_pressure(
             pressures=table.pressures,
             solution_gas_oil_ratios=table.solution_gas_oil_ratios,
             gas_oil_ratio=dissolved_ratio,
         )
+        excess_pressure = max(pressure - bubble_point_pressure, 0.0)
+        oil_lower, oil_fraction = locate_in_axis(table.pressures, bubble_point_pressure)
+
+    oil_density = read_column(table.oil_densities, oil_lower, oil_fraction)
+    oil_formation_volume_factor = read_column(
+        table.oil_formation_volume_factors, oil_lower, oil_fraction
+    )
+    oil_viscosity = read_column(table.oil_viscosities, oil_lower, oil_fraction)
+    if excess_pressure > 0.0:
+        oil_density *= math.exp(
+            read_column(table.oil_density_compressibilities, oil_lower, oil_fraction)
+            * excess_pressure
+        )
+        oil_formation_volume_factor *= math.exp(
+            -read_column(
+                table.oil_formation_volume_factor_compressibilities, oil_lower, oil_fraction
+            )
+            * excess_pressure
+        )
+        oil_viscosity *= math.exp(
+            read_column(table.oil_viscosity_pressure_coefficients, oil_lower, oil_fraction)
+            * excess_pressure
+        )
     return TubingFluidSample(
         pressure=pressure,
         formation_volume_factors=PhaseValues(
-            oil=interpolate_column(
-                table.pressures, table.oil_formation_volume_factors, oil_pressure
-            ),
-            water=interpolate_column(
-                table.pressures, table.water_formation_volume_factors, pressure
-            ),
-            gas=interpolate_column(table.pressures, table.gas_formation_volume_factors, pressure),
+            oil=oil_formation_volume_factor,
+            water=read_column(table.water_formation_volume_factors, lower, fraction),
+            gas=read_column(table.gas_formation_volume_factors, lower, fraction),
         ),
         dissolved_gas_oil_ratio=dissolved_ratio,
         phase_densities=PhaseValues(
-            oil=interpolate_column(table.pressures, table.oil_densities, oil_pressure),
-            water=interpolate_column(table.pressures, table.water_densities, pressure),
-            gas=interpolate_column(table.pressures, table.gas_densities, pressure),
+            oil=oil_density,
+            water=read_column(table.water_densities, lower, fraction),
+            gas=read_column(table.gas_densities, lower, fraction),
         ),
         phase_viscosities=PhaseValues(
-            oil=interpolate_column(table.pressures, table.oil_viscosities, oil_pressure),
-            water=interpolate_column(table.pressures, table.water_viscosities, pressure),
-            gas=interpolate_column(table.pressures, table.gas_viscosities, pressure),
+            oil=oil_viscosity,
+            water=read_column(table.water_viscosities, lower, fraction),
+            gas=read_column(table.gas_viscosities, lower, fraction),
         ),
-        gas_liquid_surface_tension=interpolate_column(
-            table.pressures, table.gas_liquid_surface_tensions, pressure
-        ),
+        gas_liquid_surface_tension=read_column(table.gas_liquid_surface_tensions, lower, fraction),
     )
 
 
@@ -461,6 +547,49 @@ def compute_two_phase_flow(
     )
 
 
+@numba.njit(cache=True)
+def compute_connection_surface_rates(
+    connection_oil_rates: NumberArray[OneDimension],
+    connection_water_rates: NumberArray[OneDimension],
+    connection_gas_rates: NumberArray[OneDimension],
+    oil_formation_volume_factors: NumberArray[OneDimension],
+    water_formation_volume_factors: NumberArray[OneDimension],
+    gas_formation_volume_factors: NumberArray[OneDimension],
+    solution_gas_oil_ratios: NumberArray[OneDimension],
+    stb_to_volume_factor: Number,
+    is_injector: Boolean,
+) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension], NumberArray[OneDimension]]:
+    """
+    Turns each connection's rates at reservoir conditions into rates at surface conditions.
+
+    The gas rate of a producing connection is the total, the gas that flows free plus the gas that
+    its oil carries in solution.
+
+    :param connection_oil_rates: Each connection's oil rate at reservoir conditions.
+    :param connection_water_rates: Each connection's water rate at reservoir conditions.
+    :param connection_gas_rates: Each connection's gas rate at reservoir conditions.
+    :param oil_formation_volume_factors: Oil formation volume factor at each connection.
+    :param water_formation_volume_factors: Water formation volume factor at each connection.
+    :param gas_formation_volume_factors: Gas formation volume factor at each connection.
+    :param solution_gas_oil_ratios: Gas the oil holds in solution at each connection, per
+        stock-tank barrel.
+    :param stb_to_volume_factor: `TubingFluidTable.stb_to_volume_factor`.
+    :param is_injector: Whether the well is an injector, whose oil carries no solution gas out.
+    :returns: Oil, water and total gas rate at surface conditions, one entry per connection.
+    """
+    count = connection_oil_rates.shape[0]
+    oil = np.empty(count, dtype=connection_oil_rates.dtype)
+    water = np.empty(count, dtype=connection_oil_rates.dtype)
+    gas = np.empty(count, dtype=connection_oil_rates.dtype)
+    for idx in range(count):
+        oil[idx] = connection_oil_rates[idx] / oil_formation_volume_factors[idx]
+        water[idx] = connection_water_rates[idx] / water_formation_volume_factors[idx]
+        gas[idx] = connection_gas_rates[idx] / gas_formation_volume_factors[idx]
+        if not is_injector:
+            gas[idx] += oil[idx] * solution_gas_oil_ratios[idx] / stb_to_volume_factor
+    return oil, water, gas  # type: ignore[return-value]
+
+
 def get_pressure_axis(
     *, low: Number, high: Number, point_count: int, dtype: npt.DTypeLike
 ) -> NumberArray[OneDimension]:
@@ -530,6 +659,7 @@ def compile_tubing_fluid_table(
         high = min(float(dataset.oil.pressures.max()), float(dataset.gas.pressures.max()))
     else:
         low, high = float(pressure_range[0]), float(pressure_range[1])
+
     if not high > low:
         raise ValidationError(f"The pressure range ({low}, {high}) is empty.")
     if point_count < 3:
@@ -581,6 +711,32 @@ def compile_tubing_fluid_table(
     solution_ratios = np.maximum.accumulate(columns["solution_gas_oil_ratios"])
     columns["solution_gas_oil_ratios"] = solution_ratios
 
+    # How the oil changes above its bubble point, averaged over a wide step above each node. The
+    # undersaturated curves of the PVT tables are not straight just above the bubble point, so a
+    # narrow step would give a compressibility that is too high.
+    step = 0.1 * (high - low)
+    undersaturated_kwargs = {
+        "solution_gor": solution_ratios,
+        "bubble_point_pressure": oil_pressures,
+    }
+    stepped_pressures = oil_pressures + step
+    stepped_density = read(oil, "density", stepped_pressures, temperature, **undersaturated_kwargs)
+    stepped_formation_volume_factor = read(
+        oil, "formation_volume_factor", stepped_pressures, temperature, **undersaturated_kwargs
+    )
+    stepped_viscosity = read(
+        oil, "viscosity", stepped_pressures, temperature, **undersaturated_kwargs
+    )
+    columns["oil_density_compressibilities"] = (
+        np.log(stepped_density / columns["oil_densities"]) / step
+    )
+    columns["oil_formation_volume_factor_compressibilities"] = (
+        -np.log(stepped_formation_volume_factor / columns["oil_formation_volume_factors"]) / step
+    )
+    columns["oil_viscosity_pressure_coefficients"] = (
+        np.log(stepped_viscosity / columns["oil_viscosities"]) / step
+    )
+
     for name, column in columns.items():
         if not np.all(np.isfinite(column)):
             raise ValidationError(f"The tubing fluid column {name!r} has non-finite values.")
@@ -592,6 +748,7 @@ def compile_tubing_fluid_table(
             np.full(point_count, gas_liquid_surface_tension).astype(resolved_dtype),
         ),
         stb_to_volume_factor=get_stb_to_volume_factor(target),
+        highest_bubble_point_pressure=float(min(highest_bubble_point, high)),
         segment_count=int(segment_count if segment_count is not None else c.TUBING_SEGMENT_COUNT),
         unit_system_tag=UNIT_SYSTEM_TAGS[target],
         **{name: column.astype(resolved_dtype) for name, column in columns.items()},

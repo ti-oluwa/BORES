@@ -114,6 +114,13 @@ class PerforationWorkspace(typing.NamedTuple):
     at this well's current BHP. Overwritten on every call.
     """
 
+    dissolved_gas_ratios: NumberArray[OneDimension]
+    """
+    Gas each connection's oil holds in solution, per volume of oil at surface conditions, in the
+    volume unit that surface oil rates are in. Multiplying a connection's surface oil rate by it
+    gives the gas that oil brings to the surface in solution.
+    """
+
 
 def build_perforation_workspace(
     well_indices: NumberArray[OneDimension],
@@ -124,6 +131,7 @@ def build_perforation_workspace(
     reference_measured_depth: Number,
     connection_conductivities: NumberArray[OneDimension] | None = None,
     d_factor: Number = math.nan,
+    stb_to_volume_factor: Number = 1.0,
     dtype: npt.DTypeLike = None,
 ) -> PerforationWorkspace:
     """
@@ -143,6 +151,9 @@ def build_perforation_workspace(
         `NaN` (the default) if this well has no non-Darcy correction to apply.
     :param d_factor: This well's non-Darcy flow coefficient. `NaN`
         (the default) disables the correction.
+    :param stb_to_volume_factor: Volume of one stock-tank barrel in the volume unit of surface
+        rates, which turns solution gas-oil ratios into gas per volume of surface oil. One
+        (the default) if the ratios are already per volume of surface oil.
     :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
     :returns: `PerforationWorkspace` for this well.
     """
@@ -169,34 +180,40 @@ def build_perforation_workspace(
         well_indices=static_well_indices.copy(),
         static_well_indices=static_well_indices,
         connection_conductivities=typing.cast(
-            "NumberArray[OneDimension]", resolved_connection_conductivities
+            NumberArray[OneDimension], resolved_connection_conductivities
         ),
         d_factor=d_factor,
         connection_fluids=resolved_fluids,
         representative_depths=typing.cast(
-            "NumberArray[OneDimension]",
+            NumberArray[OneDimension],
             np.asarray(representative_depths, dtype=resolved_dtype),
         ),
         representative_measured_depths=typing.cast(
-            "NumberArray[OneDimension]",
+            NumberArray[OneDimension],
             np.asarray(representative_measured_depths, dtype=resolved_dtype),
         ),
         reference_measured_depth=reference_measured_depth,
         inclinations_from_vertical=typing.cast(
-            "NumberArray[OneDimension]",
+            NumberArray[OneDimension],
             np.asarray(inclinations_from_vertical, dtype=resolved_dtype),
         ),
         connection_pressures=typing.cast(
-            "NumberArray[OneDimension]", np.empty(n, dtype=resolved_dtype)
+            NumberArray[OneDimension], np.empty(n, dtype=resolved_dtype)
         ),
         connection_oil_rates=typing.cast(
-            "NumberArray[OneDimension]", np.empty(n, dtype=resolved_dtype)
+            NumberArray[OneDimension], np.empty(n, dtype=resolved_dtype)
         ),
         connection_water_rates=typing.cast(
-            "NumberArray[OneDimension]", np.empty(n, dtype=resolved_dtype)
+            NumberArray[OneDimension], np.empty(n, dtype=resolved_dtype)
         ),
         connection_gas_rates=typing.cast(
-            "NumberArray[OneDimension]", np.zeros(n, dtype=resolved_dtype)
+            NumberArray[OneDimension], np.zeros(n, dtype=resolved_dtype)
+        ),
+        dissolved_gas_ratios=typing.cast(
+            NumberArray[OneDimension],
+            (resolved_fluids.solution_gas_oil_ratios / stb_to_volume_factor).astype(
+                resolved_dtype, copy=False
+            ),
         ),
     )
 
@@ -480,6 +497,7 @@ def accumulate_phase_rates(
     oil_formation_volume_factors: NumberArray[OneDimension],
     water_formation_volume_factors: NumberArray[OneDimension],
     gas_formation_volume_factors: NumberArray[OneDimension],
+    dissolved_gas_ratios: NumberArray[OneDimension],
     relevant_oil: Boolean,
     relevant_water: Boolean,
     relevant_gas: Boolean,
@@ -508,6 +526,7 @@ def accumulate_phase_rates(
     :param oil_formation_volume_factors: `PerforationWorkspace.oil_formation_volume_factors`.
     :param water_formation_volume_factors: `PerforationWorkspace.water_formation_volume_factors`.
     :param gas_formation_volume_factors: `PerforationWorkspace.gas_formation_volume_factors`.
+    :param dissolved_gas_ratios: `PerforationWorkspace.dissolved_gas_ratios`.
     :param relevant_oil: Whether oil counts toward the primary target.
     :param relevant_water: Whether water counts toward the primary target.
     :param relevant_gas: Whether gas counts toward the primary target.
@@ -523,7 +542,10 @@ def accumulate_phase_rates(
     :param out_connection_gas_rates: Gas analogue of `out_connection_oil_rates`.
     :returns: `(oil_rate, water_rate, gas_rate, surface_oil_rate,
         surface_water_rate, surface_gas_rate)` - reservoir- and
-        surface-condition well totals. A non-relevant phase's rate is `0.0`.
+        surface-condition well totals. A non-relevant phase's rate is `0.0`. The surface gas rate
+        of a producer is the total at the surface: the gas that flows free at the connections plus
+        the gas that its oil carries in solution. The reservoir-condition gas rate is the free
+        gas only.
     """
     oil_rate = 0.0
     water_rate = 0.0
@@ -543,7 +565,10 @@ def accumulate_phase_rates(
         if relevant_oil:
             contribution = radial_flow_constant * well_index * oil_mobilities[idx] * drawdown
             oil_rate += contribution
-            surface_oil_rate += contribution / oil_formation_volume_factors[idx]
+            surface_oil_contribution = contribution / oil_formation_volume_factors[idx]
+            surface_oil_rate += surface_oil_contribution
+            if not is_injector:
+                surface_gas_rate += surface_oil_contribution * dissolved_gas_ratios[idx]
             out_connection_oil_rates[idx] = contribution
         else:
             out_connection_oil_rates[idx] = 0.0

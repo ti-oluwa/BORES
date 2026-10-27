@@ -6,6 +6,7 @@ import typing
 
 import numpy as np
 
+from bores.blackoil.pvt.data import get_stb_to_volume_factor
 from bores.errors import StopSimulation, ValidationError, WellConvergenceError
 from bores.types import Integer, NumberArray, OneDimension, P, R
 from bores.wells.compile import (
@@ -211,6 +212,7 @@ def resolve_well_control(
             perforations.connection_conductivities[active_open],
         ),
         d_factor=compiled_system.d_factors[well_row],
+        stb_to_volume_factor=get_stb_to_volume_factor(compiled_system.unit_system),
     )
 
     if is_injector:

@@ -229,7 +229,8 @@ def check_economic_violation(
     :param limits: The full system's `CompiledLimits`.
     :param limits_start: First row of this well's limit range.
     :param limits_end: One past the last row of this well's limit range.
-    :param phase_rates: Well-total phase rates to check.
+    :param phase_rates: Well-total phase rates at surface conditions to check. The gas rate is the
+        total, free and dissolved, so a gas-oil ratio is the one the well produces at the surface.
     :returns: The violated row's index, or `UNSET_INT` if none is violated.
     """
     oil_rate, water_rate, gas_rate = phase_rates.oil, phase_rates.water, phase_rates.gas
@@ -437,7 +438,7 @@ def apply_limits(
         limits=limits,
         limits_start=limits_start,
         limits_end=limits_end,
-        phase_rates=governing_phase_rates,
+        phase_rates=governing_surface_phase_rates,
     )
     if violated_row != UNSET_INT:
         zero = PhaseValues(oil=0.0, water=0.0, gas=0.0)

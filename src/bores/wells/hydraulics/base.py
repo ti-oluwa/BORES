@@ -120,6 +120,16 @@ class WellBoreModel(typing.NamedTuple):
     fluid properties of a `SurfaceSample`.
     """
 
+    tubing_fluids_in_walk: bool = False
+    """
+    Whether the pressure at each connection is also found with the fluids read from
+    `tubing_fluids` at the pressure in the wellbore, rather than at the pressure of the connected
+    cell. Gas that expands and gas that comes out of solution in the wellbore then count in the
+    velocities and densities between connections. Off by default, because the rates and the
+    pressures then depend on each other more strongly, and a well probed at a very low flowing
+    pressure can fail to converge.
+    """
+
     def convert(
         self,
         target: UnitSystem,

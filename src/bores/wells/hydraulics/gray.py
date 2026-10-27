@@ -36,7 +36,12 @@ from bores.wells.hydraulics.base import (
     require_two_phase_surface_properties,
     split_liquid_gas,
 )
-from bores.wells.hydraulics.tubing_fluids import TubingFluidTable, compute_two_phase_flow
+from bores.wells.hydraulics.tubing_fluids import (
+    MARCH_ITERATIONS,
+    TubingFluidTable,
+    compute_connection_surface_rates,
+    compute_two_phase_flow,
+)
 from bores.wells.state import PhaseValues
 
 __all__ = [
@@ -48,6 +53,8 @@ __all__ = [
     "compute_tubing_head_pressure",
     "compute_tubing_head_pressure_from_table",
     "gray_wellbore",
+    "march_segment_from_table",
+    "walk_perforation_pressures_from_table",
 ]
 
 
@@ -566,22 +573,22 @@ def walk_perforation_pressures(
             gas=walk.carried_gas_rates[step],
         )
         phase_densities = PhaseValues(
-            oil=connection_fluids.oil_densities[idx],  # type: ignore
-            water=connection_fluids.water_densities[idx],  # type: ignore
-            gas=connection_fluids.gas_densities[idx],  # type: ignore
+            oil=connection_fluids.oil_densities[idx],  # type: ignore[arg-type]
+            water=connection_fluids.water_densities[idx],  # type: ignore[arg-type]
+            gas=connection_fluids.gas_densities[idx],  # type: ignore[arg-type]
         )
         phase_viscosities = PhaseValues(
-            oil=connection_fluids.oil_viscosities[idx],  # type: ignore
-            water=connection_fluids.water_viscosities[idx],  # type: ignore
-            gas=connection_fluids.gas_viscosities[idx],  # type: ignore
+            oil=connection_fluids.oil_viscosities[idx],  # type: ignore[arg-type]
+            water=connection_fluids.water_viscosities[idx],  # type: ignore[arg-type]
+            gas=connection_fluids.gas_viscosities[idx],  # type: ignore[arg-type]
         )
 
         if remaining_rates.oil + remaining_rates.water + remaining_rates.gas == 0:
             mixture_density = compute_static_mixture_density(
                 phase_saturations=PhaseValues(
-                    oil=connection_fluids.oil_saturations[idx],  # type: ignore
-                    water=connection_fluids.water_saturations[idx],  # type: ignore
-                    gas=connection_fluids.gas_saturations[idx],  # type: ignore
+                    oil=connection_fluids.oil_saturations[idx],  # type: ignore[arg-type]
+                    water=connection_fluids.water_saturations[idx],  # type: ignore[arg-type]
+                    gas=connection_fluids.gas_saturations[idx],  # type: ignore[arg-type]
                 ),
                 phase_densities=phase_densities,
             )
@@ -605,7 +612,7 @@ def walk_perforation_pressures(
             drop = compute_segment_drop(
                 model=model,
                 length=walk.segment_lengths[step],
-                inclination_from_vertical=inclinations_from_vertical[idx],  # type: ignore
+                inclination_from_vertical=inclinations_from_vertical[idx],  # type: ignore[arg-type]
                 superficial_liquid_velocity=compute_superficial_velocity(
                     rate=liquid_rate,
                     tubing_inner_diameter=model.tubing_inner_diameter,
@@ -620,7 +627,7 @@ def walk_perforation_pressures(
                 gas_density=gas_density,
                 liquid_viscosity=liquid_viscosity,
                 gas_viscosity=gas_viscosity,
-                gas_liquid_surface_tension=connection_fluids.gas_liquid_surface_tensions[idx],  # type: ignore
+                gas_liquid_surface_tension=connection_fluids.gas_liquid_surface_tensions[idx],  # type: ignore[arg-type]
             )
             pressures[idx] = (
                 previous_pressure
@@ -799,6 +806,82 @@ def compute_tubing_head_pressure(
 
 
 @numba.njit(cache=True)
+def march_segment_from_table(
+    model: GrayWellbore,
+    pressure: Number,
+    length: Number,
+    inclination_from_vertical: Number,
+    geometric_sign: Number,
+    surface_phase_rates: PhaseValues,
+    tubing_fluids: TubingFluidTable,
+    is_injector: Boolean,
+    sub_segment_count: int,
+) -> Number:
+    """
+    Finds the pressure at the far end of a stretch of the wellbore, by marching along it in
+    equal sub-segments with the fluids of each read from `tubing_fluids` at its own pressure.
+
+    The published correlation neglects acceleration, so none is applied.
+
+    :param model: This well's `GrayWellbore`.
+    :param pressure: Pressure at the near end of the stretch.
+    :param length: Length of the stretch along the wellbore.
+    :param inclination_from_vertical: Inclination of the stretch from vertical, in radians.
+    :param geometric_sign: One if the far end is deeper than the near end, negative one if it is
+        shallower.
+    :param surface_phase_rates: Rate of each phase carried along the stretch, at surface
+        conditions. The gas rate is the total, free and dissolved.
+    :param tubing_fluids: The well's fluid properties against pressure.
+    :param is_injector: Whether this well is an injector.
+    :param sub_segment_count: Number of sub-segments to march in.
+    :returns: Pressure at the far end.
+    """
+    oil_rate = surface_phase_rates.oil
+    water_rate = surface_phase_rates.water
+    gas_rate = surface_phase_rates.gas
+    friction_sign = -1.0 if is_injector else 1.0
+    sub_length = length / sub_segment_count
+    previous_change = 0.0
+    for _ in range(sub_segment_count):
+        end_pressure = pressure + previous_change
+        for _ in range(MARCH_ITERATIONS):
+            mean_pressure = 0.5 * (pressure + end_pressure)
+            # A pressure below the table's lowest is read as the lowest, which a THP search
+            # can probe when a candidate BHP is too low to lift the fluid.
+            local_pressure = max(mean_pressure, tubing_fluids.pressures[0])
+            flow = compute_two_phase_flow(
+                table=tubing_fluids,
+                pressure=local_pressure,
+                surface_oil_rate=oil_rate,
+                surface_water_rate=water_rate,
+                surface_gas_rate=gas_rate,
+                tubing_inner_diameter=model.tubing_inner_diameter,
+                rate_time_factor=model.rate_time_factor,
+            )
+            drop = compute_segment_drop(
+                model=model,
+                length=sub_length,
+                inclination_from_vertical=inclination_from_vertical,
+                superficial_liquid_velocity=flow.superficial_liquid_velocity,
+                superficial_gas_velocity=flow.superficial_gas_velocity,
+                liquid_density=flow.liquid_density,
+                gas_density=flow.gas_density,
+                liquid_viscosity=flow.liquid_viscosity,
+                gas_viscosity=flow.gas_viscosity,
+                gas_liquid_surface_tension=flow.gas_liquid_surface_tension,
+            )
+            next_end_pressure = (
+                pressure
+                + geometric_sign * (drop.hydrostatic + drop.acceleration)
+                + friction_sign * geometric_sign * drop.friction
+            )
+            end_pressure = next_end_pressure
+        previous_change = end_pressure - pressure
+        pressure = end_pressure
+    return pressure
+
+
+@numba.njit(cache=True)
 def compute_tubing_head_pressure_from_table(
     model: GrayWellbore,
     reference_depth: Number,
@@ -812,8 +895,6 @@ def compute_tubing_head_pressure_from_table(
     Computes tubing head pressure by marching up the tubing in segments, with the fluids of each
     segment read from `tubing_fluids` at that segment's own pressure.
 
-    The published correlation neglects acceleration, so none is applied.
-
     :param model: This well's `GrayWellbore`.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param reference_pressure: Pressure at `reference_depth`.
@@ -826,46 +907,134 @@ def compute_tubing_head_pressure_from_table(
     :raises ValueError: If the well has no flow and `static_density` is `NaN`.
     """
     length = abs(0.0 - reference_depth)
-    oil_rate = surface_phase_rates.oil
-    water_rate = surface_phase_rates.water
-    gas_rate = surface_phase_rates.gas
-    if oil_rate + water_rate + gas_rate == 0:
+    if surface_phase_rates.oil + surface_phase_rates.water + surface_phase_rates.gas == 0:
         density = require_static_column_density(density=static_density)
         return (
             reference_pressure
             - density * model.gravitational_acceleration * length * model.hydrostatic_scale
         )
+    return march_segment_from_table(
+        model=model,
+        pressure=reference_pressure,
+        length=length,
+        inclination_from_vertical=0.0,
+        geometric_sign=-1.0,
+        surface_phase_rates=surface_phase_rates,
+        tubing_fluids=tubing_fluids,
+        is_injector=is_injector,
+        sub_segment_count=tubing_fluids.segment_count,
+    )
 
-    friction_sign = -1.0 if is_injector else 1.0
-    segment_length = length / tubing_fluids.segment_count
-    pressure = reference_pressure
-    for _ in range(tubing_fluids.segment_count):
-        end_pressure = pressure
-        for _ in range(3):
-            mean_pressure = 0.5 * (pressure + end_pressure)
-            flow = compute_two_phase_flow(
-                table=tubing_fluids,
-                pressure=mean_pressure,
-                surface_oil_rate=oil_rate,
-                surface_water_rate=water_rate,
-                surface_gas_rate=gas_rate,
-                tubing_inner_diameter=model.tubing_inner_diameter,
-                rate_time_factor=model.rate_time_factor,
+
+@numba.njit(cache=True)
+def walk_perforation_pressures_from_table(
+    model: GrayWellbore,
+    reference_depth: Number,
+    reference_measured_depth: Number,
+    reference_pressure: Number,
+    connection_oil_rates: NumberArray[OneDimension],
+    connection_water_rates: NumberArray[OneDimension],
+    connection_gas_rates: NumberArray[OneDimension],
+    representative_depths: NumberArray[OneDimension],
+    representative_measured_depths: NumberArray[OneDimension],
+    inclinations_from_vertical: NumberArray[OneDimension],
+    connection_fluids: ConnectionFluids,
+    tubing_fluids: TubingFluidTable,
+    is_injector: Boolean,
+    pressures: NumberArray[OneDimension],
+) -> None:
+    """
+    Writes the flowing pressure at each connection into `pressures`, walking outward from
+    `reference_depth` as `walk_perforation_pressures` does, but with the fluids in every stretch
+    of the wellbore read from `tubing_fluids` at the pressure there.
+
+    The rates are turned into surface-condition rates first, so that the gas that expands and the
+    gas that comes out of solution at the lower pressure inside the wellbore is counted, rather
+    than the volumes at the pressure of the connected cell. A stretch with no flow holds the
+    saturation-weighted reservoir fluid of the connection it ends at.
+
+    :param model: This well's `GrayWellbore`.
+    :param reference_depth: The well's BHP/THP reporting datum.
+    :param reference_measured_depth: Measured depth along the wellbore of `reference_depth`.
+    :param reference_pressure: Pressure at `reference_depth`.
+    :param connection_oil_rates: Each connection's own oil rate, at reservoir conditions.
+    :param connection_water_rates: Each connection's own water rate, at reservoir conditions.
+    :param connection_gas_rates: Each connection's own gas rate, at reservoir conditions.
+    :param representative_depths: One vertical depth per connection.
+    :param representative_measured_depths: One measured depth along the wellbore per connection.
+    :param inclinations_from_vertical: One inclination per connection, in radians.
+    :param connection_fluids: Reservoir conditions at each connection.
+    :param tubing_fluids: The well's fluid properties against pressure.
+    :param is_injector: Whether this well is an injector.
+    :param pressures: Output array, one entry per connection.
+    :raises ValueError: If a connection with no flow beneath it has saturations that sum to zero.
+    """
+    surface_oil_rates, surface_water_rates, surface_gas_rates = compute_connection_surface_rates(
+        connection_oil_rates=connection_oil_rates,
+        connection_water_rates=connection_water_rates,
+        connection_gas_rates=connection_gas_rates,
+        oil_formation_volume_factors=connection_fluids.oil_formation_volume_factors,
+        water_formation_volume_factors=connection_fluids.water_formation_volume_factors,
+        gas_formation_volume_factors=connection_fluids.gas_formation_volume_factors,
+        solution_gas_oil_ratios=connection_fluids.solution_gas_oil_ratios,
+        stb_to_volume_factor=tubing_fluids.stb_to_volume_factor,
+        is_injector=is_injector,
+    )
+    walk = plan_connection_walk(
+        reference_depth=reference_depth,
+        reference_measured_depth=reference_measured_depth,
+        representative_depths=representative_depths,
+        representative_measured_depths=representative_measured_depths,
+        connection_oil_rates=surface_oil_rates,
+        connection_water_rates=surface_water_rates,
+        connection_gas_rates=surface_gas_rates,
+    )
+    target_length = np.sum(walk.segment_lengths) / tubing_fluids.segment_count
+    for step in range(walk.connection_indices.shape[0]):
+        idx = walk.connection_indices[step]
+        previous = walk.previous_indices[step]
+        previous_pressure = reference_pressure if previous < 0 else pressures[previous]
+        geometric_sign = walk.geometric_signs[step]
+        remaining_rates = PhaseValues(
+            oil=walk.carried_oil_rates[step],
+            water=walk.carried_water_rates[step],
+            gas=walk.carried_gas_rates[step],
+        )
+        if remaining_rates.oil + remaining_rates.water + remaining_rates.gas == 0:
+            mixture_density = compute_static_mixture_density(
+                phase_saturations=PhaseValues(
+                    oil=connection_fluids.oil_saturations[idx],  # type: ignore[arg-type]
+                    water=connection_fluids.water_saturations[idx],  # type: ignore[arg-type]
+                    gas=connection_fluids.gas_saturations[idx],  # type: ignore[arg-type]
+                ),
+                phase_densities=PhaseValues(
+                    oil=connection_fluids.oil_densities[idx],  # type: ignore[arg-type]
+                    water=connection_fluids.water_densities[idx],  # type: ignore[arg-type]
+                    gas=connection_fluids.gas_densities[idx],  # type: ignore[arg-type]
+                ),
             )
-            drop = compute_segment_drop(
+            pressures[idx] = (
+                previous_pressure
+                + geometric_sign
+                * mixture_density
+                * model.gravitational_acceleration
+                * walk.vertical_distances[step]
+                * model.hydrostatic_scale
+            )
+        else:
+            sub_segment_count = 1
+            if target_length > 0.0:
+                sub_segment_count = max(
+                    1, int(np.ceil(walk.segment_lengths[step] / target_length))
+                )
+            pressures[idx] = march_segment_from_table(
                 model=model,
-                length=segment_length,
-                inclination_from_vertical=0.0,
-                superficial_liquid_velocity=flow.superficial_liquid_velocity,
-                superficial_gas_velocity=flow.superficial_gas_velocity,
-                liquid_density=flow.liquid_density,
-                gas_density=flow.gas_density,
-                liquid_viscosity=flow.liquid_viscosity,
-                gas_viscosity=flow.gas_viscosity,
-                gas_liquid_surface_tension=flow.gas_liquid_surface_tension,
+                pressure=previous_pressure,  # type: ignore[arg-type]
+                length=walk.segment_lengths[step],
+                inclination_from_vertical=inclinations_from_vertical[idx],  # type: ignore[arg-type]
+                geometric_sign=geometric_sign,
+                surface_phase_rates=remaining_rates,
+                tubing_fluids=tubing_fluids,
+                is_injector=is_injector,
+                sub_segment_count=sub_segment_count,
             )
-            end_pressure = (
-                pressure - (drop.hydrostatic + drop.acceleration) - friction_sign * drop.friction
-            )
-        pressure = end_pressure
-    return pressure

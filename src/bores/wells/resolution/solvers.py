@@ -15,6 +15,7 @@ from bores.wells.hydraulics.base import (
     get_hydrostatic_divisor,
 )
 from bores.wells.hydraulics.hydrostatic import get_pressure_per_density_and_depth
+from bores.wells.hydraulics.tubing_fluids import TubingFluidTable
 from bores.wells.resolution.fixed_point import (
     FIXED_POINT_SOLVERS,
     RATE_BISECTORS,
@@ -145,6 +146,13 @@ class FixedPointSetup(typing.NamedTuple):
     bisect: FixedPointBisector
     """The compiled rate bisection, with the same pressure profile as `solve`."""
 
+    tubing_fluids: TubingFluidTable | None = None
+    """
+    The well's `TubingFluidTable`, for the `"hydraulic"` kind, if it has one. The pressure at each
+    connection is then found with the fluids read at the pressure in the wellbore. `None`
+    otherwise.
+    """
+
 
 def get_fixed_point_setup(*, tubing: WellTubing, control_spec: WellControlSpec) -> FixedPointSetup:
     """
@@ -172,6 +180,7 @@ def get_fixed_point_setup(*, tubing: WellTubing, control_spec: WellControlSpec) 
             unit_scale=get_hydrostatic_divisor(wellbore.options.unit_system),
             solve=solve,
             bisect=bisect,
+            tubing_fluids=wellbore.tubing_fluids if wellbore.tubing_fluids_in_walk else None,
         )
     if pressure_mode == ConnectionPressureMode.HYDRAULIC:
         raise ValidationError(
@@ -304,6 +313,7 @@ def solve_connection_pressures_and_rates(
             radial_flow_constant=radial_flow_constant,
             max_iterations=max_iterations,
             tolerance=tolerance,
+            tubing_fluids=setup.tubing_fluids,
         )
     elif setup.kind == "hydrostatic":
         assert setup.unit_scale is not None
@@ -416,6 +426,7 @@ def bisect_rate_bhp(
             reservoir_condition=target_rate_condition == "reservoir",
             max_bisections=control_spec.max_bisection_iterations,
             rate_tolerance=control_spec.rate_convergence_tolerance,
+            tubing_fluids=setup.tubing_fluids,
         )
     elif setup.kind == "hydrostatic":
         assert setup.unit_scale is not None

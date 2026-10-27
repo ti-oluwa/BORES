@@ -56,19 +56,20 @@ class GroupEconomicLimitOutcome(typing.NamedTuple):
     """
 
 
-def aggregate_member_rates(
+def aggregate_member_rates(  # TODO: Possible njit candidate
     *, workspace: WellsWorkspace, open_member_wells: typing.Sequence[Integer]
 ) -> PhaseValues:
     """
-    Sums already-resolved reservoir-condition rates over `open_member_wells`.
+    Sums already-resolved surface-condition rates over `open_member_wells`, which is what
+    economic limits are written against. The gas rate is the total, free and dissolved.
 
     :param workspace: Supplies each member well's own resolved rates.
     :param open_member_wells: Rows to sum over.
     :returns: The group's current aggregate `PhaseValues`.
     """
-    oil = sum(workspace.oil_rates[i] for i in open_member_wells)
-    water = sum(workspace.water_rates[i] for i in open_member_wells)
-    gas = sum(workspace.gas_rates[i] for i in open_member_wells)
+    oil = sum(workspace.surface_oil_rates[i] for i in open_member_wells)
+    water = sum(workspace.surface_water_rates[i] for i in open_member_wells)
+    gas = sum(workspace.surface_gas_rates[i] for i in open_member_wells)
     return PhaseValues(oil=oil, water=water, gas=gas)
 
 
@@ -234,6 +235,8 @@ def enforce_group_economic_limits(
 
     group_row = group_controls.group_row(name=group_name)
 
+    # TODO: Possible application of njit from here downward (can be section or parts,
+    # njitted separately of the whole thing). Just like in `redistribute_group_shortfall`
     group_limits = group_controls.limits
     limits_start = group_limits.group_offsets[group_row]
     limits_end = group_limits.group_offsets[group_row + 1]

@@ -78,6 +78,8 @@ def allocate_group_targets(
 
     group_row = group_controls.group_row(name=group_name)
 
+    # TODO: Possible application of njit from here downward (can be section or parts,
+    # njitted separately of the whole thing). Just like in `redistribute_group_shortfall`
     group_kind = group_controls.group_kinds[group_row]
     group_mode = group_controls.control_modes[group_row]
     is_injection = group_kind == GroupKind.INJECTOR
