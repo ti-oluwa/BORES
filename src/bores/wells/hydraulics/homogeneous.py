@@ -11,6 +11,7 @@ from bores.constants import c
 from bores.types import (
     Boolean,
     FrictionMethod,
+    Integer,
     Number,
     NumberArray,
     OneDimension,
@@ -375,13 +376,13 @@ def walk_perforation_pressures(
             pressures[idx] = previous_pressure + geometric_sign * hydrostatic
         else:
             mixture_density = compute_mixture_density(
-                phase_rates=remaining_rates, phase_densities=phase_densities
+                rates=remaining_rates, phase_densities=phase_densities
             )
             mixture_viscosity = compute_mixture_viscosity(
-                phase_rates=remaining_rates, phase_viscosities=phase_viscosities
+                rates=remaining_rates, phase_viscosities=phase_viscosities
             )
             velocity = compute_mixture_velocity(
-                phase_rates=remaining_rates,
+                rates=remaining_rates,
                 tubing_inner_diameter=model.tubing_inner_diameter,
                 rate_time_factor=model.rate_time_factor,
             )
@@ -492,7 +493,7 @@ def compute_tubing_head_pressure(
     model: HomogeneousWellbore,
     reference_depth: Number,
     reference_pressure: Number,
-    phase_rates: PhaseValues,
+    rates: PhaseValues,
     surface_sample: SurfaceSample,
     is_injector: Boolean,
 ) -> Number:
@@ -502,7 +503,7 @@ def compute_tubing_head_pressure(
     :param model: This well's `HomogeneousWellbore`.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param reference_pressure: Pressure at `reference_depth`.
-    :param phase_rates: Rate of each phase, at reservoir conditions.
+    :param rates: Rate of each phase, at reservoir conditions.
     :param surface_sample: Fluid properties at surface conditions. Needs a mixture density and
         viscosity, or all three phase densities and viscosities. A well with no flow needs the
         mixture density.
@@ -513,7 +514,7 @@ def compute_tubing_head_pressure(
         and no mixture density was given.
     """
     dz = 0.0 - reference_depth
-    total_rate = phase_rates.oil + phase_rates.water + phase_rates.gas
+    total_rate = rates.oil + rates.water + rates.gas
     friction_sign = -1.0 if is_injector else 1.0
 
     if total_rate == 0:
@@ -526,15 +527,15 @@ def compute_tubing_head_pressure(
     mixture_density = compute_surface_mixture_density(
         density=surface_sample.density,
         phase_densities=surface_sample.phase_densities,
-        phase_rates=phase_rates,
+        rates=rates,
     )
     mixture_viscosity = compute_surface_mixture_viscosity(
         viscosity=surface_sample.viscosity,
         phase_viscosities=surface_sample.phase_viscosities,
-        phase_rates=phase_rates,
+        rates=rates,
     )
     velocity = compute_mixture_velocity(
-        phase_rates=phase_rates,
+        rates=rates,
         tubing_inner_diameter=model.tubing_inner_diameter,
         rate_time_factor=model.rate_time_factor,
     )
@@ -558,14 +559,14 @@ def march_segment_from_table(
     length: Number,
     inclination_from_vertical: Number,
     geometric_sign: Number,
-    surface_phase_rates: PhaseValues,
-    tubing_fluids: TubingFluidTable,
+    surface_rates: PhaseValues,
+    tubing_fluid_table: TubingFluidTable,
     is_injector: Boolean,
-    sub_segment_count: int,
+    sub_segment_count: Integer,
 ) -> Number:
     """
     Finds the pressure at the far end of a stretch of the wellbore, by marching along it in
-    equal sub-segments with the fluids of each read from `tubing_fluids` at its own pressure.
+    equal sub-segments with the fluids of each read from `tubing_fluid_table` at its own pressure.
 
     The mixture velocity, density and viscosity of a sub-segment are taken at its mean pressure,
     from the same volumes of oil, water and free gas. Acceleration is the mass flux times the
@@ -577,22 +578,22 @@ def march_segment_from_table(
     :param inclination_from_vertical: Inclination of the stretch from vertical, in radians.
     :param geometric_sign: One if the far end is deeper than the near end, negative one if it is
         shallower.
-    :param surface_phase_rates: Rate of each phase carried along the stretch, at surface
+    :param surface_rates: Rate of each phase carried along the stretch, at surface
         conditions. The gas rate is the total, free and dissolved.
-    :param tubing_fluids: The well's fluid properties against pressure.
+    :param tubing_fluid_table: The well's fluid properties against pressure.
     :param is_injector: Whether this well is an injector.
     :param sub_segment_count: Number of sub-segments to march in.
     :returns: Pressure at the far end.
     """
-    oil_rate = surface_phase_rates.oil
-    water_rate = surface_phase_rates.water
-    gas_rate = surface_phase_rates.gas
+    oil_rate = surface_rates.oil
+    water_rate = surface_rates.water
+    gas_rate = surface_rates.gas
     friction_sign = -1.0 if is_injector else 1.0
     sub_length = length / sub_segment_count
     previous_change = 0.0
     for _ in range(sub_segment_count):
         start = compute_no_slip_mixture(
-            table=tubing_fluids,
+            table=tubing_fluid_table,
             pressure=pressure,
             surface_oil_rate=oil_rate,
             surface_water_rate=water_rate,
@@ -603,7 +604,7 @@ def march_segment_from_table(
         end_pressure = pressure + previous_change
         for _ in range(MARCH_ITERATIONS):
             middle = compute_no_slip_mixture(
-                table=tubing_fluids,
+                table=tubing_fluid_table,
                 pressure=0.5 * (pressure + end_pressure),
                 surface_oil_rate=oil_rate,
                 surface_water_rate=water_rate,
@@ -612,7 +613,7 @@ def march_segment_from_table(
                 rate_time_factor=model.rate_time_factor,
             )
             end = compute_no_slip_mixture(
-                table=tubing_fluids,
+                table=tubing_fluid_table,
                 pressure=end_pressure,
                 surface_oil_rate=oil_rate,
                 surface_water_rate=water_rate,
@@ -647,28 +648,28 @@ def compute_tubing_head_pressure_from_table(
     model: HomogeneousWellbore,
     reference_depth: Number,
     reference_pressure: Number,
-    surface_phase_rates: PhaseValues,
-    tubing_fluids: TubingFluidTable,
+    surface_rates: PhaseValues,
+    tubing_fluid_table: TubingFluidTable,
     is_injector: Boolean,
     static_density: Number,
 ) -> Number:
     """
     Computes tubing head pressure by marching up the tubing in segments, with the fluids of each
-    segment read from `tubing_fluids` at that segment's own pressure.
+    segment read from `tubing_fluid_table` at that segment's own pressure.
 
     :param model: This well's `HomogeneousWellbore`.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param reference_pressure: Pressure at `reference_depth`.
-    :param surface_phase_rates: Rate of each phase at surface conditions. The gas rate is the
+    :param surface_rates: Rate of each phase at surface conditions. The gas rate is the
         total, free and dissolved.
-    :param tubing_fluids: The well's fluid properties against pressure.
+    :param tubing_fluid_table: The well's fluid properties against pressure.
     :param is_injector: Whether this well is an injector.
     :param static_density: Density of the column when the well has no flow. `NaN` if unknown.
     :returns: Tubing head pressure.
     :raises ValueError: If the well has no flow and `static_density` is `NaN`.
     """
     length = abs(0.0 - reference_depth)
-    if surface_phase_rates.oil + surface_phase_rates.water + surface_phase_rates.gas == 0:
+    if surface_rates.oil + surface_rates.water + surface_rates.gas == 0:
         density = require_static_column_density(density=static_density)
         return (
             reference_pressure
@@ -680,10 +681,10 @@ def compute_tubing_head_pressure_from_table(
         length=length,
         inclination_from_vertical=0.0,
         geometric_sign=-1.0,
-        surface_phase_rates=surface_phase_rates,
-        tubing_fluids=tubing_fluids,
+        surface_rates=surface_rates,
+        tubing_fluid_table=tubing_fluid_table,
         is_injector=is_injector,
-        sub_segment_count=tubing_fluids.segment_count,
+        sub_segment_count=tubing_fluid_table.segment_count,
     )
 
 
@@ -700,14 +701,14 @@ def walk_perforation_pressures_from_table(
     representative_measured_depths: NumberArray[OneDimension],
     inclinations_from_vertical: NumberArray[OneDimension],
     connection_fluids: ConnectionFluids,
-    tubing_fluids: TubingFluidTable,
+    tubing_fluid_table: TubingFluidTable,
     is_injector: Boolean,
     pressures: NumberArray[OneDimension],
 ) -> None:
     """
     Writes the flowing pressure at each connection into `pressures`, walking outward from
     `reference_depth` as `walk_perforation_pressures` does, but with the fluids in every stretch
-    of the wellbore read from `tubing_fluids` at the pressure there.
+    of the wellbore read from `tubing_fluid_table` at the pressure there.
 
     The rates are turned into surface-condition rates first, so that the gas that expands and the
     gas that comes out of solution at the lower pressure inside the wellbore is counted, rather
@@ -725,7 +726,7 @@ def walk_perforation_pressures_from_table(
     :param representative_measured_depths: One measured depth along the wellbore per connection.
     :param inclinations_from_vertical: One inclination per connection, in radians.
     :param connection_fluids: Reservoir conditions at each connection.
-    :param tubing_fluids: The well's fluid properties against pressure.
+    :param tubing_fluid_table: The well's fluid properties against pressure.
     :param is_injector: Whether this well is an injector.
     :param pressures: Output array, one entry per connection.
     :raises ValueError: If a connection with no flow beneath it has saturations that sum to zero.
@@ -738,7 +739,7 @@ def walk_perforation_pressures_from_table(
         water_formation_volume_factors=connection_fluids.water_formation_volume_factors,
         gas_formation_volume_factors=connection_fluids.gas_formation_volume_factors,
         solution_gas_oil_ratios=connection_fluids.solution_gas_oil_ratios,
-        stb_to_volume_factor=tubing_fluids.stb_to_volume_factor,
+        stb_to_volume_factor=tubing_fluid_table.stb_to_volume_factor,
         is_injector=is_injector,
     )
     walk = plan_connection_walk(
@@ -750,7 +751,7 @@ def walk_perforation_pressures_from_table(
         connection_water_rates=surface_water_rates,
         connection_gas_rates=surface_gas_rates,
     )
-    target_length = np.sum(walk.segment_lengths) / tubing_fluids.segment_count
+    target_length = np.sum(walk.segment_lengths) / tubing_fluid_table.segment_count
     for step in range(walk.connection_indices.shape[0]):
         idx = walk.connection_indices[step]
         previous = walk.previous_indices[step]
@@ -794,8 +795,8 @@ def walk_perforation_pressures_from_table(
                 length=walk.segment_lengths[step],
                 inclination_from_vertical=inclinations_from_vertical[idx],  # type: ignore
                 geometric_sign=geometric_sign,
-                surface_phase_rates=remaining_rates,
-                tubing_fluids=tubing_fluids,
+                surface_rates=remaining_rates,
+                tubing_fluid_table=tubing_fluid_table,
                 is_injector=is_injector,
                 sub_segment_count=sub_segment_count,
             )

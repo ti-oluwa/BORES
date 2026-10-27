@@ -208,7 +208,7 @@ def solve_homogeneous(
     radial_flow_constant: Number,
     max_iterations: Integer,
     tolerance: Number,
-    tubing_fluids: TubingFluidTable | None = None,
+    tubing_fluid_table: TubingFluidTable | None = None,
 ) -> FixedPointResult:
     """
     Solves a well's connection pressures and rates together, with the pressure profile from the
@@ -276,7 +276,7 @@ def solve_homogeneous(
             radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
-        if tubing_fluids is None:
+        if tubing_fluid_table is None:
             walk_homogeneous(
                 model=model,
                 reference_depth=reference_depth,
@@ -308,7 +308,7 @@ def solve_homogeneous(
                 connection_fluids=workspace.connection_fluids,
                 is_injector=is_injector,
                 pressures=workspace.connection_pressures,
-                tubing_fluids=tubing_fluids,
+                tubing_fluid_table=tubing_fluid_table,
             )
         if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
@@ -344,7 +344,7 @@ def solve_beggs_and_brill(
     radial_flow_constant: Number,
     max_iterations: Integer,
     tolerance: Number,
-    tubing_fluids: TubingFluidTable | None = None,
+    tubing_fluid_table: TubingFluidTable | None = None,
 ) -> FixedPointResult:
     """
     Solves a well's connection pressures and rates together, with the pressure profile from the
@@ -412,7 +412,7 @@ def solve_beggs_and_brill(
             radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
-        if tubing_fluids is None:
+        if tubing_fluid_table is None:
             walk_beggs_and_brill(
                 model=model,
                 reference_depth=reference_depth,
@@ -444,7 +444,7 @@ def solve_beggs_and_brill(
                 connection_fluids=workspace.connection_fluids,
                 is_injector=is_injector,
                 pressures=workspace.connection_pressures,
-                tubing_fluids=tubing_fluids,
+                tubing_fluid_table=tubing_fluid_table,
             )
         if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
@@ -480,7 +480,7 @@ def solve_hagedorn_brown(
     radial_flow_constant: Number,
     max_iterations: Integer,
     tolerance: Number,
-    tubing_fluids: TubingFluidTable | None = None,
+    tubing_fluid_table: TubingFluidTable | None = None,
 ) -> FixedPointResult:
     """
     Solves a well's connection pressures and rates together, with the pressure profile from the
@@ -548,7 +548,7 @@ def solve_hagedorn_brown(
             radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
-        if tubing_fluids is None:
+        if tubing_fluid_table is None:
             walk_hagedorn_brown(
                 model=model,
                 reference_depth=reference_depth,
@@ -580,7 +580,7 @@ def solve_hagedorn_brown(
                 connection_fluids=workspace.connection_fluids,
                 is_injector=is_injector,
                 pressures=workspace.connection_pressures,
-                tubing_fluids=tubing_fluids,
+                tubing_fluid_table=tubing_fluid_table,
             )
         if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
@@ -616,7 +616,7 @@ def solve_gray(
     radial_flow_constant: Number,
     max_iterations: Integer,
     tolerance: Number,
-    tubing_fluids: TubingFluidTable | None = None,
+    tubing_fluid_table: TubingFluidTable | None = None,
 ) -> FixedPointResult:
     """
     Solves a well's connection pressures and rates together, with the pressure profile from the
@@ -684,7 +684,7 @@ def solve_gray(
             radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
-        if tubing_fluids is None:
+        if tubing_fluid_table is None:
             walk_gray(
                 model=model,
                 reference_depth=reference_depth,
@@ -716,7 +716,7 @@ def solve_gray(
                 connection_fluids=workspace.connection_fluids,
                 is_injector=is_injector,
                 pressures=workspace.connection_pressures,
-                tubing_fluids=tubing_fluids,
+                tubing_fluid_table=tubing_fluid_table,
             )
         if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
@@ -752,7 +752,7 @@ def solve_woldesemayat_ghajar(
     radial_flow_constant: Number,
     max_iterations: Integer,
     tolerance: Number,
-    tubing_fluids: TubingFluidTable | None = None,
+    tubing_fluid_table: TubingFluidTable | None = None,
 ) -> FixedPointResult:
     """
     Solves a well's connection pressures and rates together, with the pressure profile from the
@@ -820,7 +820,7 @@ def solve_woldesemayat_ghajar(
             radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
-        if tubing_fluids is None:
+        if tubing_fluid_table is None:
             walk_woldesemayat_ghajar(
                 model=model,
                 reference_depth=reference_depth,
@@ -852,7 +852,7 @@ def solve_woldesemayat_ghajar(
                 connection_fluids=workspace.connection_fluids,
                 is_injector=is_injector,
                 pressures=workspace.connection_pressures,
-                tubing_fluids=tubing_fluids,
+                tubing_fluid_table=tubing_fluid_table,
             )
         if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
@@ -1084,7 +1084,7 @@ def bisect_homogeneous(
     reservoir_condition: Boolean,
     max_bisections: Integer,
     rate_tolerance: Number,
-    tubing_fluids: TubingFluidTable | None = None,
+    tubing_fluid_table: TubingFluidTable | None = None,
 ) -> BisectionResult:
     """
     Finds the reference pressure at which a well's total rate matches a target, with the pressure
@@ -1144,7 +1144,7 @@ def bisect_homogeneous(
             radial_flow_constant=radial_flow_constant,
             max_iterations=max_iterations,
             tolerance=tolerance,
-            tubing_fluids=tubing_fluids,
+            tubing_fluid_table=tubing_fluid_table,
         )
         if not result.converged:
             return BisectionResult(bhp=average, result=result)
@@ -1180,7 +1180,7 @@ def bisect_beggs_and_brill(
     reservoir_condition: Boolean,
     max_bisections: Integer,
     rate_tolerance: Number,
-    tubing_fluids: TubingFluidTable | None = None,
+    tubing_fluid_table: TubingFluidTable | None = None,
 ) -> BisectionResult:
     """
     Finds the reference pressure at which a well's total rate matches a target, with the pressure
@@ -1240,7 +1240,7 @@ def bisect_beggs_and_brill(
             radial_flow_constant=radial_flow_constant,
             max_iterations=max_iterations,
             tolerance=tolerance,
-            tubing_fluids=tubing_fluids,
+            tubing_fluid_table=tubing_fluid_table,
         )
         if not result.converged:
             return BisectionResult(bhp=average, result=result)
@@ -1276,7 +1276,7 @@ def bisect_hagedorn_brown(
     reservoir_condition: Boolean,
     max_bisections: Integer,
     rate_tolerance: Number,
-    tubing_fluids: TubingFluidTable | None = None,
+    tubing_fluid_table: TubingFluidTable | None = None,
 ) -> BisectionResult:
     """
     Finds the reference pressure at which a well's total rate matches a target, with the pressure
@@ -1336,7 +1336,7 @@ def bisect_hagedorn_brown(
             radial_flow_constant=radial_flow_constant,
             max_iterations=max_iterations,
             tolerance=tolerance,
-            tubing_fluids=tubing_fluids,
+            tubing_fluid_table=tubing_fluid_table,
         )
         if not result.converged:
             return BisectionResult(bhp=average, result=result)
@@ -1372,7 +1372,7 @@ def bisect_gray(
     reservoir_condition: Boolean,
     max_bisections: Integer,
     rate_tolerance: Number,
-    tubing_fluids: TubingFluidTable | None = None,
+    tubing_fluid_table: TubingFluidTable | None = None,
 ) -> BisectionResult:
     """
     Finds the reference pressure at which a well's total rate matches a target, with the pressure
@@ -1432,7 +1432,7 @@ def bisect_gray(
             radial_flow_constant=radial_flow_constant,
             max_iterations=max_iterations,
             tolerance=tolerance,
-            tubing_fluids=tubing_fluids,
+            tubing_fluid_table=tubing_fluid_table,
         )
         if not result.converged:
             return BisectionResult(bhp=average, result=result)
@@ -1468,7 +1468,7 @@ def bisect_woldesemayat_ghajar(
     reservoir_condition: Boolean,
     max_bisections: Integer,
     rate_tolerance: Number,
-    tubing_fluids: TubingFluidTable | None = None,
+    tubing_fluid_table: TubingFluidTable | None = None,
 ) -> BisectionResult:
     """
     Finds the reference pressure at which a well's total rate matches a target, with the pressure
@@ -1528,7 +1528,7 @@ def bisect_woldesemayat_ghajar(
             radial_flow_constant=radial_flow_constant,
             max_iterations=max_iterations,
             tolerance=tolerance,
-            tubing_fluids=tubing_fluids,
+            tubing_fluid_table=tubing_fluid_table,
         )
         if not result.converged:
             return BisectionResult(bhp=average, result=result)
@@ -1732,7 +1732,7 @@ class HydraulicSolver(typing.Protocol):
         radial_flow_constant: Number,
         max_iterations: Integer,
         tolerance: Number,
-        tubing_fluids: TubingFluidTable | None,
+        tubing_fluid_table: TubingFluidTable | None,
     ) -> FixedPointResult: ...
 
 
@@ -1758,7 +1758,7 @@ class HydraulicBisector(typing.Protocol):
         reservoir_condition: Boolean,
         max_bisections: Integer,
         rate_tolerance: Number,
-        tubing_fluids: TubingFluidTable | None,
+        tubing_fluid_table: TubingFluidTable | None,
     ) -> BisectionResult: ...
 
 

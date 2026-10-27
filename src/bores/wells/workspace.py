@@ -646,7 +646,7 @@ def load_wells_states(
                     perforation=rich_perforations[row - row_start],
                     cell_index=perforations.cell_indices[row],
                     flowing_pressure=pressure,
-                    phase_rates=PhaseValues(
+                    rates=PhaseValues(
                         oil=workspace.connection_oil_rates[row],
                         water=workspace.connection_water_rates[row],
                         gas=workspace.connection_gas_rates[row],
@@ -668,12 +668,12 @@ def load_wells_states(
             active_control=decompile_well_control(controls, well_row, unit_system),
             bhp=bhp,
             perforation_states=tuple(perforation_states),
-            phase_rates=PhaseValues(
+            rates=PhaseValues(
                 oil=workspace.oil_rates[well_row],
                 water=workspace.water_rates[well_row],
                 gas=workspace.gas_rates[well_row],
             ),
-            surface_phase_rates=PhaseValues(
+            surface_rates=PhaseValues(
                 oil=workspace.surface_oil_rates[well_row],
                 water=workspace.surface_water_rates[well_row],
                 gas=workspace.surface_gas_rates[well_row],

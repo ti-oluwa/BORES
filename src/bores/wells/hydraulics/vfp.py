@@ -1284,20 +1284,20 @@ def compute_surface_phase_rates(
 
 def compute_reservoir_phase_rates(
     *,
-    surface_phase_rates: PhaseValues,
+    surface_rates: PhaseValues,
     formation_volume_factors: PhaseValues,
 ) -> PhaseValues:
     """
     Reservoir-condition phase rates from surface-condition ones.
 
-    :param surface_phase_rates: Surface-condition oil, water and gas rates.
+    :param surface_rates: Surface-condition oil, water and gas rates.
     :param formation_volume_factors: Oil, water and gas formation volume factors.
     :returns: Reservoir-condition phase rates.
     """
     return PhaseValues(
-        oil=surface_phase_rates.oil * formation_volume_factors.oil,
-        water=surface_phase_rates.water * formation_volume_factors.water,
-        gas=surface_phase_rates.gas * formation_volume_factors.gas,
+        oil=surface_rates.oil * formation_volume_factors.oil,
+        water=surface_rates.water * formation_volume_factors.water,
+        gas=surface_rates.gas * formation_volume_factors.gas,
     )
 
 
@@ -1305,8 +1305,8 @@ def bisect_bhp_for_thp(
     *,
     wellbore: WellBoreModel,
     reference_depth: Number,
-    phase_rates: PhaseValues,
-    surface_phase_rates: PhaseValues,
+    rates: PhaseValues,
+    surface_rates: PhaseValues,
     surface_sample: SurfaceSample | None,
     is_injector: bool,
     target_thp: Number,
@@ -1319,12 +1319,12 @@ def bisect_bhp_for_thp(
     bhp = 0.5 * (low + high)
     for _ in range(max_iterations):
         bhp = 0.5 * (low + high)
-        if wellbore.tubing_fluids is not None:
+        if wellbore.tubing_fluid_table is not None:
             thp = compute_tubing_head_pressure_from_table(
                 wellbore=wellbore,
                 reference_depth=reference_depth,
                 reference_pressure=bhp,
-                surface_phase_rates=surface_phase_rates,
+                surface_rates=surface_rates,
                 is_injector=is_injector,
                 static_density=surface_sample.density if surface_sample is not None else math.nan,
             )
@@ -1334,7 +1334,7 @@ def bisect_bhp_for_thp(
                 wellbore=wellbore,
                 reference_depth=reference_depth,
                 reference_pressure=bhp,
-                phase_rates=phase_rates,
+                rates=rates,
                 surface_sample=surface_sample,
                 is_injector=is_injector,
             )
@@ -1399,7 +1399,7 @@ def as_vfp_table(
     :param flow_rates: Flow rate axis, at surface conditions, in the terms of `flow_type`.
     :param thps: Tubing head pressure axis to solve BHP for.
     :param surface_sample: Fixed surface fluid properties used for every grid point. Not needed
-        if `wellbore` has `tubing_fluids`, which then give the fluids at every pressure, and
+        if `wellbore` has `tubing_fluid_table`, which then give the fluids at every pressure, and
         the grid is sampled from surface-condition rates directly.
     :param flow_type: What `flow_rates` measures. For a producer, liquid rate if not given.
         For an injector, the phase of `injected_phase`.
@@ -1429,8 +1429,10 @@ def as_vfp_table(
         don't describe non-negative phase rates.
     """
     is_injector = well_type == WellType.INJECTOR
-    if surface_sample is None and wellbore.tubing_fluids is None:
-        raise ValidationError("`surface_sample` is needed when `wellbore` has no `tubing_fluids`.")
+    if surface_sample is None and wellbore.tubing_fluid_table is None:
+        raise ValidationError(
+            "`surface_sample` is needed when `wellbore` has no `tubing_fluid_table`."
+        )
 
     resolved_formation_volume_factors = (
         formation_volume_factors
@@ -1470,13 +1472,13 @@ def as_vfp_table(
         for k, water_fraction in enumerate(resolved_water_fractions):
             for m, gas_fraction in enumerate(resolved_gas_fractions):
                 if is_injector:
-                    surface_phase_rates = PhaseValues(
+                    surface_rates = PhaseValues(
                         oil=0.0,
                         water=flow_rate if flow_type == VFPFlowType.WATER else 0.0,
                         gas=flow_rate if flow_type == VFPFlowType.GAS else 0.0,
                     )
                 else:
-                    surface_phase_rates = compute_surface_phase_rates(
+                    surface_rates = compute_surface_phase_rates(
                         flow_type=flow_type,
                         water_fraction_type=water_fraction_type,
                         gas_fraction_type=gas_fraction_type,
@@ -1485,16 +1487,16 @@ def as_vfp_table(
                         gas_fraction=gas_fraction,
                     )
 
-                phase_rates = compute_reservoir_phase_rates(
-                    surface_phase_rates=surface_phase_rates,
+                rates = compute_reservoir_phase_rates(
+                    surface_rates=surface_rates,
                     formation_volume_factors=resolved_formation_volume_factors,
                 )
                 for j, thp in enumerate(thps):
                     bhps[i, j, k, m, 0] = bisect_bhp_for_thp(
                         wellbore=wellbore,
                         reference_depth=reference_depth,
-                        phase_rates=phase_rates,
-                        surface_phase_rates=surface_phase_rates,
+                        rates=rates,
+                        surface_rates=surface_rates,
                         surface_sample=surface_sample,
                         is_injector=is_injector,
                         target_thp=thp,

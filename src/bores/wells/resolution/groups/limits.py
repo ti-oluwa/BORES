@@ -278,12 +278,12 @@ def enforce_group_economic_limits(
     rate_cutback_applied = False
 
     for _ in range(control_spec.max_fixed_point_iterations):
-        phase_rates = aggregate_member_rates(workspace=workspace, open_member_wells=open_members)
+        rates = aggregate_member_rates(workspace=workspace, open_member_wells=open_members)
         violated_row = check_economic_violation(
             limits=group_limits,
             limits_start=limits_start,
             limits_end=limits_end,
-            phase_rates=phase_rates,
+            rates=rates,
         )
         if violated_row == UNSET_INT:
             return GroupEconomicLimitOutcome(
@@ -357,13 +357,13 @@ def enforce_group_economic_limits(
         )
         reallocated_wells.extend(name for name in reresolved if name not in reallocated_wells)
 
-    phase_rates = aggregate_member_rates(workspace=workspace, open_member_wells=open_members)
+    rates = aggregate_member_rates(workspace=workspace, open_member_wells=open_members)
     still_violated = (
         check_economic_violation(
             limits=group_limits,
             limits_start=limits_start,
             limits_end=limits_end,
-            phase_rates=phase_rates,
+            rates=rates,
         )
         != UNSET_INT
     )

@@ -18,7 +18,15 @@ import numpy.typing as npt
 from bores.constants import c
 from bores.errors import ValidationError
 from bores.precision import get_dtype
-from bores.types import Boolean, Integer, Number, NumberArray, OneDimension, UnitSystem
+from bores.types import (
+    AnyDimension,
+    Boolean,
+    Integer,
+    Number,
+    NumberArray,
+    OneDimension,
+    UnitSystem,
+)
 from bores.wells.hydraulics.base import (
     UNIT_SYSTEM_TAGS,
     UNIT_SYSTEMS_BY_TAG,
@@ -31,7 +39,7 @@ from bores.wells.hydraulics.base import (
 from bores.wells.state import PhaseValues
 
 if typing.TYPE_CHECKING:
-    from bores.blackoil.pvt.tables import PVTTables
+    from bores.blackoil.pvt.tables import PVTTable, PVTTables
 
 __all__ = [
     "MARCH_ITERATIONS",
@@ -39,7 +47,7 @@ __all__ = [
     "TubingFluidSample",
     "TubingFluidTable",
     "TwoPhaseFlow",
-    "compile_tubing_fluid_table",
+    "build_tubing_fluid_table",
     "compute_connection_surface_rates",
     "compute_in_situ_phase_rates",
     "compute_no_slip_mixture",
@@ -135,10 +143,10 @@ class TubingFluidTable(typing.NamedTuple):
     volume per volume.
     """
 
-    segment_count: int
+    segment_count: Integer
     """Number of equal segments the tubing is divided into when marching up it."""
 
-    unit_system_tag: int
+    unit_system_tag: Integer
     """Tag of the unit system of the table, in `UNIT_SYSTEM_TAGS`. Read it as `unit_system`."""
 
     @property
@@ -441,12 +449,12 @@ def compute_no_slip_mixture(
         surface_gas_rate=surface_gas_rate,
     )
     return NoSlipMixture(
-        density=compute_mixture_density(phase_rates=rates, phase_densities=sample.phase_densities),
+        density=compute_mixture_density(rates=rates, phase_densities=sample.phase_densities),
         viscosity=compute_mixture_viscosity(
-            phase_rates=rates, phase_viscosities=sample.phase_viscosities
+            rates=rates, phase_viscosities=sample.phase_viscosities
         ),
         velocity=compute_mixture_velocity(
-            phase_rates=rates,
+            rates=rates,
             tubing_inner_diameter=tubing_inner_diameter,
             rate_time_factor=rate_time_factor,
         ),
@@ -524,7 +532,7 @@ def compute_two_phase_flow(
         liquid_viscosity,
         gas_viscosity,
     ) = split_liquid_gas(
-        phase_rates=rates,
+        rates=rates,
         phase_densities=sample.phase_densities,
         phase_viscosities=sample.phase_viscosities,
     )
@@ -581,7 +589,7 @@ def compute_connection_surface_rates(
     oil = np.empty(count, dtype=connection_oil_rates.dtype)
     water = np.empty(count, dtype=connection_oil_rates.dtype)
     gas = np.empty(count, dtype=connection_oil_rates.dtype)
-    for idx in range(count):
+    for idx in numba.prange(count):  # type: ignore
         oil[idx] = connection_oil_rates[idx] / oil_formation_volume_factors[idx]
         water[idx] = connection_water_rates[idx] / water_formation_volume_factors[idx]
         gas[idx] = connection_gas_rates[idx] / gas_formation_volume_factors[idx]
@@ -591,31 +599,32 @@ def compute_connection_surface_rates(
 
 
 def get_pressure_axis(
-    *, low: Number, high: Number, point_count: int, dtype: npt.DTypeLike
+    *, min_pressure: Number, max_pressure: Number, point_count: Integer, dtype: npt.DTypeLike
 ) -> NumberArray[OneDimension]:
     """
-    Builds an ascending pressure axis, closer together at low pressure where gas changes fastest.
+    Builds an ascending pressure axis, closer together at min_pressure pressure where gas changes fastest.
 
-    :param low: Lowest pressure.
-    :param high: Highest pressure.
+    :param min_pressure: Lowest pressure.
+    :param max_pressure: Highest pressure.
     :param point_count: Number of pressures.
     :param dtype: Data type of the axis.
     :returns: The pressures.
     """
     fractions = np.linspace(0.0, 1.0, point_count) ** 2
     return typing.cast(
-        NumberArray[OneDimension], (low + (high - low) * fractions).astype(dtype, copy=False)
+        NumberArray[OneDimension],
+        (min_pressure + (max_pressure - min_pressure) * fractions).astype(dtype, copy=False),
     )
 
 
-def compile_tubing_fluid_table(
+def build_tubing_fluid_table(
     *,
     pvt_tables: "PVTTables",
     temperature: Number,
     gas_liquid_surface_tension: Number,
     pressure_range: tuple[Number, Number] | None = None,
-    point_count: int = 200,
-    segment_count: int | None = None,
+    point_count: Integer = 200,
+    segment_count: Integer | None = None,
     salinity: Number | None = None,
     unit_system: UnitSystem | None = None,
     dtype: npt.DTypeLike | None = None,
@@ -635,7 +644,7 @@ def compile_tubing_fluid_table(
     :param pressure_range: Lowest and highest pressure of the table, in the unit system of the
         table. The range of the oil and gas PVT tables if not given. It should reach from
         surface pressure to the highest pressure at the bottom of the tubing.
-    :param point_count: Number of pressures. Closely spaced at low pressure.
+    :param point_count: Number of pressures. Closely spaced at min_pressure pressure.
     :param segment_count: Number of equal segments to march up the tubing in.
         `c.TUBING_SEGMENT_COUNT` if not given.
     :param salinity: Salinity of the water, in ppm. The default of the water table if not given.
@@ -646,8 +655,8 @@ def compile_tubing_fluid_table(
     """
     target = unit_system if unit_system is not None else pvt_tables.unit_system
     tables = pvt_tables.convert(target) if target != pvt_tables.unit_system else pvt_tables
-    oil, gas, water = tables.oil, tables.gas, tables.water
-    if oil is None or gas is None or water is None:
+    oil_table, gas_table, water_table = tables.oil, tables.gas, tables.water
+    if oil_table is None or gas_table is None or water_table is None:
         raise ValidationError(
             "`pvt_tables` needs oil, gas and water tables to build tubing fluids."
         )
@@ -655,32 +664,39 @@ def compile_tubing_fluid_table(
     dataset = tables.dataset
     assert dataset.oil is not None and dataset.gas is not None
     if pressure_range is None:
-        low = max(float(dataset.oil.pressures.min()), float(dataset.gas.pressures.min()))
-        high = min(float(dataset.oil.pressures.max()), float(dataset.gas.pressures.max()))
+        min_pressure = max(dataset.oil.pressures.min(), dataset.gas.pressures.min())
+        max_pressure = min(dataset.oil.pressures.max(), dataset.gas.pressures.max())
     else:
-        low, high = float(pressure_range[0]), float(pressure_range[1])
+        min_pressure, max_pressure = pressure_range[0], pressure_range[1]
 
-    if not high > low:
-        raise ValidationError(f"The pressure range ({low}, {high}) is empty.")
+    if not max_pressure > min_pressure:
+        raise ValidationError(f"The pressure range ({min_pressure}, {max_pressure}) is empty.")
     if point_count < 3:
         raise ValidationError("`point_count` must be at least 3.")
     if segment_count is not None and segment_count < 1:
         raise ValidationError("`segment_count` must be at least 1.")
 
     resolved_dtype = np.dtype(dtype) if dtype is not None else np.dtype(get_dtype())
-    pressures = get_pressure_axis(low=low, high=high, point_count=point_count, dtype=np.float64)
+    pressures = get_pressure_axis(
+        min_pressure=min_pressure,
+        max_pressure=max_pressure,
+        point_count=point_count,
+        dtype=np.float64,
+    )
 
     bubble_points = np.asarray(dataset.oil.bubble_point_pressures, dtype=np.float64)
-    highest_bubble_point = float(bubble_points.max())
+    highest_bubble_point = bubble_points.max()
     oil_pressures = np.minimum(pressures, highest_bubble_point)
-    if highest_bubble_point < high:
+    if highest_bubble_point < max_pressure:
         logger.info(
             "The oil is held at its properties at its highest bubble point pressure %s above "
             "that pressure.",
             highest_bubble_point,
         )
 
-    def read(table: typing.Any, name: str, *args: typing.Any, **kwargs: typing.Any) -> typing.Any:
+    def read_table(
+        table: "PVTTable", name: str, *args: typing.Any, **kwargs: typing.Any
+    ) -> NumberArray[AnyDimension]:
         result = getattr(table, name)(*args, **kwargs)
         if result is None:
             raise ValidationError(f"The PVT table of {table.phase.value} has no {name}.")
@@ -689,43 +705,57 @@ def compile_tubing_fluid_table(
     oil_kwargs = {"bubble_point_pressure": oil_pressures}
     water_kwargs = {} if salinity is None else {"salinity": salinity}
     columns = {
-        "oil_formation_volume_factors": read(
-            oil, "formation_volume_factor", oil_pressures, temperature, **oil_kwargs
+        "oil_formation_volume_factors": read_table(
+            oil_table, "formation_volume_factor", oil_pressures, temperature, **oil_kwargs
         ),
-        "water_formation_volume_factors": read(
-            water, "formation_volume_factor", pressures, temperature, **water_kwargs
+        "water_formation_volume_factors": read_table(
+            water_table, "formation_volume_factor", pressures, temperature, **water_kwargs
         ),
-        "gas_formation_volume_factors": read(
-            gas, "formation_volume_factor", pressures, temperature
+        "gas_formation_volume_factors": read_table(
+            gas_table, "formation_volume_factor", pressures, temperature
         ),
-        "solution_gas_oil_ratios": read(
-            oil, "solution_gas_to_oil_ratio", oil_pressures, temperature, **oil_kwargs
+        "solution_gas_oil_ratios": read_table(
+            oil_table, "solution_gas_to_oil_ratio", oil_pressures, temperature, **oil_kwargs
         ),
-        "oil_densities": read(oil, "density", oil_pressures, temperature, **oil_kwargs),
-        "water_densities": read(water, "density", pressures, temperature, **water_kwargs),
-        "gas_densities": read(gas, "density", pressures, temperature),
-        "oil_viscosities": read(oil, "viscosity", oil_pressures, temperature, **oil_kwargs),
-        "water_viscosities": read(water, "viscosity", pressures, temperature, **water_kwargs),
-        "gas_viscosities": read(gas, "viscosity", pressures, temperature),
+        "oil_densities": read_table(
+            oil_table, "density", oil_pressures, temperature, **oil_kwargs
+        ),
+        "water_densities": read_table(
+            water_table, "density", pressures, temperature, **water_kwargs
+        ),
+        "gas_densities": read_table(gas_table, "density", pressures, temperature),
+        "oil_viscosities": read_table(
+            oil_table, "viscosity", oil_pressures, temperature, **oil_kwargs
+        ),
+        "water_viscosities": read_table(
+            water_table, "viscosity", pressures, temperature, **water_kwargs
+        ),
+        "gas_viscosities": read_table(gas_table, "viscosity", pressures, temperature),
     }
     solution_ratios = np.maximum.accumulate(columns["solution_gas_oil_ratios"])
     columns["solution_gas_oil_ratios"] = solution_ratios
 
     # How the oil changes above its bubble point, averaged over a wide step above each node. The
     # undersaturated curves of the PVT tables are not straight just above the bubble point, so a
-    # narrow step would give a compressibility that is too high.
-    step = 0.1 * (high - low)
+    # narrow step would give a compressibility that is too max_pressure.
+    step = 0.1 * (max_pressure - min_pressure)
     undersaturated_kwargs = {
         "solution_gor": solution_ratios,
         "bubble_point_pressure": oil_pressures,
     }
     stepped_pressures = oil_pressures + step
-    stepped_density = read(oil, "density", stepped_pressures, temperature, **undersaturated_kwargs)
-    stepped_formation_volume_factor = read(
-        oil, "formation_volume_factor", stepped_pressures, temperature, **undersaturated_kwargs
+    stepped_density = read_table(
+        oil_table, "density", stepped_pressures, temperature, **undersaturated_kwargs
     )
-    stepped_viscosity = read(
-        oil, "viscosity", stepped_pressures, temperature, **undersaturated_kwargs
+    stepped_formation_volume_factor = read_table(
+        oil_table,
+        "formation_volume_factor",
+        stepped_pressures,
+        temperature,
+        **undersaturated_kwargs,
+    )
+    stepped_viscosity = read_table(
+        oil_table, "viscosity", stepped_pressures, temperature, **undersaturated_kwargs
     )
     columns["oil_density_compressibilities"] = (
         np.log(stepped_density / columns["oil_densities"]) / step
@@ -748,8 +778,11 @@ def compile_tubing_fluid_table(
             np.full(point_count, gas_liquid_surface_tension).astype(resolved_dtype),
         ),
         stb_to_volume_factor=get_stb_to_volume_factor(target),
-        highest_bubble_point_pressure=float(min(highest_bubble_point, high)),
-        segment_count=int(segment_count if segment_count is not None else c.TUBING_SEGMENT_COUNT),
+        highest_bubble_point_pressure=min(highest_bubble_point, max_pressure),
+        segment_count=segment_count if segment_count is not None else int(c.TUBING_SEGMENT_COUNT),
         unit_system_tag=UNIT_SYSTEM_TAGS[target],
-        **{name: column.astype(resolved_dtype) for name, column in columns.items()},
+        **{
+            name: typing.cast(NumberArray[OneDimension], column.astype(resolved_dtype))
+            for name, column in columns.items()
+        },
     )

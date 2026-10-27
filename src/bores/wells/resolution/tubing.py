@@ -24,10 +24,10 @@ from bores.wells.hydraulics.base import (
     get_gravitational_acceleration,
 )
 from bores.wells.hydraulics.dispatch import (
-    compute_tubing_head_pressure as compute_wellbore_tubing_head_pressure,
+    compute_tubing_head_pressure as compute_hydraulic_tubing_head_pressure,
 )
 from bores.wells.hydraulics.dispatch import (
-    compute_tubing_head_pressure_from_table as compute_wellbore_tubing_head_pressure_from_table,
+    compute_tubing_head_pressure_from_table as compute_hydraulic_tubing_head_pressure_from_table,
 )
 from bores.wells.hydraulics.vfp import VFPTable, VFPTables
 from bores.wells.workspace import ConnectionRates, PerforationWorkspace
@@ -80,9 +80,9 @@ class WellTubing(typing.NamedTuple):
     """
 
     @property
-    def uses_tubing_fluids(self) -> bool:
+    def uses_tubing_fluid_table(self) -> bool:
         """Whether the tubing head pressure is found by marching up the tubing with fluid tables."""
-        return self.wellbore is not None and self.wellbore.tubing_fluids is not None
+        return self.wellbore is not None and self.wellbore.tubing_fluid_table is not None
 
     @property
     def needs_surface_sample(self) -> bool:
@@ -90,7 +90,7 @@ class WellTubing(typing.NamedTuple):
         return (
             self.vfp_table is None
             and self.wellbore is not None
-            and self.wellbore.tubing_fluids is None
+            and self.wellbore.tubing_fluid_table is None
         )
 
     @property
@@ -155,7 +155,7 @@ def attach_flowing_fluid(
         the injected phase for an injector.
     :returns: `tubing`, with its `flowing_fluid` set if it has a VFP table or tubing fluids.
     """
-    if tubing.vfp_table is None and not tubing.uses_tubing_fluids:
+    if tubing.vfp_table is None and not tubing.uses_tubing_fluid_table:
         return tubing
 
     fluids = workspace.connection_fluids
@@ -269,8 +269,8 @@ def compute_tubing_head_pressure(
     tubing: WellTubing,
     reference_depth: Number,
     reference_pressure: Number,
-    phase_rates: PhaseValues,
-    surface_phase_rates: PhaseValues,
+    rates: PhaseValues,
+    surface_rates: PhaseValues,
     surface_sample: SurfaceSample | None,
     is_injector: Boolean,
     connection_rates: ConnectionRates | None = None,
@@ -285,8 +285,8 @@ def compute_tubing_head_pressure(
     :param tubing: The well's tubing performance.
     :param reference_depth: Depth the bottom-hole pressure refers to.
     :param reference_pressure: The bottom-hole pressure.
-    :param phase_rates: Reservoir-condition phase rates (used by a correlation).
-    :param surface_phase_rates: Surface-condition phase rates (used by a VFP table).
+    :param rates: Reservoir-condition phase rates (used by a correlation).
+    :param surface_rates: Surface-condition phase rates (used by a VFP table).
     :param surface_sample: Surface fluid properties. Only a correlation needs them.
     :param is_injector: Whether the well is an injector.
     :param connection_rates: Reservoir-condition phase rates at each connection, at
@@ -306,9 +306,9 @@ def compute_tubing_head_pressure(
             connection_rates=connection_rates,
         )
         lookup = table.get_lookup_variables(
-            oil_rate=surface_phase_rates.oil,
-            water_rate=surface_phase_rates.water,
-            gas_rate=surface_phase_rates.gas,
+            oil_rate=surface_rates.oil,
+            water_rate=surface_rates.water,
+            gas_rate=surface_rates.gas,
         )
         return table.get_thp(
             flow_rate=lookup.flow_rate,
@@ -322,18 +322,18 @@ def compute_tubing_head_pressure(
         raise ValidationError(
             "This well has no `WellBoreModel` or VFP table to find a tubing head pressure with."
         )
-    if tubing.uses_tubing_fluids:
+    if tubing.uses_tubing_fluid_table:
         flowing_fluid = tubing.flowing_fluid
         static_density = (
             flowing_fluid.zero_flow_density
             if flowing_fluid is not None
             else (surface_sample.density if surface_sample is not None else math.nan)
         )
-        return compute_wellbore_tubing_head_pressure_from_table(
+        return compute_hydraulic_tubing_head_pressure_from_table(
             wellbore=tubing.wellbore,
             reference_depth=reference_depth,
             reference_pressure=reference_pressure,
-            surface_phase_rates=surface_phase_rates,
+            surface_rates=surface_rates,
             is_injector=is_injector,
             static_density=static_density,
         )
@@ -341,11 +341,11 @@ def compute_tubing_head_pressure(
         raise ValidationError(
             "A hydraulics correlation needs `surface_sample` to find a tubing head pressure."
         )
-    return compute_wellbore_tubing_head_pressure(
+    return compute_hydraulic_tubing_head_pressure(
         wellbore=tubing.wellbore,
         reference_depth=reference_depth,
         reference_pressure=reference_pressure,
-        phase_rates=phase_rates,
+        rates=rates,
         surface_sample=surface_sample,
         is_injector=is_injector,
     )

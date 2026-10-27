@@ -54,7 +54,7 @@ def make_state(control, active_limit):
         perforation=Perforation(top_depth=1000.0, bottom_depth=1010.0),
         cell_index=3,
         flowing_pressure=2500.0,
-        phase_rates=PhaseValues(oil=1.0, water=0.5, gas=10.0),
+        rates=PhaseValues(oil=1.0, water=0.5, gas=10.0),
     )
     return WellState(
         well_name="W1",
@@ -62,8 +62,8 @@ def make_state(control, active_limit):
         active_control=control,
         bhp=2000.0,
         perforation_states=(perforation_state,),
-        phase_rates=PhaseValues(oil=1.0, water=0.5, gas=10.0),
-        surface_phase_rates=PhaseValues(oil=0.9, water=0.5, gas=9.0),
+        rates=PhaseValues(oil=1.0, water=0.5, gas=10.0),
+        surface_rates=PhaseValues(oil=0.9, water=0.5, gas=9.0),
         active_limit=active_limit,
     )
 

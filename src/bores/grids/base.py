@@ -21,7 +21,7 @@ from bores.errors import (
     ValidationError,
 )
 from bores.types import (
-    AnyDimensions,
+    AnyDimension,
     BooleanArray,
     Float,
     IntArray,
@@ -604,7 +604,7 @@ class RaggedRows(typing.NamedTuple):
     offsets: IntArray[OneDimension]
     """Row `r` is `values[offsets[r]:offsets[r + 1]]`. Has one more entry than there are rows."""
 
-    values: NumberArray[AnyDimensions]
+    values: NumberArray[AnyDimension]
     """All rows joined together in row order."""
 
 
@@ -1869,7 +1869,7 @@ class Grid:
             ),
         )
 
-    def get_cells_face_indices(self, cell_indices: IntOrArray[AnyDimensions]) -> RaggedRows:
+    def get_cells_face_indices(self, cell_indices: IntOrArray[AnyDimension]) -> RaggedRows:
         """
         Return the faces of each of the given cells.
 
@@ -1883,7 +1883,7 @@ class Grid:
         _, position, offsets = gather_ragged_positions(self.cell_face_offsets, cells)
         return RaggedRows(offsets=offsets, values=self.cell_face_indices[position])
 
-    def get_cells_neighbor_indices(self, cell_indices: IntOrArray[AnyDimensions]) -> RaggedRows:
+    def get_cells_neighbor_indices(self, cell_indices: IntOrArray[AnyDimension]) -> RaggedRows:
         """
         Return the face-adjacent neighbours of each of the given cells.
 
@@ -1898,8 +1898,8 @@ class Grid:
         return RaggedRows(offsets=offsets, values=self.cell_neighbor_indices[position])
 
     def get_faces_cell_indices(
-        self, face_indices: IntOrArray[AnyDimensions]
-    ) -> IntArray[AnyDimensions]:
+        self, face_indices: IntOrArray[AnyDimension]
+    ) -> IntArray[AnyDimension]:
         """
         Return the owner and neighbour cell of each of the given faces.
 
@@ -1908,9 +1908,9 @@ class Grid:
         :raises IndexError: If an index is out of range.
         """
         faces = validate_indices(face_indices, upper=self.n_faces, label="Face", error=IndexError)
-        return typing.cast(IntArray[AnyDimensions], self.face_cell_indices[faces])
+        return typing.cast(IntArray[AnyDimension], self.face_cell_indices[faces])
 
-    def get_faces_vertex_coordinates(self, face_indices: IntOrArray[AnyDimensions]) -> RaggedRows:
+    def get_faces_vertex_coordinates(self, face_indices: IntOrArray[AnyDimension]) -> RaggedRows:
         """
         Return the vertex coordinates of each of the given faces.
 
@@ -1928,8 +1928,8 @@ class Grid:
         )
 
     def get_face_normals_for_cells(
-        self, face_indices: IntOrArray[AnyDimensions], cell_indices: IntOrArray[AnyDimensions]
-    ) -> NumberArray[AnyDimensions]:
+        self, face_indices: IntOrArray[AnyDimension], cell_indices: IntOrArray[AnyDimension]
+    ) -> NumberArray[AnyDimension]:
         """
         Return the outward unit normal of each face relative to the cell it is paired with.
 
@@ -1963,15 +1963,15 @@ class Grid:
             )
         sign = np.where(is_owner, 1.0, -1.0)
         return typing.cast(
-            NumberArray[AnyDimensions], self.face_unit_normals[faces] * sign[..., None]
+            NumberArray[AnyDimension], self.face_unit_normals[faces] * sign[..., None]
         )
 
     def get_cell_centers_at(
         self,
-        i: IntOrArray[AnyDimensions],
-        j: IntOrArray[AnyDimensions],
-        k: IntOrArray[AnyDimensions],
-    ) -> NumberArray[AnyDimensions]:
+        i: IntOrArray[AnyDimension],
+        j: IntOrArray[AnyDimension],
+        k: IntOrArray[AnyDimension],
+    ) -> NumberArray[AnyDimension]:
         """
         Return the center `(x, y, z)` of the cells at 0-based indices `(i, j, k)`.
 
@@ -1983,12 +1983,12 @@ class Grid:
         """
         assert self.cell_centroids is not None
         return typing.cast(
-            NumberArray[AnyDimensions], self.cell_centroids[self.flat_indices(i, j, k)]
+            NumberArray[AnyDimension], self.cell_centroids[self.flat_indices(i, j, k)]
         )
 
     def find_nearest_cells(
-        self, points: NumberArray[AnyDimensions], *, max_distance: Number | None = None
-    ) -> IntArray[AnyDimensions]:
+        self, points: NumberArray[AnyDimension], *, max_distance: Number | None = None
+    ) -> IntArray[AnyDimension]:
         """
         Find the cell whose centroid is nearest to each of many points, using the KD-tree.
 
@@ -2008,11 +2008,11 @@ class Grid:
                 f"{int(np.count_nonzero(distance > max_distance))} of {distance.size} points have "  # type: ignore[attr-defined]
                 f"no cell center within the requested distance ({max_distance})."
             )
-        return typing.cast(IntArray[AnyDimensions], np.asarray(cell_indices))
+        return typing.cast(IntArray[AnyDimension], np.asarray(cell_indices))
 
     def find_cells_at_positions(
-        self, points: NumberArray[AnyDimensions], *, max_distance: Number | None = None
-    ) -> tuple[IntArray[AnyDimensions], IntArray[AnyDimensions], IntArray[AnyDimensions]]:
+        self, points: NumberArray[AnyDimension], *, max_distance: Number | None = None
+    ) -> tuple[IntArray[AnyDimension], IntArray[AnyDimension], IntArray[AnyDimension]]:
         """
         Return the `(i, j, k)` indices of the cell nearest to each of many points.
 
@@ -2024,7 +2024,7 @@ class Grid:
         return self.ijk_indices(self.find_nearest_cells(points, max_distance=max_distance))
 
     def find_cells_in_radii(
-        self, points: NumberArray[AnyDimensions], radius: NumberOrArray[AnyDimensions]
+        self, points: NumberArray[AnyDimension], radius: NumberOrArray[AnyDimension]
     ) -> RaggedRows:
         """
         Return all cells whose centroids lie within a radius of each of many points.

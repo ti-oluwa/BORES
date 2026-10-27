@@ -1,4 +1,4 @@
-"""Mode-specific well-control solvers: target -> nominal (bhp, phase_rates)."""
+"""Mode-specific well-control solvers: target -> nominal (bhp, rates)."""
 
 import typing
 
@@ -146,7 +146,7 @@ class FixedPointSetup(typing.NamedTuple):
     bisect: FixedPointBisector
     """The compiled rate bisection, with the same pressure profile as `solve`."""
 
-    tubing_fluids: TubingFluidTable | None = None
+    tubing_fluid_table: TubingFluidTable | None = None
     """
     The well's `TubingFluidTable`, for the `"hydraulic"` kind, if it has one. The pressure at each
     connection is then found with the fluids read at the pressure in the wellbore. `None`
@@ -180,7 +180,9 @@ def get_fixed_point_setup(*, tubing: WellTubing, control_spec: WellControlSpec) 
             unit_scale=get_hydrostatic_divisor(wellbore.options.unit_system),
             solve=solve,
             bisect=bisect,
-            tubing_fluids=wellbore.tubing_fluids if wellbore.tubing_fluids_in_walk else None,
+            tubing_fluid_table=wellbore.tubing_fluid_table
+            if wellbore.tubing_fluids_in_walk
+            else None,
         )
     if pressure_mode == ConnectionPressureMode.HYDRAULIC:
         raise ValidationError(
@@ -253,7 +255,7 @@ def solve_connection_pressures_and_rates(
     relevant-phase rate stabilizes.
 
     Starts from static (zero-rate) connection pressures, derives IPR rates
-    from those, feeds the resulting `phase_rates` back through the
+    from those, feeds the resulting `rates` back through the
     hydraulics correlation for updated flowing pressures, and repeats
     until the relative change in total rate is within
     `control_spec.rate_convergence_tolerance`, or
@@ -283,7 +285,7 @@ def solve_connection_pressures_and_rates(
     :param is_injector: Selects the drawdown sign convention.
     :param control_spec: Supplies the iteration cap, convergence tolerance,
         and `connection_pressure_mode`.
-    :returns: `(connection_pressures, phase_rates, surface_phase_rates)`.
+    :returns: `(connection_pressures, rates, surface_rates)`.
     :raises ValidationError: If the well has no `WellBoreModel` and
         `control_spec.connection_pressure_mode` is `HYDRAULIC`, or its model is unknown.
     :raises WellConvergenceError: If the connection pressures and rates don't settle within the
@@ -313,7 +315,7 @@ def solve_connection_pressures_and_rates(
             radial_flow_constant=radial_flow_constant,
             max_iterations=max_iterations,
             tolerance=tolerance,
-            tubing_fluids=setup.tubing_fluids,
+            tubing_fluid_table=setup.tubing_fluid_table,
         )
     elif setup.kind == "hydrostatic":
         assert setup.unit_scale is not None
@@ -393,7 +395,7 @@ def bisect_rate_bhp(
     :param control_spec: Supplies the iteration caps and convergence tolerances.
     :param target_rate_condition: `"surface"` bisects against the surface-condition total,
         `"reservoir"` against the reservoir-condition one.
-    :returns: `(bhp, connection_pressures, phase_rates)`, `phase_rates` reservoir-condition.
+    :returns: `(bhp, connection_pressures, rates)`, `rates` reservoir-condition.
     :raises WellConvergenceError: If a solve inside the bisection doesn't converge.
     """
     setup = get_fixed_point_setup(tubing=tubing, control_spec=control_spec)
@@ -426,7 +428,7 @@ def bisect_rate_bhp(
             reservoir_condition=target_rate_condition == "reservoir",
             max_bisections=control_spec.max_bisection_iterations,
             rate_tolerance=control_spec.rate_convergence_tolerance,
-            tubing_fluids=setup.tubing_fluids,
+            tubing_fluid_table=setup.tubing_fluid_table,
         )
     elif setup.kind == "hydrostatic":
         assert setup.unit_scale is not None
@@ -528,7 +530,7 @@ def solve_bhp(
         the surface-condition total; `"reservoir"` bisects against the
         raw reservoir-condition total instead. Ignored when `metric="thp"`.
     :param surface_sample: Required if `metric="thp"`.
-    :returns: `(bhp, connection_pressures, phase_rates)`, `phase_rates`
+    :returns: `(bhp, connection_pressures, rates)`, `rates`
         always reservoir-condition regardless of `target_rate_condition`.
     :raises ValidationError: If `metric="thp"` and `surface_sample` is `None`.
     """
@@ -552,11 +554,11 @@ def solve_bhp(
     low, high = min_pressure, max_pressure
     average_pressure = 0.5 * (low + high)
     pressures = None
-    phase_rates = PhaseValues(oil=0.0, water=0.0, gas=0.0)
+    rates = PhaseValues(oil=0.0, water=0.0, gas=0.0)
 
     for _ in range(control_spec.max_bisection_iterations):
         average_pressure = 0.5 * (low + high)
-        pressures, phase_rates, surface_phase_rates = solve_connection_pressures_and_rates(
+        pressures, rates, surface_rates = solve_connection_pressures_and_rates(
             tubing=tubing,
             reference_depth=reference_depth,
             workspace=workspace,
@@ -570,8 +572,8 @@ def solve_bhp(
             tubing=tubing,
             reference_depth=reference_depth,
             reference_pressure=average_pressure,
-            phase_rates=phase_rates,
-            surface_phase_rates=surface_phase_rates,
+            rates=rates,
+            surface_rates=surface_rates,
             surface_sample=surface_sample,
             is_injector=is_injector,
             connection_rates=get_connection_rates(workspace=workspace),
@@ -586,7 +588,7 @@ def solve_bhp(
             high = average_pressure
 
     assert pressures is not None
-    return average_pressure, pressures, phase_rates
+    return average_pressure, pressures, rates
 
 
 def solve_rate_producer(
@@ -610,7 +612,7 @@ def solve_rate_producer(
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
     :param control_spec: FixedPointSolver tunables.
-    :returns: `(bhp, connection_pressures, phase_rates, surface_phase_rates)`,
+    :returns: `(bhp, connection_pressures, rates, surface_rates)`,
         reservoir- and surface-condition rates for every phase.
     """
     relevant_phases = PRODUCER_RATE_MODE_PHASES[control_mode]
@@ -631,7 +633,7 @@ def solve_rate_producer(
         if control_mode == ProducerControlModeTag.RESERVOIR_VOLUME_RATE
         else "surface",
     )
-    connection_pressures, phase_rates, surface_phase_rates = solve_connection_pressures_and_rates(
+    connection_pressures, rates, surface_rates = solve_connection_pressures_and_rates(
         tubing=tubing,
         reference_depth=reference_depth,
         workspace=workspace,
@@ -640,7 +642,7 @@ def solve_rate_producer(
         is_injector=False,
         control_spec=control_spec,
     )
-    return bhp, connection_pressures, phase_rates, surface_phase_rates
+    return bhp, connection_pressures, rates, surface_rates
 
 
 def solve_bhp_producer(
@@ -666,10 +668,10 @@ def solve_bhp_producer(
     :param workspace: This well's `PerforationWorkspace`.
     :param control_spec: FixedPointSolver tunables, including fixed-point convergence settings and
         connection-pressure mode.
-    :returns: `(bhp, connection_pressures, phase_rates, surface_phase_rates)`, with `bhp` equal to
+    :returns: `(bhp, connection_pressures, rates, surface_rates)`, with `bhp` equal to
         `target_bhp` and rates for oil, water, and gas at reservoir and surface conditions.
     """
-    connection_pressures, phase_rates, surface_phase_rates = solve_connection_pressures_and_rates(
+    connection_pressures, rates, surface_rates = solve_connection_pressures_and_rates(
         tubing=tubing,
         reference_depth=reference_depth,
         workspace=workspace,
@@ -678,7 +680,7 @@ def solve_bhp_producer(
         is_injector=False,
         control_spec=control_spec,
     )
-    return target_bhp, connection_pressures, phase_rates, surface_phase_rates
+    return target_bhp, connection_pressures, rates, surface_rates
 
 
 def solve_rate_injector(
@@ -705,7 +707,7 @@ def solve_rate_injector(
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
     :param control_spec: FixedPointSolver tunables.
-    :returns: `(bhp, connection_pressures, phase_rates, surface_phase_rates)` -
+    :returns: `(bhp, connection_pressures, rates, surface_rates)` -
         reservoir- and surface-condition rates, `injected_phase` only nonzero.
     """
     relevant_phases = phase_mask(phase_tag=injected_phase)
@@ -726,7 +728,7 @@ def solve_rate_injector(
         if control_mode == InjectorControlModeTag.RESERVOIR_VOLUME_RATE
         else "surface",
     )
-    connection_pressures, phase_rates, surface_phase_rates = solve_connection_pressures_and_rates(
+    connection_pressures, rates, surface_rates = solve_connection_pressures_and_rates(
         tubing=tubing,
         reference_depth=reference_depth,
         workspace=workspace,
@@ -735,7 +737,7 @@ def solve_rate_injector(
         is_injector=True,
         control_spec=control_spec,
     )
-    return bhp, connection_pressures, phase_rates, surface_phase_rates
+    return bhp, connection_pressures, rates, surface_rates
 
 
 def solve_bhp_injector(
@@ -763,12 +765,12 @@ def solve_bhp_injector(
     :param workspace: This well's `PerforationWorkspace`.
     :param control_spec: FixedPointSolver tunables, including fixed-point convergence settings and
         connection-pressure mode.
-    :returns: `(bhp, connection_pressures, phase_rates, surface_phase_rates)`, with `bhp` equal to
+    :returns: `(bhp, connection_pressures, rates, surface_rates)`, with `bhp` equal to
         `target_bhp` and only the injected phase nonzero in the reservoir- and surface-condition
         rates.
     """
     relevant_phases = phase_mask(phase_tag=injected_phase)
-    connection_pressures, phase_rates, surface_phase_rates = solve_connection_pressures_and_rates(
+    connection_pressures, rates, surface_rates = solve_connection_pressures_and_rates(
         tubing=tubing,
         reference_depth=reference_depth,
         workspace=workspace,
@@ -777,4 +779,4 @@ def solve_bhp_injector(
         is_injector=True,
         control_spec=control_spec,
     )
-    return target_bhp, connection_pressures, phase_rates, surface_phase_rates
+    return target_bhp, connection_pressures, rates, surface_rates

@@ -886,8 +886,8 @@ def test_vfp_thp_uses_surface_rates_and_refuses_a_datum_mismatch(tmp_path):
     rates = PhaseValues(oil=100.0, water=0.0, gas=10_000.0)  # gas-oil ratio 100
     common = {
         "tubing": tubing,
-        "phase_rates": rates,
-        "surface_phase_rates": rates,
+        "rates": rates,
+        "surface_rates": rates,
         "surface_sample": None,
         "is_injector": False,
     }
@@ -935,8 +935,8 @@ def test_vfp_thp_follows_an_oil_rate_table_with_no_gas(tmp_path):
         tubing=WellTubing(None, table, 0.0),
         reference_depth=2000.0,
         reference_pressure=expected_bhp,
-        phase_rates=rates,
-        surface_phase_rates=rates,
+        rates=rates,
+        surface_rates=rates,
         surface_sample=None,
         is_injector=False,
     )
@@ -1132,8 +1132,8 @@ def test_thp_is_found_through_a_datum_shift(tmp_path):
         "tubing": tubing,
         "reference_depth": 1900.0,
         "reference_pressure": datum_bhp - shift,
-        "phase_rates": rates,
-        "surface_phase_rates": rates,
+        "rates": rates,
+        "surface_rates": rates,
         "surface_sample": None,
         "is_injector": False,
     }

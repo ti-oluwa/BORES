@@ -138,8 +138,8 @@ def resolve_well_control(
     :param workspace: The system-wide `WellsWorkspace` to update in place.
     :param control_spec: Solver tunables.
     :param surface_sample: Required to compute THP with a `WellBoreModel` that has no
-        `tubing_fluids`, or to resolve a `THP`-mode control or check a `THPLimit` with one.
-        A VFP table, or a `WellBoreModel` with `tubing_fluids`, doesn't need it. Omit if none of
+        `tubing_fluid_table`, or to resolve a `THP`-mode control or check a `THPLimit` with one.
+        A VFP table, or a `WellBoreModel` with `tubing_fluid_table`, doesn't need it. Omit if none of
         those apply to this well.
     :raises ValidationError: If `control_modes[well_row]` isn't a
         recognized tag for this well's `well_kinds[well_row]`, if this
@@ -229,7 +229,7 @@ def resolve_well_control(
             InjectorControlModeTag.RATE,
             InjectorControlModeTag.RESERVOIR_VOLUME_RATE,
         ):
-            bhp, connection_pressures, phase_rates, surface_phase_rates = solve_rate_injector(
+            bhp, connection_pressures, rates, surface_rates = solve_rate_injector(
                 control_mode=control_mode,
                 target_rate=controls.target_rates[well_row],
                 injected_phase=injected_phase,
@@ -239,7 +239,7 @@ def resolve_well_control(
                 control_spec=control_spec,
             )
         elif control_mode == InjectorControlModeTag.BHP:
-            bhp, connection_pressures, phase_rates, surface_phase_rates = solve_bhp_injector(
+            bhp, connection_pressures, rates, surface_rates = solve_bhp_injector(
                 target_bhp=controls.target_bhps[well_row],
                 injected_phase=injected_phase,
                 tubing=tubing,
@@ -271,16 +271,14 @@ def resolve_well_control(
                 metric="thp",
                 surface_sample=surface_sample,
             )
-            connection_pressures, phase_rates, surface_phase_rates = (
-                solve_connection_pressures_and_rates(
-                    tubing=tubing,
-                    reference_depth=reference_depth,
-                    workspace=perforation_workspace,
-                    reference_pressure=bhp,
-                    relevant_phases=relevant_phases,
-                    is_injector=True,
-                    control_spec=control_spec,
-                )
+            connection_pressures, rates, surface_rates = solve_connection_pressures_and_rates(
+                tubing=tubing,
+                reference_depth=reference_depth,
+                workspace=perforation_workspace,
+                reference_pressure=bhp,
+                relevant_phases=relevant_phases,
+                is_injector=True,
+                control_spec=control_spec,
             )
         elif control_mode == InjectorControlModeTag.GROUP:
             raise ValidationError(
@@ -307,7 +305,7 @@ def resolve_well_control(
             ProducerControlModeTag.LIQUID_RATE,
             ProducerControlModeTag.RESERVOIR_VOLUME_RATE,
         ):
-            bhp, connection_pressures, phase_rates, surface_phase_rates = solve_rate_producer(
+            bhp, connection_pressures, rates, surface_rates = solve_rate_producer(
                 control_mode=control_mode,
                 target_rate=controls.target_rates[well_row],
                 tubing=tubing,
@@ -316,7 +314,7 @@ def resolve_well_control(
                 control_spec=control_spec,
             )
         elif control_mode == ProducerControlModeTag.BHP:
-            bhp, connection_pressures, phase_rates, surface_phase_rates = solve_bhp_producer(
+            bhp, connection_pressures, rates, surface_rates = solve_bhp_producer(
                 target_bhp=controls.target_bhps[well_row],
                 tubing=tubing,
                 reference_depth=reference_depth,
@@ -347,16 +345,14 @@ def resolve_well_control(
                 metric="thp",
                 surface_sample=surface_sample,
             )
-            connection_pressures, phase_rates, surface_phase_rates = (
-                solve_connection_pressures_and_rates(
-                    tubing=tubing,
-                    reference_depth=reference_depth,
-                    workspace=perforation_workspace,
-                    reference_pressure=bhp,
-                    relevant_phases=relevant_phases,
-                    is_injector=False,
-                    control_spec=control_spec,
-                )
+            connection_pressures, rates, surface_rates = solve_connection_pressures_and_rates(
+                tubing=tubing,
+                reference_depth=reference_depth,
+                workspace=perforation_workspace,
+                reference_pressure=bhp,
+                relevant_phases=relevant_phases,
+                is_injector=False,
+                control_spec=control_spec,
             )
         elif control_mode == ProducerControlModeTag.GROUP:
             raise ValidationError(
@@ -378,8 +374,8 @@ def resolve_well_control(
     (
         bhp,
         connection_pressures,
-        phase_rates,
-        surface_phase_rates,
+        rates,
+        surface_rates,
         active_limit_row,
         economic_shutin,
     ) = apply_limits(
@@ -393,8 +389,8 @@ def resolve_well_control(
         is_injector=is_injector,
         bhp=bhp,
         connection_pressures=connection_pressures,
-        phase_rates=phase_rates,
-        surface_phase_rates=surface_phase_rates,
+        rates=rates,
+        surface_rates=surface_rates,
         min_pressure=min_pressure,
         max_pressure=max_pressure,
         control_spec=control_spec,
@@ -402,12 +398,12 @@ def resolve_well_control(
     )
 
     workspace.bhps[well_row] = bhp
-    workspace.oil_rates[well_row] = phase_rates.oil
-    workspace.water_rates[well_row] = phase_rates.water
-    workspace.gas_rates[well_row] = phase_rates.gas
-    workspace.surface_oil_rates[well_row] = surface_phase_rates.oil
-    workspace.surface_water_rates[well_row] = surface_phase_rates.water
-    workspace.surface_gas_rates[well_row] = surface_phase_rates.gas
+    workspace.oil_rates[well_row] = rates.oil
+    workspace.water_rates[well_row] = rates.water
+    workspace.gas_rates[well_row] = rates.gas
+    workspace.surface_oil_rates[well_row] = surface_rates.oil
+    workspace.surface_water_rates[well_row] = surface_rates.water
+    workspace.surface_gas_rates[well_row] = surface_rates.gas
     workspace.active_limit_rows[well_row] = active_limit_row
     workspace.economic_shutins[well_row] = 1 if economic_shutin else 0
     workspace.connection_pressures[active_open] = connection_pressures
@@ -436,10 +432,10 @@ def resolve_well_control(
 
     if (
         tubing.vfp_table is not None
-        or tubing.uses_tubing_fluids
+        or tubing.uses_tubing_fluid_table
         or (tubing.wellbore is not None and surface_sample is not None)
     ):
-        total_rate = phase_rates.oil + phase_rates.water + phase_rates.gas
+        total_rate = rates.oil + rates.water + rates.gas
         if (
             tubing.needs_surface_sample
             and total_rate == 0
@@ -453,8 +449,8 @@ def resolve_well_control(
             tubing=tubing,
             reference_depth=reference_depth,
             reference_pressure=bhp,
-            phase_rates=phase_rates,
-            surface_phase_rates=surface_phase_rates,
+            rates=rates,
+            surface_rates=surface_rates,
             surface_sample=surface_sample,
             is_injector=is_injector,
             connection_rates=ConnectionRates(

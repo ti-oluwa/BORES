@@ -48,7 +48,7 @@ from bores.wells.hydraulics.homogeneous import HomogeneousWellbore, homogeneous_
 from bores.wells.hydraulics.tubing_fluids import (
     TubingFluidSample,
     TubingFluidTable,
-    compile_tubing_fluid_table,
+    build_tubing_fluid_table,
 )
 from bores.wells.hydraulics.vfp import VFPData, VFPTable, VFPTables
 from bores.wells.hydraulics.woldesemayat_ghajar import (
@@ -74,8 +74,8 @@ __all__ = [
     "WellBoreModelOptions",
     "WoldesemayatGhajarWellbore",
     "beggs_and_brill_wellbore",
+    "build_tubing_fluid_table",
     "compile_connection_fluids",
-    "compile_tubing_fluid_table",
     "compute_beggs_brill_holdup",
     "compute_friction_factor",
     "compute_gray_effective_roughness",

@@ -133,8 +133,8 @@ def get_thp_bound(
     min_value: Number,
     max_value: Number,
     bhp: Number,
-    phase_rates: PhaseValues,
-    surface_phase_rates: PhaseValues,
+    rates: PhaseValues,
+    surface_rates: PhaseValues,
     connection_rates: ConnectionRates,
     tubing: WellTubing,
     reference_depth: Number,
@@ -155,7 +155,7 @@ def get_thp_bound(
     :param min_value: The limit row's `min_value`. `NaN` means no floor.
     :param max_value: The limit row's `max_value`. `NaN` means no ceiling.
     :param bhp: The nominal resolution's BHP.
-    :param phase_rates: The nominal resolution's reservoir-condition phase rates.
+    :param rates: The nominal resolution's reservoir-condition phase rates.
     :param connection_rates: The nominal resolution's reservoir-condition phase rates at each
         connection. Saved by the caller, since `workspace`'s own arrays may have been
         overwritten by the solves of limits checked earlier.
@@ -178,8 +178,8 @@ def get_thp_bound(
         tubing=tubing,
         reference_depth=reference_depth,
         reference_pressure=bhp,
-        phase_rates=phase_rates,
-        surface_phase_rates=surface_phase_rates,
+        rates=rates,
+        surface_rates=surface_rates,
         surface_sample=surface_sample,
         is_injector=is_injector,
         connection_rates=connection_rates,
@@ -215,7 +215,7 @@ def check_economic_violation(
     limits: CompiledLimits | CompiledGroupLimits,
     limits_start: Integer,
     limits_end: Integer,
-    phase_rates: PhaseValues,
+    rates: PhaseValues,
 ) -> Integer:
     """
     Finds the first `ECONOMIC` limit row in `[limits_start, limits_end)`
@@ -229,11 +229,11 @@ def check_economic_violation(
     :param limits: The full system's `CompiledLimits`.
     :param limits_start: First row of this well's limit range.
     :param limits_end: One past the last row of this well's limit range.
-    :param phase_rates: Well-total phase rates at surface conditions to check. The gas rate is the
+    :param rates: Well-total phase rates at surface conditions to check. The gas rate is the
         total, free and dissolved, so a gas-oil ratio is the one the well produces at the surface.
     :returns: The violated row's index, or `UNSET_INT` if none is violated.
     """
-    oil_rate, water_rate, gas_rate = phase_rates.oil, phase_rates.water, phase_rates.gas
+    oil_rate, water_rate, gas_rate = rates.oil, rates.water, rates.gas
 
     for row in range(limits_start, limits_end):
         if limits.kinds[row] != LimitKind.ECONOMIC:
@@ -276,8 +276,8 @@ def apply_limits(
     is_injector: bool,
     bhp: Number,
     connection_pressures: NumberArray[OneDimension],
-    phase_rates: PhaseValues,
-    surface_phase_rates: PhaseValues,
+    rates: PhaseValues,
+    surface_rates: PhaseValues,
     min_pressure: Number,
     max_pressure: Number,
     control_spec: WellControlSpec,
@@ -296,7 +296,7 @@ def apply_limits(
     required BHP among every violated limit automatically satisfies every
     other violated limit too so no outer iteration needed.
 
-    Returns `(bhp, connection_pressures, phase_rates, surface_phase_rates,
+    Returns `(bhp, connection_pressures, rates, surface_rates,
     UNSET_INT, False)` unchanged if nothing is violated.
 
     Called for every control mode (rate and BHP alike) because a well held at a
@@ -316,15 +316,15 @@ def apply_limits(
     :param bhp: The nominal resolution's BHP.
     :param connection_pressures: The nominal resolution's flowing pressure
         at each connection, same order as `workspace`'s arrays.
-    :param phase_rates: The nominal resolution's reservoir-condition phase rates.
-    :param surface_phase_rates: The nominal resolution's surface-condition phase rates.
+    :param rates: The nominal resolution's reservoir-condition phase rates.
+    :param surface_rates: The nominal resolution's surface-condition phase rates.
     :param min_pressure: Lower bisection bracket bound.
     :param max_pressure: Upper bisection bracket bound.
     :param control_spec: Solver tunables.
     :param surface_sample: Required if any row in range is a `THPLimit`.
-    :returns: `(bhp, connection_pressures, phase_rates, surface_phase_rates,
+    :returns: `(bhp, connection_pressures, rates, surface_rates,
         active_limit_row, economic_shutin)`. `active_limit_row` is
-        `UNSET_INT` if nothing is binding. `phase_rates`/`surface_phase_rates`
+        `UNSET_INT` if nothing is binding. `rates`/`surface_rates`
         are zeroed if `economic_shutin` is `True`; `connection_pressures`
         is not, as a shut-in well still has a real wellbore pressure profile.
     :raises ValidationError: If a `THPLimit` row is present but
@@ -383,8 +383,8 @@ def apply_limits(
                 min_value=limits.min_values[row],
                 max_value=limits.max_values[row],
                 bhp=bhp,
-                phase_rates=phase_rates,
-                surface_phase_rates=surface_phase_rates,
+                rates=rates,
+                surface_rates=surface_rates,
                 connection_rates=nominal_connection_rates,
                 tubing=tubing,
                 reference_depth=reference_depth,
@@ -407,8 +407,8 @@ def apply_limits(
         restore_connection_rates(workspace=workspace, rates=nominal_connection_rates)
         connection_pressures[:] = nominal_connection_pressures
         governing_connection_pressures = connection_pressures
-        governing_phase_rates = phase_rates
-        governing_surface_phase_rates = surface_phase_rates
+        governing_phase_rates = rates
+        governing_surface_phase_rates = surface_rates
     else:
         # Most restrictive: highest bounding BHP for a producer (lowest
         # resulting rate), lowest bounding BHP for an injector (lowest
@@ -438,7 +438,7 @@ def apply_limits(
         limits=limits,
         limits_start=limits_start,
         limits_end=limits_end,
-        phase_rates=governing_surface_phase_rates,
+        rates=governing_surface_phase_rates,
     )
     if violated_row != UNSET_INT:
         zero = PhaseValues(oil=0.0, water=0.0, gas=0.0)

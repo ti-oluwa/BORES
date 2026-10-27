@@ -159,22 +159,22 @@ def compute_tubing_head_pressure_from_table(
     *, wellbore: WellBoreModel | None, **kwargs: typing.Any
 ) -> Number:
     """
-    Compute tubing head pressure by marching up the tubing with the fluids of `wellbore.tubing_fluids`,
+    Compute tubing head pressure by marching up the tubing with the fluids of `wellbore.tubing_fluid_table`,
     using the correlation named by `wellbore.name`.
 
-    :param wellbore: `WellBoreModel` naming a hydraulics correlation, with `tubing_fluids`.
+    :param wellbore: `WellBoreModel` naming a hydraulics correlation, with `tubing_fluid_table`.
     :param kwargs: Forwarded to that correlation's `compute_tubing_head_pressure_from_table`,
-        except for `tubing_fluids`, which is `wellbore.tubing_fluids`.
+        except for `tubing_fluid_table`, which is `wellbore.tubing_fluid_table`.
     :returns: Tubing head pressure.
-    :raises ValidationError: If `wellbore` is `None` or has no `tubing_fluids`, or its name isn't
+    :raises ValidationError: If `wellbore` is `None` or has no `tubing_fluid_table`, or its name isn't
         recognized.
     """
-    if wellbore is None or wellbore.tubing_fluids is None:
-        raise ValidationError("This needs a `WellBoreModel` with `tubing_fluids`.")
+    if wellbore is None or wellbore.tubing_fluid_table is None:
+        raise ValidationError("This needs a `WellBoreModel` with `tubing_fluid_table`.")
     compute = TUBING_HEAD_PRESSURE_FROM_TABLE_FUNCTIONS.get(wellbore.name)
     if compute is None:
         raise ValidationError(f"Unknown `WellBoreModel` name: {wellbore.name!r}")
     return typing.cast(
         Number,
-        compute(model=wellbore.options, tubing_fluids=wellbore.tubing_fluids, **kwargs),
+        compute(model=wellbore.options, tubing_fluid_table=wellbore.tubing_fluid_table, **kwargs),
     )

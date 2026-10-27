@@ -112,7 +112,7 @@ class WellBoreModel(typing.NamedTuple):
     options: typing.Any
     """Wellbore model's/correlation's configuration."""
 
-    tubing_fluids: "TubingFluidTable | None" = None
+    tubing_fluid_table: "TubingFluidTable | None" = None
     """
     The fluid properties of the tubing against pressure. With them, the tubing head pressure is
     found by marching up the tubing with the fluids of each segment at its own pressure, from
@@ -123,7 +123,7 @@ class WellBoreModel(typing.NamedTuple):
     tubing_fluids_in_walk: bool = False
     """
     Whether the pressure at each connection is also found with the fluids read from
-    `tubing_fluids` at the pressure in the wellbore, rather than at the pressure of the connected
+    `tubing_fluid_table` at the pressure in the wellbore, rather than at the pressure of the connected
     cell. Gas that expands and gas that comes out of solution in the wellbore then count in the
     velocities and densities between connections. Off by default, because the rates and the
     pressures then depend on each other more strongly, and a well probed at a very low flowing
@@ -144,61 +144,61 @@ class WellBoreModel(typing.NamedTuple):
         :param table: Optional custom unit-conversion table, forwarded to `options.convert`.
         :returns: This model, with `options` converted to `target`.
         :raises ValueError: If `options` has no `convert` method.
-        :raises ValidationError: If the model has `tubing_fluids` in another unit system. Build
-            them again for `target` with `compile_tubing_fluid_table`.
+        :raises ValidationError: If the model has `tubing_fluid_table` in another unit system. Build
+            them again for `target` with `build_tubing_fluid_table`.
         """
         if not hasattr(self.options, "convert"):
             raise ValueError(
                 f"{self.__class__.__name__} {self.name!r}'s options ({type(self.options).__name__}) "
                 "has no convert method."
             )
-        if self.tubing_fluids is not None and self.tubing_fluids.unit_system != target:
+        if self.tubing_fluid_table is not None and self.tubing_fluid_table.unit_system != target:
             raise ValidationError(
-                f"This model's tubing fluids are in {self.tubing_fluids.unit_system.value} units. "
-                f"Build them again for {target.value} units with `compile_tubing_fluid_table`."
+                f"This model's tubing fluids are in {self.tubing_fluid_table.unit_system.value} units. "
+                f"Build them again for {target.value} units with `build_tubing_fluid_table`."
             )
         return self._replace(options=self.options.convert(target, table=table))  # type: ignore[attr-defined]
 
 
 @numba.njit(cache=True)
-def compute_mixture_density(phase_rates: PhaseValues, phase_densities: PhaseValues) -> Number:
+def compute_mixture_density(rates: PhaseValues, phase_densities: PhaseValues) -> Number:
     """
     Computes the no-slip, rate-weighted mixture density of a multiphase stream.
 
-    :param phase_rates: Rate of each phase.
-    :param phase_densities: Density of each phase, at the same condition as `phase_rates`.
+    :param rates: Rate of each phase.
+    :param phase_densities: Density of each phase, at the same condition as `rates`.
     :returns: Mixture density.
-    :raises ValueError: If `phase_rates` sums to zero. Use
+    :raises ValueError: If `rates` sums to zero. Use
         `compute_static_hydrostatic_drop` for a well with no flow.
     """
-    total_rate = phase_rates.oil + phase_rates.water + phase_rates.gas
+    total_rate = rates.oil + rates.water + rates.gas
     if total_rate == 0:
-        raise ValueError("`phase_rates` sums to zero; use the static no-flow case instead")
+        raise ValueError("`rates` sums to zero; use the static no-flow case instead")
     return (
-        phase_rates.oil * phase_densities.oil
-        + phase_rates.water * phase_densities.water
-        + phase_rates.gas * phase_densities.gas
+        rates.oil * phase_densities.oil
+        + rates.water * phase_densities.water
+        + rates.gas * phase_densities.gas
     ) / total_rate
 
 
 @numba.njit(cache=True)
-def compute_mixture_viscosity(phase_rates: PhaseValues, phase_viscosities: PhaseValues) -> Number:
+def compute_mixture_viscosity(rates: PhaseValues, phase_viscosities: PhaseValues) -> Number:
     """
     Computes the no-slip, rate-weighted mixture viscosity of a multiphase stream.
 
-    :param phase_rates: Rate of each phase.
-    :param phase_viscosities: Viscosity of each phase, at the same condition as `phase_rates`.
+    :param rates: Rate of each phase.
+    :param phase_viscosities: Viscosity of each phase, at the same condition as `rates`.
     :returns: Mixture viscosity.
-    :raises ValueError: If `phase_rates` sums to zero. Use
+    :raises ValueError: If `rates` sums to zero. Use
         `compute_static_hydrostatic_drop` for a well with no flow.
     """
-    total_rate = phase_rates.oil + phase_rates.water + phase_rates.gas
+    total_rate = rates.oil + rates.water + rates.gas
     if total_rate == 0:
-        raise ValueError("`phase_rates` sums to zero; use the static no-flow case instead")
+        raise ValueError("`rates` sums to zero; use the static no-flow case instead")
     return (
-        phase_rates.oil * phase_viscosities.oil
-        + phase_rates.water * phase_viscosities.water
-        + phase_rates.gas * phase_viscosities.gas
+        rates.oil * phase_viscosities.oil
+        + rates.water * phase_viscosities.water
+        + rates.gas * phase_viscosities.gas
     ) / total_rate
 
 
@@ -232,19 +232,19 @@ def compute_superficial_velocity(
 
 @numba.njit(cache=True)
 def compute_mixture_velocity(
-    phase_rates: PhaseValues, tubing_inner_diameter: Number, rate_time_factor: Number
+    rates: PhaseValues, tubing_inner_diameter: Number, rate_time_factor: Number
 ) -> Number:
     """
     Computes the no-slip superficial velocity of a multiphase stream in tubing.
 
-    :param phase_rates: Rate of each phase at reservoir conditions, in
+    :param rates: Rate of each phase at reservoir conditions, in
         the model's own unit system's own reporting time unit.
     :param tubing_inner_diameter: Tubing inner diameter.
     :param rate_time_factor: `c.RATE_TIME_FACTOR_<unit_system>` - see `compute_superficial_velocity`.
     :returns: Mixture velocity, per second.
     :raises ValueError: If `tubing_inner_diameter` isn't positive.
     """
-    total_rate = phase_rates.oil + phase_rates.water + phase_rates.gas
+    total_rate = rates.oil + rates.water + rates.gas
     return compute_superficial_velocity(
         rate=total_rate,
         tubing_inner_diameter=tubing_inner_diameter,
@@ -254,7 +254,7 @@ def compute_mixture_velocity(
 
 @numba.njit(cache=True)
 def compute_surface_mixture_density(
-    density: Number, phase_densities: PhaseValues, phase_rates: PhaseValues
+    density: Number, phase_densities: PhaseValues, rates: PhaseValues
 ) -> Number:
     """
     Gets the surface mixture density, working it out from the phase densities if no mixture
@@ -262,7 +262,7 @@ def compute_surface_mixture_density(
 
     :param density: Mixture density at surface conditions, or `NaN` if not given.
     :param phase_densities: Density of each phase at surface conditions, `NaN` if not given.
-    :param phase_rates: Rate of each phase, at surface conditions.
+    :param rates: Rate of each phase, at surface conditions.
     :returns: Mixture density at surface conditions.
     :raises ValueError: If neither a mixture density nor all three phase densities were given.
     """
@@ -274,12 +274,12 @@ def compute_surface_mixture_density(
         or math.isnan(phase_densities.gas)
     ):
         raise ValueError("`SurfaceSample` needs density or `phase_densities`")
-    return compute_mixture_density(phase_rates=phase_rates, phase_densities=phase_densities)
+    return compute_mixture_density(rates=rates, phase_densities=phase_densities)
 
 
 @numba.njit(cache=True)
 def compute_surface_mixture_viscosity(
-    viscosity: Number, phase_viscosities: PhaseValues, phase_rates: PhaseValues
+    viscosity: Number, phase_viscosities: PhaseValues, rates: PhaseValues
 ) -> Number:
     """
     Gets the surface mixture viscosity, working it out from the phase viscosities if no mixture
@@ -287,7 +287,7 @@ def compute_surface_mixture_viscosity(
 
     :param viscosity: Mixture viscosity at surface conditions, or `NaN` if not given.
     :param phase_viscosities: Viscosity of each phase at surface conditions, `NaN` if not given.
-    :param phase_rates: Rate of each phase, at surface conditions.
+    :param rates: Rate of each phase, at surface conditions.
     :returns: Mixture viscosity at surface conditions.
     :raises ValueError: If neither a mixture viscosity nor all three phase viscosities were given.
     """
@@ -299,7 +299,7 @@ def compute_surface_mixture_viscosity(
         or math.isnan(phase_viscosities.gas)
     ):
         raise ValueError("`SurfaceSample` needs viscosity or `phase_viscosities`")
-    return compute_mixture_viscosity(phase_rates=phase_rates, phase_viscosities=phase_viscosities)
+    return compute_mixture_viscosity(rates=rates, phase_viscosities=phase_viscosities)
 
 
 @numba.njit(cache=True)
@@ -846,7 +846,7 @@ def compute_segment_pressure_drop(
 
 @numba.njit(cache=True)
 def split_liquid_gas(
-    phase_rates: PhaseValues,
+    rates: PhaseValues,
     phase_densities: PhaseValues,
     phase_viscosities: PhaseValues,
 ) -> tuple[Number, Number, Number, Number, Number, Number]:
@@ -855,19 +855,19 @@ def split_liquid_gas(
     correlation such as Beggs & Brill or Hagedorn & Brown that treats
     liquid and gas as the only two phases and doesn't distinguish oil from water.
 
-    :param phase_rates: Rate of each phase.
-    :param phase_densities: Density of each phase, at the same condition as `phase_rates`.
-    :param phase_viscosities: Viscosity of each phase, at the same condition as `phase_rates`.
+    :param rates: Rate of each phase.
+    :param phase_densities: Density of each phase, at the same condition as `rates`.
+    :param phase_viscosities: Viscosity of each phase, at the same condition as `rates`.
     :returns: `(liquid_rate, gas_rate, liquid_density, gas_density, liquid_viscosity, gas_viscosity)`.
     """
-    liquid_rate = phase_rates.oil + phase_rates.water
-    gas_rate = phase_rates.gas
+    liquid_rate = rates.oil + rates.water
+    gas_rate = rates.gas
     if liquid_rate > 0.0:
         liquid_density = (
-            phase_rates.oil * phase_densities.oil + phase_rates.water * phase_densities.water
+            rates.oil * phase_densities.oil + rates.water * phase_densities.water
         ) / liquid_rate
         liquid_viscosity = (
-            phase_rates.oil * phase_viscosities.oil + phase_rates.water * phase_viscosities.water
+            rates.oil * phase_viscosities.oil + rates.water * phase_viscosities.water
         ) / liquid_rate
     else:
         liquid_density = phase_densities.oil

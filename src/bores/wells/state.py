@@ -89,7 +89,7 @@ class PerforationState(StoreSerializable):
     flowing_pressure: Number
     """Flowing bottomhole pressure at this perforation."""
 
-    phase_rates: PhaseValues
+    rates: PhaseValues
     """Rate of each phase at this perforation, at reservoir conditions."""
 
     unit_system: UnitSystem = UnitSystem.FIELD
@@ -122,10 +122,10 @@ class PerforationState(StoreSerializable):
         return attrs.evolve(
             self,
             flowing_pressure=scale(self.flowing_pressure, factors["pressure"]),
-            phase_rates=PhaseValues(
-                oil=scale(self.phase_rates.oil, rate_factor),
-                water=scale(self.phase_rates.water, rate_factor),
-                gas=scale(self.phase_rates.gas, rate_factor),
+            rates=PhaseValues(
+                oil=scale(self.rates.oil, rate_factor),
+                water=scale(self.rates.water, rate_factor),
+                gas=scale(self.rates.gas, rate_factor),
             ),
             unit_system=target,
         )
@@ -150,10 +150,10 @@ class WellState(StoreSerializable):
     perforation_states: tuple[PerforationState, ...]
     """Snapshot for each of this well's open perforations. Empty if `is_open` is `False`."""
 
-    phase_rates: PhaseValues
+    rates: PhaseValues
     """Rate of each phase for the whole well, at reservoir conditions."""
 
-    surface_phase_rates: PhaseValues
+    surface_rates: PhaseValues
     """Rate of each phase for the whole well, at surface conditions"""
 
     active_limit: Limit | None = None
@@ -190,12 +190,12 @@ class WellState(StoreSerializable):
     @property
     def total_liquid_rate(self) -> Number:
         """Combined oil and water rate for the well, at reservoir conditions."""
-        return self.phase_rates.oil + self.phase_rates.water
+        return self.rates.oil + self.rates.water
 
     @property
     def total_surface_liquid_rate(self) -> Number:
         """Combined oil and water rate for the well, at surface conditions."""
-        return self.surface_phase_rates.oil + self.surface_phase_rates.water
+        return self.surface_rates.oil + self.surface_rates.water
 
     def get_perforation_state(self, cell_index: int) -> PerforationState:
         """
@@ -225,8 +225,8 @@ class WellState(StoreSerializable):
 
         :param target: Target unit system.
         :param table: Optional custom conversion table.
-        :returns: This snapshot, with `bhp`, `thp`, `phase_rates`,
-            `surface_phase_rates`, `perforation_states`, `active_control`,
+        :returns: This snapshot, with `bhp`, `thp`, `rates`,
+            `surface_rates`, `perforation_states`, `active_control`,
             and `active_limit` (if set) converted to `target`.
         """
         if target == self.unit_system:
@@ -238,15 +238,15 @@ class WellState(StoreSerializable):
             self,
             bhp=scale(self.bhp, factors["pressure"]),
             thp=scale(self.thp, factors["pressure"]) if self.thp is not None else None,
-            phase_rates=PhaseValues(
-                oil=scale(self.phase_rates.oil, reservoir_rate_factor),
-                water=scale(self.phase_rates.water, reservoir_rate_factor),
-                gas=scale(self.phase_rates.gas, reservoir_rate_factor),
+            rates=PhaseValues(
+                oil=scale(self.rates.oil, reservoir_rate_factor),
+                water=scale(self.rates.water, reservoir_rate_factor),
+                gas=scale(self.rates.gas, reservoir_rate_factor),
             ),
-            surface_phase_rates=PhaseValues(
-                oil=scale(self.surface_phase_rates.oil, factors["liquid_surface_rate"]),
-                water=scale(self.surface_phase_rates.water, factors["liquid_surface_rate"]),
-                gas=scale(self.surface_phase_rates.gas, factors["gas_surface_rate"]),
+            surface_rates=PhaseValues(
+                oil=scale(self.surface_rates.oil, factors["liquid_surface_rate"]),
+                water=scale(self.surface_rates.water, factors["liquid_surface_rate"]),
+                gas=scale(self.surface_rates.gas, factors["gas_surface_rate"]),
             ),
             perforation_states=tuple(
                 perforation_state.convert(target, table=table)
