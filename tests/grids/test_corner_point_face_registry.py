@@ -198,3 +198,76 @@ def test_fault_resolution_matches_a_brute_force_search():
     assert {name: set(faces.tolist()) for name, faces in resolved.items()} == {
         name: faces for name, faces in expected.items() if faces
     }
+
+
+def _fault_resolution_setup(actnum):
+    nz, ny, nx = actnum.shape
+    pairs = [
+        (i + j * nx + k * nx * ny, (i + 1) + j * nx + k * nx * ny)
+        for k in range(nz)
+        for j in range(ny)
+        for i in range(nx - 1)
+    ]
+    return (nx, ny, nz), np.asarray(pairs, dtype=np.int32)
+
+
+def _resolve_recording_warnings(records, actnum, face_cell_indices, dimensions):
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        resolved = resolve_fault_face_indices(
+            fault_records=records,
+            dimensions=dimensions,
+            actnum=actnum,
+            face_cell_indices=face_cell_indices,
+        )
+    return resolved, [str(w.message) for w in caught]
+
+
+def test_faults_bordering_inactive_cells_resolve_without_warning():
+    actnum = np.ones((2, 2, 3), dtype=np.int32)
+    actnum[0, 0, 2] = 0
+    actnum[1, 1, 1] = 0
+    dimensions, face_cell_indices = _fault_resolution_setup(actnum)
+    record = FaultRecord(name="F", i1=1, i2=2, j1=1, j2=2, k1=1, k2=2, face_direction="X")
+
+    resolved, messages = _resolve_recording_warnings(
+        [record], actnum, face_cell_indices, dimensions
+    )
+
+    assert messages == []
+    # Only active-active pairs are connected.
+    active = actnum.ravel() > 0
+    expected = {
+        face
+        for face, (a, b) in enumerate(face_cell_indices)
+        if active[a] and active[b] and (a % 3, b % 3) in {(0, 1), (1, 2)}
+    }
+    assert set(resolved["F"].tolist()) == expected
+
+
+def test_fault_entirely_in_inactive_cells_resolves_to_nothing_without_warning():
+    actnum = np.zeros((1, 2, 3), dtype=np.int32)
+    dimensions, face_cell_indices = _fault_resolution_setup(actnum)
+    record = FaultRecord(name="F", i1=1, i2=2, j1=1, j2=2, k1=1, k2=1, face_direction="X")
+
+    resolved, messages = _resolve_recording_warnings(
+        [record], actnum, face_cell_indices, dimensions
+    )
+
+    assert resolved == {}
+    assert messages == []
+
+
+def test_fault_with_active_pairs_but_no_shared_face_warns():
+    actnum = np.ones((1, 2, 3), dtype=np.int32)
+    dimensions = (3, 2, 1)
+    face_cell_indices = np.empty((0, 2), dtype=np.int32)
+    record = FaultRecord(name="F", i1=1, i2=2, j1=1, j2=2, k1=1, k2=1, face_direction="X")
+
+    resolved, messages = _resolve_recording_warnings(
+        [record], actnum, face_cell_indices, dimensions
+    )
+
+    assert resolved == {}
+    assert len(messages) == 1
+    assert "Fault 'F'" in messages[0] and "no effect on flow" in messages[0]

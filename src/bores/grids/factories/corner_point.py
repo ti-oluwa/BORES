@@ -2200,7 +2200,9 @@ def resolve_fault_face_indices(
 
     For `X` and `Y` records every face between a cell and the cells of the adjacent column
     is part of the fault, since an offset fault faces several cells across it. Cell pairs that
-    share no geometric face are not connected and are skipped.
+    share no geometric face are not connected and are skipped. Pairs involving an inactive cell
+    are skipped silently since they carry no flow. A warning is only issued for a record that has
+    active-active candidate pairs yet resolves to no face.
 
     :param fault_records: Sequence of `FaultRecord` objects.
     :param dimensions: Grid extents `(nx, ny, nz)`.
@@ -2293,11 +2295,18 @@ def resolve_fault_face_indices(
             faces = face_of_pairs(cells_a[connected], cells_b[connected])  # type: ignore[arg-type]
             found_faces.append(faces[faces >= 0])  # type: ignore[arg-type]
 
-        n_inactive = int((~(cell_a_active & has_neighbour)).sum())
-        if n_inactive > 0:
+        # A fault touching inactive cells is valid: those pairs simply have no flow connection,
+        # so they are dropped silently. Only warn when the record has active-active candidate
+        # pairs but none of them resolves to a shared face, since its multiplier then cannot
+        # affect any connection and the record likely does not match the grid geometry.
+        n_resolved = sum(len(faces) for faces in found_faces)
+        n_active_pairs = int((cell_a_active & has_neighbour).sum())
+        if n_active_pairs > 0 and n_resolved == 0:
             warnings.warn(
-                f"Fault {record.name!r}: {n_inactive} cell pair(s) skipped "
-                f"(one or both cells inactive).",
+                f"Fault {record.name!r}: none of the {n_active_pairs} active cell pair(s) in "
+                f"record (I {record.i1}-{record.i2}, J {record.j1}-{record.j2}, "
+                f"K {record.k1}-{record.k2}, {record.face_direction}) share a face, so it has "
+                f"no effect on flow.",
                 stacklevel=4,
             )
 
