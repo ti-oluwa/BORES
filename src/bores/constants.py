@@ -361,6 +361,12 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         description="Conversion factor from atm to Pascals",
         unit="Pa/atm",
     ),
+    "PASCAL_TO_BAR": Constant(
+        value=1e-5, description="Conversion factor from Pascals to bar", unit="bar/Pa"
+    ),
+    "PASCAL_TO_MEGAPASCAL": Constant(
+        value=1e-6, description="Conversion factor from Pascals to megapascals", unit="MPa/Pa"
+    ),
     # Temperature Conversions
     "RANKINE_TO_KELVIN": Constant(
         value=5 / 9,
@@ -371,6 +377,16 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         value=9 / 5,
         description="Conversion factor from Kelvin to Rankine: T(R) = T(K) * 9/5",
         unit="R/K",
+    ),
+    "FAHRENHEIT_TO_RANKINE_OFFSET": Constant(
+        value=459.67,
+        description="Offset from Fahrenheit to Rankine: T(R) = T(F) + 459.67",
+        unit="R",
+    ),
+    "CELSIUS_TO_KELVIN_OFFSET": Constant(
+        value=273.15,
+        description="Offset from Celsius to Kelvin: T(K) = T(C) + 273.15",
+        unit="K",
     ),
     # Viscosity Conversions
     "CENTIPOISE_TO_PASCAL_SECONDS": Constant(
@@ -557,6 +573,15 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         value=1e4,
         description="Conversion factor from weight percent to ppm",
         unit="ppm/%",
+    ),
+    # Mass Conversions
+    "POUNDS_TO_GRAMS": Constant(
+        value=453.59237,
+        description="Conversion factor from pounds to grams (also pound-moles to moles)",
+        unit="g/lb",
+    ),
+    "KILOGRAMS_TO_GRAMS": Constant(
+        value=1e3, description="Conversion factor from kilograms to grams", unit="g/kg"
     ),
     # Molar Volume
     "SCF_PER_POUND_MOLE": Constant(

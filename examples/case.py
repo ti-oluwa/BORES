@@ -8,7 +8,7 @@ df = DeckFile(
     encoding="utf-8",
     unit_system=UnitSystem.FIELD,
 )
-wellbore = homogeneous_wellbore(tubing_inner_diameter=2.5, unit_system=UnitSystem.FIELD)
+wellbore = homogeneous_wellbore(tubing_inner_diameter=2.5, unit_system=df.unit_system)
 
 # One call loads a compiled model, initial reservoir state, and schedule, read from the deck.
 case = SimulationCase.from_deck(df, tubing_performance=wellbore, temperature=200.0)

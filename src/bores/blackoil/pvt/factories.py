@@ -844,8 +844,6 @@ def build_water_pvt_data(
             density_table = typing.cast(
                 NumberArray[ThreeDimensions],
                 correlations.compute_water_density(
-                    pressure=pressure_table_3d,
-                    temperature=temperature_table_3d,
                     gas_gravity=gas_gravity_table_3d,
                     salinity=salinity_table_3d,
                     gas_solubility_in_water=gas_solubility_table_3d,

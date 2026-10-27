@@ -109,6 +109,8 @@ if const is not None:
 |---|---|---|
 | `PSI_TO_PASCAL` | 6894.757 | psi to Pa |
 | `PASCAL_TO_PSI` | 1.450e-4 | Pa to psi |
+| `PASCAL_TO_BAR` | 1e-5 | Pa to bar |
+| `PASCAL_TO_MEGAPASCAL` | 1e-6 | Pa to MPa |
 | `PSI_TO_BAR` | 0.06895 | psi to bar |
 
 ### Temperature Conversions
@@ -117,6 +119,8 @@ if const is not None:
 |---|---|---|
 | `RANKINE_TO_KELVIN` | 0.5556 | Rankine to Kelvin |
 | `KELVIN_TO_RANKINE` | 1.8 | Kelvin to Rankine |
+| `FAHRENHEIT_TO_RANKINE_OFFSET` | 459.67 | Fahrenheit to Rankine offset |
+| `CELSIUS_TO_KELVIN_OFFSET` | 273.15 | Celsius to Kelvin offset |
 
 ### Viscosity Conversions
 
@@ -192,6 +196,13 @@ if const is not None:
 | Constant | Value | Description |
 |---|---|---|
 | `DYNE_PER_CENTIMETER_TO_PSI` | 4.621 | dyne/cm to psi |
+
+### Mass Conversions
+
+| Constant | Value | Description |
+|---|---|---|
+| `POUNDS_TO_GRAMS` | 453.59237 | lb to g (also lb-mol to mol) |
+| `KILOGRAMS_TO_GRAMS` | 1000 | kg to g |
 
 ### Molar Volume
 

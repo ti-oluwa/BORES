@@ -336,3 +336,78 @@ class TestGasGravity:
         pressure = np.array([500.0, 3000.0])
         gravity = gas.compute_gas_gravity_from_density(pressure, 200.0, np.array([1.0, 6.0]))
         assert gravity.shape == (2,)
+
+
+class TestCo2Fugacity:
+    @staticmethod
+    def reference(pressure_bar, temperature_kelvin):
+        """The Duan et al. (1992) equation solved with a bracketing root finder."""
+        a = [
+            8.99288497e-2,
+            -4.94783127e-1,
+            4.77922245e-2,
+            1.03808883e-2,
+            -2.82516861e-2,
+            9.49887563e-2,
+            5.20600880e-4,
+            -2.93540971e-4,
+            -1.77265112e-3,
+            -2.51101973e-5,
+            8.93353441e-5,
+            7.88998563e-5,
+            -1.66727022e-2,
+            1.398,
+            2.96e-2,
+        ]
+        tr, pr = temperature_kelvin / 304.1282, pressure_bar / 73.773
+        b = a[0] + a[1] / tr**2 + a[2] / tr**3
+        c = a[3] + a[4] / tr**2 + a[5] / tr**3
+        d = a[6] + a[7] / tr**2 + a[8] / tr**3
+        e = a[9] + a[10] / tr**2 + a[11] / tr**3
+        f = a[12] / tr**3
+
+        def z(v):
+            return (
+                1
+                + b / v
+                + c / v**2
+                + d / v**4
+                + e / v**5
+                + f / v**2 * (a[13] + a[14] / v**2) * np.exp(-a[14] / v**2)
+            )
+
+        v = brentq(lambda v: pr * v / tr - z(v), 0.05, 200 * tr / pr)
+        zv = z(v)
+        return np.exp(
+            zv
+            - 1
+            - np.log(zv)
+            + b / v
+            + c / (2 * v**2)
+            + d / (4 * v**4)
+            + e / (5 * v**5)
+            + f / (2 * a[14]) * (a[13] + 1 - (a[13] + 1 + a[14] / v**2) * np.exp(-a[14] / v**2))
+        )
+
+    @pytest.mark.parametrize(
+        ("pressure", "temperature"),
+        [(200.0, 150.0), (1450.0, 122.0), (3000.0, 200.0), (10000.0, 300.0), (20000.0, 400.0)],
+    )
+    def test_matches_an_independent_solution(self, pressure, temperature):
+        expected = self.reference(pressure * 0.0689476, (temperature - 32) / 1.8 + 273.15)
+        assert gas.compute_co2_fugacity_coefficient(pressure, temperature) == pytest.approx(
+            expected, rel=1e-5
+        )
+
+    def test_approaches_one_at_low_pressure(self):
+        assert gas.compute_co2_fugacity_coefficient(14.696, 200.0) == pytest.approx(1.0, abs=5e-3)
+        assert gas.compute_co2_fugacity_coefficient(0.0, 200.0) == pytest.approx(1.0, abs=1e-15)
+
+    def test_is_well_below_one_at_moderate_pressure(self):
+        assert gas.compute_co2_fugacity_coefficient(1450.0, 122.0) == pytest.approx(
+            0.633, abs=0.01
+        )
+
+    def test_temperature_below_the_critical_temperature_raises(self):
+        with pytest.raises(ValidationError):
+            gas.compute_co2_fugacity_coefficient(1000.0, 60.0)

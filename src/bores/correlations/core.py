@@ -6,14 +6,22 @@ import numba  # type: ignore[import-untyped]
 import numpy as np
 
 from bores.constants import c
+from bores.correlations.elementwise import resolve_result_dtype
 from bores.errors import ValidationError
 from bores.types import NDimension, Number, NumberOrArray
 
 logger = logging.getLogger(__name__)
 
+# Physical constants, read from `bores.constants` when this module is imported.
+CELSIUS_TO_KELVIN_OFFSET = c.CELSIUS_TO_KELVIN_OFFSET
+FAHRENHEIT_TO_RANKINE_OFFSET = c.FAHRENHEIT_TO_RANKINE_OFFSET
+KELVIN_TO_RANKINE = c.KELVIN_TO_RANKINE
+RANKINE_TO_KELVIN = c.RANKINE_TO_KELVIN
+
 __all__ = [
     "GAS_ALIASES",
     "HENRY_CONSTANTS",
+    "HENRY_REFERENCE_TEMPERATURE",
     "SETSCHENOW_CONSTANTS",
     "PropsSI",
     "clip_pressure",
@@ -143,7 +151,7 @@ def kelvin_to_fahrenheit(
     temp_K: NumberOrArray[NDimension],
 ) -> NumberOrArray[NDimension]:
     """Converts temperature from Kelvin to Fahrenheit."""
-    return (temp_K - 273.15) * 9 / 5 + 32  # type: ignore[return-value]
+    return temp_K * KELVIN_TO_RANKINE - FAHRENHEIT_TO_RANKINE_OFFSET  # type: ignore[return-value]
 
 
 @numba.njit(cache=True)
@@ -151,7 +159,7 @@ def fahrenheit_to_kelvin(
     temp_F: NumberOrArray[NDimension],
 ) -> NumberOrArray[NDimension]:
     """Converts temperature from Fahrenheit to Kelvin."""
-    return (temp_F - 32) * 5 / 9 + 273.15  # type: ignore[return-value]
+    return (temp_F + FAHRENHEIT_TO_RANKINE_OFFSET) * RANKINE_TO_KELVIN  # type: ignore[return-value]
 
 
 @numba.njit(cache=True)
@@ -159,7 +167,9 @@ def fahrenheit_to_celsius(
     temp_F: NumberOrArray[NDimension],
 ) -> NumberOrArray[NDimension]:
     """Converts temperature from Fahrenheit to Celsius."""
-    return (temp_F - 32) * 5 / 9  # type: ignore[return-value]
+    return (  # type: ignore[return-value]
+        (temp_F + FAHRENHEIT_TO_RANKINE_OFFSET) * RANKINE_TO_KELVIN - CELSIUS_TO_KELVIN_OFFSET
+    )
 
 
 @numba.njit(cache=True)
@@ -167,8 +177,11 @@ def fahrenheit_to_rankine(
     temp_F: NumberOrArray[NDimension],
 ) -> NumberOrArray[NDimension]:
     """Converts temperature from Fahrenheit to Rankine."""
-    return temp_F + 459.67  # type: ignore[return-value]
+    return temp_F + FAHRENHEIT_TO_RANKINE_OFFSET  # type: ignore[return-value]
 
+
+HENRY_REFERENCE_TEMPERATURE = 298.15
+"""Temperature in K at which the Henry's law constants of `HENRY_CONSTANTS` are tabulated."""
 
 HENRY_CONSTANTS: dict[str, tuple[float, float]] = {
     "co2": (3.3e-4, 2400.0),
@@ -181,8 +194,9 @@ HENRY_CONSTANTS: dict[str, tuple[float, float]] = {
 }
 """
 Henry's law solubility constants in pure water (Sander, 2015). Each gas maps to
-`(kH, C)`, where `kH` is the solubility at 298.15 K in mol/(m³·Pa) and `C` is
-`d(ln kH)/d(1/T)` in K, so that `kH(T) = kH * exp(C * (1/T - 1/298.15))`.
+`(kH, C)`, where `kH` is the solubility at `HENRY_REFERENCE_TEMPERATURE` in
+mol/(m³·Pa) and `C` is `d(ln kH)/d(1/T)` in K, so that
+`kH(T) = kH * exp(C * (1/T - 1/HENRY_REFERENCE_TEMPERATURE))`.
 """
 
 SETSCHENOW_CONSTANTS: dict[str, float] = {
@@ -255,9 +269,12 @@ def evaluate_coolprop(
         clip_temperature(temperature_in_kelvin.ravel(), fluid),
         fluid,
     )
-    values = np.asarray(values, dtype=np.float64).reshape(shape)
-    if isinstance(pressure, np.ndarray) and pressure.dtype == np.float32:
-        values = values.astype(np.float32, copy=False)
+    values = (
+        np
+        .asarray(values, dtype=np.float64)
+        .reshape(shape)
+        .astype(resolve_result_dtype(pressure, temperature), copy=False)
+    )
     return typing.cast(NumberOrArray[NDimension], values if values.ndim else values[()])
 
 

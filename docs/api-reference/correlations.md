@@ -40,7 +40,29 @@ Arguments can be passed by keyword or by position. Float32 arrays give float32 r
 
 Argument ranges are checked once per call, on the whole input, and a `ValidationError` names the argument that is out of range. A correlation can be called from inside your own `numba.njit` code with positional arguments.
 
-The compiled code is cached on disk, so only the first call in a fresh environment pays the compile cost.
+The result has the dtype NumPy's promotion rules give for the inputs: float32 arrays give float32, float64 gives float64, integers give float64, and float16 or extended precision inputs are computed in float64 and returned in the input dtype.
+
+Type checkers see the original argument names and defaults, since each correlation is typed with the parameters of the scalar function it wraps.
+
+### Compilation options
+
+The compiled code is cached on disk, so only the first call in a fresh environment pays the compile cost. When you define your own correlation with `elementwise`, you can control compilation:
+
+```python
+from bores.correlations.elementwise import elementwise
+from bores.types import NumberOrArray
+
+
+@elementwise(positive=("x",), target="parallel", cache=True, numba_options={"fastmath": True})
+def scaled(x: NumberOrArray, factor: NumberOrArray = 2.0) -> NumberOrArray:
+    return x * factor
+```
+
+| Option | Description |
+| --- | --- |
+| `cache` | Cache the compiled code on disk between sessions. Default `True` |
+| `target` | `"cpu"` runs on one thread (default). `"parallel"` runs array calls across threads, which pays off for large arrays |
+| `numba_options` | Options passed to numba, such as `{"fastmath": True}` |
 
 !!! note "Constants"
     The correlation modules read the physical constants from `bores.constants` when they are imported.
@@ -77,6 +99,7 @@ Unit conversions, CoolProp access and volumetric helpers.
 | `compute_gas_viscosity` | Lee, Gonzalez and Eakin |
 | `compute_gas_compressibility` | Isothermal compressibility, `1/P - (1/Z) dZ/dP` |
 | `compute_gas_gravity`, `compute_gas_gravity_from_density` | Gravity of a named gas, or from a density, through CoolProp |
+| `compute_co2_fugacity_coefficient` | Fugacity coefficient of pure CO₂ from the Duan et al. (1992) equation of state |
 
 ---
 
@@ -122,9 +145,11 @@ Unit conversions, CoolProp access and volumetric helpers.
 | `compute_water_density` | Density of water holding dissolved gas |
 | `compute_water_formation_volume_factor` | Bw from the density |
 | `compute_gas_solubility_in_water` | Solubility of CH₄, CO₂, N₂, O₂, Ar, He or H₂ in brine |
-| `compute_gas_solubility_in_water_mccain_methane`, `compute_gas_solubility_in_water_henry_law` | The two solubility models behind it |
+| `compute_gas_solubility_in_water_mccain_methane`, `compute_gas_solubility_in_water_duan_sun_co2`, `compute_gas_solubility_in_water_henry_law` | The solubility models behind it |
+| `compute_water_vapor_pressure` | Wagner and Pruss vapor pressure of water |
+| `compute_salt_molality`, `compute_water_mass_per_stock_tank_barrel` | Salt molality of a brine, and the mass of water in a stock tank barrel |
 | `compute_gas_solubility_in_water_pressure_derivative` | `dRsw/dP` |
 | `compute_water_bubble_point_pressure` | Pressure at which the water holds a given dissolved gas |
 
-!!! warning "Limits of the solubility models"
-    Methane between 100 and 400 °F uses the McCain correlation. Every other case uses Henry's law with an ideal gas, which overestimates solubility at high pressure. For CO₂ near 3000 psi and 200 °F the overestimate is about 25%, and the solubility never saturates.
+!!! note "Which solubility model is used"
+    Methane between 100 and 400 °F uses the McCain correlation. CO₂ between 88 and 500 °F, up to 29000 psi and 200000 ppm uses the Duan and Sun (2003) model, which agrees with the independent Spycher and Pruess model to within about 15% over 100 to 300 °F and 500 to 10000 psi. Every other case uses Henry's law with an ideal gas, which overestimates solubility at high pressure and never saturates.

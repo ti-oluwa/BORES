@@ -78,6 +78,21 @@ class TestCoolPropHelpers:
         density = core.compute_fluid_density(14.696, 60.0, "CO2")
         assert density == pytest.approx(0.1166, rel=1e-2)
 
+    @pytest.mark.parametrize("dtype", [np.float16, np.float32, np.float64, np.longdouble])
+    def test_result_dtype_follows_the_inputs(self, dtype):
+        result = core.compute_fluid_density(
+            np.full(2, 3000.0, dtype), np.full(2, 200.0, dtype), "Water"
+        )
+        assert result.dtype == dtype
+
+    def test_mixed_precision_inputs_promote(self):
+        pressure = np.full(2, 3000.0, dtype=np.float32)
+        assert core.compute_fluid_density(pressure, np.full(2, 200.0), "Water").dtype == np.float64
+        assert (
+            core.compute_fluid_density(np.full(2, 3000.0), np.float32(200.0), "Water").dtype
+            == np.float64
+        )
+
     def test_float32_input_gives_float32(self):
         result = core.compute_fluid_density(
             np.array([500.0, 1000.0], dtype=np.float32), np.float32(150.0), "Water"
@@ -168,6 +183,9 @@ class TestGasNames:
     )
     def test_symbol_lookup(self, name, symbol):
         assert core.get_gas_symbol(name) == symbol
+
+    def test_henry_reference_temperature_is_25_celsius(self):
+        assert core.HENRY_REFERENCE_TEMPERATURE == pytest.approx(25.0 + 273.15)
 
     def test_aliases_point_at_known_gases(self):
         assert set(core.GAS_ALIASES.values()) <= set(core.HENRY_CONSTANTS)

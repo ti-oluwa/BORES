@@ -141,7 +141,12 @@ class TestGasSolubility:
         )
         salt_mass_fraction = 0.05844
         molality = salt_mass_fraction / (1 - salt_mass_fraction) * 1000 / 58.44
-        assert brine == pytest.approx(fresh * 10 ** (-0.11 * molality), rel=1e-9)
+        water_mass_ratio = water.compute_water_mass_per_stock_tank_barrel(
+            58440.0
+        ) / water.compute_water_mass_per_stock_tank_barrel(0.0)
+        assert brine == pytest.approx(
+            fresh * 10 ** (-0.11 * molality) * water_mass_ratio, rel=1e-9
+        )
 
     def test_henry_law_agrees_with_mccain_for_methane_within_twenty_percent(self):
         henry = water.compute_gas_solubility_in_water(3000.0, 200.0, 0.0, "ch4")
@@ -354,19 +359,19 @@ class TestDensity:
         standard = water.compute_water_standard_density(30000.0)
         gas_mass = 12.0 * 0.7 * 28.9647 / 379.49
         expected = (standard * 5.6146 + gas_mass) / (bw * 5.6146)
-        result = water.compute_water_density(3000.0, 200.0, 0.7, 30000.0, 12.0, bw)
+        result = water.compute_water_density(0.7, 30000.0, 12.0, bw)
         assert result == pytest.approx(expected, rel=2e-3)
 
     def test_live_density_exceeds_gas_free_density(self):
         bw = mccain_bw(3000.0, 200.0)
-        free = water.compute_water_density(3000.0, 200.0, 0.7, 30000.0, 0.0, bw)
-        live = water.compute_water_density(3000.0, 200.0, 0.7, 30000.0, 20.0, bw)
+        free = water.compute_water_density(0.7, 30000.0, 0.0, bw)
+        live = water.compute_water_density(0.7, 30000.0, 20.0, bw)
         assert live > free
         assert free == pytest.approx(water.compute_water_density_mccain(3000.0, 200.0, 30000.0))
 
     def test_invalid_inputs_raise(self):
         with pytest.raises(ValidationError):
-            water.compute_water_density(3000.0, 200.0, 0.0, 30000.0, 12.0, 1.03)
+            water.compute_water_density(0.0, 30000.0, 12.0, 1.03)
         with pytest.raises(ValidationError):
             water.compute_water_density_batzle(-1.0, 200.0, 0.0)
 
@@ -392,3 +397,135 @@ class TestWaterFormationVolumeFactor:
     def test_invalid_density_raises(self):
         with pytest.raises(ValidationError):
             water.compute_water_formation_volume_factor(0.0, 30000.0)
+
+
+class TestWaterHelpers:
+    def test_vapor_pressure_matches_coolprop(self):
+        pytest.importorskip("CoolProp")
+        for temperature in (60.0, 150.0, 212.0, 300.0, 500.0):
+            reference = core.PropsSI("P", "T", (temperature - 32) / 1.8 + 273.15, "Q", 0, "Water")
+            assert water.compute_water_vapor_pressure(temperature) == pytest.approx(
+                reference / 6894.757, rel=2e-4
+            )
+
+    def test_vapor_pressure_at_the_boiling_point_is_one_atmosphere(self):
+        assert water.compute_water_vapor_pressure(212.0) == pytest.approx(14.696, rel=1e-3)
+
+    def test_vapor_pressure_outside_range_raises(self):
+        with pytest.raises(ValidationError):
+            water.compute_water_vapor_pressure(10.0)
+
+    def test_salt_molality(self):
+        assert water.compute_salt_molality(0.0) == pytest.approx(0.0, abs=1e-15)
+        w = 0.05844
+        assert water.compute_salt_molality(58440.0) == pytest.approx(w / (1 - w) * 1000 / 58.44)
+
+    def test_water_mass_per_barrel(self):
+        assert water.compute_water_mass_per_stock_tank_barrel(0.0) == pytest.approx(
+            158.99, rel=2e-3
+        )
+        brine = water.compute_water_mass_per_stock_tank_barrel(100000.0)
+        assert brine < water.compute_water_mass_per_stock_tank_barrel(0.0) * 1.0
+        assert brine == pytest.approx(
+            0.158987294928 * water.compute_water_standard_density(100000.0) / 0.062428 * 0.9,
+            rel=1e-3,
+        )
+
+
+class TestDuanSunCo2:
+    def molality(self, pressure_bar, temperature_kelvin, salinity=0.0):
+        pressure = pressure_bar / 0.0689476
+        temperature = (temperature_kelvin - 273.15) * 1.8 + 32
+        scf = water.compute_gas_solubility_in_water_duan_sun_co2(pressure, temperature, salinity)
+        per_mole = 379.49 / 453.59237
+        return scf / (water.compute_water_mass_per_stock_tank_barrel(salinity) * per_mole)
+
+    def test_published_solubilities_in_pure_water(self):
+        assert self.molality(100.0, 323.15) == pytest.approx(1.13, abs=0.04)
+        assert self.molality(100.0, 373.15) == pytest.approx(0.78, abs=0.04)
+
+    def test_salting_out_at_one_molal_nacl(self):
+        salinity = 58440.0 / (1000 + 58.44) * 1e6 / 1e3 * 1.0  # about 1 mol/kg
+        molal_one = 1 / (1 + 1 * 0.05844) * 0.05844 * 1e6
+        ratio = self.molality(100.0, 323.15, molal_one) / self.molality(100.0, 323.15)
+        assert ratio == pytest.approx(0.815, abs=0.02)
+        assert salinity > 0
+
+    @pytest.mark.parametrize(
+        ("pressure", "temperature", "salinity", "reference"),
+        [
+            (1500.0, 150.0, 0.0, 125.5),
+            (3000.0, 200.0, 0.0, 146.2),
+            (3000.0, 200.0, 30000.0, 131.3),
+            (6000.0, 250.0, 30000.0, 182.3),
+            (10000.0, 300.0, 100000.0, 196.6),
+        ],
+    )
+    def test_agrees_with_the_independent_spycher_pruess_model(
+        self, pressure, temperature, salinity, reference
+    ):
+        result = water.compute_gas_solubility_in_water_duan_sun_co2(
+            pressure, temperature, salinity
+        )
+        assert result == pytest.approx(reference, rel=0.12)
+
+    def test_is_zero_at_or_below_the_vapor_pressure_of_water(self):
+        vapor = water.compute_water_vapor_pressure(300.0)
+        assert water.compute_gas_solubility_in_water_duan_sun_co2(
+            vapor * 0.9, 300.0
+        ) == pytest.approx(0.0, abs=1e-15)
+        assert water.compute_gas_solubility_in_water_duan_sun_co2(vapor * 1.5, 300.0) > 0.0
+
+    def test_is_continuous_across_the_vapor_pressure(self):
+        vapor = water.compute_water_vapor_pressure(250.0)
+        assert water.compute_gas_solubility_in_water_duan_sun_co2(vapor * 1.0001, 250.0) < 0.05
+
+    def test_rises_with_pressure_and_falls_with_salinity(self):
+        pressure = np.linspace(500.0, 10000.0, 8)
+        fresh = water.compute_gas_solubility_in_water_duan_sun_co2(pressure, 200.0, 0.0)
+        brine = water.compute_gas_solubility_in_water_duan_sun_co2(pressure, 200.0, 80000.0)
+        assert np.all(np.diff(fresh) > 0)
+        assert np.all(brine < fresh)
+
+    def test_default_salinity_is_fresh(self):
+        assert water.compute_gas_solubility_in_water_duan_sun_co2(3000.0, 200.0) == pytest.approx(
+            water.compute_gas_solubility_in_water_duan_sun_co2(3000.0, 200.0, 0.0)
+        )
+
+    def test_inputs_outside_the_model_range_raise(self):
+        for kwargs in (
+            {"temperature": 60.0},
+            {"temperature": 600.0},
+            {"pressure": 40000.0},
+            {"salinity": 3e5},
+        ):
+            args = {"pressure": 3000.0, "temperature": 200.0, "salinity": 0.0, **kwargs}
+            with pytest.raises(ValidationError):
+                water.compute_gas_solubility_in_water_duan_sun_co2(**args)
+
+    def test_dispatcher_uses_duan_sun_in_range_and_henry_outside(self):
+        inside = water.compute_gas_solubility_in_water(3000.0, 200.0, 0.0, "co2")
+        assert inside == pytest.approx(
+            water.compute_gas_solubility_in_water_duan_sun_co2(3000.0, 200.0, 0.0)
+        )
+        cold = water.compute_gas_solubility_in_water(3000.0, 70.0, 0.0, "co2")
+        assert cold == pytest.approx(
+            water.compute_gas_solubility_in_water_henry_law(
+                3000.0, 70.0, 0.0, *core.HENRY_CONSTANTS["co2"], core.SETSCHENOW_CONSTANTS["co2"]
+            )
+        )
+
+    def test_dispatcher_handles_arrays_that_straddle_the_model_range(self):
+        temperature = np.array([70.0, 200.0, 600.0])
+        pressure = np.array([3000.0, 3000.0, 3000.0])
+        result = water.compute_gas_solubility_in_water(pressure, temperature, 0.0, "co2")
+        assert result.shape == (3,) and np.all(result > 0)
+        assert result[1] == pytest.approx(
+            water.compute_gas_solubility_in_water_duan_sun_co2(3000.0, 200.0, 0.0)
+        )
+
+    def test_dtype_follows_the_inputs(self):
+        result = water.compute_gas_solubility_in_water_duan_sun_co2(
+            np.full(3, 3000.0, dtype=np.float32), np.float32(200.0), np.float32(0.0)
+        )
+        assert result.dtype == np.float32

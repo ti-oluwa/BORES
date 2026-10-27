@@ -3,18 +3,17 @@ import pyvista as pv
 from bores.deck import DeckFile
 from bores.grids.utils import make_pyvista_grid
 from bores.simulation.case import SimulationCase
-from bores.types import UnitSystem
 from bores.wells.hydraulics.homogeneous import homogeneous_wellbore
 
 df = DeckFile(
     "/home/tioluwa/Projects/opm-data/norne/NORNE_ATW2013.DATA",
     encoding="latin-1",
-    unit_system=UnitSystem.FIELD,
+    # unit_system=UnitSystem.METRIC,
 )
 
 
 # Load the simultion case from the deck.
-wellbore = homogeneous_wellbore(tubing_inner_diameter=2.5, unit_system=UnitSystem.FIELD)
+wellbore = homogeneous_wellbore(tubing_inner_diameter=2.5, unit_system=df.unit_system)
 case = SimulationCase.from_deck(df, title="Norne", tubing_performance=wellbore, temperature=200.0)
 
 # Fluid model, from the compiled case

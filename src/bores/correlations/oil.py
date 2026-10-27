@@ -5,13 +5,14 @@ import numpy as np
 
 from bores.constants import c
 from bores.correlations.elementwise import elementwise
-from bores.types import Number
+from bores.types import Number, NumberOrArray
 
 logger = logging.getLogger(__name__)
 
 # Physical constants, read from `bores.constants` when this module is imported.
 BARRELS_TO_CUBIC_FEET = c.BARRELS_TO_CUBIC_FEET
 CUBIC_FEET_TO_STB = c.CUBIC_FEET_TO_STB
+FAHRENHEIT_TO_RANKINE_OFFSET = c.FAHRENHEIT_TO_RANKINE_OFFSET
 MOLECULAR_WEIGHT_AIR = c.MOLECULAR_WEIGHT_AIR
 OIL_THERMAL_EXPANSION_COEFFICIENT_IMPERIAL = c.OIL_THERMAL_EXPANSION_COEFFICIENT_IMPERIAL
 SCF_PER_POUND_MOLE = c.SCF_PER_POUND_MOLE
@@ -52,14 +53,14 @@ __all__ = [
 @elementwise(
     positive=("oil_density",),
     non_negative=("oil_compressibility",),
-    bounds={"temperature": (-459.67, np.inf), "pressure": (0.0, np.inf)},
+    bounds={"temperature": (-FAHRENHEIT_TO_RANKINE_OFFSET, np.inf), "pressure": (0.0, np.inf)},
 )
 def compute_oil_specific_gravity(
-    oil_density: Number,
-    pressure: Number,
-    temperature: Number,
-    oil_compressibility: Number,
-) -> Number:
+    oil_density: NumberOrArray,
+    pressure: NumberOrArray,
+    temperature: NumberOrArray,
+    oil_compressibility: NumberOrArray,
+) -> NumberOrArray:
     """
     Converts oil density at reservoir conditions to the specific gravity of the stock
     tank oil by undoing the pressure and temperature effects.
@@ -105,11 +106,11 @@ def compute_oil_specific_gravity(
     bounds={"temperature": (32.0, np.inf)},
 )
 def compute_oil_formation_volume_factor_standing(
-    temperature: Number,
-    oil_specific_gravity: Number,
-    gas_gravity: Number,
-    gas_to_oil_ratio: Number,
-) -> Number:
+    temperature: NumberOrArray,
+    oil_specific_gravity: NumberOrArray,
+    gas_gravity: NumberOrArray,
+    gas_to_oil_ratio: NumberOrArray,
+) -> NumberOrArray:
     """
     Computes the saturated oil formation volume factor (Bo) with the Standing correlation.
 
@@ -160,11 +161,11 @@ def get_vazquez_beggs_oil_fvf_coefficients(
     non_negative=("gas_to_oil_ratio",),
 )
 def compute_oil_formation_volume_factor_vazquez_and_beggs(
-    temperature: Number,
-    oil_specific_gravity: Number,
-    gas_gravity: Number,
-    gas_to_oil_ratio: Number,
-) -> Number:
+    temperature: NumberOrArray,
+    oil_specific_gravity: NumberOrArray,
+    gas_gravity: NumberOrArray,
+    gas_to_oil_ratio: NumberOrArray,
+) -> NumberOrArray:
     """
     Computes the saturated oil formation volume factor (Bo) with the Vazquez and Beggs
     (1980) correlation.
@@ -199,11 +200,11 @@ def compute_oil_formation_volume_factor_vazquez_and_beggs(
 
 @elementwise(positive=("saturated_oil_fvf",), non_negative=("oil_compressibility",))
 def correct_oil_fvf_for_pressure(
-    saturated_oil_fvf: Number,
-    oil_compressibility: Number,
-    bubble_point_pressure: Number,
-    current_pressure: Number,
-) -> Number:
+    saturated_oil_fvf: NumberOrArray,
+    oil_compressibility: NumberOrArray,
+    bubble_point_pressure: NumberOrArray,
+    current_pressure: NumberOrArray,
+) -> NumberOrArray:
     """
     Applies the exponential shrinkage of undersaturated oil to the oil formation volume
     factor at the bubble point.
@@ -230,14 +231,14 @@ def correct_oil_fvf_for_pressure(
     bounds={"temperature": (32.0, np.inf)},
 )
 def compute_oil_formation_volume_factor(
-    pressure: Number,
-    temperature: Number,
-    bubble_point_pressure: Number,
-    oil_specific_gravity: Number,
-    gas_gravity: Number,
-    gas_to_oil_ratio: Number,
-    oil_compressibility: Number,
-) -> Number:
+    pressure: NumberOrArray,
+    temperature: NumberOrArray,
+    bubble_point_pressure: NumberOrArray,
+    oil_specific_gravity: NumberOrArray,
+    gas_gravity: NumberOrArray,
+    gas_to_oil_ratio: NumberOrArray,
+    oil_compressibility: NumberOrArray,
+) -> NumberOrArray:
     """
     Computes the oil formation volume factor (Bo) at any pressure.
 
@@ -268,7 +269,7 @@ def compute_oil_formation_volume_factor(
 
 
 @elementwise(positive=("oil_specific_gravity",))
-def compute_oil_api_gravity(oil_specific_gravity: Number) -> Number:
+def compute_oil_api_gravity(oil_specific_gravity: NumberOrArray) -> NumberOrArray:
     """
     Computes the API gravity from the oil specific gravity.
 
@@ -304,11 +305,11 @@ def get_vazquez_beggs_oil_bubble_point_pressure_coefficients(
     bounds={"temperature": (32.0, np.inf)},
 )
 def compute_oil_bubble_point_pressure(
-    gas_gravity: Number,
-    oil_api_gravity: Number,
-    temperature: Number,
-    gas_to_oil_ratio: Number,
-) -> Number:
+    gas_gravity: NumberOrArray,
+    oil_api_gravity: NumberOrArray,
+    temperature: NumberOrArray,
+    gas_to_oil_ratio: NumberOrArray,
+) -> NumberOrArray:
     """
     Computes the bubble point pressure with the Vazquez and Beggs correlation.
 
@@ -331,7 +332,7 @@ def compute_oil_bubble_point_pressure(
     :return: Bubble point pressure (psi)
     """
     c1, c2, c3 = get_vazquez_beggs_oil_bubble_point_pressure_coefficients(oil_api_gravity)
-    temperature_rankine = temperature + 459.67
+    temperature_rankine = temperature + FAHRENHEIT_TO_RANKINE_OFFSET
     return (
         gas_to_oil_ratio / (c1 * gas_gravity * np.exp(c3 * oil_api_gravity / temperature_rankine))
     ) ** (1.0 / c2)
@@ -339,16 +340,16 @@ def compute_oil_bubble_point_pressure(
 
 @elementwise(
     positive=("pressure", "gas_gravity", "oil_api_gravity"),
-    bounds={"temperature": (-459.67, np.inf)},
+    bounds={"temperature": (-FAHRENHEIT_TO_RANKINE_OFFSET, np.inf)},
 )
 def compute_gas_to_oil_ratio(
-    pressure: Number,
-    temperature: Number,
-    bubble_point_pressure: Number,
-    gas_gravity: Number,
-    oil_api_gravity: Number,
-    gor_at_bubble_point_pressure: Number = np.nan,
-) -> Number:
+    pressure: NumberOrArray,
+    temperature: NumberOrArray,
+    bubble_point_pressure: NumberOrArray,
+    gas_gravity: NumberOrArray,
+    oil_api_gravity: NumberOrArray,
+    gor_at_bubble_point_pressure: NumberOrArray = np.nan,
+) -> NumberOrArray:
     """
     Computes the solution gas-oil ratio (Rs) with the Vazquez and Beggs correlation.
 
@@ -377,7 +378,7 @@ def compute_gas_to_oil_ratio(
     :return: Solution gas-oil ratio (scf/STB)
     """
     c1, c2, c3 = get_vazquez_beggs_oil_bubble_point_pressure_coefficients(oil_api_gravity)
-    temperature_rankine = temperature + 459.67
+    temperature_rankine = temperature + FAHRENHEIT_TO_RANKINE_OFFSET
     exponential = np.exp(c3 * oil_api_gravity / temperature_rankine)
     if pressure >= bubble_point_pressure:
         if np.isnan(gor_at_bubble_point_pressure):
@@ -391,9 +392,9 @@ def compute_gas_to_oil_ratio(
 
 @elementwise(positive=("oil_specific_gravity", "temperature"))
 def compute_dead_oil_viscosity_modified_beggs(
-    temperature: Number,
-    oil_specific_gravity: Number,
-) -> Number:
+    temperature: NumberOrArray,
+    oil_specific_gravity: NumberOrArray,
+) -> NumberOrArray:
     """
     Computes the dead oil viscosity with the Egbogah and Ng (1990) correlation, the
     modified Beggs and Robinson correlation.
@@ -422,13 +423,13 @@ def compute_dead_oil_viscosity_modified_beggs(
     non_negative=("gas_to_oil_ratio", "gor_at_bubble_point_pressure"),
 )
 def compute_oil_viscosity(
-    pressure: Number,
-    temperature: Number,
-    bubble_point_pressure: Number,
-    oil_specific_gravity: Number,
-    gas_to_oil_ratio: Number,
-    gor_at_bubble_point_pressure: Number,
-) -> Number:
+    pressure: NumberOrArray,
+    temperature: NumberOrArray,
+    bubble_point_pressure: NumberOrArray,
+    oil_specific_gravity: NumberOrArray,
+    gas_to_oil_ratio: NumberOrArray,
+    gor_at_bubble_point_pressure: NumberOrArray,
+) -> NumberOrArray:
     """
     Computes the oil viscosity of dead, saturated and undersaturated oil.
 
@@ -474,15 +475,15 @@ def compute_oil_viscosity(
 
 @elementwise(positive=("pressure", "oil_formation_volume_factor"))
 def compute_oil_compressibility_liberation_correction_term(
-    pressure: Number,
-    temperature: Number,
-    gas_gravity: Number,
-    oil_api_gravity: Number,
-    bubble_point_pressure: Number,
-    gas_formation_volume_factor: Number,
-    oil_formation_volume_factor: Number,
-    gor_at_bubble_point_pressure: Number,
-) -> Number:
+    pressure: NumberOrArray,
+    temperature: NumberOrArray,
+    gas_gravity: NumberOrArray,
+    oil_api_gravity: NumberOrArray,
+    bubble_point_pressure: NumberOrArray,
+    gas_formation_volume_factor: NumberOrArray,
+    oil_formation_volume_factor: NumberOrArray,
+    gor_at_bubble_point_pressure: NumberOrArray,
+) -> NumberOrArray:
     """
     Computes the gas liberation term of oil compressibility below the bubble point.
 
@@ -540,13 +541,13 @@ def compute_oil_compressibility_liberation_correction_term(
 
 @elementwise(positive=("pressure", "bubble_point_pressure", "gas_gravity", "oil_api_gravity"))
 def compute_base_compressibility(
-    pressure: Number,
-    temperature: Number,
-    bubble_point_pressure: Number,
-    oil_api_gravity: Number,
-    gas_gravity: Number,
-    gor_at_bubble_point_pressure: Number,
-) -> Number:
+    pressure: NumberOrArray,
+    temperature: NumberOrArray,
+    bubble_point_pressure: NumberOrArray,
+    oil_api_gravity: NumberOrArray,
+    gas_gravity: NumberOrArray,
+    gor_at_bubble_point_pressure: NumberOrArray,
+) -> NumberOrArray:
     """
     Computes the oil compressibility with the Vazquez and Beggs (1980) correlation.
 
@@ -590,15 +591,15 @@ def compute_base_compressibility(
     ),
 )
 def compute_oil_compressibility(
-    pressure: Number,
-    temperature: Number,
-    bubble_point_pressure: Number,
-    oil_api_gravity: Number,
-    gas_gravity: Number,
-    gor_at_bubble_point_pressure: Number,
-    gas_formation_volume_factor: Number,
-    oil_formation_volume_factor: Number,
-) -> Number:
+    pressure: NumberOrArray,
+    temperature: NumberOrArray,
+    bubble_point_pressure: NumberOrArray,
+    oil_api_gravity: NumberOrArray,
+    gas_gravity: NumberOrArray,
+    gor_at_bubble_point_pressure: NumberOrArray,
+    gas_formation_volume_factor: NumberOrArray,
+    oil_formation_volume_factor: NumberOrArray,
+) -> NumberOrArray:
     """
     Computes the oil compressibility at any pressure.
 
@@ -646,11 +647,11 @@ def compute_oil_compressibility(
     bounds={"api_gravity": (-131.4, np.inf)},
 )
 def compute_live_oil_density(
-    api_gravity: Number,
-    gas_gravity: Number,
-    gas_to_oil_ratio: Number,
-    formation_volume_factor: Number,
-) -> Number:
+    api_gravity: NumberOrArray,
+    gas_gravity: NumberOrArray,
+    gas_to_oil_ratio: NumberOrArray,
+    formation_volume_factor: NumberOrArray,
+) -> NumberOrArray:
     """
     Computes the density of live oil at reservoir conditions from a mass balance on one
     stock tank barrel.
@@ -680,11 +681,11 @@ def compute_live_oil_density(
     bounds={"oil_api_gravity": (10.0, np.inf)},
 )
 def compute_gas_to_oil_ratio_standing(
-    pressure: Number,
-    temperature: Number,
-    oil_api_gravity: Number,
-    gas_gravity: Number,
-) -> Number:
+    pressure: NumberOrArray,
+    temperature: NumberOrArray,
+    oil_api_gravity: NumberOrArray,
+    gas_gravity: NumberOrArray,
+) -> NumberOrArray:
     """
     Computes the saturated solution gas-oil ratio with the Standing (1947) correlation.
 
@@ -716,11 +717,11 @@ def compute_gas_to_oil_ratio_standing(
     bounds={"oil_api_gravity": (10.0, np.inf)},
 )
 def estimate_bubble_point_pressure_standing(
-    oil_api_gravity: Number,
-    gas_gravity: Number,
-    observed_gas_to_oil_ratio: Number,
-    temperature: Number,
-) -> Number:
+    oil_api_gravity: NumberOrArray,
+    gas_gravity: NumberOrArray,
+    observed_gas_to_oil_ratio: NumberOrArray,
+    temperature: NumberOrArray,
+) -> NumberOrArray:
     """
     Estimates the bubble point pressure with the Standing (1947) correlation, the exact
     inverse of `compute_gas_to_oil_ratio_standing`.
@@ -747,14 +748,14 @@ def estimate_bubble_point_pressure_standing(
 
 @elementwise(
     positive=("pressure", "gas_gravity", "oil_api_gravity"),
-    bounds={"temperature": (-459.67, np.inf)},
+    bounds={"temperature": (-FAHRENHEIT_TO_RANKINE_OFFSET, np.inf)},
 )
 def estimate_solution_gor(
-    pressure: Number,
-    temperature: Number,
-    oil_api_gravity: Number,
-    gas_gravity: Number,
-) -> Number:
+    pressure: NumberOrArray,
+    temperature: NumberOrArray,
+    oil_api_gravity: NumberOrArray,
+    gas_gravity: NumberOrArray,
+) -> NumberOrArray:
     """
     Estimates the saturated solution gas-oil ratio at a pressure with the Vazquez and
     Beggs correlation, for use where the bubble point pressure is not known.
@@ -769,16 +770,16 @@ def estimate_solution_gor(
     :return: Saturated solution gas-oil ratio (scf/STB)
     """
     c1, c2, c3 = get_vazquez_beggs_oil_bubble_point_pressure_coefficients(oil_api_gravity)
-    temperature_rankine = temperature + 459.67
+    temperature_rankine = temperature + FAHRENHEIT_TO_RANKINE_OFFSET
     return c1 * gas_gravity * pressure**c2 * np.exp(c3 * oil_api_gravity / temperature_rankine)
 
 
 @elementwise(positive=("transition_width",))
 def compute_miscibility_transition_factor(
-    pressure: Number,
-    minimum_miscibility_pressure: Number,
-    transition_width: Number = 500.0,
-) -> Number:
+    pressure: NumberOrArray,
+    minimum_miscibility_pressure: NumberOrArray,
+    transition_width: NumberOrArray = 500.0,
+) -> NumberOrArray:
     """
     Computes the degree of miscibility, rising smoothly from 0 well below the minimum
     miscibility pressure (MMP) to 1 well above it.
@@ -797,11 +798,11 @@ def compute_miscibility_transition_factor(
 
 @elementwise(positive=("transition_width",), bounds={"base_omega": (0.0, 1.0)})
 def compute_effective_todd_longstaff_omega(
-    pressure: Number,
-    base_omega: Number,
-    minimum_miscibility_pressure: Number,
-    transition_width: Number = 500.0,
-) -> Number:
+    pressure: NumberOrArray,
+    base_omega: NumberOrArray,
+    minimum_miscibility_pressure: NumberOrArray,
+    transition_width: NumberOrArray = 500.0,
+) -> NumberOrArray:
     """
     Computes the Todd-Longstaff mixing parameter at a pressure, as the base value scaled
     by the miscibility transition factor.
@@ -823,10 +824,10 @@ def compute_effective_todd_longstaff_omega(
     bounds={"solvent_concentration": (0.0, 1.0)},
 )
 def compute_todd_longstaff_mixture_viscosity(
-    oil_viscosity: Number,
-    solvent_viscosity: Number,
-    solvent_concentration: Number,
-) -> Number:
+    oil_viscosity: NumberOrArray,
+    solvent_viscosity: NumberOrArray,
+    solvent_concentration: NumberOrArray,
+) -> NumberOrArray:
     """
     Computes the viscosity of a fully mixed oil and solvent with the quarter-power
     mixing rule used by the Todd and Longstaff (1972) model.
@@ -852,11 +853,11 @@ def compute_todd_longstaff_mixture_viscosity(
     bounds={"solvent_concentration": (0.0, 1.0), "omega": (0.0, 1.0)},
 )
 def compute_todd_longstaff_effective_oil_viscosity(
-    oil_viscosity: Number,
-    solvent_viscosity: Number,
-    solvent_concentration: Number,
-    omega: Number = 0.67,
-) -> Number:
+    oil_viscosity: NumberOrArray,
+    solvent_viscosity: NumberOrArray,
+    solvent_concentration: NumberOrArray,
+    omega: NumberOrArray = 0.67,
+) -> NumberOrArray:
     """
     Computes the effective viscosity of the oil in the Todd and Longstaff (1972) model.
 
@@ -883,11 +884,11 @@ def compute_todd_longstaff_effective_oil_viscosity(
     bounds={"solvent_concentration": (0.0, 1.0), "omega": (0.0, 1.0)},
 )
 def compute_todd_longstaff_effective_solvent_viscosity(
-    oil_viscosity: Number,
-    solvent_viscosity: Number,
-    solvent_concentration: Number,
-    omega: Number = 0.67,
-) -> Number:
+    oil_viscosity: NumberOrArray,
+    solvent_viscosity: NumberOrArray,
+    solvent_concentration: NumberOrArray,
+    omega: NumberOrArray = 0.67,
+) -> NumberOrArray:
     """
     Computes the effective viscosity of the solvent in the Todd and Longstaff (1972) model.
 
@@ -914,13 +915,13 @@ def compute_todd_longstaff_effective_solvent_viscosity(
     bounds={"solvent_concentration": (0.0, 1.0), "omega": (0.0, 1.0)},
 )
 def compute_todd_longstaff_effective_oil_density(
-    oil_density: Number,
-    solvent_density: Number,
-    oil_viscosity: Number,
-    solvent_viscosity: Number,
-    solvent_concentration: Number,
-    omega: Number = 0.67,
-) -> Number:
+    oil_density: NumberOrArray,
+    solvent_density: NumberOrArray,
+    oil_viscosity: NumberOrArray,
+    solvent_viscosity: NumberOrArray,
+    solvent_concentration: NumberOrArray,
+    omega: NumberOrArray = 0.67,
+) -> NumberOrArray:
     """
     Computes the effective density of the oil in the Todd and Longstaff (1972) model.
 
@@ -958,13 +959,13 @@ def compute_todd_longstaff_effective_oil_density(
     bounds={"solvent_concentration": (0.0, 1.0), "omega": (0.0, 1.0)},
 )
 def compute_todd_longstaff_effective_solvent_density(
-    oil_density: Number,
-    solvent_density: Number,
-    oil_viscosity: Number,
-    solvent_viscosity: Number,
-    solvent_concentration: Number,
-    omega: Number = 0.67,
-) -> Number:
+    oil_density: NumberOrArray,
+    solvent_density: NumberOrArray,
+    oil_viscosity: NumberOrArray,
+    solvent_viscosity: NumberOrArray,
+    solvent_concentration: NumberOrArray,
+    omega: NumberOrArray = 0.67,
+) -> NumberOrArray:
     """
     Computes the effective density of the solvent in the Todd and Longstaff (1972) model.
 
