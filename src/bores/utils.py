@@ -74,7 +74,6 @@ def _apply_mask_2d(a: npt.NDArray, mask: npt.NDArray, values: npt.NDArray) -> No
     :param values: scalar or 2D array of values to assign where mask is True
     """
     nx, ny = a.shape
-
     for i in numba.prange(nx):  # type: ignore
         for j in range(ny):
             if mask[i, j]:

@@ -5,7 +5,7 @@ import numpy as np
 from numba.np.ufunc.dufunc import DUFunc  # type: ignore[import-untyped]
 
 from bores.errors import ValidationError
-from bores.types import NumberOrArray
+from bores.types import NDimension, Number, NumberOrArray
 
 __all__ = ["Elementwise", "elementwise"]
 
@@ -33,7 +33,7 @@ class Elementwise(DUFunc):
         *,
         positive: typing.Iterable[str] = (),
         non_negative: typing.Iterable[str] = (),
-        bounds: typing.Mapping[str, tuple[float, float]] | None = None,
+        bounds: typing.Mapping[str, tuple[Number, Number]] | None = None,
         validators: typing.Iterable[typing.Callable[[dict[str, typing.Any]], None]] = (),
     ) -> None:
         """
@@ -133,7 +133,9 @@ class Elementwise(DUFunc):
         for validator in self.validators:
             validator(by_name)
 
-    def __call__(self, *args: NumberOrArray, **kwargs: NumberOrArray) -> NumberOrArray:  # type: ignore[override]
+    def __call__(
+        self, *args: NumberOrArray[NDimension], **kwargs: NumberOrArray[NDimension]
+    ) -> NumberOrArray[NDimension]:  # type: ignore[override]
         values = self.bind(args=args, kwargs=kwargs)
         if self.positive or self.non_negative or self.bounds or self.validators:
             self.check(values)
@@ -151,7 +153,7 @@ def elementwise(
     *,
     positive: typing.Iterable[str] = (),
     non_negative: typing.Iterable[str] = (),
-    bounds: typing.Mapping[str, tuple[float, float]] | None = None,
+    bounds: typing.Mapping[str, tuple[Number, Number]] | None = None,
     validators: typing.Iterable[typing.Callable[[dict[str, typing.Any]], None]] = (),
 ) -> typing.Any:
     """

@@ -18,3 +18,10 @@ print(f"Cells: {grid.n_cells}, Faces: {grid.n_faces}, Bounding box: {grid.boundi
 print(f"Mean initial pressure: {case.initial_state.pressure.mean():.1f}")
 print(f"Wells: {list(case.model.wells.names) if case.model.wells else []}")
 print(f"Scheduled items: {len(case.schedule)}")
+
+for item in case.schedule:
+    print(item, "\n")
+
+print(f"{len(case.schedule)} scheduled item(s)")
+relperm_table = case.model.fluid.satfunc.region(1).relative_permeability
+print(relperm_table.evaluate(0.25, 0.15, 0.55))
