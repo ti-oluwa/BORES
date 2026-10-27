@@ -35,7 +35,7 @@ def resolve_wells(
     *,
     compiled_system: CompiledWellSystem,
     workspace: WellsWorkspace,
-    control_spec: WellControlSpec,
+    spec: WellControlSpec,
     get_tubing_performance: typing.Callable[[Integer], WellBoreModel | VFPTables | None],
     get_connection_fluids: typing.Callable[[Integer], ConnectionFluids],
     get_surface_sample: typing.Callable[[Integer], SurfaceSample | None] | None = None,
@@ -62,7 +62,7 @@ def resolve_wells(
 
     :param compiled_system: The compiled well system to resolve.
     :param workspace: This run's `WellsWorkspace`, updated in place.
-    :param control_spec: Solver tunables, shared by every well and group.
+    :param spec: Solver tunables, shared by every well and group.
     :param get_tubing_performance: Given a well row, what relates its BHP to its THP
         (a `WellBoreModel` or a `VFPTables` collection), or `None` if it has none.
     :param get_connection_fluids: Given a well row, its active, open
@@ -97,7 +97,7 @@ def resolve_wells(
             tubing_performance=get_tubing_performance(well_row),
             connection_fluids=get_connection_fluids(well_row),
             workspace=workspace,
-            control_spec=control_spec,
+            spec=spec,
             surface_sample=(get_surface_sample(well_row) if get_surface_sample else None),
         )
 
@@ -111,7 +111,7 @@ def resolve_wells(
                 allocated_wells=allocated_wells,
                 well_system=compiled_system,
                 workspace=workspace,
-                control_spec=control_spec,
+                spec=spec,
                 get_tubing_performance=get_tubing_performance,
                 get_connection_fluids=get_connection_fluids,
                 get_surface_sample=get_surface_sample,
@@ -128,7 +128,7 @@ def resolve_wells(
                 group_name=group_name,
                 well_system=compiled_system,
                 workspace=workspace,
-                control_spec=control_spec,
+                spec=spec,
                 get_tubing_performance=get_tubing_performance,
                 get_connection_fluids=get_connection_fluids,
                 get_surface_sample=get_surface_sample,

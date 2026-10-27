@@ -45,7 +45,7 @@ class WellSystem:
     - A mapping assigns per well. Its keys are well names, and the key `"*"` is the fallback for
       wells not named. A well mapped to `None` has none, even when `"*"` is set.
     - `None` means no well in this system needs one. Every well is then subject to
-      `control_spec.connection_pressure_mode` for connection-pressure distribution, and can't
+      `spec.connection_pressure_mode` for connection-pressure distribution, and can't
       use THP control, a `THPLimit`, or THP reporting.
     """
 
@@ -55,7 +55,7 @@ class WellSystem:
     group_controls: GroupControls | None = None
     """Current control target for each group, if the deck defined any."""
 
-    control_spec: WellControlSpec = attrs.field(factory=WellControlSpec)
+    spec: WellControlSpec = attrs.field(factory=WellControlSpec)
     """Configuration for how well controls are resolved during simulation."""
 
     def __attrs_post_init__(self) -> None:
@@ -135,7 +135,7 @@ class WellSystem:
             `WellSystem.tubing_performance`). If omitted and the deck defines `VFPPROD` or
             `VFPINJ` tables, those are used. Omit it entirely if nothing in this deck needs one,
             e.g, no well under THP control, no `THPLimit`, and
-            `control_spec.connection_pressure_mode` set to cover connection distribution
+            `spec.connection_pressure_mode` set to cover connection distribution
             without one.
         :returns: `WellSystem` built from every well/control/group keyword
             in the deck. `groups`/`group_controls` are `None` if the deck

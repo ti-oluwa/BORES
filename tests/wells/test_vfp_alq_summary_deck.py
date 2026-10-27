@@ -1232,9 +1232,7 @@ def resolve_producer(
         tubing_performance=vfp_tables,
         connection_fluids=compile_connection_fluids(connection_samples=samples),
         workspace=workspace,
-        control_spec=WellControlSpec(
-            connection_pressure_mode=mode or ConnectionPressureMode.UNIFORM_BHP
-        ),
+        spec=WellControlSpec(connection_pressure_mode=mode or ConnectionPressureMode.UNIFORM_BHP),
     )
     return workspace, samples
 
@@ -1821,7 +1819,7 @@ def resolve_horizontal_producer(*, bhp, mobility=1e-4, max_fixed_point_iteration
             )
         ),
         workspace=workspace,
-        control_spec=WellControlSpec(
+        spec=WellControlSpec(
             connection_pressure_mode=ConnectionPressureMode.HYDRAULIC,
             **(
                 {}
@@ -2868,9 +2866,7 @@ def test_a_non_finite_rate_raises_instead_of_being_reported_as_converged():
             reference_pressure=2000.0,
             relevant_phases=types.SimpleNamespace(oil=1.0, water=1.0, gas=1.0),
             is_injector=False,
-            control_spec=WellControlSpec(
-                connection_pressure_mode=ConnectionPressureMode.UNIFORM_BHP
-            ),
+            spec=WellControlSpec(connection_pressure_mode=ConnectionPressureMode.UNIFORM_BHP),
         )
 
 
@@ -2890,9 +2886,7 @@ def test_an_unknown_wellbore_model_is_rejected_by_name():
             reference_pressure=2000.0,
             relevant_phases=types.SimpleNamespace(oil=1.0, water=1.0, gas=1.0),
             is_injector=False,
-            control_spec=WellControlSpec(
-                connection_pressure_mode=ConnectionPressureMode.HYDRAULIC
-            ),
+            spec=WellControlSpec(connection_pressure_mode=ConnectionPressureMode.HYDRAULIC),
         )
 
 
@@ -3168,7 +3162,7 @@ def reference_rate_bisection(
             reference_pressure=average,
             relevant_phases=mask,
             is_injector=is_injector,
-            control_spec=spec,
+            spec=spec,
         )
         rates = reservoir if condition == "reservoir" else surface
         value = rates.oil + rates.water + rates.gas
@@ -3199,7 +3193,7 @@ def test_the_rate_bisection_matches_a_python_loop_over_the_solve(
     case, workspace = build_case_workspace(unit_system=unit_system)
     tubing, spec = mode_setup(solver_name, case, unit_system)
     mask = PhaseValues(0.0, 1.0, 0.0) if is_injector else PhaseValues(1.0, 1.0, 1.0)
-    low, high = get_pressure_bracket(workspace, is_injector=is_injector, control_spec=spec)
+    low, high = get_pressure_bracket(workspace, is_injector=is_injector, spec=spec)
     _, _, probe = solve_connection_pressures_and_rates(
         tubing=tubing,
         reference_depth=case.reference_depth,
@@ -3207,7 +3201,7 @@ def test_the_rate_bisection_matches_a_python_loop_over_the_solve(
         reference_pressure=0.5 * (low + high),
         relevant_phases=mask,
         is_injector=is_injector,
-        control_spec=spec,
+        spec=spec,
     )
     # A fraction of the rate at the middle of the bracket is reachable; fifty times it is not, so
     # the bisection runs out of steps at one end of the bracket.
@@ -3234,7 +3228,7 @@ def test_the_rate_bisection_matches_a_python_loop_over_the_solve(
         target=target,
         min_pressure=low,
         max_pressure=high,
-        control_spec=spec,
+        spec=spec,
         target_rate_condition=condition,
     )
     assert bhp == pytest.approx(expected_bhp, rel=1e-12)
@@ -3355,7 +3349,7 @@ def build_group_system(*, wells_per_group=4, groups=2, connections=4, weak_well=
     resolve_wells(
         compiled_system=compiled,
         workspace=workspace,
-        control_spec=WellControlSpec(connection_pressure_mode=ConnectionPressureMode.HYDRAULIC),
+        spec=WellControlSpec(connection_pressure_mode=ConnectionPressureMode.HYDRAULIC),
         get_tubing_performance=lambda row: tubing,
         get_connection_fluids=lambda row: fluids,
     )

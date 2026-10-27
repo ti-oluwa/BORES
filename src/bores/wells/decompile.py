@@ -565,7 +565,7 @@ def decompile_well_system(
     `wells`, `well_controls`, and `group_controls` are rebuilt entirely
     from `compiled_system`, so they reflect any in-place patch made to it
     since compile time. `tubing_performance`,
-    `groups`, and `control_spec` are carried over from `well_system`
+    `groups`, and `spec` are carried over from `well_system`
     unchanged.
 
     :param well_system: The original rich `WellSystem` `compiled_system`

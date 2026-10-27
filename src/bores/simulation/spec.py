@@ -44,7 +44,7 @@ class RunSpec:
     start_date: datetime.datetime | None = None
     """The run's calendar start date, if the run is calendar-anchored."""
 
-    control_spec: WellControlSpec = attrs.field(factory=WellControlSpec)
+    well_control: WellControlSpec = attrs.field(factory=WellControlSpec)
     """Numerical tuning for well-control resolution. Defaults to `WellControlSpec`'s own defaults."""
 
     discretization_method: DiscretizationMethod = "impes"
@@ -478,7 +478,7 @@ class RunSpec:
         pressure_factor = factors["pressure"]
         return attrs.evolve(
             self,
-            control_spec=self.control_spec.convert(target, table=table),
+            well_control=self.well_control.convert(target, table=table),
             timer=self.timer.convert(target, table=table) if self.timer is not None else None,
             maximum_pressure_change=scale(self.maximum_pressure_change, pressure_factor),
             unit_system=target,

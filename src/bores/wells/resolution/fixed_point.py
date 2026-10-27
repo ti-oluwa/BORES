@@ -50,8 +50,10 @@ from bores.wells.hydraulics.woldesemayat_ghajar import (
 )
 from bores.wells.workspace import (
     PerforationWorkspace,
-    accumulate_phase_rates,
-    correct_well_indices_for_non_darcy,
+    apply_non_darcy_correction_to_well_indices,
+)
+from bores.wells.workspace import (
+    accumulate_rates as accumulate_phase_rates,
 )
 
 __all__ = [
@@ -135,7 +137,7 @@ def accumulate_rates(
     count_oil = relevant_oil or not is_injector
     count_water = relevant_water or not is_injector
     count_gas = relevant_gas or not is_injector
-    correct_well_indices_for_non_darcy(
+    apply_non_darcy_correction_to_well_indices(
         static_well_indices=workspace.static_well_indices,
         connection_conductivities=workspace.connection_conductivities,
         connection_gas_rates=workspace.connection_gas_rates,

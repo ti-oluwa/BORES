@@ -613,6 +613,7 @@ class VFPTable(StoreSerializable):
     ) -> None:
         if not self.warn_on_extrapolation:
             return
+
         values = (flow_rate, thp, water_fraction, gas_fraction, artificial_lift_quantity)
         for name, value in zip(AXIS_NAMES, values, strict=True):
             bounds = self._extrapolation_bounds.get(name)
@@ -644,8 +645,7 @@ class VFPTable(StoreSerializable):
         """
         Interpolates bottomhole pressure at a point.
 
-        A value given for an axis this table doesn't vary over is
-        accepted but ignored.
+        A value given for an axis this table doesn't vary over is accepted but ignored.
 
         :param flow_rate: Flow rate.
         :param thp: Tubing head pressure.
@@ -1099,6 +1099,7 @@ def select_vfp_records(
     if not matching:
         available = sorted({number for _, number in latest})
         raise ValidationError(f"VFP table {table_number!r} not found. Available: {available}.")
+
     if len(matching) > 1:
         raise ValidationError(
             f"VFP table {table_number!r} is defined by both `VFPPROD` and `VFPINJ`; pass "
@@ -1229,7 +1230,7 @@ FLOW_ROW: typing.Mapping[VFPFlowType, tuple[float, float, float]] = {
 """Coefficients of `(oil, water, gas)` rates that equal the flow axis value, by flow type."""
 
 
-def compute_surface_phase_rates(
+def compute_surface_rates(
     *,
     flow_type: VFPFlowType,
     water_fraction_type: VFPWaterFractionType,
@@ -1282,7 +1283,7 @@ def compute_surface_phase_rates(
     return PhaseValues(oil=max(oil, 0.0), water=max(water, 0.0), gas=max(gas, 0.0))
 
 
-def compute_reservoir_phase_rates(
+def compute_reservoir_rates(
     *,
     surface_rates: PhaseValues,
     formation_volume_factors: PhaseValues,
@@ -1478,7 +1479,7 @@ def as_vfp_table(
                         gas=flow_rate if flow_type == VFPFlowType.GAS else 0.0,
                     )
                 else:
-                    surface_rates = compute_surface_phase_rates(
+                    surface_rates = compute_surface_rates(
                         flow_type=flow_type,
                         water_fraction_type=water_fraction_type,
                         gas_fraction_type=gas_fraction_type,
@@ -1487,7 +1488,7 @@ def as_vfp_table(
                         gas_fraction=gas_fraction,
                     )
 
-                rates = compute_reservoir_phase_rates(
+                rates = compute_reservoir_rates(
                     surface_rates=surface_rates,
                     formation_volume_factors=resolved_formation_volume_factors,
                 )

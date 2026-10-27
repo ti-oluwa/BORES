@@ -1,4 +1,4 @@
-"""Compiled (buffer-reuse) structures for the well-control resolution hot path."""
+"""Compiled (buffer-reuse) structures for the well-control resolution."""
 
 import math
 import typing
@@ -26,12 +26,12 @@ __all__ = [
     "ConnectionRates",
     "PerforationWorkspace",
     "WellsWorkspace",
-    "accumulate_phase_rates",
+    "accumulate_rates",
     "accumulate_well_volumes",
+    "apply_non_darcy_correction_to_well_indices",
     "build_perforation_workspace",
     "build_wells_workspace",
     "compute_perforation_drawdown",
-    "correct_well_indices_for_non_darcy",
     "get_connection_rates",
     "load_wells_states",
     "restore_connection_rates",
@@ -169,7 +169,7 @@ def build_perforation_workspace(
         )
 
     static_well_indices = typing.cast(
-        "NumberArray[OneDimension]", np.asarray(well_indices, dtype=resolved_dtype)
+        NumberArray[OneDimension], np.asarray(well_indices, dtype=resolved_dtype)
     )
     resolved_connection_conductivities = (
         np.full(n, np.nan, dtype=resolved_dtype)
@@ -442,8 +442,8 @@ def compute_perforation_drawdown(
     return max(drawdown, 0.0)
 
 
-@numba.njit(cache=True)
-def correct_well_indices_for_non_darcy(
+@numba.njit(cache=True, parallel=True)
+def apply_non_darcy_correction_to_well_indices(
     static_well_indices: NumberArray[OneDimension],
     connection_conductivities: NumberArray[OneDimension],
     connection_gas_rates: NumberArray[OneDimension],
@@ -475,19 +475,20 @@ def correct_well_indices_for_non_darcy(
         out_well_indices[:] = static_well_indices
         return
 
-    for i in range(static_well_indices.shape[0]):
-        conductivity = connection_conductivities[i]
+    for idx in numba.prange(static_well_indices.shape[0]):
+        conductivity = connection_conductivities[idx]
         if math.isnan(conductivity):
-            out_well_indices[i] = static_well_indices[i]
+            out_well_indices[idx] = static_well_indices[idx]
             continue
 
-        out_well_indices[i] = 1.0 / (
-            1.0 / static_well_indices[i] + d_factor * abs(connection_gas_rates[i]) / conductivity
+        out_well_indices[idx] = 1.0 / (
+            1.0 / static_well_indices[idx]
+            + d_factor * abs(connection_gas_rates[idx]) / conductivity
         )
 
 
 @numba.njit(cache=True)
-def accumulate_phase_rates(
+def accumulate_rates(
     connection_pressures: NumberArray[OneDimension],
     well_indices: NumberArray[OneDimension],
     reservoir_pressures: NumberArray[OneDimension],
@@ -547,6 +548,8 @@ def accumulate_phase_rates(
         the gas that its oil carries in solution. The reservoir-condition gas rate is the free
         gas only.
     """
+    # TODO: We can actually use prange here. Will it benefit us. If it will do it.
+    # We may need to change the way we accumulate total rates. May be switch to using an array?
     oil_rate = 0.0
     water_rate = 0.0
     gas_rate = 0.0

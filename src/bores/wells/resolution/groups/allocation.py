@@ -1,16 +1,8 @@
 """
-`CompiledGroupControls` target allocation. Splits a group's target rate
-across its eligible_member_indices member wells by guide rate, writing concrete per-well
+Group control target allocation. Splits a group's target rate
+across its eligible member wells by guide rate, writing concrete per-well
 `target_rates`/`control_modes` directly into `CompiledWellControls` in
 place for wells whose mode is `GRUP`.
-
-`allocate_group_targets` itself is a single first-pass proportional
-split, with no resolve dependency, usable anywhere a concrete per-well
-target is needed without also resolving anything. `redistribute_group_shortfall`
-builds on it: after an initial resolve, checks whether every allocated
-member actually reached its own share, and if not, grows the target of
-whichever members have headroom and re-resolves them, repeating until
-the group's real target is met or no member has any headroom left.
 """
 
 import math
@@ -274,7 +266,7 @@ def redistribute_group_shortfall(
     allocated_wells: typing.Sequence[str],
     well_system: CompiledWellSystem,
     workspace: WellsWorkspace,
-    control_spec: WellControlSpec,
+    spec: WellControlSpec,
     get_tubing_performance: typing.Callable[[Integer], WellBoreModel | VFPTables | None],
     get_connection_fluids: typing.Callable[[Integer], ConnectionFluids],
     get_surface_sample: typing.Callable[[Integer], SurfaceSample | None] | None = None,
@@ -293,7 +285,7 @@ def redistribute_group_shortfall(
     it was asked for), so its target grows by its guide-rate share of
     that shortfall, and it's re-resolved. Repeats, rechecking every
     member each pass, until the shortfall clears, no member has headroom
-    left, or `control_spec.max_fixed_point_iterations` passes are used.
+    left, or `spec.max_fixed_point_iterations` passes are used.
 
     Requires `allocate_group_targets` and an initial resolve of every
     member in `allocated_wells` to have already run this timestep. Reads
@@ -308,7 +300,7 @@ def redistribute_group_shortfall(
         group's own allocation would otherwise be wrongly swept in.
     :param well_system: Supplies `.group_controls`/`.controls`/`.well_kinds`.
     :param workspace: This run's `WellsWorkspace`, updated in place.
-    :param control_spec: Supplies `max_fixed_point_iterations` and `rate_convergence_tolerance`.
+    :param spec: Supplies `max_fixed_point_iterations` and `rate_convergence_tolerance`.
     :param get_tubing_performance: Given a well row, what relates its BHP to its THP
         (a `WellBoreModel` or a `VFPTables` collection), or `None` if it has none. Only called
         for a member actually being re-resolved.
@@ -344,7 +336,7 @@ def redistribute_group_shortfall(
     members = np.asarray(group_derived, dtype=np.int64)
     actual_rates = np.empty(len(members), dtype=np.float64)
     headroom_members = np.empty(len(members), dtype=np.int64)
-    for _ in range(control_spec.max_fixed_point_iterations):
+    for _ in range(spec.max_fixed_point_iterations):
         for position, idx in enumerate(group_derived):
             actual_rates[position] = (
                 math.nan
@@ -358,7 +350,7 @@ def redistribute_group_shortfall(
             target_rates=controls.target_rates,
             actual_rates=actual_rates,
             members=members,
-            rate_tolerance=control_spec.rate_convergence_tolerance,
+            rate_tolerance=spec.rate_convergence_tolerance,
             headroom_members=headroom_members,
         )
         if total_shortfall <= 0 or n_headroom == 0:
@@ -378,7 +370,7 @@ def redistribute_group_shortfall(
                 tubing_performance=get_tubing_performance(idx),
                 connection_fluids=get_connection_fluids(idx),
                 workspace=workspace,
-                control_spec=control_spec,
+                spec=spec,
                 surface_sample=resolved_get_surface_sample(idx),
             )
             name = well_system.names[idx]

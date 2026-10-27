@@ -67,7 +67,7 @@ def get_rate_bound(
     is_injector: bool,
     min_pressure: Number,
     max_pressure: Number,
-    control_spec: WellControlSpec,
+    spec: WellControlSpec,
 ) -> Number | None:
     """
     Gets the bounding BHP for a `RateLimit` row, if violated.
@@ -90,7 +90,7 @@ def get_rate_bound(
     :param is_injector: Whether this well is an injector.
     :param min_pressure: Lower bisection bracket bound.
     :param max_pressure: Upper bisection bracket bound.
-    :param control_spec: Solver tunables.
+    :param spec: Solver tunables.
     :returns: Bounding BHP, or `None` if not violated.
     """
     quantity_phases = RATE_QUANTITY_PHASES[quantity]
@@ -105,7 +105,7 @@ def get_rate_bound(
         reference_pressure=bhp,
         relevant_phases=quantity_phases,
         is_injector=is_injector,
-        control_spec=control_spec,
+        spec=spec,
     )
     target_rates = reservoir_rates if target_rate_condition == "reservoir" else surface_rates
     current_rate = target_rates.oil + target_rates.water + target_rates.gas
@@ -121,7 +121,7 @@ def get_rate_bound(
         target=max_value,
         min_pressure=min_pressure,
         max_pressure=max_pressure,
-        control_spec=control_spec,
+        spec=spec,
         metric="rate",
         target_rate_condition=target_rate_condition,
     )
@@ -143,7 +143,7 @@ def get_thp_bound(
     is_injector: bool,
     min_pressure: Number,
     max_pressure: Number,
-    control_spec: WellControlSpec,
+    spec: WellControlSpec,
     surface_sample: SurfaceSample | None,
 ) -> Number | None:
     """
@@ -161,7 +161,7 @@ def get_thp_bound(
         overwritten by the solves of limits checked earlier.
     :param tubing: Hydraulics correlation for this well. Required as a
         THP limit can't be evaluated without one, regardless of
-        `control_spec.connection_pressure_mode`.
+        `spec.connection_pressure_mode`.
     :param reference_depth: The well's BHP/THP reporting datum.
     :param workspace: This well's `PerforationWorkspace`.
     :param relevant_phases: Mask the `"rate"` metric would sum over
@@ -169,7 +169,7 @@ def get_thp_bound(
     :param is_injector: Whether this well is an injector.
     :param min_pressure: Lower bisection bracket bound.
     :param max_pressure: Upper bisection bracket bound.
-    :param control_spec: Solver tunables.
+    :param spec: Solver tunables.
     :param surface_sample: Fluid properties at surface conditions.
     :returns: Bounding BHP, or `None` if not violated.
     :raises ValidationError: If the well can't evaluate a THP (no `WellBoreModel` or VFP table).
@@ -203,7 +203,7 @@ def get_thp_bound(
         target=target,
         min_pressure=min_pressure,
         max_pressure=max_pressure,
-        control_spec=control_spec,
+        spec=spec,
         metric="thp",
         surface_sample=surface_sample,
     )
@@ -233,6 +233,7 @@ def check_economic_violation(
         total, free and dissolved, so a gas-oil ratio is the one the well produces at the surface.
     :returns: The violated row's index, or `UNSET_INT` if none is violated.
     """
+    # TODO: This function should be njittable with some tweaks
     oil_rate, water_rate, gas_rate = rates.oil, rates.water, rates.gas
 
     for row in range(limits_start, limits_end):
@@ -280,7 +281,7 @@ def apply_limits(
     surface_rates: PhaseValues,
     min_pressure: Number,
     max_pressure: Number,
-    control_spec: WellControlSpec,
+    spec: WellControlSpec,
     surface_sample: SurfaceSample | None = None,
 ) -> tuple[Number, NumberArray[OneDimension], PhaseValues, PhaseValues, Integer, bool]:
     """
@@ -320,7 +321,7 @@ def apply_limits(
     :param surface_rates: The nominal resolution's surface-condition phase rates.
     :param min_pressure: Lower bisection bracket bound.
     :param max_pressure: Upper bisection bracket bound.
-    :param control_spec: Solver tunables.
+    :param spec: Solver tunables.
     :param surface_sample: Required if any row in range is a `THPLimit`.
     :returns: `(bhp, connection_pressures, rates, surface_rates,
         active_limit_row, economic_shutin)`. `active_limit_row` is
@@ -363,7 +364,7 @@ def apply_limits(
                 is_injector=is_injector,
                 min_pressure=min_pressure,
                 max_pressure=max_pressure,
-                control_spec=control_spec,
+                spec=spec,
             )
         elif kind == LimitKind.THP:
             if surface_sample is None and tubing.needs_surface_sample:
@@ -377,7 +378,7 @@ def apply_limits(
                     "A THP limit is present but no `WellBoreModel` or VFP table "
                     "is assigned to this well. THP limits can't be evaluated "
                     "without one, regardless of "
-                    "`control_spec.connection_pressure_mode`."
+                    "`spec.connection_pressure_mode`."
                 )
             bound = get_thp_bound(
                 min_value=limits.min_values[row],
@@ -393,7 +394,7 @@ def apply_limits(
                 is_injector=is_injector,
                 min_pressure=min_pressure,
                 max_pressure=max_pressure,
-                control_spec=control_spec,
+                spec=spec,
                 surface_sample=surface_sample,
             )
         else:
@@ -426,7 +427,7 @@ def apply_limits(
                 reference_pressure=governing_bhp,
                 relevant_phases=relevant_phases,
                 is_injector=is_injector,
-                control_spec=control_spec,
+                spec=spec,
             )
         )
 
