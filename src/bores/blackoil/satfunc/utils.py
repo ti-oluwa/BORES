@@ -5,6 +5,7 @@ import numpy as np
 import numpy.typing as npt
 from scipy.interpolate import PchipInterpolator
 
+from bores.errors import ValidationError
 from bores.types import (
     Integer,
     NDimension,
@@ -433,6 +434,31 @@ def saturations_within_bounds(
         if sw < 0 or sw > 1 or so < 0 or so > 1 or sg < 0 or sg > 1:
             return False
     return True
+
+
+def validate_strictly_increasing(*, values: NumberArray[OneDimension], name: str) -> None:
+    """
+    Check that `values` increase at every step, and say where they do not.
+
+    Interpolating a saturation table needs every saturation to be larger than the one before it,
+    so repeated values are rejected as well as decreasing ones.
+
+    :param values: One-dimensional array to check, such as the saturations of a table.
+    :param name: Name of the array, used in the error message.
+    :raises ValidationError: If any value does not exceed the one before it. The message gives the
+        first such position, its value and the value before it, and how many positions fail.
+    """
+    failing = np.flatnonzero(~(np.diff(values) > 0)) + 1
+    if failing.size == 0:
+        return
+    position = int(failing[0])
+    kind = "repeats" if values[position] == values[position - 1] else "is not larger than"
+    raise ValidationError(
+        f"`{name}` must be strictly increasing, but entry {position} ({values[position]}) "
+        f"{kind} the entry before it ({values[position - 1]}); {failing.size} of "
+        f"{values.size - 1} steps fail. If the table was read from a deck, check that the "
+        "tables of the different regions are each terminated by their own `/`."
+    )
 
 
 def get_floating_dtype(value: NumberOrArray[NDimension]) -> np.dtype:

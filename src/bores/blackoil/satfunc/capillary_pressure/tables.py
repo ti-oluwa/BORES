@@ -9,7 +9,7 @@ import numpy.typing as npt
 from scipy.interpolate import PchipInterpolator
 from typing_extensions import Self
 
-from bores.blackoil.satfunc.utils import build_pchip_interpolant
+from bores.blackoil.satfunc.utils import build_pchip_interpolant, validate_strictly_increasing
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.precision import get_dtype
@@ -81,6 +81,41 @@ class CapillaryPressureTable:
         :return: `CapillaryPressureDerivatives` dictionary containing the partial derivatives as described above.
         """
         raise NotImplementedError
+
+    def evaluate_with_derivatives(
+        self,
+        water_saturation: NumberOrArray[NDimension],
+        oil_saturation: NumberOrArray[NDimension],
+        gas_saturation: NumberOrArray[NDimension],
+        **kwargs: typing.Any,
+    ) -> tuple[CapillaryPressures, CapillaryPressureDerivatives]:
+        """
+        Compute the capillary pressures and their derivatives together.
+
+        Models that can share work between the two computations override this. The default
+        evaluates the capillary pressures and then the derivatives, so it gives the same results
+        as calling `evaluate` and `derivatives` separately.
+
+        :param water_saturation: Water saturation (fraction) - scalar or array.
+        :param oil_saturation: Oil saturation (fraction) - scalar or array.
+        :param gas_saturation: Gas saturation (fraction) - scalar or array.
+        :param kwargs: Other key word arguments, passed to both `evaluate` and `derivatives`.
+        :return: Tuple of the `CapillaryPressures` and `CapillaryPressureDerivatives` dictionaries.
+        """
+        return (
+            self.evaluate(
+                water_saturation=water_saturation,
+                oil_saturation=oil_saturation,
+                gas_saturation=gas_saturation,
+                **kwargs,
+            ),
+            self.derivatives(
+                water_saturation=water_saturation,
+                oil_saturation=oil_saturation,
+                gas_saturation=gas_saturation,
+                **kwargs,
+            ),
+        )
 
     def __call__(
         self,
@@ -261,8 +296,8 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
             )
         if len(self.reference_saturation) < 2:
             raise ValidationError("At least 2 points required for interpolation.")
-        if not np.all(np.diff(self.reference_saturation) >= 0):
-            raise ValidationError("`reference_saturation` must be monotonically increasing.")
+
+        validate_strictly_increasing(values=self.reference_saturation, name="reference_saturation")
 
         # Resolve and enforce dtype on both stored arrays
         dtype = np.dtype(self.dtype) if self.dtype is not None else get_dtype()

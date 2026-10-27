@@ -290,3 +290,66 @@ def test_leverett_j_table_uses_the_conversion_of_its_unit_system(unit_system):
         minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
     )[0]
     np.testing.assert_allclose(doubled, 2.0 * from_table, rtol=1e-12)
+
+
+@pytest.mark.parametrize(
+    "saturation, position, kind",
+    [
+        ([0.2, 0.4, 0.3, 0.6, 1.0], 2, "is not larger than"),
+        ([0.2, 0.3, 0.3, 0.6, 1.0], 2, "repeats"),
+    ],
+)
+def test_reference_saturation_must_be_strictly_increasing_with_a_located_message(
+    saturation, position, kind
+):
+    from bores.blackoil.satfunc.capillary_pressure.tables import TwoPhaseCapillaryPressureTable
+    from bores.blackoil.satfunc.relperm.tables import TwoPhaseRelPermTable
+    from bores.types import FluidPhase
+
+    values = np.array(saturation)
+    with pytest.raises(ValidationError, match=f"entry {position} .* {kind}") as relperm_error:
+        TwoPhaseRelPermTable(
+            wetting_phase=FluidPhase.WATER,
+            non_wetting_phase=FluidPhase.OIL,
+            reference_saturation=values,
+            wetting_phase_relative_permeability=np.linspace(0.0, 1.0, values.size),
+            non_wetting_phase_relative_permeability=np.linspace(1.0, 0.0, values.size),
+            reference_phase="wetting",
+        )
+    assert "strictly increasing" in str(relperm_error.value)
+    assert "`/`" in str(relperm_error.value)
+    with pytest.raises(ValidationError, match=f"entry {position} .* {kind}"):
+        TwoPhaseCapillaryPressureTable(
+            wetting_phase=FluidPhase.WATER,
+            non_wetting_phase=FluidPhase.OIL,
+            reference_saturation=values,
+            capillary_pressure=np.linspace(2.0, 0.0, values.size),
+        )
+
+
+@pytest.mark.parametrize(
+    "table_class",
+    [
+        BrooksCoreyCapillaryPressureTable,
+        VanGenuchtenCapillaryPressureTable,
+        LeverettJCapillaryPressureTable,
+    ],
+)
+@pytest.mark.parametrize("wettability", list(Wettability))
+def test_capillary_fused_call_matches_separate_calls(table_class, wettability, saturations):
+    table = table_class(wettability=wettability, mixed_wet_water_fraction=0.4, **ENDPOINTS)
+    pressures, derivatives = table.evaluate_with_derivatives(*saturations)
+    expected_pressures = table.evaluate(*saturations)
+    expected_derivatives = table.derivatives(*saturations)
+    for key in expected_pressures:
+        np.testing.assert_array_equal(pressures[key], expected_pressures[key])
+    for key in expected_derivatives:
+        np.testing.assert_allclose(
+            derivatives[key], expected_derivatives[key], rtol=1e-9, atol=1e-10
+        )
+    sw, so, sg = (float(values[5]) for values in saturations)
+    scalar_pressures, scalar_derivatives = table.evaluate_with_derivatives(sw, so, sg)
+    assert isinstance(scalar_pressures["oil_water"], float)
+    assert scalar_derivatives["dpcow_dsw"] == pytest.approx(
+        derivatives["dpcow_dsw"][5], rel=1e-9, abs=1e-10
+    )

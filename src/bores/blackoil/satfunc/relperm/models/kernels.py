@@ -29,6 +29,7 @@ from bores.types import Integer, NDimension, Number, NumberArray, NumberOrArray,
 
 __all__ = [
     "NO_MINIMUM",
+    "FlatRelPermInputs",
     "RelPermCell",
     "blend_cells",
     "clip_unit",
@@ -360,6 +361,31 @@ def finalize_mixed_wet_cell(
     )
 
 
+class FlatRelPermInputs(typing.NamedTuple):
+    """The saturation and endpoint inputs of a relative permeability kernel as flat arrays."""
+
+    water_saturation: NumberArray[OneDimension]
+    """Water saturation, or a single value shared by every cell."""
+
+    oil_saturation: NumberArray[OneDimension]
+    """Oil saturation, or a single value shared by every cell."""
+
+    gas_saturation: NumberArray[OneDimension]
+    """Gas saturation, or a single value shared by every cell."""
+
+    irreducible_water_saturation: NumberArray[OneDimension]
+    """Irreducible water saturation, or a single value shared by every cell."""
+
+    residual_oil_saturation_water: NumberArray[OneDimension]
+    """Residual oil saturation to water flooding, or a single value shared by every cell."""
+
+    residual_oil_saturation_gas: NumberArray[OneDimension]
+    """Residual oil saturation to gas flooding, or a single value shared by every cell."""
+
+    residual_gas_saturation: NumberArray[OneDimension]
+    """Residual gas saturation, or a single value shared by every cell."""
+
+
 def prepare_relperm_inputs(
     water_saturation: NumberOrArray[NDimension],
     oil_saturation: NumberOrArray[NDimension],
@@ -368,14 +394,12 @@ def prepare_relperm_inputs(
     residual_oil_saturation_water: NumberOrArray[NDimension],
     residual_oil_saturation_gas: NumberOrArray[NDimension],
     residual_gas_saturation: NumberOrArray[NDimension],
-) -> tuple[tuple[Integer, ...], Integer, tuple[NumberArray[OneDimension], ...]]:
+) -> tuple[tuple[Integer, ...], Integer, FlatRelPermInputs]:
     """
     Validate the saturations and bring all inputs of a relative permeability kernel to flat arrays.
 
     :raises ValidationError: If any saturation is outside the range 0 to 1.
-    :return: Tuple of the broadcast shape, the number of cells and the flattened inputs in
-        the order water, oil, gas, irreducible water, residual oil to water, residual oil to
-        gas and residual gas saturation.
+    :return: Tuple of the broadcast shape, the number of cells and the flattened inputs.
     """
     shape, size, arrays = prepare_kernel_inputs(
         water_saturation,
@@ -398,4 +422,4 @@ def prepare_relperm_inputs(
             f"Saturations must be between 0 and 1. Sw: {show_invalid_saturation(sw)}, "
             f"So: {show_invalid_saturation(so)}, Sg: {show_invalid_saturation(sg)}"
         )
-    return shape, size, arrays
+    return shape, size, FlatRelPermInputs(*arrays)

@@ -16,7 +16,7 @@ from bores.blackoil.satfunc.relperm.mixing_rules import (
     get_mixing_rule,
     get_mixing_rule_partial_derivatives,
 )
-from bores.blackoil.satfunc.utils import build_pchip_interpolant
+from bores.blackoil.satfunc.utils import build_pchip_interpolant, validate_strictly_increasing
 from bores.constants import c
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
@@ -620,8 +620,8 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
             )
         if len(self.reference_saturation) < 2:
             raise ValidationError("At least 2 points required for interpolation")
-        if not np.all(np.diff(self.reference_saturation) >= 0):
-            raise ValidationError("`reference_saturation` must be monotonically increasing")
+
+        validate_strictly_increasing(values=self.reference_saturation, name="reference_saturation")
 
         # Resolve and enforce dtype on all stored arrays
         dtype = np.dtype(self.dtype) if self.dtype is not None else get_dtype()

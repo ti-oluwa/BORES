@@ -252,13 +252,13 @@ def compute_satfunc_cache(
 
         capillary_pressure_table = tables.capillary_pressure
         if capillary_pressure_table is not None:
-            capillary_pressure = capillary_pressure_table.evaluate(sw, so, sg, **state_kwargs)
+            capillary_pressure, capillary_pressure_derivatives = (
+                capillary_pressure_table.evaluate_with_derivatives(
+                    water_saturation=sw, oil_saturation=so, gas_saturation=sg, **state_kwargs
+                )
+            )
             cache.oil_water_capillary_pressure[mask] = capillary_pressure["oil_water"]
             cache.gas_oil_capillary_pressure[mask] = capillary_pressure["gas_oil"]
-
-            capillary_pressure_derivatives = capillary_pressure_table.derivatives(
-                sw, so, sg, **state_kwargs
-            )
             cache.dpcow_dsw[mask] = capillary_pressure_derivatives["dpcow_dsw"]
             cache.dpcow_dso[mask] = capillary_pressure_derivatives["dpcow_dso"]
             cache.dpcgo_dso[mask] = capillary_pressure_derivatives["dpcgo_dso"]

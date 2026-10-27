@@ -908,6 +908,438 @@ def compute_van_genuchten_derivatives(
     )
 
 
+@numba.njit(cache=True, error_model="numpy")
+def compute_van_genuchten_capillary_pressures_and_derivatives_cell(
+    water_saturation: Number,
+    oil_saturation: Number,
+    gas_saturation: Number,
+    irreducible_water_saturation: Number,
+    residual_oil_saturation_water: Number,
+    residual_oil_saturation_gas: Number,
+    residual_gas_saturation: Number,
+    wettability: Wettability,
+    oil_water_alpha_water_wet: Number,
+    oil_water_alpha_oil_wet: Number,
+    oil_water_n_water_wet: Number,
+    oil_water_n_oil_wet: Number,
+    gas_oil_alpha: Number,
+    gas_oil_n: Number,
+    mixed_wet_water_fraction: Number = 0.5,
+    saturation_epsilon: Number = 1e-6,
+    minimum_mobile_pore_space: Number = 1e-9,
+) -> tuple[Number, Number, Number, Number, Number, Number]:
+    """
+    Capillary pressures and their derivatives with respect to saturation for one cell, from a
+    single evaluation of the power functions that both need.
+
+    The pressures are identical to those of the value kernel. The derivatives equal those of the
+    derivative kernel up to rounding, and share the same saturations and the same activation
+    conditions. There is no validation of the inputs.
+
+    :return: Tuple of oil-water and gas-oil capillary pressure, `dpcow_dsw`, `dpcow_dso`,
+        `dpcgo_dsg` and `dpcgo_dso`.
+    """
+    sw: Number = water_saturation
+    so: Number = oil_saturation
+    sg: Number = gas_saturation
+    swc: Number = irreducible_water_saturation
+    sorw: Number = residual_oil_saturation_water
+    sorg: Number = residual_oil_saturation_gas
+    sgr: Number = residual_gas_saturation
+
+    # Normalize saturations if they do not sum to 1
+    total_saturation = sw + so + sg
+    if abs(total_saturation - 1.0) > saturation_epsilon and total_saturation > 0.0:
+        sw = sw / total_saturation
+        sg = sg / total_saturation
+
+    total_mobile_pore_space_water = 1.0 - swc - sorw
+    total_mobile_pore_space_gas = 1.0 - swc - sorg - sgr
+
+    oil_water_capillary_pressure: Number = 0.0
+    dpcow_dsw: Number = 0.0
+    if total_mobile_pore_space_water > minimum_mobile_pore_space:
+        raw_effective_water_saturation = (sw - swc) / total_mobile_pore_space_water
+        effective_water_saturation = min(
+            max(raw_effective_water_saturation, saturation_epsilon),
+            1.0 - saturation_epsilon,
+        )
+
+        # With `w = Se ** (-1 / m)`, `u = w - 1` and `term = u ** (1 / n)`, the capillary pressure
+        # is `term / alpha` and its slope is `term / u * (1 / (alpha * n)) * (-1 / m) * w / Se`, so
+        # the powers are evaluated once and shared by the value and the slope.
+        dpcow_dse_w: Number = 0.0
+        if wettability == Wettability.WATER_WET:
+            m_ww = 1.0 - 1.0 / oil_water_n_water_wet
+            w_ww = effective_water_saturation ** (-1.0 / m_ww)
+            u_ww = w_ww - 1.0
+            term_ww = u_ww ** (1.0 / oil_water_n_water_wet)
+            oil_water_capillary_pressure = (1.0 / oil_water_alpha_water_wet) * term_ww
+            dpcow_dse_w = (
+                (1.0 / oil_water_alpha_water_wet)
+                * (1.0 / oil_water_n_water_wet)
+                * (term_ww / max(u_ww, 1e-30))
+                * ((-1.0 / m_ww) * (w_ww / effective_water_saturation))
+            )
+        elif wettability == Wettability.OIL_WET:
+            m_ow = 1.0 - 1.0 / oil_water_n_oil_wet
+            w_ow = effective_water_saturation ** (-1.0 / m_ow)
+            u_ow = w_ow - 1.0
+            term_ow = u_ow ** (1.0 / oil_water_n_oil_wet)
+            oil_water_capillary_pressure = -(1.0 / oil_water_alpha_oil_wet) * term_ow
+            dpcow_dse_w = (
+                -(1.0 / oil_water_alpha_oil_wet)
+                * (1.0 / oil_water_n_oil_wet)
+                * (term_ow / max(u_ow, 1e-30))
+                * ((-1.0 / m_ow) * (w_ow / effective_water_saturation))
+            )
+        elif wettability == Wettability.MIXED_WET:
+            m_ww = 1.0 - 1.0 / oil_water_n_water_wet
+            w_ww = effective_water_saturation ** (-1.0 / m_ww)
+            u_ww = w_ww - 1.0
+            term_ww = u_ww ** (1.0 / oil_water_n_water_wet)
+            pcow_ww = (1.0 / oil_water_alpha_water_wet) * term_ww
+            d_ww = (
+                (1.0 / oil_water_alpha_water_wet)
+                * (1.0 / oil_water_n_water_wet)
+                * (term_ww / max(u_ww, 1e-30))
+                * ((-1.0 / m_ww) * (w_ww / effective_water_saturation))
+            )
+
+            m_ow = 1.0 - 1.0 / oil_water_n_oil_wet
+            w_ow = effective_water_saturation ** (-1.0 / m_ow)
+            u_ow = w_ow - 1.0
+            term_ow = u_ow ** (1.0 / oil_water_n_oil_wet)
+            pcow_ow = -(1.0 / oil_water_alpha_oil_wet) * term_ow
+            d_ow = (
+                -(1.0 / oil_water_alpha_oil_wet)
+                * (1.0 / oil_water_n_oil_wet)
+                * (term_ow / max(u_ow, 1e-30))
+                * ((-1.0 / m_ow) * (w_ow / effective_water_saturation))
+            )
+
+            oil_water_capillary_pressure = (
+                mixed_wet_water_fraction * pcow_ww + (1.0 - mixed_wet_water_fraction) * pcow_ow
+            )
+            dpcow_dse_w = mixed_wet_water_fraction * d_ww + (1.0 - mixed_wet_water_fraction) * d_ow
+        if (
+            raw_effective_water_saturation > saturation_epsilon
+            and raw_effective_water_saturation < 1.0 - saturation_epsilon
+        ):
+            dpcow_dsw = dpcow_dse_w / total_mobile_pore_space_water
+
+    gas_oil_capillary_pressure: Number = 0.0
+    dpcgo_dsg: Number = 0.0
+    if total_mobile_pore_space_gas > minimum_mobile_pore_space:
+        raw_effective_liquid_saturation = (1.0 - swc - sg - sorg) / total_mobile_pore_space_gas
+        effective_liquid_saturation = min(
+            max(raw_effective_liquid_saturation, saturation_epsilon),
+            1.0 - saturation_epsilon,
+        )
+
+        m_gas_oil = 1.0 - 1.0 / gas_oil_n
+        w_gas_oil = effective_liquid_saturation ** (-1.0 / m_gas_oil)
+        u_gas_oil = w_gas_oil - 1.0
+        term_gas_oil = u_gas_oil ** (1.0 / gas_oil_n)
+        gas_oil_capillary_pressure = (1.0 / gas_oil_alpha) * term_gas_oil
+        if (
+            raw_effective_liquid_saturation > saturation_epsilon
+            and raw_effective_liquid_saturation < 1.0 - saturation_epsilon
+        ):
+            dpcgo_dse_l = (
+                (1.0 / gas_oil_alpha)
+                * (1.0 / gas_oil_n)
+                * (term_gas_oil / max(u_gas_oil, 1e-30))
+                * ((-1.0 / m_gas_oil) * (w_gas_oil / effective_liquid_saturation))
+            )
+            dpcgo_dsg = -dpcgo_dse_l / total_mobile_pore_space_gas
+
+    return oil_water_capillary_pressure, gas_oil_capillary_pressure, dpcow_dsw, 0.0, dpcgo_dsg, 0.0
+
+
+@numba.njit(cache=True, parallel=True, error_model="numpy")
+def compute_van_genuchten_capillary_pressures_and_derivatives_loop(
+    water_saturation: NumberArray[OneDimension],
+    oil_saturation: NumberArray[OneDimension],
+    gas_saturation: NumberArray[OneDimension],
+    irreducible_water_saturation: NumberArray[OneDimension],
+    residual_oil_saturation_water: NumberArray[OneDimension],
+    residual_oil_saturation_gas: NumberArray[OneDimension],
+    residual_gas_saturation: NumberArray[OneDimension],
+    wettability: Wettability,
+    oil_water_alpha_water_wet: Number,
+    oil_water_alpha_oil_wet: Number,
+    oil_water_n_water_wet: Number,
+    oil_water_n_oil_wet: Number,
+    gas_oil_alpha: Number,
+    gas_oil_n: Number,
+    mixed_wet_water_fraction: Number,
+    saturation_epsilon: Number,
+    minimum_mobile_pore_space: Number,
+    size: Integer,
+    oil_water_capillary_pressure: NumberArray[OneDimension],
+    gas_oil_capillary_pressure: NumberArray[OneDimension],
+    dpcow_dsw: NumberArray[OneDimension],
+    dpcow_dso: NumberArray[OneDimension],
+    dpcgo_dsg: NumberArray[OneDimension],
+    dpcgo_dso: NumberArray[OneDimension],
+) -> None:
+    """
+    Compute the capillary pressures and their derivatives of `size` cells in parallel and write
+    them to the output arrays.
+
+    Per-cell inputs are flat arrays, or a single value shared by every cell.
+    """
+    for i in numba.prange(size):
+        oil_water, gas_oil, d_ow_sw, d_ow_so, d_go_sg, d_go_so = (
+            compute_van_genuchten_capillary_pressures_and_derivatives_cell(
+                water_saturation=np.float64(element_at(array=water_saturation, index=i)),
+                oil_saturation=np.float64(element_at(array=oil_saturation, index=i)),
+                gas_saturation=np.float64(element_at(array=gas_saturation, index=i)),
+                irreducible_water_saturation=np.float64(
+                    element_at(array=irreducible_water_saturation, index=i)
+                ),
+                residual_oil_saturation_water=np.float64(
+                    element_at(array=residual_oil_saturation_water, index=i)
+                ),
+                residual_oil_saturation_gas=np.float64(
+                    element_at(array=residual_oil_saturation_gas, index=i)
+                ),
+                residual_gas_saturation=np.float64(
+                    element_at(array=residual_gas_saturation, index=i)
+                ),
+                wettability=wettability,
+                oil_water_alpha_water_wet=oil_water_alpha_water_wet,
+                oil_water_alpha_oil_wet=oil_water_alpha_oil_wet,
+                oil_water_n_water_wet=oil_water_n_water_wet,
+                oil_water_n_oil_wet=oil_water_n_oil_wet,
+                gas_oil_alpha=gas_oil_alpha,
+                gas_oil_n=gas_oil_n,
+                mixed_wet_water_fraction=mixed_wet_water_fraction,
+                saturation_epsilon=saturation_epsilon,
+                minimum_mobile_pore_space=minimum_mobile_pore_space,
+            )
+        )
+        oil_water_capillary_pressure[i] = oil_water
+        gas_oil_capillary_pressure[i] = gas_oil
+        dpcow_dsw[i] = d_ow_sw
+        dpcow_dso[i] = d_ow_so
+        dpcgo_dsg[i] = d_go_sg
+        dpcgo_dso[i] = d_go_so
+
+
+def compute_van_genuchten_capillary_pressures_and_derivatives_array(
+    water_saturation: NumberOrArray[NDimension],
+    oil_saturation: NumberOrArray[NDimension],
+    gas_saturation: NumberOrArray[NDimension],
+    irreducible_water_saturation: NumberOrArray[NDimension],
+    residual_oil_saturation_water: NumberOrArray[NDimension],
+    residual_oil_saturation_gas: NumberOrArray[NDimension],
+    residual_gas_saturation: NumberOrArray[NDimension],
+    wettability: Wettability,
+    oil_water_alpha_water_wet: Number,
+    oil_water_alpha_oil_wet: Number,
+    oil_water_n_water_wet: Number,
+    oil_water_n_oil_wet: Number,
+    gas_oil_alpha: Number,
+    gas_oil_n: Number,
+    mixed_wet_water_fraction: Number = 0.5,
+    saturation_epsilon: Number = 1e-6,
+    minimum_mobile_pore_space: Number = 1e-9,
+) -> tuple[
+    tuple[NumberArray[NDimension], NumberArray[NDimension]],
+    tuple[
+        NumberArray[NDimension],
+        NumberArray[NDimension],
+        NumberArray[NDimension],
+        NumberArray[NDimension],
+    ],
+]:
+    """
+    Compute the capillary pressures and their derivatives for array inputs in one pass.
+
+    The saturations are validated as in the value function. Unlike the separate functions, the
+    power functions shared by the pressure and its slope are evaluated once per cell.
+
+    :param water_saturation: Current water saturation (fraction, 0-1) - scalar or array.
+    :param oil_saturation: Current oil saturation (fraction, 0-1) - scalar or array.
+    :param gas_saturation: Current gas saturation (fraction, 0-1) - scalar or array.
+    :param irreducible_water_saturation: Irreducible water saturation (swc) - scalar or array.
+    :param residual_oil_saturation_water: Residual oil saturation during water flooding (sorw) - scalar or array.
+    :param residual_oil_saturation_gas: Residual oil saturation during gas flooding (sorg) - scalar or array.
+    :param residual_gas_saturation: Residual gas saturation (sgr) - scalar or array.
+    :param wettability: Wettability type (WATER_WET, OIL_WET, or MIXED_WET).
+    :param oil_water_alpha_water_wet: van Genuchten α parameter for oil-water (water-wet) [1/psi].
+    :param oil_water_alpha_oil_wet: van Genuchten α parameter for oil-water (oil-wet) [1/psi].
+    :param oil_water_n_water_wet: van Genuchten n parameter for oil-water (water-wet).
+    :param oil_water_n_oil_wet: van Genuchten n parameter for oil-water (oil-wet).
+    :param gas_oil_alpha: van Genuchten α parameter for gas-oil [1/psi].
+    :param gas_oil_n: van Genuchten n parameter for gas-oil.
+    :param mixed_wet_water_fraction: Fraction of pore space that is water-wet (0-1, default 0.5).
+    :param saturation_epsilon: Small value to avoid division by zero in saturation calculations.
+    :param minimum_mobile_pore_space: Minimum mobile pore space threshold below which Pc is set to zero.
+    :return: Tuple of the (oil-water, gas-oil) capillary pressures and the (`dpcow_dsw`,
+        `dpcow_dso`, `dpcgo_dsg`, `dpcgo_dso`) derivatives.
+    """
+    if oil_water_alpha_water_wet <= 0.0 or oil_water_alpha_oil_wet <= 0.0:
+        raise ValidationError("Oil-water alpha parameters must be positive.")
+    if gas_oil_alpha <= 0.0:
+        raise ValidationError("Gas-oil alpha parameter must be positive.")
+    if oil_water_n_water_wet <= 1.0 or oil_water_n_oil_wet <= 1.0:
+        raise ValidationError("Oil-water n parameters must be greater than 1.")
+    if gas_oil_n <= 1.0:
+        raise ValidationError("Gas-oil n parameter must be greater than 1.")
+    (
+        shape,
+        size,
+        (
+            water_saturation_flat,
+            oil_saturation_flat,
+            gas_saturation_flat,
+            irreducible_water_saturation_flat,
+            residual_oil_saturation_water_flat,
+            residual_oil_saturation_gas_flat,
+            residual_gas_saturation_flat,
+        ),
+    ) = prepare_kernel_inputs(
+        water_saturation,
+        oil_saturation,
+        gas_saturation,
+        irreducible_water_saturation,
+        residual_oil_saturation_water,
+        residual_oil_saturation_gas,
+        residual_gas_saturation,
+    )
+    if not saturations_within_bounds(
+        water_saturation=water_saturation_flat,
+        oil_saturation=oil_saturation_flat,
+        gas_saturation=gas_saturation_flat,
+        size=size,
+    ):
+        raise ValidationError("Saturations must be between 0 and 1.")
+
+    dtype = get_floating_dtype(water_saturation)
+    oil_water_capillary_pressure = np.empty(size, dtype=dtype)
+    gas_oil_capillary_pressure = np.empty(size, dtype=dtype)
+    dpcow_dsw = np.empty(size, dtype=dtype)
+    dpcow_dso = np.empty(size, dtype=dtype)
+    dpcgo_dsg = np.empty(size, dtype=dtype)
+    dpcgo_dso = np.empty(size, dtype=dtype)
+    compute_van_genuchten_capillary_pressures_and_derivatives_loop(
+        water_saturation=water_saturation_flat,
+        oil_saturation=oil_saturation_flat,
+        gas_saturation=gas_saturation_flat,
+        irreducible_water_saturation=irreducible_water_saturation_flat,
+        residual_oil_saturation_water=residual_oil_saturation_water_flat,
+        residual_oil_saturation_gas=residual_oil_saturation_gas_flat,
+        residual_gas_saturation=residual_gas_saturation_flat,
+        wettability=wettability,
+        oil_water_alpha_water_wet=oil_water_alpha_water_wet,
+        oil_water_alpha_oil_wet=oil_water_alpha_oil_wet,
+        oil_water_n_water_wet=oil_water_n_water_wet,
+        oil_water_n_oil_wet=oil_water_n_oil_wet,
+        gas_oil_alpha=gas_oil_alpha,
+        gas_oil_n=gas_oil_n,
+        mixed_wet_water_fraction=mixed_wet_water_fraction,
+        saturation_epsilon=saturation_epsilon,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+        size=size,
+        oil_water_capillary_pressure=oil_water_capillary_pressure,
+        gas_oil_capillary_pressure=gas_oil_capillary_pressure,
+        dpcow_dsw=dpcow_dsw,
+        dpcow_dso=dpcow_dso,
+        dpcgo_dsg=dpcgo_dsg,
+        dpcgo_dso=dpcgo_dso,
+    )
+    return (
+        typing.cast(NumberArray[NDimension], oil_water_capillary_pressure.reshape(shape)),
+        typing.cast(NumberArray[NDimension], gas_oil_capillary_pressure.reshape(shape)),
+    ), (
+        typing.cast(NumberArray[NDimension], dpcow_dsw.reshape(shape)),
+        typing.cast(NumberArray[NDimension], dpcow_dso.reshape(shape)),
+        typing.cast(NumberArray[NDimension], dpcgo_dsg.reshape(shape)),
+        typing.cast(NumberArray[NDimension], dpcgo_dso.reshape(shape)),
+    )
+
+
+def compute_van_genuchten_capillary_pressures_and_derivatives(
+    water_saturation: NumberOrArray[NDimension],
+    oil_saturation: NumberOrArray[NDimension],
+    gas_saturation: NumberOrArray[NDimension],
+    irreducible_water_saturation: NumberOrArray[NDimension],
+    residual_oil_saturation_water: NumberOrArray[NDimension],
+    residual_oil_saturation_gas: NumberOrArray[NDimension],
+    residual_gas_saturation: NumberOrArray[NDimension],
+    wettability: Wettability,
+    oil_water_alpha_water_wet: Number,
+    oil_water_alpha_oil_wet: Number,
+    oil_water_n_water_wet: Number,
+    oil_water_n_oil_wet: Number,
+    gas_oil_alpha: Number,
+    gas_oil_n: Number,
+    mixed_wet_water_fraction: Number = 0.5,
+    saturation_epsilon: Number = 1e-6,
+    minimum_mobile_pore_space: Number = 1e-9,
+) -> tuple[
+    tuple[NumberOrArray[NDimension], NumberOrArray[NDimension]],
+    tuple[
+        NumberOrArray[NDimension],
+        NumberOrArray[NDimension],
+        NumberOrArray[NDimension],
+        NumberOrArray[NDimension],
+    ],
+]:
+    """
+    Dispatch function for the Van Genuchten fused capillary pressure and derivative computation.
+
+    Computes the capillary pressures and their derivatives together, evaluating the power
+    functions that both need once per cell. The results match `compute_van_genuchten_capillary_pressures` and the derivative function of this
+    model. Scalar inputs give scalar results.
+
+    :return: Tuple of the (oil-water, gas-oil) capillary pressures and the (`dpcow_dsw`,
+        `dpcow_dso`, `dpcgo_dsg`, `dpcgo_dso`) derivatives.
+    """
+    is_scalar = (
+        np.isscalar(water_saturation)
+        and np.isscalar(oil_saturation)
+        and np.isscalar(gas_saturation)
+        and np.isscalar(irreducible_water_saturation)
+        and np.isscalar(residual_oil_saturation_water)
+        and np.isscalar(residual_oil_saturation_gas)
+        and np.isscalar(residual_gas_saturation)
+    )
+    pressures, derivatives = compute_van_genuchten_capillary_pressures_and_derivatives_array(
+        water_saturation=water_saturation,  # type: ignore[arg-type]
+        oil_saturation=oil_saturation,  # type: ignore[arg-type]
+        gas_saturation=gas_saturation,  # type: ignore[arg-type]
+        irreducible_water_saturation=irreducible_water_saturation,  # type: ignore[arg-type]
+        residual_oil_saturation_water=residual_oil_saturation_water,  # type: ignore[arg-type]
+        residual_oil_saturation_gas=residual_oil_saturation_gas,  # type: ignore[arg-type]
+        residual_gas_saturation=residual_gas_saturation,  # type: ignore[arg-type]
+        wettability=wettability,
+        oil_water_alpha_water_wet=oil_water_alpha_water_wet,
+        oil_water_alpha_oil_wet=oil_water_alpha_oil_wet,
+        oil_water_n_water_wet=oil_water_n_water_wet,
+        oil_water_n_oil_wet=oil_water_n_oil_wet,
+        gas_oil_alpha=gas_oil_alpha,
+        gas_oil_n=gas_oil_n,
+        mixed_wet_water_fraction=mixed_wet_water_fraction,
+        saturation_epsilon=saturation_epsilon,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+    )
+    if is_scalar:
+        return (
+            (pressures[0].item(), pressures[1].item()),
+            (
+                derivatives[0].item(),
+                derivatives[1].item(),
+                derivatives[2].item(),
+                derivatives[3].item(),
+            ),
+        )
+    return pressures, derivatives
+
+
 @attrs.frozen(slots=True)
 class VanGenuchtenCapillaryPressureTable(CapillaryPressureTable):
     """
@@ -985,6 +1417,133 @@ class VanGenuchtenCapillaryPressureTable(CapillaryPressureTable):
     def get_gas_oil_wetting_phase(self) -> FluidPhase:
         return FluidPhase.OIL
 
+    def resolve_endpoint_saturations(
+        self,
+        irreducible_water_saturation: NumberOrArray[NDimension] | None = None,
+        residual_oil_saturation_water: NumberOrArray[NDimension] | None = None,
+        residual_oil_saturation_gas: NumberOrArray[NDimension] | None = None,
+        residual_gas_saturation: NumberOrArray[NDimension] | None = None,
+    ) -> tuple[
+        NumberOrArray[NDimension],
+        NumberOrArray[NDimension],
+        NumberOrArray[NDimension],
+        NumberOrArray[NDimension],
+    ]:
+        """
+        Endpoint saturations for an evaluation: each argument if given, otherwise the value set
+        on the model.
+
+        :param irreducible_water_saturation: Irreducible water saturation, or `None` to use the
+            model's value.
+        :param residual_oil_saturation_water: Residual oil saturation to water flooding, or
+            `None` to use the model's value.
+        :param residual_oil_saturation_gas: Residual oil saturation to gas flooding, or `None`
+            to use the model's value.
+        :param residual_gas_saturation: Residual gas saturation, or `None` to use the model's
+            value.
+        :raises ValidationError: If an endpoint is neither given nor set on the model.
+        :return: Tuple of irreducible water, residual oil to water, residual oil to gas and
+            residual gas saturation.
+        """
+        swc = (
+            irreducible_water_saturation
+            if irreducible_water_saturation is not None
+            else self.irreducible_water_saturation
+        )
+        sorw = (
+            residual_oil_saturation_water
+            if residual_oil_saturation_water is not None
+            else self.residual_oil_saturation_water
+        )
+        sorg = (
+            residual_oil_saturation_gas
+            if residual_oil_saturation_gas is not None
+            else self.residual_oil_saturation_gas
+        )
+        sgr = (
+            residual_gas_saturation
+            if residual_gas_saturation is not None
+            else self.residual_gas_saturation
+        )
+        params_missing = []
+        if swc is None:
+            params_missing.append("swc")
+        if sorw is None:
+            params_missing.append("sorw")
+        if sorg is None:
+            params_missing.append("sorg")
+        if sgr is None:
+            params_missing.append("sgr")
+        if params_missing:
+            raise ValidationError(
+                f"Residual saturations must be provided either as model defaults or in the call. "
+                f"Missing: {', '.join(params_missing)}"
+            )
+        return swc, sorw, sorg, sgr  # type: ignore[return-value]
+
+    def evaluate_with_derivatives(
+        self,
+        water_saturation: NumberOrArray[NDimension],
+        oil_saturation: NumberOrArray[NDimension],
+        gas_saturation: NumberOrArray[NDimension],
+        irreducible_water_saturation: NumberOrArray[NDimension] | None = None,
+        residual_oil_saturation_water: NumberOrArray[NDimension] | None = None,
+        residual_oil_saturation_gas: NumberOrArray[NDimension] | None = None,
+        residual_gas_saturation: NumberOrArray[NDimension] | None = None,
+        **kwargs: typing.Any,
+    ) -> tuple[CapillaryPressures, CapillaryPressureDerivatives]:
+        """
+        Compute capillary pressures using van Genuchten model.
+
+        Supports both scalar and array inputs.
+
+        :param water_saturation: Water saturation (fraction, 0-1) - scalar or array.
+        :param oil_saturation: Oil saturation (fraction, 0-1) - scalar or array.
+        :param gas_saturation: Gas saturation (fraction, 0-1) - scalar or array.
+        :param irreducible_water_saturation: Optional override for swc - scalar or array.
+        :param residual_oil_saturation_water: Optional override for sorw - scalar or array.
+        :param residual_oil_saturation_gas: Optional override for sorg - scalar or array.
+        :param residual_gas_saturation: Optional override for sgr - scalar or array.
+        :return: `CapillaryPressures` dictionary.
+        """
+        swc, sorw, sorg, sgr = self.resolve_endpoint_saturations(
+            irreducible_water_saturation=irreducible_water_saturation,
+            residual_oil_saturation_water=residual_oil_saturation_water,
+            residual_oil_saturation_gas=residual_oil_saturation_gas,
+            residual_gas_saturation=residual_gas_saturation,
+        )
+
+        (pcow, pcgo), (dpcow_dsw, dpcow_dso, dpcgo_dsg, dpcgo_dso) = (
+            compute_van_genuchten_capillary_pressures_and_derivatives(
+                water_saturation=water_saturation,
+                oil_saturation=oil_saturation,
+                gas_saturation=gas_saturation,
+                irreducible_water_saturation=swc,  # type: ignore[arg-type]
+                residual_oil_saturation_water=sorw,  # type: ignore[arg-type]
+                residual_oil_saturation_gas=sorg,  # type: ignore[arg-type]
+                residual_gas_saturation=sgr,  # type: ignore[arg-type]
+                wettability=self.wettability,
+                oil_water_alpha_water_wet=self.oil_water_alpha_water_wet,
+                oil_water_alpha_oil_wet=self.oil_water_alpha_oil_wet,
+                oil_water_n_water_wet=self.oil_water_n_water_wet,
+                oil_water_n_oil_wet=self.oil_water_n_oil_wet,
+                gas_oil_alpha=self.gas_oil_alpha,
+                gas_oil_n=self.gas_oil_n,
+                mixed_wet_water_fraction=self.mixed_wet_water_fraction,
+                saturation_epsilon=c.SATURATION_EPSILON,
+                minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
+            )
+        )
+        return (
+            CapillaryPressures(oil_water=pcow, gas_oil=pcgo),  # type: ignore[typeddict-item]
+            CapillaryPressureDerivatives(
+                dpcow_dsw=dpcow_dsw,
+                dpcow_dso=dpcow_dso,
+                dpcgo_dsg=dpcgo_dsg,
+                dpcgo_dso=dpcgo_dso,
+            ),
+        )
+
     def evaluate(
         self,
         water_saturation: NumberOrArray[NDimension],
@@ -1010,41 +1569,12 @@ class VanGenuchtenCapillaryPressureTable(CapillaryPressureTable):
         :param residual_gas_saturation: Optional override for sgr - scalar or array.
         :return: `CapillaryPressures` dictionary.
         """
-        swc = (
-            irreducible_water_saturation
-            if irreducible_water_saturation is not None
-            else self.irreducible_water_saturation
+        swc, sorw, sorg, sgr = self.resolve_endpoint_saturations(
+            irreducible_water_saturation=irreducible_water_saturation,
+            residual_oil_saturation_water=residual_oil_saturation_water,
+            residual_oil_saturation_gas=residual_oil_saturation_gas,
+            residual_gas_saturation=residual_gas_saturation,
         )
-        sorw = (
-            residual_oil_saturation_water
-            if residual_oil_saturation_water is not None
-            else self.residual_oil_saturation_water
-        )
-        sorg = (
-            residual_oil_saturation_gas
-            if residual_oil_saturation_gas is not None
-            else self.residual_oil_saturation_gas
-        )
-        sgr = (
-            residual_gas_saturation
-            if residual_gas_saturation is not None
-            else self.residual_gas_saturation
-        )
-
-        params_missing = []
-        if swc is None:
-            params_missing.append("swc")
-        if sorw is None:
-            params_missing.append("sorw")
-        if sorg is None:
-            params_missing.append("sorg")
-        if sgr is None:
-            params_missing.append("sgr")
-        if params_missing:
-            raise ValidationError(
-                f"Residual saturations must be provided either as model defaults or in the call. "
-                f"Missing: {', '.join(params_missing)}"
-            )
 
         pcow, pcgo = compute_van_genuchten_capillary_pressures(
             water_saturation=water_saturation,
@@ -1112,41 +1642,12 @@ class VanGenuchtenCapillaryPressureTable(CapillaryPressureTable):
             saturation.
         :return: `CapillaryPressureDerivatives` dictionary containing the partial derivatives as described above.
         """
-        swc = (
-            irreducible_water_saturation
-            if irreducible_water_saturation is not None
-            else self.irreducible_water_saturation
+        swc, sorw, sorg, sgr = self.resolve_endpoint_saturations(
+            irreducible_water_saturation=irreducible_water_saturation,
+            residual_oil_saturation_water=residual_oil_saturation_water,
+            residual_oil_saturation_gas=residual_oil_saturation_gas,
+            residual_gas_saturation=residual_gas_saturation,
         )
-        sorw = (
-            residual_oil_saturation_water
-            if residual_oil_saturation_water is not None
-            else self.residual_oil_saturation_water
-        )
-        sorg = (
-            residual_oil_saturation_gas
-            if residual_oil_saturation_gas is not None
-            else self.residual_oil_saturation_gas
-        )
-        sgr = (
-            residual_gas_saturation
-            if residual_gas_saturation is not None
-            else self.residual_gas_saturation
-        )
-
-        params_missing = []
-        if swc is None:
-            params_missing.append("swc")
-        if sorw is None:
-            params_missing.append("sorw")
-        if sorg is None:
-            params_missing.append("sorg")
-        if sgr is None:
-            params_missing.append("sgr")
-        if params_missing:
-            raise ValidationError(
-                f"Residual saturations must be provided either as model defaults or in the call. "
-                f"Missing: {', '.join(params_missing)}"
-            )
 
         dpcow_dsw, dpcow_dso, dpcgo_dsg, dpcgo_dso = compute_van_genuchten_derivatives(
             water_saturation=water_saturation,

@@ -925,7 +925,7 @@ def compute_brooks_corey_relative_permeabilities_compiled(
             residual_gas_saturation,
         )
     )
-    shape, size, inputs = prepare_relperm_inputs(
+    shape, size, flat = prepare_relperm_inputs(
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
         gas_saturation=gas_saturation,
@@ -939,26 +939,32 @@ def compute_brooks_corey_relative_permeabilities_compiled(
     oil_relperm = np.empty(size, dtype=dtype)
     gas_relperm = np.empty(size, dtype=dtype)
     compute_brooks_corey_values_loop(
-        *inputs,
-        water_exponent,
-        oil_exponent,
-        gas_exponent,
-        maximum_water_relperm,
-        maximum_oil_relperm,
-        maximum_gas_relperm,
-        wettability,
-        mixed_wet_water_fraction,
-        rule_id,
-        saturation_epsilon,
-        minimum_mobile_pore_space,
-        c.MINIMUM_MOBILE_PORE_SPACE,
-        to_kernel_minimum(minimum_water_relperm),
-        to_kernel_minimum(minimum_oil_relperm),
-        to_kernel_minimum(minimum_gas_relperm),
-        size,
-        water_relperm,
-        oil_relperm,
-        gas_relperm,
+        water_saturation=flat.water_saturation,
+        oil_saturation=flat.oil_saturation,
+        gas_saturation=flat.gas_saturation,
+        irreducible_water_saturation=flat.irreducible_water_saturation,
+        residual_oil_saturation_water=flat.residual_oil_saturation_water,
+        residual_oil_saturation_gas=flat.residual_oil_saturation_gas,
+        residual_gas_saturation=flat.residual_gas_saturation,
+        water_exponent=water_exponent,
+        oil_exponent=oil_exponent,
+        gas_exponent=gas_exponent,
+        maximum_water_relperm=maximum_water_relperm,
+        maximum_oil_relperm=maximum_oil_relperm,
+        maximum_gas_relperm=maximum_gas_relperm,
+        wettability=wettability,
+        mixed_wet_water_fraction=mixed_wet_water_fraction,
+        rule_id=rule_id,
+        saturation_epsilon=saturation_epsilon,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+        rule_minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
+        minimum_water_relperm=to_kernel_minimum(minimum_water_relperm),
+        minimum_oil_relperm=to_kernel_minimum(minimum_oil_relperm),
+        minimum_gas_relperm=to_kernel_minimum(minimum_gas_relperm),
+        size=size,
+        water_relperm=water_relperm,
+        oil_relperm=oil_relperm,
+        gas_relperm=gas_relperm,
     )
     if is_scalar:
         return water_relperm.item(), oil_relperm.item(), gas_relperm.item()
@@ -1018,7 +1024,7 @@ def compute_brooks_corey_relative_permeability_derivatives_compiled(
             residual_gas_saturation,
         )
     )
-    shape, size, inputs = prepare_relperm_inputs(
+    shape, size, flat = prepare_relperm_inputs(
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
         gas_saturation=gas_saturation,
@@ -1028,29 +1034,62 @@ def compute_brooks_corey_relative_permeability_derivatives_compiled(
         residual_gas_saturation=residual_gas_saturation,
     )
     dtype = get_floating_dtype(water_saturation)
-    outputs = tuple(np.empty(size, dtype=dtype) for _ in range(9))
+    dkrw_dsw = np.empty(size, dtype=dtype)
+    dkro_dsw = np.empty(size, dtype=dtype)
+    dkrg_dsw = np.empty(size, dtype=dtype)
+    dkrw_dso = np.empty(size, dtype=dtype)
+    dkro_dso = np.empty(size, dtype=dtype)
+    dkrg_dso = np.empty(size, dtype=dtype)
+    dkrw_dsg = np.empty(size, dtype=dtype)
+    dkro_dsg = np.empty(size, dtype=dtype)
+    dkrg_dsg = np.empty(size, dtype=dtype)
     compute_brooks_corey_derivatives_loop(
-        *inputs,
-        water_exponent,
-        oil_exponent,
-        gas_exponent,
-        maximum_water_relperm,
-        maximum_oil_relperm,
-        maximum_gas_relperm,
-        wettability,
-        mixed_wet_water_fraction,
-        rule_id,
-        saturation_epsilon,
-        minimum_mobile_pore_space,
-        c.MINIMUM_MOBILE_PORE_SPACE,
-        to_kernel_minimum(minimum_water_relperm),
-        to_kernel_minimum(minimum_oil_relperm),
-        to_kernel_minimum(minimum_gas_relperm),
-        size,
-        *outputs,
+        water_saturation=flat.water_saturation,
+        oil_saturation=flat.oil_saturation,
+        gas_saturation=flat.gas_saturation,
+        irreducible_water_saturation=flat.irreducible_water_saturation,
+        residual_oil_saturation_water=flat.residual_oil_saturation_water,
+        residual_oil_saturation_gas=flat.residual_oil_saturation_gas,
+        residual_gas_saturation=flat.residual_gas_saturation,
+        water_exponent=water_exponent,
+        oil_exponent=oil_exponent,
+        gas_exponent=gas_exponent,
+        maximum_water_relperm=maximum_water_relperm,
+        maximum_oil_relperm=maximum_oil_relperm,
+        maximum_gas_relperm=maximum_gas_relperm,
+        wettability=wettability,
+        mixed_wet_water_fraction=mixed_wet_water_fraction,
+        rule_id=rule_id,
+        saturation_epsilon=saturation_epsilon,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+        rule_minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
+        minimum_water_relperm=to_kernel_minimum(minimum_water_relperm),
+        minimum_oil_relperm=to_kernel_minimum(minimum_oil_relperm),
+        minimum_gas_relperm=to_kernel_minimum(minimum_gas_relperm),
+        size=size,
+        dkrw_dsw=dkrw_dsw,
+        dkro_dsw=dkro_dsw,
+        dkrg_dsw=dkrg_dsw,
+        dkrw_dso=dkrw_dso,
+        dkro_dso=dkro_dso,
+        dkrg_dso=dkrg_dso,
+        dkrw_dsg=dkrw_dsg,
+        dkro_dsg=dkro_dsg,
+        dkrg_dsg=dkrg_dsg,
     )
     dkrw_dsw, dkro_dsw, dkrg_dsw, dkrw_dso, dkro_dso, dkrg_dso, dkrw_dsg, dkro_dsg, dkrg_dsg = (
-        output.item() if is_scalar else output.reshape(shape) for output in outputs
+        output.item() if is_scalar else output.reshape(shape)
+        for output in (
+            dkrw_dsw,
+            dkro_dsw,
+            dkrg_dsw,
+            dkrw_dso,
+            dkro_dso,
+            dkrg_dso,
+            dkrw_dsg,
+            dkro_dsg,
+            dkrg_dsg,
+        )
     )
     return RelativePermeabilityDerivatives(
         dkrw_dsw=dkrw_dsw,
@@ -1353,7 +1392,7 @@ def compute_brooks_corey_relative_permeabilities_and_derivatives(
             residual_gas_saturation,
         )
     )
-    shape, size, inputs = prepare_relperm_inputs(
+    shape, size, flat = prepare_relperm_inputs(
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
         gas_saturation=gas_saturation,
@@ -1363,26 +1402,54 @@ def compute_brooks_corey_relative_permeabilities_and_derivatives(
         residual_gas_saturation=residual_gas_saturation,
     )
     dtype = get_floating_dtype(water_saturation)
-    outputs = tuple(np.empty(size, dtype=dtype) for _ in range(12))
+    water_relperm = np.empty(size, dtype=dtype)
+    oil_relperm = np.empty(size, dtype=dtype)
+    gas_relperm = np.empty(size, dtype=dtype)
+    dkrw_dsw = np.empty(size, dtype=dtype)
+    dkro_dsw = np.empty(size, dtype=dtype)
+    dkrg_dsw = np.empty(size, dtype=dtype)
+    dkrw_dso = np.empty(size, dtype=dtype)
+    dkro_dso = np.empty(size, dtype=dtype)
+    dkrg_dso = np.empty(size, dtype=dtype)
+    dkrw_dsg = np.empty(size, dtype=dtype)
+    dkro_dsg = np.empty(size, dtype=dtype)
+    dkrg_dsg = np.empty(size, dtype=dtype)
     compute_brooks_corey_values_and_derivatives_loop(
-        *inputs,
-        water_exponent,
-        oil_exponent,
-        gas_exponent,
-        maximum_water_relperm,
-        maximum_oil_relperm,
-        maximum_gas_relperm,
-        wettability,
-        mixed_wet_water_fraction,
-        rule_id,
-        saturation_epsilon,
-        minimum_mobile_pore_space,
-        c.MINIMUM_MOBILE_PORE_SPACE,
-        to_kernel_minimum(minimum_water_relperm),
-        to_kernel_minimum(minimum_oil_relperm),
-        to_kernel_minimum(minimum_gas_relperm),
-        size,
-        *outputs,
+        water_saturation=flat.water_saturation,
+        oil_saturation=flat.oil_saturation,
+        gas_saturation=flat.gas_saturation,
+        irreducible_water_saturation=flat.irreducible_water_saturation,
+        residual_oil_saturation_water=flat.residual_oil_saturation_water,
+        residual_oil_saturation_gas=flat.residual_oil_saturation_gas,
+        residual_gas_saturation=flat.residual_gas_saturation,
+        water_exponent=water_exponent,
+        oil_exponent=oil_exponent,
+        gas_exponent=gas_exponent,
+        maximum_water_relperm=maximum_water_relperm,
+        maximum_oil_relperm=maximum_oil_relperm,
+        maximum_gas_relperm=maximum_gas_relperm,
+        wettability=wettability,
+        mixed_wet_water_fraction=mixed_wet_water_fraction,
+        rule_id=rule_id,
+        saturation_epsilon=saturation_epsilon,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+        rule_minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
+        minimum_water_relperm=to_kernel_minimum(minimum_water_relperm),
+        minimum_oil_relperm=to_kernel_minimum(minimum_oil_relperm),
+        minimum_gas_relperm=to_kernel_minimum(minimum_gas_relperm),
+        size=size,
+        water_relperm=water_relperm,
+        oil_relperm=oil_relperm,
+        gas_relperm=gas_relperm,
+        dkrw_dsw=dkrw_dsw,
+        dkro_dsw=dkro_dsw,
+        dkrg_dsw=dkrg_dsw,
+        dkrw_dso=dkrw_dso,
+        dkro_dso=dkro_dso,
+        dkrg_dso=dkrg_dso,
+        dkrw_dsg=dkrw_dsg,
+        dkro_dsg=dkro_dsg,
+        dkrg_dsg=dkrg_dsg,
     )
     (
         water_relperm,
@@ -1397,7 +1464,23 @@ def compute_brooks_corey_relative_permeabilities_and_derivatives(
         dkrw_dsg,
         dkro_dsg,
         dkrg_dsg,
-    ) = (output.item() if is_scalar else output.reshape(shape) for output in outputs)
+    ) = (
+        output.item() if is_scalar else output.reshape(shape)
+        for output in (
+            water_relperm,
+            oil_relperm,
+            gas_relperm,
+            dkrw_dsw,
+            dkro_dsw,
+            dkrg_dsw,
+            dkrw_dso,
+            dkro_dso,
+            dkrg_dso,
+            dkrw_dsg,
+            dkro_dsg,
+            dkrg_dsg,
+        )
+    )
     return (
         RelativePermeabilities(water=water_relperm, oil=oil_relperm, gas=gas_relperm),
         RelativePermeabilityDerivatives(
