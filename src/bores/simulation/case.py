@@ -16,7 +16,7 @@ from bores.blackoil.satfunc.relperm.tables import MinimumRelPerm
 from bores.deck.file import DeckFile
 from bores.deck.keywords.runspec import START
 from bores.errors import CaseLoadError, CaseValidationError, ValidationError
-from bores.grids.base import Grid
+from bores.grids.base import CellStatus, Grid
 from bores.grids.factories.corner_point import InvertedCellPolicy
 from bores.initialization import (
     N_SATURATION_SAMPLES,
@@ -445,7 +445,18 @@ def load_case(
         raise CaseLoadError(f"Failed to load grid from {deck_title}.") from exc
 
     try:
-        regions = Regions.from_deck(deck_file, n_cells=grid.n_cells, use_default=True)
+        # Decks write 0 as the region of inactive cells, which Eclipse ignores.
+        active = (
+            grid.cell_statuses != int(CellStatus.INACTIVE)
+            if grid.cell_statuses is not None
+            else None
+        )
+        regions = Regions.from_deck(
+            deck_file,
+            n_cells=grid.n_cells,
+            use_default=True,
+            active=active,
+        )
     except Exception as exc:
         raise CaseLoadError(f"Failed to load regions from {deck_title}.") from exc
 

@@ -6,14 +6,34 @@ from typing_extensions import Self
 
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
-from bores.types import IntCellArray, Integer
+from bores.types import BooleanCellArray, IntCellArray, Integer
 
 __all__ = ["Regions"]
 
 
 def load_region_array(
-    deck_file: DeckFile, keyword: str, n_cells: int, default_region: int | None = None
+    deck_file: DeckFile,
+    keyword: str,
+    n_cells: int,
+    default_region: int | None = None,
+    *,
+    active: BooleanCellArray | None = None,
 ) -> IntCellArray | None:
+    """
+    Load a region number array (`SATNUM`, `EQLNUM`, ...) from a deck.
+
+    :param deck_file: Parsed deck.
+    :param keyword: Region keyword, e.g. `"EQLNUM"`.
+    :param n_cells: Number of cells the array must have (every cell of the grid, active or not).
+    :param default_region: Region of every cell when the deck does not have the keyword. `None`
+        returns `None` in that case.
+    :param active: Which cells are active. Eclipse ignores the region number of an inactive cell,
+        and decks routinely write `0` there (Norne's `EQLNUM` and `FIPNUM` do), whereas every cell
+        here needs a region of at least 1. When given, an inactive cell with a number below 1 gets
+        region 1. Active cells are never changed, so a bad number in one is still reported.
+    :returns: Region numbers as `int32`, or `None`.
+    :raises ValidationError: If the array does not have `n_cells` values.
+    """
     array = deck_file.get(keyword)
     if array is None:
         if default_region is not None:
@@ -23,6 +43,15 @@ def load_region_array(
     array = array.astype(np.int32, copy=False)
     if array.size != n_cells:
         raise ValidationError(f"{keyword} has {array.size} values; expected {n_cells}.")
+
+    if active is not None:
+        if active.shape != (n_cells,):
+            raise ValidationError(
+                f"`active` has shape {active.shape}; expected ({n_cells},) to match {keyword}."
+            )
+        unused = ~active & (array < 1)
+        if unused.any():
+            array = np.where(unused, 1, array).astype(np.int32)
     return typing.cast(IntCellArray, array)
 
 
@@ -79,37 +108,48 @@ class Regions:
     """
 
     @classmethod
-    def from_deck(cls, deck_file: DeckFile, *, n_cells: int, use_default: bool = False) -> Self:
+    def from_deck(
+        cls,
+        deck_file: DeckFile,
+        *,
+        n_cells: int,
+        use_default: bool = False,
+        active: BooleanCellArray | None = None,
+    ) -> Self:
         """
         Build `Regions` from a parsed DeckFile.
 
         Missing keywords default to None (region 1 is assumed by callers).
 
         :param deck_file: Parsed DeckFile.
-        :param n_cells: Number of active cells, for validation.
+        :param n_cells: Number of cells in the grid (active or not), for validation.
         :param use_default: If True, missing keywords are filled with region 1.
             Else, they are left as None. Default: False.
+        :param active: Which cells of the grid are active. Pass it when the grid has inactive
+            cells: decks write `0` as the region number of those (Eclipse ignores it), which
+            would otherwise fail validation, so inactive cells with a number below 1 are given
+            region 1. `None` leaves every number as written.
         :returns: `Regions` object loaded from ECLIPSE deck.
         """
         default_region = 1 if use_default else None
         return cls(
             pvt_region=load_region_array(
-                deck_file, "PVTNUM", n_cells=n_cells, default_region=default_region
+                deck_file, "PVTNUM", n_cells=n_cells, default_region=default_region, active=active
             ),
             saturation_region=load_region_array(
-                deck_file, "SATNUM", n_cells=n_cells, default_region=default_region
+                deck_file, "SATNUM", n_cells=n_cells, default_region=default_region, active=active
             ),
             imbibition_region=load_region_array(
-                deck_file, "IMBNUM", n_cells=n_cells, default_region=default_region
+                deck_file, "IMBNUM", n_cells=n_cells, default_region=default_region, active=active
             ),
             equilibrium_region=load_region_array(
-                deck_file, "EQLNUM", n_cells=n_cells, default_region=default_region
+                deck_file, "EQLNUM", n_cells=n_cells, default_region=default_region, active=active
             ),
             rock_region=load_region_array(
-                deck_file, "ROCKNUM", n_cells=n_cells, default_region=default_region
+                deck_file, "ROCKNUM", n_cells=n_cells, default_region=default_region, active=active
             ),
             fluid_in_place_region=load_region_array(
-                deck_file, "FIPNUM", n_cells=n_cells, default_region=default_region
+                deck_file, "FIPNUM", n_cells=n_cells, default_region=default_region, active=active
             ),
         )
 

@@ -74,7 +74,13 @@ def validate_regions(regions: Regions, n_cells: int) -> Regions:
                 f"`regions.{name}` has shape {array.shape}; expected ({n_cells},)."
             )
         if array.size > 0 and int(array.min()) < 1:
-            raise ValidationError(f"`regions.{name}` holds region numbers below 1.")
+            below = np.flatnonzero(array < 1)
+            raise ValidationError(
+                f"`regions.{name}` holds {below.size} region number(s) below 1 (first at cell "
+                f"{int(below[0])}, which is {int(array[below[0]])}). Region numbers start at 1. "
+                "Decks write 0 for inactive cells, which Eclipse ignores: build the regions with "
+                "`Regions.from_deck(..., active=...)` to give those cells region 1."
+            )
     return regions
 
 
