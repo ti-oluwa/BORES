@@ -246,8 +246,7 @@ nav:
 
   - API Reference:
     - api-reference/index.md
-    - Scalar Correlations: api-reference/correlations-scalar.md
-    - Array Correlations: api-reference/correlations-array.md
+    - Correlations: api-reference/correlations.md
     - Full API: api-reference/full-api.md
 
   - Best Practices:

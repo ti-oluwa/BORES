@@ -1,0 +1,600 @@
+import logging
+import typing
+
+import numpy as np
+
+from bores.constants import c
+from bores.correlations.core import (
+    HENRY_CONSTANTS,
+    SETSCHENOW_CONSTANTS,
+    get_gas_symbol,
+)
+from bores.correlations.elementwise import elementwise
+from bores.errors import ComputationError, ValidationError
+from bores.types import NDimension, Number, NumberOrArray
+
+logger = logging.getLogger(__name__)
+
+# Physical constants, read from `bores.constants` when this module is imported.
+BARRELS_TO_CUBIC_FEET = c.BARRELS_TO_CUBIC_FEET
+KILOGRAM_PER_CUBIC_METER_TO_POUNDS_PER_CUBIC_FEET = (
+    c.KILOGRAM_PER_CUBIC_METER_TO_POUNDS_PER_CUBIC_FEET
+)
+MOLECULAR_WEIGHT_AIR = c.MOLECULAR_WEIGHT_AIR
+PSI_TO_PASCAL = c.PSI_TO_PASCAL
+SCF_PER_POUND_MOLE = c.SCF_PER_POUND_MOLE
+
+__all__ = [
+    "compute_gas_free_water_formation_volume_factor",
+    "compute_gas_solubility_in_water",
+    "compute_gas_solubility_in_water_henry_law",
+    "compute_gas_solubility_in_water_mccain_methane",
+    "compute_gas_solubility_in_water_pressure_derivative",
+    "compute_water_bubble_point_pressure",
+    "compute_water_compressibility",
+    "compute_water_density",
+    "compute_water_density_batzle",
+    "compute_water_density_mccain",
+    "compute_water_formation_volume_factor",
+    "compute_water_standard_density",
+    "compute_water_viscosity",
+]
+
+PPM_PER_WEIGHT_PERCENT = 1e4
+SODIUM_CHLORIDE_MOLAR_MASS = 58.44
+"""Molar mass of NaCl in g/mol."""
+GRAMS_PER_POUND_MOLE = 453.59237
+FRESH_WATER_DENSITY_AT_STANDARD_CONDITIONS = 999.0
+"""Density of fresh water used to convert molality to stock tank barrels, in kg/m³."""
+CUBIC_METERS_PER_BARREL = 0.158987294928
+METHANE_MCCAIN_TEMPERATURE_RANGE = (100.0, 400.0)
+"""Temperature range in °F where the McCain methane solubility correlation is used."""
+BUBBLE_POINT_BISECTION_ITERATIONS = 80
+
+
+@elementwise(non_negative=("salinity",))
+def compute_water_standard_density(salinity: Number) -> Number:
+    """
+    Computes the density of brine at standard conditions (60 °F, 14.696 psi) from its
+    salinity (McCain).
+
+        ρ = 62.368 + 0.438603 * S + 1.60074e-3 * S²
+
+    where S is the salinity in weight percent of dissolved solids.
+
+    :param salinity: Water salinity (ppm by weight of total dissolved solids)
+    :return: Brine density at standard conditions (lbm/ft³)
+    """
+    weight_percent = salinity / PPM_PER_WEIGHT_PERCENT
+    return 62.368 + 0.438603 * weight_percent + 1.60074e-3 * weight_percent**2
+
+
+@elementwise(non_negative=("salinity", "pressure"), positive=("temperature",))
+def compute_water_viscosity(
+    temperature: Number,
+    salinity: Number,
+    pressure: Number,
+) -> Number:
+    """
+    Computes the brine viscosity with the McCain correlation.
+
+        μ_w1 = A * T^B
+        μ_w = μ_w1 * (0.9994 + 4.0295e-5 * P + 3.1062e-9 * P²)
+
+    where
+        A = 109.574 - 0.840564 * S + 0.313314 * S² + 8.72213e-3 * S³
+        B = -1.12166 + 0.0263951 * S - 6.79461e-4 * S² - 5.47119e-5 * S³ + 1.55586e-6 * S⁴
+
+    and S is the salinity (weight percent of dissolved solids), T the temperature (°F)
+    and P the pressure (psi). `μ_w1` is the viscosity at atmospheric pressure.
+
+    Typical range: 86-390 °F, up to 26% salinity, up to 15000 psi.
+
+    :param temperature: Temperature (°F)
+    :param salinity: Water salinity (ppm by weight of total dissolved solids)
+    :param pressure: Pressure (psi)
+    :return: Water viscosity (cP)
+    """
+    s = salinity / PPM_PER_WEIGHT_PERCENT
+    a = 109.574 - 0.840564 * s + 0.313314 * s**2 + 8.72213e-3 * s**3
+    b = -1.12166 + 2.63951e-2 * s - 6.79461e-4 * s**2 - 5.47119e-5 * s**3 + 1.55586e-6 * s**4
+    atmospheric_viscosity = a * temperature**b
+    return atmospheric_viscosity * (0.9994 + 4.0295e-5 * pressure + 3.1062e-9 * pressure**2)
+
+
+@elementwise(non_negative=("pressure",), bounds={"temperature": (-459.67, np.inf)})
+def compute_gas_free_water_formation_volume_factor(
+    pressure: Number,
+    temperature: Number,
+) -> Number:
+    """
+    Computes the water formation volume factor with the McCain correlation. The effect
+    of salinity and of dissolved gas on the factor is small and is not modeled.
+
+        Bw = (1 + ΔVwp) * (1 + ΔVwT)
+
+    where
+        ΔVwT = -0.010001 + 1.33391e-4 * T + 5.50654e-7 * T²
+        ΔVwp = -1.95301e-9 * P * T - 1.72834e-13 * P² * T - 3.58922e-7 * P - 2.25341e-10 * P²
+
+    with the temperature T in °F and the pressure P in psi.
+
+    Typical range: 70-260 °F, 200-5000 psi.
+
+    :param pressure: Pressure (psi)
+    :param temperature: Temperature (°F)
+    :return: Water formation volume factor (bbl/STB)
+    """
+    delta_v_temperature = -0.010001 + 1.33391e-4 * temperature + 5.50654e-7 * temperature**2
+    delta_v_pressure = (
+        -1.95301e-9 * pressure * temperature
+        - 1.72834e-13 * pressure**2 * temperature
+        - 3.58922e-7 * pressure
+        - 2.25341e-10 * pressure**2
+    )
+    return (1.0 + delta_v_pressure) * (1.0 + delta_v_temperature)
+
+
+@elementwise(non_negative=("pressure", "salinity"), positive=("temperature",))
+def compute_gas_solubility_in_water_mccain_methane(
+    pressure: Number,
+    temperature: Number,
+    salinity: Number = 0.0,
+) -> Number:
+    """
+    Computes the solubility of methane in brine with the McCain correlation.
+
+        Rsw = (A + B * P + C * P²) * 10^(-0.0840655 * S * T^-0.285854)
+
+    where A, B and C are cubic and quartic polynomials of the temperature T (°F),
+
+        A = 8.15839 - 6.12265e-2 * T + 1.91663e-4 * T² - 2.1654e-7 * T³
+        B = 1.01021e-2 - 7.44241e-5 * T + 3.05553e-7 * T² - 2.94883e-10 * T³
+        C = (-9.02505 + 0.130237 * T - 8.53425e-4 * T² + 2.34122e-6 * T³
+             - 2.37049e-9 * T⁴) * 1e-7
+
+    and S is the salinity (weight percent of dissolved solids).
+
+    Typical range: 100-340 °F, up to 10000 psi.
+
+    :param pressure: Pressure (psi)
+    :param temperature: Temperature (°F)
+    :param salinity: Water salinity (ppm by weight of total dissolved solids)
+    :return: Solubility of methane in water (scf/STB)
+    """
+    s = salinity / PPM_PER_WEIGHT_PERCENT
+    a = (
+        8.15839
+        - 6.12265e-2 * temperature
+        + 1.91663e-4 * temperature**2
+        - 2.1654e-7 * temperature**3
+    )
+    b = (
+        1.01021e-2
+        - 7.44241e-5 * temperature
+        + 3.05553e-7 * temperature**2
+        - 2.94883e-10 * temperature**3
+    )
+    c_ = (
+        -9.02505
+        + 0.130237 * temperature
+        - 8.53425e-4 * temperature**2
+        + 2.34122e-6 * temperature**3
+        - 2.37049e-9 * temperature**4
+    ) * 1e-7
+    pure_water_solubility = a + b * pressure + c_ * pressure**2
+    salting_out = 10.0 ** (-0.0840655 * s * temperature**-0.285854)
+    return max(pure_water_solubility * salting_out, 0.0)
+
+
+@elementwise(
+    non_negative=("pressure", "salinity"),
+    positive=("henry_constant",),
+    bounds={"temperature": (-459.67, np.inf)},
+)
+def compute_gas_solubility_in_water_henry_law(
+    pressure: Number,
+    temperature: Number,
+    salinity: Number,
+    henry_constant: Number,
+    henry_temperature_coefficient: Number,
+    setschenow_constant: Number,
+) -> Number:
+    """
+    Computes the solubility of a gas in brine with Henry's law and a Setschenow
+    salting-out correction.
+
+        kH(T) = kH * exp[C * (1 / T - 1 / 298.15)]
+        c = kH(T) * P                       (mol of gas per m³ of water)
+        m = c / ρ_w                         (mol of gas per kg of water)
+        m_brine = m * 10^(-k_s * m_salt)
+
+    The solubility per stock tank barrel of water is `m_brine` times the mass of water
+    in a stock tank barrel, converted to standard cubic feet of gas.
+
+    The gas is treated as ideal, so the solubility is overestimated at high pressure,
+    by about 25% for CO₂ near 3000 psi and 200 °F. The solubility never saturates.
+    Use `compute_gas_solubility_in_water` to look up the constants of a gas.
+
+    :param pressure: Pressure (psi)
+    :param temperature: Temperature (°F)
+    :param salinity: Water salinity (ppm by weight of total dissolved solids)
+    :param henry_constant: Solubility `kH` at 298.15 K (mol/(m³·Pa))
+    :param henry_temperature_coefficient: `d(ln kH) / d(1 / T)` (K)
+    :param setschenow_constant: Setschenow constant of the gas for NaCl (base 10, per mol/kg)
+    :return: Solubility of the gas in water (scf/STB)
+    """
+    temperature_kelvin = (temperature - 32.0) * 5.0 / 9.0 + 273.15
+    henry_at_temperature = henry_constant * np.exp(
+        henry_temperature_coefficient * (1.0 / temperature_kelvin - 1.0 / 298.15)
+    )
+    concentration = henry_at_temperature * pressure * PSI_TO_PASCAL
+    water_density = compute_water_density_batzle(pressure, temperature, 0.0)
+    water_density_si = water_density / KILOGRAM_PER_CUBIC_METER_TO_POUNDS_PER_CUBIC_FEET
+    molality = concentration / water_density_si
+    salt_mass_fraction = salinity / 1e6
+    salt_molality = (
+        salt_mass_fraction / (1.0 - salt_mass_fraction) * 1000.0 / SODIUM_CHLORIDE_MOLAR_MASS
+    )
+    molality_in_brine = molality * 10.0 ** (-setschenow_constant * salt_molality)
+    kilograms_per_barrel = CUBIC_METERS_PER_BARREL * FRESH_WATER_DENSITY_AT_STANDARD_CONDITIONS
+    standard_cubic_feet_per_mole = SCF_PER_POUND_MOLE / GRAMS_PER_POUND_MOLE
+    return molality_in_brine * kilograms_per_barrel * standard_cubic_feet_per_mole
+
+
+def compute_gas_solubility_in_water(
+    pressure: NumberOrArray[NDimension],
+    temperature: NumberOrArray[NDimension],
+    salinity: NumberOrArray[NDimension] = 0.0,
+    gas: str = "methane",
+) -> NumberOrArray[NDimension]:
+    """
+    Computes the solubility of a gas in brine.
+
+    Methane between 100 and 400 °F uses the McCain correlation
+    (`compute_gas_solubility_in_water_mccain_methane`). Every other case uses Henry's
+    law (`compute_gas_solubility_in_water_henry_law`), for the gases CO₂, CH₄, N₂, O₂,
+    Ar, He and H₂.
+
+    :param pressure: Pressure (psi)
+    :param temperature: Temperature (°F)
+    :param salinity: Water salinity (ppm by weight of total dissolved solids)
+    :param gas: Gas name or formula (e.g., "methane", "CH4", "CO2")
+    :return: Solubility of the gas in water (scf/STB)
+    :raises ValidationError: If the gas is not supported.
+    """
+    symbol = get_gas_symbol(gas)
+    if symbol not in HENRY_CONSTANTS:
+        raise ValidationError(
+            f"Solubility in water is not available for gas '{gas}'. "
+            f"Supported gases: {sorted(HENRY_CONSTANTS)}."
+        )
+    henry_constant, temperature_coefficient = HENRY_CONSTANTS[symbol]
+    henry = compute_gas_solubility_in_water_henry_law(
+        pressure=pressure,
+        temperature=temperature,
+        salinity=salinity,
+        henry_constant=henry_constant,
+        henry_temperature_coefficient=temperature_coefficient,
+        setschenow_constant=SETSCHENOW_CONSTANTS[symbol],
+    )
+    if symbol != "ch4":
+        return henry
+    mccain = compute_gas_solubility_in_water_mccain_methane(
+        pressure=pressure, temperature=temperature, salinity=salinity
+    )
+    lower, upper = METHANE_MCCAIN_TEMPERATURE_RANGE
+    in_range = (np.asarray(temperature) >= lower) & (np.asarray(temperature) <= upper)
+    result = np.where(in_range, mccain, henry)
+    return typing.cast(NumberOrArray[NDimension], result if result.ndim else result[()])
+
+
+def compute_gas_solubility_in_water_pressure_derivative(
+    pressure: NumberOrArray[NDimension],
+    temperature: NumberOrArray[NDimension],
+    salinity: NumberOrArray[NDimension] = 0.0,
+    gas: str = "methane",
+) -> NumberOrArray[NDimension]:
+    """
+    Computes `dRsw/dP`, the derivative of the solubility of a gas in brine with respect
+    to pressure, with a central difference of `compute_gas_solubility_in_water`.
+
+    :param pressure: Pressure (psi)
+    :param temperature: Temperature (°F)
+    :param salinity: Water salinity (ppm by weight of total dissolved solids)
+    :param gas: Gas name or formula (e.g., "methane", "CH4", "CO2")
+    :return: Derivative of the solubility with respect to pressure (scf/STB/psi)
+    """
+    pressure = np.asarray(pressure)  # type: ignore[assignment]
+    step = np.maximum(0.01, 1e-4 * pressure)
+    upper = compute_gas_solubility_in_water(
+        pressure=pressure + step, temperature=temperature, salinity=salinity, gas=gas
+    )
+    lower_pressure = np.maximum(pressure - step, 0.0)
+    lower = compute_gas_solubility_in_water(
+        pressure=lower_pressure, temperature=temperature, salinity=salinity, gas=gas
+    )
+    result = (upper - lower) / (pressure + step - lower_pressure)
+    return typing.cast(NumberOrArray[NDimension], result if np.ndim(result) else result[()])
+
+
+def compute_water_bubble_point_pressure(
+    temperature: NumberOrArray[NDimension],
+    gas_solubility_in_water: NumberOrArray[NDimension],
+    salinity: NumberOrArray[NDimension] = 0.0,
+    gas: str = "methane",
+) -> NumberOrArray[NDimension]:
+    """
+    Computes the bubble point pressure of water, the pressure at which the water holds
+    a given amount of dissolved gas, by inverting `compute_gas_solubility_in_water`
+    with bisection.
+
+    :param temperature: Temperature (°F)
+    :param gas_solubility_in_water: Dissolved gas in the water (scf/STB)
+    :param salinity: Water salinity (ppm by weight of total dissolved solids)
+    :param gas: Gas name or formula (e.g., "methane", "CH4", "CO2")
+    :return: Bubble point pressure (psi)
+    :raises ComputationError: If the dissolved gas is outside the solubility range
+        between 1 psi and the maximum valid pressure.
+    """
+    target, temperature_array, salinity_array = np.broadcast_arrays(
+        np.asarray(gas_solubility_in_water, dtype=np.float64),
+        np.asarray(temperature, dtype=np.float64),
+        np.asarray(salinity, dtype=np.float64),
+    )
+    lower = np.full(target.shape, 1.0)
+    upper = np.full(target.shape, float(c.MAXIMUM_VALID_PRESSURE))
+
+    def solubility(pressure: np.ndarray) -> np.ndarray:
+        return np.asarray(
+            compute_gas_solubility_in_water(
+                pressure=pressure,
+                temperature=temperature_array,
+                salinity=salinity_array,
+                gas=gas,
+            )
+        )
+
+    if np.any(target < solubility(lower)) or np.any(target > solubility(upper)):
+        raise ComputationError(
+            "The dissolved gas is outside the solubility range of the gas between "
+            f"1 psi and {c.MAXIMUM_VALID_PRESSURE} psi, so no bubble point pressure exists."
+        )
+    for _ in range(BUBBLE_POINT_BISECTION_ITERATIONS):
+        middle = 0.5 * (lower + upper)
+        below = solubility(middle) < target
+        lower = np.where(below, middle, lower)
+        upper = np.where(below, upper, middle)
+
+    result = 0.5 * (lower + upper)
+    if (
+        isinstance(gas_solubility_in_water, np.ndarray)
+        and gas_solubility_in_water.dtype == np.float32
+    ):
+        result = result.astype(np.float32)
+    return typing.cast(NumberOrArray[NDimension], result if result.ndim else result[()])
+
+
+@elementwise(
+    non_negative=("pressure", "gas_solubility_in_water", "salinity"),
+    positive=("gas_formation_volume_factor",),
+    bounds={"temperature": (-459.67, np.inf)},
+)
+def compute_water_compressibility(
+    pressure: Number,
+    temperature: Number,
+    bubble_point_pressure: Number,
+    gas_formation_volume_factor: Number,
+    gas_solubility_in_water: Number,
+    gas_solubility_pressure_derivative: Number,
+    salinity: Number = 0.0,
+) -> Number:
+    """
+    Computes the isothermal water compressibility.
+
+    The compressibility of the liquid (McCain), with the effect of dissolved gas
+    (Dodson and Standing) and of salinity:
+
+        cw = -(1 / Bw) * ∂Bw/∂P * (1 + 8.9e-3 * Rsw) * (1 + S * f(T))
+        f(T) = -0.052 + 2.7e-4 * T - 1.14e-6 * T² + 1.121e-9 * T³
+
+    where `Bw` is the McCain water formation volume factor
+    (`compute_gas_free_water_formation_volume_factor`), `Rsw` the dissolved gas
+    (scf/STB), S the salinity (weight percent) and T the temperature (°F).
+
+    Where the water is saturated, at or below the bubble point pressure, the gas
+    released as pressure falls adds a term:
+
+        cw = cw + (Bg / Bw) * dRsw/dP / 5.615
+
+    The water counts as undersaturated only when the pressure exceeds the bubble point
+    pressure by more than a relative 1e-6.
+
+    :param pressure: Pressure (psi)
+    :param temperature: Temperature (°F)
+    :param bubble_point_pressure: Bubble point pressure of the water (psi)
+    :param gas_formation_volume_factor: Gas formation volume factor (ft³/scf)
+    :param gas_solubility_in_water: Dissolved gas in the water (scf/STB)
+    :param gas_solubility_pressure_derivative: `dRsw/dP` (scf/STB/psi), see
+        `compute_gas_solubility_in_water_pressure_derivative`
+    :param salinity: Water salinity (ppm by weight of total dissolved solids)
+    :return: Water compressibility (psi⁻¹)
+    """
+    delta_v_temperature = -0.010001 + 1.33391e-4 * temperature + 5.50654e-7 * temperature**2
+    delta_v_pressure = (
+        -1.95301e-9 * pressure * temperature
+        - 1.72834e-13 * pressure**2 * temperature
+        - 3.58922e-7 * pressure
+        - 2.25341e-10 * pressure**2
+    )
+    d_delta_v_pressure = (
+        -1.95301e-9 * temperature
+        - 2.0 * 1.72834e-13 * pressure * temperature
+        - 3.58922e-7
+        - 2.0 * 2.25341e-10 * pressure
+    )
+    water_fvf = (1.0 + delta_v_pressure) * (1.0 + delta_v_temperature)
+    compressibility = -(1.0 + delta_v_temperature) * d_delta_v_pressure / water_fvf
+    compressibility *= 1.0 + 8.9e-3 * gas_solubility_in_water
+    weight_percent = salinity / PPM_PER_WEIGHT_PERCENT
+    salinity_factor = (
+        -0.052 + 2.7e-4 * temperature - 1.14e-6 * temperature**2 + 1.121e-9 * temperature**3
+    )
+    compressibility *= 1.0 + weight_percent * salinity_factor
+
+    undersaturated = pressure > bubble_point_pressure * (1.0 + 1e-6)
+    if not undersaturated:
+        compressibility += (
+            gas_formation_volume_factor
+            / water_fvf
+            * gas_solubility_pressure_derivative
+            / BARRELS_TO_CUBIC_FEET
+        )
+    return max(compressibility, 0.0)
+
+
+@elementwise(
+    bounds={"temperature": (-459.67, np.inf)},
+    non_negative=("pressure", "salinity"),
+)
+def compute_water_density_mccain(
+    pressure: Number,
+    temperature: Number,
+    salinity: Number = 0.0,
+) -> Number:
+    """
+    Computes the density of dissolved-gas-free brine with the McCain method: the
+    density at standard conditions divided by the formation volume factor.
+
+        ρ_w = ρ_w,sc / Bw
+
+    :param pressure: Pressure (psi)
+    :param temperature: Temperature (°F)
+    :param salinity: Water salinity (ppm by weight of total dissolved solids)
+    :return: Brine density (lbm/ft³)
+    """
+    return compute_water_standard_density(salinity) / (
+        compute_gas_free_water_formation_volume_factor(pressure, temperature)
+    )
+
+
+@elementwise(
+    non_negative=("pressure", "salinity"),
+    bounds={"temperature": (-459.67, np.inf)},
+)
+def compute_water_density_batzle(
+    pressure: Number,
+    temperature: Number,
+    salinity: Number = 0.0,
+) -> Number:
+    """
+    Computes the density of dissolved-gas-free brine with the Batzle and Wang (1992)
+    correlation.
+
+        ρ_w = 1 + 1e-6 * (-80 T - 3.3 T² + 0.00175 T³ + 489 P - 2 T P + 0.016 T² P
+                          - 1.3e-5 T³ P - 0.333 P² - 0.002 T P²)
+        ρ_b = ρ_w + S * (0.668 + 0.44 S + 1e-6 * (300 P - 2400 P S
+                          + T * (80 + 3 T - 3300 S - 13 P + 47 P S)))
+
+    in g/cm³, with the temperature T in °C, the pressure P in MPa and the salinity S
+    as a weight fraction.
+
+    Typical range: up to 350 °C, up to 100 MPa, up to 32% salinity.
+
+    :param pressure: Pressure (psi)
+    :param temperature: Temperature (°F)
+    :param salinity: Water salinity (ppm by weight of total dissolved solids)
+    :return: Brine density (lbm/ft³)
+    """
+    t = (temperature - 32.0) * 5.0 / 9.0
+    p = pressure * PSI_TO_PASCAL * 1e-6
+    s = salinity * 1e-6
+    pure_water = 1.0 + 1e-6 * (
+        -80.0 * t
+        - 3.3 * t**2
+        + 0.00175 * t**3
+        + 489.0 * p
+        - 2.0 * t * p
+        + 0.016 * t**2 * p
+        - 1.3e-5 * t**3 * p
+        - 0.333 * p**2
+        - 0.002 * t * p**2
+    )
+    brine = pure_water + s * (
+        0.668
+        + 0.44 * s
+        + 1e-6
+        * (
+            300.0 * p
+            - 2400.0 * p * s
+            + t * (80.0 + 3.0 * t - 3300.0 * s - 13.0 * p + 47.0 * p * s)
+        )
+    )
+    return brine * 1000.0 * KILOGRAM_PER_CUBIC_METER_TO_POUNDS_PER_CUBIC_FEET
+
+
+@elementwise(
+    non_negative=("pressure", "gas_solubility_in_water", "salinity"),
+    positive=("gas_gravity", "gas_free_water_formation_volume_factor"),
+)
+def compute_water_density(
+    pressure: Number,
+    temperature: Number,
+    gas_gravity: Number,
+    salinity: Number,
+    gas_solubility_in_water: Number,
+    gas_free_water_formation_volume_factor: Number,
+) -> Number:
+    """
+    Computes the density of water holding dissolved gas, from a mass balance on one
+    stock tank barrel.
+
+        ρ_w = (m_water + m_gas) / (Bw * 5.615)
+
+    where `m_water` is the mass of the stock tank brine
+    (`compute_water_standard_density`) and `m_gas = Rsw * γ_g * 28.96 / 379.49` the mass
+    of the dissolved gas, both per stock tank barrel. The volume is that of the
+    dissolved-gas-free brine.
+
+    :param pressure: Pressure (psi)
+    :param temperature: Temperature (°F)
+    :param gas_gravity: Gas specific gravity (air = 1.0)
+    :param salinity: Water salinity (ppm by weight of total dissolved solids)
+    :param gas_solubility_in_water: Dissolved gas in the water (scf/STB)
+    :param gas_free_water_formation_volume_factor: Water formation volume factor (bbl/STB)
+    :return: Water density (lbm/ft³)
+    """
+    mass_water = compute_water_standard_density(salinity) * BARRELS_TO_CUBIC_FEET
+    gas_mass_per_scf = gas_gravity * MOLECULAR_WEIGHT_AIR / SCF_PER_POUND_MOLE
+    mass_gas = gas_solubility_in_water * gas_mass_per_scf
+    volume = gas_free_water_formation_volume_factor * BARRELS_TO_CUBIC_FEET
+    return (mass_water + mass_gas) / volume
+
+
+@elementwise(
+    positive=("water_density",),
+    non_negative=("salinity",),
+)
+def compute_water_formation_volume_factor(
+    water_density: Number,
+    salinity: Number,
+    standard_density: Number = np.nan,
+) -> Number:
+    """
+    Computes the water formation volume factor from the density of dissolved-gas-free
+    water at reservoir conditions.
+
+        Bw = ρ_sc / ρ_w
+
+    The result is exact for dissolved-gas-free water. For water holding dissolved gas
+    it is too small by the dissolved gas mass fraction, about 0.2%.
+
+    :param water_density: Water density at reservoir conditions (lbm/ft³)
+    :param salinity: Water salinity (ppm by weight of total dissolved solids)
+    :param standard_density: Density of the water at standard conditions (lbm/ft³).
+        Computed from the salinity (`compute_water_standard_density`) when omitted (NaN).
+    :return: Water formation volume factor (bbl/STB)
+    """
+    if np.isnan(standard_density):
+        standard_density = compute_water_standard_density(salinity)
+    return standard_density / water_density

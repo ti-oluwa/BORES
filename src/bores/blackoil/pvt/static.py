@@ -1,8 +1,8 @@
 import attrs
 from typing_extensions import Self
 
+from bores import correlations
 from bores.constants import c
-from bores.correlations import scalars
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.serde.base import Serializable
@@ -163,7 +163,7 @@ class StaticPVT(Serializable):
         oil_specific_gravity = self.oil_specific_gravity
         if oil_specific_gravity is None:
             return None
-        return scalars.compute_oil_api_gravity(oil_specific_gravity)
+        return correlations.compute_oil_api_gravity(oil_specific_gravity)
 
     @property
     def gas_molecular_weight(self) -> Number | None:
@@ -173,7 +173,7 @@ class StaticPVT(Serializable):
         gas_gravity = self.gas_gravity
         if gas_gravity is None:
             return None
-        return scalars.compute_gas_molecular_weight(gas_gravity)
+        return correlations.compute_gas_molecular_weight(gas_gravity)
 
     @classmethod
     def from_deck(

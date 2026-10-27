@@ -7,12 +7,12 @@ import attrs
 import numpy as np
 import numpy.typing as npt
 
+from bores import correlations
 from bores.blackoil.pseudo_pressure import (
     PseudoPressureTable,
     build_pseudo_pressure_table,
 )
 from bores.blackoil.pvt.tables import PVTTable, PVTTables
-from bores.correlations import arrays
 from bores.errors import ValidationError
 from bores.types import FluidPhase, Number, UnitSystem
 
@@ -203,8 +203,8 @@ class Fluid:
                 temperature_ = temperature
 
                 def z_factor_func(pressure: npt.NDArray) -> npt.NDArray:  # type: ignore[misc]
-                    temperature_arr = np.full_like(pressure, temperature_)
-                    result = pvt_table.compressibility_factor(pressure, temperature_arr)
+                    temperature_array = np.full_like(pressure, temperature_)
+                    result = pvt_table.compressibility_factor(pressure, temperature_array)
                     return np.asarray(result, dtype=pressure.dtype)
 
                 z_factor_func._supports_arrays = True  # type: ignore[attr-defined]
@@ -214,8 +214,8 @@ class Fluid:
                 temperature_ = temperature
 
                 def viscosity_func(pressure: npt.NDArray) -> npt.NDArray:  # type: ignore[misc]
-                    temperature_arr = np.full_like(pressure, temperature_)
-                    result = pvt_table.viscosity(pressure, temperature_arr)
+                    temperature_array = np.full_like(pressure, temperature_)
+                    result = pvt_table.viscosity(pressure, temperature_array)
                     return np.asarray(result, dtype=pressure.dtype)
 
                 viscosity_func._supports_arrays = True  # type: ignore[attr-defined]
@@ -229,8 +229,8 @@ class Fluid:
                     temperature_ = temperature
 
                     def z_factor_func(pressure: npt.NDArray) -> npt.NDArray:  # type: ignore[misc]
-                        temperature_arr = np.full_like(pressure, temperature_)
-                        result = gas_table_.compressibility_factor(pressure, temperature_arr)
+                        temperature_array = np.full_like(pressure, temperature_)
+                        result = gas_table_.compressibility_factor(pressure, temperature_array)
                         return np.asarray(result, dtype=pressure.dtype)
 
                     z_factor_func._supports_arrays = True  # type: ignore[attr-defined]
@@ -242,8 +242,8 @@ class Fluid:
                     def viscosity_func(
                         pressure: npt.NDArray,
                     ) -> npt.NDArray:  # type: ignore[misc]
-                        temperature_arr = np.full_like(pressure, temperature_)
-                        result = gas_table_.viscosity(pressure, temperature_arr)
+                        temperature_array = np.full_like(pressure, temperature_)
+                        result = gas_table_.viscosity(pressure, temperature_array)
                         return np.asarray(result, dtype=pressure.dtype)
 
                     viscosity_func._supports_arrays = True  # type: ignore[attr-defined]
@@ -263,12 +263,15 @@ class Fluid:
             specific_gravity_ = specific_gravity
 
             def z_factor_func(pressure: npt.NDArray) -> npt.NDArray:  # type: ignore[misc]
-                temperature_arr = np.full_like(pressure, temperature)
-                specific_gravity_arr = np.full_like(pressure, specific_gravity_)
-                return arrays.compute_gas_compressibility_factor(
-                    pressure=pressure,
-                    temperature=temperature_arr,
-                    gas_gravity=specific_gravity_arr,
+                temperature_array = np.full_like(pressure, temperature)
+                specific_gravity_array = np.full_like(pressure, specific_gravity_)
+                return typing.cast(
+                    npt.NDArray,
+                    correlations.compute_gas_compressibility_factor(
+                        pressure=pressure,
+                        temperature=temperature_array,
+                        gas_gravity=specific_gravity_array,
+                    ),
                 )
 
             z_factor_func._supports_arrays = True  # type: ignore[attr-defined]
@@ -285,22 +288,22 @@ class Fluid:
             molecular_weight_ = molecular_weight
 
             def viscosity_func(pressure: npt.NDArray) -> npt.NDArray:  # type: ignore[misc]
-                temperature_arr = np.full_like(pressure, temperature)
-                specific_gravity_arr = np.full_like(pressure, specific_gravity_)
-                z_factor_arr = arrays.compute_gas_compressibility_factor(
+                temperature_array = np.full_like(pressure, temperature)
+                specific_gravity_array = np.full_like(pressure, specific_gravity_)
+                z_factor_array = correlations.compute_gas_compressibility_factor(
                     pressure=pressure,
-                    temperature=temperature_arr,
-                    gas_gravity=specific_gravity_arr,
+                    temperature=temperature_array,
+                    gas_gravity=specific_gravity_array,
                 )
-                density_arr = arrays.compute_gas_density(
+                density_array = correlations.compute_gas_density(
                     pressure=pressure,
-                    temperature=temperature_arr,
-                    gas_gravity=specific_gravity_arr,
-                    gas_compressibility_factor=z_factor_arr,
+                    temperature=temperature_array,
+                    gas_gravity=specific_gravity_array,
+                    gas_compressibility_factor=z_factor_array,
                 )
-                return arrays.compute_gas_viscosity(
-                    temperature=temperature_arr,
-                    gas_density=density_arr,
+                return correlations.compute_gas_viscosity(
+                    temperature=temperature_array,
+                    gas_density=density_array,
                     gas_molecular_weight=np.full_like(pressure, molecular_weight_),
                 )
 

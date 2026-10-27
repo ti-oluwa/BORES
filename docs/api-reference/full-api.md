@@ -725,9 +725,7 @@ Low-level array utility functions. These are primarily used internally but are a
 
 ## PVT Correlations
 
-Scalar and array PVT correlation functions are documented separately due to their size:
+The PVT correlation functions are documented separately due to their size:
 
-- **[Scalar Correlations](correlations-scalar.md)**: 60+ single-value functions for point PVT calculations. Use these for quick checks, building custom tables, or validating against lab data.
-- **[Array Correlations](correlations-array.md)**: Vectorized equivalents that operate on entire grids in a single call. The simulator uses these internally, and you can use them for post-processing or custom property computations.
+- **[Correlations](correlations.md)**: 60+ PVT functions for oil, gas and water. Each one takes a single set of conditions or whole arrays, which is how the simulator uses them to build property tables.
 
-Both modules share the same function names and parameters. The only difference is that scalar functions accept `float` inputs and array functions accept `NDimensionalGrid` inputs.
