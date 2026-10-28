@@ -836,6 +836,23 @@ def select_current_records(
     return current
 
 
+def is_status_only_producer_record(record: typing.Mapping[str, typing.Any]) -> bool:
+    """
+    Whether a `WCONPROD` record only changes the well's status.
+
+    A record that shuts or stops a well and leaves the control mode defaulted, such as
+    `'WELL' 'SHUT' 15* /`, sets no control: only the status takes effect and the well keeps
+    whichever control it had.
+
+    :param record: One parsed `WCONPROD` record.
+    :returns: `True` if the control mode is defaulted and the status is `SHUT` or `STOP`.
+    """
+    return record.get("control_mode") is None and str(record.get("status") or "OPEN").upper() in {
+        "SHUT",
+        "STOP",
+    }
+
+
 def load_producer_control_from_record(
     record: typing.Mapping[str, typing.Any], unit_system: UnitSystem
 ) -> ProducerControl:
@@ -849,6 +866,11 @@ def load_producer_control_from_record(
         when `bhp` is given and mode isn't `BHP`, and an implicit
         `THPLimit(min_value=thp)` when `thp` is given and mode isn't `THP`.
     """
+    if record.get("control_mode") is None:
+        raise ValidationError(
+            f"`WCONPROD` for well {record.get('well')!r} has no control mode, which an open "
+            "well needs."
+        )
     mode = PRODUCER_CONTROL_MODE_MAP[record["control_mode"]]
     limits: list[Limit] = []
     bhp = record.get("bhp")
@@ -1211,6 +1233,8 @@ def load_controls_from_records(
             if schedule_time > current_time:
                 continue
             if kind == "producer":
+                if is_status_only_producer_record(record):
+                    continue
                 current_control = load_producer_control_from_record(
                     record, unit_system=unit_system
                 )
@@ -1227,7 +1251,7 @@ def load_controls_from_records(
                 current_control = apply_weltarg(current_control, record)
         if current_control is not None:
             controls[well_name] = current_control
-    return WellControls(controls=controls)
+    return WellControls(controls=controls, unit_system=unit_system)
 
 
 def load_groups_from_records(
@@ -1339,7 +1363,7 @@ def load_group_controls_from_records(
         controls[group_name] = load_group_control_from_record(
             record, is_injection=is_injection, unit_system=unit_system
         )
-    return GroupControls(controls=controls)
+    return GroupControls(controls=controls, unit_system=unit_system)
 
 
 def apply_guide_rates(
@@ -1958,6 +1982,18 @@ def load_schedule(
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
+        if is_status_only_producer_record(record):
+            items.append(
+                ScheduleItem(
+                    event=TimeEvent(at=schedule_time * time_factor),
+                    action=UpdateWellStatuses(
+                        well_names=(record["well"],),
+                        status=WELOPEN_STATUS_MAP[str(record["status"]).upper()],
+                    ),
+                    name=f"wconprod-status:{record['well']}@{schedule_time}",
+                )
+            )
+            continue
         control = load_producer_control_from_record(record, unit_system=deck_unit_system).convert(
             target_unit_system
         )

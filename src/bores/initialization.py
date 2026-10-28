@@ -409,6 +409,12 @@ def get_saturations_from_capillary_pressure(
     cell far enough below the water-oil contact is fully water-filled and a cell far enough above
     the gas-oil contact holds only gas and connate water.
 
+    The two inversions are independent, so a cell can end up with `Sw + Sg > 1`, which has
+    no oil to hold the excess. This happens in a gas cap whose `Pcow` curve still reaches a
+    water saturation above connate, and in a thin oil column between two close contacts.
+    Such a cell holds no oil, and its water saturation is taken from the gas-water capillary
+    pressure `Pg - Pw = Pcow(Sw) + Pcgo(1 - Sw)` instead, with `Sg = 1 - Sw`.
+
     :param depths: Depth of each cell.
     :param oil_pressure: Oil-phase pressure of each cell along a continuous oil column.
     :param water_profile: Full-column `(depth, pressure)` water pressure profile, or `None`
@@ -434,6 +440,8 @@ def get_saturations_from_capillary_pressure(
     fractions = np.linspace(0.0, 1.0, saturation_samples, dtype=dtype)
     # Bounds the size of the `(cells, samples)` arrays built per pass
     chunk_size = max(1, CAPILLARY_INVERSION_BATCH_SIZE // saturation_samples)
+    target_pcow: NumberArray[OneDimension] | None = None
+    target_pcgo: NumberArray[OneDimension] | None = None
 
     if water_profile is not None:
         water_pressure_at_depth = np.interp(depths, water_profile[0], water_profile[1])
@@ -457,7 +465,8 @@ def get_saturations_from_capillary_pressure(
                     saturation_grid=saturation_grid,
                     capillary_pressure_grid=np.reshape(pcow_grid, saturation_grid.shape),
                     target_capillary_pressure=typing.cast(
-                        NumberArray[OneDimension], target_pcow[cells]
+                        NumberArray[OneDimension],
+                        target_pcow[cells],  # type: ignore[union-attr]
                     ),
                     pressure_falls_with_saturation=True,
                     prefer_highest_pressure_end=True,  # A cell exactly on the contact is oil-bearing
@@ -466,7 +475,9 @@ def get_saturations_from_capillary_pressure(
 
     if gas_profile is not None:
         gas_pressure_at_depth = np.interp(depths, gas_profile[0], gas_profile[1])
-        target_pcgo = gas_pressure_at_depth - oil_pressure  # Pcgo = Pg - Po
+        target_pcgo = typing.cast(
+            NumberArray[OneDimension], gas_pressure_at_depth - oil_pressure
+        )  # Pcgo = Pg - Po
         for start in range(0, n, chunk_size):
             cells = slice(start, min(start + chunk_size, n))
             swc_chunk = swc[cells]
@@ -493,6 +504,65 @@ def get_saturations_from_capillary_pressure(
                     prefer_highest_pressure_end=False,  # A cell exactly on the contact is oil-bearing
                 )
             )
+
+    if target_pcow is not None and target_pcgo is not None:
+        # Where the two curves each claim the same pore space there is no oil: the cell holds
+        # only water and gas, whose split is set by the gas-water capillary pressure, which is
+        # `Pcow(Sw) + Pcgo(1 - Sw)` and equals `Pg - Pw = Pcow + Pcgo` at the cell's depth.
+        # This is what a gas cap above a contact with a high-reaching `Pcow` curve, or a thin
+        # oil column between two contacts, needs.
+        for start in range(0, n, chunk_size):
+            cells = slice(start, min(start + chunk_size, n))
+            overlapping = np.flatnonzero(
+                water_saturation[cells] + gas_saturation[cells] > 1.0 + 1e-6
+            )
+            if overlapping.size == 0:
+                continue
+            cells_overlapping = overlapping + start
+            swc_chunk = swc[cells_overlapping]
+            saturation_grid = swc_chunk[:, None] + fractions[None, :] * (1.0 - swc_chunk)[:, None]
+            flat_water = saturation_grid.ravel()
+            flat_gas = np.clip(1.0 - flat_water, 0.0, 1.0)
+            flat_zero = np.zeros_like(flat_water)
+            endpoints = dict(
+                irreducible_water_saturation=np.repeat(swc_chunk, saturation_samples),
+                residual_oil_saturation_water=np.repeat(
+                    sorw[cells_overlapping], saturation_samples
+                ),
+                residual_oil_saturation_gas=np.repeat(sorg[cells_overlapping], saturation_samples),
+                residual_gas_saturation=np.repeat(sgr[cells_overlapping], saturation_samples),
+            )
+            pcow_grid = capillary_pressure.evaluate(
+                flat_water, 1.0 - flat_water, flat_zero, **endpoints
+            )["oil_water"]
+            pcgo_grid = capillary_pressure.evaluate(flat_water, flat_zero, flat_gas, **endpoints)[
+                "gas_oil"
+            ]
+            combined_grid = np.reshape(pcow_grid + pcgo_grid, saturation_grid.shape)
+            water_in_gas, _ = invert_capillary_pressure_curves(
+                saturation_grid=saturation_grid,
+                capillary_pressure_grid=combined_grid,
+                target_capillary_pressure=typing.cast(
+                    NumberArray[OneDimension],
+                    target_pcow[cells_overlapping] + target_pcgo[cells_overlapping],
+                ),
+                pressure_falls_with_saturation=True,
+                prefer_highest_pressure_end=True,
+            )
+            water_saturation[cells_overlapping] = water_in_gas
+            gas_saturation[cells_overlapping] = 1.0 - water_in_gas
+
+            # The pressures the cell sits at are those of its final saturations
+            final_water = water_saturation[cells_overlapping]
+            final_gas = gas_saturation[cells_overlapping]
+            final_endpoints = {
+                key: value[::saturation_samples] for key, value in endpoints.items()
+            }
+            final = capillary_pressure.evaluate(
+                final_water, np.zeros_like(final_water), final_gas, **final_endpoints
+            )
+            oil_water_capillary_pressure[cells_overlapping] = final["oil_water"]
+            gas_oil_capillary_pressure[cells_overlapping] = final["gas_oil"]
 
     return CapillarySaturations(
         water_saturation=typing.cast(CellArray, water_saturation),

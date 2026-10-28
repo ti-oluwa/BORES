@@ -413,7 +413,7 @@ def load_case(
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
     raw_deck_title = deck_file.get("TITLE")
     raw_deck_title = raw_deck_title.strip() if isinstance(raw_deck_title, str) else None
-    
+
     if title is not None and not title.strip():
         raise CaseLoadError("`title` must not be empty. Omit it to use the deck's `TITLE`.")
     if title is not None:

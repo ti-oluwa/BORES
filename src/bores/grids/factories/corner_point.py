@@ -16,6 +16,7 @@ face are not connected and are skipped.
 """
 
 import enum
+import logging
 import typing
 import warnings
 
@@ -45,6 +46,8 @@ from bores.types import (
     TwoDimensions,
     UnitSystem,
 )
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "InvertedCellPolicy",
@@ -2200,9 +2203,9 @@ def resolve_fault_face_indices(
 
     For `X` and `Y` records every face between a cell and the cells of the adjacent column
     is part of the fault, since an offset fault faces several cells across it. Cell pairs that
-    share no geometric face are not connected and are skipped. Pairs involving an inactive cell
-    are skipped silently since they carry no flow. A warning is only issued for a record that has
-    active-active candidate pairs yet resolves to no face.
+    share no geometric face are not connected and are skipped, as are pairs involving an inactive
+    cell. A record that resolves to no face at all is valid (a fault with more throw than the
+    reservoir is thick seals by juxtaposition), so it is only logged at debug level.
 
     :param fault_records: Sequence of `FaultRecord` objects.
     :param dimensions: Grid extents `(nx, ny, nz)`.
@@ -2296,18 +2299,25 @@ def resolve_fault_face_indices(
             found_faces.append(faces[faces >= 0])  # type: ignore[arg-type]
 
         # A fault touching inactive cells is valid: those pairs simply have no flow connection,
-        # so they are dropped silently. Only warn when the record has active-active candidate
-        # pairs but none of them resolves to a shared face, since its multiplier then cannot
-        # affect any connection and the record likely does not match the grid geometry.
+        # so they are dropped silently. A record whose active cells share no face is valid too:
+        # a fault with more throw than the reservoir is thick seals by juxtaposition, so its
+        # multiplier has nothing to act on. That is expected geometry, not a mistake, and is
+        # only logged for anyone debugging a fault multiplier that seems to do nothing.
         n_resolved = sum(len(faces) for faces in found_faces)
-        n_active_pairs = int((cell_a_active & has_neighbour).sum())
-        if n_active_pairs > 0 and n_resolved == 0:
-            warnings.warn(
-                f"Fault {record.name!r}: none of the {n_active_pairs} active cell pair(s) in "
-                f"record (I {record.i1}-{record.i2}, J {record.j1}-{record.j2}, "
-                f"K {record.k1}-{record.k2}, {record.face_direction}) share a face, so it has "
-                f"no effect on flow.",
-                stacklevel=4,
+        n_active_cells = int((cell_a_active & has_neighbour).sum())
+        if n_active_cells > 0 and n_resolved == 0:
+            logger.debug(
+                "Fault %r: none of the %d active cell(s) in record (I %d-%d, J %d-%d, K %d-%d, %s) "
+                "share a face with an active neighbour, so it has no effect on flow.",
+                record.name,
+                n_active_cells,
+                record.i1,
+                record.i2,
+                record.j1,
+                record.j2,
+                record.k1,
+                record.k2,
+                record.face_direction,
             )
 
         if found_faces and sum(len(faces) for faces in found_faces) > 0:

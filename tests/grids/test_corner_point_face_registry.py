@@ -258,16 +258,20 @@ def test_fault_entirely_in_inactive_cells_resolves_to_nothing_without_warning():
     assert messages == []
 
 
-def test_fault_with_active_pairs_but_no_shared_face_warns():
+def test_fault_with_active_cells_but_no_shared_face_is_logged_not_warned(caplog):
     actnum = np.ones((1, 2, 3), dtype=np.int32)
     dimensions = (3, 2, 1)
     face_cell_indices = np.empty((0, 2), dtype=np.int32)
     record = FaultRecord(name="F", i1=1, i2=2, j1=1, j2=2, k1=1, k2=1, face_direction="X")
 
-    resolved, messages = _resolve_recording_warnings(
-        [record], actnum, face_cell_indices, dimensions
-    )
+    with caplog.at_level("DEBUG", logger="bores.grids.factories.corner_point"):
+        resolved, messages = _resolve_recording_warnings(
+            [record], actnum, face_cell_indices, dimensions
+        )
 
     assert resolved == {}
-    assert len(messages) == 1
-    assert "Fault 'F'" in messages[0] and "no effect on flow" in messages[0]
+    assert messages == []
+    assert any(
+        "Fault 'F'" in r.getMessage() and "no effect on flow" in r.getMessage()
+        for r in caplog.records
+    )

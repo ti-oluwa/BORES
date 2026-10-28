@@ -406,3 +406,55 @@ class TestTiltedSubdivisionOnADippingGrid:
         assert tilted_error.mean() < 0.005
         assert tilted_error.max() < 0.03
         assert tilted_error.mean() < horizontal_error.mean() / 2
+
+
+class LinearCapillaryPressure:
+    """`Pcow = 4 (1 - Sw)` and `Pcgo = 2 Sg`, so `Pcgw = 6 (1 - Sw)` with no oil."""
+
+    def evaluate(self, water_saturation, oil_saturation, gas_saturation, **endpoints):
+        water_saturation = np.asarray(water_saturation, dtype=float)
+        gas_saturation = np.asarray(gas_saturation, dtype=float)
+        return {"oil_water": 4.0 * (1.0 - water_saturation), "gas_oil": 2.0 * gas_saturation}
+
+
+class TestWaterGasSplitWhereThereIsNoOil:
+    def saturations(self, *, gas_pressures, swc=0.0):
+        n = 2
+        zeros = np.zeros(n)
+        return initialization.get_saturations_from_capillary_pressure(
+            depths=np.array([0.0, 10.0]),
+            oil_pressure=np.full(n, 100.0),
+            connate_water_saturation=np.full(n, swc),
+            residual_oil_saturation_water=zeros,
+            residual_oil_saturation_gas=zeros,
+            residual_gas_saturation=zeros,
+            capillary_pressure=LinearCapillaryPressure(),  # type: ignore[arg-type]
+            water_profile=(np.array([0.0, 10.0]), np.array([97.0, 97.0])),  # Pcow = 3
+            gas_profile=(np.array([0.0, 10.0]), np.array(gas_pressures)),
+            dtype=np.float64,
+            saturation_samples=1001,
+        )
+
+    def test_overlapping_curves_split_by_the_gas_water_capillary_pressure(self):
+        # Cell 0: Pcow = 3 alone gives Sw = 0.25 and Pcgo = 1.8 alone gives Sg = 0.9, which sum
+        # above one. Pcgw = 4.8 = 6 (1 - Sw) gives Sw = 0.2 and Sg = 0.8 with no oil.
+        # Cell 1: Pcgo = 0 gives no gas, so the independent water saturation stands.
+        result = self.saturations(gas_pressures=[101.8, 100.0])
+        np.testing.assert_allclose(result.water_saturation, [0.2, 0.25], atol=1e-3)
+        np.testing.assert_allclose(result.gas_saturation, [0.8, 0.0], atol=1e-6)
+        assert np.all(result.water_saturation + result.gas_saturation <= 1.0 + 1e-9)
+
+    def test_capillary_pressures_reported_are_those_of_the_final_saturations(self):
+        result = self.saturations(gas_pressures=[101.8, 100.0])
+        assert result.gas_oil_capillary_pressure[0] == pytest.approx(
+            2.0 * result.gas_saturation[0], abs=1e-9
+        )
+        assert result.oil_water_capillary_pressure[0] == pytest.approx(
+            4.0 * (1.0 - result.water_saturation[0]), abs=1e-9
+        )
+
+    def test_gas_far_above_the_contact_holds_only_gas_and_connate_water(self):
+        # Pcgw = 9 is above the curve's highest value of 6, so the cell sits at connate water.
+        result = self.saturations(gas_pressures=[106.0, 106.0], swc=0.1)
+        np.testing.assert_allclose(result.water_saturation, 0.1, atol=1e-9)
+        np.testing.assert_allclose(result.gas_saturation, 0.9, atol=1e-9)

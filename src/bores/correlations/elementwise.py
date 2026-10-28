@@ -4,7 +4,6 @@ from collections.abc import Callable, Iterable, Mapping
 
 import numba  # type: ignore[import-untyped]
 import numpy as np
-import numpy.typing as npt
 from numba.np.ufunc.dufunc import DUFunc  # type: ignore[import-untyped]
 
 from bores.errors import ValidationError

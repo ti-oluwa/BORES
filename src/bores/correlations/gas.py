@@ -322,7 +322,10 @@ def compute_gas_pseudocritical_pressure(
     :return: Pseudocritical pressure (psi)
     """
     pressure, _ = compute_gas_pseudocritical_properties(
-        gas_gravity, h2s_mole_fraction, co2_mole_fraction, n2_mole_fraction  # type: ignore[arg-type]
+        gas_gravity,
+        h2s_mole_fraction,
+        co2_mole_fraction,
+        n2_mole_fraction,  # type: ignore[arg-type]
     )
     return pressure
 
@@ -349,7 +352,10 @@ def compute_gas_pseudocritical_temperature(
     :return: Pseudocritical temperature (°R)
     """
     _, temperature = compute_gas_pseudocritical_properties(
-        gas_gravity, h2s_mole_fraction, co2_mole_fraction, n2_mole_fraction  # type: ignore[arg-type]
+        gas_gravity,
+        h2s_mole_fraction,
+        co2_mole_fraction,
+        n2_mole_fraction,  # type: ignore[arg-type]
     )
     return temperature
 
@@ -391,7 +397,10 @@ def compute_gas_compressibility_factor_papay(
     :return: Gas compressibility factor Z (dimensionless)
     """
     pseudocritical_pressure, pseudocritical_temperature = compute_gas_pseudocritical_properties(
-        gas_gravity, h2s_mole_fraction, co2_mole_fraction, n2_mole_fraction  # type: ignore[arg-type]
+        gas_gravity,
+        h2s_mole_fraction,
+        co2_mole_fraction,
+        n2_mole_fraction,  # type: ignore[arg-type]
     )
     reduced_pressure = pressure / pseudocritical_pressure
     reduced_temperature = (temperature + FAHRENHEIT_TO_RANKINE_OFFSET) / pseudocritical_temperature
@@ -449,7 +458,10 @@ def compute_gas_compressibility_factor_hall_yarborough(
     :return: Gas compressibility factor Z (dimensionless)
     """
     pseudocritical_pressure, pseudocritical_temperature = compute_gas_pseudocritical_properties(
-        gas_gravity, h2s_mole_fraction, co2_mole_fraction, n2_mole_fraction  # type: ignore[arg-type]
+        gas_gravity,
+        h2s_mole_fraction,
+        co2_mole_fraction,
+        n2_mole_fraction,  # type: ignore[arg-type]
     )
     reduced_pressure = pressure / pseudocritical_pressure
     if reduced_pressure < 1e-2:
@@ -533,7 +545,10 @@ def compute_gas_compressibility_factor_dranchuk_abou_kassem(
     :return: Gas compressibility factor Z (dimensionless)
     """
     pseudocritical_pressure, pseudocritical_temperature = compute_gas_pseudocritical_properties(
-        gas_gravity, h2s_mole_fraction, co2_mole_fraction, n2_mole_fraction  # type: ignore[arg-type]
+        gas_gravity,
+        h2s_mole_fraction,
+        co2_mole_fraction,
+        n2_mole_fraction,  # type: ignore[arg-type]
     )
     reduced_pressure = pressure / pseudocritical_pressure
     if reduced_pressure < 1e-2:
