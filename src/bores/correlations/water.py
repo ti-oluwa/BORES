@@ -401,14 +401,18 @@ def compute_gas_solubility_in_water_duan_sun_co2(
     ln_molality = (
         np.log(vapor_fraction * fugacity_coefficient * pressure_bar)
         - compute_duan_sun_parameter(
-            DUAN_SUN_CHEMICAL_POTENTIAL_COEFFICIENTS, temperature_kelvin, pressure_bar
+            DUAN_SUN_CHEMICAL_POTENTIAL_COEFFICIENTS,
+            temperature_kelvin,  # type: ignore[arg-type]
+            pressure_bar,
         )
         - 2.0
         * compute_duan_sun_parameter(
-            DUAN_SUN_LAMBDA_COEFFICIENTS, temperature_kelvin, pressure_bar
+            DUAN_SUN_LAMBDA_COEFFICIENTS,
+            temperature_kelvin,  # type: ignore[arg-type]
+            pressure_bar,
         )
         * salt_molality
-        - compute_duan_sun_parameter(DUAN_SUN_ZETA_COEFFICIENTS, temperature_kelvin, pressure_bar)
+        - compute_duan_sun_parameter(DUAN_SUN_ZETA_COEFFICIENTS, temperature_kelvin, pressure_bar)  # type: ignore[arg-type]
         * salt_molality**2
     )
     standard_cubic_feet_per_mole = SCF_PER_POUND_MOLE / POUNDS_TO_GRAMS
@@ -529,6 +533,7 @@ def compute_gas_solubility_in_water(
         )
         result = np.where(in_range, duan_sun, henry)
         return typing.cast(NumberOrArray[NDimension], result if result.ndim else result[()])
+
     if symbol != "ch4":
         return henry
     mccain = compute_gas_solubility_in_water_mccain_methane(

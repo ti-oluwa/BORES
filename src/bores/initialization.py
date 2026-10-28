@@ -1,6 +1,5 @@
 """
-Utilities for reservoir equilibrium state initialization from EQUIL, explicit deck arrays, or user-supplied
-arrays.
+Reservoir equilibrium state initialization from EQUIL, explicit deck arrays, or user-supplied arrays.
 
 Precedence per field is:
 
@@ -18,27 +17,17 @@ import numpy.typing as npt
 
 from bores.blackoil.pvt.regions import PVT
 from bores.blackoil.pvt.tables import PVTTable
-from bores.blackoil.satfunc.capillary_pressure.tables import (
-    CapillaryPressureTable,
-)
+from bores.blackoil.satfunc.capillary_pressure.tables import CapillaryPressureTable
 from bores.blackoil.satfunc.regions import SatFunc
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.grids.base import Grid
 from bores.precision import get_dtype
-from bores.reservoir.equilibrium import (
-    DepthTable,
-    Equilibrium,
-    EquilibriumRegion,
-)
+from bores.reservoir.equilibrium import DepthTable, Equilibrium, EquilibriumRegion
 from bores.reservoir.mass import compute_masses
 from bores.reservoir.model import Reservoir
 from bores.reservoir.state import Hysteresis, ReservoirState
-from bores.reservoir.temperature import (
-    Temperature,
-    TemperatureGradient,
-    TemperatureTable,
-)
+from bores.reservoir.temperature import Temperature, TemperatureGradient, TemperatureTable
 from bores.types import (
     Boolean,
     CellArray,

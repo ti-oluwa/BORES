@@ -4,10 +4,11 @@ from collections.abc import Callable, Iterable, Mapping
 
 import numba  # type: ignore[import-untyped]
 import numpy as np
+import numpy.typing as npt
 from numba.np.ufunc.dufunc import DUFunc  # type: ignore[import-untyped]
 
 from bores.errors import ValidationError
-from bores.types import Number, NumberOrArray
+from bores.types import AnyDimension, Boolean, NDimension, Number, NumberOrArray
 
 __all__ = ["Elementwise", "elementwise", "resolve_result_dtype"]
 
@@ -17,10 +18,10 @@ R = typing.TypeVar("R")
 Target = typing.Literal["cpu", "parallel"]
 """Where the compiled loop runs: "cpu" on one thread, "parallel" across threads."""
 
-NumbaOption = bool | int | float | str
+NumbaOption = Boolean | Number | str
 """Value of an option passed through to numba, such as `fastmath=True`."""
 
-Validator = Callable[[Mapping[str, NumberOrArray]], None]
+Validator = Callable[[Mapping[str, NumberOrArray[AnyDimension]]], None]
 """Check on the arguments of a call, by name, that raises `ValidationError` when they are invalid."""
 
 COMPILED_FLOAT_DTYPES = (np.dtype(np.float32), np.dtype(np.float64))
@@ -33,7 +34,9 @@ PARALLEL_SIGNATURE_TYPES = ("float64", "float32")
 """Argument and result types a parallel correlation is compiled for."""
 
 
-def resolve_result_dtype(*values: NumberOrArray | list[float] | tuple[float, ...]) -> np.dtype:
+def resolve_result_dtype(
+    *values: NumberOrArray[AnyDimension] | list[Number] | tuple[Number, ...],
+) -> npt.DTypeLike:
     """
     Resolves the floating point dtype of a result from its inputs with NumPy's promotion rules.
 
@@ -50,7 +53,7 @@ def resolve_result_dtype(*values: NumberOrArray | list[float] | tuple[float, ...
     return dtype if dtype.kind == "f" else np.dtype(np.float64)
 
 
-def prepare_operand(value: NumberOrArray) -> NumberOrArray:
+def prepare_operand(value: NumberOrArray[NDimension]) -> NumberOrArray[NDimension]:
     """
     Converts floating point operands the compiled code cannot take (float16 and
     extended precision floats) to float64, and leaves everything else unchanged.
@@ -66,7 +69,7 @@ def prepare_operand(value: NumberOrArray) -> NumberOrArray:
     return value
 
 
-def smallest(value: NumberOrArray) -> Number:
+def smallest(value: NumberOrArray[AnyDimension]) -> Number:
     """
     Smallest element of a number or array, without NumPy call overhead for plain numbers.
 
@@ -80,7 +83,7 @@ def smallest(value: NumberOrArray) -> Number:
     return value  # type: ignore[return-value]
 
 
-def largest(value: NumberOrArray) -> Number:
+def largest(value: NumberOrArray[AnyDimension]) -> Number:
     """
     Largest element of a number or array, without NumPy call overhead for plain numbers.
 
@@ -171,6 +174,7 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
         self.bounds = dict(bounds or {})
         self.validators = tuple(validators)
         self.parallel_loop: np.ufunc | None = None
+        self.float32_loop: np.ufunc | None = None
         unknown = {*self.positive, *self.non_negative, *self.bounds} - set(self.argument_names)
         if unknown:
             raise ValueError(
@@ -192,6 +196,22 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
                 signatures, target="parallel", cache=self.cache, **self.numba_options
             )(self.py_func)
         return typing.cast(np.ufunc, self.parallel_loop)
+
+    def get_float32_loop(self) -> np.ufunc:
+        """
+        Returns the single-threaded loop over float32 operands, compiling it on first use.
+
+        The loop writes its result as float32 directly, so no cast of the result is needed.
+
+        :return: A universal function over float32 arrays.
+        """
+        if self.float32_loop is None:
+            arity = len(self.argument_names)
+            signature = f"float32({', '.join(['float32'] * arity)})"
+            self.float32_loop = numba.vectorize(
+                [signature], target="cpu", cache=self.cache, **self.numba_options
+            )(self.py_func)
+        return typing.cast(np.ufunc, self.float32_loop)
 
     def bind(
         self,
@@ -270,11 +290,20 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
 
         typed = [np.asarray(v) if isinstance(v, (list, tuple)) else v for v in values]
         target = np.result_type(*typed)
-        operands = [prepare_operand(v) for v in typed]
-        if self.target == "parallel" and any(isinstance(o, np.ndarray) for o in operands):
-            compute_dtype = np.float32 if target == np.float32 else np.float64
+        has_array = any(isinstance(v, np.ndarray) for v in typed)
+
+        if target == np.float32:
+            loop = (
+                self.get_parallel_loop()
+                if self.target == "parallel" and has_array
+                else self.get_float32_loop()
+            )
+            return loop(*typed)  # type: ignore[no-any-return]
+
+        operands = [prepare_operand(v) for v in typed]  # type: ignore[arg-type]
+        if self.target == "parallel" and has_array:
             result: typing.Any = self.get_parallel_loop()(
-                *(np.asarray(o, dtype=compute_dtype) for o in operands)
+                *(np.asarray(o, dtype=np.float64) for o in operands)
             )
         else:
             result = super().__call__(*operands)

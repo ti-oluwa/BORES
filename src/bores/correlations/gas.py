@@ -13,7 +13,7 @@ from bores.correlations.core import (
 )
 from bores.correlations.elementwise import elementwise
 from bores.errors import ValidationError
-from bores.types import NDimension, Number, NumberOrArray
+from bores.types import AnyDimension, NDimension, Number, NumberOrArray
 
 logger = logging.getLogger(__name__)
 
@@ -228,7 +228,7 @@ def compute_gas_viscosity(
     return 1e-4 * k * np.exp(exponent)
 
 
-def validate_contaminant_fractions(values: Mapping[str, NumberOrArray]) -> None:
+def validate_contaminant_fractions(values: Mapping[str, NumberOrArray[AnyDimension]]) -> None:
     """
     Validates the mole fractions of H₂S, CO₂ and N₂ of a gas.
 
@@ -322,9 +322,9 @@ def compute_gas_pseudocritical_pressure(
     :return: Pseudocritical pressure (psi)
     """
     pressure, _ = compute_gas_pseudocritical_properties(
-        gas_gravity,
-        h2s_mole_fraction,
-        co2_mole_fraction,
+        gas_gravity,  # type: ignore[arg-type]
+        h2s_mole_fraction,  # type: ignore[arg-type]
+        co2_mole_fraction,  # type: ignore[arg-type]
         n2_mole_fraction,  # type: ignore[arg-type]
     )
     return pressure
@@ -352,9 +352,9 @@ def compute_gas_pseudocritical_temperature(
     :return: Pseudocritical temperature (°R)
     """
     _, temperature = compute_gas_pseudocritical_properties(
-        gas_gravity,
-        h2s_mole_fraction,
-        co2_mole_fraction,
+        gas_gravity,  # type: ignore[arg-type]
+        h2s_mole_fraction,  # type: ignore[arg-type]
+        co2_mole_fraction,  # type: ignore[arg-type]
         n2_mole_fraction,  # type: ignore[arg-type]
     )
     return temperature
@@ -397,9 +397,9 @@ def compute_gas_compressibility_factor_papay(
     :return: Gas compressibility factor Z (dimensionless)
     """
     pseudocritical_pressure, pseudocritical_temperature = compute_gas_pseudocritical_properties(
-        gas_gravity,
-        h2s_mole_fraction,
-        co2_mole_fraction,
+        gas_gravity,  # type: ignore[arg-type]
+        h2s_mole_fraction,  # type: ignore[arg-type]
+        co2_mole_fraction,  # type: ignore[arg-type]
         n2_mole_fraction,  # type: ignore[arg-type]
     )
     reduced_pressure = pressure / pseudocritical_pressure
@@ -458,9 +458,9 @@ def compute_gas_compressibility_factor_hall_yarborough(
     :return: Gas compressibility factor Z (dimensionless)
     """
     pseudocritical_pressure, pseudocritical_temperature = compute_gas_pseudocritical_properties(
-        gas_gravity,
-        h2s_mole_fraction,
-        co2_mole_fraction,
+        gas_gravity,  # type: ignore[arg-type]
+        h2s_mole_fraction,  # type: ignore[arg-type]
+        co2_mole_fraction,  # type: ignore[arg-type]
         n2_mole_fraction,  # type: ignore[arg-type]
     )
     reduced_pressure = pressure / pseudocritical_pressure
@@ -545,9 +545,9 @@ def compute_gas_compressibility_factor_dranchuk_abou_kassem(
     :return: Gas compressibility factor Z (dimensionless)
     """
     pseudocritical_pressure, pseudocritical_temperature = compute_gas_pseudocritical_properties(
-        gas_gravity,
-        h2s_mole_fraction,
-        co2_mole_fraction,
+        gas_gravity,  # type: ignore[arg-type]
+        h2s_mole_fraction,  # type: ignore[arg-type]
+        co2_mole_fraction,  # type: ignore[arg-type]
         n2_mole_fraction,  # type: ignore[arg-type]
     )
     reduced_pressure = pressure / pseudocritical_pressure
@@ -814,21 +814,21 @@ def compute_co2_fugacity_coefficient(
 
     lower = 0.05
     for _ in range(20):
-        z_lower, _, _, _, _ = compute_co2_equation_of_state_factor(lower, reduced_temperature)
+        z_lower, _, _, _, _ = compute_co2_equation_of_state_factor(lower, reduced_temperature)  # type: ignore[arg-type]
         if reduced_pressure * lower / reduced_temperature - z_lower < 0.0:
             break
         lower *= 0.5
     upper = 200.0 * reduced_temperature / reduced_pressure
     for _ in range(100):
         middle = 0.5 * (lower + upper)
-        z_middle, _, _, _, _ = compute_co2_equation_of_state_factor(middle, reduced_temperature)
+        z_middle, _, _, _, _ = compute_co2_equation_of_state_factor(middle, reduced_temperature)  # type: ignore[arg-type]
         if reduced_pressure * middle / reduced_temperature - z_middle < 0.0:
             lower = middle
         else:
             upper = middle
     volume = 0.5 * (lower + upper)
 
-    z, b, c_, d, e = compute_co2_equation_of_state_factor(volume, reduced_temperature)
+    z, b, c_, d, e = compute_co2_equation_of_state_factor(volume, reduced_temperature)  # type: ignore[arg-type]
     f = a[12] / reduced_temperature**3
     beta = a[13]
     gamma = a[14]

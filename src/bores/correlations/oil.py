@@ -190,7 +190,7 @@ def compute_oil_formation_volume_factor_vazquez_and_beggs(
     :return: Oil formation volume factor (bbl/STB)
     """
     oil_api_gravity = compute_oil_api_gravity(oil_specific_gravity)
-    c1, c2, c3 = get_vazquez_beggs_oil_fvf_coefficients(oil_api_gravity)
+    c1, c2, c3 = get_vazquez_beggs_oil_fvf_coefficients(oil_api_gravity)  # type: ignore[arg-type]
     return (
         1.0
         + c1 * gas_to_oil_ratio
@@ -331,7 +331,7 @@ def compute_oil_bubble_point_pressure(
     :param gas_to_oil_ratio: Solution gas-oil ratio at the bubble point (scf/STB)
     :return: Bubble point pressure (psi)
     """
-    c1, c2, c3 = get_vazquez_beggs_oil_bubble_point_pressure_coefficients(oil_api_gravity)
+    c1, c2, c3 = get_vazquez_beggs_oil_bubble_point_pressure_coefficients(oil_api_gravity)  # type: ignore[arg-type]
     temperature_rankine = temperature + FAHRENHEIT_TO_RANKINE_OFFSET
     return (
         gas_to_oil_ratio / (c1 * gas_gravity * np.exp(c3 * oil_api_gravity / temperature_rankine))
@@ -377,7 +377,7 @@ def compute_gas_to_oil_ratio(
         the correlation when omitted (NaN).
     :return: Solution gas-oil ratio (scf/STB)
     """
-    c1, c2, c3 = get_vazquez_beggs_oil_bubble_point_pressure_coefficients(oil_api_gravity)
+    c1, c2, c3 = get_vazquez_beggs_oil_bubble_point_pressure_coefficients(oil_api_gravity)  # type: ignore[arg-type]
     temperature_rankine = temperature + FAHRENHEIT_TO_RANKINE_OFFSET
     exponential = np.exp(c3 * oil_api_gravity / temperature_rankine)
     if pressure >= bubble_point_pressure:
@@ -769,7 +769,7 @@ def estimate_solution_gor(
     :param gas_gravity: Gas specific gravity (dimensionless)
     :return: Saturated solution gas-oil ratio (scf/STB)
     """
-    c1, c2, c3 = get_vazquez_beggs_oil_bubble_point_pressure_coefficients(oil_api_gravity)
+    c1, c2, c3 = get_vazquez_beggs_oil_bubble_point_pressure_coefficients(oil_api_gravity)  # type: ignore[arg-type]
     temperature_rankine = temperature + FAHRENHEIT_TO_RANKINE_OFFSET
     return c1 * gas_gravity * pressure**c2 * np.exp(c3 * oil_api_gravity / temperature_rankine)
 

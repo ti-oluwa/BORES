@@ -167,6 +167,45 @@ class TestIntegerPreservation:
         np.testing.assert_allclose(double([1.0, 2.0], 1.0), [3.0, 5.0])
 
 
+class TestFloat32Loop:
+    def test_float32_result_is_written_directly_and_matches_float64(self):
+        x = np.linspace(0.1, 5.0, 50, dtype=np.float32)
+        result = double(x, np.float32(1.0))
+        assert result.dtype == np.float32
+        np.testing.assert_allclose(result, double(x.astype(np.float64), 1.0), rtol=1e-6)
+
+    @pytest.mark.parametrize(
+        "operands",
+        [
+            (np.ones(3, dtype=np.float16), np.ones(3, dtype=np.float32)),
+            (np.ones(3, dtype=np.int16), np.ones(3, dtype=np.float32)),
+            (np.ones(3, dtype=np.float32), 2.0),
+            (np.float32(1.0), np.float32(2.0)),
+        ],
+    )
+    def test_operands_that_promote_to_float32_use_it(self, operands):
+        assert double(*operands).dtype == np.float32
+
+    def test_float32_loop_is_compiled_once_and_only_when_needed(self):
+        @elementwise(cache=False)
+        def fresh(x):
+            return x + 1.0
+
+        fresh(np.ones(3))
+        assert fresh.float32_loop is None
+        fresh(np.ones(3, dtype=np.float32))
+        loop = fresh.float32_loop
+        assert loop is not None
+        fresh(np.ones(4, dtype=np.float32))
+        assert fresh.float32_loop is loop
+
+    def test_float32_loop_keeps_argument_checks_and_broadcasting(self):
+        with pytest.raises(ValidationError):
+            checked(np.ones(3, dtype=np.float32), -1.0, 0.5)
+        result = chained(np.ones((2, 3), dtype=np.float32), np.array([1, 2, 3], dtype=np.float32))
+        assert result.shape == (2, 3) and result.dtype == np.float32
+
+
 @elementwise(target="parallel")
 def parallel_scaled(x, y):
     return 3.0 * x + y

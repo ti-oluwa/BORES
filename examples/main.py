@@ -32,10 +32,10 @@ print(
 wells = case.model.wells
 print(f"Wells: {list(wells.names) if wells else []}")
 
-for item in case.schedule:
-    print(item, "\n")
+# for item in case.schedule:
+#     print(item, "\n")
 
-print(f"{len(case.schedule)} scheduled item(s)")
+# print(f"{len(case.schedule)} scheduled item(s)")
 
 # Plot the grid
 grid = case.model.reservoir.grid
@@ -43,7 +43,12 @@ print(f"cells: {grid.n_cells}")
 print(f"faces: {grid.n_faces}")
 print(f"bbox: {grid.bounding_box}")
 
-pv_grid = make_pyvista_grid(grid, cell_data={"pressure": case.initial_state.pressure})
+pv_grid = make_pyvista_grid(
+    grid,
+    cell_data={"pressure": case.initial_state.pressure},
+    use_hexahedra=True,
+    hollow=True,
+)
 pl = pv.Plotter()
 pl.add_mesh(pv_grid, scalars="pressure", show_edges=True)
 pl.set_scale(zscale=5, xscale=2, yscale=2)  # type:ignore
