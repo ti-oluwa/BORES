@@ -93,7 +93,9 @@ __all__ = [
     "SOF3",
     "SOGCR",
     "SOWCR",
+    "SWCON",
     "SWCR",
+    "SWCRIT",
     "SWFN",
     "SWL",
     "SWOF",
@@ -688,6 +690,12 @@ SWL = endpoint_array("SWL")
 
 SWCR = endpoint_array("SWCR")
 """`SWCR` - critical water saturation, per cell. `NaN` where never set."""
+
+SWCON = endpoint_array("SWCON")
+"""`SWCON` - BORES alias of `SWL`, read only when `SWL` is absent. `NaN` where never set."""
+
+SWCRIT = endpoint_array("SWCRIT")
+"""`SWCRIT` - BORES alias of `SWCR`, read only when `SWCR` is absent. `NaN` where never set."""
 
 SWU = endpoint_array("SWU")
 """`SWU` - maximum water saturation, per cell. `NaN` where never set."""

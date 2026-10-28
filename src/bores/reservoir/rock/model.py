@@ -182,8 +182,8 @@ class Rock:
     Static petrophysical properties of the reservoir rock.
 
     These arrays are constant between simulation time steps and are populated
-    from deck keywords such as `PORO`, `PERMX/Y/Z`, `NTG`, `SWCON`,
-    `SWCRIT`, and `TEMPVD`.
+    from deck keywords such as `PORO`, `PERMX/Y/Z`, `NTG`, `SWL` (alias `SWCON`),
+    `SWCR` (alias `SWCRIT`), and `TEMPVD`.
 
     All saturation arrays are dimensionless fractions in [0, 1].
     Use `convert(target)` to rescale dimensional quantities to another
@@ -469,7 +469,7 @@ class Rock:
         """
         Derive per-cell saturation-endpoint fallbacks from each cell's
         SATNUM relative-permeability model, for whichever of the five
-        endpoint keywords (`SWCON`, `SWCRIT`, `SOWCR`, `SOGCR`, `SGCR`)
+        endpoint keywords (`SWL`/`SWCON`, `SWCR`/`SWCRIT`, `SOWCR`, `SOGCR`, `SGCR`)
         aren't present in the deck.
 
         Uses `RelativePermeabilityTable.get_saturation_endpoints()`.
@@ -481,7 +481,7 @@ class Rock:
         endpoints only through the relative-permeability model/tables, as
         many hand-built decks do).
 
-        `irreducible_water_saturation` (`SWCRIT`) has no separate source
+        `irreducible_water_saturation` (`SWCR`) has no separate source
         and defaults to `connate_water_saturation`, matching what the rest
         of this codebase already assumes when the two coincide.
 
@@ -522,22 +522,22 @@ class Rock:
         """
         Build a `Rock` from a parsed `DeckFile` and an already-loaded `Grid`.
 
-        Reads `PORO`, `PERMX/Y/Z`, `NTG`, `SWCON`, `SWCRIT`, `SOWCR`,
-        `SOGCR`, `SGCR`, and `ROCK`/`ROCKTAB`. Rock regions (`ROCKNUM`) are carried by
-        `Regions`, not by `Rock`.
+        Reads `PORO`, `PERMX/Y/Z`, `NTG`, `SWL`, `SWCR`, `SOWCR`, `SOGCR`, `SGCR`, and
+        `ROCK`/`ROCKTAB`. Rock regions (`ROCKNUM`) are carried by `Regions`, not by `Rock`.
 
-        `SWCON`/`SWCRIT`/`SOWCR`/`SOGCR`/`SGCR` are per-cell saturation
-        *endpoint* arrays. This is relatively uncommon in hand-built decks, which
-        usually define these endpoints implicitly through the saturation
-        function tables (`SWOF`/`SGOF`) instead.
+        `SWL`/`SWCR`/`SOWCR`/`SOGCR`/`SGCR` are the Eclipse per-cell saturation *endpoint*
+        scaling arrays. `SWCON` and `SWCRIT` are BORES-specific aliases of `SWL` and `SWCR`
+        and are only read when the Eclipse name is absent. The Eclipse name always wins.
+        Decks usually define these endpoints implicitly through the saturation function
+        tables (`SWOF`/`SGOF`) instead, which is what is used when none is given.
 
-        Whichever of the five is absent from the deck is derived from
+        Whichever of the five is absent from the deck (under both names) is derived from
         `satfunc`'s per-SATNUM tables when `satfunc` is supplied (see
         `get_saturation_endpoints`); only truly defaults to `0.0`
         if `satfunc` isn't given either. Explicit deck arrays always take
-        precedence, per keyword independently. An absent `SWCRIT` defaults to the connate
-        saturation when `SWCON` is given or no `satfunc` is, and to the tables' own
-        critical water saturation otherwise.
+        precedence, per keyword independently. An absent `SWCR` (and `SWCRIT`) defaults to the
+        connate saturation when `SWL` (or `SWCON`) is given or no `satfunc` is, and to the
+        tables' own critical water saturation otherwise.
 
         :param deck_file: Parsed `DeckFile` containing PROPS/GRID keywords.
         :param grid: Already-loaded `Grid` (provides `n_cells` and cell
@@ -572,17 +572,37 @@ class Rock:
                 return np.full(n_cells, default, dtype=dtype)
             return data
 
+        def load_endpoint_array(*keywords: str) -> CellArray | None:
+            # Keywords in order of preference: the Eclipse name, then any BORES alias
+            for keyword in keywords:
+                data = load_cell_array(deck_file, keyword, n_cells, dtype=dtype)
+                if data is not None:
+                    return data
+            return None
+
+        def fill_unset(data: CellArray, fallback: CellArray) -> CellArray:
+            # A cell no record assigns is `NaN`: it takes its end-point from the table
+            unset = np.isnan(data)
+            if not unset.any():
+                return data
+            return typing.cast(
+                CellArray, np.where(unset, fallback, data).astype(dtype, copy=False)
+            )
+
         def get_saturation_endpoint(
-            keyword: str,
+            keywords: tuple[str, ...],
             field: str,
             table_derived: typing.Mapping[str, CellArray] | None,
         ) -> CellArray:
-            data = load_cell_array(deck_file, keyword, n_cells, dtype=dtype)
+            fallback = (
+                table_derived[field]
+                if table_derived is not None
+                else np.zeros(n_cells, dtype=dtype)
+            )
+            data = load_endpoint_array(*keywords)
             if data is not None:
-                return data
-            if table_derived is not None:
-                return table_derived[field]
-            return np.zeros(n_cells, dtype=dtype)
+                return fill_unset(data, fallback)
+            return fallback
 
         permeability = Permeability.from_deck(deck_file, n_cells=n_cells, dtype=dtype)
         compressibility: RockCompressibilityTables | None = None
@@ -610,17 +630,19 @@ class Rock:
                     stacklevel=3,
                 )
         connate_water_saturation = get_saturation_endpoint(
-            "SWCON", "connate_water_saturation", table_derived_endpoints
+            ("SWL", "SWCON"), "connate_water_saturation", table_derived_endpoints
         )
-        irreducible_water_saturation = load_cell_array(deck_file, "SWCRIT", n_cells, dtype=dtype)
-        if irreducible_water_saturation is None:
-            if deck_file.has("SWCON") or table_derived_endpoints is None:
-                # An absent `SWCRIT` defaults to the connate saturation.
-                irreducible_water_saturation = connate_water_saturation.copy()
-            else:
-                irreducible_water_saturation = table_derived_endpoints[
-                    "irreducible_water_saturation"
-                ]
+        if deck_file.has("SWL") or deck_file.has("SWCON") or table_derived_endpoints is None:
+            # An absent `SWCR` defaults to the connate saturation.
+            default_irreducible = connate_water_saturation.copy()
+        else:
+            default_irreducible = table_derived_endpoints["irreducible_water_saturation"]
+        critical_water_saturation = load_endpoint_array("SWCR", "SWCRIT")
+        irreducible_water_saturation = (
+            default_irreducible
+            if critical_water_saturation is None
+            else fill_unset(critical_water_saturation, default_irreducible)
+        )
         return cls(
             porosity=required("PORO"),
             absolute_permeability=permeability,
@@ -629,13 +651,13 @@ class Rock:
             connate_water_saturation=connate_water_saturation,
             irreducible_water_saturation=irreducible_water_saturation,
             residual_oil_saturation_water=get_saturation_endpoint(
-                "SOWCR", "residual_oil_saturation_water", table_derived_endpoints
+                ("SOWCR",), "residual_oil_saturation_water", table_derived_endpoints
             ),
             residual_oil_saturation_gas=get_saturation_endpoint(
-                "SOGCR", "residual_oil_saturation_gas", table_derived_endpoints
+                ("SOGCR",), "residual_oil_saturation_gas", table_derived_endpoints
             ),
             residual_gas_saturation=get_saturation_endpoint(
-                "SGCR", "residual_gas_saturation", table_derived_endpoints
+                ("SGCR",), "residual_gas_saturation", table_derived_endpoints
             ),
             unit_system=unit_system,
         )
