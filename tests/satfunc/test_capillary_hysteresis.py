@@ -138,3 +138,45 @@ def test_a_parametric_oil_water_table_with_a_tabular_gas_oil_table():
         np.testing.assert_allclose(
             _pressures(table, *point)[1], _pressures(reference, *point)[1], rtol=1e-9
         )
+
+
+def test_evaluate_with_derivatives_equals_the_separate_calls():
+    table = _hysteresis(with_imbibition=False)
+    other = _tabular(**REORIENTED)
+    table = KilloughCapillaryPressureTable(
+        oil_water_drainage_table=_tabular().oil_water_table,
+        gas_oil_drainage_table=_tabular().gas_oil_table,
+        oil_water_imbibition_table=other.oil_water_table,
+        gas_oil_imbibition_table=other.gas_oil_table,
+        scanning_interpolation_exponent=1.4,
+    )
+    points = np.array(_points(25))
+    sw, so, sg = points[:, 0], points[:, 1], points[:, 2]
+    history = dict(
+        max_water_saturation=sw + 0.08,
+        max_gas_saturation=sg + 0.08,
+        water_imbibition_flag=np.ones(sw.shape, dtype=bool),
+        gas_imbibition_flag=np.ones(sw.shape, dtype=bool),
+        water_reversal_saturation=sw - 0.06,
+        gas_reversal_saturation=np.maximum(sg - 0.06, 0.0),
+    )
+    values, slopes = table.evaluate_with_derivatives(sw, so, sg, **history)
+    expected_values = table.evaluate(sw, so, sg, **history)
+    expected_slopes = table.derivatives(sw, so, sg, **history)
+    for key in expected_values:
+        np.testing.assert_array_equal(values[key], expected_values[key])
+    for key in expected_slopes:
+        np.testing.assert_array_equal(slopes[key], expected_slopes[key])
+    step = 1e-6
+    for index in range(5):
+        point = (sw[index], so[index], sg[index])
+        single = {key: np.asarray(value)[index : index + 1] for key, value in history.items()}
+        fd = (
+            table.evaluate(
+                np.array([point[0] + step]), np.array([point[1]]), np.array([point[2]]), **single
+            )["oil_water"]
+            - table.evaluate(
+                np.array([point[0] - step]), np.array([point[1]]), np.array([point[2]]), **single
+            )["oil_water"]
+        ) / (2 * step)
+        assert float(slopes["dpcow_dsw"][index]) == pytest.approx(float(fd[0]), rel=1e-4, abs=1e-6)

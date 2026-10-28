@@ -1496,8 +1496,10 @@ def resolve_residual_oil_saturation_gas(
     :param connate_water_saturation: Connate water saturation of the system.
     :return: Residual oil saturation to gas flood.
     """
-    phases = {gas_oil_table.wetting_phase, gas_oil_table.non_wetting_phase}  # type: ignore[union-attr]
-    if FluidPhase.GAS not in phases or not isinstance(gas_oil_table, TwoPhaseRelPermTable):
+    if not isinstance(gas_oil_table, TwoPhaseRelPermTable):
+        return gas_oil_table.get_residual_oil_saturation_gas()
+    phases = {gas_oil_table.wetting_phase, gas_oil_table.non_wetting_phase}
+    if FluidPhase.GAS not in phases:
         return gas_oil_table.get_residual_oil_saturation_gas()
     if gas_oil_table.get_reference_axis_phase() != FluidPhase.GAS:
         return gas_oil_table.get_residual_oil_saturation_gas()
@@ -1589,6 +1591,80 @@ def query_gas_oil_system(
         # The table's axis is So = 1 - swc - Sg
         return -krg, -kro  # type: ignore[operator,return-value]
     return krg, kro  # type: ignore[return-value]
+
+
+class DeckSaturationSystems(typing.NamedTuple):
+    """Which saturation-function systems a deck defines for one saturation region."""
+
+    family: typing.Literal["first", "second"]
+    """Keyword family the region is read with."""
+
+    oil_water: bool
+    """Whether the oil-water system (water relative permeability and oil-in-water) is complete."""
+
+    gas_oil: bool
+    """Whether the gas-oil system (gas relative permeability and oil-in-gas) is complete."""
+
+    keywords_present: tuple[str, ...]
+    """Saturation-function keywords the deck holds for the region, for error messages."""
+
+
+def detect_saturation_systems(
+    deck_file: typing.Any,
+    satnum: int,
+    keyword_family: typing.Literal["first", "second", "auto"] = "auto",
+) -> DeckSaturationSystems:
+    """
+    Work out which saturation-function systems a deck defines for a saturation region.
+
+    With `keyword_family="auto"` the first family (`SWOF`/`SGOF`) is used when it defines both
+    systems, otherwise the second family (`SWFN`/`SGFN` + `SOF2`/`SOF3`) is used when it does. A deck
+    that completes neither falls back to the family that has any keyword, preferring the first.
+
+    :param deck_file: Parsed `DeckFile`.
+    :param satnum: 1-based saturation region number.
+    :param keyword_family: `"first"`, `"second"` or `"auto"`.
+    :return: The systems found.
+    :raises ValidationError: If `"auto"` finds no saturation-function keyword at all.
+    """
+    region_index = max(satnum - 1, 0)
+
+    def has(keyword: str) -> bool:
+        if not deck_file.has(keyword):
+            return False
+        all_regions = deck_file.get(keyword)
+        assert all_regions is not None
+        return region_index < len(all_regions) and bool(all_regions[region_index])
+
+    present = tuple(
+        keyword for keyword in ("SWOF", "SGOF", "SWFN", "SGFN", "SOF2", "SOF3") if has(keyword)
+    )
+    systems = {
+        "first": (has("SWOF"), has("SGOF")),
+        "second": (has("SWFN") and (has("SOF3") or has("SOF2")), has("SGFN") and has("SOF3")),
+    }
+    family: typing.Literal["first", "second"]
+    if keyword_family == "auto":
+        if all(systems["first"]):
+            family = "first"
+        elif all(systems["second"]):
+            family = "second"
+        elif "SWOF" in present or "SGOF" in present:
+            family = "first"
+        elif any(keyword in present for keyword in ("SWFN", "SGFN")):
+            family = "second"
+        else:
+            raise ValidationError(
+                "No recognised saturation-function keywords found in the DeckFile "
+                f"for `SATNUM` {satnum}. Expected one of: "
+                "`SWOF`, `SGOF` (first family) or `SWFN`, `SGFN` (second family)."
+            )
+    else:
+        family = keyword_family
+    oil_water, gas_oil = systems[family]
+    return DeckSaturationSystems(
+        family=family, oil_water=oil_water, gas_oil=gas_oil, keywords_present=present
+    )
 
 
 @attrs.frozen(slots=True)
@@ -2100,16 +2176,6 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
         :raises ValidationError: When required keywords are missing.
         """
         dtype = np.dtype(dtype) if dtype is not None else get_dtype()
-        region_index = max(satnum - 1, 0)
-
-        def has(keyword: str) -> bool:
-            if not deck_file.has(keyword):
-                return False
-
-            all_regions = deck_file.get(keyword)
-            assert all_regions is not None
-            return region_index < len(all_regions) and bool(all_regions[region_index])
-
         shared_kwargs: dict[str, typing.Any] = dict(
             satnum=satnum,
             number_of_base_points=number_of_base_points,
@@ -2120,29 +2186,11 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
             dtype=dtype,
         )
 
-        # Resolve keyword family
-        family: typing.Literal["first", "second"]
-        if keyword_family == "auto":
-            if has("SWOF") or has("SGOF"):
-                family = "first"
-            elif has("SWFN") or has("SGFN"):
-                family = "second"
-            else:
-                raise ValidationError(
-                    "No recognised saturation-function keywords found in the DeckFile "
-                    f"for `SATNUM` {satnum}. Expected one of: "
-                    "`SWOF`, `SGOF` (first family) or `SWFN`, `SGFN` (second family)."
-                )
-        else:
-            family = keyword_family  # type: ignore[assignment]
-
-        # Check availability of both systems and warn clearly when one is missing
-        if family == "first":
-            has_oil_water_table = has("SWOF")
-            has_gas_oil_table = has("SGOF")
-        else:
-            has_oil_water_table = has("SWFN") and (has("SOF3") or has("SOF2"))
-            has_gas_oil_table = has("SGFN") and has("SOF3")
+        systems = detect_saturation_systems(deck_file, satnum, keyword_family)
+        family = systems.family
+        has_oil_water_table = systems.oil_water
+        has_gas_oil_table = systems.gas_oil
+        found = ", ".join(f"`{keyword}`" for keyword in systems.keywords_present) or "none"
 
         if not has_oil_water_table:
             oil_water_keyword = "`SWOF`" if family == "first" else "`SWFN` + `SOF3`/`SOF2`"
@@ -2156,7 +2204,9 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
             )
             raise ValidationError(
                 f"Oil-water keyword(s) {oil_water_keyword} required for {cls.__name__} "
-                f"not found at SATNUM {satnum}."
+                f"not found at SATNUM {satnum} (keyword family {family!r}; the deck has "
+                f"{found} for this region). Pass `allow_two_phase=True` to "
+                "`SatFunc.from_deck` to build a two-phase table instead."
             )
 
         if not has_gas_oil_table:
@@ -2171,7 +2221,9 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
             )
             raise ValidationError(
                 f"Gas-oil keyword(s) {gas_oil_keyword} required for {cls.__name__} "
-                f"not found at `SATNUM` {satnum}."
+                f"not found at `SATNUM` {satnum} (keyword family {family!r}; the deck has "
+                f"{found} for this region). Pass `allow_two_phase=True` to "
+                "`SatFunc.from_deck` to build a two-phase table instead."
             )
 
         oil_water_table = TwoPhaseRelPermTable.from_deck(

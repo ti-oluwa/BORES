@@ -6,12 +6,17 @@ import numpy.typing as npt
 from typing_extensions import Self
 
 from bores.blackoil.satfunc.capillary_pressure.tables import (
+    CapillaryPressureTable,
     ThreePhaseCapillaryPressureTable,
+    TwoPhaseCapillaryPressureTable,
 )
 from bores.blackoil.satfunc.relperm.mixing_rules import MixingRule
 from bores.blackoil.satfunc.relperm.tables import (
     MinimumRelPerm,
+    RelativePermeabilityTable,
     ThreePhaseRelPermTable,
+    TwoPhaseRelPermTable,
+    detect_saturation_systems,
 )
 from bores.blackoil.satfunc.tables import SatFuncTables
 from bores.deck.file import DeckFile
@@ -145,6 +150,7 @@ class SatFunc:
         min_wetting_relperm: MinimumRelPerm = None,
         min_non_wetting_relperm: MinimumRelPerm = None,
         include_capillary_pressure: bool = True,
+        allow_two_phase: bool = False,
         dtype: npt.DTypeLike = None,
     ) -> Self:
         """
@@ -175,6 +181,11 @@ class SatFunc:
         :param include_capillary_pressure: When `True` (default), also build
             the capillary pressure table for each region. When `False`, skip
             capillary pressure entirely (useful for runs that ignore Pc).
+        :param allow_two_phase: When `True`, a region whose deck defines only one of the two
+            systems (oil-water or gas-oil) gets a two-phase table for the system it has, instead
+            of an error. The phase that is absent has zero relative permeability and capillary
+            pressure. Regions that define both systems are unaffected. False by default, so a
+            deck with a missing system is reported rather than silently reduced to two phases.
         :param dtype: Array dtype shared by every region's tables.
         :returns: `SatFunc` keyed by 1-based `SATNUM` index.
         :raises ValidationError: If no recognised saturation-function keywords
@@ -203,30 +214,71 @@ class SatFunc:
         for region_index in range(n_regions):
             satnum = region_index + 1  # 1-based
 
-            relative_permeability = ThreePhaseRelPermTable.from_deck(
-                deck_file=deck_file,
-                satnum=satnum,
-                mixing_rule=mixing_rule,
-                keyword_family=keyword_family,
-                number_of_base_points=number_of_base_points,
-                number_of_endpoint_extra_points=number_of_endpoint_extra_points,
-                spacing=spacing,
-                min_wetting_relperm=min_wetting_relperm,
-                min_non_wetting_relperm=min_non_wetting_relperm,
-                dtype=dtype,
-            )
+            systems = detect_saturation_systems(deck_file, satnum, keyword_family)
+            two_phase_system: typing.Literal["oil_water", "gas_oil"] | None = None
+            if allow_two_phase and systems.oil_water != systems.gas_oil:
+                two_phase_system = "oil_water" if systems.oil_water else "gas_oil"
+            elif allow_two_phase and not (systems.oil_water or systems.gas_oil):
+                raise ValidationError(
+                    f"`SATNUM` {satnum} defines neither an oil-water nor a gas-oil system "
+                    f"(keyword family {systems.family!r}; the deck has "
+                    f"{', '.join(systems.keywords_present) or 'no saturation keywords'})."
+                )
 
-            capillary_pressure: ThreePhaseCapillaryPressureTable | None = None
-            if include_capillary_pressure:
-                capillary_pressure = ThreePhaseCapillaryPressureTable.from_deck(
+            relative_permeability: RelativePermeabilityTable
+            capillary_pressure: CapillaryPressureTable | None = None
+            if two_phase_system is not None:
+                logger.warning(
+                    "`SATNUM` %d defines only the %s system; building a two-phase table.",
+                    satnum,
+                    two_phase_system.replace("_", "-"),
+                )
+                relative_permeability = TwoPhaseRelPermTable.from_deck(
                     deck_file=deck_file,
                     satnum=satnum,
+                    system=two_phase_system,
+                    keyword_family=systems.family,
+                    number_of_base_points=number_of_base_points,
+                    number_of_endpoint_extra_points=number_of_endpoint_extra_points,
+                    spacing=spacing,
+                    min_wetting_relperm=min_wetting_relperm,
+                    min_non_wetting_relperm=min_non_wetting_relperm,
+                    dtype=dtype,
+                )
+                if include_capillary_pressure:
+                    capillary_pressure = TwoPhaseCapillaryPressureTable.from_deck(
+                        deck_file=deck_file,
+                        satnum=satnum,
+                        system=two_phase_system,
+                        keyword_family=systems.family,
+                        number_of_base_points=number_of_base_points,
+                        number_of_endpoint_extra_points=number_of_endpoint_extra_points,
+                        spacing=spacing,
+                        dtype=dtype,
+                    )
+            else:
+                relative_permeability = ThreePhaseRelPermTable.from_deck(
+                    deck_file=deck_file,
+                    satnum=satnum,
+                    mixing_rule=mixing_rule,
                     keyword_family=keyword_family,
                     number_of_base_points=number_of_base_points,
                     number_of_endpoint_extra_points=number_of_endpoint_extra_points,
                     spacing=spacing,
+                    min_wetting_relperm=min_wetting_relperm,
+                    min_non_wetting_relperm=min_non_wetting_relperm,
                     dtype=dtype,
                 )
+                if include_capillary_pressure:
+                    capillary_pressure = ThreePhaseCapillaryPressureTable.from_deck(
+                        deck_file=deck_file,
+                        satnum=satnum,
+                        keyword_family=keyword_family,
+                        number_of_base_points=number_of_base_points,
+                        number_of_endpoint_extra_points=number_of_endpoint_extra_points,
+                        spacing=spacing,
+                        dtype=dtype,
+                    )
 
             tables[satnum] = SatFuncTables(
                 relative_permeability=relative_permeability, capillary_pressure=capillary_pressure

@@ -288,6 +288,109 @@ def build_pchip_interpolant(
     return interpolant, derivative_interpolant
 
 
+@numba.njit(cache=True, inline="always", error_model="numpy")
+def compute_killough_scanning_weight(
+    saturation: Number,
+    reversal_saturation: Number,
+    maximum_historical_saturation: Number,
+    is_imbibition: Number,
+    scanning_exponent: Number = 1.0,
+    numerical_epsilon: Number = 1e-12,
+) -> tuple[Number, Number]:
+    """
+    Weight of the imbibition curve on the Killough scanning curve, and its derivative with
+    respect to saturation.
+
+    A scanning curve is `value = drainage + (imbibition - drainage) * weight`, so
+    `d value / d S = d drainage + (d imbibition - d drainage) * weight + (imbibition - drainage) * d weight`.
+    The weight depends on saturation and history only, so every curve that is scanned over the
+    same saturation (for example the water and oil relative permeabilities of the oil-water
+    system) can share one weight instead of recomputing it.
+
+    The weight is `clamp((S - S_rev) / (S_max - S_rev), 0, 1) ** n`. A cell that sits on its
+    maximum while draining is on the primary drainage curve (weight 0), and a cell that sits on
+    its reversal point while imbibing is on the primary imbibition curve (weight 1). Both have a
+    zero weight derivative.
+
+    :param saturation: Current saturation.
+    :param reversal_saturation: Saturation at the last reversal point (S_rev).
+    :param maximum_historical_saturation: Maximum saturation reached before the reversal (S_max).
+    :param is_imbibition: 1.0 if currently on the imbibition path, 0.0 if drainage.
+    :param scanning_exponent: Killough interpolation exponent *n* (> 0; 1 = linear).
+    :param numerical_epsilon: Numerical stability tolerance.
+    :return: Tuple of the weight and its derivative with respect to saturation.
+    """
+    if is_imbibition < 0.5:
+        if abs(saturation - maximum_historical_saturation) < numerical_epsilon:
+            return 0.0, 0.0
+    elif abs(saturation - reversal_saturation) < numerical_epsilon:
+        return 1.0, 0.0
+
+    saturation_span = maximum_historical_saturation - reversal_saturation
+    if abs(saturation_span) <= numerical_epsilon:
+        return 0.0, 0.0
+
+    raw_ratio = (saturation - reversal_saturation) / saturation_span
+    if raw_ratio <= 0.0:
+        return 0.0, 0.0
+    if raw_ratio >= 1.0:
+        return 1.0, 0.0
+
+    if abs(scanning_exponent - 1.0) < 1e-10:
+        return raw_ratio, 1.0 / saturation_span
+    return (
+        raw_ratio**scanning_exponent,
+        scanning_exponent * raw_ratio ** (scanning_exponent - 1.0) / saturation_span,
+    )
+
+
+@numba.njit(cache=True, error_model="numpy")
+def scan_curve_kernel(
+    size: Integer,
+    saturation: NumberArray[OneDimension],
+    reversal_saturation: NumberArray[OneDimension],
+    maximum_historical_saturation: NumberArray[OneDimension],
+    is_imbibition: NumberArray[OneDimension],
+    scanning_exponent: Number,
+    numerical_epsilon: Number,
+    drainage_value: NumberArray[OneDimension],
+    imbibition_value: NumberArray[OneDimension],
+    drainage_derivative: NumberArray[OneDimension],
+    imbibition_derivative: NumberArray[OneDimension],
+    want_derivative: bool,
+    out_value: NumberArray[OneDimension],
+    out_derivative: NumberArray[OneDimension],
+) -> None:
+    """
+    Scan one curve between its drainage and imbibition bounds for every cell, writing the
+    value and (optionally) the derivative in a single pass.
+
+    Every array argument is flat and holds either one value per cell or a single value shared
+    by all cells. `out_value` and `out_derivative` must hold one value per cell, except that
+    `out_derivative` may be a one-element array when `want_derivative` is `False`.
+    """
+    for i in range(size):
+        weight, weight_derivative = compute_killough_scanning_weight(
+            saturation=element_at(array=saturation, index=i),
+            reversal_saturation=element_at(array=reversal_saturation, index=i),
+            maximum_historical_saturation=element_at(array=maximum_historical_saturation, index=i),
+            is_imbibition=element_at(array=is_imbibition, index=i),
+            scanning_exponent=scanning_exponent,
+            numerical_epsilon=numerical_epsilon,
+        )
+        drainage = element_at(array=drainage_value, index=i)
+        imbibition = element_at(array=imbibition_value, index=i)
+        out_value[i] = drainage + (imbibition - drainage) * weight
+        if want_derivative:
+            drainage_slope = element_at(array=drainage_derivative, index=i)
+            imbibition_slope = element_at(array=imbibition_derivative, index=i)
+            out_derivative[i] = (
+                drainage_slope
+                + (imbibition_slope - drainage_slope) * weight
+                + (imbibition - drainage) * weight_derivative
+            )
+
+
 @numba.njit(cache=True)
 def compute_killough_scanning_curve_scalar(
     saturation: Number,
@@ -326,31 +429,15 @@ def compute_killough_scanning_curve_scalar(
     :param numerical_epsilon: Numerical stability tolerance.
     :return: Interpolated scanning-curve value.
     """
-    saturation_span = maximum_historical_saturation - reversal_saturation
-    if abs(saturation_span) > numerical_epsilon:
-        raw_ratio = (saturation - reversal_saturation) / saturation_span
-    else:
-        raw_ratio = 0.0
-
-    clamped_ratio = min(max(raw_ratio, 0.0), 1.0)
-    interpolation_factor = clamped_ratio**scanning_exponent
-    scanning_curve_value = (
-        drainage_curve_value
-        + (imbibition_curve_value - drainage_curve_value) * interpolation_factor
+    weight, _ = compute_killough_scanning_weight(
+        saturation=saturation,
+        reversal_saturation=reversal_saturation,
+        maximum_historical_saturation=maximum_historical_saturation,
+        is_imbibition=is_imbibition,
+        scanning_exponent=scanning_exponent,
+        numerical_epsilon=numerical_epsilon,
     )
-
-    on_primary_drainage = (is_imbibition < 0.5) and (
-        abs(saturation - maximum_historical_saturation) < numerical_epsilon
-    )
-    on_primary_imbibition = (is_imbibition >= 0.5) and (
-        abs(saturation - reversal_saturation) < numerical_epsilon
-    )
-
-    if on_primary_drainage:
-        return drainage_curve_value
-    if on_primary_imbibition:
-        return imbibition_curve_value
-    return scanning_curve_value
+    return drainage_curve_value + (imbibition_curve_value - drainage_curve_value) * weight
 
 
 def _prepare_killough_arrays(
@@ -409,6 +496,24 @@ def prepare_kernel_inputs(
         else:
             prepared.append(np.ascontiguousarray(np.broadcast_to(array, shape)).ravel())
     return shape, size, tuple(prepared)
+
+
+def flatten_kernel_input(
+    value: typing.Any, *, shape: tuple[int, ...], as_float: bool = True
+) -> NumberArray[OneDimension]:
+    """
+    Flat array of `value` for a per-cell kernel.
+
+    A single value stays a one-element array that the kernel shares between all cells. Any
+    other value is broadcast to `shape` and used as it is when it is already contiguous.
+    Non-floating values are converted to float64 when `as_float` is set.
+    """
+    array = np.asarray(value)
+    if as_float and array.dtype.kind != "f":
+        array = array.astype(np.float64)
+    if array.size == 1:
+        return array.reshape(1)
+    return np.ascontiguousarray(np.broadcast_to(array, shape)).reshape(-1)
 
 
 @numba.njit(cache=True, error_model="numpy")
@@ -625,45 +730,18 @@ def compute_killough_scanning_curve_derivative_scalar(
     :param numerical_epsilon: Numerical tolerance.
     :return: Derivative of scanning-curve value w.r.t. saturation.
     """
-    saturation_span = maximum_historical_saturation - reversal_saturation
-
-    on_primary_drainage = (is_imbibition < 0.5) and (
-        abs(saturation - maximum_historical_saturation) < numerical_epsilon
+    weight, weight_derivative = compute_killough_scanning_weight(
+        saturation=saturation,
+        reversal_saturation=reversal_saturation,
+        maximum_historical_saturation=maximum_historical_saturation,
+        is_imbibition=is_imbibition,
+        scanning_exponent=scanning_exponent,
+        numerical_epsilon=numerical_epsilon,
     )
-    on_primary_imbibition = (is_imbibition >= 0.5) and (
-        abs(saturation - reversal_saturation) < numerical_epsilon
-    )
-    if on_primary_drainage:
-        return drainage_curve_derivative
-    if on_primary_imbibition:
-        return imbibition_curve_derivative
-
-    if abs(saturation_span) > numerical_epsilon:
-        raw_ratio = (saturation - reversal_saturation) / saturation_span
-    else:
-        raw_ratio = 0.0
-
-    clamped_ratio = min(max(raw_ratio, 0.0), 1.0)
-    interpolation_factor = clamped_ratio**scanning_exponent
-
-    in_active_range = (
-        (raw_ratio > 0.0) and (raw_ratio < 1.0) and (abs(saturation_span) > numerical_epsilon)
-    )
-    if in_active_range:
-        if abs(scanning_exponent - 1.0) < 1e-10:
-            interpolation_factor_derivative = 1.0 / saturation_span
-        else:
-            safe_ratio = clamped_ratio if clamped_ratio > 0.0 else 1e-30
-            interpolation_factor_derivative = (
-                scanning_exponent * (safe_ratio ** (scanning_exponent - 1.0)) / saturation_span
-            )
-    else:
-        interpolation_factor_derivative = 0.0
-
     return (
         drainage_curve_derivative
-        + (imbibition_curve_derivative - drainage_curve_derivative) * interpolation_factor
-        + (imbibition_curve_value - drainage_curve_value) * interpolation_factor_derivative
+        + (imbibition_curve_derivative - drainage_curve_derivative) * weight
+        + (imbibition_curve_value - drainage_curve_value) * weight_derivative
     )
 
 
