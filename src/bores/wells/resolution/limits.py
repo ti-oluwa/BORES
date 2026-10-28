@@ -3,6 +3,7 @@
 import math
 import typing
 
+import numba
 import numpy as np
 
 from bores.errors import ValidationError
@@ -209,6 +210,7 @@ def get_thp_bound(
     return bound_bhp
 
 
+@numba.njit(cache=True)
 def check_economic_violation(
     *,
     limits: CompiledLimits | CompiledGroupLimits,
@@ -232,7 +234,6 @@ def check_economic_violation(
         total, free and dissolved, so a gas-oil ratio is the one the well produces at the surface.
     :returns: The violated row's index, or `UNSET_INT` if none is violated.
     """
-    # TODO: This function should be njittable with some tweaks
     oil_rate, water_rate, gas_rate = rates.oil, rates.water, rates.gas
 
     for row in range(limits_start, limits_end):

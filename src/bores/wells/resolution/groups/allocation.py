@@ -33,6 +33,42 @@ from bores.wells.workspace import WellsWorkspace
 __all__ = ["allocate_group_targets", "get_group_controlled_rate", "redistribute_group_shortfall"]
 
 
+@numba.njit(cache=True)
+def assign_group_shares(
+    *,
+    target_rates: npt.NDArray,
+    control_modes: npt.NDArray,
+    guide_rates: npt.NDArray,
+    members: npt.NDArray,
+    group_target_rate: Number,
+    target_mode_tag: Integer,
+) -> None:
+    """
+    Splits a group's target rate across its members by guide rate, and switches each member to
+    the concrete rate control mode that target is in.
+
+    :param target_rates: Every well's target rate, indexed by well row. Set in place for each
+        member.
+    :param control_modes: Every well's control mode tag, indexed by well row. Set in place for
+        each member.
+    :param guide_rates: Every well's guide rate, indexed by well row. A `NaN` guide rate counts
+        as 1.
+    :param members: Well rows to allocate to. Must not be empty.
+    :param group_target_rate: The group's target rate to split.
+    :param target_mode_tag: The control mode tag each member is switched to.
+    """
+    total_weight = 0.0
+    for position in range(members.shape[0]):
+        weight = guide_rates[members[position]]
+        total_weight += 1.0 if math.isnan(weight) else weight
+    for position in range(members.shape[0]):
+        well_row = members[position]
+        weight = guide_rates[well_row]
+        weight = 1.0 if math.isnan(weight) else weight
+        target_rates[well_row] = group_target_rate * (weight / total_weight)
+        control_modes[well_row] = target_mode_tag
+
+
 def allocate_group_targets(
     group_name: str, well_system: CompiledWellSystem, workspace: WellsWorkspace
 ) -> tuple[str, ...]:
@@ -70,8 +106,6 @@ def allocate_group_targets(
 
     group_row = group_controls.group_row(name=group_name)
 
-    # TODO: Possible application of njit from here downward (can be section or parts,
-    # njitted separately of the whole thing). Just like in `redistribute_group_shortfall`
     group_kind = group_controls.group_kinds[group_row]
     group_mode = group_controls.control_modes[group_row]
     is_injection = group_kind == GroupKind.INJECTOR
@@ -107,14 +141,14 @@ def allocate_group_targets(
     if not eligible_member_indices:
         return ()
 
-    guide_rates = controls.guide_rates[eligible_member_indices]
-    weights = np.where(np.isnan(guide_rates), 1.0, guide_rates)
-    total_weight = weights.sum()
-
-    for idx, weight in zip(eligible_member_indices, weights, strict=False):
-        controls.target_rates[idx] = target_rate * (weight / total_weight)
-        controls.control_modes[idx] = target_mode_tag
-
+    assign_group_shares(
+        target_rates=controls.target_rates,
+        control_modes=controls.control_modes,
+        guide_rates=controls.guide_rates,
+        members=np.asarray(eligible_member_indices, dtype=np.int64),
+        group_target_rate=target_rate,
+        target_mode_tag=target_mode_tag,
+    )
     return tuple(well_system.names[idx] for idx in eligible_member_indices)
 
 

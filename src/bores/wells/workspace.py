@@ -561,8 +561,6 @@ def accumulate_rates(
         plus the condensate its gas carries. The reservoir-condition rates are those of the
         phases that flow at the connections.
     """
-    # TODO: We can actually use prange here. Will it benefit us. If it will do it.
-    # We may need to change the way we accumulate total rates. May be switch to using an array?
     oil_rate = 0.0
     water_rate = 0.0
     gas_rate = 0.0

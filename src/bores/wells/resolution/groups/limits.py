@@ -12,10 +12,11 @@ stale rate behind for the caller to reconcile.
 import math
 import typing
 
+import numba
 import numpy as np
 
 from bores.errors import StopSimulation, ValidationError
-from bores.types import Integer, PhaseValues
+from bores.types import Boolean, IntArray, Integer, NumberArray, OneDimension, PhaseValues
 from bores.wells.compile import (
     UNSET_INT,
     CompiledWellSystem,
@@ -39,13 +40,13 @@ __all__ = ["GroupEconomicLimitOutcome", "enforce_group_economic_limits"]
 class GroupEconomicLimitOutcome(typing.NamedTuple):
     """Result of one `enforce_group_economic_limits` call."""
 
-    satisfied: bool
+    satisfied: Boolean
     """Whether every one of this group's `GECON` limits is satisfied when this call returns."""
 
     shut_wells: tuple[str, ...]
     """Names of member wells shut this call, in the order they were shut."""
 
-    rate_cutback_applied: bool
+    rate_cutback_applied: Boolean
     """Whether this call cut the group's own `target_rate` (`workover_action` was `RATE`)."""
 
     reallocated_wells: tuple[str, ...]
@@ -55,8 +56,36 @@ class GroupEconomicLimitOutcome(typing.NamedTuple):
     """
 
 
-def aggregate_member_rates(  # TODO: Possible njit candidate
-    workspace: WellsWorkspace, open_member_wells: typing.Sequence[Integer]
+@numba.njit(cache=True)
+def sum_member_rates(
+    *,
+    surface_oil_rates: NumberArray[OneDimension],
+    surface_water_rates: NumberArray[OneDimension],
+    surface_gas_rates: NumberArray[OneDimension],
+    members: IntArray[OneDimension],
+) -> PhaseValues:
+    """
+    Sums the surface-condition rates of the given wells.
+
+    :param surface_oil_rates: Every well's resolved surface oil rate, indexed by well row.
+    :param surface_water_rates: Every well's resolved surface water rate, indexed by well row.
+    :param surface_gas_rates: Every well's resolved surface gas rate, indexed by well row.
+    :param members: Well rows to sum over.
+    :returns: The summed `PhaseValues`.
+    """
+    oil = 0.0
+    water = 0.0
+    gas = 0.0
+    for position in range(members.shape[0]):
+        well_row = members[position]
+        oil += surface_oil_rates[well_row]
+        water += surface_water_rates[well_row]
+        gas += surface_gas_rates[well_row]
+    return PhaseValues(oil=oil, water=water, gas=gas)  # type: ignore[arg-type]
+
+
+def aggregate_member_rates(
+    workspace: WellsWorkspace, open_member_wells: typing.Sequence[Integer] | IntArray[OneDimension]
 ) -> PhaseValues:
     """
     Sums already-resolved surface-condition rates over `open_member_wells`, which is what
@@ -66,10 +95,95 @@ def aggregate_member_rates(  # TODO: Possible njit candidate
     :param open_member_wells: Rows to sum over.
     :returns: The group's current aggregate `PhaseValues`.
     """
-    oil = sum(workspace.surface_oil_rates[idx] for idx in open_member_wells)
-    water = sum(workspace.surface_water_rates[idx] for idx in open_member_wells)
-    gas = sum(workspace.surface_gas_rates[idx] for idx in open_member_wells)
-    return PhaseValues(oil=oil, water=water, gas=gas)
+    return sum_member_rates(
+        surface_oil_rates=workspace.surface_oil_rates,
+        surface_water_rates=workspace.surface_water_rates,
+        surface_gas_rates=workspace.surface_gas_rates,
+        members=typing.cast(IntArray[OneDimension], np.asarray(open_member_wells, dtype=np.int64)),
+    )
+
+
+@numba.njit(cache=True)
+def select_open_members(
+    *,
+    member_indices: IntArray[OneDimension],
+    well_kinds: IntArray[OneDimension],
+    expected_well_kind: Integer,
+    economic_shutins: IntArray[OneDimension],
+    bhps: NumberArray[OneDimension],
+) -> IntArray[OneDimension]:
+    """
+    Picks the group members that are still open: of the group's own well kind, not shut in
+    economically, and resolved this pass (a resolved well has a bottom-hole pressure).
+
+    :param member_indices: Well rows of the group's members.
+    :param well_kinds: Every well's kind tag, indexed by well row.
+    :param expected_well_kind: The `WellKind` the group's members must be.
+    :param economic_shutins: Every well's economic shut-in flag, indexed by well row.
+    :param bhps: Every well's resolved bottom-hole pressure, indexed by well row.
+    :returns: The open members' well rows, in the order of `member_indices`.
+    """
+    out = np.empty(member_indices.shape[0], dtype=np.int64)
+    count = 0
+    for position in range(member_indices.shape[0]):
+        well_row = member_indices[position]
+        if (
+            well_kinds[well_row] == expected_well_kind
+            and economic_shutins[well_row] == 0
+            and not math.isnan(bhps[well_row])
+        ):
+            out[count] = well_row
+            count += 1
+    return out[:count]  # type: ignore[return-value]
+
+
+@numba.njit(cache=True)
+def select_members_in_mode(
+    *,
+    members: IntArray[OneDimension],
+    control_modes: IntArray[OneDimension],
+    mode_tag: Integer,
+) -> IntArray[OneDimension]:
+    """
+    :param members: Well rows to filter.
+    :param control_modes: Every well's control mode tag, indexed by well row.
+    :param mode_tag: The control mode tag to keep.
+    :returns: The rows of `members` currently in `mode_tag`, in order.
+    """
+    out = np.empty(members.shape[0], dtype=np.int64)
+    count = 0
+    for position in range(members.shape[0]):
+        if control_modes[members[position]] == mode_tag:
+            out[count] = members[position]
+            count += 1
+    return out[:count]  # type: ignore[return-value]
+
+
+@numba.njit(cache=True)
+def find_lowest_guide_rate_member(
+    *, members: IntArray[OneDimension], guide_rates: NumberArray[OneDimension]
+) -> Integer:
+    """
+    Finds the member with the lowest guide rate, the first to shut in when a group limit is
+    breached. A `NaN` guide rate counts as 1, the same default weight group allocation uses. The
+    first of equally weighted members wins.
+
+    :param members: Well rows to choose from. Must not be empty.
+    :param guide_rates: Every well's guide rate, indexed by well row.
+    :returns: The chosen member's position in `members`.
+    """
+    best_position = 0
+    best_weight = guide_rates[members[0]]
+    if math.isnan(best_weight):
+        best_weight = 1.0
+    for position in range(1, members.shape[0]):
+        weight = guide_rates[members[position]]
+        if math.isnan(weight):
+            weight = 1.0
+        if weight < best_weight:
+            best_weight = weight
+            best_position = position
+    return best_position
 
 
 def shut_in_member_well(
@@ -234,8 +348,6 @@ def enforce_group_economic_limits(
 
     group_row = group_controls.group_row(name=group_name)
 
-    # TODO: Possible application of njit from here downward (can be section or parts,
-    # njitted separately of the whole thing). Just like in `redistribute_group_shortfall`
     group_limits = group_controls.limits
     limits_start = group_limits.group_offsets[group_row]
     limits_end = group_limits.group_offsets[group_row + 1]
@@ -257,27 +369,34 @@ def enforce_group_economic_limits(
     )
 
     controls = well_system.controls
-    open_members = [
-        i
-        for i in member_indices
-        if well_system.well_kinds[i] == expected_well_kind
-        and workspace.economic_shutins[i] == 0
-        and not math.isnan(workspace.bhps[i])
-    ]
+    open_members = select_open_members(
+        member_indices=typing.cast(IntArray[OneDimension], member_indices),
+        well_kinds=well_system.well_kinds,
+        expected_well_kind=expected_well_kind,
+        economic_shutins=workspace.economic_shutins,
+        bhps=workspace.bhps,
+    )
 
     grup_mode_tag = (
         InjectorControlModeTag.GROUP
         if expected_well_kind == WellKind.INJECTOR
         else ProducerControlModeTag.GROUP
     )
-    grup_member_rows = tuple(i for i in open_members if controls.control_modes[i] == grup_mode_tag)
+    grup_member_rows = select_members_in_mode(
+        members=open_members,
+        control_modes=controls.control_modes,
+        mode_tag=grup_mode_tag,
+    )
 
     shut_wells: list[str] = []
     reallocated_wells: list[str] = []
     rate_cutback_applied = False
 
     for _ in range(spec.max_fixed_point_iterations):
-        rates = aggregate_member_rates(workspace=workspace, open_member_wells=open_members)
+        rates = aggregate_member_rates(
+            workspace=workspace,
+            open_member_wells=typing.cast(IntArray[OneDimension], open_members),
+        )
         violated_row = check_economic_violation(
             limits=group_limits,
             limits_start=limits_start,
@@ -315,7 +434,7 @@ def enforce_group_economic_limits(
             # `WELL` / `PLUG` / `CON` / `PLUS_CON`: shut the eligible open member
             # with the lowest guide rate (NaN treated as the default
             # weight of 1.0, matching `allocate_group_targets`' own convention).
-            if not open_members:
+            if open_members.shape[0] == 0:
                 if end_run:
                     raise StopSimulation(
                         f"Group {group_name!r} breached a `GECON` limit flagged to "
@@ -328,13 +447,18 @@ def enforce_group_economic_limits(
                     reallocated_wells=tuple(reallocated_wells),
                 )
 
-            guide_rates = controls.guide_rates[open_members]
-            weights = np.where(np.isnan(guide_rates), 1.0, guide_rates)
-            candidate = open_members[int(np.argmin(weights))]
+            candidate = int(
+                open_members[
+                    find_lowest_guide_rate_member(
+                        members=typing.cast(IntArray[OneDimension], open_members),
+                        guide_rates=controls.guide_rates,
+                    )
+                ]
+            )
 
             shut_in_member_well(well_system=well_system, workspace=workspace, well_row=candidate)
             shut_wells.append(well_system.names[candidate])
-            open_members = [i for i in open_members if i != candidate]
+            open_members = open_members[open_members != candidate]
 
             if end_run:
                 raise StopSimulation(
@@ -347,16 +471,18 @@ def enforce_group_economic_limits(
             well_system=well_system,
             workspace=workspace,
             spec=spec,
-            open_members=open_members,
+            open_members=typing.cast(typing.Sequence[Integer], open_members),
             grup_mode_tag=grup_mode_tag,
-            grup_member_rows=grup_member_rows,
+            grup_member_rows=typing.cast(typing.Sequence[Integer], grup_member_rows),
             get_tubing_performance=get_tubing_performance,
             get_connection_fluids=get_connection_fluids,
             get_surface_sample=get_resolved_surface_sample,
         )
         reallocated_wells.extend(name for name in reresolved if name not in reallocated_wells)
 
-    rates = aggregate_member_rates(workspace=workspace, open_member_wells=open_members)
+    rates = aggregate_member_rates(
+        workspace=workspace, open_member_wells=typing.cast(IntArray[OneDimension], open_members)
+    )
     still_violated = (
         check_economic_violation(
             limits=group_limits,

@@ -440,11 +440,14 @@ def load_case(
         )
 
     try:
+        print("Loading grid")
         grid = Grid.from_deck(deck_file, on_inverted_cells=on_inverted_cells)
+        print("Loaded grid")
     except Exception as exc:
         raise CaseLoadError(f"Failed to load grid from deck file: {title!r}.") from exc
 
     try:
+        print("Loading regions")
         # Decks write 0 as the region of inactive cells, which Eclipse ignores.
         active = (
             grid.cell_statuses != int(CellStatus.INACTIVE)
@@ -457,10 +460,12 @@ def load_case(
             use_default=True,
             active=active,
         )
+        print("Loaded regions")
     except Exception as exc:
         raise CaseLoadError(f"Failed to load regions from deck file: {title!r}.") from exc
 
     try:
+        print("Loading satfunc")
         satfunc = SatFunc.from_deck(
             deck_file,
             mixing_rule=mixing_rule,
@@ -470,12 +475,14 @@ def load_case(
             include_capillary_pressure=include_capillary_pressure,
             dtype=dtype,
         )
+        print("Loaded satfunc")
     except Exception as exc:
         raise CaseLoadError(
             f"Failed to load saturation functions from deck file: {title!r}."
         ) from exc
 
     try:
+        print("Loading rock")
         rock = Rock.from_deck(
             deck_file,
             grid=grid,
@@ -484,24 +491,28 @@ def load_case(
             interpolation_method=interpolation_method,
             dtype=dtype,
         )
+        print("Loaded rock")
     except Exception as exc:
         raise CaseLoadError(f"Failed to load rock properties from deck file: {title!r}.") from exc
 
     reservoir = Reservoir(grid=grid, rock=rock, regions=regions)
 
     try:
+        print("Loading PVT")
         pvt = PVT.from_deck(
             deck_file,
             temperature=temperature,
             interpolation_method=interpolation_method,
             warn_on_extrapolation=warn_on_extrapolation,
         )
+        print("Loaded PVT")
     except Exception as exc:
         raise CaseLoadError(f"Failed to load PVT tables from deck file: {title!r}.") from exc
 
     fluid = BlackOil(pvt=pvt, satfunc=satfunc)
 
     try:
+        print("Loading state")
         equilibrium = Equilibrium.from_deck(deck_file)
         initial_state = initialize_reservoir_state(
             reservoir=reservoir,
@@ -516,27 +527,32 @@ def load_case(
             saturation_samples=saturation_samples,
             dtype=dtype,
         )
+        print("Loaded state")
     except Exception as exc:
         raise CaseLoadError(
             f"Failed to initialize reservoir state from deck file: {title!r}."
         ) from exc
 
     try:
+        print("Loading wells")
         wells = WellSystem.from_deck(
             deck_file,
             grid=grid,
             tubing_performance=tubing_performance,
         )
+        print("Loaded wells")
     except Exception as exc:
         raise CaseLoadError(f"Failed to load wells from deck file: {title!r}.") from exc
 
     try:
+        print("Loading BC")
         resolved_boundary_conditions = load_boundary_conditions(
             deck_file,
             grid,
             pvt=pvt,
             reservoir_pressure=compute_water_phase_pressure(reservoir, initial_state, satfunc),
         )
+        print("Loaded BC")
     except Exception as exc:
         raise CaseLoadError(
             f"Failed to load boundary conditions from deck file: {title!r}."
@@ -559,12 +575,14 @@ def load_case(
     )
 
     try:
+        print("Loading schedule")
         schedule = load_schedule(
             deck_file,
             compiled_at=compiled_at,
             load_summary=load_summary,
             unit_system=unit_system,
         )
+        print("Loaded schedule")
     except Exception as exc:
         raise CaseLoadError(f"Failed to load schedule from deck file: {title!r}.") from exc
 
