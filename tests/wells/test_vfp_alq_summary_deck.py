@@ -878,7 +878,7 @@ def test_missing_table_number_in_the_collection_is_reported(tmp_path):
 
 
 def test_vfp_thp_uses_surface_rates_and_refuses_a_datum_mismatch(tmp_path):
-    from bores.wells.hydraulics.base import PhaseValues
+    from bores.types import PhaseValues
     from bores.wells.resolution.tubing import WellTubing, compute_tubing_head_pressure
 
     table = VFPTable.from_deck(producer_table(tmp_path), table_number=3)
@@ -917,7 +917,7 @@ def test_vfp_thp_uses_surface_rates_and_refuses_a_datum_mismatch(tmp_path):
 
 
 def test_vfp_thp_follows_an_oil_rate_table_with_no_gas(tmp_path):
-    from bores.wells.hydraulics.base import PhaseValues
+    from bores.types import PhaseValues
     from bores.wells.resolution.tubing import WellTubing, compute_tubing_head_pressure
 
     table = VFPTable.from_deck(producer_table(tmp_path, wfr="WOR", flo="OIL"), table_number=3)
@@ -1102,7 +1102,7 @@ def test_flowing_density_is_mass_rate_over_volume_rate_across_connections():
 
 
 def test_thp_is_found_through_a_datum_shift(tmp_path):
-    from bores.wells.hydraulics.base import PhaseValues
+    from bores.types import PhaseValues
     from bores.wells.resolution.tubing import (
         WellTubing,
         compute_datum_pressure_shift,
@@ -1144,7 +1144,7 @@ def test_thp_is_found_through_a_datum_shift(tmp_path):
 
 
 def test_attached_flowing_fluid_records_densities_and_a_zero_flow_density():
-    from bores.wells.hydraulics.base import PhaseValues
+    from bores.types import PhaseValues
     from bores.wells.resolution.tubing import WellTubing, attach_flowing_fluid
 
     samples = [
@@ -1184,10 +1184,9 @@ def resolve_producer(
     import attrs
 
     from bores.grids.factories.cartesian import make_cartesian_grid
-    from bores.types import Orientation
+    from bores.types import Orientation, PhaseValues
     from bores.wells.compile import compile_well_system
     from bores.wells.factories import make_producer, make_well_controls, make_wells
-    from bores.wells.hydraulics.base import PhaseValues
     from bores.wells.resolution.engine import resolve_well_control
     from bores.wells.resolution.spec import ConnectionPressureMode, WellControlSpec
     from bores.wells.state import ConnectionSample
@@ -1290,7 +1289,7 @@ def test_resolved_thp_with_a_vfp_table_accounts_for_the_datum_depth(tmp_path):
 
 
 def hydrostatic_samples(oil_densities=(40.0, 50.0, 60.0), mobility=1.0):
-    from bores.wells.hydraulics.base import PhaseValues
+    from bores.types import PhaseValues
     from bores.wells.state import ConnectionSample
 
     return [
@@ -1443,7 +1442,8 @@ def walk(
     reference_measured_depth=None,
     dtype=np.float64,
 ):
-    from bores.wells.hydraulics.base import PhaseValues, plan_connection_walk
+    from bores.types import PhaseValues
+    from bores.wells.hydraulics.base import plan_connection_walk
 
     depth_array = np.array(depths, dtype=dtype)
     oil_array = np.array(oil, dtype=dtype)
@@ -1897,9 +1897,10 @@ def scenario(*, unit_system, geometry, reference_kind, rate_kind, dtype):
     """Per-connection inputs for one well in `unit_system`, consistent in its units."""
     import math
 
+    from bores.types import PhaseValues
     from bores.units import get_conversion_factors
     from bores.wells.hydraulics.base import compile_connection_fluids
-    from bores.wells.state import ConnectionSample, PhaseValues
+    from bores.wells.state import ConnectionSample
 
     count = 6
     rng = np.random.RandomState(7)
@@ -2702,8 +2703,8 @@ def build_case_workspace(
     *, unit_system, geometry="vertical", mobility=1e-4, d_factor=float("nan")
 ):
     """A real perforation workspace for six connections, with rates of an ordinary size."""
+    from bores.types import PhaseValues
     from bores.units import get_conversion_factors
-    from bores.wells.hydraulics.base import PhaseValues
     from bores.wells.state import ConnectionSample
     from bores.wells.workspace import build_perforation_workspace
 
@@ -3182,7 +3183,7 @@ def reference_rate_bisection(
 def test_the_rate_bisection_matches_a_python_loop_over_the_solve(
     solver_name, is_injector, condition, fraction
 ):
-    from bores.wells.hydraulics.base import PhaseValues
+    from bores.types import PhaseValues
     from bores.wells.resolution.solvers import (
         get_pressure_bracket,
         solve_bhp,
@@ -3275,7 +3276,7 @@ def build_group_system(*, wells_per_group=4, groups=2, connections=4, weak_well=
     import attrs
 
     from bores.grids.factories.cartesian import make_cartesian_grid
-    from bores.types import Orientation
+    from bores.types import Orientation, PhaseValues
     from bores.wells.compile import compile_well_system
     from bores.wells.controls import ProducerControlMode
     from bores.wells.factories import (
@@ -3285,7 +3286,6 @@ def build_group_system(*, wells_per_group=4, groups=2, connections=4, weak_well=
         make_wells,
     )
     from bores.wells.groups import GroupControls, WellGroup, WellGroups
-    from bores.wells.hydraulics.base import PhaseValues
     from bores.wells.hydraulics.homogeneous import homogeneous_wellbore
     from bores.wells.resolution.spec import ConnectionPressureMode, WellControlSpec
     from bores.wells.resolution.system import resolve_wells

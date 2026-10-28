@@ -16,6 +16,7 @@ from bores.types import (
     Number,
     NumberArray,
     OneDimension,
+    PhaseValues,
     UnitConversionTable,
     UnitSystem,
 )
@@ -44,7 +45,6 @@ from bores.wells.hydraulics.tubing_fluids import (
     compute_connection_surface_rates,
     compute_two_phase_flow,
 )
-from bores.wells.state import PhaseValues
 
 __all__ = [
     "HagedornBrownWellbore",

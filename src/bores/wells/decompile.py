@@ -182,17 +182,28 @@ def decompile_perforation(
     :returns: `perforation`, evolved with the compiled row's current state.
     """
     saturation_region = perforations.saturation_regions[row]
-    changes: dict[str, object] = {
-        "status": get_completion_status(perforations.completion_statuses[row]),
-        "schedule_status": get_well_status(perforations.schedule_statuses[row]),
-        "skin": perforations.skins[row],
-        "wellbore_radius": perforations.wellbore_radii[row],
-        "saturation_region": None if saturation_region == UNSET_INT else int(saturation_region),
-    }
+    status = get_completion_status(perforations.completion_statuses[row])
+    schedule_status = get_well_status(perforations.schedule_statuses[row])
+    saturation_region = None if saturation_region == UNSET_INT else int(saturation_region)
     if include_connection_factor:
-        changes["connection_factor_override"] = float(perforations.well_indices[row])
-        changes["connection_factor_multiplier"] = None
-    return attrs.evolve(perforation, **changes)
+        return attrs.evolve(
+            perforation,
+            status=status,
+            schedule_status=schedule_status,
+            skin=perforations.skins[row],
+            wellbore_radius=perforations.wellbore_radii[row],
+            saturation_region=saturation_region,
+            connection_factor_override=float(perforations.well_indices[row]),
+            connection_factor_multiplier=None,
+        )
+    return attrs.evolve(
+        perforation,
+        status=status,
+        schedule_status=schedule_status,
+        skin=perforations.skins[row],
+        wellbore_radius=perforations.wellbore_radii[row],
+        saturation_region=saturation_region,
+    )
 
 
 def decompile_perforations(
@@ -225,11 +236,10 @@ def decompile_perforations(
     row_start = perforations.well_offsets[well_row]
     row_end = perforations.well_offsets[well_row + 1]
     rich_perforations = wells[well_name].perforations
+    ordinals = perforations.perforation_indices[row_start:row_end].tolist()
     return tuple(
-        decompile_perforation(
-            rich_perforations[perforations.perforation_indices[row]], perforations, row
-        )
-        for row in range(row_start, row_end)
+        decompile_perforation(rich_perforations[ordinal], perforations, row)
+        for row, ordinal in enumerate(ordinals, start=row_start)
     )
 
 
@@ -262,22 +272,22 @@ def decompile_well_perforations(
     row_start = perforations.well_offsets[well_row]
     row_end = perforations.well_offsets[well_row + 1]
     rich_perforations = wells[well_name].perforations
+    ordinals = perforations.perforation_indices[row_start:row_end].tolist()
 
     rebuilt = []
-    row = row_start
-    while row < row_end:
-        ordinal = perforations.perforation_indices[row]
+    previous_ordinal = None
+    for offset, ordinal in enumerate(ordinals):
+        if ordinal == previous_ordinal:
+            continue
+        previous_ordinal = ordinal
         rebuilt.append(
             decompile_perforation(
                 rich_perforations[ordinal],
                 perforations,
-                row,
+                row_start + offset,
                 include_connection_factor=False,
             )
         )
-        row += 1
-        while row < row_end and perforations.perforation_indices[row] == ordinal:
-            row += 1
     return tuple(rebuilt)
 
 
@@ -382,14 +392,21 @@ def decompile_limit(controls: CompiledWellControls, row: int, unit_system: UnitS
     """
     limits = controls.limits
     kind = limits.kinds[row]
-    min_value = none_if_nan(limits.min_values[row])
-    max_value = none_if_nan(limits.max_values[row])
 
     if kind == LimitKind.BHP:
-        return BHPLimit(min_value=min_value, max_value=max_value, unit_system=unit_system)
+        return BHPLimit(
+            min_value=none_if_nan(limits.min_values[row]),
+            max_value=none_if_nan(limits.max_values[row]),
+            unit_system=unit_system,
+        )
     if kind == LimitKind.THP:
-        return THPLimit(min_value=min_value, max_value=max_value, unit_system=unit_system)
+        return THPLimit(
+            min_value=none_if_nan(limits.min_values[row]),
+            max_value=none_if_nan(limits.max_values[row]),
+            unit_system=unit_system,
+        )
     if kind == LimitKind.RATE:
+        max_value = none_if_nan(limits.max_values[row])
         assert max_value is not None, "`LimitKind.RATE` `max_value` row cannot be None"
         return RateLimit(
             quantity=RATE_QUANTITY_FROM_TAG[limits.quantities[row]],
@@ -399,8 +416,8 @@ def decompile_limit(controls: CompiledWellControls, row: int, unit_system: UnitS
     if kind == LimitKind.ECONOMIC:
         return EconomicLimit(
             quantity=ECONOMIC_QUANTITY_FROM_TAG[limits.quantities[row]],
-            min_value=min_value,
-            max_value=max_value,
+            min_value=none_if_nan(limits.min_values[row]),
+            max_value=none_if_nan(limits.max_values[row]),
             workover_action=WORKOVER_ACTION_FROM_TAG[limits.workover_actions[row]],
             end_run=bool(limits.end_run_flags[row]),
             unit_system=unit_system,

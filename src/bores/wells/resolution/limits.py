@@ -6,7 +6,7 @@ import typing
 import numpy as np
 
 from bores.errors import ValidationError
-from bores.types import Integer, Number, NumberArray, OneDimension
+from bores.types import Integer, Number, NumberArray, OneDimension, PhaseValues
 from bores.wells.compile import (
     UNSET_INT,
     CompiledGroupLimits,
@@ -24,7 +24,6 @@ from bores.wells.resolution.solvers import (
 )
 from bores.wells.resolution.spec import WellControlSpec
 from bores.wells.resolution.tubing import WellTubing
-from bores.wells.state import PhaseValues
 from bores.wells.workspace import (
     ConnectionRates,
     PerforationWorkspace,

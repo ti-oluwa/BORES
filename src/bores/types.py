@@ -24,6 +24,7 @@ __all__ = [
     "OneDimension",
     "OneDimensionalGrid",
     "Orientation",
+    "PhaseValues",
     "Preconditioner",
     "RelativePermeabilities",
     "Solver",
@@ -459,6 +460,19 @@ class MixingRuleDFunc(typing.Protocol):
             `MixingRulePartialDerivatives` dict or a 7-tuple.
         """
         ...
+
+
+class PhaseValues(typing.NamedTuple):
+    """A value for each of the three fluid phases."""
+
+    oil: Number
+    """The value for the oil phase."""
+
+    water: Number
+    """The value for the water phase."""
+
+    gas: Number
+    """The value for the gas phase."""
 
 
 class RelativePermeabilities(TypedDict):

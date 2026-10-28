@@ -15,7 +15,7 @@ import typing
 import numpy as np
 
 from bores.errors import StopSimulation, ValidationError
-from bores.types import Integer
+from bores.types import Integer, PhaseValues
 from bores.wells.compile import (
     UNSET_INT,
     CompiledWellSystem,
@@ -31,7 +31,6 @@ from bores.wells.resolution.engine import resolve_well_control
 from bores.wells.resolution.groups.allocation import allocate_group_targets
 from bores.wells.resolution.limits import check_economic_violation
 from bores.wells.resolution.spec import WellControlSpec
-from bores.wells.state import PhaseValues
 from bores.wells.workspace import WellsWorkspace
 
 __all__ = ["GroupEconomicLimitOutcome", "enforce_group_economic_limits"]

@@ -55,7 +55,6 @@ from bores.wells.model import WellSystem
 from bores.wells.state import (
     ConnectionSample,
     PerforationState,
-    PhaseValues,
     WellState,
     WellStates,
 )
@@ -81,7 +80,6 @@ __all__ = [
     "Perforation",
     "PerforationIndex",
     "PerforationState",
-    "PhaseValues",
     "ProducerControl",
     "ProducerControlMode",
     "RateLimit",

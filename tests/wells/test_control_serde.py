@@ -1,7 +1,7 @@
 import pytest
 
 from bores.serde.stores.json import JSONStore
-from bores.types import FluidPhase, UnitSystem
+from bores.types import FluidPhase, PhaseValues, UnitSystem
 from bores.wells.base import Perforation
 from bores.wells.controls import (
     BHPLimit,
@@ -16,7 +16,7 @@ from bores.wells.controls import (
     THPLimit,
     WorkoverAction,
 )
-from bores.wells.state import PerforationState, PhaseValues, WellState
+from bores.wells.state import PerforationState, WellState
 
 LIMITS = [
     RateLimit(quantity=RateQuantity.LIQUID, max_value=2000.0),

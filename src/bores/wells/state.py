@@ -7,7 +7,7 @@ from typing_extensions import Self
 
 from bores.errors import ValidationError
 from bores.serde.stores import StoreSerializable
-from bores.types import Integer, Number, UnitConversionTable, UnitSystem
+from bores.types import Integer, Number, PhaseValues, UnitConversionTable, UnitSystem
 from bores.units import get_conversion_factors
 from bores.utils import scale
 from bores.wells.base import Perforation
@@ -16,23 +16,9 @@ from bores.wells.controls import Limit, WellControl
 __all__ = [
     "ConnectionSample",
     "PerforationState",
-    "PhaseValues",
     "WellState",
     "WellStates",
 ]
-
-
-class PhaseValues(typing.NamedTuple):
-    """A value for each of the three fluid phases."""
-
-    oil: Number
-    """The value for the oil phase."""
-
-    water: Number
-    """The value for the water phase."""
-
-    gas: Number
-    """The value for the gas phase."""
 
 
 class ConnectionSample(typing.NamedTuple):

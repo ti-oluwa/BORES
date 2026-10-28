@@ -8,6 +8,7 @@ from bores.wells.indices.perforations import (
 )
 from bores.wells.indices.wells import (
     WellIndex,
+    build_well_index,
     build_wells_indices,
     compute_2D_effective_drainage_radius,
     compute_3D_effective_drainage_radius,
@@ -16,12 +17,14 @@ from bores.wells.indices.wells import (
     compute_peaceman_well_index,
     is_locally_cartesian,
     resolve_connection_factor,
+    resolve_connection_terms,
     resolve_well_index_direction,
 )
 
 __all__ = [
     "PerforationIndex",
     "WellIndex",
+    "build_well_index",
     "build_wells_indices",
     "compute_2D_effective_drainage_radius",
     "compute_3D_effective_drainage_radius",
@@ -30,6 +33,7 @@ __all__ = [
     "compute_peaceman_well_index",
     "is_locally_cartesian",
     "resolve_connection_factor",
+    "resolve_connection_terms",
     "resolve_md_perforations_indices",
     "resolve_perforation_orientation",
     "resolve_perforations_indices",

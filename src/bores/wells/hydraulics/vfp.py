@@ -35,6 +35,7 @@ from bores.types import (
     Number,
     NumberArray,
     OneDimension,
+    PhaseValues,
     TableQuery,
     TableResult,
     UnitSystem,
@@ -47,7 +48,6 @@ from bores.wells.hydraulics.dispatch import (
     compute_tubing_head_pressure,
     compute_tubing_head_pressure_from_table,
 )
-from bores.wells.state import PhaseValues
 
 __all__ = [
     "VFPData",

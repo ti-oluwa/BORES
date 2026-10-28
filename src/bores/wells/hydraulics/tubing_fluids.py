@@ -25,6 +25,7 @@ from bores.types import (
     Number,
     NumberArray,
     OneDimension,
+    PhaseValues,
     UnitSystem,
 )
 from bores.wells.hydraulics.base import (
@@ -36,7 +37,6 @@ from bores.wells.hydraulics.base import (
     compute_superficial_velocity,
     split_liquid_gas,
 )
-from bores.wells.state import PhaseValues
 
 if typing.TYPE_CHECKING:
     from bores.blackoil.pvt.tables import PVTTable, PVTTables

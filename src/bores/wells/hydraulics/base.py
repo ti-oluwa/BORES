@@ -11,9 +11,16 @@ from typing_extensions import Self
 from bores.constants import c
 from bores.errors import ValidationError
 from bores.precision import get_dtype
-from bores.types import Number, NumberArray, OneDimension, UnitConversionTable, UnitSystem
+from bores.types import (
+    Number,
+    NumberArray,
+    OneDimension,
+    PhaseValues,
+    UnitConversionTable,
+    UnitSystem,
+)
 from bores.units import get_conversion_factors
-from bores.wells.state import ConnectionSample, PhaseValues
+from bores.wells.state import ConnectionSample
 
 if typing.TYPE_CHECKING:
     from bores.wells.hydraulics.tubing_fluids import TubingFluidTable

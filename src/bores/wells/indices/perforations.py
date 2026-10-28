@@ -257,7 +257,12 @@ def compute_local_vertical_extent_exact(
     return min(crossings), max(crossings)
 
 
-def resolve_known_perforations_indices(*, grid: Grid, well: Well) -> tuple[PerforationIndex, ...]:
+def resolve_known_perforations_indices(
+    *,
+    grid: Grid,
+    well: Well,
+    perforations: typing.Sequence[Perforation] | None = None,
+) -> tuple[PerforationIndex, ...]:
     """
     Resolve every open perforation on `well` straight to its own
     `Perforation.cell_index`, skipping geometric derivation entirely.
@@ -280,7 +285,9 @@ def resolve_known_perforations_indices(*, grid: Grid, well: Well) -> tuple[Perfo
         perforation must already have `cell_index` set; see
         `resolve_perforations_indices`/`resolve_md_perforations_indices`
         for a well without that.
-    :returns: Tuple of `PerforationIndex`, one per open perforation.
+    :param perforations: Perforations to resolve, open or shut. Defaults to
+        `well.open_perforations`.
+    :returns: Tuple of `PerforationIndex`, one per resolved perforation.
     """
     if grid.unit_system != well.unit_system:
         raise ValidationError(
@@ -289,7 +296,7 @@ def resolve_known_perforations_indices(*, grid: Grid, well: Well) -> tuple[Perfo
         )
 
     results: list[PerforationIndex] = []
-    for perforation in well.open_perforations:
+    for perforation in well.open_perforations if perforations is None else perforations:
         assert perforation.cell_index is not None
         assert perforation.top_depth is not None and perforation.bottom_depth is not None
         representative_depth = 0.5 * (perforation.top_depth + perforation.bottom_depth)
@@ -337,6 +344,7 @@ def resolve_perforations_indices(
     *,
     horizontal_tolerance: Number | None = None,
     intersection_method: GridIntersectionMethod = "aabb",
+    perforations: typing.Sequence[Perforation] | None = None,
 ) -> tuple[PerforationIndex, ...]:
     """
     Resolve every open `Perforation` on `well` to the `Grid` cell(s) it
@@ -356,6 +364,8 @@ def resolve_perforations_indices(
         length units. `None` derives a default from the grid's local cell
         size at `surface_location`.
     :param method: `"aabb"` (default) or `"exact"`.
+    :param perforations: Perforations to resolve, open or shut. Defaults to
+        `well.open_perforations`.
     :returns: Tuple of `PerforationIndex`, one per (perforation, cell) pair
         that overlaps. A single `Perforation` spanning multiple layers
         yields multiple `PerforationIndex` entries.
@@ -388,7 +398,7 @@ def resolve_perforations_indices(
     )
 
     results: list[PerforationIndex] = []
-    for perforation in well.open_perforations:
+    for perforation in well.open_perforations if perforations is None else perforations:
         assert perforation.top_depth is not None and perforation.bottom_depth is not None
         inclination = (
             0.0 if resolve_perforation_orientation(perforation) is Orientation.Z else math.pi / 2.0
@@ -584,6 +594,7 @@ def resolve_md_perforations_indices(
     well: Well,
     *,
     search_radius: Number | None = None,
+    perforations: typing.Sequence[Perforation] | None = None,
 ) -> tuple[PerforationIndex, ...]:
     """
     Resolve every open perforation on `well` to the `Grid` cell(s) its
@@ -602,6 +613,8 @@ def resolve_md_perforations_indices(
     :param search_radius: Forwarded to `locate_cell` for each leg's
         starting-cell search. `None` derives a default from the grid's
         local cell size at `well.surface_location`.
+    :param perforations: Perforations to resolve, open or shut. Defaults to
+        `well.open_perforations`.
     :returns: Tuple of `PerforationIndex`, one per (perforation, cell) the
         trajectory passes through in that perforation's MD range, in
         along-hole order. A perforation crossing several cells yields
@@ -631,7 +644,7 @@ def resolve_md_perforations_indices(
     )
 
     results: list[PerforationIndex] = []
-    for perforation in well.open_perforations:
+    for perforation in well.open_perforations if perforations is None else perforations:
         assert perforation.top_md is not None and perforation.bottom_md is not None
         top_md = perforation.top_md
         true_bottom_md = perforation.bottom_md

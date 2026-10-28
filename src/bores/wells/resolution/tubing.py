@@ -13,11 +13,10 @@ import typing
 import numpy as np
 
 from bores.errors import ValidationError
-from bores.types import Boolean, Integer, Number, NumberArray, OneDimension
+from bores.types import Boolean, Integer, Number, NumberArray, OneDimension, PhaseValues
 from bores.wells.base import WellType
 from bores.wells.compile import CompiledWellSystem, WellKind
 from bores.wells.hydraulics.base import (
-    PhaseValues,
     SurfaceSample,
     WellBoreModel,
     compute_hydrostatic_pressure,

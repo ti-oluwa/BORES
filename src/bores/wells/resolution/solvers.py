@@ -3,7 +3,7 @@
 import typing
 
 from bores.errors import ValidationError, WellConvergenceError
-from bores.types import Boolean, Integer, Number, NumberArray, OneDimension
+from bores.types import Boolean, Integer, Number, NumberArray, OneDimension, PhaseValues
 from bores.wells.compile import (
     FluidPhaseTag,
     InjectorControlModeTag,
@@ -35,7 +35,6 @@ from bores.wells.resolution.fixed_point import (
 )
 from bores.wells.resolution.spec import ConnectionPressureMode, WellControlSpec
 from bores.wells.resolution.tubing import WellTubing, compute_tubing_head_pressure
-from bores.wells.state import PhaseValues
 from bores.wells.workspace import (
     PerforationWorkspace,
     get_connection_rates,

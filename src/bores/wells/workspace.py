@@ -9,7 +9,7 @@ import numpy.typing as npt
 
 from bores.errors import ValidationError
 from bores.precision import get_dtype
-from bores.types import Boolean, IntArray, Integer, Number, NumberArray, OneDimension
+from bores.types import Boolean, IntArray, Integer, Number, NumberArray, OneDimension, PhaseValues
 from bores.utils import none_if_nan
 from bores.wells.base import Wells
 from bores.wells.compile import UNSET_INT, CompiledWellSystem
@@ -17,7 +17,6 @@ from bores.wells.decompile import decompile_limit, decompile_perforations, decom
 from bores.wells.hydraulics.base import ConnectionFluids
 from bores.wells.state import (
     PerforationState,
-    PhaseValues,
     WellState,
     WellStates,
 )
