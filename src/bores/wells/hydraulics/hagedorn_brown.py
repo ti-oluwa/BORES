@@ -38,6 +38,7 @@ from bores.wells.hydraulics.base import (
     require_static_column_density,
     require_two_phase_surface_properties,
     split_liquid_gas,
+    validate_tubing_fluid_options,
 )
 from bores.wells.hydraulics.tubing_fluids import (
     MARCH_ITERATIONS,
@@ -191,6 +192,8 @@ def hagedorn_brown_wellbore(
     turbulent_reynolds_limit: Number | None = None,
     friction_max_iterations: int | None = None,
     friction_tolerance: Number | None = None,
+    tubing_fluid_table: TubingFluidTable | None = None,
+    use_tubing_fluid_table: bool = False,
 ) -> WellBoreModel:
     """
     Builds a `WellBoreModel` wrapping a fully configured `HagedornBrownWellbore`.
@@ -218,8 +221,23 @@ def hagedorn_brown_wellbore(
         `c.COLEBROOK_MAX_ITERATIONS` if not given.
     :param friction_tolerance: Colebrook convergence tolerance.
         `c.COLEBROOK_TOLERANCE` if not given.
+    :param tubing_fluid_table: The fluid properties of the tubing against pressure, from
+        `build_tubing_fluid_table`. With it, the tubing head pressure is found by marching up the
+        tubing from surface-condition rates, with the fluids of each segment at its own pressure.
+        Without it, the tubing is taken as one segment with the fluids of a `SurfaceSample`. Must
+        be in `unit_system`.
+    :param use_tubing_fluid_table: Whether the pressure at each connection is also found with the
+        fluids read from `tubing_fluid_table` at the pressure in the wellbore, rather than at the
+        pressure of the connected cell. Needs `tubing_fluid_table`.
+    :raises ValidationError: If `tubing_fluid_table` is not in `unit_system`, or
+        `use_tubing_fluid_table` is set without a `tubing_fluid_table`.
     :returns: `WellBoreModel(name="hagedorn_brown", options=<HagedornBrownWellbore>)`.
     """
+    validate_tubing_fluid_options(
+        tubing_fluid_table=tubing_fluid_table,
+        use_tubing_fluid_table=use_tubing_fluid_table,
+        unit_system=unit_system,
+    )
     if unit_system != UnitSystem.FIELD:
         factors = get_conversion_factors(UnitSystem.FIELD, unit_system)
         length_factor = factors["length"]
@@ -271,7 +289,12 @@ def hagedorn_brown_wellbore(
         ),
         unit_system_tag=UNIT_SYSTEM_TAGS[unit_system],
     )
-    return WellBoreModel(name="hagedorn_brown", options=options)
+    return WellBoreModel(
+        name="hagedorn_brown",
+        options=options,
+        tubing_fluid_table=tubing_fluid_table,
+        use_tubing_fluid_table=use_tubing_fluid_table,
+    )
 
 
 @numba.njit(cache=True)
@@ -553,6 +576,14 @@ def compute_segment_drop(
             liquid_surface_tension=liquid_surface_tension,
             tubing_inner_diameter=model.tubing_inner_diameter,
             pressure=pressure,
+        )
+
+    if superficial_liquid_velocity > 0.0:
+        # The holdup correlation is fitted to charts and can leave the physical range when the
+        # dimensionless groups do. Liquid holdup is never below the no-slip holdup, and never
+        # above one.
+        in_situ_holdup = min(
+            max(in_situ_holdup, superficial_liquid_velocity / mixture_velocity), 1.0
         )
 
     in_situ_density = liquid_density * in_situ_holdup + gas_density * (1.0 - in_situ_holdup)
@@ -1148,6 +1179,7 @@ def walk_perforation_pressures_from_table(
         water_formation_volume_factors=connection_fluids.water_formation_volume_factors,
         gas_formation_volume_factors=connection_fluids.gas_formation_volume_factors,
         solution_gas_oil_ratios=connection_fluids.solution_gas_oil_ratios,
+        vaporized_oil_gas_ratios=connection_fluids.vaporized_oil_gas_ratios,
         stb_to_volume_factor=tubing_fluid_table.stb_to_volume_factor,
         is_injector=is_injector,
     )

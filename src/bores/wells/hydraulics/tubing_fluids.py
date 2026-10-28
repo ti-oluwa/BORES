@@ -45,15 +45,15 @@ __all__ = [
     "MARCH_ITERATIONS",
     "NoSlipMixture",
     "TubingFluidSample",
+    "TubingFluidState",
     "TubingFluidTable",
     "TwoPhaseFlow",
     "build_tubing_fluid_table",
     "compute_connection_surface_rates",
-    "compute_in_situ_phase_rates",
     "compute_no_slip_mixture",
-    "compute_produced_gas_oil_ratio",
     "compute_two_phase_flow",
     "evaluate_tubing_fluids",
+    "evaluate_tubing_state",
     "get_stb_to_volume_factor",
 ]
 
@@ -114,6 +114,12 @@ class TubingFluidTable(typing.NamedTuple):
     gas_liquid_surface_tensions: NumberArray[OneDimension]
     """Gas-liquid surface tension at each pressure."""
 
+    vaporized_oil_gas_ratios: NumberArray[OneDimension]
+    """
+    Saturated vaporized oil-gas ratio at each pressure, the oil the gas carries as vapor, in
+    stock-tank barrels per standard cubic foot. Zero for dry gas.
+    """
+
     oil_density_compressibilities: NumberArray[OneDimension]
     """
     How fast the density of oil rises with pressure above its bubble point, as a fraction of its
@@ -135,12 +141,18 @@ class TubingFluidTable(typing.NamedTuple):
     highest_bubble_point_pressure: Number
     """The highest bubble point pressure that the saturated oil columns reach."""
 
+    oil_surface_density: Number
+    """Density of the oil at surface conditions."""
+
+    gas_surface_density: Number
+    """Density of the gas at surface conditions."""
+
     stb_to_volume_factor: Number
     """
-    Volume of one stock-tank barrel of oil, in the unit of the surface rates. Solution gas-oil
-    ratios are per stock-tank barrel while rates are per volume, so a dissolved gas rate is the
-    ratio times the oil rate divided by this. One in the unit systems whose ratios are
-    volume per volume.
+    Volume of one stock-tank barrel of oil, in the volume unit of rates in the wellbore. Oil and
+    water rates at the surface are in stock-tank barrels per day, and the rates in the wellbore
+    are in volume per day, so a surface rate times a formation volume factor times this gives a
+    wellbore rate. One in the unit systems where a stock-tank volume is a plain volume.
     """
 
     segment_count: Integer
@@ -238,23 +250,6 @@ def find_bubble_point_pressure(
 
 
 @numba.njit(cache=True)
-def compute_produced_gas_oil_ratio(
-    surface_oil_rate: Number, surface_gas_rate: Number, stb_to_volume_factor: Number
-) -> Number:
-    """
-    The gas-oil ratio of what a well produces, in the units of a solution gas-oil ratio.
-
-    :param surface_oil_rate: Oil rate at surface conditions.
-    :param surface_gas_rate: Total gas rate at surface conditions, free and dissolved.
-    :param stb_to_volume_factor: `TubingFluidTable.stb_to_volume_factor`.
-    :returns: The ratio. Infinite if there is no oil.
-    """
-    if surface_oil_rate <= 0.0:
-        return math.inf
-    return surface_gas_rate * stb_to_volume_factor / surface_oil_rate
-
-
-@numba.njit(cache=True)
 def locate_in_axis(axis: NumberArray[OneDimension], x: Number) -> tuple[Integer, Number]:
     """
     Finds where `x` sits in an ascending axis.
@@ -299,8 +294,8 @@ def evaluate_tubing_fluids(
 
     :param table: The well's `TubingFluidTable`.
     :param pressure: Pressure to read the fluids at.
-    :param produced_gas_oil_ratio: The gas-oil ratio of what the well produces, from
-        `compute_produced_gas_oil_ratio`. Infinite or `NaN` for a stream with no oil.
+    :param produced_gas_oil_ratio: The gas the oil carries, per stock-tank barrel. Infinite or
+        `NaN` for oil that is saturated.
     :returns: The fluids at `pressure`.
     """
     lower, fraction = locate_in_axis(table.pressures, pressure)
@@ -367,33 +362,94 @@ def evaluate_tubing_fluids(
     )
 
 
+class TubingFluidState(typing.NamedTuple):
+    """What a well's surface rates make at one pressure in its tubing."""
+
+    sample: TubingFluidSample
+    """The properties of each phase at the pressure."""
+
+    phase_rates: PhaseValues
+    """Volume rate of the oil, water and free gas at the pressure, per day."""
+
+
 @numba.njit(cache=True)
-def compute_in_situ_phase_rates(
-    sample: TubingFluidSample,
-    stb_to_volume_factor: Number,
+def evaluate_tubing_state(
+    table: TubingFluidTable,
+    pressure: Number,
     surface_oil_rate: Number,
     surface_water_rate: Number,
     surface_gas_rate: Number,
-) -> PhaseValues:
+) -> TubingFluidState:
     """
-    Turns the surface rates of a well into the volume rate of each phase at the pressure of
-    `sample`.
+    Finds the phases a well's surface rates make at one pressure in its tubing, and their volumes.
 
-    The gas that flows free is the total surface gas less what the oil holds in solution.
+    The surface oil rate is the total, oil that flows as liquid plus the condensate the gas
+    carries, and the surface gas rate is the total as well, free gas plus gas dissolved in the
+    oil. At a pressure where both phases are present, the oil is saturated with gas and the gas
+    with oil. When the oil can hold all of the gas, there is no free gas and the oil is not
+    saturated. When the gas can hold all of the oil, there is no liquid oil and the gas is not
+    saturated.
 
-    :param sample: The fluids at the pressure of interest.
-    :param stb_to_volume_factor: `TubingFluidTable.stb_to_volume_factor`.
-    :param surface_oil_rate: Oil rate at surface conditions.
-    :param surface_water_rate: Water rate at surface conditions.
-    :param surface_gas_rate: Total gas rate at surface conditions, free and dissolved.
-    :returns: Oil, water and free gas volume rates at the pressure of `sample`.
+    :param table: The well's fluid properties against pressure.
+    :param pressure: Pressure in the tubing.
+    :param surface_oil_rate: Total oil rate at surface conditions, in stock-tank barrels per day.
+    :param surface_water_rate: Water rate at surface conditions, in stock-tank barrels per day.
+    :param surface_gas_rate: Total gas rate at surface conditions, in standard cubic feet per day.
+    :returns: The properties and volumes of the phases at `pressure`.
     """
-    dissolved_gas_rate = sample.dissolved_gas_oil_ratio * surface_oil_rate / stb_to_volume_factor
-    free_gas_rate = max(surface_gas_rate - dissolved_gas_rate, 0.0)
-    return PhaseValues(
-        oil=surface_oil_rate * sample.formation_volume_factors.oil,
-        water=surface_water_rate * sample.formation_volume_factors.water,
-        gas=free_gas_rate * sample.formation_volume_factors.gas,
+    lower, fraction = locate_in_axis(table.pressures, pressure)
+    saturated_solution_ratio = read_column(table.solution_gas_oil_ratios, lower, fraction)
+    saturated_vaporized_ratio = read_column(table.vaporized_oil_gas_ratios, lower, fraction)
+
+    free_gas_rate = (surface_gas_rate - saturated_solution_ratio * surface_oil_rate) / (
+        1.0 - saturated_solution_ratio * saturated_vaporized_ratio
+    )
+    liquid_oil_rate = surface_oil_rate - saturated_vaporized_ratio * free_gas_rate
+    gas_density_override = math.nan
+    if free_gas_rate < 0.0:
+        free_gas_rate = 0.0
+        liquid_oil_rate = surface_oil_rate
+        sample = evaluate_tubing_fluids(
+            table=table,
+            pressure=pressure,
+            produced_gas_oil_ratio=surface_gas_rate / surface_oil_rate,
+        )
+    else:
+        sample = evaluate_tubing_fluids(
+            table=table, pressure=pressure, produced_gas_oil_ratio=math.inf
+        )
+        if liquid_oil_rate < 0.0:
+            liquid_oil_rate = 0.0
+            free_gas_rate = surface_gas_rate
+            if surface_gas_rate > 0.0:
+                vaporized_ratio = surface_oil_rate / surface_gas_rate
+                gas_density_override = (
+                    table.gas_surface_density
+                    + vaporized_ratio * table.oil_surface_density * table.stb_to_volume_factor
+                ) / sample.formation_volume_factors.gas
+
+    if not math.isnan(gas_density_override):
+        sample = TubingFluidSample(
+            pressure=sample.pressure,
+            formation_volume_factors=sample.formation_volume_factors,
+            dissolved_gas_oil_ratio=sample.dissolved_gas_oil_ratio,
+            phase_densities=PhaseValues(
+                oil=sample.phase_densities.oil,
+                water=sample.phase_densities.water,
+                gas=gas_density_override,
+            ),
+            phase_viscosities=sample.phase_viscosities,
+            gas_liquid_surface_tension=sample.gas_liquid_surface_tension,
+        )
+    return TubingFluidState(
+        sample=sample,
+        phase_rates=PhaseValues(
+            oil=liquid_oil_rate * sample.formation_volume_factors.oil * table.stb_to_volume_factor,
+            water=surface_water_rate
+            * sample.formation_volume_factors.water
+            * table.stb_to_volume_factor,
+            gas=free_gas_rate * sample.formation_volume_factors.gas,
+        ),
     )
 
 
@@ -425,29 +481,22 @@ def compute_no_slip_mixture(
 
     :param table: The well's fluid properties against pressure.
     :param pressure: Pressure in the tubing.
-    :param surface_oil_rate: Oil rate at surface conditions.
-    :param surface_water_rate: Water rate at surface conditions.
-    :param surface_gas_rate: Total gas rate at surface conditions, free and dissolved.
+    :param surface_oil_rate: Total oil rate at surface conditions, in stock-tank barrels per day.
+    :param surface_water_rate: Water rate at surface conditions, in stock-tank barrels per day.
+    :param surface_gas_rate: Total gas rate at surface conditions, in standard cubic feet per day.
     :param tubing_inner_diameter: Tubing inner diameter.
     :param rate_time_factor: Converts a rate to a per-second rate.
     :returns: The mixture at `pressure`.
     """
-    sample = evaluate_tubing_fluids(
+    state = evaluate_tubing_state(
         table=table,
         pressure=pressure,
-        produced_gas_oil_ratio=compute_produced_gas_oil_ratio(
-            surface_oil_rate=surface_oil_rate,
-            surface_gas_rate=surface_gas_rate,
-            stb_to_volume_factor=table.stb_to_volume_factor,
-        ),
-    )
-    rates = compute_in_situ_phase_rates(
-        sample=sample,
-        stb_to_volume_factor=table.stb_to_volume_factor,
         surface_oil_rate=surface_oil_rate,
         surface_water_rate=surface_water_rate,
         surface_gas_rate=surface_gas_rate,
     )
+    sample = state.sample
+    rates = state.phase_rates
     return NoSlipMixture(
         density=compute_mixture_density(rates=rates, phase_densities=sample.phase_densities),
         viscosity=compute_mixture_viscosity(
@@ -501,29 +550,22 @@ def compute_two_phase_flow(
 
     :param table: The well's fluid properties against pressure.
     :param pressure: Pressure in the tubing.
-    :param surface_oil_rate: Oil rate at surface conditions.
-    :param surface_water_rate: Water rate at surface conditions.
-    :param surface_gas_rate: Total gas rate at surface conditions, free and dissolved.
+    :param surface_oil_rate: Total oil rate at surface conditions, in stock-tank barrels per day.
+    :param surface_water_rate: Water rate at surface conditions, in stock-tank barrels per day.
+    :param surface_gas_rate: Total gas rate at surface conditions, in standard cubic feet per day.
     :param tubing_inner_diameter: Tubing inner diameter.
     :param rate_time_factor: Converts a rate to a per-second rate.
     :returns: The liquid and gas at `pressure`.
     """
-    sample = evaluate_tubing_fluids(
+    state = evaluate_tubing_state(
         table=table,
         pressure=pressure,
-        produced_gas_oil_ratio=compute_produced_gas_oil_ratio(
-            surface_oil_rate=surface_oil_rate,
-            surface_gas_rate=surface_gas_rate,
-            stb_to_volume_factor=table.stb_to_volume_factor,
-        ),
-    )
-    rates = compute_in_situ_phase_rates(
-        sample=sample,
-        stb_to_volume_factor=table.stb_to_volume_factor,
         surface_oil_rate=surface_oil_rate,
         surface_water_rate=surface_water_rate,
         surface_gas_rate=surface_gas_rate,
     )
+    sample = state.sample
+    rates = state.phase_rates
     (
         liquid_rate,
         gas_rate,
@@ -564,14 +606,16 @@ def compute_connection_surface_rates(
     water_formation_volume_factors: NumberArray[OneDimension],
     gas_formation_volume_factors: NumberArray[OneDimension],
     solution_gas_oil_ratios: NumberArray[OneDimension],
+    vaporized_oil_gas_ratios: NumberArray[OneDimension],
     stb_to_volume_factor: Number,
     is_injector: Boolean,
 ) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension], NumberArray[OneDimension]]:
     """
     Turns each connection's rates at reservoir conditions into rates at surface conditions.
 
-    The gas rate of a producing connection is the total, the gas that flows free plus the gas that
-    its oil carries in solution.
+    The oil and gas rates of a producing connection are totals. The gas is the gas that flows
+    free plus the gas that its oil carries in solution, and the oil is the oil that flows as
+    liquid plus the condensate that its gas carries.
 
     :param connection_oil_rates: Each connection's oil rate at reservoir conditions.
     :param connection_water_rates: Each connection's water rate at reservoir conditions.
@@ -581,20 +625,30 @@ def compute_connection_surface_rates(
     :param gas_formation_volume_factors: Gas formation volume factor at each connection.
     :param solution_gas_oil_ratios: Gas the oil holds in solution at each connection, per
         stock-tank barrel.
+    :param vaporized_oil_gas_ratios: Oil the gas carries as vapor at each connection, in
+        stock-tank barrels per standard cubic foot.
     :param stb_to_volume_factor: `TubingFluidTable.stb_to_volume_factor`.
-    :param is_injector: Whether the well is an injector, whose oil carries no solution gas out.
-    :returns: Oil, water and total gas rate at surface conditions, one entry per connection.
+    :param is_injector: Whether the well is an injector, whose fluids carry nothing out.
+    :returns: Oil and water rates in stock-tank barrels per day and gas rate in standard cubic
+        feet per day, at surface conditions, one entry per connection.
     """
     count = connection_oil_rates.shape[0]
     oil = np.empty(count, dtype=connection_oil_rates.dtype)
     water = np.empty(count, dtype=connection_oil_rates.dtype)
     gas = np.empty(count, dtype=connection_oil_rates.dtype)
-    for idx in numba.prange(count):  # type: ignore
-        oil[idx] = connection_oil_rates[idx] / oil_formation_volume_factors[idx]
-        water[idx] = connection_water_rates[idx] / water_formation_volume_factors[idx]
-        gas[idx] = connection_gas_rates[idx] / gas_formation_volume_factors[idx]
+    for idx in range(count):
+        liquid_oil = connection_oil_rates[idx] / (
+            oil_formation_volume_factors[idx] * stb_to_volume_factor
+        )
+        free_gas = connection_gas_rates[idx] / gas_formation_volume_factors[idx]
+        oil[idx] = liquid_oil
+        gas[idx] = free_gas
+        water[idx] = connection_water_rates[idx] / (
+            water_formation_volume_factors[idx] * stb_to_volume_factor
+        )
         if not is_injector:
-            gas[idx] += oil[idx] * solution_gas_oil_ratios[idx] / stb_to_volume_factor
+            oil[idx] += free_gas * vaporized_oil_gas_ratios[idx]
+            gas[idx] += liquid_oil * solution_gas_oil_ratios[idx]
     return oil, water, gas  # type: ignore[return-value]
 
 
@@ -602,7 +656,7 @@ def get_pressure_axis(
     *, min_pressure: Number, max_pressure: Number, point_count: Integer, dtype: npt.DTypeLike
 ) -> NumberArray[OneDimension]:
     """
-    Builds an ascending pressure axis, closer together at min_pressure pressure where gas changes fastest.
+    Builds an ascending pressure axis, closer together at low pressure where gas changes fastest.
 
     :param min_pressure: Lowest pressure.
     :param max_pressure: Highest pressure.
@@ -633,8 +687,8 @@ def build_tubing_fluid_table(
     Builds the fluid table of a well's tubing from PVT tables.
 
     The table depends only on the PVT tables and the temperature, so one table serves a well for
-    a whole run. The whole tubing is taken to be at `temperature`. Gas is taken as dry gas, and
-    the oil above its highest bubble point pressure as incompressible.
+    a whole run. The whole tubing is taken to be at `temperature`. Gas that carries oil as vapor is
+    handled through the vaporized oil-gas ratio of the PVT tables.
 
     :param pvt_tables: PVT tables of the region around the well's reference depth, with oil,
         gas and water.
@@ -644,7 +698,7 @@ def build_tubing_fluid_table(
     :param pressure_range: Lowest and highest pressure of the table, in the unit system of the
         table. The range of the oil and gas PVT tables if not given. It should reach from
         surface pressure to the highest pressure at the bottom of the tubing.
-    :param point_count: Number of pressures. Closely spaced at min_pressure pressure.
+    :param point_count: Number of pressures. Closely spaced at low pressure.
     :param segment_count: Number of equal segments to march up the tubing in.
         `c.TUBING_SEGMENT_COUNT` if not given.
     :param salinity: Salinity of the water, in ppm. The default of the water table if not given.
@@ -732,12 +786,24 @@ def build_tubing_fluid_table(
         ),
         "gas_viscosities": read_table(gas_table, "viscosity", pressures, temperature),
     }
+    vaporized_ratios = gas_table.vaporized_oil_gas_ratio(pressures, temperature)
+    columns["vaporized_oil_gas_ratios"] = (
+        np.zeros_like(pressures)
+        if vaporized_ratios is None
+        else np.maximum(np.asarray(vaporized_ratios, dtype=np.float64), 0.0)
+    )
+    oil_surface_density = oil_table.stock_tank_oil_density
+    gas_surface_density = oil_table.stock_tank_gas_density
+    if oil_surface_density is None or gas_surface_density is None:
+        raise ValidationError(
+            "The PVT tables need stock-tank oil and gas densities to build tubing fluids."
+        )
     solution_ratios = np.maximum.accumulate(columns["solution_gas_oil_ratios"])
     columns["solution_gas_oil_ratios"] = solution_ratios
 
     # How the oil changes above its bubble point, averaged over a wide step above each node. The
     # undersaturated curves of the PVT tables are not straight just above the bubble point, so a
-    # narrow step would give a compressibility that is too max_pressure.
+    # narrow step would give a compressibility that is too high.
     step = 0.1 * (max_pressure - min_pressure)
     undersaturated_kwargs = {
         "solution_gor": solution_ratios,
@@ -778,6 +844,8 @@ def build_tubing_fluid_table(
             np.full(point_count, gas_liquid_surface_tension).astype(resolved_dtype),
         ),
         stb_to_volume_factor=get_stb_to_volume_factor(target),
+        oil_surface_density=oil_surface_density,
+        gas_surface_density=gas_surface_density,
         highest_bubble_point_pressure=min(highest_bubble_point, max_pressure),
         segment_count=segment_count if segment_count is not None else int(c.TUBING_SEGMENT_COUNT),
         unit_system_tag=UNIT_SYSTEM_TAGS[target],

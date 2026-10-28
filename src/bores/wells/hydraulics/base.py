@@ -127,7 +127,7 @@ class WellBoreModel(typing.NamedTuple):
     fluid properties of a `SurfaceSample`.
     """
 
-    tubing_fluids_in_walk: bool = False
+    use_tubing_fluid_table: bool = False
     """
     Whether the pressure at each connection is also found with the fluids read from
     `tubing_fluid_table` at the pressure in the wellbore, rather than at the pressure of the connected
@@ -550,6 +550,33 @@ class ConnectionFluids(typing.NamedTuple):
     solution_gas_oil_ratios: NumberArray[OneDimension]
     """Gas the oil holds in solution at each connection, per stock-tank barrel of oil."""
 
+    vaporized_oil_gas_ratios: NumberArray[OneDimension]
+    """Oil the gas carries as vapor at each connection, in stock-tank barrels per standard cubic foot."""
+
+
+def validate_tubing_fluid_options(
+    *,
+    tubing_fluid_table: "TubingFluidTable | None",
+    use_tubing_fluid_table: bool,
+    unit_system: UnitSystem,
+) -> None:
+    """
+    Checks the tubing fluid options a wellbore model is built with.
+
+    :param tubing_fluid_table: The tubing fluid table, if the model has one.
+    :param use_tubing_fluid_table: Whether the table is also used for the connection pressures.
+    :param unit_system: The unit system of the model.
+    :raises ValidationError: If the table is in another unit system than the model, or the
+        connection pressures are to use a table the model does not have.
+    """
+    if use_tubing_fluid_table and tubing_fluid_table is None:
+        raise ValidationError("`use_tubing_fluid_table` needs a `tubing_fluid_table`.")
+    if tubing_fluid_table is not None and tubing_fluid_table.unit_system != unit_system:
+        raise ValidationError(
+            f"`tubing_fluid_table` is in {tubing_fluid_table.unit_system.value} units, but the "
+            f"model is in {unit_system.value} units."
+        )
+
 
 class ConnectionWalk(typing.NamedTuple):
     """
@@ -620,6 +647,7 @@ def compile_connection_fluids(
         water_formation_volume_factors=gather(lambda sample: sample.phase_fvfs.water),
         gas_formation_volume_factors=gather(lambda sample: sample.phase_fvfs.gas),
         solution_gas_oil_ratios=gather(lambda sample: sample.solution_gas_oil_ratio),
+        vaporized_oil_gas_ratios=gather(lambda sample: sample.vaporized_oil_gas_ratio),
     )
 
 

@@ -61,6 +61,12 @@ class ConnectionSample(typing.NamedTuple):
     from a table of tubing fluids. Zero if the oil is taken to hold no gas.
     """
 
+    vaporized_oil_gas_ratio: Number = 0.0
+    """
+    Oil the gas at this connected cell carries as vapor, in stock-tank barrels per standard cubic
+    foot of gas. Zero for dry gas.
+    """
+
 
 @attrs.frozen(kw_only=True, slots=True)
 class PerforationState(StoreSerializable):

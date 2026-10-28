@@ -8,7 +8,7 @@ import typing
 import numba
 import numpy as np
 
-from bores.types import Boolean, Integer, Number
+from bores.types import Boolean, Integer, Number, NumberArray, OneDimension
 from bores.wells.hydraulics.beggs_and_brill import (
     BeggsAndBrillWellbore,
 )
@@ -162,6 +162,8 @@ def accumulate_rates(
         water_formation_volume_factors=workspace.connection_fluids.water_formation_volume_factors,
         gas_formation_volume_factors=workspace.connection_fluids.gas_formation_volume_factors,
         dissolved_gas_ratios=workspace.dissolved_gas_ratios,
+        vaporized_oil_ratios=workspace.vaporized_oil_ratios,
+        stb_to_volume_factor=workspace.stb_to_volume_factor,
         relevant_oil=count_oil,
         relevant_water=count_water,
         relevant_gas=count_gas,
@@ -179,6 +181,46 @@ def accumulate_rates(
         surface_water_rate if relevant_water else 0.0,
         surface_gas_rate if relevant_gas else 0.0,
     )
+
+
+@numba.njit(cache=True)
+def adjust_relaxation(
+    relaxation: Number, signed_change: Number, previous_signed_change: Number
+) -> Number:
+    """
+    Lowers the relaxation of the connection pressures when the total rate swings back and forth
+    without settling.
+
+    A well flowing at a very low pressure has gas that expands so much that the pressure it
+    needs and the rate it flows at push each other past their balance on every iteration. Taking
+    only part of each new pressure damps that, as it would in any fixed-point iteration.
+
+    :param relaxation: Share of each new pressure that is taken, from `0.05` to one.
+    :param signed_change: Change of the total rate in this iteration.
+    :param previous_signed_change: Change of the total rate in the iteration before.
+    :returns: The relaxation to use in the next iteration.
+    """
+    swung_back = signed_change * previous_signed_change < 0.0
+    if swung_back and abs(signed_change) >= 0.5 * abs(previous_signed_change):
+        return max(0.05, 0.5 * relaxation)
+    return relaxation
+
+
+@numba.njit(cache=True)
+def relax_pressures(
+    previous: NumberArray[OneDimension],
+    pressures: NumberArray[OneDimension],
+    relaxation: Number,
+) -> None:
+    """
+    Replaces `pressures` with the share `relaxation` of the way from `previous` to it.
+
+    :param previous: Pressures before this iteration.
+    :param pressures: Pressures after this iteration, replaced in place.
+    :param relaxation: Share of the new pressures to take.
+    """
+    for idx in range(pressures.shape[0]):
+        pressures[idx] = previous[idx] + relaxation * (pressures[idx] - previous[idx])
 
 
 @numba.njit(cache=True)
@@ -261,6 +303,8 @@ def solve_homogeneous(
     surface_water_rate = 0.0
     surface_gas_rate = 0.0
     converged = False
+    relaxation = 1.0
+    previous_signed_change = 0.0
     for _ in range(max_iterations):
         (
             oil_rate,
@@ -278,6 +322,9 @@ def solve_homogeneous(
             radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
+        previous_pressures = workspace.connection_pressures
+        if relaxation < 1.0:
+            previous_pressures = workspace.connection_pressures.copy()
         if tubing_fluid_table is None:
             walk_homogeneous(
                 model=model,
@@ -312,10 +359,23 @@ def solve_homogeneous(
                 pressures=workspace.connection_pressures,
                 tubing_fluid_table=tubing_fluid_table,
             )
+        if relaxation < 1.0:
+            relax_pressures(
+                previous=previous_pressures,
+                pressures=workspace.connection_pressures,
+                relaxation=relaxation,
+            )
+        signed_change = new_total_rate - total_rate
         if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
             converged = True
             break
+        relaxation = adjust_relaxation(
+            relaxation=relaxation,
+            signed_change=signed_change,
+            previous_signed_change=previous_signed_change,
+        )
+        previous_signed_change = signed_change
         previous_total_rate = total_rate
         total_rate = new_total_rate
 
@@ -397,6 +457,8 @@ def solve_beggs_and_brill(
     surface_water_rate = 0.0
     surface_gas_rate = 0.0
     converged = False
+    relaxation = 1.0
+    previous_signed_change = 0.0
     for _ in range(max_iterations):
         (
             oil_rate,
@@ -414,6 +476,9 @@ def solve_beggs_and_brill(
             radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
+        previous_pressures = workspace.connection_pressures
+        if relaxation < 1.0:
+            previous_pressures = workspace.connection_pressures.copy()
         if tubing_fluid_table is None:
             walk_beggs_and_brill(
                 model=model,
@@ -448,10 +513,23 @@ def solve_beggs_and_brill(
                 pressures=workspace.connection_pressures,
                 tubing_fluid_table=tubing_fluid_table,
             )
+        if relaxation < 1.0:
+            relax_pressures(
+                previous=previous_pressures,
+                pressures=workspace.connection_pressures,
+                relaxation=relaxation,
+            )
+        signed_change = new_total_rate - total_rate
         if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
             converged = True
             break
+        relaxation = adjust_relaxation(
+            relaxation=relaxation,
+            signed_change=signed_change,
+            previous_signed_change=previous_signed_change,
+        )
+        previous_signed_change = signed_change
         previous_total_rate = total_rate
         total_rate = new_total_rate
 
@@ -533,6 +611,8 @@ def solve_hagedorn_brown(
     surface_water_rate = 0.0
     surface_gas_rate = 0.0
     converged = False
+    relaxation = 1.0
+    previous_signed_change = 0.0
     for _ in range(max_iterations):
         (
             oil_rate,
@@ -550,6 +630,9 @@ def solve_hagedorn_brown(
             radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
+        previous_pressures = workspace.connection_pressures
+        if relaxation < 1.0:
+            previous_pressures = workspace.connection_pressures.copy()
         if tubing_fluid_table is None:
             walk_hagedorn_brown(
                 model=model,
@@ -584,10 +667,23 @@ def solve_hagedorn_brown(
                 pressures=workspace.connection_pressures,
                 tubing_fluid_table=tubing_fluid_table,
             )
+        if relaxation < 1.0:
+            relax_pressures(
+                previous=previous_pressures,
+                pressures=workspace.connection_pressures,
+                relaxation=relaxation,
+            )
+        signed_change = new_total_rate - total_rate
         if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
             converged = True
             break
+        relaxation = adjust_relaxation(
+            relaxation=relaxation,
+            signed_change=signed_change,
+            previous_signed_change=previous_signed_change,
+        )
+        previous_signed_change = signed_change
         previous_total_rate = total_rate
         total_rate = new_total_rate
 
@@ -669,6 +765,8 @@ def solve_gray(
     surface_water_rate = 0.0
     surface_gas_rate = 0.0
     converged = False
+    relaxation = 1.0
+    previous_signed_change = 0.0
     for _ in range(max_iterations):
         (
             oil_rate,
@@ -686,6 +784,9 @@ def solve_gray(
             radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
+        previous_pressures = workspace.connection_pressures
+        if relaxation < 1.0:
+            previous_pressures = workspace.connection_pressures.copy()
         if tubing_fluid_table is None:
             walk_gray(
                 model=model,
@@ -720,10 +821,23 @@ def solve_gray(
                 pressures=workspace.connection_pressures,
                 tubing_fluid_table=tubing_fluid_table,
             )
+        if relaxation < 1.0:
+            relax_pressures(
+                previous=previous_pressures,
+                pressures=workspace.connection_pressures,
+                relaxation=relaxation,
+            )
+        signed_change = new_total_rate - total_rate
         if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
             converged = True
             break
+        relaxation = adjust_relaxation(
+            relaxation=relaxation,
+            signed_change=signed_change,
+            previous_signed_change=previous_signed_change,
+        )
+        previous_signed_change = signed_change
         previous_total_rate = total_rate
         total_rate = new_total_rate
 
@@ -805,6 +919,8 @@ def solve_woldesemayat_ghajar(
     surface_water_rate = 0.0
     surface_gas_rate = 0.0
     converged = False
+    relaxation = 1.0
+    previous_signed_change = 0.0
     for _ in range(max_iterations):
         (
             oil_rate,
@@ -822,6 +938,9 @@ def solve_woldesemayat_ghajar(
             radial_flow_constant=radial_flow_constant,
         )
         new_total_rate = oil_rate + water_rate + gas_rate
+        previous_pressures = workspace.connection_pressures
+        if relaxation < 1.0:
+            previous_pressures = workspace.connection_pressures.copy()
         if tubing_fluid_table is None:
             walk_woldesemayat_ghajar(
                 model=model,
@@ -856,10 +975,23 @@ def solve_woldesemayat_ghajar(
                 pressures=workspace.connection_pressures,
                 tubing_fluid_table=tubing_fluid_table,
             )
+        if relaxation < 1.0:
+            relax_pressures(
+                previous=previous_pressures,
+                pressures=workspace.connection_pressures,
+                relaxation=relaxation,
+            )
+        signed_change = new_total_rate - total_rate
         if has_settled(new_total_rate=new_total_rate, total_rate=total_rate, tolerance=tolerance):
             total_rate = new_total_rate
             converged = True
             break
+        relaxation = adjust_relaxation(
+            relaxation=relaxation,
+            signed_change=signed_change,
+            previous_signed_change=previous_signed_change,
+        )
+        previous_signed_change = signed_change
         previous_total_rate = total_rate
         total_rate = new_total_rate
 

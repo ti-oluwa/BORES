@@ -1848,15 +1848,14 @@ def test_a_horizontal_well_has_friction_pressure_loss_along_its_length():
     assert np.all(np.diff(pressures) > 0.0)
 
 
-def test_a_well_whose_rates_never_settle_raises_instead_of_returning_a_state():
-    from bores.errors import SolverError, WellConvergenceError
-
+def test_a_well_whose_rates_swing_between_two_states_is_relaxed_to_one():
     # A mobility of 1 gives millions of rb/d; friction at that rate takes the connection
-    # pressures past reservoir pressure, so the drawdown and the rate flip between two states.
-    with pytest.raises(WellConvergenceError, match="Well 'H1'") as raised:
-        resolve_horizontal_producer(bhp=1000.0, mobility=1.0)
-    assert "did not converge in 20 iterations" in str(raised.value)
-    assert isinstance(raised.value, SolverError)
+    # pressures past reservoir pressure, so without relaxation the drawdown and the rate flip
+    # between two states and never settle. Taking part of each new pressure settles them.
+    _, workspace = resolve_horizontal_producer(bhp=1000.0, mobility=1.0)
+    assert np.all(np.isfinite(workspace.connection_pressures))
+    assert np.all(np.isfinite(workspace.connection_oil_rates))
+    assert np.all(np.diff(workspace.connection_pressures) > 0.0)
 
 
 def test_the_iteration_limit_is_enforced():

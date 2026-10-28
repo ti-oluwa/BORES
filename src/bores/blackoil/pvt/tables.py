@@ -1289,6 +1289,16 @@ class PVTTable(StoreSerializable):
         return typing.cast(FluidPhase, self._phase)
 
     @property
+    def stock_tank_oil_density(self) -> Number | None:
+        """Density of the oil at stock-tank conditions, if this table was given it."""
+        return self._stock_tank_oil_density
+
+    @property
+    def stock_tank_gas_density(self) -> Number | None:
+        """Density of the gas at standard conditions, if this table was given it."""
+        return self._stock_tank_gas_density
+
+    @property
     def unit_system(self) -> UnitSystem:
         """Unit system of the underlying table data."""
         return typing.cast(UnitSystem, self._data.unit_system)

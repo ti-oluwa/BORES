@@ -48,6 +48,7 @@ from bores.wells.hydraulics.dispatch import (
     compute_tubing_head_pressure,
     compute_tubing_head_pressure_from_table,
 )
+from bores.wells.hydraulics.tubing_fluids import get_stb_to_volume_factor
 
 __all__ = [
     "VFPData",
@@ -1287,17 +1288,21 @@ def compute_reservoir_rates(
     *,
     surface_rates: PhaseValues,
     formation_volume_factors: PhaseValues,
+    stb_to_volume_factor: Number = 1.0,
 ) -> PhaseValues:
     """
     Reservoir-condition phase rates from surface-condition ones.
 
-    :param surface_rates: Surface-condition oil, water and gas rates.
+    :param surface_rates: Surface-condition oil and water rates in stock-tank barrels per day,
+        and gas rate in standard cubic feet per day.
     :param formation_volume_factors: Oil, water and gas formation volume factors.
+    :param stb_to_volume_factor: Volume of one stock-tank barrel in the volume unit of
+        reservoir rates.
     :returns: Reservoir-condition phase rates.
     """
     return PhaseValues(
-        oil=surface_rates.oil * formation_volume_factors.oil,
-        water=surface_rates.water * formation_volume_factors.water,
+        oil=surface_rates.oil * formation_volume_factors.oil * stb_to_volume_factor,
+        water=surface_rates.water * formation_volume_factors.water * stb_to_volume_factor,
         gas=surface_rates.gas * formation_volume_factors.gas,
     )
 
@@ -1491,6 +1496,7 @@ def as_vfp_table(
                 rates = compute_reservoir_rates(
                     surface_rates=surface_rates,
                     formation_volume_factors=resolved_formation_volume_factors,
+                    stb_to_volume_factor=get_stb_to_volume_factor(unit_system),
                 )
                 for j, thp in enumerate(thps):
                     bhps[i, j, k, m, 0] = bisect_bhp_for_thp(

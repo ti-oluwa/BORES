@@ -178,7 +178,7 @@ def get_fixed_point_setup(*, tubing: WellTubing, spec: WellControlSpec) -> Fixed
             solve=solve,
             bisect=bisect,
             tubing_fluid_table=wellbore.tubing_fluid_table
-            if wellbore.tubing_fluids_in_walk
+            if wellbore.use_tubing_fluid_table
             else None,
         )
     if pressure_mode == ConnectionPressureMode.HYDRAULIC:

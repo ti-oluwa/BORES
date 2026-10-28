@@ -115,9 +115,21 @@ class PerforationWorkspace(typing.NamedTuple):
 
     dissolved_gas_ratios: NumberArray[OneDimension]
     """
-    Gas each connection's oil holds in solution, per volume of oil at surface conditions, in the
-    volume unit that surface oil rates are in. Multiplying a connection's surface oil rate by it
-    gives the gas that oil brings to the surface in solution.
+    Gas each connection's oil holds in solution, per stock-tank barrel of oil. Multiplying a
+    connection's surface oil rate by it gives the gas that oil brings to the surface in solution.
+    """
+
+    vaporized_oil_ratios: NumberArray[OneDimension]
+    """
+    Oil each connection's gas carries as vapor, in stock-tank barrels per standard cubic foot of
+    gas. Multiplying a connection's free gas rate at the surface by it gives the oil that gas
+    brings to the surface as condensate.
+    """
+
+    stb_to_volume_factor: Number
+    """
+    Volume of one stock-tank barrel in the volume unit of reservoir rates. Reservoir rates are
+    in volume per day, while oil and water rates at the surface are in stock-tank barrels per day.
     """
 
 
@@ -150,9 +162,8 @@ def build_perforation_workspace(
         `NaN` (the default) if this well has no non-Darcy correction to apply.
     :param d_factor: This well's non-Darcy flow coefficient. `NaN`
         (the default) disables the correction.
-    :param stb_to_volume_factor: Volume of one stock-tank barrel in the volume unit of surface
-        rates, which turns solution gas-oil ratios into gas per volume of surface oil. One
-        (the default) if the ratios are already per volume of surface oil.
+    :param stb_to_volume_factor: Volume of one stock-tank barrel in the volume unit of reservoir
+        rates. One (the default) in the unit systems where a stock-tank volume is a plain volume.
     :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
     :returns: `PerforationWorkspace` for this well.
     """
@@ -208,12 +219,9 @@ def build_perforation_workspace(
         connection_gas_rates=typing.cast(
             NumberArray[OneDimension], np.zeros(n, dtype=resolved_dtype)
         ),
-        dissolved_gas_ratios=typing.cast(
-            NumberArray[OneDimension],
-            (resolved_fluids.solution_gas_oil_ratios / stb_to_volume_factor).astype(
-                resolved_dtype, copy=False
-            ),
-        ),
+        dissolved_gas_ratios=resolved_fluids.solution_gas_oil_ratios,
+        vaporized_oil_ratios=resolved_fluids.vaporized_oil_gas_ratios,
+        stb_to_volume_factor=stb_to_volume_factor,
     )
 
 
@@ -498,6 +506,8 @@ def accumulate_rates(
     water_formation_volume_factors: NumberArray[OneDimension],
     gas_formation_volume_factors: NumberArray[OneDimension],
     dissolved_gas_ratios: NumberArray[OneDimension],
+    vaporized_oil_ratios: NumberArray[OneDimension],
+    stb_to_volume_factor: Number,
     relevant_oil: Boolean,
     relevant_water: Boolean,
     relevant_gas: Boolean,
@@ -527,6 +537,8 @@ def accumulate_rates(
     :param water_formation_volume_factors: `PerforationWorkspace.water_formation_volume_factors`.
     :param gas_formation_volume_factors: `PerforationWorkspace.gas_formation_volume_factors`.
     :param dissolved_gas_ratios: `PerforationWorkspace.dissolved_gas_ratios`.
+    :param vaporized_oil_ratios: `PerforationWorkspace.vaporized_oil_ratios`.
+    :param stb_to_volume_factor: `PerforationWorkspace.stb_to_volume_factor`.
     :param relevant_oil: Whether oil counts toward the primary target.
     :param relevant_water: Whether water counts toward the primary target.
     :param relevant_gas: Whether gas counts toward the primary target.
@@ -541,11 +553,13 @@ def accumulate_rates(
     :param out_connection_water_rates: Water analogue of `out_connection_oil_rates`.
     :param out_connection_gas_rates: Gas analogue of `out_connection_oil_rates`.
     :returns: `(oil_rate, water_rate, gas_rate, surface_oil_rate,
-        surface_water_rate, surface_gas_rate)` - reservoir- and
-        surface-condition well totals. A non-relevant phase's rate is `0.0`. The surface gas rate
-        of a producer is the total at the surface: the gas that flows free at the connections plus
-        the gas that its oil carries in solution. The reservoir-condition gas rate is the free
-        gas only.
+        surface_water_rate, surface_gas_rate)` - reservoir- and surface-condition well totals. A
+        non-relevant phase's rate is `0.0`. Surface oil and water rates are in stock-tank barrels
+        per day and the surface gas rate in standard cubic feet per day. A producer's surface gas
+        rate is the total, the gas that flows free at the connections plus the gas its oil carries
+        in solution, and its surface oil rate is the total as well, the oil that flows as liquid
+        plus the condensate its gas carries. The reservoir-condition rates are those of the
+        phases that flow at the connections.
     """
     # TODO: We can actually use prange here. Will it benefit us. If it will do it.
     # We may need to change the way we accumulate total rates. May be switch to using an array?
@@ -556,6 +570,8 @@ def accumulate_rates(
     surface_water_rate = 0.0
     surface_gas_rate = 0.0
 
+    carries_dissolved_gas = relevant_gas and not is_injector
+    carries_condensate = relevant_oil and not is_injector
     for idx in range(well_indices.shape[0]):
         drawdown = compute_perforation_drawdown(
             reservoir_pressure=reservoir_pressures[idx],
@@ -564,32 +580,39 @@ def accumulate_rates(
         )
         well_index = well_indices[idx]
 
-        if relevant_oil:
+        out_connection_oil_rates[idx] = 0.0
+        if relevant_oil or carries_dissolved_gas:
             contribution = radial_flow_constant * well_index * oil_mobilities[idx] * drawdown
-            oil_rate += contribution
-            surface_oil_contribution = contribution / oil_formation_volume_factors[idx]
-            surface_oil_rate += surface_oil_contribution
-            if not is_injector:
+            surface_oil_contribution = contribution / (
+                oil_formation_volume_factors[idx] * stb_to_volume_factor
+            )
+            if relevant_oil:
+                oil_rate += contribution
+                surface_oil_rate += surface_oil_contribution
+                out_connection_oil_rates[idx] = contribution
+            if carries_dissolved_gas:
                 surface_gas_rate += surface_oil_contribution * dissolved_gas_ratios[idx]
-            out_connection_oil_rates[idx] = contribution
-        else:
-            out_connection_oil_rates[idx] = 0.0
 
         if relevant_water:
             contribution = radial_flow_constant * well_index * water_mobilities[idx] * drawdown
             water_rate += contribution
-            surface_water_rate += contribution / water_formation_volume_factors[idx]
+            surface_water_rate += contribution / (
+                water_formation_volume_factors[idx] * stb_to_volume_factor
+            )
             out_connection_water_rates[idx] = contribution
         else:
             out_connection_water_rates[idx] = 0.0
 
-        if relevant_gas:
+        out_connection_gas_rates[idx] = 0.0
+        if relevant_gas or carries_condensate:
             contribution = radial_flow_constant * well_index * gas_mobilities[idx] * drawdown
-            gas_rate += contribution
-            surface_gas_rate += contribution / gas_formation_volume_factors[idx]
-            out_connection_gas_rates[idx] = contribution
-        else:
-            out_connection_gas_rates[idx] = 0.0
+            surface_free_gas_contribution = contribution / gas_formation_volume_factors[idx]
+            if relevant_gas:
+                gas_rate += contribution
+                surface_gas_rate += surface_free_gas_contribution
+                out_connection_gas_rates[idx] = contribution
+            if carries_condensate:
+                surface_oil_rate += surface_free_gas_contribution * vaporized_oil_ratios[idx]
 
     return (
         oil_rate,
