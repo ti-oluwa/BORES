@@ -196,6 +196,7 @@ def build_oil_pvt_data(
     assert gas_gravity is not None
 
     pressure_table, temperature_table = np.meshgrid(pressures, temperatures, indexing="ij")
+    gas_gravity_table = np.full((n_p, n_t), gas_gravity, dtype=dtype)
 
     # Gas FVF grid for compressibility calculation
     gas_fvf_table: NumberArray[TwoDimensions] | None = None
@@ -217,7 +218,7 @@ def build_oil_pvt_data(
             correlations.compute_gas_compressibility_factor(
                 pressure=pressure_table,
                 temperature=temperature_table,
-                gas_gravity=np.full((n_p, n_t), gas_gravity, dtype=dtype),
+                gas_gravity=gas_gravity_table,
             ),
         )
         gas_fvf_table = typing.cast(
@@ -243,19 +244,20 @@ def build_oil_pvt_data(
             correlations.compute_oil_api_gravity(np.full(n_t, oil_specific_gravity, dtype=dtype)),
         )
         if solution_gas_to_oil_ratios is not None:
-            n_rs = len(solution_gas_to_oil_ratios)
-            bubble_point_pressures = np.zeros((n_rs, n_t), dtype=dtype)
-            for i, solution_gor in enumerate(solution_gas_to_oil_ratios):
-                bubble_point_pressures[i, :] = correlations.compute_oil_bubble_point_pressure(
-                    gas_gravity=gas_gravity_1d,
-                    oil_api_gravity=oil_api_gravity_1d,
-                    temperature=temperatures,
-                    gas_to_oil_ratio=np.full(n_t, solution_gor, dtype=dtype),
-                )
-        else:
-            oil_api_gravity = typing.cast(
-                Number, correlations.compute_oil_api_gravity(oil_specific_gravity)
+            gas_to_oil_ratios = np.asarray(solution_gas_to_oil_ratios, dtype=dtype)
+            table_shape = (len(gas_to_oil_ratios), n_t)
+            bubble_point_pressures = np.asarray(
+                correlations.compute_oil_bubble_point_pressure(
+                    gas_gravity=np.broadcast_to(gas_gravity_1d, table_shape),  # type: ignore[arg-type]
+                    oil_api_gravity=np.broadcast_to(oil_api_gravity_1d, table_shape),  # type: ignore[arg-type]
+                    temperature=np.broadcast_to(temperatures, table_shape),  # type: ignore[arg-type]
+                    gas_to_oil_ratio=np.broadcast_to(
+                        gas_to_oil_ratios[:, np.newaxis], table_shape
+                    ),
+                ),
+                dtype=dtype,
             )
+        else:
             if estimated_solution_gor is None:
                 estimated_solution_gor = np.clip(
                     10 ** (0.0125 * oil_api_gravity) * 50.0, 50.0, 2000.0
@@ -278,9 +280,10 @@ def build_oil_pvt_data(
             )
 
     # 2-D Pb grid for property table construction
-    if bubble_point_pressures.ndim == 1:
+    if bubble_point_pressures.ndim == 1:  # type: ignore[union-attr]
         bubble_point_pressure_table = np.broadcast_to(
-            bubble_point_pressures[np.newaxis, :], (n_p, n_t)
+            bubble_point_pressures[np.newaxis, :],  # type: ignore[arg-type]
+            (n_p, n_t),
         ).copy()
     else:
         if solution_gas_to_oil_ratio_table is None:
@@ -290,7 +293,7 @@ def build_oil_pvt_data(
                     pressure=pressure_table,
                     temperature=temperature_table,
                     oil_api_gravity=oil_api_gravity_table,
-                    gas_gravity=np.full((n_p, n_t), gas_gravity, dtype=dtype),
+                    gas_gravity=gas_gravity_table,
                 ),
             )
         if solution_gas_to_oil_ratios is None:
@@ -300,7 +303,7 @@ def build_oil_pvt_data(
         pb_interp = RectBivariateSpline(
             x=solution_gas_to_oil_ratios,
             y=temperatures,
-            z=bubble_point_pressures,
+            z=bubble_point_pressures,  # type: ignore[arg-type]
             kx=1,
             ky=1,
         )
@@ -312,8 +315,6 @@ def build_oil_pvt_data(
             .reshape(n_p, n_t)
             .astype(dtype)
         )
-
-    gas_gravity_table = np.full((n_p, n_t), gas_gravity, dtype=dtype)
 
     if solution_gas_to_oil_ratio_table is None:
         solution_gas_to_oil_ratio_table = typing.cast(

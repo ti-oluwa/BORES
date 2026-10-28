@@ -12,6 +12,7 @@ import functools
 import typing
 import warnings
 
+import numba
 import numpy as np
 import numpy.typing as npt
 
@@ -48,6 +49,7 @@ __all__ = [
     "initialize_equilibrium_arrays",
     "initialize_reservoir_state",
     "initialize_water_gas_state",
+    "invert_capillary_pressure_curves",
 ]
 
 N_SATURATION_SAMPLES = 100
@@ -285,6 +287,88 @@ class CapillarySaturations(typing.NamedTuple):
     """
 
 
+@numba.njit(cache=True)
+def invert_curves(
+    saturation_grid,
+    capillary_pressure_grid,
+    curve_index,
+    target_capillary_pressure,
+    pressure_falls_when_flat,
+    prefer_highest_pressure_end,
+    saturation_out,
+    capillary_pressure_out,
+):
+    """
+    Finds, for every target, the saturation at which its curve reaches that target.
+
+    Curve `curve_index[cell]` of the two grids is the curve of `cell`. The rows are read in
+    place, in the direction in which their pressure rises, so no oriented copy of a row is made.
+    The results are written to `saturation_out` and `capillary_pressure_out`.
+    """
+    sample_count = capillary_pressure_grid.shape[1]
+    last = sample_count - 1
+    for cell in range(target_capillary_pressure.shape[0]):
+        row = curve_index[cell]
+        target = target_capillary_pressure[cell]
+
+        pressure_change = capillary_pressure_grid[row, last] - capillary_pressure_grid[row, 0]
+        if pressure_change == 0:
+            descending = pressure_falls_when_flat
+        else:
+            descending = pressure_change < 0
+        # Sample positions of the lowest- and highest-pressure end of the curve
+        if descending:
+            lowest_position = last
+            highest_position = 0
+        else:
+            lowest_position = 0
+            highest_position = last
+        lowest_pressure = capillary_pressure_grid[row, lowest_position]
+        highest_pressure = capillary_pressure_grid[row, highest_position]
+
+        samples_below_target = 0
+        for sample in range(sample_count):
+            if capillary_pressure_grid[row, sample] < target:
+                samples_below_target += 1
+        upper = min(max(samples_below_target, 1), last)
+        lower = upper - 1
+        if descending:
+            lower_position = last - lower
+            upper_position = last - upper
+        else:
+            lower_position = lower
+            upper_position = upper
+
+        pressure_lower = capillary_pressure_grid[row, lower_position]
+        pressure_span = capillary_pressure_grid[row, upper_position] - pressure_lower
+        if pressure_span > 0.0:
+            fraction = min(max((target - pressure_lower) / pressure_span, 0.0), 1.0)
+        else:
+            fraction = 1.0
+        saturation_lower = saturation_grid[row, lower_position]
+        saturation = saturation_lower + fraction * (
+            saturation_grid[row, upper_position] - saturation_lower
+        )
+
+        at_lowest_end = target <= lowest_pressure
+        at_highest_end = target >= highest_pressure
+        lowest_end_saturation = saturation_grid[row, lowest_position]
+        highest_end_saturation = saturation_grid[row, highest_position]
+        if prefer_highest_pressure_end:
+            if at_lowest_end:
+                saturation = lowest_end_saturation
+            if at_highest_end:
+                saturation = highest_end_saturation
+        else:
+            if at_highest_end:
+                saturation = highest_end_saturation
+            if at_lowest_end:
+                saturation = lowest_end_saturation
+
+        saturation_out[cell] = saturation
+        capillary_pressure_out[cell] = min(max(target, lowest_pressure), highest_pressure)
+
+
 def invert_capillary_pressure_curves(
     *,
     saturation_grid: NumberArray[typing.Any],
@@ -292,6 +376,7 @@ def invert_capillary_pressure_curves(
     target_capillary_pressure: NumberArray[OneDimension],
     pressure_falls_with_saturation: Boolean,
     prefer_highest_pressure_end: Boolean,
+    curve_index: IntArray[OneDimension] | None = None,
 ) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension]]:
     """
     Find the saturation at which each capillary pressure curve reaches its target pressure.
@@ -306,7 +391,7 @@ def invert_capillary_pressure_curves(
 
     :param saturation_grid: Saturations the curves are sampled at, shape `(n_curves, n_samples)`.
     :param capillary_pressure_grid: Capillary pressure at each sample, same shape.
-    :param target_capillary_pressure: Pressure to invert each curve at, shape `(n_curves,)`.
+    :param target_capillary_pressure: Pressure to invert at, one per target, shape `(n_targets,)`.
     :param pressure_falls_with_saturation: Direction a curve is taken to run in when it is flat,
         which for the oil-water curve is `True` (`Pcow` falls as `Sw` rises) and for the
         gas-oil curve is `False` (`Pcgo` rises with `Sg`). A curve that is not flat runs in
@@ -314,61 +399,118 @@ def invert_capillary_pressure_curves(
     :param prefer_highest_pressure_end: Which end a target that equals both the lowest and the
         highest pressure of a flat curve resolves to. `True` picks the saturation at the
         highest-pressure end.
-    :returns: `(saturation, capillary_pressure)`, each of shape `(n_curves,)`. The second is the
+    :param curve_index: Row of the grids each target is inverted on, shape `(n_targets,)`, which
+        lets targets that share a curve share its row. Target `i` is inverted on row `i` when
+        not given.
+    :returns: `(saturation, capillary_pressure)`, each of shape `(n_targets,)`. The second is the
         target limited to the range of its curve.
     """
-    sample_count = capillary_pressure_grid.shape[1]
-    # Orient every curve so that pressure never decreases along the sample axis
-    pressure_change = capillary_pressure_grid[:, -1] - capillary_pressure_grid[:, 0]
-    descending = np.where(
-        pressure_change == 0, pressure_falls_with_saturation, pressure_change < 0
+    target = np.asarray(target_capillary_pressure)
+    if curve_index is None:
+        curve_index = np.arange(target.shape[0])
+    result_dtype = np.result_type(saturation_grid, capillary_pressure_grid, target)
+    saturation = np.empty(target.shape[0], dtype=result_dtype)
+    capillary_pressure = np.empty(target.shape[0], dtype=result_dtype)
+    invert_curves(
+        saturation_grid,
+        capillary_pressure_grid,
+        curve_index,
+        target,
+        bool(pressure_falls_with_saturation),
+        bool(prefer_highest_pressure_end),
+        saturation,
+        capillary_pressure,
     )
-    if np.any(descending):
-        flip = descending[:, None]
-        saturation_grid = np.where(flip, saturation_grid[:, ::-1], saturation_grid)
-        capillary_pressure_grid = np.where(
-            flip, capillary_pressure_grid[:, ::-1], capillary_pressure_grid
-        )
-
-    rows = np.arange(capillary_pressure_grid.shape[0])
-    lowest_pressure = capillary_pressure_grid[:, 0]
-    highest_pressure = capillary_pressure_grid[:, -1]
-
-    samples_below_target = np.count_nonzero(
-        capillary_pressure_grid < target_capillary_pressure[:, None], axis=1
-    )
-    upper = np.clip(samples_below_target, 1, sample_count - 1)
-    lower = upper - 1
-    pressure_lower = capillary_pressure_grid[rows, lower]
-    pressure_span = capillary_pressure_grid[rows, upper] - pressure_lower
-    has_span = pressure_span > 0.0
-    fraction = np.clip(
-        np.where(
-            has_span,
-            (target_capillary_pressure - pressure_lower) / np.where(has_span, pressure_span, 1.0),
-            1.0,
-        ),
-        0.0,
-        1.0,
-    )
-    saturation_lower = saturation_grid[rows, lower]
-    saturation = saturation_lower + fraction * (saturation_grid[rows, upper] - saturation_lower)
-
-    at_lowest_end = target_capillary_pressure <= lowest_pressure
-    at_highest_end = target_capillary_pressure >= highest_pressure
-    lowest_end_saturation = saturation_grid[:, 0]
-    highest_end_saturation = saturation_grid[:, -1]
-    if prefer_highest_pressure_end:
-        saturation = np.where(at_lowest_end, lowest_end_saturation, saturation)
-        saturation = np.where(at_highest_end, highest_end_saturation, saturation)
-    else:
-        saturation = np.where(at_highest_end, highest_end_saturation, saturation)
-        saturation = np.where(at_lowest_end, lowest_end_saturation, saturation)
-
-    capillary_pressure = np.clip(target_capillary_pressure, lowest_pressure, highest_pressure)
     return typing.cast(
         tuple[NumberArray[OneDimension], NumberArray[OneDimension]],
         (saturation, capillary_pressure),
+    )
+
+
+def index_unique_endpoints(
+    *endpoints: NumberArray[OneDimension],
+) -> tuple[IntArray[OneDimension], tuple[NumberArray[OneDimension], ...]]:
+    """
+    Groups cells whose endpoint saturations are all the same, since such cells share one
+    capillary pressure curve.
+
+    :param endpoints: One array per endpoint saturation, each of shape `(n_cells,)`.
+    :returns: `(curve_ids, unique_endpoints)`. `curve_ids[cell]` is the position of the cell's
+        endpoints in each of the `unique_endpoints` arrays.
+    """
+    n_cells = endpoints[0].shape[0]
+    if n_cells == 0 or all(np.all(values == values[0]) for values in endpoints):
+        return (
+            typing.cast(IntArray[OneDimension], np.zeros(n_cells, dtype=np.intp)),
+            typing.cast(
+                tuple[NumberArray[OneDimension], ...], tuple(values[:1] for values in endpoints)
+            ),
+        )
+    unique_rows, curve_ids = np.unique(np.stack(endpoints, axis=1), axis=0, return_inverse=True)
+    return (
+        typing.cast(IntArray[OneDimension], curve_ids.reshape(-1)),
+        typing.cast(
+            tuple[NumberArray[OneDimension], ...],
+            tuple(unique_rows[:, column] for column in range(len(endpoints))),
+        ),
+    )
+
+
+def invert_curves_per_cell(
+    *,
+    curve_ids: IntArray[OneDimension],
+    unique_endpoints: tuple[NumberArray[OneDimension], ...],
+    target_capillary_pressure: NumberArray[OneDimension],
+    build_curves: typing.Callable[
+        [tuple[NumberArray[OneDimension], ...]],
+        tuple[NumberArray[TwoDimensions], NumberArray[TwoDimensions]],
+    ],
+    pressure_falls_with_saturation: Boolean,
+    prefer_highest_pressure_end: Boolean,
+    saturation_samples: int,
+    dtype: npt.DTypeLike,
+) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension]]:
+    """
+    Invert a capillary pressure curve for every cell, evaluating each distinct curve once.
+
+    :param curve_ids: Distinct curve of each cell, see `index_unique_endpoints`.
+    :param unique_endpoints: Endpoint saturations of every distinct curve.
+    :param target_capillary_pressure: Pressure to invert at for each cell.
+    :param build_curves: Takes the endpoints of some distinct curves and returns their
+        saturation and capillary pressure grids, each of shape `(n_curves, saturation_samples)`.
+    :param saturation_samples: Number of samples on each curve.
+    :returns: `(saturation, capillary_pressure)` of every cell, see `invert_capillary_pressure_curves`.
+    """
+    n_cells = target_capillary_pressure.shape[0]
+    n_curves = unique_endpoints[0].shape[0]
+    saturation = np.empty(n_cells, dtype=dtype)
+    capillary_pressure = np.empty(n_cells, dtype=dtype)
+    # The grids of all the distinct curves are built in one go when they fit the batch size
+    chunk_size = (
+        n_cells
+        if n_curves * saturation_samples <= CAPILLARY_INVERSION_BATCH_SIZE
+        else max(1, CAPILLARY_INVERSION_BATCH_SIZE // saturation_samples)
+    )
+    for start in range(0, n_cells, max(chunk_size, 1)):
+        cells = slice(start, min(start + chunk_size, n_cells))
+        if chunk_size >= n_cells:
+            chunk_endpoints = unique_endpoints
+            local_curve_ids = curve_ids
+        else:
+            used_curves, local_curve_ids = np.unique(curve_ids[cells], return_inverse=True)
+            chunk_endpoints = tuple(values[used_curves] for values in unique_endpoints)
+        saturation_grid, capillary_pressure_grid = build_curves(chunk_endpoints)  # type: ignore[arg-type]
+        saturation[cells], capillary_pressure[cells] = invert_capillary_pressure_curves(
+            saturation_grid=saturation_grid,
+            capillary_pressure_grid=capillary_pressure_grid,
+            target_capillary_pressure=target_capillary_pressure[cells],  # type: ignore[arg-type]
+            pressure_falls_with_saturation=pressure_falls_with_saturation,
+            prefer_highest_pressure_end=prefer_highest_pressure_end,
+            curve_index=local_curve_ids.reshape(-1),
+        )
+    return (
+        typing.cast(NumberArray[OneDimension], saturation),
+        typing.cast(NumberArray[OneDimension], capillary_pressure),
     )
 
 
@@ -427,74 +569,110 @@ def get_saturations_from_capillary_pressure(
     gas_oil_capillary_pressure = np.zeros(n, dtype=dtype)
 
     fractions = np.linspace(0.0, 1.0, saturation_samples, dtype=dtype)
-    # Bounds the size of the `(cells, samples)` arrays built per pass
-    chunk_size = max(1, CAPILLARY_INVERSION_BATCH_SIZE // saturation_samples)
+    # Cells with the same endpoint saturations sit on the same curves, so each distinct curve
+    # is evaluated once however many cells share it
+    curve_ids, unique_endpoints = index_unique_endpoints(swc, sorw, sorg, sgr)  # type: ignore[arg-type]
     target_pcow: NumberArray[OneDimension] | None = None
     target_pcgo: NumberArray[OneDimension] | None = None
+
+    def endpoint_arguments(
+        endpoints: tuple[NumberArray[OneDimension], ...],
+    ) -> dict[str, NumberArray[OneDimension]]:
+        return typing.cast(
+            dict[str, NumberArray[OneDimension]],
+            dict(
+                irreducible_water_saturation=np.repeat(endpoints[0], saturation_samples),
+                residual_oil_saturation_water=np.repeat(endpoints[1], saturation_samples),
+                residual_oil_saturation_gas=np.repeat(endpoints[2], saturation_samples),
+                residual_gas_saturation=np.repeat(endpoints[3], saturation_samples),
+            ),
+        )
+
+    def build_water_curves(
+        endpoints: tuple[NumberArray[OneDimension], ...],
+    ) -> tuple[NumberArray[TwoDimensions], NumberArray[TwoDimensions]]:
+        connate = endpoints[0]
+        saturation_grid = connate[:, None] + fractions[None, :] * (1.0 - connate)[:, None]
+        flat_saturation = saturation_grid.ravel()
+        pcow_grid = capillary_pressure.evaluate(
+            flat_saturation,
+            1.0 - flat_saturation,
+            np.zeros_like(flat_saturation),
+            **endpoint_arguments(endpoints),
+        )["oil_water"]
+        return typing.cast(
+            tuple[NumberArray[TwoDimensions], NumberArray[TwoDimensions]],
+            (saturation_grid, np.reshape(pcow_grid, saturation_grid.shape)),
+        )
+
+    def build_gas_curves(
+        endpoints: tuple[NumberArray[OneDimension], ...],
+    ) -> tuple[NumberArray[TwoDimensions], NumberArray[TwoDimensions]]:
+        connate = endpoints[0]
+        saturation_grid = fractions[None, :] * (1.0 - connate)[:, None]
+        flat_saturation = saturation_grid.ravel()
+        flat_connate = np.repeat(connate, saturation_samples)
+        pcgo_grid = capillary_pressure.evaluate(
+            flat_connate,  # type: ignore[arg-type]
+            np.clip(1.0 - flat_connate - flat_saturation, 0.0, 1.0),
+            flat_saturation,
+            **endpoint_arguments(endpoints),
+        )["gas_oil"]
+        return typing.cast(
+            tuple[NumberArray[TwoDimensions], NumberArray[TwoDimensions]],
+            (saturation_grid, np.reshape(pcgo_grid, saturation_grid.shape)),
+        )
+
+    def build_gas_water_curves(
+        endpoints: tuple[NumberArray[OneDimension], ...],
+    ) -> tuple[NumberArray[TwoDimensions], NumberArray[TwoDimensions]]:
+        connate = endpoints[0]
+        saturation_grid = connate[:, None] + fractions[None, :] * (1.0 - connate)[:, None]
+        flat_water = saturation_grid.ravel()
+        flat_zero = np.zeros_like(flat_water)
+        arguments = endpoint_arguments(endpoints)
+        pcow_grid = capillary_pressure.evaluate(
+            flat_water, 1.0 - flat_water, flat_zero, **arguments
+        )["oil_water"]
+        pcgo_grid = capillary_pressure.evaluate(
+            flat_water, flat_zero, np.clip(1.0 - flat_water, 0.0, 1.0), **arguments
+        )["gas_oil"]
+        return typing.cast(
+            tuple[NumberArray[TwoDimensions], NumberArray[TwoDimensions]],
+            (saturation_grid, np.reshape(pcow_grid + pcgo_grid, saturation_grid.shape)),
+        )
 
     if water_profile is not None:
         water_pressure_at_depth = np.interp(depths, water_profile[0], water_profile[1])
         target_pcow = typing.cast(
             NumberArray[OneDimension], oil_pressure - water_pressure_at_depth
         )  # Pcow = Po - Pw
-        for start in range(0, n, chunk_size):
-            cells = slice(start, min(start + chunk_size, n))
-            swc_chunk = swc[cells]
-            saturation_grid = swc_chunk[:, None] + fractions[None, :] * (1.0 - swc_chunk)[:, None]
-            flat_saturation = saturation_grid.ravel()
-            pcow_grid = capillary_pressure.evaluate(
-                flat_saturation,
-                1.0 - flat_saturation,
-                np.zeros_like(flat_saturation),
-                irreducible_water_saturation=np.repeat(swc_chunk, saturation_samples),
-                residual_oil_saturation_water=np.repeat(sorw[cells], saturation_samples),
-                residual_oil_saturation_gas=np.repeat(sorg[cells], saturation_samples),
-                residual_gas_saturation=np.repeat(sgr[cells], saturation_samples),
-            )["oil_water"]
-            water_saturation[cells], oil_water_capillary_pressure[cells] = (
-                invert_capillary_pressure_curves(
-                    saturation_grid=saturation_grid,
-                    capillary_pressure_grid=np.reshape(pcow_grid, saturation_grid.shape),
-                    target_capillary_pressure=typing.cast(
-                        NumberArray[OneDimension],
-                        target_pcow[cells],  # type: ignore[union-attr]
-                    ),
-                    pressure_falls_with_saturation=True,
-                    prefer_highest_pressure_end=True,  # A cell exactly on the contact is oil-bearing
-                )
-            )
+        water_saturation, oil_water_capillary_pressure = invert_curves_per_cell(
+            curve_ids=curve_ids,
+            unique_endpoints=unique_endpoints,
+            target_capillary_pressure=target_pcow,
+            build_curves=build_water_curves,
+            pressure_falls_with_saturation=True,
+            prefer_highest_pressure_end=True,  # A cell exactly on the contact is oil-bearing
+            saturation_samples=saturation_samples,
+            dtype=dtype,
+        )
 
     if gas_profile is not None:
         gas_pressure_at_depth = np.interp(depths, gas_profile[0], gas_profile[1])
         target_pcgo = typing.cast(
             NumberArray[OneDimension], gas_pressure_at_depth - oil_pressure
         )  # Pcgo = Pg - Po
-        for start in range(0, n, chunk_size):
-            cells = slice(start, min(start + chunk_size, n))
-            swc_chunk = swc[cells]
-            saturation_grid = fractions[None, :] * (1.0 - swc_chunk)[:, None]
-            flat_saturation = saturation_grid.ravel()
-            flat_connate = np.repeat(swc_chunk, saturation_samples)
-            pcgo_grid = capillary_pressure.evaluate(
-                flat_connate,
-                np.clip(1.0 - flat_connate - flat_saturation, 0.0, 1.0),
-                flat_saturation,
-                irreducible_water_saturation=flat_connate,
-                residual_oil_saturation_water=np.repeat(sorw[cells], saturation_samples),
-                residual_oil_saturation_gas=np.repeat(sorg[cells], saturation_samples),
-                residual_gas_saturation=np.repeat(sgr[cells], saturation_samples),
-            )["gas_oil"]
-            gas_saturation[cells], gas_oil_capillary_pressure[cells] = (
-                invert_capillary_pressure_curves(
-                    saturation_grid=saturation_grid,
-                    capillary_pressure_grid=np.reshape(pcgo_grid, saturation_grid.shape),
-                    target_capillary_pressure=typing.cast(
-                        NumberArray[OneDimension], target_pcgo[cells]
-                    ),
-                    pressure_falls_with_saturation=False,
-                    prefer_highest_pressure_end=False,  # A cell exactly on the contact is oil-bearing
-                )
-            )
+        gas_saturation, gas_oil_capillary_pressure = invert_curves_per_cell(
+            curve_ids=curve_ids,
+            unique_endpoints=unique_endpoints,
+            target_capillary_pressure=target_pcgo,
+            build_curves=build_gas_curves,
+            pressure_falls_with_saturation=False,
+            prefer_highest_pressure_end=False,  # A cell exactly on the contact is oil-bearing
+            saturation_samples=saturation_samples,
+            dtype=dtype,
+        )
 
     if target_pcow is not None and target_pcgo is not None:
         # Where the two curves each claim the same pore space there is no oil: the cell holds
@@ -502,58 +680,38 @@ def get_saturations_from_capillary_pressure(
         # `Pcow(Sw) + Pcgo(1 - Sw)` and equals `Pg - Pw = Pcow + Pcgo` at the cell's depth.
         # This is what a gas cap above a contact with a high-reaching `Pcow` curve, or a thin
         # oil column between two contacts, needs.
-        for start in range(0, n, chunk_size):
-            cells = slice(start, min(start + chunk_size, n))
-            overlapping = np.flatnonzero(
-                water_saturation[cells] + gas_saturation[cells] > 1.0 + 1e-6
-            )
-            if overlapping.size == 0:
-                continue
-            cells_overlapping = overlapping + start
-            swc_chunk = swc[cells_overlapping]
-            saturation_grid = swc_chunk[:, None] + fractions[None, :] * (1.0 - swc_chunk)[:, None]
-            flat_water = saturation_grid.ravel()
-            flat_gas = np.clip(1.0 - flat_water, 0.0, 1.0)
-            flat_zero = np.zeros_like(flat_water)
-            endpoints = dict(
-                irreducible_water_saturation=np.repeat(swc_chunk, saturation_samples),
-                residual_oil_saturation_water=np.repeat(
-                    sorw[cells_overlapping], saturation_samples
-                ),
-                residual_oil_saturation_gas=np.repeat(sorg[cells_overlapping], saturation_samples),
-                residual_gas_saturation=np.repeat(sgr[cells_overlapping], saturation_samples),
-            )
-            pcow_grid = capillary_pressure.evaluate(
-                flat_water, 1.0 - flat_water, flat_zero, **endpoints
-            )["oil_water"]
-            pcgo_grid = capillary_pressure.evaluate(flat_water, flat_zero, flat_gas, **endpoints)[
-                "gas_oil"
-            ]
-            combined_grid = np.reshape(pcow_grid + pcgo_grid, saturation_grid.shape)
-            water_in_gas, _ = invert_capillary_pressure_curves(
-                saturation_grid=saturation_grid,
-                capillary_pressure_grid=combined_grid,
+        overlapping = np.flatnonzero(water_saturation + gas_saturation > 1.0 + 1e-6)
+        if overlapping.size > 0:
+            overlapping_curve_ids = curve_ids[overlapping]
+            water_in_gas, _ = invert_curves_per_cell(
+                curve_ids=typing.cast(IntArray[OneDimension], overlapping_curve_ids),
+                unique_endpoints=unique_endpoints,
                 target_capillary_pressure=typing.cast(
                     NumberArray[OneDimension],
-                    target_pcow[cells_overlapping] + target_pcgo[cells_overlapping],
+                    target_pcow[overlapping] + target_pcgo[overlapping],
                 ),
+                build_curves=build_gas_water_curves,
                 pressure_falls_with_saturation=True,
                 prefer_highest_pressure_end=True,
+                saturation_samples=saturation_samples,
+                dtype=dtype,
             )
-            water_saturation[cells_overlapping] = water_in_gas
-            gas_saturation[cells_overlapping] = 1.0 - water_in_gas
+            water_saturation[overlapping] = water_in_gas
+            gas_saturation[overlapping] = 1.0 - water_in_gas
 
             # The pressures the cell sits at are those of its final saturations
-            final_water = water_saturation[cells_overlapping]
-            final_gas = gas_saturation[cells_overlapping]
-            final_endpoints = {
-                key: value[::saturation_samples] for key, value in endpoints.items()
-            }
+            final_water = water_saturation[overlapping]
             final = capillary_pressure.evaluate(
-                final_water, np.zeros_like(final_water), final_gas, **final_endpoints
+                final_water,
+                np.zeros_like(final_water),
+                gas_saturation[overlapping],
+                irreducible_water_saturation=swc[overlapping],
+                residual_oil_saturation_water=sorw[overlapping],
+                residual_oil_saturation_gas=sorg[overlapping],
+                residual_gas_saturation=sgr[overlapping],
             )
-            oil_water_capillary_pressure[cells_overlapping] = final["oil_water"]
-            gas_oil_capillary_pressure[cells_overlapping] = final["gas_oil"]
+            oil_water_capillary_pressure[overlapping] = final["oil_water"]
+            gas_oil_capillary_pressure[overlapping] = final["gas_oil"]
 
     return CapillarySaturations(
         water_saturation=typing.cast(CellArray, water_saturation),
@@ -898,6 +1056,45 @@ def initialize_center_point_equilibrium(
     )
 
 
+SAMPLE_WEIGHTS = 0
+"""Averages a field with the plain sample weights."""
+
+OIL_CONTENT_WEIGHTS = 1
+"""Averages a field with the sample weights times each sample's oil content."""
+
+GAS_CONTENT_WEIGHTS = 2
+"""Averages a field with the sample weights times each sample's gas content."""
+
+
+@numba.njit(cache=True)
+def average_samples(values, water_saturation, gas_saturation, sample_weights, weighting, averages):
+    """
+    Averages the samples of every cell in one pass, weighted as `weighting` says.
+
+    A cell whose weights add up to nothing, such as one wholly in the gas cap that has no oil
+    for the oil content weights, is averaged with the plain sample weights instead, and a cell
+    whose plain weights add up to nothing averages to zero.
+    """
+    n_cells, n_samples = values.shape
+    for cell in range(n_cells):
+        for use_plain_weights in range(2):
+            total_weight = 0.0
+            weighted_sum = 0.0
+            for sample in range(n_samples):
+                weight = float(sample_weights[cell, sample])
+                if use_plain_weights == 0:
+                    if weighting == OIL_CONTENT_WEIGHTS:
+                        oil = 1.0 - water_saturation[cell, sample] - gas_saturation[cell, sample]
+                        weight *= min(max(oil, 0.0), 1.0)
+                    elif weighting == GAS_CONTENT_WEIGHTS:
+                        weight *= gas_saturation[cell, sample]
+                total_weight += weight
+                weighted_sum += values[cell, sample] * weight
+            if use_plain_weights == 1 or weighting == SAMPLE_WEIGHTS or total_weight > 0.0:
+                break
+        averages[cell] = weighted_sum / total_weight if total_weight > 0.0 else 0.0
+
+
 def average_equilibrium_samples(
     sample_arrays: EquilibriumArrays,
     *,
@@ -922,33 +1119,26 @@ def average_equilibrium_samples(
     :returns: One value per cell for every array.
     """
 
-    def to_samples(field: CellArray) -> NumberArray[TwoDimensions]:
-        return typing.cast(NumberArray[TwoDimensions], np.reshape(field, (n_cells, -1)))
-
-    oil_content = (
-        1.0 - to_samples(sample_arrays.water_saturation) - to_samples(sample_arrays.gas_saturation)
-    ).clip(0.0, 1.0) * sample_weights
-    gas_content = to_samples(sample_arrays.gas_saturation) * sample_weights
-    weights_by_field = {
-        "solution_gor": oil_content,
-        "oil_bubble_point_pressure": oil_content,
-        "vaporized_oil_gas_ratio": gas_content,
-        "gas_dew_point_pressure": gas_content,
+    water_saturation = np.reshape(sample_arrays.water_saturation, (n_cells, -1))
+    gas_saturation = np.reshape(sample_arrays.gas_saturation, (n_cells, -1))
+    weighting_by_field = {
+        "solution_gor": OIL_CONTENT_WEIGHTS,
+        "oil_bubble_point_pressure": OIL_CONTENT_WEIGHTS,
+        "vaporized_oil_gas_ratio": GAS_CONTENT_WEIGHTS,
+        "gas_dew_point_pressure": GAS_CONTENT_WEIGHTS,
     }
 
     averages = {}
     for name in EquilibriumArrays._fields:
-        weights = weights_by_field.get(name, sample_weights)
-        # No sample holds the fluid (e.g. a cell wholly in the gas cap has no oil), so the
-        # saturated value of the samples is averaged with their plain weights instead
-        weights = np.where(weights.sum(axis=1, keepdims=True) > 0.0, weights, sample_weights)
-        total_weight = weights.sum(axis=1)
-        weighted_sum = (to_samples(getattr(sample_arrays, name)) * weights).sum(axis=1)
-        averages[name] = np.divide(
-            weighted_sum,
-            total_weight,
-            out=np.zeros_like(weighted_sum),
-            where=total_weight > 0.0,
+        values = np.reshape(getattr(sample_arrays, name), (n_cells, -1))
+        averages[name] = np.empty(n_cells, dtype=values.dtype)
+        average_samples(
+            values,
+            water_saturation,
+            gas_saturation,
+            sample_weights,
+            weighting_by_field.get(name, SAMPLE_WEIGHTS),
+            averages[name],
         )
     return EquilibriumArrays(**averages)
 
@@ -1148,16 +1338,20 @@ def initialize_equilibrium_arrays(
     residual_oil_saturation_gas = reservoir.rock.residual_oil_saturation_gas
     residual_gas_saturation = reservoir.rock.residual_gas_saturation
 
-    pressure = np.zeros(n_cells, dtype=dtype)
-    water_saturation = np.zeros(n_cells, dtype=dtype)
-    gas_saturation = np.zeros(n_cells, dtype=dtype)
-    solution_gor = np.zeros(n_cells, dtype=dtype)
-    oil_bubble_point_pressure = np.zeros(n_cells, dtype=dtype)
-    vaporized_oil_gas_ratio = np.zeros(n_cells, dtype=dtype)
-    gas_dew_point_pressure = np.zeros(n_cells, dtype=dtype)
+    eqlnums = np.unique(equilibrium_region_index)
+    single_region = len(eqlnums) == 1
+    # Every cell belongs to exactly one region, so each array is fully written below
+    assembled = (
+        None
+        if single_region
+        else EquilibriumArrays(
+            *(np.empty(n_cells, dtype=dtype) for _ in EquilibriumArrays._fields)
+        )
+    )
 
-    for eqlnum in np.unique(equilibrium_region_index):
-        mask = equilibrium_region_index == eqlnum
+    for eqlnum in eqlnums:
+        # With one region the cells are all of the grid, which needs no mask and no copies
+        mask = slice(None) if single_region else equilibrium_region_index == eqlnum
         equilibrium_region = equilibrium.region(int(eqlnum))
 
         region_pvtnum = np.unique(pvt_region_index[mask])
@@ -1229,27 +1423,74 @@ def initialize_equilibrium_arrays(
         else:
             region_arrays = initialize_tilted_subdivision_equilibrium(
                 grid=reservoir.grid,
-                cell_indices=np.nonzero(mask)[0],  # type: ignore[arg-type]
+                cell_indices=np.arange(n_cells) if single_region else np.nonzero(mask)[0],  # type: ignore[arg-type]
                 **initialization_kwargs,
             )
 
-        pressure[mask] = region_arrays.pressure
-        water_saturation[mask] = region_arrays.water_saturation
-        gas_saturation[mask] = region_arrays.gas_saturation
-        solution_gor[mask] = region_arrays.solution_gor
-        oil_bubble_point_pressure[mask] = region_arrays.oil_bubble_point_pressure
-        vaporized_oil_gas_ratio[mask] = region_arrays.vaporized_oil_gas_ratio
-        gas_dew_point_pressure[mask] = region_arrays.gas_dew_point_pressure
+        if assembled is None:
+            return EquilibriumArrays(
+                *(np.asarray(array, dtype=dtype) for array in region_arrays)  # type: ignore[arg-type]
+            )
+        for assembled_array, region_array in zip(assembled, region_arrays, strict=True):
+            assembled_array[mask] = region_array
 
-    return EquilibriumArrays(
-        pressure=typing.cast(CellArray, pressure),
-        water_saturation=typing.cast(CellArray, water_saturation),
-        gas_saturation=typing.cast(CellArray, gas_saturation),
-        solution_gor=typing.cast(CellArray, solution_gor),
-        oil_bubble_point_pressure=typing.cast(CellArray, oil_bubble_point_pressure),
-        vaporized_oil_gas_ratio=typing.cast(CellArray, vaporized_oil_gas_ratio),
-        gas_dew_point_pressure=typing.cast(CellArray, gas_dew_point_pressure),
-    )
+    assert assembled is not None
+    return assembled
+
+
+def iterate_regions(
+    region_index: IntCellArray,
+) -> typing.Iterator[tuple[typing.Any, slice | NumberArray[OneDimension]]]:
+    """
+    Yield each region number with the cells it selects.
+
+    A grid with a single region selects all of its cells with a slice, which reads and writes
+    the cell arrays in place, where a mask would copy every array it selects.
+
+    :param region_index: Region number of each cell.
+    :returns: `(region number, selector)` pairs, to index a cell array with.
+    """
+    region_numbers = np.unique(region_index)
+    if len(region_numbers) == 1:
+        yield region_numbers[0], slice(None)
+        return
+    for region_number in region_numbers:
+        yield region_number, region_index == region_number
+
+
+@numba.njit(cache=True)
+def all_finite(values):
+    """Whether every value is finite, stopping at the first that is not."""
+    for index in range(values.shape[0]):
+        if not np.isfinite(values[index]):
+            return False
+    return True
+
+
+@numba.njit(cache=True)
+def derive_oil_saturation(water_saturation, gas_saturation, oil_saturation):
+    """
+    Fill `oil_saturation` with what the water and gas leave, limited to `[0, 1]`, and return the
+    ranges the validation needs, all from one pass over the cells.
+
+    :returns: `(lowest water, highest water, lowest gas, highest gas, largest amount by which
+        water plus gas exceeds 1)`.
+    """
+    lowest_water = np.inf
+    highest_water = -np.inf
+    lowest_gas = np.inf
+    highest_gas = -np.inf
+    largest_excess = -np.inf
+    for index in range(water_saturation.shape[0]):
+        water = float(water_saturation[index])
+        gas = float(gas_saturation[index])
+        lowest_water = min(lowest_water, water)
+        highest_water = max(highest_water, water)
+        lowest_gas = min(lowest_gas, gas)
+        highest_gas = max(highest_gas, gas)
+        largest_excess = max(largest_excess, water + gas - 1.0)
+        oil_saturation[index] = min(max(1.0 - water - gas, 0.0), 1.0)
+    return lowest_water, highest_water, lowest_gas, highest_gas, largest_excess
 
 
 def get_temperature_array_from_regions(
@@ -1269,8 +1510,7 @@ def get_temperature_array_from_regions(
     """
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
     result = np.empty(len(pvt_region_index), dtype=dtype)
-    for pvtnum in np.unique(pvt_region_index):
-        mask = pvt_region_index == pvtnum
+    for pvtnum, mask in iterate_regions(pvt_region_index):
         spec = temperature.region(pvtnum)
         if isinstance(spec, (TemperatureGradient, TemperatureTable)):
             result[mask] = spec.at_depth(depth[mask]).astype(dtype, copy=False)  # type: ignore[union-attr]
@@ -1353,21 +1593,20 @@ def compute_water_phase_pressure(
         )
 
     rock = reservoir.rock
-    for satnum in np.unique(saturation_region):
+    for satnum, mask in iterate_regions(saturation_region):
         capillary_pressure = satfunc.region(satnum).capillary_pressure
         if capillary_pressure is None:
             continue
-        mask = saturation_region == satnum
         oil_water = capillary_pressure.evaluate(
-            state.water_saturation[mask],
-            state.oil_saturation[mask],
-            state.gas_saturation[mask],
-            irreducible_water_saturation=rock.connate_water_saturation[mask],
-            residual_oil_saturation_water=rock.residual_oil_saturation_water[mask],
-            residual_oil_saturation_gas=rock.residual_oil_saturation_gas[mask],
-            residual_gas_saturation=rock.residual_gas_saturation[mask],
+            state.water_saturation[mask],  # type: ignore[arg-type]
+            state.oil_saturation[mask],  # type: ignore[arg-type]
+            state.gas_saturation[mask],  # type: ignore[arg-type]
+            irreducible_water_saturation=rock.connate_water_saturation[mask],  # type: ignore[arg-type]
+            residual_oil_saturation_water=rock.residual_oil_saturation_water[mask],  # type: ignore[arg-type]
+            residual_oil_saturation_gas=rock.residual_oil_saturation_gas[mask],  # type: ignore[arg-type]
+            residual_gas_saturation=rock.residual_gas_saturation[mask],  # type: ignore[arg-type]
         )["oil_water"]
-        water_pressure[mask] -= np.asarray(oil_water, dtype=water_pressure.dtype)
+        water_pressure[mask] -= np.asarray(oil_water, dtype=water_pressure.dtype)  # type: ignore
     return typing.cast(CellArray, water_pressure)
 
 
@@ -1423,12 +1662,11 @@ def initialize_water_gas_state(
     solubility = np.zeros(n_cells, dtype=dtype)
     bubble_point = np.zeros(n_cells, dtype=dtype)
 
-    for pvtnum in np.unique(pvt_region_index):
-        mask = pvt_region_index == pvtnum
+    for pvtnum, mask in iterate_regions(pvt_region_index):
         tables = pvt.region(pvtnum).tables
-        p = pressure[mask]
-        t = temperature[mask]
-        s = salinity[mask] if salinity is not None else None
+        p = pressure[mask]  # type: ignore
+        t = temperature[mask]  # type: ignore
+        s = salinity[mask] if salinity is not None else None  # type: ignore
         gas = tables.gas
         water = tables.water
 
@@ -1441,35 +1679,41 @@ def initialize_water_gas_state(
         if gas_solubility_in_water is None:
             if saturated is None:
                 continue
-            solubility[mask] = saturated
+            solubility[mask] = saturated  # type: ignore
             region_bubble_point = (
                 water.bubble_point_pressure(t, pressure=p, salinity=s)
                 if water is not None
                 else None
             )
-            bubble_point[mask] = region_bubble_point if region_bubble_point is not None else p
+            bubble_point[mask] = region_bubble_point if region_bubble_point is not None else p  # type: ignore
             continue
 
-        rsw = np.asarray(gas_solubility_in_water[mask], dtype=dtype)
-        solubility[mask] = rsw
+        rsw = np.asarray(gas_solubility_in_water[mask], dtype=dtype)  # type: ignore
+        solubility[mask] = rsw  # type: ignore
         if saturated is None:
-            bubble_point[mask] = p
+            bubble_point[mask] = p  # type: ignore
             continue
 
         # Saturated `Rsw` rises with pressure, so the bubble point is found by bisection between
         # a pressure low enough to hold less than `rsw` and the cell's own pressure.
         saturated = np.broadcast_to(saturated, p.shape)
-        low = p * 1e-3
-        high = np.array(p, dtype=dtype, copy=True)
+        search_dtype = np.result_type(p.dtype, dtype)
+        low = np.asarray(p * 1e-3, dtype=search_dtype)
+        high = np.array(p, dtype=search_dtype, copy=True)
+        middle = np.empty_like(high)
+        above = np.empty(p.shape, dtype=np.bool_)
         for _ in range(iterations):
-            middle = 0.5 * (low + high)
+            np.add(low, high, out=middle)
+            middle *= 0.5
             holds = gas.solubility_in_water(middle, t, salinity=s)  # type: ignore[union-attr]
             below = np.broadcast_to(holds, p.shape) < rsw  # type: ignore[arg-type]
-            low = np.where(below, middle, low)
-            high = np.where(below, high, middle)
+            np.logical_not(below, out=above)
+            np.copyto(low, middle, where=below)
+            np.copyto(high, middle, where=above)
+
         region_bubble_point = 0.5 * (low + high)
         # At or above the saturated value the water is saturated, so its bubble point is `p`.
-        bubble_point[mask] = np.where(rsw >= saturated, p, region_bubble_point)
+        bubble_point[mask] = np.where(rsw >= saturated, p, region_bubble_point)  # type: ignore
     return typing.cast(CellArray, solubility), typing.cast(CellArray, bubble_point)
 
 
@@ -1733,30 +1977,33 @@ def initialize_reservoir_state(
         ("solution_gor", solution_gor_array),
         ("vaporized_oil_gas_ratio", vaporized_oil_ratio_array),
     ):
-        if not np.all(np.isfinite(field_array)):
+        if not all_finite(field_array):
             raise ValidationError(f"`{field_name}` contains NaN or infinite values.")
 
-    if np.any(pressure_array <= 0.0):
+    if n_cells > 0 and pressure_array.min() <= 0.0:
         raise ValidationError("`pressure` must be positive in every cell.")
-    for field_name, field_array in (
-        ("water_saturation", water_saturation_array),
-        ("gas_saturation", gas_saturation_array),
+    oil_saturation_array = np.empty(n_cells, dtype=dtype)
+    (
+        lowest_water,
+        highest_water,
+        lowest_gas,
+        highest_gas,
+        largest_saturation_excess,
+    ) = derive_oil_saturation(water_saturation_array, gas_saturation_array, oil_saturation_array)
+    for field_name, lowest, highest in (
+        ("water_saturation", lowest_water, highest_water),
+        ("gas_saturation", lowest_gas, highest_gas),
     ):
-        if np.any(field_array < -1e-6) or np.any(field_array > 1.0 + 1e-6):
+        if lowest < -1e-6 or highest > 1.0 + 1e-6:
             raise ValidationError(
                 f"`{field_name}` must be between 0 and 1 in every cell; got values from "
-                f"{float(field_array.min()):.4g} to {float(field_array.max()):.4g}."
+                f"{lowest:.4g} to {highest:.4g}."
             )
-
-    saturation_sum_excess = (water_saturation_array + gas_saturation_array) - 1.0
-    if np.any(saturation_sum_excess > 1e-6):
+    if largest_saturation_excess > 1e-6:
         raise ValidationError(
             "water_saturation + gas_saturation exceeds 1.0 in at least one "
-            f"cell (max excess {float(saturation_sum_excess.max()):.3e})."
+            f"cell (max excess {largest_saturation_excess:.3e})."
         )
-    oil_saturation_array = np.clip(
-        1.0 - water_saturation_array - gas_saturation_array, 0.0, 1.0, dtype=dtype
-    )
 
     pore_volumes = reservoir.compute_pore_volumes(pressure_array)
     pvt_region_index: IntCellArray = (
@@ -1772,24 +2019,25 @@ def initialize_reservoir_state(
         equilibrium_arrays is None or explicit["vaporized_oil_gas_ratio"] is not None
     )
     if bubble_point_from_tables or dew_point_from_tables:
-        for pvtnum in np.unique(pvt_region_index):
-            mask = pvt_region_index == pvtnum
+        for pvtnum, mask in iterate_regions(pvt_region_index):
             pvt_region = pvt.region(pvtnum)
-            t = temperature_array[mask]
+            t = temperature_array[mask]  # type: ignore
 
             if bubble_point_from_tables:
                 oil_bubble_point = pvt_region.tables.oil.bubble_point_pressure(  # type: ignore[union-attr]
-                    temperature=t, solution_gor=solution_gor_array[mask]
+                    temperature=t,
+                    solution_gor=solution_gor_array[mask],  # type: ignore
                 )
                 if oil_bubble_point is not None:
-                    oil_bubble_point_pressure_array[mask] = oil_bubble_point
+                    oil_bubble_point_pressure_array[mask] = oil_bubble_point  # type: ignore
 
             if dew_point_from_tables and pvt_region.tables.gas is not None:
                 gas_dew_point = pvt_region.tables.gas.dew_point_pressure(
-                    temperature=t, vaporized_oil_ratio=vaporized_oil_ratio_array[mask]
+                    temperature=t,
+                    vaporized_oil_ratio=vaporized_oil_ratio_array[mask],  # type: ignore
                 )
                 if gas_dew_point is not None:
-                    gas_dew_point_pressure_array[mask] = gas_dew_point
+                    gas_dew_point_pressure_array[mask] = gas_dew_point  # type: ignore
 
     solubility_in_water_input = gas_solubility_in_water
     if solubility_in_water_input is None and deck_file is not None:
@@ -1803,8 +2051,8 @@ def initialize_reservoir_state(
                 f"Explicit `gas_solubility_in_water` has shape {solubility_in_water_input.shape}; "
                 f"expected ({n_cells},)."
             )
-        if not np.all(np.isfinite(solubility_in_water_input)) or np.any(
-            solubility_in_water_input < 0.0
+        if not all_finite(solubility_in_water_input) or (
+            n_cells > 0 and solubility_in_water_input.min() < 0.0
         ):
             raise ValidationError(
                 "`gas_solubility_in_water` must be finite and non-negative in every cell."

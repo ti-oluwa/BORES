@@ -1,3 +1,5 @@
+import typing
+
 import attrs
 from typing_extensions import Self
 
@@ -163,7 +165,7 @@ class StaticPVT(Serializable):
         oil_specific_gravity = self.oil_specific_gravity
         if oil_specific_gravity is None:
             return None
-        return correlations.compute_oil_api_gravity(oil_specific_gravity)
+        return typing.cast(Number, correlations.compute_oil_api_gravity(oil_specific_gravity))
 
     @property
     def gas_molecular_weight(self) -> Number | None:
@@ -173,7 +175,7 @@ class StaticPVT(Serializable):
         gas_gravity = self.gas_gravity
         if gas_gravity is None:
             return None
-        return correlations.compute_gas_molecular_weight(gas_gravity)
+        return typing.cast(Number, correlations.compute_gas_molecular_weight(gas_gravity))
 
     @classmethod
     def from_deck(

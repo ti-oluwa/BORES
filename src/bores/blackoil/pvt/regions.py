@@ -377,6 +377,27 @@ def _broadcast_to_2d(values_1d: npt.NDArray, n_t: int = 2) -> npt.NDArray:
     return np.tile(values_1d[:, np.newaxis], (1, n_t)).astype(values_1d.dtype, copy=False)
 
 
+def compute_fvf_compressibility(
+    pressures: FloatArray[OneDimension],
+    fvf_2d: FloatArray[TwoDimensions],
+    *,
+    dtype: npt.DTypeLike,
+) -> FloatArray[TwoDimensions]:
+    """
+    Compressibility `-(1/B)·(∂B/∂P)` of a formation volume factor table, from the PCHIP
+    derivative of `B` along pressure.
+
+    :param pressures: Pressure of each row, shape `(n_pressures,)`.
+    :param fvf_2d: Formation volume factor, shape `(n_pressures, n_temperatures)`.
+    :param dtype: Floating-point dtype of the result.
+    :returns: Compressibility with the shape of `fvf_2d`.
+    """
+    derivative = PchipInterpolator(pressures, fvf_2d, axis=0).derivative(1)(pressures)
+    return typing.cast(
+        FloatArray[TwoDimensions], (-(1.0 / fvf_2d) * derivative).astype(dtype, copy=False)
+    )
+
+
 def build_oil_data_from_pvto(
     pvto_records: list[dict[str, typing.Any]],
     density_record: dict[str, Number] | None,
@@ -447,6 +468,10 @@ def build_oil_data_from_pvto(
         )
 
     solution_gor_keys = sorted(solution_gor_to_rows.keys())
+    rows_by_solution_gor = {
+        key: sorted(solution_gor_to_rows[key], key=lambda row: row["pressure"])
+        for key in solution_gor_keys
+    }
     solution_gor_values = np.array(solution_gor_keys, dtype=dtype)
     n_rs = len(solution_gor_values)
 
@@ -456,7 +481,7 @@ def build_oil_data_from_pvto(
     saturated_oil_viscosity = np.empty(n_rs, dtype=dtype)
 
     for i, solution_gor_key in enumerate(solution_gor_keys):
-        rows = sorted(solution_gor_to_rows[solution_gor_key], key=lambda row: row["pressure"])
+        rows = rows_by_solution_gor[solution_gor_key]
         saturated_row = rows[0]
         bubble_point_pressure_values[i] = saturated_row["pressure"]
         saturated_oil_fvf[i] = saturated_row["fvf"]
@@ -481,7 +506,6 @@ def build_oil_data_from_pvto(
     pressures = np.unique(
         np.concatenate([bubble_point_pressure_values, row_pressures, extension])
     ).astype(dtype)
-    n_p = len(pressures)
 
     # Reference undersaturated branch: most Eclipse decks only attach an
     # undersaturated (>1 row) branch to the highest Rs value - all other Rs
@@ -495,7 +519,7 @@ def build_oil_data_from_pvto(
     # case a deck attaches it somewhere other than the top Rs) and apply it
     # relative to each single-row group's own saturated point.
     reference_key = max(solution_gor_keys, key=lambda k: len(solution_gor_to_rows[k]))
-    reference_rows = sorted(solution_gor_to_rows[reference_key], key=lambda row: row["pressure"])
+    reference_rows = rows_by_solution_gor[reference_key]
     if len(reference_rows) < 2:
         raise ValidationError(
             "`PVTO` table has no Rs group with an undersaturated (>1 row) "
@@ -534,7 +558,7 @@ def build_oil_data_from_pvto(
     group_viscosity: list[npt.NDArray] = []
 
     for solution_gor_key in solution_gor_keys:
-        rows = sorted(solution_gor_to_rows[solution_gor_key], key=lambda row: row["pressure"])
+        rows = rows_by_solution_gor[solution_gor_key]
         pressure_array = np.array([row["pressure"] for row in rows], dtype=dtype)
         oil_fvf_array = np.array([row["fvf"] for row in rows], dtype=dtype)
         oil_viscosity_array = np.array([row["viscosity"] for row in rows], dtype=dtype)
@@ -622,10 +646,7 @@ def build_oil_data_from_pvto(
         ).astype(dtype, copy=False)
 
     # Compressibility: co = -(1/Bo)·(∂Bo/∂P) via PCHIP derivative
-    oil_compressibility_2d = np.empty((n_p, n_t), dtype=dtype)
-    for j in range(n_t):
-        dbo_dp = PchipInterpolator(pressures, oil_fvf_2d[:, j]).derivative(1)(pressures)
-        oil_compressibility_2d[:, j] = -(1.0 / oil_fvf_2d[:, j]) * dbo_dp
+    oil_compressibility_2d = compute_fvf_compressibility(pressures, oil_fvf_2d, dtype=dtype)
     # Compressibility must be non-negative; clamp to physical range
     clip_compressibility(
         oil_compressibility_2d,
@@ -720,10 +741,7 @@ def build_oil_data_from_pvdo(
         oil_density_2d = (stock_tank_oil_density / oil_fvf_2d).astype(dtype, copy=False)
 
     # Compressibility: co = -(1/Bo)·(∂Bo/∂P)
-    oil_compressibility_2d = np.empty((n_p, n_t), dtype=dtype)
-    for j in range(n_t):
-        dbo_dp = PchipInterpolator(pressures, oil_fvf_2d[:, j]).derivative(1)(pressures)
-        oil_compressibility_2d[:, j] = -(1.0 / oil_fvf_2d[:, j]) * dbo_dp
+    oil_compressibility_2d = compute_fvf_compressibility(pressures, oil_fvf_2d, dtype=dtype)
     clip_compressibility(
         oil_compressibility_2d,
         dtype=dtype,
@@ -959,7 +977,6 @@ def build_gas_data_from_pvdg(
     if np.any(gas_viscosity_1d <= 0):
         raise ValidationError("`PVDG` viscosity values must be positive.")
 
-    n_p = len(pressures)
     gas_fvf_2d = _broadcast_to_2d(gas_fvf_1d, n_t)
     gas_viscosity_2d = _broadcast_to_2d(gas_viscosity_1d, n_t)
 
@@ -973,10 +990,7 @@ def build_gas_data_from_pvdg(
         gas_density_2d = (stock_tank_gas_density / gas_fvf_2d).astype(dtype, copy=False)
 
     # Compressibility: cg ≈ -(1/Bg)·(∂Bg/∂P)
-    gas_compressibility_2d = np.empty((n_p, n_t), dtype=dtype)
-    for j in range(n_t):
-        dbg_dp = PchipInterpolator(pressures, gas_fvf_2d[:, j]).derivative(1)(pressures)
-        gas_compressibility_2d[:, j] = -(1.0 / gas_fvf_2d[:, j]) * dbg_dp
+    gas_compressibility_2d = compute_fvf_compressibility(pressures, gas_fvf_2d, dtype=dtype)
     clip_compressibility(
         gas_compressibility_2d,
         dtype=dtype,
