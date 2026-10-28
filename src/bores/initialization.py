@@ -445,7 +445,9 @@ def get_saturations_from_capillary_pressure(
 
     if water_profile is not None:
         water_pressure_at_depth = np.interp(depths, water_profile[0], water_profile[1])
-        target_pcow = oil_pressure - water_pressure_at_depth  # Pcow = Po - Pw
+        target_pcow = typing.cast(
+            NumberArray[OneDimension], oil_pressure - water_pressure_at_depth
+        )  # Pcow = Po - Pw
         for start in range(0, n, chunk_size):
             cells = slice(start, min(start + chunk_size, n))
             swc_chunk = swc[cells]
