@@ -218,6 +218,15 @@ class SimulationCase:
         horizontal_tolerance: Number | None = None,
         intersection_method: GridIntersectionMethod = "aabb",
         search_radius: Number | None = None,
+        grid: Grid | None = None,
+        regions: Regions | None = None,
+        satfunc: SatFunc | None = None,
+        rock: Rock | None = None,
+        pvt: PVT | None = None,
+        equilibrium: Equilibrium | None = None,
+        initial_state: ReservoirState | None = None,
+        wells: WellSystem | None = None,
+        schedule: Schedule[CompiledBlackOilModel] | None = None,
         runspec: RunSpec | None = None,
         summary: SummaryReport | None = None,
         min_wetting_relperm: MinimumRelPerm = None,
@@ -260,6 +269,31 @@ class SimulationCase:
         :param intersection_method: Well-grid intersection strategy passed to `compile_model`.
         :param search_radius: Optional search radius for well-grid intersection.
             Forwarded to `compile_model`.
+        :param grid: The grid to use in place of the deck's. Everything read from the deck that has one
+            value per cell (rock properties, regions, the initial state) must have the same number of
+            cells and the same cell ordering as this grid. Converted to the deck's unit system.
+        :param regions: The region assignments to use in place of the deck's. Each array must have one
+            entry per grid cell.
+        :param satfunc: The saturation functions to use in place of the deck's. `mixing_rule`, `spacing`,
+            and `include_capillary_pressure` are then not used, and `min_wetting_relperm` and
+            `min_non_wetting_relperm` must not be given. Converted to the deck's unit system.
+        :param rock: The rock properties to use in place of the deck's. They must have one value per
+            grid cell, and must have been built against the same saturation functions and saturation
+            regions that the case uses. `interpolation_method` is then not used for the rock. Converted
+            to the deck's unit system.
+        :param pvt: The PVT tables to use in place of the deck's. Converted to the deck's unit system.
+        :param equilibrium: The equilibration data to use in place of the deck's when computing the
+            initial state. Not allowed together with `initial_state`. Converted to the deck's unit system.
+        :param initial_state: The reservoir state to start the run from, in place of one computed from
+            the deck's equilibration data. It must have one value per grid cell. Its pressures and
+            saturations should be consistent with the PVT tables and saturation functions the case uses.
+            `equilibrium`, `hysteresis_enabled`, and `saturation_samples` are then not used. Converted
+            to the deck's unit system.
+        :param wells: The wells, their controls, and their groups to use in place of those in the deck.
+            Its own tubing performance is used, so `tubing_performance` must not be given. The schedule
+            is still checked for references to VFP tables this system does not have.
+        :param schedule: The schedule of well and model edits to use in place of the deck's. `compiled_at`
+            and `load_summary` are then not used. It must already be expressed in the case's unit system.
         :param runspec: Run configuration. `RunSpec`'s own defaults if not given. If it has no
         `start_date`, the deck's `START` is used. If it has a timer, the timer is set up to land
         on the deck's report times, the schedule's events and `extra_time_targets`.
@@ -301,6 +335,15 @@ class SimulationCase:
             horizontal_tolerance=horizontal_tolerance,
             intersection_method=intersection_method,
             search_radius=search_radius,
+            grid=grid,
+            regions=regions,
+            satfunc=satfunc,
+            rock=rock,
+            pvt=pvt,
+            equilibrium=equilibrium,
+            initial_state=initial_state,
+            wells=wells,
+            schedule=schedule,
             runspec=runspec,
             summary=summary,
             min_wetting_relperm=min_wetting_relperm,
@@ -320,6 +363,40 @@ class SimulationCase:
         return typing.cast(Self, case)
 
 
+def check_cell_counts(
+    *,
+    n_cells: int,
+    regions: Regions | None,
+    rock: Rock | None,
+    initial_state: ReservoirState | None,
+) -> None:
+    """
+    Checks that every supplied per-cell component has one entry per grid cell.
+
+    :param n_cells: Number of cells in the grid.
+    :param regions: Supplied region assignments, if any.
+    :param rock: Supplied rock properties, if any.
+    :param initial_state: Supplied initial state, if any.
+    :raises CaseLoadError: If any supplied component has a different number of cells.
+    """
+    mismatches: list[str] = []
+    if regions is not None:
+        for field in attrs.fields(Regions):
+            values = getattr(regions, field.name)
+            if values is not None and np.size(values) != n_cells:
+                mismatches.append(f"regions.{field.name} has {np.size(values)}")
+    if rock is not None and np.size(rock.porosity) != n_cells:
+        mismatches.append(f"rock has {np.size(rock.porosity)}")
+    if initial_state is not None and np.size(initial_state.pressure) != n_cells:
+        mismatches.append(f"initial_state has {np.size(initial_state.pressure)}")
+    if mismatches:
+        raise CaseLoadError(
+            f"The grid has {n_cells} cells but a supplied component does not match: "
+            + ", ".join(mismatches)
+            + "."
+        )
+
+
 def load_case(
     deck_file: DeckFile,
     *,
@@ -336,6 +413,15 @@ def load_case(
     horizontal_tolerance: Number | None = None,
     intersection_method: GridIntersectionMethod = "aabb",
     search_radius: Number | None = None,
+    grid: Grid | None = None,
+    regions: Regions | None = None,
+    satfunc: SatFunc | None = None,
+    rock: Rock | None = None,
+    pvt: PVT | None = None,
+    equilibrium: Equilibrium | None = None,
+    initial_state: ReservoirState | None = None,
+    wells: WellSystem | None = None,
+    schedule: Schedule[CompiledBlackOilModel] | None = None,
     runspec: RunSpec | None = None,
     summary: SummaryReport | None = None,
     min_wetting_relperm: MinimumRelPerm = None,
@@ -379,6 +465,31 @@ def load_case(
     :param intersection_method: Well-grid intersection strategy passed to `compile_model`.
     :param search_radius: Optional search radius for well-grid intersection.
         Forwarded to `compile_model`.
+    :param grid: The grid to use in place of the deck's. Everything read from the deck that has one
+        value per cell (rock properties, regions, the initial state) must have the same number of
+        cells and the same cell ordering as this grid. Converted to the deck's unit system.
+    :param regions: The region assignments to use in place of the deck's. Each array must have one
+        entry per grid cell.
+    :param satfunc: The saturation functions to use in place of the deck's. `mixing_rule`, `spacing`,
+        and `include_capillary_pressure` are then not used, and `min_wetting_relperm` and
+        `min_non_wetting_relperm` must not be given. Converted to the deck's unit system.
+    :param rock: The rock properties to use in place of the deck's. They must have one value per
+        grid cell, and must have been built against the same saturation functions and saturation
+        regions that the case uses. `interpolation_method` is then not used for the rock. Converted
+        to the deck's unit system.
+    :param pvt: The PVT tables to use in place of the deck's. Converted to the deck's unit system.
+    :param equilibrium: The equilibration data to use in place of the deck's when computing the
+        initial state. Not allowed together with `initial_state`. Converted to the deck's unit system.
+    :param initial_state: The reservoir state to start the run from, in place of one computed from
+        the deck's equilibration data. It must have one value per grid cell. Its pressures and
+        saturations should be consistent with the PVT tables and saturation functions the case uses.
+        `equilibrium`, `hysteresis_enabled`, and `saturation_samples` are then not used. Converted
+        to the deck's unit system.
+    :param wells: The wells, their controls, and their groups to use in place of those in the deck.
+        Its own tubing performance is used, so `tubing_performance` must not be given. The schedule
+        is still checked for references to VFP tables this system does not have.
+    :param schedule: The schedule of well and model edits to use in place of the deck's. `compiled_at`
+        and `load_summary` are then not used. It must already be expressed in the case's unit system.
     :param runspec: Run configuration. `RunSpec`'s own defaults if not given.
     :param summary: Summary-vector reports for the run. Empty if not given.
     :param min_wetting_relperm: Minimum wetting-phase relative permeability for `SatFunc.from_deck`.
@@ -407,8 +518,11 @@ def load_case(
         Converted to `unit_system` if given in a different one. If the
         deck defines no boundary conditions, this is used as-is.
     :returns: The loaded `SimulationCase`.
-    :raises CaseLoadError: If the deck has no `TITLE` and no `title` is given, or if any
-        loading stage fails. For a failed stage, the original exception is chained as the cause.
+    :raises CaseLoadError: If the deck has no `TITLE` and no `title` is given, if an option is
+        given that has no effect because the component it configures was supplied instead (see
+        `satfunc`, `equilibrium`, `initial_state`, and `wells`), if a supplied component does not
+        match the grid's cell count, or if any loading stage fails. For a failed stage, the
+        original exception is chained as the cause.
     """
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
     raw_deck_title = deck_file.get("TITLE")
@@ -425,13 +539,38 @@ def load_case(
             "The deck has no `TITLE`, so a case title is required. Pass `title` to name the case."
         )
 
+    if satfunc is not None and (
+        min_wetting_relperm is not None or min_non_wetting_relperm is not None
+    ):
+        raise CaseLoadError(
+            "`min_wetting_relperm` and `min_non_wetting_relperm` only apply to saturation "
+            "functions loaded from the deck, so they cannot be given together with `satfunc`."
+        )
+    if wells is not None and tubing_performance is not None:
+        raise CaseLoadError(
+            "`tubing_performance` only applies to wells loaded from the deck. Set it on the "
+            "`WellSystem` given as `wells` instead."
+        )
+    if initial_state is not None and equilibrium is not None:
+        raise CaseLoadError(
+            "`equilibrium` is only used to compute the initial state, so it cannot be given "
+            "together with `initial_state`."
+        )
+    if initial_state is not None and hysteresis_enabled is not None:
+        raise CaseLoadError(
+            "`hysteresis_enabled` only applies to an initial state computed from the deck. "
+            "Build the `initial_state` given with the hysteresis tracking it needs instead."
+        )
+
     deck_unit_system = deck_file.unit_system
     unit_system = unit_system if unit_system is not None else deck_unit_system
     runspec = (
         runspec.convert(unit_system) if runspec is not None else RunSpec(unit_system=unit_system)
     )
     if temperature is None:
-        temperature = Temperature.from_deck(deck_file, dtype=dtype)
+        # Only the PVT tables and the initial state need a temperature.
+        if pvt is None or initial_state is None:
+            temperature = Temperature.from_deck(deck_file, dtype=dtype)
     else:
         temperature = (
             temperature.convert(deck_unit_system)
@@ -439,110 +578,142 @@ def load_case(
             else Temperature(temperature, unit_system=deck_unit_system)
         )
 
-    try:
-        print("Loading grid")
-        grid = Grid.from_deck(deck_file, on_inverted_cells=on_inverted_cells)
-        print("Loaded grid")
-    except Exception as exc:
-        raise CaseLoadError(f"Failed to load grid from deck file: {title!r}.") from exc
+    # Components that are supplied are expressed in the deck's unit system from here on, as the
+    # ones loaded from the deck are, since the stages below combine them.
+    if grid is None:
+        try:
+            print("Loading grid")
+            grid = Grid.from_deck(deck_file, on_inverted_cells=on_inverted_cells)
+            print("Loaded grid")
+        except Exception as exc:
+            raise CaseLoadError(f"Failed to load grid from deck file: {title!r}.") from exc
+    else:
+        grid = grid.convert(deck_unit_system)
 
-    try:
-        print("Loading regions")
-        # Decks write 0 as the region of inactive cells, which Eclipse ignores.
-        active = (
-            grid.cell_statuses != int(CellStatus.INACTIVE)
-            if grid.cell_statuses is not None
-            else None
-        )
-        regions = Regions.from_deck(
-            deck_file,
-            n_cells=grid.n_cells,
-            use_default=True,
-            active=active,
-        )
-        print("Loaded regions")
-    except Exception as exc:
-        raise CaseLoadError(f"Failed to load regions from deck file: {title!r}.") from exc
+    if regions is None:
+        try:
+            print("Loading regions")
+            # Decks write 0 as the region of inactive cells, which Eclipse ignores.
+            active = (
+                grid.cell_statuses != int(CellStatus.INACTIVE)
+                if grid.cell_statuses is not None
+                else None
+            )
+            regions = Regions.from_deck(
+                deck_file,
+                n_cells=grid.n_cells,
+                use_default=True,
+                active=active,
+            )
+            print("Loaded regions")
+        except Exception as exc:
+            raise CaseLoadError(f"Failed to load regions from deck file: {title!r}.") from exc
 
-    try:
-        print("Loading satfunc")
-        satfunc = SatFunc.from_deck(
-            deck_file,
-            mixing_rule=mixing_rule,
-            spacing=spacing,
-            min_wetting_relperm=min_wetting_relperm,
-            min_non_wetting_relperm=min_non_wetting_relperm,
-            include_capillary_pressure=include_capillary_pressure,
-            dtype=dtype,
-        )
-        print("Loaded satfunc")
-    except Exception as exc:
-        raise CaseLoadError(
-            f"Failed to load saturation functions from deck file: {title!r}."
-        ) from exc
+    if satfunc is None:
+        try:
+            print("Loading satfunc")
+            satfunc = SatFunc.from_deck(
+                deck_file,
+                mixing_rule=mixing_rule,
+                spacing=spacing,
+                min_wetting_relperm=min_wetting_relperm,
+                min_non_wetting_relperm=min_non_wetting_relperm,
+                include_capillary_pressure=include_capillary_pressure,
+                dtype=dtype,
+            )
+            print("Loaded satfunc")
+        except Exception as exc:
+            raise CaseLoadError(
+                f"Failed to load saturation functions from deck file: {title!r}."
+            ) from exc
+    else:
+        satfunc = satfunc.convert(deck_unit_system)
 
-    try:
-        print("Loading rock")
-        rock = Rock.from_deck(
-            deck_file,
-            grid=grid,
-            satfunc=satfunc,
-            saturation_region=regions.saturation_region,
-            interpolation_method=interpolation_method,
-            dtype=dtype,
-        )
-        print("Loaded rock")
-    except Exception as exc:
-        raise CaseLoadError(f"Failed to load rock properties from deck file: {title!r}.") from exc
+    if rock is None:
+        try:
+            print("Loading rock")
+            rock = Rock.from_deck(
+                deck_file,
+                grid=grid,
+                satfunc=satfunc,
+                saturation_region=regions.saturation_region,
+                interpolation_method=interpolation_method,
+                dtype=dtype,
+            )
+            print("Loaded rock")
+        except Exception as exc:
+            raise CaseLoadError(
+                f"Failed to load rock properties from deck file: {title!r}."
+            ) from exc
+    else:
+        rock = rock.convert(deck_unit_system)
 
+    if initial_state is not None:
+        initial_state = initial_state.convert(deck_unit_system)
+
+    check_cell_counts(
+        n_cells=grid.n_cells,
+        regions=regions,
+        rock=rock,
+        initial_state=initial_state,
+    )
     reservoir = Reservoir(grid=grid, rock=rock, regions=regions)
 
-    try:
-        print("Loading PVT")
-        pvt = PVT.from_deck(
-            deck_file,
-            temperature=temperature,
-            interpolation_method=interpolation_method,
-            warn_on_extrapolation=warn_on_extrapolation,
-        )
-        print("Loaded PVT")
-    except Exception as exc:
-        raise CaseLoadError(f"Failed to load PVT tables from deck file: {title!r}.") from exc
+    if pvt is None:
+        try:
+            print("Loading PVT")
+            pvt = PVT.from_deck(
+                deck_file,
+                temperature=typing.cast(Temperature, temperature),
+                interpolation_method=interpolation_method,
+                warn_on_extrapolation=warn_on_extrapolation,
+            )
+            print("Loaded PVT")
+        except Exception as exc:
+            raise CaseLoadError(f"Failed to load PVT tables from deck file: {title!r}.") from exc
+    else:
+        pvt = pvt.convert(deck_unit_system)
 
     fluid = BlackOil(pvt=pvt, satfunc=satfunc)
 
-    try:
-        print("Loading state")
-        equilibrium = Equilibrium.from_deck(deck_file)
-        initial_state = initialize_reservoir_state(
-            reservoir=reservoir,
-            pvt=pvt,
-            deck_file=deck_file,
-            equilibrium=equilibrium,
-            satfunc=satfunc,
-            temperature=temperature,
-            hysteresis_enabled=hysteresis_enabled
-            if hysteresis_enabled is not None
-            else runspec.hysteresis_enabled,
-            saturation_samples=saturation_samples,
-            dtype=dtype,
-        )
-        print("Loaded state")
-    except Exception as exc:
-        raise CaseLoadError(
-            f"Failed to initialize reservoir state from deck file: {title!r}."
-        ) from exc
+    if initial_state is None:
+        try:
+            print("Loading state")
+            equilibrium = (
+                Equilibrium.from_deck(deck_file)
+                if equilibrium is None
+                else equilibrium.convert(deck_unit_system)
+            )
+            initial_state = initialize_reservoir_state(
+                reservoir=reservoir,
+                pvt=pvt,
+                deck_file=deck_file,
+                equilibrium=equilibrium,
+                satfunc=satfunc,
+                temperature=typing.cast(Temperature, temperature),
+                hysteresis_enabled=hysteresis_enabled
+                if hysteresis_enabled is not None
+                else runspec.hysteresis_enabled,
+                saturation_samples=saturation_samples,
+                dtype=dtype,
+            )
+            print("Loaded state")
+        except Exception as exc:
+            raise CaseLoadError(
+                f"Failed to initialize reservoir state from deck file: {title!r}."
+            ) from exc
 
-    try:
-        print("Loading wells")
-        wells = WellSystem.from_deck(
-            deck_file,
-            grid=grid,
-            tubing_performance=tubing_performance,
-        )
-        print("Loaded wells")
-    except Exception as exc:
-        raise CaseLoadError(f"Failed to load wells from deck file: {title!r}.") from exc
+    if wells is None:
+        try:
+            print("Loading wells")
+            wells = WellSystem.from_deck(
+                deck_file,
+                grid=grid,
+                tubing_performance=tubing_performance,
+            )
+            print("Loaded wells")
+        except Exception as exc:
+            raise CaseLoadError(f"Failed to load wells from deck file: {title!r}.") from exc
 
     try:
         print("Loading BC")
@@ -574,17 +745,18 @@ def load_case(
         unit_system=unit_system,
     )
 
-    try:
-        print("Loading schedule")
-        schedule = load_schedule(
-            deck_file,
-            compiled_at=compiled_at,
-            load_summary=load_summary,
-            unit_system=unit_system,
-        )
-        print("Loaded schedule")
-    except Exception as exc:
-        raise CaseLoadError(f"Failed to load schedule from deck file: {title!r}.") from exc
+    if schedule is None:
+        try:
+            print("Loading schedule")
+            schedule = load_schedule(
+                deck_file,
+                compiled_at=compiled_at,
+                load_summary=load_summary,
+                unit_system=unit_system,
+            )
+            print("Loaded schedule")
+        except Exception as exc:
+            raise CaseLoadError(f"Failed to load schedule from deck file: {title!r}.") from exc
 
     try:
         check_vfp_references(well_system=wells, schedule=schedule)
