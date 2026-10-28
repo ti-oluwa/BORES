@@ -307,10 +307,11 @@ def compute_killough_scanning_weight(
     same saturation (for example the water and oil relative permeabilities of the oil-water
     system) can share one weight instead of recomputing it.
 
-    The weight is `clamp((S - S_rev) / (S_max - S_rev), 0, 1) ** n`. A cell that sits on its
-    maximum while draining is on the primary drainage curve (weight 0), and a cell that sits on
-    its reversal point while imbibing is on the primary imbibition curve (weight 1). Both have a
-    zero weight derivative.
+    The weight is `clamp((S - S_rev) / (S_max - S_rev), 0, 1) ** n`: it is 0 at the reversal
+    saturation and 1 at the historical maximum, whichever way the saturation is moving, so
+    the scanning curve is continuous and meets each bounding curve at an end of the range.
+    When the range collapses (`S_max == S_rev`) the weight is that of the bounding curve the
+    cell is on, 1 while imbibing and 0 while draining, with a zero derivative.
 
     :param saturation: Current saturation.
     :param reversal_saturation: Saturation at the last reversal point (S_rev).
@@ -320,15 +321,9 @@ def compute_killough_scanning_weight(
     :param numerical_epsilon: Numerical stability tolerance.
     :return: Tuple of the weight and its derivative with respect to saturation.
     """
-    if is_imbibition < 0.5:
-        if abs(saturation - maximum_historical_saturation) < numerical_epsilon:
-            return 0.0, 0.0
-    elif abs(saturation - reversal_saturation) < numerical_epsilon:
-        return 1.0, 0.0
-
     saturation_span = maximum_historical_saturation - reversal_saturation
     if abs(saturation_span) <= numerical_epsilon:
-        return 0.0, 0.0
+        return (1.0 if is_imbibition >= 0.5 else 0.0), 0.0
 
     raw_ratio = (saturation - reversal_saturation) / saturation_span
     if raw_ratio <= 0.0:

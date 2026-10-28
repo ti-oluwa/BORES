@@ -6,9 +6,11 @@ import pytest
 from bores.blackoil.satfunc.relperm.hysteresis import (
     KilloughLandRelPermTable,
     compute_land_residual_saturation,
+    compute_land_trapping_coefficient,
 )
 from bores.blackoil.satfunc.relperm.tables import RelativePermeabilityTable
 from bores.blackoil.satfunc.tables import as_three_phase_relperm_table
+from bores.blackoil.satfunc.utils import compute_killough_scanning_weight
 from bores.types import Wettability
 from tests.satfunc.test_mixing_rules import RULES, _model, _points, _values
 
@@ -182,3 +184,59 @@ def test_analytical_tables_with_land_trapping_evaluate():
     history = _history(sw, sg)
     values, slopes = table.evaluate_with_derivatives(sw, 1.0 - sw - sg, sg, **history)
     assert np.all(np.isfinite(values["oil"])) and np.all(np.isfinite(slopes["dkro_dsw"]))
+
+
+def test_land_form_is_the_standard_one():
+    maximum_residual, maximum_saturation = 0.25, 0.7
+    coefficient = compute_land_trapping_coefficient(
+        maximum_residual_saturation=maximum_residual,
+        maximum_non_wetting_saturation=maximum_saturation,
+    )
+    assert coefficient == pytest.approx(1 / 0.25 - 1 / 0.7)
+    at_maximum = compute_land_residual_saturation(
+        initial_non_wetting_saturation=maximum_saturation,
+        maximum_residual_saturation=maximum_residual,
+        land_trapping_coefficient=coefficient,
+    )
+    assert at_maximum == pytest.approx(maximum_residual)
+    low = compute_land_residual_saturation(
+        initial_non_wetting_saturation=0.2,
+        maximum_residual_saturation=maximum_residual,
+        land_trapping_coefficient=coefficient,
+    )
+    assert low == pytest.approx(0.2 / (1 + coefficient * 0.2))
+    assert low < 0.2
+
+
+@pytest.mark.parametrize("exponent", [1.0, 1.8])
+@pytest.mark.parametrize("imbibing", [True, False])
+def test_scanning_weight_is_continuous_and_bounded(exponent, imbibing):
+    saturations = np.linspace(0.2, 0.6, 4001)
+    weights = np.array([
+        compute_killough_scanning_weight(
+            saturation=value,
+            reversal_saturation=0.3,
+            maximum_historical_saturation=0.5,
+            is_imbibition=1.0 if imbibing else 0.0,
+            scanning_exponent=exponent,
+            numerical_epsilon=1e-12,
+        )[0]
+        for value in saturations
+    ])
+    assert weights.min() >= 0.0 and weights.max() <= 1.0
+    assert np.max(np.abs(np.diff(weights))) < 5e-3
+    assert weights[0] == 0.0 and weights[-1] == 1.0
+
+
+@pytest.mark.parametrize("imbibing", [True, False])
+def test_collapsed_scanning_range_sits_on_the_flagged_curve(imbibing):
+    weight, slope = compute_killough_scanning_weight(
+        saturation=0.4,
+        reversal_saturation=0.4,
+        maximum_historical_saturation=0.4,
+        is_imbibition=1.0 if imbibing else 0.0,
+        scanning_exponent=1.0,
+        numerical_epsilon=1e-12,
+    )
+    assert weight == (1.0 if imbibing else 0.0)
+    assert slope == 0.0

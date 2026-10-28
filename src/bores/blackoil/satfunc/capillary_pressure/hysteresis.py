@@ -72,12 +72,14 @@ def query_oil_water_curve(
     :return: Tuple of `Pcow` and `dPcow/dSw`.
     """
     if isinstance(table, TwoPhaseCapillaryPressureTable):
-        value = query_oil_water_capillary_pressure(table, water_saturation)
+        value = query_oil_water_capillary_pressure(table=table, water_saturation=water_saturation)
         if not with_derivatives:
             return value, None
-        return value, query_oil_water_capillary_pressure(table, water_saturation, derivative=True)
+        return value, query_oil_water_capillary_pressure(
+            table=table, water_saturation=water_saturation, derivative=True
+        )
     values, slopes = evaluate_three_phase_table(
-        table,
+        table=table,
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
         gas_saturation=gas_saturation,
@@ -118,14 +120,21 @@ def query_gas_oil_curve(
     :return: Tuple of `Pcgo` and `dPcgo/dSg`.
     """
     if isinstance(table, TwoPhaseCapillaryPressureTable):
-        value = query_gas_oil_capillary_pressure(table, gas_saturation, connate_water_saturation)
+        value = query_gas_oil_capillary_pressure(
+            table=table,
+            gas_saturation=gas_saturation,
+            connate_water_saturation=connate_water_saturation,
+        )
         if not with_derivatives:
             return value, None
         return value, query_gas_oil_capillary_pressure(
-            table, gas_saturation, connate_water_saturation, derivative=True
+            table=table,
+            gas_saturation=gas_saturation,
+            connate_water_saturation=connate_water_saturation,
+            derivative=True,
         )
     values, slopes = evaluate_three_phase_table(
-        table,
+        table=table,
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
         gas_saturation=gas_saturation,
@@ -152,7 +161,7 @@ def evaluate_three_phase_table(
     The values and derivatives come from a single `evaluate_with_derivatives` call when the
     derivatives are wanted, which shares work inside models that can.
     """
-    cached = memo.get(id(table))
+    cached = memo.get(id(table), None)
     if cached is not None and (cached[1] is not None or not with_derivatives):
         return cached
     arguments = dict(
@@ -406,9 +415,9 @@ class KilloughCapillaryPressureTable(CapillaryPressureTable):
         flat_shape = shape or (1,)
         size = math.prod(flat_shape)
 
-        sw = flatten_kernel_input(water_saturation, shape=flat_shape)
-        so = flatten_kernel_input(oil_saturation, shape=flat_shape)
-        sg = flatten_kernel_input(gas_saturation, shape=flat_shape)
+        sw = flatten_kernel_input(value=water_saturation, shape=flat_shape)
+        so = flatten_kernel_input(value=oil_saturation, shape=flat_shape)
+        sg = flatten_kernel_input(value=gas_saturation, shape=flat_shape)
 
         connate_water_saturation = self.get_connate_water_saturation()
         memo: dict[int, typing.Any] = {}
@@ -436,18 +445,18 @@ class KilloughCapillaryPressureTable(CapillaryPressureTable):
                 **arguments,
                 **kwargs,
             )
-            maximum = flatten_kernel_input(max_water_saturation, shape=flat_shape)
+            maximum = flatten_kernel_input(value=max_water_saturation, shape=flat_shape)
             oil_water, oil_water_slope = scan_curve(
                 size=size,
                 flat_shape=flat_shape,
                 saturation=sw,
                 maximum_saturation=maximum,
                 imbibition_flag=flatten_kernel_input(
-                    water_imbibition_flag, shape=flat_shape, as_float=False
+                    value=water_imbibition_flag, shape=flat_shape, as_float=False
                 ),
                 reversal_saturation=maximum
                 if water_reversal_saturation is None
-                else flatten_kernel_input(water_reversal_saturation, shape=flat_shape),
+                else flatten_kernel_input(value=water_reversal_saturation, shape=flat_shape),
                 scanning_exponent=self.scanning_interpolation_exponent,
                 drainage=oil_water_drainage,
                 imbibition=oil_water_imbibition,
@@ -462,18 +471,18 @@ class KilloughCapillaryPressureTable(CapillaryPressureTable):
                 **arguments,
                 **kwargs,
             )
-            maximum = flatten_kernel_input(max_gas_saturation, shape=flat_shape)
+            maximum = flatten_kernel_input(value=max_gas_saturation, shape=flat_shape)
             gas_oil, gas_oil_slope = scan_curve(
                 size=size,
                 flat_shape=flat_shape,
                 saturation=sg,
                 maximum_saturation=maximum,
                 imbibition_flag=flatten_kernel_input(
-                    gas_imbibition_flag, shape=flat_shape, as_float=False
+                    value=gas_imbibition_flag, shape=flat_shape, as_float=False
                 ),
                 reversal_saturation=maximum
                 if gas_reversal_saturation is None
-                else flatten_kernel_input(gas_reversal_saturation, shape=flat_shape),
+                else flatten_kernel_input(value=gas_reversal_saturation, shape=flat_shape),
                 scanning_exponent=self.scanning_interpolation_exponent,
                 drainage=gas_oil_drainage,
                 imbibition=gas_oil_imbibition,
@@ -487,14 +496,16 @@ class KilloughCapillaryPressureTable(CapillaryPressureTable):
             result = result.reshape(shape)
             return result.item() if is_scalar else result
 
-        pressures = CapillaryPressures(oil_water=finish(oil_water), gas_oil=finish(gas_oil))
+        pressures = CapillaryPressures(
+            oil_water=finish(array=oil_water), gas_oil=finish(array=gas_oil)
+        )
         if not with_derivatives:
             return pressures, None
-        zero = finish(np.zeros(size, dtype=np.asarray(oil_water).dtype))
+        zero = finish(array=np.zeros(size, dtype=np.asarray(oil_water).dtype))
         return pressures, CapillaryPressureDerivatives(
-            dpcow_dsw=finish(oil_water_slope),
+            dpcow_dsw=finish(array=oil_water_slope),
             dpcow_dso=zero,
-            dpcgo_dsg=finish(gas_oil_slope),
+            dpcgo_dsg=finish(array=gas_oil_slope),
             dpcgo_dso=zero,
         )
 
@@ -526,7 +537,11 @@ class KilloughCapillaryPressureTable(CapillaryPressureTable):
         :return: `CapillaryPressures` dictionary with keys `"oil_water"` and `"gas_oil"`.
         """
         pressures, _ = self.compute(
-            water_saturation, oil_saturation, gas_saturation, with_derivatives=False, **kwargs
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+            with_derivatives=False,
+            **kwargs,
         )
         return pressures
 
@@ -555,7 +570,11 @@ class KilloughCapillaryPressureTable(CapillaryPressureTable):
             `dpcow_dsw`, `dpcow_dso`, `dpcgo_dsg`, and `dpcgo_dso`.
         """
         _, derivatives = self.compute(
-            water_saturation, oil_saturation, gas_saturation, with_derivatives=True, **kwargs
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+            with_derivatives=True,
+            **kwargs,
         )
         assert derivatives is not None
         return derivatives
@@ -580,7 +599,11 @@ class KilloughCapillaryPressureTable(CapillaryPressureTable):
         :return: Tuple of the `CapillaryPressures` and `CapillaryPressureDerivatives`.
         """
         pressures, derivatives = self.compute(
-            water_saturation, oil_saturation, gas_saturation, with_derivatives=True, **kwargs
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+            with_derivatives=True,
+            **kwargs,
         )
         assert derivatives is not None
         return pressures, derivatives

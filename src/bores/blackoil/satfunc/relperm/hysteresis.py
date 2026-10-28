@@ -53,7 +53,11 @@ from bores.types import (
     RelativePermeabilityDerivatives,
 )
 
-__all__ = ["KilloughLandRelPermTable"]
+__all__ = [
+    "KilloughLandRelPermTable",
+    "compute_land_residual_saturation",
+    "compute_land_trapping_coefficient",
+]
 
 
 @numba.njit(cache=True, inline="always", error_model="numpy")
@@ -70,29 +74,49 @@ def compute_land_residual_saturation_scalar(
     imbibition begins at `initial_non_wetting_saturation` to the maximum
     possible residual saturation observed at the drainage endpoint:
 
-        S_r = S_r_max / (1 + C * S_i)
+        S_r = S_i / (1 + C * S_i),    C = 1 / S_r_max - 1 / S_max
 
-    Higher *C* means more trapping (smaller residual for the same initial
-    saturation). *C* = 0 means no dynamic trapping (residual equals
-    `maximum_residual_saturation`). The residual can never exceed the saturation the
-    imbibition starts from.
+    Higher *C* means less trapping for the same initial saturation, and `C = 0` traps
+    everything. The residual never exceeds the saturation the imbibition starts from, nor
+    the maximum residual saturation of the drainage endpoint.
 
     :param initial_non_wetting_saturation: Non-wetting saturation at the
         drainage-imbibition reversal point.
     :param maximum_residual_saturation: Maximum residual saturation from the
         drainage endpoint (S_r_max).
-    :param land_trapping_coefficient: Land trapping coefficient *C* (>= 0).
+    :param land_trapping_coefficient: Land trapping coefficient *C* (>= 0), see
+        `compute_land_trapping_coefficient`.
     :param saturation_epsilon: Small value to guard against division by zero.
     :return: Dynamic residual saturation (scalar).
     """
     safe_maximum_residual = max(maximum_residual_saturation, saturation_epsilon)
     non_negative_initial = max(initial_non_wetting_saturation, 0.0)
-    if land_trapping_coefficient <= 0.0:
-        return min(safe_maximum_residual, non_negative_initial)
-    return min(
-        safe_maximum_residual / (1.0 + land_trapping_coefficient * non_negative_initial),
-        non_negative_initial,
+    trapped = non_negative_initial / (
+        1.0 + max(land_trapping_coefficient, 0.0) * non_negative_initial
     )
+    return min(trapped, safe_maximum_residual)
+
+
+@numba.njit(cache=True, inline="always", error_model="numpy")
+def compute_land_trapping_coefficient(
+    maximum_residual_saturation: Number,
+    maximum_non_wetting_saturation: Number,
+    saturation_epsilon: Number = 1e-12,
+) -> Number:
+    """
+    Land trapping coefficient `C = 1 / S_r_max - 1 / S_max`.
+
+    It makes the residual equal `S_r_max` when imbibition starts from the largest
+    non-wetting saturation `S_max`.
+
+    :param maximum_residual_saturation: Residual saturation after imbibition from `S_max`.
+    :param maximum_non_wetting_saturation: Largest non-wetting saturation, `S_max`.
+    :param saturation_epsilon: Small value to guard against division by zero.
+    :return: The coefficient, never negative.
+    """
+    residual = max(maximum_residual_saturation, saturation_epsilon)
+    largest = max(maximum_non_wetting_saturation, saturation_epsilon)
+    return max(1.0 / residual - 1.0 / largest, 0.0)
 
 
 @numba.njit(cache=True, parallel=True)
@@ -377,6 +401,10 @@ def scan_relative_permeabilities_kernel(
         out.krw[i] = krw
         out.krg[i] = krg
 
+        dkrw = 0.0
+        dkro_water = 0.0
+        dkro_gas = 0.0
+        dkrg = 0.0
         if with_derivatives:
             dkrw_drainage = element_at(array=slopes.krw_drainage, index=i)
             dkrw_imbibition = element_at(array=slopes.krw_imbibition, index=i)
@@ -487,10 +515,12 @@ def query_oil_water_curves(
     :return: Tuple of `krw`, `kro`, `dkrw/dSw` and `dkro/dSw`.
     """
     if isinstance(table, TwoPhaseRelPermTable):
-        krw, kro = query_oil_water_system(table, water_saturation)
+        krw, kro = query_oil_water_system(table=table, water_saturation=water_saturation)
         if not with_derivatives:
             return krw, kro, None, None
-        dkrw, dkro = query_oil_water_system(table, water_saturation, derivative=True)
+        dkrw, dkro = query_oil_water_system(
+            table=table, water_saturation=water_saturation, derivative=True
+        )
         return krw, kro, dkrw, dkro
 
     if with_derivatives:
@@ -537,11 +567,18 @@ def query_gas_oil_curves(
     :return: Tuple of `kro`, `krg`, `dkro/dSg` and `dkrg/dSg`.
     """
     if isinstance(table, TwoPhaseRelPermTable):
-        krg, kro = query_gas_oil_system(table, gas_saturation, connate_water_saturation)
+        krg, kro = query_gas_oil_system(
+            table=table,
+            gas_saturation=gas_saturation,
+            connate_water_saturation=connate_water_saturation,
+        )
         if not with_derivatives:
             return kro, krg, None, None
         dkrg, dkro = query_gas_oil_system(
-            table, gas_saturation, connate_water_saturation, derivative=True
+            table=table,
+            gas_saturation=gas_saturation,
+            connate_water_saturation=connate_water_saturation,
+            derivative=True,
         )
         return kro, krg, dkro, dkrg
 
@@ -576,7 +613,7 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
     disconnected. The dynamic residual saturation depends on the saturation
     at the reversal point via Land's formula:
 
-        S_r(S_i) = S_r_max / (1 + C * S_i)
+        S_r(S_i) = S_i / (1 + C * S_i),    C = 1 / S_r_max - 1 / S_max
 
     The dynamic residual is handed to the imbibition table as an endpoint override, so it
     changes the curve of an analytical (parametric) imbibition table. A tabular table has
@@ -614,10 +651,16 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
     """Primary imbibition table for the gas-oil system. Defaults to the drainage table."""
 
     land_trapping_coefficient_water: Number = 1.0
-    """Land trapping coefficient *C* for the oil-water system (>= 0)."""
+    """
+    Land trapping coefficient *C* for the oil-water system (>= 0). Use
+    `compute_land_trapping_coefficient` to derive it from the endpoint saturations.
+    """
 
     land_trapping_coefficient_gas: Number = 1.0
-    """Land trapping coefficient *C* for the gas-oil system (>= 0)."""
+    """
+    Land trapping coefficient *C* for the gas-oil system (>= 0). Use
+    `compute_land_trapping_coefficient` to derive it from the endpoint saturations.
+    """
 
     maximum_residual_oil_saturation_water: float | None = None
     """
@@ -647,7 +690,7 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
 
     def __attrs_post_init__(self) -> None:
         if isinstance(self.mixing_rule, str):
-            object.__setattr__(self, "mixing_rule", get_mixing_rule(self.mixing_rule))
+            object.__setattr__(self, "mixing_rule", get_mixing_rule(name=self.mixing_rule))
 
         for name, table, phases in (
             (
@@ -731,7 +774,8 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
         the connate water saturation of the system into account.
         """
         return resolve_residual_oil_saturation_gas(
-            self.gas_oil_drainage_table, self.get_connate_water_saturation()
+            gas_oil_table=self.gas_oil_drainage_table,
+            connate_water_saturation=self.get_connate_water_saturation(),
         )
 
     def get_residual_gas_saturation(self) -> Number:
@@ -801,9 +845,9 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
         flat_shape = shape or (1,)
         size = math.prod(flat_shape)
 
-        sw = flatten_kernel_input(water_saturation, shape=flat_shape)
-        so = flatten_kernel_input(oil_saturation, shape=flat_shape)
-        sg = flatten_kernel_input(gas_saturation, shape=flat_shape)
+        sw = flatten_kernel_input(value=water_saturation, shape=flat_shape)
+        so = flatten_kernel_input(value=oil_saturation, shape=flat_shape)
+        sg = flatten_kernel_input(value=gas_saturation, shape=flat_shape)
         saturation_epsilon = c.SATURATION_EPSILON
         if saturations_need_normalising(
             size=size,
@@ -823,24 +867,26 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
         placeholder = np.zeros(1, dtype=sw.dtype)
         no_flag = np.zeros(1, dtype=np.bool_)
         if use_water_hysteresis:
-            maximum_water = flatten_kernel_input(max_water_saturation, shape=flat_shape)
+            maximum_water = flatten_kernel_input(value=max_water_saturation, shape=flat_shape)
             water_flag = flatten_kernel_input(
-                water_imbibition_flag, shape=flat_shape, as_float=False
+                value=water_imbibition_flag, shape=flat_shape, as_float=False
             )
             water_reversal = (
                 maximum_water
                 if water_reversal_saturation is None
-                else flatten_kernel_input(water_reversal_saturation, shape=flat_shape)
+                else flatten_kernel_input(value=water_reversal_saturation, shape=flat_shape)
             )
         else:
             maximum_water, water_flag, water_reversal = placeholder, no_flag, placeholder
         if use_gas_hysteresis:
-            maximum_gas = flatten_kernel_input(max_gas_saturation, shape=flat_shape)
-            gas_flag = flatten_kernel_input(gas_imbibition_flag, shape=flat_shape, as_float=False)
+            maximum_gas = flatten_kernel_input(value=max_gas_saturation, shape=flat_shape)
+            gas_flag = flatten_kernel_input(
+                value=gas_imbibition_flag, shape=flat_shape, as_float=False
+            )
             gas_reversal = (
                 maximum_gas
                 if gas_reversal_saturation is None
-                else flatten_kernel_input(gas_reversal_saturation, shape=flat_shape)
+                else flatten_kernel_input(value=gas_reversal_saturation, shape=flat_shape)
             )
         else:
             maximum_gas, gas_flag, gas_reversal = placeholder, no_flag, placeholder
@@ -1036,24 +1082,24 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
             return result.item() if is_scalar else result
 
         relperms = RelativePermeabilities(
-            water=finish(krw),
-            oil=finish(kro),
-            gas=finish(krg),
+            water=finish(array=krw),
+            oil=finish(array=kro),
+            gas=finish(array=krg),
         )
         if not with_derivatives:
             return relperms, None
         assert zeros is not None
-        zero = finish(zeros)
+        zero = finish(array=zeros)
         return relperms, RelativePermeabilityDerivatives(
-            dkrw_dsw=finish(out.dkrw_dsw),
-            dkro_dsw=finish(dkro_dsw),
+            dkrw_dsw=finish(array=out.dkrw_dsw),
+            dkro_dsw=finish(array=dkro_dsw),
             dkrg_dsw=zero,
             dkrw_dso=zero,
-            dkro_dso=finish(dkro_dso),
+            dkro_dso=finish(array=dkro_dso),
             dkrg_dso=zero,
             dkrw_dsg=zero,
-            dkro_dsg=finish(dkro_dsg),
-            dkrg_dsg=finish(out.dkrg_dsg),
+            dkro_dsg=finish(array=dkro_dsg),
+            dkrg_dsg=finish(array=out.dkrg_dsg),
         )
 
     def land_override_kwargs_water(
@@ -1157,7 +1203,11 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
         :return: `RelativePermeabilities` dictionary with keys `"water"`, `"oil"`, and `"gas"`.
         """
         relperms, _ = self.compute(
-            water_saturation, oil_saturation, gas_saturation, with_derivatives=False, **kwargs
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+            with_derivatives=False,
+            **kwargs,
         )
         return relperms
 
@@ -1183,7 +1233,11 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
         :return: `RelativePermeabilityDerivatives` dictionary with all nine entries.
         """
         _, derivatives = self.compute(
-            water_saturation, oil_saturation, gas_saturation, with_derivatives=True, **kwargs
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+            with_derivatives=True,
+            **kwargs,
         )
         assert derivatives is not None
         return derivatives
@@ -1208,7 +1262,11 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
         :return: Tuple of the `RelativePermeabilities` and `RelativePermeabilityDerivatives`.
         """
         relperms, derivatives = self.compute(
-            water_saturation, oil_saturation, gas_saturation, with_derivatives=True, **kwargs
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+            with_derivatives=True,
+            **kwargs,
         )
         assert derivatives is not None
         return relperms, derivatives
