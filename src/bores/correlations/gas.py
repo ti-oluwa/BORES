@@ -1,5 +1,6 @@
 import logging
 import typing
+from collections.abc import Mapping
 
 import numba  # type: ignore[import-untyped]
 import numpy as np
@@ -227,7 +228,7 @@ def compute_gas_viscosity(
     return 1e-4 * k * np.exp(exponent)
 
 
-def validate_contaminant_fractions(values: dict[str, typing.Any]) -> None:
+def validate_contaminant_fractions(values: Mapping[str, NumberOrArray]) -> None:
     """
     Validates the mole fractions of H₂S, CO₂ and N₂ of a gas.
 
@@ -321,7 +322,7 @@ def compute_gas_pseudocritical_pressure(
     :return: Pseudocritical pressure (psi)
     """
     pressure, _ = compute_gas_pseudocritical_properties(
-        gas_gravity, h2s_mole_fraction, co2_mole_fraction, n2_mole_fraction
+        gas_gravity, h2s_mole_fraction, co2_mole_fraction, n2_mole_fraction  # type: ignore[arg-type]
     )
     return pressure
 
@@ -348,7 +349,7 @@ def compute_gas_pseudocritical_temperature(
     :return: Pseudocritical temperature (°R)
     """
     _, temperature = compute_gas_pseudocritical_properties(
-        gas_gravity, h2s_mole_fraction, co2_mole_fraction, n2_mole_fraction
+        gas_gravity, h2s_mole_fraction, co2_mole_fraction, n2_mole_fraction  # type: ignore[arg-type]
     )
     return temperature
 
@@ -390,7 +391,7 @@ def compute_gas_compressibility_factor_papay(
     :return: Gas compressibility factor Z (dimensionless)
     """
     pseudocritical_pressure, pseudocritical_temperature = compute_gas_pseudocritical_properties(
-        gas_gravity, h2s_mole_fraction, co2_mole_fraction, n2_mole_fraction
+        gas_gravity, h2s_mole_fraction, co2_mole_fraction, n2_mole_fraction  # type: ignore[arg-type]
     )
     reduced_pressure = pressure / pseudocritical_pressure
     reduced_temperature = (temperature + FAHRENHEIT_TO_RANKINE_OFFSET) / pseudocritical_temperature
@@ -448,7 +449,7 @@ def compute_gas_compressibility_factor_hall_yarborough(
     :return: Gas compressibility factor Z (dimensionless)
     """
     pseudocritical_pressure, pseudocritical_temperature = compute_gas_pseudocritical_properties(
-        gas_gravity, h2s_mole_fraction, co2_mole_fraction, n2_mole_fraction
+        gas_gravity, h2s_mole_fraction, co2_mole_fraction, n2_mole_fraction  # type: ignore[arg-type]
     )
     reduced_pressure = pressure / pseudocritical_pressure
     if reduced_pressure < 1e-2:
@@ -532,7 +533,7 @@ def compute_gas_compressibility_factor_dranchuk_abou_kassem(
     :return: Gas compressibility factor Z (dimensionless)
     """
     pseudocritical_pressure, pseudocritical_temperature = compute_gas_pseudocritical_properties(
-        gas_gravity, h2s_mole_fraction, co2_mole_fraction, n2_mole_fraction
+        gas_gravity, h2s_mole_fraction, co2_mole_fraction, n2_mole_fraction  # type: ignore[arg-type]
     )
     reduced_pressure = pressure / pseudocritical_pressure
     if reduced_pressure < 1e-2:
@@ -791,7 +792,9 @@ def compute_co2_fugacity_coefficient(
     if pressure <= 0.0:
         return 1.0
     a = CO2_EQUATION_OF_STATE_COEFFICIENTS
-    reduced_temperature = fahrenheit_to_kelvin(temperature) / CO2_CRITICAL_TEMPERATURE
+    reduced_temperature = (
+        fahrenheit_to_kelvin(temperature) / CO2_CRITICAL_TEMPERATURE  # type: ignore[arg-type]
+    )
     reduced_pressure = pressure * PSI_TO_PASCAL * PASCAL_TO_BAR / CO2_CRITICAL_PRESSURE
 
     lower = 0.05

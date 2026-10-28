@@ -143,6 +143,30 @@ class TestResultDtype:
         assert double(np.float32(2.0), np.float32(1.0)).dtype == np.float32
 
 
+@elementwise
+def product(x, y):
+    return x * y
+
+
+class TestIntegerPreservation:
+    def test_integer_operations_keep_the_integer_dtype(self):
+        assert product(np.arange(3), np.arange(3)).dtype == np.int64
+        a = np.arange(3, dtype=np.int32)
+        assert product(a, a).dtype == np.int32
+
+    def test_float_operand_promotes_integer_operations(self):
+        assert product(np.arange(3), np.ones(3, dtype=np.float32)).dtype == np.float64
+        assert product(np.ones(3, dtype=np.float32), 2.0).dtype == np.float32
+
+    def test_python_numbers_skip_dtype_resolution(self):
+        assert product(2, 3) == 6
+        assert product(2.0, 3.0) == pytest.approx(6.0)
+
+    def test_empty_inputs_and_lists_are_accepted(self):
+        assert double(np.array([]), 1.0).shape == (0,)
+        np.testing.assert_allclose(double([1.0, 2.0], 1.0), [3.0, 5.0])
+
+
 @elementwise(target="parallel")
 def parallel_scaled(x, y):
     return 3.0 * x + y

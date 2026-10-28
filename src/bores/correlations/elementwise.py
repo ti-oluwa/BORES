@@ -27,6 +27,9 @@ Validator = Callable[[Mapping[str, NumberOrArray]], None]
 COMPILED_FLOAT_DTYPES = (np.dtype(np.float32), np.dtype(np.float64))
 """Floating point dtypes the compiled correlations compute in."""
 
+TYPED_OPERANDS = (np.ndarray, np.generic, list, tuple)
+"""Operand types that carry a dtype or may need one resolved. Plain Python numbers do not."""
+
 PARALLEL_SIGNATURE_TYPES = ("float64", "float32")
 """Argument and result types a parallel correlation is compiled for."""
 
@@ -64,6 +67,34 @@ def prepare_operand(value: NumberOrArray) -> NumberOrArray:
     return value
 
 
+def smallest(value: NumberOrArray) -> Number:
+    """
+    Smallest element of a number or array, without NumPy call overhead for plain numbers.
+
+    :param value: A number, array, or sequence of numbers.
+    :return: The smallest element.
+    """
+    if isinstance(value, np.ndarray):
+        return value.min()
+    if isinstance(value, (list, tuple)):
+        return np.min(value)
+    return value  # type: ignore[return-value]
+
+
+def largest(value: NumberOrArray) -> Number:
+    """
+    Largest element of a number or array, without NumPy call overhead for plain numbers.
+
+    :param value: A number, array, or sequence of numbers.
+    :return: The largest element.
+    """
+    if isinstance(value, np.ndarray):
+        return value.max()
+    if isinstance(value, (list, tuple)):
+        return np.max(value)
+    return value  # type: ignore[return-value]
+
+
 class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
     """
     A correlation written once as a scalar function and usable on scalars and arrays alike.
@@ -79,10 +110,13 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
     the scalar function with `NumberOrArray`, since that is what callers may pass and
     receive.
 
-    The result has the floating point dtype NumPy's promotion rules give for the
-    inputs: float32 arrays give float32, float64 gives float64, and integers give
-    float64. Float16 and extended precision inputs are computed in float64 and the
-    result is returned in the input dtype.
+    The result has the dtype NumPy's promotion rules give for the inputs when the
+    scalar function returns the same kind of number it was given: float32 arrays
+    give float32, float64 gives float64, and a function that only uses integer
+    operations on integer arrays gives integers. A function that returns floats for
+    integer inputs, for example by dividing, gives float64. Float16 and extended
+    precision inputs are computed in float64 and the result is returned in the
+    input dtype. Calls with only Python numbers skip dtype resolution entirely.
 
     Argument checks declared on the decorator run once per call, on the whole
     input, before any computation.
@@ -211,15 +245,15 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
         by_name = dict(zip(self.argument_names, values, strict=False))
         for name in self.positive:
             value = by_name.get(name)
-            if value is not None and np.min(value) <= 0:
+            if value is not None and smallest(value) <= 0:
                 raise ValidationError(f"`{name}` must be greater than zero.")
         for name in self.non_negative:
             value = by_name.get(name)
-            if value is not None and np.min(value) < 0:
+            if value is not None and smallest(value) < 0:
                 raise ValidationError(f"`{name}` must be non-negative.")
         for name, (lower, upper) in self.bounds.items():
             value = by_name.get(name)
-            if value is not None and (np.min(value) < lower or np.max(value) > upper):
+            if value is not None and (smallest(value) < lower or largest(value) > upper):
                 raise ValidationError(f"`{name}` must be between {lower} and {upper}.")
         for validator in self.validators:
             validator(by_name)
@@ -232,20 +266,23 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
         if self.positive or self.non_negative or self.bounds or self.validators:
             self.check(values)
 
-        dtype = resolve_result_dtype(*values)
-        operands = tuple(prepare_operand(v) for v in values)
+        if not any(isinstance(v, TYPED_OPERANDS) for v in values):
+            return super().__call__(*values)
+
+        typed = [np.asarray(v) if isinstance(v, (list, tuple)) else v for v in values]
+        target = np.result_type(*typed)
+        operands = [prepare_operand(v) for v in typed]
         if self.target == "parallel" and any(isinstance(o, np.ndarray) for o in operands):
-            compute_dtype = np.float32 if dtype == np.float32 else np.float64
-            result = self.get_parallel_loop()(
+            compute_dtype = np.float32 if target == np.float32 else np.float64
+            result: typing.Any = self.get_parallel_loop()(
                 *(np.asarray(o, dtype=compute_dtype) for o in operands)
             )
         else:
             result = super().__call__(*operands)
 
-        result = typing.cast(npt.NDArray | np.generic, result)
-        if result.dtype != dtype:
-            result = result.astype(dtype, copy=False)
-        return typing.cast(R, result)
+        if result.dtype != target and result.dtype.kind == target.kind:
+            result = result.astype(target, copy=False)
+        return result
 
 
 @typing.overload
