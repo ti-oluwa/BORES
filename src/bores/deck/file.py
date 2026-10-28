@@ -546,6 +546,8 @@ class DeckFile:
         strict: bool = False,
     ) -> None:
         """
+        Initialize the deck file.
+
         :param source: A file path, raw deck text `str`, or raw deck
             `bytes`. Filesystem paths and `Path` objects are read from
             disk; `INCLUDE` directives are resolved relative to the source
@@ -932,7 +934,7 @@ class DeckFile:
         """
         Convenience batch form of `get`.
 
-        :param ks: Keyword ks to retrieve.
+        :param ks: Keywords to retrieve.
         :param use_cache: Passed through to `get`.
         :returns: `{name: value}` dict in the order requested.
         """

@@ -13,7 +13,6 @@ from bores.grids.base import Grid
 from bores.types import (
     Boolean,
     BooleanArray,
-    CellArray,
     IntArray,
     Integer,
     NumberArray,
@@ -864,7 +863,7 @@ def fill_cell_entries(
 def make_pyvista_grid(
     grid: Grid,
     *,
-    cell_data: Mapping[str, CellArray] | None = None,
+    cell_data: Mapping[str, NumberArray[OneDimension]] | None = None,
     hollow: bool = False,
     use_hexahedra: bool = False,
 ) -> typing.Any:

@@ -30,7 +30,7 @@ print(
 
 # Wells and schedule
 wells = case.model.wells
-print(f"Wells: {list(wells.names) if wells else []}")
+print(f"Wells: {wells.names if wells else []}")
 
 # for item in case.schedule:
 #     print(item, "\n")
@@ -45,7 +45,7 @@ print(f"bbox: {grid.bounding_box}")
 
 pv_grid = make_pyvista_grid(
     grid,
-    cell_data={"pressure": case.initial_state.pressure},
+    cell_data={"pressure": case.model.reservoir.regions.equilibrium_region},
     use_hexahedra=True,
     hollow=True,
 )
