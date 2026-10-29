@@ -2544,9 +2544,27 @@ def compute_hex_volumes_and_centroids(
                         weighted[axis] += determinant * position[axis]
 
         cell_volumes[cell_idx] = total_volume
+        # A cell whose volume is almost, but not exactly, zero (a collapsed cell) gives a volume
+        # weighted centroid that is a ratio of two rounding-level numbers and can land far
+        # outside the cell. A genuine centroid always lies within the bounds of the corners, so
+        # a centroid outside them is replaced by the mean of the corners.
+        use_volume_weighted_centroid = abs(total_volume) > 0.0
+        if use_volume_weighted_centroid:
+            for axis in range(3):
+                lowest = corners[0, axis]
+                highest = corners[0, axis]
+                for node in range(1, 8):
+                    lowest = min(lowest, corners[node, axis])
+                    highest = max(highest, corners[node, axis])
+                slack = 1e-9 * (highest - lowest)
+                candidate = weighted[axis] / total_volume
+                if not (lowest - slack <= candidate <= highest + slack):
+                    use_volume_weighted_centroid = False
+                    break
+
         for axis in range(3):
             origin = vertex_coordinates[vtk_corner_indices[cell_idx, 0], axis]
-            if abs(total_volume) > 0.0:
+            if use_volume_weighted_centroid:
                 cell_centroids[cell_idx, axis] = origin + weighted[axis] / total_volume
             else:
                 mean = 0.0

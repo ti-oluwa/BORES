@@ -81,6 +81,25 @@ def test_hex_kernel_matches_the_exact_trilinear_integral_for_warped_cells(seed):
     assert np.allclose(centroids[0], expected_centroid + offset, atol=1e-8)
 
 
+def test_hex_kernel_keeps_the_centroid_of_a_collapsed_cell_inside_its_corners():
+    # Top and bottom corners coincide, so the true volume is zero. The quadrature returns a
+    # volume of about 1e-15 (rounding noise) and the volume weighted centroid is a ratio of
+    # two such numbers, which used to land hundreds of kilometres away.
+    top = np.array([
+        [461226.6857677247, 7327592.785550759, 2941.283],
+        [461361.64861677936, 7327538.850736207, 2924.395],
+        [461463.69567462424, 7327702.904687385, 2859.935],
+        [461329.771104733, 7327759.847211365, 2875.772],
+    ])
+    collapsed = np.vstack([top, top])
+    volumes, centroids = compute_hex_volumes_and_centroids(
+        np.arange(8, dtype=np.int32)[None, :], collapsed
+    )
+    assert abs(volumes[0]) < 1e-6
+    assert np.all(centroids[0] >= collapsed.min(axis=0))
+    assert np.all(centroids[0] <= collapsed.max(axis=0))
+
+
 def test_hex_kernel_reports_an_inverted_cell_as_negative():
     volumes, _ = compute_hex_volumes_and_centroids(
         np.arange(8, dtype=np.int32)[None, :], BOX[[4, 5, 6, 7, 0, 1, 2, 3]]
