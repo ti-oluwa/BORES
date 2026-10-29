@@ -78,7 +78,7 @@ class PeriodicTarget:
 
 def _sorted_unique(values: Iterable[Number]) -> tuple[Number, ...]:
     """Sorts times and drops repeats."""
-    return tuple(sorted({float(value) for value in values}))
+    return tuple(sorted({value for value in values}))
 
 
 def _as_periodic_tuple(values: Iterable[PeriodicTarget]) -> tuple[PeriodicTarget, ...]:

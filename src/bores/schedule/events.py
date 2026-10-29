@@ -230,6 +230,7 @@ class IntervalEvent(Event[ModelT]):
         """
         if context.time < self.start:
             return False
+
         previous_count = (
             0
             if context.previous_time is None

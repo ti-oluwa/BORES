@@ -543,8 +543,8 @@ class Timer:
         for actual, limit, label in mbe_checks:
             if limit is None or actual is None:
                 continue
-            if abs(float(actual)) > limit:
-                messages.append(f"{label}: |{abs(float(actual)):.3e}| > {limit:.3e}")
+            if abs(actual) > limit:
+                messages.append(f"{label}: |{abs(actual):.3e}| > {limit:.3e}")
         return bool(messages), messages
 
     def propose_step_size(self) -> Number:
