@@ -23,6 +23,7 @@ from bores.wells.compile import (
     RateQuantityTag,
     WellKind,
     WorkoverActionTag,
+    get_well_open_status,
 )
 from bores.wells.controls import (
     BHPLimit,
@@ -552,7 +553,7 @@ def decompile_well(wells: Wells, compiled_system: CompiledWellSystem, well_row: 
         well_type=WELL_TYPE_FROM_KIND[compiled_system.well_kinds[well_row]],
         reference_depth=compiled_system.reference_depths[well_row],
         schedule_status=get_well_status(compiled_system.schedule_statuses[well_row]),
-        open_status=get_completion_status(compiled_system.open_statuses[well_row]),
+        open_status=get_well_open_status(tag=compiled_system.open_statuses[well_row]),
         perforations=perforations,
     )
 

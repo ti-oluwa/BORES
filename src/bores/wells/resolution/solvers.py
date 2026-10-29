@@ -642,6 +642,63 @@ def solve_rate_producer(
     return bhp, connection_pressures, rates, surface_rates
 
 
+def solve_stopped_well(
+    *,
+    is_injector: Boolean,
+    injected_phase: Integer,
+    tubing: WellTubing,
+    reference_depth: Number,
+    workspace: PerforationWorkspace,
+    spec: WellControlSpec,
+) -> tuple[Number, NumberArray[OneDimension], PhaseValues, PhaseValues]:
+    """
+    Resolves a stopped well that allows crossflow: nothing leaves or enters the well in total,
+    while its connections still flow between each other through the wellbore.
+
+    This is a rate-controlled solve with a target of zero. The reference pressure it finds is
+    the one at which what the connections at higher pressure give the wellbore is exactly what
+    the connections at lower pressure take from it. The total is the volume at reservoir
+    conditions of every phase for a producer, and of the injected phase for an injector.
+
+    Nominal resolution only. Does not check limits.
+
+    :param is_injector: Whether the well is an injector.
+    :param injected_phase: `FluidPhaseTag` value of the injected phase. Unused for a producer.
+    :param tubing: Hydraulics correlation for this well.
+    :param reference_depth: The well's BHP/THP reporting datum.
+    :param workspace: This well's `PerforationWorkspace`.
+    :param spec: FixedPointSolver tunables.
+    :returns: `(bhp, connection_pressures, rates, surface_rates)`, reservoir- and
+        surface-condition rates for every phase.
+    """
+    relevant_phases = phase_mask(phase_tag=injected_phase) if is_injector else ALL_PHASES
+    min_pressure, max_pressure = get_pressure_bracket(
+        workspace=workspace, is_injector=is_injector, spec=spec
+    )
+    bhp, _, _ = solve_bhp(
+        tubing=tubing,
+        reference_depth=reference_depth,
+        workspace=workspace,
+        relevant_phases=relevant_phases,
+        is_injector=is_injector,
+        target=0.0,
+        min_pressure=min_pressure,
+        max_pressure=max_pressure,
+        spec=spec,
+        target_rate_condition="reservoir",
+    )
+    connection_pressures, rates, surface_rates = solve_connection_pressures_and_rates(
+        tubing=tubing,
+        reference_depth=reference_depth,
+        workspace=workspace,
+        reference_pressure=bhp,
+        relevant_phases=relevant_phases,
+        is_injector=is_injector,
+        spec=spec,
+    )
+    return bhp, connection_pressures, rates, surface_rates
+
+
 def solve_bhp_producer(
     *,
     target_bhp: Number,

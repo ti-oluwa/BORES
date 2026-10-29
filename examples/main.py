@@ -47,7 +47,7 @@ print(f"bbox: {grid.bounding_box}")
 
 pv_grid = make_pyvista_grid(
     grid,
-    cell_data={"pressure": case.initial_state.oil_saturation},
+    cell_data={"pressure": case.initial_state.solution_gor},
     use_hexahedra=True,
     hollow=True,
 )

@@ -58,6 +58,16 @@ GROUP_INJECTOR_CONTROL_MODE_MAP = {
     "FLD": GroupInjectorControlMode.FIELD,
 }
 """Group-control analogue of `INJECTOR_CONTROL_MODE_MAP`, for `GCONINJE`."""
+WELL_STATUS_MAP = {
+    "OPEN": CompletionStatus.OPEN,
+    "AUTO": CompletionStatus.OPEN,
+    "SHUT": CompletionStatus.SHUT,
+    "STOP": CompletionStatus.STOP,
+}
+"""
+Used for the status item of `WELOPEN` records that name no connection, and of `WCONPROD` and
+`WCONINJE`, which set a well's own status. `AUTO` (resume normal operation) is the same as `OPEN`.
+"""
 WELOPEN_STATUS_MAP = {
     "OPEN": CompletionStatus.OPEN,
     "AUTO": CompletionStatus.OPEN,
@@ -65,14 +75,9 @@ WELOPEN_STATUS_MAP = {
     "STOP": CompletionStatus.SHUT,
 }
 """
-Used for the status item of `WELOPEN`, `WCONPROD` and `WCONINJE` alike.
-
-`CompletionStatus` only distinguishes open from shut, so `WELOPEN`'s
-`STOP` (stop flow, but not the same as a deck author marking a completion
-as never meant to flow) is treated the same as `SHUT` here, and `AUTO`
-(resume normal operation) the same as `OPEN`. A real distinction between
-"shut" and "temporarily stopped" would need `CompletionStatus` itself
-extended, not something patched in at the deck-loading layer.
+Used for the status item of `WELOPEN` records that name a connection. A connection cannot be
+stopped, so `STOP` is the same as `SHUT` there, and `AUTO` (resume normal operation) is the same
+as `OPEN`.
 """
 
 WELTARG_TARGET_FIELD = {

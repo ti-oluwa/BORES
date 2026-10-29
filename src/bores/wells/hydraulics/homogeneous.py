@@ -420,7 +420,7 @@ def walk_perforation_pressures(
             pressures[idx] = (
                 previous_pressure
                 + geometric_sign * (drop.hydrostatic + drop.acceleration)
-                + friction_sign * geometric_sign * drop.friction
+                + friction_sign * walk.flow_directions[step] * geometric_sign * drop.friction
             )
 
 
@@ -582,6 +582,7 @@ def march_segment_from_table(
     length: Number,
     inclination_from_vertical: Number,
     geometric_sign: Number,
+    flow_direction: Number,
     surface_rates: PhaseValues,
     tubing_fluid_table: TubingFluidTable,
     is_injector: Boolean,
@@ -604,6 +605,8 @@ def march_segment_from_table(
     :param surface_rates: Rate of each phase carried along the stretch, at surface
         conditions. The gas rate is the total, free and dissolved.
     :param tubing_fluid_table: The well's fluid properties against pressure.
+    :param flow_direction: `1` if the stretch carries flow the way the well flows, `-1` if
+        connections that flow against the well have turned it around.
     :param is_injector: Whether this well is an injector.
     :param sub_segment_count: Number of sub-segments to march in.
     :returns: Pressure at the far end.
@@ -657,7 +660,7 @@ def march_segment_from_table(
             next_end_pressure = (
                 pressure
                 + geometric_sign * (drop.hydrostatic + drop.acceleration)
-                + friction_sign * geometric_sign * drop.friction
+                + friction_sign * flow_direction * geometric_sign * drop.friction
                 - kinetic
             )
             end_pressure = next_end_pressure
@@ -819,6 +822,7 @@ def walk_perforation_pressures_from_table(
                 length=walk.segment_lengths[step],
                 inclination_from_vertical=inclinations_from_vertical[idx],  # type: ignore
                 geometric_sign=geometric_sign,
+                flow_direction=walk.flow_directions[step],
                 surface_rates=remaining_rates,
                 tubing_fluid_table=tubing_fluid_table,
                 is_injector=is_injector,

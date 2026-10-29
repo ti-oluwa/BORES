@@ -53,6 +53,7 @@ from bores.wells.mappings import (
     GROUP_PRODUCER_CONTROL_MODE_MAP,
     INJECTOR_CONTROL_MODE_MAP,
     PRODUCER_CONTROL_MODE_MAP,
+    WELL_STATUS_MAP,
     WELOPEN_STATUS_MAP,
     WELSPECS_PHASE_MAP,
     WELTARG_TARGET_FIELD,
@@ -173,12 +174,12 @@ def replay_open_status(
             changes.append((
                 time,
                 0,
-                WELOPEN_STATUS_MAP[str(record.get("status") or "OPEN").upper()],
+                WELL_STATUS_MAP[str(record.get("status") or "OPEN").upper()],
             ))
     for record in welopen_records or ():
         time = record.get("schedule_time", 0.0)
         if time <= current_time and is_whole_well_record(record, keyword="WELOPEN"):
-            changes.append((time, 1, WELOPEN_STATUS_MAP[record["status"]]))
+            changes.append((time, 1, WELL_STATUS_MAP[record["status"]]))
     status = CompletionStatus.OPEN
     for *_, new_status in sorted(changes, key=lambda change: change[:2]):
         status = new_status
@@ -1989,7 +1990,7 @@ def load_schedule(
                     event=TimeEvent(at=schedule_time * time_factor),
                     action=UpdateWellStatuses(
                         well_names=(record["well"],),
-                        status=WELOPEN_STATUS_MAP[str(record["status"]).upper()],
+                        status=WELL_STATUS_MAP[str(record["status"]).upper()],
                     ),
                     name=f"wconprod-status:{record['well']}@{schedule_time}",
                 )
@@ -2048,7 +2049,7 @@ def load_schedule(
                 event=TimeEvent(at=schedule_time * time_factor),
                 action=UpdateWellStatuses(
                     well_names=(record["well"],),
-                    status=WELOPEN_STATUS_MAP[str(record.get("status") or "OPEN").upper()],
+                    status=WELL_STATUS_MAP[str(record.get("status") or "OPEN").upper()],
                 ),
                 name=f"wconprod-status:{record['well']}@{schedule_time}",
             )
@@ -2108,7 +2109,7 @@ def load_schedule(
                 event=TimeEvent(at=schedule_time * time_factor),
                 action=UpdateWellStatuses(
                     well_names=(record["well"],),
-                    status=WELOPEN_STATUS_MAP[str(record.get("status") or "OPEN").upper()],
+                    status=WELL_STATUS_MAP[str(record.get("status") or "OPEN").upper()],
                 ),
                 name=f"wconinje-status:{record['well']}@{schedule_time}",
             )

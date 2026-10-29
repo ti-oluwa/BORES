@@ -52,7 +52,7 @@ class WellType(enum.Enum):
 
 class CompletionStatus(enum.Enum):
     """
-    Whether a connection, or a whole well, is open or shut.
+    Whether a connection, or a whole well, is open, shut or stopped.
 
     As a perforation's `status`, it is whether that connection is meant to flow. It comes from
     deck `COMPDAT` item 6, and from `WELOPEN` records that name the connection. As a well's
@@ -70,6 +70,14 @@ class CompletionStatus(enum.Enum):
 
     OPEN = "open"
     SHUT = "shut"
+    STOP = "stop"
+    """
+    Only for a well's own `open_status`, never for a connection. The well produces or injects
+    nothing at the surface, but its connections stay open to the formation. If the well allows
+    crossflow, they still flow between each other through the wellbore, from the connections at
+    higher pressure to those at lower, so that nothing leaves the well in total. If it doesn't,
+    a stopped well is the same as a shut one. A shut well is cut off from the formation entirely.
+    """
 
     def __str__(self) -> str:
         return self.value
@@ -350,14 +358,15 @@ class Well:
     Deck `WELSPECS` item 2. `None` if ungrouped.
     """
 
-    pvt_region: int | None = None
+    pvt_region: Integer | None = None
 
     unit_system: UnitSystem = UnitSystem.FIELD
 
     open_status: CompletionStatus = CompletionStatus.OPEN
     """
-    The well's own open or shut flag. A shut well flows nothing, whatever the status of its
-    connections, and keeps them as they are for when it is opened again. Independent of
+    The well's own open, shut or stopped flag. A shut well flows nothing, whatever the status of
+    its connections, and keeps them as they are for when it is opened again. A stopped well flows
+    nothing at the surface, but see `CompletionStatus.STOP`. Independent of
     `schedule_status`: a well can be `ACTIVE` and shut, or `PENDING` and already shut for when
     it comes online. See `CompletionStatus`.
     """

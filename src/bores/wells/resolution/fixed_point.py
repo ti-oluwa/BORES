@@ -169,6 +169,7 @@ def accumulate_rates(
         relevant_gas=count_gas,
         is_injector=is_injector,
         radial_flow_constant=radial_flow_constant,
+        allows_crossflow=workspace.allows_crossflow,
         out_connection_oil_rates=workspace.connection_oil_rates,
         out_connection_water_rates=workspace.connection_water_rates,
         out_connection_gas_rates=workspace.connection_gas_rates,

@@ -525,6 +525,7 @@ def accumulate_rates(
     relevant_gas: Boolean,
     is_injector: Boolean,
     radial_flow_constant: Number,
+    allows_crossflow: Boolean,
     out_connection_oil_rates: NumberArray[OneDimension],
     out_connection_water_rates: NumberArray[OneDimension],
     out_connection_gas_rates: NumberArray[OneDimension],
@@ -559,6 +560,14 @@ def accumulate_rates(
         converts `well_index * mobility * drawdown` (`compute_peaceman_well_index`'s
         own units, which have no 2*pi built in) into a real reservoir-condition
         rate in this simulation's own unit system.
+    :param allows_crossflow: Whether a connection whose drawdown is reversed flows the other
+        way instead of giving no flow. A producer's reversed connection takes fluid from the
+        wellbore into the formation, in the proportions of the fluid the well's other
+        connections produce. An injector's reversed connection produces the formation's own fluid
+        into the wellbore, all three phases, whatever the injected phase. Both use the
+        connection's own formation volume factors and gas ratios to find surface rates, and are
+        negative in the connection and well rates. A producer with nothing flowing the normal way
+        has no fluid to give a reversed connection, so those get no flow.
     :param out_connection_oil_rates: Written in place with each
         connection's own reservoir-condition oil rate (`0.0` if
         `relevant_oil` is `False`). `PerforationWorkspace.connection_oil_rates`.
@@ -623,6 +632,62 @@ def accumulate_rates(
                 out_connection_gas_rates[idx] = contribution
             if carries_condensate:
                 surface_oil_rate += surface_free_gas_contribution * vaporized_oil_ratios[idx]
+
+    if allows_crossflow:
+        forward_oil_rate = oil_rate
+        forward_water_rate = water_rate
+        forward_gas_rate = gas_rate
+        forward_total_rate = forward_oil_rate + forward_water_rate + forward_gas_rate
+        for idx in range(well_indices.shape[0]):
+            if is_injector:
+                signed_drawdown = connection_pressures[idx] - reservoir_pressures[idx]
+            else:
+                signed_drawdown = reservoir_pressures[idx] - connection_pressures[idx]
+            if signed_drawdown >= 0.0:
+                continue
+            reverse_drawdown = -signed_drawdown
+            well_index = well_indices[idx]
+            if is_injector:
+                reverse_oil_rate = (
+                    radial_flow_constant * well_index * oil_mobilities[idx] * reverse_drawdown
+                )
+                reverse_water_rate = (
+                    radial_flow_constant * well_index * water_mobilities[idx] * reverse_drawdown
+                )
+                reverse_gas_rate = (
+                    radial_flow_constant * well_index * gas_mobilities[idx] * reverse_drawdown
+                )
+            else:
+                if forward_total_rate <= 0.0:
+                    continue
+                total_reverse_rate = (
+                    radial_flow_constant
+                    * well_index
+                    * (oil_mobilities[idx] + water_mobilities[idx] + gas_mobilities[idx])
+                    * reverse_drawdown
+                )
+                reverse_oil_rate = total_reverse_rate * forward_oil_rate / forward_total_rate
+                reverse_water_rate = total_reverse_rate * forward_water_rate / forward_total_rate
+                reverse_gas_rate = total_reverse_rate * forward_gas_rate / forward_total_rate
+
+            out_connection_oil_rates[idx] = -reverse_oil_rate
+            out_connection_water_rates[idx] = -reverse_water_rate
+            out_connection_gas_rates[idx] = -reverse_gas_rate
+            oil_rate -= reverse_oil_rate
+            water_rate -= reverse_water_rate
+            gas_rate -= reverse_gas_rate
+
+            surface_oil_contribution = reverse_oil_rate / (
+                oil_formation_volume_factors[idx] * stb_to_volume_factor
+            )
+            surface_oil_rate -= surface_oil_contribution
+            surface_gas_rate -= surface_oil_contribution * dissolved_gas_ratios[idx]
+            surface_water_rate -= reverse_water_rate / (
+                water_formation_volume_factors[idx] * stb_to_volume_factor
+            )
+            surface_free_gas_contribution = reverse_gas_rate / gas_formation_volume_factors[idx]
+            surface_gas_rate -= surface_free_gas_contribution
+            surface_oil_rate -= surface_free_gas_contribution * vaporized_oil_ratios[idx]
 
     return (
         oil_rate,

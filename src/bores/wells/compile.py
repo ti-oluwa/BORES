@@ -493,10 +493,10 @@ class CompiledPerforations(typing.NamedTuple):
             applies to every row in `row`; a sequence sets each row to its own status.
         """
         if isinstance(status, CompletionStatus):
-            self.completion_statuses[row] = 1 if status == CompletionStatus.OPEN else 0
+            self.completion_statuses[row] = get_completion_status_tag(status=status)
         else:
             self.completion_statuses[row] = [
-                1 if one_status == CompletionStatus.OPEN else 0 for one_status in status
+                get_completion_status_tag(status=one_status) for one_status in status
             ]
 
     @typing.overload
@@ -1432,8 +1432,8 @@ class CompiledWellSystem(typing.NamedTuple):
 
     open_statuses: IntArray[OneDimension]
     """
-    Shape `(n_wells,)`. `1` for a well whose `Well.open_status` is `OPEN`, `0` for `SHUT`.
-    A shut well flows nothing, whatever the status of its connections, which are left as they
+    Shape `(n_wells,)`. `1` for a well whose `Well.open_status` is `OPEN`, `0` for `SHUT`, `2`
+    for `STOP`. A shut well flows nothing, whatever the status of its connections, which are left as they
     are for when the well is opened again.
     """
 
@@ -1611,9 +1611,9 @@ class CompiledWellSystem(typing.NamedTuple):
         """
         if np.isscalar(well_row):
             well_row = typing.cast(Integer, well_row)
-            return CompletionStatus.OPEN if self.open_statuses[well_row] else CompletionStatus.SHUT
+            return get_well_open_status(tag=self.open_statuses[well_row])
         return [
-            CompletionStatus.OPEN if tag else CompletionStatus.SHUT
+            get_well_open_status(tag=tag)
             for tag in self.open_statuses[well_row]  # type: ignore[index]
         ]
 
@@ -1632,23 +1632,30 @@ class CompiledWellSystem(typing.NamedTuple):
             every row in `well_row`; a sequence sets each row to its own status.
         """
         if isinstance(status, CompletionStatus):
-            self.open_statuses[well_row] = get_completion_status_tag(status=status)
+            self.open_statuses[well_row] = get_well_open_status_tag(status=status)
         else:
             self.open_statuses[well_row] = [
-                get_completion_status_tag(status=one_status) for one_status in status
+                get_well_open_status_tag(status=one_status) for one_status in status
             ]
 
     def get_flowing_connection_rows(self, *, well_row: Integer) -> IntArray[OneDimension]:
         """
         The connections of a well that can flow right now: in effect, open, and on a well that
-        is itself in effect and open. This is the one place that decides it, so whatever
-        supplies a well's connection fluids must supply them for exactly these rows, in order.
+        is itself in effect and either open or stopped with crossflow allowed. This is the one
+        place that decides it, so whatever supplies a well's connection fluids must supply them
+        for exactly these rows, in order.
 
         :param well_row: The well's row in `names`.
         :returns: The rows of the well's flowing connections, in order. Empty if the well is
-            pending or shut, or has no connection that is open and in effect.
+            pending or shut, is stopped and does not allow crossflow, or has no connection that
+            is open and in effect.
         """
-        if self.schedule_statuses[well_row] == 0 or self.open_statuses[well_row] == 0:
+        open_status = self.open_statuses[well_row]
+        if (
+            self.schedule_statuses[well_row] == 0
+            or open_status == 0
+            or (open_status == STOPPED_WELL_TAG and self.crossflow_flags[well_row] == 0)
+        ):
             return np.empty(0, dtype=np.intp)  # type: ignore[return-value]
 
         perforations = self.perforations
@@ -1752,8 +1759,42 @@ def get_completion_status_tag(status: CompletionStatus) -> Integer:
 
     :param status: `CompletionStatus` to convert.
     :returns: `1` for `OPEN`, `0` for `SHUT`.
+    :raises ValidationError: If `status` is `STOP`, which a connection cannot be.
     """
+    if status is CompletionStatus.STOP:
+        raise ValidationError(
+            "A connection cannot be `STOP`. Only a well as a whole can be stopped."
+        )
     return 1 if status is CompletionStatus.OPEN else 0
+
+
+STOPPED_WELL_TAG = 2
+"""The value `CompiledWellSystem.open_statuses` holds for a stopped well."""
+
+
+def get_well_open_status_tag(status: CompletionStatus) -> Integer:
+    """
+    Converts a well's `CompletionStatus` to its compiled tag value.
+
+    :param status: `CompletionStatus` to convert.
+    :returns: `1` for `OPEN`, `0` for `SHUT`, `2` for `STOP`.
+    """
+    if status is CompletionStatus.STOP:
+        return STOPPED_WELL_TAG
+    return 1 if status is CompletionStatus.OPEN else 0
+
+
+def get_well_open_status(tag: Integer) -> CompletionStatus:
+    """
+    Converts a compiled well open-status tag back to `CompletionStatus`.
+    Inverse of `get_well_open_status_tag`.
+
+    :param tag: `1` for `OPEN`, `0` for `SHUT`, `2` for `STOP`.
+    :returns: The matching `CompletionStatus`.
+    """
+    if tag == STOPPED_WELL_TAG:
+        return CompletionStatus.STOP
+    return CompletionStatus.OPEN if tag else CompletionStatus.SHUT
 
 
 def to_int_array(
@@ -2318,7 +2359,7 @@ def compile_well_system(
             get_well_status_tag(status=well.schedule_status) for well in roster
         ),
         open_statuses=to_int_array(
-            get_completion_status_tag(status=well.open_status) for well in roster
+            get_well_open_status_tag(status=well.open_status) for well in roster
         ),
         reference_depths=to_number_array((well.reference_depth for well in roster), dtype=dtype),
         reference_measured_depths=to_number_array(

@@ -10,6 +10,7 @@ from bores.blackoil.pvt.data import get_stb_to_volume_factor
 from bores.errors import StopSimulation, ValidationError, WellConvergenceError
 from bores.types import Integer, NumberArray, OneDimension, P, R
 from bores.wells.compile import (
+    STOPPED_WELL_TAG,
     UNSET_INT,
     CompiledWellSystem,
     InjectorControlModeTag,
@@ -29,6 +30,7 @@ from bores.wells.resolution.solvers import (
     solve_connection_pressures_and_rates,
     solve_rate_injector,
     solve_rate_producer,
+    solve_stopped_well,
 )
 from bores.wells.resolution.spec import WellControlSpec
 from bores.wells.resolution.tubing import (
@@ -216,7 +218,24 @@ def resolve_well_control(
         stb_to_volume_factor=get_stb_to_volume_factor(compiled_system.unit_system),
     )
 
-    if is_injector:
+    is_stopped = compiled_system.open_statuses[well_row] == STOPPED_WELL_TAG
+    if is_stopped:
+        injected_phase = controls.injected_phases[well_row]
+        relevant_phases = phase_mask(injected_phase) if is_injector else ALL_PHASES
+        tubing = attach_flowing_fluid(
+            tubing=tubing,
+            workspace=perforation_workspace,
+            relevant_phases=relevant_phases,
+        )
+        bhp, connection_pressures, rates, surface_rates = solve_stopped_well(
+            is_injector=is_injector,
+            injected_phase=injected_phase,
+            tubing=tubing,
+            reference_depth=reference_depth,
+            workspace=perforation_workspace,
+            spec=spec,
+        )
+    elif is_injector:
         if control_mode == InjectorControlModeTag.UNSET:
             return
         injected_phase = controls.injected_phases[well_row]
@@ -365,38 +384,42 @@ def resolve_well_control(
             raise ValidationError(f"Unknown `ProducerControlModeTag`: {control_mode!r}.")
 
     limits = controls.limits
-    limits_start, limits_end = (
-        limits.well_offsets[well_row],
-        limits.well_offsets[well_row + 1],
-    )
-    min_pressure, max_pressure = get_pressure_bracket(
-        workspace=perforation_workspace, is_injector=is_injector, spec=spec
-    )
-    (
-        bhp,
-        connection_pressures,
-        rates,
-        surface_rates,
-        active_limit_row,
-        economic_shutin,
-    ) = apply_limits(
-        limits=limits,
-        limits_start=limits_start,
-        limits_end=limits_end,
-        tubing=tubing,
-        reference_depth=reference_depth,
-        workspace=perforation_workspace,
-        relevant_phases=relevant_phases,
-        is_injector=is_injector,
-        bhp=bhp,
-        connection_pressures=connection_pressures,
-        rates=rates,
-        surface_rates=surface_rates,
-        min_pressure=min_pressure,
-        max_pressure=max_pressure,
-        spec=spec,
-        surface_sample=surface_sample,
-    )
+    if is_stopped:
+        active_limit_row = UNSET_INT
+        economic_shutin = False
+    else:
+        limits_start, limits_end = (
+            limits.well_offsets[well_row],
+            limits.well_offsets[well_row + 1],
+        )
+        min_pressure, max_pressure = get_pressure_bracket(
+            workspace=perforation_workspace, is_injector=is_injector, spec=spec
+        )
+        (
+            bhp,
+            connection_pressures,
+            rates,
+            surface_rates,
+            active_limit_row,
+            economic_shutin,
+        ) = apply_limits(
+            limits=limits,
+            limits_start=limits_start,
+            limits_end=limits_end,
+            tubing=tubing,
+            reference_depth=reference_depth,
+            workspace=perforation_workspace,
+            relevant_phases=relevant_phases,
+            is_injector=is_injector,
+            bhp=bhp,
+            connection_pressures=connection_pressures,
+            rates=rates,
+            surface_rates=surface_rates,
+            min_pressure=min_pressure,
+            max_pressure=max_pressure,
+            spec=spec,
+            surface_sample=surface_sample,
+        )
 
     workspace.bhps[well_row] = bhp
     workspace.oil_rates[well_row] = rates.oil

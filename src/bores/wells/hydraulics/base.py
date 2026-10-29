@@ -600,13 +600,29 @@ class ConnectionWalk(typing.NamedTuple):
     """`1` where a segment ends deeper than it starts, `-1` where shallower."""
 
     carried_oil_rates: NumberArray[OneDimension]
-    """Oil rate flowing through each segment, at reservoir conditions."""
+    """
+    Oil rate flowing through each segment, at reservoir conditions. Never negative: the direction
+    of the flow is in `flow_directions`.
+    """
 
     carried_water_rates: NumberArray[OneDimension]
-    """Water rate flowing through each segment, at reservoir conditions."""
+    """
+    Water rate flowing through each segment, at reservoir conditions. Never negative: the
+    direction of the flow is in `flow_directions`.
+    """
 
     carried_gas_rates: NumberArray[OneDimension]
-    """Gas rate flowing through each segment, at reservoir conditions."""
+    """
+    Gas rate flowing through each segment, at reservoir conditions. Never negative: the direction
+    of the flow is in `flow_directions`.
+    """
+
+    flow_directions: NumberArray[OneDimension]
+    """
+    `1` where a segment carries flow in the direction of the well's own flow, a producer's flow
+    towards the surface and an injector's flow away from it, and `-1` where connections that flow
+    against the well have turned the net flow of the segment around.
+    """
 
 
 def compile_connection_fluids(
@@ -666,6 +682,35 @@ def get_hydrostatic_divisor(unit_system: UnitSystem) -> Number:
 
 
 @numba.njit(cache=True)
+def get_flow_magnitudes(
+    oil_rate: Number, water_rate: Number, gas_rate: Number
+) -> tuple[Number, Number, Number, Number]:
+    """
+    Turns the signed net rate of each phase through a segment into the rates a wellbore
+    correlation takes, and the direction of the flow.
+
+    Connections that flow against the well can leave a segment with phases that flow in opposite
+    directions. The composition of the stream is then taken from the size of each phase's rate,
+    and its size and direction from the net of all three, so a segment whose phases all flow the
+    same way is passed on unchanged apart from the sign.
+
+    :param oil_rate: Net oil rate through the segment, positive in the direction of the well's
+        own flow.
+    :param water_rate: Net water rate through the segment, likewise.
+    :param gas_rate: Net gas rate through the segment, likewise.
+    :returns: The oil, water and gas rates, none negative, and the direction of the flow, `1` or
+        `-1`. A segment whose net rate is zero has no flow, and all three rates are zero.
+    """
+    net = oil_rate + water_rate + gas_rate
+    spread = abs(oil_rate) + abs(water_rate) + abs(gas_rate)
+    if net == 0 or spread == 0:
+        return 0.0, 0.0, 0.0, 1.0
+    scale = abs(net) / spread
+    direction = 1.0 if net > 0.0 else -1.0
+    return abs(oil_rate) * scale, abs(water_rate) * scale, abs(gas_rate) * scale, direction
+
+
+@numba.njit(cache=True)
 def plan_connection_walk(
     reference_depth: Number,
     reference_measured_depth: Number,
@@ -684,6 +729,11 @@ def plan_connection_walk(
     connection at or below the reference depth, plus every connection above it that the walk has
     already passed. A connection exactly at the reference depth belongs to the downward walk.
     Connections at the same depth are visited in index order.
+
+    A connection that flows against the well, which only happens when the well allows
+    crossflow, has a negative rate. Each segment carries the net of the rates beneath it, and
+    `ConnectionWalk.flow_directions` says whether that net still flows the well's way. The
+    carried rates themselves are never negative.
 
     The reference depths are taken in the data type of the depth arrays, so a connection at the
     reference depth is at it exactly, whatever precision the reference was given in.
@@ -715,6 +765,7 @@ def plan_connection_walk(
     carried_oil_rates = np.empty(count, dtype=connection_oil_rates.dtype)
     carried_water_rates = np.empty(count, dtype=connection_water_rates.dtype)
     carried_gas_rates = np.empty(count, dtype=connection_gas_rates.dtype)
+    flow_directions = np.empty(count, dtype=representative_depths.dtype)
 
     below_start = count - below_count
     oil_beneath = connection_oil_rates.dtype.type(0.0)
@@ -725,9 +776,16 @@ def plan_connection_walk(
         oil_beneath = oil_beneath + connection_oil_rates[idx]
         water_beneath = water_beneath + connection_water_rates[idx]
         gas_beneath = gas_beneath + connection_gas_rates[idx]
-        carried_oil_rates[step] = oil_beneath
-        carried_water_rates[step] = water_beneath
-        carried_gas_rates[step] = gas_beneath
+        (
+            carried_oil_rates[step],
+            carried_water_rates[step],
+            carried_gas_rates[step],
+            flow_directions[step],
+        ) = get_flow_magnitudes(
+            oil_rate=oil_beneath,  # type: ignore[arg-type]
+            water_rate=water_beneath,  # type: ignore[arg-type]
+            gas_rate=gas_beneath,  # type: ignore[arg-type]
+        )
 
     previous_index = -1
     previous_depth = reference_depth
@@ -762,9 +820,16 @@ def plan_connection_walk(
             abs(representative_measured_depths[idx] - previous_measured_depth), vertical_distance
         )
         geometric_signs[step] = -1.0
-        carried_oil_rates[step] = oil_carried
-        carried_water_rates[step] = water_carried
-        carried_gas_rates[step] = gas_carried
+        (
+            carried_oil_rates[step],
+            carried_water_rates[step],
+            carried_gas_rates[step],
+            flow_directions[step],
+        ) = get_flow_magnitudes(
+            oil_rate=oil_carried,  # type: ignore[arg-type]
+            water_rate=water_carried,  # type: ignore[arg-type]
+            gas_rate=gas_carried,  # type: ignore[arg-type]
+        )
         oil_carried = oil_carried + connection_oil_rates[idx]
         water_carried = water_carried + connection_water_rates[idx]
         gas_carried = gas_carried + connection_gas_rates[idx]
@@ -781,6 +846,7 @@ def plan_connection_walk(
         carried_oil_rates=carried_oil_rates,  # type: ignore[arg-type]
         carried_water_rates=carried_water_rates,  # type: ignore[arg-type]
         carried_gas_rates=carried_gas_rates,  # type: ignore[arg-type]
+        flow_directions=flow_directions,  # type: ignore[arg-type]
     )
 
 
