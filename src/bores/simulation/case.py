@@ -232,6 +232,7 @@ class SimulationCase:
         min_wetting_relperm: MinimumRelPerm = None,
         min_non_wetting_relperm: MinimumRelPerm = None,
         include_capillary_pressure: bool = True,
+        allow_two_phase_satfunc: bool = False,
         hysteresis_enabled: bool | None = None,
         saturation_samples: int = N_SATURATION_SAMPLES,
         interpolation_method: InterpolationMethod = "linear",
@@ -275,7 +276,7 @@ class SimulationCase:
         :param regions: The region assignments to use in place of the deck's. Each array must have one
             entry per grid cell.
         :param satfunc: The saturation functions to use in place of the deck's. `mixing_rule`, `spacing`,
-            and `include_capillary_pressure` are then not used, and `min_wetting_relperm` and
+            `include_capillary_pressure`, and `allow_two_phase_satfunc` are then not used, and `min_wetting_relperm` and
             `min_non_wetting_relperm` must not be given. Converted to the deck's unit system.
         :param rock: The rock properties to use in place of the deck's. They must have one value per
             grid cell, and must have been built against the same saturation functions and saturation
@@ -302,6 +303,12 @@ class SimulationCase:
         :param min_non_wetting_relperm: Minimum non-wetting-phase relative permeability for `SatFunc.from_deck`.
         :param include_capillary_pressure: Whether to include capillary pressure in the saturation functions.
             Forwarded to `SatFunc.from_deck`.
+        :param allow_two_phase_satfunc: Whether a saturation region whose deck defines only one of the
+            oil-water and gas-oil systems may be given a two-phase saturation function, instead of the
+            load failing. It covers relative permeability and capillary pressure together. The phase
+            that the region has no system for gets zero relative permeability and capillary pressure.
+            Regions that define both systems are unaffected. Forwarded to `SatFunc.from_deck` as
+            `allow_two_phase`.
         :param hysteresis_enabled: Whether to include hysteresis in the initial state.
             Forwarded to `initialize_reservoir_state`.
         :param saturation_samples: Number of saturation samples for the initial state.
@@ -349,6 +356,7 @@ class SimulationCase:
             min_wetting_relperm=min_wetting_relperm,
             min_non_wetting_relperm=min_non_wetting_relperm,
             include_capillary_pressure=include_capillary_pressure,
+            allow_two_phase_satfunc=allow_two_phase_satfunc,
             hysteresis_enabled=hysteresis_enabled,
             saturation_samples=saturation_samples,
             interpolation_method=interpolation_method,
@@ -427,6 +435,7 @@ def load_case(
     min_wetting_relperm: MinimumRelPerm = None,
     min_non_wetting_relperm: MinimumRelPerm = None,
     include_capillary_pressure: bool = True,
+    allow_two_phase_satfunc: bool = False,
     hysteresis_enabled: bool | None = None,
     saturation_samples: int = N_SATURATION_SAMPLES,
     interpolation_method: InterpolationMethod = "linear",
@@ -471,7 +480,7 @@ def load_case(
     :param regions: The region assignments to use in place of the deck's. Each array must have one
         entry per grid cell.
     :param satfunc: The saturation functions to use in place of the deck's. `mixing_rule`, `spacing`,
-        and `include_capillary_pressure` are then not used, and `min_wetting_relperm` and
+        `include_capillary_pressure`, and `allow_two_phase_satfunc` are then not used, and `min_wetting_relperm` and
         `min_non_wetting_relperm` must not be given. Converted to the deck's unit system.
     :param rock: The rock properties to use in place of the deck's. They must have one value per
         grid cell, and must have been built against the same saturation functions and saturation
@@ -496,6 +505,12 @@ def load_case(
     :param min_non_wetting_relperm: Minimum non-wetting-phase relative permeability for `SatFunc.from_deck`.
     :param include_capillary_pressure: Whether to include capillary pressure in the saturation functions.
         Forwarded to `SatFunc.from_deck`.
+    :param allow_two_phase_satfunc: Whether a saturation region whose deck defines only one of the
+        oil-water and gas-oil systems may be given a two-phase saturation function, instead of the
+        load failing. It covers relative permeability and capillary pressure together. The phase
+        that the region has no system for gets zero relative permeability and capillary pressure.
+        Regions that define both systems are unaffected. Forwarded to `SatFunc.from_deck` as
+        `allow_two_phase`.
     :param hysteresis_enabled: Whether to include hysteresis in the initial state.
         Forwarded to `initialize_reservoir_state`.
     :param saturation_samples: Number of saturation samples for the initial state.
@@ -619,6 +634,7 @@ def load_case(
                 min_wetting_relperm=min_wetting_relperm,
                 min_non_wetting_relperm=min_non_wetting_relperm,
                 include_capillary_pressure=include_capillary_pressure,
+                allow_two_phase=allow_two_phase_satfunc,
                 dtype=dtype,
             )
             print("Loaded satfunc")
