@@ -1,13 +1,4 @@
-"""
-Complete `CompiledWellSystem` resolution for one timestep.
-
-`resolution.engine.resolve_well_control` resolves one well; it raises if
-that well is still in `GRUP` mode, since a `GRUP`-mode well has no
-concrete target until its group's own allocation runs. This module is
-the orchestrator that sequences group allocation, well resolution, and
-group economic-limit enforcement correctly, so a caller never has to get
-that ordering right by hand.
-"""
+"""`CompiledWellSystem` resolution for one timestep."""
 
 import typing
 

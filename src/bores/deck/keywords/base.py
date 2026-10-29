@@ -306,7 +306,7 @@ class ArrayKeyword(Keyword[FloatArray[OneDimension]]):
         name: str,
         *,
         dtype: npt.DTypeLike = np.float64,
-        default_value: float = 0.0,
+        default_value: Number = 0.0,
         is_multiplier: bool = False,
         column_shape: tuple[str, ...] | None = None,
     ) -> None:

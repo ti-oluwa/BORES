@@ -30,8 +30,7 @@ named/numbered objects.
 - `WTHP`: well tubing-head pressure.
 - `WOIR` / `WOIT`: well oil injection rate/total. Rare in practice; Eclipse still defines them.
 
-Every vector above has a matching `bores.wells.summary` `Summary`
-implementation of the same mnemonic.
+Every vector above has a matching `bores.wells.summary` `Summary` implementation of the same mnemonic.
 
 **Solver vectors** (whole run, no object list; they report on the solver itself, so there is no
 `bores.wells.summary` counterpart):
@@ -39,13 +38,11 @@ implementation of the same mnemonic.
 - `NEWTON`: Newton iterations in each time step.
 - `MLINEARS`: linear solver iterations per Newton iteration.
 
-**Region vectors** (one series per FIP region; optionally restricted to
-named region numbers):
+**Region vectors** (one series per FIP region; optionally restricted to named region numbers):
 
 - `ROIP` / `RGIP` / `RWIP`: reservoir oil/gas/water in place.
 
-**Block vectors** (one series per listed grid cell, given as `I J K /` lines closed
-by a final `/`):
+**Block vectors** (one series per listed grid cell, given as `I J K /` lines closed by a final `/`):
 
 - `BPR` / `BPRESSUR`: oil phase pressure in the cell.
 - `BGSAT` / `BSGAS`: gas saturation in the cell.

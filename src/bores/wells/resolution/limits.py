@@ -411,9 +411,8 @@ def apply_limits(
         governing_phase_rates = rates
         governing_surface_phase_rates = surface_rates
     else:
-        # Most restrictive: highest bounding BHP for a producer (lowest
-        # resulting rate), lowest bounding BHP for an injector (lowest
-        # resulting injection rate).
+        # Use the most restrictive limit. The highest bounding BHP for a producer (lowest
+        # resulting rate), lowest bounding BHP for an injector (lowest resulting injection rate).
         governing_bhp, governing_row = (
             min(candidates, key=lambda pair: pair[0])
             if is_injector

@@ -4,7 +4,7 @@ Fluid properties against pressure for the tubing of a well.
 A tubing head pressure is found by marching up the tubing in segments. The fluid in each segment
 has to be described at that segment's own pressure, since gas expands and oil gives up dissolved
 gas as the pressure falls. `TubingFluidTable` holds the properties against pressure, built once
-from the PVT tables, and `evaluate_tubing_fluids` reads them at any pressure inside jitted code.
+from the PVT tables, and `get_tubing_fluid_sample` reads them at any pressure.
 """
 
 import logging
@@ -45,16 +45,16 @@ __all__ = [
     "MARCH_ITERATIONS",
     "NoSlipMixture",
     "TubingFluidSample",
-    "TubingFluidState",
     "TubingFluidTable",
+    "TubingState",
     "TwoPhaseFlow",
     "build_tubing_fluid_table",
     "compute_connection_surface_rates",
     "compute_no_slip_mixture",
     "compute_two_phase_flow",
-    "evaluate_tubing_fluids",
     "evaluate_tubing_state",
     "get_stb_to_volume_factor",
+    "get_tubing_fluid_sample",
 ]
 
 logger = logging.getLogger(__name__)
@@ -281,11 +281,11 @@ def read_column(values: NumberArray[OneDimension], lower: Integer, fraction: Num
 
 
 @numba.njit(cache=True)
-def evaluate_tubing_fluids(
+def get_tubing_fluid_sample(
     table: TubingFluidTable, pressure: Number, produced_gas_oil_ratio: Number
 ) -> TubingFluidSample:
     """
-    Reads the fluids of a well's tubing at one pressure.
+    Reads the properties of fluids of a well's tubing at a given pressure.
 
     The oil holds the lower of the produced gas-oil ratio and the saturated solution gas-oil
     ratio at this pressure. Oil that is not saturated is read from the table at its own bubble
@@ -362,7 +362,7 @@ def evaluate_tubing_fluids(
     )
 
 
-class TubingFluidState(typing.NamedTuple):
+class TubingState(typing.NamedTuple):
     """What a well's surface rates make at one pressure in its tubing."""
 
     sample: TubingFluidSample
@@ -379,7 +379,7 @@ def evaluate_tubing_state(
     surface_oil_rate: Number,
     surface_water_rate: Number,
     surface_gas_rate: Number,
-) -> TubingFluidState:
+) -> TubingState:
     """
     Finds the phases a well's surface rates make at one pressure in its tubing, and their volumes.
 
@@ -409,13 +409,13 @@ def evaluate_tubing_state(
     if free_gas_rate < 0.0:
         free_gas_rate = 0.0
         liquid_oil_rate = surface_oil_rate
-        sample = evaluate_tubing_fluids(
+        sample = get_tubing_fluid_sample(
             table=table,
             pressure=pressure,
             produced_gas_oil_ratio=surface_gas_rate / surface_oil_rate,
         )
     else:
-        sample = evaluate_tubing_fluids(
+        sample = get_tubing_fluid_sample(
             table=table, pressure=pressure, produced_gas_oil_ratio=math.inf
         )
         if liquid_oil_rate < 0.0:
@@ -441,7 +441,7 @@ def evaluate_tubing_state(
             phase_viscosities=sample.phase_viscosities,
             gas_liquid_surface_tension=sample.gas_liquid_surface_tension,
         )
-    return TubingFluidState(
+    return TubingState(
         sample=sample,
         phase_rates=PhaseValues(
             oil=liquid_oil_rate * sample.formation_volume_factors.oil * table.stb_to_volume_factor,

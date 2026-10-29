@@ -36,6 +36,7 @@ from bores.types import (
     NumberArray,
     OneDimension,
     PhaseValues,
+    T,
     TableQuery,
     TableResult,
     UnitSystem,
@@ -933,8 +934,8 @@ def map_deck_definition(
     label: str,
     axis: str,
     declared: str,
-    mapping: typing.Mapping[str, typing.Any],
-) -> typing.Any:
+    mapping: typing.Mapping[str, T],
+) -> T:
     """
     Maps the definition a deck declares for a table axis to its enum.
 

@@ -1233,7 +1233,6 @@ def average_equilibrium_samples(
     :param sample_weights: Weight of each sample, shape `(n_cells, n_samples)`.
     :returns: One value per cell for every array.
     """
-
     water_saturation = typing.cast(
         NumberArray[TwoDimensions], np.reshape(sample_arrays.water_saturation, (n_cells, -1))
     )
@@ -1472,7 +1471,7 @@ def initialize_equilibrium_arrays(
     for eqlnum in eqlnums:
         # With one region the cells are all of the grid, which needs no mask and no copies
         mask = slice(None) if single_region else equilibrium_region_index == eqlnum
-        equilibrium_region = equilibrium.region(int(eqlnum))
+        equilibrium_region = equilibrium.region(eqlnum)
 
         region_pvtnum = np.unique(pvt_region_index[mask])
         if len(region_pvtnum) != 1:

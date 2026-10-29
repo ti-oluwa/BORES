@@ -88,7 +88,7 @@ class RegionGroups(typing.NamedTuple):
 
 
 @numba.njit(cache=True)
-def sort_cells_by_region_kernel(
+def sort_cells_by_region(
     saturation_region: IntCellArray,
     imbibition_region: IntCellArray,
     use_imbibition_region: Boolean,
@@ -157,7 +157,7 @@ def group_cells_by_region(
     key_count = (int(saturation_region.max()) + 1) * stride
     offsets = np.zeros(key_count + 1, dtype=np.int64)
     order = np.empty(size, dtype=np.int64)
-    sort_cells_by_region_kernel(
+    sort_cells_by_region(
         saturation_region=saturation_region,
         imbibition_region=imbibition_region,
         use_imbibition_region=use_imbibition_region,

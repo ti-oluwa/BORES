@@ -1964,36 +1964,48 @@ def compile_perforations(
         well_offsets=to_int_array(well_offsets, dtype=np.int64),
         cell_indices=typing.cast(
             IntArray[OneDimension],
-            np.fromiter((c.cell_index for c in connections), dtype=np.int64, count=count),
+            np.fromiter(
+                (connection.cell_index for connection in connections), dtype=np.int64, count=count
+            ),
         ),
         perforation_indices=to_int_array(ordinals, dtype=np.int64),
         well_indices=number_column(
-            c.well_index if c.well_index is not None else np.nan for c in connections
+            connection.well_index if connection.well_index is not None else np.nan
+            for connection in connections
         ),
         connection_conductivities=number_column(
-            c.conductivity if c.conductivity is not None else np.nan for c in connections
+            connection.conductivity if connection.conductivity is not None else np.nan
+            for connection in connections
         ),
-        wellbore_radii=number_column(c.perforation.wellbore_radius for c in connections),
-        skins=number_column(c.perforation.skin for c in connections),
+        wellbore_radii=number_column(
+            connection.perforation.wellbore_radius for connection in connections
+        ),
+        skins=number_column(connection.perforation.skin for connection in connections),
         partial_penetration_fractions=number_column(
-            c.partial_penetration_fraction for c in connections
+            connection.partial_penetration_fraction for connection in connections
         ),
-        representative_depths=number_column(c.representative_depth for c in connections),
+        representative_depths=number_column(
+            connection.representative_depth for connection in connections
+        ),
         representative_measured_depths=number_column(
-            c.representative_measured_depth for c in connections
+            connection.representative_measured_depth for connection in connections
         ),
-        inclinations_from_vertical=number_column(c.inclination_from_vertical for c in connections),
+        inclinations_from_vertical=number_column(
+            connection.inclination_from_vertical for connection in connections
+        ),
         completion_statuses=int_column(
-            get_completion_status_tag(status=c.perforation.status) for c in connections
+            get_completion_status_tag(status=connection.perforation.status)
+            for connection in connections
         ),
         schedule_statuses=int_column(
-            get_well_status_tag(status=c.perforation.schedule_status) for c in connections
+            get_well_status_tag(status=connection.perforation.schedule_status)
+            for connection in connections
         ),
         saturation_regions=int_column(
-            c.perforation.saturation_region
-            if c.perforation.saturation_region is not None
+            connection.perforation.saturation_region
+            if connection.perforation.saturation_region is not None
             else UNSET_INT
-            for c in connections
+            for connection in connections
         ),
     )
 
@@ -2068,7 +2080,7 @@ def compile_well_controls(
             control_modes.append(PRODUCER_MODE_TAG[control.mode])
             injected_phases.append(UNSET_INT)
         else:
-            raise ValidationError(f"Unknown WellControl type: {type(control)!r}.")
+            raise ValidationError(f"Unknown `WellControl` type: {type(control)!r}.")
 
         target_bhp = getattr(control, "target_bhp", None)
         target_thp = getattr(control, "target_thp", None)

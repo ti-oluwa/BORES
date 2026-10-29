@@ -717,7 +717,7 @@ def _min_value_loop(
 
 
 @numba.njit(cache=True, error_model="numpy", parallel=True)
-def _min_value_loop_parallel(
+def _min_value_parallel_loop(
     kw: NumberArray[OneDimension],
     kg: NumberArray[OneDimension],
     rw: NumberArray[OneDimension],
@@ -778,7 +778,7 @@ def _min_derivative_loop(
 
 
 @numba.njit(cache=True, error_model="numpy", parallel=True)
-def _min_derivative_loop_parallel(
+def _min_derivative_parallel_loop(
     kw: NumberArray[OneDimension],
     kg: NumberArray[OneDimension],
     rw: NumberArray[OneDimension],
@@ -838,7 +838,7 @@ def min_rule(
     """
     return run_rule(  # type: ignore[arg-type]
         _min_value_loop,
-        _min_value_loop_parallel,
+        _min_value_parallel_loop,
         kro_w,
         kro_w,
         kro_g,
@@ -883,7 +883,7 @@ def _(
     """
     return run_rule_derivatives(  # type: ignore[arg-type]
         _min_derivative_loop,
-        _min_derivative_loop_parallel,
+        _min_derivative_parallel_loop,
         kro_w,
         kro_g,
         krw,
@@ -968,7 +968,7 @@ def _baker_value_loop(
 
 
 @numba.njit(cache=True, error_model="numpy", parallel=True)
-def _baker_value_loop_parallel(
+def _baker_value_parallel_loop(
     kw: NumberArray[OneDimension],
     kg: NumberArray[OneDimension],
     rw: NumberArray[OneDimension],
@@ -1039,7 +1039,7 @@ def _baker_derivative_loop(
 
 
 @numba.njit(cache=True, error_model="numpy", parallel=True)
-def _baker_derivative_loop_parallel(
+def _baker_derivative_parallel_loop(
     kw: NumberArray[OneDimension],
     kg: NumberArray[OneDimension],
     rw: NumberArray[OneDimension],
@@ -1106,7 +1106,7 @@ def baker_linear_rule(
     """
     return run_rule(  # type: ignore[arg-type]
         _baker_value_loop,
-        _baker_value_loop_parallel,
+        _baker_value_parallel_loop,
         kro_w,
         kro_w,
         kro_g,
@@ -1159,7 +1159,7 @@ def _(
     """
     return run_rule_derivatives(  # type: ignore[arg-type]
         _baker_derivative_loop,
-        _baker_derivative_loop_parallel,
+        _baker_derivative_parallel_loop,
         kro_w,
         kro_g,
         krw,
@@ -1235,7 +1235,7 @@ def _stone_II_value_loop(
 
 
 @numba.njit(cache=True, error_model="numpy", parallel=True)
-def _stone_II_value_loop_parallel(
+def _stone_II_value_parallel_loop(
     kw: NumberArray[OneDimension],
     kg: NumberArray[OneDimension],
     rw: NumberArray[OneDimension],
@@ -1306,7 +1306,7 @@ def _stone_II_derivative_loop(
 
 
 @numba.njit(cache=True, error_model="numpy", parallel=True)
-def _stone_II_derivative_loop_parallel(
+def _stone_II_derivative_parallel_loop(
     kw: NumberArray[OneDimension],
     kg: NumberArray[OneDimension],
     rw: NumberArray[OneDimension],
@@ -1372,7 +1372,7 @@ def stone_II_rule(
     """
     return run_rule(  # type: ignore[arg-type]
         _stone_II_value_loop,
-        _stone_II_value_loop_parallel,
+        _stone_II_value_parallel_loop,
         kro_w,
         kro_w,
         kro_g,
@@ -1422,7 +1422,7 @@ def _(
     """
     return run_rule_derivatives(  # type: ignore[arg-type]
         _stone_II_derivative_loop,
-        _stone_II_derivative_loop_parallel,
+        _stone_II_derivative_parallel_loop,
         kro_w,
         kro_g,
         krw,
@@ -1612,7 +1612,7 @@ def _stone_I_value_loop(
 
 
 @numba.njit(cache=True, error_model="numpy", parallel=True)
-def _stone_I_value_loop_parallel(
+def _stone_I_value_parallel_loop(
     kw: NumberArray[OneDimension],
     kg: NumberArray[OneDimension],
     rw: NumberArray[OneDimension],
@@ -1691,7 +1691,7 @@ def _stone_I_derivative_loop(
 
 
 @numba.njit(cache=True, error_model="numpy", parallel=True)
-def _stone_I_derivative_loop_parallel(
+def _stone_I_derivative_parallel_loop(
     kw: NumberArray[OneDimension],
     kg: NumberArray[OneDimension],
     rw: NumberArray[OneDimension],
@@ -1769,7 +1769,7 @@ def stone_I_rule(
     """
     return run_rule(  # type: ignore[arg-type]
         _stone_I_value_loop,
-        _stone_I_value_loop_parallel,
+        _stone_I_value_parallel_loop,
         kro_w,
         kro_w,
         kro_g,
@@ -1830,7 +1830,7 @@ def _(
     """
     return run_rule_derivatives(  # type: ignore[arg-type]
         _stone_I_derivative_loop,
-        _stone_I_derivative_loop_parallel,
+        _stone_I_derivative_parallel_loop,
         kro_w,
         kro_g,
         krw,

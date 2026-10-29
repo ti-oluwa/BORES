@@ -13,6 +13,7 @@ from bores.grids.base import Grid
 from bores.grids.containment import cell_contains_point, get_first_cell_containing_point
 from bores.grids.traversal import check_point_in_polygon_2d, walk_segment_cells
 from bores.types import (
+    Boolean,
     GridIntersectionMethod,
     IntArray,
     Integer,
@@ -466,7 +467,7 @@ def check_cell_contains_point(
     cell_index: Integer,
     point: tuple[Number, Number, Number],
     tolerance: Number = 1e-6,
-) -> bool:
+) -> Boolean:
     """
     `True` if `point` lies inside cell `cell_index`, or on its boundary within `tolerance`.
 
