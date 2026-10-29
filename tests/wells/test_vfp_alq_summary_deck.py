@@ -3235,9 +3235,12 @@ def test_the_rate_bisection_matches_a_python_loop_over_the_solve(
         spec=spec,
         target_rate_condition=condition,
     )
-    assert bhp == pytest.approx(expected_bhp, rel=1e-9)
-    assert pressures == pytest.approx(expected_pressures, rel=1e-9)
-    assert tuple(rates) == pytest.approx(tuple(expected_rates), rel=1e-9)
+    # Both stop within the solver's own tolerance, one from a warm start and one from a cold one,
+    # so they agree to a small multiple of it and not to rounding.
+    agreement = max(1e-9, 10.0 * spec.rate_convergence_tolerance)
+    assert bhp == pytest.approx(expected_bhp, rel=agreement)
+    assert pressures == pytest.approx(expected_pressures, rel=agreement)
+    assert tuple(rates) == pytest.approx(tuple(expected_rates), rel=agreement)
 
 
 @pytest.mark.parametrize("solver_name", FIXED_POINT_DRIVERS)

@@ -320,7 +320,7 @@ def tvdpf(tracer: str) -> TableKeyword:
     :returns: The table keyword.
     """
     return TableKeyword(
-        f"TVDPF{tracer.upper()}",
+        f"{TVDPF_PREFIX}{tracer.upper()}",
         columns=[
             Field("depth", np.float64),
             Field("concentration", np.float64),

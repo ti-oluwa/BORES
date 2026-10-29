@@ -5,11 +5,27 @@ import attrs
 from typing_extensions import Self
 
 from bores.errors import ValidationError
+from bores.precision import get_floating_point_info
 from bores.types import Integer, Number, UnitSystem
 from bores.units import UnitConversionTable, c, get_conversion_factors
 from bores.utils import scale
 
-__all__ = ["ConnectionPressureMode", "WellControlSpec"]
+__all__ = ["ConnectionPressureMode", "WellControlSpec", "get_default_rate_convergence_tolerance"]
+
+
+def get_default_rate_convergence_tolerance() -> Number:
+    """
+    The relative tolerance on a well's total rate that resolution aims for by default.
+
+    This is `c.CONTROL_RATE_CONVERGENCE_TOLERANCE`, raised if needed to a thousand times the
+    machine epsilon of the current working precision. A rate computed in single precision
+    cannot be pinned down much tighter than that, so a tighter tolerance there would only make
+    every rate-controlled solve run to its iteration limit without being any more accurate.
+
+    :returns: The tolerance.
+    """
+    floor = 1000.0 * float(get_floating_point_info().eps)
+    return max(c.CONTROL_RATE_CONVERGENCE_TOLERANCE, floor)
 
 
 class ConnectionPressureMode(enum.Enum):
@@ -62,8 +78,13 @@ class WellControlSpec:
         factory=lambda: c.CONTROL_MAX_FIXED_POINT_ITERATIONS
     )
     rate_convergence_tolerance: Number = attrs.field(
-        factory=lambda: c.CONTROL_RATE_CONVERGENCE_TOLERANCE
+        factory=get_default_rate_convergence_tolerance
     )
+    """
+    Relative tolerance on a well's total rate, for both the fixed-point iteration and the search
+    for the reference pressure that meets a rate target. The default depends on the working
+    precision, as `get_default_rate_convergence_tolerance` describes.
+    """
     max_bisection_iterations: Integer = attrs.field(
         factory=lambda: c.CONTROL_MAX_BISECTION_ITERATIONS
     )
