@@ -41,7 +41,7 @@ from bores.types import (
     TwoDimensions,
     UnitSystem,
 )
-from bores.utils import get_hydrostatic_gradient_factor
+from bores.utils import get_hydrostatic_gradient_factor, iterate_regions
 
 __all__ = [
     "EquilibriumArrays",
@@ -289,15 +289,15 @@ class CapillarySaturations(typing.NamedTuple):
 
 @numba.njit(cache=True)
 def invert_curves(
-    saturation_grid,
-    capillary_pressure_grid,
-    curve_index,
-    target_capillary_pressure,
-    pressure_falls_when_flat,
-    prefer_highest_pressure_end,
-    saturation_out,
-    capillary_pressure_out,
-):
+    saturation_grid: NumberArray[TwoDimensions],
+    capillary_pressure_grid: NumberArray[TwoDimensions],
+    curve_index: IntArray[OneDimension],
+    target_capillary_pressure: NumberArray[OneDimension],
+    pressure_falls_when_flat: Boolean,
+    prefer_highest_pressure_end: Boolean,
+    saturation_out: NumberArray[OneDimension],
+    capillary_pressure_out: NumberArray[OneDimension],
+) -> None:
     """
     Finds, for every target, the saturation at which its curve reaches that target.
 
@@ -412,14 +412,14 @@ def invert_capillary_pressure_curves(
     saturation = np.empty(target.shape[0], dtype=result_dtype)
     capillary_pressure = np.empty(target.shape[0], dtype=result_dtype)
     invert_curves(
-        saturation_grid,
-        capillary_pressure_grid,
-        curve_index,
-        target,
-        bool(pressure_falls_with_saturation),
-        bool(prefer_highest_pressure_end),
-        saturation,
-        capillary_pressure,
+        saturation_grid=saturation_grid,
+        capillary_pressure_grid=capillary_pressure_grid,
+        curve_index=curve_index,
+        target_capillary_pressure=typing.cast(NumberArray[OneDimension], target),
+        pressure_falls_when_flat=bool(pressure_falls_with_saturation),
+        prefer_highest_pressure_end=bool(prefer_highest_pressure_end),
+        saturation_out=saturation,
+        capillary_pressure_out=capillary_pressure,
     )
     return typing.cast(
         tuple[NumberArray[OneDimension], NumberArray[OneDimension]],
@@ -1067,7 +1067,14 @@ GAS_CONTENT_WEIGHTS = 2
 
 
 @numba.njit(cache=True)
-def average_samples(values, water_saturation, gas_saturation, sample_weights, weighting, averages):
+def average_samples(
+    values: NumberArray[TwoDimensions],
+    water_saturation: NumberArray[TwoDimensions],
+    gas_saturation: NumberArray[TwoDimensions],
+    sample_weights: NumberArray[TwoDimensions],
+    weighting: Integer,
+    averages: NumberArray[OneDimension],
+) -> None:
     """
     Averages the samples of every cell in one pass, weighted as `weighting` says.
 
@@ -1077,6 +1084,8 @@ def average_samples(values, water_saturation, gas_saturation, sample_weights, we
     """
     n_cells, n_samples = values.shape
     for cell in range(n_cells):
+        total_weight = 0.0
+        weighted_sum = 0.0
         for use_plain_weights in range(2):
             total_weight = 0.0
             weighted_sum = 0.0
@@ -1119,8 +1128,12 @@ def average_equilibrium_samples(
     :returns: One value per cell for every array.
     """
 
-    water_saturation = np.reshape(sample_arrays.water_saturation, (n_cells, -1))
-    gas_saturation = np.reshape(sample_arrays.gas_saturation, (n_cells, -1))
+    water_saturation = typing.cast(
+        NumberArray[TwoDimensions], np.reshape(sample_arrays.water_saturation, (n_cells, -1))
+    )
+    gas_saturation = typing.cast(
+        NumberArray[TwoDimensions], np.reshape(sample_arrays.gas_saturation, (n_cells, -1))
+    )
     weighting_by_field = {
         "solution_gor": OIL_CONTENT_WEIGHTS,
         "oil_bubble_point_pressure": OIL_CONTENT_WEIGHTS,
@@ -1133,12 +1146,12 @@ def average_equilibrium_samples(
         values = np.reshape(getattr(sample_arrays, name), (n_cells, -1))
         averages[name] = np.empty(n_cells, dtype=values.dtype)
         average_samples(
-            values,
-            water_saturation,
-            gas_saturation,
-            sample_weights,
-            weighting_by_field.get(name, SAMPLE_WEIGHTS),
-            averages[name],
+            values=values,
+            water_saturation=water_saturation,
+            gas_saturation=gas_saturation,
+            sample_weights=sample_weights,
+            weighting=weighting_by_field.get(name, SAMPLE_WEIGHTS),
+            averages=averages[name],
         )
     return EquilibriumArrays(**averages)
 
@@ -1438,28 +1451,8 @@ def initialize_equilibrium_arrays(
     return assembled
 
 
-def iterate_regions(
-    region_index: IntCellArray,
-) -> typing.Iterator[tuple[typing.Any, slice | NumberArray[OneDimension]]]:
-    """
-    Yield each region number with the cells it selects.
-
-    A grid with a single region selects all of its cells with a slice, which reads and writes
-    the cell arrays in place, where a mask would copy every array it selects.
-
-    :param region_index: Region number of each cell.
-    :returns: `(region number, selector)` pairs, to index a cell array with.
-    """
-    region_numbers = np.unique(region_index)
-    if len(region_numbers) == 1:
-        yield region_numbers[0], slice(None)
-        return
-    for region_number in region_numbers:
-        yield region_number, region_index == region_number
-
-
 @numba.njit(cache=True)
-def all_finite(values):
+def all_finite(values: NumberArray[OneDimension]) -> Boolean:
     """Whether every value is finite, stopping at the first that is not."""
     for index in range(values.shape[0]):
         if not np.isfinite(values[index]):
@@ -1468,7 +1461,11 @@ def all_finite(values):
 
 
 @numba.njit(cache=True)
-def derive_oil_saturation(water_saturation, gas_saturation, oil_saturation):
+def derive_oil_saturation(
+    water_saturation: NumberArray[OneDimension],
+    gas_saturation: NumberArray[OneDimension],
+    oil_saturation: NumberArray[OneDimension],
+) -> tuple[Number, Number, Number, Number, Number]:
     """
     Fill `oil_saturation` with what the water and gas leave, limited to `[0, 1]`, and return the
     ranges the validation needs, all from one pass over the cells.
@@ -1977,7 +1974,7 @@ def initialize_reservoir_state(
         ("solution_gor", solution_gor_array),
         ("vaporized_oil_gas_ratio", vaporized_oil_ratio_array),
     ):
-        if not all_finite(field_array):
+        if not all_finite(values=field_array):
             raise ValidationError(f"`{field_name}` contains NaN or infinite values.")
 
     if n_cells > 0 and pressure_array.min() <= 0.0:
@@ -1989,7 +1986,11 @@ def initialize_reservoir_state(
         lowest_gas,
         highest_gas,
         largest_saturation_excess,
-    ) = derive_oil_saturation(water_saturation_array, gas_saturation_array, oil_saturation_array)
+    ) = derive_oil_saturation(
+        water_saturation=water_saturation_array,
+        gas_saturation=gas_saturation_array,
+        oil_saturation=oil_saturation_array,
+    )
     for field_name, lowest, highest in (
         ("water_saturation", lowest_water, highest_water),
         ("gas_saturation", lowest_gas, highest_gas),
@@ -2051,7 +2052,7 @@ def initialize_reservoir_state(
                 f"Explicit `gas_solubility_in_water` has shape {solubility_in_water_input.shape}; "
                 f"expected ({n_cells},)."
             )
-        if not all_finite(solubility_in_water_input) or (
+        if not all_finite(values=solubility_in_water_input) or (  # type: ignore[arg-type]
             n_cells > 0 and solubility_in_water_input.min() < 0.0
         ):
             raise ValidationError(

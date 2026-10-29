@@ -9,6 +9,7 @@ from bores.constants import c
 from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.types import CellArray, IntCellArray, UnitSystem
+from bores.utils import any_positive, iterate_regions
 
 if typing.TYPE_CHECKING:
     from bores.blackoil.pvt.regions import PVT
@@ -117,8 +118,7 @@ def compute_masses(
     volume_correction = c.CUBIC_FEET_TO_STB if unit_system is UnitSystem.FIELD else 1.0
     inverse_volume_correction = c.STB_TO_CUBIC_FEET if unit_system is UnitSystem.FIELD else 1.0
 
-    for pvtnum in np.unique(pvt_region_index):
-        mask = pvt_region_index == pvtnum
+    for pvtnum, mask in iterate_regions(pvt_region_index):
         pvt_region = pvt.region(pvtnum)
         static = pvt_region.static
         if static.stock_tank_oil_density is None:
@@ -152,7 +152,7 @@ def compute_masses(
             )
         oil_mass[mask] = so * pv / bo * rho_o_sc
 
-        if np.any(sg > 0.0):
+        if any_positive(values=sg):  # type: ignore[arg-type]
             if pvt_region.tables.gas is None:
                 raise ValidationError(
                     f"`PVTNUM` {pvtnum}: free gas saturation is present "
@@ -172,7 +172,7 @@ def compute_masses(
                 rv * free_gas_mass[mask] * (rho_o_sc / rho_g_sc) * inverse_volume_correction
             )
 
-        if np.any(sw > 0.0):
+        if any_positive(values=sw):  # type: ignore[arg-type]
             if pvt_region.tables.water is None:
                 raise ValidationError(
                     f"`PVTNUM` {pvtnum}: water saturation is present "
@@ -193,7 +193,7 @@ def compute_masses(
                     rsw * water_mass[mask] * (rho_g_sc / rho_w_sc) * volume_correction
                 )
 
-        if np.any(rs > 0.0):
+        if any_positive(values=rs):  # type: ignore[arg-type]
             if rho_g_sc is None:
                 raise ValidationError(
                     f"`PVTNUM` {pvtnum}: `stock_tank_gas_density` is required to compute the "

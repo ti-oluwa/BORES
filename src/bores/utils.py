@@ -13,16 +13,23 @@ from numba.extending import overload  # type: ignore[import-untyped]
 from bores.constants import c
 from bores.precision import get_dtype
 from bores.types import (
+    Boolean,
+    BooleanCellArray,
+    IntCellArray,
     NDimension,
     Number,
     NumberArray,
     NumberOrArray,
+    OneDimension,
     UnitSystem,
 )
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["array", "clip", "is_array"]
+__all__ = ["RegionSelector", "any_positive", "array", "clip", "is_array", "iterate_regions"]
+
+RegionSelector: typing.TypeAlias = slice | BooleanCellArray
+"""Indexes the cells of one region: a slice of all cells for a single region, otherwise a mask."""
 
 
 def array(obj: typing.Any, **kwargs: typing.Any):
@@ -498,3 +505,32 @@ def none_if_nan(value: Number) -> Number | None:
     :returns: `value`, or `None` if it's `NaN`.
     """
     return None if math.isnan(value) else value
+
+
+def iterate_regions(
+    region_index: IntCellArray,
+) -> typing.Iterator[tuple[np.integer[typing.Any], RegionSelector]]:
+    """
+    Yield each region number with the cells it selects.
+
+    A grid with a single region selects all of its cells with a slice, which reads and writes
+    the cell arrays in place, where a mask would copy every array it selects.
+
+    :param region_index: Region number of each cell.
+    :returns: `(region number, selector)` pairs, to index a cell array with.
+    """
+    region_numbers = np.unique(region_index)
+    if len(region_numbers) == 1:
+        yield region_numbers[0], slice(None)
+        return
+    for region_number in region_numbers:
+        yield region_number, region_index == region_number
+
+
+@numba.njit(cache=True)
+def any_positive(values: NumberArray[OneDimension]) -> Boolean:
+    """Whether any value is above zero, stopping at the first that is, with no temporary array."""
+    for index in range(values.shape[0]):
+        if values[index] > 0.0:
+            return True
+    return False

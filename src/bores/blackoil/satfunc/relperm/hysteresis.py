@@ -1166,7 +1166,7 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
         maximum_residual = self.maximum_residual_oil_saturation_water
         if maximum_residual is None or isinstance(table, TwoPhaseRelPermTable):
             return kwargs
-        
+
         residual = np.empty(size, dtype=gas_saturation.dtype)
         land_residual_from_reversal(
             size=size,
