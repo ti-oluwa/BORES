@@ -131,9 +131,9 @@ def _rk4_march(
     z, p = reference_depth, reference_pressure
     for i in range(n_steps):
         k1 = gradient_factor * density_fn(p, z)
-        k2 = gradient_factor * density_fn(p + 0.5 * h * k1, z + 0.5 * h)
-        k3 = gradient_factor * density_fn(p + 0.5 * h * k2, z + 0.5 * h)
-        k4 = gradient_factor * density_fn(p + h * k3, z + h)
+        k2 = gradient_factor * density_fn(p + 0.5 * h * k1, z + 0.5 * h)  # type: ignore[arg-type]
+        k3 = gradient_factor * density_fn(p + 0.5 * h * k2, z + 0.5 * h)  # type: ignore[arg-type]
+        k4 = gradient_factor * density_fn(p + h * k3, z + h)  # type: ignore[arg-type]
         p = p + (h / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
         z = z + h
         depths[i + 1], pressures[i + 1] = z, p
@@ -218,29 +218,30 @@ def integrate_hydrostatic_pressure(
     node_depths = reference_depth + h * np.arange(n_steps + 1, dtype=np.float64)
     midpoint_depths = node_depths[:-1] + 0.5 * h
     if bind_depths is not None:
-        node_density = bind_depths(node_depths)
-        midpoint_density = bind_depths(midpoint_depths)
+        node_density = bind_depths(node_depths)  # type: ignore[arg-type]
+        midpoint_density = bind_depths(midpoint_depths)  # type: ignore[arg-type]
     else:
-        node_density = functools.partial(density_fn, depth=node_depths)
-        midpoint_density = functools.partial(density_fn, depth=midpoint_depths)
+        node_density = functools.partial(density_fn, depth=node_depths)  # type: ignore[call-arg]
+        midpoint_density = functools.partial(density_fn, depth=midpoint_depths)  # type: ignore[call-arg]
 
     pressures = np.full(n_steps + 1, reference_pressure, dtype=np.float64)
     reference_gradient = (
         gradient_factor
-        * np.ravel(density_fn(np.array([reference_pressure]), np.array([reference_depth])))[0]
+        * np.ravel(density_fn(np.array([reference_pressure]), np.array([reference_depth])))[0]  # type: ignore[arg-type]
     )
     pressures += reference_gradient * (node_depths - reference_depth)
 
     converged = False
     with np.errstate(all="ignore"):
         for _ in range(COLLOCATION_MAX_ITERATIONS):
-            node_gradient = gradient_factor * np.asarray(node_density(pressures), dtype=np.float64)
+            node_gradient = gradient_factor * np.asarray(node_density(pressures), dtype=np.float64)  # type: ignore[arg-type]
             # Cubic Hermite estimate of the pressure at the middle of every step
             midpoint_pressures = 0.5 * (pressures[:-1] + pressures[1:]) + (h / 8.0) * (
                 node_gradient[:-1] - node_gradient[1:]
             )
             midpoint_gradient = gradient_factor * np.asarray(
-                midpoint_density(midpoint_pressures), dtype=np.float64
+                midpoint_density(midpoint_pressures),  # type: ignore[arg-type]
+                dtype=np.float64,
             )
             increments = (h / 6.0) * (
                 node_gradient[:-1] + 4.0 * midpoint_gradient + node_gradient[1:]
@@ -552,6 +553,7 @@ def invert_curves_per_cell(
         else:
             used_curves, local_curve_ids = np.unique(curve_ids[cells], return_inverse=True)
             chunk_endpoints = tuple(values[used_curves] for values in unique_endpoints)
+
         saturation_grid, capillary_pressure_grid = build_curves(chunk_endpoints)  # type: ignore[arg-type]
         saturation[cells], capillary_pressure[cells] = invert_capillary_pressure_curves(
             saturation_grid=saturation_grid,
@@ -841,7 +843,7 @@ def initialize_center_point_equilibrium(
     sorted_temperature = temperature[order]
 
     def get_temperature_at(depth: ColumnValues) -> ColumnValues:
-        return np.interp(depth, sorted_depths, sorted_temperature)
+        return typing.cast(ColumnValues, np.interp(depth, sorted_depths, sorted_temperature))
 
     def bind_oil_density(depth: ColumnValues) -> PressureDensityFunction:
         temperature_at_depth = get_temperature_at(depth)
