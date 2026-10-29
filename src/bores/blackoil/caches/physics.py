@@ -12,6 +12,7 @@ from bores.blackoil.caches.mobility import MobilityCache, compute_mobility_cache
 from bores.blackoil.caches.pvt import PVTCache, compute_pvt_cache
 from bores.blackoil.caches.satfunc import SatFuncCache, compute_satfunc_cache
 from bores.blackoil.fluids.model import BlackOil
+from bores.reservoir.regions import RegionGroups
 from bores.reservoir.state import Hysteresis
 from bores.reservoir.workspace import HysteresisWorkspace
 from bores.types import CellArray, IntCellArray
@@ -53,6 +54,7 @@ def compute_physics_cache(
     residual_gas_saturation: CellArray | None = None,
     vaporized_oil_ratio: CellArray | None = None,
     hysteresis: Hysteresis | HysteresisWorkspace | None = None,
+    region_groups: RegionGroups | None = None,
     freeze_saturation_pressure: bool = False,
     frozen_bubble_point_pressure: CellArray | None = None,
     frozen_dew_point_pressure: CellArray | None = None,
@@ -99,6 +101,9 @@ def compute_physics_cache(
         hysteresis for any saturation-function table that supports it.
         Tables that don't fall back to their normal drainage curves, same
         as when this isn't given at all.
+    :param region_groups: Cells grouped by saturation region, built once for the run with
+        `Regions.group_saturation_cells` and forwarded to `compute_satfunc_cache`. Built on
+        every call from `saturation_region` when not given.
     :param out: Previous `PhysicsCache` to overwrite in place, or `None` to
         allocate a new one.
     :param dtype: Output array dtype for any newly allocated sub-cache.
@@ -161,6 +166,7 @@ def compute_physics_cache(
         gas_reversal_saturation=(
             hysteresis.gas_reversal_saturation if hysteresis is not None else None
         ),
+        region_groups=region_groups,
         out=out.satfunc if out is not None else None,
         dtype=dtype,
     )

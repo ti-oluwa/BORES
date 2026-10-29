@@ -8,7 +8,7 @@ from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.types import BooleanCellArray, IntCellArray, Integer
 
-__all__ = ["Regions"]
+__all__ = ["RegionGroups", "Regions", "group_cells_by_region"]
 
 
 def load_region_array(
@@ -53,6 +53,83 @@ def load_region_array(
         if unused.any():
             array = np.where(unused, 1, array).astype(np.int32)
     return typing.cast(IntCellArray, array)
+
+
+class RegionGroups(typing.NamedTuple):
+    """
+    Cells grouped by the pair of regions that decides which saturation function table a cell
+    uses. Region numbers never change during a run, so the grouping is built once and then reused
+    on every timestep instead of being rediscovered from the region arrays each time.
+    """
+
+    saturation_regions: tuple[int, ...]
+    """Saturation region number (`SATNUM`) of each group."""
+
+    imbibition_regions: tuple[int, ...]
+    """Imbibition region number (`IMBNUM`) of each group, `0` when no imbibition regions are used."""
+
+    cell_indices: tuple[IntCellArray | None, ...]
+    """
+    Ascending cell indices of each group. `None` means the group holds every cell, which is the
+    case whenever there is a single group, so callers can use whole-array views and skip the
+    gather and scatter.
+    """
+
+    def __len__(self) -> int:
+        return len(self.saturation_regions)
+
+
+def group_cells_by_region(
+    *,
+    saturation_region: IntCellArray,
+    imbibition_region: IntCellArray | None = None,
+) -> RegionGroups:
+    """
+    Group cells by `(SATNUM, IMBNUM)`, once, so that later timesteps can evaluate each group's
+    tables without searching the region arrays again.
+
+    Groups are ordered by saturation region and then imbibition region, and the cells in each
+    group keep their original order.
+
+    :param saturation_region: Saturation region number of every cell.
+    :param imbibition_region: Imbibition region number of every cell. Cells are grouped by
+        saturation region alone when this is not given.
+    :returns: The cell groups.
+    """
+    size = saturation_region.size
+    if imbibition_region is None:
+        keys = saturation_region.astype(np.int64, copy=False)
+        imbibition_of = None
+    else:
+        if imbibition_region.size != size:
+            raise ValidationError(
+                f"`imbibition_region` has {imbibition_region.size} values; "
+                f"`saturation_region` has {size}."
+            )
+        keys = saturation_region.astype(np.int64) * (int(imbibition_region.max()) + 1) + (
+            imbibition_region.astype(np.int64, copy=False)
+        )
+        imbibition_of = imbibition_region
+
+    order = np.argsort(keys, kind="stable")
+    sorted_keys = keys[order]
+    starts = np.flatnonzero(np.diff(sorted_keys)) + 1
+    boundaries = np.concatenate(([0], starts, [size]))
+    group_count = len(boundaries) - 1
+
+    saturation_regions: list[int] = []
+    imbibition_regions: list[int] = []
+    cell_indices: list[IntCellArray | None] = []
+    for group in range(group_count):
+        cells = order[boundaries[group] : boundaries[group + 1]]
+        saturation_regions.append(int(saturation_region[cells[0]]))
+        imbibition_regions.append(0 if imbibition_of is None else int(imbibition_of[cells[0]]))
+        cell_indices.append(None if group_count == 1 else typing.cast(IntCellArray, cells))
+    return RegionGroups(
+        saturation_regions=tuple(saturation_regions),
+        imbibition_regions=tuple(imbibition_regions),
+        cell_indices=tuple(cell_indices),
+    )
 
 
 @attrs.frozen(slots=True)
@@ -151,6 +228,29 @@ class Regions:
             fluid_in_place_region=load_region_array(
                 deck_file, "FIPNUM", n_cells=n_cells, default_region=default_region, active=active
             ),
+        )
+
+    def group_saturation_cells(self, *, use_imbibition_region: bool = False) -> RegionGroups:
+        """
+        Group the cells by the regions that decide their saturation function tables.
+
+        The regions do not change during a run, so call this once and reuse the result.
+
+        :param use_imbibition_region: Group by `(SATNUM, IMBNUM)` rather than by `SATNUM` alone.
+            Needed once imbibition tables are evaluated, a cell then being described by both.
+        :returns: The cell groups.
+        :raises ValidationError: If `saturation_region` is not set, or `use_imbibition_region`
+            is set while `imbibition_region` is not.
+        """
+        if self.saturation_region is None:
+            raise ValidationError("`saturation_region` is not set, so cells cannot be grouped.")
+        if use_imbibition_region and self.imbibition_region is None:
+            raise ValidationError(
+                "`imbibition_region` is not set, so cells cannot be grouped by it."
+            )
+        return group_cells_by_region(
+            saturation_region=self.saturation_region,
+            imbibition_region=self.imbibition_region if use_imbibition_region else None,
         )
 
     def get_pvt_region(self, cell_idx: Integer) -> Integer:

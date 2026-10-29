@@ -47,7 +47,7 @@ print(f"bbox: {grid.bounding_box}")
 
 pv_grid = make_pyvista_grid(
     grid,
-    cell_data={"pressure": case.model.reservoir.regions.equilibrium_region},
+    cell_data={"pressure": case.initial_state.gas_saturation},
     use_hexahedra=True,
     hollow=True,
 )

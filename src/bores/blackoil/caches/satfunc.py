@@ -10,6 +10,7 @@ import numpy.typing as npt
 
 from bores.blackoil.satfunc.regions import SatFunc
 from bores.precision import get_dtype
+from bores.reservoir.regions import RegionGroups, group_cells_by_region
 from bores.types import BooleanCellArray, CellArray, IntCellArray
 
 __all__ = ["SatFuncCache", "compute_satfunc_cache"]
@@ -92,6 +93,15 @@ CACHE_NAN_FIELDS: tuple[str, ...] = tuple(
     name for name in SatFuncCache._fields if name != "saturation_region"
 )
 
+CAPILLARY_PRESSURE_FIELDS: tuple[str, ...] = (
+    "oil_water_capillary_pressure",
+    "gas_oil_capillary_pressure",
+    "dpcow_dsw",
+    "dpcow_dso",
+    "dpcgo_dso",
+    "dpcgo_dsg",
+)
+
 
 def make_new_cache(n_cells: int, dtype: npt.DTypeLike) -> SatFuncCache:
     fields = {name: np.full(n_cells, np.nan, dtype=dtype) for name in CACHE_NAN_FIELDS}
@@ -117,6 +127,7 @@ def compute_satfunc_cache(
     gas_imbibition_flag: BooleanCellArray | None = None,
     water_reversal_saturation: CellArray | None = None,
     gas_reversal_saturation: CellArray | None = None,
+    region_groups: RegionGroups | None = None,
     out: SatFuncCache | None = None,
     dtype: npt.DTypeLike = None,
 ) -> SatFuncCache:
@@ -124,9 +135,9 @@ def compute_satfunc_cache(
     Build (or refresh, in place) a `SatFuncCache` from current
     cell saturations.
 
-    Groups cells by `saturation_region` and evaluates each region's
-    `SatFuncTables` once per property, vectorised over that
-    region's cells. The relative permeabilities and their derivatives are
+    Evaluates each region's `SatFuncTables` once per property, vectorised over that
+    region's cells. The cells of each region come from `region_groups`, which is built
+    once for the run, so a timestep does no region search and builds no boolean masks. The relative permeabilities and their derivatives are
     computed together, which analytical models do in a single pass.
 
     **Reuse**: pass a previous call's returned `SatFuncCache` as
@@ -172,6 +183,10 @@ def compute_satfunc_cache(
         fallback behaviour.
     :param gas_reversal_saturation: Shape `(n_cells,)` gas saturation at
         each cell's most recent reversal. Same fallback behaviour.
+    :param region_groups: Cells grouped by region, from `group_cells_by_region` or
+        `Regions.group_saturation_cells`. Region numbers do not change during a run, so build it once and
+        pass it on every call. Built here from `saturation_region` when not given, which
+        repeats the grouping on every call.
     :param out: Previous `SatFuncCache` to overwrite in place, or
         `None` to allocate a new one.
     :return: The populated `SatFuncCache`. `out` itself if given,
@@ -187,19 +202,28 @@ def compute_satfunc_cache(
                 f"cells; `water_saturation` has {n_cells}."
             )
         cache = out
-        for name in CACHE_NAN_FIELDS:
-            getattr(cache, name).fill(np.nan)
     else:
         dtype = np.dtype(dtype) if dtype is not None else get_dtype()
         cache = make_new_cache(n_cells, dtype=dtype)
 
     cache.saturation_region[:] = saturation_region
-    regions = np.unique(saturation_region)
-    # With a single saturation region every cell belongs to it, so views of the inputs and
-    # whole-array assignment replace the boolean-mask copies that several regions need.
-    single_region = len(regions) == 1
-    for region in regions:
-        mask = slice(None) if single_region else saturation_region == region
+    if region_groups is None:
+        region_groups = group_cells_by_region(saturation_region=saturation_region)
+
+    # Every cell belongs to exactly one group, so each relative permeability field is fully
+    # rewritten below. Only the capillary pressure fields can keep an old value, and only when
+    # some region has no capillary pressure table, so only then do they need resetting.
+    if any(
+        satfunc[region].capillary_pressure is None for region in region_groups.saturation_regions
+    ):
+        for name in CAPILLARY_PRESSURE_FIELDS:
+            getattr(cache, name).fill(np.nan)
+
+    for group, region in enumerate(region_groups.saturation_regions):
+        # `None` means the group holds every cell, so views of the inputs and whole-array
+        # assignment replace the gather and scatter that several regions need.
+        cells = region_groups.cell_indices[group]
+        mask = slice(None) if cells is None else cells
         tables = satfunc[region]
 
         sw = water_saturation[mask]
