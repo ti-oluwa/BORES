@@ -187,13 +187,8 @@ from bores.deck.keywords.solution import (
     SOIL,
     SWAT,
     TEMPVD,
-    TVDPF2FB,
-    TVDPF4FB,
-    TVDPFDFB,
-    TVDPFHTO,
-    TVDPFS36,
-    TVDPFSEA,
-    TVDPFTFB,
+    tvdpf,
+    tvdpf_tracer,
 )
 from bores.deck.keywords.summary import (
     BGKR,
@@ -388,13 +383,6 @@ DEFAULT_KEYWORDS = frozenset({
     SWFN,
     SWOF,
     # SOLUTION ###
-    TVDPF2FB,
-    TVDPF4FB,
-    TVDPFDFB,
-    TVDPFHTO,
-    TVDPFS36,
-    TVDPFSEA,
-    TVDPFTFB,
     AQUANCON,
     AQUCT,
     AQUFETP,
@@ -597,6 +585,7 @@ class DeckFile:
         self._deck = Deck(resolve_source(source, encoding=encoding, strict=strict), strict=strict)
 
         self._registry = {keyword.name: keyword for keyword in keywords}
+        self._register_tracer_keywords()
         self._cache: dict[str, typing.Any] = {}
         self.dimensions = self._resolve_dimensions()
         deck_unit_system = unit_system if unit_system is not None else self._resolve_unit_system()
@@ -836,6 +825,18 @@ class DeckFile:
         literal = self._deck.keywords
         operator_only = sorted(self._operation_targets - set(literal))
         return literal + operator_only
+
+    def _register_tracer_keywords(self) -> None:
+        """
+        Register the `TVDPF<name>` keyword of every tracer concentration table in the deck.
+
+        The tracer name is part of the keyword, so no fixed list of them can cover every deck.
+        A keyword that is already registered, such as one passed in `keywords`, is kept.
+        """
+        for name in self._deck.keywords:
+            tracer = tvdpf_tracer(name)
+            if tracer is not None and name not in self._registry:
+                self._registry[name] = tvdpf(tracer)
 
     def add_keywords(self, *keywords: Keyword[typing.Any]) -> None:
         """

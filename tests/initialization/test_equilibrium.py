@@ -1,4 +1,5 @@
 import re
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -278,6 +279,73 @@ class TestStateConsistency:
             )
         )[0]
         np.testing.assert_allclose(state.oil_bubble_point_pressure, expected, rtol=1e-4)
+
+    def test_an_equilibrium_state_is_consistent(self, spe1):
+        deck_file, case = spe1
+        reservoir, pvt = case.model.reservoir, case.model.fluid.pvt
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            initialize_reservoir_state(
+                reservoir, pvt, deck_file=deck_file, satfunc=None, temperature=200.0
+            )
+
+    def test_explicit_pressure_below_the_equilibrium_bubble_point_is_reported(self, spe1):
+        deck_file, case = spe1
+        reservoir, pvt = case.model.reservoir, case.model.fluid.pvt
+        with pytest.warns(UserWarning, match="below its bubble point without free gas"):
+            initialize_reservoir_state(
+                reservoir, pvt, deck_file=deck_file, satfunc=None, temperature=200.0,
+                pressure=np.full(reservoir.n_cells, 1000.0, dtype=np.float32),
+            )  # fmt: skip
+
+    def test_explicit_free_gas_in_undersaturated_oil_is_reported(self, spe1):
+        deck_file, case = spe1
+        reservoir, pvt = case.model.reservoir, case.model.fluid.pvt
+        with pytest.warns(UserWarning, match="free gas in oil that is above its bubble point"):
+            initialize_reservoir_state(
+                reservoir, pvt, deck_file=deck_file, satfunc=None, temperature=200.0,
+                gas_saturation=np.full(reservoir.n_cells, 0.2, dtype=np.float32),
+            )  # fmt: skip
+
+    def test_inactive_cells_are_not_examined(self):
+        count = 4
+        active = np.array([True, True, False, False])
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            initialization.warn_on_inconsistent_phase_state(
+                pressure=np.array([3000.0, 3000.0, 1000.0, 1000.0]),
+                oil_bubble_point_pressure=np.array([2000.0, 2000.0, 2500.0, 2500.0]),
+                gas_dew_point_pressure=np.zeros(count),
+                water_saturation=np.full(count, 0.2),
+                gas_saturation=np.zeros(count),
+                oil_saturation=np.full(count, 0.8),
+                active=active,
+                explicit_fields=[],
+            )
+        with pytest.warns(UserWarning, match="2 cell"):
+            initialization.warn_on_inconsistent_phase_state(
+                pressure=np.array([3000.0, 3000.0, 1000.0, 1000.0]),
+                oil_bubble_point_pressure=np.array([2000.0, 2000.0, 2500.0, 2500.0]),
+                gas_dew_point_pressure=np.zeros(count),
+                water_saturation=np.full(count, 0.2),
+                gas_saturation=np.zeros(count),
+                oil_saturation=np.full(count, 0.8),
+                active=None,
+                explicit_fields=[],
+            )
+
+    def test_gas_below_its_dew_point_without_free_oil_is_reported(self):
+        with pytest.warns(UserWarning, match="gas below its dew point without free oil"):
+            initialization.warn_on_inconsistent_phase_state(
+                pressure=np.array([2000.0]),
+                oil_bubble_point_pressure=np.array([2000.0]),
+                gas_dew_point_pressure=np.array([3000.0]),
+                water_saturation=np.array([0.2]),
+                gas_saturation=np.array([0.8]),
+                oil_saturation=np.array([0.0]),
+                active=None,
+                explicit_fields=["pressure"],
+            )
 
     @pytest.mark.parametrize("bad", [-0.2, 1.3, np.nan])
     def test_invalid_explicit_saturation_is_rejected(self, spe1, bad):

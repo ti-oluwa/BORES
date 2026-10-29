@@ -4,7 +4,8 @@ import numpy as np
 import pytest
 
 import bores.deck.keywords as keywords
-from bores.deck import DEFAULT_KEYWORDS, DeckFile, DeckParseError, tvdpf
+from bores.deck import DEFAULT_KEYWORDS, DeckFile, DeckParseError, tvdpf, tvdpf_tracer
+from bores.deck.keywords.base import Field, TableKeyword
 
 # A stretch of the Norne deck, exactly as it is written there.
 NORNE_SNIPPET = """GDORIENT
@@ -194,8 +195,7 @@ def test_every_keyword_of_the_snippet_is_registered():
         "GDORIENT", "ENDSCALE", "SATOPTS", "EQLOPTS", "VFPIDIMS", "VFPPDIMS", "FAULTDIM",
         "PIMTDIMS", "NSTACK", "UNIFIN", "UNIFOUT", "FMTOUT", "FMTIN", "NEWTRAN", "GRIDFILE",
         "MESSAGES", "NOECHO", "MINPV", "TRACER", "SCALECRS", "EHYSTR", "RPTPROPS", "RPTRST",
-        "RPTSOL", "TVDPFSEA", "TVDPFHTO", "TVDPFS36", "TVDPF2FB", "TVDPF4FB", "TVDPFDFB",
-        "TVDPFTFB", "SUMMARY", "NEWTON", "MLINEARS", "TUNING", "ZIPPY2", "SWL", "SWCR", "SGU",
+        "RPTSOL", "SUMMARY", "NEWTON", "MLINEARS", "TUNING", "ZIPPY2", "SWL", "SWCR", "SGU",
         "SGL", "SGCR", "SOWCR", "SOGCR", "SWU", "ISGCR",
     }  # fmt: skip
     assert snippet_keywords <= names
@@ -477,12 +477,34 @@ def test_tvdpf_tables_one_per_region():
 
 
 def test_tvdpf_builds_the_keyword_of_any_tracer():
-    keyword = tvdpf("xyz")
-    assert keyword.name == "TVDPFXYZ"
-    deck = make("TVDPFXYZ\n 1000 0.5 /\n")
-    assert deck.get("TVDPFXYZ") is None  # not registered, so not read
-    deck.add_keywords(keyword)
+    assert tvdpf("xyz").name == "TVDPFXYZ"
+
+
+@pytest.mark.parametrize(
+    ("keyword", "tracer"),
+    [("TVDPFSEA", "SEA"), ("tvdpf2fb", "2FB"), ("TVDPFQ", "Q"), ("TVDPFAB", "AB")],
+)
+def test_the_tracer_of_a_concentration_keyword_is_read_from_its_name(keyword, tracer):
+    assert tvdpf_tracer(keyword) == tracer
+
+
+@pytest.mark.parametrize("keyword", ["TVDPF", "TVDPFABCD", "TVDPSSEA", "EQUIL", "TRACER"])
+def test_other_keywords_have_no_tracer(keyword):
+    assert tvdpf_tracer(keyword) is None
+
+
+def test_the_concentration_table_of_any_tracer_is_read_without_registering_it():
+    deck = make("TVDPFXYZ\n 1000 0.5 /\nTVDPFQ\n 2000 0.25\n 3000 0.0 /\n")
     assert deck.get("TVDPFXYZ")[0][0]["concentration"] == pytest.approx(0.5)
+    (table,) = deck.get("TVDPFQ")
+    assert [(row["depth"], row["concentration"]) for row in table] == [(2000, 0.25), (3000, 0.0)]
+    assert deck.get("TVDPFABC") is None  # not in the deck
+
+
+def test_a_tracer_keyword_that_was_passed_in_is_kept():
+    custom = TableKeyword("TVDPFXYZ", columns=[Field("z", np.float64), Field("c", np.float64)])
+    deck = make("TVDPFXYZ\n 1000 0.5 /\n", keywords=DEFAULT_KEYWORDS | {custom})
+    assert set(deck.get("TVDPFXYZ")[0][0]) == {"z", "c"}
 
 
 # --- TUNING and ZIPPY2 over time ---------------------------------------------------------------

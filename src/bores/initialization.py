@@ -46,10 +46,12 @@ from bores.utils import get_hydrostatic_gradient_factor, iterate_regions
 __all__ = [
     "EquilibriumArrays",
     "compute_water_phase_pressure",
+    "get_active_cells",
     "initialize_equilibrium_arrays",
     "initialize_reservoir_state",
     "initialize_water_gas_state",
     "invert_capillary_pressure_curves",
+    "warn_on_inconsistent_phase_state",
 ]
 
 N_SATURATION_SAMPLES = 100
@@ -76,8 +78,30 @@ class EquilibriumArrays(typing.NamedTuple):
     gas_dew_point_pressure: CellArray
 
 
+ColumnValues: typing.TypeAlias = Number | NumberArray[OneDimension]
+"""A single value, or the values at a series of depths down a column."""
+
+DensityFunction: typing.TypeAlias = typing.Callable[[ColumnValues, ColumnValues], ColumnValues]
+"""
+Fluid density at a pressure and a depth, given in that order. Scalars or arrays of the same shape
+are accepted, and the density has the shape of its inputs.
+"""
+
+PressureDensityFunction: typing.TypeAlias = typing.Callable[[ColumnValues], ColumnValues]
+"""Fluid density at a pressure, for depths that were fixed beforehand. See `DepthBinder`."""
+
+DepthBinder: typing.TypeAlias = typing.Callable[[ColumnValues], PressureDensityFunction]
+"""
+Fixes the depths of a column and returns the density as a function of pressure alone.
+
+Whatever depends on depth only, such as temperature, is worked out once when the depths are
+given, instead of on every call of the returned function. It must give the same densities as the
+`DensityFunction` it stands in for.
+"""
+
+
 def _rk4_march(
-    density_fn: typing.Callable[[Number, Number], Number],
+    density_fn: DensityFunction,
     reference_depth: Number,
     reference_pressure: Number,
     endpoint_depth: Number,
@@ -135,15 +159,14 @@ vectorized solve and integrates the column step by step instead.
 
 
 def integrate_hydrostatic_pressure(
-    density_fn: typing.Callable[[typing.Any, typing.Any], typing.Any],
+    density_fn: DensityFunction,
     reference_depth: Number,
     reference_pressure: Number,
     endpoint_depth: Number,
     gradient_factor: Number,
     step: Number = 1.0,
     dtype: npt.DTypeLike = None,
-    bind_depths: typing.Callable[[typing.Any], typing.Callable[[typing.Any], typing.Any]]
-    | None = None,
+    bind_depths: DepthBinder | None = None,
 ) -> tuple[npt.NDArray, npt.NDArray]:
     """
     Integrate `dP/dz = gradient_factor * density_fn(pressure, depth)` from `reference_depth`
@@ -254,7 +277,7 @@ def integrate_hydrostatic_pressure(
 
 
 def _march_full_range(
-    density_fn: typing.Callable[[Number, Number], Number],
+    density_fn: DensityFunction,
     reference_depth: Number,
     reference_pressure: Number,
     min_depth: Number,
@@ -262,8 +285,7 @@ def _march_full_range(
     gradient_factor: Number,
     step: Number,
     dtype: npt.DTypeLike,
-    bind_depths: typing.Callable[[typing.Any], typing.Callable[[typing.Any], typing.Any]]
-    | None = None,
+    bind_depths: DepthBinder | None = None,
 ) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension]]:
     """
     March `density_fn` outward from `reference_depth` in both directions, covering
@@ -818,10 +840,10 @@ def initialize_center_point_equilibrium(
     sorted_depths = depths[order]
     sorted_temperature = temperature[order]
 
-    def get_temperature_at(depth: Number) -> Number:
+    def get_temperature_at(depth: ColumnValues) -> ColumnValues:
         return np.interp(depth, sorted_depths, sorted_temperature)
 
-    def bind_oil_density(depth: Number) -> typing.Callable[[Number], Number]:
+    def bind_oil_density(depth: ColumnValues) -> PressureDensityFunction:
         temperature_at_depth = get_temperature_at(depth)
         if rsvd_table is not None:
             # `Rs(depth)` from `RSVD`: oil is undersaturated wherever `P` exceeds the bubble
@@ -832,7 +854,7 @@ def initialize_center_point_equilibrium(
                 solution_gor=solution_gor_at_depth,  # type: ignore[arg-type]
             )
 
-            def oil_density_at(pressure: Number) -> Number:
+            def oil_density_at(pressure: ColumnValues) -> ColumnValues:
                 density = oil_table.density(
                     pressure,
                     temperature_at_depth,
@@ -843,7 +865,7 @@ def initialize_center_point_equilibrium(
 
             return oil_density_at
 
-        def saturated_oil_density_at(pressure: Number) -> Number:
+        def saturated_oil_density_at(pressure: ColumnValues) -> ColumnValues:
             # No `RSVD`: assume saturated oil (`Pb = P`) everywhere in the oil zone, the same
             # assumption used for `Rs` below. `bubble_point_pressure=pressure` selects the
             # saturated branch, which reads the density straight off the table at `P`.
@@ -854,7 +876,7 @@ def initialize_center_point_equilibrium(
 
         return saturated_oil_density_at
 
-    def bind_gas_density(depth: Number) -> typing.Callable[[Number], Number]:
+    def bind_gas_density(depth: ColumnValues) -> PressureDensityFunction:
         assert gas_table is not None
         temperature_at_depth = get_temperature_at(depth)
         # Wet gas: the gas's own `Rv(depth)` when `RVVD` is given, otherwise saturated gas
@@ -864,7 +886,7 @@ def initialize_center_point_equilibrium(
             else None
         )
 
-        def gas_density_at(pressure: Number) -> Number:
+        def gas_density_at(pressure: ColumnValues) -> ColumnValues:
             density = gas_table.density(  # type: ignore[union-attr]
                 pressure,
                 temperature_at_depth,
@@ -874,24 +896,24 @@ def initialize_center_point_equilibrium(
 
         return gas_density_at
 
-    def bind_water_density(depth: Number) -> typing.Callable[[Number], Number]:
+    def bind_water_density(depth: ColumnValues) -> PressureDensityFunction:
         assert water_table is not None
         temperature_at_depth = get_temperature_at(depth)
 
-        def water_density_at(pressure: Number) -> Number:
+        def water_density_at(pressure: ColumnValues) -> ColumnValues:
             return water_table.density(pressure, temperature_at_depth).astype(  # type: ignore[union-attr, return-value]
                 dtype, copy=False
             )
 
         return water_density_at
 
-    def compute_oil_density(pressure: Number, depth: Number) -> Number:
+    def compute_oil_density(pressure: ColumnValues, depth: ColumnValues) -> ColumnValues:
         return bind_oil_density(depth)(pressure)
 
-    def compute_gas_density(pressure: Number, depth: Number) -> Number:
+    def compute_gas_density(pressure: ColumnValues, depth: ColumnValues) -> ColumnValues:
         return bind_gas_density(depth)(pressure)
 
-    def compute_water_density(pressure: Number, depth: Number) -> Number:
+    def compute_water_density(pressure: ColumnValues, depth: ColumnValues) -> ColumnValues:
         return bind_water_density(depth)(pressure)
 
     min_depth = min(shallowest_depth, region.datum_depth, oil_zone_low)
@@ -1428,10 +1450,7 @@ def initialize_equilibrium_arrays(
         saturation_region_index = typing.cast(IntCellArray, np.ones(n_cells, dtype=np.int32))
 
     depth = reservoir.depth
-    cell_statuses = np.asarray(reservoir.grid.cell_statuses)
-    active_cells: npt.NDArray[np.bool_] | None = (
-        cell_statuses == int(CellStatus.ACTIVE) if cell_statuses.shape == (n_cells,) else None
-    )
+    active_cells = get_active_cells(reservoir.grid, n_cells)
     connate_water_saturation = reservoir.rock.connate_water_saturation
     residual_oil_saturation_water = reservoir.rock.residual_oil_saturation_water
     residual_oil_saturation_gas = reservoir.rock.residual_oil_saturation_gas
@@ -1801,6 +1820,119 @@ def initialize_water_gas_state(
     return typing.cast(CellArray, solubility), typing.cast(CellArray, bubble_point)
 
 
+OIL_PRESENCE_SATURATION = 1.0e-3
+"""Oil saturation above which a cell is treated as holding oil when checking its state."""
+
+GAS_PRESENCE_SATURATION = 1.0e-3
+"""Gas saturation above which a cell is treated as holding gas when checking its state."""
+
+FREE_PHASE_SATURATION = 1.0e-6
+"""Saturation at or below which a phase is treated as absent from a cell when checking its state."""
+
+PRESSURE_CONSISTENCY_TOLERANCE = 1.0e-4
+"""
+Fraction of the bubble point or dew point by which a cell's pressure may stray from it before the
+cell is reported as inconsistent. It absorbs the rounding of the working precision.
+"""
+
+
+def get_active_cells(grid: Grid, n_cells: int) -> npt.NDArray[np.bool_] | None:
+    """
+    Which cells of the grid take part in the flow simulation.
+
+    :param grid: The grid whose cells are described.
+    :param n_cells: Number of cells the arrays being initialized have.
+    :returns: A boolean array with one entry per cell, or `None` when the grid does not describe
+        exactly `n_cells` cells.
+    """
+    cell_statuses = np.asarray(grid.cell_statuses)
+    if cell_statuses.shape != (n_cells,):
+        return None
+    return cell_statuses == int(CellStatus.ACTIVE)
+
+
+def warn_on_inconsistent_phase_state(
+    *,
+    pressure: CellArray,
+    oil_bubble_point_pressure: CellArray,
+    gas_dew_point_pressure: CellArray,
+    water_saturation: CellArray,
+    gas_saturation: CellArray,
+    oil_saturation: CellArray,
+    active: npt.NDArray[np.bool_] | None,
+    explicit_fields: typing.Collection[str],
+) -> None:
+    """
+    Warn about cells whose pressure, saturations and bubble or dew point cannot coexist.
+
+    Oil that holds more dissolved gas than it can at its pressure must release it, so a cell with
+    oil, no free gas and a pressure below the oil bubble point is not a state that can exist. Gas
+    that holds more vaporized oil than it can at its pressure must drop it out, so a cell with gas,
+    no free oil and a pressure below the gas dew point is not one either. Free gas in oil that is
+    undersaturated, or free oil in undersaturated gas, is physically possible only as a transient,
+    so it is reported as well. Only cells that take part in the flow simulation are examined.
+
+    The state is still returned. A deliberate mismatch, such as a measured pressure history
+    matched against a derived `Rs` profile, is a legitimate use of explicit arrays.
+
+    :param pressure: Pressure of every cell.
+    :param oil_bubble_point_pressure: Oil bubble-point pressure of every cell.
+    :param gas_dew_point_pressure: Gas dew-point pressure of every cell.
+    :param water_saturation: Water saturation of every cell.
+    :param gas_saturation: Gas saturation of every cell.
+    :param oil_saturation: Oil saturation of every cell.
+    :param active: Which cells take part in the flow simulation, or `None` to examine all of them.
+    :param explicit_fields: Names of the fields that were supplied rather than derived. They are
+        named in the warning, since a state built only from equilibration or only from explicit
+        arrays is consistent by construction and a mix is where an inconsistency arises.
+    :warns UserWarning: For every kind of inconsistency found.
+    """
+    pressure_floor = 1.0 - PRESSURE_CONSISTENCY_TOLERANCE
+    pressure_ceiling = 1.0 + PRESSURE_CONSISTENCY_TOLERANCE
+    has_oil = oil_saturation > OIL_PRESENCE_SATURATION
+    has_gas = gas_saturation > GAS_PRESENCE_SATURATION
+    no_free_gas = gas_saturation <= FREE_PHASE_SATURATION
+    no_free_oil = oil_saturation <= FREE_PHASE_SATURATION
+    oil_below_bubble_point = pressure < oil_bubble_point_pressure * pressure_floor
+    gas_below_dew_point = pressure < gas_dew_point_pressure * pressure_floor
+
+    findings = {
+        "oil below its bubble point without free gas": (
+            has_oil & no_free_gas & oil_below_bubble_point,
+            oil_bubble_point_pressure - pressure,
+        ),
+        "free gas in oil that is above its bubble point": (
+            has_oil
+            & (gas_saturation > FREE_PHASE_SATURATION)
+            & (pressure > oil_bubble_point_pressure * pressure_ceiling),
+            pressure - oil_bubble_point_pressure,
+        ),
+        "gas below its dew point without free oil": (
+            has_gas & no_free_oil & gas_below_dew_point,
+            gas_dew_point_pressure - pressure,
+        ),
+    }
+    mixing = (
+        f"Explicit fields: {sorted(explicit_fields)}."
+        if explicit_fields
+        else "No field was supplied explicitly."
+    )
+    for description, (offending, shortfall) in findings.items():
+        if active is not None:
+            offending = offending & active
+        count = int(offending.sum())
+        if count:
+            warnings.warn(
+                f"{count} cell(s) have {description}; the largest difference is "
+                f"{float(shortfall[offending].max()):.4g} in pressure units. {mixing} The state "
+                "does not lie on the fluid's saturation curve, so supply `pressure`, "
+                "`solution_gor` and `vaporized_oil_gas_ratio` together, or let equilibration "
+                "derive them together.",
+                UserWarning,
+                stacklevel=3,
+            )
+
+
 def initialize_reservoir_state(
     reservoir: Reservoir,
     pvt: PVT,
@@ -2126,6 +2258,17 @@ def initialize_reservoir_state(
                 )
                 if gas_dew_point is not None:
                     gas_dew_point_pressure_array[mask] = gas_dew_point  # type: ignore
+
+    warn_on_inconsistent_phase_state(
+        pressure=pressure_array,
+        oil_bubble_point_pressure=typing.cast(CellArray, oil_bubble_point_pressure_array),
+        gas_dew_point_pressure=typing.cast(CellArray, gas_dew_point_pressure_array),
+        water_saturation=water_saturation_array,
+        gas_saturation=gas_saturation_array,
+        oil_saturation=oil_saturation_array,
+        active=get_active_cells(reservoir.grid, n_cells),
+        explicit_fields=[field for field, value in explicit.items() if value is not None],
+    )
 
     solubility_in_water_input = gas_solubility_in_water
     if solubility_in_water_input is None and deck_file is not None:

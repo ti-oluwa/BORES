@@ -3150,11 +3150,17 @@ def reference_rate_bisection(
     *, tubing, case, workspace, mask, is_injector, spec, target, low, high, condition
 ):
     """The rate bisection written as a plain Python loop over the compiled solve."""
+    from bores.wells.resolution.fixed_point import (
+        get_trial_pressure,
+        make_bracket,
+        narrow_bracket,
+    )
     from bores.wells.resolution.solvers import solve_connection_pressures_and_rates
 
+    bracket = make_bracket(low=low, high=high)
     average = 0.5 * (low + high)
     for _ in range(spec.max_bisection_iterations):
-        average = 0.5 * (low + high)
+        average = get_trial_pressure(bracket=bracket)
         pressures, reservoir, surface = solve_connection_pressures_and_rates(
             tubing=tubing,
             reference_depth=case.reference_depth,
@@ -3166,12 +3172,10 @@ def reference_rate_bisection(
         )
         rates = reservoir if condition == "reservoir" else surface
         value = rates.oil + rates.water + rates.gas
-        if abs(value - target) <= spec.rate_convergence_tolerance * max(abs(target), 1.0):
+        gap = value - target
+        if abs(gap) <= spec.rate_convergence_tolerance * max(abs(target), 1.0):
             break
-        if (value < target) == is_injector:
-            low = average
-        else:
-            high = average
+        bracket = narrow_bracket(bracket=bracket, trial=average, gap=gap, is_injector=is_injector)
     return average, pressures, reservoir
 
 

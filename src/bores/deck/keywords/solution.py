@@ -26,9 +26,9 @@ float64 arrays):
 **Tracer initialisation keywords** (`TVDPF<name>`, one per tracer declared with `TRACER`):
 
 - `TVDPF<name>`: initial tracer concentration versus depth, one table per region.
-  The name is part of the keyword, so each tracer is its own keyword: `TVDPF2FB`, `TVDPF4FB`,
-  `TVDPFDFB`, `TVDPFHTO`, `TVDPFS36`, `TVDPFSEA` and `TVDPFTFB` are registered, and `tvdpf`
-  builds the keyword for any other tracer name.
+  The tracer name is part of the keyword, so each tracer is its own keyword. `DeckFile` registers
+  the keyword of every tracer it finds in a deck, so none has to be listed here; `tvdpf` builds
+  the keyword for a tracer name and `tvdpf_tracer` reads the name back out of a keyword.
 
 **Restart keyword**:
 
@@ -44,6 +44,7 @@ float64 arrays):
   index, total compressibility, and initial water volume.
 """
 
+import re
 import typing
 
 import numpy as np
@@ -82,14 +83,11 @@ __all__ = [
     "SW",
     "SWAT",
     "TEMPVD",
-    "TVDPF2FB",
-    "TVDPF4FB",
-    "TVDPFDFB",
-    "TVDPFHTO",
-    "TVDPFS36",
-    "TVDPFSEA",
-    "TVDPFTFB",
+    "TRACER_NAME_MAX_LENGTH",
+    "TVDPF_PATTERN",
+    "TVDPF_PREFIX",
     "tvdpf",
+    "tvdpf_tracer",
 ]
 
 
@@ -280,12 +278,34 @@ Columns:
 """
 
 
+TVDPF_PREFIX = "TVDPF"
+"""Start of the keyword that gives the initial concentration of a tracer versus depth."""
+
+TRACER_NAME_MAX_LENGTH = 8 - len(TVDPF_PREFIX)
+"""Longest tracer name that fits in a `TVDPF<name>` keyword, which is at most eight characters."""
+
+TVDPF_PATTERN = re.compile(rf"{TVDPF_PREFIX}(?P<tracer>\w{{1,{TRACER_NAME_MAX_LENGTH}}})")
+
+
+def tvdpf_tracer(keyword_name: str) -> str | None:
+    """
+    The tracer a `TVDPF<name>` keyword belongs to.
+
+    :param keyword_name: Name of a keyword, such as `"TVDPFSEA"`.
+    :returns: The tracer name (`"SEA"`), or `None` when the keyword is not a tracer
+        concentration table.
+    """
+    match = TVDPF_PATTERN.fullmatch(keyword_name.upper())
+    return match.group("tracer") if match is not None else None
+
+
 def tvdpf(tracer: str) -> TableKeyword:
     """
     Build the `TVDPF<tracer>` keyword: initial concentration of a tracer versus depth.
 
-    The tracer name is part of the keyword (`TVDPFSEA` for a tracer called `SEA`), so a deck's own
-    tracers need their keyword registered before they can be read:
+    The tracer name is part of the keyword (`TVDPFSEA` for a tracer called `SEA`). `DeckFile`
+    registers the keyword of every tracer concentration table it finds, so this is only needed to
+    read one from a deck that was built without it, or to replace the registered one:
 
         deck_file.add_keywords(tvdpf("XYZ"))
 
@@ -295,8 +315,8 @@ def tvdpf(tracer: str) -> TableKeyword:
     - `depth`: true vertical depth (ft in FIELD, m in METRIC).
     - `concentration`: free-phase tracer concentration at that depth (in the tracer's own unit).
 
-    :param tracer: Tracer name, as declared with `TRACER` (up to five characters, since a keyword
-        is at most eight characters long).
+    :param tracer: Tracer name, as declared with `TRACER` (at most three characters, since
+        `TVDPF` leaves three of the eight characters a keyword can have).
     :returns: The table keyword.
     """
     return TableKeyword(
@@ -306,28 +326,6 @@ def tvdpf(tracer: str) -> TableKeyword:
             Field("concentration", np.float64),
         ],
     )
-
-
-TVDPFSEA = tvdpf("SEA")
-"""`TVDPFSEA` - initial concentration of the tracer `SEA` versus depth. See `tvdpf`."""
-
-TVDPFHTO = tvdpf("HTO")
-"""`TVDPFHTO` - initial concentration of the tracer `HTO` versus depth. See `tvdpf`."""
-
-TVDPFS36 = tvdpf("S36")
-"""`TVDPFS36` - initial concentration of the tracer `S36` versus depth. See `tvdpf`."""
-
-TVDPF2FB = tvdpf("2FB")
-"""`TVDPF2FB` - initial concentration of the tracer `2FB` versus depth. See `tvdpf`."""
-
-TVDPF4FB = tvdpf("4FB")
-"""`TVDPF4FB` - initial concentration of the tracer `4FB` versus depth. See `tvdpf`."""
-
-TVDPFDFB = tvdpf("DFB")
-"""`TVDPFDFB` - initial concentration of the tracer `DFB` versus depth. See `tvdpf`."""
-
-TVDPFTFB = tvdpf("TFB")
-"""`TVDPFTFB` - initial concentration of the tracer `TFB` versus depth. See `tvdpf`."""
 
 
 class RestartKeyword(Keyword[dict[str, typing.Any]]):

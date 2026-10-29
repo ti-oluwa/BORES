@@ -1268,6 +1268,117 @@ class BisectionResult(typing.NamedTuple):
     """The last solve. If it didn't converge, the bisection stopped there."""
 
 
+class Bracket(typing.NamedTuple):
+    """The reference pressures a rate bisection has narrowed a target rate down to."""
+
+    low: Number
+    """Lower bound of the reference pressure."""
+
+    high: Number
+    """Upper bound of the reference pressure."""
+
+    low_gap: Number
+    """Total rate minus the target at `low`. `NaN` until a solve has been made there."""
+
+    high_gap: Number
+    """Total rate minus the target at `high`. `NaN` until a solve has been made there."""
+
+    last_side: Integer
+    """The bound the last solve replaced: `-1` for the lower, `1` for the upper, `0` for none."""
+
+    slow_steps: Integer
+    """How many interpolation steps in a row narrowed the bounds by less than half."""
+
+
+@numba.njit(cache=True)
+def make_bracket(low: Number, high: Number) -> Bracket:
+    """
+    Starts a bracket from the bounds of the reference pressure.
+
+    :param low: Lower bound of the reference pressure.
+    :param high: Upper bound of the reference pressure.
+    :returns: A bracket with no solve made at either bound yet.
+    """
+    return Bracket(
+        low=np.float64(low),
+        high=np.float64(high),
+        low_gap=math.nan,
+        high_gap=math.nan,
+        last_side=0,
+        slow_steps=0,
+    )
+
+
+@numba.njit(cache=True)
+def get_trial_pressure(bracket: Bracket) -> Number:
+    """
+    Chooses the next reference pressure to solve at.
+
+    Once a solve has been made at both bounds, the pressure is where the straight line between
+    their rates meets the target, kept off the bounds so that every step narrows the bracket.
+    Before that, and after two interpolation steps in a row that each narrowed the bracket by
+    less than half, it is the middle of the bounds.
+
+    :param bracket: The bracket so far.
+    :returns: The reference pressure to solve at.
+    """
+    width = bracket.high - bracket.low
+    low_gap = bracket.low_gap
+    high_gap = bracket.high_gap
+    has_both_gaps = math.isfinite(low_gap) and math.isfinite(high_gap)
+    if has_both_gaps and low_gap * high_gap < 0.0 and bracket.slow_steps < 2:
+        trial = (bracket.low * high_gap - bracket.high * low_gap) / (high_gap - low_gap)
+        return min(max(trial, bracket.low + 0.01 * width), bracket.high - 0.01 * width)
+    return 0.5 * (bracket.low + bracket.high)
+
+
+@numba.njit(cache=True)
+def narrow_bracket(bracket: Bracket, trial: Number, gap: Number, is_injector: Boolean) -> Bracket:
+    """
+    Narrows a bracket with a solve made inside it.
+
+    The total rate falls as the reference pressure rises for a producer and rises with it for an
+    injector, so the solve replaces the bound whose side of the target it is on. When the same
+    bound is replaced twice in a row, the gap at the other bound is halved so that the next
+    interpolation moves away from it.
+
+    :param bracket: The bracket so far.
+    :param trial: The reference pressure that was solved at.
+    :param gap: Total rate minus the target at `trial`.
+    :param is_injector: Whether the well is an injector.
+    :returns: The narrowed bracket.
+    """
+    trial = np.float64(trial)
+    gap = np.float64(gap)
+    width = bracket.high - bracket.low
+    interpolated = bracket.slow_steps < 2 and math.isfinite(bracket.low_gap + bracket.high_gap)
+    replaces_low = (gap < 0.0) == is_injector
+    if replaces_low:
+        low = trial
+        high = bracket.high
+        low_gap = gap
+        high_gap = 0.5 * bracket.high_gap if bracket.last_side == -1 else bracket.high_gap
+        last_side = -1
+    else:
+        low = bracket.low
+        high = trial
+        low_gap = 0.5 * bracket.low_gap if bracket.last_side == 1 else bracket.low_gap
+        high_gap = gap
+        last_side = 1
+    if interpolated and (high - low) > 0.5 * width:
+        slow_steps = bracket.slow_steps + 1
+    else:
+        slow_steps = 0
+    return Bracket(
+        low=low,
+        high=high,
+        low_gap=low_gap,
+        high_gap=high_gap,
+        last_side=last_side,
+        slow_steps=slow_steps,
+    )
+
+
 @numba.njit(cache=True)
 def bisect_homogeneous(
     model: HomogeneousWellbore,
@@ -1294,8 +1405,11 @@ def bisect_homogeneous(
     profile from the homogeneous correlation.
 
     The total rate falls as the reference pressure rises for a producer and rises with it for an
-    injector. Each step bisects the bounds and solves the connection pressures and rates there. If a
-    solve doesn't converge the bisection stops and returns it, for the caller to report.
+    injector. Each step solves the connection pressures and rates at a pressure between the bounds
+    and narrows them with it. That pressure is found by interpolating between the rates at the
+    bounds once both are known, and is the middle of the bounds otherwise or when interpolation
+    narrows them too slowly. If a solve doesn't converge the bisection stops and returns it, for
+    the caller to report.
 
     :param model: The well's `HomogeneousWellbore`.
     :param hydrostatic_divisor: The model's unit system's gravitational factor times its
@@ -1316,11 +1430,12 @@ def bisect_homogeneous(
     :param high: Upper bound of the reference pressure.
     :param reservoir_condition: Whether `target` is a reservoir-condition rate, instead of a
         surface-condition one.
-    :param max_bisections: The most bisection steps to take.
+    :param max_bisections: The most steps to take.
     :param rate_tolerance: Relative tolerance on the match to `target`.
     :returns: The reference pressure of the last solve, and that solve.
     """
-    average = 0.5 * (low + high)
+    trial = 0.5 * (low + high)
+    bracket = make_bracket(low=low, high=high)
     result = FixedPointResult(
         converged=False,
         previous_total_rate=0.0,
@@ -1333,11 +1448,11 @@ def bisect_homogeneous(
         surface_gas_rate=0.0,
     )
     for step in range(max_bisections):
-        average = 0.5 * (low + high)
+        trial = get_trial_pressure(bracket=bracket)
         result = solve_homogeneous(
             model=model,
             reference_depth=reference_depth,
-            reference_pressure=average,
+            reference_pressure=trial,
             workspace=workspace,
             relevant_oil=relevant_oil,
             relevant_water=relevant_water,
@@ -1351,18 +1466,16 @@ def bisect_homogeneous(
             warm_start=step > 0,
         )
         if not result.converged:
-            return BisectionResult(bhp=average, result=result)
+            return BisectionResult(bhp=trial, result=result)
         if reservoir_condition:
             value = result.oil_rate + result.water_rate + result.gas_rate
         else:
             value = result.surface_oil_rate + result.surface_water_rate + result.surface_gas_rate
-        if abs(value - target) <= rate_tolerance * max(abs(target), 1.0):
+        gap = value - target
+        if abs(gap) <= rate_tolerance * max(abs(target), 1.0):
             break
-        if (value < target) == is_injector:
-            low = average
-        else:
-            high = average
-    return BisectionResult(bhp=average, result=result)
+        bracket = narrow_bracket(bracket=bracket, trial=trial, gap=gap, is_injector=is_injector)
+    return BisectionResult(bhp=trial, result=result)
 
 
 @numba.njit(cache=True)
@@ -1391,8 +1504,11 @@ def bisect_beggs_and_brill(
     profile from the Beggs and Brill correlation.
 
     The total rate falls as the reference pressure rises for a producer and rises with it for an
-    injector. Each step bisects the bounds and solves the connection pressures and rates there. If a
-    solve doesn't converge the bisection stops and returns it, for the caller to report.
+    injector. Each step solves the connection pressures and rates at a pressure between the bounds
+    and narrows them with it. That pressure is found by interpolating between the rates at the
+    bounds once both are known, and is the middle of the bounds otherwise or when interpolation
+    narrows them too slowly. If a solve doesn't converge the bisection stops and returns it, for
+    the caller to report.
 
     :param model: The well's `BeggsAndBrillWellbore`.
     :param hydrostatic_divisor: The model's unit system's gravitational factor times its
@@ -1413,11 +1529,12 @@ def bisect_beggs_and_brill(
     :param high: Upper bound of the reference pressure.
     :param reservoir_condition: Whether `target` is a reservoir-condition rate, instead of a
         surface-condition one.
-    :param max_bisections: The most bisection steps to take.
+    :param max_bisections: The most steps to take.
     :param rate_tolerance: Relative tolerance on the match to `target`.
     :returns: The reference pressure of the last solve, and that solve.
     """
-    average = 0.5 * (low + high)
+    trial = 0.5 * (low + high)
+    bracket = make_bracket(low=low, high=high)
     result = FixedPointResult(
         converged=False,
         previous_total_rate=0.0,
@@ -1430,11 +1547,11 @@ def bisect_beggs_and_brill(
         surface_gas_rate=0.0,
     )
     for step in range(max_bisections):
-        average = 0.5 * (low + high)
+        trial = get_trial_pressure(bracket=bracket)
         result = solve_beggs_and_brill(
             model=model,
             reference_depth=reference_depth,
-            reference_pressure=average,
+            reference_pressure=trial,
             workspace=workspace,
             relevant_oil=relevant_oil,
             relevant_water=relevant_water,
@@ -1448,18 +1565,16 @@ def bisect_beggs_and_brill(
             warm_start=step > 0,
         )
         if not result.converged:
-            return BisectionResult(bhp=average, result=result)
+            return BisectionResult(bhp=trial, result=result)
         if reservoir_condition:
             value = result.oil_rate + result.water_rate + result.gas_rate
         else:
             value = result.surface_oil_rate + result.surface_water_rate + result.surface_gas_rate
-        if abs(value - target) <= rate_tolerance * max(abs(target), 1.0):
+        gap = value - target
+        if abs(gap) <= rate_tolerance * max(abs(target), 1.0):
             break
-        if (value < target) == is_injector:
-            low = average
-        else:
-            high = average
-    return BisectionResult(bhp=average, result=result)
+        bracket = narrow_bracket(bracket=bracket, trial=trial, gap=gap, is_injector=is_injector)
+    return BisectionResult(bhp=trial, result=result)
 
 
 @numba.njit(cache=True)
@@ -1488,8 +1603,11 @@ def bisect_hagedorn_brown(
     profile from the Hagedorn and Brown correlation.
 
     The total rate falls as the reference pressure rises for a producer and rises with it for an
-    injector. Each step bisects the bounds and solves the connection pressures and rates there. If a
-    solve doesn't converge the bisection stops and returns it, for the caller to report.
+    injector. Each step solves the connection pressures and rates at a pressure between the bounds
+    and narrows them with it. That pressure is found by interpolating between the rates at the
+    bounds once both are known, and is the middle of the bounds otherwise or when interpolation
+    narrows them too slowly. If a solve doesn't converge the bisection stops and returns it, for
+    the caller to report.
 
     :param model: The well's `HagedornBrownWellbore`.
     :param hydrostatic_divisor: The model's unit system's gravitational factor times its
@@ -1510,11 +1628,12 @@ def bisect_hagedorn_brown(
     :param high: Upper bound of the reference pressure.
     :param reservoir_condition: Whether `target` is a reservoir-condition rate, instead of a
         surface-condition one.
-    :param max_bisections: The most bisection steps to take.
+    :param max_bisections: The most steps to take.
     :param rate_tolerance: Relative tolerance on the match to `target`.
     :returns: The reference pressure of the last solve, and that solve.
     """
-    average = 0.5 * (low + high)
+    trial = 0.5 * (low + high)
+    bracket = make_bracket(low=low, high=high)
     result = FixedPointResult(
         converged=False,
         previous_total_rate=0.0,
@@ -1527,11 +1646,11 @@ def bisect_hagedorn_brown(
         surface_gas_rate=0.0,
     )
     for step in range(max_bisections):
-        average = 0.5 * (low + high)
+        trial = get_trial_pressure(bracket=bracket)
         result = solve_hagedorn_brown(
             model=model,
             reference_depth=reference_depth,
-            reference_pressure=average,
+            reference_pressure=trial,
             workspace=workspace,
             relevant_oil=relevant_oil,
             relevant_water=relevant_water,
@@ -1545,18 +1664,16 @@ def bisect_hagedorn_brown(
             warm_start=step > 0,
         )
         if not result.converged:
-            return BisectionResult(bhp=average, result=result)
+            return BisectionResult(bhp=trial, result=result)
         if reservoir_condition:
             value = result.oil_rate + result.water_rate + result.gas_rate
         else:
             value = result.surface_oil_rate + result.surface_water_rate + result.surface_gas_rate
-        if abs(value - target) <= rate_tolerance * max(abs(target), 1.0):
+        gap = value - target
+        if abs(gap) <= rate_tolerance * max(abs(target), 1.0):
             break
-        if (value < target) == is_injector:
-            low = average
-        else:
-            high = average
-    return BisectionResult(bhp=average, result=result)
+        bracket = narrow_bracket(bracket=bracket, trial=trial, gap=gap, is_injector=is_injector)
+    return BisectionResult(bhp=trial, result=result)
 
 
 @numba.njit(cache=True)
@@ -1585,8 +1702,11 @@ def bisect_gray(
     profile from the Gray correlation.
 
     The total rate falls as the reference pressure rises for a producer and rises with it for an
-    injector. Each step bisects the bounds and solves the connection pressures and rates there. If a
-    solve doesn't converge the bisection stops and returns it, for the caller to report.
+    injector. Each step solves the connection pressures and rates at a pressure between the bounds
+    and narrows them with it. That pressure is found by interpolating between the rates at the
+    bounds once both are known, and is the middle of the bounds otherwise or when interpolation
+    narrows them too slowly. If a solve doesn't converge the bisection stops and returns it, for
+    the caller to report.
 
     :param model: The well's `GrayWellbore`.
     :param hydrostatic_divisor: The model's unit system's gravitational factor times its
@@ -1607,11 +1727,12 @@ def bisect_gray(
     :param high: Upper bound of the reference pressure.
     :param reservoir_condition: Whether `target` is a reservoir-condition rate, instead of a
         surface-condition one.
-    :param max_bisections: The most bisection steps to take.
+    :param max_bisections: The most steps to take.
     :param rate_tolerance: Relative tolerance on the match to `target`.
     :returns: The reference pressure of the last solve, and that solve.
     """
-    average = 0.5 * (low + high)
+    trial = 0.5 * (low + high)
+    bracket = make_bracket(low=low, high=high)
     result = FixedPointResult(
         converged=False,
         previous_total_rate=0.0,
@@ -1624,11 +1745,11 @@ def bisect_gray(
         surface_gas_rate=0.0,
     )
     for step in range(max_bisections):
-        average = 0.5 * (low + high)
+        trial = get_trial_pressure(bracket=bracket)
         result = solve_gray(
             model=model,
             reference_depth=reference_depth,
-            reference_pressure=average,
+            reference_pressure=trial,
             workspace=workspace,
             relevant_oil=relevant_oil,
             relevant_water=relevant_water,
@@ -1642,18 +1763,16 @@ def bisect_gray(
             warm_start=step > 0,
         )
         if not result.converged:
-            return BisectionResult(bhp=average, result=result)
+            return BisectionResult(bhp=trial, result=result)
         if reservoir_condition:
             value = result.oil_rate + result.water_rate + result.gas_rate
         else:
             value = result.surface_oil_rate + result.surface_water_rate + result.surface_gas_rate
-        if abs(value - target) <= rate_tolerance * max(abs(target), 1.0):
+        gap = value - target
+        if abs(gap) <= rate_tolerance * max(abs(target), 1.0):
             break
-        if (value < target) == is_injector:
-            low = average
-        else:
-            high = average
-    return BisectionResult(bhp=average, result=result)
+        bracket = narrow_bracket(bracket=bracket, trial=trial, gap=gap, is_injector=is_injector)
+    return BisectionResult(bhp=trial, result=result)
 
 
 @numba.njit(cache=True)
@@ -1682,8 +1801,11 @@ def bisect_woldesemayat_ghajar(
     profile from the Woldesemayat and Ghajar correlation.
 
     The total rate falls as the reference pressure rises for a producer and rises with it for an
-    injector. Each step bisects the bounds and solves the connection pressures and rates there. If a
-    solve doesn't converge the bisection stops and returns it, for the caller to report.
+    injector. Each step solves the connection pressures and rates at a pressure between the bounds
+    and narrows them with it. That pressure is found by interpolating between the rates at the
+    bounds once both are known, and is the middle of the bounds otherwise or when interpolation
+    narrows them too slowly. If a solve doesn't converge the bisection stops and returns it, for
+    the caller to report.
 
     :param model: The well's `WoldesemayatGhajarWellbore`.
     :param hydrostatic_divisor: The model's unit system's gravitational factor times its
@@ -1704,11 +1826,12 @@ def bisect_woldesemayat_ghajar(
     :param high: Upper bound of the reference pressure.
     :param reservoir_condition: Whether `target` is a reservoir-condition rate, instead of a
         surface-condition one.
-    :param max_bisections: The most bisection steps to take.
+    :param max_bisections: The most steps to take.
     :param rate_tolerance: Relative tolerance on the match to `target`.
     :returns: The reference pressure of the last solve, and that solve.
     """
-    average = 0.5 * (low + high)
+    trial = 0.5 * (low + high)
+    bracket = make_bracket(low=low, high=high)
     result = FixedPointResult(
         converged=False,
         previous_total_rate=0.0,
@@ -1721,11 +1844,11 @@ def bisect_woldesemayat_ghajar(
         surface_gas_rate=0.0,
     )
     for step in range(max_bisections):
-        average = 0.5 * (low + high)
+        trial = get_trial_pressure(bracket=bracket)
         result = solve_woldesemayat_ghajar(
             model=model,
             reference_depth=reference_depth,
-            reference_pressure=average,
+            reference_pressure=trial,
             workspace=workspace,
             relevant_oil=relevant_oil,
             relevant_water=relevant_water,
@@ -1739,18 +1862,16 @@ def bisect_woldesemayat_ghajar(
             warm_start=step > 0,
         )
         if not result.converged:
-            return BisectionResult(bhp=average, result=result)
+            return BisectionResult(bhp=trial, result=result)
         if reservoir_condition:
             value = result.oil_rate + result.water_rate + result.gas_rate
         else:
             value = result.surface_oil_rate + result.surface_water_rate + result.surface_gas_rate
-        if abs(value - target) <= rate_tolerance * max(abs(target), 1.0):
+        gap = value - target
+        if abs(gap) <= rate_tolerance * max(abs(target), 1.0):
             break
-        if (value < target) == is_injector:
-            low = average
-        else:
-            high = average
-    return BisectionResult(bhp=average, result=result)
+        bracket = narrow_bracket(bracket=bracket, trial=trial, gap=gap, is_injector=is_injector)
+    return BisectionResult(bhp=trial, result=result)
 
 
 @numba.njit(cache=True)
@@ -1776,7 +1897,7 @@ def bisect_hydrostatic(
     Finds the reference pressure at which a well's total rate matches a target, with the pressure
     profile from the weight of the fluid between connections.
 
-    See `bisect_homogeneous` for how the bisection proceeds.
+    See `bisect_homogeneous` for how the next pressure is chosen.
 
     :param pressure_per_density_and_depth: As `get_pressure_per_density_and_depth` gives it.
     :param reference_depth: The well's BHP/THP reporting datum.
@@ -1795,11 +1916,12 @@ def bisect_hydrostatic(
     :param high: Upper bound of the reference pressure.
     :param reservoir_condition: Whether `target` is a reservoir-condition rate, instead of a
         surface-condition one.
-    :param max_bisections: The most bisection steps to take.
+    :param max_bisections: The most steps to take.
     :param rate_tolerance: Relative tolerance on the match to `target`.
     :returns: The reference pressure of the last solve, and that solve.
     """
-    average = 0.5 * (low + high)
+    trial = 0.5 * (low + high)
+    bracket = make_bracket(low=low, high=high)
     result = FixedPointResult(
         converged=False,
         previous_total_rate=0.0,
@@ -1812,10 +1934,10 @@ def bisect_hydrostatic(
         surface_gas_rate=0.0,
     )
     for step in range(max_bisections):
-        average = 0.5 * (low + high)
+        trial = get_trial_pressure(bracket=bracket)
         result = solve_hydrostatic(
             reference_depth=reference_depth,
-            reference_pressure=average,
+            reference_pressure=trial,
             workspace=workspace,
             relevant_oil=relevant_oil,
             relevant_water=relevant_water,
@@ -1828,18 +1950,16 @@ def bisect_hydrostatic(
             warm_start=step > 0,
         )
         if not result.converged:
-            return BisectionResult(bhp=average, result=result)
+            return BisectionResult(bhp=trial, result=result)
         if reservoir_condition:
             value = result.oil_rate + result.water_rate + result.gas_rate
         else:
             value = result.surface_oil_rate + result.surface_water_rate + result.surface_gas_rate
-        if abs(value - target) <= rate_tolerance * max(abs(target), 1.0):
+        gap = value - target
+        if abs(gap) <= rate_tolerance * max(abs(target), 1.0):
             break
-        if (value < target) == is_injector:
-            low = average
-        else:
-            high = average
-    return BisectionResult(bhp=average, result=result)
+        bracket = narrow_bracket(bracket=bracket, trial=trial, gap=gap, is_injector=is_injector)
+    return BisectionResult(bhp=trial, result=result)
 
 
 @numba.njit(cache=True)
@@ -1863,7 +1983,7 @@ def bisect_uniform(
     Finds the reference pressure at which a well's total rate matches a target, with that
     pressure applied unchanged at every connection.
 
-    See `bisect_homogeneous` for how the bisection proceeds.
+    See `bisect_homogeneous` for how the next pressure is chosen.
 
     :param workspace: The well's workspace. Its connection pressures, well indices and connection
         rates are updated.
@@ -1880,11 +2000,12 @@ def bisect_uniform(
     :param high: Upper bound of the reference pressure.
     :param reservoir_condition: Whether `target` is a reservoir-condition rate, instead of a
         surface-condition one.
-    :param max_bisections: The most bisection steps to take.
+    :param max_bisections: The most steps to take.
     :param rate_tolerance: Relative tolerance on the match to `target`.
     :returns: The reference pressure of the last solve, and that solve.
     """
-    average = 0.5 * (low + high)
+    trial = 0.5 * (low + high)
+    bracket = make_bracket(low=low, high=high)
     result = FixedPointResult(
         converged=False,
         previous_total_rate=0.0,
@@ -1897,9 +2018,9 @@ def bisect_uniform(
         surface_gas_rate=0.0,
     )
     for _ in range(max_bisections):
-        average = 0.5 * (low + high)
+        trial = get_trial_pressure(bracket=bracket)
         result = solve_uniform(
-            reference_pressure=average,
+            reference_pressure=trial,
             workspace=workspace,
             relevant_oil=relevant_oil,
             relevant_water=relevant_water,
@@ -1910,18 +2031,16 @@ def bisect_uniform(
             tolerance=tolerance,
         )
         if not result.converged:
-            return BisectionResult(bhp=average, result=result)
+            return BisectionResult(bhp=trial, result=result)
         if reservoir_condition:
             value = result.oil_rate + result.water_rate + result.gas_rate
         else:
             value = result.surface_oil_rate + result.surface_water_rate + result.surface_gas_rate
-        if abs(value - target) <= rate_tolerance * max(abs(target), 1.0):
+        gap = value - target
+        if abs(gap) <= rate_tolerance * max(abs(target), 1.0):
             break
-        if (value < target) == is_injector:
-            low = average
-        else:
-            high = average
-    return BisectionResult(bhp=average, result=result)
+        bracket = narrow_bracket(bracket=bracket, trial=trial, gap=gap, is_injector=is_injector)
+    return BisectionResult(bhp=trial, result=result)
 
 
 class HydraulicSolver(typing.Protocol):
