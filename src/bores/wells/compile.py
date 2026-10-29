@@ -1733,11 +1733,7 @@ class CompiledWellSystem(typing.NamedTuple):
         :param value: Whether crossflow is allowed. A single value applies to every row in
             `well_row`; a sequence sets each row to its own value.
         """
-        if isinstance(value, bool):
-            self.crossflow_flags[well_row] = 1 if value else 0
-        else:
-            # TODO: there should be a better way to handle this. this looks slow
-            self.crossflow_flags[well_row] = [1 if flag else 0 for flag in value]  # type: ignore
+        self.crossflow_flags[well_row] = np.asarray(value, dtype=self.crossflow_flags.dtype)
 
 
 def get_well_status_tag(status: WellStatus) -> Integer:

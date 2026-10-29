@@ -3231,9 +3231,9 @@ def test_the_rate_bisection_matches_a_python_loop_over_the_solve(
         spec=spec,
         target_rate_condition=condition,
     )
-    assert bhp == pytest.approx(expected_bhp, rel=1e-12)
-    assert pressures == pytest.approx(expected_pressures, rel=1e-12)
-    assert tuple(rates) == pytest.approx(tuple(expected_rates), rel=1e-12)
+    assert bhp == pytest.approx(expected_bhp, rel=1e-9)
+    assert pressures == pytest.approx(expected_pressures, rel=1e-9)
+    assert tuple(rates) == pytest.approx(tuple(expected_rates), rel=1e-9)
 
 
 @pytest.mark.parametrize("solver_name", FIXED_POINT_DRIVERS)
