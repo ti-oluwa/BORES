@@ -2,6 +2,7 @@
 
 import typing
 
+import numba
 import numpy as np
 
 from bores.blackoil.satfunc.relperm.mixing_rules import (
@@ -12,6 +13,7 @@ from bores.blackoil.satfunc.relperm.mixing_rules import (
 from bores.blackoil.satfunc.relperm.tables import clamp_relperm_derivative, show_invalid_saturation
 from bores.errors import ValidationError
 from bores.types import (
+    AnyDimension,
     Boolean,
     NDimension,
     Number,
@@ -50,34 +52,34 @@ class WettabilitySystem(typing.NamedTuple):
     saturation only in every supported model.
     """
 
-    krw: NumberArray[typing.Any]
+    krw: NumberArray[AnyDimension]
     """Water relative permeability."""
 
-    kro: NumberArray[typing.Any]
+    kro: NumberArray[AnyDimension]
     """Oil relative permeability."""
 
-    krg: NumberArray[typing.Any]
+    krg: NumberArray[AnyDimension]
     """Gas relative permeability."""
 
-    dkrw_dsw: NumberArray[typing.Any]
+    dkrw_dsw: NumberArray[AnyDimension]
     """Derivative of water relative permeability with respect to water saturation."""
 
-    dkrw_dso: NumberArray[typing.Any]
+    dkrw_dso: NumberArray[AnyDimension]
     """Derivative of water relative permeability with respect to oil saturation."""
 
-    dkrw_dsg: NumberArray[typing.Any]
+    dkrw_dsg: NumberArray[AnyDimension]
     """Derivative of water relative permeability with respect to gas saturation."""
 
-    dkro_dsw: NumberArray[typing.Any]
+    dkro_dsw: NumberArray[AnyDimension]
     """Derivative of oil relative permeability with respect to water saturation."""
 
-    dkro_dso: NumberArray[typing.Any]
+    dkro_dso: NumberArray[AnyDimension]
     """Derivative of oil relative permeability with respect to oil saturation."""
 
-    dkro_dsg: NumberArray[typing.Any]
+    dkro_dsg: NumberArray[AnyDimension]
     """Derivative of oil relative permeability with respect to gas saturation."""
 
-    dkrg_dsg: NumberArray[typing.Any]
+    dkrg_dsg: NumberArray[AnyDimension]
     """Derivative of gas relative permeability with respect to gas saturation."""
 
 
@@ -332,6 +334,7 @@ def to_scalar(value: NumberOrArray[NDimension]) -> Number:
     return np.asarray(value).item()
 
 
+@numba.njit(cache=True)
 def blend_systems(
     *,
     water_wet_value: NumberArray[NDimension],
@@ -524,8 +527,8 @@ def finalize_mixed_wet_derivatives(
     """
 
     def blend(
-        water_wet_value: NumberArray[typing.Any], oil_wet_value: NumberArray[typing.Any]
-    ) -> NumberArray[typing.Any]:
+        water_wet_value: NumberArray[AnyDimension], oil_wet_value: NumberArray[AnyDimension]
+    ) -> NumberArray[AnyDimension]:
         return blend_systems(
             water_wet_value=water_wet_value,
             oil_wet_value=oil_wet_value,

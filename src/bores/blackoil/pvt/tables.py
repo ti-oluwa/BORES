@@ -112,10 +112,10 @@ def evaluate_pchip_columns(
     query: npt.NDArray[np.floating],
 ) -> npt.NDArray[np.float64]:
     """
-    Evaluate one PCHIP per column of *columns*, each at its own query point.
+    Evaluate one PCHIP per column of `columns`, each at its own query point.
 
     A single `PchipInterpolator` is fitted to all columns at once (`axis=0`), and every
-    column's cubic piece is then evaluated at its own *query* value straight from the
+    column's cubic piece is then evaluated at its own `query` value straight from the
     piecewise-polynomial coefficients. This returns exactly what
     `PchipInterpolator(knots, columns[:, i], extrapolate=True)(query[i])` would for every
     `i` (including end-piece extrapolation), without building one interpolator per query
@@ -168,7 +168,7 @@ def build_bilinear_2d_derivative_interpolator(
     [NumberArray[NDimension], NumberArray[NDimension]], NumberArray[OneDimension]
 ]:
     """
-    Build the exact ∂table/∂P of a *bilinear* (kx=ky=1) surface.
+    Build the exact ∂table/∂P of a bilinear (kx=ky=1) surface.
 
     `RectBivariateSpline.partial_derivative(1, 0)` requires `dx < kx`, which
     is never true for `kx=1` ("linear" interpolation) - scipy has no way to

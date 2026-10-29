@@ -41,6 +41,7 @@ from bores.blackoil.satfunc.utils import (
 from bores.constants import c
 from bores.errors import ValidationError
 from bores.types import (
+    Boolean,
     BooleanArray,
     FluidPhase,
     Integer,
@@ -183,7 +184,7 @@ def compute_land_residual_saturation(
 
 
 @numba.njit(cache=True, error_model="numpy")
-def land_residual_from_reversal_kernel(
+def land_residual_from_reversal(
     size: Integer,
     reversal_saturation: NumberArray[OneDimension],
     other_saturation: NumberArray[OneDimension],
@@ -234,7 +235,7 @@ def saturations_need_normalising(
 
 
 @numba.njit(cache=True, error_model="numpy")
-def normalise_saturations_kernel(
+def normalise_saturations(
     size: Integer,
     water_saturation: NumberArray[OneDimension],
     oil_saturation: NumberArray[OneDimension],
@@ -302,7 +303,7 @@ class CurveSet(typing.NamedTuple):
 
 class ScanOutputs(typing.NamedTuple):
     """
-    Arrays that `scan_relative_permeabilities_kernel` fills.
+    Arrays that `scan_relative_permeabilities` fills.
 
     Entries the requested computation does not need are one-element placeholders.
     """
@@ -319,19 +320,19 @@ class ScanOutputs(typing.NamedTuple):
 
 
 @numba.njit(cache=True, error_model="numpy")
-def scan_relative_permeabilities_kernel(
+def scan_relative_permeabilities(
     size: Integer,
     water_saturation: NumberArray[OneDimension],
     oil_saturation: NumberArray[OneDimension],
     gas_saturation: NumberArray[OneDimension],
     history: HistoryArrays,
-    use_water_hysteresis: bool,
-    use_gas_hysteresis: bool,
+    use_water_hysteresis: Boolean,
+    use_gas_hysteresis: Boolean,
     scanning_exponent: Number,
     numerical_epsilon: Number,
     values: CurveSet,
     slopes: CurveSet,
-    with_derivatives: bool,
+    with_derivatives: Boolean,
     rule_id: Integer,
     kr_max: Number,
     irreducible_water_saturation: Number,
@@ -496,7 +497,7 @@ def query_oil_water_curves(
     water_saturation: NumberArray[OneDimension],
     oil_saturation: NumberArray[OneDimension],
     gas_saturation: NumberArray[OneDimension],
-    with_derivatives: bool,
+    with_derivatives: Boolean,
     **kwargs: typing.Any,
 ) -> tuple[typing.Any, typing.Any, typing.Any, typing.Any]:
     """
@@ -531,6 +532,7 @@ def query_oil_water_curves(
             **kwargs,
         )
         return values["water"], values["oil"], slopes["dkrw_dsw"], slopes["dkro_dsw"]
+
     values = table.evaluate(
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
@@ -547,7 +549,7 @@ def query_gas_oil_curves(
     oil_saturation: NumberArray[OneDimension],
     gas_saturation: NumberArray[OneDimension],
     connate_water_saturation: Number,
-    with_derivatives: bool,
+    with_derivatives: Boolean,
     **kwargs: typing.Any,
 ) -> tuple[typing.Any, typing.Any, typing.Any, typing.Any]:
     """
@@ -590,6 +592,7 @@ def query_gas_oil_curves(
             **kwargs,
         )
         return values["oil"], values["gas"], slopes["dkro_dsg"], slopes["dkrg_dsg"]
+
     values = table.evaluate(
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
@@ -788,7 +791,7 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
         oil_saturation: NumberOrArray[NDimension],
         gas_saturation: NumberOrArray[NDimension],
         *,
-        with_derivatives: bool,
+        with_derivatives: Boolean,
         max_water_saturation: NumberOrArray[NDimension] | None = None,
         max_gas_saturation: NumberOrArray[NDimension] | None = None,
         water_imbibition_flag: bool | BooleanArray[NDimension] | None = None,
@@ -841,6 +844,7 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
             inputs += [max_gas_saturation, gas_imbibition_flag]
             if gas_reversal_saturation is not None:
                 inputs.append(gas_reversal_saturation)
+
         shape = np.broadcast_shapes(*(np.shape(value) for value in inputs))
         flat_shape = shape or (1,)
         size = math.prod(flat_shape)
@@ -856,7 +860,7 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
             gas_saturation=sg,
             saturation_epsilon=saturation_epsilon,
         ):
-            sw, so, sg = normalise_saturations_kernel(
+            sw, so, sg = normalise_saturations(
                 size=size,
                 water_saturation=sw,
                 oil_saturation=so,
@@ -890,13 +894,14 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
             )
         else:
             maximum_gas, gas_flag, gas_reversal = placeholder, no_flag, placeholder
+
         history = HistoryArrays(
-            max_water_saturation=maximum_water,
-            max_gas_saturation=maximum_gas,
-            water_imbibition_flag=water_flag,
-            gas_imbibition_flag=gas_flag,
-            water_reversal_saturation=water_reversal,
-            gas_reversal_saturation=gas_reversal,
+            max_water_saturation=typing.cast(NumberArray[OneDimension], maximum_water),
+            max_gas_saturation=typing.cast(NumberArray[OneDimension], maximum_gas),
+            water_imbibition_flag=typing.cast(NumberArray[OneDimension], water_flag),
+            gas_imbibition_flag=typing.cast(NumberArray[OneDimension], gas_flag),
+            water_reversal_saturation=typing.cast(NumberArray[OneDimension], water_reversal),
+            gas_reversal_saturation=typing.cast(NumberArray[OneDimension], gas_reversal),
         )
 
         # Bounding curves
@@ -926,7 +931,7 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
             land_kwargs = self.land_override_kwargs_water(
                 size=size,
                 gas_saturation=sg,
-                water_reversal=water_reversal,
+                water_reversal=typing.cast(NumberArray[OneDimension], water_reversal),
                 table=imbibition_table or drainage_water_system,
                 kwargs=kwargs,
             )
@@ -945,7 +950,7 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
             land_kwargs = self.land_override_kwargs_gas(
                 size=size,
                 water_saturation=sw,
-                gas_reversal=gas_reversal,
+                gas_reversal=typing.cast(NumberArray[OneDimension], gas_reversal),
                 table=imbibition_table or drainage_gas_system,
                 kwargs=kwargs,
             )
@@ -969,17 +974,43 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
             krg_imbibition=krg_i,
         )
         slopes = CurveSet(
-            krw_drainage=dkrw_d if with_derivatives else placeholder,
-            krw_imbibition=dkrw_i if with_derivatives else placeholder,
-            kro_water_drainage=dkro_water_d if with_derivatives else placeholder,
-            kro_water_imbibition=dkro_water_i if with_derivatives else placeholder,
-            kro_gas_drainage=dkro_gas_d if with_derivatives else placeholder,
-            kro_gas_imbibition=dkro_gas_i if with_derivatives else placeholder,
-            krg_drainage=dkrg_d if with_derivatives else placeholder,
-            krg_imbibition=dkrg_i if with_derivatives else placeholder,
+            krw_drainage=typing.cast(
+                NumberArray[OneDimension], dkrw_d if with_derivatives else placeholder
+            ),
+            krw_imbibition=typing.cast(
+                NumberArray[OneDimension], dkrw_i if with_derivatives else placeholder
+            ),
+            kro_water_drainage=typing.cast(
+                NumberArray[OneDimension], dkro_water_d if with_derivatives else placeholder
+            ),
+            kro_water_imbibition=typing.cast(
+                NumberArray[OneDimension], dkro_water_i if with_derivatives else placeholder
+            ),
+            kro_gas_drainage=typing.cast(
+                NumberArray[OneDimension], dkro_gas_d if with_derivatives else placeholder
+            ),
+            kro_gas_imbibition=typing.cast(
+                NumberArray[OneDimension], dkro_gas_i if with_derivatives else placeholder
+            ),
+            krg_drainage=typing.cast(
+                NumberArray[OneDimension], dkrg_d if with_derivatives else placeholder
+            ),
+            krg_imbibition=typing.cast(
+                NumberArray[OneDimension], dkrg_i if with_derivatives else placeholder
+            ),
         )
-        values = CurveSet(*(np.asarray(array).reshape(-1) for array in values))
-        slopes = CurveSet(*(np.asarray(array).reshape(-1) for array in slopes))
+        values = CurveSet(
+            *(
+                typing.cast(NumberArray[OneDimension], np.asarray(array).reshape(-1))
+                for array in values
+            )
+        )
+        slopes = CurveSet(
+            *(
+                typing.cast(NumberArray[OneDimension], np.asarray(array).reshape(-1))
+                for array in slopes
+            )
+        )
 
         dtype = values.krw_drainage.dtype
         if dtype.kind != "f":
@@ -989,21 +1020,34 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
         use_rule_in_kernel = rule_id is not None
         needs_gas_oil = not use_rule_in_kernel
         out = ScanOutputs(
-            krw=np.empty(size, dtype=dtype),
-            kro=np.empty(size, dtype=dtype),
-            krg=np.empty(size, dtype=dtype),
-            kro_gas=np.empty(size if needs_gas_oil else 1, dtype=dtype),
-            dkrw_dsw=np.empty(size if with_derivatives else 1, dtype=dtype),
-            dkro_dsw=np.empty(size if with_derivatives else 1, dtype=dtype),
-            dkro_dso=np.empty(size if with_derivatives and use_rule_in_kernel else 1, dtype=dtype),
-            dkro_dsg=np.empty(size if with_derivatives else 1, dtype=dtype),
-            dkrg_dsg=np.empty(size if with_derivatives else 1, dtype=dtype),
+            krw=typing.cast(NumberArray[OneDimension], np.empty(size, dtype=dtype)),
+            kro=typing.cast(NumberArray[OneDimension], np.empty(size, dtype=dtype)),
+            krg=typing.cast(NumberArray[OneDimension], np.empty(size, dtype=dtype)),
+            kro_gas=typing.cast(
+                NumberArray[OneDimension], np.empty(size if needs_gas_oil else 1, dtype=dtype)
+            ),
+            dkrw_dsw=typing.cast(
+                NumberArray[OneDimension], np.empty(size if with_derivatives else 1, dtype=dtype)
+            ),
+            dkro_dsw=typing.cast(
+                NumberArray[OneDimension], np.empty(size if with_derivatives else 1, dtype=dtype)
+            ),
+            dkro_dso=typing.cast(
+                NumberArray[OneDimension],
+                np.empty(size if with_derivatives and use_rule_in_kernel else 1, dtype=dtype),
+            ),
+            dkro_dsg=typing.cast(
+                NumberArray[OneDimension], np.empty(size if with_derivatives else 1, dtype=dtype)
+            ),
+            dkrg_dsg=typing.cast(
+                NumberArray[OneDimension], np.empty(size if with_derivatives else 1, dtype=dtype)
+            ),
         )
         kr_max = self.get_oil_relperm_endpoint()
         irreducible_water_saturation = self.get_connate_water_saturation()
         residual_oil_saturation_water = self.get_residual_oil_saturation_water()
         residual_oil_saturation_gas = self.get_residual_oil_saturation_gas()
-        scan_relative_permeabilities_kernel(
+        scan_relative_permeabilities(
             size=size,
             water_saturation=sw,
             oil_saturation=so,
@@ -1122,8 +1166,9 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
         maximum_residual = self.maximum_residual_oil_saturation_water
         if maximum_residual is None or isinstance(table, TwoPhaseRelPermTable):
             return kwargs
+        
         residual = np.empty(size, dtype=gas_saturation.dtype)
-        land_residual_from_reversal_kernel(
+        land_residual_from_reversal(
             size=size,
             reversal_saturation=water_reversal,
             other_saturation=gas_saturation,
@@ -1131,7 +1176,7 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
             maximum_residual_saturation=maximum_residual,
             land_trapping_coefficient=self.land_trapping_coefficient_water,
             saturation_epsilon=1e-12,
-            out=residual,
+            out=typing.cast(NumberArray[OneDimension], residual),
         )
         return {**kwargs, "residual_oil_saturation_water": residual}
 
@@ -1156,7 +1201,7 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
         overrides: dict[str, typing.Any] = {}
         if self.maximum_residual_gas_saturation is not None:
             residual_gas = np.empty(size, dtype=water_saturation.dtype)
-            land_residual_from_reversal_kernel(
+            land_residual_from_reversal(
                 size=size,
                 reversal_saturation=gas_reversal,
                 other_saturation=water_saturation,
@@ -1164,12 +1209,12 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
                 maximum_residual_saturation=self.maximum_residual_gas_saturation,
                 land_trapping_coefficient=self.land_trapping_coefficient_gas,
                 saturation_epsilon=1e-12,
-                out=residual_gas,
+                out=typing.cast(NumberArray[OneDimension], residual_gas),
             )
             overrides["residual_gas_saturation"] = residual_gas
         if self.maximum_residual_oil_saturation_gas is not None:
             residual_oil = np.empty(size, dtype=water_saturation.dtype)
-            land_residual_from_reversal_kernel(
+            land_residual_from_reversal(
                 size=size,
                 reversal_saturation=gas_reversal,
                 other_saturation=water_saturation,
@@ -1177,7 +1222,7 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
                 maximum_residual_saturation=self.maximum_residual_oil_saturation_gas,
                 land_trapping_coefficient=self.land_trapping_coefficient_gas,
                 saturation_epsilon=1e-12,
-                out=residual_oil,
+                out=typing.cast(NumberArray[OneDimension], residual_oil),
             )
             overrides["residual_oil_saturation_gas"] = residual_oil
         return {**kwargs, **overrides} if overrides else kwargs

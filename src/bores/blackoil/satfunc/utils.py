@@ -7,6 +7,7 @@ from scipy.interpolate import PchipInterpolator
 
 from bores.errors import ValidationError
 from bores.types import (
+    Boolean,
     Integer,
     NDimension,
     Number,
@@ -352,7 +353,7 @@ def scan_curve_kernel(
     imbibition_value: NumberArray[OneDimension],
     drainage_derivative: NumberArray[OneDimension],
     imbibition_derivative: NumberArray[OneDimension],
-    want_derivative: bool,
+    with_derivatives: Boolean,
     out_value: NumberArray[OneDimension],
     out_derivative: NumberArray[OneDimension],
 ) -> None:
@@ -362,7 +363,7 @@ def scan_curve_kernel(
 
     Every array argument is flat and holds either one value per cell or a single value shared
     by all cells. `out_value` and `out_derivative` must hold one value per cell, except that
-    `out_derivative` may be a one-element array when `want_derivative` is `False`.
+    `out_derivative` may be a one-element array when `with_derivatives` is `False`.
     """
     for i in range(size):
         weight, weight_derivative = compute_killough_scanning_weight(
@@ -376,7 +377,7 @@ def scan_curve_kernel(
         drainage = element_at(array=drainage_value, index=i)
         imbibition = element_at(array=imbibition_value, index=i)
         out_value[i] = drainage + (imbibition - drainage) * weight
-        if want_derivative:
+        if with_derivatives:
             drainage_slope = element_at(array=drainage_derivative, index=i)
             imbibition_slope = element_at(array=imbibition_derivative, index=i)
             out_derivative[i] = (

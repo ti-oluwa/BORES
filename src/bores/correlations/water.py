@@ -16,9 +16,29 @@ from bores.correlations.core import (
 from bores.correlations.elementwise import elementwise, resolve_result_dtype
 from bores.correlations.gas import compute_co2_fugacity_coefficient
 from bores.errors import ComputationError, ValidationError
-from bores.types import NDimension, Number, NumberOrArray
+from bores.types import AnyDimension, Number, NumberOrArray
 
 logger = logging.getLogger(__name__)
+
+__all__ = [
+    "compute_gas_free_water_formation_volume_factor",
+    "compute_gas_solubility_in_water",
+    "compute_gas_solubility_in_water_duan_sun_co2",
+    "compute_gas_solubility_in_water_henry_law",
+    "compute_gas_solubility_in_water_mccain_methane",
+    "compute_gas_solubility_in_water_pressure_derivative",
+    "compute_salt_molality",
+    "compute_water_bubble_point_pressure",
+    "compute_water_compressibility",
+    "compute_water_density",
+    "compute_water_density_batzle",
+    "compute_water_density_mccain",
+    "compute_water_formation_volume_factor",
+    "compute_water_mass_per_stock_tank_barrel",
+    "compute_water_standard_density",
+    "compute_water_vapor_pressure",
+    "compute_water_viscosity",
+]
 
 # Physical constants, read from `bores.constants` when this module is imported.
 BARRELS_TO_CUBIC_FEET = c.BARRELS_TO_CUBIC_FEET
@@ -40,26 +60,6 @@ PPM_TO_WEIGHT_FRACTION = c.PPM_TO_WEIGHT_FRACTION
 PPM_TO_WEIGHT_PERCENT = c.PPM_TO_WEIGHT_PERCENT
 PSI_TO_PASCAL = c.PSI_TO_PASCAL
 SCF_PER_POUND_MOLE = c.SCF_PER_POUND_MOLE
-
-__all__ = [
-    "compute_gas_free_water_formation_volume_factor",
-    "compute_gas_solubility_in_water",
-    "compute_gas_solubility_in_water_duan_sun_co2",
-    "compute_gas_solubility_in_water_henry_law",
-    "compute_gas_solubility_in_water_mccain_methane",
-    "compute_gas_solubility_in_water_pressure_derivative",
-    "compute_salt_molality",
-    "compute_water_bubble_point_pressure",
-    "compute_water_compressibility",
-    "compute_water_density",
-    "compute_water_density_batzle",
-    "compute_water_density_mccain",
-    "compute_water_formation_volume_factor",
-    "compute_water_mass_per_stock_tank_barrel",
-    "compute_water_standard_density",
-    "compute_water_vapor_pressure",
-    "compute_water_viscosity",
-]
 
 METHANE_MCCAIN_TEMPERATURE_RANGE = (100.0, 400.0)
 """Temperature range in °F where the McCain methane solubility correlation is used."""
@@ -115,7 +115,9 @@ BUBBLE_POINT_BISECTION_ITERATIONS = 80
 
 
 @elementwise(non_negative=("salinity",))
-def compute_water_standard_density(salinity: NumberOrArray) -> NumberOrArray:
+def compute_water_standard_density(
+    salinity: NumberOrArray[AnyDimension],
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the density of brine at standard conditions (60 °F, 14.696 psi) from its
     salinity (McCain).
@@ -133,10 +135,10 @@ def compute_water_standard_density(salinity: NumberOrArray) -> NumberOrArray:
 
 @elementwise(non_negative=("salinity", "pressure"), positive=("temperature",))
 def compute_water_viscosity(
-    temperature: NumberOrArray,
-    salinity: NumberOrArray,
-    pressure: NumberOrArray,
-) -> NumberOrArray:
+    temperature: NumberOrArray[AnyDimension],
+    salinity: NumberOrArray[AnyDimension],
+    pressure: NumberOrArray[AnyDimension],
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the brine viscosity with the McCain correlation.
 
@@ -168,9 +170,9 @@ def compute_water_viscosity(
     non_negative=("pressure",), bounds={"temperature": (-FAHRENHEIT_TO_RANKINE_OFFSET, np.inf)}
 )
 def compute_gas_free_water_formation_volume_factor(
-    pressure: NumberOrArray,
-    temperature: NumberOrArray,
-) -> NumberOrArray:
+    pressure: NumberOrArray[AnyDimension],
+    temperature: NumberOrArray[AnyDimension],
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the water formation volume factor with the McCain correlation. The effect
     of salinity and of dissolved gas on the factor is small and is not modeled.
@@ -201,10 +203,10 @@ def compute_gas_free_water_formation_volume_factor(
 
 @elementwise(non_negative=("pressure", "salinity"), positive=("temperature",))
 def compute_gas_solubility_in_water_mccain_methane(
-    pressure: NumberOrArray,
-    temperature: NumberOrArray,
-    salinity: NumberOrArray = 0.0,
-) -> NumberOrArray:
+    pressure: NumberOrArray[AnyDimension],
+    temperature: NumberOrArray[AnyDimension],
+    salinity: NumberOrArray[AnyDimension] = 0.0,
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the solubility of methane in brine with the McCain correlation.
 
@@ -252,7 +254,7 @@ def compute_gas_solubility_in_water_mccain_methane(
 
 
 @elementwise(non_negative=("salinity",))
-def compute_salt_molality(salinity: NumberOrArray) -> NumberOrArray:
+def compute_salt_molality(salinity: NumberOrArray[AnyDimension]) -> NumberOrArray[AnyDimension]:
     """
     Computes the molality of NaCl in brine.
 
@@ -273,7 +275,9 @@ def compute_salt_molality(salinity: NumberOrArray) -> NumberOrArray:
 
 
 @elementwise(non_negative=("salinity",))
-def compute_water_mass_per_stock_tank_barrel(salinity: NumberOrArray) -> NumberOrArray:
+def compute_water_mass_per_stock_tank_barrel(
+    salinity: NumberOrArray[AnyDimension],
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the mass of water in one stock tank barrel of brine, which is the mass of
     the brine less the dissolved salt.
@@ -289,7 +293,9 @@ def compute_water_mass_per_stock_tank_barrel(salinity: NumberOrArray) -> NumberO
 
 
 @elementwise(bounds={"temperature": (32.0, 700.0)})
-def compute_water_vapor_pressure(temperature: NumberOrArray) -> NumberOrArray:
+def compute_water_vapor_pressure(
+    temperature: NumberOrArray[AnyDimension],
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the vapor pressure of water with the Wagner and Pruss (1993) equation.
 
@@ -361,10 +367,10 @@ def compute_duan_sun_parameter(
     },
 )
 def compute_gas_solubility_in_water_duan_sun_co2(
-    pressure: NumberOrArray,
-    temperature: NumberOrArray,
-    salinity: NumberOrArray = 0.0,
-) -> NumberOrArray:
+    pressure: NumberOrArray[AnyDimension],
+    temperature: NumberOrArray[AnyDimension],
+    salinity: NumberOrArray[AnyDimension] = 0.0,
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the solubility of CO₂ in brine with the Duan and Sun (2003) model.
 
@@ -429,13 +435,13 @@ def compute_gas_solubility_in_water_duan_sun_co2(
     bounds={"temperature": (-FAHRENHEIT_TO_RANKINE_OFFSET, np.inf)},
 )
 def compute_gas_solubility_in_water_henry_law(
-    pressure: NumberOrArray,
-    temperature: NumberOrArray,
-    salinity: NumberOrArray,
-    henry_constant: NumberOrArray,
-    henry_temperature_coefficient: NumberOrArray,
-    setschenow_constant: NumberOrArray,
-) -> NumberOrArray:
+    pressure: NumberOrArray[AnyDimension],
+    temperature: NumberOrArray[AnyDimension],
+    salinity: NumberOrArray[AnyDimension],
+    henry_constant: NumberOrArray[AnyDimension],
+    henry_temperature_coefficient: NumberOrArray[AnyDimension],
+    setschenow_constant: NumberOrArray[AnyDimension],
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the solubility of a gas in brine with Henry's law and a Setschenow
     salting-out correction.
@@ -480,11 +486,11 @@ def compute_gas_solubility_in_water_henry_law(
 
 
 def compute_gas_solubility_in_water(
-    pressure: NumberOrArray[NDimension],
-    temperature: NumberOrArray[NDimension],
-    salinity: NumberOrArray[NDimension] = 0.0,
+    pressure: NumberOrArray[AnyDimension],
+    temperature: NumberOrArray[AnyDimension],
+    salinity: NumberOrArray[AnyDimension] = 0.0,
     gas: str = "methane",
-) -> NumberOrArray[NDimension]:
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the solubility of a gas in brine.
 
@@ -532,7 +538,7 @@ def compute_gas_solubility_in_water(
             salinity=np.clip(salinity, 0.0, DUAN_SUN_MAXIMUM_SALINITY),
         )
         result = np.where(in_range, duan_sun, henry)
-        return typing.cast(NumberOrArray[NDimension], result if result.ndim else result[()])
+        return typing.cast(NumberOrArray[AnyDimension], result if result.ndim else result[()])
 
     if symbol != "ch4":
         return henry
@@ -542,15 +548,15 @@ def compute_gas_solubility_in_water(
     lower, upper = METHANE_MCCAIN_TEMPERATURE_RANGE
     in_range = (np.asarray(temperature) >= lower) & (np.asarray(temperature) <= upper)
     result = np.where(in_range, mccain, henry)
-    return typing.cast(NumberOrArray[NDimension], result if result.ndim else result[()])
+    return result if result.ndim else result[()]
 
 
 def compute_gas_solubility_in_water_pressure_derivative(
-    pressure: NumberOrArray[NDimension],
-    temperature: NumberOrArray[NDimension],
-    salinity: NumberOrArray[NDimension] = 0.0,
+    pressure: NumberOrArray[AnyDimension],
+    temperature: NumberOrArray[AnyDimension],
+    salinity: NumberOrArray[AnyDimension] = 0.0,
     gas: str = "methane",
-) -> NumberOrArray[NDimension]:
+) -> NumberOrArray[AnyDimension]:
     """
     Computes `dRsw/dP`, the derivative of the solubility of a gas in brine with respect
     to pressure, with a central difference of `compute_gas_solubility_in_water`.
@@ -571,15 +577,15 @@ def compute_gas_solubility_in_water_pressure_derivative(
         pressure=lower_pressure, temperature=temperature, salinity=salinity, gas=gas
     )
     result = (upper - lower) / (pressure + step - lower_pressure)
-    return typing.cast(NumberOrArray[NDimension], result if np.ndim(result) else result[()])
+    return typing.cast(NumberOrArray[AnyDimension], result if np.ndim(result) else result[()])
 
 
 def compute_water_bubble_point_pressure(
-    temperature: NumberOrArray[NDimension],
-    gas_solubility_in_water: NumberOrArray[NDimension],
-    salinity: NumberOrArray[NDimension] = 0.0,
+    temperature: NumberOrArray[AnyDimension],
+    gas_solubility_in_water: NumberOrArray[AnyDimension],
+    salinity: NumberOrArray[AnyDimension] = 0.0,
     gas: str = "methane",
-) -> NumberOrArray[NDimension]:
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the bubble point pressure of water, the pressure at which the water holds
     a given amount of dissolved gas, by inverting `compute_gas_solubility_in_water`
@@ -626,7 +632,7 @@ def compute_water_bubble_point_pressure(
     result = result.astype(
         resolve_result_dtype(temperature, gas_solubility_in_water, salinity), copy=False
     )
-    return typing.cast(NumberOrArray[NDimension], result if result.ndim else result[()])
+    return result if result.ndim else result[()]
 
 
 @elementwise(
@@ -635,14 +641,14 @@ def compute_water_bubble_point_pressure(
     bounds={"temperature": (-FAHRENHEIT_TO_RANKINE_OFFSET, np.inf)},
 )
 def compute_water_compressibility(
-    pressure: NumberOrArray,
-    temperature: NumberOrArray,
-    bubble_point_pressure: NumberOrArray,
-    gas_formation_volume_factor: NumberOrArray,
-    gas_solubility_in_water: NumberOrArray,
-    gas_solubility_pressure_derivative: NumberOrArray,
-    salinity: NumberOrArray = 0.0,
-) -> NumberOrArray:
+    pressure: NumberOrArray[AnyDimension],
+    temperature: NumberOrArray[AnyDimension],
+    bubble_point_pressure: NumberOrArray[AnyDimension],
+    gas_formation_volume_factor: NumberOrArray[AnyDimension],
+    gas_solubility_in_water: NumberOrArray[AnyDimension],
+    gas_solubility_pressure_derivative: NumberOrArray[AnyDimension],
+    salinity: NumberOrArray[AnyDimension] = 0.0,
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the isothermal water compressibility.
 
@@ -712,10 +718,10 @@ def compute_water_compressibility(
     non_negative=("pressure", "salinity"),
 )
 def compute_water_density_mccain(
-    pressure: NumberOrArray,
-    temperature: NumberOrArray,
-    salinity: NumberOrArray = 0.0,
-) -> NumberOrArray:
+    pressure: NumberOrArray[AnyDimension],
+    temperature: NumberOrArray[AnyDimension],
+    salinity: NumberOrArray[AnyDimension] = 0.0,
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the density of dissolved-gas-free brine with the McCain method: the
     density at standard conditions divided by the formation volume factor.
@@ -737,10 +743,10 @@ def compute_water_density_mccain(
     bounds={"temperature": (-FAHRENHEIT_TO_RANKINE_OFFSET, np.inf)},
 )
 def compute_water_density_batzle(
-    pressure: NumberOrArray,
-    temperature: NumberOrArray,
-    salinity: NumberOrArray = 0.0,
-) -> NumberOrArray:
+    pressure: NumberOrArray[AnyDimension],
+    temperature: NumberOrArray[AnyDimension],
+    salinity: NumberOrArray[AnyDimension] = 0.0,
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the density of dissolved-gas-free brine with the Batzle and Wang (1992)
     correlation.
@@ -792,11 +798,11 @@ def compute_water_density_batzle(
     positive=("gas_gravity", "gas_free_water_formation_volume_factor"),
 )
 def compute_water_density(
-    gas_gravity: NumberOrArray,
-    salinity: NumberOrArray,
-    gas_solubility_in_water: NumberOrArray,
-    gas_free_water_formation_volume_factor: NumberOrArray,
-) -> NumberOrArray:
+    gas_gravity: NumberOrArray[AnyDimension],
+    salinity: NumberOrArray[AnyDimension],
+    gas_solubility_in_water: NumberOrArray[AnyDimension],
+    gas_free_water_formation_volume_factor: NumberOrArray[AnyDimension],
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the density of water holding dissolved gas, from a mass balance on one
     stock tank barrel.
@@ -826,10 +832,10 @@ def compute_water_density(
     non_negative=("salinity",),
 )
 def compute_water_formation_volume_factor(
-    water_density: NumberOrArray,
-    salinity: NumberOrArray,
-    standard_density: NumberOrArray = np.nan,
-) -> NumberOrArray:
+    water_density: NumberOrArray[AnyDimension],
+    salinity: NumberOrArray[AnyDimension],
+    standard_density: NumberOrArray[AnyDimension] = np.nan,
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the water formation volume factor from the density of dissolved-gas-free
     water at reservoir conditions.

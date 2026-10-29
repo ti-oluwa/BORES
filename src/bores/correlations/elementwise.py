@@ -99,18 +99,13 @@ def largest(value: NumberOrArray[AnyDimension]) -> Number:
 
 class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
     """
-    A correlation written once as a scalar function and usable on scalars and arrays alike.
+    A function written once as a scalar function and usable on scalars and arrays alike.
 
     Calling it with plain numbers returns a number. Calling it with arrays of any
     shape (broadcast against each other and against scalars) returns an array.
     Arguments can be passed by keyword or by position. The same object can be
     called from inside other `numba.njit` functions and `elementwise` correlations
     with positional arguments.
-
-    The object is generic over the parameters `P` and the return type `R` of the scalar
-    function it wraps, so a type checker sees the original argument names. Annotate
-    the scalar function with `NumberOrArray`, since that is what callers may pass and
-    receive.
 
     The result has the dtype NumPy's promotion rules give for the inputs when the
     scalar function returns the same kind of number it was given: float32 arrays
@@ -137,6 +132,8 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
         numba_options: Mapping[str, NumbaOption] | None = None,
     ) -> None:
         """
+        Initializes the function.
+
         :param py_func: Scalar implementation. Must be compilable by `numba.njit`.
         :param positive: Names of arguments that must be strictly greater than zero.
         :param non_negative: Names of arguments that must be greater than or equal to zero.
@@ -155,6 +152,7 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
         """
         if target not in ("cpu", "parallel"):
             raise ValueError(f"Unknown target {target!r}. Use 'cpu' or 'parallel'.")
+
         self.numba_options = dict(numba_options or {})
         super().__init__(
             py_func, identity=None, cache=cache, targetoptions=dict(self.numba_options)
@@ -215,9 +213,9 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
 
     def bind(
         self,
-        args: tuple[NumberOrArray, ...],
-        kwargs: Mapping[str, NumberOrArray],
-    ) -> tuple[NumberOrArray, ...]:
+        args: tuple[NumberOrArray[AnyDimension], ...],
+        kwargs: Mapping[str, NumberOrArray[AnyDimension]],
+    ) -> tuple[NumberOrArray[AnyDimension], ...]:
         """
         Orders positional and keyword arguments into the positional order of the scalar
         function, filling omitted arguments from the defaults of the scalar function.
@@ -234,6 +232,7 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
             )
         if len(args) == len(names) and not kwargs:
             return args
+
         repeated = set(names[: len(args)]) & set(kwargs)
         if repeated:
             raise TypeError(
@@ -244,6 +243,7 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
             raise TypeError(
                 f"{self.__name__}() got an unexpected keyword argument {sorted(unknown)[0]!r}."
             )
+
         filled = list(args)
         for name in names[len(args) :]:
             if name in kwargs:
@@ -254,7 +254,7 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
                 raise TypeError(f"{self.__name__}() missing required argument {name!r}.")
         return tuple(filled)
 
-    def check(self, values: tuple[NumberOrArray, ...]) -> None:
+    def check(self, values: tuple[NumberOrArray[AnyDimension], ...]) -> None:
         """
         Validates the declared argument ranges.
 
@@ -266,21 +266,24 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
             value = by_name.get(name)
             if value is not None and smallest(value) <= 0:
                 raise ValidationError(f"`{name}` must be greater than zero.")
+
         for name in self.non_negative:
             value = by_name.get(name)
             if value is not None and smallest(value) < 0:
                 raise ValidationError(f"`{name}` must be non-negative.")
+
         for name, (lower, upper) in self.bounds.items():
             value = by_name.get(name)
             if value is not None and (smallest(value) < lower or largest(value) > upper):
                 raise ValidationError(f"`{name}` must be between {lower} and {upper}.")
+
         for validator in self.validators:
             validator(by_name)
 
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R:
         values = self.bind(
-            args=typing.cast(tuple[NumberOrArray, ...], args),
-            kwargs=typing.cast(Mapping[str, NumberOrArray], kwargs),
+            args=typing.cast(tuple[NumberOrArray[AnyDimension], ...], args),
+            kwargs=typing.cast(Mapping[str, NumberOrArray[AnyDimension]], kwargs),
         )
         if self.positive or self.non_negative or self.bounds or self.validators:
             self.check(values)

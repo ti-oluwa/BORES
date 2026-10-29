@@ -394,13 +394,13 @@ class MixingRulePartialDerivatives(TypedDict):
         ∂kro / ∂Sg  through the explicit gas-saturation argument.
     """
 
-    dkro_dkro_w: NumberOrArray
-    dkro_dkro_g: NumberOrArray
-    dkro_dkrw: NumberOrArray
-    dkro_dkrg: NumberOrArray
-    dkro_dsw_explicit: NumberOrArray
-    dkro_dso_explicit: NumberOrArray
-    dkro_dsg_explicit: NumberOrArray
+    dkro_dkro_w: NumberOrArray[AnyDimension]
+    dkro_dkro_g: NumberOrArray[AnyDimension]
+    dkro_dkrw: NumberOrArray[AnyDimension]
+    dkro_dkrg: NumberOrArray[AnyDimension]
+    dkro_dsw_explicit: NumberOrArray[AnyDimension]
+    dkro_dso_explicit: NumberOrArray[AnyDimension]
+    dkro_dsg_explicit: NumberOrArray[AnyDimension]
 
 
 class MixingRuleDFunc(typing.Protocol):
@@ -487,33 +487,33 @@ class RelativePermeabilityDerivatives(TypedDict):
     """Dictionary holding relative permeabilities derivatives."""
 
     # w.r.t water
-    dkrw_dsw: NumberOrArray
-    dkro_dsw: NumberOrArray
-    dkrg_dsw: NumberOrArray
+    dkrw_dsw: NumberOrArray[AnyDimension]
+    dkro_dsw: NumberOrArray[AnyDimension]
+    dkrg_dsw: NumberOrArray[AnyDimension]
     # w.r.t oil
-    dkrw_dso: NumberOrArray
-    dkro_dso: NumberOrArray
-    dkrg_dso: NumberOrArray
+    dkrw_dso: NumberOrArray[AnyDimension]
+    dkro_dso: NumberOrArray[AnyDimension]
+    dkrg_dso: NumberOrArray[AnyDimension]
     # w.r.t gas
-    dkrw_dsg: NumberOrArray
-    dkro_dsg: NumberOrArray
-    dkrg_dsg: NumberOrArray
+    dkrw_dsg: NumberOrArray[AnyDimension]
+    dkro_dsg: NumberOrArray[AnyDimension]
+    dkrg_dsg: NumberOrArray[AnyDimension]
 
 
 class CapillaryPressures(TypedDict):
     """Dictionary containing capillary pressures for different phase pairs."""
 
-    oil_water: NumberOrArray  # Pcow = Po - Pw
-    gas_oil: NumberOrArray  # Pcgo = Pg - Po
+    oil_water: NumberOrArray[AnyDimension]  # Pcow = Po - Pw
+    gas_oil: NumberOrArray[AnyDimension]  # Pcgo = Pg - Po
 
 
 class CapillaryPressureDerivatives(TypedDict):
     """Dictionary containing capillary pressure derivatives for different phase pairs."""
 
-    dpcow_dsw: NumberOrArray
-    dpcow_dso: NumberOrArray
-    dpcgo_dsg: NumberOrArray
-    dpcgo_dso: NumberOrArray
+    dpcow_dsw: NumberOrArray[AnyDimension]
+    dpcow_dso: NumberOrArray[AnyDimension]
+    dpcgo_dsg: NumberOrArray[AnyDimension]
+    dpcgo_dso: NumberOrArray[AnyDimension]
 
 
 class Wettability(enum.Enum):

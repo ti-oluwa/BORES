@@ -13,19 +13,9 @@ from bores.correlations.core import (
 )
 from bores.correlations.elementwise import elementwise
 from bores.errors import ValidationError
-from bores.types import AnyDimension, NDimension, Number, NumberOrArray
+from bores.types import AnyDimension, Number, NumberOrArray
 
 logger = logging.getLogger(__name__)
-
-# Physical constants, read from `bores.constants` when this module is imported.
-FAHRENHEIT_TO_RANKINE_OFFSET = c.FAHRENHEIT_TO_RANKINE_OFFSET
-IDEAL_GAS_CONSTANT_IMPERIAL = c.IDEAL_GAS_CONSTANT_IMPERIAL
-MOLECULAR_WEIGHT_AIR = c.MOLECULAR_WEIGHT_AIR
-PASCAL_TO_BAR = c.PASCAL_TO_BAR
-POUNDS_PER_CUBIC_FEET_TO_GRAMS_PER_CUBIC_METER = c.POUNDS_PER_CUBIC_FEET_TO_GRAMS_PER_CUBIC_METER
-PSI_TO_PASCAL = c.PSI_TO_PASCAL
-STANDARD_PRESSURE_IMPERIAL = c.STANDARD_PRESSURE_IMPERIAL
-STANDARD_TEMPERATURE_RANKINE = c.STANDARD_TEMPERATURE_RANKINE
 
 __all__ = [
     "compute_co2_fugacity_coefficient",
@@ -44,6 +34,17 @@ __all__ = [
     "compute_gas_pseudocritical_temperature",
     "compute_gas_viscosity",
 ]
+
+# Physical constants, read from `bores.constants` when this module is imported.
+FAHRENHEIT_TO_RANKINE_OFFSET = c.FAHRENHEIT_TO_RANKINE_OFFSET
+IDEAL_GAS_CONSTANT_IMPERIAL = c.IDEAL_GAS_CONSTANT_IMPERIAL
+MOLECULAR_WEIGHT_AIR = c.MOLECULAR_WEIGHT_AIR
+PASCAL_TO_BAR = c.PASCAL_TO_BAR
+POUNDS_PER_CUBIC_FEET_TO_GRAMS_PER_CUBIC_METER = c.POUNDS_PER_CUBIC_FEET_TO_GRAMS_PER_CUBIC_METER
+PSI_TO_PASCAL = c.PSI_TO_PASCAL
+STANDARD_PRESSURE_IMPERIAL = c.STANDARD_PRESSURE_IMPERIAL
+STANDARD_TEMPERATURE_RANKINE = c.STANDARD_TEMPERATURE_RANKINE
+
 
 CO2_CRITICAL_TEMPERATURE = 304.1282
 """Critical temperature of CO₂ in K, as used by the Duan et al. (1992) equation of state."""
@@ -96,10 +97,10 @@ def compute_gas_gravity(gas: str) -> Number:
 
 
 def compute_gas_gravity_from_density(
-    pressure: NumberOrArray[NDimension],
-    temperature: NumberOrArray[NDimension],
-    density: NumberOrArray[NDimension],
-) -> NumberOrArray[NDimension]:
+    pressure: NumberOrArray[AnyDimension],
+    temperature: NumberOrArray[AnyDimension],
+    density: NumberOrArray[AnyDimension],
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the specific gravity of a gas from its density, relative to air at the
     same pressure and temperature (from an equation of state, using CoolProp).
@@ -110,7 +111,7 @@ def compute_gas_gravity_from_density(
     :return: Gas specific gravity (air = 1.0)
     """
     air_density = compute_fluid_density(pressure, temperature, fluid="Air")
-    return typing.cast(NumberOrArray[NDimension], density / air_density)
+    return typing.cast(NumberOrArray[AnyDimension], density / air_density)
 
 
 @elementwise(
@@ -118,10 +119,10 @@ def compute_gas_gravity_from_density(
     bounds={"temperature": (-FAHRENHEIT_TO_RANKINE_OFFSET, np.inf)},
 )
 def compute_gas_formation_volume_factor(
-    pressure: NumberOrArray,
-    temperature: NumberOrArray,
-    gas_compressibility_factor: NumberOrArray,
-) -> NumberOrArray:
+    pressure: NumberOrArray[AnyDimension],
+    temperature: NumberOrArray[AnyDimension],
+    gas_compressibility_factor: NumberOrArray[AnyDimension],
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the gas formation volume factor.
 
@@ -145,7 +146,9 @@ def compute_gas_formation_volume_factor(
 
 
 @elementwise(positive=("gas_gravity",))
-def compute_gas_molecular_weight(gas_gravity: NumberOrArray) -> NumberOrArray:
+def compute_gas_molecular_weight(
+    gas_gravity: NumberOrArray[AnyDimension],
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the apparent molecular weight of a gas from its specific gravity.
 
@@ -162,11 +165,11 @@ def compute_gas_molecular_weight(gas_gravity: NumberOrArray) -> NumberOrArray:
     bounds={"temperature": (-FAHRENHEIT_TO_RANKINE_OFFSET, np.inf)},
 )
 def compute_gas_density(
-    pressure: NumberOrArray,
-    temperature: NumberOrArray,
-    gas_gravity: NumberOrArray,
-    gas_compressibility_factor: NumberOrArray,
-) -> NumberOrArray:
+    pressure: NumberOrArray[AnyDimension],
+    temperature: NumberOrArray[AnyDimension],
+    gas_gravity: NumberOrArray[AnyDimension],
+    gas_compressibility_factor: NumberOrArray[AnyDimension],
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the gas density from the real gas law.
 
@@ -195,10 +198,10 @@ def compute_gas_density(
     bounds={"temperature": (-FAHRENHEIT_TO_RANKINE_OFFSET, np.inf)},
 )
 def compute_gas_viscosity(
-    temperature: NumberOrArray,
-    gas_density: NumberOrArray,
-    gas_molecular_weight: NumberOrArray,
-) -> NumberOrArray:
+    temperature: NumberOrArray[AnyDimension],
+    gas_density: NumberOrArray[AnyDimension],
+    gas_molecular_weight: NumberOrArray[AnyDimension],
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the gas viscosity with the Lee, Gonzalez and Eakin (1966) correlation.
 
@@ -307,11 +310,11 @@ def compute_gas_pseudocritical_properties(
     validators=(validate_contaminant_fractions,),
 )
 def compute_gas_pseudocritical_pressure(
-    gas_gravity: NumberOrArray,
-    h2s_mole_fraction: NumberOrArray = 0.0,
-    co2_mole_fraction: NumberOrArray = 0.0,
-    n2_mole_fraction: NumberOrArray = 0.0,
-) -> NumberOrArray:
+    gas_gravity: NumberOrArray[AnyDimension],
+    h2s_mole_fraction: NumberOrArray[AnyDimension] = 0.0,
+    co2_mole_fraction: NumberOrArray[AnyDimension] = 0.0,
+    n2_mole_fraction: NumberOrArray[AnyDimension] = 0.0,
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the pseudocritical pressure of a gas (see `compute_gas_pseudocritical_properties`).
 
@@ -337,11 +340,11 @@ def compute_gas_pseudocritical_pressure(
     validators=(validate_contaminant_fractions,),
 )
 def compute_gas_pseudocritical_temperature(
-    gas_gravity: NumberOrArray,
-    h2s_mole_fraction: NumberOrArray = 0.0,
-    co2_mole_fraction: NumberOrArray = 0.0,
-    n2_mole_fraction: NumberOrArray = 0.0,
-) -> NumberOrArray:
+    gas_gravity: NumberOrArray[AnyDimension],
+    h2s_mole_fraction: NumberOrArray[AnyDimension] = 0.0,
+    co2_mole_fraction: NumberOrArray[AnyDimension] = 0.0,
+    n2_mole_fraction: NumberOrArray[AnyDimension] = 0.0,
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the pseudocritical temperature of a gas (see `compute_gas_pseudocritical_properties`).
 
@@ -371,13 +374,13 @@ def compute_gas_pseudocritical_temperature(
     validators=(validate_contaminant_fractions,),
 )
 def compute_gas_compressibility_factor_papay(
-    pressure: NumberOrArray,
-    temperature: NumberOrArray,
-    gas_gravity: NumberOrArray,
-    h2s_mole_fraction: NumberOrArray = 0.0,
-    co2_mole_fraction: NumberOrArray = 0.0,
-    n2_mole_fraction: NumberOrArray = 0.0,
-) -> NumberOrArray:
+    pressure: NumberOrArray[AnyDimension],
+    temperature: NumberOrArray[AnyDimension],
+    gas_gravity: NumberOrArray[AnyDimension],
+    h2s_mole_fraction: NumberOrArray[AnyDimension] = 0.0,
+    co2_mole_fraction: NumberOrArray[AnyDimension] = 0.0,
+    n2_mole_fraction: NumberOrArray[AnyDimension] = 0.0,
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the gas compressibility factor with the Papay correlation.
 
@@ -423,13 +426,13 @@ def compute_gas_compressibility_factor_papay(
     validators=(validate_contaminant_fractions,),
 )
 def compute_gas_compressibility_factor_hall_yarborough(
-    pressure: NumberOrArray,
-    temperature: NumberOrArray,
-    gas_gravity: NumberOrArray,
-    h2s_mole_fraction: NumberOrArray = 0.0,
-    co2_mole_fraction: NumberOrArray = 0.0,
-    n2_mole_fraction: NumberOrArray = 0.0,
-) -> NumberOrArray:
+    pressure: NumberOrArray[AnyDimension],
+    temperature: NumberOrArray[AnyDimension],
+    gas_gravity: NumberOrArray[AnyDimension],
+    h2s_mole_fraction: NumberOrArray[AnyDimension] = 0.0,
+    co2_mole_fraction: NumberOrArray[AnyDimension] = 0.0,
+    n2_mole_fraction: NumberOrArray[AnyDimension] = 0.0,
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the gas compressibility factor with the Hall and Yarborough (1973)
     equation of state fit to the Standing-Katz chart.
@@ -514,13 +517,13 @@ def compute_gas_compressibility_factor_hall_yarborough(
     validators=(validate_contaminant_fractions,),
 )
 def compute_gas_compressibility_factor_dranchuk_abou_kassem(
-    pressure: NumberOrArray,
-    temperature: NumberOrArray,
-    gas_gravity: NumberOrArray,
-    h2s_mole_fraction: NumberOrArray = 0.0,
-    co2_mole_fraction: NumberOrArray = 0.0,
-    n2_mole_fraction: NumberOrArray = 0.0,
-) -> NumberOrArray:
+    pressure: NumberOrArray[AnyDimension],
+    temperature: NumberOrArray[AnyDimension],
+    gas_gravity: NumberOrArray[AnyDimension],
+    h2s_mole_fraction: NumberOrArray[AnyDimension] = 0.0,
+    co2_mole_fraction: NumberOrArray[AnyDimension] = 0.0,
+    n2_mole_fraction: NumberOrArray[AnyDimension] = 0.0,
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the gas compressibility factor with the Dranchuk and Abou-Kassem (1975)
     equation of state fit to the Standing-Katz chart.
@@ -627,14 +630,14 @@ def compute_gas_compressibility_factor_dranchuk_abou_kassem(
 
 
 def compute_gas_compressibility_factor(
-    pressure: NumberOrArray[NDimension],
-    temperature: NumberOrArray[NDimension],
-    gas_gravity: NumberOrArray[NDimension],
-    h2s_mole_fraction: NumberOrArray[NDimension] = 0.0,
-    co2_mole_fraction: NumberOrArray[NDimension] = 0.0,
-    n2_mole_fraction: NumberOrArray[NDimension] = 0.0,
+    pressure: NumberOrArray[AnyDimension],
+    temperature: NumberOrArray[AnyDimension],
+    gas_gravity: NumberOrArray[AnyDimension],
+    h2s_mole_fraction: NumberOrArray[AnyDimension] = 0.0,
+    co2_mole_fraction: NumberOrArray[AnyDimension] = 0.0,
+    n2_mole_fraction: NumberOrArray[AnyDimension] = 0.0,
     method: typing.Literal["dak", "hall-yarborough", "papay"] = "dak",
-) -> NumberOrArray[NDimension]:
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the gas compressibility factor with the chosen correlation.
 
@@ -683,14 +686,14 @@ def compute_gas_compressibility_factor(
     validators=(validate_contaminant_fractions,),
 )
 def compute_gas_compressibility(
-    pressure: NumberOrArray,
-    temperature: NumberOrArray,
-    gas_gravity: NumberOrArray,
-    gas_compressibility_factor: NumberOrArray = np.nan,
-    h2s_mole_fraction: NumberOrArray = 0.0,
-    co2_mole_fraction: NumberOrArray = 0.0,
-    n2_mole_fraction: NumberOrArray = 0.0,
-) -> NumberOrArray:
+    pressure: NumberOrArray[AnyDimension],
+    temperature: NumberOrArray[AnyDimension],
+    gas_gravity: NumberOrArray[AnyDimension],
+    gas_compressibility_factor: NumberOrArray[AnyDimension] = np.nan,
+    h2s_mole_fraction: NumberOrArray[AnyDimension] = 0.0,
+    co2_mole_fraction: NumberOrArray[AnyDimension] = 0.0,
+    n2_mole_fraction: NumberOrArray[AnyDimension] = 0.0,
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the isothermal gas compressibility.
 
@@ -740,7 +743,7 @@ def compute_gas_compressibility(
         dz_dp = (z_plus - z_minus) / (2.0 * delta_p)
     else:
         dz_dp = (z_plus - z) / delta_p
-    return max(1.0 / pressure - dz_dp / z, 0.0)
+    return max(1.0 / pressure - dz_dp / z, 0.0)  # type: ignore[return-value]
 
 
 @numba.njit(cache=True)
@@ -785,8 +788,8 @@ def compute_co2_equation_of_state_factor(
     bounds={"temperature": (CO2_FUGACITY_MINIMUM_TEMPERATURE, np.inf)},
 )
 def compute_co2_fugacity_coefficient(
-    pressure: NumberOrArray, temperature: NumberOrArray
-) -> NumberOrArray:
+    pressure: NumberOrArray[AnyDimension], temperature: NumberOrArray
+) -> NumberOrArray[AnyDimension]:
     """
     Computes the fugacity coefficient of pure CO₂ with the Duan et al. (1992) equation of
     state, valid up to 8000 bar.

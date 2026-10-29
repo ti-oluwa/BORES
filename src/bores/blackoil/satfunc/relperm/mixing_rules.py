@@ -67,6 +67,7 @@ from bores.blackoil.satfunc.utils import get_floating_dtype
 from bores.constants import c
 from bores.errors import ValidationError
 from bores.types import (
+    AnyDimension,
     MixingRuleDFunc,
     MixingRuleFunc,
     MixingRulePartialDerivatives,
@@ -353,7 +354,7 @@ def compute_central_difference_partial_derivatives(
     }
     is_saturation = {"water_saturation", "oil_saturation", "gas_saturation"}
 
-    def partial(name: str) -> NumberOrArray:
+    def partial(name: str) -> NumberOrArray[AnyDimension]:
         value = np.asarray(base[name], dtype=np.float64)
         step = epsilon if name in is_saturation else epsilon * np.maximum(1.0, np.abs(value))
         plus = dict(base, **{name: value + step})
@@ -451,9 +452,7 @@ def mixing_rule(
     :return: The registered `MixingRule` instance.
     """
 
-    def register(
-        f: MixingRuleFunc | MixingRule,
-    ) -> MixingRule:
+    def register(f: MixingRuleFunc | MixingRule, /) -> MixingRule:
         # Determine the registry key
         rule_name = name or getattr(f, "__name__", None)
         if rule_name is None:

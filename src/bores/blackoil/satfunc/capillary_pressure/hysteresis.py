@@ -29,6 +29,7 @@ from bores.blackoil.satfunc.capillary_pressure.tables import (
 from bores.blackoil.satfunc.utils import flatten_kernel_input, scan_curve_kernel
 from bores.errors import ValidationError
 from bores.types import (
+    Boolean,
     BooleanArray,
     CapillaryPressureDerivatives,
     CapillaryPressures,
@@ -51,7 +52,7 @@ def query_oil_water_curve(
     water_saturation: NumberArray[OneDimension],
     oil_saturation: NumberArray[OneDimension],
     gas_saturation: NumberArray[OneDimension],
-    with_derivatives: bool,
+    with_derivatives: Boolean,
     memo: dict[int, typing.Any],
     **kwargs: typing.Any,
 ) -> tuple[typing.Any, typing.Any]:
@@ -97,7 +98,7 @@ def query_gas_oil_curve(
     oil_saturation: NumberArray[OneDimension],
     gas_saturation: NumberArray[OneDimension],
     connate_water_saturation: Number,
-    with_derivatives: bool,
+    with_derivatives: Boolean,
     memo: dict[int, typing.Any],
     **kwargs: typing.Any,
 ) -> tuple[typing.Any, typing.Any]:
@@ -151,7 +152,7 @@ def evaluate_three_phase_table(
     water_saturation: NumberArray[OneDimension],
     oil_saturation: NumberArray[OneDimension],
     gas_saturation: NumberArray[OneDimension],
-    with_derivatives: bool,
+    with_derivatives: Boolean,
     memo: dict[int, typing.Any],
     **kwargs: typing.Any,
 ) -> tuple[CapillaryPressures, CapillaryPressureDerivatives | None]:
@@ -189,7 +190,7 @@ def scan_curve(
     scanning_exponent: Number,
     drainage: tuple[typing.Any, typing.Any],
     imbibition: tuple[typing.Any, typing.Any],
-    with_derivatives: bool,
+    with_derivatives: Boolean,
 ) -> tuple[typing.Any, typing.Any]:
     """
     Scan one capillary pressure curve between its drainage and imbibition bounds.
@@ -227,7 +228,7 @@ def scan_curve(
         imbibition_value=imbibition_value,
         drainage_derivative=drainage_slope,
         imbibition_derivative=imbibition_slope,
-        want_derivative=with_derivatives,
+        with_derivatives=with_derivatives,
         out_value=value,
         out_derivative=slope,
     )
@@ -351,7 +352,7 @@ class KilloughCapillaryPressureTable(CapillaryPressureTable):
         oil_saturation: NumberOrArray[NDimension],
         gas_saturation: NumberOrArray[NDimension],
         *,
-        with_derivatives: bool,
+        with_derivatives: Boolean,
         max_water_saturation: NumberOrArray[NDimension] | None = None,
         max_gas_saturation: NumberOrArray[NDimension] | None = None,
         water_imbibition_flag: bool | BooleanArray[NDimension] | None = None,
@@ -411,6 +412,7 @@ class KilloughCapillaryPressureTable(CapillaryPressureTable):
             inputs += [max_gas_saturation, gas_imbibition_flag]
             if gas_reversal_saturation is not None:
                 inputs.append(gas_reversal_saturation)
+
         shape = np.broadcast_shapes(*(np.shape(value) for value in inputs))
         flat_shape = shape or (1,)
         size = math.prod(flat_shape)
