@@ -946,6 +946,7 @@ def compute_tubing_head_pressure_from_table(
         length=length,
         inclination_from_vertical=0.0,
         geometric_sign=-1.0,
+        flow_direction=1.0,
         surface_rates=surface_rates,
         tubing_fluid_table=tubing_fluid_table,
         is_injector=is_injector,
