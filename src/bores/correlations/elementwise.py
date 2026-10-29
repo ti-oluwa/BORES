@@ -193,7 +193,7 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
             self.parallel_loop = numba.vectorize(
                 signatures, target="parallel", cache=self.cache, **self.numba_options
             )(self.py_func)
-        return typing.cast(np.ufunc, self.parallel_loop)
+        return typing.cast("np.ufunc", self.parallel_loop)
 
     def get_float32_loop(self) -> np.ufunc:
         """
@@ -209,7 +209,7 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
             self.float32_loop = numba.vectorize(
                 [signature], target="cpu", cache=self.cache, **self.numba_options
             )(self.py_func)
-        return typing.cast(np.ufunc, self.float32_loop)
+        return typing.cast("np.ufunc", self.float32_loop)
 
     def bind(
         self,
@@ -282,8 +282,8 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
 
     def __call__(self, *args: P.args, **kwargs: P.kwargs) -> R:
         values = self.bind(
-            args=typing.cast(tuple[NumberOrArray[AnyDimension], ...], args),
-            kwargs=typing.cast(Mapping[str, NumberOrArray[AnyDimension]], kwargs),
+            args=typing.cast("tuple[NumberOrArray[AnyDimension], ...]", args),
+            kwargs=typing.cast("Mapping[str, NumberOrArray[AnyDimension]]", kwargs),
         )
         if self.positive or self.non_negative or self.bounds or self.validators:
             self.check(values)
