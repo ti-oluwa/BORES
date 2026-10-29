@@ -202,6 +202,7 @@ def make_producer(
     unit_system: UnitSystem = UnitSystem.FIELD,
     metadata: typing.Mapping[str, typing.Any] | None = None,
     d_factor: Number | None = None,
+    allows_crossflow: bool = True,
 ) -> tuple[Well, ProducerControl]:
     """
     Builds a producer `Well` and its `ProducerControl`, for direct
@@ -248,6 +249,7 @@ def make_producer(
     :param unit_system: `Well.unit_system` and `ProducerControl.unit_system`.
     :param metadata: `Well.metadata`.
     :param d_factor: `Well.d_factor`, the non-Darcy flow coefficient.
+    :param allows_crossflow: `Well.allows_crossflow`.
     :returns: `(Well, ProducerControl)`.
     :raises ValidationError: If none of `target_rate`, `target_bhp`, or
         `target_thp` is given; if both or neither of `perforation_depths`/
@@ -283,6 +285,7 @@ def make_producer(
         unit_system=unit_system,
         metadata=metadata,
         d_factor=d_factor,
+        allows_crossflow=allows_crossflow,
     )
 
     resolved_limits: list[Limit] = []
@@ -353,6 +356,7 @@ def make_injector(
     unit_system: UnitSystem = UnitSystem.FIELD,
     metadata: typing.Mapping[str, typing.Any] | None = None,
     d_factor: Number | None = None,
+    allows_crossflow: bool = True,
 ) -> tuple[Well, InjectorControl]:
     """
     Builds an injector `Well` and its `InjectorControl`, for direct
@@ -398,6 +402,7 @@ def make_injector(
     :param unit_system: `Well.unit_system` and `InjectorControl.unit_system`.
     :param metadata: `Well.metadata`.
     :param d_factor: `Well.d_factor`, the non-Darcy flow coefficient.
+    :param allows_crossflow: `Well.allows_crossflow`.
     :returns: `(Well, InjectorControl)`.
     :raises ValidationError: If none of `target_rate`, `target_bhp`, or
         `target_thp` is given; if both or neither of `perforation_depths`/
@@ -433,6 +438,7 @@ def make_injector(
         unit_system=unit_system,
         metadata=metadata,
         d_factor=d_factor,
+        allows_crossflow=allows_crossflow,
     )
 
     resolved_limits: list[Limit] = []

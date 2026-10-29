@@ -378,6 +378,14 @@ class Well:
     d_factor: Number | None = None
     """Non-Darcy flow coefficient, deck `WDFAC`. `None` if not set."""
 
+    allows_crossflow: bool = True
+    """
+    Whether this well's connections may flow in the opposite direction to the well, for example
+    a producer's connection taking fluid from the wellbore into the formation. Deck `WELSPECS`
+    item 11, which defaults to `YES`. Reverse flow is not modelled yet, so well resolution gives
+    a reversed connection zero flow whatever this is set to.
+    """
+
     def __attrs_post_init__(self) -> None:
         if not self.name:
             raise ValidationError("`name` must be a non-empty string.")

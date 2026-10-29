@@ -12,6 +12,7 @@ from bores.grids.base import Grid
 from bores.precision import get_dtype
 from bores.types import (
     Boolean,
+    BooleanArray,
     FluidPhase,
     GridIntersectionMethod,
     IntArray,
@@ -1449,6 +1450,11 @@ class CompiledWellSystem(typing.NamedTuple):
     d_factors: NumberArray[OneDimension]
     """Shape `(n_wells,)`. Non-Darcy flow coefficient. `NaN` where unset."""
 
+    crossflow_flags: IntArray[OneDimension]
+    """
+    Shape `(n_wells,)`. `1` for a well whose `Well.allows_crossflow` is `True`, `0` otherwise.
+    """
+
     perforations: CompiledPerforations
     """Compiled perforation data for the solver hot path."""
 
@@ -1697,6 +1703,41 @@ class CompiledWellSystem(typing.NamedTuple):
             every row in `well_row`; an array sets each row to its own value.
         """
         self.d_factors[well_row] = value
+
+    @typing.overload
+    def get_allows_crossflow(self, *, well_row: Integer) -> Boolean: ...
+    @typing.overload
+    def get_allows_crossflow(
+        self, *, well_row: IntArray[OneDimension]
+    ) -> BooleanArray[OneDimension]: ...
+    def get_allows_crossflow(
+        self, *, well_row: IntOrArray[OneDimension]
+    ) -> Boolean | BooleanArray[OneDimension]:
+        """
+        :param well_row: One well's row, or an array of them.
+        :returns: Whether each well allows crossflow. A `Boolean` for a single `well_row`, a
+            boolean array for an array.
+        """
+        if np.isscalar(well_row):
+            well_row = typing.cast(Integer, well_row)
+            return bool(self.crossflow_flags[well_row])
+        return self.crossflow_flags[well_row] == 1  # type: ignore[index]
+
+    def set_allows_crossflow(
+        self, *, well_row: IntOrArray[OneDimension], value: Boolean | typing.Sequence[Boolean]
+    ) -> None:
+        """
+        Sets one or more wells' crossflow permission in place.
+
+        :param well_row: One well's row, or an array of them.
+        :param value: Whether crossflow is allowed. A single value applies to every row in
+            `well_row`; a sequence sets each row to its own value.
+        """
+        if isinstance(value, bool):
+            self.crossflow_flags[well_row] = 1 if value else 0
+        else:
+            # TODO: there should be a better way to handle this. this looks slow
+            self.crossflow_flags[well_row] = [1 if flag else 0 for flag in value]  # type: ignore
 
 
 def get_well_status_tag(status: WellStatus) -> Integer:
@@ -2285,6 +2326,7 @@ def compile_well_system(
             (well.d_factor if well.d_factor is not None else np.nan for well in roster),
             dtype=dtype,
         ),
+        crossflow_flags=to_int_array(1 if well.allows_crossflow else 0 for well in roster),
         perforations=perforations,
         controls=well_controls,
         group_controls=compile_group_controls(

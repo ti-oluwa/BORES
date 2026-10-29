@@ -193,25 +193,26 @@ def resolve_well_control(
 
     perforation_workspace = build_perforation_workspace(
         well_indices=typing.cast(
-            "NumberArray[OneDimension]", perforations.well_indices[active_open]
+            NumberArray[OneDimension], perforations.well_indices[active_open]
         ),
         representative_depths=typing.cast(
-            "NumberArray[OneDimension]", perforations.representative_depths[active_open]
+            NumberArray[OneDimension], perforations.representative_depths[active_open]
         ),
         representative_measured_depths=typing.cast(
-            "NumberArray[OneDimension]", perforations.representative_measured_depths[active_open]
+            NumberArray[OneDimension], perforations.representative_measured_depths[active_open]
         ),
         inclinations_from_vertical=typing.cast(
-            "NumberArray[OneDimension]",
+            NumberArray[OneDimension],
             perforations.inclinations_from_vertical[active_open],
         ),
         connection_fluids=connection_fluids,
         reference_measured_depth=compiled_system.reference_measured_depths[well_row],
         connection_conductivities=typing.cast(
-            "NumberArray[OneDimension]",
+            NumberArray[OneDimension],
             perforations.connection_conductivities[active_open],
         ),
         d_factor=compiled_system.d_factors[well_row],
+        allows_crossflow=compiled_system.get_allows_crossflow(well_row=well_row),
         stb_to_volume_factor=get_stb_to_volume_factor(compiled_system.unit_system),
     )
 

@@ -472,6 +472,7 @@ def load_well_from_records(
             current_time=current_time,
         ),
         schedule_status=well_schedule_status,
+        allows_crossflow=bool(welspecs_record.get("enable_crossflow", True)),
     )
 
 

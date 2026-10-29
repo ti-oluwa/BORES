@@ -77,6 +77,13 @@ class PerforationWorkspace(typing.NamedTuple):
     d_factor: Number
     """This well's non-Darcy flow coefficient. `NaN` disables the correction."""
 
+    allows_crossflow: Boolean
+    """
+    Whether this well allows its connections to flow in the opposite direction to the well.
+    Reverse flow is not modelled yet, so a connection with reversed drawdown is given zero
+    flow whatever this is set to.
+    """
+
     connection_fluids: ConnectionFluids
     """Matching reservoir conditions at each connection."""
 
@@ -142,6 +149,7 @@ def build_perforation_workspace(
     reference_measured_depth: Number,
     connection_conductivities: NumberArray[OneDimension] | None = None,
     d_factor: Number = math.nan,
+    allows_crossflow: Boolean = True,
     stb_to_volume_factor: Number = 1.0,
     dtype: npt.DTypeLike = None,
 ) -> PerforationWorkspace:
@@ -162,6 +170,8 @@ def build_perforation_workspace(
         `NaN` (the default) if this well has no non-Darcy correction to apply.
     :param d_factor: This well's non-Darcy flow coefficient. `NaN`
         (the default) disables the correction.
+    :param allows_crossflow: Whether this well allows crossflow. `True` (the default) matches
+        a deck that does not say.
     :param stb_to_volume_factor: Volume of one stock-tank barrel in the volume unit of reservoir
         rates. One (the default) in the unit systems where a stock-tank volume is a plain volume.
     :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
@@ -193,6 +203,7 @@ def build_perforation_workspace(
             NumberArray[OneDimension], resolved_connection_conductivities
         ),
         d_factor=d_factor,
+        allows_crossflow=allows_crossflow,
         connection_fluids=resolved_fluids,
         representative_depths=typing.cast(
             NumberArray[OneDimension],
@@ -439,8 +450,9 @@ def compute_perforation_drawdown(
     :param connection_pressure: Flowing wellbore pressure at the connection.
     :param is_injector: Whether this well is an injector.
     :returns: The driving pressure difference, clipped to `>= 0` so a
-        connection with reversed drawdown contributes zero flow rather
-        than crossflow.
+        connection with reversed drawdown contributes zero flow. Reverse
+        flow (crossflow) is not modelled yet, so this applies to every well,
+        whether or not it allows crossflow.
     """
     if is_injector:
         drawdown = connection_pressure - reservoir_pressure

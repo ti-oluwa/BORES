@@ -239,6 +239,33 @@ def has_settled(new_total_rate: Number, total_rate: Number, tolerance: Number) -
 
 
 @numba.njit(cache=True)
+def get_seed_connection_rates(
+    workspace: PerforationWorkspace, warm_start: Boolean
+) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension], NumberArray[OneDimension]]:
+    """
+    The connection rates a solve builds its first pressure profile from.
+
+    :param workspace: The well's workspace.
+    :param warm_start: Whether to use the connection rates already in the workspace, as a
+        previous solve at a nearby reference pressure left them. Otherwise the profile starts
+        from zero flow.
+    :returns: The oil, water and gas rate at each connection. These are the workspace's own
+        arrays when `warm_start` is set, so callers must only read them.
+    """
+    if warm_start:
+        return (
+            workspace.connection_oil_rates,
+            workspace.connection_water_rates,
+            workspace.connection_gas_rates,
+        )
+    return (
+        np.zeros_like(workspace.connection_oil_rates),
+        np.zeros_like(workspace.connection_water_rates),
+        np.zeros_like(workspace.connection_gas_rates),
+    )
+
+
+@numba.njit(cache=True)
 def solve_homogeneous(
     model: HomogeneousWellbore,
     reference_depth: Number,
@@ -253,12 +280,14 @@ def solve_homogeneous(
     max_iterations: Integer,
     tolerance: Number,
     tubing_fluid_table: TubingFluidTable | None = None,
+    warm_start: Boolean = False,
 ) -> FixedPointResult:
     """
     Solves a well's connection pressures and rates together, with the pressure profile from the
     homogeneous correlation.
 
-    The profile starts from zero flow and is updated from the rates each iteration.
+    The profile starts from zero flow, or from the rates already in the workspace when
+    `warm_start` is set, and is updated from the rates each iteration.
 
     :param model: The well's `HomogeneousWellbore`.
     :param hydrostatic_divisor: The model's unit system's gravitational factor times its
@@ -275,16 +304,21 @@ def solve_homogeneous(
         system.
     :param max_iterations: The most iterations to run.
     :param tolerance: Relative tolerance on the total rate.
+    :param warm_start: Whether the first pressure profile is built from the connection rates
+        already in the workspace instead of from zero flow.
     :returns: What the solve ended with.
     """
+    seed_oil_rates, seed_water_rates, seed_gas_rates = get_seed_connection_rates(
+        workspace=workspace, warm_start=warm_start
+    )
     walk_homogeneous(
         model=model,
         reference_depth=reference_depth,
         reference_measured_depth=workspace.reference_measured_depth,
         reference_pressure=reference_pressure,
-        connection_oil_rates=np.zeros_like(workspace.connection_oil_rates),
-        connection_water_rates=np.zeros_like(workspace.connection_water_rates),
-        connection_gas_rates=np.zeros_like(workspace.connection_gas_rates),
+        connection_oil_rates=seed_oil_rates,
+        connection_water_rates=seed_water_rates,
+        connection_gas_rates=seed_gas_rates,
         representative_depths=workspace.representative_depths,
         representative_measured_depths=workspace.representative_measured_depths,
         inclinations_from_vertical=workspace.inclinations_from_vertical,
@@ -407,12 +441,14 @@ def solve_beggs_and_brill(
     max_iterations: Integer,
     tolerance: Number,
     tubing_fluid_table: TubingFluidTable | None = None,
+    warm_start: Boolean = False,
 ) -> FixedPointResult:
     """
     Solves a well's connection pressures and rates together, with the pressure profile from the
     Beggs and Brill correlation.
 
-    The profile starts from zero flow and is updated from the rates each iteration.
+    The profile starts from zero flow, or from the rates already in the workspace when
+    `warm_start` is set, and is updated from the rates each iteration.
 
     :param model: The well's `BeggsAndBrillWellbore`.
     :param hydrostatic_divisor: The model's unit system's gravitational factor times its
@@ -429,16 +465,21 @@ def solve_beggs_and_brill(
         system.
     :param max_iterations: The most iterations to run.
     :param tolerance: Relative tolerance on the total rate.
+    :param warm_start: Whether the first pressure profile is built from the connection rates
+        already in the workspace instead of from zero flow.
     :returns: What the solve ended with.
     """
+    seed_oil_rates, seed_water_rates, seed_gas_rates = get_seed_connection_rates(
+        workspace=workspace, warm_start=warm_start
+    )
     walk_beggs_and_brill(
         model=model,
         reference_depth=reference_depth,
         reference_measured_depth=workspace.reference_measured_depth,
         reference_pressure=reference_pressure,
-        connection_oil_rates=np.zeros_like(workspace.connection_oil_rates),
-        connection_water_rates=np.zeros_like(workspace.connection_water_rates),
-        connection_gas_rates=np.zeros_like(workspace.connection_gas_rates),
+        connection_oil_rates=seed_oil_rates,
+        connection_water_rates=seed_water_rates,
+        connection_gas_rates=seed_gas_rates,
         representative_depths=workspace.representative_depths,
         representative_measured_depths=workspace.representative_measured_depths,
         inclinations_from_vertical=workspace.inclinations_from_vertical,
@@ -561,12 +602,14 @@ def solve_hagedorn_brown(
     max_iterations: Integer,
     tolerance: Number,
     tubing_fluid_table: TubingFluidTable | None = None,
+    warm_start: Boolean = False,
 ) -> FixedPointResult:
     """
     Solves a well's connection pressures and rates together, with the pressure profile from the
     Hagedorn and Brown correlation.
 
-    The profile starts from zero flow and is updated from the rates each iteration.
+    The profile starts from zero flow, or from the rates already in the workspace when
+    `warm_start` is set, and is updated from the rates each iteration.
 
     :param model: The well's `HagedornBrownWellbore`.
     :param hydrostatic_divisor: The model's unit system's gravitational factor times its
@@ -583,16 +626,21 @@ def solve_hagedorn_brown(
         system.
     :param max_iterations: The most iterations to run.
     :param tolerance: Relative tolerance on the total rate.
+    :param warm_start: Whether the first pressure profile is built from the connection rates
+        already in the workspace instead of from zero flow.
     :returns: What the solve ended with.
     """
+    seed_oil_rates, seed_water_rates, seed_gas_rates = get_seed_connection_rates(
+        workspace=workspace, warm_start=warm_start
+    )
     walk_hagedorn_brown(
         model=model,
         reference_depth=reference_depth,
         reference_measured_depth=workspace.reference_measured_depth,
         reference_pressure=reference_pressure,
-        connection_oil_rates=np.zeros_like(workspace.connection_oil_rates),
-        connection_water_rates=np.zeros_like(workspace.connection_water_rates),
-        connection_gas_rates=np.zeros_like(workspace.connection_gas_rates),
+        connection_oil_rates=seed_oil_rates,
+        connection_water_rates=seed_water_rates,
+        connection_gas_rates=seed_gas_rates,
         representative_depths=workspace.representative_depths,
         representative_measured_depths=workspace.representative_measured_depths,
         inclinations_from_vertical=workspace.inclinations_from_vertical,
@@ -715,12 +763,14 @@ def solve_gray(
     max_iterations: Integer,
     tolerance: Number,
     tubing_fluid_table: TubingFluidTable | None = None,
+    warm_start: Boolean = False,
 ) -> FixedPointResult:
     """
     Solves a well's connection pressures and rates together, with the pressure profile from the
     Gray correlation.
 
-    The profile starts from zero flow and is updated from the rates each iteration.
+    The profile starts from zero flow, or from the rates already in the workspace when
+    `warm_start` is set, and is updated from the rates each iteration.
 
     :param model: The well's `GrayWellbore`.
     :param hydrostatic_divisor: The model's unit system's gravitational factor times its
@@ -737,16 +787,21 @@ def solve_gray(
         system.
     :param max_iterations: The most iterations to run.
     :param tolerance: Relative tolerance on the total rate.
+    :param warm_start: Whether the first pressure profile is built from the connection rates
+        already in the workspace instead of from zero flow.
     :returns: What the solve ended with.
     """
+    seed_oil_rates, seed_water_rates, seed_gas_rates = get_seed_connection_rates(
+        workspace=workspace, warm_start=warm_start
+    )
     walk_gray(
         model=model,
         reference_depth=reference_depth,
         reference_measured_depth=workspace.reference_measured_depth,
         reference_pressure=reference_pressure,
-        connection_oil_rates=np.zeros_like(workspace.connection_oil_rates),
-        connection_water_rates=np.zeros_like(workspace.connection_water_rates),
-        connection_gas_rates=np.zeros_like(workspace.connection_gas_rates),
+        connection_oil_rates=seed_oil_rates,
+        connection_water_rates=seed_water_rates,
+        connection_gas_rates=seed_gas_rates,
         representative_depths=workspace.representative_depths,
         representative_measured_depths=workspace.representative_measured_depths,
         inclinations_from_vertical=workspace.inclinations_from_vertical,
@@ -869,12 +924,14 @@ def solve_woldesemayat_ghajar(
     max_iterations: Integer,
     tolerance: Number,
     tubing_fluid_table: TubingFluidTable | None = None,
+    warm_start: Boolean = False,
 ) -> FixedPointResult:
     """
     Solves a well's connection pressures and rates together, with the pressure profile from the
     Woldesemayat and Ghajar correlation.
 
-    The profile starts from zero flow and is updated from the rates each iteration.
+    The profile starts from zero flow, or from the rates already in the workspace when
+    `warm_start` is set, and is updated from the rates each iteration.
 
     :param model: The well's `WoldesemayatGhajarWellbore`.
     :param hydrostatic_divisor: The model's unit system's gravitational factor times its
@@ -891,16 +948,21 @@ def solve_woldesemayat_ghajar(
         system.
     :param max_iterations: The most iterations to run.
     :param tolerance: Relative tolerance on the total rate.
+    :param warm_start: Whether the first pressure profile is built from the connection rates
+        already in the workspace instead of from zero flow.
     :returns: What the solve ended with.
     """
+    seed_oil_rates, seed_water_rates, seed_gas_rates = get_seed_connection_rates(
+        workspace=workspace, warm_start=warm_start
+    )
     walk_woldesemayat_ghajar(
         model=model,
         reference_depth=reference_depth,
         reference_measured_depth=workspace.reference_measured_depth,
         reference_pressure=reference_pressure,
-        connection_oil_rates=np.zeros_like(workspace.connection_oil_rates),
-        connection_water_rates=np.zeros_like(workspace.connection_water_rates),
-        connection_gas_rates=np.zeros_like(workspace.connection_gas_rates),
+        connection_oil_rates=seed_oil_rates,
+        connection_water_rates=seed_water_rates,
+        connection_gas_rates=seed_gas_rates,
         representative_depths=workspace.representative_depths,
         representative_measured_depths=workspace.representative_measured_depths,
         inclinations_from_vertical=workspace.inclinations_from_vertical,
@@ -1021,12 +1083,14 @@ def solve_hydrostatic(
     radial_flow_constant: Number,
     max_iterations: Integer,
     tolerance: Number,
+    warm_start: Boolean = False,
 ) -> FixedPointResult:
     """
     Solves a well's connection pressures and rates together, with the pressure profile from the
     weight of the fluid between connections.
 
-    The profile starts from zero flow and is updated from the rates each iteration.
+    The profile starts from zero flow, or from the rates already in the workspace when
+    `warm_start` is set, and is updated from the rates each iteration.
 
     :param pressure_per_density_and_depth: As `get_pressure_per_density_and_depth` gives it.
     :param reference_depth: The well's BHP/THP reporting datum.
@@ -1041,16 +1105,21 @@ def solve_hydrostatic(
         system.
     :param max_iterations: The most iterations to run.
     :param tolerance: Relative tolerance on the total rate.
+    :param warm_start: Whether the first pressure profile is built from the connection rates
+        already in the workspace instead of from zero flow.
     :returns: What the solve ended with.
     """
+    seed_oil_rates, seed_water_rates, seed_gas_rates = get_seed_connection_rates(
+        workspace=workspace, warm_start=warm_start
+    )
     walk_hydrostatic_pressures(
         reference_depth=reference_depth,
         reference_pressure=reference_pressure,
         representative_depths=workspace.representative_depths,
         connection_fluids=workspace.connection_fluids,
-        connection_oil_rates=np.zeros_like(workspace.connection_oil_rates),
-        connection_water_rates=np.zeros_like(workspace.connection_water_rates),
-        connection_gas_rates=np.zeros_like(workspace.connection_gas_rates),
+        connection_oil_rates=seed_oil_rates,
+        connection_water_rates=seed_water_rates,
+        connection_gas_rates=seed_gas_rates,
         pressure_per_density_and_depth=pressure_per_density_and_depth,
         pressures=workspace.connection_pressures,
     )
@@ -1263,7 +1332,7 @@ def bisect_homogeneous(
         surface_water_rate=0.0,
         surface_gas_rate=0.0,
     )
-    for _ in range(max_bisections):
+    for step in range(max_bisections):
         average = 0.5 * (low + high)
         result = solve_homogeneous(
             model=model,
@@ -1279,6 +1348,7 @@ def bisect_homogeneous(
             max_iterations=max_iterations,
             tolerance=tolerance,
             tubing_fluid_table=tubing_fluid_table,
+            warm_start=step > 0,
         )
         if not result.converged:
             return BisectionResult(bhp=average, result=result)
@@ -1359,7 +1429,7 @@ def bisect_beggs_and_brill(
         surface_water_rate=0.0,
         surface_gas_rate=0.0,
     )
-    for _ in range(max_bisections):
+    for step in range(max_bisections):
         average = 0.5 * (low + high)
         result = solve_beggs_and_brill(
             model=model,
@@ -1375,6 +1445,7 @@ def bisect_beggs_and_brill(
             max_iterations=max_iterations,
             tolerance=tolerance,
             tubing_fluid_table=tubing_fluid_table,
+            warm_start=step > 0,
         )
         if not result.converged:
             return BisectionResult(bhp=average, result=result)
@@ -1455,7 +1526,7 @@ def bisect_hagedorn_brown(
         surface_water_rate=0.0,
         surface_gas_rate=0.0,
     )
-    for _ in range(max_bisections):
+    for step in range(max_bisections):
         average = 0.5 * (low + high)
         result = solve_hagedorn_brown(
             model=model,
@@ -1471,6 +1542,7 @@ def bisect_hagedorn_brown(
             max_iterations=max_iterations,
             tolerance=tolerance,
             tubing_fluid_table=tubing_fluid_table,
+            warm_start=step > 0,
         )
         if not result.converged:
             return BisectionResult(bhp=average, result=result)
@@ -1551,7 +1623,7 @@ def bisect_gray(
         surface_water_rate=0.0,
         surface_gas_rate=0.0,
     )
-    for _ in range(max_bisections):
+    for step in range(max_bisections):
         average = 0.5 * (low + high)
         result = solve_gray(
             model=model,
@@ -1567,6 +1639,7 @@ def bisect_gray(
             max_iterations=max_iterations,
             tolerance=tolerance,
             tubing_fluid_table=tubing_fluid_table,
+            warm_start=step > 0,
         )
         if not result.converged:
             return BisectionResult(bhp=average, result=result)
@@ -1647,7 +1720,7 @@ def bisect_woldesemayat_ghajar(
         surface_water_rate=0.0,
         surface_gas_rate=0.0,
     )
-    for _ in range(max_bisections):
+    for step in range(max_bisections):
         average = 0.5 * (low + high)
         result = solve_woldesemayat_ghajar(
             model=model,
@@ -1663,6 +1736,7 @@ def bisect_woldesemayat_ghajar(
             max_iterations=max_iterations,
             tolerance=tolerance,
             tubing_fluid_table=tubing_fluid_table,
+            warm_start=step > 0,
         )
         if not result.converged:
             return BisectionResult(bhp=average, result=result)
@@ -1737,7 +1811,7 @@ def bisect_hydrostatic(
         surface_water_rate=0.0,
         surface_gas_rate=0.0,
     )
-    for _ in range(max_bisections):
+    for step in range(max_bisections):
         average = 0.5 * (low + high)
         result = solve_hydrostatic(
             reference_depth=reference_depth,
@@ -1751,6 +1825,7 @@ def bisect_hydrostatic(
             radial_flow_constant=radial_flow_constant,
             max_iterations=max_iterations,
             tolerance=tolerance,
+            warm_start=step > 0,
         )
         if not result.converged:
             return BisectionResult(bhp=average, result=result)
