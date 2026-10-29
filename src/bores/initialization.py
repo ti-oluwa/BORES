@@ -22,7 +22,7 @@ from bores.blackoil.satfunc.capillary_pressure.tables import CapillaryPressureTa
 from bores.blackoil.satfunc.regions import SatFunc
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
-from bores.grids.base import Grid
+from bores.grids.base import CellStatus, Grid
 from bores.precision import get_dtype
 from bores.reservoir.equilibrium import DepthTable, Equilibrium, EquilibriumRegion
 from bores.reservoir.mass import compute_masses
@@ -120,6 +120,13 @@ def _rk4_march(
     return depths, pressures
 
 
+MAX_PLAUSIBLE_COLUMN_SPAN = 100_000.0
+"""
+Tallest hydrostatic column, in depth units of the unit system, that is believed to be real.
+`integrate_hydrostatic_pressure` warns above it because the cause is nearly always a corrupt cell
+depth, and the cost of the integration grows with the span.
+"""
+
 COLLOCATION_MAX_ITERATIONS = 60
 """
 Most passes `integrate_hydrostatic_pressure` makes over a column before it gives up on the
@@ -135,6 +142,8 @@ def integrate_hydrostatic_pressure(
     gradient_factor: Number,
     step: Number = 1.0,
     dtype: npt.DTypeLike = None,
+    bind_depths: typing.Callable[[typing.Any], typing.Callable[[typing.Any], typing.Any]]
+    | None = None,
 ) -> tuple[npt.NDArray, npt.NDArray]:
     """
     Integrate `dP/dz = gradient_factor * density_fn(pressure, depth)` from `reference_depth`
@@ -149,6 +158,10 @@ def integrate_hydrostatic_pressure(
     `_rk4_march`.
 
     :param density_fn: Fluid density at the given pressure and depth. It must accept arrays.
+    :param bind_depths: Optional. Takes the depths of a column and returns a function that gives
+        the density at a pressure for those depths. Everything that depends on depth alone
+        (temperature, `RSVD`/`RVVD` values, the bubble point that follows from them) is then
+        worked out once per column instead of on every pass. It must agree with `density_fn`.
     :returns: `(depths, pressures)`, both ascending in depth and spanning
         `[min(reference_depth, endpoint_depth), max(reference_depth, endpoint_depth)]`.
     """
@@ -169,8 +182,24 @@ def integrate_hydrostatic_pressure(
     direction = 1.0 if endpoint_depth > reference_depth else -1.0
     n_steps = max(1, int(np.ceil(abs(endpoint_depth - reference_depth) / step)))
     h = direction * abs(endpoint_depth - reference_depth) / n_steps
+    span = abs(endpoint_depth - reference_depth)
+    if span > MAX_PLAUSIBLE_COLUMN_SPAN:
+        warnings.warn(
+            f"A hydrostatic column spans {span:g} depth units ({n_steps + 1} integration "
+            "depths), which is far taller than any reservoir. A cell with a corrupt depth, such "
+            "as one with degenerate geometry, can cause this, and it makes initialization slow. "
+            "Check the grid and the `EQUIL` contact and datum depths.",
+            UserWarning,
+            stacklevel=2,
+        )
     node_depths = reference_depth + h * np.arange(n_steps + 1, dtype=np.float64)
     midpoint_depths = node_depths[:-1] + 0.5 * h
+    if bind_depths is not None:
+        node_density = bind_depths(node_depths)
+        midpoint_density = bind_depths(midpoint_depths)
+    else:
+        node_density = functools.partial(density_fn, depth=node_depths)
+        midpoint_density = functools.partial(density_fn, depth=midpoint_depths)
 
     pressures = np.full(n_steps + 1, reference_pressure, dtype=np.float64)
     reference_gradient = (
@@ -182,15 +211,13 @@ def integrate_hydrostatic_pressure(
     converged = False
     with np.errstate(all="ignore"):
         for _ in range(COLLOCATION_MAX_ITERATIONS):
-            node_gradient = gradient_factor * np.asarray(
-                density_fn(pressures, node_depths), dtype=np.float64
-            )
+            node_gradient = gradient_factor * np.asarray(node_density(pressures), dtype=np.float64)
             # Cubic Hermite estimate of the pressure at the middle of every step
             midpoint_pressures = 0.5 * (pressures[:-1] + pressures[1:]) + (h / 8.0) * (
                 node_gradient[:-1] - node_gradient[1:]
             )
             midpoint_gradient = gradient_factor * np.asarray(
-                density_fn(midpoint_pressures, midpoint_depths), dtype=np.float64
+                midpoint_density(midpoint_pressures), dtype=np.float64
             )
             increments = (h / 6.0) * (
                 node_gradient[:-1] + 4.0 * midpoint_gradient + node_gradient[1:]
@@ -235,6 +262,8 @@ def _march_full_range(
     gradient_factor: Number,
     step: Number,
     dtype: npt.DTypeLike,
+    bind_depths: typing.Callable[[typing.Any], typing.Callable[[typing.Any], typing.Any]]
+    | None = None,
 ) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension]]:
     """
     March `density_fn` outward from `reference_depth` in both directions, covering
@@ -248,6 +277,7 @@ def _march_full_range(
         gradient_factor=gradient_factor,
         step=step,
         dtype=dtype,
+        bind_depths=bind_depths,
     )
     depths_down, pressures_down = integrate_hydrostatic_pressure(
         density_fn=density_fn,
@@ -257,6 +287,7 @@ def _march_full_range(
         gradient_factor=gradient_factor,
         step=step,
         dtype=dtype,
+        bind_depths=bind_depths,
     )
     depths = np.concatenate([depths_up[:-1], depths_down], dtype=dtype)
     pressures = np.concatenate([pressures_up[:-1], pressures_down], dtype=dtype)
@@ -740,12 +771,18 @@ def initialize_center_point_equilibrium(
     depth_step: Number = 1.0,
     dtype: npt.DTypeLike = None,
     saturation_samples: int = N_SATURATION_SAMPLES,
+    active: npt.NDArray[np.bool_] | None = None,
     **kwargs: typing.Any,
 ) -> EquilibriumArrays:
     """
     Center-point `EQUIL` initialization: evaluate pressure and saturation once
     at each cell's centroid depth (`region.accuracy_flag == 0`).
 
+    :param active: Which of the cells take part in the flow simulation. The depth range that is
+        integrated is taken from these cells, so inactive cells, whose depths do not matter
+        and can be unreliable, cannot stretch it. Cells outside that range still get a finite
+        value, from the nearest end of the integrated profile. When `None`, or when no cell is
+        active, every cell sets the range.
     :param saturation_samples: Forwarded to `get_saturations_from_capillary_pressure`
         when `capillary_pressure` is supplied; ignored for sharp-contact initialization.
     :raises ValidationError: If `datum_depth` is outside the oil zone, or a
@@ -762,8 +799,13 @@ def initialize_center_point_equilibrium(
 
     goc_depth = region.goc_depth
     woc_depth = region.woc_depth
-    oil_zone_low = goc_depth if goc_depth is not None else min(depths.min(), region.datum_depth)
-    oil_zone_high = woc_depth if woc_depth is not None else max(depths.max(), region.datum_depth)
+    ranged_depths = depths[active] if active is not None and active.any() else depths
+    shallowest_depth = ranged_depths.min()
+    deepest_depth = ranged_depths.max()
+    oil_zone_low = (
+        goc_depth if goc_depth is not None else min(shallowest_depth, region.datum_depth)
+    )
+    oil_zone_high = woc_depth if woc_depth is not None else max(deepest_depth, region.datum_depth)
     if not (oil_zone_low <= region.datum_depth <= oil_zone_high):
         raise ValidationError(
             f"`EQUIL` `datum_depth` ({region.datum_depth}) must lie within the oil "
@@ -779,51 +821,86 @@ def initialize_center_point_equilibrium(
     def get_temperature_at(depth: Number) -> Number:
         return np.interp(depth, sorted_depths, sorted_temperature)
 
-    def compute_oil_density(pressure: Number, depth: Number) -> Number:
+    def bind_oil_density(depth: Number) -> typing.Callable[[Number], Number]:
         temperature_at_depth = get_temperature_at(depth)
         if rsvd_table is not None:
-            # `Rs(depth)` from `RSVD`: oil is undersaturated wherever `P` exceeds the
-            # bubble point of that Rs
-            density = oil_table.density(
-                pressure,
-                temperature_at_depth,
-                solution_gor=rsvd_table.at_depth(depth),  # type: ignore[arg-type]
+            # `Rs(depth)` from `RSVD`: oil is undersaturated wherever `P` exceeds the bubble
+            # point of that Rs. Neither the Rs nor its bubble point depends on pressure.
+            solution_gor_at_depth = rsvd_table.at_depth(depth)  # type: ignore[arg-type]
+            bubble_point_at_depth = oil_table.bubble_point_pressure(
+                temperature=temperature_at_depth,
+                solution_gor=solution_gor_at_depth,  # type: ignore[arg-type]
             )
-        else:
+
+            def oil_density_at(pressure: Number) -> Number:
+                density = oil_table.density(
+                    pressure,
+                    temperature_at_depth,
+                    solution_gor=solution_gor_at_depth,  # type: ignore[arg-type]
+                    bubble_point_pressure=bubble_point_at_depth,
+                )
+                return density.astype(dtype, copy=False)  # type: ignore[union-attr, return-value]
+
+            return oil_density_at
+
+        def saturated_oil_density_at(pressure: Number) -> Number:
             # No `RSVD`: assume saturated oil (`Pb = P`) everywhere in the oil zone, the same
             # assumption used for `Rs` below. `bubble_point_pressure=pressure` selects the
             # saturated branch, which reads the density straight off the table at `P`.
-            density = oil_table.density(
+            density = oil_table.density(  # type: ignore[union-attr]
                 pressure, temperature_at_depth, bubble_point_pressure=pressure
             )
-        return density.astype(dtype, copy=False)  # type: ignore[union-attr, return-value]
+            return density.astype(dtype, copy=False)  # type: ignore[union-attr, return-value]
+
+        return saturated_oil_density_at
+
+    def bind_gas_density(depth: Number) -> typing.Callable[[Number], Number]:
+        assert gas_table is not None
+        temperature_at_depth = get_temperature_at(depth)
+        # Wet gas: the gas's own `Rv(depth)` when `RVVD` is given, otherwise saturated gas
+        vaporized_oil_ratio_at_depth = (
+            rvvd_table.at_depth(depth)  # type: ignore[arg-type]
+            if rvvd_table is not None
+            else None
+        )
+
+        def gas_density_at(pressure: Number) -> Number:
+            density = gas_table.density(  # type: ignore[union-attr]
+                pressure,
+                temperature_at_depth,
+                vaporized_oil_ratio=vaporized_oil_ratio_at_depth,
+            )
+            return density.astype(dtype, copy=False)  # type: ignore[union-attr, return-value]
+
+        return gas_density_at
+
+    def bind_water_density(depth: Number) -> typing.Callable[[Number], Number]:
+        assert water_table is not None
+        temperature_at_depth = get_temperature_at(depth)
+
+        def water_density_at(pressure: Number) -> Number:
+            return water_table.density(pressure, temperature_at_depth).astype(  # type: ignore[union-attr, return-value]
+                dtype, copy=False
+            )
+
+        return water_density_at
+
+    def compute_oil_density(pressure: Number, depth: Number) -> Number:
+        return bind_oil_density(depth)(pressure)
 
     def compute_gas_density(pressure: Number, depth: Number) -> Number:
-        assert gas_table is not None
-        # Wet gas: the gas's own `Rv(depth)` when `RVVD` is given, otherwise saturated gas
-        density = gas_table.density(
-            pressure,
-            get_temperature_at(depth),
-            vaporized_oil_ratio=(
-                rvvd_table.at_depth(depth)  # type: ignore[arg-type]
-                if rvvd_table is not None
-                else None
-            ),
-        )
-        return density.astype(dtype, copy=False)  # type: ignore[union-attr, return-value]
+        return bind_gas_density(depth)(pressure)
 
     def compute_water_density(pressure: Number, depth: Number) -> Number:
-        assert water_table is not None
-        return water_table.density(pressure, get_temperature_at(depth)).astype(  # type: ignore[union-attr, return-value]
-            dtype, copy=False
-        )
+        return bind_water_density(depth)(pressure)
 
-    min_depth = min(depths.min(), region.datum_depth, oil_zone_low)
-    max_depth = max(depths.max(), region.datum_depth, oil_zone_high)
+    min_depth = min(shallowest_depth, region.datum_depth, oil_zone_low)
+    max_depth = max(deepest_depth, region.datum_depth, oil_zone_high)
 
     # Oil zone: integrate from datum outward to the zone edges.
     oil_depths_up, oil_pressures_up = integrate_hydrostatic_pressure(
         density_fn=compute_oil_density,
+        bind_depths=bind_oil_density,
         reference_depth=region.datum_depth,
         reference_pressure=region.datum_pressure,
         endpoint_depth=oil_zone_low,
@@ -833,6 +910,7 @@ def initialize_center_point_equilibrium(
     )
     oil_depths_down, oil_pressures_down = integrate_hydrostatic_pressure(
         density_fn=compute_oil_density,
+        bind_depths=bind_oil_density,
         reference_depth=region.datum_depth,
         reference_pressure=region.datum_pressure,
         endpoint_depth=oil_zone_high,
@@ -851,6 +929,7 @@ def initialize_center_point_equilibrium(
         if goc_depth is not None and min_depth < oil_zone_low:
             cap_depths, cap_pressures = integrate_hydrostatic_pressure(
                 density_fn=compute_oil_density,
+                bind_depths=bind_oil_density,
                 reference_depth=oil_zone_low,
                 reference_pressure=oil_pressures_up[0],
                 endpoint_depth=min_depth,
@@ -864,6 +943,7 @@ def initialize_center_point_equilibrium(
         if woc_depth is not None and max_depth > oil_zone_high:
             base_depths, base_pressures = integrate_hydrostatic_pressure(
                 density_fn=compute_oil_density,
+                bind_depths=bind_oil_density,
                 reference_depth=oil_zone_high,
                 reference_pressure=oil_pressures_down[-1],
                 endpoint_depth=max_depth,
@@ -888,6 +968,7 @@ def initialize_center_point_equilibrium(
         )
         gas_depths_full, gas_pressures_full = _march_full_range(
             density_fn=compute_gas_density,
+            bind_depths=bind_gas_density,
             reference_depth=goc_depth,
             reference_pressure=gas_pressure_at_goc,
             min_depth=min_depth,
@@ -914,6 +995,7 @@ def initialize_center_point_equilibrium(
         )
         water_depths_full, water_pressures_full = _march_full_range(
             density_fn=compute_water_density,
+            bind_depths=bind_water_density,
             reference_depth=woc_depth,
             reference_pressure=water_pressure_at_woc,
             min_depth=min_depth,
@@ -1346,6 +1428,10 @@ def initialize_equilibrium_arrays(
         saturation_region_index = typing.cast(IntCellArray, np.ones(n_cells, dtype=np.int32))
 
     depth = reservoir.depth
+    cell_statuses = np.asarray(reservoir.grid.cell_statuses)
+    active_cells: npt.NDArray[np.bool_] | None = (
+        cell_statuses == int(CellStatus.ACTIVE) if cell_statuses.shape == (n_cells,) else None
+    )
     connate_water_saturation = reservoir.rock.connate_water_saturation
     residual_oil_saturation_water = reservoir.rock.residual_oil_saturation_water
     residual_oil_saturation_gas = reservoir.rock.residual_oil_saturation_gas
@@ -1420,6 +1506,7 @@ def initialize_equilibrium_arrays(
             depth_step=depth_step,
             dtype=dtype,
             saturation_samples=saturation_samples,
+            active=active_cells[mask] if active_cells is not None else None,
         )
 
         if equilibrium_region.accuracy_flag == 0:

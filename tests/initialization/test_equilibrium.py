@@ -200,6 +200,69 @@ class TestSubdivisionAveraging:
         )
 
 
+class TestActiveCellsSetTheDepthRange:
+    """A cell that takes no part in the simulation must not stretch the integrated columns."""
+
+    def run(self, spe1_capillary, *, depths, active, monkeypatch):
+        deck_file, case = spe1_capillary
+        equilibrium = Equilibrium.from_deck(deck_file).convert(UnitSystem.FIELD)
+        region = equilibrium.region(1)
+        pvt_tables = case.model.fluid.pvt.region(1).tables
+        deepest_endpoint = []
+        real = initialization.integrate_hydrostatic_pressure
+
+        def spy(*args, **kwargs):
+            deepest_endpoint.append(max(kwargs["reference_depth"], kwargs["endpoint_depth"]))
+            return real(*args, **kwargs)
+
+        monkeypatch.setattr(initialization, "integrate_hydrostatic_pressure", spy)
+        n = len(depths)
+        arrays = initialization.initialize_center_point_equilibrium(
+            region=region,
+            depths=depths,
+            connate_water_saturation=np.full(n, 0.12),
+            oil_table=pvt_tables.oil,
+            gas_table=pvt_tables.gas,
+            water_table=pvt_tables.water,
+            rsvd_table=equilibrium.rsvd_tables.get(region.rsvd_table),
+            rvvd_table=None,
+            temperature=np.full(n, 200.0),
+            unit_system=UnitSystem.FIELD,
+            capillary_pressure=None,
+            dtype=np.float64,
+            active=active,
+        )  # fmt: skip
+        return arrays, max(deepest_endpoint)
+
+    def test_a_corrupt_inactive_depth_is_left_out_of_the_range(self, spe1_capillary, monkeypatch):
+        sane = np.array([8340.0, 8360.0, 8370.0, 8390.0])
+        corrupt = np.append(sane, 2.0e5)
+        reference, reference_deepest = self.run(
+            spe1_capillary, depths=sane, active=None, monkeypatch=monkeypatch
+        )
+        arrays, deepest = self.run(
+            spe1_capillary,
+            depths=corrupt,
+            active=np.array([True, True, True, True, False]),
+            monkeypatch=monkeypatch,
+        )
+        assert deepest == pytest.approx(reference_deepest)
+        for name in arrays._fields:
+            values = getattr(arrays, name)
+            assert np.all(np.isfinite(values)), name
+            np.testing.assert_allclose(values[:4], getattr(reference, name), rtol=1e-6, atol=1e-9)
+
+    def test_without_the_mask_the_corrupt_depth_does_stretch_the_range(
+        self, spe1_capillary, monkeypatch
+    ):
+        corrupt = np.array([8340.0, 8360.0, 8370.0, 8390.0, 2.0e5])
+        with pytest.warns(UserWarning, match="hydrostatic column"):
+            _, deepest = self.run(
+                spe1_capillary, depths=corrupt, active=None, monkeypatch=monkeypatch
+            )
+        assert deepest >= 2.0e5
+
+
 class TestStateConsistency:
     def test_explicit_solution_gor_gets_its_own_bubble_point(self, spe1):
         deck_file, case = spe1
@@ -261,6 +324,27 @@ class TestIntegrateHydrostaticPressure:
         )
         np.testing.assert_allclose(result[0], reference[0])
         np.testing.assert_allclose(result[1], reference[1], rtol=1e-9)
+
+    def test_depth_bound_density_gives_exactly_the_same_profile(self):
+        def bind_depths(depth):
+            return lambda pressure: self.density(pressure, depth)
+
+        plain = integrate_hydrostatic_pressure(
+            self.density, 9000.0, 4800.0, 8333.3, self.gradient_factor, step=1.0, dtype=np.float64
+        )
+        bound = integrate_hydrostatic_pressure(
+            self.density, 9000.0, 4800.0, 8333.3, self.gradient_factor, step=1.0, dtype=np.float64,
+            bind_depths=bind_depths,
+        )  # fmt: skip
+        np.testing.assert_array_equal(bound[0], plain[0])
+        np.testing.assert_array_equal(bound[1], plain[1])
+
+    def test_warns_when_the_column_is_taller_than_any_reservoir(self):
+        with pytest.warns(UserWarning, match="hydrostatic column"):
+            integrate_hydrostatic_pressure(
+                self.density, 9000.0, 4800.0, 9000.0 + 2.0 * initialization.MAX_PLAUSIBLE_COLUMN_SPAN,
+                self.gradient_factor, step=50.0, dtype=np.float64,
+            )  # fmt: skip
 
     def test_falls_back_to_the_step_by_step_march_when_the_solve_does_not_settle(
         self, monkeypatch
