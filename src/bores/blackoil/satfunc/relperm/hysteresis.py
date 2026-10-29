@@ -280,6 +280,12 @@ class HistoryArrays(typing.NamedTuple):
     gas_reversal_saturation: NumberArray[OneDimension]
     """Gas saturation at the last gas-oil reversal per cell, or one shared value."""
 
+    gas_trapped_saturation: NumberArray[OneDimension]
+    """
+    Lowest gas saturation that gas imbibition can reach per cell, or one shared value. It is
+    only read while gas is the non-wetting phase.
+    """
+
 
 class CurveSet(typing.NamedTuple):
     """
@@ -328,6 +334,7 @@ def scan_relative_permeabilities(
     history: HistoryArrays,
     use_water_hysteresis: Boolean,
     use_gas_hysteresis: Boolean,
+    gas_is_non_wetting: Boolean,
     scanning_exponent: Number,
     numerical_epsilon: Number,
     values: CurveSet,
@@ -375,12 +382,19 @@ def scan_relative_permeabilities(
         gas_weight = 0.0
         gas_weight_derivative = 0.0
         if use_gas_hysteresis:
+            gas_reversal = element_at(array=history.gas_reversal_saturation, index=i)
+            if gas_is_non_wetting:
+                # Gas imbibes by falling from its peak (weight 0) to the trapped saturation
+                # (weight 1), so the scanning range runs downward from the reversal.
+                gas_range_end = min(
+                    element_at(array=history.gas_trapped_saturation, index=i), gas_reversal
+                )
+            else:
+                gas_range_end = element_at(array=history.max_gas_saturation, index=i)
             gas_weight, gas_weight_derivative = compute_killough_scanning_weight(
                 saturation=sg,
-                reversal_saturation=element_at(array=history.gas_reversal_saturation, index=i),
-                maximum_historical_saturation=element_at(
-                    array=history.max_gas_saturation, index=i
-                ),
+                reversal_saturation=gas_reversal,
+                maximum_historical_saturation=gas_range_end,
                 is_imbibition=element_at(array=history.gas_imbibition_flag, index=i),
                 scanning_exponent=scanning_exponent,
                 numerical_epsilon=numerical_epsilon,
@@ -902,7 +916,9 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
             gas_imbibition_flag=typing.cast(NumberArray[OneDimension], gas_flag),
             water_reversal_saturation=typing.cast(NumberArray[OneDimension], water_reversal),
             gas_reversal_saturation=typing.cast(NumberArray[OneDimension], gas_reversal),
+            gas_trapped_saturation=typing.cast(NumberArray[OneDimension], placeholder),
         )
+        gas_is_non_wetting = self.get_gas_oil_wetting_phase() != FluidPhase.GAS
 
         # Bounding curves
         drainage_water_system = self.oil_water_drainage_table
@@ -954,6 +970,18 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
                 table=imbibition_table or drainage_gas_system,
                 kwargs=kwargs,
             )
+            if gas_is_non_wetting:
+                if "residual_gas_saturation" in land_kwargs:
+                    trapped_gas = land_kwargs["residual_gas_saturation"]
+                else:
+                    trapped_gas = np.full(
+                        1,
+                        (imbibition_table or drainage_gas_system).get_residual_gas_saturation(),
+                        dtype=sw.dtype,
+                    )
+                history = history._replace(
+                    gas_trapped_saturation=typing.cast(NumberArray[OneDimension], trapped_gas)
+                )
             if imbibition_table is not None and imbibition_table is not drainage_gas_system:
                 kro_gas_i, krg_i, dkro_gas_i, dkrg_i = query_gas_oil_curves(
                     imbibition_table, **gas_oil_arguments, **land_kwargs
@@ -1055,6 +1083,7 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
             history=history,
             use_water_hysteresis=use_water_hysteresis,
             use_gas_hysteresis=use_gas_hysteresis,
+            gas_is_non_wetting=gas_is_non_wetting,
             scanning_exponent=self.scanning_interpolation_exponent,
             numerical_epsilon=1e-12,
             values=values,

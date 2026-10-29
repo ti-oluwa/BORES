@@ -48,7 +48,7 @@ def _history(sw, sg):
         water_imbibition_flag=np.ones_like(sw, dtype=bool),
         gas_imbibition_flag=np.ones_like(sg, dtype=bool),
         water_reversal_saturation=sw - 0.06,
-        gas_reversal_saturation=np.maximum(sg - 0.06, 0.0),
+        gas_reversal_saturation=sg + 0.08,
     )
 
 
@@ -240,3 +240,94 @@ def test_collapsed_scanning_range_sits_on_the_flagged_curve(imbibing):
     )
     assert weight == (1.0 if imbibing else 0.0)
     assert slope == 0.0
+
+
+def _gas_scanning_table():
+    """A table whose gas imbibition curve lies well below its gas drainage curve."""
+    from bores.blackoil.satfunc.tables import as_three_phase_relperm_table
+    from tests.satfunc.test_mixing_rules import ENDPOINTS, NO_FLOORS, LETThreePhaseRelPermTable
+
+    base = _tabular("baker_linear_rule")
+    imbibition = as_three_phase_relperm_table(
+        LETThreePhaseRelPermTable(
+            **ENDPOINTS,
+            **NO_FLOORS,
+            wettability=Wettability.WATER_WET,
+            mixing_rule="baker_linear_rule",
+            maximum_oil_relperm=0.8,
+            maximum_water_relperm=0.7,
+            maximum_gas_relperm=0.45,
+        ),
+        n_points=500,
+        n_endpoint_extra=0,
+        mixing_rule="baker_linear_rule",
+        dtype=np.float64,
+    )
+    table = _table(
+        base,
+        imbibition=imbibition,
+        maximum_residual_gas_saturation=0.25,
+        maximum_residual_oil_saturation_gas=0.3,
+        maximum_residual_oil_saturation_water=0.3,
+    )
+    return table, base, imbibition
+
+
+def test_non_wetting_gas_scans_down_from_the_drainage_curve_at_its_peak():
+    table, base, imbibition = _gas_scanning_table()
+    peak = 0.4
+    sg = np.array([0.4, 0.35, 0.3, 0.25, 0.2, 0.15, 0.1])
+    sw = np.full_like(sg, 0.2)
+    so = 1.0 - sw - sg
+    history = dict(
+        max_gas_saturation=np.full_like(sg, peak),
+        gas_imbibition_flag=np.ones_like(sg, dtype=bool),
+        gas_reversal_saturation=np.full_like(sg, peak),
+    )
+    drainage = np.asarray(base.evaluate(sw, so, sg)["gas"])
+    bounding_imbibition = np.asarray(imbibition.evaluate(sw, so, sg)["gas"])
+    scanned = np.asarray(table.evaluate(sw, so, sg, **history)["gas"])
+
+    # At the peak the cell is still on the drainage curve.
+    assert scanned[0] == pytest.approx(drainage[0], rel=1e-9)
+    # Below the peak it leaves the drainage curve and stays between the two bounding curves.
+    assert np.all(scanned[1:] < drainage[1:])
+    assert np.all(scanned[1:] > bounding_imbibition[1:])
+    # The further gas falls, the closer it is to the imbibition curve.
+    weight = (drainage - scanned) / (drainage - bounding_imbibition + 1e-300)
+    assert np.all(np.diff(weight[1:]) > 0.0)
+
+
+def test_rising_non_wetting_gas_retraces_back_onto_the_drainage_curve():
+    table, base, _ = _gas_scanning_table()
+    sg = np.array([0.1, 0.2, 0.3, 0.4, 0.45])
+    sw = np.full_like(sg, 0.2)
+    so = 1.0 - sw - sg
+    history = dict(
+        max_gas_saturation=np.full_like(sg, 0.4),
+        gas_imbibition_flag=np.zeros_like(sg, dtype=bool),
+        gas_reversal_saturation=np.full_like(sg, 0.4),
+    )
+    drainage = np.asarray(base.evaluate(sw, so, sg)["gas"])
+    scanned = np.asarray(table.evaluate(sw, so, sg, **history)["gas"])
+    # Gas beyond its previous peak is on the primary drainage curve again.
+    assert scanned[-2:] == pytest.approx(drainage[-2:], rel=1e-9)
+    assert np.all(scanned[:-2] <= drainage[:-2])
+
+
+def test_gas_scanning_derivative_matches_finite_differences():
+    table, _, _ = _gas_scanning_table()
+    sg, step = 0.27, 1e-6
+    history = dict(
+        max_gas_saturation=0.4,
+        gas_imbibition_flag=True,
+        gas_reversal_saturation=0.4,
+    )
+
+    def krg(gas):
+        return float(table.evaluate(0.2, 0.8 - gas, gas, **history)["gas"])
+
+    analytic = table.derivatives(0.2, 0.8 - sg, sg, **history)
+    slope = float(analytic["dkrg_dsg"] - analytic["dkrg_dso"])
+    numeric = (krg(sg + step) - krg(sg - step)) / (2.0 * step)
+    assert slope == pytest.approx(numeric, rel=1e-4)

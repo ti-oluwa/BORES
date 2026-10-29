@@ -10,6 +10,7 @@ from bores.precision import get_dtype
 from bores.reservoir.mass import compute_masses
 from bores.reservoir.state import Hysteresis, ReservoirState, advance_phase_hysteresis
 from bores.types import (
+    Boolean,
     BooleanCellArray,
     CellArray,
     IntCellArray,
@@ -60,19 +61,18 @@ class HysteresisWorkspace(typing.NamedTuple):
 
     water_imbibition_flag: BooleanCellArray
     """
-    Shape (n_cells,) - `True` if the current water-phase displacement is
-    imbibition (water saturation increasing toward `max_water_saturation`).
+    Shape (n_cells,) - `True` if water is currently on its imbibition path.
 
-    `False` indicates drainage (water saturation decreasing).
+    For a water-wet system that is water saturation rising, and for an oil-wet system it is
+    water saturation falling. `False` indicates drainage.
     """
 
     gas_imbibition_flag: BooleanCellArray
     """
-    Shape (n_cells,) - `True` if gas saturation is currently increasing
-    toward `max_gas_saturation`, `False` if decreasing (drainage).
+    Shape (n_cells,) - `True` if gas is currently on its imbibition path.
 
-    Same convention as `water_imbibition_flag`: the flag tracks that
-    phase's own saturation, not a wetting/non-wetting distinction.
+    Gas is the non-wetting phase, so imbibition is gas saturation falling away from
+    `max_gas_saturation`. `False` indicates drainage, gas saturation rising.
     """
 
     water_reversal_saturation: CellArray
@@ -89,7 +89,8 @@ class HysteresisWorkspace(typing.NamedTuple):
     Shape (n_cells,) - gas saturation at the most recent reversal point
     (fraction).
 
-    Analogous to `water_reversal_saturation` for the gas phase.
+    Gas imbibes while its saturation falls, so the reversal is the highest gas saturation
+    reached, which is the saturation Land's relation turns into trapped gas.
     """
 
     @classmethod
@@ -141,6 +142,8 @@ class HysteresisWorkspace(typing.NamedTuple):
         gas_saturation: CellArray,
         previous_water_saturation: CellArray,
         previous_gas_saturation: CellArray,
+        water_imbibition_when_increasing: Boolean,
+        gas_imbibition_when_increasing: Boolean,
         tolerance: Number | None = None,
     ) -> None:
         """
@@ -150,6 +153,10 @@ class HysteresisWorkspace(typing.NamedTuple):
         :param gas_saturation: Current gas saturation per cell (fraction).
         :param previous_water_saturation: Previous water saturation per cell (fraction).
         :param previous_gas_saturation: Previous gas saturation per cell (fraction).
+        :param water_imbibition_when_increasing: `True` when water is the wetting phase of the
+            oil-water system, so that water imbibes while its saturation rises.
+        :param gas_imbibition_when_increasing: `True` only when gas is the wetting phase of the
+            gas-oil system. Gas is normally non-wetting, so this is normally `False`.
         :param tolerance: Smallest saturation change that counts as a phase moving.
             `HYSTERESIS_SATURATION_TOLERANCE` if not given.
         """
@@ -159,6 +166,7 @@ class HysteresisWorkspace(typing.NamedTuple):
             max_saturation=self.max_water_saturation,
             imbibition_flag=self.water_imbibition_flag,
             reversal_saturation=self.water_reversal_saturation,
+            imbibition_when_increasing=water_imbibition_when_increasing,
             tolerance=tolerance,
             out_max_saturation=self.max_water_saturation,
             out_imbibition_flag=self.water_imbibition_flag,
@@ -170,6 +178,7 @@ class HysteresisWorkspace(typing.NamedTuple):
             max_saturation=self.max_gas_saturation,
             imbibition_flag=self.gas_imbibition_flag,
             reversal_saturation=self.gas_reversal_saturation,
+            imbibition_when_increasing=gas_imbibition_when_increasing,
             tolerance=tolerance,
             out_max_saturation=self.max_gas_saturation,
             out_imbibition_flag=self.gas_imbibition_flag,

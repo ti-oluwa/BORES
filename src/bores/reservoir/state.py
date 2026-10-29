@@ -1,14 +1,17 @@
 import typing
 
 import attrs
+import numba
 import numpy as np
 import numpy.typing as npt
 from typing_extensions import Self
 
 from bores.constants import c
+from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.serde.stores import StoreSerializable
 from bores.types import (
+    Boolean,
     BooleanCellArray,
     CellArray,
     Number,
@@ -20,6 +23,57 @@ from bores.utils import scale, scale_and_offset
 __all__ = ["Hysteresis", "ReservoirState"]
 
 
+@numba.njit(cache=True, error_model="numpy")
+def advance_phase_hysteresis_kernel(
+    new_saturation: npt.NDArray,
+    previous_saturation: npt.NDArray,
+    max_saturation: npt.NDArray,
+    imbibition_flag: npt.NDArray,
+    reversal_saturation: npt.NDArray,
+    tolerance: Number,
+    imbibition_when_increasing: Boolean,
+    out_max_saturation: npt.NDArray,
+    out_imbibition_flag: npt.NDArray,
+    out_reversal_saturation: npt.NDArray,
+) -> None:
+    """
+    Advance one phase's saturation history for every cell in a single pass.
+
+    Every input may share memory with its output, because each cell reads all of its inputs
+    before writing any of its outputs. No temporary array is created.
+    """
+    for i in range(new_saturation.size):
+        saturation = new_saturation[i]
+        change = saturation - previous_saturation[i]
+        previous_max = max_saturation[i]
+        was_imbibing = imbibition_flag[i]
+        reversal = reversal_saturation[i]
+
+        moving_up = change > tolerance
+        moving_down = change < -tolerance
+        imbibing = was_imbibing
+        if moving_up:
+            imbibing = imbibition_when_increasing
+        elif moving_down:
+            imbibing = not imbibition_when_increasing
+
+        new_max = max(previous_max, saturation)
+        if imbibition_when_increasing:
+            # Wetting phase: imbibition is the climb away from the lowest saturation reached.
+            if imbibing and not was_imbibing:
+                reversal = previous_saturation[i]
+            elif not imbibing and was_imbibing:
+                reversal = previous_max
+        else:
+            # Non-wetting phase: imbibition is the fall away from the highest saturation reached,
+            # so the reversal sits at that peak for as long as the peak stands.
+            reversal = new_max
+
+        out_max_saturation[i] = new_max
+        out_imbibition_flag[i] = imbibing
+        out_reversal_saturation[i] = reversal
+
+
 def advance_phase_hysteresis(
     *,
     new_saturation: npt.NDArray,
@@ -27,6 +81,7 @@ def advance_phase_hysteresis(
     max_saturation: npt.NDArray,
     imbibition_flag: npt.NDArray,
     reversal_saturation: npt.NDArray,
+    imbibition_when_increasing: Boolean,
     tolerance: Number | None = None,
     out_max_saturation: npt.NDArray | None = None,
     out_imbibition_flag: npt.NDArray | None = None,
@@ -36,21 +91,25 @@ def advance_phase_hysteresis(
     Updates one phase's tracked saturation history for one new saturation
     value, per cell.
 
-    A phase is on its imbibition path when its saturation is moving from
-    `reversal_saturation` toward `max_saturation`. The previous saturation is
-    needed as well as the historical maximum, because a phase can turn around well
-    before it climbs back past its own peak. A change no larger than `tolerance`
-    counts as no movement, so solver round-off cannot flip the regime.
+    Which way a phase moves during imbibition depends on its role. A wetting phase imbibes
+    while its saturation rises, so its reversal sits at the lowest saturation reached before
+    the rise. A non-wetting phase imbibes while its saturation falls, so its reversal sits at
+    the highest saturation it has reached, which is also the saturation that sets how much of
+    it gets trapped. The previous saturation is needed as well as the historical maximum,
+    because a phase can turn around well before it reaches its own peak. A change no larger
+    than `tolerance` counts as no movement, so solver round-off cannot flip the regime.
 
     Passing the `out_*` arrays writes the result into them, which may be the input
-    arrays themselves, so no memory is allocated.
+    arrays themselves, so no memory is allocated. All arrays must be C-contiguous.
 
     :param new_saturation: This timestep's saturation, per cell.
     :param previous_saturation: The saturation this phase had before this update.
     :param max_saturation: The historical maximum before this update.
-    :param imbibition_flag: Whether the phase was increasing before this update.
+    :param imbibition_flag: Whether the phase was on its imbibition path before this update.
     :param reversal_saturation: The saturation at the last known reversal,
         before this update.
+    :param imbibition_when_increasing: `True` for a wetting phase, whose imbibition raises its
+        saturation. `False` for a non-wetting phase, whose imbibition lowers it.
     :param tolerance: Smallest saturation change that counts as movement.
         `HYSTERESIS_SATURATION_TOLERANCE` if not given.
     :param out_max_saturation: Receives the new historical maximum.
@@ -61,12 +120,6 @@ def advance_phase_hysteresis(
     tolerance = typing.cast(
         Number, c.HYSTERESIS_SATURATION_TOLERANCE if tolerance is None else tolerance
     )
-    change = new_saturation - previous_saturation
-    increasing_now = change > tolerance
-    decreasing_now = change < -tolerance
-    turned_to_drainage = imbibition_flag & decreasing_now
-    turned_to_imbibition = ~imbibition_flag & increasing_now
-
     new_max = np.empty_like(max_saturation) if out_max_saturation is None else out_max_saturation
     new_flag = (
         np.empty_like(imbibition_flag) if out_imbibition_flag is None else out_imbibition_flag
@@ -76,14 +129,25 @@ def advance_phase_hysteresis(
         if out_reversal_saturation is None
         else out_reversal_saturation
     )
-
-    np.copyto(new_reversal, reversal_saturation)
-    np.copyto(new_reversal, max_saturation, where=turned_to_drainage)
-    np.copyto(new_reversal, previous_saturation, where=turned_to_imbibition)
-    np.copyto(new_flag, imbibition_flag)
-    np.copyto(new_flag, True, where=increasing_now)
-    np.copyto(new_flag, False, where=decreasing_now)
-    np.maximum(max_saturation, new_saturation, out=new_max)
+    for name, array in (
+        ("out_max_saturation", new_max),
+        ("out_imbibition_flag", new_flag),
+        ("out_reversal_saturation", new_reversal),
+    ):
+        if not array.flags.c_contiguous:
+            raise ValidationError(f"`{name}` must be C-contiguous so it can be written in place.")
+    advance_phase_hysteresis_kernel(
+        new_saturation=new_saturation.reshape(-1),
+        previous_saturation=previous_saturation.reshape(-1),
+        max_saturation=max_saturation.reshape(-1),
+        imbibition_flag=imbibition_flag.reshape(-1),
+        reversal_saturation=reversal_saturation.reshape(-1),
+        tolerance=tolerance,
+        imbibition_when_increasing=imbibition_when_increasing,
+        out_max_saturation=new_max.reshape(-1),
+        out_imbibition_flag=new_flag.reshape(-1),
+        out_reversal_saturation=new_reversal.reshape(-1),
+    )
     return new_max, new_flag, new_reversal
 
 
@@ -118,19 +182,18 @@ class Hysteresis(StoreSerializable):
 
     water_imbibition_flag: BooleanCellArray
     """
-    Shape (n_cells,) - `True` if the current water-phase displacement is
-    imbibition (water saturation increasing toward `max_water_saturation`).
+    Shape (n_cells,) - `True` if water is currently on its imbibition path.
 
-    `False` indicates drainage (water saturation decreasing).
+    For a water-wet system that is water saturation rising, and for an oil-wet system it is
+    water saturation falling. `False` indicates drainage.
     """
 
     gas_imbibition_flag: BooleanCellArray
     """
-    Shape (n_cells,) - `True` if gas saturation is currently increasing
-    toward `max_gas_saturation`, `False` if decreasing (drainage).
+    Shape (n_cells,) - `True` if gas is currently on its imbibition path.
 
-    Same convention as `water_imbibition_flag`: the flag tracks that
-    phase's own saturation, not a wetting/non-wetting distinction.
+    Gas is the non-wetting phase, so imbibition is gas saturation falling away from
+    `max_gas_saturation`. `False` indicates drainage, gas saturation rising.
     """
 
     water_reversal_saturation: CellArray
@@ -147,7 +210,8 @@ class Hysteresis(StoreSerializable):
     Shape (n_cells,) - gas saturation at the most recent reversal point
     (fraction).
 
-    Analogous to `water_reversal_saturation` for the gas phase.
+    Gas imbibes while its saturation falls, so the reversal is the highest gas saturation
+    reached, which is the saturation Land's relation turns into trapped gas.
     """
 
     @classmethod
@@ -190,17 +254,18 @@ class Hysteresis(StoreSerializable):
         gas_saturation: npt.ArrayLike,
         previous_water_saturation: npt.ArrayLike,
         previous_gas_saturation: npt.ArrayLike,
+        water_imbibition_when_increasing: Boolean,
+        gas_imbibition_when_increasing: Boolean,
         tolerance: Number | None = None,
         dtype: npt.DTypeLike = None,
     ) -> Self:
         """
         Return a new `Hysteresis` updated for the current timestep's saturations.
 
-        For each phase: if that phase's saturation is still moving the
-        same way it was last time, its historical maximum extends (if
-        increasing) and its reversal point stays put. If it has turned
-        around since the last update, the reversal point moves to where
-        the turn happened, and the imbibition flag flips.
+        For each phase, the imbibition flag says whether it is moving the way its wettability
+        role calls imbibition (rising for a wetting phase, falling for a non-wetting one).
+        The historical maximum extends whenever the saturation rises past it, and the reversal
+        point moves to where the phase last turned into imbibition.
 
         Call this once per timestep, after the new saturations for that
         step are known, to keep the tracked history current for the next
@@ -215,6 +280,10 @@ class Hysteresis(StoreSerializable):
             which way it is currently moving.
         :param previous_gas_saturation: Array-like (n_cells,) - the gas
             saturation this cell had before this timestep.
+        :param water_imbibition_when_increasing: `True` when water is the wetting phase of the
+            oil-water system, so that water imbibes while its saturation rises.
+        :param gas_imbibition_when_increasing: `True` only when gas is the wetting phase of the
+            gas-oil system. Gas is normally non-wetting, so this is normally `False`.
         :param tolerance: Smallest saturation change that counts as a phase moving.
             `HYSTERESIS_SATURATION_TOLERANCE` if not given.
         :returns: New `Hysteresis` reflecting this timestep.
@@ -232,6 +301,7 @@ class Hysteresis(StoreSerializable):
                 max_saturation=self.max_water_saturation,
                 imbibition_flag=self.water_imbibition_flag,
                 reversal_saturation=self.water_reversal_saturation,
+                imbibition_when_increasing=water_imbibition_when_increasing,
                 tolerance=tolerance,
             )
         )
@@ -242,6 +312,7 @@ class Hysteresis(StoreSerializable):
                 max_saturation=self.max_gas_saturation,
                 imbibition_flag=self.gas_imbibition_flag,
                 reversal_saturation=self.gas_reversal_saturation,
+                imbibition_when_increasing=gas_imbibition_when_increasing,
                 tolerance=tolerance,
             )
         )
