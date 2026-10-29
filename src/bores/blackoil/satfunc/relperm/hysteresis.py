@@ -34,6 +34,7 @@ from bores.blackoil.satfunc.relperm.tables import (
     resolve_residual_oil_saturation_gas,
 )
 from bores.blackoil.satfunc.utils import (
+    PARALLEL_SIZE_THRESHOLD,
     compute_killough_scanning_weight,
     element_at,
     flatten_kernel_input,
@@ -259,6 +260,31 @@ def normalise_saturations(
     return new_water, new_oil, new_gas  # type: ignore[return-value]
 
 
+@numba.njit(cache=True, error_model="numpy", parallel=True)
+def normalise_saturations_parallel(
+    size: Integer,
+    water_saturation: NumberArray[OneDimension],
+    oil_saturation: NumberArray[OneDimension],
+    gas_saturation: NumberArray[OneDimension],
+    saturation_epsilon: Number,
+) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension], NumberArray[OneDimension]]:
+    """Scale the saturations of every cell that does not add up to 1, returning new arrays."""
+    new_water = np.empty(size, dtype=water_saturation.dtype)
+    new_oil = np.empty(size, dtype=water_saturation.dtype)
+    new_gas = np.empty(size, dtype=water_saturation.dtype)
+    for i in numba.prange(size):  # type: ignore
+        sw = element_at(array=water_saturation, index=i)
+        so = element_at(array=oil_saturation, index=i)
+        sg = element_at(array=gas_saturation, index=i)
+        total = sw + so + sg
+        if abs(total - 1.0) > saturation_epsilon and total > 0.0:
+            sw, so, sg = sw / total, so / total, sg / total
+        new_water[i] = sw
+        new_oil[i] = so
+        new_gas[i] = sg
+    return new_water, new_oil, new_gas  # type: ignore[return-value]
+
+
 class HistoryArrays(typing.NamedTuple):
     """Flat saturation history of one cell array, for the oil-water and gas-oil systems."""
 
@@ -326,8 +352,9 @@ class ScanOutputs(typing.NamedTuple):
 
 
 @numba.njit(cache=True, error_model="numpy")
-def scan_relative_permeabilities(
-    size: Integer,
+def scan_relative_permeabilities_block(
+    start: Integer,
+    stop: Integer,
     water_saturation: NumberArray[OneDimension],
     oil_saturation: NumberArray[OneDimension],
     gas_saturation: NumberArray[OneDimension],
@@ -349,8 +376,8 @@ def scan_relative_permeabilities(
     out: ScanOutputs,
 ) -> None:
     """
-    Scan the four two-phase curves, mix the three-phase oil curve, and differentiate, for every
-    cell in one pass.
+    Scan the four two-phase curves, mix the three-phase oil curve, and differentiate, for the
+    cells `start` up to but not including `stop`, in one pass.
 
     The water curves share one scanning weight, and so do the gas curves, so each weight (and its
     power) is evaluated once per cell instead of once per curve. For a built-in mixing rule
@@ -361,7 +388,7 @@ def scan_relative_permeabilities(
 
     A system whose history is not in use stays on its primary drainage curves.
     """
-    for i in range(size):
+    for i in range(start, stop):
         sw = element_at(array=water_saturation, index=i)
         so = element_at(array=oil_saturation, index=i)
         sg = element_at(array=gas_saturation, index=i)
@@ -503,6 +530,109 @@ def scan_relative_permeabilities(
             out.dkro_dsw[i] = d_kro_water * dkro_water + d_krw * dkrw + d_sw
             out.dkro_dso[i] = d_so
             out.dkro_dsg[i] = d_kro_gas * dkro_gas + d_krg * dkrg + d_sg
+
+
+@numba.njit(cache=True, error_model="numpy")
+def scan_relative_permeabilities(
+    size: Integer,
+    water_saturation: NumberArray[OneDimension],
+    oil_saturation: NumberArray[OneDimension],
+    gas_saturation: NumberArray[OneDimension],
+    history: HistoryArrays,
+    use_water_hysteresis: Boolean,
+    use_gas_hysteresis: Boolean,
+    gas_is_non_wetting: Boolean,
+    scanning_exponent: Number,
+    numerical_epsilon: Number,
+    values: CurveSet,
+    slopes: CurveSet,
+    with_derivatives: Boolean,
+    rule_id: Integer,
+    kr_max: Number,
+    irreducible_water_saturation: Number,
+    residual_oil_saturation_water: Number,
+    residual_oil_saturation_gas: Number,
+    minimum_mobile_pore_space: Number,
+    out: ScanOutputs,
+) -> None:
+    """Scan every cell on the calling thread, see `scan_relative_permeabilities_block`."""
+    scan_relative_permeabilities_block(
+        start=0,
+        stop=size,
+        water_saturation=water_saturation,
+        oil_saturation=oil_saturation,
+        gas_saturation=gas_saturation,
+        history=history,
+        use_water_hysteresis=use_water_hysteresis,
+        use_gas_hysteresis=use_gas_hysteresis,
+        gas_is_non_wetting=gas_is_non_wetting,
+        scanning_exponent=scanning_exponent,
+        numerical_epsilon=numerical_epsilon,
+        values=values,
+        slopes=slopes,
+        with_derivatives=with_derivatives,
+        rule_id=rule_id,
+        kr_max=kr_max,
+        irreducible_water_saturation=irreducible_water_saturation,
+        residual_oil_saturation_water=residual_oil_saturation_water,
+        residual_oil_saturation_gas=residual_oil_saturation_gas,
+        minimum_mobile_pore_space=minimum_mobile_pore_space,
+        out=out,
+    )
+
+
+@numba.njit(cache=True, error_model="numpy", parallel=True)
+def scan_relative_permeabilities_parallel(
+    size: Integer,
+    water_saturation: NumberArray[OneDimension],
+    oil_saturation: NumberArray[OneDimension],
+    gas_saturation: NumberArray[OneDimension],
+    history: HistoryArrays,
+    use_water_hysteresis: Boolean,
+    use_gas_hysteresis: Boolean,
+    gas_is_non_wetting: Boolean,
+    scanning_exponent: Number,
+    numerical_epsilon: Number,
+    values: CurveSet,
+    slopes: CurveSet,
+    with_derivatives: Boolean,
+    rule_id: Integer,
+    kr_max: Number,
+    irreducible_water_saturation: Number,
+    residual_oil_saturation_water: Number,
+    residual_oil_saturation_gas: Number,
+    minimum_mobile_pore_space: Number,
+    out: ScanOutputs,
+) -> None:
+    """Scan the cells in one contiguous block per thread, see `scan_relative_permeabilities_block`."""
+    block_count = numba.get_num_threads()
+    block_size = (size + block_count - 1) // block_count
+    for block in numba.prange(block_count):  # type: ignore
+        start = block * block_size
+        stop = min(start + block_size, size)
+        scan_relative_permeabilities_block(
+            start=start,
+            stop=stop,
+            water_saturation=water_saturation,
+            oil_saturation=oil_saturation,
+            gas_saturation=gas_saturation,
+            history=history,
+            use_water_hysteresis=use_water_hysteresis,
+            use_gas_hysteresis=use_gas_hysteresis,
+            gas_is_non_wetting=gas_is_non_wetting,
+            scanning_exponent=scanning_exponent,
+            numerical_epsilon=numerical_epsilon,
+            values=values,
+            slopes=slopes,
+            with_derivatives=with_derivatives,
+            rule_id=rule_id,
+            kr_max=kr_max,
+            irreducible_water_saturation=irreducible_water_saturation,
+            residual_oil_saturation_water=residual_oil_saturation_water,
+            residual_oil_saturation_gas=residual_oil_saturation_gas,
+            minimum_mobile_pore_space=minimum_mobile_pore_space,
+            out=out,
+        )
 
 
 def query_oil_water_curves(
@@ -874,7 +1004,12 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
             gas_saturation=sg,
             saturation_epsilon=saturation_epsilon,
         ):
-            sw, so, sg = normalise_saturations(
+            normalise = (
+                normalise_saturations_parallel
+                if size >= PARALLEL_SIZE_THRESHOLD
+                else normalise_saturations
+            )
+            sw, so, sg = normalise(
                 size=size,
                 water_saturation=sw,
                 oil_saturation=so,
@@ -1075,7 +1210,12 @@ class KilloughLandRelPermTable(RelativePermeabilityTable):
         irreducible_water_saturation = self.get_connate_water_saturation()
         residual_oil_saturation_water = self.get_residual_oil_saturation_water()
         residual_oil_saturation_gas = self.get_residual_oil_saturation_gas()
-        scan_relative_permeabilities(
+        scan = (
+            scan_relative_permeabilities_parallel
+            if size >= PARALLEL_SIZE_THRESHOLD
+            else scan_relative_permeabilities
+        )
+        scan(
             size=size,
             water_saturation=sw,
             oil_saturation=so,

@@ -18,6 +18,9 @@ from bores.types import (
 )
 from bores.utils import atleast_1d
 
+PARALLEL_SIZE_THRESHOLD = 10_000
+"""Number of cells from which the satfunc kernels run their parallel variant."""
+
 
 def make_saturation_field(
     n_points: Integer = 200,

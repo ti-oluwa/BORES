@@ -1,7 +1,9 @@
 import typing
 
 import attrs
+import numba
 import numpy as np
+import numpy.typing as npt
 from typing_extensions import Self
 
 from bores.deck.file import DeckFile
@@ -79,6 +81,40 @@ class RegionGroups(typing.NamedTuple):
         return len(self.saturation_regions)
 
 
+@numba.njit(cache=True)
+def sort_cells_by_region_kernel(
+    saturation_region: npt.NDArray,
+    imbibition_region: npt.NDArray,
+    use_imbibition_region: bool,
+    stride: int,
+    offsets: npt.NDArray,
+    order: npt.NDArray,
+) -> None:
+    """
+    Counting sort of the cells by `saturation_region * stride + imbibition_region`.
+
+    The sort is stable, so the cells of each group stay in ascending order. `offsets` has one entry more
+    than there are keys, and must be zero on entry. On exit the cells of key `k` are
+    `order[offsets[k] : offsets[k + 1]]`.
+    """
+    size = saturation_region.size
+    for cell in range(size):
+        key = saturation_region[cell] * stride
+        if use_imbibition_region:
+            key += imbibition_region[cell]
+        offsets[key + 1] += 1
+    for key in range(offsets.size - 1):
+        offsets[key + 1] += offsets[key]
+    # `cursor` walks each key's slot, leaving `offsets` untouched for the caller.
+    cursor = offsets[:-1].copy()
+    for cell in range(size):
+        key = saturation_region[cell] * stride
+        if use_imbibition_region:
+            key += imbibition_region[cell]
+        order[cursor[key]] = cell
+        cursor[key] += 1
+
+
 def group_cells_by_region(
     *,
     saturation_region: IntCellArray,
@@ -95,36 +131,45 @@ def group_cells_by_region(
     :param imbibition_region: Imbibition region number of every cell. Cells are grouped by
         saturation region alone when this is not given.
     :returns: The cell groups.
+    :raises ValidationError: If the two arrays differ in size, or a region number is negative.
     """
     size = saturation_region.size
+    use_imbibition_region = imbibition_region is not None
     if imbibition_region is None:
-        keys = saturation_region.astype(np.int64, copy=False)
-        imbibition_of = None
-    else:
-        if imbibition_region.size != size:
-            raise ValidationError(
-                f"`imbibition_region` has {imbibition_region.size} values; "
-                f"`saturation_region` has {size}."
-            )
-        keys = saturation_region.astype(np.int64) * (int(imbibition_region.max()) + 1) + (
-            imbibition_region.astype(np.int64, copy=False)
+        imbibition_region = saturation_region[:0]
+    elif imbibition_region.size != size:
+        raise ValidationError(
+            f"`imbibition_region` has {imbibition_region.size} values; "
+            f"`saturation_region` has {size}."
         )
-        imbibition_of = imbibition_region
+    if size == 0:
+        raise ValidationError("`saturation_region` is empty, so there are no cells to group.")
+    if saturation_region.min() < 0 or (use_imbibition_region and imbibition_region.min() < 0):
+        raise ValidationError("Region numbers must not be negative.")
 
-    order = np.argsort(keys, kind="stable")
-    sorted_keys = keys[order]
-    starts = np.flatnonzero(np.diff(sorted_keys)) + 1
-    boundaries = np.concatenate(([0], starts, [size]))
-    group_count = len(boundaries) - 1
+    stride = int(imbibition_region.max()) + 1 if use_imbibition_region else 1
+    key_count = (int(saturation_region.max()) + 1) * stride
+    offsets = np.zeros(key_count + 1, dtype=np.int64)
+    order = np.empty(size, dtype=np.int64)
+    sort_cells_by_region_kernel(
+        saturation_region=saturation_region,
+        imbibition_region=imbibition_region,
+        use_imbibition_region=use_imbibition_region,
+        stride=stride,
+        offsets=offsets,
+        order=order,
+    )
 
     saturation_regions: list[int] = []
     imbibition_regions: list[int] = []
     cell_indices: list[IntCellArray | None] = []
-    for group in range(group_count):
-        cells = order[boundaries[group] : boundaries[group + 1]]
-        saturation_regions.append(int(saturation_region[cells[0]]))
-        imbibition_regions.append(0 if imbibition_of is None else int(imbibition_of[cells[0]]))
-        cell_indices.append(None if group_count == 1 else typing.cast(IntCellArray, cells))
+    occupied = np.flatnonzero(offsets[1:] != offsets[:-1])
+    for key in occupied.tolist():
+        saturation_regions.append(key // stride)
+        imbibition_regions.append(key % stride if use_imbibition_region else 0)
+        cell_indices.append(order[offsets[key] : offsets[key + 1]])
+    if len(occupied) == 1:
+        cell_indices = [None]
     return RegionGroups(
         saturation_regions=tuple(saturation_regions),
         imbibition_regions=tuple(imbibition_regions),

@@ -129,3 +129,28 @@ def test_reusing_the_cache_leaves_no_value_from_the_previous_regions():
     assert np.isnan(reused.oil_water_capillary_pressure).all()
     assert np.isnan(reused.dpcgo_dsg).all()
     assert not np.isnan(reused.water_relative_permeability).any()
+
+
+def test_region_numbers_without_a_table_are_reported_together():
+    from bores.errors import ValidationError
+
+    satfunc = _satfunc()
+    groups = group_cells_by_region(
+        saturation_region=np.array([1, 2, 7], dtype=np.int32),
+        imbibition_region=np.array([2, 9, 1], dtype=np.int32),
+    )
+    with pytest.raises(ValidationError, match=r"SATNUM \[7\].*IMBNUM \[9\]"):
+        satfunc.validate_region_groups(groups)
+
+
+def test_valid_region_numbers_and_unused_imbibition_regions_pass():
+    satfunc = _satfunc()
+    satfunc.validate_region_groups(
+        group_cells_by_region(saturation_region=np.array([1, 2, 3], dtype=np.int32))
+    )
+    satfunc.validate_region_groups(
+        group_cells_by_region(
+            saturation_region=np.array([1, 2, 3], dtype=np.int32),
+            imbibition_region=np.array([3, 2, 1], dtype=np.int32),
+        )
+    )

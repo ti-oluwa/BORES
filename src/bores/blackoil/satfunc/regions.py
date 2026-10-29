@@ -22,6 +22,7 @@ from bores.blackoil.satfunc.tables import SatFuncTables
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.precision import get_dtype
+from bores.reservoir.regions import RegionGroups
 from bores.types import Integer, Spacing, UnitSystem
 from bores.units import UnitConversionTable
 
@@ -85,6 +86,33 @@ class SatFunc:
     def n_regions(self) -> int:
         """Number of saturation function regions."""
         return len(self.tables)
+
+    def validate_region_groups(self, region_groups: RegionGroups) -> None:
+        """
+        Check that every region number the cells use has a table.
+
+        `SATNUM` and `IMBNUM` both pick from the same table list, so each must lie in
+        `1..n_regions`. Doing this once when the run is set up reports a bad region number
+        with its group, instead of as a `KeyError` from deep inside a timestep. An imbibition
+        region of `0` means imbibition regions are not in use and is not checked.
+
+        :param region_groups: Cells grouped by region, from `Regions.group_saturation_cells`.
+        :raises ValidationError: If a saturation or imbibition region has no table.
+        """
+        missing_saturation = sorted({
+            region for region in region_groups.saturation_regions if region not in self.tables
+        })
+        missing_imbibition = sorted({
+            region
+            for region in region_groups.imbibition_regions
+            if region != 0 and region not in self.tables
+        })
+        if missing_saturation or missing_imbibition:
+            raise ValidationError(
+                f"Region numbers without a saturation function table (available: "
+                f"{sorted(self.tables)}): SATNUM {missing_saturation or 'none'}, "
+                f"IMBNUM {missing_imbibition or 'none'}."
+            )
 
     def region(self, satnum: Integer) -> SatFuncTables:
         """

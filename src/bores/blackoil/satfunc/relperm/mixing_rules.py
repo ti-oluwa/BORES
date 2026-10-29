@@ -63,7 +63,7 @@ import attrs
 import numba
 import numpy as np
 
-from bores.blackoil.satfunc.utils import get_floating_dtype
+from bores.blackoil.satfunc.utils import PARALLEL_SIZE_THRESHOLD, get_floating_dtype
 from bores.constants import c
 from bores.errors import ValidationError
 from bores.types import (
@@ -607,33 +607,36 @@ def _prepare_rule_inputs(
 def _restore_shape(
     flat: NumberArray[OneDimension],
     shape: tuple[int, ...],
-    dtype: np.dtype | None = None,
 ) -> NumberOrArray[NDimension]:
     """Reshape a loop result to the broadcast shape (a scalar for scalar inputs)."""
     result = flat.reshape(shape)
-    if dtype is not None:
-        result = result.astype(dtype, copy=False)
     return result[()] if result.ndim == 0 else result  # type: ignore[return-value]
 
 
 def run_rule(
-    loop: typing.Callable[..., NumberArray[OneDimension]],
+    loop: typing.Callable[..., None],
+    parallel_loop: typing.Callable[..., None],
     like: NumberOrArray[NDimension],
     *values: NumberOrArray[NDimension],
 ) -> NumberOrArray[NDimension]:
     """
     Run a jitted value loop and return the result in the floating dtype of `like`.
 
-    The guard `c.MINIMUM_MOBILE_PORE_SPACE` is read here, at call time, so it follows the
-    active dtype, and is passed to the loop as a plain scalar.
+    The result is written straight into an array of that dtype. `parallel_loop` is used once the
+    number of elements reaches `PARALLEL_SIZE_THRESHOLD`, `loop` otherwise. The guard
+    `c.MINIMUM_MOBILE_PORE_SPACE` is read here, at call time, so it follows the active dtype.
     """
     shape, arrays = _prepare_rule_inputs(*values)
-    flat = loop(*arrays, math.prod(shape), c.MINIMUM_MOBILE_PORE_SPACE)
-    return _restore_shape(flat=flat, shape=shape, dtype=get_floating_dtype(like))
+    size = math.prod(shape)
+    flat = np.empty(size, dtype=get_floating_dtype(like))
+    selected = parallel_loop if size >= PARALLEL_SIZE_THRESHOLD else loop
+    selected(*arrays, size, c.MINIMUM_MOBILE_PORE_SPACE, flat)
+    return _restore_shape(flat=flat, shape=shape)
 
 
 def run_rule_derivatives(
     loop: typing.Callable[..., tuple[NumberArray[OneDimension], ...]],
+    parallel_loop: typing.Callable[..., tuple[NumberArray[OneDimension], ...]],
     *values: NumberOrArray[NDimension],
 ) -> tuple[
     NumberOrArray[NDimension],
@@ -644,9 +647,16 @@ def run_rule_derivatives(
     NumberOrArray[NDimension],
     NumberOrArray[NDimension],
 ]:
-    """Run a jitted derivative loop and return the seven partial derivatives."""
+    """
+    Run a jitted derivative loop and return the seven partial derivatives.
+
+    `parallel_loop` is used once the number of elements reaches `PARALLEL_SIZE_THRESHOLD`,
+    `loop` otherwise.
+    """
     shape, arrays = _prepare_rule_inputs(*values)
-    outputs = loop(*arrays, math.prod(shape), c.MINIMUM_MOBILE_PORE_SPACE)
+    size = math.prod(shape)
+    selected = parallel_loop if size >= PARALLEL_SIZE_THRESHOLD else loop
+    outputs = selected(*arrays, size, c.MINIMUM_MOBILE_PORE_SPACE)
     return typing.cast(
         tuple[
             NumberOrArray[NDimension],
@@ -698,13 +708,35 @@ def _min_value_loop(
     sorg: NumberArray[OneDimension],
     size: int,
     epsilon: Number,
-) -> NumberArray[OneDimension]:
-    result = np.empty(size, dtype=np.float64)
+    out: NumberArray[OneDimension],
+) -> None:
     for i in range(size):
-        result[i] = _min_value(
+        out[i] = _min_value(
             kro_w=element_at(array=kw, index=i), kro_g=element_at(array=kg, index=i)
         )
-    return result
+
+
+@numba.njit(cache=True, error_model="numpy", parallel=True)
+def _min_value_loop_parallel(
+    kw: NumberArray[OneDimension],
+    kg: NumberArray[OneDimension],
+    rw: NumberArray[OneDimension],
+    rg: NumberArray[OneDimension],
+    km: NumberArray[OneDimension],
+    sw: NumberArray[OneDimension],
+    so: NumberArray[OneDimension],
+    sg: NumberArray[OneDimension],
+    swc: NumberArray[OneDimension],
+    sorw: NumberArray[OneDimension],
+    sorg: NumberArray[OneDimension],
+    size: int,
+    epsilon: Number,
+    out: NumberArray[OneDimension],
+) -> None:
+    for i in numba.prange(size):  # type: ignore
+        out[i] = _min_value(
+            kro_w=element_at(array=kw, index=i), kro_g=element_at(array=kg, index=i)
+        )
 
 
 @numba.njit(cache=True, error_model="numpy")
@@ -745,6 +777,44 @@ def _min_derivative_loop(
     return d0, d1, d2, d3, d4, d5, d6
 
 
+@numba.njit(cache=True, error_model="numpy", parallel=True)
+def _min_derivative_loop_parallel(
+    kw: NumberArray[OneDimension],
+    kg: NumberArray[OneDimension],
+    rw: NumberArray[OneDimension],
+    rg: NumberArray[OneDimension],
+    km: NumberArray[OneDimension],
+    sw: NumberArray[OneDimension],
+    so: NumberArray[OneDimension],
+    sg: NumberArray[OneDimension],
+    swc: NumberArray[OneDimension],
+    sorw: NumberArray[OneDimension],
+    sorg: NumberArray[OneDimension],
+    size: int,
+    epsilon: Number,
+) -> tuple[
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+]:
+    d0 = np.empty(size, dtype=np.float64)
+    d1 = np.empty(size, dtype=np.float64)
+    d2 = np.empty(size, dtype=np.float64)
+    d3 = np.empty(size, dtype=np.float64)
+    d4 = np.empty(size, dtype=np.float64)
+    d5 = np.empty(size, dtype=np.float64)
+    d6 = np.empty(size, dtype=np.float64)
+    for i in numba.prange(size):  # type: ignore
+        d0[i], d1[i], d2[i], d3[i], d4[i], d5[i], d6[i] = _min_derivatives(
+            kro_w=element_at(array=kw, index=i), kro_g=element_at(array=kg, index=i)
+        )
+    return d0, d1, d2, d3, d4, d5, d6
+
+
 @mixing_rule
 def min_rule(
     kro_w: NumberOrArray[NDimension],
@@ -768,6 +838,7 @@ def min_rule(
     """
     return run_rule(  # type: ignore[arg-type]
         _min_value_loop,
+        _min_value_loop_parallel,
         kro_w,
         kro_w,
         kro_g,
@@ -812,6 +883,7 @@ def _(
     """
     return run_rule_derivatives(  # type: ignore[arg-type]
         _min_derivative_loop,
+        _min_derivative_loop_parallel,
         kro_w,
         kro_g,
         krw,
@@ -882,10 +954,10 @@ def _baker_value_loop(
     sorg: NumberArray[OneDimension],
     size: int,
     epsilon: Number,
-) -> NumberArray[OneDimension]:
-    result = np.empty(size, dtype=np.float64)
+    out: NumberArray[OneDimension],
+) -> None:
     for i in range(size):
-        result[i] = _baker_value(
+        out[i] = _baker_value(
             kro_w=element_at(array=kw, index=i),
             kro_g=element_at(array=kg, index=i),
             water_saturation=element_at(array=sw, index=i),
@@ -893,7 +965,34 @@ def _baker_value_loop(
             irreducible_water_saturation=element_at(array=swc, index=i),
             minimum_mobile_pore_space=epsilon,
         )
-    return result
+
+
+@numba.njit(cache=True, error_model="numpy", parallel=True)
+def _baker_value_loop_parallel(
+    kw: NumberArray[OneDimension],
+    kg: NumberArray[OneDimension],
+    rw: NumberArray[OneDimension],
+    rg: NumberArray[OneDimension],
+    km: NumberArray[OneDimension],
+    sw: NumberArray[OneDimension],
+    so: NumberArray[OneDimension],
+    sg: NumberArray[OneDimension],
+    swc: NumberArray[OneDimension],
+    sorw: NumberArray[OneDimension],
+    sorg: NumberArray[OneDimension],
+    size: int,
+    epsilon: Number,
+    out: NumberArray[OneDimension],
+) -> None:
+    for i in numba.prange(size):  # type: ignore
+        out[i] = _baker_value(
+            kro_w=element_at(array=kw, index=i),
+            kro_g=element_at(array=kg, index=i),
+            water_saturation=element_at(array=sw, index=i),
+            gas_saturation=element_at(array=sg, index=i),
+            irreducible_water_saturation=element_at(array=swc, index=i),
+            minimum_mobile_pore_space=epsilon,
+        )
 
 
 @numba.njit(cache=True, error_model="numpy")
@@ -939,6 +1038,49 @@ def _baker_derivative_loop(
     return d0, d1, d2, d3, d4, d5, d6
 
 
+@numba.njit(cache=True, error_model="numpy", parallel=True)
+def _baker_derivative_loop_parallel(
+    kw: NumberArray[OneDimension],
+    kg: NumberArray[OneDimension],
+    rw: NumberArray[OneDimension],
+    rg: NumberArray[OneDimension],
+    km: NumberArray[OneDimension],
+    sw: NumberArray[OneDimension],
+    so: NumberArray[OneDimension],
+    sg: NumberArray[OneDimension],
+    swc: NumberArray[OneDimension],
+    sorw: NumberArray[OneDimension],
+    sorg: NumberArray[OneDimension],
+    size: int,
+    epsilon: Number,
+) -> tuple[
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+]:
+    d0 = np.empty(size, dtype=np.float64)
+    d1 = np.empty(size, dtype=np.float64)
+    d2 = np.empty(size, dtype=np.float64)
+    d3 = np.empty(size, dtype=np.float64)
+    d4 = np.empty(size, dtype=np.float64)
+    d5 = np.empty(size, dtype=np.float64)
+    d6 = np.empty(size, dtype=np.float64)
+    for i in numba.prange(size):  # type: ignore
+        d0[i], d1[i], d2[i], d3[i], d4[i], d5[i], d6[i] = _baker_derivatives(
+            kro_w=element_at(array=kw, index=i),
+            kro_g=element_at(array=kg, index=i),
+            water_saturation=element_at(array=sw, index=i),
+            gas_saturation=element_at(array=sg, index=i),
+            irreducible_water_saturation=element_at(array=swc, index=i),
+            minimum_mobile_pore_space=epsilon,
+        )
+    return d0, d1, d2, d3, d4, d5, d6
+
+
 @mixing_rule
 def baker_linear_rule(
     kro_w: NumberOrArray[NDimension],
@@ -964,6 +1106,7 @@ def baker_linear_rule(
     """
     return run_rule(  # type: ignore[arg-type]
         _baker_value_loop,
+        _baker_value_loop_parallel,
         kro_w,
         kro_w,
         kro_g,
@@ -1016,6 +1159,7 @@ def _(
     """
     return run_rule_derivatives(  # type: ignore[arg-type]
         _baker_derivative_loop,
+        _baker_derivative_loop_parallel,
         kro_w,
         kro_g,
         krw,
@@ -1077,10 +1221,10 @@ def _stone_II_value_loop(
     sorg: NumberArray[OneDimension],
     size: int,
     epsilon: Number,
-) -> NumberArray[OneDimension]:
-    result = np.empty(size, dtype=np.float64)
+    out: NumberArray[OneDimension],
+) -> None:
     for i in range(size):
-        result[i] = _stone_II_value(
+        out[i] = _stone_II_value(
             kro_w=element_at(array=kw, index=i),
             kro_g=element_at(array=kg, index=i),
             krw=element_at(array=rw, index=i),
@@ -1088,7 +1232,34 @@ def _stone_II_value_loop(
             kr_max=element_at(array=km, index=i),
             minimum_mobile_pore_space=epsilon,
         )
-    return result
+
+
+@numba.njit(cache=True, error_model="numpy", parallel=True)
+def _stone_II_value_loop_parallel(
+    kw: NumberArray[OneDimension],
+    kg: NumberArray[OneDimension],
+    rw: NumberArray[OneDimension],
+    rg: NumberArray[OneDimension],
+    km: NumberArray[OneDimension],
+    sw: NumberArray[OneDimension],
+    so: NumberArray[OneDimension],
+    sg: NumberArray[OneDimension],
+    swc: NumberArray[OneDimension],
+    sorw: NumberArray[OneDimension],
+    sorg: NumberArray[OneDimension],
+    size: int,
+    epsilon: Number,
+    out: NumberArray[OneDimension],
+) -> None:
+    for i in numba.prange(size):  # type: ignore
+        out[i] = _stone_II_value(
+            kro_w=element_at(array=kw, index=i),
+            kro_g=element_at(array=kg, index=i),
+            krw=element_at(array=rw, index=i),
+            krg=element_at(array=rg, index=i),
+            kr_max=element_at(array=km, index=i),
+            minimum_mobile_pore_space=epsilon,
+        )
 
 
 @numba.njit(cache=True, error_model="numpy")
@@ -1134,6 +1305,49 @@ def _stone_II_derivative_loop(
     return d0, d1, d2, d3, d4, d5, d6
 
 
+@numba.njit(cache=True, error_model="numpy", parallel=True)
+def _stone_II_derivative_loop_parallel(
+    kw: NumberArray[OneDimension],
+    kg: NumberArray[OneDimension],
+    rw: NumberArray[OneDimension],
+    rg: NumberArray[OneDimension],
+    km: NumberArray[OneDimension],
+    sw: NumberArray[OneDimension],
+    so: NumberArray[OneDimension],
+    sg: NumberArray[OneDimension],
+    swc: NumberArray[OneDimension],
+    sorw: NumberArray[OneDimension],
+    sorg: NumberArray[OneDimension],
+    size: int,
+    epsilon: Number,
+) -> tuple[
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+]:
+    d0 = np.empty(size, dtype=np.float64)
+    d1 = np.empty(size, dtype=np.float64)
+    d2 = np.empty(size, dtype=np.float64)
+    d3 = np.empty(size, dtype=np.float64)
+    d4 = np.empty(size, dtype=np.float64)
+    d5 = np.empty(size, dtype=np.float64)
+    d6 = np.empty(size, dtype=np.float64)
+    for i in numba.prange(size):  # type: ignore
+        d0[i], d1[i], d2[i], d3[i], d4[i], d5[i], d6[i] = _stone_II_derivatives(
+            kro_w=element_at(array=kw, index=i),
+            kro_g=element_at(array=kg, index=i),
+            krw=element_at(array=rw, index=i),
+            krg=element_at(array=rg, index=i),
+            kr_max=element_at(array=km, index=i),
+            minimum_mobile_pore_space=epsilon,
+        )
+    return d0, d1, d2, d3, d4, d5, d6
+
+
 @mixing_rule
 def stone_II_rule(
     kro_w: NumberOrArray[NDimension],
@@ -1158,6 +1372,7 @@ def stone_II_rule(
     """
     return run_rule(  # type: ignore[arg-type]
         _stone_II_value_loop,
+        _stone_II_value_loop_parallel,
         kro_w,
         kro_w,
         kro_g,
@@ -1207,6 +1422,7 @@ def _(
     """
     return run_rule_derivatives(  # type: ignore[arg-type]
         _stone_II_derivative_loop,
+        _stone_II_derivative_loop_parallel,
         kro_w,
         kro_g,
         krw,
@@ -1378,10 +1594,10 @@ def _stone_I_value_loop(
     sorg: NumberArray[OneDimension],
     size: int,
     epsilon: Number,
-) -> NumberArray[OneDimension]:
-    result = np.empty(size, dtype=np.float64)
+    out: NumberArray[OneDimension],
+) -> None:
     for i in range(size):
-        result[i] = _stone_I_value(
+        out[i] = _stone_I_value(
             kro_w=element_at(array=kw, index=i),
             kro_g=element_at(array=kg, index=i),
             kr_max=element_at(array=km, index=i),
@@ -1393,7 +1609,38 @@ def _stone_I_value_loop(
             residual_oil_saturation_gas=element_at(array=sorg, index=i),
             minimum_mobile_pore_space=epsilon,
         )
-    return result
+
+
+@numba.njit(cache=True, error_model="numpy", parallel=True)
+def _stone_I_value_loop_parallel(
+    kw: NumberArray[OneDimension],
+    kg: NumberArray[OneDimension],
+    rw: NumberArray[OneDimension],
+    rg: NumberArray[OneDimension],
+    km: NumberArray[OneDimension],
+    sw: NumberArray[OneDimension],
+    so: NumberArray[OneDimension],
+    sg: NumberArray[OneDimension],
+    swc: NumberArray[OneDimension],
+    sorw: NumberArray[OneDimension],
+    sorg: NumberArray[OneDimension],
+    size: int,
+    epsilon: Number,
+    out: NumberArray[OneDimension],
+) -> None:
+    for i in numba.prange(size):  # type: ignore
+        out[i] = _stone_I_value(
+            kro_w=element_at(array=kw, index=i),
+            kro_g=element_at(array=kg, index=i),
+            kr_max=element_at(array=km, index=i),
+            water_saturation=element_at(array=sw, index=i),
+            oil_saturation=element_at(array=so, index=i),
+            gas_saturation=element_at(array=sg, index=i),
+            irreducible_water_saturation=element_at(array=swc, index=i),
+            residual_oil_saturation_water=element_at(array=sorw, index=i),
+            residual_oil_saturation_gas=element_at(array=sorg, index=i),
+            minimum_mobile_pore_space=epsilon,
+        )
 
 
 @numba.njit(cache=True, error_model="numpy")
@@ -1443,6 +1690,53 @@ def _stone_I_derivative_loop(
     return d0, d1, d2, d3, d4, d5, d6
 
 
+@numba.njit(cache=True, error_model="numpy", parallel=True)
+def _stone_I_derivative_loop_parallel(
+    kw: NumberArray[OneDimension],
+    kg: NumberArray[OneDimension],
+    rw: NumberArray[OneDimension],
+    rg: NumberArray[OneDimension],
+    km: NumberArray[OneDimension],
+    sw: NumberArray[OneDimension],
+    so: NumberArray[OneDimension],
+    sg: NumberArray[OneDimension],
+    swc: NumberArray[OneDimension],
+    sorw: NumberArray[OneDimension],
+    sorg: NumberArray[OneDimension],
+    size: int,
+    epsilon: Number,
+) -> tuple[
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+    NumberArray[OneDimension],
+]:
+    d0 = np.empty(size, dtype=np.float64)
+    d1 = np.empty(size, dtype=np.float64)
+    d2 = np.empty(size, dtype=np.float64)
+    d3 = np.empty(size, dtype=np.float64)
+    d4 = np.empty(size, dtype=np.float64)
+    d5 = np.empty(size, dtype=np.float64)
+    d6 = np.empty(size, dtype=np.float64)
+    for i in numba.prange(size):  # type: ignore
+        d0[i], d1[i], d2[i], d3[i], d4[i], d5[i], d6[i] = _stone_I_derivatives(
+            kro_w=element_at(array=kw, index=i),
+            kro_g=element_at(array=kg, index=i),
+            kr_max=element_at(array=km, index=i),
+            water_saturation=element_at(array=sw, index=i),
+            oil_saturation=element_at(array=so, index=i),
+            gas_saturation=element_at(array=sg, index=i),
+            irreducible_water_saturation=element_at(array=swc, index=i),
+            residual_oil_saturation_water=element_at(array=sorw, index=i),
+            residual_oil_saturation_gas=element_at(array=sorg, index=i),
+            minimum_mobile_pore_space=epsilon,
+        )
+    return d0, d1, d2, d3, d4, d5, d6
+
+
 @mixing_rule
 def stone_I_rule(
     kro_w: NumberOrArray[NDimension],
@@ -1475,6 +1769,7 @@ def stone_I_rule(
     """
     return run_rule(  # type: ignore[arg-type]
         _stone_I_value_loop,
+        _stone_I_value_loop_parallel,
         kro_w,
         kro_w,
         kro_g,
@@ -1535,6 +1830,7 @@ def _(
     """
     return run_rule_derivatives(  # type: ignore[arg-type]
         _stone_I_derivative_loop,
+        _stone_I_derivative_loop_parallel,
         kro_w,
         kro_g,
         krw,
