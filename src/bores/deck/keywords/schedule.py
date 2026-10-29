@@ -205,6 +205,11 @@ WELSPECS = ScheduledRecordKeyword[str | float | bool](
             default="SEG",
             options={"SEG", "AVG"},
         ),
+        Field("fip_region", int, required=False, default=0),
+        Field("frontsim1", str, required=False),
+        Field("frontsim2", str, required=False),
+        Field("well_model", uppercase, required=False, default="STD"),
+        Field("polymer_table", int, required=False, default=0),
     ],
 )
 """
@@ -231,6 +236,8 @@ Fields:
   `NO`, returned as a `bool`). `True` if omitted.
 - `pvt_table`: PVT region override (`0` = use cell's `PVTNUM`).
 - `density_calculation_method`: wellbore density calculation method (`SEG` or `AVG`).
+
+Further items, read by position after the ones above and named as in OPM's keyword definition: `fip_region`, `frontsim1`, `frontsim2`, `well_model`, `polymer_table`.
 """
 
 COMPDAT = ScheduledRecordKeyword[str | float](
@@ -322,6 +329,11 @@ WELSEGS = HeaderedScheduledRecordKeyword(
             default="HO",
             options={"HO", "DF"},
         ),
+        Field("top_x", np.float64, required=False),
+        Field("top_y", np.float64, required=False),
+        Field("top_pipe_wall_area", np.float64, required=False),
+        Field("top_pipe_wall_volumetric_heat_capacity", np.float64, required=False),
+        Field("top_pipe_wall_thermal_conductivity", np.float64, required=False),
     ],
     detail_fields=[
         Field("first_segment", int),
@@ -334,6 +346,11 @@ WELSEGS = HeaderedScheduledRecordKeyword(
         Field("roughness", np.float64, required=False, default=0.0),
         Field("cross_sectional_area", np.float64, required=False, default=None),
         Field("volume", np.float64, required=False, default=None),
+        Field("length_x", np.float64, required=False),
+        Field("length_y", np.float64, required=False),
+        Field("pipe_wall_area", np.float64, required=False),
+        Field("pipe_wall_volumetric_heat_capacity", np.float64, required=False),
+        Field("pipe_wall_thermal_conductivity", np.float64, required=False),
     ],
 )
 """
@@ -383,6 +400,8 @@ Segment record fields:
   Eclipse computes it from `diameter`.
 - `volume`: wellbore volume of this segment; `None`
   means Eclipse computes it from the area and length.
+
+Further items, read by position after the ones above and named as in OPM's keyword definition: `top_x`, `top_y`, `top_pipe_wall_area`, `top_pipe_wall_volumetric_heat_capacity`, `top_pipe_wall_thermal_conductivity` (the header record).
 """
 
 COMPSEGS = HeaderedScheduledRecordKeyword(
@@ -397,6 +416,11 @@ COMPSEGS = HeaderedScheduledRecordKeyword(
         Field("branch", int, required=False, default=1),
         Field("start_length", np.float64, required=False, default=None),
         Field("end_length", np.float64, required=False, default=None),
+        Field("direction", str, required=False),
+        Field("end_ijk", int, required=False),
+        Field("center_depth", np.float64, required=False),
+        Field("thermal_length", np.float64, required=False),
+        Field("segment_number", int, required=False),
     ],
 )
 """
@@ -422,6 +446,8 @@ Detail fields:
   connection starts/ends. `None` (`1*`) means Eclipse would derive it
   from the connection's own grid-block geometry; `load_well_segments`
   requires both explicitly instead of attempting that derivation.
+
+Further items, read by position after the ones above and named as in OPM's keyword definition: `direction`, `end_ijk`, `center_depth`, `thermal_length`, `segment_number` (the detail record).
 """
 
 WCONPROD = ScheduledRecordKeyword[str | float](
@@ -520,6 +546,11 @@ WCONINJE = ScheduledRecordKeyword[str | float](
         Field("thp", np.float64, required=False, default=None),
         Field("vfp_table", int, required=False, default=0),
         Field("vaporized_oil_concentration", np.float64, required=False, default=None),
+        Field("gas_steam_ratio", np.float64, required=False, default=0.0),
+        Field("surface_oil_fraction", np.float64, required=False, default=0.0),
+        Field("surface_water_fraction", np.float64, required=False, default=0.0),
+        Field("surface_gas_fraction", np.float64, required=False, default=0.0),
+        Field("oil_steam_ratio", np.float64, required=False, default=0.0),
     ],
 )
 """
@@ -542,6 +573,8 @@ Fields:
   (`0` = none assigned).
 - `vaporized_oil_concentration`: vaporized oil concentration (`Rv`) of the injected
   gas; `None` means Eclipse uses its default.
+
+Further items, read by position after the ones above and named as in OPM's keyword definition: `gas_steam_ratio`, `surface_oil_fraction`, `surface_water_fraction`, `surface_gas_fraction`, `oil_steam_ratio`.
 """
 
 WELOPEN = ScheduledRecordKeyword[str | int](
@@ -551,6 +584,8 @@ WELOPEN = ScheduledRecordKeyword[str | int](
         Field(
             "status",
             uppercase,
+            required=False,
+            default="OPEN",
             options={"OPEN", "SHUT", "STOP", "AUTO", "POPN"},
         ),
         Field("i", int, required=False, default=0),
@@ -659,7 +694,7 @@ WPIMULT = ScheduledRecordKeyword[str | float](
     "WPIMULT",
     fields=[
         Field("well", str),
-        Field("multiplier", np.float64),
+        Field("multiplier", np.float64, required=False, default=1.0),
         Field("i", int, required=False, default=0),
         Field("j", int, required=False, default=0),
         Field("k", int, required=False, default=0),
@@ -688,7 +723,7 @@ GRUPTREE = ScheduledRecordKeyword[str](
     "GRUPTREE",
     fields=[
         Field("child", str),
-        Field("parent", str),
+        Field("parent", str, required=False, default="FIELD"),
     ],
 )
 """
@@ -735,6 +770,19 @@ GCONPROD = ScheduledRecordKeyword[str | float](
             options={"NONE", "CON", "+CON", "WELL", "PLUG", "RATE"},
         ),
         Field("apply_to_subordinates", yes_no, required=False, default=True),
+        Field("guide_rate", np.float64, required=False),
+        Field("guide_rate_def", str, required=False),
+        Field("water_exceed_procedure", uppercase, required=False, default="NONE"),
+        Field("gas_exceed_procedure", uppercase, required=False, default="NONE"),
+        Field("liquid_exceed_procedure", uppercase, required=False, default="NONE"),
+        Field("reservoir_fluid_target", np.float64, required=False),
+        Field("reservoir_volume_balance", np.float64, required=False),
+        Field("wet_gas_target", np.float64, required=False),
+        Field("calorific_target", np.float64, required=False),
+        Field("surface_gas_fraction", np.float64, required=False),
+        Field("surface_wat_fraction", np.float64, required=False),
+        Field("linear_combined_target", np.float64, required=False),
+        Field("lin_target_exceed_procedure", str, required=False),
     ],
 )
 """
@@ -752,6 +800,8 @@ Fields:
   `+CON`, `WELL`, `PLUG`, or `RATE`).
 - `apply_to_subordinates`: whether the targets also apply to the groups below
   this one (`YES` or `NO`, returned as a `bool`). `True` if omitted.
+
+Further items, read by position after the ones above and named as in OPM's keyword definition: `guide_rate`, `guide_rate_def`, `water_exceed_procedure`, `gas_exceed_procedure`, `liquid_exceed_procedure`, `reservoir_fluid_target`, `reservoir_volume_balance`, `wet_gas_target`, `calorific_target`, `surface_gas_fraction`, `surface_wat_fraction`, `linear_combined_target`, `lin_target_exceed_procedure`.
 """
 
 GCONINJE = ScheduledRecordKeyword[str | float](
@@ -779,6 +829,12 @@ GCONINJE = ScheduledRecordKeyword[str | float](
         Field("reservoir_volume_rate", np.float64, required=False, default=0.0),
         Field("reinjection_fraction", np.float64, required=False, default=None),
         Field("voidage_replacement_fraction", np.float64, required=False, default=None),
+        Field("respond_to_parent", yes_no, required=False, default=True),
+        Field("guide_rate", np.float64, required=False, default=0.0),
+        Field("guide_rate_def", str, required=False),
+        Field("reinject_group", str, required=False),
+        Field("voidage_group", str, required=False),
+        Field("wetgas_target", np.float64, required=False),
     ],
 )
 """
@@ -799,6 +855,8 @@ Fields:
   control; `None` if omitted.
 - `voidage_replacement_fraction`: fraction of the produced reservoir voidage replaced,
   used by `VREP` control; `None` if omitted.
+
+Further items, read by position after the ones above and named as in OPM's keyword definition: `respond_to_parent`, `guide_rate`, `guide_rate_def`, `reinject_group`, `voidage_group`, `wetgas_target`.
 """
 
 WECON = ScheduledRecordKeyword[str | float | bool](
@@ -823,6 +881,14 @@ WECON = ScheduledRecordKeyword[str | float | bool](
             required=False,
             default=False,
         ),
+        Field("follow_on_well", uppercase, required=False, default="'"),
+        Field("limited_quantity", uppercase, required=False, default="RATE"),
+        Field("second_max_water_cut", np.float64, required=False, default=0.0),
+        Field("workover_second_water_cut_limit", str, required=False),
+        Field("max_gas_liquid_ratio", np.float64, required=False, default=0.0),
+        Field("min_liquid_production_rate", np.float64, required=False),
+        Field("max_temp", np.float64, required=False),
+        Field("min_res_fluid_rate", np.float64, required=False),
     ],
 )
 """
@@ -846,6 +912,8 @@ Fields:
   `CON`, `+CON`, `WELL`, `PLUG`). `NONE` if omitted.
 - `end_run`: whether breaching this limit should end the
   simulation run (`YES` or `NO`).
+
+Further items, read by position after the ones above and named as in OPM's keyword definition: `follow_on_well`, `limited_quantity`, `second_max_water_cut`, `workover_second_water_cut_limit`, `max_gas_liquid_ratio`, `min_liquid_production_rate`, `max_temp`, `min_res_fluid_rate`.
 """
 
 WTEST = ScheduledRecordKeyword[str | float](
@@ -956,6 +1024,7 @@ GECON = ScheduledRecordKeyword[str | float | bool](
             required=False,
             default=False,
         ),
+        Field("max_open_wells", int, required=False, default=0),
     ],
 )
 """
@@ -978,6 +1047,8 @@ Fields:
   (`NONE`, `CON`, `+CON`, `WELL`, `PLUG`, or `RATE`).
 - `end_run`: whether exceeding the limit terminates the
   simulation (`YES` or `NO`).
+
+Further items, read by position after the ones above and named as in OPM's keyword definition: `max_open_wells`.
 """
 
 WELPI = ScheduledRecordKeyword[str | float](
@@ -1004,15 +1075,8 @@ Fields:
 WPAVE = RecordKeyword[str | float | bool](
     "WPAVE",
     fields=[
-        Field(name="f1", type=np.float64, required=False, default=1.0),
-        Field(name="f2", type=np.float64, required=False, default=0.0),
-        Field(
-            name="connections",
-            type=uppercase,
-            required=False,
-            default="OPEN",
-            options={"OPEN", "ALL"},
-        ),
+        Field(name="f1", type=np.float64, required=False, default=0.5),
+        Field(name="f2", type=np.float64, required=False, default=1.0),
         Field(
             name="depth_correction",
             type=uppercase,
@@ -1020,10 +1084,17 @@ WPAVE = RecordKeyword[str | float | bool](
             default="WELL",
             options={"WELL", "RES", "NONE"},
         ),
+        Field(
+            name="connections",
+            type=uppercase,
+            required=False,
+            default="OPEN",
+            options={"OPEN", "ALL"},
+        ),
     ],
 )
 """
-`WPAVE [f1] [f2] [connections] [depth_correction] /`
+`WPAVE [f1] [f2] [depth_correction] [connections] /`
 - configure how the average pressure around a well is calculated.
 
 The average well pressure is used by several well-control algorithms and
@@ -1033,14 +1104,14 @@ pore-volume averaging, and which connections contribute.
 Fields:
 
 - `f1`: weighting factor between connection-factor weighting and
-  pore-volume weighting. `1.0` if omitted.
+  pore-volume weighting. `0.5` if omitted.
 - `f2`: weighting factor applied to the connection-factor average
-  of the cells around each connection. `0.0` if omitted.
-- `connections`: which connections contribute to the average, `OPEN` for open
-  connections only or `ALL` for every connection. `OPEN` if omitted.
+  of the cells around each connection. `1.0` if omitted.
 - `depth_correction`: the depth the average pressure is corrected to: the well
   reference depth (`WELL`), the reservoir depth (`RES`), or no correction (`NONE`).
-  `WELL` if omitted.
+  `WELL` if omitted. This is the third item, ahead of `connections`.
+- `connections`: which connections contribute to the average, `OPEN` for open
+  connections only or `ALL` for every connection. `OPEN` if omitted.
 """
 
 WCONHIST = ScheduledRecordKeyword[str | float](
@@ -1066,6 +1137,8 @@ WCONHIST = ScheduledRecordKeyword[str | float](
         Field(name="alq", type=np.float64, required=False, default=None),
         Field(name="thp", type=np.float64, required=False, default=None),
         Field(name="bhp", type=np.float64, required=False, default=None),
+        Field("wgasrat_his", np.float64, required=False),
+        Field("nglrat_his", np.float64, required=False),
     ],
 )
 """
@@ -1089,6 +1162,8 @@ Fields:
 - `alq`: artificial lift quantity.
 - `thp`: observed tubing-head pressure.
 - `bhp`: observed bottom-hole pressure.
+
+Further items, read by position after the ones above and named as in OPM's keyword definition: `wgasrat_his`, `nglrat_his`.
 """
 
 WCONINJH = ScheduledRecordKeyword[str | float](
@@ -1560,7 +1635,7 @@ at:
 ```
 
 An item left out (or written `1*`) takes the default shown below; `5*` leaves five items at their
-default. Defaults for times and pressures are in the deck's unit system. Three items have no
+default. Defaults for times and pressures are OPM's metric values (days, bar). Three items have no
 default and are `None` when left out: `tmaxwc`, `trgsft` and `xxxdpr`.
 
 Record 1, `time_step` (times in the deck's time unit):

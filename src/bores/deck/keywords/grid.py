@@ -259,7 +259,9 @@ Fields:
 GRIDUNIT = RecordKeyword[str](
     "GRIDUNIT",
     fields=[
-        Field("unit", uppercase, options={"METRES", "FEET", "CM"}),
+        Field(
+            "unit", uppercase, required=False, default="METRES", options={"METRES", "FEET", "CM"}
+        ),
         Field("type", uppercase, required=False, default="", options={"MAP", ""}),
     ],
 )
@@ -274,7 +276,12 @@ Fields:
 """
 
 MAPUNITS = RecordKeyword[str](
-    "MAPUNITS", fields=[Field("unit", uppercase, options={"METRES", "FEET", "CM"})]
+    "MAPUNITS",
+    fields=[
+        Field(
+            "unit", uppercase, required=False, default="METRES", options={"METRES", "FEET", "CM"}
+        )
+    ],
 )
 """
 `MAPUNITS 'UNIT' /` - map coordinate unit declaration.
@@ -378,7 +385,7 @@ MINPV = RecordKeyword[float](
 `MINPV VALUE /` - minimum pore volume for a cell to be active.
 
 A cell whose pore volume is below `minpv` is made inactive. The value is a reservoir volume in
-the deck's unit system, and defaults to `1e-6`.
+the deck's unit system. The default, `1e-6`, is OPM's metric (reservoir m3) value.
 """
 
 NEWTRAN = FlagKeyword("NEWTRAN")
@@ -702,7 +709,7 @@ Fields:
 - `multiplier`: transmissibility multiplier applied to the fault.
 """
 
-NNC = RepeatedRecordKeyword[float](
+NNC = RepeatedRecordKeyword[int | float | str](
     "NNC",
     fields=[
         Field("i1", int),
@@ -712,6 +719,16 @@ NNC = RepeatedRecordKeyword[float](
         Field("j2", int),
         Field("k2", int),
         Field("transmissibility", np.float64),
+        Field("ist1", int, required=False, default=0),
+        Field("ist2", int, required=False, default=0),
+        Field("pressure_table1", int, required=False, default=0),
+        Field("pressure_table2", int, required=False, default=0),
+        Field("ve_face1", str, required=False),
+        Field("ve_face2", str, required=False),
+        Field("diffusivity", np.float64, required=False, default=0.0),
+        Field("sim_dependent3", np.float64, required=False),
+        Field("vdflow_area", np.float64, required=False),
+        Field("vdflow_perm", np.float64, required=False),
     ],
 )
 """
@@ -725,6 +742,10 @@ Fields:
 - `i2` / `j2` / `k2`: 1-based IJK index of the second cell of the connection.
 - `transmissibility`: transmissibility of the connection, in the grid's
     declared unit system.
+
+Further items, read by position after the ones above and named as in OPM's keyword definition: 
+`ist1`, `ist2`, `pressure_table1`, `pressure_table2`, `ve_face1`, `ve_face2`, `diffusivity`, 
+`sim_dependent3`, `vdflow_area`, `vdflow_perm`.
 """
 
 PORV = ArrayKeyword("PORV", dtype=np.float64, default_value=0.0)

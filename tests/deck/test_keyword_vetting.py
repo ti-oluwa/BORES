@@ -93,7 +93,9 @@ def test_gridunit_validates_unit():
 
 
 def test_wpave_uses_eclipse_items():
-    record = make("WPAVE\n0.5 1 ALL RES /").get("WPAVE")
+    # The depth correction is the third item and the connections flag the fourth, as in OPM's
+    # definition and in Norne (`WPAVE 1* 0.000 'WELL' 'ALL' /`).
+    record = make("WPAVE\n0.5 1 RES ALL /").get("WPAVE")
     assert (record["connections"], record["depth_correction"]) == ("ALL", "RES")
 
 

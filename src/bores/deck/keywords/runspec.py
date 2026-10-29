@@ -198,7 +198,7 @@ Example:
         1 JAN 2020 /
 """
 
-TABDIMS = RecordKeyword[int](
+TABDIMS = RecordKeyword[int | str](
     "TABDIMS",
     fields=[
         Field("ntsfun", int, required=False, default=1),
@@ -207,6 +207,24 @@ TABDIMS = RecordKeyword[int](
         Field("nppvt", int, required=False, default=20),
         Field("ntfip", int, required=False, default=1),
         Field("nrpvt", int, required=False, default=20),
+        Field("max_rv_nodes", int, required=False, default=20),
+        Field("ntendp", int, required=False, default=1),
+        Field("num_eos_res", int, required=False, default=1),
+        Field("num_eos_surface", int, required=False, default=1),
+        Field("max_flux_regions", int, required=False, default=10),
+        Field("max_thermal_regions", int, required=False, default=1),
+        Field("ntrocc", int, required=False),
+        Field("max_pressure_maintainance_regions", int, required=False, default=0),
+        Field("max_kvalue_tables", int, required=False, default=0),
+        Field("ntalpha", int, required=False),
+        Field("asphaltene_aspkdam_max_rows", int, required=False, default=10),
+        Field("asphaltene_asprewg_max_rows", int, required=False, default=10),
+        Field("asphaltene_aspviso_max_rows", int, required=False, default=10),
+        Field("item20_not_used", str, required=False),
+        Field("asphaltene_asppw2d_max_columns", int, required=False, default=5),
+        Field("asphaltene_asppw2d_max_rows", int, required=False, default=5),
+        Field("asphaltene_aspwetf_max_rows", int, required=False, default=5),
+        Field("num_kvalue_tables", int, required=False, default=0),
     ],
 )
 """
@@ -225,15 +243,27 @@ Fields:
 - `nppvt`: max number of pressure nodes in any PVT table.
 - `ntfip`: max number of FIP regions (`FIPNUM`).
 - `nrpvt`: max number of Rs/Rv nodes in a live-oil / wet-gas table.
+
+Further items, read by position after the ones above and named as in OPM's keyword definition: `max_rv_nodes`, `ntendp`, `num_eos_res`, `num_eos_surface`, `max_flux_regions`, `max_thermal_regions`, `ntrocc`, `max_pressure_maintainance_regions`, `max_kvalue_tables`, `ntalpha`, `asphaltene_aspkdam_max_rows`, `asphaltene_asprewg_max_rows`, `asphaltene_aspviso_max_rows`, `item20_not_used`, `asphaltene_asppw2d_max_columns`, `asphaltene_asppw2d_max_rows`, `asphaltene_aspwetf_max_rows`, `num_kvalue_tables`.
 """
 
 WELLDIMS = RecordKeyword[int](
     "WELLDIMS",
     fields=[
-        Field("nwmaxz", int, required=False, default=1),
-        Field("ncwmax", int, required=False, default=1),
-        Field("ngmaxz", int, required=False, default=1),
-        Field("nwgmax", int, required=False, default=1),
+        Field("nwmaxz", int, required=False, default=0),
+        Field("ncwmax", int, required=False, default=0),
+        Field("ngmaxz", int, required=False, default=0),
+        Field("nwgmax", int, required=False, default=0),
+        Field("max_stages", int, required=False, default=5),
+        Field("max_streams", int, required=False, default=10),
+        Field("max_mixtures", int, required=False, default=5),
+        Field("max_separators", int, required=False, default=4),
+        Field("max_mixture_items", int, required=False, default=3),
+        Field("max_completion_x", int, required=False, default=0),
+        Field("max_wellist_pr_well", int, required=False, default=1),
+        Field("max_dynamic_wellist", int, required=False, default=1),
+        Field("max_secondary_wells", int, required=False, default=10),
+        Field("max_gpp_rows", int, required=False, default=201),
     ],
 )
 """
@@ -248,15 +278,17 @@ Fields:
 - `ncwmax`: maximum number of connections (completions) per well.
 - `ngmaxz`: maximum number of groups.
 - `nwgmax`: maximum number of wells in any one group.
+
+Further items, read by position after the ones above and named as in OPM's keyword definition: `max_stages`, `max_streams`, `max_mixtures`, `max_separators`, `max_mixture_items`, `max_completion_x`, `max_wellist_pr_well`, `max_dynamic_wellist`, `max_secondary_wells`, `max_gpp_rows`.
 """
 
 EQLDIMS = RecordKeyword[int](
     "EQLDIMS",
     fields=[
         Field("ntequl", int, required=False, default=1),
-        Field("ndprvd", int, required=False, default=20),
+        Field("ndprvd", int, required=False, default=2000),
         Field("ndrxvd", int, required=False, default=20),
-        Field("nttrvd", int, required=False, default=20),
+        Field("nttrvd", int, required=False, default=1),
         Field("nstrvd", int, required=False, default=20),
     ],
 )
@@ -279,14 +311,19 @@ REGDIMS = RecordKeyword[int](
     "REGDIMS",
     fields=[
         Field("ntfip", int, required=False, default=1),
-        Field("nmfip", int, required=False, default=0),
+        Field("nmfip", int, required=False, default=1),
         Field("nrfreg", int, required=False, default=0),
         Field("ntfreg", int, required=False, default=0),
-        Field("nplmix", int, required=False, default=0),
+        Field("max_etrack", int, required=False, default=0),
+        Field("ntcreg", int, required=False, default=1),
+        Field("max_opernum", int, required=False, default=0),
+        Field("max_operate_dwork", int, required=False, default=0),
+        Field("max_operate_iwork", int, required=False, default=0),
+        Field("nplmix", int, required=False, default=1),
     ],
 )
 """
-`REGDIMS NTFIP NMFIP NRFREG NTFREG NPLMIX /`
+`REGDIMS NTFIP NMFIPR NRFREG NTFREG MAX_ETRACK NTCREG ... NPLMIX /`
 - FIP/region dimensioning.
 
 All parameters are optional with simulator defaults.
@@ -297,7 +334,10 @@ Fields:
 - `nmfip`: maximum number of multiply-defined FIP regions.
 - `nrfreg`: maximum number of reservoir fluid-in-place regions.
 - `ntfreg`: maximum number of tracer FIP regions.
-- `nplmix`: maximum number of polymer mixing regions.
+- `max_etrack`: maximum number of extra tracked quantities.
+- `ntcreg`, `max_opernum`, `max_operate_dwork`, `max_operate_iwork`: dimensions of the
+  coal, `OPERNUM` and `OPERATE` features.
+- `nplmix`: maximum number of polymer mixing regions (the tenth item).
 """
 
 ENDSCALE = RecordKeyword[int | str](

@@ -124,6 +124,9 @@ EQUIL = RepeatedRecordKeyword[float](
         Field("rsvd_table", int, required=False, default=0),
         Field("rvvd_table", int, required=False, default=0),
         Field("accuracy_flag", int, required=False, default=0),
+        Field("comp_init_type", int, required=False, default=1),
+        Field("comp_not_set_sat_pressure", int, required=False),
+        Field("black_oil_init_hg", int, required=False, default=0),
     ],
 )
 """
@@ -163,6 +166,8 @@ Note:
     between Eclipse 100 and Eclipse 300 / compositional runs; verify
     against your simulator's manual if this run uses anything beyond
     plain black-oil equilibration.
+
+Further items, read by position after the ones above and named as in OPM's keyword definition: `comp_init_type`, `comp_not_set_sat_pressure`, `black_oil_init_hg`.
 """
 
 RTEMP = TableKeyword(
@@ -383,13 +388,15 @@ AQUCT = RepeatedRecordKeyword[float](
         Field("datum_depth", np.float64),
         Field("initial_pressure", np.float64, required=False, default=None),
         Field("permeability", np.float64),
-        Field("porosity", np.float64),
+        Field("porosity", np.float64, required=False, default=1.0),
         Field("total_compressibility", np.float64),
         Field("radius", np.float64),
         Field("thickness", np.float64),
         Field("influence_angle", np.float64, required=False, default=360.0),
         Field("pvt_table_number", int, required=False, default=1),
         Field("aquifer_influence_table_number", int, required=False, default=1),
+        Field("ini_salt", np.float64, required=False),
+        Field("temp_aquifer", np.float64, required=False),
     ],
 )
 """
@@ -426,6 +433,8 @@ Fields:
   custom dimensionless pressure influence function. `1` selects the
   built-in infinite-acting Van Everdingen-Hurst behaviour, the default.
   `AQUTAB` tables are numbered from 2 in the order they appear.
+
+Further items, read by position after the ones above and named as in OPM's keyword definition: `ini_salt`, `temp_aquifer`.
 """
 
 AQUFETP = RepeatedRecordKeyword[float](
@@ -439,6 +448,7 @@ AQUFETP = RepeatedRecordKeyword[float](
         Field("productivity_index", np.float64),
         Field("pvt_table_number", int, required=False, default=1),
         Field("salt_concentration", np.float64, required=False, default=0.0),
+        Field("temp", np.float64, required=False),
     ],
 )
 """
@@ -465,6 +475,8 @@ Fields:
 - `pvt_table_number`: water PVT table number. `1` if omitted.
 - `salt_concentration`: initial salt concentration, for brine tracking.
   `0` if omitted.
+
+Further items, read by position after the ones above and named as in OPM's keyword definition: `temp`.
 """
 
 AQUANCON = RepeatedRecordKeyword[typing.Any](
@@ -524,7 +536,13 @@ aquifers is an error.
 
 AQUFLUX = RepeatedRecordKeyword[float](
     "AQUFLUX",
-    fields=[Field("aquifer_id", int), Field("flux", np.float64)],
+    fields=[
+        Field("aquifer_id", int),
+        Field("flux", np.float64),
+        Field("sc_0", np.float64, required=False),
+        Field("temp", np.float64, required=False),
+        Field("pressure", np.float64, required=False),
+    ],
 )
 """
 `AQUFLUX  AQUIFER_ID  FLUX /` (one record per aquifer) - flux-specified
@@ -543,6 +561,8 @@ Fields:
   `AQUANCON` to attach the aquifer to grid connections.
 - `flux`: constant influx per unit of connected face area: liquid surface
   volume per day per unit area (STB/day/ft² in FIELD units).
+
+Further items, read by position after the ones above and named as in OPM's keyword definition: `sc_0`, `temp`, `pressure`.
 """
 
 RESTART = RestartKeyword()
