@@ -25,16 +25,16 @@ __all__ = ["Hysteresis", "ReservoirState"]
 
 @numba.njit(cache=True, error_model="numpy")
 def advance_phase_hysteresis_kernel(
-    new_saturation: npt.NDArray,
-    previous_saturation: npt.NDArray,
-    max_saturation: npt.NDArray,
-    imbibition_flag: npt.NDArray,
-    reversal_saturation: npt.NDArray,
+    new_saturation: CellArray,
+    previous_saturation: CellArray,
+    max_saturation: CellArray,
+    imbibition_flag: BooleanCellArray,
+    reversal_saturation: CellArray,
     tolerance: Number,
     imbibition_when_increasing: Boolean,
-    out_max_saturation: npt.NDArray,
-    out_imbibition_flag: npt.NDArray,
-    out_reversal_saturation: npt.NDArray,
+    out_max_saturation: CellArray,
+    out_imbibition_flag: BooleanCellArray,
+    out_reversal_saturation: CellArray,
 ) -> None:
     """
     Advance one phase's saturation history for every cell in a single pass.
@@ -76,17 +76,17 @@ def advance_phase_hysteresis_kernel(
 
 def advance_phase_hysteresis(
     *,
-    new_saturation: npt.NDArray,
-    previous_saturation: npt.NDArray,
-    max_saturation: npt.NDArray,
-    imbibition_flag: npt.NDArray,
-    reversal_saturation: npt.NDArray,
+    new_saturation: CellArray,
+    previous_saturation: CellArray,
+    max_saturation: CellArray,
+    imbibition_flag: BooleanCellArray,
+    reversal_saturation: CellArray,
     imbibition_when_increasing: Boolean,
     tolerance: Number | None = None,
-    out_max_saturation: npt.NDArray | None = None,
-    out_imbibition_flag: npt.NDArray | None = None,
-    out_reversal_saturation: npt.NDArray | None = None,
-) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
+    out_max_saturation: CellArray | None = None,
+    out_imbibition_flag: BooleanCellArray | None = None,
+    out_reversal_saturation: CellArray | None = None,
+) -> tuple[CellArray, BooleanCellArray, CellArray]:
     """
     Updates one phase's tracked saturation history for one new saturation
     value, per cell.
@@ -136,6 +136,7 @@ def advance_phase_hysteresis(
     ):
         if not array.flags.c_contiguous:
             raise ValidationError(f"`{name}` must be C-contiguous so it can be written in place.")
+
     advance_phase_hysteresis_kernel(
         new_saturation=new_saturation.reshape(-1),
         previous_saturation=previous_saturation.reshape(-1),
@@ -296,8 +297,8 @@ class Hysteresis(StoreSerializable):
 
         new_max_water_saturation, new_water_imbibition_flag, new_water_reversal_saturation = (
             advance_phase_hysteresis(
-                new_saturation=sw,
-                previous_saturation=previous_sw,
+                new_saturation=typing.cast(CellArray, sw),
+                previous_saturation=typing.cast(CellArray, previous_sw),
                 max_saturation=self.max_water_saturation,
                 imbibition_flag=self.water_imbibition_flag,
                 reversal_saturation=self.water_reversal_saturation,
@@ -307,8 +308,8 @@ class Hysteresis(StoreSerializable):
         )
         new_max_gas_saturation, new_gas_imbibition_flag, new_gas_reversal_saturation = (
             advance_phase_hysteresis(
-                new_saturation=sg,
-                previous_saturation=previous_sg,
+                new_saturation=typing.cast(CellArray, sg),
+                previous_saturation=typing.cast(CellArray, previous_sg),
                 max_saturation=self.max_gas_saturation,
                 imbibition_flag=self.gas_imbibition_flag,
                 reversal_saturation=self.gas_reversal_saturation,

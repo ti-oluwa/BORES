@@ -3,12 +3,18 @@ import typing
 import attrs
 import numba
 import numpy as np
-import numpy.typing as npt
 from typing_extensions import Self
 
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
-from bores.types import BooleanCellArray, IntCellArray, Integer
+from bores.types import (
+    Boolean,
+    BooleanCellArray,
+    IntArray,
+    IntCellArray,
+    Integer,
+    OneDimension,
+)
 
 __all__ = ["RegionGroups", "Regions", "group_cells_by_region"]
 
@@ -83,12 +89,12 @@ class RegionGroups(typing.NamedTuple):
 
 @numba.njit(cache=True)
 def sort_cells_by_region_kernel(
-    saturation_region: npt.NDArray,
-    imbibition_region: npt.NDArray,
-    use_imbibition_region: bool,
-    stride: int,
-    offsets: npt.NDArray,
-    order: npt.NDArray,
+    saturation_region: IntCellArray,
+    imbibition_region: IntCellArray,
+    use_imbibition_region: Boolean,
+    stride: Integer,
+    offsets: IntArray[OneDimension],
+    order: IntCellArray,
 ) -> None:
     """
     Counting sort of the cells by `saturation_region * stride + imbibition_region`.
@@ -136,7 +142,7 @@ def group_cells_by_region(
     size = saturation_region.size
     use_imbibition_region = imbibition_region is not None
     if imbibition_region is None:
-        imbibition_region = saturation_region[:0]
+        imbibition_region = typing.cast(IntCellArray, saturation_region[:0])
     elif imbibition_region.size != size:
         raise ValidationError(
             f"`imbibition_region` has {imbibition_region.size} values; "
@@ -167,7 +173,8 @@ def group_cells_by_region(
     for key in occupied.tolist():
         saturation_regions.append(key // stride)
         imbibition_regions.append(key % stride if use_imbibition_region else 0)
-        cell_indices.append(order[offsets[key] : offsets[key + 1]])
+        cell_indices.append(typing.cast(IntCellArray, order[offsets[key] : offsets[key + 1]]))
+
     if len(occupied) == 1:
         cell_indices = [None]
     return RegionGroups(

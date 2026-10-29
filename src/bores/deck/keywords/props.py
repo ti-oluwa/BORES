@@ -35,7 +35,9 @@ and relative permeability / capillary pressure curves.
 - `SWL`, `SWCR`, `SWU`: connate, critical and maximum water saturation.
 - `SGL`, `SGCR`, `SGU`: connate, critical and maximum gas saturation.
 - `SOWCR`, `SOGCR`: critical oil saturation in water, and in gas.
-- `ISGCR`: critical gas saturation of the imbibition curves (used with hysteresis).
+- `ISWL`, `ISWCR`, `ISWU`, `ISGL`, `ISGCR`, `ISGU`, `ISOWCR`, `ISOGCR`: the imbibition-curve counterparts of the drainage
+  end-points above (used with hysteresis, and paired with `IMBNUM`).
+- `ISWLPC`, `ISGLPC`: connate saturations that scale only the imbibition capillary pressure curves.
 - `SCALECRS`: how the critical saturations are scaled.
 
 A cell that is never given a value by one of these arrays is `NaN`, not `0.0`: Eclipse then takes
@@ -74,6 +76,15 @@ __all__ = [
     "EHYSTR",
     "GRAVITY",
     "ISGCR",
+    "ISGL",
+    "ISGLPC",
+    "ISGU",
+    "ISOGCR",
+    "ISOWCR",
+    "ISWCR",
+    "ISWL",
+    "ISWLPC",
+    "ISWU",
     "PVCDO",
     "PVCO",
     "PVDG",
@@ -720,3 +731,30 @@ ISGCR = endpoint_array("ISGCR")
 `ISGCR` - critical gas saturation of the imbibition curves, per cell (used with hysteresis).
 `NaN` where never set.
 """
+
+ISGL = endpoint_array("ISGL")
+"""`ISGL` - connate gas saturation of the imbibition curves, per cell (drainage: `SGL`). `NaN` where never set."""
+
+ISGLPC = endpoint_array("ISGLPC")
+"""`ISGLPC` - connate gas saturation that scales only the imbibition capillary pressure curve, per cell. `NaN` where never set."""
+
+ISGU = endpoint_array("ISGU")
+"""`ISGU` - maximum gas saturation of the imbibition curves, per cell (drainage: `SGU`). `NaN` where never set."""
+
+ISOGCR = endpoint_array("ISOGCR")
+"""`ISOGCR` - critical oil-in-gas saturation of the imbibition curves, per cell (drainage: `SOGCR`). `NaN` where never set."""
+
+ISOWCR = endpoint_array("ISOWCR")
+"""`ISOWCR` - critical oil-in-water saturation of the imbibition curves, per cell (drainage: `SOWCR`). `NaN` where never set."""
+
+ISWCR = endpoint_array("ISWCR")
+"""`ISWCR` - critical water saturation of the imbibition curves, per cell (drainage: `SWCR`). `NaN` where never set."""
+
+ISWL = endpoint_array("ISWL")
+"""`ISWL` - connate water saturation of the imbibition curves, per cell (drainage: `SWL`). `NaN` where never set."""
+
+ISWLPC = endpoint_array("ISWLPC")
+"""`ISWLPC` - connate water saturation that scales only the imbibition capillary pressure curve, per cell. `NaN` where never set."""
+
+ISWU = endpoint_array("ISWU")
+"""`ISWU` - maximum water saturation of the imbibition curves, per cell (drainage: `SWU`). `NaN` where never set."""
