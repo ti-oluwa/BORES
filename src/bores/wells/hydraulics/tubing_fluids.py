@@ -368,7 +368,7 @@ class TubingState(typing.NamedTuple):
     sample: TubingFluidSample
     """The properties of each phase at the pressure."""
 
-    phase_rates: PhaseValues
+    rates: PhaseValues
     """Volume rate of the oil, water and free gas at the pressure, per day."""
 
 
@@ -443,7 +443,7 @@ def evaluate_tubing_state(
         )
     return TubingState(
         sample=sample,
-        phase_rates=PhaseValues(
+        rates=PhaseValues(
             oil=liquid_oil_rate * sample.formation_volume_factors.oil * table.stb_to_volume_factor,
             water=surface_water_rate
             * sample.formation_volume_factors.water
@@ -496,7 +496,7 @@ def compute_no_slip_mixture(
         surface_gas_rate=surface_gas_rate,
     )
     sample = state.sample
-    rates = state.phase_rates
+    rates = state.rates
     return NoSlipMixture(
         density=compute_mixture_density(rates=rates, phase_densities=sample.phase_densities),
         viscosity=compute_mixture_viscosity(
@@ -565,7 +565,7 @@ def compute_two_phase_flow(
         surface_gas_rate=surface_gas_rate,
     )
     sample = state.sample
-    rates = state.phase_rates
+    rates = state.rates
     (
         liquid_rate,
         gas_rate,
@@ -633,23 +633,23 @@ def compute_connection_surface_rates(
         feet per day, at surface conditions, one entry per connection.
     """
     count = connection_oil_rates.shape[0]
-    oil = np.empty(count, dtype=connection_oil_rates.dtype)
-    water = np.empty(count, dtype=connection_oil_rates.dtype)
-    gas = np.empty(count, dtype=connection_oil_rates.dtype)
+    oil_rate = np.empty(count, dtype=connection_oil_rates.dtype)
+    water_rate = np.empty(count, dtype=connection_oil_rates.dtype)
+    gas_rate = np.empty(count, dtype=connection_oil_rates.dtype)
     for idx in range(count):
-        liquid_oil = connection_oil_rates[idx] / (
+        liquid_oil_rate = connection_oil_rates[idx] / (
             oil_formation_volume_factors[idx] * stb_to_volume_factor
         )
-        free_gas = connection_gas_rates[idx] / gas_formation_volume_factors[idx]
-        oil[idx] = liquid_oil
-        gas[idx] = free_gas
-        water[idx] = connection_water_rates[idx] / (
+        free_gas_rate = connection_gas_rates[idx] / gas_formation_volume_factors[idx]
+        oil_rate[idx] = liquid_oil_rate
+        gas_rate[idx] = free_gas_rate
+        water_rate[idx] = connection_water_rates[idx] / (
             water_formation_volume_factors[idx] * stb_to_volume_factor
         )
         if not is_injector:
-            oil[idx] += free_gas * vaporized_oil_gas_ratios[idx]
-            gas[idx] += liquid_oil * solution_gas_oil_ratios[idx]
-    return oil, water, gas  # type: ignore[return-value]
+            oil_rate[idx] += free_gas_rate * vaporized_oil_gas_ratios[idx]
+            gas_rate[idx] += liquid_oil_rate * solution_gas_oil_ratios[idx]
+    return oil_rate, water_rate, gas_rate  # type: ignore[return-value]
 
 
 def get_pressure_axis(
