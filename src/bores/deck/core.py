@@ -963,3 +963,19 @@ class Deck:
         layer up, in `bores.deck.file.DeckFile.has`, which checks both.
         """
         return keyword.upper() in self._keyword_records
+
+    def has_many(self, *keywords: str) -> dict[str, bool]:
+        """
+        Return, for each of `keywords`, whether it has a literal record of its own in the deck.
+
+        This is `has` for several keywords at once: one dictionary lookup per name against the
+        index built when the deck was scanned, so nothing is parsed and no record is touched.
+        The same literal-only caveat as `has` applies (operator targets such as a `DZ` set only
+        through `EQUALS` are not seen here; use `bores.deck.file.DeckFile.has_many` for that).
+
+        :param keywords: Keyword names, case-insensitive.
+        :returns: `{NAME: present}` with upper-cased names, in the order given. A name given
+            more than once appears once.
+        """
+        index = self._keyword_records
+        return {name: name in index for name in (keyword.upper() for keyword in keywords)}

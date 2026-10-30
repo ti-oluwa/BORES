@@ -488,13 +488,14 @@ def load_boundary_conditions(
             )
         defined_ids[aquifer_id] = source
 
-    if deck_file.get("AQUCT"):
+    aquct_records = deck_file.get("AQUCT")
+    if aquct_records:
         if pvt is None:
             raise ValidationError(
                 "Deck defines an `AQUCT` keyword but no `pvt` was given to "
                 "resolve water viscosity from. See `load_carter_tracy_aquifer`."
             )
-        for record in deck_file.get("AQUCT") or []:
+        for record in aquct_records:
             get_aquancon_connections(record["aquifer_id"])
 
         carter_tracy_aquifers = CarterTracyAquifer.from_deck(
@@ -512,8 +513,9 @@ def load_boundary_conditions(
             if region is not None:
                 regions.append(region)
 
-    if deck_file.get("AQUFETP"):
-        for record in deck_file.get("AQUFETP") or []:
+    aqufetp_records = deck_file.get("AQUFETP")
+    if aqufetp_records:
+        for record in aqufetp_records:
             get_aquancon_connections(record["aquifer_id"])
         fetkovich_aquifers = FetkovichAquifer.from_deck(
             deck_file, get_initial_pressure=get_initial_pressure

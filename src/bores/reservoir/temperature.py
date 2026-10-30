@@ -22,7 +22,10 @@ from bores.types import (
 from bores.units import UnitConversionTable, get_conversion_factors, resolve_unit_conversion_table
 from bores.utils import scale, scale_and_offset
 
-__all__ = ["Temperature", "TemperatureGradient", "TemperatureTable"]
+__all__ = ["TEMPERATURE_KEYWORDS", "Temperature", "TemperatureGradient", "TemperatureTable"]
+
+TEMPERATURE_KEYWORDS = ("TEMPVD", "RTEMPVD", "RTEMP")
+"""The deck keywords that define reservoir temperature. A deck needs at least one to load a `Temperature`."""
 
 
 @attrs.frozen(slots=True)
@@ -416,6 +419,13 @@ class Temperature:
         :raises ValidationError: If neither `TEMPVD` nor `RTEMP` is
             present in the deck.
         """
+        if not deck_file.has_any(*TEMPERATURE_KEYWORDS):
+            raise ValidationError(
+                "No temperature keyword found in the `DeckFile`. "
+                "Expected `TEMPVD` (depth-indexed table) or `RTEMP` (single scalar). "
+                f"Supply a temperature explicitly via `{cls.__name__}(default=...)`."
+            )
+
         unit_system = deck_file.unit_system
         dtype = np.dtype(dtype) if dtype is not None else get_dtype()
 

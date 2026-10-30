@@ -28,7 +28,10 @@ from bores.units import UnitConversionTable, resolve_unit_conversion_table
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["SatFunc"]
+__all__ = ["SATFUNC_KEYWORDS", "SatFunc"]
+
+SATFUNC_KEYWORDS = ("SWOF", "SGOF", "SWFN", "SGFN")
+"""The deck keywords that define saturation functions. A deck needs at least one to load a `SatFunc`."""
 
 
 class SatFunc:
@@ -221,6 +224,13 @@ class SatFunc:
             are found.
         """
         dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+
+        if not deck_file.has_any(*SATFUNC_KEYWORDS):
+            raise ValidationError(
+                "No recognised saturation-function keywords found in the `DeckFile`. "
+                "Expected one of: `SWOF`, `SGOF` (first family) or `SWFN`, `SGFN` "
+                "(second family)."
+            )
 
         def get_region_count(keyword: str) -> int:
             all_regions = deck_file.get(keyword)

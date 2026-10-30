@@ -35,6 +35,7 @@ from bores.constants import c
 from bores.datastructures import MapAxes
 from bores.deck.core import DeckParseError
 from bores.deck.file import DeckFile
+from bores.deck.precheck import find_missing
 from bores.errors import GridExportError, GridImportError
 from bores.grids.base import CellStatus, Grid
 from bores.grids.factories.cartesian import make_cartesian_grid
@@ -497,6 +498,26 @@ def assemble_grid(
     dims = deck_file.dimensions
     nx, ny, nz = dims
 
+    # Settle the geometry family and what it needs before any array is parsed, so a grid that
+    # lacks (say) `DY` is reported at once instead of after `DX` and `TOPS` have been read.
+    is_corner_point = deck_file.has("COORD")
+    missing_geometry = find_missing(deck_file, **grid_geometry_requirements(is_corner_point))
+    if missing_geometry:
+        if is_corner_point:
+            raise GridImportError(
+                f"GRDECL corner-point grid is missing required keyword {missing_geometry[0]}."
+            )
+        if len(missing_geometry) == 3 and not deck_file.has_any("TOPS"):
+            raise GridImportError(
+                "GRDECL file contains neither `COORD` (corner-point) nor `TOPS` / `DX` / `DXV` "
+                "(Cartesian) geometry keywords."
+            )
+        raise GridImportError(
+            "Cartesian GRDECL grid is missing required spacing keyword(s): "
+            + ", ".join(missing_geometry)
+            + "."
+        )
+
     unit_system = detect_unit_system(deck_file)
     map_axes = build_map_axes(deck_file)
 
@@ -515,18 +536,11 @@ def assemble_grid(
         dimensions=dims,
     )
 
-    has_coord = deck_file.has("COORD")
-    has_tops = deck_file.has("TOPS") or deck_file.has("DX") or deck_file.has("DXV")
-
+    assemble = assemble_corner_point_grid if is_corner_point else assemble_cartesian_grid
     try:
-        if has_coord:
-            return assemble_corner_point_grid(
-                deck_file, nx, ny, nz, unit_system, meta, on_inverted_cells=on_inverted_cells
-            )
-        if has_tops:
-            return assemble_cartesian_grid(
-                deck_file, nx, ny, nz, unit_system, meta, on_inverted_cells=on_inverted_cells
-            )
+        return assemble(
+            deck_file, nx, ny, nz, unit_system, meta, on_inverted_cells=on_inverted_cells
+        )
     except GridImportError:
         raise
     except Exception as exc:
@@ -534,10 +548,21 @@ def assemble_grid(
             f"Failed to construct grid from parsed GRDECL arrays: {exc}"
         ) from exc
 
-    raise GridImportError(
-        "GRDECL file contains neither `COORD` (corner-point) nor `TOPS` / `DX` / `DXV` "
-        "(Cartesian) geometry keywords."
-    )
+
+def grid_geometry_requirements(
+    is_corner_point: bool,
+) -> dict[str, typing.Any]:
+    """
+    The keywords a grid's geometry needs, as the `all_of`/`any_of` arguments of `find_missing`.
+
+    :param is_corner_point: Whether the grid is corner-point (the deck has `COORD`) rather than
+        Cartesian.
+    :returns: A corner-point grid needs `COORD` and `ZCORN`. A Cartesian grid needs a spacing along
+        each axis, as either the per-cell or the vector keyword (`TOPS` is optional).
+    """
+    if is_corner_point:
+        return {"all_of": ("COORD", "ZCORN")}
+    return {"any_of": (("DX", "DXV"), ("DY", "DYV"), ("DZ", "DZV"))}
 
 
 def assemble_corner_point_grid(

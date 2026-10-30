@@ -41,7 +41,10 @@ from bores.units import resolve_unit_conversion_table
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["PVT", "load_pvt_regions"]
+__all__ = ["OIL_PVT_KEYWORDS", "PVT", "load_pvt_regions"]
+
+OIL_PVT_KEYWORDS = ("PVTO", "PVCO", "PVDO", "PVCDO")
+"""The deck keywords that define the oil PVT. A deck needs at least one to load a `PVT`."""
 
 
 @attrs.frozen(slots=True)
@@ -1402,6 +1405,12 @@ def load_pvt_regions(
     :raises ValidationError: If no recognisable PVT keyword is found.
     """
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+
+    if not deck_file.has_any(*OIL_PVT_KEYWORDS):
+        raise ValidationError(
+            "No oil PVT keyword found in DeckFile. "
+            "Expected one of: `PVTO`, `PVDO`, `PVCO`, `PVCDO`."
+        )
 
     # Retrieve deck records (each is a list-of-lists: outer = regions)
     pvto_records: list | None = deck_file.get("PVTO")

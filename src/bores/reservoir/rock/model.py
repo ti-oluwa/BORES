@@ -7,6 +7,7 @@ import numpy.typing as npt
 from typing_extensions import Self
 
 from bores.deck.file import DeckFile
+from bores.deck.precheck import find_missing
 from bores.errors import ValidationError
 from bores.grids.base import Grid
 from bores.precision import get_dtype
@@ -28,7 +29,10 @@ from bores.types import (
 )
 from bores.utils import scale
 
-__all__ = ["Permeability", "Rock"]
+__all__ = ["ROCK_REQUIRED_KEYWORDS", "Permeability", "Rock"]
+
+ROCK_REQUIRED_KEYWORDS = ("PORO", "PERMX")
+"""The keywords a `Rock` cannot be loaded from a deck without."""
 
 
 def load_cell_array(
@@ -560,6 +564,13 @@ class Rock:
         unit_system = deck_file.unit_system
         n_cells = grid.n_cells
         dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+
+        missing = find_missing(deck_file, all_of=ROCK_REQUIRED_KEYWORDS)
+        if missing:
+            raise ValidationError(
+                f"{', '.join(missing)} {'is' if len(missing) == 1 else 'are'} required but not "
+                "found in the DeckFile."
+            )
 
         def required(keyword: str) -> CellArray:
             data = load_cell_array(deck_file, keyword, n_cells, dtype=dtype)

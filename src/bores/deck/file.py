@@ -891,6 +891,44 @@ class DeckFile:
         name = k.name if isinstance(k, Keyword) else k.upper()
         return self._deck.has(name) or name in self._operation_targets
 
+    def has_many(self, *ks: str | Keyword[typing.Any]) -> dict[str, bool]:
+        """
+        Return, for each of `ks`, whether it occurs in the deck, as `has` would answer it.
+
+        This is the cheap way to check up front which of the keywords a loader needs are there:
+        one lookup per name against the index built when the deck was scanned (plus the set of
+        operator targets), with nothing parsed. A keyword counts as present when it has a record
+        of its own or is the target of a `BOX`/`EQUALS`/`ADD`/`MULTIPLY`/`COPY`/`MAXVALUE`/
+        `MINVALUE` record.
+
+        Presence is not a promise that the keyword parses: its record may be empty or malformed,
+        and a keyword that is not registered on this `DeckFile` is present here but `get` still
+        returns `None` for it.
+
+        :param ks: Keyword names (case-insensitive) or `Keyword` objects.
+        :returns: `{NAME: present}` with upper-cased names, in the order given. A name given more
+            than once appears once.
+        """
+        names = [k.name.upper() if isinstance(k, Keyword) else k.upper() for k in ks]
+        targets = self._operation_targets
+        return {
+            name: present or name in targets
+            for name, present in self._deck.has_many(*names).items()
+        }
+
+    def has_any(self, *ks: str | Keyword[typing.Any]) -> bool:
+        """Return whether at least one of `ks` occurs in the deck, as `has` would answer it."""
+        return any(self.has(k) for k in ks)
+
+    def missing(self, *ks: str | Keyword[typing.Any]) -> list[str]:
+        """
+        Return the names among `ks` that do not occur in the deck, in the order given.
+
+        :param ks: Keyword names (case-insensitive) or `Keyword` objects.
+        :returns: Upper-cased names of the absent keywords. Empty when every one is present.
+        """
+        return [name for name, present in self.has_many(*ks).items() if not present]
+
     @typing.overload
     def get(self, k: Keyword[T], /, *, use_cache: bool = ...) -> T | None: ...
 

@@ -1663,7 +1663,7 @@ def load_summary_items(
 
     quantities: list[Summary[CompiledBlackOilModel]] = []
     for mnemonic, field_summary_cls in FIELD_SUMMARY_VECTORS.items():
-        if deck_file.get(mnemonic) is not None:
+        if deck_file.has(mnemonic):
             quantities.append(field_summary_cls())
 
     for mnemonic, well_summary_cls in WELL_SUMMARY_VECTORS.items():

@@ -10,14 +10,16 @@ from typing_extensions import Self
 from bores.blackoil.compile import CompiledBlackOilModel, compile_model
 from bores.blackoil.fluids.model import BlackOil
 from bores.blackoil.model import BlackOilModel
-from bores.blackoil.pvt.regions import PVT
-from bores.blackoil.satfunc.regions import SatFunc
+from bores.blackoil.pvt.regions import OIL_PVT_KEYWORDS, PVT
+from bores.blackoil.satfunc.regions import SATFUNC_KEYWORDS, SatFunc
 from bores.blackoil.satfunc.relperm.tables import MinimumRelPerm
 from bores.deck.file import DeckFile
 from bores.deck.keywords.runspec import START
+from bores.deck.precheck import find_missing
 from bores.errors import CaseLoadError, CaseValidationError, ValidationError
 from bores.grids.base import CellStatus, Grid
 from bores.grids.factories.corner_point import InvertedCellPolicy
+from bores.grids.io.grdecl import grid_geometry_requirements
 from bores.initialization import (
     N_SATURATION_SAMPLES,
     compute_water_phase_pressure,
@@ -29,9 +31,9 @@ from bores.reservoir.boundary.deck import load_boundary_conditions
 from bores.reservoir.equilibrium import Equilibrium
 from bores.reservoir.model import Reservoir
 from bores.reservoir.regions import Regions
-from bores.reservoir.rock.model import Rock
+from bores.reservoir.rock.model import ROCK_REQUIRED_KEYWORDS, Rock
 from bores.reservoir.state import Hysteresis, ReservoirState
-from bores.reservoir.temperature import Temperature
+from bores.reservoir.temperature import TEMPERATURE_KEYWORDS, Temperature
 from bores.schedule.base import Schedule
 from bores.schedule.summary import SummaryReport
 from bores.simulation.spec import RunSpec
@@ -405,6 +407,85 @@ def check_cell_counts(
         )
 
 
+def check_deck_requirements(
+    deck_file: DeckFile,
+    *,
+    title: str,
+    needs_temperature: bool,
+    needs_grid: bool,
+    needs_satfunc: bool,
+    needs_rock: bool,
+    needs_pvt: bool,
+    needs_equilibrium: bool,
+) -> None:
+    """
+    Check that the deck has what every stage still to be loaded from it cannot do without.
+
+    Loading the grid, saturation functions and rock parses large arrays and tables, so a deck
+    that lacks (say) its `EQUIL` would otherwise only be reported after all of that work. This
+    looks at the deck's keyword index only, reports every missing requirement at once, and leaves
+    out the stages whose component the caller supplied. Optional keywords (wells, schedule,
+    boundary conditions, regions, ...) are never required here.
+
+    :param deck_file: The deck the case is being loaded from.
+    :param title: The case title, for the error message.
+    :param needs_temperature: Whether a `Temperature` has to be read from the deck.
+    :param needs_grid: Whether the grid has to be read from the deck.
+    :param needs_satfunc: Whether the saturation functions have to be read from the deck.
+    :param needs_rock: Whether the rock properties have to be read from the deck.
+    :param needs_pvt: Whether the PVT tables have to be read from the deck.
+    :param needs_equilibrium: Whether the equilibration data has to be read from the deck.
+    :raises CaseLoadError: If any needed keyword is missing, naming each one by the stage that
+        needs it.
+    """
+    all_of: list[str] = []
+    any_of: list[tuple[str, ...]] = []
+    stage_of: dict[str, str] = {}
+
+    def require(
+        stage: str,
+        *,
+        all_of_keywords: tuple[str, ...] = (),
+        any_of_keywords: typing.Sequence[tuple[str, ...]] = (),
+    ) -> None:
+        for keyword in all_of_keywords:
+            all_of.append(keyword)
+            stage_of.setdefault(f"`{keyword}`", stage)
+        for group in any_of_keywords:
+            any_of.append(tuple(group))
+            stage_of.setdefault("one of " + ", ".join(f"`{k}`" for k in group), stage)
+
+    problems: list[str] = []
+    if needs_grid:
+        if deck_file.dimensions is None:
+            problems.append("grid: `SPECGRID` or `DIMENS`")
+        geometry = grid_geometry_requirements(deck_file.has("COORD"))
+        require(
+            "grid",
+            all_of_keywords=geometry.get("all_of", ()),
+            any_of_keywords=geometry.get("any_of", ()),
+        )
+    if needs_temperature:
+        require("temperature", any_of_keywords=(TEMPERATURE_KEYWORDS,))
+    if needs_satfunc:
+        require("saturation functions", any_of_keywords=(SATFUNC_KEYWORDS,))
+    if needs_rock:
+        require("rock", all_of_keywords=ROCK_REQUIRED_KEYWORDS)
+    if needs_pvt:
+        require("PVT", any_of_keywords=(OIL_PVT_KEYWORDS,))
+    if needs_equilibrium:
+        require("initial state", all_of_keywords=("EQUIL",))
+
+    for entry in find_missing(deck_file, all_of=all_of, any_of=any_of):
+        problems.append(f"{stage_of[entry]}: {entry}")
+    if problems:
+        raise CaseLoadError(
+            f"The deck for case {title!r} is missing what is needed to load it: "
+            + "; ".join(problems)
+            + ". Supply the component to `load_case` directly, or add the keyword to the deck."
+        )
+
+
 def load_case(
     deck_file: DeckFile,
     *,
@@ -576,6 +657,17 @@ def load_case(
             "`hysteresis_enabled` only applies to an initial state computed from the deck. "
             "Build the `initial_state` given with the hysteresis tracking it needs instead."
         )
+
+    check_deck_requirements(
+        deck_file,
+        title=title,
+        needs_temperature=temperature is None and (pvt is None or initial_state is None),
+        needs_grid=grid is None,
+        needs_satfunc=satfunc is None,
+        needs_rock=rock is None,
+        needs_pvt=pvt is None,
+        needs_equilibrium=initial_state is None and equilibrium is None,
+    )
 
     deck_unit_system = deck_file.unit_system
     unit_system = unit_system if unit_system is not None else deck_unit_system
