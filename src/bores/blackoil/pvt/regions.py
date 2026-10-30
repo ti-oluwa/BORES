@@ -652,7 +652,7 @@ def build_oil_data_from_pvto(
         ).astype(dtype, copy=False)
 
     # Compressibility: co = -(1/Bo)·(∂Bo/∂P) via PCHIP derivative
-    oil_compressibility_2d = compute_fvf_compressibility(pressures, oil_fvf_2d, dtype=dtype)
+    oil_compressibility_2d = compute_fvf_compressibility(pressures, oil_fvf_2d, dtype=dtype)  # type: ignore[arg-type]
     # Compressibility must be non-negative; clamp to physical range
     clip_compressibility(
         oil_compressibility_2d,
@@ -747,7 +747,7 @@ def build_oil_data_from_pvdo(
         oil_density_2d = (stock_tank_oil_density / oil_fvf_2d).astype(dtype, copy=False)
 
     # Compressibility: co = -(1/Bo)·(∂Bo/∂P)
-    oil_compressibility_2d = compute_fvf_compressibility(pressures, oil_fvf_2d, dtype=dtype)
+    oil_compressibility_2d = compute_fvf_compressibility(pressures, oil_fvf_2d, dtype=dtype)  # type: ignore[arg-type]
     clip_compressibility(
         oil_compressibility_2d,
         dtype=dtype,
@@ -996,7 +996,7 @@ def build_gas_data_from_pvdg(
         gas_density_2d = (stock_tank_gas_density / gas_fvf_2d).astype(dtype, copy=False)
 
     # Compressibility: cg ≈ -(1/Bg)·(∂Bg/∂P)
-    gas_compressibility_2d = compute_fvf_compressibility(pressures, gas_fvf_2d, dtype=dtype)
+    gas_compressibility_2d = compute_fvf_compressibility(pressures, gas_fvf_2d, dtype=dtype)  # type: ignore[arg-type]
     clip_compressibility(
         gas_compressibility_2d,
         dtype=dtype,

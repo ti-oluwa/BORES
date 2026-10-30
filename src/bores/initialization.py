@@ -130,7 +130,7 @@ def _rk4_march(
     depths[0], pressures[0] = reference_depth, reference_pressure
     z, p = reference_depth, reference_pressure
     for i in range(n_steps):
-        k1 = gradient_factor * density_fn(p, z)
+        k1 = gradient_factor * density_fn(p, z)  # type: ignore[arg-type]
         k2 = gradient_factor * density_fn(p + 0.5 * h * k1, z + 0.5 * h)  # type: ignore[arg-type]
         k3 = gradient_factor * density_fn(p + 0.5 * h * k2, z + 0.5 * h)  # type: ignore[arg-type]
         k4 = gradient_factor * density_fn(p + h * k3, z + h)  # type: ignore[arg-type]
