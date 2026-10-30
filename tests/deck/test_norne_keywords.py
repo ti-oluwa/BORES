@@ -212,24 +212,28 @@ def test_grid_and_runspec_values(norne):
     assert norne.get("ENDSCALE") == {
         "directional": "NODIR",
         "reversibility": "REVERS",
-        "ntendp": 1,
-        "nsendp": 20,
+        "num_endpoint_depth_tables": 1,
+        "num_endpoint_depth_nodes": 20,
         "combination_mode": 0,
     }
     assert norne.get("SATOPTS") == ["HYSTER"]
     assert norne.get("EQLOPTS") == ["THPRES"]
-    assert norne.get("VFPIDIMS") == {"mxmflo": 30, "mxmthp": 20, "nmmvft": 20}
-    assert norne.get("VFPPDIMS") == {
-        "mxmflo": 19,
-        "mxmthp": 10,
-        "mxmwfr": 10,
-        "mxmgfr": 10,
-        "mxmalq": 0,
-        "nmmvft": 50,
+    assert norne.get("VFPIDIMS") == {
+        "max_flow_rate_values": 30,
+        "max_tubing_head_pressure_values": 20,
+        "max_injection_vfp_tables": 20,
     }
-    assert norne.get("FAULTDIM") == {"mfsegs": 10000}
-    assert norne.get("PIMTDIMS") == {"ntpimt": 1, "nppimt": 51}
-    assert norne.get("NSTACK") == {"nstack": 30}
+    assert norne.get("VFPPDIMS") == {
+        "max_flow_rate_values": 19,
+        "max_tubing_head_pressure_values": 10,
+        "max_water_fraction_values": 10,
+        "max_gas_fraction_values": 10,
+        "max_artificial_lift_values": 0,
+        "max_production_vfp_tables": 50,
+    }
+    assert norne.get("FAULTDIM") == {"max_fault_segments": 10000}
+    assert norne.get("PIMTDIMS") == {"max_multiplier_tables": 1, "max_multiplier_table_rows": 51}
+    assert norne.get("NSTACK") == {"stack_size": 30}
     assert norne.get("GRIDFILE") == {"grid": 0, "egrid": 1}
     assert norne.get("MINPV") == {"minpv": 500.0}
     assert norne.get("MESSAGES") == {
@@ -402,27 +406,42 @@ def test_endscale_defaults_and_validation():
     assert make("ENDSCALE\n /\n").get("ENDSCALE") == {
         "directional": "NODIR",
         "reversibility": "REVERS",
-        "ntendp": 1,
-        "nsendp": 20,
+        "num_endpoint_depth_tables": 1,
+        "num_endpoint_depth_nodes": 20,
         "combination_mode": 0,
     }
     deck = make("ENDSCALE\n DIRECT IRREVERS 3 40 1 /\n")
     assert deck.get("ENDSCALE")["directional"] == "DIRECT"
     assert deck.get("ENDSCALE")["reversibility"] == "IRREVERS"
-    assert deck.get("ENDSCALE")["ntendp"] == 3
+    assert deck.get("ENDSCALE")["num_endpoint_depth_tables"] == 3
     with pytest.raises(DeckParseError, match="'directional'"):
         make("ENDSCALE\n SIDEWAYS /\n").get("ENDSCALE")
 
 
 def test_dimension_records_default_the_items_not_given():
     # Defaults as declared in OPM's keyword definitions.
-    assert make("VFPIDIMS\n 30 /\n").get("VFPIDIMS") == {"mxmflo": 30, "mxmthp": 0, "nmmvft": 0}
+    assert make("VFPIDIMS\n 30 /\n").get("VFPIDIMS") == {
+        "max_flow_rate_values": 30,
+        "max_tubing_head_pressure_values": 0,
+        "max_injection_vfp_tables": 0,
+    }
     assert make("VFPPDIMS\n /\n").get("VFPPDIMS") == dict.fromkeys(
-        ("mxmflo", "mxmthp", "mxmwfr", "mxmgfr", "mxmalq", "nmmvft"), 0
+        (
+            "max_flow_rate_values",
+            "max_tubing_head_pressure_values",
+            "max_water_fraction_values",
+            "max_gas_fraction_values",
+            "max_artificial_lift_values",
+            "max_production_vfp_tables",
+        ),
+        0,
     )
-    assert make("FAULTDIM\n 1* /\n").get("FAULTDIM") == {"mfsegs": 0}
-    assert make("PIMTDIMS\n /\n").get("PIMTDIMS") == {"ntpimt": 0, "nppimt": 0}
-    assert make("NSTACK\n /\n").get("NSTACK") == {"nstack": 10}
+    assert make("FAULTDIM\n 1* /\n").get("FAULTDIM") == {"max_fault_segments": 0}
+    assert make("PIMTDIMS\n /\n").get("PIMTDIMS") == {
+        "max_multiplier_tables": 0,
+        "max_multiplier_table_rows": 0,
+    }
+    assert make("NSTACK\n /\n").get("NSTACK") == {"stack_size": 10}
     assert make("MINPV\n /\n").get("MINPV") == {"minpv": pytest.approx(1e-6)}
 
 

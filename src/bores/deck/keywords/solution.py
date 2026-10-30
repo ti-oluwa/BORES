@@ -319,7 +319,7 @@ def tvdpf(tracer: str) -> TableKeyword:
         deck_file.add_keywords(tvdpf("XYZ"))
 
     One table per record, numbered in the order they are written (`EQLDIMS` gives the most there
-    can be, in its item `nttrvd`). Each table is a list of rows, each with:
+    can be, in its item `max_tracer_concentration_depth_tables`). Each table is a list of rows, each with:
 
     - `depth`: true vertical depth (ft in FIELD, m in METRIC).
     - `concentration`: free-phase tracer concentration at that depth (in the tracer's own unit).

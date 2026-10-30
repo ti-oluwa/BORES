@@ -210,12 +210,12 @@ Example:
 TABDIMS = RecordKeyword[int | str](
     "TABDIMS",
     fields=[
-        Field("ntsfun", int, required=False, default=1),
-        Field("ntpvt", int, required=False, default=1),
-        Field("nssfun", int, required=False, default=20),
-        Field("nppvt", int, required=False, default=20),
-        Field("ntfip", int, required=False, default=1),
-        Field("nrpvt", int, required=False, default=20),
+        Field("num_saturation_tables", int, required=False, default=1),
+        Field("num_pvt_tables", int, required=False, default=1),
+        Field("max_saturation_table_nodes", int, required=False, default=20),
+        Field("max_pvt_pressure_nodes", int, required=False, default=20),
+        Field("max_fluid_in_place_regions", int, required=False, default=1),
+        Field("max_dissolved_gas_ratio_nodes", int, required=False, default=20),
         Field("max_vaporized_oil_ratio_nodes", int, required=False, default=20),
         Field("max_endpoint_depth_tables", int, required=False, default=1),
         Field("num_reservoir_eos_regions", int, required=False, default=1),
@@ -241,17 +241,16 @@ TABDIMS = RecordKeyword[int | str](
 - saturation/PVT table dimensioning.
 
 Provides upper bounds used by Eclipse to pre-allocate table memory.
-All parameters are optional with simulator defaults; only the first
-six are parsed here (the most commonly needed ones).
+All parameters are optional with simulator defaults.
 
 Fields:
 
-- `ntsfun`: number of saturation-function families / regions.
-- `ntpvt`: number of PVT-function families / regions.
-- `nssfun`: max number of nodes in any saturation table.
-- `nppvt`: max number of pressure nodes in any PVT table.
-- `ntfip`: max number of FIP regions (`FIPNUM`).
-- `nrpvt`: max number of Rs/Rv nodes in a live-oil / wet-gas table.
+- `num_saturation_tables` (`NTSFUN`): number of saturation function tables (`SATNUM` regions).
+- `num_pvt_tables` (`NTPVT`): number of PVT tables (`PVTNUM` regions).
+- `max_saturation_table_nodes` (`NSSFUN`): max number of nodes in any saturation table.
+- `max_pvt_pressure_nodes` (`NPPVT`): max number of pressure nodes in any PVT table.
+- `max_fluid_in_place_regions` (`NTFIP`): max number of fluid-in-place regions (`FIPNUM`).
+- `max_dissolved_gas_ratio_nodes` (`NRPVT`): max number of `Rs` nodes in a live-oil table.
 - `max_vaporized_oil_ratio_nodes`: max number of `Rv` nodes in a wet-gas table.
 - `max_endpoint_depth_tables`: max number of end-point scaling versus depth tables.
 - `num_reservoir_eos_regions`: number of equation-of-state regions for the reservoir
@@ -277,10 +276,10 @@ Fields:
 WELLDIMS = RecordKeyword[int](
     "WELLDIMS",
     fields=[
-        Field("nwmaxz", int, required=False, default=0),
-        Field("ncwmax", int, required=False, default=0),
-        Field("ngmaxz", int, required=False, default=0),
-        Field("nwgmax", int, required=False, default=0),
+        Field("max_wells", int, required=False, default=0),
+        Field("max_connections_per_well", int, required=False, default=0),
+        Field("max_groups", int, required=False, default=0),
+        Field("max_wells_per_group", int, required=False, default=0),
         Field("max_separator_stages", int, required=False, default=5),
         Field("max_surface_streams", int, required=False, default=10),
         Field("max_mixtures", int, required=False, default=5),
@@ -301,10 +300,10 @@ Provides upper bounds for well/group memory allocation.
 
 Fields:
 
-- `nwmaxz`: maximum number of wells.
-- `ncwmax`: maximum number of connections (completions) per well.
-- `ngmaxz`: maximum number of groups.
-- `nwgmax`: maximum number of wells in any one group.
+- `max_wells` (`NWMAXZ`): maximum number of wells.
+- `max_connections_per_well` (`NCWMAX`): maximum number of connections (completions) per well.
+- `max_groups` (`NGMAXZ`): maximum number of groups.
+- `max_wells_per_group` (`NWGMAX`): maximum number of wells in any one group.
 - `max_separator_stages`: maximum number of stages in a surface separator system (default 5).
 - `max_surface_streams`: maximum number of surface streams (default 10).
 - `max_mixtures`: maximum number of stream mixtures (default 5).
@@ -323,11 +322,11 @@ Fields:
 EQLDIMS = RecordKeyword[int](
     "EQLDIMS",
     fields=[
-        Field("ntequl", int, required=False, default=1),
-        Field("ndprvd", int, required=False, default=2000),
-        Field("ndrxvd", int, required=False, default=20),
-        Field("nttrvd", int, required=False, default=1),
-        Field("nstrvd", int, required=False, default=20),
+        Field("max_equilibration_regions", int, required=False, default=1),
+        Field("max_pressure_depth_nodes", int, required=False, default=2000),
+        Field("max_rs_rv_depth_nodes", int, required=False, default=20),
+        Field("max_tracer_concentration_depth_tables", int, required=False, default=1),
+        Field("max_tracer_concentration_depth_nodes", int, required=False, default=20),
     ],
 )
 """
@@ -338,26 +337,31 @@ All parameters are optional with simulator defaults.
 
 Fields:
 
-- `ntequl`: maximum number of equilibration regions.
-- `ndprvd`: maximum number of depth nodes in pressure-depth tables.
-- `ndrxvd`: maximum number of depth nodes in Rs/Rv-depth tables.
-- `nttrvd`: maximum number of depth nodes in temp-depth tables.
-- `nstrvd`: maximum number of depth nodes in saturation-depth tables.
+- `max_equilibration_regions` (`NTEQUL`): maximum number of equilibration regions (`EQLNUM`).
+  Default 1.
+- `max_pressure_depth_nodes` (`NDPRVD`): maximum number of depth nodes in pressure-depth tables.
+  Default 2000.
+- `max_rs_rv_depth_nodes` (`NDRXVD`): maximum number of depth nodes in the `Rs`/`Rv`-depth
+  tables (`RSVD`, `RVVD`, ...). Default 20.
+- `max_tracer_concentration_depth_tables` (`NTTRVD`): maximum number of tracer concentration-
+  depth tables (`TVDP<name>`). Default 1.
+- `max_tracer_concentration_depth_nodes` (`NSTRVD`): maximum number of depth nodes in any tracer
+  concentration-depth table. Default 20.
 """
 
 REGDIMS = RecordKeyword[int](
     "REGDIMS",
     fields=[
-        Field("ntfip", int, required=False, default=1),
-        Field("nmfip", int, required=False, default=1),
-        Field("nrfreg", int, required=False, default=0),
-        Field("ntfreg", int, required=False, default=0),
+        Field("max_fluid_in_place_regions", int, required=False, default=1),
+        Field("max_fluid_in_place_region_sets", int, required=False, default=1),
+        Field("max_reservoir_regions", int, required=False, default=0),
+        Field("max_tracer_fip_regions", int, required=False, default=0),
         Field("max_etrack", int, required=False, default=0),
-        Field("ntcreg", int, required=False, default=1),
-        Field("max_opernum", int, required=False, default=0),
-        Field("max_operate_dwork", int, required=False, default=0),
-        Field("max_operate_iwork", int, required=False, default=0),
-        Field("nplmix", int, required=False, default=1),
+        Field("max_coal_regions", int, required=False, default=1),
+        Field("max_opernum_regions", int, required=False, default=0),
+        Field("max_operate_real_work_size", int, required=False, default=0),
+        Field("max_operate_integer_work_size", int, required=False, default=0),
+        Field("max_polymer_mixing_regions", int, required=False, default=1),
     ],
 )
 """
@@ -368,14 +372,18 @@ All parameters are optional with simulator defaults.
 
 Fields:
 
-- `ntfip`: maximum number of FIP regions.
-- `nmfip`: maximum number of multiply-defined FIP regions.
-- `nrfreg`: maximum number of reservoir fluid-in-place regions.
-- `ntfreg`: maximum number of tracer FIP regions.
+- `max_fluid_in_place_regions` (`NTFIP`): maximum number of fluid-in-place regions (`FIPNUM`).
+- `max_fluid_in_place_region_sets` (`NMFIPR`): maximum number of fluid-in-place region sets
+  (`FIPNUM` and any other `FIP<name>` array). Default 1.
+- `max_reservoir_regions` (`NRFREG`): maximum number of reservoir regions.
+- `max_tracer_fip_regions` (`NTFREG`): maximum number of tracer fluid-in-place regions.
 - `max_etrack`: maximum number of extra tracked quantities.
-- `ntcreg`, `max_opernum`, `max_operate_dwork`, `max_operate_iwork`: dimensions of the
-  coal, `OPERNUM` and `OPERATE` features.
-- `nplmix`: maximum number of polymer mixing regions (the tenth item).
+- `max_coal_regions` (`NTCREG`): maximum number of coal regions (`COALNUM`). Default 1.
+- `max_opernum_regions`: maximum number of `OPERNUM` regions.
+- `max_operate_real_work_size`: size of the real-valued work space for `OPERATE`.
+- `max_operate_integer_work_size`: size of the integer work space for `OPERATE`.
+- `max_polymer_mixing_regions` (`NPLMIX`): maximum number of polymer mixing regions (the tenth
+  item). Default 1.
 """
 
 ENDSCALE = RecordKeyword[int | str](
@@ -395,8 +403,8 @@ ENDSCALE = RecordKeyword[int | str](
             default="REVERS",
             options={"REVERS", "IRREVERS"},
         ),
-        Field("ntendp", int, required=False, default=1),
-        Field("nsendp", int, required=False, default=20),
+        Field("num_endpoint_depth_tables", int, required=False, default=1),
+        Field("num_endpoint_depth_nodes", int, required=False, default=20),
         Field("combination_mode", int, required=False, default=0),
     ],
 )
@@ -411,8 +419,8 @@ Fields:
   `"DIRECT"`, a set per direction.
 - `reversibility`: `"REVERS"` (default), the scaling of an imbibition curve is reversible, or
   `"IRREVERS"`.
-- `ntendp`: number of end-point versus depth tables (default 1).
-- `nsendp`: number of nodes in each of those tables (default 20).
+- `num_endpoint_depth_tables` (`NTENDP`): number of end-point versus depth tables (default 1).
+- `num_endpoint_depth_nodes` (`NSENDP`): number of nodes in each of those tables (default 20).
 - `combination_mode`: end-point scaling combination mode (default 0).
 """
 
@@ -437,9 +445,9 @@ Options are not checked against a list, since the set Eclipse accepts depends on
 VFPIDIMS = RecordKeyword[int](
     "VFPIDIMS",
     fields=[
-        Field("mxmflo", int, required=False, default=0),
-        Field("mxmthp", int, required=False, default=0),
-        Field("nmmvft", int, required=False, default=0),
+        Field("max_flow_rate_values", int, required=False, default=0),
+        Field("max_tubing_head_pressure_values", int, required=False, default=0),
+        Field("max_injection_vfp_tables", int, required=False, default=0),
     ],
 )
 """
@@ -449,20 +457,21 @@ Every item defaults to 0.
 
 Fields:
 
-- `mxmflo`: maximum number of flow-rate values in any table.
-- `mxmthp`: maximum number of tubing-head-pressure values in any table.
-- `nmmvft`: maximum number of injection VFP tables.
+- `max_flow_rate_values` (`MXMFLO`): maximum number of flow-rate values in any table.
+- `max_tubing_head_pressure_values` (`MXMTHP`): maximum number of tubing-head-pressure values in
+  any table.
+- `max_injection_vfp_tables` (`NMMVFT`): maximum number of injection VFP tables.
 """
 
 VFPPDIMS = RecordKeyword[int](
     "VFPPDIMS",
     fields=[
-        Field("mxmflo", int, required=False, default=0),
-        Field("mxmthp", int, required=False, default=0),
-        Field("mxmwfr", int, required=False, default=0),
-        Field("mxmgfr", int, required=False, default=0),
-        Field("mxmalq", int, required=False, default=0),
-        Field("nmmvft", int, required=False, default=0),
+        Field("max_flow_rate_values", int, required=False, default=0),
+        Field("max_tubing_head_pressure_values", int, required=False, default=0),
+        Field("max_water_fraction_values", int, required=False, default=0),
+        Field("max_gas_fraction_values", int, required=False, default=0),
+        Field("max_artificial_lift_values", int, required=False, default=0),
+        Field("max_production_vfp_tables", int, required=False, default=0),
     ],
 )
 """
@@ -472,28 +481,30 @@ Every item defaults to 0.
 
 Fields:
 
-- `mxmflo`: maximum number of flow-rate values in any table.
-- `mxmthp`: maximum number of tubing-head-pressure values in any table.
-- `mxmwfr`: maximum number of water-fraction values in any table.
-- `mxmgfr`: maximum number of gas-fraction values in any table.
-- `mxmalq`: maximum number of artificial-lift-quantity values in any table.
-- `nmmvft`: maximum number of production VFP tables.
+- `max_flow_rate_values` (`MXMFLO`): maximum number of flow-rate values in any table.
+- `max_tubing_head_pressure_values` (`MXMTHP`): maximum number of tubing-head-pressure values in
+  any table.
+- `max_water_fraction_values` (`MXMWFR`): maximum number of water-fraction values in any table.
+- `max_gas_fraction_values` (`MXMGFR`): maximum number of gas-fraction values in any table.
+- `max_artificial_lift_values` (`MXMALQ`): maximum number of artificial-lift-quantity values in
+  any table.
+- `max_production_vfp_tables` (`NMMVFT`): maximum number of production VFP tables.
 """
 
 FAULTDIM = RecordKeyword[int](
     "FAULTDIM",
-    fields=[Field("mfsegs", int, required=False, default=0)],
+    fields=[Field("max_fault_segments", int, required=False, default=0)],
 )
 """
-`FAULTDIM MFSEGS /` - fault dimensioning. `mfsegs` is the maximum number of fault segments
+`FAULTDIM MFSEGS /` - fault dimensioning. `max_fault_segments` is the maximum number of fault segments
 (default 0).
 """
 
 PIMTDIMS = RecordKeyword[int](
     "PIMTDIMS",
     fields=[
-        Field("ntpimt", int, required=False, default=0),
-        Field("nppimt", int, required=False, default=0),
+        Field("max_multiplier_tables", int, required=False, default=0),
+        Field("max_multiplier_table_rows", int, required=False, default=0),
     ],
 )
 """
@@ -502,16 +513,16 @@ tables. Every item defaults to 0.
 
 Fields:
 
-- `ntpimt`: maximum number of multiplier tables.
-- `nppimt`: maximum number of rows in any multiplier table.
+- `max_multiplier_tables` (`NTPIMT`): maximum number of multiplier tables.
+- `max_multiplier_table_rows` (`NPPIMT`): maximum number of rows in any multiplier table.
 """
 
 NSTACK = RecordKeyword[int](
     "NSTACK",
-    fields=[Field("nstack", int, required=False, default=10)],
+    fields=[Field("stack_size", int, required=False, default=10)],
 )
 """
-`NSTACK N /` - size of the linear solver's search-direction stack (default 10). It may also
+`NSTACK N /` - size of the linear solver's search-direction stack, `stack_size` (default 10). It may also
 appear in `SCHEDULE` to change the size from that point on; only the first occurrence is read.
 """
 

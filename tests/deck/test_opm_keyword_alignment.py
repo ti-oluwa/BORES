@@ -28,16 +28,19 @@ def test_wpave_defaults():
 def test_regdims_item_five_is_max_etrack_and_nplmix_is_the_tenth():
     record = read("REGDIMS\n 1 2 3 4 5 6 7 8 9 10 /\n", "REGDIMS")
     assert record["max_etrack"] == 5
-    assert record["ntcreg"] == 6
-    assert record["nplmix"] == 10
-    assert read("REGDIMS\n /\n", "REGDIMS")["nmfip"] == 1
+    assert record["max_coal_regions"] == 6
+    assert record["max_polymer_mixing_regions"] == 10
+    assert read("REGDIMS\n /\n", "REGDIMS")["max_fluid_in_place_region_sets"] == 1
 
 
 def test_dimension_defaults():
-    assert read("EQLDIMS\n /\n", "EQLDIMS")["ndprvd"] == 2000
-    assert read("EQLDIMS\n /\n", "EQLDIMS")["nttrvd"] == 1
+    assert read("EQLDIMS\n /\n", "EQLDIMS")["max_pressure_depth_nodes"] == 2000
+    assert read("EQLDIMS\n /\n", "EQLDIMS")["max_tracer_concentration_depth_tables"] == 1
     welldims = read("WELLDIMS\n /\n", "WELLDIMS")
-    assert [welldims[name] for name in ("nwmaxz", "ncwmax", "ngmaxz", "nwgmax")] == [0, 0, 0, 0]
+    assert [
+        welldims[name]
+        for name in ("max_wells", "max_connections_per_well", "max_groups", "max_wells_per_group")
+    ] == [0, 0, 0, 0]
     assert welldims["max_separator_stages"] == 5 and welldims["max_gpp_table_rows"] == 201
 
 
@@ -63,7 +66,7 @@ def test_tabdims_items_after_the_sixth_are_read():
 
 def test_welldims_items_after_the_fourth_are_read():
     record = read("WELLDIMS\n 10 20 3 5 1 2 3 4 5 6 7 8 9 10 /\n", "WELLDIMS")
-    assert record["nwgmax"] == 5
+    assert record["max_wells_per_group"] == 5
     assert record["max_separator_stages"] == 1
     assert record["max_gpp_table_rows"] == 10
 
