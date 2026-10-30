@@ -8,14 +8,14 @@ most other reservoir simulators to describe/declare corner-point pillar grids.
 
 `SPECGRID`, `DIMENS`, `COORD`, `ZCORN`, `ACTNUM`, `GRIDUNIT`,
 `TOPS`, `DX`, `DY`, `DZ`, `DXV`, `DYV`, `DZV`,
-`MAPAXES`, `MAPUNITS`, `PINCH`, `PINCHOUT`, `NNC`, `FAULTS`, `MULTFLT`,
+`MAPAXES`, `MAPUNITS`, `GDORIENT`, `PINCH`, `PINCHOUT`, `NNC`, `FAULTS`, `MULTFLT`,
 `MULTX`, `MULTY`, `MULTZ`, `MULTX-`, `MULTY-`, `MULTZ-`.
 
 **Supported keywords (write)**:
 
-`SPECGRID`, `GRIDUNIT`, `MAPAXES`, `MAPUNITS`,
+`SPECGRID`, `GRIDUNIT`, `GDORIENT`, `MAPAXES`, `MAPUNITS`,
 `COORD`, `ZCORN`, `ACTNUM` (corner-point grids);
-`SPECGRID`, `GRIDUNIT`, `MAPAXES`, `MAPUNITS`,
+`SPECGRID`, `GRIDUNIT`, `GDORIENT`, `MAPAXES`, `MAPUNITS`,
 `TOPS`, `DXV`, `DYV`, `DZV`, `ACTNUM` (Cartesian grids).
 
 Both grid types also emit (when present on the grid):
@@ -32,7 +32,13 @@ import numpy as np
 import numpy.typing as npt
 
 from bores.constants import c
-from bores.datastructures import MapAxes
+from bores.datastructures import (
+    DepthDirection,
+    GridOrientation,
+    Handedness,
+    IndexDirection,
+    MapAxes,
+)
 from bores.deck.core import DeckParseError
 from bores.deck.file import DeckFile
 from bores.deck.precheck import find_missing
@@ -133,6 +139,80 @@ def build_map_axes(deck_file: DeckFile) -> MapAxes | None:
         ),
         unit_system=map_unit,
     )
+
+
+INDEX_DIRECTION_MAP: dict[str, IndexDirection] = {
+    "INC": IndexDirection.INCREASING,
+    "DEC": IndexDirection.DECREASING,
+}
+"""`GDORIENT` index-direction keywords, by deck spelling."""
+
+DEPTH_DIRECTION_MAP: dict[str, DepthDirection] = {
+    "DOWN": DepthDirection.DOWN,
+    "UP": DepthDirection.UP,
+}
+"""`GDORIENT` vertical-direction keywords, by deck spelling."""
+
+HANDEDNESS_MAP: dict[str, Handedness] = {
+    "RIGHT": Handedness.RIGHT,
+    "LEFT": Handedness.LEFT,
+}
+"""`GDORIENT` handedness keywords, by deck spelling."""
+
+INDEX_DIRECTION_TO_DECK: dict[IndexDirection, str] = {
+    direction: keyword for keyword, direction in INDEX_DIRECTION_MAP.items()
+}
+DEPTH_DIRECTION_TO_DECK: dict[DepthDirection, str] = {
+    direction: keyword for keyword, direction in DEPTH_DIRECTION_MAP.items()
+}
+HANDEDNESS_TO_DECK: dict[Handedness, str] = {
+    handedness: keyword for keyword, handedness in HANDEDNESS_MAP.items()
+}
+
+
+def build_grid_orientation(deck_file: DeckFile) -> GridOrientation | None:
+    """
+    Construct a `GridOrientation` from the parsed `GDORIENT` keyword.
+
+    :param deck_file: Parsed deck.
+    :returns: The orientation, with defaults for any item the record leaves out, or `None` if
+        `GDORIENT` is absent.
+    """
+    record = deck_file.get("GDORIENT")
+    if record is None:
+        return None
+
+    return GridOrientation(
+        i_direction=INDEX_DIRECTION_MAP[record["i_direction"]],
+        j_direction=INDEX_DIRECTION_MAP[record["j_direction"]],
+        k_direction=INDEX_DIRECTION_MAP[record["k_direction"]],
+        depth_direction=DEPTH_DIRECTION_MAP[record["z_direction"]],
+        handedness=HANDEDNESS_MAP[record["handedness"]],
+    )
+
+
+def warn_orientation_not_applied(orientation: GridOrientation) -> None:
+    """
+    Warn that a non-default `GDORIENT` is recorded on the grid but does not change its geometry.
+
+    :param orientation: The declared orientation.
+    """
+    items = orientation.non_default_items
+    if not items:
+        return
+
+    declared = ", ".join(f"{name}={value}" for name, value in items.items())
+    message = (
+        f"`GDORIENT` declares a non-default grid orientation ({declared}). It is kept on "
+        "`grid.orientation` and written back by `dump_grdecl`, but the grid geometry is used as "
+        "written."
+    )
+    if orientation.depth_direction is DepthDirection.UP:
+        message += (
+            " Vertical coordinates are treated as depths that increase downward, so a deck whose "
+            "vertical coordinates are elevations will have its gravity head reversed."
+        )
+    warnings.warn(message, stacklevel=3)
 
 
 def get_deck_nnc_volume_factor(unit_system: UnitSystem) -> float:
@@ -383,6 +463,7 @@ def load_grdecl(
     * Activity:          `ACTNUM`
     * Units:             `GRIDUNIT`, `FIELD`, `METRIC`, `LAB`, `SI`
     * Map CRS:           `MAPAXES`, `MAPUNITS`
+    * Orientation:       `GDORIENT` (recorded on `grid.orientation`, not applied)
     * Pinchouts:         `PINCH`, `PINCHOUT`
     * Connections:       `NNC` (with transmissibilities)
     * Faults:            `FAULTS`, `MULTFLT`
@@ -443,7 +524,7 @@ def dump_grdecl(
     Emits all keywords that can be reconstructed from the grid object.
     The full set that may appear in the output is:
 
-    `SPECGRID`, `GRIDUNIT`, `MAPAXES`, `MAPUNITS`,
+    `SPECGRID`, `GRIDUNIT`, `GDORIENT` (when not the default), `MAPAXES`, `MAPUNITS`,
     `COORD` / `ZCORN` (corner-point) or `TOPS` / `DXV` / `DYV` /
     `DZV` (Cartesian), `ACTNUM`, `MULTX`, `MULTY`, `MULTZ`,
     `MULTX-`, `MULTY-`, `MULTZ-`, `FAULTS`, `MULTFLT`,
@@ -520,6 +601,9 @@ def assemble_grid(
 
     unit_system = detect_unit_system(deck_file)
     map_axes = build_map_axes(deck_file)
+    orientation = build_grid_orientation(deck_file)
+    if orientation is not None:
+        warn_orientation_not_applied(orientation)
 
     pinch_rec = deck_file.get("PINCH")
     pinch = pinch_rec["thickness"] if pinch_rec is not None else None
@@ -529,6 +613,7 @@ def assemble_grid(
     meta: dict[str, typing.Any] = dict(metadata or {})
     meta.update(
         map_axes=map_axes,
+        orientation=orientation,
         pinch=pinch,
         nx=nx,
         ny=ny,
@@ -797,6 +882,19 @@ def _emit_gridunit(lines: list[str], unit_system: UnitSystem) -> None:
     unit_str = US_TO_GRIDUNIT.get(unit_system, "FEET")
     lines.append("GRIDUNIT")
     lines.append(f"  '{unit_str}  ' '        ' /")
+    lines.append("")
+
+
+def _emit_gdorient(lines: list[str], orientation: GridOrientation) -> None:
+    """Append a `GDORIENT` block."""
+    lines.append("GDORIENT")
+    lines.append(
+        f"  {INDEX_DIRECTION_TO_DECK[orientation.i_direction]}"
+        f"  {INDEX_DIRECTION_TO_DECK[orientation.j_direction]}"
+        f"  {INDEX_DIRECTION_TO_DECK[orientation.k_direction]}"
+        f"  {DEPTH_DIRECTION_TO_DECK[orientation.depth_direction]}"
+        f"  {HANDEDNESS_TO_DECK[orientation.handedness]}  /"
+    )
     lines.append("")
 
 
@@ -1174,6 +1272,10 @@ def build_grdecl_cartesian_text(grid: Grid, *, actnum: ActNumArray | None = None
     _emit_specgrid(lines, nx, ny, nz)
     _emit_gridunit(lines, grid.unit_system)
 
+    orientation: GridOrientation | None = meta.get("orientation")
+    if orientation is not None and not orientation.is_default:
+        _emit_gdorient(lines, orientation)
+
     map_axes: MapAxes | None = meta.get("map_axes")
     if map_axes is not None:
         _emit_mapaxes(lines, map_axes)
@@ -1253,6 +1355,10 @@ def build_grdecl_corner_point_text(grid: Grid, *, actnum: ActNumArray | None = N
 
     _emit_specgrid(lines, nx, ny, nz)
     _emit_gridunit(lines, grid.unit_system)
+
+    orientation: GridOrientation | None = meta.get("orientation")
+    if orientation is not None and not orientation.is_default:
+        _emit_gdorient(lines, orientation)
 
     map_axes: MapAxes | None = meta.get("map_axes")
     if map_axes is not None:

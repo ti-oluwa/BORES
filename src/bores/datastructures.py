@@ -1,3 +1,4 @@
+import enum
 import typing
 import warnings
 from contextvars import ContextVar, Token
@@ -26,7 +27,15 @@ DType = typing.TypeVar("DType", float, np.floating)
 ShapeT = typing.TypeVar("ShapeT", bound=tuple[int, ...])
 
 
-__all__ = ["ContextFlag", "GridDimensions", "MapAxes"]
+__all__ = [
+    "ContextFlag",
+    "DepthDirection",
+    "GridDimensions",
+    "GridOrientation",
+    "Handedness",
+    "IndexDirection",
+    "MapAxes",
+]
 
 
 class GridDimensions(NamedTuple):
@@ -183,6 +192,110 @@ class MapAxes:
             map_y_axis_point=scale(self.map_y_axis_point, factor),
             unit_system=target,
         )
+
+
+class IndexDirection(enum.Enum):
+    """Whether a cell index increases or decreases along its coordinate axis."""
+
+    INCREASING = "increasing"
+    """The index grows in the positive direction of the axis."""
+
+    DECREASING = "decreasing"
+    """The index grows in the negative direction of the axis."""
+
+    def __str__(self) -> str:
+        return self.value
+
+    @classmethod
+    def _missing_(cls, value: object) -> Self | None:
+        lowered = str(value).lower()
+        for member in cls:
+            if member.value == lowered:
+                return member
+        return None
+
+
+class DepthDirection(enum.Enum):
+    """Which way the vertical coordinate points."""
+
+    DOWN = "down"
+    """Vertical coordinates are depths: they increase going down."""
+
+    UP = "up"
+    """Vertical coordinates are elevations: they increase going up."""
+
+    def __str__(self) -> str:
+        return self.value
+
+    @classmethod
+    def _missing_(cls, value: object) -> Self | None:
+        lowered = str(value).lower()
+        for member in cls:
+            if member.value == lowered:
+                return member
+        return None
+
+
+class Handedness(enum.Enum):
+    """Whether the grid's coordinate axes form a right-handed or a left-handed system."""
+
+    RIGHT = "right"
+    """Right-handed axes."""
+
+    LEFT = "left"
+    """Left-handed axes."""
+
+    def __str__(self) -> str:
+        return self.value
+
+    @classmethod
+    def _missing_(cls, value: object) -> Self | None:
+        lowered = str(value).lower()
+        for member in cls:
+            if member.value == lowered:
+                return member
+        return None
+
+
+@attrs.frozen(slots=True, kw_only=True)
+class GridOrientation:
+    """
+    Orientation of a grid's axes, as declared by the `GDORIENT` keyword.
+
+    It says which way the cell indices run, which way the vertical coordinate points and whether
+    the axes are right- or left-handed. The grid geometry is always used as written; this
+    records the declaration so that it can be read back and written out again.
+    """
+
+    i_direction: IndexDirection = IndexDirection.INCREASING
+    """Whether the `I` index increases or decreases along the x axis."""
+
+    j_direction: IndexDirection = IndexDirection.INCREASING
+    """Whether the `J` index increases or decreases along the y axis."""
+
+    k_direction: IndexDirection = IndexDirection.INCREASING
+    """Whether the `K` index increases or decreases along the vertical axis."""
+
+    depth_direction: DepthDirection = DepthDirection.DOWN
+    """Whether vertical coordinates are depths (`DOWN`) or elevations (`UP`)."""
+
+    handedness: Handedness = Handedness.RIGHT
+    """Whether the axes are right-handed or left-handed."""
+
+    @property
+    def is_default(self) -> bool:
+        """Whether every item has its default value, which is what a deck without `GDORIENT` gets."""
+        return self == GridOrientation()
+
+    @property
+    def non_default_items(self) -> dict[str, str]:
+        """The items that differ from their default, by field name, with the value as text."""
+        default = GridOrientation()
+        return {
+            field.name: str(getattr(self, field.name))
+            for field in attrs.fields(type(self))
+            if getattr(self, field.name) != getattr(default, field.name)
+        }
 
 
 class ContextFlag(typing.Generic[T]):

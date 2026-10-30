@@ -9,7 +9,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 from typing_extensions import Self
 
-from bores.datastructures import GridDimensions, MapAxes
+from bores.datastructures import GridDimensions, GridOrientation, MapAxes
 from bores.deck.file import DeckFile
 from bores.errors import (
     CellNotFoundError,
@@ -1491,6 +1491,17 @@ class Grid:
     def map_axes(self) -> MapAxes | None:
         if self.metadata is not None:
             return self.metadata.get("map_axes", None)
+        return None
+
+    @property
+    def orientation(self) -> GridOrientation | None:
+        """
+        The axis orientation declared by `GDORIENT`, or `None` if the grid was not given one.
+
+        It is a record of the declaration only. The grid geometry is used as written.
+        """
+        if self.metadata is not None:
+            return self.metadata.get("orientation", None)
         return None
 
     def flat_index(self, i: Integer, j: Integer, k: Integer) -> Integer:
