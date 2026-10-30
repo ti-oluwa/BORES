@@ -766,7 +766,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
         unit_system = deck_file.unit_system
 
         def require(keyword: str) -> list[dict[str, typing.Any]]:
-            all_regions = deck_file.get(keyword)
+            all_regions = deck_file.get_shared(keyword)
             if all_regions is None or region_index >= len(all_regions):
                 raise ValidationError(
                     f"Keyword `{keyword}` not found or region index {region_index} "
@@ -1156,7 +1156,7 @@ class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
         region_index = max(satnum - 1, 0)
 
         def has(keyword: str) -> bool:
-            all_regions = deck_file.get(keyword)
+            all_regions = deck_file.get_shared(keyword)
             if all_regions is None:
                 return False
             return region_index < len(all_regions) and bool(all_regions[region_index])

@@ -11,6 +11,7 @@ import numpy as np
 from bores.constants import c
 from bores.deck.core import DeckParseError
 from bores.deck.file import DeckFile
+from bores.deck.precheck import find_missing
 from bores.errors import NotSupportedError, ValidationError
 from bores.grids.base import Grid
 from bores.schedule.actions import RunSequence
@@ -83,10 +84,12 @@ if typing.TYPE_CHECKING:
     from bores.blackoil.compile import CompiledBlackOilModel
 
 __all__ = [
+    "WELL_REQUIRED_KEYWORDS",
     "apply_d_factors",
     "apply_economic_limits",
     "apply_guide_rates",
     "apply_well_segments",
+    "check_well_keywords",
     "from_deck_gas_rate",
     "get_fluid_in_place_regions",
     "is_whole_well_record",
@@ -495,16 +498,16 @@ def load_well_segments(
     :param deck_file: The deck to read from.
     :param wells: An already-built `Wells`, from `load_wells`.
     :param compdat_records: Every `COMPDAT` record in the deck, in the
-        same order `wells` was built from. Defaults to `deck_file.get("COMPDAT")`.
+        same order `wells` was built from. Defaults to `deck_file.get_shared("COMPDAT")`.
     :returns: `wells`, with every well named in a `WELSEGS` record
         updated; a well `WELSEGS` doesn't mention is returned unchanged.
     """
-    welsegs_records = deck_file.get("WELSEGS")
-    compsegs_records = deck_file.get("COMPSEGS")
+    welsegs_records = deck_file.get_shared("WELSEGS")
+    compsegs_records = deck_file.get_shared("COMPSEGS")
     if not welsegs_records or not compsegs_records:
         return wells
     resolved_compdat_records: typing.Sequence[typing.Mapping[str, typing.Any]] = (
-        compdat_records if compdat_records is not None else (deck_file.get("COMPDAT") or [])
+        compdat_records if compdat_records is not None else (deck_file.get_shared("COMPDAT") or [])
     )
     return apply_well_segments(
         wells,
@@ -1420,6 +1423,26 @@ def apply_d_factors(
         wells[well_name] = attrs.evolve(wells[well_name], d_factor=d_factor)
 
 
+WELL_REQUIRED_KEYWORDS = ("WELSPECS", "COMPDAT")
+"""The deck keywords a well roster cannot be built without. The controls and limits are optional."""
+
+
+def check_well_keywords(deck_file: DeckFile) -> None:
+    """
+    Check that the deck defines wells and their completions, before any of it is read.
+
+    :param deck_file: The deck the wells are to be loaded from.
+    :raises ValidationError: If `WELSPECS` or `COMPDAT` is missing, naming each one that is.
+    """
+    missing = find_missing(deck_file, all_of=WELL_REQUIRED_KEYWORDS)
+    if missing:
+        raise ValidationError(
+            f"Cannot load wells from the deck: {', '.join(missing)} "
+            f"{'is' if len(missing) == 1 else 'are'} missing. "
+            "A well needs a `WELSPECS` record and at least one `COMPDAT` completion."
+        )
+
+
 def load_wells(deck_file: DeckFile, grid: Grid, current_time: float = 0.0) -> Wells:
     """
     Builds the full well roster from a parsed deck, covering every well
@@ -1432,19 +1455,20 @@ def load_wells(deck_file: DeckFile, grid: Grid, current_time: float = 0.0) -> We
         before this time is marked active; anything later is marked
         pending. Defaults to zero, the start of the run.
     :returns: Wells for every well the deck defines, at any point in the schedule.
-    :raises ValidationError: If the deck has no grid dimensions.
+    :raises ValidationError: If the deck has no grid dimensions, or lacks `WELSPECS` or `COMPDAT`.
     """
     if deck_file.dimensions is None:
         raise ValidationError(
             "Deck has no `SPECGRID`/`DIMENS`; `COMPDAT` (I, J, K) can't be resolved."
         )
+    check_well_keywords(deck_file)
 
-    welspecs = deck_file.get("WELSPECS") or []
-    compdat = deck_file.get("COMPDAT") or []
-    wconinje = deck_file.get("WCONINJE") or []
-    wconprod = deck_file.get("WCONPROD") or []
-    wpimult = deck_file.get("WPIMULT")
-    welopen = deck_file.get("WELOPEN")
+    welspecs = deck_file.get_shared("WELSPECS") or []
+    compdat = deck_file.get_shared("COMPDAT") or []
+    wconinje = deck_file.get_shared("WCONINJE") or []
+    wconprod = deck_file.get_shared("WCONPROD") or []
+    wpimult = deck_file.get_shared("WPIMULT")
+    welopen = deck_file.get_shared("WELOPEN")
     injector_names = {record["well"] for record in wconinje}
     wells = load_wells_from_records(
         grid=grid,
@@ -1473,13 +1497,13 @@ def load_well_controls(deck_file: DeckFile, current_time: float = 0.0) -> WellCo
     :returns: Well controls for every well that has a control in effect by this time.
     """
     controls = load_controls_from_records(
-        wconprod_records=deck_file.get("WCONPROD") or [],
-        wconinje_records=deck_file.get("WCONINJE") or [],
-        weltarg_records=deck_file.get("WELTARG"),
+        wconprod_records=deck_file.get_shared("WCONPROD") or [],
+        wconinje_records=deck_file.get_shared("WCONINJE") or [],
+        weltarg_records=deck_file.get_shared("WELTARG"),
         unit_system=deck_file.unit_system,
         current_time=current_time,
     )
-    wecon = deck_file.get("WECON") or []
+    wecon = deck_file.get_shared("WECON") or []
     if wecon:
         apply_economic_limits(
             controls=controls,
@@ -1488,7 +1512,7 @@ def load_well_controls(deck_file: DeckFile, current_time: float = 0.0) -> WellCo
             current_time=current_time,
         )
 
-    wgrupcon = deck_file.get("WGRUPCON") or []
+    wgrupcon = deck_file.get_shared("WGRUPCON") or []
     if wgrupcon:
         apply_guide_rates(controls=controls, wgrupcon_records=wgrupcon, current_time=current_time)
     return controls
@@ -1502,7 +1526,7 @@ def load_groups(deck_file: DeckFile) -> WellGroups:
     :returns: Well groups from `GRUPTREE`.
     :raises DeckParseError: If the deck has no `GRUPTREE`.
     """
-    gruptree = deck_file.get("GRUPTREE")
+    gruptree = deck_file.get_shared("GRUPTREE")
     if not gruptree:
         raise DeckParseError("Cannot load well groups from deck. `GRUPTREE` is missing.")
     return load_groups_from_records(gruptree)
@@ -1520,8 +1544,8 @@ def load_group_controls(deck_file: DeckFile, current_time: float = 0.0) -> Group
     :returns: Group controls for every group that has a control in effect by this time.
     :raises DeckParseError: If the deck has neither `GCONPROD` nor `GCONINJE`.
     """
-    gconprod = deck_file.get("GCONPROD") or []
-    gconinje = deck_file.get("GCONINJE") or []
+    gconprod = deck_file.get_shared("GCONPROD") or []
+    gconinje = deck_file.get_shared("GCONINJE") or []
     if not gconprod and not gconinje:
         raise DeckParseError(
             "Cannot load well group controls from deck. `GCONPROD` and `GCONINJE` are both missing. "
@@ -1533,7 +1557,7 @@ def load_group_controls(deck_file: DeckFile, current_time: float = 0.0) -> Group
         unit_system=deck_file.unit_system,
         current_time=current_time,
     )
-    gecon = deck_file.get("GECON") or []
+    gecon = deck_file.get_shared("GECON") or []
     if gecon:
         apply_group_economic_limits(
             group_controls=controls,
@@ -1659,7 +1683,7 @@ def load_summary_items(
         requested vector.
     :raises DeckParseError: If a block vector lists a cell outside the deck's grid.
     """
-    well_names = [record["well"] for record in deck_file.get("WELSPECS") or []]
+    well_names = [record["well"] for record in deck_file.get_shared("WELSPECS") or []]
 
     quantities: list[Summary[CompiledBlackOilModel]] = []
     for mnemonic, field_summary_cls in FIELD_SUMMARY_VECTORS.items():
@@ -1845,7 +1869,7 @@ def load_schedule(
     def is_due(record: typing.Mapping[str, typing.Any]) -> bool:
         return record.get("schedule_time", 0.0) > compiled_at
 
-    for record in deck_file.get("WELSPECS") or empty:
+    for record in deck_file.get_shared("WELSPECS") or empty:
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
@@ -1858,7 +1882,7 @@ def load_schedule(
             )
         )
 
-    for record in deck_file.get("WPIMULT") or empty:
+    for record in deck_file.get_shared("WPIMULT") or empty:
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
@@ -1879,7 +1903,7 @@ def load_schedule(
             )
         )
 
-    for record in deck_file.get("WLIFT") or empty:
+    for record in deck_file.get_shared("WLIFT") or empty:
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
@@ -1960,7 +1984,7 @@ def load_schedule(
             later_changes = [
                 other["schedule_time"]
                 for keyword in ("WLIFT", "WCONPROD")
-                for other in deck_file.get(keyword) or empty
+                for other in deck_file.get_shared(keyword) or empty
                 if other["well"] == well_name and other["schedule_time"] > schedule_time
             ]
             event = AllOf(
@@ -1980,7 +2004,7 @@ def load_schedule(
             )
         )
 
-    for record in deck_file.get("WCONPROD") or empty:
+    for record in deck_file.get_shared("WCONPROD") or empty:
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
@@ -2055,7 +2079,7 @@ def load_schedule(
             )
         )
 
-    for record in deck_file.get("WCONINJE") or empty:
+    for record in deck_file.get_shared("WCONINJE") or empty:
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
@@ -2115,7 +2139,7 @@ def load_schedule(
             )
         )
 
-    for record in deck_file.get("WELTARG") or empty:
+    for record in deck_file.get_shared("WELTARG") or empty:
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
@@ -2133,7 +2157,7 @@ def load_schedule(
             )
         )
 
-    for record in deck_file.get("WECON") or empty:
+    for record in deck_file.get_shared("WECON") or empty:
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
@@ -2158,7 +2182,7 @@ def load_schedule(
                 )
             )
 
-    for record in deck_file.get("GECON") or empty:
+    for record in deck_file.get_shared("GECON") or empty:
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
@@ -2184,7 +2208,7 @@ def load_schedule(
                 )
             )
 
-    for record in deck_file.get("COMPDAT") or empty:
+    for record in deck_file.get_shared("COMPDAT") or empty:
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]
@@ -2203,7 +2227,7 @@ def load_schedule(
             )
         )
 
-    for record in deck_file.get("WELOPEN") or empty:
+    for record in deck_file.get_shared("WELOPEN") or empty:
         if not is_due(record):
             continue
         schedule_time = record["schedule_time"]

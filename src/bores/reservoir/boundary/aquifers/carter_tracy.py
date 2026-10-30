@@ -1029,7 +1029,7 @@ def load_aquifer_influence_table(
     :raises ValidationError: If `table_number` is given but not found, or a table is not
         valid.
     """
-    deck_tables = deck_file.get("AQUTAB") or []
+    deck_tables = deck_file.get_shared("AQUTAB") or []
     tables = {
         number: load_aquifer_influence_table_from_records(records)
         for number, records in enumerate(deck_tables, start=FIRST_INFLUENCE_TABLE_NUMBER)
@@ -1178,7 +1178,7 @@ def load_carter_tracy_aquifer(
         not found in it, or an aquifer cannot be built (see
         `load_carter_tracy_aquifer_from_record`).
     """
-    records = deck_file.get("AQUCT")
+    records = deck_file.get_shared("AQUCT")
     if not records:
         raise ValidationError("No `AQUCT` keyword found in the provided deck.")
 

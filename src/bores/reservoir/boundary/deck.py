@@ -77,7 +77,7 @@ def load_flux_aquifer(
     :raises ValidationError: If the deck has no `AQUFLUX` keyword, or `aquifer_id` is
         given but not found in it.
     """
-    records = deck_file.get("AQUFLUX")
+    records = deck_file.get_shared("AQUFLUX")
     if not records:
         raise ValidationError("No `AQUFLUX` keyword found in the provided deck.")
 
@@ -180,7 +180,7 @@ def resolve_aquancon_connections(
         would connect a face that adjoins an active cell, or connects a cell that another
         aquifer holds.
     """
-    records = deck_file.get("AQUANCON") or []
+    records = deck_file.get_shared("AQUANCON") or []
     matching = [record for record in records if record["aquifer_id"] == aquifer_id]
     if not matching:
         return None
@@ -488,7 +488,7 @@ def load_boundary_conditions(
             )
         defined_ids[aquifer_id] = source
 
-    aquct_records = deck_file.get("AQUCT")
+    aquct_records = deck_file.get_shared("AQUCT")
     if aquct_records:
         if pvt is None:
             raise ValidationError(
@@ -513,7 +513,7 @@ def load_boundary_conditions(
             if region is not None:
                 regions.append(region)
 
-    aqufetp_records = deck_file.get("AQUFETP")
+    aqufetp_records = deck_file.get_shared("AQUFETP")
     if aqufetp_records:
         for record in aqufetp_records:
             get_aquancon_connections(record["aquifer_id"])
@@ -532,7 +532,7 @@ def load_boundary_conditions(
             if region is not None:
                 regions.append(region)
 
-    if deck_file.get("AQUFLUX"):
+    if deck_file.get_shared("AQUFLUX"):
         flux_aquifers = load_flux_aquifer(deck_file)
         for aquifer_id in flux_aquifers:
             get_aquancon_connections(aquifer_id)
@@ -554,7 +554,7 @@ def load_boundary_conditions(
 
     dangling = {
         record["aquifer_id"]
-        for record in (deck_file.get("AQUANCON") or [])
+        for record in (deck_file.get_shared("AQUANCON") or [])
         if record["aquifer_id"] not in defined_ids
     }
     if dangling:

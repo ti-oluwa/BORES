@@ -272,7 +272,7 @@ class WellStates(
     StoreSerializable,
     fields={
         "states": typing.Mapping[str, WellState],
-        "unit_system": typing.Optional[UnitSystem],  # ruff: ignore[non-pep604-annotation-optional]
+        "unit_system": typing.Optional[UnitSystem],
     },
 ):
     """Name-keyed collection of `WellState`, one per well, for a single timestep."""

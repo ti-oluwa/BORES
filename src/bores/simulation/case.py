@@ -48,7 +48,7 @@ from bores.types import (
     Spacing,
     UnitSystem,
 )
-from bores.wells.deck import load_schedule
+from bores.wells.deck import WELL_REQUIRED_KEYWORDS, load_schedule
 from bores.wells.model import TubingPerformance, WellSystem
 from bores.wells.schedule import check_vfp_references
 
@@ -417,6 +417,7 @@ def check_deck_requirements(
     needs_rock: bool,
     needs_pvt: bool,
     needs_equilibrium: bool,
+    needs_wells: bool,
 ) -> None:
     """
     Check that the deck has what every stage still to be loaded from it cannot do without.
@@ -435,6 +436,7 @@ def check_deck_requirements(
     :param needs_rock: Whether the rock properties have to be read from the deck.
     :param needs_pvt: Whether the PVT tables have to be read from the deck.
     :param needs_equilibrium: Whether the equilibration data has to be read from the deck.
+    :param needs_wells: Whether the wells have to be read from the deck.
     :raises CaseLoadError: If any needed keyword is missing, naming each one by the stage that
         needs it.
     """
@@ -475,6 +477,8 @@ def check_deck_requirements(
         require("PVT", any_of_keywords=(OIL_PVT_KEYWORDS,))
     if needs_equilibrium:
         require("initial state", all_of_keywords=("EQUIL",))
+    if needs_wells:
+        require("wells", all_of_keywords=WELL_REQUIRED_KEYWORDS)
 
     for entry in find_missing(deck_file, all_of=all_of, any_of=any_of):
         problems.append(f"{stage_of[entry]}: {entry}")
@@ -667,6 +671,7 @@ def load_case(
         needs_rock=rock is None,
         needs_pvt=pvt is None,
         needs_equilibrium=initial_state is None and equilibrium is None,
+        needs_wells=wells is None,
     )
 
     deck_unit_system = deck_file.unit_system

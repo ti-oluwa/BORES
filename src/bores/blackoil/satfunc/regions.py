@@ -233,7 +233,7 @@ class SatFunc:
             )
 
         def get_region_count(keyword: str) -> int:
-            all_regions = deck_file.get(keyword)
+            all_regions = deck_file.get_shared(keyword)
             return len(all_regions) if all_regions is not None else 0
 
         n_regions = max(

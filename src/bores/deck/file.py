@@ -543,6 +543,7 @@ class DeckFile:
         "_registry",
         "_report_times",
         "_schedule_times",
+        "_shared",
         "dimensions",
         "strict",
         "unit_system",
@@ -593,6 +594,7 @@ class DeckFile:
         self._registry = {keyword.name: keyword for keyword in keywords}
         self._register_tracer_keywords()
         self._cache: dict[str, typing.Any] = {}
+        self._shared: dict[str, typing.Any] = {}
         self.dimensions = self._resolve_dimensions()
         deck_unit_system = unit_system if unit_system is not None else self._resolve_unit_system()
         if deck_unit_system is None:
@@ -858,6 +860,7 @@ class DeckFile:
         for keyword in keywords:
             self._registry[keyword.name] = keyword
             self._cache.pop(keyword.name, None)
+            self._shared.pop(keyword.name, None)
 
         dimensions_changed = any(keyword.name in DIMENSION_KEYWORDS for keyword in keywords)
         if dimensions_changed:
@@ -872,6 +875,7 @@ class DeckFile:
         ):
             self._resolve_operations()
             self._cache.clear()
+            self._shared.clear()
 
     def _location_suffix(self, name: str) -> str:
         """Where `name` is in the deck, as ` (line 12)` for an error message, or empty."""
@@ -999,6 +1003,31 @@ class DeckFile:
             else:
                 self._cache[key] = copy.deepcopy(value)
         return value
+
+    def get_shared(self, k: str, /) -> typing.Any | None:
+        """
+        Parse keyword `k` once and return that same value on every later call.
+
+        Meant for loaders that read the same keyword more than once, whether over many regions
+        or across separate stages that each read the wells. Unlike `get(use_cache=True)`, nothing
+        is copied, which for the record tables a deck is mostly made of is cheaper than parsing
+        again. The cost is that every caller gets the same object.
+
+        Warning:
+            Treat the returned value as read-only. Changing it changes what every later caller
+            of `get_shared` receives. Use `get` for a value of your own to modify.
+
+        The value is dropped when `add_keywords` changes how the keyword (or the grid
+        dimensions it depends on) is read. A keyword that is absent or not registered gives
+        `None`, and that too is remembered.
+
+        :param k: Keyword name, case-insensitive.
+        :returns: The keyword's parsed value, or `None` as `get` would return it.
+        """
+        key = k.upper()
+        if key not in self._shared:
+            self._shared[key] = self.get(key)
+        return self._shared[key]
 
     def gets(
         self, *ks: str | Keyword[typing.Any], use_cache: bool = False

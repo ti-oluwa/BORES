@@ -116,6 +116,7 @@ class TestCaseRequirements:
             needs_rock=True,
             needs_pvt=True,
             needs_equilibrium=True,
+            needs_wells=True,
         )
         defaults.update(needs)
         check_deck_requirements(d, title="t", **defaults)
@@ -131,6 +132,7 @@ class TestCaseRequirements:
             "rock: `PORO`",
             "PVT: one of `PVTO`",
             "initial state: `EQUIL`",
+            "wells: `WELSPECS`",
         ):
             assert fragment in message
 
@@ -143,12 +145,13 @@ class TestCaseRequirements:
             needs_rock=False,
             needs_pvt=False,
             needs_equilibrium=False,
+            needs_wells=False,
         )
 
     def test_a_deck_with_everything_passes(self):
         body = (
             "DX\n 4*10 /\nDY\n 4*10 /\nDZ\n 4*5 /\nPORO\n 4*0.2 /\nPERMX\n 4*100 /\n"
-            "RTEMP\n 80 /\nSWOF\n 0.2 0 1 0\n 1 1 0 0 /\nPVDO\n 100 1.2 1 /\nEQUIL\n 1000 300 1100 0 900 0 /\n"
+            "RTEMP\n 80 /\nSWOF\n 0.2 0 1 0\n 1 1 0 0 /\nPVDO\n 100 1.2 1 /\nEQUIL\n 1000 300 1100 0 900 0 /\nWELSPECS\n 'P' 'G' 1 1 1* OIL /\n/\nCOMPDAT\n 'P' 1 1 1 1 OPEN /\n/\n"
         )
         self.check(deck(body))
 
@@ -162,3 +165,26 @@ class TestCaseRequirements:
                 needs_pvt=False,
                 needs_equilibrium=False,
             )
+
+
+class TestWellsPrecheck:
+    def test_wells_need_welspecs_and_compdat_but_not_controls(self):
+        from bores.wells.deck import check_well_keywords
+
+        check_well_keywords(
+            deck("WELSPECS\n 'P' 'G' 1 1 1* OIL /\n/\nCOMPDAT\n 'P' 1 1 1 1 OPEN /\n/\n")
+        )
+        with pytest.raises(ValidationError, match="`WELSPECS`, `COMPDAT` are missing"):
+            check_well_keywords(deck())
+        with pytest.raises(ValidationError, match="`COMPDAT` is missing"):
+            check_well_keywords(deck("WELSPECS\n 'P' 'G' 1 1 1* OIL /\n/\n"))
+
+    def test_well_system_fails_before_reading_vfp_tables(self):
+        from bores.wells.model import WellSystem
+
+        d = deck("VFPPROD\n 1 /\n")
+        with mock.patch(
+            "bores.wells.model.VFPTables.from_deck", side_effect=AssertionError("parsed")
+        ):
+            with pytest.raises(ValidationError, match="missing"):
+                WellSystem.from_deck(d, grid=mock.Mock())

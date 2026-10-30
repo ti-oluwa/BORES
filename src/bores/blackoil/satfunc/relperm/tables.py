@@ -1311,7 +1311,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
 
         def get_rows(keyword: str) -> list[dict[str, typing.Any]]:
             """Extract rows for `region_index` from a deck keyword, or return []."""
-            all_regions = deck_file.get(keyword)
+            all_regions = deck_file.get_shared(keyword)
             if all_regions is None:
                 return []
             if region_index >= len(all_regions):
@@ -1632,7 +1632,7 @@ def detect_saturation_systems(
     def has(keyword: str) -> bool:
         if not deck_file.has(keyword):
             return False
-        all_regions = deck_file.get(keyword)
+        all_regions = deck_file.get_shared(keyword)
         assert all_regions is not None
         return region_index < len(all_regions) and bool(all_regions[region_index])
 

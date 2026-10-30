@@ -559,7 +559,7 @@ def load_fetkovich_aquifer(
         but not found in it, or an aquifer cannot be built (see
         `load_fetkovich_aquifer_from_record`).
     """
-    records = deck_file.get("AQUFETP")
+    records = deck_file.get_shared("AQUFETP")
     if not records:
         raise ValidationError("No `AQUFETP` keyword found in the provided deck.")
 
