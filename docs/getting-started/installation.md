@@ -137,6 +137,16 @@ BORES supports multiple storage backends for saving and loading simulation resul
 pip install h5py zarr
 ```
 
+### Data frames - pandas and polars
+
+Results can be turned into data frames with the `as_dataframe` function of `bores.schedule.summary`, `bores.reservoir.state`, `bores.wells.state` and `bores.blackoil.state`. Neither library is required by BORES. Install the one you use with the `backend` argument, or both.
+
+```bash
+pip install 'bores-framework[pandas]'      # backend="pandas"
+pip install 'bores-framework[polars]'      # backend="polars"
+pip install 'bores-framework[dataframes]'  # both
+```
+
 ---
 
 ## Troubleshooting

@@ -132,6 +132,9 @@ hdf5 = ["h5py>=3.15.1"]
 yaml = ["pyyaml>=6.0.0"]
 meshio = ["meshio>=5.3.5"]
 coolprop = ["coolprop>=6.8.0"]
+pandas = ["pandas>=2.2.3"]
+polars = ["polars>=1.0.0"]
+dataframes = ["pandas>=2.2.3", "polars>=1.0.0"]
 tbb = [
     "tbb>=2022.3.1",
     "tbb-devel>=2022.3.1",

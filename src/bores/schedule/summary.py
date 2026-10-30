@@ -13,11 +13,13 @@ return in a `SummaryReport`.
 """
 
 import datetime
+import fnmatch
 import typing
 
 import attrs
 import numpy as np
 
+from bores.dataframes import AnyDataFrame, Backend, Column, build_dataframe, resolve_backend
 from bores.errors import SummaryError, ValidationError
 from bores.schedule.base import (
     Action,
@@ -29,7 +31,7 @@ from bores.schedule.base import (
 from bores.schedule.events import IntervalEvent, TimeEvent, TimeStepEvent
 from bores.serde.base import Serializable
 from bores.serde.stores.base import StoreSerializable
-from bores.types import Number, NumberArray, OneDimension
+from bores.types import Boolean, IntArray, Number, NumberArray, OneDimension
 from bores.utils import get_current_date
 
 __all__ = [
@@ -37,6 +39,7 @@ __all__ = [
     "Summary",
     "SummaryRecord",
     "SummaryReport",
+    "as_dataframe",
     "record_at",
     "record_every",
 ]
@@ -434,3 +437,195 @@ def record_at(
         action=RecordSummary(quantities=quantities),
         name=name or f"{label[:-1]}, {','.join(quantity.key for quantity in quantities)})",
     )
+
+
+SummaryLayout = typing.Literal["wide", "long"]
+"""How `as_dataframe` lays a `SummaryReport` out: one column for each vector, or one row for each record."""
+
+
+def select_summary_keys(
+    report: SummaryReport, keys: str | typing.Sequence[str] | None
+) -> list[str]:
+    """
+    Works out which of a report's vectors a data frame covers.
+
+    :param report: The report to select from.
+    :param keys: Vector keys, or Eclipse-style patterns such as `"WBHP:*"` or `"F*PR"`, or
+        `None` for every recorded vector.
+    :returns: The matching keys, in the order they were first recorded for `None` and in the
+        order they were asked for otherwise, each once.
+    :raises ValidationError: If a key was never recorded or a pattern matches nothing.
+    """
+    report.update_index()
+    available = list(report.key_indices)
+    if keys is None:
+        return available
+
+    chosen: list[str] = []
+    for pattern in [keys] if isinstance(keys, str) else list(keys):
+        if any(character in pattern for character in "*?["):
+            matches = [key for key in available if fnmatch.fnmatchcase(key, pattern)]
+        else:
+            matches = [pattern] if pattern in report.key_indices else []
+        if not matches:
+            shown = available[:20]
+            more = f" and {len(available) - 20} more" if len(available) > 20 else ""
+            raise ValidationError(
+                f"No recorded summary vector matches {pattern!r}. Recorded vectors: {shown}{more}."
+            )
+        chosen.extend(key for key in matches if key not in chosen)
+    return chosen
+
+
+def as_dataframe(
+    report: SummaryReport,
+    *,
+    backend: Backend = "pandas",
+    layout: SummaryLayout = "wide",
+    keys: str | typing.Sequence[str] | None = None,
+    start: Number | None = None,
+    end: Number | None = None,
+    include_dates: Boolean | None = None,
+    include_time_steps: Boolean | None = None,
+    split_keys: Boolean = False,
+    categorical: Boolean = False,
+) -> AnyDataFrame:
+    """
+    Turns a `SummaryReport` into a pandas or polars data frame.
+
+    In the `"wide"` layout, the default, there is one row for each time any chosen vector was
+    recorded and one column for each vector, named by its key. A vector that was not recorded at
+    some time has a missing value there: NaN in pandas and null in polars. This is the form to
+    plot or to compare vectors in.
+
+    In the `"long"` layout there is one row for each record, with the columns `key`, `time` and
+    `value`. This is the form to group by well or to filter on a vector.
+
+    Values are double precision. Times are in the run's unit system, as recorded.
+
+    :param report: The report to convert.
+    :param backend: `"pandas"` or `"polars"`. The library must be installed.
+    :param layout: `"wide"` or `"long"`.
+    :param keys: Vector keys or patterns such as `"WBHP:*"`, one or a sequence, to include. Every
+        recorded vector if not given.
+    :param start: Earliest elapsed time to include. No lower limit if not given.
+    :param end: Latest elapsed time to include. No upper limit if not given.
+    :param include_dates: Whether to add a `date` column. If not given, it is added when any
+        included record has a date.
+    :param include_time_steps: Whether to add a `time_step` column. If not given, it is added
+        when any included record has a time-step index.
+    :param split_keys: For the `"long"` layout, add `vector` and `qualifier` columns, which
+        split `"WBHP:PROD1"` into `"WBHP"` and `"PROD1"`. The qualifier is missing for a key with
+        no colon.
+    :param categorical: For the `"long"` layout, store the `key`, `vector` and `qualifier`
+        columns as categoricals, which saves memory for a large report.
+    :returns: A `pandas.DataFrame` or `polars.DataFrame`, ordered by time. Records of the
+        `"long"` layout keep the order they were recorded in.
+    :raises ValidationError: If an option is not valid for the layout, `start` is after `end`,
+        or a key matches no recorded vector.
+    :raises ImportError: If the library behind `backend` is not installed.
+    """
+    resolve_backend(backend)
+    if layout not in ("wide", "long"):
+        raise ValidationError(f"`layout` must be 'wide' or 'long'; got {layout!r}.")
+    if layout == "wide" and (split_keys or categorical):
+        raise ValidationError(
+            "`split_keys` and `categorical` apply to the 'long' layout, where keys are values "
+            "of a column. The 'wide' layout names a column for each key."
+        )
+    if start is not None and end is not None and start > end:
+        raise ValidationError(f"`start` ({start}) must not be after `end` ({end}).")
+
+    chosen = select_summary_keys(report, keys)
+    records = report.records
+    positions_by_key: dict[str, IntArray[OneDimension]] = {}
+    for key in chosen:
+        positions = np.asarray(report.key_indices[key], dtype=np.int64)
+        times, _ = report.series(key)
+        keep = np.ones(times.shape[0], dtype=np.bool_)
+        if start is not None:
+            keep &= times >= start
+        if end is not None:
+            keep &= times <= end
+        positions_by_key[key] = typing.cast("IntArray[OneDimension]", positions[keep])
+
+    all_positions = (
+        np.sort(np.concatenate(list(positions_by_key.values())))
+        if positions_by_key
+        else np.empty(0, dtype=np.int64)
+    )
+    if include_dates is None:
+        include_dates = any(records[position].date is not None for position in all_positions)
+    if include_time_steps is None:
+        include_time_steps = any(
+            records[position].time_step is not None for position in all_positions
+        )
+
+    if layout == "long":
+        selected = [records[position] for position in all_positions]
+        columns = [
+            Column(
+                name="key", values=[r.key for r in selected], kind="str", categorical=categorical
+            )
+        ]
+        if split_keys:
+            vectors, qualifiers = [], []
+            for record in selected:
+                vector, separator, qualifier = record.key.partition(":")
+                vectors.append(vector)
+                qualifiers.append(qualifier if separator else None)
+            columns += [
+                Column(name="vector", values=vectors, kind="str", categorical=categorical),
+                Column(name="qualifier", values=qualifiers, kind="str", categorical=categorical),
+            ]
+        columns += [
+            Column(name="time", values=np.fromiter((r.time for r in selected), dtype=np.float64)),
+            Column(
+                name="value", values=np.fromiter((r.value for r in selected), dtype=np.float64)
+            ),
+        ]
+        if include_time_steps:
+            columns.append(
+                Column(name="time_step", values=[r.time_step for r in selected], kind="int")
+            )
+        if include_dates:
+            columns.append(Column(name="date", values=[r.date for r in selected], kind="datetime"))
+        return build_dataframe(columns, backend=backend)
+
+    series: dict[str, tuple[NumberArray[OneDimension], NumberArray[OneDimension]]] = {}
+    for key in chosen:
+        times, values = report.series(key)
+        keep = np.isin(
+            np.asarray(report.key_indices[key], dtype=np.int64),
+            positions_by_key[key],
+            assume_unique=True,
+        )
+        series[key] = (times[keep], values[keep])
+
+    times_present = [times for times, _ in series.values() if times.size]
+    row_times = np.unique(np.concatenate(times_present)) if times_present else np.empty(0)
+    n_rows = row_times.shape[0]
+
+    columns = [Column(name="time", values=row_times)]
+    if include_dates or include_time_steps:
+        dates: list[datetime.datetime | None] = [None] * n_rows
+        time_steps: list[int | None] = [None] * n_rows
+        for key in chosen:
+            rows = np.searchsorted(row_times, series[key][0])
+            for row, position in zip(rows, positions_by_key[key], strict=True):
+                record = records[position]
+                if record.date is not None and dates[row] is None:
+                    dates[row] = record.date
+                if record.time_step is not None and time_steps[row] is None:
+                    time_steps[row] = record.time_step
+        if include_dates:
+            columns.append(Column(name="date", values=dates, kind="datetime"))
+        if include_time_steps:
+            columns.append(Column(name="time_step", values=time_steps, kind="int"))
+
+    for key in chosen:
+        times, values = series[key]
+        column = np.full(n_rows, np.nan, dtype=np.float64)
+        column[np.searchsorted(row_times, times)] = values
+        columns.append(Column(name=key, values=column, missing_is_null=True))
+    return build_dataframe(columns, backend=backend)

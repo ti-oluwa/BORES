@@ -7,20 +7,40 @@ import numpy.typing as npt
 from typing_extensions import Self
 
 from bores.constants import c
+from bores.dataframes import (
+    AnyDataFrame,
+    Backend,
+    Column,
+    build_dataframe,
+    get_grid_columns,
+    get_label_column,
+    resolve_backend,
+    resolve_times,
+    select_cells,
+)
 from bores.errors import ValidationError
+from bores.grids.base import Grid
 from bores.precision import get_dtype
 from bores.serde.stores import StoreSerializable
 from bores.types import (
     Boolean,
     BooleanCellArray,
     CellArray,
+    Integer,
     Number,
     UnitSystem,
 )
 from bores.units import UnitConversionTable, get_conversion_factors
 from bores.utils import scale, scale_and_offset
 
-__all__ = ["Hysteresis", "ReservoirState"]
+__all__ = [
+    "DEFAULT_DATAFRAME_FIELDS",
+    "DERIVED_DATAFRAME_FIELDS",
+    "STORED_DATAFRAME_FIELDS",
+    "Hysteresis",
+    "ReservoirState",
+    "as_dataframe",
+]
 
 
 @numba.njit(cache=True, error_model="numpy")
@@ -684,3 +704,187 @@ class ReservoirState(StoreSerializable):
             hysteresis=self.hysteresis,
             unit_system=target,
         )
+
+
+STORED_DATAFRAME_FIELDS: tuple[str, ...] = (
+    "pressure",
+    "temperature",
+    "oil_saturation",
+    "water_saturation",
+    "gas_saturation",
+    "solution_gor",
+    "oil_bubble_point_pressure",
+    "vaporized_oil_gas_ratio",
+    "gas_dew_point_pressure",
+    "gas_solubility_in_water",
+    "water_bubble_point_pressure",
+    "oil_mass",
+    "water_mass",
+    "free_gas_mass",
+    "dissolved_gas_mass_in_oil",
+    "dissolved_gas_mass_in_water",
+    "vaporized_oil_mass_in_gas",
+    "solvent_concentration",
+)
+"""Every per-cell array a `ReservoirState` stores, which `as_dataframe` can report."""
+
+DERIVED_DATAFRAME_FIELDS: tuple[str, ...] = ("total_gas_mass", "total_oil_mass")
+"""Per-cell quantities a `ReservoirState` works out from the stored arrays, which `as_dataframe` can also report."""
+
+DEFAULT_DATAFRAME_FIELDS: tuple[str, ...] = (
+    "pressure",
+    "temperature",
+    "oil_saturation",
+    "water_saturation",
+    "gas_saturation",
+    "solution_gor",
+    "oil_bubble_point_pressure",
+)
+"""The fields `as_dataframe` reports when none are chosen."""
+
+
+def as_dataframe(
+    states: ReservoirState | typing.Iterable[ReservoirState],
+    *,
+    backend: Backend = "pandas",
+    fields: typing.Sequence[str] | typing.Literal["all"] | None = None,
+    times: Number | typing.Sequence[Number] | None = None,
+    cells: typing.Sequence[Integer] | npt.NDArray | None = None,
+    grid: Grid | None = None,
+    active_only: Boolean = False,
+    centroids: Boolean = False,
+    unit_system: UnitSystem | None = None,
+    dtype: npt.DTypeLike = None,
+) -> AnyDataFrame:
+    """
+    Turns one reservoir state, or a sequence of them, into a pandas or polars data frame with
+    one row for each cell of each state.
+
+    The columns are, in order: `time` if `times` is given, or `snapshot` (0, 1, 2, ...) when
+    several states are given without times, then `cell_index`, then `i`, `j` and `k` and
+    optionally `x`, `y` and `z` when a `grid` is given, then one column for each field. Rows of
+    one state are together, and states follow in the order given.
+
+    The result has as many rows as cells times states, so choose `fields` and `cells` to suit
+    the size of the grid when reporting many states.
+
+    :param states: A reservoir state, or states in time order, for example the reservoir of each
+        state of a run.
+    :param backend: `"pandas"` or `"polars"`. The library must be installed.
+    :param fields: Fields to include. They are named like the attributes of `ReservoirState`,
+        and may also be `total_gas_mass` and `total_oil_mass`. `"all"` includes every stored
+        field that has values, so a state without a solvent concentration has no such column.
+        Defaults to pressure, temperature, the three saturations, solution gas-oil ratio and
+        bubble point pressure.
+    :param times: The elapsed time of each state, in the order given, which adds a `time`
+        column. A single number is enough for a single state.
+    :param cells: Cells to include, as flat cell indices or a boolean mask with one entry for
+        each cell. Every cell if not given.
+    :param grid: The grid the states were computed on. Adds each cell's `i`, `j` and `k`
+        indices when the grid is structured, and is needed by `active_only` and `centroids`.
+    :param active_only: Leave out the cells the grid marks inactive.
+    :param centroids: Add the cell centroid coordinates as `x`, `y` and `z`.
+    :param unit_system: Unit system to report in. Every state is converted to it. If not given,
+        the states must all share one unit system, which is used as it is.
+    :param dtype: Floating point dtype of the field columns. Each field keeps the dtype it has
+        if not given.
+    :returns: A `pandas.DataFrame` or `polars.DataFrame`.
+    :raises ValidationError: If a field is unknown or has no values, the states differ in cell
+        count or unit system, `times` does not match the states, or `cells`, `grid`,
+        `active_only` or `centroids` are inconsistent with the states.
+    :raises ImportError: If the library behind `backend` is not installed.
+    """
+    resolve_backend(backend)
+    is_single = isinstance(states, ReservoirState)
+    snapshots = [states] if isinstance(states, ReservoirState) else list(states)
+    for position, snapshot in enumerate(snapshots):
+        if not isinstance(snapshot, ReservoirState):
+            raise ValidationError(
+                f"`states` must hold `ReservoirState`s; item {position} is a "
+                f"{type(snapshot).__name__}."
+            )
+
+    time_values = resolve_times(times, count=len(snapshots))
+
+    if unit_system is None:
+        systems = {snapshot.unit_system for snapshot in snapshots}
+        if len(systems) > 1:
+            raise ValidationError(
+                "The states use different unit systems, "
+                f"{sorted(system.value for system in systems)}. Pass `unit_system` to report "
+                "them all in one."
+            )
+    else:
+        snapshots = [snapshot.convert(unit_system) for snapshot in snapshots]
+
+    known = (*STORED_DATAFRAME_FIELDS, *DERIVED_DATAFRAME_FIELDS)
+    if fields is None:
+        chosen = list(DEFAULT_DATAFRAME_FIELDS)
+    elif isinstance(fields, str):
+        if fields != "all":
+            raise ValidationError(
+                f"`fields` must be 'all' or a sequence of names; got {fields!r}."
+            )
+        chosen = [
+            name
+            for name in STORED_DATAFRAME_FIELDS
+            if all(getattr(snapshot, name).size for snapshot in snapshots)
+        ]
+        if not snapshots:
+            chosen = list(STORED_DATAFRAME_FIELDS[:-1])
+    else:
+        chosen = list(fields)
+        unknown = [name for name in chosen if name not in known]
+        if unknown:
+            raise ValidationError(
+                f"Unknown reservoir fields {unknown}. Known fields: {list(known)}."
+            )
+        repeated = sorted({name for name in chosen if chosen.count(name) > 1})
+        if repeated:
+            raise ValidationError(f"`fields` repeats {repeated}.")
+
+    label_name = "time" if time_values is not None else "snapshot"
+    if not snapshots:
+        columns = [
+            Column(
+                name=label_name, values=np.empty(0), kind="float" if times is not None else "int"
+            ),
+            Column(name="cell_index", values=np.empty(0, dtype=np.int64), kind="int"),
+            *(Column(name=name, values=np.empty(0)) for name in chosen),
+        ]
+        return build_dataframe(columns, backend=backend)
+
+    n_cells = snapshots[0].pressure.shape[0]
+    for position, snapshot in enumerate(snapshots):
+        for name in chosen:
+            values = getattr(snapshot, name)
+            if values.shape != (n_cells,):
+                reason = (
+                    "has no values"
+                    if values.size == 0
+                    else f"has shape {values.shape}, not ({n_cells},)"
+                )
+                raise ValidationError(
+                    f"Reservoir field {name!r} {reason}"
+                    + (f" in state {position}." if not is_single else ".")
+                )
+
+    selected = select_cells(n_cells=n_cells, cells=cells, grid=grid, active_only=active_only)
+    count = len(snapshots)
+    n_selected = selected.shape[0]
+
+    columns = []
+    label = get_label_column(
+        times=time_values, row_counts=[n_selected] * count, is_single=is_single
+    )
+    if label is not None:
+        columns.append(label)
+    columns.append(Column(name="cell_index", values=np.tile(selected, count), kind="int"))
+    for column in get_grid_columns(grid=grid, cell_indices=selected, centroids=centroids):
+        columns.append(attrs.evolve(column, values=np.tile(column.values, count)))
+    for name in chosen:
+        values = np.concatenate([getattr(snapshot, name)[selected] for snapshot in snapshots])
+        columns.append(
+            Column(name=name, values=values if dtype is None else values.astype(dtype, copy=False))
+        )
+    return build_dataframe(columns, backend=backend)
