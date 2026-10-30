@@ -19,7 +19,7 @@ from bores.types import (
     OneDimension,
     UnitSystem,
 )
-from bores.units import UnitConversionTable, get_conversion_factors
+from bores.units import UnitConversionTable, get_conversion_factors, resolve_unit_conversion_table
 from bores.utils import scale, scale_and_offset
 
 __all__ = ["Temperature", "TemperatureGradient", "TemperatureTable"]
@@ -374,6 +374,7 @@ class Temperature:
         """
         if target == self.unit_system:
             return self
+        table = resolve_unit_conversion_table(table)
 
         factors = get_conversion_factors(self.unit_system, target, table=table)
         factor = factors["temperature"]

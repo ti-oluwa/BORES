@@ -37,7 +37,7 @@ from bores.types import (
     TwoDimensions,
     UnitSystem,
 )
-from bores.units import UnitConversionTable, get_conversion_factors
+from bores.units import UnitConversionTable, get_conversion_factors, resolve_unit_conversion_table
 
 logger = logging.getLogger(__name__)
 
@@ -1324,6 +1324,7 @@ class PVTTable(StoreSerializable):
         """
         if target == self.unit_system:
             return self
+        table = resolve_unit_conversion_table(table)
 
         return self.__class__(
             data=self._data.convert(target, table=table),
@@ -3603,6 +3604,7 @@ class PVTTables(StoreSerializable):
         :param target: Target `UnitSystem`.
         :returns: New `PVTTables` in *target* units.
         """
+        table = resolve_unit_conversion_table(table)
         return attrs.evolve(
             self,
             oil=self.oil.convert(target, table=table) if self.oil is not None else None,

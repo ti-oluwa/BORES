@@ -31,6 +31,7 @@ from bores.types import (
     Wettability,
 )
 from bores.units import get_conversion_factors
+from bores.utils import scale
 
 __all__ = [
     "VanGenuchtenCapillaryPressureTable",
@@ -1703,8 +1704,8 @@ class VanGenuchtenCapillaryPressureTable(CapillaryPressureTable):
         alpha_factor = 1.0 / pressure_factor
         return attrs.evolve(
             self,
-            oil_water_alpha_water_wet=self.oil_water_alpha_water_wet * alpha_factor,
-            oil_water_alpha_oil_wet=self.oil_water_alpha_oil_wet * alpha_factor,
-            gas_oil_alpha=self.gas_oil_alpha * alpha_factor,
+            oil_water_alpha_water_wet=scale(self.oil_water_alpha_water_wet, alpha_factor),
+            oil_water_alpha_oil_wet=scale(self.oil_water_alpha_oil_wet, alpha_factor),
+            gas_oil_alpha=scale(self.gas_oil_alpha, alpha_factor),
             unit_system=target,
         )

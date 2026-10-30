@@ -41,6 +41,7 @@ from bores.units import (
     UnitConversionTable,
     build_unit_conversion_table,
     get_conversion_factors,
+    resolve_unit_conversion_table,
 )
 from bores.utils import scale
 
@@ -483,7 +484,7 @@ class RockCompressibilityTable(StoreSerializable):
         factors = get_conversion_factors(self.unit_system, target, table=table)
         pressure_factor = factors["pressure"]
         return self.__class__(
-            pressures=scale(self.pressures, pressure_factor).astype(self.dtype, copy=False),  # type: ignore[arg-type, operator]
+            pressures=scale(self.pressures, pressure_factor),  # type: ignore[arg-type]
             pore_volume_multipliers=self.pore_volume_multipliers.copy(),  # type: ignore[arg-type]
             transmissibility_multipliers=self.transmissibility_multipliers.copy(),  # type: ignore[arg-type]
             reference_pressure=scale(self.reference_pressure, pressure_factor),  # type: ignore[arg-type, operator]
@@ -1009,6 +1010,7 @@ class RockCompressibilityTables(StoreSerializable):
         :param target: Target `UnitSystem`.
         :returns: New `RockCompressibilityTables` in *target* units.
         """
+        table = resolve_unit_conversion_table(table)
         return self.__class__(
             tables={
                 rocknum: tables.convert(target, table=table)

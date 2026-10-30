@@ -24,7 +24,8 @@ from bores.types import (
     UnitSystem,
 )
 from bores.units import get_conversion_factors
-from bores.wells.base import Perforation, Well
+from bores.utils import scale
+from bores.wells.base import Perforation, Well, convert_perforation
 
 __all__ = [
     "PerforationIndex",
@@ -106,14 +107,17 @@ class PerforationIndex:
             return self
 
         factors = get_conversion_factors(self.unit_system, target, table=table)
-        well_index_factor = factors["permeability"] * factors["length"]
+        length_factor = factors["length"]
+        connection_factor = factors["permeability"] * length_factor
         return attrs.evolve(
             self,
-            representative_depth=self.representative_depth * factors["length"],
-            representative_measured_depth=self.representative_measured_depth * factors["length"],
-            well_index=self.well_index * well_index_factor
-            if self.well_index is not None
-            else None,
+            perforation=convert_perforation(
+                self.perforation, length_factor=length_factor, connection_factor=connection_factor
+            ),
+            representative_depth=scale(self.representative_depth, length_factor),
+            representative_measured_depth=scale(self.representative_measured_depth, length_factor),
+            well_index=scale(self.well_index, connection_factor),
+            conductivity=scale(self.conductivity, connection_factor),
             unit_system=target,
         )
 

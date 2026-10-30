@@ -15,6 +15,7 @@ from bores.reservoir.boundary.base import (
 )
 from bores.types import Integer, Number, UnitConversionTable, UnitSystem
 from bores.units import get_conversion_factors
+from bores.utils import scale
 
 __all__ = [
     "FetkovichAquifer",
@@ -402,34 +403,23 @@ class FetkovichAquifer(BoundaryCondition):
             return self
         factors = get_conversion_factors(self.unit_system, target, table=table)
 
-        def convert_optional(value: Number | None, factor: Number) -> Number | None:
-            return value * factor if value is not None else None
-
         rate_factor = factors["reservoir_rate"] / factors["pressure"]
         return attrs.evolve(
             self,
-            initial_pressure=self.initial_pressure * factors["pressure"],
-            aquifer_permeability=convert_optional(
-                self.aquifer_permeability, factors["permeability"]
-            ),
-            aquifer_porosity=self.aquifer_porosity,
-            aquifer_compressibility=convert_optional(
+            initial_pressure=scale(self.initial_pressure, factors["pressure"]),
+            aquifer_permeability=scale(self.aquifer_permeability, factors["permeability"]),
+            aquifer_compressibility=scale(
                 self.aquifer_compressibility, factors["compressibility"]
             ),
-            water_viscosity=convert_optional(self.water_viscosity, factors["viscosity"]),
-            inner_radius=convert_optional(self.inner_radius, factors["length"]),
-            outer_radius=convert_optional(self.outer_radius, factors["length"]),
-            aquifer_thickness=convert_optional(self.aquifer_thickness, factors["length"]),
-            aquifer_productivity_index=convert_optional(
-                self.aquifer_productivity_index, rate_factor
-            ),
-            initial_encroachable_water=convert_optional(
-                self.initial_encroachable_water, factors["volume"]
-            ),
-            initial_aquifer_water_volume=convert_optional(
+            water_viscosity=scale(self.water_viscosity, factors["viscosity"]),
+            inner_radius=scale(self.inner_radius, factors["length"]),
+            outer_radius=scale(self.outer_radius, factors["length"]),
+            aquifer_thickness=scale(self.aquifer_thickness, factors["length"]),
+            aquifer_productivity_index=scale(self.aquifer_productivity_index, rate_factor),
+            initial_encroachable_water=scale(self.initial_encroachable_water, factors["volume"]),
+            initial_aquifer_water_volume=scale(
                 self.initial_aquifer_water_volume, factors["volume"]
             ),
-            angle=self.angle,
             unit_system=target,
         )
 

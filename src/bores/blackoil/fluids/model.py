@@ -6,7 +6,11 @@ from bores.blackoil.pvt.regions import PVT
 from bores.blackoil.satfunc.regions import SatFunc
 from bores.errors import ValidationError
 from bores.types import UnitSystem
-from bores.units import UnitConversionTable, build_unit_conversion_table
+from bores.units import (
+    UnitConversionTable,
+    build_unit_conversion_table,
+    resolve_unit_conversion_table,
+)
 
 __all__ = ["BlackOil"]
 
@@ -91,6 +95,7 @@ class BlackOil:
         """
         if target == self.unit_system:
             return self
+        table = resolve_unit_conversion_table(table)
 
         return self.__class__(
             pvt=self.pvt.convert(target, table=table),

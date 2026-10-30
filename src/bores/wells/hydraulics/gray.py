@@ -21,6 +21,7 @@ from bores.types import (
     UnitSystem,
 )
 from bores.units import get_conversion_factors
+from bores.utils import scale
 from bores.wells.hydraulics.base import (
     UNIT_SYSTEM_TAGS,
     UNIT_SYSTEMS_BY_TAG,
@@ -161,9 +162,9 @@ class GrayWellbore(typing.NamedTuple):
         length_factor = factors["length"]
         field_factors = get_conversion_factors(target, UnitSystem.FIELD, table=table)
         return self._replace(
-            tubing_inner_diameter=self.tubing_inner_diameter * length_factor,
-            tubing_roughness=self.tubing_roughness * length_factor,
-            gravitational_acceleration=self.gravitational_acceleration * length_factor,
+            tubing_inner_diameter=scale(self.tubing_inner_diameter, length_factor),
+            tubing_roughness=scale(self.tubing_roughness, length_factor),
+            gravitational_acceleration=scale(self.gravitational_acceleration, length_factor),
             rate_time_factor=get_unit_system_constant(
                 prefix="RATE_TIME_FACTOR", unit_system=target
             ),

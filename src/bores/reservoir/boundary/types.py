@@ -10,6 +10,7 @@ from bores.reservoir.boundary.base import (
 )
 from bores.types import Number, UnitConversionTable, UnitSystem
 from bores.units import get_conversion_factors
+from bores.utils import scale
 
 __all__ = [
     "ConstantFluxBoundary",
@@ -79,7 +80,7 @@ class ConstantFluxBoundary(BoundaryCondition):
         flux_factor = factors["reservoir_rate"]
         if self.basis is FluxBasis.PER_AREA:
             flux_factor = flux_factor / factors["length"] ** 2
-        return attrs.evolve(self, flux=self.flux * flux_factor, unit_system=target)
+        return attrs.evolve(self, flux=scale(self.flux, flux_factor), unit_system=target)
 
     def is_no_flow(self) -> bool:
         """Return `True` if `flux == 0` (sealed boundary)."""
@@ -146,7 +147,9 @@ class ConstantPressureBoundary(BoundaryCondition):
         if target == self.unit_system:
             return self
         factors = get_conversion_factors(self.unit_system, target, table=table)
-        return attrs.evolve(self, pressure=self.pressure * factors["pressure"], unit_system=target)
+        return attrs.evolve(
+            self, pressure=scale(self.pressure, factors["pressure"]), unit_system=target
+        )
 
 
 @attrs.frozen(slots=True)
@@ -219,7 +222,7 @@ class ProductivityIndexBoundary(BoundaryCondition):
         productivity_index_factor = factors["reservoir_rate"] / factors["pressure"]
         return attrs.evolve(
             self,
-            pressure_boundary=self.pressure_boundary * factors["pressure"],
-            productivity_index=self.productivity_index * productivity_index_factor,
+            pressure_boundary=scale(self.pressure_boundary, factors["pressure"]),
+            productivity_index=scale(self.productivity_index, productivity_index_factor),
             unit_system=target,
         )

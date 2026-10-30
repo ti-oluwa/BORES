@@ -20,7 +20,7 @@ from bores.types import (
     TwoDimensions,
     UnitSystem,
 )
-from bores.units import UnitConversionTable, get_conversion_factors
+from bores.units import UnitConversionTable, get_conversion_factors, resolve_unit_conversion_table
 from bores.utils import scale, scale_and_offset
 
 logger = logging.getLogger(__name__)
@@ -479,6 +479,7 @@ class PVTDataSet(StoreSerializable):
         :param table: Optional custom conversion table; `None` uses the default.
         :returns: New `PVTDataSet` in *target* units.
         """
+        table = resolve_unit_conversion_table(table)
         return self.__class__(
             oil=self.oil.convert(target, table=table) if self.oil is not None else None,
             gas=self.gas.convert(target, table=table) if self.gas is not None else None,

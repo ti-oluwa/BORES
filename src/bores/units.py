@@ -12,6 +12,7 @@ __all__ = [
     "UnitSystemContext",
     "build_unit_conversion_table",
     "get_unit_system",
+    "resolve_unit_conversion_table",
     "set_unit_system",
     "u",
 ]
@@ -657,6 +658,18 @@ UNIT_CONVERSION_TABLE = build_unit_conversion_table()
 """Default unit conversion table"""
 
 
+def resolve_unit_conversion_table(
+    table: UnitConversionTable | None = None, /
+) -> UnitConversionTable:
+    """
+    The given conversion table, or a freshly built one when `table` is `None`.
+
+    A `convert` that hands work to several other `convert` calls resolves its table once with
+    this and passes it down, so the table is built once rather than once per call.
+    """
+    return table if table is not None else build_unit_conversion_table()
+
+
 def get_conversion_factors(
     from_system: UnitSystem,
     to_system: UnitSystem,
@@ -684,7 +697,7 @@ def get_conversion_factors(
     if from_system == to_system:
         return IDENTITY_FACTORS
 
-    table = table if table is not None else build_unit_conversion_table()
+    table = resolve_unit_conversion_table(table)
     key = (from_system, to_system)
     if key not in table:
         pairs = [f"{a.value} -> {b.value}" for a, b in table]

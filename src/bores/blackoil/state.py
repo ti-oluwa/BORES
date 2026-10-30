@@ -13,7 +13,7 @@ from bores.reservoir.state import Hysteresis, ReservoirState
 from bores.reservoir.workspace import HysteresisWorkspace, load_reservoir_state
 from bores.serde.base import Serializable
 from bores.types import CellArray, Number, UnitConversionTable, UnitSystem
-from bores.units import get_conversion_factors
+from bores.units import get_conversion_factors, resolve_unit_conversion_table
 from bores.utils import scale
 from bores.wells.state import WellStates
 from bores.wells.workspace import load_wells_states
@@ -68,6 +68,7 @@ class BlackOilModelState(Serializable):
         """
         if target == self.unit_system:
             return self
+        table = resolve_unit_conversion_table(table)
         factors = get_conversion_factors(self.unit_system, target, table=table)
         return attrs.evolve(
             self,

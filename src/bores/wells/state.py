@@ -8,7 +8,7 @@ from typing_extensions import Self
 from bores.errors import ValidationError
 from bores.serde.stores import StoreSerializable
 from bores.types import Integer, Number, PhaseValues, UnitConversionTable, UnitSystem
-from bores.units import get_conversion_factors
+from bores.units import get_conversion_factors, resolve_unit_conversion_table
 from bores.utils import scale
 from bores.wells.base import Perforation
 from bores.wells.controls import Limit, WellControl
@@ -223,6 +223,7 @@ class WellState(StoreSerializable):
         """
         if target == self.unit_system:
             return self
+        table = resolve_unit_conversion_table(table)
 
         factors = get_conversion_factors(self.unit_system, target, table=table)
         reservoir_rate_factor = factors["reservoir_rate"]
@@ -368,6 +369,7 @@ class WellStates(
         """
         if target == self.unit_system:
             return self
+        table = resolve_unit_conversion_table(table)
         return self.__class__(
             states={
                 name: state.convert(target, table=table) for name, state in self.states.items()

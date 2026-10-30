@@ -762,10 +762,10 @@ class PseudoPressureTable:
         factors = get_conversion_factors(self.unit_system, target, table=table)
         pressure_factor = factors["pressure"]
         # pseudo-pressure unit is [pressure]² / [viscosity]
-        pressure_factor = (pressure_factor**2) / factors["viscosity"]
+        pseudo_pressure_factor = (pressure_factor**2) / factors["viscosity"]
         return self.__class__(
             pressures=scale(self.pressures, pressure_factor),
-            pseudo_pressures=scale(self.pseudo_pressures, pressure_factor),
+            pseudo_pressures=scale(self.pseudo_pressures, pseudo_pressure_factor),
             reference_pressure=scale(self.reference_pressure, pressure_factor),
             number_of_base_points=self.number_of_base_points,
             number_of_endpoint_extra_points=self.number_of_endpoint_extra_points,

@@ -11,7 +11,7 @@ from bores.errors import ValidationError
 from bores.grids.base import Grid
 from bores.precision import get_dtype
 from bores.reservoir.regions import load_region_array
-from bores.units import UnitConversionTable, get_conversion_factors
+from bores.units import UnitConversionTable, get_conversion_factors, resolve_unit_conversion_table
 
 if typing.TYPE_CHECKING:
     from bores.blackoil.satfunc.regions import SatFunc
@@ -441,6 +441,7 @@ class Rock:
         """
         if target == self.unit_system:
             return self
+        table = resolve_unit_conversion_table(table)
 
         factors = get_conversion_factors(self.unit_system, target, table=table)
         return attrs.evolve(

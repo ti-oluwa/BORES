@@ -36,6 +36,7 @@ from bores.types import (
     UnitSystem,
 )
 from bores.units import UnitConversionTable, get_conversion_factors
+from bores.utils import scale
 
 __all__ = ["CellStatus", "CellTopBottomFaces", "ConnectionType", "Grid", "RaggedRows"]
 
@@ -2361,27 +2362,29 @@ class Grid:
         volume_factor = length_factor**3
         # Rescale vertex coordinates only.
         # All other geometry is derived and will be recomputed on Grid initialization.
-        vertex_coordinates = self.vertex_coordinates * length_factor
-        cell_volumes = self.cell_volumes * volume_factor if self.cell_volumes is not None else None
-        cell_centroids = (
-            self.cell_centroids * length_factor if self.cell_centroids is not None else None
-        )
+        vertex_coordinates = scale(self.vertex_coordinates, length_factor)
+        cell_volumes = scale(self.cell_volumes, volume_factor)
+        cell_centroids = scale(self.cell_centroids, length_factor)
+
         # The cell bounding boxes set the cell lengths, so they scale with the vertices.
-        cell_min_xyz = self.cell_min_xyz * length_factor if self.cell_min_xyz is not None else None
-        cell_max_xyz = self.cell_max_xyz * length_factor if self.cell_max_xyz is not None else None
+        cell_min_xyz = scale(self.cell_min_xyz, length_factor)
+        cell_max_xyz = scale(self.cell_max_xyz, length_factor)
+
         # Flow transmissibility has units of volumetric rate x viscosity / pressure.
-        nnc_transmissibilities = (
-            self.nnc_transmissibilities
-            * (factors["reservoir_rate"] * factors["viscosity"] / factors["pressure"])
-            if self.nnc_transmissibilities is not None
-            else None
+        nnc_transmissibilities = scale(
+            self.nnc_transmissibilities,
+            factors["reservoir_rate"] * factors["viscosity"] / factors["pressure"],
         )
+
         metadata = self.metadata
         if metadata:
             metadata = {
-                key: (np.asarray(value) * length_factor if key in ("coord", "zcorn") else value)
+                key: (
+                    scale(np.asarray(value), length_factor) if key in ("coord", "zcorn") else value
+                )
                 for key, value in metadata.items()
             }
+
         return attrs.evolve(
             self,
             vertex_coordinates=vertex_coordinates,

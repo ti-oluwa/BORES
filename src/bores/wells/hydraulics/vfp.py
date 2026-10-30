@@ -41,7 +41,7 @@ from bores.types import (
     TableResult,
     UnitSystem,
 )
-from bores.units import UnitConversionTable, get_conversion_factors
+from bores.units import UnitConversionTable, get_conversion_factors, resolve_unit_conversion_table
 from bores.utils import scale
 from bores.wells.base import WellType
 from bores.wells.hydraulics.base import SurfaceSample, WellBoreModel
@@ -878,6 +878,7 @@ class VFPTables(StoreSerializable):
         """
         if target == self.unit_system:
             return self
+        table = resolve_unit_conversion_table(table)
         return attrs.evolve(
             self,
             producers={

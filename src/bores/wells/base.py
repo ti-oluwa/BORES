@@ -18,7 +18,7 @@ from bores.types import (
     UnitConversionTable,
     UnitSystem,
 )
-from bores.units import get_conversion_factors
+from bores.units import get_conversion_factors, resolve_unit_conversion_table
 from bores.utils import scale
 from bores.wells.trajectory import WellTrajectory
 
@@ -310,6 +310,32 @@ class Perforation:
         return self.bottom_depth - self.top_depth  # type: ignore[operator]
 
 
+def convert_perforation(
+    perforation: Perforation, /, *, length_factor: Number, connection_factor: Number
+) -> Perforation:
+    """
+    A copy of `perforation` with its dimensioned fields rescaled.
+
+    :param perforation: The perforation to convert.
+    :param length_factor: Factor from the current length unit to the target one. Applied to the
+        depths, measured depths and wellbore radius.
+    :param connection_factor: Factor from the current connection-factor unit (permeability times
+        length) to the target one. Applied to `connection_factor_override`.
+    :returns: The converted perforation.
+    """
+    return attrs.evolve(
+        perforation,
+        top_depth=scale(perforation.top_depth, length_factor),
+        bottom_depth=scale(perforation.bottom_depth, length_factor),
+        top_md=scale(perforation.top_md, length_factor),
+        bottom_md=scale(perforation.bottom_md, length_factor),
+        wellbore_radius=scale(perforation.wellbore_radius, length_factor),
+        connection_factor_override=scale(
+            perforation.connection_factor_override, connection_factor
+        ),
+    )
+
+
 @attrs.frozen(kw_only=True, slots=True)
 class Well:
     """Static well identity and configuration."""
@@ -514,10 +540,8 @@ class Well:
 
         factors = get_conversion_factors(self.unit_system, target, table=table)
         length_factor = factors["length"]
-
-        trajectory: WellTrajectory | None
-        perforations: tuple[Perforation, ...]
-
+        connection_factor = factors["permeability"] * length_factor
+        trajectory: WellTrajectory | None = None
         if self.trajectory is not None:
             trajectory = WellTrajectory(
                 stations=tuple(
@@ -531,26 +555,12 @@ class Well:
                     for station in self.trajectory.stations
                 )
             )
-            perforations = tuple(
-                attrs.evolve(
-                    perforation,
-                    top_md=scale(perforation.top_md, length_factor),  # type: ignore[union-attr]
-                    bottom_md=scale(perforation.bottom_md, length_factor),  # type: ignore[union-attr]
-                    wellbore_radius=scale(perforation.wellbore_radius, length_factor),
-                )
-                for perforation in self.perforations
+        perforations = tuple(
+            convert_perforation(
+                perforation, length_factor=length_factor, connection_factor=connection_factor
             )
-        else:
-            trajectory = None
-            perforations = tuple(
-                attrs.evolve(
-                    perforation,
-                    top_depth=scale(perforation.top_depth, length_factor),  # type: ignore[union-attr]
-                    bottom_depth=scale(perforation.bottom_depth, length_factor),  # type: ignore[union-attr]
-                    wellbore_radius=scale(perforation.wellbore_radius, length_factor),
-                )
-                for perforation in self.perforations
-            )
+            for perforation in self.perforations
+        )
         return attrs.evolve(
             self,
             surface_location=(
@@ -560,6 +570,7 @@ class Well:
             reference_depth=scale(self.reference_depth, length_factor),
             perforations=perforations,
             trajectory=trajectory,
+            d_factor=scale(self.d_factor, 1.0 / factors["gas_surface_rate"]),
             unit_system=target,
         )
 
@@ -773,6 +784,7 @@ class Wells:
         """
         if target == self.unit_system:
             return self
+        table = resolve_unit_conversion_table(table)
         return self.__class__(
             wells={name: well.convert(target, table=table) for name, well in self.wells.items()},
             unit_system=target,

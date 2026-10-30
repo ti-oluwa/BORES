@@ -25,6 +25,7 @@ from bores.types import (
     UnitSystem,
 )
 from bores.units import get_conversion_factors
+from bores.utils import scale
 
 if typing.TYPE_CHECKING:
     from bores.blackoil.pvt.regions import PVT
@@ -837,47 +838,15 @@ class CarterTracyAquifer(BoundaryCondition):
 
         return attrs.evolve(
             self,
-            initial_pressure=self.initial_pressure * pressure_factor,
-            aquifer_permeability=(
-                self.aquifer_permeability * permeability_factor
-                if self.aquifer_permeability is not None
-                else None
-            ),
-            aquifer_porosity=self.aquifer_porosity,
-            aquifer_compressibility=(
-                self.aquifer_compressibility * compressibility_factor
-                if self.aquifer_compressibility is not None
-                else None
-            ),
-            water_viscosity=(
-                self.water_viscosity * viscosity_factor
-                if self.water_viscosity is not None
-                else None
-            ),
-            inner_radius=(
-                self.inner_radius * length_factor if self.inner_radius is not None else None
-            ),
-            outer_radius=(
-                self.outer_radius * length_factor if self.outer_radius is not None else None
-            ),
-            aquifer_thickness=(
-                self.aquifer_thickness * length_factor
-                if self.aquifer_thickness is not None
-                else None
-            ),
-            aquifer_constant=(
-                self.aquifer_constant * volume_factor / pressure_factor
-                if self.aquifer_constant is not None
-                else None
-            ),
-            dimensionless_radius_ratio=self.dimensionless_radius_ratio,
-            dimensionless_time_scale=(
-                self.dimensionless_time_scale / time_factor
-                if self.dimensionless_time_scale is not None
-                else None
-            ),
-            bounded_aquifer=self.bounded_aquifer,
-            angle=self.angle,
+            initial_pressure=scale(self.initial_pressure, pressure_factor),
+            aquifer_permeability=scale(self.aquifer_permeability, permeability_factor),
+            aquifer_compressibility=scale(self.aquifer_compressibility, compressibility_factor),
+            water_viscosity=scale(self.water_viscosity, viscosity_factor),
+            inner_radius=scale(self.inner_radius, length_factor),
+            outer_radius=scale(self.outer_radius, length_factor),
+            aquifer_thickness=scale(self.aquifer_thickness, length_factor),
+            aquifer_constant=scale(self.aquifer_constant, volume_factor / pressure_factor),
+            dimensionless_time_scale=scale(self.dimensionless_time_scale, 1.0 / time_factor),
             unit_system=target,
         )
 

@@ -13,7 +13,7 @@ from bores.errors import ValidationError
 from bores.serde.base import Serializable
 from bores.serde.registry import make_serializable_type_registrar
 from bores.types import FluidPhase, Integer, Number, UnitConversionTable, UnitSystem
-from bores.units import get_conversion_factors
+from bores.units import get_conversion_factors, resolve_unit_conversion_table
 from bores.utils import scale
 
 __all__ = [
@@ -605,6 +605,7 @@ class ProducerControl(WellControl):
         """
         if target == self.unit_system:
             return self
+        table = resolve_unit_conversion_table(table)
         factors = get_conversion_factors(self.unit_system, target, table=table)
         rate_modes = {
             ProducerControlMode.OIL_RATE: "liquid_surface_rate",
@@ -695,6 +696,7 @@ class InjectorControl(WellControl):
         """
         if target == self.unit_system:
             return self
+        table = resolve_unit_conversion_table(table)
 
         factors = get_conversion_factors(self.unit_system, target, table=table)
         rate_factor = (
@@ -842,6 +844,7 @@ class WellControls:
         """
         if target == self.unit_system:
             return self
+        table = resolve_unit_conversion_table(table)
         return self.__class__(
             controls={
                 name: control.convert(target, table=table)

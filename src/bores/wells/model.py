@@ -9,6 +9,7 @@ from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.grids.base import Grid
 from bores.types import UnitConversionTable, UnitSystem
+from bores.units import resolve_unit_conversion_table
 from bores.wells.base import Wells
 from bores.wells.controls import WellControls
 from bores.wells.groups import GroupControls, WellGroups
@@ -176,9 +177,11 @@ class WellSystem:
         """
         if target == self.unit_system:
             return self
+        table = resolve_unit_conversion_table(table)
         return attrs.evolve(
             self,
             wells=self.wells.convert(target, table=table),
+            spec=self.spec.convert(target, table=table),
             well_controls=self.well_controls.convert(target, table=table),
             tubing_performance=convert_tubing_performance(
                 self.tubing_performance, target, table=table

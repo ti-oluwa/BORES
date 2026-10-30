@@ -20,6 +20,7 @@ from bores.types import (
     UnitSystem,
 )
 from bores.units import get_conversion_factors
+from bores.utils import scale
 
 DType = typing.TypeVar("DType", float, np.floating)
 ShapeT = typing.TypeVar("ShapeT", bound=tuple[int, ...])
@@ -177,9 +178,9 @@ class MapAxes:
 
         factor = get_conversion_factors(self.unit_system, target, table=table)["length"]
         return self.__class__(
-            origin=self.origin * factor,  # type: ignore[arg-type]
-            map_x_axis_point=self.map_x_axis_point * factor,  # type: ignore[arg-type]
-            map_y_axis_point=self.map_y_axis_point * factor,  # type: ignore[arg-type]
+            origin=scale(self.origin, factor),
+            map_x_axis_point=scale(self.map_x_axis_point, factor),
+            map_y_axis_point=scale(self.map_y_axis_point, factor),
             unit_system=target,
         )
 

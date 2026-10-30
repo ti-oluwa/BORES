@@ -31,6 +31,7 @@ from bores.types import (
     Wettability,
 )
 from bores.units import get_conversion_factors
+from bores.utils import scale
 
 __all__ = [
     "BrooksCoreyCapillaryPressureTable",
@@ -1596,7 +1597,7 @@ class BrooksCoreyCapillaryPressureTable(CapillaryPressureTable):
 
         Entry pressures (`oil_water_entry_pressure_water_wet`,
         `oil_water_entry_pressure_oil_wet`, `gas_oil_entry_pressure`) are
-        multiplied by the pressure conversion factor from `self.unit_system`
+        scaled by the pressure conversion factor from `self.unit_system`
         to *target*. Saturation parameters, pore-size distribution indices,
         wettability, and `mixed_wet_water_fraction` are dimensionless and
         are copied unchanged.
@@ -1611,10 +1612,12 @@ class BrooksCoreyCapillaryPressureTable(CapillaryPressureTable):
         pressure_factor = factors["pressure"]
         return attrs.evolve(
             self,
-            oil_water_entry_pressure_water_wet=self.oil_water_entry_pressure_water_wet
-            * pressure_factor,
-            oil_water_entry_pressure_oil_wet=self.oil_water_entry_pressure_oil_wet
-            * pressure_factor,
-            gas_oil_entry_pressure=self.gas_oil_entry_pressure * pressure_factor,
+            oil_water_entry_pressure_water_wet=scale(
+                self.oil_water_entry_pressure_water_wet, pressure_factor
+            ),
+            oil_water_entry_pressure_oil_wet=scale(
+                self.oil_water_entry_pressure_oil_wet, pressure_factor
+            ),
+            gas_oil_entry_pressure=scale(self.gas_oil_entry_pressure, pressure_factor),
             unit_system=target,
         )

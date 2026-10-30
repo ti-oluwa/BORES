@@ -18,6 +18,7 @@ from bores.types import CellArray, Number, UnitSystem
 from bores.units import (
     UnitConversionTable,
     build_unit_conversion_table,
+    resolve_unit_conversion_table,
 )
 
 __all__ = ["Reservoir"]
@@ -302,8 +303,8 @@ class Reservoir:
         """
         if target == self.unit_system:
             return self
+        table = resolve_unit_conversion_table(table)
 
-        table = table or build_unit_conversion_table()
         new_model = self.__class__(
             grid=self.grid.convert(target, table=table),
             rock=self.rock.convert(target, table=table),

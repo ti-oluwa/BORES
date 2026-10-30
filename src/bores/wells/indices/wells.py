@@ -34,7 +34,7 @@ from bores.types import (
     UnitConversionTable,
     UnitSystem,
 )
-from bores.units import get_conversion_factors
+from bores.units import get_conversion_factors, resolve_unit_conversion_table
 from bores.utils import scale
 from bores.wells.base import Perforation, Well, Wells
 from bores.wells.indices.perforations import (
@@ -127,6 +127,7 @@ class WellIndex:
         """
         if target == self.unit_system:
             return self
+        table = resolve_unit_conversion_table(table)
         factors = get_conversion_factors(self.unit_system, target, table=table)
         index_factor = factors["permeability"] * factors["length"]
         return attrs.evolve(

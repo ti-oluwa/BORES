@@ -17,6 +17,7 @@ from bores.types import (
     UnitConversionTable,
     UnitSystem,
 )
+from bores.units import resolve_unit_conversion_table
 
 logger = logging.getLogger(__name__)
 
@@ -281,6 +282,7 @@ class BoundaryConditions:
         :param target: Target `UnitSystem`.
         :returns: New `BoundaryConditions` in *target* units.
         """
+        table = resolve_unit_conversion_table(table)
         return attrs.evolve(
             self,
             regions=[region.convert(target, table=table) for region in self.regions],

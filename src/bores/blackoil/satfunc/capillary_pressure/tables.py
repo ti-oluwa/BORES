@@ -25,7 +25,8 @@ from bores.types import (
     Spacing,
     UnitSystem,
 )
-from bores.units import UnitConversionTable, get_conversion_factors
+from bores.units import UnitConversionTable, get_conversion_factors, resolve_unit_conversion_table
+from bores.utils import scale
 
 __all__ = ["ThreePhaseCapillaryPressureTable", "TwoPhaseCapillaryPressureTable"]
 
@@ -700,9 +701,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
             wetting_phase=self.wetting_phase,
             non_wetting_phase=self.non_wetting_phase,
             reference_saturation=self.reference_saturation.copy(),
-            capillary_pressure=(self.capillary_pressure * pressure_factor).astype(  # type: ignore[arg-type]
-                self.dtype, copy=False
-            ),
+            capillary_pressure=scale(self.capillary_pressure, pressure_factor),
             reference_phase=self.reference_phase,
             number_of_base_points=self.number_of_base_points,
             number_of_endpoint_extra_points=self.number_of_endpoint_extra_points,
@@ -1095,6 +1094,7 @@ class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
         """
         if target == self.unit_system:
             return self
+        table = resolve_unit_conversion_table(table)
 
         return self.__class__(
             oil_water_table=self.oil_water_table.convert(target, table=table),

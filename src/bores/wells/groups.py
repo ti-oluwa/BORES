@@ -9,7 +9,8 @@ from typing_extensions import Self
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.types import FluidPhase, Number, UnitConversionTable, UnitSystem
-from bores.units import get_conversion_factors
+from bores.units import get_conversion_factors, resolve_unit_conversion_table
+from bores.utils import scale
 from bores.wells.controls import EconomicLimit
 
 __all__ = [
@@ -331,9 +332,9 @@ class GroupControl:
         :param table: Optional custom conversion table.
         :returns: New `GroupControl` with `target_rate` converted to target.
         """
-        if target == self.unit_system or self.target_rate is None:
-            return attrs.evolve(self, unit_system=target)
-
+        if target == self.unit_system:
+            return self
+        table = resolve_unit_conversion_table(table)
         factors = get_conversion_factors(self.unit_system, target, table=table)
         if self.injected_phase is not None:
             factor = (
@@ -351,7 +352,12 @@ class GroupControl:
                 if self.mode is GroupProducerControlMode.GAS_RATE
                 else factors["liquid_surface_rate"]
             )
-        return attrs.evolve(self, target_rate=self.target_rate * factor, unit_system=target)
+        return attrs.evolve(
+            self,
+            target_rate=scale(self.target_rate, factor),
+            limits=tuple(limit.convert(target, table=table) for limit in self.limits),
+            unit_system=target,
+        )
 
 
 class GroupControls:
@@ -452,6 +458,7 @@ class GroupControls:
         """
         if target == self.unit_system:
             return self
+        table = resolve_unit_conversion_table(table)
         return self.__class__(
             controls={
                 name: control.convert(target, table=table)

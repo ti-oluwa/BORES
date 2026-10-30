@@ -18,7 +18,13 @@ from bores.types import (
     OneDimension,
     UnitSystem,
 )
-from bores.units import UnitConversionTable, c, get_conversion_factors
+from bores.units import (
+    UnitConversionTable,
+    c,
+    get_conversion_factors,
+    resolve_unit_conversion_table,
+)
+from bores.utils import scale
 
 __all__ = [
     "DepthTable",
@@ -112,11 +118,11 @@ class DepthTable(StoreSerializable):
             return self
         factors = get_conversion_factors(self.unit_system, target, table=table)
         return self.__class__(
-            depths=typing.cast(NumberArray[OneDimension], self.depths * factors["length"]),
+            depths=scale(self.depths, factors["length"]),
             values=(
                 self.values
                 if self.quantity is None
-                else typing.cast(NumberArray[OneDimension], self.values * factors[self.quantity])
+                else scale(self.values, factors[self.quantity])
             ),
             unit_system=target,
             quantity=self.quantity,
@@ -308,12 +314,12 @@ class EquilibriumRegion:
         pressure_factor = factors["pressure"]
         return attrs.evolve(
             self,
-            datum_depth=self.datum_depth * length_factor,
-            datum_pressure=self.datum_pressure * pressure_factor,
-            woc_depth=None if self.woc_depth is None else self.woc_depth * length_factor,
-            pcow_at_woc=self.pcow_at_woc * pressure_factor,
-            goc_depth=None if self.goc_depth is None else self.goc_depth * length_factor,
-            pcgo_at_goc=self.pcgo_at_goc * pressure_factor,
+            datum_depth=scale(self.datum_depth, length_factor),
+            datum_pressure=scale(self.datum_pressure, pressure_factor),
+            woc_depth=scale(self.woc_depth, length_factor),
+            pcow_at_woc=scale(self.pcow_at_woc, pressure_factor),
+            goc_depth=scale(self.goc_depth, length_factor),
+            pcgo_at_goc=scale(self.pcgo_at_goc, pressure_factor),
             rsvd_table=self.rsvd_table,
             rvvd_table=self.rvvd_table,
             accuracy_flag=self.accuracy_flag,
@@ -494,6 +500,7 @@ class Equilibrium:
         """
         if target == self.unit_system:
             return self
+        table = resolve_unit_conversion_table(table)
         return self.__class__(
             regions={
                 num: region.convert(target, table=table) for num, region in self.regions.items()

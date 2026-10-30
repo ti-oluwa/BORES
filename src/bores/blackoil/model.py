@@ -7,7 +7,11 @@ from bores.errors import ValidationError
 from bores.reservoir.boundary.conditions import BoundaryConditions
 from bores.reservoir.model import Reservoir
 from bores.types import UnitSystem
-from bores.units import UnitConversionTable, build_unit_conversion_table
+from bores.units import (
+    UnitConversionTable,
+    build_unit_conversion_table,
+    resolve_unit_conversion_table,
+)
 from bores.wells.model import WellSystem
 
 __all__ = ["BlackOilModel"]
@@ -128,6 +132,7 @@ class BlackOilModel:
         """
         if target == self.unit_system:
             return self
+        table = resolve_unit_conversion_table(table)
         return self.__class__(
             reservoir=self.reservoir.convert(target, table=table),
             fluid=self.fluid.convert(target, table=table),

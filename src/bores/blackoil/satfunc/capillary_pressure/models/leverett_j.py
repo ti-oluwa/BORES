@@ -31,6 +31,7 @@ from bores.types import (
     Wettability,
 )
 from bores.units import get_conversion_factors
+from bores.utils import scale
 
 __all__ = [
     "LeverettJCapillaryPressureTable",
@@ -1440,6 +1441,16 @@ class LeverettJCapillaryPressureTable(CapillaryPressureTable):
     supports_vector: bool = attrs.field(init=False, repr=False, default=True)
     """Flag indicating support for array inputs."""
 
+    dyne_per_cm_to_pressure_unit: Number = attrs.field(init=False, repr=False, default=0.0)
+    """Factor from dyne/cm to the pressure unit of `unit_system`. Set from `unit_system`."""
+
+    def __attrs_post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "dyne_per_cm_to_pressure_unit",
+            convert_dyne_per_cm_to_pressure_unit(self.unit_system),
+        )
+
     def get_oil_water_wetting_phase(self) -> FluidPhase:
         wettability = self.wettability
         if wettability == Wettability.WATER_WET:
@@ -1576,9 +1587,7 @@ class LeverettJCapillaryPressureTable(CapillaryPressureTable):
                 wettability=self.wettability,
                 saturation_epsilon=c.SATURATION_EPSILON,
                 minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
-                dyne_per_cm_to_pressure_unit=convert_dyne_per_cm_to_pressure_unit(
-                    self.unit_system
-                ),
+                dyne_per_cm_to_pressure_unit=self.dyne_per_cm_to_pressure_unit,
             )
         )
         return (
@@ -1649,7 +1658,7 @@ class LeverettJCapillaryPressureTable(CapillaryPressureTable):
             wettability=self.wettability,
             saturation_epsilon=c.SATURATION_EPSILON,
             minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
-            dyne_per_cm_to_pressure_unit=convert_dyne_per_cm_to_pressure_unit(self.unit_system),
+            dyne_per_cm_to_pressure_unit=self.dyne_per_cm_to_pressure_unit,
         )
         return CapillaryPressures(oil_water=pcow, gas_oil=pcgo)  # type: ignore[typeddict-item]
 
@@ -1745,7 +1754,7 @@ class LeverettJCapillaryPressureTable(CapillaryPressureTable):
             mixed_wet_water_fraction=self.mixed_wet_water_fraction,
             saturation_epsilon=c.SATURATION_EPSILON,
             minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
-            dyne_per_cm_to_pressure_unit=convert_dyne_per_cm_to_pressure_unit(self.unit_system),
+            dyne_per_cm_to_pressure_unit=self.dyne_per_cm_to_pressure_unit,
         )
         return CapillaryPressureDerivatives(
             dpcow_dsw=dpcow_dsw,
@@ -1777,6 +1786,6 @@ class LeverettJCapillaryPressureTable(CapillaryPressureTable):
         factors = get_conversion_factors(self.unit_system, target, table=table)
         return attrs.evolve(
             self,
-            permeability=self.permeability * factors["permeability"],
+            permeability=scale(self.permeability, factors["permeability"]),
             unit_system=target,
         )

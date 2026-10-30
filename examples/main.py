@@ -5,18 +5,12 @@ from bores.grids.utils import make_pyvista_grid
 from bores.simulation.case import SimulationCase
 from bores.wells.hydraulics.homogeneous import homogeneous_wellbore
 
-df = DeckFile(
-    "/home/tioluwa/Projects/opm-data/norne/NORNE_ATW2013.DATA",
-    encoding="latin-1",
-    # unit_system=UnitSystem.METRIC,
-)
+df = DeckFile("/home/tioluwa/Projects/opm-data/norne/NORNE_ATW2013.DATA", encoding="latin-1")
 
 
-# Load the simultion case from the deck.
+# Load the simulation case from the deck.
 wellbore = homogeneous_wellbore(tubing_inner_diameter=2.5, unit_system=df.unit_system)
-print("Loading case")
 case = SimulationCase.from_deck(df, title="Norne", tubing_performance=wellbore, temperature=200.0)
-print("Loaded case")
 
 # Fluid model, from the compiled case
 pvt = case.model.fluid.pvt
@@ -47,11 +41,11 @@ print(f"bbox: {grid.bounding_box}")
 
 pv_grid = make_pyvista_grid(
     grid,
-    cell_data={"pressure": case.initial_state.solution_gor},
+    cell_data={"oil saturation": case.initial_state.oil_saturation},
     use_hexahedra=True,
     hollow=True,
 )
 pl = pv.Plotter()
-pl.add_mesh(pv_grid, scalars="pressure", show_edges=True)
+pl.add_mesh(pv_grid, scalars="oil saturation", show_edges=True)
 pl.set_scale(zscale=5, xscale=2, yscale=2)  # type:ignore
 pl.show()

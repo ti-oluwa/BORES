@@ -37,6 +37,7 @@ from bores.types import (
     UnitConversionTable,
     UnitSystem,
 )
+from bores.units import resolve_unit_conversion_table
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,7 @@ class PVTRegion:
         :param target: Target `UnitSystem`.
         :returns: New `PVTRegion` in *target* units.
         """
+        table = resolve_unit_conversion_table(table)
         return attrs.evolve(
             self,
             static=self.static.convert(target, table=table),
@@ -228,6 +230,7 @@ class PVT:
         :param target: Target `UnitSystem`.
         :returns: New `PVT` in *target* units.
         """
+        table = resolve_unit_conversion_table(table)
         return self.__class__(
             regions={
                 pvtnum: region.convert(target, table=table)

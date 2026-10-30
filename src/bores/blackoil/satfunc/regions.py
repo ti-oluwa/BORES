@@ -24,7 +24,7 @@ from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.reservoir.regions import RegionGroups
 from bores.types import Integer, Spacing, UnitSystem
-from bores.units import UnitConversionTable
+from bores.units import UnitConversionTable, resolve_unit_conversion_table
 
 logger = logging.getLogger(__name__)
 
@@ -158,6 +158,7 @@ class SatFunc:
         :param target: Target `UnitSystem`.
         :returns: New `SatFunc` in *target* units.
         """
+        table = resolve_unit_conversion_table(table)
         return self.__class__(
             tables={
                 satnum: tables.convert(target, table=table)
