@@ -75,6 +75,15 @@ __all__ = [
     "DENSITY",
     "EHYSTR",
     "GRAVITY",
+    "IKRG",
+    "IKRGR",
+    "IKRO",
+    "IKRORG",
+    "IKRORW",
+    "IKRW",
+    "IKRWR",
+    "IPCG",
+    "IPCW",
     "ISGCR",
     "ISGL",
     "ISGLPC",
@@ -98,6 +107,7 @@ __all__ = [
     "SGCR",
     "SGFN",
     "SGL",
+    "SGLPC",
     "SGOF",
     "SGU",
     "SOF2",
@@ -109,6 +119,7 @@ __all__ = [
     "SWCRIT",
     "SWFN",
     "SWL",
+    "SWLPC",
     "SWOF",
     "SWU",
     "TRACER",
@@ -758,3 +769,36 @@ ISWLPC = endpoint_array("ISWLPC")
 
 ISWU = endpoint_array("ISWU")
 """`ISWU` - maximum water saturation of the imbibition curves, per cell (drainage: `SWU`). `NaN` where never set."""
+
+IKRG = endpoint_array("IKRG")
+"""`IKRG` - maximum gas relative permeability of the imbibition curve (drainage: `KRG`). `NaN` where never set."""
+
+IKRGR = endpoint_array("IKRGR")
+"""`IKRGR` - gas relative permeability of the imbibition curve at the residual (critical) oil saturation in gas (drainage: `KRGR`). `NaN` where never set."""
+
+IKRO = endpoint_array("IKRO")
+"""`IKRO` - maximum oil relative permeability of the imbibition curves (drainage: `KRO`). `NaN` where never set."""
+
+IKRORG = endpoint_array("IKRORG")
+"""`IKRORG` - oil relative permeability of the imbibition curve at the critical gas saturation (drainage: `KRORG`). `NaN` where never set."""
+
+IKRORW = endpoint_array("IKRORW")
+"""`IKRORW` - oil relative permeability of the imbibition curve at the critical water saturation (drainage: `KRORW`). `NaN` where never set."""
+
+IKRW = endpoint_array("IKRW")
+"""`IKRW` - maximum water relative permeability of the imbibition curve (drainage: `KRW`). `NaN` where never set."""
+
+IKRWR = endpoint_array("IKRWR")
+"""`IKRWR` - water relative permeability of the imbibition curve at the residual (critical) oil saturation in water (drainage: `KRWR`). `NaN` where never set."""
+
+IPCG = endpoint_array("IPCG")
+"""`IPCG` - maximum gas-oil capillary pressure of the imbibition curve, in psi (FIELD) or barsa (METRIC) (drainage: `PCG`). `NaN` where never set."""
+
+IPCW = endpoint_array("IPCW")
+"""`IPCW` - maximum oil-water capillary pressure of the imbibition curve, in psi (FIELD) or barsa (METRIC) (drainage: `PCW`). `NaN` where never set."""
+
+SGLPC = endpoint_array("SGLPC")
+"""`SGLPC` - connate gas saturation that scales only the drainage capillary pressure curve, per cell. `NaN` where never set."""
+
+SWLPC = endpoint_array("SWLPC")
+"""`SWLPC` - connate water saturation that scales only the drainage capillary pressure curve, per cell. `NaN` where never set."""

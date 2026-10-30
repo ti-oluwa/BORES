@@ -464,7 +464,7 @@ class WellStates(
         categorical: Boolean = False,
     ) -> AnyDataFrame:
         """
-        Turns these well states into a pandas or polars data frame, with one row for each well
+        Turns these well states into a `pandas` or `polars` data frame, with one row for each well
         or for each open perforation.
 
         To stack the well states of a run into one data frame, pass them to the module-level
@@ -588,7 +588,7 @@ def as_dataframe(
     categorical: Boolean = False,
 ) -> AnyDataFrame:
     """
-    Turns the well states of one time, or of many times, into a pandas or polars data frame.
+    Turns the well states of one time, or of many times, into a `pandas` or `polars` data frame.
 
     With `level="well"`, the default, there is one row for each well at each time, with its
     control, pressures and rates. With `level="perforation"` there is one row for each open

@@ -17,6 +17,17 @@ IMBIBITION_ENDPOINTS = (
     "ISGU",
     "ISOWCR",
     "ISOGCR",
+    "IKRW",
+    "IKRWR",
+    "IKRO",
+    "IKRORW",
+    "IKRORG",
+    "IKRG",
+    "IKRGR",
+    "IPCW",
+    "IPCG",
+    "SWLPC",
+    "SGLPC",
 )
 
 

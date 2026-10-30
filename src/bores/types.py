@@ -26,6 +26,7 @@ __all__ = [
     "Orientation",
     "PhaseValues",
     "Preconditioner",
+    "RelPermHysteresisModel",
     "RelativePermeabilities",
     "Solver",
     "SolverFunction",
@@ -148,6 +149,30 @@ class Orientation(enum.Enum):
             if member.value == lowered:
                 return member
         return None
+
+
+class RelPermHysteresisModel(enum.Enum):
+    """Construction used for the scanning curves of relative permeability hysteresis."""
+
+    NONE = "none"
+    """No relative permeability hysteresis: every cell stays on its drainage curves."""
+
+    CARLSON = "carlson"
+    """Carlson's scanning curves for the non-wetting phase. The Eclipse default."""
+
+    KILLOUGH = "killough"
+    """Killough's scanning curves for the non-wetting phase, as Eclipse defines them."""
+
+    BLENDED_SCANNING = "blended_scanning"
+    """
+    A weighted blend between the drainage and imbibition curves, with the weight set by how far
+    the saturation has moved between the reversal and the end of the scanning range. This is
+    the scheme BORES had before Eclipse's Carlson and Killough models were added. It is not
+    reachable from `EHYSTR`, only by choosing it explicitly.
+    """
+
+    def __str__(self) -> str:
+        return self.value
 
 
 class FluidPhase(enum.Enum):

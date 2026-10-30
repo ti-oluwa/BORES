@@ -5,9 +5,12 @@ from bores.reservoir.rock.compressibility import (
     RockCompressibilityTable,
     RockCompressibilityTables,
 )
+from bores.reservoir.rock.imbibition import IMBIBITION_ENDPOINT_KEYWORDS, ImbibitionEndpoints
 from bores.reservoir.rock.model import Permeability, Rock
 
 __all__ = [
+    "IMBIBITION_ENDPOINT_KEYWORDS",
+    "ImbibitionEndpoints",
     "Permeability",
     "Rock",
     "RockCompressibility",

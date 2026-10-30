@@ -1109,6 +1109,30 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         ),
         unit="dimensionless",
     ),
+    "HYSTERESIS_CAPILLARY_PRESSURE_CURVATURE": Constant(
+        value=0.1,
+        description=(
+            "Curvature parameter of the capillary pressure hysteresis scanning curves when the "
+            "deck gives no `EHYSTR`. Matches the Eclipse default."
+        ),
+        unit="dimensionless",
+    ),
+    "HYSTERESIS_KILLOUGH_WETTING_CURVATURE": Constant(
+        value=1.0,
+        description=(
+            "Curvature parameter of the Killough wetting phase scanning curves when the deck "
+            "gives no `EHYSTR`. Matches the Eclipse default."
+        ),
+        unit="dimensionless",
+    ),
+    "HYSTERESIS_KILLOUGH_TRAPPED_MODIFIER": Constant(
+        value=0.1,
+        description=(
+            "Modification parameter of the Killough trapped non-wetting saturation when the "
+            "deck gives no `EHYSTR`. Matches the Eclipse default."
+        ),
+        unit="dimensionless",
+    ),
     "AQUIFER_BESSEL_SERIES_TERMS": Constant(
         value=30,
         description=("Empirically validated safety margin for the Klins finite-aquifer series"),
