@@ -108,6 +108,8 @@ from bores.deck.keywords.props import (
 )
 from bores.deck.keywords.regions import EQLNUM, FIPNUM, IMBNUM, PVTNUM, ROCKNUM, SATNUM
 from bores.deck.keywords.runspec import (
+    CO2STOR,
+    CO2STORE,
     DISGAS,
     DISGASW,
     ENDSCALE,
@@ -118,6 +120,7 @@ from bores.deck.keywords.runspec import (
     FMTIN,
     FMTOUT,
     GAS,
+    GASWAT,
     LAB,
     MESSAGES,
     METRIC,
@@ -134,6 +137,7 @@ from bores.deck.keywords.runspec import (
     UNIFIN,
     UNIFOUT,
     VAPOIL,
+    VAPWAT,
     VFPIDIMS,
     VFPPDIMS,
     WATER,
@@ -294,6 +298,10 @@ DEFAULT_KEYWORDS = frozenset({
     VFPPDIMS,
     DISGAS,
     DISGASW,
+    CO2STOR,
+    CO2STORE,
+    GASWAT,
+    VAPWAT,
     EQLDIMS,
     FIELD,
     GAS,

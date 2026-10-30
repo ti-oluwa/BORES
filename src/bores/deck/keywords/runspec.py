@@ -20,6 +20,8 @@ from bores.deck.keywords.parsers import uppercase
 from bores.deck.operators import Operation
 
 __all__ = [
+    "CO2STOR",
+    "CO2STORE",
     "DISGAS",
     "DISGASW",
     "ENDSCALE",
@@ -30,6 +32,7 @@ __all__ = [
     "FMTIN",
     "FMTOUT",
     "GAS",
+    "GASWAT",
     "LAB",
     "MESSAGES",
     "METRIC",
@@ -46,6 +49,7 @@ __all__ = [
     "UNIFIN",
     "UNIFOUT",
     "VAPOIL",
+    "VAPWAT",
     "VFPIDIMS",
     "VFPPDIMS",
     "WATER",
@@ -99,6 +103,33 @@ VAPOIL = FlagKeyword("VAPOIL")
 
 Requires `OIL` and `GAS` to also be active. Wet-gas PVT data
 must be supplied via `PVTG` in the PROPS section.
+"""
+
+GASWAT = FlagKeyword("GASWAT")
+"""
+`GASWAT` - enable the gas and water phases together.
+
+Shorthand for declaring `GAS` and `WATER`, for a model with no oil.
+"""
+
+VAPWAT = FlagKeyword("VAPWAT")
+"""
+`VAPWAT` - enable vaporized-water-in-gas modelling (water that evaporates into the gas phase).
+
+Requires `WATER` and `GAS` to also be active.
+"""
+
+CO2STORE = FlagKeyword("CO2STORE")
+"""
+`CO2STORE` - model CO2 storage in brine.
+
+The fluid properties of CO2 and brine are computed from pressure, temperature and `SALINITY`
+instead of being read from PVT tables. The gas phase is CO2 and the aqueous phase is brine.
+"""
+
+CO2STOR = FlagKeyword("CO2STOR")
+"""
+`CO2STOR` - the OPM Flow spelling of `CO2STORE`, with the same meaning.
 """
 
 FIELD = FlagKeyword("FIELD")
