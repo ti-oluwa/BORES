@@ -87,3 +87,13 @@ def test_unit_dimensioned_defaults_are_not_filled_in_with_opms_metric_values():
     # defaulted item stays `None` for the consumer to resolve in the deck's own units.
     assert read("WCONPROD\n 'P1' OPEN ORAT 100 /\n", "WCONPROD")[0]["bhp"] is None
     assert read("PINCH\n /\n", "PINCH")["max_empty_gap"] is None
+
+
+def test_regdims_names_item_four_as_flux_regions():
+    # item 4 (NTFREG) is the number of flux regions: Norne sets 20 and its FLUXNUM has 20 regions
+    record = read("REGDIMS\n 22 3 1* 20 /\n", "REGDIMS")
+    assert record["max_fluid_in_place_regions"] == 22
+    assert record["max_fluid_in_place_region_sets"] == 3
+    assert record["max_reservoir_regions"] == 0
+    assert record["max_flux_regions"] == 20
+    assert "max_tracer_fip_regions" not in record

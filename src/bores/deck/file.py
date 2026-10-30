@@ -1029,7 +1029,7 @@ class DeckFile:
             self._shared[key] = self.get(key)
         return self._shared[key]
 
-    def gets(
+    def get_many(
         self, *ks: str | Keyword[typing.Any], use_cache: bool = False
     ) -> dict[str, typing.Any | None]:
         """

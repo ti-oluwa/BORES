@@ -11,7 +11,6 @@ import numpy as np
 from bores.constants import c
 from bores.deck.core import DeckParseError
 from bores.deck.file import DeckFile
-from bores.deck.precheck import find_missing
 from bores.errors import NotSupportedError, ValidationError
 from bores.grids.base import Grid
 from bores.schedule.actions import RunSequence
@@ -84,12 +83,14 @@ if typing.TYPE_CHECKING:
     from bores.blackoil.compile import CompiledBlackOilModel
 
 __all__ = [
-    "WELL_REQUIRED_KEYWORDS",
+    "WELL_DEFINING_KEYWORDS",
+    "WELL_DEPENDENT_KEYWORDS",
     "apply_d_factors",
     "apply_economic_limits",
     "apply_guide_rates",
     "apply_well_segments",
-    "check_well_keywords",
+    "deck_defines_wells",
+    "find_well_keyword_problem",
     "from_deck_gas_rate",
     "get_fluid_in_place_regions",
     "is_whole_well_record",
@@ -1423,24 +1424,66 @@ def apply_d_factors(
         wells[well_name] = attrs.evolve(wells[well_name], d_factor=d_factor)
 
 
-WELL_REQUIRED_KEYWORDS = ("WELSPECS", "COMPDAT")
-"""The deck keywords a well roster cannot be built without. The controls and limits are optional."""
+WELL_DEFINING_KEYWORDS = ("WELSPECS", "COMPDAT")
+"""The deck keywords that define wells. A deck has wells when it has both, and none when it has neither."""
+
+WELL_DEPENDENT_KEYWORDS = (
+    "WCONPROD",
+    "WCONINJE",
+    "WELTARG",
+    "WELOPEN",
+    "WECON",
+    "WPIMULT",
+    "WLIFT",
+    "WGRUPCON",
+    "WELSEGS",
+    "COMPSEGS",
+)
+"""The deck keywords that act on wells by name, so are meaningless in a deck that defines none."""
 
 
-def check_well_keywords(deck_file: DeckFile) -> None:
+def find_well_keyword_problem(deck_file: DeckFile) -> str | None:
     """
-    Check that the deck defines wells and their completions, before any of it is read.
+    Check that the deck's well keywords are consistent, before any of them is read.
 
-    :param deck_file: The deck the wells are to be loaded from.
-    :raises ValidationError: If `WELSPECS` or `COMPDAT` is missing, naming each one that is.
+    A deck without wells is fine. What is not fine is a deck that defines wells only halfway
+    (`WELSPECS` without `COMPDAT`, or the reverse), or that sets controls, limits or
+    completions for wells it never defines.
+
+    :param deck_file: The deck to check.
+    :returns: A description of the problem, or `None` if the well keywords are consistent.
     """
-    missing = find_missing(deck_file, all_of=WELL_REQUIRED_KEYWORDS)
-    if missing:
-        raise ValidationError(
-            f"Cannot load wells from the deck: {', '.join(missing)} "
-            f"{'is' if len(missing) == 1 else 'are'} missing. "
-            "A well needs a `WELSPECS` record and at least one `COMPDAT` completion."
+    presence = deck_file.has_many(*WELL_DEFINING_KEYWORDS, *WELL_DEPENDENT_KEYWORDS)
+    defining = [name for name in WELL_DEFINING_KEYWORDS if presence[name]]
+    if len(defining) == 1:
+        absent = next(name for name in WELL_DEFINING_KEYWORDS if name not in defining)
+        return (
+            f"`{defining[0]}` is present but `{absent}` is missing. A well needs both a "
+            "`WELSPECS` record and at least one `COMPDAT` completion."
         )
+    if not defining:
+        dependent = [name for name in WELL_DEPENDENT_KEYWORDS if presence[name]]
+        if dependent:
+            return (
+                f"{', '.join(f'`{name}`' for name in dependent)} "
+                f"{'is' if len(dependent) == 1 else 'are'} present but the deck defines no wells "
+                "(no `WELSPECS` or `COMPDAT`). Define the wells, or remove these keywords."
+            )
+    return None
+
+
+def deck_defines_wells(deck_file: DeckFile) -> bool:
+    """
+    Whether the deck defines any wells.
+
+    :param deck_file: The deck to check.
+    :returns: `True` if the deck has `WELSPECS` and `COMPDAT`, `False` if it has neither.
+    :raises ValidationError: If the well keywords are inconsistent (see `find_well_keyword_problem`).
+    """
+    problem = find_well_keyword_problem(deck_file)
+    if problem is not None:
+        raise ValidationError(f"Cannot load wells from the deck: {problem}")
+    return deck_file.has("WELSPECS")
 
 
 def load_wells(deck_file: DeckFile, grid: Grid, current_time: float = 0.0) -> Wells:
@@ -1455,13 +1498,16 @@ def load_wells(deck_file: DeckFile, grid: Grid, current_time: float = 0.0) -> We
         before this time is marked active; anything later is marked
         pending. Defaults to zero, the start of the run.
     :returns: Wells for every well the deck defines, at any point in the schedule.
-    :raises ValidationError: If the deck has no grid dimensions, or lacks `WELSPECS` or `COMPDAT`.
+    :raises ValidationError: If the deck has no grid dimensions, defines no wells, or defines them inconsistently.
     """
     if deck_file.dimensions is None:
         raise ValidationError(
             "Deck has no `SPECGRID`/`DIMENS`; `COMPDAT` (I, J, K) can't be resolved."
         )
-    check_well_keywords(deck_file)
+    if not deck_defines_wells(deck_file):
+        raise ValidationError(
+            "Cannot load wells from the deck: it defines none (no `WELSPECS` or `COMPDAT`)."
+        )
 
     welspecs = deck_file.get_shared("WELSPECS") or []
     compdat = deck_file.get_shared("COMPDAT") or []

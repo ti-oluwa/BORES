@@ -48,7 +48,7 @@ from bores.types import (
     Spacing,
     UnitSystem,
 )
-from bores.wells.deck import WELL_REQUIRED_KEYWORDS, load_schedule
+from bores.wells.deck import deck_defines_wells, find_well_keyword_problem, load_schedule
 from bores.wells.model import TubingPerformance, WellSystem
 from bores.wells.schedule import check_vfp_references
 
@@ -478,7 +478,9 @@ def check_deck_requirements(
     if needs_equilibrium:
         require("initial state", all_of_keywords=("EQUIL",))
     if needs_wells:
-        require("wells", all_of_keywords=WELL_REQUIRED_KEYWORDS)
+        well_problem = find_well_keyword_problem(deck_file)
+        if well_problem is not None:
+            problems.append(f"wells: {well_problem.rstrip('.')}")
 
     for entry in find_missing(deck_file, all_of=all_of, any_of=any_of):
         problems.append(f"{stage_of[entry]}: {entry}")
@@ -816,7 +818,7 @@ def load_case(
                 f"Failed to initialize reservoir state from deck file: {title!r}."
             ) from exc
 
-    if wells is None:
+    if wells is None and deck_defines_wells(deck_file):
         try:
             print("Loading wells")
             wells = WellSystem.from_deck(
@@ -871,10 +873,13 @@ def load_case(
         except Exception as exc:
             raise CaseLoadError(f"Failed to load schedule from deck file: {title!r}.") from exc
 
-    try:
-        check_vfp_references(well_system=wells, schedule=schedule)
-    except ValidationError as exc:
-        raise CaseLoadError(f"Invalid VFP table reference in deck file: {title!r}: {exc}") from exc
+    if wells is not None:
+        try:
+            check_vfp_references(well_system=wells, schedule=schedule)
+        except ValidationError as exc:
+            raise CaseLoadError(
+                f"Invalid VFP table reference in deck file: {title!r}: {exc}"
+            ) from exc
 
     start_date = runspec.start_date
     if start_date is None:

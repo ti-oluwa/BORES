@@ -141,11 +141,15 @@ class WellSystem:
         :returns: `WellSystem` built from every well/control/group keyword
             in the deck. `groups`/`group_controls` are `None` if the deck
             has no `GRUPTREE`/`GCONPROD`/`GCONINJE`.
-        :raises ValidationError: If the deck lacks `WELSPECS` or `COMPDAT`.
+        :raises ValidationError: If the deck defines no wells, or defines them inconsistently.
         """
-        from bores.wells.deck import check_well_keywords
+        from bores.wells.deck import deck_defines_wells
 
-        check_well_keywords(deck_file)
+        if not deck_defines_wells(deck_file):
+            raise ValidationError(
+                "Cannot build a `WellSystem` from the deck: it defines no wells (no `WELSPECS` or "
+                "`COMPDAT`). A model without wells needs no `WellSystem`."
+            )
         if tubing_performance is None and (deck_file.has("VFPPROD") or deck_file.has("VFPINJ")):
             tubing_performance = VFPTables.from_deck(deck_file)
         groups = WellGroups.from_deck(deck_file) if deck_file.has("GRUPTREE") else None

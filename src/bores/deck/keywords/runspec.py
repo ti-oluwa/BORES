@@ -355,7 +355,7 @@ REGDIMS = RecordKeyword[int](
         Field("max_fluid_in_place_regions", int, required=False, default=1),
         Field("max_fluid_in_place_region_sets", int, required=False, default=1),
         Field("max_reservoir_regions", int, required=False, default=0),
-        Field("max_tracer_fip_regions", int, required=False, default=0),
+        Field("max_flux_regions", int, required=False, default=0),
         Field("max_etrack", int, required=False, default=0),
         Field("max_coal_regions", int, required=False, default=1),
         Field("max_opernum_regions", int, required=False, default=0),
@@ -374,9 +374,10 @@ Fields:
 
 - `max_fluid_in_place_regions` (`NTFIP`): maximum number of fluid-in-place regions (`FIPNUM`).
 - `max_fluid_in_place_region_sets` (`NMFIPR`): maximum number of fluid-in-place region sets
-  (`FIPNUM` and any other `FIP<name>` array). Default 1.
-- `max_reservoir_regions` (`NRFREG`): maximum number of reservoir regions.
-- `max_tracer_fip_regions` (`NTFREG`): maximum number of tracer fluid-in-place regions.
+  (`FIPNUM` and any other `FIP<name>` array, such as `FIPGL`). Default 1.
+- `max_reservoir_regions` (`NRFREG`): maximum number of independent reservoir regions. Default 0.
+- `max_flux_regions` (`NTFREG`): maximum number of flux regions (`FLUXNUM`), as used by the flux
+  options. Default 0.
 - `max_etrack`: maximum number of extra tracked quantities.
 - `max_coal_regions` (`NTCREG`): maximum number of coal regions (`COALNUM`). Default 1.
 - `max_opernum_regions`: maximum number of `OPERNUM` regions.

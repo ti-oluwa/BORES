@@ -132,7 +132,6 @@ class TestCaseRequirements:
             "rock: `PORO`",
             "PVT: one of `PVTO`",
             "initial state: `EQUIL`",
-            "wells: `WELSPECS`",
         ):
             assert fragment in message
 
@@ -167,24 +166,87 @@ class TestCaseRequirements:
             )
 
 
-class TestWellsPrecheck:
-    def test_wells_need_welspecs_and_compdat_but_not_controls(self):
-        from bores.wells.deck import check_well_keywords
+class TestWellsAreOptional:
+    WELLS = "WELSPECS\n 'P' 'G' 1 1 1* OIL /\n/\nCOMPDAT\n 'P' 1 1 1 1 OPEN /\n/\n"
 
-        check_well_keywords(
-            deck("WELSPECS\n 'P' 'G' 1 1 1* OIL /\n/\nCOMPDAT\n 'P' 1 1 1 1 OPEN /\n/\n")
+    def test_a_deck_with_no_well_keywords_has_no_wells(self):
+        from bores.wells.deck import deck_defines_wells
+
+        assert deck_defines_wells(deck()) is False
+        assert deck_defines_wells(deck(self.WELLS)) is True
+
+    def test_a_deck_without_wells_passes_the_case_precheck(self):
+        TestCaseRequirements().check(
+            deck(),
+            needs_temperature=False,
+            needs_grid=False,
+            needs_satfunc=False,
+            needs_rock=False,
+            needs_pvt=False,
+            needs_equilibrium=False,
         )
-        with pytest.raises(ValidationError, match="`WELSPECS`, `COMPDAT` are missing"):
-            check_well_keywords(deck())
-        with pytest.raises(ValidationError, match="`COMPDAT` is missing"):
-            check_well_keywords(deck("WELSPECS\n 'P' 'G' 1 1 1* OIL /\n/\n"))
 
-    def test_well_system_fails_before_reading_vfp_tables(self):
+    @pytest.mark.parametrize(
+        "body, fragment",
+        [
+            ("WELSPECS\n 'P' 'G' 1 1 1* OIL /\n/\n", "`COMPDAT` is missing"),
+            ("COMPDAT\n 'P' 1 1 1 1 OPEN /\n/\n", "`WELSPECS` is missing"),
+            (
+                "WCONPROD\n 'P' OPEN BHP 5* 100 /\n/\n",
+                "`WCONPROD` is present but the deck defines no wells",
+            ),
+        ],
+    )
+    def test_inconsistent_well_keywords_are_reported_up_front(self, body, fragment):
+        with pytest.raises(CaseLoadError, match=fragment):
+            TestCaseRequirements().check(
+                deck(body),
+                needs_temperature=False,
+                needs_grid=False,
+                needs_satfunc=False,
+                needs_rock=False,
+                needs_pvt=False,
+                needs_equilibrium=False,
+            )
+
+    def test_inconsistency_is_not_checked_when_wells_are_supplied(self):
+        TestCaseRequirements().check(
+            deck("WCONPROD\n 'P' OPEN BHP 5* 100 /\n/\n"),
+            needs_temperature=False,
+            needs_grid=False,
+            needs_satfunc=False,
+            needs_rock=False,
+            needs_pvt=False,
+            needs_equilibrium=False,
+            needs_wells=False,
+        )
+
+    def test_well_system_from_a_deck_without_wells_says_so_before_reading_vfp_tables(self):
         from bores.wells.model import WellSystem
 
         d = deck("VFPPROD\n 1 /\n")
         with mock.patch(
             "bores.wells.model.VFPTables.from_deck", side_effect=AssertionError("parsed")
         ):
-            with pytest.raises(ValidationError, match="missing"):
+            with pytest.raises(ValidationError, match="defines no wells"):
                 WellSystem.from_deck(d, grid=mock.Mock())
+
+
+def spe1_without_wells() -> DeckFile:
+    import pathlib
+    import re
+
+    text = (pathlib.Path(__file__).resolve().parents[2] / "data" / "SPE1CASE1.DATA").read_text()
+    for keyword in ("WELSPECS", "COMPDAT", "WCONPROD", "WCONINJE"):
+        text = re.sub(rf"(?ms)^{keyword}\s*\n.*?^/\s*$", "", text)
+    return DeckFile(text)
+
+
+def test_a_real_deck_without_wells_loads_as_a_case_with_no_wells():
+    from bores.simulation.case import load_case
+
+    d = spe1_without_wells()
+    assert not d.has_any("WELSPECS", "COMPDAT", "WCONPROD", "WCONINJE")
+    case = load_case(d, temperature=200.0)
+    assert case.model.wells is None
+    assert case.schedule is not None
