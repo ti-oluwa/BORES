@@ -18,6 +18,7 @@ from bores.reservoir.boundary.base import (
 )
 from bores.types import (
     Integer,
+    NDimension,
     Number,
     NumberArray,
     OneDimension,
@@ -41,6 +42,7 @@ __all__ = [
     "CarterTracyAquifer",
     "compute_incremental_influx",
     "compute_tabulated_dimensionless_pressure",
+    "compute_tabulated_dimensionless_pressures",
     "load_aquifer_influence_table",
     "load_aquifer_influence_table_from_records",
     "load_carter_tracy_aquifer",
@@ -256,6 +258,53 @@ class AquiferInfluenceTable:
                 "strictly increase."
             )
 
+    @property
+    def time_range(self) -> tuple[Number, Number]:
+        """
+        The first and last dimensionless time the table lists. Outside this range `query`
+        extends the table instead of reading it.
+        """
+        return self.times[0].item(), self.times[-1].item()
+
+    @typing.overload
+    def query(self, dimensionless_time: Number, *, derivative: bool = False) -> Number: ...
+    @typing.overload
+    def query(
+        self, dimensionless_time: NumberArray[NDimension], *, derivative: bool = False
+    ) -> NumberArray[NDimension]: ...
+
+    def query(
+        self, dimensionless_time: Number | NumberArray[NDimension], *, derivative: bool = False
+    ) -> Number | NumberArray[NDimension]:
+        """
+        Reads the dimensionless pressure `pD` at one or more dimensionless times, interpolating
+        linearly between rows.
+
+        Before the first row the table is joined to the origin by a straight line, or if the
+        first row is at `tD = 0`, `pD` stays at its value there. After the last row the slope of
+        the last two rows is continued.
+
+        :param dimensionless_time: Dimensionless time `tD`, a number or an array of any shape.
+        :param derivative: If `True`, returns `pD'`, the slope of the table segment `tD` falls in,
+            instead of `pD`.
+        :returns: `pD` (or `pD'`), a number for a number and an array of the same shape for an
+            array.
+        :raises ValidationError: If any dimensionless time is negative.
+        """
+        times = np.asarray(dimensionless_time, dtype=np.float64)
+        if np.any(times < 0.0):
+            raise ValidationError("Dimensionless time must not be negative.")
+
+        index = 1 if derivative else 0
+        if times.ndim == 0:
+            return compute_tabulated_dimensionless_pressure(
+                float(times), self.times, self.pressures
+            )[index]
+
+        flat = np.ascontiguousarray(times.ravel())
+        values = compute_tabulated_dimensionless_pressures(flat, self.times, self.pressures)[index]  # type: ignore[arg-type]
+        return typing.cast("NumberArray[NDimension]", values.reshape(times.shape))
+
     @typing.overload
     @classmethod
     def from_deck(cls, deck_file: DeckFile, *, table_number: Integer) -> Self: ...
@@ -323,6 +372,28 @@ def compute_tabulated_dimensionless_pressure(
     lower = upper - 1
     slope = (pressures[upper] - pressures[lower]) / (times[upper] - times[lower])
     return pressures[lower] + slope * (t_d - times[lower]), slope
+
+
+@numba.njit(cache=True)
+def compute_tabulated_dimensionless_pressures(
+    t_d: NumberArray[OneDimension],
+    times: NumberArray[OneDimension],
+    pressures: NumberArray[OneDimension],
+) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension]]:
+    """
+    `pD` and `pD'` at every `tD` of an array, read from a table by linear interpolation as
+    `compute_tabulated_dimensionless_pressure` does for one.
+
+    :param t_d: Dimensionless times.
+    :param times: Table `tD` column, increasing.
+    :param pressures: Table `pD` column.
+    :returns: `(pD, pD')`, each an array the length of `t_d`.
+    """
+    values = np.empty(t_d.shape[0], dtype=np.float64)
+    slopes = np.empty(t_d.shape[0], dtype=np.float64)
+    for i in range(t_d.shape[0]):
+        values[i], slopes[i] = compute_tabulated_dimensionless_pressure(t_d[i], times, pressures)
+    return values, slopes
 
 
 @numba.njit(cache=True)
