@@ -1,30 +1,19 @@
-"""
-Shared support for turning BORES results into pandas or polars data frames.
-
-Neither library is a dependency of BORES. Each is imported only when a data frame is built
-with it, so installing BORES without them costs nothing and importing BORES never needs them.
-Install either with `pip install 'bores-framework[pandas]'` or
-`pip install 'bores-framework[polars]'`, or both with `pip install 'bores-framework[dataframes]'`.
-
-The `as_dataframe` function of each results module (`bores.schedule.summary`,
-`bores.reservoir.state`, `bores.wells.state` and `bores.blackoil.state`) builds its columns as
-NumPy arrays and hands them to `build_dataframe`, which is the only place that knows about the
-two libraries.
-"""
+"""Shared support for turning result models into pandas or polars data frames."""
 
 import importlib
 import typing
 
 import attrs
 import numpy as np
+import numpy.typing as npt
 
 from bores.errors import ValidationError
 from bores.grids.base import Grid
-from bores.types import IntArray, Integer, Number, OneDimension
+from bores.types import Boolean, IntArray, Integer, Number, OneDimension
 
 if typing.TYPE_CHECKING:
-    import pandas as pd
-    import polars as pl
+    import pandas as pd  # type: ignore[import]
+    import polars as pl  # type: ignore[import]
 
 __all__ = [
     "BACKENDS",
@@ -59,7 +48,7 @@ class Column:
     name: str
     """The column's name."""
 
-    values: typing.Sequence[typing.Any] | np.ndarray
+    values: typing.Sequence[typing.Any] | npt.NDArray
     """
     The column's values. A `float` column is a NumPy array, where NaN marks a missing value.
     An `int`, `str` or `datetime` column may be a list holding `None` for a missing value.
@@ -68,14 +57,14 @@ class Column:
     kind: ColumnKind = "float"
     """What the column holds. This decides the column's type in either library."""
 
-    missing_is_null: bool = False
+    missing_is_null: Boolean = False
     """
     For a `float` column, whether NaN means "no value here" rather than a number that is not
     a number. Polars tells the two apart, so such a column holds nulls there. Pandas does not,
     so it keeps NaN.
     """
 
-    categorical: bool = False
+    categorical: Boolean = False
     """For a `str` column, whether to store it as a categorical, which saves memory when the same few strings repeat."""
 
 
@@ -173,10 +162,10 @@ def to_polars(pl: typing.Any, column: Column) -> typing.Any:
 
 def select_cells(
     *,
-    n_cells: int,
+    n_cells: Integer,
     cells: typing.Sequence[Integer] | np.ndarray | None,
     grid: Grid | None,
-    active_only: bool,
+    active_only: Boolean,
 ) -> IntArray[OneDimension]:
     """
     Works out which cells of a state a data frame reports.
@@ -234,7 +223,7 @@ def get_grid_columns(
     *,
     grid: Grid | None,
     cell_indices: IntArray[OneDimension],
-    centroids: bool,
+    centroids: Boolean,
 ) -> list[Column]:
     """
     Builds the columns that say where cells are, from the grid they belong to.
@@ -271,7 +260,7 @@ def get_grid_columns(
 
 
 def resolve_times(
-    times: Number | typing.Sequence[Number] | None, *, count: int
+    times: Number | typing.Sequence[Number] | None, *, count: Integer
 ) -> list[Number] | None:
     """
     Checks the elapsed times given for a number of states.
@@ -286,14 +275,14 @@ def resolve_times(
     values = [times] if np.isscalar(times) else list(typing.cast("typing.Sequence[Number]", times))
     if len(values) != count:
         raise ValidationError(f"`times` has {len(values)} entries but {count} states were given.")
-    return values
+    return typing.cast("list[Number]", values)
 
 
 def get_label_column(
     *,
     times: typing.Sequence[Number] | None,
-    row_counts: typing.Sequence[int],
-    is_single: bool,
+    row_counts: typing.Sequence[Integer],
+    is_single: Boolean,
 ) -> Column | None:
     """
     Builds the column that says which state each row came from.

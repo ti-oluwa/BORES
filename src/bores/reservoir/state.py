@@ -33,9 +33,14 @@ from bores.types import (
 from bores.units import UnitConversionTable, get_conversion_factors
 from bores.utils import scale, scale_and_offset
 
+if typing.TYPE_CHECKING:
+    import pandas as pd  # type: ignore[import]
+    import polars as pl  # type: ignore[import]
+
 __all__ = [
     "DEFAULT_DATAFRAME_FIELDS",
     "DERIVED_DATAFRAME_FIELDS",
+    "HYSTERESIS_DATAFRAME_FIELDS",
     "STORED_DATAFRAME_FIELDS",
     "Hysteresis",
     "ReservoirState",
@@ -705,6 +710,94 @@ class ReservoirState(StoreSerializable):
             unit_system=target,
         )
 
+    @typing.overload
+    def as_dataframe(
+        self,
+        *,
+        backend: typing.Literal["pandas"] = "pandas",
+        fields: typing.Sequence[str] | typing.Literal["all"] | None = ...,
+        time: Number | None = ...,
+        cells: typing.Sequence[Integer] | npt.NDArray | None = ...,
+        grid: Grid | None = ...,
+        active_only: Boolean = ...,
+        centroids: Boolean = ...,
+        unit_system: UnitSystem | None = ...,
+        dtype: npt.DTypeLike = ...,
+    ) -> "pd.DataFrame": ...
+    @typing.overload
+    def as_dataframe(
+        self,
+        *,
+        backend: typing.Literal["polars"],
+        fields: typing.Sequence[str] | typing.Literal["all"] | None = ...,
+        time: Number | None = ...,
+        cells: typing.Sequence[Integer] | npt.NDArray | None = ...,
+        grid: Grid | None = ...,
+        active_only: Boolean = ...,
+        centroids: Boolean = ...,
+        unit_system: UnitSystem | None = ...,
+        dtype: npt.DTypeLike = ...,
+    ) -> "pl.DataFrame": ...
+    @typing.overload
+    def as_dataframe(
+        self,
+        *,
+        backend: Backend,
+        fields: typing.Sequence[str] | typing.Literal["all"] | None = ...,
+        time: Number | None = ...,
+        cells: typing.Sequence[Integer] | npt.NDArray | None = ...,
+        grid: Grid | None = ...,
+        active_only: Boolean = ...,
+        centroids: Boolean = ...,
+        unit_system: UnitSystem | None = ...,
+        dtype: npt.DTypeLike = ...,
+    ) -> AnyDataFrame: ...
+    def as_dataframe(
+        self,
+        *,
+        backend: Backend = "pandas",
+        fields: typing.Sequence[str] | typing.Literal["all"] | None = None,
+        time: Number | None = None,
+        cells: typing.Sequence[Integer] | npt.NDArray | None = None,
+        grid: Grid | None = None,
+        active_only: Boolean = False,
+        centroids: Boolean = False,
+        unit_system: UnitSystem | None = None,
+        dtype: npt.DTypeLike = None,
+    ) -> AnyDataFrame:
+        """
+        Turns this state into a pandas or polars data frame with one row for each cell.
+
+        To stack the states of a run into one data frame, pass them to the module-level
+        `as_dataframe`.
+
+        :param backend: `"pandas"` or `"polars"`. The library must be installed.
+        :param fields: Fields to include, or `"all"`. Defaults to pressure, temperature, the
+            saturations, solution gas-oil ratio and bubble point pressure. May include the
+            hysteresis arrays when this state tracks hysteresis.
+        :param time: Elapsed time of this state, which adds a `time` column.
+        :param cells: Cells to include, as flat indices or a boolean mask. Every cell if not given.
+        :param grid: The grid this state was computed on. Adds `i`, `j` and `k` when it is
+            structured, and is needed by `active_only` and `centroids`.
+        :param active_only: Leave out the cells the grid marks inactive.
+        :param centroids: Add the cell centroid coordinates as `x`, `y` and `z`.
+        :param unit_system: Unit system to report in. This state's own if not given.
+        :param dtype: Floating point dtype of the field columns. Each keeps its own if not given.
+        :returns: A `pandas.DataFrame` or `polars.DataFrame`.
+        """
+        return as_dataframe(
+            self,
+            backend=backend,
+            fields=fields,
+            times=time,
+            cells=cells,
+            grid=grid,
+            active_only=active_only,
+            centroids=centroids,
+            unit_system=unit_system,
+            dtype=dtype,
+        )
+
 
 STORED_DATAFRAME_FIELDS: tuple[str, ...] = (
     "pressure",
@@ -731,6 +824,16 @@ STORED_DATAFRAME_FIELDS: tuple[str, ...] = (
 DERIVED_DATAFRAME_FIELDS: tuple[str, ...] = ("total_gas_mass", "total_oil_mass")
 """Per-cell quantities a `ReservoirState` works out from the stored arrays, which `as_dataframe` can also report."""
 
+HYSTERESIS_DATAFRAME_FIELDS: tuple[str, ...] = (
+    "max_water_saturation",
+    "max_gas_saturation",
+    "water_imbibition_flag",
+    "gas_imbibition_flag",
+    "water_reversal_saturation",
+    "gas_reversal_saturation",
+)
+"""The per-cell arrays of a state's `Hysteresis`, which `as_dataframe` can also report when the states track hysteresis."""
+
 DEFAULT_DATAFRAME_FIELDS: tuple[str, ...] = (
     "pressure",
     "temperature",
@@ -743,6 +846,61 @@ DEFAULT_DATAFRAME_FIELDS: tuple[str, ...] = (
 """The fields `as_dataframe` reports when none are chosen."""
 
 
+def get_dataframe_field(state: ReservoirState, name: str) -> typing.Any:
+    """
+    :param state: A reservoir state.
+    :param name: A name from `STORED_DATAFRAME_FIELDS`, `DERIVED_DATAFRAME_FIELDS` or
+        `HYSTERESIS_DATAFRAME_FIELDS`.
+    :returns: The field's per-cell array, or `None` for a hysteresis field of a state that does
+        not track hysteresis.
+    """
+    if name in HYSTERESIS_DATAFRAME_FIELDS:
+        return None if state.hysteresis is None else getattr(state.hysteresis, name)
+    return getattr(state, name)
+
+
+@typing.overload
+def as_dataframe(
+    states: ReservoirState | typing.Iterable[ReservoirState],
+    *,
+    backend: typing.Literal["pandas"] = "pandas",
+    fields: typing.Sequence[str] | typing.Literal["all"] | None = ...,
+    times: Number | typing.Sequence[Number] | None = ...,
+    cells: typing.Sequence[Integer] | npt.NDArray | None = ...,
+    grid: Grid | None = ...,
+    active_only: Boolean = ...,
+    centroids: Boolean = ...,
+    unit_system: UnitSystem | None = ...,
+    dtype: npt.DTypeLike = ...,
+) -> "pd.DataFrame": ...
+@typing.overload
+def as_dataframe(
+    states: ReservoirState | typing.Iterable[ReservoirState],
+    *,
+    backend: typing.Literal["polars"],
+    fields: typing.Sequence[str] | typing.Literal["all"] | None = ...,
+    times: Number | typing.Sequence[Number] | None = ...,
+    cells: typing.Sequence[Integer] | npt.NDArray | None = ...,
+    grid: Grid | None = ...,
+    active_only: Boolean = ...,
+    centroids: Boolean = ...,
+    unit_system: UnitSystem | None = ...,
+    dtype: npt.DTypeLike = ...,
+) -> "pl.DataFrame": ...
+@typing.overload
+def as_dataframe(
+    states: ReservoirState | typing.Iterable[ReservoirState],
+    *,
+    backend: Backend,
+    fields: typing.Sequence[str] | typing.Literal["all"] | None = ...,
+    times: Number | typing.Sequence[Number] | None = ...,
+    cells: typing.Sequence[Integer] | npt.NDArray | None = ...,
+    grid: Grid | None = ...,
+    active_only: Boolean = ...,
+    centroids: Boolean = ...,
+    unit_system: UnitSystem | None = ...,
+    dtype: npt.DTypeLike = ...,
+) -> AnyDataFrame: ...
 def as_dataframe(
     states: ReservoirState | typing.Iterable[ReservoirState],
     *,
@@ -772,10 +930,14 @@ def as_dataframe(
         state of a run.
     :param backend: `"pandas"` or `"polars"`. The library must be installed.
     :param fields: Fields to include. They are named like the attributes of `ReservoirState`,
-        and may also be `total_gas_mass` and `total_oil_mass`. `"all"` includes every stored
-        field that has values, so a state without a solvent concentration has no such column.
-        Defaults to pressure, temperature, the three saturations, solution gas-oil ratio and
-        bubble point pressure.
+        and may also be `total_gas_mass` and `total_oil_mass`, or any of the hysteresis arrays
+        (`max_water_saturation`, `max_gas_saturation`, `water_imbibition_flag`,
+        `gas_imbibition_flag`, `water_reversal_saturation`, `gas_reversal_saturation`), which
+        need states that track hysteresis. The two imbibition flags are boolean columns.
+        `"all"` includes every stored field and hysteresis array that has values, so a state
+        without a solvent concentration or hysteresis has no such columns. Defaults to
+        pressure, temperature, the three saturations, solution gas-oil ratio and bubble point
+        pressure.
     :param times: The elapsed time of each state, in the order given, which adds a `time`
         column. A single number is enough for a single state.
     :param cells: Cells to include, as flat cell indices or a boolean mask with one entry for
@@ -817,7 +979,7 @@ def as_dataframe(
     else:
         snapshots = [snapshot.convert(unit_system) for snapshot in snapshots]
 
-    known = (*STORED_DATAFRAME_FIELDS, *DERIVED_DATAFRAME_FIELDS)
+    known = (*STORED_DATAFRAME_FIELDS, *DERIVED_DATAFRAME_FIELDS, *HYSTERESIS_DATAFRAME_FIELDS)
     if fields is None:
         chosen = list(DEFAULT_DATAFRAME_FIELDS)
     elif isinstance(fields, str):
@@ -827,8 +989,11 @@ def as_dataframe(
             )
         chosen = [
             name
-            for name in STORED_DATAFRAME_FIELDS
-            if all(getattr(snapshot, name).size for snapshot in snapshots)
+            for name in (*STORED_DATAFRAME_FIELDS, *HYSTERESIS_DATAFRAME_FIELDS)
+            if all(
+                (values := get_dataframe_field(snapshot, name)) is not None and values.size
+                for snapshot in snapshots
+            )
         ]
         if not snapshots:
             chosen = list(STORED_DATAFRAME_FIELDS[:-1])
@@ -857,13 +1022,14 @@ def as_dataframe(
     n_cells = snapshots[0].pressure.shape[0]
     for position, snapshot in enumerate(snapshots):
         for name in chosen:
-            values = getattr(snapshot, name)
-            if values.shape != (n_cells,):
-                reason = (
-                    "has no values"
-                    if values.size == 0
-                    else f"has shape {values.shape}, not ({n_cells},)"
-                )
+            values = get_dataframe_field(snapshot, name)
+            if values is None or values.shape != (n_cells,):
+                if values is None:
+                    reason = "is not available because the state does not track hysteresis"
+                elif values.size == 0:
+                    reason = "has no values"
+                else:
+                    reason = f"has shape {values.shape}, not ({n_cells},)"
                 raise ValidationError(
                     f"Reservoir field {name!r} {reason}"
                     + (f" in state {position}." if not is_single else ".")
@@ -879,12 +1045,21 @@ def as_dataframe(
     )
     if label is not None:
         columns.append(label)
+
     columns.append(Column(name="cell_index", values=np.tile(selected, count), kind="int"))
     for column in get_grid_columns(grid=grid, cell_indices=selected, centroids=centroids):
         columns.append(attrs.evolve(column, values=np.tile(column.values, count)))
+
     for name in chosen:
-        values = np.concatenate([getattr(snapshot, name)[selected] for snapshot in snapshots])
-        columns.append(
-            Column(name=name, values=values if dtype is None else values.astype(dtype, copy=False))
-        )
+        values = np.concatenate([
+            get_dataframe_field(snapshot, name)[selected] for snapshot in snapshots
+        ])
+        if values.dtype == np.bool_:
+            columns.append(Column(name=name, values=values, kind="bool"))
+        else:
+            columns.append(
+                Column(
+                    name=name, values=values if dtype is None else values.astype(dtype, copy=False)
+                )
+            )
     return build_dataframe(columns, backend=backend)

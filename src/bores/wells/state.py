@@ -21,11 +21,24 @@ from bores.dataframes import (
 from bores.errors import ValidationError
 from bores.grids.base import Grid
 from bores.serde.stores import StoreSerializable
-from bores.types import Boolean, Integer, Number, PhaseValues, UnitConversionTable, UnitSystem
+from bores.types import (
+    Boolean,
+    IntArray,
+    Integer,
+    Number,
+    OneDimension,
+    PhaseValues,
+    UnitConversionTable,
+    UnitSystem,
+)
 from bores.units import get_conversion_factors, resolve_unit_conversion_table
 from bores.utils import scale
 from bores.wells.base import Perforation
 from bores.wells.controls import InjectorControl, Limit, ProducerControl, WellControl
+
+if typing.TYPE_CHECKING:
+    import pandas as pd  # type: ignore[import]
+    import polars as pl  # type: ignore[import]
 
 __all__ = [
     "ConnectionSample",
@@ -34,6 +47,9 @@ __all__ = [
     "WellStates",
     "as_dataframe",
 ]
+
+WellLevel = typing.Literal["well", "perforation"]
+"""What a row of `as_dataframe` describes: one well, or one open perforation of a well."""
 
 
 class ConnectionSample(typing.NamedTuple):
@@ -272,7 +288,7 @@ class WellStates(
     StoreSerializable,
     fields={
         "states": typing.Mapping[str, WellState],
-        "unit_system": typing.Optional[UnitSystem],
+        "unit_system": UnitSystem | None,
     },
 ):
     """Name-keyed collection of `WellState`, one per well, for a single timestep."""
@@ -392,9 +408,92 @@ class WellStates(
             unit_system=target,
         )
 
+    @typing.overload
+    def as_dataframe(
+        self,
+        *,
+        backend: typing.Literal["pandas"] = "pandas",
+        level: WellLevel = ...,
+        time: Number | None = ...,
+        wells: str | typing.Sequence[str] | None = ...,
+        open_only: Boolean = ...,
+        grid: Grid | None = ...,
+        centroids: Boolean = ...,
+        unit_system: UnitSystem | None = ...,
+        categorical: Boolean = ...,
+    ) -> "pd.DataFrame": ...
+    @typing.overload
+    def as_dataframe(
+        self,
+        *,
+        backend: typing.Literal["polars"],
+        level: WellLevel = ...,
+        time: Number | None = ...,
+        wells: str | typing.Sequence[str] | None = ...,
+        open_only: Boolean = ...,
+        grid: Grid | None = ...,
+        centroids: Boolean = ...,
+        unit_system: UnitSystem | None = ...,
+        categorical: Boolean = ...,
+    ) -> "pl.DataFrame": ...
+    @typing.overload
+    def as_dataframe(
+        self,
+        *,
+        backend: Backend,
+        level: WellLevel = ...,
+        time: Number | None = ...,
+        wells: str | typing.Sequence[str] | None = ...,
+        open_only: Boolean = ...,
+        grid: Grid | None = ...,
+        centroids: Boolean = ...,
+        unit_system: UnitSystem | None = ...,
+        categorical: Boolean = ...,
+    ) -> AnyDataFrame: ...
+    def as_dataframe(
+        self,
+        *,
+        backend: Backend = "pandas",
+        level: WellLevel = "well",
+        time: Number | None = None,
+        wells: str | typing.Sequence[str] | None = None,
+        open_only: Boolean = False,
+        grid: Grid | None = None,
+        centroids: Boolean = False,
+        unit_system: UnitSystem | None = None,
+        categorical: Boolean = False,
+    ) -> AnyDataFrame:
+        """
+        Turns these well states into a pandas or polars data frame, with one row for each well
+        or for each open perforation.
 
-WellLevel = typing.Literal["well", "perforation"]
-"""What a row of `as_dataframe` describes: one well, or one open perforation of a well."""
+        To stack the well states of a run into one data frame, pass them to the module-level
+        `as_dataframe`.
+
+        :param backend: `"pandas"` or `"polars"`. The library must be installed.
+        :param level: `"well"` or `"perforation"`.
+        :param time: Elapsed time of these states, which adds a `time` column.
+        :param wells: Well names or patterns such as `"PROD*"` to include. Every well if not given.
+        :param open_only: For the `"well"` level, leave out shut wells.
+        :param grid: The grid the wells are on. For the `"perforation"` level, adds `i`, `j`
+            and `k` when it is structured, and is needed by `centroids`.
+        :param centroids: For the `"perforation"` level, add the cell centroid coordinates.
+        :param unit_system: Unit system to report in. These states' own if not given.
+        :param categorical: Store the text columns as categoricals.
+        :returns: A `pandas.DataFrame` or `polars.DataFrame`.
+        """
+        return as_dataframe(
+            self,
+            backend=backend,
+            level=level,
+            times=time,
+            wells=wells,
+            open_only=open_only,
+            grid=grid,
+            centroids=centroids,
+            unit_system=unit_system,
+            categorical=categorical,
+        )
 
 
 def get_enum_name(value: object) -> str | None:
@@ -433,6 +532,48 @@ def select_well_names(
     return chosen
 
 
+@typing.overload
+def as_dataframe(
+    states: WellStates | typing.Iterable[WellStates],
+    *,
+    backend: typing.Literal["pandas"] = "pandas",
+    level: WellLevel = ...,
+    times: Number | typing.Sequence[Number] | None = ...,
+    wells: str | typing.Sequence[str] | None = ...,
+    open_only: Boolean = ...,
+    grid: Grid | None = ...,
+    centroids: Boolean = ...,
+    unit_system: UnitSystem | None = ...,
+    categorical: Boolean = ...,
+) -> "pd.DataFrame": ...
+@typing.overload
+def as_dataframe(
+    states: WellStates | typing.Iterable[WellStates],
+    *,
+    backend: typing.Literal["polars"],
+    level: WellLevel = ...,
+    times: Number | typing.Sequence[Number] | None = ...,
+    wells: str | typing.Sequence[str] | None = ...,
+    open_only: Boolean = ...,
+    grid: Grid | None = ...,
+    centroids: Boolean = ...,
+    unit_system: UnitSystem | None = ...,
+    categorical: Boolean = ...,
+) -> "pl.DataFrame": ...
+@typing.overload
+def as_dataframe(
+    states: WellStates | typing.Iterable[WellStates],
+    *,
+    backend: Backend,
+    level: WellLevel = ...,
+    times: Number | typing.Sequence[Number] | None = ...,
+    wells: str | typing.Sequence[str] | None = ...,
+    open_only: Boolean = ...,
+    grid: Grid | None = ...,
+    centroids: Boolean = ...,
+    unit_system: UnitSystem | None = ...,
+    categorical: Boolean = ...,
+) -> AnyDataFrame: ...
 def as_dataframe(
     states: WellStates | typing.Iterable[WellStates],
     *,
@@ -549,7 +690,7 @@ def as_dataframe(
     )
 
 
-def count_rows(rows: typing.Sequence[int], *, count: int) -> list[int]:
+def count_rows(rows: typing.Sequence[Integer], *, count: Integer) -> list[Integer]:
     """
     :param rows: The snapshot position of each row.
     :param count: How many snapshots there are.
@@ -559,13 +700,13 @@ def count_rows(rows: typing.Sequence[int], *, count: int) -> list[int]:
 
 
 def build_well_dataframe(
-    rows: typing.Sequence[tuple[int, WellState]],
+    rows: typing.Sequence[tuple[Integer, WellState]],
     *,
     backend: Backend,
     times: typing.Sequence[Number] | None,
-    count: int,
-    is_single: bool,
-    categorical: bool,
+    count: Integer,
+    is_single: Boolean,
+    categorical: Boolean,
 ) -> AnyDataFrame:
     """
     :param rows: Each well state to report and the position of the snapshot it came from.
@@ -596,56 +737,68 @@ def build_well_dataframe(
 
     columns: list[Column] = []
     label = get_label_column(
-        times=times, row_counts=count_rows([p for p, _ in rows], count=count), is_single=is_single
+        times=times,
+        row_counts=count_rows([p for p, _ in rows], count=count),
+        is_single=is_single,
     )
     if label is not None:
         columns.append(label)
     columns += [
-        text((s.well_name for s in states), "well_name"),
-        text((well_type(s) for s in states), "well_type"),
-        Column(name="is_open", values=[s.is_open for s in states], kind="bool"),
+        text((state.well_name for state in states), "well_name"),
+        text((well_type(state) for state in states), "well_type"),
+        Column(name="is_open", values=[state.is_open for state in states], kind="bool"),
         text(
-            (get_enum_name(getattr(s.active_control, "mode", None)) for s in states),
+            (get_enum_name(getattr(state.active_control, "mode", None)) for state in states),
             "control_mode",
         ),
         text(
-            (get_enum_name(getattr(s.active_control, "injected_phase", None)) for s in states),
+            (
+                get_enum_name(getattr(state.active_control, "injected_phase", None))
+                for state in states
+            ),
             "injected_phase",
         ),
         Column(
             name="target_rate",
-            values=numbers(target(s, "target_rate") for s in states),
+            values=numbers(target(state, "target_rate") for state in states),
             missing_is_null=True,
         ),
         Column(
             name="target_bhp",
-            values=numbers(target(s, "target_bhp") for s in states),
+            values=numbers(target(state, "target_bhp") for state in states),
             missing_is_null=True,
         ),
         Column(
             name="target_thp",
-            values=numbers(target(s, "target_thp") for s in states),
+            values=numbers(target(state, "target_thp") for state in states),
             missing_is_null=True,
         ),
-        Column(name="bhp", values=numbers(s.bhp for s in states)),
-        Column(name="thp", values=numbers(s.thp for s in states), missing_is_null=True),
-        Column(name="oil_rate", values=numbers(s.rates.oil for s in states)),
-        Column(name="water_rate", values=numbers(s.rates.water for s in states)),
-        Column(name="gas_rate", values=numbers(s.rates.gas for s in states)),
-        Column(name="surface_oil_rate", values=numbers(s.surface_rates.oil for s in states)),
-        Column(name="surface_water_rate", values=numbers(s.surface_rates.water for s in states)),
-        Column(name="surface_gas_rate", values=numbers(s.surface_rates.gas for s in states)),
+        Column(name="bhp", values=numbers(state.bhp for state in states)),
+        Column(name="thp", values=numbers(state.thp for state in states), missing_is_null=True),
+        Column(name="oil_rate", values=numbers(state.rates.oil for state in states)),
+        Column(name="water_rate", values=numbers(state.rates.water for state in states)),
+        Column(name="gas_rate", values=numbers(state.rates.gas for state in states)),
+        Column(
+            name="surface_oil_rate", values=numbers(state.surface_rates.oil for state in states)
+        ),
+        Column(
+            name="surface_water_rate",
+            values=numbers(state.surface_rates.water for state in states),
+        ),
+        Column(
+            name="surface_gas_rate", values=numbers(state.surface_rates.gas for state in states)
+        ),
         text(
             (
-                getattr(s.active_limit, "__type__", type(s.active_limit).__name__)
-                if s.active_limit is not None
+                getattr(state.active_limit, "__type__", type(state.active_limit).__name__)
+                if state.active_limit is not None
                 else None
-                for s in states
+                for state in states
             ),
             "active_limit",
         ),
         text(
-            (get_enum_name(getattr(s.active_limit, "quantity", None)) for s in states),
+            (get_enum_name(getattr(state.active_limit, "quantity", None)) for state in states),
             "active_limit_quantity",
         ),
     ]
@@ -653,15 +806,15 @@ def build_well_dataframe(
 
 
 def build_perforation_dataframe(
-    rows: typing.Sequence[tuple[int, WellState]],
+    rows: typing.Sequence[tuple[Integer, WellState]],
     *,
     backend: Backend,
     times: typing.Sequence[Number] | None,
-    count: int,
-    is_single: bool,
+    count: Integer,
+    is_single: Boolean,
     grid: Grid | None,
-    centroids: bool,
-    categorical: bool,
+    centroids: Boolean,
+    categorical: Boolean,
 ) -> AnyDataFrame:
     """
     :param rows: Each well state to report and the position of the snapshot it came from.
@@ -674,9 +827,9 @@ def build_perforation_dataframe(
     :param categorical: Whether to store text columns as categoricals.
     :returns: One row for each open perforation of each well state.
     """
-    snapshot_positions: list[int] = []
+    snapshot_positions: list[Integer] = []
     well_names: list[str] = []
-    ordinals: list[int] = []
+    ordinals: list[Integer] = []
     perforations: list[PerforationState] = []
     for position, state in rows:
         for ordinal, perforation in enumerate(state.perforation_states):
@@ -696,22 +849,34 @@ def build_perforation_dataframe(
         Column(name="well_name", values=well_names, kind="str", categorical=categorical),
         Column(name="perforation", values=ordinals, kind="int"),
         Column(name="cell_index", values=cell_indices, kind="int"),
-        *get_grid_columns(grid=grid, cell_indices=cell_indices, centroids=centroids),
+        *get_grid_columns(
+            grid=grid,
+            cell_indices=typing.cast("IntArray[OneDimension]", cell_indices),
+            centroids=centroids,
+        ),
         Column(
             name="flowing_pressure",
-            values=np.fromiter((p.flowing_pressure for p in perforations), dtype=np.float64),
+            values=np.fromiter(
+                (perforation.flowing_pressure for perforation in perforations), dtype=np.float64
+            ),
         ),
         Column(
             name="oil_rate",
-            values=np.fromiter((p.rates.oil for p in perforations), dtype=np.float64),
+            values=np.fromiter(
+                (perforation.rates.oil for perforation in perforations), dtype=np.float64
+            ),
         ),
         Column(
             name="water_rate",
-            values=np.fromiter((p.rates.water for p in perforations), dtype=np.float64),
+            values=np.fromiter(
+                (perforation.rates.water for perforation in perforations), dtype=np.float64
+            ),
         ),
         Column(
             name="gas_rate",
-            values=np.fromiter((p.rates.gas for p in perforations), dtype=np.float64),
+            values=np.fromiter(
+                (perforation.rates.gas for perforation in perforations), dtype=np.float64
+            ),
         ),
     ]
     return build_dataframe(columns, backend=backend)

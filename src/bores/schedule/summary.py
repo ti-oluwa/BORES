@@ -34,6 +34,10 @@ from bores.serde.stores.base import StoreSerializable
 from bores.types import Boolean, IntArray, Number, NumberArray, OneDimension
 from bores.utils import get_current_date
 
+if typing.TYPE_CHECKING:
+    import pandas as pd  # type: ignore[import]
+    import polars as pl  # type: ignore[import]
+
 __all__ = [
     "RecordSummary",
     "Summary",
@@ -43,6 +47,9 @@ __all__ = [
     "record_at",
     "record_every",
 ]
+
+SummaryLayout = typing.Literal["wide", "long"]
+"""How `as_dataframe` lays a `SummaryReport` out: one column for each vector, or one row for each record."""
 
 
 @typing.runtime_checkable
@@ -322,6 +329,90 @@ class SummaryReport(
         self.update_index()
         return key in self.key_indices
 
+    @typing.overload
+    def as_dataframe(
+        self,
+        *,
+        backend: typing.Literal["pandas"] = "pandas",
+        layout: SummaryLayout = ...,
+        keys: str | typing.Sequence[str] | None = ...,
+        start: Number | None = ...,
+        end: Number | None = ...,
+        include_dates: Boolean | None = ...,
+        include_time_steps: Boolean | None = ...,
+        split_keys: Boolean = ...,
+        categorical: Boolean = ...,
+    ) -> "pd.DataFrame": ...
+    @typing.overload
+    def as_dataframe(
+        self,
+        *,
+        backend: typing.Literal["polars"],
+        layout: SummaryLayout = ...,
+        keys: str | typing.Sequence[str] | None = ...,
+        start: Number | None = ...,
+        end: Number | None = ...,
+        include_dates: Boolean | None = ...,
+        include_time_steps: Boolean | None = ...,
+        split_keys: Boolean = ...,
+        categorical: Boolean = ...,
+    ) -> "pl.DataFrame": ...
+    @typing.overload
+    def as_dataframe(
+        self,
+        *,
+        backend: Backend,
+        layout: SummaryLayout = ...,
+        keys: str | typing.Sequence[str] | None = ...,
+        start: Number | None = ...,
+        end: Number | None = ...,
+        include_dates: Boolean | None = ...,
+        include_time_steps: Boolean | None = ...,
+        split_keys: Boolean = ...,
+        categorical: Boolean = ...,
+    ) -> AnyDataFrame: ...
+    def as_dataframe(
+        self,
+        *,
+        backend: Backend = "pandas",
+        layout: SummaryLayout = "wide",
+        keys: str | typing.Sequence[str] | None = None,
+        start: Number | None = None,
+        end: Number | None = None,
+        include_dates: Boolean | None = None,
+        include_time_steps: Boolean | None = None,
+        split_keys: Boolean = False,
+        categorical: Boolean = False,
+    ) -> AnyDataFrame:
+        """
+        Turns this report into a pandas or polars data frame.
+
+        :param backend: `"pandas"` or `"polars"`. The library must be installed.
+        :param layout: `"wide"` for a row for each time and a column for each vector, or `"long"`
+            for a row for each record.
+        :param keys: Vector keys or patterns such as `"WBHP:*"` to include. Every vector if not given.
+        :param start: Earliest elapsed time to include.
+        :param end: Latest elapsed time to include.
+        :param include_dates: Whether to add a `date` column. Added when any record has a date if not given.
+        :param include_time_steps: Whether to add a `time_step` column. Added when any record
+            has a time-step index if not given.
+        :param split_keys: For the `"long"` layout, add `vector` and `qualifier` columns.
+        :param categorical: For the `"long"` layout, store the key columns as categoricals.
+        :returns: A `pandas.DataFrame` or `polars.DataFrame`.
+        """
+        return as_dataframe(
+            self,
+            backend=backend,
+            layout=layout,
+            keys=keys,
+            start=start,
+            end=end,
+            include_dates=include_dates,
+            include_time_steps=include_time_steps,
+            split_keys=split_keys,
+            categorical=categorical,
+        )
+
 
 @attrs.frozen(kw_only=True, slots=True)
 class RecordSummary(Action[ModelT]):
@@ -439,10 +530,6 @@ def record_at(
     )
 
 
-SummaryLayout = typing.Literal["wide", "long"]
-"""How `as_dataframe` lays a `SummaryReport` out: one column for each vector, or one row for each record."""
-
-
 def select_summary_keys(
     report: SummaryReport, keys: str | typing.Sequence[str] | None
 ) -> list[str]:
@@ -477,6 +564,48 @@ def select_summary_keys(
     return chosen
 
 
+@typing.overload
+def as_dataframe(
+    report: SummaryReport,
+    *,
+    backend: typing.Literal["pandas"] = "pandas",
+    layout: SummaryLayout = ...,
+    keys: str | typing.Sequence[str] | None = ...,
+    start: Number | None = ...,
+    end: Number | None = ...,
+    include_dates: Boolean | None = ...,
+    include_time_steps: Boolean | None = ...,
+    split_keys: Boolean = ...,
+    categorical: Boolean = ...,
+) -> "pd.DataFrame": ...
+@typing.overload
+def as_dataframe(
+    report: SummaryReport,
+    *,
+    backend: typing.Literal["polars"],
+    layout: SummaryLayout = ...,
+    keys: str | typing.Sequence[str] | None = ...,
+    start: Number | None = ...,
+    end: Number | None = ...,
+    include_dates: Boolean | None = ...,
+    include_time_steps: Boolean | None = ...,
+    split_keys: Boolean = ...,
+    categorical: Boolean = ...,
+) -> "pl.DataFrame": ...
+@typing.overload
+def as_dataframe(
+    report: SummaryReport,
+    *,
+    backend: Backend,
+    layout: SummaryLayout = ...,
+    keys: str | typing.Sequence[str] | None = ...,
+    start: Number | None = ...,
+    end: Number | None = ...,
+    include_dates: Boolean | None = ...,
+    include_time_steps: Boolean | None = ...,
+    split_keys: Boolean = ...,
+    categorical: Boolean = ...,
+) -> AnyDataFrame: ...
 def as_dataframe(
     report: SummaryReport,
     *,
@@ -565,7 +694,10 @@ def as_dataframe(
         selected = [records[position] for position in all_positions]
         columns = [
             Column(
-                name="key", values=[r.key for r in selected], kind="str", categorical=categorical
+                name="key",
+                values=[record.key for record in selected],
+                kind="str",
+                categorical=categorical,
             )
         ]
         if split_keys:
@@ -579,17 +711,25 @@ def as_dataframe(
                 Column(name="qualifier", values=qualifiers, kind="str", categorical=categorical),
             ]
         columns += [
-            Column(name="time", values=np.fromiter((r.time for r in selected), dtype=np.float64)),
             Column(
-                name="value", values=np.fromiter((r.value for r in selected), dtype=np.float64)
+                name="time",
+                values=np.fromiter((record.time for record in selected), dtype=np.float64),
+            ),
+            Column(
+                name="value",
+                values=np.fromiter((record.value for record in selected), dtype=np.float64),
             ),
         ]
         if include_time_steps:
             columns.append(
-                Column(name="time_step", values=[r.time_step for r in selected], kind="int")
+                Column(
+                    name="time_step", values=[record.time_step for record in selected], kind="int"
+                )
             )
         if include_dates:
-            columns.append(Column(name="date", values=[r.date for r in selected], kind="datetime"))
+            columns.append(
+                Column(name="date", values=[record.date for record in selected], kind="datetime")
+            )
         return build_dataframe(columns, backend=backend)
 
     series: dict[str, tuple[NumberArray[OneDimension], NumberArray[OneDimension]]] = {}
@@ -600,7 +740,10 @@ def as_dataframe(
             positions_by_key[key],
             assume_unique=True,
         )
-        series[key] = (times[keep], values[keep])
+        series[key] = typing.cast(
+            "tuple[NumberArray[OneDimension], NumberArray[OneDimension]]",
+            (times[keep], values[keep]),
+        )
 
     times_present = [times for times, _ in series.values() if times.size]
     row_times = np.unique(np.concatenate(times_present)) if times_present else np.empty(0)

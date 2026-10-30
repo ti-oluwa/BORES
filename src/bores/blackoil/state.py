@@ -23,9 +23,15 @@ from bores.wells.state import as_dataframe as wells_as_dataframe
 from bores.wells.workspace import load_wells_states
 
 if typing.TYPE_CHECKING:
+    import pandas as pd  # type: ignore[import]
+    import polars as pl  # type: ignore[import]
+
     from bores.simulation.workspace import SimulationWorkspace
 
 __all__ = ["BlackOilModelState", "as_dataframe", "load_model_state"]
+
+ModelStatePart = typing.Literal["reservoir", "wells", "perforations"]
+"""Which part of a `BlackOilModelState` `as_dataframe` reports."""
 
 _UNSET: typing.Any = object()
 
@@ -79,6 +85,112 @@ class BlackOilModelState(Serializable):
             reservoir=self.reservoir.convert(target, table=table),
             wells=self.wells.convert(target, table=table) if self.wells is not None else None,
             time=scale(self.time, factors["time"]),
+        )
+
+    @typing.overload
+    def as_dataframe(
+        self,
+        *,
+        backend: typing.Literal["pandas"] = "pandas",
+        part: ModelStatePart = ...,
+        fields: typing.Sequence[str] | typing.Literal["all"] | None = ...,
+        cells: typing.Sequence[Integer] | npt.NDArray | None = ...,
+        active_only: Boolean = ...,
+        wells: str | typing.Sequence[str] | None = ...,
+        open_only: Boolean = ...,
+        grid: Grid | None = ...,
+        centroids: Boolean = ...,
+        unit_system: UnitSystem | None = ...,
+        dtype: npt.DTypeLike = ...,
+        categorical: Boolean = ...,
+    ) -> "pd.DataFrame": ...
+    @typing.overload
+    def as_dataframe(
+        self,
+        *,
+        backend: typing.Literal["polars"],
+        part: ModelStatePart = ...,
+        fields: typing.Sequence[str] | typing.Literal["all"] | None = ...,
+        cells: typing.Sequence[Integer] | npt.NDArray | None = ...,
+        active_only: Boolean = ...,
+        wells: str | typing.Sequence[str] | None = ...,
+        open_only: Boolean = ...,
+        grid: Grid | None = ...,
+        centroids: Boolean = ...,
+        unit_system: UnitSystem | None = ...,
+        dtype: npt.DTypeLike = ...,
+        categorical: Boolean = ...,
+    ) -> "pl.DataFrame": ...
+    @typing.overload
+    def as_dataframe(
+        self,
+        *,
+        backend: Backend,
+        part: ModelStatePart = ...,
+        fields: typing.Sequence[str] | typing.Literal["all"] | None = ...,
+        cells: typing.Sequence[Integer] | npt.NDArray | None = ...,
+        active_only: Boolean = ...,
+        wells: str | typing.Sequence[str] | None = ...,
+        open_only: Boolean = ...,
+        grid: Grid | None = ...,
+        centroids: Boolean = ...,
+        unit_system: UnitSystem | None = ...,
+        dtype: npt.DTypeLike = ...,
+        categorical: Boolean = ...,
+    ) -> AnyDataFrame: ...
+    def as_dataframe(
+        self,
+        *,
+        backend: Backend = "pandas",
+        part: ModelStatePart = "reservoir",
+        fields: typing.Sequence[str] | typing.Literal["all"] | None = None,
+        cells: typing.Sequence[Integer] | npt.NDArray | None = None,
+        active_only: Boolean = False,
+        wells: str | typing.Sequence[str] | None = None,
+        open_only: Boolean = False,
+        grid: Grid | None = None,
+        centroids: Boolean = False,
+        unit_system: UnitSystem | None = None,
+        dtype: npt.DTypeLike = None,
+        categorical: Boolean = False,
+    ) -> AnyDataFrame:
+        """
+        Turns one part of this state into a pandas or polars data frame, with this state's `time`
+        as its first column.
+
+        To stack the states of a run into one data frame, pass them to the module-level
+        `as_dataframe`.
+
+        :param backend: `"pandas"` or `"polars"`. The library must be installed.
+        :param part: `"reservoir"` for a row for each cell, `"wells"` for a row for each well,
+            or `"perforations"` for a row for each open perforation.
+        :param fields: Reservoir part only. Fields to include, or `"all"`.
+        :param cells: Reservoir part only. Cells to include, as flat indices or a boolean mask.
+        :param active_only: Reservoir part only. Leave out the cells the grid marks inactive.
+        :param wells: Wells parts only. Well names or patterns such as `"PROD*"` to include.
+        :param open_only: `"wells"` part only. Leave out shut wells.
+        :param grid: The grid the model uses. Adds `i`, `j` and `k` for the reservoir and
+            perforation parts, and is needed by `active_only` and `centroids`.
+        :param centroids: Add cell centroid coordinates, for the reservoir and perforation parts.
+        :param unit_system: Unit system to report in. This state's own if not given.
+        :param dtype: Reservoir part only. Floating point dtype of the field columns.
+        :param categorical: Wells parts only. Store the text columns as categoricals.
+        :returns: A `pandas.DataFrame` or `polars.DataFrame`.
+        """
+        return as_dataframe(
+            self,
+            backend=backend,
+            part=part,
+            fields=fields,
+            cells=cells,
+            active_only=active_only,
+            wells=wells,
+            open_only=open_only,
+            grid=grid,
+            centroids=centroids,
+            unit_system=unit_system,
+            dtype=dtype,
+            categorical=categorical,
         )
 
 
@@ -147,10 +259,57 @@ def load_model_state(
     return BlackOilModelState(reservoir=reservoir_state, wells=wells_state, time=time)
 
 
-ModelStatePart = typing.Literal["reservoir", "wells", "perforations"]
-"""Which part of a `BlackOilModelState` `as_dataframe` reports."""
-
-
+@typing.overload
+def as_dataframe(
+    states: BlackOilModelState | typing.Iterable[BlackOilModelState],
+    *,
+    backend: typing.Literal["pandas"] = "pandas",
+    part: ModelStatePart = ...,
+    fields: typing.Sequence[str] | typing.Literal["all"] | None = ...,
+    cells: typing.Sequence[Integer] | npt.NDArray | None = ...,
+    active_only: Boolean = ...,
+    wells: str | typing.Sequence[str] | None = ...,
+    open_only: Boolean = ...,
+    grid: Grid | None = ...,
+    centroids: Boolean = ...,
+    unit_system: UnitSystem | None = ...,
+    dtype: npt.DTypeLike = ...,
+    categorical: Boolean = ...,
+) -> "pd.DataFrame": ...
+@typing.overload
+def as_dataframe(
+    states: BlackOilModelState | typing.Iterable[BlackOilModelState],
+    *,
+    backend: typing.Literal["polars"],
+    part: ModelStatePart = ...,
+    fields: typing.Sequence[str] | typing.Literal["all"] | None = ...,
+    cells: typing.Sequence[Integer] | npt.NDArray | None = ...,
+    active_only: Boolean = ...,
+    wells: str | typing.Sequence[str] | None = ...,
+    open_only: Boolean = ...,
+    grid: Grid | None = ...,
+    centroids: Boolean = ...,
+    unit_system: UnitSystem | None = ...,
+    dtype: npt.DTypeLike = ...,
+    categorical: Boolean = ...,
+) -> "pl.DataFrame": ...
+@typing.overload
+def as_dataframe(
+    states: BlackOilModelState | typing.Iterable[BlackOilModelState],
+    *,
+    backend: Backend,
+    part: ModelStatePart = ...,
+    fields: typing.Sequence[str] | typing.Literal["all"] | None = ...,
+    cells: typing.Sequence[Integer] | npt.NDArray | None = ...,
+    active_only: Boolean = ...,
+    wells: str | typing.Sequence[str] | None = ...,
+    open_only: Boolean = ...,
+    grid: Grid | None = ...,
+    centroids: Boolean = ...,
+    unit_system: UnitSystem | None = ...,
+    dtype: npt.DTypeLike = ...,
+    categorical: Boolean = ...,
+) -> AnyDataFrame: ...
 def as_dataframe(
     states: BlackOilModelState | typing.Iterable[BlackOilModelState],
     *,
@@ -210,7 +369,7 @@ def as_dataframe(
             f"`part` must be 'reservoir', 'wells' or 'perforations'; got {part!r}."
         )
 
-    inapplicable: dict[str, bool]
+    inapplicable: dict[str, Boolean]
     if part == "reservoir":
         inapplicable = {
             "wells": wells is not None,
@@ -228,6 +387,7 @@ def as_dataframe(
             inapplicable |= {"grid": grid is not None, "centroids": centroids}
         else:
             inapplicable["open_only"] = open_only
+
     misplaced = [name for name, given in inapplicable.items() if given]
     if misplaced:
         raise ValidationError(f"{misplaced} do not apply to `part={part!r}`.")
@@ -239,6 +399,7 @@ def as_dataframe(
                 f"`states` must hold `BlackOilModelState`s; item {position} is a "
                 f"{type(snapshot).__name__}."
             )
+
     if unit_system is None:
         systems = {snapshot.unit_system for snapshot in snapshots}
         if len(systems) > 1:
