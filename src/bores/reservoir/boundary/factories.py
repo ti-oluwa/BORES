@@ -148,7 +148,7 @@ def make_boundary_conditions(
             BoundaryRegion(
                 name="+".join(side.value for side in shared_sides),
                 face_positions=typing.cast(
-                    IntArray[OneDimension],
+                    "IntArray[OneDimension]",
                     np.concatenate([classified[side] for side in shared_sides]),
                 ),
                 condition=condition,

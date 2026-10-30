@@ -637,7 +637,7 @@ def validate_indices(
         raise error(
             f"{label} index {int(array[out_of_range].flat[0])} is out of range [0, {int(upper) - 1}]."
         )
-    return typing.cast(IntArray[NDimension], array.astype(np.int64, copy=False))
+    return typing.cast("IntArray[NDimension]", array.astype(np.int64, copy=False))
 
 
 def gather_ragged_positions(
@@ -655,11 +655,11 @@ def gather_ragged_positions(
     first = offsets[rows].astype(np.int64)
     counts = offsets[rows + 1].astype(np.int64) - first
     gathered_offsets = typing.cast(
-        IntArray[OneDimension], np.concatenate([[0], np.cumsum(counts)])
+        "IntArray[OneDimension]", np.concatenate([[0], np.cumsum(counts)])
     )
-    entry_row = typing.cast(IntArray[OneDimension], np.repeat(np.arange(len(rows)), counts))
+    entry_row = typing.cast("IntArray[OneDimension]", np.repeat(np.arange(len(rows)), counts))
     position = typing.cast(
-        IntArray[OneDimension],
+        "IntArray[OneDimension]",
         first[entry_row] + (np.arange(entry_row.size) - gathered_offsets[:-1][entry_row]),
     )
     return entry_row, position, gathered_offsets
@@ -1573,7 +1573,7 @@ class Grid:
 
         start = self.cell_face_offsets[cell_index]
         end = self.cell_face_offsets[cell_index + 1]
-        return typing.cast(IntArray[OneDimension], self.cell_face_indices[start:end])
+        return typing.cast("IntArray[OneDimension]", self.cell_face_indices[start:end])
 
     def get_cell_neighbor_indices(self, cell_index: Integer) -> IntArray[OneDimension]:
         """
@@ -1590,7 +1590,7 @@ class Grid:
 
         start = self.cell_neighbor_offsets[cell_index]
         end = self.cell_neighbor_offsets[cell_index + 1]
-        return typing.cast(IntArray[OneDimension], self.cell_neighbor_indices[start:end])
+        return typing.cast("IntArray[OneDimension]", self.cell_neighbor_indices[start:end])
 
     def get_face_vertex_coordinates(self, face_index: Integer) -> NumberArray[TwoDimensions]:
         """
@@ -1605,7 +1605,7 @@ class Grid:
         start = self.face_vertex_offsets[face_index]
         end = self.face_vertex_offsets[face_index + 1]
         return typing.cast(
-            NumberArray[TwoDimensions],
+            "NumberArray[TwoDimensions]",
             self.vertex_coordinates[self.face_vertex_indices[start:end]],
         )
 
@@ -1619,7 +1619,7 @@ class Grid:
         """
         if face_index < 0 or face_index >= self.n_faces:
             raise IndexError(f"Face index {face_index} is out of range [0, {self.n_faces - 1}].")
-        return typing.cast(IntArray[OneDimension], self.face_cell_indices[face_index])
+        return typing.cast("IntArray[OneDimension]", self.face_cell_indices[face_index])
 
     def get_face_normal_for_cell(
         self, face_index: Integer, cell_index: Integer
@@ -1678,7 +1678,7 @@ class Grid:
             cell_indices = np.arange(self.n_cells)
 
         cells = typing.cast(
-            IntArray[OneDimension],
+            "IntArray[OneDimension]",
             validate_indices(
                 cell_indices, upper=self.n_cells, label="Cell", error=CellNotFoundError
             ),
@@ -1739,10 +1739,10 @@ class Grid:
         top_area = np.where(lacks_faces, 1.0, top_area)
         bottom_area = np.where(lacks_faces, 1.0, bottom_area)
         return CellTopBottomFaces(
-            top_depth=typing.cast(NumberArray[OneDimension], top_depth),
-            bottom_depth=typing.cast(NumberArray[OneDimension], bottom_depth),
-            top_area=typing.cast(NumberArray[OneDimension], top_area),
-            bottom_area=typing.cast(NumberArray[OneDimension], bottom_area),
+            top_depth=typing.cast("NumberArray[OneDimension]", top_depth),
+            bottom_depth=typing.cast("NumberArray[OneDimension]", bottom_depth),
+            top_area=typing.cast("NumberArray[OneDimension]", top_area),
+            bottom_area=typing.cast("NumberArray[OneDimension]", bottom_area),
         )
 
     def flat_indices(
@@ -1772,7 +1772,7 @@ class Grid:
         )
         # Broadcasting gives the common shape of the three, which NumPy's type stubs do not express
         return typing.cast(
-            IntArray[NDimension],
+            "IntArray[NDimension]",
             np.asarray(dims.flat_index(broadcast_i, broadcast_j, broadcast_k)),
         )
 
@@ -1806,7 +1806,7 @@ class Grid:
         cells = validate_indices(
             cell_indices, upper=self.n_cells, label="Cell", error=CellNotFoundError
         )
-        return typing.cast(BooleanArray[NDimension], self.cell_statuses[cells].astype(bool))
+        return typing.cast("BooleanArray[NDimension]", self.cell_statuses[cells].astype(bool))
 
     def are_boundary_cells(self, cell_indices: IntOrArray[NDimension]) -> BooleanArray[NDimension]:
         """
@@ -1824,7 +1824,7 @@ class Grid:
         faces = self.cell_face_indices[position]
         on_boundary = np.any(self.face_cell_indices[faces] < 0, axis=1)
         result = np.bincount(row, weights=on_boundary, minlength=flat_cells.size) > 0
-        return typing.cast(BooleanArray[NDimension], result.reshape(cells.shape))
+        return typing.cast("BooleanArray[NDimension]", result.reshape(cells.shape))
 
     def get_face_types(self, face_indices: IntOrArray[NDimension]) -> IntArray[NDimension]:
         """
@@ -1836,7 +1836,7 @@ class Grid:
         """
         assert self.face_connection_types is not None
         faces = validate_indices(face_indices, upper=self.n_faces, label="Face", error=IndexError)
-        return typing.cast(IntArray[NDimension], self.face_connection_types[faces])
+        return typing.cast("IntArray[NDimension]", self.face_connection_types[faces])
 
     def are_boundary_faces(self, face_indices: IntOrArray[NDimension]) -> BooleanArray[NDimension]:
         """
@@ -1847,7 +1847,7 @@ class Grid:
         :raises IndexError: If an index is out of range.
         """
         return typing.cast(
-            BooleanArray[NDimension],
+            "BooleanArray[NDimension]",
             np.isin(
                 self.get_face_types(face_indices),
                 [int(ConnectionType.BOUNDARY_FACE), int(ConnectionType.BOUNDARY_FAULT_FACE)],
@@ -1863,7 +1863,7 @@ class Grid:
         :raises IndexError: If an index is out of range.
         """
         return typing.cast(
-            BooleanArray[NDimension],
+            "BooleanArray[NDimension]",
             np.isin(
                 self.get_face_types(face_indices),
                 [int(ConnectionType.INTERIOR_FAULT_FACE), int(ConnectionType.BOUNDARY_FAULT_FACE)],
@@ -1909,7 +1909,7 @@ class Grid:
         :raises IndexError: If an index is out of range.
         """
         faces = validate_indices(face_indices, upper=self.n_faces, label="Face", error=IndexError)
-        return typing.cast(IntArray[AnyDimension], self.face_cell_indices[faces])
+        return typing.cast("IntArray[AnyDimension]", self.face_cell_indices[faces])
 
     def get_faces_vertex_coordinates(self, face_indices: IntOrArray[AnyDimension]) -> RaggedRows:
         """
@@ -1964,7 +1964,7 @@ class Grid:
             )
         sign = np.where(is_owner, 1.0, -1.0)
         return typing.cast(
-            NumberArray[AnyDimension], self.face_unit_normals[faces] * sign[..., None]
+            "NumberArray[AnyDimension]", self.face_unit_normals[faces] * sign[..., None]
         )
 
     def get_cell_centers_at(
@@ -1984,7 +1984,7 @@ class Grid:
         """
         assert self.cell_centroids is not None
         return typing.cast(
-            NumberArray[AnyDimension], self.cell_centroids[self.flat_indices(i, j, k)]
+            "NumberArray[AnyDimension]", self.cell_centroids[self.flat_indices(i, j, k)]
         )
 
     def find_nearest_cells(
@@ -2009,7 +2009,7 @@ class Grid:
                 f"{int(np.count_nonzero(distance > max_distance))} of {distance.size} points have "  # type: ignore[attr-defined]
                 f"no cell center within the requested distance ({max_distance})."
             )
-        return typing.cast(IntArray[AnyDimension], np.asarray(cell_indices))
+        return typing.cast("IntArray[AnyDimension]", np.asarray(cell_indices))
 
     def find_cells_at_positions(
         self, points: NumberArray[AnyDimension], *, max_distance: Number | None = None
@@ -2052,7 +2052,9 @@ class Grid:
             else np.empty(0, dtype=np.int32)
         )
         return RaggedRows(
-            offsets=typing.cast(IntArray[OneDimension], np.concatenate([[0], np.cumsum(counts)])),
+            offsets=typing.cast(
+                "IntArray[OneDimension]", np.concatenate([[0], np.cumsum(counts)])
+            ),
             values=values,
         )
 
@@ -2064,13 +2066,13 @@ class Grid:
             owners[owners >= 0],
             neighbours[neighbours >= 0],
         ])
-        return typing.cast(IntArray[OneDimension], np.unique(all_boundary).astype(np.int32))
+        return typing.cast("IntArray[OneDimension]", np.unique(all_boundary).astype(np.int32))
 
     def get_interior_cell_indices(self) -> IntArray[OneDimension]:
         """Return sorted indices of all cells that have no boundary faces."""
         boundary_cells = self.get_boundary_cell_indices()
         all_cells = np.arange(self.n_cells, dtype=np.int32)
-        return typing.cast(IntArray[OneDimension], np.setdiff1d(all_cells, boundary_cells))
+        return typing.cast("IntArray[OneDimension]", np.setdiff1d(all_cells, boundary_cells))
 
     def is_boundary_cell(self, cell_index: Integer) -> bool:
         """
@@ -2224,7 +2226,7 @@ class Grid:
         :returns: 1-D array of matching cell indices.
         """
         raw = self._get_spatial_index().query_ball_point([x, y, z], r=radius)
-        return typing.cast(IntArray[OneDimension], np.asarray(raw, dtype=np.int32))
+        return typing.cast("IntArray[OneDimension]", np.asarray(raw, dtype=np.int32))
 
     def compute_pore_volume(
         self,
@@ -2239,7 +2241,9 @@ class Grid:
         :returns: Pore volumes in the same units³ as `cell_volumes`.
         """
         assert self.cell_volumes is not None
-        return typing.cast(NumberArray[OneDimension], porosity * net_to_gross * self.cell_volumes)
+        return typing.cast(
+            "NumberArray[OneDimension]", porosity * net_to_gross * self.cell_volumes
+        )
 
     def validate_geometry(self) -> None:
         """

@@ -69,32 +69,22 @@ def prepare_operand(value: NumberOrArray[NDimension]) -> NumberOrArray[NDimensio
     return value
 
 
-def smallest(value: NumberOrArray[AnyDimension]) -> Number:
+def get_extremes(value: NumberOrArray[AnyDimension]) -> tuple[Number, Number]:
     """
-    Smallest element of a number or array, without NumPy call overhead for plain numbers.
+    Smallest and largest element of a number or array.
+
+    An empty array gives `(inf, -inf)`, which no range check rejects.
 
     :param value: A number, array, or sequence of numbers.
-    :return: The smallest element.
+    :return: `(smallest, largest)`.
     """
     if isinstance(value, np.ndarray):
-        return value.min()
+        if value.size == 0:
+            return np.inf, -np.inf
+        return value.min(), value.max()
     if isinstance(value, (list, tuple)):
-        return np.min(value)
-    return value  # type: ignore[return-value]
-
-
-def largest(value: NumberOrArray[AnyDimension]) -> Number:
-    """
-    Largest element of a number or array, without NumPy call overhead for plain numbers.
-
-    :param value: A number, array, or sequence of numbers.
-    :return: The largest element.
-    """
-    if isinstance(value, np.ndarray):
-        return value.max()
-    if isinstance(value, (list, tuple)):
-        return np.max(value)
-    return value  # type: ignore[return-value]
+        return np.min(value), np.max(value)
+    return value, value  # type: ignore[return-value]
 
 
 class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
@@ -127,6 +117,7 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
         non_negative: Iterable[str] = (),
         bounds: Mapping[str, tuple[Number, Number]] | None = None,
         validators: Iterable[Validator] = (),
+        validate: Boolean = True,
         cache: bool = True,
         target: Target = "cpu",
         numba_options: Mapping[str, NumbaOption] | None = None,
@@ -140,6 +131,9 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
         :param bounds: Names of arguments mapped to their inclusive `(lower, upper)` range.
         :param validators: Functions that receive every argument by name and raise
             `ValidationError` for invalid combinations of arguments.
+        :param validate: Whether calls check the arguments against the declared ranges and
+            validators. Set to `False` when the inputs are known to be valid. `unchecked`
+            skips the checks for a single call regardless of this setting.
         :param cache: Whether to cache the compiled code on disk between sessions.
         :param target: "cpu" runs the loop on one thread. "parallel" runs it across
             threads when called with arrays, which pays off for large arrays. Calls
@@ -171,6 +165,7 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
         self.non_negative = tuple(non_negative)
         self.bounds = dict(bounds or {})
         self.validators = tuple(validators)
+        self.validate = validate
         self.parallel_loop: np.ufunc | None = None
         self.float32_loop: np.ufunc | None = None
         unknown = {*self.positive, *self.non_negative, *self.bounds} - set(self.argument_names)
@@ -262,19 +257,29 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
         :raises ValidationError: If any element of a checked argument is outside its range.
         """
         by_name = dict(zip(self.argument_names, values, strict=False))
-        for name in self.positive:
+        extremes: dict[str, tuple[Number, Number]] = {}
+
+        def get_checked_extremes(name: str) -> tuple[Number, Number] | None:
             value = by_name.get(name)
-            if value is not None and smallest(value) <= 0:
+            if value is None:
+                return None
+            if name not in extremes:
+                extremes[name] = get_extremes(value)
+            return extremes[name]
+
+        for name in self.positive:
+            found = get_checked_extremes(name)
+            if found is not None and found[0] <= 0:
                 raise ValidationError(f"`{name}` must be greater than zero.")
 
         for name in self.non_negative:
-            value = by_name.get(name)
-            if value is not None and smallest(value) < 0:
+            found = get_checked_extremes(name)
+            if found is not None and found[0] < 0:
                 raise ValidationError(f"`{name}` must be non-negative.")
 
         for name, (lower, upper) in self.bounds.items():
-            value = by_name.get(name)
-            if value is not None and (smallest(value) < lower or largest(value) > upper):
+            found = get_checked_extremes(name)
+            if found is not None and (found[0] < lower or found[1] > upper):
                 raise ValidationError(f"`{name}` must be between {lower} and {upper}.")
 
         for validator in self.validators:
@@ -285,9 +290,34 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
             args=typing.cast("tuple[NumberOrArray[AnyDimension], ...]", args),
             kwargs=typing.cast("Mapping[str, NumberOrArray[AnyDimension]]", kwargs),
         )
-        if self.positive or self.non_negative or self.bounds or self.validators:
+        if self.validate and (
+            self.positive or self.non_negative or self.bounds or self.validators
+        ):
             self.check(values)
+        return self.evaluate(values)
 
+    def unchecked(self, *args: P.args, **kwargs: P.kwargs) -> R:
+        """
+        Calls the function without checking the arguments against the declared ranges and
+        validators. Use it where the inputs are already known to be valid.
+
+        :param args: Positional arguments, as for a normal call.
+        :param kwargs: Keyword arguments, as for a normal call.
+        :return: The same result a normal call gives for valid arguments.
+        """
+        values = self.bind(
+            args=typing.cast("tuple[NumberOrArray[AnyDimension], ...]", args),
+            kwargs=typing.cast("Mapping[str, NumberOrArray[AnyDimension]]", kwargs),
+        )
+        return self.evaluate(values)
+
+    def evaluate(self, values: tuple[NumberOrArray[AnyDimension], ...]) -> R:
+        """
+        Computes the result for arguments that are already in positional order and checked.
+
+        :param values: All arguments in positional order.
+        :return: A number for number arguments, otherwise an array.
+        """
         if not any(isinstance(v, TYPED_OPERANDS) for v in values):
             return super().__call__(*values)
 
@@ -325,6 +355,7 @@ def elementwise(
     non_negative: Iterable[str] = ...,
     bounds: Mapping[str, tuple[Number, Number]] | None = ...,
     validators: Iterable[Validator] = ...,
+    validate: Boolean = ...,
     cache: bool = ...,
     target: Target = ...,
     numba_options: Mapping[str, NumbaOption] | None = ...,
@@ -339,6 +370,7 @@ def elementwise(
     non_negative: Iterable[str] = (),
     bounds: Mapping[str, tuple[Number, Number]] | None = None,
     validators: Iterable[Validator] = (),
+    validate: Boolean = True,
     cache: bool = True,
     target: Target = "cpu",
     numba_options: Mapping[str, NumbaOption] | None = None,
@@ -355,6 +387,8 @@ def elementwise(
     :param bounds: Names of arguments mapped to their inclusive `(lower, upper)` range.
     :param validators: Functions that receive every argument by name and raise
         `ValidationError` for invalid combinations of arguments.
+    :param validate: Whether calls check the arguments against the declared ranges and
+        validators. `unchecked` skips the checks for a single call.
     :param cache: Whether to cache the compiled code on disk between sessions.
     :param target: "cpu" runs the loop on one thread. "parallel" runs it across
         threads when called with arrays.
@@ -370,6 +404,7 @@ def elementwise(
             non_negative=non_negative,
             bounds=bounds,
             validators=validators,
+            validate=validate,
             cache=cache,
             target=target,
             numba_options=numba_options,

@@ -502,7 +502,7 @@ def get_first_cell_containing_point(
         x=point[0],
         y=point[1],
         z=point[2],
-        candidates=typing.cast(IntArray[OneDimension], np.ascontiguousarray(candidates)),
+        candidates=typing.cast("IntArray[OneDimension]", np.ascontiguousarray(candidates)),
         tolerance=tolerance,
         **geometry_arrays(grid),  # type: ignore[arg-type]
     )

@@ -497,7 +497,7 @@ def get_segment_face_intersection(
         dz=direction[2],
         face=face_index,
         cell=cell_index,
-        face_cell_indices=typing.cast(IntArray[TwoDimensions], arrays["face_cell_indices"]),
+        face_cell_indices=typing.cast("IntArray[TwoDimensions]", arrays["face_cell_indices"]),
         face_unit_normals=arrays["face_unit_normals"],
         face_centroids=arrays["face_centroids"],
     )
@@ -512,8 +512,8 @@ def get_segment_face_intersection(
         dz=direction[2],
         t=t,
         face=face_index,
-        face_vertex_offsets=typing.cast(IntArray[OneDimension], arrays["face_vertex_offsets"]),
-        face_vertex_indices=typing.cast(IntArray[OneDimension], arrays["face_vertex_indices"]),
+        face_vertex_offsets=typing.cast("IntArray[OneDimension]", arrays["face_vertex_offsets"]),
+        face_vertex_indices=typing.cast("IntArray[OneDimension]", arrays["face_vertex_indices"]),
         vertex_coordinates=arrays["vertex_coordinates"],
         face_unit_normals=arrays["face_unit_normals"],
     )

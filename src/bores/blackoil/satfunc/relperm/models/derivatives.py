@@ -160,9 +160,9 @@ def validate_and_normalize_saturations(
         so = np.where(needs_norm, so / total_saturation, so)
         sg = np.where(needs_norm, sg / total_saturation, sg)
     return (
-        typing.cast(NumberArray[NDimension], sw),
-        typing.cast(NumberArray[NDimension], so),
-        typing.cast(NumberArray[NDimension], sg),
+        typing.cast("NumberArray[NDimension]", sw),
+        typing.cast("NumberArray[NDimension]", so),
+        typing.cast("NumberArray[NDimension]", sg),
     )
 
 

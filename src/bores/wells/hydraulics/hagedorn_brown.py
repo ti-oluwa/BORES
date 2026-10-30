@@ -851,10 +851,10 @@ def compute_perforation_pressures(
 
     pressures: NumberArray[OneDimension]
     if out is not None:
-        pressures = typing.cast(NumberArray[OneDimension], out)
+        pressures = typing.cast("NumberArray[OneDimension]", out)
     else:
         pressures = typing.cast(
-            NumberArray[OneDimension],
+            "NumberArray[OneDimension]",
             np.empty(
                 count,
                 dtype=np.dtype(dtype)

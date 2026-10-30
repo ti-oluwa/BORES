@@ -387,8 +387,8 @@ def compute_brooks_corey_capillary_pressures_array(
         gas_oil_capillary_pressure=gas_oil_capillary_pressure,
     )
     return typing.cast(
-        NumberArray[NDimension], oil_water_capillary_pressure.reshape(shape)
-    ), typing.cast(NumberArray[NDimension], gas_oil_capillary_pressure.reshape(shape))
+        "NumberArray[NDimension]", oil_water_capillary_pressure.reshape(shape)
+    ), typing.cast("NumberArray[NDimension]", gas_oil_capillary_pressure.reshape(shape))
 
 
 def compute_brooks_corey_capillary_pressures(
@@ -741,10 +741,10 @@ def compute_brooks_corey_derivatives_array(
         dpcgo_dso=dpcgo_dso,
     )
     return (
-        typing.cast(NumberArray[NDimension], dpcow_dsw.reshape(shape)),
-        typing.cast(NumberArray[NDimension], dpcow_dso.reshape(shape)),
-        typing.cast(NumberArray[NDimension], dpcgo_dsg.reshape(shape)),
-        typing.cast(NumberArray[NDimension], dpcgo_dso.reshape(shape)),
+        typing.cast("NumberArray[NDimension]", dpcow_dsw.reshape(shape)),
+        typing.cast("NumberArray[NDimension]", dpcow_dso.reshape(shape)),
+        typing.cast("NumberArray[NDimension]", dpcgo_dsg.reshape(shape)),
+        typing.cast("NumberArray[NDimension]", dpcgo_dso.reshape(shape)),
     )
 
 
@@ -1132,13 +1132,13 @@ def compute_brooks_corey_capillary_pressures_and_derivatives_array(
         dpcgo_dso=dpcgo_dso,
     )
     return (
-        typing.cast(NumberArray[NDimension], oil_water_capillary_pressure.reshape(shape)),
-        typing.cast(NumberArray[NDimension], gas_oil_capillary_pressure.reshape(shape)),
+        typing.cast("NumberArray[NDimension]", oil_water_capillary_pressure.reshape(shape)),
+        typing.cast("NumberArray[NDimension]", gas_oil_capillary_pressure.reshape(shape)),
     ), (
-        typing.cast(NumberArray[NDimension], dpcow_dsw.reshape(shape)),
-        typing.cast(NumberArray[NDimension], dpcow_dso.reshape(shape)),
-        typing.cast(NumberArray[NDimension], dpcgo_dsg.reshape(shape)),
-        typing.cast(NumberArray[NDimension], dpcgo_dso.reshape(shape)),
+        typing.cast("NumberArray[NDimension]", dpcow_dsw.reshape(shape)),
+        typing.cast("NumberArray[NDimension]", dpcow_dso.reshape(shape)),
+        typing.cast("NumberArray[NDimension]", dpcgo_dsg.reshape(shape)),
+        typing.cast("NumberArray[NDimension]", dpcgo_dso.reshape(shape)),
     )
 
 

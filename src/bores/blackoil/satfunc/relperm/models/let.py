@@ -1148,9 +1148,9 @@ def compute_let_relative_permeabilities_compiled(
     if is_scalar:
         return water_relperm.item(), oil_relperm.item(), gas_relperm.item()
     return (
-        typing.cast(NumberOrArray[NDimension], water_relperm.reshape(shape)),
-        typing.cast(NumberOrArray[NDimension], oil_relperm.reshape(shape)),
-        typing.cast(NumberOrArray[NDimension], gas_relperm.reshape(shape)),
+        typing.cast("NumberOrArray[NDimension]", water_relperm.reshape(shape)),
+        typing.cast("NumberOrArray[NDimension]", oil_relperm.reshape(shape)),
+        typing.cast("NumberOrArray[NDimension]", gas_relperm.reshape(shape)),
     )
 
 

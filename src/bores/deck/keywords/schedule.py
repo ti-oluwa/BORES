@@ -1514,7 +1514,9 @@ class VFPKeyword(Keyword[list[VFPProducerDeckTable] | list[VFPInjectorDeckTable]
 
         def numbers(segment: list[str], label: str) -> NumberArray[OneDimension]:
             try:
-                return typing.cast(NumberArray[OneDimension], np.array(segment, dtype=np.float64))
+                return typing.cast(
+                    "NumberArray[OneDimension]", np.array(segment, dtype=np.float64)
+                )
             except ValueError as exc:
                 raise DeckParseError(f"{self.name}: bad {label} axis values {segment}.") from exc
 

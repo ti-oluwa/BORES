@@ -666,7 +666,7 @@ def get_pressure_axis(
     """
     fractions = np.linspace(0.0, 1.0, point_count) ** 2
     return typing.cast(
-        NumberArray[OneDimension],
+        "NumberArray[OneDimension]",
         (min_pressure + (max_pressure - min_pressure) * fractions).astype(dtype, copy=False),
     )
 
@@ -838,9 +838,9 @@ def build_tubing_fluid_table(
             raise ValidationError(f"The tubing fluid column {name!r} has non-finite values.")
 
     return TubingFluidTable(
-        pressures=typing.cast(NumberArray[OneDimension], pressures.astype(resolved_dtype)),
+        pressures=typing.cast("NumberArray[OneDimension]", pressures.astype(resolved_dtype)),
         gas_liquid_surface_tensions=typing.cast(
-            NumberArray[OneDimension],
+            "NumberArray[OneDimension]",
             np.full(point_count, gas_liquid_surface_tension).astype(resolved_dtype),
         ),
         stb_to_volume_factor=get_stb_to_volume_factor(target),
@@ -850,7 +850,7 @@ def build_tubing_fluid_table(
         segment_count=segment_count if segment_count is not None else int(c.TUBING_SEGMENT_COUNT),
         unit_system_tag=UNIT_SYSTEM_TAGS[target],
         **{
-            name: typing.cast(NumberArray[OneDimension], column.astype(resolved_dtype))
+            name: typing.cast("NumberArray[OneDimension]", column.astype(resolved_dtype))
             for name, column in columns.items()
         },
     )

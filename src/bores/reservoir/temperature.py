@@ -61,7 +61,7 @@ class TemperatureGradient:
         :returns: Temperature value(s) in `unit_system` temperature units.
         """
         return typing.cast(
-            NumberOrArray[OneDimension],
+            "NumberOrArray[OneDimension]",
             self.reference_temperature + self.gradient * (depth - self.reference_depth),
         )
 
@@ -160,7 +160,7 @@ class TemperatureTable(StoreSerializable):
         return (
             typing.cast(Number, result[0])
             if is_scalar
-            else typing.cast(NumberArray[OneDimension], result)
+            else typing.cast("NumberArray[OneDimension]", result)
         )
 
     def convert(
@@ -440,8 +440,8 @@ class Temperature:
                         f"`TEMPVD` region {region_num}: `depth` values must be strictly increasing."
                     )
                 regions[region_num] = TemperatureTable(
-                    depths=typing.cast(NumberArray[OneDimension], depths),
-                    temperatures=typing.cast(NumberArray[OneDimension], temperatures),
+                    depths=typing.cast("NumberArray[OneDimension]", depths),
+                    temperatures=typing.cast("NumberArray[OneDimension]", temperatures),
                     unit_system=unit_system,
                 )
 

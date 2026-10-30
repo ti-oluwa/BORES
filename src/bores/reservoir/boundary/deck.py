@@ -250,13 +250,13 @@ def resolve_aquancon_connections(
 
     ordered = sorted(coefficients)
     return AquiferConnections(
-        face_positions=typing.cast(IntArray[OneDimension], np.asarray(ordered, dtype=np.int32)),
+        face_positions=typing.cast("IntArray[OneDimension]", np.asarray(ordered, dtype=np.int32)),
         influx_coefficients=typing.cast(
-            NumberArray[OneDimension],
+            "NumberArray[OneDimension]",
             np.asarray([coefficients[position] for position in ordered], dtype=np.float64),
         ),
         area_ratios=typing.cast(
-            NumberArray[OneDimension],
+            "NumberArray[OneDimension]",
             np.asarray(
                 [coefficients[position] / face_areas[position] for position in ordered],
                 dtype=np.float64,

@@ -538,7 +538,7 @@ def compute_gas_solubility_in_water(
             salinity=np.clip(salinity, 0.0, DUAN_SUN_MAXIMUM_SALINITY),
         )
         result = np.where(in_range, duan_sun, henry)
-        return typing.cast(NumberOrArray[AnyDimension], result if result.ndim else result[()])
+        return typing.cast("NumberOrArray[AnyDimension]", result if result.ndim else result[()])
 
     if symbol != "ch4":
         return henry
@@ -577,7 +577,7 @@ def compute_gas_solubility_in_water_pressure_derivative(
         pressure=lower_pressure, temperature=temperature, salinity=salinity, gas=gas
     )
     result = (upper - lower) / (pressure + step - lower_pressure)
-    return typing.cast(NumberOrArray[AnyDimension], result if np.ndim(result) else result[()])
+    return typing.cast("NumberOrArray[AnyDimension]", result if np.ndim(result) else result[()])
 
 
 def compute_water_bubble_point_pressure(

@@ -640,7 +640,7 @@ def compile_connection_fluids(
 
     def gather(read: typing.Callable[[ConnectionSample], Number]) -> NumberArray[OneDimension]:
         return typing.cast(
-            NumberArray[OneDimension],
+            "NumberArray[OneDimension]",
             np.fromiter((read(sample) for sample in connection_samples), resolved_dtype, count),
         )
 

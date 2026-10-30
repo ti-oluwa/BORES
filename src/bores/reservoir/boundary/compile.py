@@ -227,13 +227,13 @@ def compute_constant_flux_values(
     if condition.basis is FluxBasis.PER_FACE:
         weights = 1.0 if face_weights is None else face_weights
         return typing.cast(
-            NumberArray[OneDimension],
+            "NumberArray[OneDimension]",
             np.asarray(condition.flux * weights * np.ones(face_areas.shape[0])),
         )
     if condition.basis is FluxBasis.PER_AREA:
         weights = 1.0 if face_weights is None else face_weights
         return typing.cast(
-            NumberArray[OneDimension], np.asarray(condition.flux * face_areas * weights)
+            "NumberArray[OneDimension]", np.asarray(condition.flux * face_areas * weights)
         )
 
     shares = face_areas if face_weights is None else face_weights
@@ -244,7 +244,7 @@ def compute_constant_flux_values(
             "add up to more than zero to share it between."
         )
     return typing.cast(
-        NumberArray[OneDimension], np.asarray(condition.flux * shares / total_share)
+        "NumberArray[OneDimension]", np.asarray(condition.flux * shares / total_share)
     )
 
 
@@ -260,7 +260,7 @@ def resolve_owner_cells(
     """
     grid = reservoir.grid
     global_face_indices = grid.boundary_face_indices[face_positions]
-    return typing.cast(IntArray[OneDimension], grid.face_cell_indices[global_face_indices, 0])
+    return typing.cast("IntArray[OneDimension]", grid.face_cell_indices[global_face_indices, 0])
 
 
 def compile_boundary_conditions(
@@ -307,7 +307,7 @@ def compile_boundary_conditions(
 
     for region in boundary_conditions.regions:
         face_positions = typing.cast(
-            IntArray[OneDimension], np.asarray(region.face_positions, dtype=np.int64)
+            "IntArray[OneDimension]", np.asarray(region.face_positions, dtype=np.int64)
         )
         if face_positions.shape[0] == 0:
             continue
@@ -331,7 +331,7 @@ def compile_boundary_conditions(
                 region_name=region.name,
                 face_weights=region.face_weights,
                 face_areas=typing.cast(
-                    NumberArray[OneDimension],
+                    "NumberArray[OneDimension]",
                     reservoir.grid.face_areas[
                         reservoir.grid.boundary_face_indices[face_positions]
                     ],
@@ -370,7 +370,7 @@ def compile_boundary_conditions(
         # A region overridden by a later region on some of its faces keeps only the
         # faces it still owns.
         kept_positions = typing.cast(
-            IntArray[OneDimension], face_positions[face_pi_row[face_positions] == original_row]
+            "IntArray[OneDimension]", face_positions[face_pi_row[face_positions] == original_row]
         )
         if kept_positions.shape[0] == 0:
             continue
@@ -385,19 +385,19 @@ def compile_boundary_conditions(
 
     productivity_indices = CompiledProductivityIndices(
         owner_cells=typing.cast(
-            IntArray[OneDimension], np.asarray(pi_owner_cells, dtype=np.int64)
+            "IntArray[OneDimension]", np.asarray(pi_owner_cells, dtype=np.int64)
         ),
         face_positions=typing.cast(
-            IntArray[OneDimension], np.asarray(pi_face_positions, dtype=np.int64)
+            "IntArray[OneDimension]", np.asarray(pi_face_positions, dtype=np.int64)
         ),
         row_of_face=typing.cast(
-            IntArray[OneDimension], np.asarray(pi_row_of_face, dtype=np.int64)
+            "IntArray[OneDimension]", np.asarray(pi_row_of_face, dtype=np.int64)
         ),
         pressure_boundary=typing.cast(
-            NumberArray[OneDimension], np.asarray(pi_pressure_boundary, dtype=resolved_dtype)
+            "NumberArray[OneDimension]", np.asarray(pi_pressure_boundary, dtype=resolved_dtype)
         ),
         productivity_index=typing.cast(
-            NumberArray[OneDimension], np.asarray(pi_productivity_index, dtype=resolved_dtype)
+            "NumberArray[OneDimension]", np.asarray(pi_productivity_index, dtype=resolved_dtype)
         ),
     )
 
@@ -429,7 +429,7 @@ def compile_boundary_conditions(
         aquifer_regions
     ):
         kept_mask = face_aquifer_row[face_positions] == original_row
-        kept_positions = typing.cast(IntArray[OneDimension], face_positions[kept_mask])
+        kept_positions = typing.cast("IntArray[OneDimension]", face_positions[kept_mask])
         if kept_positions.shape[0] == 0:
             continue
         if region_weights is not None:
@@ -544,8 +544,8 @@ def compile_boundary_conditions(
     )
     return CompiledBoundaryConditions(
         n_boundary_faces=n_boundary_faces,
-        static_pressure_values=typing.cast(NumberArray[OneDimension], static_pressure_values),
-        static_flux_values=typing.cast(NumberArray[OneDimension], static_flux_values),
+        static_pressure_values=typing.cast("NumberArray[OneDimension]", static_pressure_values),
+        static_flux_values=typing.cast("NumberArray[OneDimension]", static_flux_values),
         static_is_dirichlet=static_is_dirichlet,
         productivity_indices=productivity_indices,
         productivity_index_names=tuple(pi_names),

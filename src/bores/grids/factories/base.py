@@ -228,13 +228,13 @@ def build_csr_face_arrays_from_entries(
     :raises InvalidFaceConnectivityError: If any face is shared by more than two cells.
     """
     entry_cells = typing.cast(
-        IntArray[OneDimension], np.ascontiguousarray(entry_cells, dtype=np.int64)
+        "IntArray[OneDimension]", np.ascontiguousarray(entry_cells, dtype=np.int64)
     )
     entry_offsets = typing.cast(
-        IntArray[OneDimension], np.ascontiguousarray(entry_offsets, dtype=np.int64)
+        "IntArray[OneDimension]", np.ascontiguousarray(entry_offsets, dtype=np.int64)
     )
     entry_vertices = typing.cast(
-        IntArray[OneDimension], np.ascontiguousarray(entry_vertices, dtype=np.int64)
+        "IntArray[OneDimension]", np.ascontiguousarray(entry_vertices, dtype=np.int64)
     )
     status, bad_entry, bad_face, face_entries, owners, neighbours = deduplicate_faces(
         entry_cells=entry_cells,
@@ -263,10 +263,10 @@ def build_csr_face_arrays_from_entries(
     )
     return (
         vertex_coordinates,
-        typing.cast(IntArray[OneDimension], entry_vertices[source].astype(np.int32)),
-        typing.cast(IntArray[OneDimension], face_offsets.astype(np.int32)),
+        typing.cast("IntArray[OneDimension]", entry_vertices[source].astype(np.int32)),
+        typing.cast("IntArray[OneDimension]", face_offsets.astype(np.int32)),
         typing.cast(
-            IntArray[TwoDimensions], np.column_stack([owners, neighbours]).astype(np.int32)
+            "IntArray[TwoDimensions]", np.column_stack([owners, neighbours]).astype(np.int32)
         ),
     )
 
@@ -306,13 +306,13 @@ def build_csr_face_arrays(
     return build_csr_face_arrays_from_entries(
         vertex_coordinates,
         entry_cells=typing.cast(
-            IntArray[OneDimension],
+            "IntArray[OneDimension]",
             np.repeat(np.arange(len(faces_per_cell), dtype=np.int64), faces_per_cell),
         ),
         entry_offsets=typing.cast(
-            IntArray[OneDimension], np.concatenate([[0], np.cumsum(face_sizes)])
+            "IntArray[OneDimension]", np.concatenate([[0], np.cumsum(face_sizes)])
         ),
-        entry_vertices=typing.cast(IntArray[OneDimension], vertices),
+        entry_vertices=typing.cast("IntArray[OneDimension]", vertices),
     )
 
 
@@ -394,5 +394,5 @@ def map_xy_to_map_space(
     :returns: Shape `(n, 2)` map-space points.
     """
     return typing.cast(
-        NumberArray[TwoDimensions], map_axes.origin + xy @ map_axes.rotation_matrix.T
+        "NumberArray[TwoDimensions]", map_axes.origin + xy @ map_axes.rotation_matrix.T
     )

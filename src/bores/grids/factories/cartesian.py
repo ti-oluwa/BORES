@@ -291,7 +291,7 @@ def resolve_fault_face_indices(
                 result[record.name] = face_indices
 
     return {
-        name: typing.cast(IntArray[OneDimension], np.unique(np.asarray(idxs, dtype=np.int32)))
+        name: typing.cast("IntArray[OneDimension]", np.unique(np.asarray(idxs, dtype=np.int32)))
         for name, idxs in result.items()
     }
 

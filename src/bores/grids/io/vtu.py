@@ -38,7 +38,7 @@ def get_outward_face_loops(grid: Grid, cell: Integer) -> list[IntArray[OneDimens
         end = grid.face_vertex_offsets[face + 1]
         loop = grid.face_vertex_indices[start:end]
         loops.append(loop if grid.face_cell_indices[face, 0] == cell else loop[::-1])
-    return typing.cast(list[IntArray[OneDimension]], loops)
+    return typing.cast("list[IntArray[OneDimension]]", loops)
 
 
 def format_array(values: npt.ArrayLike, *, kind: typing.Literal["int", "float"]) -> str:
@@ -277,7 +277,7 @@ def load_polyhedral(
             length = int(faces[position])
             cell_faces.append(
                 typing.cast(
-                    IntArray[OneDimension],
+                    "IntArray[OneDimension]",
                     faces[position + 1 : position + 1 + length].astype(np.int32),
                 )
             )
@@ -291,7 +291,7 @@ def load_polyhedral(
     try:
         vertex_coordinates, face_vertex_indices, face_vertex_offsets, face_cell_indices = (
             build_csr_face_arrays(
-                vertex_coordinates=typing.cast(NumberArray[OneDimension], points),  # type: ignore[arg-type]
+                vertex_coordinates=typing.cast("NumberArray[OneDimension]", points),  # type: ignore[arg-type]
                 per_cell_face_vertex_lists=per_cell_faces,  # type: ignore[arg-type]
             )
         )

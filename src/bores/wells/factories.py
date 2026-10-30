@@ -155,7 +155,7 @@ def _resolve_perforations(
             )
         return tuple(perforations), reference_depth
 
-    top_depth, bottom_depth = typing.cast(tuple[Number, Number], perforation_depths)
+    top_depth, bottom_depth = typing.cast("tuple[Number, Number]", perforation_depths)
     resolved_reference_depth = reference_depth if reference_depth is not None else bottom_depth
     perforation = Perforation(
         top_depth=top_depth,

@@ -99,7 +99,9 @@ def aggregate_member_rates(
         surface_oil_rates=workspace.surface_oil_rates,
         surface_water_rates=workspace.surface_water_rates,
         surface_gas_rates=workspace.surface_gas_rates,
-        members=typing.cast(IntArray[OneDimension], np.asarray(open_member_wells, dtype=np.int64)),
+        members=typing.cast(
+            "IntArray[OneDimension]", np.asarray(open_member_wells, dtype=np.int64)
+        ),
     )
 
 
@@ -370,7 +372,7 @@ def enforce_group_economic_limits(
 
     controls = well_system.controls
     open_members = select_open_members(
-        member_indices=typing.cast(IntArray[OneDimension], member_indices),
+        member_indices=typing.cast("IntArray[OneDimension]", member_indices),
         well_kinds=well_system.well_kinds,
         expected_well_kind=expected_well_kind,
         economic_shutins=workspace.economic_shutins,
@@ -395,7 +397,7 @@ def enforce_group_economic_limits(
     for _ in range(spec.max_fixed_point_iterations):
         rates = aggregate_member_rates(
             workspace=workspace,
-            open_member_wells=typing.cast(IntArray[OneDimension], open_members),
+            open_member_wells=typing.cast("IntArray[OneDimension]", open_members),
         )
         violated_row = check_economic_violation(
             limits=group_limits,
@@ -450,7 +452,7 @@ def enforce_group_economic_limits(
             candidate = int(
                 open_members[
                     find_lowest_guide_rate_member(
-                        members=typing.cast(IntArray[OneDimension], open_members),
+                        members=typing.cast("IntArray[OneDimension]", open_members),
                         guide_rates=controls.guide_rates,
                     )
                 ]
@@ -471,9 +473,9 @@ def enforce_group_economic_limits(
             well_system=well_system,
             workspace=workspace,
             spec=spec,
-            open_members=typing.cast(typing.Sequence[Integer], open_members),
+            open_members=typing.cast("typing.Sequence[Integer]", open_members),
             grup_mode_tag=grup_mode_tag,
-            grup_member_rows=typing.cast(typing.Sequence[Integer], grup_member_rows),
+            grup_member_rows=typing.cast("typing.Sequence[Integer]", grup_member_rows),
             get_tubing_performance=get_tubing_performance,
             get_connection_fluids=get_connection_fluids,
             get_surface_sample=get_resolved_surface_sample,
@@ -481,7 +483,7 @@ def enforce_group_economic_limits(
         reallocated_wells.extend(name for name in reresolved if name not in reallocated_wells)
 
     rates = aggregate_member_rates(
-        workspace=workspace, open_member_wells=typing.cast(IntArray[OneDimension], open_members)
+        workspace=workspace, open_member_wells=typing.cast("IntArray[OneDimension]", open_members)
     )
     still_violated = (
         check_economic_violation(

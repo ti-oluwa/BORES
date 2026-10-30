@@ -309,7 +309,7 @@ def make_corner_point_grid(
     nnc_flow_transmissibilities: NumberArray[OneDimension] | None = None
     if nnc_cell_indices is not None and cell_statuses is not None and len(nnc_cell_indices) > 0:
         pairs = typing.cast(
-            IntArray[OneDimension], np.asarray(nnc_cell_indices, dtype=np.int32).reshape(-1, 2)
+            "IntArray[OneDimension]", np.asarray(nnc_cell_indices, dtype=np.int32).reshape(-1, 2)
         )
         flow_transmissibilities = np.asarray(nnc_transmissibilities, dtype=np.float64)
         if len(flow_transmissibilities) != len(pairs):
@@ -333,9 +333,9 @@ def make_corner_point_grid(
                 stacklevel=3,
             )
         if keep.any():
-            nnc_pairs = typing.cast(IntArray[OneDimension], pairs[keep])
+            nnc_pairs = typing.cast("IntArray[OneDimension]", pairs[keep])
             nnc_flow_transmissibilities = typing.cast(
-                NumberArray[OneDimension], flow_transmissibilities[keep]
+                "NumberArray[OneDimension]", flow_transmissibilities[keep]
             )
 
     return Grid(
@@ -386,7 +386,7 @@ def get_map_axes_xy_inverse(
     :returns: Shape `(n, 2)` local-space points.
     """
     inverse_rotation = np.linalg.inv(map_axes.rotation_matrix)
-    return typing.cast(NumberArray[TwoDimensions], (xy - map_axes.origin) @ inverse_rotation.T)
+    return typing.cast("NumberArray[TwoDimensions]", (xy - map_axes.origin) @ inverse_rotation.T)
 
 
 def apply_map_axes_to_coord(coord: CoordArray, map_axes: MapAxes) -> CoordArray:
@@ -514,7 +514,7 @@ def compute_cell_corner_coordinates(
 
 
 FACE_CORNER_TABLE: IntArray[TwoDimensions] = typing.cast(
-    IntArray[TwoDimensions], np.array(HEXAHEDRON_FACES_ZDOWN, dtype=np.int64)
+    "IntArray[TwoDimensions]", np.array(HEXAHEDRON_FACES_ZDOWN, dtype=np.int64)
 )
 """Shape `(6, 4)` local hexahedron corner indices (VTK order) of each local face."""
 
@@ -723,9 +723,11 @@ def subtract_convex_polygon(
     """
     pieces = subtract_convex_polygon_pieces(
         subject=typing.cast(
-            NumberArray[TwoDimensions], np.ascontiguousarray(subject, dtype=np.float64)
+            "NumberArray[TwoDimensions]", np.ascontiguousarray(subject, dtype=np.float64)
         ),
-        clip=typing.cast(NumberArray[TwoDimensions], np.ascontiguousarray(clip, dtype=np.float64)),
+        clip=typing.cast(
+            "NumberArray[TwoDimensions]", np.ascontiguousarray(clip, dtype=np.float64)
+        ),
     )
     return list(pieces)
 
@@ -1987,15 +1989,15 @@ def merge_coincident_points(
     """
     _, first_index, lattice, group_of_point = find_distinct_points(
         points=typing.cast(
-            NumberArray[TwoDimensions], np.ascontiguousarray(points, dtype=np.float64)
+            "NumberArray[TwoDimensions]", np.ascontiguousarray(points, dtype=np.float64)
         ),
         tolerance=float(tolerance),
     )
     order = np.lexsort((lattice[:, 2], lattice[:, 1], lattice[:, 0]))
     rank = np.empty(len(order), dtype=np.intp)
     rank[order] = np.arange(len(order), dtype=np.intp)
-    return typing.cast(IntArray[OneDimension], first_index[order]), typing.cast(
-        IntArray[OneDimension], rank[group_of_point]
+    return typing.cast("IntArray[OneDimension]", first_index[order]), typing.cast(
+        "IntArray[OneDimension]", rank[group_of_point]
     )
 
 
@@ -2087,7 +2089,7 @@ def compute_corner_point_geometry(
     registry_arrays = register_cell_faces(
         corner_global=corner_global,
         active_cells=typing.cast(
-            IntArray[OneDimension], np.flatnonzero(active_mask).astype(np.int32, copy=False)
+            "IntArray[OneDimension]", np.flatnonzero(active_mask).astype(np.int32, copy=False)
         ),
         vertex_coordinates=vertex_coordinates,  # type: ignore[arg-type]
         pinch_tolerance=pinch_tolerance,
@@ -2111,7 +2113,7 @@ def compute_corner_point_geometry(
     nz_cells, ny_cells, nx_cells = actnum.shape
     new_faces = connect_unmatched_faces(
         registry=registry,
-        active_mask=typing.cast(BooleanArray[OneDimension], active_mask),
+        active_mask=typing.cast("BooleanArray[OneDimension]", active_mask),
         corner_coordinates=corner_coordinates,
         coord=coord,
         dimensions=(nx_cells, ny_cells, nz_cells),
@@ -2173,17 +2175,19 @@ def compute_corner_point_geometry(
             f"{bad[:5].tolist()}{'...' if len(bad) > 5 else ''}."
         )
 
-    cell_volumes = typing.cast(NumberArray[OneDimension], np.where(active_mask, cell_volumes, 0.0))
+    cell_volumes = typing.cast(
+        "NumberArray[OneDimension]", np.where(active_mask, cell_volumes, 0.0)
+    )
     cell_statuses = typing.cast(
-        IntArray[OneDimension],
+        "IntArray[OneDimension]",
         np.where(active_mask, int(CellStatus.ACTIVE), int(CellStatus.INACTIVE)).astype(np.int8),
     )
     return (
         vertex_coordinates,
-        typing.cast(IntArray[OneDimension], flat_face_vertex_indices),
-        typing.cast(IntArray[OneDimension], face_vertex_offsets),
-        typing.cast(IntArray[TwoDimensions], face_cell_pairs),
-        typing.cast(IntArray[OneDimension], face_connection_types),
+        typing.cast("IntArray[OneDimension]", flat_face_vertex_indices),
+        typing.cast("IntArray[OneDimension]", face_vertex_offsets),
+        typing.cast("IntArray[TwoDimensions]", face_cell_pairs),
+        typing.cast("IntArray[OneDimension]", face_connection_types),
         cell_statuses,
         cell_volumes,
         cell_centroids,
@@ -2325,7 +2329,7 @@ def resolve_fault_face_indices(
 
     return {
         name: typing.cast(
-            IntArray[OneDimension], np.unique(np.concatenate(chunks).astype(np.int32))
+            "IntArray[OneDimension]", np.unique(np.concatenate(chunks).astype(np.int32))
         )
         for name, chunks in result.items()
     }
@@ -2445,7 +2449,7 @@ def compute_oriented_cell_volumes(
     :returns: `(cell_volumes, cell_centroids)`.
     """
     vtk_corner_indices = typing.cast(
-        IntArray[TwoDimensions], corner_global[:, list(vtk_to_corner)].astype(np.int32)
+        "IntArray[TwoDimensions]", corner_global[:, list(vtk_to_corner)].astype(np.int32)
     )
     cell_volumes, cell_centroids = compute_hex_volumes_and_centroids(
         vtk_corner_indices=vtk_corner_indices,
@@ -2455,7 +2459,7 @@ def compute_oriented_cell_volumes(
         cell_volumes = -cell_volumes
     box_volume = np.prod(corner_coordinates.max(axis=1) - corner_coordinates.min(axis=1), axis=1)
     round_off = (cell_volumes < 0.0) & (cell_volumes >= -1e-9 * box_volume)
-    cell_volumes = typing.cast(NumberArray[OneDimension], np.where(round_off, 0.0, cell_volumes))
+    cell_volumes = typing.cast("NumberArray[OneDimension]", np.where(round_off, 0.0, cell_volumes))
     return cell_volumes, cell_centroids
 
 

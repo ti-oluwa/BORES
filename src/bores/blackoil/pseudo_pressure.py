@@ -659,7 +659,7 @@ class PseudoPressureTable:
         result = np.where(pressure_array > max_pressure, self.pseudo_pressures[-1], result)
         if is_scalar:
             return typing.cast(Number, dtype.type(result.item()))
-        return typing.cast(FloatArray[NDimension], result.reshape(pressure_array.shape))
+        return typing.cast("FloatArray[NDimension]", result.reshape(pressure_array.shape))
 
     def inverse(self, pseudo_pressure: NumberOrArray[NDimension]) -> NumberOrArray[NDimension]:
         """
@@ -700,7 +700,7 @@ class PseudoPressureTable:
         if is_scalar:
             return typing.cast(Number, dtype.type(result.item()))
         return typing.cast(
-            FloatArray[NDimension],
+            "FloatArray[NDimension]",
             result.reshape(pseudo_pressure_arr.shape, copy=False),
         )
 
@@ -738,7 +738,7 @@ class PseudoPressureTable:
         )
         if is_scalar:
             return typing.cast(Number, dtype.type(result.item()))
-        return typing.cast(FloatArray[NDimension], result.reshape(pressure_array.shape))
+        return typing.cast("FloatArray[NDimension]", result.reshape(pressure_array.shape))
 
     dm_dp = gradient  # alias
 

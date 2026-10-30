@@ -81,7 +81,7 @@ def build_piecewise_coefficients(
         coefficients[2] = np.diff(values) / np.diff(pressures)
         coefficients[3] = values[:-1]
     return typing.cast(
-        NumberArray[TwoDimensions], np.ascontiguousarray(coefficients, dtype=values.dtype)
+        "NumberArray[TwoDimensions]", np.ascontiguousarray(coefficients, dtype=values.dtype)
     )
 
 
@@ -265,13 +265,13 @@ class RockCompressibilityTable(StoreSerializable):
 
         self.dtype = np.dtype(dtype if dtype is not None else get_dtype())
         self.pressures = typing.cast(
-            NumberArray[OneDimension], pressures.astype(self.dtype, copy=False)
+            "NumberArray[OneDimension]", pressures.astype(self.dtype, copy=False)
         )
         self.pore_volume_multipliers = typing.cast(
-            NumberArray[OneDimension], pore_volume_multipliers.astype(self.dtype, copy=False)
+            "NumberArray[OneDimension]", pore_volume_multipliers.astype(self.dtype, copy=False)
         )
         self.transmissibility_multipliers = typing.cast(
-            NumberArray[OneDimension], np.asarray(transmissibility_multipliers, dtype=self.dtype)
+            "NumberArray[OneDimension]", np.asarray(transmissibility_multipliers, dtype=self.dtype)
         )
         self.reference_pressure = typing.cast(
             Number,
@@ -368,14 +368,14 @@ class RockCompressibilityTable(StoreSerializable):
         evaluate_piecewise_table(
             pressures=self.pressures,
             coefficients=coefficients,
-            query=typing.cast(NumberArray[OneDimension], pressure_array.reshape(-1)),
+            query=typing.cast("NumberArray[OneDimension]", pressure_array.reshape(-1)),
             derivative=derivative,
             lower_bound=-np.inf if lower_bound is None else lower_bound,
-            out=typing.cast(NumberArray[OneDimension], result),
+            out=typing.cast("NumberArray[OneDimension]", result),
         )
         if pressure_array.ndim == 0:
             return typing.cast(Number, self.dtype.type(result[0]))
-        return typing.cast(FloatArray[NDimension], result.reshape(pressure_array.shape))
+        return typing.cast("FloatArray[NDimension]", result.reshape(pressure_array.shape))
 
     def pore_volume_multiplier(self, pressure: TableQuery[NDimension]) -> TableResult[NDimension]:
         """
@@ -551,12 +551,12 @@ class RockCompressibilityTable(StoreSerializable):
     @classmethod
     def __load__(cls, data: typing.Mapping[str, typing.Any]) -> Self:
         return cls(
-            pressures=typing.cast(FloatArray[OneDimension], np.atleast_1d(data["pressures"])),
+            pressures=typing.cast("FloatArray[OneDimension]", np.atleast_1d(data["pressures"])),
             pore_volume_multipliers=typing.cast(
-                FloatArray[OneDimension], np.atleast_1d(data["pore_volume_multipliers"])
+                "FloatArray[OneDimension]", np.atleast_1d(data["pore_volume_multipliers"])
             ),
             transmissibility_multipliers=typing.cast(
-                FloatArray[OneDimension],
+                "FloatArray[OneDimension]",
                 np.atleast_1d(data["transmissibility_multipliers"]),
             ),
             reference_pressure=float(data["reference_pressure"]),
@@ -652,10 +652,12 @@ class RockCompressibilityTable(StoreSerializable):
         transmissibility_multipliers = np.ones(pressures.shape[0], dtype=dtype)
 
         return cls(
-            pressures=typing.cast(FloatArray[OneDimension], pressures),
-            pore_volume_multipliers=typing.cast(FloatArray[OneDimension], pore_volume_multipliers),
+            pressures=typing.cast("FloatArray[OneDimension]", pressures),
+            pore_volume_multipliers=typing.cast(
+                "FloatArray[OneDimension]", pore_volume_multipliers
+            ),
             transmissibility_multipliers=typing.cast(
-                FloatArray[OneDimension], transmissibility_multipliers
+                "FloatArray[OneDimension]", transmissibility_multipliers
             ),
             reference_pressure=reference_pressure,
             interpolation_method=interpolation_method,
@@ -718,10 +720,12 @@ class RockCompressibilityTable(StoreSerializable):
             )
 
         return cls(
-            pressures=typing.cast(FloatArray[OneDimension], pressures),
-            pore_volume_multipliers=typing.cast(FloatArray[OneDimension], pore_volume_multipliers),
+            pressures=typing.cast("FloatArray[OneDimension]", pressures),
+            pore_volume_multipliers=typing.cast(
+                "FloatArray[OneDimension]", pore_volume_multipliers
+            ),
             transmissibility_multipliers=typing.cast(
-                FloatArray[OneDimension], transmissibility_multipliers
+                "FloatArray[OneDimension]", transmissibility_multipliers
             ),
             reference_pressure=reference_pressure,
             interpolation_method=interpolation_method,

@@ -370,7 +370,7 @@ def get_box_view(
     """
     i1, i2, j1, j2, k1, k2 = box
     grid = array.reshape(dims.nz, dims.ny, dims.nx)
-    return typing.cast(FloatArray[ThreeDimensions], grid[k1 : k2 + 1, j1 : j2 + 1, i1 : i2 + 1])
+    return typing.cast("FloatArray[ThreeDimensions]", grid[k1 : k2 + 1, j1 : j2 + 1, i1 : i2 + 1])
 
 
 def apply_operation(

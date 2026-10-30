@@ -70,23 +70,23 @@ def build_aquifer_workspace(
     n = compiled.kinds.shape[0]
     return AquiferWorkspace(
         origin_time=typing.cast(
-            NumberArray[OneDimension], np.full(n, start_time, dtype=resolved_dtype)
+            "NumberArray[OneDimension]", np.full(n, start_time, dtype=resolved_dtype)
         ),
         previous_time=typing.cast(
-            NumberArray[OneDimension], np.full(n, start_time, dtype=resolved_dtype)
+            "NumberArray[OneDimension]", np.full(n, start_time, dtype=resolved_dtype)
         ),
         previous_cumulative_influx=typing.cast(
-            NumberArray[OneDimension], np.zeros(n, dtype=resolved_dtype)
+            "NumberArray[OneDimension]", np.zeros(n, dtype=resolved_dtype)
         ),
         previous_boundary_pressure=typing.cast(
-            NumberArray[OneDimension],
+            "NumberArray[OneDimension]",
             np.asarray(compiled.initial_pressures, dtype=resolved_dtype).copy(),
         ),
         previous_dimensionless_time=typing.cast(
-            NumberArray[OneDimension], np.zeros(n, dtype=resolved_dtype)
+            "NumberArray[OneDimension]", np.zeros(n, dtype=resolved_dtype)
         ),
         previous_aquifer_pressure=typing.cast(
-            NumberArray[OneDimension],
+            "NumberArray[OneDimension]",
             np.asarray(compiled.initial_pressures, dtype=resolved_dtype).copy(),
         ),
     )

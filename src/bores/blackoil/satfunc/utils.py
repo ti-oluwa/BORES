@@ -451,7 +451,7 @@ def _prepare_killough_arrays(
     """
     broadcast = np.broadcast_arrays(*(np.atleast_1d(np.asarray(value)) for value in values))
     return typing.cast(
-        tuple[NumberArray[OneDimension], ...],
+        "tuple[NumberArray[OneDimension], ...]",
         tuple(np.ascontiguousarray(array, dtype=np.float64) for array in broadcast),
     )
 

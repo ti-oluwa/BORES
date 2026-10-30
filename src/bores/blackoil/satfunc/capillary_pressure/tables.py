@@ -398,7 +398,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
 
         if is_scalar:
             return typing.cast(Number, dtype.type(result.item()))  # type: ignore
-        return typing.cast(NumberOrArray[NDimension], result.reshape(sat.shape))
+        return typing.cast("NumberOrArray[NDimension]", result.reshape(sat.shape))
 
     def _d_query(self, reference: NumberOrArray[NDimension]) -> NumberOrArray[NDimension]:
         """
@@ -424,7 +424,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
 
         if is_scalar:
             return typing.cast(Number, dtype.type(result.item()))  # type: ignore
-        return typing.cast(NumberOrArray[NDimension], result.reshape(sat.shape))
+        return typing.cast("NumberOrArray[NDimension]", result.reshape(sat.shape))
 
     def get_capillary_pressure(
         self,

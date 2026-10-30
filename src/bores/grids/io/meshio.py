@@ -303,7 +303,7 @@ def _get_vtk_cell_nodes(grid: Grid, cell: Integer) -> tuple[str, IntArray[OneDim
         base = loops[0]
         apex = next(vertex for vertex in unique if vertex not in base)
         return "tetra", typing.cast(
-            IntArray[OneDimension], np.array([base[2], base[1], base[0], apex], dtype=np.int32)
+            "IntArray[OneDimension]", np.array([base[2], base[1], base[0], apex], dtype=np.int32)
         )
 
     if len(loops) == 6 and all(len(loop) == 4 for loop in loops) and len(unique) == 8:
@@ -333,7 +333,7 @@ def _get_vtk_cell_nodes(grid: Grid, cell: Integer) -> tuple[str, IntArray[OneDim
         # The outward winding of the base points away from the top; VTK wants it toward the top.
         order = [3, 2, 1, 0]
         nodes = [base[i] for i in order] + [top[i] for i in order]
-        return "hexahedron", typing.cast(IntArray[OneDimension], np.array(nodes, dtype=np.int32))
+        return "hexahedron", typing.cast("IntArray[OneDimension]", np.array(nodes, dtype=np.int32))
 
     return None
 
@@ -396,7 +396,7 @@ def _grid_to_mesh(grid: Grid, *, cell_data: dict[str, npt.NDArray] | None) -> ty
                 (low[0], high[1], high[2]),
             ]
             extra_points.extend(
-                typing.cast(NumberArray[OneDimension], np.array(corner, dtype=np.float64))
+                typing.cast("NumberArray[OneDimension]", np.array(corner, dtype=np.float64))
                 for corner in corners
             )
             nodes = np.arange(next_point, next_point + 8, dtype=np.int32)

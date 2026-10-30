@@ -182,7 +182,7 @@ def as_number_or_array(value: Number | typing.Sequence[Number]) -> NumberOrArray
     """
     if isinstance(value, (list, tuple)):
         return np.asarray(value)  # type: ignore[return-value]
-    return typing.cast(NumberOrArray[OneDimension], value)
+    return typing.cast("NumberOrArray[OneDimension]", value)
 
 
 def expand_values(
@@ -291,13 +291,13 @@ def get_matching_connection_rows(
     if active_only:
         rows = rows[perforations.schedule_statuses[rows] == get_well_status_tag(WellStatus.ACTIVE)]
     if i == 0 and j == 0 and k1 == 0 and k2 == 0:
-        return typing.cast(IntArray[OneDimension], rows)
+        return typing.cast("IntArray[OneDimension]", rows)
 
     if grid is None or grid.dimensions is None:
         raise ValidationError("A grid with dimensions is required to target specific connections.")
 
     dims = grid.dimensions
-    cells = perforations.get_cell_index(row=typing.cast(IntArray[OneDimension], rows))
+    cells = perforations.get_cell_index(row=typing.cast("IntArray[OneDimension]", rows))
     layers = cells // (dims.nx * dims.ny) + 1
     mask = match_connection_target(
         i=i,
@@ -309,7 +309,7 @@ def get_matching_connection_rows(
         connection_k1=layers,  # type: ignore[arg-type]
         connection_k2=layers,  # type: ignore[arg-type]
     )
-    selected = typing.cast(IntArray[OneDimension], rows[mask])
+    selected = typing.cast("IntArray[OneDimension]", rows[mask])
     if require_match and selected.size == 0:
         raise ValidationError(
             f"Well {well_name if well_name is not None else well_row!r} has no connection "
@@ -682,7 +682,7 @@ class ActivateCompletions(Action["CompiledBlackOilModel"]):
             ordinals = perforations.perforation_indices[rows]
             versions: dict[frozenset[Integer], dict[Integer, IntArray[OneDimension]]] = {}
             for ordinal in np.unique(ordinals):
-                ordinal_rows = typing.cast(IntArray[OneDimension], rows[ordinals == ordinal])
+                ordinal_rows = typing.cast("IntArray[OneDimension]", rows[ordinals == ordinal])
                 cells = frozenset(cell for cell in perforations.get_cell_index(row=ordinal_rows))
                 versions.setdefault(cells, {})[ordinal] = ordinal_rows
 
@@ -775,7 +775,7 @@ class SetWellControls(Action["CompiledBlackOilModel"]):
         modes = as_list(self.mode, count=count, field_name="mode")
         check_control_mode_kind(
             controls=controls,
-            well_rows=typing.cast(typing.Sequence[Integer], well_rows),
+            well_rows=typing.cast("typing.Sequence[Integer]", well_rows),
             well_names=self.well_names,
             modes=modes,
         )

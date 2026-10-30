@@ -337,7 +337,7 @@ def parse_floats(text: str, name: str) -> FloatArray[OneDimension]:
             # Older numpy only warns about, and stops at, text it cannot read.
             warnings.simplefilter("error", DeprecationWarning)
             return typing.cast(
-                FloatArray[OneDimension], np.fromstring(text, dtype=np.float64, sep=" ")
+                "FloatArray[OneDimension]", np.fromstring(text, dtype=np.float64, sep=" ")
             )
     except (ValueError, DeprecationWarning, UnicodeEncodeError):
         pass

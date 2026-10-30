@@ -275,7 +275,7 @@ def evaluate_coolprop(
         .reshape(shape)
         .astype(resolve_result_dtype(pressure, temperature), copy=False)
     )
-    return typing.cast(NumberOrArray[NDimension], values if values.ndim else values[()])
+    return typing.cast("NumberOrArray[NDimension]", values if values.ndim else values[()])
 
 
 def compute_fluid_density(
@@ -361,7 +361,7 @@ def compute_total_fluid_compressibility(
     total = water_saturation * water_compressibility + oil_saturation * oil_compressibility
     if gas_saturation is not None and gas_compressibility is not None:
         total = total + gas_saturation * gas_compressibility
-    return typing.cast(NumberOrArray[NDimension], total)
+    return typing.cast("NumberOrArray[NDimension]", total)
 
 
 def compute_fluid_in_place(
@@ -421,7 +421,7 @@ def compute_fluid_in_place(
 
     unit_factor = acre_ft_to_ft3 if hydrocarbon_type == "gas" else acre_ft_to_bbl
     return typing.cast(
-        NumberOrArray[NDimension],
+        "NumberOrArray[NDimension]",
         (
             unit_factor
             * area

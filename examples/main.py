@@ -28,8 +28,8 @@ print(
 wells = case.model.wells
 print(f"Wells: {wells.names if wells else []}")
 
-for item in case.schedule:
-    print(item, "\n")
+# for item in case.schedule:
+#     print(item, "\n")
 
 print(f"{len(case.schedule)} scheduled item(s)")
 

@@ -96,7 +96,7 @@ class DepthTable(StoreSerializable):
         return (
             typing.cast(Number, result[0])
             if is_scalar
-            else typing.cast(NumberArray[OneDimension], result)
+            else typing.cast("NumberArray[OneDimension]", result)
         )
 
     def convert(
@@ -168,8 +168,8 @@ def load_depth_tables(
         values *= value_multiplier
         try:
             tables[table_number] = DepthTable(
-                depths=typing.cast(NumberArray[OneDimension], depths),
-                values=typing.cast(NumberArray[OneDimension], values),
+                depths=typing.cast("NumberArray[OneDimension]", depths),
+                values=typing.cast("NumberArray[OneDimension]", values),
                 unit_system=unit_system,
                 quantity=quantity,
             )

@@ -297,7 +297,9 @@ def resolve_boundary_faces_for_box(
         if reason is not None:
             warnings.warn(reason, stacklevel=2)
 
-    return typing.cast(IntArray[OneDimension], np.unique(position[position >= 0]).astype(np.int32))
+    return typing.cast(
+        "IntArray[OneDimension]", np.unique(position[position >= 0]).astype(np.int32)
+    )
 
 
 def classify_boundary_cells(grid: Grid) -> dict[Side, IntArray[OneDimension]]:
@@ -958,7 +960,7 @@ def make_pyvista_grid(
     all_points[:, 2] *= -1
 
     # Cells with faces are the ones that can be drawn at all.
-    render = typing.cast(BooleanArray[OneDimension], np.diff(grid.cell_face_offsets) > 0)
+    render = typing.cast("BooleanArray[OneDimension]", np.diff(grid.cell_face_offsets) > 0)
     if hollow:
         render = find_exposed_cells(
             cell_face_offsets=grid.cell_face_offsets,
@@ -994,7 +996,7 @@ def make_pyvista_grid(
         face_vertex_indices=grid.face_vertex_indices,
         vertex_coordinates=all_points,
         counts=counts,
-        cell_starts=typing.cast(IntArray[OneDimension], cell_starts),
+        cell_starts=typing.cast("IntArray[OneDimension]", cell_starts),
         use_hexahedra=use_hexahedra,
         out=flat_cells,
     )

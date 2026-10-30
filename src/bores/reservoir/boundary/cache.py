@@ -305,24 +305,24 @@ def compute_boundary_cache(
     apply_productivity_index_values(
         productivity_indices=compiled.productivity_indices,
         pressure=pressure,
-        out_flux_values=typing.cast(NumberArray[OneDimension], flux_values),
-        out_flux_derivatives=typing.cast(NumberArray[OneDimension], flux_derivatives),
+        out_flux_values=typing.cast("NumberArray[OneDimension]", flux_values),
+        out_flux_derivatives=typing.cast("NumberArray[OneDimension]", flux_derivatives),
     )
     apply_aquifer_rates(
         aquifers=compiled.aquifers,
         workspace=aquifer_workspace,
         pressure=pressure,
         time=time,
-        out_flux_values=typing.cast(NumberArray[OneDimension], flux_values),
-        out_flux_derivatives=typing.cast(NumberArray[OneDimension], flux_derivatives),
-        out_rate_derivatives=typing.cast(NumberArray[OneDimension], rate_derivatives),
+        out_flux_values=typing.cast("NumberArray[OneDimension]", flux_values),
+        out_flux_derivatives=typing.cast("NumberArray[OneDimension]", flux_derivatives),
+        out_rate_derivatives=typing.cast("NumberArray[OneDimension]", rate_derivatives),
     )
     return BoundaryCache(
-        pressure_values=typing.cast(NumberArray[OneDimension], pressure_values),
-        flux_values=typing.cast(NumberArray[OneDimension], flux_values),
+        pressure_values=typing.cast("NumberArray[OneDimension]", pressure_values),
+        flux_values=typing.cast("NumberArray[OneDimension]", flux_values),
         is_dirichlet=is_dirichlet,
-        flux_derivatives=typing.cast(NumberArray[OneDimension], flux_derivatives),
-        aquifer_rate_derivatives=typing.cast(NumberArray[OneDimension], rate_derivatives),
+        flux_derivatives=typing.cast("NumberArray[OneDimension]", flux_derivatives),
+        aquifer_rate_derivatives=typing.cast("NumberArray[OneDimension]", rate_derivatives),
     )
 
 

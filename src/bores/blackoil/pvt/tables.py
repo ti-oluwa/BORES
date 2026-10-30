@@ -97,7 +97,7 @@ def build_pchip_2d_interpolator(
             result[chunk] = evaluate_pchip_columns(
                 temperature_knots, over_pressure.T, t_flat[chunk]
             )
-        return typing.cast(NumberArray[NDimension], result.reshape(shape))
+        return typing.cast("NumberArray[NDimension]", result.reshape(shape))
 
     return interpolator
 
@@ -302,7 +302,7 @@ def build_pchip_3d_interpolator(
                 over_salinity.T,
                 chunk[:, 1],  # type: ignore
             )
-        return typing.cast(NumberArray[OneDimension], result)
+        return typing.cast("NumberArray[OneDimension]", result)
 
     return interpolator
 
@@ -343,7 +343,7 @@ def build_bilinear_3d_derivative_interpolator(
     ]
 
     def interpolator(points: NumberArray[NDimension]) -> NumberArray[OneDimension]:
-        points = typing.cast(NumberArray[TwoDimensions], np.atleast_2d(points))  # type: ignore
+        points = typing.cast("NumberArray[TwoDimensions]", np.atleast_2d(points))  # type: ignore
         p = points[:, 0].astype(dtype, copy=False)
         t = points[:, 1].astype(dtype, copy=False)
         s = points[:, 2].astype(dtype, copy=False)
@@ -862,7 +862,7 @@ def broadcast_query_arrays(
     arrays = [np.atleast_1d(value) for value in inputs.values()]
     try:
         return typing.cast(
-            tuple[npt.NDArray[np.floating], ...], tuple(np.broadcast_arrays(*arrays))
+            "tuple[npt.NDArray[np.floating], ...]", tuple(np.broadcast_arrays(*arrays))
         )
     except ValueError:
         shapes = ", ".join(
@@ -1453,7 +1453,7 @@ class PVTTable(StoreSerializable):
             return typing.cast(Number, dtype.type(result))  # type: ignore[attr-defined]
         elif is_array and result.size == 1:
             return typing.cast(Number, dtype.type(result.item()))  # type: ignore[attr-defined]
-        return typing.cast(NumberArray[NDimension], result.astype(dtype, copy=False))
+        return typing.cast("NumberArray[NDimension]", result.astype(dtype, copy=False))
 
     def squery(
         self,
@@ -1506,7 +1506,7 @@ class PVTTable(StoreSerializable):
             return typing.cast(Number, dtype.type(result))  # type: ignore[attr-defined]
         if result.size == 1:
             return typing.cast(Number, dtype.type(result.item()))  # type: ignore[attr-defined]
-        return typing.cast(NumberArray[NDimension], result.astype(dtype, copy=False))
+        return typing.cast("NumberArray[NDimension]", result.astype(dtype, copy=False))
 
     def resolve_salinity(self, salinity: TableQuery[NDimension] | None) -> TableQuery[NDimension]:
         if salinity is not None:
@@ -1597,7 +1597,7 @@ class PVTTable(StoreSerializable):
             )
 
         return typing.cast(
-            TableResult[NDimension],
+            "TableResult[NDimension]",
             dtype.type(result.item())  # type: ignore[attr-defined]
             if result.size == 1
             else result.astype(dtype, copy=False),
@@ -1679,7 +1679,7 @@ class PVTTable(StoreSerializable):
                 result[undersaturated] = density  # type: ignore[index]
 
         return typing.cast(
-            TableResult[NDimension],
+            "TableResult[NDimension]",
             dtype.type(result.item())  # type: ignore[attr-defined]
             if result.size == 1
             else result.astype(dtype, copy=False),
@@ -1818,7 +1818,7 @@ class PVTTable(StoreSerializable):
                 result[undersaturated] = np.asarray(fvf_at_bubble_point)
 
         return typing.cast(
-            TableResult[NDimension],
+            "TableResult[NDimension]",
             dtype.type(result.item())  # type: ignore[attr-defined]
             if result.size == 1
             else result.astype(dtype, copy=False),
@@ -1993,7 +1993,7 @@ class PVTTable(StoreSerializable):
             result[undersaturated] = 0.0
 
         return typing.cast(
-            TableResult[NDimension],
+            "TableResult[NDimension]",
             dtype.type(result.item())  # type: ignore[attr-defined]
             if result.size == 1
             else result.astype(dtype, copy=False),
@@ -2113,7 +2113,7 @@ class PVTTable(StoreSerializable):
             result[undersaturated] = np.clip(mu_ob * (ratio**X), mu_ob, mu_ob * 100.0, dtype=dtype)
 
         return typing.cast(
-            TableResult[NDimension],
+            "TableResult[NDimension]",
             dtype.type(result.item())  # type: ignore[attr-defined]
             if result.size == 1
             else result.astype(dtype, copy=False),
@@ -2258,7 +2258,7 @@ class PVTTable(StoreSerializable):
             )
 
         return typing.cast(
-            TableResult[NDimension],
+            "TableResult[NDimension]",
             dtype.type(result.item())  # type: ignore[attr-defined]
             if result.size == 1
             else result.astype(dtype, copy=False),
@@ -2392,7 +2392,7 @@ class PVTTable(StoreSerializable):
                 ) / np.asarray(undersaturated_fvf)
 
         return typing.cast(
-            TableResult[NDimension],
+            "TableResult[NDimension]",
             dtype.type(result.item())  # type: ignore[attr-defined]
             if result.size == 1
             else result.astype(dtype, copy=False),
@@ -2522,7 +2522,7 @@ class PVTTable(StoreSerializable):
             )
 
         return typing.cast(
-            TableResult[NDimension],
+            "TableResult[NDimension]",
             dtype.type(result.item())  # type: ignore[attr-defined]
             if result.size == 1
             else result.astype(dtype, copy=False),
@@ -2581,7 +2581,7 @@ class PVTTable(StoreSerializable):
             )
             compressibility = -np.asarray(dgas_fvf_dp) / np.asarray(gas_fvf)
             return typing.cast(
-                TableResult[NDimension],
+                "TableResult[NDimension]",
                 self.dtype.type(compressibility.item())  # type: ignore[attr-defined]
                 if compressibility.size == 1
                 else compressibility.astype(self.dtype, copy=False),
@@ -2636,7 +2636,7 @@ class PVTTable(StoreSerializable):
                     )
                     result[undersaturated] = -np.asarray(doil_fvf_dp) / np.asarray(oil_fvf)  # type: ignore[index]
                 return typing.cast(
-                    TableResult[NDimension],
+                    "TableResult[NDimension]",
                     self.dtype.type(result.item())  # type: ignore[attr-defined]
                     if result.size == 1
                     else result.astype(self.dtype, copy=False),
@@ -2745,7 +2745,7 @@ class PVTTable(StoreSerializable):
             else interp(solution_gor_array, temperature_array)
         )
         return typing.cast(
-            TableResult[NDimension],
+            "TableResult[NDimension]",
             dtype.type(result.item())  # type: ignore[attr-defined]
             if result.size == 1
             else result.astype(dtype, copy=False),
@@ -2829,7 +2829,7 @@ class PVTTable(StoreSerializable):
         )
         dtype = self.dtype  # type: ignore[has-type]
         return typing.cast(
-            TableResult[NDimension],
+            "TableResult[NDimension]",
             dtype.type(result.item())  # type: ignore[attr-defined]
             if result.size == 1
             else result.astype(dtype, copy=False),
@@ -3047,7 +3047,7 @@ class PVTTable(StoreSerializable):
             else interp(solution_gor_array, temperature_array)
         )
         return typing.cast(
-            TableResult[NDimension],
+            "TableResult[NDimension]",
             dtype.type(result.item())  # type: ignore[attr-defined]
             if result.size == 1
             else result.astype(dtype, copy=False),
@@ -3112,7 +3112,7 @@ class PVTTable(StoreSerializable):
             )
 
         return typing.cast(
-            TableResult[NDimension],
+            "TableResult[NDimension]",
             dtype.type(result.item())  # type: ignore[attr-defined]
             if result.size == 1
             else result.astype(dtype, copy=False),
@@ -3158,7 +3158,7 @@ class PVTTable(StoreSerializable):
                 )
                 result = np.where(pressure_array <= bubble_point_array, slope_array, 0.0)
                 return typing.cast(
-                    TableResult[NDimension],
+                    "TableResult[NDimension]",
                     self.dtype.type(result.item())  # type: ignore[attr-defined]
                     if result.size == 1
                     else result.astype(self.dtype, copy=False),
@@ -3201,7 +3201,7 @@ class PVTTable(StoreSerializable):
         saturation_array = np.atleast_1d(saturation_pressure)
         result = pressure_array <= saturation_array
         return typing.cast(
-            Boolean | BooleanArray[NDimension],
+            "Boolean | BooleanArray[NDimension]",
             bool(result.item()) if result.size == 1 else result,
         )
 
@@ -3271,7 +3271,7 @@ class PVTTable(StoreSerializable):
 
         result = np.minimum(np.asarray(vaporized_oil_ratio), np.asarray(saturated_ratio))
         return typing.cast(
-            TableResult[NDimension],
+            "TableResult[NDimension]",
             self.dtype.type(result.item())  # type: ignore[attr-defined]
             if result.size == 1
             else result.astype(self.dtype, copy=False),
@@ -3323,7 +3323,7 @@ class PVTTable(StoreSerializable):
         )
         result = np.where(pressure_array <= dew_point_array, slope_array, 0.0)
         return typing.cast(
-            TableResult[NDimension],
+            "TableResult[NDimension]",
             self.dtype.type(result.item())  # type: ignore[attr-defined]
             if result.size == 1
             else result.astype(self.dtype, copy=False),
@@ -3375,7 +3375,7 @@ class PVTTable(StoreSerializable):
             else interp(rv_array, temperature_array)
         )
         return typing.cast(
-            TableResult[NDimension],
+            "TableResult[NDimension]",
             dtype.type(result.item())  # type: ignore[attr-defined]
             if result.size == 1
             else result.astype(dtype, copy=False),

@@ -496,8 +496,8 @@ def resolve_fault_cell_pairs(
             stacklevel=5,
         )
     return FaultCellPairs(
-        lower=typing.cast(IntArray[OneDimension], lower[in_bounds]),
-        upper=typing.cast(IntArray[OneDimension], upper[in_bounds]),
+        lower=typing.cast("IntArray[OneDimension]", lower[in_bounds]),
+        upper=typing.cast("IntArray[OneDimension]", upper[in_bounds]),
     )
 
 
@@ -523,7 +523,7 @@ def build_face_lookup(grid: Grid) -> FaceLookup:
     order = np.argsort(keys, kind="stable")
     return FaceLookup(
         keys=keys[order],
-        faces=typing.cast(IntArray[OneDimension], interior_faces[order]),
+        faces=typing.cast("IntArray[OneDimension]", interior_faces[order]),
         n_cells=n_cells,
     )
 
@@ -559,9 +559,9 @@ def apply_faults_to_grid(
         replaced = fault_face_indices.pop(fault.name, None)
         if replaced is not None:
             reclassify_faces(
-                connection_types=typing.cast(IntArray[OneDimension], connection_types),
-                face_cell_indices=typing.cast(IntArray[TwoDimensions], face_cell_indices),
-                face_indices=typing.cast(IntArray[OneDimension], np.ascontiguousarray(replaced)),
+                connection_types=typing.cast("IntArray[OneDimension]", connection_types),
+                face_cell_indices=typing.cast("IntArray[TwoDimensions]", face_cell_indices),
+                face_indices=typing.cast("IntArray[OneDimension]", np.ascontiguousarray(replaced)),
                 interior_type=int(ConnectionType.INTERIOR_FACE),
                 boundary_type=int(ConnectionType.BOUNDARY_FACE),
             )
@@ -581,14 +581,14 @@ def apply_faults_to_grid(
         if found.shape[0] == 0:
             continue
         reclassify_faces(
-            connection_types=typing.cast(IntArray[OneDimension], connection_types),
-            face_cell_indices=typing.cast(IntArray[TwoDimensions], face_cell_indices),
-            face_indices=typing.cast(IntArray[OneDimension], found),
+            connection_types=typing.cast("IntArray[OneDimension]", connection_types),
+            face_cell_indices=typing.cast("IntArray[TwoDimensions]", face_cell_indices),
+            face_indices=typing.cast("IntArray[OneDimension]", found),
             interior_type=int(ConnectionType.INTERIOR_FAULT_FACE),
             boundary_type=int(ConnectionType.BOUNDARY_FAULT_FACE),
         )
         fault_face_indices[fault.name] = typing.cast(
-            IntArray[OneDimension], found.astype(np.int32)
+            "IntArray[OneDimension]", found.astype(np.int32)
         )
 
     updated_multipliers: dict[str, Number] = dict(grid.fault_transmissibility_multipliers or {})
@@ -627,10 +627,10 @@ def remove_faults_from_grid(grid: Grid, names: frozenset[str]) -> Grid:
             if face_indices is None:
                 continue
             reclassify_faces(
-                connection_types=typing.cast(IntArray[OneDimension], connection_types),
-                face_cell_indices=typing.cast(IntArray[TwoDimensions], face_cell_indices),
+                connection_types=typing.cast("IntArray[OneDimension]", connection_types),
+                face_cell_indices=typing.cast("IntArray[TwoDimensions]", face_cell_indices),
                 face_indices=typing.cast(
-                    IntArray[OneDimension], np.ascontiguousarray(face_indices)
+                    "IntArray[OneDimension]", np.ascontiguousarray(face_indices)
                 ),
                 interior_type=int(ConnectionType.INTERIOR_FACE),
                 boundary_type=int(ConnectionType.BOUNDARY_FACE),

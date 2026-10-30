@@ -111,7 +111,7 @@ def compute_gas_gravity_from_density(
     :return: Gas specific gravity (air = 1.0)
     """
     air_density = compute_fluid_density(pressure, temperature, fluid="Air")
-    return typing.cast(NumberOrArray[AnyDimension], density / air_density)
+    return typing.cast("NumberOrArray[AnyDimension]", density / air_density)
 
 
 @elementwise(

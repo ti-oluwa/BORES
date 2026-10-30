@@ -975,7 +975,7 @@ class CompiledWellControls(typing.NamedTuple):
 
         is_injector = self.well_kinds[well_row] == WellKind.INJECTOR
         tag_map = INJECTOR_MODE_TAG if is_injector else PRODUCER_MODE_TAG
-        mode = typing.cast(ProducerControlMode | InjectorControlMode, mode)
+        mode = typing.cast("ProducerControlMode | InjectorControlMode", mode)
         self.control_modes[well_row] = tag_map[mode]  # type: ignore[index]
 
     @typing.overload
@@ -1807,7 +1807,7 @@ def to_int_array(
     :param dtype: Integer dtype of the result.
     :returns: A one-dimensional integer array.
     """
-    return typing.cast(IntArray[OneDimension], np.fromiter(values, dtype=dtype))
+    return typing.cast("IntArray[OneDimension]", np.fromiter(values, dtype=dtype))
 
 
 def to_number_array(
@@ -1820,7 +1820,7 @@ def to_number_array(
     :param dtype: Floating-point dtype of the result.
     :returns: A one-dimensional floating-point array.
     """
-    return typing.cast(NumberArray[OneDimension], np.fromiter(values, dtype=dtype))
+    return typing.cast("NumberArray[OneDimension]", np.fromiter(values, dtype=dtype))
 
 
 class LimitColumns:
@@ -1993,18 +1993,18 @@ def compile_perforations(
 
     def number_column(values: typing.Iterable[Number]) -> NumberArray[OneDimension]:
         return typing.cast(
-            NumberArray[OneDimension], np.fromiter(values, dtype=dtype, count=count)
+            "NumberArray[OneDimension]", np.fromiter(values, dtype=dtype, count=count)
         )
 
     def int_column(values: typing.Iterable[Integer]) -> IntArray[OneDimension]:
         return typing.cast(
-            IntArray[OneDimension], np.fromiter(values, dtype=np.int32, count=count)
+            "IntArray[OneDimension]", np.fromiter(values, dtype=np.int32, count=count)
         )
 
     return CompiledPerforations(
         well_offsets=to_int_array(well_offsets, dtype=np.int64),
         cell_indices=typing.cast(
-            IntArray[OneDimension],
+            "IntArray[OneDimension]",
             np.fromiter(
                 (connection.cell_index for connection in connections), dtype=np.int64, count=count
             ),

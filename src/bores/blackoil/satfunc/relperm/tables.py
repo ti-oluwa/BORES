@@ -720,7 +720,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
 
         if is_scalar:
             return typing.cast(Number, dtype.type(result.item()))  # type: ignore
-        return typing.cast(NumberArray[NDimension], result.reshape(sat.shape))
+        return typing.cast("NumberArray[NDimension]", result.reshape(sat.shape))
 
     def _d_query(
         self,
@@ -751,7 +751,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
 
         if is_scalar:
             return typing.cast(Number, dtype.type(result.item()))  # type: ignore
-        return typing.cast(NumberArray[NDimension], result.reshape(sat.shape))
+        return typing.cast("NumberArray[NDimension]", result.reshape(sat.shape))
 
     def get_wetting_phase_relative_permeability(
         self,
@@ -1809,7 +1809,7 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
         """
         total_saturation = water_saturation + oil_saturation + gas_saturation
         needs_norm = typing.cast(
-            NumberArray[NDimension],
+            "NumberArray[NDimension]",
             (np.abs(total_saturation - 1.0) > saturation_epsilon) & (total_saturation > 0.0),
         )
         if not np.any(needs_norm):
@@ -1826,12 +1826,7 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
             1.0,
         )
         return typing.cast(
-            tuple[
-                NumberArray[NDimension],
-                NumberArray[NDimension],
-                NumberArray[NDimension],
-                NumberArray[NDimension] | None,
-            ],
+            "tuple[NumberArray[NDimension], NumberArray[NDimension], NumberArray[NDimension], NumberArray[NDimension] | None]",
             (water_saturation, oil_saturation, gas_saturation, scale),
         )
 
@@ -2009,7 +2004,7 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
 
         kr_max = self.get_oil_relperm_endpoint()
         # Mixing rule partial derivatives
-        mixing_rule = typing.cast(MixingRule | None, self.mixing_rule)
+        mixing_rule = typing.cast("MixingRule | None", self.mixing_rule)
         if mixing_rule is None:
             # Strict on one side so a tie (e.g. both zero below the residual oil) is
             # not double counted

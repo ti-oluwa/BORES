@@ -982,7 +982,7 @@ class TableKeyword(Keyword[list[Table[Number]]]):
         to their declared `default` values. The Eclipse `1*` default
         designator is treated as absent (falls back to `default`).
         """
-        return typing.cast(TableRow[Number], parse_tokens(self.name, self.columns, tokens))
+        return typing.cast("TableRow[Number]", parse_tokens(self.name, self.columns, tokens))
 
     def _parse_flat_tables(self, body: str) -> list[Table[Number]]:
         """

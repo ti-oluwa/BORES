@@ -314,8 +314,8 @@ def _march_full_range(
     )
     depths = np.concatenate([depths_up[:-1], depths_down], dtype=dtype)
     pressures = np.concatenate([pressures_up[:-1], pressures_down], dtype=dtype)
-    return typing.cast(NumberArray[OneDimension], depths), typing.cast(
-        NumberArray[OneDimension], pressures
+    return typing.cast("NumberArray[OneDimension]", depths), typing.cast(
+        "NumberArray[OneDimension]", pressures
     )
 
 
@@ -469,14 +469,14 @@ def invert_capillary_pressure_curves(
         saturation_grid=saturation_grid,
         capillary_pressure_grid=capillary_pressure_grid,
         curve_index=curve_index,
-        target_capillary_pressure=typing.cast(NumberArray[OneDimension], target),
+        target_capillary_pressure=typing.cast("NumberArray[OneDimension]", target),
         pressure_falls_when_flat=bool(pressure_falls_with_saturation),
         prefer_highest_pressure_end=bool(prefer_highest_pressure_end),
         saturation_out=saturation,
         capillary_pressure_out=capillary_pressure,
     )
     return typing.cast(
-        tuple[NumberArray[OneDimension], NumberArray[OneDimension]],
+        "tuple[NumberArray[OneDimension], NumberArray[OneDimension]]",
         (saturation, capillary_pressure),
     )
 
@@ -495,16 +495,16 @@ def index_unique_endpoints(
     n_cells = endpoints[0].shape[0]
     if n_cells == 0 or all(np.all(values == values[0]) for values in endpoints):
         return (
-            typing.cast(IntArray[OneDimension], np.zeros(n_cells, dtype=np.intp)),
+            typing.cast("IntArray[OneDimension]", np.zeros(n_cells, dtype=np.intp)),
             typing.cast(
-                tuple[NumberArray[OneDimension], ...], tuple(values[:1] for values in endpoints)
+                "tuple[NumberArray[OneDimension], ...]", tuple(values[:1] for values in endpoints)
             ),
         )
     unique_rows, curve_ids = np.unique(np.stack(endpoints, axis=1), axis=0, return_inverse=True)
     return (
-        typing.cast(IntArray[OneDimension], curve_ids.reshape(-1)),
+        typing.cast("IntArray[OneDimension]", curve_ids.reshape(-1)),
         typing.cast(
-            tuple[NumberArray[OneDimension], ...],
+            "tuple[NumberArray[OneDimension], ...]",
             tuple(unique_rows[:, column] for column in range(len(endpoints))),
         ),
     )
@@ -564,8 +564,8 @@ def invert_curves_per_cell(
             curve_index=local_curve_ids.reshape(-1),
         )
     return (
-        typing.cast(NumberArray[OneDimension], saturation),
-        typing.cast(NumberArray[OneDimension], capillary_pressure),
+        typing.cast("NumberArray[OneDimension]", saturation),
+        typing.cast("NumberArray[OneDimension]", capillary_pressure),
     )
 
 
@@ -634,7 +634,7 @@ def get_saturations_from_capillary_pressure(
         endpoints: tuple[NumberArray[OneDimension], ...],
     ) -> dict[str, NumberArray[OneDimension]]:
         return typing.cast(
-            dict[str, NumberArray[OneDimension]],
+            "dict[str, NumberArray[OneDimension]]",
             dict(
                 irreducible_water_saturation=np.repeat(endpoints[0], saturation_samples),
                 residual_oil_saturation_water=np.repeat(endpoints[1], saturation_samples),
@@ -656,7 +656,7 @@ def get_saturations_from_capillary_pressure(
             **endpoint_arguments(endpoints),
         )["oil_water"]
         return typing.cast(
-            tuple[NumberArray[TwoDimensions], NumberArray[TwoDimensions]],
+            "tuple[NumberArray[TwoDimensions], NumberArray[TwoDimensions]]",
             (saturation_grid, np.reshape(pcow_grid, saturation_grid.shape)),
         )
 
@@ -674,7 +674,7 @@ def get_saturations_from_capillary_pressure(
             **endpoint_arguments(endpoints),
         )["gas_oil"]
         return typing.cast(
-            tuple[NumberArray[TwoDimensions], NumberArray[TwoDimensions]],
+            "tuple[NumberArray[TwoDimensions], NumberArray[TwoDimensions]]",
             (saturation_grid, np.reshape(pcgo_grid, saturation_grid.shape)),
         )
 
@@ -693,14 +693,14 @@ def get_saturations_from_capillary_pressure(
             flat_water, flat_zero, np.clip(1.0 - flat_water, 0.0, 1.0), **arguments
         )["gas_oil"]
         return typing.cast(
-            tuple[NumberArray[TwoDimensions], NumberArray[TwoDimensions]],
+            "tuple[NumberArray[TwoDimensions], NumberArray[TwoDimensions]]",
             (saturation_grid, np.reshape(pcow_grid + pcgo_grid, saturation_grid.shape)),
         )
 
     if water_profile is not None:
         water_pressure_at_depth = np.interp(depths, water_profile[0], water_profile[1])
         target_pcow = typing.cast(
-            NumberArray[OneDimension], oil_pressure - water_pressure_at_depth
+            "NumberArray[OneDimension]", oil_pressure - water_pressure_at_depth
         )  # Pcow = Po - Pw
         water_saturation, oil_water_capillary_pressure = invert_curves_per_cell(
             curve_ids=curve_ids,
@@ -716,7 +716,7 @@ def get_saturations_from_capillary_pressure(
     if gas_profile is not None:
         gas_pressure_at_depth = np.interp(depths, gas_profile[0], gas_profile[1])
         target_pcgo = typing.cast(
-            NumberArray[OneDimension], gas_pressure_at_depth - oil_pressure
+            "NumberArray[OneDimension]", gas_pressure_at_depth - oil_pressure
         )  # Pcgo = Pg - Po
         gas_saturation, gas_oil_capillary_pressure = invert_curves_per_cell(
             curve_ids=curve_ids,
@@ -739,10 +739,10 @@ def get_saturations_from_capillary_pressure(
         if overlapping.size > 0:
             overlapping_curve_ids = curve_ids[overlapping]
             water_in_gas, _ = invert_curves_per_cell(
-                curve_ids=typing.cast(IntArray[OneDimension], overlapping_curve_ids),
+                curve_ids=typing.cast("IntArray[OneDimension]", overlapping_curve_ids),
                 unique_endpoints=unique_endpoints,
                 target_capillary_pressure=typing.cast(
-                    NumberArray[OneDimension],
+                    "NumberArray[OneDimension]",
                     target_pcow[overlapping] + target_pcgo[overlapping],
                 ),
                 build_curves=build_gas_water_curves,
@@ -1234,10 +1234,10 @@ def average_equilibrium_samples(
     :returns: One value per cell for every array.
     """
     water_saturation = typing.cast(
-        NumberArray[TwoDimensions], np.reshape(sample_arrays.water_saturation, (n_cells, -1))
+        "NumberArray[TwoDimensions]", np.reshape(sample_arrays.water_saturation, (n_cells, -1))
     )
     gas_saturation = typing.cast(
-        NumberArray[TwoDimensions], np.reshape(sample_arrays.gas_saturation, (n_cells, -1))
+        "NumberArray[TwoDimensions]", np.reshape(sample_arrays.gas_saturation, (n_cells, -1))
     )
     weighting_by_field = {
         "solution_gor": OIL_CONTENT_WEIGHTS,
@@ -1300,7 +1300,7 @@ def initialize_horizontal_subdivision_equilibrium(
         sub_arrays,
         n_cells=n_cells,
         sample_weights=typing.cast(
-            NumberArray[TwoDimensions], np.ones((n_cells, n_sub), dtype=cell_top.dtype)
+            "NumberArray[TwoDimensions]", np.ones((n_cells, n_sub), dtype=cell_top.dtype)
         ),
     )
 
@@ -2300,7 +2300,7 @@ def initialize_reservoir_state(
         pvt_region_index=pvt_region_index,
         pressure=pressure_array,
         temperature=temperature_array,
-        gas_solubility_in_water=typing.cast(CellArray | None, solubility_in_water_input),
+        gas_solubility_in_water=typing.cast("CellArray | None", solubility_in_water_input),
         salinity=water_salinity,
         dtype=dtype,
     )

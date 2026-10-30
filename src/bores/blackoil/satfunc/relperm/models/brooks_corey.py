@@ -969,9 +969,9 @@ def compute_brooks_corey_relative_permeabilities_compiled(
     if is_scalar:
         return water_relperm.item(), oil_relperm.item(), gas_relperm.item()
     return (
-        typing.cast(NumberArray[NDimension], water_relperm.reshape(shape)),
-        typing.cast(NumberArray[NDimension], oil_relperm.reshape(shape)),
-        typing.cast(NumberArray[NDimension], gas_relperm.reshape(shape)),
+        typing.cast("NumberArray[NDimension]", water_relperm.reshape(shape)),
+        typing.cast("NumberArray[NDimension]", oil_relperm.reshape(shape)),
+        typing.cast("NumberArray[NDimension]", gas_relperm.reshape(shape)),
     )
 
 

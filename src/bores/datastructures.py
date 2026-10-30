@@ -109,7 +109,7 @@ class GridDimensions(NamedTuple):
         """
         # Integer arithmetic keeps the shape of `flat`, which NumPy's type stubs do not express
         return typing.cast(
-            tuple[IntArray[NDimension], IntArray[NDimension], IntArray[NDimension]],
+            "tuple[IntArray[NDimension], IntArray[NDimension], IntArray[NDimension]]",
             (flat % self.nx, (flat // self.nx) % self.ny, flat // (self.nx * self.ny)),
         )
 

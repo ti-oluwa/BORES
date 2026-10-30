@@ -228,7 +228,7 @@ class VFPData(Serializable):
     """Tubing head pressure axis, strictly ascending."""
 
     water_fractions: NumberArray[OneDimension] = attrs.field(
-        factory=lambda: typing.cast(NumberArray[OneDimension], np.array([0.0]))
+        factory=lambda: typing.cast("NumberArray[OneDimension]", np.array([0.0]))
     )
     """
     Water axis, strictly ascending, in the terms of `water_fraction_type`. A single
@@ -236,7 +236,7 @@ class VFPData(Serializable):
     """
 
     gas_fractions: NumberArray[OneDimension] = attrs.field(
-        factory=lambda: typing.cast(NumberArray[OneDimension], np.array([0.0]))
+        factory=lambda: typing.cast("NumberArray[OneDimension]", np.array([0.0]))
     )
     """
     Gas axis, strictly ascending, in the terms of `gas_fraction_type`. A single value
@@ -244,7 +244,7 @@ class VFPData(Serializable):
     """
 
     artificial_lift_quantities: NumberArray[OneDimension] = attrs.field(
-        factory=lambda: typing.cast(NumberArray[OneDimension], np.array([0.0]))
+        factory=lambda: typing.cast("NumberArray[OneDimension]", np.array([0.0]))
     )
     """
     Artificial lift quantity axis (gas-lift injection rate, pump
@@ -381,7 +381,7 @@ class VFPData(Serializable):
             or is ambiguous, or a table cannot be mapped.
         """
         return typing.cast(
-            Self | list[Self],
+            "Self | list[Self]",
             load_vfp_data(deck_file, table_number=table_number, well_type=well_type),
         )
 
@@ -680,7 +680,7 @@ class VFPTable(StoreSerializable):
         dtype = self.dtype
         if is_scalar:
             return typing.cast(Number, result.astype(dtype, copy=False).item())
-        return typing.cast(NumberArray[NDimension], result.astype(dtype, copy=False))
+        return typing.cast("NumberArray[NDimension]", result.astype(dtype, copy=False))
 
     get_bhp = query
 
@@ -793,7 +793,7 @@ class VFPTable(StoreSerializable):
         :raises ValidationError: As for `VFPData.from_deck`.
         """
         return typing.cast(
-            Self | list[Self],
+            "Self | list[Self]",
             load_vfp_table(
                 deck_file,
                 table_number=table_number,
@@ -1006,10 +1006,10 @@ def load_vfp_data_from_record(
             well_type=WellType.INJECTOR,
             datum_depth=datum_depth,
             flow_type=flow_type,
-            flow_rates=typing.cast(NumberArray[OneDimension], injector["flow"] * gas_flow_scale),
-            thps=typing.cast(NumberArray[OneDimension], injector["thp"]),
+            flow_rates=typing.cast("NumberArray[OneDimension]", injector["flow"] * gas_flow_scale),
+            thps=typing.cast("NumberArray[OneDimension]", injector["thp"]),
             bhps=typing.cast(
-                NumberArray[FiveDimensions], injector["bhps"][:, :, None, None, None]
+                "NumberArray[FiveDimensions]", injector["bhps"][:, :, None, None, None]
             ),
             unit_system=unit_system,
         )
@@ -1051,14 +1051,16 @@ def load_vfp_data_from_record(
         flow_type=flow_type,
         water_fraction_type=water_fraction_type,
         gas_fraction_type=gas_fraction_type,
-        flow_rates=typing.cast(NumberArray[OneDimension], producer["flow"] * flow_scale),
-        thps=typing.cast(NumberArray[OneDimension], producer["thp"]),
+        flow_rates=typing.cast("NumberArray[OneDimension]", producer["flow"] * flow_scale),
+        thps=typing.cast("NumberArray[OneDimension]", producer["thp"]),
         water_fractions=typing.cast(
-            NumberArray[OneDimension], producer["water_fraction"] * water_scale
+            "NumberArray[OneDimension]", producer["water_fraction"] * water_scale
         ),
-        gas_fractions=typing.cast(NumberArray[OneDimension], producer["gas_fraction"] * gas_scale),
-        artificial_lift_quantities=typing.cast(NumberArray[OneDimension], producer["alq"]),
-        bhps=typing.cast(NumberArray[FiveDimensions], producer["bhps"]),
+        gas_fractions=typing.cast(
+            "NumberArray[OneDimension]", producer["gas_fraction"] * gas_scale
+        ),
+        artificial_lift_quantities=typing.cast("NumberArray[OneDimension]", producer["alq"]),
+        bhps=typing.cast("NumberArray[FiveDimensions]", producer["bhps"]),
         unit_system=unit_system,
     )
 
@@ -1192,7 +1194,7 @@ def load_vfp_table(
         )
     return [
         VFPTable(item, warn_on_extrapolation=warn_on_extrapolation, dtype=dtype)
-        for item in typing.cast(list[VFPData], data)
+        for item in typing.cast("list[VFPData]", data)
     ]
 
 
@@ -1524,8 +1526,8 @@ def as_vfp_table(
         gas_fraction_type=gas_fraction_type,
         flow_rates=flow_rates,
         thps=thps,
-        water_fractions=typing.cast(NumberArray[OneDimension], resolved_water_fractions),
-        gas_fractions=typing.cast(NumberArray[OneDimension], resolved_gas_fractions),
+        water_fractions=typing.cast("NumberArray[OneDimension]", resolved_water_fractions),
+        gas_fractions=typing.cast("NumberArray[OneDimension]", resolved_gas_fractions),
         bhps=bhps,
         unit_system=unit_system,
     )

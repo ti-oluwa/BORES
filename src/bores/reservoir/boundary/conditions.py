@@ -144,7 +144,7 @@ class BoundaryRegion:
         return cls(
             name=name,
             face_positions=typing.cast(
-                IntArray[OneDimension], face_positions.astype(np.int32, copy=False)
+                "IntArray[OneDimension]", face_positions.astype(np.int32, copy=False)
             ),
             condition=ConstantFluxBoundary(flux=0.0, unit_system=unit_system),
         )

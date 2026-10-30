@@ -229,9 +229,9 @@ def resolve_ridge_owners(
     owners = np.where(first_original, first, second)
     neighbours = np.where(first_original & second_original, second, BOUNDARY_CELL)
     return (
-        typing.cast(BooleanArray[OneDimension], keep),
-        typing.cast(IntArray[OneDimension], owners),
-        typing.cast(IntArray[OneDimension], neighbours),
+        typing.cast("BooleanArray[OneDimension]", keep),
+        typing.cast("IntArray[OneDimension]", owners),
+        typing.cast("IntArray[OneDimension]", neighbours),
     )
 
 
@@ -588,17 +588,21 @@ def make_2d_voronoi_grid(
         region_vertices=region_vertices,
         region_offsets=region_offsets,
         point_region=typing.cast(
-            IntArray[OneDimension], np.ascontiguousarray(voronoi.point_region, dtype=np.int64)
+            "IntArray[OneDimension]", np.ascontiguousarray(voronoi.point_region, dtype=np.int64)
         ),
         voronoi_vertices=typing.cast(
-            NumberArray[TwoDimensions], np.ascontiguousarray(voronoi.vertices, dtype=np.float64)
+            "NumberArray[TwoDimensions]", np.ascontiguousarray(voronoi.vertices, dtype=np.float64)
         ),
         seeds=typing.cast(SeedCoordinates2D, np.ascontiguousarray(seeds, dtype=np.float64)),
-        ridge_a=typing.cast(IntArray[OneDimension], np.ascontiguousarray(ridge_vertices[keep, 0])),
-        ridge_b=typing.cast(IntArray[OneDimension], np.ascontiguousarray(ridge_vertices[keep, 1])),
-        ridge_owner=typing.cast(IntArray[OneDimension], np.ascontiguousarray(owners[keep])),
+        ridge_a=typing.cast(
+            "IntArray[OneDimension]", np.ascontiguousarray(ridge_vertices[keep, 0])
+        ),
+        ridge_b=typing.cast(
+            "IntArray[OneDimension]", np.ascontiguousarray(ridge_vertices[keep, 1])
+        ),
+        ridge_owner=typing.cast("IntArray[OneDimension]", np.ascontiguousarray(owners[keep])),
         ridge_neighbour=typing.cast(
-            IntArray[OneDimension], np.ascontiguousarray(neighbours[keep])
+            "IntArray[OneDimension]", np.ascontiguousarray(neighbours[keep])
         ),
         n_layers=n_layers,
         n_z_levels=n_z_levels,
@@ -660,12 +664,12 @@ def make_3d_voronoi_grid(
     faces_per_cell, entry_cells, entry_offsets, entry_vertices = build_3d_cell_entries(
         ridge_vertices=ridge_vertices,
         ridge_offsets=ridge_offsets,
-        ridge_owner=typing.cast(IntArray[OneDimension], np.ascontiguousarray(owners)),
-        ridge_neighbour=typing.cast(IntArray[OneDimension], np.ascontiguousarray(neighbours)),
+        ridge_owner=typing.cast("IntArray[OneDimension]", np.ascontiguousarray(owners)),
+        ridge_neighbour=typing.cast("IntArray[OneDimension]", np.ascontiguousarray(neighbours)),
         ridge_direction=direction,
         keep=keep,
         voronoi_vertices=typing.cast(
-            NumberArray[TwoDimensions], np.ascontiguousarray(voronoi.vertices, dtype=np.float64)
+            "NumberArray[TwoDimensions]", np.ascontiguousarray(voronoi.vertices, dtype=np.float64)
         ),
         n_seeds=n_seeds,
     )

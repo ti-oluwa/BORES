@@ -658,15 +658,7 @@ def run_rule_derivatives(
     selected = parallel_loop if size >= PARALLEL_SIZE_THRESHOLD else loop
     outputs = selected(*arrays, size, c.MINIMUM_MOBILE_PORE_SPACE)
     return typing.cast(
-        tuple[
-            NumberOrArray[NDimension],
-            NumberOrArray[NDimension],
-            NumberOrArray[NDimension],
-            NumberOrArray[NDimension],
-            NumberOrArray[NDimension],
-            NumberOrArray[NDimension],
-            NumberOrArray[NDimension],
-        ],
+        "tuple[NumberOrArray[NDimension], NumberOrArray[NDimension], NumberOrArray[NDimension], NumberOrArray[NDimension], NumberOrArray[NDimension], NumberOrArray[NDimension], NumberOrArray[NDimension]]",
         tuple(_restore_shape(flat=output, shape=shape) for output in outputs),
     )
 

@@ -468,7 +468,7 @@ class FetkovichAquifer(BoundaryCondition):
             `aquifer_id` is given but not found in it.
         """
         return typing.cast(
-            Self | dict[int, Self],
+            "Self | dict[int, Self]",
             load_fetkovich_aquifer(
                 deck_file,
                 aquifer_id=aquifer_id,

@@ -240,11 +240,11 @@ class SummaryReport(
 
         records = self.records
         times = typing.cast(
-            NumberArray[OneDimension],
+            "NumberArray[OneDimension]",
             np.fromiter((records[position].time for position in positions), dtype=np.float64),
         )
         values = typing.cast(
-            NumberArray[OneDimension],
+            "NumberArray[OneDimension]",
             np.fromiter((records[position].value for position in positions), dtype=np.float64),
         )
         self.series_cache[key] = (len(positions), times, values)
@@ -303,8 +303,8 @@ class SummaryReport(
         """
         times, values = self.series(key)
         mask = (times >= start) & (times <= end)
-        return typing.cast(NumberArray[OneDimension], times[mask]), typing.cast(
-            NumberArray[OneDimension], values[mask]
+        return typing.cast("NumberArray[OneDimension]", times[mask]), typing.cast(
+            "NumberArray[OneDimension]", values[mask]
         )
 
     def __len__(self) -> int:

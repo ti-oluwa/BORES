@@ -239,7 +239,7 @@ def compute_perforation_pressures(
             count, dtype=np.dtype(dtype) if dtype is not None else representative_depths.dtype
         )
 
-    pressures = typing.cast(NumberArray[OneDimension], pressures)
+    pressures = typing.cast("NumberArray[OneDimension]", pressures)
     walk_hydrostatic_pressures(
         reference_depth=reference_depth,
         reference_pressure=reference_pressure,

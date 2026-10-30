@@ -397,7 +397,7 @@ def compute_fvf_compressibility(
     """
     derivative = PchipInterpolator(pressures, fvf_2d, axis=0).derivative(1)(pressures)
     return typing.cast(
-        FloatArray[TwoDimensions], (-(1.0 / fvf_2d) * derivative).astype(dtype, copy=False)
+        "FloatArray[TwoDimensions]", (-(1.0 / fvf_2d) * derivative).astype(dtype, copy=False)
     )
 
 
@@ -659,23 +659,23 @@ def build_oil_data_from_pvto(
     )
     return PVTData(
         phase=FluidPhase.OIL,
-        pressures=typing.cast(FloatArray[OneDimension], pressures),
-        temperatures=typing.cast(FloatArray[OneDimension], temperatures),
-        bubble_point_pressures=typing.cast(FloatArray[TwoDimensions], bubble_point_pressure_2d),
-        solution_gas_to_oil_ratios=typing.cast(FloatArray[OneDimension], solution_gor_values),
-        formation_volume_factor_table=typing.cast(FloatArray[TwoDimensions], oil_fvf_2d),
-        viscosity_table=typing.cast(FloatArray[TwoDimensions], oil_viscosity_2d),
+        pressures=typing.cast("FloatArray[OneDimension]", pressures),
+        temperatures=typing.cast("FloatArray[OneDimension]", temperatures),
+        bubble_point_pressures=typing.cast("FloatArray[TwoDimensions]", bubble_point_pressure_2d),
+        solution_gas_to_oil_ratios=typing.cast("FloatArray[OneDimension]", solution_gor_values),
+        formation_volume_factor_table=typing.cast("FloatArray[TwoDimensions]", oil_fvf_2d),
+        viscosity_table=typing.cast("FloatArray[TwoDimensions]", oil_viscosity_2d),
         undersaturated_formation_volume_factor_table=typing.cast(
-            FloatArray[ThreeDimensions], undersaturated_fvf_3d
+            "FloatArray[ThreeDimensions]", undersaturated_fvf_3d
         ),
         undersaturated_viscosity_table=typing.cast(
-            FloatArray[ThreeDimensions], undersaturated_viscosity_3d
+            "FloatArray[ThreeDimensions]", undersaturated_viscosity_3d
         ),
-        solution_gor_table=typing.cast(FloatArray[TwoDimensions], solution_gor_2d),
-        density_table=typing.cast(FloatArray[TwoDimensions], oil_density_2d)
+        solution_gor_table=typing.cast("FloatArray[TwoDimensions]", solution_gor_2d),
+        density_table=typing.cast("FloatArray[TwoDimensions]", oil_density_2d)
         if oil_density_2d is not None
         else None,
-        compressibility_table=typing.cast(FloatArray[TwoDimensions], oil_compressibility_2d),
+        compressibility_table=typing.cast("FloatArray[TwoDimensions]", oil_compressibility_2d),
         dtype=dtype,
         unit_system=unit_system,
     )
@@ -754,15 +754,15 @@ def build_oil_data_from_pvdo(
 
     return PVTData(
         phase=FluidPhase.OIL,
-        pressures=typing.cast(FloatArray[OneDimension], pressures),
-        temperatures=typing.cast(FloatArray[OneDimension], temperatures),
-        formation_volume_factor_table=typing.cast(FloatArray[TwoDimensions], oil_fvf_2d),
-        viscosity_table=typing.cast(FloatArray[TwoDimensions], oil_viscosity_2d),
-        solution_gor_table=typing.cast(FloatArray[TwoDimensions], solution_gor_2d),
-        density_table=typing.cast(FloatArray[TwoDimensions], oil_density_2d)
+        pressures=typing.cast("FloatArray[OneDimension]", pressures),
+        temperatures=typing.cast("FloatArray[OneDimension]", temperatures),
+        formation_volume_factor_table=typing.cast("FloatArray[TwoDimensions]", oil_fvf_2d),
+        viscosity_table=typing.cast("FloatArray[TwoDimensions]", oil_viscosity_2d),
+        solution_gor_table=typing.cast("FloatArray[TwoDimensions]", solution_gor_2d),
+        density_table=typing.cast("FloatArray[TwoDimensions]", oil_density_2d)
         if oil_density_2d is not None
         else None,
-        compressibility_table=typing.cast(FloatArray[TwoDimensions], oil_compressibility_2d),
+        compressibility_table=typing.cast("FloatArray[TwoDimensions]", oil_compressibility_2d),
         dtype=dtype,
         unit_system=unit_system,
     )
@@ -1004,14 +1004,14 @@ def build_gas_data_from_pvdg(
 
     return PVTData(
         phase=FluidPhase.GAS,
-        pressures=typing.cast(FloatArray[OneDimension], pressures),
-        temperatures=typing.cast(FloatArray[OneDimension], temperatures),
-        formation_volume_factor_table=typing.cast(FloatArray[TwoDimensions], gas_fvf_2d),
-        viscosity_table=typing.cast(FloatArray[TwoDimensions], gas_viscosity_2d),
-        density_table=typing.cast(FloatArray[TwoDimensions], gas_density_2d)
+        pressures=typing.cast("FloatArray[OneDimension]", pressures),
+        temperatures=typing.cast("FloatArray[OneDimension]", temperatures),
+        formation_volume_factor_table=typing.cast("FloatArray[TwoDimensions]", gas_fvf_2d),
+        viscosity_table=typing.cast("FloatArray[TwoDimensions]", gas_viscosity_2d),
+        density_table=typing.cast("FloatArray[TwoDimensions]", gas_density_2d)
         if gas_density_2d is not None
         else None,
-        compressibility_table=typing.cast(FloatArray[TwoDimensions], gas_compressibility_2d),
+        compressibility_table=typing.cast("FloatArray[TwoDimensions]", gas_compressibility_2d),
         dtype=dtype,
         unit_system=unit_system,
     )
@@ -1217,29 +1217,29 @@ def build_gas_data_from_pvtg(
     undersaturated_gas_viscosity_3d = np.repeat(gas_viscosity_2d[:, np.newaxis, :], n_t, axis=1)
     return PVTData(
         phase=FluidPhase.GAS,
-        pressures=typing.cast(FloatArray[OneDimension], pressure_values),
-        temperatures=typing.cast(FloatArray[OneDimension], temperatures),
-        vaporized_oil_ratios=typing.cast(FloatArray[OneDimension], rv_values),
+        pressures=typing.cast("FloatArray[OneDimension]", pressure_values),
+        temperatures=typing.cast("FloatArray[OneDimension]", temperatures),
+        vaporized_oil_ratios=typing.cast("FloatArray[OneDimension]", rv_values),
         formation_volume_factor_table=typing.cast(
-            FloatArray[TwoDimensions], _broadcast_to_2d(saturated_gas_fvf, n_t)
+            "FloatArray[TwoDimensions]", _broadcast_to_2d(saturated_gas_fvf, n_t)
         ),
         viscosity_table=typing.cast(
-            FloatArray[TwoDimensions], _broadcast_to_2d(saturated_gas_viscosity, n_t)
+            "FloatArray[TwoDimensions]", _broadcast_to_2d(saturated_gas_viscosity, n_t)
         ),
         vaporized_oil_ratio_table=typing.cast(
-            FloatArray[TwoDimensions], _broadcast_to_2d(max_rv_per_pressure, n_t)
+            "FloatArray[TwoDimensions]", _broadcast_to_2d(max_rv_per_pressure, n_t)
         ),
         undersaturated_formation_volume_factor_table=typing.cast(
-            FloatArray[ThreeDimensions], undersaturated_gas_fvf_3d
+            "FloatArray[ThreeDimensions]", undersaturated_gas_fvf_3d
         ),
         undersaturated_viscosity_table=typing.cast(
-            FloatArray[ThreeDimensions], undersaturated_gas_viscosity_3d
+            "FloatArray[ThreeDimensions]", undersaturated_gas_viscosity_3d
         ),
-        density_table=typing.cast(FloatArray[TwoDimensions], gas_density_2d)
+        density_table=typing.cast("FloatArray[TwoDimensions]", gas_density_2d)
         if gas_density_2d is not None
         else None,
-        compressibility_table=typing.cast(FloatArray[TwoDimensions], gas_compressibility_2d),
-        dew_point_pressures=typing.cast(FloatArray[TwoDimensions], dew_point_pressure_2d),
+        compressibility_table=typing.cast("FloatArray[TwoDimensions]", gas_compressibility_2d),
+        dew_point_pressures=typing.cast("FloatArray[TwoDimensions]", dew_point_pressure_2d),
         dtype=dtype,
         unit_system=unit_system,
     )
@@ -1353,16 +1353,16 @@ def build_water_data_from_pvtw(
 
     return PVTData(
         phase=FluidPhase.WATER,
-        pressures=typing.cast(FloatArray[OneDimension], pressures),
-        temperatures=typing.cast(FloatArray[OneDimension], temperatures),
-        salinities=typing.cast(FloatArray[OneDimension], salinities),
-        formation_volume_factor_table=typing.cast(FloatArray[ThreeDimensions], water_fvf_3d),
-        viscosity_table=typing.cast(FloatArray[ThreeDimensions], water_viscosity_3d),
-        density_table=typing.cast(FloatArray[ThreeDimensions], water_density_3d)
+        pressures=typing.cast("FloatArray[OneDimension]", pressures),
+        temperatures=typing.cast("FloatArray[OneDimension]", temperatures),
+        salinities=typing.cast("FloatArray[OneDimension]", salinities),
+        formation_volume_factor_table=typing.cast("FloatArray[ThreeDimensions]", water_fvf_3d),
+        viscosity_table=typing.cast("FloatArray[ThreeDimensions]", water_viscosity_3d),
+        density_table=typing.cast("FloatArray[ThreeDimensions]", water_density_3d)
         if water_density_3d is not None
         else None,
-        compressibility_table=typing.cast(FloatArray[ThreeDimensions], water_compressibility_3d),
-        gas_free_water_fvf_table=typing.cast(FloatArray[TwoDimensions], water_fvf_2d),
+        compressibility_table=typing.cast("FloatArray[ThreeDimensions]", water_compressibility_3d),
+        gas_free_water_fvf_table=typing.cast("FloatArray[TwoDimensions]", water_fvf_2d),
         dtype=dtype,
         unit_system=unit_system,
     )

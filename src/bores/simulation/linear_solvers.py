@@ -118,7 +118,7 @@ def _get_matrix_shape(A_csr: csr_array | csr_matrix) -> tuple[int, int]:
     shape = A_csr.shape
     if len(shape) != 2:
         raise ValidationError(f"Matrix must be two-dimensional, got shape {shape}.")
-    return typing.cast(tuple[int, int], shape)
+    return typing.cast("tuple[int, int]", shape)
 
 
 def _get_square_matrix_shape(A_csr: csr_array | csr_matrix) -> tuple[int, int]:

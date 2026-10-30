@@ -64,11 +64,11 @@ def compute_bessel_roots(r_ed: Number, n_max: int) -> NumberArray[OneDimension]:
 
     def root_func(beta: NumberArray[OneDimension]) -> NumberArray[OneDimension]:
         return typing.cast(
-            NumberArray[OneDimension], j1(beta * r_ed) * y1(beta) - j1(beta) * y1(beta * r_ed)
+            "NumberArray[OneDimension]", j1(beta * r_ed) * y1(beta) - j1(beta) * y1(beta * r_ed)
         )
 
     sample = typing.cast(
-        NumberArray[OneDimension], np.linspace(1e-9, 8 * n_max / r_ed, n_max * 400)
+        "NumberArray[OneDimension]", np.linspace(1e-9, 8 * n_max / r_ed, n_max * 400)
     )
     zero_crossings = np.array([])
     while len(zero_crossings) < n_max:
@@ -76,7 +76,7 @@ def compute_bessel_roots(r_ed: Number, n_max: int) -> NumberArray[OneDimension]:
         zero_crossings = np.where(np.diff(np.sign(root_func(sample))))[0]
     zero_crossings = zero_crossings[:n_max]
     roots = [root_scalar(root_func, x0=sample[zc]).root for zc in zero_crossings]  # type: ignore[arg-type]
-    return typing.cast(NumberArray[OneDimension], np.asarray(roots, dtype=np.float64))
+    return typing.cast("NumberArray[OneDimension]", np.asarray(roots, dtype=np.float64))
 
 
 def compute_bessel_series_coefficients(
@@ -105,9 +105,9 @@ def compute_bessel_series_coefficients(
     pd_coefficients = j1_beta_red**2 / (betas**2 * denominator)
     pd_prime_coefficients = -(j1_beta_red**2) / denominator
     return (
-        typing.cast(NumberArray[OneDimension], np.asarray(pd_coefficients, dtype=np.float64)),
+        typing.cast("NumberArray[OneDimension]", np.asarray(pd_coefficients, dtype=np.float64)),
         typing.cast(
-            NumberArray[OneDimension], np.asarray(pd_prime_coefficients, dtype=np.float64)
+            "NumberArray[OneDimension]", np.asarray(pd_prime_coefficients, dtype=np.float64)
         ),
     )
 
@@ -282,7 +282,7 @@ class AquiferInfluenceTable:
             is not valid.
         """
         return typing.cast(
-            Self | dict[int, Self],
+            "Self | dict[int, Self]",
             load_aquifer_influence_table(deck_file, table_number=table_number),
         )
 
@@ -898,7 +898,7 @@ class CarterTracyAquifer(BoundaryCondition):
             given but not found in it, or an aquifer cannot be built.
         """
         return typing.cast(
-            Self | dict[int, Self],
+            "Self | dict[int, Self]",
             load_carter_tracy_aquifer(
                 deck_file,
                 pvt=pvt,
@@ -921,11 +921,11 @@ def load_aquifer_influence_table_from_records(
     """
     return AquiferInfluenceTable(
         times=typing.cast(
-            NumberArray[OneDimension],
+            "NumberArray[OneDimension]",
             np.asarray([record["dimensionless_time"] for record in records], dtype=np.float64),
         ),
         pressures=typing.cast(
-            NumberArray[OneDimension],
+            "NumberArray[OneDimension]",
             np.asarray([record["dimensionless_pressure"] for record in records], dtype=np.float64),
         ),
     )

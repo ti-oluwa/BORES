@@ -759,12 +759,12 @@ def _resample_three_phase_relperm_table(
     oil_water_table = TwoPhaseRelPermTable(
         wetting_phase=oil_water_wetting,
         non_wetting_phase=oil_water_source.non_wetting_phase,
-        reference_saturation=typing.cast(NumberArray[OneDimension], oil_water_axis),
+        reference_saturation=typing.cast("NumberArray[OneDimension]", oil_water_axis),
         wetting_phase_relative_permeability=typing.cast(
-            NumberArray[OneDimension], oil_water_wetting_kr
+            "NumberArray[OneDimension]", oil_water_wetting_kr
         ),
         non_wetting_phase_relative_permeability=typing.cast(
-            NumberArray[OneDimension], oil_water_non_wetting_kr
+            "NumberArray[OneDimension]", oil_water_non_wetting_kr
         ),
         reference_phase=oil_water_reference,
         min_wetting_relperm=oil_water_source.min_wetting_relperm,
@@ -774,12 +774,12 @@ def _resample_three_phase_relperm_table(
     gas_oil_table = TwoPhaseRelPermTable(
         wetting_phase=gas_oil_wetting,
         non_wetting_phase=gas_oil_source.non_wetting_phase,
-        reference_saturation=typing.cast(NumberArray[OneDimension], gas_oil_axis),
+        reference_saturation=typing.cast("NumberArray[OneDimension]", gas_oil_axis),
         wetting_phase_relative_permeability=typing.cast(
-            NumberArray[OneDimension], gas_oil_wetting_kr
+            "NumberArray[OneDimension]", gas_oil_wetting_kr
         ),
         non_wetting_phase_relative_permeability=typing.cast(
-            NumberArray[OneDimension], gas_oil_non_wetting_kr
+            "NumberArray[OneDimension]", gas_oil_non_wetting_kr
         ),
         reference_phase=gas_oil_reference,
         min_wetting_relperm=gas_oil_source.min_wetting_relperm,
@@ -1014,13 +1014,13 @@ def as_three_phase_relperm_table(
         wetting_phase=oil_water_wetting_phase_resolved,
         non_wetting_phase=oil_water_non_wetting_phase,
         reference_saturation=typing.cast(
-            NumberArray[OneDimension], oil_water_reference_saturations
+            "NumberArray[OneDimension]", oil_water_reference_saturations
         ),
         wetting_phase_relative_permeability=typing.cast(
-            NumberArray[OneDimension], oil_water_wetting_phase_kr
+            "NumberArray[OneDimension]", oil_water_wetting_phase_kr
         ),
         non_wetting_phase_relative_permeability=typing.cast(
-            NumberArray[OneDimension], oil_water_non_wetting_phase_kr
+            "NumberArray[OneDimension]", oil_water_non_wetting_phase_kr
         ),
         reference_phase=oil_water_reference_phase,
         dtype=dtype,
@@ -1028,12 +1028,14 @@ def as_three_phase_relperm_table(
     gas_oil_table = TwoPhaseRelPermTable(
         wetting_phase=gas_oil_wetting_phase_resolved,
         non_wetting_phase=gas_oil_non_wetting_phase,
-        reference_saturation=typing.cast(NumberArray[OneDimension], gas_oil_reference_saturations),
+        reference_saturation=typing.cast(
+            "NumberArray[OneDimension]", gas_oil_reference_saturations
+        ),
         wetting_phase_relative_permeability=typing.cast(
-            NumberArray[OneDimension], gas_oil_wetting_phase_kr
+            "NumberArray[OneDimension]", gas_oil_wetting_phase_kr
         ),
         non_wetting_phase_relative_permeability=typing.cast(
-            NumberArray[OneDimension], gas_oil_non_wetting_phase_kr
+            "NumberArray[OneDimension]", gas_oil_non_wetting_phase_kr
         ),
         reference_phase=gas_oil_reference_phase,
         dtype=dtype,
@@ -1122,8 +1124,8 @@ def _resample_three_phase_capillary_pressure_table(
         oil_water_table=TwoPhaseCapillaryPressureTable(
             wetting_phase=oil_water_wetting,
             non_wetting_phase=oil_water_source.non_wetting_phase,
-            reference_saturation=typing.cast(NumberArray[OneDimension], oil_water_axis),
-            capillary_pressure=typing.cast(NumberArray[OneDimension], oil_water_values),
+            reference_saturation=typing.cast("NumberArray[OneDimension]", oil_water_axis),
+            capillary_pressure=typing.cast("NumberArray[OneDimension]", oil_water_values),
             reference_phase=oil_water_reference,
             dtype=dtype,
             unit_system=current_unit_system,
@@ -1131,8 +1133,8 @@ def _resample_three_phase_capillary_pressure_table(
         gas_oil_table=TwoPhaseCapillaryPressureTable(
             wetting_phase=gas_oil_wetting,
             non_wetting_phase=gas_oil_source.non_wetting_phase,
-            reference_saturation=typing.cast(NumberArray[OneDimension], gas_oil_axis),
-            capillary_pressure=typing.cast(NumberArray[OneDimension], gas_oil_values),
+            reference_saturation=typing.cast("NumberArray[OneDimension]", gas_oil_axis),
+            capillary_pressure=typing.cast("NumberArray[OneDimension]", gas_oil_values),
             reference_phase=gas_oil_reference,
             dtype=dtype,
             unit_system=current_unit_system,
@@ -1369,10 +1371,10 @@ def as_three_phase_capillary_pressure_table(
         wetting_phase=oil_water_wetting_phase_resolved,
         non_wetting_phase=oil_water_non_wetting_phase,
         reference_saturation=typing.cast(
-            NumberArray[OneDimension], oil_water_reference_saturations
+            "NumberArray[OneDimension]", oil_water_reference_saturations
         ),
         capillary_pressure=typing.cast(
-            NumberArray[OneDimension], oil_water_capillary_pressure_values
+            "NumberArray[OneDimension]", oil_water_capillary_pressure_values
         ),
         reference_phase=oil_water_reference_phase,
         dtype=dtype,
@@ -1381,9 +1383,11 @@ def as_three_phase_capillary_pressure_table(
     gas_oil_table = TwoPhaseCapillaryPressureTable(
         wetting_phase=gas_oil_wetting_phase_resolved,
         non_wetting_phase=gas_oil_non_wetting_phase,
-        reference_saturation=typing.cast(NumberArray[OneDimension], gas_oil_reference_saturations),
+        reference_saturation=typing.cast(
+            "NumberArray[OneDimension]", gas_oil_reference_saturations
+        ),
         capillary_pressure=typing.cast(
-            NumberArray[OneDimension], gas_oil_capillary_pressure_values
+            "NumberArray[OneDimension]", gas_oil_capillary_pressure_values
         ),
         reference_phase=gas_oil_reference_phase,
         dtype=dtype,

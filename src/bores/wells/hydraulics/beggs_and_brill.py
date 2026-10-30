@@ -793,9 +793,9 @@ def compute_perforation_pressures(
         connection_fluids=connection_fluids,
         is_injector=is_injector,
         hydrostatic_divisor=get_hydrostatic_divisor(model.unit_system),
-        pressures=typing.cast(NumberArray[OneDimension], pressures),
+        pressures=typing.cast("NumberArray[OneDimension]", pressures),
     )
-    return typing.cast(NumberArray[OneDimension], pressures)
+    return typing.cast("NumberArray[OneDimension]", pressures)
 
 
 @numba.njit(cache=True)

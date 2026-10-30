@@ -393,7 +393,7 @@ def scale(
     result = a * factor
     if isinstance(a, np.ndarray):
         result = result.astype(a.dtype, copy=False)  # type: ignore[attr-defined]
-    return typing.cast(NumberOrArray[NDimension], result)
+    return typing.cast("NumberOrArray[NDimension]", result)
 
 
 @typing.overload
@@ -431,7 +431,7 @@ def scale_and_offset(
     result = (a * factor) + offset
     if isinstance(a, np.ndarray):
         result = result.astype(a.dtype, copy=False)  # type: ignore[attr-defined]
-    return typing.cast(NumberOrArray[NDimension], result)
+    return typing.cast("NumberOrArray[NDimension]", result)
 
 
 def get_hydrostatic_gradient_factor(unit_system: UnitSystem) -> float:

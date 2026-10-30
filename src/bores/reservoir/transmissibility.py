@@ -205,7 +205,7 @@ def compute_connection_transmissibilities(
     nnc_transmissibilities: NumberArray[OneDimension] | None = None
     if grid.n_nnc > 0 and grid.nnc_transmissibilities is not None:
         nnc_transmissibilities = typing.cast(
-            NumberArray[OneDimension], grid.nnc_transmissibilities.astype(dtype, copy=True)
+            "NumberArray[OneDimension]", grid.nnc_transmissibilities.astype(dtype, copy=True)
         )
 
     # Apply `MULTFLT` to face-based connections

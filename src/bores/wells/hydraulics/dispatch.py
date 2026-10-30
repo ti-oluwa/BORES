@@ -127,7 +127,7 @@ def compute_perforation_pressures(
     compute = PERFORATION_PRESSURE_FUNCTIONS.get(wellbore.name)
     if compute is None:
         raise ValidationError(f"Unknown `WellBoreModel` name: {wellbore.name!r}")
-    return typing.cast(NumberArray[OneDimension], compute(model=wellbore.options, **kwargs))
+    return typing.cast("NumberArray[OneDimension]", compute(model=wellbore.options, **kwargs))
 
 
 def compute_tubing_head_pressure(
