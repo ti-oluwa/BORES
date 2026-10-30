@@ -216,20 +216,20 @@ TABDIMS = RecordKeyword[int | str](
         Field("nppvt", int, required=False, default=20),
         Field("ntfip", int, required=False, default=1),
         Field("nrpvt", int, required=False, default=20),
-        Field("max_rv_nodes", int, required=False, default=20),
-        Field("ntendp", int, required=False, default=1),
-        Field("num_eos_res", int, required=False, default=1),
-        Field("num_eos_surface", int, required=False, default=1),
+        Field("max_vaporized_oil_ratio_nodes", int, required=False, default=20),
+        Field("max_endpoint_depth_tables", int, required=False, default=1),
+        Field("num_reservoir_eos_regions", int, required=False, default=1),
+        Field("num_surface_eos_regions", int, required=False, default=1),
         Field("max_flux_regions", int, required=False, default=10),
         Field("max_thermal_regions", int, required=False, default=1),
-        Field("ntrocc", int, required=False),
-        Field("max_pressure_maintainance_regions", int, required=False, default=0),
+        Field("max_rock_compaction_regions", int, required=False),
+        Field("max_pressure_maintenance_regions", int, required=False, default=0),
         Field("max_kvalue_tables", int, required=False, default=0),
-        Field("ntalpha", int, required=False),
+        Field("max_alpha_tables", int, required=False),
         Field("asphaltene_aspkdam_max_rows", int, required=False, default=10),
         Field("asphaltene_asprewg_max_rows", int, required=False, default=10),
         Field("asphaltene_aspviso_max_rows", int, required=False, default=10),
-        Field("item20_not_used", str, required=False),
+        Field("unused_item_20", str, required=False),
         Field("asphaltene_asppw2d_max_columns", int, required=False, default=5),
         Field("asphaltene_asppw2d_max_rows", int, required=False, default=5),
         Field("asphaltene_aspwetf_max_rows", int, required=False, default=5),
@@ -252,8 +252,26 @@ Fields:
 - `nppvt`: max number of pressure nodes in any PVT table.
 - `ntfip`: max number of FIP regions (`FIPNUM`).
 - `nrpvt`: max number of Rs/Rv nodes in a live-oil / wet-gas table.
-
-Further items, read by position after the ones above and named as in OPM's keyword definition: `max_rv_nodes`, `ntendp`, `num_eos_res`, `num_eos_surface`, `max_flux_regions`, `max_thermal_regions`, `ntrocc`, `max_pressure_maintainance_regions`, `max_kvalue_tables`, `ntalpha`, `asphaltene_aspkdam_max_rows`, `asphaltene_asprewg_max_rows`, `asphaltene_aspviso_max_rows`, `item20_not_used`, `asphaltene_asppw2d_max_columns`, `asphaltene_asppw2d_max_rows`, `asphaltene_aspwetf_max_rows`, `num_kvalue_tables`.
+- `max_vaporized_oil_ratio_nodes`: max number of `Rv` nodes in a wet-gas table.
+- `max_endpoint_depth_tables`: max number of end-point scaling versus depth tables.
+- `num_reservoir_eos_regions`: number of equation-of-state regions for the reservoir
+  (compositional runs).
+- `num_surface_eos_regions`: number of equation-of-state regions for the surface (compositional
+  runs).
+- `max_flux_regions`: max number of flux regions (`FLUXNUM`).
+- `max_thermal_regions`: max number of thermal regions (`THERMNUM`).
+- `max_rock_compaction_regions`: max number of rock compaction regions.
+- `max_pressure_maintenance_regions`: max number of pressure maintenance regions.
+- `max_kvalue_tables`: max number of K-value tables.
+- `max_alpha_tables`: max number of `ALPHA` tables.
+- `asphaltene_aspkdam_max_rows`: max number of rows in an asphaltene damage (`ASPKDAM`) table.
+- `asphaltene_asprewg_max_rows`: max number of rows in an `ASPREWG` table.
+- `asphaltene_aspviso_max_rows`: max number of rows in an `ASPVISO` table.
+- `unused_item_20`: not used by the simulator; kept so the items after it keep their positions.
+- `asphaltene_asppw2d_max_columns`: max number of columns in an `ASPPW2D` table.
+- `asphaltene_asppw2d_max_rows`: max number of rows in an `ASPPW2D` table.
+- `asphaltene_aspwetf_max_rows`: max number of rows in an `ASPWETF` table.
+- `num_kvalue_tables`: number of K-value tables in use.
 """
 
 WELLDIMS = RecordKeyword[int](
@@ -263,16 +281,16 @@ WELLDIMS = RecordKeyword[int](
         Field("ncwmax", int, required=False, default=0),
         Field("ngmaxz", int, required=False, default=0),
         Field("nwgmax", int, required=False, default=0),
-        Field("max_stages", int, required=False, default=5),
-        Field("max_streams", int, required=False, default=10),
+        Field("max_separator_stages", int, required=False, default=5),
+        Field("max_surface_streams", int, required=False, default=10),
         Field("max_mixtures", int, required=False, default=5),
         Field("max_separators", int, required=False, default=4),
         Field("max_mixture_items", int, required=False, default=3),
         Field("max_completion_x", int, required=False, default=0),
-        Field("max_wellist_pr_well", int, required=False, default=1),
-        Field("max_dynamic_wellist", int, required=False, default=1),
+        Field("max_well_lists_per_well", int, required=False, default=1),
+        Field("max_dynamic_well_lists", int, required=False, default=1),
         Field("max_secondary_wells", int, required=False, default=10),
-        Field("max_gpp_rows", int, required=False, default=201),
+        Field("max_gpp_table_rows", int, required=False, default=201),
     ],
 )
 """
@@ -287,8 +305,19 @@ Fields:
 - `ncwmax`: maximum number of connections (completions) per well.
 - `ngmaxz`: maximum number of groups.
 - `nwgmax`: maximum number of wells in any one group.
-
-Further items, read by position after the ones above and named as in OPM's keyword definition: `max_stages`, `max_streams`, `max_mixtures`, `max_separators`, `max_mixture_items`, `max_completion_x`, `max_wellist_pr_well`, `max_dynamic_wellist`, `max_secondary_wells`, `max_gpp_rows`.
+- `max_separator_stages`: maximum number of stages in a surface separator system (default 5).
+- `max_surface_streams`: maximum number of surface streams (default 10).
+- `max_mixtures`: maximum number of stream mixtures (default 5).
+- `max_separators`: maximum number of separators (default 4).
+- `max_mixture_items`: maximum number of items in a mixture (default 3).
+- `max_completion_x`: completion-related dimension that the simulator reserves; not used here
+  (default 0).
+- `max_well_lists_per_well`: maximum number of well lists any one well can belong to (default
+  1).
+- `max_dynamic_well_lists`: maximum number of dynamic well lists (default 1).
+- `max_secondary_wells`: maximum number of secondary wells (default 10).
+- `max_gpp_table_rows`: maximum number of rows in a gas plant processing (`GPP`) table (default
+  201).
 """
 
 EQLDIMS = RecordKeyword[int](

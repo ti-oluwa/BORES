@@ -124,8 +124,8 @@ EQUIL = RepeatedRecordKeyword[float](
         Field("rsvd_table", int, required=False, default=0),
         Field("rvvd_table", int, required=False, default=0),
         Field("accuracy_flag", int, required=False, default=0),
-        Field("comp_init_type", int, required=False, default=1),
-        Field("comp_not_set_sat_pressure", int, required=False),
+        Field("compositional_init_type", int, required=False, default=1),
+        Field("compositional_not_set_saturation_pressure", int, required=False),
         Field("black_oil_init_hg", int, required=False, default=0),
     ],
 )
@@ -160,14 +160,18 @@ Fields:
 - `accuracy_flag`: initialization accuracy/option switch (e.g.
   selecting compositional-vs-black-oil equilibration nuances); `0` is
   the simulator default behaviour.
+- `compositional_init_type`: Eclipse 300 compositional runs only: how the initial composition is
+  set up (default 1). Not used by black-oil runs.
+- `compositional_not_set_saturation_pressure`: Eclipse 300 compositional runs only: how cells
+  with no saturation pressure set are treated; `None` if omitted. Not used by black-oil runs.
+- `black_oil_init_hg`: Eclipse 300 only: initialization option for the hydrocarbon gas phase of
+  a black-oil fluid (default 0).
  
 Note:
     The exact semantics of `accuracy_flag` (item 9) vary slightly
     between Eclipse 100 and Eclipse 300 / compositional runs; verify
     against your simulator's manual if this run uses anything beyond
     plain black-oil equilibration.
-
-Further items, read by position after the ones above and named as in OPM's keyword definition: `comp_init_type`, `comp_not_set_sat_pressure`, `black_oil_init_hg`.
 """
 
 RTEMP = TableKeyword(
@@ -395,8 +399,8 @@ AQUCT = RepeatedRecordKeyword[float](
         Field("influence_angle", np.float64, required=False, default=360.0),
         Field("pvt_table_number", int, required=False, default=1),
         Field("aquifer_influence_table_number", int, required=False, default=1),
-        Field("ini_salt", np.float64, required=False),
-        Field("temp_aquifer", np.float64, required=False),
+        Field("initial_salt_concentration", np.float64, required=False),
+        Field("aquifer_temperature", np.float64, required=False),
     ],
 )
 """
@@ -433,8 +437,9 @@ Fields:
   custom dimensionless pressure influence function. `1` selects the
   built-in infinite-acting Van Everdingen-Hurst behaviour, the default.
   `AQUTAB` tables are numbered from 2 in the order they appear.
-
-Further items, read by position after the ones above and named as in OPM's keyword definition: `ini_salt`, `temp_aquifer`.
+- `initial_salt_concentration`: initial salt concentration of the aquifer water, for brine
+  tracking; `None` if omitted.
+- `aquifer_temperature`: temperature of the aquifer water, for thermal runs; `None` if omitted.
 """
 
 AQUFETP = RepeatedRecordKeyword[float](
@@ -448,7 +453,7 @@ AQUFETP = RepeatedRecordKeyword[float](
         Field("productivity_index", np.float64),
         Field("pvt_table_number", int, required=False, default=1),
         Field("salt_concentration", np.float64, required=False, default=0.0),
-        Field("temp", np.float64, required=False),
+        Field("aquifer_temperature", np.float64, required=False),
     ],
 )
 """
@@ -475,8 +480,7 @@ Fields:
 - `pvt_table_number`: water PVT table number. `1` if omitted.
 - `salt_concentration`: initial salt concentration, for brine tracking.
   `0` if omitted.
-
-Further items, read by position after the ones above and named as in OPM's keyword definition: `temp`.
+- `aquifer_temperature`: temperature of the aquifer water, for thermal runs; `None` if omitted.
 """
 
 AQUANCON = RepeatedRecordKeyword[typing.Any](
@@ -539,9 +543,9 @@ AQUFLUX = RepeatedRecordKeyword[float](
     fields=[
         Field("aquifer_id", int),
         Field("flux", np.float64),
-        Field("sc_0", np.float64, required=False),
-        Field("temp", np.float64, required=False),
-        Field("pressure", np.float64, required=False),
+        Field("salt_concentration", np.float64, required=False),
+        Field("aquifer_temperature", np.float64, required=False),
+        Field("aquifer_pressure", np.float64, required=False),
     ],
 )
 """
@@ -561,8 +565,10 @@ Fields:
   `AQUANCON` to attach the aquifer to grid connections.
 - `flux`: constant influx per unit of connected face area: liquid surface
   volume per day per unit area (STB/day/ft² in FIELD units).
-
-Further items, read by position after the ones above and named as in OPM's keyword definition: `sc_0`, `temp`, `pressure`.
+- `salt_concentration`: salt concentration of the influx water, for brine tracking; `None` if
+  omitted.
+- `aquifer_temperature`: temperature of the influx water, for thermal runs; `None` if omitted.
+- `aquifer_pressure`: pressure of the aquifer; `None` if omitted.
 """
 
 RESTART = RestartKeyword()

@@ -205,11 +205,11 @@ WELSPECS = ScheduledRecordKeyword[str | float | bool](
             default="SEG",
             options={"SEG", "AVG"},
         ),
-        Field("fip_region", int, required=False, default=0),
-        Field("frontsim1", str, required=False),
-        Field("frontsim2", str, required=False),
+        Field("fluid_in_place_region", int, required=False, default=0),
+        Field("frontsim_item_1", str, required=False),
+        Field("frontsim_item_2", str, required=False),
         Field("well_model", uppercase, required=False, default="STD"),
-        Field("polymer_table", int, required=False, default=0),
+        Field("polymer_table_number", int, required=False, default=0),
     ],
 )
 """
@@ -236,8 +236,13 @@ Fields:
   `NO`, returned as a `bool`). `True` if omitted.
 - `pvt_table`: PVT region override (`0` = use cell's `PVTNUM`).
 - `density_calculation_method`: wellbore density calculation method (`SEG` or `AVG`).
-
-Further items, read by position after the ones above and named as in OPM's keyword definition: `fip_region`, `frontsim1`, `frontsim2`, `well_model`, `polymer_table`.
+- `fluid_in_place_region`: fluid-in-place region the well is reported against (`0` = the region
+  of its connection cells).
+- `frontsim_item_1`: reserved for FrontSim; not used here.
+- `frontsim_item_2`: reserved for FrontSim; not used here.
+- `well_model`: well model type; `STD` (the standard well model) if omitted.
+- `polymer_table_number`: polymer table number for the well (`0` = the table of its connection
+  cells).
 """
 
 COMPDAT = ScheduledRecordKeyword[str | float](
@@ -329,11 +334,11 @@ WELSEGS = HeaderedScheduledRecordKeyword(
             default="HO",
             options={"HO", "DF"},
         ),
-        Field("top_x", np.float64, required=False),
-        Field("top_y", np.float64, required=False),
-        Field("top_pipe_wall_area", np.float64, required=False),
-        Field("top_pipe_wall_volumetric_heat_capacity", np.float64, required=False),
-        Field("top_pipe_wall_thermal_conductivity", np.float64, required=False),
+        Field("top_segment_x", np.float64, required=False),
+        Field("top_segment_y", np.float64, required=False),
+        Field("top_segment_pipe_wall_area", np.float64, required=False),
+        Field("top_segment_pipe_wall_volumetric_heat_capacity", np.float64, required=False),
+        Field("top_segment_pipe_wall_thermal_conductivity", np.float64, required=False),
     ],
     detail_fields=[
         Field("first_segment", int),
@@ -381,6 +386,14 @@ Header fields:
 - `flow_model`: multiphase flow model in the segments: `HO`
   (homogeneous) or `DF` (drift flux). Parsed through but not yet consumed by
   `load_well_segments`.
+- `top_segment_x`: X coordinate of the first segment's node; `None` if omitted.
+- `top_segment_y`: Y coordinate of the first segment's node; `None` if omitted.
+- `top_segment_pipe_wall_area`: cross-sectional area of the first segment's pipe wall (thermal
+  runs); `None` if omitted.
+- `top_segment_pipe_wall_volumetric_heat_capacity`: volumetric heat capacity of the first
+  segment's pipe wall (thermal runs); `None` if omitted.
+- `top_segment_pipe_wall_thermal_conductivity`: thermal conductivity of the first segment's pipe
+  wall (thermal runs); `None` if omitted.
 
 Segment record fields:
 
@@ -400,8 +413,13 @@ Segment record fields:
   Eclipse computes it from `diameter`.
 - `volume`: wellbore volume of this segment; `None`
   means Eclipse computes it from the area and length.
-
-Further items, read by position after the ones above and named as in OPM's keyword definition: `top_x`, `top_y`, `top_pipe_wall_area`, `top_pipe_wall_volumetric_heat_capacity`, `top_pipe_wall_thermal_conductivity` (the header record).
+- `length_x` / `length_y`: extent of the segment in the X and Y directions; `None` if omitted.
+- `pipe_wall_area`: cross-sectional area of this segment's pipe wall (thermal runs); `None` if
+  omitted.
+- `pipe_wall_volumetric_heat_capacity`: volumetric heat capacity of this segment's pipe wall
+  (thermal runs); `None` if omitted.
+- `pipe_wall_thermal_conductivity`: thermal conductivity of this segment's pipe wall (thermal
+  runs); `None` if omitted.
 """
 
 COMPSEGS = HeaderedScheduledRecordKeyword(
@@ -416,10 +434,10 @@ COMPSEGS = HeaderedScheduledRecordKeyword(
         Field("branch", int, required=False, default=1),
         Field("start_length", np.float64, required=False, default=None),
         Field("end_length", np.float64, required=False, default=None),
-        Field("direction", str, required=False),
-        Field("end_ijk", int, required=False),
-        Field("center_depth", np.float64, required=False),
-        Field("thermal_length", np.float64, required=False),
+        Field("penetration_direction", str, required=False),
+        Field("end_cell_index", int, required=False),
+        Field("connection_center_depth", np.float64, required=False),
+        Field("thermal_contact_length", np.float64, required=False),
         Field("segment_number", int, required=False),
     ],
 )
@@ -446,8 +464,16 @@ Detail fields:
   connection starts/ends. `None` (`1*`) means Eclipse would derive it
   from the connection's own grid-block geometry; `load_well_segments`
   requires both explicitly instead of attempting that derivation.
-
-Further items, read by position after the ones above and named as in OPM's keyword definition: `direction`, `end_ijk`, `center_depth`, `thermal_length`, `segment_number` (the detail record).
+- `penetration_direction`: direction in which the well penetrates the connection's cell (`X`,
+  `Y` or `Z`); needed when `start_length` and `end_length` are defaulted; `None` if omitted.
+- `end_cell_index`: index, along `penetration_direction`, of the last cell a connection spanning
+  several cells penetrates; `None` if omitted.
+- `connection_center_depth`: depth of the centre of the connection; `None` means Eclipse derives
+  it.
+- `thermal_contact_length`: length of the connection over which it exchanges heat with its
+  segment (thermal runs); `None` if omitted.
+- `segment_number`: segment the connection is attached to, overriding the one found from the
+  lengths; `None` if omitted.
 """
 
 WCONPROD = ScheduledRecordKeyword[str | float](
@@ -573,8 +599,14 @@ Fields:
   (`0` = none assigned).
 - `vaporized_oil_concentration`: vaporized oil concentration (`Rv`) of the injected
   gas; `None` means Eclipse uses its default.
-
-Further items, read by position after the ones above and named as in OPM's keyword definition: `gas_steam_ratio`, `surface_oil_fraction`, `surface_water_fraction`, `surface_gas_fraction`, `oil_steam_ratio`.
+- `gas_steam_ratio`: gas/steam ratio of the injected stream (thermal runs). `0.0` if omitted.
+- `surface_oil_fraction`: fraction of oil, by surface volume, in the injected stream. `0.0` if
+  omitted.
+- `surface_water_fraction`: fraction of water, by surface volume, in the injected stream. `0.0`
+  if omitted.
+- `surface_gas_fraction`: fraction of gas, by surface volume, in the injected stream. `0.0` if
+  omitted.
+- `oil_steam_ratio`: oil/steam ratio of the injected stream (thermal runs). `0.0` if omitted.
 """
 
 WELOPEN = ScheduledRecordKeyword[str | int](
@@ -771,18 +803,18 @@ GCONPROD = ScheduledRecordKeyword[str | float](
         ),
         Field("apply_to_subordinates", yes_no, required=False, default=True),
         Field("guide_rate", np.float64, required=False),
-        Field("guide_rate_def", str, required=False),
-        Field("water_exceed_procedure", uppercase, required=False, default="NONE"),
-        Field("gas_exceed_procedure", uppercase, required=False, default="NONE"),
-        Field("liquid_exceed_procedure", uppercase, required=False, default="NONE"),
+        Field("guide_rate_definition", str, required=False),
+        Field("water_exceed_action", uppercase, required=False, default="NONE"),
+        Field("gas_exceed_action", uppercase, required=False, default="NONE"),
+        Field("liquid_exceed_action", uppercase, required=False, default="NONE"),
         Field("reservoir_fluid_target", np.float64, required=False),
-        Field("reservoir_volume_balance", np.float64, required=False),
+        Field("reservoir_volume_balance_fraction", np.float64, required=False),
         Field("wet_gas_target", np.float64, required=False),
         Field("calorific_target", np.float64, required=False),
         Field("surface_gas_fraction", np.float64, required=False),
-        Field("surface_wat_fraction", np.float64, required=False),
+        Field("surface_water_fraction", np.float64, required=False),
         Field("linear_combined_target", np.float64, required=False),
-        Field("lin_target_exceed_procedure", str, required=False),
+        Field("linear_combined_exceed_action", str, required=False),
     ],
 )
 """
@@ -800,8 +832,31 @@ Fields:
   `+CON`, `WELL`, `PLUG`, or `RATE`).
 - `apply_to_subordinates`: whether the targets also apply to the groups below
   this one (`YES` or `NO`, returned as a `bool`). `True` if omitted.
-
-Further items, read by position after the ones above and named as in OPM's keyword definition: `guide_rate`, `guide_rate_def`, `water_exceed_procedure`, `gas_exceed_procedure`, `liquid_exceed_procedure`, `reservoir_fluid_target`, `reservoir_volume_balance`, `wet_gas_target`, `calorific_target`, `surface_gas_fraction`, `surface_wat_fraction`, `linear_combined_target`, `lin_target_exceed_procedure`.
+- `guide_rate`: guide rate used to share the parent group's production target among its
+  subordinates; `None` if omitted.
+- `guide_rate_definition`: quantity the guide rate refers to (for example `OIL`, `WAT`, `GAS`,
+  `LIQ` or `RES`); `None` if omitted.
+- `water_exceed_action`: action when the group exceeds its water rate target, as for
+  `exceed_action`. `NONE` if omitted.
+- `gas_exceed_action`: action when the group exceeds its gas rate target, as for
+  `exceed_action`. `NONE` if omitted.
+- `liquid_exceed_action`: action when the group exceeds its liquid rate target, as for
+  `exceed_action`. `NONE` if omitted.
+- `reservoir_fluid_target`: reservoir fluid volume rate upper-limit target for the group; `None`
+  if omitted.
+- `reservoir_volume_balance_fraction`: fraction used to balance reservoir volume produced
+  against injected under `PRBL` control; `None` if omitted.
+- `wet_gas_target`: wet gas rate upper-limit target for the group; `None` if omitted.
+- `calorific_target`: calorific (energy) rate upper-limit target for the group; `None` if
+  omitted.
+- `surface_gas_fraction`: target fraction of gas, by surface volume, in the group's production;
+  `None` if omitted.
+- `surface_water_fraction`: target fraction of water, by surface volume, in the group's
+  production; `None` if omitted.
+- `linear_combined_target`: upper-limit target of the group's linearly combined rate (`LINCOM`);
+  `None` if omitted.
+- `linear_combined_exceed_action`: action when the linearly combined target is exceeded, as for
+  `exceed_action`; `None` if omitted.
 """
 
 GCONINJE = ScheduledRecordKeyword[str | float](
@@ -831,10 +886,10 @@ GCONINJE = ScheduledRecordKeyword[str | float](
         Field("voidage_replacement_fraction", np.float64, required=False, default=None),
         Field("respond_to_parent", yes_no, required=False, default=True),
         Field("guide_rate", np.float64, required=False, default=0.0),
-        Field("guide_rate_def", str, required=False),
-        Field("reinject_group", str, required=False),
-        Field("voidage_group", str, required=False),
-        Field("wetgas_target", np.float64, required=False),
+        Field("guide_rate_definition", str, required=False),
+        Field("reinjection_group", str, required=False),
+        Field("voidage_replacement_group", str, required=False),
+        Field("wet_gas_target", np.float64, required=False),
     ],
 )
 """
@@ -855,8 +910,17 @@ Fields:
   control; `None` if omitted.
 - `voidage_replacement_fraction`: fraction of the produced reservoir voidage replaced,
   used by `VREP` control; `None` if omitted.
-
-Further items, read by position after the ones above and named as in OPM's keyword definition: `respond_to_parent`, `guide_rate`, `guide_rate_def`, `reinject_group`, `voidage_group`, `wetgas_target`.
+- `respond_to_parent`: whether the group takes part in its parent group's guide-rate
+  distribution (`YES` or `NO`, returned as a `bool`). `True` if omitted.
+- `guide_rate`: guide rate used to share the parent group's injection target among its
+  subordinates. `0.0` if omitted.
+- `guide_rate_definition`: quantity the guide rate refers to (for example `RATE` or `RESV`);
+  `None` if omitted.
+- `reinjection_group`: name of the group whose produced fluid is reinjected, used by `REIN`
+  control; `None` if omitted.
+- `voidage_replacement_group`: name of the group whose voidage is replaced, used by `VREP`
+  control; `None` if omitted.
+- `wet_gas_target`: wet gas injection rate upper-limit target for the group; `None` if omitted.
 """
 
 WECON = ScheduledRecordKeyword[str | float | bool](
@@ -881,14 +945,14 @@ WECON = ScheduledRecordKeyword[str | float | bool](
             required=False,
             default=False,
         ),
-        Field("follow_on_well", uppercase, required=False, default="'"),
+        Field("follow_on_well", str, required=False),
         Field("limited_quantity", uppercase, required=False, default="RATE"),
         Field("second_max_water_cut", np.float64, required=False, default=0.0),
-        Field("workover_second_water_cut_limit", str, required=False),
+        Field("second_water_cut_workover_action", str, required=False),
         Field("max_gas_liquid_ratio", np.float64, required=False, default=0.0),
         Field("min_liquid_production_rate", np.float64, required=False),
-        Field("max_temp", np.float64, required=False),
-        Field("min_res_fluid_rate", np.float64, required=False),
+        Field("max_temperature", np.float64, required=False),
+        Field("min_reservoir_fluid_rate", np.float64, required=False),
     ],
 )
 """
@@ -912,8 +976,19 @@ Fields:
   `CON`, `+CON`, `WELL`, `PLUG`). `NONE` if omitted.
 - `end_run`: whether breaching this limit should end the
   simulation run (`YES` or `NO`).
-
-Further items, read by position after the ones above and named as in OPM's keyword definition: `follow_on_well`, `limited_quantity`, `second_max_water_cut`, `workover_second_water_cut_limit`, `max_gas_liquid_ratio`, `min_liquid_production_rate`, `max_temp`, `min_res_fluid_rate`.
+- `follow_on_well`: well that is opened when this one is closed by a limit; `None` if omitted.
+- `limited_quantity`: what the limits are applied to: the well's `RATE` or its potential
+  (`POTN`). `RATE` if omitted.
+- `second_max_water_cut`: second water cut limit, which triggers its own workover action; `0.0`
+  (no limit) if omitted.
+- `second_water_cut_workover_action`: action taken when the second water cut limit is breached
+  (`NONE`, `CON`, `+CON`, `WELL`, `PLUG`); `None` if omitted.
+- `max_gas_liquid_ratio`: maximum gas-liquid ratio before workover/shut-in; `0.0` (no limit) if
+  omitted.
+- `min_liquid_production_rate`: minimum economic liquid production rate; `None` means no limit.
+- `max_temperature`: maximum well temperature before workover/shut-in; `None` means no limit.
+- `min_reservoir_fluid_rate`: minimum economic reservoir fluid production rate; `None` means no
+  limit.
 """
 
 WTEST = ScheduledRecordKeyword[str | float](
@@ -1047,8 +1122,7 @@ Fields:
   (`NONE`, `CON`, `+CON`, `WELL`, `PLUG`, or `RATE`).
 - `end_run`: whether exceeding the limit terminates the
   simulation (`YES` or `NO`).
-
-Further items, read by position after the ones above and named as in OPM's keyword definition: `max_open_wells`.
+- `max_open_wells`: limit on the number of open wells in the group; `0` (no limit) if omitted.
 """
 
 WELPI = ScheduledRecordKeyword[str | float](
@@ -1137,8 +1211,8 @@ WCONHIST = ScheduledRecordKeyword[str | float](
         Field(name="alq", type=np.float64, required=False, default=None),
         Field(name="thp", type=np.float64, required=False, default=None),
         Field(name="bhp", type=np.float64, required=False, default=None),
-        Field("wgasrat_his", np.float64, required=False),
-        Field("nglrat_his", np.float64, required=False),
+        Field("wet_gas_rate", np.float64, required=False),
+        Field("natural_gas_liquid_rate", np.float64, required=False),
     ],
 )
 """
@@ -1162,8 +1236,8 @@ Fields:
 - `alq`: artificial lift quantity.
 - `thp`: observed tubing-head pressure.
 - `bhp`: observed bottom-hole pressure.
-
-Further items, read by position after the ones above and named as in OPM's keyword definition: `wgasrat_his`, `nglrat_his`.
+- `wet_gas_rate`: observed wet gas production rate.
+- `natural_gas_liquid_rate`: observed natural gas liquid production rate.
 """
 
 WCONINJH = ScheduledRecordKeyword[str | float](

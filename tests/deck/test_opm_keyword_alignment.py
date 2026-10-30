@@ -38,7 +38,7 @@ def test_dimension_defaults():
     assert read("EQLDIMS\n /\n", "EQLDIMS")["nttrvd"] == 1
     welldims = read("WELLDIMS\n /\n", "WELLDIMS")
     assert [welldims[name] for name in ("nwmaxz", "ncwmax", "ngmaxz", "nwgmax")] == [0, 0, 0, 0]
-    assert welldims["max_stages"] == 5 and welldims["max_gpp_rows"] == 201
+    assert welldims["max_separator_stages"] == 5 and welldims["max_gpp_table_rows"] == 201
 
 
 def test_defaults_of_items_that_used_to_be_required():
@@ -57,26 +57,26 @@ def test_defaults_of_items_that_used_to_be_required():
 
 def test_tabdims_items_after_the_sixth_are_read():
     record = read("TABDIMS\n 1 1 20 20 1 20 30 7 /\n", "TABDIMS")
-    assert record["max_rv_nodes"] == 30
-    assert record["ntendp"] == 7
+    assert record["max_vaporized_oil_ratio_nodes"] == 30
+    assert record["max_endpoint_depth_tables"] == 7
 
 
 def test_welldims_items_after_the_fourth_are_read():
     record = read("WELLDIMS\n 10 20 3 5 1 2 3 4 5 6 7 8 9 10 /\n", "WELLDIMS")
     assert record["nwgmax"] == 5
-    assert record["max_stages"] == 1
-    assert record["max_gpp_rows"] == 10
+    assert record["max_separator_stages"] == 1
+    assert record["max_gpp_table_rows"] == 10
 
 
 def test_well_keywords_read_their_later_items():
     welspecs = read(
         "WELSPECS\n 'W1' 'G' 1 1 1* OIL 0 STD SHUT YES 0 SEG 2 1* 1* STD /\n", "WELSPECS"
     )[0]
-    assert welspecs["fip_region"] == 2
+    assert welspecs["fluid_in_place_region"] == 2
     assert welspecs["well_model"] == "STD"
     wconhist = read("WCONHIST\n 'W1' OPEN ORAT 1000 0 0 1* 0 0 0 7 8 /\n", "WCONHIST")[0]
-    assert wconhist["wgasrat_his"] == pytest.approx(7.0)
-    assert wconhist["nglrat_his"] == pytest.approx(8.0)
+    assert wconhist["wet_gas_rate"] == pytest.approx(7.0)
+    assert wconhist["natural_gas_liquid_rate"] == pytest.approx(8.0)
 
 
 def test_unit_dimensioned_defaults_are_not_filled_in_with_opms_metric_values():

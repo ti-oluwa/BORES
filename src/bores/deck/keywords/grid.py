@@ -729,16 +729,16 @@ NNC = RepeatedRecordKeyword[int | float | str](
         Field("j2", int),
         Field("k2", int),
         Field("transmissibility", np.float64),
-        Field("ist1", int, required=False, default=0),
-        Field("ist2", int, required=False, default=0),
-        Field("pressure_table1", int, required=False, default=0),
-        Field("pressure_table2", int, required=False, default=0),
-        Field("ve_face1", str, required=False),
-        Field("ve_face2", str, required=False),
+        Field("first_cell_saturation_table", int, required=False, default=0),
+        Field("second_cell_saturation_table", int, required=False, default=0),
+        Field("first_cell_pressure_table", int, required=False, default=0),
+        Field("second_cell_pressure_table", int, required=False, default=0),
+        Field("first_cell_vertical_equilibrium_face", str, required=False),
+        Field("second_cell_vertical_equilibrium_face", str, required=False),
         Field("diffusivity", np.float64, required=False, default=0.0),
-        Field("sim_dependent3", np.float64, required=False),
-        Field("vdflow_area", np.float64, required=False),
-        Field("vdflow_perm", np.float64, required=False),
+        Field("simulator_dependent_item", np.float64, required=False),
+        Field("velocity_dependent_flow_area", np.float64, required=False),
+        Field("velocity_dependent_flow_permeability", np.float64, required=False),
     ],
 )
 """
@@ -752,10 +752,25 @@ Fields:
 - `i2` / `j2` / `k2`: 1-based IJK index of the second cell of the connection.
 - `transmissibility`: transmissibility of the connection, in the grid's
     declared unit system.
-
-Further items, read by position after the ones above and named as in OPM's keyword definition: 
-`ist1`, `ist2`, `pressure_table1`, `pressure_table2`, `ve_face1`, `ve_face2`, `diffusivity`, 
-`sim_dependent3`, `vdflow_area`, `vdflow_perm`.
+- `first_cell_saturation_table`: saturation table number used on the first cell's side of the
+  connection; the cell's own table if omitted.
+- `second_cell_saturation_table`: saturation table number used on the second cell's side of the
+  connection; the cell's own table if omitted.
+- `first_cell_pressure_table`: pressure table number used on the first cell's side of the
+  connection; the cell's own table if omitted.
+- `second_cell_pressure_table`: pressure table number used on the second cell's side of the
+  connection; the cell's own table if omitted.
+- `first_cell_vertical_equilibrium_face`: vertical-equilibrium face of the first cell that the
+  connection joins; `None` if omitted.
+- `second_cell_vertical_equilibrium_face`: vertical-equilibrium face of the second cell that the
+  connection joins; `None` if omitted.
+- `diffusivity`: diffusivity of the connection, for diffusion between the two cells; `None` if
+  omitted.
+- `simulator_dependent_item`: simulator-dependent item; read for its position only and not used.
+- `velocity_dependent_flow_area`: flow area of the connection for velocity dependent (non-Darcy)
+  flow; `None` if omitted.
+- `velocity_dependent_flow_permeability`: permeability of the connection for velocity dependent
+  (non-Darcy) flow; `None` if omitted.
 """
 
 PORV = ArrayKeyword("PORV", dtype=np.float64, default_value=0.0)
