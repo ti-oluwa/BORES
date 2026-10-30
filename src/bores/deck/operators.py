@@ -18,7 +18,7 @@ import numpy as np
 
 from bores.datastructures import GridDimensions
 from bores.deck.core import Deck, first_segment, report, split_segments, tokenize
-from bores.types import FloatArray, OneDimension, ThreeDimensions
+from bores.types import FloatArray, Integer, Number, OneDimension, ThreeDimensions
 
 __all__ = [
     "OPERATOR_CONTROL_KEYWORDS",
@@ -59,7 +59,7 @@ class Operation(typing.NamedTuple):
     target: str
     """Upper-cased name of the keyword array being modified."""
 
-    value: float | None
+    value: Number | None
     """
     Scalar operand for `EQUALS` / `ADD` / `MULTIPLY` / `MAXVALUE` /
     `MINVALUE`; `None` for `COPY`.
@@ -68,7 +68,7 @@ class Operation(typing.NamedTuple):
     source: str | None
     """Upper-cased source keyword name for `COPY`; `None` otherwise."""
 
-    box: tuple[int, int, int, int, int, int]
+    box: tuple[Integer, Integer, Integer, Integer, Integer, Integer]
     """**0-based** inclusive `(i1, i2, j1, j2, k1, k2)` sub-grid box."""
 
     order: tuple[int, int]
@@ -81,7 +81,7 @@ class Operation(typing.NamedTuple):
     multiple operation lines within the same operator block.
     """
 
-    source_default: float | None = None
+    source_default: Number | None = None
     """
     For `COPY`: the value cells of the source array have before anything is written to them (the
     source keyword's own default, e.g. `1.0` for `NTG`). `None` when the source is not a known
@@ -92,7 +92,7 @@ class Operation(typing.NamedTuple):
     """For `COPY`: the short-form `column_shape` of the source array keyword, if it has one."""
 
 
-ArrayInfo = typing.Mapping[str, tuple[float, tuple[str, ...] | None]]
+ArrayInfo = typing.Mapping[str, tuple[Number, tuple[str, ...] | None]]
 """
 What the operator resolver needs to know about array keywords, by name: `(default_value,
 column_shape)`. Built by `bores.deck.file.DeckFile` from its registry.
@@ -105,14 +105,14 @@ def get_default_box(dims: GridDimensions) -> tuple[int, int, int, int, int, int]
 
 
 def clamp_box(
-    i1: int,
-    i2: int,
-    j1: int,
-    j2: int,
-    k1: int,
-    k2: int,
+    i1: Integer,
+    i2: Integer,
+    j1: Integer,
+    j2: Integer,
+    k1: Integer,
+    k2: Integer,
     dims: GridDimensions,
-) -> tuple[int, int, int, int, int, int]:
+) -> tuple[Integer, Integer, Integer, Integer, Integer, Integer]:
     """Clamp a raw (possibly out-of-bounds) box to grid extents and sort each pair."""
     i1, i2 = sorted((max(0, min(i1, dims.nx - 1)), max(0, min(i2, dims.nx - 1))))
     j1, j2 = sorted((max(0, min(j1, dims.ny - 1)), max(0, min(j2, dims.ny - 1))))
@@ -122,12 +122,12 @@ def clamp_box(
 
 def parse_box(
     tokens: typing.Sequence[str],
-    fallback: tuple[int, int, int, int, int, int],
+    fallback: tuple[Integer, Integer, Integer, Integer, Integer, Integer],
     dims: GridDimensions,
     *,
     label: str,
     strict: bool,
-) -> tuple[int, int, int, int, int, int] | None:
+) -> tuple[Integer, Integer, Integer, Integer, Integer, Integer] | None:
     """
     Turn up to six 1-based box tokens (`I1 I2 J1 J2 K1 K2`) into a 0-based inclusive box.
 
@@ -145,7 +145,7 @@ def parse_box(
     :returns: The box, or `None` if a bound is not an integer (reported first).
     """
     padded = [*tokens[:6], *["1*"] * (6 - len(tokens[:6]))]
-    bounds: list[int] = []
+    bounds: list[Integer] = []
     for token, default in zip(padded, fallback, strict=True):
         if token == "1*":
             bounds.append(default)
@@ -255,7 +255,7 @@ def warn_box_ignored(strict: bool) -> None:
 def parse_operator_records(
     body: str,
     op: str,
-    box: tuple[int, int, int, int, int, int],
+    box: tuple[Integer, Integer, Integer, Integer, Integer, Integer],
     dims: GridDimensions,
     *,
     strict: bool = False,
@@ -352,7 +352,7 @@ def parse_operator_records(
 
 def get_box_view(
     array: FloatArray[OneDimension],
-    box: tuple[int, int, int, int, int, int],
+    box: tuple[Integer, Integer, Integer, Integer, Integer, Integer],
     dims: GridDimensions,
 ) -> FloatArray[ThreeDimensions]:
     """

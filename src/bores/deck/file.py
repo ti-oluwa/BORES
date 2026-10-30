@@ -40,6 +40,7 @@ from bores.deck.keywords.grid import (
     NEWTRAN,
     NNC,
     NTG,
+    OLDTRAN,
     PERMX,
     PERMY,
     PERMZ,
@@ -97,6 +98,7 @@ from bores.deck.keywords.props import (
 from bores.deck.keywords.regions import EQLNUM, FIPNUM, IMBNUM, PVTNUM, ROCKNUM, SATNUM
 from bores.deck.keywords.runspec import (
     DISGAS,
+    DISGASW,
     ENDSCALE,
     EQLDIMS,
     EQLOPTS,
@@ -227,6 +229,7 @@ from bores.deck.keywords.summary import (
     RPTRST,
     RPTSCHED,
     RPTSOL,
+    RUNSUM,
     RWIP,
     WBHP,
     WGIR,
@@ -247,7 +250,7 @@ from bores.deck.keywords.summary import (
     WWPT,
 )
 from bores.deck.operators import Operation, resolve_operations
-from bores.types import TextOrPath, UnitSystem
+from bores.types import Number, TextOrPath, UnitSystem
 
 __all__ = ["DEFAULT_KEYWORDS", "DataFile", "DeckFile"]
 
@@ -279,6 +282,7 @@ DEFAULT_KEYWORDS = frozenset({
     VFPIDIMS,
     VFPPDIMS,
     DISGAS,
+    DISGASW,
     EQLDIMS,
     FIELD,
     GAS,
@@ -300,6 +304,7 @@ DEFAULT_KEYWORDS = frozenset({
     GRIDFILE,
     MINPV,
     NEWTRAN,
+    OLDTRAN,
     ACTNUM,
     COORD,
     DIMENS,
@@ -434,6 +439,7 @@ DEFAULT_KEYWORDS = frozenset({
     WDFAC,
     # SUMMARY ###
     MLINEARS,
+    RUNSUM,
     NEWTON,
     RPTPROPS,
     RPTSOL,
@@ -782,7 +788,7 @@ class DeckFile:
             )
         return declared[0][1]
 
-    def _array_info(self) -> dict[str, tuple[float, tuple[str, ...] | None]]:
+    def _array_info(self) -> dict[str, tuple[Number, tuple[str, ...] | None]]:
         """What a `COPY` needs to know about each registered array keyword to read it as a source."""
         return {
             name: (
@@ -867,6 +873,11 @@ class DeckFile:
             self._resolve_operations()
             self._cache.clear()
 
+    def _location_suffix(self, name: str) -> str:
+        """Where `name` is in the deck, as ` (line 12)` for an error message, or empty."""
+        location = self._deck.describe_location(name)
+        return f" ({location})" if location else ""
+
     def has(self, k: str | Keyword[typing.Any], /) -> bool:
         """
         Return whether `k` occurs anywhere in the deck. Either as an
@@ -919,7 +930,9 @@ class DeckFile:
                     schedule_times=self._schedule_times,
                 )
             except (ValueError, TypeError) as exc:
-                raise DeckParseError(f"Could not parse keyword `{k.name}`'s value: {exc}") from exc
+                raise DeckParseError(
+                    f"Could not parse keyword `{k.name}`{self._location_suffix(k.name)}: {exc}"
+                ) from exc
 
         key = k.upper()
         if key not in self._registry or not self.has(key):
@@ -937,7 +950,9 @@ class DeckFile:
                 schedule_times=self._schedule_times,
             )
         except (ValueError, TypeError) as exc:
-            raise DeckParseError(f"Could not parse keyword `{key}`: {exc}") from exc
+            raise DeckParseError(
+                f"Could not parse keyword `{key}`{self._location_suffix(key)}: {exc}"
+            ) from exc
 
         if use_cache:
             if isinstance(value, np.ndarray):

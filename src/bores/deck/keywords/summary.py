@@ -65,6 +65,7 @@ from bores.datastructures import GridDimensions
 from bores.deck.core import Deck, DeckParseError, first_segment, tokenize
 from bores.deck.keywords.base import (
     Field,
+    FlagKeyword,
     Keyword,
     RepeatedRecordKeyword,
     TimeUnit,
@@ -109,6 +110,7 @@ __all__ = [
     "RPTRST",
     "RPTSCHED",
     "RPTSOL",
+    "RUNSUM",
     "RWIP",
     "WBHP",
     "WGIR",
@@ -532,4 +534,14 @@ MLINEARS = SummaryVectorKeyword("MLINEARS")
 """
 `MLINEARS` - linear solver iterations per Newton iteration, for each time step. Takes no object
 list (whole run).
+"""
+
+
+RUNSUM = FlagKeyword("RUNSUM")
+"""
+`RUNSUM` - request a tabular run summary (one row per report step with the main field
+and well quantities) in the simulator's print file.
+
+Bare/nullary keyword (no data section). `parse` returns `True` if present in the deck, `False`
+otherwise. It only affects printed output, not the simulation itself.
 """

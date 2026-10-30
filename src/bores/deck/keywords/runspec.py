@@ -21,6 +21,7 @@ from bores.deck.operators import Operation
 
 __all__ = [
     "DISGAS",
+    "DISGASW",
     "ENDSCALE",
     "EQLDIMS",
     "EQLOPTS",
@@ -82,6 +83,14 @@ DISGAS = FlagKeyword("DISGAS")
 
 Requires `OIL` and `GAS` to also be active. Live-oil PVT data
 must be supplied via `PVTO` (or `PVCO`) in the PROPS section.
+"""
+
+DISGASW = FlagKeyword("DISGASW")
+"""
+`DISGASW` - enable dissolved-gas-in-water modelling (gas solubility in the aqueous phase).
+
+Requires `WATER` and `GAS` to also be active. Bare/nullary keyword (no data section). `parse`
+returns `True` if present in the deck, `False` otherwise.
 """
 
 VAPOIL = FlagKeyword("VAPOIL")

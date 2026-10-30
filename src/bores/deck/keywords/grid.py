@@ -51,6 +51,7 @@ __all__ = [
     "NEWTRAN",
     "NNC",
     "NTG",
+    "OLDTRAN",
     "PERMX",
     "PERMY",
     "PERMZ",
@@ -392,6 +393,15 @@ NEWTRAN = FlagKeyword("NEWTRAN")
 """
 `NEWTRAN` - calculate transmissibilities with the newer method rather than the older one
 (`OLDTRAN`).
+
+Bare/nullary keyword (no data section). `parse` returns `True` if present in the deck, `False`
+otherwise.
+"""
+
+OLDTRAN = FlagKeyword("OLDTRAN")
+"""
+`OLDTRAN` - calculate transmissibilities with the older, block-centred method rather than the
+newer one (`NEWTRAN`).
 
 Bare/nullary keyword (no data section). `parse` returns `True` if present in the deck, `False`
 otherwise.

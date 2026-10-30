@@ -2384,6 +2384,11 @@ class Grid:
                 )
                 for key, value in metadata.items()
             }
+            if map_axes := metadata.get("map_axes", None):
+                assert isinstance(map_axes, MapAxes), (
+                    "`map_axes` in metadata must be a `MapAxes` object."
+                )
+                metadata["map_axes"] = map_axes.convert(target, table=table)  # type: ignore[attr-defined]
 
         return attrs.evolve(
             self,

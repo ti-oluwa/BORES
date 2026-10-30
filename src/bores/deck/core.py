@@ -650,6 +650,13 @@ class Record(typing.NamedTuple):
     keyword name itself for a bare/nullary keyword).
     """
 
+    line: int = 0
+    """
+    One-based line of the keyword name in the deck text. When the deck pulls in other files with
+    `INCLUDE`, this counts lines in the combined text, with each included file placed where its
+    `INCLUDE` was. `0` when unknown.
+    """
+
 
 # A keyword name is a bare token of letters, digits and underscores starting
 # with a letter, 1-8 characters (Eclipse's own limit), optionally ending in `-`
@@ -659,7 +666,7 @@ class Record(typing.NamedTuple):
 # The underscore is intentional because some simulator extensions use keywords
 # like `COORD_V`.
 KEYWORD_LINE_RE = re.compile(
-    r"^[ \t]*(?P<keyword>[A-Z][A-Z0-9_]{0,7}-?)[ \t]*\r?$",
+    r"^[ \t]*(?P<keyword>[A-Z][A-Z0-9_]{0,7}-?)[ \t]*(?:=+[ \t]*)?\r?$",
     re.MULTILINE | re.IGNORECASE,
 )
 
@@ -764,9 +771,13 @@ class Deck:
         records: list[Record] = []
         keyword_records: dict[str, list[Record]] = {}
 
+        counted_to = 0
+        line = 1
         for idx, match in enumerate(keyword_lines):
             keyword = match.group("keyword").upper()
             body_start = match.end()
+            line += text.count("\n", counted_to, match.start())
+            counted_to = match.start()
 
             # The next keyword line (if any) bounds how far this keyword's body
             # may extend, even if no '/' is found before it.
@@ -783,6 +794,7 @@ class Deck:
                         keyword=keyword,
                         body=text[body_start:next_keyword_start],
                         start=match.start(),
+                        line=line,
                         end=next_keyword_start,
                     )
                 else:
@@ -815,6 +827,7 @@ class Deck:
                         keyword=keyword,
                         body="",
                         start=match.start(),
+                        line=line,
                         end=body_start,
                     )
             else:
@@ -868,6 +881,7 @@ class Deck:
                     keyword=keyword,
                     body=body,
                     start=match.start(),
+                    line=line,
                     end=next_keyword_start,
                 )
 
@@ -883,6 +897,24 @@ class Deck:
             records.append(record)
             keyword_records.setdefault(keyword, []).append(record)
         return ScanResult(records=records, keyword_records=keyword_records)
+
+    def describe_location(self, keyword: str, *, limit: int = 5) -> str:
+        """
+        Say where `keyword` is in the deck, for use in error messages.
+
+        :param keyword: Keyword name.
+        :param limit: Most line numbers to list before summarising the rest.
+        :returns: `"line 155"` for one occurrence, `"lines 155, 340"` for several, or an empty
+            string if the keyword is absent or its lines are unknown.
+        """
+        lines = [record.line for record in self.get_records_for(keyword) if record.line > 0]
+        if not lines:
+            return ""
+        if len(lines) == 1:
+            return f"line {lines[0]}"
+        shown = ", ".join(str(line) for line in lines[:limit])
+        extra = f" and {len(lines) - limit} more" if len(lines) > limit else ""
+        return f"lines {shown}{extra}"
 
     def get_records_for(self, keyword: str) -> list[Record]:
         """Return every record for `keyword`, in file order."""
