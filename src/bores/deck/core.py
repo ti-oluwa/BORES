@@ -666,10 +666,9 @@ class Record(typing.NamedTuple):
 # The underscore is intentional because some simulator extensions use keywords
 # like `COORD_V`.
 KEYWORD_LINE_RE = re.compile(
-    r"^[ \t]*(?P<keyword>[A-Z][A-Z0-9_]{0,7}-?)[ \t]*(?:=+[ \t]*)?\r?$",
+    r"^[ \t]*(?P<keyword>[A-Z][A-Z0-9_]{0,7}-?)[ \t]*(?:[=*#~_+:.|<>^!%&@]+[ \t]*)?\r?$",
     re.MULTILINE | re.IGNORECASE,
 )
-
 
 # Keywords whose data is free text with no `/` terminator, i.e, the data simply
 # runs until the next keyword line. Without this exception, `_scan`'s
