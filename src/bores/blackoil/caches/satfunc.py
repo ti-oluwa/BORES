@@ -69,11 +69,13 @@ class SatFuncCache(typing.NamedTuple):
     dkrg_dsg: CellArray
     """Derivative of gas relative permeability w.r.t. gas saturation, dkrg/dsg."""
 
-    # Capillary pressures: Pcow = Po - Pw, Pcgo = Pg - Po
+    # Capillary pressures: Pcow = Po - Pw, Pcgo = Pg - Po, Pcgw = Pg - Pw
     oil_water_capillary_pressure: CellArray
     """Oil-water capillary pressure, Pcow = Po - Pw."""
     gas_oil_capillary_pressure: CellArray
     """Gas-oil capillary pressure, Pcgo = Pg - Po."""
+    gas_water_capillary_pressure: CellArray
+    """Gas-water capillary pressure, Pcgw = Pg - Pw, for a model with no oil. Zero otherwise."""
 
     # Capillary pressure derivatives
     dpcow_dsw: CellArray
@@ -84,6 +86,8 @@ class SatFuncCache(typing.NamedTuple):
     """Derivative of gas-oil capillary pressure w.r.t. oil saturation, dPcgo/dso."""
     dpcgo_dsg: CellArray
     """Derivative of gas-oil capillary pressure w.r.t. gas saturation, dPcgo/dsg."""
+    dpcgw_dsg: CellArray
+    """Derivative of gas-water capillary pressure w.r.t. gas saturation, dPcgw/dsg."""
 
     saturation_region: IntCellArray
     """The 1-based SATNUM each cell was evaluated against."""
@@ -96,10 +100,12 @@ CACHE_NAN_FIELDS: tuple[str, ...] = tuple(
 CAPILLARY_PRESSURE_FIELDS: tuple[str, ...] = (
     "oil_water_capillary_pressure",
     "gas_oil_capillary_pressure",
+    "gas_water_capillary_pressure",
     "dpcow_dsw",
     "dpcow_dso",
     "dpcgo_dso",
     "dpcgo_dsg",
+    "dpcgw_dsg",
 )
 
 
@@ -283,9 +289,11 @@ def compute_satfunc_cache(
             )
             cache.oil_water_capillary_pressure[mask] = capillary_pressure["oil_water"]
             cache.gas_oil_capillary_pressure[mask] = capillary_pressure["gas_oil"]
+            cache.gas_water_capillary_pressure[mask] = capillary_pressure["gas_water"]
             cache.dpcow_dsw[mask] = capillary_pressure_derivatives["dpcow_dsw"]
             cache.dpcow_dso[mask] = capillary_pressure_derivatives["dpcow_dso"]
             cache.dpcgo_dso[mask] = capillary_pressure_derivatives["dpcgo_dso"]
             cache.dpcgo_dsg[mask] = capillary_pressure_derivatives["dpcgo_dsg"]
+            cache.dpcgw_dsg[mask] = capillary_pressure_derivatives["dpcgw_dsg"]
 
     return cache

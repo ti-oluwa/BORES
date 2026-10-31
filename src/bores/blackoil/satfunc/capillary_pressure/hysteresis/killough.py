@@ -271,15 +271,19 @@ class KilloughCapillaryPressureTable(HysteresisCapillaryPressureTable):
             result = result.reshape(shape)
             return result.item() if is_scalar else result
 
+        zero_pressure = finish(array=np.zeros(size, dtype=np.asarray(oil_water).dtype))
         pressures = CapillaryPressures(
-            oil_water=finish(array=oil_water), gas_oil=finish(array=gas_oil)
+            oil_water=finish(array=oil_water),
+            gas_oil=finish(array=gas_oil),
+            gas_water=zero_pressure,
         )
         if not with_derivatives:
             return pressures, None
-        zero = finish(array=np.zeros(size, dtype=np.asarray(oil_water).dtype))
+        zero = zero_pressure
         return pressures, CapillaryPressureDerivatives(
             dpcow_dsw=finish(array=oil_water_slope),
             dpcow_dso=zero,
             dpcgo_dsg=finish(array=gas_oil_slope),
             dpcgo_dso=zero,
+            dpcgw_dsg=zero,
         )

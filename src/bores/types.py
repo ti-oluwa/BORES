@@ -530,6 +530,7 @@ class CapillaryPressures(TypedDict):
 
     oil_water: NumberOrArray[AnyDimension]  # Pcow = Po - Pw
     gas_oil: NumberOrArray[AnyDimension]  # Pcgo = Pg - Po
+    gas_water: NumberOrArray[AnyDimension]  # Pcgw = Pg - Pw, a model with no oil
 
 
 class CapillaryPressureDerivatives(TypedDict):
@@ -539,6 +540,7 @@ class CapillaryPressureDerivatives(TypedDict):
     dpcow_dso: NumberOrArray[AnyDimension]
     dpcgo_dsg: NumberOrArray[AnyDimension]
     dpcgo_dso: NumberOrArray[AnyDimension]
+    dpcgw_dsg: NumberOrArray[AnyDimension]
 
 
 class Wettability(enum.Enum):

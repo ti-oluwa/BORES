@@ -571,6 +571,19 @@ def get_floating_dtype(value: NumberOrArray[NDimension]) -> np.dtype:
     return dtype if np.issubdtype(dtype, np.floating) else np.dtype(np.float64)
 
 
+def zeros_like_value(value: NumberOrArray[NDimension]) -> NumberOrArray[NDimension]:
+    """
+    Zero with the shape and floating dtype of `value`.
+
+    :param value: A scalar or an array.
+    :returns: A scalar zero for a scalar `value`, otherwise an array of zeros.
+    """
+    dtype = get_floating_dtype(value)
+    if np.isscalar(value):
+        return dtype.type(0)  # type: ignore[return-value]
+    return np.zeros_like(value, dtype=dtype)  # type: ignore[return-value]
+
+
 @numba.njit(cache=True)
 def compute_killough_scanning_curve_array(
     saturation: NumberOrArray[NDimension],

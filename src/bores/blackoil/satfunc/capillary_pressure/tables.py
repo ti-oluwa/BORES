@@ -9,7 +9,11 @@ import numpy.typing as npt
 from scipy.interpolate import PchipInterpolator
 from typing_extensions import Self
 
-from bores.blackoil.satfunc.utils import build_pchip_interpolant, validate_strictly_increasing
+from bores.blackoil.satfunc.utils import (
+    build_pchip_interpolant,
+    validate_strictly_increasing,
+    zeros_like_value,
+)
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.precision import get_dtype
@@ -528,8 +532,13 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
                 return CapillaryPressures(
                     oil_water=dtype.type(np.asarray(pcow).item()),  # type: ignore
                     gas_oil=dtype.type(0),  # type: ignore
+                    gas_water=dtype.type(0),  # type: ignore
                 )
-            return CapillaryPressures(oil_water=pcow, gas_oil=zeros)  # type: ignore[typeddict-item]
+            return CapillaryPressures(
+                oil_water=pcow,
+                gas_oil=zeros,
+                gas_water=zeros.copy(),  # type: ignore[typeddict-item]
+            )
 
         if phases == {FluidPhase.OIL, FluidPhase.GAS}:
             if self.wetting_phase == FluidPhase.OIL:
@@ -544,17 +553,27 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
                 return CapillaryPressures(
                     oil_water=dtype.type(0),  # type: ignore
                     gas_oil=dtype.type(np.asarray(pcgo).item()),  # type: ignore
+                    gas_water=dtype.type(0),  # type: ignore
                 )
-            return CapillaryPressures(oil_water=zeros, gas_oil=pcgo)  # type: ignore[typeddict-item]
+            return CapillaryPressures(
+                oil_water=zeros,
+                gas_oil=pcgo,
+                gas_water=zeros.copy(),  # type: ignore[typeddict-item]
+            )
 
         if phases == {FluidPhase.WATER, FluidPhase.GAS} and self.wetting_phase == FluidPhase.WATER:
             pcgw = self.get_capillary_pressure(wetting_saturation=sw, non_wetting_saturation=sg)
             if is_scalar:
                 return CapillaryPressures(
                     oil_water=dtype.type(0),  # type: ignore
-                    gas_oil=dtype.type(np.asarray(pcgw).item()),  # type: ignore
+                    gas_oil=dtype.type(0),  # type: ignore
+                    gas_water=dtype.type(np.asarray(pcgw).item()),  # type: ignore
                 )
-            return CapillaryPressures(oil_water=zeros, gas_oil=pcgw)  # type: ignore[typeddict-item]
+            return CapillaryPressures(
+                oil_water=zeros,
+                gas_oil=zeros.copy(),
+                gas_water=pcgw,  # type: ignore[typeddict-item]
+            )
 
         raise ValidationError(
             f"Cannot dispatch three-phase saturations to a two-phase capillary "
@@ -628,7 +647,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
                         wetting_saturation=so, non_wetting_saturation=sw
                     )
                     dpcow_dso = zeros
-            results = (dpcow_dsw, dpcow_dso, zeros, zeros)
+            results = (dpcow_dsw, dpcow_dso, zeros, zeros, zeros)
             if is_scalar:
                 results = tuple(
                     dtype.type(np.asarray(row).item())  # type: ignore
@@ -639,6 +658,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
                 dpcow_dso=results[1],
                 dpcgo_dso=results[2],
                 dpcgo_dsg=results[3],
+                dpcgw_dsg=results[4],
             )
 
         if phases == {FluidPhase.OIL, FluidPhase.GAS}:
@@ -665,7 +685,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
                         wetting_saturation=sg, non_wetting_saturation=so
                     )
                     dpcgo_dsg = zeros
-            results = (zeros, zeros, dpcgo_dso, dpcgo_dsg)
+            results = (zeros, zeros, dpcgo_dso, dpcgo_dsg, zeros)
             if is_scalar:
                 results = tuple(
                     dtype.type(np.asarray(row).item())  # type: ignore
@@ -676,6 +696,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
                 dpcow_dso=results[1],
                 dpcgo_dso=results[2],
                 dpcgo_dsg=results[3],
+                dpcgw_dsg=results[4],
             )
 
         if phases == {FluidPhase.WATER, FluidPhase.GAS} and self.wetting_phase == FluidPhase.WATER:
@@ -685,7 +706,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
             # With no oil, `Sw = 1 - Sg`, so a slope taken along the water axis is minus the
             # slope along the gas axis.
             dpcgw_dsg = slope if self.reference_phase == "non_wetting" else -slope
-            results = (zeros, zeros, zeros, dpcgw_dsg)
+            results = (zeros, zeros, zeros, zeros, dpcgw_dsg)
             if is_scalar:
                 results = tuple(
                     dtype.type(np.asarray(row).item())  # type: ignore
@@ -696,6 +717,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
                 dpcow_dso=results[1],
                 dpcgo_dso=results[2],
                 dpcgo_dsg=results[3],
+                dpcgw_dsg=results[4],
             )
 
         raise ValidationError(
@@ -1103,7 +1125,11 @@ class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
         pcgo = query_gas_oil_capillary_pressure(
             self.gas_oil_table, gas_saturation, self.get_connate_water_saturation()
         )
-        return CapillaryPressures(oil_water=pcow, gas_oil=pcgo)  # type: ignore[typeddict-item]
+        return CapillaryPressures(
+            oil_water=pcow,
+            gas_oil=pcgo,
+            gas_water=zeros_like_value(pcow),  # type: ignore[typeddict-item]
+        )
 
     def derivatives(
         self,
@@ -1155,6 +1181,7 @@ class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
             dpcow_dso=dpcow_dso,
             dpcgo_dso=dpcgo_dso,
             dpcgo_dsg=dpcgo_dsg,
+            dpcgw_dsg=zero,
         )
 
     def convert(

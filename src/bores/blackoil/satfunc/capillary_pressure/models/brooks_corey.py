@@ -13,6 +13,7 @@ from bores.blackoil.satfunc.utils import (
     get_floating_dtype,
     prepare_kernel_inputs,
     saturations_within_bounds,
+    zeros_like_value,
 )
 from bores.constants import c
 from bores.errors import ValidationError
@@ -1414,12 +1415,13 @@ class BrooksCoreyCapillaryPressureTable(CapillaryPressureTable):
             )
         )
         return (
-            CapillaryPressures(oil_water=pcow, gas_oil=pcgo),  # type: ignore[typeddict-item]
+            CapillaryPressures(oil_water=pcow, gas_oil=pcgo, gas_water=zeros_like_value(pcow)),  # type: ignore[typeddict-item]
             CapillaryPressureDerivatives(
                 dpcow_dsw=dpcow_dsw,
                 dpcow_dso=dpcow_dso,
                 dpcgo_dsg=dpcgo_dsg,
                 dpcgo_dso=dpcgo_dso,
+                dpcgw_dsg=zeros_like_value(dpcgo_dsg),
             ),
         )
 
@@ -1474,7 +1476,7 @@ class BrooksCoreyCapillaryPressureTable(CapillaryPressureTable):
             saturation_epsilon=c.SATURATION_EPSILON,
             minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
         )
-        return CapillaryPressures(oil_water=pcow, gas_oil=pcgo)  # type: ignore[typeddict-item]
+        return CapillaryPressures(oil_water=pcow, gas_oil=pcgo, gas_water=zeros_like_value(pcow))  # type: ignore[typeddict-item]
 
     def derivatives(
         self,
@@ -1582,6 +1584,7 @@ class BrooksCoreyCapillaryPressureTable(CapillaryPressureTable):
             dpcow_dso=dpcow_dso,
             dpcgo_dsg=dpcgo_dsg,
             dpcgo_dso=dpcgo_dso,
+            dpcgw_dsg=zeros_like_value(dpcgo_dsg),
         )
 
     def convert(
