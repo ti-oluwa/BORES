@@ -10,11 +10,13 @@ from typing_extensions import Self
 from bores.blackoil.compile import CompiledBlackOilModel, compile_model
 from bores.blackoil.fluids.model import BlackOil
 from bores.blackoil.model import BlackOilModel
-from bores.blackoil.pvt.regions import OIL_PVT_KEYWORDS, PVT
+from bores.blackoil.pvt.regions import OIL_PVT_KEYWORDS, PVT, pvt_requirements
 from bores.blackoil.satfunc.regions import SATFUNC_KEYWORDS, SatFunc
 from bores.blackoil.satfunc.relperm.tables import MinimumRelPerm
+from bores.deck.dimensions import warn_deck_dimensions
 from bores.deck.file import DeckFile
 from bores.deck.keywords.runspec import START
+from bores.deck.phases import DeckPhases, declares_phases, read_deck_phases
 from bores.deck.precheck import find_missing
 from bores.errors import CaseLoadError, CaseValidationError, ValidationError
 from bores.grids.base import CellStatus, Grid
@@ -31,11 +33,12 @@ from bores.reservoir.boundary.deck import load_boundary_conditions
 from bores.reservoir.equilibrium import Equilibrium
 from bores.reservoir.model import Reservoir
 from bores.reservoir.regions import Regions
-from bores.reservoir.rock.model import ROCK_REQUIRED_KEYWORDS, Rock
+from bores.reservoir.rock.model import ROCK_POROSITY_KEYWORDS, ROCK_REQUIRED_KEYWORDS, Rock
 from bores.reservoir.state import Hysteresis, ReservoirState
 from bores.reservoir.temperature import TEMPERATURE_KEYWORDS, Temperature
 from bores.schedule.base import Schedule
 from bores.schedule.summary import SummaryReport
+from bores.simulation.deck import load_run_spec
 from bores.simulation.spec import RunSpec
 from bores.simulation.workspace import SimulationWorkspace, build_simulation_workspace
 from bores.timestep import TimeTargets, TimeTargetSource, build_time_targets
@@ -418,6 +421,7 @@ def check_deck_requirements(
     needs_pvt: bool,
     needs_equilibrium: bool,
     needs_wells: bool,
+    phases: DeckPhases | None = None,
 ) -> None:
     """
     Check that the deck has what every stage still to be loaded from it cannot do without.
@@ -437,6 +441,8 @@ def check_deck_requirements(
     :param needs_pvt: Whether the PVT tables have to be read from the deck.
     :param needs_equilibrium: Whether the equilibration data has to be read from the deck.
     :param needs_wells: Whether the wells have to be read from the deck.
+    :param phases: The phases the deck declares, if it declares any. Decides which PVT keywords
+        are needed; without it, any oil PVT will do.
     :raises CaseLoadError: If any needed keyword is missing, naming each one by the stage that
         needs it.
     """
@@ -470,11 +476,25 @@ def check_deck_requirements(
     if needs_temperature:
         require("temperature", any_of_keywords=(TEMPERATURE_KEYWORDS,))
     if needs_satfunc:
+        # Which systems a model needs is left to `SatFunc.from_deck`, which can accept a single
+        # one (`allow_two_phase`), so only the presence of some saturation function is checked.
         require("saturation functions", any_of_keywords=(SATFUNC_KEYWORDS,))
     if needs_rock:
-        require("rock", all_of_keywords=ROCK_REQUIRED_KEYWORDS)
+        require(
+            "rock",
+            all_of_keywords=ROCK_REQUIRED_KEYWORDS,
+            any_of_keywords=(ROCK_POROSITY_KEYWORDS,),
+        )
     if needs_pvt:
-        require("PVT", any_of_keywords=(OIL_PVT_KEYWORDS,))
+        if phases is None:
+            require("PVT", any_of_keywords=(OIL_PVT_KEYWORDS,))
+        else:
+            requirements = pvt_requirements(phases)
+            require(
+                "PVT",
+                all_of_keywords=requirements["all_of"],
+                any_of_keywords=requirements["any_of"],
+            )
     if needs_equilibrium:
         require("initial state", all_of_keywords=("EQUIL",))
     if needs_wells:
@@ -664,8 +684,14 @@ def load_case(
             "Build the `initial_state` given with the hysteresis tracking it needs instead."
         )
 
+    try:
+        phases = read_deck_phases(deck_file) if declares_phases(deck_file) else None
+    except ValidationError as exc:
+        raise CaseLoadError(f"Invalid phases in deck file: {title!r}: {exc}") from exc
+
     check_deck_requirements(
         deck_file,
+        phases=phases,
         title=title,
         needs_temperature=temperature is None and (pvt is None or initial_state is None),
         needs_grid=grid is None,
@@ -675,12 +701,19 @@ def load_case(
         needs_equilibrium=initial_state is None and equilibrium is None,
         needs_wells=wells is None,
     )
+    warn_deck_dimensions(deck_file)
 
     deck_unit_system = deck_file.unit_system
     unit_system = unit_system if unit_system is not None else deck_unit_system
-    runspec = (
-        runspec.convert(unit_system) if runspec is not None else RunSpec(unit_system=unit_system)
-    )
+    if runspec is None:
+        try:
+            runspec = load_run_spec(deck_file).convert(unit_system)
+        except ValidationError as exc:
+            raise CaseLoadError(f"Invalid run settings in deck file: {title!r}: {exc}") from exc
+    else:
+        runspec = runspec.convert(unit_system)
+        if runspec.phases is None and phases is not None:
+            runspec = attrs.evolve(runspec, phases=phases)
     if temperature is None:
         # Only the PVT tables and the initial state need a temperature.
         if pvt is None or initial_state is None:
@@ -734,6 +767,7 @@ def load_case(
                 min_non_wetting_relperm=min_non_wetting_relperm,
                 include_capillary_pressure=include_capillary_pressure,
                 allow_two_phase=allow_two_phase_satfunc,
+                phases=phases,
                 dtype=dtype,
             )
             print("Loaded satfunc")
@@ -782,6 +816,7 @@ def load_case(
                 temperature=typing.cast(Temperature, temperature),
                 interpolation_method=interpolation_method,
                 warn_on_extrapolation=warn_on_extrapolation,
+                phases=phases,
             )
             print("Loaded PVT")
         except Exception as exc:

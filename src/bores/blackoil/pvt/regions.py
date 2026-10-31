@@ -13,10 +13,12 @@ from typing_extensions import Self
 
 from bores.blackoil.pvt.data import PVTData, PVTDataSet, get_stb_to_volume_factor
 from bores.blackoil.pvt.live_oil import build_live_oil_branch_tables
-from bores.blackoil.pvt.static import StaticPVT
+from bores.blackoil.pvt.static import StaticPVT, load_density_records
 from bores.blackoil.pvt.tables import PVTTables, clip_compressibility
 from bores.constants import c
 from bores.deck.file import DeckFile
+from bores.deck.phases import DeckPhases, declares_phases, read_deck_phases
+from bores.deck.precheck import find_missing
 from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.reservoir.temperature import (
@@ -41,10 +43,38 @@ from bores.units import resolve_unit_conversion_table
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["OIL_PVT_KEYWORDS", "PVT", "load_pvt_regions"]
+__all__ = ["OIL_PVT_KEYWORDS", "PVT", "load_pvt_regions", "pvt_requirements"]
 
 OIL_PVT_KEYWORDS = ("PVTO", "PVCO", "PVDO", "PVCDO")
-"""The deck keywords that define the oil PVT. A deck needs at least one to load a `PVT`."""
+"""The deck keywords that define the oil PVT. A deck with an oil phase needs at least one."""
+
+GAS_PVT_KEYWORDS = ("PVTG", "PVDG")
+"""The deck keywords that define the gas PVT. A deck with a gas phase needs at least one."""
+
+
+def pvt_requirements(phases: DeckPhases) -> dict[str, typing.Any]:
+    """
+    The PVT keywords a model with `phases` cannot do without.
+
+    Only the phases the model has need tables, so a gas and water model needs no oil table. Gas
+    that dissolves in the oil needs a table with a solution gas-oil ratio in it (`PVTO` or
+    `PVCO`), and oil that vaporizes into the gas needs `PVTG`. A CO2 storage deck computes its
+    fluid properties and reads no PVT tables, so it needs none.
+
+    :param phases: The phases the model has.
+    :returns: Arguments for `bores.deck.precheck.find_missing` (`all_of` and `any_of`).
+    """
+    if phases.co2_storage:
+        return {"all_of": (), "any_of": ()}
+    all_of: list[str] = []
+    any_of: list[tuple[str, ...]] = []
+    if phases.oil:
+        any_of.append(("PVTO", "PVCO") if phases.dissolved_gas_in_oil else OIL_PVT_KEYWORDS)
+    if phases.gas:
+        any_of.append(("PVTG",) if phases.vaporized_oil else GAS_PVT_KEYWORDS)
+    if phases.water:
+        all_of.append("PVTW")
+    return {"all_of": tuple(all_of), "any_of": tuple(any_of)}
 
 
 @attrs.frozen(slots=True)
@@ -193,6 +223,7 @@ class PVT:
         validate: bool = True,
         warn_on_extrapolation: bool = False,
         dtype: npt.DTypeLike = None,
+        phases: DeckPhases | None = None,
     ) -> Self:
         """
         Build all PVT regions' tables from a parsed `DeckFile`.
@@ -206,6 +237,8 @@ class PVT:
         :param interpolation_method: `"linear"` or `"cubic"`.
         :param validate: Run physical-consistency checks.
         :param warn_on_extrapolation: Log warnings on extrapolation.
+        :param phases: The phases the model has, which decide the tables read and required (see
+            `load_pvt_regions`). Read from the deck's `RUNSPEC` keywords if omitted.
         :returns: `PVT` keyed by 1-based PVTNUM index.
         """
         regions = load_pvt_regions(
@@ -217,6 +250,7 @@ class PVT:
             validate=validate,
             warn_on_extrapolation=warn_on_extrapolation,
             dtype=dtype,
+            phases=phases,
         )
         return cls(regions=regions)
 
@@ -1379,6 +1413,7 @@ def load_pvt_regions(
     validate: bool = True,
     warn_on_extrapolation: bool = False,
     dtype: npt.DTypeLike = None,
+    phases: DeckPhases | None = None,
 ) -> dict[Integer, PVTRegion]:
     """
     Build a `PVT` object from a parsed `DeckFile`.
@@ -1401,28 +1436,53 @@ def load_pvt_regions(
     :param interpolation_method: `"linear"` (default) or `"cubic"`.
     :param validate: Run physical-consistency checks.
     :param warn_on_extrapolation: Log warnings when queries exceed table bounds.
+    :param phases: The phases the model has. When omitted they are read from the deck's `RUNSPEC`
+        keywords, if it declares any. Only the tables of those phases are read, and each is
+        required, so a gas and water model needs no oil table and a deck missing a table its
+        phases need is reported before any table is parsed.
     :returns: Mapping of 1-based `PVTNUM` region index to corresponding `PVTRegion`.
-    :raises ValidationError: If no recognisable PVT keyword is found.
+    :raises ValidationError: If a table the phases need is missing, no recognisable oil PVT
+        keyword is found when no phases are declared, or the deck is a CO2 storage deck.
     """
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
 
-    if not deck_file.has_any(*OIL_PVT_KEYWORDS):
-        raise ValidationError(
-            "No oil PVT keyword found in DeckFile. "
-            "Expected one of: `PVTO`, `PVDO`, `PVCO`, `PVCDO`."
-        )
+    if phases is None and declares_phases(deck_file):
+        phases = read_deck_phases(deck_file)
+
+    if phases is None:
+        # No phases declared (a deck made only of tables): any oil table will do
+        if not deck_file.has_any(*OIL_PVT_KEYWORDS):
+            raise ValidationError(
+                "No oil PVT keyword found in DeckFile. "
+                "Expected one of: `PVTO`, `PVDO`, `PVCO`, `PVCDO`."
+            )
+    else:
+        if phases.co2_storage:
+            raise ValidationError(
+                "A CO2 storage deck computes its fluid properties and has no PVT tables to "
+                "load, which `load_pvt_regions` does not support."
+            )
+        missing = find_missing(deck_file, **pvt_requirements(phases))
+        if missing:
+            raise ValidationError(
+                "The deck's phases need PVT keywords it does not have: " + ", ".join(missing) + "."
+            )
+    # Tables of a phase the model does not have are left unread
+    read_oil = phases is None or phases.oil
+    read_gas = phases is None or phases.gas
+    read_water = phases is None or phases.water
 
     # Retrieve deck records (each is a list-of-lists: outer = regions)
-    pvto_records: list | None = deck_file.get("PVTO")
-    pvdo_records: list | None = deck_file.get("PVDO")
-    pvco_records: list | None = deck_file.get("PVCO")
-    pvcdo_records: list | None = deck_file.get("PVCDO")
-    pvtg_records: list | None = deck_file.get("PVTG")
-    pvdg_records: list | None = deck_file.get("PVDG")
-    pvtw_records: list | None = deck_file.get("PVTW")
-    density_records: list | None = deck_file.get("DENSITY")
+    pvto_records: list | None = deck_file.get("PVTO") if read_oil else None
+    pvdo_records: list | None = deck_file.get("PVDO") if read_oil else None
+    pvco_records: list | None = deck_file.get("PVCO") if read_oil else None
+    pvcdo_records: list | None = deck_file.get("PVCDO") if read_oil else None
+    pvtg_records: list | None = deck_file.get("PVTG") if read_gas else None
+    pvdg_records: list | None = deck_file.get("PVDG") if read_gas else None
+    pvtw_records: list | None = deck_file.get("PVTW") if read_water else None
+    density_records: list | None = load_density_records(deck_file)
 
-    if (
+    if read_oil and (
         pvto_records is None
         and pvdo_records is None
         and pvco_records is None

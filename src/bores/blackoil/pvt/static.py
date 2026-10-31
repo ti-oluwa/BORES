@@ -12,7 +12,57 @@ from bores.types import Number, UnitSystem
 from bores.units import UnitConversionTable, get_conversion_factors
 from bores.utils import scale
 
-__all__ = ["StaticPVT"]
+__all__ = [
+    "GRAVITY_REFERENCE_AIR_DENSITY",
+    "GRAVITY_REFERENCE_WATER_DENSITY",
+    "StaticPVT",
+    "load_density_records",
+]
+
+GRAVITY_REFERENCE_WATER_DENSITY = 1000.0
+"""Density of pure water, in kg/m³, that `GRAVITY` measures the oil API gravity and water specific gravity against."""
+
+GRAVITY_REFERENCE_AIR_DENSITY = 1.22
+"""Density of air, in kg/m³, that `GRAVITY` measures the gas specific gravity against."""
+
+
+def load_density_records(deck_file: DeckFile) -> list[list[dict[str, Number]]] | None:
+    """
+    The stock-tank densities of every PVT region, from `DENSITY` or else `GRAVITY`.
+
+    `DENSITY` gives the densities directly. `GRAVITY` gives them as oil API gravity and water and
+    gas specific gravities, which are turned into densities against 1000 kg/m³ water and
+    1.22 kg/m³ air (what Eclipse and OPM Flow both assume). `GRAVITY` is read only when the deck
+    has no `DENSITY`, as in Eclipse.
+
+    :param deck_file: The deck to read.
+    :returns: One list per region holding a single `{"oil": ..., "water": ..., "gas": ...}` row,
+        in the deck's density unit, or `None` if the deck has neither keyword.
+    """
+    density = deck_file.get_shared("DENSITY")
+    if density is not None:
+        return density
+    gravity = deck_file.get_shared("GRAVITY")
+    if gravity is None:
+        return None
+    to_deck_unit = get_conversion_factors(UnitSystem.SI, deck_file.unit_system)["density"]
+    return [
+        [
+            {
+                "oil": 141.5
+                / (float(record["api_gravity"]) + 131.5)
+                * GRAVITY_REFERENCE_WATER_DENSITY
+                * to_deck_unit,
+                "water": float(record["water_specific_gravity"])
+                * GRAVITY_REFERENCE_WATER_DENSITY
+                * to_deck_unit,
+                "gas": float(record["gas_specific_gravity"])
+                * GRAVITY_REFERENCE_AIR_DENSITY
+                * to_deck_unit,
+            }
+        ]
+        for record in gravity
+    ]
 
 
 @attrs.frozen(slots=True, kw_only=True)
@@ -204,7 +254,7 @@ class StaticPVT(Serializable):
 
         # Extract `DENSITY` record for this region
         density_record: dict[str, Number] | None = None
-        density_all = deck_file.get("DENSITY")
+        density_all = load_density_records(deck_file)
         if density_all is not None and region_idx < len(density_all):
             region_density_rows = density_all[region_idx]
             if region_density_rows:

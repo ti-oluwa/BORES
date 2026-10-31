@@ -29,10 +29,13 @@ from bores.types import (
 )
 from bores.utils import scale
 
-__all__ = ["ROCK_REQUIRED_KEYWORDS", "Permeability", "Rock"]
+__all__ = ["ROCK_POROSITY_KEYWORDS", "ROCK_REQUIRED_KEYWORDS", "Permeability", "Rock"]
 
-ROCK_REQUIRED_KEYWORDS = ("PORO", "PERMX")
-"""The keywords a `Rock` cannot be loaded from a deck without."""
+ROCK_REQUIRED_KEYWORDS = ("PERMX",)
+"""The keywords a `Rock` cannot be loaded from a deck without, besides one of `ROCK_POROSITY_KEYWORDS`."""
+
+ROCK_POROSITY_KEYWORDS = ("PORO", "PORV")
+"""The keywords that give a `Rock` its pore space: the porosity, or the pore volume directly."""
 
 
 def load_cell_array(
@@ -513,6 +516,83 @@ class Rock:
             "residual_gas_saturation": residual_gas_saturation,
         }
 
+    @staticmethod
+    def load_porosity(
+        deck_file: DeckFile,
+        *,
+        grid: Grid,
+        net_to_gross: CellArray,
+        dtype: npt.DTypeLike = None,
+    ) -> CellArray:
+        """
+        The porosity of every cell, from `PORO` and `PORV`.
+
+        `PORV` gives each cell's pore volume directly and overrides what `PORO`, `NTG` and the cell
+        volume would give, as in Eclipse. Here the pore volume is `porosity x NTG x cell volume`, so
+        a `PORV` is honoured by taking the porosity that reproduces it: `PORV / (NTG x cell
+        volume)`. A cell `PORV` does not set (an unassigned entry) keeps its `PORO`.
+
+        :param deck_file: The deck to read.
+        :param grid: The grid, for its cell volumes.
+        :param net_to_gross: Net-to-gross of every cell, shape `(n_cells,)`.
+        :param dtype: Array dtype. Defaults to `bores.precision.get_dtype()`.
+        :returns: The porosity, shape `(n_cells,)`.
+        :raises ValidationError: If neither keyword is in the deck, if `PORV` leaves a cell without
+            any porosity, if a cell with no bulk volume has a pore volume, or if a `PORV` needs a
+            porosity above 1.
+        """
+        dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+        n_cells = grid.n_cells
+        porosity = load_cell_array(deck_file, "PORO", n_cells, dtype=dtype)
+        pore_volume = load_cell_array(deck_file, "PORV", n_cells, dtype=dtype)
+        if porosity is None and pore_volume is None:
+            raise ValidationError("`PORO` or `PORV` is required but neither is in the DeckFile.")
+        if pore_volume is None:
+            return typing.cast(CellArray, porosity)
+
+        if grid.cell_volumes is None:
+            raise ValidationError("`PORV` needs the grid's cell volumes, which it does not have.")
+
+        bulk_volume = np.asarray(net_to_gross, dtype=dtype) * np.asarray(
+            grid.cell_volumes, dtype=dtype
+        )
+        assigned = ~np.isnan(pore_volume)
+        if (pore_volume[assigned] < 0).any():
+            raise ValidationError("`PORV` has negative pore volumes.")
+
+        has_bulk = bulk_volume > 0
+        no_bulk = assigned & ~has_bulk & (pore_volume > 0)
+        if no_bulk.any():
+            raise ValidationError(
+                f"`PORV` gives a pore volume to {int(no_bulk.sum())} cell(s) that have no bulk "
+                "volume (zero `NTG` or cell volume)."
+            )
+
+        derived = np.zeros(n_cells, dtype=dtype)
+        np.divide(pore_volume, bulk_volume, out=derived, where=assigned & has_bulk)
+        too_high = derived > 1.0 + 1e-6
+        if too_high.any():
+            raise ValidationError(
+                f"`PORV` needs a porosity above 1 in {int(too_high.sum())} cell(s) (the largest "
+                f"is {float(derived.max()):.4g}): a cell's pore volume cannot exceed its bulk volume."
+            )
+        if porosity is None:
+            if not assigned.all():
+                raise ValidationError(
+                    f"`PORV` does not set {int((~assigned).sum())} cell(s) and there is no `PORO` "
+                    "to give them a porosity."
+                )
+            return derived
+
+        unset = np.isnan(porosity) & ~assigned
+        if unset.any():
+            raise ValidationError(
+                f"{int(unset.sum())} cell(s) have neither a `PORO` nor a `PORV`."
+            )
+        return typing.cast(
+            "CellArray", np.where(assigned, derived, porosity).astype(dtype, copy=False)
+        )
+
     @classmethod
     def from_deck(
         cls,
@@ -565,18 +645,14 @@ class Rock:
         n_cells = grid.n_cells
         dtype = np.dtype(dtype) if dtype is not None else get_dtype()
 
-        missing = find_missing(deck_file, all_of=ROCK_REQUIRED_KEYWORDS)
+        missing = find_missing(
+            deck_file, all_of=ROCK_REQUIRED_KEYWORDS, any_of=(ROCK_POROSITY_KEYWORDS,)
+        )
         if missing:
             raise ValidationError(
                 f"{', '.join(missing)} {'is' if len(missing) == 1 else 'are'} required but not "
                 "found in the DeckFile."
             )
-
-        def required(keyword: str) -> CellArray:
-            data = load_cell_array(deck_file, keyword, n_cells, dtype=dtype)
-            if data is None:
-                raise ValidationError(f"`{keyword}` is required but not found in the DeckFile.")
-            return data
 
         def optional(keyword: str, default: float) -> CellArray:
             data = load_cell_array(deck_file, keyword, n_cells, dtype=dtype)
@@ -641,6 +717,7 @@ class Rock:
                     category=UserWarning,
                     stacklevel=3,
                 )
+
         connate_water_saturation = get_saturation_endpoint(
             ("SWL", "SWCON"), "connate_water_saturation", table_derived_endpoints
         )
@@ -649,16 +726,23 @@ class Rock:
             default_irreducible = connate_water_saturation.copy()
         else:
             default_irreducible = table_derived_endpoints["irreducible_water_saturation"]
+
         critical_water_saturation = load_endpoint_array("SWCR", "SWCRIT")
         irreducible_water_saturation = (
             default_irreducible
             if critical_water_saturation is None
             else fill_unset(critical_water_saturation, default_irreducible)
         )
+        net_to_gross = optional("NTG", 1.0)
         return cls(
-            porosity=required("PORO"),
+            porosity=cls.load_porosity(
+                deck_file,
+                grid=grid,
+                net_to_gross=net_to_gross,
+                dtype=dtype,
+            ),
             absolute_permeability=permeability,
-            net_to_gross=optional("NTG", 1.0),
+            net_to_gross=net_to_gross,
             compressibility=compressibility,
             connate_water_saturation=connate_water_saturation,
             irreducible_water_saturation=irreducible_water_saturation,

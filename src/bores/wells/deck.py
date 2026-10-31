@@ -17,6 +17,7 @@ from bores.schedule.actions import RunSequence
 from bores.schedule.base import Action, Event, Schedule, ScheduleItem
 from bores.schedule.events import AllOf, AnyOf, ComparisonOperator, TimeEvent, TimeWindowEvent
 from bores.schedule.summary import RecordSummary, Summary
+from bores.timestep.deck import get_tuning_at_start
 from bores.timestep.targets import TimeTargets
 from bores.types import FluidPhase, Number, UnitSystem
 from bores.units import get_conversion_factors
@@ -58,6 +59,7 @@ from bores.wells.mappings import (
     WELSPECS_PHASE_MAP,
     WELTARG_TARGET_FIELD,
 )
+from bores.wells.resolution.spec import ConnectionPressureMode, WellControlSpec
 from bores.wells.schedule import (
     ActivateCompletions,
     ActivateWells,
@@ -105,6 +107,7 @@ __all__ = [
     "load_producer_control_from_record",
     "load_schedule",
     "load_summary_items",
+    "load_well_control_spec",
     "load_well_controls",
     "load_well_from_records",
     "load_well_segments",
@@ -2300,3 +2303,37 @@ def load_schedule(
         )
     items.sort(key=get_item_start_time)
     return Schedule(items=tuple(items))
+
+
+def load_well_control_spec(deck_file: DeckFile) -> WellControlSpec:
+    """
+    Build the numerical settings for resolving well controls from a deck.
+
+    - `unit_system` is the deck's.
+    - `connection_pressure_mode` is `HYDROSTATIC` when the deck defines wells. Wells read from a
+      deck have no wellbore model (a deck describes tubing performance with VFP tables, which
+      relate BHP to THP at one depth only), so `HYDRAULIC` would fail as soon as a control is
+      resolved. A deck with no wells keeps the default.
+    - `max_fixed_point_iterations` and `max_bisection_iterations` follow `TUNING`'s `MXWSIT` and
+      `MXWPIT`, but only upwards. Eclipse's defaults (8 and 8) count iterations of a different
+      well solver, and taking them literally would cut these searches short of converging, so a
+      deck can ask for more iterations than the defaults and never fewer.
+
+    :param deck_file: The deck to read.
+    :returns: The well control spec.
+    """
+    defaults = WellControlSpec(unit_system=deck_file.unit_system)
+    options: dict[str, typing.Any] = {}
+    if deck_defines_wells(deck_file):
+        options["connection_pressure_mode"] = ConnectionPressureMode.HYDROSTATIC
+
+    tuning = get_tuning_at_start(deck_file)
+    iteration = (tuning or {}).get("iteration", {})
+    for item, attribute in (
+        ("mxwsit", "max_fixed_point_iterations"),
+        ("mxwpit", "max_bisection_iterations"),
+    ):
+        requested = iteration.get(item)
+        if requested is not None and int(requested) > getattr(defaults, attribute):
+            options[attribute] = int(requested)
+    return attrs.evolve(defaults, **options)

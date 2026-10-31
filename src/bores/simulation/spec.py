@@ -8,6 +8,7 @@ import attrs
 from typing_extensions import Self
 
 from bores.constants import Constants
+from bores.deck.phases import DeckPhases
 from bores.errors import ValidationError
 from bores.timestep.control import Timer
 from bores.types import (
@@ -43,6 +44,12 @@ class RunSpec:
 
     start_date: datetime.datetime | None = None
     """The run's calendar start date, if the run is calendar-anchored."""
+
+    phases: DeckPhases | None = None
+    """
+    The fluid phases the model has and which of them exchange components, as its deck declared
+    them. `None` when they were not declared, so they are to be inferred from the data supplied.
+    """
 
     well_control: WellControlSpec = attrs.field(factory=WellControlSpec)
     """Numerical tuning for well-control resolution. Defaults to `WellControlSpec`'s own defaults."""

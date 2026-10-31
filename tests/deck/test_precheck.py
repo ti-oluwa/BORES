@@ -83,12 +83,12 @@ class TestFailsBeforeParsing:
         d = deck("PERMX\n 4*100 /\n")
         grid = mock.Mock(n_cells=4)
         with mock.patch("bores.reservoir.rock.model.load_cell_array") as load:
-            with pytest.raises(ValidationError, match="`PORO` is required"):
+            with pytest.raises(ValidationError, match="one of `PORO`, `PORV` is required"):
                 Rock.from_deck(d, grid=grid)
         load.assert_not_called()
 
     def test_rock_lists_every_missing_keyword(self):
-        with pytest.raises(ValidationError, match="`PORO`, `PERMX` are required"):
+        with pytest.raises(ValidationError, match="`PERMX`, one of `PORO`, `PORV` are required"):
             Rock.from_deck(deck(), grid=mock.Mock(n_cells=4))
 
     def test_cartesian_grid_missing_dy_is_reported_before_dx_is_parsed(self):
@@ -129,7 +129,8 @@ class TestCaseRequirements:
             "grid:",
             "temperature: one of `TEMPVD`",
             "saturation functions: one of `SWOF`",
-            "rock: `PORO`",
+            "rock: `PERMX`",
+            "rock: one of `PORO`, `PORV`",
             "PVT: one of `PVTO`",
             "initial state: `EQUIL`",
         ):
