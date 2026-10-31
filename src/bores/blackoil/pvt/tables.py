@@ -2238,10 +2238,10 @@ class PVTTable(StoreSerializable):
             p_undersaturated = pressure_array[undersaturated].astype(np.float64)
             t_undersaturated = temperature_array[undersaturated]
             pb_undersaturated = bubble_point_array[undersaturated].astype(np.float64)
-            mu_at_bubble_point = np.asarray(
+            viscosity_at_bubble_point = np.asarray(
                 self.query("viscosity", pb_undersaturated, t_undersaturated), dtype=np.float64
             )
-            # d(mu)/dP of `mu = mu_ob * (P / Pb)**X(P)` with the same clipping as `viscosity`
+            # d(μ)/dP of `μ = μ_ob * (P / Pb)**X(P)` with the same clipping as `viscosity`
             p_psi = p_undersaturated * self._pressure_to_psi
             x_raw = 2.6 * (p_psi**1.187) * np.exp(-11.513 - 8.98e-5 * p_psi)
             x_clipped = np.clip(x_raw, 0.0, 5.0)
@@ -2251,10 +2251,10 @@ class PVTTable(StoreSerializable):
                 0.0,
             )
             ratio = np.maximum(p_undersaturated / pb_undersaturated, 1.0)
-            mu_unclipped = mu_at_bubble_point * ratio**x_clipped
-            dmu_dp = mu_unclipped * (x_clipped / p_undersaturated + np.log(ratio) * dx_dp)
+            unclipped_viscosity = viscosity_at_bubble_point * ratio**x_clipped
+            dμ_dp = unclipped_viscosity * (x_clipped / p_undersaturated + np.log(ratio) * dx_dp)
             result[undersaturated] = np.where(
-                mu_unclipped < mu_at_bubble_point * 100.0, dmu_dp, 0.0
+                unclipped_viscosity < viscosity_at_bubble_point * 100.0, dμ_dp, 0.0
             )
 
         return typing.cast(
