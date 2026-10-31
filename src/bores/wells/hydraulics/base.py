@@ -563,46 +563,46 @@ class ConnectionDerivatives(typing.NamedTuple):
     order of the well's connections. `ConnectionSampleDerivatives` describes each one.
     """
 
-    oil_mobility_pressures: NumberArray[OneDimension]
+    dʎo_dp: NumberArray[OneDimension]
     """Derivative of the oil mobility with respect to pressure."""
 
-    oil_mobility_water_saturations: NumberArray[OneDimension]
+    dʎo_dsw: NumberArray[OneDimension]
     """Derivative of the oil mobility with respect to water saturation."""
 
-    oil_mobility_gas_saturations: NumberArray[OneDimension]
+    dʎo_dsg: NumberArray[OneDimension]
     """Derivative of the oil mobility with respect to gas saturation."""
 
-    water_mobility_pressures: NumberArray[OneDimension]
+    dʎw_dp: NumberArray[OneDimension]
     """Derivative of the water mobility with respect to pressure."""
 
-    water_mobility_water_saturations: NumberArray[OneDimension]
+    dʎw_dsw: NumberArray[OneDimension]
     """Derivative of the water mobility with respect to water saturation."""
 
-    water_mobility_gas_saturations: NumberArray[OneDimension]
+    dʎw_dsg: NumberArray[OneDimension]
     """Derivative of the water mobility with respect to gas saturation."""
 
-    gas_mobility_pressures: NumberArray[OneDimension]
+    dʎg_dp: NumberArray[OneDimension]
     """Derivative of the gas mobility with respect to pressure."""
 
-    gas_mobility_water_saturations: NumberArray[OneDimension]
+    dʎg_dsw: NumberArray[OneDimension]
     """Derivative of the gas mobility with respect to water saturation."""
 
-    gas_mobility_gas_saturations: NumberArray[OneDimension]
+    dʎg_dsg: NumberArray[OneDimension]
     """Derivative of the gas mobility with respect to gas saturation."""
 
-    oil_formation_volume_factor_pressures: NumberArray[OneDimension]
+    dbo_dp: NumberArray[OneDimension]
     """Derivative of the oil formation volume factor with respect to pressure."""
 
-    water_formation_volume_factor_pressures: NumberArray[OneDimension]
+    dbw_dp: NumberArray[OneDimension]
     """Derivative of the water formation volume factor with respect to pressure."""
 
-    gas_formation_volume_factor_pressures: NumberArray[OneDimension]
+    dbg_dp: NumberArray[OneDimension]
     """Derivative of the gas formation volume factor with respect to pressure."""
 
-    solution_gas_oil_ratio_pressures: NumberArray[OneDimension]
+    drs_dp: NumberArray[OneDimension]
     """Derivative of the solution gas-oil ratio with respect to pressure."""
 
-    vaporized_oil_gas_ratio_pressures: NumberArray[OneDimension]
+    drv_dp: NumberArray[OneDimension]
     """Derivative of the vaporized oil-gas ratio with respect to pressure."""
 
 
@@ -637,20 +637,20 @@ def compile_connection_derivatives(
         )
 
     return ConnectionDerivatives(
-        oil_mobility_pressures=gather(lambda d: d.oil_mobility_pressure),
-        oil_mobility_water_saturations=gather(lambda d: d.oil_mobility_water_saturation),
-        oil_mobility_gas_saturations=gather(lambda d: d.oil_mobility_gas_saturation),
-        water_mobility_pressures=gather(lambda d: d.water_mobility_pressure),
-        water_mobility_water_saturations=gather(lambda d: d.water_mobility_water_saturation),
-        water_mobility_gas_saturations=gather(lambda d: d.water_mobility_gas_saturation),
-        gas_mobility_pressures=gather(lambda d: d.gas_mobility_pressure),
-        gas_mobility_water_saturations=gather(lambda d: d.gas_mobility_water_saturation),
-        gas_mobility_gas_saturations=gather(lambda d: d.gas_mobility_gas_saturation),
-        oil_formation_volume_factor_pressures=gather(lambda d: d.oil_fvf_pressure),
-        water_formation_volume_factor_pressures=gather(lambda d: d.water_fvf_pressure),
-        gas_formation_volume_factor_pressures=gather(lambda d: d.gas_fvf_pressure),
-        solution_gas_oil_ratio_pressures=gather(lambda d: d.solution_gas_oil_ratio_pressure),
-        vaporized_oil_gas_ratio_pressures=gather(lambda d: d.vaporized_oil_gas_ratio_pressure),
+        dʎo_dp=gather(lambda d: d.dʎo_dp),
+        dʎo_dsw=gather(lambda d: d.dʎo_dsw),
+        dʎo_dsg=gather(lambda d: d.dʎo_dsg),
+        dʎw_dp=gather(lambda d: d.dʎw_dp),
+        dʎw_dsw=gather(lambda d: d.dʎw_dsw),
+        dʎw_dsg=gather(lambda d: d.dʎw_dsg),
+        dʎg_dp=gather(lambda d: d.dʎg_dp),
+        dʎg_dsw=gather(lambda d: d.dʎg_dsw),
+        dʎg_dsg=gather(lambda d: d.dʎg_dsg),
+        dbo_dp=gather(lambda d: d.dbo_dp),
+        dbw_dp=gather(lambda d: d.dbw_dp),
+        dbg_dp=gather(lambda d: d.dbg_dp),
+        drs_dp=gather(lambda d: d.drs_dp),
+        drv_dp=gather(lambda d: d.drv_dp),
     )
 
 

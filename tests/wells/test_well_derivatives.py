@@ -59,20 +59,20 @@ def get_properties(pressure, water_saturation, gas_saturation):
     mu_o, d_mu_o = 1.0 + 1e-4 * (pressure - 3000.0), 1e-4
     mu_g, d_mu_g = 0.02 * (1.0 + 2e-4 * (pressure - 3000.0)), 0.02 * 2e-4
     derivatives = ConnectionSampleDerivatives(
-        oil_mobility_pressure=-(so**2) * d_mu_o / mu_o**2,
-        oil_mobility_water_saturation=-2.0 * so / mu_o,
-        oil_mobility_gas_saturation=-2.0 * so / mu_o,
-        water_mobility_pressure=0.0,
-        water_mobility_water_saturation=2.0 * water_saturation / 0.5,
-        water_mobility_gas_saturation=0.0,
-        gas_mobility_pressure=-(gas_saturation**2) * d_mu_g / mu_g**2,
-        gas_mobility_water_saturation=0.0,
-        gas_mobility_gas_saturation=2.0 * gas_saturation / mu_g,
-        oil_fvf_pressure=-1e-5,
-        water_fvf_pressure=-1e-6,
-        gas_fvf_pressure=-0.01 * 3000.0 / pressure**2,
-        solution_gas_oil_ratio_pressure=0.05,
-        vaporized_oil_gas_ratio_pressure=1e-10,
+        dmo_dp=-(so**2) * d_mu_o / mu_o**2,
+        dmo_dsw=-2.0 * so / mu_o,
+        dmo_dsg=-2.0 * so / mu_o,
+        dmw_dp=0.0,
+        dmw_dsw=2.0 * water_saturation / 0.5,
+        dmw_dsg=0.0,
+        dmg_dp=-(gas_saturation**2) * d_mu_g / mu_g**2,
+        dmg_dsw=0.0,
+        dmg_dsg=2.0 * gas_saturation / mu_g,
+        dbo_dp=-1e-5,
+        dbw_dp=-1e-6,
+        dbg_dp=-0.01 * 3000.0 / pressure**2,
+        drs_dp=0.05,
+        drv_dp=1e-10,
     )
     values = {
         "mobilities": PhaseValues(
@@ -128,7 +128,9 @@ class Well:
         d_factor=None,
         limits=None,
         injected=FluidPhase.WATER,
+        dtype=F64,
     ):
+        self.dtype = dtype
         grid = make_cartesian_grid(nx=1, ny=1, nz=n, dx=50.0, dy=50.0, dz=50.0)
         options = dict(
             surface_location=(25.0, 25.0),
@@ -158,7 +160,7 @@ class Well:
             n_wells=1,
             n_connections=n,
             well_offsets=self.system.perforations.well_offsets,
-            dtype=F64,
+            dtype=dtype,
         )
 
     def resolve(
@@ -167,7 +169,7 @@ class Well:
         if bhp is not None:
             self.system.controls.target_bhps[0] = bhp
         samples = make_samples(pressures, water_saturations, gas_saturations)
-        fluids = compile_connection_fluids(connection_samples=samples, dtype=F64)
+        fluids = compile_connection_fluids(connection_samples=samples, dtype=self.dtype)
         resolve_well_control(
             compiled_system=self.system,
             well_row=0,
@@ -184,7 +186,7 @@ class Well:
                 tubing_performance=self.tubing,
                 connection_fluids=fluids,
                 connection_derivatives=compile_connection_derivatives(
-                    connection_samples=samples, dtype=F64
+                    connection_samples=samples, dtype=self.dtype
                 ),
                 workspace=self.workspace,
                 spec=self.spec,
@@ -243,13 +245,13 @@ def assert_derivatives_match(well, state, bhp, *, tolerance=2e-4):
                     row = 3 * connection + phase
                     column = 3 * cell + unknown
                     np.testing.assert_allclose(
-                        derivatives.rates_cell[row, column],
+                        derivatives.dq_dx[row, column],
                         difference[connection, phase],
                         rtol=tolerance,
                         atol=1e-5 * np.abs(difference).max(),
                     )
                     np.testing.assert_allclose(
-                        derivatives.surface_rates_cell[row, column],
+                        derivatives.dqs_dx[row, column],
                         surface_difference[connection, phase],
                         rtol=tolerance,
                         atol=1e-5 * np.abs(surface_difference).max(),
@@ -263,19 +265,19 @@ def assert_derivatives_match(well, state, bhp, *, tolerance=2e-4):
     difference = (rates_up - rates_down) / (2.0 * step)
     surface_difference = (surface_up - surface_down) / (2.0 * step)
     np.testing.assert_allclose(
-        derivatives.rates_bhp, difference, rtol=tolerance, atol=1e-5 * np.abs(difference).max()
+        derivatives.dq_dbhp, difference, rtol=tolerance, atol=1e-5 * np.abs(difference).max()
     )
     np.testing.assert_allclose(
-        derivatives.surface_rates_bhp,
+        derivatives.dqs_dbhp,
         surface_difference,
         rtol=tolerance,
         atol=1e-5 * np.abs(surface_difference).max(),
     )
     np.testing.assert_allclose(
-        derivatives.well_rates_bhp, difference.sum(axis=0), rtol=tolerance, atol=1e-6
+        derivatives.dq_dbhp_well, difference.sum(axis=0), rtol=tolerance, atol=1e-6
     )
     np.testing.assert_allclose(
-        derivatives.well_surface_rates_bhp,
+        derivatives.dqs_dbhp_well,
         surface_difference.sum(axis=0),
         rtol=tolerance,
         atol=1e-6,
@@ -329,7 +331,7 @@ def test_producer_without_crossflow_has_no_derivative_on_a_reversed_connection()
     derivatives = get_well_derivatives(
         compiled_system=well.system, workspace=well.workspace, well_row=0
     )
-    assert not derivatives.rates_cell[0:3].any()
+    assert not derivatives.dq_dx[0:3].any()
 
 
 @pytest.mark.parametrize(
@@ -361,7 +363,7 @@ def test_tubing_head_pressure_derivatives_match_finite_differences(kind, bhp, de
 
     step = 1e-5 * bhp
     np.testing.assert_allclose(
-        derivatives.thp_bhp,
+        derivatives.dthp_dbhp,
         (get_thp(bhp=bhp + step) - get_thp(bhp=bhp - step)) / (2 * step),
         rtol=1e-4,
     )
@@ -376,7 +378,7 @@ def test_tubing_head_pressure_derivatives_match_finite_differences(kind, bhp, de
 
             expected = (at(steps[unknown]) - at(-steps[unknown])) / (2 * steps[unknown])
             np.testing.assert_allclose(
-                derivatives.thp_cell[cell, unknown], expected, rtol=1e-3, atol=1e-6
+                derivatives.dthp_dx[cell, unknown], expected, rtol=1e-3, atol=1e-6
             )
 
 
@@ -386,11 +388,11 @@ def test_well_totals_are_the_sum_of_its_connections():
     derivatives = get_well_derivatives(
         compiled_system=well.system, workspace=well.workspace, well_row=0
     )
-    expected = derivatives.rates_cell.reshape(3, 3, 3, 3).sum(axis=0)
-    np.testing.assert_allclose(derivatives.well_rates_cell, expected.transpose(1, 0, 2))
+    expected = derivatives.dq_dx.reshape(3, 3, 3, 3).sum(axis=0)
+    np.testing.assert_allclose(derivatives.dq_dx_well, expected.transpose(1, 0, 2))
     np.testing.assert_allclose(
-        derivatives.well_surface_rates_cell,
-        derivatives.surface_rates_cell.reshape(3, 3, 3, 3).sum(axis=0).transpose(1, 0, 2),
+        derivatives.dqs_dx_well,
+        derivatives.dqs_dx.reshape(3, 3, 3, 3).sum(axis=0).transpose(1, 0, 2),
     )
 
 
@@ -404,8 +406,8 @@ def test_a_well_shut_in_by_an_economic_limit_has_zero_derivatives():
         compiled_system=well.system, workspace=well.workspace, well_row=0
     )
     assert well.workspace.economic_shutins[0] == 1
-    assert not derivatives.rates_cell.any()
-    assert not derivatives.surface_rates_bhp.any()
+    assert not derivatives.dq_dx.any()
+    assert not derivatives.dqs_dbhp.any()
 
 
 def test_a_workspace_without_room_for_derivatives_is_rejected():
@@ -451,7 +453,7 @@ def test_samples_without_derivatives_give_nan_derivatives():
     derivatives = get_well_derivatives(
         compiled_system=well.system, workspace=well.workspace, well_row=0
     )
-    assert np.isnan(derivatives.rates_cell).all()
+    assert np.isnan(derivatives.dq_dx).all()
 
 
 def test_injector_crossflow_reports_the_formation_fluid_it_produces():
@@ -483,3 +485,34 @@ def test_a_well_economic_limit_with_no_workover_action_does_not_shut_the_well(ac
     shut_in = action == WorkoverAction.WELL
     assert bool(well.workspace.economic_shutins[0]) is shut_in
     assert bool(well.workspace.surface_oil_rates[0] == 0.0) is shut_in
+
+
+def test_derivatives_in_a_single_precision_workspace_agree_with_double_precision():
+    wellbore = homogeneous_wellbore(tubing_inner_diameter=0.25)
+    reference = Well(kind="producer", bhp=1500.0, mode=HYDRAULIC, tubing=wellbore)
+    reference.resolve(*NORMAL, derivatives=True)
+    expected = get_well_derivatives(
+        compiled_system=reference.system, workspace=reference.workspace, well_row=0
+    )
+    with with_precision(np.float32):
+        single = Well(
+            kind="producer",
+            bhp=1500.0,
+            mode=HYDRAULIC,
+            tubing=homogeneous_wellbore(tubing_inner_diameter=0.25),
+            dtype=np.float32,
+        )
+        single.resolve(*NORMAL, derivatives=True)
+        derivatives = get_well_derivatives(
+            compiled_system=single.system, workspace=single.workspace, well_row=0
+        )
+    assert derivatives.dq_dx.dtype == np.float32
+    np.testing.assert_allclose(
+        derivatives.dq_dx, expected.dq_dx, rtol=1e-3, atol=1e-4 * np.abs(expected.dq_dx).max()
+    )
+    np.testing.assert_allclose(
+        derivatives.dqs_dbhp,
+        expected.dqs_dbhp,
+        rtol=1e-3,
+        atol=1e-4 * np.abs(expected.dqs_dbhp).max(),
+    )

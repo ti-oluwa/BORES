@@ -86,16 +86,16 @@ def record_shut_well(
     workspace.connection_gas_rates[start:end] = 0.0
     block_start = workspace.derivative_offsets[well_row]
     block_end = workspace.derivative_offsets[well_row + 1]
-    workspace.connection_rate_cell_derivatives[block_start:block_end] = 0.0
-    workspace.connection_surface_rate_cell_derivatives[block_start:block_end] = 0.0
-    workspace.connection_rate_bhp_derivatives[start:end] = 0.0
-    workspace.connection_surface_rate_bhp_derivatives[start:end] = 0.0
-    workspace.well_rate_cell_derivatives[start:end] = 0.0
-    workspace.well_surface_rate_cell_derivatives[start:end] = 0.0
-    workspace.well_rate_bhp_derivatives[well_row] = 0.0
-    workspace.well_surface_rate_bhp_derivatives[well_row] = 0.0
-    workspace.thp_bhp_derivatives[well_row] = np.nan
-    workspace.thp_cell_derivatives[start:end] = np.nan
+    workspace.dq_dx_connection[block_start:block_end] = 0.0
+    workspace.dqs_dx_connection[block_start:block_end] = 0.0
+    workspace.dq_dbhp_connection[start:end] = 0.0
+    workspace.dqs_dbhp_connection[start:end] = 0.0
+    workspace.dq_dx_well[start:end] = 0.0
+    workspace.dqs_dx_well[start:end] = 0.0
+    workspace.dq_dbhp_well[well_row] = 0.0
+    workspace.dqs_dbhp_well[well_row] = 0.0
+    workspace.dthp_dbhp[well_row] = np.nan
+    workspace.dthp_dx[start:end] = np.nan
 
 
 def build_well_perforation_workspace(

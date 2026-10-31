@@ -64,53 +64,53 @@ class ConnectionSampleDerivatives(typing.NamedTuple):
     Every field is `NaN` unless given, and a `NaN` makes the well derivatives that depend on it `NaN`.
     """
 
-    oil_mobility_pressure: Number = math.nan
+    dʎo_dp: Number = math.nan
     """Derivative of the oil mobility with respect to pressure."""
 
-    oil_mobility_water_saturation: Number = math.nan
+    dʎo_dsw: Number = math.nan
     """Derivative of the oil mobility with respect to water saturation."""
 
-    oil_mobility_gas_saturation: Number = math.nan
+    dʎo_dsg: Number = math.nan
     """Derivative of the oil mobility with respect to gas saturation."""
 
-    water_mobility_pressure: Number = math.nan
+    dʎw_dp: Number = math.nan
     """Derivative of the water mobility with respect to pressure."""
 
-    water_mobility_water_saturation: Number = math.nan
+    dʎw_dsw: Number = math.nan
     """Derivative of the water mobility with respect to water saturation."""
 
-    water_mobility_gas_saturation: Number = math.nan
+    dʎw_dsg: Number = math.nan
     """Derivative of the water mobility with respect to gas saturation."""
 
-    gas_mobility_pressure: Number = math.nan
+    dʎg_dp: Number = math.nan
     """Derivative of the gas mobility with respect to pressure."""
 
-    gas_mobility_water_saturation: Number = math.nan
+    dʎg_dsw: Number = math.nan
     """Derivative of the gas mobility with respect to water saturation."""
 
-    gas_mobility_gas_saturation: Number = math.nan
+    dʎg_dsg: Number = math.nan
     """Derivative of the gas mobility with respect to gas saturation."""
 
-    oil_fvf_pressure: Number = math.nan
+    dbo_dp: Number = math.nan
     """Derivative of the oil formation volume factor with respect to pressure."""
 
-    water_fvf_pressure: Number = math.nan
+    dbw_dp: Number = math.nan
     """Derivative of the water formation volume factor with respect to pressure."""
 
-    gas_fvf_pressure: Number = math.nan
+    dbg_dp: Number = math.nan
     """Derivative of the gas formation volume factor with respect to pressure."""
 
-    solution_gas_oil_ratio_pressure: Number = math.nan
+    drs_dp: Number = math.nan
     """Derivative of the solution gas-oil ratio with respect to pressure."""
 
-    vaporized_oil_gas_ratio_pressure: Number = math.nan
+    drv_dp: Number = math.nan
     """Derivative of the vaporized oil-gas ratio with respect to pressure."""
 
 
 class ConnectionSample(typing.NamedTuple):
     """Reservoir conditions at one connected cell."""
 
-    cell_index: int
+    cell_index: Integer
     """Index of the connected grid cell."""
 
     pressure: Number

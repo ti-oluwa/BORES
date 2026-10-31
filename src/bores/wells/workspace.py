@@ -288,22 +288,22 @@ class DerivativeScratch(typing.NamedTuple):
     backward_pressures: NumberArray[OneDimension]
     """Shape `(size, n)`. Row `t` is the connection pressures with rate `t` stepped the other way."""
 
-    pressure_rate_sensitivities: NumberArray[OneDimension]
+    dpc_dq: NumberArray[OneDimension]
     """Shape `(n, size)`. How each connection's pressure changes with every connection rate."""
 
-    pressure_reference_sensitivities: NumberArray[OneDimension]
+    dpc_dbhp: NumberArray[OneDimension]
     """Shape `(n,)`. How each connection's pressure changes with the reference pressure."""
 
-    wellbore_pressure_partials: NumberArray[OneDimension]
+    dq_dpc: NumberArray[OneDimension]
     """Shape `(n, 3)`. Each connection's rates against the pressure in the wellbore beside it."""
 
-    cell_partials: NumberArray[OneDimension]
+    dq_dx_direct: NumberArray[OneDimension]
     """Shape `(n, 3, 3)`. Each connection's rates against its cell's pressure and saturations."""
 
-    gas_rate_partials: NumberArray[OneDimension]
+    dq_dqg: NumberArray[OneDimension]
     """Shape `(n, 3)`. Each connection's rates against its own gas rate, through non-Darcy flow."""
 
-    composition_partials: NumberArray[OneDimension]
+    dq_dq_composition: NumberArray[OneDimension]
     """Shape `(size, size)`. A reversed producer connection's rates against the producing ones."""
 
     system: NumberArray[OneDimension]
@@ -312,16 +312,16 @@ class DerivativeScratch(typing.NamedTuple):
     right_hand_side: NumberArray[OneDimension]
     """Shape `(size, size + 1)`. The cell unknowns' columns, then the bottom-hole pressure's."""
 
-    rate_cell_derivatives: NumberArray[OneDimension]
+    dq_dx: NumberArray[OneDimension]
     """Shape `(size, size)`. The connection rates against the cell unknowns."""
 
-    rate_bhp_derivatives: NumberArray[OneDimension]
+    dq_dbhp: NumberArray[OneDimension]
     """Shape `(size,)`. The connection rates against the bottom-hole pressure."""
 
-    surface_cell_derivatives: NumberArray[OneDimension]
+    dqs_dx: NumberArray[OneDimension]
     """Shape `(size, size)`. The surface component rates against the cell unknowns."""
 
-    surface_bhp_derivatives: NumberArray[OneDimension]
+    dqs_dbhp: NumberArray[OneDimension]
     """Shape `(size,)`. The surface component rates against the bottom-hole pressure."""
 
 
@@ -351,18 +351,18 @@ def build_derivative_scratch(*, max_connections: Integer) -> DerivativeScratch:
         shifted_gas_rates=buffer(size * count),
         forward_pressures=buffer(size * count),
         backward_pressures=buffer(size * count),
-        pressure_rate_sensitivities=buffer(count * size),
-        pressure_reference_sensitivities=buffer(count),
-        wellbore_pressure_partials=buffer(count * 3),
-        cell_partials=buffer(count * 9),
-        gas_rate_partials=buffer(count * 3),
-        composition_partials=buffer(size * size),
+        dpc_dq=buffer(count * size),
+        dpc_dbhp=buffer(count),
+        dq_dpc=buffer(count * 3),
+        dq_dx_direct=buffer(count * 9),
+        dq_dqg=buffer(count * 3),
+        dq_dq_composition=buffer(size * size),
         system=buffer(size * size),
         right_hand_side=buffer(size * (size + 1)),
-        rate_cell_derivatives=buffer(size * size),
-        rate_bhp_derivatives=buffer(size),
-        surface_cell_derivatives=buffer(size * size),
-        surface_bhp_derivatives=buffer(size),
+        dq_dx=buffer(size * size),
+        dq_dbhp=buffer(size),
+        dqs_dx=buffer(size * size),
+        dqs_dbhp=buffer(size),
     )
 
 
@@ -447,14 +447,14 @@ class WellsWorkspace(typing.NamedTuple):
 
     derivative_offsets: IntArray[OneDimension]
     """
-    Shape `(n_wells + 1,)`. Where each well's block starts in `connection_rate_cell_derivatives`
-    and `connection_surface_rate_cell_derivatives`. A well with `n` connections has a block of
+    Shape `(n_wells + 1,)`. Where each well's block starts in `dq_dx_connection`
+    and `dqs_dx_connection`. A well with `n` connections has a block of
     `(3 * n) ** 2` entries, so its block is `derivative_offsets[w]:derivative_offsets[w + 1]`.
     All zero when the workspace was built without `well_offsets`, and then no derivatives are
     stored.
     """
 
-    connection_rate_cell_derivatives: NumberArray[OneDimension]
+    dq_dx_connection: NumberArray[OneDimension]
     """
     Each well's block, flattened row by row, of how its connections' reservoir-condition phase
     rates change with the primary unknowns of every one of its connections' cells. A well's
@@ -467,63 +467,63 @@ class WellsWorkspace(typing.NamedTuple):
     rows and columns. `get_well_derivatives` reads a well's block.
     """
 
-    connection_surface_rate_cell_derivatives: NumberArray[OneDimension]
+    dqs_dx_connection: NumberArray[OneDimension]
     """
-    As `connection_rate_cell_derivatives`, for the surface-condition rate of each component at
+    As `dq_dx_connection`, for the surface-condition rate of each component at
     each connection: stock-tank oil, stock-tank water and standard gas, in that order. The gas
     that a producer's oil carries in solution and the oil its gas carries as vapor are included,
     so these are the rates at which the reservoir's components leave or enter through the well.
     """
 
-    connection_rate_bhp_derivatives: NumberArray[TwoDimensions]
+    dq_dbhp_connection: NumberArray[TwoDimensions]
     """
     Shape `(n_connections, 3)`. How each connection's reservoir-condition oil, water and gas rates
     change with the well's bottom-hole pressure, indexed like `connection_pressures`. A total
     derivative, with every cell's unknowns held fixed.
     """
 
-    connection_surface_rate_bhp_derivatives: NumberArray[TwoDimensions]
+    dqs_dbhp_connection: NumberArray[TwoDimensions]
     """
-    Shape `(n_connections, 3)`. As `connection_rate_bhp_derivatives`, for the surface-condition
+    Shape `(n_connections, 3)`. As `dq_dbhp_connection`, for the surface-condition
     oil, water and gas component rates.
     """
 
-    well_rate_cell_derivatives: NumberArray[ThreeDimensions]
+    dq_dx_well: NumberArray[ThreeDimensions]
     """
     Shape `(n_connections, 3, 3)`. For the well each connection belongs to, how that well's
     total reservoir-condition oil, water and gas rates (axis 1) change with the pressure, water
     saturation and gas saturation (axis 2) of the cell at that connection, indexed like
-    `connection_pressures`. These are the sums of the well's rows of `connection_rate_cell_derivatives`
+    `connection_pressures`. These are the sums of the well's rows of `dq_dx_connection`
     and give the Jacobian row of a reservoir-volume-rate control.
     """
 
-    well_surface_rate_cell_derivatives: NumberArray[ThreeDimensions]
+    dqs_dx_well: NumberArray[ThreeDimensions]
     """
-    Shape `(n_connections, 3, 3)`. As `well_rate_cell_derivatives`, for the well's total
+    Shape `(n_connections, 3, 3)`. As `dq_dx_well`, for the well's total
     surface-condition oil, water and gas rates. A surface rate control's Jacobian row is the
     sum of these over the phases it counts.
     """
 
-    well_rate_bhp_derivatives: NumberArray[TwoDimensions]
+    dq_dbhp_well: NumberArray[TwoDimensions]
     """
     Shape `(n_wells, 3)`. How each well's total reservoir-condition oil, water and gas rates
     change with its own bottom-hole pressure.
     """
 
-    well_surface_rate_bhp_derivatives: NumberArray[TwoDimensions]
+    dqs_dbhp_well: NumberArray[TwoDimensions]
     """
-    Shape `(n_wells, 3)`. As `well_rate_bhp_derivatives`, for the surface-condition oil, water and
+    Shape `(n_wells, 3)`. As `dq_dbhp_well`, for the surface-condition oil, water and
     gas rates.
     """
 
-    thp_bhp_derivatives: NumberArray[OneDimension]
+    dthp_dbhp: NumberArray[OneDimension]
     """
     Shape `(n_wells,)`. How each well's tubing head pressure changes with its own bottom-hole
     pressure, including the change in the rates that the bottom-hole pressure makes. `NaN` for
     a well with no tubing head pressure.
     """
 
-    thp_cell_derivatives: NumberArray[TwoDimensions]
+    dthp_dx: NumberArray[TwoDimensions]
     """
     Shape `(n_connections, 3)`. For the well each connection belongs to, how that well's tubing
     head pressure changes with the pressure, water saturation and gas saturation of the cell at
@@ -618,28 +618,28 @@ def build_wells_workspace(
         connection_water_rates=np.full(n_connections, np.nan, dtype=dtype),
         connection_gas_rates=np.full(n_connections, np.nan, dtype=dtype),
         derivative_offsets=typing.cast("IntArray[OneDimension]", derivative_offsets),
-        connection_rate_cell_derivatives=np.full(n_block_entries, np.nan, dtype=dtype),
-        connection_surface_rate_cell_derivatives=np.full(n_block_entries, np.nan, dtype=dtype),
-        connection_rate_bhp_derivatives=typing.cast(
+        dq_dx_connection=np.full(n_block_entries, np.nan, dtype=dtype),
+        dqs_dx_connection=np.full(n_block_entries, np.nan, dtype=dtype),
+        dq_dbhp_connection=typing.cast(
             "NumberArray[TwoDimensions]", np.full((n_connections, 3), np.nan, dtype=dtype)
         ),
-        connection_surface_rate_bhp_derivatives=typing.cast(
+        dqs_dbhp_connection=typing.cast(
             "NumberArray[TwoDimensions]", np.full((n_connections, 3), np.nan, dtype=dtype)
         ),
-        well_rate_cell_derivatives=typing.cast(
+        dq_dx_well=typing.cast(
             "NumberArray[ThreeDimensions]", np.full((n_connections, 3, 3), np.nan, dtype=dtype)
         ),
-        well_surface_rate_cell_derivatives=typing.cast(
+        dqs_dx_well=typing.cast(
             "NumberArray[ThreeDimensions]", np.full((n_connections, 3, 3), np.nan, dtype=dtype)
         ),
-        well_rate_bhp_derivatives=typing.cast(
+        dq_dbhp_well=typing.cast(
             "NumberArray[TwoDimensions]", np.full((n_wells, 3), np.nan, dtype=dtype)
         ),
-        well_surface_rate_bhp_derivatives=typing.cast(
+        dqs_dbhp_well=typing.cast(
             "NumberArray[TwoDimensions]", np.full((n_wells, 3), np.nan, dtype=dtype)
         ),
-        thp_bhp_derivatives=np.full(n_wells, np.nan, dtype=dtype),
-        thp_cell_derivatives=typing.cast(
+        dthp_dbhp=np.full(n_wells, np.nan, dtype=dtype),
+        dthp_dx=typing.cast(
             "NumberArray[TwoDimensions]", np.full((n_connections, 3), np.nan, dtype=dtype)
         ),
         derivative_scratch=build_derivative_scratch(max_connections=max_connections),
