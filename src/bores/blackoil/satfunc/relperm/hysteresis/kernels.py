@@ -179,6 +179,7 @@ def scan_relative_permeabilities_block(
     use_gas_hysteresis: Boolean,
     gas_is_non_wetting: Boolean,
     gas_translated_scanning: Boolean,
+    water_translated_scanning: Boolean,
     scanning_exponent: Number,
     numerical_epsilon: Number,
     values: CurveSet,
@@ -213,16 +214,28 @@ def scan_relative_permeabilities_block(
         water_weight = 0.0
         water_weight_derivative = 0.0
         if use_water_hysteresis:
-            water_weight, water_weight_derivative = compute_killough_scanning_weight(
-                saturation=sw,
-                reversal_saturation=element_at(array=history.water_reversal_saturation, index=i),
-                maximum_historical_saturation=element_at(
-                    array=history.max_water_saturation, index=i
-                ),
-                is_imbibition=element_at(array=history.water_imbibition_flag, index=i),
-                scanning_exponent=scanning_exponent,
-                numerical_epsilon=numerical_epsilon,
-            )
+            if water_translated_scanning:
+                # Carlson: oil, the non-wetting phase, is on its translated imbibition curve once
+                # water has risen above the minimum it has reached, which is where oil peaked.
+                water_weight = (
+                    1.0
+                    if sw > element_at(array=history.water_reversal_saturation, index=i)
+                    else 0.0
+                )
+                water_weight_derivative = 0.0
+            else:
+                water_weight, water_weight_derivative = compute_killough_scanning_weight(
+                    saturation=sw,
+                    reversal_saturation=element_at(
+                        array=history.water_reversal_saturation, index=i
+                    ),
+                    maximum_historical_saturation=element_at(
+                        array=history.max_water_saturation, index=i
+                    ),
+                    is_imbibition=element_at(array=history.water_imbibition_flag, index=i),
+                    scanning_exponent=scanning_exponent,
+                    numerical_epsilon=numerical_epsilon,
+                )
         gas_weight = 0.0
         gas_weight_derivative = 0.0
         if use_gas_hysteresis:
@@ -366,6 +379,7 @@ def scan_relative_permeabilities(
     use_gas_hysteresis: Boolean,
     gas_is_non_wetting: Boolean,
     gas_translated_scanning: Boolean,
+    water_translated_scanning: Boolean,
     scanning_exponent: Number,
     numerical_epsilon: Number,
     values: CurveSet,
@@ -391,6 +405,7 @@ def scan_relative_permeabilities(
         use_gas_hysteresis=use_gas_hysteresis,
         gas_is_non_wetting=gas_is_non_wetting,
         gas_translated_scanning=gas_translated_scanning,
+        water_translated_scanning=water_translated_scanning,
         scanning_exponent=scanning_exponent,
         numerical_epsilon=numerical_epsilon,
         values=values,
@@ -417,6 +432,7 @@ def scan_relative_permeabilities_parallel(
     use_gas_hysteresis: Boolean,
     gas_is_non_wetting: Boolean,
     gas_translated_scanning: Boolean,
+    water_translated_scanning: Boolean,
     scanning_exponent: Number,
     numerical_epsilon: Number,
     values: CurveSet,
@@ -447,6 +463,7 @@ def scan_relative_permeabilities_parallel(
             use_gas_hysteresis=use_gas_hysteresis,
             gas_is_non_wetting=gas_is_non_wetting,
             gas_translated_scanning=gas_translated_scanning,
+            water_translated_scanning=water_translated_scanning,
             scanning_exponent=scanning_exponent,
             numerical_epsilon=numerical_epsilon,
             values=values,

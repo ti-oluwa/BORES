@@ -193,6 +193,9 @@ class ScanInputs(typing.NamedTuple):
     water_reversal: NumberArray[OneDimension]
     gas_reversal: NumberArray[OneDimension]
 
+    water_minimum: NumberArray[OneDimension]
+    """Historical minimum water saturation per cell, or the placeholder when it was not given."""
+
 
 class BoundingCurves(typing.NamedTuple):
     """
@@ -422,6 +425,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         gas_imbibition_flag: bool | BooleanArray[NDimension] | None,
         water_reversal_saturation: NumberOrArray[NDimension] | None,
         gas_reversal_saturation: NumberOrArray[NDimension] | None,
+        min_water_saturation: NumberOrArray[NDimension] | None = None,
     ) -> tuple[ScanInputs, HistoryArrays]:
         """
         Broadcast, flatten and normalise the saturations and history of one `compute` call.
@@ -443,6 +447,8 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
             inputs += [max_water_saturation, water_imbibition_flag]
             if water_reversal_saturation is not None:
                 inputs.append(water_reversal_saturation)
+            if min_water_saturation is not None:
+                inputs.append(min_water_saturation)
         if use_gas_hysteresis:
             inputs += [max_gas_saturation, gas_imbibition_flag]
             if gas_reversal_saturation is not None:
@@ -503,6 +509,12 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         else:
             maximum_gas, gas_flag, gas_reversal = placeholder, no_flag, placeholder
 
+        water_minimum = (
+            flatten_kernel_input(value=min_water_saturation, shape=flat_shape)
+            if use_water_hysteresis and min_water_saturation is not None
+            else placeholder
+        )
+
         history = HistoryArrays(
             max_water_saturation=typing.cast("NumberArray[OneDimension]", maximum_water),
             max_gas_saturation=typing.cast("NumberArray[OneDimension]", maximum_gas),
@@ -526,6 +538,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
             gas_is_non_wetting=gas_is_non_wetting,
             water_reversal=typing.cast("NumberArray[OneDimension]", water_reversal),
             gas_reversal=typing.cast("NumberArray[OneDimension]", gas_reversal),
+            water_minimum=typing.cast("NumberArray[OneDimension]", water_minimum),
         )
         return inputs, history
 
@@ -537,6 +550,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         curves: BoundingCurves,
         scanning_exponent: Number,
         gas_translated_scanning: Boolean,
+        water_translated_scanning: Boolean = False,
         with_derivatives: Boolean,
     ) -> tuple[RelativePermeabilities, RelativePermeabilityDerivatives | None]:
         """
@@ -550,6 +564,9 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
             `gas_translated_scanning` is set.
         :param gas_translated_scanning: Whether the gas weight is a step, 1 below the reversal
             saturation and 0 at and above it, as the Carlson translated curve needs.
+        :param water_translated_scanning: Whether the water weight, which also weighs the oil of
+            the oil-water system, is a step, 1 above the reversal saturation (the minimum water
+            saturation) and 0 at and below it, as the Carlson translated curve needs.
         :param with_derivatives: Whether to also compute the derivatives.
         :returns: The relative permeabilities and, when requested, their derivatives.
         """
@@ -677,6 +694,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
             gas_is_non_wetting=gas_is_non_wetting,
             scanning_exponent=scanning_exponent,
             gas_translated_scanning=gas_translated_scanning,
+            water_translated_scanning=water_translated_scanning,
             numerical_epsilon=1e-12,
             values=values,
             slopes=slopes,

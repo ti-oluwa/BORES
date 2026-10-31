@@ -166,6 +166,7 @@ def test_the_workspace_updates_in_place_and_matches_the_immutable_state():
     for name in (
         "max_water_saturation",
         "max_gas_saturation",
+        "min_water_saturation",
         "water_imbibition_flag",
         "gas_imbibition_flag",
         "water_reversal_saturation",
@@ -201,3 +202,58 @@ def test_an_output_that_cannot_be_written_in_place_is_rejected():
             imbibition_when_increasing=False,
             out_max_saturation=np.zeros(8)[::2],
         )
+
+
+def test_the_historical_minimum_water_saturation_only_ever_falls():
+    history = _walk(
+        water_path=WATER_PATH,
+        gas_path=[0.1] * len(WATER_PATH),
+        water_imbibition_when_increasing=True,
+        gas_imbibition_when_increasing=False,
+    )
+    assert [float(state.min_water_saturation[0]) for state in history] == pytest.approx([
+        0.3,
+        0.2,
+        0.2,
+        0.2,
+        0.2,
+    ])
+
+
+def test_the_minimum_starts_at_the_initial_water_saturation():
+    state = Hysteresis.from_saturation(
+        water_saturation=np.array([0.4, 0.6]), gas_saturation=np.array([0.0, 0.1])
+    )
+    np.testing.assert_allclose(state.min_water_saturation, [0.4, 0.6])
+
+
+def test_the_workspace_snapshot_carries_the_minimum():
+    state = Hysteresis.from_saturation(
+        water_saturation=np.array([0.5, 0.5]), gas_saturation=np.array([0.1, 0.1])
+    )
+    workspace = HysteresisWorkspace.from_state(state)
+    workspace.update(
+        water_saturation=np.array([0.3, 0.6]),
+        gas_saturation=np.array([0.1, 0.1]),
+        previous_water_saturation=np.array([0.5, 0.5]),
+        previous_gas_saturation=np.array([0.1, 0.1]),
+        water_imbibition_when_increasing=True,
+        gas_imbibition_when_increasing=False,
+    )
+    np.testing.assert_allclose(workspace.snapshot().min_water_saturation, [0.3, 0.5])
+
+
+def test_the_minimum_and_where_it_is_written_must_be_given_together():
+    saturation = np.full(4, 0.3)
+    arguments = dict(
+        new_saturation=saturation,
+        previous_saturation=saturation,
+        max_saturation=saturation,
+        imbibition_flag=np.zeros(4, dtype=bool),
+        reversal_saturation=saturation,
+        imbibition_when_increasing=True,
+    )
+    with pytest.raises(ValidationError):
+        advance_phase_hysteresis(**arguments, min_saturation=saturation)
+    with pytest.raises(ValidationError):
+        advance_phase_hysteresis(**arguments, out_min_saturation=np.empty(4))

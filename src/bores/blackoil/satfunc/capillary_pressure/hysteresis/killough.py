@@ -132,6 +132,7 @@ class KilloughCapillaryPressureTable(HysteresisCapillaryPressureTable):
         gas_imbibition_flag: bool | BooleanArray[NDimension] | None = None,
         water_reversal_saturation: NumberOrArray[NDimension] | None = None,
         gas_reversal_saturation: NumberOrArray[NDimension] | None = None,
+        min_water_saturation: NumberOrArray[NDimension] | None = None,
         **kwargs: typing.Any,
     ) -> tuple[CapillaryPressures, CapillaryPressureDerivatives | None]:
         """
@@ -152,6 +153,8 @@ class KilloughCapillaryPressureTable(HysteresisCapillaryPressureTable):
             `max_water_saturation`.
         :param gas_reversal_saturation: Gas saturation at the last reversal. Defaults to
             `max_gas_saturation`.
+        :param min_water_saturation: Historical minimum water saturation per cell. Not used by
+            this model.
         :param kwargs: Extra arguments forwarded to the backing tables.
         :return: The capillary pressures and, when requested, their derivatives (otherwise
             `None`).

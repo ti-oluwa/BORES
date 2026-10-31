@@ -59,6 +59,13 @@ class HysteresisWorkspace(typing.NamedTuple):
     Analogous to `max_water_saturation` for the gas phase.
     """
 
+    min_water_saturation: CellArray
+    """
+    Shape (n_cells,) - historical minimum water saturation reached in each cell (fraction).
+
+    In a water-wet system the highest oil saturation a cell has reached is read off this minimum.
+    """
+
     water_imbibition_flag: BooleanCellArray
     """
     Shape (n_cells,) - `True` if water is currently on its imbibition path.
@@ -109,6 +116,9 @@ class HysteresisWorkspace(typing.NamedTuple):
             ),
             max_gas_saturation=typing.cast(
                 CellArray, np.array(state.max_gas_saturation, dtype=dtype, copy=True)
+            ),
+            min_water_saturation=typing.cast(
+                CellArray, np.array(state.min_water_saturation, dtype=dtype, copy=True)
             ),
             water_imbibition_flag=typing.cast(
                 BooleanCellArray,
@@ -171,6 +181,8 @@ class HysteresisWorkspace(typing.NamedTuple):
             out_max_saturation=self.max_water_saturation,
             out_imbibition_flag=self.water_imbibition_flag,
             out_reversal_saturation=self.water_reversal_saturation,
+            min_saturation=self.min_water_saturation,
+            out_min_saturation=self.min_water_saturation,
         )
         advance_phase_hysteresis(
             new_saturation=gas_saturation,
@@ -312,6 +324,9 @@ def load_hysteresis(workspace: HysteresisWorkspace, *, dtype: npt.DTypeLike = No
         ),
         max_gas_saturation=typing.cast(
             CellArray, np.array(workspace.max_gas_saturation, dtype=dtype, copy=True)
+        ),
+        min_water_saturation=typing.cast(
+            CellArray, np.array(workspace.min_water_saturation, dtype=dtype, copy=True)
         ),
         water_imbibition_flag=workspace.water_imbibition_flag.copy(),
         gas_imbibition_flag=workspace.gas_imbibition_flag.copy(),

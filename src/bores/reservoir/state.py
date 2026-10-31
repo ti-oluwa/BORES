@@ -60,12 +60,17 @@ def advance_phase_hysteresis_kernel(
     out_max_saturation: CellArray,
     out_imbibition_flag: BooleanCellArray,
     out_reversal_saturation: CellArray,
+    track_minimum: Boolean,
+    min_saturation: CellArray,
+    out_min_saturation: CellArray,
 ) -> None:
     """
     Advance one phase's saturation history for every cell in a single pass.
 
     Every input may share memory with its output, because each cell reads all of its inputs
-    before writing any of its outputs. No temporary array is created.
+    before writing any of its outputs. No temporary array is created. The historical minimum is
+    only read and written when `track_minimum` is set, otherwise `min_saturation` and
+    `out_min_saturation` are placeholders.
     """
     for i in range(new_saturation.size):
         saturation = new_saturation[i]
@@ -97,6 +102,8 @@ def advance_phase_hysteresis_kernel(
         out_max_saturation[i] = new_max
         out_imbibition_flag[i] = imbibing
         out_reversal_saturation[i] = reversal
+        if track_minimum:
+            out_min_saturation[i] = min(min_saturation[i], saturation)
 
 
 def advance_phase_hysteresis(
@@ -111,6 +118,8 @@ def advance_phase_hysteresis(
     out_max_saturation: CellArray | None = None,
     out_imbibition_flag: BooleanCellArray | None = None,
     out_reversal_saturation: CellArray | None = None,
+    min_saturation: CellArray | None = None,
+    out_min_saturation: CellArray | None = None,
 ) -> tuple[CellArray, BooleanCellArray, CellArray]:
     """
     Updates one phase's tracked saturation history for one new saturation
@@ -140,7 +149,14 @@ def advance_phase_hysteresis(
     :param out_max_saturation: Receives the new historical maximum.
     :param out_imbibition_flag: Receives the new imbibition flag.
     :param out_reversal_saturation: Receives the new reversal saturation.
-    :returns: `(new_max_saturation, new_imbibition_flag, new_reversal_saturation)`.
+    :param min_saturation: The historical minimum before this update. Give it, with
+        `out_min_saturation`, to track the minimum as well, which a wetting phase needs when the
+        non-wetting phase's peak is read off it. Not tracked when omitted.
+    :param out_min_saturation: Receives the new historical minimum. Required with
+        `min_saturation`, and may be that same array.
+    :returns: `(new_max_saturation, new_imbibition_flag, new_reversal_saturation)`. The minimum is
+        written to `out_min_saturation`.
+    :raises ValidationError: If only one of `min_saturation` and `out_min_saturation` is given.
     """
     tolerance = typing.cast(
         Number, c.HYSTERESIS_SATURATION_TOLERANCE if tolerance is None else tolerance
@@ -162,6 +178,14 @@ def advance_phase_hysteresis(
         if not array.flags.c_contiguous:
             raise ValidationError(f"`{name}` must be C-contiguous so it can be written in place.")
 
+    track_minimum = min_saturation is not None
+    if track_minimum != (out_min_saturation is not None):
+        raise ValidationError("`min_saturation` and `out_min_saturation` must be given together.")
+    if out_min_saturation is not None and not out_min_saturation.flags.c_contiguous:
+        raise ValidationError(
+            "`out_min_saturation` must be C-contiguous so it can be written in place."
+        )
+    placeholder = np.empty(1, dtype=max_saturation.dtype)
     advance_phase_hysteresis_kernel(
         new_saturation=new_saturation.reshape(-1),
         previous_saturation=previous_saturation.reshape(-1),
@@ -173,6 +197,14 @@ def advance_phase_hysteresis(
         out_max_saturation=new_max.reshape(-1),
         out_imbibition_flag=new_flag.reshape(-1),
         out_reversal_saturation=new_reversal.reshape(-1),
+        track_minimum=track_minimum,
+        min_saturation=typing.cast(
+            "CellArray", placeholder if min_saturation is None else min_saturation.reshape(-1)
+        ),
+        out_min_saturation=typing.cast(
+            "CellArray",
+            placeholder if out_min_saturation is None else out_min_saturation.reshape(-1),
+        ),
     )
     return new_max, new_flag, new_reversal
 
@@ -204,6 +236,15 @@ class Hysteresis(StoreSerializable):
     cell (fraction).
 
     Analogous to `max_water_saturation` for the gas phase.
+    """
+
+    min_water_saturation: CellArray
+    """
+    Shape (n_cells,) - historical minimum water saturation reached in each cell (fraction).
+
+    Updated whenever the current water saturation falls below the stored minimum. In a water-wet
+    system the oil is the non-wetting phase, so the highest oil saturation it has reached is read
+    off this minimum, and the oil scanning curves start from it.
     """
 
     water_imbibition_flag: BooleanCellArray
@@ -265,6 +306,7 @@ class Hysteresis(StoreSerializable):
         return cls(
             max_water_saturation=typing.cast(CellArray, sw.copy()),
             max_gas_saturation=typing.cast(CellArray, sg.copy()),
+            min_water_saturation=typing.cast(CellArray, sw.copy()),
             water_imbibition_flag=typing.cast(
                 BooleanCellArray, np.zeros(sw.shape, dtype=np.bool_)
             ),
@@ -320,6 +362,7 @@ class Hysteresis(StoreSerializable):
         previous_sw = np.asarray(previous_water_saturation, dtype=dtype)
         previous_sg = np.asarray(previous_gas_saturation, dtype=dtype)
 
+        new_min_water_saturation = np.empty_like(self.min_water_saturation)
         new_max_water_saturation, new_water_imbibition_flag, new_water_reversal_saturation = (
             advance_phase_hysteresis(
                 new_saturation=typing.cast(CellArray, sw),
@@ -329,6 +372,8 @@ class Hysteresis(StoreSerializable):
                 reversal_saturation=self.water_reversal_saturation,
                 imbibition_when_increasing=water_imbibition_when_increasing,
                 tolerance=tolerance,
+                min_saturation=self.min_water_saturation,
+                out_min_saturation=typing.cast(CellArray, new_min_water_saturation),
             )
         )
         new_max_gas_saturation, new_gas_imbibition_flag, new_gas_reversal_saturation = (
@@ -346,6 +391,7 @@ class Hysteresis(StoreSerializable):
             self,
             max_water_saturation=new_max_water_saturation,
             max_gas_saturation=new_max_gas_saturation,
+            min_water_saturation=typing.cast(CellArray, new_min_water_saturation),
             water_imbibition_flag=new_water_imbibition_flag,
             gas_imbibition_flag=new_gas_imbibition_flag,
             water_reversal_saturation=new_water_reversal_saturation,
@@ -827,6 +873,7 @@ DERIVED_DATAFRAME_FIELDS: tuple[str, ...] = ("total_gas_mass", "total_oil_mass")
 HYSTERESIS_DATAFRAME_FIELDS: tuple[str, ...] = (
     "max_water_saturation",
     "max_gas_saturation",
+    "min_water_saturation",
     "water_imbibition_flag",
     "gas_imbibition_flag",
     "water_reversal_saturation",
@@ -931,7 +978,7 @@ def as_dataframe(
     :param backend: `"pandas"` or `"polars"`. The library must be installed.
     :param fields: Fields to include. They are named like the attributes of `ReservoirState`,
         and may also be `total_gas_mass` and `total_oil_mass`, or any of the hysteresis arrays
-        (`max_water_saturation`, `max_gas_saturation`, `water_imbibition_flag`,
+        (`max_water_saturation`, `max_gas_saturation`, `min_water_saturation`, `water_imbibition_flag`,
         `gas_imbibition_flag`, `water_reversal_saturation`, `gas_reversal_saturation`), which
         need states that track hysteresis. The two imbibition flags are boolean columns.
         `"all"` includes every stored field and hysteresis array that has values, so a state
