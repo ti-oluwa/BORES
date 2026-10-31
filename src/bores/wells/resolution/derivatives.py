@@ -20,7 +20,6 @@ import typing
 
 import numba
 import numpy as np
-from numba import prange
 
 from bores.errors import ValidationError
 from bores.types import (
@@ -377,7 +376,14 @@ def differentiate_pressures(
         else:
             row_gas[connection] = value + step
         evaluate(
-            walk, setup, workspace, row_oil, row_water, row_gas, reference_pressure, forward[task]
+            walk,
+            setup,
+            workspace,
+            row_oil,
+            row_water,
+            row_gas,
+            reference_pressure,
+            forward[task],
         )
 
         if phase == 0:
@@ -387,7 +393,14 @@ def differentiate_pressures(
         else:
             row_gas[connection] = value + lower
         evaluate(
-            walk, setup, workspace, row_oil, row_water, row_gas, reference_pressure, backward[task]
+            walk,
+            setup,
+            workspace,
+            row_oil,
+            row_water,
+            row_gas,
+            reference_pressure,
+            backward[task],
         )
 
         denominator = step - lower
@@ -398,13 +411,25 @@ def differentiate_pressures(
 
     reference_step = get_step(reference_pressure, 1.0)
     evaluate(
-        walk, setup, workspace, base_oil, base_water, base_gas,
-        reference_pressure + reference_step, forward[0],
-    )  # fmt: skip
+        walk,
+        setup,
+        workspace,
+        base_oil,
+        base_water,
+        base_gas,
+        reference_pressure + reference_step,
+        forward[0],
+    )
     evaluate(
-        walk, setup, workspace, base_oil, base_water, base_gas,
-        reference_pressure - reference_step, backward[0],
-    )  # fmt: skip
+        walk,
+        setup,
+        workspace,
+        base_oil,
+        base_water,
+        base_gas,
+        reference_pressure - reference_step,
+        backward[0],
+    )
     for index in range(count):
         reference_sensitivities[index] = (forward[0, index] - backward[0, index]) / (
             2.0 * reference_step
@@ -512,7 +537,7 @@ def compute_connection_partials(
         else (0.0, 0.0, 0.0)
     )
 
-    for index in prange(count):
+    for index in numba.prange(count):
         signed = sign * (cell_pressures[index] - connection_pressures[index])
         if signed == 0:
             continue
@@ -681,7 +706,7 @@ def solve_rate_derivatives(
     system = system_buffer[: size * size].reshape(size, size)
     right_hand_side = right_hand_side_buffer[: size * (size + 1)].reshape(size, size + 1)
 
-    for row in prange(size):
+    for row in numba.prange(size):
         index = row // 3
         row % 3
         slope = wellbore_pressure_partials[row]
@@ -697,7 +722,7 @@ def solve_rate_derivatives(
     solution = solve_linear_system(system, right_hand_side)
 
     cell_output = rate_cell_derivatives[: size * size].reshape(size, size)
-    for row in prange(size):
+    for row in numba.prange(size):
         for column in range(size):
             cell_output[row, column] = solution[row, column]
         rate_bhp_derivatives[row] = solution[row, size]
@@ -754,7 +779,7 @@ def convert_to_surface(
     rate_cell = rate_cell_derivatives[: size * size].reshape(size, size)
     surface_cell = surface_cell_derivatives[: size * size].reshape(size, size)
 
-    for index in prange(count):
+    for index in numba.prange(count):
         oil_rate = oil_rates[index]
         water_rate = water_rates[index]
         gas_rate = gas_rates[index]
@@ -875,7 +900,7 @@ def write_well_derivatives(
     well_rate_cell_derivatives[start : start + n_compiled] = 0.0
     well_surface_rate_cell_derivatives[start : start + n_compiled] = 0.0
 
-    for index in prange(count):
+    for index in numba.prange(count):
         local_row = active_rows[index] - start
         for phase in range(3):
             row = 3 * index + phase
@@ -894,7 +919,7 @@ def write_well_derivatives(
                 surface_bhp_derivatives[row]
             )
 
-    for other in prange(count):
+    for other in numba.prange(count):
         for phase in range(3):
             for unknown in range(3):
                 total = 0.0

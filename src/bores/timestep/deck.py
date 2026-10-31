@@ -106,7 +106,7 @@ def load_timer(deck_file: DeckFile) -> Timer | None:
         options["aggressive_backoff_factor"] = min(0.25, backoff)
 
     mass_balance = convergence.get("xxxmbe", TUNING_DEFAULTS["xxxmbe"])
-    if mass_balance is not None and float(mass_balance) != TUNING_DEFAULTS["xxxmbe"]:
+    if mass_balance is not None and float(mass_balance) != TUNING_DEFAULTS["xxxmbe"]:  # noqa
         options["maximum_total_relative_mbe"] = float(mass_balance)
 
     return Timer(

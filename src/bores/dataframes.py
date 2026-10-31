@@ -1,4 +1,4 @@
-"""Shared support for turning result models into pandas or polars data frames."""
+"""Shared API for turning result models into pandas or polars data frames."""
 
 import importlib
 import typing

@@ -373,7 +373,7 @@ class SatFunc:
             )
         return cls(tables=tables)
 
-    def __getitem__(self, key: int) -> SatFuncTables:
+    def __getitem__(self, key: Integer) -> SatFuncTables:
         return self.region(key)
 
     def __iter__(self) -> typing.Iterator[Integer]:

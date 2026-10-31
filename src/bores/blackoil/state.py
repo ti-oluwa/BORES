@@ -1,4 +1,4 @@
-"""Dynamic simulation state for one point in time: reservoir state plus optional well states."""
+"""Dynamic simulation state for one point in time. Contains the reservoir state plus optional well states."""
 
 import typing
 
@@ -12,14 +12,14 @@ from bores.dataframes import AnyDataFrame, Backend, resolve_backend
 from bores.errors import ValidationError
 from bores.grids.base import Grid
 from bores.reservoir.state import Hysteresis, ReservoirState
-from bores.reservoir.state import as_dataframe as reservoir_as_dataframe
+from bores.reservoir.state import as_dataframe as as_reservoir_dataframe
 from bores.reservoir.workspace import HysteresisWorkspace, load_reservoir_state
 from bores.serde.base import Serializable
 from bores.types import Boolean, CellArray, Integer, Number, UnitConversionTable, UnitSystem
 from bores.units import get_conversion_factors, resolve_unit_conversion_table
 from bores.utils import scale
 from bores.wells.state import WellStates
-from bores.wells.state import as_dataframe as wells_as_dataframe
+from bores.wells.state import as_dataframe as as_wells_dataframe
 from bores.wells.workspace import load_wells_states
 
 if typing.TYPE_CHECKING:
@@ -412,7 +412,7 @@ def as_dataframe(
         snapshots = [snapshot.convert(unit_system) for snapshot in snapshots]
 
     if part == "reservoir":
-        return reservoir_as_dataframe(
+        return as_reservoir_dataframe(
             [snapshot.reservoir for snapshot in snapshots],
             backend=backend,
             fields=fields,
@@ -429,7 +429,7 @@ def as_dataframe(
         raise ValidationError(
             f"None of the states carries well states, so `part={part!r}` is empty."
         )
-    return wells_as_dataframe(
+    return as_wells_dataframe(
         [typing.cast("WellStates", snapshot.wells) for snapshot in with_wells],
         backend=backend,
         level="well" if part == "wells" else "perforation",

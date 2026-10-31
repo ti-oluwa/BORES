@@ -31,6 +31,7 @@ from bores.reservoir.state import Hysteresis, ReservoirState
 from bores.reservoir.temperature import Temperature, TemperatureGradient, TemperatureTable
 from bores.types import (
     Boolean,
+    BooleanCellArray,
     CellArray,
     IntArray,
     IntCellArray,
@@ -1837,7 +1838,7 @@ cell is reported as inconsistent. It absorbs the rounding of the working precisi
 """
 
 
-def get_active_cells(grid: Grid, n_cells: int) -> npt.NDArray[np.bool_] | None:
+def get_active_cells(grid: Grid, n_cells: int) -> BooleanCellArray | None:
     """
     Which cells of the grid take part in the flow simulation.
 
@@ -1860,7 +1861,7 @@ def warn_on_inconsistent_phase_state(
     water_saturation: CellArray,
     gas_saturation: CellArray,
     oil_saturation: CellArray,
-    active: npt.NDArray[np.bool_] | None,
+    active: BooleanCellArray | None,
     explicit_fields: typing.Collection[str],
 ) -> None:
     """

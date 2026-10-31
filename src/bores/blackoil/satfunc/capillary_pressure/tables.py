@@ -899,6 +899,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
                     rows = sgwfn_rows[region_index]
                 else:
                     rows = require("SGFN")
+
             pressure_column = "pcgw" if "pcgw" in rows[0] else "pcog"
             sg = np.array([row["sg"] for row in rows], dtype=dtype)
             pcgw = np.array([row[pressure_column] for row in rows], dtype=dtype)

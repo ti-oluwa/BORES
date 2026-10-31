@@ -23,8 +23,8 @@ class DeckDimensionWarning(UserWarning):
     """A deck holds more than one of its own dimension keywords says it should."""
 
 
-def region_counts(deck_file: DeckFile, keywords: typing.Iterable[str]) -> dict[str, int]:
-    """How many regions (tables) each present keyword of `keywords` defines."""
+def get_region_counts(deck_file: DeckFile, keywords: typing.Iterable[str]) -> dict[str, int]:
+    """Counts how many regions (tables) each present keyword of `keywords` defines."""
     counts: dict[str, int] = {}
     for keyword in keywords:
         records = deck_file.get_shared(keyword) if deck_file.has(keyword) else None
@@ -53,7 +53,7 @@ def check_deck_dimensions(deck_file: DeckFile) -> list[str]:
 
     tabdims = deck_file.get_shared("TABDIMS")
     if tabdims is not None:
-        saturation = region_counts(deck_file, SATURATION_TABLE_KEYWORDS)
+        saturation = get_region_counts(deck_file, SATURATION_TABLE_KEYWORDS)
         if saturation:
             keyword = max(saturation, key=lambda name: saturation[name])
             exceeded(
@@ -75,7 +75,8 @@ def check_deck_dimensions(deck_file: DeckFile) -> list[str]:
                 longest,
                 "rows in its longest saturation function table",
             )
-        pvt = region_counts(deck_file, PVT_TABLE_KEYWORDS)
+
+        pvt = get_region_counts(deck_file, PVT_TABLE_KEYWORDS)
         if pvt:
             keyword = max(pvt, key=lambda name: pvt[name])
             exceeded(

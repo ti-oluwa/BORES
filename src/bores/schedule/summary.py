@@ -554,6 +554,7 @@ def select_summary_keys(
             matches = [key for key in available if fnmatch.fnmatchcase(key, pattern)]
         else:
             matches = [pattern] if pattern in report.key_indices else []
+
         if not matches:
             shown = available[:20]
             more = f" and {len(available) - 20} more" if len(available) > 20 else ""
@@ -710,6 +711,7 @@ def as_dataframe(
                 Column(name="vector", values=vectors, kind="str", categorical=categorical),
                 Column(name="qualifier", values=qualifiers, kind="str", categorical=categorical),
             ]
+
         columns += [
             Column(
                 name="time",
@@ -761,6 +763,7 @@ def as_dataframe(
                     dates[row] = record.date
                 if record.time_step is not None and time_steps[row] is None:
                     time_steps[row] = record.time_step
+
         if include_dates:
             columns.append(Column(name="date", values=dates, kind="datetime"))
         if include_time_steps:

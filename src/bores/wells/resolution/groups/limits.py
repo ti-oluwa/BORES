@@ -1,12 +1,7 @@
 """
-`GECON` group-level economic-limit enforcement.
+Well group-level economic-limit enforcement.
 
-Checked after a group's member wells have already been resolved for the
-current timestep. Every action this module takes against a group's
-target or membership is followed by reallocating (`allocate_group_targets`)
-and actually re-resolving (`resolve_well_control`) every affected member
-still open, before rechecking the group's aggregate - never leaves a
-stale rate behind for the caller to reconcile.
+Checked after a group's member wells have already been resolved for the current timestep.
 """
 
 import math
@@ -441,7 +436,8 @@ def enforce_group_economic_limits(
         reallocated_wells.extend(name for name in reresolved if name not in reallocated_wells)
 
     rates = aggregate_member_rates(
-        workspace=workspace, open_member_wells=typing.cast("IntArray[OneDimension]", open_members)
+        workspace=workspace,
+        open_member_wells=typing.cast("IntArray[OneDimension]", open_members),
     )
     still_violated = (
         check_economic_violation(

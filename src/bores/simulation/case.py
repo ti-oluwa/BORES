@@ -474,12 +474,14 @@ def check_deck_requirements(
             all_of_keywords=geometry.get("all_of", ()),
             any_of_keywords=geometry.get("any_of", ()),
         )
+
     if needs_temperature:
         require("temperature", any_of_keywords=(TEMPERATURE_KEYWORDS,))
     if needs_satfunc:
         # Which systems a model needs is left to `SatFunc.from_deck`, which can accept a single
         # one (`allow_two_phase`), so only the presence of some saturation function is checked.
         require("saturation functions", any_of_keywords=(SATFUNC_KEYWORDS,))
+
     if needs_rock:
         require(
             "rock",
@@ -496,6 +498,7 @@ def check_deck_requirements(
                 all_of_keywords=requirements["all_of"],
                 any_of_keywords=requirements["any_of"],
             )
+
     if needs_equilibrium:
         require("initial state", all_of_keywords=("EQUIL",))
     if needs_wells:
@@ -505,6 +508,7 @@ def check_deck_requirements(
 
     for entry in find_missing(deck_file, all_of=all_of, any_of=any_of):
         problems.append(f"{stage_of[entry]}: {entry}")
+
     if problems:
         raise CaseLoadError(
             f"The deck for case {title!r} is missing what is needed to load it: "
@@ -715,6 +719,7 @@ def load_case(
         runspec = runspec.convert(unit_system)
         if runspec.phases is None and phases is not None:
             runspec = attrs.evolve(runspec, phases=phases)
+
     if temperature is None:
         # Only the PVT tables and the initial state need a temperature.
         if pvt is None or initial_state is None:

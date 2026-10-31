@@ -902,7 +902,9 @@ def build_perforation_dataframe(
     cell_indices = np.fromiter((p.cell_index for p in perforations), dtype=np.int64)
     columns: list[Column] = []
     label = get_label_column(
-        times=times, row_counts=count_rows(snapshot_positions, count=count), is_single=is_single
+        times=times,
+        row_counts=count_rows(snapshot_positions, count=count),
+        is_single=is_single,
     )
     if label is not None:
         columns.append(label)

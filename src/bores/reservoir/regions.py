@@ -22,8 +22,8 @@ __all__ = ["RegionGroups", "Regions", "group_cells_by_region"]
 def load_region_array(
     deck_file: DeckFile,
     keyword: str,
-    n_cells: int,
-    default_region: int | None = None,
+    n_cells: Integer,
+    default_region: Integer | None = None,
     *,
     active: BooleanCellArray | None = None,
 ) -> IntCellArray | None:
@@ -70,10 +70,10 @@ class RegionGroups(typing.NamedTuple):
     on every timestep instead of being rediscovered from the region arrays each time.
     """
 
-    saturation_regions: tuple[int, ...]
+    saturation_regions: tuple[Integer, ...]
     """Saturation region number (`SATNUM`) of each group."""
 
-    imbibition_regions: tuple[int, ...]
+    imbibition_regions: tuple[Integer, ...]
     """Imbibition region number (`IMBNUM`) of each group, `0` when no imbibition regions are used."""
 
     cell_indices: tuple[IntCellArray | None, ...]
