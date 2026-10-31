@@ -4,14 +4,17 @@ import typing
 
 from bores.deck.file import DeckFile
 from bores.deck.phases import declares_phases, read_deck_phases
+from bores.simulation.options import (
+    load_equilibration_options,
+    load_minimum_pore_volume,
+    load_model_dimensions,
+    load_saturation_options,
+)
 from bores.simulation.spec import RunSpec
-from bores.timestep.deck import get_tuning_at_start, load_timer
+from bores.timestep.deck import TUNING_DEFAULTS, get_tuning_at_start, load_timer
 from bores.wells.deck import load_well_control_spec
 
-__all__ = ["NEWTON_ITERATIONS_DEFAULT", "load_run_spec"]
-
-NEWTON_ITERATIONS_DEFAULT = 12
-"""`NEWTMX`'s default in Eclipse. A deck value equal to it is taken as not customised."""
+__all__ = ["load_run_spec"]
 
 
 def load_run_spec(deck_file: DeckFile) -> RunSpec:
@@ -28,8 +31,11 @@ def load_run_spec(deck_file: DeckFile) -> RunSpec:
       schedule length to run for.
     - `well_control`: see `load_well_control_spec`.
     - `hysteresis_enabled`: whether `SATOPTS` lists `HYSTER`.
-    - `maximum_newton_iterations`: `NEWTMX` from the `TUNING` in effect at the start, only if the
-      deck sets it to something other than Eclipse's default and within the range `RunSpec`
+    - `saturation_options`, `equilibration_options`: `SATOPTS` and `EQLOPTS`.
+    - `dimensions`: `TABDIMS`, `EQLDIMS`, `REGDIMS`, `WELLDIMS`, `VFPPDIMS` and `VFPIDIMS`.
+    - `minimum_pore_volume`: `MINPV`, in pore volume units.
+    - `maximum_newton_iterations`: the `TUNING` item of that name in effect at the start, only if
+      the deck sets it to something other than Eclipse's default and within the range `RunSpec`
       accepts.
 
     Everything else (solvers, tolerances, capillary and gravity switches, ...) has no deck
@@ -49,15 +55,26 @@ def load_run_spec(deck_file: DeckFile) -> RunSpec:
     if "HYSTER" in saturation_options:
         options["hysteresis_enabled"] = True
 
-    tuning = get_tuning_at_start(deck_file)
-    newton = ((tuning or {}).get("iteration", {})).get("newtmx")
-    if newton is not None and int(newton) != NEWTON_ITERATIONS_DEFAULT and 1 <= int(newton) <= 50:
-        options["maximum_newton_iterations"] = int(newton)
+    tuning = get_tuning_at_start(deck_file) or {}
+    maximum_newton_iterations = tuning.get("iteration", {}).get("maximum_newton_iterations")
+    if (
+        maximum_newton_iterations is not None
+        and int(maximum_newton_iterations) != TUNING_DEFAULTS["maximum_newton_iterations"]
+        and 1 <= int(maximum_newton_iterations) <= 50
+    ):
+        options["maximum_newton_iterations"] = int(maximum_newton_iterations)
+
+    minimum_pore_volume = load_minimum_pore_volume(deck_file)
+    if minimum_pore_volume is not None:
+        options["minimum_pore_volume"] = minimum_pore_volume
 
     return RunSpec(
         unit_system=deck_file.unit_system,
-        phases=read_deck_phases(deck_file) if declares_phases(deck_file) else None,
+        phases=read_deck_phases(deck_file).to_phases() if declares_phases(deck_file) else None,
         timer=load_timer(deck_file),
         well_control=load_well_control_spec(deck_file),
+        saturation_options=load_saturation_options(deck_file),
+        equilibration_options=load_equilibration_options(deck_file),
+        dimensions=load_model_dimensions(deck_file),
         **options,
     )

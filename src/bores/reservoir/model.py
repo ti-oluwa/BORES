@@ -14,7 +14,7 @@ from bores.reservoir.transmissibility import (
     ConnectionTransmissibilities,
     compute_connection_transmissibilities,
 )
-from bores.types import CellArray, Number, UnitSystem
+from bores.types import BooleanCellArray, CellArray, Number, UnitSystem
 from bores.units import (
     UnitConversionTable,
     build_unit_conversion_table,
@@ -219,6 +219,25 @@ class Reservoir:
         return (  # type: ignore[return-value]
             self.rock.porosity * self.rock.net_to_gross * self.grid.cell_volumes
         )
+
+    def compute_flow_mask(self, minimum_pore_volume: Number | None) -> BooleanCellArray:
+        """
+        Which cells are large enough in pore volume to take part in the flow (`MINPV`).
+
+        A cell whose pore volume is below `minimum_pore_volume` is left out, as in Eclipse. The
+        comparison is made on `pore_volumes`, the pore volume at the rock's reference pressure,
+        and not on the pore volume at the current pressure. The mask is therefore fixed for the
+        whole run: a cell does not drop out and come back as compaction changes its pore volume.
+        The grid's own cell statuses are left as they are, so this is a mask to apply on top of
+        them where the cells are solved for.
+
+        :param minimum_pore_volume: Smallest pore volume a cell may have, in the unit of
+            `pore_volumes`. `None` keeps every cell.
+        :returns: Shape `(n_cells,)`, `True` for the cells that take part in the flow.
+        """
+        if minimum_pore_volume is None:
+            return typing.cast("BooleanCellArray", np.ones(self.grid.n_cells, dtype=np.bool_))
+        return typing.cast("BooleanCellArray", self.pore_volumes >= minimum_pore_volume)
 
     def compute_pore_volumes(self, pressure: CellArray) -> CellArray:
         """

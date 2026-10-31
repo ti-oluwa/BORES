@@ -21,7 +21,7 @@ from bores.types import Boolean, Number, UnitConversionTable, UnitSystem
 from bores.units import get_conversion_factors
 from bores.utils import scale
 
-__all__ = ["Time", "Timer", "TimerState"]
+__all__ = ["RETUNABLE_SETTINGS", "Time", "Timer", "TimerState"]
 
 logger = logging.getLogger(__name__)
 
@@ -199,6 +199,18 @@ def check_same_source(old: TimeTargetSource, new: TimeTargetSource) -> bool:
     return isinstance(old, value_types) and type(old) is type(new) and old == new
 
 
+RETUNABLE_SETTINGS: tuple[str, ...] = (
+    "initial_step_size",
+    "maximum_step_size",
+    "minimum_step_size",
+    "maximum_growth_per_step",
+    "backoff_factor",
+    "aggressive_backoff_factor",
+    "maximum_total_relative_mbe",
+)
+"""The `Timer` settings `Timer.retune` can change during a run."""
+
+
 @attrs.mutable(kw_only=True, slots=True)
 class Timer:
     """
@@ -374,6 +386,57 @@ class Timer:
         self.failed_step_sizes = deque(maxlen=self.failure_memory_window)
         self._cfl_window = deque(maxlen=self.metrics_history_size)
         self._newton_window = deque(maxlen=self.metrics_history_size)
+
+    def retune(self, settings: typing.Mapping[str, Number], /) -> None:
+        """
+        Changes some of the timer's settings part-way through a run.
+
+        The run's progress is kept. The step the timer has planned next is brought inside the new
+        limits (and under the new `initial_step_size` if one is given, which from now on means the
+        longest the next step may be), and a remembered failure ceiling that the new maximum
+        step size has passed is dropped. If the new settings are not usable together, nothing is
+        changed.
+
+        :param settings: New values by setting name. Only `RETUNABLE_SETTINGS` may be given.
+        :raises ValidationError: If a setting cannot be changed this way, or the settings do not
+            hold together (a minimum step above the maximum, a backoff factor outside 0 to 1, ...).
+        """
+        unknown = sorted(set(settings) - set(RETUNABLE_SETTINGS))
+        if unknown:
+            raise ValidationError(
+                f"These settings cannot be changed during a run: {unknown}. "
+                f"The ones that can: {sorted(RETUNABLE_SETTINGS)}."
+            )
+
+        names = {*settings, "initial_step_size"}
+        previous = {name: getattr(self, name) for name in names}
+        for name, value in settings.items():
+            setattr(self, name, value)
+
+        # The initial step only bounds the first step, so it follows the limits rather than
+        # blocking a change of them
+        self.initial_step_size = min(
+            max(self.initial_step_size, self.minimum_step_size), self.maximum_step_size
+        )
+        try:
+            self.validate()
+        except ValidationError:
+            for name, value in previous.items():
+                setattr(self, name, value)
+            raise
+
+        if "initial_step_size" in settings:
+            self.next_step_size = min(self.next_step_size, self.initial_step_size)
+
+        self.next_step_size = min(
+            max(self.next_step_size, self.minimum_step_size), self.maximum_step_size
+        )
+        if self.failure_ceiling is not None and self.failure_ceiling >= self.maximum_step_size:
+            self.failure_ceiling = None
+        self.use_constant_step_size = (
+            self.initial_step_size == self.maximum_step_size
+            and self.initial_step_size == self.minimum_step_size
+        )
 
     def validate(self) -> None:
         """

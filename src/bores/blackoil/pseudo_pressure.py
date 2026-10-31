@@ -740,7 +740,7 @@ class PseudoPressureTable:
             return typing.cast(Number, dtype.type(result.item()))
         return typing.cast("FloatArray[NDimension]", result.reshape(pressure_array.shape))
 
-    dm_dp = gradient  # alias
+    dm_dp = dgrad_dp = gradient  # alias
 
     def convert(
         self,

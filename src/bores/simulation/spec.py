@@ -8,12 +8,14 @@ import attrs
 from typing_extensions import Self
 
 from bores.constants import Constants
-from bores.deck.phases import DeckPhases
 from bores.errors import ValidationError
+from bores.simulation.options import EquilibrationOptions, ModelDimensions, SaturationOptions
 from bores.timestep.control import Timer
 from bores.types import (
     DiscretizationMethod,
     MiscibilityModel,
+    Number,
+    Phases,
     PreconditionerStr,
     SolverStr,
     UnitConversionTable,
@@ -45,10 +47,31 @@ class RunSpec:
     start_date: datetime.datetime | None = None
     """The run's calendar start date, if the run is calendar-anchored."""
 
-    phases: DeckPhases | None = None
+    phases: Phases | None = None
     """
     The fluid phases the model has and which of them exchange components, as its deck declared
     them. `None` when they were not declared, so they are to be inferred from the data supplied.
+    """
+
+    saturation_options: SaturationOptions = attrs.field(factory=SaturationOptions)
+    """The optional saturation function features the deck switched on with `SATOPTS`."""
+
+    equilibration_options: EquilibrationOptions = attrs.field(factory=EquilibrationOptions)
+    """The optional equilibration features the deck switched on with `EQLOPTS`."""
+
+    dimensions: ModelDimensions | None = None
+    """The sizes the deck declared for its tables, regions, wells and VFP tables. `None` if it declared none."""
+
+    minimum_pore_volume: Number | None = attrs.field(
+        default=None,
+        validator=attrs.validators.optional(attrs.validators.ge(0)),  # type: ignore[arg-type]
+    )
+    """
+    Pore volume below which a cell takes no part in the flow (`MINPV`), in the pore volume unit of
+    `unit_system` (m³, ft³ or cm³). `None` when the deck sets none.
+
+    Pore volumes here are the ones at the rock's reference pressure, so the cells this excludes
+    are fixed for the whole run and do not change as pressure moves the pore volume.
     """
 
     well_control: WellControlSpec = attrs.field(factory=WellControlSpec)
@@ -141,6 +164,35 @@ class RunSpec:
     when tracking relative permeability hysteresis. `None` uses the
     `HYSTERESIS_SATURATION_TOLERANCE` constant of `constants`.
     """
+    oil_presence_saturation: float | None = attrs.field(
+        default=None,
+        validator=attrs.validators.optional(attrs.validators.ge(0)),  # type: ignore[arg-type]
+    )
+    """
+    Oil saturation above which a cell is treated as holding oil when the initial phase state is
+    checked for consistency. `None` uses the `OIL_PRESENCE_SATURATION` constant of `constants`.
+    """
+
+    gas_presence_saturation: float | None = attrs.field(
+        default=None,
+        validator=attrs.validators.optional(attrs.validators.ge(0)),  # type: ignore[arg-type]
+    )
+    """
+    Gas saturation above which a cell is treated as holding gas when the initial phase state is
+    checked for consistency. `None` uses the `GAS_PRESENCE_SATURATION` constant of `constants`.
+    """
+
+    pressure_consistency_tolerance: float | None = attrs.field(
+        default=None,
+        validator=attrs.validators.optional(attrs.validators.ge(0)),  # type: ignore[arg-type]
+    )
+    """
+    Fraction of the bubble point or dew point by which a cell's pressure may stray from it before
+    the initial phase state is reported as inconsistent. `None` uses the
+    `PRESSURE_CONSISTENCY_TOLERANCE` constant of `constants`. The saturation at or below which a
+    phase counts as absent in that check is `phase_appearance_tolerance`.
+    """
+
     pressure_solver: SolverStr | Iterable[SolverStr] = "bicgstab"
     """Pressure system solver(s) (can be a list of solver to use in sequence)."""
 
@@ -423,19 +475,6 @@ class RunSpec:
     physical effect and incurs unnecessary computation.
     """
 
-    residual_oil_drainage_ratio_water_flood: float = attrs.field(
-        default=0.6, validator=attrs.validators.ge(0)
-    )
-    """Ratio to compute oil drainage residual from imbibition value during water flooding."""
-
-    residual_oil_drainage_ratio_gas_flood: float = attrs.field(
-        default=0.6, validator=attrs.validators.ge(0)
-    )
-    """Ratio to compute oil drainage residual from imbibition value during gas flooding."""
-
-    residual_gas_drainage_ratio: float = attrs.field(default=0.5, validator=attrs.validators.ge(0))
-    """Ratio to compute gas drainage residual from imbibition value."""
-
     capture_timer_state: bool = True
     """
     Whether to capture and include the timer state in the yielded model states during simulation monitoring.
@@ -489,5 +528,10 @@ class RunSpec:
             well_control=self.well_control.convert(target, table=table),
             timer=self.timer.convert(target, table=table) if self.timer is not None else None,
             maximum_pressure_change=scale(self.maximum_pressure_change, pressure_factor),
+            minimum_pore_volume=(
+                scale(self.minimum_pore_volume, factors["volume"])
+                if self.minimum_pore_volume is not None
+                else None
+            ),
             unit_system=target,
         )

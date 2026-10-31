@@ -20,6 +20,7 @@ from bores.blackoil.pvt.regions import PVT
 from bores.blackoil.pvt.tables import PVTTable
 from bores.blackoil.satfunc.capillary_pressure.tables import CapillaryPressureTable
 from bores.blackoil.satfunc.regions import SatFunc
+from bores.constants import c
 from bores.deck.file import DeckFile
 from bores.deck.phases import DeckPhases, declares_phases, read_deck_phases
 from bores.errors import ValidationError
@@ -2047,22 +2048,6 @@ def initialize_water_gas_state(
     return typing.cast(CellArray, solubility), typing.cast(CellArray, bubble_point)
 
 
-OIL_PRESENCE_SATURATION = 1.0e-3
-"""Oil saturation above which a cell is treated as holding oil when checking its state."""
-
-GAS_PRESENCE_SATURATION = 1.0e-3
-"""Gas saturation above which a cell is treated as holding gas when checking its state."""
-
-FREE_PHASE_SATURATION = 1.0e-6
-"""Saturation at or below which a phase is treated as absent from a cell when checking its state."""
-
-PRESSURE_CONSISTENCY_TOLERANCE = 1.0e-4
-"""
-Fraction of the bubble point or dew point by which a cell's pressure may stray from it before the
-cell is reported as inconsistent. It absorbs the rounding of the working precision.
-"""
-
-
 def get_active_cells(grid: Grid, n_cells: int) -> BooleanCellArray | None:
     """
     Which cells of the grid take part in the flow simulation.
@@ -2088,6 +2073,10 @@ def warn_on_inconsistent_phase_state(
     oil_saturation: CellArray,
     active: BooleanCellArray | None,
     explicit_fields: typing.Collection[str],
+    oil_presence_saturation: Number | None = None,
+    gas_presence_saturation: Number | None = None,
+    free_phase_saturation: Number | None = None,
+    pressure_consistency_tolerance: Number | None = None,
 ) -> None:
     """
     Warn about cells whose pressure, saturations and bubble or dew point cannot coexist.
@@ -2112,14 +2101,41 @@ def warn_on_inconsistent_phase_state(
     :param explicit_fields: Names of the fields that were supplied rather than derived. They are
         named in the warning, since a state built only from equilibration or only from explicit
         arrays is consistent by construction and a mix is where an inconsistency arises.
+    :param oil_presence_saturation: Oil saturation above which a cell is treated as holding oil.
+        Defaults to the `OIL_PRESENCE_SATURATION` constant.
+    :param gas_presence_saturation: Gas saturation above which a cell is treated as holding gas.
+        Defaults to the `GAS_PRESENCE_SATURATION` constant.
+    :param free_phase_saturation: Saturation at or below which a phase is treated as absent.
+        Defaults to the `FREE_PHASE_SATURATION` constant.
+    :param pressure_consistency_tolerance: Fraction of the bubble point or dew point by which a
+        cell's pressure may stray from it before the cell is reported. Defaults to the
+        `PRESSURE_CONSISTENCY_TOLERANCE` constant.
     :warns UserWarning: For every kind of inconsistency found.
     """
-    pressure_floor = 1.0 - PRESSURE_CONSISTENCY_TOLERANCE
-    pressure_ceiling = 1.0 + PRESSURE_CONSISTENCY_TOLERANCE
-    has_oil = oil_saturation > OIL_PRESENCE_SATURATION
-    has_gas = gas_saturation > GAS_PRESENCE_SATURATION
-    no_free_gas = gas_saturation <= FREE_PHASE_SATURATION
-    no_free_oil = oil_saturation <= FREE_PHASE_SATURATION
+    oil_presence_saturation = typing.cast(
+        "Number",
+        c.OIL_PRESENCE_SATURATION if oil_presence_saturation is None else oil_presence_saturation,
+    )
+    gas_presence_saturation = typing.cast(
+        "Number",
+        c.GAS_PRESENCE_SATURATION if gas_presence_saturation is None else gas_presence_saturation,
+    )
+    free_phase_saturation = typing.cast(
+        "Number",
+        c.FREE_PHASE_SATURATION if free_phase_saturation is None else free_phase_saturation,
+    )
+    pressure_consistency_tolerance = typing.cast(
+        "Number",
+        c.PRESSURE_CONSISTENCY_TOLERANCE
+        if pressure_consistency_tolerance is None
+        else pressure_consistency_tolerance,
+    )
+    pressure_floor = 1.0 - pressure_consistency_tolerance
+    pressure_ceiling = 1.0 + pressure_consistency_tolerance
+    has_oil = oil_saturation > oil_presence_saturation
+    has_gas = gas_saturation > gas_presence_saturation
+    no_free_gas = gas_saturation <= free_phase_saturation
+    no_free_oil = oil_saturation <= free_phase_saturation
     oil_below_bubble_point = pressure < oil_bubble_point_pressure * pressure_floor
     gas_below_dew_point = pressure < gas_dew_point_pressure * pressure_floor
 
@@ -2130,7 +2146,7 @@ def warn_on_inconsistent_phase_state(
         ),
         "free gas in oil that is above its bubble point": (
             has_oil
-            & (gas_saturation > FREE_PHASE_SATURATION)
+            & (gas_saturation > free_phase_saturation)
             & (pressure > oil_bubble_point_pressure * pressure_ceiling),
             pressure - oil_bubble_point_pressure,
         ),
@@ -2180,6 +2196,10 @@ def initialize_reservoir_state(
     dtype: npt.DTypeLike = None,
     saturation_samples: int = N_SATURATION_SAMPLES,
     phases: DeckPhases | None = None,
+    oil_presence_saturation: Number | None = None,
+    gas_presence_saturation: Number | None = None,
+    free_phase_saturation: Number | None = None,
+    pressure_consistency_tolerance: Number | None = None,
 ) -> ReservoirState:
     """
     Build a complete `ReservoirState` from equilibration data (e.g `EQUIL`) and/or explicit arrays.
@@ -2250,6 +2270,15 @@ def initialize_reservoir_state(
     :param phases: The phases the model has. When omitted they are read from `deck_file`, if it
         declares any, and otherwise the model has oil unless none of its PVT regions has an oil
         table.
+    :param oil_presence_saturation: Oil saturation above which a cell is treated as holding oil
+        when the state is checked for consistency. Defaults to `OIL_PRESENCE_SATURATION`.
+    :param gas_presence_saturation: Gas saturation above which a cell is treated as holding gas
+        when the state is checked for consistency. Defaults to `GAS_PRESENCE_SATURATION`.
+    :param free_phase_saturation: Saturation at or below which a phase is treated as absent when
+        the state is checked for consistency. Defaults to `FREE_PHASE_SATURATION`.
+    :param pressure_consistency_tolerance: Fraction of the bubble or dew point by which a cell's
+        pressure may stray from it before the state is reported as inconsistent. Defaults to
+        `PRESSURE_CONSISTENCY_TOLERANCE`.
     :raises NotImplementedError: If `deck_file` has a `RESTART` keyword
         (not yet supported).
     :raises ValidationError: If some field is covered by neither an
@@ -2525,6 +2554,10 @@ def initialize_reservoir_state(
         oil_saturation=oil_saturation_array,
         active=get_active_cells(reservoir.grid, n_cells),
         explicit_fields=[field for field, value in explicit.items() if value is not None],
+        oil_presence_saturation=oil_presence_saturation,
+        gas_presence_saturation=gas_presence_saturation,
+        free_phase_saturation=free_phase_saturation,
+        pressure_consistency_tolerance=pressure_consistency_tolerance,
     )
 
     solubility_in_water_input = gas_solubility_in_water
@@ -2551,6 +2584,7 @@ def initialize_reservoir_state(
             raise ValidationError(
                 f"`water_salinity` has shape {water_salinity.shape}; expected ({n_cells},)."  # type: ignore[attr-defined]
             )
+
     gas_solubility_in_water_array, water_bubble_point_pressure_array = initialize_water_gas_state(
         pvt=pvt,
         pvt_region_index=pvt_region_index,

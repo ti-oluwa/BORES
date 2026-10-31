@@ -1109,6 +1109,39 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         ),
         unit="dimensionless",
     ),
+    "OIL_PRESENCE_SATURATION": Constant(
+        value=1.0e-3,
+        description=(
+            "Oil saturation above which a cell is treated as holding oil when its initial "
+            "phase state is checked for consistency."
+        ),
+        unit="dimensionless",
+    ),
+    "GAS_PRESENCE_SATURATION": Constant(
+        value=1.0e-3,
+        description=(
+            "Gas saturation above which a cell is treated as holding gas when its initial "
+            "phase state is checked for consistency."
+        ),
+        unit="dimensionless",
+    ),
+    "FREE_PHASE_SATURATION": Constant(
+        value=1.0e-6,
+        description=(
+            "Saturation at or below which a phase is treated as absent from a cell when its "
+            "initial phase state is checked for consistency."
+        ),
+        unit="dimensionless",
+    ),
+    "PRESSURE_CONSISTENCY_TOLERANCE": Constant(
+        value=1.0e-4,
+        description=(
+            "Fraction of the bubble point or dew point by which a cell's pressure may stray "
+            "from it before the cell is reported as inconsistent. It absorbs the rounding of "
+            "the working precision."
+        ),
+        unit="fraction",
+    ),
     "HYSTERESIS_CAPILLARY_PRESSURE_CURVATURE": Constant(
         value=0.1,
         description=(

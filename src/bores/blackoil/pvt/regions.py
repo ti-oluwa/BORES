@@ -17,7 +17,7 @@ from bores.blackoil.pvt.static import StaticPVT, load_density_records
 from bores.blackoil.pvt.tables import PVTTables, clip_compressibility
 from bores.constants import c
 from bores.deck.file import DeckFile
-from bores.deck.phases import DeckPhases, declares_phases, read_deck_phases
+from bores.deck.phases import declares_phases, read_deck_phases
 from bores.deck.precheck import find_missing
 from bores.errors import ValidationError
 from bores.precision import get_dtype
@@ -34,6 +34,7 @@ from bores.types import (
     InterpolationMethod,
     Number,
     OneDimension,
+    Phases,
     ThreeDimensions,
     TwoDimensions,
     UnitConversionTable,
@@ -52,7 +53,7 @@ GAS_PVT_KEYWORDS = ("PVTG", "PVDG")
 """The deck keywords that define the gas PVT. A deck with a gas phase needs at least one."""
 
 
-def pvt_requirements(phases: DeckPhases) -> dict[str, typing.Any]:
+def pvt_requirements(phases: Phases) -> dict[str, typing.Any]:
     """
     The PVT keywords a model with `phases` cannot do without.
 
@@ -223,7 +224,7 @@ class PVT:
         validate: bool = True,
         warn_on_extrapolation: bool = False,
         dtype: npt.DTypeLike = None,
-        phases: DeckPhases | None = None,
+        phases: Phases | None = None,
     ) -> Self:
         """
         Build all PVT regions' tables from a parsed `DeckFile`.
@@ -1413,7 +1414,7 @@ def load_pvt_regions(
     validate: bool = True,
     warn_on_extrapolation: bool = False,
     dtype: npt.DTypeLike = None,
-    phases: DeckPhases | None = None,
+    phases: Phases | None = None,
 ) -> dict[Integer, PVTRegion]:
     """
     Build a `PVT` object from a parsed `DeckFile`.

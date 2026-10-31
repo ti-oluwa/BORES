@@ -2330,8 +2330,8 @@ def load_well_control_spec(deck_file: DeckFile) -> WellControlSpec:
     tuning = get_tuning_at_start(deck_file)
     iteration = (tuning or {}).get("iteration", {})
     for item, attribute in (
-        ("mxwsit", "max_fixed_point_iterations"),
-        ("mxwpit", "max_bisection_iterations"),
+        ("maximum_well_solution_iterations", "max_fixed_point_iterations"),
+        ("maximum_well_pressure_iterations", "max_bisection_iterations"),
     ):
         requested = iteration.get(item)
         if requested is not None and int(requested) > getattr(defaults, attribute):

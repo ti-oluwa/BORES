@@ -25,6 +25,7 @@ __all__ = [
     "compute_oil_formation_volume_factor_standing",
     "compute_oil_formation_volume_factor_vazquez_and_beggs",
     "compute_oil_specific_gravity",
+    "compute_oil_specific_gravity_from_api_gravity",
     "compute_oil_viscosity",
     "compute_todd_longstaff_effective_oil_density",
     "compute_todd_longstaff_effective_oil_viscosity",
@@ -267,6 +268,21 @@ def compute_oil_formation_volume_factor(
     return correct_oil_fvf_for_pressure(
         saturated_fvf, oil_compressibility, bubble_point_pressure, pressure
     )
+
+
+@elementwise(bounds={"oil_api_gravity": (-131.4, np.inf)})
+def compute_oil_specific_gravity_from_api_gravity(
+    oil_api_gravity: NumberOrArray[AnyDimension],
+) -> NumberOrArray[AnyDimension]:
+    """
+    Computes the stock tank oil specific gravity from the API gravity.
+
+        SG = 141.5 / (API + 131.5)
+
+    :param oil_api_gravity: API gravity (°API)
+    :return: Oil specific gravity (dimensionless, water = 1.0 at 60 °F)
+    """
+    return 141.5 / (oil_api_gravity + 131.5)
 
 
 @elementwise(positive=("oil_specific_gravity",))
@@ -670,7 +686,10 @@ def compute_live_oil_density(
     :param formation_volume_factor: Oil formation volume factor at the pressure (bbl/STB)
     :return: Live oil density (lbm/ft³)
     """
-    stock_tank_oil_density = 141.5 / (api_gravity + 131.5) * STANDARD_WATER_DENSITY_IMPERIAL
+    stock_tank_oil_density = (
+        compute_oil_specific_gravity_from_api_gravity(api_gravity)
+        * STANDARD_WATER_DENSITY_IMPERIAL
+    )
     mass_stock_tank_oil = stock_tank_oil_density / CUBIC_FEET_TO_STB
     gas_mass_per_scf = gas_gravity * MOLECULAR_WEIGHT_AIR / SCF_PER_POUND_MOLE
     mass_dissolved_gas = gas_to_oil_ratio * gas_mass_per_scf

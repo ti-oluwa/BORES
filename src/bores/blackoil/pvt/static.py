@@ -13,17 +13,9 @@ from bores.units import UnitConversionTable, get_conversion_factors
 from bores.utils import scale
 
 __all__ = [
-    "GRAVITY_REFERENCE_AIR_DENSITY",
-    "GRAVITY_REFERENCE_WATER_DENSITY",
     "StaticPVT",
     "load_density_records",
 ]
-
-GRAVITY_REFERENCE_WATER_DENSITY = 1000.0
-"""Density of pure water, in kg/m³, that `GRAVITY` measures the oil API gravity and water specific gravity against."""
-
-GRAVITY_REFERENCE_AIR_DENSITY = 1.22
-"""Density of air, in kg/m³, that `GRAVITY` measures the gas specific gravity against."""
 
 
 def load_density_records(deck_file: DeckFile) -> list[list[dict[str, Number]]] | None:
@@ -31,9 +23,10 @@ def load_density_records(deck_file: DeckFile) -> list[list[dict[str, Number]]] |
     The stock-tank densities of every PVT region, from `DENSITY` or else `GRAVITY`.
 
     `DENSITY` gives the densities directly. `GRAVITY` gives them as oil API gravity and water and
-    gas specific gravities, which are turned into densities against 1000 kg/m³ water and
-    1.22 kg/m³ air (what Eclipse and OPM Flow both assume). `GRAVITY` is read only when the deck
-    has no `DENSITY`, as in Eclipse.
+    gas specific gravities, so the densities follow from those and the standard water and air
+    densities (`c.STANDARD_WATER_DENSITY_IMPERIAL`, `c.STANDARD_AIR_DENSITY_IMPERIAL`). The
+    correlations work in field units, so the densities are worked out in them and converted to the
+    deck's unit system. `GRAVITY` is read only when the deck has no `DENSITY`, as in Eclipse.
 
     :param deck_file: The deck to read.
     :returns: One list per region holding a single `{"oil": ..., "water": ..., "gas": ...}` row,
@@ -45,20 +38,22 @@ def load_density_records(deck_file: DeckFile) -> list[list[dict[str, Number]]] |
     gravity = deck_file.get_shared("GRAVITY")
     if gravity is None:
         return None
-    to_deck_unit = get_conversion_factors(UnitSystem.SI, deck_file.unit_system)["density"]
+
+    field_to_deck_unit = get_conversion_factors(UnitSystem.FIELD, deck_file.unit_system)["density"]
+    water_density = c.STANDARD_WATER_DENSITY_IMPERIAL
+    air_density = c.STANDARD_AIR_DENSITY_IMPERIAL
     return [
         [
             {
-                "oil": 141.5
-                / (float(record["api_gravity"]) + 131.5)
-                * GRAVITY_REFERENCE_WATER_DENSITY
-                * to_deck_unit,
+                "oil": correlations.compute_oil_specific_gravity_from_api_gravity(
+                    oil_api_gravity=float(record["api_gravity"])
+                )
+                * water_density
+                * field_to_deck_unit,
                 "water": float(record["water_specific_gravity"])
-                * GRAVITY_REFERENCE_WATER_DENSITY
-                * to_deck_unit,
-                "gas": float(record["gas_specific_gravity"])
-                * GRAVITY_REFERENCE_AIR_DENSITY
-                * to_deck_unit,
+                * water_density
+                * field_to_deck_unit,
+                "gas": float(record["gas_specific_gravity"]) * air_density * field_to_deck_unit,
             }
         ]
         for record in gravity

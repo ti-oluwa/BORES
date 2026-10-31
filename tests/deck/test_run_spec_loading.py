@@ -160,22 +160,43 @@ class TestPhasesDrivePvt:
 
 
 class TestGravity:
-    def test_gravity_becomes_densities_against_1000_water_and_1_22_air(self):
+    def test_gravity_becomes_densities_from_the_correlation_and_standard_constants(self):
+        from bores import correlations
+        from bores.constants import c
+        from bores.units import get_conversion_factors
+
+        to_deck = get_conversion_factors(UnitSystem.FIELD, UnitSystem.METRIC)["density"]
         record = load_density_records(deck("GRAVITY\n 45 1.0 0.8 /\n"))[0][0]
-        assert record["oil"] == pytest.approx(141.5 / 176.5 * 1000.0)
-        assert record["water"] == pytest.approx(1000.0)
-        assert record["gas"] == pytest.approx(0.8 * 1.22)
+        oil_gravity = correlations.compute_oil_specific_gravity_from_api_gravity(
+            oil_api_gravity=45.0
+        )
+        assert record["oil"] == pytest.approx(
+            oil_gravity * c.STANDARD_WATER_DENSITY_IMPERIAL * to_deck
+        )
+        assert record["water"] == pytest.approx(c.STANDARD_WATER_DENSITY_IMPERIAL * to_deck)
+        assert record["gas"] == pytest.approx(0.8 * c.STANDARD_AIR_DENSITY_IMPERIAL * to_deck)
+
+    def test_it_follows_the_runtime_constants(self):
+        from bores.constants import Constants, ConstantsContext
+
+        with ConstantsContext(Constants({"STANDARD_WATER_DENSITY_IMPERIAL": 63.0})):
+            water = load_density_records(
+                DeckFile("FIELD\nSPECGRID\n 2 2 1 1 F /\nGRAVITY\n 45 1.0 0.8 /\n")
+            )[0][0]["water"]
+        assert water == pytest.approx(63.0)
 
     def test_density_wins_over_gravity_and_neither_gives_none(self):
         both = load_density_records(deck("GRAVITY\n 45 1.0 0.8 /\nDENSITY\n 800 1000 1 /\n"))
         assert both[0][0]["oil"] == 800.0
         assert load_density_records(deck()) is None
 
-    def test_field_units_are_converted(self):
+    def test_field_units_need_no_conversion(self):
+        from bores.constants import c
+
         record = load_density_records(
             DeckFile("FIELD\nSPECGRID\n 2 2 1 1 F /\nGRAVITY\n 45 1.0 0.8 /\n")
         )[0][0]
-        assert record["water"] == pytest.approx(62.428, rel=1e-4)
+        assert record["water"] == pytest.approx(c.STANDARD_WATER_DENSITY_IMPERIAL)
 
 
 def small_grid(body: str) -> tuple[DeckFile, Grid]:

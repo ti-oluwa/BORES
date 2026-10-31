@@ -16,7 +16,7 @@ from bores.blackoil.satfunc.relperm.tables import MinimumRelPerm
 from bores.deck.dimensions import warn_deck_dimensions
 from bores.deck.file import DeckFile
 from bores.deck.keywords.runspec import START
-from bores.deck.phases import DeckPhases, declares_phases, read_deck_phases
+from bores.deck.phases import declares_phases, read_deck_phases
 from bores.deck.precheck import find_missing
 from bores.errors import CaseLoadError, CaseValidationError, ValidationError
 from bores.grids.base import CellStatus, Grid
@@ -48,6 +48,7 @@ from bores.types import (
     GridIntersectionMethod,
     InterpolationMethod,
     Number,
+    Phases,
     Spacing,
     UnitSystem,
 )
@@ -422,7 +423,7 @@ def check_deck_requirements(
     needs_pvt: bool,
     needs_equilibrium: bool,
     needs_wells: bool,
-    phases: DeckPhases | None = None,
+    phases: Phases | None = None,
 ) -> None:
     """
     Check that the deck has what every stage still to be loaded from it cannot do without.
@@ -718,7 +719,7 @@ def load_case(
     else:
         runspec = runspec.convert(unit_system)
         if runspec.phases is None and phases is not None:
-            runspec = attrs.evolve(runspec, phases=phases)
+            runspec = attrs.evolve(runspec, phases=phases.to_phases())
 
     if temperature is None:
         # Only the PVT tables and the initial state need a temperature.
@@ -852,6 +853,11 @@ def load_case(
                 else runspec.hysteresis_enabled,
                 saturation_samples=saturation_samples,
                 dtype=dtype,
+                oil_presence_saturation=runspec.oil_presence_saturation,
+                gas_presence_saturation=runspec.gas_presence_saturation,
+                free_phase_saturation=runspec.phase_appearance_tolerance,
+                pressure_consistency_tolerance=runspec.pressure_consistency_tolerance,
+                phases=phases,
             )
             print("Loaded state")
         except Exception as exc:

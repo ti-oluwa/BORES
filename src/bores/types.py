@@ -3,6 +3,7 @@ import typing
 from pathlib import Path
 from typing import TypeAlias
 
+import attrs
 import numpy as np
 import numpy.typing as npt
 from scipy.sparse import csr_array, csr_matrix  # type: ignore[import-untyped]
@@ -25,6 +26,7 @@ __all__ = [
     "OneDimensionalGrid",
     "Orientation",
     "PhaseValues",
+    "Phases",
     "Preconditioner",
     "RelPermHysteresisModel",
     "RelativePermeabilities",
@@ -818,3 +820,69 @@ class SupportsUnitSystem(typing.Protocol):
 
 PathOrStr = str | Path
 TextOrPath = str | bytes | Path
+
+
+@attrs.frozen(kw_only=True, slots=True)
+class Phases:
+    """
+    The fluid phases a model has and the components that can move between them.
+
+    This describes the model, whatever it was built from. Which tables or keywords carry each
+    phase's properties is not part of it.
+    """
+
+    oil: Boolean
+    """Whether the model has an oil phase."""
+
+    water: Boolean
+    """Whether the model has a water (aqueous) phase."""
+
+    gas: Boolean
+    """Whether the model has a gas phase."""
+
+    dissolved_gas_in_oil: Boolean
+    """Whether gas can dissolve in the oil phase (`DISGAS` in a model with oil)."""
+
+    vaporized_oil: Boolean
+    """Whether oil can vaporize into the gas phase (`VAPOIL`)."""
+
+    dissolved_gas_in_water: Boolean
+    """Whether gas can dissolve in the water phase (`DISGASW`, or `DISGAS` in a CO2 storage deck)."""
+
+    vaporized_water: Boolean
+    """Whether water can vaporize into the gas phase (`VAPWAT`)."""
+
+    co2_storage: Boolean
+    """Whether the model is CO2 storage in brine, whose fluid properties are computed rather than tabulated."""
+
+    @property
+    def phases(self) -> tuple[FluidPhase, ...]:
+        """The active phases in the order oil, water, gas."""
+        active: list[FluidPhase] = []
+        if self.oil:
+            active.append(FluidPhase.OIL)
+        if self.water:
+            active.append(FluidPhase.WATER)
+        if self.gas:
+            active.append(FluidPhase.GAS)
+        return tuple(active)
+
+    @property
+    def phase_count(self) -> Integer:
+        """How many phases the model has."""
+        return int(self.oil) + int(self.water) + int(self.gas)
+
+    @property
+    def is_three_phase(self) -> Boolean:
+        """Whether the model has oil, water and gas."""
+        return self.oil and self.water and self.gas
+
+    @property
+    def is_gas_water(self) -> Boolean:
+        """Whether the model has gas and water and no oil."""
+        return self.gas and self.water and not self.oil
+
+    @property
+    def is_single_phase(self) -> Boolean:
+        """Whether the model has only one phase."""
+        return self.phase_count == 1

@@ -1649,50 +1649,87 @@ TUNING = MultiRecordScheduledKeyword(
         (
             "time_step",
             [
-                Field("tsinit", np.float64, required=False, default=1.0),
-                Field("tsmaxz", np.float64, required=False, default=365.0),
-                Field("tsminz", np.float64, required=False, default=0.1),
-                Field("tsmchp", np.float64, required=False, default=0.15),
-                Field("tsfmax", np.float64, required=False, default=3.0),
-                Field("tsfmin", np.float64, required=False, default=0.3),
-                Field("tsfcnv", np.float64, required=False, default=0.1),
-                Field("tfdiff", np.float64, required=False, default=1.25),
-                Field("thrupt", np.float64, required=False, default=1e20),
-                Field("tmaxwc", np.float64, required=False),
+                Field("initial_time_step", np.float64, required=False, default=1.0),
+                Field("maximum_time_step", np.float64, required=False, default=365.0),
+                Field("minimum_time_step", np.float64, required=False, default=0.1),
+                Field("minimum_time_step_after_chop", np.float64, required=False, default=0.15),
+                Field(
+                    "maximum_time_step_increase_factor", np.float64, required=False, default=3.0
+                ),
+                Field("minimum_time_step_cut_factor", np.float64, required=False, default=0.3),
+                Field("convergence_failure_cut_factor", np.float64, required=False, default=0.1),
+                Field(
+                    "maximum_increase_factor_after_convergence_failure",
+                    np.float64,
+                    required=False,
+                    default=1.25,
+                ),
+                Field("maximum_throughput_ratio", np.float64, required=False, default=1e20),
+                Field("maximum_time_step_after_well_change", np.float64, required=False),
             ],
         ),
         (
             "convergence",
             [
-                Field("trgtte", np.float64, required=False, default=0.1),
-                Field("trgcnv", np.float64, required=False, default=0.001),
-                Field("trgmbe", np.float64, required=False, default=1e-07),
-                Field("trglcv", np.float64, required=False, default=0.0001),
-                Field("xxxtte", np.float64, required=False, default=10.0),
-                Field("xxxcnv", np.float64, required=False, default=0.01),
-                Field("xxxmbe", np.float64, required=False, default=1e-06),
-                Field("xxxlcv", np.float64, required=False, default=0.001),
-                Field("xxxwfl", np.float64, required=False, default=0.001),
-                Field("trgfip", np.float64, required=False, default=0.025),
-                Field("trgsft", np.float64, required=False),
-                Field("thionx", np.float64, required=False, default=0.01),
-                Field("trwght", int, required=False, default=1),
+                Field("target_time_truncation_error", np.float64, required=False, default=0.1),
+                Field(
+                    "target_nonlinear_convergence_error", np.float64, required=False, default=0.001
+                ),
+                Field("target_material_balance_error", np.float64, required=False, default=1e-07),
+                Field(
+                    "target_linear_convergence_error", np.float64, required=False, default=0.0001
+                ),
+                Field("maximum_time_truncation_error", np.float64, required=False, default=10.0),
+                Field(
+                    "maximum_nonlinear_convergence_error", np.float64, required=False, default=0.01
+                ),
+                Field("maximum_material_balance_error", np.float64, required=False, default=1e-06),
+                Field(
+                    "maximum_linear_convergence_error", np.float64, required=False, default=0.001
+                ),
+                Field(
+                    "maximum_well_flow_convergence_error",
+                    np.float64,
+                    required=False,
+                    default=0.001,
+                ),
+                Field("target_fluid_in_place_change", np.float64, required=False, default=0.025),
+                Field("target_surfactant_change", np.float64, required=False),
+                Field("ion_exchange_threshold", np.float64, required=False, default=0.01),
+                Field("error_weighting", int, required=False, default=1),
             ],
         ),
         (
             "iteration",
             [
-                Field("newtmx", int, required=False, default=12),
-                Field("newtmn", int, required=False, default=1),
-                Field("litmax", int, required=False, default=25),
-                Field("litmin", int, required=False, default=1),
-                Field("mxwsit", int, required=False, default=8),
-                Field("mxwpit", int, required=False, default=8),
-                Field("ddplim", np.float64, required=False, default=1000000.0),
-                Field("ddslim", np.float64, required=False, default=1000000.0),
-                Field("trgdpr", np.float64, required=False, default=1000000.0),
-                Field("xxxdpr", np.float64, required=False),
-                Field("mnwrfp", int, required=False, default=4),
+                Field("maximum_newton_iterations", int, required=False, default=12),
+                Field("minimum_newton_iterations", int, required=False, default=1),
+                Field("maximum_linear_iterations", int, required=False, default=25),
+                Field("minimum_linear_iterations", int, required=False, default=1),
+                Field("maximum_well_solution_iterations", int, required=False, default=8),
+                Field("maximum_well_pressure_iterations", int, required=False, default=8),
+                Field(
+                    "maximum_pressure_change_per_time_step",
+                    np.float64,
+                    required=False,
+                    default=1000000.0,
+                ),
+                Field(
+                    "maximum_saturation_change_per_time_step",
+                    np.float64,
+                    required=False,
+                    default=1000000.0,
+                ),
+                Field(
+                    "target_pressure_change_per_time_step",
+                    np.float64,
+                    required=False,
+                    default=1000000.0,
+                ),
+                Field("tolerated_pressure_change_per_time_step", np.float64, required=False),
+                Field(
+                    "maximum_well_rate_from_pressure_iterations", int, required=False, default=4
+                ),
             ],
         ),
     ],
@@ -1712,50 +1749,56 @@ at:
 
 An item left out (or written `1*`) takes the default shown below; `5*` leaves five items at their
 default. Defaults for times and pressures are OPM's metric values (days, bar). Three items have no
-default and are `None` when left out: `tmaxwc`, `trgsft` and `xxxdpr`.
+default and are `None` when left out: `maximum_time_step_after_well_change`, `target_surfactant_change` and `tolerated_pressure_change_per_time_step`.
 
 Record 1, `time_step` (times in the deck's time unit):
 
-- `tsinit`: length of the first time step (default 1).
-- `tsmaxz`: maximum length of the next time step (default 365).
-- `tsminz`: minimum length of all time steps (default 0.1).
-- `tsmchp`: minimum length of the next time step after a time step was chopped (default 0.15).
-- `tsfmax`: maximum time step increase factor (default 3).
-- `tsfmin`: minimum time step cut factor (default 0.3).
-- `tsfcnv`: cut factor after a convergence failure (default 0.1).
-- `tfdiff`: maximum increase factor after a convergence failure (default 1.25).
-- `thrupt`: maximum throughput ratio (default 1e20).
-- `tmaxwc`: maximum length of a time step after a well modification.
+- `initial_time_step`: length of the first time step (default 1).
+- `maximum_time_step`: maximum length of the next time step (default 365).
+- `minimum_time_step`: minimum length of all time steps (default 0.1).
+- `minimum_time_step_after_chop`: minimum length of the next time step after a time step was chopped (default 0.15).
+- `maximum_time_step_increase_factor`: maximum time step increase factor (default 3).
+- `minimum_time_step_cut_factor`: minimum time step cut factor (default 0.3).
+- `convergence_failure_cut_factor`: cut factor after a convergence failure (default 0.1).
+- `maximum_increase_factor_after_convergence_failure`: maximum increase factor after a convergence failure (default 1.25).
+- `maximum_throughput_ratio`: maximum throughput ratio (default 1e20).
+- `maximum_time_step_after_well_change`: maximum length of a time step after a well modification.
 
 Record 2, `convergence`:
 
-- `trgtte`: target time truncation error (default 0.1).
-- `trgcnv`: target non-linear convergence error (default 0.001).
-- `trgmbe`: target material balance error (default 1e-7).
-- `trglcv`: target linear convergence error (default 1e-4).
-- `xxxtte`, `xxxcnv`, `xxxmbe`, `xxxlcv`: the corresponding maximum errors that are tolerated
+- `target_time_truncation_error`: target time truncation error (default 0.1).
+- `target_nonlinear_convergence_error`: target non-linear convergence error (default 0.001).
+- `target_material_balance_error`: target material balance error (default 1e-7).
+- `target_linear_convergence_error`: target linear convergence error (default 1e-4).
+- `maximum_time_truncation_error`, `maximum_nonlinear_convergence_error`, `maximum_material_balance_error`, `maximum_linear_convergence_error`: the corresponding maximum errors that are tolerated
   (defaults 10, 0.01, 1e-6 and 0.001).
-- `xxxwfl`: maximum well flow convergence error (default 0.001).
-- `trgfip`: target of the change in fluid in place (default 0.025).
-- `trgsft`: target surfactant change.
-- `thionx`: threshold for ion exchange (default 0.01).
-- `trwght`: weighting of the error (default 1).
+- `maximum_well_flow_convergence_error`: maximum well flow convergence error (default 0.001).
+- `target_fluid_in_place_change`: target of the change in fluid in place (default 0.025).
+- `target_surfactant_change`: target surfactant change.
+- `ion_exchange_threshold`: threshold for ion exchange (default 0.01).
+- `error_weighting`: weighting of the error (default 1).
 
 Record 3, `iteration`:
 
-- `newtmx`: maximum number of Newton iterations in a time step (default 12).
-- `newtmn`: minimum number of Newton iterations in a time step (default 1).
-- `litmax`: maximum number of linear iterations in a Newton iteration (default 25).
-- `litmin`: minimum number of linear iterations in a Newton iteration (default 1).
-- `mxwsit`: maximum number of well-solution iterations (default 8).
-- `mxwpit`: maximum number of well-pressure iterations (default 8).
-- `ddplim`: maximum pressure change at a time step (default 1e6).
-- `ddslim`: maximum saturation change at a time step (default 1e6).
-- `trgdpr`: target pressure change at a time step (default 1e6).
-- `xxxdpr`: maximum pressure change tolerated at a time step.
-- `mnwrfp`: maximum number of well-rate-from-pressure iterations (default 4).
+- `maximum_newton_iterations`: maximum number of Newton iterations in a time step (default 12).
+- `minimum_newton_iterations`: minimum number of Newton iterations in a time step (default 1).
+- `maximum_linear_iterations`: maximum number of linear iterations in a Newton iteration (default 25).
+- `minimum_linear_iterations`: minimum number of linear iterations in a Newton iteration (default 1).
+- `maximum_well_solution_iterations`: maximum number of well-solution iterations (default 8).
+- `maximum_well_pressure_iterations`: maximum number of well-pressure iterations (default 8).
+- `maximum_pressure_change_per_time_step`: maximum pressure change at a time step (default 1e6).
+- `maximum_saturation_change_per_time_step`: maximum saturation change at a time step (default 1e6).
+- `target_pressure_change_per_time_step`: target pressure change at a time step (default 1e6).
+- `tolerated_pressure_change_per_time_step`: maximum pressure change tolerated at a time step.
+- `maximum_well_rate_from_pressure_iterations`: maximum number of well-rate-from-pressure iterations (default 4).
 
 An occurrence with fewer than three records is reported, and the missing ones are read as empty.
+
+The field names spell out what Eclipse abbreviates. In the order the items are written, the Eclipse
+names are: `TSINIT TSMAXZ TSMINZ TSMCHP TSFMAX TSFMIN TSFCNV TFDIFF THRUPT TMAXWC` (record 1),
+`TRGTTE TRGCNV TRGMBE TRGLCV XXXTTE XXXCNV XXXMBE XXXLCV XXXWFL TRGFIP TRGSFT THIONX TRWGHT`
+(record 2) and `NEWTMX NEWTMN LITMAX LITMIN MXWSIT MXWPIT DDPLIM DDSLIM TRGDPR XXXDPR MNWRFP`
+(record 3).
 """
 
 ZIPPY2 = SettingsKeyword("ZIPPY2")

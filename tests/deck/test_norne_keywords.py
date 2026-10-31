@@ -297,26 +297,72 @@ def test_report_controls(norne):
 def test_tuning_and_zippy2(norne):
     (tuning,) = norne.get("TUNING")
     time_step = tuning["time_step"]
-    assert [time_step[k] for k in ("tsinit", "tsmaxz", "tsminz", "tsmchp")] == [1, 10, 0.1, 0.15]
-    assert [time_step[k] for k in ("tsfmax", "tsfmin", "tsfcnv", "tfdiff")] == [3, 0.3, 0.3, 1.2]
-    assert time_step["thrupt"] == pytest.approx(1e20)  # defaulted
-    assert time_step["tmaxwc"] is None  # no default
+    assert [
+        time_step[k]
+        for k in (
+            "initial_time_step",
+            "maximum_time_step",
+            "minimum_time_step",
+            "minimum_time_step_after_chop",
+        )
+    ] == [1, 10, 0.1, 0.15]
+    assert [
+        time_step[k]
+        for k in (
+            "maximum_time_step_increase_factor",
+            "minimum_time_step_cut_factor",
+            "convergence_failure_cut_factor",
+            "maximum_increase_factor_after_convergence_failure",
+        )
+    ] == [3, 0.3, 0.3, 1.2]
+    assert time_step["maximum_throughput_ratio"] == pytest.approx(1e20)  # defaulted
+    assert time_step["maximum_time_step_after_well_change"] is None  # no default
     convergence = tuning["convergence"]
     # The five items skipped with `5*` take their defaults.
-    assert [convergence[k] for k in ("trgtte", "trgcnv", "trgmbe", "trglcv", "xxxtte")] == [
-        pytest.approx(v) for v in (0.1, 0.001, 1e-7, 1e-4, 10.0)
-    ]
-    assert convergence["trgsft"] is None
-    assert [convergence[k] for k in ("xxxcnv", "xxxmbe", "xxxlcv", "xxxwfl")] == [
+    assert [
+        convergence[k]
+        for k in (
+            "target_time_truncation_error",
+            "target_nonlinear_convergence_error",
+            "target_material_balance_error",
+            "target_linear_convergence_error",
+            "maximum_time_truncation_error",
+        )
+    ] == [pytest.approx(v) for v in (0.1, 0.001, 1e-7, 1e-4, 10.0)]
+    assert convergence["target_surfactant_change"] is None
+    assert [
+        convergence[k]
+        for k in (
+            "maximum_nonlinear_convergence_error",
+            "maximum_material_balance_error",
+            "maximum_linear_convergence_error",
+            "maximum_well_flow_convergence_error",
+        )
+    ] == [
         0.1,
         0.0001,
         0.02,
         0.02,
     ]
-    assert convergence["trwght"] == 1
+    assert convergence["error_weighting"] == 1
     iteration = tuning["iteration"]
-    assert [iteration[k] for k in ("newtmx", "newtmn", "litmax", "litmin")] == [12, 1, 40, 1]
-    assert [iteration[k] for k in ("mxwsit", "mxwpit", "mnwrfp")] == [15, 8, 4]
+    assert [
+        iteration[k]
+        for k in (
+            "maximum_newton_iterations",
+            "minimum_newton_iterations",
+            "maximum_linear_iterations",
+            "minimum_linear_iterations",
+        )
+    ] == [12, 1, 40, 1]
+    assert [
+        iteration[k]
+        for k in (
+            "maximum_well_solution_iterations",
+            "maximum_well_pressure_iterations",
+            "maximum_well_rate_from_pressure_iterations",
+        )
+    ] == [15, 8, 4]
     assert tuning["schedule_time"] == pytest.approx(0.0)
     assert norne.get("ZIPPY2") == [
         {"settings": {"SIM": "4.2", "MINSTEP": "1E-6"}, "schedule_time": 0.0}
@@ -534,10 +580,13 @@ def test_tuning_is_stamped_with_the_time_it_takes_effect():
     first, second = make(body).get("TUNING")
     assert first["schedule_time"] == pytest.approx(0.0)
     assert second["schedule_time"] == pytest.approx(30.0)
-    assert first["time_step"]["tsinit"] == 1 and second["time_step"]["tsinit"] == 2
-    assert second["convergence"]["xxxcnv"] == pytest.approx(0.5)
-    assert second["iteration"]["newtmx"] == 5
-    assert first["iteration"]["newtmx"] == 12
+    assert (
+        first["time_step"]["initial_time_step"] == 1
+        and second["time_step"]["initial_time_step"] == 2
+    )
+    assert second["convergence"]["maximum_nonlinear_convergence_error"] == pytest.approx(0.5)
+    assert second["iteration"]["maximum_newton_iterations"] == 5
+    assert first["iteration"]["maximum_newton_iterations"] == 12
 
 
 def test_tuning_empty_records_leave_everything_at_its_default():
@@ -547,17 +596,23 @@ def test_tuning_empty_records_leave_everything_at_its_default():
         tuning["convergence"],
         tuning["iteration"],
     )
-    assert [time_step[k] for k in ("tsinit", "tsmaxz", "tsminz", "tsmchp")] == [
-        pytest.approx(v) for v in (1.0, 365.0, 0.1, 0.15)
-    ]
-    assert time_step["tfdiff"] == pytest.approx(1.25)
-    assert time_step["tmaxwc"] is None  # no default
-    assert convergence["trgmbe"] == pytest.approx(1e-7)
-    assert convergence["trgsft"] is None
-    assert convergence["trwght"] == 1
-    assert iteration["ddplim"] == pytest.approx(1e6)
-    assert iteration["xxxdpr"] is None
-    assert iteration["litmax"] == 25
+    assert [
+        time_step[k]
+        for k in (
+            "initial_time_step",
+            "maximum_time_step",
+            "minimum_time_step",
+            "minimum_time_step_after_chop",
+        )
+    ] == [pytest.approx(v) for v in (1.0, 365.0, 0.1, 0.15)]
+    assert time_step["maximum_increase_factor_after_convergence_failure"] == pytest.approx(1.25)
+    assert time_step["maximum_time_step_after_well_change"] is None  # no default
+    assert convergence["target_material_balance_error"] == pytest.approx(1e-7)
+    assert convergence["target_surfactant_change"] is None
+    assert convergence["error_weighting"] == 1
+    assert iteration["maximum_pressure_change_per_time_step"] == pytest.approx(1e6)
+    assert iteration["tolerated_pressure_change_per_time_step"] is None
+    assert iteration["maximum_linear_iterations"] == 25
 
 
 def test_tuning_with_a_stray_closing_slash_is_read_without_complaint():
@@ -565,7 +620,7 @@ def test_tuning_with_a_stray_closing_slash_is_read_without_complaint():
         lambda: make("TUNING\n 1 /\n /\n /\n/\n", strict=True),
     )
     (tuning,) = deck.get("TUNING")
-    assert tuning["time_step"]["tsinit"] == 1
+    assert tuning["time_step"]["initial_time_step"] == 1
     assert messages == []
 
 
@@ -573,7 +628,9 @@ def test_tuning_with_too_few_records_is_reported():
     body = "TUNING\n 1 /\n 2 /\n"
     (tuning,), messages = captured(lambda: make(body).get("TUNING"))
     assert any("has 2 `/`-terminated record(s) but needs 3" in m for m in messages)
-    assert tuning["iteration"]["newtmx"] == 12  # the missing record is read as empty
+    assert (
+        tuning["iteration"]["maximum_newton_iterations"] == 12
+    )  # the missing record is read as empty
     with pytest.raises(DeckParseError, match="needs 3"):
         make(body, strict=True).get("TUNING")
 
@@ -585,7 +642,7 @@ def test_tuning_with_data_after_its_records_is_reported():
 
 
 def test_tuning_rejects_a_value_that_is_not_a_number():
-    with pytest.raises(DeckParseError, match="'tsinit' got invalid value 'abc'"):
+    with pytest.raises(DeckParseError, match="'initial_time_step' got invalid value 'abc'"):
         make("TUNING\n abc /\n /\n /\n").get("TUNING")
 
 

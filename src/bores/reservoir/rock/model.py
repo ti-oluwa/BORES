@@ -546,9 +546,10 @@ class Rock:
         porosity = load_cell_array(deck_file, "PORO", n_cells, dtype=dtype)
         pore_volume = load_cell_array(deck_file, "PORV", n_cells, dtype=dtype)
         if porosity is None and pore_volume is None:
-            raise ValidationError("`PORO` or `PORV` is required but neither is in the DeckFile.")
+            raise ValidationError("`PORO` or `PORV` is required but neither is in the deck file.")
+
         if pore_volume is None:
-            return typing.cast(CellArray, porosity)
+            return typing.cast("CellArray", porosity)
 
         if grid.cell_volumes is None:
             raise ValidationError("`PORV` needs the grid's cell volumes, which it does not have.")
