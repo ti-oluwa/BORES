@@ -1611,7 +1611,9 @@ def load_pvt_regions(
 
         # `StaticPVT` for this region
         # Resolve stock-tank densities from DENSITY record
-        stock_tank_oil_density = density_record["oil"] if density_record is not None else None
+        stock_tank_oil_density = (
+            density_record["oil"] if density_record is not None and read_oil else None
+        )
         stock_tank_water_density = density_record["water"] if density_record is not None else None
         stock_tank_gas_density = density_record["gas"] if density_record is not None else None
 

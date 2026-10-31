@@ -216,6 +216,10 @@ def compute_pvt_cache(
     in `caches.mobility`'s jitted kernel instead, consuming this cache's
     output as plain arrays.
 
+    A region with no oil table holds inert oil properties instead of `NaN`: unit formation volume
+    factor and viscosity, zero density, compressibility, solution gas-oil ratio and derivatives, a
+    bubble point equal to the cell pressure, and saturated oil.
+
     **Reuse**: pass the `PVTCache` returned by a previous call as `out` to
     overwrite its arrays in place rather than allocate new ones - the
     returned object is `out` itself in that case. Omit `out` (or pass `None`)
@@ -367,6 +371,29 @@ def compute_pvt_cache(
                     state_derivative = derivative(p, t, solution_gor_estimate)  # type: ignore[arg-type,var-annotated]
                     if state_derivative is not None:
                         field[mask] = state_derivative
+        else:
+            # A region with no oil holds inert oil properties, so that nothing built from them
+            # (mobility, transmissibility) turns a zero oil saturation into `NaN`. The oil has no
+            # volume (`Bo = 1`), no mass (`ρo = 0`) and no flow (`μo = 1` with a zero relative
+            # permeability), and it is saturated by convention, so the bubble point is the pressure.
+            cache.oil_formation_volume_factor[mask] = 1.0
+            cache.oil_viscosity[mask] = 1.0
+            cache.oil_density[mask] = 0.0
+            cache.bubble_point_pressure[mask] = p
+            cache.is_saturated[mask] = True
+            for inert_field in (
+                cache.dbo_dp,
+                cache.dμo_dp,
+                cache.dρo_dp,
+                cache.dbo_drs,
+                cache.dμo_drs,
+                cache.dρo_drs,
+                cache.oil_compressibility,
+                cache.solution_gas_oil_ratio,
+                cache.drs_dp,
+                cache.dpb_drs,
+            ):
+                inert_field[mask] = 0.0
 
         water = tables.water
         if water is not None:

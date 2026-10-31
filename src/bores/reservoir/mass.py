@@ -121,13 +121,14 @@ def compute_masses(
     for pvtnum, mask in iterate_regions(pvt_region_index):
         pvt_region = pvt.region(pvtnum)
         static = pvt_region.static
-        if static.stock_tank_oil_density is None:
+        has_oil = pvt_region.tables.oil is not None
+        if has_oil and static.stock_tank_oil_density is None:
             raise ValidationError(
                 f"`PVTNUM` {pvtnum}: `stock_tank_oil_density` (`DENSITY` "
                 "keyword) is required to compute masses."
             )
 
-        rho_o_sc = static.stock_tank_oil_density
+        rho_o_sc = static.stock_tank_oil_density or 0.0
         rho_g_sc = static.stock_tank_gas_density
         rho_w_sc = static.stock_tank_water_density
 
@@ -140,17 +141,15 @@ def compute_masses(
         rv = vaporized_oil_gas_ratio[mask]
         pv = pore_volumes[mask]
 
-        if pvt_region.tables.oil is None:
-            raise ValidationError(f"`PVTNUM` {pvtnum}: oil PVT table is unavailable.")
-
-        bo = pvt_region.tables.oil.formation_volume_factor(
-            pressure=p, temperature=t, solution_gor=rs
-        )
-        if bo is None:
-            raise ValidationError(
-                f"`PVTNUM` {pvtnum}: oil formation volume factor table is unavailable."
+        if pvt_region.tables.oil is not None:
+            bo = pvt_region.tables.oil.formation_volume_factor(
+                pressure=p, temperature=t, solution_gor=rs
             )
-        oil_mass[mask] = so * pv / bo * rho_o_sc
+            if bo is None:
+                raise ValidationError(
+                    f"`PVTNUM` {pvtnum}: oil formation volume factor table is unavailable."
+                )
+            oil_mass[mask] = so * pv / bo * rho_o_sc
 
         if any_positive(values=sg):  # type: ignore[arg-type]
             if pvt_region.tables.gas is None:
@@ -168,9 +167,10 @@ def compute_masses(
                     "`stock_tank_gas_density` is unavailable but Sg > 0."
                 )
             free_gas_mass[mask] = sg * pv / bg * rho_g_sc
-            vaporized_oil_mass_in_gas[mask] = (
-                rv * free_gas_mass[mask] * (rho_o_sc / rho_g_sc) * inverse_volume_correction
-            )
+            if has_oil:
+                vaporized_oil_mass_in_gas[mask] = (
+                    rv * free_gas_mass[mask] * (rho_o_sc / rho_g_sc) * inverse_volume_correction
+                )
 
         if any_positive(values=sw):  # type: ignore[arg-type]
             if pvt_region.tables.water is None:
@@ -193,7 +193,7 @@ def compute_masses(
                     rsw * water_mass[mask] * (rho_g_sc / rho_w_sc) * volume_correction
                 )
 
-        if any_positive(values=rs):  # type: ignore[arg-type]
+        if has_oil and any_positive(values=rs):  # type: ignore[arg-type]
             if rho_g_sc is None:
                 raise ValidationError(
                     f"`PVTNUM` {pvtnum}: `stock_tank_gas_density` is required to compute the "
