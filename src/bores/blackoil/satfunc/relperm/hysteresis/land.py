@@ -5,6 +5,7 @@ Land (1968) trapping of the non-wetting phase for relative permeability hysteres
   Flow from Rock Properties". SPE 1942.
 """
 
+import attrs
 import numba
 import numpy as np
 
@@ -12,6 +13,7 @@ from bores.blackoil.satfunc.utils import (
     element_at,
 )
 from bores.types import (
+    Boolean,
     Integer,
     NDimension,
     Number,
@@ -21,11 +23,13 @@ from bores.types import (
 )
 
 __all__ = [
+    "LandTrapping",
     "compute_land_residual_saturation",
     "compute_land_residual_saturation_array",
     "compute_land_residual_saturation_scalar",
     "compute_land_trapping_coefficient",
     "land_residual_from_reversal",
+    "rescale_scanning_saturation",
 ]
 
 
@@ -178,5 +182,139 @@ def land_residual_from_reversal(
             initial_non_wetting_saturation=initial,
             maximum_residual_saturation=maximum_residual_saturation,
             land_trapping_coefficient=land_trapping_coefficient,
+            saturation_epsilon=saturation_epsilon,
+        )
+
+
+@numba.njit(cache=True, error_model="numpy")
+def rescale_scanning_saturation(
+    size: Integer,
+    saturation: NumberArray[OneDimension],
+    reversal_saturation: NumberArray[OneDimension],
+    trapped_saturation: NumberArray[OneDimension],
+    on_wetting_axis: Boolean,
+    table_start: Number,
+    table_end: Number,
+    saturation_epsilon: Number,
+    out_saturation: NumberArray[OneDimension],
+    out_scale: NumberArray[OneDimension],
+) -> None:
+    """
+    Map each cell's saturation onto the saturation axis of a tabular imbibition curve, so the
+    curve ends where Land trapping says this cell's imbibition ends.
+
+    A tabular curve has fixed endpoints, so Land's trapped saturation cannot be handed to it the
+    way it is to a parametric curve. Instead the axis is stretched linearly, in one pass and
+    without intermediate arrays, so that the span the cell actually imbibes over lands on the
+    span the table covers:
+
+    - On the wetting axis (water in a water-wet system) imbibition runs from the reversal
+      saturation up to `1 - trapped_saturation`, the table from `table_start` (its connate
+      saturation) to `table_end` (one minus its residual oil saturation).
+    - On a non-wetting axis (gas) imbibition runs from `trapped_saturation` up to the reversal
+      saturation, the table from `table_start` (its critical gas saturation) to `table_end` (its
+      largest gas saturation).
+
+    A cell whose span has collapsed, because nothing was trapped or the reversal is at the
+    trapped saturation, is left unscaled.
+
+    :param size: Number of cells.
+    :param saturation: Saturation the table is to be queried at.
+    :param reversal_saturation: Saturation at the drainage to imbibition reversal.
+    :param trapped_saturation: Land's trapped non-wetting saturation for each cell.
+    :param on_wetting_axis: Whether the axis is the wetting phase's saturation.
+    :param table_start: Saturation where the table's imbibition curve starts.
+    :param table_end: Saturation where the table's imbibition curve ends.
+    :param saturation_epsilon: Smallest span that is rescaled.
+    :param out_saturation: Receives the saturation to query the table at.
+    :param out_scale: Receives the slope of the mapping, which turns a table slope into a slope
+        with respect to the cell's own saturation.
+    """
+    table_span = table_end - table_start
+    for i in range(size):
+        reversal = element_at(array=reversal_saturation, index=i)
+        trapped = element_at(array=trapped_saturation, index=i)
+        if on_wetting_axis:
+            start = reversal
+            span = 1.0 - trapped - reversal
+        else:
+            start = trapped
+            span = reversal - trapped
+        current = element_at(array=saturation, index=i)
+        if span > saturation_epsilon and table_span > saturation_epsilon:
+            scale = table_span / span
+            out_saturation[i] = table_start + (current - start) * scale
+            out_scale[i] = scale
+        else:
+            out_saturation[i] = current
+            out_scale[i] = 1.0
+
+
+@attrs.frozen(slots=True)
+class LandTrapping:
+    """
+    Land's (1968) trapping of the non-wetting phase for one displacement.
+
+    It answers one question: how much of the non-wetting phase is left behind when imbibition
+    starts from a given saturation. The answer rises with the starting saturation and reaches
+    `maximum_trapped_saturation` when imbibition starts from `maximum_saturation`:
+
+        S_t = S_i / (1 + C * S_i),    C = 1 / S_t_max - 1 / S_max
+    """
+
+    maximum_trapped_saturation: Number
+    """The most that can be trapped, `S_t_max`, reached when imbibition starts from the maximum."""
+
+    maximum_saturation: Number
+    """The largest non-wetting saturation, `S_max`, that imbibition can start from."""
+
+    coefficient: Number
+    """Land's trapping coefficient `C`. Never negative."""
+
+    @classmethod
+    def from_endpoints(
+        cls,
+        *,
+        maximum_trapped_saturation: Number,
+        maximum_saturation: Number,
+        saturation_epsilon: Number = 1e-12,
+    ) -> "LandTrapping":
+        """
+        Derive the coefficient from the two endpoints, which is how a deck's tables define it.
+
+        :param maximum_trapped_saturation: The imbibition table's critical non-wetting saturation.
+        :param maximum_saturation: The largest non-wetting saturation of the drainage table.
+        :param saturation_epsilon: Small value to guard against division by zero.
+        :returns: The trapping model.
+        """
+        return cls(
+            maximum_trapped_saturation=maximum_trapped_saturation,
+            maximum_saturation=maximum_saturation,
+            coefficient=compute_land_trapping_coefficient(
+                maximum_residual_saturation=maximum_trapped_saturation,
+                maximum_non_wetting_saturation=maximum_saturation,
+                saturation_epsilon=saturation_epsilon,
+            ),
+        )
+
+    def trapped_saturation(
+        self,
+        initial_saturation: NumberOrArray[NDimension],
+        *,
+        saturation_epsilon: Number = 1e-12,
+    ) -> NumberOrArray[NDimension]:
+        """
+        Non-wetting saturation trapped when imbibition starts from `initial_saturation`.
+
+        It never exceeds the starting saturation or `maximum_trapped_saturation`.
+
+        :param initial_saturation: Non-wetting saturation at the reversal, scalar or array.
+        :param saturation_epsilon: Small value to guard against division by zero.
+        :returns: The trapped saturation, shaped like the input.
+        """
+        return compute_land_residual_saturation(
+            initial_non_wetting_saturation=initial_saturation,
+            maximum_residual_saturation=self.maximum_trapped_saturation,
+            land_trapping_coefficient=self.coefficient,
             saturation_epsilon=saturation_epsilon,
         )

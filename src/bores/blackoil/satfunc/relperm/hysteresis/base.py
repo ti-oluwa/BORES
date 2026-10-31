@@ -11,6 +11,7 @@ from bores.blackoil.satfunc.relperm.hysteresis.land import (
 from bores.blackoil.satfunc.relperm.tables import (
     MixingRule,
     RelativePermeabilityTable,
+    ThreePhaseRelPermTable,
     TwoPhaseRelPermTable,
     get_mixing_rule,
     query_gas_oil_system,
@@ -145,6 +146,14 @@ def query_gas_oil_curves(
     return values["oil"], values["gas"], None, None
 
 
+def uses_tabular_endpoints(table: RelativePermeabilityTable) -> bool:
+    """
+    Whether a table's curves have fixed endpoints, so Land's trapped saturation cannot be handed to
+    it as an override and its saturation axis has to be rescaled instead.
+    """
+    return isinstance(table, (TwoPhaseRelPermTable, ThreePhaseRelPermTable))
+
+
 @attrs.frozen(slots=True)
 class HysteresisRelPermTable(RelativePermeabilityTable):
     """
@@ -196,6 +205,16 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
     """
     Maximum residual gas saturation S_r_max used by Land's formula. Required
     when `gas_oil_imbibition_table` is set.
+    """
+
+    tabular_land_trapping: bool = True
+    """
+    Whether Land trapping also reaches tabular imbibition curves, in addition to parametric ones.
+
+    A parametric curve takes the trapped saturation as an endpoint. A tabular curve has fixed
+    endpoints, so its saturation axis is rescaled instead, until the curve ends at the trapped
+    saturation and starts from the reversal saturation. When this is off a tabular imbibition
+    curve is used as tabulated, whatever the maximum residual saturations are.
     """
 
     mixing_rule: MixingRule | str = "baker_linear_rule"
@@ -319,6 +338,87 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         """
         raise NotImplementedError
 
+    def land_residual_oil_water(
+        self,
+        *,
+        size: Integer,
+        gas_saturation: NumberArray[OneDimension],
+        water_reversal: NumberArray[OneDimension],
+    ) -> NumberArray[OneDimension] | None:
+        """
+        Land residual oil saturation of the oil-water system for every cell, or `None` when no
+        maximum residual oil saturation is configured for it.
+        """
+        maximum_residual = self.maximum_residual_oil_saturation_water
+        if maximum_residual is None:
+            return None
+        residual = np.empty(size, dtype=gas_saturation.dtype)
+        land_residual_from_reversal(
+            size=size,
+            reversal_saturation=water_reversal,
+            other_saturation=gas_saturation,
+            from_remaining_oil=True,
+            maximum_residual_saturation=maximum_residual,
+            land_trapping_coefficient=self.land_trapping_coefficient_water,
+            saturation_epsilon=1e-12,
+            out=typing.cast("NumberArray[OneDimension]", residual),
+        )
+        return typing.cast("NumberArray[OneDimension]", residual)
+
+    def land_residual_gas(
+        self,
+        *,
+        size: Integer,
+        water_saturation: NumberArray[OneDimension],
+        gas_reversal: NumberArray[OneDimension],
+    ) -> NumberArray[OneDimension] | None:
+        """
+        Land residual (trapped) gas saturation for every cell, or `None` when no maximum residual
+        gas saturation is configured.
+        """
+        maximum_residual = self.maximum_residual_gas_saturation
+        if maximum_residual is None:
+            return None
+        residual = np.empty(size, dtype=water_saturation.dtype)
+        land_residual_from_reversal(
+            size=size,
+            reversal_saturation=gas_reversal,
+            other_saturation=water_saturation,
+            from_remaining_oil=False,
+            maximum_residual_saturation=maximum_residual,
+            land_trapping_coefficient=self.land_trapping_coefficient_gas,
+            saturation_epsilon=1e-12,
+            out=typing.cast("NumberArray[OneDimension]", residual),
+        )
+        return typing.cast("NumberArray[OneDimension]", residual)
+
+    def land_residual_oil_gas(
+        self,
+        *,
+        size: Integer,
+        water_saturation: NumberArray[OneDimension],
+        gas_reversal: NumberArray[OneDimension],
+    ) -> NumberArray[OneDimension] | None:
+        """
+        Land residual oil saturation of the gas-oil system for every cell, or `None` when no
+        maximum residual oil saturation is configured for it.
+        """
+        maximum_residual = self.maximum_residual_oil_saturation_gas
+        if maximum_residual is None:
+            return None
+        residual = np.empty(size, dtype=water_saturation.dtype)
+        land_residual_from_reversal(
+            size=size,
+            reversal_saturation=gas_reversal,
+            other_saturation=water_saturation,
+            from_remaining_oil=True,
+            maximum_residual_saturation=maximum_residual,
+            land_trapping_coefficient=self.land_trapping_coefficient_gas,
+            saturation_epsilon=1e-12,
+            out=typing.cast("NumberArray[OneDimension]", residual),
+        )
+        return typing.cast("NumberArray[OneDimension]", residual)
+
     def land_override_kwargs_water(
         self,
         *,
@@ -332,25 +432,17 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         Keyword arguments for the oil-water imbibition table with the Land residual oil saturation
         in place.
 
-        Land trapping only changes a curve whose table accepts endpoint overrides, so a tabular
-        two-phase table and a model without a configured maximum residual get `kwargs` back
-        as it is.
+        Only a parametric curve takes its endpoints as overrides, so a tabular table and a model
+        without a configured maximum residual get `kwargs` back as it is. A tabular table has its
+        axis rescaled instead, see `tabular_land_trapping`.
         """
-        maximum_residual = self.maximum_residual_oil_saturation_water
-        if maximum_residual is None or isinstance(table, TwoPhaseRelPermTable):
+        if uses_tabular_endpoints(table):
             return kwargs
-
-        residual = np.empty(size, dtype=gas_saturation.dtype)
-        land_residual_from_reversal(
-            size=size,
-            reversal_saturation=water_reversal,
-            other_saturation=gas_saturation,
-            from_remaining_oil=True,
-            maximum_residual_saturation=maximum_residual,
-            land_trapping_coefficient=self.land_trapping_coefficient_water,
-            saturation_epsilon=1e-12,
-            out=typing.cast("NumberArray[OneDimension]", residual),
+        residual = self.land_residual_oil_water(
+            size=size, gas_saturation=gas_saturation, water_reversal=water_reversal
         )
+        if residual is None:
+            return kwargs
         return {**kwargs, "residual_oil_saturation_water": residual}
 
     def land_override_kwargs_gas(
@@ -366,37 +458,21 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         Keyword arguments for the gas-oil imbibition table with the Land residual gas and oil
         saturations in place.
 
-        Same rule as `land_override_kwargs_water`: a table that cannot take endpoint overrides,
-        or a model with no configured maximum residual, leaves the entries out.
+        Same rule as `land_override_kwargs_water`: a tabular table, or a model with no configured
+        maximum residual, leaves the entries out.
         """
-        if isinstance(table, TwoPhaseRelPermTable):
+        if uses_tabular_endpoints(table):
             return kwargs
         overrides: dict[str, typing.Any] = {}
-        if self.maximum_residual_gas_saturation is not None:
-            residual_gas = np.empty(size, dtype=water_saturation.dtype)
-            land_residual_from_reversal(
-                size=size,
-                reversal_saturation=gas_reversal,
-                other_saturation=water_saturation,
-                from_remaining_oil=False,
-                maximum_residual_saturation=self.maximum_residual_gas_saturation,
-                land_trapping_coefficient=self.land_trapping_coefficient_gas,
-                saturation_epsilon=1e-12,
-                out=typing.cast("NumberArray[OneDimension]", residual_gas),
-            )
+        residual_gas = self.land_residual_gas(
+            size=size, water_saturation=water_saturation, gas_reversal=gas_reversal
+        )
+        if residual_gas is not None:
             overrides["residual_gas_saturation"] = residual_gas
-        if self.maximum_residual_oil_saturation_gas is not None:
-            residual_oil = np.empty(size, dtype=water_saturation.dtype)
-            land_residual_from_reversal(
-                size=size,
-                reversal_saturation=gas_reversal,
-                other_saturation=water_saturation,
-                from_remaining_oil=True,
-                maximum_residual_saturation=self.maximum_residual_oil_saturation_gas,
-                land_trapping_coefficient=self.land_trapping_coefficient_gas,
-                saturation_epsilon=1e-12,
-                out=typing.cast("NumberArray[OneDimension]", residual_oil),
-            )
+        residual_oil = self.land_residual_oil_gas(
+            size=size, water_saturation=water_saturation, gas_reversal=gas_reversal
+        )
+        if residual_oil is not None:
             overrides["residual_oil_saturation_gas"] = residual_oil
         return {**kwargs, **overrides} if overrides else kwargs
 

@@ -242,7 +242,7 @@ def test_collapsed_scanning_range_sits_on_the_flagged_curve(imbibing):
     assert slope == 0.0
 
 
-def _gas_scanning_table():
+def _gas_scanning_table(*, tabular_land_trapping: bool = True):
     """A table whose gas imbibition curve lies well below its gas drainage curve."""
     from bores.blackoil.satfunc.tables import as_three_phase_relperm_table
     from tests.satfunc.test_mixing_rules import ENDPOINTS, NO_FLOORS, LETThreePhaseRelPermTable
@@ -269,12 +269,13 @@ def _gas_scanning_table():
         maximum_residual_gas_saturation=0.25,
         maximum_residual_oil_saturation_gas=0.3,
         maximum_residual_oil_saturation_water=0.3,
+        tabular_land_trapping=tabular_land_trapping,
     )
     return table, base, imbibition
 
 
 def test_non_wetting_gas_scans_down_from_the_drainage_curve_at_its_peak():
-    table, base, imbibition = _gas_scanning_table()
+    table, base, imbibition = _gas_scanning_table(tabular_land_trapping=False)
     peak = 0.4
     sg = np.array([0.4, 0.35, 0.3, 0.25, 0.2, 0.15, 0.1])
     sw = np.full_like(sg, 0.2)
@@ -331,3 +332,178 @@ def test_gas_scanning_derivative_matches_finite_differences():
     slope = float(analytic["dkrg_dsg"] - analytic["dkrg_dso"])
     numeric = (krg(sg + step) - krg(sg - step)) / (2.0 * step)
     assert slope == pytest.approx(numeric, rel=1e-4)
+
+
+def _gas_history(peak, size):
+    return dict(
+        max_gas_saturation=np.full(size, peak),
+        gas_imbibition_flag=np.ones(size, dtype=bool),
+        gas_reversal_saturation=np.full(size, peak),
+    )
+
+
+def test_tabular_land_trapping_ends_the_imbibition_curve_at_the_trapped_gas():
+    table, base, _ = _gas_scanning_table()
+    peak = 0.4
+    trapped = float(
+        table.land_residual_gas(
+            size=1, water_saturation=np.array([0.2]), gas_reversal=np.array([peak])
+        )[0]
+    )
+    below = np.linspace(0.0, trapped, 6)
+    sw = np.full_like(below, 0.2)
+    scanned = np.asarray(
+        table.evaluate(sw, 1.0 - sw - below, below, **_gas_history(peak, below.size))["gas"]
+    )
+    # Gas at or below the trapped saturation is immobile, which the unscaled table puts at 0.05.
+    np.testing.assert_allclose(scanned, 0.0, atol=1e-12)
+    above = np.array([trapped + 0.01])
+    sw = np.full_like(above, 0.2)
+    mobile = table.evaluate(sw, 1.0 - sw - above, above, **_gas_history(peak, 1))["gas"]
+    assert float(mobile[0]) > 0.0
+    assert trapped > 0.05
+    assert base.get_residual_gas_saturation() == pytest.approx(0.05)
+
+
+def test_tabular_land_trapping_traps_more_gas_than_the_table_alone_when_asked():
+    on, _, _ = _gas_scanning_table(tabular_land_trapping=True)
+    off, _, _ = _gas_scanning_table(tabular_land_trapping=False)
+    sg = np.array([0.1, 0.15, 0.2])
+    sw = np.full_like(sg, 0.2)
+    so = 1.0 - sw - sg
+    history = _gas_history(0.4, sg.size)
+    trapped_on = np.asarray(on.evaluate(sw, so, sg, **history)["gas"])
+    trapped_off = np.asarray(off.evaluate(sw, so, sg, **history)["gas"])
+    # The table alone is critical at 0.05, Land traps up to the larger saturation.
+    assert np.all(trapped_on < trapped_off)
+
+
+def test_switching_tabular_land_trapping_off_leaves_the_table_as_tabulated():
+    off, base, _ = _gas_scanning_table(tabular_land_trapping=False)
+    drainage_only = _table(
+        base,
+        imbibition=_gas_scanning_table()[2],
+        maximum_residual_gas_saturation=None,
+        maximum_residual_oil_saturation_gas=None,
+        maximum_residual_oil_saturation_water=None,
+    )
+    sg = np.array([0.1, 0.2, 0.3])
+    sw = np.full_like(sg, 0.2)
+    so = 1.0 - sw - sg
+    history = _gas_history(0.4, sg.size)
+    np.testing.assert_array_equal(
+        off.evaluate(sw, so, sg, **history)["gas"],
+        drainage_only.evaluate(sw, so, sg, **history)["gas"],
+    )
+
+
+def test_the_rescaled_axis_maps_the_cell_span_onto_the_table_span():
+    from bores.blackoil.satfunc.relperm.hysteresis.land import rescale_scanning_saturation
+
+    reversal = np.array([0.4, 0.4])
+    trapped = np.array([0.1, 0.4])
+    saturation = np.array([0.4, 0.3])
+    scaled = np.empty(2)
+    scale = np.empty(2)
+    rescale_scanning_saturation(
+        size=2,
+        saturation=saturation,
+        reversal_saturation=reversal,
+        trapped_saturation=trapped,
+        on_wetting_axis=False,
+        table_start=0.05,
+        table_end=0.65,
+        saturation_epsilon=1e-12,
+        out_saturation=scaled,
+        out_scale=scale,
+    )
+    # Cell one: the reversal maps to the table end, the span 0.3 stretches to 0.6.
+    assert scaled[0] == pytest.approx(0.65)
+    assert scale[0] == pytest.approx(2.0)
+    # Cell two has nothing trapped between its reversal and its trapped saturation: unscaled.
+    assert scaled[1] == pytest.approx(0.3)
+    assert scale[1] == pytest.approx(1.0)
+
+
+def test_the_wetting_axis_runs_from_the_reversal_up_to_one_minus_the_trapped_saturation():
+    from bores.blackoil.satfunc.relperm.hysteresis.land import rescale_scanning_saturation
+
+    scaled = np.empty(2)
+    scale = np.empty(2)
+    rescale_scanning_saturation(
+        size=2,
+        saturation=np.array([0.3, 0.7]),
+        reversal_saturation=np.array([0.3, 0.3]),
+        trapped_saturation=np.array([0.2, 0.2]),
+        on_wetting_axis=True,
+        table_start=0.2,
+        table_end=0.8,
+        saturation_epsilon=1e-12,
+        out_saturation=scaled,
+        out_scale=scale,
+    )
+    # Imbibition runs from 0.3 to 0.8, so the span is 0.5 and the table's 0.6 is stretched by 1.2.
+    np.testing.assert_allclose(scaled, [0.2, 0.2 + 0.4 * 1.2])
+    np.testing.assert_allclose(scale, [1.2, 1.2])
+
+
+def test_tabular_gas_derivative_matches_finite_differences_with_the_land_rescaling():
+    table, _, _ = _gas_scanning_table()
+    step = 1e-6
+    history = dict(max_gas_saturation=0.4, gas_imbibition_flag=True, gas_reversal_saturation=0.4)
+
+    def krg(gas):
+        return float(table.evaluate(0.2, 0.8 - gas, gas, **history)["gas"])
+
+    for sg in (0.18, 0.27, 0.33):
+        analytic = table.derivatives(0.2, 0.8 - sg, sg, **history)
+        slope = float(analytic["dkrg_dsg"] - analytic["dkrg_dso"])
+        numeric = (krg(sg + step) - krg(sg - step)) / (2.0 * step)
+        assert slope == pytest.approx(numeric, rel=1e-3)
+
+
+def test_tabular_land_trapping_makes_oil_immobile_at_the_land_residual_on_the_water_side():
+    table, _, _ = _gas_scanning_table()
+    reversal = 0.3
+    land_residual = float(
+        table.land_residual_oil_water(
+            size=1, gas_saturation=np.array([0.0]), water_reversal=np.array([reversal])
+        )[0]
+    )
+    end = 1.0 - land_residual
+    history = dict(
+        max_water_saturation=np.array([end]),
+        water_imbibition_flag=np.array([True]),
+        water_reversal_saturation=np.array([reversal]),
+    )
+    water = np.array([end])
+    gas = np.zeros(1)
+    at_end = table.evaluate(water, 1.0 - water - gas, gas, **history)
+    assert float(at_end["oil"][0]) == pytest.approx(0.0, abs=1e-9)
+    below = np.array([end - 0.02])
+    assert float(table.evaluate(below, 1.0 - below - gas, gas, **history)["oil"][0]) > 0.0
+    assert land_residual > 0.0
+
+
+def test_the_land_model_traps_the_most_from_the_maximum_and_never_more_than_it_started_with():
+    from bores.blackoil.satfunc.relperm.hysteresis import LandTrapping
+
+    model = LandTrapping.from_endpoints(maximum_trapped_saturation=0.25, maximum_saturation=0.8)
+    assert model.coefficient == pytest.approx(1.0 / 0.25 - 1.0 / 0.8)
+    assert model.trapped_saturation(0.8) == pytest.approx(0.25)
+    starts = np.array([0.0, 0.05, 0.2, 0.5, 0.8])
+    trapped = model.trapped_saturation(starts)
+    assert np.all(trapped <= starts + 1e-12)
+    assert np.all(trapped <= 0.25 + 1e-12)
+    assert np.all(np.diff(trapped) >= 0.0)
+    for start, value in zip(starts, trapped, strict=True):
+        assert model.trapped_saturation(float(start)) == pytest.approx(float(value))
+
+
+def test_a_land_model_with_no_room_to_trap_traps_everything_it_can_up_to_the_maximum():
+    from bores.blackoil.satfunc.relperm.hysteresis import LandTrapping
+
+    model = LandTrapping.from_endpoints(maximum_trapped_saturation=0.5, maximum_saturation=0.5)
+    assert model.coefficient == pytest.approx(0.0)
+    assert model.trapped_saturation(0.3) == pytest.approx(0.3)
+    assert model.trapped_saturation(0.9) == pytest.approx(0.5)

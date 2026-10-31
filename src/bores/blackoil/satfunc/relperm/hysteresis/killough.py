@@ -15,6 +15,7 @@ from bores.blackoil.satfunc.relperm.hysteresis.base import (
     HysteresisRelPermTable,
     query_gas_oil_curves,
     query_oil_water_curves,
+    uses_tabular_endpoints,
 )
 from bores.blackoil.satfunc.relperm.hysteresis.kernels import (
     CurveSet,
@@ -26,10 +27,12 @@ from bores.blackoil.satfunc.relperm.hysteresis.kernels import (
     scan_relative_permeabilities,
     scan_relative_permeabilities_parallel,
 )
+from bores.blackoil.satfunc.relperm.hysteresis.land import rescale_scanning_saturation
 from bores.blackoil.satfunc.relperm.mixing_rules import get_builtin_rule_id
 from bores.blackoil.satfunc.relperm.tables import (
     MixingRule,
     get_mixing_rule_partial_derivatives,
+    resolve_residual_oil_saturation_gas,
 )
 from bores.blackoil.satfunc.utils import (
     PARALLEL_SIZE_THRESHOLD,
@@ -244,52 +247,126 @@ class KilloughLandRelPermTable(HysteresisRelPermTable):
         krw_i, kro_water_i, dkrw_i, dkro_water_i = krw_d, kro_water_d, dkrw_d, dkro_water_d
         if use_water_hysteresis:
             imbibition_table = self.oil_water_imbibition_table
+            water_table = imbibition_table or drainage_water_system
             land_kwargs = self.land_override_kwargs_water(
                 size=size,
                 gas_saturation=sg,
                 water_reversal=typing.cast("NumberArray[OneDimension]", water_reversal),
-                table=imbibition_table or drainage_water_system,
+                table=water_table,
                 kwargs=kwargs,
             )
+            water_arguments = curve_arguments
+            water_scale = None
+            if (
+                self.tabular_land_trapping
+                and uses_tabular_endpoints(water_table)
+                and self.get_oil_water_wetting_phase() == FluidPhase.WATER
+            ):
+                water_residual = self.land_residual_oil_water(
+                    size=size,
+                    gas_saturation=sg,
+                    water_reversal=typing.cast("NumberArray[OneDimension]", water_reversal),
+                )
+                if water_residual is not None:
+                    rescaled_water = np.empty_like(sw)
+                    water_scale = np.empty_like(sw)
+                    rescale_scanning_saturation(
+                        size=size,
+                        saturation=sw,
+                        reversal_saturation=typing.cast(
+                            "NumberArray[OneDimension]", water_reversal
+                        ),
+                        trapped_saturation=water_residual,
+                        on_wetting_axis=True,
+                        table_start=water_table.get_connate_water_saturation(),
+                        table_end=1.0 - water_table.get_residual_oil_saturation_water(),
+                        saturation_epsilon=1e-12,
+                        out_saturation=rescaled_water,
+                        out_scale=water_scale,
+                    )
+                    water_arguments = {
+                        **curve_arguments,
+                        "water_saturation": rescaled_water,
+                        "oil_saturation": 1.0 - rescaled_water - sg,
+                    }
             if imbibition_table is not None and imbibition_table is not drainage_water_system:
                 krw_i, kro_water_i, dkrw_i, dkro_water_i = query_oil_water_curves(
-                    imbibition_table, **curve_arguments, **land_kwargs
+                    imbibition_table, **water_arguments, **land_kwargs
                 )
-            elif land_kwargs is not kwargs:
+            elif land_kwargs is not kwargs or water_scale is not None:
                 krw_i, kro_water_i, dkrw_i, dkro_water_i = query_oil_water_curves(
-                    drainage_water_system, **curve_arguments, **land_kwargs
+                    drainage_water_system, **water_arguments, **land_kwargs
                 )
+            if water_scale is not None and with_derivatives:
+                dkrw_i = dkrw_i * water_scale
+                dkro_water_i = dkro_water_i * water_scale
 
         kro_gas_i, krg_i, dkro_gas_i, dkrg_i = kro_gas_d, krg_d, dkro_gas_d, dkrg_d
         if use_gas_hysteresis:
             imbibition_table = self.gas_oil_imbibition_table
+            gas_table = imbibition_table or drainage_gas_system
             land_kwargs = self.land_override_kwargs_gas(
                 size=size,
                 water_saturation=sw,
                 gas_reversal=typing.cast("NumberArray[OneDimension]", gas_reversal),
-                table=imbibition_table or drainage_gas_system,
+                table=gas_table,
                 kwargs=kwargs,
             )
+            gas_residual = None
+            if not uses_tabular_endpoints(gas_table) or self.tabular_land_trapping:
+                gas_residual = self.land_residual_gas(
+                    size=size,
+                    water_saturation=sw,
+                    gas_reversal=typing.cast("NumberArray[OneDimension]", gas_reversal),
+                )
+            gas_arguments = gas_oil_arguments
+            gas_scale = None
+            if gas_residual is not None and uses_tabular_endpoints(gas_table):
+                rescaled_gas = np.empty_like(sg)
+                gas_scale = np.empty_like(sg)
+                connate_water = self.get_connate_water_saturation()
+                rescale_scanning_saturation(
+                    size=size,
+                    saturation=sg,
+                    reversal_saturation=typing.cast("NumberArray[OneDimension]", gas_reversal),
+                    trapped_saturation=gas_residual,
+                    on_wetting_axis=False,
+                    table_start=gas_table.get_residual_gas_saturation(),
+                    table_end=1.0
+                    - connate_water
+                    - resolve_residual_oil_saturation_gas(
+                        gas_oil_table=gas_table, connate_water_saturation=connate_water
+                    ),
+                    saturation_epsilon=1e-12,
+                    out_saturation=rescaled_gas,
+                    out_scale=gas_scale,
+                )
+                gas_arguments = {
+                    **gas_oil_arguments,
+                    "gas_saturation": rescaled_gas,
+                    "oil_saturation": 1.0 - sw - rescaled_gas,
+                }
             if gas_is_non_wetting:
-                if "residual_gas_saturation" in land_kwargs:
-                    trapped_gas = land_kwargs["residual_gas_saturation"]
+                if gas_residual is not None:
+                    trapped_gas = gas_residual
                 else:
                     trapped_gas = np.full(
-                        1,
-                        (imbibition_table or drainage_gas_system).get_residual_gas_saturation(),
-                        dtype=sw.dtype,
+                        1, gas_table.get_residual_gas_saturation(), dtype=sw.dtype
                     )
                 history = history._replace(
                     gas_trapped_saturation=typing.cast("NumberArray[OneDimension]", trapped_gas)
                 )
             if imbibition_table is not None and imbibition_table is not drainage_gas_system:
                 kro_gas_i, krg_i, dkro_gas_i, dkrg_i = query_gas_oil_curves(
-                    imbibition_table, **gas_oil_arguments, **land_kwargs
+                    imbibition_table, **gas_arguments, **land_kwargs
                 )
-            elif land_kwargs is not kwargs:
+            elif land_kwargs is not kwargs or gas_scale is not None:
                 kro_gas_i, krg_i, dkro_gas_i, dkrg_i = query_gas_oil_curves(
-                    drainage_gas_system, **gas_oil_arguments, **land_kwargs
+                    drainage_gas_system, **gas_arguments, **land_kwargs
                 )
+            if gas_scale is not None and with_derivatives:
+                dkro_gas_i = dkro_gas_i * gas_scale
+                dkrg_i = dkrg_i * gas_scale
 
         values = CurveSet(
             krw_drainage=krw_d,

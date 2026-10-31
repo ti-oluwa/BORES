@@ -16,6 +16,7 @@ The old module path `bores.blackoil.satfunc.relperm.hysteresis` still provides e
 from bores.blackoil.satfunc.relperm.hysteresis.base import HysteresisRelPermTable
 from bores.blackoil.satfunc.relperm.hysteresis.killough import KilloughLandRelPermTable
 from bores.blackoil.satfunc.relperm.hysteresis.land import (
+    LandTrapping,
     compute_land_residual_saturation,
     compute_land_trapping_coefficient,
 )
@@ -23,6 +24,7 @@ from bores.blackoil.satfunc.relperm.hysteresis.land import (
 __all__ = [
     "HysteresisRelPermTable",
     "KilloughLandRelPermTable",
+    "LandTrapping",
     "compute_land_residual_saturation",
     "compute_land_trapping_coefficient",
 ]
