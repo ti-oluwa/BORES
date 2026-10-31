@@ -21,15 +21,16 @@ from bores.wells.compile import (
     UNSET_INT,
     CompiledWellSystem,
     GroupKind,
-    InjectorControlModeTag,
-    ProducerControlModeTag,
     WellKind,
     WorkoverActionTag,
 )
 from bores.wells.hydraulics.base import ConnectionFluids, SurfaceSample, WellBoreModel
 from bores.wells.hydraulics.vfp import VFPTables
 from bores.wells.resolution.engine import resolve_well_control
-from bores.wells.resolution.groups.allocation import allocate_group_targets
+from bores.wells.resolution.groups.allocation import (
+    allocate_group_targets,
+    redistribute_group_shortfall,
+)
 from bores.wells.resolution.limits import check_economic_violation
 from bores.wells.resolution.spec import WellControlSpec
 from bores.wells.workspace import WellsWorkspace
@@ -140,28 +141,6 @@ def select_open_members(
 
 
 @numba.njit(cache=True)
-def select_members_in_mode(
-    *,
-    members: IntArray[OneDimension],
-    control_modes: IntArray[OneDimension],
-    mode_tag: Integer,
-) -> IntArray[OneDimension]:
-    """
-    :param members: Well rows to filter.
-    :param control_modes: Every well's control mode tag, indexed by well row.
-    :param mode_tag: The control mode tag to keep.
-    :returns: The rows of `members` currently in `mode_tag`, in order.
-    """
-    out = np.empty(members.shape[0], dtype=np.int64)
-    count = 0
-    for position in range(members.shape[0]):
-        if control_modes[members[position]] == mode_tag:
-            out[count] = members[position]
-            count += 1
-    return out[:count]  # type: ignore[return-value]
-
-
-@numba.njit(cache=True)
 def find_lowest_guide_rate_member(
     *, members: IntArray[OneDimension], guide_rates: NumberArray[OneDimension]
 ) -> Integer:
@@ -206,6 +185,8 @@ def shut_in_member_well(
     :param well_row: The member well being shut in.
     """
     workspace.economic_shutins[well_row] = 1
+    workspace.group_control_modes[well_row] = UNSET_INT
+    workspace.group_target_rates[well_row] = math.nan
     workspace.oil_rates[well_row] = 0.0
     workspace.water_rates[well_row] = 0.0
     workspace.gas_rates[well_row] = 0.0
@@ -228,34 +209,17 @@ def reallocate_and_reresolve(
     workspace: WellsWorkspace,
     spec: WellControlSpec,
     open_members: typing.Sequence[Integer],
-    grup_mode_tag: Integer,
-    grup_member_rows: typing.Sequence[Integer],
     get_tubing_performance: typing.Callable[[Integer], WellBoreModel | VFPTables | None],
     get_connection_fluids: typing.Callable[[Integer], ConnectionFluids],
     get_surface_sample: typing.Callable[[Integer], SurfaceSample | None],
 ) -> tuple[str, ...]:
     """
-    Reallocates `group_name`'s current target across `grup_member_rows`
-    and actually re-resolves every one still open, in place, so the
-    group's aggregate reflects real, freshly resolved rates on the next
-    check, not a stale pre-reallocation value.
-
-    `allocate_group_targets` only picks up a member currently in `GRUP`
-    mode, but converts it to a concrete mode as part of allocating it.
-    So a member already reallocated by an earlier call this pass would
-    be silently skipped on a later one. Restoring `grup_member_rows`'
-    still-open rows to `grup_mode_tag` immediately before calling it
-    keeps every one of this group's own members reallocatable on every
-    pass, for as long as this function keeps calling this helper.
+    Reallocates `group_name`'s current target across its group-controlled members that are
+    still open, re-resolves each, and redistributes any shortfall a member leaves, so the
+    group's aggregate reflects freshly resolved rates on the next check.
 
     :param open_members: Rows currently eligible to be resolved (open,
         matching well kind, not economically shut).
-    :param grup_mode_tag: This group's own `GRUP`-equivalent control mode
-        tag (producer or injector, matching `group_name`'s own kind).
-    :param grup_member_rows: Rows that were in `GRUP` mode when
-        `enforce_group_economic_limits` was first called for this group,
-        the members this group's own reallocation is meant to keep
-        covering across every pass this call makes.
     :param get_tubing_performance: Given a well row, what relates its BHP to its THP
         (a `WellBoreModel` or a `VFPTables` collection), or `None` if it has none.
     :param get_connection_fluids: Given a well row, its active, open
@@ -265,10 +229,6 @@ def reallocate_and_reresolve(
     :returns: Names of the members actually re-resolved.
     """
     open_member_set = set(open_members)
-    for well_row in grup_member_rows:
-        if well_row in open_member_set:
-            well_system.controls.control_modes[well_row] = grup_mode_tag
-
     reallocated = allocate_group_targets(group_name, well_system, workspace)
     reresolved = [
         name for name in reallocated if well_system.well_row(name=name) in open_member_set
@@ -284,6 +244,16 @@ def reallocate_and_reresolve(
             spec=spec,
             surface_sample=get_surface_sample(well_row),
         )
+    redistribute_group_shortfall(
+        group_name=group_name,
+        allocated_wells=reresolved,
+        well_system=well_system,
+        workspace=workspace,
+        spec=spec,
+        get_tubing_performance=get_tubing_performance,
+        get_connection_fluids=get_connection_fluids,
+        get_surface_sample=get_surface_sample,
+    )
     return tuple(reresolved)
 
 
@@ -379,17 +349,6 @@ def enforce_group_economic_limits(
         bhps=workspace.bhps,
     )
 
-    grup_mode_tag = (
-        InjectorControlModeTag.GROUP
-        if expected_well_kind == WellKind.INJECTOR
-        else ProducerControlModeTag.GROUP
-    )
-    grup_member_rows = select_members_in_mode(
-        members=open_members,
-        control_modes=controls.control_modes,
-        mode_tag=grup_mode_tag,
-    )
-
     shut_wells: list[str] = []
     reallocated_wells: list[str] = []
     rate_cutback_applied = False
@@ -404,6 +363,7 @@ def enforce_group_economic_limits(
             limits_start=limits_start,
             limits_end=limits_end,
             rates=rates,
+            skip_unenforced=False,
         )
         if violated_row == UNSET_INT:
             return GroupEconomicLimitOutcome(
@@ -474,8 +434,6 @@ def enforce_group_economic_limits(
             workspace=workspace,
             spec=spec,
             open_members=typing.cast("typing.Sequence[Integer]", open_members),
-            grup_mode_tag=grup_mode_tag,
-            grup_member_rows=typing.cast("typing.Sequence[Integer]", grup_member_rows),
             get_tubing_performance=get_tubing_performance,
             get_connection_fluids=get_connection_fluids,
             get_surface_sample=get_resolved_surface_sample,
@@ -491,6 +449,7 @@ def enforce_group_economic_limits(
             limits_start=limits_start,
             limits_end=limits_end,
             rates=rates,
+            skip_unenforced=False,
         )
         != UNSET_INT
     )

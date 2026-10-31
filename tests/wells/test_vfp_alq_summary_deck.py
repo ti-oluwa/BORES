@@ -3274,10 +3274,20 @@ def test_each_compiled_bisection_matches_the_same_code_run_as_python(solver_name
     assert tuple(compiled.result) == pytest.approx(tuple(interpreted.result), rel=1e-9)
 
 
-def build_group_system(*, wells_per_group=4, groups=2, connections=4, weak_well=None):
+def build_group_system(
+    *,
+    wells_per_group=4,
+    groups=2,
+    connections=4,
+    weak_well=None,
+    gas_heavy_well=None,
+    group_limits=(),
+    return_system=False,
+):
     """
     Resolves producers in group control, in several groups, each with an oil rate target, on a real
-    compiled system. A `weak_well` is given too little productivity to reach its share.
+    compiled system. A `weak_well` is given too little productivity to reach its share, and a `gas_heavy_well` a
+    gas mobility fifty times the others'. `group_limits` are every group's economic limits.
     """
     import attrs
 
@@ -3315,15 +3325,17 @@ def build_group_system(*, wells_per_group=4, groups=2, connections=4, weak_well=
             control, mode=ProducerControlMode.GROUP, guide_rate=1.0 + (i % 3) * 0.5
         )
     group_target = wells_per_group * 400.0
+    rich_wells = make_wells(*wells)
     compiled = compile_well_system(
-        make_wells(*wells),
+        rich_wells,
         make_well_controls(**controls),
         grid,
         permeabilities={
             orientation: np.full(count * connections, 100.0) for orientation in Orientation
         },
         group_controls=GroupControls({
-            f"G{g}": make_group_control(target_rate=group_target) for g in range(groups)
+            f"G{g}": make_group_control(target_rate=group_target, limits=group_limits)
+            for g in range(groups)
         }),
         groups=WellGroups({
             f"G{g}": WellGroup(name=f"G{g}", parent="FIELD") for g in range(groups)
@@ -3348,17 +3360,29 @@ def build_group_system(*, wells_per_group=4, groups=2, connections=4, weak_well=
         for k in range(connections)
     ]
     fluids = compile_connection_fluids(connection_samples=samples)
+    heavy_fluids = compile_connection_fluids(
+        connection_samples=[
+            sample._replace(phase_mobilities=PhaseValues(0.2, 0.1, 25.0)) for sample in samples
+        ]
+    )
+
+    def get_fluids(row):
+        return heavy_fluids if row == gas_heavy_well else fluids
+
     tubing = homogeneous_wellbore(tubing_inner_diameter=0.25)
     workspace = build_wells_workspace(
         n_wells=count, n_connections=int(compiled.perforations.well_indices.shape[0])
     )
+    spec = WellControlSpec(connection_pressure_mode=ConnectionPressureMode.HYDRAULIC)
     resolve_wells(
         compiled_system=compiled,
         workspace=workspace,
-        spec=WellControlSpec(connection_pressure_mode=ConnectionPressureMode.HYDRAULIC),
+        spec=spec,
         get_tubing_performance=lambda row: tubing,
-        get_connection_fluids=lambda row: fluids,
+        get_connection_fluids=get_fluids,
     )
+    if return_system:
+        return workspace, group_target, groups, count, (compiled, spec, fluids, tubing, rich_wells)
     return workspace, group_target, groups, count
 
 
@@ -3380,3 +3404,78 @@ def test_a_well_that_cannot_reach_its_share_has_the_shortfall_taken_up_by_its_gr
     assert total == pytest.approx(group_target, rel=1e-3)
     others = workspace.surface_oil_rates[groups:count:groups]
     assert np.all(others > even.surface_oil_rates[groups:count:groups])
+
+
+def resolve_group_system_again(system):
+    from bores.wells.resolution.system import resolve_wells
+
+    compiled, spec, fluids, tubing, _ = system
+    return lambda workspace: resolve_wells(
+        compiled_system=compiled,
+        workspace=workspace,
+        spec=spec,
+        get_tubing_performance=lambda row: tubing,
+        get_connection_fluids=lambda row: fluids,
+    )
+
+
+def test_group_control_stays_configured_after_wells_are_resolved():
+    from bores.wells.compile import ProducerControlModeTag
+
+    workspace, _, _, count, system = build_group_system(return_system=True)
+    compiled = system[0]
+    assert (compiled.controls.control_modes == ProducerControlModeTag.GROUP).all()
+    assert (workspace.group_control_modes != -1).all()
+    assert not np.isnan(workspace.group_target_rates).any()
+    assert workspace.group_control_modes.shape[0] == count
+
+
+def test_a_changed_group_target_is_allocated_again_on_the_next_resolve():
+    workspace, target, groups, count, system = build_group_system(return_system=True)
+    compiled = system[0]
+    compiled.group_controls.target_rates[:] = 1.5 * target
+    resolve_group_system_again(system)(workspace)
+    for group in range(groups):
+        delivered = workspace.surface_oil_rates[group:count:groups].sum()
+        assert delivered == pytest.approx(1.5 * target, rel=1e-3)
+
+
+def test_a_member_that_was_short_of_its_share_recovers_when_it_can_deliver_again():
+    workspace, target, groups, count, system = build_group_system(weak_well=0, return_system=True)
+    compiled = system[0]
+    shortfall = workspace.surface_oil_rates[0]
+    offsets = compiled.perforations.well_offsets
+    compiled.perforations.well_indices[offsets[0] : offsets[1]] *= 1e4
+    resolve_group_system_again(system)(workspace)
+    assert workspace.surface_oil_rates[0] > shortfall
+    assert workspace.surface_oil_rates[0:count:groups].sum() == pytest.approx(target, rel=1e-3)
+
+
+def test_a_group_member_is_reported_with_the_control_its_group_gave_it():
+    from bores.wells.compile import ProducerControlModeTag
+    from bores.wells.workspace import load_wells_states
+
+    workspace, _, _, _, system = build_group_system(return_system=True)
+    compiled = system[0]
+    states = load_wells_states(wells=system[4], compiled_system=compiled, workspace=workspace)
+    assert (workspace.group_control_modes == ProducerControlModeTag.OIL_RATE).all()
+    assert all(state.active_control.mode.value == "oil_rate" for state in states.states.values())
+    assert all(state.active_control.target_rate > 0.0 for state in states.states.values())
+
+
+def test_a_group_reallocates_a_shut_in_members_share_to_the_wells_still_open():
+    from bores.wells.controls import EconomicLimit, EconomicQuantity, WorkoverAction
+
+    limit = EconomicLimit(
+        quantity=EconomicQuantity.GOR, max_value=2000.0, workover_action=WorkoverAction.WELL
+    )
+    workspace, target, groups, count, system = build_group_system(
+        wells_per_group=4, gas_heavy_well=0, group_limits=(limit,), return_system=True
+    )
+    compiled = system[0]
+    members = list(range(0, count, groups))
+    assert workspace.economic_shutins[0] == 1
+    assert workspace.surface_oil_rates[0] == 0.0
+    assert not workspace.economic_shutins[members[1:]].any()
+    assert workspace.surface_oil_rates[members].sum() == pytest.approx(target, rel=1e-3)
+    assert (compiled.controls.control_modes == compiled.controls.control_modes[0]).all()

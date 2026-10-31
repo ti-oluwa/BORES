@@ -20,7 +20,7 @@ from bores.types import (
     UnitSystem,
 )
 from bores.units import get_conversion_factors
-from bores.wells.state import ConnectionSample
+from bores.wells.state import ConnectionSample, ConnectionSampleDerivatives
 
 if typing.TYPE_CHECKING:
     from bores.wells.hydraulics.tubing_fluids import TubingFluidTable
@@ -28,12 +28,14 @@ if typing.TYPE_CHECKING:
 __all__ = [
     "UNIT_SYSTEMS_BY_TAG",
     "UNIT_SYSTEM_TAGS",
+    "ConnectionDerivatives",
     "ConnectionFluids",
     "ConnectionWalk",
     "PressureDrop",
     "SurfaceSample",
     "WellBoreModel",
     "WellBoreModelOptions",
+    "compile_connection_derivatives",
     "compile_connection_fluids",
     "compute_friction_factor",
     "compute_hydrostatic_pressure",
@@ -552,6 +554,104 @@ class ConnectionFluids(typing.NamedTuple):
 
     vaporized_oil_gas_ratios: NumberArray[OneDimension]
     """Oil the gas carries as vapor at each connection, in stock-tank barrels per standard cubic foot."""
+
+
+class ConnectionDerivatives(typing.NamedTuple):
+    """
+    How the fluid properties at every connection of a well change with the primary unknowns of the
+    connected cell (pressure, water saturation, gas saturation), one array per derivative, in the
+    order of the well's connections. `ConnectionSampleDerivatives` describes each one.
+    """
+
+    oil_mobility_pressures: NumberArray[OneDimension]
+    """Derivative of the oil mobility with respect to pressure."""
+
+    oil_mobility_water_saturations: NumberArray[OneDimension]
+    """Derivative of the oil mobility with respect to water saturation."""
+
+    oil_mobility_gas_saturations: NumberArray[OneDimension]
+    """Derivative of the oil mobility with respect to gas saturation."""
+
+    water_mobility_pressures: NumberArray[OneDimension]
+    """Derivative of the water mobility with respect to pressure."""
+
+    water_mobility_water_saturations: NumberArray[OneDimension]
+    """Derivative of the water mobility with respect to water saturation."""
+
+    water_mobility_gas_saturations: NumberArray[OneDimension]
+    """Derivative of the water mobility with respect to gas saturation."""
+
+    gas_mobility_pressures: NumberArray[OneDimension]
+    """Derivative of the gas mobility with respect to pressure."""
+
+    gas_mobility_water_saturations: NumberArray[OneDimension]
+    """Derivative of the gas mobility with respect to water saturation."""
+
+    gas_mobility_gas_saturations: NumberArray[OneDimension]
+    """Derivative of the gas mobility with respect to gas saturation."""
+
+    oil_formation_volume_factor_pressures: NumberArray[OneDimension]
+    """Derivative of the oil formation volume factor with respect to pressure."""
+
+    water_formation_volume_factor_pressures: NumberArray[OneDimension]
+    """Derivative of the water formation volume factor with respect to pressure."""
+
+    gas_formation_volume_factor_pressures: NumberArray[OneDimension]
+    """Derivative of the gas formation volume factor with respect to pressure."""
+
+    solution_gas_oil_ratio_pressures: NumberArray[OneDimension]
+    """Derivative of the solution gas-oil ratio with respect to pressure."""
+
+    vaporized_oil_gas_ratio_pressures: NumberArray[OneDimension]
+    """Derivative of the vaporized oil-gas ratio with respect to pressure."""
+
+
+def compile_connection_derivatives(
+    *, connection_samples: typing.Sequence[ConnectionSample], dtype: npt.DTypeLike = None
+) -> ConnectionDerivatives:
+    """
+    Compiles a well's connection samples into the derivative arrays its derivatives are computed
+    from. A sample without derivatives contributes `NaN` for each.
+
+    :param connection_samples: One `ConnectionSample` per connection.
+    :param dtype: Array data type. `bores.precision.get_dtype()` if not given.
+    :returns: The derivatives at every connection.
+    """
+    resolved_dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+    count = len(connection_samples)
+    missing = ConnectionSampleDerivatives()
+
+    def gather(
+        read: typing.Callable[[ConnectionSampleDerivatives], Number],
+    ) -> NumberArray[OneDimension]:
+        return typing.cast(
+            "NumberArray[OneDimension]",
+            np.fromiter(
+                (
+                    read(missing if sample.derivatives is None else sample.derivatives)
+                    for sample in connection_samples
+                ),
+                resolved_dtype,
+                count,
+            ),
+        )
+
+    return ConnectionDerivatives(
+        oil_mobility_pressures=gather(lambda d: d.oil_mobility_pressure),
+        oil_mobility_water_saturations=gather(lambda d: d.oil_mobility_water_saturation),
+        oil_mobility_gas_saturations=gather(lambda d: d.oil_mobility_gas_saturation),
+        water_mobility_pressures=gather(lambda d: d.water_mobility_pressure),
+        water_mobility_water_saturations=gather(lambda d: d.water_mobility_water_saturation),
+        water_mobility_gas_saturations=gather(lambda d: d.water_mobility_gas_saturation),
+        gas_mobility_pressures=gather(lambda d: d.gas_mobility_pressure),
+        gas_mobility_water_saturations=gather(lambda d: d.gas_mobility_water_saturation),
+        gas_mobility_gas_saturations=gather(lambda d: d.gas_mobility_gas_saturation),
+        oil_formation_volume_factor_pressures=gather(lambda d: d.oil_fvf_pressure),
+        water_formation_volume_factor_pressures=gather(lambda d: d.water_fvf_pressure),
+        gas_formation_volume_factor_pressures=gather(lambda d: d.gas_fvf_pressure),
+        solution_gas_oil_ratio_pressures=gather(lambda d: d.solution_gas_oil_ratio_pressure),
+        vaporized_oil_gas_ratio_pressures=gather(lambda d: d.vaporized_oil_gas_ratio_pressure),
+    )
 
 
 def validate_tubing_fluid_options(

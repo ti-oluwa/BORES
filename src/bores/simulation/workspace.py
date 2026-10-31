@@ -23,7 +23,7 @@ from bores.reservoir.workspace import (
     ReservoirWorkspace,
 )
 from bores.simulation.spec import RunSpec
-from bores.types import CellArray, Integer, Number
+from bores.types import CellArray, IntArray, Integer, Number, OneDimension
 from bores.wells.workspace import WellsWorkspace, build_wells_workspace
 
 __all__ = ["SimulationWorkspace", "build_simulation_workspace"]
@@ -86,6 +86,7 @@ def build_simulation_workspace(
     n_wells: Integer,
     n_connections: Integer,
     runspec: RunSpec,
+    well_offsets: IntArray[OneDimension] | None = None,
     boundary_conditions: CompiledBoundaryConditions | None = None,
     hysteresis: Hysteresis | HysteresisWorkspace | None = None,
     salinity: CellArray | None = None,
@@ -103,6 +104,8 @@ def build_simulation_workspace(
     :param n_wells: Number of wells.
     :param n_connections: Total active connections across every well.
     :param runspec: Simulation run settings controlling enabled physics terms such as gravity and capillary effects.
+    :param well_offsets: Where each well's connections start, as `CompiledPerforations.well_offsets`
+        gives it. Gives the wells' workspace room for their derivatives. Without it none can be stored.
     :param boundary_conditions: The run's compiled boundary conditions, if any.
     :param start_time: Simulation time the run starts at. Aquifers start responding then.
     :param dtype: Output array dtype for every buffer. `bores.precision.get_dtype()` if not given.
@@ -168,10 +171,17 @@ def build_simulation_workspace(
     )
     reservoir_workspace = ReservoirWorkspace.from_state(initial_state, dtype=dtype)
     wells_workspace = build_wells_workspace(
-        n_wells=n_wells, n_connections=n_connections, dtype=dtype
+        n_wells=n_wells,
+        n_connections=n_connections,
+        well_offsets=well_offsets,
+        dtype=dtype,
     )
     aquifer_workspace = (
-        build_aquifer_workspace(boundary_conditions.aquifers, dtype=dtype, start_time=start_time)
+        build_aquifer_workspace(
+            boundary_conditions.aquifers,
+            dtype=dtype,
+            start_time=start_time,
+        )
         if boundary_conditions is not None
         else None
     )

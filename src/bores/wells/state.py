@@ -2,6 +2,7 @@
 
 import enum
 import fnmatch
+import math
 import typing
 
 import attrs
@@ -42,6 +43,7 @@ if typing.TYPE_CHECKING:
 
 __all__ = [
     "ConnectionSample",
+    "ConnectionSampleDerivatives",
     "PerforationState",
     "WellState",
     "WellStates",
@@ -50,6 +52,59 @@ __all__ = [
 
 WellLevel = typing.Literal["well", "perforation"]
 """What a row of `as_dataframe` describes: one well, or one open perforation of a well."""
+
+
+class ConnectionSampleDerivatives(typing.NamedTuple):
+    """
+    How the fluid properties at one connected cell change with the cell's primary unknowns:
+    pressure, water saturation and gas saturation, with oil saturation following as one minus the
+    other two. Each derivative is the total derivative with respect to that unknown, with the
+    other two unknowns held fixed.
+
+    Every field is `NaN` unless given, and a `NaN` makes the well derivatives that depend on it `NaN`.
+    """
+
+    oil_mobility_pressure: Number = math.nan
+    """Derivative of the oil mobility with respect to pressure."""
+
+    oil_mobility_water_saturation: Number = math.nan
+    """Derivative of the oil mobility with respect to water saturation."""
+
+    oil_mobility_gas_saturation: Number = math.nan
+    """Derivative of the oil mobility with respect to gas saturation."""
+
+    water_mobility_pressure: Number = math.nan
+    """Derivative of the water mobility with respect to pressure."""
+
+    water_mobility_water_saturation: Number = math.nan
+    """Derivative of the water mobility with respect to water saturation."""
+
+    water_mobility_gas_saturation: Number = math.nan
+    """Derivative of the water mobility with respect to gas saturation."""
+
+    gas_mobility_pressure: Number = math.nan
+    """Derivative of the gas mobility with respect to pressure."""
+
+    gas_mobility_water_saturation: Number = math.nan
+    """Derivative of the gas mobility with respect to water saturation."""
+
+    gas_mobility_gas_saturation: Number = math.nan
+    """Derivative of the gas mobility with respect to gas saturation."""
+
+    oil_fvf_pressure: Number = math.nan
+    """Derivative of the oil formation volume factor with respect to pressure."""
+
+    water_fvf_pressure: Number = math.nan
+    """Derivative of the water formation volume factor with respect to pressure."""
+
+    gas_fvf_pressure: Number = math.nan
+    """Derivative of the gas formation volume factor with respect to pressure."""
+
+    solution_gas_oil_ratio_pressure: Number = math.nan
+    """Derivative of the solution gas-oil ratio with respect to pressure."""
+
+    vaporized_oil_gas_ratio_pressure: Number = math.nan
+    """Derivative of the vaporized oil-gas ratio with respect to pressure."""
 
 
 class ConnectionSample(typing.NamedTuple):
@@ -96,6 +151,12 @@ class ConnectionSample(typing.NamedTuple):
     """
     Oil the gas at this connected cell carries as vapor, in stock-tank barrels per standard cubic
     foot of gas. Zero for dry gas.
+    """
+
+    derivatives: ConnectionSampleDerivatives | None = None
+    """
+    How the properties above change with this cell's pressure and saturations. Only needed to
+    compute the well derivatives a fully implicit solver assembles.
     """
 
 

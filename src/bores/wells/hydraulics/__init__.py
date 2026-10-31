@@ -1,11 +1,13 @@
 """Wellbore hydraulics API. Shared primitives and  models."""
 
 from bores.wells.hydraulics.base import (
+    ConnectionDerivatives,
     ConnectionFluids,
     PressureDrop,
     SurfaceSample,
     WellBoreModel,
     WellBoreModelOptions,
+    compile_connection_derivatives,
     compile_connection_fluids,
     compute_friction_factor,
     compute_hydrostatic_pressure,
@@ -59,6 +61,7 @@ from bores.wells.hydraulics.woldesemayat_ghajar import (
 
 __all__ = [
     "BeggsAndBrillWellbore",
+    "ConnectionDerivatives",
     "ConnectionFluids",
     "GrayWellbore",
     "HagedornBrownWellbore",
@@ -75,6 +78,7 @@ __all__ = [
     "WoldesemayatGhajarWellbore",
     "beggs_and_brill_wellbore",
     "build_tubing_fluid_table",
+    "compile_connection_derivatives",
     "compile_connection_fluids",
     "compute_beggs_brill_holdup",
     "compute_friction_factor",

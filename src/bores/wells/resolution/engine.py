@@ -5,10 +5,11 @@ import math
 import typing
 
 import numpy as np
+import numpy.typing as npt
 
 from bores.blackoil.pvt.data import get_stb_to_volume_factor
 from bores.errors import StopSimulation, ValidationError, WellConvergenceError
-from bores.types import Integer, NumberArray, OneDimension, P, R
+from bores.types import IntArray, Integer, NumberArray, OneDimension, P, R
 from bores.wells.compile import (
     STOPPED_WELL_TAG,
     UNSET_INT,
@@ -40,12 +41,14 @@ from bores.wells.resolution.tubing import (
 )
 from bores.wells.workspace import (
     ConnectionRates,
+    PerforationWorkspace,
     WellsWorkspace,
     build_perforation_workspace,
     get_connection_rates,
+    sum_connection_rates,
 )
 
-__all__ = ["record_shut_well", "resolve_well_control"]
+__all__ = ["build_well_perforation_workspace", "record_shut_well", "resolve_well_control"]
 
 
 def record_shut_well(
@@ -81,6 +84,65 @@ def record_shut_well(
     workspace.connection_oil_rates[start:end] = 0.0
     workspace.connection_water_rates[start:end] = 0.0
     workspace.connection_gas_rates[start:end] = 0.0
+    block_start = workspace.derivative_offsets[well_row]
+    block_end = workspace.derivative_offsets[well_row + 1]
+    workspace.connection_rate_cell_derivatives[block_start:block_end] = 0.0
+    workspace.connection_surface_rate_cell_derivatives[block_start:block_end] = 0.0
+    workspace.connection_rate_bhp_derivatives[start:end] = 0.0
+    workspace.connection_surface_rate_bhp_derivatives[start:end] = 0.0
+    workspace.well_rate_cell_derivatives[start:end] = 0.0
+    workspace.well_surface_rate_cell_derivatives[start:end] = 0.0
+    workspace.well_rate_bhp_derivatives[well_row] = 0.0
+    workspace.well_surface_rate_bhp_derivatives[well_row] = 0.0
+    workspace.thp_bhp_derivatives[well_row] = np.nan
+    workspace.thp_cell_derivatives[start:end] = np.nan
+
+
+def build_well_perforation_workspace(
+    *,
+    compiled_system: CompiledWellSystem,
+    well_row: Integer,
+    active_open: IntArray[OneDimension],
+    connection_fluids: ConnectionFluids,
+    dtype: npt.DTypeLike = None,
+) -> PerforationWorkspace:
+    """
+    Builds the `PerforationWorkspace` of one well from the rows of its flowing connections.
+
+    :param compiled_system: The compiled well system.
+    :param well_row: Which well, by row index into `compiled_system`.
+    :param active_open: The well's flowing connection rows, as
+        `compiled_system.get_flowing_connection_rows` gives them.
+    :param connection_fluids: Reservoir conditions at those connections, in the same order.
+    :param dtype: Array data type. `bores.precision.get_dtype()` if not given.
+    :returns: The well's perforation workspace.
+    """
+    perforations = compiled_system.perforations
+    return build_perforation_workspace(
+        well_indices=typing.cast(
+            "NumberArray[OneDimension]", perforations.well_indices[active_open]
+        ),
+        representative_depths=typing.cast(
+            "NumberArray[OneDimension]", perforations.representative_depths[active_open]
+        ),
+        representative_measured_depths=typing.cast(
+            "NumberArray[OneDimension]", perforations.representative_measured_depths[active_open]
+        ),
+        inclinations_from_vertical=typing.cast(
+            "NumberArray[OneDimension]",
+            perforations.inclinations_from_vertical[active_open],
+        ),
+        connection_fluids=connection_fluids,
+        reference_measured_depth=compiled_system.reference_measured_depths[well_row],
+        connection_conductivities=typing.cast(
+            "NumberArray[OneDimension]",
+            perforations.connection_conductivities[active_open],
+        ),
+        d_factor=compiled_system.d_factors[well_row],
+        allows_crossflow=compiled_system.get_allows_crossflow(well_row=well_row),
+        stb_to_volume_factor=get_stb_to_volume_factor(compiled_system.unit_system),
+        dtype=dtype,
+    )
 
 
 def name_well_in_convergence_errors(func: typing.Callable[P, R]) -> typing.Callable[P, R]:
@@ -160,8 +222,15 @@ def resolve_well_control(
         well_row=well_row,
     )
     control_mode = controls.control_modes[well_row]
+    target_rate = controls.target_rates[well_row]
     well_kind = controls.well_kinds[well_row]
     is_injector = well_kind == WellKind.INJECTOR
+    group_mode = workspace.group_control_modes[well_row]
+    if group_mode != UNSET_INT and control_mode == (
+        InjectorControlModeTag.GROUP if is_injector else ProducerControlModeTag.GROUP
+    ):
+        control_mode = group_mode
+        target_rate = workspace.group_target_rates[well_row]
     reference_depth = compiled_system.reference_depths[well_row]
 
     perforations = compiled_system.perforations
@@ -193,29 +262,11 @@ def resolve_well_control(
     workspace.connection_water_rates[not_open] = 0.0
     workspace.connection_gas_rates[not_open] = 0.0
 
-    perforation_workspace = build_perforation_workspace(
-        well_indices=typing.cast(
-            "NumberArray[OneDimension]", perforations.well_indices[active_open]
-        ),
-        representative_depths=typing.cast(
-            "NumberArray[OneDimension]", perforations.representative_depths[active_open]
-        ),
-        representative_measured_depths=typing.cast(
-            "NumberArray[OneDimension]", perforations.representative_measured_depths[active_open]
-        ),
-        inclinations_from_vertical=typing.cast(
-            "NumberArray[OneDimension]",
-            perforations.inclinations_from_vertical[active_open],
-        ),
+    perforation_workspace = build_well_perforation_workspace(
+        compiled_system=compiled_system,
+        well_row=well_row,
+        active_open=active_open,
         connection_fluids=connection_fluids,
-        reference_measured_depth=compiled_system.reference_measured_depths[well_row],
-        connection_conductivities=typing.cast(
-            "NumberArray[OneDimension]",
-            perforations.connection_conductivities[active_open],
-        ),
-        d_factor=compiled_system.d_factors[well_row],
-        allows_crossflow=compiled_system.get_allows_crossflow(well_row=well_row),
-        stb_to_volume_factor=get_stb_to_volume_factor(compiled_system.unit_system),
     )
 
     is_stopped = compiled_system.open_statuses[well_row] == STOPPED_WELL_TAG
@@ -251,7 +302,7 @@ def resolve_well_control(
         ):
             bhp, connection_pressures, rates, surface_rates = solve_rate_injector(
                 control_mode=control_mode,
-                target_rate=controls.target_rates[well_row],
+                target_rate=target_rate,
                 injected_phase=injected_phase,
                 tubing=tubing,
                 reference_depth=reference_depth,
@@ -327,7 +378,7 @@ def resolve_well_control(
         ):
             bhp, connection_pressures, rates, surface_rates = solve_rate_producer(
                 control_mode=control_mode,
-                target_rate=controls.target_rates[well_row],
+                target_rate=target_rate,
                 tubing=tubing,
                 reference_depth=reference_depth,
                 workspace=perforation_workspace,
@@ -421,13 +472,24 @@ def resolve_well_control(
             surface_sample=surface_sample,
         )
 
+    reported_rates, reported_surface_rates = rates, surface_rates
+    if is_injector and not economic_shutin and perforation_workspace.allows_crossflow:
+        if (
+            (perforation_workspace.connection_oil_rates < 0.0).any()
+            or (perforation_workspace.connection_water_rates < 0.0).any()
+            or (perforation_workspace.connection_gas_rates < 0.0).any()
+        ):
+            reported_rates, reported_surface_rates = sum_connection_rates(
+                workspace=perforation_workspace, is_injector=True
+            )
+
     workspace.bhps[well_row] = bhp
-    workspace.oil_rates[well_row] = rates.oil
-    workspace.water_rates[well_row] = rates.water
-    workspace.gas_rates[well_row] = rates.gas
-    workspace.surface_oil_rates[well_row] = surface_rates.oil
-    workspace.surface_water_rates[well_row] = surface_rates.water
-    workspace.surface_gas_rates[well_row] = surface_rates.gas
+    workspace.oil_rates[well_row] = reported_rates.oil
+    workspace.water_rates[well_row] = reported_rates.water
+    workspace.gas_rates[well_row] = reported_rates.gas
+    workspace.surface_oil_rates[well_row] = reported_surface_rates.oil
+    workspace.surface_water_rates[well_row] = reported_surface_rates.water
+    workspace.surface_gas_rates[well_row] = reported_surface_rates.gas
     workspace.active_limit_rows[well_row] = active_limit_row
     workspace.economic_shutins[well_row] = 1 if economic_shutin else 0
     workspace.connection_pressures[active_open] = connection_pressures

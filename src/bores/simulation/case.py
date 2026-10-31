@@ -198,6 +198,7 @@ class SimulationCase:
             initial_state=initial_state,
             n_wells=n_wells,
             n_connections=n_connections,
+            well_offsets=wells.perforations.well_offsets if wells is not None else None,
             runspec=self.runspec,
             boundary_conditions=model.boundary_conditions,
             hysteresis=hysteresis,

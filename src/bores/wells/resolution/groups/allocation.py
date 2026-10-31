@@ -17,6 +17,7 @@ from bores.types import Integer, Number
 from bores.wells.compile import (
     GROUP_TO_INJECTOR_MODE_TAG,
     GROUP_TO_PRODUCER_MODE_TAG,
+    UNSET_INT,
     CompiledWellSystem,
     FluidPhaseTag,
     GroupKind,
@@ -76,9 +77,9 @@ def allocate_group_targets(
     Allocate `group_name`'s current target rate across its member wells
     whose control mode is `GRUP`, by guide rate.
 
-    Writes the resulting per-well control (mode switched to a concrete
-    rate mode, `target_rates` set to the well's share) directly into
-    `well_system.controls.target_rates`/`.control_modes` in place.
+    Writes each member's concrete rate control mode and its share of the target into
+    `workspace.group_control_modes`/`workspace.group_target_rates`, leaving the well's configured
+    control mode in `well_system.controls` as group control, so the next call allocates it again.
 
     Member wells were resolved once at compile time (`compile_group_controls`);
     this only re-evaluates which of them currently sit in `GRUP` mode,
@@ -142,8 +143,8 @@ def allocate_group_targets(
         return ()
 
     assign_group_shares(
-        target_rates=controls.target_rates,
-        control_modes=controls.control_modes,
+        target_rates=workspace.group_target_rates,
+        control_modes=workspace.group_control_modes,
         guide_rates=controls.guide_rates,
         members=np.asarray(eligible_member_indices, dtype=np.int64),
         group_target_rate=target_rate,
@@ -178,6 +179,8 @@ def get_group_controlled_rate(
     """
     controls = well_system.controls
     mode = controls.control_modes[well_row]
+    if workspace.group_control_modes[well_row] != UNSET_INT:
+        mode = workspace.group_control_modes[well_row]
 
     if well_system.well_kinds[well_row] == WellKind.INJECTOR:
         if mode == InjectorControlModeTag.RATE:
@@ -374,14 +377,14 @@ def redistribute_group_shortfall(
         for position, idx in enumerate(group_derived):
             actual_rates[position] = (
                 math.nan
-                if math.isnan(controls.target_rates[idx])
+                if math.isnan(workspace.group_target_rates[idx])
                 else get_group_controlled_rate(
                     well_system=well_system, workspace=workspace, well_row=idx
                 )
             )
 
         total_shortfall, n_headroom = cap_unmet_targets(
-            target_rates=controls.target_rates,
+            target_rates=workspace.group_target_rates,
             actual_rates=actual_rates,
             members=members,
             rate_tolerance=spec.rate_convergence_tolerance,
@@ -391,7 +394,7 @@ def redistribute_group_shortfall(
             break
 
         boost_headroom_targets(
-            target_rates=controls.target_rates,
+            target_rates=workspace.group_target_rates,
             guide_rates=controls.guide_rates,
             headroom_members=headroom_members,
             n_headroom=n_headroom,

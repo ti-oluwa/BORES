@@ -7,7 +7,7 @@ import numba
 import numpy as np
 
 from bores.errors import ValidationError
-from bores.types import Integer, Number, NumberArray, OneDimension, PhaseValues
+from bores.types import Boolean, Integer, Number, NumberArray, OneDimension, PhaseValues
 from bores.wells.compile import (
     UNSET_INT,
     CompiledGroupLimits,
@@ -15,6 +15,7 @@ from bores.wells.compile import (
     EconomicQuantityTag,
     LimitKind,
     RateQuantityTag,
+    WorkoverActionTag,
 )
 from bores.wells.hydraulics.base import SurfaceSample
 from bores.wells.resolution.solvers import (
@@ -217,6 +218,7 @@ def check_economic_violation(
     limits_start: Integer,
     limits_end: Integer,
     rates: PhaseValues,
+    skip_unenforced: Boolean,
 ) -> Integer:
     """
     Finds the first `ECONOMIC` limit row in `[limits_start, limits_end)`
@@ -232,12 +234,17 @@ def check_economic_violation(
     :param limits_end: One past the last row of this well's limit range.
     :param rates: Well-total phase rates at surface conditions to check. The gas rate is the
         total, free and dissolved, so a gas-oil ratio is the one the well produces at the surface.
+    :param skip_unenforced: Whether to pass over rows whose workover action is `NONE`, which
+        is tracked but not acted on. A well shuts in on a violation, so it skips them; a group
+        reports them as a violation it takes no action on.
     :returns: The violated row's index, or `UNSET_INT` if none is violated.
     """
     oil_rate, water_rate, gas_rate = rates.oil, rates.water, rates.gas
 
     for row in range(limits_start, limits_end):
         if limits.kinds[row] != LimitKind.ECONOMIC:
+            continue
+        if skip_unenforced and limits.workover_actions[row] == WorkoverActionTag.NONE:
             continue
 
         quantity = limits.quantities[row]
@@ -439,6 +446,7 @@ def apply_limits(
         limits_start=limits_start,
         limits_end=limits_end,
         rates=governing_surface_phase_rates,
+        skip_unenforced=True,
     )
     if violated_row != UNSET_INT:
         zero = PhaseValues(oil=0.0, water=0.0, gas=0.0)

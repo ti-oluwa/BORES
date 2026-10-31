@@ -14,6 +14,7 @@ from bores.wells.base import (
 )
 from bores.wells.controls import (
     BHPLimit,
+    EconomicLimit,
     InjectorControl,
     InjectorControlMode,
     Limit,
@@ -489,6 +490,7 @@ def make_group_control(
     target_rate: Number,
     quantity: RateQuantity = RateQuantity.OIL,
     injected_phase: FluidPhase | None = None,
+    limits: typing.Sequence[EconomicLimit] = (),
     unit_system: UnitSystem = UnitSystem.FIELD,
 ) -> GroupControl:
     """
@@ -498,6 +500,7 @@ def make_group_control(
     :param quantity: Which rate `target_rate` is. Ignored if `injected_phase` is given.
     :param injected_phase: If given, builds an injection `GroupControl`
         (`mode=GroupInjectorControlMode.RATE`) instead of a production one.
+    :param limits: The group's economic limits (`GECON`).
     :param unit_system: `GroupControl.unit_system`.
     :returns: Constructed `GroupControl`.
     """
@@ -506,11 +509,13 @@ def make_group_control(
             mode=GroupInjectorControlMode.RATE,
             target_rate=target_rate,
             injected_phase=injected_phase,
+            limits=tuple(limits),
             unit_system=unit_system,
         )
     return GroupControl(
         mode=QUANTITY_GROUP_CONTROL_MODES[quantity],
         target_rate=target_rate,
+        limits=tuple(limits),
         unit_system=unit_system,
     )
 

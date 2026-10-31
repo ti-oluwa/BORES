@@ -9,7 +9,17 @@ import numpy.typing as npt
 
 from bores.errors import ValidationError
 from bores.precision import get_dtype
-from bores.types import Boolean, IntArray, Integer, Number, NumberArray, OneDimension, PhaseValues
+from bores.types import (
+    Boolean,
+    IntArray,
+    Integer,
+    Number,
+    NumberArray,
+    OneDimension,
+    PhaseValues,
+    ThreeDimensions,
+    TwoDimensions,
+)
 from bores.utils import none_if_nan
 from bores.wells.base import Wells
 from bores.wells.compile import UNSET_INT, CompiledWellSystem
@@ -23,17 +33,20 @@ from bores.wells.state import (
 
 __all__ = [
     "ConnectionRates",
+    "DerivativeScratch",
     "PerforationWorkspace",
     "WellsWorkspace",
     "accumulate_rates",
     "accumulate_well_volumes",
     "apply_non_darcy_correction_to_well_indices",
+    "build_derivative_scratch",
     "build_perforation_workspace",
     "build_wells_workspace",
     "compute_perforation_drawdown",
     "get_connection_rates",
     "load_wells_states",
     "restore_connection_rates",
+    "sum_connection_rates",
 ]
 
 
@@ -79,9 +92,8 @@ class PerforationWorkspace(typing.NamedTuple):
 
     allows_crossflow: Boolean
     """
-    Whether this well allows its connections to flow in the opposite direction to the well.
-    Reverse flow is not modelled yet, so a connection with reversed drawdown is given zero
-    flow whatever this is set to.
+    Whether this well allows its connections to flow in the opposite direction to the well. A
+    connection with reversed drawdown is given zero flow when this is `False`.
     """
 
     connection_fluids: ConnectionFluids
@@ -236,6 +248,124 @@ def build_perforation_workspace(
     )
 
 
+class DerivativeScratch(typing.NamedTuple):
+    """
+    Double-precision buffers the well derivative computation works in, sized once for the
+    well with the most connections, so that computing a well's derivatives allocates none.
+
+    For a well with `n` connections, `n <= max_connections`, each buffer is used through its
+    first `n` (or `3 * n`, `3 * n * n`...) entries and reshaped there. The names give each
+    buffer's logical shape, with `size` standing for `3 * n`.
+    """
+
+    oil_rates: NumberArray[OneDimension]
+    """Shape `(n,)`. The final oil rate at each flowing connection."""
+
+    water_rates: NumberArray[OneDimension]
+    """Shape `(n,)`. The final water rate at each flowing connection."""
+
+    gas_rates: NumberArray[OneDimension]
+    """Shape `(n,)`. The final gas rate at each flowing connection."""
+
+    connection_pressures: NumberArray[OneDimension]
+    """Shape `(n,)`. The final pressure at each flowing connection."""
+
+    well_indices: NumberArray[OneDimension]
+    """Shape `(n,)`. Each flowing connection's well index after the non-Darcy correction."""
+
+    shifted_oil_rates: NumberArray[OneDimension]
+    """Shape `(size, n)`. Row `t` is the oil rates with the rate `t` is differenced by changed."""
+
+    shifted_water_rates: NumberArray[OneDimension]
+    """Shape `(size, n)`. As `shifted_oil_rates`, for water."""
+
+    shifted_gas_rates: NumberArray[OneDimension]
+    """Shape `(size, n)`. As `shifted_oil_rates`, for gas."""
+
+    forward_pressures: NumberArray[OneDimension]
+    """Shape `(size, n)`. Row `t` is the connection pressures with rate `t` stepped one way."""
+
+    backward_pressures: NumberArray[OneDimension]
+    """Shape `(size, n)`. Row `t` is the connection pressures with rate `t` stepped the other way."""
+
+    pressure_rate_sensitivities: NumberArray[OneDimension]
+    """Shape `(n, size)`. How each connection's pressure changes with every connection rate."""
+
+    pressure_reference_sensitivities: NumberArray[OneDimension]
+    """Shape `(n,)`. How each connection's pressure changes with the reference pressure."""
+
+    wellbore_pressure_partials: NumberArray[OneDimension]
+    """Shape `(n, 3)`. Each connection's rates against the pressure in the wellbore beside it."""
+
+    cell_partials: NumberArray[OneDimension]
+    """Shape `(n, 3, 3)`. Each connection's rates against its cell's pressure and saturations."""
+
+    gas_rate_partials: NumberArray[OneDimension]
+    """Shape `(n, 3)`. Each connection's rates against its own gas rate, through non-Darcy flow."""
+
+    composition_partials: NumberArray[OneDimension]
+    """Shape `(size, size)`. A reversed producer connection's rates against the producing ones."""
+
+    system: NumberArray[OneDimension]
+    """Shape `(size, size)`. The matrix the total derivatives are solved with."""
+
+    right_hand_side: NumberArray[OneDimension]
+    """Shape `(size, size + 1)`. The cell unknowns' columns, then the bottom-hole pressure's."""
+
+    rate_cell_derivatives: NumberArray[OneDimension]
+    """Shape `(size, size)`. The connection rates against the cell unknowns."""
+
+    rate_bhp_derivatives: NumberArray[OneDimension]
+    """Shape `(size,)`. The connection rates against the bottom-hole pressure."""
+
+    surface_cell_derivatives: NumberArray[OneDimension]
+    """Shape `(size, size)`. The surface component rates against the cell unknowns."""
+
+    surface_bhp_derivatives: NumberArray[OneDimension]
+    """Shape `(size,)`. The surface component rates against the bottom-hole pressure."""
+
+
+def build_derivative_scratch(*, max_connections: Integer) -> DerivativeScratch:
+    """
+    Allocates the buffers of `DerivativeScratch`.
+
+    :param max_connections: The most connections any one well has.
+    :returns: Buffers, all `NaN`, in double precision.
+    """
+    count = int(max_connections)
+    size = 3 * count
+
+    def buffer(entries: Integer) -> NumberArray[OneDimension]:
+        return typing.cast(
+            "NumberArray[OneDimension]", np.full(int(entries), np.nan, dtype=np.float64)
+        )
+
+    return DerivativeScratch(
+        oil_rates=buffer(count),
+        water_rates=buffer(count),
+        gas_rates=buffer(count),
+        connection_pressures=buffer(count),
+        well_indices=buffer(count),
+        shifted_oil_rates=buffer(size * count),
+        shifted_water_rates=buffer(size * count),
+        shifted_gas_rates=buffer(size * count),
+        forward_pressures=buffer(size * count),
+        backward_pressures=buffer(size * count),
+        pressure_rate_sensitivities=buffer(count * size),
+        pressure_reference_sensitivities=buffer(count),
+        wellbore_pressure_partials=buffer(count * 3),
+        cell_partials=buffer(count * 9),
+        gas_rate_partials=buffer(count * 3),
+        composition_partials=buffer(size * size),
+        system=buffer(size * size),
+        right_hand_side=buffer(size * (size + 1)),
+        rate_cell_derivatives=buffer(size * size),
+        rate_bhp_derivatives=buffer(size),
+        surface_cell_derivatives=buffer(size * size),
+        surface_bhp_derivatives=buffer(size),
+    )
+
+
 class WellsWorkspace(typing.NamedTuple):
     """Every well's control-resolution result, one row per well."""
 
@@ -315,6 +445,110 @@ class WellsWorkspace(typing.NamedTuple):
     `NaN` means "not resolved this pass", not "resolved to zero".
     """
 
+    derivative_offsets: IntArray[OneDimension]
+    """
+    Shape `(n_wells + 1,)`. Where each well's block starts in `connection_rate_cell_derivatives`
+    and `connection_surface_rate_cell_derivatives`. A well with `n` connections has a block of
+    `(3 * n) ** 2` entries, so its block is `derivative_offsets[w]:derivative_offsets[w + 1]`.
+    All zero when the workspace was built without `well_offsets`, and then no derivatives are
+    stored.
+    """
+
+    connection_rate_cell_derivatives: NumberArray[OneDimension]
+    """
+    Each well's block, flattened row by row, of how its connections' reservoir-condition phase
+    rates change with the primary unknowns of every one of its connections' cells. A well's
+    block reshapes to `(3 * n, 3 * n)`. Row `3 * i + a` is phase `a` (oil, water, gas) at
+    connection `i`. Column `3 * k + v` is unknown `v` (pressure, water saturation, gas
+    saturation) of connection `k`'s cell. These are total derivatives: they include the change
+    in the pressure at every connection that the change in rate makes through the wellbore, the
+    non-Darcy correction, and the reversed connections' dependence on the producing ones, with
+    the well's bottom-hole pressure held fixed. A connection that is not flowing has zero
+    rows and columns. `get_well_derivatives` reads a well's block.
+    """
+
+    connection_surface_rate_cell_derivatives: NumberArray[OneDimension]
+    """
+    As `connection_rate_cell_derivatives`, for the surface-condition rate of each component at
+    each connection: stock-tank oil, stock-tank water and standard gas, in that order. The gas
+    that a producer's oil carries in solution and the oil its gas carries as vapor are included,
+    so these are the rates at which the reservoir's components leave or enter through the well.
+    """
+
+    connection_rate_bhp_derivatives: NumberArray[TwoDimensions]
+    """
+    Shape `(n_connections, 3)`. How each connection's reservoir-condition oil, water and gas rates
+    change with the well's bottom-hole pressure, indexed like `connection_pressures`. A total
+    derivative, with every cell's unknowns held fixed.
+    """
+
+    connection_surface_rate_bhp_derivatives: NumberArray[TwoDimensions]
+    """
+    Shape `(n_connections, 3)`. As `connection_rate_bhp_derivatives`, for the surface-condition
+    oil, water and gas component rates.
+    """
+
+    well_rate_cell_derivatives: NumberArray[ThreeDimensions]
+    """
+    Shape `(n_connections, 3, 3)`. For the well each connection belongs to, how that well's
+    total reservoir-condition oil, water and gas rates (axis 1) change with the pressure, water
+    saturation and gas saturation (axis 2) of the cell at that connection, indexed like
+    `connection_pressures`. These are the sums of the well's rows of `connection_rate_cell_derivatives`
+    and give the Jacobian row of a reservoir-volume-rate control.
+    """
+
+    well_surface_rate_cell_derivatives: NumberArray[ThreeDimensions]
+    """
+    Shape `(n_connections, 3, 3)`. As `well_rate_cell_derivatives`, for the well's total
+    surface-condition oil, water and gas rates. A surface rate control's Jacobian row is the
+    sum of these over the phases it counts.
+    """
+
+    well_rate_bhp_derivatives: NumberArray[TwoDimensions]
+    """
+    Shape `(n_wells, 3)`. How each well's total reservoir-condition oil, water and gas rates
+    change with its own bottom-hole pressure.
+    """
+
+    well_surface_rate_bhp_derivatives: NumberArray[TwoDimensions]
+    """
+    Shape `(n_wells, 3)`. As `well_rate_bhp_derivatives`, for the surface-condition oil, water and
+    gas rates.
+    """
+
+    thp_bhp_derivatives: NumberArray[OneDimension]
+    """
+    Shape `(n_wells,)`. How each well's tubing head pressure changes with its own bottom-hole
+    pressure, including the change in the rates that the bottom-hole pressure makes. `NaN` for
+    a well with no tubing head pressure.
+    """
+
+    thp_cell_derivatives: NumberArray[TwoDimensions]
+    """
+    Shape `(n_connections, 3)`. For the well each connection belongs to, how that well's tubing
+    head pressure changes with the pressure, water saturation and gas saturation of the cell at
+    that connection, through the rates, with the bottom-hole pressure held fixed. `NaN` for a
+    well with no tubing head pressure.
+    """
+
+    derivative_scratch: DerivativeScratch
+    """Buffers the well derivatives are computed in. Empty when `derivative_offsets` is all zero."""
+
+    group_control_modes: IntArray[OneDimension]
+    """
+    Shape `(n_wells,)`. For a well configured for group control, the concrete control mode tag
+    (`ProducerControlModeTag` or `InjectorControlModeTag`) its group's allocation gave it this
+    pass; `UNSET_INT` for every other well and for a group-controlled well not yet allocated.
+    The well's own configured control mode stays group control throughout.
+    """
+
+    group_target_rates: NumberArray[OneDimension]
+    """
+    Shape `(n_wells,)`. The rate target in `group_control_modes`' quantity that the well's group
+    allocation gave it this pass, after any redistribution of a group's shortfall. `NaN` where
+    `group_control_modes` is `UNSET_INT`.
+    """
+
     cumulative_oil_volumes: NumberArray[OneDimension]
     """
     Shape `(n_wells,)`. Surface-condition oil volume each well has produced
@@ -331,7 +565,11 @@ class WellsWorkspace(typing.NamedTuple):
 
 
 def build_wells_workspace(
-    *, n_wells: Integer, n_connections: Integer, dtype: npt.DTypeLike = None
+    *,
+    n_wells: Integer,
+    n_connections: Integer,
+    well_offsets: IntArray[OneDimension] | None = None,
+    dtype: npt.DTypeLike = None,
 ) -> WellsWorkspace:
     """
     Builds an empty `WellsWorkspace` for a system of `n_wells` wells with
@@ -342,10 +580,28 @@ def build_wells_workspace(
     :param n_wells: Number of wells.
     :param n_connections: Total active connections across every well,
         matching `CompiledPerforations`' own row count. Sizes `connection_pressures`.
+    :param well_offsets: Shape `(n_wells + 1,)`. Where each well's connections start, as
+        `CompiledPerforations.well_offsets` gives it. Sizes the stored well derivatives. Without
+        it no derivatives can be stored.
     :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
     :returns: `WellsWorkspace` with every row `NaN`/`UNSET_INT`/`0`.
+    :raises ValidationError: If `well_offsets` does not match `n_wells` and `n_connections`.
     """
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+    if well_offsets is None:
+        derivative_offsets = np.zeros(n_wells + 1, dtype=np.int64)
+    else:
+        offsets = np.asarray(well_offsets, dtype=np.int64)
+        if offsets.shape != (n_wells + 1,) or offsets[-1] != n_connections:
+            raise ValidationError(
+                f"`well_offsets` must have {n_wells + 1} entries ending at {n_connections}; "
+                f"got {offsets.tolist()}."
+            )
+        derivative_offsets = np.concatenate(([0], np.cumsum((3 * np.diff(offsets)) ** 2)))
+    n_block_entries = int(derivative_offsets[-1])
+    max_connections = (
+        0 if well_offsets is None else int(np.diff(np.asarray(well_offsets)).max(initial=0))
+    )
     return WellsWorkspace(
         bhps=np.full(n_wells, np.nan, dtype=dtype),
         oil_rates=np.full(n_wells, np.nan, dtype=dtype),
@@ -361,6 +617,34 @@ def build_wells_workspace(
         connection_oil_rates=np.full(n_connections, np.nan, dtype=dtype),
         connection_water_rates=np.full(n_connections, np.nan, dtype=dtype),
         connection_gas_rates=np.full(n_connections, np.nan, dtype=dtype),
+        derivative_offsets=typing.cast("IntArray[OneDimension]", derivative_offsets),
+        connection_rate_cell_derivatives=np.full(n_block_entries, np.nan, dtype=dtype),
+        connection_surface_rate_cell_derivatives=np.full(n_block_entries, np.nan, dtype=dtype),
+        connection_rate_bhp_derivatives=typing.cast(
+            "NumberArray[TwoDimensions]", np.full((n_connections, 3), np.nan, dtype=dtype)
+        ),
+        connection_surface_rate_bhp_derivatives=typing.cast(
+            "NumberArray[TwoDimensions]", np.full((n_connections, 3), np.nan, dtype=dtype)
+        ),
+        well_rate_cell_derivatives=typing.cast(
+            "NumberArray[ThreeDimensions]", np.full((n_connections, 3, 3), np.nan, dtype=dtype)
+        ),
+        well_surface_rate_cell_derivatives=typing.cast(
+            "NumberArray[ThreeDimensions]", np.full((n_connections, 3, 3), np.nan, dtype=dtype)
+        ),
+        well_rate_bhp_derivatives=typing.cast(
+            "NumberArray[TwoDimensions]", np.full((n_wells, 3), np.nan, dtype=dtype)
+        ),
+        well_surface_rate_bhp_derivatives=typing.cast(
+            "NumberArray[TwoDimensions]", np.full((n_wells, 3), np.nan, dtype=dtype)
+        ),
+        thp_bhp_derivatives=np.full(n_wells, np.nan, dtype=dtype),
+        thp_cell_derivatives=typing.cast(
+            "NumberArray[TwoDimensions]", np.full((n_connections, 3), np.nan, dtype=dtype)
+        ),
+        derivative_scratch=build_derivative_scratch(max_connections=max_connections),
+        group_control_modes=np.full(n_wells, UNSET_INT, dtype=np.int32),
+        group_target_rates=np.full(n_wells, np.nan, dtype=dtype),
         cumulative_oil_volumes=np.zeros(n_wells, dtype=np.float64),
         cumulative_water_volumes=np.zeros(n_wells, dtype=np.float64),
         cumulative_gas_volumes=np.zeros(n_wells, dtype=np.float64),
@@ -438,6 +722,48 @@ def accumulate_well_volumes(*, workspace: WellsWorkspace, step_size: Number) -> 
         np.add(volumes, rates * step_size, out=volumes, where=~np.isnan(rates))
 
 
+def sum_connection_rates(
+    *, workspace: PerforationWorkspace, is_injector: Boolean
+) -> tuple[PhaseValues, PhaseValues]:
+    """
+    Sums a well's per-connection rates, as the most recent solve left them in its
+    `PerforationWorkspace`, into well totals of every phase.
+
+    An injector's connections that flow against the well produce the formation's own fluid, so
+    the well total of a phase it does not inject is negative when any of them does. The solve's
+    own totals count only the injected phase, since those are what an injection target is
+    matched against. A connection that produces, whether it belongs to a producer or flows
+    against an injector, brings the gas its oil holds in solution and the oil its gas carries as
+    vapor to the surface with it.
+
+    :param workspace: The well's perforation workspace.
+    :param is_injector: Whether the well is an injector.
+    :returns: `(rates, surface_rates)`, the reservoir- and surface-condition totals.
+    """
+    fluids = workspace.connection_fluids
+    oil = workspace.connection_oil_rates
+    water = workspace.connection_water_rates
+    gas = workspace.connection_gas_rates
+    if is_injector:
+        carries = (oil < 0.0) | (water < 0.0) | (gas < 0.0)
+    else:
+        carries = np.ones(oil.shape[0], dtype=np.bool_)
+    factor = workspace.stb_to_volume_factor
+    surface_oil = oil / (fluids.oil_formation_volume_factors * factor)
+    surface_free_gas = gas / fluids.gas_formation_volume_factors
+    rates = PhaseValues(oil=oil.sum(), water=water.sum(), gas=gas.sum())
+    surface_rates = PhaseValues(
+        oil=(
+            surface_oil + np.where(carries, surface_free_gas * workspace.vaporized_oil_ratios, 0.0)
+        ).sum(),
+        water=(water / (fluids.water_formation_volume_factors * factor)).sum(),
+        gas=(
+            surface_free_gas + np.where(carries, surface_oil * workspace.dissolved_gas_ratios, 0.0)
+        ).sum(),
+    )
+    return rates, surface_rates
+
+
 @numba.njit(cache=True)
 def compute_perforation_drawdown(
     reservoir_pressure: Number, connection_pressure: Number, is_injector: Boolean
@@ -449,10 +775,9 @@ def compute_perforation_drawdown(
     :param reservoir_pressure: Reservoir pressure at the connection.
     :param connection_pressure: Flowing wellbore pressure at the connection.
     :param is_injector: Whether this well is an injector.
-    :returns: The driving pressure difference, clipped to `>= 0` so a
-        connection with reversed drawdown contributes zero flow. Reverse
-        flow (crossflow) is not modelled yet, so this applies to every well,
-        whether or not it allows crossflow.
+    :returns: The driving pressure difference, clipped to `>= 0` so a connection with reversed
+        drawdown contributes no forward flow. Reverse flow, where a well allows it, is added
+        separately by `accumulate_rates`.
     """
     if is_injector:
         drawdown = connection_pressure - reservoir_pressure
@@ -708,7 +1033,8 @@ def load_wells_states(
     Only covers wells actually resolved this pass/step. A well whose
     `WellStatus` is still `PENDING` (its BHP is left `NaN` by
     `resolve_control`) is skipped rather than reported with meaningless
-    values. A well that was resolved as shut, because it is shut or has no open
+    values. A group-controlled well is reported with the control its group allocated it this
+    pass. A well that was resolved as shut, because it is shut or has no open
     connection in effect, is reported with `is_open=False`, no perforation states, zero
     rates, and a `NaN` bottom-hole pressure, since it has no flowing pressure.
 
@@ -720,6 +1046,13 @@ def load_wells_states(
     :returns: One `WellState` per resolved well, keyed by well name.
     """
     controls = compiled_system.controls
+    allocated = workspace.group_control_modes != UNSET_INT
+    if allocated.any():
+        control_modes = controls.control_modes.copy()
+        target_rates = controls.target_rates.copy()
+        control_modes[allocated] = workspace.group_control_modes[allocated]
+        target_rates[allocated] = workspace.group_target_rates[allocated]
+        controls = controls._replace(control_modes=control_modes, target_rates=target_rates)
     perforations = compiled_system.perforations
     unit_system = compiled_system.unit_system
 

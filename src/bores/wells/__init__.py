@@ -54,6 +54,7 @@ from bores.wells.indices import PerforationIndex, WellIndex, build_wells_indices
 from bores.wells.model import WellSystem
 from bores.wells.state import (
     ConnectionSample,
+    ConnectionSampleDerivatives,
     PerforationState,
     WellState,
     WellStates,
@@ -66,6 +67,7 @@ __all__ = [
     "BeggsAndBrillWellbore",
     "CompletionStatus",
     "ConnectionSample",
+    "ConnectionSampleDerivatives",
     "EconomicLimit",
     "EconomicQuantity",
     "GroupControl",
