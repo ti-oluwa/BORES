@@ -178,6 +178,7 @@ def scan_relative_permeabilities_block(
     use_water_hysteresis: Boolean,
     use_gas_hysteresis: Boolean,
     gas_is_non_wetting: Boolean,
+    gas_translated_scanning: Boolean,
     scanning_exponent: Number,
     numerical_epsilon: Number,
     values: CurveSet,
@@ -226,22 +227,28 @@ def scan_relative_permeabilities_block(
         gas_weight_derivative = 0.0
         if use_gas_hysteresis:
             gas_reversal = element_at(array=history.gas_reversal_saturation, index=i)
-            if gas_is_non_wetting:
-                # Gas imbibes by falling from its peak (weight 0) to the trapped saturation
-                # (weight 1), so the scanning range runs downward from the reversal.
-                gas_range_end = min(
-                    element_at(array=history.gas_trapped_saturation, index=i), gas_reversal
-                )
+            if gas_translated_scanning:
+                # Carlson: the translated imbibition curve is the scanning curve below the peak,
+                # and the drainage curve is followed at and above it.
+                gas_weight = 1.0 if sg < gas_reversal else 0.0
+                gas_weight_derivative = 0.0
             else:
-                gas_range_end = element_at(array=history.max_gas_saturation, index=i)
-            gas_weight, gas_weight_derivative = compute_killough_scanning_weight(
-                saturation=sg,
-                reversal_saturation=gas_reversal,
-                maximum_historical_saturation=gas_range_end,
-                is_imbibition=element_at(array=history.gas_imbibition_flag, index=i),
-                scanning_exponent=scanning_exponent,
-                numerical_epsilon=numerical_epsilon,
-            )
+                if gas_is_non_wetting:
+                    # Gas imbibes by falling from its peak (weight 0) to the trapped saturation
+                    # (weight 1), so the scanning range runs downward from the reversal.
+                    gas_range_end = min(
+                        element_at(array=history.gas_trapped_saturation, index=i), gas_reversal
+                    )
+                else:
+                    gas_range_end = element_at(array=history.max_gas_saturation, index=i)
+                gas_weight, gas_weight_derivative = compute_killough_scanning_weight(
+                    saturation=sg,
+                    reversal_saturation=gas_reversal,
+                    maximum_historical_saturation=gas_range_end,
+                    is_imbibition=element_at(array=history.gas_imbibition_flag, index=i),
+                    scanning_exponent=scanning_exponent,
+                    numerical_epsilon=numerical_epsilon,
+                )
 
         krw_drainage = element_at(array=values.krw_drainage, index=i)
         krw_imbibition = element_at(array=values.krw_imbibition, index=i)
@@ -358,6 +365,7 @@ def scan_relative_permeabilities(
     use_water_hysteresis: Boolean,
     use_gas_hysteresis: Boolean,
     gas_is_non_wetting: Boolean,
+    gas_translated_scanning: Boolean,
     scanning_exponent: Number,
     numerical_epsilon: Number,
     values: CurveSet,
@@ -382,6 +390,7 @@ def scan_relative_permeabilities(
         use_water_hysteresis=use_water_hysteresis,
         use_gas_hysteresis=use_gas_hysteresis,
         gas_is_non_wetting=gas_is_non_wetting,
+        gas_translated_scanning=gas_translated_scanning,
         scanning_exponent=scanning_exponent,
         numerical_epsilon=numerical_epsilon,
         values=values,
@@ -407,6 +416,7 @@ def scan_relative_permeabilities_parallel(
     use_water_hysteresis: Boolean,
     use_gas_hysteresis: Boolean,
     gas_is_non_wetting: Boolean,
+    gas_translated_scanning: Boolean,
     scanning_exponent: Number,
     numerical_epsilon: Number,
     values: CurveSet,
@@ -436,6 +446,7 @@ def scan_relative_permeabilities_parallel(
             use_water_hysteresis=use_water_hysteresis,
             use_gas_hysteresis=use_gas_hysteresis,
             gas_is_non_wetting=gas_is_non_wetting,
+            gas_translated_scanning=gas_translated_scanning,
             scanning_exponent=scanning_exponent,
             numerical_epsilon=numerical_epsilon,
             values=values,

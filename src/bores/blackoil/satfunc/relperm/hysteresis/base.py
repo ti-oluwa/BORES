@@ -1,26 +1,45 @@
 """The base class and curve queries shared by the relative permeability hysteresis models."""
 
+import math
 import typing
 
 import attrs
 import numpy as np
 
+from bores.blackoil.satfunc.relperm.hysteresis.kernels import (
+    CurveSet,
+    HistoryArrays,
+    ScanOutputs,
+    normalise_saturations,
+    normalise_saturations_parallel,
+    saturations_need_normalising,
+    scan_relative_permeabilities,
+    scan_relative_permeabilities_parallel,
+)
 from bores.blackoil.satfunc.relperm.hysteresis.land import (
     land_residual_from_reversal,
 )
+from bores.blackoil.satfunc.relperm.mixing_rules import get_builtin_rule_id
 from bores.blackoil.satfunc.relperm.tables import (
     MixingRule,
     RelativePermeabilityTable,
     ThreePhaseRelPermTable,
     TwoPhaseRelPermTable,
     get_mixing_rule,
+    get_mixing_rule_partial_derivatives,
     query_gas_oil_system,
     query_oil_water_system,
     resolve_residual_oil_saturation_gas,
 )
+from bores.blackoil.satfunc.utils import (
+    PARALLEL_SIZE_THRESHOLD,
+    flatten_kernel_input,
+)
+from bores.constants import c
 from bores.errors import ValidationError
 from bores.types import (
     Boolean,
+    BooleanArray,
     FluidPhase,
     Integer,
     NDimension,
@@ -144,6 +163,59 @@ def query_gas_oil_curves(
         **kwargs,
     )
     return values["oil"], values["gas"], None, None
+
+
+class ScanInputs(typing.NamedTuple):
+    """Flat, normalised saturations and history of one `compute` call, ready for the curve queries."""
+
+    is_scalar: bool
+    """Whether every saturation given was a scalar, so the results are returned as scalars."""
+
+    shape: tuple[int, ...]
+    """Broadcast shape of the inputs."""
+
+    size: int
+    """Number of cells."""
+
+    sw: NumberArray[OneDimension]
+    so: NumberArray[OneDimension]
+    sg: NumberArray[OneDimension]
+
+    placeholder: NumberArray[OneDimension]
+    """One-element array standing in for anything a pass does not need."""
+
+    use_water_hysteresis: bool
+    use_gas_hysteresis: bool
+
+    gas_is_non_wetting: bool
+    """Whether gas is the non-wetting phase of the gas-oil system."""
+
+    water_reversal: NumberArray[OneDimension]
+    gas_reversal: NumberArray[OneDimension]
+
+
+class BoundingCurves(typing.NamedTuple):
+    """
+    Values and slopes of the two-phase curves on both bounding curves, as the table queries return
+    them. The slopes are `None` when derivatives were not requested.
+    """
+
+    krw_d: typing.Any
+    krw_i: typing.Any
+    kro_water_d: typing.Any
+    kro_water_i: typing.Any
+    kro_gas_d: typing.Any
+    kro_gas_i: typing.Any
+    krg_d: typing.Any
+    krg_i: typing.Any
+    dkrw_d: typing.Any
+    dkrw_i: typing.Any
+    dkro_water_d: typing.Any
+    dkro_water_i: typing.Any
+    dkro_gas_d: typing.Any
+    dkro_gas_i: typing.Any
+    dkrg_d: typing.Any
+    dkrg_i: typing.Any
 
 
 def uses_tabular_endpoints(table: RelativePermeabilityTable) -> bool:
@@ -337,6 +409,363 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
             (otherwise `None`).
         """
         raise NotImplementedError
+
+    def prepare_scan_inputs(
+        self,
+        water_saturation: NumberOrArray[NDimension],
+        oil_saturation: NumberOrArray[NDimension],
+        gas_saturation: NumberOrArray[NDimension],
+        *,
+        max_water_saturation: NumberOrArray[NDimension] | None,
+        max_gas_saturation: NumberOrArray[NDimension] | None,
+        water_imbibition_flag: bool | BooleanArray[NDimension] | None,
+        gas_imbibition_flag: bool | BooleanArray[NDimension] | None,
+        water_reversal_saturation: NumberOrArray[NDimension] | None,
+        gas_reversal_saturation: NumberOrArray[NDimension] | None,
+    ) -> tuple[ScanInputs, HistoryArrays]:
+        """
+        Broadcast, flatten and normalise the saturations and history of one `compute` call.
+
+        :returns: The flat inputs, and the flat saturation history the scan kernel reads.
+        """
+        is_scalar = (
+            np.isscalar(water_saturation)
+            and np.isscalar(oil_saturation)
+            and np.isscalar(gas_saturation)
+        )
+        use_water_hysteresis = (
+            max_water_saturation is not None and water_imbibition_flag is not None
+        )
+        use_gas_hysteresis = max_gas_saturation is not None and gas_imbibition_flag is not None
+
+        inputs = [water_saturation, oil_saturation, gas_saturation]
+        if use_water_hysteresis:
+            inputs += [max_water_saturation, water_imbibition_flag]
+            if water_reversal_saturation is not None:
+                inputs.append(water_reversal_saturation)
+        if use_gas_hysteresis:
+            inputs += [max_gas_saturation, gas_imbibition_flag]
+            if gas_reversal_saturation is not None:
+                inputs.append(gas_reversal_saturation)
+
+        shape = np.broadcast_shapes(*(np.shape(value) for value in inputs))
+        flat_shape = shape or (1,)
+        size = math.prod(flat_shape)
+
+        sw = flatten_kernel_input(value=water_saturation, shape=flat_shape)
+        so = flatten_kernel_input(value=oil_saturation, shape=flat_shape)
+        sg = flatten_kernel_input(value=gas_saturation, shape=flat_shape)
+        saturation_epsilon = c.SATURATION_EPSILON
+        if saturations_need_normalising(
+            size=size,
+            water_saturation=sw,
+            oil_saturation=so,
+            gas_saturation=sg,
+            saturation_epsilon=saturation_epsilon,
+        ):
+            normalise = (
+                normalise_saturations_parallel
+                if size >= PARALLEL_SIZE_THRESHOLD
+                else normalise_saturations
+            )
+            sw, so, sg = normalise(
+                size=size,
+                water_saturation=sw,
+                oil_saturation=so,
+                gas_saturation=sg,
+                saturation_epsilon=saturation_epsilon,
+            )
+
+        placeholder = np.zeros(1, dtype=sw.dtype)
+        no_flag = np.zeros(1, dtype=np.bool_)
+        if use_water_hysteresis:
+            maximum_water = flatten_kernel_input(value=max_water_saturation, shape=flat_shape)
+            water_flag = flatten_kernel_input(
+                value=water_imbibition_flag, shape=flat_shape, as_float=False
+            )
+            water_reversal = (
+                maximum_water
+                if water_reversal_saturation is None
+                else flatten_kernel_input(value=water_reversal_saturation, shape=flat_shape)
+            )
+        else:
+            maximum_water, water_flag, water_reversal = placeholder, no_flag, placeholder
+        if use_gas_hysteresis:
+            maximum_gas = flatten_kernel_input(value=max_gas_saturation, shape=flat_shape)
+            gas_flag = flatten_kernel_input(
+                value=gas_imbibition_flag, shape=flat_shape, as_float=False
+            )
+            gas_reversal = (
+                maximum_gas
+                if gas_reversal_saturation is None
+                else flatten_kernel_input(value=gas_reversal_saturation, shape=flat_shape)
+            )
+        else:
+            maximum_gas, gas_flag, gas_reversal = placeholder, no_flag, placeholder
+
+        history = HistoryArrays(
+            max_water_saturation=typing.cast("NumberArray[OneDimension]", maximum_water),
+            max_gas_saturation=typing.cast("NumberArray[OneDimension]", maximum_gas),
+            water_imbibition_flag=typing.cast("NumberArray[OneDimension]", water_flag),
+            gas_imbibition_flag=typing.cast("NumberArray[OneDimension]", gas_flag),
+            water_reversal_saturation=typing.cast("NumberArray[OneDimension]", water_reversal),
+            gas_reversal_saturation=typing.cast("NumberArray[OneDimension]", gas_reversal),
+            gas_trapped_saturation=typing.cast("NumberArray[OneDimension]", placeholder),
+        )
+        gas_is_non_wetting = self.get_gas_oil_wetting_phase() != FluidPhase.GAS
+        inputs = ScanInputs(
+            is_scalar=is_scalar,
+            shape=shape,
+            size=size,
+            sw=sw,
+            so=so,
+            sg=sg,
+            placeholder=typing.cast("NumberArray[OneDimension]", placeholder),
+            use_water_hysteresis=use_water_hysteresis,
+            use_gas_hysteresis=use_gas_hysteresis,
+            gas_is_non_wetting=gas_is_non_wetting,
+            water_reversal=typing.cast("NumberArray[OneDimension]", water_reversal),
+            gas_reversal=typing.cast("NumberArray[OneDimension]", gas_reversal),
+        )
+        return inputs, history
+
+    def scan_bounding_curves(
+        self,
+        *,
+        inputs: ScanInputs,
+        history: HistoryArrays,
+        curves: BoundingCurves,
+        scanning_exponent: Number,
+        gas_translated_scanning: Boolean,
+        with_derivatives: Boolean,
+    ) -> tuple[RelativePermeabilities, RelativePermeabilityDerivatives | None]:
+        """
+        Blend the bounding curves cell by cell and apply the three-phase mixing rule, in one
+        kernel pass, then shape the results like the inputs.
+
+        :param inputs: The flat inputs from `prepare_scan_inputs`.
+        :param history: The flat saturation history the weights are read from.
+        :param curves: Both bounding curves of every two-phase system, with their slopes.
+        :param scanning_exponent: Exponent of the Killough scanning weight. Unused when
+            `gas_translated_scanning` is set.
+        :param gas_translated_scanning: Whether the gas weight is a step, 1 below the reversal
+            saturation and 0 at and above it, as the Carlson translated curve needs.
+        :param with_derivatives: Whether to also compute the derivatives.
+        :returns: The relative permeabilities and, when requested, their derivatives.
+        """
+        is_scalar, shape, size = inputs.is_scalar, inputs.shape, inputs.size
+        sw, so, sg = inputs.sw, inputs.so, inputs.sg
+        placeholder = inputs.placeholder
+        use_water_hysteresis = inputs.use_water_hysteresis
+        use_gas_hysteresis = inputs.use_gas_hysteresis
+        gas_is_non_wetting = inputs.gas_is_non_wetting
+        (
+            krw_d,
+            krw_i,
+            kro_water_d,
+            kro_water_i,
+            kro_gas_d,
+            kro_gas_i,
+            krg_d,
+            krg_i,
+            dkrw_d,
+            dkrw_i,
+            dkro_water_d,
+            dkro_water_i,
+            dkro_gas_d,
+            dkro_gas_i,
+            dkrg_d,
+            dkrg_i,
+        ) = curves
+        values = CurveSet(
+            krw_drainage=krw_d,
+            krw_imbibition=krw_i,
+            kro_water_drainage=kro_water_d,
+            kro_water_imbibition=kro_water_i,
+            kro_gas_drainage=kro_gas_d,
+            kro_gas_imbibition=kro_gas_i,
+            krg_drainage=krg_d,
+            krg_imbibition=krg_i,
+        )
+        slopes = CurveSet(
+            krw_drainage=typing.cast(
+                "NumberArray[OneDimension]", dkrw_d if with_derivatives else placeholder
+            ),
+            krw_imbibition=typing.cast(
+                "NumberArray[OneDimension]", dkrw_i if with_derivatives else placeholder
+            ),
+            kro_water_drainage=typing.cast(
+                "NumberArray[OneDimension]", dkro_water_d if with_derivatives else placeholder
+            ),
+            kro_water_imbibition=typing.cast(
+                "NumberArray[OneDimension]", dkro_water_i if with_derivatives else placeholder
+            ),
+            kro_gas_drainage=typing.cast(
+                "NumberArray[OneDimension]", dkro_gas_d if with_derivatives else placeholder
+            ),
+            kro_gas_imbibition=typing.cast(
+                "NumberArray[OneDimension]", dkro_gas_i if with_derivatives else placeholder
+            ),
+            krg_drainage=typing.cast(
+                "NumberArray[OneDimension]", dkrg_d if with_derivatives else placeholder
+            ),
+            krg_imbibition=typing.cast(
+                "NumberArray[OneDimension]", dkrg_i if with_derivatives else placeholder
+            ),
+        )
+        values = CurveSet(
+            *(
+                typing.cast("NumberArray[OneDimension]", np.asarray(array).reshape(-1))
+                for array in values
+            )
+        )
+        slopes = CurveSet(
+            *(
+                typing.cast("NumberArray[OneDimension]", np.asarray(array).reshape(-1))
+                for array in slopes
+            )
+        )
+
+        dtype = values.krw_drainage.dtype
+        if dtype.kind != "f":
+            dtype = np.dtype(np.float64)
+        rule = typing.cast(MixingRule, self.mixing_rule)
+        rule_id = get_builtin_rule_id(rule)
+        use_rule_in_kernel = rule_id is not None
+        needs_gas_oil = not use_rule_in_kernel
+        out = ScanOutputs(
+            krw=typing.cast("NumberArray[OneDimension]", np.empty(size, dtype=dtype)),
+            kro=typing.cast("NumberArray[OneDimension]", np.empty(size, dtype=dtype)),
+            krg=typing.cast("NumberArray[OneDimension]", np.empty(size, dtype=dtype)),
+            kro_gas=typing.cast(
+                "NumberArray[OneDimension]", np.empty(size if needs_gas_oil else 1, dtype=dtype)
+            ),
+            dkrw_dsw=typing.cast(
+                "NumberArray[OneDimension]", np.empty(size if with_derivatives else 1, dtype=dtype)
+            ),
+            dkro_dsw=typing.cast(
+                "NumberArray[OneDimension]", np.empty(size if with_derivatives else 1, dtype=dtype)
+            ),
+            dkro_dso=typing.cast(
+                "NumberArray[OneDimension]",
+                np.empty(size if with_derivatives and use_rule_in_kernel else 1, dtype=dtype),
+            ),
+            dkro_dsg=typing.cast(
+                "NumberArray[OneDimension]", np.empty(size if with_derivatives else 1, dtype=dtype)
+            ),
+            dkrg_dsg=typing.cast(
+                "NumberArray[OneDimension]", np.empty(size if with_derivatives else 1, dtype=dtype)
+            ),
+        )
+        kr_max = self.get_oil_relperm_endpoint()
+        irreducible_water_saturation = self.get_connate_water_saturation()
+        residual_oil_saturation_water = self.get_residual_oil_saturation_water()
+        residual_oil_saturation_gas = self.get_residual_oil_saturation_gas()
+        scan = (
+            scan_relative_permeabilities_parallel
+            if size >= PARALLEL_SIZE_THRESHOLD
+            else scan_relative_permeabilities
+        )
+        scan(
+            size=size,
+            water_saturation=sw,
+            oil_saturation=so,
+            gas_saturation=sg,
+            history=history,
+            use_water_hysteresis=use_water_hysteresis,
+            use_gas_hysteresis=use_gas_hysteresis,
+            gas_is_non_wetting=gas_is_non_wetting,
+            scanning_exponent=scanning_exponent,
+            gas_translated_scanning=gas_translated_scanning,
+            numerical_epsilon=1e-12,
+            values=values,
+            slopes=slopes,
+            with_derivatives=with_derivatives,
+            rule_id=-1 if rule_id is None else rule_id,
+            kr_max=kr_max,
+            irreducible_water_saturation=irreducible_water_saturation,
+            residual_oil_saturation_water=residual_oil_saturation_water,
+            residual_oil_saturation_gas=residual_oil_saturation_gas,
+            minimum_mobile_pore_space=c.MINIMUM_MOBILE_PORE_SPACE,
+            out=out,
+        )
+
+        zeros = np.zeros(size, dtype=dtype) if with_derivatives else None
+        krw, krg = out.krw, out.krg
+        if use_rule_in_kernel:
+            kro = out.kro
+            dkro_dsw, dkro_dso, dkro_dsg = out.dkro_dsw, out.dkro_dso, out.dkro_dsg
+        else:
+            kro_water, kro_gas = out.kro, out.kro_gas
+            kro = rule(
+                kro_w=kro_water,
+                kro_g=kro_gas,
+                krw=krw,
+                krg=krg,
+                kr_max=kr_max,
+                water_saturation=sw,
+                oil_saturation=so,
+                gas_saturation=sg,
+                irreducible_water_saturation=irreducible_water_saturation,
+                residual_oil_saturation_water=residual_oil_saturation_water,
+                residual_oil_saturation_gas=residual_oil_saturation_gas,
+            )
+            dkro_dsw = dkro_dso = dkro_dsg = None
+            if with_derivatives:
+                partials = get_mixing_rule_partial_derivatives(
+                    rule=rule,
+                    kro_w=kro_water,
+                    kro_g=kro_gas,
+                    krw=krw,
+                    krg=krg,
+                    kr_max=kr_max,
+                    water_saturation=sw,
+                    oil_saturation=so,
+                    gas_saturation=sg,
+                    irreducible_water_saturation=irreducible_water_saturation,
+                    residual_oil_saturation_water=residual_oil_saturation_water,
+                    residual_oil_saturation_gas=residual_oil_saturation_gas,
+                    epsilon=c.FINITE_DIFFERENCE_EPSILON,
+                )
+                dkro_dsw = (
+                    partials["dkro_dkro_w"] * out.dkro_dsw
+                    + partials["dkro_dkrw"] * out.dkrw_dsw
+                    + partials["dkro_dsw_explicit"]
+                )
+                dkro_dso = partials["dkro_dso_explicit"]
+                dkro_dsg = (
+                    partials["dkro_dkro_g"] * out.dkro_dsg
+                    + partials["dkro_dkrg"] * out.dkrg_dsg
+                    + partials["dkro_dsg_explicit"]
+                )
+
+        def finish(array: typing.Any) -> typing.Any:
+            result = np.asarray(array)
+            if result.size == 1 and size > 1:
+                result = np.broadcast_to(result, (size,))
+            result = result.reshape(shape)
+            return result.item() if is_scalar else result
+
+        relperms = RelativePermeabilities(
+            water=finish(array=krw),
+            oil=finish(array=kro),
+            gas=finish(array=krg),
+        )
+        if not with_derivatives:
+            return relperms, None
+        assert zeros is not None
+        zero = finish(array=zeros)
+        return relperms, RelativePermeabilityDerivatives(
+            dkrw_dsw=finish(array=out.dkrw_dsw),
+            dkro_dsw=finish(array=dkro_dsw),
+            dkrg_dsw=zero,
+            dkrw_dso=zero,
+            dkro_dso=finish(array=dkro_dso),
+            dkrg_dso=zero,
+            dkrw_dsg=zero,
+            dkro_dsg=finish(array=dkro_dsg),
+            dkrg_dsg=finish(array=out.dkrg_dsg),
+        )
 
     def land_residual_oil_water(
         self,
