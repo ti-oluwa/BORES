@@ -545,7 +545,7 @@ def compute_connection_partials(
             water_mobilities[index],
             gas_mobilities[index],
         )
-        dm = (
+        dʎ = (
             dʎo_dp[index],
             dʎo_dsw[index],
             dʎo_dsg[index],
@@ -572,10 +572,10 @@ def compute_connection_partials(
                 mobility = mobilities[phase]
                 dq_dpc[index, phase] = -factor * mobility * sign
                 dq_dx_direct[index, phase, 0] = factor * (
-                    dm[3 * phase + 0] * signed + mobility * sign
+                    dʎ[3 * phase + 0] * signed + mobility * sign
                 )
-                dq_dx_direct[index, phase, 1] = factor * dm[3 * phase + 1] * signed
-                dq_dx_direct[index, phase, 2] = factor * dm[3 * phase + 2] * signed
+                dq_dx_direct[index, phase, 1] = factor * dʎ[3 * phase + 1] * signed
+                dq_dx_direct[index, phase, 2] = factor * dʎ[3 * phase + 2] * signed
                 dq_dqg[index, phase] = radial_flow_constant * mobility * signed * dwi_dqg
         elif allows_crossflow:
             reverse_drawdown = -signed
@@ -584,18 +584,18 @@ def compute_connection_partials(
                     mobility = mobilities[phase]
                     dq_dpc[index, phase] = factor * mobility
                     dq_dx_direct[index, phase, 0] = -factor * (
-                        dm[3 * phase + 0] * reverse_drawdown + mobility
+                        dʎ[3 * phase + 0] * reverse_drawdown + mobility
                     )
-                    dq_dx_direct[index, phase, 1] = -factor * dm[3 * phase + 1] * reverse_drawdown
-                    dq_dx_direct[index, phase, 2] = -factor * dm[3 * phase + 2] * reverse_drawdown
+                    dq_dx_direct[index, phase, 1] = -factor * dʎ[3 * phase + 1] * reverse_drawdown
+                    dq_dx_direct[index, phase, 2] = -factor * dʎ[3 * phase + 2] * reverse_drawdown
                     dq_dqg[index, phase] = (
                         -radial_flow_constant * mobility * reverse_drawdown * dwi_dqg
                     )
             elif forward_total > 0.0:
                 total_mobility = mobilities[0] + mobilities[1] + mobilities[2]
-                total_pressure_derivative = dm[0] + dm[3] + dm[6]
-                total_water_derivative = dm[1] + dm[4] + dm[7]
-                total_gas_derivative = dm[2] + dm[5] + dm[8]
+                total_pressure_derivative = dʎ[0] + dʎ[3] + dʎ[6]
+                total_water_derivative = dʎ[1] + dʎ[4] + dʎ[7]
+                total_gas_derivative = dʎ[2] + dʎ[5] + dʎ[8]
                 reverse_rate = factor * total_mobility * reverse_drawdown
                 for phase in range(3):
                     fraction = forward_fractions[phase]
