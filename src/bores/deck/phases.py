@@ -14,9 +14,9 @@ import attrs
 
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
-from bores.types import FluidPhase
+from bores.types import Boolean, FluidPhase, Integer
 
-__all__ = ["SUPPORTED_PHASE_SETS", "DeckPhases", "read_deck_phases"]
+__all__ = ["SUPPORTED_PHASE_SETS", "DeckPhases", "declares_phases", "read_deck_phases"]
 
 SUPPORTED_PHASE_SETS = (
     "oil, water and gas",
@@ -38,28 +38,28 @@ class DeckPhases:
     gas and water model with `aqueous_slot` set to `"oil"`.
     """
 
-    oil: bool
+    oil: Boolean
     """Whether the model has an oil phase."""
 
-    water: bool
+    water: Boolean
     """Whether the model has a water (aqueous) phase."""
 
-    gas: bool
+    gas: Boolean
     """Whether the model has a gas phase."""
 
-    dissolved_gas_in_oil: bool
+    dissolved_gas_in_oil: Boolean
     """Whether gas can dissolve in the oil phase (`DISGAS` in a model with oil)."""
 
-    vaporized_oil: bool
+    vaporized_oil: Boolean
     """Whether oil can vaporize into the gas phase (`VAPOIL`)."""
 
-    dissolved_gas_in_water: bool
+    dissolved_gas_in_water: Boolean
     """Whether gas can dissolve in the water phase (`DISGASW`, or `DISGAS` in a CO2 storage deck)."""
 
-    vaporized_water: bool
+    vaporized_water: Boolean
     """Whether water can vaporize into the gas phase (`VAPWAT`)."""
 
-    co2_storage: bool
+    co2_storage: Boolean
     """Whether the deck models CO2 storage in brine (`CO2STORE` or `CO2STOR`)."""
 
     aqueous_slot: typing.Literal["oil", "water"]
@@ -83,24 +83,37 @@ class DeckPhases:
         return tuple(active)
 
     @property
-    def phase_count(self) -> int:
+    def phase_count(self) -> Integer:
         """How many phases the model has."""
         return int(self.oil) + int(self.water) + int(self.gas)
 
     @property
-    def is_three_phase(self) -> bool:
+    def is_three_phase(self) -> Boolean:
         """Whether the model has oil, water and gas."""
         return self.oil and self.water and self.gas
 
     @property
-    def is_gas_water(self) -> bool:
+    def is_gas_water(self) -> Boolean:
         """Whether the model has gas and water and no oil."""
         return self.gas and self.water and not self.oil
 
     @property
-    def is_single_phase(self) -> bool:
+    def is_single_phase(self) -> Boolean:
         """Whether the model has only one phase."""
         return self.phase_count == 1
+
+
+def declares_phases(deck_file: DeckFile) -> Boolean:
+    """
+    Whether a deck declares any phase keyword (`OIL`, `WATER`, `GAS` or `GASWAT`).
+
+    A standalone include file that holds only fluid or rock tables declares none, and has no
+    phase set to read.
+
+    :param deck_file: The deck to check.
+    :returns: `True` if at least one phase keyword is present.
+    """
+    return deck_file.has_any("OIL", "WATER", "GAS", "GASWAT")
 
 
 def read_deck_phases(deck_file: DeckFile) -> DeckPhases:
@@ -212,7 +225,7 @@ def read_deck_phases(deck_file: DeckFile) -> DeckPhases:
     )
 
 
-def is_supported_phase_set(*, oil: bool, water: bool, gas: bool) -> bool:
+def is_supported_phase_set(*, oil: Boolean, water: Boolean, gas: Boolean) -> Boolean:
     """Whether the phase combination is one the model can be built with."""
     count = int(oil) + int(water) + int(gas)
     if count >= 2:
@@ -220,7 +233,7 @@ def is_supported_phase_set(*, oil: bool, water: bool, gas: bool) -> bool:
     return water and not oil and not gas
 
 
-def describe_phase_set(*, oil: bool, water: bool, gas: bool) -> str:
+def describe_phase_set(*, oil: Boolean, water: Boolean, gas: Boolean) -> str:
     """Name the phase combination for an error message, such as `gas only`."""
     names = [name for name, active in (("oil", oil), ("water", water), ("gas", gas)) if active]
     return f"{' and '.join(names)} only"

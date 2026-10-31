@@ -547,10 +547,20 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
                 )
             return CapillaryPressures(oil_water=zeros, gas_oil=pcgo)  # type: ignore[typeddict-item]
 
+        if phases == {FluidPhase.WATER, FluidPhase.GAS} and self.wetting_phase == FluidPhase.WATER:
+            pcgw = self.get_capillary_pressure(wetting_saturation=sw, non_wetting_saturation=sg)
+            if is_scalar:
+                return CapillaryPressures(
+                    oil_water=dtype.type(0),  # type: ignore
+                    gas_oil=dtype.type(np.asarray(pcgw).item()),  # type: ignore
+                )
+            return CapillaryPressures(oil_water=zeros, gas_oil=pcgw)  # type: ignore[typeddict-item]
+
         raise ValidationError(
             f"Cannot dispatch three-phase saturations to a two-phase capillary "
             f"pressure table with phases {self.wetting_phase!r} / "
-            f"{self.non_wetting_phase!r}. Expected OIL+WATER or OIL+GAS."
+            f"{self.non_wetting_phase!r}. Expected OIL+WATER, OIL+GAS or WATER+GAS with "
+            f"water as the wetting phase."
         )
 
     def derivatives(
@@ -668,10 +678,31 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
                 dpcgo_dsg=results[3],
             )
 
+        if phases == {FluidPhase.WATER, FluidPhase.GAS} and self.wetting_phase == FluidPhase.WATER:
+            slope = self.get_capillary_pressure_derivative(
+                wetting_saturation=sw, non_wetting_saturation=sg
+            )
+            # With no oil, `Sw = 1 - Sg`, so a slope taken along the water axis is minus the
+            # slope along the gas axis.
+            dpcgw_dsg = slope if self.reference_phase == "non_wetting" else -slope
+            results = (zeros, zeros, zeros, dpcgw_dsg)
+            if is_scalar:
+                results = tuple(
+                    dtype.type(np.asarray(row).item())  # type: ignore
+                    for row in results
+                )
+            return CapillaryPressureDerivatives(
+                dpcow_dsw=results[0],
+                dpcow_dso=results[1],
+                dpcgo_dso=results[2],
+                dpcgo_dsg=results[3],
+            )
+
         raise ValidationError(
             f"Cannot dispatch three-phase saturations to a two-phase capillary "
             f"pressure table with phases {self.wetting_phase!r} / "
-            f"{self.non_wetting_phase!r}. Expected OIL+WATER or OIL+GAS."
+            f"{self.non_wetting_phase!r}. Expected OIL+WATER, OIL+GAS or WATER+GAS with "
+            f"water as the wetting phase."
         )
 
     def convert(
@@ -716,8 +747,9 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
         deck_file: DeckFile,
         satnum: int = 1,
         *,
-        system: typing.Literal["oil_water", "gas_oil"],
+        system: typing.Literal["oil_water", "gas_oil", "gas_water"],
         keyword_family: typing.Literal["first", "second"] = "first",
+        aqueous_slot: typing.Literal["oil", "water"] = "water",
         number_of_base_points: int = 200,
         number_of_endpoint_extra_points: int = 30,
         spacing: Spacing = "cosine",
@@ -746,13 +778,24 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
         - Gas-oil:   reads `SGFN` -> `(sg, pcog)`. Same axis/phase convention
           as the first family.
 
+        **Gas-water system** (`system="gas_water"`, a model with no oil):
+
+        The table is indexed by gas saturation, with water as the wetting phase and gas as
+        the non-wetting phase, and holds `Pcgw = Pg - Pw`. It is read from `SGWFN` -> `(sg, pcgw)`,
+        or from the `pcog` column of `SGFN` when `SGWFN` is absent. For a CO2 storage deck
+        whose oil slot holds brine (`aqueous_slot="oil"`) it is read from the `pcog` column of
+        `SGOF`.
+
         The unit system is read from `deck_file.unit_system` automatically.
 
         :param deck_file: Parsed `DeckFile` containing `PROPS`-section keywords.
         :param satnum: 1-based saturation region index (default region = 1).
             Region index is given by `region_index = max(satnum - 1, 0)`.
-        :param system: `"oil_water"` or `"gas_oil"`.
+        :param system: `"oil_water"`, `"gas_oil"` or `"gas_water"`.
         :param keyword_family: `"first"` (`SWOF`/`SGOF`) or `"second"` (`SWFN`/`SGFN`).
+        :param aqueous_slot: `"oil"` when the deck uses its oil phase for brine (a CO2 storage
+            deck declaring `OIL GAS CO2STOR`), otherwise `"water"`. Only used with
+            `system="gas_water"`.
         :param number_of_base_points: Passed to PCHIP grid scaling.
         :param number_of_endpoint_extra_points: Passed to PCHIP endpoint enrichment.
         :param spacing: Grid spacing mode for PCHIP scaling.
@@ -816,7 +859,43 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
                 dtype=dtype,
             )
 
-        raise ValidationError(f"`system` must be 'oil_water' or 'gas_oil'; got {system!r}.")
+        elif system == "gas_water":
+            if aqueous_slot == "oil":
+                rows = require("SGOF")
+            elif keyword_family == "first":
+                raise ValidationError(
+                    "The first saturation-function family (`SWOF`/`SGOF`) has no gas-water "
+                    "keyword. Use `SGWFN`, or `SGFN`."
+                )
+            else:
+                sgwfn_rows = deck_file.get_shared("SGWFN")
+                if (
+                    sgwfn_rows is not None
+                    and region_index < len(sgwfn_rows)
+                    and sgwfn_rows[region_index]
+                ):
+                    rows = sgwfn_rows[region_index]
+                else:
+                    rows = require("SGFN")
+            pressure_column = "pcgw" if "pcgw" in rows[0] else "pcog"
+            sg = np.array([row["sg"] for row in rows], dtype=dtype)
+            pcgw = np.array([row[pressure_column] for row in rows], dtype=dtype)
+            return cls(
+                wetting_phase=FluidPhase.WATER,
+                non_wetting_phase=FluidPhase.GAS,
+                reference_saturation=sg,  # type: ignore[arg-type]
+                capillary_pressure=pcgw,  # type: ignore[arg-type]
+                reference_phase="non_wetting",
+                number_of_base_points=number_of_base_points,
+                number_of_endpoint_extra_points=number_of_endpoint_extra_points,
+                spacing=spacing,
+                unit_system=unit_system,
+                dtype=dtype,
+            )
+
+        raise ValidationError(
+            f"`system` must be 'oil_water', 'gas_oil' or 'gas_water'; got {system!r}."
+        )
 
 
 def query_oil_water_capillary_pressure(

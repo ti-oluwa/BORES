@@ -110,6 +110,7 @@ __all__ = [
     "SGLPC",
     "SGOF",
     "SGU",
+    "SGWFN",
     "SOF2",
     "SOF3",
     "SOGCR",
@@ -564,6 +565,28 @@ Each table contains rows:
 - `pcog`: gas-oil capillary pressure (psi / bar).
 """
 
+
+SGWFN = TableKeyword(
+    "SGWFN",
+    columns=[
+        Field("sg", fraction),
+        Field("krg", fraction),
+        Field("krw", fraction),
+        Field("pcgw", np.float64),
+    ],
+)
+"""
+`SGWFN` - gas-water saturation function table, for a model with gas and water and no oil.
+
+Each table (one per saturation region) contains rows:
+
+- `sg`: gas saturation [-].
+- `krg`: gas relative permeability [-].
+- `krw`: water relative permeability at the water saturation `1 - sg` [-].
+- `pcgw`: gas-water capillary pressure Pcgw = Pg - Pw (psi / bar).
+
+Rows must be in ascending `sg` order.
+"""
 
 SOF2 = TableKeyword(
     "SOF2",

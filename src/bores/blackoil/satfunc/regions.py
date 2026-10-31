@@ -20,7 +20,8 @@ from bores.blackoil.satfunc.relperm.tables import (
 )
 from bores.blackoil.satfunc.tables import SatFuncTables
 from bores.deck.file import DeckFile
-from bores.errors import ValidationError
+from bores.deck.phases import DeckPhases, declares_phases, read_deck_phases
+from bores.errors import NotSupportedError, ValidationError
 from bores.precision import get_dtype
 from bores.reservoir.regions import RegionGroups
 from bores.types import Integer, Spacing, UnitSystem
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["SATFUNC_KEYWORDS", "SatFunc"]
 
-SATFUNC_KEYWORDS = ("SWOF", "SGOF", "SWFN", "SGFN")
+SATFUNC_KEYWORDS = ("SWOF", "SGOF", "SWFN", "SGFN", "SGWFN")
 """The deck keywords that define saturation functions. A deck needs at least one to load a `SatFunc`."""
 
 
@@ -183,6 +184,7 @@ class SatFunc:
         min_non_wetting_relperm: MinimumRelPerm = None,
         include_capillary_pressure: bool = True,
         allow_two_phase: bool = False,
+        phases: DeckPhases | None = None,
         dtype: npt.DTypeLike = None,
     ) -> Self:
         """
@@ -218,6 +220,11 @@ class SatFunc:
             of an error. The phase that is absent has zero relative permeability and capillary
             pressure. Regions that define both systems are unaffected. False by default, so a
             deck with a missing system is reported rather than silently reduced to two phases.
+        :param phases: The phases the deck models. When omitted they are read from the deck's
+            `RUNSPEC` keywords, if it declares any. A deck with exactly two phases gets the
+            matching two-phase tables without `allow_two_phase`: oil-water, oil-gas, or gas-water
+            (`SGWFN`, `SWFN` with `SGFN`, or `SGOF` for a CO2 storage deck whose oil slot holds
+            brine). A deck that declares no phase keeps the keyword-based detection.
         :param dtype: Array dtype shared by every region's tables.
         :returns: `SatFunc` keyed by 1-based `SATNUM` index.
         :raises ValidationError: If no recognised saturation-function keywords
@@ -228,9 +235,12 @@ class SatFunc:
         if not deck_file.has_any(*SATFUNC_KEYWORDS):
             raise ValidationError(
                 "No recognised saturation-function keywords found in the `DeckFile`. "
-                "Expected one of: `SWOF`, `SGOF` (first family) or `SWFN`, `SGFN` "
+                "Expected one of: `SWOF`, `SGOF` (first family) or `SWFN`, `SGFN`, `SGWFN` "
                 "(second family)."
             )
+
+        if phases is None and declares_phases(deck_file):
+            phases = read_deck_phases(deck_file)
 
         def get_region_count(keyword: str) -> int:
             all_regions = deck_file.get_shared(keyword)
@@ -241,11 +251,12 @@ class SatFunc:
             get_region_count("SGOF"),
             get_region_count("SWFN"),
             get_region_count("SGFN"),
+            get_region_count("SGWFN"),
         )
         if n_regions == 0:
             raise ValidationError(
                 "No recognised saturation-function keywords found in the `DeckFile`. "
-                "Expected one of: `SWOF`, `SGOF` (first family) or `SWFN`, `SGFN` "
+                "Expected one of: `SWOF`, `SGOF` (first family) or `SWFN`, `SGFN`, `SGWFN` "
                 "(second family)."
             )
 
@@ -254,29 +265,61 @@ class SatFunc:
             satnum = region_index + 1  # 1-based
 
             systems = detect_saturation_systems(deck_file, satnum, keyword_family)
-            two_phase_system: typing.Literal["oil_water", "gas_oil"] | None = None
-            if allow_two_phase and systems.oil_water != systems.gas_oil:
-                two_phase_system = "oil_water" if systems.oil_water else "gas_oil"
-            elif allow_two_phase and not (systems.oil_water or systems.gas_oil):
-                raise ValidationError(
-                    f"`SATNUM` {satnum} defines neither an oil-water nor a gas-oil system "
-                    f"(keyword family {systems.family!r}; the deck has "
-                    f"{', '.join(systems.keywords_present) or 'no saturation keywords'})."
-                )
+            two_phase_system: typing.Literal["oil_water", "gas_oil", "gas_water"] | None = None
+            two_phase_family: typing.Literal["first", "second"] = systems.family
+            aqueous_slot: typing.Literal["oil", "water"] = "water"
+            declared_by_phases = False
+            if phases is not None:
+                if phases.is_single_phase:
+                    raise NotSupportedError(
+                        "Saturation functions for a single-phase (water only) model are not "
+                        "supported yet."
+                    )
+                elif phases.is_gas_water:
+                    two_phase_system = "gas_water"
+                    aqueous_slot = phases.aqueous_slot
+                    two_phase_family = "first" if aqueous_slot == "oil" else "second"
+                elif phases.phase_count == 2:
+                    two_phase_system = "oil_water" if phases.water else "gas_oil"
+                declared_by_phases = two_phase_system is not None
+            if two_phase_system is None:
+                if allow_two_phase and systems.oil_water != systems.gas_oil:
+                    two_phase_system = "oil_water" if systems.oil_water else "gas_oil"
+                elif allow_two_phase and not (systems.oil_water or systems.gas_oil):
+                    raise ValidationError(
+                        f"`SATNUM` {satnum} defines neither an oil-water nor a gas-oil system "
+                        f"(keyword family {systems.family!r}; the deck has "
+                        f"{', '.join(systems.keywords_present) or 'no saturation keywords'})."
+                    )
+                elif (
+                    phases is None
+                    and systems.gas_water
+                    and not (systems.oil_water or systems.gas_oil)
+                ):
+                    two_phase_system = "gas_water"
+                    two_phase_family = "second"
 
             relative_permeability: RelativePermeabilityTable
             capillary_pressure: CapillaryPressureTable | None = None
             if two_phase_system is not None:
-                logger.warning(
-                    "`SATNUM` %d defines only the %s system; building a two-phase table.",
-                    satnum,
-                    two_phase_system.replace("_", "-"),
-                )
+                if declared_by_phases:
+                    logger.debug(
+                        "`SATNUM` %d: building a %s two-phase table.",
+                        satnum,
+                        two_phase_system.replace("_", "-"),
+                    )
+                else:
+                    logger.warning(
+                        "`SATNUM` %d defines only the %s system; building a two-phase table.",
+                        satnum,
+                        two_phase_system.replace("_", "-"),
+                    )
                 relative_permeability = TwoPhaseRelPermTable.from_deck(
                     deck_file=deck_file,
                     satnum=satnum,
                     system=two_phase_system,
-                    keyword_family=systems.family,
+                    keyword_family=two_phase_family,
+                    aqueous_slot=aqueous_slot,
                     number_of_base_points=number_of_base_points,
                     number_of_endpoint_extra_points=number_of_endpoint_extra_points,
                     spacing=spacing,
@@ -289,7 +332,8 @@ class SatFunc:
                         deck_file=deck_file,
                         satnum=satnum,
                         system=two_phase_system,
-                        keyword_family=systems.family,
+                        keyword_family=two_phase_family,
+                        aqueous_slot=aqueous_slot,
                         number_of_base_points=number_of_base_points,
                         number_of_endpoint_extra_points=number_of_endpoint_extra_points,
                         spacing=spacing,

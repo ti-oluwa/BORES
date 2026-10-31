@@ -1086,10 +1086,21 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
                 )
             return RelativePermeabilities(water=zeros, oil=kro, gas=krg)  # type: ignore[typeddict-item]
 
+        if phases == {FluidPhase.WATER, FluidPhase.GAS} and self.wetting_phase == FluidPhase.WATER:
+            krw = self.get_wetting_phase_relative_permeability(sw, non_wetting_saturation=sg)
+            krg = self.get_non_wetting_phase_relative_permeability(sw, non_wetting_saturation=sg)
+            if is_scalar:
+                return RelativePermeabilities(
+                    water=dtype.type(krw.item()),  # type: ignore
+                    oil=dtype.type(0),  # type: ignore
+                    gas=dtype.type(krg.item()),  # type: ignore
+                )
+            return RelativePermeabilities(water=krw, oil=zeros, gas=krg)  # type: ignore[typeddict-item]
+
         raise ValidationError(
             f"Cannot dispatch three-phase saturations to a two-phase table with phases "
             f"{self.wetting_phase!r} / {self.non_wetting_phase!r}. "
-            f"Expected OIL+WATER or OIL+GAS."
+            f"Expected OIL+WATER, OIL+GAS or WATER+GAS with water as the wetting phase."
         )
 
     def derivatives(
@@ -1241,10 +1252,49 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
                 dkrg_dsg=results[8],
             )
 
+        if phases == {FluidPhase.WATER, FluidPhase.GAS} and self.wetting_phase == FluidPhase.WATER:
+            dkrw = self.get_wetting_phase_relative_permeability_derivative(
+                sw, non_wetting_saturation=sg
+            )
+            dkrg = self.get_non_wetting_phase_relative_permeability_derivative(
+                sw, non_wetting_saturation=sg
+            )
+            if self.reference_phase == "wetting":
+                dkrw_dsw, dkrw_dsg = dkrw, zeros
+                dkrg_dsw, dkrg_dsg = dkrg, zeros
+            else:
+                dkrw_dsw, dkrw_dsg = zeros, dkrw
+                dkrg_dsw, dkrg_dsg = zeros, dkrg
+
+            results = (
+                dkrw_dsw,
+                zeros,
+                dkrg_dsw,
+                zeros,
+                zeros,
+                zeros,
+                dkrw_dsg,
+                zeros,
+                dkrg_dsg,
+            )
+            if is_scalar:
+                results = tuple(dtype.type(row.item()) for row in results)  # type: ignore
+            return RelativePermeabilityDerivatives(
+                dkrw_dsw=results[0],
+                dkro_dsw=results[1],
+                dkrg_dsw=results[2],
+                dkrw_dso=results[3],
+                dkro_dso=results[4],
+                dkrg_dso=results[5],
+                dkrw_dsg=results[6],
+                dkro_dsg=results[7],
+                dkrg_dsg=results[8],
+            )
+
         raise ValidationError(
             f"Cannot dispatch three-phase derivatives to a two-phase table with phases "
             f"{self.wetting_phase!r} / {self.non_wetting_phase!r}. "
-            f"Expected OIL+WATER or OIL+GAS."
+            f"Expected OIL+WATER, OIL+GAS or WATER+GAS with water as the wetting phase."
         )
 
     @classmethod
@@ -1253,8 +1303,9 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
         deck_file: DeckFile,
         satnum: int = 1,
         *,
-        system: typing.Literal["oil_water", "gas_oil"],
+        system: typing.Literal["oil_water", "gas_oil", "gas_water"],
         keyword_family: typing.Literal["first", "second"] = "first",
+        aqueous_slot: typing.Literal["oil", "water"] = "water",
         number_of_base_points: int = 200,
         number_of_endpoint_extra_points: int = 20,
         spacing: Spacing = "cosine",
@@ -1291,11 +1342,24 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
         When `SOF3` is absent but `SOF2` is present and `system="gas_oil"`, a
         warning is raised and `krog` defaults to the `kro` column of `SOF2`.
 
+        **Gas-water system** (`system="gas_water"`, a model with no oil):
+
+        The table is indexed by gas saturation, water is the wetting phase and gas the
+        non-wetting phase. It is read from `SGWFN` -> `(sg, krg, krw)`, or from `SWFN` and `SGFN`
+        together when `SGWFN` is absent, with the water curve moved onto the gas axis through
+        `Sw = 1 - Sg`. For a CO2 storage deck whose oil slot holds brine (`aqueous_slot="oil"`),
+        it is read from `SGOF` -> `(sg, krg, krog)`, where the `krog` column is the brine
+        relative permeability.
+
         :param deck_file: Parsed `DeckFile` containing `PROPS`-section keywords.
         :param satnum: 1-based saturation region number (default region = 1).
             Region index is given as `region_index = max(satnum - 1, 0)`.
-        :param system: `"oil_water"` or `"gas_oil"`.
+        :param system: `"oil_water"`, `"gas_oil"` or `"gas_water"`.
         :param keyword_family: `"first"` (`SWOF`/`SGOF`) or `"second"` (`SWFN`/`SGFN`+`SOF`).
+            A gas-water system reads the second family unless `aqueous_slot` is `"oil"`.
+        :param aqueous_slot: `"oil"` when the deck uses its oil phase for brine (a CO2 storage
+            deck declaring `OIL GAS CO2STOR`), otherwise `"water"`. Only used with
+            `system="gas_water"`.
         :param number_of_base_points: Passed to PCHIP grid scaling.
         :param number_of_endpoint_extra_points: Passed to PCHIP endpoint enrichment.
         :param spacing: Grid spacing mode for PCHIP scaling.
@@ -1476,7 +1540,55 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
                     spacing=spacing,
                     dtype=dtype,
                 )
-        raise ValidationError(f"`system` must be 'oil_water' or 'gas_oil'; got {system!r}.")
+        elif system == "gas_water":
+            if aqueous_slot == "oil":
+                rows = require("SGOF")
+                sg = np.array([row["sg"] for row in rows], dtype=dtype)
+                krg = np.array([row["krg"] for row in rows], dtype=dtype)
+                krw = np.array([row["krog"] for row in rows], dtype=dtype)
+            elif keyword_family == "first":
+                raise ValidationError(
+                    "The first saturation-function family (`SWOF`/`SGOF`) has no gas-water "
+                    "keyword. Use `SGWFN`, or `SWFN` with `SGFN`."
+                )
+            else:
+                sgwfn_rows = get_rows("SGWFN")
+                if sgwfn_rows:
+                    sg = np.array([row["sg"] for row in sgwfn_rows], dtype=dtype)
+                    krg = np.array([row["krg"] for row in sgwfn_rows], dtype=dtype)
+                    krw = np.array([row["krw"] for row in sgwfn_rows], dtype=dtype)
+                else:
+                    sgfn_rows = get_rows("SGFN")
+                    swfn_rows = get_rows("SWFN")
+                    if not sgfn_rows or not swfn_rows:
+                        raise ValidationError(
+                            "A gas-water system needs `SGWFN`, or both `SWFN` and `SGFN`, for "
+                            f"saturation region {satnum}."
+                        )
+                    sg = np.array([row["sg"] for row in sgfn_rows], dtype=dtype)
+                    krg = np.array([row["krg"] for row in sgfn_rows], dtype=dtype)
+                    sw = np.array([row["sw"] for row in swfn_rows], dtype=dtype)
+                    krw_on_sw = np.array([row["krw"] for row in swfn_rows], dtype=dtype)
+                    krw = np.interp(dtype.type(1) - sg, sw, krw_on_sw).astype(  # type: ignore[attr-defined]
+                        dtype, copy=False
+                    )
+            return cls(
+                wetting_phase=FluidPhase.WATER,
+                non_wetting_phase=FluidPhase.GAS,
+                reference_saturation=sg,  # type: ignore[arg-type]
+                wetting_phase_relative_permeability=krw,  # type: ignore[arg-type]
+                non_wetting_phase_relative_permeability=krg,  # type: ignore[arg-type]
+                reference_phase="non_wetting",
+                min_wetting_relperm=min_wetting_relperm,
+                min_non_wetting_relperm=min_non_wetting_relperm,
+                number_of_base_points=number_of_base_points,
+                number_of_endpoint_extra_points=number_of_endpoint_extra_points,
+                spacing=spacing,
+                dtype=dtype,
+            )
+        raise ValidationError(
+            f"`system` must be 'oil_water', 'gas_oil' or 'gas_water'; got {system!r}."
+        )
 
 
 def resolve_residual_oil_saturation_gas(
@@ -1605,6 +1717,12 @@ class DeckSaturationSystems(typing.NamedTuple):
     gas_oil: bool
     """Whether the gas-oil system (gas relative permeability and oil-in-gas) is complete."""
 
+    gas_water: bool
+    """
+    Whether the deck defines a gas-water system and no oil system: `SGWFN`, or `SWFN` with `SGFN`
+    and no `SOF2`/`SOF3`.
+    """
+
     keywords_present: tuple[str, ...]
     """Saturation-function keywords the deck holds for the region, for error messages."""
 
@@ -1637,12 +1755,19 @@ def detect_saturation_systems(
         return region_index < len(all_regions) and bool(all_regions[region_index])
 
     present = tuple(
-        keyword for keyword in ("SWOF", "SGOF", "SWFN", "SGFN", "SOF2", "SOF3") if has(keyword)
+        keyword
+        for keyword in ("SWOF", "SGOF", "SWFN", "SGFN", "SGWFN", "SOF2", "SOF3")
+        if has(keyword)
     )
     systems = {
         "first": (has("SWOF"), has("SGOF")),
         "second": (has("SWFN") and (has("SOF3") or has("SOF2")), has("SGFN") and has("SOF3")),
     }
+    gas_water = has("SGWFN") or (
+        has("SWFN")
+        and has("SGFN")
+        and not any(has(keyword) for keyword in ("SWOF", "SGOF", "SOF2", "SOF3"))
+    )
     family: typing.Literal["first", "second"]
     if keyword_family == "auto":
         if all(systems["first"]):
@@ -1651,19 +1776,23 @@ def detect_saturation_systems(
             family = "second"
         elif "SWOF" in present or "SGOF" in present:
             family = "first"
-        elif any(keyword in present for keyword in ("SWFN", "SGFN")):
+        elif any(keyword in present for keyword in ("SWFN", "SGFN", "SGWFN")):
             family = "second"
         else:
             raise ValidationError(
                 "No recognised saturation-function keywords found in the DeckFile "
                 f"for `SATNUM` {satnum}. Expected one of: "
-                "`SWOF`, `SGOF` (first family) or `SWFN`, `SGFN` (second family)."
+                "`SWOF`, `SGOF` (first family) or `SWFN`, `SGFN`, `SGWFN` (second family)."
             )
     else:
         family = keyword_family
     oil_water, gas_oil = systems[family]
     return DeckSaturationSystems(
-        family=family, oil_water=oil_water, gas_oil=gas_oil, keywords_present=present
+        family=family,
+        oil_water=oil_water,
+        gas_oil=gas_oil,
+        gas_water=gas_water,
+        keywords_present=present,
     )
 
 
