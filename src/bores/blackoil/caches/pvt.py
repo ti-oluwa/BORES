@@ -381,19 +381,16 @@ def compute_pvt_cache(
             cache.oil_density[mask] = 0.0
             cache.bubble_point_pressure[mask] = p
             cache.is_saturated[mask] = True
-            for inert_field in (
-                cache.dbo_dp,
-                cache.dμo_dp,
-                cache.dρo_dp,
-                cache.dbo_drs,
-                cache.dμo_drs,
-                cache.dρo_drs,
-                cache.oil_compressibility,
-                cache.solution_gas_oil_ratio,
-                cache.drs_dp,
-                cache.dpb_drs,
-            ):
-                inert_field[mask] = 0.0
+            cache.dbo_dp[mask] = 0.0
+            cache.dμo_dp[mask] = 0.0
+            cache.dρo_dp[mask] = 0.0
+            cache.dbo_drs[mask] = 0.0
+            cache.dμo_drs[mask] = 0.0
+            cache.dρo_drs[mask] = 0.0
+            cache.oil_compressibility[mask] = 0.0
+            cache.solution_gas_oil_ratio[mask] = 0.0
+            cache.drs_dp[mask] = 0.0
+            cache.dpb_drs[mask] = 0.0
 
         water = tables.water
         if water is not None:
@@ -425,6 +422,7 @@ def compute_pvt_cache(
                     if vaporized_oil_ratio is not None
                     else None
                 )
+
             cache.gas_formation_volume_factor[mask] = gas.formation_volume_factor(  # type: ignore[arg-type]
                 p, t, vaporized_oil_ratio=rv_state
             )

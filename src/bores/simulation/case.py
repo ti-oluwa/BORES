@@ -179,7 +179,7 @@ class SimulationCase:
             regions = Regions()
 
         hysteresis = self.hysteresis
-        hysteresis_enabled = self.runspec.hysteresis_enabled
+        hysteresis_enabled = self.runspec.saturation_options.hysteresis_enabled
         if not hysteresis_enabled:
             hysteresis = None
         elif hysteresis_enabled and hysteresis is None:
@@ -850,13 +850,13 @@ def load_case(
                 temperature=typing.cast(Temperature, temperature),
                 hysteresis_enabled=hysteresis_enabled
                 if hysteresis_enabled is not None
-                else runspec.hysteresis_enabled,
+                else runspec.saturation_options.hysteresis_enabled,
                 saturation_samples=saturation_samples,
                 dtype=dtype,
-                oil_presence_saturation=runspec.oil_presence_saturation,
-                gas_presence_saturation=runspec.gas_presence_saturation,
-                free_phase_saturation=runspec.phase_appearance_tolerance,
-                pressure_consistency_tolerance=runspec.pressure_consistency_tolerance,
+                oil_presence_saturation=runspec.phase_options.oil_presence_saturation,
+                gas_presence_saturation=runspec.phase_options.gas_presence_saturation,
+                free_phase_saturation=runspec.phase_options.phase_appearance_tolerance,
+                pressure_consistency_tolerance=runspec.phase_options.pressure_consistency_tolerance,
                 phases=phases,
             )
             print("Loaded state")

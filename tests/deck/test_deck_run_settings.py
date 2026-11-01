@@ -20,6 +20,7 @@ from bores.simulation.options import (
     load_model_dimensions,
     load_saturation_options,
 )
+from bores.simulation.run_options import PhaseOptions, PhysicsOptions
 from bores.simulation.spec import RunSpec
 from bores.timestep.control import RETUNABLE_SETTINGS, Timer
 from bores.timestep.deck import (
@@ -85,14 +86,15 @@ class TestRunSpecOptions:
         spec = load_run_spec(
             deck("SATOPTS\n HYSTER SURFTENS /\nEQLOPTS\n QUIESC /\nWELLDIMS\n 3 /\n")
         )
-        assert spec.hysteresis_enabled and spec.saturation_options.surface_tension_dependence
+        assert spec.saturation_options.hysteresis_enabled
+        assert spec.saturation_options.surface_tension_dependence
         assert spec.equilibration_options.quiescent_start and spec.dimensions.wells == 3
 
 
 class TestMinimumPoreVolume:
     def test_it_is_none_without_the_keyword(self):
         assert load_minimum_pore_volume(deck()) is None
-        assert load_run_spec(deck()).minimum_pore_volume is None
+        assert load_run_spec(deck()).physics_options.minimum_pore_volume is None
 
     def test_reservoir_barrels_become_cubic_feet_for_field_decks(self):
         assert load_minimum_pore_volume(deck("MINPV\n 1 /\n", FIELD_HEAD)) == pytest.approx(
@@ -104,11 +106,13 @@ class TestMinimumPoreVolume:
 
     def test_it_converts_with_the_run_spec(self):
         spec = load_run_spec(deck("MINPV\n 1 /\n", FIELD_HEAD))
-        assert spec.convert(UnitSystem.METRIC).minimum_pore_volume == pytest.approx(0.158987294928)
+        assert spec.convert(
+            UnitSystem.METRIC
+        ).physics_options.minimum_pore_volume == pytest.approx(0.158987294928)
 
     def test_a_negative_value_is_rejected(self):
         with pytest.raises(ValueError):
-            RunSpec(unit_system=UnitSystem.METRIC, minimum_pore_volume=-1.0)
+            PhysicsOptions(minimum_pore_volume=-1.0)
 
     def test_the_flow_mask_compares_reference_pore_volumes_and_keeps_all_cells_without_a_minimum(
         self,
@@ -268,10 +272,12 @@ class TestPresenceConstants:
 
     def test_the_run_spec_fields_default_to_none_so_the_constants_apply(self):
         spec = RunSpec(unit_system=UnitSystem.METRIC)
-        assert spec.oil_presence_saturation is None and spec.gas_presence_saturation is None
-        assert spec.pressure_consistency_tolerance is None
+        phase_options = spec.phase_options
+        assert phase_options.oil_presence_saturation is None
+        assert phase_options.gas_presence_saturation is None
+        assert phase_options.pressure_consistency_tolerance is None
         with pytest.raises(ValueError):
-            RunSpec(unit_system=UnitSystem.METRIC, oil_presence_saturation=-0.1)
+            PhaseOptions(oil_presence_saturation=-0.1)
 
 
 def test_api_gravity_converts_to_specific_gravity_and_back():

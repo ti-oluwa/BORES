@@ -127,7 +127,7 @@ def build_simulation_workspace(
     rock = reservoir.rock
     frozen_bubble_point_pressure = None
     frozen_dew_point_pressure = None
-    if runspec.freeze_saturation_pressure:
+    if runspec.physics_options.freeze_saturation_pressure:
         frozen_bubble_point_pressure, frozen_dew_point_pressure = compute_saturation_pressures(
             temperature=initial_state.temperature,
             solution_gas_oil_ratio=initial_state.solution_gor,
@@ -136,6 +136,7 @@ def build_simulation_workspace(
             vaporized_oil_ratio=initial_state.vaporized_oil_gas_ratio,
             dtype=dtype,
         )
+
     physics_cache = compute_physics_cache(
         pressure=initial_state.pressure,
         temperature=initial_state.temperature,
@@ -153,7 +154,7 @@ def build_simulation_workspace(
         residual_gas_saturation=rock.residual_gas_saturation,
         residual_oil_saturation_water=rock.residual_oil_saturation_water,
         residual_oil_saturation_gas=rock.residual_oil_saturation_gas,
-        freeze_saturation_pressure=runspec.freeze_saturation_pressure,
+        freeze_saturation_pressure=runspec.physics_options.freeze_saturation_pressure,
         frozen_bubble_point_pressure=frozen_bubble_point_pressure,
         frozen_dew_point_pressure=frozen_dew_point_pressure,
         dtype=dtype,
@@ -165,8 +166,8 @@ def build_simulation_workspace(
         oil_pressure=initial_state.pressure,
         oil_water_capillary_pressure=physics_cache.satfunc.oil_water_capillary_pressure,
         gas_oil_capillary_pressure=physics_cache.satfunc.gas_oil_capillary_pressure,
-        gravity_enabled=runspec.gravity_enabled,
-        capillary_effects_enabled=runspec.capillary_effects_enabled,
+        gravity_enabled=runspec.physics_options.gravity_enabled,
+        capillary_effects_enabled=runspec.physics_options.capillary_effects_enabled,
         dtype=dtype,
     )
     reservoir_workspace = ReservoirWorkspace.from_state(initial_state, dtype=dtype)

@@ -528,21 +528,43 @@ class RelativePermeabilityDerivatives(TypedDict):
 
 
 class CapillaryPressures(TypedDict):
-    """Dictionary containing capillary pressures for different phase pairs."""
+    """
+    Capillary pressures of the phase pairs.
 
-    oil_water: NumberOrArray[AnyDimension]  # Pcow = Po - Pw
-    gas_oil: NumberOrArray[AnyDimension]  # Pcgo = Pg - Po
-    gas_water: NumberOrArray[AnyDimension]  # Pcgw = Pg - Pw, a model with no oil
+    A model with oil uses `oil_water` and `gas_oil`, and the gas-water capillary pressure is their
+    sum. A model with gas and water and no oil uses `gas_water` and leaves the other two at zero.
+    """
+
+    oil_water: NumberOrArray[AnyDimension]
+    """Oil-water capillary pressure, Pcow = Po - Pw."""
+
+    gas_oil: NumberOrArray[AnyDimension]
+    """Gas-oil capillary pressure, Pcgo = Pg - Po."""
+
+    gas_water: NumberOrArray[AnyDimension]
+    """Gas-water capillary pressure, Pcgw = Pg - Pw, for a model with no oil. Zero otherwise."""
 
 
 class CapillaryPressureDerivatives(TypedDict):
-    """Dictionary containing capillary pressure derivatives for different phase pairs."""
+    """Derivatives of the capillary pressures of the phase pairs with respect to saturation."""
 
     dpcow_dsw: NumberOrArray[AnyDimension]
+    """Derivative of the oil-water capillary pressure with respect to water saturation."""
+
     dpcow_dso: NumberOrArray[AnyDimension]
+    """Derivative of the oil-water capillary pressure with respect to oil saturation."""
+
     dpcgo_dsg: NumberOrArray[AnyDimension]
+    """Derivative of the gas-oil capillary pressure with respect to gas saturation."""
+
     dpcgo_dso: NumberOrArray[AnyDimension]
+    """Derivative of the gas-oil capillary pressure with respect to oil saturation."""
+
     dpcgw_dsg: NumberOrArray[AnyDimension]
+    """
+    Derivative of the gas-water capillary pressure with respect to gas saturation, for a model with
+    no oil. Zero otherwise.
+    """
 
 
 class Wettability(enum.Enum):

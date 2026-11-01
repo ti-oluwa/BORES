@@ -104,17 +104,36 @@ class TestRunSpec:
             and spec.phases.dissolved_gas_in_oil
         )
         assert spec.timer is not None and spec.timer.unit_system == UnitSystem.FIELD
-        assert spec.hysteresis_enabled is False
+        assert spec.saturation_options.hysteresis_enabled is False
         assert spec.well_control.connection_pressure_mode == ConnectionPressureMode.HYDROSTATIC
 
     def test_hysteresis_comes_from_satopts(self):
-        assert load_run_spec(deck("OIL\nGAS\nSATOPTS\n 'HYSTER' /\n")).hysteresis_enabled is True
-        assert load_run_spec(deck("OIL\nGAS\nSATOPTS\n 'DIRECT' /\n")).hysteresis_enabled is False
+        assert (
+            load_run_spec(
+                deck("OIL\nGAS\nSATOPTS\n 'HYSTER' /\n")
+            ).saturation_options.hysteresis_enabled
+            is True
+        )
+        assert (
+            load_run_spec(
+                deck("OIL\nGAS\nSATOPTS\n 'DIRECT' /\n")
+            ).saturation_options.hysteresis_enabled
+            is False
+        )
 
     def test_newton_iterations_follow_a_non_default_newtmx_only(self):
-        assert load_run_spec(deck("TUNING\n /\n /\n 20 /\n")).maximum_newton_iterations == 20
-        assert load_run_spec(deck("TUNING\n /\n /\n /\n")).maximum_newton_iterations == 10
-        assert load_run_spec(deck("TUNING\n /\n /\n 99 /\n")).maximum_newton_iterations == 10
+        assert (
+            load_run_spec(deck("TUNING\n /\n /\n 20 /\n")).newton_options.maximum_newton_iterations
+            == 20
+        )
+        assert (
+            load_run_spec(deck("TUNING\n /\n /\n /\n")).newton_options.maximum_newton_iterations
+            == 10
+        )
+        assert (
+            load_run_spec(deck("TUNING\n /\n /\n 99 /\n")).newton_options.maximum_newton_iterations
+            == 10
+        )
 
     def test_a_deck_with_no_phases_gives_none(self):
         assert load_run_spec(deck()).phases is None

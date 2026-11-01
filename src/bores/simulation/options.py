@@ -2,8 +2,8 @@
 Switches and sizes a deck sets for the model as a whole.
 
 These come from the `RUNSPEC` keywords that turn optional features on (`SATOPTS`, `EQLOPTS`), the
-ones that declare how large the model is (`TABDIMS`, `EQLDIMS`, `REGDIMS`, `WELLDIMS`, `VFPPDIMS`,
-`VFPIDIMS`) and `MINPV` from the `GRID` section. A deck sets them once for the whole run, so they
+ones that declare how large the model is (`TABDIMS`, `EQLDIMS`, `REGDIMS`, `WELLDIMS`, `FAULTDIM`, `PIMTDIMS`,
+`VFPPDIMS`, `VFPIDIMS`) and `MINPV` from the `GRID` section. A deck sets them once for the whole run, so they
 are held on the `RunSpec` instead of on the data they describe.
 """
 
@@ -29,10 +29,55 @@ __all__ = [
 @attrs.frozen(kw_only=True, slots=True)
 class SaturationOptions:
     """
-    The optional saturation function features a deck switches on with `SATOPTS`.
+    The saturation function features of a run, which a deck switches on with `SATOPTS`.
 
-    `HYSTER` is not here: it is `RunSpec.hysteresis_enabled`.
+    Held on `RunSpec.saturation_options`.
     """
+
+    hysteresis_enabled: bool = False
+    """
+    Enable saturation hysteresis tracking for residual saturations.
+
+    When True, residual oil and gas saturations are updated each time step
+    based on the saturation reversal history of each cell (drainage vs.
+    imbibition regime). This is required when using hysteresis-aware
+    relative permeability or capillary pressure models (e.g. Killough,
+    Land trapping) where the scanning curves depend on the maximum
+    historical saturation reached in each cell.
+
+    When False (default), residual saturations are treated as fixed rock
+    properties and the hysteresis state is not updated during the
+    simulation. This is appropriate for standard black-oil simulations
+    without hysteresis models, and avoids the overhead of per-step
+    history tracking.
+
+    This flag should only be enabled when the configured relative
+    permeability and/or capillary pressure tables implement hysteresis-
+    aware scanning curves. Enabling it with non-hysteretic tables has no
+    physical effect and incurs unnecessary computation.
+    """
+
+    hysteresis_saturation_tolerance: float | None = attrs.field(
+        default=None,
+        validator=attrs.validators.optional(attrs.validators.ge(0)),  # type: ignore[arg-type]
+    )
+    """
+    Smallest saturation change between time steps that counts as a phase moving up or down
+    when tracking relative permeability hysteresis. `None` uses the
+    `HYSTERESIS_SATURATION_TOLERANCE` constant of `constants`.
+    """
+
+    endpoint_scaling_enabled: bool = False
+    """Whether the deck scales the saturation function end points cell by cell (`ENDSCALE`)."""
+
+    directional_endpoint_scaling: bool = False
+    """Whether end point scaling depends on the flow direction (`ENDSCALE` with `DIRECT`)."""
+
+    irreversible_endpoint_scaling: bool = False
+    """Whether end point scaling is irreversible, so one set applies to flow in each direction (`ENDSCALE` with `IRREVERS`)."""
+
+    scale_critical_saturations: bool = False
+    """Whether the critical saturations are scaled consistently with the other end points (`SCALECRS YES`)."""
 
     directional_relative_permeability: bool = False
     """Whether relative permeabilities depend on the flow direction (`DIRECT`)."""
@@ -128,6 +173,36 @@ class ModelDimensions:
     wells_per_group: Integer | None = None
     """Most wells or groups directly under one group (`WELLDIMS`)."""
 
+    endpoint_depth_tables: Integer | None = None
+    """Number of tables of end points against depth (`ENDSCALE`)."""
+
+    endpoint_depth_nodes: Integer | None = None
+    """Most depth nodes in a table of end points against depth (`ENDSCALE`)."""
+
+    fault_segments: Integer | None = None
+    """Most fault segments (`FAULTDIM`)."""
+
+    multiplier_tables: Integer | None = None
+    """Number of productivity index multiplier tables (`PIMTDIMS`)."""
+
+    multiplier_table_rows: Integer | None = None
+    """Most rows in a productivity index multiplier table (`PIMTDIMS`)."""
+
+    vfp_flow_rate_values: Integer | None = None
+    """Most flow rate values on a production VFP table's axis (`VFPPDIMS`)."""
+
+    vfp_tubing_head_pressure_values: Integer | None = None
+    """Most tubing head pressure values on a production VFP table's axis (`VFPPDIMS`)."""
+
+    vfp_water_fraction_values: Integer | None = None
+    """Most water fraction values on a production VFP table's axis (`VFPPDIMS`)."""
+
+    vfp_gas_fraction_values: Integer | None = None
+    """Most gas fraction values on a production VFP table's axis (`VFPPDIMS`)."""
+
+    vfp_artificial_lift_values: Integer | None = None
+    """Most artificial lift values on a production VFP table's axis (`VFPPDIMS`)."""
+
     production_vfp_tables: Integer | None = None
     """Number of production VFP tables (`VFPPDIMS`)."""
 
@@ -153,6 +228,16 @@ DIMENSION_SOURCES: tuple[tuple[str, str, str], ...] = (
     ("WELLDIMS", "max_connections_per_well", "connections_per_well"),
     ("WELLDIMS", "max_groups", "groups"),
     ("WELLDIMS", "max_wells_per_group", "wells_per_group"),
+    ("ENDSCALE", "num_endpoint_depth_tables", "endpoint_depth_tables"),
+    ("ENDSCALE", "num_endpoint_depth_nodes", "endpoint_depth_nodes"),
+    ("FAULTDIM", "max_fault_segments", "fault_segments"),
+    ("PIMTDIMS", "max_multiplier_tables", "multiplier_tables"),
+    ("PIMTDIMS", "max_multiplier_table_rows", "multiplier_table_rows"),
+    ("VFPPDIMS", "max_flow_rate_values", "vfp_flow_rate_values"),
+    ("VFPPDIMS", "max_tubing_head_pressure_values", "vfp_tubing_head_pressure_values"),
+    ("VFPPDIMS", "max_water_fraction_values", "vfp_water_fraction_values"),
+    ("VFPPDIMS", "max_gas_fraction_values", "vfp_gas_fraction_values"),
+    ("VFPPDIMS", "max_artificial_lift_values", "vfp_artificial_lift_values"),
     ("VFPPDIMS", "max_production_vfp_tables", "production_vfp_tables"),
     ("VFPIDIMS", "max_injection_vfp_tables", "injection_vfp_tables"),
 )
@@ -161,13 +246,22 @@ DIMENSION_SOURCES: tuple[tuple[str, str, str], ...] = (
 
 def load_saturation_options(deck_file: DeckFile) -> SaturationOptions:
     """
-    Read `SATOPTS`.
+    Read `SATOPTS`, `ENDSCALE` and `SCALECRS`.
 
     :param deck_file: The deck to read.
-    :returns: The options, all off if the deck has no `SATOPTS`.
+    :returns: The options, all off for whichever of the keywords the deck does not have.
     """
     listed = frozenset(str(option).upper() for option in deck_file.get("SATOPTS") or ())
+    endpoint_scaling = deck_file.get_shared("ENDSCALE")
+    critical_scaling = deck_file.get_shared("SCALECRS")
     return SaturationOptions(
+        endpoint_scaling_enabled=endpoint_scaling is not None,
+        directional_endpoint_scaling=bool(endpoint_scaling)
+        and endpoint_scaling["directional"] == "DIRECT",
+        irreversible_endpoint_scaling=bool(endpoint_scaling)
+        and endpoint_scaling["reversibility"] == "IRREVERS",
+        scale_critical_saturations=bool(critical_scaling) and bool(critical_scaling["enabled"]),
+        hysteresis_enabled="HYSTER" in listed,
         directional_relative_permeability="DIRECT" in listed,
         irreversible_directional_relative_permeability="IRREVERS" in listed,
         surface_tension_dependence="SURFTENS" in listed,

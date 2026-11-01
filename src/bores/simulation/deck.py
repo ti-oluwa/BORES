@@ -10,6 +10,7 @@ from bores.simulation.options import (
     load_model_dimensions,
     load_saturation_options,
 )
+from bores.simulation.run_options import NewtonOptions, PhysicsOptions
 from bores.simulation.spec import RunSpec
 from bores.timestep.deck import TUNING_DEFAULTS, get_tuning_at_start, load_timer
 from bores.wells.deck import load_well_control_spec
@@ -30,13 +31,15 @@ def load_run_spec(deck_file: DeckFile) -> RunSpec:
     - `timer`: the schedule length and `TUNING` (see `load_timer`), or `None` if the deck has no
       schedule length to run for.
     - `well_control`: see `load_well_control_spec`.
-    - `hysteresis_enabled`: whether `SATOPTS` lists `HYSTER`.
-    - `saturation_options`, `equilibration_options`: `SATOPTS` and `EQLOPTS`.
-    - `dimensions`: `TABDIMS`, `EQLDIMS`, `REGDIMS`, `WELLDIMS`, `VFPPDIMS` and `VFPIDIMS`.
-    - `minimum_pore_volume`: `MINPV`, in pore volume units.
-    - `maximum_newton_iterations`: the `TUNING` item of that name in effect at the start, only if
-      the deck sets it to something other than Eclipse's default and within the range `RunSpec`
-      accepts.
+    - `saturation_options`, `equilibration_options`: `SATOPTS` (including whether hysteresis is
+      on), `ENDSCALE` and `SCALECRS`, and `EQLOPTS`.
+    - `dimensions`: `TABDIMS`, `EQLDIMS`, `REGDIMS`, `WELLDIMS`, `FAULTDIM`, `PIMTDIMS`, `VFPPDIMS`
+      and `VFPIDIMS`.
+    - `data_check_only`: whether the deck has `NOSIM`.
+    - `physics_options.minimum_pore_volume`: `MINPV`, in pore volume units.
+    - `newton_options.maximum_newton_iterations`: the `TUNING` item of that name in effect at the
+      start, only if the deck sets it to something other than Eclipse's default and within the
+      range `NewtonOptions` accepts.
 
     Everything else (solvers, tolerances, capillary and gravity switches, ...) has no deck
     equivalent, or none that means the same thing here, and keeps its `RunSpec` default.
@@ -51,10 +54,7 @@ def load_run_spec(deck_file: DeckFile) -> RunSpec:
     if start_date is not None:
         options["start_date"] = start_date
 
-    saturation_options = deck_file.get("SATOPTS") or []
-    if "HYSTER" in saturation_options:
-        options["hysteresis_enabled"] = True
-
+    newton_settings: dict[str, typing.Any] = {}
     tuning = get_tuning_at_start(deck_file) or {}
     maximum_newton_iterations = tuning.get("iteration", {}).get("maximum_newton_iterations")
     if (
@@ -62,11 +62,12 @@ def load_run_spec(deck_file: DeckFile) -> RunSpec:
         and int(maximum_newton_iterations) != TUNING_DEFAULTS["maximum_newton_iterations"]
         and 1 <= int(maximum_newton_iterations) <= 50
     ):
-        options["maximum_newton_iterations"] = int(maximum_newton_iterations)
+        newton_settings["maximum_newton_iterations"] = int(maximum_newton_iterations)
 
+    physics_settings: dict[str, typing.Any] = {}
     minimum_pore_volume = load_minimum_pore_volume(deck_file)
     if minimum_pore_volume is not None:
-        options["minimum_pore_volume"] = minimum_pore_volume
+        physics_settings["minimum_pore_volume"] = minimum_pore_volume
 
     return RunSpec(
         unit_system=deck_file.unit_system,
@@ -76,5 +77,8 @@ def load_run_spec(deck_file: DeckFile) -> RunSpec:
         saturation_options=load_saturation_options(deck_file),
         equilibration_options=load_equilibration_options(deck_file),
         dimensions=load_model_dimensions(deck_file),
+        data_check_only=deck_file.has("NOSIM"),
+        newton_options=NewtonOptions(**newton_settings),
+        physics_options=PhysicsOptions(**physics_settings),
         **options,
     )

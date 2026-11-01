@@ -51,6 +51,141 @@ GENERIC_CONSUMERS = {
 """Keywords read by the deck machinery through their kind rather than by name, so no module names them."""
 
 
+NOT_BLACK_OIL = "not black-oil"
+NOT_BUILT = "feature not built"
+CANDIDATE = "candidate"
+NO_LOADER = "no loader yet"
+NO_HOME = "no model home"
+
+TRIAGE: dict[str, tuple[str, str]] = {
+    "GRIDUNIT": (NO_HOME, "the grid unit type is informational"),
+    "NNC": (
+        NOT_BUILT,
+        "per-connection saturation and pressure table numbers need NNC-level region overrides",
+    ),
+    "PINCH": (
+        NOT_BUILT,
+        "pinch-out gap and connection options change transmissibility across pinched-out layers",
+    ),
+    "SPECGRID": (
+        NOT_BUILT,
+        "`numres` counts local grid refinements and `gflag` marks a radial grid; neither is supported",
+    ),
+    "ENDSCALE": (
+        NOT_BUILT,
+        "`combination_mode` selects how scaled end points are combined, which nothing consumes",
+    ),
+    "EQLDIMS": (NOT_BLACK_OIL, "tracer concentration table capacities"),
+    "REGDIMS": (NOT_BLACK_OIL, "capacities for tracking, coal, operate regions and polymer"),
+    "TABDIMS": (NOT_BLACK_OIL, "capacities for EOS, thermal and compaction tables"),
+    "VFPPDIMS": (NO_HOME, "all of its items are now read into `ModelDimensions`"),
+    "WELLDIMS": (
+        NOT_BLACK_OIL,
+        "capacities for separators, surface streams, mixtures and multi-segment well detail",
+    ),
+    "COMPDAT": (
+        CANDIDATE,
+        "`kh` and `pressure_equivalent_radius` override the connection factor's permeability-thickness and Peaceman radius; the well index calculation has no override to receive them yet",
+    ),
+    "COMPSEGS": (NOT_BUILT, "multi-segment wells are not modelled"),
+    "WELSEGS": (NOT_BUILT, "multi-segment wells are not modelled"),
+    "GCONINJE": (
+        NOT_BUILT,
+        "reinjection and voidage replacement targets and group responses are not implemented",
+    ),
+    "GCONPROD": (
+        NOT_BUILT,
+        "exceed actions, subordinate application and reservoir fluid targets are not implemented",
+    ),
+    "GECON": (NOT_BUILT, "group economic limits are not implemented"),
+    "WCONINJE": (NOT_BLACK_OIL, "steam ratios are thermal"),
+    "WECON": (
+        NOT_BUILT,
+        "secondary limits, follow-on wells and the limited quantity are not implemented",
+    ),
+    "WELSPECS": (
+        CANDIDATE,
+        "`drainage_radius` has no field on `Well` since the index calculation derives it; the rest are FrontSim, polymer and well model options",
+    ),
+    "WGRUPCON": (
+        NOT_BUILT,
+        "guide rate phase, scaling and group availability are not implemented",
+    ),
+    "AQUCT": (NOT_BLACK_OIL, "salt concentration"),
+    "AQUFLUX": (NO_HOME, "the aquifer pressure of a constant flux aquifer is for reporting"),
+    "EQUIL": (
+        NOT_BLACK_OIL,
+        "compositional initialization and the black-oil hydrocarbon-in-gas initialization option",
+    ),
+    "GRIDFILE": (NO_HOME, "controls Eclipse grid file output"),
+    "MESSAGES": (NO_HOME, "Eclipse message print limits"),
+    "NSTACK": (NO_HOME, "size of Eclipse's linear solver stack"),
+    "TRACER": (NOT_BUILT, "tracers are not modelled"),
+    "DRSDT": (
+        NO_LOADER,
+        "a scheduled limit on how fast dissolved gas can rise, with no matching limit in the model",
+    ),
+    "DRVDT": (
+        NO_LOADER,
+        "a scheduled limit on how fast vaporized oil can rise, with no matching limit in the model",
+    ),
+    "WCONHIST": (NO_LOADER, "history controls are not loaded"),
+    "WCONINJH": (NO_LOADER, "history controls are not loaded"),
+    "WDFAC": (NO_LOADER, "non-Darcy flow is not applied"),
+    "WELPI": (NO_LOADER, "productivity index rescaling is not applied"),
+    "WPAVE": (NO_LOADER, "well pressure averaging is not modelled"),
+    "WTEST": (NO_LOADER, "well testing is not modelled"),
+    "INIT": (NO_HOME, "asks Eclipse to write an initial file"),
+    "FMTIN": (NO_HOME, "Eclipse input file format"),
+    "FMTOUT": (NO_HOME, "Eclipse output file format"),
+    "UNIFIN": (NO_HOME, "Eclipse unified input files"),
+    "UNIFOUT": (NO_HOME, "Eclipse unified output files"),
+    "NOECHO": (NO_HOME, "stops Eclipse echoing the input"),
+    "RUNSUM": (NO_HOME, "asks Eclipse for a run summary file"),
+    "ZIPPY2": (NO_HOME, "an OPM Flow settings keyword"),
+    "NEWTRAN": (
+        NOT_BUILT,
+        "chooses between two Eclipse transmissibility calculations; there is only one here",
+    ),
+    "OLDTRAN": (
+        NOT_BUILT,
+        "chooses between two Eclipse transmissibility calculations; there is only one here",
+    ),
+    "SGL": (CANDIDATE, "connate gas end point array; `Rock` has no field for it"),
+    "SGU": (CANDIDATE, "maximum gas saturation end point array; `Rock` has no field for it"),
+    "SWU": (CANDIDATE, "maximum water saturation end point array; `Rock` has no field for it"),
+    "SGLPC": (
+        CANDIDATE,
+        "end point used only to scale capillary pressure; `Rock` has no separate capillary end points",
+    ),
+    "SWLPC": (
+        CANDIDATE,
+        "end point used only to scale capillary pressure; `Rock` has no separate capillary end points",
+    ),
+    "SOIL": (
+        CANDIDATE,
+        "initial oil saturation; the initializer derives oil as 1 - Sw - Sg, so it needs a rule for when it is given as well",
+    ),
+}
+KIND_TRIAGE: dict[str, tuple[str, str]] = {
+    "MnemonicReportKeyword": (NO_HOME, "controls which Eclipse report files are written"),
+    "SummaryVectorKeyword": (
+        NO_HOME,
+        "selects summary vectors, which are built from the model's own output",
+    ),
+}
+"""
+What an unlisted keyword of a given kind is, by its class name, when nothing names it in `TRIAGE`.
+"""
+
+SECTION_MODULES = ("sections",)
+
+"""
+Why each keyword's unread fields stay unread. Every keyword with unread fields needs an entry, so a
+new one shows as untriaged until someone decides.
+"""
+
+
 def field_names(keyword) -> list[str]:
     """Every field, column or record name a keyword's records carry."""
     names: list[str] = []
@@ -173,13 +308,43 @@ def main() -> None:
             unread = [n for n in names if n not in literals and field_owner_count[n] == 1]
             shared = [n for n in names if n not in literals and field_owner_count[n] > 1]
             unread_total += len(unread)
+            if unread or not users:
+                category, reason = TRIAGE.get(
+                    keyword.name,
+                    ("section marker", "")
+                    if module_name in SECTION_MODULES
+                    else KIND_TRIAGE.get(type(keyword).__name__, ("untriaged", "")),
+                )
+            else:
+                category, reason = "", ""
             lines.append(
                 f"| `{keyword.name}` | {type(keyword).__name__} | "
                 f"{', '.join(f'`{u}`' for u in users) if users else (note or '**none**')} | "
-                f"{', '.join(f'`{n}`' for n in unread) or ''} | {', '.join(f'`{n}`' for n in shared) or ''} |"
+                f"{', '.join(f'`{n}`' for n in unread) or ''} | {', '.join(f'`{n}`' for n in shared) or ''} | "
+                f"{(category + ': ' + reason) if reason else category} |"
             )
         lines.append("")
+    untriaged = [
+        keyword.name
+        for keyword in keywords
+        if [n for n in field_names(keyword) if n not in literals and field_owner_count[n] == 1]
+        and keyword.name not in TRIAGE
+    ]
+    untriaged += [
+        keyword.name
+        for keyword in keywords
+        if not (literals.get(keyword.name, set()) | imports.get(keyword.name, set()))
+        and not GENERIC_CONSUMERS.get(keyword.name)
+        and keyword.name not in TRIAGE
+        and type(keyword).__name__ not in KIND_TRIAGE
+        and defined_in.get(keyword.name) not in SECTION_MODULES
+    ]
     lines += [f"Fields no module reads: {unread_total}.", ""]
+    if untriaged:
+        lines += [
+            f"Keywords with no consumer or with unread fields, and no triage entry: {', '.join(untriaged)}.",
+            "",
+        ]
     OUTPUT.write_text("\n".join(lines), encoding="utf-8")
     print(
         f"wrote {OUTPUT.relative_to(ROOT)}: {len(keywords)} keywords, {unread_total} unread fields"
