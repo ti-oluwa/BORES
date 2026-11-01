@@ -5,6 +5,7 @@ import importlib
 import pytest
 
 from bores.blackoil.satfunc.capillary_pressure.hysteresis import (
+    CurvatureCapillaryPressureTable,
     HysteresisCapillaryPressureTable,
     KilloughCapillaryPressureTable,
 )
@@ -24,6 +25,7 @@ def test_the_models_share_their_family_base():
     assert issubclass(KilloughLandRelPermTable, HysteresisRelPermTable)
     assert issubclass(CarlsonRelPermTable, HysteresisRelPermTable)
     assert issubclass(KilloughCapillaryPressureTable, HysteresisCapillaryPressureTable)
+    assert issubclass(CurvatureCapillaryPressureTable, HysteresisCapillaryPressureTable)
 
 
 def test_the_old_module_paths_and_the_new_modules_give_the_same_objects():

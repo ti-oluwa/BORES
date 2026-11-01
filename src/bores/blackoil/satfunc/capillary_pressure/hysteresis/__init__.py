@@ -13,8 +13,15 @@ it used to.
 from bores.blackoil.satfunc.capillary_pressure.hysteresis.base import (
     HysteresisCapillaryPressureTable,
 )
+from bores.blackoil.satfunc.capillary_pressure.hysteresis.curvature import (
+    CurvatureCapillaryPressureTable,
+)
 from bores.blackoil.satfunc.capillary_pressure.hysteresis.killough import (
     KilloughCapillaryPressureTable,
 )
 
-__all__ = ["HysteresisCapillaryPressureTable", "KilloughCapillaryPressureTable"]
+__all__ = [
+    "CurvatureCapillaryPressureTable",
+    "HysteresisCapillaryPressureTable",
+    "KilloughCapillaryPressureTable",
+]
