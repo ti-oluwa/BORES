@@ -14,8 +14,15 @@ from bores.grids.factories.cartesian import make_cartesian_grid
 from bores.precision import with_precision
 from bores.types import Orientation, PhaseValues
 from bores.wells.base import FluidPhase
-from bores.wells.compile import compile_well_system
-from bores.wells.controls import EconomicLimit, EconomicQuantity, WorkoverAction
+from bores.wells.compile import InjectorControlModeTag, ProducerControlModeTag, compile_well_system
+from bores.wells.controls import (
+    BHPLimit,
+    EconomicLimit,
+    EconomicQuantity,
+    RateLimit,
+    RateQuantity,
+    WorkoverAction,
+)
 from bores.wells.factories import make_injector, make_producer, make_well_controls, make_wells
 from bores.wells.hydraulics.base import (
     SurfaceSample,
@@ -27,7 +34,11 @@ from bores.wells.hydraulics.gray import gray_wellbore
 from bores.wells.hydraulics.hagedorn_brown import hagedorn_brown_wellbore
 from bores.wells.hydraulics.homogeneous import homogeneous_wellbore
 from bores.wells.hydraulics.woldesemayat_ghajar import woldesemayat_ghajar_wellbore
-from bores.wells.resolution.derivatives import compute_well_derivatives, get_well_derivatives
+from bores.wells.resolution.derivatives import (
+    compute_well_derivatives,
+    get_control_derivatives,
+    get_well_derivatives,
+)
 from bores.wells.resolution.engine import resolve_well_control
 from bores.wells.resolution.spec import ConnectionPressureMode, WellControlSpec
 from bores.wells.state import ConnectionSample, ConnectionSampleDerivatives
@@ -54,38 +65,67 @@ def double_precision():
 
 
 def get_properties(pressure, water_saturation, gas_saturation):
-    """Fluid properties with their exact derivatives, for one cell."""
-    so = 1.0 - water_saturation - gas_saturation
-    mu_o, d_mu_o = 1.0 + 1e-4 * (pressure - 3000.0), 1e-4
-    mu_g, d_mu_g = 0.02 * (1.0 + 2e-4 * (pressure - 3000.0)), 0.02 * 2e-4
-    derivatives = ConnectionSampleDerivatives(
-        dmo_dp=-(so**2) * d_mu_o / mu_o**2,
-        dmo_dsw=-2.0 * so / mu_o,
-        dmo_dsg=-2.0 * so / mu_o,
-        dmw_dp=0.0,
-        dmw_dsw=2.0 * water_saturation / 0.5,
-        dmw_dsg=0.0,
-        dmg_dp=-(gas_saturation**2) * d_mu_g / mu_g**2,
-        dmg_dsw=0.0,
-        dmg_dsg=2.0 * gas_saturation / mu_g,
-        dbo_dp=-1e-5,
-        dbw_dp=-1e-6,
-        dbg_dp=-0.01 * 3000.0 / pressure**2,
-        drs_dp=0.05,
-        drv_dp=1e-10,
-    )
+    """
+    Every fluid property of one cell as an explicit function of its unknowns, with exact
+    derivatives. Each property depends on pressure and on saturation, so a dependence the well
+    derivatives leave out shows up as a mismatch.
+    """
+    p, sw, sg = pressure - 3000.0, water_saturation, gas_saturation
+    so = 1.0 - sw - sg
+    mu_o = (1.0 + 1e-4 * p) * (1.0 + 0.5 * sg)
+    mu_w = 0.5 * (1.0 + 2e-5 * p) * (1.0 + 0.1 * sw)
+    mu_g = 0.02 * (1.0 + 2e-4 * p)
+    d_mu_o = (1e-4 * (1.0 + 0.5 * sg), 0.0, 0.5 * (1.0 + 1e-4 * p))
+    d_mu_w = (0.5 * 2e-5 * (1.0 + 0.1 * sw), 0.5 * (1.0 + 2e-5 * p) * 0.1, 0.0)
+    d_mu_g = (0.02 * 2e-4, 0.0, 0.0)
+    d_so = (0.0, -1.0, -1.0)
+    d_sw = (0.0, 1.0, 0.0)
+    d_sg = (0.0, 0.0, 1.0)
+
+    def quotient(numerator, d_numerator, denominator, d_denominator):
+        return tuple(
+            dn / denominator - numerator * dd / denominator**2
+            for dn, dd in zip(d_numerator, d_denominator, strict=True)
+        )
+
+    d_lo = quotient(so**2, tuple(2.0 * so * d for d in d_so), mu_o, d_mu_o)
+    d_lw = quotient(sw**2, tuple(2.0 * sw * d for d in d_sw), mu_w, d_mu_w)
+    d_lg = quotient(sg**2, tuple(2.0 * sg * d for d in d_sg), mu_g, d_mu_g)
     values = {
-        "mobilities": PhaseValues(
-            so**2 / mu_o, water_saturation**2 / 0.5, gas_saturation**2 / mu_g
+        "mobilities": PhaseValues(so**2 / mu_o, sw**2 / mu_w, sg**2 / mu_g),
+        "viscosities": PhaseValues(mu_o, mu_w, mu_g),
+        "densities": PhaseValues(
+            50.0 + 0.004 * p + 3.0 * sg,
+            62.4 + 0.0005 * p + 1.0 * sw,
+            5.0 * (pressure / 3000.0) * (1.0 + 0.1 * sw),
         ),
+        "sigma": 20.0 + 0.001 * p + 2.0 * sw,
         "fvfs": PhaseValues(
-            1.2 - 1e-5 * (pressure - 3000.0),
-            1.0 - 1e-6 * (pressure - 3000.0),
+            1.2 - 1e-5 * p + 0.01 * sw + 0.02 * sg,
+            1.0 - 1e-6 * p,
             0.01 * 3000.0 / pressure,
         ),
-        "rs": 300.0 + 0.05 * (pressure - 3000.0),
-        "rv": 1e-7 + 1e-10 * (pressure - 3000.0),
+        "rs": 300.0 + 0.05 * p + 100.0 * sg,
+        "rv": 1e-7 + 1e-10 * p + 1e-8 * sg,
     }
+    derivatives = ConnectionSampleDerivatives(
+        dʎo_dp=d_lo[0], dʎo_dsw=d_lo[1], dʎo_dsg=d_lo[2],
+        dʎw_dp=d_lw[0], dʎw_dsw=d_lw[1], dʎw_dsg=d_lw[2],
+        dʎg_dp=d_lg[0], dʎg_dsw=d_lg[1], dʎg_dsg=d_lg[2],
+        dbo_dp=-1e-5, dbo_dsw=0.01, dbo_dsg=0.02,
+        dbw_dp=-1e-6, dbw_dsw=0.0, dbw_dsg=0.0,
+        dbg_dp=-0.01 * 3000.0 / pressure**2, dbg_dsw=0.0, dbg_dsg=0.0,
+        drs_dp=0.05, drs_dsw=0.0, drs_dsg=100.0,
+        drv_dp=1e-10, drv_dsw=0.0, drv_dsg=1e-8,
+        drho_o_dp=0.004, drho_o_dsw=0.0, drho_o_dsg=3.0,
+        drho_w_dp=0.0005, drho_w_dsw=1.0, drho_w_dsg=0.0,
+        drho_g_dp=5.0 / 3000.0 * (1.0 + 0.1 * sw), drho_g_dsw=5.0 * (pressure / 3000.0) * 0.1,
+        drho_g_dsg=0.0,
+        dmu_o_dp=d_mu_o[0], dmu_o_dsw=d_mu_o[1], dmu_o_dsg=d_mu_o[2],
+        dmu_w_dp=d_mu_w[0], dmu_w_dsw=d_mu_w[1], dmu_w_dsg=d_mu_w[2],
+        dmu_g_dp=d_mu_g[0], dmu_g_dsw=d_mu_g[1], dmu_g_dsg=d_mu_g[2],
+        dsigma_dp=0.001, dsigma_dsw=2.0, dsigma_dsg=0.0,
+    )  # fmt: skip
     return values, derivatives
 
 
@@ -100,9 +140,9 @@ def make_samples(pressures, water_saturations, gas_saturations):
                 temperature=200.0,
                 phase_saturations=PhaseValues(1.0 - state[1] - state[2], state[1], state[2]),
                 phase_mobilities=values["mobilities"],
-                phase_densities=PhaseValues(50.0 + index, 62.4, 5.0),
-                phase_viscosities=PhaseValues(1.0, 0.5, 0.02),
-                gas_liquid_surface_tension=20.0,
+                phase_densities=values["densities"],
+                phase_viscosities=values["viscosities"],
+                gas_liquid_surface_tension=values["sigma"],
                 phase_fvfs=values["fvfs"],
                 solution_gas_oil_ratio=values["rs"],
                 vaporized_oil_gas_ratio=values["rv"],
@@ -193,7 +233,7 @@ class Well:
                 surface_sample=self.surface_sample,
             )
 
-    def get_rates(self, pressures):
+    def get_rates(self, state):
         """Connection reservoir rates and surface component rates, from the last resolve."""
         workspace = self.workspace
         rates = np.stack(
@@ -207,7 +247,7 @@ class Well:
         is_injector = bool(self.system.controls.well_kinds[0] == 1)
         surface = np.zeros_like(rates)
         for index in range(self.n):
-            values, _ = get_properties(pressures[index], 0.2, 0.1)
+            values, _ = get_properties(state[0][index], state[1][index], state[2][index])
             oil_volume, water_volume, gas_volume = values["fvfs"]
             carries = (not is_injector) or bool((rates[index] < 0.0).any())
             oil, water, gas = rates[index]
@@ -221,7 +261,7 @@ class Well:
 
 def assert_derivatives_match(well, state, bhp, *, tolerance=2e-4):
     """Compares every derivative of `well` at `state` with a central finite difference."""
-    pressures, _water_saturations, _gas_saturations = state
+    _pressures, _water_saturations, _gas_saturations = state
     well.resolve(*state, bhp=bhp, derivatives=True)
     derivatives = get_well_derivatives(
         compiled_system=well.system, workspace=well.workspace, well_row=0
@@ -234,7 +274,7 @@ def assert_derivatives_match(well, state, bhp, *, tolerance=2e-4):
                 shifted = [np.array(values, dtype=F64) for values in state]
                 shifted[unknown][cell] += shift
                 well.resolve(*shifted, bhp=bhp)
-                return well.get_rates(shifted[0])
+                return well.get_rates(shifted)
 
             rates_up, surface_up = solve(steps[unknown])
             rates_down, surface_down = solve(-steps[unknown])
@@ -259,9 +299,9 @@ def assert_derivatives_match(well, state, bhp, *, tolerance=2e-4):
 
     step = 1e-5 * bhp
     well.resolve(*state, bhp=bhp + step)
-    rates_up, surface_up = well.get_rates(pressures)
+    rates_up, surface_up = well.get_rates(state)
     well.resolve(*state, bhp=bhp - step)
-    rates_down, surface_down = well.get_rates(pressures)
+    rates_down, surface_down = well.get_rates(state)
     difference = (rates_up - rates_down) / (2.0 * step)
     surface_difference = (surface_up - surface_down) / (2.0 * step)
     np.testing.assert_allclose(
@@ -463,7 +503,7 @@ def test_injector_crossflow_reports_the_formation_fluid_it_produces():
     assert workspace.connection_oil_rates[2] < 0.0
     np.testing.assert_allclose(workspace.oil_rates[0], workspace.connection_oil_rates.sum())
     np.testing.assert_allclose(workspace.gas_rates[0], workspace.connection_gas_rates.sum())
-    _, surface = well.get_rates(CROSSFLOW[0])
+    _, surface = well.get_rates(CROSSFLOW)
     np.testing.assert_allclose(
         [
             workspace.surface_oil_rates[0],
@@ -516,3 +556,118 @@ def test_derivatives_in_a_single_precision_workspace_agree_with_double_precision
         rtol=1e-3,
         atol=1e-4 * np.abs(expected.dqs_dbhp).max(),
     )
+
+
+def set_control(well, mode, *, target_rate=None):
+    well.system.controls.control_modes[0] = mode
+    if target_rate is not None:
+        well.system.controls.target_rates[0] = target_rate
+
+
+@pytest.mark.parametrize(
+    "mode,phases,reservoir",
+    [
+        (ProducerControlModeTag.OIL_RATE, [0], False),
+        (ProducerControlModeTag.WATER_RATE, [1], False),
+        (ProducerControlModeTag.GAS_RATE, [2], False),
+        (ProducerControlModeTag.LIQUID_RATE, [0, 1], False),
+        (ProducerControlModeTag.RESERVOIR_VOLUME_RATE, [0, 1, 2], True),
+    ],
+)
+def test_a_producers_rate_control_row_sums_the_phases_it_counts(mode, phases, reservoir):
+    well = Well(kind="producer", bhp=1500.0)
+    set_control(well, mode, target_rate=1e9)
+    well.resolve(*NORMAL, derivatives=True)
+    derivatives = get_well_derivatives(
+        compiled_system=well.system, workspace=well.workspace, well_row=0
+    )
+    row = get_control_derivatives(
+        compiled_system=well.system, workspace=well.workspace, well_row=0
+    )
+    totals_x = derivatives.dq_dx_well if reservoir else derivatives.dqs_dx_well
+    totals_bhp = derivatives.dq_dbhp_well if reservoir else derivatives.dqs_dbhp_well
+    assert row.quantity == ("reservoir_rate" if reservoir else "surface_rate")
+    np.testing.assert_allclose(row.dr_dx, totals_x[:, phases, :].sum(axis=1))
+    np.testing.assert_allclose(row.dr_dbhp, totals_bhp[phases].sum())
+
+
+def test_a_bottom_hole_pressure_control_row_depends_only_on_the_pressure():
+    well = Well(kind="producer", bhp=1500.0)
+    well.resolve(*NORMAL, derivatives=True)
+    row = get_control_derivatives(
+        compiled_system=well.system, workspace=well.workspace, well_row=0
+    )
+    assert row.quantity == "bhp"
+    assert row.dr_dbhp == 1.0
+    assert not row.dr_dx.any()
+
+
+def test_a_tubing_head_pressure_control_row_is_the_tubing_head_pressure_derivatives():
+    well = Well(
+        kind="producer",
+        bhp=1500.0,
+        mode=HYDRAULIC,
+        tubing=homogeneous_wellbore(tubing_inner_diameter=0.25),
+        surface_sample=SURFACE,
+    )
+    set_control(well, ProducerControlModeTag.THP)
+    well.resolve(*NORMAL, derivatives=True)
+    row = get_control_derivatives(
+        compiled_system=well.system, workspace=well.workspace, well_row=0
+    )
+    assert row.quantity == "thp"
+    np.testing.assert_allclose(row.dr_dx, well.workspace.dthp_dx)
+    assert row.dr_dbhp == pytest.approx(float(well.workspace.dthp_dbhp[0]))
+
+
+def test_an_injectors_rate_control_row_counts_only_the_injected_phase():
+    well = Well(kind="injector", bhp=4000.0, injected=FluidPhase.WATER)
+    set_control(well, InjectorControlModeTag.RATE, target_rate=1e9)
+    well.resolve(*NORMAL, derivatives=True)
+    derivatives = get_well_derivatives(
+        compiled_system=well.system, workspace=well.workspace, well_row=0
+    )
+    row = get_control_derivatives(
+        compiled_system=well.system, workspace=well.workspace, well_row=0
+    )
+    np.testing.assert_allclose(row.dr_dx, derivatives.dqs_dx_well[:, 1, :])
+    np.testing.assert_allclose(row.dr_dbhp, derivatives.dqs_dbhp_well[1])
+
+
+def test_a_binding_limit_replaces_the_control_in_the_control_row():
+    well = Well(
+        kind="producer",
+        bhp=1000.0,
+        limits=[RateLimit(quantity=RateQuantity.OIL, max_value=3000.0)],
+    )
+    well.resolve(*NORMAL, derivatives=True)
+    assert well.workspace.active_limit_rows[0] != -1
+    derivatives = get_well_derivatives(
+        compiled_system=well.system, workspace=well.workspace, well_row=0
+    )
+    row = get_control_derivatives(
+        compiled_system=well.system, workspace=well.workspace, well_row=0
+    )
+    assert row.quantity == "surface_rate"
+    np.testing.assert_allclose(row.dr_dx, derivatives.dqs_dx_well[:, 0, :])
+
+    bhp_limited = Well(kind="producer", bhp=1000.0, limits=[BHPLimit(min_value=2000.0)])
+    bhp_limited.resolve(*NORMAL, derivatives=True)
+    row = get_control_derivatives(
+        compiled_system=bhp_limited.system, workspace=bhp_limited.workspace, well_row=0
+    )
+    assert row.quantity == "bhp"
+
+
+def test_a_well_shut_in_by_an_economic_limit_has_an_empty_control_row():
+    limit = EconomicLimit(
+        quantity=EconomicQuantity.WATER_CUT, max_value=1e-4, workover_action=WorkoverAction.WELL
+    )
+    well = Well(kind="producer", bhp=1000.0, limits=[limit])
+    well.resolve(*NORMAL, derivatives=True)
+    row = get_control_derivatives(
+        compiled_system=well.system, workspace=well.workspace, well_row=0
+    )
+    assert row.quantity == "none"
+    assert not row.dr_dx.any()
+    assert row.dr_dbhp == 0.0

@@ -16,6 +16,8 @@ from bores.types import (
     NumberArray,
     OneDimension,
     PhaseValues,
+    ThreeDimensions,
+    TwoDimensions,
     UnitConversionTable,
     UnitSystem,
 )
@@ -559,51 +561,37 @@ class ConnectionFluids(typing.NamedTuple):
 class ConnectionDerivatives(typing.NamedTuple):
     """
     How the fluid properties at every connection of a well change with the primary unknowns of the
-    connected cell (pressure, water saturation, gas saturation), one array per derivative, in the
-    order of the well's connections. `ConnectionSampleDerivatives` describes each one.
+    connected cell, packed one array per kind of property, in the order of the well's connections.
+
+    The last axis of each array is the unknown: pressure, water saturation, and the third
+    unknown (gas saturation, or the variable the solver switches to in its place), in that order.
+    A phase axis is ordered oil, water, gas. `ConnectionSampleDerivatives` describes each.
     """
 
-    dʎo_dp: NumberArray[OneDimension]
-    """Derivative of the oil mobility with respect to pressure."""
+    ds_dx: NumberArray[ThreeDimensions]
+    """Shape `(n, 3, 3)`. Phase saturations against the unknowns."""
 
-    dʎo_dsw: NumberArray[OneDimension]
-    """Derivative of the oil mobility with respect to water saturation."""
+    dʎ_dx: NumberArray[ThreeDimensions]
+    """Shape `(n, 3, 3)`. Phase mobilities against the unknowns."""
 
-    dʎo_dsg: NumberArray[OneDimension]
-    """Derivative of the oil mobility with respect to gas saturation."""
+    db_dx: NumberArray[ThreeDimensions]
+    """Shape `(n, 3, 3)`. Phase formation volume factors against the unknowns."""
 
-    dʎw_dp: NumberArray[OneDimension]
-    """Derivative of the water mobility with respect to pressure."""
+    dr_dx: NumberArray[ThreeDimensions]
+    """Shape `(n, 2, 3)`. The solution gas-oil ratio, then the vaporized oil-gas ratio, against the unknowns."""
 
-    dʎw_dsw: NumberArray[OneDimension]
-    """Derivative of the water mobility with respect to water saturation."""
+    drho_dx: NumberArray[ThreeDimensions]
+    """Shape `(n, 3, 3)`. Phase densities against the unknowns."""
 
-    dʎw_dsg: NumberArray[OneDimension]
-    """Derivative of the water mobility with respect to gas saturation."""
+    dmu_dx: NumberArray[ThreeDimensions]
+    """Shape `(n, 3, 3)`. Phase viscosities against the unknowns."""
 
-    dʎg_dp: NumberArray[OneDimension]
-    """Derivative of the gas mobility with respect to pressure."""
+    dsigma_dx: NumberArray[TwoDimensions]
+    """Shape `(n, 3)`. The gas-liquid surface tension against the unknowns."""
 
-    dʎg_dsw: NumberArray[OneDimension]
-    """Derivative of the gas mobility with respect to water saturation."""
 
-    dʎg_dsg: NumberArray[OneDimension]
-    """Derivative of the gas mobility with respect to gas saturation."""
-
-    dbo_dp: NumberArray[OneDimension]
-    """Derivative of the oil formation volume factor with respect to pressure."""
-
-    dbw_dp: NumberArray[OneDimension]
-    """Derivative of the water formation volume factor with respect to pressure."""
-
-    dbg_dp: NumberArray[OneDimension]
-    """Derivative of the gas formation volume factor with respect to pressure."""
-
-    drs_dp: NumberArray[OneDimension]
-    """Derivative of the solution gas-oil ratio with respect to pressure."""
-
-    drv_dp: NumberArray[OneDimension]
-    """Derivative of the vaporized oil-gas ratio with respect to pressure."""
+UNKNOWN_SUFFIXES = ("p", "sw", "sg")
+"""Suffix of a derivative against each unknown, in the order of the last axis of `ConnectionDerivatives`."""
 
 
 def compile_connection_derivatives(
@@ -620,37 +608,27 @@ def compile_connection_derivatives(
     resolved_dtype = np.dtype(dtype) if dtype is not None else get_dtype()
     count = len(connection_samples)
     missing = ConnectionSampleDerivatives()
+    sample_derivatives = [
+        missing if sample.derivatives is None else sample.derivatives
+        for sample in connection_samples
+    ]
 
-    def gather(
-        read: typing.Callable[[ConnectionSampleDerivatives], Number],
-    ) -> NumberArray[OneDimension]:
-        return typing.cast(
-            "NumberArray[OneDimension]",
-            np.fromiter(
-                (
-                    read(missing if sample.derivatives is None else sample.derivatives)
-                    for sample in connection_samples
-                ),
-                resolved_dtype,
-                count,
-            ),
-        )
+    def pack(prefixes: typing.Sequence[str]) -> NumberArray[ThreeDimensions]:
+        packed = np.empty((count, len(prefixes), 3), dtype=resolved_dtype)
+        for index, derivatives in enumerate(sample_derivatives):
+            for row, prefix in enumerate(prefixes):
+                for column, suffix in enumerate(UNKNOWN_SUFFIXES):
+                    packed[index, row, column] = getattr(derivatives, f"{prefix}_d{suffix}")
+        return typing.cast("NumberArray[ThreeDimensions]", packed)
 
     return ConnectionDerivatives(
-        dʎo_dp=gather(lambda d: d.dʎo_dp),
-        dʎo_dsw=gather(lambda d: d.dʎo_dsw),
-        dʎo_dsg=gather(lambda d: d.dʎo_dsg),
-        dʎw_dp=gather(lambda d: d.dʎw_dp),
-        dʎw_dsw=gather(lambda d: d.dʎw_dsw),
-        dʎw_dsg=gather(lambda d: d.dʎw_dsg),
-        dʎg_dp=gather(lambda d: d.dʎg_dp),
-        dʎg_dsw=gather(lambda d: d.dʎg_dsw),
-        dʎg_dsg=gather(lambda d: d.dʎg_dsg),
-        dbo_dp=gather(lambda d: d.dbo_dp),
-        dbw_dp=gather(lambda d: d.dbw_dp),
-        dbg_dp=gather(lambda d: d.dbg_dp),
-        drs_dp=gather(lambda d: d.drs_dp),
-        drv_dp=gather(lambda d: d.drv_dp),
+        ds_dx=pack(("dso", "dsw", "dsg")),
+        dʎ_dx=pack(("dʎo", "dʎw", "dʎg")),
+        db_dx=pack(("dbo", "dbw", "dbg")),
+        dr_dx=pack(("drs", "drv")),
+        drho_dx=pack(("drho_o", "drho_w", "drho_g")),
+        dmu_dx=pack(("dmu_o", "dmu_w", "dmu_g")),
+        dsigma_dx=typing.cast("NumberArray[TwoDimensions]", pack(("dsigma",))[:, 0, :]),
     )
 
 

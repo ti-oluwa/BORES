@@ -398,7 +398,9 @@ class PhaseOptions:
     Held on `RunSpec.phase_options`.
     """
 
-    phase_appearance_tolerance: Number = attrs.field(default=1e-6, validator=attrs.validators.ge(0))
+    phase_appearance_tolerance: Number = attrs.field(
+        default=1e-6, validator=attrs.validators.ge(0)
+    )
     """
     Tolerance for determining phase appearance/disappearance based on saturation levels.
 

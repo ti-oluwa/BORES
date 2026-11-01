@@ -294,6 +294,28 @@ class DerivativeScratch(typing.NamedTuple):
     dpc_dbhp: NumberArray[OneDimension]
     """Shape `(n,)`. How each connection's pressure changes with the reference pressure."""
 
+    dpc_dx: NumberArray[OneDimension]
+    """
+    Shape `(n, size)`. How each connection's pressure changes with the unknowns of every
+    connection's cell, through the fluid properties the wellbore pressure is computed from, with
+    the rates held fixed. Entry `(i, 3 * k + v)` is unknown `v` of connection `k`'s cell.
+    """
+
+    fluids: NumberArray[OneDimension]
+    """
+    Shape `(19, n)`. A copy of the well's connection fluids, one row per `ConnectionFluids` field in
+    its order, which the fluid properties are shifted in while differencing the wellbore walk.
+    """
+
+    fluid_base: NumberArray[OneDimension]
+    """Shape `(19,)`. One connection's fluid properties as they were before being shifted."""
+
+    fluid_direction: NumberArray[OneDimension]
+    """
+    Shape `(19,)`. How each fluid property of one connection changes with one of its cell's
+    unknowns, in the order of `ConnectionFluids`.
+    """
+
     dq_dpc: NumberArray[OneDimension]
     """Shape `(n, 3)`. Each connection's rates against the pressure in the wellbore beside it."""
 
@@ -353,6 +375,10 @@ def build_derivative_scratch(*, max_connections: Integer) -> DerivativeScratch:
         backward_pressures=buffer(size * count),
         dpc_dq=buffer(count * size),
         dpc_dbhp=buffer(count),
+        dpc_dx=buffer(count * size),
+        fluids=buffer(19 * count),
+        fluid_base=buffer(19),
+        fluid_direction=buffer(19),
         dq_dpc=buffer(count * 3),
         dq_dx_direct=buffer(count * 9),
         dq_dqg=buffer(count * 3),
@@ -462,8 +488,9 @@ class WellsWorkspace(typing.NamedTuple):
     connection `i`. Column `3 * k + v` is unknown `v` (pressure, water saturation, gas
     saturation) of connection `k`'s cell. These are total derivatives: they include the change
     in the pressure at every connection that the change in rate makes through the wellbore, the
-    non-Darcy correction, and the reversed connections' dependence on the producing ones, with
-    the well's bottom-hole pressure held fixed. A connection that is not flowing has zero
+    change in that pressure that the cell's fluid properties make, the non-Darcy correction, and
+    the reversed connections' dependence on the producing ones, with the well's bottom-hole
+    pressure held fixed. A connection that is not flowing has zero
     rows and columns. `get_well_derivatives` reads a well's block.
     """
 

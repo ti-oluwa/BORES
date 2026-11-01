@@ -56,13 +56,49 @@ WellLevel = typing.Literal["well", "perforation"]
 
 class ConnectionSampleDerivatives(typing.NamedTuple):
     """
-    How the fluid properties at one connected cell change with the cell's primary unknowns:
-    pressure, water saturation and gas saturation, with oil saturation following as one minus the
-    other two. Each derivative is the total derivative with respect to that unknown, with the
-    other two unknowns held fixed.
+    How the fluid properties at one connected cell change with the cell's three primary unknowns.
 
-    Every field is `NaN` unless given, and a `NaN` makes the well derivatives that depend on it `NaN`.
+    The unknowns are pressure `p`, water saturation `sw` and a third unknown `sg`, which is gas
+    saturation, or whatever the solver switches to in its place where gas is not present (the
+    dissolved gas-oil ratio, for instance). Each derivative is the total derivative with respect to
+    that unknown, with the other two held fixed, so a property that depends on the third unknown
+    only through a switched variable still has the right derivative here.
+
+    The mobilities, formation volume factors and gas-oil ratios set the rate at the surface. The
+    densities, viscosities and surface tension set the pressure in the wellbore beside the
+    connection, which the rate in turn depends on.
+
+    Every field is `NaN` unless given, and a `NaN` makes every well derivative that depends on it
+    `NaN`. The saturation derivatives are the exception: they default to the values that hold when
+    the unknowns are the saturations themselves.
     """
+
+    dso_dp: Number = 0.0
+    """Derivative of the oil saturation with respect to pressure. The default holds unless the solver switches its third unknown."""
+
+    dso_dsw: Number = -1.0
+    """Derivative of the oil saturation with respect to water saturation. The default holds unless the solver switches its third unknown."""
+
+    dso_dsg: Number = -1.0
+    """Derivative of the oil saturation with respect to gas saturation. The default holds unless the solver switches its third unknown."""
+
+    dsw_dp: Number = 0.0
+    """Derivative of the water saturation with respect to pressure. The default holds unless the solver switches its third unknown."""
+
+    dsw_dsw: Number = 1.0
+    """Derivative of the water saturation with respect to water saturation. The default holds unless the solver switches its third unknown."""
+
+    dsw_dsg: Number = 0.0
+    """Derivative of the water saturation with respect to gas saturation. The default holds unless the solver switches its third unknown."""
+
+    dsg_dp: Number = 0.0
+    """Derivative of the gas saturation with respect to pressure. The default holds unless the solver switches its third unknown."""
+
+    dsg_dsw: Number = 0.0
+    """Derivative of the gas saturation with respect to water saturation. The default holds unless the solver switches its third unknown."""
+
+    dsg_dsg: Number = 1.0
+    """Derivative of the gas saturation with respect to gas saturation. The default holds unless the solver switches its third unknown."""
 
     dʎo_dp: Number = math.nan
     """Derivative of the oil mobility with respect to pressure."""
@@ -94,17 +130,110 @@ class ConnectionSampleDerivatives(typing.NamedTuple):
     dbo_dp: Number = math.nan
     """Derivative of the oil formation volume factor with respect to pressure."""
 
+    dbo_dsw: Number = math.nan
+    """Derivative of the oil formation volume factor with respect to water saturation."""
+
+    dbo_dsg: Number = math.nan
+    """Derivative of the oil formation volume factor with respect to gas saturation."""
+
     dbw_dp: Number = math.nan
     """Derivative of the water formation volume factor with respect to pressure."""
+
+    dbw_dsw: Number = math.nan
+    """Derivative of the water formation volume factor with respect to water saturation."""
+
+    dbw_dsg: Number = math.nan
+    """Derivative of the water formation volume factor with respect to gas saturation."""
 
     dbg_dp: Number = math.nan
     """Derivative of the gas formation volume factor with respect to pressure."""
 
+    dbg_dsw: Number = math.nan
+    """Derivative of the gas formation volume factor with respect to water saturation."""
+
+    dbg_dsg: Number = math.nan
+    """Derivative of the gas formation volume factor with respect to gas saturation."""
+
     drs_dp: Number = math.nan
     """Derivative of the solution gas-oil ratio with respect to pressure."""
 
+    drs_dsw: Number = math.nan
+    """Derivative of the solution gas-oil ratio with respect to water saturation."""
+
+    drs_dsg: Number = math.nan
+    """Derivative of the solution gas-oil ratio with respect to gas saturation."""
+
     drv_dp: Number = math.nan
     """Derivative of the vaporized oil-gas ratio with respect to pressure."""
+
+    drv_dsw: Number = math.nan
+    """Derivative of the vaporized oil-gas ratio with respect to water saturation."""
+
+    drv_dsg: Number = math.nan
+    """Derivative of the vaporized oil-gas ratio with respect to gas saturation."""
+
+    drho_o_dp: Number = math.nan
+    """Derivative of the oil density with respect to pressure."""
+
+    drho_o_dsw: Number = math.nan
+    """Derivative of the oil density with respect to water saturation."""
+
+    drho_o_dsg: Number = math.nan
+    """Derivative of the oil density with respect to gas saturation."""
+
+    drho_w_dp: Number = math.nan
+    """Derivative of the water density with respect to pressure."""
+
+    drho_w_dsw: Number = math.nan
+    """Derivative of the water density with respect to water saturation."""
+
+    drho_w_dsg: Number = math.nan
+    """Derivative of the water density with respect to gas saturation."""
+
+    drho_g_dp: Number = math.nan
+    """Derivative of the gas density with respect to pressure."""
+
+    drho_g_dsw: Number = math.nan
+    """Derivative of the gas density with respect to water saturation."""
+
+    drho_g_dsg: Number = math.nan
+    """Derivative of the gas density with respect to gas saturation."""
+
+    dmu_o_dp: Number = math.nan
+    """Derivative of the oil viscosity with respect to pressure."""
+
+    dmu_o_dsw: Number = math.nan
+    """Derivative of the oil viscosity with respect to water saturation."""
+
+    dmu_o_dsg: Number = math.nan
+    """Derivative of the oil viscosity with respect to gas saturation."""
+
+    dmu_w_dp: Number = math.nan
+    """Derivative of the water viscosity with respect to pressure."""
+
+    dmu_w_dsw: Number = math.nan
+    """Derivative of the water viscosity with respect to water saturation."""
+
+    dmu_w_dsg: Number = math.nan
+    """Derivative of the water viscosity with respect to gas saturation."""
+
+    dmu_g_dp: Number = math.nan
+    """Derivative of the gas viscosity with respect to pressure."""
+
+    dmu_g_dsw: Number = math.nan
+    """Derivative of the gas viscosity with respect to water saturation."""
+
+    dmu_g_dsg: Number = math.nan
+    """Derivative of the gas viscosity with respect to gas saturation."""
+
+    dsigma_dp: Number = math.nan
+    """Derivative of the gas-liquid surface tension with respect to pressure."""
+
+    dsigma_dsw: Number = math.nan
+    """Derivative of the gas-liquid surface tension with respect to water saturation."""
+
+    dsigma_dsg: Number = math.nan
+    """Derivative of the gas-liquid surface tension with respect to gas saturation."""
 
 
 class ConnectionSample(typing.NamedTuple):

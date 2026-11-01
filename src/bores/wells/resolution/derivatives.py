@@ -8,8 +8,13 @@ on the rates of the connections it is fed by, through the weight and friction of
 So every rate depends on every other, and the derivatives are those of the whole set of
 equations, found by implicit differentiation of the system the fixed-point solve settles on. Only
 the pressure change that a change in rate makes in the wellbore is found numerically, by
-differencing the wellbore correlation itself, so that every correlation is covered. Everything
-else is analytic.
+differencing the wellbore correlation itself, so that every correlation is covered. That
+covers both how the pressure in the wellbore responds to the rates and how it responds to the
+fluid properties at the connections, which change with the cells' pressure and saturations.
+Everything else is analytic.
+
+The tubing head pressure's own dependence on the cell fluids, which only a VFP table or a tubing
+fluid table has, through its datum shift and its zero-flow density, is not included.
 
 The computation is compiled end to end and works in the buffers of `DerivativeScratch`, so it
 allocates nothing per well beyond what the linear solve itself needs.
@@ -31,7 +36,15 @@ from bores.types import (
     OneDimension,
     PhaseValues,
 )
-from bores.wells.compile import CompiledWellSystem, WellKind
+from bores.wells.compile import (
+    UNSET_INT,
+    CompiledWellSystem,
+    InjectorControlModeTag,
+    LimitKind,
+    ProducerControlModeTag,
+    RateQuantityTag,
+    WellKind,
+)
 from bores.wells.hydraulics.base import (
     ConnectionDerivatives,
     ConnectionFluids,
@@ -68,7 +81,12 @@ from bores.wells.hydraulics.woldesemayat_ghajar import (
     walk_perforation_pressures_from_table as walk_woldesemayat_ghajar_from_table,
 )
 from bores.wells.resolution.engine import build_well_perforation_workspace
-from bores.wells.resolution.solvers import ALL_PHASES, get_fixed_point_setup, phase_mask
+from bores.wells.resolution.solvers import (
+    ALL_PHASES,
+    RATE_QUANTITY_PHASES,
+    get_fixed_point_setup,
+    phase_mask,
+)
 from bores.wells.resolution.spec import WellControlSpec
 from bores.wells.resolution.tubing import (
     attach_flowing_fluid,
@@ -83,9 +101,11 @@ from bores.wells.workspace import (
 )
 
 __all__ = [
+    "ControlDerivatives",
     "WalkSetup",
     "WellDerivatives",
     "compute_well_derivatives",
+    "get_control_derivatives",
     "get_well_derivatives",
 ]
 
@@ -312,9 +332,10 @@ def differentiate_pressures(
     reference pressure, by differencing the pressure walk.
 
     Each rate is differenced centrally, except one too small to step down from without changing
-    direction, which is differenced forward. The walk takes the nested `ConnectionFluids` of the
-    workspace, which numba cannot hand to the threads of a parallel loop, so the rates are
-    differenced one after another.
+    direction, which is differenced forward. The rates are differenced one after another. Running
+    them in parallel gives identical numbers, but needs the walk adapters to take the fluid arrays
+    individually and rebuild `ConnectionFluids` inside the loop, and only pays off for a well with
+    many connections on a machine with many cores.
 
     :param evaluate: The adapter for the kind of walk, `evaluate_*_walk`.
     :param walk: The walk function the adapter calls.
@@ -434,6 +455,157 @@ def differentiate_pressures(
         dpc_dbhp[index] = (forward[0, index] - backward[0, index]) / (2.0 * reference_step)
 
 
+FLUID_FIELDS = 19
+"""Number of fields of `ConnectionFluids`, the rows of `DerivativeScratch.fluids`."""
+
+PRESSURE_FIELD = 0
+"""Row of the cell pressure in `DerivativeScratch.fluids`."""
+
+WATER_SATURATION_FIELD = 9
+"""Row of the water saturation in `DerivativeScratch.fluids`."""
+
+GAS_SATURATION_FIELD = 10
+"""Row of the gas saturation in `DerivativeScratch.fluids`."""
+
+
+@numba.njit(cache=True)
+def fill_fluid_direction(
+    direction: NumberArray[OneDimension],
+    derivatives: ConnectionDerivatives,
+    connection: Integer,
+    unknown: Integer,
+) -> None:
+    """
+    Writes how every fluid property of one connection changes with one unknown of its cell, in
+    the order of the fields of `ConnectionFluids`.
+
+    :param direction: Output, `FLUID_FIELDS` entries.
+    :param derivatives: How the fluid properties change with the cells' unknowns.
+    :param connection: Index of the connection.
+    :param unknown: Which unknown: 0 pressure, 1 water saturation, 2 the third unknown.
+    """
+    direction[0] = 1.0 if unknown == 0 else 0.0
+    direction[1] = derivatives.dsigma_dx[connection, unknown]
+    for phase in range(3):
+        direction[2 + phase] = derivatives.drho_dx[connection, phase, unknown]
+        direction[5 + phase] = derivatives.dmu_dx[connection, phase, unknown]
+        direction[8 + phase] = derivatives.ds_dx[connection, phase, unknown]
+        direction[11 + phase] = derivatives.dʎ_dx[connection, phase, unknown]
+        direction[14 + phase] = derivatives.db_dx[connection, phase, unknown]
+    direction[17] = derivatives.dr_dx[connection, 0, unknown]
+    direction[18] = derivatives.dr_dx[connection, 1, unknown]
+
+
+@numba.njit(cache=True)
+def differentiate_pressures_with_cells(
+    evaluate,
+    walk,
+    setup: WalkSetup,
+    workspace: PerforationWorkspace,
+    derivatives: ConnectionDerivatives,
+    count: Integer,
+    reference_pressure: Number,
+    oil_rates: NumberArray[OneDimension],
+    water_rates: NumberArray[OneDimension],
+    gas_rates: NumberArray[OneDimension],
+    fluids: NumberArray[AnyDimension],
+    fluid_base: NumberArray[OneDimension],
+    fluid_direction: NumberArray[OneDimension],
+    forward_pressures: NumberArray[OneDimension],
+    backward_pressures: NumberArray[OneDimension],
+    dpc_dx_buffer: NumberArray[OneDimension],
+) -> None:
+    """
+    Finds how the pressure at every connection changes with the unknowns of every connection's
+    cell through the fluid properties the wellbore pressure is computed from, with the rates held
+    fixed, by differencing the pressure walk.
+
+    The walk reads every field of the connection fluids, so for each connection and each of its
+    cell's unknowns all of that connection's fluid properties are shifted together, each along its
+    own derivative with respect to the unknown. The difference of the walk over that shift is then
+    the derivative with respect to the unknown. An unknown too small to step down from without
+    leaving its valid range, such as a gas saturation of zero, is differenced forward.
+
+    :param evaluate: The adapter for the kind of walk, `evaluate_*_walk`.
+    :param walk: The walk function the adapter calls.
+    :param setup: How the walk is set up.
+    :param workspace: The well's perforation workspace, whose connection fluids are the rows of
+        `fluids`.
+    :param derivatives: How the fluid properties change with the cells' unknowns.
+    :param count: Number of flowing connections.
+    :param reference_pressure: The reference pressure the well was solved at.
+    :param oil_rates: Buffer holding the oil rate at each connection in its first `count` entries.
+    :param water_rates: As `oil_rates`, for water.
+    :param gas_rates: As `oil_rates`, for gas.
+    :param fluids: Shape `(FLUID_FIELDS, count)`. The memory of the workspace's connection fluids,
+        shifted in place and restored.
+    :param fluid_base: Buffer of `FLUID_FIELDS` entries.
+    :param fluid_direction: Buffer of `FLUID_FIELDS` entries.
+    :param forward_pressures: Buffer of at least `count` entries.
+    :param backward_pressures: Buffer of at least `count` entries.
+    :param dpc_dx_buffer: Output buffer, filled as shape `(count, 3 * count)`.
+    """
+    size = 3 * count
+    dpc_dx = dpc_dx_buffer[: count * size].reshape(count, size)
+    base_oil = oil_rates[:count]
+    base_water = water_rates[:count]
+    base_gas = gas_rates[:count]
+    forward = forward_pressures[:count]
+    backward = backward_pressures[:count]
+
+    for connection in range(count):
+        for field in range(FLUID_FIELDS):
+            fluid_base[field] = fluids[field, connection]
+        for unknown in range(3):
+            fill_fluid_direction(
+                direction=fluid_direction,
+                derivatives=derivatives,
+                connection=connection,
+                unknown=unknown,
+            )
+            if unknown == 0:
+                value = fluid_base[PRESSURE_FIELD]
+            elif unknown == 1:
+                value = fluid_base[WATER_SATURATION_FIELD]
+            else:
+                value = fluid_base[GAS_SATURATION_FIELD]
+            step = get_step(value=value, scale=1.0)
+            lower = -step if abs(value) > 2.0 * step else 0.0
+
+            for field in range(FLUID_FIELDS):
+                fluids[field, connection] = fluid_base[field] + step * fluid_direction[field]
+            evaluate(
+                walk=walk,
+                setup=setup,
+                workspace=workspace,
+                oil_rates=base_oil,
+                water_rates=base_water,
+                gas_rates=base_gas,
+                reference_pressure=reference_pressure,
+                pressures=forward,
+            )
+            for field in range(FLUID_FIELDS):
+                fluids[field, connection] = fluid_base[field] + lower * fluid_direction[field]
+            evaluate(
+                walk=walk,
+                setup=setup,
+                workspace=workspace,
+                oil_rates=base_oil,
+                water_rates=base_water,
+                gas_rates=base_gas,
+                reference_pressure=reference_pressure,
+                pressures=backward,
+            )
+            for field in range(FLUID_FIELDS):
+                fluids[field, connection] = fluid_base[field]
+
+            denominator = step - lower
+            for index in range(count):
+                dpc_dx[index, 3 * connection + unknown] = (forward[index] - backward[index]) / (
+                    denominator
+                )
+
+
 @numba.njit(cache=True, parallel=True)
 def compute_connection_partials(
     workspace: PerforationWorkspace,
@@ -497,15 +669,7 @@ def compute_connection_partials(
     conductivities = workspace.connection_conductivities
     d_factor = workspace.d_factor
     allows_crossflow = workspace.allows_crossflow
-    dʎo_dp = derivatives.dʎo_dp
-    dʎo_dsw = derivatives.dʎo_dsw
-    dʎo_dsg = derivatives.dʎo_dsg
-    dʎw_dp = derivatives.dʎw_dp
-    dʎw_dsw = derivatives.dʎw_dsw
-    dʎw_dsg = derivatives.dʎw_dsg
-    dʎg_dp = derivatives.dʎg_dp
-    dʎg_dsw = derivatives.dʎg_dsw
-    dʎg_dsg = derivatives.dʎg_dsg
+    dʎ_dx = derivatives.dʎ_dx
     size = 3 * count
     sign = -1.0 if is_injector else 1.0
     relevant = (relevant_oil > 0.0, relevant_water > 0.0, relevant_gas > 0.0)
@@ -546,15 +710,15 @@ def compute_connection_partials(
             gas_mobilities[index],
         )
         dʎ = (
-            dʎo_dp[index],
-            dʎo_dsw[index],
-            dʎo_dsg[index],
-            dʎw_dp[index],
-            dʎw_dsw[index],
-            dʎw_dsg[index],
-            dʎg_dp[index],
-            dʎg_dsw[index],
-            dʎg_dsg[index],
+            dʎ_dx[index, 0, 0],
+            dʎ_dx[index, 0, 1],
+            dʎ_dx[index, 0, 2],
+            dʎ_dx[index, 1, 0],
+            dʎ_dx[index, 1, 1],
+            dʎ_dx[index, 1, 2],
+            dʎ_dx[index, 2, 0],
+            dʎ_dx[index, 2, 1],
+            dʎ_dx[index, 2, 2],
         )
         factor = radial_flow_constant * well_indices[index]
         dwi_dqg = 0.0
@@ -657,6 +821,7 @@ def solve_rate_derivatives(
     dq_dqg: NumberArray[OneDimension],
     dq_dq_composition_buffer: NumberArray[OneDimension],
     dpc_dq_buffer: NumberArray[OneDimension],
+    dpc_dx_buffer: NumberArray[OneDimension],
     dpc_dbhp: NumberArray[OneDimension],
     system_buffer: NumberArray[OneDimension],
     right_hand_side_buffer: NumberArray[OneDimension],
@@ -678,6 +843,7 @@ def solve_rate_derivatives(
     :param dq_dqg: As `compute_connection_partials` fills it.
     :param dq_dq_composition_buffer: As `compute_connection_partials` fills it.
     :param dpc_dq_buffer: As `differentiate_pressures` fills it.
+    :param dpc_dx_buffer: As `differentiate_pressures_with_cells` fills it.
     :param dpc_dbhp: As `differentiate_pressures` fills it.
     :param system_buffer: Buffer of at least `(3 * count) ** 2` entries.
     :param right_hand_side_buffer: Buffer of at least `3 * count * (3 * count + 1)` entries.
@@ -689,6 +855,7 @@ def solve_rate_derivatives(
     size = 3 * count
     dpc_dq = dpc_dq_buffer[: count * size].reshape(count, size)
     dq_dq_composition = dq_dq_composition_buffer[: size * size].reshape(size, size)
+    dpc_dx = dpc_dx_buffer[: count * size].reshape(count, size)
     dq_dx_direct = dq_dx_direct_buffer[: 3 * size]
     system = system_buffer[: size * size].reshape(size, size)
     right_hand_side = right_hand_side_buffer[: size * (size + 1)].reshape(size, size + 1)
@@ -700,12 +867,12 @@ def solve_rate_derivatives(
             system[row, column] = (
                 -dq_dq_composition[row, column] - dq_dpc_row * dpc_dq[index, column]
             )
-            right_hand_side[row, column] = 0.0
+            right_hand_side[row, column] = dq_dpc_row * dpc_dx[index, column]
         system[row, row] += 1.0
         system[row, 3 * index + 2] -= dq_dqg[row]
         right_hand_side[row, size] = dq_dpc_row * dpc_dbhp[index]
         for unknown in range(3):
-            right_hand_side[row, 3 * index + unknown] = dq_dx_direct[3 * row + unknown]
+            right_hand_side[row, 3 * index + unknown] += dq_dx_direct[3 * row + unknown]
 
     solution = solve_linear_system(system=system, right_hand_side=right_hand_side)
 
@@ -758,11 +925,8 @@ def convert_to_surface(
     gas_volume_factors = fluids.gas_formation_volume_factors
     solution_ratios = workspace.dissolved_gas_ratios
     vaporized_ratios = workspace.vaporized_oil_ratios
-    oil_volume_factor_slopes = derivatives.dbo_dp
-    water_volume_factor_slopes = derivatives.dbw_dp
-    gas_volume_factor_slopes = derivatives.dbg_dp
-    solution_ratio_slopes = derivatives.drs_dp
-    vaporized_ratio_slopes = derivatives.drv_dp
+    db_dx = derivatives.db_dx
+    dr_dx = derivatives.dr_dx
     size = 3 * count
     factor = workspace.stb_to_volume_factor
     dq_dx = dq_dx_buffer[: size * size].reshape(size, size)
@@ -791,17 +955,6 @@ def convert_to_surface(
 
         surface_oil_base = oil_rate * oil_to_oil
         free_gas_base = gas_rate * gas_to_gas
-        dqo_base_dp = -oil_rate * oil_volume_factor_slopes[index] / (oil_volume_factor**2 * factor)
-        dqg_base_dp = -gas_rate * gas_volume_factor_slopes[index] / gas_volume_factor**2
-        dqs_o_dp_explicit = dqo_base_dp + carries * (
-            vaporized_ratio_slopes[index] * free_gas_base + vaporized_ratio * dqg_base_dp
-        )
-        dqs_w_dp_explicit = (
-            -water_rate * water_volume_factor_slopes[index] / (water_volume_factor**2 * factor)
-        )
-        dqs_g_dp_explicit = dqg_base_dp + carries * (
-            solution_ratio_slopes[index] * surface_oil_base + solution_ratio * dqo_base_dp
-        )
 
         oil_row = 3 * index
         for column in range(size):
@@ -812,9 +965,18 @@ def convert_to_surface(
             dqs_dx[oil_row + 2, column] = (
                 oil_to_gas * dq_dx[oil_row, column] + gas_to_gas * dq_dx[oil_row + 2, column]
             )
-        dqs_dx[oil_row, oil_row] += dqs_o_dp_explicit
-        dqs_dx[oil_row + 1, oil_row] += dqs_w_dp_explicit
-        dqs_dx[oil_row + 2, oil_row] += dqs_g_dp_explicit
+        for unknown in range(3):
+            dqo_base_dx = -oil_rate * db_dx[index, 0, unknown] / (oil_volume_factor**2 * factor)
+            dqg_base_dx = -gas_rate * db_dx[index, 2, unknown] / gas_volume_factor**2
+            dqs_dx[oil_row, oil_row + unknown] += dqo_base_dx + carries * (
+                dr_dx[index, 1, unknown] * free_gas_base + vaporized_ratio * dqg_base_dx
+            )
+            dqs_dx[oil_row + 1, oil_row + unknown] += (
+                -water_rate * db_dx[index, 1, unknown] / (water_volume_factor**2 * factor)
+            )
+            dqs_dx[oil_row + 2, oil_row + unknown] += dqg_base_dx + carries * (
+                dr_dx[index, 0, unknown] * surface_oil_base + solution_ratio * dqo_base_dx
+            )
         dqs_dbhp[oil_row] = oil_to_oil * dq_dbhp[oil_row] + gas_to_oil * dq_dbhp[oil_row + 2]
         dqs_dbhp[oil_row + 1] = water_to_water * dq_dbhp[oil_row + 1]
         dqs_dbhp[oil_row + 2] = oil_to_gas * dq_dbhp[oil_row] + gas_to_gas * dq_dbhp[oil_row + 2]
@@ -954,6 +1116,138 @@ class WellDerivatives(typing.NamedTuple):
     """Shape `(n, 3)`. The well's tubing head pressure against each cell's unknowns."""
 
 
+class ControlDerivatives(typing.NamedTuple):
+    """
+    The derivatives of the quantity a well is controlled on, as the row of the well's control
+    equation `quantity - target = 0` in a fully implicit Jacobian.
+    """
+
+    quantity: str
+    """
+    What the well is controlled on: `"bhp"`, `"thp"`, `"surface_rate"`, `"reservoir_rate"`, or
+    `"none"` for a well that is shut, shut in by an economic limit, or has no control.
+    """
+
+    dr_dx: NumberArray[AnyDimension]
+    """
+    Shape `(n, 3)`, over all of the well's compiled connections. How the quantity changes with the
+    pressure, water saturation and third unknown of each connection's cell.
+    """
+
+    dr_dbhp: Number
+    """How the quantity changes with the well's bottom-hole pressure."""
+
+
+def get_control_derivatives(
+    *, compiled_system: CompiledWellSystem, workspace: WellsWorkspace, well_row: Integer
+) -> ControlDerivatives:
+    """
+    Reads the derivatives of the quantity a well is held to, which is its binding limit if one
+    limited it in the last solve, else the control it was given, else the control its group
+    allocated it.
+
+    A bottom-hole pressure control depends only on the bottom-hole pressure. A tubing head
+    pressure control depends on the rates, through the tubing. A rate control is the sum of the
+    well's derivatives over the phases it counts, in surface or reservoir conditions. The
+    derivatives must have been computed by `compute_well_derivatives`.
+
+    :param compiled_system: The compiled well system `workspace` was resolved against.
+    :param workspace: A workspace whose derivatives have been computed.
+    :param well_row: The well's row in `compiled_system`.
+    :returns: The derivatives of the quantity the well is held to.
+    """
+    perforations = compiled_system.perforations
+    start, end = (
+        perforations.well_offsets[well_row],
+        perforations.well_offsets[well_row + 1],
+    )
+    count = end - start
+    inactive = ControlDerivatives(quantity="none", dr_dx=np.zeros((count, 3)), dr_dbhp=0.0)
+    if math.isnan(workspace.bhps[well_row]) or workspace.economic_shutins[well_row]:
+        return inactive
+
+    controls = compiled_system.controls
+    is_injector = bool(controls.well_kinds[well_row] == WellKind.INJECTOR)
+    limit_row = workspace.active_limit_rows[well_row]
+
+    quantity: str
+    phases = ALL_PHASES
+    if limit_row != UNSET_INT:
+        kind = controls.limits.kinds[limit_row]
+        if kind == LimitKind.BHP:
+            quantity = "bhp"
+        elif kind == LimitKind.THP:
+            quantity = "thp"
+        elif kind == LimitKind.RATE:
+            rate_quantity = controls.limits.quantities[limit_row]
+            phases = RATE_QUANTITY_PHASES[rate_quantity]  # type: ignore[arg-type]
+            quantity = (
+                "reservoir_rate" if rate_quantity == RateQuantityTag.RESERVOIR else "surface_rate"
+            )
+        else:
+            return inactive
+    else:
+        mode = controls.control_modes[well_row]
+        group_mode = workspace.group_control_modes[well_row]
+        group_tag = InjectorControlModeTag.GROUP if is_injector else ProducerControlModeTag.GROUP
+        if mode == group_tag and group_mode != UNSET_INT:
+            mode = group_mode
+        if is_injector:
+            injected = phase_mask(controls.injected_phases[well_row])
+            if mode == InjectorControlModeTag.BHP:
+                quantity = "bhp"
+            elif mode == InjectorControlModeTag.THP:
+                quantity = "thp"
+            elif mode == InjectorControlModeTag.RATE:
+                quantity, phases = "surface_rate", injected
+            elif mode == InjectorControlModeTag.RESERVOIR_VOLUME_RATE:
+                quantity, phases = "reservoir_rate", injected
+            else:
+                return inactive
+        elif mode == ProducerControlModeTag.BHP:
+            quantity = "bhp"
+        elif mode == ProducerControlModeTag.THP:
+            quantity = "thp"
+        elif mode == ProducerControlModeTag.RESERVOIR_VOLUME_RATE:
+            quantity = "reservoir_rate"
+        elif mode in (
+            ProducerControlModeTag.OIL_RATE,
+            ProducerControlModeTag.WATER_RATE,
+            ProducerControlModeTag.GAS_RATE,
+            ProducerControlModeTag.LIQUID_RATE,
+        ):
+            quantity = "surface_rate"
+            phases = RATE_QUANTITY_PHASES[
+                {
+                    ProducerControlModeTag.OIL_RATE: RateQuantityTag.OIL,
+                    ProducerControlModeTag.WATER_RATE: RateQuantityTag.WATER,
+                    ProducerControlModeTag.GAS_RATE: RateQuantityTag.GAS,
+                    ProducerControlModeTag.LIQUID_RATE: RateQuantityTag.LIQUID,
+                }[mode]
+            ]
+        else:
+            return inactive
+
+    if quantity == "bhp":
+        return ControlDerivatives(quantity=quantity, dr_dx=np.zeros((count, 3)), dr_dbhp=1.0)
+    if quantity == "thp":
+        return ControlDerivatives(
+            quantity=quantity,
+            dr_dx=workspace.dthp_dx[start:end],
+            dr_dbhp=workspace.dthp_dbhp[well_row],
+        )
+    weights = np.array([phases.oil, phases.water, phases.gas])
+    if quantity == "reservoir_rate":
+        dq_dx, dq_dbhp = workspace.dq_dx_well[start:end], workspace.dq_dbhp_well[well_row]
+    else:
+        dq_dx, dq_dbhp = workspace.dqs_dx_well[start:end], workspace.dqs_dbhp_well[well_row]
+    return ControlDerivatives(
+        quantity=quantity,
+        dr_dx=np.einsum("p,kpv->kv", weights, dq_dx),
+        dr_dbhp=weights @ dq_dbhp,
+    )
+
+
 def get_well_derivatives(
     *, compiled_system: CompiledWellSystem, workspace: WellsWorkspace, well_row: Integer
 ) -> WellDerivatives:
@@ -968,7 +1262,7 @@ def get_well_derivatives(
     """
     perforations = compiled_system.perforations
     start, end = perforations.well_offsets[well_row], perforations.well_offsets[well_row + 1]
-    count = int(end - start)
+    count = end - start
     block_start = workspace.derivative_offsets[well_row]
     block_end = workspace.derivative_offsets[well_row + 1]
     if block_end - block_start != (3 * count) ** 2:
@@ -1126,18 +1420,18 @@ def compute_well_derivatives(
 
     perforations = compiled_system.perforations
     start, end = (
-        int(perforations.well_offsets[well_row]),
-        int(perforations.well_offsets[well_row + 1]),
+        perforations.well_offsets[well_row],
+        perforations.well_offsets[well_row + 1],
     )
     n_compiled = end - start
-    block_start = int(workspace.derivative_offsets[well_row])
-    block_end = int(workspace.derivative_offsets[well_row + 1])
+    block_start = workspace.derivative_offsets[well_row]
+    block_end = workspace.derivative_offsets[well_row + 1]
     if block_end - block_start != (3 * n_compiled) ** 2:
         raise ValidationError(
             "This `WellsWorkspace` has no room for well derivatives. Build it with `well_offsets`."
         )
 
-    bhp = float(workspace.bhps[well_row])
+    bhp = workspace.bhps[well_row]
     active_open = compiled_system.get_flowing_connection_rows(well_row=well_row)
     count = len(active_open)
     if count == 0 or math.isnan(bhp) or workspace.economic_shutins[well_row]:
@@ -1152,9 +1446,9 @@ def compute_well_derivatives(
         workspace.dthp_dbhp[well_row] = math.nan
         workspace.dthp_dx[start:end] = math.nan
         return
-    if len(connection_derivatives.dʎo_dp) != count:
+    if len(connection_derivatives.dʎ_dx) != count:
         raise ValidationError(
-            f"`connection_derivatives` has {len(connection_derivatives.dʎo_dp)} "
+            f"`connection_derivatives` has {len(connection_derivatives.dʎ_dx)} "
             f"connections but the well has {count} flowing connections. They must match 1:1."
         )
 
@@ -1172,7 +1466,7 @@ def compute_well_derivatives(
     )
     derivatives = ConnectionDerivatives(
         *(
-            typing.cast("NumberArray[OneDimension]", np.asarray(array, dtype=np.float64))
+            typing.cast("NumberArray[AnyDimension]", np.asarray(array, dtype=np.float64))  # type: ignore[arg-type]
             for array in connection_derivatives
         )
     )
@@ -1205,6 +1499,13 @@ def compute_well_derivatives(
     )
 
     scratch = workspace.derivative_scratch
+    fluid_rows = scratch.fluids[: FLUID_FIELDS * count].reshape(FLUID_FIELDS, count)
+    for row, source in zip(fluid_rows, perforation_workspace.connection_fluids, strict=True):
+        np.copyto(row, source)
+
+    perforation_workspace = perforation_workspace._replace(
+        connection_fluids=ConnectionFluids(*fluid_rows)  # type: ignore[arg-type]
+    )
     np.take(
         workspace.connection_oil_rates, active_open, out=scratch.oil_rates[:count], mode="clip"
     )
@@ -1246,6 +1547,24 @@ def compute_well_derivatives(
         dpc_dq_buffer=scratch.dpc_dq,
         dpc_dbhp=scratch.dpc_dbhp,
     )
+    differentiate_pressures_with_cells(
+        evaluate=evaluate,
+        walk=walk,
+        setup=setup,
+        workspace=perforation_workspace,
+        derivatives=derivatives,
+        count=count,
+        reference_pressure=bhp,
+        oil_rates=scratch.oil_rates,
+        water_rates=scratch.water_rates,
+        gas_rates=scratch.gas_rates,
+        fluids=fluid_rows,
+        fluid_base=scratch.fluid_base,
+        fluid_direction=scratch.fluid_direction,
+        forward_pressures=scratch.forward_pressures,
+        backward_pressures=scratch.backward_pressures,
+        dpc_dx_buffer=scratch.dpc_dx,
+    )
     compute_connection_partials(
         workspace=perforation_workspace,
         derivatives=derivatives,
@@ -1272,6 +1591,7 @@ def compute_well_derivatives(
         dq_dqg=scratch.dq_dqg,
         dq_dq_composition_buffer=scratch.dq_dq_composition,
         dpc_dq_buffer=scratch.dpc_dq,
+        dpc_dx_buffer=scratch.dpc_dx,
         dpc_dbhp=scratch.dpc_dbhp,
         system_buffer=scratch.system,
         right_hand_side_buffer=scratch.right_hand_side,
@@ -1359,7 +1679,7 @@ def compute_well_derivatives(
     )
     if dthp_dq_connection:
         gradient = np.asarray(dthp_dq_connection)
-        dthp_dbhp += float(gradient @ dq_dbhp)
+        dthp_dbhp += gradient @ dq_dbhp
         dthp_dx += (gradient @ dq_dx).reshape(count, 3)
     workspace.dthp_dbhp[well_row] = dthp_dbhp
     workspace.dthp_dx[active_open] = dthp_dx
