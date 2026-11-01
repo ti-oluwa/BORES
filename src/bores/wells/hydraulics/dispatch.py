@@ -58,8 +58,8 @@ __all__ = [
 ]
 
 
-class PerforationPressuresFunction(typing.Protocol):
-    """A correlation function returning one pressure per perforation."""
+class PerforationPressuresSolver(typing.Protocol):
+    """A correlation returning one pressure per perforation."""
 
     def __call__(
         self,
@@ -69,8 +69,8 @@ class PerforationPressuresFunction(typing.Protocol):
     ) -> NumberArray[OneDimension]: ...
 
 
-class TubingHeadPressureFunction(typing.Protocol):
-    """A correlation function returning a single tubing head pressure."""
+class TubingHeadPressureSolver(typing.Protocol):
+    """A correlation returning a single tubing head pressure."""
 
     def __call__(
         self,
@@ -80,7 +80,7 @@ class TubingHeadPressureFunction(typing.Protocol):
     ) -> Number: ...
 
 
-PERFORATION_PRESSURE_FUNCTIONS: dict[str, PerforationPressuresFunction] = {
+PERFORATION_PRESSURE_SOLVERS: dict[str, PerforationPressuresSolver] = {
     "homogeneous": compute_homogeneous_perforation_pressures,
     "beggs_brill": compute_beggs_brill_perforation_pressures,
     "beggs_and_brill": compute_beggs_brill_perforation_pressures,
@@ -89,7 +89,7 @@ PERFORATION_PRESSURE_FUNCTIONS: dict[str, PerforationPressuresFunction] = {
     "woldesemayat_ghajar": compute_woldesemayat_ghajar_perforation_pressures,
 }
 
-TUBING_HEAD_PRESSURE_FUNCTIONS: dict[str, TubingHeadPressureFunction] = {
+THP_SOLVERS: dict[str, TubingHeadPressureSolver] = {
     "homogeneous": compute_homogeneous_tubing_head_pressure,
     "beggs_brill": compute_beggs_brill_tubing_head_pressure,
     "beggs_and_brill": compute_beggs_brill_tubing_head_pressure,
@@ -98,7 +98,7 @@ TUBING_HEAD_PRESSURE_FUNCTIONS: dict[str, TubingHeadPressureFunction] = {
     "woldesemayat_ghajar": compute_woldesemayat_ghajar_tubing_head_pressure,
 }
 
-TUBING_HEAD_PRESSURE_FROM_TABLE_FUNCTIONS: dict[str, TubingHeadPressureFunction] = {
+THP_FROM_TABLE_SOLVERS: dict[str, TubingHeadPressureSolver] = {
     "homogeneous": compute_homogeneous_tubing_head_pressure_from_table,
     "beggs_brill": compute_beggs_and_brill_tubing_head_pressure_from_table,
     "beggs_and_brill": compute_beggs_and_brill_tubing_head_pressure_from_table,
@@ -124,7 +124,8 @@ def compute_perforation_pressures(
             "Perforation pressures require a `WellBoreModel`; without one, "
             "choose a connection pressure mode in the well-control solver."
         )
-    compute = PERFORATION_PRESSURE_FUNCTIONS.get(wellbore.name)
+
+    compute = PERFORATION_PRESSURE_SOLVERS.get(wellbore.name)
     if compute is None:
         raise ValidationError(f"Unknown `WellBoreModel` name: {wellbore.name!r}")
     return typing.cast("NumberArray[OneDimension]", compute(model=wellbore.options, **kwargs))
@@ -149,7 +150,8 @@ def compute_tubing_head_pressure(
             "connection-to-connection pressure distribution, "
             "not the datum-to-surface relationship."
         )
-    compute = TUBING_HEAD_PRESSURE_FUNCTIONS.get(wellbore.name)
+
+    compute = THP_SOLVERS.get(wellbore.name)
     if compute is None:
         raise ValidationError(f"Unknown `WellBoreModel` name: {wellbore.name!r}")
     return typing.cast(Number, compute(model=wellbore.options, **kwargs))
@@ -171,7 +173,8 @@ def compute_tubing_head_pressure_from_table(
     """
     if wellbore is None or wellbore.tubing_fluid_table is None:
         raise ValidationError("This needs a `WellBoreModel` with `tubing_fluid_table`.")
-    compute = TUBING_HEAD_PRESSURE_FROM_TABLE_FUNCTIONS.get(wellbore.name)
+
+    compute = THP_FROM_TABLE_SOLVERS.get(wellbore.name)
     if compute is None:
         raise ValidationError(f"Unknown `WellBoreModel` name: {wellbore.name!r}")
     return typing.cast(

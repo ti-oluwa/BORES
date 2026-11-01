@@ -10,6 +10,7 @@ which of the two answers a THP question.
 import math
 import typing
 
+import numba
 import numpy as np
 
 from bores.errors import ValidationError
@@ -136,7 +137,6 @@ def resolve_well_tubing(
 
 
 def attach_flowing_fluid(
-    *,
     tubing: WellTubing,
     workspace: PerforationWorkspace,
     relevant_phases: PhaseValues,
@@ -157,6 +157,7 @@ def attach_flowing_fluid(
     if tubing.vfp_table is None and not tubing.uses_tubing_fluid_table:
         return tubing
 
+    # TODO: Should be able to njit this part #
     fluids = workspace.connection_fluids
     mobilities = (fluids.oil_mobilities, fluids.water_mobilities, fluids.gas_mobilities)
     flags = (relevant_phases.oil > 0.0, relevant_phases.water > 0.0, relevant_phases.gas > 0.0)
@@ -177,7 +178,7 @@ def attach_flowing_fluid(
     else:
         flowing = sum(flags)
         fractions = [1.0 / flowing if flag else 0.0 for flag in flags]
-
+    ##########################################
     return tubing._replace(
         flowing_fluid=FlowingFluid(
             oil_densities=densities[0],
@@ -191,8 +192,9 @@ def attach_flowing_fluid(
     )
 
 
+@numba.njit(cache=True)
 def compute_flowing_density(
-    *, flowing_fluid: FlowingFluid, connection_rates: ConnectionRates
+    flowing_fluid: FlowingFluid, connection_rates: ConnectionRates
 ) -> Number:
     """
     Computes the density of the mixture a well flows as its total mass rate over its total volume rate,
@@ -336,6 +338,7 @@ def compute_tubing_head_pressure(
             is_injector=is_injector,
             static_density=static_density,
         )
+    
     if surface_sample is None:
         raise ValidationError(
             "A hydraulics correlation needs `surface_sample` to find a tubing head pressure."

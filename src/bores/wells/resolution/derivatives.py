@@ -1359,6 +1359,7 @@ def differentiate_tubing_head_pressure(
             lower = evaluate(pressure=reference_pressure)
             target[position] = value
             return (upper - lower) / (2.0 * step)
+
         target[position] = value + step
         upper = evaluate(pressure=reference_pressure)
         target[position] = value

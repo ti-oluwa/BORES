@@ -450,7 +450,7 @@ def get_gravitational_acceleration(unit_system: UnitSystem) -> Number:
     :param unit_system: The unit system to express it in.
     :returns: Acceleration due to gravity.
     """
-    gravity = typing.cast(Number, c.ACCELERATION_DUE_TO_GRAVITY_FEET_PER_SECONDS_SQUARE)
+    gravity = typing.cast("Number", c.ACCELERATION_DUE_TO_GRAVITY_FEET_PER_SECONDS_SQUARE)
     if unit_system != UnitSystem.FIELD:
         gravity = gravity * get_conversion_factors(UnitSystem.FIELD, unit_system)["length"]
     return gravity

@@ -679,7 +679,7 @@ class VFPTable(StoreSerializable):
 
         dtype = self.dtype
         if is_scalar:
-            return typing.cast(Number, result.astype(dtype, copy=False).item())
+            return typing.cast("Number", result.astype(dtype, copy=False).item())
         return typing.cast("NumberArray[NDimension]", result.astype(dtype, copy=False))
 
     get_bhp = query
