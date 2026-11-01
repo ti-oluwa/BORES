@@ -117,6 +117,7 @@ def scan_curve_curvature_kernel(
     curvature: Number,
     numerical_epsilon: Number,
     mirror: Boolean,
+    retrace: Boolean,
     drainage_value: NumberArray[OneDimension],
     imbibition_value: NumberArray[OneDimension],
     drainage_derivative: NumberArray[OneDimension],
@@ -133,7 +134,9 @@ def scan_curve_curvature_kernel(
     `maximum_saturation`. A draining cell scans down from `reversal_saturation`, where it left the
     imbibition curve, to `minimum_saturation`. With `mirror` set, for a non-wetting phase, the cell
     scans down from `reversal_saturation`, its peak, to `minimum_saturation`, whichever way its
-    saturation moves, and the imbibition flag and `maximum_saturation` are not read. Every array
+    saturation moves, and the imbibition flag and `maximum_saturation` are not read. With `retrace`
+    set, a wetting phase scans one curve between `minimum_saturation` and `maximum_saturation`
+    whichever way it moves, so the flag and the reversal are not read. Every array
     argument is flat and holds either one value per cell or one value shared by all cells.
     """
     for i in range(size):
@@ -152,7 +155,13 @@ def scan_curve_curvature_kernel(
             weight_derivative = -mirrored_derivative
         else:
             imbibing = element_at(array=is_imbibition, index=i)
-            if imbibing != 0:
+            if retrace:
+                # One scanning curve between the lowest and the highest saturation reached, so
+                # a reversal part-way along it goes back the way it came.
+                imbibing = 1.0
+                lowest = element_at(array=minimum_saturation, index=i)
+                highest = element_at(array=maximum_saturation, index=i)
+            elif imbibing != 0:
                 lowest = reversal
                 highest = element_at(array=maximum_saturation, index=i)
             else:
@@ -192,6 +201,7 @@ def scan_curve_curvature(
     imbibition: tuple[typing.Any, typing.Any],
     with_derivatives: Boolean,
     mirror: Boolean = False,
+    retrace: Boolean = False,
 ) -> tuple[typing.Any, typing.Any]:
     """
     Scan one capillary pressure curve between its drainage and imbibition bounds, with the curvature
@@ -208,6 +218,8 @@ def scan_curve_curvature(
     :param imbibition: Imbibition value and slope.
     :param with_derivatives: Whether the slopes are present and wanted.
     :param mirror: Scan a non-wetting phase down from its peak, see `scan_curve_curvature_kernel`.
+    :param retrace: Scan a wetting phase along one curve in both directions, see
+        `scan_curve_curvature_kernel`.
     :return: Scanned value and slope (`None` when the slope is not wanted).
     """
     drainage_value = np.asarray(drainage[0]).reshape(-1)
@@ -229,6 +241,7 @@ def scan_curve_curvature(
         curvature=curvature,
         numerical_epsilon=1e-12,
         mirror=mirror,
+        retrace=retrace,
         drainage_value=drainage_value,
         imbibition_value=imbibition_value,
         drainage_derivative=drainage_slope,
@@ -269,6 +282,15 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
     """
     Curvature `ε` of the scanning curves. The closer it is to zero, the sooner a scanning curve
     moves over to the other bound. Not negative.
+    """
+
+    retrace_scanning_curves: Boolean = True
+    """
+    What the oil-water capillary pressure does when water reverses part-way along a scanning
+    curve. When set, it goes back the way it came: one curve joins the lowest and the highest water
+    saturation reached, and the cell is on it whichever way water is moving. Otherwise a reversal
+    starts a new scanning curve, a drainage one from the point where imbibition turned around, and
+    the two together close a loop. The gas-oil capillary pressure is always retraced.
     """
 
     def __attrs_post_init__(self) -> None:
@@ -442,6 +464,7 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
                 drainage=oil_water_drainage,
                 imbibition=oil_water_imbibition,
                 with_derivatives=with_derivatives,
+                retrace=self.retrace_scanning_curves,
             )
 
         def finish(array: typing.Any) -> typing.Any:

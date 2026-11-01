@@ -31,7 +31,7 @@ def _tabular(entry_pressure_scale: float = 1.0):
     )
 
 
-def _table(curvature=0.1, with_imbibition=True):
+def _table(curvature=0.1, with_imbibition=True, retrace=True):
     drainage = _tabular()
     imbibition = _tabular(entry_pressure_scale=0.5)
     return (
@@ -41,6 +41,7 @@ def _table(curvature=0.1, with_imbibition=True):
             oil_water_imbibition_table=imbibition.oil_water_table if with_imbibition else None,
             gas_oil_imbibition_table=imbibition.gas_oil_table if with_imbibition else None,
             scanning_curvature=curvature,
+            retrace_scanning_curves=retrace,
         ),
         drainage,
         imbibition,
@@ -135,7 +136,7 @@ def test_an_imbibition_scan_leaves_the_drainage_curve_and_arrives_on_the_imbibit
 
 
 def test_a_drainage_scan_leaves_the_imbibition_curve_and_returns_to_the_drainage_curve():
-    table, drainage, imbibition = _table()
+    table, drainage, imbibition = _table(retrace=False)
     history = _history(2, reversal=0.7, imbibing=False)
     water = np.array([0.7, 0.3])
     scanned = _pcow(table, water, **history)
@@ -159,7 +160,7 @@ def test_without_history_or_an_imbibition_curve_the_drainage_curve_is_used():
 @pytest.mark.parametrize("imbibing", [True, False])
 @pytest.mark.parametrize("water", [0.36, 0.5, 0.64])
 def test_the_derivative_matches_finite_differences(imbibing, water):
-    table, _, _ = _table()
+    table, _, _ = _table(retrace=False)
     step = 1e-6
     history = dict(
         max_water_saturation=0.7,
@@ -296,3 +297,71 @@ def test_invalid_configurations_are_rejected():
             gas_oil_drainage_table=gas_wet.gas_oil_table,
             gas_oil_imbibition_table=imbibition.gas_oil_table,
         )
+
+
+def _water_history(size, *, minimum, maximum, imbibing):
+    return dict(
+        max_water_saturation=np.full(size, maximum),
+        min_water_saturation=np.full(size, minimum),
+        water_imbibition_flag=np.full(size, imbibing),
+        water_reversal_saturation=np.full(size, minimum if imbibing else maximum),
+    )
+
+
+def test_a_retraced_scanning_curve_is_the_same_curve_whichever_way_water_moves():
+    table, _, _ = _table(retrace=True)
+    water = np.array([0.35, 0.4, 0.45])
+    rising = _pcow(table, water, **_water_history(3, minimum=0.3, maximum=0.5, imbibing=True))
+    falling = _pcow(table, water, **_water_history(3, minimum=0.3, maximum=0.5, imbibing=False))
+    np.testing.assert_array_equal(rising, falling)
+
+
+def test_a_retraced_scanning_curve_is_the_imbibition_scan_between_the_lowest_and_highest_water():
+    table, drainage, imbibition = _table(retrace=True)
+    water = np.array([0.35, 0.4, 0.45])
+    scanned = _pcow(table, water, **_water_history(3, minimum=0.3, maximum=0.5, imbibing=False))
+    weights = np.array([
+        compute_curvature_scanning_weight(value, 0.3, 0.5, 1.0, 0.1, 1e-12)[0] for value in water
+    ])
+    drained, imbibed = _pcow(drainage, water), _pcow(imbibition, water)
+    np.testing.assert_allclose(scanned, drained + (imbibed - drained) * weights, rtol=1e-9)
+
+
+def test_new_scanning_curves_start_where_imbibition_turned_around_and_close_a_loop():
+    retraced, _, _ = _table(retrace=True)
+    new, _, _ = _table(retrace=False)
+    water = np.array([0.35, 0.4, 0.45])
+    # Imbibition rose from 0.3 to 0.5 and water is now falling back.
+    history = _water_history(3, minimum=0.3, maximum=0.5, imbibing=False)
+    assert not np.allclose(_pcow(retraced, water, **history), _pcow(new, water, **history))
+    # The two agree at both ends of the loop.
+    ends = np.array([0.3, 0.5])
+    np.testing.assert_allclose(
+        _pcow(retraced, ends, **_water_history(2, minimum=0.3, maximum=0.5, imbibing=False)),
+        _pcow(new, ends, **_water_history(2, minimum=0.3, maximum=0.5, imbibing=False)),
+        rtol=1e-9,
+    )
+
+
+@pytest.mark.parametrize("water", [0.34, 0.4, 0.46])
+def test_the_retraced_derivative_matches_finite_differences(water):
+    table, _, _ = _table(retrace=True)
+    step = 1e-6
+    history = dict(
+        max_water_saturation=0.5,
+        min_water_saturation=0.3,
+        water_imbibition_flag=False,
+        water_reversal_saturation=0.5,
+    )
+
+    def pc(value):
+        return float(table.evaluate(value, 1.0 - value, 0.0, **history)["oil_water"])
+
+    analytic = float(table.derivatives(water, 1.0 - water, 0.0, **history)["dpcow_dsw"])
+    numeric = (pc(water + step) - pc(water - step)) / (2.0 * step)
+    assert analytic == pytest.approx(numeric, rel=1e-4)
+
+
+def test_retracing_is_the_default():
+    table, _, _ = _table()
+    assert table.retrace_scanning_curves
