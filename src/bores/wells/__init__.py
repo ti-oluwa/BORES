@@ -27,8 +27,8 @@ from bores.wells.controls import (
 from bores.wells.deck import (
     load_group_controls,
     load_groups,
-    load_schedule,
     load_well_controls,
+    load_well_schedule,
     load_wells,
 )
 from bores.wells.groups import (
@@ -110,7 +110,7 @@ __all__ = [
     "homogeneous_wellbore",
     "load_group_controls",
     "load_groups",
-    "load_schedule",
     "load_well_controls",
+    "load_well_schedule",
     "load_wells",
 ]

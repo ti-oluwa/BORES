@@ -52,7 +52,7 @@ from bores.types import (
     Spacing,
     UnitSystem,
 )
-from bores.wells.deck import deck_defines_wells, find_well_keyword_problem, load_schedule
+from bores.wells.deck import deck_defines_wells, find_well_keyword_problem, load_well_schedule
 from bores.wells.model import TubingPerformance, WellSystem
 from bores.wells.schedule import check_vfp_references
 
@@ -265,7 +265,7 @@ class SimulationCase:
             a constant value in the deck's own unit system.
         :param mixing_rule: Three-phase relative permeability mixing rule for `SatFunc.from_deck`.
         :param compiled_at: The point on the schedule clock this case's
-            model reflects. Forwarded to `bores.wells.deck.load_schedule`.
+            model reflects. Forwarded to `bores.wells.deck.load_well_schedule`.
             Only schedule events strictly after this remain as actions.
         :param load_summary: Whether to add summary-vector recording items
             from the deck's `SUMMARY` section to the schedule.
@@ -575,7 +575,7 @@ def load_case(
         a constant value in the deck's own unit system.
     :param mixing_rule: Three-phase relative permeability mixing rule for `SatFunc.from_deck`.
     :param compiled_at: The point on the schedule clock this case's
-        model reflects. Forwarded to `bores.wells.deck.load_schedule`.
+        model reflects. Forwarded to `bores.wells.deck.load_well_schedule`.
         Only schedule events strictly after this remain as actions.
     :param load_summary: Whether to add summary-vector recording items
         from the deck's `SUMMARY` section to the schedule.
@@ -910,7 +910,7 @@ def load_case(
     if schedule is None:
         try:
             print("Loading schedule")
-            schedule = load_schedule(
+            schedule = load_well_schedule(
                 deck_file,
                 compiled_at=compiled_at,
                 load_summary=load_summary,

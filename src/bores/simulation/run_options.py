@@ -11,7 +11,7 @@ from collections.abc import Iterable
 
 import attrs
 
-from bores.types import MiscibilityModel, Number, PreconditionerStr, SolverStr
+from bores.types import Boolean, Integer, MiscibilityModel, Number, PreconditionerStr, SolverStr
 from bores.utils import scale
 
 __all__ = [
@@ -40,15 +40,15 @@ class SolverOptions:
     """Preconditioner to use for pressure system solvers."""
     transport_preconditioner: PreconditionerStr | None = "ilu"
     """Preconditioner to use for transport system solvers."""
-    pressure_convergence_tolerance: float = attrs.field(
+    pressure_convergence_tolerance: Number = attrs.field(
         default=1e-6, validator=attrs.validators.le(1e-2)
     )
     """Relative convergence tolerance for pressure iterative solvers (default is 1e-6)."""
-    transport_convergence_tolerance: float = attrs.field(
+    transport_convergence_tolerance: Number = attrs.field(
         default=1e-4, validator=attrs.validators.le(1e-2)
     )
     """Relative convergence tolerance for saturation iterative solvers (default is 1e-4). Transport matrix tend to be more well conditioned."""
-    maximum_solver_iterations: int = attrs.field(
+    maximum_solver_iterations: Integer = attrs.field(
         default=250,
         validator=attrs.validators.and_(
             attrs.validators.ge(1),  # type: ignore[arg-type]
@@ -63,7 +63,7 @@ class SolverOptions:
     ill-conditioned or the problem setup needs to be reviewed. Use a stronger
     preconditioner, try another solver, or adjust simulation parameters accordingly.
     """
-    use_nonlinear_pressure_solve: bool = False
+    use_nonlinear_pressure_solve: Boolean = False
 
 
 @attrs.frozen(kw_only=True, slots=True)
@@ -74,7 +74,7 @@ class NewtonOptions:
     Held on `RunSpec.newton_options`.
     """
 
-    maximum_newton_iterations: int = attrs.field(
+    maximum_newton_iterations: Integer = attrs.field(
         default=10,
         validator=attrs.validators.and_(
             attrs.validators.ge(1),  # type: ignore[arg-type]
@@ -82,9 +82,9 @@ class NewtonOptions:
         ),
     )
     """Maximum Newton-Raphson non-linear iterations for implicit solvers."""
-    newton_tolerance: float = attrs.field(default=1e-5, validator=attrs.validators.le(1e-2))
+    newton_tolerance: Number = attrs.field(default=1e-5, validator=attrs.validators.le(1e-2))
     """Relative residual tolerance for Newton convergence in implicit solvers."""
-    maximum_line_search_cuts: int = attrs.field(
+    maximum_line_search_cuts: Integer = attrs.field(
         default=4,
         validator=attrs.validators.and_(
             attrs.validators.ge(0),  # type: ignore[arg-type]
@@ -104,7 +104,7 @@ class NewtonOptions:
       Faster and more accurate than the numerical Jacobian, but requires that
       the relperm and capillary pressure tables implement the `derivatives(...)` API.
     """
-    maximum_newton_saturation_change: float = attrs.field(
+    maximum_newton_saturation_change: Number = attrs.field(
         default=0.2,
         validator=attrs.validators.and_(
             attrs.validators.gt(0.0),
@@ -115,7 +115,7 @@ class NewtonOptions:
     Maximum per-cell saturation change per Newton iteration. Damps the Newton
     update to prevent upwind direction flipping that causes limit-cycle oscillation.
     """
-    newton_stagnation_patience: int = attrs.field(
+    newton_stagnation_patience: Integer = attrs.field(
         default=4,
         validator=attrs.validators.ge(1),
     )
@@ -140,7 +140,7 @@ class NewtonOptions:
     Lower values means faster detection, more aggressive termination  
     Higher values means more tolerance for slow convergence
     """
-    newton_stagnation_improvement_threshold: float = attrs.field(
+    newton_stagnation_improvement_threshold: Number = attrs.field(
         default=0.005,
         validator=attrs.validators.gt(0),
     )
@@ -174,7 +174,7 @@ class StepLimitOptions:
     Held on `RunSpec.step_limit_options`.
     """
 
-    cfl_threshold: float = 0.7
+    cfl_threshold: Number = 0.7
     """
     Maximum allowable transport CFL number for the 'explicit' evolution scheme to ensure numerical stability.
 
@@ -183,7 +183,7 @@ class StepLimitOptions:
     Lowering this value increases stability but may require smaller time steps.
     Raising them can improve performance but risks instability. Use with caution and monitor simulation behavior.
     """
-    maximum_pressure_change: float = attrs.field(default=1000.0, validator=attrs.validators.ge(0))
+    maximum_pressure_change: Number = attrs.field(default=1000.0, validator=attrs.validators.ge(0))
     """
     Maximum allowable pressure change (in psi) per time step.
 
@@ -217,7 +217,7 @@ class StepLimitOptions:
 
     Note: Larger changes can cause density/viscosity jumps and well control issues.
     """
-    maximum_oil_saturation_change: float = attrs.field(
+    maximum_oil_saturation_change: Number = attrs.field(
         default=0.6, validator=attrs.validators.ge(0)
     )
     """
@@ -227,7 +227,7 @@ class StepLimitOptions:
     instabilities and maintain material balance accuracy. When exceeded, the time
     step is reduced or rejected.
     """
-    maximum_water_saturation_change: float = attrs.field(
+    maximum_water_saturation_change: Number = attrs.field(
         default=0.6, validator=attrs.validators.ge(0)
     )
     """
@@ -237,7 +237,7 @@ class StepLimitOptions:
     instabilities and maintain material balance accuracy. When exceeded, the time
     step is reduced or rejected.
     """
-    maximum_gas_saturation_change: float = attrs.field(
+    maximum_gas_saturation_change: Number = attrs.field(
         default=0.5, validator=attrs.validators.ge(0)
     )
     """
@@ -247,7 +247,7 @@ class StepLimitOptions:
     instabilities and maintain material balance accuracy. When exceeded, the time
     step is reduced or rejected.
     """
-    saturation_change_violation_tolerance: float = attrs.field(
+    saturation_change_violation_tolerance: Number = attrs.field(
         default=5e-2, validator=attrs.validators.ge(0)
     )
 
@@ -271,9 +271,9 @@ class PhysicsOptions:
     Held on `RunSpec.physics_options`.
     """
 
-    capillary_effects_enabled: bool = True
+    capillary_effects_enabled: Boolean = True
     """Whether to include capillary pressure effects in the simulation."""
-    capillary_strength_factor: float = attrs.field(
+    capillary_strength_factor: Number = attrs.field(
         default=1.0,
         validator=attrs.validators.ge(0),  # type: ignore[arg-type]
     )
@@ -286,11 +286,11 @@ class PhysicsOptions:
 
     Set to 0 to disable capillary effects entirely (not recommended).
     """
-    gravity_enabled: bool = True
+    gravity_enabled: Boolean = True
     """Whether to disable structural dip effects in reservoir simulation."""
     miscibility: MiscibilityModel = "immiscible"
     """Miscibility model: 'immiscible', 'todd-longstaff'"""
-    freeze_saturation_pressure: bool = False
+    freeze_saturation_pressure: Boolean = False
     """
     If True, keeps oil bubble point pressure (Pb) constant at its initial value throughout the simulation.
 
@@ -312,7 +312,7 @@ class PhysicsOptions:
     - Oil viscosity (μo) - indirectly through Rs
     - Oil density (ρo) - indirectly through Rs and Bo
     """
-    normalize_saturations: bool = False
+    normalize_saturations: Boolean = False
     """
     Whether to normalize saturations so that `So + Sw + Sg = 1.0` after each timestep.
 
@@ -326,7 +326,7 @@ class PhysicsOptions:
     (unnormalized) values reveal how much drift the transport step actually produces.
     For production simulations, always leave this enabled.
     """
-    minimum_injector_gas_saturation: float | None = attrs.field(
+    minimum_injector_gas_saturation: Number | None = attrs.field(
         default=None, validator=attrs.validators.optional(attrs.validators.ge(0))
     )
     """
@@ -346,7 +346,7 @@ class PhysicsOptions:
     which is appropriate when the initial gas saturation is already non-zero in
     injector cells.
     """
-    minimum_injector_water_saturation: float | None = attrs.field(
+    minimum_injector_water_saturation: Number | None = attrs.field(
         default=None, validator=attrs.validators.optional(attrs.validators.ge(0))
     )
     """
@@ -398,7 +398,7 @@ class PhaseOptions:
     Held on `RunSpec.phase_options`.
     """
 
-    phase_appearance_tolerance: float = attrs.field(default=1e-6, validator=attrs.validators.ge(0))
+    phase_appearance_tolerance: Number = attrs.field(default=1e-6, validator=attrs.validators.ge(0))
     """
     Tolerance for determining phase appearance/disappearance based on saturation levels.
 
@@ -406,7 +406,7 @@ class PhaseOptions:
     maintain stability in relative permeability and mobility calculations by treating phases
     with saturations below this threshold as absent from the system.
     """
-    oil_presence_saturation: float | None = attrs.field(
+    oil_presence_saturation: Number | None = attrs.field(
         default=None,
         validator=attrs.validators.optional(attrs.validators.ge(0)),  # type: ignore[arg-type]
     )
@@ -414,7 +414,7 @@ class PhaseOptions:
     Oil saturation above which a cell is treated as holding oil when the initial phase state is
     checked for consistency. `None` uses the `OIL_PRESENCE_SATURATION` constant of `constants`.
     """
-    gas_presence_saturation: float | None = attrs.field(
+    gas_presence_saturation: Number | None = attrs.field(
         default=None,
         validator=attrs.validators.optional(attrs.validators.ge(0)),  # type: ignore[arg-type]
     )
@@ -422,7 +422,7 @@ class PhaseOptions:
     Gas saturation above which a cell is treated as holding gas when the initial phase state is
     checked for consistency. `None` uses the `GAS_PRESENCE_SATURATION` constant of `constants`.
     """
-    pressure_consistency_tolerance: float | None = attrs.field(
+    pressure_consistency_tolerance: Number | None = attrs.field(
         default=None,
         validator=attrs.validators.optional(attrs.validators.ge(0)),  # type: ignore[arg-type]
     )
@@ -442,11 +442,11 @@ class OutputOptions:
     Held on `RunSpec.output_options`.
     """
 
-    output_frequency: int = attrs.field(default=1, validator=attrs.validators.ge(1))
+    output_frequency: Integer = attrs.field(default=1, validator=attrs.validators.ge(1))
     """Frequency, in time steps, at which model states are output."""
-    log_interval: int = attrs.field(default=5, validator=attrs.validators.ge(0))
+    log_interval: Integer = attrs.field(default=5, validator=attrs.validators.ge(0))
     """Interval (in time steps) at which to log simulation progress."""
-    capture_timer_state: bool = True
+    capture_timer_state: Boolean = True
     """
     Whether to capture and include the timer state in the yielded model states during simulation monitoring.
 
@@ -455,5 +455,5 @@ class OutputOptions:
     When False, the timer state is not included in the yielded states, which may reduce memory usage if the timer state is 
     large or if many states are captured.
     """
-    warn_well_anomalies: bool = True
+    warn_well_anomalies: Boolean = True
     """Whether to warn about anomalous flow rates during the simulation."""

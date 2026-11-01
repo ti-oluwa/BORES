@@ -105,11 +105,11 @@ __all__ = [
     "load_groups_from_records",
     "load_injector_control_from_record",
     "load_producer_control_from_record",
-    "load_schedule",
     "load_summary_items",
     "load_well_control_spec",
     "load_well_controls",
     "load_well_from_records",
+    "load_well_schedule",
     "load_well_segments",
     "load_wells",
     "load_wells_from_records",
@@ -165,7 +165,7 @@ def replay_open_status(
 
     A `WCONPROD` or `WCONINJE` record sets it through its status item, and an omitted status
     means `OPEN`. A `WELOPEN` record sets it when it names no connection. At the same time,
-    the `WELOPEN` is replayed last, so it has the last word, as it does in `load_schedule`.
+    the `WELOPEN` is replayed last, so it has the last word, as it does in `load_well_schedule`.
     A well that nothing sets is open.
 
     :param control_records: The well's `WCONPROD` and `WCONINJE` records, from any point in
@@ -1831,7 +1831,7 @@ def get_item_start_time(item: ScheduleItem["CompiledBlackOilModel"]) -> Number:
     return event.at  # type: ignore[attr-defined]
 
 
-def load_schedule(
+def load_well_schedule(
     deck_file: DeckFile,
     *,
     compiled_at: float = 0.0,

@@ -13,7 +13,7 @@ import attrs
 
 from bores.constants import c
 from bores.deck.file import DeckFile
-from bores.types import Integer, Number, UnitSystem
+from bores.types import Boolean, Integer, Number, UnitSystem
 
 __all__ = [
     "EquilibrationOptions",
@@ -34,7 +34,7 @@ class SaturationOptions:
     Held on `RunSpec.saturation_options`.
     """
 
-    hysteresis_enabled: bool = False
+    hysteresis_enabled: Boolean = False
     """
     Enable saturation hysteresis tracking for residual saturations.
 
@@ -57,7 +57,7 @@ class SaturationOptions:
     physical effect and incurs unnecessary computation.
     """
 
-    hysteresis_saturation_tolerance: float | None = attrs.field(
+    hysteresis_saturation_tolerance: Number | None = attrs.field(
         default=None,
         validator=attrs.validators.optional(attrs.validators.ge(0)),  # type: ignore[arg-type]
     )
@@ -67,25 +67,25 @@ class SaturationOptions:
     `HYSTERESIS_SATURATION_TOLERANCE` constant of `constants`.
     """
 
-    endpoint_scaling_enabled: bool = False
+    endpoint_scaling_enabled: Boolean = False
     """Whether the deck scales the saturation function end points cell by cell (`ENDSCALE`)."""
 
-    directional_endpoint_scaling: bool = False
+    directional_endpoint_scaling: Boolean = False
     """Whether end point scaling depends on the flow direction (`ENDSCALE` with `DIRECT`)."""
 
-    irreversible_endpoint_scaling: bool = False
+    irreversible_endpoint_scaling: Boolean = False
     """Whether end point scaling is irreversible, so one set applies to flow in each direction (`ENDSCALE` with `IRREVERS`)."""
 
-    scale_critical_saturations: bool = False
+    scale_critical_saturations: Boolean = False
     """Whether the critical saturations are scaled consistently with the other end points (`SCALECRS YES`)."""
 
-    directional_relative_permeability: bool = False
+    directional_relative_permeability: Boolean = False
     """Whether relative permeabilities depend on the flow direction (`DIRECT`)."""
 
-    irreversible_directional_relative_permeability: bool = False
+    irreversible_directional_relative_permeability: Boolean = False
     """Whether the directional relative permeabilities are irreversible (`IRREVERS`)."""
 
-    surface_tension_dependence: bool = False
+    surface_tension_dependence: Boolean = False
     """Whether relative permeability and capillary pressure depend on surface tension (`SURFTENS`)."""
 
     unrecognized: frozenset[str] = frozenset()
@@ -96,16 +96,16 @@ class SaturationOptions:
 class EquilibrationOptions:
     """The optional equilibration features a deck switches on with `EQLOPTS`."""
 
-    threshold_pressures: bool = False
+    threshold_pressures: Boolean = False
     """Whether the deck defines pressure differences that flow between regions must exceed (`THPRES`)."""
 
-    irreversible_threshold_pressures: bool = False
+    irreversible_threshold_pressures: Boolean = False
     """Whether a threshold pressure applies in one direction only (`IRREVERS`)."""
 
-    quiescent_start: bool = False
+    quiescent_start: Boolean = False
     """Whether the initial state is adjusted so that nothing flows at the start (`QUIESC`)."""
 
-    mobile_fluid_endpoint_correction: bool = False
+    mobile_fluid_endpoint_correction: Boolean = False
     """Whether saturation end points are corrected so the initial fluids are mobile (`MOBILE`)."""
 
     unrecognized: frozenset[str] = frozenset()

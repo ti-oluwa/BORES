@@ -524,7 +524,7 @@ def invert_curves_per_cell(
     ],
     pressure_falls_with_saturation: Boolean,
     prefer_highest_pressure_end: Boolean,
-    saturation_samples: int,
+    saturation_samples: Integer,
     dtype: npt.DTypeLike,
 ) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension]]:
     """
@@ -584,7 +584,7 @@ def get_saturations_from_capillary_pressure(
     water_profile: tuple[npt.NDArray, npt.NDArray] | None,
     gas_profile: tuple[npt.NDArray, npt.NDArray] | None,
     dtype: npt.DTypeLike,
-    saturation_samples: int = N_SATURATION_SAMPLES,
+    saturation_samples: Integer = N_SATURATION_SAMPLES,
 ) -> CapillarySaturations:
     """
     Recover `Sw(z)` and `Sg(z)` from the capillary pressure the fluids sit at, which gives a
@@ -772,10 +772,10 @@ def get_saturations_from_capillary_pressure(
             gas_oil_capillary_pressure[overlapping] = final["gas_oil"]
 
     return CapillarySaturations(
-        water_saturation=typing.cast(CellArray, water_saturation),
-        gas_saturation=typing.cast(CellArray, gas_saturation),
-        oil_water_capillary_pressure=typing.cast(CellArray, oil_water_capillary_pressure),
-        gas_oil_capillary_pressure=typing.cast(CellArray, gas_oil_capillary_pressure),
+        water_saturation=typing.cast("CellArray", water_saturation),
+        gas_saturation=typing.cast("CellArray", gas_saturation),
+        oil_water_capillary_pressure=typing.cast("CellArray", oil_water_capillary_pressure),
+        gas_oil_capillary_pressure=typing.cast("CellArray", gas_oil_capillary_pressure),
     )
 
 
@@ -797,7 +797,7 @@ def initialize_center_point_equilibrium(
     residual_gas_saturation: CellArray | None = None,
     depth_step: Number = 1.0,
     dtype: npt.DTypeLike = None,
-    saturation_samples: int = N_SATURATION_SAMPLES,
+    saturation_samples: Integer = N_SATURATION_SAMPLES,
     active: npt.NDArray[np.bool_] | None = None,
     **kwargs: typing.Any,
 ) -> EquilibriumArrays:
@@ -846,7 +846,7 @@ def initialize_center_point_equilibrium(
     sorted_temperature = temperature[order]
 
     def get_temperature_at(depth: ColumnValues) -> ColumnValues:
-        return typing.cast(ColumnValues, np.interp(depth, sorted_depths, sorted_temperature))
+        return typing.cast("ColumnValues", np.interp(depth, sorted_depths, sorted_temperature))
 
     def bind_oil_density(depth: ColumnValues) -> PressureDensityFunction:
         temperature_at_depth = get_temperature_at(depth)
@@ -1044,7 +1044,7 @@ def initialize_center_point_equilibrium(
     grid_pressures = grid_pressures[grid_order]
 
     pressure = typing.cast(
-        CellArray,
+        "CellArray",
         np.interp(depths, grid_depths, grid_pressures).astype(dtype, copy=False),
     )
 
@@ -1155,13 +1155,13 @@ def initialize_center_point_equilibrium(
             gas_dew_point_pressure = pressure.copy()
 
     return EquilibriumArrays(
-        pressure=typing.cast(CellArray, pressure),
-        water_saturation=typing.cast(CellArray, water_saturation),
-        gas_saturation=typing.cast(CellArray, gas_saturation),
-        solution_gor=typing.cast(CellArray, solution_gor),
-        oil_bubble_point_pressure=typing.cast(CellArray, oil_bubble_point_pressure),
-        vaporized_oil_gas_ratio=typing.cast(CellArray, vaporized_oil_gas_ratio),
-        gas_dew_point_pressure=typing.cast(CellArray, gas_dew_point_pressure),
+        pressure=typing.cast("CellArray", pressure),
+        water_saturation=typing.cast("CellArray", water_saturation),
+        gas_saturation=typing.cast("CellArray", gas_saturation),
+        solution_gor=typing.cast("CellArray", solution_gor),
+        oil_bubble_point_pressure=typing.cast("CellArray", oil_bubble_point_pressure),
+        vaporized_oil_gas_ratio=typing.cast("CellArray", vaporized_oil_gas_ratio),
+        gas_dew_point_pressure=typing.cast("CellArray", gas_dew_point_pressure),
     )
 
 
@@ -1179,7 +1179,7 @@ def initialize_gas_water_center_point_equilibrium(
     residual_gas_saturation: CellArray | None = None,
     depth_step: Number = 1.0,
     dtype: npt.DTypeLike = None,  # type: ignore[assignment]
-    saturation_samples: int = N_SATURATION_SAMPLES,
+    saturation_samples: Integer = N_SATURATION_SAMPLES,
     active: npt.NDArray[np.bool_] | None = None,
     **kwargs: typing.Any,
 ) -> EquilibriumArrays:
@@ -1231,6 +1231,7 @@ def initialize_gas_water_center_point_equilibrium(
     else:
         contact_depth, contact_capillary_pressure = region.woc_depth, region.pcow_at_woc
         contact_items = "items 3 and 4"
+
     if contact_depth is None:
         raise ValidationError(
             f"A gas and water model needs a gas-water contact depth in `EQUIL` ({contact_items})."
@@ -1346,13 +1347,13 @@ def initialize_gas_water_center_point_equilibrium(
 
     zeros = np.zeros(n, dtype=dtype)
     return EquilibriumArrays(
-        pressure=typing.cast(CellArray, pressure),
-        water_saturation=typing.cast(CellArray, water_saturation),
-        gas_saturation=typing.cast(CellArray, gas_saturation),
-        solution_gor=typing.cast(CellArray, zeros),
-        oil_bubble_point_pressure=typing.cast(CellArray, pressure.copy()),
-        vaporized_oil_gas_ratio=typing.cast(CellArray, zeros.copy()),
-        gas_dew_point_pressure=typing.cast(CellArray, zeros.copy()),
+        pressure=typing.cast("CellArray", pressure),
+        water_saturation=typing.cast("CellArray", water_saturation),
+        gas_saturation=typing.cast("CellArray", gas_saturation),
+        solution_gor=typing.cast("CellArray", zeros),
+        oil_bubble_point_pressure=typing.cast("CellArray", pressure.copy()),
+        vaporized_oil_gas_ratio=typing.cast("CellArray", zeros.copy()),
+        gas_dew_point_pressure=typing.cast("CellArray", zeros.copy()),
     )
 
 
@@ -1413,7 +1414,7 @@ def average_samples(
 def average_equilibrium_samples(
     sample_arrays: EquilibriumArrays,
     *,
-    n_cells: int,
+    n_cells: Integer,
     sample_weights: NumberArray[TwoDimensions],
 ) -> EquilibriumArrays:
     """
@@ -1451,7 +1452,7 @@ def average_equilibrium_samples(
         values = np.reshape(getattr(sample_arrays, name), (n_cells, -1))
         averages[name] = np.empty(n_cells, dtype=values.dtype)
         average_samples(
-            values=values,
+            values=typing.cast("NumberArray[TwoDimensions]", values),
             water_saturation=water_saturation,
             gas_saturation=gas_saturation,
             sample_weights=sample_weights,
@@ -1466,7 +1467,7 @@ def initialize_horizontal_subdivision_equilibrium(
     region: EquilibriumRegion,
     cell_top: CellArray,
     cell_bottom: CellArray,
-    n_subdivisions: int | None = None,
+    n_subdivisions: Integer | None = None,
     center_point_initializer: CenterPointInitializer = initialize_center_point_equilibrium,
     **kwargs: typing.Any,
 ) -> EquilibriumArrays:
@@ -1496,7 +1497,6 @@ def initialize_horizontal_subdivision_equilibrium(
         depths=sub_depth.ravel(),
         **repeated_kwargs,  # type: ignore[arg-type]
     )
-
     return average_equilibrium_samples(
         sub_arrays,
         n_cells=n_cells,
@@ -1511,7 +1511,7 @@ def initialize_tilted_subdivision_equilibrium(
     region: EquilibriumRegion,
     grid: Grid,
     cell_indices: IntArray[OneDimension],
-    n_subdivisions: int | None = None,
+    n_subdivisions: Integer | None = None,
     center_point_initializer: CenterPointInitializer = initialize_center_point_equilibrium,
     **kwargs: typing.Any,
 ) -> EquilibriumArrays:
@@ -1573,7 +1573,7 @@ def initialize_equilibrium_arrays(
     satfunc: SatFunc | None = None,
     depth_step: Number = 1.0,
     dtype: npt.DTypeLike = None,
-    saturation_samples: int = N_SATURATION_SAMPLES,
+    saturation_samples: Integer = N_SATURATION_SAMPLES,
     phases: DeckPhases | None = None,
 ) -> EquilibriumArrays:
     """
@@ -2048,9 +2048,9 @@ def initialize_water_gas_state(
     return typing.cast(CellArray, solubility), typing.cast(CellArray, bubble_point)
 
 
-def get_active_cells(grid: Grid, n_cells: int) -> BooleanCellArray | None:
+def get_active_cells(grid: Grid, n_cells: Integer) -> BooleanCellArray | None:
     """
-    Which cells of the grid take part in the flow simulation.
+    Get a mask of which cells of the grid take part in the flow simulation.
 
     :param grid: The grid whose cells are described.
     :param n_cells: Number of cells the arrays being initialized have.
@@ -2192,9 +2192,9 @@ def initialize_reservoir_state(
     gas_solubility_in_water: CellArray | None = None,
     water_salinity: CellArray | None = None,
     depth_step: Number = 1.0,
-    hysteresis_enabled: bool = False,
+    hysteresis_enabled: Boolean = False,
     dtype: npt.DTypeLike = None,
-    saturation_samples: int = N_SATURATION_SAMPLES,
+    saturation_samples: Integer = N_SATURATION_SAMPLES,
     phases: DeckPhases | None = None,
     oil_presence_saturation: Number | None = None,
     gas_presence_saturation: Number | None = None,
@@ -2565,6 +2565,7 @@ def initialize_reservoir_state(
         deck_solubility = deck_file.get("RSW")
         if deck_solubility is not None:
             solubility_in_water_input = typing.cast(CellArray, deck_solubility)
+
     if solubility_in_water_input is not None:
         solubility_in_water_input = np.asarray(solubility_in_water_input, dtype=dtype)
         if solubility_in_water_input.shape != (n_cells,):
@@ -2578,6 +2579,7 @@ def initialize_reservoir_state(
             raise ValidationError(
                 "`gas_solubility_in_water` must be finite and non-negative in every cell."
             )
+
     if water_salinity is not None:
         water_salinity = np.asarray(water_salinity, dtype=dtype)  # type: ignore
         if water_salinity.shape != (n_cells,):  # type: ignore[attr-defined]
@@ -2627,9 +2629,9 @@ def initialize_reservoir_state(
         water_saturation=water_saturation_array,
         gas_saturation=gas_saturation_array,
         solution_gor=solution_gor_array,
-        oil_bubble_point_pressure=typing.cast(CellArray, oil_bubble_point_pressure_array),
+        oil_bubble_point_pressure=typing.cast("CellArray", oil_bubble_point_pressure_array),
         vaporized_oil_gas_ratio=vaporized_oil_ratio_array,
-        gas_dew_point_pressure=typing.cast(CellArray, gas_dew_point_pressure_array),
+        gas_dew_point_pressure=typing.cast("CellArray", gas_dew_point_pressure_array),
         gas_solubility_in_water=gas_solubility_in_water_array,
         water_bubble_point_pressure=water_bubble_point_pressure_array,
         oil_mass=masses.oil_mass,
