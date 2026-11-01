@@ -487,10 +487,10 @@ def fill_fluid_direction(
     :param unknown: Which unknown: 0 pressure, 1 water saturation, 2 the third unknown.
     """
     direction[0] = 1.0 if unknown == 0 else 0.0
-    direction[1] = derivatives.dsigma_dx[connection, unknown]
+    direction[1] = derivatives.dσ_dx[connection, unknown]
     for phase in range(3):
-        direction[2 + phase] = derivatives.drho_dx[connection, phase, unknown]
-        direction[5 + phase] = derivatives.dmu_dx[connection, phase, unknown]
+        direction[2 + phase] = derivatives.dρ_dx[connection, phase, unknown]
+        direction[5 + phase] = derivatives.dμ_dx[connection, phase, unknown]
         direction[8 + phase] = derivatives.ds_dx[connection, phase, unknown]
         direction[11 + phase] = derivatives.dʎ_dx[connection, phase, unknown]
         direction[14 + phase] = derivatives.db_dx[connection, phase, unknown]

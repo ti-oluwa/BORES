@@ -117,14 +117,14 @@ def get_properties(pressure, water_saturation, gas_saturation):
         dbg_dp=-0.01 * 3000.0 / pressure**2, dbg_dsw=0.0, dbg_dsg=0.0,
         drs_dp=0.05, drs_dsw=0.0, drs_dsg=100.0,
         drv_dp=1e-10, drv_dsw=0.0, drv_dsg=1e-8,
-        drho_o_dp=0.004, drho_o_dsw=0.0, drho_o_dsg=3.0,
-        drho_w_dp=0.0005, drho_w_dsw=1.0, drho_w_dsg=0.0,
-        drho_g_dp=5.0 / 3000.0 * (1.0 + 0.1 * sw), drho_g_dsw=5.0 * (pressure / 3000.0) * 0.1,
-        drho_g_dsg=0.0,
-        dmu_o_dp=d_mu_o[0], dmu_o_dsw=d_mu_o[1], dmu_o_dsg=d_mu_o[2],
-        dmu_w_dp=d_mu_w[0], dmu_w_dsw=d_mu_w[1], dmu_w_dsg=d_mu_w[2],
-        dmu_g_dp=d_mu_g[0], dmu_g_dsw=d_mu_g[1], dmu_g_dsg=d_mu_g[2],
-        dsigma_dp=0.001, dsigma_dsw=2.0, dsigma_dsg=0.0,
+        dρo_dp=0.004, dρo_dsw=0.0, dρo_dsg=3.0,
+        dρw_dp=0.0005, dρw_dsw=1.0, dρw_dsg=0.0,
+        dρg_dp=5.0 / 3000.0 * (1.0 + 0.1 * sw), dρg_dsw=5.0 * (pressure / 3000.0) * 0.1,
+        dρg_dsg=0.0,
+        dμo_dp=d_mu_o[0], dμo_dsw=d_mu_o[1], dμo_dsg=d_mu_o[2],
+        dμw_dp=d_mu_w[0], dμw_dsw=d_mu_w[1], dμw_dsg=d_mu_w[2],
+        dμg_dp=d_mu_g[0], dμg_dsw=d_mu_g[1], dμg_dsg=d_mu_g[2],
+        dσ_dp=0.001, dσ_dsw=2.0, dσ_dsg=0.0,
     )  # fmt: skip
     return values, derivatives
 

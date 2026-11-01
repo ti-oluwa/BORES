@@ -172,67 +172,67 @@ class ConnectionSampleDerivatives(typing.NamedTuple):
     drv_dsg: Number = math.nan
     """Derivative of the vaporized oil-gas ratio with respect to gas saturation."""
 
-    drho_o_dp: Number = math.nan
+    dρo_dp: Number = math.nan
     """Derivative of the oil density with respect to pressure."""
 
-    drho_o_dsw: Number = math.nan
+    dρo_dsw: Number = math.nan
     """Derivative of the oil density with respect to water saturation."""
 
-    drho_o_dsg: Number = math.nan
+    dρo_dsg: Number = math.nan
     """Derivative of the oil density with respect to gas saturation."""
 
-    drho_w_dp: Number = math.nan
+    dρw_dp: Number = math.nan
     """Derivative of the water density with respect to pressure."""
 
-    drho_w_dsw: Number = math.nan
+    dρw_dsw: Number = math.nan
     """Derivative of the water density with respect to water saturation."""
 
-    drho_w_dsg: Number = math.nan
+    dρw_dsg: Number = math.nan
     """Derivative of the water density with respect to gas saturation."""
 
-    drho_g_dp: Number = math.nan
+    dρg_dp: Number = math.nan
     """Derivative of the gas density with respect to pressure."""
 
-    drho_g_dsw: Number = math.nan
+    dρg_dsw: Number = math.nan
     """Derivative of the gas density with respect to water saturation."""
 
-    drho_g_dsg: Number = math.nan
+    dρg_dsg: Number = math.nan
     """Derivative of the gas density with respect to gas saturation."""
 
-    dmu_o_dp: Number = math.nan
+    dμo_dp: Number = math.nan
     """Derivative of the oil viscosity with respect to pressure."""
 
-    dmu_o_dsw: Number = math.nan
+    dμo_dsw: Number = math.nan
     """Derivative of the oil viscosity with respect to water saturation."""
 
-    dmu_o_dsg: Number = math.nan
+    dμo_dsg: Number = math.nan
     """Derivative of the oil viscosity with respect to gas saturation."""
 
-    dmu_w_dp: Number = math.nan
+    dμw_dp: Number = math.nan
     """Derivative of the water viscosity with respect to pressure."""
 
-    dmu_w_dsw: Number = math.nan
+    dμw_dsw: Number = math.nan
     """Derivative of the water viscosity with respect to water saturation."""
 
-    dmu_w_dsg: Number = math.nan
+    dμw_dsg: Number = math.nan
     """Derivative of the water viscosity with respect to gas saturation."""
 
-    dmu_g_dp: Number = math.nan
+    dμg_dp: Number = math.nan
     """Derivative of the gas viscosity with respect to pressure."""
 
-    dmu_g_dsw: Number = math.nan
+    dμg_dsw: Number = math.nan
     """Derivative of the gas viscosity with respect to water saturation."""
 
-    dmu_g_dsg: Number = math.nan
+    dμg_dsg: Number = math.nan
     """Derivative of the gas viscosity with respect to gas saturation."""
 
-    dsigma_dp: Number = math.nan
+    dσ_dp: Number = math.nan
     """Derivative of the gas-liquid surface tension with respect to pressure."""
 
-    dsigma_dsw: Number = math.nan
+    dσ_dsw: Number = math.nan
     """Derivative of the gas-liquid surface tension with respect to water saturation."""
 
-    dsigma_dsg: Number = math.nan
+    dσ_dsg: Number = math.nan
     """Derivative of the gas-liquid surface tension with respect to gas saturation."""
 
 

@@ -580,13 +580,13 @@ class ConnectionDerivatives(typing.NamedTuple):
     dr_dx: NumberArray[ThreeDimensions]
     """Shape `(n, 2, 3)`. The solution gas-oil ratio, then the vaporized oil-gas ratio, against the unknowns."""
 
-    drho_dx: NumberArray[ThreeDimensions]
+    dρ_dx: NumberArray[ThreeDimensions]
     """Shape `(n, 3, 3)`. Phase densities against the unknowns."""
 
-    dmu_dx: NumberArray[ThreeDimensions]
+    dμ_dx: NumberArray[ThreeDimensions]
     """Shape `(n, 3, 3)`. Phase viscosities against the unknowns."""
 
-    dsigma_dx: NumberArray[TwoDimensions]
+    dσ_dx: NumberArray[TwoDimensions]
     """Shape `(n, 3)`. The gas-liquid surface tension against the unknowns."""
 
 
@@ -626,9 +626,9 @@ def compile_connection_derivatives(
         dʎ_dx=pack(("dʎo", "dʎw", "dʎg")),
         db_dx=pack(("dbo", "dbw", "dbg")),
         dr_dx=pack(("drs", "drv")),
-        drho_dx=pack(("drho_o", "drho_w", "drho_g")),
-        dmu_dx=pack(("dmu_o", "dmu_w", "dmu_g")),
-        dsigma_dx=typing.cast("NumberArray[TwoDimensions]", pack(("dsigma",))[:, 0, :]),
+        dρ_dx=pack(("dρo", "dρw", "dρg")),
+        dμ_dx=pack(("dμo", "dμw", "dμg")),
+        dσ_dx=typing.cast("NumberArray[TwoDimensions]", pack(("dσ",))[:, 0, :]),
     )
 
 
