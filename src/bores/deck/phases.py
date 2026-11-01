@@ -12,11 +12,20 @@ import warnings
 
 import attrs
 
+from bores.constants import c
 from bores.deck.file import DeckFile
 from bores.errors import ValidationError
-from bores.types import Boolean, Phases
+from bores.types import Boolean, Phases, UnitSystem
+from bores.units import get_conversion_factors
 
-__all__ = ["SUPPORTED_PHASE_SETS", "DeckPhases", "declares_phases", "read_deck_phases"]
+__all__ = [
+    "SUPPORTED_PHASE_SETS",
+    "DeckPhases",
+    "check_co2_storage_standard_conditions",
+    "declares_phases",
+    "default_standard_conditions",
+    "read_deck_phases",
+]
 
 SUPPORTED_PHASE_SETS = (
     "oil, water and gas",
@@ -49,6 +58,53 @@ class DeckPhases(Phases):
     def to_phases(self) -> Phases:
         """The phases without the deck's own labelling, for a model that has no use for it."""
         return Phases(**{field.name: getattr(self, field.name) for field in attrs.fields(Phases)})
+
+
+STANDARD_CONDITIONS_TOLERANCE = 1.0e-3
+"""Relative difference from the default standard conditions that is still taken as the default."""
+
+
+def default_standard_conditions(unit_system: UnitSystem) -> tuple[float, float]:
+    """
+    The standard temperature and pressure a deck gets when it does not set `STCOND`.
+
+    They are 60 F and 1 atm, expressed in the unit system of the deck.
+
+    :param unit_system: The unit system of the deck.
+    :returns: The standard temperature and the standard pressure, in the deck's units.
+    """
+    factors = get_conversion_factors(UnitSystem.FIELD, unit_system)
+    temperature = (
+        c.STANDARD_TEMPERATURE_FAHRENHEIT * factors["temperature"] + factors["temperature_offset"]
+    )
+    pressure = c.STANDARD_PRESSURE_PSI * factors["pressure"]
+    return float(temperature), float(pressure)
+
+
+def check_co2_storage_standard_conditions(deck_file: DeckFile) -> None:
+    """
+    Check that a CO2 storage deck leaves its standard conditions at their defaults.
+
+    The CO2 and brine properties are computed at the default standard conditions, so a deck that
+    sets `STCOND` to anything else cannot be honoured.
+
+    :param deck_file: The deck to check.
+    :raises ValidationError: If `STCOND` sets a temperature or pressure other than the default.
+    """
+    record = deck_file.get("STCOND")
+    if record is None:
+        return
+
+    defaults = default_standard_conditions(deck_file.unit_system)
+    for name, default in zip(("temperature", "pressure"), defaults, strict=True):
+        value = record[name]
+        if value is not None and abs(float(value) - default) > STANDARD_CONDITIONS_TOLERANCE * abs(
+            default
+        ):
+            raise ValidationError(
+                f"A CO2 storage deck must keep the default standard {name} ({default:g}) in "
+                f"`STCOND`, but the deck sets {float(value):g}."
+            )
 
 
 def declares_phases(deck_file: DeckFile) -> Boolean:
@@ -98,6 +154,9 @@ def read_deck_phases(deck_file: DeckFile) -> DeckPhases:
     disgasw = present["DISGASW"]
     vapoil = present["VAPOIL"]
     vapwat = present["VAPWAT"]
+
+    if (present["CO2STORE"] or present["CO2STOR"]) and declared_gas:
+        check_co2_storage_standard_conditions(deck_file)
 
     if not (declared_oil or declared_water or declared_gas):
         raise ValidationError(

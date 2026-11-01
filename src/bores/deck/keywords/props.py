@@ -103,6 +103,7 @@ __all__ = [
     "PVTW",
     "ROCK",
     "ROCKTAB",
+    "SALINITY",
     "SCALECRS",
     "SGCR",
     "SGFN",
@@ -115,6 +116,7 @@ __all__ = [
     "SOF3",
     "SOGCR",
     "SOWCR",
+    "STCOND",
     "SWCON",
     "SWCR",
     "SWCRIT",
@@ -447,6 +449,32 @@ primary-key line):
 - `viscosity`: gas viscosity (cP).
 """
 
+
+SALINITY = RecordKeyword[float](
+    "SALINITY",
+    fields=[Field("molality", np.float64, required=False, default=0.0)],
+)
+"""
+`SALINITY MOLALITY /` - salt content of the brine, as the molality of NaCl.
+
+The value is in mol of salt per kg of water, in every unit system, and is `0` when defaulted. It
+is converted to a salinity in ppm by weight when the case is loaded.
+"""
+
+STCOND = RecordKeyword[float](
+    "STCOND",
+    fields=[
+        Field("temperature", np.float64, required=False),
+        Field("pressure", np.float64, required=False),
+    ],
+)
+"""
+`STCOND TEMPERATURE PRESSURE /` - the standard conditions the surface volumes are measured at.
+
+A defaulted item takes the standard value, 60 F and 1 atm, expressed in the deck's unit system
+(15.56 C and 1.01325 bar for METRIC, 60 F and 14.696 psia for FIELD). A CO2 storage deck is only
+accepted with those defaults.
+"""
 
 ROCK = TableKeyword(
     "ROCK",

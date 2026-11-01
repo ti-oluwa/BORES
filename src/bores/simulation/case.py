@@ -34,6 +34,7 @@ from bores.reservoir.equilibrium import Equilibrium
 from bores.reservoir.model import Reservoir
 from bores.reservoir.regions import Regions
 from bores.reservoir.rock.model import ROCK_POROSITY_KEYWORDS, ROCK_REQUIRED_KEYWORDS, Rock
+from bores.reservoir.salinity import load_salinity, resolve_salinity
 from bores.reservoir.state import Hysteresis, ReservoirState
 from bores.reservoir.temperature import TEMPERATURE_KEYWORDS, Temperature
 from bores.schedule.base import Schedule
@@ -244,7 +245,7 @@ class SimulationCase:
         saturation_samples: int = N_SATURATION_SAMPLES,
         interpolation_method: InterpolationMethod = "linear",
         boundary_conditions: BoundaryConditions | None = None,
-        salinity: CellArray | None = None,
+        salinity: Number | CellArray | None = None,
         hysteresis: Hysteresis | None = None,
         unit_system: UnitSystem | None = None,
         on_inverted_cells: InvertedCellPolicy | str = InvertedCellPolicy.RAISE,
@@ -321,7 +322,10 @@ class SimulationCase:
         :param saturation_samples: Number of saturation samples for the initial state.
             Forwarded to `initialize_reservoir_state`.
         :param interpolation_method: Interpolation method for `Rock.from_deck` and `PVT.from_deck`.
-        :param salinity: Optional per-cell water salinity (ppm NaCl) for the simulation.
+        :param salinity: Water salinity in ppm by weight of salt, which is the same in every unit
+            system. A single value applies to every cell, or give one value per cell. When omitted
+            it is read from the deck's `SALINITY` keyword, given there as a molality, and without
+            one the PVT tables' own default salinity applies.
         :param hysteresis: Optional hysteresis history/configuration for the simulation workspace.
         :param unit_system: Unit system the case is expressed in: the model, the initial state, the
             run spec, the schedule's event times and values, and the time targets. Defaults to the
@@ -553,7 +557,7 @@ def load_case(
     saturation_samples: int = N_SATURATION_SAMPLES,
     interpolation_method: InterpolationMethod = "linear",
     boundary_conditions: BoundaryConditions | None = None,
-    salinity: CellArray | None = None,
+    salinity: Number | CellArray | None = None,
     hysteresis: Hysteresis | None = None,
     unit_system: UnitSystem | None = None,
     on_inverted_cells: InvertedCellPolicy | str = InvertedCellPolicy.RAISE,
@@ -629,7 +633,10 @@ def load_case(
     :param saturation_samples: Number of saturation samples for the initial state.
         Forwarded to `initialize_reservoir_state`.
     :param interpolation_method: Interpolation method for `Rock.from_deck` and `PVT.from_deck`.
-    :param salinity: Optional per-cell water salinity (ppm NaCl) for the simulation.
+    :param salinity: Water salinity in ppm by weight of salt, which is the same in every unit
+        system. A single value applies to every cell, or give one value per cell. When omitted it
+        is read from the deck's `SALINITY` keyword, given there as a molality, and without one the
+        PVT tables' own default salinity applies.
     :param hysteresis: Optional hysteresis history/configuration for the simulation workspace.
     :param unit_system: Unit system the case is expressed in: the model, the initial state, the
         run spec, the schedule's event times and values, and the time targets. Defaults to the
@@ -815,6 +822,12 @@ def load_case(
     )
     reservoir = Reservoir(grid=grid, rock=rock, regions=regions)
 
+    resolved_salinity = (
+        load_salinity(deck_file, n_cells=reservoir.n_cells, dtype=dtype)
+        if salinity is None
+        else resolve_salinity(salinity, n_cells=reservoir.n_cells, dtype=dtype)
+    )
+
     if pvt is None:
         try:
             print("Loading PVT")
@@ -851,6 +864,7 @@ def load_case(
                 hysteresis_enabled=hysteresis_enabled
                 if hysteresis_enabled is not None
                 else runspec.saturation_options.hysteresis_enabled,
+                water_salinity=resolved_salinity,
                 saturation_samples=saturation_samples,
                 dtype=dtype,
                 oil_presence_saturation=runspec.phase_options.oil_presence_saturation,
@@ -958,7 +972,7 @@ def load_case(
         schedule=schedule,
         time_targets=time_targets,
         summary=summary if summary is not None else SummaryReport(),
-        salinity=salinity,
+        salinity=resolved_salinity,
         hysteresis=hysteresis,
         dtype=dtype,
     )

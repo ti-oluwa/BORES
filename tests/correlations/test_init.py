@@ -34,6 +34,7 @@ def make_inputs() -> dict[str, np.ndarray]:
         "gas_density": 4.0 + 6.0 * r,
         "gas_molecular_weight": 16.0 + 10.0 * r,
         "salinity": 5000.0 + 90000.0 * rng.random(N),
+        "molality": 0.1 + 1.5 * rng.random(N),
         "gas_solubility_in_water": 5.0 + 15.0 * r,
         "gas_solubility_pressure_derivative": 0.002 + 0.004 * r,
         "gas_free_water_formation_volume_factor": 1.02 + 0.02 * r,

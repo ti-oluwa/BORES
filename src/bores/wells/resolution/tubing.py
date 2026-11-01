@@ -338,7 +338,7 @@ def compute_tubing_head_pressure(
             is_injector=is_injector,
             static_density=static_density,
         )
-    
+
     if surface_sample is None:
         raise ValidationError(
             "A hydraulics correlation needs `surface_sample` to find a tubing head pressure."

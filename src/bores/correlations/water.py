@@ -27,6 +27,7 @@ __all__ = [
     "compute_gas_solubility_in_water_henry_law",
     "compute_gas_solubility_in_water_mccain_methane",
     "compute_gas_solubility_in_water_pressure_derivative",
+    "compute_salinity_from_molality",
     "compute_salt_molality",
     "compute_water_bubble_point_pressure",
     "compute_water_compressibility",
@@ -251,6 +252,25 @@ def compute_gas_solubility_in_water_mccain_methane(
     pure_water_solubility = a + b * pressure + c_ * pressure**2
     salting_out = 10.0 ** (-0.0840655 * s * temperature**-0.285854)
     return max(pure_water_solubility * salting_out, 0.0)
+
+
+@elementwise(non_negative=("molality",))
+def compute_salinity_from_molality(
+    molality: NumberOrArray[AnyDimension],
+) -> NumberOrArray[AnyDimension]:
+    """
+    Computes the salinity of an NaCl brine from its molality, the inverse of `compute_salt_molality`.
+
+        w = r / (1 + r),   r = m * M
+
+    where `m` is the molality, `M` the molar mass of NaCl in kg/mol and `w` the salt mass fraction.
+
+    :param molality: Salt molality (mol of NaCl per kg of water)
+    :return: Water salinity (ppm by weight of NaCl)
+    """
+    salt_per_unit_water_mass = molality * MOLECULAR_WEIGHT_NACL / KILOGRAMS_TO_GRAMS
+    salt_mass_fraction = salt_per_unit_water_mass / (1.0 + salt_per_unit_water_mass)
+    return salt_mass_fraction / PPM_TO_WEIGHT_FRACTION
 
 
 @elementwise(non_negative=("salinity",))
