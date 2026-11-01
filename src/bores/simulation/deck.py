@@ -5,12 +5,13 @@ import typing
 from bores.deck.file import DeckFile
 from bores.deck.phases import declares_phases, read_deck_phases
 from bores.simulation.options import (
+    NewtonOptions,
+    PhysicsOptions,
     load_equilibration_options,
     load_minimum_pore_volume,
     load_model_dimensions,
     load_saturation_options,
 )
-from bores.simulation.run_options import NewtonOptions, PhysicsOptions
 from bores.simulation.spec import RunSpec
 from bores.timestep.deck import TUNING_DEFAULTS, get_tuning_at_start, load_timer
 from bores.wells.deck import load_well_control_spec

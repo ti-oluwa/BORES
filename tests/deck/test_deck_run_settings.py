@@ -15,12 +15,13 @@ from bores.initialization import warn_on_inconsistent_phase_state
 from bores.schedule.base import ScheduleContext
 from bores.simulation.deck import load_run_spec
 from bores.simulation.options import (
+    PhaseOptions,
+    PhysicsOptions,
     load_equilibration_options,
     load_minimum_pore_volume,
     load_model_dimensions,
     load_saturation_options,
 )
-from bores.simulation.run_options import PhaseOptions, PhysicsOptions
 from bores.simulation.spec import RunSpec
 from bores.timestep.control import RETUNABLE_SETTINGS, Timer
 from bores.timestep.deck import (

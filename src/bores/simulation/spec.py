@@ -7,12 +7,14 @@ from typing_extensions import Self
 
 from bores.constants import Constants
 from bores.errors import ValidationError
-from bores.simulation.options import EquilibrationOptions, ModelDimensions, SaturationOptions
-from bores.simulation.run_options import (
+from bores.simulation.options import (
+    EquilibrationOptions,
+    ModelDimensions,
     NewtonOptions,
     OutputOptions,
     PhaseOptions,
     PhysicsOptions,
+    SaturationOptions,
     SolverOptions,
     StepLimitOptions,
 )

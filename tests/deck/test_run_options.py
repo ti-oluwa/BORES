@@ -6,14 +6,15 @@ import pytest
 from bores.deck import DeckFile
 from bores.errors import ValidationError
 from bores.simulation.deck import load_run_spec
-from bores.simulation.options import load_model_dimensions, load_saturation_options
-from bores.simulation.run_options import (
+from bores.simulation.options import (
     NewtonOptions,
     OutputOptions,
     PhaseOptions,
     PhysicsOptions,
     SolverOptions,
     StepLimitOptions,
+    load_model_dimensions,
+    load_saturation_options,
 )
 from bores.simulation.spec import RunSpec
 from bores.types import UnitSystem
