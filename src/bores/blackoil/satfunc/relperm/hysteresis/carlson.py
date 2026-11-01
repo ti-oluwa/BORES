@@ -311,6 +311,7 @@ class CarlsonRelPermTable(HysteresisRelPermTable):
         water_reversal_saturation: NumberOrArray[NDimension] | None = None,
         gas_reversal_saturation: NumberOrArray[NDimension] | None = None,
         min_water_saturation: NumberOrArray[NDimension] | None = None,
+        min_gas_saturation: NumberOrArray[NDimension] | None = None,
         **kwargs: typing.Any,
     ) -> tuple[RelativePermeabilities, RelativePermeabilityDerivatives | None]:
         """
@@ -330,6 +331,8 @@ class CarlsonRelPermTable(HysteresisRelPermTable):
             oil peak is read off `min_water_saturation`.
         :param gas_reversal_saturation: Gas saturation at the last reversal, the peak the
             scanning curve starts from. Defaults to `max_gas_saturation`.
+        :param min_gas_saturation: Historical minimum gas saturation per cell. Not used by this
+            model.
         :param min_water_saturation: Historical minimum water saturation per cell, where oil, the
             non-wetting phase of a water-wet system, peaked.
         :param kwargs: Extra arguments forwarded to the backing tables.

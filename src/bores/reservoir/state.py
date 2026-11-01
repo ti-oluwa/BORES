@@ -247,6 +247,15 @@ class Hysteresis(StoreSerializable):
     off this minimum, and the oil scanning curves start from it.
     """
 
+    min_gas_saturation: CellArray
+    """
+    Shape (n_cells,) - historical minimum gas saturation reached in each cell (fraction).
+
+    Updated whenever the current gas saturation falls below the stored minimum. Gas is the
+    non-wetting phase, so a gas scanning curve runs from the peak (`max_gas_saturation`) down to
+    this minimum, where it meets the imbibition curve.
+    """
+
     water_imbibition_flag: BooleanCellArray
     """
     Shape (n_cells,) - `True` if water is currently on its imbibition path.
@@ -307,6 +316,7 @@ class Hysteresis(StoreSerializable):
             max_water_saturation=typing.cast(CellArray, sw.copy()),
             max_gas_saturation=typing.cast(CellArray, sg.copy()),
             min_water_saturation=typing.cast(CellArray, sw.copy()),
+            min_gas_saturation=typing.cast(CellArray, sg.copy()),
             water_imbibition_flag=typing.cast(
                 BooleanCellArray, np.zeros(sw.shape, dtype=np.bool_)
             ),
@@ -363,6 +373,7 @@ class Hysteresis(StoreSerializable):
         previous_sg = np.asarray(previous_gas_saturation, dtype=dtype)
 
         new_min_water_saturation = np.empty_like(self.min_water_saturation)
+        new_min_gas_saturation = np.empty_like(self.min_gas_saturation)
         new_max_water_saturation, new_water_imbibition_flag, new_water_reversal_saturation = (
             advance_phase_hysteresis(
                 new_saturation=typing.cast(CellArray, sw),
@@ -385,6 +396,8 @@ class Hysteresis(StoreSerializable):
                 reversal_saturation=self.gas_reversal_saturation,
                 imbibition_when_increasing=gas_imbibition_when_increasing,
                 tolerance=tolerance,
+                min_saturation=self.min_gas_saturation,
+                out_min_saturation=typing.cast(CellArray, new_min_gas_saturation),
             )
         )
         return attrs.evolve(
@@ -392,6 +405,7 @@ class Hysteresis(StoreSerializable):
             max_water_saturation=new_max_water_saturation,
             max_gas_saturation=new_max_gas_saturation,
             min_water_saturation=typing.cast(CellArray, new_min_water_saturation),
+            min_gas_saturation=typing.cast(CellArray, new_min_gas_saturation),
             water_imbibition_flag=new_water_imbibition_flag,
             gas_imbibition_flag=new_gas_imbibition_flag,
             water_reversal_saturation=new_water_reversal_saturation,
@@ -874,6 +888,7 @@ HYSTERESIS_DATAFRAME_FIELDS: tuple[str, ...] = (
     "max_water_saturation",
     "max_gas_saturation",
     "min_water_saturation",
+    "min_gas_saturation",
     "water_imbibition_flag",
     "gas_imbibition_flag",
     "water_reversal_saturation",
@@ -978,7 +993,7 @@ def as_dataframe(
     :param backend: `"pandas"` or `"polars"`. The library must be installed.
     :param fields: Fields to include. They are named like the attributes of `ReservoirState`,
         and may also be `total_gas_mass` and `total_oil_mass`, or any of the hysteresis arrays
-        (`max_water_saturation`, `max_gas_saturation`, `min_water_saturation`, `water_imbibition_flag`,
+        (`max_water_saturation`, `max_gas_saturation`, `min_water_saturation`, `min_gas_saturation`, `water_imbibition_flag`,
         `gas_imbibition_flag`, `water_reversal_saturation`, `gas_reversal_saturation`), which
         need states that track hysteresis. The two imbibition flags are boolean columns.
         `"all"` includes every stored field and hysteresis array that has values, so a state

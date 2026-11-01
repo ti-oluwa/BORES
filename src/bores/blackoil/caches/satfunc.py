@@ -130,6 +130,7 @@ def compute_satfunc_cache(
     max_water_saturation: CellArray | None = None,
     max_gas_saturation: CellArray | None = None,
     min_water_saturation: CellArray | None = None,
+    min_gas_saturation: CellArray | None = None,
     water_imbibition_flag: BooleanCellArray | None = None,
     gas_imbibition_flag: BooleanCellArray | None = None,
     water_reversal_saturation: CellArray | None = None,
@@ -181,6 +182,8 @@ def compute_satfunc_cache(
         primary drainage curves.
     :param min_water_saturation: Shape `(n_cells,)` historical minimum water saturation, which
         a Carlson table reads the oil peak from.
+    :param min_gas_saturation: Shape `(n_cells,)` historical minimum gas saturation, which
+        the gas scanning curves of the capillary pressure curvature model run down to.
     :param max_gas_saturation: Shape `(n_cells,)` historical maximum gas
         saturation reached in each cell. Same fallback behaviour.
     :param water_imbibition_flag: Shape `(n_cells,)` whether water
@@ -258,6 +261,8 @@ def compute_satfunc_cache(
             state_kwargs["max_gas_saturation"] = max_gas_saturation[mask]
         if min_water_saturation is not None:
             state_kwargs["min_water_saturation"] = min_water_saturation[mask]
+        if min_gas_saturation is not None:
+            state_kwargs["min_gas_saturation"] = min_gas_saturation[mask]
         if water_imbibition_flag is not None:
             state_kwargs["water_imbibition_flag"] = water_imbibition_flag[mask]
         if gas_imbibition_flag is not None:

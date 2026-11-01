@@ -116,6 +116,7 @@ def scan_curve_curvature_kernel(
     is_imbibition: NumberArray[OneDimension],
     curvature: Number,
     numerical_epsilon: Number,
+    mirror: Boolean,
     drainage_value: NumberArray[OneDimension],
     imbibition_value: NumberArray[OneDimension],
     drainage_derivative: NumberArray[OneDimension],
@@ -130,26 +131,41 @@ def scan_curve_curvature_kernel(
 
     An imbibing cell scans up from `reversal_saturation`, where it left the drainage curve, to
     `maximum_saturation`. A draining cell scans down from `reversal_saturation`, where it left the
-    imbibition curve, to `minimum_saturation`. Every array argument is flat and holds either one
-    value per cell or one value shared by all cells.
+    imbibition curve, to `minimum_saturation`. With `mirror` set, for a non-wetting phase, the cell
+    scans down from `reversal_saturation`, its peak, to `minimum_saturation`, whichever way its
+    saturation moves, and the imbibition flag and `maximum_saturation` are not read. Every array
+    argument is flat and holds either one value per cell or one value shared by all cells.
     """
     for i in range(size):
-        imbibing = element_at(array=is_imbibition, index=i)
         reversal = element_at(array=reversal_saturation, index=i)
-        if imbibing != 0:
-            lowest = reversal
-            highest = element_at(array=maximum_saturation, index=i)
+        if mirror:
+            # The non-wetting phase scans downward from its peak to its minimum, retracing the
+            # same curve in both directions, which is the imbibition form on the mirrored axis.
+            weight, mirrored_derivative = compute_curvature_scanning_weight(
+                saturation=-element_at(array=saturation, index=i),
+                lowest_saturation=-reversal,
+                highest_saturation=-element_at(array=minimum_saturation, index=i),
+                is_imbibition=1.0,
+                curvature=curvature,
+                numerical_epsilon=numerical_epsilon,
+            )
+            weight_derivative = -mirrored_derivative
         else:
-            lowest = element_at(array=minimum_saturation, index=i)
-            highest = reversal
-        weight, weight_derivative = compute_curvature_scanning_weight(
-            saturation=element_at(array=saturation, index=i),
-            lowest_saturation=lowest,
-            highest_saturation=highest,
-            is_imbibition=imbibing,
-            curvature=curvature,
-            numerical_epsilon=numerical_epsilon,
-        )
+            imbibing = element_at(array=is_imbibition, index=i)
+            if imbibing != 0:
+                lowest = reversal
+                highest = element_at(array=maximum_saturation, index=i)
+            else:
+                lowest = element_at(array=minimum_saturation, index=i)
+                highest = reversal
+            weight, weight_derivative = compute_curvature_scanning_weight(
+                saturation=element_at(array=saturation, index=i),
+                lowest_saturation=lowest,
+                highest_saturation=highest,
+                is_imbibition=imbibing,
+                curvature=curvature,
+                numerical_epsilon=numerical_epsilon,
+            )
         drainage = element_at(array=drainage_value, index=i)
         imbibition = element_at(array=imbibition_value, index=i)
         out_value[i] = drainage + (imbibition - drainage) * weight
@@ -175,6 +191,7 @@ def scan_curve_curvature(
     drainage: tuple[typing.Any, typing.Any],
     imbibition: tuple[typing.Any, typing.Any],
     with_derivatives: Boolean,
+    mirror: Boolean = False,
 ) -> tuple[typing.Any, typing.Any]:
     """
     Scan one capillary pressure curve between its drainage and imbibition bounds, with the curvature
@@ -190,6 +207,7 @@ def scan_curve_curvature(
     :param drainage: Drainage value and slope.
     :param imbibition: Imbibition value and slope.
     :param with_derivatives: Whether the slopes are present and wanted.
+    :param mirror: Scan a non-wetting phase down from its peak, see `scan_curve_curvature_kernel`.
     :return: Scanned value and slope (`None` when the slope is not wanted).
     """
     drainage_value = np.asarray(drainage[0]).reshape(-1)
@@ -210,6 +228,7 @@ def scan_curve_curvature(
         is_imbibition=imbibition_flag,
         curvature=curvature,
         numerical_epsilon=1e-12,
+        mirror=mirror,
         drainage_value=drainage_value,
         imbibition_value=imbibition_value,
         drainage_derivative=drainage_slope,
@@ -229,11 +248,14 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
 
     The oil-water capillary pressure scans over water saturation, between the lowest water
     saturation reached, the highest, and the saturation of the last reversal, which are all in the
-    saturation history. The gas-oil capillary pressure follows its drainage curve: its scanning
-    needs the history of the lowest gas saturation, which is not tracked, so a gas-oil imbibition
-    table is rejected rather than ignored. Water has to be the wetting phase of the oil-water
-    system for an oil-water imbibition table to scan, since the scanning range is then in the
-    wetting phase's saturation.
+    saturation history. Water has to be the wetting phase of the oil-water system for an oil-water
+    imbibition table to scan, since the scanning range is then in the wetting phase's saturation.
+
+    The gas-oil capillary pressure scans over gas saturation, the non-wetting phase, down from the
+    peak gas saturation to the lowest gas saturation reached, where it meets the imbibition
+    curve. That scanning curve is retraced when gas rises again, so it needs no imbibition flag.
+    Gas has to be the non-wetting phase of the gas-oil system for a gas-oil imbibition table to
+    scan.
 
     Saturation history is passed as keyword arguments to `evaluate`, `derivatives` and
     `evaluate_with_derivatives`. A system whose history is not supplied stays on its drainage curve.
@@ -253,10 +275,13 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
         super().__attrs_post_init__()
         if self.scanning_curvature < 0.0:
             raise ValidationError("`scanning_curvature` must not be negative.")
-        if self.gas_oil_imbibition_table is not None:
+        if (
+            self.gas_oil_imbibition_table is not None
+            and self.get_gas_oil_wetting_phase() == FluidPhase.GAS
+        ):
             raise ValidationError(
-                "The curvature strategy does not scan gas-oil capillary pressure yet, because the "
-                "lowest gas saturation is not tracked. Give no `gas_oil_imbibition_table`."
+                "The curvature strategy scans gas-oil capillary pressure over gas saturation as the "
+                "non-wetting phase, so gas cannot be the wetting phase."
             )
         if (
             self.oil_water_imbibition_table is not None
@@ -281,6 +306,7 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
         water_reversal_saturation: NumberOrArray[NDimension] | None = None,
         gas_reversal_saturation: NumberOrArray[NDimension] | None = None,
         min_water_saturation: NumberOrArray[NDimension] | None = None,
+        min_gas_saturation: NumberOrArray[NDimension] | None = None,
         **kwargs: typing.Any,
     ) -> tuple[CapillaryPressures, CapillaryPressureDerivatives | None]:
         """
@@ -291,14 +317,19 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
         :param gas_saturation: Gas saturation (fraction) - scalar or array.
         :param with_derivatives: Whether to also compute the derivatives.
         :param max_water_saturation: Historical maximum water saturation per cell.
-        :param max_gas_saturation: Historical maximum gas saturation per cell. Not used.
+        :param max_gas_saturation: Historical maximum gas saturation per cell, the peak a gas scan
+            starts from. Defaults the peak of `gas_reversal_saturation`.
         :param water_imbibition_flag: Per-cell flag, true while water is imbibing, so rising.
-        :param gas_imbibition_flag: Per-cell gas imbibition flag. Not used.
+        :param gas_imbibition_flag: Per-cell gas imbibition flag. Not used: the gas scanning curve
+            is retraced.
         :param water_reversal_saturation: Water saturation at the last reversal. Defaults to
             `max_water_saturation`.
-        :param gas_reversal_saturation: Gas saturation at the last reversal. Not used.
+        :param gas_reversal_saturation: Gas saturation at the last reversal, the peak. Defaults
+            to `max_gas_saturation`.
         :param min_water_saturation: Historical minimum water saturation per cell, where a
             drainage scan ends.
+        :param min_gas_saturation: Historical minimum gas saturation per cell, where a gas scan
+            meets the imbibition curve.
         :param kwargs: Extra arguments forwarded to the backing tables.
         :return: The capillary pressures and, when requested, their derivatives (otherwise `None`).
         """
@@ -316,13 +347,26 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
             )
         )
 
+        gas_peak = gas_reversal_saturation if max_gas_saturation is None else max_gas_saturation
+        gas_peak = gas_reversal_saturation if gas_reversal_saturation is not None else gas_peak
+        use_gas_hysteresis = (
+            gas_peak is not None
+            and min_gas_saturation is not None
+            and self.get_gas_oil_wetting_phase() != FluidPhase.GAS
+            and self.is_distinct_imbibition(
+                self.gas_oil_imbibition_table, self.gas_oil_drainage_table
+            )
+        )
+
         inputs = [water_saturation, oil_saturation, gas_saturation]
+        if use_gas_hysteresis:
+            inputs += [gas_peak, min_gas_saturation]
         if use_water_hysteresis:
             inputs += [max_water_saturation, water_imbibition_flag, min_water_saturation]
             if water_reversal_saturation is not None:
                 inputs.append(water_reversal_saturation)
 
-        shape = np.broadcast_shapes(*(np.shape(value) for value in inputs))
+        shape = np.broadcast_shapes(*(np.shape(value) for value in inputs))  # type: ignore[arg-type]
         flat_shape = shape or (1,)
         size = math.prod(flat_shape)
 
@@ -341,12 +385,37 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
         oil_water_drainage = query_oil_water_curve(
             self.oil_water_drainage_table, **arguments, **kwargs
         )
-        gas_oil, gas_oil_slope = query_gas_oil_curve(
+        connate_water_saturation = self.get_connate_water_saturation()
+        gas_oil_drainage = query_gas_oil_curve(
             self.gas_oil_drainage_table,
-            connate_water_saturation=self.get_connate_water_saturation(),
+            connate_water_saturation=connate_water_saturation,
             **arguments,
             **kwargs,
         )
+        gas_oil, gas_oil_slope = gas_oil_drainage
+        if use_gas_hysteresis:
+            gas_oil_imbibition = query_gas_oil_curve(
+                typing.cast(AnyCapillaryTable, self.gas_oil_imbibition_table),
+                connate_water_saturation=connate_water_saturation,
+                **arguments,
+                **kwargs,
+            )
+            peak = flatten_kernel_input(value=gas_peak, shape=flat_shape)
+            gas_oil, gas_oil_slope = scan_curve_curvature(
+                size=size,
+                saturation=sg,
+                maximum_saturation=peak,
+                minimum_saturation=flatten_kernel_input(
+                    value=min_gas_saturation, shape=flat_shape
+                ),
+                imbibition_flag=peak,
+                reversal_saturation=peak,
+                curvature=self.scanning_curvature,
+                drainage=gas_oil_drainage,
+                imbibition=gas_oil_imbibition,
+                with_derivatives=with_derivatives,
+                mirror=True,
+            )
 
         oil_water, oil_water_slope = oil_water_drainage
         if use_water_hysteresis:

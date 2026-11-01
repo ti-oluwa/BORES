@@ -23,6 +23,7 @@ def _tabular(entry_pressure_scale: float = 1.0):
             **ENDPOINTS,
             oil_water_entry_pressure_water_wet=defaults.oil_water_entry_pressure_water_wet
             * entry_pressure_scale,
+            gas_oil_entry_pressure=defaults.gas_oil_entry_pressure * entry_pressure_scale,
         ),
         n_points=500,
         n_endpoint_extra=0,
@@ -38,6 +39,7 @@ def _table(curvature=0.1, with_imbibition=True):
             oil_water_drainage_table=drainage.oil_water_table,
             gas_oil_drainage_table=drainage.gas_oil_table,
             oil_water_imbibition_table=imbibition.oil_water_table if with_imbibition else None,
+            gas_oil_imbibition_table=imbibition.gas_oil_table if with_imbibition else None,
             scanning_curvature=curvature,
         ),
         drainage,
@@ -174,13 +176,94 @@ def test_the_derivative_matches_finite_differences(imbibing, water):
     assert analytic == pytest.approx(numeric, rel=1e-4)
 
 
-def test_gas_oil_capillary_pressure_follows_its_drainage_curve():
-    table, drainage, _ = _table()
-    gas = np.array([0.1, 0.2])
+def _gas_history(size, *, peak=0.4, minimum=0.1, imbibing=True):
+    return dict(
+        max_gas_saturation=np.full(size, peak),
+        gas_reversal_saturation=np.full(size, peak),
+        min_gas_saturation=np.full(size, minimum),
+        gas_imbibition_flag=np.full(size, imbibing),
+    )
+
+
+def _pcgo(table, gas, **history):
+    gas = np.atleast_1d(np.asarray(gas, dtype=np.float64))
     water = np.full_like(gas, 0.3)
-    oil = 1.0 - water - gas
-    scanned = table.evaluate(water, oil, gas, **_history(2))["gas_oil"]
-    np.testing.assert_array_equal(scanned, drainage.evaluate(water, oil, gas)["gas_oil"])
+    return np.asarray(table.evaluate(water, 1.0 - water - gas, gas, **history)["gas_oil"])
+
+
+def test_gas_scans_down_from_its_peak_on_the_drainage_curve_to_its_minimum_on_the_imbibition_curve():
+    table, drainage, imbibition = _table()
+    gas = np.array([0.4, 0.1])
+    scanned = _pcgo(table, gas, **_gas_history(2))
+    np.testing.assert_allclose(scanned[0], _pcgo(drainage, gas[:1])[0], rtol=1e-9)
+    np.testing.assert_allclose(scanned[1], _pcgo(imbibition, gas[1:])[0], rtol=1e-9)
+    inside = np.array([0.15, 0.25, 0.35])
+    scanned = _pcgo(table, inside, **_gas_history(3))
+    low, high = _pcgo(imbibition, inside), _pcgo(drainage, inside)
+    assert np.all(scanned >= np.minimum(low, high) - 1e-12)
+    assert np.all(scanned <= np.maximum(low, high) + 1e-12)
+    assert not np.allclose(scanned, high)
+
+
+def test_the_gas_scanning_curve_is_retraced_whichever_way_gas_moves():
+    table, _, _ = _table()
+    gas = np.array([0.15, 0.25, 0.35])
+    falling = _pcgo(table, gas, **_gas_history(3, imbibing=True))
+    rising = _pcgo(table, gas, **_gas_history(3, imbibing=False))
+    np.testing.assert_array_equal(falling, rising)
+
+
+def test_gas_above_its_peak_is_on_the_drainage_curve():
+    table, drainage, _ = _table()
+    gas = np.array([0.45, 0.5])
+    np.testing.assert_allclose(
+        _pcgo(table, gas, **_gas_history(2)), _pcgo(drainage, gas), rtol=1e-9
+    )
+
+
+def test_gas_without_its_history_or_a_distinct_imbibition_curve_uses_the_drainage_curve():
+    table, drainage, _ = _table()
+    gas = np.array([0.15, 0.3])
+    np.testing.assert_array_equal(_pcgo(table, gas), _pcgo(drainage, gas))
+    without_minimum = _gas_history(2)
+    del without_minimum["min_gas_saturation"]
+    np.testing.assert_array_equal(_pcgo(table, gas, **without_minimum), _pcgo(drainage, gas))
+    no_imbibition, _, _ = _table(with_imbibition=False)
+    np.testing.assert_array_equal(
+        _pcgo(no_imbibition, gas, **_gas_history(2)), _pcgo(drainage, gas)
+    )
+
+
+def test_the_gas_peak_defaults_to_the_reversal_saturation_or_the_maximum():
+    table, _, _ = _table()
+    gas = np.array([0.15, 0.3])
+    full = _gas_history(2)
+    only_reversal = dict(
+        gas_reversal_saturation=full["gas_reversal_saturation"],
+        min_gas_saturation=full["min_gas_saturation"],
+    )
+    only_maximum = dict(
+        max_gas_saturation=full["max_gas_saturation"],
+        min_gas_saturation=full["min_gas_saturation"],
+    )
+    expected = _pcgo(table, gas, **full)
+    np.testing.assert_array_equal(_pcgo(table, gas, **only_reversal), expected)
+    np.testing.assert_array_equal(_pcgo(table, gas, **only_maximum), expected)
+
+
+@pytest.mark.parametrize("gas", [0.14, 0.2, 0.3, 0.38])
+def test_the_gas_derivative_matches_finite_differences(gas):
+    table, _, _ = _table()
+    step = 1e-6
+    history = dict(max_gas_saturation=0.4, gas_reversal_saturation=0.4, min_gas_saturation=0.1)
+
+    def pc(value):
+        return float(table.evaluate(0.3, 0.7 - value, value, **history)["gas_oil"])
+
+    analytic = table.derivatives(0.3, 0.7 - gas, gas, **history)
+    slope = float(analytic["dpcgo_dsg"] - analytic["dpcgo_dso"])
+    numeric = (pc(gas + step) - pc(gas - step)) / (2.0 * step)
+    assert slope == pytest.approx(numeric, rel=1e-4)
 
 
 def test_it_is_a_hysteresis_table_with_its_own_curvature():
@@ -200,9 +283,16 @@ def test_invalid_configurations_are_rejected():
             gas_oil_drainage_table=drainage.gas_oil_table,
             scanning_curvature=-0.1,
         )
+    gas_wet = as_three_phase_capillary_pressure_table(
+        BrooksCoreyCapillaryPressureTable(**ENDPOINTS),
+        n_points=100,
+        n_endpoint_extra=0,
+        dtype=np.float64,
+        gas_oil_wetting_phase="gas",
+    )
     with pytest.raises(ValidationError):
         CurvatureCapillaryPressureTable(
-            oil_water_drainage_table=drainage.oil_water_table,
-            gas_oil_drainage_table=drainage.gas_oil_table,
+            oil_water_drainage_table=gas_wet.oil_water_table,
+            gas_oil_drainage_table=gas_wet.gas_oil_table,
             gas_oil_imbibition_table=imbibition.gas_oil_table,
         )

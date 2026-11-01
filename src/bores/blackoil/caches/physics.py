@@ -157,6 +157,7 @@ def compute_physics_cache(
         max_water_saturation=hysteresis.max_water_saturation if hysteresis is not None else None,
         max_gas_saturation=hysteresis.max_gas_saturation if hysteresis is not None else None,
         min_water_saturation=hysteresis.min_water_saturation if hysteresis is not None else None,
+        min_gas_saturation=hysteresis.min_gas_saturation if hysteresis is not None else None,
         water_imbibition_flag=(
             hysteresis.water_imbibition_flag if hysteresis is not None else None
         ),

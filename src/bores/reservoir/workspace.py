@@ -66,6 +66,13 @@ class HysteresisWorkspace(typing.NamedTuple):
     In a water-wet system the highest oil saturation a cell has reached is read off this minimum.
     """
 
+    min_gas_saturation: CellArray
+    """
+    Shape (n_cells,) - historical minimum gas saturation reached in each cell (fraction).
+
+    Gas is the non-wetting phase, so its scanning curves run from the peak down to this minimum.
+    """
+
     water_imbibition_flag: BooleanCellArray
     """
     Shape (n_cells,) - `True` if water is currently on its imbibition path.
@@ -112,27 +119,30 @@ class HysteresisWorkspace(typing.NamedTuple):
         dtype = np.dtype(dtype) if dtype is not None else get_dtype()
         return cls(
             max_water_saturation=typing.cast(
-                CellArray, np.array(state.max_water_saturation, dtype=dtype, copy=True)
+                "CellArray", np.array(state.max_water_saturation, dtype=dtype, copy=True)
             ),
             max_gas_saturation=typing.cast(
-                CellArray, np.array(state.max_gas_saturation, dtype=dtype, copy=True)
+                "CellArray", np.array(state.max_gas_saturation, dtype=dtype, copy=True)
             ),
             min_water_saturation=typing.cast(
-                CellArray, np.array(state.min_water_saturation, dtype=dtype, copy=True)
+                "CellArray", np.array(state.min_water_saturation, dtype=dtype, copy=True)
+            ),
+            min_gas_saturation=typing.cast(
+                "CellArray", np.array(state.min_gas_saturation, dtype=dtype, copy=True)
             ),
             water_imbibition_flag=typing.cast(
-                BooleanCellArray,
+                "BooleanCellArray",
                 np.array(state.water_imbibition_flag, dtype=np.bool_, copy=True),
             ),
             gas_imbibition_flag=typing.cast(
-                BooleanCellArray,
+                "BooleanCellArray",
                 np.array(state.gas_imbibition_flag, dtype=np.bool_, copy=True),
             ),
             water_reversal_saturation=typing.cast(
-                CellArray, np.array(state.water_reversal_saturation, dtype=dtype, copy=True)
+                "CellArray", np.array(state.water_reversal_saturation, dtype=dtype, copy=True)
             ),
             gas_reversal_saturation=typing.cast(
-                CellArray, np.array(state.gas_reversal_saturation, dtype=dtype, copy=True)
+                "CellArray", np.array(state.gas_reversal_saturation, dtype=dtype, copy=True)
             ),
         )
 
@@ -195,6 +205,8 @@ class HysteresisWorkspace(typing.NamedTuple):
             out_max_saturation=self.max_gas_saturation,
             out_imbibition_flag=self.gas_imbibition_flag,
             out_reversal_saturation=self.gas_reversal_saturation,
+            min_saturation=self.min_gas_saturation,
+            out_min_saturation=self.min_gas_saturation,
         )
 
 
@@ -320,21 +332,24 @@ def load_hysteresis(workspace: HysteresisWorkspace, *, dtype: npt.DTypeLike = No
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
     return Hysteresis(
         max_water_saturation=typing.cast(
-            CellArray, np.array(workspace.max_water_saturation, dtype=dtype, copy=True)
+            "CellArray", np.array(workspace.max_water_saturation, dtype=dtype, copy=True)
         ),
         max_gas_saturation=typing.cast(
-            CellArray, np.array(workspace.max_gas_saturation, dtype=dtype, copy=True)
+            "CellArray", np.array(workspace.max_gas_saturation, dtype=dtype, copy=True)
         ),
         min_water_saturation=typing.cast(
-            CellArray, np.array(workspace.min_water_saturation, dtype=dtype, copy=True)
+            "CellArray", np.array(workspace.min_water_saturation, dtype=dtype, copy=True)
+        ),
+        min_gas_saturation=typing.cast(
+            "CellArray", np.array(workspace.min_gas_saturation, dtype=dtype, copy=True)
         ),
         water_imbibition_flag=workspace.water_imbibition_flag.copy(),
         gas_imbibition_flag=workspace.gas_imbibition_flag.copy(),
         water_reversal_saturation=typing.cast(
-            CellArray, np.array(workspace.water_reversal_saturation, dtype=dtype, copy=True)
+            "CellArray", np.array(workspace.water_reversal_saturation, dtype=dtype, copy=True)
         ),
         gas_reversal_saturation=typing.cast(
-            CellArray, np.array(workspace.gas_reversal_saturation, dtype=dtype, copy=True)
+            "CellArray", np.array(workspace.gas_reversal_saturation, dtype=dtype, copy=True)
         ),
     )
 

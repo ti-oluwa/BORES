@@ -94,6 +94,7 @@ class KilloughLandRelPermTable(HysteresisRelPermTable):
         water_reversal_saturation: NumberOrArray[NDimension] | None = None,
         gas_reversal_saturation: NumberOrArray[NDimension] | None = None,
         min_water_saturation: NumberOrArray[NDimension] | None = None,
+        min_gas_saturation: NumberOrArray[NDimension] | None = None,
         **kwargs: typing.Any,
     ) -> tuple[RelativePermeabilities, RelativePermeabilityDerivatives | None]:
         """
@@ -114,6 +115,8 @@ class KilloughLandRelPermTable(HysteresisRelPermTable):
         :param gas_imbibition_flag: Per-cell flag, true while gas saturation increases.
         :param water_reversal_saturation: Water saturation at the last reversal. Defaults to
             `max_water_saturation`.
+        :param min_gas_saturation: Historical minimum gas saturation per cell. Not used by this
+            model.
         :param min_water_saturation: Historical minimum water saturation per cell. Not used by the
             Killough model.
         :param gas_reversal_saturation: Gas saturation at the last reversal. Defaults to

@@ -167,6 +167,7 @@ def test_the_workspace_updates_in_place_and_matches_the_immutable_state():
         "max_water_saturation",
         "max_gas_saturation",
         "min_water_saturation",
+        "min_gas_saturation",
         "water_imbibition_flag",
         "gas_imbibition_flag",
         "water_reversal_saturation",
@@ -257,3 +258,51 @@ def test_the_minimum_and_where_it_is_written_must_be_given_together():
         advance_phase_hysteresis(**arguments, min_saturation=saturation)
     with pytest.raises(ValidationError):
         advance_phase_hysteresis(**arguments, out_min_saturation=np.empty(4))
+
+
+def test_the_historical_minimum_gas_saturation_only_ever_falls():
+    history = _walk(
+        water_path=[0.2] * len(GAS_PATH),
+        gas_path=GAS_PATH,
+        water_imbibition_when_increasing=True,
+        gas_imbibition_when_increasing=False,
+    )
+    assert [float(state.min_gas_saturation[0]) for state in history] == pytest.approx([
+        0.10,
+        0.10,
+        0.10,
+        0.10,
+        0.10,
+        0.10,
+    ])
+    falling = _walk(
+        water_path=[0.2] * 5,
+        gas_path=[0.4, 0.3, 0.2, 0.25, 0.1],
+        water_imbibition_when_increasing=True,
+        gas_imbibition_when_increasing=False,
+    )
+    assert [float(state.min_gas_saturation[0]) for state in falling] == pytest.approx([
+        0.3,
+        0.2,
+        0.2,
+        0.1,
+    ])
+
+
+def test_the_workspace_tracks_the_minimum_gas_saturation_in_place():
+    state = Hysteresis.from_saturation(
+        water_saturation=np.array([0.5, 0.5]), gas_saturation=np.array([0.3, 0.3])
+    )
+    np.testing.assert_allclose(state.min_gas_saturation, [0.3, 0.3])
+    workspace = HysteresisWorkspace.from_state(state)
+    array = workspace.min_gas_saturation
+    workspace.update(
+        water_saturation=np.array([0.5, 0.5]),
+        gas_saturation=np.array([0.1, 0.4]),
+        previous_water_saturation=np.array([0.5, 0.5]),
+        previous_gas_saturation=np.array([0.3, 0.3]),
+        water_imbibition_when_increasing=True,
+        gas_imbibition_when_increasing=False,
+    )
+    assert workspace.min_gas_saturation is array
+    np.testing.assert_allclose(workspace.snapshot().min_gas_saturation, [0.1, 0.3])
