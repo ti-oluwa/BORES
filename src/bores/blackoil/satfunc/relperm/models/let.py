@@ -23,7 +23,7 @@ from bores.blackoil.satfunc.relperm.models.derivatives import (
     validate_and_normalize_saturations,
 )
 from bores.blackoil.satfunc.relperm.models.kernels import (
-    RelPermCell,
+    CellRelPerm,
     blend_cells,
     clip_unit,
     finalize_mixed_wet_cell,
@@ -50,6 +50,7 @@ from bores.blackoil.satfunc.utils import element_at, get_floating_dtype
 from bores.constants import c
 from bores.errors import ValidationError
 from bores.types import (
+    Boolean,
     FluidPhase,
     Integer,
     NDimension,
@@ -449,7 +450,7 @@ def compute_let_water_wet_cell(
     rule_id: Integer,
     minimum_mobile_pore_space: Number,
     rule_minimum_mobile_pore_space: Number,
-) -> RelPermCell:
+) -> CellRelPerm:
     """
     LET relative permeabilities and derivatives of a water-wet cell.
 
@@ -513,7 +514,7 @@ def compute_let_water_wet_cell(
         residual_oil_saturation_gas=sorg,
         minimum_mobile_pore_space=rule_minimum_mobile_pore_space,
     )
-    return RelPermCell(
+    return CellRelPerm(
         krw=krw,
         kro=kro,
         krg=krg,
@@ -546,7 +547,7 @@ def compute_let_oil_wet_cell(
     rule_id: Integer,
     minimum_mobile_pore_space: Number,
     rule_minimum_mobile_pore_space: Number,
-) -> RelPermCell:
+) -> CellRelPerm:
     """
     LET relative permeabilities and derivatives of an oil-wet cell.
 
@@ -618,7 +619,7 @@ def compute_let_oil_wet_cell(
         residual_oil_saturation_gas=swc,
         minimum_mobile_pore_space=rule_minimum_mobile_pore_space,
     )
-    return RelPermCell(
+    return CellRelPerm(
         krw=krw,
         kro=kro,
         krg=krg,
@@ -2759,7 +2760,7 @@ class LETThreePhaseRelPermTable(RelativePermeabilityTable):
     `"auto"` - dtype-aware `min_value`; `None` - no `min_value`; `Number` - explicit value.
     """
 
-    supports_vector: bool = attrs.field(init=False, repr=False, default=True)
+    supports_vector: Boolean = attrs.field(init=False, repr=False, default=True)
     """Flag indicating support for array/vector inputs."""
 
     def __attrs_post_init__(self) -> None:

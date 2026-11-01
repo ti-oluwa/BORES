@@ -153,6 +153,7 @@ def validate_and_normalize_saturations(
             f"Saturations must be between 0 and 1. Sw: {show_invalid_saturation(sw)}, "
             f"So: {show_invalid_saturation(so)}, Sg: {show_invalid_saturation(sg)}"
         )
+
     total_saturation = sw + so + sg
     needs_norm = (np.abs(total_saturation - 1.0) > saturation_epsilon) & (total_saturation > 0.0)
     if np.any(needs_norm):

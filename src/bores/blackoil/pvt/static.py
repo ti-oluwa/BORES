@@ -39,7 +39,7 @@ def load_density_records(deck_file: DeckFile) -> list[list[dict[str, Number]]] |
     if gravity is None:
         return None
 
-    field_to_deck_unit = get_conversion_factors(UnitSystem.FIELD, deck_file.unit_system)["density"]
+    factor = get_conversion_factors(UnitSystem.FIELD, deck_file.unit_system)["density"]
     water_density = c.STANDARD_WATER_DENSITY_IMPERIAL
     air_density = c.STANDARD_AIR_DENSITY_IMPERIAL
     return [
@@ -49,11 +49,9 @@ def load_density_records(deck_file: DeckFile) -> list[list[dict[str, Number]]] |
                     oil_api_gravity=float(record["api_gravity"])
                 )
                 * water_density
-                * field_to_deck_unit,
-                "water": float(record["water_specific_gravity"])
-                * water_density
-                * field_to_deck_unit,
-                "gas": float(record["gas_specific_gravity"]) * air_density * field_to_deck_unit,
+                * factor,
+                "water": float(record["water_specific_gravity"]) * water_density * factor,
+                "gas": float(record["gas_specific_gravity"]) * air_density * factor,
             }
         ]
         for record in gravity

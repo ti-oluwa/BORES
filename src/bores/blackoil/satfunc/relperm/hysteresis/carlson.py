@@ -182,8 +182,6 @@ class CarlsonRelPermTable(HysteresisRelPermTable):
     phase.
     """
 
-    __type__ = "carlson_relperm_model"
-
     wetting_phase_uses_imbibition: bool = False
     """
     Whether the wetting phase takes its imbibition curve rather than its drainage curve, as
@@ -221,6 +219,7 @@ class CarlsonRelPermTable(HysteresisRelPermTable):
                 "system is not supported. Give no `oil_water_imbibition_table`, or set "
                 "`wetting_phase_uses_imbibition` so that it serves the wetting phase."
             )
+
         for prefix, tabulated in (
             ("gas", self._tabulate_gas_translation()),
             ("oil", self._tabulate_oil_translation()),
@@ -248,6 +247,7 @@ class CarlsonRelPermTable(HysteresisRelPermTable):
         imbibition_table = self.gas_oil_imbibition_table
         if imbibition_table is None or self.get_gas_oil_wetting_phase() == FluidPhase.GAS:
             return self._no_translation()
+
         connate_water = self.get_connate_water_saturation()
         axis = typing.cast(
             "NumberArray[OneDimension]", np.linspace(0.0, 1.0 - connate_water, SHIFT_CURVE_POINTS)
@@ -278,6 +278,7 @@ class CarlsonRelPermTable(HysteresisRelPermTable):
         imbibition_table = self.oil_water_imbibition_table
         if imbibition_table is None or self.get_oil_water_wetting_phase() != FluidPhase.WATER:
             return self._no_translation()
+
         connate_water = self.get_connate_water_saturation()
         axis = typing.cast(
             "NumberArray[OneDimension]", np.linspace(0.0, 1.0 - connate_water, SHIFT_CURVE_POINTS)
@@ -432,6 +433,7 @@ class CarlsonRelPermTable(HysteresisRelPermTable):
             kro_water_i = kro_water_i * oil_factor
             if with_derivatives:
                 dkro_water_i = dkro_water_i * oil_factor
+
         if use_gas_hysteresis:
             translated_gas = np.empty_like(sg)
             gas_factor = np.empty_like(sg)

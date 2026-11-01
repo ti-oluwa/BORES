@@ -169,6 +169,7 @@ class HysteresisOptions:
         """
         if "HYSTER" not in (deck_file.get("SATOPTS") or ()):
             return None
+
         record = deck_file.get("EHYSTR")
         if record is None:
             return cls() if relperm_model is None else cls(relperm_model=relperm_model)
@@ -178,6 +179,7 @@ class HysteresisOptions:
             raise ValidationError(
                 f"`EHYSTR` item 2 must be one of {sorted(RELPERM_HYSTERESIS_MODEL_MAP)}; got {code}."
             )
+
         deck_model, wetting_phase_uses_imbibition = RELPERM_HYSTERESIS_MODEL_MAP[code]
         apply_to_relperm, apply_to_capillary_pressure = LIMITING_CURVES_MAP[
             record["limiting_curves"]

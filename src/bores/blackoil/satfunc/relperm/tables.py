@@ -22,7 +22,9 @@ from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.precision import get_dtype, get_floating_point_info
 from bores.types import (
+    Boolean,
     FluidPhase,
+    Integer,
     NDimension,
     Number,
     NumberArray,
@@ -1301,7 +1303,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
     def from_deck(
         cls,
         deck_file: DeckFile,
-        satnum: int = 1,
+        satnum: Integer = 1,
         *,
         system: typing.Literal["oil_water", "gas_oil", "gas_water"],
         keyword_family: typing.Literal["first", "second"] = "first",
@@ -1711,13 +1713,13 @@ class DeckSaturationSystems(typing.NamedTuple):
     family: typing.Literal["first", "second"]
     """Keyword family the region is read with."""
 
-    oil_water: bool
+    oil_water: Boolean
     """Whether the oil-water system (water relative permeability and oil-in-water) is complete."""
 
-    gas_oil: bool
+    gas_oil: Boolean
     """Whether the gas-oil system (gas relative permeability and oil-in-gas) is complete."""
 
-    gas_water: bool
+    gas_water: Boolean
     """
     Whether the deck defines a gas-water system and no oil system: `SGWFN`, or `SWFN` with `SGFN`
     and no `SOF2`/`SOF3`.
@@ -1728,8 +1730,8 @@ class DeckSaturationSystems(typing.NamedTuple):
 
 
 def detect_saturation_systems(
-    deck_file: typing.Any,
-    satnum: int,
+    deck_file: DeckFile,
+    satnum: Integer,
     keyword_family: typing.Literal["first", "second", "auto"] = "auto",
 ) -> DeckSaturationSystems:
     """
@@ -1786,6 +1788,7 @@ def detect_saturation_systems(
             )
     else:
         family = keyword_family
+
     oil_water, gas_oil = systems[family]
     return DeckSaturationSystems(
         family=family,
@@ -1842,7 +1845,7 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
     If `None`, falls back to `min(kro_w, kro_g)`.
     """
 
-    supports_vector: bool = attrs.field(init=False, repr=False, default=True)
+    supports_vector: Boolean = attrs.field(init=False, repr=False, default=True)
     """Flag indicating support for array inputs."""
 
     def __attrs_post_init__(self) -> None:
@@ -2238,7 +2241,7 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
     def from_deck(
         cls,
         deck_file: DeckFile,
-        satnum: int = 1,
+        satnum: Integer = 1,
         *,
         mixing_rule: MixingRule | str | None = None,
         keyword_family: typing.Literal["first", "second", "auto"] = "auto",

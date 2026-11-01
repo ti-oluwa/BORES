@@ -187,6 +187,7 @@ class KilloughCapillaryPressureTable(HysteresisCapillaryPressureTable):
             inputs += [max_water_saturation, water_imbibition_flag]
             if water_reversal_saturation is not None:
                 inputs.append(water_reversal_saturation)
+
         if use_gas_hysteresis:
             inputs += [max_gas_saturation, gas_imbibition_flag]
             if gas_reversal_saturation is not None:

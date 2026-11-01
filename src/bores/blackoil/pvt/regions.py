@@ -1468,6 +1468,7 @@ def load_pvt_regions(
             raise ValidationError(
                 "The deck's phases need PVT keywords it does not have: " + ", ".join(missing) + "."
             )
+
     # Tables of a phase the model does not have are left unread
     read_oil = phases is None or phases.oil
     read_gas = phases is None or phases.gas

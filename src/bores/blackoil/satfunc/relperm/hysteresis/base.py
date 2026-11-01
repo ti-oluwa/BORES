@@ -1,4 +1,4 @@
-"""The base class and curve queries shared by the relative permeability hysteresis models."""
+"""Base class and curve queries shared by the relative permeability hysteresis models."""
 
 import math
 import typing
@@ -168,7 +168,7 @@ def query_gas_oil_curves(
 class ScanInputs(typing.NamedTuple):
     """Flat, normalised saturations and history of one `compute` call, ready for the curve queries."""
 
-    is_scalar: bool
+    is_scalar: Boolean
     """Whether every saturation given was a scalar, so the results are returned as scalars."""
 
     shape: tuple[int, ...]
@@ -184,10 +184,10 @@ class ScanInputs(typing.NamedTuple):
     placeholder: NumberArray[OneDimension]
     """One-element array standing in for anything a pass does not need."""
 
-    use_water_hysteresis: bool
-    use_gas_hysteresis: bool
+    use_water_hysteresis: Boolean
+    use_gas_hysteresis: Boolean
 
-    gas_is_non_wetting: bool
+    gas_is_non_wetting: Boolean
     """Whether gas is the non-wetting phase of the gas-oil system."""
 
     water_reversal: NumberArray[OneDimension]
@@ -264,25 +264,25 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
     `compute_land_trapping_coefficient` to derive it from the endpoint saturations.
     """
 
-    maximum_residual_oil_saturation_water: float | None = None
+    maximum_residual_oil_saturation_water: Number | None = None
     """
     Maximum residual oil saturation S_r_max used by Land's formula for the
     oil-water system. Required when `oil_water_imbibition_table` is set.
     """
 
-    maximum_residual_oil_saturation_gas: float | None = None
+    maximum_residual_oil_saturation_gas: Number | None = None
     """
     Maximum residual oil saturation S_r_max for the gas-oil system. Required
     when `gas_oil_imbibition_table` is set.
     """
 
-    maximum_residual_gas_saturation: float | None = None
+    maximum_residual_gas_saturation: Number | None = None
     """
     Maximum residual gas saturation S_r_max used by Land's formula. Required
     when `gas_oil_imbibition_table` is set.
     """
 
-    tabular_land_trapping: bool = True
+    tabular_land_trapping: Boolean = True
     """
     Whether Land trapping also reaches tabular imbibition curves, in addition to parametric ones.
 
@@ -295,7 +295,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
     mixing_rule: MixingRule | str = "baker_linear_rule"
     """Three-phase oil relative permeability mixing rule."""
 
-    supports_vector: bool = attrs.field(init=False, repr=False, default=True)
+    supports_vector: Boolean = attrs.field(init=False, repr=False, default=True)
 
     def __attrs_post_init__(self) -> None:
         if isinstance(self.mixing_rule, str):
@@ -421,8 +421,8 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         *,
         max_water_saturation: NumberOrArray[NDimension] | None,
         max_gas_saturation: NumberOrArray[NDimension] | None,
-        water_imbibition_flag: bool | BooleanArray[NDimension] | None,
-        gas_imbibition_flag: bool | BooleanArray[NDimension] | None,
+        water_imbibition_flag: Boolean | BooleanArray[NDimension] | None,
+        gas_imbibition_flag: Boolean | BooleanArray[NDimension] | None,
         water_reversal_saturation: NumberOrArray[NDimension] | None,
         gas_reversal_saturation: NumberOrArray[NDimension] | None,
         min_water_saturation: NumberOrArray[NDimension] | None = None,
@@ -646,6 +646,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         dtype = values.krw_drainage.dtype
         if dtype.kind != "f":
             dtype = np.dtype(np.float64)
+
         rule = typing.cast(MixingRule, self.mixing_rule)
         rule_id = get_builtin_rule_id(rule)
         use_rule_in_kernel = rule_id is not None
@@ -799,6 +800,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         maximum_residual = self.maximum_residual_oil_saturation_water
         if maximum_residual is None:
             return None
+
         residual = np.empty(size, dtype=gas_saturation.dtype)
         land_residual_from_reversal(
             size=size,
@@ -826,6 +828,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         maximum_residual = self.maximum_residual_gas_saturation
         if maximum_residual is None:
             return None
+
         residual = np.empty(size, dtype=water_saturation.dtype)
         land_residual_from_reversal(
             size=size,
@@ -885,6 +888,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         """
         if uses_tabular_endpoints(table):
             return kwargs
+
         residual = self.land_residual_oil_water(
             size=size, gas_saturation=gas_saturation, water_reversal=water_reversal
         )
@@ -910,12 +914,14 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         """
         if uses_tabular_endpoints(table):
             return kwargs
+
         overrides: dict[str, typing.Any] = {}
         residual_gas = self.land_residual_gas(
             size=size, water_saturation=water_saturation, gas_reversal=gas_reversal
         )
         if residual_gas is not None:
             overrides["residual_gas_saturation"] = residual_gas
+
         residual_oil = self.land_residual_oil_gas(
             size=size, water_saturation=water_saturation, gas_reversal=gas_reversal
         )

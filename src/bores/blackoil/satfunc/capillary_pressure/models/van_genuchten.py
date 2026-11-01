@@ -18,6 +18,7 @@ from bores.blackoil.satfunc.utils import (
 from bores.constants import c
 from bores.errors import ValidationError
 from bores.types import (
+    Boolean,
     CapillaryPressureDerivatives,
     CapillaryPressures,
     FluidPhase,
@@ -1403,7 +1404,7 @@ class VanGenuchtenCapillaryPressureTable(CapillaryPressureTable):
     another `UnitSystem`.
     """
 
-    supports_vector: bool = attrs.field(init=False, repr=False, default=True)
+    supports_vector: Boolean = attrs.field(init=False, repr=False, default=True)
     """Flag indicating support for array inputs."""
 
     def get_oil_water_wetting_phase(self) -> FluidPhase:

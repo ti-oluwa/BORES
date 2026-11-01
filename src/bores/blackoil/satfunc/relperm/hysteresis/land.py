@@ -255,7 +255,7 @@ class LandTrapping:
     """
     Land's (1968) trapping of the non-wetting phase for one displacement.
 
-    It answers one question: how much of the non-wetting phase is left behind when imbibition
+    It answers the question of how much of the non-wetting phase is left behind when imbibition
     starts from a given saturation. The answer rises with the starting saturation and reaches
     `maximum_trapped_saturation` when imbibition starts from `maximum_saturation`:
 

@@ -142,6 +142,7 @@ def pchip_resample(
 
     if number_of_output_points is None:
         raise ValueError("Provide either `number_of_output_points` or `target_saturations`.")
+
     resampled_saturations = make_saturation_field(
         n_points=number_of_output_points,
         min_saturation=source_saturations[0],

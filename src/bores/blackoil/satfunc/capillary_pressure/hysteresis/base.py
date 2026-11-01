@@ -154,6 +154,7 @@ def evaluate_three_phase_table(
     cached = memo.get(id(table), None)
     if cached is not None and (cached[1] is not None or not with_derivatives):
         return cached
+
     arguments = dict(
         water_saturation=water_saturation,
         oil_saturation=oil_saturation,
@@ -193,7 +194,7 @@ class HysteresisCapillaryPressureTable(CapillaryPressureTable):
     gas_oil_imbibition_table: TwoPhaseCapillaryPressureTable | CapillaryPressureTable | None = None
     """Primary imbibition Pc table for the gas-oil system. Defaults to the drainage table."""
 
-    supports_vector: bool = attrs.field(init=False, repr=False, default=True)
+    supports_vector: Boolean = attrs.field(init=False, repr=False, default=True)
 
     def __attrs_post_init__(self) -> None:
         for name, table, phases in (

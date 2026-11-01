@@ -75,8 +75,6 @@ class KilloughLandRelPermTable(HysteresisRelPermTable):
     imbibition curve that differs from its drainage curve.
     """
 
-    __type__ = "killough_land_relperm_model"
-
     scanning_interpolation_exponent: Number = 1.0
     """Killough scanning curve interpolation exponent *n* (1 = linear)."""
 
@@ -209,6 +207,7 @@ class KilloughLandRelPermTable(HysteresisRelPermTable):
                         "water_saturation": rescaled_water,
                         "oil_saturation": 1.0 - rescaled_water - sg,
                     }
+
             if imbibition_table is not None and imbibition_table is not drainage_water_system:
                 krw_i, kro_water_i, dkrw_i, dkro_water_i = query_oil_water_curves(
                     imbibition_table, **water_arguments, **land_kwargs
@@ -239,6 +238,7 @@ class KilloughLandRelPermTable(HysteresisRelPermTable):
                     water_saturation=sw,
                     gas_reversal=typing.cast("NumberArray[OneDimension]", gas_reversal),
                 )
+
             gas_arguments = gas_oil_arguments
             gas_scale = None
             if gas_residual is not None and uses_tabular_endpoints(gas_table):
@@ -266,6 +266,7 @@ class KilloughLandRelPermTable(HysteresisRelPermTable):
                     "gas_saturation": rescaled_gas,
                     "oil_saturation": 1.0 - sw - rescaled_gas,
                 }
+
             if gas_is_non_wetting:
                 if gas_residual is not None:
                     trapped_gas = gas_residual
@@ -276,6 +277,7 @@ class KilloughLandRelPermTable(HysteresisRelPermTable):
                 history = history._replace(
                     gas_trapped_saturation=typing.cast("NumberArray[OneDimension]", trapped_gas)
                 )
+
             if imbibition_table is not None and imbibition_table is not drainage_gas_system:
                 kro_gas_i, krg_i, dkro_gas_i, dkrg_i = query_gas_oil_curves(
                     imbibition_table, **gas_arguments, **land_kwargs
@@ -284,6 +286,7 @@ class KilloughLandRelPermTable(HysteresisRelPermTable):
                 kro_gas_i, krg_i, dkro_gas_i, dkrg_i = query_gas_oil_curves(
                     drainage_gas_system, **gas_arguments, **land_kwargs
                 )
+
             if gas_scale is not None and with_derivatives:
                 dkro_gas_i = dkro_gas_i * gas_scale
                 dkrg_i = dkrg_i * gas_scale

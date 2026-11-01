@@ -89,6 +89,7 @@ from bores.wells.resolution.solvers import (
 )
 from bores.wells.resolution.spec import WellControlSpec
 from bores.wells.resolution.tubing import (
+    WellTubing,
     attach_flowing_fluid,
     compute_tubing_head_pressure,
     resolve_well_tubing,
@@ -387,6 +388,7 @@ def differentiate_pressures(
             value = base_water[connection]
         else:
             value = base_gas[connection]
+
         step = get_step(value=value, scale=scale)
         lower = -step if abs(value) > 2.0 * step else 0.0
 
@@ -556,6 +558,7 @@ def differentiate_pressures_with_cells(
     for connection in range(count):
         for field in range(FLUID_FIELDS):
             fluid_base[field] = fluids[field, connection]
+
         for unknown in range(3):
             fill_fluid_direction(
                 direction=fluid_direction,
@@ -574,6 +577,7 @@ def differentiate_pressures_with_cells(
 
             for field in range(FLUID_FIELDS):
                 fluids[field, connection] = fluid_base[field] + step * fluid_direction[field]
+
             evaluate(
                 walk=walk,
                 setup=setup,
@@ -586,6 +590,7 @@ def differentiate_pressures_with_cells(
             )
             for field in range(FLUID_FIELDS):
                 fluids[field, connection] = fluid_base[field] + lower * fluid_direction[field]
+
             evaluate(
                 walk=walk,
                 setup=setup,
@@ -965,6 +970,7 @@ def convert_to_surface(
             dqs_dx[oil_row + 2, column] = (
                 oil_to_gas * dq_dx[oil_row, column] + gas_to_gas * dq_dx[oil_row + 2, column]
             )
+
         for unknown in range(3):
             dqo_base_dx = -oil_rate * db_dx[index, 0, unknown] / (oil_volume_factor**2 * factor)
             dqg_base_dx = -gas_rate * db_dx[index, 2, unknown] / gas_volume_factor**2
@@ -977,6 +983,7 @@ def convert_to_surface(
             dqs_dx[oil_row + 2, oil_row + unknown] += dqg_base_dx + carries * (
                 dr_dx[index, 0, unknown] * surface_oil_base + solution_ratio * dqo_base_dx
             )
+
         dqs_dbhp[oil_row] = oil_to_oil * dq_dbhp[oil_row] + gas_to_oil * dq_dbhp[oil_row + 2]
         dqs_dbhp[oil_row + 1] = water_to_water * dq_dbhp[oil_row + 1]
         dqs_dbhp[oil_row + 2] = oil_to_gas * dq_dbhp[oil_row] + gas_to_gas * dq_dbhp[oil_row + 2]
@@ -1236,6 +1243,7 @@ def get_control_derivatives(
             dr_dx=workspace.dthp_dx[start:end],
             dr_dbhp=workspace.dthp_dbhp[well_row],
         )
+
     weights = np.array([phases.oil, phases.water, phases.gas])
     if quantity == "reservoir_rate":
         dq_dx, dq_dbhp = workspace.dq_dx_well[start:end], workspace.dq_dbhp_well[well_row]
@@ -1269,6 +1277,7 @@ def get_well_derivatives(
         raise ValidationError(
             "This `WellsWorkspace` has no room for well derivatives. Build it with `well_offsets`."
         )
+
     size = 3 * count
     return WellDerivatives(
         dq_dx=workspace.dq_dx_connection[block_start:block_end].reshape(size, size),
@@ -1286,7 +1295,7 @@ def get_well_derivatives(
 
 def differentiate_tubing_head_pressure(
     *,
-    tubing: typing.Any,
+    tubing: WellTubing,
     reference_depth: Number,
     reference_pressure: Number,
     relevant_phases: PhaseValues,
@@ -1339,7 +1348,7 @@ def differentiate_tubing_head_pressure(
         )
 
     def difference(
-        target: list[Number] | NumberArray[OneDimension], position: int, scale: Number
+        target: list[Number] | NumberArray[OneDimension], position: Integer, scale: Number
     ) -> Number:
         value = target[position]
         step = get_step(value=value, scale=scale)
@@ -1446,6 +1455,7 @@ def compute_well_derivatives(
         workspace.dthp_dbhp[well_row] = math.nan
         workspace.dthp_dx[start:end] = math.nan
         return
+
     if len(connection_derivatives.dʎ_dx) != count:
         raise ValidationError(
             f"`connection_derivatives` has {len(connection_derivatives.dʎ_dx)} "
@@ -1681,5 +1691,6 @@ def compute_well_derivatives(
         gradient = np.asarray(dthp_dq_connection)
         dthp_dbhp += gradient @ dq_dbhp
         dthp_dx += (gradient @ dq_dx).reshape(count, 3)
+
     workspace.dthp_dbhp[well_row] = dthp_dbhp
     workspace.dthp_dx[active_open] = dthp_dx

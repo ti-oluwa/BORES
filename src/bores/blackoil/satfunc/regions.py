@@ -192,9 +192,8 @@ class SatFunc:
 
         Detects which Eclipse saturation-function keyword family is present
         (`SWOF`/`SGOF` or `SWFN`/`SGFN` + `SOF2`/`SOF3`) and builds one
-        `SatFuncTables` per `SATNUM` region, each combining a
-        `ThreePhaseRelPermTable` and (when available) a
-        `ThreePhaseCapillaryPressureTable`.
+        `SatFuncTables` per `SATNUM` region, each combining a `ThreePhaseRelPermTable`
+        and (when available) a `ThreePhaseCapillaryPressureTable`.
 
         The number of regions is inferred from the longest region list across
         the relevant keywords (`SWOF`/`SWFN` for oil-water, `SGOF`/`SGFN` for
@@ -282,6 +281,7 @@ class SatFunc:
                 elif phases.phase_count == 2:
                     two_phase_system = "oil_water" if phases.water else "gas_oil"
                 declared_by_phases = two_phase_system is not None
+
             if two_phase_system is None:
                 if allow_two_phase and systems.oil_water != systems.gas_oil:
                     two_phase_system = "oil_water" if systems.oil_water else "gas_oil"
@@ -314,6 +314,7 @@ class SatFunc:
                         satnum,
                         two_phase_system.replace("_", "-"),
                     )
+
                 relative_permeability = TwoPhaseRelPermTable.from_deck(
                     deck_file=deck_file,
                     satnum=satnum,
@@ -364,7 +365,8 @@ class SatFunc:
                     )
 
             tables[satnum] = SatFuncTables(
-                relative_permeability=relative_permeability, capillary_pressure=capillary_pressure
+                relative_permeability=relative_permeability,
+                capillary_pressure=capillary_pressure,
             )
             logger.debug(
                 "Built rock-fluid tables for `SATNUM` region %d (capillary_pressure=%s)",

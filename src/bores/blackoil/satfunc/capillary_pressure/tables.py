@@ -18,9 +18,11 @@ from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.types import (
+    Boolean,
     CapillaryPressureDerivatives,
     CapillaryPressures,
     FluidPhase,
+    Integer,
     NDimension,
     Number,
     NumberArray,
@@ -767,7 +769,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
     def from_deck(
         cls,
         deck_file: DeckFile,
-        satnum: int = 1,
+        satnum: Integer = 1,
         *,
         system: typing.Literal["oil_water", "gas_oil", "gas_water"],
         keyword_family: typing.Literal["first", "second"] = "first",
@@ -1041,7 +1043,7 @@ class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
     A table of Pcgo against oil saturation.
     """
 
-    supports_vector: bool = attrs.field(init=False, repr=False, default=True)
+    supports_vector: Boolean = attrs.field(init=False, repr=False, default=True)
     """Flag indicating support for array inputs."""
 
     def __attrs_post_init__(self) -> None:
@@ -1212,7 +1214,7 @@ class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
     def from_deck(
         cls,
         deck_file: DeckFile,
-        satnum: int = 1,
+        satnum: Integer = 1,
         *,
         keyword_family: typing.Literal["first", "second", "auto"] = "auto",
         number_of_base_points: int = 200,

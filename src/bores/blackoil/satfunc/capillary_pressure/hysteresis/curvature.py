@@ -167,6 +167,7 @@ def scan_curve_curvature_kernel(
             else:
                 lowest = element_at(array=minimum_saturation, index=i)
                 highest = reversal
+
             weight, weight_derivative = compute_curvature_scanning_weight(
                 saturation=element_at(array=saturation, index=i),
                 lowest_saturation=lowest,
@@ -175,6 +176,7 @@ def scan_curve_curvature_kernel(
                 curvature=curvature,
                 numerical_epsilon=numerical_epsilon,
             )
+
         drainage = element_at(array=drainage_value, index=i)
         imbibition = element_at(array=imbibition_value, index=i)
         out_value[i] = drainage + (imbibition - drainage) * weight

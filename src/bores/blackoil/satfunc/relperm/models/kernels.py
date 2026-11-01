@@ -29,8 +29,8 @@ from bores.types import Integer, NDimension, Number, NumberArray, NumberOrArray,
 
 __all__ = [
     "NO_MINIMUM",
+    "CellRelPerm",
     "FlatRelPermInputs",
-    "RelPermCell",
     "blend_cells",
     "clip_unit",
     "finalize_mixed_wet_cell",
@@ -59,7 +59,7 @@ def to_kernel_minimum(minimum: Number | None) -> Number:
     return NO_MINIMUM if minimum is None else minimum
 
 
-class RelPermCell(typing.NamedTuple):
+class CellRelPerm(typing.NamedTuple):
     """
     Relative permeabilities and their partial derivatives for one cell of one wettability
     system, before the minimum relative permeability is applied.
@@ -255,12 +255,12 @@ def rule_derivatives(
 
 @numba.njit(cache=True, error_model="numpy")
 def blend_cells(
-    water_wet: RelPermCell, oil_wet: RelPermCell, water_wet_fraction: Number
-) -> RelPermCell:
+    water_wet: CellRelPerm, oil_wet: CellRelPerm, water_wet_fraction: Number
+) -> CellRelPerm:
     """Blend the water-wet and oil-wet systems of a mixed-wet rock, weighting the water-wet system by `water_wet_fraction`."""
     f = water_wet_fraction
     g = 1.0 - water_wet_fraction
-    return RelPermCell(
+    return CellRelPerm(
         krw=f * water_wet.krw + g * oil_wet.krw,
         kro=f * water_wet.kro + g * oil_wet.kro,
         krg=f * water_wet.krg + g * oil_wet.krg,
@@ -276,7 +276,7 @@ def blend_cells(
 
 @numba.njit(cache=True, error_model="numpy")
 def finalize_water_wet_cell(
-    cell: RelPermCell, minimum_water: Number, minimum_oil: Number, minimum_gas: Number
+    cell: CellRelPerm, minimum_water: Number, minimum_oil: Number, minimum_gas: Number
 ) -> tuple[Number, Number, Number, Number, Number, Number, Number, Number, Number]:
     """
     Apply the minimum relative permeability to a purely water-wet cell.
@@ -304,7 +304,7 @@ def finalize_water_wet_cell(
 
 @numba.njit(cache=True, error_model="numpy")
 def finalize_oil_wet_cell(
-    cell: RelPermCell, minimum_water: Number, minimum_oil: Number, minimum_gas: Number
+    cell: CellRelPerm, minimum_water: Number, minimum_oil: Number, minimum_gas: Number
 ) -> tuple[Number, Number, Number, Number, Number, Number, Number, Number, Number]:
     """
     Apply the minimum relative permeability to a purely oil-wet cell.
@@ -335,7 +335,7 @@ def finalize_oil_wet_cell(
 
 @numba.njit(cache=True, error_model="numpy")
 def finalize_mixed_wet_cell(
-    cell: RelPermCell, minimum_water: Number, minimum_oil: Number, minimum_gas: Number
+    cell: CellRelPerm, minimum_water: Number, minimum_oil: Number, minimum_gas: Number
 ) -> tuple[Number, Number, Number, Number, Number, Number, Number, Number, Number]:
     """
     Apply the minimum relative permeability to an already blended mixed-wet cell.

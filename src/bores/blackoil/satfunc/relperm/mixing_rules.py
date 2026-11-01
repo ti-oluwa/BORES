@@ -704,7 +704,8 @@ def _min_value_loop(
 ) -> None:
     for i in range(size):
         out[i] = _min_value(
-            kro_w=element_at(array=kw, index=i), kro_g=element_at(array=kg, index=i)
+            kro_w=element_at(array=kw, index=i),
+            kro_g=element_at(array=kg, index=i),
         )
 
 

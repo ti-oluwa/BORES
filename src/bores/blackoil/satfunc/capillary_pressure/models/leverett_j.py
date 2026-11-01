@@ -18,6 +18,7 @@ from bores.blackoil.satfunc.utils import (
 from bores.constants import c
 from bores.errors import ValidationError
 from bores.types import (
+    Boolean,
     CapillaryPressureDerivatives,
     CapillaryPressures,
     FluidPhase,
@@ -1439,7 +1440,7 @@ class LeverettJCapillaryPressureTable(CapillaryPressureTable):
     another `UnitSystem`.
     """
 
-    supports_vector: bool = attrs.field(init=False, repr=False, default=True)
+    supports_vector: Boolean = attrs.field(init=False, repr=False, default=True)
     """Flag indicating support for array inputs."""
 
     dyne_per_cm_to_pressure_unit: Number = attrs.field(init=False, repr=False, default=0.0)

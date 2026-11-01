@@ -24,6 +24,7 @@ from bores.blackoil.satfunc.utils import (
 from bores.errors import ValidationError
 from bores.precision import get_dtype
 from bores.types import (
+    Boolean,
     FluidPhase,
     Number,
     NumberArray,
@@ -433,7 +434,7 @@ def sample_oil_water_relative_permeabilities(
     *,
     relperm_table: RelativePermeabilityTable,
     oil_water_reference_saturations: npt.NDArray,
-    sweep_axis_is_water_saturation: bool,
+    sweep_axis_is_water_saturation: Boolean,
     irreducible_water_saturation: Number,
     residual_oil_saturation_water: Number,
     model_kwargs: dict[str, typing.Any],
@@ -503,7 +504,7 @@ def sample_gas_oil_relative_permeabilities(
     *,
     relperm_table: RelativePermeabilityTable,
     gas_oil_reference_saturations: npt.NDArray,
-    sweep_axis_is_gas_saturation: bool,
+    sweep_axis_is_gas_saturation: Boolean,
     irreducible_water_saturation: Number,
     residual_oil_saturation_gas: Number,
     residual_gas_saturation: Number,
@@ -577,7 +578,7 @@ def sample_oil_water_capillary_pressure(
     *,
     capillary_pressure_table: CapillaryPressureTable,
     oil_water_reference_saturations: npt.NDArray,
-    sweep_axis_is_water_saturation: bool,
+    sweep_axis_is_water_saturation: Boolean,
     irreducible_water_saturation: Number,
     residual_oil_saturation_water: Number,
     model_kwargs: dict[str, typing.Any],
@@ -633,7 +634,7 @@ def sample_gas_oil_capillary_pressure(
     *,
     capillary_pressure_table: CapillaryPressureTable,
     gas_oil_reference_saturations: npt.NDArray,
-    sweep_axis_is_gas_saturation: bool,
+    sweep_axis_is_gas_saturation: Boolean,
     irreducible_water_saturation: Number,
     residual_oil_saturation_gas: Number,
     residual_gas_saturation: Number,
