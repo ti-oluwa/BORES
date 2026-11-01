@@ -39,6 +39,7 @@ __all__ = [
     "compute_water_standard_density",
     "compute_water_vapor_pressure",
     "compute_water_viscosity",
+    "compute_water_viscosity_batzle",
 ]
 
 # Physical constants, read from `bores.constants` when this module is imported.
@@ -132,6 +133,29 @@ def compute_water_standard_density(
     """
     weight_percent = salinity * PPM_TO_WEIGHT_PERCENT
     return 62.368 + 0.438603 * weight_percent + 1.60074e-3 * weight_percent**2
+
+
+@elementwise(bounds={"temperature": (32.0, np.inf)}, non_negative=("salinity",))
+def compute_water_viscosity_batzle(
+    temperature: NumberOrArray[AnyDimension],
+    salinity: NumberOrArray[AnyDimension],
+) -> NumberOrArray[AnyDimension]:
+    """
+    Computes the brine viscosity with the Batzle and Wang (1992) correlation.
+
+        μ = 0.1 + 0.333 S + (1.65 + 91.9 S³) exp(-(0.42 (S^0.8 - 0.17)² + 0.045) T^0.8)
+
+    in cP, with the temperature `T` in °C and the salinity `S` as a weight fraction. It does not
+    depend on pressure.
+
+    :param temperature: Temperature (°F)
+    :param salinity: Water salinity (ppm by weight of NaCl)
+    :return: Brine viscosity (cP)
+    """
+    t = fahrenheit_to_celsius(temperature)
+    s = salinity * PPM_TO_WEIGHT_FRACTION
+    decay = (0.42 * (s**0.8 - 0.17) ** 2 + 0.045) * t**0.8
+    return 0.1 + 0.333 * s + (1.65 + 91.9 * s**3) * np.exp(-decay)
 
 
 @elementwise(non_negative=("salinity", "pressure"), positive=("temperature",))

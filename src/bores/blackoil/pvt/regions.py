@@ -11,6 +11,7 @@ from scipy.interpolate import (  # type: ignore[import-untyped]
 )
 from typing_extensions import Self
 
+from bores.blackoil.pvt.co2_storage import build_co2_pressure_axis, build_co2_storage_tables
 from bores.blackoil.pvt.data import PVTData, PVTDataSet, get_stb_to_volume_factor
 from bores.blackoil.pvt.live_oil import build_live_oil_branch_tables
 from bores.blackoil.pvt.static import StaticPVT, load_density_records
@@ -21,6 +22,7 @@ from bores.deck.phases import declares_phases, read_deck_phases
 from bores.deck.precheck import find_missing
 from bores.errors import ValidationError
 from bores.precision import get_dtype
+from bores.reservoir.salinity import load_salinity
 from bores.reservoir.temperature import (
     Temperature,
     TemperatureGradient,
@@ -40,11 +42,18 @@ from bores.types import (
     UnitConversionTable,
     UnitSystem,
 )
-from bores.units import resolve_unit_conversion_table
+from bores.units import get_conversion_factors, resolve_unit_conversion_table
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["OIL_PVT_KEYWORDS", "PVT", "load_pvt_regions", "pvt_requirements"]
+__all__ = [
+    "OIL_PVT_KEYWORDS",
+    "PVT",
+    "build_co2_temperature_axis",
+    "load_co2_storage_pvt_regions",
+    "load_pvt_regions",
+    "pvt_requirements",
+]
 
 OIL_PVT_KEYWORDS = ("PVTO", "PVCO", "PVDO", "PVCDO")
 """The deck keywords that define the oil PVT. A deck with an oil phase needs at least one."""
@@ -225,6 +234,8 @@ class PVT:
         warn_on_extrapolation: bool = False,
         dtype: npt.DTypeLike = None,
         phases: Phases | None = None,
+        salinity: Number | None = None,
+        pressure_range: tuple[Number, Number] | None = None,
     ) -> Self:
         """
         Build all PVT regions' tables from a parsed `DeckFile`.
@@ -240,6 +251,11 @@ class PVT:
         :param warn_on_extrapolation: Log warnings on extrapolation.
         :param phases: The phases the model has, which decide the tables read and required (see
             `load_pvt_regions`). Read from the deck's `RUNSPEC` keywords if omitted.
+        :param salinity: Brine salinity in ppm by weight of salt, used by a CO2 storage deck only.
+            The deck's `SALINITY` if omitted.
+        :param pressure_range: Lowest and highest pressure in the deck's unit system that the
+            tables of a CO2 storage deck cover. From the standard pressure to three times the
+            highest `EQUIL` datum pressure if omitted.
         :returns: `PVT` keyed by 1-based PVTNUM index.
         """
         regions = load_pvt_regions(
@@ -252,6 +268,8 @@ class PVT:
             warn_on_extrapolation=warn_on_extrapolation,
             dtype=dtype,
             phases=phases,
+            salinity=salinity,
+            pressure_range=pressure_range,
         )
         return cls(regions=regions)
 
@@ -1406,6 +1424,135 @@ def build_water_data_from_pvtw(
     )
 
 
+def build_co2_temperature_axis(
+    temperature: TemperatureSpec,
+    *,
+    interpolation_method: InterpolationMethod = "linear",
+    spacing: Number = 0.25,
+    maximum_points: Integer = 60,
+    dtype: npt.DTypeLike = None,  # type: ignore[assignment]
+) -> npt.NDArray:
+    """
+    The temperatures the CO2 storage tables of a region are built at.
+
+    CO2 properties change quickly with temperature near the critical temperature of 31 C, and
+    unlike deck tables every temperature column of these tables holds different values. A uniform
+    temperature therefore gets two points a thousandth of a degree either side of it, so the tables
+    hold the properties at that temperature. A temperature that varies keeps the range of the axis
+    that `generate_temperature_axis` builds, spread over steps of `spacing`.
+
+    :param temperature: Reservoir temperature spec of the region, in the deck's unit system.
+    :param interpolation_method: `"linear"` or `"cubic"`, which set the fewest points needed.
+    :param spacing: The largest step of the axis, in degrees of the deck's unit system.
+    :param maximum_points: The most points the axis of a varying temperature may have.
+    :param dtype: Dtype of the axis.
+    :returns: Strictly increasing temperatures.
+    """
+    dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+    minimum_points = get_min_temperature_points(interpolation_method)
+    if not isinstance(temperature, TemperatureGradient | TemperatureTable):
+        return np.linspace(
+            temperature - 1.0e-3, temperature + 1.0e-3, max(minimum_points, 2), dtype=dtype
+        )
+    axis = generate_temperature_axis(
+        temperature, dtype=dtype, interpolation_method=interpolation_method
+    )
+    count = int(np.ceil((axis[-1] - axis[0]) / spacing)) + 1
+    count = min(max(count, len(axis)), maximum_points)
+    return np.linspace(axis[0], axis[-1], count, dtype=dtype)
+
+
+def load_co2_storage_pvt_regions(
+    deck_file: DeckFile,
+    temperature: Temperature,
+    *,
+    phases: Phases,
+    salinity: Number | None = None,
+    pressure_range: tuple[Number, Number] | None = None,
+    interpolation_method: InterpolationMethod = "linear",
+    validate: bool = True,
+    warn_on_extrapolation: bool = False,
+    dtype: npt.DTypeLike = None,  # type: ignore[assignment]
+) -> dict[Integer, PVTRegion]:
+    """
+    Build the PVT regions of a CO2 storage deck, whose fluid properties are computed.
+
+    The gas is CO2 and the water is brine. The tables are built on a pressure axis over
+    `pressure_range` and on the temperature axis of each region. Dissolution of CO2 in the brine is
+    tabulated only if the deck lets gas dissolve in water.
+
+    :param deck_file: The deck to read.
+    :param temperature: Reservoir temperature.
+    :param phases: The phases the deck models.
+    :param salinity: Brine salinity in ppm by weight of salt. The deck's `SALINITY` if omitted, and
+        fresh water if the deck has none.
+    :param pressure_range: The lowest and highest pressure the tables cover, in the deck's unit
+        system. From the standard pressure to three times the highest `EQUIL` datum pressure if
+        omitted.
+    :param interpolation_method: Interpolation method of the tables.
+    :param validate: Whether the tables check their own data.
+    :param warn_on_extrapolation: Whether the tables log a warning for a query outside their axes.
+    :param dtype: Dtype of the tables. `bores.precision.get_dtype()` if not given.
+    :returns: Mapping of 1-based `PVTNUM` region index to its `PVTRegion`, in the deck's unit system.
+    """
+    dtype = np.dtype(dtype) if dtype is not None else get_dtype()
+    unit_system = deck_file.unit_system
+    to_field = get_conversion_factors(unit_system, UnitSystem.FIELD)
+    if unit_system != temperature.unit_system:
+        temperature = temperature.convert(unit_system)
+
+    if salinity is None:
+        deck_salinity = load_salinity(deck_file, n_cells=1, dtype=np.float64)
+        salinity = 0.0 if deck_salinity is None else float(deck_salinity[0])
+
+    if pressure_range is None:
+        equil_records = deck_file.get("EQUIL")
+        datum_pressures = [
+            float(row["datum_pressure"])
+            for region_rows in (equil_records or [])
+            for row in (region_rows if isinstance(region_rows, list) else [region_rows])
+        ]
+        highest = 3.0 * max(datum_pressures) if datum_pressures else None
+        field_range = (
+            c.STANDARD_PRESSURE_PSI,
+            highest * to_field["pressure"] if highest is not None else 10000.0,
+        )
+    else:
+        field_range = (
+            float(pressure_range[0]) * to_field["pressure"],
+            float(pressure_range[1]) * to_field["pressure"],
+        )
+    pressures = build_co2_pressure_axis(field_range, dtype=dtype)
+
+    pvtnum = deck_file.get("PVTNUM") if deck_file.has("PVTNUM") else None
+    n_regions = 1 if pvtnum is None else int(np.max(pvtnum))
+
+    regions: dict[Integer, PVTRegion] = {}
+    for pvtnum_index in range(1, n_regions + 1):
+        temperatures_deck = build_co2_temperature_axis(
+            temperature.region(pvtnum_index),
+            interpolation_method=interpolation_method,
+            dtype=dtype,
+        )
+        temperatures = (
+            temperatures_deck * to_field["temperature"] + to_field["temperature_offset"]
+        ).astype(dtype)
+        static, tables = build_co2_storage_tables(
+            pressures=pressures,
+            temperatures=temperatures,
+            salinity=salinity,
+            dissolved_gas=phases.dissolved_gas_in_water,
+            interpolation_method=interpolation_method,
+            validate=validate,
+            warn_on_extrapolation=warn_on_extrapolation,
+            dtype=dtype,
+        )
+        regions[pvtnum_index] = PVTRegion(
+            static=static, tables=tables, unit_system=UnitSystem.FIELD
+        ).convert(unit_system)
+    return regions
+
+
 def load_pvt_regions(
     deck_file: DeckFile,
     temperature: Temperature,
@@ -1415,6 +1562,8 @@ def load_pvt_regions(
     warn_on_extrapolation: bool = False,
     dtype: npt.DTypeLike = None,
     phases: Phases | None = None,
+    salinity: Number | None = None,
+    pressure_range: tuple[Number, Number] | None = None,
 ) -> dict[Integer, PVTRegion]:
     """
     Build a `PVT` object from a parsed `DeckFile`.
@@ -1440,10 +1589,16 @@ def load_pvt_regions(
     :param phases: The phases the model has. When omitted they are read from the deck's `RUNSPEC`
         keywords, if it declares any. Only the tables of those phases are read, and each is
         required, so a gas and water model needs no oil table and a deck missing a table its
-        phases need is reported before any table is parsed.
+        phases need is reported before any table is parsed. A CO2 storage deck has no tables, and
+        its CO2 and brine properties are computed instead (see `load_co2_storage_pvt_regions`).
+    :param salinity: Brine salinity in ppm by weight of salt, used by a CO2 storage deck only.
+        The deck's `SALINITY` if omitted.
+    :param pressure_range: Lowest and highest pressure in the deck's unit system that the tables
+        of a CO2 storage deck cover. From the standard pressure to three times the highest `EQUIL`
+        datum pressure if omitted.
     :returns: Mapping of 1-based `PVTNUM` region index to corresponding `PVTRegion`.
-    :raises ValidationError: If a table the phases need is missing, no recognisable oil PVT
-        keyword is found when no phases are declared, or the deck is a CO2 storage deck.
+    :raises ValidationError: If a table the phases need is missing, or no recognisable oil PVT
+        keyword is found when no phases are declared.
     """
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
 
@@ -1459,9 +1614,16 @@ def load_pvt_regions(
             )
     else:
         if phases.co2_storage:
-            raise ValidationError(
-                "A CO2 storage deck computes its fluid properties and has no PVT tables to "
-                "load, which `load_pvt_regions` does not support."
+            return load_co2_storage_pvt_regions(
+                deck_file,
+                temperature,
+                phases=phases,
+                salinity=salinity,
+                pressure_range=pressure_range,
+                interpolation_method=interpolation_method,
+                validate=validate,
+                warn_on_extrapolation=warn_on_extrapolation,
+                dtype=dtype,
             )
         missing = find_missing(deck_file, **pvt_requirements(phases))
         if missing:

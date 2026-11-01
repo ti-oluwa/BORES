@@ -173,9 +173,10 @@ class TestPhasesDrivePvt:
         region = PVT.from_deck(deck(body), temperature=150.0).regions[1]
         assert region.tables.gas is None and region.tables.oil is not None
 
-    def test_a_co2_storage_deck_is_refused_clearly(self):
-        with pytest.raises(ValidationError, match="CO2 storage"):
-            PVT.from_deck(deck("GAS\nWATER\nCO2STORE\n"), temperature=150.0)
+    def test_a_co2_storage_deck_gets_computed_gas_and_water_tables(self):
+        region = PVT.from_deck(deck("GAS\nWATER\nCO2STORE\n"), temperature=150.0).regions[1]
+        assert region.tables.oil is None
+        assert region.tables.gas is not None and region.tables.water is not None
 
 
 class TestGravity:

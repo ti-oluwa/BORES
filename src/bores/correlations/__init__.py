@@ -98,6 +98,7 @@ from bores.correlations.water import (
     compute_water_standard_density,
     compute_water_vapor_pressure,
     compute_water_viscosity,
+    compute_water_viscosity_batzle,
 )
 
 __all__ = [
@@ -170,6 +171,7 @@ __all__ = [
     "compute_water_standard_density",
     "compute_water_vapor_pressure",
     "compute_water_viscosity",
+    "compute_water_viscosity_batzle",
     "correct_oil_fvf_for_pressure",
     "elementwise",
     "estimate_bubble_point_pressure_standing",
