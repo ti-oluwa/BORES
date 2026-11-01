@@ -29,7 +29,7 @@ from bores.deck.phases import DeckPhases, declares_phases, read_deck_phases
 from bores.errors import NotSupportedError, ValidationError
 from bores.precision import get_dtype
 from bores.reservoir.regions import RegionGroups
-from bores.types import Integer, RelPermHysteresisModel, Spacing, UnitSystem
+from bores.types import Boolean, Integer, RelPermHysteresisModel, Spacing, UnitSystem
 from bores.units import UnitConversionTable, resolve_unit_conversion_table
 
 logger = logging.getLogger(__name__)
@@ -176,6 +176,7 @@ class SatFunc:
                 "Hysteresis is on, so an imbibition region (`IMBNUM`) of at least 1 is needed to "
                 f"pick the imbibition tables of `SATNUM` {saturation_region}."
             )
+
         pair = (saturation_region, imbibition_region)
         tables = self._pairs.get(pair)
         if tables is None:
@@ -187,7 +188,7 @@ class SatFunc:
             self._pairs[pair] = tables
         return tables
 
-    def hysteresis_roles(self) -> tuple[bool, bool]:
+    def hysteresis_roles(self) -> tuple[Boolean, Boolean]:
         """
         The direction each phase imbibes in, which the saturation history tracker takes.
 
@@ -204,6 +205,7 @@ class SatFunc:
                 "The saturation function regions disagree on which phase is wetting, but one "
                 "saturation history serves every region."
             )
+
         water_increasing, gas_increasing = roles.pop()
         options = self.hysteresis
         if options is not None and (
