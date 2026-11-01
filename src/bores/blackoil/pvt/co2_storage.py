@@ -1,15 +1,14 @@
 """
-PVT of a CO2 storage model: CO2 as the gas and brine as the water.
+PVT of a CO2 storage model with CO2 as the gas and brine as the water.
 
 A CO2 storage deck has no PVT tables. The properties of the CO2 and of the brine are computed from
 pressure, temperature and salinity, and tabulated here once on a grid so that the simulation reads
 them like the tables of any other deck.
 
 CO2 density, viscosity and compressibility come from an equation of state (CoolProp), whose
-density is the Span and Wagner (1996) equation that OPM Flow tabulates. The brine density is the
-Batzle and Wang (1992) correlation and its viscosity the Batzle and Wang (1992) correlation, as in
-OPM Flow. The solubility of CO2 in the brine, which is only tabulated when the deck lets gas
-dissolve in water, is the Duan and Sun (2003) model.
+density is the Span and Wagner (1996) equation. The brine density is the Batzle and Wang (1992) correlation
+and its viscosity the Batzle and Wang (1992) correlation. The solubility of CO2 in the brine, which is only
+tabulated when the deck lets gas dissolve in water, is the Duan and Sun (2003) model.
 """
 
 import typing
@@ -41,6 +40,7 @@ from bores.types import (
     Integer,
     InterpolationMethod,
     Number,
+    NumberArray,
     OneDimension,
     ThreeDimensions,
     TwoDimensions,
@@ -91,6 +91,7 @@ def build_co2_pressure_axis(
             f"The pressure range of a CO2 storage model must satisfy 0 < lowest < highest, "
             f"but it is ({lowest:g}, {highest:g}) psi."
         )
+
     critical_pressure = PropsSI("PCRIT", CO2_FLUID) / c.PSI_TO_PASCAL
     critical_lowest = max(lowest, CRITICAL_REGION_LOWER_FRACTION * critical_pressure)
     critical_highest = min(highest, CRITICAL_REGION_UPPER_FRACTION * critical_pressure)
@@ -191,7 +192,11 @@ def build_co2_storage_tables(
         compressibility_table=cast_2d(co2_compressibility),
         compressibility_factor_table=cast_2d(co2_compressibility_factor),
         solubility_in_water_table=solubility_in_water_table,
-        salinities=np.array([salinity], dtype=dtype) if dissolved_gas else None,
+        salinities=(
+            typing.cast("NumberArray[OneDimension]", np.array([salinity], dtype=dtype))
+            if dissolved_gas
+            else None
+        ),
         dtype=dtype,
         unit_system=UnitSystem.FIELD,
         pressures=pressure_axis,
@@ -216,12 +221,10 @@ def build_co2_storage_tables(
     static = StaticPVT(
         stock_tank_water_density=brine_standard_density,
         stock_tank_gas_density=co2_standard_density,
-        water_reference_pressure=float(pressures[reference_row]),
-        water_reference_fvf=float(brine_formation_volume_factor[reference_row, reference_column]),
-        water_reference_viscosity=float(brine_viscosity[reference_row, reference_column]),
-        water_reference_compressibility=float(
-            brine_compressibility[reference_row, reference_column]
-        ),
+        water_reference_pressure=pressures[reference_row],
+        water_reference_fvf=brine_formation_volume_factor[reference_row, reference_column],
+        water_reference_viscosity=brine_viscosity[reference_row, reference_column],
+        water_reference_compressibility=brine_compressibility[reference_row, reference_column],
         water_salinity=salinity,
         unit_system=UnitSystem.FIELD,
     )

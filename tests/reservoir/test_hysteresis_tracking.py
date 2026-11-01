@@ -306,3 +306,21 @@ def test_the_workspace_tracks_the_minimum_gas_saturation_in_place():
     )
     assert workspace.min_gas_saturation is array
     np.testing.assert_allclose(workspace.snapshot().min_gas_saturation, [0.1, 0.3])
+
+
+def test_a_wetting_phase_that_turns_back_before_its_peak_reverses_where_it_turned():
+    # Water falls to 0.2, climbs to 0.6 (its peak), falls to 0.35, climbs to 0.5, then falls again.
+    water_path = [0.5, 0.2, 0.6, 0.35, 0.5, 0.45]
+    history = _walk(
+        water_path=water_path,
+        gas_path=[0.1] * len(water_path),
+        water_imbibition_when_increasing=True,
+        gas_imbibition_when_increasing=False,
+    )
+    flags = [bool(state.water_imbibition_flag[0]) for state in history]
+    reversals = [float(state.water_reversal_saturation[0]) for state in history]
+    assert flags == [False, True, False, True, False]
+    # Turning to imbibition: where it had fallen to. Turning to drainage: where it had climbed to,
+    # not the historical maximum of 0.6.
+    assert reversals == pytest.approx([0.5, 0.2, 0.6, 0.35, 0.5])
+    assert float(history[-1].max_water_saturation[0]) == pytest.approx(0.6)

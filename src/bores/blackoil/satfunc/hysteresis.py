@@ -1,18 +1,43 @@
+import logging
 import typing
 
 import attrs
 from typing_extensions import Self
 
+from bores.blackoil.satfunc.capillary_pressure.hysteresis import CurvatureCapillaryPressureTable
+from bores.blackoil.satfunc.capillary_pressure.tables import (
+    CapillaryPressureTable,
+    ThreePhaseCapillaryPressureTable,
+)
+from bores.blackoil.satfunc.relperm.hysteresis import (
+    CarlsonRelPermTable,
+    KilloughLandRelPermTable,
+    compute_land_trapping_coefficient,
+)
+from bores.blackoil.satfunc.relperm.tables import (
+    RelativePermeabilityTable,
+    ThreePhaseRelPermTable,
+    resolve_residual_oil_saturation_gas,
+)
+from bores.blackoil.satfunc.tables import SatFuncTables
 from bores.constants import c
 from bores.deck.file import DeckFile
-from bores.errors import ValidationError
-from bores.types import FluidPhase, RelPermHysteresisModel
+from bores.errors import NotSupportedError, ValidationError
+from bores.types import Boolean, FluidPhase, Number, RelPermHysteresisModel
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "HYSTERESIS_WETTING_PHASE_MAP",
     "LIMITING_CURVES_MAP",
     "RELPERM_HYSTERESIS_MODEL_MAP",
     "HysteresisOptions",
+    "LandParameters",
+    "as_hysteresis_capillary_pressure_table",
+    "as_hysteresis_relperm_table",
+    "as_hysteresis_tables",
+    "derive_land_parameters",
+    "hysteresis_roles",
 ]
 
 RELPERM_HYSTERESIS_MODEL_MAP: typing.Mapping[int, tuple[RelPermHysteresisModel, bool]] = {
@@ -202,3 +227,213 @@ class HysteresisOptions:
             fix_killough_wetting_phase=bool(record["fix_killough_wetting_phase"]),
             scale_capillary_pressure=bool(record["scale_capillary_pressure"]),
         )
+
+
+class LandParameters(typing.NamedTuple):
+    """Land's trapping parameters of one drainage and imbibition pair of tables."""
+
+    land_trapping_coefficient_water: Number
+    """Land coefficient of the oil-water system, whose non-wetting phase is oil."""
+
+    land_trapping_coefficient_gas: Number
+    """Land coefficient of the gas-oil system, whose non-wetting phase is gas."""
+
+    maximum_residual_oil_saturation_water: Number | None
+    """Most oil the imbibition table traps in the oil-water system, or `None` for none."""
+
+    maximum_residual_oil_saturation_gas: Number | None
+    """Most oil the imbibition table traps in the gas-oil system, or `None` for none."""
+
+    maximum_residual_gas_saturation: Number | None
+    """Most gas the imbibition table traps, or `None` for none."""
+
+
+def derive_land_parameters(
+    *,
+    drainage: RelativePermeabilityTable,
+    imbibition: RelativePermeabilityTable,
+) -> LandParameters:
+    """
+    Derive Land's trapping parameters from a drainage and an imbibition table.
+
+    The most that is trapped is the imbibition table's critical saturation. It is trapped when
+    imbibition starts from the largest saturation the non-wetting phase reaches on the drainage
+    table, which is one minus connate water, and minus the residual oil to gas flood for gas. The
+    coefficient follows from those two, so nothing about Land is configured by hand. A phase the
+    imbibition table traps none of gets `None`, which switches Land off for it.
+
+    :param drainage: The drainage relative permeability table of the pair.
+    :param imbibition: The imbibition relative permeability table of the pair.
+    :returns: Land's parameters.
+    """
+    connate_water = drainage.get_connate_water_saturation()
+    largest_gas = (
+        1.0 - connate_water - resolve_residual_oil_saturation_gas(drainage, connate_water)
+    )
+    largest_oil = 1.0 - connate_water
+
+    trapped_gas = imbibition.get_residual_gas_saturation()
+    trapped_oil_water = imbibition.get_residual_oil_saturation_water()
+    trapped_oil_gas = resolve_residual_oil_saturation_gas(
+        imbibition, imbibition.get_connate_water_saturation()
+    )
+    return LandParameters(
+        land_trapping_coefficient_water=compute_land_trapping_coefficient(
+            maximum_residual_saturation=trapped_oil_water,
+            maximum_non_wetting_saturation=largest_oil,
+        ),
+        land_trapping_coefficient_gas=compute_land_trapping_coefficient(
+            maximum_residual_saturation=trapped_gas,
+            maximum_non_wetting_saturation=largest_gas,
+        ),
+        maximum_residual_oil_saturation_water=trapped_oil_water if trapped_oil_water > 0 else None,
+        maximum_residual_oil_saturation_gas=trapped_oil_gas if trapped_oil_gas > 0 else None,
+        maximum_residual_gas_saturation=trapped_gas if trapped_gas > 0 else None,
+    )
+
+
+def hysteresis_roles(relative_permeability: RelativePermeabilityTable) -> tuple[Boolean, Boolean]:
+    """
+    The direction each phase imbibes in, as the saturation history tracker needs it.
+
+    Read from the table's own wetting phases, since the wetting phase decides which way a phase
+    moves while it imbibes and the tables already know it.
+
+    :param relative_permeability: Any relative permeability table of the run.
+    :returns: `(water_imbibition_when_increasing, gas_imbibition_when_increasing)`: water imbibes
+        as it rises when it is the wetting phase of the oil-water system, and gas only when it is
+        the wetting phase of the gas-oil system.
+    """
+    return (
+        relative_permeability.get_oil_water_wetting_phase() == FluidPhase.WATER,
+        relative_permeability.get_gas_oil_wetting_phase() == FluidPhase.GAS,
+    )
+
+
+def as_hysteresis_relperm_table(
+    *,
+    drainage: RelativePermeabilityTable,
+    imbibition: RelativePermeabilityTable,
+    options: HysteresisOptions,
+) -> RelativePermeabilityTable:
+    """
+    Pair a drainage and an imbibition relative permeability table into a hysteresis table.
+
+    The model comes from `options.relperm_model`. Relative permeability stays on the drainage table
+    when the model is `NONE` or `options.apply_to_relperm` is off.
+
+    :param drainage: The drainage table, which a cell is on until it first reverses.
+    :param imbibition: The imbibition table.
+    :param options: How hysteresis is modelled.
+    :returns: The hysteresis table, or `drainage` when relative permeability does not follow
+        hysteresis.
+    :raises NotSupportedError: For a two-phase table, or for the Eclipse Killough model, which is
+        not built yet. Choose `BLENDED_SCANNING` for BORES's own scheme.
+    """
+    if not options.relperm_hysteresis_active:
+        return drainage
+
+    if not isinstance(drainage, ThreePhaseRelPermTable) or not isinstance(
+        imbibition, ThreePhaseRelPermTable
+    ):
+        raise NotSupportedError(
+            "Relative permeability hysteresis needs three-phase tables, with both the oil-water "
+            "and the gas-oil system. Two-phase decks are not supported yet."
+        )
+
+    model = options.relperm_model
+    if model == RelPermHysteresisModel.CARLSON:
+        return CarlsonRelPermTable(
+            oil_water_drainage_table=drainage,
+            gas_oil_drainage_table=drainage,
+            oil_water_imbibition_table=imbibition,
+            gas_oil_imbibition_table=imbibition,
+            wetting_phase_uses_imbibition=options.wetting_phase_uses_imbibition,
+        )
+
+    if model == RelPermHysteresisModel.BLENDED_SCANNING:
+        land = derive_land_parameters(drainage=drainage, imbibition=imbibition)
+        return KilloughLandRelPermTable(
+            oil_water_drainage_table=drainage,
+            gas_oil_drainage_table=drainage,
+            oil_water_imbibition_table=imbibition,
+            gas_oil_imbibition_table=imbibition,
+            land_trapping_coefficient_water=land.land_trapping_coefficient_water,
+            land_trapping_coefficient_gas=land.land_trapping_coefficient_gas,
+            maximum_residual_oil_saturation_water=land.maximum_residual_oil_saturation_water,
+            maximum_residual_oil_saturation_gas=land.maximum_residual_oil_saturation_gas,
+            maximum_residual_gas_saturation=land.maximum_residual_gas_saturation,
+        )
+    raise NotSupportedError(
+        f"Relative permeability hysteresis model `{model}` is not built yet. Use `carlson`, or "
+        "`blended_scanning` for BORES's own Killough-style scheme."
+    )
+
+
+def as_hysteresis_capillary_pressure_table(
+    *,
+    drainage: CapillaryPressureTable | None,
+    imbibition: CapillaryPressureTable | None,
+    options: HysteresisOptions,
+) -> CapillaryPressureTable | None:
+    """
+    Pair a drainage and an imbibition capillary pressure table into a hysteresis table.
+
+    Capillary pressure stays on the drainage table when `options.apply_to_capillary_pressure` is
+    off, or when there is no imbibition table to scan towards.
+
+    :param drainage: The drainage table, or `None` when the region has no capillary pressure.
+    :param imbibition: The imbibition table, or `None`.
+    :param options: How hysteresis is modelled.
+    :returns: The hysteresis table, or `drainage` when capillary pressure does not follow
+        hysteresis.
+    :raises NotSupportedError: For a two-phase table.
+    """
+    if drainage is None or imbibition is None or not options.apply_to_capillary_pressure:
+        return drainage
+
+    if not isinstance(drainage, ThreePhaseCapillaryPressureTable) or not isinstance(
+        imbibition, ThreePhaseCapillaryPressureTable
+    ):
+        raise NotSupportedError(
+            "Capillary pressure hysteresis needs three-phase tables, with both the oil-water and "
+            "the gas-oil system. Two-phase decks are not supported yet."
+        )
+
+    return CurvatureCapillaryPressureTable(
+        oil_water_drainage_table=drainage.oil_water_table,
+        gas_oil_drainage_table=drainage.gas_oil_table,
+        oil_water_imbibition_table=imbibition.oil_water_table,
+        gas_oil_imbibition_table=imbibition.gas_oil_table,
+        scanning_curvature=options.capillary_pressure_curvature,
+        retrace_scanning_curves=options.retrace_capillary_pressure,
+    )
+
+
+def as_hysteresis_tables(
+    *,
+    drainage: SatFuncTables,
+    imbibition: SatFuncTables,
+    options: HysteresisOptions,
+) -> SatFuncTables:
+    """
+    Pair the drainage and imbibition tables of a cell into the tables it is evaluated with.
+
+    :param drainage: The tables `SATNUM` selects.
+    :param imbibition: The tables `IMBNUM` selects.
+    :param options: How hysteresis is modelled.
+    :returns: Relative permeability and capillary pressure that follow hysteresis as `options`
+        say, and drainage tables where they do not.
+    """
+    return SatFuncTables(
+        relative_permeability=as_hysteresis_relperm_table(
+            drainage=drainage.relative_permeability,
+            imbibition=imbibition.relative_permeability,
+            options=options,
+        ),
+        capillary_pressure=as_hysteresis_capillary_pressure_table(
+            drainage=drainage.capillary_pressure,
+            imbibition=imbibition.capillary_pressure,
+            options=options,
+        ),
+    )

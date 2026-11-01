@@ -10,6 +10,11 @@ from bores.blackoil.satfunc.capillary_pressure.tables import (
     ThreePhaseCapillaryPressureTable,
     TwoPhaseCapillaryPressureTable,
 )
+from bores.blackoil.satfunc.hysteresis import (
+    HysteresisOptions,
+    as_hysteresis_tables,
+    hysteresis_roles,
+)
 from bores.blackoil.satfunc.relperm.mixing_rules import MixingRule
 from bores.blackoil.satfunc.relperm.tables import (
     MinimumRelPerm,
@@ -24,7 +29,7 @@ from bores.deck.phases import DeckPhases, declares_phases, read_deck_phases
 from bores.errors import NotSupportedError, ValidationError
 from bores.precision import get_dtype
 from bores.reservoir.regions import RegionGroups
-from bores.types import Integer, Spacing, UnitSystem
+from bores.types import Integer, RelPermHysteresisModel, Spacing, UnitSystem
 from bores.units import UnitConversionTable, resolve_unit_conversion_table
 
 logger = logging.getLogger(__name__)
@@ -46,15 +51,20 @@ class SatFunc:
 
     Use `region(satnum)` to retrieve the tables for a given region, and
     `from_deck` to construct from a deck.
+
+    When `hysteresis` is set, the list of tables serves both curves: `SATNUM` selects a cell's
+    drainage tables and `IMBNUM` its imbibition tables from the same numbered list, and `resolve`
+    pairs them into the tables the cell is evaluated with.
     """
 
-    __slots__ = ("tables", "unit_system")
+    __slots__ = ("_pairs", "hysteresis", "tables", "unit_system")
 
     def __init__(
         self,
         tables: dict[Integer, SatFuncTables],
         *,
         unit_system: UnitSystem | None = None,
+        hysteresis: HysteresisOptions | None = None,
     ) -> None:
         """
         Build a `SatFunc` from a pre-built regional tables dict.
@@ -63,6 +73,8 @@ class SatFunc:
         :param unit_system: Expected unit system for all tables. If omitted,
             it is inferred from the first table and every other table is
             required to match it.
+        :param hysteresis: How hysteresis is modelled, or `None` for none. When set, a cell's
+            tables are the pair of its `SATNUM` drainage tables and its `IMBNUM` imbibition tables.
         :raises ValidationError: If *tables* is empty, or if any table's
             unit system does not match *unit_system* (explicit or inferred).
         """
@@ -85,6 +97,8 @@ class SatFunc:
 
         self.tables = tables
         self.unit_system = expected_unit_system
+        self.hysteresis = hysteresis
+        self._pairs: dict[tuple[Integer, Integer], SatFuncTables] = {}
 
     @property
     def n_regions(self) -> int:
@@ -111,6 +125,12 @@ class SatFunc:
             for region in region_groups.imbibition_regions
             if region != 0 and region not in self.tables
         })
+        if self.hysteresis is not None and 0 in region_groups.imbibition_regions:
+            raise ValidationError(
+                "Hysteresis is on, so every cell needs an imbibition region (`IMBNUM`) to pick its "
+                "imbibition tables, and some have none. Define `IMBNUM`, and group the cells with "
+                "`Regions.group_saturation_cells(use_imbibition_region=True)`."
+            )
         if missing_saturation or missing_imbibition:
             raise ValidationError(
                 f"Region numbers without a saturation function table (available: "
@@ -133,6 +153,71 @@ class SatFunc:
                 f"Saturation function region {satnum} not found. Available regions: {available}."
             )
         return tables
+
+    def resolve(self, saturation_region: Integer, imbibition_region: Integer = 0) -> SatFuncTables:
+        """
+        The tables a cell with these regions is evaluated with.
+
+        Without hysteresis they are the drainage tables of `saturation_region`. With it they are
+        those paired with the imbibition tables of `imbibition_region`, built the first time a pair
+        is asked for and reused after, so a run assembles each pair once.
+
+        :param saturation_region: 1-based `SATNUM` of the cell.
+        :param imbibition_region: 1-based `IMBNUM` of the cell. Ignored without hysteresis.
+        :returns: The cell's saturation function tables.
+        :raises ValidationError: If hysteresis is on and `imbibition_region` is not a region.
+        :raises KeyError: If a region does not exist.
+        """
+        drainage = self.region(saturation_region)
+        if self.hysteresis is None:
+            return drainage
+        if imbibition_region < 1:
+            raise ValidationError(
+                "Hysteresis is on, so an imbibition region (`IMBNUM`) of at least 1 is needed to "
+                f"pick the imbibition tables of `SATNUM` {saturation_region}."
+            )
+        pair = (saturation_region, imbibition_region)
+        tables = self._pairs.get(pair)
+        if tables is None:
+            tables = as_hysteresis_tables(
+                drainage=drainage,
+                imbibition=self.region(imbibition_region),
+                options=self.hysteresis,
+            )
+            self._pairs[pair] = tables
+        return tables
+
+    def hysteresis_roles(self) -> tuple[bool, bool]:
+        """
+        The direction each phase imbibes in, which the saturation history tracker takes.
+
+        Read from the tables, which all have to agree, since one tracker serves the whole run.
+        The wetting phase `EHYSTR` names is only checked against them, with a warning when it
+        differs.
+
+        :returns: `(water_imbibition_when_increasing, gas_imbibition_when_increasing)`.
+        :raises ValidationError: If the regions disagree on which phase is wetting.
+        """
+        roles = {hysteresis_roles(tables.relative_permeability) for tables in self.tables.values()}
+        if len(roles) != 1:
+            raise ValidationError(
+                "The saturation function regions disagree on which phase is wetting, but one "
+                "saturation history serves every region."
+            )
+        water_increasing, gas_increasing = roles.pop()
+        options = self.hysteresis
+        if options is not None and (
+            options.water_imbibition_when_increasing != water_increasing
+            or options.gas_imbibition_when_increasing != gas_increasing
+        ):
+            logger.warning(
+                "`EHYSTR` names %s as the wetting phase, but the saturation tables say water is "
+                "%swetting and gas is %swetting. The tables are followed.",
+                options.wetting_phase,
+                "" if water_increasing else "non-",
+                "" if gas_increasing else "non-",
+            )
+        return water_increasing, gas_increasing
 
     @classmethod
     def from_one(cls, tables: SatFuncTables) -> Self:
@@ -167,7 +252,8 @@ class SatFunc:
             tables={
                 satnum: tables.convert(target, table=table)
                 for satnum, tables in self.tables.items()
-            }
+            },
+            hysteresis=self.hysteresis,
         )
 
     @classmethod
@@ -186,6 +272,7 @@ class SatFunc:
         allow_two_phase: bool = False,
         phases: DeckPhases | None = None,
         dtype: npt.DTypeLike = None,
+        relperm_model: RelPermHysteresisModel | None = None,
     ) -> Self:
         """
         Build all saturation function regions from a parsed `DeckFile`.
@@ -225,7 +312,12 @@ class SatFunc:
             (`SGWFN`, `SWFN` with `SGFN`, or `SGOF` for a CO2 storage deck whose oil slot holds
             brine). A deck that declares no phase keeps the keyword-based detection.
         :param dtype: Array dtype shared by every region's tables.
-        :returns: `SatFunc` keyed by 1-based `SATNUM` index.
+        :param relperm_model: Hysteresis model to use instead of the one `EHYSTR` item 2 selects,
+            which is how `BLENDED_SCANNING` is chosen for a deck. Only read when `SATOPTS` lists
+            `HYSTER`.
+        :returns: `SatFunc` keyed by 1-based `SATNUM` index. When `SATOPTS` lists `HYSTER` it
+            also carries the hysteresis options, and the same list of tables serves as imbibition
+            tables for the cells' `IMBNUM`.
         :raises ValidationError: If no recognised saturation-function keywords
             are found.
         """
@@ -373,7 +465,10 @@ class SatFunc:
                 satnum,
                 include_capillary_pressure,
             )
-        return cls(tables=tables)
+        return cls(
+            tables=tables,
+            hysteresis=HysteresisOptions.from_deck(deck_file, relperm_model=relperm_model),
+        )
 
     def __getitem__(self, key: Integer) -> SatFuncTables:
         return self.region(key)

@@ -168,8 +168,7 @@ class RelPermHysteresisModel(enum.Enum):
     BLENDED_SCANNING = "blended_scanning"
     """
     A weighted blend between the drainage and imbibition curves, with the weight set by how far
-    the saturation has moved between the reversal and the end of the scanning range. This is
-    the scheme BORES had before Eclipse's Carlson and Killough models were added. It is not
+    the saturation has moved between the reversal and the end of the scanning range. It is not
     reachable from `EHYSTR`, only by choosing it explicitly.
     """
 

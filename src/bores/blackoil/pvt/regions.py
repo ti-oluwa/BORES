@@ -1503,7 +1503,7 @@ def load_co2_storage_pvt_regions(
 
     if salinity is None:
         deck_salinity = load_salinity(deck_file, n_cells=1, dtype=np.float64)
-        salinity = 0.0 if deck_salinity is None else float(deck_salinity[0])
+        salinity = typing.cast("Number", 0.0 if deck_salinity is None else deck_salinity[0])
 
     if pressure_range is None:
         equil_records = deck_file.get("EQUIL")
@@ -1519,9 +1519,10 @@ def load_co2_storage_pvt_regions(
         )
     else:
         field_range = (
-            float(pressure_range[0]) * to_field["pressure"],
-            float(pressure_range[1]) * to_field["pressure"],
+            pressure_range[0] * to_field["pressure"],
+            pressure_range[1] * to_field["pressure"],
         )
+
     pressures = build_co2_pressure_axis(field_range, dtype=dtype)
 
     pvtnum = deck_file.get("PVTNUM") if deck_file.has("PVTNUM") else None
@@ -1537,9 +1538,10 @@ def load_co2_storage_pvt_regions(
         temperatures = (
             temperatures_deck * to_field["temperature"] + to_field["temperature_offset"]
         ).astype(dtype)
+
         static, tables = build_co2_storage_tables(
             pressures=pressures,
-            temperatures=temperatures,
+            temperatures=typing.cast("FloatArray[OneDimension]", temperatures),
             salinity=salinity,
             dissolved_gas=phases.dissolved_gas_in_water,
             interpolation_method=interpolation_method,
@@ -1625,6 +1627,7 @@ def load_pvt_regions(
                 warn_on_extrapolation=warn_on_extrapolation,
                 dtype=dtype,
             )
+
         missing = find_missing(deck_file, **pvt_requirements(phases))
         if missing:
             raise ValidationError(

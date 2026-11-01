@@ -365,3 +365,17 @@ def test_the_retraced_derivative_matches_finite_differences(water):
 def test_retracing_is_the_default():
     table, _, _ = _table()
     assert table.retrace_scanning_curves
+
+
+def test_a_new_drainage_scan_starts_on_the_imbibition_curve_where_imbibition_turned_around():
+    table, drainage, imbibition = _table(retrace=False)
+    # Water climbed from 0.3 to 0.6, fell back to 0.5, and is now falling from there.
+    history = dict(
+        max_water_saturation=np.full(2, 0.6),
+        min_water_saturation=np.full(2, 0.3),
+        water_imbibition_flag=np.full(2, False),
+        water_reversal_saturation=np.full(2, 0.5),
+    )
+    scanned = _pcow(table, np.array([0.5, 0.3]), **history)
+    np.testing.assert_allclose(scanned[0], _pcow(imbibition, np.array([0.5]))[0], rtol=1e-9)
+    np.testing.assert_allclose(scanned[1], _pcow(drainage, np.array([0.3]))[0], rtol=1e-9)

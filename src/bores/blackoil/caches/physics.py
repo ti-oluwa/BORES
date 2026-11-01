@@ -55,6 +55,7 @@ def compute_physics_cache(
     vaporized_oil_ratio: CellArray | None = None,
     hysteresis: Hysteresis | HysteresisWorkspace | None = None,
     region_groups: RegionGroups | None = None,
+    imbibition_region: IntCellArray | None = None,
     freeze_saturation_pressure: bool = False,
     frozen_bubble_point_pressure: CellArray | None = None,
     frozen_dew_point_pressure: CellArray | None = None,
@@ -104,6 +105,8 @@ def compute_physics_cache(
     :param region_groups: Cells grouped by saturation region, built once for the run with
         `Regions.group_saturation_cells` and forwarded to `compute_satfunc_cache`. Built on
         every call from `saturation_region` when not given.
+    :param imbibition_region: Per-cell `IMBNUM`, read only when `region_groups` is not given and
+        `satfunc` has hysteresis. Forwarded to `compute_satfunc_cache`.
     :param out: Previous `PhysicsCache` to overwrite in place, or `None` to
         allocate a new one.
     :param dtype: Output array dtype for any newly allocated sub-cache.
@@ -169,6 +172,7 @@ def compute_physics_cache(
             hysteresis.gas_reversal_saturation if hysteresis is not None else None
         ),
         region_groups=region_groups,
+        imbibition_region=imbibition_region,
         out=out.satfunc if out is not None else None,
         dtype=dtype,
     )

@@ -136,6 +136,7 @@ def compute_satfunc_cache(
     water_reversal_saturation: CellArray | None = None,
     gas_reversal_saturation: CellArray | None = None,
     region_groups: RegionGroups | None = None,
+    imbibition_region: IntCellArray | None = None,
     out: SatFuncCache | None = None,
     dtype: npt.DTypeLike = None,
 ) -> SatFuncCache:
@@ -199,6 +200,9 @@ def compute_satfunc_cache(
         `Regions.group_saturation_cells`. Region numbers do not change during a run, so build it once and
         pass it on every call. Built here from `saturation_region` when not given, which
         repeats the grouping on every call.
+    :param imbibition_region: Shape `(n_cells,)` 1-based IMBNUM per cell. Only read when
+        `region_groups` is not given and `satfunc` has hysteresis, to group the cells by
+        `(SATNUM, IMBNUM)`. Groups that are passed in carry their own imbibition regions.
     :param out: Previous `SatFuncCache` to overwrite in place, or
         `None` to allocate a new one.
     :return: The populated `SatFuncCache`. `out` itself if given,
@@ -220,23 +224,32 @@ def compute_satfunc_cache(
 
     cache.saturation_region[:] = saturation_region
     if region_groups is None:
-        region_groups = group_cells_by_region(saturation_region=saturation_region)
+        region_groups = group_cells_by_region(
+            saturation_region=saturation_region,
+            imbibition_region=imbibition_region if satfunc.hysteresis is not None else None,
+        )
+
+    # With hysteresis a group's tables are its drainage tables paired with its imbibition tables,
+    # which `resolve` assembles once per pair, so this is a lookup after the first step.
+    group_tables = [
+        satfunc.resolve(region, imbibition)
+        for region, imbibition in zip(
+            region_groups.saturation_regions, region_groups.imbibition_regions, strict=True
+        )
+    ]
 
     # Every cell belongs to exactly one group, so each relative permeability field is fully
     # rewritten below. Only the capillary pressure fields can keep an old value, and only when
     # some region has no capillary pressure table, so only then do they need resetting.
-    if any(
-        satfunc[region].capillary_pressure is None for region in region_groups.saturation_regions
-    ):
+    if any(tables.capillary_pressure is None for tables in group_tables):
         for name in CAPILLARY_PRESSURE_FIELDS:
             getattr(cache, name).fill(np.nan)
 
-    for group, region in enumerate(region_groups.saturation_regions):
+    for group, tables in enumerate(group_tables):
         # `None` means the group holds every cell, so views of the inputs and whole-array
         # assignment replace the gather and scatter that several regions need.
         cells = region_groups.cell_indices[group]
         mask = slice(None) if cells is None else cells
-        tables = satfunc[region]
 
         sw = water_saturation[mask]
         so = oil_saturation[mask]

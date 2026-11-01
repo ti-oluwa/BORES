@@ -89,11 +89,14 @@ def advance_phase_hysteresis_kernel(
 
         new_max = max(previous_max, saturation)
         if imbibition_when_increasing:
-            # Wetting phase: imbibition is the climb away from the lowest saturation reached.
+            # Wetting phase: imbibition is the climb away from the lowest saturation reached,
+            # and the turn back to drainage is where that climb ended.
             if imbibing and not was_imbibing:
                 reversal = previous_saturation[i]
             elif not imbibing and was_imbibing:
-                reversal = previous_max
+                # Where imbibition actually turned around, which is below the historical maximum
+                # whenever it did not reach it.
+                reversal = previous_saturation[i]
         else:
             # Non-wetting phase: imbibition is the fall away from the highest saturation reached,
             # so the reversal sits at that peak for as long as the peak stands.
@@ -185,6 +188,7 @@ def advance_phase_hysteresis(
         raise ValidationError(
             "`out_min_saturation` must be C-contiguous so it can be written in place."
         )
+
     placeholder = np.empty(1, dtype=max_saturation.dtype)
     advance_phase_hysteresis_kernel(
         new_saturation=new_saturation.reshape(-1),
@@ -277,8 +281,9 @@ class Hysteresis(StoreSerializable):
     Shape (n_cells,) - water saturation at the most recent
     drainage-to-imbibition (or reverse) reversal point (fraction).
 
-    Starting saturation of the Killough scanning curve when the displacement
-    regime changes.
+    The saturation the water phase turned around at: the lowest it had reached when it began
+    to imbibe, and the highest the imbibition reached when it turned back to drain. Starting
+    saturation of a scanning curve when the displacement regime changes.
     """
 
     gas_reversal_saturation: CellArray

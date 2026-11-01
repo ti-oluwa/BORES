@@ -3,6 +3,7 @@
 import typing
 
 import attrs
+from typing_extensions import Self
 
 from bores.blackoil.satfunc.capillary_pressure.tables import (
     CapillaryPressureTable,
@@ -22,7 +23,9 @@ from bores.types import (
     NumberArray,
     NumberOrArray,
     OneDimension,
+    UnitSystem,
 )
+from bores.units import UnitConversionTable
 
 __all__ = [
     "AnyCapillaryTable",
@@ -229,6 +232,40 @@ class HysteresisCapillaryPressureTable(CapillaryPressureTable):
             ):
                 involved = " and ".join(sorted(phase.value for phase in phases))
                 raise ValidationError(f"`{name}` must involve {involved} phases.")
+
+    @property
+    def unit_system(self) -> UnitSystem:  # type: ignore[override]
+        """Unit system of the capillary pressures, which is that of the drainage tables."""
+        return self.oil_water_drainage_table.unit_system
+
+    def convert(
+        self,
+        target: UnitSystem,
+        /,
+        *,
+        table: UnitConversionTable | None = None,
+    ) -> Self:
+        """
+        Return the table with every backing table converted to `target` units.
+
+        :param target: Desired `UnitSystem`.
+        :param table: Optional custom conversion table; `None` uses the default.
+        :returns: A new table of the same kind in `target` units, or this one when it is already
+            in `target`.
+        """
+        if target == self.unit_system:
+            return self
+
+        def convert_table(backing: CapillaryPressureTable | None) -> CapillaryPressureTable | None:
+            return None if backing is None else backing.convert(target, table=table)
+
+        return attrs.evolve(
+            self,
+            oil_water_drainage_table=convert_table(self.oil_water_drainage_table),
+            gas_oil_drainage_table=convert_table(self.gas_oil_drainage_table),
+            oil_water_imbibition_table=convert_table(self.oil_water_imbibition_table),
+            gas_oil_imbibition_table=convert_table(self.gas_oil_imbibition_table),
+        )
 
     def get_oil_water_wetting_phase(self) -> FluidPhase:
         """
