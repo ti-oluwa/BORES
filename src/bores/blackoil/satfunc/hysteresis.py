@@ -38,7 +38,7 @@ __all__ = [
     "as_hysteresis_relperm_table",
     "as_hysteresis_tables",
     "derive_land_parameters",
-    "hysteresis_roles",
+    "get_hysteresis_roles",
 ]
 
 RELPERM_HYSTERESIS_MODEL_MAP: typing.Mapping[int, tuple[RelPermHysteresisModel, bool]] = {
@@ -88,55 +88,55 @@ class HysteresisOptions:
     BORES's own weighted blend available next to Eclipse's two models.
     """
 
-    wetting_phase_uses_imbibition: bool = False
+    wetting_phase_uses_imbibition: Boolean = False
     """Whether the wetting phase takes its imbibition curve instead of its drainage curve."""
 
-    capillary_pressure_curvature: float = attrs.field(
+    capillary_pressure_curvature: Number = attrs.field(
         factory=lambda: typing.cast(float, c.HYSTERESIS_CAPILLARY_PRESSURE_CURVATURE)
     )
     """Curvature parameter of the capillary pressure scanning curves (`EHYSTR` item 1)."""
 
-    killough_wetting_curvature: float = attrs.field(
+    killough_wetting_curvature: Number = attrs.field(
         factory=lambda: typing.cast(float, c.HYSTERESIS_KILLOUGH_WETTING_CURVATURE)
     )
     """Curvature parameter of the Killough wetting phase scanning curves (`EHYSTR` item 3)."""
 
-    killough_trapped_modifier: float = attrs.field(
+    killough_trapped_modifier: Number = attrs.field(
         factory=lambda: typing.cast(float, c.HYSTERESIS_KILLOUGH_TRAPPED_MODIFIER)
     )
     """Modification parameter of the Killough trapped non-wetting saturation (`EHYSTR` item 4)."""
 
-    apply_to_relperm: bool = True
+    apply_to_relperm: Boolean = True
     """Whether relative permeability follows hysteresis. Set from `EHYSTR` item 5."""
 
-    apply_to_capillary_pressure: bool = True
+    apply_to_capillary_pressure: Boolean = True
     """Whether capillary pressure follows hysteresis. Set from `EHYSTR` item 5."""
 
-    retrace_capillary_pressure: bool = True
+    retrace_capillary_pressure: Boolean = True
     """Whether capillary pressure scanning curves are retraced rather than new (`EHYSTR` item 6)."""
 
-    starts_on_imbibition_curve: bool = False
+    starts_on_imbibition_curve: Boolean = False
     """Whether the mobility starts on the imbibition curve (`EHYSTR` item 7)."""
 
     wetting_phase: FluidPhase = FluidPhase.OIL
     """Wetting phase (`EHYSTR` item 8). Water and gas are the non-wetting phases when it is oil."""
 
-    baker_interpolation_oil: bool = False
+    baker_interpolation_oil: Boolean = False
     """Whether Baker's interpolation is used for oil relative permeability (`EHYSTR` item 9)."""
 
-    baker_interpolation_gas: bool = False
+    baker_interpolation_gas: Boolean = False
     """Whether Baker's interpolation is used for gas relative permeability (`EHYSTR` item 10)."""
 
-    baker_interpolation_water: bool = False
+    baker_interpolation_water: Boolean = False
     """Whether Baker's interpolation is used for water relative permeability (`EHYSTR` item 11)."""
 
-    threshold_saturation: float = 0.0
+    threshold_saturation: Number = 0.0
     """Saturation change below which hysteresis is not triggered (`EHYSTR` item 12)."""
 
-    fix_killough_wetting_phase: bool = False
+    fix_killough_wetting_phase: Boolean = False
     """Whether the Killough wetting phase correction is applied (`EHYSTR` item 13)."""
 
-    scale_capillary_pressure: bool = False
+    scale_capillary_pressure: Boolean = False
     """Whether capillary pressure is scaled (`EHYSTR` item 14)."""
 
     def __attrs_post_init__(self) -> None:
@@ -154,12 +154,12 @@ class HysteresisOptions:
             raise ValidationError("`threshold_saturation` must lie in [0, 1).")
 
     @property
-    def relperm_hysteresis_active(self) -> bool:
+    def relperm_hysteresis_active(self) -> Boolean:
         """Whether relative permeability follows hysteresis at all."""
         return self.apply_to_relperm and self.relperm_model != RelPermHysteresisModel.NONE
 
     @property
-    def water_imbibition_when_increasing(self) -> bool:
+    def water_imbibition_when_increasing(self) -> Boolean:
         """
         Whether water imbibes as its saturation rises, which it does when water is the wetting
         phase. This is the argument the saturation history tracker takes for water.
@@ -167,7 +167,7 @@ class HysteresisOptions:
         return self.wetting_phase == FluidPhase.WATER
 
     @property
-    def gas_imbibition_when_increasing(self) -> bool:
+    def gas_imbibition_when_increasing(self) -> Boolean:
         """
         Whether gas imbibes as its saturation rises, which it does only when gas is the wetting
         phase. This is the argument the saturation history tracker takes for gas.
@@ -293,7 +293,9 @@ def derive_land_parameters(
     )
 
 
-def hysteresis_roles(relative_permeability: RelativePermeabilityTable) -> tuple[Boolean, Boolean]:
+def get_hysteresis_roles(
+    relative_permeability: RelativePermeabilityTable,
+) -> tuple[Boolean, Boolean]:
     """
     The direction each phase imbibes in, as the saturation history tracker needs it.
 

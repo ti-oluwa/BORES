@@ -342,7 +342,7 @@ class EclipseKilloughRelPermTable(HysteresisRelPermTable):
     Not implemented: the Eclipse modification of the trapped saturation (`EHYSTR` item 4).
     """
 
-    wetting_phase_hysteresis: bool = False
+    wetting_phase_hysteresis: Boolean = False
     """Whether the wetting phase scans too, as `EHYSTR` code 3 asks, rather than staying on drainage."""
 
     wetting_phase_curvature: Number = 1.0

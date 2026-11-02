@@ -5,13 +5,13 @@ Land (1968) trapping of the non-wetting phase for relative permeability hysteres
   Flow from Rock Properties". SPE 1942.
 """
 
+import typing
+
 import attrs
 import numba
 import numpy as np
 
-from bores.blackoil.satfunc.utils import (
-    element_at,
-)
+from bores.blackoil.satfunc.utils import element_at
 from bores.types import (
     Boolean,
     Integer,
@@ -24,11 +24,11 @@ from bores.types import (
 
 __all__ = [
     "LandTrapping",
+    "compute_land_residual_from_reversal",
     "compute_land_residual_saturation",
     "compute_land_residual_saturation_array",
     "compute_land_residual_saturation_scalar",
     "compute_land_trapping_coefficient",
-    "land_residual_from_reversal",
     "rescale_scanning_saturation",
 ]
 
@@ -145,6 +145,7 @@ def compute_land_residual_saturation(
             land_trapping_coefficient=land_trapping_coefficient,
             saturation_epsilon=saturation_epsilon,
         )
+
     initial = np.asarray(initial_non_wetting_saturation)
     result = compute_land_residual_saturation_array(
         initial_non_wetting_saturation=np.ascontiguousarray(initial).reshape(-1),
@@ -156,7 +157,7 @@ def compute_land_residual_saturation(
 
 
 @numba.njit(cache=True, error_model="numpy")
-def land_residual_from_reversal(
+def compute_land_residual_from_reversal(
     size: Integer,
     reversal_saturation: NumberArray[OneDimension],
     other_saturation: NumberArray[OneDimension],
@@ -278,7 +279,7 @@ class LandTrapping:
         maximum_trapped_saturation: Number,
         maximum_saturation: Number,
         saturation_epsilon: Number = 1e-12,
-    ) -> "LandTrapping":
+    ) -> typing.Self:
         """
         Derive the coefficient from the two endpoints, which is how a deck's tables define it.
 
@@ -297,14 +298,14 @@ class LandTrapping:
             ),
         )
 
-    def trapped_saturation(
+    def get_trapped_saturation(
         self,
         initial_saturation: NumberOrArray[NDimension],
         *,
         saturation_epsilon: Number = 1e-12,
     ) -> NumberOrArray[NDimension]:
         """
-        Non-wetting saturation trapped when imbibition starts from `initial_saturation`.
+        Get non-wetting saturation trapped when imbibition starts from `initial_saturation`.
 
         It never exceeds the starting saturation or `maximum_trapped_saturation`.
 

@@ -13,7 +13,7 @@ from bores.blackoil.satfunc.capillary_pressure.tables import (
 from bores.blackoil.satfunc.hysteresis import (
     HysteresisOptions,
     as_hysteresis_tables,
-    hysteresis_roles,
+    get_hysteresis_roles,
 )
 from bores.blackoil.satfunc.relperm.mixing_rules import MixingRule
 from bores.blackoil.satfunc.relperm.tables import (
@@ -156,7 +156,7 @@ class SatFunc:
 
     def resolve(self, saturation_region: Integer, imbibition_region: Integer = 0) -> SatFuncTables:
         """
-        The tables a cell with these regions is evaluated with.
+        Return the tables a cell with these regions is evaluated with.
 
         Without hysteresis they are the drainage tables of `saturation_region`. With it they are
         those paired with the imbibition tables of `imbibition_region`, built the first time a pair
@@ -188,9 +188,9 @@ class SatFunc:
             self._pairs[pair] = tables
         return tables
 
-    def hysteresis_roles(self) -> tuple[Boolean, Boolean]:
+    def get_hysteresis_roles(self) -> tuple[Boolean, Boolean]:
         """
-        The direction each phase imbibes in, which the saturation history tracker takes.
+        Get the direction each phase imbibes in, which the saturation history tracker takes.
 
         Read from the tables, which all have to agree, since one tracker serves the whole run.
         The wetting phase `EHYSTR` names is only checked against them, with a warning when it
@@ -199,7 +199,9 @@ class SatFunc:
         :returns: `(water_imbibition_when_increasing, gas_imbibition_when_increasing)`.
         :raises ValidationError: If the regions disagree on which phase is wetting.
         """
-        roles = {hysteresis_roles(tables.relative_permeability) for tables in self.tables.values()}
+        roles = {
+            get_hysteresis_roles(tables.relative_permeability) for tables in self.tables.values()
+        }
         if len(roles) != 1:
             raise ValidationError(
                 "The saturation function regions disagree on which phase is wetting, but one "

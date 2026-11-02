@@ -71,6 +71,7 @@ def query_oil_water_curve(
         return value, query_oil_water_capillary_pressure(
             table=table, water_saturation=water_saturation, derivative=True
         )
+
     values, slopes = evaluate_three_phase_table(
         table=table,
         water_saturation=water_saturation,
@@ -126,6 +127,7 @@ def query_gas_oil_curve(
             connate_water_saturation=connate_water_saturation,
             derivative=True,
         )
+
     values, slopes = evaluate_three_phase_table(
         table=table,
         water_saturation=water_saturation,

@@ -17,7 +17,7 @@ from bores.blackoil.satfunc.relperm.hysteresis.kernels import (
     scan_relative_permeabilities_parallel,
 )
 from bores.blackoil.satfunc.relperm.hysteresis.land import (
-    land_residual_from_reversal,
+    compute_land_residual_from_reversal,
 )
 from bores.blackoil.satfunc.relperm.mixing_rules import get_builtin_rule_id
 from bores.blackoil.satfunc.relperm.tables import (
@@ -786,7 +786,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
             dkrg_dsg=finish(array=out.dkrg_dsg),
         )
 
-    def land_residual_oil_water(
+    def get_land_residual_oil_water(
         self,
         *,
         size: Integer,
@@ -802,7 +802,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
             return None
 
         residual = np.empty(size, dtype=gas_saturation.dtype)
-        land_residual_from_reversal(
+        compute_land_residual_from_reversal(
             size=size,
             reversal_saturation=water_reversal,
             other_saturation=gas_saturation,
@@ -814,7 +814,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         )
         return typing.cast("NumberArray[OneDimension]", residual)
 
-    def land_residual_gas(
+    def get_land_residual_gas(
         self,
         *,
         size: Integer,
@@ -830,7 +830,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
             return None
 
         residual = np.empty(size, dtype=water_saturation.dtype)
-        land_residual_from_reversal(
+        compute_land_residual_from_reversal(
             size=size,
             reversal_saturation=gas_reversal,
             other_saturation=water_saturation,
@@ -842,7 +842,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         )
         return typing.cast("NumberArray[OneDimension]", residual)
 
-    def land_residual_oil_gas(
+    def get_land_residual_oil_gas(
         self,
         *,
         size: Integer,
@@ -856,8 +856,9 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         maximum_residual = self.maximum_residual_oil_saturation_gas
         if maximum_residual is None:
             return None
+
         residual = np.empty(size, dtype=water_saturation.dtype)
-        land_residual_from_reversal(
+        compute_land_residual_from_reversal(
             size=size,
             reversal_saturation=gas_reversal,
             other_saturation=water_saturation,
@@ -869,7 +870,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         )
         return typing.cast("NumberArray[OneDimension]", residual)
 
-    def land_override_kwargs_water(
+    def get_land_override_kwargs_water(
         self,
         *,
         size: Integer,
@@ -889,14 +890,14 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         if uses_tabular_endpoints(table):
             return kwargs
 
-        residual = self.land_residual_oil_water(
+        residual = self.get_land_residual_oil_water(
             size=size, gas_saturation=gas_saturation, water_reversal=water_reversal
         )
         if residual is None:
             return kwargs
         return {**kwargs, "residual_oil_saturation_water": residual}
 
-    def land_override_kwargs_gas(
+    def get_land_override_kwargs_gas(
         self,
         *,
         size: Integer,
@@ -909,20 +910,20 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         Keyword arguments for the gas-oil imbibition table with the Land residual gas and oil
         saturations in place.
 
-        Same rule as `land_override_kwargs_water`: a tabular table, or a model with no configured
+        Same rule as `get_land_override_kwargs_water`: a tabular table, or a model with no configured
         maximum residual, leaves the entries out.
         """
         if uses_tabular_endpoints(table):
             return kwargs
 
         overrides: dict[str, typing.Any] = {}
-        residual_gas = self.land_residual_gas(
+        residual_gas = self.get_land_residual_gas(
             size=size, water_saturation=water_saturation, gas_reversal=gas_reversal
         )
         if residual_gas is not None:
             overrides["residual_gas_saturation"] = residual_gas
 
-        residual_oil = self.land_residual_oil_gas(
+        residual_oil = self.get_land_residual_oil_gas(
             size=size, water_saturation=water_saturation, gas_reversal=gas_reversal
         )
         if residual_oil is not None:

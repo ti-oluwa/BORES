@@ -166,7 +166,7 @@ class KilloughLandRelPermTable(HysteresisRelPermTable):
         if use_water_hysteresis:
             imbibition_table = self.oil_water_imbibition_table
             water_table = imbibition_table or drainage_water_system
-            land_kwargs = self.land_override_kwargs_water(
+            land_kwargs = self.get_land_override_kwargs_water(
                 size=size,
                 gas_saturation=sg,
                 water_reversal=typing.cast("NumberArray[OneDimension]", water_reversal),
@@ -180,7 +180,7 @@ class KilloughLandRelPermTable(HysteresisRelPermTable):
                 and uses_tabular_endpoints(water_table)
                 and self.get_oil_water_wetting_phase() == FluidPhase.WATER
             ):
-                water_residual = self.land_residual_oil_water(
+                water_residual = self.get_land_residual_oil_water(
                     size=size,
                     gas_saturation=sg,
                     water_reversal=typing.cast("NumberArray[OneDimension]", water_reversal),
@@ -224,7 +224,7 @@ class KilloughLandRelPermTable(HysteresisRelPermTable):
         if use_gas_hysteresis:
             imbibition_table = self.gas_oil_imbibition_table
             gas_table = imbibition_table or drainage_gas_system
-            land_kwargs = self.land_override_kwargs_gas(
+            land_kwargs = self.get_land_override_kwargs_gas(
                 size=size,
                 water_saturation=sw,
                 gas_reversal=typing.cast("NumberArray[OneDimension]", gas_reversal),
@@ -233,7 +233,7 @@ class KilloughLandRelPermTable(HysteresisRelPermTable):
             )
             gas_residual = None
             if not uses_tabular_endpoints(gas_table) or self.tabular_land_trapping:
-                gas_residual = self.land_residual_gas(
+                gas_residual = self.get_land_residual_gas(
                     size=size,
                     water_saturation=sw,
                     gas_reversal=typing.cast("NumberArray[OneDimension]", gas_reversal),

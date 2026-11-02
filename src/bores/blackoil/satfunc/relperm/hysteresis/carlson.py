@@ -182,7 +182,7 @@ class CarlsonRelPermTable(HysteresisRelPermTable):
     phase.
     """
 
-    wetting_phase_uses_imbibition: bool = False
+    wetting_phase_uses_imbibition: Boolean = False
     """
     Whether the wetting phase takes its imbibition curve rather than its drainage curve, as
     `EHYSTR` codes 1 and 3 ask. It applies to water in the oil-water system and to oil in the
