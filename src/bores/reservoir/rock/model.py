@@ -21,6 +21,7 @@ from bores.reservoir.rock.compressibility import (
     RockCompressibilityTables,
 )
 from bores.types import (
+    Boolean,
     CellArray,
     IntCellArray,
     InterpolationMethod,
@@ -29,10 +30,32 @@ from bores.types import (
 )
 from bores.utils import scale
 
-__all__ = ["ROCK_POROSITY_KEYWORDS", "ROCK_REQUIRED_KEYWORDS", "Permeability", "Rock"]
+__all__ = [
+    "ENDPOINT_SCALING_KEYWORDS",
+    "ROCK_POROSITY_KEYWORDS",
+    "ROCK_REQUIRED_KEYWORDS",
+    "Permeability",
+    "Rock",
+]
 
 ROCK_REQUIRED_KEYWORDS = ("PERMX",)
 """The keywords a `Rock` cannot be loaded from a deck without, besides one of `ROCK_POROSITY_KEYWORDS`."""
+
+ENDPOINT_SCALING_KEYWORDS = (
+    "SWL",
+    "SWCON",
+    "SWCR",
+    "SWCRIT",
+    "SWU",
+    "SGL",
+    "SGCR",
+    "SGU",
+    "SOWCR",
+    "SOGCR",
+    "SWLPC",
+    "SGLPC",
+)
+"""The per-cell end point arrays a deck can give, which only apply when end point scaling is on."""
 
 ROCK_POROSITY_KEYWORDS = ("PORO", "PORV")
 """The keywords that give a `Rock` its pore space: the porosity, or the pore volume directly."""
@@ -258,6 +281,36 @@ class Rock:
     Gas is immobile below this saturation when water or liquid displaces gas.
     """
 
+    connate_gas_saturation: CellArray | None = None
+    """
+    Shape (n_cells,) - connate gas saturation (fraction), the smallest gas saturation the
+    saturation functions apply to (`SGL`). `None` when the deck gave none.
+    """
+
+    maximum_gas_saturation: CellArray | None = None
+    """
+    Shape (n_cells,) - the largest gas saturation the saturation functions apply to (fraction,
+    `SGU`). `None` when the deck gave none.
+    """
+
+    maximum_water_saturation: CellArray | None = None
+    """
+    Shape (n_cells,) - the largest water saturation the saturation functions apply to (fraction,
+    `SWU`). `None` when the deck gave none.
+    """
+
+    capillary_connate_water_saturation: CellArray | None = None
+    """
+    Shape (n_cells,) - the connate water saturation used only to scale the capillary pressure
+    curves (fraction, `SWLPC`). `None` when the deck gave none.
+    """
+
+    capillary_connate_gas_saturation: CellArray | None = None
+    """
+    Shape (n_cells,) - the connate gas saturation used only to scale the capillary pressure
+    curves (fraction, `SGLPC`). `None` when the deck gave none.
+    """
+
     compressibility: RockCompressibilityTables | None = None
     """
     Formation compressibility tables - one per `ROCKNUM` region in `unit_system`.
@@ -282,11 +335,20 @@ class Rock:
             ("residual_oil_saturation_water", self.residual_oil_saturation_water, 1.0),
             ("residual_oil_saturation_gas", self.residual_oil_saturation_gas, 1.0),
             ("residual_gas_saturation", self.residual_gas_saturation, 1.0),
+            ("connate_gas_saturation", self.connate_gas_saturation, 1.0),
+            ("maximum_gas_saturation", self.maximum_gas_saturation, 1.0),
+            ("maximum_water_saturation", self.maximum_water_saturation, 1.0),
+            (
+                "capillary_connate_water_saturation",
+                self.capillary_connate_water_saturation,
+                1.0,
+            ),
+            ("capillary_connate_gas_saturation", self.capillary_connate_gas_saturation, 1.0),
             ("absolute_permeability.x", self.absolute_permeability.x, None),
             ("absolute_permeability.y", self.absolute_permeability.y, None),
             ("absolute_permeability.z", self.absolute_permeability.z, None),
         ):
-            if array.size == 0:
+            if array is None or array.size == 0:
                 continue
             if not np.all(np.isfinite(array)):
                 raise ValidationError(f"`{name}` contains NaN or infinite values.")
@@ -604,6 +666,7 @@ class Rock:
         saturation_region: IntCellArray | None = None,
         interpolation_method: InterpolationMethod = "linear",
         dtype: npt.DTypeLike = None,
+        endpoint_scaling: Boolean | None = None,
     ) -> Self:
         """
         Build a `Rock` from a parsed `DeckFile` and an already-loaded `Grid`.
@@ -634,6 +697,11 @@ class Rock:
             table. Strongly recommended. Without it, any endpoint the deck
             doesn't supply explicitly silently defaults to `0.0` for every
             cell, which is rarely physically correct.
+        :param endpoint_scaling: Whether the deck's per-cell end point arrays are used. They are
+            only meaningful when end point scaling is on, which a deck does with `ENDSCALE`, so
+            by default (`None`) they are read only if the deck has it. When they are off, any
+            end point arrays in the deck are ignored with a warning and the end points come from
+            the saturation function tables.
         :param saturation_region: Optional per-cell SATNUM array, used
             (only) for the `satfunc`-based derivation above. If omitted,
             loaded from the deck's own `SATNUM` keyword (defaulting to
@@ -661,8 +729,25 @@ class Rock:
                 return np.full(n_cells, default, dtype=dtype)
             return data
 
+        if endpoint_scaling is None:
+            endpoint_scaling = deck_file.has("ENDSCALE")
+        if not endpoint_scaling:
+            ignored = [name for name in ENDPOINT_SCALING_KEYWORDS if deck_file.has(name)]
+            if ignored:
+                warnings.warn(
+                    f"{', '.join(f'`{name}`' for name in ignored)} "
+                    f"{'is' if len(ignored) == 1 else 'are'} in the deck but end point scaling "
+                    "is off (the deck has no `ENDSCALE`), so "
+                    f"{'it is' if len(ignored) == 1 else 'they are'} ignored and the end points "
+                    "come from the saturation function tables.",
+                    category=UserWarning,
+                    stacklevel=3,
+                )
+
         def load_endpoint_array(*keywords: str) -> CellArray | None:
             # Keywords in order of preference: the Eclipse name, then any BORES alias
+            if not endpoint_scaling:
+                return None
             for keyword in keywords:
                 data = load_cell_array(deck_file, keyword, n_cells, dtype=dtype)
                 if data is not None:
@@ -722,7 +807,10 @@ class Rock:
         connate_water_saturation = get_saturation_endpoint(
             ("SWL", "SWCON"), "connate_water_saturation", table_derived_endpoints
         )
-        if deck_file.has("SWL") or deck_file.has("SWCON") or table_derived_endpoints is None:
+        has_connate_water_array = endpoint_scaling and (
+            deck_file.has("SWL") or deck_file.has("SWCON")
+        )
+        if has_connate_water_array or table_derived_endpoints is None:
             # An absent `SWCR` defaults to the connate saturation.
             default_irreducible = connate_water_saturation.copy()
         else:
@@ -734,6 +822,31 @@ class Rock:
             if critical_water_saturation is None
             else fill_unset(critical_water_saturation, default_irreducible)
         )
+
+        # An end point the deck leaves unset in a cell takes the value the saturation functions
+        # would give it: no connate gas, the largest water saturation of 1 and the largest gas
+        # saturation of what connate water leaves, and capillary end points equal to the ordinary
+        # ones.
+        def load_optional_endpoint(
+            keywords: tuple[str, ...], fallback: CellArray
+        ) -> CellArray | None:
+            data = load_endpoint_array(*keywords)
+            return None if data is None else fill_unset(data, fallback)
+
+        zeros = np.zeros(n_cells, dtype=dtype)
+        connate_gas_saturation = load_optional_endpoint(("SGL",), zeros)
+        maximum_gas_saturation = load_optional_endpoint(
+            ("SGU",),
+            typing.cast("CellArray", (1.0 - connate_water_saturation).astype(dtype, copy=False)),
+        )
+        maximum_water_saturation = load_optional_endpoint(("SWU",), np.ones(n_cells, dtype=dtype))
+        capillary_connate_water_saturation = load_optional_endpoint(
+            ("SWLPC",), connate_water_saturation
+        )
+        capillary_connate_gas_saturation = load_optional_endpoint(
+            ("SGLPC",), zeros if connate_gas_saturation is None else connate_gas_saturation
+        )
+
         net_to_gross = optional("NTG", 1.0)
         return cls(
             porosity=cls.load_porosity(
@@ -756,5 +869,10 @@ class Rock:
             residual_gas_saturation=get_saturation_endpoint(
                 ("SGCR",), "residual_gas_saturation", table_derived_endpoints
             ),
+            connate_gas_saturation=connate_gas_saturation,
+            maximum_gas_saturation=maximum_gas_saturation,
+            maximum_water_saturation=maximum_water_saturation,
+            capillary_connate_water_saturation=capillary_connate_water_saturation,
+            capillary_connate_gas_saturation=capillary_connate_gas_saturation,
             unit_system=unit_system,
         )

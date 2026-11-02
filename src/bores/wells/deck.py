@@ -317,6 +317,11 @@ def load_well_from_records(
             "status": status,
             "saturation_region": saturation_region,
             "connection_factor_override": record.get("connection_factor"),
+            # A deck leaves these to be worked out by writing nothing, zero or a negative number
+            "permeability_thickness": positive_or_none(record.get("kh")),
+            "pressure_equivalent_radius": positive_or_none(
+                record.get("pressure_equivalent_radius")
+            ),
             "connection_factor_multiplier": None,
             "direction": DIRECTION_MAP.get(direction) if direction else None,
             "start_time": record.get("schedule_time", 0.0),
@@ -431,6 +436,8 @@ def load_well_from_records(
             saturation_region=spec["saturation_region"],
             connection_factor_override=spec["connection_factor_override"],
             connection_factor_multiplier=spec["connection_factor_multiplier"],
+            permeability_thickness=spec["permeability_thickness"],
+            pressure_equivalent_radius=spec["pressure_equivalent_radius"],
             direction=spec["direction"],
             schedule_status=spec["schedule_status"],
         )
@@ -481,7 +488,20 @@ def load_well_from_records(
         ),
         schedule_status=well_schedule_status,
         allows_crossflow=bool(welspecs_record.get("enable_crossflow", True)),
+        drainage_radius=positive_or_none(welspecs_record.get("drainage_radius")),
     )
+
+
+def positive_or_none(value: typing.Any) -> float | None:
+    """
+    A deck value that means "work it out" when it is missing, zero or negative.
+
+    :param value: The value as parsed, possibly `None`.
+    :returns: The value as a float if it is positive, else `None`.
+    """
+    if value is None or float(value) <= 0.0:
+        return None
+    return float(value)
 
 
 def load_well_segments(

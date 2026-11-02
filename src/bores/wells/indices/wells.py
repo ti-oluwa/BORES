@@ -335,6 +335,8 @@ def compute_equivalent_radius_well_index(
     completion_length: Number,
     wellbore_radius: Number,
     skin: Number,
+    equivalent_radius: Number = 0.0,
+    permeability_thickness: Number = 0.0,
 ) -> Number:
     """
     Well index for a cell where `is_locally_cartesian` returned `False`.
@@ -349,10 +351,23 @@ def compute_equivalent_radius_well_index(
     :param completion_length: Perforation length within this cell (ft).
     :param wellbore_radius: Perforation or Well wellbore radius (ft).
     :param skin: Perforation skin factor.
+    :param equivalent_radius: Pressure equivalent radius to use in place of the one worked out
+        from the cell volume. Zero to work it out.
+    :param permeability_thickness: Permeability times thickness to use in place of
+        `permeability * completion_length`. Zero to work it out.
     :returns: Well index (mD*ft).
     """
-    r0 = 0.14 * np.sqrt(cell_volume / completion_length)
-    return 2.0 * np.pi * permeability * completion_length / (np.log(r0 / wellbore_radius) + skin)
+    r0 = (
+        equivalent_radius
+        if equivalent_radius > 0.0
+        else 0.14 * np.sqrt(cell_volume / completion_length)
+    )
+    kh = (
+        permeability_thickness
+        if permeability_thickness > 0.0
+        else permeability * completion_length
+    )
+    return 2.0 * np.pi * kh / (np.log(r0 / wellbore_radius) + skin)
 
 
 def resolve_connection_terms(
@@ -375,7 +390,10 @@ def resolve_connection_terms(
     The connection factor follows this order: `perforation.connection_factor_override`
     if set, scaled by `connection_factor_multiplier` if that is set too; otherwise
     Peaceman (`compute_peaceman_well_index`) if `is_locally_cartesian`; otherwise the
-    equivalent-radius fallback (`compute_equivalent_radius_well_index`).
+    equivalent-radius fallback (`compute_equivalent_radius_well_index`). In the last two,
+    `perforation.pressure_equivalent_radius` replaces the equivalent radius that would be worked
+    out from the cell, and `perforation.permeability_thickness` replaces permeability times
+    thickness.
 
     The conductivity is the part of the connection factor that does not depend on skin,
     so that the factor equals `conductivity / (resistance + skin)`. It is `None` for a
@@ -413,8 +431,14 @@ def resolve_connection_terms(
             completion_length=completion_length,
             wellbore_radius=wellbore_radius,
             skin=perforation.skin,
+            equivalent_radius=perforation.pressure_equivalent_radius or 0.0,
+            permeability_thickness=perforation.permeability_thickness or 0.0,
         )
-        conductivity = 2.0 * np.pi * effective_permeability * completion_length
+        conductivity = (
+            2.0 * np.pi * perforation.permeability_thickness
+            if perforation.permeability_thickness is not None
+            else 2.0 * np.pi * effective_permeability * completion_length
+        )
     else:
         # Perforation (TVD, axis-aligned).
         length_x = grid.cell_length_x[cell_index]
@@ -433,21 +457,35 @@ def resolve_connection_terms(
         )
 
         if is_locally_cartesian(grid, cell_index):
-            effective_drainage_radius = compute_3D_effective_drainage_radius(
-                interval_thickness=(length_x, length_y, length_z),
-                permeability=(kx, ky, kz),
-                well_orientation=direction,
-            )
+            if perforation.pressure_equivalent_radius is not None:
+                effective_drainage_radius = perforation.pressure_equivalent_radius
+            else:
+                effective_drainage_radius = compute_3D_effective_drainage_radius(
+                    interval_thickness=(length_x, length_y, length_z),
+                    permeability=(kx, ky, kz),
+                    well_orientation=direction,
+                )
+
+            if perforation.permeability_thickness is not None:
+                # Used whole: net-to-gross and partial penetration are already in it
+                permeability_for_index = perforation.permeability_thickness
+                thickness_for_index = 1.0
+                net_to_gross_for_index = 1.0
+            else:
+                permeability_for_index = effective_permeability
+                thickness_for_index = completion_length
+                net_to_gross_for_index = net_to_gross
+
             well_index = compute_peaceman_well_index(
-                permeability=effective_permeability,
-                interval_thickness=completion_length,
+                permeability=permeability_for_index,
+                interval_thickness=thickness_for_index,
                 wellbore_radius=wellbore_radius,
                 effective_drainage_radius=effective_drainage_radius,
                 skin_factor=perforation.skin,
-                net_to_gross=net_to_gross,
+                net_to_gross=net_to_gross_for_index,
                 regime_constant=regime_constant,
             )
-            conductivity = effective_permeability * completion_length * net_to_gross
+            conductivity = permeability_for_index * thickness_for_index * net_to_gross_for_index
         else:
             well_index = compute_equivalent_radius_well_index(
                 permeability=effective_permeability,
@@ -455,8 +493,14 @@ def resolve_connection_terms(
                 completion_length=completion_length,
                 wellbore_radius=wellbore_radius,
                 skin=perforation.skin,
+                equivalent_radius=perforation.pressure_equivalent_radius or 0.0,
+                permeability_thickness=perforation.permeability_thickness or 0.0,
             )
-            conductivity = 2.0 * np.pi * effective_permeability * completion_length
+            conductivity = (
+                2.0 * np.pi * perforation.permeability_thickness
+                if perforation.permeability_thickness is not None
+                else 2.0 * np.pi * effective_permeability * completion_length
+            )
 
     if multiplier is not None:
         well_index *= multiplier

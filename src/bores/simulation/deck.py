@@ -7,9 +7,11 @@ from bores.deck.phases import declares_phases, read_deck_phases
 from bores.simulation.options import (
     NewtonOptions,
     PhysicsOptions,
+    load_dissolution_limits,
     load_equilibration_options,
     load_minimum_pore_volume,
     load_model_dimensions,
+    load_output_options,
     load_saturation_options,
 )
 from bores.simulation.spec import RunSpec
@@ -38,6 +40,10 @@ def load_run_spec(deck_file: DeckFile) -> RunSpec:
       and `VFPIDIMS`.
     - `data_check_only`: whether the deck has `NOSIM`.
     - `physics_options.minimum_pore_volume`: `MINPV`, in pore volume units.
+    - `physics_options` limits on how fast gas dissolves and oil vaporizes: `DRSDT` and `DRVDT`
+      (the ones at the start).
+    - `output_options`: `NOECHO`, `FMTIN`, `FMTOUT`, `UNIFIN`, `UNIFOUT`, `INIT`, `GRIDFILE`,
+      `RUNSUM`, `MESSAGES` and the `RPT*` report requests.
     - `newton_options.maximum_newton_iterations`: the `TUNING` item of that name in effect at the
       start, only if the deck sets it to something other than Eclipse's default and within the
       range `NewtonOptions` accepts.
@@ -65,7 +71,7 @@ def load_run_spec(deck_file: DeckFile) -> RunSpec:
     ):
         newton_settings["maximum_newton_iterations"] = int(maximum_newton_iterations)
 
-    physics_settings: dict[str, typing.Any] = {}
+    physics_settings: dict[str, typing.Any] = load_dissolution_limits(deck_file)
     minimum_pore_volume = load_minimum_pore_volume(deck_file)
     if minimum_pore_volume is not None:
         physics_settings["minimum_pore_volume"] = minimum_pore_volume
@@ -81,5 +87,6 @@ def load_run_spec(deck_file: DeckFile) -> RunSpec:
         data_check_only=deck_file.has("NOSIM"),
         newton_options=NewtonOptions(**newton_settings),
         physics_options=PhysicsOptions(**physics_settings),
+        output_options=load_output_options(deck_file),
         **options,
     )

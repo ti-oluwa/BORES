@@ -66,6 +66,8 @@ def make_perforation(
     schedule_status: WellStatus = WellStatus.ACTIVE,
     saturation_region: int | None = None,
     connection_factor_override: Number | None = None,
+    permeability_thickness: Number | None = None,
+    pressure_equivalent_radius: Number | None = None,
     connection_factor_multiplier: Number | None = None,
     direction: Orientation | None = None,
 ) -> Perforation:
@@ -82,6 +84,8 @@ def make_perforation(
     :param schedule_status: Schedule activation status.
     :param saturation_region: Optional saturation-region integer identifier.
     :param connection_factor_override: Optional explicit connection factor.
+    :param permeability_thickness: `Perforation.permeability_thickness` (deck `COMPDAT` `kh`).
+    :param pressure_equivalent_radius: `Perforation.pressure_equivalent_radius`.
     :param connection_factor_multiplier: Optional multiplier on the computed factor.
     :param direction: Optional principal-axis direction for TVD-based perforations.
     :returns: Constructed `Perforation`.
@@ -97,6 +101,8 @@ def make_perforation(
         schedule_status=schedule_status,
         saturation_region=saturation_region,
         connection_factor_override=connection_factor_override,
+        permeability_thickness=permeability_thickness,
+        pressure_equivalent_radius=pressure_equivalent_radius,
         connection_factor_multiplier=connection_factor_multiplier,
         direction=direction,
     )
@@ -111,6 +117,8 @@ def _resolve_perforations(
     skin: Number,
     saturation_region: int | None,
     connection_factor_override: Number | None,
+    permeability_thickness: Number | None,
+    pressure_equivalent_radius: Number | None,
     connection_factor_multiplier: Number | None,
     direction: Orientation | None,
     schedule_status: WellStatus,
@@ -165,6 +173,8 @@ def _resolve_perforations(
         skin=skin,
         saturation_region=saturation_region,
         connection_factor_override=connection_factor_override,
+        permeability_thickness=permeability_thickness,
+        pressure_equivalent_radius=pressure_equivalent_radius,
         connection_factor_multiplier=connection_factor_multiplier,
         direction=direction,
         schedule_status=schedule_status,
@@ -193,6 +203,8 @@ def make_producer(
     skin: Number = 0.0,
     saturation_region: int | None = None,
     connection_factor_override: Number | None = None,
+    permeability_thickness: Number | None = None,
+    pressure_equivalent_radius: Number | None = None,
     connection_factor_multiplier: Number | None = None,
     direction: Orientation | None = None,
     preferred_phase: FluidPhase | None = None,
@@ -203,6 +215,7 @@ def make_producer(
     unit_system: UnitSystem = UnitSystem.FIELD,
     metadata: typing.Mapping[str, typing.Any] | None = None,
     d_factor: Number | None = None,
+    drainage_radius: Number | None = None,
     allows_crossflow: bool = True,
 ) -> tuple[Well, ProducerControl]:
     """
@@ -239,6 +252,8 @@ def make_producer(
     :param skin: `Perforation.skin`.
     :param saturation_region: `Perforation.saturation_region`.
     :param connection_factor_override: `Perforation.connection_factor_override`.
+    :param permeability_thickness: `Perforation.permeability_thickness` (deck `COMPDAT` `kh`).
+    :param pressure_equivalent_radius: `Perforation.pressure_equivalent_radius`.
     :param connection_factor_multiplier: `Perforation.connection_factor_multiplier`.
     :param direction: `Perforation.direction`.
     :param preferred_phase: `Well.preferred_phase`.
@@ -250,6 +265,7 @@ def make_producer(
     :param unit_system: `Well.unit_system` and `ProducerControl.unit_system`.
     :param metadata: `Well.metadata`.
     :param d_factor: `Well.d_factor`, the non-Darcy flow coefficient.
+    :param drainage_radius: `Well.drainage_radius`, the radius of the well's drainage area.
     :param allows_crossflow: `Well.allows_crossflow`.
     :returns: `(Well, ProducerControl)`.
     :raises ValidationError: If none of `target_rate`, `target_bhp`, or
@@ -267,6 +283,8 @@ def make_producer(
         skin=skin,
         saturation_region=saturation_region,
         connection_factor_override=connection_factor_override,
+        permeability_thickness=permeability_thickness,
+        pressure_equivalent_radius=pressure_equivalent_radius,
         connection_factor_multiplier=connection_factor_multiplier,
         direction=direction,
         schedule_status=schedule_status,
@@ -286,6 +304,7 @@ def make_producer(
         unit_system=unit_system,
         metadata=metadata,
         d_factor=d_factor,
+        drainage_radius=drainage_radius,
         allows_crossflow=allows_crossflow,
     )
 
@@ -348,6 +367,8 @@ def make_injector(
     skin: Number = 0.0,
     saturation_region: int | None = None,
     connection_factor_override: Number | None = None,
+    permeability_thickness: Number | None = None,
+    pressure_equivalent_radius: Number | None = None,
     connection_factor_multiplier: Number | None = None,
     direction: Orientation | None = None,
     pvt_region: int | None = None,
@@ -357,6 +378,7 @@ def make_injector(
     unit_system: UnitSystem = UnitSystem.FIELD,
     metadata: typing.Mapping[str, typing.Any] | None = None,
     d_factor: Number | None = None,
+    drainage_radius: Number | None = None,
     allows_crossflow: bool = True,
 ) -> tuple[Well, InjectorControl]:
     """
@@ -393,6 +415,8 @@ def make_injector(
     :param skin: `Perforation.skin`.
     :param saturation_region: `Perforation.saturation_region`.
     :param connection_factor_override: `Perforation.connection_factor_override`.
+    :param permeability_thickness: `Perforation.permeability_thickness` (deck `COMPDAT` `kh`).
+    :param pressure_equivalent_radius: `Perforation.pressure_equivalent_radius`.
     :param connection_factor_multiplier: `Perforation.connection_factor_multiplier`.
     :param direction: `Perforation.direction`.
     :param pvt_region: `Well.pvt_region`.
@@ -403,6 +427,7 @@ def make_injector(
     :param unit_system: `Well.unit_system` and `InjectorControl.unit_system`.
     :param metadata: `Well.metadata`.
     :param d_factor: `Well.d_factor`, the non-Darcy flow coefficient.
+    :param drainage_radius: `Well.drainage_radius`, the radius of the well's drainage area.
     :param allows_crossflow: `Well.allows_crossflow`.
     :returns: `(Well, InjectorControl)`.
     :raises ValidationError: If none of `target_rate`, `target_bhp`, or
@@ -420,6 +445,8 @@ def make_injector(
         skin=skin,
         saturation_region=saturation_region,
         connection_factor_override=connection_factor_override,
+        permeability_thickness=permeability_thickness,
+        pressure_equivalent_radius=pressure_equivalent_radius,
         connection_factor_multiplier=connection_factor_multiplier,
         direction=direction,
         schedule_status=schedule_status,
@@ -439,6 +466,7 @@ def make_injector(
         unit_system=unit_system,
         metadata=metadata,
         d_factor=d_factor,
+        drainage_radius=drainage_radius,
         allows_crossflow=allows_crossflow,
     )
 

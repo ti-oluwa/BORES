@@ -4,7 +4,7 @@ import pytest
 from bores.deck import DeckFile
 from bores.reservoir.rock.model import Rock
 
-HEADER = "METRIC\nSPECGRID\n 2 1 1 1 F /\nPORO\n 0.2 0.2 /\nPERMX\n 100 100 /\n"
+HEADER = "METRIC\nSPECGRID\n 2 1 1 1 F /\nENDSCALE\n /\nPORO\n 0.2 0.2 /\nPERMX\n 100 100 /\n"
 
 
 class Grid:

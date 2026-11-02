@@ -50,6 +50,7 @@ __all__ = [
     "EquilibriumArrays",
     "compute_water_phase_pressure",
     "get_active_cells",
+    "initial_state_needs_equilibration",
     "initialize_equilibrium_arrays",
     "initialize_reservoir_state",
     "initialize_water_gas_state",
@@ -1794,6 +1795,44 @@ def all_finite(values: NumberArray[OneDimension]) -> Boolean:
     return True
 
 
+def initial_state_needs_equilibration(deck_file: DeckFile) -> bool:
+    """
+    Whether the deck leaves part of the initial state to equilibration.
+
+    The initial state is covered without it when the deck gives the pressure, the solution gas-oil
+    ratio (`RS`) and the vaporized oil-gas ratio (`RV`), and two of the three saturations
+    (`SWAT`, `SGAS`, `SOIL`), which fix the third.
+
+    :param deck_file: The deck to read.
+    :returns: `True` if equilibration (`EQUIL`) is needed to fill in the rest.
+    """
+    present = deck_file.has_many("PRESSURE", "RS", "RV", "SWAT", "SGAS", "SOIL")
+    saturations_given = sum(present[name] for name in ("SWAT", "SGAS", "SOIL"))
+    return not (present["PRESSURE"] and present["RS"] and present["RV"] and saturations_given >= 2)
+
+
+def derive_saturation_from_oil(
+    known: CellArray, oil: CellArray, known_name: str, derived_name: str
+) -> CellArray:
+    """
+    Derive the water or gas saturation that an oil saturation and the other one leave.
+
+    :param known: Saturation of the phase that is given, of every cell.
+    :param oil: Oil saturation of every cell.
+    :param known_name: Name of the phase that is given, for messages.
+    :param derived_name: Name of the phase being worked out, for messages.
+    :returns: `1 - known - oil`, for every cell.
+    :raises ValidationError: If the given saturations already add up to more than 1.
+    """
+    derived = 1.0 - np.asarray(known) - np.asarray(oil)
+    if derived.size and float(derived.min()) < -1e-6:
+        raise ValidationError(
+            f"`oil_saturation` plus the {known_name} saturation exceeds 1.0, so the "
+            f"{derived_name} saturation would be negative (by up to {-float(derived.min()):.3e})."
+        )
+    return typing.cast("CellArray", np.clip(derived, 0.0, 1.0))
+
+
 @numba.njit(cache=True)
 def derive_oil_saturation(
     water_saturation: NumberArray[OneDimension],
@@ -2187,6 +2226,7 @@ def initialize_reservoir_state(
     pressure: CellArray | None = None,
     water_saturation: CellArray | None = None,
     gas_saturation: CellArray | None = None,
+    oil_saturation: CellArray | None = None,
     solution_gor: CellArray | None = None,
     vaporized_oil_gas_ratio: CellArray | None = None,
     gas_solubility_in_water: CellArray | None = None,
@@ -2208,8 +2248,8 @@ def initialize_reservoir_state(
     (if the kwarg is `None`) the matching `PRESSURE`/`SWAT`/`SGAS`/`RS`/`RV`
     keyword in `deck_file`. Any field left uncovered by both is filled in
     from equilibration, which therefore only runs at all if at least one
-    field needs it. `oil_saturation` is always derived as
-    `1 - water_saturation - gas_saturation`, never taken from an explicit array.
+    field needs it. `oil_saturation` is derived as
+    `1 - water_saturation - gas_saturation` unless it is given too (see `oil_saturation` below).
 
     `oil_bubble_point_pressure` and `gas_dew_point_pressure` are taken from
     equilibration when it derives the matching `solution_gor` and `vaporized_oil_gas_ratio`.
@@ -2251,6 +2291,11 @@ def initialize_reservoir_state(
     :param pressure: Optional explicit pressure array (overrides `PRESSURE` keyword).
     :param water_saturation: Optional explicit water saturation array (overrides `SWAT` keyword).
     :param gas_saturation: Optional explicit gas saturation array (overrides `SGAS` keyword).
+    :param oil_saturation: Optional explicit oil saturation array (overrides the `SOIL` keyword).
+        Any two of water, gas and oil saturation fix the third. Given with both water and gas
+        saturation it has to agree with them. Given with one of them it sets the other, so that
+        saturation needs no equilibration. Given alone it cannot say how the rest splits between
+        water and gas, so it is ignored with a warning.
     :param solution_gor: Optional explicit solution GOR array (overrides `RS` keyword).
     :param vaporized_oil_gas_ratio: Optional explicit vaporized oil ratio array (overrides `RV` keyword).
     :param gas_solubility_in_water: Optional explicit gas solubility in water (`Rsw`) array, in the
@@ -2363,6 +2408,39 @@ def initialize_reservoir_state(
                 if deck_array is not None:
                     explicit[field] = typing.cast(CellArray, deck_array)
 
+    explicit_oil_saturation: CellArray | None = oil_saturation
+    if explicit_oil_saturation is None and deck_file is not None:
+        explicit_oil_saturation = deck_file.get("SOIL")
+    if explicit_oil_saturation is not None:
+        explicit_oil_saturation = typing.cast(
+            "CellArray",
+            np.asarray(explicit_oil_saturation, dtype=get_dtype() if dtype is None else dtype),
+        )
+        known_water = explicit["water_saturation"]
+        known_gas = explicit["gas_saturation"]
+        if known_water is not None and known_gas is None:
+            explicit["gas_saturation"] = derive_saturation_from_oil(
+                known=known_water,
+                oil=explicit_oil_saturation,
+                known_name="water",
+                derived_name="gas",
+            )
+        elif known_gas is not None and known_water is None:
+            explicit["water_saturation"] = derive_saturation_from_oil(
+                known=known_gas,
+                oil=explicit_oil_saturation,
+                known_name="gas",
+                derived_name="water",
+            )
+        elif known_water is None and known_gas is None:
+            warnings.warn(
+                "An oil saturation was given without a water or gas saturation, which cannot say "
+                "how the rest splits between water and gas, so it is ignored.",
+                category=UserWarning,
+                stacklevel=2,
+            )
+            explicit_oil_saturation = None
+
     equilibrium_arrays: EquilibriumArrays | None = None
     if any(value is None for value in explicit.values()):
         if equilibrium is None:
@@ -2472,6 +2550,20 @@ def initialize_reservoir_state(
 
     if n_cells > 0 and pressure_array.min() <= 0.0:
         raise ValidationError("`pressure` must be positive in every cell.")
+
+    if explicit_oil_saturation is not None and n_cells > 0:
+        disagreement = float(
+            np.max(
+                np.abs(
+                    1.0 - water_saturation_array - gas_saturation_array - explicit_oil_saturation
+                )
+            )
+        )
+        if disagreement > 1e-6:
+            raise ValidationError(
+                "`water_saturation`, `gas_saturation` and `oil_saturation` must add up to 1.0 in "
+                f"every cell, but they are off by up to {disagreement:.3e}."
+            )
 
     oil_saturation_array = np.empty(n_cells, dtype=dtype)
     (

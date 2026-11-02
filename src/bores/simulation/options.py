@@ -1,6 +1,7 @@
 """Simulation run options/configurations, grouped by what they configure."""
 
 import typing
+import warnings
 from collections.abc import Iterable
 
 import attrs
@@ -20,17 +21,22 @@ from bores.utils import scale
 
 __all__ = [
     "EquilibrationOptions",
+    "MessageLimits",
     "ModelDimensions",
     "NewtonOptions",
     "OutputOptions",
     "PhaseOptions",
     "PhysicsOptions",
+    "ReportRequest",
     "SaturationOptions",
     "SolverOptions",
     "StepLimitOptions",
+    "get_scheduled_at_start",
+    "load_dissolution_limits",
     "load_equilibration_options",
     "load_minimum_pore_volume",
     "load_model_dimensions",
+    "load_output_options",
     "load_saturation_options",
 ]
 
@@ -76,8 +82,12 @@ class SaturationOptions:
     `HYSTERESIS_SATURATION_TOLERANCE` constant of `constants`.
     """
 
-    endpoint_scaling_enabled: Boolean = False
-    """Whether the deck scales the saturation function end points cell by cell (`ENDSCALE`)."""
+    endpoint_scaling_enabled: Boolean | None = None
+    """
+    Whether the saturation function end points are scaled cell by cell, so the deck's end point
+    arrays (`SWL`, `SGCR`, ...) are used (`ENDSCALE`). `None` leaves it to the deck, which turns
+    it on by having `ENDSCALE`; `False` or `True` overrides the deck.
+    """
 
     directional_endpoint_scaling: Boolean = False
     """Whether end point scaling depends on the flow direction (`ENDSCALE` with `DIRECT`)."""
@@ -687,6 +697,37 @@ class PhysicsOptions:
     are fixed for the whole run and do not change as pressure moves the pore volume.
     """
 
+    maximum_solution_gor_increase_rate: Number | None = attrs.field(
+        default=None,
+        validator=attrs.validators.optional(attrs.validators.ge(0)),  # type: ignore[arg-type]
+    )
+    """
+    The fastest the solution gas-oil ratio of a cell may rise (`DRSDT`), in the unit of the gas-oil
+    ratio per time unit of `unit_system`. `None` when the deck sets no limit.
+
+    Oil that is under-saturated with gas does not take up gas from a free gas phase at once. This
+    caps how much it can take up per unit of time, so gas moving into contact with oil dissolves
+    gradually.
+    """
+
+    solution_gor_limit_applies_to_all_cells: Boolean = True
+    """
+    Whether the solution gas-oil ratio limit holds in every cell (`DRSDT` option `ALL`) or only in
+    cells that hold free gas (`FREE`).
+    """
+
+    maximum_vaporized_oil_gas_ratio_increase_rate: Number | None = attrs.field(
+        default=None,
+        validator=attrs.validators.optional(attrs.validators.ge(0)),  # type: ignore[arg-type]
+    )
+    """
+    The fastest the vaporized oil-gas ratio of a cell may rise (`DRVDT`), in the unit of that ratio
+    per time unit of `unit_system`. `None` when the deck sets no limit.
+
+    The counterpart of `maximum_solution_gor_increase_rate`: how fast gas that is under-saturated
+    with oil can take up oil.
+    """
+
     def convert(self, *, volume_factor: Number) -> "PhysicsOptions":
         """
         The settings in another unit system.
@@ -748,6 +789,55 @@ class PhaseOptions:
 
 
 @attrs.frozen(kw_only=True, slots=True)
+class MessageLimits:
+    """How many messages of each kind are printed, and how many of each stop the run (`MESSAGES`)."""
+
+    message_print_limit: Integer = 1_000_000
+    """Most ordinary messages printed."""
+    comment_print_limit: Integer = 1_000_000
+    """Most comments printed."""
+    warning_print_limit: Integer = 10_000
+    """Most warnings printed."""
+    problem_print_limit: Integer = 100
+    """Most problems printed."""
+    error_print_limit: Integer = 100
+    """Most errors printed."""
+    bug_print_limit: Integer = 100
+    """Most bugs printed."""
+    message_stop_limit: Integer = 1_000_000
+    """Ordinary messages after which the run stops."""
+    comment_stop_limit: Integer = 1_000_000
+    """Comments after which the run stops."""
+    warning_stop_limit: Integer = 10_000
+    """Warnings after which the run stops."""
+    problem_stop_limit: Integer = 100
+    """Problems after which the run stops."""
+    error_stop_limit: Integer = 10
+    """Errors after which the run stops."""
+    bug_stop_limit: Integer = 1
+    """Bugs after which the run stops."""
+    group_print_limit: Integer = 10
+    """Most messages of one group printed."""
+
+
+@attrs.frozen(kw_only=True, slots=True)
+class ReportRequest:
+    """One request in the deck for something to be reported, and from when it applies."""
+
+    keyword: str
+    """The keyword that made the request (`RPTPROPS`, `RPTSOL`, `RPTRST` or `RPTSCHED`)."""
+
+    time: Number
+    """When the request takes effect, in the time unit of the unit system (0 for the start)."""
+
+    mnemonics: tuple[tuple[str, Number | None], ...]
+    """The mnemonics asked for with their level, `None` where the mnemonic has no level, in the order written."""
+
+    flags: tuple[str, ...] = ()
+    """Bare flags written alongside the mnemonics."""
+
+
+@attrs.frozen(kw_only=True, slots=True)
 class OutputOptions:
     """
     What a run reports while it advances.
@@ -770,3 +860,136 @@ class OutputOptions:
     """
     warn_well_anomalies: Boolean = True
     """Whether to warn about anomalous flow rates during the simulation."""
+
+    echo_input: Boolean = True
+    """Whether the input is echoed to the log as it is read (`NOECHO` turns it off)."""
+
+    formatted_input: Boolean = False
+    """Whether input files are formatted rather than binary (`FMTIN`)."""
+
+    formatted_output: Boolean = False
+    """Whether output files are formatted rather than binary (`FMTOUT`)."""
+
+    unified_input: Boolean = False
+    """Whether restart input comes from one unified file (`UNIFIN`)."""
+
+    unified_output: Boolean = False
+    """Whether restart output goes to one unified file (`UNIFOUT`)."""
+
+    write_initial_file: Boolean = False
+    """Whether the initial file of static properties is written (`INIT`)."""
+
+    write_grid_file: Boolean = False
+    """Whether the grid geometry file is written (`GRIDFILE` with its first item set)."""
+
+    write_extended_grid_file: Boolean = False
+    """Whether the extended grid geometry file is written (`GRIDFILE` with its second item set)."""
+
+    write_run_summary: Boolean = False
+    """Whether a run summary is written (`RUNSUM`)."""
+
+    message_limits: "MessageLimits | None" = None
+    """How many of each kind of message are printed and how many stop the run (`MESSAGES`). `None` when the deck sets none."""
+
+    report_requests: tuple["ReportRequest", ...] = ()
+    """What the deck asks to have reported and when (`RPTPROPS`, `RPTSOL`, `RPTRST`, `RPTSCHED`), ordered by the time they take effect."""
+
+
+def get_scheduled_at_start(deck_file: DeckFile, keyword: str) -> dict[str, typing.Any] | None:
+    """
+    The record of a scheduled keyword that applies from the start of the run.
+
+    A scheduled keyword changes its setting from the time it appears at. This is the one in effect
+    at time zero. The later ones are warned about, as a setting held for the whole run cannot
+    follow them.
+
+    :param deck_file: The deck to read.
+    :param keyword: The scheduled keyword, such as `DRSDT`.
+    :returns: The record (the last written if several are at time zero), or `None` if there is none
+        at time zero.
+    """
+    occurrences = deck_file.get_shared(keyword) or []
+    later = sorted({item["schedule_time"] for item in occurrences if item["schedule_time"] != 0})
+    if later:
+        warnings.warn(
+            f"`{keyword}` appears again at {', '.join(f'{time:g}' for time in later)} "
+            f"({deck_file.unit_system.name} time unit); only the one in effect at the start of the "
+            "run is used.",
+            stacklevel=2,
+        )
+    at_start = [item for item in occurrences if item["schedule_time"] == 0]
+    return at_start[-1] if at_start else None
+
+
+def load_dissolution_limits(deck_file: DeckFile) -> dict[str, typing.Any]:
+    """
+    Read how fast gas may dissolve in oil and oil vaporize in gas, from `DRSDT` and `DRVDT`.
+
+    :param deck_file: The deck to read.
+    :returns: Settings for `PhysicsOptions`, holding only what the deck sets.
+    """
+    settings: dict[str, typing.Any] = {}
+    solution = get_scheduled_at_start(deck_file, "DRSDT")
+    if solution is not None:
+        if solution["max_rate"] is not None:
+            settings["maximum_solution_gor_increase_rate"] = float(solution["max_rate"])
+        settings["solution_gor_limit_applies_to_all_cells"] = (
+            str(solution["option"]).upper() == "ALL"
+        )
+
+    vaporized = get_scheduled_at_start(deck_file, "DRVDT")
+    if vaporized is not None and vaporized["max_rate"] is not None:
+        settings["maximum_vaporized_oil_gas_ratio_increase_rate"] = float(vaporized["max_rate"])
+    return settings
+
+
+def load_output_options(deck_file: DeckFile) -> OutputOptions:
+    """
+    Read the keywords that decide what a run writes and reports.
+
+    These are `NOECHO`, `FMTIN`, `FMTOUT`, `UNIFIN`, `UNIFOUT`, `INIT`, `GRIDFILE`, `RUNSUM`,
+    `MESSAGES` and the report requests `RPTPROPS`, `RPTSOL`, `RPTRST` and `RPTSCHED`. The other
+    output settings have no deck keyword and keep their defaults.
+
+    :param deck_file: The deck to read.
+    :returns: The output options.
+    """
+    present = deck_file.has_many(
+        "NOECHO", "FMTIN", "FMTOUT", "UNIFIN", "UNIFOUT", "INIT", "RUNSUM"
+    )
+    settings: dict[str, typing.Any] = {
+        "echo_input": not present["NOECHO"],
+        "formatted_input": present["FMTIN"],
+        "formatted_output": present["FMTOUT"],
+        "unified_input": present["UNIFIN"],
+        "unified_output": present["UNIFOUT"],
+        "write_initial_file": present["INIT"],
+        "write_run_summary": present["RUNSUM"],
+    }
+    grid_file = deck_file.get_shared("GRIDFILE")
+    if grid_file is not None:
+        settings["write_grid_file"] = bool(grid_file["grid"])
+        settings["write_extended_grid_file"] = bool(grid_file["egrid"])
+
+    messages = deck_file.get_shared("MESSAGES")
+    if messages is not None:
+        settings["message_limits"] = MessageLimits(**{
+            name: int(value) for name, value in messages.items()
+        })
+
+    requests: list[ReportRequest] = []
+    for keyword in ("RPTPROPS", "RPTSOL", "RPTRST", "RPTSCHED"):
+        for record in deck_file.get_shared(keyword) or []:
+            requests.append(
+                ReportRequest(
+                    keyword=keyword,
+                    time=float(record.get("schedule_time", 0.0)),
+                    mnemonics=tuple(
+                        (name, None if level is None else float(level))
+                        for name, level in record["mnemonics"].items()
+                    ),
+                    flags=tuple(record["flags"]),
+                )
+            )
+    settings["report_requests"] = tuple(sorted(requests, key=lambda request: request.time))
+    return OutputOptions(**settings)

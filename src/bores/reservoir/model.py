@@ -44,6 +44,16 @@ def validate_rock(rock: Rock, n_cells: int) -> Rock:
         "rock.residual_oil_saturation_gas": (rock.residual_oil_saturation_gas),
         "rock.residual_gas_saturation": rock.residual_gas_saturation,
     }
+    for name, optional_array in (
+        ("rock.connate_gas_saturation", rock.connate_gas_saturation),
+        ("rock.maximum_gas_saturation", rock.maximum_gas_saturation),
+        ("rock.maximum_water_saturation", rock.maximum_water_saturation),
+        ("rock.capillary_connate_water_saturation", rock.capillary_connate_water_saturation),
+        ("rock.capillary_connate_gas_saturation", rock.capillary_connate_gas_saturation),
+    ):
+        if optional_array is not None:
+            checks[name] = optional_array
+
     for name, array in checks.items():
         if array.shape != (n_cells,):
             raise ValidationError(f"`{name}` has shape {array.shape}; expected ({n_cells},).")

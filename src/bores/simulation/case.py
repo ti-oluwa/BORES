@@ -25,6 +25,7 @@ from bores.grids.io.grdecl import grid_geometry_requirements
 from bores.initialization import (
     N_SATURATION_SAMPLES,
     compute_water_phase_pressure,
+    initial_state_needs_equilibration,
     initialize_reservoir_state,
 )
 from bores.precision import get_dtype
@@ -712,7 +713,9 @@ def load_case(
         needs_satfunc=satfunc is None,
         needs_rock=rock is None,
         needs_pvt=pvt is None,
-        needs_equilibrium=initial_state is None and equilibrium is None,
+        needs_equilibrium=initial_state is None
+        and equilibrium is None
+        and initial_state_needs_equilibration(deck_file),
         needs_wells=wells is None,
     )
     warn_deck_dimensions(deck_file)
@@ -803,6 +806,7 @@ def load_case(
                 saturation_region=regions.saturation_region,
                 interpolation_method=interpolation_method,
                 dtype=dtype,
+                endpoint_scaling=runspec.saturation_options.endpoint_scaling_enabled,
             )
             print("Loaded rock")
         except Exception as exc:
@@ -851,11 +855,11 @@ def load_case(
     if initial_state is None:
         try:
             print("Loading state")
-            equilibrium = (
-                Equilibrium.from_deck(deck_file)
-                if equilibrium is None
-                else equilibrium.convert(deck_unit_system)
-            )
+            if equilibrium is not None:
+                equilibrium = equilibrium.convert(deck_unit_system)
+            elif deck_file.has("EQUIL"):
+                equilibrium = Equilibrium.from_deck(deck_file)
+
             initial_state = initialize_reservoir_state(
                 reservoir=reservoir,
                 pvt=pvt,

@@ -83,10 +83,6 @@ TRIAGE: dict[str, tuple[str, str]] = {
         NOT_BLACK_OIL,
         "capacities for separators, surface streams, mixtures and multi-segment well detail",
     ),
-    "COMPDAT": (
-        CANDIDATE,
-        "`kh` and `pressure_equivalent_radius` override the connection factor's permeability-thickness and Peaceman radius; the well index calculation has no override to receive them yet",
-    ),
     "COMPSEGS": (NOT_BUILT, "multi-segment wells are not modelled"),
     "WELSEGS": (NOT_BUILT, "multi-segment wells are not modelled"),
     "GCONINJE": (
@@ -104,8 +100,8 @@ TRIAGE: dict[str, tuple[str, str]] = {
         "secondary limits, follow-on wells and the limited quantity are not implemented",
     ),
     "WELSPECS": (
-        CANDIDATE,
-        "`drainage_radius` has no field on `Well` since the index calculation derives it; the rest are FrontSim, polymer and well model options",
+        NOT_BUILT,
+        "auto-shut behaviour, the well model and the density calculation are not modelled; the rest are FrontSim and polymer options",
     ),
     "WGRUPCON": (
         NOT_BUILT,
@@ -117,8 +113,6 @@ TRIAGE: dict[str, tuple[str, str]] = {
         NOT_BLACK_OIL,
         "compositional initialization and the black-oil hydrocarbon-in-gas initialization option",
     ),
-    "GRIDFILE": (NO_HOME, "controls Eclipse grid file output"),
-    "MESSAGES": (NO_HOME, "Eclipse message print limits"),
     "NSTACK": (NO_HOME, "size of Eclipse's linear solver stack"),
     "TRACER": (NOT_BUILT, "tracers are not modelled"),
     "DRSDT": (
@@ -135,13 +129,6 @@ TRIAGE: dict[str, tuple[str, str]] = {
     "WELPI": (NO_LOADER, "productivity index rescaling is not applied"),
     "WPAVE": (NO_LOADER, "well pressure averaging is not modelled"),
     "WTEST": (NO_LOADER, "well testing is not modelled"),
-    "INIT": (NO_HOME, "asks Eclipse to write an initial file"),
-    "FMTIN": (NO_HOME, "Eclipse input file format"),
-    "FMTOUT": (NO_HOME, "Eclipse output file format"),
-    "UNIFIN": (NO_HOME, "Eclipse unified input files"),
-    "UNIFOUT": (NO_HOME, "Eclipse unified output files"),
-    "NOECHO": (NO_HOME, "stops Eclipse echoing the input"),
-    "RUNSUM": (NO_HOME, "asks Eclipse for a run summary file"),
     "ZIPPY2": (NO_HOME, "an OPM Flow settings keyword"),
     "NEWTRAN": (
         NOT_BUILT,
@@ -151,9 +138,6 @@ TRIAGE: dict[str, tuple[str, str]] = {
         NOT_BUILT,
         "chooses between two Eclipse transmissibility calculations; there is only one here",
     ),
-    "SGL": (CANDIDATE, "connate gas end point array; `Rock` has no field for it"),
-    "SGU": (CANDIDATE, "maximum gas saturation end point array; `Rock` has no field for it"),
-    "SWU": (CANDIDATE, "maximum water saturation end point array; `Rock` has no field for it"),
     "SGLPC": (
         CANDIDATE,
         "end point used only to scale capillary pressure; `Rock` has no separate capillary end points",
@@ -184,6 +168,12 @@ SECTION_MODULES = ("sections",)
 Why each keyword's unread fields stay unread. Every keyword with unread fields needs an entry, so a
 new one shows as untriaged until someone decides.
 """
+
+
+DYNAMIC_READERS = {
+    "MESSAGES": "`load_output_options` copies every item into `MessageLimits`",
+}
+"""Keywords read field by field without naming the fields, so no literal shows it."""
 
 
 def field_names(keyword) -> list[str]:
@@ -305,7 +295,13 @@ def main() -> None:
             users = sorted(literals.get(keyword.name, set()) | imports.get(keyword.name, set()))
             note = GENERIC_CONSUMERS.get(keyword.name)
             names = field_names(keyword)
-            unread = [n for n in names if n not in literals and field_owner_count[n] == 1]
+            unread = [
+                n
+                for n in names
+                if n not in literals
+                and field_owner_count[n] == 1
+                and keyword.name not in DYNAMIC_READERS
+            ]
             shared = [n for n in names if n not in literals and field_owner_count[n] > 1]
             unread_total += len(unread)
             if unread or not users:
@@ -329,6 +325,7 @@ def main() -> None:
         for keyword in keywords
         if [n for n in field_names(keyword) if n not in literals and field_owner_count[n] == 1]
         and keyword.name not in TRIAGE
+        and keyword.name not in DYNAMIC_READERS
     ]
     untriaged += [
         keyword.name

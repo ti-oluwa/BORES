@@ -11,6 +11,7 @@ from bores.deck.file import DeckFile
 from bores.errors import ValidationError
 from bores.grids.base import Grid
 from bores.types import (
+    Boolean,
     FluidPhase,
     Integer,
     Number,
@@ -202,6 +203,21 @@ class Perforation:
     directly instead of computing a Peaceman/equivalent-radius well index.
     """
 
+    permeability_thickness: Number | None = None
+    """
+    Deck `COMPDAT` `kh`: the permeability times thickness of the connection. When present it
+    replaces the value worked out from the cell permeability, the connection length and
+    net-to-gross, and is used as it stands, so neither net-to-gross nor partial penetration
+    scales it. `None` to work it out from the grid.
+    """
+
+    pressure_equivalent_radius: Number | None = None
+    """
+    Deck `COMPDAT` pressure equivalent radius, the radius at which the cell pressure equals the
+    flowing pressure around the well. When present it replaces the one worked out from the cell
+    size and permeability (Peaceman's). `None` to work it out from the grid.
+    """
+
     connection_factor_multiplier: Number | None = None
     """
     Deck `WPIMULT`. Scales the computed well index rather than replacing
@@ -274,6 +290,10 @@ class Perforation:
             raise ValidationError("`wellbore_radius` must be positive.")
         if self.connection_factor_override is not None and (self.connection_factor_override <= 0):
             raise ValidationError("`connection_factor_override` must be positive.")
+        if self.permeability_thickness is not None and self.permeability_thickness <= 0:
+            raise ValidationError("`permeability_thickness` must be positive.")
+        if self.pressure_equivalent_radius is not None and self.pressure_equivalent_radius <= 0:
+            raise ValidationError("`pressure_equivalent_radius` must be positive.")
         if self.partial_penetration_fraction is not None and not (
             0 < self.partial_penetration_fraction <= 1
         ):
@@ -320,7 +340,8 @@ def convert_perforation(
     :param length_factor: Factor from the current length unit to the target one. Applied to the
         depths, measured depths and wellbore radius.
     :param connection_factor: Factor from the current connection-factor unit (permeability times
-        length) to the target one. Applied to `connection_factor_override`.
+        length) to the target one. Applied to `connection_factor_override` and
+        `permeability_thickness`.
     :returns: The converted perforation.
     """
     return attrs.evolve(
@@ -333,6 +354,8 @@ def convert_perforation(
         connection_factor_override=scale(
             perforation.connection_factor_override, connection_factor
         ),
+        permeability_thickness=scale(perforation.permeability_thickness, connection_factor),
+        pressure_equivalent_radius=scale(perforation.pressure_equivalent_radius, length_factor),
     )
 
 
@@ -413,7 +436,13 @@ class Well:
     d_factor: Number | None = None
     """Non-Darcy flow coefficient, deck `WDFAC`. `None` if not set."""
 
-    allows_crossflow: bool = True
+    drainage_radius: Number | None = None
+    """
+    Radius of the well's drainage area, deck `WELSPECS` drainage radius, used to work out the
+    well's productivity index. `None` when the deck leaves it to the equivalent radius.
+    """
+
+    allows_crossflow: Boolean = True
     """
     Whether this well's connections may flow in the opposite direction to the well, for example
     a producer's connection taking fluid from the wellbore into the formation. Deck `WELSPECS`
@@ -426,6 +455,8 @@ class Well:
             raise ValidationError("`name` must be a non-empty string.")
         if not self.perforations:
             raise ValidationError(f"Well {self.name!r} must have at least one perforation.")
+        if self.drainage_radius is not None and self.drainage_radius <= 0:
+            raise ValidationError(f"Well {self.name!r}: `drainage_radius` must be positive.")
 
         if self.trajectory is not None:
             if not all(perforation.top_md is not None for perforation in self.perforations):
@@ -571,6 +602,7 @@ class Well:
             perforations=perforations,
             trajectory=trajectory,
             d_factor=scale(self.d_factor, 1.0 / factors["gas_surface_rate"]),
+            drainage_radius=scale(self.drainage_radius, length_factor),
             unit_system=target,
         )
 
