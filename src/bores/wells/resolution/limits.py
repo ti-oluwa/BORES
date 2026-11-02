@@ -345,14 +345,17 @@ def apply_limits(
     resolution governs.
     """
     candidates: list[tuple[Number, Integer]] = []
-    nominal_connection_rates = get_connection_rates(workspace=workspace, copy=True)
-    nominal_connection_pressures = np.array(connection_pressures, copy=True)
+    bound_rows = [
+        row for row in range(limits_start, limits_end) if limits.kinds[row] != LimitKind.ECONOMIC
+    ]
+    nominal_connection_rates = None
+    nominal_connection_pressures = None
+    if bound_rows:
+        nominal_connection_rates = get_connection_rates(workspace=workspace, copy=True)
+        nominal_connection_pressures = np.array(connection_pressures, copy=True)
 
-    for row in range(limits_start, limits_end):
+    for row in bound_rows:
         kind = limits.kinds[row]
-        if kind == LimitKind.ECONOMIC:
-            continue
-
         if kind == LimitKind.BHP:
             bound = get_bhp_bound(
                 min_value=limits.min_values[row],
@@ -387,6 +390,7 @@ def apply_limits(
                     "without one, regardless of "
                     "`spec.connection_pressure_mode`."
                 )
+            assert nominal_connection_rates is not None
             bound = get_thp_bound(
                 min_value=limits.min_values[row],
                 max_value=limits.max_values[row],
@@ -412,8 +416,12 @@ def apply_limits(
 
     if not candidates:
         governing_bhp, governing_row = bhp, UNSET_INT
-        restore_connection_rates(workspace=workspace, rates=nominal_connection_rates)
-        connection_pressures[:] = nominal_connection_pressures
+        if bound_rows:
+            assert nominal_connection_rates is not None
+            assert nominal_connection_pressures is not None
+            restore_connection_rates(workspace=workspace, rates=nominal_connection_rates)
+            connection_pressures[:] = nominal_connection_pressures
+
         governing_connection_pressures = connection_pressures
         governing_phase_rates = rates
         governing_surface_phase_rates = surface_rates

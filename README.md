@@ -105,19 +105,6 @@ Planned, not started yet:
 - Custom visualization API for model state, simulation or analyses results (1D time series, 2D maps, 3D volume/section rendering)
 - Post-simulation analysis (recovery factors, sweep efficiency, front tracking)
 
-## Citing BORES
-
-If you use BORES in academic work, please cite it as:
-
-```bibtex
-@software{bores,
-  author = {Daniel Toluwalase Afolayan},
-  title = {BORES: Black-Oil Reservoir Simulation Framework},
-  year = {2026},
-  url = {https://github.com/ti-oluwa/bores},
-}
-```
-
 ## Contributing
 
 BORES is being developed by a graduate petroleum engineer with just theoretical/research knowledge and little experience. The project does not have the benefit of decades of field/research experience backing its implementation (atleast in code), so contributions, issues, bug report and fixes, from students,researchers, and domain experts are very welcome and appreciated.

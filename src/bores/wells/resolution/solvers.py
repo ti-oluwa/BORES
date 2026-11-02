@@ -30,6 +30,9 @@ from bores.wells.resolution.fixed_point import (
     UniformSolver,
     bisect_hydrostatic,
     bisect_uniform,
+    get_trial_pressure,
+    make_bracket,
+    narrow_bracket,
     solve_hydrostatic,
     solve_uniform,
 )
@@ -548,13 +551,13 @@ def solve_bhp(
             target_rate_condition=target_rate_condition,
         )
 
-    low, high = min_pressure, max_pressure
-    average_pressure = 0.5 * (low + high)
+    bracket = make_bracket(low=min_pressure, high=max_pressure)
+    average_pressure = 0.5 * (min_pressure + max_pressure)
     pressures = None
     rates = PhaseValues(oil=0.0, water=0.0, gas=0.0)
 
     for _ in range(spec.max_bisection_iterations):
-        average_pressure = 0.5 * (low + high)
+        average_pressure = get_trial_pressure(bracket=bracket)
         pressures, rates, surface_rates = solve_connection_pressures_and_rates(
             tubing=tubing,
             reference_depth=reference_depth,
@@ -576,13 +579,13 @@ def solve_bhp(
             connection_rates=get_connection_rates(workspace=workspace),
         )
 
-        if abs(value - target) <= spec.rate_convergence_tolerance * max(abs(target), 1.0):
+        gap = value - target
+        if abs(gap) <= spec.rate_convergence_tolerance * max(abs(target), 1.0):
             break
 
-        if value < target:
-            low = average_pressure
-        else:
-            high = average_pressure
+        bracket = narrow_bracket(
+            bracket=bracket, trial=average_pressure, gap=gap, is_injector=True
+        )
 
     assert pressures is not None
     return average_pressure, pressures, rates
