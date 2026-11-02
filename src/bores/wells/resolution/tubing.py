@@ -157,39 +157,81 @@ def attach_flowing_fluid(
     if tubing.vfp_table is None and not tubing.uses_tubing_fluid_table:
         return tubing
 
-    # TODO: Should be able to njit this part #
     fluids = workspace.connection_fluids
-    mobilities = (fluids.oil_mobilities, fluids.water_mobilities, fluids.gas_mobilities)
-    flags = (relevant_phases.oil > 0.0, relevant_phases.water > 0.0, relevant_phases.gas > 0.0)
-    densities = (fluids.oil_densities, fluids.water_densities, fluids.gas_densities)
-    deliverabilities = []
-    phase_averages = []
-    for mobility, phase_densities, flag in zip(mobilities, densities, flags, strict=True):
-        weights = workspace.well_indices * mobility
-        total = weights.sum()
-        phase_averages.append(
-            np.dot(weights, phase_densities) / total if total > 0.0 else phase_densities.mean()
-        )
-        deliverabilities.append(total if flag else 0.0)
-
-    total_deliverability = sum(deliverabilities)
-    if total_deliverability > 0.0:
-        fractions = [deliverability / total_deliverability for deliverability in deliverabilities]
-    else:
-        flowing = sum(flags)
-        fractions = [1.0 / flowing if flag else 0.0 for flag in flags]
-    ##########################################
+    oil_flows = relevant_phases.oil > 0.0
+    water_flows = relevant_phases.water > 0.0
+    gas_flows = relevant_phases.gas > 0.0
+    zero_flow_density = compute_zero_flow_density(
+        well_indices=workspace.well_indices,
+        oil_mobilities=fluids.oil_mobilities,
+        water_mobilities=fluids.water_mobilities,
+        gas_mobilities=fluids.gas_mobilities,
+        oil_densities=fluids.oil_densities,
+        water_densities=fluids.water_densities,
+        gas_densities=fluids.gas_densities,
+        oil_flows=oil_flows,
+        water_flows=water_flows,
+        gas_flows=gas_flows,
+    )
     return tubing._replace(
         flowing_fluid=FlowingFluid(
-            oil_densities=densities[0],
-            water_densities=densities[1],
-            gas_densities=densities[2],
-            zero_flow_density=sum(
-                fraction * average
-                for fraction, average in zip(fractions, phase_averages, strict=True)
-            ),
+            oil_densities=fluids.oil_densities,
+            water_densities=fluids.water_densities,
+            gas_densities=fluids.gas_densities,
+            zero_flow_density=zero_flow_density,
         )
     )
+
+
+@numba.njit(cache=True)
+def compute_zero_flow_density(
+    well_indices: NumberArray[OneDimension],
+    oil_mobilities: NumberArray[OneDimension],
+    water_mobilities: NumberArray[OneDimension],
+    gas_mobilities: NumberArray[OneDimension],
+    oil_densities: NumberArray[OneDimension],
+    water_densities: NumberArray[OneDimension],
+    gas_densities: NumberArray[OneDimension],
+    oil_flows: Boolean,
+    water_flows: Boolean,
+    gas_flows: Boolean,
+) -> Number:
+    oil_weights = well_indices * oil_mobilities
+    water_weights = well_indices * water_mobilities
+    gas_weights = well_indices * gas_mobilities
+
+    oil_total = oil_weights.sum()
+    water_total = water_weights.sum()
+    gas_total = gas_weights.sum()
+
+    oil_average = (
+        np.dot(oil_weights, oil_densities) / oil_total if oil_total > 0.0 else oil_densities.mean()
+    )
+    water_average = (
+        np.dot(water_weights, water_densities) / water_total
+        if water_total > 0.0
+        else water_densities.mean()
+    )
+    gas_average = (
+        np.dot(gas_weights, gas_densities) / gas_total if gas_total > 0.0 else gas_densities.mean()
+    )
+
+    oil_deliverability = oil_total if oil_flows else 0.0
+    water_deliverability = water_total if water_flows else 0.0
+    gas_deliverability = gas_total if gas_flows else 0.0
+    total_deliverability = oil_deliverability + water_deliverability + gas_deliverability
+
+    if total_deliverability > 0.0:
+        oil_fraction = oil_deliverability / total_deliverability
+        water_fraction = water_deliverability / total_deliverability
+        gas_fraction = gas_deliverability / total_deliverability
+    else:
+        flowing = int(oil_flows) + int(water_flows) + int(gas_flows)
+        oil_fraction = 1.0 / flowing if oil_flows else 0.0
+        water_fraction = 1.0 / flowing if water_flows else 0.0
+        gas_fraction = 1.0 / flowing if gas_flows else 0.0
+
+    return oil_fraction * oil_average + water_fraction * water_average + gas_fraction * gas_average
 
 
 @numba.njit(cache=True)

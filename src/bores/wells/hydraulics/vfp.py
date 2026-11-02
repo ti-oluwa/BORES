@@ -16,6 +16,7 @@ import math
 import typing
 
 import attrs
+import numba
 import numpy as np
 import numpy.typing as npt
 from scipy.interpolate import RegularGridInterpolator  # type: ignore[import-untyped]
@@ -386,6 +387,41 @@ class VFPData(Serializable):
         )
 
 
+@numba.njit(cache=True)
+def safe_ratio(numerator: Number, denominator: Number, axis: NumberArray[OneDimension]) -> Number:
+    """
+    A ratio for a table lookup: zero for `0/0`, and the axis maximum for a nonzero
+    numerator over a zero denominator.
+
+    :param numerator: Ratio numerator.
+    :param denominator: Ratio denominator.
+    :param axis: The table axis the ratio is looked up on.
+    :returns: The ratio.
+    """
+    if denominator > 0.0:
+        return numerator / denominator
+    if numerator > 0.0:
+        return axis[-1]
+    return 0.0
+
+
+@numba.njit(cache=True)
+def interpolate_thp_from_bhp(
+    bhp: Number,
+    bhps: NumberArray[OneDimension],
+    thps: NumberArray[OneDimension],
+) -> Number:
+    if bhp <= bhps[0]:
+        lower, upper = 0, 1
+    elif bhp >= bhps[-1]:
+        lower, upper = len(thps) - 2, len(thps) - 1
+    else:
+        return np.interp(bhp, bhps, thps)
+
+    slope = (thps[upper] - thps[lower]) / (bhps[upper] - bhps[lower])
+    return thps[lower] + slope * (bhp - bhps[lower])
+
+
 class VFPTable(StoreSerializable):
     """
     A `VFPData` grid with a pre-built interpolator for bottomhole-pressure lookup.
@@ -552,36 +588,17 @@ class VFPTable(StoreSerializable):
 
         return VFPLookupVariables(
             flow_rate=flow_rate,
-            water_fraction=self.safe_ratio(
+            water_fraction=safe_ratio(
                 numerator=water_numerator,
                 denominator=water_denominator,
                 axis=self._data.water_fractions,
             ),
-            gas_fraction=self.safe_ratio(
+            gas_fraction=safe_ratio(
                 numerator=gas_numerator,
                 denominator=gas_denominator,
                 axis=self._data.gas_fractions,
             ),
         )
-
-    @staticmethod
-    def safe_ratio(
-        *, numerator: Number, denominator: Number, axis: NumberArray[OneDimension]
-    ) -> Number:
-        """
-        A ratio for a table lookup: zero for `0/0`, and the axis maximum for a nonzero
-        numerator over a zero denominator.
-
-        :param numerator: Ratio numerator.
-        :param denominator: Ratio denominator.
-        :param axis: The table axis the ratio is looked up on.
-        :returns: The ratio.
-        """
-        if denominator > 0.0:
-            return numerator / denominator
-        if numerator > 0.0:
-            return axis[-1]
-        return 0.0
 
     def convert(
         self,
@@ -735,16 +752,11 @@ class VFPTable(StoreSerializable):
                 f"artificial lift quantity {artificial_lift_quantity}, so a THP can't be found "
                 "from a BHP."
             )
-
-        if bhp <= bhps[0]:
-            lower, upper = 0, 1
-        elif bhp >= bhps[-1]:
-            lower, upper = len(thps) - 2, len(thps) - 1
-        else:
-            return np.interp(bhp, bhps, thps)
-
-        slope = (thps[upper] - thps[lower]) / (bhps[upper] - bhps[lower])
-        return thps[lower] + slope * (bhp - bhps[lower])
+        return interpolate_thp_from_bhp(
+            bhp=bhp,
+            bhps=typing.cast("NumberArray[OneDimension]", bhps),
+            thps=thps,
+        )
 
     @typing.overload
     @classmethod
