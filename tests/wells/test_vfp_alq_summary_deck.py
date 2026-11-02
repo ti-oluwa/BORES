@@ -3175,7 +3175,12 @@ def reference_rate_bisection(
         gap = value - target
         if abs(gap) <= spec.rate_convergence_tolerance * max(abs(target), 1.0):
             break
-        bracket = narrow_bracket(bracket=bracket, trial=average, gap=gap, is_injector=is_injector)
+        bracket = narrow_bracket(
+            bracket=bracket,
+            trial=average,
+            gap=gap,
+            increases_with_pressure=is_injector,
+        )
     return average, pressures, reservoir
 
 

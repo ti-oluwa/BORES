@@ -5,11 +5,10 @@ Land (1968) trapping of the non-wetting phase for relative permeability hysteres
   Flow from Rock Properties". SPE 1942.
 """
 
-import typing
-
 import attrs
 import numba
 import numpy as np
+from typing_extensions import Self
 
 from bores.blackoil.satfunc.utils import element_at
 from bores.types import (
@@ -279,7 +278,7 @@ class LandTrapping:
         maximum_trapped_saturation: Number,
         maximum_saturation: Number,
         saturation_epsilon: Number = 1e-12,
-    ) -> typing.Self:
+    ) -> Self:
         """
         Derive the coefficient from the two endpoints, which is how a deck's tables define it.
 

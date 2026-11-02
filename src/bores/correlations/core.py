@@ -12,12 +12,6 @@ from bores.types import NDimension, Number, NumberOrArray
 
 logger = logging.getLogger(__name__)
 
-# Physical constants, read from `bores.constants` when this module is imported.
-CELSIUS_TO_KELVIN_OFFSET = c.CELSIUS_TO_KELVIN_OFFSET
-FAHRENHEIT_TO_RANKINE_OFFSET = c.FAHRENHEIT_TO_RANKINE_OFFSET
-KELVIN_TO_RANKINE = c.KELVIN_TO_RANKINE
-RANKINE_TO_KELVIN = c.RANKINE_TO_KELVIN
-
 __all__ = [
     "GAS_ALIASES",
     "HENRY_CONSTANTS",
@@ -42,6 +36,12 @@ __all__ = [
     "validate_input_pressure",
     "validate_input_temperature",
 ]
+
+# Physical constants, read from `bores.constants` when this module is imported.
+CELSIUS_TO_KELVIN_OFFSET = c.CELSIUS_TO_KELVIN_OFFSET
+FAHRENHEIT_TO_RANKINE_OFFSET = c.FAHRENHEIT_TO_RANKINE_OFFSET
+KELVIN_TO_RANKINE = c.KELVIN_TO_RANKINE
+RANKINE_TO_KELVIN = c.RANKINE_TO_KELVIN
 
 
 def PropsSI(*args: typing.Any, **kwargs: typing.Any) -> typing.Any:

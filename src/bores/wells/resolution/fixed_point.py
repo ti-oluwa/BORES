@@ -1334,26 +1334,31 @@ def get_trial_pressure(bracket: Bracket) -> Number:
 
 
 @numba.njit(cache=True)
-def narrow_bracket(bracket: Bracket, trial: Number, gap: Number, is_injector: Boolean) -> Bracket:
+def narrow_bracket(
+    bracket: Bracket,
+    trial: Number,
+    gap: Number,
+    increases_with_pressure: Boolean,
+) -> Bracket:
     """
     Narrows a bracket with a solve made inside it.
 
-    The total rate falls as the reference pressure rises for a producer and rises with it for an
-    injector, so the solve replaces the bound whose side of the target it is on. When the same
-    bound is replaced twice in a row, the gap at the other bound is halved so that the next
-    interpolation moves away from it.
+    The solved value either rises or falls with reference pressure, depending on the metric. The
+    solve replaces the bound whose side of the target it is on. When the same bound is replaced
+    twice in a row, the gap at the other bound is halved so that the next interpolation moves away
+    from it.
 
     :param bracket: The bracket so far.
     :param trial: The reference pressure that was solved at.
     :param gap: Total rate minus the target at `trial`.
-    :param is_injector: Whether the well is an injector.
+    :param increases_with_pressure: Whether the solved metric rises with reference pressure.
     :returns: The narrowed bracket.
     """
     trial = np.float64(trial)
     gap = np.float64(gap)
     width = bracket.high - bracket.low
     interpolated = bracket.slow_steps < 2 and math.isfinite(bracket.low_gap + bracket.high_gap)
-    replaces_low = (gap < 0.0) == is_injector
+    replaces_low = (gap < 0.0) == increases_with_pressure
     if replaces_low:
         low = trial
         high = bracket.high
@@ -1475,7 +1480,12 @@ def bisect_homogeneous(
         gap = value - target
         if abs(gap) <= rate_tolerance * max(abs(target), 1.0):
             break
-        bracket = narrow_bracket(bracket=bracket, trial=trial, gap=gap, is_injector=is_injector)
+        bracket = narrow_bracket(
+            bracket=bracket,
+            trial=trial,
+            gap=gap,
+            increases_with_pressure=is_injector,
+        )
     return BisectionResult(bhp=trial, result=result)
 
 
@@ -1574,7 +1584,12 @@ def bisect_beggs_and_brill(
         gap = value - target
         if abs(gap) <= rate_tolerance * max(abs(target), 1.0):
             break
-        bracket = narrow_bracket(bracket=bracket, trial=trial, gap=gap, is_injector=is_injector)
+        bracket = narrow_bracket(
+            bracket=bracket,
+            trial=trial,
+            gap=gap,
+            increases_with_pressure=is_injector,
+        )
     return BisectionResult(bhp=trial, result=result)
 
 
@@ -1673,7 +1688,12 @@ def bisect_hagedorn_brown(
         gap = value - target
         if abs(gap) <= rate_tolerance * max(abs(target), 1.0):
             break
-        bracket = narrow_bracket(bracket=bracket, trial=trial, gap=gap, is_injector=is_injector)
+        bracket = narrow_bracket(
+            bracket=bracket,
+            trial=trial,
+            gap=gap,
+            increases_with_pressure=is_injector,
+        )
     return BisectionResult(bhp=trial, result=result)
 
 
@@ -1772,7 +1792,12 @@ def bisect_gray(
         gap = value - target
         if abs(gap) <= rate_tolerance * max(abs(target), 1.0):
             break
-        bracket = narrow_bracket(bracket=bracket, trial=trial, gap=gap, is_injector=is_injector)
+        bracket = narrow_bracket(
+            bracket=bracket,
+            trial=trial,
+            gap=gap,
+            increases_with_pressure=is_injector,
+        )
     return BisectionResult(bhp=trial, result=result)
 
 
@@ -1871,7 +1896,12 @@ def bisect_woldesemayat_ghajar(
         gap = value - target
         if abs(gap) <= rate_tolerance * max(abs(target), 1.0):
             break
-        bracket = narrow_bracket(bracket=bracket, trial=trial, gap=gap, is_injector=is_injector)
+        bracket = narrow_bracket(
+            bracket=bracket,
+            trial=trial,
+            gap=gap,
+            increases_with_pressure=is_injector,
+        )
     return BisectionResult(bhp=trial, result=result)
 
 
@@ -1959,7 +1989,12 @@ def bisect_hydrostatic(
         gap = value - target
         if abs(gap) <= rate_tolerance * max(abs(target), 1.0):
             break
-        bracket = narrow_bracket(bracket=bracket, trial=trial, gap=gap, is_injector=is_injector)
+        bracket = narrow_bracket(
+            bracket=bracket,
+            trial=trial,
+            gap=gap,
+            increases_with_pressure=is_injector,
+        )
     return BisectionResult(bhp=trial, result=result)
 
 
@@ -2040,7 +2075,12 @@ def bisect_uniform(
         gap = value - target
         if abs(gap) <= rate_tolerance * max(abs(target), 1.0):
             break
-        bracket = narrow_bracket(bracket=bracket, trial=trial, gap=gap, is_injector=is_injector)
+        bracket = narrow_bracket(
+            bracket=bracket,
+            trial=trial,
+            gap=gap,
+            increases_with_pressure=is_injector,
+        )
     return BisectionResult(bhp=trial, result=result)
 
 

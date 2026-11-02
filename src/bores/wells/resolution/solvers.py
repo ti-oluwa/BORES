@@ -584,7 +584,10 @@ def solve_bhp(
             break
 
         bracket = narrow_bracket(
-            bracket=bracket, trial=average_pressure, gap=gap, is_injector=True
+            bracket=bracket,
+            trial=average_pressure,
+            gap=gap,
+            increases_with_pressure=True,
         )
 
     assert pressures is not None
