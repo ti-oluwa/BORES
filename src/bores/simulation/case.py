@@ -327,7 +327,7 @@ class SimulationCase:
             system. A single value applies to every cell, or give one value per cell. When omitted
             it is read from the deck's `SALINITY` keyword, given there as a molality, and without
             one the PVT tables' own default salinity applies. A CO2 storage model builds its brine
-            properties at the mean salinity.
+            tables over the range of salinities given.
         :param hysteresis: Optional hysteresis history/configuration for the simulation workspace.
         :param unit_system: Unit system the case is expressed in: the model, the initial state, the
             run spec, the schedule's event times and values, and the time targets. Defaults to the
@@ -842,7 +842,7 @@ def load_case(
                 interpolation_method=interpolation_method,
                 warn_on_extrapolation=warn_on_extrapolation,
                 phases=phases,
-                salinity=None if resolved_salinity is None else float(resolved_salinity.mean()),
+                salinity=resolved_salinity,
             )
             print("Loaded PVT")
         except Exception as exc:

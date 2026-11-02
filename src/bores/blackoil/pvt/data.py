@@ -233,6 +233,17 @@ class PVTData(StoreSerializable):
     for the water phase; not exposed as a direct query method on `PVTTable`.
     """
 
+    dissolved_gas_volume_table: NumberArray[TwoDimensions] | None = None
+    """
+    Volume that dissolved gas adds to the water, `DV(P, T)`, per unit standard volume of the gas.
+    Water phase only.
+
+    It has no unit, so it reads the same in every unit system. With it the water formation volume
+    factor of water holding `Rsw` of dissolved gas is `Bw = Bw_gf + Rsw · DV / f`, where `f` is
+    ft³/STB in FIELD units and 1 otherwise. A gas that dissolves without swelling the water has
+    `DV = 0`, which is what a water table without this table assumes. Shape `(n_p, n_t)`.
+    """
+
     # Undersaturated live-phase tables: 3-D over the Rs axis (oil) or the Rv axis (wet gas)
     undersaturated_formation_volume_factor_table: NumberArray[ThreeDimensions] | None = None
     """
@@ -398,6 +409,7 @@ class PVTData(StoreSerializable):
             solubility_in_water_table=scale(self.solubility_in_water_table, gas_oil_ratio_factor),
             bubble_point_pressure_table=scale(self.bubble_point_pressure_table, pressure_factor),
             gas_free_water_fvf_table=scale(self.gas_free_water_fvf_table, liquid_fvf_factor),
+            dissolved_gas_volume_table=self.dissolved_gas_volume_table,
             unit_system=target,
         )
 

@@ -20,7 +20,7 @@ import numpy.typing as npt
 
 from bores.blackoil.pvt.regions import PVT
 from bores.precision import get_dtype
-from bores.types import BooleanCellArray, CellArray, IntCellArray
+from bores.types import Boolean, BooleanCellArray, CellArray, IntCellArray
 
 __all__ = ["PVTCache", "compute_pvt_cache"]
 
@@ -93,6 +93,17 @@ class PVTCache(typing.NamedTuple):
     """Derivative of gas viscosity w.r.t. `Rv`, dμg/dRv, at constant P."""
     dρg_drv: CellArray
     """Derivative of gas density w.r.t. `Rv`, dρg/dRv, at constant P."""
+    dbw_drsw: CellArray
+    """
+    Derivative of water formation volume factor w.r.t. `Rsw`, dBw/dRsw, at constant P. `NaN`
+    unless the water table swells with its dissolved gas and the state of the dissolved gas is
+    given.
+    """
+    dρw_drsw: CellArray
+    """
+    Derivative of water density w.r.t. `Rsw`, dρw/dRsw, at constant P. `NaN` unless the water table
+    swells with its dissolved gas and the state of the dissolved gas is given.
+    """
 
     # Compressibilities (value only - c = -(1/B)(dB/dP) for oil/water,
     # 1/P - (1/z)(dz/dP) for gas; already what dB/dP-based Jacobian entries
@@ -200,9 +211,10 @@ def compute_pvt_cache(
     out: PVTCache | None = None,
     dtype: npt.DTypeLike = None,
     vaporized_oil_ratio: CellArray | None = None,
-    freeze_saturation_pressure: bool = False,
+    freeze_saturation_pressure: Boolean = False,
     frozen_bubble_point_pressure: CellArray | None = None,
     frozen_dew_point_pressure: CellArray | None = None,
+    gas_solubility_in_water: CellArray | None = None,
 ) -> PVTCache:
     """
     Build (or refresh, in place) a `PVTCache` from the current cell state.
@@ -266,6 +278,9 @@ def compute_pvt_cache(
         `compute_saturation_pressures`.
     :param frozen_dew_point_pressure: Shape `(n_cells,)` dew-point pressure to hold when
         `freeze_saturation_pressure`. Without it the gas is treated as saturated (or dry).
+    :param gas_solubility_in_water: Shape `(n_cells,)` `Rsw` of the water, the gas dissolved in
+        it. Water whose table swells with dissolved gas takes up more volume and is denser with
+        it, and `dbw_drsw` and `dρw_drsw` are filled. Without it the water is gas-free.
     :return: The populated `PVTCache` - `out` itself if given, otherwise a
         newly allocated one. Always returned, never `None`.
     :raises ValueError: If `out` is given but sized for a different cell
@@ -394,17 +409,34 @@ def compute_pvt_cache(
 
         water = tables.water
         if water is not None:
-            cache.water_formation_volume_factor[mask] = water.formation_volume_factor(  # type: ignore[arg-type]
-                p, t, salinity=s
+            # Water holding dissolved gas swells, when its table says by how much
+            dissolved_gas = (
+                typing.cast(CellArray, gas_solubility_in_water[mask])
+                if gas_solubility_in_water is not None
+                else None
             )
-            cache.dbw_dp[mask] = water.db_dp(p, t, salinity=s)  # type: ignore[arg-type]
+            cache.water_formation_volume_factor[mask] = water.formation_volume_factor(  # type: ignore[arg-type]
+                p, t, salinity=s, dissolved_gas_ratio=dissolved_gas
+            )
+            cache.dbw_dp[mask] = water.db_dp(p, t, salinity=s, dissolved_gas_ratio=dissolved_gas)  # type: ignore[arg-type]
             cache.water_viscosity[mask] = water.viscosity(p, t, salinity=s)  # type: ignore[arg-type]
             cache.dμw_dp[mask] = water.dμ_dp(p, t, salinity=s)  # type: ignore[arg-type]
-            cache.water_density[mask] = water.density(p, t, salinity=s)  # type: ignore[arg-type]
-            cache.dρw_dp[mask] = water.dρ_dp(p, t, salinity=s)  # type: ignore[arg-type]
+            cache.water_density[mask] = water.density(  # type: ignore[arg-type]
+                p, t, salinity=s, dissolved_gas_ratio=dissolved_gas
+            )
+            cache.dρw_dp[mask] = water.dρ_dp(  # type: ignore[arg-type]
+                p, t, salinity=s, dissolved_gas_ratio=dissolved_gas
+            )
             compressibility = water.compressibility(p, t, salinity=s)
             if compressibility is not None:
                 cache.water_compressibility[mask] = compressibility
+            if dissolved_gas is not None:
+                water_fvf_drsw = water.db_drsw(p, t)
+                if water_fvf_drsw is not None:
+                    cache.dbw_drsw[mask] = water_fvf_drsw
+                water_density_drsw = water.dρ_drsw(p, t, s, dissolved_gas)  # type: ignore[arg-type]
+                if water_density_drsw is not None:
+                    cache.dρw_drsw[mask] = water_density_drsw
 
         gas = tables.gas
         if gas is not None:

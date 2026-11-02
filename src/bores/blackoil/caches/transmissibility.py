@@ -15,7 +15,7 @@ from bores.blackoil.caches.pvt import PVTCache
 from bores.constants import c
 from bores.precision import get_dtype
 from bores.reservoir.model import Reservoir
-from bores.types import CellArray, IntCellArray, UnitSystem
+from bores.types import Boolean, CellArray, IntCellArray, Number, UnitSystem
 from bores.units import get_conversion_factors
 
 __all__ = ["TransmissibilityCache", "compute_transmissibility_cache"]
@@ -153,7 +153,7 @@ def update_transmissibility_cache(
     neighbour_indices: IntCellArray,
     geometric_transmissibility: CellArray,
     cell_depth: CellArray,
-    gravity_acceleration: float,
+    gravity_acceleration: Number,
     pvt_cache: PVTCache,
     mobility_cache: MobilityCache,
     water_pressure: CellArray,
@@ -303,8 +303,8 @@ def compute_transmissibility_cache(
     oil_pressure: CellArray,
     oil_water_capillary_pressure: CellArray,
     gas_oil_capillary_pressure: CellArray,
-    gravity_enabled: bool = True,
-    capillary_effects_enabled: bool = True,
+    gravity_enabled: Boolean = True,
+    capillary_effects_enabled: Boolean = True,
     out: TransmissibilityCache | None = None,
     dtype: npt.DTypeLike = None,
 ) -> TransmissibilityCache:

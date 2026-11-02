@@ -2701,6 +2701,7 @@ def initialize_reservoir_state(
         pvt=pvt,
         pvt_region_index=pvt_region_index,
         gas_solubility_in_water=gas_solubility_in_water_array,
+        salinity=water_salinity,
         unit_system=unit_system,
         dtype=dtype,
     )

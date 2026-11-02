@@ -15,7 +15,7 @@ from bores.blackoil.fluids.model import BlackOil
 from bores.reservoir.regions import RegionGroups
 from bores.reservoir.state import Hysteresis
 from bores.reservoir.workspace import HysteresisWorkspace
-from bores.types import CellArray, IntCellArray
+from bores.types import Boolean, CellArray, IntCellArray
 
 __all__ = ["PhysicsCache", "compute_physics_cache"]
 
@@ -56,9 +56,10 @@ def compute_physics_cache(
     hysteresis: Hysteresis | HysteresisWorkspace | None = None,
     region_groups: RegionGroups | None = None,
     imbibition_region: IntCellArray | None = None,
-    freeze_saturation_pressure: bool = False,
+    freeze_saturation_pressure: Boolean = False,
     frozen_bubble_point_pressure: CellArray | None = None,
     frozen_dew_point_pressure: CellArray | None = None,
+    gas_solubility_in_water: CellArray | None = None,
     out: PhysicsCache | None = None,
     dtype: npt.DTypeLike = None,
 ) -> PhysicsCache:
@@ -121,6 +122,8 @@ def compute_physics_cache(
         `compute_pvt_cache`.
     :param frozen_dew_point_pressure: Shape `(n_cells,)` dew point to hold. Forwarded to
         `compute_pvt_cache`.
+    :param gas_solubility_in_water: Shape `(n_cells,)` `Rsw` of the water, the gas dissolved in
+        it. Forwarded to `compute_pvt_cache`.
     :return: The populated `PhysicsCache`. `out` itself if given, otherwise
         a newly allocated one. Always returned, never `None`.
     :raises ValueError: If `pressure`/`water_saturation` disagree on cell
@@ -146,6 +149,7 @@ def compute_physics_cache(
         freeze_saturation_pressure=freeze_saturation_pressure,
         frozen_bubble_point_pressure=frozen_bubble_point_pressure,
         frozen_dew_point_pressure=frozen_dew_point_pressure,
+        gas_solubility_in_water=gas_solubility_in_water,
     )
     satfunc_cache = compute_satfunc_cache(
         water_saturation=water_saturation,

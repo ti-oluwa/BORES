@@ -361,6 +361,7 @@ def load_reservoir_state(
     pore_volumes: CellArray,
     pvt: "PVT",
     pvt_region_index: IntCellArray | None = None,
+    salinity: CellArray | None = None,
     unit_system: UnitSystem = UnitSystem.FIELD,
     hysteresis: Hysteresis | HysteresisWorkspace | None = None,
     dtype: npt.DTypeLike = None,
@@ -375,6 +376,8 @@ def load_reservoir_state(
         rock compressibility applies). See `compute_masses`.
     :param pvt: PVT tables to compute masses from, by `PVTNUM` region.
     :param pvt_region_index: `PVTNUM` per cell. All region `1` if not given.
+    :param salinity: Water salinity (ppm NaCl) per cell, used to compute the water mass. The
+        default salinity of each region's water table if not given.
     :param unit_system: The workspace's unit system. Needed for masses'
         `FIELD`-only ft3<->bbl correction between `Rs`/`Rv` and volumes,
         and set directly as the returned state's own `unit_system`.
@@ -400,6 +403,7 @@ def load_reservoir_state(
         pvt=pvt,
         pvt_region_index=pvt_region_index,
         gas_solubility_in_water=workspace.gas_solubility_in_water,
+        salinity=salinity,
         unit_system=unit_system,
         dtype=dtype,
     )

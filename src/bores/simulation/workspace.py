@@ -157,6 +157,7 @@ def build_simulation_workspace(
         freeze_saturation_pressure=runspec.physics_options.freeze_saturation_pressure,
         frozen_bubble_point_pressure=frozen_bubble_point_pressure,
         frozen_dew_point_pressure=frozen_dew_point_pressure,
+        gas_solubility_in_water=initial_state.gas_solubility_in_water,
         dtype=dtype,
     )
     transmissibility_cache = compute_transmissibility_cache(

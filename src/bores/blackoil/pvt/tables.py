@@ -443,6 +443,7 @@ TWO_DIMENSIONAL_TABLES = (
     "solution_gor_table",
     "compressibility_factor_table",
     "gas_free_water_fvf_table",
+    "dissolved_gas_volume_table",
     "vaporized_oil_ratio_table",
 )
 THREE_DIMENSIONAL_TABLES = (
@@ -1030,6 +1031,7 @@ class PVTTable(StoreSerializable):
         self._pvt: StaticPVT | None = None
         self._stock_tank_oil_density: Number | None = None
         self._stock_tank_gas_density: Number | None = None
+        self._stock_tank_water_density: Number | None = None
         # ft³/STB in FIELD units (1 otherwise); reconciles Rs (SCF/STB) with density units
         self._stb_to_volume = get_stb_to_volume_factor(data.unit_system)
         if pvt is not None:
@@ -1038,6 +1040,7 @@ class PVTTable(StoreSerializable):
             self._pvt = pvt
             self._stock_tank_oil_density = pvt.stock_tank_oil_density
             self._stock_tank_gas_density = pvt.stock_tank_gas_density
+            self._stock_tank_water_density = pvt.stock_tank_water_density
             data = build_derived_tables(data, pvt, self.dtype)
 
         self._data = data
@@ -1148,6 +1151,7 @@ class PVTTable(StoreSerializable):
             register_3d("density", data.density_table)
             register_3d("formation_volume_factor", data.formation_volume_factor_table)
             register_3d("compressibility", data.compressibility_table)
+            register_2d("dissolved_gas_volume", data.dissolved_gas_volume_table)
         else:
             register_2d("viscosity", data.viscosity_table)
             register_2d("density", data.density_table)
@@ -1685,6 +1689,188 @@ class PVTTable(StoreSerializable):
             else result.astype(dtype, copy=False),
         )
 
+    def dissolved_gas_volume(
+        self,
+        pressure: TableQuery[NDimension],
+        temperature: TableQuery[NDimension],
+        *,
+        derivative: bool = False,
+    ) -> TableResult[NDimension] | None:
+        """
+        Get the volume that dissolved gas adds to the water, per unit standard volume of the gas.
+
+        :param pressure: Pressure.
+        :param temperature: Temperature.
+        :param derivative: Return `∂/∂P` when `True`.
+        :returns: The volume, which has no unit, or `None` if the table has no
+            `dissolved_gas_volume_table`.
+        """
+        if not self.has("dissolved_gas_volume"):
+            return None
+        return self.query("dissolved_gas_volume", pressure, temperature, derivative=derivative)
+
+    def add_dissolved_gas_volume(
+        self,
+        gas_free: TableResult[NDimension] | None,
+        pressure: TableQuery[NDimension],
+        temperature: TableQuery[NDimension],
+        dissolved_gas_ratio: TableQuery[NDimension] | None,
+        *,
+        derivative: bool = False,
+    ) -> TableResult[NDimension] | None:
+        """
+        Add the volume of the dissolved gas to a gas-free water formation volume factor.
+
+        The result is `Bw_gf + Rsw · DV / f`, or its pressure derivative `∂Bw_gf/∂P + Rsw · ∂DV/∂P / f`
+        when `derivative` is set.
+
+        :param gas_free: The gas-free formation volume factor, or its derivative.
+        :param pressure: Pressure.
+        :param temperature: Temperature.
+        :param dissolved_gas_ratio: `Rsw` of the water. The water is gas-free when `None`.
+        :param derivative: Whether `gas_free` is the pressure derivative.
+        :returns: The formation volume factor of the water with the dissolved gas, or `gas_free`
+            if there is no dissolved gas or no `dissolved_gas_volume_table`.
+        """
+        if gas_free is None or dissolved_gas_ratio is None:
+            return gas_free
+
+        volume = self.dissolved_gas_volume(pressure, temperature, derivative=derivative)
+        if volume is None:
+            return gas_free
+        result = np.asarray(gas_free) + np.asarray(dissolved_gas_ratio) * np.asarray(volume) / (
+            self._stb_to_volume
+        )
+        dtype = self.dtype
+        return typing.cast(
+            "TableResult[NDimension]",
+            dtype.type(result.item())  # type: ignore[attr-defined]
+            if result.ndim == 0
+            else result.astype(dtype, copy=False),
+        )
+
+    def dissolved_gas_water_density(
+        self,
+        pressure: TableQuery[NDimension],
+        temperature: TableQuery[NDimension],
+        salinity: TableQuery[NDimension] | None,
+        dissolved_gas_ratio: TableQuery[NDimension] | None,
+        *,
+        derivative: bool = False,
+    ) -> TableResult[NDimension] | None:
+        """
+        Get the density of water holding dissolved gas, `ρw = (ρw,SC + Rsw·ρg,SC / f) / Bw`, or its
+        pressure derivative `-ρw · (∂Bw/∂P) / Bw`.
+
+        :param pressure: Pressure.
+        :param temperature: Temperature.
+        :param salinity: Salinity (ppm NaCl).
+        :param dissolved_gas_ratio: `Rsw` of the water.
+        :param derivative: Return `∂ρ/∂P` when `True`.
+        :returns: The density, or `None` when it cannot be worked out: there is no dissolved gas,
+            no `dissolved_gas_volume_table`, or the stock-tank densities were not supplied at
+            construction (`pvt=`).
+        """
+        if (
+            dissolved_gas_ratio is None
+            or not self.has("dissolved_gas_volume")
+            or self._stock_tank_water_density is None
+            or self._stock_tank_gas_density is None
+        ):
+            return None
+
+        fvf = self.formation_volume_factor(
+            pressure, temperature, salinity, dissolved_gas_ratio=dissolved_gas_ratio
+        )
+        if fvf is None:
+            return None
+
+        density = (
+            self._stock_tank_water_density
+            + np.asarray(dissolved_gas_ratio) * self._stock_tank_gas_density / self._stb_to_volume
+        ) / np.asarray(fvf)
+        if derivative:
+            fvf_dp = self.db_dp(
+                pressure, temperature, salinity, dissolved_gas_ratio=dissolved_gas_ratio
+            )
+            density = -density * np.asarray(fvf_dp) / np.asarray(fvf)
+
+        dtype = self.dtype
+        return typing.cast(
+            "TableResult[NDimension]",
+            dtype.type(density.item())  # type: ignore[attr-defined]
+            if density.ndim == 0
+            else density.astype(dtype, copy=False),
+        )
+
+    def db_drsw(
+        self,
+        pressure: TableQuery[NDimension],
+        temperature: TableQuery[NDimension],
+    ) -> TableResult[NDimension] | None:
+        """
+        Return `∂Bw/∂Rsw`, the volume each unit of dissolved gas adds to a unit of water.
+
+        :param pressure: Pressure.
+        :param temperature: Temperature.
+        :returns: `DV / f`, or `None` if this is not a water table with a
+            `dissolved_gas_volume_table`.
+        """
+        if self._phase != FluidPhase.WATER:
+            return None
+        volume = self.dissolved_gas_volume(pressure, temperature)
+        if volume is None:
+            return None
+        return typing.cast("TableResult[NDimension]", volume / self._stb_to_volume)
+
+    def dρ_drsw(
+        self,
+        pressure: TableQuery[NDimension],
+        temperature: TableQuery[NDimension],
+        salinity: TableQuery[NDimension] | None,
+        dissolved_gas_ratio: TableQuery[NDimension],
+    ) -> TableResult[NDimension] | None:
+        """
+        Return `∂ρw/∂Rsw` for water holding dissolved gas, at constant pressure.
+
+        With `ρw = N / Bw`, `N = ρw,SC + Rsw·ρg,SC / f` and `∂Bw/∂Rsw = DV / f`, it is
+        `(ρg,SC / f · Bw - N · DV / f) / Bw²`.
+
+        :param pressure: Pressure.
+        :param temperature: Temperature.
+        :param salinity: Salinity (ppm NaCl).
+        :param dissolved_gas_ratio: `Rsw` of the water.
+        :returns: `∂ρw/∂Rsw`, or `None` when the density cannot be worked out. See
+            `dissolved_gas_water_density`.
+        """
+        fvf_drsw = self.db_drsw(pressure, temperature)
+        fvf = self.formation_volume_factor(
+            pressure, temperature, salinity, dissolved_gas_ratio=dissolved_gas_ratio
+        )
+        if (
+            fvf_drsw is None
+            or fvf is None
+            or self._stock_tank_water_density is None
+            or self._stock_tank_gas_density is None
+        ):
+            return None
+        fvf_array = np.asarray(fvf)
+        mass_numerator = (
+            self._stock_tank_water_density
+            + np.asarray(dissolved_gas_ratio) * self._stock_tank_gas_density / self._stb_to_volume
+        )
+        result = (
+            self._stock_tank_gas_density / self._stb_to_volume * fvf_array
+            - mass_numerator * np.asarray(fvf_drsw)
+        ) / fvf_array**2
+        dtype = self.dtype
+        return typing.cast(
+            "TableResult[NDimension]",
+            dtype.type(result.item())  # type: ignore[attr-defined]
+            if result.ndim == 0
+            else result.astype(dtype, copy=False),
+        )
+
     def formation_volume_factor(
         self,
         pressure: TableQuery[NDimension],
@@ -1693,6 +1879,7 @@ class PVTTable(StoreSerializable):
         solution_gor: TableQuery[NDimension] | None = None,
         bubble_point_pressure: TableQuery[NDimension] | None = None,
         vaporized_oil_ratio: TableQuery[NDimension] | None = None,
+        dissolved_gas_ratio: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
         Get formation volume factor `B`.
@@ -1725,14 +1912,20 @@ class PVTTable(StoreSerializable):
         :param vaporized_oil_ratio: Rv of the gas (wet gas only). Gas at or below its dew point
             reads the saturated (dew-curve) table; gas above it is undersaturated and is looked
             up at its own Rv. When omitted, gas is treated as saturated.
+        :param dissolved_gas_ratio: `Rsw` of the water, the gas dissolved in it. Water phase only.
+            The water swells by the volume the dissolved gas takes up, if the table has the
+            `dissolved_gas_volume_table`. When omitted, the water is gas-free.
         :returns: FVF or `None` if the table is not present.
         """
         if self._phase == FluidPhase.WATER:
-            return self.squery(
+            gas_free = self.squery(
                 "formation_volume_factor",
                 pressure,
                 temperature,
                 self.resolve_salinity(salinity),
+            )
+            return self.add_dissolved_gas_volume(
+                gas_free, pressure, temperature, dissolved_gas_ratio
             )
         if self._phase == FluidPhase.GAS:
             if vaporized_oil_ratio is not None and self.has(
@@ -1834,6 +2027,7 @@ class PVTTable(StoreSerializable):
         solution_gor: TableQuery[NDimension] | None = None,
         bubble_point_pressure: TableQuery[NDimension] | None = None,
         vaporized_oil_ratio: TableQuery[NDimension] | None = None,
+        dissolved_gas_ratio: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
         Return `∂B/∂P`. Units depend on `unit_system`.
@@ -1880,16 +2074,22 @@ class PVTTable(StoreSerializable):
         :param vaporized_oil_ratio: Rv of the gas (wet gas only). Gas at or below its dew point
             reads the saturated (dew-curve) table; gas above it is undersaturated and is looked
             up at its own Rv. When omitted, gas is treated as saturated.
+        :param dissolved_gas_ratio: `Rsw` of the water. Water phase only. See
+            `formation_volume_factor`.
         :returns: `∂B/∂P` or `None` if table is absent.
         """
         if self._phase == FluidPhase.WATER:
-            return self.squery(
+            gas_free = self.squery(
                 "formation_volume_factor",
                 pressure,
                 temperature,
                 self.resolve_salinity(salinity),
                 derivative=True,
             )
+            return self.add_dissolved_gas_volume(
+                gas_free, pressure, temperature, dissolved_gas_ratio, derivative=True
+            )
+
         if self._phase == FluidPhase.GAS:
             if vaporized_oil_ratio is not None and self.has(
                 "undersaturated_formation_volume_factor"
@@ -2274,6 +2474,7 @@ class PVTTable(StoreSerializable):
         solution_gor: TableQuery[NDimension] | None = None,
         bubble_point_pressure: TableQuery[NDimension] | None = None,
         vaporized_oil_ratio: TableQuery[NDimension] | None = None,
+        dissolved_gas_ratio: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
         Get fluid density `ρ`. Units depend on `unit_system` (lbm/ft³ in FIELD, kg/m³ in METRIC/SI, g/cm³ in LAB).
@@ -2284,7 +2485,8 @@ class PVTTable(StoreSerializable):
         - Oil:   `ρo = (ρo,SC + Rs·ρg,SC) / Bo`
         - Gas:   `ρg = (ρg,SC + Rv·ρo,SC) / Bg`  [wet gas]
                  `ρg = ρg,SC / Bg`                 [dry gas]
-        - Water: `ρw = ρw,SC / Bw`
+        - Water: `ρw = ρw,SC / Bw`, or `ρw = (ρw,SC + Rsw·ρg,SC) / Bw` for water holding dissolved
+                 gas, whose `Bw` includes the volume the gas takes up
 
         **Oil phase - saturated/undersaturated switching**: the pre-built
         table's pressure axis is the bubble curve, so it's only exactly
@@ -2309,15 +2511,24 @@ class PVTTable(StoreSerializable):
             density table; undersaturated gas is recomputed from its own Rv with
             `ρg = (ρg,SC + Rv·ρo,SC · f) / Bg(P, T, Rv)` when the stock-tank densities were
             supplied at construction (`pvt=`), and falls back to the dew-curve table otherwise.
+        :param dissolved_gas_ratio: `Rsw` of the water, the gas dissolved in it. Water phase only.
+            Counts only when the table has the `dissolved_gas_volume_table` and the stock-tank
+            densities were supplied at construction (`pvt=`). Otherwise the density is the
+            gas-free one.
         :returns: Density, or `None` if table not present.
         """
         if self._phase == FluidPhase.WATER:
-            return self.squery(
+            gas_free = self.squery(
                 "density",
                 pressure,
                 temperature,
                 self.resolve_salinity(salinity),
             )
+            laden = self.dissolved_gas_water_density(
+                pressure, temperature, salinity, dissolved_gas_ratio
+            )
+            return gas_free if laden is None else laden
+
         if self._phase == FluidPhase.GAS:
             if vaporized_oil_ratio is not None and self.has(
                 "undersaturated_formation_volume_factor"
@@ -2408,6 +2619,7 @@ class PVTTable(StoreSerializable):
         solution_gor: TableQuery[NDimension] | None = None,
         bubble_point_pressure: TableQuery[NDimension] | None = None,
         vaporized_oil_ratio: TableQuery[NDimension] | None = None,
+        dissolved_gas_ratio: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
         Return `∂ρ/∂P` (density-unit / pressure-unit, unit_system-dependent - lbm/ft³/psi in FIELD).
@@ -2436,9 +2648,15 @@ class PVTTable(StoreSerializable):
         :param vaporized_oil_ratio: Rv of the gas (wet gas only). Saturated gas: the slope of the
             dew-curve density table. Undersaturated gas: `-ρ·(∂Bg/∂P)/Bg` at fixed Rv (see
             `density`).
+        :param dissolved_gas_ratio: `Rsw` of the water. Water phase only. See `density`.
         :returns: `∂ρ/∂P` or `None`.
         """
         if self._phase == FluidPhase.WATER:
+            laden = self.dissolved_gas_water_density(
+                pressure, temperature, salinity, dissolved_gas_ratio, derivative=True
+            )
+            if laden is not None:
+                return laden
             return self.squery(
                 "density",
                 pressure,
@@ -2446,6 +2664,7 @@ class PVTTable(StoreSerializable):
                 self.resolve_salinity(salinity),
                 derivative=True,
             )
+
         if self._phase == FluidPhase.GAS:
             if vaporized_oil_ratio is not None and self.has(
                 "undersaturated_formation_volume_factor"

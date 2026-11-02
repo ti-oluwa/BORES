@@ -55,6 +55,7 @@ def compute_masses(
     pvt: "PVT",
     pvt_region_index: IntCellArray | None = None,
     gas_solubility_in_water: CellArray | None = None,
+    salinity: CellArray | None = None,
     unit_system: UnitSystem = UnitSystem.FIELD,
     dtype: npt.DTypeLike = None,
 ) -> Masses:
@@ -81,7 +82,11 @@ def compute_masses(
     :param gas_solubility_in_water: `Rsw`, shape `(n_cells,)`. Not every
         deck or PVT model carries this. A plain `PVTW`-only water model
         doesn't so it's optional. `dissolved_gas_mass_in_water` is zero
-        wherever it isn't given, or a region has no `stock_tank_gas_density`.
+        wherever it isn't given, or a region has no `stock_tank_gas_density`. Water whose table
+        swells with dissolved gas takes up more volume, so it holds less water for the same
+        saturation.
+    :param salinity: Water salinity (ppm NaCl), shape `(n_cells,)`. The default salinity of each
+        region's water table if not given.
     :param unit_system: Needed to apply the `FIELD`-only ft3<->bbl
         correction between `Rs`/`Rsw` (SCF/STB), `Rv` (STB/SCF) and the
         oil/water/gas volumes they scale.
@@ -179,7 +184,14 @@ def compute_masses(
                     "but no water PVT table is available."
                 )
 
-            bw = pvt_region.tables.water.formation_volume_factor(pressure=p, temperature=t)
+            bw = pvt_region.tables.water.formation_volume_factor(
+                pressure=p,
+                temperature=t,
+                salinity=salinity[mask] if salinity is not None else None,
+                dissolved_gas_ratio=(
+                    gas_solubility_in_water[mask] if gas_solubility_in_water is not None else None
+                ),
+            )
             if bw is None or rho_w_sc is None:
                 raise ValidationError(
                     f"`PVTNUM` {pvtnum}: water FVF table or "

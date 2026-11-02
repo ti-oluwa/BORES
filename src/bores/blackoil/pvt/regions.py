@@ -11,7 +11,11 @@ from scipy.interpolate import (  # type: ignore[import-untyped]
 )
 from typing_extensions import Self
 
-from bores.blackoil.pvt.co2_storage import build_co2_pressure_axis, build_co2_storage_tables
+from bores.blackoil.pvt.co2_storage import (
+    build_co2_pressure_axis,
+    build_co2_salinity_axis,
+    build_co2_storage_tables,
+)
 from bores.blackoil.pvt.data import PVTData, PVTDataSet, get_stb_to_volume_factor
 from bores.blackoil.pvt.live_oil import build_live_oil_branch_tables
 from bores.blackoil.pvt.static import StaticPVT, load_density_records
@@ -30,6 +34,7 @@ from bores.reservoir.temperature import (
     TemperatureTable,
 )
 from bores.types import (
+    CellArray,
     FloatArray,
     FluidPhase,
     Integer,
@@ -234,7 +239,7 @@ class PVT:
         warn_on_extrapolation: bool = False,
         dtype: npt.DTypeLike = None,
         phases: Phases | None = None,
-        salinity: Number | None = None,
+        salinity: Number | CellArray | None = None,
         pressure_range: tuple[Number, Number] | None = None,
     ) -> Self:
         """
@@ -252,7 +257,7 @@ class PVT:
         :param phases: The phases the model has, which decide the tables read and required (see
             `load_pvt_regions`). Read from the deck's `RUNSPEC` keywords if omitted.
         :param salinity: Brine salinity in ppm by weight of salt, used by a CO2 storage deck only.
-            The deck's `SALINITY` if omitted.
+            One value, or the salinity of each cell. The deck's `SALINITY` if omitted.
         :param pressure_range: Lowest and highest pressure in the deck's unit system that the
             tables of a CO2 storage deck cover. From the standard pressure to three times the
             highest `EQUIL` datum pressure if omitted.
@@ -1467,7 +1472,7 @@ def load_co2_storage_pvt_regions(
     temperature: Temperature,
     *,
     phases: Phases,
-    salinity: Number | None = None,
+    salinity: Number | CellArray | None = None,
     pressure_range: tuple[Number, Number] | None = None,
     interpolation_method: InterpolationMethod = "linear",
     validate: bool = True,
@@ -1484,8 +1489,10 @@ def load_co2_storage_pvt_regions(
     :param deck_file: The deck to read.
     :param temperature: Reservoir temperature.
     :param phases: The phases the deck models.
-    :param salinity: Brine salinity in ppm by weight of salt. The deck's `SALINITY` if omitted, and
-        fresh water if the deck has none.
+    :param salinity: Brine salinity in ppm by weight of salt: one value, or the salinity of each
+        cell. The tables cover every salinity given, and brine is measured at the standard density
+        of the mean salinity. The deck's `SALINITY` if omitted, and fresh water if the deck has
+        none.
     :param pressure_range: The lowest and highest pressure the tables cover, in the deck's unit
         system. From the standard pressure to three times the highest `EQUIL` datum pressure if
         omitted.
@@ -1504,6 +1511,9 @@ def load_co2_storage_pvt_regions(
     if salinity is None:
         deck_salinity = load_salinity(deck_file, n_cells=1, dtype=np.float64)
         salinity = typing.cast("Number", 0.0 if deck_salinity is None else deck_salinity[0])
+
+    salinity_axis = build_co2_salinity_axis(salinity, dtype=dtype)
+    reference_salinity = float(np.mean(np.asarray(salinity, dtype=np.float64)))
 
     if pressure_range is None:
         equil_records = deck_file.get("EQUIL")
@@ -1542,7 +1552,8 @@ def load_co2_storage_pvt_regions(
         static, tables = build_co2_storage_tables(
             pressures=pressures,
             temperatures=typing.cast("FloatArray[OneDimension]", temperatures),
-            salinity=salinity,
+            salinities=salinity_axis,
+            reference_salinity=reference_salinity,
             dissolved_gas=phases.dissolved_gas_in_water,
             interpolation_method=interpolation_method,
             validate=validate,
@@ -1564,7 +1575,7 @@ def load_pvt_regions(
     warn_on_extrapolation: bool = False,
     dtype: npt.DTypeLike = None,
     phases: Phases | None = None,
-    salinity: Number | None = None,
+    salinity: Number | CellArray | None = None,
     pressure_range: tuple[Number, Number] | None = None,
 ) -> dict[Integer, PVTRegion]:
     """
@@ -1593,8 +1604,8 @@ def load_pvt_regions(
         required, so a gas and water model needs no oil table and a deck missing a table its
         phases need is reported before any table is parsed. A CO2 storage deck has no tables, and
         its CO2 and brine properties are computed instead (see `load_co2_storage_pvt_regions`).
-    :param salinity: Brine salinity in ppm by weight of salt, used by a CO2 storage deck only.
-        The deck's `SALINITY` if omitted.
+    :param salinity: Brine salinity in ppm by weight of salt, used by a CO2 storage deck only. One
+        value, or the salinity of each cell. The deck's `SALINITY` if omitted.
     :param pressure_range: Lowest and highest pressure in the deck's unit system that the tables
         of a CO2 storage deck cover. From the standard pressure to three times the highest `EQUIL`
         datum pressure if omitted.
