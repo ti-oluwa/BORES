@@ -169,13 +169,14 @@ class Well:
         limits=None,
         injected=FluidPhase.WATER,
         dtype=F64,
+        reference_depth=None,
     ):
         self.dtype = dtype
         grid = make_cartesian_grid(nx=1, ny=1, nz=n, dx=50.0, dy=50.0, dz=50.0)
         options = dict(
             surface_location=(25.0, 25.0),
             perforation_depths=(0.0, 50.0 * n),
-            reference_depth=25.0 * n,
+            reference_depth=25.0 * n if reference_depth is None else reference_depth,
             target_bhp=bhp,
             allows_crossflow=allows_crossflow,
             limits=limits,
@@ -204,7 +205,14 @@ class Well:
         )
 
     def resolve(
-        self, pressures, water_saturations, gas_saturations, *, bhp=None, derivatives=False
+        self,
+        pressures,
+        water_saturations,
+        gas_saturations,
+        *,
+        bhp=None,
+        derivatives=False,
+        exhaustive=False,
     ):
         if bhp is not None:
             self.system.controls.target_bhps[0] = bhp
@@ -231,6 +239,7 @@ class Well:
                 workspace=self.workspace,
                 spec=self.spec,
                 surface_sample=self.surface_sample,
+                exhaustive=exhaustive,
             )
 
     def get_rates(self, state):
@@ -671,3 +680,63 @@ def test_a_well_shut_in_by_an_economic_limit_has_an_empty_control_row():
     assert row.quantity == "none"
     assert not row.dr_dx.any()
     assert row.dr_dbhp == 0.0
+
+
+@pytest.mark.parametrize("name", sorted(WELLBORES))
+@pytest.mark.parametrize(
+    "kind,bhp,state,reference_depth",
+    [
+        ("producer", 1500.0, NORMAL, None),
+        ("producer", 1500.0, NORMAL, 0.0),
+        ("producer", 1500.0, NORMAL, 1000.0),
+        ("producer", 2000.0, CROSSFLOW, None),
+        ("injector", 4000.0, NORMAL, None),
+        ("injector", 3000.0, CROSSFLOW, 0.0),
+    ],
+    ids=[
+        "producer",
+        "reference_at_top",
+        "reference_at_bottom",
+        "producer_crossflow",
+        "injector",
+        "injector_crossflow",
+    ],
+)
+def test_differencing_by_segment_matches_differencing_every_connection(
+    name, kind, bhp, state, reference_depth
+):
+    wellbore = WELLBORES[name](tubing_inner_diameter=0.25)
+    results = []
+    for exhaustive in (False, True):
+        well = Well(
+            kind=kind,
+            bhp=bhp,
+            mode=HYDRAULIC,
+            tubing=wellbore,
+            reference_depth=reference_depth,
+        )
+        well.resolve(*state, bhp=bhp, derivatives=True, exhaustive=exhaustive)
+        derivatives = get_well_derivatives(
+            compiled_system=well.system, workspace=well.workspace, well_row=0
+        )
+        results.append((
+            derivatives.dq_dx.copy(),
+            derivatives.dq_dbhp.copy(),
+            derivatives.dqs_dx.copy(),
+        ))
+    for fast, slow in zip(results[0], results[1], strict=True):
+        np.testing.assert_allclose(fast, slow, rtol=1e-6, atol=1e-8 * np.abs(slow).max())
+
+
+def test_the_hydrostatic_and_uniform_walks_have_no_segment_wise_path_but_still_agree():
+    for mode in (ConnectionPressureMode.HYDROSTATIC, ConnectionPressureMode.UNIFORM_BHP):
+        results = []
+        for exhaustive in (False, True):
+            well = Well(kind="producer", bhp=1500.0, mode=mode)
+            well.resolve(*NORMAL, bhp=1500.0, derivatives=True, exhaustive=exhaustive)
+            results.append(
+                get_well_derivatives(
+                    compiled_system=well.system, workspace=well.workspace, well_row=0
+                ).dq_dx.copy()
+            )
+        np.testing.assert_allclose(results[0], results[1], rtol=1e-9, atol=1e-12)

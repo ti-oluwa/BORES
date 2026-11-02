@@ -310,6 +310,21 @@ class DerivativeScratch(typing.NamedTuple):
     fluid_base: NumberArray[OneDimension]
     """Shape `(19,)`. One connection's fluid properties as they were before being shifted."""
 
+    fluids_saved: NumberArray[OneDimension]
+    """
+    Shape `(19, n)`. Every connection's fluid properties as they were before being shifted all
+    together.
+    """
+
+    segments: NumberArray[OneDimension]
+    """
+    Shape `(11 * n,)`. Per-segment working values of the segment-wise differencing, in blocks of
+    `3 * n` for the derivative of each segment's pressure drop with the rate it carries, `3 * n` for
+    their running sums along the walk, `3 * n` for its derivative with its connection's cell
+    unknowns, then `n` each for the position of each connection in the walk and the step taken
+    down and up on its fluid properties.
+    """
+
     fluid_direction: NumberArray[OneDimension]
     """
     Shape `(19,)`. How each fluid property of one connection changes with one of its cell's
@@ -378,6 +393,8 @@ def build_derivative_scratch(*, max_connections: Integer) -> DerivativeScratch:
         dpc_dx=buffer(count * size),
         fluids=buffer(19 * count),
         fluid_base=buffer(19),
+        fluids_saved=buffer(19 * count),
+        segments=buffer(11 * count),
         fluid_direction=buffer(19),
         dq_dpc=buffer(count * 3),
         dq_dx_direct=buffer(count * 9),
@@ -625,6 +642,7 @@ def build_wells_workspace(
                 f"got {offsets.tolist()}."
             )
         derivative_offsets = np.concatenate(([0], np.cumsum((3 * np.diff(offsets)) ** 2)))
+
     n_block_entries = int(derivative_offsets[-1])
     max_connections = (
         0 if well_offsets is None else int(np.diff(np.asarray(well_offsets)).max(initial=0))
@@ -691,9 +709,7 @@ class ConnectionRates(typing.NamedTuple):
     """Gas rate at each connection."""
 
 
-def get_connection_rates(
-    *, workspace: PerforationWorkspace, copy: bool = False
-) -> ConnectionRates:
+def get_connection_rates(workspace: PerforationWorkspace, copy: bool = False) -> ConnectionRates:
     """
     The per-connection rates the most recent solve left in a well's `PerforationWorkspace`.
 
@@ -716,7 +732,8 @@ def get_connection_rates(
     return rates
 
 
-def restore_connection_rates(*, workspace: PerforationWorkspace, rates: ConnectionRates) -> None:
+@numba.njit(cache=True)
+def restore_connection_rates(workspace: PerforationWorkspace, rates: ConnectionRates) -> None:
     """
     Writes saved per-connection rates back into a well's `PerforationWorkspace`.
 
@@ -728,7 +745,8 @@ def restore_connection_rates(*, workspace: PerforationWorkspace, rates: Connecti
     workspace.connection_gas_rates[:] = rates.gas
 
 
-def accumulate_well_volumes(*, workspace: WellsWorkspace, step_size: Number) -> None:
+@numba.njit(cache=True)
+def accumulate_well_volumes(workspace: WellsWorkspace, step_size: Number) -> None:
     """
     Adds one accepted time step's surface volumes to every well's running totals, in place.
 
@@ -749,8 +767,9 @@ def accumulate_well_volumes(*, workspace: WellsWorkspace, step_size: Number) -> 
         np.add(volumes, rates * step_size, out=volumes, where=~np.isnan(rates))
 
 
+@numba.njit(cache=True)
 def sum_connection_rates(
-    *, workspace: PerforationWorkspace, is_injector: Boolean
+    workspace: PerforationWorkspace, is_injector: Boolean
 ) -> tuple[PhaseValues, PhaseValues]:
     """
     Sums a well's per-connection rates, as the most recent solve left them in its
@@ -775,6 +794,7 @@ def sum_connection_rates(
         carries = (oil < 0.0) | (water < 0.0) | (gas < 0.0)
     else:
         carries = np.ones(oil.shape[0], dtype=np.bool_)
+
     factor = workspace.stb_to_volume_factor
     surface_oil = oil / (fluids.oil_formation_volume_factors * factor)
     surface_free_gas = gas / fluids.gas_formation_volume_factors
@@ -995,8 +1015,10 @@ def accumulate_rates(
                 signed_drawdown = connection_pressures[idx] - reservoir_pressures[idx]
             else:
                 signed_drawdown = reservoir_pressures[idx] - connection_pressures[idx]
+
             if signed_drawdown >= 0.0:
                 continue
+
             reverse_drawdown = -signed_drawdown
             well_index = well_indices[idx]
             if is_injector:
@@ -1012,6 +1034,7 @@ def accumulate_rates(
             else:
                 if forward_total_rate <= 0.0:
                     continue
+
                 total_reverse_rate = (
                     radial_flow_constant
                     * well_index
@@ -1080,6 +1103,7 @@ def load_wells_states(
         control_modes[allocated] = workspace.group_control_modes[allocated]
         target_rates[allocated] = workspace.group_target_rates[allocated]
         controls = controls._replace(control_modes=control_modes, target_rates=target_rates)
+
     perforations = compiled_system.perforations
     unit_system = compiled_system.unit_system
 
