@@ -11,6 +11,7 @@ from bores.blackoil.satfunc.capillary_pressure.hysteresis import (
 )
 from bores.blackoil.satfunc.relperm.hysteresis import (
     CarlsonRelPermTable,
+    EclipseKilloughRelPermTable,
     HysteresisRelPermTable,
     KilloughLandRelPermTable,
     compute_land_residual_saturation,
@@ -24,6 +25,7 @@ from tests.satfunc.test_relperm_hysteresis import _tabular as _tabular_relperm
 def test_the_models_share_their_family_base():
     assert issubclass(KilloughLandRelPermTable, HysteresisRelPermTable)
     assert issubclass(CarlsonRelPermTable, HysteresisRelPermTable)
+    assert issubclass(EclipseKilloughRelPermTable, HysteresisRelPermTable)
     assert issubclass(KilloughCapillaryPressureTable, HysteresisCapillaryPressureTable)
     assert issubclass(CurvatureCapillaryPressureTable, HysteresisCapillaryPressureTable)
 

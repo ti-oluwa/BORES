@@ -11,6 +11,7 @@ from bores.blackoil.satfunc.capillary_pressure.tables import (
 )
 from bores.blackoil.satfunc.relperm.hysteresis import (
     CarlsonRelPermTable,
+    EclipseKilloughRelPermTable,
     KilloughLandRelPermTable,
     compute_land_trapping_coefficient,
 )
@@ -327,8 +328,7 @@ def as_hysteresis_relperm_table(
     :param options: How hysteresis is modelled.
     :returns: The hysteresis table, or `drainage` when relative permeability does not follow
         hysteresis.
-    :raises NotSupportedError: For a two-phase table, or for the Eclipse Killough model, which is
-        not built yet. Choose `BLENDED_SCANNING` for BORES's own scheme.
+    :raises NotSupportedError: For a two-phase table.
     """
     if not options.relperm_hysteresis_active:
         return drainage
@@ -351,6 +351,16 @@ def as_hysteresis_relperm_table(
             wetting_phase_uses_imbibition=options.wetting_phase_uses_imbibition,
         )
 
+    if model == RelPermHysteresisModel.KILLOUGH:
+        return EclipseKilloughRelPermTable(
+            oil_water_drainage_table=drainage,
+            gas_oil_drainage_table=drainage,
+            oil_water_imbibition_table=imbibition,
+            gas_oil_imbibition_table=imbibition,
+            wetting_phase_hysteresis=options.wetting_phase_uses_imbibition,
+            wetting_phase_curvature=options.killough_wetting_curvature,
+        )
+
     if model == RelPermHysteresisModel.BLENDED_SCANNING:
         land = derive_land_parameters(drainage=drainage, imbibition=imbibition)
         return KilloughLandRelPermTable(
@@ -364,10 +374,7 @@ def as_hysteresis_relperm_table(
             maximum_residual_oil_saturation_gas=land.maximum_residual_oil_saturation_gas,
             maximum_residual_gas_saturation=land.maximum_residual_gas_saturation,
         )
-    raise NotSupportedError(
-        f"Relative permeability hysteresis model `{model}` is not built yet. Use `carlson`, or "
-        "`blended_scanning` for BORES's own Killough-style scheme."
-    )
+    raise NotSupportedError(f"Relative permeability hysteresis model `{model}` is not built.")
 
 
 def as_hysteresis_capillary_pressure_table(

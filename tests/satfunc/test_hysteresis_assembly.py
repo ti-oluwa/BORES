@@ -18,11 +18,12 @@ from bores.blackoil.satfunc.hysteresis import (
 from bores.blackoil.satfunc.regions import SatFunc
 from bores.blackoil.satfunc.relperm.hysteresis import (
     CarlsonRelPermTable,
+    EclipseKilloughRelPermTable,
     KilloughLandRelPermTable,
     compute_land_residual_saturation,
 )
 from bores.deck import DeckFile
-from bores.errors import NotSupportedError, ValidationError
+from bores.errors import ValidationError
 from bores.reservoir.regions import Regions
 from bores.types import FluidPhase, RelPermHysteresisModel
 
@@ -99,6 +100,7 @@ def test_land_is_derived_so_the_largest_start_traps_the_imbibition_tables_critic
     ("model", "expected"),
     [
         (RelPermHysteresisModel.CARLSON, CarlsonRelPermTable),
+        (RelPermHysteresisModel.KILLOUGH, EclipseKilloughRelPermTable),
         (RelPermHysteresisModel.BLENDED_SCANNING, KilloughLandRelPermTable),
     ],
 )
@@ -125,14 +127,22 @@ def test_relperm_stays_on_the_drainage_table_when_it_does_not_follow_hysteresis(
         )
 
 
-def test_the_eclipse_killough_model_is_reported_as_not_built_yet():
+def test_the_killough_options_reach_the_eclipse_killough_table():
     satfunc = _satfunc()
-    with pytest.raises(NotSupportedError):
-        as_hysteresis_relperm_table(
-            drainage=satfunc[1].relative_permeability,
-            imbibition=satfunc[2].relative_permeability,
-            options=HysteresisOptions(relperm_model=RelPermHysteresisModel.KILLOUGH),
-        )
+    options = HysteresisOptions(
+        relperm_model=RelPermHysteresisModel.KILLOUGH,
+        wetting_phase=FluidPhase.WATER,
+        wetting_phase_uses_imbibition=True,
+        killough_wetting_curvature=2.5,
+    )
+    table = as_hysteresis_relperm_table(
+        drainage=satfunc[1].relative_permeability,
+        imbibition=satfunc[2].relative_permeability,
+        options=options,
+    )
+    assert isinstance(table, EclipseKilloughRelPermTable)
+    assert table.wetting_phase_hysteresis
+    assert table.wetting_phase_curvature == pytest.approx(2.5)
 
 
 def test_capillary_pressure_follows_the_options():
