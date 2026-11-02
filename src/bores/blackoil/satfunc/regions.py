@@ -44,7 +44,7 @@ class SatFunc:
     """
     Multi-region saturation-function tables keyed by 1-based `SATNUM` region index.
 
-    Eclipse supports multiple saturation function regions via the `SATNUM`
+    Supports multiple saturation function regions via the `SATNUM`
     keyword - each cell is assigned a region index and its relative
     permeability and capillary pressure are evaluated from the corresponding
     `SatFuncTables` instance.
@@ -220,18 +220,6 @@ class SatFunc:
                 "" if gas_increasing else "non-",
             )
         return water_increasing, gas_increasing
-
-    @classmethod
-    def from_one(cls, tables: SatFuncTables) -> Self:
-        """
-        Wrap a single `SatFuncTables` as region 1.
-
-        Convenience factory for the common single-region case.
-
-        :param tables: `SatFuncTables` instance.
-        :returns: `SatFunc` with one entry at key 1.
-        """
-        return cls(tables={1: tables})
 
     def convert(
         self,
