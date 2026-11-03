@@ -13,7 +13,7 @@ from bores.wells.hydraulics.base import (
     WellBoreModel,
 )
 from bores.wells.hydraulics.vfp import VFPTables
-from bores.wells.resolution.compiled import resolve_wells_in_parallel
+from bores.wells.resolution import compiled
 from bores.wells.resolution.derivatives import compute_well_derivatives
 from bores.wells.resolution.engine import resolve_well_control
 from bores.wells.resolution.groups.allocation import (
@@ -50,7 +50,7 @@ def resolve_wells(
        (`FLD`/`NONE`/`VREP`/`REIN`) is skipped. Its members are
        controlled some other way, not this group's own target.
     2. Resolves every active well's control, now that none are left in `GRUP` mode. The wells
-       `resolve_wells_in_parallel` can take are resolved together in one compiled pass across
+       `compiled.resolve_wells` can take are resolved together in one compiled pass across
        threads, and the rest one at a time (`resolve_well_control`).
     3. Redistributes any shortfall left in a group's own target across
        whichever of its members have headroom
@@ -96,7 +96,7 @@ def resolve_wells(
                 # some other way, not this group's own target.
                 continue
 
-    for well_row in resolve_wells_in_parallel(
+    for well_row in compiled.resolve_wells(
         compiled_system=compiled_system,
         workspace=workspace,
         spec=spec,

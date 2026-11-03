@@ -2,7 +2,7 @@
 Resolution of many wells in one compiled pass, spread across threads.
 
 `resolve_well_control` resolves one well, in Python, and spends most of its time on Python
-around the compiled solvers it calls. `resolve_wells_in_parallel` resolves every well it can take
+around the compiled solvers it calls. `resolve_wells` resolves every well it can take
 in a single compiled call that works well by well in parallel, and leaves the rest to
 `resolve_well_control`. The two give the same result for a well they both take.
 """
@@ -15,6 +15,7 @@ import numpy as np
 from bores.errors import StopSimulation, ValidationError
 from bores.precision import get_dtype
 from bores.types import (
+    Boolean,
     IntArray,
     Integer,
     Number,
@@ -77,7 +78,7 @@ __all__ = [
     "CompiledWellInputs",
     "CompiledWellOutputs",
     "CompiledWellbores",
-    "resolve_wells_in_parallel",
+    "resolve_wells",
 ]
 
 
@@ -336,25 +337,25 @@ def slice_connection_fluids(
     :returns: The fluids of those connections. Nothing is copied.
     """
     return ConnectionFluids(
-        pressures=fluids.pressures[start:stop],
-        gas_liquid_surface_tensions=fluids.gas_liquid_surface_tensions[start:stop],
-        oil_densities=fluids.oil_densities[start:stop],
-        water_densities=fluids.water_densities[start:stop],
-        gas_densities=fluids.gas_densities[start:stop],
-        oil_viscosities=fluids.oil_viscosities[start:stop],
-        water_viscosities=fluids.water_viscosities[start:stop],
-        gas_viscosities=fluids.gas_viscosities[start:stop],
-        oil_saturations=fluids.oil_saturations[start:stop],
-        water_saturations=fluids.water_saturations[start:stop],
-        gas_saturations=fluids.gas_saturations[start:stop],
-        oil_mobilities=fluids.oil_mobilities[start:stop],
-        water_mobilities=fluids.water_mobilities[start:stop],
-        gas_mobilities=fluids.gas_mobilities[start:stop],
-        oil_formation_volume_factors=fluids.oil_formation_volume_factors[start:stop],
-        water_formation_volume_factors=fluids.water_formation_volume_factors[start:stop],
-        gas_formation_volume_factors=fluids.gas_formation_volume_factors[start:stop],
-        solution_gas_oil_ratios=fluids.solution_gas_oil_ratios[start:stop],
-        vaporized_oil_gas_ratios=fluids.vaporized_oil_gas_ratios[start:stop],
+        pressures=fluids.pressures[start:stop],  # type: ignore[arg-type]
+        gas_liquid_surface_tensions=fluids.gas_liquid_surface_tensions[start:stop],  # type: ignore[arg-type]
+        oil_densities=fluids.oil_densities[start:stop],  # type: ignore[arg-type]
+        water_densities=fluids.water_densities[start:stop],  # type: ignore[arg-type]
+        gas_densities=fluids.gas_densities[start:stop],  # type: ignore[arg-type]
+        oil_viscosities=fluids.oil_viscosities[start:stop],  # type: ignore[arg-type]
+        water_viscosities=fluids.water_viscosities[start:stop],  # type: ignore[arg-type]
+        gas_viscosities=fluids.gas_viscosities[start:stop],  # type: ignore[arg-type]
+        oil_saturations=fluids.oil_saturations[start:stop],  # type: ignore[arg-type]
+        water_saturations=fluids.water_saturations[start:stop],  # type: ignore[arg-type]
+        gas_saturations=fluids.gas_saturations[start:stop],  # type: ignore[arg-type]
+        oil_mobilities=fluids.oil_mobilities[start:stop],  # type: ignore[arg-type]
+        water_mobilities=fluids.water_mobilities[start:stop],  # type: ignore[arg-type]
+        gas_mobilities=fluids.gas_mobilities[start:stop],  # type: ignore[arg-type]
+        oil_formation_volume_factors=fluids.oil_formation_volume_factors[start:stop],  # type: ignore[arg-type]
+        water_formation_volume_factors=fluids.water_formation_volume_factors[start:stop],  # type: ignore[arg-type]
+        gas_formation_volume_factors=fluids.gas_formation_volume_factors[start:stop],  # type: ignore[arg-type]
+        solution_gas_oil_ratios=fluids.solution_gas_oil_ratios[start:stop],  # type: ignore[arg-type]
+        vaporized_oil_gas_ratios=fluids.vaporized_oil_gas_ratios[start:stop],  # type: ignore[arg-type]
     )
 
 
@@ -366,10 +367,10 @@ def solve_at(
     workspace: PerforationWorkspace,
     reference_depth: Number,
     reference_pressure: Number,
-    relevant_oil: bool,
-    relevant_water: bool,
-    relevant_gas: bool,
-    is_injector: bool,
+    relevant_oil: Boolean,
+    relevant_water: Boolean,
+    relevant_gas: Boolean,
+    is_injector: Boolean,
 ):
     """
     Solves a well's connection pressures and rates at a reference pressure, with the solver its
@@ -393,7 +394,7 @@ def solve_at(
         scale = wellbores.unit_scales[row]
         if tag == HOMOGENEOUS:
             return solve_homogeneous(
-                model=wellbores.homogeneous[index],
+                model=wellbores.homogeneous[index],  # type: ignore[arg-type]
                 reference_depth=reference_depth,
                 reference_pressure=reference_pressure,
                 workspace=workspace,
@@ -409,7 +410,7 @@ def solve_at(
             )
         if tag == BEGGS_AND_BRILL:
             return solve_beggs_and_brill(
-                model=wellbores.beggs_and_brill[index],
+                model=wellbores.beggs_and_brill[index],  # type: ignore[arg-type]
                 reference_depth=reference_depth,
                 reference_pressure=reference_pressure,
                 workspace=workspace,
@@ -425,7 +426,7 @@ def solve_at(
             )
         if tag == HAGEDORN_BROWN:
             return solve_hagedorn_brown(
-                model=wellbores.hagedorn_brown[index],
+                model=wellbores.hagedorn_brown[index],  # type: ignore[arg-type]
                 reference_depth=reference_depth,
                 reference_pressure=reference_pressure,
                 workspace=workspace,
@@ -441,7 +442,7 @@ def solve_at(
             )
         if tag == GRAY:
             return solve_gray(
-                model=wellbores.gray[index],
+                model=wellbores.gray[index],  # type: ignore[arg-type]
                 reference_depth=reference_depth,
                 reference_pressure=reference_pressure,
                 workspace=workspace,
@@ -456,7 +457,7 @@ def solve_at(
                 tubing_fluid_table=None,
             )
         return solve_woldesemayat_ghajar(
-            model=wellbores.woldesemayat_ghajar[index],
+            model=wellbores.woldesemayat_ghajar[index],  # type: ignore[arg-type]
             reference_depth=reference_depth,
             reference_pressure=reference_pressure,
             workspace=workspace,
@@ -504,14 +505,14 @@ def bisect_at(
     row: Integer,
     workspace: PerforationWorkspace,
     reference_depth: Number,
-    relevant_oil: bool,
-    relevant_water: bool,
-    relevant_gas: bool,
-    is_injector: bool,
+    relevant_oil: Boolean,
+    relevant_water: Boolean,
+    relevant_gas: Boolean,
+    is_injector: Boolean,
     target: Number,
     low: Number,
     high: Number,
-    reservoir_condition: bool,
+    reservoir_condition: Boolean,
 ):
     """
     Finds the reference pressure that gives a well a target rate, with the bisector its
@@ -538,7 +539,7 @@ def bisect_at(
         scale = wellbores.unit_scales[row]
         if tag == HOMOGENEOUS:
             return bisect_homogeneous(
-                model=wellbores.homogeneous[index],
+                model=wellbores.homogeneous[index],  # type: ignore[arg-type]
                 reference_depth=reference_depth,
                 workspace=workspace,
                 relevant_oil=relevant_oil,
@@ -559,7 +560,7 @@ def bisect_at(
             )
         if tag == BEGGS_AND_BRILL:
             return bisect_beggs_and_brill(
-                model=wellbores.beggs_and_brill[index],
+                model=wellbores.beggs_and_brill[index],  # type: ignore[arg-type]
                 reference_depth=reference_depth,
                 workspace=workspace,
                 relevant_oil=relevant_oil,
@@ -580,7 +581,7 @@ def bisect_at(
             )
         if tag == HAGEDORN_BROWN:
             return bisect_hagedorn_brown(
-                model=wellbores.hagedorn_brown[index],
+                model=wellbores.hagedorn_brown[index],  # type: ignore[arg-type]
                 reference_depth=reference_depth,
                 workspace=workspace,
                 relevant_oil=relevant_oil,
@@ -601,7 +602,7 @@ def bisect_at(
             )
         if tag == GRAY:
             return bisect_gray(
-                model=wellbores.gray[index],
+                model=wellbores.gray[index],  # type: ignore[arg-type]
                 reference_depth=reference_depth,
                 workspace=workspace,
                 relevant_oil=relevant_oil,
@@ -621,7 +622,7 @@ def bisect_at(
                 tubing_fluid_table=None,
             )
         return bisect_woldesemayat_ghajar(
-            model=wellbores.woldesemayat_ghajar[index],
+            model=wellbores.woldesemayat_ghajar[index],  # type: ignore[arg-type]
             reference_depth=reference_depth,
             workspace=workspace,
             relevant_oil=relevant_oil,
@@ -731,27 +732,31 @@ def resolve_well(
     start = inputs.perforation_offsets[row]
     stop = inputs.perforation_offsets[row + 1]
     fluid_start = inputs.fluid_starts[row]
-    cell = slice_connection_fluids(fluids, fluid_start, fluid_start + (stop - start))
+    cell = slice_connection_fluids(
+        fluids=fluids,
+        start=fluid_start,
+        stop=fluid_start + (stop - start),
+    )
     static_well_indices = inputs.well_indices[start:stop]
     working_well_indices = outputs.well_index_scratch[start:stop]
     working_well_indices[:] = static_well_indices
     connection_gas_rates = outputs.connection_gas_rates[start:stop]
     connection_gas_rates[:] = 0.0
     workspace = PerforationWorkspace(
-        well_indices=working_well_indices,
-        static_well_indices=static_well_indices,
-        connection_conductivities=inputs.connection_conductivities[start:stop],
+        well_indices=working_well_indices,  # type: ignore[arg-type]
+        static_well_indices=static_well_indices,  # type: ignore[arg-type]
+        connection_conductivities=inputs.connection_conductivities[start:stop],  # type: ignore[arg-type]
         d_factor=inputs.d_factors[row],
         allows_crossflow=inputs.crossflow_flags[row] == 1,
         connection_fluids=cell,
-        representative_depths=inputs.representative_depths[start:stop],
-        representative_measured_depths=inputs.representative_measured_depths[start:stop],
-        reference_measured_depth=inputs.reference_measured_depths[row],
-        inclinations_from_vertical=inputs.inclinations_from_vertical[start:stop],
-        connection_pressures=outputs.connection_pressures[start:stop],
-        connection_oil_rates=outputs.connection_oil_rates[start:stop],
-        connection_water_rates=outputs.connection_water_rates[start:stop],
-        connection_gas_rates=connection_gas_rates,
+        representative_depths=inputs.representative_depths[start:stop],  # type: ignore[arg-type]
+        representative_measured_depths=inputs.representative_measured_depths[start:stop],  # type: ignore[arg-type]
+        reference_measured_depth=inputs.reference_measured_depths[row],  # type: ignore[arg-type]
+        inclinations_from_vertical=inputs.inclinations_from_vertical[start:stop],  # type: ignore[arg-type]
+        connection_pressures=outputs.connection_pressures[start:stop],  # type: ignore[arg-type]
+        connection_oil_rates=outputs.connection_oil_rates[start:stop],  # type: ignore[arg-type]
+        connection_water_rates=outputs.connection_water_rates[start:stop],  # type: ignore[arg-type]
+        connection_gas_rates=connection_gas_rates,  # type: ignore[arg-type]
         dissolved_gas_ratios=cell.solution_gas_oil_ratios,
         vaporized_oil_ratios=cell.vaporized_oil_gas_ratios,
         stb_to_volume_factor=settings.stb_to_volume_factor,
@@ -765,7 +770,7 @@ def resolve_well(
         min_pressure = cell.pressures.min()
         max_pressure = settings.injector_bracket_multiplier * highest_cell_pressure
         relevant_oil, relevant_water, relevant_gas = get_injected_phases(
-            inputs.injected_phases[row]
+            phase=inputs.injected_phases[row],
         )
     else:
         min_pressure = settings.producer_bhp_floor
@@ -781,44 +786,48 @@ def resolve_well(
         target_oil, target_water, target_gas = relevant_oil, relevant_water, relevant_gas
         reservoir_target = False
     else:
-        target_oil, target_water, target_gas = get_quantity_phases(mode)
+        target_oil, target_water, target_gas = get_quantity_phases(
+            quantity=mode,
+        )
         reservoir_target = mode == PRODUCER_RESERVOIR_RATE
 
     if (is_injector and mode == INJECTOR_BHP) or (not is_injector and mode == PRODUCER_BHP):
         bhp = inputs.target_bhps[row]
     else:
         bisected = bisect_at(
-            settings,
-            wellbores,
-            row,
-            workspace,
-            reference_depth,
-            target_oil,
-            target_water,
-            target_gas,
-            is_injector,
-            inputs.target_rates[row],
-            min_pressure,
-            max_pressure,
-            reservoir_target,
+            settings=settings,
+            wellbores=wellbores,
+            row=row,
+            workspace=workspace,
+            reference_depth=reference_depth,
+            relevant_oil=target_oil,
+            relevant_water=target_water,
+            relevant_gas=target_gas,
+            is_injector=is_injector,
+            target=inputs.target_rates[row],
+            low=min_pressure,
+            high=max_pressure,
+            reservoir_condition=reservoir_target,
         )
         if not bisected.result.converged:
             return FAILED
         bhp = bisected.bhp
+
     result = solve_at(
-        settings,
-        wellbores,
-        row,
-        workspace,
-        reference_depth,
-        bhp,
-        relevant_oil,
-        relevant_water,
-        relevant_gas,
-        is_injector,
+        settings=settings,
+        wellbores=wellbores,
+        row=row,
+        workspace=workspace,
+        reference_depth=reference_depth,
+        reference_pressure=bhp,
+        relevant_oil=relevant_oil,
+        relevant_water=relevant_water,
+        relevant_gas=relevant_gas,
+        is_injector=is_injector,
     )
     if not result.converged:
         return FAILED
+
     rates = PhaseValues(oil=result.oil_rate, water=result.water_rate, gas=result.gas_rate)
     surface_rates = PhaseValues(
         oil=result.surface_oil_rate,
@@ -860,55 +869,65 @@ def resolve_well(
         kind = limits.kinds[limit_row]
         if kind == LIMIT_ECONOMIC:
             continue
+
         bound = bhp
         violated = False
         if kind == LIMIT_BHP:
             violated, bound = find_bhp_bound(
-                limits.min_values[limit_row], limits.max_values[limit_row], bhp, is_injector
+                min_value=limits.min_values[limit_row],
+                max_value=limits.max_values[limit_row],
+                bhp=bhp,
+                is_injector=is_injector,
             )
         elif kind == LIMIT_RATE:
             quantity = limits.quantities[limit_row]
-            limit_oil, limit_water, limit_gas = get_quantity_phases(quantity)
+            limit_oil, limit_water, limit_gas = get_quantity_phases(
+                quantity=quantity,
+            )
             reservoir_quantity = quantity == RESERVOIR_QUANTITY
             probe = solve_at(
-                settings,
-                wellbores,
-                row,
-                workspace,
-                reference_depth,
-                bhp,
-                limit_oil,
-                limit_water,
-                limit_gas,
-                is_injector,
+                settings=settings,
+                wellbores=wellbores,
+                row=row,
+                workspace=workspace,
+                reference_depth=reference_depth,
+                reference_pressure=bhp,
+                relevant_oil=limit_oil,
+                relevant_water=limit_water,
+                relevant_gas=limit_gas,
+                is_injector=is_injector,
             )
             if not probe.converged:
                 return FAILED
+
             if reservoir_quantity:
                 current_rate = probe.oil_rate + probe.water_rate + probe.gas_rate
             else:
                 current_rate = (
                     probe.surface_oil_rate + probe.surface_water_rate + probe.surface_gas_rate
                 )
+
             if current_rate > limits.max_values[limit_row]:
                 bisected = bisect_at(
-                    settings,
-                    wellbores,
-                    row,
-                    workspace,
-                    reference_depth,
-                    limit_oil,
-                    limit_water,
-                    limit_gas,
-                    is_injector,
-                    limits.max_values[limit_row],
-                    min_pressure,
-                    max_pressure,
-                    reservoir_quantity,
+                    settings=settings,
+                    wellbores=wellbores,
+                    row=row,
+                    workspace=workspace,
+                    reference_depth=reference_depth,
+                    relevant_oil=limit_oil,
+                    relevant_water=limit_water,
+                    relevant_gas=limit_gas,
+                    is_injector=is_injector,
+                    target=limits.max_values[limit_row],
+                    low=min_pressure,
+                    high=max_pressure,
+                    reservoir_condition=reservoir_quantity,
                 )
                 if not bisected.result.converged:
                     return FAILED
+
                 bound, violated = bisected.bhp, True
+
         if violated:
             if not found:
                 governing_bhp, governing_row, found = bound, limit_row, True
@@ -926,19 +945,20 @@ def resolve_well(
     else:
         bhp = governing_bhp
         result = solve_at(
-            settings,
-            wellbores,
-            row,
-            workspace,
-            reference_depth,
-            bhp,
-            relevant_oil,
-            relevant_water,
-            relevant_gas,
-            is_injector,
+            settings=settings,
+            wellbores=wellbores,
+            row=row,
+            workspace=workspace,
+            reference_depth=reference_depth,
+            reference_pressure=bhp,
+            relevant_oil=relevant_oil,
+            relevant_water=relevant_water,
+            relevant_gas=relevant_gas,
+            is_injector=is_injector,
         )
         if not result.converged:
             return FAILED
+
         rates = PhaseValues(oil=result.oil_rate, water=result.water_rate, gas=result.gas_rate)
         surface_rates = PhaseValues(
             oil=result.surface_oil_rate,
@@ -946,7 +966,13 @@ def resolve_well(
             gas=result.surface_gas_rate,
         )
 
-    economic_row = check_economic_violation(limits, limits_start, limits_end, surface_rates, True)
+    economic_row = check_economic_violation(
+        limits=limits,
+        limits_start=limits_start,
+        limits_end=limits_end,
+        rates=surface_rates,
+        skip_unenforced=True,
+    )
     shut_in = economic_row != UNSET_INT
     if shut_in:
         governing_row = economic_row
@@ -964,7 +990,10 @@ def resolve_well(
             or (workspace.connection_water_rates < 0.0).any()
             or (workspace.connection_gas_rates < 0.0).any()
         ):
-            summed, summed_surface = sum_connection_rates(workspace, True)
+            summed, summed_surface = sum_connection_rates(
+                workspace=workspace,
+                is_injector=True,
+            )
             reported_oil, reported_water, reported_gas = summed.oil, summed.water, summed.gas
             reported_surface_oil = summed_surface.oil
             reported_surface_water = summed_surface.water
@@ -1009,7 +1038,14 @@ def resolve_wells_kernel(
     """
     for index in numba.prange(len(rows)):
         row = rows[index]
-        resolutions[row] = resolve_well(row, inputs, wellbores, fluids, outputs, settings)
+        resolutions[row] = resolve_well(
+            row=row,
+            inputs=inputs,
+            wellbores=wellbores,
+            fluids=fluids,
+            outputs=outputs,
+            settings=settings,
+        )
 
 
 def build_compiled_wellbores(
@@ -1067,13 +1103,16 @@ def stack_connection_fluids(
     """
     return ConnectionFluids(
         *(
-            np.concatenate([field[index] for field in fluids]).astype(dtype, copy=False)
+            typing.cast(
+                "NumberArray[OneDimension]",
+                np.concatenate([field[index] for field in fluids]).astype(dtype, copy=False),
+            )
             for index in range(len(ConnectionFluids._fields))
         )
     )
 
 
-def resolve_wells_in_parallel(
+def resolve_wells(
     *,
     compiled_system: CompiledWellSystem,
     workspace: WellsWorkspace,
@@ -1105,7 +1144,7 @@ def resolve_wells_in_parallel(
     dtype = np.dtype(get_dtype())
     in_effect = compiled_system.schedule_statuses != 0
     if not spec.use_compiled_resolution or workspace.bhps.dtype != dtype:
-        return np.flatnonzero(in_effect)
+        return typing.cast("IntArray[OneDimension]", np.flatnonzero(in_effect))
 
     controls = compiled_system.controls
     perforations = compiled_system.perforations
@@ -1149,7 +1188,7 @@ def resolve_wells_in_parallel(
     wellbore_models: list[WellBoreModel | None] = [None] * n_wells
     fluids_by_well: list[ConnectionFluids] = []
     reports_thp: list[tuple[int, WellTubing, SurfaceSample]] = []
-    for row in candidates:
+    for row in candidates.tolist():
         tubing = resolve_well_tubing(
             tubing_performance=get_tubing_performance(row),
             compiled_system=compiled_system,
@@ -1167,7 +1206,7 @@ def resolve_wells_in_parallel(
         fluids = get_connection_fluids(row)
         if len(fluids.pressures) != counts[row]:
             raise ValidationError(
-                f"`resolve_wells_in_parallel`: `well_row` {row} has {counts[row]} flowing "
+                f"`resolve_wells`: `well_row` {row} has {counts[row]} flowing "
                 f"connections but was given {len(fluids.pressures)} connections in "
                 "`connection_fluids`. These must match 1:1."
             )
@@ -1177,21 +1216,31 @@ def resolve_wells_in_parallel(
             reports_thp.append((row, tubing, surface_sample))
     not_taken = np.setdiff1d(np.flatnonzero(in_effect), taken, assume_unique=True)
     if not taken:
-        return not_taken
+        return typing.cast("IntArray[OneDimension]", not_taken)
 
     fluid_starts = np.full(n_wells, -1, dtype=np.int64)
     fluid_starts[taken] = np.concatenate(([0], np.cumsum(counts[taken])[:-1]))
     inputs = CompiledWellInputs(
         perforation_offsets=offsets,
-        well_indices=np.asarray(perforations.well_indices, dtype=dtype),
-        representative_depths=np.asarray(perforations.representative_depths, dtype=dtype),
-        representative_measured_depths=np.asarray(
-            perforations.representative_measured_depths, dtype=dtype
+        well_indices=typing.cast(
+            "NumberArray[OneDimension]", np.asarray(perforations.well_indices, dtype=dtype)
         ),
-        inclinations_from_vertical=np.asarray(
-            perforations.inclinations_from_vertical, dtype=dtype
+        representative_depths=typing.cast(
+            "NumberArray[OneDimension]",
+            np.asarray(perforations.representative_depths, dtype=dtype),
         ),
-        connection_conductivities=np.asarray(perforations.connection_conductivities, dtype=dtype),
+        representative_measured_depths=typing.cast(
+            "NumberArray[OneDimension]",
+            np.asarray(perforations.representative_measured_depths, dtype=dtype),
+        ),
+        inclinations_from_vertical=typing.cast(
+            "NumberArray[OneDimension]",
+            np.asarray(perforations.inclinations_from_vertical, dtype=dtype),
+        ),
+        connection_conductivities=typing.cast(
+            "NumberArray[OneDimension]",
+            np.asarray(perforations.connection_conductivities, dtype=dtype),
+        ),
         reference_depths=compiled_system.reference_depths,
         reference_measured_depths=compiled_system.reference_measured_depths,
         d_factors=compiled_system.d_factors,
@@ -1237,17 +1286,19 @@ def resolve_wells_in_parallel(
         tolerance=spec.rate_convergence_tolerance,
         max_bisections=spec.max_bisection_iterations,
         producer_bhp_floor=spec.producer_bhp_floor,
-        injector_bracket_multiplier=dtype.type(spec.injector_bhp_bracket_multiplier),
+        injector_bracket_multiplier=typing.cast(
+            Number, np.asarray(spec.injector_bhp_bracket_multiplier, dtype=dtype)[()]
+        ),
         stb_to_volume_factor=get_stb_to_volume_factor(compiled_system.unit_system),
     )
     resolve_wells_kernel(
-        np.asarray(taken, dtype=np.int64),
-        resolutions,
-        inputs,
-        build_compiled_wellbores(wellbore_models=wellbore_models),
-        stack_connection_fluids(fluids=fluids_by_well, dtype=dtype),
-        outputs,
-        settings,
+        rows=typing.cast("IntArray[OneDimension]", np.asarray(taken, dtype=np.int64)),
+        resolutions=resolutions,
+        inputs=inputs,
+        wellbores=build_compiled_wellbores(wellbore_models=wellbore_models),
+        fluids=stack_connection_fluids(fluids=fluids_by_well, dtype=dtype),
+        outputs=outputs,
+        settings=settings,
     )
 
     unresolved = [row for row in taken if resolutions[row] != RESOLVED]
@@ -1289,8 +1340,12 @@ def resolve_wells_in_parallel(
             ),
             surface_sample=surface_sample,
             is_injector=bool(is_injector[row]),
-            connection_rates=ConnectionRates(oil=oil, water=water, gas=gas),
+            connection_rates=ConnectionRates(
+                oil=typing.cast("NumberArray[OneDimension]", oil),
+                water=typing.cast("NumberArray[OneDimension]", water),
+                gas=typing.cast("NumberArray[OneDimension]", gas),
+            ),
             well_row=row,
             workspace=workspace,
         )
-    return np.union1d(not_taken, unresolved)
+    return typing.cast("IntArray[OneDimension]", np.union1d(not_taken, unresolved))
