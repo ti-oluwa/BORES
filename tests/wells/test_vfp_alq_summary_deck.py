@@ -6,15 +6,14 @@ import pytest
 from bores.constants import c
 from bores.deck import DeckFile
 from bores.errors import ValidationError
+from bores.reservoir import summary as reservoir_summary
+from bores.reservoir.deck import get_fluid_in_place_regions
+from bores.simulation.case import load_summary_items
 from bores.types import UnitSystem
 from bores.units import get_conversion_factors
 from bores.wells import summary as well_summary
 from bores.wells.base import WellType
-from bores.wells.deck import (
-    get_fluid_in_place_regions,
-    load_producer_control_from_record,
-    load_summary_items,
-)
+from bores.wells.deck import load_producer_control_from_record
 from bores.wells.hydraulics.base import compile_connection_fluids
 from bores.wells.hydraulics.vfp import (
     VFPData,
@@ -386,7 +385,7 @@ def region_workspace():
 
 @pytest.fixture
 def with_workspace(monkeypatch):
-    monkeypatch.setattr(well_summary, "get_workspace", lambda *, context: region_workspace())
+    monkeypatch.setattr(reservoir_summary, "get_workspace", lambda *, context: region_workspace())
 
 
 def test_region_in_place_matches_hand_calculation(with_workspace):
@@ -398,20 +397,20 @@ def test_region_in_place_matches_hand_calculation(with_workspace):
 
     # Oil in the oil phase plus oil vaporized in the free gas, in cubic feet. Rv is in STB per scf.
     vaporized = np.array([1e-4, 2e-4, 0.0]) * free_gas / to_stb
-    roip = well_summary.RegionOilInPlace(region=1)(model, None)
+    roip = reservoir_summary.RegionOilInPlace(region=1)(model, None)
     assert roip == pytest.approx(oil_ft3[:2].sum() + vaporized[:2].sum())
-    assert well_summary.RegionOilInPlace(region=2)(model, None) == pytest.approx(
+    assert reservoir_summary.RegionOilInPlace(region=2)(model, None) == pytest.approx(
         oil_ft3[2:].sum() + 5e-5 * (0.4 * 4000 / 0.006) / to_stb
     )
 
-    assert well_summary.RegionWaterInPlace(region=2)(model, None) == pytest.approx(
+    assert reservoir_summary.RegionWaterInPlace(region=2)(model, None) == pytest.approx(
         water_ft3[2:].sum()
     )
 
     # Free gas, gas in the oil (Rs, scf/STB) and gas in the water (Rsw, scf/STB), in scf.
     in_oil = np.array([500.0, 400.0]) * oil_ft3[:2] * to_stb
     in_water = np.array([20.0, 20.0]) * water_ft3[:2] * to_stb
-    assert well_summary.RegionGasInPlace(region=1)(model, None) == pytest.approx(
+    assert reservoir_summary.RegionGasInPlace(region=1)(model, None) == pytest.approx(
         (free_gas[:2] + in_oil + in_water).sum()
     )
 
@@ -420,10 +419,12 @@ def test_a_model_without_vaporized_oil_or_gas_in_water_reads_those_as_zero(monke
     workspace = region_workspace()
     workspace.physics.pvt.vaporized_oil_gas_ratio = np.full(4, np.nan)
     workspace.reservoir.gas_solubility_in_water = np.full(4, np.nan)
-    monkeypatch.setattr(well_summary, "get_workspace", lambda *, context: workspace)
+    monkeypatch.setattr(reservoir_summary, "get_workspace", lambda *, context: workspace)
     model = region_model(None)
     oil_ft3 = np.array([0.5 * 1000 / 1.2, 0.6 * 2000 / 1.25, 0.4 * 3000 / 1.3, 0.3 * 4000 / 1.35])
-    assert well_summary.RegionOilInPlace(region=1)(model, None) == pytest.approx(oil_ft3.sum())
+    assert reservoir_summary.RegionOilInPlace(region=1)(model, None) == pytest.approx(
+        oil_ft3.sum()
+    )
     free = np.array([
         0.2 * 1000 / 0.005,
         0.1 * 2000 / 0.005,
@@ -431,7 +432,7 @@ def test_a_model_without_vaporized_oil_or_gas_in_water_reads_those_as_zero(monke
         0.4 * 4000 / 0.006,
     ])
     dissolved = np.array([500.0, 400.0, 300.0, 200.0]) * oil_ft3 * c.CUBIC_FEET_TO_STB
-    assert well_summary.RegionGasInPlace(region=1)(model, None) == pytest.approx(
+    assert reservoir_summary.RegionGasInPlace(region=1)(model, None) == pytest.approx(
         (free + dissolved).sum()
     )
 
@@ -440,20 +441,20 @@ def test_regions_partition_the_field_and_other_unit_systems_need_no_barrel_conve
     with_workspace,
 ):
     model = region_model([1, 2, 1, 2])
-    total = sum(well_summary.RegionOilInPlace(region=r)(model, None) for r in (1, 2))
+    total = sum(reservoir_summary.RegionOilInPlace(region=r)(model, None) for r in (1, 2))
     assert total == pytest.approx(
-        well_summary.RegionOilInPlace(region=1)(region_model(None), None)
+        reservoir_summary.RegionOilInPlace(region=1)(region_model(None), None)
     )
     metric_model = region_model(None, UnitSystem.METRIC)
-    metric_water = well_summary.RegionWaterInPlace(region=1)(metric_model, None)
-    field_water = well_summary.RegionWaterInPlace(region=1)(region_model(None), None)
+    metric_water = reservoir_summary.RegionWaterInPlace(region=1)(metric_model, None)
+    field_water = reservoir_summary.RegionWaterInPlace(region=1)(region_model(None), None)
     assert metric_water == pytest.approx(field_water)
 
 
 def test_region_without_cells_and_keys(with_workspace):
     with pytest.raises(Exception, match="has no cells"):
-        well_summary.RegionOilInPlace(region=7)(region_model([1, 1, 2, 2]), None)
-    assert well_summary.RegionGasInPlace(region=3).key == "RGIP:3"
+        reservoir_summary.RegionOilInPlace(region=7)(region_model([1, 1, 2, 2]), None)
+    assert reservoir_summary.RegionGasInPlace(region=3).key == "RGIP:3"
 
 
 def test_deck_loads_region_vectors_for_listed_and_all_regions(tmp_path):
@@ -472,15 +473,15 @@ def test_deck_loads_region_vectors_for_listed_and_all_regions(tmp_path):
     assert {"RegionOilInPlace:2", "RegionGasInPlace:1"} <= names
 
 
-def test_load_schedule_can_skip_summary_items(tmp_path):
-    from bores.wells.deck import load_schedule
+def test_well_schedule_holds_no_summary_items(tmp_path):
+    from bores.wells.deck import load_well_schedule
 
     path = tmp_path / "summary.DATA"
     path.write_text("RUNSPEC\nFIELD\nSUMMARY\nFOPR\nSCHEDULE\nTSTEP\n 10 /\n")
     deck = DeckFile.from_path(path) if hasattr(DeckFile, "from_path") else DeckFile(path)
 
-    assert [item.name for item in load_schedule(deck)] == ["summary@10.0"]
-    assert load_schedule(deck, load_summary=False).items == ()
+    assert load_well_schedule(deck).items == ()
+    assert [item.name for item in load_summary_items(deck)] == ["summary@10.0"]
 
 
 def build_compiled_controls():
@@ -584,7 +585,7 @@ def test_set_well_lift_rejects_invalid_requests(kwargs):
 
 
 def test_schedule_turns_wlift_and_reissued_controls_into_lift_actions(tmp_path):
-    from bores.wells.deck import load_schedule
+    from bores.wells.deck import load_well_schedule
     from bores.wells.schedule import SetWellLift
 
     deck = deck_from(
@@ -593,7 +594,7 @@ def test_schedule_turns_wlift_and_reissued_controls_into_lift_actions(tmp_path):
         "WLIFT\n 'P1' 1* 1* 2 400 0.8 /\n/\nTSTEP\n 30 /\n",
     )
     actions = {
-        item.name.split("@")[0]: item.action for item in load_schedule(deck, compiled_at=-1.0)
+        item.name.split("@")[0]: item.action for item in load_well_schedule(deck, compiled_at=-1.0)
     }
     assert isinstance(actions["wconprod-lift:P1"], SetWellLift)
     assert actions["wconprod-lift:P1"].vfp_table == 3
@@ -707,11 +708,13 @@ WLIFT_SCHEDULE = (
 
 
 def wlift_item(tmp_path, text=WLIFT_SCHEDULE):
-    from bores.wells.deck import load_schedule
+    from bores.wells.deck import load_well_schedule
 
     deck = deck_from(tmp_path, text)
     return next(
-        item for item in load_schedule(deck, compiled_at=-1.0) if item.name.startswith("wlift:")
+        item
+        for item in load_well_schedule(deck, compiled_at=-1.0)
+        if item.name.startswith("wlift:")
     )
 
 
@@ -756,14 +759,14 @@ def test_wlift_combines_its_triggers_and_applies_a_new_thp_limit(tmp_path):
 def test_wlift_with_no_trigger_applies_at_its_own_time_and_shifts_stay_unsupported(tmp_path):
     from bores.errors import NotSupportedError
     from bores.schedule.events import TimeEvent
-    from bores.wells.deck import load_schedule
+    from bores.wells.deck import load_well_schedule
 
     assert isinstance(
         wlift_item(tmp_path, "WLIFT\n 'P1' 1* 1* 2 400 /\n/\nTSTEP\n 30 /\n").event, TimeEvent
     )
     deck = deck_from(tmp_path, "WLIFT\n 'P1' 100 OIL 2 400 1* 1* 1* 1* 50 /\n/\nTSTEP\n 30 /\n")
     with pytest.raises(NotSupportedError, match="alq_shift"):
-        load_schedule(deck, compiled_at=-1.0)
+        load_well_schedule(deck, compiled_at=-1.0)
 
 
 def build_well_system(**kwargs):
@@ -2152,8 +2155,8 @@ def test_per_connection_inputs_of_different_lengths_are_rejected():
 def test_region_in_place_uses_the_pore_volume_at_the_current_pressure(monkeypatch):
     workspace = region_workspace()
     workspace.reservoir.pressure = np.full(4, 4000.0)
-    monkeypatch.setattr(well_summary, "get_workspace", lambda *, context: workspace)
-    reference = well_summary.RegionWaterInPlace(region=1)(region_model(None), None)
+    monkeypatch.setattr(reservoir_summary, "get_workspace", lambda *, context: workspace)
+    reference = reservoir_summary.RegionWaterInPlace(region=1)(region_model(None), None)
     compressed = 0.3 * 1000 + 0.3 * 2000 + 0.3 * 3000 + 0.3 * 4000
     assert reference == pytest.approx(compressed * 1.01)
 

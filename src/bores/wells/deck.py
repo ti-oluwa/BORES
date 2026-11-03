@@ -16,10 +16,10 @@ from bores.grids.base import Grid
 from bores.schedule.actions import RunSequence
 from bores.schedule.base import Action, Event, Schedule, ScheduleItem
 from bores.schedule.events import AllOf, AnyOf, ComparisonOperator, TimeEvent, TimeWindowEvent
-from bores.schedule.summary import RecordSummary, Summary
+from bores.schedule.summary import Summary
 from bores.timestep.deck import get_tuning_at_start
 from bores.timestep.targets import TimeTargets
-from bores.types import Boolean, FluidPhase, Number, UnitSystem
+from bores.types import FluidPhase, Number, UnitSystem
 from bores.units import get_conversion_factors
 from bores.wells import summary as ws
 from bores.wells.base import CompletionStatus, Perforation, Well, Wells, WellStatus, WellType
@@ -94,7 +94,7 @@ __all__ = [
     "deck_defines_wells",
     "find_well_keyword_problem",
     "from_deck_gas_rate",
-    "get_fluid_in_place_regions",
+    "get_item_start_time",
     "is_whole_well_record",
     "load_controls_from_records",
     "load_economic_limits_from_record",
@@ -105,7 +105,7 @@ __all__ = [
     "load_groups_from_records",
     "load_injector_control_from_record",
     "load_producer_control_from_record",
-    "load_summary_items",
+    "load_summary_quantities",
     "load_well_control_spec",
     "load_well_controls",
     "load_well_from_records",
@@ -1677,80 +1677,17 @@ WELL_SUMMARY_VECTORS: dict[str, type[ws.WellVector]] = {
 }
 """Deck mnemonic to the `bores.wells.summary` class it requests. One instance per named well."""
 
-REGION_SUMMARY_VECTORS: dict[str, type[ws.RegionInPlace]] = {
-    "ROIP": ws.RegionOilInPlace,
-    "RGIP": ws.RegionGasInPlace,
-    "RWIP": ws.RegionWaterInPlace,
-}
-"""Deck mnemonic to the `bores.wells.summary` class it requests. One instance per `FIPNUM` region."""
 
-BLOCK_SUMMARY_VECTORS: dict[str, type[ws.BlockVector]] = {
-    "BPR": ws.BlockPressure,
-    "BPRESSUR": ws.BlockPressure,
-    "BGSAT": ws.BlockGasSaturation,
-    "BSGAS": ws.BlockGasSaturation,
-    "BOSAT": ws.BlockOilSaturation,
-    "BSOIL": ws.BlockOilSaturation,
-    "BWSAT": ws.BlockWaterSaturation,
-    "BSWAT": ws.BlockWaterSaturation,
-    "BRS": ws.BlockGasOilRatio,
-    "BRV": ws.BlockVaporizedOilGasRatio,
-    "BOKR": ws.BlockOilRelativePermeability,
-    "BWKR": ws.BlockWaterRelativePermeability,
-    "BGKR": ws.BlockGasRelativePermeability,
-}
-"""
-Deck mnemonic to the `bores.wells.summary` class it requests. One instance per listed cell.
-Mnemonics that Eclipse treats as the same vector (`BPR` and `BPRESSUR`) map to the same class.
-"""
-
-
-def get_fluid_in_place_regions(deck_file: DeckFile) -> list[int]:
+def load_summary_quantities(deck_file: DeckFile) -> list[Summary["CompiledBlackOilModel"]]:
     """
-    Every fluid-in-place region number a deck defines.
+    Load every well and field summary vector the deck's `SUMMARY` section requests.
 
-    :param deck_file: The deck to read `FIPNUM` from.
-    :returns: The distinct `FIPNUM` values in ascending order, or `[1]` if the deck has none.
-    """
-    fip_numbers = deck_file.get("FIPNUM")
-    if fip_numbers is None:
-        return [1]
-    return sorted(int(region) for region in np.unique(np.asarray(fip_numbers)))
-
-
-def load_summary_items(
-    deck_file: DeckFile, *, compiled_at: float = 0.0, unit_system: UnitSystem | None = None
-) -> list[ScheduleItem["CompiledBlackOilModel"]]:
-    """
-    Builds one `ScheduleItem` per report time from every summary-vector
-    keyword in a deck's `SUMMARY` section, for report times strictly
-    after `compiled_at`.
-
-    Every requested vector is recorded together at every report time (a
-    `TSTEP`/`DATES` boundary), matching Eclipse's own default summary
-    output behavior. A `SUMMARY` declaration has no cadence of its own,
-    unlike a `SCHEDULE`-section keyword's `schedule_time`. A well
-    keyword with no object list (`WOPR` alone, say) requests every well
-    ever mentioned via `WELSPECS`, matching Eclipse's own default.
-
-    `ROIP`/`RGIP`/`RWIP` (region in-place volumes) request one vector per listed fluid-in-place
-    region. With no region list they request every `FIPNUM` region in the deck (region 1 if the
-    deck has no `FIPNUM`), matching Eclipse's own default.
-
-    `BPR`, `BGSAT`, `BOSAT`, `BWSAT`, `BRS`, `BRV`, `BOKR`, `BWKR`, `BGKR` (and `BPRESSUR`, `BSGAS`,
-    `BSOIL`, `BSWAT`, the names Eclipse gives the same vectors) request one vector per listed cell.
-    A cell listed more than once for the same vector is recorded once.
+    A field vector (`FOPR`, `FWCT`, ...) takes no object list. A well vector (`WOPR`, `WBHP`, ...)
+    requests one vector per listed well, or one per well the deck's `WELSPECS` mentions when it
+    lists none.
 
     :param deck_file: The deck to read the `SUMMARY` section from.
-    :param compiled_at: The point on the schedule clock the model this
-        schedule will run against was compiled at, in the deck's time
-        unit. Only report times strictly after this become items.
-    :param unit_system: The unit system the items' times are expressed in. Defaults to the
-        deck's own.
-    :returns: One `ScheduleItem` per qualifying report time, each
-        wrapping the same `RecordSummary` action, carrying every
-        requested vector.
-    :raises DeckParseError: If a block vector lists a cell outside the deck's grid.
+    :returns: The requested vectors, field vectors first. Empty if the deck requests none.
     """
     well_names = [record["well"] for record in deck_file.get_shared("WELSPECS") or []]
 
@@ -1764,53 +1701,7 @@ def load_summary_items(
         if requested is None:
             continue
         quantities.extend(well_summary_cls(well_name=name) for name in (requested or well_names))
-
-    for mnemonic, region_summary_cls in REGION_SUMMARY_VECTORS.items():
-        requested = deck_file.get(mnemonic)
-        if requested is None:
-            continue
-        regions = [int(region) for region in requested] or get_fluid_in_place_regions(deck_file)
-        quantities.extend(region_summary_cls(region=region) for region in regions)
-
-    dimensions = deck_file.dimensions
-    block_keys: set[str] = set()
-    for mnemonic, block_summary_cls in BLOCK_SUMMARY_VECTORS.items():
-        requested = deck_file.get(mnemonic)
-        if requested is None:
-            continue
-        if dimensions is None:
-            raise DeckParseError(
-                f"{mnemonic}: cannot place block vectors without grid dimensions "
-                "(`SPECGRID`/`DIMENS` not found)."
-            )
-        for cell in requested:
-            i, j, k = cell["i"], cell["j"], cell["k"]
-            if not (
-                1 <= i <= dimensions.nx and 1 <= j <= dimensions.ny and 1 <= k <= dimensions.nz
-            ):
-                raise DeckParseError(
-                    f"{mnemonic}: cell ({i}, {j}, {k}) is outside the {dimensions.nx} x "
-                    f"{dimensions.ny} x {dimensions.nz} grid."
-                )
-            quantity = block_summary_cls(i=i - 1, j=j - 1, k=k - 1)
-            # A cell listed twice, or under two names for the same vector, is recorded once.
-            if quantity.key in block_keys:
-                continue
-            block_keys.add(quantity.key)
-            quantities.append(quantity)
-
-    if not quantities:
-        return []
-
-    action = RecordSummary(quantities=quantities)
-    time_factor = get_conversion_factors(
-        deck_file.unit_system, unit_system or deck_file.unit_system
-    )["time"]
-    return [
-        ScheduleItem(event=TimeEvent(at=time * time_factor), action=action, name=f"summary@{time}")
-        for time in deck_file.report_times
-        if time > compiled_at
-    ]
+    return quantities
 
 
 def load_report_times(deck_file: DeckFile) -> TimeTargets:
@@ -1855,7 +1746,6 @@ def load_well_schedule(
     deck_file: DeckFile,
     *,
     compiled_at: float = 0.0,
-    load_summary: Boolean = True,
     unit_system: UnitSystem | None = None,
 ) -> Schedule["CompiledBlackOilModel"]:
     """
@@ -1905,24 +1795,21 @@ def load_well_schedule(
 
     Items that fall at the same time run in a fixed order, by the keyword they came from:
     `WELSPECS`, `WPIMULT`, `WLIFT`, `WCONPROD`, `WCONINJE`, `WELTARG`, `WECON`, `GECON`,
-    `COMPDAT`, `WELOPEN`, then summary recording. Records of the same keyword at the same
+    `COMPDAT`, `WELOPEN`. Records of the same keyword at the same
     time run in deck order. A `WELTARG` therefore fine-tunes the control a `WCONPROD` or
     `WCONINJE` at the same time sets, which is also how `load_controls_from_records` replays
     them. A `WELOPEN` comes after the `WCONPROD`/`WCONINJE` status and after `COMPDAT`, so it
     has the last word on whether a well is open, and can target connections that a `COMPDAT`
-    at the same time brings into effect. Summary vectors are recorded last, after every change
-    at that time. The order is not the order different keywords appear in the deck.
+    at the same time brings into effect. The order is not the order different keywords appear in
+    the deck.
 
-    When `load_summary` is `True`, every requested `SUMMARY`-section vector
-    (see `load_summary_items`) is added too, one item per report time
-    strictly after `compiled_at`.
+    The schedule holds well changes only. Summary vectors are loaded separately, see
+    `load_summary_quantities`.
 
     :param deck_file: The deck to read schedule keywords from.
     :param compiled_at: The point on the schedule clock the model this
         schedule will run against was compiled at, in the deck's time
         unit. Only events strictly after this become actions.
-    :param load_summary: Whether to add scheduled summary-vector recording
-        items from the deck's `SUMMARY` section.
     :param unit_system: The unit system the schedule will run against. Every event time and every
         rate, pressure and ratio the actions carry is expressed in it. Defaults to the deck's own.
     :returns: A `Schedule[CompiledBlackOilModel]`, one rule per
@@ -2317,10 +2204,6 @@ def load_well_schedule(
             )
         )
 
-    if load_summary:
-        items.extend(
-            load_summary_items(deck_file, compiled_at=compiled_at, unit_system=target_unit_system)
-        )
     items.sort(key=get_item_start_time)
     return Schedule(items=tuple(items))
 

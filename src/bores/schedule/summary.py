@@ -38,12 +38,16 @@ if typing.TYPE_CHECKING:
     import pandas as pd  # type: ignore[import]
     import polars as pl  # type: ignore[import]
 
+    from bores.simulation.workspace import SimulationWorkspace
+
 __all__ = [
     "RecordSummary",
     "Summary",
     "SummaryRecord",
     "SummaryReport",
     "as_dataframe",
+    "build_summary_items",
+    "get_workspace",
     "record_at",
     "record_every",
 ]
@@ -462,6 +466,54 @@ class RecordSummary(Action[ModelT]):
                 date=date,
             )
         return model
+
+
+def get_workspace(*, context: ScheduleContext) -> "SimulationWorkspace":
+    """
+    Read the run's `SimulationWorkspace` from `context.extra["workspace"]`.
+
+    :param context: The current moment's context.
+    :returns: The run's `SimulationWorkspace`.
+    :raises SummaryError: If the key is missing or isn't a `SimulationWorkspace`.
+    """
+    from bores.simulation.workspace import SimulationWorkspace
+
+    workspace = context.extra.get("workspace")
+    if not isinstance(workspace, SimulationWorkspace):
+        raise SummaryError(
+            "Summary vectors that read the run's state need key 'workspace' in "
+            f"`context.extra`, with a `SimulationWorkspace` value, but got {workspace!r}."
+        )
+    return workspace
+
+
+def build_summary_items(
+    quantities: typing.Sequence[Summary[ModelT]],
+    *,
+    report_times: typing.Sequence[Number],
+    compiled_at: Number = 0.0,
+    time_factor: Number = 1.0,
+) -> list[ScheduleItem[ModelT]]:
+    """
+    Build one schedule item per report time that records the same set of summary vectors.
+
+    :param quantities: Every vector to record at each report time. No items are built when it
+        is empty.
+    :param report_times: The times to record at, in the unit the report times are given in.
+    :param compiled_at: Only report times strictly after this point become items, in the same
+        unit as `report_times`.
+    :param time_factor: Multiplies each report time to express it in the schedule's time unit.
+    :returns: One `ScheduleItem` per qualifying report time, in report time order, each wrapping
+        the same `RecordSummary` action.
+    """
+    if not quantities:
+        return []
+    action = RecordSummary(quantities=quantities)
+    return [
+        ScheduleItem(event=TimeEvent(at=time * time_factor), action=action, name=f"summary@{time}")
+        for time in report_times
+        if time > compiled_at
+    ]
 
 
 def record_every(

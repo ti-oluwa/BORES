@@ -78,6 +78,7 @@ __all__ = [
     "BGSAT",
     "BOKR",
     "BOSAT",
+    "BPORV",
     "BPR",
     "BPRESSUR",
     "BRS",
@@ -87,17 +88,27 @@ __all__ = [
     "BSWAT",
     "BWKR",
     "BWSAT",
+    "FGIP",
+    "FGIPG",
+    "FGIPL",
     "FGIR",
     "FGIT",
     "FGOR",
     "FGPR",
     "FGPT",
     "FLPR",
+    "FOIP",
+    "FOIPG",
+    "FOIPL",
     "FOIR",
     "FOIT",
     "FOPR",
     "FOPT",
+    "FPORV",
+    "FPR",
+    "FPRH",
     "FWCT",
+    "FWIP",
     "FWIR",
     "FWIT",
     "FWPR",
@@ -105,13 +116,21 @@ __all__ = [
     "MLINEARS",
     "NEWTON",
     "RGIP",
+    "RGIPG",
+    "RGIPL",
     "ROIP",
+    "ROIPG",
+    "ROIPL",
+    "RPORV",
+    "RPR",
+    "RPRH",
     "RPTPROPS",
     "RPTRST",
     "RPTSCHED",
     "RPTSOL",
     "RUNSUM",
     "RWIP",
+    "TIMESTEP",
     "WBHP",
     "WGIR",
     "WGIT",
@@ -291,6 +310,58 @@ RWIP = SummaryVectorKeyword("RWIP")
 """`RWIP [region1 ...] /` - reservoir water in place, per region (see `ROIP`)."""
 
 
+FPR = SummaryVectorKeyword("FPR")
+"""`FPR` - field average pressure, weighted by pore volume. Takes no object list (whole field)."""
+
+FPRH = SummaryVectorKeyword("FPRH")
+"""`FPRH` - field average pressure, weighted by hydrocarbon pore volume. Takes no object list (whole field)."""
+
+FPORV = SummaryVectorKeyword("FPORV")
+"""`FPORV` - field pore volume at the current pressure. Takes no object list (whole field)."""
+
+FOIP = SummaryVectorKeyword("FOIP")
+"""`FOIP` - stock-tank oil in place in the field. Takes no object list (whole field)."""
+
+FOIPL = SummaryVectorKeyword("FOIPL")
+"""`FOIPL` - stock-tank oil in place in the field that sits in the oil phase. Takes no object list (whole field)."""
+
+FOIPG = SummaryVectorKeyword("FOIPG")
+"""`FOIPG` - stock-tank oil in place in the field that is vaporized in free gas. Takes no object list (whole field)."""
+
+FGIP = SummaryVectorKeyword("FGIP")
+"""`FGIP` - gas in place in the field. Takes no object list (whole field)."""
+
+FGIPL = SummaryVectorKeyword("FGIPL")
+"""`FGIPL` - gas in place in the field that is dissolved in the oil and the water. Takes no object list (whole field)."""
+
+FGIPG = SummaryVectorKeyword("FGIPG")
+"""`FGIPG` - free gas in place in the field. Takes no object list (whole field)."""
+
+FWIP = SummaryVectorKeyword("FWIP")
+"""`FWIP` - stock-tank water in place in the field. Takes no object list (whole field)."""
+
+RPR = SummaryVectorKeyword("RPR")
+"""`RPR [region1 region2 ...] /` - average pressure of each fluid-in-place region, weighted by pore volume (see `ROIP`)."""
+
+RPRH = SummaryVectorKeyword("RPRH")
+"""`RPRH [region1 region2 ...] /` - average pressure of each fluid-in-place region, weighted by hydrocarbon pore volume (see `ROIP`)."""
+
+RPORV = SummaryVectorKeyword("RPORV")
+"""`RPORV [region1 region2 ...] /` - pore volume of each fluid-in-place region at the current pressure (see `ROIP`)."""
+
+ROIPL = SummaryVectorKeyword("ROIPL")
+"""`ROIPL [region1 region2 ...] /` - stock-tank oil in place in each region that sits in the oil phase (see `ROIP`)."""
+
+ROIPG = SummaryVectorKeyword("ROIPG")
+"""`ROIPG [region1 region2 ...] /` - stock-tank oil in place in each region that is vaporized in free gas (see `ROIP`)."""
+
+RGIPL = SummaryVectorKeyword("RGIPL")
+"""`RGIPL [region1 region2 ...] /` - gas in place in each region that is dissolved in the oil and the water (see `ROIP`)."""
+
+RGIPG = SummaryVectorKeyword("RGIPG")
+"""`RGIPG [region1 region2 ...] /` - free gas in place in each region (see `ROIP`)."""
+
+
 def block_vector(name: str) -> RepeatedRecordKeyword[int]:
     """
     Build a `SUMMARY`-section block vector selector.
@@ -341,6 +412,8 @@ BOSAT = block_vector("BOSAT")
 Takes one `I J K /` line per cell, closed by a final `/`. `parse` returns a list of
 `{"i", "j", "k"}` dicts.
 """
+
+BPORV = block_vector("BPORV")
 
 BPR = block_vector("BPR")
 """
@@ -529,6 +602,9 @@ appears in `SOLUTION`, so its `schedule_time` is always `0.0`.
 
 NEWTON = SummaryVectorKeyword("NEWTON")
 """`NEWTON` - number of Newton iterations in each time step. Takes no object list (whole run)."""
+
+TIMESTEP = SummaryVectorKeyword("TIMESTEP")
+"""`TIMESTEP` - length of each time step. Takes no object list (whole run)."""
 
 MLINEARS = SummaryVectorKeyword("MLINEARS")
 """

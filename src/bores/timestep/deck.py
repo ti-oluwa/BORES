@@ -10,6 +10,8 @@ from bores.deck.keywords.schedule import TUNING
 from bores.errors import ValidationError
 from bores.schedule.base import ScheduleItem
 from bores.schedule.events import TimeEvent
+from bores.schedule.summary import Summary
+from bores.timestep import summary as ts
 from bores.timestep.control import Timer
 from bores.timestep.schedule import RetuneTimer
 from bores.types import Number
@@ -17,6 +19,7 @@ from bores.types import Number
 __all__ = [
     "TUNING_DEFAULTS",
     "get_tuning_at_start",
+    "load_summary_quantities",
     "load_timer",
     "load_timer_schedule",
     "tuning_to_timer_settings",
@@ -30,6 +33,22 @@ What each `TUNING` item is when the deck leaves it out, keyed by item name. A de
 its default is taken as "not customised", because `TUNING` fills in a default for every item and a
 defaulted item cannot be told from one written out.
 """
+
+
+def load_summary_quantities(deck_file: DeckFile) -> list[Summary]:
+    """
+    Load every time stepping summary vector the deck's `SUMMARY` section requests.
+
+    :param deck_file: The deck to read the `SUMMARY` section from.
+    :returns: A `TimeStepSize` if the deck asks for `TIMESTEP`, then a `NewtonIterations` if it
+        asks for `NEWTON`. Empty if it asks for neither.
+    """
+    quantities: list[Summary] = []
+    if deck_file.has("TIMESTEP"):
+        quantities.append(ts.TimeStepSize())
+    if deck_file.has("NEWTON"):
+        quantities.append(ts.NewtonIterations())
+    return quantities
 
 
 def get_tuning_occurrences(deck_file: DeckFile) -> list[dict[str, typing.Any]]:

@@ -10,10 +10,10 @@ from bores.deck import DeckFile
 from bores.deck import keywords as k
 from bores.deck.core import DeckParseError
 from bores.errors import SummaryError
-from bores.simulation.case import SimulationCase
+from bores.reservoir import summary as reservoir_summary
+from bores.reservoir.deck import BLOCK_SUMMARY_VECTORS
+from bores.simulation.case import SimulationCase, load_summary_items
 from bores.types import UnitSystem
-from bores.wells import summary as well_summary
-from bores.wells.deck import BLOCK_SUMMARY_VECTORS, load_summary_items
 from bores.wells.hydraulics.homogeneous import homogeneous_wellbore
 
 SPE1_DECK = pathlib.Path(__file__).parents[2] / "data" / "SPE1CASE1.DATA"
@@ -169,17 +169,19 @@ def test_spe1_block_vectors_report_the_initial_state(spe1):
     )
 
     cell = {"i": 9, "j": 9, "k": 2}
-    assert well_summary.BlockWaterSaturation(**cell)(model, context) == pytest.approx(0.12)
-    assert well_summary.BlockOilSaturation(**cell)(model, context) == pytest.approx(0.88)
-    assert well_summary.BlockGasOilRatio(**cell)(model, context) == pytest.approx(1270.0)
-    assert well_summary.BlockVaporizedOilGasRatio(**cell)(model, context) == 0.0
-    assert well_summary.BlockOilRelativePermeability(**cell)(model, context) == pytest.approx(1.0)
-    assert well_summary.BlockGasRelativePermeability(**cell)(model, context) == 0.0
-    assert well_summary.BlockWaterRelativePermeability(**cell)(model, context) == 0.0
-    assert well_summary.BPRESSUR is well_summary.BPR
+    assert reservoir_summary.BlockWaterSaturation(**cell)(model, context) == pytest.approx(0.12)
+    assert reservoir_summary.BlockOilSaturation(**cell)(model, context) == pytest.approx(0.88)
+    assert reservoir_summary.BlockGasOilRatio(**cell)(model, context) == pytest.approx(1270.0)
+    assert reservoir_summary.BlockVaporizedOilGasRatio(**cell)(model, context) == 0.0
+    assert reservoir_summary.BlockOilRelativePermeability(**cell)(model, context) == pytest.approx(
+        1.0
+    )
+    assert reservoir_summary.BlockGasRelativePermeability(**cell)(model, context) == 0.0
+    assert reservoir_summary.BlockWaterRelativePermeability(**cell)(model, context) == 0.0
+    assert reservoir_summary.BPRESSUR is reservoir_summary.BPR
 
 
 def test_block_vector_outside_the_grid_raises(spe1):
     _, model, context = spe1
     with pytest.raises(SummaryError, match="outside"):
-        well_summary.BlockPressure(i=10, j=0, k=0)(model, context)
+        reservoir_summary.BlockPressure(i=10, j=0, k=0)(model, context)
