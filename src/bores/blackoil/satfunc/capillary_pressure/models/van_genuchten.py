@@ -1368,22 +1368,22 @@ class VanGenuchtenCapillaryPressureTable(CapillaryPressureTable):
     """Default residual gas saturation (sgr). Can be overridden per call."""
 
     oil_water_alpha_water_wet: Number = 0.01
-    """van Genuchten α parameter for oil-water (water-wet). Units: 1/[pressure] in `unit_system`."""
+    """van Genuchten `α` parameter for oil-water (water-wet). Units: 1/[pressure] in `unit_system`."""
 
     oil_water_alpha_oil_wet: Number = 0.01
-    """van Genuchten α parameter for oil-water (oil-wet). Units: 1/[pressure] in `unit_system`."""
+    """van Genuchten `α` parameter for oil-water (oil-wet). Units: 1/[pressure] in `unit_system`."""
 
     oil_water_n_water_wet: Number = 2.0
-    """van Genuchten n parameter for oil-water (water-wet)."""
+    """van Genuchten `n` parameter for oil-water (water-wet)."""
 
     oil_water_n_oil_wet: Number = 2.0
-    """van Genuchten n parameter for oil-water (oil-wet)."""
+    """van Genuchten `n` parameter for oil-water (oil-wet)."""
 
     gas_oil_alpha: Number = 0.01
     """van Genuchten α parameter for gas-oil. Units: 1/[pressure] in `unit_system`."""
 
     gas_oil_n: Number = 2.0
-    """van Genuchten n parameter for gas-oil."""
+    """van Genuchten `n` parameter for gas-oil."""
 
     wettability: Wettability = Wettability.WATER_WET
     """Wettability type (`WATER_WET`, `OIL_WET`, or `MIXED_WET`)."""

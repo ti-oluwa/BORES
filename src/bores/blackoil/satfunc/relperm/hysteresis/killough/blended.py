@@ -217,8 +217,12 @@ class BlendedKilloughRelPermTable(HysteresisRelPermTable):
                     drainage_water_system, **water_arguments, **land_kwargs
                 )
             if water_scale is not None and with_derivatives:
-                dkrw_i = dkrw_i * water_scale
-                dkro_water_i = dkro_water_i * water_scale
+                assert dkrw_i is not None
+                assert dkro_water_i is not None
+                dkrw_i = typing.cast("NumberOrArray[OneDimension]", dkrw_i * water_scale)
+                dkro_water_i = typing.cast(
+                    "NumberOrArray[OneDimension]", dkro_water_i * water_scale
+                )
 
         kro_gas_i, krg_i, dkro_gas_i, dkrg_i = kro_gas_d, krg_d, dkro_gas_d, dkrg_d
         if use_gas_hysteresis:
@@ -288,26 +292,28 @@ class BlendedKilloughRelPermTable(HysteresisRelPermTable):
                 )
 
             if gas_scale is not None and with_derivatives:
-                dkro_gas_i = dkro_gas_i * gas_scale
-                dkrg_i = dkrg_i * gas_scale
+                assert dkro_gas_i is not None
+                assert dkrg_i is not None
+                dkro_gas_i = typing.cast("NumberOrArray[OneDimension]", dkro_gas_i * gas_scale)
+                dkrg_i = typing.cast("NumberOrArray[OneDimension]", dkrg_i * gas_scale)
 
         curves = BoundingCurves(
-            krw_d=krw_d,
-            krw_i=krw_i,
-            kro_water_d=kro_water_d,
-            kro_water_i=kro_water_i,
-            kro_gas_d=kro_gas_d,
-            kro_gas_i=kro_gas_i,
-            krg_d=krg_d,
-            krg_i=krg_i,
-            dkrw_d=dkrw_d,
-            dkrw_i=dkrw_i,
-            dkro_water_d=dkro_water_d,
-            dkro_water_i=dkro_water_i,
-            dkro_gas_d=dkro_gas_d,
-            dkro_gas_i=dkro_gas_i,
-            dkrg_d=dkrg_d,
-            dkrg_i=dkrg_i,
+            krw_d=typing.cast("NumberOrArray[OneDimension]", krw_d),
+            krw_i=typing.cast("NumberOrArray[OneDimension]", krw_i),
+            kro_water_d=typing.cast("NumberOrArray[OneDimension]", kro_water_d),
+            kro_water_i=typing.cast("NumberOrArray[OneDimension]", kro_water_i),
+            kro_gas_d=typing.cast("NumberOrArray[OneDimension]", kro_gas_d),
+            kro_gas_i=typing.cast("NumberOrArray[OneDimension]", kro_gas_i),
+            krg_d=typing.cast("NumberOrArray[OneDimension]", krg_d),
+            krg_i=typing.cast("NumberOrArray[OneDimension]", krg_i),
+            dkrw_d=typing.cast("NumberOrArray[OneDimension] | None", dkrw_d),
+            dkrw_i=typing.cast("NumberOrArray[OneDimension] | None", dkrw_i),
+            dkro_water_d=typing.cast("NumberOrArray[OneDimension] | None", dkro_water_d),
+            dkro_water_i=typing.cast("NumberOrArray[OneDimension] | None", dkro_water_i),
+            dkro_gas_d=typing.cast("NumberOrArray[OneDimension] | None", dkro_gas_d),
+            dkro_gas_i=typing.cast("NumberOrArray[OneDimension] | None", dkro_gas_i),
+            dkrg_d=typing.cast("NumberOrArray[OneDimension] | None", dkrg_d),
+            dkrg_i=typing.cast("NumberOrArray[OneDimension] | None", dkrg_i),
         )
         return self.scan_bounding_curves(
             inputs=inputs,

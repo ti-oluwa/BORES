@@ -226,19 +226,29 @@ def scan_curve_curvature(
         `scan_curve_curvature_kernel`.
     :return: Scanned pressure and slope (the slope is `None` when it is not wanted).
     """
-    drainage_value = drainage.pressure.reshape(-1)
-    imbibition_value = imbibition.pressure.reshape(-1)
+    drainage_value = typing.cast(
+        "NumberArray[OneDimension]", np.asarray(drainage.pressure).reshape(-1)
+    )
+    imbibition_value = typing.cast(
+        "NumberArray[OneDimension]", np.asarray(imbibition.pressure).reshape(-1)
+    )
     dtype = drainage_value.dtype if drainage_value.dtype.kind == "f" else np.dtype(np.float64)
-    placeholder = np.zeros(1, dtype=dtype)
+    placeholder = typing.cast("NumberArray[OneDimension]", np.zeros(1, dtype=dtype))
     drainage_slope = placeholder
     imbibition_slope = placeholder
     if with_derivatives and drainage.pressure_slope is not None:
-        drainage_slope = drainage.pressure_slope.reshape(-1)
+        drainage_slope = typing.cast(
+            "NumberArray[OneDimension]", np.asarray(drainage.pressure_slope).reshape(-1)
+        )
     if with_derivatives and imbibition.pressure_slope is not None:
-        imbibition_slope = imbibition.pressure_slope.reshape(-1)
+        imbibition_slope = typing.cast(
+            "NumberArray[OneDimension]", np.asarray(imbibition.pressure_slope).reshape(-1)
+        )
 
-    value = np.empty(size, dtype=dtype)
-    slope = np.empty(size if with_derivatives else 1, dtype=dtype)
+    value = typing.cast("NumberArray[OneDimension]", np.empty(size, dtype=dtype))
+    slope = typing.cast(
+        "NumberArray[OneDimension]", np.empty(size if with_derivatives else 1, dtype=dtype)
+    )
     scan_curve_curvature_kernel(
         size=size,
         saturation=saturation,
@@ -258,7 +268,12 @@ def scan_curve_curvature(
         out_value=value,
         out_derivative=slope,
     )
-    return CapillaryCurve(value, slope if with_derivatives else None)
+    return CapillaryCurve(
+        pressure=typing.cast("NumberOrArray[OneDimension]", value),
+        pressure_slope=(
+            typing.cast("NumberOrArray[OneDimension]", slope) if with_derivatives else None
+        ),
+    )
 
 
 @attrs.frozen(slots=True)
@@ -281,8 +296,6 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
     Saturation history is passed as keyword arguments to `evaluate`, `derivatives` and
     `evaluate_with_derivatives`. A system whose history is not supplied stays on its drainage curve.
     """
-
-    __type__ = "curvature_capillary_pressure_model"
 
     scanning_curvature: Number = attrs.field(
         factory=lambda: typing.cast(float, c.HYSTERESIS_CAPILLARY_PRESSURE_CURVATURE)
@@ -396,7 +409,7 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
             if water_reversal_saturation is not None:
                 inputs.append(water_reversal_saturation)
 
-        shape = np.broadcast_shapes(*(np.shape(value) for value in inputs))  # type: ignore[arg-type]
+        shape = np.broadcast_shapes(*(np.asarray(value).shape for value in inputs))
         flat_shape = shape or (1,)
         size = math.prod(flat_shape)
 
@@ -413,11 +426,11 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
             memo=memo,
         )
         oil_water_drainage = query_oil_water_curve(
-            self.oil_water_drainage_table, **arguments, **kwargs
+            table=self.oil_water_drainage_table, **arguments, **kwargs
         )
         connate_water_saturation = self.get_connate_water_saturation()
         gas_oil_drainage = query_gas_oil_curve(
-            self.gas_oil_drainage_table,
+            table=self.gas_oil_drainage_table,
             connate_water_saturation=connate_water_saturation,
             **arguments,
             **kwargs,
@@ -425,7 +438,7 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
         gas_oil, gas_oil_slope = gas_oil_drainage
         if use_gas_hysteresis:
             gas_oil_imbibition = query_gas_oil_curve(
-                typing.cast(AnyCapillaryTable, self.gas_oil_imbibition_table),
+                typing.cast("AnyCapillaryTable", self.gas_oil_imbibition_table),
                 connate_water_saturation=connate_water_saturation,
                 **arguments,
                 **kwargs,
@@ -450,7 +463,7 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
         oil_water, oil_water_slope = oil_water_drainage
         if use_water_hysteresis:
             oil_water_imbibition = query_oil_water_curve(
-                typing.cast(AnyCapillaryTable, self.oil_water_imbibition_table),
+                typing.cast("AnyCapillaryTable", self.oil_water_imbibition_table),
                 **arguments,
                 **kwargs,
             )
@@ -475,12 +488,18 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
                 retrace=self.retrace_scanning_curves,
             )
 
-        def finish(array: NumberArray[OneDimension]) -> NumberOrArray[NDimension]:
+        def finish(
+            array: NumberOrArray[OneDimension] | None,
+        ) -> NumberOrArray[NDimension]:
+            assert array is not None
             result = np.asarray(array)
             if result.size == 1 and size > 1:
                 result = np.broadcast_to(result, (size,))
+
             result = result.reshape(shape)
-            return result.item() if is_scalar else result
+            if is_scalar:
+                return typing.cast("Number", result.item())
+            return typing.cast("NumberArray[NDimension]", result)
 
         zero_pressure = finish(array=np.zeros(size, dtype=np.asarray(oil_water).dtype))
         pressures = CapillaryPressures(
@@ -490,6 +509,7 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
         )
         if not with_derivatives:
             return pressures, None
+        assert oil_water_slope is not None and gas_oil_slope is not None
         zero = zero_pressure
         return pressures, CapillaryPressureDerivatives(
             dpcow_dsw=finish(array=oil_water_slope),

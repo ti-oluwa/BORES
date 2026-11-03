@@ -2,7 +2,7 @@
 Killough (1976) scanning curves for relative permeability hysteresis.
 
 The blended scheme of `BlendedKilloughRelPermTable` weighs the drainage and imbibition curves of
-every phase against each other. Here the two kinds of phase are treated differently, and nothing is
+                np.ascontiguousarray(np.broadcast_to(array, typing.cast("tuple[int]", (size,)))),
 blended with the drainage curve at the same saturation.
 
 **Non-wetting phase.** Imbibition from a reversal at the saturation `s_hy` traps `s_t` of the
@@ -387,7 +387,7 @@ class KilloughRelPermTable(HysteresisRelPermTable):
         gas_saturation: NumberArray[OneDimension],
         *,
         water_saturation: NumberArray[OneDimension],
-        with_derivatives: bool,
+        with_derivatives: Boolean,
     ) -> TwoPhaseRelPerms:
         """
         Relative permeabilities of the gas-oil system at the given gas saturations.
@@ -401,7 +401,12 @@ class KilloughRelPermTable(HysteresisRelPermTable):
         return query_gas_oil_curves(
             table,
             water_saturation=water_saturation,
-            oil_saturation=1.0 - water_saturation - gas_saturation,
+            oil_saturation=typing.cast(
+                "NumberArray[OneDimension]",
+                1.0
+                - typing.cast(typing.Any, water_saturation)
+                - typing.cast(typing.Any, gas_saturation),
+            ),
             gas_saturation=gas_saturation,
             connate_water_saturation=self.get_connate_water_saturation(),
             with_derivatives=with_derivatives,
@@ -413,7 +418,7 @@ class KilloughRelPermTable(HysteresisRelPermTable):
         oil_saturation: NumberArray[OneDimension],
         *,
         gas_saturation: NumberArray[OneDimension],
-        with_derivatives: bool,
+        with_derivatives: Boolean,
     ) -> TwoPhaseRelPerms:
         """
         Relative permeabilities of the oil-water system at the given oil saturations, where oil
@@ -428,18 +433,22 @@ class KilloughRelPermTable(HysteresisRelPermTable):
         """
         relperms = query_oil_water_curves(
             table,
-            water_saturation=1.0 - oil_saturation,
-            oil_saturation=oil_saturation - gas_saturation,
+            water_saturation=typing.cast(
+                "NumberArray[OneDimension]", 1.0 - typing.cast(typing.Any, oil_saturation)
+            ),
+            oil_saturation=typing.cast(
+                "NumberArray[OneDimension]", oil_saturation - gas_saturation
+            ),
             gas_saturation=gas_saturation,
             with_derivatives=with_derivatives,
         )
         if relperms.wetting_relperm_slope is None or relperms.non_wetting_relperm_slope is None:
             return relperms
         return TwoPhaseRelPerms(
-            relperms.wetting_relperm,
-            relperms.non_wetting_relperm,
-            -relperms.wetting_relperm_slope,
-            -relperms.non_wetting_relperm_slope,
+            wetting_relperm=relperms.wetting_relperm,
+            non_wetting_relperm=relperms.non_wetting_relperm,
+            wetting_relperm_slope=-relperms.wetting_relperm_slope,
+            non_wetting_relperm_slope=-relperms.non_wetting_relperm_slope,
         )
 
     def _read_gas_oil_endpoints(self) -> KilloughEndpoints | None:
@@ -459,8 +468,10 @@ class KilloughRelPermTable(HysteresisRelPermTable):
         def relperms_at(table: RelativePermeabilityTable, gas: Number) -> TwoPhaseRelPerms:
             return self.gas_oil_relperms_at(
                 table,
-                np.array([gas]),
-                water_saturation=np.array([connate_water]),
+                typing.cast("NumberArray[OneDimension]", np.array([gas])),
+                water_saturation=typing.cast(
+                    "NumberArray[OneDimension]", np.array([connate_water])
+                ),
                 with_derivatives=False,
             )
 
@@ -474,14 +485,23 @@ class KilloughRelPermTable(HysteresisRelPermTable):
                 maximum_residual_saturation=imbibition_critical - drainage_critical,
                 maximum_non_wetting_saturation=maximum - drainage_critical,
             ),
-            imbibition_non_wetting_relperm_at_critical_saturation=at_critical.non_wetting_relperm[
-                0
-            ],
-            imbibition_non_wetting_relperm_at_maximum_saturation=at_maximum.non_wetting_relperm[0],
-            imbibition_wetting_relperm_at_critical_saturation=at_critical.wetting_relperm[0],
-            imbibition_wetting_relperm_at_maximum_saturation=at_maximum.wetting_relperm[0],
+            imbibition_non_wetting_relperm_at_critical_saturation=typing.cast(
+                "NumberArray[OneDimension]", at_critical.non_wetting_relperm
+            )[0],
+            imbibition_non_wetting_relperm_at_maximum_saturation=typing.cast(
+                "NumberArray[OneDimension]", at_maximum.non_wetting_relperm
+            )[0],
+            imbibition_wetting_relperm_at_critical_saturation=typing.cast(
+                "NumberArray[OneDimension]", at_critical.wetting_relperm
+            )[0],
+            imbibition_wetting_relperm_at_maximum_saturation=typing.cast(
+                "NumberArray[OneDimension]", at_maximum.wetting_relperm
+            )[0],
             drainage_wetting_relperm_at_imbibition_critical_saturation=(
-                relperms_at(drainage, imbibition_critical).wetting_relperm[0]
+                typing.cast(
+                    "NumberArray[OneDimension]",
+                    relperms_at(drainage, imbibition_critical).wetting_relperm,
+                )[0]
             ),
         )
 
@@ -498,7 +518,10 @@ class KilloughRelPermTable(HysteresisRelPermTable):
 
         def relperms_at(table: RelativePermeabilityTable, oil: Number) -> TwoPhaseRelPerms:
             return self.oil_water_relperms_at(
-                table, np.array([oil]), gas_saturation=np.zeros(1), with_derivatives=False
+                table,
+                typing.cast("NumberArray[OneDimension]", np.array([oil])),
+                gas_saturation=typing.cast("NumberArray[OneDimension]", np.zeros(1)),
+                with_derivatives=False,
             )
 
         at_critical = relperms_at(imbibition, imbibition_critical)
@@ -511,14 +534,23 @@ class KilloughRelPermTable(HysteresisRelPermTable):
                 maximum_residual_saturation=imbibition_critical - drainage_critical,
                 maximum_non_wetting_saturation=maximum - drainage_critical,
             ),
-            imbibition_non_wetting_relperm_at_critical_saturation=at_critical.non_wetting_relperm[
-                0
-            ],
-            imbibition_non_wetting_relperm_at_maximum_saturation=at_maximum.non_wetting_relperm[0],
-            imbibition_wetting_relperm_at_critical_saturation=at_critical.wetting_relperm[0],
-            imbibition_wetting_relperm_at_maximum_saturation=at_maximum.wetting_relperm[0],
+            imbibition_non_wetting_relperm_at_critical_saturation=typing.cast(
+                "NumberArray[OneDimension]", at_critical.non_wetting_relperm
+            )[0],
+            imbibition_non_wetting_relperm_at_maximum_saturation=typing.cast(
+                "NumberArray[OneDimension]", at_maximum.non_wetting_relperm
+            )[0],
+            imbibition_wetting_relperm_at_critical_saturation=typing.cast(
+                "NumberArray[OneDimension]", at_critical.wetting_relperm
+            )[0],
+            imbibition_wetting_relperm_at_maximum_saturation=typing.cast(
+                "NumberArray[OneDimension]", at_maximum.wetting_relperm
+            )[0],
             drainage_wetting_relperm_at_imbibition_critical_saturation=(
-                relperms_at(drainage, imbibition_critical).wetting_relperm[0]
+                typing.cast(
+                    "NumberArray[OneDimension]",
+                    relperms_at(drainage, imbibition_critical).wetting_relperm,
+                )[0]
             ),
         )
 
@@ -526,17 +558,17 @@ class KilloughRelPermTable(HysteresisRelPermTable):
         self,
         *,
         endpoints: KilloughEndpoints,
-        size: int,
+        size: Integer,
         saturation: NumberArray[OneDimension],
         reversal_saturation: NumberArray[OneDimension],
         non_wetting_is_complement: bool,
         drainage_relperms: TwoPhaseRelPerms,
         relperms_at: typing.Callable[
-            [RelativePermeabilityTable, NumberArray[OneDimension], bool], TwoPhaseRelPerms
+            [RelativePermeabilityTable, NumberArray[OneDimension], Boolean], TwoPhaseRelPerms
         ],
         drainage_table: RelativePermeabilityTable,
         imbibition_table: RelativePermeabilityTable,
-        with_derivatives: bool,
+        with_derivatives: Boolean,
     ) -> TwoPhaseRelPerms:
         """
         Killough's scanning curves of one two-phase system, in the saturation of its non-wetting
@@ -558,11 +590,11 @@ class KilloughRelPermTable(HysteresisRelPermTable):
         :param with_derivatives: Whether to also compute the slopes.
         :returns: The scanned curves, with slopes with respect to the non-wetting saturation.
         """
-        dtype = drainage_relperms.wetting_relperm.dtype
-        trapped_saturation = np.empty(size, dtype=dtype)
-        mapped_saturation = np.empty(size, dtype=dtype)
-        axis_scale = np.empty(size, dtype=dtype)
-        is_scanning = np.empty(size, dtype=dtype)
+        dtype = typing.cast("NumberArray[OneDimension]", drainage_relperms.wetting_relperm).dtype
+        trapped_saturation = typing.cast("NumberArray[OneDimension]", np.empty(size, dtype=dtype))
+        mapped_saturation = typing.cast("NumberArray[OneDimension]", np.empty(size, dtype=dtype))
+        axis_scale = typing.cast("NumberArray[OneDimension]", np.empty(size, dtype=dtype))
+        is_scanning = typing.cast("NumberArray[OneDimension]", np.empty(size, dtype=dtype))
         stretch_saturation_axis_kernel(
             size=size,
             saturation=saturation,
@@ -574,25 +606,38 @@ class KilloughRelPermTable(HysteresisRelPermTable):
             out_axis_scale=axis_scale,
             out_is_scanning=is_scanning,
         )
-        reversal_non_wetting = (
-            1.0 - reversal_saturation if non_wetting_is_complement else reversal_saturation
+        reversal_non_wetting = typing.cast(
+            "NumberArray[OneDimension]",
+            1.0 - typing.cast(typing.Any, reversal_saturation)
+            if non_wetting_is_complement
+            else reversal_saturation,
         )
         at_reversal = relperms_at(drainage_table, reversal_non_wetting, False)
         at_trapped = relperms_at(drainage_table, trapped_saturation, False)
         mapped = relperms_at(imbibition_table, mapped_saturation, with_derivatives)
 
-        def per_cell(array: NumberArray[OneDimension]) -> NumberArray[OneDimension]:
-            return np.ascontiguousarray(np.broadcast_to(array, (size,)))
+        def per_cell(array: NumberOrArray[OneDimension]) -> NumberArray[OneDimension]:
+            shape = typing.cast("tuple[int]", (size,))
+            return typing.cast(
+                "NumberArray[OneDimension]",
+                np.ascontiguousarray(np.broadcast_to(array, shape)),
+            )
 
-        placeholder = np.zeros(1, dtype=dtype)
+        placeholder = typing.cast("NumberArray[OneDimension]", np.zeros(1, dtype=dtype))
 
-        def slope(array: NumberArray[OneDimension] | None) -> NumberArray[OneDimension]:
+        def slope(array: NumberOrArray[OneDimension] | None) -> NumberArray[OneDimension]:
             return placeholder if array is None else per_cell(array)
 
-        out_non_wetting = np.empty(size, dtype=dtype)
-        out_wetting = np.empty(size, dtype=dtype)
-        out_non_wetting_slope = np.empty(size if with_derivatives else 1, dtype=dtype)
-        out_wetting_slope = np.empty(size if with_derivatives else 1, dtype=dtype)
+        out_non_wetting = typing.cast("NumberArray[OneDimension]", np.empty(size, dtype=dtype))
+        out_wetting = typing.cast("NumberArray[OneDimension]", np.empty(size, dtype=dtype))
+        out_non_wetting_slope = typing.cast(
+            "NumberArray[OneDimension]",
+            np.empty(size if with_derivatives else 1, dtype=dtype),
+        )
+        out_wetting_slope = typing.cast(
+            "NumberArray[OneDimension]",
+            np.empty(size if with_derivatives else 1, dtype=dtype),
+        )
         scan_killough_curves_kernel(
             size=size,
             is_scanning=is_scanning,
@@ -619,10 +664,10 @@ class KilloughRelPermTable(HysteresisRelPermTable):
             out_wetting_relperm_slope=out_wetting_slope,
         )
         return TwoPhaseRelPerms(
-            out_wetting,
-            out_non_wetting,
-            out_wetting_slope if with_derivatives else None,
-            out_non_wetting_slope if with_derivatives else None,
+            wetting_relperm=out_wetting,
+            non_wetting_relperm=out_non_wetting,
+            wetting_relperm_slope=out_wetting_slope if with_derivatives else None,
+            non_wetting_relperm_slope=out_non_wetting_slope if with_derivatives else None,
         )
 
     def compute(
@@ -713,19 +758,23 @@ class KilloughRelPermTable(HysteresisRelPermTable):
         if scan_oil:
             scanned = self.scan_system(
                 endpoints=typing.cast(KilloughEndpoints, oil_water_endpoints),
-                size=size,
+                size=typing.cast(int, size),
                 saturation=sw,
                 reversal_saturation=inputs.water_minimum,
                 non_wetting_is_complement=True,
                 drainage_relperms=TwoPhaseRelPerms(
-                    oil_water.wetting_relperm,
-                    oil_water.non_wetting_relperm,
-                    None
-                    if oil_water.wetting_relperm_slope is None
-                    else -oil_water.wetting_relperm_slope,
-                    None
-                    if oil_water.non_wetting_relperm_slope is None
-                    else -oil_water.non_wetting_relperm_slope,
+                    wetting_relperm=oil_water.wetting_relperm,
+                    non_wetting_relperm=oil_water.non_wetting_relperm,
+                    wetting_relperm_slope=(
+                        None
+                        if oil_water.wetting_relperm_slope is None
+                        else -oil_water.wetting_relperm_slope
+                    ),
+                    non_wetting_relperm_slope=(
+                        None
+                        if oil_water.non_wetting_relperm_slope is None
+                        else -oil_water.non_wetting_relperm_slope
+                    ),
                 ),
                 relperms_at=lambda table, oil, with_slopes: self.oil_water_relperms_at(
                     table, oil, gas_saturation=sg, with_derivatives=with_slopes
@@ -738,22 +787,28 @@ class KilloughRelPermTable(HysteresisRelPermTable):
             )
             # The scanned slopes are with respect to oil, and the models take them with respect to water.
             oil_water = TwoPhaseRelPerms(
-                scanned.wetting_relperm
-                if self.wetting_phase_hysteresis
-                else oil_water.wetting_relperm,
-                scanned.non_wetting_relperm,
-                oil_water.wetting_relperm_slope
-                if scanned.wetting_relperm_slope is None or not self.wetting_phase_hysteresis
-                else -scanned.wetting_relperm_slope,
-                None
-                if scanned.non_wetting_relperm_slope is None
-                else -scanned.non_wetting_relperm_slope,
+                wetting_relperm=(
+                    scanned.wetting_relperm
+                    if self.wetting_phase_hysteresis
+                    else oil_water.wetting_relperm
+                ),
+                non_wetting_relperm=scanned.non_wetting_relperm,
+                wetting_relperm_slope=(
+                    oil_water.wetting_relperm_slope
+                    if scanned.wetting_relperm_slope is None or not self.wetting_phase_hysteresis
+                    else -scanned.wetting_relperm_slope
+                ),
+                non_wetting_relperm_slope=(
+                    None
+                    if scanned.non_wetting_relperm_slope is None
+                    else -scanned.non_wetting_relperm_slope
+                ),
             )
 
         if scan_gas:
             scanned = self.scan_system(
                 endpoints=typing.cast(KilloughEndpoints, gas_oil_endpoints),
-                size=size,
+                size=typing.cast(int, size),
                 saturation=sg,
                 reversal_saturation=inputs.gas_reversal,
                 non_wetting_is_complement=False,
@@ -768,14 +823,18 @@ class KilloughRelPermTable(HysteresisRelPermTable):
                 with_derivatives=with_derivatives,
             )
             gas_oil = TwoPhaseRelPerms(
-                scanned.wetting_relperm
-                if self.wetting_phase_hysteresis
-                else gas_oil.wetting_relperm,
-                scanned.non_wetting_relperm,
-                scanned.wetting_relperm_slope
-                if self.wetting_phase_hysteresis
-                else gas_oil.wetting_relperm_slope,
-                scanned.non_wetting_relperm_slope,
+                wetting_relperm=(
+                    scanned.wetting_relperm
+                    if self.wetting_phase_hysteresis
+                    else gas_oil.wetting_relperm
+                ),
+                non_wetting_relperm=scanned.non_wetting_relperm,
+                wetting_relperm_slope=(
+                    scanned.wetting_relperm_slope
+                    if self.wetting_phase_hysteresis
+                    else gas_oil.wetting_relperm_slope
+                ),
+                non_wetting_relperm_slope=scanned.non_wetting_relperm_slope,
             )
 
         # Scanning has produced the final curves, so the shared kernel only has to mix them.

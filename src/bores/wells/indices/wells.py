@@ -645,7 +645,7 @@ def build_well_index(
             kz=kz[position],
             regime_constant=regime_constant,
             net_to_gross=(
-                float(net_to_gross)  # type: ignore[arg-type]
+                net_to_gross  # type: ignore[arg-type]
                 if net_to_gross_values is None
                 else net_to_gross_values[position]
             ),

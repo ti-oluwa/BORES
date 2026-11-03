@@ -217,7 +217,10 @@ class TestNetToGross:
 
         grid = Grid.from_deck(DeckFile(DECK))
         well, _ = make_producer(
-            name="P", perforation_depths=(8000.0, 8020.0), surface_location=(150.0, 150.0), target_bhp=1000.0
+            name="P",
+            perforation_depths=(8000.0, 8020.0),
+            surface_location=(150.0, 150.0),
+            target_bhp=1000.0,
         )
         permeabilities = {
             Orientation.X: np.full(grid.n_cells, 100.0),
@@ -227,7 +230,11 @@ class TestNetToGross:
 
         def first_index(**kwargs) -> float:
             compiled = compile_perforations(
-                names=["P"], wells=make_wells(well), grid=grid, permeabilities=permeabilities, **kwargs
+                names=["P"],
+                wells=make_wells(well),
+                grid=grid,
+                permeabilities=permeabilities,
+                **kwargs,
             )
             return float(compiled.well_indices[0])
 

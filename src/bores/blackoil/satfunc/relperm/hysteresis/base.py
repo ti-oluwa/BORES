@@ -67,16 +67,16 @@ class TwoPhaseRelPerms(typing.NamedTuple):
     read over: water saturation for the oil-water system, gas saturation for the gas-oil system.
     """
 
-    wetting_relperm: NumberArray[OneDimension]
+    wetting_relperm: NumberOrArray[OneDimension]
     """Relative permeability of the wetting phase: water, or oil in the gas-oil system."""
 
-    non_wetting_relperm: NumberArray[OneDimension]
+    non_wetting_relperm: NumberOrArray[OneDimension]
     """Relative permeability of the non-wetting phase: oil, or gas in the gas-oil system."""
 
-    wetting_relperm_slope: NumberArray[OneDimension] | None
+    wetting_relperm_slope: NumberOrArray[OneDimension] | None
     """Slope of `wetting_relperm`, or `None` when slopes were not asked for."""
 
-    non_wetting_relperm_slope: NumberArray[OneDimension] | None
+    non_wetting_relperm_slope: NumberOrArray[OneDimension] | None
     """Slope of `non_wetting_relperm`, or `None` when slopes were not asked for."""
 
 
@@ -108,6 +108,7 @@ def query_oil_water_curves(
         krw, kro = query_oil_water_system(table=table, water_saturation=water_saturation)
         if not with_derivatives:
             return TwoPhaseRelPerms(krw, kro, None, None)
+
         dkrw, dkro = query_oil_water_system(
             table=table, water_saturation=water_saturation, derivative=True
         )
@@ -121,7 +122,10 @@ def query_oil_water_curves(
             **kwargs,
         )
         return TwoPhaseRelPerms(
-            values["water"], values["oil"], slopes["dkrw_dsw"], slopes["dkro_dsw"]
+            values["water"],
+            values["oil"],
+            typing.cast("NumberOrArray[OneDimension]", slopes["dkrw_dsw"]),
+            typing.cast("NumberOrArray[OneDimension]", slopes["dkro_dsw"]),
         )
 
     values = table.evaluate(
@@ -167,6 +171,7 @@ def query_gas_oil_curves(
         )
         if not with_derivatives:
             return TwoPhaseRelPerms(kro, krg, None, None)
+
         dkrg, dkro = query_gas_oil_system(
             table=table,
             gas_saturation=gas_saturation,
@@ -183,7 +188,10 @@ def query_gas_oil_curves(
             **kwargs,
         )
         return TwoPhaseRelPerms(
-            values["oil"], values["gas"], slopes["dkro_dsg"], slopes["dkrg_dsg"]
+            values["oil"],
+            values["gas"],
+            typing.cast("NumberOrArray[OneDimension]", slopes["dkro_dsg"]),
+            typing.cast("NumberOrArray[OneDimension]", slopes["dkrg_dsg"]),
         )
 
     values = table.evaluate(
@@ -204,24 +212,35 @@ class ScanInputs(typing.NamedTuple):
     shape: tuple[int, ...]
     """Broadcast shape of the inputs."""
 
-    size: int
+    size: Integer
     """Number of cells."""
 
     sw: NumberArray[OneDimension]
+    """Flat, normalized water saturations."""
+
     so: NumberArray[OneDimension]
+    """Flat, normalized oil saturations."""
+
     sg: NumberArray[OneDimension]
+    """Flat, normalized gas saturations."""
 
     placeholder: NumberArray[OneDimension]
     """One-element array standing in for anything a pass does not need."""
 
     use_water_hysteresis: Boolean
+    """Whether water saturation history enables an oil-water scan."""
+
     use_gas_hysteresis: Boolean
+    """Whether gas saturation history enables a gas-oil scan."""
 
     gas_is_non_wetting: Boolean
     """Whether gas is the non-wetting phase of the gas-oil system."""
 
     water_reversal: NumberArray[OneDimension]
+    """Water saturation at the last reversal, or the maximum when unspecified."""
+
     gas_reversal: NumberArray[OneDimension]
+    """Gas saturation at the last reversal, or the maximum when unspecified."""
 
     water_minimum: NumberArray[OneDimension]
     """Historical minimum water saturation per cell, or the placeholder when it was not given."""
@@ -233,22 +252,53 @@ class BoundingCurves(typing.NamedTuple):
     them. The slopes are `None` when derivatives were not requested.
     """
 
-    krw_d: NumberArray[OneDimension]
-    krw_i: NumberArray[OneDimension]
-    kro_water_d: NumberArray[OneDimension]
-    kro_water_i: NumberArray[OneDimension]
-    kro_gas_d: NumberArray[OneDimension]
-    kro_gas_i: NumberArray[OneDimension]
-    krg_d: NumberArray[OneDimension]
-    krg_i: NumberArray[OneDimension]
-    dkrw_d: NumberArray[OneDimension] | None
-    dkrw_i: NumberArray[OneDimension] | None
-    dkro_water_d: NumberArray[OneDimension] | None
-    dkro_water_i: NumberArray[OneDimension] | None
-    dkro_gas_d: NumberArray[OneDimension] | None
-    dkro_gas_i: NumberArray[OneDimension] | None
-    dkrg_d: NumberArray[OneDimension] | None
-    dkrg_i: NumberArray[OneDimension] | None
+    krw_d: NumberOrArray[OneDimension]
+    """Water relative permeability on the oil-water drainage curve."""
+
+    krw_i: NumberOrArray[OneDimension]
+    """Water relative permeability on the oil-water imbibition curve."""
+
+    kro_water_d: NumberOrArray[OneDimension]
+    """Oil relative permeability on the oil-water drainage curve."""
+
+    kro_water_i: NumberOrArray[OneDimension]
+    """Oil relative permeability on the oil-water imbibition curve."""
+
+    kro_gas_d: NumberOrArray[OneDimension]
+    """Oil relative permeability on the gas-oil drainage curve."""
+
+    kro_gas_i: NumberOrArray[OneDimension]
+    """Oil relative permeability on the gas-oil imbibition curve."""
+
+    krg_d: NumberOrArray[OneDimension]
+    """Gas relative permeability on the gas-oil drainage curve."""
+
+    krg_i: NumberOrArray[OneDimension]
+    """Gas relative permeability on the gas-oil imbibition curve."""
+
+    dkrw_d: NumberOrArray[OneDimension] | None
+    """Water drainage-curve slope with respect to water saturation, or `None` if not requested."""
+
+    dkrw_i: NumberOrArray[OneDimension] | None
+    """Water imbibition-curve slope with respect to water saturation, or `None` if not requested."""
+
+    dkro_water_d: NumberOrArray[OneDimension] | None
+    """Oil-water drainage-curve slope with respect to water saturation, or `None` if not requested."""
+
+    dkro_water_i: NumberOrArray[OneDimension] | None
+    """Oil-water imbibition-curve slope with respect to water saturation, or `None` if not requested."""
+
+    dkro_gas_d: NumberOrArray[OneDimension] | None
+    """Gas-oil drainage-curve oil slope with respect to gas saturation, or `None` if not requested."""
+
+    dkro_gas_i: NumberOrArray[OneDimension] | None
+    """Gas-oil imbibition-curve oil slope with respect to gas saturation, or `None` if not requested."""
+
+    dkrg_d: NumberOrArray[OneDimension] | None
+    """Gas drainage-curve slope with respect to gas saturation, or `None` if not requested."""
+
+    dkrg_i: NumberOrArray[OneDimension] | None
+    """Gas imbibition-curve slope with respect to gas saturation, or `None` if not requested."""
 
 
 def uses_tabular_endpoints(table: RelativePermeabilityTable) -> bool:
@@ -624,53 +674,72 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
             dkrg_d,
             dkrg_i,
         ) = curves
+
         values = CurveSet(
-            krw_drainage=krw_d,
-            krw_imbibition=krw_i,
-            kro_water_drainage=kro_water_d,
-            kro_water_imbibition=kro_water_i,
-            kro_gas_drainage=kro_gas_d,
-            kro_gas_imbibition=kro_gas_i,
-            krg_drainage=krg_d,
-            krg_imbibition=krg_i,
+            krw_drainage=typing.cast("NumberArray[OneDimension]", krw_d),
+            krw_imbibition=typing.cast("NumberArray[OneDimension]", krw_i),
+            kro_water_drainage=typing.cast("NumberArray[OneDimension]", kro_water_d),
+            kro_water_imbibition=typing.cast("NumberArray[OneDimension]", kro_water_i),
+            kro_gas_drainage=typing.cast("NumberArray[OneDimension]", kro_gas_d),
+            kro_gas_imbibition=typing.cast("NumberArray[OneDimension]", kro_gas_i),
+            krg_drainage=typing.cast("NumberArray[OneDimension]", krg_d),
+            krg_imbibition=typing.cast("NumberArray[OneDimension]", krg_i),
         )
-        slopes = CurveSet(
-            krw_drainage=typing.cast(
-                "NumberArray[OneDimension]", dkrw_d if with_derivatives else placeholder
-            ),
-            krw_imbibition=typing.cast(
-                "NumberArray[OneDimension]", dkrw_i if with_derivatives else placeholder
-            ),
-            kro_water_drainage=typing.cast(
-                "NumberArray[OneDimension]", dkro_water_d if with_derivatives else placeholder
-            ),
-            kro_water_imbibition=typing.cast(
-                "NumberArray[OneDimension]", dkro_water_i if with_derivatives else placeholder
-            ),
-            kro_gas_drainage=typing.cast(
-                "NumberArray[OneDimension]", dkro_gas_d if with_derivatives else placeholder
-            ),
-            kro_gas_imbibition=typing.cast(
-                "NumberArray[OneDimension]", dkro_gas_i if with_derivatives else placeholder
-            ),
-            krg_drainage=typing.cast(
-                "NumberArray[OneDimension]", dkrg_d if with_derivatives else placeholder
-            ),
-            krg_imbibition=typing.cast(
-                "NumberArray[OneDimension]", dkrg_i if with_derivatives else placeholder
-            ),
-        )
-        values = CurveSet(
-            *(
-                typing.cast("NumberArray[OneDimension]", np.asarray(array).reshape(-1))
-                for array in values
+        if with_derivatives:
+            assert all(
+                slope is not None
+                for slope in (
+                    dkrw_d,
+                    dkrw_i,
+                    dkro_water_d,
+                    dkro_water_i,
+                    dkro_gas_d,
+                    dkro_gas_i,
+                    dkrg_d,
+                    dkrg_i,
+                )
             )
-        )
         slopes = CurveSet(
-            *(
-                typing.cast("NumberArray[OneDimension]", np.asarray(array).reshape(-1))
-                for array in slopes
-            )
+            krw_drainage=(
+                typing.cast("NumberArray[OneDimension]", dkrw_d)
+                if with_derivatives
+                else placeholder
+            ),
+            krw_imbibition=(
+                typing.cast("NumberArray[OneDimension]", dkrw_i)
+                if with_derivatives
+                else placeholder
+            ),
+            kro_water_drainage=(
+                typing.cast("NumberArray[OneDimension]", dkro_water_d)
+                if with_derivatives
+                else placeholder
+            ),
+            kro_water_imbibition=(
+                typing.cast("NumberArray[OneDimension]", dkro_water_i)
+                if with_derivatives
+                else placeholder
+            ),
+            kro_gas_drainage=(
+                typing.cast("NumberArray[OneDimension]", dkro_gas_d)
+                if with_derivatives
+                else placeholder
+            ),
+            kro_gas_imbibition=(
+                typing.cast("NumberArray[OneDimension]", dkro_gas_i)
+                if with_derivatives
+                else placeholder
+            ),
+            krg_drainage=(
+                typing.cast("NumberArray[OneDimension]", dkrg_d)
+                if with_derivatives
+                else placeholder
+            ),
+            krg_imbibition=(
+                typing.cast("NumberArray[OneDimension]", dkrg_i)
+                if with_derivatives
+                else placeholder
+            ),
         )
 
         dtype = values.krw_drainage.dtype
@@ -739,7 +808,11 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
             out=out,
         )
 
-        zeros = np.zeros(size, dtype=dtype) if with_derivatives else None
+        zeros = (
+            typing.cast("NumberArray[OneDimension]", np.zeros(size, dtype=dtype))
+            if with_derivatives
+            else None
+        )
         krw, krg = out.krw, out.krg
         if use_rule_in_kernel:
             kro = out.kro
@@ -776,24 +849,29 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
                     residual_oil_saturation_gas=residual_oil_saturation_gas,
                     epsilon=c.FINITE_DIFFERENCE_EPSILON,
                 )
-                dkro_dsw = (
+                dkro_dsw = typing.cast(
+                    "NumberArray[OneDimension]",
                     partials["dkro_dkro_w"] * out.dkro_dsw
                     + partials["dkro_dkrw"] * out.dkrw_dsw
-                    + partials["dkro_dsw_explicit"]
+                    + partials["dkro_dsw_explicit"],
                 )
-                dkro_dso = partials["dkro_dso_explicit"]
-                dkro_dsg = (
+                dkro_dso = typing.cast("NumberArray[OneDimension]", partials["dkro_dso_explicit"])
+                dkro_dsg = typing.cast(
+                    "NumberArray[OneDimension]",
                     partials["dkro_dkro_g"] * out.dkro_dsg
                     + partials["dkro_dkrg"] * out.dkrg_dsg
-                    + partials["dkro_dsg_explicit"]
+                    + partials["dkro_dsg_explicit"],
                 )
 
-        def finish(array: NumberArray[OneDimension]) -> NumberOrArray[NDimension]:
+        def finish(array: NumberOrArray[OneDimension] | None) -> NumberOrArray[NDimension]:
+            assert array is not None
             result = np.asarray(array)
             if result.size == 1 and size > 1:
-                result = np.broadcast_to(result, (size,))
+                result = np.broadcast_to(result, (int(size),))
             result = result.reshape(shape)
-            return result.item() if is_scalar else result
+            if is_scalar:
+                return typing.cast("Number", result.item())
+            return typing.cast("NumberArray[NDimension]", result)
 
         relperms = RelativePermeabilities(
             water=finish(array=krw),

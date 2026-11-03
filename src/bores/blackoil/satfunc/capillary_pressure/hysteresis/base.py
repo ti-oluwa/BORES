@@ -43,10 +43,10 @@ AnyCapillaryTable = TwoPhaseCapillaryPressureTable | CapillaryPressureTable
 class CapillaryCurve(typing.NamedTuple):
     """Capillary pressure of one two-phase system along the saturation it is read over."""
 
-    pressure: NumberArray[OneDimension]
+    pressure: NumberOrArray[OneDimension]
     """Capillary pressure of every cell."""
 
-    pressure_slope: NumberArray[OneDimension] | None
+    pressure_slope: NumberOrArray[OneDimension] | None
     """Slope of `pressure`, or `None` when slopes were not asked for."""
 
 
@@ -100,7 +100,14 @@ def query_oil_water_curve(
         memo=memo,
         **kwargs,
     )
-    return CapillaryCurve(values["oil_water"], None if slopes is None else slopes["dpcow_dsw"])
+    return CapillaryCurve(
+        pressure=typing.cast("NumberOrArray[OneDimension]", values["oil_water"]),
+        pressure_slope=(
+            None
+            if slopes is None
+            else typing.cast("NumberOrArray[OneDimension]", slopes["dpcow_dsw"])
+        ),
+    )
 
 
 def query_gas_oil_curve(
@@ -159,7 +166,14 @@ def query_gas_oil_curve(
         memo=memo,
         **kwargs,
     )
-    return CapillaryCurve(values["gas_oil"], None if slopes is None else slopes["dpcgo_dsg"])
+    return CapillaryCurve(
+        pressure=typing.cast("NumberOrArray[OneDimension]", values["gas_oil"]),
+        pressure_slope=(
+            None
+            if slopes is None
+            else typing.cast("NumberOrArray[OneDimension]", slopes["dpcgo_dsg"])
+        ),
+    )
 
 
 def evaluate_three_phase_table(
