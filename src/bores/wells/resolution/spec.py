@@ -88,6 +88,13 @@ class WellControlSpec:
     max_bisection_iterations: Integer = attrs.field(
         factory=lambda: c.CONTROL_MAX_BISECTION_ITERATIONS
     )
+    use_compiled_resolution: bool = attrs.field(default=True)
+    """
+    Whether `resolve_wells` resolves the wells it can in one compiled pass over all of them,
+    spread across threads, instead of one at a time. A well the compiled pass cannot take is
+    resolved one at a time either way: one under THP control, with a VFP table or tubing fluid
+    table, not fully open, or stopped. Turn off to resolve every well one at a time.
+    """
     producer_bhp_floor: Number = attrs.field(factory=lambda: c.MINIMUM_VALID_PRESSURE)
     injector_bhp_bracket_multiplier: Number = attrs.field(
         factory=lambda: c.CONTROL_INJECTOR_BHP_BRACKET_MULTIPLIER

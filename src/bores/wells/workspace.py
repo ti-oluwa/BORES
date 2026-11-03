@@ -578,6 +578,13 @@ class WellsWorkspace(typing.NamedTuple):
     derivative_scratch: DerivativeScratch
     """Buffers the well derivatives are computed in. Empty when `derivative_offsets` is all zero."""
 
+    well_index_scratch: NumberArray[OneDimension]
+    """
+    Shape `(n_connections,)`. Holds each connection's well index while its well is resolved,
+    where the non-Darcy correction changes it from one iteration to the next. Whatever it holds
+    between resolutions means nothing.
+    """
+
     group_control_modes: IntArray[OneDimension]
     """
     Shape `(n_wells,)`. For a well configured for group control, the concrete control mode tag
@@ -688,6 +695,7 @@ def build_wells_workspace(
             "NumberArray[TwoDimensions]", np.full((n_connections, 3), np.nan, dtype=dtype)
         ),
         derivative_scratch=build_derivative_scratch(max_connections=max_connections),
+        well_index_scratch=np.empty(n_connections, dtype=dtype),
         group_control_modes=np.full(n_wells, UNSET_INT, dtype=np.int32),
         group_target_rates=np.full(n_wells, np.nan, dtype=dtype),
         cumulative_oil_volumes=np.zeros(n_wells, dtype=np.float64),

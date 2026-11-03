@@ -9,7 +9,16 @@ import numpy.typing as npt
 
 from bores.blackoil.pvt.data import get_stb_to_volume_factor
 from bores.errors import StopSimulation, ValidationError, WellConvergenceError
-from bores.types import IntArray, Integer, NumberArray, OneDimension, P, R
+from bores.types import (
+    IntArray,
+    Integer,
+    Number,
+    NumberArray,
+    OneDimension,
+    P,
+    PhaseValues,
+    R,
+)
 from bores.wells.compile import (
     STOPPED_WELL_TAG,
     UNSET_INT,
@@ -35,6 +44,7 @@ from bores.wells.resolution.solvers import (
 )
 from bores.wells.resolution.spec import WellControlSpec
 from bores.wells.resolution.tubing import (
+    WellTubing,
     attach_flowing_fluid,
     compute_tubing_head_pressure,
     resolve_well_tubing,
@@ -48,7 +58,12 @@ from bores.wells.workspace import (
     sum_connection_rates,
 )
 
-__all__ = ["build_well_perforation_workspace", "record_shut_well", "resolve_well_control"]
+__all__ = [
+    "build_well_perforation_workspace",
+    "record_shut_well",
+    "report_tubing_head_pressure",
+    "resolve_well_control",
+]
 
 
 def record_shut_well(
@@ -163,6 +178,63 @@ def name_well_in_convergence_errors(func: typing.Callable[P, R]) -> typing.Calla
             raise WellConvergenceError(f"Well {name!r}: {exc}") from exc
 
     return wrapper
+
+
+def report_tubing_head_pressure(
+    *,
+    tubing: WellTubing,
+    reference_depth: Number,
+    bhp: Number,
+    rates: PhaseValues,
+    surface_rates: PhaseValues,
+    surface_sample: SurfaceSample | None,
+    is_injector: bool,
+    connection_rates: ConnectionRates,
+    well_row: Integer,
+    workspace: WellsWorkspace,
+) -> None:
+    """
+    Records the tubing head pressure of a resolved well, for a well that has a tubing model to
+    evaluate it with. Leaves it untouched for a well that has none.
+
+    :param tubing: The well's tubing.
+    :param reference_depth: The well's BHP and THP reporting datum.
+    :param bhp: The well's resolved bottom-hole pressure.
+    :param rates: The well's resolved reservoir-condition phase rates.
+    :param surface_rates: The well's resolved surface-condition phase rates.
+    :param surface_sample: Fluid properties at surface conditions, if the well has any.
+    :param is_injector: Whether the well is an injector.
+    :param connection_rates: The reservoir-condition phase rates at each flowing connection.
+    :param well_row: The well's row in `workspace`.
+    :param workspace: Receives the tubing head pressure in `thps`.
+    """
+    if not (
+        tubing.vfp_table is not None
+        or tubing.uses_tubing_fluid_table
+        or (tubing.wellbore is not None and surface_sample is not None)
+    ):
+        return None
+    total_rate = rates.oil + rates.water + rates.gas
+    if (
+        tubing.needs_surface_sample
+        and total_rate == 0
+        and surface_sample is not None
+        and math.isnan(surface_sample.density)
+    ):
+        # With no flow, the fluid in the tubing is unknown unless the sample gives its density.
+        workspace.thps[well_row] = math.nan
+        return None
+    workspace.thps[well_row] = compute_tubing_head_pressure(
+        tubing=tubing,
+        reference_depth=reference_depth,
+        reference_pressure=bhp,
+        rates=rates,
+        surface_rates=surface_rates,
+        surface_sample=surface_sample,
+        is_injector=is_injector,
+        connection_rates=connection_rates,
+    )
+    return None
 
 
 @name_well_in_convergence_errors
@@ -516,35 +588,22 @@ def resolve_well_control(
             "flagged to end the run."
         )
 
-    if (
-        tubing.vfp_table is not None
-        or tubing.uses_tubing_fluid_table
-        or (tubing.wellbore is not None and surface_sample is not None)
-    ):
-        total_rate = rates.oil + rates.water + rates.gas
-        if (
-            tubing.needs_surface_sample
-            and total_rate == 0
-            and surface_sample is not None
-            and math.isnan(surface_sample.density)
-        ):
-            # With no flow, the fluid in the tubing is unknown unless the sample gives its density.
-            workspace.thps[well_row] = math.nan
-            return None
-        workspace.thps[well_row] = compute_tubing_head_pressure(
-            tubing=tubing,
-            reference_depth=reference_depth,
-            reference_pressure=bhp,
-            rates=rates,
-            surface_rates=surface_rates,
-            surface_sample=surface_sample,
-            is_injector=is_injector,
-            connection_rates=ConnectionRates(
-                oil=np.zeros_like(perforation_workspace.connection_oil_rates),
-                water=np.zeros_like(perforation_workspace.connection_water_rates),
-                gas=np.zeros_like(perforation_workspace.connection_gas_rates),
-            )
-            if economic_shutin
-            else get_connection_rates(workspace=perforation_workspace),
+    report_tubing_head_pressure(
+        tubing=tubing,
+        reference_depth=reference_depth,
+        bhp=bhp,
+        rates=rates,
+        surface_rates=surface_rates,
+        surface_sample=surface_sample,
+        is_injector=is_injector,
+        connection_rates=ConnectionRates(
+            oil=np.zeros_like(perforation_workspace.connection_oil_rates),
+            water=np.zeros_like(perforation_workspace.connection_water_rates),
+            gas=np.zeros_like(perforation_workspace.connection_gas_rates),
         )
+        if economic_shutin
+        else get_connection_rates(workspace=perforation_workspace),
+        well_row=well_row,
+        workspace=workspace,
+    )
     return None

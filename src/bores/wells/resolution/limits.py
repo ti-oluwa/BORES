@@ -33,7 +33,29 @@ from bores.wells.workspace import (
     restore_connection_rates,
 )
 
-__all__ = ["apply_limits"]
+__all__ = ["apply_limits", "check_economic_violation", "find_bhp_bound", "get_bhp_bound"]
+
+
+@numba.njit(cache=True)
+def find_bhp_bound(
+    min_value: Number, max_value: Number, bhp: Number, is_injector: bool
+) -> tuple[bool, Number]:
+    """
+    Finds the bounding BHP for a `BHPLimit` row, if violated.
+
+    :param min_value: The limit row's `min_value`. `NaN` means no floor.
+    :param max_value: The limit row's `max_value`. `NaN` means no ceiling.
+    :param bhp: The nominal resolution's BHP.
+    :param is_injector: Whether this well is an injector.
+    :returns: Whether the limit is violated, and the bound it holds the BHP to if it is.
+    """
+    if is_injector:
+        if not math.isnan(max_value) and bhp > max_value:
+            return True, max_value
+        return False, bhp
+    if not math.isnan(min_value) and bhp < min_value:
+        return True, min_value
+    return False, bhp
 
 
 def get_bhp_bound(
@@ -48,13 +70,8 @@ def get_bhp_bound(
     :param is_injector: Whether this well is an injector.
     :returns: The violated bound's value, or `None` if not violated.
     """
-    if is_injector:
-        if not math.isnan(max_value) and bhp > max_value:
-            return max_value
-        return None
-    if not math.isnan(min_value) and bhp < min_value:
-        return min_value
-    return None
+    violated, bound = find_bhp_bound(min_value, max_value, bhp, is_injector)
+    return bound if violated else None
 
 
 def get_rate_bound(
@@ -213,7 +230,6 @@ def get_thp_bound(
 
 @numba.njit(cache=True)
 def check_economic_violation(
-    *,
     limits: CompiledLimits | CompiledGroupLimits,
     limits_start: Integer,
     limits_end: Integer,
