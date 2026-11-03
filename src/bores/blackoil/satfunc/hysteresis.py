@@ -10,9 +10,9 @@ from bores.blackoil.satfunc.capillary_pressure.tables import (
     ThreePhaseCapillaryPressureTable,
 )
 from bores.blackoil.satfunc.relperm.hysteresis import (
+    BlendedKilloughRelPermTable,
     CarlsonRelPermTable,
-    EclipseKilloughRelPermTable,
-    KilloughLandRelPermTable,
+    KilloughRelPermTable,
     compute_land_trapping_coefficient,
 )
 from bores.blackoil.satfunc.relperm.tables import (
@@ -84,8 +84,8 @@ class HysteresisOptions:
 
     relperm_model: RelPermHysteresisModel = RelPermHysteresisModel.CARLSON
     """
-    Construction used for the relative permeability scanning curves. `BLENDED_SCANNING` keeps
-    BORES's own weighted blend available next to Eclipse's two models.
+    Construction used for the relative permeability scanning curves. `KILLOUGH_BLENDED` keeps
+    BORES's own weighted blend available next to Killough's scheme and Carlson's.
     """
 
     wetting_phase_uses_imbibition: Boolean = False
@@ -189,7 +189,7 @@ class HysteresisOptions:
 
         :param deck_file: The deck to read.
         :param relperm_model: Use this relative permeability model instead of the one `EHYSTR`
-            item 2 selects. This is how `BLENDED_SCANNING`, which no `EHYSTR` code selects, is
+            item 2 selects. This is how `KILLOUGH_BLENDED`, which no `EHYSTR` code selects, is
             chosen for a deck. The wetting phase still follows item 2.
         :returns: The options, or `None` when the deck does not turn hysteresis on.
         """
@@ -354,7 +354,7 @@ def as_hysteresis_relperm_table(
         )
 
     if model == RelPermHysteresisModel.KILLOUGH:
-        return EclipseKilloughRelPermTable(
+        return KilloughRelPermTable(
             oil_water_drainage_table=drainage,
             gas_oil_drainage_table=drainage,
             oil_water_imbibition_table=imbibition,
@@ -363,9 +363,9 @@ def as_hysteresis_relperm_table(
             wetting_phase_curvature=options.killough_wetting_curvature,
         )
 
-    if model == RelPermHysteresisModel.BLENDED_SCANNING:
+    if model == RelPermHysteresisModel.KILLOUGH_BLENDED:
         land = derive_land_parameters(drainage=drainage, imbibition=imbibition)
-        return KilloughLandRelPermTable(
+        return BlendedKilloughRelPermTable(
             oil_water_drainage_table=drainage,
             gas_oil_drainage_table=drainage,
             oil_water_imbibition_table=imbibition,

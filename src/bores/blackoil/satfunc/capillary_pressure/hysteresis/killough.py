@@ -13,7 +13,9 @@ import numpy as np
 
 from bores.blackoil.satfunc.capillary_pressure.hysteresis.base import (
     AnyCapillaryTable,
+    CapillaryCurve,
     HysteresisCapillaryPressureTable,
+    ThreePhaseEvaluation,
     query_gas_oil_curve,
     query_oil_water_curve,
 )
@@ -42,10 +44,10 @@ def scan_curve(
     imbibition_flag: NumberArray[OneDimension],
     reversal_saturation: NumberArray[OneDimension],
     scanning_exponent: Number,
-    drainage: tuple[typing.Any, typing.Any],
-    imbibition: tuple[typing.Any, typing.Any],
+    drainage: CapillaryCurve,
+    imbibition: CapillaryCurve,
     with_derivatives: Boolean,
-) -> tuple[typing.Any, typing.Any]:
+) -> CapillaryCurve:
     """
     Scan one capillary pressure curve between its drainage and imbibition bounds.
 
@@ -56,17 +58,21 @@ def scan_curve(
     :param imbibition_flag: Imbibition flag of that phase (flat).
     :param reversal_saturation: Saturation at the last reversal (flat).
     :param scanning_exponent: Killough exponent *n*.
-    :param drainage: Drainage value and slope.
-    :param imbibition: Imbibition value and slope.
+    :param drainage: Drainage pressure and slope.
+    :param imbibition: Imbibition pressure and slope.
     :param with_derivatives: Whether the slopes are present and wanted.
     :return: Scanned value and slope (`None` when the slope is not wanted).
     """
-    drainage_value = np.asarray(drainage[0]).reshape(-1)
-    imbibition_value = np.asarray(imbibition[0]).reshape(-1)
+    drainage_value = drainage.pressure.reshape(-1)
+    imbibition_value = imbibition.pressure.reshape(-1)
     dtype = drainage_value.dtype if drainage_value.dtype.kind == "f" else np.dtype(np.float64)
     placeholder = np.zeros(1, dtype=dtype)
-    drainage_slope = np.asarray(drainage[1]).reshape(-1) if with_derivatives else placeholder
-    imbibition_slope = np.asarray(imbibition[1]).reshape(-1) if with_derivatives else placeholder
+    drainage_slope = placeholder
+    imbibition_slope = placeholder
+    if with_derivatives and drainage.pressure_slope is not None:
+        drainage_slope = drainage.pressure_slope.reshape(-1)
+    if with_derivatives and imbibition.pressure_slope is not None:
+        imbibition_slope = imbibition.pressure_slope.reshape(-1)
 
     value = np.empty(size, dtype=dtype)
     slope = np.empty(size if with_derivatives else 1, dtype=dtype)
@@ -86,7 +92,7 @@ def scan_curve(
         out_value=value,
         out_derivative=slope,
     )
-    return value, slope if with_derivatives else None
+    return CapillaryCurve(value, slope if with_derivatives else None)
 
 
 @attrs.frozen(slots=True)
@@ -202,7 +208,7 @@ class KilloughCapillaryPressureTable(HysteresisCapillaryPressureTable):
         sg = flatten_kernel_input(value=gas_saturation, shape=flat_shape)
 
         connate_water_saturation = self.get_connate_water_saturation()
-        memo: dict[int, typing.Any] = {}
+        memo: dict[int, ThreePhaseEvaluation] = {}
         arguments = dict(
             water_saturation=sw,
             oil_saturation=so,
@@ -271,7 +277,7 @@ class KilloughCapillaryPressureTable(HysteresisCapillaryPressureTable):
                 with_derivatives=with_derivatives,
             )
 
-        def finish(array: typing.Any) -> typing.Any:
+        def finish(array: NumberArray[OneDimension]) -> NumberOrArray[NDimension]:
             result = np.asarray(array)
             if result.size == 1 and size > 1:
                 result = np.broadcast_to(result, (size,))

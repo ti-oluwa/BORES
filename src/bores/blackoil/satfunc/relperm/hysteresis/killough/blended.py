@@ -34,11 +34,11 @@ from bores.types import (
     RelativePermeabilityDerivatives,
 )
 
-__all__ = ["KilloughLandRelPermTable"]
+__all__ = ["BlendedKilloughRelPermTable"]
 
 
 @attrs.frozen(slots=True)
-class KilloughLandRelPermTable(HysteresisRelPermTable):
+class BlendedKilloughRelPermTable(HysteresisRelPermTable):
     """
     Implements the Killough relative permeability hysteresis model/table with Land trapping.
 

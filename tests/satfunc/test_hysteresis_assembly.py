@@ -13,13 +13,13 @@ from bores.blackoil.satfunc.hysteresis import (
     as_hysteresis_relperm_table,
     as_hysteresis_tables,
     derive_land_parameters,
-    hysteresis_roles,
+    get_hysteresis_roles,
 )
 from bores.blackoil.satfunc.regions import SatFunc
 from bores.blackoil.satfunc.relperm.hysteresis import (
+    BlendedKilloughRelPermTable,
     CarlsonRelPermTable,
-    EclipseKilloughRelPermTable,
-    KilloughLandRelPermTable,
+    KilloughRelPermTable,
     compute_land_residual_saturation,
 )
 from bores.deck import DeckFile
@@ -100,8 +100,8 @@ def test_land_is_derived_so_the_largest_start_traps_the_imbibition_tables_critic
     ("model", "expected"),
     [
         (RelPermHysteresisModel.CARLSON, CarlsonRelPermTable),
-        (RelPermHysteresisModel.KILLOUGH, EclipseKilloughRelPermTable),
-        (RelPermHysteresisModel.BLENDED_SCANNING, KilloughLandRelPermTable),
+        (RelPermHysteresisModel.KILLOUGH, KilloughRelPermTable),
+        (RelPermHysteresisModel.KILLOUGH_BLENDED, BlendedKilloughRelPermTable),
     ],
 )
 def test_the_chosen_model_builds_its_table(model, expected):
@@ -140,7 +140,7 @@ def test_the_killough_options_reach_the_eclipse_killough_table():
         imbibition=satfunc[2].relative_permeability,
         options=options,
     )
-    assert isinstance(table, EclipseKilloughRelPermTable)
+    assert isinstance(table, KilloughRelPermTable)
     assert table.wetting_phase_hysteresis
     assert table.wetting_phase_curvature == pytest.approx(2.5)
 
@@ -214,11 +214,11 @@ def test_hysteresis_needs_an_imbibition_region_that_exists():
 
 def test_the_wetting_roles_come_from_the_tables_and_a_disagreeing_ehystr_is_only_a_warning(caplog):
     water_wet = _satfunc()
-    assert water_wet.hysteresis_roles() == (True, False)
-    assert hysteresis_roles(water_wet[1].relative_permeability) == (True, False)
+    assert water_wet.get_hysteresis_roles() == (True, False)
+    assert get_hysteresis_roles(water_wet[1].relative_permeability) == (True, False)
     disagreeing = _satfunc(ehystr="0.2 0 1.0 0.1 BOTH RETR DRAIN OIL")
     with caplog.at_level(logging.WARNING):
-        assert disagreeing.hysteresis_roles() == (True, False)
+        assert disagreeing.get_hysteresis_roles() == (True, False)
     assert "wetting phase" in caplog.text
 
 
@@ -243,7 +243,7 @@ def _history(size):
 
 
 @pytest.mark.parametrize(
-    "model", [None, RelPermHysteresisModel.BLENDED_SCANNING], ids=["carlson", "blended"]
+    "model", [None, RelPermHysteresisModel.KILLOUGH_BLENDED], ids=["carlson", "blended"]
 )
 def test_the_cache_evaluates_each_cell_with_the_tables_of_its_own_pair(model):
     satfunc = SatFunc.from_deck(_deck(), dtype=np.float64, relperm_model=model)

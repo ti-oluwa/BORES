@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 from bores.blackoil.satfunc.relperm.hysteresis import (
-    KilloughLandRelPermTable,
+    BlendedKilloughRelPermTable,
     compute_land_residual_saturation,
     compute_land_trapping_coefficient,
 )
@@ -33,7 +33,7 @@ def _table(base, imbibition=None, **options):
             "oil_water_imbibition_table": imbibition.oil_water_table,
             "gas_oil_imbibition_table": imbibition.gas_oil_table,
         }
-    return KilloughLandRelPermTable(
+    return BlendedKilloughRelPermTable(
         oil_water_drainage_table=base.oil_water_table,
         gas_oil_drainage_table=base.gas_oil_table,
         **extra,
@@ -53,7 +53,7 @@ def _history(sw, sg):
 
 
 def test_it_is_a_relative_permeability_table():
-    assert issubclass(KilloughLandRelPermTable, RelativePermeabilityTable)
+    assert issubclass(BlendedKilloughRelPermTable, RelativePermeabilityTable)
 
 
 @pytest.mark.parametrize("rule_name", RULES)
@@ -170,7 +170,7 @@ def test_analytical_tables_with_land_trapping_evaluate():
     """Analytical (non-tabular) backing tables take the Land residual as an endpoint override."""
     drainage = _model("brooks_corey", Wettability.WATER_WET, "stone_II_rule")
     imbibition = _model("let", Wettability.WATER_WET, "stone_II_rule")
-    table = KilloughLandRelPermTable(
+    table = BlendedKilloughRelPermTable(
         oil_water_drainage_table=drainage,
         gas_oil_drainage_table=drainage,
         oil_water_imbibition_table=imbibition,
@@ -346,7 +346,7 @@ def test_tabular_land_trapping_ends_the_imbibition_curve_at_the_trapped_gas():
     table, base, _ = _gas_scanning_table()
     peak = 0.4
     trapped = float(
-        table.land_residual_gas(
+        table.get_land_residual_gas(
             size=1, water_saturation=np.array([0.2]), gas_reversal=np.array([peak])
         )[0]
     )
@@ -466,7 +466,7 @@ def test_tabular_land_trapping_makes_oil_immobile_at_the_land_residual_on_the_wa
     table, _, _ = _gas_scanning_table()
     reversal = 0.3
     land_residual = float(
-        table.land_residual_oil_water(
+        table.get_land_residual_oil_water(
             size=1, gas_saturation=np.array([0.0]), water_reversal=np.array([reversal])
         )[0]
     )
@@ -490,14 +490,14 @@ def test_the_land_model_traps_the_most_from_the_maximum_and_never_more_than_it_s
 
     model = LandTrapping.from_endpoints(maximum_trapped_saturation=0.25, maximum_saturation=0.8)
     assert model.coefficient == pytest.approx(1.0 / 0.25 - 1.0 / 0.8)
-    assert model.trapped_saturation(0.8) == pytest.approx(0.25)
+    assert model.get_trapped_saturation(0.8) == pytest.approx(0.25)
     starts = np.array([0.0, 0.05, 0.2, 0.5, 0.8])
-    trapped = model.trapped_saturation(starts)
+    trapped = model.get_trapped_saturation(starts)
     assert np.all(trapped <= starts + 1e-12)
     assert np.all(trapped <= 0.25 + 1e-12)
     assert np.all(np.diff(trapped) >= 0.0)
     for start, value in zip(starts, trapped, strict=True):
-        assert model.trapped_saturation(float(start)) == pytest.approx(float(value))
+        assert model.get_trapped_saturation(float(start)) == pytest.approx(float(value))
 
 
 def test_a_land_model_with_no_room_to_trap_traps_everything_it_can_up_to_the_maximum():
@@ -505,5 +505,5 @@ def test_a_land_model_with_no_room_to_trap_traps_everything_it_can_up_to_the_max
 
     model = LandTrapping.from_endpoints(maximum_trapped_saturation=0.5, maximum_saturation=0.5)
     assert model.coefficient == pytest.approx(0.0)
-    assert model.trapped_saturation(0.3) == pytest.approx(0.3)
-    assert model.trapped_saturation(0.9) == pytest.approx(0.5)
+    assert model.get_trapped_saturation(0.3) == pytest.approx(0.3)
+    assert model.get_trapped_saturation(0.9) == pytest.approx(0.5)

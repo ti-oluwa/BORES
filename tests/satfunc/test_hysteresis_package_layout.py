@@ -10,10 +10,10 @@ from bores.blackoil.satfunc.capillary_pressure.hysteresis import (
     KilloughCapillaryPressureTable,
 )
 from bores.blackoil.satfunc.relperm.hysteresis import (
+    BlendedKilloughRelPermTable,
     CarlsonRelPermTable,
-    EclipseKilloughRelPermTable,
     HysteresisRelPermTable,
-    KilloughLandRelPermTable,
+    KilloughRelPermTable,
     compute_land_residual_saturation,
     compute_land_trapping_coefficient,
 )
@@ -23,9 +23,9 @@ from tests.satfunc.test_relperm_hysteresis import _tabular as _tabular_relperm
 
 
 def test_the_models_share_their_family_base():
-    assert issubclass(KilloughLandRelPermTable, HysteresisRelPermTable)
+    assert issubclass(BlendedKilloughRelPermTable, HysteresisRelPermTable)
     assert issubclass(CarlsonRelPermTable, HysteresisRelPermTable)
-    assert issubclass(EclipseKilloughRelPermTable, HysteresisRelPermTable)
+    assert issubclass(KilloughRelPermTable, HysteresisRelPermTable)
     assert issubclass(KilloughCapillaryPressureTable, HysteresisCapillaryPressureTable)
     assert issubclass(CurvatureCapillaryPressureTable, HysteresisCapillaryPressureTable)
 
@@ -35,12 +35,12 @@ def test_the_old_module_paths_and_the_new_modules_give_the_same_objects():
     killough = importlib.import_module("bores.blackoil.satfunc.relperm.hysteresis.killough")
     assert land.compute_land_residual_saturation is compute_land_residual_saturation
     assert land.compute_land_trapping_coefficient is compute_land_trapping_coefficient
-    assert killough.KilloughLandRelPermTable is KilloughLandRelPermTable
+    assert killough.BlendedKilloughRelPermTable is BlendedKilloughRelPermTable
 
 
 def test_the_names_the_package_exposes_are_still_exported_from_satfunc():
     satfunc = importlib.import_module("bores.blackoil.satfunc")
-    assert satfunc.KilloughLandRelPermTable is KilloughLandRelPermTable
+    assert satfunc.BlendedKilloughRelPermTable is BlendedKilloughRelPermTable
     assert satfunc.KilloughCapillaryPressureTable is KilloughCapillaryPressureTable
 
 

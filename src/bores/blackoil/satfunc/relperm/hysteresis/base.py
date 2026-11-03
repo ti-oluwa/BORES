@@ -51,7 +51,33 @@ from bores.types import (
     RelativePermeabilityDerivatives,
 )
 
-__all__ = ["HysteresisRelPermTable", "query_gas_oil_curves", "query_oil_water_curves"]
+__all__ = [
+    "HysteresisRelPermTable",
+    "TwoPhaseRelPerms",
+    "query_gas_oil_curves",
+    "query_oil_water_curves",
+]
+
+
+class TwoPhaseRelPerms(typing.NamedTuple):
+    """
+    Relative permeabilities of the two phases of one two-phase system, and their slopes.
+
+    The wetting phase comes first. The slopes are with respect to the saturation the system is
+    read over: water saturation for the oil-water system, gas saturation for the gas-oil system.
+    """
+
+    wetting_relperm: NumberArray[OneDimension]
+    """Relative permeability of the wetting phase: water, or oil in the gas-oil system."""
+
+    non_wetting_relperm: NumberArray[OneDimension]
+    """Relative permeability of the non-wetting phase: oil, or gas in the gas-oil system."""
+
+    wetting_relperm_slope: NumberArray[OneDimension] | None
+    """Slope of `wetting_relperm`, or `None` when slopes were not asked for."""
+
+    non_wetting_relperm_slope: NumberArray[OneDimension] | None
+    """Slope of `non_wetting_relperm`, or `None` when slopes were not asked for."""
 
 
 def query_oil_water_curves(
@@ -62,7 +88,7 @@ def query_oil_water_curves(
     gas_saturation: NumberArray[OneDimension],
     with_derivatives: Boolean,
     **kwargs: typing.Any,
-) -> tuple[typing.Any, typing.Any, typing.Any, typing.Any]:
+) -> TwoPhaseRelPerms:
     """
     Water and oil relative permeabilities of an oil-water table, with their slopes with respect to
     water saturation.
@@ -76,16 +102,16 @@ def query_oil_water_curves(
     :param gas_saturation: Flat gas saturation array.
     :param with_derivatives: Whether to compute the slopes. They are `None` otherwise.
     :param kwargs: Extra arguments forwarded to a three-phase table.
-    :return: Tuple of `krw`, `kro`, `dkrw/dSw` and `dkro/dSw`.
+    :return: `krw`, `kro`, `dkrw/dSw` and `dkro/dSw`, wetting phase first.
     """
     if isinstance(table, TwoPhaseRelPermTable):
         krw, kro = query_oil_water_system(table=table, water_saturation=water_saturation)
         if not with_derivatives:
-            return krw, kro, None, None
+            return TwoPhaseRelPerms(krw, kro, None, None)
         dkrw, dkro = query_oil_water_system(
             table=table, water_saturation=water_saturation, derivative=True
         )
-        return krw, kro, dkrw, dkro
+        return TwoPhaseRelPerms(krw, kro, dkrw, dkro)
 
     if with_derivatives:
         values, slopes = table.evaluate_with_derivatives(
@@ -94,7 +120,9 @@ def query_oil_water_curves(
             gas_saturation=gas_saturation,
             **kwargs,
         )
-        return values["water"], values["oil"], slopes["dkrw_dsw"], slopes["dkro_dsw"]
+        return TwoPhaseRelPerms(
+            values["water"], values["oil"], slopes["dkrw_dsw"], slopes["dkro_dsw"]
+        )
 
     values = table.evaluate(
         water_saturation=water_saturation,
@@ -102,7 +130,7 @@ def query_oil_water_curves(
         gas_saturation=gas_saturation,
         **kwargs,
     )
-    return values["water"], values["oil"], None, None
+    return TwoPhaseRelPerms(values["water"], values["oil"], None, None)
 
 
 def query_gas_oil_curves(
@@ -114,7 +142,7 @@ def query_gas_oil_curves(
     connate_water_saturation: Number,
     with_derivatives: Boolean,
     **kwargs: typing.Any,
-) -> tuple[typing.Any, typing.Any, typing.Any, typing.Any]:
+) -> TwoPhaseRelPerms:
     """
     Oil and gas relative permeabilities of a gas-oil table, with their slopes with respect to gas
     saturation.
@@ -129,7 +157,7 @@ def query_gas_oil_curves(
     :param connate_water_saturation: Connate water saturation, which places the gas-oil system.
     :param with_derivatives: Whether to compute the slopes. They are `None` otherwise.
     :param kwargs: Extra arguments forwarded to a three-phase table.
-    :return: Tuple of `kro`, `krg`, `dkro/dSg` and `dkrg/dSg`.
+    :return: `kro`, `krg`, `dkro/dSg` and `dkrg/dSg`, wetting phase first.
     """
     if isinstance(table, TwoPhaseRelPermTable):
         krg, kro = query_gas_oil_system(
@@ -138,14 +166,14 @@ def query_gas_oil_curves(
             connate_water_saturation=connate_water_saturation,
         )
         if not with_derivatives:
-            return kro, krg, None, None
+            return TwoPhaseRelPerms(kro, krg, None, None)
         dkrg, dkro = query_gas_oil_system(
             table=table,
             gas_saturation=gas_saturation,
             connate_water_saturation=connate_water_saturation,
             derivative=True,
         )
-        return kro, krg, dkro, dkrg
+        return TwoPhaseRelPerms(kro, krg, dkro, dkrg)
 
     if with_derivatives:
         values, slopes = table.evaluate_with_derivatives(
@@ -154,7 +182,9 @@ def query_gas_oil_curves(
             gas_saturation=gas_saturation,
             **kwargs,
         )
-        return values["oil"], values["gas"], slopes["dkro_dsg"], slopes["dkrg_dsg"]
+        return TwoPhaseRelPerms(
+            values["oil"], values["gas"], slopes["dkro_dsg"], slopes["dkrg_dsg"]
+        )
 
     values = table.evaluate(
         water_saturation=water_saturation,
@@ -162,7 +192,7 @@ def query_gas_oil_curves(
         gas_saturation=gas_saturation,
         **kwargs,
     )
-    return values["oil"], values["gas"], None, None
+    return TwoPhaseRelPerms(values["oil"], values["gas"], None, None)
 
 
 class ScanInputs(typing.NamedTuple):
@@ -203,22 +233,22 @@ class BoundingCurves(typing.NamedTuple):
     them. The slopes are `None` when derivatives were not requested.
     """
 
-    krw_d: typing.Any
-    krw_i: typing.Any
-    kro_water_d: typing.Any
-    kro_water_i: typing.Any
-    kro_gas_d: typing.Any
-    kro_gas_i: typing.Any
-    krg_d: typing.Any
-    krg_i: typing.Any
-    dkrw_d: typing.Any
-    dkrw_i: typing.Any
-    dkro_water_d: typing.Any
-    dkro_water_i: typing.Any
-    dkro_gas_d: typing.Any
-    dkro_gas_i: typing.Any
-    dkrg_d: typing.Any
-    dkrg_i: typing.Any
+    krw_d: NumberArray[OneDimension]
+    krw_i: NumberArray[OneDimension]
+    kro_water_d: NumberArray[OneDimension]
+    kro_water_i: NumberArray[OneDimension]
+    kro_gas_d: NumberArray[OneDimension]
+    kro_gas_i: NumberArray[OneDimension]
+    krg_d: NumberArray[OneDimension]
+    krg_i: NumberArray[OneDimension]
+    dkrw_d: NumberArray[OneDimension] | None
+    dkrw_i: NumberArray[OneDimension] | None
+    dkro_water_d: NumberArray[OneDimension] | None
+    dkro_water_i: NumberArray[OneDimension] | None
+    dkro_gas_d: NumberArray[OneDimension] | None
+    dkro_gas_i: NumberArray[OneDimension] | None
+    dkrg_d: NumberArray[OneDimension] | None
+    dkrg_i: NumberArray[OneDimension] | None
 
 
 def uses_tabular_endpoints(table: RelativePermeabilityTable) -> bool:
@@ -758,7 +788,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
                     + partials["dkro_dsg_explicit"]
                 )
 
-        def finish(array: typing.Any) -> typing.Any:
+        def finish(array: NumberArray[OneDimension]) -> NumberOrArray[NDimension]:
             result = np.asarray(array)
             if result.size == 1 and size > 1:
                 result = np.broadcast_to(result, (size,))

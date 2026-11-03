@@ -107,15 +107,15 @@ def test_every_item_reaches_its_own_field():
 
 def test_the_blended_model_is_chosen_explicitly_and_the_deck_still_sets_the_rest():
     options = HysteresisOptions.from_deck(
-        _deck(ehystr="0.3 3"), relperm_model=RelPermHysteresisModel.BLENDED_SCANNING
+        _deck(ehystr="0.3 3"), relperm_model=RelPermHysteresisModel.KILLOUGH_BLENDED
     )
-    assert options.relperm_model == RelPermHysteresisModel.BLENDED_SCANNING
+    assert options.relperm_model == RelPermHysteresisModel.KILLOUGH_BLENDED
     assert options.wetting_phase_uses_imbibition
     assert options.capillary_pressure_curvature == pytest.approx(0.3)
     without_ehystr = HysteresisOptions.from_deck(
-        _deck(), relperm_model=RelPermHysteresisModel.BLENDED_SCANNING
+        _deck(), relperm_model=RelPermHysteresisModel.KILLOUGH_BLENDED
     )
-    assert without_ehystr.relperm_model == RelPermHysteresisModel.BLENDED_SCANNING
+    assert without_ehystr.relperm_model == RelPermHysteresisModel.KILLOUGH_BLENDED
 
 
 def test_relperm_hysteresis_is_inactive_when_the_model_is_none_or_relperm_is_not_limited():

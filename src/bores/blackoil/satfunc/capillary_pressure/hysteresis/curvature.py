@@ -26,7 +26,9 @@ import numpy as np
 
 from bores.blackoil.satfunc.capillary_pressure.hysteresis.base import (
     AnyCapillaryTable,
+    CapillaryCurve,
     HysteresisCapillaryPressureTable,
+    ThreePhaseEvaluation,
     query_gas_oil_curve,
     query_oil_water_curve,
 )
@@ -199,12 +201,12 @@ def scan_curve_curvature(
     imbibition_flag: NumberArray[OneDimension],
     reversal_saturation: NumberArray[OneDimension],
     curvature: Number,
-    drainage: tuple[typing.Any, typing.Any],
-    imbibition: tuple[typing.Any, typing.Any],
+    drainage: CapillaryCurve,
+    imbibition: CapillaryCurve,
     with_derivatives: Boolean,
     mirror: Boolean = False,
     retrace: Boolean = False,
-) -> tuple[typing.Any, typing.Any]:
+) -> CapillaryCurve:
     """
     Scan one capillary pressure curve between its drainage and imbibition bounds, with the curvature
     weight.
@@ -216,20 +218,24 @@ def scan_curve_curvature(
     :param imbibition_flag: Imbibition flag of that phase (flat).
     :param reversal_saturation: Saturation at the last reversal (flat).
     :param curvature: The curvature `ε`.
-    :param drainage: Drainage value and slope.
-    :param imbibition: Imbibition value and slope.
+    :param drainage: Drainage pressure and slope.
+    :param imbibition: Imbibition pressure and slope.
     :param with_derivatives: Whether the slopes are present and wanted.
     :param mirror: Scan a non-wetting phase down from its peak, see `scan_curve_curvature_kernel`.
     :param retrace: Scan a wetting phase along one curve in both directions, see
         `scan_curve_curvature_kernel`.
-    :return: Scanned value and slope (`None` when the slope is not wanted).
+    :return: Scanned pressure and slope (the slope is `None` when it is not wanted).
     """
-    drainage_value = np.asarray(drainage[0]).reshape(-1)
-    imbibition_value = np.asarray(imbibition[0]).reshape(-1)
+    drainage_value = drainage.pressure.reshape(-1)
+    imbibition_value = imbibition.pressure.reshape(-1)
     dtype = drainage_value.dtype if drainage_value.dtype.kind == "f" else np.dtype(np.float64)
     placeholder = np.zeros(1, dtype=dtype)
-    drainage_slope = np.asarray(drainage[1]).reshape(-1) if with_derivatives else placeholder
-    imbibition_slope = np.asarray(imbibition[1]).reshape(-1) if with_derivatives else placeholder
+    drainage_slope = placeholder
+    imbibition_slope = placeholder
+    if with_derivatives and drainage.pressure_slope is not None:
+        drainage_slope = drainage.pressure_slope.reshape(-1)
+    if with_derivatives and imbibition.pressure_slope is not None:
+        imbibition_slope = imbibition.pressure_slope.reshape(-1)
 
     value = np.empty(size, dtype=dtype)
     slope = np.empty(size if with_derivatives else 1, dtype=dtype)
@@ -252,14 +258,14 @@ def scan_curve_curvature(
         out_value=value,
         out_derivative=slope,
     )
-    return value, slope if with_derivatives else None
+    return CapillaryCurve(value, slope if with_derivatives else None)
 
 
 @attrs.frozen(slots=True)
 class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
     """
     Capillary pressure hysteresis with Killough's scanning curves and a curvature parameter (see the
-    module notes), as Eclipse's `EHYSTR` item 1 sets it.
+    module notes), with the curvature set by `EHYSTR` item 1.
 
     The oil-water capillary pressure scans over water saturation, between the lowest water
     saturation reached, the highest, and the saturation of the last reversal, which are all in the
@@ -398,7 +404,7 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
         so = flatten_kernel_input(value=oil_saturation, shape=flat_shape)
         sg = flatten_kernel_input(value=gas_saturation, shape=flat_shape)
 
-        memo: dict[int, typing.Any] = {}
+        memo: dict[int, ThreePhaseEvaluation] = {}
         arguments = dict(
             water_saturation=sw,
             oil_saturation=so,
@@ -469,7 +475,7 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
                 retrace=self.retrace_scanning_curves,
             )
 
-        def finish(array: typing.Any) -> typing.Any:
+        def finish(array: NumberArray[OneDimension]) -> NumberOrArray[NDimension]:
             result = np.asarray(array)
             if result.size == 1 and size > 1:
                 result = np.broadcast_to(result, (size,))

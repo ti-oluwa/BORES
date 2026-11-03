@@ -376,7 +376,7 @@ def test_tabular_orientation_does_not_change_three_phase_results(rule_name):
 # Hysteresis
 # --------------------------------------------------------------------------------------
 def _hysteresis_pair(rule_name: str, with_imbibition: bool = False):
-    from bores.blackoil.satfunc.relperm.hysteresis import KilloughLandRelPermTable
+    from bores.blackoil.satfunc.relperm.hysteresis import BlendedKilloughRelPermTable
 
     base = as_three_phase_relperm_table(
         _model("let", Wettability.WATER_WET, rule_name),
@@ -391,7 +391,7 @@ def _hysteresis_pair(rule_name: str, with_imbibition: bool = False):
             "oil_water_imbibition_table": base.oil_water_table,
             "gas_oil_imbibition_table": base.gas_oil_table,
         }
-    table = KilloughLandRelPermTable(
+    table = BlendedKilloughRelPermTable(
         oil_water_drainage_table=base.oil_water_table,
         gas_oil_drainage_table=base.gas_oil_table,
         mixing_rule=rule_name,

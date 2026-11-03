@@ -260,8 +260,8 @@ class SatFunc:
         spacing: Spacing = "cosine",
         min_wetting_relperm: MinimumRelPerm = None,
         min_non_wetting_relperm: MinimumRelPerm = None,
-        include_capillary_pressure: bool = True,
-        allow_two_phase: bool = False,
+        include_capillary_pressure: Boolean = True,
+        allow_two_phase: Boolean = False,
         phases: DeckPhases | None = None,
         dtype: npt.DTypeLike = None,
         relperm_model: RelPermHysteresisModel | None = None,
@@ -305,7 +305,7 @@ class SatFunc:
             brine). A deck that declares no phase keeps the keyword-based detection.
         :param dtype: Array dtype shared by every region's tables.
         :param relperm_model: Hysteresis model to use instead of the one `EHYSTR` item 2 selects,
-            which is how `BLENDED_SCANNING` is chosen for a deck. Only read when `SATOPTS` lists
+            which is how `KILLOUGH_BLENDED` is chosen for a deck. Only read when `SATOPTS` lists
             `HYSTER`.
         :returns: `SatFunc` keyed by 1-based `SATNUM` index. When `SATOPTS` lists `HYSTER` it
             also carries the hysteresis options, and the same list of tables serves as imbibition

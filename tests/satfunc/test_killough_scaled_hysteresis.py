@@ -4,10 +4,13 @@ import numpy as np
 import pytest
 
 from bores.blackoil.satfunc.relperm.hysteresis import (
-    EclipseKilloughRelPermTable,
-    KilloughLandRelPermTable,
+    BlendedKilloughRelPermTable,
+    KilloughRelPermTable,
 )
-from bores.blackoil.satfunc.relperm.hysteresis.eclipse_killough import killough_axis_kernel
+from bores.blackoil.satfunc.relperm.hysteresis.killough.scaled import (
+    KilloughEndpoints,
+    stretch_saturation_axis_kernel,
+)
 from bores.blackoil.satfunc.tables import as_three_phase_relperm_table
 from bores.errors import ValidationError
 from bores.types import Wettability
@@ -48,7 +51,7 @@ def _table(**options):
     base = _tabular("baker_linear_rule")
     imbibition = _imbibition_table()
     return (
-        EclipseKilloughRelPermTable(
+        KilloughRelPermTable(
             oil_water_drainage_table=base,
             gas_oil_drainage_table=base,
             oil_water_imbibition_table=imbibition,
@@ -88,22 +91,27 @@ def _gas(table, gas, **history):
 
 
 def _trapped(system, peak):
-    excess = peak - system.critical_drainage
-    return system.critical_drainage + excess / (1.0 + system.land_coefficient * excess)
+    excess = peak - system.drainage_critical_saturation
+    return system.drainage_critical_saturation + excess / (
+        1.0 + system.land_trapping_coefficient * excess
+    )
 
 
 def test_the_endpoints_come_from_the_two_tables_and_the_largest_start_traps_the_critical_saturation():
     table, base, _ = _table()
-    system = table.gas_system
-    assert system.critical_drainage == pytest.approx(base.get_residual_gas_saturation())
-    assert system.critical_imbibition == pytest.approx(0.15)
-    assert system.maximum == pytest.approx(1.0 - CONNATE_WATER - 0.15)
-    assert system.land_coefficient == pytest.approx(
-        1.0 / (0.15 - system.critical_drainage) - 1.0 / (system.maximum - system.critical_drainage)
+    system = table.gas_oil_endpoints
+    assert system.drainage_critical_saturation == pytest.approx(base.get_residual_gas_saturation())
+    assert system.imbibition_critical_saturation == pytest.approx(0.15)
+    assert system.maximum_saturation == pytest.approx(1.0 - CONNATE_WATER - 0.15)
+    assert system.land_trapping_coefficient == pytest.approx(
+        1.0 / (0.15 - system.drainage_critical_saturation)
+        - 1.0 / (system.maximum_saturation - system.drainage_critical_saturation)
     )
     # Land measured from the drainage critical saturation traps `critical_imbibition` at the maximum.
-    assert _trapped(system, system.maximum) == pytest.approx(system.critical_imbibition)
-    assert table.oil_system.critical_imbibition == pytest.approx(0.35)
+    assert _trapped(system, system.maximum_saturation) == pytest.approx(
+        system.imbibition_critical_saturation
+    )
+    assert table.oil_water_endpoints.imbibition_critical_saturation == pytest.approx(0.35)
 
 
 def test_gas_is_on_the_drainage_curve_at_and_above_its_peak():
@@ -115,15 +123,17 @@ def test_gas_is_on_the_drainage_curve_at_and_above_its_peak():
 
 def test_gas_below_its_peak_is_the_stretched_and_scaled_imbibition_curve():
     table, base, imbibition = _table()
-    system = table.gas_system
+    system = table.gas_oil_endpoints
     gas = np.array([0.37, 0.3, 0.25, 0.2])
     trapped = _trapped(system, PEAK)
-    stretch = (system.maximum - system.critical_imbibition) / (PEAK - trapped)
-    mapped = system.critical_imbibition + (gas - trapped) * stretch
+    stretch = (system.maximum_saturation - system.imbibition_critical_saturation) / (
+        PEAK - trapped
+    )
+    mapped = system.imbibition_critical_saturation + (gas - trapped) * stretch
     peak_value = _gas(base, np.array([PEAK]))["gas"][0]
     imbibition_value = _gas(imbibition, mapped)["gas"]
-    at_critical = _gas(imbibition, np.array([system.critical_imbibition]))["gas"][0]
-    at_maximum = _gas(imbibition, np.array([system.maximum]))["gas"][0]
+    at_critical = _gas(imbibition, np.array([system.imbibition_critical_saturation]))["gas"][0]
+    at_maximum = _gas(imbibition, np.array([system.maximum_saturation]))["gas"][0]
     expected = peak_value * (imbibition_value - at_critical) / (at_maximum - at_critical)
     scanned = _gas(table, gas, **_gas_history(4))["gas"]
     np.testing.assert_allclose(scanned, expected, rtol=1e-9)
@@ -132,13 +142,13 @@ def test_gas_below_its_peak_is_the_stretched_and_scaled_imbibition_curve():
 
 def test_gas_is_continuous_at_the_reversal_and_immobile_at_and_below_the_trapped_saturation():
     table, base, _ = _table()
-    system = table.gas_system
+    system = table.gas_oil_endpoints
     trapped = _trapped(system, PEAK)
     near_peak = _gas(table, np.array([PEAK - 1e-7]), **_gas_history(1))["gas"][0]
     assert near_peak == pytest.approx(_gas(base, np.array([PEAK]))["gas"][0], rel=1e-4)
-    low = np.array([trapped, trapped - 0.02, system.critical_drainage])
+    low = np.array([trapped, trapped - 0.02, system.drainage_critical_saturation])
     np.testing.assert_allclose(_gas(table, low, **_gas_history(3))["gas"], 0.0, atol=1e-9)
-    assert trapped > system.critical_drainage
+    assert trapped > system.drainage_critical_saturation
 
 
 def test_the_scanning_curve_is_retraced_whichever_way_gas_moves():
@@ -153,7 +163,7 @@ def test_without_history_or_an_imbibition_table_the_drainage_curves_are_used():
     table, base, _ = _table()
     gas = np.array([0.15, 0.3])
     np.testing.assert_array_equal(_gas(table, gas)["gas"], _gas(base, gas)["gas"])
-    drainage_only = EclipseKilloughRelPermTable(
+    drainage_only = KilloughRelPermTable(
         oil_water_drainage_table=base, gas_oil_drainage_table=base
     )
     np.testing.assert_array_equal(
@@ -173,15 +183,18 @@ def test_the_wetting_phase_stays_on_drainage_unless_it_is_asked_to_scan():
 
 def test_the_wetting_phase_scans_from_the_drainage_value_to_its_value_at_the_trapped_saturation():
     table, base, _ = _table(wetting_phase_hysteresis=True, wetting_phase_curvature=1.5)
-    system = table.gas_system
+    system = table.gas_oil_endpoints
     trapped = _trapped(system, PEAK)
     at_peak = _gas(table, np.array([PEAK]), **_gas_history(1))["oil"][0]
     assert at_peak == pytest.approx(_gas(base, np.array([PEAK]))["oil"][0], rel=1e-9)
     drainage_at_trapped = _gas(base, np.array([trapped]))["oil"][0]
     expected_at_trapped = (
         drainage_at_trapped
-        + (system.imbibition_wetting_at_critical - system.drainage_wetting_at_critical)
-        * (trapped / system.critical_imbibition) ** 1.5
+        + (
+            system.imbibition_wetting_relperm_at_critical_saturation
+            - system.drainage_wetting_relperm_at_imbibition_critical_saturation
+        )
+        * (trapped / system.imbibition_critical_saturation) ** 1.5
     )
     at_trapped = _gas(table, np.array([trapped]), **_gas_history(1))["oil"][0]
     assert at_trapped == pytest.approx(expected_at_trapped, rel=1e-6)
@@ -196,7 +209,7 @@ def test_it_is_not_the_blended_scheme():
         maximum_residual_oil_saturation_gas=0.2,
         maximum_residual_oil_saturation_water=0.35,
     )
-    assert isinstance(blended, KilloughLandRelPermTable)
+    assert isinstance(blended, BlendedKilloughRelPermTable)
     gas = np.array([0.35, 0.3, 0.25])
     water = np.full(3, CONNATE_WATER)
     history = _gas_history(3)
@@ -252,16 +265,20 @@ def test_oil_is_on_the_drainage_curve_at_and_below_the_minimum_water_saturation(
 
 def test_above_the_minimum_water_saturation_oil_is_the_stretched_and_scaled_imbibition_curve():
     table, base, imbibition = _table()
-    system = table.oil_system
+    system = table.oil_water_endpoints
     water = np.array([0.35, 0.45, 0.55])
     oil_peak = 1.0 - WATER_MINIMUM
     trapped = _trapped(system, oil_peak)
-    stretch = (system.maximum - system.critical_imbibition) / (oil_peak - trapped)
-    mapped_oil = system.critical_imbibition + ((1.0 - water) - trapped) * stretch
+    stretch = (system.maximum_saturation - system.imbibition_critical_saturation) / (
+        oil_peak - trapped
+    )
+    mapped_oil = system.imbibition_critical_saturation + ((1.0 - water) - trapped) * stretch
     peak_value = _oil(base, np.array([WATER_MINIMUM]))["oil"][0]
     imbibition_value = _oil(imbibition, 1.0 - mapped_oil)["oil"]
-    at_critical = _oil(imbibition, np.array([1.0 - system.critical_imbibition]))["oil"][0]
-    at_maximum = _oil(imbibition, np.array([1.0 - system.maximum]))["oil"][0]
+    at_critical = _oil(imbibition, np.array([1.0 - system.imbibition_critical_saturation]))["oil"][
+        0
+    ]
+    at_maximum = _oil(imbibition, np.array([1.0 - system.maximum_saturation]))["oil"][0]
     expected = peak_value * (imbibition_value - at_critical) / (at_maximum - at_critical)
     np.testing.assert_allclose(_oil(table, water, **_oil_history(3))["oil"], expected, rtol=1e-9)
 
@@ -292,28 +309,48 @@ def test_oil_scanning_needs_the_minimum_water_saturation_history():
     np.testing.assert_array_equal(_oil(table, water, **history)["oil"], _oil(base, water)["oil"])
 
 
-def test_the_axis_kernel_maps_the_reversal_to_the_maximum_and_the_trapped_saturation_to_critical():
-    size = 3
-    trapped = np.empty(size)
-    mapped = np.empty(size)
-    scale = np.empty(size)
-    scanning = np.empty(size)
-    killough_axis_kernel(
-        size=size,
-        saturation=np.array([0.4, 0.3, 0.45]),
-        peak=np.array([0.4]),
-        reflect=False,
-        critical_drainage=0.05,
-        critical_imbibition=0.15,
-        maximum=0.65,
-        land_coefficient=1.0 / 0.10 - 1.0 / 0.60,
-        has_trapping=True,
-        out_trapped=trapped,
-        out_mapped=mapped,
-        out_scale=scale,
-        out_scanning=scanning,
+def _endpoints(*, imbibition_critical=0.15, coefficient=None):
+    """Endpoints of a system whose drainage curve is critical at 0.05 and that reaches 0.65."""
+    drainage_critical, maximum = 0.05, 0.65
+    if coefficient is None:
+        coefficient = 1.0 / (imbibition_critical - drainage_critical) - 1.0 / (
+            maximum - drainage_critical
+        )
+    return KilloughEndpoints(
+        drainage_critical_saturation=drainage_critical,
+        imbibition_critical_saturation=imbibition_critical,
+        maximum_saturation=maximum,
+        land_trapping_coefficient=coefficient,
+        imbibition_non_wetting_relperm_at_critical_saturation=0.0,
+        imbibition_non_wetting_relperm_at_maximum_saturation=0.9,
+        imbibition_wetting_relperm_at_critical_saturation=0.8,
+        imbibition_wetting_relperm_at_maximum_saturation=0.0,
+        drainage_wetting_relperm_at_imbibition_critical_saturation=0.7,
     )
-    expected_trapped = 0.05 + 0.35 / (1.0 + (1.0 / 0.10 - 1.0 / 0.60) * 0.35)
+
+
+def _axis(saturation, peak, endpoints, *, complement=False):
+    size = len(saturation)
+    outputs = [np.empty(size) for _ in range(4)]
+    stretch_saturation_axis_kernel(
+        size=size,
+        saturation=np.asarray(saturation, dtype=np.float64),
+        reversal_saturation=np.asarray(peak, dtype=np.float64),
+        non_wetting_is_complement=complement,
+        endpoints=endpoints,
+        out_trapped_saturation=outputs[0],
+        out_mapped_saturation=outputs[1],
+        out_axis_scale=outputs[2],
+        out_is_scanning=outputs[3],
+    )
+    return outputs
+
+
+def test_the_axis_kernel_maps_the_reversal_to_the_maximum_and_the_trapped_saturation_to_critical():
+    endpoints = _endpoints()
+    trapped, mapped, _, scanning = _axis([0.4, 0.3, 0.45], [0.4], endpoints)
+    coefficient = endpoints.land_trapping_coefficient
+    expected_trapped = 0.05 + 0.35 / (1.0 + coefficient * 0.35)
     assert trapped[0] == pytest.approx(expected_trapped)
     # At the peak itself, and above it, the cell is on the drainage curve.
     np.testing.assert_allclose(scanning, [0.0, 1.0, 0.0])
@@ -323,37 +360,32 @@ def test_the_axis_kernel_maps_the_reversal_to_the_maximum_and_the_trapped_satura
 
 
 def test_nothing_is_trapped_beyond_the_critical_saturation_when_the_curves_share_it():
-    size = 1
-    out = [np.empty(size) for _ in range(4)]
-    killough_axis_kernel(
-        size=size,
-        saturation=np.array([0.3]),
-        peak=np.array([0.4]),
-        reflect=False,
-        critical_drainage=0.05,
-        critical_imbibition=0.05,
-        maximum=0.65,
-        land_coefficient=0.0,
-        has_trapping=False,
-        out_trapped=out[0],
-        out_mapped=out[1],
-        out_scale=out[2],
-        out_scanning=out[3],
-    )
-    assert out[0][0] == pytest.approx(0.05)
+    endpoints = _endpoints(imbibition_critical=0.05, coefficient=1e12)
+    trapped, _, _, _ = _axis([0.3], [0.4], endpoints)
+    assert trapped[0] == pytest.approx(0.05)
+
+
+def test_the_axis_kernel_reads_oil_off_the_water_saturation_and_its_minimum():
+    endpoints = _endpoints()
+    trapped, mapped, _, scanning = _axis([0.5, 0.3], [0.3], endpoints, complement=True)
+    # Water of 0.5 is oil of 0.5, and its minimum of 0.3 is an oil peak of 0.7, so it is scanning.
+    # Water at its minimum is oil at its peak, which is on the drainage curve.
+    np.testing.assert_allclose(scanning, [1.0, 0.0])
+    assert trapped[0] > 0.05
+    assert mapped[0] >= endpoints.imbibition_critical_saturation
 
 
 def test_invalid_configurations_are_rejected():
     base = _tabular("baker_linear_rule")
     with pytest.raises(ValidationError):
-        EclipseKilloughRelPermTable(
+        KilloughRelPermTable(
             oil_water_drainage_table=base,
             gas_oil_drainage_table=base,
             wetting_phase_curvature=0.0,
         )
     oil_wet = _tabular("baker_linear_rule", oil_water_wetting_phase="oil")
     with pytest.raises(ValidationError):
-        EclipseKilloughRelPermTable(
+        KilloughRelPermTable(
             oil_water_drainage_table=oil_wet,
             gas_oil_drainage_table=oil_wet,
             oil_water_imbibition_table=_imbibition_table(),
@@ -362,9 +394,9 @@ def test_invalid_configurations_are_rejected():
 
 def test_gas_that_has_shrunk_to_below_the_trapped_saturation_is_immobile_and_does_not_break_the_wetting_phase():
     table, _, _ = _table(wetting_phase_hysteresis=True)
-    system = table.gas_system
+    system = table.gas_oil_endpoints
     trapped = _trapped(system, PEAK)
-    gas = np.array([trapped, trapped - 0.05, system.critical_drainage, 0.01])
+    gas = np.array([trapped, trapped - 0.05, system.drainage_critical_saturation, 0.01])
     result = _gas(table, gas, **_gas_history(4))
     np.testing.assert_allclose(result["gas"], 0.0, atol=1e-9)
     # The wetting phase has reached its value at the trapped saturation and stays there.

@@ -29,13 +29,29 @@ from bores.units import UnitConversionTable
 
 __all__ = [
     "AnyCapillaryTable",
+    "CapillaryCurve",
     "HysteresisCapillaryPressureTable",
+    "ThreePhaseEvaluation",
     "evaluate_three_phase_table",
     "query_gas_oil_curve",
     "query_oil_water_curve",
 ]
 
 AnyCapillaryTable = TwoPhaseCapillaryPressureTable | CapillaryPressureTable
+
+
+class CapillaryCurve(typing.NamedTuple):
+    """Capillary pressure of one two-phase system along the saturation it is read over."""
+
+    pressure: NumberArray[OneDimension]
+    """Capillary pressure of every cell."""
+
+    pressure_slope: NumberArray[OneDimension] | None
+    """Slope of `pressure`, or `None` when slopes were not asked for."""
+
+
+ThreePhaseEvaluation = tuple[CapillaryPressures, CapillaryPressureDerivatives | None]
+"""What a three-phase table returns: its pressures and, when asked for, their derivatives."""
 
 
 def query_oil_water_curve(
@@ -45,9 +61,9 @@ def query_oil_water_curve(
     oil_saturation: NumberArray[OneDimension],
     gas_saturation: NumberArray[OneDimension],
     with_derivatives: Boolean,
-    memo: dict[int, typing.Any],
+    memo: dict[int, ThreePhaseEvaluation],
     **kwargs: typing.Any,
-) -> tuple[typing.Any, typing.Any]:
+) -> CapillaryCurve:
     """
     Oil-water capillary pressure of a table and its slope with respect to water saturation.
 
@@ -67,9 +83,12 @@ def query_oil_water_curve(
     if isinstance(table, TwoPhaseCapillaryPressureTable):
         value = query_oil_water_capillary_pressure(table=table, water_saturation=water_saturation)
         if not with_derivatives:
-            return value, None
-        return value, query_oil_water_capillary_pressure(
-            table=table, water_saturation=water_saturation, derivative=True
+            return CapillaryCurve(value, None)
+        return CapillaryCurve(
+            value,
+            query_oil_water_capillary_pressure(
+                table=table, water_saturation=water_saturation, derivative=True
+            ),
         )
 
     values, slopes = evaluate_three_phase_table(
@@ -81,7 +100,7 @@ def query_oil_water_curve(
         memo=memo,
         **kwargs,
     )
-    return values["oil_water"], None if slopes is None else slopes["dpcow_dsw"]
+    return CapillaryCurve(values["oil_water"], None if slopes is None else slopes["dpcow_dsw"])
 
 
 def query_gas_oil_curve(
@@ -92,9 +111,9 @@ def query_gas_oil_curve(
     gas_saturation: NumberArray[OneDimension],
     connate_water_saturation: Number,
     with_derivatives: Boolean,
-    memo: dict[int, typing.Any],
+    memo: dict[int, ThreePhaseEvaluation],
     **kwargs: typing.Any,
-) -> tuple[typing.Any, typing.Any]:
+) -> CapillaryCurve:
     """
     Gas-oil capillary pressure of a table and its slope with respect to gas saturation.
 
@@ -120,12 +139,15 @@ def query_gas_oil_curve(
             connate_water_saturation=connate_water_saturation,
         )
         if not with_derivatives:
-            return value, None
-        return value, query_gas_oil_capillary_pressure(
-            table=table,
-            gas_saturation=gas_saturation,
-            connate_water_saturation=connate_water_saturation,
-            derivative=True,
+            return CapillaryCurve(value, None)
+        return CapillaryCurve(
+            value,
+            query_gas_oil_capillary_pressure(
+                table=table,
+                gas_saturation=gas_saturation,
+                connate_water_saturation=connate_water_saturation,
+                derivative=True,
+            ),
         )
 
     values, slopes = evaluate_three_phase_table(
@@ -137,7 +159,7 @@ def query_gas_oil_curve(
         memo=memo,
         **kwargs,
     )
-    return values["gas_oil"], None if slopes is None else slopes["dpcgo_dsg"]
+    return CapillaryCurve(values["gas_oil"], None if slopes is None else slopes["dpcgo_dsg"])
 
 
 def evaluate_three_phase_table(
@@ -147,9 +169,9 @@ def evaluate_three_phase_table(
     oil_saturation: NumberArray[OneDimension],
     gas_saturation: NumberArray[OneDimension],
     with_derivatives: Boolean,
-    memo: dict[int, typing.Any],
+    memo: dict[int, ThreePhaseEvaluation],
     **kwargs: typing.Any,
-) -> tuple[CapillaryPressures, CapillaryPressureDerivatives | None]:
+) -> ThreePhaseEvaluation:
     """
     Evaluate a three-phase capillary pressure table, once per call for a table used by both systems.
 

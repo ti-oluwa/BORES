@@ -160,16 +160,20 @@ class RelPermHysteresisModel(enum.Enum):
     """No relative permeability hysteresis: every cell stays on its drainage curves."""
 
     CARLSON = "carlson"
-    """Carlson's scanning curves for the non-wetting phase. The Eclipse default."""
+    """Carlson's scanning curves for the non-wetting phase, which is the default of a deck."""
 
     KILLOUGH = "killough"
-    """Killough's scanning curves for the non-wetting phase, as Eclipse defines them."""
-
-    BLENDED_SCANNING = "blended_scanning"
     """
-    A weighted blend between the drainage and imbibition curves, with the weight set by how far
-    the saturation has moved between the reversal and the end of the scanning range. It is not
-    reachable from `EHYSTR`, only by choosing it explicitly.
+    Killough's scanning curves: the non-wetting phase scans along its imbibition curve, stretched to
+    the trapped saturation, and the wetting phase has a scheme of its own.
+    """
+
+    KILLOUGH_BLENDED = "killough_blended"
+    """
+    Killough-style scanning where every phase is a weighted blend between its drainage and
+    imbibition curves, with the weight set by how far the saturation has moved between the reversal
+    and the end of the scanning range. It is not reachable from `EHYSTR`, only by choosing it
+    explicitly.
     """
 
     def __str__(self) -> str:
