@@ -21,6 +21,7 @@ from bores.blackoil.pvt.live_oil import build_live_oil_branch_tables
 from bores.blackoil.pvt.static import StaticPVT, load_density_records
 from bores.blackoil.pvt.tables import PVTTables, clip_compressibility
 from bores.constants import c
+from bores.correlations import PropsSI
 from bores.deck.file import DeckFile
 from bores.deck.phases import declares_phases, read_deck_phases
 from bores.deck.precheck import find_missing
@@ -1421,39 +1422,56 @@ def build_water_data_from_pvtw(
 def build_co2_temperature_axis(
     temperature: TemperatureSpec,
     *,
+    unit_system: UnitSystem,
     interpolation_method: InterpolationMethod = "linear",
-    spacing: Number = 0.25,
-    maximum_points: Integer = 60,
+    step_fraction: Number = 0.12,
+    minimum_step: Number = 0.18,
+    maximum_points: Integer = 200,
     dtype: npt.DTypeLike = None,  # type: ignore[assignment]
 ) -> npt.NDArray:
     """
-    The temperatures the CO2 storage tables of a region are built at.
+    The temperatures the CO2 storage tables of a region are built at, in F.
 
-    CO2 properties change quickly with temperature near the critical temperature of 31 C, and
+    CO2 properties change quickly with temperature near its critical temperature of 31 C, and
     unlike deck tables every temperature column of these tables holds different values. A uniform
-    temperature therefore gets two points a thousandth of a degree either side of it, so the tables
-    hold the properties at that temperature. A temperature that varies keeps the range of the axis
-    that `generate_temperature_axis` builds, spread over steps of `spacing`.
+    temperature therefore gets two points a thousandth of a degree either side of it, so the
+    tables hold the properties at that temperature. A temperature that varies keeps the range of
+    the axis that `generate_temperature_axis` builds. The axis is dense near the critical
+    temperature and coarser away from it, with each step a fraction of the distance above it, so
+    the density stays accurate where it is steepest without building the whole range finely.
 
     :param temperature: Reservoir temperature spec of the region, in the deck's unit system.
+    :param unit_system: The deck's unit system.
     :param interpolation_method: `"linear"` or `"cubic"`, which set the fewest points needed.
-    :param spacing: The largest step of the axis, in degrees of the deck's unit system.
+    :param step_fraction: The step of the axis, as a fraction of the distance from the critical
+        temperature.
+    :param minimum_step: The smallest step of the axis, in F.
     :param maximum_points: The most points the axis of a varying temperature may have.
     :param dtype: Dtype of the axis.
-    :returns: Strictly increasing temperatures.
+    :returns: Strictly increasing temperatures in F.
     """
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
-    minimum_points = get_min_temperature_points(interpolation_method)
+    minimum_points = max(get_min_temperature_points(interpolation_method), 2)
+    factors = get_conversion_factors(unit_system, UnitSystem.FIELD)
+    scale, offset = factors["temperature"], factors["temperature_offset"]
     if not isinstance(temperature, TemperatureGradient | TemperatureTable):
-        return np.linspace(
-            temperature - 1.0e-3, temperature + 1.0e-3, max(minimum_points, 2), dtype=dtype
-        )
-    axis = generate_temperature_axis(
-        temperature, dtype=dtype, interpolation_method=interpolation_method
+        value = float(temperature) * scale + offset
+        half_width = 1.0e-3 * scale
+        return np.linspace(value - half_width, value + half_width, minimum_points, dtype=dtype)
+
+    deck_axis = generate_temperature_axis(
+        temperature, dtype=np.float64, interpolation_method=interpolation_method
     )
-    count = int(np.ceil((axis[-1] - axis[0]) / spacing)) + 1
-    count = min(max(count, len(axis)), maximum_points)
-    return np.linspace(axis[0], axis[-1], count, dtype=dtype)
+    low, high = float(deck_axis[0]) * scale + offset, float(deck_axis[-1]) * scale + offset
+    critical = (float(PropsSI("TCRIT", "CO2")) - 273.15) * 9.0 / 5.0 + 32.0
+    points = [low]
+    while points[-1] < high and len(points) < maximum_points:
+        step = max(minimum_step, step_fraction * abs(points[-1] - critical))
+        points.append(min(points[-1] + step, high))
+
+    if points[-1] < high or len(points) < minimum_points:
+        return np.linspace(low, high, max(minimum_points, maximum_points // 2), dtype=dtype)
+    return np.asarray(points, dtype=dtype)
 
 
 def load_co2_storage_pvt_regions(
@@ -1529,15 +1547,12 @@ def load_co2_storage_pvt_regions(
 
     regions: dict[Integer, PVTRegion] = {}
     for pvtnum_index in range(1, n_regions + 1):
-        temperatures_deck = build_co2_temperature_axis(
+        temperatures = build_co2_temperature_axis(
             temperature.region(pvtnum_index),
+            unit_system=unit_system,
             interpolation_method=interpolation_method,
             dtype=dtype,
         )
-        temperatures = (
-            temperatures_deck * to_field["temperature"] + to_field["temperature_offset"]
-        ).astype(dtype)
-
         static, tables = build_co2_storage_tables(
             pressures=pressures,
             temperatures=typing.cast("FloatArray[OneDimension]", temperatures),
