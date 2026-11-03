@@ -16,7 +16,7 @@ from bores.grids.base import Grid
 from bores.schedule.actions import RunSequence
 from bores.schedule.base import Action, Event, Schedule, ScheduleItem
 from bores.schedule.events import AllOf, AnyOf, ComparisonOperator, TimeEvent, TimeWindowEvent
-from bores.schedule.summary import Summary
+from bores.schedule.summary import Summary, build_summary_schedule
 from bores.timestep.deck import get_tuning_at_start
 from bores.timestep.targets import TimeTargets
 from bores.types import FluidPhase, Number, UnitSystem
@@ -106,6 +106,7 @@ __all__ = [
     "load_injector_control_from_record",
     "load_producer_control_from_record",
     "load_summary_quantities",
+    "load_summary_schedule",
     "load_well_control_spec",
     "load_well_controls",
     "load_well_from_records",
@@ -1680,7 +1681,7 @@ WELL_SUMMARY_VECTORS: dict[str, type[ws.WellVector]] = {
 
 def load_summary_quantities(deck_file: DeckFile) -> list[Summary["CompiledBlackOilModel"]]:
     """
-    Load every well and field summary vector the deck's `SUMMARY` section requests.
+    Loads every well and field summary vector the deck's `SUMMARY` section requests.
 
     A field vector (`FOPR`, `FWCT`, ...) takes no object list. A well vector (`WOPR`, `WBHP`, ...)
     requests one vector per listed well, or one per well the deck's `WELSPECS` mentions when it
@@ -1702,6 +1703,31 @@ def load_summary_quantities(deck_file: DeckFile) -> list[Summary["CompiledBlackO
             continue
         quantities.extend(well_summary_cls(well_name=name) for name in (requested or well_names))
     return quantities
+
+
+def load_summary_schedule(
+    deck_file: DeckFile,
+    *,
+    compiled_at: Number = 0.0,
+    unit_system: UnitSystem | None = None,
+) -> Schedule["CompiledBlackOilModel"]:
+    """
+    Loads a schedule that records only the well and field rate summary vectors the deck requests.
+
+    :param deck_file: The deck to read the `SUMMARY` section from.
+    :param compiled_at: The point on the schedule clock the model was compiled at, in the deck's
+        time unit. Only report times strictly after this are recorded.
+    :param unit_system: The unit system the schedule's times are expressed in. Defaults to the
+        deck's own.
+    :returns: A `Schedule` with one item per qualifying report time. Empty if the deck requests
+        none of these vectors.
+    """
+    return build_summary_schedule(
+        load_summary_quantities(deck_file),
+        deck_file=deck_file,
+        compiled_at=compiled_at,
+        unit_system=unit_system,
+    )
 
 
 def load_report_times(deck_file: DeckFile) -> TimeTargets:

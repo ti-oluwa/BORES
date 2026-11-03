@@ -142,7 +142,7 @@ class PressureWeight(enum.Enum):
 
 def get_stock_tank_barrels_per_volume(unit_system: UnitSystem) -> Number:
     """
-    Return the factor between a volume in the model's own volume unit and stock-tank barrels.
+    Returns the factor between a volume in the model's own volume unit and stock-tank barrels.
 
     The gas-oil, oil-gas and gas-water ratios are per stock-tank barrel in FIELD units, while
     the volumes the vectors report are in cubic feet. Every other unit system states these
@@ -156,7 +156,7 @@ def get_stock_tank_barrels_per_volume(unit_system: UnitSystem) -> Number:
 
 def finite_or_zero(values: CellArray) -> CellArray:
     """
-    Replace the `NaN` entries of a per-cell ratio with zero.
+    Replaces the `NaN` entries of a per-cell ratio with zero.
 
     :param values: A per-cell ratio that is `NaN` where the model doesn't track it.
     :returns: `values`, with `NaN` read as `0`.
@@ -172,7 +172,7 @@ def compute_cell_in_place(
     unit_system: UnitSystem,
 ) -> CellArray:
     """
-    Compute the volume of one fluid in every cell, at the pressures the run holds now.
+    Computes the volume of one fluid in every cell, at the pressures the run holds now.
 
     :param quantity: Which fluid volume to compute.
     :param workspace: The run's workspace.
@@ -224,7 +224,7 @@ def compute_average_pressure(
     workspace: "SimulationWorkspace",
 ) -> Number:
     """
-    Compute the weighted average oil phase pressure over a set of cells.
+    Computes the weighted average oil phase pressure over a set of cells.
 
     :param weight: What each cell's pressure is weighted by.
     :param cell_mask: Shape `(n_cells,)` boolean mask of the cells to average over.
@@ -257,7 +257,7 @@ class FieldVector(Summary["CompiledBlackOilModel"]):
     @property
     def key(self) -> str:
         """
-        Return this vector's report key.
+        Returns this vector's report key.
 
         :returns: The mnemonic, e.g. `"FOIP"`.
         """
@@ -272,7 +272,7 @@ class FieldVector(Summary["CompiledBlackOilModel"]):
         unit_system: UnitSystem,
     ) -> Number:
         """
-        Compute this vector's value over a set of cells. Must be overridden.
+        Computes this vector's value over a set of cells. Must be overridden.
 
         :param cell_mask: Shape `(n_cells,)` boolean mask of the cells to report on.
         :param pore_volumes: Shape `(n_cells,)` pore volume of every cell at the current pressure.
@@ -284,7 +284,7 @@ class FieldVector(Summary["CompiledBlackOilModel"]):
 
     def __call__(self, model: "CompiledBlackOilModel", context: ScheduleContext) -> Number:
         """
-        Compute this vector's value over every cell.
+        Computes this vector's value over every cell.
 
         :param model: The model to read the pore volumes from.
         :param context: The current moment's context, carrying the workspace.
@@ -317,7 +317,7 @@ class RegionVector(Summary["CompiledBlackOilModel"]):
     @property
     def key(self) -> str:
         """
-        Return this vector's report key.
+        Returns this vector's report key.
 
         :returns: The mnemonic and region number, e.g. `"ROIP:2"`.
         """
@@ -332,7 +332,7 @@ class RegionVector(Summary["CompiledBlackOilModel"]):
         unit_system: UnitSystem,
     ) -> Number:
         """
-        Compute this vector's value over the cells of the region. Must be overridden.
+        Computes this vector's value over the cells of the region. Must be overridden.
 
         :param cell_mask: Shape `(n_cells,)` boolean mask of the region's cells.
         :param pore_volumes: Shape `(n_cells,)` pore volume of every cell at the current pressure.
@@ -344,7 +344,7 @@ class RegionVector(Summary["CompiledBlackOilModel"]):
 
     def __call__(self, model: "CompiledBlackOilModel", context: ScheduleContext) -> Number:
         """
-        Compute this vector's value over the cells of `region`.
+        Computes this vector's value over the cells of `region`.
 
         :param model: The model to read the regions and pore volumes from.
         :param context: The current moment's context, carrying the workspace.
@@ -665,7 +665,7 @@ class BlockVector(Summary["CompiledBlackOilModel"]):
     @property
     def key(self) -> str:
         """
-        Return this vector's report key.
+        Returns this vector's report key.
 
         :returns: The mnemonic and the cell's 1-based indices, e.g. `"BPR:1,1,1"`.
         """
@@ -679,7 +679,7 @@ class BlockVector(Summary["CompiledBlackOilModel"]):
         model: "CompiledBlackOilModel",
     ) -> Number:
         """
-        Read this vector's value for one cell. Must be overridden.
+        Reads this vector's value for one cell. Must be overridden.
 
         :param cell_index: The cell's flat index.
         :param workspace: The run's workspace.
@@ -690,7 +690,7 @@ class BlockVector(Summary["CompiledBlackOilModel"]):
 
     def __call__(self, model: "CompiledBlackOilModel", context: ScheduleContext) -> Number:
         """
-        Read this vector's value for the cell at `i`, `j`, `k`.
+        Reads this vector's value for the cell at `i`, `j`, `k`.
 
         :param model: The model to look the cell up in.
         :param context: The current moment's context, carrying the workspace.

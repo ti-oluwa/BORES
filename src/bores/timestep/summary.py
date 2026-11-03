@@ -31,7 +31,7 @@ __all__ = [
 
 def get_timer(*, context: ScheduleContext) -> Timer:
     """
-    Read the run's `Timer` from `context.extra["timer"]`.
+    Reads the run's `Timer` from `context.extra["timer"]`.
 
     :param context: The current moment's context.
     :returns: The run's `Timer`.
@@ -48,7 +48,7 @@ def get_timer(*, context: ScheduleContext) -> Timer:
 
 def get_last_accepted_step(*, timer: Timer) -> StepMetrics | None:
     """
-    Find the most recent accepted step in a timer's recent step metrics.
+    Finds the most recent accepted step in a timer's recent step metrics.
 
     :param timer: The run's timer.
     :returns: The metrics of the latest accepted step, or `None` if no step has been accepted yet
@@ -67,7 +67,7 @@ class TimeStepSize(Summary["CompiledBlackOilModel"]):
     @property
     def key(self) -> str:
         """
-        Return this vector's report key.
+        Returns this vector's report key.
 
         :returns: `"TIMESTEP"`.
         """
@@ -75,7 +75,7 @@ class TimeStepSize(Summary["CompiledBlackOilModel"]):
 
     def __call__(self, model: "CompiledBlackOilModel", context: ScheduleContext) -> Number:
         """
-        Read the latest accepted step's size.
+        Reads the latest accepted step's size.
 
         :param model: Unused. Present to satisfy the `Summary` protocol.
         :param context: The current moment's context, carrying the timer.
@@ -92,7 +92,7 @@ class NewtonIterations(Summary["CompiledBlackOilModel"]):
     @property
     def key(self) -> str:
         """
-        Return this vector's report key.
+        Returns this vector's report key.
 
         :returns: `"NEWTON"`.
         """
@@ -100,7 +100,7 @@ class NewtonIterations(Summary["CompiledBlackOilModel"]):
 
     def __call__(self, model: "CompiledBlackOilModel", context: ScheduleContext) -> Number:
         """
-        Read the latest accepted step's Newton iteration count.
+        Reads the latest accepted step's Newton iteration count.
 
         :param model: Unused. Present to satisfy the `Summary` protocol.
         :param context: The current moment's context, carrying the timer.

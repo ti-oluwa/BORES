@@ -8,18 +8,22 @@ import attrs
 from bores.deck.file import DeckFile
 from bores.deck.keywords.schedule import TUNING
 from bores.errors import ValidationError
-from bores.schedule.base import ScheduleItem
+from bores.schedule.base import Schedule, ScheduleItem
 from bores.schedule.events import TimeEvent
-from bores.schedule.summary import Summary
+from bores.schedule.summary import Summary, build_summary_schedule
 from bores.timestep import summary as ts
 from bores.timestep.control import Timer
 from bores.timestep.schedule import RetuneTimer
-from bores.types import Number
+from bores.types import Number, UnitSystem
+
+if typing.TYPE_CHECKING:
+    from bores.blackoil.compile import CompiledBlackOilModel
 
 __all__ = [
     "TUNING_DEFAULTS",
     "get_tuning_at_start",
     "load_summary_quantities",
+    "load_summary_schedule",
     "load_timer",
     "load_timer_schedule",
     "tuning_to_timer_settings",
@@ -37,7 +41,7 @@ defaulted item cannot be told from one written out.
 
 def load_summary_quantities(deck_file: DeckFile) -> list[Summary]:
     """
-    Load every time stepping summary vector the deck's `SUMMARY` section requests.
+    Loads every time stepping summary vector the deck's `SUMMARY` section requests.
 
     :param deck_file: The deck to read the `SUMMARY` section from.
     :returns: A `TimeStepSize` if the deck asks for `TIMESTEP`, then a `NewtonIterations` if it
@@ -49,6 +53,31 @@ def load_summary_quantities(deck_file: DeckFile) -> list[Summary]:
     if deck_file.has("NEWTON"):
         quantities.append(ts.NewtonIterations())
     return quantities
+
+
+def load_summary_schedule(
+    deck_file: DeckFile,
+    *,
+    compiled_at: Number = 0.0,
+    unit_system: UnitSystem | None = None,
+) -> Schedule["CompiledBlackOilModel"]:
+    """
+    Loads a schedule that records only the time stepping summary vectors the deck requests.
+
+    :param deck_file: The deck to read the `SUMMARY` section from.
+    :param compiled_at: The point on the schedule clock the model was compiled at, in the deck's
+        time unit. Only report times strictly after this are recorded.
+    :param unit_system: The unit system the schedule's times are expressed in. Defaults to the
+        deck's own.
+    :returns: A `Schedule` with one item per qualifying report time. Empty if the deck requests
+        none of these vectors.
+    """
+    return build_summary_schedule(
+        load_summary_quantities(deck_file),
+        deck_file=deck_file,
+        compiled_at=compiled_at,
+        unit_system=unit_system,
+    )
 
 
 def get_tuning_occurrences(deck_file: DeckFile) -> list[dict[str, typing.Any]]:

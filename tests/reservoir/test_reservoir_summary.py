@@ -203,3 +203,52 @@ def test_deck_requests_become_vectors(tmp_path):
 
     assert {q.key for q in load_reservoir(deck)} == {"FPR", "FOIP", "RPR:1", "BPORV:2,1,1"}
     assert [q.key for q in load_timestep(deck)] == ["TIMESTEP", "NEWTON"]
+
+
+def summary_deck(tmp_path):
+    from bores.deck.file import DeckFile
+
+    path = tmp_path / "case.DATA"
+    path.write_text(
+        "RUNSPEC\nDIMENS\n 2 2 1 /\nFIELD\nSUMMARY\nFOIP\nFOPR\nTIMESTEP\n"
+        "SCHEDULE\nTSTEP\n 10 20 /\n"
+    )
+    return DeckFile.from_path(path) if hasattr(DeckFile, "from_path") else DeckFile(path)
+
+
+def recorded_keys(schedule):
+    keys = set()
+    for item in schedule.items:
+        keys |= {quantity.key for quantity in item.action.quantities}
+    return keys
+
+
+def test_each_module_schedules_only_its_own_vectors(tmp_path):
+    from bores.reservoir.deck import load_summary_schedule as load_reservoir
+    from bores.simulation.case import load_summary_schedule as load_all
+    from bores.timestep.deck import load_summary_schedule as load_timestep
+    from bores.wells.deck import load_summary_schedule as load_wells
+
+    deck = summary_deck(tmp_path)
+    assert recorded_keys(load_reservoir(deck)) == {"FOIP"}
+    assert recorded_keys(load_wells(deck)) == {"FOPR"}
+    assert recorded_keys(load_timestep(deck)) == {"TIMESTEP"}
+    assert recorded_keys(load_all(deck)) == {"FOIP", "FOPR", "TIMESTEP"}
+    assert len(load_reservoir(deck).items) == 2
+
+
+def test_summary_schedule_skips_report_times_already_passed(tmp_path):
+    from bores.reservoir.deck import load_summary_schedule as load_reservoir
+
+    deck = summary_deck(tmp_path)
+    assert len(load_reservoir(deck, compiled_at=10.0).items) == 1
+
+
+def test_a_module_with_no_requested_vectors_gives_an_empty_schedule(tmp_path):
+    from bores.deck.file import DeckFile
+    from bores.reservoir.deck import load_summary_schedule as load_reservoir
+
+    path = tmp_path / "none.DATA"
+    path.write_text("RUNSPEC\nFIELD\nSUMMARY\nFOPR\nSCHEDULE\nTSTEP\n 10 /\n")
+    deck = DeckFile.from_path(path) if hasattr(DeckFile, "from_path") else DeckFile(path)
+    assert load_reservoir(deck).items == ()

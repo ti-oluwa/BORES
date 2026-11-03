@@ -12,7 +12,7 @@ from bores.deck.core import DeckParseError
 from bores.errors import SummaryError
 from bores.reservoir import summary as reservoir_summary
 from bores.reservoir.deck import BLOCK_SUMMARY_VECTORS
-from bores.simulation.case import SimulationCase, load_summary_items
+from bores.simulation.case import SimulationCase, load_summary_schedule
 from bores.types import UnitSystem
 from bores.wells.hydraulics.homogeneous import homogeneous_wellbore
 
@@ -102,7 +102,7 @@ def test_summary_loader_places_block_vectors_and_dedupes():
         + "SCHEDULE\nTSTEP\n 1 /\n",
         encoding="utf-8",
     )
-    (item,) = load_summary_items(deck)
+    (item,) = load_summary_schedule(deck)
     assert [quantity.key for quantity in item.action.quantities] == [
         "BPR:1,1,1",
         "BPR:2,1,1",
@@ -116,7 +116,7 @@ def test_summary_loader_rejects_cells_outside_the_grid():
         encoding="utf-8",
     )
     with pytest.raises(DeckParseError, match="outside"):
-        load_summary_items(deck)
+        load_summary_schedule(deck)
 
 
 @pytest.fixture(scope="module")
@@ -157,7 +157,7 @@ def test_spe1_block_vectors_report_the_initial_state(spe1):
     deck, model, context = spe1
     quantities = {
         quantity.key: quantity
-        for quantity in load_summary_items(deck)[0].action.quantities
+        for quantity in load_summary_schedule(deck).items[0].action.quantities
         if quantity.key.startswith("B")
     }
     assert len(quantities) == 2 + 9

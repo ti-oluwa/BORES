@@ -39,8 +39,8 @@ from bores.reservoir.rock.model import ROCK_POROSITY_KEYWORDS, ROCK_REQUIRED_KEY
 from bores.reservoir.salinity import load_salinity, resolve_salinity
 from bores.reservoir.state import Hysteresis, ReservoirState
 from bores.reservoir.temperature import TEMPERATURE_KEYWORDS, Temperature
-from bores.schedule.base import Schedule, ScheduleItem
-from bores.schedule.summary import Summary, SummaryReport, build_summary_items
+from bores.schedule.base import Schedule
+from bores.schedule.summary import Summary, SummaryReport, build_summary_schedule
 from bores.simulation.deck import load_run_spec
 from bores.simulation.spec import RunSpec
 from bores.simulation.workspace import SimulationWorkspace, build_simulation_workspace
@@ -56,7 +56,6 @@ from bores.types import (
     Spacing,
     UnitSystem,
 )
-from bores.units import get_conversion_factors
 from bores.wells.deck import (
     deck_defines_wells,
     find_well_keyword_problem,
@@ -69,7 +68,7 @@ from bores.wells.deck import (
 from bores.wells.model import TubingPerformance, WellSystem
 from bores.wells.schedule import check_vfp_references
 
-__all__ = ["SimulationCase", "load_case", "load_summary_items"]
+__all__ = ["SimulationCase", "load_case", "load_summary_schedule"]
 
 
 @attrs.define(kw_only=True, slots=True, frozen=True)
@@ -395,28 +394,28 @@ class SimulationCase:
         return typing.cast(Self, case)
 
 
-def load_summary_items(
+def load_summary_schedule(
     deck_file: DeckFile,
     *,
     compiled_at: Number = 0.0,
     unit_system: UnitSystem | None = None,
-) -> list[ScheduleItem[CompiledBlackOilModel]]:
+) -> Schedule[CompiledBlackOilModel]:
     """
-    Load the summary vectors a deck requests, as schedule items that record them.
+    Loads a schedule that records every summary vector a deck requests.
 
     Each module that has summary vectors loads its own (`bores.wells.deck` for wells and field
     rates, `bores.reservoir.deck` for fluids in place, average pressure and per-cell values,
-    `bores.timestep.deck` for step size and Newton iterations) and they are assembled here. Every requested vector is recorded together at every report time of
-    the deck (a `TSTEP` or `DATES` boundary), since the `SUMMARY` section has no cadence of its
-    own.
+    `bores.timestep.deck` for step size and Newton iterations) and they are assembled here. Every
+    requested vector is recorded together at every report time of the deck (a `TSTEP` or `DATES`
+    boundary), since the `SUMMARY` section has no cadence of its own.
 
     :param deck_file: The deck to read the `SUMMARY` section from.
     :param compiled_at: The point on the schedule clock the model was compiled at, in the deck's
-        time unit. Only report times strictly after this become items.
-    :param unit_system: The unit system the items' times are expressed in. Defaults to the
+        time unit. Only report times strictly after this are recorded.
+    :param unit_system: The unit system the schedule's times are expressed in. Defaults to the
         deck's own.
-    :returns: One `ScheduleItem` per qualifying report time, each recording every requested
-        vector. Empty if the deck requests none.
+    :returns: A `Schedule` with one item per qualifying report time, each recording every
+        requested vector. Empty if the deck requests none.
     :raises DeckParseError: If a block vector lists a cell outside the deck's grid.
     """
     quantities: list[Summary[CompiledBlackOilModel]] = [
@@ -424,14 +423,11 @@ def load_summary_items(
         *load_reservoir_summary_quantities(deck_file),
         *load_timestep_summary_quantities(deck_file),
     ]
-    time_factor = get_conversion_factors(
-        deck_file.unit_system, unit_system or deck_file.unit_system
-    )["time"]
-    return build_summary_items(
+    return build_summary_schedule(
         quantities,
-        report_times=deck_file.report_times,
+        deck_file=deck_file,
         compiled_at=compiled_at,
-        time_factor=time_factor,
+        unit_system=unit_system,
     )
 
 
@@ -984,12 +980,14 @@ def load_case(
                 unit_system=unit_system,
             )
             if load_summary:
-                summary_items = load_summary_items(
+                summary_schedule = load_summary_schedule(
                     deck_file, compiled_at=compiled_at, unit_system=unit_system
                 )
                 # Sorting is stable, so a vector is recorded after every well change at its time.
                 schedule = Schedule(
-                    items=sorted([*schedule.items, *summary_items], key=get_item_start_time)
+                    items=sorted(
+                        [*schedule.items, *summary_schedule.items], key=get_item_start_time
+                    )
                 )
         except Exception as exc:
             raise CaseLoadError(f"Failed to load schedule from deck file: {title!r}.") from exc

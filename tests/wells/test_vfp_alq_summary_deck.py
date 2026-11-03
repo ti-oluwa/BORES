@@ -8,7 +8,7 @@ from bores.deck import DeckFile
 from bores.errors import ValidationError
 from bores.reservoir import summary as reservoir_summary
 from bores.reservoir.deck import get_fluid_in_place_regions
-from bores.simulation.case import load_summary_items
+from bores.simulation.case import load_summary_schedule
 from bores.types import UnitSystem
 from bores.units import get_conversion_factors
 from bores.wells import summary as well_summary
@@ -464,7 +464,7 @@ def test_deck_loads_region_vectors_for_listed_and_all_regions(tmp_path):
     path = tmp_path / "s.DATA"
     path.write_text(text)
     summary_deck = DeckFile.from_path(path) if hasattr(DeckFile, "from_path") else DeckFile(path)
-    items = load_summary_items(summary_deck)
+    items = load_summary_schedule(summary_deck)
     names = {
         type(quantity).__name__ + ":" + str(quantity.region)
         for item in items
@@ -481,7 +481,7 @@ def test_well_schedule_holds_no_summary_items(tmp_path):
     deck = DeckFile.from_path(path) if hasattr(DeckFile, "from_path") else DeckFile(path)
 
     assert load_well_schedule(deck).items == ()
-    assert [item.name for item in load_summary_items(deck)] == ["summary@10.0"]
+    assert [item.name for item in load_summary_schedule(deck)] == ["summary@10.0"]
 
 
 def build_compiled_controls():

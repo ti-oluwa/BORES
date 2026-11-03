@@ -25,19 +25,22 @@ from bores.schedule.base import (
     Action,
     ModelT,
     ModelTcon,
+    Schedule,
     ScheduleContext,
     ScheduleItem,
 )
 from bores.schedule.events import IntervalEvent, TimeEvent, TimeStepEvent
 from bores.serde.base import Serializable
 from bores.serde.stores.base import StoreSerializable
-from bores.types import Boolean, IntArray, Number, NumberArray, OneDimension
+from bores.types import Boolean, IntArray, Number, NumberArray, OneDimension, UnitSystem
+from bores.units import get_conversion_factors
 from bores.utils import get_current_date
 
 if typing.TYPE_CHECKING:
     import pandas as pd  # type: ignore[import]
     import polars as pl  # type: ignore[import]
 
+    from bores.deck.file import DeckFile
     from bores.simulation.workspace import SimulationWorkspace
 
 __all__ = [
@@ -47,6 +50,7 @@ __all__ = [
     "SummaryReport",
     "as_dataframe",
     "build_summary_items",
+    "build_summary_schedule",
     "get_workspace",
     "record_at",
     "record_every",
@@ -470,7 +474,7 @@ class RecordSummary(Action[ModelT]):
 
 def get_workspace(*, context: ScheduleContext) -> "SimulationWorkspace":
     """
-    Read the run's `SimulationWorkspace` from `context.extra["workspace"]`.
+    Reads the run's `SimulationWorkspace` from `context.extra["workspace"]`.
 
     :param context: The current moment's context.
     :returns: The run's `SimulationWorkspace`.
@@ -495,7 +499,7 @@ def build_summary_items(
     time_factor: Number = 1.0,
 ) -> list[ScheduleItem[ModelT]]:
     """
-    Build one schedule item per report time that records the same set of summary vectors.
+    Builds one schedule item per report time that records the same set of summary vectors.
 
     :param quantities: Every vector to record at each report time. No items are built when it
         is empty.
@@ -514,6 +518,41 @@ def build_summary_items(
         for time in report_times
         if time > compiled_at
     ]
+
+
+def build_summary_schedule(
+    quantities: typing.Sequence[Summary[ModelT]],
+    *,
+    deck_file: "DeckFile",
+    compiled_at: Number = 0.0,
+    unit_system: UnitSystem | None = None,
+) -> Schedule[ModelT]:
+    """
+    Builds a schedule that records summary vectors at every report time of a deck.
+
+    A deck's `SUMMARY` section has no cadence of its own, so each vector is recorded at every
+    `TSTEP` or `DATES` boundary.
+
+    :param quantities: Every vector to record at each report time.
+    :param deck_file: The deck whose report times to record at.
+    :param compiled_at: The point on the schedule clock the model was compiled at, in the deck's
+        time unit. Only report times strictly after this are recorded.
+    :param unit_system: The unit system the schedule's times are expressed in. Defaults to the
+        deck's own.
+    :returns: A `Schedule` with one item per qualifying report time. Empty if `quantities` is
+        empty.
+    """
+    time_factor = get_conversion_factors(
+        deck_file.unit_system, unit_system or deck_file.unit_system
+    )["time"]
+    return Schedule(
+        items=build_summary_items(
+            quantities,
+            report_times=deck_file.report_times,
+            compiled_at=compiled_at,
+            time_factor=time_factor,
+        )
+    )
 
 
 def record_every(

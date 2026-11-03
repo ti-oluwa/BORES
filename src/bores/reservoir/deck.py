@@ -1,11 +1,18 @@
 """Loading the reservoir summary vectors a deck requests."""
 
+import typing
+
 import numpy as np
 
 from bores.deck.core import DeckParseError
 from bores.deck.file import DeckFile
 from bores.reservoir import summary as rs
-from bores.schedule.summary import Summary
+from bores.schedule.base import Schedule
+from bores.schedule.summary import Summary, build_summary_schedule
+from bores.types import Number, UnitSystem
+
+if typing.TYPE_CHECKING:
+    from bores.blackoil.compile import CompiledBlackOilModel
 
 __all__ = [
     "BLOCK_SUMMARY_VECTORS",
@@ -13,6 +20,7 @@ __all__ = [
     "REGION_SUMMARY_VECTORS",
     "get_fluid_in_place_regions",
     "load_summary_quantities",
+    "load_summary_schedule",
 ]
 
 FIELD_SUMMARY_VECTORS: dict[str, type[rs.FieldVector]] = {
@@ -67,7 +75,7 @@ Mnemonics that name the same vector (`BPR` and `BPRESSUR`) map to the same class
 
 def get_fluid_in_place_regions(deck_file: DeckFile) -> list[int]:
     """
-    Return every fluid-in-place region number a deck defines.
+    Returns every fluid-in-place region number a deck defines.
 
     :param deck_file: The deck to read `FIPNUM` from.
     :returns: The distinct `FIPNUM` values in ascending order, or `[1]` if the deck has none.
@@ -80,7 +88,7 @@ def get_fluid_in_place_regions(deck_file: DeckFile) -> list[int]:
 
 def load_summary_quantities(deck_file: DeckFile) -> list[Summary]:
     """
-    Load every reservoir summary vector the deck's `SUMMARY` section requests.
+    Loads every reservoir summary vector the deck's `SUMMARY` section requests.
 
     - Field vectors (`FOIP`, `FPR`, ...) take no object list and request one vector for the field.
     - Region vectors (`ROIP`, `RPR`, ...) request one vector per listed fluid-in-place region. With
@@ -135,3 +143,28 @@ def load_summary_quantities(deck_file: DeckFile) -> list[Summary]:
             block_keys.add(quantity.key)
             quantities.append(quantity)
     return quantities
+
+
+def load_summary_schedule(
+    deck_file: DeckFile,
+    *,
+    compiled_at: Number = 0.0,
+    unit_system: UnitSystem | None = None,
+) -> Schedule["CompiledBlackOilModel"]:
+    """
+    Loads a schedule that records only the reservoir summary vectors the deck requests.
+
+    :param deck_file: The deck to read the `SUMMARY` section from.
+    :param compiled_at: The point on the schedule clock the model was compiled at, in the deck's
+        time unit. Only report times strictly after this are recorded.
+    :param unit_system: The unit system the schedule's times are expressed in. Defaults to the
+        deck's own.
+    :returns: A `Schedule` with one item per qualifying report time. Empty if the deck requests
+        none of these vectors.
+    """
+    return build_summary_schedule(
+        load_summary_quantities(deck_file),
+        deck_file=deck_file,
+        compiled_at=compiled_at,
+        unit_system=unit_system,
+    )
