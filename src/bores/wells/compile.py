@@ -1936,6 +1936,7 @@ def compile_perforations(
     *,
     grid: Grid,
     permeabilities: typing.Mapping[Orientation, NumberArray[OneDimension]],
+    net_to_gross: NumberOrArray[OneDimension] = 1.0,
     horizontal_tolerance: Number | None = None,
     intersection_method: GridIntersectionMethod = "aabb",
     search_radius: Number | None = None,
@@ -1977,6 +1978,7 @@ def compile_perforations(
             grid=grid,
             well=well,
             permeabilities=permeabilities,
+            net_to_gross=net_to_gross,
             horizontal_tolerance=horizontal_tolerance,
             intersection_method=intersection_method,
             search_radius=search_radius,
@@ -2290,6 +2292,7 @@ def compile_well_system(
     grid: Grid,
     *,
     permeabilities: typing.Mapping[Orientation, NumberArray[OneDimension]],
+    net_to_gross: NumberOrArray[OneDimension] = 1.0,
     group_controls: GroupControls | None = None,
     groups: WellGroups | None = None,
     dtype: npt.DTypeLike = None,
@@ -2310,6 +2313,9 @@ def compile_well_system(
     :param controls: Current controls. A well absent from `controls`
         compiles to an `UNSET`-mode row (see `compile_well_controls`).
     :param grid: Grid to resolve perforation geometry against.
+    :param net_to_gross: Net-to-gross ratio of every cell, or one value for all. It scales each
+        connection's permeability thickness, so a connection in a cell with a net-to-gross below 1
+        has a smaller index.
     :param permeabilities: Per-axis permeability arrays, forwarded to
         `compile_perforations`.
     :param group_controls: Current group controls, if any.
@@ -2339,6 +2345,7 @@ def compile_well_system(
         wells=wells,
         grid=grid,
         permeabilities=permeabilities,
+        net_to_gross=net_to_gross,
         horizontal_tolerance=horizontal_tolerance,
         intersection_method=intersection_method,
         search_radius=search_radius,

@@ -141,3 +141,96 @@ class TestRegimeConstant:
             physics_options=PhysicsOptions(well_index_regime_constant=0.5),
         )
         assert spec.physics_options.well_index_regime_constant == 0.5
+
+
+class TestNetToGross:
+    def test_the_equivalent_radius_function_scales_a_worked_out_thickness_only(self):
+        base = dict(
+            permeability=PERMEABILITY,
+            cell_volume=1.0,
+            completion_length=LENGTH,
+            wellbore_radius=RADIUS,
+            skin=SKIN,
+            equivalent_radius=EQUIVALENT_RADIUS,
+        )
+        full = compute_equivalent_radius_well_index(**base)
+        assert compute_equivalent_radius_well_index(**base, net_to_gross=0.5) == pytest.approx(
+            0.5 * full
+        )
+        given = compute_equivalent_radius_well_index(**base, permeability_thickness=1500.0)
+        assert compute_equivalent_radius_well_index(
+            **base, permeability_thickness=1500.0, net_to_gross=0.5
+        ) == pytest.approx(given)
+
+    @pytest.fixture
+    def non_cartesian(self, monkeypatch):
+        monkeypatch.setattr(
+            "bores.wells.indices.wells.is_locally_cartesian", lambda grid, cell_index: False
+        )
+
+    def test_both_branches_apply_it_to_the_index_and_the_conductivity(self, monkeypatch):
+        cartesian_full, cartesian_conductivity = terms()
+        cartesian_half, half_conductivity = terms(net_to_gross=0.5)
+        assert cartesian_half == pytest.approx(0.5 * cartesian_full)
+        assert half_conductivity == pytest.approx(0.5 * cartesian_conductivity)
+
+        monkeypatch.setattr(
+            "bores.wells.indices.wells.is_locally_cartesian", lambda grid, cell_index: False
+        )
+        full, conductivity = terms()
+        half, scaled_conductivity = terms(net_to_gross=0.5)
+        assert half == pytest.approx(0.5 * full)
+        assert scaled_conductivity == pytest.approx(0.5 * conductivity)
+        # The index is still the conductivity over the resistance plus skin
+        assert half == pytest.approx(
+            scaled_conductivity / (np.log(EQUIVALENT_RADIUS / RADIUS) + SKIN)
+        )
+
+    def test_a_given_kh_is_not_scaled_by_it(self, non_cartesian):
+        perforation = Perforation(
+            top_depth=8000.0,
+            bottom_depth=8020.0,
+            wellbore_radius=RADIUS,
+            skin=SKIN,
+            permeability_thickness=1500.0,
+        )
+
+        def with_ntg(net_to_gross: float):
+            return resolve_connection_terms(
+                perforation=perforation,
+                grid=Grid.from_deck(DeckFile(DECK)),
+                cell_index=4,
+                partial_penetration_fraction=1.0,
+                wellbore_radius=RADIUS,
+                kx=PERMEABILITY,
+                ky=PERMEABILITY,
+                kz=10.0,
+                net_to_gross=net_to_gross,
+            )
+
+        assert with_ntg(0.5) == with_ntg(1.0)
+
+    def test_the_compiled_path_applies_a_scalar_or_a_per_cell_net_to_gross(self):
+        from bores.types import Orientation
+        from bores.wells.compile import compile_perforations
+        from bores.wells.factories import make_producer, make_wells
+
+        grid = Grid.from_deck(DeckFile(DECK))
+        well, _ = make_producer(
+            name="P", perforation_depths=(8000.0, 8020.0), surface_location=(150.0, 150.0), target_bhp=1000.0
+        )
+        permeabilities = {
+            Orientation.X: np.full(grid.n_cells, 100.0),
+            Orientation.Y: np.full(grid.n_cells, 100.0),
+            Orientation.Z: np.full(grid.n_cells, 10.0),
+        }
+
+        def first_index(**kwargs) -> float:
+            compiled = compile_perforations(
+                names=["P"], wells=make_wells(well), grid=grid, permeabilities=permeabilities, **kwargs
+            )
+            return float(compiled.well_indices[0])
+
+        full = first_index()
+        assert first_index(net_to_gross=0.5) == pytest.approx(0.5 * full)
+        assert first_index(net_to_gross=np.full(grid.n_cells, 0.5)) == pytest.approx(0.5 * full)

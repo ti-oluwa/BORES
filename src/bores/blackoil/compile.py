@@ -94,6 +94,7 @@ def compile_model(
                     Orientation.Y: permeability.y,
                     Orientation.Z: permeability.z,
                 },
+                net_to_gross=reservoir.rock.net_to_gross,
                 group_controls=wells.group_controls,
                 groups=wells.groups,
                 horizontal_tolerance=horizontal_tolerance,

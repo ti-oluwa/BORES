@@ -338,6 +338,7 @@ def compute_equivalent_radius_well_index(
     skin: Number,
     equivalent_radius: Number = 0.0,
     permeability_thickness: Number = 0.0,
+    net_to_gross: Number = 1.0,
 ) -> Number:
     """
     Well index for a cell where `is_locally_cartesian` returned `False`.
@@ -359,7 +360,10 @@ def compute_equivalent_radius_well_index(
     :param equivalent_radius: Pressure equivalent radius to use in place of the one worked out
         from the cell volume. Zero to work it out.
     :param permeability_thickness: Permeability times thickness to use in place of
-        `permeability * completion_length`. Zero to work it out.
+        `permeability * completion_length * net_to_gross`. Zero to work it out. It is used as it
+        stands, without net-to-gross.
+    :param net_to_gross: Net-to-gross ratio of the interval, which scales the permeability
+        thickness that is worked out.
     :returns: Well index (mD*ft).
     """
     r0 = (
@@ -370,7 +374,7 @@ def compute_equivalent_radius_well_index(
     kh = (
         permeability_thickness
         if permeability_thickness > 0.0
-        else permeability * completion_length
+        else permeability * completion_length * net_to_gross
     )
     return kh / (np.log(r0 / wellbore_radius) + skin)
 
@@ -386,7 +390,7 @@ def resolve_connection_terms(
     ky: Number,
     kz: Number,
     regime_constant: Number | None = None,
-    net_to_gross: float = 1.0,
+    net_to_gross: Number = 1.0,
 ) -> tuple[Number, Number | None]:
     """
     Resolves the connection factor and the connection conductivity for one
@@ -415,7 +419,8 @@ def resolve_connection_terms(
     :param kz: Permeability along z at `cell_index`.
     :param regime_constant: Forwarded to `compute_peaceman_well_index`. Defaults to the
         `WELL_INDEX_REGIME_CONSTANT` constant.
-    :param net_to_gross: Forwarded to `compute_peaceman_well_index`.
+    :param net_to_gross: Net-to-gross ratio of the interval. It scales the permeability thickness
+        in both index calculations, unless the perforation gives its own.
     :returns: `(connection factor, conductivity)` for this (perforation, cell) pair.
     """
     multiplier = perforation.connection_factor_multiplier
@@ -442,11 +447,12 @@ def resolve_connection_terms(
             skin=perforation.skin,
             equivalent_radius=perforation.pressure_equivalent_radius or 0.0,
             permeability_thickness=perforation.permeability_thickness or 0.0,
+            net_to_gross=net_to_gross,
         )
         conductivity = (
             perforation.permeability_thickness
             if perforation.permeability_thickness is not None
-            else effective_permeability * completion_length
+            else effective_permeability * completion_length * net_to_gross
         )
     else:
         # Perforation (TVD, axis-aligned).
@@ -504,11 +510,12 @@ def resolve_connection_terms(
                 skin=perforation.skin,
                 equivalent_radius=perforation.pressure_equivalent_radius or 0.0,
                 permeability_thickness=perforation.permeability_thickness or 0.0,
+                net_to_gross=net_to_gross,
             )
             conductivity = (
                 perforation.permeability_thickness
                 if perforation.permeability_thickness is not None
-                else effective_permeability * completion_length
+                else effective_permeability * completion_length * net_to_gross
             )
 
     if multiplier is not None:
@@ -637,7 +644,11 @@ def build_well_index(
             ky=ky[position],
             kz=kz[position],
             regime_constant=regime_constant,
-            net_to_gross=1.0 if net_to_gross_values is None else net_to_gross_values[position],
+            net_to_gross=(
+                float(net_to_gross)  # type: ignore[arg-type]
+                if net_to_gross_values is None
+                else net_to_gross_values[position]
+            ),
         )
         resolved.append(
             attrs.evolve(perforation_index, well_index=well_index, conductivity=conductivity)
