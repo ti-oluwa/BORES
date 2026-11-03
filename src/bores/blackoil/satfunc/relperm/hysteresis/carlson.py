@@ -372,7 +372,7 @@ class CarlsonRelPermTable(HysteresisRelPermTable):
         )
         if use_oil_hysteresis:
             # The step weight of the water side compares water with its minimum.
-            history = history._replace(water_reversal_saturation=inputs.water_minimum)
+            history = history._replace(water_reversal_saturation=inputs.minimum_water)
 
         drainage_water_system = self.oil_water_drainage_table
         drainage_gas_system = self.gas_oil_drainage_table
@@ -412,7 +412,7 @@ class CarlsonRelPermTable(HysteresisRelPermTable):
             translate_scanning_saturation(
                 size=size,
                 saturation=sw,
-                reversal_saturation=inputs.water_minimum,
+                reversal_saturation=inputs.minimum_water,
                 shift_axis=self.oil_shift_axis,
                 shift=self.oil_shift,
                 vertical_scale=self.oil_scale,

@@ -242,7 +242,7 @@ class ScanInputs(typing.NamedTuple):
     gas_reversal: NumberArray[OneDimension]
     """Gas saturation at the last reversal, or the maximum when unspecified."""
 
-    water_minimum: NumberArray[OneDimension]
+    minimum_water: NumberArray[OneDimension]
     """Historical minimum water saturation per cell, or the placeholder when it was not given."""
 
 
@@ -576,6 +576,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
             )
         else:
             maximum_water, water_flag, water_reversal = placeholder, no_flag, placeholder
+
         if use_gas_hysteresis:
             maximum_gas = flatten_kernel_input(value=max_gas_saturation, shape=flat_shape)
             gas_flag = flatten_kernel_input(
@@ -589,7 +590,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         else:
             maximum_gas, gas_flag, gas_reversal = placeholder, no_flag, placeholder
 
-        water_minimum = (
+        minimum_water = (
             flatten_kernel_input(value=min_water_saturation, shape=flat_shape)
             if use_water_hysteresis and min_water_saturation is not None
             else placeholder
@@ -618,7 +619,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
             gas_is_non_wetting=gas_is_non_wetting,
             water_reversal=typing.cast("NumberArray[OneDimension]", water_reversal),
             gas_reversal=typing.cast("NumberArray[OneDimension]", gas_reversal),
-            water_minimum=typing.cast("NumberArray[OneDimension]", water_minimum),
+            minimum_water=typing.cast("NumberArray[OneDimension]", minimum_water),
         )
         return inputs, history
 

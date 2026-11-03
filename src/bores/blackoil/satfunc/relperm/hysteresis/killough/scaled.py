@@ -73,8 +73,8 @@ from bores.types import (
 __all__ = [
     "KilloughEndpoints",
     "KilloughRelPermTable",
-    "scan_killough_curves_kernel",
-    "stretch_saturation_axis_kernel",
+    "scan_killough_curves",
+    "stretch_saturation_axis",
 ]
 
 SATURATION_EPSILON = 1e-12
@@ -124,7 +124,7 @@ class KilloughEndpoints(typing.NamedTuple):
 
 
 @numba.njit(cache=True, error_model="numpy")
-def stretch_saturation_axis_kernel(
+def stretch_saturation_axis(
     size: Integer,
     saturation: NumberArray[OneDimension],
     reversal_saturation: NumberArray[OneDimension],
@@ -201,7 +201,7 @@ def stretch_saturation_axis_kernel(
 
 
 @numba.njit(cache=True, error_model="numpy")
-def scan_killough_curves_kernel(
+def scan_killough_curves(
     size: Integer,
     is_scanning: NumberArray[OneDimension],
     axis_scale: NumberArray[OneDimension],
@@ -234,9 +234,9 @@ def scan_killough_curves_kernel(
     respect to the non-wetting phase's saturation. See the module notes for the equations.
 
     :param size: Number of cells.
-    :param is_scanning: 1 for a cell on a scanning curve, from `stretch_saturation_axis_kernel`.
-    :param axis_scale: Slope of the stretched axis, from `stretch_saturation_axis_kernel`.
-    :param trapped_saturation: Trapped saturation, from `stretch_saturation_axis_kernel`.
+    :param is_scanning: 1 for a cell on a scanning curve, from `stretch_saturation_axis`.
+    :param axis_scale: Slope of the stretched axis, from `stretch_saturation_axis`.
+    :param trapped_saturation: Trapped saturation, from `stretch_saturation_axis`.
     :param drainage_non_wetting_relperm: Drainage non-wetting value at each cell's saturation.
     :param drainage_wetting_relperm: Drainage wetting value at each cell's saturation.
     :param drainage_non_wetting_relperm_slope: Slope of `drainage_non_wetting_relperm`.
@@ -381,7 +381,7 @@ class KilloughRelPermTable(HysteresisRelPermTable):
         object.__setattr__(self, "gas_oil_endpoints", self._read_gas_oil_endpoints())
         object.__setattr__(self, "oil_water_endpoints", self._read_oil_water_endpoints())
 
-    def gas_oil_relperms_at(
+    def get_gas_oil_relperms_at(
         self,
         table: RelativePermeabilityTable,
         gas_saturation: NumberArray[OneDimension],
@@ -412,7 +412,7 @@ class KilloughRelPermTable(HysteresisRelPermTable):
             with_derivatives=with_derivatives,
         )
 
-    def oil_water_relperms_at(
+    def get_oil_water_relperms_at(
         self,
         table: RelativePermeabilityTable,
         oil_saturation: NumberArray[OneDimension],
@@ -465,8 +465,8 @@ class KilloughRelPermTable(HysteresisRelPermTable):
         if maximum - imbibition_critical <= SATURATION_EPSILON:
             return None
 
-        def relperms_at(table: RelativePermeabilityTable, gas: Number) -> TwoPhaseRelPerms:
-            return self.gas_oil_relperms_at(
+        def get_relperms_at(table: RelativePermeabilityTable, gas: Number) -> TwoPhaseRelPerms:
+            return self.get_gas_oil_relperms_at(
                 table,
                 typing.cast("NumberArray[OneDimension]", np.array([gas])),
                 water_saturation=typing.cast(
@@ -475,8 +475,8 @@ class KilloughRelPermTable(HysteresisRelPermTable):
                 with_derivatives=False,
             )
 
-        at_critical = relperms_at(imbibition, imbibition_critical)
-        at_maximum = relperms_at(imbibition, maximum)
+        at_critical = get_relperms_at(imbibition, imbibition_critical)
+        at_maximum = get_relperms_at(imbibition, maximum)
         return KilloughEndpoints(
             drainage_critical_saturation=drainage_critical,
             imbibition_critical_saturation=imbibition_critical,
@@ -500,7 +500,7 @@ class KilloughRelPermTable(HysteresisRelPermTable):
             drainage_wetting_relperm_at_imbibition_critical_saturation=(
                 typing.cast(
                     "NumberArray[OneDimension]",
-                    relperms_at(drainage, imbibition_critical).wetting_relperm,
+                    get_relperms_at(drainage, imbibition_critical).wetting_relperm,
                 )[0]
             ),
         )
@@ -516,16 +516,16 @@ class KilloughRelPermTable(HysteresisRelPermTable):
         if maximum - imbibition_critical <= SATURATION_EPSILON:
             return None
 
-        def relperms_at(table: RelativePermeabilityTable, oil: Number) -> TwoPhaseRelPerms:
-            return self.oil_water_relperms_at(
+        def get_relperms_at(table: RelativePermeabilityTable, oil: Number) -> TwoPhaseRelPerms:
+            return self.get_oil_water_relperms_at(
                 table,
                 typing.cast("NumberArray[OneDimension]", np.array([oil])),
                 gas_saturation=typing.cast("NumberArray[OneDimension]", np.zeros(1)),
                 with_derivatives=False,
             )
 
-        at_critical = relperms_at(imbibition, imbibition_critical)
-        at_maximum = relperms_at(imbibition, maximum)
+        at_critical = get_relperms_at(imbibition, imbibition_critical)
+        at_maximum = get_relperms_at(imbibition, maximum)
         return KilloughEndpoints(
             drainage_critical_saturation=drainage_critical,
             imbibition_critical_saturation=imbibition_critical,
@@ -549,7 +549,7 @@ class KilloughRelPermTable(HysteresisRelPermTable):
             drainage_wetting_relperm_at_imbibition_critical_saturation=(
                 typing.cast(
                     "NumberArray[OneDimension]",
-                    relperms_at(drainage, imbibition_critical).wetting_relperm,
+                    get_relperms_at(drainage, imbibition_critical).wetting_relperm,
                 )[0]
             ),
         )
@@ -561,9 +561,9 @@ class KilloughRelPermTable(HysteresisRelPermTable):
         size: Integer,
         saturation: NumberArray[OneDimension],
         reversal_saturation: NumberArray[OneDimension],
-        non_wetting_is_complement: bool,
+        non_wetting_is_complement: Boolean,
         drainage_relperms: TwoPhaseRelPerms,
-        relperms_at: typing.Callable[
+        get_relperms_at: typing.Callable[
             [RelativePermeabilityTable, NumberArray[OneDimension], Boolean], TwoPhaseRelPerms
         ],
         drainage_table: RelativePermeabilityTable,
@@ -583,7 +583,7 @@ class KilloughRelPermTable(HysteresisRelPermTable):
             saturation given.
         :param drainage_relperms: The system's drainage curves at the cells' own saturations, with
             slopes with respect to the non-wetting saturation.
-        :param relperms_at: Reads a table's curves at an array of non-wetting saturations, with
+        :param get_relperms_at: Reads a table's curves at an array of non-wetting saturations, with
             slopes with respect to that saturation, and whether to read the slopes.
         :param drainage_table: The drainage table.
         :param imbibition_table: The imbibition table.
@@ -595,7 +595,7 @@ class KilloughRelPermTable(HysteresisRelPermTable):
         mapped_saturation = typing.cast("NumberArray[OneDimension]", np.empty(size, dtype=dtype))
         axis_scale = typing.cast("NumberArray[OneDimension]", np.empty(size, dtype=dtype))
         is_scanning = typing.cast("NumberArray[OneDimension]", np.empty(size, dtype=dtype))
-        stretch_saturation_axis_kernel(
+        stretch_saturation_axis(
             size=size,
             saturation=saturation,
             reversal_saturation=reversal_saturation,
@@ -612,9 +612,9 @@ class KilloughRelPermTable(HysteresisRelPermTable):
             if non_wetting_is_complement
             else reversal_saturation,
         )
-        at_reversal = relperms_at(drainage_table, reversal_non_wetting, False)
-        at_trapped = relperms_at(drainage_table, trapped_saturation, False)
-        mapped = relperms_at(imbibition_table, mapped_saturation, with_derivatives)
+        at_reversal = get_relperms_at(drainage_table, reversal_non_wetting, False)
+        at_trapped = get_relperms_at(drainage_table, trapped_saturation, False)
+        mapped = get_relperms_at(imbibition_table, mapped_saturation, with_derivatives)
 
         def per_cell(array: NumberOrArray[OneDimension]) -> NumberArray[OneDimension]:
             shape = typing.cast("tuple[int]", (size,))
@@ -638,7 +638,7 @@ class KilloughRelPermTable(HysteresisRelPermTable):
             "NumberArray[OneDimension]",
             np.empty(size if with_derivatives else 1, dtype=dtype),
         )
-        scan_killough_curves_kernel(
+        scan_killough_curves(
             size=size,
             is_scanning=is_scanning,
             axis_scale=axis_scale,
@@ -760,7 +760,7 @@ class KilloughRelPermTable(HysteresisRelPermTable):
                 endpoints=typing.cast(KilloughEndpoints, oil_water_endpoints),
                 size=typing.cast(int, size),
                 saturation=sw,
-                reversal_saturation=inputs.water_minimum,
+                reversal_saturation=inputs.minimum_water,
                 non_wetting_is_complement=True,
                 drainage_relperms=TwoPhaseRelPerms(
                     wetting_relperm=oil_water.wetting_relperm,
@@ -776,7 +776,7 @@ class KilloughRelPermTable(HysteresisRelPermTable):
                         else -oil_water.non_wetting_relperm_slope
                     ),
                 ),
-                relperms_at=lambda table, oil, with_slopes: self.oil_water_relperms_at(
+                get_relperms_at=lambda table, oil, with_slopes: self.get_oil_water_relperms_at(
                     table, oil, gas_saturation=sg, with_derivatives=with_slopes
                 ),
                 drainage_table=self.oil_water_drainage_table,
@@ -813,7 +813,7 @@ class KilloughRelPermTable(HysteresisRelPermTable):
                 reversal_saturation=inputs.gas_reversal,
                 non_wetting_is_complement=False,
                 drainage_relperms=gas_oil,
-                relperms_at=lambda table, gas, with_slopes: self.gas_oil_relperms_at(
+                get_relperms_at=lambda table, gas, with_slopes: self.get_gas_oil_relperms_at(
                     table, gas, water_saturation=sw, with_derivatives=with_slopes
                 ),
                 drainage_table=self.gas_oil_drainage_table,

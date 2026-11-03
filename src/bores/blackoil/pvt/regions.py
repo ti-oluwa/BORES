@@ -34,6 +34,7 @@ from bores.reservoir.temperature import (
     TemperatureTable,
 )
 from bores.types import (
+    Boolean,
     CellArray,
     FloatArray,
     FluidPhase,
@@ -217,26 +218,14 @@ class PVT:
         return len(self.regions)
 
     @classmethod
-    def from_one(cls, region: PVTRegion) -> Self:
-        """
-        Wrap a single `PVTRegion` as region 1.
-
-        Convenience factory for the common single-region case.
-
-        :param region: `PVTRegion` instance.
-        :returns: `PVT` with one entry at key 1.
-        """
-        return cls(regions={1: region})
-
-    @classmethod
     def from_deck(
         cls,
         deck_file: DeckFile,
         *,
         temperature: Temperature | Number,
         interpolation_method: InterpolationMethod = "linear",
-        validate: bool = True,
-        warn_on_extrapolation: bool = False,
+        validate: Boolean = True,
+        warn_on_extrapolation: Boolean = False,
         dtype: npt.DTypeLike = None,
         phases: Phases | None = None,
         salinity: Number | CellArray | None = None,
@@ -1475,8 +1464,8 @@ def load_co2_storage_pvt_regions(
     salinity: Number | CellArray | None = None,
     pressure_range: tuple[Number, Number] | None = None,
     interpolation_method: InterpolationMethod = "linear",
-    validate: bool = True,
-    warn_on_extrapolation: bool = False,
+    validate: Boolean = True,
+    warn_on_extrapolation: Boolean = False,
     dtype: npt.DTypeLike = None,  # type: ignore[assignment]
 ) -> dict[Integer, PVTRegion]:
     """
@@ -1571,8 +1560,8 @@ def load_pvt_regions(
     temperature: Temperature,
     *,
     interpolation_method: InterpolationMethod = "linear",
-    validate: bool = True,
-    warn_on_extrapolation: bool = False,
+    validate: Boolean = True,
+    warn_on_extrapolation: Boolean = False,
     dtype: npt.DTypeLike = None,
     phases: Phases | None = None,
     salinity: Number | CellArray | None = None,

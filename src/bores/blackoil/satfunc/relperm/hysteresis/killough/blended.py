@@ -42,10 +42,10 @@ class BlendedKilloughRelPermTable(HysteresisRelPermTable):
     """
     Implements the Killough relative permeability hysteresis model/table with Land trapping.
 
-    During *primary drainage* the relative permeabilities follow the
+    During primary drainage, the relative permeabilities follow the
     `oil_water_drainage_table` and `gas_oil_drainage_table`.
 
-    When the flow reverses (*imbibition*) two things happen simultaneously.
+    When the flow reverses (imbibition) two things happen simultaneously.
 
     **Land trapping**: a portion of the non-wetting phase becomes
     disconnected. The dynamic residual saturation depends on the saturation
@@ -141,6 +141,7 @@ class BlendedKilloughRelPermTable(HysteresisRelPermTable):
         use_water_hysteresis = inputs.use_water_hysteresis
         use_gas_hysteresis = inputs.use_gas_hysteresis
         gas_is_non_wetting = inputs.gas_is_non_wetting
+
         # Bounding curves
         drainage_water_system = self.oil_water_drainage_table
         drainage_gas_system = self.gas_oil_drainage_table
@@ -216,6 +217,7 @@ class BlendedKilloughRelPermTable(HysteresisRelPermTable):
                 krw_i, kro_water_i, dkrw_i, dkro_water_i = query_oil_water_curves(
                     drainage_water_system, **water_arguments, **land_kwargs
                 )
+
             if water_scale is not None and with_derivatives:
                 assert dkrw_i is not None
                 assert dkro_water_i is not None

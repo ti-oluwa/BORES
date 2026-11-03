@@ -134,7 +134,7 @@ class SatFunc:
         if missing_saturation or missing_imbibition:
             raise ValidationError(
                 f"Region numbers without a saturation function table (available: "
-                f"{sorted(self.tables)}): SATNUM {missing_saturation or 'none'}, "
+                f"{sorted(self.tables)}): `SATNUM` {missing_saturation or 'none'}, "
                 f"IMBNUM {missing_imbibition or 'none'}."
             )
 
@@ -142,7 +142,7 @@ class SatFunc:
         """
         Return the `SatFuncTables` for a given 1-based region index.
 
-        :param satnum: 1-based SATNUM region index.
+        :param satnum: 1-based `SATNUM` region index.
         :returns: `SatFuncTables` for that region.
         :raises KeyError: If the region index does not exist.
         """

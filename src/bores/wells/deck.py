@@ -19,7 +19,7 @@ from bores.schedule.events import AllOf, AnyOf, ComparisonOperator, TimeEvent, T
 from bores.schedule.summary import RecordSummary, Summary
 from bores.timestep.deck import get_tuning_at_start
 from bores.timestep.targets import TimeTargets
-from bores.types import FluidPhase, Number, UnitSystem
+from bores.types import Boolean, FluidPhase, Number, UnitSystem
 from bores.units import get_conversion_factors
 from bores.wells import summary as ws
 from bores.wells.base import CompletionStatus, Perforation, Well, Wells, WellStatus, WellType
@@ -1855,7 +1855,7 @@ def load_well_schedule(
     deck_file: DeckFile,
     *,
     compiled_at: float = 0.0,
-    load_summary: bool = True,
+    load_summary: Boolean = True,
     unit_system: UnitSystem | None = None,
 ) -> Schedule["CompiledBlackOilModel"]:
     """

@@ -25,6 +25,7 @@ from bores.types import (
     BooleanArray,
     CapillaryPressureDerivatives,
     CapillaryPressures,
+    Integer,
     NDimension,
     Number,
     NumberArray,
@@ -37,7 +38,7 @@ __all__ = ["KilloughCapillaryPressureTable", "scan_curve"]
 
 def scan_curve(
     *,
-    size: int,
+    size: Integer,
     flat_shape: tuple[int, ...],
     saturation: NumberArray[OneDimension],
     maximum_saturation: NumberArray[OneDimension],
@@ -116,7 +117,7 @@ class KilloughCapillaryPressureTable(HysteresisCapillaryPressureTable):
     Implements the Killough capillary pressure hysteresis model/table.
 
     Capillary pressure hysteresis involves no trapping. When the displacement
-    direction reverses, capillary pressure traces a *scanning curve* that
+    direction reverses, capillary pressure traces a scanning curve that
     interpolates between the primary drainage and imbibition bounds.
 
     Both two-phase (`TwoPhaseCapillaryPressureTable`) and full three-phase
@@ -125,8 +126,8 @@ class KilloughCapillaryPressureTable(HysteresisCapillaryPressureTable):
     (`get_oil_water_wetting_phase` / `get_gas_oil_wetting_phase`) so the
     model is wettability-agnostic.
 
-    The oil-water scanning curve scans over *water* saturation; the gas-oil
-    scanning curve scans over *gas* saturation.
+    The oil-water scanning curve scans over water saturation; the gas-oil
+    scanning curve scans over gas saturation.
 
     Saturation history is passed as keyword arguments to `evaluate`, `derivatives` and
     `evaluate_with_derivatives`. A sub-system whose history is not supplied stays on its primary
@@ -134,8 +135,6 @@ class KilloughCapillaryPressureTable(HysteresisCapillaryPressureTable):
     and an imbibition table that differs from its drainage table, since a scan between identical
     curves is the curve itself.
     """
-
-    __type__ = "killough_capillary_pressure_model"
 
     scanning_interpolation_exponent: Number = 1.0
     """Killough interpolation exponent *n* (1 = linear)."""
@@ -296,6 +295,7 @@ class KilloughCapillaryPressureTable(HysteresisCapillaryPressureTable):
             result = np.asarray(array)
             if result.size == 1 and size > 1:
                 result = np.broadcast_to(result, (size,))
+
             result = result.reshape(shape)
             if is_scalar:
                 return typing.cast("Number", result.item())

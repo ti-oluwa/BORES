@@ -240,6 +240,7 @@ def rescale_scanning_saturation(
         else:
             start = trapped
             span = reversal - trapped
+
         current = element_at(array=saturation, index=i)
         if span > saturation_epsilon and table_span > saturation_epsilon:
             scale = table_span / span

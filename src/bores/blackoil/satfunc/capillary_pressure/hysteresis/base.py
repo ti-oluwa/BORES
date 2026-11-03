@@ -323,7 +323,7 @@ class HysteresisCapillaryPressureTable(CapillaryPressureTable):
         :return: Connate water saturation.
         """
         table = self.oil_water_drainage_table
-        if isinstance(table, TwoPhaseCapillaryPressureTable | ThreePhaseCapillaryPressureTable):
+        if isinstance(table, (TwoPhaseCapillaryPressureTable, ThreePhaseCapillaryPressureTable)):
             return table.get_connate_water_saturation()
         return table.irreducible_water_saturation  # type: ignore[attr-defined]
 
@@ -361,7 +361,7 @@ class HysteresisCapillaryPressureTable(CapillaryPressureTable):
     @staticmethod
     def is_distinct_imbibition(
         imbibition_table: AnyCapillaryTable | None, drainage_table: AnyCapillaryTable
-    ) -> bool:
+    ) -> Boolean:
         """Whether the imbibition curve can differ from the drainage curve."""
         return imbibition_table is not None and imbibition_table is not drainage_table
 

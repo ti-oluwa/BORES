@@ -20,6 +20,7 @@ from bores.simulation.options import (
 )
 from bores.timestep.control import Timer
 from bores.types import (
+    Boolean,
     DiscretizationMethod,
     Phases,
     UnitConversionTable,
@@ -83,7 +84,7 @@ class RunSpec:
     well_control: WellControlSpec = attrs.field(factory=WellControlSpec)
     """Numerical tuning for well-control resolution. Defaults to `WellControlSpec`'s own defaults."""
 
-    data_check_only: bool = False
+    data_check_only: Boolean = False
     """
     Whether the run only loads and checks its input without simulating (`NOSIM`).
 

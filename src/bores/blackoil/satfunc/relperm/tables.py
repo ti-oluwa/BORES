@@ -644,7 +644,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
             np.asarray(self.non_wetting_phase_relative_permeability, dtype=dtype),
         )
 
-        # Validate min_value sentinels eagerly so errors surface at construction time
+        # Validate `min_value` sentinels eagerly so errors surface at construction time
         resolve_min_relperm(self.min_wetting_relperm)
         resolve_min_relperm(self.min_non_wetting_relperm)
 
@@ -1612,12 +1612,14 @@ def resolve_residual_oil_saturation_gas(
     """
     if not isinstance(gas_oil_table, TwoPhaseRelPermTable):
         return gas_oil_table.get_residual_oil_saturation_gas()
+
     phases = {gas_oil_table.wetting_phase, gas_oil_table.non_wetting_phase}
     if FluidPhase.GAS not in phases:
         return gas_oil_table.get_residual_oil_saturation_gas()
     if gas_oil_table.get_reference_axis_phase() != FluidPhase.GAS:
         return gas_oil_table.get_residual_oil_saturation_gas()
-    sg_max = float(gas_oil_table.reference_saturation[-1])
+
+    sg_max = gas_oil_table.reference_saturation[-1]
     return max(0.0, 1.0 - connate_water_saturation - sg_max)
 
 
@@ -1675,6 +1677,7 @@ def query_oil_water_system(
         krw, kro = query_two_phase_pair(table, water_saturation, oil_saturation, derivative)
     else:
         kro, krw = query_two_phase_pair(table, oil_saturation, water_saturation, derivative)
+
     if derivative and table.get_reference_axis_phase() != FluidPhase.WATER:
         # The table's axis is So = 1 - Sw
         return -krw, -kro  # type: ignore[operator,return-value]
@@ -1701,6 +1704,7 @@ def query_gas_oil_system(
         kro, krg = query_two_phase_pair(table, oil_saturation, gas_saturation, derivative)
     else:
         krg, kro = query_two_phase_pair(table, gas_saturation, oil_saturation, derivative)
+
     if derivative and table.get_reference_axis_phase() != FluidPhase.GAS:
         # The table's axis is So = 1 - swc - Sg
         return -krg, -kro  # type: ignore[operator,return-value]

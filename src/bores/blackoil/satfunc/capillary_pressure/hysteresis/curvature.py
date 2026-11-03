@@ -52,7 +52,7 @@ from bores.types import (
 __all__ = [
     "CurvatureCapillaryPressureTable",
     "compute_curvature_scanning_weight",
-    "scan_curve_curvature",
+    "scan_curve",
 ]
 
 
@@ -66,8 +66,8 @@ def compute_curvature_scanning_weight(
     numerical_epsilon: Number,
 ) -> tuple[Number, Number]:
     """
-    Weight `F` of the imbibition curve on a scanning curve, and its derivative with respect to the
-    saturation.
+    Compute the weight `F` of the imbibition curve on a scanning curve, and its derivative with
+    respect to the saturation.
 
     With `x` the distance travelled from the end the curve left, and `X` the length of the
     scanning range, both forms reduce to `x * (X + ε) / (X * (x + ε))`, which is 0 at the start,
@@ -90,10 +90,12 @@ def compute_curvature_scanning_weight(
     span = highest_saturation - lowest_saturation
     if span <= numerical_epsilon:
         return 0.0, 0.0
+
     if is_imbibition != 0:
         travelled = saturation - lowest_saturation
     else:
         travelled = highest_saturation - saturation
+
     if travelled <= 0.0:
         fraction = 0.0
         fraction_slope = 0.0
@@ -103,13 +105,14 @@ def compute_curvature_scanning_weight(
     else:
         fraction = travelled * (span + curvature) / (span * (travelled + curvature))
         fraction_slope = (span + curvature) * curvature / (span * (travelled + curvature) ** 2)
+
     if is_imbibition != 0:
         return fraction, fraction_slope
     return 1.0 - fraction, fraction_slope
 
 
 @numba.njit(cache=True, error_model="numpy")
-def scan_curve_curvature_kernel(
+def scan_curve_kernel(
     size: Integer,
     saturation: NumberArray[OneDimension],
     reversal_saturation: NumberArray[OneDimension],
@@ -192,9 +195,9 @@ def scan_curve_curvature_kernel(
             )
 
 
-def scan_curve_curvature(
+def scan_curve(
     *,
-    size: int,
+    size: Integer,
     saturation: NumberArray[OneDimension],
     maximum_saturation: NumberArray[OneDimension],
     minimum_saturation: NumberArray[OneDimension],
@@ -221,9 +224,9 @@ def scan_curve_curvature(
     :param drainage: Drainage pressure and slope.
     :param imbibition: Imbibition pressure and slope.
     :param with_derivatives: Whether the slopes are present and wanted.
-    :param mirror: Scan a non-wetting phase down from its peak, see `scan_curve_curvature_kernel`.
+    :param mirror: Scan a non-wetting phase down from its peak, see `scan_curve_kernel`.
     :param retrace: Scan a wetting phase along one curve in both directions, see
-        `scan_curve_curvature_kernel`.
+        `scan_curve_kernel`.
     :return: Scanned pressure and slope (the slope is `None` when it is not wanted).
     """
     drainage_value = typing.cast(
@@ -249,7 +252,7 @@ def scan_curve_curvature(
     slope = typing.cast(
         "NumberArray[OneDimension]", np.empty(size if with_derivatives else 1, dtype=dtype)
     )
-    scan_curve_curvature_kernel(
+    scan_curve_kernel(
         size=size,
         saturation=saturation,
         reversal_saturation=reversal_saturation,
@@ -298,7 +301,7 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
     """
 
     scanning_curvature: Number = attrs.field(
-        factory=lambda: typing.cast(float, c.HYSTERESIS_CAPILLARY_PRESSURE_CURVATURE)
+        factory=lambda: typing.cast(Number, c.HYSTERESIS_CAPILLARY_PRESSURE_CURVATURE)
     )
     """
     Curvature `ε` of the scanning curves. The closer it is to zero, the sooner a scanning curve
@@ -308,7 +311,7 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
     retrace_scanning_curves: Boolean = True
     """
     What the oil-water capillary pressure does when water reverses part-way along a scanning
-    curve. When set, it goes back the way it came: one curve joins the lowest and the highest water
+    curve. When True, it goes back the way it came: one curve joins the lowest and the highest water
     saturation reached, and the cell is on it whichever way water is moving. Otherwise a reversal
     starts a new scanning curve, a drainage one from the point where imbibition turned around, and
     the two together close a loop. The gas-oil capillary pressure is always retraced.
@@ -444,7 +447,7 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
                 **kwargs,
             )
             peak = flatten_kernel_input(value=gas_peak, shape=flat_shape)
-            gas_oil, gas_oil_slope = scan_curve_curvature(
+            gas_oil, gas_oil_slope = scan_curve(
                 size=size,
                 saturation=sg,
                 maximum_saturation=peak,
@@ -468,7 +471,7 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
                 **kwargs,
             )
             maximum = flatten_kernel_input(value=max_water_saturation, shape=flat_shape)
-            oil_water, oil_water_slope = scan_curve_curvature(
+            oil_water, oil_water_slope = scan_curve(
                 size=size,
                 saturation=sw,
                 maximum_saturation=maximum,
