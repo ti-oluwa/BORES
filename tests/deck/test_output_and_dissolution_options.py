@@ -86,7 +86,10 @@ class TestDissolutionLimits:
 
     def test_a_deck_with_neither_sets_nothing(self):
         assert load_dissolution_limits(deck()) == {}
-        assert load_run_spec(deck()).physics_options == PhysicsOptions()
+        # Only the regime constant, which every deck sets to Eclipse's 0
+        assert load_run_spec(deck()).physics_options == PhysicsOptions(
+            well_index_regime_constant=0.0
+        )
 
     def test_later_records_are_warned_about_and_not_used(self):
         body = "DRSDT\n 0.5 /\nTSTEP\n 10 /\nDRSDT\n 9 /\nTSTEP\n 5 /\n"

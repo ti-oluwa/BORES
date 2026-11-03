@@ -40,6 +40,7 @@ def load_run_spec(deck_file: DeckFile) -> RunSpec:
       and `VFPIDIMS`.
     - `data_check_only`: whether the deck has `NOSIM`.
     - `physics_options.minimum_pore_volume`: `MINPV`, in pore volume units.
+    - `physics_options.well_index_regime_constant`: 0, since Eclipse's well index has none.
     - `physics_options` limits on how fast gas dissolves and oil vaporizes: `DRSDT` and `DRVDT`
       (the ones at the start).
     - `output_options`: `NOECHO`, `FMTIN`, `FMTOUT`, `UNIFIN`, `UNIFOUT`, `INIT`, `GRIDFILE`,
@@ -72,6 +73,8 @@ def load_run_spec(deck_file: DeckFile) -> RunSpec:
         newton_settings["maximum_newton_iterations"] = int(maximum_newton_iterations)
 
     physics_settings: dict[str, typing.Any] = load_dissolution_limits(deck_file)
+    # Eclipse's well index has no regime constant, so a deck's index is the steady state one
+    physics_settings["well_index_regime_constant"] = 0.0
     minimum_pore_volume = load_minimum_pore_volume(deck_file)
     if minimum_pore_volume is not None:
         physics_settings["minimum_pore_volume"] = minimum_pore_volume

@@ -728,6 +728,16 @@ class PhysicsOptions:
     with oil can take up oil.
     """
 
+    well_index_regime_constant: Number | None = None
+    """
+    The constant added to `ln(re / rw) + skin` in the well index, which selects the flow regime
+    the index assumes: 0 for steady state, -3/4 for pseudo steady state, 1/2 for transient. `None`
+    uses the `WELL_INDEX_REGIME_CONSTANT` constant of `constants`. It is handed to the wells API
+    that builds the well indices.
+
+    A deck's own well index (Eclipse's) has no such constant, so a deck loads as 0.
+    """
+
     def convert(self, *, volume_factor: Number) -> "PhysicsOptions":
         """
         The settings in another unit system.

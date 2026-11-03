@@ -130,7 +130,7 @@ class TestEquivalentRadiusBranch:
         index = compute_equivalent_radius_well_index(
             **self.BASE, equivalent_radius=12.0, permeability_thickness=1500.0
         )
-        assert index == pytest.approx(2 * np.pi * 1500.0 / (np.log(12.0 / 0.25) + 0.5))
+        assert index == pytest.approx(1500.0 / (np.log(12.0 / 0.25) + 0.5))
 
 
 class TestValidationAndUnits:

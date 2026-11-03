@@ -851,6 +851,14 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         description="SI already reports viscosity in the coherent unit (Pa*s) its Reynolds-number calculation needs - no conversion.",
         unit="dimensionless",
     ),
+    "WELL_INDEX_REGIME_CONSTANT": Constant(
+        value=-3 / 4,
+        description=(
+            "The constant added to ln(re/rw) + skin in the Peaceman well index to select the flow "
+            "regime: 0 for steady state, -3/4 for pseudo steady state, 1/2 for transient."
+        ),
+        unit="dimensionless",
+    ),
     "RADIAL_FLOW_CONSTANT_FIELD": Constant(
         value=0.03976180178418527,
         description=(

@@ -21,6 +21,7 @@ import numba
 import numpy as np
 from typing_extensions import Self
 
+from bores.constants import c
 from bores.errors import ValidationError
 from bores.grids.base import Grid
 from bores.types import (
@@ -346,6 +347,10 @@ def compute_equivalent_radius_well_index(
     Peaceman's `r_0 = 0.14 * sqrt(dx**2 + dy**2)`, valid without assuming a
     clean local (dx, dy) pair.
 
+    Like `compute_peaceman_well_index` it returns `k * h / (ln(r0 / rw) + skin)` without the
+    `2 * pi`, which `c.RADIAL_FLOW_CONSTANT_<unit system>` supplies when the index is turned into
+    a rate. It has no regime constant, as in Eclipse.
+
     :param permeability: Isotropic (or geometric-mean) permeability (mD).
     :param cell_volume: `grid.cell_volumes[cell_index]`.
     :param completion_length: Perforation length within this cell (ft).
@@ -367,7 +372,7 @@ def compute_equivalent_radius_well_index(
         if permeability_thickness > 0.0
         else permeability * completion_length
     )
-    return 2.0 * np.pi * kh / (np.log(r0 / wellbore_radius) + skin)
+    return kh / (np.log(r0 / wellbore_radius) + skin)
 
 
 def resolve_connection_terms(
@@ -380,7 +385,7 @@ def resolve_connection_terms(
     kx: Number,
     ky: Number,
     kz: Number,
-    regime_constant: float = -3 / 4,
+    regime_constant: Number | None = None,
     net_to_gross: float = 1.0,
 ) -> tuple[Number, Number | None]:
     """
@@ -408,7 +413,8 @@ def resolve_connection_terms(
     :param kx: Permeability along x at `cell_index`.
     :param ky: Permeability along y at `cell_index`.
     :param kz: Permeability along z at `cell_index`.
-    :param regime_constant: Forwarded to `compute_peaceman_well_index`.
+    :param regime_constant: Forwarded to `compute_peaceman_well_index`. Defaults to the
+        `WELL_INDEX_REGIME_CONSTANT` constant.
     :param net_to_gross: Forwarded to `compute_peaceman_well_index`.
     :returns: `(connection factor, conductivity)` for this (perforation, cell) pair.
     """
@@ -419,6 +425,9 @@ def resolve_connection_terms(
         return perforation.connection_factor_override, None
 
     assert grid.cell_volumes is not None
+    regime_constant = typing.cast(
+        "Number", c.WELL_INDEX_REGIME_CONSTANT if regime_constant is None else regime_constant
+    )
     if perforation.top_md is not None:
         # No discrete axis to run Peaceman against so we always use isotropic
         # equivalent-radius, using the geometric-mean permeability and this
@@ -435,9 +444,9 @@ def resolve_connection_terms(
             permeability_thickness=perforation.permeability_thickness or 0.0,
         )
         conductivity = (
-            2.0 * np.pi * perforation.permeability_thickness
+            perforation.permeability_thickness
             if perforation.permeability_thickness is not None
-            else 2.0 * np.pi * effective_permeability * completion_length
+            else effective_permeability * completion_length
         )
     else:
         # Perforation (TVD, axis-aligned).
@@ -497,9 +506,9 @@ def resolve_connection_terms(
                 permeability_thickness=perforation.permeability_thickness or 0.0,
             )
             conductivity = (
-                2.0 * np.pi * perforation.permeability_thickness
+                perforation.permeability_thickness
                 if perforation.permeability_thickness is not None
-                else 2.0 * np.pi * effective_permeability * completion_length
+                else effective_permeability * completion_length
             )
 
     if multiplier is not None:
@@ -515,7 +524,7 @@ def resolve_connection_factor(
     partial_penetration_fraction: Number,
     wellbore_radius: Number,
     permeabilities: typing.Mapping[Orientation, Number],
-    regime_constant: float = -3 / 4,
+    regime_constant: Number | None = None,
     net_to_gross: float = 1.0,
 ) -> Number:
     """
@@ -533,7 +542,8 @@ def resolve_connection_factor(
         well default).
     :param permeabilities: Per-axis permeability at `cell_index`, keyed by
         `Orientation.X`/`Y`/`Z`.
-    :param regime_constant: Forwarded to `compute_peaceman_well_index`.
+    :param regime_constant: Forwarded to `compute_peaceman_well_index`. Defaults to the
+        `WELL_INDEX_REGIME_CONSTANT` constant.
     :param net_to_gross: Forwarded to `compute_peaceman_well_index`.
     :returns: Connection factor / well index for this (perforation, cell) pair.
     """
@@ -556,7 +566,7 @@ def build_well_index(
     well: Well,
     *,
     permeabilities: typing.Mapping[Orientation, NumberArray[OneDimension]],
-    regime_constant: float = -3 / 4,
+    regime_constant: Number | None = None,
     net_to_gross: NumberOrArray[OneDimension] = 1.0,
     horizontal_tolerance: Number | None = None,
     intersection_method: GridIntersectionMethod = "aabb",
@@ -571,7 +581,8 @@ def build_well_index(
     :param well: The well to resolve. Not modified.
     :param permeabilities: Per-axis permeability arrays, shape `(n_cells,)`
         each, keyed by `Orientation.X`/`Y`/`Z`.
-    :param regime_constant: Forwarded to `resolve_connection_terms`.
+    :param regime_constant: Forwarded to `resolve_connection_terms`. Defaults to the
+        `WELL_INDEX_REGIME_CONSTANT` constant.
     :param net_to_gross: Forwarded to `resolve_connection_terms`.
     :param horizontal_tolerance: Forwarded to `resolve_perforations_indices`.
     :param intersection_method: Forwarded to `resolve_perforations_indices`.
@@ -646,7 +657,7 @@ def build_wells_indices(
     wells: Wells,
     *,
     permeabilities: typing.Mapping[Orientation, NumberArray[OneDimension]],
-    regime_constant: float = -3 / 4,
+    regime_constant: Number | None = None,
     net_to_gross: NumberOrArray[OneDimension] = 1.0,
     horizontal_tolerance: Number | None = None,
     intersection_method: GridIntersectionMethod = "aabb",
@@ -660,7 +671,8 @@ def build_wells_indices(
     :param wells: `Wells` container (all wells to resolve).
     :param permeabilities: Per-axis permeability arrays, shape `(n_cells,)`
         each, keyed by `Orientation.X`/`Y`/`Z`.
-    :param regime_constant: Forwarded to `build_well_index`.
+    :param regime_constant: Forwarded to `build_well_index`. Defaults to the
+        `WELL_INDEX_REGIME_CONSTANT` constant.
     :param net_to_gross: Forwarded to `build_well_index`.
     :param horizontal_tolerance: Forwarded to `build_well_index`.
     :param intersection_method: Forwarded to `build_well_index`.
