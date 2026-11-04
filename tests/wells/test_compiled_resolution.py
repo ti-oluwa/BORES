@@ -9,6 +9,7 @@ import attrs
 import numpy as np
 import pytest
 
+from bores.errors import ValidationError
 from bores.precision import get_dtype, with_precision
 from bores.types import FluidPhase
 from bores.wells.compile import (
@@ -21,6 +22,7 @@ from bores.wells.controls import (
     EconomicQuantity,
     RateLimit,
     RateQuantity,
+    THPLimit,
     WorkoverAction,
 )
 from bores.wells.hydraulics.base import compile_connection_fluids
@@ -124,10 +126,11 @@ def set_control(well, mode, target_rate=None):
 
 def make_well(*, kind, correlation, mode=ConnectionPressureMode.HYDRAULIC, **options):
     tubing = CORRELATIONS[correlation](tubing_inner_diameter=0.25) if correlation else None
+    bhp = options.pop("bhp", 1000.0 if kind == "producer" else 4500.0)
     return Well(
         kind=kind,
         n=3,
-        bhp=1000.0 if kind == "producer" else 4500.0,
+        bhp=bhp,
         mode=mode,
         tubing=tubing,
         dtype=get_dtype(),
@@ -344,16 +347,120 @@ def test_a_crossflowing_injector_is_reported_as_one_at_a_time_reports_it(spy):
     check_same_as_one_at_a_time(build, spy)
 
 
+def thp_of(*, kind, correlation, **options):
+    """The tubing head pressure a well under BHP control reports."""
+    well = make_well(kind=kind, correlation=correlation, surface_sample=SURFACE, **options)
+    return float(resolve(well, compiled=False).thps[0])
+
+
+def make_thp_well(*, kind, correlation, target_thp, **options):
+    well = make_well(kind=kind, correlation=correlation, surface_sample=SURFACE, **options)
+    tag = ProducerControlModeTag.THP if kind == "producer" else InjectorControlModeTag.THP
+    well.system.controls.control_modes[0] = tag
+    well.system.controls.target_thps[0] = target_thp
+    return well
+
+
+@pytest.mark.parametrize("correlation", list(CORRELATIONS))
 @pytest.mark.parametrize("kind", ["producer", "injector"])
-def test_a_well_under_thp_control_is_left_to_the_one_at_a_time_path(kind, spy):
+def test_a_thp_controlled_well_matches_and_recovers_its_bhp(correlation, kind, spy):
+    target = thp_of(kind=kind, correlation=correlation)
+    expected_bhp = 1000.0 if kind == "producer" else 4500.0
+
     def build():
-        well = make_well(kind=kind, correlation="beggs_and_brill", surface_sample=SURFACE)
+        return make_thp_well(kind=kind, correlation=correlation, target_thp=target)
+
+    assert check_same_as_one_at_a_time(build, spy) == []
+    assert float(resolve(build(), compiled=True).bhps[0]) == pytest.approx(expected_bhp, rel=5e-3)
+
+
+@pytest.mark.parametrize("correlation", ["beggs_and_brill", "gray", "homogeneous"])
+@pytest.mark.parametrize(
+    "case",
+    [
+        "producer_floor_binds",
+        "producer_floor_not_binding",
+        "injector_cap_binds",
+        "injector_cap_loose",
+    ],
+)
+def test_a_well_with_a_thp_limit_matches(correlation, case, spy):
+    kind = "producer" if case.startswith("producer") else "injector"
+    nominal = thp_of(kind=kind, correlation=correlation)
+    limit = {
+        "producer_floor_binds": THPLimit(min_value=nominal + 150.0),
+        "producer_floor_not_binding": THPLimit(min_value=nominal - 150.0),
+        "injector_cap_binds": THPLimit(max_value=nominal - 200.0),
+        "injector_cap_loose": THPLimit(max_value=nominal + 200.0),
+    }[case]
+
+    def build():
+        return make_well(
+            kind=kind, correlation=correlation, surface_sample=SURFACE, limits=[limit]
+        )
+
+    assert check_same_as_one_at_a_time(build, spy) == []
+
+
+@pytest.mark.parametrize("kind", ["producer", "injector"])
+def test_a_well_held_by_thp_bhp_and_rate_limits_matches(kind, spy):
+    nominal = thp_of(kind=kind, correlation="beggs_and_brill")
+    if kind == "producer":
+        limits = [
+            THPLimit(min_value=nominal + 100.0),
+            BHPLimit(min_value=1300.0),
+            RateLimit(
+                quantity=RateQuantity.OIL, max_value=0.8 * rate_of("producer", "surface_oil_rates")
+            ),
+        ]
+    else:
+        limits = [
+            THPLimit(max_value=nominal - 150.0),
+            BHPLimit(max_value=4300.0),
+        ]
+
+    def build():
+        return make_well(
+            kind=kind, correlation="beggs_and_brill", surface_sample=SURFACE, limits=limits
+        )
+
+    assert check_same_as_one_at_a_time(build, spy) == []
+
+
+@pytest.mark.parametrize("kind", ["producer", "injector"])
+def test_a_thp_controlled_well_without_a_surface_sample_raises_as_one_at_a_time_does(kind, spy):
+    def build():
+        well = make_well(kind=kind, correlation="beggs_and_brill")
         tag = ProducerControlModeTag.THP if kind == "producer" else InjectorControlModeTag.THP
         well.system.controls.control_modes[0] = tag
-        well.system.controls.target_thps[0] = 500.0 if kind == "producer" else 3500.0
+        well.system.controls.target_thps[0] = 500.0
         return well
 
-    assert check_same_as_one_at_a_time(build, spy) == [0]
+    for compiled in (False, True):
+        spy.clear()
+        with pytest.raises(ValidationError, match="surface_sample"):
+            resolve(build(), compiled=compiled)
+    assert spy == [0]
+
+
+def test_a_well_with_a_thp_limit_and_no_surface_sample_raises_as_one_at_a_time_does(spy):
+    def build():
+        return make_well(
+            kind="producer", correlation="beggs_and_brill", limits=[THPLimit(min_value=300.0)]
+        )
+
+    for compiled in (False, True):
+        with pytest.raises(ValidationError):
+            resolve(build(), compiled=compiled)
+
+
+def test_the_tubing_head_pressure_of_a_stopped_flow_is_reported_as_one_at_a_time_reports_it(spy):
+    def build():
+        well = make_well(kind="producer", correlation="beggs_and_brill", surface_sample=SURFACE)
+        set_control(well, ProducerControlModeTag.OIL_RATE, target_rate=0.0)
+        return well
+
+    check_same_as_one_at_a_time(build, spy)
 
 
 def test_a_well_with_a_shut_connection_is_left_to_the_one_at_a_time_path(spy):

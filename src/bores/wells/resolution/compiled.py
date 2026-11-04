@@ -7,6 +7,7 @@ in a single compiled call that works well by well in parallel, and leaves the re
 `resolve_well_control`. The two give the same result for a well they both take.
 """
 
+import math
 import typing
 
 import numba
@@ -39,14 +40,26 @@ from bores.wells.hydraulics.base import (
     get_hydrostatic_divisor,
 )
 from bores.wells.hydraulics.beggs_and_brill import BeggsAndBrillWellbore
+from bores.wells.hydraulics.beggs_and_brill import (
+    compute_tubing_head_pressure as thp_beggs_and_brill,
+)
 from bores.wells.hydraulics.gray import GrayWellbore
+from bores.wells.hydraulics.gray import compute_tubing_head_pressure as thp_gray
 from bores.wells.hydraulics.hagedorn_brown import HagedornBrownWellbore
+from bores.wells.hydraulics.hagedorn_brown import (
+    compute_tubing_head_pressure as thp_hagedorn_brown,
+)
 from bores.wells.hydraulics.homogeneous import HomogeneousWellbore
+from bores.wells.hydraulics.homogeneous import (
+    compute_tubing_head_pressure as thp_homogeneous,
+)
 from bores.wells.hydraulics.hydrostatic import get_pressure_per_density_and_depth
 from bores.wells.hydraulics.tubing_fluids import get_stb_to_volume_factor
 from bores.wells.hydraulics.vfp import VFPTables
 from bores.wells.hydraulics.woldesemayat_ghajar import WoldesemayatGhajarWellbore
-from bores.wells.resolution.engine import report_tubing_head_pressure
+from bores.wells.hydraulics.woldesemayat_ghajar import (
+    compute_tubing_head_pressure as thp_woldesemayat_ghajar,
+)
 from bores.wells.resolution.fixed_point import (
     bisect_beggs_and_brill,
     bisect_gray,
@@ -55,6 +68,9 @@ from bores.wells.resolution.fixed_point import (
     bisect_hydrostatic,
     bisect_uniform,
     bisect_woldesemayat_ghajar,
+    get_trial_pressure,
+    make_bracket,
+    narrow_bracket,
     solve_beggs_and_brill,
     solve_gray,
     solve_hagedorn_brown,
@@ -65,9 +81,8 @@ from bores.wells.resolution.fixed_point import (
 )
 from bores.wells.resolution.limits import check_economic_violation, find_bhp_bound
 from bores.wells.resolution.spec import ConnectionPressureMode, WellControlSpec
-from bores.wells.resolution.tubing import WellTubing, resolve_well_tubing
+from bores.wells.resolution.tubing import resolve_well_tubing
 from bores.wells.workspace import (
-    ConnectionRates,
     PerforationWorkspace,
     WellsWorkspace,
     sum_connection_rates,
@@ -75,6 +90,7 @@ from bores.wells.workspace import (
 
 __all__ = [
     "CompiledSettings",
+    "CompiledSurfaceSamples",
     "CompiledWellInputs",
     "CompiledWellOutputs",
     "CompiledWellbores",
@@ -132,12 +148,15 @@ PRODUCER_RATE_MODES = (
     int(ProducerControlModeTag.RESERVOIR_VOLUME_RATE),
 )
 PRODUCER_RESERVOIR_RATE = int(ProducerControlModeTag.RESERVOIR_VOLUME_RATE)
+PRODUCER_THP = int(ProducerControlModeTag.THP)
 INJECTOR_BHP = int(InjectorControlModeTag.BHP)
+INJECTOR_THP = int(InjectorControlModeTag.THP)
 INJECTOR_RATE = int(InjectorControlModeTag.RATE)
 INJECTOR_RESERVOIR_RATE = int(InjectorControlModeTag.RESERVOIR_VOLUME_RATE)
 INJECTOR_KIND = int(WellKind.INJECTOR)
 LIMIT_BHP = int(LimitKind.BHP)
 LIMIT_RATE = int(LimitKind.RATE)
+LIMIT_THP = int(LimitKind.THP)
 LIMIT_ECONOMIC = int(LimitKind.ECONOMIC)
 RESERVOIR_QUANTITY = 4
 """`RateQuantityTag.RESERVOIR`."""
@@ -175,6 +194,37 @@ class CompiledSettings(typing.NamedTuple):
 
     stb_to_volume_factor: Number
     """Volume of one stock-tank barrel in the volume unit of reservoir rates."""
+
+
+class CompiledSurfaceSamples(typing.NamedTuple):
+    """The fluid properties at surface conditions of every well, one array per property."""
+
+    density: NumberArray[OneDimension]
+    """Per well, the density of the fluid in the tubing when nothing flows, `NaN` if unknown."""
+
+    viscosity: NumberArray[OneDimension]
+    """Per well, the viscosity of that fluid."""
+
+    oil_density: NumberArray[OneDimension]
+    """Per well, the oil density at surface conditions."""
+
+    water_density: NumberArray[OneDimension]
+    """Per well, the water density at surface conditions."""
+
+    gas_density: NumberArray[OneDimension]
+    """Per well, the gas density at surface conditions."""
+
+    oil_viscosity: NumberArray[OneDimension]
+    """Per well, the oil viscosity at surface conditions."""
+
+    water_viscosity: NumberArray[OneDimension]
+    """Per well, the water viscosity at surface conditions."""
+
+    gas_viscosity: NumberArray[OneDimension]
+    """Per well, the gas viscosity at surface conditions."""
+
+    gas_liquid_surface_tension: NumberArray[OneDimension]
+    """Per well, the gas-liquid surface tension at surface conditions."""
 
 
 class CompiledWellbores(typing.NamedTuple):
@@ -253,6 +303,12 @@ class CompiledWellInputs(typing.NamedTuple):
     target_bhps: NumberArray[OneDimension]
     """Per well, its bottom-hole pressure target."""
 
+    target_thps: NumberArray[OneDimension]
+    """Per well, its tubing head pressure target."""
+
+    reports_thp: IntArray[OneDimension]
+    """Per well, `1` if it has a wellbore model and surface sample to report its THP with."""
+
     limit_well_offsets: IntArray[OneDimension]
     """Per well, where its limits start in the per-limit arrays. One extra entry."""
 
@@ -301,6 +357,9 @@ class CompiledWellOutputs(typing.NamedTuple):
 
     surface_gas_rates: NumberArray[OneDimension]
     """Per well, its surface-condition gas rate."""
+
+    thps: NumberArray[OneDimension]
+    """Per well, its tubing head pressure, left as it was for a well that does not report one."""
 
     active_limit_rows: IntArray[OneDimension]
     """Per well, the limit row that governs it, or `UNSET_INT`."""
@@ -679,9 +738,183 @@ def bisect_at(
 
 
 @numba.njit(cache=True)
+def get_surface_sample(samples: CompiledSurfaceSamples, row: Integer) -> SurfaceSample:
+    """
+    Returns the surface sample of one well.
+
+    :param samples: The surface samples of every well.
+    :param row: The well's row.
+    :returns: Its `SurfaceSample`.
+    """
+    return SurfaceSample(
+        density=samples.density[row],
+        viscosity=samples.viscosity[row],
+        phase_densities=PhaseValues(
+            oil=samples.oil_density[row],
+            water=samples.water_density[row],
+            gas=samples.gas_density[row],
+        ),
+        phase_viscosities=PhaseValues(
+            oil=samples.oil_viscosity[row],
+            water=samples.water_viscosity[row],
+            gas=samples.gas_viscosity[row],
+        ),
+        gas_liquid_surface_tension=samples.gas_liquid_surface_tension[row],
+    )
+
+
+@numba.njit(cache=True)
+def thp_at(
+    wellbores: CompiledWellbores,
+    surface_samples: CompiledSurfaceSamples,
+    row: Integer,
+    reference_depth: Number,
+    reference_pressure: Number,
+    rates: PhaseValues,
+    is_injector: bool,
+) -> Number:
+    """
+    Returns the tubing head pressure of a well whose bottom-hole pressure is `reference_pressure`,
+    using the correlation the well has.
+
+    :param wellbores: The correlation of every well.
+    :param surface_samples: The surface samples of every well.
+    :param row: The well's row. It must have a wellbore model.
+    :param reference_depth: The well's bottom-hole pressure datum.
+    :param reference_pressure: The bottom-hole pressure at that datum.
+    :param rates: The well's reservoir-condition phase rates.
+    :param is_injector: Whether the well is an injector.
+    :returns: The tubing head pressure.
+    """
+    tag = wellbores.tags[row]
+    index = wellbores.indices[row]
+    sample = get_surface_sample(samples=surface_samples, row=row)
+    if tag == HOMOGENEOUS:
+        return thp_homogeneous(
+            model=wellbores.homogeneous[index],  # type: ignore[arg-type]
+            reference_depth=reference_depth,
+            reference_pressure=reference_pressure,
+            rates=rates,
+            surface_sample=sample,
+            is_injector=is_injector,
+        )
+    if tag == BEGGS_AND_BRILL:
+        return thp_beggs_and_brill(
+            model=wellbores.beggs_and_brill[index],  # type: ignore[arg-type]
+            reference_depth=reference_depth,
+            reference_pressure=reference_pressure,
+            rates=rates,
+            surface_sample=sample,
+            is_injector=is_injector,
+        )
+    if tag == HAGEDORN_BROWN:
+        return thp_hagedorn_brown(
+            model=wellbores.hagedorn_brown[index],  # type: ignore[arg-type]
+            reference_depth=reference_depth,
+            reference_pressure=reference_pressure,
+            rates=rates,
+            surface_sample=sample,
+            is_injector=is_injector,
+        )
+    if tag == GRAY:
+        return thp_gray(
+            model=wellbores.gray[index],  # type: ignore[arg-type]
+            reference_depth=reference_depth,
+            reference_pressure=reference_pressure,
+            rates=rates,
+            surface_sample=sample,
+            is_injector=is_injector,
+        )
+    return thp_woldesemayat_ghajar(
+        model=wellbores.woldesemayat_ghajar[index],  # type: ignore[arg-type]
+        reference_depth=reference_depth,
+        reference_pressure=reference_pressure,
+        rates=rates,
+        surface_sample=sample,
+        is_injector=is_injector,
+    )
+
+
+@numba.njit(cache=True)
+def bisect_thp(
+    settings: CompiledSettings,
+    wellbores: CompiledWellbores,
+    surface_samples: CompiledSurfaceSamples,
+    row: Integer,
+    workspace: PerforationWorkspace,
+    reference_depth: Number,
+    relevant_oil: bool,
+    relevant_water: bool,
+    relevant_gas: bool,
+    is_injector: bool,
+    target: Number,
+    low: Number,
+    high: Number,
+) -> tuple[bool, Number]:
+    """
+    Finds the bottom-hole pressure that gives a well a target tubing head pressure. Like its
+    counterpart for a single well it stops at the iteration limit with the last pressure it
+    tried, but reports a solve that did not converge.
+
+    :param settings: Numbers shared by every well.
+    :param wellbores: The correlation of every well.
+    :param surface_samples: The surface samples of every well.
+    :param row: The well's row. It must have a wellbore model.
+    :param workspace: The well's perforation workspace.
+    :param reference_depth: The well's bottom-hole pressure datum.
+    :param relevant_oil: Whether oil counts toward the solves' total rate.
+    :param relevant_water: Whether water counts toward it.
+    :param relevant_gas: Whether gas counts toward it.
+    :param is_injector: Whether the well is an injector.
+    :param target: The target tubing head pressure.
+    :param low: Lowest bottom-hole pressure to search.
+    :param high: Highest bottom-hole pressure to search.
+    :returns: Whether every solve converged, and the bottom-hole pressure.
+    """
+    bracket = make_bracket(low=low, high=high)
+    pressure = 0.5 * (low + high)
+    for _ in range(settings.max_bisections):
+        pressure = get_trial_pressure(bracket=bracket)
+        result = solve_at(
+            settings=settings,
+            wellbores=wellbores,
+            row=row,
+            workspace=workspace,
+            reference_depth=reference_depth,
+            reference_pressure=pressure,
+            relevant_oil=relevant_oil,
+            relevant_water=relevant_water,
+            relevant_gas=relevant_gas,
+            is_injector=is_injector,
+        )
+        if not result.converged:
+            return False, pressure
+        value = thp_at(
+            wellbores=wellbores,
+            surface_samples=surface_samples,
+            row=row,
+            reference_depth=reference_depth,
+            reference_pressure=pressure,
+            rates=PhaseValues(
+                oil=float(result.oil_rate),
+                water=float(result.water_rate),
+                gas=float(result.gas_rate),
+            ),
+            is_injector=is_injector,
+        )
+        gap = value - target
+        if abs(gap) <= settings.tolerance * max(abs(target), 1.0):
+            break
+        bracket = narrow_bracket(
+            bracket=bracket, trial=pressure, gap=gap, increases_with_pressure=True
+        )
+    return True, pressure
+
+
+@numba.njit(cache=True)
 def get_quantity_phases(quantity: Integer) -> tuple[bool, bool, bool]:
     """
-    Which phases a rate quantity or a producer's rate control mode sums over.
+    Returns which phases a rate quantity or a producer's rate control mode sums over.
 
     :param quantity: `RateQuantityTag` or `ProducerControlModeTag` rate mode, which share values.
     :returns: Whether oil, water and gas count.
@@ -700,7 +933,7 @@ def get_quantity_phases(quantity: Integer) -> tuple[bool, bool, bool]:
 @numba.njit(cache=True)
 def get_injected_phases(phase: Integer) -> tuple[bool, bool, bool]:
     """
-    Which phase an injector's rate counts.
+    Returns which phase an injector's rate counts.
 
     :param phase: `FluidPhaseTag` of the injected phase.
     :returns: Whether oil, water and gas count.
@@ -713,6 +946,7 @@ def resolve_well(
     row: Integer,
     inputs: CompiledWellInputs,
     wellbores: CompiledWellbores,
+    surface_samples: CompiledSurfaceSamples,
     fluids: ConnectionFluids,
     outputs: CompiledWellOutputs,
     settings: CompiledSettings,
@@ -724,6 +958,7 @@ def resolve_well(
     :param row: The well's row.
     :param inputs: What is read about every well.
     :param wellbores: The correlation of every well.
+    :param surface_samples: The surface samples of every well.
     :param fluids: Stacked reservoir conditions at the connections of every well in the pass.
     :param outputs: Where the result is written.
     :param settings: Numbers shared by every well.
@@ -793,6 +1028,24 @@ def resolve_well(
 
     if (is_injector and mode == INJECTOR_BHP) or (not is_injector and mode == PRODUCER_BHP):
         bhp = inputs.target_bhps[row]
+    elif (is_injector and mode == INJECTOR_THP) or (not is_injector and mode == PRODUCER_THP):
+        thp_converged, bhp = bisect_thp(
+            settings=settings,
+            wellbores=wellbores,
+            surface_samples=surface_samples,
+            row=row,
+            workspace=workspace,
+            reference_depth=reference_depth,
+            relevant_oil=relevant_oil,
+            relevant_water=relevant_water,
+            relevant_gas=relevant_gas,
+            is_injector=is_injector,
+            target=inputs.target_thps[row],
+            low=min_pressure,
+            high=max_pressure,
+        )
+        if not thp_converged:
+            return FAILED
     else:
         bisected = bisect_at(
             settings=settings,
@@ -879,6 +1132,42 @@ def resolve_well(
                 bhp=bhp,
                 is_injector=is_injector,
             )
+        elif kind == LIMIT_THP:
+            current_thp = thp_at(
+                wellbores=wellbores,
+                surface_samples=surface_samples,
+                row=row,
+                reference_depth=reference_depth,
+                reference_pressure=bhp,
+                rates=PhaseValues(
+                    oil=float(rates.oil), water=float(rates.water), gas=float(rates.gas)
+                ),
+                is_injector=is_injector,
+            )
+            if is_injector:
+                limit_value = limits.max_values[limit_row]
+                violated = (not math.isnan(limit_value)) and current_thp > limit_value
+            else:
+                limit_value = limits.min_values[limit_row]
+                violated = (not math.isnan(limit_value)) and current_thp < limit_value
+            if violated:
+                thp_converged, bound = bisect_thp(
+                    settings=settings,
+                    wellbores=wellbores,
+                    surface_samples=surface_samples,
+                    row=row,
+                    workspace=workspace,
+                    reference_depth=reference_depth,
+                    relevant_oil=relevant_oil,
+                    relevant_water=relevant_water,
+                    relevant_gas=relevant_gas,
+                    is_injector=is_injector,
+                    target=limit_value,
+                    low=min_pressure,
+                    high=max_pressure,
+                )
+                if not thp_converged:
+                    return FAILED
         elif kind == LIMIT_RATE:
             quantity = limits.quantities[limit_row]
             limit_oil, limit_water, limit_gas = get_quantity_phases(
@@ -999,6 +1288,25 @@ def resolve_well(
             reported_surface_water = summed_surface.water
             reported_surface_gas = summed_surface.gas
 
+    if inputs.reports_thp[row] == 1:
+        if shut_in:
+            thp_oil, thp_water, thp_gas = 0.0, 0.0, 0.0
+        else:
+            thp_oil, thp_water, thp_gas = rates.oil, rates.water, rates.gas
+
+        no_flow = not (thp_oil + thp_water + thp_gas)
+        if no_flow and math.isnan(surface_samples.density[row]):
+            outputs.thps[row] = math.nan
+        else:
+            outputs.thps[row] = thp_at(
+                wellbores=wellbores,
+                surface_samples=surface_samples,
+                row=row,
+                reference_depth=reference_depth,
+                reference_pressure=bhp,
+                rates=PhaseValues(oil=thp_oil, water=thp_water, gas=thp_gas),
+                is_injector=is_injector,
+            )
     outputs.bhps[row] = bhp
     outputs.oil_rates[row] = reported_oil
     outputs.water_rates[row] = reported_water
@@ -1021,6 +1329,7 @@ def resolve_wells_kernel(
     resolutions: IntArray[OneDimension],
     inputs: CompiledWellInputs,
     wellbores: CompiledWellbores,
+    surface_samples: CompiledSurfaceSamples,
     fluids: ConnectionFluids,
     outputs: CompiledWellOutputs,
     settings: CompiledSettings,
@@ -1032,6 +1341,7 @@ def resolve_wells_kernel(
     :param resolutions: Per well, receives `RESOLVED` or `FAILED` for each well in `rows`.
     :param inputs: What is read about every well.
     :param wellbores: The correlation of every well.
+    :param surface_samples: The surface samples of every well.
     :param fluids: Stacked reservoir conditions at the connections of those wells.
     :param outputs: Where the results are written.
     :param settings: Numbers shared by every well.
@@ -1042,6 +1352,7 @@ def resolve_wells_kernel(
             row=row,
             inputs=inputs,
             wellbores=wellbores,
+            surface_samples=surface_samples,
             fluids=fluids,
             outputs=outputs,
             settings=settings,
@@ -1091,6 +1402,34 @@ def build_compiled_wellbores(
     )
 
 
+def build_compiled_surface_samples(
+    *, samples: typing.Sequence[SurfaceSample | None]
+) -> CompiledSurfaceSamples:
+    """
+    Puts the surface sample of every well into arrays a compiled pass can index.
+
+    :param samples: Per well, its `SurfaceSample`, or `None` for a well with none.
+    :returns: The samples as arrays, `NaN` for a well with none.
+    """
+    n_wells = len(samples)
+    columns = np.full((9, n_wells), np.nan, dtype=np.float64)
+    for row, sample in enumerate(samples):
+        if sample is None:
+            continue
+        columns[:, row] = (
+            sample.density,
+            sample.viscosity,
+            sample.phase_densities.oil,
+            sample.phase_densities.water,
+            sample.phase_densities.gas,
+            sample.phase_viscosities.oil,
+            sample.phase_viscosities.water,
+            sample.phase_viscosities.gas,
+            sample.gas_liquid_surface_tension,
+        )
+    return CompiledSurfaceSamples(*columns)  # type: ignore[arg-type]
+
+
 def stack_connection_fluids(
     *, fluids: typing.Sequence[ConnectionFluids], dtype: np.dtype
 ) -> ConnectionFluids:
@@ -1125,10 +1464,11 @@ def resolve_wells(
     Resolves every well it can take in one compiled pass over all of them, in parallel, and
     reports the rows of the rest.
 
-    A well is taken if it is in effect, fully open with every connection flowing, under BHP or
-    rate control, has no THP limit, and has no VFP table or tubing fluid table. Wells that are
-    stopped, under THP control, or whose solve does not converge are left for
-    `resolve_well_control`, which also raises the error of one that does not converge.
+    A well is taken if it is in effect, fully open with every connection flowing, under BHP, rate
+    or THP control, and has no VFP table or tubing fluid table. A well under THP control or with
+    a THP limit is taken only if it has a wellbore model and a surface sample. Wells that are
+    stopped, or whose solve does not converge, are left for `resolve_well_control`, which also
+    raises the error of one that does not converge.
 
     :param compiled_system: The compiled well system.
     :param workspace: This run's `WellsWorkspace`, updated in place for the wells taken.
@@ -1166,8 +1506,10 @@ def resolve_wells(
 
     controllable = np.where(
         is_injector,
-        np.isin(control_modes, (INJECTOR_RATE, INJECTOR_RESERVOIR_RATE, INJECTOR_BHP)),
-        np.isin(control_modes, (*PRODUCER_RATE_MODES, PRODUCER_BHP)),
+        np.isin(
+            control_modes, (INJECTOR_RATE, INJECTOR_RESERVOIR_RATE, INJECTOR_BHP, INJECTOR_THP)
+        ),
+        np.isin(control_modes, (*PRODUCER_RATE_MODES, PRODUCER_BHP, PRODUCER_THP)),
     )
     flowing = (perforations.completion_statuses == 1) & (perforations.schedule_statuses == 1)
     flowing_total = np.concatenate(([0], np.cumsum(flowing)))
@@ -1175,19 +1517,20 @@ def resolve_wells(
     all_flowing = (flowing_counts == np.diff(offsets)) & (flowing_counts > 0)
     thp_total = np.concatenate(([0], np.cumsum(limits.kinds == int(LimitKind.THP))))
     has_thp_limit = thp_total[limits.well_offsets[1:]] != thp_total[limits.well_offsets[:-1]]
+    needs_thp = (
+        has_thp_limit
+        | (is_injector & (control_modes == INJECTOR_THP))
+        | (~is_injector & (control_modes == PRODUCER_THP))
+    )
     candidates = np.flatnonzero(
-        in_effect
-        & (compiled_system.open_statuses == 1)
-        & controllable
-        & all_flowing
-        & ~has_thp_limit
+        in_effect & (compiled_system.open_statuses == 1) & controllable & all_flowing
     )
 
     counts = np.diff(offsets)
     taken: list[int] = []
     wellbore_models: list[WellBoreModel | None] = [None] * n_wells
     fluids_by_well: list[ConnectionFluids] = []
-    reports_thp: list[tuple[int, WellTubing, SurfaceSample]] = []
+    surface_sample_by_well: list[SurfaceSample | None] = [None] * n_wells
     for row in candidates.tolist():
         tubing = resolve_well_tubing(
             tubing_performance=get_tubing_performance(row),
@@ -1201,7 +1544,11 @@ def resolve_wells(
             continue
         if wellbore is not None and wellbore.name not in CORRELATION_TAGS:
             continue
+        surface_sample = get_surface_sample(row) if get_surface_sample is not None else None
+        if needs_thp[row] and (wellbore is None or surface_sample is None):
+            continue
         taken.append(row)
+        surface_sample_by_well[row] = surface_sample
         wellbore_models[row] = wellbore
         fluids = get_connection_fluids(row)
         if len(fluids.pressures) != counts[row]:
@@ -1211,9 +1558,6 @@ def resolve_wells(
                 "`connection_fluids`. These must match 1:1."
             )
         fluids_by_well.append(fluids)
-        surface_sample = get_surface_sample(row) if get_surface_sample is not None else None
-        if wellbore is not None and surface_sample is not None:
-            reports_thp.append((row, tubing, surface_sample))
     not_taken = np.setdiff1d(np.flatnonzero(in_effect), taken, assume_unique=True)
     if not taken:
         return typing.cast("IntArray[OneDimension]", not_taken)
@@ -1250,6 +1594,19 @@ def resolve_wells(
         control_modes=control_modes,
         target_rates=target_rates,
         target_bhps=controls.target_bhps,
+        target_thps=controls.target_thps,
+        reports_thp=typing.cast(
+            "IntArray[OneDimension]",
+            np.array(
+                [
+                    int(wellbore is not None and sample is not None)
+                    for wellbore, sample in zip(
+                        wellbore_models, surface_sample_by_well, strict=True
+                    )
+                ],
+                dtype=np.int64,
+            ),
+        ),
         limit_well_offsets=limits.well_offsets,
         limit_kinds=limits.kinds,
         limit_quantities=limits.quantities,
@@ -1267,6 +1624,7 @@ def resolve_wells(
         surface_oil_rates=workspace.surface_oil_rates,
         surface_water_rates=workspace.surface_water_rates,
         surface_gas_rates=workspace.surface_gas_rates,
+        thps=workspace.thps,
         active_limit_rows=workspace.active_limit_rows,
         economic_shutins=workspace.economic_shutins,
         connection_pressures=workspace.connection_pressures,
@@ -1296,6 +1654,7 @@ def resolve_wells(
         resolutions=resolutions,
         inputs=inputs,
         wellbores=build_compiled_wellbores(wellbore_models=wellbore_models),
+        surface_samples=build_compiled_surface_samples(samples=surface_sample_by_well),
         fluids=stack_connection_fluids(fluids=fluids_by_well, dtype=dtype),
         outputs=outputs,
         settings=settings,
@@ -1309,43 +1668,4 @@ def resolve_wells(
                     f"Well {compiled_system.names[row]!r} breached an economic limit "
                     "flagged to end the run."
                 )
-    for row, tubing, surface_sample in reports_thp:
-        if resolutions[row] != RESOLVED:
-            continue
-        start, stop = offsets[row], offsets[row + 1]
-        oil = workspace.connection_oil_rates[start:stop]
-        water = workspace.connection_water_rates[start:stop]
-        gas = workspace.connection_gas_rates[start:stop]
-        if (
-            is_injector[row]
-            and compiled_system.crossflow_flags[row] == 1
-            and not workspace.economic_shutins[row]
-            and ((oil < 0.0).any() or (water < 0.0).any() or (gas < 0.0).any())
-        ):
-            unresolved.append(row)
-            continue
-        report_tubing_head_pressure(
-            tubing=tubing,
-            reference_depth=compiled_system.reference_depths[row],
-            bhp=workspace.bhps[row],
-            rates=PhaseValues(
-                oil=workspace.oil_rates[row],
-                water=workspace.water_rates[row],
-                gas=workspace.gas_rates[row],
-            ),
-            surface_rates=PhaseValues(
-                oil=workspace.surface_oil_rates[row],
-                water=workspace.surface_water_rates[row],
-                gas=workspace.surface_gas_rates[row],
-            ),
-            surface_sample=surface_sample,
-            is_injector=bool(is_injector[row]),
-            connection_rates=ConnectionRates(
-                oil=typing.cast("NumberArray[OneDimension]", oil),
-                water=typing.cast("NumberArray[OneDimension]", water),
-                gas=typing.cast("NumberArray[OneDimension]", gas),
-            ),
-            well_row=row,
-            workspace=workspace,
-        )
     return typing.cast("IntArray[OneDimension]", np.union1d(not_taken, unresolved))

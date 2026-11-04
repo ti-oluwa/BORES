@@ -7,8 +7,9 @@ Run from the repository root:
     python scripts/benchmark_well_resolution.py
     python scripts/benchmark_well_resolution.py --wells 2000 --connections 20 --threads 1,2,4,8
 
-Each well is a producer with its own Beggs and Brill tubing. Half are held to a bottom-hole
-pressure and half to an oil rate, so both the single solve and the rate search are timed.
+Each well is a producer with its own Beggs and Brill tubing and a surface sample. A third are
+held to a bottom-hole pressure, a third to an oil rate and a third to a tubing head pressure, so
+the single solve, the rate search and the THP search are all timed.
 """
 
 import argparse
@@ -33,7 +34,7 @@ from bores.wells.hydraulics.beggs_and_brill import beggs_and_brill_wellbore
 from bores.wells.resolution.spec import ConnectionPressureMode, WellControlSpec
 from bores.wells.resolution.system import resolve_wells
 from bores.wells.workspace import build_wells_workspace
-from tests.wells.test_well_derivatives import make_samples
+from tests.wells.test_well_derivatives import SURFACE, make_samples
 
 FIELDS = (
     "bhps",
@@ -41,6 +42,7 @@ FIELDS = (
     "water_rates",
     "gas_rates",
     "surface_oil_rates",
+    "thps",
     "connection_pressures",
     "connection_oil_rates",
 )
@@ -89,6 +91,7 @@ def run(system, workspace, spec, tubing, fluids):
         spec=spec,
         get_tubing_performance=lambda row: tubing,
         get_connection_fluids=lambda row: fluids,
+        get_surface_sample=lambda row: SURFACE,
     )
 
 
@@ -133,17 +136,25 @@ def main():
 
         run(system, workspace, one_at_a_time, tubing, fluids)
         rate = float(workspace.surface_oil_rates[0])
-        half = arguments.wells // 2
-        system.controls.control_modes[half:] = ProducerControlModeTag.OIL_RATE
-        system.controls.target_rates[half:] = 0.7 * rate
+        thp = float(workspace.thps[0])
+        third = arguments.wells // 3
+
+        def assign_controls(target_system):
+            target_system.controls.control_modes[third : 2 * third] = (
+                ProducerControlModeTag.OIL_RATE
+            )
+            target_system.controls.target_rates[third : 2 * third] = 0.7 * rate
+            target_system.controls.control_modes[2 * third :] = ProducerControlModeTag.THP
+            target_system.controls.target_thps[2 * third :] = thp
+
+        assign_controls(system)
 
         print("warming up (the first compiled call compiles, which takes a minute or two)...")
         numba.set_num_threads(maximum)
         run(system, workspace, compiled, tubing, fluids)
 
         reference = build_system(n_wells=arguments.wells, n_connections=arguments.connections)
-        reference[0].controls.control_modes[half:] = ProducerControlModeTag.OIL_RATE
-        reference[0].controls.target_rates[half:] = 0.7 * rate
+        assign_controls(reference[0])
         run(reference[0], reference[1], one_at_a_time, tubing, fluids)
         worst = 0.0
         for field in FIELDS:
