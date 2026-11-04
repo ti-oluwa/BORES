@@ -28,6 +28,7 @@ from scipy.sparse.linalg import (  # type: ignore[import-untyped]
     tfqmr,
 )
 
+from bores.constants import c
 from bores.errors import PreconditionerError, SolverError, ValidationError
 from bores.types import (
     Preconditioner,
@@ -1573,7 +1574,7 @@ def scale_linear_system(
     jacobian_csr: csr_array | csr_matrix,
     residual_vector: npt.NDArray[np.floating],
     methods: SystemScalingMethod | typing.Iterable[SystemScalingMethod] | None = None,
-    epsilon: float = 1e-12,
+    epsilon: float | None = None,
 ) -> tuple[
     csr_array | csr_matrix,
     npt.NDArray[np.floating],
@@ -1619,7 +1620,7 @@ def scale_linear_system(
         Order matters (applied sequentially)
 
     :param epsilon: Rows, columns and diagonal entries with a magnitude below this are
-        left unscaled to avoid dividing by near-zero values.
+        left unscaled to avoid dividing by near-zero values. Defaults to the `LINEAR_SYSTEM_SCALING_EPSILON` constant.
     :return: Tuple of:
         - scaled jacobian (CSR matrix)
         - scaled residual (ndarray)
@@ -1629,6 +1630,8 @@ def scale_linear_system(
             dx = dx_scaled * column_scaling_vector
     :raises ValidationError: If a scaling method is unknown.
     """
+    if epsilon is None:
+        epsilon = c.LINEAR_SYSTEM_SCALING_EPSILON
     J = jacobian_csr.tocsr(copy=True)
     if not np.issubdtype(J.dtype, np.floating):
         J = J.astype(np.float64)

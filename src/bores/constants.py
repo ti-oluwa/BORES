@@ -1179,6 +1179,95 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         description=("Empirically validated safety margin for the Klins finite-aquifer series"),
         unit="dimensionless",
     ),
+    "DEFAULT_WELLBORE_RADIUS": Constant(
+        value=0.25,
+        description=(
+            "Wellbore radius a perforation gets when none is given, in the model's length unit (feet for FIELD)."
+        ),
+        unit="length",
+    ),
+    "DEFAULT_OIL_SPECIFIC_GRAVITY": Constant(
+        value=0.85,
+        description=(
+            "Specific gravity of the stock-tank oil assumed when none is given (water = 1)."
+        ),
+        unit="dimensionless",
+    ),
+    "CELL_CONTAINMENT_TOLERANCE": Constant(
+        value=1e-06,
+        description=(
+            "Distance from a cell's surface up to which a point still counts as inside the cell."
+        ),
+        unit="length",
+    ),
+    "CORNER_POINT_VERTEX_TOLERANCE": Constant(
+        value=1e-08,
+        description=(
+            "Distance below which two corner points of a corner-point grid are merged into one."
+        ),
+        unit="length",
+    ),
+    "VFP_BHP_CONVERGENCE_TOLERANCE": Constant(
+        value=0.0001,
+        description=(
+            "Relative tolerance on the tubing head pressure at which the bottom-hole pressure search of a VFP table stops early."
+        ),
+        unit="dimensionless",
+    ),
+    "LOCALLY_CARTESIAN_TOLERANCE": Constant(
+        value=0.05,
+        description=(
+            "Relative deviation from a Cartesian cell shape up to which Peaceman's well index formula is still used."
+        ),
+        unit="dimensionless",
+    ),
+    "LINEAR_SYSTEM_SCALING_EPSILON": Constant(
+        value=1e-12,
+        description=(
+            "Magnitude below which a row, column or diagonal entry is left unscaled when scaling a linear system."
+        ),
+        unit="dimensionless",
+    ),
+    "PVCO_PRESSURE_SPAN_FACTOR": Constant(
+        value=3.0,
+        description=(
+            "Multiple of the highest bubble point pressure that the undersaturated branches built from a live oil table extend to."
+        ),
+        unit="dimensionless",
+    ),
+    "CO2_TEMPERATURE_STEP_FRACTION": Constant(
+        value=0.12,
+        description=(
+            "Step of a CO2 storage table's temperature axis, as a fraction of the distance from the critical temperature."
+        ),
+        unit="fraction",
+    ),
+    "CO2_TEMPERATURE_MINIMUM_STEP": Constant(
+        value=0.18,
+        description=("Smallest step of a CO2 storage table's temperature axis."),
+        unit="F",
+    ),
+    "CO2_SALINITY_SPACING": Constant(
+        value=10000.0,
+        description=(
+            "Largest step of the salinity axis of the brine tables of a CO2 storage model."
+        ),
+        unit="ppm",
+    ),
+    "LIVE_OIL_FLOOR_FRACTION": Constant(
+        value=0.05,
+        description=(
+            "Fraction of a live oil branch's smallest tabulated formation volume factor and viscosity that its extrapolation may not fall below."
+        ),
+        unit="fraction",
+    ),
+    "ROCK_PRESSURE_RANGE_FACTOR": Constant(
+        value=10.0,
+        description=(
+            "Factor by which the pressure grid of a rock compressibility table extends above and below the reference pressure."
+        ),
+        unit="dimensionless",
+    ),
 }
 
 

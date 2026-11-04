@@ -584,7 +584,7 @@ class RockCompressibilityTable(StoreSerializable):
         rock_compressibility: Number,
         *,
         n_pressure_points: int = 50,
-        pressure_range_factor: Number = 10.0,
+        pressure_range_factor: Number | None = None,
         interpolation_method: InterpolationMethod = "linear",
         unit_system: UnitSystem = UnitSystem.FIELD,
         dtype: npt.DTypeLike = None,
@@ -611,13 +611,15 @@ class RockCompressibilityTable(StoreSerializable):
             `FIELD`, bar⁻¹ in `METRIC`, etc.) from `ROCK` column 2.
         :param n_pressure_points: Points in the synthetic pressure grid.
         :param pressure_range_factor: Multiplier defining the grid extent above
-            and below `reference_pressure`.
+            and below `reference_pressure`. Defaults to the `ROCK_PRESSURE_RANGE_FACTOR` constant.
         :param interpolation_method: `"linear"` or `"cubic"`.
         :param unit_system: Unit system for pressures.
         :param dtype: Array dtype.
         :returns: `RockCompressibilityTable` with all-ones transmissibility.
         :raises ValidationError: If inputs are physically invalid.
         """
+        if pressure_range_factor is None:
+            pressure_range_factor = c.ROCK_PRESSURE_RANGE_FACTOR
         if reference_pressure <= 0:
             raise ValidationError(
                 f"`reference_pressure` must be positive; got {reference_pressure}."

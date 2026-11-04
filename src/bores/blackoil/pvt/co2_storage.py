@@ -119,7 +119,7 @@ def build_co2_pressure_axis(
 def build_co2_salinity_axis(
     salinity: Number | CellArray,
     *,
-    spacing: Number = 10000.0,
+    spacing: Number | None = None,
     maximum_points: Integer = 12,
     dtype: npt.DTypeLike = None,  # type: ignore[assignment]
 ) -> FloatArray[OneDimension]:
@@ -132,10 +132,13 @@ def build_co2_salinity_axis(
 
     :param salinity: A salinity, or the salinity of each cell, in ppm by weight of salt.
     :param spacing: The largest step of the axis, in ppm.
+        Defaults to the `CO2_SALINITY_SPACING` constant.
     :param maximum_points: The most points the axis may have.
     :param dtype: Dtype of the axis. `bores.precision.get_dtype()` if not given.
     :returns: Strictly increasing salinities in ppm.
     """
+    if spacing is None:
+        spacing = c.CO2_SALINITY_SPACING
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
     values = np.asarray(salinity, dtype=np.float64).ravel()
     lowest, highest = values.min(), values.max()

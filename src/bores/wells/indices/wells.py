@@ -169,7 +169,7 @@ def resolve_well_index_direction(
     return min(lengths, key=lengths.get)  # type: ignore[arg-type]
 
 
-def is_locally_cartesian(grid: Grid, cell_index: Integer, tolerance: Number = 0.05) -> bool:
+def is_locally_cartesian(grid: Grid, cell_index: Integer, tolerance: Number | None = None) -> bool:
     """
     Decide whether a cell is "Cartesian-like enough" for Peaceman's
     formula to be valid, vs. requiring the equivalent-radius fallback.
@@ -181,8 +181,11 @@ def is_locally_cartesian(grid: Grid, cell_index: Integer, tolerance: Number = 0.
     :param grid: Grid providing `cell_volumes`, `cell_length_x/y/z`.
     :param cell_index: Cell to classify.
     :param tolerance: Allowed fractional deviation from a perfect box.
+        Defaults to the `LOCALLY_CARTESIAN_TOLERANCE` constant.
     :returns: `True` if Peaceman should be used, `False` for the fallback.
     """
+    if tolerance is None:
+        tolerance = c.LOCALLY_CARTESIAN_TOLERANCE
     aabb_volume = (
         grid.cell_length_x[cell_index]
         * grid.cell_length_y[cell_index]

@@ -8,6 +8,7 @@ import attrs
 import numpy as np
 from typing_extensions import Self
 
+from bores.constants import c
 from bores.errors import ValidationError
 from bores.grids.base import Grid
 from bores.grids.containment import cell_contains_point, get_first_cell_containing_point
@@ -470,7 +471,7 @@ def check_cell_contains_point(
     grid: Grid,
     cell_index: Integer,
     point: tuple[Number, Number, Number],
-    tolerance: Number = 1e-6,
+    tolerance: Number | None = None,
 ) -> Boolean:
     """
     Returns `True` if `point` lies inside cell `cell_index`, or on its boundary within `tolerance`.
@@ -482,8 +483,11 @@ def check_cell_contains_point(
     :param cell_index: Cell to test.
     :param point: `(x, y, z)` to test.
     :param tolerance: Distance from the cell's surface up to which a point still counts as inside.
+        Defaults to the `CELL_CONTAINMENT_TOLERANCE` constant.
     :returns: Whether the cell contains the point.
     """
+    if tolerance is None:
+        tolerance = c.CELL_CONTAINMENT_TOLERANCE
     return cell_contains_point(grid, cell_index, point, tolerance)
 
 
@@ -491,7 +495,7 @@ def find_first_containing_cell(
     grid: Grid,
     candidates: IntArray[OneDimension],
     point: tuple[Number, Number, Number],
-    tolerance: Number = 1e-6,
+    tolerance: Number | None = None,
 ) -> Integer | None:
     """
     Finds the first of `candidates` whose cell contains `point`.
@@ -503,8 +507,11 @@ def find_first_containing_cell(
     :param candidates: Cell indices to test, in priority order.
     :param point: Point to locate.
     :param tolerance: Distance from a cell's surface up to which a point still counts as inside.
+        Defaults to the `CELL_CONTAINMENT_TOLERANCE` constant.
     :returns: The first containing cell, or `None` if none of them contains `point`.
     """
+    if tolerance is None:
+        tolerance = c.CELL_CONTAINMENT_TOLERANCE
     return get_first_cell_containing_point(grid, candidates, point, tolerance)
 
 

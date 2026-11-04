@@ -22,6 +22,7 @@ import numpy.typing as npt
 from scipy.interpolate import RegularGridInterpolator  # type: ignore[import-untyped]
 from typing_extensions import Self
 
+from bores.constants import c
 from bores.deck.file import DeckFile
 from bores.deck.keywords.schedule import VFPInjectorDeckTable, VFPProducerDeckTable
 from bores.errors import ValidationError
@@ -1389,7 +1390,7 @@ def as_vfp_table(
     min_bhp: Number,
     max_bhp: Number,
     max_bisection_iterations: Integer = 60,
-    bhp_convergence_tolerance: Number = 1e-4,
+    bhp_convergence_tolerance: Number | None = None,
     unit_system: UnitSystem = UnitSystem.FIELD,
     dtype: npt.DTypeLike = None,
     warn_on_extrapolation: bool = False,
@@ -1441,7 +1442,7 @@ def as_vfp_table(
     :param max_bhp: Upper bisection bracket bound, covering every grid point.
     :param max_bisection_iterations: Per grid point.
     :param bhp_convergence_tolerance: Relative tolerance on `thps` for
-        the bisection to stop early.
+        the bisection to stop early. Defaults to the `VFP_BHP_CONVERGENCE_TOLERANCE` constant.
     :param unit_system: Unit system `flow_rates`/`thps`/etc. are already
         expressed in.
     :param dtype: Output array dtype for the resulting `VFPTable`.
@@ -1450,6 +1451,8 @@ def as_vfp_table(
     :raises ValidationError: If an injector's flow is not water or gas, or a grid point's values
         don't describe non-negative phase rates.
     """
+    if bhp_convergence_tolerance is None:
+        bhp_convergence_tolerance = typing.cast("Number", c.VFP_BHP_CONVERGENCE_TOLERANCE)
     is_injector = well_type == WellType.INJECTOR
     if surface_sample is None and wellbore.tubing_fluid_table is None:
         raise ValidationError(

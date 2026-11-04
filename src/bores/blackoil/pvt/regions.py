@@ -894,7 +894,7 @@ def build_oil_data_from_pvco(
     temperature: TemperatureSpec,
     unit_system: UnitSystem,
     n_undersaturated_points: int = 10,
-    pressure_span_factor: Number = 3.0,
+    pressure_span_factor: Number | None = None,
     interpolation_method: InterpolationMethod = "linear",
     depth_range: tuple[Number, Number] | None = None,
     dtype: npt.DTypeLike = None,
@@ -923,10 +923,12 @@ def build_oil_data_from_pvco(
     :param temperature: Reservoir temperature.
     :param n_undersaturated_points: Undersaturated pressure points generated per bubble point.
     :param pressure_span_factor: The undersaturated branches extend to this multiple of the
-        highest bubble-point pressure.
+        highest bubble-point pressure. Defaults to the `PVCO_PRESSURE_SPAN_FACTOR` constant.
     :param dtype: Array dtype; defaults to `get_dtype()`.
     :returns: `PVTData` for the oil phase.
     """
+    if pressure_span_factor is None:
+        pressure_span_factor = c.PVCO_PRESSURE_SPAN_FACTOR
     if len(pvco_records) < 2:
         raise ValidationError(
             f"`PVCO` table requires at least 2 rows (bubble points); got {len(pvco_records)}."
@@ -1424,8 +1426,8 @@ def build_co2_temperature_axis(
     *,
     unit_system: UnitSystem,
     interpolation_method: InterpolationMethod = "linear",
-    step_fraction: Number = 0.12,
-    minimum_step: Number = 0.18,
+    step_fraction: Number | None = None,
+    minimum_step: Number | None = None,
     maximum_points: Integer = 200,
     dtype: npt.DTypeLike = None,  # type: ignore[assignment]
 ) -> npt.NDArray:
@@ -1444,12 +1446,17 @@ def build_co2_temperature_axis(
     :param unit_system: The deck's unit system.
     :param interpolation_method: `"linear"` or `"cubic"`, which set the fewest points needed.
     :param step_fraction: The step of the axis, as a fraction of the distance from the critical
-        temperature.
+        temperature. Defaults to the `CO2_TEMPERATURE_STEP_FRACTION` constant.
     :param minimum_step: The smallest step of the axis, in F.
+        Defaults to the `CO2_TEMPERATURE_MINIMUM_STEP` constant.
     :param maximum_points: The most points the axis of a varying temperature may have.
     :param dtype: Dtype of the axis.
     :returns: Strictly increasing temperatures in F.
     """
+    if minimum_step is None:
+        minimum_step = c.CO2_TEMPERATURE_MINIMUM_STEP
+    if step_fraction is None:
+        step_fraction = c.CO2_TEMPERATURE_STEP_FRACTION
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
     minimum_points = max(get_min_temperature_points(interpolation_method), 2)
     factors = get_conversion_factors(unit_system, UnitSystem.FIELD)

@@ -24,6 +24,7 @@ import numba
 import numpy as np
 from typing_extensions import Self
 
+from bores.constants import c
 from bores.datastructures import GridDimensions, MapAxes
 from bores.errors import GridExportError, InvalidGridError, ValidationError
 from bores.grids.base import CellStatus, ConnectionType, Grid
@@ -127,7 +128,7 @@ def make_corner_point_grid(
     coord: CoordArray,
     zcorn: ZCornArray,
     actnum: ActNumArray | None = None,
-    vertex_tolerance: Number = 1e-8,
+    vertex_tolerance: Number | None = None,
     pinch_tolerance: Number | None = None,
     unit_system: UnitSystem = UnitSystem.FIELD,
     metadata: typing.Mapping[str, typing.Any] | None = None,
@@ -152,6 +153,7 @@ def make_corner_point_grid(
     :param zcorn: Shape `(NZ*2, NY*2, NX*2)` depth array.
     :param actnum: Shape `(NZ, NY, NX)` integer mask (1=active). All active if `None`.
     :param vertex_tolerance: Merge distance for coincident corner points.
+        Defaults to the `CORNER_POINT_VERTEX_TOLERANCE` constant.
     :param pinch_tolerance: Average thickness threshold for pinch detection.
         Defaults to `metadata['pinch']` or 0.0 (no detection).
     :param unit_system: Declared unit system for coordinate arrays.
@@ -187,6 +189,8 @@ def make_corner_point_grid(
     :raises InvalidGridError: If no active cells are found, or if active cells are inverted
         and `on_inverted_cells` is `"raise"`.
     """
+    if vertex_tolerance is None:
+        vertex_tolerance = c.CORNER_POINT_VERTEX_TOLERANCE
     if (
         nnc_cell_indices is not None
         and len(nnc_cell_indices) > 0
@@ -503,12 +507,12 @@ def compute_cell_corner_coordinates(
         zv[6] = zcorn[2 * k + 1, 2 * j + 1, 2 * i]
         zv[7] = zcorn[2 * k + 1, 2 * j + 1, 2 * i + 1]
 
-        for c in range(8):
-            p = pillar_order[c]
-            xyz = _interpolate_pillar_point(pt[p], pb[p], zv[c])
-            corners[cell_idx, c, 0] = xyz[0]
-            corners[cell_idx, c, 1] = xyz[1]
-            corners[cell_idx, c, 2] = xyz[2]
+        for corner in range(8):
+            p = pillar_order[corner]
+            xyz = _interpolate_pillar_point(pt[p], pb[p], zv[corner])
+            corners[cell_idx, corner, 0] = xyz[0]
+            corners[cell_idx, corner, 1] = xyz[1]
+            corners[cell_idx, corner, 2] = xyz[2]
 
     return corners
 
@@ -2005,7 +2009,7 @@ def compute_corner_point_geometry(
     coord: CoordArray,
     zcorn: ZCornArray,
     actnum: ActNumArray,
-    vertex_tolerance: Number = 1e-8,
+    vertex_tolerance: Number | None = None,
     pinch_tolerance: Number = 0.0,
     mirrored: bool = False,
     on_inverted_cells: InvertedCellPolicy = InvertedCellPolicy.RAISE,
@@ -2028,6 +2032,7 @@ def compute_corner_point_geometry(
     :param zcorn: Shape `(NZ*2, NY*2, NX*2)`.
     :param actnum: Shape `(NZ, NY, NX)`.
     :param vertex_tolerance: Vertex merge distance.
+        Defaults to the `CORNER_POINT_VERTEX_TOLERANCE` constant.
     :param pinch_tolerance: Average thickness threshold for pinch detection.
     :param mirrored: Whether `coord` is a mirror image of a right-handed `(x, y, depth)`
         frame, as when a `MAPAXES` with a south-pointing Y axis has been applied. Cell
@@ -2043,6 +2048,8 @@ def compute_corner_point_geometry(
     :raises InvalidGridError: If no active cells are found, or if active cells are inverted
         and `on_inverted_cells` is `RAISE`.
     """
+    if vertex_tolerance is None:
+        vertex_tolerance = c.CORNER_POINT_VERTEX_TOLERANCE
     active_mask = (actnum > 0).ravel()
     if not active_mask.any():
         raise InvalidGridError(

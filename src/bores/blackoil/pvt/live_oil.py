@@ -12,6 +12,8 @@ import typing
 import numpy as np
 import numpy.typing as npt
 
+from bores.constants import c
+
 __all__ = [
     "build_live_oil_branch_tables",
     "evaluate_interpolator",
@@ -60,7 +62,7 @@ def build_live_oil_branch_tables(
     group_viscosity: typing.Sequence[npt.NDArray[np.floating]],
     pressures: npt.NDArray[np.floating],
     *,
-    floor_fraction: float = 0.05,
+    floor_fraction: float | None = None,
 ) -> tuple[
     npt.NDArray[np.float64],
     npt.NDArray[np.float64],
@@ -91,6 +93,8 @@ def build_live_oil_branch_tables(
     :param pressures: Common pressure grid, strictly increasing.
     :returns: `(envelope_fvf, envelope_viscosity, envelope_rs, branch_fvf, branch_viscosity)`.
     """
+    if floor_fraction is None:
+        floor_fraction = c.LIVE_OIL_FLOOR_FRACTION
     rs_nodes = np.asarray(rs_nodes, dtype=np.float64)
     pressures = np.asarray(pressures, dtype=np.float64)
     n_p, n_rs = len(pressures), len(rs_nodes)

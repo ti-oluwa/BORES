@@ -137,7 +137,7 @@ def get_gas_tables_from_pvt_table(
 def build_oil_pvt_data(
     pressures: NumberArray[OneDimension],
     temperatures: NumberArray[OneDimension],
-    oil_specific_gravity: Number = 0.85,
+    oil_specific_gravity: Number | None = None,
     gas_gravity: Number | None = None,
     estimated_solution_gor: Number | None = None,
     bubble_point_pressures: NumberArray[OneDimension] | NumberArray[TwoDimensions] | None = None,
@@ -165,6 +165,7 @@ def build_oil_pvt_data(
     :param pressures: 1-D array of pressures (psi), strictly increasing.
     :param temperatures: 1-D array of temperatures (°F), strictly increasing.
     :param oil_specific_gravity: Oil specific gravity (dimensionless, water=1).
+        Defaults to the `DEFAULT_OIL_SPECIFIC_GRAVITY` constant.
     :param gas_gravity: Gas specific gravity (air=1). Derived from `gas` if absent.
     :param estimated_solution_gor: Estimated Rs (SCF/STB) for the 1-D Pb
         correlation. Estimated from API if absent. (Formerly `estimatedsolution_gor`, which is
@@ -183,6 +184,8 @@ def build_oil_pvt_data(
         `density_table` when absent.
     :returns: `PVTData` with `phase=OIL`.
     """
+    if oil_specific_gravity is None:
+        oil_specific_gravity = c.DEFAULT_OIL_SPECIFIC_GRAVITY
     if pressures.ndim != 1 or not np.all(np.diff(pressures) > 0):
         raise ValidationError("`pressures` must be a strictly increasing 1-D array.")
     if temperatures.ndim != 1 or not np.all(np.diff(temperatures) > 0):
@@ -894,7 +897,7 @@ def build_water_pvt_data(
 def build_pvt_dataset(
     pressures: NumberArray[OneDimension],
     temperatures: NumberArray[OneDimension],
-    oil_specific_gravity: Number = 0.85,
+    oil_specific_gravity: Number | None = None,
     gas_gravity: Number | None = None,
     water_salinity: Number | None = None,
     salinities: NumberArray[OneDimension] | None = None,
@@ -922,6 +925,7 @@ def build_pvt_dataset(
     :param pressures: 1-D array of pressures (psi).
     :param temperatures: 1-D array of temperatures (°F).
     :param oil_specific_gravity: Oil specific gravity (water=1).
+        Defaults to the `DEFAULT_OIL_SPECIFIC_GRAVITY` constant.
     :param gas_gravity: Gas specific gravity (air=1).
     :param water_salinity: Single salinity scalar (ppm).
     :param salinities: 1-D salinity array (ppm).
@@ -941,6 +945,8 @@ def build_pvt_dataset(
         routed to (the builders themselves ignore unknown keywords, so a typo would
         otherwise vanish silently).
     """
+    if oil_specific_gravity is None:
+        oil_specific_gravity = c.DEFAULT_OIL_SPECIFIC_GRAVITY
     oil_kwargs: dict[str, typing.Any] = {}
     gas_kwargs: dict[str, typing.Any] = {}
     water_kwargs: dict[str, typing.Any] = {}

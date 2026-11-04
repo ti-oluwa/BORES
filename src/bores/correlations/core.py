@@ -372,8 +372,8 @@ def compute_fluid_in_place(
     formation_volume_factor: NumberOrArray[NDimension],
     net_to_gross_ratio: NumberOrArray[NDimension] = 1.0,
     hydrocarbon_type: typing.Literal["oil", "gas", "water"] = "oil",
-    acre_ft_to_bbl: Number = 7758.0,
-    acre_ft_to_ft3: Number = 43560.0,
+    acre_ft_to_bbl: Number | None = None,
+    acre_ft_to_ft3: Number | None = None,
 ) -> NumberOrArray[NDimension]:
     """
     Computes the free oil, free gas or free water in place with the volumetric method.
@@ -401,11 +401,16 @@ def compute_fluid_in_place(
         and water, ft³/scf for gas).
     :param net_to_gross_ratio: Net-to-gross ratio (fraction).
     :param hydrocarbon_type: Phase to compute, "oil", "gas" or "water".
-    :param acre_ft_to_bbl: Barrels per acre-foot.
+    :param acre_ft_to_bbl: Barrels per acre-foot. Defaults to the `ACRE_FOOT_TO_BARRELS` constant.
     :param acre_ft_to_ft3: Cubic feet per acre-foot.
+        Defaults to the `ACRE_FOOT_TO_CUBIC_FEET` constant.
     :return: Oil or water in place (STB), or free gas in place (SCF).
     :raises ValidationError: If an input is outside its valid range.
     """
+    if acre_ft_to_ft3 is None:
+        acre_ft_to_ft3 = c.ACRE_FOOT_TO_CUBIC_FEET
+    if acre_ft_to_bbl is None:
+        acre_ft_to_bbl = c.ACRE_FOOT_TO_BARRELS
     if hydrocarbon_type not in {"oil", "gas", "water"}:
         raise ValidationError("Hydrocarbon type must be either 'oil', 'gas', or 'water'.")
     if np.min(area) <= 0 or np.min(thickness) <= 0:

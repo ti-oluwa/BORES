@@ -2,6 +2,7 @@
 
 import typing
 
+from bores.constants import c
 from bores.errors import ValidationError
 from bores.types import FluidPhase, Number, Orientation, UnitSystem
 from bores.wells.base import (
@@ -61,7 +62,7 @@ def make_perforation(
     top_md: Number | None = None,
     bottom_md: Number | None = None,
     skin: Number = 0.0,
-    wellbore_radius: Number = 0.25,
+    wellbore_radius: Number | None = None,
     status: CompletionStatus = CompletionStatus.OPEN,
     schedule_status: WellStatus = WellStatus.ACTIVE,
     saturation_region: int | None = None,
@@ -79,7 +80,7 @@ def make_perforation(
     :param top_md: Top measured depth, for a well with a trajectory.
     :param bottom_md: Bottom measured depth; pair with `top_md`.
     :param skin: Dimensionless skin factor.
-    :param wellbore_radius: Perforation radius.
+    :param wellbore_radius: Perforation radius. Defaults to the `DEFAULT_WELLBORE_RADIUS` constant.
     :param status: Completion open/shut status.
     :param schedule_status: Schedule activation status.
     :param saturation_region: Optional saturation-region integer identifier.
@@ -90,6 +91,8 @@ def make_perforation(
     :param direction: Optional principal-axis direction for TVD-based perforations.
     :returns: Constructed `Perforation`.
     """
+    if wellbore_radius is None:
+        wellbore_radius = c.DEFAULT_WELLBORE_RADIUS
     return Perforation(
         top_depth=top_depth,
         bottom_depth=bottom_depth,
@@ -199,7 +202,7 @@ def make_producer(
     limits: typing.Sequence[Limit] | None = None,
     efficiency_factor: Number = 1.0,
     guide_rate: Number | None = None,
-    wellbore_radius: Number = 0.25,
+    wellbore_radius: Number | None = None,
     skin: Number = 0.0,
     saturation_region: int | None = None,
     connection_factor_override: Number | None = None,
@@ -249,6 +252,7 @@ def make_producer(
     :param efficiency_factor: `ProducerControl.efficiency_factor`.
     :param guide_rate: `ProducerControl.guide_rate`.
     :param wellbore_radius: `Perforation.wellbore_radius`.
+        Defaults to the `DEFAULT_WELLBORE_RADIUS` constant.
     :param skin: `Perforation.skin`.
     :param saturation_region: `Perforation.saturation_region`.
     :param connection_factor_override: `Perforation.connection_factor_override`.
@@ -272,6 +276,8 @@ def make_producer(
         `target_thp` is given; if both or neither of `perforation_depths`/
         `perforations` is given; or if `perforations` is given without `reference_depth`.
     """
+    if wellbore_radius is None:
+        wellbore_radius = c.DEFAULT_WELLBORE_RADIUS
     if target_rate is None and target_bhp is None and target_thp is None:
         raise ValidationError("Supply one of `target_rate`, `target_bhp`, or `target_thp`.")
 
@@ -363,7 +369,7 @@ def make_injector(
     limits: typing.Sequence[Limit] | None = None,
     efficiency_factor: Number = 1.0,
     guide_rate: Number | None = None,
-    wellbore_radius: Number = 0.25,
+    wellbore_radius: Number | None = None,
     skin: Number = 0.0,
     saturation_region: int | None = None,
     connection_factor_override: Number | None = None,
@@ -412,6 +418,7 @@ def make_injector(
     :param efficiency_factor: `InjectorControl.efficiency_factor`.
     :param guide_rate: `InjectorControl.guide_rate`.
     :param wellbore_radius: `Perforation.wellbore_radius`.
+        Defaults to the `DEFAULT_WELLBORE_RADIUS` constant.
     :param skin: `Perforation.skin`.
     :param saturation_region: `Perforation.saturation_region`.
     :param connection_factor_override: `Perforation.connection_factor_override`.
@@ -434,6 +441,8 @@ def make_injector(
         `target_thp` is given; if both or neither of `perforation_depths`/
         `perforations` is given; or if `perforations` is given without `reference_depth`.
     """
+    if wellbore_radius is None:
+        wellbore_radius = c.DEFAULT_WELLBORE_RADIUS
     if target_rate is None and target_bhp is None and target_thp is None:
         raise ValidationError("Supply one of `target_rate`, `target_bhp`, or `target_thp`.")
 
