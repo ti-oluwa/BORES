@@ -186,7 +186,7 @@ class ScheduleItem(typing.Generic[ModelT]):
 
     @property
     def is_limited(self) -> Boolean:
-        """Whether this item's runs are capped or spaced out, so `Firings` must track it."""
+        """Checks whether this item's runs are capped or spaced out, so `Firings` must track it."""
         return self.max_firings != math.inf or self.min_interval > 0
 
     def may_fire(self, *, firings: Firings, time: Number) -> Boolean:

@@ -25,7 +25,7 @@ This module provides three layers:
 
 Deck keyword support
 --------------------
-`pvt_regions_from_data_file` detects which Eclipse PVT keywords are present
+`pvt_regions_from_data_file` detects which PVT keywords are present
 (`PVTO` > `PVDO` > `PVCO` for oil; `PVTG` > `PVDG` for gas;
 `PVTW` for water - always analytical) and builds one `PVTTables` per
 `PVTNUM` region.

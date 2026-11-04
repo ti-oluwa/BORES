@@ -78,7 +78,7 @@ class SatFuncTables:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `SatFuncTables` with capillary pressure in every
+        Returns a new `SatFuncTables` with capillary pressure in every
         region rescaled to *target*.
 
         Relative permeability is dimensionless and is unaffected.
@@ -101,7 +101,7 @@ def _resolve_saturation_endpoint(
     arg_value: Number | None, table: typing.Any, attr_name: str, caller: str
 ) -> Number:
     """
-    Return `arg_value` if provided, otherwise fall back to the named
+    Returns `arg_value` if provided, otherwise fall back to the named
     attribute on `table`. Raises `ValueError` when neither source supplies
     a value.
 
@@ -128,7 +128,7 @@ def _resolve_saturation_endpoint(
 @numba.njit(cache=True, inline="always")
 def _clamp(value: Number, lower_bound: Number, upper_bound: Number) -> Number:
     """
-    Clamp `value` to the closed interval [`lower_bound`, `upper_bound`].
+    Clamps `value` to the closed interval [`lower_bound`, `upper_bound`].
 
     :param value: Value to clamp.
     :param lower_bound: Minimum permitted value.
@@ -145,7 +145,7 @@ def get_oil_water_point_sweep_along_water_saturation(
     residual_oil_saturation_water: Number,
 ) -> tuple[Number, Number, Number]:
     """
-    Clamp a water saturation value to the oil-water mobile window and return
+    Clamps a water saturation value to the oil-water mobile window and returns
     the corresponding (Sw, So, Sg) triple with Sg fixed at zero.
 
     :param water_saturation: Candidate water saturation to clamp.
@@ -169,7 +169,7 @@ def get_oil_water_point_sweep_along_oil_saturation(
     residual_oil_saturation_water: Number,
 ) -> tuple[Number, Number, Number]:
     """
-    Clamp an oil saturation value to the oil-water mobile window and return
+    Clamps an oil saturation value to the oil-water mobile window and returns
     the corresponding (Sw, So, Sg) triple with Sg fixed at zero.
 
     :param oil_saturation: Candidate oil saturation to clamp.
@@ -199,7 +199,7 @@ def get_gas_oil_point_sweep_along_gas_saturation(
     residual_gas_saturation: Number,
 ) -> tuple[Number, Number, Number]:
     """
-    Clamp a gas saturation value to the gas-oil mobile window and return the
+    Clamps a gas saturation value to the gas-oil mobile window and returnss the
     corresponding (Sw, So, Sg) triple with Sw fixed at swc.
 
     :param gas_saturation: Candidate gas saturation to clamp.
@@ -230,7 +230,7 @@ def get_gas_oil_point_sweep_along_oil_saturation(
     residual_gas_saturation: Number,
 ) -> tuple[Number, Number, Number]:
     """
-    Clamp an oil saturation value to the gas-oil mobile window and return the
+    Clamps an oil saturation value to the gas-oil mobile window and returnss the
     corresponding (Sw, So, Sg) triple with Sw fixed at swc.
 
     :param oil_saturation: Candidate oil saturation to clamp.
@@ -257,7 +257,7 @@ def check_oil_water_sweep_axis_is_water_saturation(
     reference_phase: typing.Literal["wetting", "non_wetting"],
 ) -> bool:
     """
-    Return `True` when the oil-water table should be built by sweeping along
+    Returns `True` when the oil-water table should be built by sweeping along
     increasing water saturation.
 
     :param wetting_phase: Wetting phase declared for the oil-water system.
@@ -273,7 +273,7 @@ def check_gas_oil_sweep_axis_is_gas_saturation(
     reference_phase: typing.Literal["wetting", "non_wetting"],
 ) -> bool:
     """
-    Return `True` when the gas-oil table should be built by sweeping along
+    Returns `True` when the gas-oil table should be built by sweeping along
     increasing gas saturation.
 
     :param wetting_phase: Wetting phase declared for the gas-oil system.
@@ -294,7 +294,7 @@ def _resolve_system_orientation(
     reference_phase: typing.Literal["wetting", "non_wetting"] | None,
 ) -> tuple[FluidPhase, typing.Literal["wetting", "non_wetting"]]:
     """
-    Resolve the wetting phase and reference phase of one two-phase system.
+    Resolves the wetting phase and reference phase of one two-phase system.
 
     PCHIP resampling reuses the source saturation axis and value arrays, so it
     cannot re-orient a tabular source. A mismatch would not fail on its own, it
@@ -352,7 +352,7 @@ def _build_tabular_reference_saturations(
     dtype: npt.DTypeLike,
 ) -> npt.NDArray:
     """
-    Build the saturation axis a tabular source is resampled onto.
+    Builds the saturation axis a tabular source is resampled onto.
 
     The axis spans the source table's own saturation range, since that is the only
     range its data covers. Endpoint enrichment is applied inside that range.
@@ -384,7 +384,7 @@ def _resample_tabular_relperm(
     dtype: npt.DTypeLike,
 ) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     """
-    PCHIP-evaluate a tabular two-phase relative permeability table on a new axis.
+    Returns PCHIP-evaluate a tabular two-phase relative permeability table on a new axis.
 
     :param source_table: Two-phase sub-table to resample.
     :param reference_saturations: Saturation axis to evaluate on. Values outside the
@@ -414,7 +414,7 @@ def _resample_tabular_capillary_pressure(
     dtype: npt.DTypeLike,
 ) -> tuple[npt.NDArray, npt.NDArray]:
     """
-    PCHIP-evaluate a tabular two-phase capillary pressure table on a new axis.
+    Returns PCHIP-evaluate a tabular two-phase capillary pressure table on a new axis.
 
     :param source_table: Two-phase sub-table to resample.
     :param reference_saturations: Saturation axis to evaluate on. Values outside the
@@ -442,7 +442,7 @@ def sample_oil_water_relative_permeabilities(
     dtype: npt.DTypeLike,
 ) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     """
-    Sample oil-water relative permeability values across the oil-water saturation range.
+    Samples oil-water relative permeability values across the oil-water saturation range.
 
     The table is evaluated at every point of the reference axis.
 
@@ -513,7 +513,7 @@ def sample_gas_oil_relative_permeabilities(
     dtype: npt.DTypeLike,
 ) -> tuple[npt.NDArray, npt.NDArray, npt.NDArray]:
     """
-    Sample gas-oil relative permeability values across the gas-oil saturation range.
+    Samples gas-oil relative permeability values across the gas-oil saturation range.
 
     The table is evaluated at every point of the reference axis.
 
@@ -585,7 +585,7 @@ def sample_oil_water_capillary_pressure(
     dtype: npt.DTypeLike,
 ) -> tuple[npt.NDArray, npt.NDArray]:
     """
-    Sample oil-water capillary pressure values across the oil-water saturation range.
+    Samples oil-water capillary pressure values across the oil-water saturation range.
 
     The table is evaluated at every point of the reference axis.
 
@@ -642,7 +642,7 @@ def sample_gas_oil_capillary_pressure(
     dtype: npt.DTypeLike,
 ) -> tuple[npt.NDArray, npt.NDArray]:
     """
-    Sample gas-oil capillary pressure values across the gas-oil saturation range.
+    Samples gas-oil capillary pressure values across the gas-oil saturation range.
 
     The table is evaluated at every point of the reference axis.
 
@@ -704,7 +704,7 @@ def _resample_three_phase_relperm_table(
     dtype: np.dtype,
 ) -> ThreePhaseRelPermTable:
     """
-    Resample a tabular `ThreePhaseRelPermTable` onto a new saturation field.
+    Resamples a tabular `ThreePhaseRelPermTable` onto a new saturation field.
 
     Needs none of the saturation endpoints. The new field spans each sub-table's own
     saturation range, with `n_endpoint_extra` extra knots in each end region, unless
@@ -815,7 +815,7 @@ def as_three_phase_relperm_table(
     dtype: npt.DTypeLike = None,
 ) -> ThreePhaseRelPermTable:
     """
-    Convert any `RelativePermeabilityTable` to a `ThreePhaseRelPermTable`
+    Converts any `RelativePermeabilityTable` to a `ThreePhaseRelPermTable`
     backed by piecewise-linear `TwoPhaseRelPermTable` instances.
 
     Analytical derivatives are sampled at every knot and stored in the
@@ -1067,7 +1067,7 @@ def _resample_three_phase_capillary_pressure_table(
     dtype: np.dtype,
 ) -> ThreePhaseCapillaryPressureTable:
     """
-    Resample a tabular `ThreePhaseCapillaryPressureTable` onto a new saturation field.
+    Resamples a tabular `ThreePhaseCapillaryPressureTable` onto a new saturation field.
 
     Needs none of the saturation endpoints. The new field spans each sub-table's own
     saturation range, with `n_endpoint_extra` extra knots in each end region, unless
@@ -1164,7 +1164,7 @@ def as_three_phase_capillary_pressure_table(
     dtype: npt.DTypeLike = None,
 ) -> ThreePhaseCapillaryPressureTable:
     """
-    Convert any `CapillaryPressureTable` to a `ThreePhaseCapillaryPressureTable`
+    Converts any `CapillaryPressureTable` to a `ThreePhaseCapillaryPressureTable`
     backed by piecewise-linear `TwoPhaseCapillaryPressureTable` instances.
 
     Analytical derivatives are sampled at every knot and stored in the

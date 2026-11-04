@@ -65,7 +65,7 @@ def advance_phase_hysteresis_kernel(
     out_min_saturation: CellArray,
 ) -> None:
     """
-    Advance one phase's saturation history for every cell in a single pass.
+    Advances one phase's saturation history for every cell in a single pass.
 
     Every input may share memory with its output, because each cell reads all of its inputs
     before writing any of its outputs. No temporary array is created. The historical minimum is
@@ -304,7 +304,7 @@ class Hysteresis(StoreSerializable):
         dtype: npt.DTypeLike = None,
     ) -> Self:
         """
-        Load a `Hysteresis` from saturation arrays.
+        Loads a `Hysteresis` from saturation arrays.
 
         Sets maximum saturations to the current values, marks all cells as
         drainage (not yet reversing), and places reversal points at the
@@ -343,7 +343,7 @@ class Hysteresis(StoreSerializable):
         dtype: npt.DTypeLike = None,
     ) -> Self:
         """
-        Return a new `Hysteresis` updated for the current timestep's saturations.
+        Returns a new `Hysteresis` updated for the current timestep's saturations.
 
         For each phase, the imbibition flag says whether it is moving the way its wettability
         role calls imbibition (rising for a wetting phase, falling for a non-wetting one).
@@ -527,7 +527,7 @@ class ReservoirState(StoreSerializable):
     phase. Must be stored and checkpointed in this regime.
 
     The two-regime handling is the same saturated/undersaturated switching
-    used by Eclipse E100 (PBPD switching logic).
+    used by a bubble-point/dew-point switching scheme.
     """
 
     vaporized_oil_gas_ratio: CellArray
@@ -670,7 +670,7 @@ class ReservoirState(StoreSerializable):
     @property
     def total_gas_mass(self) -> CellArray:
         """
-        Shape (n_cells,) - total gas-component mass per cell.
+        Returns shape (n_cells,) - total gas-component mass per cell.
 
         m_g,total = free_gas_mass + dissolved_gas_mass_in_oil
                     + dissolved_gas_mass_in_water
@@ -687,7 +687,7 @@ class ReservoirState(StoreSerializable):
     @property
     def total_oil_mass(self) -> CellArray:
         """
-        Shape (n_cells,) - total oil-component mass per cell.
+        Returns shape (n_cells,) - total oil-component mass per cell.
 
         m_o,total = oil_mass + vaporized_oil_mass_in_gas
 
@@ -698,7 +698,7 @@ class ReservoirState(StoreSerializable):
 
     def evolve(self, **kwargs: typing.Any) -> Self:
         """
-        Return a new `ReservoirState` with selected fields replaced.
+        Returns a new `ReservoirState` with selected fields replaced.
 
         All fields not present in *kwargs* are carried forward unchanged.
         Preferred solver pattern:
@@ -728,7 +728,7 @@ class ReservoirState(StoreSerializable):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `ReservoirState` with all dimensional quantities rescaled
+        Returns a new `ReservoirState` with all dimensional quantities rescaled
         to *target*.
 
         Dimensionless fields (saturations, `solvent_concentration`) are

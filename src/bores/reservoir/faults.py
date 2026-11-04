@@ -22,12 +22,12 @@ class Fault:
     """
     Definition of a single named fault and its optional transmissibility multiplier.
 
-    Combines the information from the Eclipse `FAULTS` and `MULTFLT` keywords
+    Combines the information from the `FAULTS` and `MULTFLT` keywords
     into a single object. A fault without a transmissibility multiplier is valid
     (`transmissibility_multiplier=None`); it will still classify faces but
     will not modify their transmissibilities.
 
-    All IJK indices are 1-based, following Eclipse convention.
+    All IJK indices are 1-based, as in a deck.
 
     :param name: Fault name as declared in the `FAULTS` keyword.
     :param i1: Start of the fault's cell range in the I direction (1-based).
@@ -99,7 +99,7 @@ class Fault:
         name: str | None = None,
     ) -> Self | list[Self]:
         """
-        Construct one or all `Fault` objects from a parsed `DeckFile`.
+        Constructs one or all `Fault` objects from a parsed `DeckFile`.
 
         Reads the `FAULTS` keyword for geometry and `MULTFLT` for multipliers.
         When `name` is given, returns a single `Fault` for that fault.
@@ -175,7 +175,7 @@ class Fault:
 
 def apply_faults(grid: Grid, *faults: Fault) -> Grid:
     """
-    Apply one or more `Fault` definitions to a grid and return a new grid.
+    Applies one or more `Fault` definitions to a grid and returns a new grid.
 
     Useful for introducing or updating fault definitions at runtime, e.g,
     during history matching, sensitivity studies, or when
@@ -226,7 +226,7 @@ def apply_faults(grid: Grid, *faults: Fault) -> Grid:
 
 def remove_faults(grid: Grid, *names: str) -> Grid:
     """
-    Remove named faults from a grid and return a new grid.
+    Removes named faults from a grid and returns a new grid.
 
     Strips the specified faults from all grid fault data structures:
     face classifications are reverted to plain `INTERIOR_FACE`/`BOUNDARY_FACE`,
@@ -259,7 +259,7 @@ def validate_fault_bounds(
     faults: tuple[Fault, ...], nx: Integer, ny: Integer, nz: Integer
 ) -> None:
     """
-    Validate that all fault IJK ranges are within the grid bounds.
+    Validates that all fault IJK ranges are within the grid bounds.
 
     :param faults: Fault records to validate.
     :param nx: Grid extent in x.
@@ -328,7 +328,7 @@ def fault_pair(
     in_bounds: BooleanArray[OneDimension],
 ) -> None:
     """
-    Fill the cell pair across a fault interface for every cell of a fault's IJK box.
+    Fills the cell pair across a fault interface for every cell of a fault's IJK box.
 
     Position `p` of the box is cell `(i1 + p % ni, j1 + (p // ni) % nj, k1 + p // (ni * nj))`, so
     `i` varies fastest and `k` slowest. Every position writes only its own slot of the outputs.
@@ -386,7 +386,7 @@ def find_faces(
     out: IntArray[OneDimension],
 ) -> None:
     """
-    Look up the interior face shared by each cell pair, `-1` where the pair shares none.
+    Looks up the interior face shared by each cell pair, `-1` where the pair shares none.
 
     If several faces separate the same two cells, the one with the highest position in `keys` is
     returned. Every pair writes only its own slot of `out`.
@@ -423,7 +423,7 @@ def reclassify_faces(
     boundary_type: Integer,
 ) -> None:
     """
-    Set the connection type of each listed face by whether it has a neighbouring cell.
+    Sets the connection type of each listed face by whether it has a neighbouring cell.
 
     :param connection_types: Connection type of every face, updated in place.
     :param face_cell_indices: Shape `(n_faces, 2)` owner and neighbour of every face.
@@ -443,7 +443,7 @@ def resolve_fault_cell_pairs(
     fault: Fault, nx: Integer, ny: Integer, nz: Integer
 ) -> FaultCellPairs:
     """
-    Enumerate all cell pairs across a fault interface.
+    Returns enumerate all cell pairs across a fault interface.
 
     Iterates the IJK box defined by the fault record and, for each cell in the
     box, finds its neighbour in the face direction. Pairs are returned with the lower
@@ -503,7 +503,7 @@ def resolve_fault_cell_pairs(
 
 def build_face_lookup(grid: Grid) -> FaceLookup:
     """
-    Index the interior faces of `grid` by the pair of cells each one separates.
+    Indexes the interior faces of `grid` by the pair of cells each one separates.
 
     Only faces with a cell on both sides are included. The index is used to find whether a
     fault's cell pair shares a geometric face.
@@ -532,7 +532,7 @@ def apply_faults_to_grid(
     grid: Grid, faults: tuple[Fault, ...], nx: Integer, ny: Integer, nz: Integer
 ) -> Grid:
     """
-    Produce a new `Grid` with the given faults applied.
+    Produces a new `Grid` with the given faults applied.
 
     For each fault, cell pairs are resolved from the IJK range. Each pair is
     checked against the face lookup:
@@ -608,7 +608,7 @@ def apply_faults_to_grid(
 
 def remove_faults_from_grid(grid: Grid, names: frozenset[str]) -> Grid:
     """
-    Produce a new `Grid` with the specified faults stripped out.
+    Produces a new `Grid` with the specified faults stripped out.
 
     Fault face classifications are reverted to plain `INTERIOR_FACE` or
     `BOUNDARY_FACE`. Transmissibility multipliers for the removed faults are dropped.

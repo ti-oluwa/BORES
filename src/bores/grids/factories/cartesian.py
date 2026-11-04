@@ -221,7 +221,7 @@ def resolve_fault_face_indices(
     n_y_faces: Integer,
 ) -> dict[str, IntArray[OneDimension]]:
     """
-    Resolve `FaultRecord` IJK ranges to Cartesian face index arrays.
+    Resolves `FaultRecord` IJK ranges to Cartesian face index arrays.
 
     The Cartesian face layout (from `build_face_arrays`):
 
@@ -309,7 +309,7 @@ def resolve_spacing(
     FloatArray[OneDimension],
 ]:
     """
-    Resolve scalar or array spacing arguments into 1-D float64 arrays.
+    Resolves scalar or array spacing arguments into 1-D float64 arrays.
 
     :param nx: Explicit x-cell count (or `None` to infer from `dx`).
     :param ny: Explicit y-cell count.
@@ -355,7 +355,7 @@ def build_vertex_coordinates(
     origin: tuple[Number, Number, Number],
 ) -> VertexCoordinates:
     """
-    Build the `(n_vertices, 3)` vertex coordinate array via meshgrid.
+    Builds the `(n_vertices, 3)` vertex coordinate array via meshgrid.
 
     :param dx: 1-D array of x-direction cell widths.
     :param dy: 1-D array of y-direction cell widths.
@@ -386,7 +386,7 @@ def build_face_arrays(
     IntArray[TwoDimensions],
 ]:
     """
-    Build face connectivity arrays for a structured Cartesian grid.
+    Builds face connectivity arrays for a structured Cartesian grid.
 
     Face winding conventions (CCW from owner = lower-index side):
 

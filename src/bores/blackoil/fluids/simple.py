@@ -156,7 +156,7 @@ class Fluid:
         use_cache: bool = True,
     ) -> PseudoPressureTable:
         """
-        Return the gas pseudo-pressure table for this fluid.
+        Returns the gas pseudo-pressure table for this fluid.
 
         **Priority order:**
 

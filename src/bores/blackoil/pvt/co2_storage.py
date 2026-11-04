@@ -85,7 +85,7 @@ def build_co2_pressure_axis(
     dtype: npt.DTypeLike = None,  # type: ignore[assignment]
 ) -> FloatArray[OneDimension]:
     """
-    The pressures the CO2 storage tables are built at.
+    Returns the pressures the CO2 storage tables are built at.
 
     The density of CO2 changes sharply with pressure near its critical pressure when the
     temperature is close to its critical temperature, as in many storage reservoirs. The axis is
@@ -124,7 +124,7 @@ def build_co2_salinity_axis(
     dtype: npt.DTypeLike = None,  # type: ignore[assignment]
 ) -> FloatArray[OneDimension]:
     """
-    The salinities the brine tables are built at, covering every salinity in `salinity`.
+    Returns the salinities the brine tables are built at, covering every salinity in `salinity`.
 
     A single salinity, or cells that all have the same one, gives an axis of one point. Otherwise
     the axis spans the lowest to the highest salinity in steps of at most `spacing`, which keeps
@@ -151,13 +151,13 @@ def compute_co2_dissolved_volume(
     co2_standard_density: Number,
 ) -> FloatArray[OneDimension]:
     """
-    The volume that dissolved CO2 adds to brine, per unit standard volume of the CO2.
+    Returns the volume that dissolved CO2 adds to brine, per unit standard volume of the CO2.
 
     Dissolved CO2 occupies its apparent molar volume `Vφ` in the brine, from Garcia (2001),
 
         Vφ = 37.51 - 9.585e-2 T + 8.740e-4 T² - 5.044e-7 T³   [cm³/mol, T in °C]
 
-    which is the volume OPM Flow gives it. A standard volume of CO2 holds `ρ / M` moles.
+    which is the volume it takes at standard conditions. A standard volume of CO2 holds `ρ / M` moles.
 
     :param temperatures: Temperatures in F.
     :param co2_standard_density: CO2 density at standard conditions in lbm/ft³.
@@ -186,7 +186,7 @@ def build_co2_storage_tables(
     dtype: npt.DTypeLike = None,  # type: ignore[assignment]
 ) -> tuple[StaticPVT, PVTTables]:
     """
-    The static properties and tables of one PVT region of a CO2 storage model, in field units.
+    Returns the static properties and tables of one PVT region of a CO2 storage model, in field units.
 
     The gas is CO2 and the water is brine. Formation volume factors are relative to the standard
     conditions of 60 F and 1 atm. The brine is measured at one standard density, that of brine of

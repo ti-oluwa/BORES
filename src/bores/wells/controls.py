@@ -177,7 +177,7 @@ class WellTargetMode(enum.Enum):
     """
     A `WELTARG` record's own control mode, spelled out so a caller
     building `SetWellTargets` by hand doesn't need
-    Eclipse's abbreviated deck vocabulary (`ORAT`, `WRAT`, and so on)
+    The abbreviated deck vocabulary (`ORAT`, `WRAT`, and so on)
     memorized. Every member's own value is that deck string.
 
     A `WELTARG` record doesn't itself commit to a well kind - it names
@@ -269,7 +269,7 @@ class RateLimit(Limit):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Convert the limit to the *target* unit system.
+        Converts the limit to the *target* unit system.
 
         :param target: Target unit system.
         :param table: Optional custom conversion table.
@@ -329,7 +329,7 @@ class BHPLimit(Limit):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Convert the limit to the *target* unit system.
+        Converts the limit to the *target* unit system.
 
         :param target: Target unit system.
         :param table: Optional custom conversion table.
@@ -377,7 +377,7 @@ class THPLimit(Limit):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Convert the limit to the *target* unit system.
+        Converts the limit to the *target* unit system.
 
         :param target: Target unit system.
         :param table: Optional custom conversion table.
@@ -440,7 +440,7 @@ class EconomicLimit(Limit):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Convert the limit to the *target* unit system.
+        Converts the limit to the *target* unit system.
 
         :param target: Target unit system.
         :param table: Optional custom conversion table.
@@ -596,7 +596,7 @@ class ProducerControl(WellControl):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Convert the control to the *target* unit system.
+        Converts the control to the *target* unit system.
 
         :param target: Target unit system.
         :param table: Optional custom conversion table.
@@ -687,7 +687,7 @@ class InjectorControl(WellControl):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Convert the control to the *target* unit system.
+        Converts the control to the *target* unit system.
 
         :param target: Target unit system.
         :param table: Optional custom conversion table.
@@ -763,12 +763,12 @@ class WellControls:
         self.unit_system = unit_system
 
     def get(self, name: str) -> WellControl | None:
-        """Current control for `name`, or `None` if unset."""
+        """Returns current control for `name`, or `None` if unset."""
         return self.controls.get(name)
 
     def set(self, name: str, control: WellControl) -> None:
         """
-        Replace the current control for `name` wholesale (say for a
+        Replaces the current control for `name` wholesale (say for a
         `WCONPROD`/`WCONINJE` reissue, a limit-triggered mode switch, or an
         initial assignment).
 
@@ -779,7 +779,7 @@ class WellControls:
 
     def update(self, name: str, **fields: typing.Any) -> None:
         """
-        Modify one or more fields of `name`'s current control without
+        Modifies one or more fields of `name`'s current control without
         replacing it wholesale.
 
         The `WellControl` analogue of deck `WELTARG`/`WELCNTL` (single-target edits),
@@ -796,7 +796,7 @@ class WellControls:
     @classmethod
     def from_deck(cls, deck_file: DeckFile) -> Self:
         """
-        Load a `WellControls` object froma parsed `DeckFile`.
+        Loads a `WellControls` object froma parsed `DeckFile`.
 
         :param deck_file: Parsed deck containing WCONPROD/WCONINJE/WECON.
         :returns: WellControls for every well with a control record.
@@ -836,7 +836,7 @@ class WellControls:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Convert every control in this `WellControls` to the *target* unit system.
+        Converts every control in this `WellControls` to the *target* unit system.
 
         :param target: Target unit system.
         :param table: Optional custom conversion table.

@@ -93,7 +93,7 @@ class FaceRecord:
 
     def __init__(self, owner_cell_index: Integer, face_vertex_indices: FaceVertexIndices) -> None:
         """
-        Initialise with only an owner; neighbour is set later if face is interior.
+        Initialises with only an owner; neighbour is set later if face is interior.
 
         :param owner_cell_index: The cell that first registered this face.
         :param face_vertex_indices: Face vertex indices winding from the owner's perspective.
@@ -117,7 +117,7 @@ def deduplicate_faces(
     IntArray[OneDimension],
 ]:
     """
-    Match the face entries of every cell so a face shared by two cells is stored once.
+    Matches the face entries of every cell so a face shared by two cells is stored once.
 
     An entry is one face of one cell, as the cell sees it: its vertices wound outward from that
     cell. Entries must be ordered by cell, and each cell's entries in the order its faces were
@@ -214,7 +214,7 @@ def build_csr_face_arrays_from_entries(
     IntArray[TwoDimensions],
 ]:
     """
-    Deduplicate the faces of every cell and build CSR face arrays, from flat arrays.
+    Deduplicates the faces of every cell and builds CSR face arrays, from flat arrays.
 
     The array form of `build_csr_face_arrays`; see `deduplicate_faces` for what an entry is and
     how faces are matched and numbered.
@@ -281,7 +281,7 @@ def build_csr_face_arrays(
     IntArray[TwoDimensions],
 ]:
     """
-    Deduplicate faces across cells and build CSR face arrays.
+    Deduplicates faces across cells and builds CSR face arrays.
 
     Each cell provides a list of faces; each face is a list of vertex
     indices wound CCW from **outside** that cell (outward-normal convention).
@@ -330,7 +330,7 @@ class FaultRecord(typing.NamedTuple):
     :param j2: 1-based end index in the J direction (inclusive).
     :param k1: 1-based start index in the K (z) direction (inclusive).
     :param k2: 1-based end index in the K direction (inclusive).
-    :param face_direction: Eclipse face direction string, one of
+    :param face_direction: Face direction string, one of
         `'X'`, `'X-'`, `'Y'`, `'Y-'`, `'Z'`, `'Z-'`.
     """
 
@@ -360,7 +360,7 @@ MAP_AXES_PERPENDICULAR_TOLERANCE = 1e-3
 
 def validate_map_axes(map_axes: MapAxes) -> None:
     """
-    Check that the two `MAPAXES` axes are perpendicular, as a map placement requires.
+    Checks that the two `MAPAXES` axes are perpendicular, as a map placement requires.
 
     Axes that are not perpendicular shear the grid and change cell volumes, so they are
     refused instead of applied.
@@ -387,7 +387,7 @@ def map_xy_to_map_space(
     xy: NumberArray[TwoDimensions], map_axes: MapAxes
 ) -> NumberArray[TwoDimensions]:
     """
-    Map local `(x, y)` pairs into map space: `origin + rotation_matrix @ xy`.
+    Maps local `(x, y)` pairs into map space: `origin + rotation_matrix @ xy`.
 
     :param xy: Shape `(n, 2)` local-space points.
     :param map_axes: Map axes to apply.

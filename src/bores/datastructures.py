@@ -52,7 +52,7 @@ class GridDimensions(NamedTuple):
 
     @property
     def n_cells(self) -> Integer:
-        """Total number of cells `nx * ny * nz`."""
+        """Returns the total number of cells `nx * ny * nz`."""
         return self.nx * self.ny * self.nz
 
     @typing.overload
@@ -72,7 +72,7 @@ class GridDimensions(NamedTuple):
 
     def flat_index(self, i, j, k):
         """
-        Convert 0-based `(i, j, k)` to a flat index in Eclipse's natural
+        Converts 0-based `(i, j, k)` to a flat index in the natural
         ordering (`i` fastest, `k` slowest):
 
         `index = i + j*nx + k*nx*ny`.
@@ -89,9 +89,9 @@ class GridDimensions(NamedTuple):
 
     def ijk_index(self, flat: Integer) -> tuple[int, int, int]:
         """
-        Convert a flat index to  0-based `(i, j, k)`.
+        Converts a flat index to  0-based `(i, j, k)`.
 
-        Given the flat index was generated Eclipse's natural
+        Given the flat index was generated in the natural
         ordering (`i` fastest, `k` slowest):
 
         `index = i + j*nx + k*nx*ny`.
@@ -108,9 +108,9 @@ class GridDimensions(NamedTuple):
         self, flat: IntArray[NDimension]
     ) -> tuple[IntArray[NDimension], IntArray[NDimension], IntArray[NDimension]]:
         """
-        Convert flat indices to 0-based `(i, j, k)` indices, for any number of cells at once.
+        Converts flat indices to 0-based `(i, j, k)` indices, for any number of cells at once.
 
-        Given the flat indices were generated in Eclipse's natural ordering
+        Given the flat indices were generated in the natural ordering
         (`i` fastest, `k` slowest): `index = i + j*nx + k*nx*ny`.
 
         :param flat: Flat cell indices, of any shape.
@@ -176,7 +176,7 @@ class MapAxes:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `MapAxes` with all coordinates expressed in *target*.
+        Returns a new `MapAxes` with all coordinates expressed in *target*.
 
         :param target: Target `UnitSystem`.
         :returns: New `MapAxes` in the target unit system, or `self`
@@ -284,12 +284,12 @@ class GridOrientation:
 
     @property
     def is_default(self) -> bool:
-        """Whether every item has its default value, which is what a deck without `GDORIENT` gets."""
+        """Checks whether every item has its default value, which is what a deck without `GDORIENT` gets."""
         return self == GridOrientation()
 
     @property
     def non_default_items(self) -> dict[str, str]:
-        """The items that differ from their default, by field name, with the value as text."""
+        """Returns the items that differ from their default, by field name, with the value as text."""
         default = GridOrientation()
         return {
             field.name: str(getattr(self, field.name))
@@ -310,7 +310,7 @@ class ContextFlag(typing.Generic[T]):
 
     def __init__(self, id: str, /, initial: T) -> None:
         """
-        Initialize the context flag with an initial value.
+        Initializes the context flag with an initial value.
 
         :param id: Unique identifier for the context variable
         :param initial: Initial value for new contexts
@@ -320,7 +320,7 @@ class ContextFlag(typing.Generic[T]):
 
     def get(self) -> T:
         """
-        Get the flag value in the current context.
+        Gets the flag value in the current context.
 
         :return: Current value (defaults to initial if never set in this context)
         """
@@ -328,13 +328,13 @@ class ContextFlag(typing.Generic[T]):
 
     def set(self, value: T) -> None:
         """
-        Set the flag to a new value in the current context.
+        Sets the flag to a new value in the current context.
 
         :param value: New value
         """
         self._token.set(self._var.set(value))
 
     def reset(self) -> None:
-        """Reset the flag to its initial value in the current context."""
+        """Resets the flag to its initial value in the current context."""
         if (token := self._token.get()) is not None:
             self._var.reset(token)

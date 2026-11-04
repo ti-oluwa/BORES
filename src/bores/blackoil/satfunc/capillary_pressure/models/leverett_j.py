@@ -64,7 +64,7 @@ def compute_leverett_j_capillary_pressures_cell(
     minimum_mobile_pore_space: Number = 1e-9,
 ) -> tuple[Number, Number]:
     """
-    Capillary pressures of a single cell, without any validation of the inputs.
+    Returns capillary pressures of a single cell, without any validation of the inputs.
 
     This is the per-cell kernel shared by the scalar function and the array loop. It has the
     same parameters as the scalar function.
@@ -174,7 +174,7 @@ def compute_leverett_j_capillary_pressures_scalar(
     minimum_mobile_pore_space: Number = 1e-9,
 ) -> tuple[Number, Number]:
     """
-    Scalar variant of Leverett J-function capillary pressure computation.
+    Computes Leverett J-function capillary pressure for scalar inputs.
 
     Computes capillary pressures using Leverett J-function approach.
 
@@ -263,7 +263,7 @@ def compute_leverett_j_capillary_pressures_loop(
     gas_oil_capillary_pressure: NumberArray[OneDimension],
 ) -> None:
     """
-    Compute the capillary pressures of `size` cells in parallel and write them to the output arrays.
+    Computes the capillary pressures of `size` cells in parallel and writess them to the output arrays.
 
     Per-cell inputs are flat arrays, or a single value shared by every cell.
     """
@@ -323,7 +323,7 @@ def compute_leverett_j_capillary_pressures_array(
     minimum_mobile_pore_space: Number = 1e-9,
 ) -> tuple[NumberArray[NDimension], NumberArray[NDimension]]:
     """
-    Array variant of Leverett J-function capillary pressure computation.
+    Computes Leverett J-function capillary pressure for array inputs.
 
     Computes capillary pressures using Leverett J-function approach.
     Supports array inputs (up to 3D). Always returns NDArrays.
@@ -446,7 +446,7 @@ def compute_leverett_j_capillary_pressures(
     minimum_mobile_pore_space: Number = 1e-9,
 ) -> tuple[NumberOrArray[NDimension], NumberOrArray[NDimension]]:
     """
-    Dispatch function for Leverett J-function capillary pressure computation.
+    Dispatches function for Leverett J-function capillary pressure computation.
 
     Routes to the scalar variant when all inputs are Python scalars, otherwise
     routes to the array variant. This avoids Numba union return-type limitations.
@@ -535,7 +535,7 @@ def compute_leverett_j_derivatives_scalar(
     minimum_mobile_pore_space: Number = 1e-9,
 ) -> tuple[Number, Number, Number, Number]:
     """
-    Scalar variant of Leverett J-function capillary pressure derivatives.
+    Computes Leverett J-function capillary pressure derivatives for scalar inputs.
 
     Returns (dpcow_dsw, dpcow_dso, dpcgo_dsg, dpcgo_dso).
 
@@ -671,7 +671,7 @@ def compute_leverett_j_derivatives_loop(
     dpcgo_dso: NumberArray[OneDimension],
 ) -> None:
     """
-    Compute the capillary pressure derivatives of `size` cells in parallel and write them to the
+    Computes the capillary pressure derivatives of `size` cells in parallel and writess them to the
     output arrays.
 
     Per-cell inputs are flat arrays, or a single value shared by every cell.
@@ -739,7 +739,7 @@ def compute_leverett_j_derivatives_array(
     NumberArray[NDimension],
 ]:
     """
-    Array variant of Leverett J-function capillary pressure derivatives.
+    Computes Leverett J-function capillary pressure derivatives for array inputs.
 
     Returns (dpcow_dsw, dpcow_dso, dpcgo_dsg, dpcgo_dso) as NDArrays.
 
@@ -859,7 +859,7 @@ def compute_leverett_j_derivatives(
     NumberOrArray[NDimension],
 ]:
     """
-    Dispatch function for Leverett J-function capillary pressure derivatives.
+    Dispatches function for Leverett J-function capillary pressure derivatives.
 
     Routes to the scalar variant when all inputs are Python scalars, otherwise
     routes to the array variant.
@@ -955,7 +955,7 @@ def compute_leverett_j_capillary_pressures_and_derivatives_cell(
     minimum_mobile_pore_space: Number = 1e-9,
 ) -> tuple[Number, Number, Number, Number, Number, Number]:
     """
-    Capillary pressures and their derivatives with respect to saturation for one cell, from a
+    Returns capillary pressures and their derivatives with respect to saturation for one cell, from a
     single evaluation of the power functions that both need.
 
     The pressures are identical to those of the value kernel. The derivatives equal those of the
@@ -1102,7 +1102,7 @@ def compute_leverett_j_capillary_pressures_and_derivatives_loop(
     dpcgo_dso: NumberArray[OneDimension],
 ) -> None:
     """
-    Compute the capillary pressures and their derivatives of `size` cells in parallel and write
+    Computes the capillary pressures and their derivatives of `size` cells in parallel and writes
     them to the output arrays.
 
     Per-cell inputs are flat arrays, or a single value shared by every cell.
@@ -1179,7 +1179,7 @@ def compute_leverett_j_capillary_pressures_and_derivatives_array(
     ],
 ]:
     """
-    Compute the capillary pressures and their derivatives for array inputs in one pass.
+    Computes the capillary pressures and their derivatives for array inputs in one pass.
 
     The saturations are validated as in the value function. Unlike the separate functions, the
     power functions shared by the pressure and its slope are evaluated once per cell.
@@ -1321,7 +1321,7 @@ def compute_leverett_j_capillary_pressures_and_derivatives(
     ],
 ]:
     """
-    Dispatch function for the Leverett J-function fused capillary pressure and derivative computation.
+    Dispatches function for the Leverett J-function fused capillary pressure and derivative computation.
 
     Computes the capillary pressures and their derivatives together, evaluating the power
     functions that both need once per cell. The results match `compute_leverett_j_capillary_pressures` and the derivative function of this
@@ -1479,7 +1479,7 @@ class LeverettJCapillaryPressureTable(CapillaryPressureTable):
         NumberOrArray[NDimension],
     ]:
         """
-        Endpoint saturations for an evaluation: each argument if given, otherwise the value set
+        Returns endpoint saturations for an evaluation: each argument if given, otherwise the value set
         on the model.
 
         :param irreducible_water_saturation: Irreducible water saturation, or `None` to use the
@@ -1544,7 +1544,7 @@ class LeverettJCapillaryPressureTable(CapillaryPressureTable):
         **kwargs: typing.Any,
     ) -> tuple[CapillaryPressures, CapillaryPressureDerivatives]:
         """
-        Compute capillary pressures using Leverett J-function.
+        Computes capillary pressures using Leverett J-function.
 
         Supports both scalar and array inputs.
 
@@ -1617,7 +1617,7 @@ class LeverettJCapillaryPressureTable(CapillaryPressureTable):
         **kwargs: typing.Any,
     ) -> CapillaryPressures:
         """
-        Compute capillary pressures using Leverett J-function.
+        Computes capillary pressures using Leverett J-function.
 
         Supports both scalar and array inputs.
 
@@ -1679,7 +1679,7 @@ class LeverettJCapillaryPressureTable(CapillaryPressureTable):
         **kwargs: typing.Any,
     ) -> CapillaryPressureDerivatives:
         """
-        Compute the partial derivatives of the Leverett J-function oil-water and
+        Computes the partial derivatives of the Leverett J-function oil-water and
         gas-oil capillary pressures with respect to saturation.
 
         Returns a dictionary containing:
@@ -1775,7 +1775,7 @@ class LeverettJCapillaryPressureTable(CapillaryPressureTable):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `LeverettJCapillaryPressureTable` rescaled to *target*.
+        Returns a new `LeverettJCapillaryPressureTable` rescaled to *target*.
 
         `permeability` is rescaled from `self.unit_system` to *target* using
         the `permeability` conversion factor so that the rock factor

@@ -148,7 +148,7 @@ class YAMLStore(DataStore[SerializableT, list[typing.Any]]):
 
     def __init__(self, filepath: PathLike | str):
         """
-        Initialize the store
+        Initializes the store
 
         :param filepath: Path to the YAML file
         :raises StorageError: If filepath is invalid or has wrong extension
@@ -160,7 +160,7 @@ class YAMLStore(DataStore[SerializableT, list[typing.Any]]):
 
     def open(self, mode: str = "a", **kwargs: typing.Any) -> None:
         """
-        Load the YAML file into memory as `self._handle` (a list).
+        Loads the YAML file into memory as `self._handle` (a list).
 
         :param mode: `"a"` to load existing contents for appending (default),
             `"w"` to start with an empty list (discard existing data).
@@ -184,7 +184,7 @@ class YAMLStore(DataStore[SerializableT, list[typing.Any]]):
 
     def close(self) -> None:
         """
-        Serialise `self._handle` back to disk and release it.
+        Serialises `self._handle` back to disk and release it.
 
         Idempotent. Safe to call when no handle is open.
         """

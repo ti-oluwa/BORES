@@ -228,7 +228,7 @@ class FieldRate(Summary["CompiledBlackOilModel"]):
         """
         This vector's report key.
 
-        :returns: The Eclipse mnemonic, e.g. `"FOPR"`.
+        :returns: The deck mnemonic, e.g. `"FOPR"`.
         """
         return self.mnemonic
 
@@ -283,7 +283,7 @@ class FieldWaterInjectionRate(FieldRate):
 
 @attrs.frozen(kw_only=True, slots=True)
 class FieldOilInjectionRate(FieldRate):
-    """Field oil injection rate (`FOIR`). Rare in practice; Eclipse still defines it."""
+    """Field oil injection rate (`FOIR`). Rarely used."""
 
     mnemonic = "FOIR"
     array_name = "surface_oil_rates"
@@ -419,7 +419,7 @@ class WellVector(Summary["CompiledBlackOilModel"]):
         """
         This vector's report key.
 
-        :returns: The Eclipse mnemonic and well name, e.g. `"WOPR:PROD1"`.
+        :returns: The deck mnemonic and well name, e.g. `"WOPR:PROD1"`.
         """
         return f"{self.mnemonic}:{self.well_name}"
 
@@ -520,7 +520,7 @@ class WellWaterInjectionRate(WellRate):
 
 @attrs.frozen(kw_only=True, slots=True)
 class WellOilInjectionRate(WellRate):
-    """Well oil injection rate (`WOIR`). Rare in practice; Eclipse still defines it."""
+    """Well oil injection rate (`WOIR`). Rarely used."""
 
     mnemonic = "WOIR"
     kind = WellKind.INJECTOR
@@ -670,7 +670,7 @@ class FieldWaterInjectionTotal(FieldRate):
 
 @attrs.frozen(kw_only=True, slots=True)
 class FieldOilInjectionTotal(FieldRate):
-    """Field cumulative oil injection (`FOIT`). Rare in practice; Eclipse still defines it."""
+    """Field cumulative oil injection (`FOIT`). Rarely used."""
 
     mnemonic = "FOIT"
     array_name = "cumulative_oil_volumes"
@@ -724,7 +724,7 @@ class WellWaterInjectionTotal(WellRate):
 
 @attrs.frozen(kw_only=True, slots=True)
 class WellOilInjectionTotal(WellRate):
-    """Well cumulative oil injection (`WOIT`). Rare in practice; Eclipse still defines it."""
+    """Well cumulative oil injection (`WOIT`). Rarely used."""
 
     mnemonic = "WOIT"
     kind = WellKind.INJECTOR

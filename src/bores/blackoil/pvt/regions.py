@@ -71,7 +71,7 @@ GAS_PVT_KEYWORDS = ("PVTG", "PVDG")
 
 def pvt_requirements(phases: Phases) -> dict[str, typing.Any]:
     """
-    The PVT keywords a model with `phases` cannot do without.
+    Returns the PVT keywords a model with `phases` cannot do without.
 
     Only the phases the model has need tables, so a gas and water model needs no oil table. Gas
     that dissolves in the oil needs a table with a solution gas-oil ratio in it (`PVTO` or
@@ -96,7 +96,7 @@ def pvt_requirements(phases: Phases) -> dict[str, typing.Any]:
 
 @attrs.frozen(slots=True)
 class PVTRegion:
-    """A collection of PVT tables and static properties for a single Eclipse PVT region."""
+    """A collection of PVT tables and static properties for a single PVT region."""
 
     static: StaticPVT
     """Static PVT properties for this region (e.g. DENSITY, VISCOSITY)."""
@@ -127,7 +127,7 @@ class PVTRegion:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `PVTRegion` with all region tables converted to *target*.
+        Returns a new `PVTRegion` with all region tables converted to *target*.
 
         :param target: Target `UnitSystem`.
         :returns: New `PVTRegion` in *target* units.
@@ -145,7 +145,7 @@ class PVT:
     """
     Multi-region PVT tables keyed by 1-based `PVTNUM` region index.
 
-    Eclipse supports multiple PVT regions via the `PVTNUM` keyword. Each
+    A deck defines multiple PVT regions through the `PVTNUM` keyword. Each
     cell is assigned a region index and its PVT properties are evaluated from
     the corresponding `PVTTables` instance.
 
@@ -170,7 +170,7 @@ class PVT:
         unit_system: UnitSystem | None = None,
     ) -> None:
         """
-        Build a `PVT` from a pre-built regions dict.
+        Builds a `PVT` from a pre-built regions dict.
 
         :param regions: Mapping from 1-based PVTNUM index to `PVTRegion`.
         :param unit_system: Expected unit system for all regions. If omitted,
@@ -201,7 +201,7 @@ class PVT:
 
     def region(self, pvtnum: Integer) -> PVTRegion:
         """
-        Return the `PVTRegion` for a given 1-based region index.
+        Returns the `PVTRegion` for a given 1-based region index.
 
         :param pvtnum: 1-based PVT region index.
         :returns: `PVTRegion` for that region.
@@ -215,7 +215,7 @@ class PVT:
 
     @property
     def n_regions(self) -> int:
-        """Number of PVT regions."""
+        """Returns the number of PVT regions."""
         return len(self.regions)
 
     @classmethod
@@ -233,9 +233,9 @@ class PVT:
         pressure_range: tuple[Number, Number] | None = None,
     ) -> Self:
         """
-        Build all PVT regions' tables from a parsed `DeckFile`.
+        Builds all PVT regions' tables from a parsed `DeckFile`.
 
-        Detects which Eclipse PVT keywords are present (`PVTO` > `PVCO` > `PVDO` > `PVCDO` for oil;
+        Detects which PVT keywords are present (`PVTO` > `PVCO` > `PVDO` > `PVCDO` for oil;
         `PVTG` > `PVDG` for gas; `PVTW` for water) and builds one `PVTRegion` per `PVTNUM` region.
 
         :param deck_file: Parsed `DeckFile` containing PROPS-section keywords.
@@ -276,7 +276,7 @@ class PVT:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `PVT` with all region tables converted to *target*.
+        Returns a new `PVT` with all region tables converted to *target*.
 
         :param target: Target `UnitSystem`.
         :returns: New `PVT` in *target* units.
@@ -303,7 +303,7 @@ class PVT:
 
 
 def get_min_temperature_points(interpolation_method: InterpolationMethod) -> int:
-    """Minimum temperature-axis length required by `PVTTable` for a given method."""
+    """Returns minimum temperature-axis length required by `PVTTable` for a given method."""
     return 4 if interpolation_method == "cubic" else 2
 
 
@@ -311,7 +311,7 @@ def ensure_strictly_increasing(
     values: npt.NDArray, min_points: int, dtype: npt.DTypeLike
 ) -> npt.NDArray:
     """
-    Deduplicate, sort, and pad *values* so the result is strictly increasing
+    Deduplicates, sort, and pad *values* so the result is strictly increasing
     and has at least *min_points* entries (both required by `PVTTable`).
 
     Padding interpolates additional points between the existing extremes
@@ -341,9 +341,9 @@ def generate_temperature_axis(
     max_points: int = 25,
 ) -> npt.NDArray:
     """
-    Build a temperature axis appropriate to *temperature*'s spec type.
+    Builds a temperature axis appropriate to *temperature*'s spec type.
 
-    Eclipse PVT tables are 2-D `(n_p, n_t)`. `PVTTable` requires the `n_t`
+    Deck PVT tables are 2-D `(n_p, n_t)`. `PVTTable` requires the `n_t`
     axis to be strictly increasing, with at least 2 points for `"linear"`
     interpolation or 4 for `"cubic"`. This builds the smallest axis that
     faithfully represents each spec type while satisfying that constraint:
@@ -419,7 +419,7 @@ def generate_temperature_axis(
 
 def _broadcast_to_2d(values_1d: npt.NDArray, n_t: int = 2) -> npt.NDArray:
     """
-    Broadcast a 1-D array of shape `(n_p,)` to 2-D shape `(n_p, n_t)`.
+    Broadcasts a 1-D array of shape `(n_p,)` to 2-D shape `(n_p, n_t)`.
 
     Used to satisfy the `(n_p, n_t)` shape requirement of `PVTTable`
     when deck data contains only a pressure axis (isothermal tables).
@@ -438,7 +438,7 @@ def compute_fvf_compressibility(
     dtype: npt.DTypeLike,
 ) -> FloatArray[TwoDimensions]:
     """
-    Compressibility `-(1/B)·(∂B/∂P)` of a formation volume factor table, from the PCHIP
+    Returns compressibility `-(1/B)·(∂B/∂P)` of a formation volume factor table, from the PCHIP
     derivative of `B` along pressure.
 
     :param pressures: Pressure of each row, shape `(n_pressures,)`.
@@ -462,7 +462,7 @@ def build_oil_data_from_pvto(
     dtype: npt.DTypeLike = None,
 ) -> PVTData:
     """
-    Build oil `PVTData` from a parsed `PVTO` record set.
+    Builds oil `PVTData` from a parsed `PVTO` record set.
 
     `PVTO` format: Rs is the outer key; each Rs group contains rows of
     `(pressure, bo, viscosity)` ordered by ascending pressure. The first
@@ -494,7 +494,7 @@ def build_oil_data_from_pvto(
     :returns: `PVTData` for the oil phase.
     """
     dtype = np.dtype(dtype) if dtype is not None else get_dtype()
-    # Eclipse reports Rs in Mscf/STB under FIELD units (see PVTO's deck docs);
+    # A FIELD deck gives Rs in Mscf/STB (see PVTO's deck docs);
     # internally we standardize on SCF/STB, matching the `gas_oil_ratio`
     # convention `get_conversion_factors` assumes. METRIC/LAB decks already
     # report Rs in the internally-expected units (sm³/sm³ / scc/scc), so no
@@ -561,7 +561,7 @@ def build_oil_data_from_pvto(
         np.concatenate([bubble_point_pressure_values, row_pressures, extension])
     ).astype(dtype)
 
-    # Reference undersaturated branch: most Eclipse decks only attach an
+    # Reference undersaturated branch: most decks only attach an
     # undersaturated (>1 row) branch to the highest Rs value - all other Rs
     # groups have just their single saturated point. A group with a single
     # pressure point has no slope to interpolate at all (feeding scipy a
@@ -742,7 +742,7 @@ def build_oil_data_from_pvdo(
     dtype: npt.DTypeLike = None,
 ) -> PVTData:
     """
-    Build dead-oil `PVTData` from a parsed `PVDO` record set.
+    Builds dead-oil `PVTData` from a parsed `PVDO` record set.
 
     `PVDO` format: single table of `(pressure, bo, viscosity)` rows for
     dead oil (Rs = 0 everywhere). No bubble-point switching is required
@@ -830,12 +830,12 @@ def build_oil_data_from_pvcdo(
     dtype: npt.DTypeLike = None,
 ) -> PVTData:
     """
-    Build dead-oil `PVTData` from a `PVCDO` analytical record.
+    Builds dead-oil `PVTData` from a `PVCDO` analytical record.
 
     The record holds `(reference_pressure, fvf, compressibility, viscosity, viscosibility)`:
     oil without dissolved gas, with constant compressibility `co` and viscosibility `cv`.
     Like `PVTW` for water, `Bo(P)` and `μo(P)` are evaluated
-    with Eclipse's second-order series on a synthetic pressure grid and handed to
+    with the second-order series on a synthetic pressure grid and handed to
     `build_oil_data_from_pvdo`. With `X = co · (P - P_ref)` and `Y = (co - cv) · (P - P_ref)`:
 
     - `Bo(P) = Bo_ref / (1 + X + X²/2)`
@@ -900,12 +900,12 @@ def build_oil_data_from_pvco(
     dtype: npt.DTypeLike = None,
 ) -> PVTData:
     """
-    Build live-oil `PVTData` from a parsed `PVCO` record set.
+    Builds live-oil `PVTData` from a parsed `PVCO` record set.
 
     `PVCO` format: one row per bubble point, `(bubble_point_pressure, solution_gor, fvf,
     viscosity, compressibility, viscosibility)`. Each row is a saturated state. The undersaturated
     branch at that Rs follows from the row's own compressibility `co` and viscosibility `cv`, with
-    Eclipse's second-order series (as for `PVTW` / `PVCDO`). With `X = co · (P - Pb)` and
+    The second-order series (as for `PVTW` / `PVCDO`). With `X = co · (P - Pb)` and
     `Y = (co - cv) · (P - Pb)`:
 
     - `Bo(P) = Bob / (1 + X + X²/2)`
@@ -989,10 +989,10 @@ def build_gas_data_from_pvdg(
     dtype: npt.DTypeLike = None,
 ) -> PVTData:
     """
-    Build dry-gas `PVTData` from a parsed `PVDG` record set.
+    Builds dry-gas `PVTData` from a parsed `PVDG` record set.
 
     `PVDG` format: single table of `(pressure, bg, viscosity)` rows.
-    Eclipse stores Bg in rb/Mscf; this builder converts to ft³/SCF:
+    A FIELD deck stores Bg in rb/Mscf; this builder converts to ft³/SCF:
     `Bg_ft3_scf = Bg_rb_Mscf x 5.615 / 1000`.
 
     :param pvdg_records: List of row dicts with keys `"pressure"`, `"fvf"`,
@@ -1016,7 +1016,7 @@ def build_gas_data_from_pvdg(
         raise ValidationError(f"`PVDG` table requires at least 2 rows; got {len(rows)}.")
 
     pressures = np.array([row["pressure"] for row in rows], dtype=dtype)
-    # Eclipse reports Bg in rb/Mscf under FIELD units only; METRIC/LAB decks
+    # A deck gives Bg in rb/Mscf under FIELD units only; METRIC/LAB decks
     # already report Bg in rm³/sm³ / rcc/scc, matching our internal `gas_fvf`
     # convention, so the rescale only applies to FIELD.
     bbl_to_ft3 = c.BARRELS_TO_CUBIC_FEET if unit_system == UnitSystem.FIELD else 1.0
@@ -1078,7 +1078,7 @@ def build_gas_data_from_pvtg(
     dtype: npt.DTypeLike = None,
 ) -> PVTData:
     """
-    Build wet-gas `PVTData` from a parsed `PVTG` record set.
+    Builds wet-gas `PVTData` from a parsed `PVTG` record set.
 
     `PVTG` format: pressure is the outer key; each pressure group contains
     rows of `(rv, bg, viscosity)` ordered by ascending Rv. The row with the largest Rv
@@ -1111,7 +1111,7 @@ def build_gas_data_from_pvtg(
         depth_range=depth_range,
     )
     n_t = len(temperatures)
-    # Eclipse reports Rv in STB/Mscf under FIELD units (see PVTG's deck docs);
+    # A FIELD deck gives Rv in STB/Mscf (see PVTG's deck docs);
     # internally we standardize on STB/SCF, matching the `vaporized_oil_gas_ratio`
     # convention `get_conversion_factors` assumes. METRIC/LAB decks already
     # report Rv in the internally-expected units (sm³/sm³ / scc/scc), so no
@@ -1143,7 +1143,7 @@ def build_gas_data_from_pvtg(
 
     rv_values = np.array(all_rv, dtype=dtype)
     n_rv = len(rv_values)
-    # Eclipse reports Bg in rb/Mscf under FIELD units only; METRIC/LAB decks
+    # A deck gives Bg in rb/Mscf under FIELD units only; METRIC/LAB decks
     # already report Bg in rm³/sm³ / rcc/scc, matching our internal `gas_fvf`
     # convention, so the rescale only applies to FIELD.
     bbl_to_ft3 = c.BARRELS_TO_CUBIC_FEET if unit_system == UnitSystem.FIELD else 1.0
@@ -1308,20 +1308,20 @@ def build_water_data_from_pvtw(
     dtype: npt.DTypeLike = None,
 ) -> PVTData:
     """
-    Build water `PVTData` from a `PVTW` analytical record.
+    Builds water `PVTData` from a `PVTW` analytical record.
 
     `PVTW` provides four scalars per region - reference pressure, Bw, cw,
     μw, and optionally cv (viscosibility). Bw(P) and μw(P) are evaluated
     analytically on a pressure grid and stored as tables so all subsequent
     lookups are interpolator calls.
 
-    The models used are Eclipse's second-order series (in place of the exponential, which
+    The models used are the second-order series (in place of the exponential, which
     it approximates). With `X = cw · (P - P_ref)` and `Y = (cw - cv) · (P - P_ref)`:
 
     - `Bw(P) = Bw_ref / (1 + X + X²/2)`
     - `μw(P) = μw_ref · (1 + X + X²/2) / (1 + Y + Y²/2)`
 
-    The viscosity form follows from Eclipse evaluating the product `μw · Bw` as
+    The viscosity form follows from evaluating the product `μw · Bw` as
     `(μw_ref · Bw_ref) / (1 + Y + Y²/2)`. It gives `cv = (1/μw) · (dμw/dP)` at the
     reference pressure, and a constant viscosity when `cv = 0`.
 
@@ -1371,11 +1371,11 @@ def build_water_data_from_pvtw(
     #     reference_water_fvf * np.exp(-water_compressibility * delta_p)
     # ).astype(dtype, copy=False)
 
-    # Taylor's exponential approximation (more stable). Used by Eclipse.
+    # Taylor's exponential approximation (more stable).
     x = water_compressibility * delta_p
     water_fvf_1d = (reference_water_fvf / (1.0 + x + 0.5 * x * x)).astype(dtype, copy=False)
 
-    # Eclipse evaluates the product μw·Bw as (μw_ref·Bw_ref) / (1 + Y + Y²/2) with
+    # The product μw·Bw as (μw_ref·Bw_ref) / (1 + Y + Y²/2) with
     # Y = (cw - cv)·ΔP; dividing by Bw(P) = Bw_ref / (1 + X + X²/2) gives μw.
     # cv = 0 leaves μw constant and cv is the true (1/μw)·(dμw/dP) at the reference pressure.
     y = (water_compressibility - water_viscosibility) * delta_p
@@ -1430,7 +1430,7 @@ def build_co2_temperature_axis(
     dtype: npt.DTypeLike = None,  # type: ignore[assignment]
 ) -> npt.NDArray:
     """
-    The temperatures the CO2 storage tables of a region are built at, in F.
+    Returns the temperatures the CO2 storage tables of a region are built at, in F.
 
     CO2 properties change quickly with temperature near its critical temperature of 31 C, and
     unlike deck tables every temperature column of these tables holds different values. A uniform
@@ -1487,7 +1487,7 @@ def load_co2_storage_pvt_regions(
     dtype: npt.DTypeLike = None,  # type: ignore[assignment]
 ) -> dict[Integer, PVTRegion]:
     """
-    Build the PVT regions of a CO2 storage deck, whose fluid properties are computed.
+    Builds the PVT regions of a CO2 storage deck, whose fluid properties are computed.
 
     The gas is CO2 and the water is brine. The tables are built on a pressure axis over
     `pressure_range` and on the temperature axis of each region. Dissolution of CO2 in the brine is
@@ -1583,9 +1583,9 @@ def load_pvt_regions(
     pressure_range: tuple[Number, Number] | None = None,
 ) -> dict[Integer, PVTRegion]:
     """
-    Build a `PVT` object from a parsed `DeckFile`.
+    Builds a `PVT` object from a parsed `DeckFile`.
 
-    Detects which Eclipse PVT keywords are present and builds one
+    Detects which PVT keywords are present and builds one
     `PVTRegion` per `PVTNUM` region:
 
     - Oil: `PVTO` (live oil, tabulated) -> `PVCO` (live oil, constant undersaturated

@@ -47,7 +47,7 @@ def compute_solid_angle_fraction(
     face_unit_normals: NumberArray[TwoDimensions],
 ) -> Number:
     """
-    Cmpute the fraction of a full turn of solid angle that the surface of a cell subtends at a point.
+    Returns cmpute the fraction of a full turn of solid angle that the surface of a cell subtends at a point.
 
     The surface is every face polygon of the cell, split into triangles that fan out from the
     face's first vertex, which is also how the grid computes cell volumes. The result is `1` for a
@@ -146,7 +146,7 @@ def compute_triangle_distance_squared(
     cz: Number,
 ) -> Number:
     """
-    Compute squared distance from a point to a triangle.
+    Computes squared distance from a point to a triangle.
 
     :param px: x coordinate of the point.
     :param py: y coordinate of the point.
@@ -251,7 +251,7 @@ def is_within_of_surface(
     vertex_coordinates: NumberArray[TwoDimensions],
 ) -> Boolean:
     """
-    Check whether a point is no further than `distance` from the surface of a cell.
+    Checks whether a point is no further than `distance` from the surface of a cell.
 
     The surface is the same fan of triangles that `compute_solid_angle_fraction` uses.
 
@@ -317,7 +317,7 @@ def contains_point(
     cell_max_xyz: NumberArray[TwoDimensions],
 ) -> Boolean:
     """
-    Check whether a cell contains a point.
+    Checks whether a cell contains a point.
 
     A cell with no faces (an inactive or pinched-out cell) contains nothing. Otherwise the point
     is inside if the cell's faces surround it, or if it lies within `tolerance` of the surface.
@@ -399,7 +399,7 @@ def get_first_containing_cell(
     cell_max_xyz: NumberArray[TwoDimensions],
 ) -> Integer:
     """
-    Get the position, in `candidates`, of the first cell that contains the point.
+    Gets the position, in `candidates`, of the first cell that contains the point.
 
     :param x: x coordinate of the point.
     :param y: y coordinate of the point.
@@ -439,7 +439,7 @@ def get_first_containing_cell(
 
 
 def geometry_arrays(grid: Grid) -> dict[str, IntArray | NumberArray]:
-    """The grid arrays the containment kernels read."""
+    """Returns the grid arrays the containment kernels read."""
     return {
         "cell_face_offsets": grid.cell_face_offsets,
         "cell_face_indices": grid.cell_face_indices,
@@ -460,7 +460,7 @@ def cell_contains_point(
     tolerance: Number = 1e-6,
 ) -> Boolean:
     """
-    Whether a cell contains a point, judged from the cell's own faces.
+    Checks whether a cell contains a point, judged from the cell's own faces.
 
     This follows warped and non-convex cells correctly, and a cell with no faces (an inactive
     or pinched-out cell) contains nothing.
@@ -490,7 +490,7 @@ def get_first_cell_containing_point(
     tolerance: Number = 1e-6,
 ) -> Integer | None:
     """
-    The first of `candidates` that contains a point.
+    Returns the first of `candidates` that contains a point.
 
     :param grid: Grid providing the cell geometry.
     :param candidates: Cell indices to test, in priority order.

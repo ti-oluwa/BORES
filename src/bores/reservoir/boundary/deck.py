@@ -38,7 +38,7 @@ def load_flux_aquifer_from_record(
     record: typing.Mapping[str, typing.Any], unit_system: UnitSystem
 ) -> ConstantFluxBoundary:
     """
-    Build a `ConstantFluxBoundary` from one `AQUFLUX` record.
+    Builds a `ConstantFluxBoundary` from one `AQUFLUX` record.
 
     `AQUFLUX` gives the influx per unit of face area, as liquid surface volume per time.
     The returned boundary has a `PER_AREA` basis, so each face passes that rate times its
@@ -68,7 +68,7 @@ def load_flux_aquifer(
     deck_file: DeckFile, *, aquifer_id: Integer | None = None
 ) -> ConstantFluxBoundary | dict[int, ConstantFluxBoundary]:
     """
-    Load one or all `AQUFLUX` aquifers of a deck as `ConstantFluxBoundary`s.
+    Loads one or all `AQUFLUX` aquifers of a deck as `ConstantFluxBoundary`s.
 
     :param deck_file: Parsed `bores.deck.file.DeckFile`.
     :param aquifer_id: Id of a specific aquifer to load, or `None` for all.
@@ -121,7 +121,7 @@ class AquiferConnections(typing.NamedTuple):
 
 def count_active_cells_in_box(grid: Grid, record: typing.Mapping[str, typing.Any]) -> Integer:
     """
-    Number of active cells in the IJK box of an `AQUANCON` record.
+    Returns the number of active cells in the IJK box of an `AQUANCON` record.
 
     :param grid: Grid with structured dimensions and cell statuses. Without them nothing
         can be counted and `0` is returned.
@@ -147,7 +147,7 @@ def resolve_aquancon_connections(
     length_factor: Number = 1.0,
 ) -> AquiferConnections | None:
     """
-    Resolve the boundary faces one aquifer is attached to by `AQUANCON`, and how much
+    Resolves the boundary faces one aquifer is attached to by `AQUANCON`, and how much
     of the aquifer's influx each face takes.
 
     Every `AQUANCON` record with a matching `aquifer_id` is resolved via
@@ -271,7 +271,7 @@ def resolve_aquancon_face_positions(
     aquifer_id: int,
 ) -> IntArray[OneDimension] | None:
     """
-    Resolve the boundary face positions one aquifer is attached to by `AQUANCON`.
+    Resolves the boundary face positions one aquifer is attached to by `AQUANCON`.
 
     :param deck_file: Parsed deck, read for its `AQUANCON` records.
     :param grid: Grid to resolve face positions against.
@@ -295,7 +295,7 @@ def resolve_aquancon_region(
     face_weights: NumberArray[OneDimension] | None = None,
 ) -> BoundaryRegion | None:
     """
-    Build a `BoundaryRegion` for one aquifer from its `AQUANCON` records.
+    Builds a `BoundaryRegion` for one aquifer from its `AQUANCON` records.
 
     :param deck_file: Parsed deck, read for its `AQUANCON` records.
     :param grid: Grid to resolve face positions against.
@@ -382,13 +382,13 @@ def load_boundary_conditions(
     extra_regions: typing.Sequence[BoundaryRegion] | None = None,
 ) -> BoundaryConditions | None:
     """
-    Build a `BoundaryConditions` from every boundary condition a deck defines.
+    Builds a `BoundaryConditions` from every boundary condition a deck defines.
 
     Covers every deck-sourced boundary condition this codebase knows how
     to load: `AQUCT` and `AQUFETP` analytic aquifers, and `AQUFLUX`
     flux-specified aquifers, each attached to grid faces via `AQUANCON`.
 
-    There is no real Eclipse keyword for a plain constant-pressure
+    There is no deck keyword for a plain constant-pressure
     boundary (`ConstantPressureBoundary`) outside of the aquifer models
     already covered here, so this function can't populate one from a
     deck. Pass one in via `extra_regions` if the model needs it.

@@ -114,7 +114,7 @@ def _flatten(vector: npt.NDArray) -> npt.NDArray:
 
 
 def _get_matrix_shape(A_csr: csr_array | csr_matrix) -> tuple[int, int]:
-    """Return the two-dimensional shape of a CSR matrix, validating its rank."""
+    """Returns the two-dimensional shape of a CSR matrix, validating its rank."""
     shape = A_csr.shape
     if len(shape) != 2:
         raise ValidationError(f"Matrix must be two-dimensional, got shape {shape}.")
@@ -122,7 +122,7 @@ def _get_matrix_shape(A_csr: csr_array | csr_matrix) -> tuple[int, int]:
 
 
 def _get_square_matrix_shape(A_csr: csr_array | csr_matrix) -> tuple[int, int]:
-    """Return a CSR matrix's shape, raising if it is not square."""
+    """Returns a CSR matrix's shape, raising if it is not square."""
     shape = _get_matrix_shape(A_csr)
     if shape[0] != shape[1]:
         raise ValidationError(f"Matrix must be square, got shape {shape}.")
@@ -130,7 +130,7 @@ def _get_square_matrix_shape(A_csr: csr_array | csr_matrix) -> tuple[int, int]:
 
 
 def _check_matrix_is_square(A_csr: csr_array | csr_matrix) -> None:
-    """Validate that a CSR matrix is square when its shape is not otherwise needed."""
+    """Validates that a CSR matrix is square when its shape is not otherwise needed."""
     _get_square_matrix_shape(A_csr)
 
 
@@ -715,7 +715,7 @@ def make_cpr_preconditioner(
             raise PreconditionerError(f"ILU factorization failed for CPR: {exc}") from exc
 
     def matvec(residual: npt.NDArray) -> npt.NDArray:
-        """CPR preconditioner application: x = M^{-1} r"""
+        """Returns CPR preconditioner application: x = M^{-1} r"""
         flat = _flatten(residual)
         if equation_permutation is not None:
             flat = flat[equation_permutation]
@@ -785,7 +785,7 @@ def _lgmres(
     outer_k: int = 5,
 ) -> tuple[npt.NDArray, int]:
     """
-    LGMRES solver wrapper compatible with the standard `SolverFunction` interface,
+    Returns LGMRES solver wrapper compatible with the standard `SolverFunction` interface,
     with configurable inner/outer iteration parameters.
 
     `maxiter` counts outer iterations. Each outer iteration performs up to `inner_m`
@@ -821,7 +821,7 @@ def _minres(
     shift: float = 0.0,
 ) -> tuple[npt.NDArray, int]:
     """
-    MINRES solver wrapper compatible with the standard `SolverFunction` interface.
+    Returns MINRES solver wrapper compatible with the standard `SolverFunction` interface.
 
     MINRES is only suitable for symmetric (possibly indefinite) systems, and a
     preconditioner for it must be symmetric positive definite. It does **not** accept
@@ -865,7 +865,7 @@ def _qmr(
     callback: typing.Callable[[npt.NDArray], None] | None,
 ) -> tuple[npt.NDArray, int]:
     """
-    QMR solver wrapper compatible with the standard `SolverFunction` interface.
+    Returns QMR solver wrapper compatible with the standard `SolverFunction` interface.
 
     SciPy's `~scipy.sparse.linalg.qmr` uses a *split* preconditioner
     `(M1, M2)` rather than the single `M` used by every other solver here.
@@ -957,7 +957,7 @@ class CachedPreconditionerFactory:
         recompute_threshold: float = 0.5,
     ):
         """
-        Initialize cached preconditioner.
+        Initializes cached preconditioner.
 
         :param factory: Preconditioner factory function or string name (e.g., "ilu", "amg", "block_jacobi")
         :param name: The name of the preconditioner factory been cached or a new name for the cached version of the factory.
@@ -997,12 +997,12 @@ class CachedPreconditionerFactory:
 
     @property
     def name(self) -> str:
-        """The name this preconditioner factory is registered under."""
+        """Returns the name this preconditioner factory is registered under."""
         return self._name
 
     def __call__(self, A_csr: csr_array | csr_matrix) -> LinearOperator:
         """
-        Get preconditioner, reusing cache if possible.
+        Gets preconditioner, reusing cache if possible.
 
         :param A_csr: Current coefficient matrix
         :return: Preconditioner (cached or newly built)
@@ -1030,7 +1030,7 @@ class CachedPreconditionerFactory:
 
     def should_recompute(self, A_csr: csr_array | csr_matrix) -> bool:
         """
-        Determine if preconditioner should be rebuilt.
+        Determines if preconditioner should be rebuilt.
 
         :param A_csr: Current coefficient matrix
         :return: True if the next call would rebuild the preconditioner.
@@ -1080,7 +1080,7 @@ class CachedPreconditionerFactory:
         return False
 
     def reset(self) -> None:
-        """Clear cache and force rebuild on next call."""
+        """Clears cache and force rebuild on next call."""
         with self._lock:
             self._cached_M = None
             self._cached_A_data = None
@@ -1091,7 +1091,7 @@ class CachedPreconditionerFactory:
 
     def register(self, override: bool = False) -> None:
         """
-        Register this cached preconditioner (factory) in the preconditioner factory registry
+        Registers this cached preconditioner (factory) in the preconditioner factory registry
 
         :param override: Whether to override existing factories with the same name in the registry
         """
@@ -1185,7 +1185,7 @@ def preconditioner_factory(
 
 def list_preconditioner_factories() -> list[str]:
     """
-    List the names of all registered preconditioner factories.
+    Lists the names of all registered preconditioner factories.
 
     :return: List of registered preconditioner factory names.
     """
@@ -1195,7 +1195,7 @@ def list_preconditioner_factories() -> list[str]:
 
 def get_preconditioner_factory(name: str) -> PreconditionerFactory:
     """
-    Get a registered preconditioner factory by name.
+    Gets a registered preconditioner factory by name.
 
     :param name: Name of the preconditioner factory.
     :return: The corresponding preconditioner factory function.
@@ -1268,7 +1268,7 @@ def solver_function(
 
 def list_solver_functions() -> list[str]:
     """
-    List the names of all registered solver functions.
+    Lists the names of all registered solver functions.
 
     :return: List of registered solver function names.
     """
@@ -1278,7 +1278,7 @@ def list_solver_functions() -> list[str]:
 
 def get_solver_function(name: str) -> SolverFunction:
     """
-    Get a registered solver function by name.
+    Gets a registered solver function by name.
 
     :param name: Name of the solver function.
     :return: The corresponding solver function.
@@ -1299,7 +1299,7 @@ def _get_preconditioner(
     preconditioner: Preconditioner | None,
 ) -> LinearOperator | None:
     """
-    Get or build a preconditioner based on the specification.
+    Gets or builds a preconditioner based on the specification.
 
     :param A_csr: The coefficient matrix in CSR format.
     :param preconditioner: Preconditioner specification as a string, callable, or None
@@ -1326,7 +1326,7 @@ def _get_solver_function(
     solver: Solver | typing.Iterable[Solver],
 ) -> list[SolverFunction]:
     """
-    Get solver functions from a solver specification.
+    Gets solver functions from a solver specification.
 
     :param solver: Solver specification as a string, a callable, or an ordered sequence of
         strings and callables.
@@ -1363,7 +1363,7 @@ def _get_solver_function(
 
 
 def _supports_transpose(operator: LinearOperator) -> bool:
-    """Whether `operator` can multiply by its transpose, which `bicg` and `qmr` require."""
+    """Checks whether `operator` can multiply by its transpose, which `bicg` and `qmr` require."""
     try:
         operator.rmatvec(np.zeros(operator.shape[0], dtype=operator.dtype))
     except NotImplementedError:
@@ -1580,7 +1580,7 @@ def scale_linear_system(
     npt.NDArray[np.floating] | None,
 ]:
     """
-    Scale a linear system to improve numerical conditioning.
+    Scales a linear system to improve numerical conditioning.
 
     This function applies row scaling and/or column scaling to the
     Jacobian matrix and residual vector. It is designed for use in Newton-based

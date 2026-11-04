@@ -2,9 +2,9 @@
 Checking a deck against the sizes it declares for itself.
 
 The `RUNSPEC` dimension keywords (`TABDIMS`, `EQLDIMS`, `WELLDIMS`, `VFPPDIMS`, `VFPIDIMS`) tell
-Eclipse how much room to reserve, and Eclipse refuses a deck that then exceeds them. Nothing here
-depends on those limits to run, and OPM Flow ignores them, so a deck that exceeds one still loads.
-But it is a deck Eclipse would reject, and usually a sign of a table or well added without updating
+the simulator how much room to reserve, and a strict simulator refuses a deck that then exceeds them. Nothing here
+depends on those limits to run, and some simulators ignore them, so a deck that exceeds one still loads.
+But it is a deck a strict simulator would reject, and usually a sign of a table or well added without updating
 the limit, so it is reported.
 """
 
@@ -35,9 +35,9 @@ def get_region_counts(deck_file: DeckFile, keywords: typing.Iterable[str]) -> di
 
 def check_deck_dimensions(deck_file: DeckFile) -> list[str]:
     """
-    Find where the deck holds more than its dimension keywords declare.
+    Finds where the deck holds more than its dimension keywords declare.
 
-    A dimension keyword the deck does not write is not checked, since Eclipse then has nothing
+    A dimension keyword the deck does not write is not checked, since there is then nothing
     to enforce.
 
     :param deck_file: The deck to check.
@@ -119,7 +119,7 @@ def check_deck_dimensions(deck_file: DeckFile) -> list[str]:
 
 def warn_deck_dimensions(deck_file: DeckFile) -> list[str]:
     """
-    Warn about each limit the deck exceeds, and return the messages.
+    Warns about each limit the deck exceeds, and returns the messages.
 
     :param deck_file: The deck to check.
     :returns: The messages, as from `check_deck_dimensions`.
@@ -127,6 +127,8 @@ def warn_deck_dimensions(deck_file: DeckFile) -> list[str]:
     problems = check_deck_dimensions(deck_file)
     for problem in problems:
         warnings.warn(
-            f"{problem} Eclipse would reject this deck.", DeckDimensionWarning, stacklevel=2
+            f"{problem} Eclipse would reject this deck.",
+            DeckDimensionWarning,
+            stacklevel=2,
         )
     return problems

@@ -28,14 +28,14 @@ def load_region_array(
     active: BooleanCellArray | None = None,
 ) -> IntCellArray | None:
     """
-    Load a region number array (`SATNUM`, `EQLNUM`, ...) from a deck.
+    Loads a region number array (`SATNUM`, `EQLNUM`, ...) from a deck.
 
     :param deck_file: Parsed deck.
     :param keyword: Region keyword, e.g. `"EQLNUM"`.
     :param n_cells: Number of cells the array must have (every cell of the grid, active or not).
     :param default_region: Region of every cell when the deck does not have the keyword. `None`
         returns `None` in that case.
-    :param active: Which cells are active. Eclipse ignores the region number of an inactive cell,
+    :param active: Which cells are active. The region number of an inactive cell is ignored,
         and decks routinely write `0` there (Norne's `EQLNUM` and `FIPNUM` do), whereas every cell
         here needs a region of at least 1. When given, an inactive cell with a number below 1 gets
         region 1. Active cells are never changed, so a bad number in one is still reported.
@@ -97,7 +97,7 @@ def sort_cells_by_region(
     order: IntCellArray,
 ) -> None:
     """
-    Counting sort of the cells by `saturation_region * stride + imbibition_region`.
+    Returns counting sort of the cells by `saturation_region * stride + imbibition_region`.
 
     The sort is stable, so the cells of each group stay in ascending order. `offsets` has one entry more
     than there are keys, and must be zero on entry. On exit the cells of key `k` are
@@ -127,7 +127,7 @@ def group_cells_by_region(
     imbibition_region: IntCellArray | None = None,
 ) -> RegionGroups:
     """
-    Group cells by `(SATNUM, IMBNUM)`, once, so that later timesteps can evaluate each group's
+    Groups cells by `(SATNUM, IMBNUM)`, once, so that later timesteps can evaluate each group's
     tables without searching the region arrays again.
 
     Groups are ordered by saturation region and then imbibition region, and the cells in each
@@ -189,7 +189,7 @@ class Regions:
     """
     Reservoir per-cell region assignments metadata.
 
-    Populated from the `REGIONS` section of an Eclipse deck, or supplied
+    Populated from the `REGIONS` section of a deck, or supplied
     directly by the user. All region arrays are 1-based integer indices
     selecting which PVT, saturation-function, equilibration, or rock
     compaction table applies to each cell.
@@ -246,7 +246,7 @@ class Regions:
         active: BooleanCellArray | None = None,
     ) -> Self:
         """
-        Build `Regions` from a parsed DeckFile.
+        Builds `Regions` from a parsed DeckFile.
 
         Missing keywords default to None (region 1 is assumed by callers).
 
@@ -255,10 +255,10 @@ class Regions:
         :param use_default: If True, missing keywords are filled with region 1.
             Else, they are left as None. Default: False.
         :param active: Which cells of the grid are active. Pass it when the grid has inactive
-            cells: decks write `0` as the region number of those (Eclipse ignores it), which
+            cells: decks write `0` as the region number of those (it is ignored), which
             would otherwise fail validation, so inactive cells with a number below 1 are given
             region 1. `None` leaves every number as written.
-        :returns: `Regions` object loaded from ECLIPSE deck.
+        :returns: `Regions` object loaded from a deck.
         """
         default_region = 1 if use_default else None
         return cls(
@@ -284,7 +284,7 @@ class Regions:
 
     def group_saturation_cells(self, *, use_imbibition_region: bool = False) -> RegionGroups:
         """
-        Group the cells by the regions that decide their saturation function tables.
+        Groups the cells by the regions that decide their saturation function tables.
 
         The regions do not change during a run, so call this once and reuse the result.
 
@@ -306,7 +306,7 @@ class Regions:
         )
 
     def get_pvt_region(self, cell_idx: Integer) -> Integer:
-        """Return the PVT region for a cell, defaulting to 1."""
+        """Returns the PVT region for a cell, defaulting to 1."""
         if self.pvt_region is None:
             return 1
         return self.pvt_region[cell_idx]
@@ -314,7 +314,7 @@ class Regions:
     get_pvtnum = get_pvt_region
 
     def get_saturation_region(self, cell_idx: Integer) -> Integer:
-        """Return the saturation function region for a cell, defaulting to 1."""
+        """Returns the saturation function region for a cell, defaulting to 1."""
         if self.saturation_region is None:
             return 1
         return self.saturation_region[cell_idx]
@@ -322,13 +322,13 @@ class Regions:
     get_satnum = get_saturation_region
 
     def get_imbibition_region(self, cell_idx: Integer) -> Integer:
-        """Return the imbibition region for a cell, defaulting to 1."""
+        """Returns the imbibition region for a cell, defaulting to 1."""
         if self.imbibition_region is None:
             return 1
         return self.imbibition_region[cell_idx]
 
     def get_equilibration_region(self, cell_idx: Integer) -> Integer:
-        """Return the equilibration region for a cell, defaulting to 1."""
+        """Returns the equilibration region for a cell, defaulting to 1."""
         if self.equilibrium_region is None:
             return 1
         return self.equilibrium_region[cell_idx]
@@ -336,7 +336,7 @@ class Regions:
     get_eqlnum = get_equilibration_region
 
     def get_fluid_in_place_region(self, cell_idx: Integer) -> Integer:
-        """Return the fluid-in-place region for a cell, defaulting to 1."""
+        """Returns the fluid-in-place region for a cell, defaulting to 1."""
         if self.fluid_in_place_region is None:
             return 1
         return self.fluid_in_place_region[cell_idx]
@@ -344,7 +344,7 @@ class Regions:
     get_fipnum = get_fluid_in_place_region
 
     def get_rock_region(self, cell_idx: Integer) -> Integer:
-        """Return the rock function region for a cell, defaulting to 1."""
+        """Returns the rock function region for a cell, defaulting to 1."""
         if self.rock_region is None:
             return 1
         return self.rock_region[cell_idx]

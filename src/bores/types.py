@@ -52,7 +52,7 @@ class UnitSystem(enum.Enum):
     """
     Declared unit system.
 
-    Systems follow Eclipse/OPM conventions:
+    Systems follow the usual deck conventions:
 
     ```
     =========  =======  ======  =======  =========  =======  ========  ========
@@ -356,7 +356,7 @@ class MixingRuleFunc(typing.Protocol):
         residual_oil_saturation_gas: NumberOrArray[NDimension],
     ) -> NumberOrArray[NDimension]:
         """
-        Compute the three-phase oil relative permeability.
+        Computes the three-phase oil relative permeability.
 
         :param kro_w: Two-phase oil relative permeability from the oil-water
             table at the current water saturation.
@@ -465,7 +465,7 @@ class MixingRuleDFunc(typing.Protocol):
         ]
     ):
         """
-        Return the seven partial derivatives of the mixing rule.
+        Returns the seven partial derivatives of the mixing rule.
 
         The tuple order (when not returning a `MixingRulePartialDerivatives` dict) is:
 
@@ -882,7 +882,7 @@ class Phases:
 
     @property
     def phases(self) -> tuple[FluidPhase, ...]:
-        """The active phases in the order oil, water, gas."""
+        """Returns the active phases in the order oil, water, gas."""
         active: list[FluidPhase] = []
         if self.oil:
             active.append(FluidPhase.OIL)
@@ -899,15 +899,15 @@ class Phases:
 
     @property
     def is_three_phase(self) -> Boolean:
-        """Whether the model has oil, water and gas."""
+        """Checks whether the model has oil, water and gas."""
         return self.oil and self.water and self.gas
 
     @property
     def is_gas_water(self) -> Boolean:
-        """Whether the model has gas and water and no oil."""
+        """Checks whether the model has gas and water and no oil."""
         return self.gas and self.water and not self.oil
 
     @property
     def is_single_phase(self) -> Boolean:
-        """Whether the model has only one phase."""
+        """Checks whether the model has only one phase."""
         return self.phase_count == 1

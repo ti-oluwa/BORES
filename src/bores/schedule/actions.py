@@ -13,7 +13,7 @@ class EndRun(Action[ModelT]):
     """
     Ends the simulation unconditionally when applied. Pair with an event
     for a manual stop condition, the schedule-driven equivalent of
-    Eclipse's `END` keyword, separate from the automatic end-run an
+    The `END` keyword, separate from the automatic end-run an
     economic limit's own `end_run` flag can already raise.
     """
 

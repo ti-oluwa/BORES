@@ -56,7 +56,7 @@ class DeckPhases(Phases):
     """
 
     def to_phases(self) -> Phases:
-        """The phases without the deck's own labelling, for a model that has no use for it."""
+        """Returns the phases without the deck's own labelling, for a model that has no use for it."""
         return Phases(**{field.name: getattr(self, field.name) for field in attrs.fields(Phases)})
 
 
@@ -66,7 +66,7 @@ STANDARD_CONDITIONS_TOLERANCE = 1.0e-3
 
 def default_standard_conditions(unit_system: UnitSystem) -> tuple[float, float]:
     """
-    The standard temperature and pressure a deck gets when it does not set `STCOND`.
+    Returns the standard temperature and pressure a deck gets when it does not set `STCOND`.
 
     They are 60 F and 1 atm, expressed in the unit system of the deck.
 
@@ -83,7 +83,7 @@ def default_standard_conditions(unit_system: UnitSystem) -> tuple[float, float]:
 
 def check_co2_storage_standard_conditions(deck_file: DeckFile) -> None:
     """
-    Check that a CO2 storage deck leaves its standard conditions at their defaults.
+    Checks that a CO2 storage deck leaves its standard conditions at their defaults.
 
     The CO2 and brine properties are computed at the default standard conditions, so a deck that
     sets `STCOND` to anything else cannot be honoured.
@@ -109,7 +109,7 @@ def check_co2_storage_standard_conditions(deck_file: DeckFile) -> None:
 
 def declares_phases(deck_file: DeckFile) -> Boolean:
     """
-    Whether a deck declares any phase keyword (`OIL`, `WATER`, `GAS` or `GASWAT`).
+    Checks whether a deck declares any phase keyword (`OIL`, `WATER`, `GAS` or `GASWAT`).
 
     A standalone include file that holds only fluid or rock tables declares none, and has no
     phase set to read.
@@ -122,7 +122,7 @@ def declares_phases(deck_file: DeckFile) -> Boolean:
 
 def read_deck_phases(deck_file: DeckFile) -> DeckPhases:
     """
-    Read which phases a deck models from its `RUNSPEC` keywords.
+    Reads which phases a deck models from its `RUNSPEC` keywords.
 
     `GASWAT` declares gas and water together. For a CO2 storage deck, `DISGAS` and `DISGASW` both
     mean that CO2 dissolves in the brine. A deck with `OIL GAS CO2STOR` and no `WATER` is
@@ -233,7 +233,7 @@ def read_deck_phases(deck_file: DeckFile) -> DeckPhases:
 
 
 def is_supported_phase_set(*, oil: Boolean, water: Boolean, gas: Boolean) -> Boolean:
-    """Whether the phase combination is one the model can be built with."""
+    """Checks whether the phase combination is one the model can be built with."""
     count = int(oil) + int(water) + int(gas)
     if count >= 2:
         return True
@@ -241,6 +241,6 @@ def is_supported_phase_set(*, oil: Boolean, water: Boolean, gas: Boolean) -> Boo
 
 
 def describe_phase_set(*, oil: Boolean, water: Boolean, gas: Boolean) -> str:
-    """Name the phase combination for an error message, such as `gas only`."""
+    """Names the phase combination for an error message, such as `gas only`."""
     names = [name for name, active in (("oil", oil), ("water", water), ("gas", gas)) if active]
     return f"{' and '.join(names)} only"

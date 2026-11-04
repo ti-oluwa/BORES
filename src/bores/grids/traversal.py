@@ -52,7 +52,7 @@ def check_point_on_segment(
     tolerance: Number,
 ) -> Boolean:
     """
-    Whether `(px, py)` lies on the segment `(x1, y1)` to `(x2, y2)`, within `tolerance`.
+    Checks whether `(px, py)` lies on the segment `(x1, y1)` to `(x2, y2)`, within `tolerance`.
 
     :param px: x coordinate of the point.
     :param py: y coordinate of the point.
@@ -164,7 +164,7 @@ def check_point_in_polygon_3d(
     tolerance: Number = 1e-9,
 ) -> Boolean:
     """
-    Point-in-polygon test for a planar polygon in 3-D, given a point already known to lie on (or
+    Returns point-in-polygon test for a planar polygon in 3-D, given a point already known to lie on (or
     very near) the polygon's plane.
 
     Both are projected onto the pair of axes the normal is least aligned with, so a steeply tilted
@@ -205,7 +205,7 @@ def get_face_plane_crossing(
     face_centroids: NumberArray[TwoDimensions],
 ) -> Number:
     """
-    Return where a segment crosses a face's plane.
+    Returns where a segment crosses a face's plane.
 
     :param sx: x coordinate of the segment's start.
     :param sy: y coordinate of the segment's start.
@@ -252,7 +252,7 @@ def crossing_is_inside_face(
     face_unit_normals: NumberArray[TwoDimensions],
 ) -> Boolean:
     """
-    Check whether the point a segment reaches at `t` lies within a face's polygon.
+    Checks whether the point a segment reaches at `t` lies within a face's polygon.
 
     :param sx: x coordinate of the segment's start.
     :param sy: y coordinate of the segment's start.
@@ -310,7 +310,7 @@ def walk_cells(
     face_centroids: NumberArray[TwoDimensions],
 ) -> tuple[IntArray[OneDimension], NumberArray[OneDimension], NumberArray[OneDimension]]:
     """
-    Walk a segment through the grid from `first_cell`, crossing from cell to cell through the face
+    Walks a segment through the grid from `first_cell`, crossing from cell to cell through the face
     it leaves each one by, until it ends or leaves the active grid.
 
     A face is only checked against its polygon if the segment crosses its plane ahead of the
@@ -418,7 +418,7 @@ def walk_cells(
 
 
 def traversal_arrays(grid: Grid) -> dict[str, IntArray | NumberArray]:
-    """The grid arrays the walk reads."""
+    """Returns the grid arrays the walk reads."""
     return {
         "cell_face_offsets": grid.cell_face_offsets,
         "cell_face_indices": grid.cell_face_indices,
@@ -438,7 +438,7 @@ def walk_segment_cells(
     first_cell: Integer,
 ) -> tuple[IntArray[OneDimension], NumberArray[OneDimension], NumberArray[OneDimension]]:
     """
-    Walk the straight segment from `start` to `end` through `grid`, cell by cell.
+    Walks the straight segment from `start` to `end` through `grid`, cell by cell.
 
     The walk crosses from each cell to its neighbour through the face the segment leaves it by,
     until it reaches `end` or leaves the active grid through a boundary face. It stops there

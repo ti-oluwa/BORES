@@ -112,7 +112,7 @@ def compute_perforation_pressures(
     *, wellbore: WellBoreModel | None, **kwargs: typing.Any
 ) -> NumberArray[OneDimension]:
     """
-    Compute perforation pressures using the correlation named by `wellbore.name`.
+    Computes perforation pressures using the correlation named by `wellbore.name`.
 
     :param wellbore: `WellBoreModel` naming a hydraulics correlation. Required; `None` raises.
     :param kwargs: Forwarded to that correlation's `compute_perforation_pressures`.
@@ -135,7 +135,7 @@ def compute_tubing_head_pressure(
     *, wellbore: WellBoreModel | None, **kwargs: typing.Any
 ) -> Number:
     """
-    Compute tubing head pressure using the correlation named by `wellbore.name`.
+    Computes tubing head pressure using the correlation named by `wellbore.name`.
 
     :param wellbore: `WellBoreModel` naming a hydraulics correlation. Required; `None` raises.
     :param kwargs: Forwarded to that correlation's `compute_tubing_head_pressure`.
@@ -161,7 +161,7 @@ def compute_tubing_head_pressure_from_table(
     *, wellbore: WellBoreModel | None, **kwargs: typing.Any
 ) -> Number:
     """
-    Compute tubing head pressure by marching up the tubing with the fluids of `wellbore.tubing_fluid_table`,
+    Computes tubing head pressure by marching up the tubing with the fluids of `wellbore.tubing_fluid_table`,
     using the correlation named by `wellbore.name`.
 
     :param wellbore: `WellBoreModel` naming a hydraulics correlation, with `tubing_fluid_table`.

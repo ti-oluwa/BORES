@@ -1,8 +1,8 @@
 """
-Eclipse `BOX` / `ENDBOX` / `EQUALS` / `ADD` / `MULTIPLY` /
+The `BOX` / `ENDBOX` / `EQUALS` / `ADD` / `MULTIPLY` /
 `COPY` / `MAXVALUE` / `MINVALUE` operator resolution.
 
-Operators in Eclipse allow bulk modification of per-cell arrays without
+Operators allow bulk modification of per-cell arrays without
 re-stating the full array. They work in file order: every
 `EQUALS`/`ADD`/`MULTIPLY`/`COPY`/`MAXVALUE`/`MINVALUE`
 record targets a named keyword array and is applied to a sub-grid box.
@@ -100,7 +100,7 @@ column_shape)`. Built by `bores.deck.file.DeckFile` from its registry.
 
 
 def get_default_box(dims: GridDimensions) -> tuple[int, int, int, int, int, int]:
-    """Return the 0-based inclusive box covering every cell in the grid."""
+    """Returns the 0-based inclusive box covering every cell in the grid."""
     return (0, dims.nx - 1, 0, dims.ny - 1, 0, dims.nz - 1)
 
 
@@ -113,7 +113,7 @@ def clamp_box(
     k2: Integer,
     dims: GridDimensions,
 ) -> tuple[Integer, Integer, Integer, Integer, Integer, Integer]:
-    """Clamp a raw (possibly out-of-bounds) box to grid extents and sort each pair."""
+    """Clamps a raw (possibly out-of-bounds) box to grid extents and sorts each pair."""
     i1, i2 = sorted((max(0, min(i1, dims.nx - 1)), max(0, min(i2, dims.nx - 1))))
     j1, j2 = sorted((max(0, min(j1, dims.ny - 1)), max(0, min(j2, dims.ny - 1))))
     k1, k2 = sorted((max(0, min(k1, dims.nz - 1)), max(0, min(k2, dims.nz - 1))))
@@ -129,9 +129,9 @@ def parse_box(
     strict: bool,
 ) -> tuple[Integer, Integer, Integer, Integer, Integer, Integer] | None:
     """
-    Turn up to six 1-based box tokens (`I1 I2 J1 J2 K1 K2`) into a 0-based inclusive box.
+    Turns up to six 1-based box tokens (`I1 I2 J1 J2 K1 K2`) into a 0-based inclusive box.
 
-    As in any Eclipse record, items left off the end are defaulted, and a bound written `1*` is
+    As in any deck record, items left off the end are defaulted, and a bound written `1*` is
     defaulted too. A defaulted bound takes the matching bound of `fallback`.
 
     A box that does not fit the grid (a bound outside it, or a lower bound above its upper bound)
@@ -187,7 +187,7 @@ def resolve_operations(
     deck: Deck, dims: GridDimensions, *, array_info: ArrayInfo | None = None
 ) -> list[Operation]:
     """
-    Walk every `BOX` / `ENDBOX` / operator record in deck order and
+    Walks every `BOX` / `ENDBOX` / operator record in deck order and
     resolve each operator record to a concrete `Operation`.
 
     `BOX` updates the active box for all subsequent operator records until
@@ -242,7 +242,7 @@ def resolve_operations(
 
 
 def warn_box_ignored(strict: bool) -> None:
-    """Warn that an unreadable `BOX` was ignored and the previous box stays in force."""
+    """Warns that an unreadable `BOX` was ignored and the previous box stays in force."""
     if not strict:
         report(
             "The unreadable `BOX` record is ignored, so the operators after it apply to the "
@@ -262,11 +262,11 @@ def parse_operator_records(
     array_info: ArrayInfo | None = None,
 ) -> typing.Iterator[Operation]:
     """
-    Parse the (possibly multi-record) body of a single operator block.
+    Parses the (possibly multi-record) body of a single operator block.
 
     Each `/`-delimited line is one record. An optional trailing 6
     integers on the same record override the ambient `BOX` for that
-    record only (standard Eclipse shorthand). The per-record override is
+    record only (standard deck shorthand). The per-record override is
     clamped to grid bounds, just like an explicit `BOX` keyword.
 
     :param body: Raw record body (between the operator keyword and its
@@ -356,9 +356,9 @@ def get_box_view(
     dims: GridDimensions,
 ) -> FloatArray[ThreeDimensions]:
     """
-    Return the cells of `box` as a writable 3-D view of the flat per-cell `array`.
+    Returns the cells of `box` as a writable 3-D view of the flat per-cell `array`.
 
-    A flat array in Eclipse order (`i` fastest, then `j`, then `k`) is a `(nz, ny, nx)` array in
+    A flat array in deck order (`i` fastest, then `j`, then `k`) is a `(nz, ny, nx)` array in
     C order, so a box is a plain slice of it. Working on that view needs no index array and
     copies nothing, however large the box: a full-grid operator is the common case, and an
     index array for it would be as large as the grid itself.
@@ -380,7 +380,7 @@ def apply_operation(
     resolve_source: typing.Callable[[str], FloatArray[OneDimension] | None],
 ) -> None:
     """
-    Apply one resolved `Operation` to `array` in place, over its box.
+    Applies one resolved `Operation` to `array` in place, over its box.
 
     :param array: Flat `(n_cells,)` array for the operation's target
         keyword (already validated to belong to that keyword).

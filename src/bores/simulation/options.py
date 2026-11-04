@@ -108,7 +108,7 @@ class SaturationOptions:
     """Whether relative permeability and capillary pressure depend on surface tension (`SURFTENS`)."""
 
     unrecognized: frozenset[str] = frozenset()
-    """Any other option the deck listed, upper-cased, since the options Eclipse accepts depend on its version."""
+    """Any other option the deck listed, upper-cased, since the options accepted depend on the simulator version."""
 
 
 @attrs.frozen(kw_only=True, slots=True)
@@ -137,7 +137,7 @@ class ModelDimensions:
     The sizes a deck declares for its own tables, regions, wells and VFP tables.
 
     Every field is `None` when the deck does not write the keyword it comes from. They are
-    capacities Eclipse reserves rather than anything a calculation needs, which is why they are
+    capacities reserved rather than anything a calculation needs, which is why they are
     checked against the deck (`bores.deck.dimensions`) and otherwise just carried.
     """
 
@@ -265,7 +265,7 @@ DIMENSION_SOURCES: tuple[tuple[str, str, str], ...] = (
 
 def load_saturation_options(deck_file: DeckFile) -> SaturationOptions:
     """
-    Read `SATOPTS`, `ENDSCALE` and `SCALECRS`.
+    Reads `SATOPTS`, `ENDSCALE` and `SCALECRS`.
 
     :param deck_file: The deck to read.
     :returns: The options, all off for whichever of the keywords the deck does not have.
@@ -290,7 +290,7 @@ def load_saturation_options(deck_file: DeckFile) -> SaturationOptions:
 
 def load_equilibration_options(deck_file: DeckFile) -> EquilibrationOptions:
     """
-    Read `EQLOPTS`.
+    Reads `EQLOPTS`.
 
     :param deck_file: The deck to read.
     :returns: The options, all off if the deck has no `EQLOPTS`.
@@ -307,7 +307,7 @@ def load_equilibration_options(deck_file: DeckFile) -> EquilibrationOptions:
 
 def load_model_dimensions(deck_file: DeckFile) -> ModelDimensions | None:
     """
-    Read the deck's dimension keywords.
+    Reads the deck's dimension keywords.
 
     :param deck_file: The deck to read.
     :returns: The dimensions, or `None` if the deck has none of the dimension keywords.
@@ -326,7 +326,7 @@ def load_model_dimensions(deck_file: DeckFile) -> ModelDimensions | None:
 
 def load_minimum_pore_volume(deck_file: DeckFile) -> Number | None:
     """
-    Read `MINPV`, the pore volume below which a cell takes no part in the flow.
+    Reads `MINPV`, the pore volume below which a cell takes no part in the flow.
 
     The deck gives it in reservoir volume: cubic metres (`METRIC`), reservoir barrels (`FIELD`) or
     cubic centimetres (`LAB`). It is returned in the volume unit pore volumes have here (m³, ft³
@@ -574,7 +574,7 @@ class StepLimitOptions:
 
     def convert(self, *, pressure_factor: Number) -> "StepLimitOptions":
         """
-        The limits in another unit system.
+        Returns the limits in another unit system.
 
         :param pressure_factor: What to multiply a pressure by to express it in the new unit system.
         :returns: The limits, with the pressure change converted. The rest are dimensionless.
@@ -735,12 +735,12 @@ class PhysicsOptions:
     uses the `WELL_INDEX_REGIME_CONSTANT` constant of `constants`. It is handed to the wells API
     that builds the well indices.
 
-    A deck's own well index (Eclipse's) has no such constant, so a deck loads as 0.
+    A deck's own well index has no such constant, so a deck loads as 0.
     """
 
     def convert(self, *, volume_factor: Number) -> "PhysicsOptions":
         """
-        The settings in another unit system.
+        Returns the settings in another unit system.
 
         :param volume_factor: What to multiply a volume by to express it in the new unit system.
         :returns: The settings, with the minimum pore volume converted. The rest are dimensionless.
@@ -907,7 +907,7 @@ class OutputOptions:
 
 def get_scheduled_at_start(deck_file: DeckFile, keyword: str) -> dict[str, typing.Any] | None:
     """
-    The record of a scheduled keyword that applies from the start of the run.
+    Returns the record of a scheduled keyword that applies from the start of the run.
 
     A scheduled keyword changes its setting from the time it appears at. This is the one in effect
     at time zero. The later ones are warned about, as a setting held for the whole run cannot
@@ -933,7 +933,7 @@ def get_scheduled_at_start(deck_file: DeckFile, keyword: str) -> dict[str, typin
 
 def load_dissolution_limits(deck_file: DeckFile) -> dict[str, typing.Any]:
     """
-    Read how fast gas may dissolve in oil and oil vaporize in gas, from `DRSDT` and `DRVDT`.
+    Reads how fast gas may dissolve in oil and oil vaporize in gas, from `DRSDT` and `DRVDT`.
 
     :param deck_file: The deck to read.
     :returns: Settings for `PhysicsOptions`, holding only what the deck sets.
@@ -955,7 +955,7 @@ def load_dissolution_limits(deck_file: DeckFile) -> dict[str, typing.Any]:
 
 def load_output_options(deck_file: DeckFile) -> OutputOptions:
     """
-    Read the keywords that decide what a run writes and reports.
+    Reads the keywords that decide what a run writes and reports.
 
     These are `NOECHO`, `FMTIN`, `FMTOUT`, `UNIFIN`, `UNIFOUT`, `INIT`, `GRIDFILE`, `RUNSUM`,
     `MESSAGES` and the report requests `RPTPROPS`, `RPTSOL`, `RPTRST` and `RPTSCHED`. The other

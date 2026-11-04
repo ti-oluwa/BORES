@@ -82,7 +82,7 @@ def load_summary_schedule(
 
 def get_tuning_occurrences(deck_file: DeckFile) -> list[dict[str, typing.Any]]:
     """
-    Every `TUNING` in the deck, in file order.
+    Returns every `TUNING` in the deck, in file order.
 
     :param deck_file: The deck to read.
     :returns: One dict per occurrence, holding the `time_step`, `convergence` and `iteration`
@@ -93,7 +93,7 @@ def get_tuning_occurrences(deck_file: DeckFile) -> list[dict[str, typing.Any]]:
 
 def get_tuning_at_start(deck_file: DeckFile) -> dict[str, dict[str, typing.Any]] | None:
     """
-    The `TUNING` settings that apply from the start of the run.
+    Returns the `TUNING` settings that apply from the start of the run.
 
     A `TUNING` in the schedule changes the settings from the time it appears at. This is the one
     in effect at time zero; the later ones come from `load_timer_schedule`.
@@ -117,14 +117,14 @@ def tuning_to_timer_settings(
     tuning: dict[str, dict[str, typing.Any]] | None, *, include_step_sizes: bool
 ) -> dict[str, Number]:
     """
-    Turn the `TUNING` items a `Timer` can use into `Timer` settings.
+    Turns the `TUNING` items a `Timer` can use into `Timer` settings.
 
     - `initial_time_step`, `maximum_time_step` and `minimum_time_step` become the step sizes.
     - `maximum_time_step_increase_factor` becomes `maximum_growth_per_step`,
       `convergence_failure_cut_factor` the `backoff_factor` (with `aggressive_backoff_factor` kept
       from exceeding it) and `maximum_material_balance_error` `maximum_total_relative_mbe`.
 
-    Only an item the deck sets to something other than Eclipse's default is taken, since `TUNING`
+    Only an item the deck sets to something other than its default is taken, since `TUNING`
     fills in a default for every item and a defaulted item cannot be told from one written out.
     The step sizes are the exception when `include_step_sizes` is set, as a `Timer` cannot be
     built without them. The other `TUNING` items have no `Timer` setting and are not carried over.
@@ -180,10 +180,10 @@ def tuning_to_timer_settings(
 
 def load_timer(deck_file: DeckFile) -> Timer | None:
     """
-    Build a `Timer` from the deck's schedule length and the `TUNING` in effect at the start.
+    Builds a `Timer` from the deck's schedule length and the `TUNING` in effect at the start.
 
     `simulation_time` is the last report time (the end of the final `TSTEP` or `DATES`). The
-    other settings follow `tuning_to_timer_settings`, with Eclipse's own defaults for the step
+    other settings follow `tuning_to_timer_settings`, with the default step
     sizes when the deck has no `TUNING`. Times are in the deck's native time unit (days for
     `FIELD` and `METRIC`, hours for `LAB`), which is also what the `Timer` uses for the same unit
     system.
@@ -209,7 +209,7 @@ def load_timer(deck_file: DeckFile) -> Timer | None:
             f"must be positive and no larger than the maximum time step {maximum_step_size:g}."
         )
 
-    # Eclipse takes the initial step as a wish and keeps it inside the limits
+    # The initial step is a wish, kept inside the limits
     settings["initial_step_size"] = min(
         max(settings["initial_step_size"], minimum_step_size), maximum_step_size
     )
@@ -237,10 +237,10 @@ def load_timer(deck_file: DeckFile) -> Timer | None:
 
 def load_timer_schedule(deck_file: DeckFile) -> tuple[ScheduleItem[typing.Any], ...]:
     """
-    The scheduled timer changes from every `TUNING` that appears after the start of the run.
+    Returns the scheduled timer changes from every `TUNING` that appears after the start of the run.
 
     Each becomes one item that applies `RetuneTimer` at the time the `TUNING` takes effect, with
-    only the settings that `TUNING` sets to something other than Eclipse's default (see
+    only the settings that `TUNING` sets to something other than its default (see
     `tuning_to_timer_settings`). An occurrence that sets none of them gives no item. The items
     only work if the code advancing the schedule puts the run's `Timer` in
     `ScheduleContext.extra` under `TIMER_CONTEXT_KEY`.

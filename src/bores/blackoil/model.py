@@ -35,7 +35,7 @@ class BlackOilModel:
         unit_system: UnitSystem | None = None,
     ) -> None:
         """
-        Initialize the black-oil model.
+        Initializes the black-oil model.
 
         :param reservoir: Reservoir characterization.
         :param fluid: Black-oil fluid physics.
@@ -108,7 +108,7 @@ class BlackOilModel:
 
     def validate(self) -> None:
         """
-        Run all necessary validation and correctness checks on the model
+        Runs all necessary validation and correctness checks on the model
 
         :raise ValidationError:
         """
@@ -124,7 +124,7 @@ class BlackOilModel:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Convert the model to the *target* unit system.
+        Converts the model to the *target* unit system.
 
         :param target: Target unit system.
         :param table: Optional custom conversion table.

@@ -145,7 +145,7 @@ def resolve_well_index_direction(
     perforation: Perforation, grid: Grid, cell_index: Integer
 ) -> Orientation:
     """
-    Resolve which axis a Peaceman-style well index should treat as the
+    Resolves which axis a Peaceman-style well index should treat as the
     "along-wellbore" direction for `perforation` in `cell_index`.
 
     Resolution order: `perforation.direction` if set (and not `UNSET`);
@@ -207,7 +207,7 @@ def compute_peaceman_well_index(
     regime_constant: Number = -3 / 4,
 ) -> Number:
     """
-    Compute the well index for a given well using the Peaceman equation.
+    Computes the well index for a given well using the Peaceman equation.
 
     W = (k * h * N/G) / (ln(re/rw) + C + s)
 
@@ -232,7 +232,7 @@ def compute_3D_effective_drainage_radius(
     well_orientation: Orientation,
 ) -> Number:
     """
-    Compute the effective drainage radius for a well in a 3D reservoir
+    Computes the effective drainage radius for a well in a 3D reservoir
     model using Peaceman's (1983) anisotropic effective drainage radius
     formula.
 
@@ -275,7 +275,7 @@ def compute_2D_effective_drainage_radius(
     permeability: tuple[Number, Number],
 ) -> Number:
     """
-    Compute the effective drainage radius for a well in a 2D reservoir
+    Computes the effective drainage radius for a well in a 2D reservoir
     model using Peaceman's (1983) anisotropic formula.
 
     :param interval_thickness: Tuple of cell dimensions (dx, dy) in ft.
@@ -296,7 +296,7 @@ def compute_2D_effective_drainage_radius(
 
 @numba.njit(cache=True, inline="always")
 def compute_geometric_mean(values: typing.Sequence[Number]) -> Number:
-    """Geometric mean of `values`, clamping any negative input to zero."""
+    """Returns geometric mean of `values`, clamping any negative input to zero."""
     product = 1.0
     n = 0
     for v in values:
@@ -312,7 +312,7 @@ def compute_effective_permeability_for_well(
     permeability: tuple[Number, Number, Number], orientation: Orientation
 ) -> Number:
     """
-    Compute `k_eff` for Peaceman WI using geometric mean of the two
+    Computes `k_eff` for Peaceman WI using geometric mean of the two
     permeabilities perpendicular to the well axis.
 
     :param permeability: `(kx, ky, kz)`.
@@ -341,7 +341,7 @@ def compute_equivalent_radius_well_index(
     net_to_gross: Number = 1.0,
 ) -> Number:
     """
-    Well index for a cell where `is_locally_cartesian` returned `False`.
+    Returns well index for a cell where `is_locally_cartesian` returned `False`.
 
     Isotropic equivalent-radius formulation: `r_0 = 0.14 * sqrt(cell_volume
     / completion_length)`, the volume-per-unit-length analogue of
@@ -350,7 +350,7 @@ def compute_equivalent_radius_well_index(
 
     Like `compute_peaceman_well_index` it returns `k * h / (ln(r0 / rw) + skin)` without the
     `2 * pi`, which `c.RADIAL_FLOW_CONSTANT_<unit system>` supplies when the index is turned into
-    a rate. It has no regime constant, as in Eclipse.
+    a rate. It has no regime constant.
 
     :param permeability: Isotropic (or geometric-mean) permeability (mD).
     :param cell_volume: `grid.cell_volumes[cell_index]`.
@@ -675,7 +675,7 @@ def build_wells_indices(
     search_radius: Number | None = None,
 ) -> dict[str, WellIndex]:
     """
-    Resolve every well in `wells` against `grid` and compute connection
+    Resolves every well in `wells` against `grid` and computes connection
     factors for every open perforation.
 
     :param grid: Grid to resolve against.

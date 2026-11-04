@@ -1,7 +1,7 @@
 """
 Eclipse / GRDECL keyword deck parsing engine.
 
-This package provides a composable framework for reading Eclipse-style keyword
+This package provides a composable framework for reading deck-style keyword
 decks (GRDECL include files, full `.DATA` decks, etc.).
 
 **Usage Example**:

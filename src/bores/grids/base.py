@@ -116,7 +116,7 @@ def build_cell_face_csr(
     n_cells: Integer,
 ) -> tuple[IntArray[OneDimension], IntArray[OneDimension]]:
     """
-    Build the cell-to-face CSR arrays with a single counting sort.
+    Builds the cell-to-face CSR arrays with a single counting sort.
 
     Faces of a cell appear in ascending face index order.
 
@@ -155,7 +155,7 @@ def build_cell_neighbor_csr(
     n_cells: Integer,
 ) -> tuple[IntArray[OneDimension], IntArray[OneDimension]]:
     """
-    Build the cell-to-neighbour CSR arrays: the sorted, de-duplicated cells that share an
+    Builds the cell-to-neighbour CSR arrays: the sorted, de-duplicated cells that share an
     interior face with each cell.
 
     :param face_cell_indices: Shape `(n_faces, 2)` owner and neighbour cell of each face,
@@ -225,7 +225,7 @@ def compute_face_geometry(
     NumberArray[TwoDimensions],
 ]:
     """
-    Compute area-weighted face centroids, areas, and unit normals (Newell's method).
+    Computes area-weighted face centroids, areas, and unit normals (Newell's method).
 
     :param face_vertex_indices: Flat CSR data array of vertex indices.
     :param face_vertex_offsets: CSR offset array of length `n_faces + 1`.
@@ -324,7 +324,7 @@ def compute_cell_volumes_and_centroids(
     n_cells: int,
 ) -> tuple[NumberArray[OneDimension], NumberArray[TwoDimensions]]:
     """
-    Compute cell volumes and centroids via the divergence theorem.
+    Computes cell volumes and centroids via the divergence theorem.
 
     :param face_cell_indices: Shape `(n_faces, 2)`.
     :param face_vertex_indices: Flat CSR vertex index data array.
@@ -403,7 +403,7 @@ def compute_cell_bounding_boxes(
     n_cells: int,
 ) -> tuple[NumberArray[TwoDimensions], NumberArray[TwoDimensions]]:
     """
-    Compute per-cell axis-aligned bounding boxes.
+    Computes per-cell axis-aligned bounding boxes.
 
     :param face_cell_indices: Shape `(n_faces, 2)`.
     :param face_vertex_indices: Flat CSR vertex index data array.
@@ -471,7 +471,7 @@ def compute_cell_volumes_and_centroids_by_cell(
     n_cells: int,
 ) -> tuple[NumberArray[OneDimension], NumberArray[TwoDimensions]]:
     """
-    Cell volumes and centroids via the divergence theorem, one cell per parallel iteration.
+    Returns cell volumes and centroids via the divergence theorem, one cell per parallel iteration.
 
     Gives exactly the results of `compute_cell_volumes_and_centroids`: a cell reads its own faces
     (ascending, as that function visits them) and writes only its own entries, so cells are
@@ -540,7 +540,7 @@ def compute_cell_bounding_boxes_by_cell(
     n_cells: int,
 ) -> tuple[NumberArray[TwoDimensions], NumberArray[TwoDimensions]]:
     """
-    Per-cell axis-aligned bounding boxes, one cell per parallel iteration.
+    Returns per-cell axis-aligned bounding boxes, one cell per parallel iteration.
 
     Gives exactly the results of `compute_cell_bounding_boxes`; a cell without faces keeps
     `+inf` / `-inf` bounds.
@@ -617,7 +617,7 @@ def validate_indices(
     error: type[Exception],
 ) -> IntArray[NDimension]:
     """
-    Convert `indices` to an integer array and check that each one is in `[0, upper)`.
+    Converts `indices` to an integer array and checks that each one is in `[0, upper)`.
 
     Negative indices are rejected rather than counted from the end, since a negative index in
     a grid query is always a mistake.
@@ -644,7 +644,7 @@ def gather_ragged_positions(
     offsets: IntArray[OneDimension], rows: IntArray[OneDimension]
 ) -> tuple[IntArray[OneDimension], IntArray[OneDimension], IntArray[OneDimension]]:
     """
-    Locate the entries of the requested rows of a compressed (offsets plus values) table.
+    Locates the entries of the requested rows of a compressed (offsets plus values) table.
 
     :param offsets: Row boundaries of the table, one more entry than it has rows.
     :param rows: Rows to gather, in the order they should be returned.
@@ -998,7 +998,7 @@ class Grid:
 
     def _get_cell_count(self) -> int:
         """
-        Number of cells implied by the face connectivity and any per-cell arrays supplied.
+        Returns the number of cells implied by the face connectivity and any per-cell arrays supplied.
 
         Cells with no faces (fully pinched out) carry no entries in `face_cell_indices`, so
         the count is taken from the per-cell arrays when they are longer.
@@ -1025,7 +1025,7 @@ class Grid:
         return from_faces
 
     def _validate_consistency(self) -> None:
-        """Check that per-cell, per-face and per-NNC arrays agree with the grid topology."""
+        """Checks that per-cell, per-face and per-NNC arrays agree with the grid topology."""
         n_cells = self._get_cell_count()
         n_faces = self.face_cell_indices.shape[0]
 
@@ -1150,7 +1150,7 @@ class Grid:
 
     def _canonicalize_boundary_faces(self) -> None:
         """
-        Ensure every boundary face has a real owner cell and a `-1` neighbour.
+        Ensures every boundary face has a real owner cell and a `-1` neighbour.
 
         A boundary face supplied with the `-1` in the owner column is swapped so the
         owner is the real cell, and its vertex winding is reversed so the face normal
@@ -1187,7 +1187,7 @@ class Grid:
 
     def _remove_faces_of_inactive_cells(self) -> None:
         """
-        Drop every face that touches an inactive cell, so inactive cells have no connections.
+        Drops every face that touches an inactive cell, so inactive cells have no connections.
 
         Cell volumes, centroids and bounding boxes are taken from the full face set first when
         they were not supplied, so an inactive cell keeps its geometry (with zero volume).
@@ -1400,7 +1400,7 @@ class Grid:
 
     def _compute_cell_thickness(self) -> NumberArray[OneDimension]:
         """
-        Mean vertical thickness of each cell: volume divided by horizontally projected area.
+        Returns mean vertical thickness of each cell: volume divided by horizontally projected area.
 
         For a cell with sloping or dipping top and bottom surfaces this is the true vertical
         thickness, unlike the bounding-box height, which also includes the dip.
@@ -1421,7 +1421,7 @@ class Grid:
         return thickness
 
     def _get_spatial_index(self) -> cKDTree:
-        """KD-tree of the cell centroids, built on first use because most grids never query it."""
+        """Returns KD-tree of the cell centroids, built on first use because most grids never query it."""
         index = self._spatial_index
         if index is None:
             assert self.cell_centroids is not None
@@ -1431,50 +1431,50 @@ class Grid:
 
     @property
     def n_cells(self) -> int:
-        """Total number of cells."""
+        """Returns the total number of cells."""
         assert self.cell_centroids is not None
         return self.cell_centroids.shape[0]
 
     @property
     def n_faces(self) -> int:
-        """Total number of faces (boundary + interior)."""
+        """Returns the total number of faces (boundary + interior)."""
         return self.face_cell_indices.shape[0]
 
     @property
     def n_vertices(self) -> int:
-        """Total number of vertex points."""
+        """Returns the total number of vertex points."""
         return self.vertex_coordinates.shape[0]
 
     @property
     def n_boundary_faces(self) -> int:
-        """Number of boundary faces."""
+        """Returns the number of boundary faces."""
         return len(self.boundary_face_indices)
 
     @property
     def n_interior_faces(self) -> int:
-        """Number of interior faces."""
+        """Returns the number of interior faces."""
         return len(self.interior_face_indices)
 
     @property
     def n_nnc(self) -> int:
-        """Number of non-neighbour connections. 0 when `nnc_cell_indices` is `None`."""
+        """Returns the number of non-neighbour connections. 0 when `nnc_cell_indices` is `None`."""
         if self.nnc_cell_indices is None:
             return 0
         return self.nnc_cell_indices.shape[0]
 
     @property
     def n_connections(self) -> int:
-        """Total connections: `n_faces + n_nnc`."""
+        """Returns the total connections: `n_faces + n_nnc`."""
         return self.n_faces + self.n_nnc
 
     @property
     def n_faults(self) -> int:
-        """Number of named faults. 0 when no fault data."""
+        """Returns the number of named faults. 0 when no fault data."""
         return len(self.fault_face_indices) if self.fault_face_indices is not None else 0
 
     @property
     def has_transmissibility_multipliers(self) -> bool:
-        """`True` if any directional `MULT*` array is present."""
+        """Returns `True` if any directional `MULT*` array is present."""
         return any(
             array is not None
             for array in (
@@ -1496,7 +1496,7 @@ class Grid:
     @property
     def orientation(self) -> GridOrientation | None:
         """
-        The axis orientation declared by `GDORIENT`, or `None` if the grid was not given one.
+        Returns the axis orientation declared by `GDORIENT`, or `None` if the grid was not given one.
 
         It is a record of the declaration only. The grid geometry is used as written.
         """
@@ -1506,7 +1506,7 @@ class Grid:
 
     def flat_index(self, i: Integer, j: Integer, k: Integer) -> Integer:
         """
-        Convert 0-based `(i, j, k)` to a flat index (`i` fastest, `k` slowest):
+        Converts 0-based `(i, j, k)` to a flat index (`i` fastest, `k` slowest):
 
         `index = i + j*nx + k*nx*ny`.
 
@@ -1524,7 +1524,7 @@ class Grid:
 
     def ijk_index(self, flat: Integer) -> tuple[int, int, int]:
         """
-        Convert a flat index to  0-based `(i, j, k)`.
+        Converts a flat index to  0-based `(i, j, k)`.
 
         Given the flat index was generated as `i` fastest, `k` slowest:
 
@@ -1542,7 +1542,7 @@ class Grid:
 
     def is_cell_active(self, cell_index: Integer) -> bool:
         """
-        Return whether a given cell is active.
+        Returns whether a given cell is active.
 
         :param cell_index: 0-based cell index.
         :returns: `True` if the cell has `CellStatus.ACTIVE`.
@@ -1558,7 +1558,7 @@ class Grid:
 
     def get_face_type(self, face_index: Integer) -> ConnectionType:
         """
-        Return the `ConnectionType` for a given face.
+        Returns the `ConnectionType` for a given face.
 
         :param face_index: 0-based face index.
         :returns: `ConnectionType` enum value.
@@ -1571,7 +1571,7 @@ class Grid:
 
     def get_cell_face_indices(self, cell_index: Integer) -> IntArray[OneDimension]:
         """
-        Return the indices of all faces belonging to a given cell.
+        Returns the indices of all faces belonging to a given cell.
 
         :param cell_index: 0-based cell index.
         :returns: 1-D array of face indices.
@@ -1588,7 +1588,7 @@ class Grid:
 
     def get_cell_neighbor_indices(self, cell_index: Integer) -> IntArray[OneDimension]:
         """
-        Return the indices of all face-adjacent neighbours of a given cell.
+        Returns the indices of all face-adjacent neighbours of a given cell.
 
         :param cell_index: 0-based cell index.
         :returns: 1-D array of neighbouring cell indices.
@@ -1605,7 +1605,7 @@ class Grid:
 
     def get_face_vertex_coordinates(self, face_index: Integer) -> NumberArray[TwoDimensions]:
         """
-        Return the vertex coordinates of a given face.
+        Returns the vertex coordinates of a given face.
 
         :param face_index: 0-based face index.
         :returns: Shape `(n_verts_for_face, 3)` coordinate array.
@@ -1622,7 +1622,7 @@ class Grid:
 
     def get_face_cell_indices(self, face_index: Integer) -> IntArray[OneDimension]:
         """
-        Return the indices of all cells that share a given face.
+        Returns the indices of all cells that share a given face.
 
         :param face_index: 0-based face index.
         :returns: 1-D array of cell indices (usually of length=2).
@@ -1636,7 +1636,7 @@ class Grid:
         self, face_index: Integer, cell_index: Integer
     ) -> NumberArray[OneDimension]:
         """
-        Return the outward unit normal of a face relative to a specific cell.
+        Returns the outward unit normal of a face relative to a specific cell.
 
         :param face_index: 0-based face index.
         :param cell_index: Must be owner or neighbour of `face_index`.
@@ -1663,7 +1663,7 @@ class Grid:
         self, cell_indices: IntArray[OneDimension] | None = None
     ) -> CellTopBottomFaces:
         """
-        Find the depth and area of the top and bottom of cells from their actual faces rather
+        Finds the depth and area of the top and bottom of cells from their actual faces rather
         than from their bounding boxes.
 
         A dipping cell is much thinner along its own vertical than its bounding box
@@ -1760,7 +1760,7 @@ class Grid:
         self, i: IntOrArray[NDimension], j: IntOrArray[NDimension], k: IntOrArray[NDimension]
     ) -> IntArray[NDimension]:
         """
-        Convert 0-based `(i, j, k)` indices to flat indices, for any number of cells at once.
+        Converts 0-based `(i, j, k)` indices to flat indices, for any number of cells at once.
 
         The three index arguments are broadcast together, so the result has their common shape
         (which may have any number of dimensions).
@@ -1791,7 +1791,7 @@ class Grid:
         self, flat: IntOrArray[NDimension]
     ) -> tuple[IntArray[NDimension], IntArray[NDimension], IntArray[NDimension]]:
         """
-        Convert flat cell indices to 0-based `(i, j, k)` indices, for any number of cells at once.
+        Converts flat cell indices to 0-based `(i, j, k)` indices, for any number of cells at once.
 
         :param flat: Flat cell indices, of any shape.
         :returns: Arrays `(i, j, k)`, each with the shape of `flat`.
@@ -1807,7 +1807,7 @@ class Grid:
 
     def are_cells_active(self, cell_indices: IntOrArray[NDimension]) -> BooleanArray[NDimension]:
         """
-        Return whether each of the given cells is active.
+        Returns whether each of the given cells is active.
 
         :param cell_indices: 0-based cell indices, of any shape.
         :returns: Boolean array with the shape of `cell_indices`.
@@ -1821,7 +1821,7 @@ class Grid:
 
     def are_boundary_cells(self, cell_indices: IntOrArray[NDimension]) -> BooleanArray[NDimension]:
         """
-        Return whether each of the given cells is adjacent to at least one boundary face.
+        Returns whether each of the given cells is adjacent to at least one boundary face.
 
         :param cell_indices: 0-based cell indices, of any shape.
         :returns: Boolean array with the shape of `cell_indices`.
@@ -1839,7 +1839,7 @@ class Grid:
 
     def get_face_types(self, face_indices: IntOrArray[NDimension]) -> IntArray[NDimension]:
         """
-        Return the `ConnectionType` value of each of the given faces.
+        Returns the `ConnectionType` value of each of the given faces.
 
         :param face_indices: 0-based face indices, of any shape.
         :returns: Integer array with the shape of `face_indices`, holding `ConnectionType` values.
@@ -1851,7 +1851,7 @@ class Grid:
 
     def are_boundary_faces(self, face_indices: IntOrArray[NDimension]) -> BooleanArray[NDimension]:
         """
-        Return whether each of the given faces is adjacent to a boundary cell.
+        Returns whether each of the given faces is adjacent to a boundary cell.
 
         :param face_indices: 0-based face indices, of any shape.
         :returns: Boolean array with the shape of `face_indices`.
@@ -1867,7 +1867,7 @@ class Grid:
 
     def are_fault_faces(self, face_indices: IntOrArray[NDimension]) -> BooleanArray[NDimension]:
         """
-        Return whether each of the given faces belongs to a fault.
+        Returns whether each of the given faces belongs to a fault.
 
         :param face_indices: 0-based face indices, of any shape.
         :returns: Boolean array with the shape of `face_indices`.
@@ -1883,7 +1883,7 @@ class Grid:
 
     def get_cells_face_indices(self, cell_indices: IntOrArray[AnyDimension]) -> RaggedRows:
         """
-        Return the faces of each of the given cells.
+        Returns the faces of each of the given cells.
 
         :param cell_indices: 0-based cell indices. Multi-dimensional input is read in C order.
         :returns: The face indices of each cell, one row per cell.
@@ -1897,7 +1897,7 @@ class Grid:
 
     def get_cells_neighbor_indices(self, cell_indices: IntOrArray[AnyDimension]) -> RaggedRows:
         """
-        Return the face-adjacent neighbours of each of the given cells.
+        Returns the face-adjacent neighbours of each of the given cells.
 
         :param cell_indices: 0-based cell indices. Multi-dimensional input is read in C order.
         :returns: The neighbour cell indices of each cell, one row per cell.
@@ -1913,7 +1913,7 @@ class Grid:
         self, face_indices: IntOrArray[AnyDimension]
     ) -> IntArray[AnyDimension]:
         """
-        Return the owner and neighbour cell of each of the given faces.
+        Returns the owner and neighbour cell of each of the given faces.
 
         :param face_indices: 0-based face indices, of any shape.
         :returns: Array of shape `(*face_indices.shape, 2)`. The neighbour of a boundary face is `-1`.
@@ -1924,7 +1924,7 @@ class Grid:
 
     def get_faces_vertex_coordinates(self, face_indices: IntOrArray[AnyDimension]) -> RaggedRows:
         """
-        Return the vertex coordinates of each of the given faces.
+        Returns the vertex coordinates of each of the given faces.
 
         :param face_indices: 0-based face indices. Multi-dimensional input is read in C order.
         :returns: One row of `(x, y, z)` vertices per face, so `values` has shape `(n_vertices, 3)`.
@@ -1943,7 +1943,7 @@ class Grid:
         self, face_indices: IntOrArray[AnyDimension], cell_indices: IntOrArray[AnyDimension]
     ) -> NumberArray[AnyDimension]:
         """
-        Return the outward unit normal of each face relative to the cell it is paired with.
+        Returns the outward unit normal of each face relative to the cell it is paired with.
 
         :param face_indices: 0-based face indices.
         :param cell_indices: Cells to take the normals relative to. Broadcast with `face_indices`.
@@ -1985,7 +1985,7 @@ class Grid:
         k: IntOrArray[AnyDimension],
     ) -> NumberArray[AnyDimension]:
         """
-        Return the center `(x, y, z)` of the cells at 0-based indices `(i, j, k)`.
+        Returns the center `(x, y, z)` of the cells at 0-based indices `(i, j, k)`.
 
         :param i: 0-based x indices.
         :param j: 0-based y indices.
@@ -2002,7 +2002,7 @@ class Grid:
         self, points: NumberArray[AnyDimension], *, max_distance: Number | None = None
     ) -> IntArray[AnyDimension]:
         """
-        Find the cell whose centroid is nearest to each of many points, using the KD-tree.
+        Finds the cell whose centroid is nearest to each of many points, using the KD-tree.
 
         :param points: Query points `(x, y, z)` (`z` positive downward), shape `(..., 3)`.
         :param max_distance: Largest allowed distance between a point and its nearest cell.
@@ -2026,7 +2026,7 @@ class Grid:
         self, points: NumberArray[AnyDimension], *, max_distance: Number | None = None
     ) -> tuple[IntArray[AnyDimension], IntArray[AnyDimension], IntArray[AnyDimension]]:
         """
-        Return the `(i, j, k)` indices of the cell nearest to each of many points.
+        Returns the `(i, j, k)` indices of the cell nearest to each of many points.
 
         :param points: Query points `(x, y, z)` (`z` positive downward), shape `(..., 3)`.
         :param max_distance: Largest allowed distance between a point and its nearest cell.
@@ -2039,7 +2039,7 @@ class Grid:
         self, points: NumberArray[AnyDimension], radius: NumberOrArray[AnyDimension]
     ) -> RaggedRows:
         """
-        Return all cells whose centroids lie within a radius of each of many points.
+        Returns all cells whose centroids lie within a radius of each of many points.
 
         :param points: Query points `(x, y, z)` (`z` positive downward), shape `(..., 3)`.
             Multi-dimensional input is read in C order.
@@ -2070,7 +2070,7 @@ class Grid:
         )
 
     def get_boundary_cell_indices(self) -> IntArray[OneDimension]:
-        """Return sorted indices of all cells that touch at least one boundary face."""
+        """Returns sorted indices of all cells that touch at least one boundary face."""
         owners = self.face_cell_indices[self.boundary_face_indices, 0]
         neighbours = self.face_cell_indices[self.boundary_face_indices, 1]
         all_boundary = np.concatenate([
@@ -2080,14 +2080,14 @@ class Grid:
         return typing.cast("IntArray[OneDimension]", np.unique(all_boundary).astype(np.int32))
 
     def get_interior_cell_indices(self) -> IntArray[OneDimension]:
-        """Return sorted indices of all cells that have no boundary faces."""
+        """Returns sorted indices of all cells that have no boundary faces."""
         boundary_cells = self.get_boundary_cell_indices()
         all_cells = np.arange(self.n_cells, dtype=np.int32)
         return typing.cast("IntArray[OneDimension]", np.setdiff1d(all_cells, boundary_cells))
 
     def is_boundary_cell(self, cell_index: Integer) -> bool:
         """
-        Return whether a given cell is adjacent to at least one boundary face.
+        Returns whether a given cell is adjacent to at least one boundary face.
 
         :param cell_index: 0-based cell index.
         :raises CellNotFoundError: If `cell_index` is out of range.
@@ -2105,7 +2105,7 @@ class Grid:
 
     def is_boundary_face(self, face_index: Integer) -> bool:
         """
-        Return whether a given face is adjacent to at least one boundary cell.
+        Returns whether a given face is adjacent to at least one boundary cell.
 
         :param face_index: 0-based face index.
         :raises IndexError: If `face_index` is out of range.
@@ -2118,7 +2118,7 @@ class Grid:
 
     def is_fault_face(self, face_index: Integer) -> bool:
         """
-        Return whether a given face belongs to fault.
+        Returns whether a given face belongs to fault.
 
         :param face_index: 0-based face index.
         :raises IndexError: If `face_index` is out of range.
@@ -2131,7 +2131,7 @@ class Grid:
 
     def get_fault_face_indices(self, fault_name: str) -> IntArray[OneDimension]:
         """
-        Return face indices for a named fault.
+        Returns face indices for a named fault.
 
         :param fault_name: Fault name as declared in `FAULTS`.
         :raises KeyError: If `fault_name` is not found.
@@ -2149,7 +2149,7 @@ class Grid:
 
     def get_fault_transmissibility_multiplier(self, fault_name: str) -> Number:
         """
-        Return the transmissibility multiplier for a named fault.
+        Returns the transmissibility multiplier for a named fault.
 
         :param fault_name: Fault name as declared in `MULTFLT`.
         :raises KeyError: If `fault_name` is not found.
@@ -2168,7 +2168,7 @@ class Grid:
     def get_cell_center_at(
         self, i: Integer, j: Integer, k: Integer
     ) -> tuple[Number, Number, Number]:
-        """Return the center coordinates `(x, y, z)`, of cell 0-based index `(i, j, k)`."""
+        """Returns the center coordinates `(x, y, z)`, of cell 0-based index `(i, j, k)`."""
         assert self.cell_centroids is not None
         cell_index = self.flat_index(i, j, k)
         return tuple(self.cell_centroids[cell_index])
@@ -2182,7 +2182,7 @@ class Grid:
         max_distance: Number | None = None,
     ) -> tuple[Integer, Integer, Integer]:
         """
-        Return the `(i, j, k)` indices of the cell whose center is nearest to
+        Returns the `(i, j, k)` indices of the cell whose center is nearest to
         `(x, y, z)`.
 
         :param x: Query x-coordinate.
@@ -2206,7 +2206,7 @@ class Grid:
         max_distance: Number | None = None,
     ) -> int:
         """
-        Find the cell whose centroid is nearest to `(x, y, z)`.
+        Finds the cell whose centroid is nearest to `(x, y, z)`.
 
         O(log n) via the pre-built KD-tree.
 
@@ -2228,7 +2228,7 @@ class Grid:
         self, x: Number, y: Number, z: Number, radius: Number
     ) -> IntArray[OneDimension]:
         """
-        Return all cell indices whose centroids fall within `radius` of a point.
+        Returns all cell indices whose centroids fall within `radius` of a point.
 
         :param x: Query x-coordinate.
         :param y: Query y-coordinate.
@@ -2245,7 +2245,7 @@ class Grid:
         net_to_gross: NumberOrArray[OneDimension],
     ) -> NumberArray[OneDimension]:
         """
-        Compute the pore volume for each cell.
+        Computes the pore volume for each cell.
 
         :param porosity: Scalar or shape `(n_cells,)` porosity values in `[0, 1]`.
         :param net_to_gross: Scalar or shape `(n_cells,)` NTG values.
@@ -2258,7 +2258,7 @@ class Grid:
 
     def validate_geometry(self) -> None:
         """
-        Validate that all computed geometry values are physically reasonable.
+        Validates that all computed geometry values are physically reasonable.
 
         :raises InvalidVolumeError: If any active cell volume is <= 0.
         :raises InvalidFaceAreaError: If any face area is negative.
@@ -2300,7 +2300,7 @@ class Grid:
         **kwargs: typing.Any,
     ) -> Self:
         """
-        Build a `Grid` from a parsed `DeckFile`.
+        Builds a `Grid` from a parsed `DeckFile`.
 
         Detects the grid format (corner-point via `COORD`/`ZCORN` or Cartesian
         via `DX`/`DY`/`DZ`) and delegates to the appropriate factory.
@@ -2337,7 +2337,7 @@ class Grid:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `Grid` expressed in the target unit system.
+        Returns a new `Grid` expressed in the target unit system.
 
         Coordinates, volumes and explicit NNC transmissibilities are rescaled. If the grid is
         already in the target unit system, the same object is returned.

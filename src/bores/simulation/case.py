@@ -162,7 +162,7 @@ class SimulationCase:
     @property
     def unit_system(self) -> UnitSystem:
         """
-        The simulation case's unit system.
+        Returns the simulation case's unit system.
 
         :returns: The case's unit system.
         """
@@ -171,7 +171,7 @@ class SimulationCase:
     @property
     def workspace(self) -> SimulationWorkspace:
         """
-        The simulation case's workspace, building it on first access.
+        Returns the simulation case's workspace, building it on first access.
 
         :returns: The case's `SimulationWorkspace`.
         """
@@ -479,7 +479,7 @@ def check_deck_requirements(
     phases: Phases | None = None,
 ) -> None:
     """
-    Check that the deck has what every stage still to be loaded from it cannot do without.
+    Checks that the deck has what every stage still to be loaded from it cannot do without.
 
     Loading the grid, saturation functions and rock parses large arrays and tables, so a deck
     that lacks (say) its `EQUIL` would otherwise only be reported after all of that work. This
@@ -805,7 +805,7 @@ def load_case(
     if regions is None:
         try:
             print("Loading regions")
-            # Decks write 0 as the region of inactive cells, which Eclipse ignores.
+            # Decks write 0 as the region of inactive cells, which are ignored.
             active = (
                 grid.cell_statuses != int(CellStatus.INACTIVE)
                 if grid.cell_statuses is not None

@@ -572,7 +572,7 @@ DEFAULT_KEYWORDS = frozenset({
 
 class DeckFile:
     """
-    A parsed Eclipse deck (*.DATA / *.GRDECL) file.
+    A parsed deck (*.DATA / *.GRDECL) file.
 
     Comment-stripped, `INCLUDE`-resolved text plus a registry of `bores.deck.keywords.base.Keyword`
     objects, exposed through `get`.
@@ -633,7 +633,7 @@ class DeckFile:
         strict: bool = False,
     ) -> None:
         """
-        Initialize the deck file.
+        Initializes the deck file.
 
         :param source: A file path, raw deck text `str`, or raw deck
             `bytes`. Filesystem paths and `Path` objects are read from
@@ -702,7 +702,7 @@ class DeckFile:
         strict: bool = False,
     ) -> Self:
         """
-        Parse raw deck text. Unlike the plain constructor this never treats `text` as a path, even
+        Parses raw deck text. Unlike the plain constructor this never treats `text` as a path, even
         when it is a single line (such as `"METRIC"`).
 
         `INCLUDE` directives cannot be followed from raw text; see `strict`.
@@ -734,7 +734,7 @@ class DeckFile:
         strict: bool = False,
     ) -> Self:
         """
-        Parse a deck file. `INCLUDE` directives are resolved relative to the file's directory.
+        Parses a deck file. `INCLUDE` directives are resolved relative to the file's directory.
 
         :param path: Path of the file.
         :param keywords: See `DeckFile`.
@@ -764,7 +764,7 @@ class DeckFile:
         strict: bool = False,
     ) -> Self:
         """
-        Parse raw deck bytes. `INCLUDE` directives cannot be followed from bytes; see `strict`.
+        Parses raw deck bytes. `INCLUDE` directives cannot be followed from bytes; see `strict`.
 
         :param data: The encoded deck text.
         :param keywords: See `DeckFile`.
@@ -783,7 +783,7 @@ class DeckFile:
     @property
     def report_times(self) -> list[float]:
         """
-        Every report time the deck asks for, in the deck's own time unit (days for `FIELD` and
+        Returns every report time the deck asks for, in the deck's own time unit (days for `FIELD` and
         `METRIC`, hours for `LAB`, seconds for `SI`): `0.0`, each entry of every `TSTEP` and each
         date of every `DATES`, sorted and without repeats. The last one is where the deck's
         schedule ends.
@@ -792,7 +792,7 @@ class DeckFile:
 
     def _resolve_dimensions(self) -> GridDimensions | None:
         """
-        Resolve grid extent from `SPECGRID` (preferred) or `DIMENS`.
+        Resolves grid extent from `SPECGRID` (preferred) or `DIMENS`.
 
         If both are present and disagree, `SPECGRID` is used and the conflict is reported
         (an error when `strict`).
@@ -832,9 +832,9 @@ class DeckFile:
 
     def _resolve_unit_system(self) -> UnitSystem | None:
         """
-        Resolve the unit system from the `RUNSPEC` unit keywords.
+        Resolves the unit system from the `RUNSPEC` unit keywords.
 
-        Eclipse decks declare exactly one of `FIELD`, `METRIC`, or `LAB` (`SI` is also recognised
+        Decks declare exactly one of `FIELD`, `METRIC`, or `LAB` (`SI` is also recognised
         as a BORES extension). When none is present (e.g. a standalone PVT or relperm include
         file), returns `None`. When several are present the deck is contradicting itself: that is
         reported (an error when `strict`) and, if parsing carries on, the first of `METRIC`,
@@ -876,7 +876,7 @@ class DeckFile:
         }
 
     def _resolve_operations(self) -> None:
-        """(Re-)resolve the `BOX` / operator records, which depend on the grid dimensions."""
+        """Returns (Re-)resolve the `BOX` / operator records, which depend on the grid dimensions."""
         self._operations = (
             resolve_operations(self._deck, self.dimensions, array_info=self._array_info())
             if self.dimensions is not None
@@ -890,13 +890,13 @@ class DeckFile:
 
     @property
     def deck(self) -> Deck:
-        """The underlying scanned `bores.deck.core.Deck`."""
+        """Returns the underlying scanned `bores.deck.core.Deck`."""
         return self._deck
 
     @property
     def keywords(self) -> list[str]:
         """
-        Return every unique keyword in the deck, in file order, including
+        Returns every unique keyword in the deck, in file order, including
         keywords with no record of their own that are nonetheless resolvable
         because an operator (`EQUALS`/`ADD`/`MULTIPLY`/`COPY`/`MAXVALUE`/
         `MINVALUE`) targets them (e.g. `DZ` set purely via `EQUALS`).
@@ -910,7 +910,7 @@ class DeckFile:
 
     def _register_tracer_keywords(self) -> None:
         """
-        Register the `TVDPF<name>` keyword of every tracer concentration table in the deck.
+        Registers the `TVDPF<name>` keyword of every tracer concentration table in the deck.
 
         The tracer name is part of the keyword, so no fixed list of them can cover every deck.
         A keyword that is already registered, such as one passed in `keywords`, is kept.
@@ -922,7 +922,7 @@ class DeckFile:
 
     def add_keywords(self, *keywords: Keyword[typing.Any]) -> None:
         """
-        Register additional keywords (or override existing ones by name).
+        Registers additional keywords (or override existing ones by name).
 
         Clears any cached value for a keyword name that is being replaced. Registering a grid
         dimension keyword (`SPECGRID` / `DIMENS`), or an array keyword that a `COPY` reads from,
@@ -958,7 +958,7 @@ class DeckFile:
 
     def has(self, k: str | Keyword[typing.Any], /) -> bool:
         """
-        Return whether `k` occurs anywhere in the deck. Either as an
+        Returns whether `k` occurs anywhere in the deck. Either as an
         explicit record of its own, or as the target of a `BOX`/`EQUALS`/
         `ADD`/`MULTIPLY`/`COPY`/`MAXVALUE`/`MINVALUE` operator record.
 
@@ -971,7 +971,7 @@ class DeckFile:
 
     def has_many(self, *ks: str | Keyword[typing.Any]) -> dict[str, bool]:
         """
-        Return, for each of `ks`, whether it occurs in the deck, as `has` would answer it.
+        Returns, for each of `ks`, whether it occurs in the deck, as `has` would answer it.
 
         This is the cheap way to check up front which of the keywords a loader needs are there:
         one lookup per name against the index built when the deck was scanned (plus the set of
@@ -995,12 +995,12 @@ class DeckFile:
         }
 
     def has_any(self, *ks: str | Keyword[typing.Any]) -> bool:
-        """Return whether at least one of `ks` occurs in the deck, as `has` would answer it."""
+        """Returns whether at least one of `ks` occurs in the deck, as `has` would answer it."""
         return any(self.has(k) for k in ks)
 
     def missing(self, *ks: str | Keyword[typing.Any]) -> list[str]:
         """
-        Return the names among `ks` that do not occur in the deck, in the order given.
+        Returns the names among `ks` that do not occur in the deck, in the order given.
 
         :param ks: Keyword names (case-insensitive) or `Keyword` objects.
         :returns: Upper-cased names of the absent keywords. Empty when every one is present.
@@ -1017,7 +1017,7 @@ class DeckFile:
         self, k: str | Keyword[typing.Any], /, *, use_cache: bool = False
     ) -> typing.Any | None:
         """
-        Parse and return the value of keyword `k`.
+        Parses and returns the value of keyword `k`.
 
         :param k: Keyword `k`, case-insensitive or a `Keyword` object (never cached if `Keyword` object).
         :param use_cache: Whether to read/write the per-`DeckFile`
@@ -1080,7 +1080,7 @@ class DeckFile:
 
     def get_shared(self, k: str, /) -> typing.Any | None:
         """
-        Parse keyword `k` once and return that same value on every later call.
+        Parses keyword `k` once and returns that same value on every later call.
 
         Meant for loaders that read the same keyword more than once, whether over many regions
         or across separate stages that each read the wells. Unlike `get(use_cache=True)`, nothing

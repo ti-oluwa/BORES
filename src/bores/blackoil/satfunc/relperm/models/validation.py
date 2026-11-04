@@ -19,7 +19,7 @@ def validate_analytical_relperm_parameters(
     exponents: dict[str, Number] | None = None,
 ) -> None:
     """
-    Check the parameters of an analytical three-phase relative permeability model.
+    Checks the parameters of an analytical three-phase relative permeability model.
 
     Only clearly invalid values are rejected. An endpoint relative permeability of zero would
     divide by zero when the two-phase curves are combined, an exponent that is not positive does

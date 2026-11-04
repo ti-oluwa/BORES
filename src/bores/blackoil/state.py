@@ -58,7 +58,7 @@ class BlackOilModelState(Serializable):
 
     @property
     def unit_system(self) -> UnitSystem:
-        """Unit system shared by reservoir and wells."""
+        """Returns unit system shared by reservoir and wells."""
         return self.reservoir.unit_system
 
     def convert(
@@ -69,7 +69,7 @@ class BlackOilModelState(Serializable):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Convert the reservoir, well state, and simulation time to *target*.
+        Converts the reservoir, well state, and simulation time to *target*.
 
         :param target: Target unit system.
         :param table: Optional custom conversion table.
@@ -205,7 +205,7 @@ def load_model_state(
     dtype: npt.DTypeLike = None,
 ) -> BlackOilModelState:
     """
-    Load a `BlackOilModelState` snapshot from a running simulation's workspace.
+    Loads a `BlackOilModelState` snapshot from a running simulation's workspace.
 
     :param model: The original rich model `compiled_model` was compiled
         from. Supplies `wells.wells` (each well's own `Well`/`Perforation`

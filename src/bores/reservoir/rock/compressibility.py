@@ -63,7 +63,7 @@ def build_piecewise_coefficients(
     method: InterpolationMethod,
 ) -> NumberArray[TwoDimensions]:
     """
-    Piecewise cubic coefficients of a pressure-indexed column.
+    Returns piecewise cubic coefficients of a pressure-indexed column.
 
     Piece `i` covers `pressures[i]..pressures[i + 1]` and equals
     `c[0, i]*x³ + c[1, i]*x² + c[2, i]*x + c[3, i]` with `x = P - pressures[i]`. The linear
@@ -95,7 +95,7 @@ def evaluate_piecewise_table(
     out: NumberArray[OneDimension],
 ) -> None:
     """
-    Evaluate a column from `build_piecewise_coefficients` (or its derivative) at every
+    Evaluates a column from `build_piecewise_coefficients` (or its derivative) at every
     pressure in `query`, writing into `out`. Callable from jitted code.
 
     Outside the table the value continues along the end-point slope and the derivative is
@@ -172,7 +172,7 @@ class RockCompressibility:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `RockCompressibility` with all quantities rescaled
+        Returns a new `RockCompressibility` with all quantities rescaled
         to *target*.
 
         Conversion factors are sourced from `get_conversion_factors`.
@@ -238,7 +238,7 @@ class RockCompressibilityTable(StoreSerializable):
         validate: bool = True,
     ) -> None:
         """
-        Build the rock compressibility table from raw pressure and multiplier arrays.
+        Builds the rock compressibility table from raw pressure and multiplier arrays.
 
         :param pressures: 1-D array of pressures, strictly increasing.
             Units must match `unit_system`.
@@ -296,7 +296,7 @@ class RockCompressibilityTable(StoreSerializable):
         )
 
     def _validate(self) -> None:
-        """Run physical-consistency checks on the table arrays."""
+        """Runs physical-consistency checks on the table arrays."""
         if len(self.pressures) < 2:
             raise ValidationError(
                 "Rock compressibility table requires at least 2 pressure points; "
@@ -334,7 +334,7 @@ class RockCompressibilityTable(StoreSerializable):
             )
 
     def _build_interpolants(self) -> None:
-        """Build the piecewise-cubic coefficients of both multiplier columns."""
+        """Builds the piecewise-cubic coefficients of both multiplier columns."""
         self.pore_volume_coefficients = build_piecewise_coefficients(
             pressures=self.pressures,
             values=self.pore_volume_multipliers,
@@ -355,7 +355,7 @@ class RockCompressibilityTable(StoreSerializable):
         lower_bound: Number | None = None,
     ) -> TableResult[NDimension]:
         """
-        Evaluate one column (or its derivative) at `pressure`.
+        Evaluates one column (or its derivative) at `pressure`.
 
         :param coefficients: This column's piecewise coefficients.
         :param pressure: Scalar or array of pressures in `self.unit_system`.
@@ -379,7 +379,7 @@ class RockCompressibilityTable(StoreSerializable):
 
     def pore_volume_multiplier(self, pressure: TableQuery[NDimension]) -> TableResult[NDimension]:
         """
-        Return the pore-volume multiplier at `pressure`.
+        Returns the pore-volume multiplier at `pressure`.
 
         `PV_mult(P) = PV(P) / PV(P_ref)`, dimensionless. Outside the table range the
         multiplier continues along the end-point slope, so its derivative is the end-point
@@ -396,7 +396,7 @@ class RockCompressibilityTable(StoreSerializable):
         self, pressure: TableQuery[NDimension]
     ) -> TableResult[NDimension]:
         """
-        Return `∂(PV_mult)/∂P` at `pressure`, exactly consistent with `pore_volume_multiplier`.
+        Returns `∂(PV_mult)/∂P` at `pressure`, exactly consistent with `pore_volume_multiplier`.
 
         Units: `[unit_system pressure]⁻¹` - e.g. psi⁻¹ in `FIELD`.
 
@@ -412,7 +412,7 @@ class RockCompressibilityTable(StoreSerializable):
         self, pressure: TableQuery[NDimension]
     ) -> TableResult[NDimension]:
         """
-        Return the transmissibility multiplier at `pressure`.
+        Returns the transmissibility multiplier at `pressure`.
 
         `T_mult(P) = T(P) / T(P_ref)`, dimensionless. For tables built from `ROCK` this
         is 1.0 everywhere. The result is never negative.
@@ -428,7 +428,7 @@ class RockCompressibilityTable(StoreSerializable):
         self, pressure: TableQuery[NDimension]
     ) -> TableResult[NDimension]:
         """
-        Return `∂(T_mult)/∂P` at `pressure`, exactly consistent with `transmissibility_multiplier`.
+        Returns `∂(T_mult)/∂P` at `pressure`, exactly consistent with `transmissibility_multiplier`.
 
         Units: `[unit_system pressure]⁻¹`.
 
@@ -469,7 +469,7 @@ class RockCompressibilityTable(StoreSerializable):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `RockCompressibilityTable` with pressures rescaled to
+        Returns a new `RockCompressibilityTable` with pressures rescaled to
         *target*.
 
         Multiplier values are dimensionless and are copied unchanged. Only
@@ -500,7 +500,7 @@ class RockCompressibilityTable(StoreSerializable):
         unit_system: UnitSystem | None = None,
     ) -> RockCompressibility:
         """
-        Derive per-cell `RockCompressibility` scalars from this table.
+        Derives per-cell `RockCompressibility` scalars from this table.
 
         Evaluates an effective compressibility at each cell's current
         pressure using:
@@ -590,7 +590,7 @@ class RockCompressibilityTable(StoreSerializable):
         dtype: npt.DTypeLike = None,
     ) -> Self:
         """
-        Build a `RockCompressibilityTable` from a `ROCK` scalar record.
+        Builds a `RockCompressibilityTable` from a `ROCK` scalar record.
 
         Synthesises a pressure table using the standard exponential model:
 
@@ -675,11 +675,11 @@ class RockCompressibilityTable(StoreSerializable):
         dtype: npt.DTypeLike = None,
     ) -> Self:
         """
-        Build a `RockCompressibilityTable` from parsed `ROCKTAB` records.
+        Builds a `RockCompressibilityTable` from parsed `ROCKTAB` records.
 
         `ROCKTAB` provides explicit `(pressure, pore_volume_multiplier, transmissibility_multiplier)` rows.
         The reference pressure is the pressure where `pore_volume_multiplier` is closest to
-        1.0 - per the Eclipse spec, exactly one row should have `pore_volume_multiplier = 1`.
+        1.0 - exactly one row should have `pore_volume_multiplier = 1`.
 
         :param rocktab_records: List of row dicts with keys `"pressure"`,
             `"pore_volume_multiplier"`, and optionally `"transmissibility_multiplier"` (default 1.0 when absent).
@@ -745,7 +745,7 @@ class RockCompressibilityTable(StoreSerializable):
         dtype: npt.DTypeLike = None,
     ) -> Self:
         """
-        Build a `RockCompressibilityTable` for one region from a `DeckFile`.
+        Builds a `RockCompressibilityTable` for one region from a `DeckFile`.
 
         `ROCKTAB` takes precedence over `ROCK`. The unit system is read from
         `deck_file.unit_system` automatically.
@@ -811,7 +811,7 @@ class RockCompressibilityTables(StoreSerializable):
         unit_system: UnitSystem | None = None,
     ) -> None:
         """
-        Build a `RockCompressibilityTables` from a pre-built regions dict.
+        Builds a `RockCompressibilityTables` from a pre-built regions dict.
 
         :param tables: Mapping from 1-based `ROCKNUM` index to table.
         :param unit_system: Expected unit system for all tables. If omitted,
@@ -841,12 +841,12 @@ class RockCompressibilityTables(StoreSerializable):
 
     @property
     def n_regions(self) -> int:
-        """Number of rock compressibility regions."""
+        """Returns the number of rock compressibility regions."""
         return len(self.tables)
 
     def region(self, rocknum: Integer) -> RockCompressibilityTable:
         """
-        Return the `RockCompressibilityTable` for a given 1-based region index.
+        Returns the `RockCompressibilityTable` for a given 1-based region index.
 
         :param rocknum: 1-based `ROCKNUM` region index.
         :returns: `RockCompressibilityTable` for that region.
@@ -863,7 +863,7 @@ class RockCompressibilityTables(StoreSerializable):
     @classmethod
     def from_one(cls, table: RockCompressibilityTable) -> Self:
         """
-        Wrap a single `RockCompressibilityTable` as region 1.
+        Wraps a single `RockCompressibilityTable` as region 1.
 
         :param table: `RockCompressibilityTable` instance.
         :returns: `RockCompressibilityTables` with one entry at key 1.
@@ -879,7 +879,7 @@ class RockCompressibilityTables(StoreSerializable):
         dtype: npt.DTypeLike = None,
     ) -> Self:
         """
-        Build all rock compressibility regions' tables from a `DeckFile`.
+        Builds all rock compressibility regions' tables from a `DeckFile`.
 
         `ROCKTAB` takes precedence over `ROCK` for any region that has a
         `ROCKTAB` entry; remaining regions fall back to `ROCK`. The unit
@@ -911,7 +911,7 @@ class RockCompressibilityTables(StoreSerializable):
         rock_region: IntCellArray | None = None,
     ) -> CellArray:
         """
-        Evaluate one table quantity per cell, each cell using its own region's table.
+        Evaluates one table quantity per cell, each cell using its own region's table.
 
         :param quantity: Which `RockCompressibilityTable` method to evaluate.
         :param pressure: Shape `(n_cells,)` pressures in the tables' unit system.
@@ -937,7 +937,7 @@ class RockCompressibilityTables(StoreSerializable):
         dtype: npt.DTypeLike = None,
     ) -> RockCompressibility:
         """
-        Derive per-cell `RockCompressibility` from this `RockCompressibilityTables`.
+        Derives per-cell `RockCompressibility` from this `RockCompressibilityTables`.
 
         For each cell, evaluates the effective compressibility at the cell's
         current pressure from its region's table:
@@ -1009,7 +1009,7 @@ class RockCompressibilityTables(StoreSerializable):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `RockCompressibilityTables` with all region tables converted to *target*.
+        Returns a new `RockCompressibilityTables` with all region tables converted to *target*.
 
         :param target: Target `UnitSystem`.
         :returns: New `RockCompressibilityTables` in *target* units.
@@ -1057,7 +1057,7 @@ def load_rock_compressibility_tables(
     dtype: npt.DTypeLike = None,
 ) -> dict[Integer, RockCompressibilityTable]:
     """
-    Build a `{rocknum: RockCompressibilityTable}` dict from a `DeckFile`.
+    Builds a `{rocknum: RockCompressibilityTable}` dict from a `DeckFile`.
 
     `ROCKTAB` takes precedence over `ROCK`. For any region that has a
     `ROCKTAB` entry, `ROCKTAB` is used; remaining regions fall back to

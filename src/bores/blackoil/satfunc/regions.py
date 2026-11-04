@@ -67,7 +67,7 @@ class SatFunc:
         hysteresis: HysteresisOptions | None = None,
     ) -> None:
         """
-        Build a `SatFunc` from a pre-built regional tables dict.
+        Builds a `SatFunc` from a pre-built regional tables dict.
 
         :param tables: Mapping from 1-based SATNUM index to `SatFuncTables`.
         :param unit_system: Expected unit system for all tables. If omitted,
@@ -102,12 +102,12 @@ class SatFunc:
 
     @property
     def n_regions(self) -> int:
-        """Number of saturation function regions."""
+        """Returns the number of saturation function regions."""
         return len(self.tables)
 
     def validate_region_groups(self, region_groups: RegionGroups) -> None:
         """
-        Check that every region number the cells use has a table.
+        Checks that every region number the cells use has a table.
 
         `SATNUM` and `IMBNUM` both pick from the same table list, so each must lie in
         `1..n_regions`. Doing this once when the run is set up reports a bad region number
@@ -140,7 +140,7 @@ class SatFunc:
 
     def region(self, satnum: Integer) -> SatFuncTables:
         """
-        Return the `SatFuncTables` for a given 1-based region index.
+        Returns the `SatFuncTables` for a given 1-based region index.
 
         :param satnum: 1-based `SATNUM` region index.
         :returns: `SatFuncTables` for that region.
@@ -156,7 +156,7 @@ class SatFunc:
 
     def resolve(self, saturation_region: Integer, imbibition_region: Integer = 0) -> SatFuncTables:
         """
-        Return the tables a cell with these regions is evaluated with.
+        Returns the tables a cell with these regions is evaluated with.
 
         Without hysteresis they are the drainage tables of `saturation_region`. With it they are
         those paired with the imbibition tables of `imbibition_region`, built the first time a pair
@@ -190,7 +190,7 @@ class SatFunc:
 
     def get_hysteresis_roles(self) -> tuple[Boolean, Boolean]:
         """
-        Get the direction each phase imbibes in, which the saturation history tracker takes.
+        Gets the direction each phase imbibes in, which the saturation history tracker takes.
 
         Read from the tables, which all have to agree, since one tracker serves the whole run.
         The wetting phase `EHYSTR` names is only checked against them, with a warning when it
@@ -231,7 +231,7 @@ class SatFunc:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `SatFunc` with capillary pressure in every
+        Returns a new `SatFunc` with capillary pressure in every
         region rescaled to *target*.
 
         Relative permeability is dimensionless and is unaffected.
@@ -267,9 +267,9 @@ class SatFunc:
         relperm_model: RelPermHysteresisModel | None = None,
     ) -> Self:
         """
-        Build all saturation function regions from a parsed `DeckFile`.
+        Builds all saturation function regions from a parsed `DeckFile`.
 
-        Detects which Eclipse saturation-function keyword family is present
+        Detects which saturation-function keyword family is present
         (`SWOF`/`SGOF` or `SWFN`/`SGFN` + `SOF2`/`SOF3`) and builds one
         `SatFuncTables` per `SATNUM` region, each combining a `ThreePhaseRelPermTable`
         and (when available) a `ThreePhaseCapillaryPressureTable`.

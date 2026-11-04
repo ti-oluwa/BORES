@@ -80,7 +80,7 @@ def make_registry_serializer(
     key_attr: str = "__type__",
 ) -> typing.Callable[[SerializableT], dict[str, typing.Any]]:
     """
-    Create a serializer function for a registry of `Serializable` subclasses.
+    Creates a serializer function for a registry of `Serializable` subclasses.
 
     :param registry: The registry of `Serializable` subclasses.
     :param key_attr: The attribute used as the registry key.
@@ -103,7 +103,7 @@ def make_registry_deserializer(
     registry: dict[str, type[SerializableT]],
 ) -> typing.Callable[[typing.Mapping[str, typing.Any]], SerializableT]:
     """
-    Create a deserializer function for a registry of `Serializable` subclasses.
+    Creates a deserializer function for a registry of `Serializable` subclasses.
 
     :param registry: The registry of `Serializable` subclasses.
     :param key_attr: The attribute used as the registry key.

@@ -1,7 +1,7 @@
 """
 Corner-point (pillar) grid factory.
 
-Builds a `bores.grids.base.Grid` from ECLIPSE-style `COORD` / `ZCORN` / `ACTNUM` arrays.
+Builds a `bores.grids.base.Grid` from deck-style `COORD` / `ZCORN` / `ACTNUM` arrays.
 
 **Coordinate convention**: z-axis positive downward.
 
@@ -146,7 +146,7 @@ def make_corner_point_grid(
     negative_z_transmissibility_multipliers: NumberArray[OneDimension] | None = None,
 ) -> Grid:
     """
-    Build a corner-point (pillar) grid from ECLIPSE-style COORD / ZCORN / ACTNUM arrays.
+    Builds a corner-point (pillar) grid from deck-style COORD / ZCORN / ACTNUM arrays.
 
     :param coord: Shape `(NY+1, NX+1, 6)` pillar array.
     :param zcorn: Shape `(NZ*2, NY*2, NX*2)` depth array.
@@ -253,7 +253,7 @@ def make_corner_point_grid(
 
     inverted_cell_policy = InvertedCellPolicy(on_inverted_cells)
     # A `MAPAXES` whose Y axis points against the right-handed direction (the usual
-    # Eclipse convention, with Y pointing south) reflects the grid when it is applied.
+    # deck convention, with Y pointing south) reflects the grid when it is applied.
     mirrored = (
         resolved_map_axes is not None
         and apply_map_axes
@@ -373,7 +373,7 @@ def get_map_axes_xy_inverse(
     xy: NumberArray[TwoDimensions], map_axes: MapAxes
 ) -> NumberArray[TwoDimensions]:
     """
-    Map `(x, y)` pairs from map space back to local (pre-`MAPAXES`) space.
+    Maps `(x, y)` pairs from map space back to local (pre-`MAPAXES`) space.
 
     Uses `numpy.linalg.inv` rather than assuming `rotation_matrix` is
     orthonormal (it's built from two independently-normalised axis
@@ -391,7 +391,7 @@ def get_map_axes_xy_inverse(
 
 def apply_map_axes_to_coord(coord: CoordArray, map_axes: MapAxes) -> CoordArray:
     """
-    Rotate, translate and, when the Y axis points the other way, reflect a COORD pillar
+    Rotates, translate and, when the Y axis points the other way, reflect a COORD pillar
     array's `(x, y)` pairs into map space.
 
     Applied once, before pillar interpolation, so the vertex coordinates, cell centroids
@@ -422,7 +422,7 @@ def _interpolate_pillar_point(
     z: Number,
 ) -> NumberArray[OneDimension]:
     """
-    Interpolate an (x, y, z) position along a pillar at depth `z`, extrapolating along the
+    Interpolates an (x, y, z) position along a pillar at depth `z`, extrapolating along the
     pillar line when `z` lies outside its stored extent.
 
     :param pillar_top: Shape `(3,)` - `[x, y, z]` of pillar top.
@@ -451,7 +451,7 @@ def compute_cell_corner_coordinates(
     zcorn: ZCornArray,
 ) -> NumberArray[ThreeDimensions]:
     """
-    Compute the eight corner coordinates of each given cell.
+    Computes the eight corner coordinates of each given cell.
 
     Corner layout (index 0..7):
 
@@ -542,7 +542,7 @@ def is_cell_pinched(
     pinch_tolerance: Number,
 ) -> Boolean:
     """
-    Return `True` if the cell's average thickness is at or below `pinch_tolerance`, or if
+    Returns `True` if the cell's average thickness is at or below `pinch_tolerance`, or if
     its top and bottom share the same four vertices.
 
     :param vtk_vertices: Shape `(8,)` global vertex indices in VTK hexahedron order.
@@ -590,7 +590,7 @@ MINIMUM_RELATIVE_OVERLAP_AREA: Number = 1e-6
 @numba.njit(cache=True)
 def compute_polygon_signed_area(polygon: NumberArray[TwoDimensions]) -> Float:
     """
-    Signed area of a 2-D polygon (positive when the vertices run counter-clockwise).
+    Returns signed area of a 2-D polygon (positive when the vertices run counter-clockwise).
 
     :param polygon: Shape `(n, 2)` polygon vertices.
     :returns: Signed area.
@@ -612,7 +612,7 @@ def clip_half_plane(
     keep_inside: Boolean,
 ) -> NumberArray[TwoDimensions]:
     """
-    Clip a convex 2-D polygon against the half-plane to the left (or right) of the line `a -> b`.
+    Clips a convex 2-D polygon against the half-plane to the left (or right) of the line `a -> b`.
 
     :param polygon: Shape `(n, 2)` polygon vertices.
     :param a: Shape `(2,)` first point of the line.
@@ -663,7 +663,7 @@ def clip_convex_polygon(
     clip: NumberArray[TwoDimensions],
 ) -> NumberArray[TwoDimensions]:
     """
-    Intersect two convex 2-D polygons (Sutherland-Hodgman clipping).
+    Intersects two convex 2-D polygons (Sutherland-Hodgman clipping).
 
     :param subject: Shape `(n, 2)` polygon to clip, vertices counter-clockwise.
     :param clip: Shape `(m, 2)` convex clipping polygon, vertices counter-clockwise.
@@ -689,7 +689,7 @@ def subtract_convex_polygon_pieces(
     clip: NumberArray[TwoDimensions],
 ) -> list[NumberArray[TwoDimensions]]:
     """
-    Remove a convex polygon from a convex 2-D polygon.
+    Removes a convex polygon from a convex 2-D polygon.
 
     :param subject: Shape `(n, 2)` polygon to cut, vertices counter-clockwise.
     :param clip: Shape `(m, 2)` convex polygon to remove, vertices counter-clockwise.
@@ -715,7 +715,7 @@ def subtract_convex_polygon(
     clip: NumberArray[TwoDimensions],
 ) -> list[NumberArray[TwoDimensions]]:
     """
-    Remove a convex polygon from a convex 2-D polygon.
+    Removes a convex polygon from a convex 2-D polygon.
 
     :param subject: Shape `(n, 2)` polygon to cut, vertices counter-clockwise.
     :param clip: Shape `(m, 2)` convex polygon to remove, vertices counter-clockwise.
@@ -740,7 +740,7 @@ def _get_point_on_pillar_pair(
     z_value: Number,
 ) -> NumberArray[OneDimension]:
     """
-    Point at fractional position `s_value` between two pillars, at depth `z_value`.
+    Returns point at fractional position `s_value` between two pillars, at depth `z_value`.
 
     :param pillar_1: Shape `(6,)` top and bottom points of the first pillar.
     :param pillar_2: Shape `(6,)` top and bottom points of the second pillar.
@@ -827,7 +827,7 @@ def register_cell_faces(
     Integer,
 ]:
     """
-    Register the six faces of every active cell, matching faces shared by two cells through
+    Registers the six faces of every active cell, matching faces shared by two cells through
     their sorted vertex ids with an open-addressing hash table.
 
     The first cell to claim a face owns it, the second becomes its neighbour and any later
@@ -991,7 +991,7 @@ def _kernel_failure(
     IntArray[OneDimension],
     BooleanArray[OneDimension],
 ]:
-    """Empty kernel result carrying a non-zero `status`."""
+    """Returns empty kernel result carrying a non-zero `status`."""
     return (  # type: ignore[return-value]
         status,
         0,
@@ -1013,7 +1013,7 @@ def build_lateral_polygon(
     polygon: NumberArray[TwoDimensions],
 ) -> None:
     """
-    Write the polygon of a lateral face in the `(s, depth)` plane spanned by its two pillars,
+    Writes the polygon of a lateral face in the `(s, depth)` plane spanned by its two pillars,
     wound counter-clockwise, into `polygon`.
 
     :param corner_coordinates: Shape `(n_cells, 8, 3)` corner coordinates of every cell.
@@ -1225,7 +1225,7 @@ def polygon_to_pillar_points(
     points: NumberArray[TwoDimensions],
 ) -> Integer:
     """
-    Lift a polygon in the `(s, depth)` plane of a pillar pair to 3-D points.
+    Lifts a polygon in the `(s, depth)` plane of a pillar pair to 3-D points.
 
     :param polygon: Shape `(n, 2)` polygon.
     :param coord: Shape `(NY+1, NX+1, 6)` pillar array.
@@ -1263,7 +1263,7 @@ def append_face(
     n_stored_points: Integer,
 ) -> tuple[Integer, Integer]:
     """
-    Append a face to the new-face buffers, winding its points so that the normal points out
+    Appends a face to the new-face buffers, winding its points so that the normal points out
     of the owner cell.
 
     :param points: Shape `(>= n_points, 3)` face points.
@@ -1825,7 +1825,7 @@ def connect_unmatched_faces(
     dimensions: tuple[Integer, Integer, Integer],
 ) -> NewFaces:
     """
-    Connect cells whose facing faces do not share all four vertices.
+    Connects cells whose facing faces do not share all four vertices.
 
     **Lateral faces.** Across a fault the neighbouring column's cells may sit at a different
     depth, so one lateral face can face several cells of the next column, each only partly. The
@@ -1920,7 +1920,7 @@ def find_distinct_points(
     IntArray[OneDimension],
 ]:
     """
-    Group points that fall on the same `tolerance`-sized lattice cell, using a hash table.
+    Groups points that fall on the same `tolerance`-sized lattice cell, using a hash table.
 
     Points are quantised as `round(coordinate / tolerance)` (half to even) and two points
     belong to the same group when all three quantised coordinates are equal.
@@ -1974,7 +1974,7 @@ def merge_coincident_points(
     tolerance: Number,
 ) -> tuple[IntArray[OneDimension], IntArray[OneDimension]]:
     """
-    Merge points that quantise to the same `tolerance` lattice cell.
+    Merges points that quantise to the same `tolerance` lattice cell.
 
     Equivalent to `np.unique(np.round(points / tolerance).astype(np.int64), axis=0,
     return_index=True, return_inverse=True)` but without sorting every point: points are
@@ -2022,7 +2022,7 @@ def compute_corner_point_geometry(
     NumberArray[TwoDimensions],
 ]:
     """
-    Compute 3-D corner coordinates and build face arrays for a corner-point grid.
+    Computes 3-D corner coordinates and builds face arrays for a corner-point grid.
 
     :param coord: Shape `(NY+1, NX+1, 6)`.
     :param zcorn: Shape `(NZ*2, NY*2, NX*2)`.
@@ -2203,7 +2203,7 @@ def resolve_fault_face_indices(
     face_cell_indices: IntArray[TwoDimensions],
 ) -> dict[str, IntArray[OneDimension]]:
     """
-    Resolve `FaultRecord` IJK ranges to unstructured face index arrays.
+    Resolves `FaultRecord` IJK ranges to unstructured face index arrays.
 
     For `X` and `Y` records every face between a cell and the cells of the adjacent column
     is part of the fault, since an offset fault faces several cells across it. Cell pairs that
@@ -2245,7 +2245,7 @@ def resolve_fault_face_indices(
         return result
 
     def face_of_pairs(cells_a: IntArray[OneDimension], cells_b: IntArray[OneDimension]):
-        """Face index of each cell pair, `-1` where the pair shares no face."""
+        """Returns face index of each cell pair, `-1` where the pair shares no face."""
         keys = np.minimum(cells_a, cells_b) * n_cells + np.maximum(cells_a, cells_b)
         position = np.searchsorted(unique_keys, keys)
         position[position >= len(unique_keys)] = 0
@@ -2349,7 +2349,7 @@ def _accumulate_pillars(
     pillar_count: IntArray[TwoDimensions],
 ) -> None:
     """
-    Accumulate per-pillar XY positions and Z extents from cell bounding boxes.
+    Accumulates per-pillar XY positions and Z extents from cell bounding boxes.
 
     :param cell_min_xyz: Shape `(n_cells, 3)` bounding-box minima.
     :param cell_max_xyz: Shape `(n_cells, 3)` bounding-box maxima.
@@ -2402,7 +2402,7 @@ def _fill_zcorn(
     zcorn: ZCornArray,
 ) -> None:
     """
-    Fill `ZCORN` array from per-cell Z bounding-box extents.
+    Fills `ZCORN` array from per-cell Z bounding-box extents.
 
     :param cell_min_xyz: Shape `(n_cells, 3)` bounding-box minima.
     :param cell_max_xyz: Shape `(n_cells, 3)` bounding-box maxima.
@@ -2436,7 +2436,7 @@ def compute_oriented_cell_volumes(
     mirrored: bool,
 ) -> tuple[NumberArray[OneDimension], NumberArray[TwoDimensions]]:
     """
-    Cell volumes and centroids with the sign of the unmirrored `(x, y, depth)` frame.
+    Returns cell volumes and centroids with the sign of the unmirrored `(x, y, depth)` frame.
 
     A cell is inverted when its volume is negative. Volumes within round-off of zero are
     set to exactly zero.
@@ -2469,7 +2469,7 @@ def compute_hex_volumes_and_centroids(
     vertex_coordinates: NumberArray[TwoDimensions],
 ) -> tuple[NumberArray[OneDimension], NumberArray[TwoDimensions]]:
     """
-    Compute signed hexahedral cell volumes and centroids from the trilinear cell map.
+    Computes signed hexahedral cell volumes and centroids from the trilinear cell map.
 
     A corner-point cell has bilinear faces, so its volume is the integral of the Jacobian
     determinant of the trilinear map from the unit cube. The determinant is quadratic in each
@@ -2583,7 +2583,7 @@ def rederive_corner_point_arrays(
     grid: Grid,
 ) -> tuple[CoordArray, ZCornArray, Integer, Integer, Integer]:
     """
-    Reconstruct approximate `COORD` and `ZCORN` arrays from a `Grid`.
+    Reconstructs approximate `COORD` and `ZCORN` arrays from a `Grid`.
 
     The reconstruction uses each cell's AABB. Pillars are assumed straight
     and vertical, so this is lossy for grids with lateral pillar displacement.

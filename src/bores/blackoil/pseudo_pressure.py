@@ -37,7 +37,7 @@ def compute_gas_pseudo_pressure(
     reference_pressure: Number = 14.7,
 ) -> Number:
     """
-    Compute the gas pseudo-pressure using Al-Hussainy real-gas potential.
+    Computes the gas pseudo-pressure using Al-Hussainy real-gas potential.
 
     The pseudo-pressure is defined as:
         m(P) = ∫[P_ref to P] (2*P' / (μ(P') * Z(P'))) dP'
@@ -72,7 +72,7 @@ def compute_gas_pseudo_pressure(
 
     # Define the integrand: 2*P / (μ*z_factor)
     def integrand(P: Number) -> Number:
-        """Integrand for pseudo-pressure calculation."""
+        """Returns integrand for pseudo-pressure calculation."""
         # Clamp pressure to avoid extrapolation issues
         clamped_P = max(1.0, P)  # Don't go below 1 psi
 
@@ -170,7 +170,7 @@ def _supports_vectorization(
     viscosity_func: typing.Callable[[NumberOrArray[NDimension]], NumberOrArray[NDimension]],
 ) -> bool:
     """
-    Check if both Z-factor and viscosity functions support vectorized operations.
+    Checks if both Z-factor and viscosity functions support vectorized operations.
 
     :param z_factor_func: Z-factor function
     :param viscosity_func: Viscosity function
@@ -189,7 +189,7 @@ def compute_pseudo_pressures_vectorized(
     dtype: npt.DTypeLike = None,
 ) -> NumberArray[NDimension]:
     """
-    Build entire pseudo-pressure table values using vectorized operations.
+    Builds entire pseudo-pressure table values using vectorized operations.
 
     This is much faster than computing each point individually because:
     - Single vectorized call to Z(P_array) and μ(P_array)
@@ -276,7 +276,7 @@ def compute_pseudo_pressures_scalar(
     dtype: npt.DTypeLike = None,
 ) -> NumberArray[NDimension]:
     """
-    Build pseudo-pressure table values using threaded scalar computation.
+    Builds pseudo-pressure table values using threaded scalar computation.
 
     Uses `ThreadPoolExecutor` to parallelize individual integrations.
 
@@ -309,7 +309,7 @@ def compute_pseudo_pressures(
     dtype: npt.DTypeLike = None,
 ) -> NumberArray[NDimension]:
     """
-    Build pseudo-pressure table values with automatic vectorization detection.
+    Builds pseudo-pressure table values with automatic vectorization detection.
 
     If both z_factor_func and viscosity_func have `_supports_arrays=True`,
     uses fast vectorized computation. Otherwise uses threaded scalar computation.
@@ -362,7 +362,7 @@ def build_pchip_interpolants_from_points(
     dtype: npt.DTypeLike = np.float64,
 ) -> tuple[PchipInterpolator, PchipInterpolator]:
     """
-    Build a PCHIP interp (and its analytical derivative) from arbitrary
+    Builds a PCHIP interp (and its analytical derivative) from arbitrary
     monotonically increasing x-coordinates and corresponding values.
 
     When `number_of_base_points > 0` and the raw knot count is smaller than
@@ -504,7 +504,7 @@ class PseudoPressureTable:
         unit_system: UnitSystem = UnitSystem.FIELD,
     ):
         """
-        Build pseudo-pressure lookup table.
+        Builds pseudo-pressure lookup table.
 
         **Function-based mode** (compute from correlations):
 
@@ -639,7 +639,7 @@ class PseudoPressureTable:
 
     def query(self, pressure: NumberOrArray[NDimension]) -> NumberOrArray[NDimension]:
         """
-        Interpolate pseudo-pressure at given pressure.
+        Interpolates pseudo-pressure at given pressure.
 
         Forward interpolation: pressure to pseudo-pressure.
 
@@ -663,7 +663,7 @@ class PseudoPressureTable:
 
     def inverse(self, pseudo_pressure: NumberOrArray[NDimension]) -> NumberOrArray[NDimension]:
         """
-        Inverse interpolate pressure at given pseudo-pressure.
+        Returns inverse interpolate pressure at given pseudo-pressure.
 
         Uses numerical inversion of the PCHIP interp (via Brent's method)
         to guarantee consistency with `interpolate`.
@@ -715,7 +715,7 @@ class PseudoPressureTable:
 
     def gradient(self, pressure: NumberOrArray[NDimension]) -> NumberOrArray[NDimension]:
         """
-        Evaluate dm/dP from the stored analytical PCHIP derivative.
+        Evaluates dm/dP from the stored analytical PCHIP derivative.
 
         This is the integrand 2P/(μZ) evaluated consistently with the fitted
         curve rather than from the raw functions, so it is available in both
@@ -750,7 +750,7 @@ class PseudoPressureTable:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `PseudoPressureTable` with pressure and pseudo-pressure axes
+        Returns a new `PseudoPressureTable` with pressure and pseudo-pressure axes
         rescaled to *target*.
 
         :param target: Target `UnitSystem`.
@@ -794,7 +794,7 @@ def build_pseudo_pressure_table(
     cache_key: typing.Hashable | None = None,
 ) -> PseudoPressureTable:
     """
-    Build a gas pseudo-pressure table with optional global caching.
+    Builds a gas pseudo-pressure table with optional global caching.
 
     Creates `PseudoPressureTable` instances with intelligent caching
     to avoid recomputing expensive integrals for identical fluid properties.
@@ -891,7 +891,7 @@ def build_pseudo_pressure_table(
 
 
 def clear_pseudo_pressure_table_cache() -> None:
-    """Clear the global pseudo-pressure table cache to free memory."""
+    """Clears the global pseudo-pressure table cache to free memory."""
     global PSEUDO_PRESSURE_TABLE_CACHE
     with _pseudo_pressure_cache_lock:
         cache_size = len(PSEUDO_PRESSURE_TABLE_CACHE)
@@ -900,7 +900,7 @@ def clear_pseudo_pressure_table_cache() -> None:
 
 
 def get_pseudo_pressure_table_cache_info() -> dict[str, typing.Any]:
-    """Get information about the current cache state."""
+    """Gets information about the current cache state."""
     with _pseudo_pressure_cache_lock:
         return {
             "cache_size": len(PSEUDO_PRESSURE_TABLE_CACHE),

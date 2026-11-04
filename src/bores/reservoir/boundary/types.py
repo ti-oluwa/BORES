@@ -68,7 +68,7 @@ class ConstantFluxBoundary(BoundaryCondition):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `ConstantFluxBoundary` with `flux` rescaled to
+        Returns a new `ConstantFluxBoundary` with `flux` rescaled to
         *target*.
 
         :param target: Target `UnitSystem`.
@@ -83,7 +83,7 @@ class ConstantFluxBoundary(BoundaryCondition):
         return attrs.evolve(self, flux=scale(self.flux, flux_factor), unit_system=target)
 
     def is_no_flow(self) -> bool:
-        """Return `True` if `flux == 0` (sealed boundary)."""
+        """Returns `True` if `flux == 0` (sealed boundary)."""
         return self.flux == 0
 
 
@@ -138,7 +138,7 @@ class ConstantPressureBoundary(BoundaryCondition):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `ConstantPressureBoundary` with `pressure` rescaled
+        Returns a new `ConstantPressureBoundary` with `pressure` rescaled
         to *target*.
 
         :param target: Target `UnitSystem`.
@@ -210,7 +210,7 @@ class ProductivityIndexBoundary(BoundaryCondition):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `ProductivityIndexBoundary` with `pressure_boundary`
+        Returns a new `ProductivityIndexBoundary` with `pressure_boundary`
         and `productivity_index` rescaled to *target*.
 
         :param target: Target `UnitSystem`.

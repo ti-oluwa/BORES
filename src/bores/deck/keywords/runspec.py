@@ -1,7 +1,7 @@
 """
 RUNSPEC section keyword implementations.
 
-The `RUNSPEC` section is the first section in an Eclipse black-oil data file.
+The `RUNSPEC` section is the first section in a black-oil data file.
 It declares the run's meta-data: grid dimensions, active phases, unit system,
 table-sizing hints, well/group dimensioning, and the simulation start date.
 """
@@ -61,7 +61,7 @@ OIL = FlagKeyword("OIL")
 """
 `OIL` - enable the oil phase.
 
-When present, Eclipse activates oil conservation equations and expects
+When present, the oil conservation equations are activated and the PROPS section must provide
 oil PVT data in the PROPS section.
 """
 
@@ -69,7 +69,7 @@ GAS = FlagKeyword("GAS")
 """
 `GAS` - enable the gas phase.
 
-When present, Eclipse activates gas conservation equations and expects
+When present, the gas conservation equations are activated and the PROPS section must provide
 gas PVT data in the PROPS section.
 """
 
@@ -77,7 +77,7 @@ WATER = FlagKeyword("WATER")
 """
 `WATER` - enable the water phase.
 
-When present, Eclipse activates water conservation equations and expects
+When present, the water conservation equations are activated and the PROPS section must provide
 water PVT data (`PVTW`) in the PROPS section.
 """
 
@@ -129,7 +129,7 @@ instead of being read from PVT tables. The gas phase is CO2 and the aqueous phas
 
 CO2STOR = FlagKeyword("CO2STOR")
 """
-`CO2STOR` - the OPM Flow spelling of `CO2STORE`, with the same meaning.
+`CO2STOR` - the alternative spelling of `CO2STORE`, with the same meaning.
 """
 
 FIELD = FlagKeyword("FIELD")
@@ -168,7 +168,7 @@ UNIFIN = FlagKeyword("UNIFIN")
 """
 `UNIFIN` - read unified (single-file) restart input.
 
-When present, Eclipse reads restart data from a single `.UNRST`
+When present, restart data is read from a single `.UNRST`
 file rather than individual step files.
 """
 
@@ -176,7 +176,7 @@ UNIFOUT = FlagKeyword("UNIFOUT")
 """
 `UNIFOUT` - write unified (single-file) restart output.
 
-When present, Eclipse writes restart data to a single `.UNRST`
+When present, restart data is written to a single `.UNRST`
 file rather than individual step files.
 """
 
@@ -186,7 +186,7 @@ class TitleKeyword(Keyword[str]):
     The `TITLE` keyword: a single free-text line immediately after the
     keyword name, terminated by end-of-line (no `/` required).
 
-    Eclipse allows the title to contain any characters; it is used as a
+    A deck allows the title to contain any characters; it is used as a
     label on simulator output. The parsed value is the stripped raw text
     of the body, or an empty string if the keyword has no body.
     """
@@ -217,7 +217,7 @@ TITLE = TitleKeyword()
 `TITLE` - free-text simulation case label.
 
 The value on the line immediately following `TITLE` is used as a
-header on Eclipse print-file output. No `/` terminator is required.
+header on print-file output. No `/` terminator is required.
 
 `parse` returns the stripped title string, or `None` if the
 keyword is absent.
@@ -271,7 +271,7 @@ TABDIMS = RecordKeyword[int | str](
 `TABDIMS NTSFUN NTPVT NSSFUN NPPVT NTFIP NRPVT ... /`
 - saturation/PVT table dimensioning.
 
-Provides upper bounds used by Eclipse to pre-allocate table memory.
+Provides upper bounds used to pre-allocate table memory.
 All parameters are optional with simulator defaults.
 
 Fields:
@@ -462,7 +462,7 @@ SATOPTS = OptionListKeyword("SATOPTS")
 
 `parse` returns the options written, upper-cased, e.g. `["HYSTER"]` for `SATOPTS HYSTER /` (see
 `EHYSTR` for the hysteresis controls). Options are not checked against a list, since the set
-Eclipse accepts depends on its version.
+accepted depends on the simulator version.
 """
 
 EQLOPTS = OptionListKeyword("EQLOPTS")
@@ -471,7 +471,7 @@ EQLOPTS = OptionListKeyword("EQLOPTS")
 `MOBILE`, `IRREVERS`).
 
 `parse` returns the options written, upper-cased, e.g. `["THPRES"]` for `EQLOPTS 'THPRES' /`.
-Options are not checked against a list, since the set Eclipse accepts depends on its version.
+Options are not checked against a list, since the accepted set depends on the simulator version.
 """
 
 VFPIDIMS = RecordKeyword[int](

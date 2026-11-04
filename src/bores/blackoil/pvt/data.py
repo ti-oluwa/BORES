@@ -30,7 +30,7 @@ __all__ = ["PVTData", "PVTDataSet"]
 
 def get_stb_to_volume_factor(unit_system: UnitSystem) -> Number:
     """
-    Return the factor that reconciles gas-oil ratio units with density units.
+    Returns the factor that reconciles gas-oil ratio units with density units.
 
     In FIELD units `Rs` and `Rsw` (SCF/STB) and `Rv` (STB/SCF) are per barrel of
     stock-tank liquid, while densities are per cubic foot. Mass balances such as
@@ -69,7 +69,7 @@ class PVTData(StoreSerializable):
 
     **Primary (interpolated) properties**
 
-    These are the only quantities read directly from Eclipse deck keywords:
+    These are the only quantities read directly from deck keywords:
 
     - Oil: `formation_volume_factor_table` (Bo), `viscosity_table` (μo),
       `solution_gor_table` (Rs).
@@ -254,7 +254,7 @@ class PVTData(StoreSerializable):
 
     For oil, slice `k` is the undersaturated branch at the `k`-th Rs node on the common pressure
     axis; oil with an Rs between two nodes blends the two bounding branches linearly in Rs at the
-    same pressure, as Eclipse does.
+    same pressure.
     """
 
     undersaturated_viscosity_table: NumberArray[ThreeDimensions] | None = None
@@ -283,7 +283,7 @@ class PVTData(StoreSerializable):
         self.ensure_dtype(self.dtype, force=True)
 
     def _check_phase_fields(self) -> None:
-        """Warn about fields that do not apply to the phase, and require the Rs axis of a 2-D Pb table."""
+        """Warns about fields that do not apply to the phase, and require the Rs axis of a 2-D Pb table."""
         phase = typing.cast(FluidPhase, self.phase)
         # `stacklevel=4`: this method -> `__attrs_post_init__` -> attrs' `__init__` -> the caller
         if phase == FluidPhase.GAS and self.solution_gor_table is not None:
@@ -330,7 +330,7 @@ class PVTData(StoreSerializable):
 
     def ensure_dtype(self, dtype: npt.DTypeLike = None, force: bool = True) -> None:
         """
-        Cast every array field to `dtype`, in place (the instance is frozen, so this
+        Casts every array field to `dtype`, in place (the instance is frozen, so this
         bypasses attrs).
 
         :param dtype: Target dtype. Defaults to the active `BORES` precision.
@@ -356,7 +356,7 @@ class PVTData(StoreSerializable):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `PVTData` with all dimensional quantities rescaled to *target*.
+        Returns a new `PVTData` with all dimensional quantities rescaled to *target*.
 
         Pressure and temperature axes, bubble/dew point pressures, densities, FVFs,
         viscosities, compressibilities, and the gas-oil / oil-gas ratios (Rs, Rv, Rsw)
@@ -485,7 +485,7 @@ class PVTDataSet(StoreSerializable):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `PVTDataSet` with all pvt data converted to *target*.
+        Returns a new `PVTDataSet` with all pvt data converted to *target*.
 
         :param target: Target `UnitSystem`.
         :param table: Optional custom conversion table; `None` uses the default.

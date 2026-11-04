@@ -81,12 +81,12 @@ class WellTubing(typing.NamedTuple):
 
     @property
     def uses_tubing_fluid_table(self) -> bool:
-        """Whether the tubing head pressure is found by marching up the tubing with fluid tables."""
+        """Checks whether the tubing head pressure is found by marching up the tubing with fluid tables."""
         return self.wellbore is not None and self.wellbore.tubing_fluid_table is not None
 
     @property
     def needs_surface_sample(self) -> bool:
-        """Whether the tubing head pressure needs the surface fluid properties of a sample."""
+        """Checks whether the tubing head pressure needs the surface fluid properties of a sample."""
         return (
             self.vfp_table is None
             and self.wellbore is not None
@@ -95,7 +95,7 @@ class WellTubing(typing.NamedTuple):
 
     @property
     def can_evaluate_thp(self) -> bool:
-        """Whether a THP can be found from a BHP, by a correlation or a VFP table."""
+        """Checks whether a THP can be found from a BHP, by a correlation or a VFP table."""
         return self.wellbore is not None or self.vfp_table is not None
 
 

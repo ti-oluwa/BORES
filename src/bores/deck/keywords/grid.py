@@ -111,7 +111,7 @@ def read_exact_values(
     body: str, *, name: str, expected: int, describe: str
 ) -> FloatArray[OneDimension]:
     """
-    Read the numbers of a record body (`N*value` groups included) into one flat array of exactly
+    Reads the numbers of a record body (`N*value` groups included) into one flat array of exactly
     `expected` values.
 
     The numbers are parsed in bulk, with no list of token strings in between, so a large
@@ -143,7 +143,7 @@ class CoordKeyword(Keyword[FloatArray[ThreeDimensions]]):
     """
     `COORD` - corner-point pillar array.
 
-    :returns: Shape `(ny+1, nx+1, 6)` float64 array in Eclipse pillar order
+    :returns: Shape `(ny+1, nx+1, 6)` float64 array in pillar order
         (j outermost, i innermost). Each pillar stores
         `[x_top, y_top, z_top, x_bottom, y_bottom, z_bottom]`.
         Access pattern: `coord[j, i, :]` for cell `(i, j, :)`.
@@ -177,7 +177,7 @@ class CoordKeyword(Keyword[FloatArray[ThreeDimensions]]):
             describe=f"a {dims.nx}x{dims.ny} grid",
         )
 
-        # Eclipse writes the coord array (pillars) with coord6 varying fastest
+        # A deck writes the coord array (pillars) with coord6 varying fastest
         # then i, and j (slowest), hence the corresponding C-order shape is (ny + 1, nx +1, 6)
         # Access: coord[j, i, :] == [x_top, y_top, z_top, x_bottom, y_bottom, z_bottom]
         return values.reshape(dims.ny + 1, dims.nx + 1, 6)
@@ -187,7 +187,7 @@ class ZCornKeyword(Keyword[FloatArray[ThreeDimensions]]):
     """
     `ZCORN` - corner-point depth array.
 
-    :returns: Shape `(nz*2, ny*2, nx*2)` float64 array matching Eclipse
+    :returns: Shape `(nz*2, ny*2, nx*2)` float64 array in deck order
         Fortran write order (i fastest, k slowest).
         Access pattern: `zcorn[2*k, 2*j, 2*i]` for cell `(i, j, k)`.
     """
@@ -217,7 +217,7 @@ class ZCornKeyword(Keyword[FloatArray[ThreeDimensions]]):
             describe=f"a {dims.nx}x{dims.ny}x{dims.nz} grid",
         )
 
-        # Eclipse writes `ZCORN` in Fortran order with i varying fastest, then j, then k varying slowest,
+        # A deck writes `ZCORN` in Fortran order with i varying fastest, then j, then k varying slowest,
         # hence in the corresponding shape in C-order with i-fastest is (nz*2, ny*2, nx*2)
         # Access: zcorn[2*k, 2*j, 2*i] for cell (i, j, k)
         return values.reshape(dims.nz * 2, dims.ny * 2, dims.nx * 2)
@@ -386,7 +386,7 @@ MINPV = RecordKeyword[float](
 `MINPV VALUE /` - minimum pore volume for a cell to be active.
 
 A cell whose pore volume is below `minpv` is made inactive. The value is a reservoir volume in
-the deck's unit system. The default, `1e-6`, is OPM's metric (reservoir m3) value.
+the deck's unit system. The default, `1e-6`, is the metric (reservoir m3) value.
 """
 
 NEWTRAN = FlagKeyword("NEWTRAN")
@@ -463,7 +463,7 @@ TOPS = ArrayKeyword(
 (one value per column `nx * ny`, or all `nx * ny * nz` cells for
 non-uniform decks).
 
-In practice Eclipse accepts either `nx * ny` values (applying the same
+In practice a deck accepts either `nx * ny` values (applying the same
 top to every layer) or `nx * ny * nz` values. The array length
 reported by `ArrayKeyword.parse` matches `n_cells`;
 callers should slice `[:nx*ny]` to get the top-layer tops.
@@ -485,7 +485,7 @@ class VectorDimsKeyword(Keyword[list[np.float64]]):
     per-column or per-layer cell sizes along one structured axis, given
     once rather than once-per-cell.
 
-    Eclipse expects exactly `nx` (`DXV`), `ny` (`DYV`), or `nz` (`DZV`)
+    A deck gives exactly `nx` (`DXV`), `ny` (`DYV`), or `nz` (`DZV`)
     values; every cell in that row/column/layer shares the corresponding
     entry. This is a non-uniform-Cartesian-grid shorthand for `DX` /
     `DY` / `DZ`, used instead of (never alongside) the full per-cell
@@ -570,7 +570,7 @@ Values are `1` (active) or `0` (inactive). Stored as int32.
 Default is `1` (all cells active) when the keyword is absent.
 
 Note:
-    A missing `ACTNUM` keyword means all cells are active in Eclipse,
+    A missing `ACTNUM` keyword means all cells are active,
     so `ArrayKeyword.parse` returns `None` (keyword
     absent) rather than an all-ones array. Callers should treat
     `None` as "all active".
@@ -634,7 +634,7 @@ class MultFLTKeyword(RepeatedRecordKeyword[np.float64 | str]):
     """
     `MULTFLT 'NAME' MULTIPLIER / ... /` - per-fault transmissibility multiplier.
 
-    Eclipse semantics: when a fault name appears in multiple records
+    Deck semantics: when a fault name appears in multiple records
     across one or more `MULTFLT` blocks, the *last* value wins.
     `parse` enforces this automatically.
 
@@ -690,7 +690,7 @@ FAULTS = RepeatedRecordKeyword[str | int](
 
 Multiple `FAULTS` keyword blocks in the same deck are concatenated in
 file order. Indices `I1`/`I2`/`J1`/`J2`/`K1`/`K2` are
-*1-based* Eclipse IJK indices, passed through unchanged to the caller.
+*1-based* deck IJK indices, passed through unchanged to the caller.
 
 Fields:
 
@@ -699,7 +699,7 @@ Fields:
 - `j1` / `j2`: first and last cell of the fault in the j direction.
 - `k1` / `k2`: first and last cell of the fault in the k direction.
 - `face`: the face of the cells the fault lies on, one of `X`, `X-`, `Y`, `Y-`,
-    `Z`, `Z-`. The Eclipse spellings `I`, `J`, `K` (and a trailing `+`) are
+    `Z`, `Z-`. The deck spellings `I`, `J`, `K` (and a trailing `+`) are
     accepted and returned as the matching `X`, `Y`, `Z` form.
 
 :raises DeckParseError: If `FACE` is not a valid face.
@@ -709,7 +709,7 @@ MULTFLT = MultFLTKeyword()
 """
 `MULTFLT 'NAME' MULTIPLIER / ... /` - per-fault transmissibility multiplier.
 
-Eclipse semantics: when a fault name appears in multiple records
+Deck semantics: when a fault name appears in multiple records
 across one or more `MULTFLT` blocks, the *last* value wins.
 `parse` enforces this automatically.
 

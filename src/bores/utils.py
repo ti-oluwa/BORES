@@ -74,7 +74,7 @@ def is_array(x: typing.Any) -> bool:
 @numba.njit(cache=True)
 def _apply_mask_2d(a: npt.NDArray, mask: npt.NDArray, values: npt.NDArray) -> None:
     """
-    Apply values (scalar or array) to a 2D array where mask is True (in-place).
+    Applies values (scalar or array) to a 2D array where mask is True (in-place).
 
     :param a: 2D array to modify
     :param mask: 2D boolean mask with same shape as a
@@ -90,7 +90,7 @@ def _apply_mask_2d(a: npt.NDArray, mask: npt.NDArray, values: npt.NDArray) -> No
 @numba.njit(cache=True)
 def _apply_mask_3d(a: npt.NDArray, mask: npt.NDArray, values: npt.NDArray) -> None:
     """
-    Apply values (scalar or array) to a 3D array where mask is True (in-place).
+    Applies values (scalar or array) to a 3D array where mask is True (in-place).
 
     :param a: 3D array to modify
     :param mask: 3D boolean mask with same shape as a
@@ -107,7 +107,7 @@ def _apply_mask_3d(a: npt.NDArray, mask: npt.NDArray, values: npt.NDArray) -> No
 @numba.njit(cache=True)
 def _apply_mask_nd(a: npt.NDArray, mask: npt.NDArray, values: npt.NDArray) -> None:
     """
-    Apply values (scalar or array) to an N-dimensional array where mask is True (in-place).
+    Applies values (scalar or array) to an N-dimensional array where mask is True (in-place).
 
     :param a: N-dimensional array to modify
     :param mask: N-dimensional boolean mask with same shape as a
@@ -139,7 +139,7 @@ def apply_mask(a: npt.NDArray, mask: npt.NDArray, values: npt.NDArray) -> None:
 @numba.njit(cache=True)
 def _get_mask_2d(a: npt.NDArray, mask: npt.NDArray, fill_value: float):
     """
-    Return a new 2D array where values are kept if mask is True, otherwise replaced with fill_value.
+    Returns a new 2D array where values are kept if mask is True, otherwise replaced with fill_value.
 
     :param a: 2D input array
     :param mask: 2D boolean mask with same shape as a
@@ -160,7 +160,7 @@ def _get_mask_2d(a: npt.NDArray, mask: npt.NDArray, fill_value: float):
 @numba.njit(cache=True)
 def _get_mask_3d(a: npt.NDArray, mask: npt.NDArray, fill_value: float):
     """
-    Return a new 3D array where values are kept if mask is True, otherwise replaced with fill_value.
+    Returns a new 3D array where values are kept if mask is True, otherwise replaced with fill_value.
 
     :param a: 3D input array
     :param mask: 3D boolean mask with same shape as a
@@ -182,7 +182,7 @@ def _get_mask_3d(a: npt.NDArray, mask: npt.NDArray, fill_value: float):
 @numba.njit(cache=True)
 def _get_mask_nd(a: npt.NDArray, mask: npt.NDArray, fill_value: float):
     """
-    Return a new N-dimensional array where values are kept if mask is True, otherwise replaced with fill_value.
+    Returns a new N-dimensional array where values are kept if mask is True, otherwise replaced with fill_value.
 
     :param a: N-dimensional input array
     :param mask: N-dimensional boolean mask with same shape as a
@@ -386,7 +386,7 @@ def scale(a: None, /, factor: Number) -> None: ...
 def scale(
     a: NumberOrArray[NDimension] | None, /, factor: Number
 ) -> NumberOrArray[NDimension] | None:
-    """Return `a * factor` as the same dtype; identity when factor == 1."""
+    """Returns `a * factor` as the same dtype; identity when factor == 1."""
     if a is None or factor == 1:
         return a
 
@@ -405,7 +405,7 @@ def scale_non_empty(a: None, /, factor: Number) -> None: ...
 def scale_non_empty(
     a: NumberOrArray[NDimension] | None, /, factor: Number
 ) -> NumberOrArray[NDimension] | None:
-    """Scale only if the optional array or float is non-empty and truthy."""
+    """Scales only if the optional array or float is non-empty and truthy."""
     if isinstance(a, np.ndarray):
         non_empty = a is not None and a.size > 0
     else:
@@ -424,7 +424,7 @@ def scale_and_offset(a: None, /, factor: Number, offset: Number) -> None: ...
 def scale_and_offset(
     a: NumberOrArray[NDimension] | None, /, factor: Number, offset: Number
 ) -> NumberOrArray[NDimension] | None:
-    """Return `a * factor + offset` as the same dtype; identity when trivial."""
+    """Returns `a * factor + offset` as the same dtype; identity when trivial."""
     if a is None or (factor == 1 and offset == 0):
         return a
 
@@ -436,7 +436,7 @@ def scale_and_offset(
 
 def get_hydrostatic_gradient_factor(unit_system: UnitSystem) -> float:
     """
-    Return the hydrostatic pressure-gradient constant for the given unit
+    Returns the hydrostatic pressure-gradient constant for the given unit
     system.
 
     The returned value is the multiplier used to convert density into the
@@ -459,7 +459,7 @@ TIME_UNIT_PER_UNIT_SYSTEM: dict[UnitSystem, typing.Literal["days", "hours", "sec
     UnitSystem.LAB: "hours",
     UnitSystem.SI: "seconds",
 }
-"""Elapsed-time unit each `UnitSystem` uses, following Eclipse/OPM convention."""
+"""Elapsed-time unit each `UnitSystem` uses, matching the deck convention."""
 
 
 def get_current_date(
@@ -511,7 +511,7 @@ def iterate_regions(
     region_index: IntCellArray,
 ) -> typing.Iterator[tuple[np.integer[typing.Any], RegionSelector]]:
     """
-    Yield each region number with the cells it selects.
+    Yields each region number with the cells it selects.
 
     A grid with a single region selects all of its cells with a slice, which reads and writes
     the cell arrays in place, where a mask would copy every array it selects.
@@ -529,7 +529,7 @@ def iterate_regions(
 
 @numba.njit(cache=True)
 def any_positive(values: NumberArray[OneDimension]) -> Boolean:
-    """Whether any value is above zero, stopping at the first that is, with no temporary array."""
+    """Checks whether any value is above zero, stopping at the first that is, with no temporary array."""
     for index in range(values.shape[0]):
         if values[index] > 0.0:
             return True

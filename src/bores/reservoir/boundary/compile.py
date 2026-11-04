@@ -160,7 +160,7 @@ class CompiledAquifers(typing.NamedTuple):
 
     def region_rows(self, *, row: Integer) -> range:
         """
-        One aquifer's own face-row range, without the caller needing to
+        Returns one aquifer's own face-row range, without the caller needing to
         know about `region_offsets`.
 
         :param row: The aquifer's row.
@@ -214,7 +214,7 @@ def compute_constant_flux_values(
     face_areas: NumberArray[OneDimension],
 ) -> NumberArray[OneDimension]:
     """
-    The flux through each face of a `ConstantFluxBoundary` region, according to its `basis`.
+    Returns the flux through each face of a `ConstantFluxBoundary` region, according to its `basis`.
 
     :param condition: The condition, already in the reservoir's unit system.
     :param region_name: The region's name, for error messages.

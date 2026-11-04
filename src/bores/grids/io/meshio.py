@@ -90,7 +90,7 @@ def load_mesh(
     metadata: typing.Mapping[str, typing.Any] | None = None,
 ) -> Grid:
     """
-    Load any mesh format supported by `meshio` from a path or bytes.
+    Loads any mesh format supported by `meshio` from a path or bytes.
 
     This is the most general import path. `meshio` supports over 20
     formats including Abaqus, Ansys, OpenFOAM, MEDIT, etc.
@@ -144,7 +144,7 @@ def dump_mesh(
     cell_data: dict[str, np.ndarray] | None = None,
 ) -> bytes | None:
     """
-    Write a `bores.grids.base.Grid` to any format supported by `meshio`.
+    Writes a `bores.grids.base.Grid` to any format supported by `meshio`.
 
     This is the most general export path. `meshio` supports over 20
     formats including Abaqus, Ansys, MEDIT, OpenFOAM, etc.
@@ -182,7 +182,7 @@ def _load(
     unit_system: UnitSystem | None = None,
 ) -> Grid:
     """
-    Load any `meshio`-supported mesh and convert to a
+    Loads any `meshio`-supported mesh and converts to a
     `bores.grids.base.Grid`.
 
     :param source: Path or bytes source.
@@ -235,7 +235,7 @@ def _mesh_to_grid(
     unit_system: UnitSystem | None = None,
 ) -> Grid:
     """
-    Convert a `meshio.Mesh` object to a `bores.grids.base.Grid`.
+    Converts a `meshio.Mesh` object to a `bores.grids.base.Grid`.
 
     Only volumetric (3-D) cell types are retained. Quadratic elements are
     reduced to their linear counterparts by discarding mid-side nodes.
@@ -287,7 +287,7 @@ def _mesh_to_grid(
 
 def _get_vtk_cell_nodes(grid: Grid, cell: Integer) -> tuple[str, IntArray[OneDimension]] | None:
     """
-    Get vertex indices of a cell in VTK node order, if the cell is a hexahedron or a tetrahedron.
+    Gets vertex indices of a cell in VTK node order, if the cell is a hexahedron or a tetrahedron.
 
     A hexahedron has six quadrilateral faces over eight vertices, each shared by three faces;
     a tetrahedron has four triangular faces over four vertices.
@@ -340,7 +340,7 @@ def _get_vtk_cell_nodes(grid: Grid, cell: Integer) -> tuple[str, IntArray[OneDim
 
 def _has_cells_needing_polyhedra(grid: Grid) -> bool:
     """
-    Whether any active cell is neither a hexahedron nor a tetrahedron.
+    Checks whether any active cell is neither a hexahedron nor a tetrahedron.
 
     :param grid: Source grid.
     :returns: `True` if the grid cannot be written exactly with standard VTK cell types.
@@ -354,7 +354,7 @@ def _has_cells_needing_polyhedra(grid: Grid) -> bool:
 
 def _grid_to_mesh(grid: Grid, *, cell_data: dict[str, npt.NDArray] | None) -> typing.Any:
     """
-    Convert a `bores.grids.base.Grid` to a `meshio.Mesh`.
+    Converts a `bores.grids.base.Grid` to a `meshio.Mesh`.
 
     Cells whose faces form a hexahedron or a tetrahedron are exported exactly, sharing the
     grid's own vertices. Any other cell (for example a Voronoi polyhedron, or a hexahedron cut
@@ -454,7 +454,7 @@ def _dump(
     cell_data: dict[str, npt.NDArray] | None,
 ) -> bytes | None:
     """
-    Write a `bores.grids.base.Grid` using `meshio`.
+    Writes a `bores.grids.base.Grid` using `meshio`.
 
     :param grid: Source grid.
     :param destination: File path or `None` to return bytes.

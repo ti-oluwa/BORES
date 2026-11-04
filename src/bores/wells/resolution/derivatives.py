@@ -207,7 +207,7 @@ def evaluate_table_walk(
     pressures: NumberArray[OneDimension],
 ) -> None:
     """
-    As `evaluate_hydraulic_walk`, with the fluids read from the well's tubing fluid table.
+    Returns as `evaluate_hydraulic_walk`, with the fluids read from the well's tubing fluid table.
 
     :param walk: The correlation's `walk_perforation_pressures_from_table`.
     :param setup: How the walk is set up.
@@ -248,7 +248,7 @@ def evaluate_hydrostatic_walk(
     pressures: NumberArray[OneDimension],
 ) -> None:
     """
-    As `evaluate_hydraulic_walk`, for the weight of the fluid between connections alone.
+    Returns as `evaluate_hydraulic_walk`, for the weight of the fluid between connections alone.
 
     :param walk: `walk_hydrostatic_pressures`.
     :param setup: How the walk is set up.
@@ -284,7 +284,7 @@ def evaluate_uniform_walk(
     pressures: NumberArray[OneDimension],
 ) -> None:
     """
-    As `evaluate_hydraulic_walk`, for the reference pressure applied unchanged at every connection.
+    Returns as `evaluate_hydraulic_walk`, for the reference pressure applied unchanged at every connection.
 
     :param walk: Not used.
     :param setup: Not used.
@@ -301,7 +301,7 @@ def evaluate_uniform_walk(
 @numba.njit(cache=True)
 def get_step(value: Number, scale: Number) -> Number:
     """
-    The size of a finite-difference step for a quantity.
+    Returns the size of a finite-difference step for a quantity.
 
     :param value: The quantity's value.
     :param scale: A typical size of the quantity, so a quantity of zero still gets a step.
@@ -621,7 +621,7 @@ def get_segment_drop(
     reference_pressure: Number,
 ) -> Number:
     """
-    The pressure drop of the walk segment that ends at a connection.
+    Returns the pressure drop of the walk segment that ends at a connection.
 
     :param pressures: The pressure the walk gave at each connection.
     :param connection: The connection the segment ends at.

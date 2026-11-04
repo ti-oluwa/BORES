@@ -78,7 +78,7 @@ class PressureDrop(typing.NamedTuple):
 
     @property
     def total(self) -> Number:
-        """The combined pressure drop across the segment."""
+        """Returns the combined pressure drop across the segment."""
         return self.hydrostatic + self.friction + self.acceleration
 
 
@@ -445,7 +445,7 @@ UNIT_SYSTEMS_BY_TAG: tuple[UnitSystem, ...] = tuple(UnitSystem)
 
 def get_gravitational_acceleration(unit_system: UnitSystem) -> Number:
     """
-    Standard gravity in a unit system's length and time units.
+    Returns standard gravity in a unit system's length and time units.
 
     :param unit_system: The unit system to express it in.
     :returns: Acceleration due to gravity.
@@ -747,7 +747,7 @@ def compile_connection_fluids(
 
 def get_hydrostatic_divisor(unit_system: UnitSystem) -> Number:
     """
-    The divisor that turns `density * gravity * length` into a pressure in `unit_system`: the
+    Returns the divisor that turns `density * gravity * length` into a pressure in `unit_system`: the
     product of its gravitational factor and hydrostatic area factor, as the constants are set
     now.
 

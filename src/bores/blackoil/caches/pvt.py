@@ -217,7 +217,7 @@ def compute_pvt_cache(
     gas_solubility_in_water: CellArray | None = None,
 ) -> PVTCache:
     """
-    Build (or refresh, in place) a `PVTCache` from the current cell state.
+    Builds (or refresh, in place) a `PVTCache` from the current cell state.
 
     Groups cells by `pvt_region` (typically a handful of regions, not
     `n_cells` of them) and evaluates each region's `PVTTable`s once per
@@ -524,7 +524,7 @@ def compute_saturation_pressures(
     dtype: npt.DTypeLike | None = None,
 ) -> tuple[CellArray, CellArray]:
     """
-    Bubble-point and dew-point pressure of every cell at the given state, for use as the
+    Returns bubble-point and dew-point pressure of every cell at the given state, for use as the
     frozen saturation pressures of `compute_pvt_cache(freeze_saturation_pressure=True)`.
 
     Evaluate it once at the initial state. The bubble point is `Pb(Rs, T)` from the cell's

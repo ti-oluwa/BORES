@@ -90,7 +90,7 @@ def query_oil_water_curves(
     **kwargs: typing.Any,
 ) -> TwoPhaseRelPerms:
     """
-    Water and oil relative permeabilities of an oil-water table, with their slopes with respect to
+    Returns water and oil relative permeabilities of an oil-water table, with their slopes with respect to
     water saturation.
 
     A two-phase table is queried at the oil-water system's own saturations, `So = 1 - Sw`,
@@ -148,7 +148,7 @@ def query_gas_oil_curves(
     **kwargs: typing.Any,
 ) -> TwoPhaseRelPerms:
     """
-    Oil and gas relative permeabilities of a gas-oil table, with their slopes with respect to gas
+    Returns oil and gas relative permeabilities of a gas-oil table, with their slopes with respect to gas
     saturation.
 
     A two-phase table is queried at the gas-oil system's own saturations, `So = 1 - swc - Sg`,
@@ -303,7 +303,7 @@ class BoundingCurves(typing.NamedTuple):
 
 def uses_tabular_endpoints(table: RelativePermeabilityTable) -> bool:
     """
-    Whether a table's curves have fixed endpoints, so Land's trapped saturation cannot be handed to
+    Checks whether a table's curves have fixed endpoints, so Land's trapped saturation cannot be handed to
     it as an override and its saturation axis has to be rescaled instead.
     """
     return isinstance(table, (TwoPhaseRelPermTable, ThreePhaseRelPermTable))
@@ -416,7 +416,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
 
     def get_oil_water_wetting_phase(self) -> FluidPhase:
         """
-        Return the wetting phase for the oil-water sub-system.
+        Returns the wetting phase for the oil-water sub-system.
 
         :return: `FluidPhase.WATER` for water-wet or `FluidPhase.OIL` for
             oil-wet systems, as reported by the drainage table.
@@ -425,7 +425,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
 
     def get_gas_oil_wetting_phase(self) -> FluidPhase:
         """
-        Return the wetting phase for the gas-oil sub-system.
+        Returns the wetting phase for the gas-oil sub-system.
 
         :return: `FluidPhase.OIL` for oil-wet or `FluidPhase.GAS` for
             gas-wet systems, as reported by the drainage table.
@@ -433,24 +433,24 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         return self.gas_oil_drainage_table.get_gas_oil_wetting_phase()
 
     def get_oil_relperm_endpoint(self) -> Number:
-        """Oil relative permeability endpoint from the primary drainage table."""
+        """Returns oil relative permeability endpoint from the primary drainage table."""
         return self.oil_water_drainage_table.get_oil_relperm_endpoint()
 
     def get_water_relperm_endpoint(self) -> Number:
-        """Water relative permeability endpoint from the primary drainage table."""
+        """Returns water relative permeability endpoint from the primary drainage table."""
         return self.oil_water_drainage_table.get_water_relperm_endpoint()
 
     def get_gas_relperm_endpoint(self) -> Number:
-        """Gas relative permeability endpoint from the primary drainage table."""
+        """Returns gas relative permeability endpoint from the primary drainage table."""
         return self.gas_oil_drainage_table.get_gas_relperm_endpoint()
 
     def get_connate_water_saturation(self) -> Number:
-        """Connate water saturation from the primary drainage table. Hysteresis does not move it."""
+        """Returns connate water saturation from the primary drainage table. Hysteresis does not move it."""
         return self.oil_water_drainage_table.get_connate_water_saturation()
 
     def get_residual_oil_saturation_water(self) -> Number:
         """
-        Residual oil saturation to water flooding that the primary drainage table declares.
+        Returns residual oil saturation to water flooding that the primary drainage table declares.
 
         This is the static value of the table, not the Land-trapped value used while an
         imbibition scan is active.
@@ -459,7 +459,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
 
     def get_residual_oil_saturation_gas(self) -> Number:
         """
-        Residual oil saturation to gas flooding that the primary drainage table declares, taking
+        Returns residual oil saturation to gas flooding that the primary drainage table declares, taking
         the connate water saturation of the system into account.
         """
         return resolve_residual_oil_saturation_gas(
@@ -468,7 +468,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         )
 
     def get_residual_gas_saturation(self) -> Number:
-        """Residual (critical) gas saturation that the primary drainage table declares."""
+        """Returns residual (critical) gas saturation that the primary drainage table declares."""
         return self.gas_oil_drainage_table.get_residual_gas_saturation()
 
     def compute(
@@ -481,7 +481,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         **kwargs: typing.Any,
     ) -> tuple[RelativePermeabilities, RelativePermeabilityDerivatives | None]:
         """
-        Relative permeabilities, and optionally their nine derivatives, in one pass.
+        Returns relative permeabilities, and optionally their nine derivatives, in one pass.
 
         :param water_saturation: Water saturation (fraction) - scalar or array.
         :param oil_saturation: Oil saturation (fraction) - scalar or array.
@@ -508,7 +508,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         min_water_saturation: NumberOrArray[NDimension] | None = None,
     ) -> tuple[ScanInputs, HistoryArrays]:
         """
-        Broadcast, flatten and normalise the saturations and history of one `compute` call.
+        Broadcasts, flatten and normalise the saturations and history of one `compute` call.
 
         :returns: The flat inputs, and the flat saturation history the scan kernel reads.
         """
@@ -635,7 +635,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         with_derivatives: Boolean,
     ) -> tuple[RelativePermeabilities, RelativePermeabilityDerivatives | None]:
         """
-        Blend the bounding curves cell by cell and apply the three-phase mixing rule, in one
+        Blends the bounding curves cell by cell and applies the three-phase mixing rule, in one
         kernel pass, then shape the results like the inputs.
 
         :param inputs: The flat inputs from `prepare_scan_inputs`.
@@ -903,7 +903,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         water_reversal: NumberArray[OneDimension],
     ) -> NumberArray[OneDimension] | None:
         """
-        Land residual oil saturation of the oil-water system for every cell, or `None` when no
+        Returns Land residual oil saturation of the oil-water system for every cell, or `None` when no
         maximum residual oil saturation is configured for it.
         """
         maximum_residual = self.maximum_residual_oil_saturation_water
@@ -931,7 +931,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         gas_reversal: NumberArray[OneDimension],
     ) -> NumberArray[OneDimension] | None:
         """
-        Land residual (trapped) gas saturation for every cell, or `None` when no maximum residual
+        Returns Land residual (trapped) gas saturation for every cell, or `None` when no maximum residual
         gas saturation is configured.
         """
         maximum_residual = self.maximum_residual_gas_saturation
@@ -959,7 +959,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         gas_reversal: NumberArray[OneDimension],
     ) -> NumberArray[OneDimension] | None:
         """
-        Land residual oil saturation of the gas-oil system for every cell, or `None` when no
+        Returns Land residual oil saturation of the gas-oil system for every cell, or `None` when no
         maximum residual oil saturation is configured for it.
         """
         maximum_residual = self.maximum_residual_oil_saturation_gas
@@ -1047,7 +1047,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         **kwargs: typing.Any,
     ) -> RelativePermeabilities:
         """
-        Compute three-phase relative permeabilities with Killough/Land hysteresis.
+        Computes three-phase relative permeabilities with Killough/Land hysteresis.
 
         Without saturation history the result is the primary drainage relative permeability.
 
@@ -1076,7 +1076,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         **kwargs: typing.Any,
     ) -> RelativePermeabilityDerivatives:
         """
-        Compute the nine partial derivatives of the relative permeabilities with
+        Computes the nine partial derivatives of the relative permeabilities with
         Killough/Land hysteresis.
 
         The derivatives with respect to the scanning saturations (Sw for oil-water, Sg for
@@ -1107,7 +1107,7 @@ class HysteresisRelPermTable(RelativePermeabilityTable):
         **kwargs: typing.Any,
     ) -> tuple[RelativePermeabilities, RelativePermeabilityDerivatives]:
         """
-        Compute the relative permeabilities and their derivatives in one pass.
+        Computes the relative permeabilities and their derivatives in one pass.
 
         This evaluates every bounding curve and scanning weight once, where calling `evaluate`
         and `derivatives` separately would do it twice.

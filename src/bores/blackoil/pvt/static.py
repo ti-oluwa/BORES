@@ -20,13 +20,13 @@ __all__ = [
 
 def load_density_records(deck_file: DeckFile) -> list[list[dict[str, Number]]] | None:
     """
-    The stock-tank densities of every PVT region, from `DENSITY` or else `GRAVITY`.
+    Returns the stock-tank densities of every PVT region, from `DENSITY` or else `GRAVITY`.
 
     `DENSITY` gives the densities directly. `GRAVITY` gives them as oil API gravity and water and
     gas specific gravities, so the densities follow from those and the standard water and air
     densities (`c.STANDARD_WATER_DENSITY_IMPERIAL`, `c.STANDARD_AIR_DENSITY_IMPERIAL`). The
     correlations work in field units, so the densities are worked out in them and converted to the
-    deck's unit system. `GRAVITY` is read only when the deck has no `DENSITY`, as in Eclipse.
+    deck's unit system. `GRAVITY` is read only when the deck has no `DENSITY`.
 
     :param deck_file: The deck to read.
     :returns: One list per region holding a single `{"oil": ..., "water": ..., "gas": ...}` row,
@@ -163,7 +163,7 @@ class StaticPVT(Serializable):
     @property
     def oil_specific_gravity(self) -> Number | None:
         """
-        Oil specific gravity relative to fresh water at standard conditions (dimensionless).
+        Returns oil specific gravity relative to fresh water at standard conditions (dimensionless).
         """
         if self.stock_tank_oil_density is None:
             return None
@@ -183,7 +183,7 @@ class StaticPVT(Serializable):
     @property
     def gas_gravity(self) -> Number | None:
         """
-        Gas specific gravity relative to air (dimensionless).
+        Returns gas specific gravity relative to air (dimensionless).
         """
         if self.stock_tank_gas_density is None:
             return None
@@ -201,7 +201,7 @@ class StaticPVT(Serializable):
     @property
     def oil_api_gravity(self) -> Number | None:
         """
-        Oil API gravity (°API), computed as 141.5 / SG - 131.5.
+        Returns oil API gravity (°API), computed as 141.5 / SG - 131.5.
 
         Provided for convenience; redundant with `oil_specific_gravity`.
         """
@@ -213,7 +213,7 @@ class StaticPVT(Serializable):
     @property
     def gas_molecular_weight(self) -> Number | None:
         """
-        Gas molecular weight (g/mol) computed from the gas gravity.
+        Returns gas molecular weight (g/mol) computed from the gas gravity.
         """
         gas_gravity = self.gas_gravity
         if gas_gravity is None:
@@ -229,14 +229,14 @@ class StaticPVT(Serializable):
         salinity: Number = 0.0,
     ) -> Self:
         """
-        Load static PVT properties from a parsed `DeckFile` for a given region.
+        Loads static PVT properties from a parsed `DeckFile` for a given region.
 
         Extracts `DENSITY` and `PVTW` records for the specified PVT region and
         constructs a `StaticPVT` instance with the stock-tank densities and
         water reference properties.
 
         :param deck_file: Parsed `DeckFile` containing `PROPS`-section keywords.
-        :param pvtnum: 1-based PVT region index (matches Eclipse `PVTNUM`). Values below 1
+        :param pvtnum: 1-based PVT region index (matches the deck's `PVTNUM`). Values below 1
             (including the default `0`) select the first region.
         :param salinity: Water salinity in ppm NaCl (default 0).
         :returns: New `StaticPVT` instance populated from deck data.
@@ -303,7 +303,7 @@ class StaticPVT(Serializable):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `StaticPVT` with dimensional quantities rescaled to
+        Returns a new `StaticPVT` with dimensional quantities rescaled to
         *target*.
 
         Unit-independent fields (e.g. `water_salinity`) are copied unchanged.

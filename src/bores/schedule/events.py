@@ -59,7 +59,7 @@ class TimeEvent(Event[ModelT]):
         self, *, start_date: datetime | None = None, unit_system: UnitSystem = UnitSystem.FIELD
     ) -> TimeTargets:
         """
-        Return the time at which this event fires.
+        Returns the time at which this event fires.
 
         :param start_date: The simulation's start date. Unused.
         :param unit_system: Unit system of the run's time. Unused, `at` is already in it.
@@ -98,7 +98,7 @@ class TimeWindowEvent(Event[ModelT]):
         self, *, start_date: datetime | None = None, unit_system: UnitSystem = UnitSystem.FIELD
     ) -> TimeTargets:
         """
-        Return the times at which this window opens and closes.
+        Returns the times at which this window opens and closes.
 
         :param start_date: The simulation's start date. Unused.
         :param unit_system: Unit system of the run's time. Unused, `start` and `end` are already in it.
@@ -154,7 +154,7 @@ class DateEvent(Event[ModelT]):
         self, *, start_date: datetime | None = None, unit_system: UnitSystem = UnitSystem.FIELD
     ) -> TimeTargets:
         """
-        Return the elapsed time at which this date event fires.
+        Returns the elapsed time at which this date event fires.
 
         :param start_date: The simulation's start date. Required.
         :param unit_system: Unit system the elapsed time is expressed in.
@@ -212,7 +212,7 @@ class IntervalEvent(Event[ModelT]):
         self, *, start_date: datetime | None = None, unit_system: UnitSystem = UnitSystem.FIELD
     ) -> TimeTargets:
         """
-        Return every recurring time at which this event fires.
+        Returns every recurring time at which this event fires.
 
         :param start_date: The simulation's start date. Unused.
         :param unit_system: Unit system of the run's time. Unused, `every` and `start` are already in it.
@@ -307,14 +307,14 @@ class AllOf(Event[ModelT]):
 
     @property
     def level_triggered(self) -> bool:
-        """Whether any sub-event holds across many checks."""
+        """Checks whether any sub-event holds across many checks."""
         return any(getattr(event, "level_triggered", False) for event in self.events)
 
     def get_time_targets(
         self, *, start_date: datetime | None = None, unit_system: UnitSystem = UnitSystem.FIELD
     ) -> TimeTargets:
         """
-        Return the combined time targets of all sub-events.
+        Returns the combined time targets of all sub-events.
 
         :param start_date: The simulation's start date.
         :param unit_system: Unit system of the run's time.
@@ -351,14 +351,14 @@ class AnyOf(Event[ModelT]):
 
     @property
     def level_triggered(self) -> bool:
-        """Whether any sub-event holds across many checks."""
+        """Checks whether any sub-event holds across many checks."""
         return any(getattr(event, "level_triggered", False) for event in self.events)
 
     def get_time_targets(
         self, *, start_date: datetime | None = None, unit_system: UnitSystem = UnitSystem.FIELD
     ) -> TimeTargets:
         """
-        Return the combined time targets of all sub-events.
+        Returns the combined time targets of all sub-events.
 
         :param start_date: The simulation's start date.
         :param unit_system: Unit system of the run's time.

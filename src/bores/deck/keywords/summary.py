@@ -1,7 +1,7 @@
 """
 SUMMARY section keyword implementations.
 
-The SUMMARY section declares which result vectors Eclipse should write to
+The SUMMARY section declares which result vectors to write to
 the summary file (`.SMSPEC` / `.UNSMRY`) for later plotting and analysis.
 Most SUMMARY keywords are *selector* keywords: their bare presence in the
 deck means "output this vector for every relevant object" (every well,
@@ -16,7 +16,7 @@ named/numbered objects.
 - `FWIT` / `FGIT`: field water/gas injection cumulative total.
 - `FWCT`: field water cut.
 - `FGOR`: field gas-oil ratio.
-- `FOIR` / `FOIT`: field oil injection rate/total. Rare in practice; Eclipse still defines them.
+- `FOIR` / `FOIT`: field oil injection rate/total. Rarely used.
 
 **Well vectors** (one series per well; optionally restricted to named wells):
 
@@ -28,7 +28,7 @@ named/numbered objects.
 - `WGOR`: well gas-oil ratio.
 - `WBHP`: well bottom-hole pressure.
 - `WTHP`: well tubing-head pressure.
-- `WOIR` / `WOIT`: well oil injection rate/total. Rare in practice; Eclipse still defines them.
+- `WOIR` / `WOIT`: well oil injection rate/total. Rarely used.
 
 Every vector above has a matching `bores.wells.summary` `Summary` implementation of the same mnemonic.
 
@@ -155,7 +155,7 @@ class SummaryVectorKeyword(Keyword[list[str]]):
     """
     A `SUMMARY`-section vector selector (`FOPR`, `WOPR`, `ROIP`, ...).
 
-    Eclipse allows an optional list of object names/numbers (well names for
+    A deck allows an optional list of object names/numbers (well names for
     `W*` vectors, region numbers for `R*` vectors) immediately following the
     keyword, terminated by `/`. A bare keyword with no list (or an empty
     list before the `/`) means "every object of the relevant type" and is
@@ -217,7 +217,7 @@ FWIR = SummaryVectorKeyword("FWIR")
 """`FWIR` - field water injection rate. Takes no object list."""
 
 FOIR = SummaryVectorKeyword("FOIR")
-"""`FOIR` - field oil injection rate. Rare in practice; Eclipse still defines it. Takes no object list."""
+"""`FOIR` - field oil injection rate. Rarely used. Takes no object list."""
 
 FGIR = SummaryVectorKeyword("FGIR")
 """`FGIR` - field gas injection rate. Takes no object list."""
@@ -226,7 +226,7 @@ FWIT = SummaryVectorKeyword("FWIT")
 """`FWIT` - field cumulative water injection total. Takes no object list."""
 
 FOIT = SummaryVectorKeyword("FOIT")
-"""`FOIT` - field cumulative oil injection total. Rare in practice; Eclipse still defines it. Takes no object list."""
+"""`FOIT` - field cumulative oil injection total. Rarely used. Takes no object list."""
 
 FGIT = SummaryVectorKeyword("FGIT")
 """`FGIT` - field cumulative gas injection total. Takes no object list."""
@@ -264,7 +264,7 @@ WWIR = SummaryVectorKeyword("WWIR")
 """`WWIR ['WELL1' ...] /` - well water injection rate (see `WOPR`)."""
 
 WOIR = SummaryVectorKeyword("WOIR")
-"""`WOIR ['WELL1' ...] /` - well oil injection rate. Rare in practice; Eclipse still defines it (see `WOPR`)."""
+"""`WOIR ['WELL1' ...] /` - well oil injection rate. Rarely used (see `WOPR`)."""
 
 WGIR = SummaryVectorKeyword("WGIR")
 """`WGIR ['WELL1' ...] /` - well gas injection rate (see `WOPR`)."""
@@ -282,7 +282,7 @@ WWIT = SummaryVectorKeyword("WWIT")
 """`WWIT ['WELL1' ...] /` - well cumulative water injection total (see `WOPR`)."""
 
 WOIT = SummaryVectorKeyword("WOIT")
-"""`WOIT ['WELL1' ...] /` - well cumulative oil injection total. Rare in practice; Eclipse still defines it (see `WOPR`)."""
+"""`WOIT ['WELL1' ...] /` - well cumulative oil injection total. Rarely used (see `WOPR`)."""
 
 WGIT = SummaryVectorKeyword("WGIT")
 """`WGIT ['WELL1' ...] /` - well cumulative gas injection total (see `WOPR`)."""
@@ -364,7 +364,7 @@ RGIPG = SummaryVectorKeyword("RGIPG")
 
 def block_vector(name: str) -> RepeatedRecordKeyword[int]:
     """
-    Build a `SUMMARY`-section block vector selector.
+    Builds a `SUMMARY`-section block vector selector.
 
     Block vectors list the grid cells to report, one `I J K /` line per cell, closed
     by a final `/`.

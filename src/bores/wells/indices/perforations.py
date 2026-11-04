@@ -124,7 +124,7 @@ class PerforationIndex:
 
 def resolve_perforation_orientation(perforation: Perforation) -> Orientation:
     """
-    Resolve which axis a `Perforation`'s completion runs along.
+    Resolves which axis a `Perforation`'s completion runs along.
 
     Resolution order: `perforation.direction` if set (and not
     `Orientation.UNSET`); otherwise `Orientation.Z`.
@@ -139,7 +139,7 @@ def resolve_perforation_orientation(perforation: Perforation) -> Orientation:
 
 def get_default_horizontal_tolerance(grid: Grid, x: Number, y: Number) -> Number:
     """
-    Derive a default horizontal search radius for `resolve_perforations_indices`.
+    Derives a default horizontal search radius for `resolve_perforations_indices`.
 
     Evaluated locally at the well's own position (half the diagonal of the
     nearest cell), since cell size can vary across an unstructured grid.
@@ -160,7 +160,7 @@ def get_vertical_column_candidates(
     grid: Grid, x: Number, y: Number, tolerance: Number
 ) -> IntArray[OneDimension]:
     """
-    Return every cell index whose centroid falls within `tolerance` of
+    Returns every cell index whose centroid falls within `tolerance` of
     `(x, y)` in the horizontal plane, across all depths.
 
     `grid.find_cells_in_radius` is a 3-D sphere query, not a vertical
@@ -195,7 +195,7 @@ def compute_local_vertical_extent_aabb(
     grid: Grid, cell_index: Integer, x: Number, y: Number
 ) -> tuple[Number, Number] | None:
     """
-    Get vertical extent of a cell's axis-aligned bounding box.
+    Gets vertical extent of a cell's axis-aligned bounding box.
 
     Every point within the cell's horizontal footprint sees the same
     `[cell_min_z, cell_max_z]` window under this method. `x`/`y` are
@@ -218,7 +218,7 @@ def compute_local_vertical_extent_exact(
     grid: Grid, cell_index: Integer, x: Number, y: Number
 ) -> tuple[Number, Number] | None:
     """
-    Get exact vertical extent of a cell at horizontal position
+    Gets exact vertical extent of a cell at horizontal position
     `(x, y)`.
 
     A vertical line through `(x, y)` pierces a convex cell's boundary at
@@ -269,7 +269,7 @@ def resolve_known_perforations_indices(
     perforations: typing.Sequence[Perforation] | None = None,
 ) -> tuple[PerforationIndex, ...]:
     """
-    Resolve every open perforation on `well` straight to its own
+    Resolves every open perforation on `well` straight to its own
     `Perforation.cell_index`, skipping geometric derivation entirely.
 
     For a completion built from a structured-grid deck record
@@ -352,7 +352,7 @@ def resolve_perforations_indices(
     perforations: typing.Sequence[Perforation] | None = None,
 ) -> tuple[PerforationIndex, ...]:
     """
-    Resolve every open `Perforation` on `well` to the `Grid` cell(s) it
+    Resolves every open `Perforation` on `well` to the `Grid` cell(s) it
     intersects. Only valid for a `well` with no `trajectory`.
     See `resolve_md_perforations_indices` for one with a trajectory.
 
@@ -473,7 +473,7 @@ def check_cell_contains_point(
     tolerance: Number = 1e-6,
 ) -> Boolean:
     """
-    `True` if `point` lies inside cell `cell_index`, or on its boundary within `tolerance`.
+    Returns `True` if `point` lies inside cell `cell_index`, or on its boundary within `tolerance`.
 
     The test follows the cell's own faces, so it stays correct for warped and non-convex cells.
     A cell with no faces (an inactive or pinched-out cell) contains nothing.
@@ -494,7 +494,7 @@ def find_first_containing_cell(
     tolerance: Number = 1e-6,
 ) -> Integer | None:
     """
-    Find the first of `candidates` whose cell contains `point`.
+    Finds the first of `candidates` whose cell contains `point`.
 
     A cell with no faces (an inactive or pinched-out cell) contains nothing, so it is never
     returned.
@@ -512,7 +512,7 @@ def locate_cell(
     grid: Grid, point: tuple[Number, Number, Number], search_radius: Number
 ) -> Integer | None:
     """
-    Find the grid cell containing `point`.
+    Finds the grid cell containing `point`.
 
     Starts from the nearest-centroid guess (cheap, right most of the
     time); if that guess isn't actually the containing cell (common near a
@@ -551,7 +551,7 @@ def walk_segment_through_grid(
     search_radius: Number,
 ) -> list[tuple[Integer, Number, Number]]:
     """
-    Walk the straight 3-D segment from `start` to `end` through `grid`,
+    Walks the straight 3-D segment from `start` to `end` through `grid`,
     cell by cell.
 
     Locates the cell containing `start`, then repeatedly finds the nearest
@@ -602,7 +602,7 @@ def resolve_md_perforations_indices(
     perforations: typing.Sequence[Perforation] | None = None,
 ) -> tuple[PerforationIndex, ...]:
     """
-    Resolve every open perforation on `well` to the `Grid` cell(s) its
+    Resolves every open perforation on `well` to the `Grid` cell(s) its
     measured-depth interval passes through. Only valid for a `well` with a
     `trajectory` set. See `resolve_perforations_indices` for one without.
 

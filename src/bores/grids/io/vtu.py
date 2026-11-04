@@ -26,7 +26,7 @@ VTK_POLYHEDRON = 42
 
 def get_outward_face_loops(grid: Grid, cell: Integer) -> list[IntArray[OneDimension]]:
     """
-    Vertex loops of every face of a cell, each wound so the face normal points out of the cell.
+    Returns vertex loops of every face of a cell, each wound so the face normal points out of the cell.
 
     :param grid: Source grid.
     :param cell: Cell index.
@@ -43,7 +43,7 @@ def get_outward_face_loops(grid: Grid, cell: Integer) -> list[IntArray[OneDimens
 
 def format_array(values: npt.ArrayLike, *, kind: typing.Literal["int", "float"]) -> str:
     """
-    Text of a flat array for a VTK `DataArray` element.
+    Returns text of a flat array for a VTK `DataArray` element.
 
     :param values: Values to write.
     :param kind: `"int"` for integers, `"float"` for floating-point values at full precision.
@@ -61,7 +61,7 @@ def dump_polyhedral(
     cell_data: typing.Mapping[str, npt.NDArray] | None = None,
 ) -> bytes:
     """
-    Write the active cells of a grid as VTK polyhedra.
+    Writes the active cells of a grid as VTK polyhedra.
 
     Every face of every active cell is written, so the grid is reproduced exactly. A
     `cell_index` cell field holds each written cell's index in the grid. Each cell's volume,
@@ -180,7 +180,7 @@ def read_stored_geometry(
     piece: ElementTree.Element, *, n_cells: Integer
 ) -> dict[str, NumberArray[typing.Any]]:
     """
-    Per-cell geometry stored by `dump_polyhedral`, as keyword arguments for `Grid`.
+    Returns per-cell geometry stored by `dump_polyhedral`, as keyword arguments for `Grid`.
 
     :param piece: The `Piece` element of the document.
     :param n_cells: Number of cells in the piece.
@@ -214,7 +214,7 @@ def load_polyhedral(
     unit_system: UnitSystem | None = None,
 ) -> Grid | None:
     """
-    Read a `.vtu` document made of polyhedron cells into a grid.
+    Reads a `.vtu` document made of polyhedron cells into a grid.
 
     :param payload: The XML document.
     :param metadata: Optional metadata attached to the grid.

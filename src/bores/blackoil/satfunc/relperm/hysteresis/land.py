@@ -40,7 +40,7 @@ def compute_land_residual_saturation_scalar(
     saturation_epsilon: Number = 1e-12,
 ) -> Number:
     """
-    Compute the dynamic residual non-wetting saturation via Land's model (scalar).
+    Computes the dynamic residual non-wetting saturation via Land's model (scalar).
 
     Land (1968) relates the residual saturation that will be trapped when
     imbibition begins at `initial_non_wetting_saturation` to the maximum
@@ -76,7 +76,7 @@ def compute_land_trapping_coefficient(
     saturation_epsilon: Number = 1e-12,
 ) -> Number:
     """
-    Land trapping coefficient `C = 1 / S_r_max - 1 / S_max`.
+    Returns Land trapping coefficient `C = 1 / S_r_max - 1 / S_max`.
 
     It makes the residual equal `S_r_max` when imbibition starts from the largest
     non-wetting saturation `S_max`.
@@ -99,7 +99,7 @@ def compute_land_residual_saturation_array(
     saturation_epsilon: Number = 1e-12,
 ) -> NumberArray[NDimension]:
     """
-    Compute the dynamic residual non-wetting saturation via Land's model (array).
+    Computes the dynamic residual non-wetting saturation via Land's model (array).
 
     :param initial_non_wetting_saturation: Non-wetting saturations at the
         drainage-imbibition reversal points (1-D array).
@@ -127,7 +127,7 @@ def compute_land_residual_saturation(
     saturation_epsilon: Number = 1e-12,
 ) -> NumberOrArray[NDimension]:
     """
-    Compute the dynamic residual non-wetting saturation via Land's model.
+    Computes the dynamic residual non-wetting saturation via Land's model.
 
     :param initial_non_wetting_saturation: Non-wetting saturation at the
         drainage-imbibition reversal point (scalar or array).
@@ -167,7 +167,7 @@ def compute_land_residual_from_reversal(
     out: NumberArray[OneDimension],
 ) -> None:
     """
-    Dynamic Land residual for every cell, in one pass and without intermediate arrays.
+    Returns dynamic Land residual for every cell, in one pass and without intermediate arrays.
 
     When `from_remaining_oil` is set the non-wetting saturation at the reversal is the oil
     that is left, `1 - reversal - other`. Otherwise it is the reversal saturation itself.
@@ -200,7 +200,7 @@ def rescale_scanning_saturation(
     out_scale: NumberArray[OneDimension],
 ) -> None:
     """
-    Map each cell's saturation onto the saturation axis of a tabular imbibition curve, so the
+    Maps each cell's saturation onto the saturation axis of a tabular imbibition curve, so the
     curve ends where Land trapping says this cell's imbibition ends.
 
     A tabular curve has fixed endpoints, so Land's trapped saturation cannot be handed to it the
@@ -281,7 +281,7 @@ class LandTrapping:
         saturation_epsilon: Number = 1e-12,
     ) -> Self:
         """
-        Derive the coefficient from the two endpoints, which is how a deck's tables define it.
+        Derives the coefficient from the two endpoints, which is how a deck's tables define it.
 
         :param maximum_trapped_saturation: The imbibition table's critical non-wetting saturation.
         :param maximum_saturation: The largest non-wetting saturation of the drainage table.
@@ -305,7 +305,7 @@ class LandTrapping:
         saturation_epsilon: Number = 1e-12,
     ) -> NumberOrArray[NDimension]:
         """
-        Get non-wetting saturation trapped when imbibition starts from `initial_saturation`.
+        Gets non-wetting saturation trapped when imbibition starts from `initial_saturation`.
 
         It never exceeds the starting saturation or `maximum_trapped_saturation`.
 

@@ -63,7 +63,7 @@ def translate_scanning_saturation(
     out_vertical_scale: NumberArray[OneDimension],
 ) -> None:
     """
-    Saturation at which to read the imbibition curve for each cell, and the factor that keeps the
+    Returns saturation at which to read the imbibition curve for each cell, and the factor that keeps the
     scanning curve on the drainage curve at the reversal.
 
     The translation `Δ` and the vertical factor are read off their tabulated curves by linear
@@ -121,7 +121,7 @@ def tabulate_translation(
     imbibition_values: NumberArray[OneDimension],
 ) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension]]:
     """
-    Tabulate the translation `Δ(s_hst)` from `kr_imb(s_hst + Δ) = kr_drain(s_hst)` along `axis`,
+    Tabulates the translation `Δ(s_hst)` from `kr_imb(s_hst + Δ) = kr_drain(s_hst)` along `axis`,
     and the vertical factor that makes the scanning curve meet the drainage curve when the
     imbibition curve cannot reach it.
 
@@ -233,7 +233,7 @@ class CarlsonRelPermTable(HysteresisRelPermTable):
     def _no_translation() -> tuple[
         NumberArray[OneDimension], NumberArray[OneDimension], NumberArray[OneDimension]
     ]:
-        """The translation of a phase that does not scan: none, at either end of its axis."""
+        """Returns the translation of a phase that does not scan: none, at either end of its axis."""
         return (
             typing.cast("NumberArray[OneDimension]", np.array([0.0, 1.0])),
             typing.cast("NumberArray[OneDimension]", np.zeros(2)),
@@ -243,7 +243,7 @@ class CarlsonRelPermTable(HysteresisRelPermTable):
     def _tabulate_gas_translation(
         self,
     ) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension], NumberArray[OneDimension]]:
-        """Tabulate the translation of the gas imbibition curve, or none when there is none."""
+        """Tabulates the translation of the gas imbibition curve, or none when there is none."""
         imbibition_table = self.gas_oil_imbibition_table
         if imbibition_table is None or self.get_gas_oil_wetting_phase() == FluidPhase.GAS:
             return self._no_translation()
@@ -272,7 +272,7 @@ class CarlsonRelPermTable(HysteresisRelPermTable):
         self,
     ) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension], NumberArray[OneDimension]]:
         """
-        Tabulate the translation of the oil-water imbibition curve along the oil saturation, or
+        Tabulates the translation of the oil-water imbibition curve along the oil saturation, or
         none when oil is not the non-wetting phase or there is no imbibition curve.
         """
         imbibition_table = self.oil_water_imbibition_table
@@ -316,7 +316,7 @@ class CarlsonRelPermTable(HysteresisRelPermTable):
         **kwargs: typing.Any,
     ) -> tuple[RelativePermeabilities, RelativePermeabilityDerivatives | None]:
         """
-        Relative permeabilities, and optionally their nine derivatives, in one pass.
+        Returns relative permeabilities, and optionally their nine derivatives, in one pass.
 
         :param water_saturation: Water saturation (fraction) - scalar or array.
         :param oil_saturation: Oil saturation (fraction) - scalar or array.

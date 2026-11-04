@@ -163,7 +163,7 @@ class TubingFluidTable(typing.NamedTuple):
 
     @property
     def unit_system(self) -> UnitSystem:
-        """The unit system the table is in."""
+        """Returns the unit system the table is in."""
         return UNIT_SYSTEMS_BY_TAG[self.unit_system_tag]
 
 
@@ -191,7 +191,7 @@ class TubingFluidSample(typing.NamedTuple):
 
 def get_stb_to_volume_factor(unit_system: UnitSystem) -> Number:
     """
-    The volume of one stock-tank barrel in the volume unit that surface rates are in.
+    Returns the volume of one stock-tank barrel in the volume unit that surface rates are in.
 
     :param unit_system: The unit system.
     :returns: The factor, one where gas-oil ratios are volume per volume.

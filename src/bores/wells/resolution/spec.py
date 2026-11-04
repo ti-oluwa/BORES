@@ -15,7 +15,7 @@ __all__ = ["ConnectionPressureMode", "WellControlSpec", "get_default_rate_conver
 
 def get_default_rate_convergence_tolerance() -> Number:
     """
-    The relative tolerance on a well's total rate that resolution aims for by default.
+    Returns the relative tolerance on a well's total rate that resolution aims for by default.
 
     This is `c.CONTROL_RATE_CONVERGENCE_TOLERANCE`, raised if needed to a thousand times the
     machine epsilon of the current working precision. A rate computed in single precision
@@ -115,7 +115,7 @@ class WellControlSpec:
     @property
     def radial_flow_constant(self) -> Number:
         """
-        `c.RADIAL_FLOW_CONSTANT_<unit_system>` - multiplies a well index
+        Returns `c.RADIAL_FLOW_CONSTANT_<unit_system>` - multiplies a well index
         (`compute_peaceman_well_index`'s own units, which have no 2*pi
         built in) times mobility times drawdown to get a real
         reservoir-condition rate in this spec's own `unit_system`.
@@ -167,7 +167,7 @@ class WellControlSpec:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `WellControlSpec` with pressure-valued limits rescaled
+        Returns a new `WellControlSpec` with pressure-valued limits rescaled
         to *target*.
 
         `producer_bhp_floor` is converted using the pressure factor for the

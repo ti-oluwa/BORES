@@ -120,7 +120,7 @@ def update_mobility_cache(
     pvt_cache: PVTCache, satfunc_cache: SatFuncCache, out: MobilityCache
 ) -> None:
     """
-    Fill `out` in place from `pvt_cache`/`satfunc_cache`. Pure arithmetic,
+    Fills `out` in place from `pvt_cache`/`satfunc_cache`. Pure arithmetic,
     one cell at a time, no allocation. Every `out` array is written to by
     index and nothing is created here.
     """
@@ -255,7 +255,7 @@ def compute_mobility_cache(
     dtype: npt.DTypeLike = None,
 ) -> MobilityCache:
     """
-    Build (or refresh, in place) a `MobilityCache` from a `PVTCache` and a
+    Builds (or refresh, in place) a `MobilityCache` from a `PVTCache` and a
     `SatFuncCache`.
 
     **Reuse**: pass a previous call's returned `MobilityCache` as `out` to

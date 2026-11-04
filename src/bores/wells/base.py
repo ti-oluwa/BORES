@@ -306,7 +306,7 @@ class Perforation:
 
     @property
     def is_point_perforation(self) -> bool:
-        """`True` if the given interval (measured depth, if given, else true
+        """Returns `True` if the given interval (measured depth, if given, else true
         vertical depth) has zero length."""
         if self.top_md is not None:
             return self.top_md == self.bottom_md
@@ -314,7 +314,7 @@ class Perforation:
 
     @property
     def is_active(self) -> bool:
-        """`True` if `schedule_status is WellStatus.ACTIVE`."""
+        """Returns `True` if `schedule_status is WellStatus.ACTIVE`."""
         return self.schedule_status is WellStatus.ACTIVE
 
     @property
@@ -334,7 +334,7 @@ def convert_perforation(
     perforation: Perforation, /, *, length_factor: Number, connection_factor: Number
 ) -> Perforation:
     """
-    A copy of `perforation` with its dimensioned fields rescaled.
+    Returns a copy of `perforation` with its dimensioned fields rescaled.
 
     :param perforation: The perforation to convert.
     :param length_factor: Factor from the current length unit to the target one. Applied to the
@@ -490,17 +490,17 @@ class Well:
 
     @property
     def is_injector(self) -> bool:
-        """`True` if `well_type is WellType.INJECTOR`."""
+        """Returns `True` if `well_type is WellType.INJECTOR`."""
         return self.well_type is WellType.INJECTOR
 
     @property
     def is_producer(self) -> bool:
-        """`True` if `well_type is WellType.PRODUCER`."""
+        """Returns `True` if `well_type is WellType.PRODUCER`."""
         return self.well_type is WellType.PRODUCER
 
     @property
     def n_perforations(self) -> int:
-        """Total perforation count, including any with `CompletionStatus.SHUT`."""
+        """Returns the total perforation count, including any with `CompletionStatus.SHUT`."""
         return len(self.perforations)
 
     @property
@@ -523,17 +523,17 @@ class Well:
 
     @property
     def is_active(self) -> bool:
-        """`True` if `schedule_status is WellStatus.ACTIVE`."""
+        """Returns `True` if `schedule_status is WellStatus.ACTIVE`."""
         return self.schedule_status is WellStatus.ACTIVE
 
     @property
     def is_open(self) -> bool:
-        """`True` if `open_status is CompletionStatus.OPEN`."""
+        """Returns `True` if `open_status is CompletionStatus.OPEN`."""
         return self.open_status is CompletionStatus.OPEN
 
     @property
     def min_perforation_depth(self) -> Number:
-        """Shallowest true vertical depth across all perforations (open or shut)."""
+        """Returns shallowest true vertical depth across all perforations (open or shut)."""
         if self.trajectory is not None:
             return min(
                 self.trajectory.position_at(perforation.top_md)[2]  # type: ignore[union-attr]
@@ -543,7 +543,7 @@ class Well:
 
     @property
     def max_perforation_depth(self) -> Number:
-        """Deepest true vertical depth across all perforations (open or shut)."""
+        """Returns deepest true vertical depth across all perforations (open or shut)."""
         if self.trajectory is not None:
             return max(
                 self.trajectory.position_at(perforation.bottom_md)[2]  # type: ignore[union-attr]
@@ -559,7 +559,7 @@ class Well:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `Well` with all dimensioned fields converted to *target*.
+        Returns a new `Well` with all dimensioned fields converted to *target*.
 
         :param target: Target `UnitSystem`.
         :param table: Optional explicit `UnitConversionTable` override,
@@ -660,7 +660,7 @@ class Wells:
 
     def get(self, name: str) -> Well:
         """
-        Retrieve a registered `Well` by name.
+        Retrieves a registered `Well` by name.
 
         :param name: `Well` name.
         :returns: `Well` for that well.
@@ -673,7 +673,7 @@ class Wells:
 
     def add(self, well: Well) -> None:
         """
-        Add a new `Well` to the container. If a well with the same name already exists, it is replaced.
+        Adds a new `Well` to the container. If a well with the same name already exists, it is replaced.
 
         :param well: `Well` to add.
         """
@@ -685,7 +685,7 @@ class Wells:
 
     def set(self, name: str, well: Well) -> None:
         """
-        Set an existing `Well` in the container by name. The name must match the `Well.name`.
+        Sets an existing `Well` in the container by name. The name must match the `Well.name`.
 
         :param name: Name of the well to set.
         :param well: `Well` to set.
@@ -698,7 +698,7 @@ class Wells:
 
     @property
     def names(self) -> tuple[str, ...]:
-        """All well names, in insertion order."""
+        """Returns all well names, in insertion order."""
         return tuple(self.wells.keys())
 
     @property
@@ -724,7 +724,7 @@ class Wells:
     @classmethod
     def from_deck(cls, deck_file: DeckFile, *, grid: Grid, current_time: float = 0) -> Self:
         """
-        Load the `Wells` object from a parsed `DeckFile`.
+        Loads the `Wells` object from a parsed `DeckFile`.
 
         :param deck_file: Parsed deck containing `WELSPECS`/`COMPDAT`/`WCONINJE`.
         :param grid: Grid built from the same deck.
@@ -750,7 +750,7 @@ class Wells:
 
     def __add__(self, other: Self | Well) -> Self:
         """
-        Return a new `Wells` object containing the union of this and *other*.
+        Returns a new `Wells` object containing the union of this and *other*.
 
         :param other: Another `Wells` or a single `Well`.
         :returns: New `Wells` with all wells from both.
@@ -774,7 +774,7 @@ class Wells:
 
     def __iadd__(self, other: Self | Well) -> Self:
         """
-        In-place addition of another `Wells` or a single `Well`.
+        Returns in-place addition of another `Wells` or a single `Well`.
 
         :param other: Another `Wells` or a single `Well`.
         :returns: Self with wells from *other* added.

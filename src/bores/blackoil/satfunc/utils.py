@@ -30,7 +30,7 @@ def make_saturation_field(
     dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray:
     """
-    Build a 1-D saturation field over `[min_saturation, max_saturation]`.
+    Builds a 1-D saturation field over `[min_saturation, max_saturation]`.
 
     :param n_points: Number of field points (>= 2).
     :param min_saturation: Physical saturation range. Must satisfy `0 ≤ min_saturation < max_saturation ≤ 1`.
@@ -68,7 +68,7 @@ def make_min_span_saturation_field(
     dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray:
     """
-    Build a saturation grid, enforcing a floor of `minimum_span` on the
+    Builds a saturation grid, enforcing a floor of `minimum_span` on the
     total range so the grid never collapses to a single point.
 
     :param number_of_points: Number of points in the output grid.
@@ -107,7 +107,7 @@ def pchip_resample(
     target_saturations: npt.ArrayLike | None = None,
 ) -> tuple[npt.NDArray, npt.NDArray]:
     """
-    Fit a PCHIP interpolant through (`source_saturations`, `source_values`),
+    Fits a PCHIP interpolant through (`source_saturations`, `source_values`),
     evaluate it on a new saturation grid and return both the grid and the
     interpolated values.
 
@@ -163,7 +163,7 @@ def build_saturation_reference_field(
     dtype: npt.DTypeLike = np.float64,
 ) -> npt.NDArray:
     """
-    Build a saturation reference field with optional endpoint refinement.
+    Builds a saturation reference field with optional endpoint refinement.
 
     The base field spans [`saturation_lower_bound`, `saturation_upper_bound`]
     at `number_of_base_points` using `spacing`. When
@@ -241,7 +241,7 @@ def build_pchip_interpolant(
     dtype: npt.DTypeLike = np.float64,
 ) -> tuple[PchipInterpolator, PchipInterpolator]:
     """
-    Build a PCHIP interpolant (and its derivative) for a two-phase kr or Pc
+    Builds a PCHIP interpolant (and its derivative) for a two-phase kr or Pc
     curve, optionally after expanding the knot field.
 
     The knot field is expanded only when `number_of_base_points > 0`, the raw
@@ -303,7 +303,7 @@ def compute_killough_scanning_weight(
     numerical_epsilon: Number = 1e-12,
 ) -> tuple[Number, Number]:
     """
-    Weight of the imbibition curve on the Killough scanning curve, and its derivative with
+    Returns weight of the imbibition curve on the Killough scanning curve, and its derivative with
     respect to saturation.
 
     A scanning curve is `value = drainage + (imbibition - drainage) * weight`, so
@@ -362,7 +362,7 @@ def scan_curve_kernel(
     out_derivative: NumberArray[OneDimension],
 ) -> None:
     """
-    Scan one curve between its drainage and imbibition bounds for every cell, writing the
+    Scans one curve between its drainage and imbibition bounds for every cell, writing the
     value and (optionally) the derivative in a single pass.
 
     Every array argument is flat and holds either one value per cell or a single value shared
@@ -403,7 +403,7 @@ def compute_killough_scanning_curve_scalar(
     numerical_epsilon: Number = 1e-12,
 ) -> Number:
     """
-    Killough scanning-curve interpolation between primary drainage and
+    Returns Killough scanning-curve interpolation between primary drainage and
     imbibition curves (scalar).
 
     When the flow direction reverses the reservoir property (kr or Pc)
@@ -444,7 +444,7 @@ def _prepare_killough_arrays(
     *values: NumberOrArray[NDimension],
 ) -> tuple[NumberArray[OneDimension], ...]:
     """
-    Broadcast the inputs of a Killough array function to a common shape and convert them
+    Broadcasts the inputs of a Killough array function to a common shape and converts them
     to contiguous float64 arrays.
 
     This happens outside Numba, which cannot broadcast arrays of different dtypes (e.g. a
@@ -460,7 +460,7 @@ def _prepare_killough_arrays(
 @numba.njit(cache=True, inline="always", error_model="numpy")
 def element_at(array: NumberArray[OneDimension], index: Integer) -> Number:
     """
-    Element `index` of `array`, or its only element when it holds a single value.
+    Returns element `index` of `array`, or its only element when it holds a single value.
 
     Lets a kernel read a per-cell array and a single value shared by every cell with the
     same code.
@@ -472,7 +472,7 @@ def prepare_kernel_inputs(
     *values: NumberOrArray[NDimension],
 ) -> tuple[tuple[Integer, ...], Integer, tuple[NumberArray[OneDimension], ...]]:
     """
-    Bring the inputs of a per-cell kernel to flat arrays that the kernel can read by index.
+    Brings the inputs of a per-cell kernel to flat arrays that the kernel can read by index.
 
     Inputs are broadcast to a common shape. An input that holds a single value is passed as
     a one-element array, which the kernel reads with `element_at`, so a value shared by
@@ -502,7 +502,7 @@ def flatten_kernel_input(
     value: typing.Any, *, shape: tuple[int, ...], as_float: bool = True
 ) -> NumberArray[OneDimension]:
     """
-    Flat array of `value` for a per-cell kernel.
+    Returns flat array of `value` for a per-cell kernel.
 
     A single value stays a one-element array that the kernel shares between all cells. Any
     other value is broadcast to `shape` and used as it is when it is already contiguous.
@@ -524,7 +524,7 @@ def saturations_within_bounds(
     size: Integer,
 ) -> bool:
     """
-    Whether every water, oil and gas saturation lies between 0 and 1.
+    Checks whether every water, oil and gas saturation lies between 0 and 1.
 
     :param water_saturation: Flat water saturation array, or a single shared value.
     :param oil_saturation: Flat oil saturation array, or a single shared value.
@@ -543,7 +543,7 @@ def saturations_within_bounds(
 
 def validate_strictly_increasing(*, values: NumberArray[OneDimension], name: str) -> None:
     """
-    Check that `values` increase at every step, and say where they do not.
+    Checks that `values` increase at every step, and says where they do not.
 
     Interpolating a saturation table needs every saturation to be larger than the one before it,
     so repeated values are rejected as well as decreasing ones.
@@ -574,7 +574,7 @@ def get_floating_dtype(value: NumberOrArray[NDimension]) -> np.dtype:
 
 def zeros_like_value(value: NumberOrArray[NDimension]) -> NumberOrArray[NDimension]:
     """
-    Zero with the shape and floating dtype of `value`.
+    Returns zero with the shape and floating dtype of `value`.
 
     :param value: A scalar or an array.
     :returns: A scalar zero for a scalar `value`, otherwise an array of zeros.
@@ -597,7 +597,7 @@ def compute_killough_scanning_curve_array(
     numerical_epsilon: Number = 1e-12,
 ) -> NumberArray[NDimension]:
     """
-    Killough scanning-curve interpolation between primary drainage and
+    Returns Killough scanning-curve interpolation between primary drainage and
     imbibition curves (array).
 
     :param saturation: Current saturation array.
@@ -645,7 +645,7 @@ def compute_killough_scanning_curve(
     numerical_epsilon: Number = 1e-12,
 ) -> NumberOrArray[NDimension]:
     """
-    Killough scanning-curve interpolation between primary drainage and
+    Returns Killough scanning-curve interpolation between primary drainage and
     imbibition curves.
 
     :param saturation: Current saturation (scalar or array).
@@ -719,7 +719,7 @@ def compute_killough_scanning_curve_derivative_scalar(
     numerical_epsilon: Number = 1e-12,
 ) -> Number:
     """
-    Analytical derivative of the Killough scanning-curve value with respect
+    Returns analytical derivative of the Killough scanning-curve value with respect
     to the scanning saturation (scalar).
 
     The scanning curve is:
@@ -772,7 +772,7 @@ def compute_killough_scanning_curve_derivative_array(
     numerical_epsilon: Number = 1e-12,
 ) -> NumberArray[NDimension]:
     """
-    Analytical derivative of the Killough scanning-curve value with respect
+    Returns analytical derivative of the Killough scanning-curve value with respect
     to the scanning saturation (array).
 
     :param saturation: Current saturation array.
@@ -828,7 +828,7 @@ def compute_killough_scanning_curve_derivative(
     numerical_epsilon: Number = 1e-12,
 ) -> NumberOrArray[NDimension]:
     """
-    Analytical derivative of the Killough scanning-curve value with respect
+    Returns analytical derivative of the Killough scanning-curve value with respect
     to the scanning saturation.
 
     :param saturation: Current saturation (scalar or array).

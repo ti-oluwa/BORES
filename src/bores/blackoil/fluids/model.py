@@ -87,7 +87,7 @@ class BlackOil:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `BlackOil` with all region tables rescaled to *target*.
+        Returns a new `BlackOil` with all region tables rescaled to *target*.
 
         :param target: Target `UnitSystem`.
         :param table: Optional custom conversion table.

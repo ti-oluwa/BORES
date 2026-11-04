@@ -60,7 +60,7 @@ def compute_masses(
     dtype: npt.DTypeLike = None,
 ) -> Masses:
     """
-    Compute per-cell phase masses from saturations, pore volume, and PVT
+    Computes per-cell phase masses from saturations, pore volume, and PVT
     properties.
 
     Masses are not primary unknowns anywhere in this codebase, they're

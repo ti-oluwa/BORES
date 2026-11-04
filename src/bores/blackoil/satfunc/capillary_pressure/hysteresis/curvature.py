@@ -66,7 +66,7 @@ def compute_curvature_scanning_weight(
     numerical_epsilon: Number,
 ) -> tuple[Number, Number]:
     """
-    Compute the weight `F` of the imbibition curve on a scanning curve, and its derivative with
+    Computes the weight `F` of the imbibition curve on a scanning curve, and its derivative with
     respect to the saturation.
 
     With `x` the distance travelled from the end the curve left, and `X` the length of the
@@ -132,7 +132,7 @@ def scan_curve_kernel(
     out_derivative: NumberArray[OneDimension],
 ) -> None:
     """
-    Scan one capillary pressure curve between its bounds for every cell, writing the value and
+    Scans one capillary pressure curve between its bounds for every cell, writing the value and
     optionally the derivative in a single pass.
 
     An imbibing cell scans up from `reversal_saturation`, where it left the drainage curve, to
@@ -211,7 +211,7 @@ def scan_curve(
     retrace: Boolean = False,
 ) -> CapillaryCurve:
     """
-    Scan one capillary pressure curve between its drainage and imbibition bounds, with the curvature
+    Scans one capillary pressure curve between its drainage and imbibition bounds, with the curvature
     weight.
 
     :param size: Number of cells.
@@ -356,7 +356,7 @@ class CurvatureCapillaryPressureTable(HysteresisCapillaryPressureTable):
         **kwargs: typing.Any,
     ) -> tuple[CapillaryPressures, CapillaryPressureDerivatives | None]:
         """
-        Capillary pressures, and optionally their derivatives, in one pass.
+        Returns capillary pressures, and optionally their derivatives, in one pass.
 
         :param water_saturation: Water saturation (fraction) - scalar or array.
         :param oil_saturation: Oil saturation (fraction) - scalar or array.

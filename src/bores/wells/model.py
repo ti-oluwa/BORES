@@ -83,7 +83,7 @@ class WellSystem:
 
     @property
     def unit_system(self) -> UnitSystem:
-        """Unit system shared by `wells`/`well_controls`/`group_controls`."""
+        """Returns unit system shared by `wells`/`well_controls`/`group_controls`."""
         return self.wells.unit_system
 
     def get_tubing_performance(self, well_name: str) -> TubingPerformance | None:

@@ -1,4 +1,4 @@
-"""Eclipse keyword implementations, organised by deck section."""
+"""Deck keyword implementations, organised by deck section."""
 
 from bores.deck.keywords.base import (
     ArrayKeyword,

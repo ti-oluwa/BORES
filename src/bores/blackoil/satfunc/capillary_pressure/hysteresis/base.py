@@ -65,7 +65,7 @@ def query_oil_water_curve(
     **kwargs: typing.Any,
 ) -> CapillaryCurve:
     """
-    Oil-water capillary pressure of a table and its slope with respect to water saturation.
+    Returns oil-water capillary pressure of a table and its slope with respect to water saturation.
 
     A two-phase table is queried at the oil-water system's own saturations (`So = 1 - Sw`),
     whichever phase its reference axis uses. A three-phase table is evaluated at the three-phase
@@ -122,7 +122,7 @@ def query_gas_oil_curve(
     **kwargs: typing.Any,
 ) -> CapillaryCurve:
     """
-    Gas-oil capillary pressure of a table and its slope with respect to gas saturation.
+    Returns gas-oil capillary pressure of a table and its slope with respect to gas saturation.
 
     A two-phase table is queried at the gas-oil system's own saturations
     (`So = 1 - swc - Sg`), whichever phase its reference axis uses. A three-phase table is
@@ -187,7 +187,7 @@ def evaluate_three_phase_table(
     **kwargs: typing.Any,
 ) -> ThreePhaseEvaluation:
     """
-    Evaluate a three-phase capillary pressure table, once per call for a table used by both systems.
+    Evaluates a three-phase capillary pressure table, once per call for a table used by both systems.
 
     The values and derivatives come from a single `evaluate_with_derivatives` call when the
     derivatives are wanted, which shares work inside models that can.
@@ -284,7 +284,7 @@ class HysteresisCapillaryPressureTable(CapillaryPressureTable):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return the table with every backing table converted to `target` units.
+        Returns the table with every backing table converted to `target` units.
 
         :param target: Desired `UnitSystem`.
         :param table: Optional custom conversion table; `None` uses the default.
@@ -307,7 +307,7 @@ class HysteresisCapillaryPressureTable(CapillaryPressureTable):
 
     def get_oil_water_wetting_phase(self) -> FluidPhase:
         """
-        Return the wetting phase for the oil-water sub-system.
+        Returns the wetting phase for the oil-water sub-system.
 
         :return: `FluidPhase.WATER` for water-wet or `FluidPhase.OIL` for
             oil-wet systems, as reported by the drainage table.
@@ -316,7 +316,7 @@ class HysteresisCapillaryPressureTable(CapillaryPressureTable):
 
     def get_connate_water_saturation(self) -> Number:
         """
-        Connate water saturation of the system, read off the oil-water drainage table. It
+        Returns connate water saturation of the system, read off the oil-water drainage table. It
         places the gas-oil system (`So = 1 - swc - Sg`) when the gas-oil table is a
         two-phase table.
 
@@ -329,7 +329,7 @@ class HysteresisCapillaryPressureTable(CapillaryPressureTable):
 
     def get_gas_oil_wetting_phase(self) -> FluidPhase:
         """
-        Return the wetting phase for the gas-oil sub-system.
+        Returns the wetting phase for the gas-oil sub-system.
 
         :return: `FluidPhase.OIL` for oil-wet or `FluidPhase.GAS` for
             gas-wet systems, as reported by the drainage table.
@@ -346,7 +346,7 @@ class HysteresisCapillaryPressureTable(CapillaryPressureTable):
         **kwargs: typing.Any,
     ) -> tuple[CapillaryPressures, CapillaryPressureDerivatives | None]:
         """
-        Capillary pressures, and optionally their derivatives, in one pass.
+        Returns capillary pressures, and optionally their derivatives, in one pass.
 
         :param water_saturation: Water saturation (fraction) - scalar or array.
         :param oil_saturation: Oil saturation (fraction) - scalar or array.
@@ -362,7 +362,7 @@ class HysteresisCapillaryPressureTable(CapillaryPressureTable):
     def is_distinct_imbibition(
         imbibition_table: AnyCapillaryTable | None, drainage_table: AnyCapillaryTable
     ) -> Boolean:
-        """Whether the imbibition curve can differ from the drainage curve."""
+        """Checks whether the imbibition curve can differ from the drainage curve."""
         return imbibition_table is not None and imbibition_table is not drainage_table
 
     def evaluate(
@@ -373,7 +373,7 @@ class HysteresisCapillaryPressureTable(CapillaryPressureTable):
         **kwargs: typing.Any,
     ) -> CapillaryPressures:
         """
-        Compute three-phase capillary pressures with Killough hysteresis.
+        Computes three-phase capillary pressures with Killough hysteresis.
 
         Without saturation history the result is the primary drainage capillary pressure.
 
@@ -402,7 +402,7 @@ class HysteresisCapillaryPressureTable(CapillaryPressureTable):
         **kwargs: typing.Any,
     ) -> CapillaryPressureDerivatives:
         """
-        Compute partial derivatives of capillary pressures with Killough hysteresis.
+        Computes partial derivatives of capillary pressures with Killough hysteresis.
 
         Returns the following non-zero entries.
 
@@ -436,7 +436,7 @@ class HysteresisCapillaryPressureTable(CapillaryPressureTable):
         **kwargs: typing.Any,
     ) -> tuple[CapillaryPressures, CapillaryPressureDerivatives]:
         """
-        Compute the capillary pressures and their derivatives in one pass.
+        Computes the capillary pressures and their derivatives in one pass.
 
         Every bounding curve is evaluated once, where calling `evaluate` and `derivatives`
         separately would evaluate each twice.

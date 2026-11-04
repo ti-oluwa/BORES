@@ -78,7 +78,7 @@ def compute_corey_effective_saturation(
     minimum_mobile_pore_space: Number,
 ) -> Number:
     """
-    Saturation of a phase scaled to the range 0 to 1 between `lower_saturation` and the top
+    Returns saturation of a phase scaled to the range 0 to 1 between `lower_saturation` and the top
     of its mobile range, or zero when the mobile range is smaller than `minimum_mobile_pore_space`.
     """
     if mobile_range <= minimum_mobile_pore_space:
@@ -94,7 +94,7 @@ def compute_corey_slope(
     exponent: Number,
     minimum_mobile_pore_space: Number,
 ) -> Number:
-    """Slope of a Corey power-law relative permeability with respect to the saturation of its phase."""
+    """Returns slope of a Corey power-law relative permeability with respect to the saturation of its phase."""
     if mobile_range > minimum_mobile_pore_space and effective_saturation > 0.0:
         return maximum_relperm * (
             exponent * (effective_saturation ** max(exponent - 1.0, 0.0)) / mobile_range
@@ -107,7 +107,7 @@ def compute_corey_complement(
     relperm: Number, maximum_relperm: Number, relperm_slope: Number, exponent: Number
 ) -> tuple[Number, Number]:
     """
-    Corey-shaped complement `(1 - kr / kr_max) ** exponent` of a phase relative permeability and
+    Returns Corey-shaped complement `(1 - kr / kr_max) ** exponent` of a phase relative permeability and
     its slope with respect to the saturation that drives `kr`.
     """
     one_minus_relperm = 1.0 - relperm / maximum_relperm
@@ -144,7 +144,7 @@ def compute_brooks_corey_water_wet_values(
     minimum_mobile_pore_space: Number,
     rule_minimum_mobile_pore_space: Number,
 ) -> tuple[Number, Number, Number]:
-    """Brooks-Corey relative permeabilities of a water-wet cell, before limiting and flooring."""
+    """Returns Brooks-Corey relative permeabilities of a water-wet cell, before limiting and flooring."""
     krw = maximum_water_relperm * (
         compute_corey_effective_saturation(
             saturation=sw,
@@ -202,7 +202,7 @@ def compute_brooks_corey_oil_wet_values(
     minimum_mobile_pore_space: Number,
     rule_minimum_mobile_pore_space: Number,
 ) -> tuple[Number, Number, Number]:
-    """Brooks-Corey relative permeabilities of an oil-wet cell, before limiting and flooring."""
+    """Returns Brooks-Corey relative permeabilities of an oil-wet cell, before limiting and flooring."""
     lowest_residual_oil = min(sorw, sorg)
     kro = maximum_oil_relperm * (
         compute_corey_effective_saturation(
@@ -262,7 +262,7 @@ def compute_brooks_corey_water_wet_cell(
     rule_minimum_mobile_pore_space: Number,
 ) -> CellRelPerm:
     """
-    Brooks-Corey relative permeabilities and derivatives of a water-wet cell.
+    Returns Brooks-Corey relative permeabilities and derivatives of a water-wet cell.
 
     Water and gas follow Corey power laws of their own saturation. Oil follows the three-phase
     mixing rule applied to Corey-shaped two-phase oil curves, and its derivatives are completed
@@ -375,7 +375,7 @@ def compute_brooks_corey_oil_wet_cell(
     rule_minimum_mobile_pore_space: Number,
 ) -> CellRelPerm:
     """
-    Brooks-Corey relative permeabilities and derivatives of an oil-wet cell.
+    Returns Brooks-Corey relative permeabilities and derivatives of an oil-wet cell.
 
     Oil is the wetting phase, so oil and gas follow Corey power laws of their own saturation.
     Water is the intermediate phase, so it follows the three-phase mixing rule applied to
@@ -502,7 +502,7 @@ def compute_brooks_corey_values_cell(
     minimum_gas_relperm: Number,
 ) -> tuple[Number, Number, Number]:
     """
-    Brooks-Corey relative permeabilities of one cell.
+    Returns Brooks-Corey relative permeabilities of one cell.
 
     The saturations are scaled to sum to 1 when they differ from 1 by more than
     `saturation_epsilon`, and the results are limited to the range 0 to 1 and floored by the
@@ -628,7 +628,7 @@ def compute_brooks_corey_derivatives_cell(
     minimum_gas_relperm: Number,
 ) -> tuple[Number, Number, Number, Number, Number, Number, Number, Number, Number]:
     """
-    Brooks-Corey partial derivatives of the relative permeabilities of one cell.
+    Returns Brooks-Corey partial derivatives of the relative permeabilities of one cell.
 
     The saturations are scaled in the same way as in `compute_brooks_corey_values_cell`, so the
     derivatives belong to the same point as the values. A minimum of `NO_MINIMUM` means no floor.
@@ -766,7 +766,7 @@ def compute_brooks_corey_values_loop(
     gas_relperm: NumberArray[OneDimension],
 ) -> None:
     """
-    Compute the Brooks-Corey relative permeabilities of `size` cells in parallel and write them
+    Computes the Brooks-Corey relative permeabilities of `size` cells in parallel and writes them
     to the output arrays.
 
     Per-cell inputs are flat arrays, or a single value shared by every cell.
@@ -837,7 +837,7 @@ def compute_brooks_corey_derivatives_loop(
     dkrg_dsg: NumberArray[OneDimension],
 ) -> None:
     """
-    Compute the Brooks-Corey relative permeability derivatives of `size` cells in parallel and
+    Computes the Brooks-Corey relative permeability derivatives of `size` cells in parallel and
     write them to the output arrays.
 
     Per-cell inputs are flat arrays, or a single value shared by every cell.
@@ -902,7 +902,7 @@ def compute_brooks_corey_relative_permeabilities_compiled(
     minimum_gas_relperm: Number | None = None,
 ) -> tuple[NumberOrArray[NDimension], NumberOrArray[NDimension], NumberOrArray[NDimension]]:
     """
-    Brooks-Corey relative permeabilities computed by the compiled parallel loop, for the
+    Returns Brooks-Corey relative permeabilities computed by the compiled parallel loop, for the
     built-in mixing rule identified by `rule_id`.
 
     The parameters match `compute_brooks_corey_relative_permeabilities`, with the mixing rule
@@ -1000,7 +1000,7 @@ def compute_brooks_corey_relative_permeability_derivatives_compiled(
     minimum_gas_relperm: Number | None = None,
 ) -> RelativePermeabilityDerivatives:
     """
-    Brooks-Corey relative permeability derivatives computed by the compiled parallel loop, for
+    Returns Brooks-Corey relative permeability derivatives computed by the compiled parallel loop, for
     the built-in mixing rule identified by `rule_id`.
 
     The parameters match `compute_brooks_corey_relative_permeability_derivatives`, with the
@@ -1133,7 +1133,7 @@ def compute_brooks_corey_values_and_derivatives_cell(
     Number, Number, Number, Number, Number, Number, Number, Number, Number, Number, Number, Number
 ]:
     """
-    Brooks-Corey relative permeabilities and all nine partial derivatives of one cell, from a
+    Returns Brooks-Corey relative permeabilities and all nine partial derivatives of one cell, from a
     single evaluation of the underlying two-phase curves and mixing rule.
 
     The results are identical to `compute_brooks_corey_values_cell` and
@@ -1300,7 +1300,7 @@ def compute_brooks_corey_values_and_derivatives_loop(
     dkrg_dsg: NumberArray[OneDimension],
 ) -> None:
     """
-    Compute the Brooks-Corey relative permeabilities and all nine derivatives of `size` cells in
+    Computes the Brooks-Corey relative permeabilities and all nine derivatives of `size` cells in
     parallel and write them to the output arrays.
 
     Per-cell inputs are flat arrays, or a single value shared by every cell.
@@ -1368,7 +1368,7 @@ def compute_brooks_corey_relative_permeabilities_and_derivatives(
     minimum_gas_relperm: Number | None = None,
 ) -> tuple[RelativePermeabilities, RelativePermeabilityDerivatives]:
     """
-    Brooks-Corey relative permeabilities and derivatives computed together by the compiled
+    Returns Brooks-Corey relative permeabilities and derivatives computed together by the compiled
     parallel loop, for the built-in mixing rule identified by `rule_id`.
 
     The parameters match `compute_brooks_corey_relative_permeability_derivatives_compiled`. The
@@ -1823,7 +1823,7 @@ def compute_brooks_corey_phase_curve(
     zeros: NumberArray[NDimension],
 ) -> tuple[NumberArray[NDimension], NumberArray[NDimension]]:
     """
-    Corey power-law relative permeability of one phase and its slope with respect to
+    Returns Corey power-law relative permeability of one phase and its slope with respect to
     the saturation of that phase.
 
     The relative permeability is `maximum_relperm * Se ** exponent`, where `Se` is the
@@ -1865,7 +1865,7 @@ def compute_brooks_corey_complement_curve(
     zeros: NumberArray[NDimension],
 ) -> tuple[NumberArray[NDimension], NumberArray[NDimension]]:
     """
-    Corey-shaped complement `(1 - kr / kr_max) ** exponent` of a phase relative
+    Returns Corey-shaped complement `(1 - kr / kr_max) ** exponent` of a phase relative
     permeability, and its slope with respect to the saturation that drives `kr`.
 
     This is the two-phase relative permeability of the displaced phase that the
@@ -1912,7 +1912,7 @@ def compute_brooks_corey_water_wet_system(
     zeros: NumberArray[NDimension],
 ) -> WettabilitySystem:
     """
-    Brooks-Corey relative permeabilities and derivatives of a water-wet system.
+    Returns Brooks-Corey relative permeabilities and derivatives of a water-wet system.
 
     Water and gas follow Corey power laws of their own saturation. Oil follows the
     three-phase mixing rule applied to Corey-shaped two-phase oil curves, and its
@@ -2038,7 +2038,7 @@ def compute_brooks_corey_oil_wet_system(
     zeros: NumberArray[NDimension],
 ) -> WettabilitySystem:
     """
-    Brooks-Corey relative permeabilities and derivatives of an oil-wet system.
+    Returns Brooks-Corey relative permeabilities and derivatives of an oil-wet system.
 
     Oil is the wetting phase, so oil follows a Corey power law of oil saturation and
     gas a Corey power law of gas saturation. Water is the intermediate phase, so it
@@ -2167,7 +2167,7 @@ def compute_brooks_corey_relative_permeability_derivatives(
     minimum_gas_relperm: Number | None = None,
 ) -> RelativePermeabilityDerivatives:
     """
-    Compute all nine partial derivatives of the three-phase relative permeabilities
+    Computes all nine partial derivatives of the three-phase relative permeabilities
     with respect to water, oil and gas saturation using the Brooks-Corey model.
 
     The two-phase Corey power-law derivatives are computed analytically through the
@@ -2485,7 +2485,7 @@ class BrooksCoreyRelPermTable(RelativePermeabilityTable):
         NumberOrArray[NDimension],
     ]:
         """
-        Endpoint saturations for an evaluation: each argument if given, otherwise the value set
+        Returns endpoint saturations for an evaluation: each argument if given, otherwise the value set
         on the model.
 
         :param irreducible_water_saturation: Irreducible water saturation, or `None` to use the
@@ -2548,7 +2548,7 @@ class BrooksCoreyRelPermTable(RelativePermeabilityTable):
         **kwargs: typing.Any,
     ) -> tuple[RelativePermeabilities, RelativePermeabilityDerivatives]:
         """
-        Compute the relative permeabilities and all nine partial derivatives together.
+        Computes the relative permeabilities and all nine partial derivatives together.
 
         The results are the same as calling `evaluate` and `derivatives` separately. For the
         built-in mixing rules the two share one pass over the cells, which is about as fast as
@@ -2634,7 +2634,7 @@ class BrooksCoreyRelPermTable(RelativePermeabilityTable):
         **kwargs: typing.Any,
     ) -> RelativePermeabilities:
         """
-        Compute relative permeabilities for water, oil, and gas.
+        Computes relative permeabilities for water, oil, and gas.
 
         Supports both scalar and array inputs for saturations.
 
@@ -2691,7 +2691,7 @@ class BrooksCoreyRelPermTable(RelativePermeabilityTable):
         **kwargs: typing.Any,
     ) -> RelativePermeabilityDerivatives:
         """
-        Compute all nine partial derivatives of the three-phase relative
+        Computes all nine partial derivatives of the three-phase relative
         permeabilities with respect to water saturation, oil saturation, and
         gas saturation using the Brooks-Corey model.
 

@@ -59,7 +59,7 @@ class CapillaryPressureTable:
         **kwargs: typing.Any,
     ) -> CapillaryPressures:
         """
-        Compute capillary pressures for three-phase system.
+        Computes capillary pressures for three-phase system.
 
         Supports both scalar and array inputs.
 
@@ -78,7 +78,7 @@ class CapillaryPressureTable:
         **kwargs: typing.Any,
     ) -> CapillaryPressureDerivatives:
         """
-        Compute capillary pressure derivatives for three-phase system.
+        Computes capillary pressure derivatives for three-phase system.
 
         Supports both scalar and array inputs.
 
@@ -97,7 +97,7 @@ class CapillaryPressureTable:
         **kwargs: typing.Any,
     ) -> tuple[CapillaryPressures, CapillaryPressureDerivatives]:
         """
-        Compute the capillary pressures and their derivatives together.
+        Computes the capillary pressures and their derivatives together.
 
         Models that can share work between the two computations override this. The default
         evaluates the capillary pressures and then the derivatives, so it gives the same results
@@ -340,7 +340,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
 
     def get_reference_axis_phase(self) -> FluidPhase:
         """
-        The phase whose saturation is this table's reference axis: the wetting phase for
+        Returns the phase whose saturation is this table's reference axis: the wetting phase for
         `reference_phase="wetting"`, otherwise the non-wetting phase.
         """
         return typing.cast(
@@ -350,7 +350,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
 
     def get_connate_water_saturation(self) -> Number:
         """
-        Connate water saturation (swco), read off this table's own saturation axis.
+        Returns connate water saturation (swco), read off this table's own saturation axis.
         `0.0` if water is not one of the table's two phases.
 
         - Water axis: the axis minimum, `swco = Sw_min`.
@@ -369,7 +369,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
         non_wetting_saturation: NumberOrArray[NDimension],
     ) -> NumberOrArray[NDimension]:
         """
-        Return whichever saturation array corresponds to the reference axis.
+        Returns whichever saturation array corresponds to the reference axis.
 
         :param wetting_saturation: Current wetting-phase saturation.
         :param non_wetting_saturation: Current non-wetting-phase saturation.
@@ -384,7 +384,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
         reference: NumberOrArray[NDimension],
     ) -> NumberOrArray[NDimension]:
         """
-        Evaluate the capillary pressure PCHIP interpolant at `reference`,
+        Evaluates the capillary pressure PCHIP interpolant at `reference`,
         applying constant extrapolation at the boundaries. Result is cast
         to `self.dtype`.
 
@@ -408,7 +408,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
 
     def _d_query(self, reference: NumberOrArray[NDimension]) -> NumberOrArray[NDimension]:
         """
-        Evaluate the analytical PCHIP derivative at `reference`, returning
+        Evaluates the analytical PCHIP derivative at `reference`, returning
         zero (in `self.dtype`) outside the knot range.
 
         :param reference: Query saturation value(s) - scalar or array.
@@ -438,7 +438,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
         non_wetting_saturation: NumberOrArray[NDimension] | None = None,
     ) -> NumberOrArray[NDimension]:
         """
-        Get capillary pressure at the given saturation(s).
+        Gets capillary pressure at the given saturation(s).
 
         When `reference_phase="wetting"`, only `wetting_saturation` is
         needed. When `reference_phase="non_wetting"`, `non_wetting_saturation` must be supplied.
@@ -460,7 +460,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
         non_wetting_saturation: NumberOrArray[NDimension] | None = None,
     ) -> NumberOrArray[NDimension]:
         """
-        Derivative of capillary pressure with respect to the reference
+        Returns derivative of capillary pressure with respect to the reference
         saturation axis of this table: `dPc / d(reference_saturation)`.
 
         Evaluated from the analytical PCHIP derivative. Zero (in `self.dtype`)
@@ -485,7 +485,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
         **kwargs: typing.Any,
     ) -> CapillaryPressures:
         """
-        Compute capillary pressures for the three-phase system from this
+        Computes capillary pressures for the three-phase system from this
         two-phase table alone, so it can be used standalone anywhere a full
         `CapillaryPressureTable` is expected.
 
@@ -592,7 +592,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
         **kwargs: typing.Any,
     ) -> CapillaryPressureDerivatives:
         """
-        Compute the four three-phase capillary-pressure derivatives from
+        Computes the four three-phase capillary-pressure derivatives from
         this two-phase table alone, so it can be used standalone anywhere a
         full `CapillaryPressureTable` is expected.
 
@@ -737,7 +737,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `TwoPhaseCapillaryPressureTable` with `capillary_pressure`
+        Returns a new `TwoPhaseCapillaryPressureTable` with `capillary_pressure`
         rescaled to *target*.
 
         `reference_saturation` is dimensionless and is copied unchanged.
@@ -780,7 +780,7 @@ class TwoPhaseCapillaryPressureTable(CapillaryPressureTable):
         dtype: npt.DTypeLike = None,
     ) -> Self:
         """
-        Build a `TwoPhaseCapillaryPressureTable` for one saturation region from a `DeckFile`.
+        Builds a `TwoPhaseCapillaryPressureTable` for one saturation region from a `DeckFile`.
 
         Capillary pressure is only available in the **first** saturation-function
         family (`SWOF` / `SGOF`); the **second** family (`SWFN` / `SGFN`) also
@@ -929,7 +929,7 @@ def query_oil_water_capillary_pressure(
     derivative: bool = False,
 ) -> NumberOrArray[NDimension]:
     """
-    Query an oil-water table at the current water saturation, with the oil saturation of
+    Queries an oil-water table at the current water saturation, with the oil saturation of
     the two-phase system `So = 1 - Sw`. `Pcow` is a function of `Sw` only.
 
     With `derivative=True`, the result is the derivative with respect to `Sw`, with the sign
@@ -968,7 +968,7 @@ def query_gas_oil_capillary_pressure(
     derivative: bool = False,
 ) -> NumberOrArray[NDimension]:
     """
-    Query a gas-oil table at the current gas saturation, with the oil saturation of the
+    Queries a gas-oil table at the current gas saturation, with the oil saturation of the
     two-phase system at connate water, `So = 1 - swc - Sg`. `Pcgo` is a function of `Sg` only.
 
     With `derivative=True`, the result is the derivative with respect to `Sg`, with the sign
@@ -1047,7 +1047,7 @@ class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
     """Flag indicating support for array inputs."""
 
     def __attrs_post_init__(self) -> None:
-        """Validate that the tables are set up correctly for three-phase flow."""
+        """Validates that the tables are set up correctly for three-phase flow."""
         if {
             self.oil_water_table.wetting_phase,
             self.oil_water_table.non_wetting_phase,
@@ -1083,12 +1083,12 @@ class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
 
     @property
     def dtype(self) -> np.dtype:
-        """Shared `dtype` of the two underlying two-phase tables."""
+        """Returns shared `dtype` of the two underlying two-phase tables."""
         return np.dtype(self.oil_water_table.dtype)
 
     @property
     def unit_system(self) -> UnitSystem:  # type: ignore[override]
-        """Shared `unit_system` of the two underlying two-phase tables."""
+        """Returns shared `unit_system` of the two underlying two-phase tables."""
         return self.oil_water_table.unit_system
 
     def get_oil_water_wetting_phase(self) -> FluidPhase:
@@ -1098,7 +1098,7 @@ class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
         return typing.cast(FluidPhase, self.gas_oil_table.wetting_phase)
 
     def get_connate_water_saturation(self) -> Number:
-        """Connate water saturation, read off the oil-water table's saturation axis."""
+        """Returns connate water saturation, read off the oil-water table's saturation axis."""
         return self.oil_water_table.get_connate_water_saturation()
 
     def evaluate(
@@ -1109,7 +1109,7 @@ class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
         **kwargs: typing.Any,
     ) -> CapillaryPressures:
         """
-        Compute capillary pressures for the three-phase system.
+        Computes capillary pressures for the three-phase system.
 
         `Pcow` is a function of `Sw` only and `Pcgo` of `Sg` only: each two-phase table is
         queried at its own system's saturations (`So = 1 - Sw` for oil-water and
@@ -1142,7 +1142,7 @@ class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
         **kwargs: typing.Any,
     ) -> CapillaryPressureDerivatives:
         """
-        Compute the partial derivatives of the oil-water and gas-oil capillary
+        Computes the partial derivatives of the oil-water and gas-oil capillary
         pressures with respect to saturation.
 
         `Pcow` depends on `Sw` only and `Pcgo` on `Sg` only (see `evaluate`), so
@@ -1195,7 +1195,7 @@ class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `ThreePhaseCapillaryPressureTable` with both sub-tables
+        Returns a new `ThreePhaseCapillaryPressureTable` with both sub-tables
         rescaled to *target*.
 
         :param target: Target `UnitSystem`.
@@ -1223,10 +1223,10 @@ class ThreePhaseCapillaryPressureTable(CapillaryPressureTable):
         dtype: npt.DTypeLike = None,
     ) -> Self:
         """
-        Build a `ThreePhaseCapillaryPressureTable` for one saturation region from
+        Builds a `ThreePhaseCapillaryPressureTable` for one saturation region from
         a `DeckFile`.
 
-        Detects which Eclipse saturation-function keyword family is present and
+        Detects which saturation-function keyword family is present and
         builds the oil-water and gas-oil two-phase sub-tables automatically:
 
         **First family** (detected when `SWOF` or `SGOF` is present):

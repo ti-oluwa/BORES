@@ -29,7 +29,7 @@ def make_boundary_region(
     classified: typing.Mapping[Side, IntArray[OneDimension]] | None = None,
 ) -> BoundaryRegion:
     """
-    Build a `BoundaryRegion` covering one axis-aligned flank of `grid`.
+    Builds a `BoundaryRegion` covering one axis-aligned flank of `grid`.
 
     ```python
     aquifer_region = make_boundary_region(
@@ -74,7 +74,7 @@ def make_boundary_conditions(
     unit_system: UnitSystem | None = None,
 ) -> BoundaryConditions:
     """
-    Build a complete (axis-aligned) `BoundaryConditions` from a `{side: condition}`
+    Builds a complete (axis-aligned) `BoundaryConditions` from a `{side: condition}`
     mapping.
 
     ```python

@@ -1,5 +1,5 @@
 """
-Utilities for building well model definition objects from parsed Eclipse deck records.
+Utilities for building well model definition objects from parsed deck records.
 """
 
 import itertools
@@ -121,7 +121,7 @@ __all__ = [
 
 def connection_layers(record: typing.Mapping[str, typing.Any], *, keyword: str) -> tuple[int, int]:
     """
-    The first and last k layer a `WELOPEN` or `WPIMULT` record targets, with `0` meaning any.
+    Returns the first and last k layer a `WELOPEN` or `WPIMULT` record targets, with `0` meaning any.
 
     A record parsed from a deck carries one `k`, so both layers are that value. A record
     built in code may give a layer range as `k1` and `k2` instead.
@@ -161,7 +161,7 @@ def replay_open_status(
     current_time: float,
 ) -> CompletionStatus:
     """
-    A well's own open or shut flag at a point in the schedule, found by replaying every record
+    Returns a well's own open or shut flag at a point in the schedule, found by replaying every record
     that sets it, in schedule order.
 
     A `WCONPROD` or `WCONINJE` record sets it through its status item, and an omitted status
@@ -358,7 +358,7 @@ def load_well_from_records(
         record: typing.Mapping[str, typing.Any], *, keyword: str
     ) -> list[dict[str, typing.Any]]:
         """
-        The specs a `WPIMULT` or `WELOPEN` record acts on, as of its own time.
+        Returns the specs a `WPIMULT` or `WELOPEN` record acts on, as of its own time.
 
         Raises `ValidationError` if the record matches none.
         """
@@ -495,7 +495,7 @@ def load_well_from_records(
 
 def positive_or_none(value: typing.Any) -> float | None:
     """
-    A deck value that means "work it out" when it is missing, zero or negative.
+    Returns a deck value that means "work it out" when it is missing, zero or negative.
 
     :param value: The value as parsed, possibly `None`.
     :returns: The value as a float if it is positive, else `None`.
@@ -557,7 +557,7 @@ def apply_well_segments(
     raises an error rather than being dropped. `COMPDAT` still owns
     which grid cells a well connects to, `WELSEGS`/`COMPSEGS` only add
     each connection's own measured depth on top of that, matching how
-    Eclipse itself always requires `COMPDAT` alongside a multi-segment
+    A deck always requires `COMPDAT` alongside a multi-segment
     well's own `WELSEGS`/`COMPSEGS`, rather than deriving connections
     from a survey the way `bores`'s own `WellTrajectory` does for
     a hand-built deviated well elsewhere.
@@ -626,7 +626,7 @@ def apply_well_segments(
         # via each detail record's own outlet_segment. Records are expected
         # in an order where a segment's outlet is already resolved by the
         # time that segment's own record is reached, the same assumption
-        # Eclipse itself makes.
+        # a deck itself makes.
         tubing_length_to_first_segment = header["tubing_length_to_first_segment"]
         reference_depth = header["reference_depth"]
         mode = header.get("length_depth_mode") or "INC"
@@ -824,7 +824,7 @@ def from_deck_gas_rate(value: float | None, unit_system: UnitSystem) -> float | 
     :param value: Raw gas rate value as written in the deck, or None.
     :param unit_system: The deck's unit system.
     :returns: value unchanged, except multiplied by 1000 when
-        `unit_system` is FIELD. Eclipse's FIELD convention reports gas
+        `unit_system` is FIELD. A FIELD deck reports gas
         rates in Mscf/day; this codebase's internal FIELD convention is
         raw scf/day, dimensionally consistent with oil/water in stb/day.
         Not applied for any other `unit_system`.
@@ -868,7 +868,7 @@ def select_current_records(
 
 def is_status_only_producer_record(record: typing.Mapping[str, typing.Any]) -> bool:
     """
-    Whether a `WCONPROD` record only changes the well's status.
+    Checks whether a `WCONPROD` record only changes the well's status.
 
     A record that shuts or stops a well and leaves the control mode defaulted, such as
     `'WELL' 'SHUT' 15* /`, sets no control: only the status takes effect and the well keeps
@@ -887,7 +887,7 @@ def load_producer_control_from_record(
     record: typing.Mapping[str, typing.Any], unit_system: UnitSystem
 ) -> ProducerControl:
     """
-    Build a `ProducerControl` from one `WCONPROD` record.
+    Builds a `ProducerControl` from one `WCONPROD` record.
 
     :param record: One parsed `WCONPROD` record.
     :param unit_system: The deck's unit system.
@@ -941,7 +941,7 @@ def load_injector_control_from_record(
     record: typing.Mapping[str, typing.Any], unit_system: UnitSystem
 ) -> InjectorControl:
     """
-    Build an `InjectorControl` from one `WCONINJE` record.
+    Builds an `InjectorControl` from one `WCONINJE` record.
 
     :param record: One parsed `WCONINJE` record.
     :param unit_system: The deck's unit system.
@@ -1288,7 +1288,7 @@ def load_groups_from_records(
     gruptree_records: typing.Sequence[typing.Mapping[str, typing.Any]],
 ) -> WellGroups:
     """
-    Build a `WellGroups` hierarchy from `GRUPTREE` records.
+    Builds a `WellGroups` hierarchy from `GRUPTREE` records.
 
     :param gruptree_records: All parsed `GRUPTREE` records (`child`/`parent` fields).
     :returns: `WellGroups`.
@@ -1307,7 +1307,7 @@ def load_group_control_from_record(
     unit_system: UnitSystem,
 ) -> GroupControl:
     """
-    Build a `GroupControl` from one `GCONPROD`/`GCONINJE` record.
+    Builds a `GroupControl` from one `GCONPROD`/`GCONINJE` record.
 
     :param record: One parsed `GCONPROD` or `GCONINJE` record.
     :param is_injection: `True` for a `GCONINJE` record, `False` for `GCONPROD`.
@@ -1468,7 +1468,7 @@ WELL_DEPENDENT_KEYWORDS = (
 
 def find_well_keyword_problem(deck_file: DeckFile) -> str | None:
     """
-    Check that the deck's well keywords are consistent, before any of them is read.
+    Checks that the deck's well keywords are consistent, before any of them is read.
 
     A deck without wells is fine. What is not fine is a deck that defines wells only halfway
     (`WELSPECS` without `COMPDAT`, or the reverse), or that sets controls, limits or
@@ -1498,7 +1498,7 @@ def find_well_keyword_problem(deck_file: DeckFile) -> str | None:
 
 def deck_defines_wells(deck_file: DeckFile) -> bool:
     """
-    Whether the deck defines any wells.
+    Checks whether the deck defines any wells.
 
     :param deck_file: The deck to check.
     :returns: `True` if the deck has `WELSPECS` and `COMPDAT`, `False` if it has neither.
@@ -1754,7 +1754,7 @@ WLIFT_TRIGGER_QUANTITIES: dict[str, RateQuantity] = {
 
 def get_item_start_time(item: ScheduleItem["CompiledBlackOilModel"]) -> Number:
     """
-    The elapsed time a schedule item first becomes live.
+    Returns the elapsed time a schedule item first becomes live.
 
     :param item: A schedule item whose event is a `TimeEvent`, an interval event, or a
         `TimeWindowEvent` combined with a condition by `AllOf`.
@@ -2236,7 +2236,7 @@ def load_well_schedule(
 
 def load_well_control_spec(deck_file: DeckFile) -> WellControlSpec:
     """
-    Build the numerical settings for resolving well controls from a deck.
+    Builds the numerical settings for resolving well controls from a deck.
 
     - `unit_system` is the deck's.
     - `connection_pressure_mode` is `HYDROSTATIC` when the deck defines wells. Wells read from a
@@ -2244,7 +2244,7 @@ def load_well_control_spec(deck_file: DeckFile) -> WellControlSpec:
       relate BHP to THP at one depth only), so `HYDRAULIC` would fail as soon as a control is
       resolved. A deck with no wells keeps the default.
     - `max_fixed_point_iterations` and `max_bisection_iterations` follow `TUNING`'s `MXWSIT` and
-      `MXWPIT`, but only upwards. Eclipse's defaults (8 and 8) count iterations of a different
+      `MXWPIT`, but only upwards. The defaults (8 and 8) count iterations of a different
       well solver, and taking them literally would cut these searches short of converging, so a
       deck can ask for more iterations than the defaults and never fewer.
 

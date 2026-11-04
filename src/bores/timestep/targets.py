@@ -40,7 +40,7 @@ class PeriodicTarget:
 
     def next_after(self, time: Number, *, tolerance: Number) -> Number | None:
         """
-        Return the first recurring target after `time`.
+        Returns the first recurring target after `time`.
 
         :param time: The time to look beyond.
         :param tolerance: Occurrences within this distance after `time` count as `time` itself.
@@ -58,7 +58,7 @@ class PeriodicTarget:
 
     def snap(self, time: Number, *, tolerance: Number) -> Number | None:
         """
-        Return the recurring target nearest `time` within `tolerance`.
+        Returns the recurring target nearest `time` within `tolerance`.
 
         :param time: A time that may have landed just beside an occurrence.
         :param tolerance: How close counts as landing on it.
@@ -119,7 +119,7 @@ class TimeTargets:
 
     def scaled(self, factor: Number) -> Self:
         """
-        Return a copy with all target times scaled by `factor`.
+        Returns a copy with all target times scaled by `factor`.
 
         :param factor: Multiplier from the current time unit to the new one.
         :returns: A copy with every time and recurrence expressed in the new unit.
@@ -138,7 +138,7 @@ class TimeTargets:
 
     def next_after(self, time: Number, *, tolerance: Number = 0.0) -> Number | None:
         """
-        Return the earliest target after `time`.
+        Returns the earliest target after `time`.
 
         :param time: The time to look beyond.
         :param tolerance: A target within this distance after `time` counts as `time` itself,
@@ -157,7 +157,7 @@ class TimeTargets:
 
     def snap(self, time: Number, *, tolerance: Number) -> Number | None:
         """
-        Return the latest target within `tolerance` of `time`.
+        Returns the latest target within `tolerance` of `time`.
 
         :param time: A time that may have landed just beside a target.
         :param tolerance: How close counts as landing on it.
@@ -200,7 +200,7 @@ class SupportsReportTimes(typing.Protocol):
 
     @property
     def report_times(self) -> typing.Sequence[Number]:
-        """Report times, in the source's own time unit."""
+        """Reports times, in the source's own time unit."""
         ...
 
 

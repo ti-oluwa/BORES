@@ -227,7 +227,7 @@ def relax_pressures(
 @numba.njit(cache=True)
 def has_settled(new_total_rate: Number, total_rate: Number, tolerance: Number) -> Boolean:
     """
-    Whether a total rate has stopped changing.
+    Checks whether a total rate has stopped changing.
 
     :param new_total_rate: The total rate of this iteration.
     :param total_rate: The total rate of the iteration before.
@@ -244,7 +244,7 @@ def get_seed_connection_rates(
     workspace: PerforationWorkspace, warm_start: Boolean
 ) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension], NumberArray[OneDimension]]:
     """
-    The connection rates a solve builds its first pressure profile from.
+    Returns the connection rates a solve builds its first pressure profile from.
 
     :param workspace: The well's workspace.
     :param warm_start: Whether to use the connection rates already in the workspace, as a

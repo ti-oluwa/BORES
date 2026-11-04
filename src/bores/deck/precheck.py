@@ -23,7 +23,7 @@ KeywordLike = str | Keyword[typing.Any]
 
 
 def keyword_name(keyword: KeywordLike) -> str:
-    """Return the upper-case name of a keyword given as a name or a `Keyword`."""
+    """Returns the upper-case name of a keyword given as a name or a `Keyword`."""
     return keyword.name.upper() if isinstance(keyword, Keyword) else keyword.upper()
 
 
@@ -34,7 +34,7 @@ def find_missing(
     any_of: typing.Iterable[typing.Iterable[KeywordLike]] = (),
 ) -> list[str]:
     """
-    Describe what a deck lacks out of what a loader needs.
+    Describes what a deck lacks out of what a loader needs.
 
     The whole question is answered with a single `DeckFile.has_many` call.
 

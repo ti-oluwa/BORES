@@ -1316,7 +1316,7 @@ def get_well_rate_arrays(
     *, model: "CompiledBlackOilModel", context: ScheduleContext, well_name: str, caller: str
 ) -> tuple[Integer, "WellsWorkspace"]:
     """
-    The well's row and the workspace's well arrays, for an event that reads solved rates.
+    Returns the well's row and the workspace's well arrays, for an event that reads solved rates.
 
     :param model: The model being scheduled against.
     :param context: The current moment's context.

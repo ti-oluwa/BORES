@@ -23,7 +23,7 @@ __all__ = ["load_run_spec"]
 
 def load_run_spec(deck_file: DeckFile) -> RunSpec:
     """
-    Build the run configuration a deck describes.
+    Builds the run configuration a deck describes.
 
     A deck only speaks to some of what a `RunSpec` holds. These come from it:
 
@@ -40,13 +40,13 @@ def load_run_spec(deck_file: DeckFile) -> RunSpec:
       and `VFPIDIMS`.
     - `data_check_only`: whether the deck has `NOSIM`.
     - `physics_options.minimum_pore_volume`: `MINPV`, in pore volume units.
-    - `physics_options.well_index_regime_constant`: 0, since Eclipse's well index has none.
+    - `physics_options.well_index_regime_constant`: 0, since a deck's well index has none.
     - `physics_options` limits on how fast gas dissolves and oil vaporizes: `DRSDT` and `DRVDT`
       (the ones at the start).
     - `output_options`: `NOECHO`, `FMTIN`, `FMTOUT`, `UNIFIN`, `UNIFOUT`, `INIT`, `GRIDFILE`,
       `RUNSUM`, `MESSAGES` and the `RPT*` report requests.
     - `newton_options.maximum_newton_iterations`: the `TUNING` item of that name in effect at the
-      start, only if the deck sets it to something other than Eclipse's default and within the
+      start, only if the deck sets it to something other than its default and within the
       range `NewtonOptions` accepts.
 
     Everything else (solvers, tolerances, capillary and gravity switches, ...) has no deck
@@ -73,7 +73,7 @@ def load_run_spec(deck_file: DeckFile) -> RunSpec:
         newton_settings["maximum_newton_iterations"] = int(maximum_newton_iterations)
 
     physics_settings: dict[str, typing.Any] = load_dissolution_limits(deck_file)
-    # Eclipse's well index has no regime constant, so a deck's index is the steady state one
+    # A deck's well index has no regime constant, so a deck's index is the steady state one
     physics_settings["well_index_regime_constant"] = 0.0
     minimum_pore_volume = load_minimum_pore_volume(deck_file)
     if minimum_pore_volume is not None:

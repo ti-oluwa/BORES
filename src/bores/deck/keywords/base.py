@@ -82,10 +82,10 @@ class Field(typing.Generic[T]):
 
     def parse(self, raw: str | None, keyword: str) -> T | None:
         """
-        Parse one Eclipse field value.
+        Parses one deck field value.
 
         - `raw=None` means the field was omitted entirely.
-        - `raw="1*"` is Eclipse's explicit "use the default value" designator.
+        - `raw="1*"` is the explicit "use the default value" designator.
 
         :param raw: Raw token string, or `None` if the field is absent.
         :param keyword: Keyword name for error messages.
@@ -99,7 +99,7 @@ class Field(typing.Generic[T]):
                 raise DeckParseError(f"{keyword} record: missing required field {self.name!r}.")
             return self.default
 
-        # Eclipse explicit default ("1*").
+        # Explicit default ("1*").
         if raw == "1*":
             if self.required:
                 raise DeckParseError(
@@ -126,7 +126,7 @@ class Field(typing.Generic[T]):
 
 class Keyword(typing.Generic[T], abc.ABC):
     """
-    Base class for a single supported Eclipse keyword.
+    Base class for a single supported deck keyword.
 
     A `Keyword` is pure parsing / shape logic: given the
     `bores.deck.core.Record`(s) that belong to it (already located by
@@ -156,7 +156,7 @@ class Keyword(typing.Generic[T], abc.ABC):
         schedule_times: dict[int, float] | None = None,
     ) -> T | None:
         """
-        Parse this keyword's value out of `deck`.
+        Parses this keyword's value out of `deck`.
 
         :param deck: The scanned deck to read records from.
         :param dims: Resolved grid dimensions, or `None` if
@@ -176,7 +176,7 @@ def parse_tokens(
     keyword: str, fields: typing.Sequence[Field[T]], tokens: typing.Sequence[str]
 ) -> dict[str, T | None]:
     """
-    Convert a flat token sequence to a `{field_name: value}` dict
+    Converts a flat token sequence to a `{field_name: value}` dict
     according to `fields`.
 
     :param keyword: Keyword name, used only in error messages.
@@ -245,7 +245,7 @@ class RepeatedRecordKeyword(Keyword[list[dict[str, T | None]]]):
     Note:
         The body is split on `"/"` before tokenising individual lines.
         Quoted field values that contain a literal `"/"` character are
-        therefore not supported (they are vanishingly rare in Eclipse
+        therefore not supported (they are vanishingly rare in decks
         practice).
     """
 
@@ -293,7 +293,7 @@ class ArrayKeyword(Keyword[FloatArray[OneDimension]]):
     subclass needs to implement it.
 
     If the keyword itself never appears as a standalone data block but *is*
-    the target of one or more operator records (a common Eclipse idiom for
+    the target of one or more operator records (a common deck idiom for
     keywords like `MULTX` that are only ever set via `BOX`/`EQUALS`),
     the array still starts from `default_value` and operators are applied
     on top.
@@ -367,11 +367,11 @@ class ArrayKeyword(Keyword[FloatArray[OneDimension]]):
         schedule_times: dict[int, float] | None = None,
     ) -> FloatArray[OneDimension] | None:
         """
-        Parse and return the resolved per-cell array.
+        Parses and returns the resolved per-cell array.
 
         :param deck: The scanned deck.
         :param dims: Resolved grid dimensions (required).
-        :returns: Shape `(n_cells,)` array in Eclipse flat order
+        :returns: Shape `(n_cells,)` array in flat order
             (i-fastest), or `None` if the keyword is absent from the
             deck and no operator targets it.
         :raises DeckParseError: If `dims` is `None` or the keyword
@@ -394,13 +394,13 @@ class ArrayKeyword(Keyword[FloatArray[OneDimension]]):
         source_states: dict[tuple[str, int], FloatArray[OneDimension]] | None = None,
     ) -> FloatArray[OneDimension] | None:
         """
-        Replay every event affecting this keyword's array - its own
+        Replays every event affecting this keyword's array - its own
         explicit data block(s) *and* every operator record targeting it -
         strictly in the order they occur in the deck.
 
         This is what makes e.g. `MULTX` set via `EQUALS` and later
         overwritten by an explicit `MULTX ... /` block (or vice versa)
-        behave like Eclipse, that is, whichever event is last in the file wins for
+        behave like a deck, that is, whichever event is last in the file wins for
         the cells it touches.
 
         :param deck: Scanned deck.
@@ -449,7 +449,7 @@ class ArrayKeyword(Keyword[FloatArray[OneDimension]]):
         source_states: dict[tuple[str, int], FloatArray[OneDimension]],
     ) -> FloatArray[OneDimension] | None:
         """
-        Resolve the source array of a `COPY` *as of* the point in the file where the `COPY`
+        Resolves the source array of a `COPY` *as of* the point in the file where the `COPY`
         itself occurs, not as the source ends up after later events.
 
         :param deck: Scanned deck.
@@ -503,7 +503,7 @@ class ArrayKeyword(Keyword[FloatArray[OneDimension]]):
         strict: bool,
     ) -> None:
         """
-        Write one explicit data block of this keyword into `array`.
+        Writes one explicit data block of this keyword into `array`.
 
         The block must hold one value per cell, or (when the keyword has a `column_shape`) one per
         column. A single value standing for the whole array is accepted unless `strict`. Defaulted
@@ -551,7 +551,7 @@ class ArrayKeyword(Keyword[FloatArray[OneDimension]]):
             return
 
         if total_count == 1:
-            # One value for the whole grid. Eclipse does not allow it (an array needs a value
+            # One value for the whole grid. That is not allowed (an array needs a value
             # per cell), but it is unambiguous, so it is accepted unless asked to be strict.
             if strict:
                 raise DeckParseError(
@@ -570,7 +570,7 @@ class ArrayKeyword(Keyword[FloatArray[OneDimension]]):
 
     def _short_form_count(self, dims: GridDimensions) -> int:
         """
-        Return the number of tokens accepted in the short (column) form.
+        Returns the number of tokens accepted in the short (column) form.
 
         :param dims: Resolved grid dimensions.
         :returns: Product of the dimensions named in `self.column_shape`.
@@ -588,11 +588,11 @@ class ArrayKeyword(Keyword[FloatArray[OneDimension]]):
         dims: GridDimensions,
     ) -> npt.NDArray[np.float64]:
         """
-        Broadcast a short-form array to full `n_cells` length.
+        Broadcasts a short-form array to full `n_cells` length.
 
-        The short array covers the axes in `self.column_shape` in Eclipse
+        The short array covers the axes in `self.column_shape` in deck
         flat order (i fastest). The missing axes are tiled so that the
-        result is in standard Eclipse flat order `i + j*nx + k*nx*ny`.
+        result is in standard flat order `i + j*nx + k*nx*ny`.
 
         :param short_array: 1-D float64 array of length `_short_form_count(dims)`.
         :param dims: Resolved grid dimensions.
@@ -619,7 +619,7 @@ class ArrayKeyword(Keyword[FloatArray[OneDimension]]):
             target_shape[axis_indices[ax]] = int(dim_map[ax])
         arr_expanded = array.reshape(target_shape)
         full[:] = np.broadcast_to(arr_expanded, (int(dims.nx), int(dims.ny), int(dims.nz)))
-        return full.ravel(order="F")  # Eclipse flat order: i fastest
+        return full.ravel(order="F")  # Flat order: i fastest
 
     def _timeline(
         self,
@@ -629,7 +629,7 @@ class ArrayKeyword(Keyword[FloatArray[OneDimension]]):
         operations: list[Operation] | None = None,
     ) -> list[tuple[tuple[int, int], str, typing.Any]]:
         """
-        Build the ordered `(order, kind, payload)` events affecting this
+        Builds the ordered `(order, kind, payload)` events affecting this
         keyword: `("assign", Record)` for each of its own explicit
         data-block records, interleaved with `("operate", Operation)`
         for every operator record that targets it.
@@ -657,7 +657,7 @@ class ArrayKeyword(Keyword[FloatArray[OneDimension]]):
 
 def fill_from_runs(array: FloatArray[OneDimension], runs: typing.Iterable[NumericRun]) -> None:
     """
-    Write `runs` (as read by `parse_numeric_runs`, with no defaulted runs) into `array`, one
+    Writes `runs` (as read by `parse_numeric_runs`, with no defaulted runs) into `array`, one
     after another from its start.
 
     :param array: Flat array with room for every run. Modified in place.
@@ -687,9 +687,9 @@ MONTH_MAP: dict[str, int] = {
 
 def _parse_date(tokens: typing.Sequence[str], name: str) -> datetime.date:
     """
-    Parse a three-token Eclipse date `[day, month, year]` into a `datetime.date`.
+    Parses a three-token deck date `[day, month, year]` into a `datetime.date`.
 
-    Eclipse month tokens may be bare (`JAN`) or quoted (`'JAN'`);
+    Month tokens may be bare (`JAN`) or quoted (`'JAN'`);
     quoting is already stripped by `bores.deck.core.tokenize`.
 
     :param tokens: At least three string tokens: day, month abbreviation, year.
@@ -728,7 +728,7 @@ def _parse_date(tokens: typing.Sequence[str], name: str) -> datetime.date:
 
 def _parse_time_of_day(token: str, name: str) -> datetime.timedelta:
     """
-    Parse an Eclipse time of day `HH:MM:SS` or `HH:MM:SS.SSS` into the time elapsed since
+    Parses a deck time of day `HH:MM:SS` or `HH:MM:SS.SSS` into the time elapsed since
     midnight.
 
     :param token: The time token.
@@ -752,7 +752,7 @@ def _parse_time_of_day(token: str, name: str) -> datetime.timedelta:
 
 def _parse_datetime(tokens: typing.Sequence[str], name: str) -> datetime.datetime:
     """
-    Parse an Eclipse date with an optional time of day, `[day, month, year]` or
+    Parses a deck date with an optional time of day, `[day, month, year]` or
     `[day, month, year, time]`, into a `datetime.datetime`. A date without a time is midnight.
 
     :param tokens: Three or four string tokens: day, month abbreviation, year and, optionally,
@@ -804,7 +804,7 @@ class OptionListKeyword(Keyword[list[str]]):
     (`1*`) positions switch nothing on and are left out. The keyword being present with no options
     gives `[]`, so it stays distinguishable from `None`, the keyword being absent.
 
-    The names are not checked against a list: the options an Eclipse version accepts differ, and
+    The names are not checked against a list: the accepted options differ between simulator versions, and
     reading a deck is not the place to reject one.
     """
 
@@ -824,7 +824,7 @@ class OptionListKeyword(Keyword[list[str]]):
 
 class DateKeyword(Keyword[datetime.datetime]):
     """
-    A keyword whose single record is an Eclipse-format date
+    A keyword whose single record is an deck-format date
     `D MON YYYY /`, optionally followed by a time of day, `D MON YYYY HH:MM:SS /`.
 
     Used for `START`.
@@ -976,17 +976,17 @@ class TableKeyword(Keyword[list[Table[Number]]]):
 
     def _row_from_tokens(self, tokens: typing.Sequence[str]) -> TableRow[Number]:
         """
-        Convert a token list to a row dict using `self.columns`.
+        Converts a token list to a row dict using `self.columns`.
 
         Trailing optional columns that are absent from `tokens` fall back
-        to their declared `default` values. The Eclipse `1*` default
+        to their declared `default` values. The `1*` default
         designator is treated as absent (falls back to `default`).
         """
         return typing.cast("TableRow[Number]", parse_tokens(self.name, self.columns, tokens))
 
     def _parse_flat_tables(self, body: str) -> list[Table[Number]]:
         """
-        Parse a flat (immiscible/simple) keyword body into one table per region.
+        Parses a flat (immiscible/simple) keyword body into one table per region.
 
         Each non-empty `/`-delimited segment is one table: its tokens are chunked into
         `n_columns`-sized rows, which is unambiguous because every column in these tables is
@@ -1029,7 +1029,7 @@ class TableKeyword(Keyword[list[Table[Number]]]):
 
     def _parse_miscible(self, body: str) -> list[Table[Number]]:
         """
-        Parse a miscible (PVTO/PVTG-style) keyword body.
+        Parses a miscible (PVTO/PVTG-style) keyword body.
 
         Each `/`-terminated segment holds either:
 
@@ -1106,7 +1106,7 @@ TimeUnit = typing.Literal["days", "hours", "seconds"]
 
 def timedelta_to_timeunit(delta: datetime.timedelta, time_unit: TimeUnit) -> float:
     """
-    Convert the difference between two deck dates, including any time of day, to `time_unit`.
+    Converts the difference between two deck dates, including any time of day, to `time_unit`.
 
     :param delta: Difference between two deck dates.
     :param time_unit: Unit to express the difference in.
@@ -1249,7 +1249,7 @@ def get_schedule_times(deck: Deck, time_unit: TimeUnit = "days") -> dict[int, fl
 
 def get_report_times(deck: Deck, time_unit: TimeUnit = "days") -> list[float]:
     """
-    Every report time a deck asks for: each entry of every `TSTEP` and each date of every
+    Returns every report time a deck asks for: each entry of every `TSTEP` and each date of every
     `DATES`, as elapsed time since the start, and `0.0`. A `TSTEP 5*30 /` gives a report time
     after each of its five 30 day entries, not only after their sum.
 

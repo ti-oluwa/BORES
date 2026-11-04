@@ -55,7 +55,7 @@ def build_pchip_2d_interpolator(
     derivative: bool = False,
 ) -> typing.Callable[[NumberArray[NDimension], NumberArray[NDimension]], NumberArray[NDimension]]:
     """
-    Build a two-stage PCHIP 2-D interpolator for a property table.
+    Builds a two-stage PCHIP 2-D interpolator for a property table.
 
     Fits independent PCHIP interpolants along the pressure axis at each
     temperature knot (one vectorised fit for all of them), then re-interpolates
@@ -112,7 +112,7 @@ def evaluate_pchip_columns(
     query: npt.NDArray[np.floating],
 ) -> npt.NDArray[np.float64]:
     """
-    Evaluate one PCHIP per column of `columns`, each at its own query point.
+    Evaluates one PCHIP per column of `columns`, each at its own query point.
 
     A single `PchipInterpolator` is fitted to all columns at once (`axis=0`), and every
     column's cubic piece is then evaluated at its own `query` value straight from the
@@ -145,7 +145,7 @@ def build_pchip_2d_derivative_interpolator(
     dtype: npt.DTypeLike,
 ) -> typing.Callable[[NumberArray[NDimension], NumberArray[NDimension]], NumberArray[NDimension]]:
     """
-    Build a two-stage PCHIP interpolator for `∂table/∂P`.
+    Builds a two-stage PCHIP interpolator for `∂table/∂P`.
 
     For each temperature column, builds a PCHIP and takes its analytical
     first derivative (via `PchipInterpolator.derivative`), then
@@ -168,7 +168,7 @@ def build_bilinear_2d_derivative_interpolator(
     [NumberArray[NDimension], NumberArray[NDimension]], NumberArray[OneDimension]
 ]:
     """
-    Build the exact ∂table/∂P of a bilinear (kx=ky=1) surface.
+    Builds the exact ∂table/∂P of a bilinear (kx=ky=1) surface.
 
     `RectBivariateSpline.partial_derivative(1, 0)` requires `dx < kx`, which
     is never true for `kx=1` ("linear" interpolation) - scipy has no way to
@@ -220,7 +220,7 @@ def build_pchip_3d_derivative_interpolator(
     dtype: npt.DTypeLike,
 ) -> typing.Callable[[NumberArray[NDimension]], NumberArray[OneDimension]]:
     """
-    Build a three-stage PCHIP interpolator for `∂table/∂P` over
+    Builds a three-stage PCHIP interpolator for `∂table/∂P` over
     `(pressure, temperature, salinity)`.
 
     At every `(temperature, salinity)` grid node, builds a PCHIP along
@@ -252,7 +252,7 @@ def build_pchip_3d_interpolator(
     derivative: bool = False,
 ) -> typing.Callable[[NumberArray[NDimension]], NumberArray[OneDimension]]:
     """
-    Build a three-stage PCHIP interpolator over `(pressure, temperature, salinity)`.
+    Builds a three-stage PCHIP interpolator over `(pressure, temperature, salinity)`.
 
     At every `(temperature, salinity)` grid node a PCHIP along pressure is fitted (one
     vectorised fit for all nodes) and evaluated at each query point's own pressure. The
@@ -315,7 +315,7 @@ def build_bilinear_3d_derivative_interpolator(
     dtype: npt.DTypeLike,
 ) -> typing.Callable[[NumberArray[NDimension]], NumberArray[OneDimension]]:
     """
-    Build the exact `∂table/∂P` of a trilinear (`kx=ky=kz=1`) surface.
+    Builds the exact `∂table/∂P` of a trilinear (`kx=ky=kz=1`) surface.
 
     Same reasoning as `build_bilinear_2d_derivative_interpolator`: within a
     pressure cell, `∂z/∂P` is the bracketing pressure columns' slope,
@@ -373,7 +373,7 @@ def clip_compressibility(
     context: str = "compressibility",
 ) -> NumberArray[NDimension]:
     """
-    Clip a raw `-(1/B)·(dB/dP)` array to the physically valid range `[0, max_value]`.
+    Clips a raw `-(1/B)·(dB/dP)` array to the physically valid range `[0, max_value]`.
 
     Negative values are expected on saturated-branch (Rs/Rv-bracketed) tables -
     `PVTO`/`PVTG` - where this formula implicitly assumes constant Rs/Rv, which
@@ -467,7 +467,7 @@ so linear interpolation between tabulated pressures is far more accurate on `1/B
 
 def build_derived_tables(data: PVTData, pvt: StaticPVT, dtype: npt.DTypeLike = None) -> PVTData:
     """
-    Build `density_table` and `compressibility_table` if absent.
+    Builds `density_table` and `compressibility_table` if absent.
 
     Uses the standard reservoir-engineering formulas so that at
     simulation time every property is a single interpolator call.
@@ -656,7 +656,7 @@ def build_derived_tables(data: PVTData, pvt: StaticPVT, dtype: npt.DTypeLike = N
 
 
 def validate_pvt_data(data: PVTData) -> None:
-    """Validate grid monotonicity, shapes, and phase-specific field/table rules."""
+    """Validates grid monotonicity, shapes, and phase-specific field/table rules."""
     pressures = data.pressures
     temperatures = data.temperatures
     salinities = data.salinities
@@ -808,7 +808,7 @@ def validate_pvt_data(data: PVTData) -> None:
 
 
 def check_physical_consistency(data: PVTData) -> None:
-    """Phase-aware physical sanity checks on table values."""
+    """Returns phase-aware physical sanity checks on table values."""
     phase = typing.cast(FluidPhase, data.phase)
     if data.viscosity_table is not None and np.any(data.viscosity_table <= 0):
         raise ValidationError(f"{phase.value.upper()} viscosity must be positive everywhere.")
@@ -849,7 +849,7 @@ def broadcast_query_arrays(
     **inputs: TableQuery[NDimension],
 ) -> tuple[npt.NDArray[np.floating], ...]:
     """
-    Broadcast the inputs of a PVT query against each other, element by element.
+    Broadcasts the inputs of a PVT query against each other, element by element.
 
     A query pairs its inputs: `pressure[i]` is evaluated at `temperature[i]` (and so on), so
     the inputs must have the same shape, or be scalars or otherwise broadcastable to a
@@ -938,7 +938,7 @@ class PVTTable(StoreSerializable):
         dtype: npt.DTypeLike = None,
     ) -> None:
         """
-        Build a `PVTTable` from raw tabulated data.
+        Builds a `PVTTable` from raw tabulated data.
 
         :param data: Phase-tagged `PVTData` or path to a serialised file.
         :param interpolation_method: `"linear"` (default) or `"cubic"`.
@@ -1060,7 +1060,7 @@ class PVTTable(StoreSerializable):
         )
 
     def build_interpolants(self, data: PVTData) -> None:
-        """Build scipy / PCHIP interpolators and their pressure-derivatives."""
+        """Builds scipy / PCHIP interpolators and their pressure-derivatives."""
         phase = typing.cast(FluidPhase, data.phase)
         pressures = data.pressures
         temperatures = data.temperatures
@@ -1069,7 +1069,7 @@ class PVTTable(StoreSerializable):
         use_pchip = self.interpolation_method == "cubic"
 
         def register_2d(name: str, table: npt.NDArray | None) -> None:
-            """Register a 2-D property interpolator and its ∂/∂P derivative."""
+            """Registers a 2-D property interpolator and its ∂/∂P derivative."""
             if table is None:
                 return
 
@@ -1102,7 +1102,7 @@ class PVTTable(StoreSerializable):
             name: str, table: npt.NDArray | None, axis: npt.NDArray | None = None
         ) -> None:
             """
-            Register a 3-D property interpolator over `(pressure, temperature, axis)`.
+            Registers a 3-D property interpolator over `(pressure, temperature, axis)`.
 
             *axis* is the third coordinate: salinity by default (water, and gas solubility
             in water), or the Rv axis of the undersaturated wet-gas tables. For
@@ -1289,7 +1289,7 @@ class PVTTable(StoreSerializable):
 
     @property
     def phase(self) -> FluidPhase:
-        """Fluid phase this table describes."""
+        """Returns fluid phase this table describes."""
         return typing.cast(FluidPhase, self._phase)
 
     @property
@@ -1304,7 +1304,7 @@ class PVTTable(StoreSerializable):
 
     @property
     def unit_system(self) -> UnitSystem:
-        """Unit system of the underlying table data."""
+        """Returns unit system of the underlying table data."""
         return typing.cast(UnitSystem, self._data.unit_system)
 
     def convert(
@@ -1315,7 +1315,7 @@ class PVTTable(StoreSerializable):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `PVTTable` with all dimensional quantities rescaled to *target*.
+        Returns a new `PVTTable` with all dimensional quantities rescaled to *target*.
 
         The underlying `PVTData` (pressure and temperature axes, densities, FVFs,
         viscosities, compressibilities, gas-oil and oil-gas ratios) and the optional
@@ -1340,7 +1340,7 @@ class PVTTable(StoreSerializable):
         )
 
     def has(self, name: str) -> bool:
-        """Return `True` if an interpolator for *name* was built."""
+        """Returns `True` if an interpolator for *name* was built."""
         return name in self._interpolatants
 
     def __contains__(self, name: str, /) -> bool:
@@ -1403,7 +1403,7 @@ class PVTTable(StoreSerializable):
         derivative: bool = False,
     ) -> TableResult[NDimension] | None:
         """
-        Evaluate a 2-D interpolator at `(pressure, temperature)` pairs.
+        Evaluates a 2-D interpolator at `(pressure, temperature)` pairs.
 
         :param name: Key in `_interpolatants` / `_derivative_interpolatants`.
         :param pressure: Pressure.
@@ -1469,7 +1469,7 @@ class PVTTable(StoreSerializable):
         derivative: bool = False,
     ) -> TableResult[NDimension] | None:
         """
-        Evaluate a 3-D interpolator at `(pressure, temperature, salinity)` points.
+        Evaluates a 3-D interpolator at `(pressure, temperature, salinity)` points.
 
         When `_water_constant_salinity` is `True` the registered
         interpolator is actually 2-D (the salinity slice was taken at
@@ -1529,7 +1529,7 @@ class PVTTable(StoreSerializable):
         solution_gor: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Get the Rs of oil at its bubble point, the value it keeps while it stays undersaturated.
+        Gets the Rs of oil at its bubble point, the value it keeps while it stays undersaturated.
 
         The cell's own `solution_gor` when given; otherwise `Rs_sat` read off the saturated table
         at `(Pb, T)`, which is the Rs of that bubble point.
@@ -1554,7 +1554,7 @@ class PVTTable(StoreSerializable):
         derivative: bool = False,
     ) -> TableResult[NDimension] | None:
         """
-        Evaluate a live-phase property across its saturated and undersaturated regimes.
+        Evaluates a live-phase property across its saturated and undersaturated regimes.
 
         Saturated states (`P <= saturation_pressure`) read the 2-D table `name`, which holds the
         property along the saturation curve. Undersaturated states read the 3-D table
@@ -1697,7 +1697,7 @@ class PVTTable(StoreSerializable):
         derivative: bool = False,
     ) -> TableResult[NDimension] | None:
         """
-        Get the volume that dissolved gas adds to the water, per unit standard volume of the gas.
+        Gets the volume that dissolved gas adds to the water, per unit standard volume of the gas.
 
         :param pressure: Pressure.
         :param temperature: Temperature.
@@ -1719,7 +1719,7 @@ class PVTTable(StoreSerializable):
         derivative: bool = False,
     ) -> TableResult[NDimension] | None:
         """
-        Add the volume of the dissolved gas to a gas-free water formation volume factor.
+        Adds the volume of the dissolved gas to a gas-free water formation volume factor.
 
         The result is `Bw_gf + Rsw · DV / f`, or its pressure derivative `∂Bw_gf/∂P + Rsw · ∂DV/∂P / f`
         when `derivative` is set.
@@ -1759,7 +1759,7 @@ class PVTTable(StoreSerializable):
         derivative: bool = False,
     ) -> TableResult[NDimension] | None:
         """
-        Get the density of water holding dissolved gas, `ρw = (ρw,SC + Rsw·ρg,SC / f) / Bw`, or its
+        Gets the density of water holding dissolved gas, `ρw = (ρw,SC + Rsw·ρg,SC / f) / Bw`, or its
         pressure derivative `-ρw · (∂Bw/∂P) / Bw`.
 
         :param pressure: Pressure.
@@ -1809,7 +1809,7 @@ class PVTTable(StoreSerializable):
         temperature: TableQuery[NDimension],
     ) -> TableResult[NDimension] | None:
         """
-        Return `∂Bw/∂Rsw`, the volume each unit of dissolved gas adds to a unit of water.
+        Returns `∂Bw/∂Rsw`, the volume each unit of dissolved gas adds to a unit of water.
 
         :param pressure: Pressure.
         :param temperature: Temperature.
@@ -1831,7 +1831,7 @@ class PVTTable(StoreSerializable):
         dissolved_gas_ratio: TableQuery[NDimension],
     ) -> TableResult[NDimension] | None:
         """
-        Return `∂ρw/∂Rsw` for water holding dissolved gas, at constant pressure.
+        Returns `∂ρw/∂Rsw` for water holding dissolved gas, at constant pressure.
 
         With `ρw = N / Bw`, `N = ρw,SC + Rsw·ρg,SC / f` and `∂Bw/∂Rsw = DV / f`, it is
         `(ρg,SC / f · Bw - N · DV / f) / Bw²`.
@@ -1882,7 +1882,7 @@ class PVTTable(StoreSerializable):
         dissolved_gas_ratio: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Get formation volume factor `B`.
+        Gets formation volume factor `B`.
 
         Units depend on `unit_system` and phase:
         - Oil/water: bbl/STB (FIELD), m³/Sm³ (METRIC/SI), cc/scc (LAB)
@@ -1893,7 +1893,7 @@ class PVTTable(StoreSerializable):
         - Saturated (`P ≤ Pb`): interpolated directly from the 2-D (bubble-curve) table.
         - Undersaturated (`P > Pb`) with per-Rs branch tables (`PVTO` / `PVCO` decks): the 3-D
           `undersaturated_formation_volume_factor` table at the oil's own Rs, which blends the two
-          bounding Rs branches linearly in Rs at the same pressure (the Eclipse treatment).
+          bounding Rs branches linearly in Rs at the same pressure.
         - Undersaturated without branch tables (correlation-built data): the McCain exponential
           correction `Bo = Bob · exp(-c̄ · (P - Pb))`, `c̄` the mean of the compressibility table at
           `Pb` and `P`. Falls back to `Bob` if unavailable.
@@ -2030,7 +2030,7 @@ class PVTTable(StoreSerializable):
         dissolved_gas_ratio: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Return `∂B/∂P`. Units depend on `unit_system`.
+        Returns `∂B/∂P`. Units depend on `unit_system`.
 
         **For oil/water**: (psi⁻¹ · bbl/STB) in FIELD, (bar⁻¹ · m³/Sm³) in METRIC, (Pa⁻¹ · m³/Sm³) in SI,
         (atm⁻¹ · cc/scc) in LAB
@@ -2209,7 +2209,7 @@ class PVTTable(StoreSerializable):
         vaporized_oil_ratio: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Get fluid viscosity `μ`. Units depend on `unit_system` (cP in FIELD/METRIC/LAB, Pa·s in SI).
+        Gets fluid viscosity `μ`. Units depend on `unit_system` (cP in FIELD/METRIC/LAB, Pa·s in SI).
 
         **Oil phase** - saturated / undersaturated switching on the bubble point. With per-Rs
         branch tables (`PVTO` / `PVCO` decks) undersaturated oil reads the 3-D
@@ -2331,7 +2331,7 @@ class PVTTable(StoreSerializable):
         vaporized_oil_ratio: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Return `∂μ/∂P` (viscosity-unit / pressure-unit, unit_system-dependent - cP/psi in FIELD).
+        Returns `∂μ/∂P` (viscosity-unit / pressure-unit, unit_system-dependent - cP/psi in FIELD).
 
         **Oil phase** - saturated/undersaturated switching, matching
         `viscosity`'s own regime split (previously this always returned the
@@ -2477,7 +2477,7 @@ class PVTTable(StoreSerializable):
         dissolved_gas_ratio: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Get fluid density `ρ`. Units depend on `unit_system` (lbm/ft³ in FIELD, kg/m³ in METRIC/SI, g/cm³ in LAB).
+        Gets fluid density `ρ`. Units depend on `unit_system` (lbm/ft³ in FIELD, kg/m³ in METRIC/SI, g/cm³ in LAB).
 
         Returned from the pre-built density table which was constructed using
         the standard formula at `PVTTable` initialisation time:
@@ -2622,7 +2622,7 @@ class PVTTable(StoreSerializable):
         dissolved_gas_ratio: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Return `∂ρ/∂P` (density-unit / pressure-unit, unit_system-dependent - lbm/ft³/psi in FIELD).
+        Returns `∂ρ/∂P` (density-unit / pressure-unit, unit_system-dependent - lbm/ft³/psi in FIELD).
 
         **Oil phase - saturated/undersaturated switching**, matching
         `density`'s own regime split:
@@ -2759,7 +2759,7 @@ class PVTTable(StoreSerializable):
         bubble_point_pressure: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Get fluid compressibility `c`. Units depend on `unit_system` (1/psi in FIELD,
+        Gets fluid compressibility `c`. Units depend on `unit_system` (1/psi in FIELD,
         1/bar in METRIC, 1/atm in LAB, 1/Pa in SI).
 
         Returned from the pre-built compressibility table constructed at
@@ -2871,7 +2871,7 @@ class PVTTable(StoreSerializable):
         salinity: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Return `∂c/∂P` (1 / pressure-unit-squared, unit_system-dependent - psi⁻² in FIELD).
+        Returns `∂c/∂P` (1 / pressure-unit-squared, unit_system-dependent - psi⁻² in FIELD).
 
         :param pressure: Pressure.
         :param temperature: Temperature.
@@ -2898,7 +2898,7 @@ class PVTTable(StoreSerializable):
         salinity: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Get bubble-point pressure `bubble_point_array`. Units depend on `unit_system`.
+        Gets bubble-point pressure `bubble_point_array`. Units depend on `unit_system`.
 
         **Oil phase:**
 
@@ -2983,7 +2983,7 @@ class PVTTable(StoreSerializable):
         state_floor: Number,
     ) -> TableResult[NDimension] | None:
         """
-        Derivative of an undersaturated live-phase property with respect to the cell's own
+        Returns derivative of an undersaturated live-phase property with respect to the cell's own
         state (`Rs` for oil, `Rv` for gas) at constant pressure and temperature.
 
         The derivative is taken on the table's own value function, so it is consistent with
@@ -3071,7 +3071,7 @@ class PVTTable(StoreSerializable):
         solution_gor: TableQuery[NDimension],
     ) -> TableResult[NDimension] | None:
         """
-        Oil formation volume factor derivative `∂Bo/∂Rs` at constant `P` and `T`, for
+        Returns oil formation volume factor derivative `∂Bo/∂Rs` at constant `P` and `T`, for
         undersaturated oil whose `Rs` is a primary variable. See `_undersaturated_state_derivative`.
 
         :param pressure: Pressure.
@@ -3099,7 +3099,7 @@ class PVTTable(StoreSerializable):
         solution_gor: TableQuery[NDimension],
     ) -> TableResult[NDimension] | None:
         """
-        Oil viscosity derivative `∂μo/∂Rs` at constant `P` and `T`, for undersaturated oil
+        Returns oil viscosity derivative `∂μo/∂Rs` at constant `P` and `T`, for undersaturated oil
         whose `Rs` is a primary variable. See `_undersaturated_state_derivative`.
 
         :param pressure: Pressure.
@@ -3127,7 +3127,7 @@ class PVTTable(StoreSerializable):
         solution_gor: TableQuery[NDimension],
     ) -> TableResult[NDimension] | None:
         """
-        Oil density derivative `∂ρo/∂Rs` at constant `P` and `T`, for undersaturated oil whose
+        Returns oil density derivative `∂ρo/∂Rs` at constant `P` and `T`, for undersaturated oil whose
         `Rs` is a primary variable. See `_undersaturated_state_derivative`.
 
         :param pressure: Pressure.
@@ -3155,7 +3155,7 @@ class PVTTable(StoreSerializable):
         vaporized_oil_ratio: TableQuery[NDimension],
     ) -> TableResult[NDimension] | None:
         """
-        Gas formation volume factor derivative `∂Bg/∂Rv` at constant `P` and `T`, for
+        Returns gas formation volume factor derivative `∂Bg/∂Rv` at constant `P` and `T`, for
         undersaturated (wet) gas whose `Rv` is a primary variable. See
         `_undersaturated_state_derivative`.
 
@@ -3186,7 +3186,7 @@ class PVTTable(StoreSerializable):
         vaporized_oil_ratio: TableQuery[NDimension],
     ) -> TableResult[NDimension] | None:
         """
-        Gas viscosity derivative `∂μg/∂Rv` at constant `P` and `T`, for undersaturated (wet) gas
+        Returns gas viscosity derivative `∂μg/∂Rv` at constant `P` and `T`, for undersaturated (wet) gas
         whose `Rv` is a primary variable. See `_undersaturated_state_derivative`.
 
         :param pressure: Pressure.
@@ -3214,7 +3214,7 @@ class PVTTable(StoreSerializable):
         vaporized_oil_ratio: TableQuery[NDimension],
     ) -> TableResult[NDimension] | None:
         """
-        Gas density derivative `∂ρg/∂Rv` at constant `P` and `T`, for undersaturated (wet) gas
+        Returns gas density derivative `∂ρg/∂Rv` at constant `P` and `T`, for undersaturated (wet) gas
         whose `Rv` is a primary variable. See `_undersaturated_state_derivative`.
 
         :param pressure: Pressure.
@@ -3241,7 +3241,7 @@ class PVTTable(StoreSerializable):
         temperature: TableQuery[NDimension],
     ) -> TableResult[NDimension] | None:
         """
-        Return `∂Pb/∂Rs` (pressure-unit / GOR-unit, unit_system-dependent - psi · STB/SCF in FIELD).
+        Returns `∂Pb/∂Rs` (pressure-unit / GOR-unit, unit_system-dependent - psi · STB/SCF in FIELD).
 
         Only available when the bubble-point table is 2-D (bubble_point_array(Rs, T)).
         Returns `None` for 1-D bubble_point_array(T) tables or gas / water phases.
@@ -3282,7 +3282,7 @@ class PVTTable(StoreSerializable):
         bubble_point_pressure: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Get solution gas-to-oil ratio `Rs`. Units: SCF/STB (FIELD), Sm³/Sm³ (METRIC/SI), scc/scc (LAB).
+        Gets solution gas-to-oil ratio `Rs`. Units: SCF/STB (FIELD), Sm³/Sm³ (METRIC/SI), scc/scc (LAB).
 
         **Oil phase only.**  Rs is frozen at Rsb above bubble point.
 
@@ -3347,7 +3347,7 @@ class PVTTable(StoreSerializable):
         bubble_point_pressure: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Return `∂Rs/∂P` (GOR-unit / pressure-unit, unit_system-dependent - SCF/STB/psi in FIELD).
+        Returns `∂Rs/∂P` (GOR-unit / pressure-unit, unit_system-dependent - SCF/STB/psi in FIELD).
         Oil phase only.
 
         Matches `solution_gas_to_oil_ratio`'s regime split: along the bubble curve the slope of
@@ -3394,7 +3394,7 @@ class PVTTable(StoreSerializable):
         vaporized_oil_ratio: TableQuery[NDimension] | None = None,
     ) -> Boolean | BooleanArray[NDimension] | None:
         """
-        Determine whether conditions are saturated: `P ≤ Pb` for oil, `P ≤ Pdew` for wet gas.
+        Determines whether conditions are saturated: `P ≤ Pb` for oil, `P ≤ Pdew` for wet gas.
 
         :param pressure: Pressure.
         :param temperature: Temperature.
@@ -3430,7 +3430,7 @@ class PVTTable(StoreSerializable):
         temperature: TableQuery[NDimension],
     ) -> TableResult[NDimension] | None:
         """
-        Get gas z-factor `z` (dimensionless). Gas phase only.
+        Gets gas z-factor `z` (dimensionless). Gas phase only.
 
         :param pressure: Pressure.
         :param temperature: Temperature.
@@ -3448,7 +3448,7 @@ class PVTTable(StoreSerializable):
         temperature: TableQuery[NDimension],
     ) -> TableResult[NDimension] | None:
         """
-        Return `∂z/∂P` (1 / pressure-unit, unit_system-dependent - psi⁻¹ in FIELD).
+        Returns `∂z/∂P` (1 / pressure-unit, unit_system-dependent - psi⁻¹ in FIELD).
         Gas phase only.
 
         :param pressure: Pressure.
@@ -3468,7 +3468,7 @@ class PVTTable(StoreSerializable):
         vaporized_oil_ratio: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Get the vaporized oil ratio `Rv` (unit_system-dependent - STB/scf in FIELD).
+        Gets the vaporized oil ratio `Rv` (unit_system-dependent - STB/scf in FIELD).
         Gas / condensate phase only.
 
         Without `vaporized_oil_ratio` this is `Rv_sat(P, T)`, the Rv of saturated gas on the dew
@@ -3506,7 +3506,7 @@ class PVTTable(StoreSerializable):
         dew_point_pressure: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Return `∂Rv/∂P` (vaporized-oil-ratio-unit / pressure-unit, `unit_system`-dependent - STB/scf/psi in FIELD).
+        Returns `∂Rv/∂P` (vaporized-oil-ratio-unit / pressure-unit, `unit_system`-dependent - STB/scf/psi in FIELD).
         Gas / condensate phase only.
 
         Matches `vaporized_oil_gas_ratio`'s regime split: along the dew curve the slope of
@@ -3554,7 +3554,7 @@ class PVTTable(StoreSerializable):
         vaporized_oil_ratio: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Get gas dew-point pressure. Gas phase only. Units depend on `unit_system`.
+        Gets gas dew-point pressure. Gas phase only. Units depend on `unit_system`.
 
         - 1-D table `Pdew(T)`: pass `temperature` only.
         - 2-D table `Pdew(Rv, T)`: both `temperature` and `vaporized_oil_ratio` are required. Gas
@@ -3604,7 +3604,7 @@ class PVTTable(StoreSerializable):
 
     @property
     def has_solubility_in_water(self) -> bool:
-        """Whether this table holds gas solubility in water (`Rsw`) data. Gas phase only."""
+        """Checks whether this table holds gas solubility in water (`Rsw`) data. Gas phase only."""
         return self._phase == FluidPhase.GAS and "solubility_in_water" in self._interpolatants
 
     def solubility_in_water(
@@ -3614,7 +3614,7 @@ class PVTTable(StoreSerializable):
         salinity: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Get gas solubility in water `Rsw` (SCF/STB). Gas phase only.
+        Gets gas solubility in water `Rsw` (SCF/STB). Gas phase only.
 
         :param pressure: Pressure.
         :param temperature: Temperature.
@@ -3639,7 +3639,7 @@ class PVTTable(StoreSerializable):
         salinity: TableQuery[NDimension] | None = None,
     ) -> TableResult[NDimension] | None:
         """
-        Return `∂Rsw/∂P` (solubility-unit / pressure-unit, unit_system-dependent - SCF/STB/psi in FIELD).
+        Returns `∂Rsw/∂P` (solubility-unit / pressure-unit, unit_system-dependent - SCF/STB/psi in FIELD).
         Gas phase only.
 
         :param pressure: Pressure.
@@ -3730,7 +3730,7 @@ class PVTTables(StoreSerializable):
         dtype: npt.DTypeLike = None,
     ) -> Self:
         """
-        Build a `PVTTables` bundle from a `PVTDataSet`.
+        Builds a `PVTTables` bundle from a `PVTDataSet`.
 
         :param dataset: Source `PVTDataSet`.
         :param interpolation_method: `"linear"` or `"cubic"`.
@@ -3766,7 +3766,7 @@ class PVTTables(StoreSerializable):
         dtype: npt.DTypeLike = None,
     ) -> Self:
         """
-        Build `PVTTables` for a single PVT region from a parsed `DeckFile`.
+        Builds `PVTTables` for a single PVT region from a parsed `DeckFile`.
 
         Convenience wrapper around `PVT.from_deck` for the
         common single-region case.
@@ -3797,7 +3797,7 @@ class PVTTables(StoreSerializable):
     @property
     def dataset(self) -> PVTDataSet:
         """
-        Return the underlying raw data as a `PVTDataSet`.
+        Returns the underlying raw data as a `PVTDataSet`.
 
         Useful when you want to persist the raw tabulated data independently
         of interpolator settings.
@@ -3818,7 +3818,7 @@ class PVTTables(StoreSerializable):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `PVTTables` with all phase tables converted to *target*.
+        Returns a new `PVTTables` with all phase tables converted to *target*.
 
         :param target: Target `UnitSystem`.
         :returns: New `PVTTables` in *target* units.

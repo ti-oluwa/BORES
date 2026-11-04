@@ -61,7 +61,7 @@ class ConnectionTransmissibilities(typing.NamedTuple):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `ConnectionTransmissibilities` with transmissibilities
+        Returns a new `ConnectionTransmissibilities` with transmissibilities
         rescaled to *target*.
 
         :param target: Target `UnitSystem`.
@@ -97,7 +97,7 @@ def compute_connection_transmissibilities(
     dtype: npt.DTypeLike = None,
 ) -> ConnectionTransmissibilities:
     """
-    Compute TPFA transmissibilities for all connections in an unstructured grid.
+    Computes TPFA transmissibilities for all connections in an unstructured grid.
 
     Each cell's half-transmissibility toward a face is
     `A · |(K n) · c| / |c|²`, with `c` the vector from the cell centroid to the face centroid
@@ -152,7 +152,7 @@ def compute_connection_transmissibilities(
             raise ValueError(f"{name} array has shape {array.shape}; expected ({n_cells},).")
 
     # Net-to-gross reduces horizontal flow only. Vertical flow crosses the whole gross
-    # thickness of the cell, so Kz is not scaled (Eclipse convention).
+    # thickness of the cell, so Kz is not scaled.
     effective_kx = kx * ntg
     effective_ky = ky * ntg
     effective_kz = kz
@@ -241,7 +241,7 @@ def compute_half_transmissibility(
     offset_z: Number,
 ) -> Number:
     """
-    One cell's half-transmissibility toward a face.
+    Returns one cell's half-transmissibility toward a face.
 
     `T = A · |(K n) · c| / |c|²`, with `c` the vector from the cell centroid to the face
     centroid and `n` the face normal. For a diagonal permeability tensor `K`. For a face
@@ -282,7 +282,7 @@ def compute_interior_tpfa_transmissibilities(
     dtype: npt.DTypeLike,
 ) -> NumberArray[OneDimension]:
     """
-    Harmonic-mean TPFA transmissibilities for all interior faces.
+    Returns harmonic-mean TPFA transmissibilities for all interior faces.
 
     The half-T of each cell comes from `compute_half_transmissibility`. Full harmonic T: `T_A · T_B / (T_A + T_B)`.
 
@@ -360,7 +360,7 @@ def compute_boundary_half_transmissibilities(
     dtype: npt.DTypeLike,
 ) -> NumberArray[OneDimension]:
     """
-    Owner half-transmissibilities for all boundary faces.
+    Returns owner half-transmissibilities for all boundary faces.
 
     The half-T comes from `compute_half_transmissibility`.
 
@@ -415,7 +415,7 @@ def apply_directional_multipliers(
     negative_z_multipliers: NumberArray[OneDimension] | None,
 ) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension]]:
     """
-    Scale face transmissibilities by per-cell directional MULT arrays (in-place).
+    Scales face transmissibilities by per-cell directional MULT arrays (in-place).
 
     The direction of a face is the dominant component of its unit normal, and the
     normal points from the owner cell to the neighbour cell (outward from the owner for a
@@ -506,7 +506,7 @@ def apply_fault_face_multipliers(
     fault_transmissibility_multipliers: typing.Mapping[str, Number],
 ) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension]]:
     """
-    Apply `MULTFLT` multipliers to face-based fault connections (in-place).
+    Applies `MULTFLT` multipliers to face-based fault connections (in-place).
 
     Only faces tagged with `ConnectionType.*_FAULT_FACE` (i.e. present in
     `fault_face_indices`) are affected. NNCs are handled separately. A face that belongs

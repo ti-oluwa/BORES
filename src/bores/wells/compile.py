@@ -383,7 +383,7 @@ class CompiledPerforations(typing.NamedTuple):
 
     def connection_rows(self, *, well_row: Integer) -> range:
         """
-        A well's own row range, without the caller needing to know about `well_offsets`.
+        Returns a well's own row range, without the caller needing to know about `well_offsets`.
 
         :param well_row: The well's row in `CompiledWellSystem.names`.
         :returns: `range(start, end)` over this well's rows.
@@ -644,7 +644,7 @@ class CompiledLimits(typing.NamedTuple):
 
     def limit_rows(self, *, well_row: Integer) -> range:
         """
-        A well's own limit-row range, without the caller needing to know about `well_offsets`.
+        Returns a well's own limit-row range, without the caller needing to know about `well_offsets`.
 
         :param well_row: The well's row in `CompiledWellSystem.names`.
         :returns: `range(start, end)` over this well's limit rows.
@@ -1258,7 +1258,7 @@ class CompiledGroupLimits(typing.NamedTuple):
 
     def limit_rows(self, *, group_row: Integer) -> range:
         """
-        A group's own limit-row range, without the caller needing to know about `group_offsets`.
+        Returns a group's own limit-row range, without the caller needing to know about `group_offsets`.
 
         :param group_row: The group's row in `CompiledGroupControls.names`.
         :returns: `range(start, end)` over this group's limit rows.
@@ -1398,7 +1398,7 @@ class CompiledGroupControls(typing.NamedTuple):
     def group_row(self, name: typing.Iterable[str]) -> list[Integer]: ...
     def group_row(self, name: str | typing.Iterable[str]) -> Integer | list[Integer]:
         """
-        A group's row, by name.
+        Returns a group's row, by name.
 
         :param name: The group to find, or a sequence of them.
         :returns: The group's row for a single `name`, a list for a sequence.
@@ -1473,7 +1473,7 @@ class CompiledWellSystem(typing.NamedTuple):
     def well_row(self, name: typing.Iterable[str]) -> list[Integer]: ...
     def well_row(self, name: str | typing.Iterable[str]) -> Integer | list[Integer]:
         """
-        A well's row, by name.
+        Returns a well's row, by name.
 
         :param name: The well to find, or a sequence of them.
         :returns: The well's row for a single `name`, a list for a sequence.
@@ -1494,12 +1494,12 @@ class CompiledWellSystem(typing.NamedTuple):
         return name in self.names
 
     def is_injector(self, well: str | Integer) -> bool:
-        """Whether `well`, given by name or row, is an injector."""
+        """Checks whether `well`, given by name or row, is an injector."""
         well_row = self.well_row(name=well) if isinstance(well, str) else well
         return self.well_kinds[well_row] == WellKind.INJECTOR
 
     def is_producer(self, well: str | Integer) -> bool:
-        """Whether `well`, given by name or row, is a producer."""
+        """Checks whether `well`, given by name or row, is a producer."""
         well_row = self.well_row(name=well) if isinstance(well, str) else well
         return self.well_kinds[well_row] == WellKind.PRODUCER
 
@@ -1640,7 +1640,7 @@ class CompiledWellSystem(typing.NamedTuple):
 
     def get_flowing_connection_rows(self, *, well_row: Integer) -> IntArray[OneDimension]:
         """
-        The connections of a well that can flow right now: in effect, open, and on a well that
+        Returns the connections of a well that can flow right now: in effect, open, and on a well that
         is itself in effect and either open or stopped with crossflow allowed. This is the one
         place that decides it, so whatever supplies a well's connection fluids must supply them
         for exactly these rows, in order.

@@ -141,7 +141,7 @@ def compute_satfunc_cache(
     dtype: npt.DTypeLike = None,
 ) -> SatFuncCache:
     """
-    Build (or refresh, in place) a `SatFuncCache` from current
+    Builds (or refresh, in place) a `SatFuncCache` from current
     cell saturations.
 
     Evaluates each region's `SatFuncTables` once per property, vectorised over that

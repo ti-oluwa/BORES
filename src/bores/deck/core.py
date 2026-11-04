@@ -28,12 +28,12 @@ __all__ = [
 
 
 class DeckParseError(ValidationError):
-    """Raised when an Eclipse deck or one of its keyword records is malformed."""
+    """Raised when a deck or one of its keyword records is malformed."""
 
 
 def report(message: str, *, strict: bool, stacklevel: int = 2) -> None:
     """
-    Report a problem with the deck according to the parsing mode.
+    Reports a problem with the deck according to the parsing mode.
 
     :param message: What is wrong, ending with a full stop. It should say what the parser did about
         it (or would have done), because that is what a lenient parse falls back to.
@@ -81,7 +81,7 @@ INCLUDE_RE = re.compile(
 
 def strip_comments(text: str) -> str:
     """
-    Remove `--` line comments from Eclipse text.
+    Removes `--` line comments from deck text.
 
     A `--` inside a quoted string (e.g. `'CASE--A'`) is part of the string, not a comment. A quote
     only protects text up to the end of its own line, so an unclosed quote cannot swallow a comment.
@@ -99,10 +99,10 @@ RECORD_LIKE_RE = re.compile(r"""['"+\-.\d]""")
 
 def looks_like_record(note: str) -> bool:
     """
-    Whether a note after a record's closing `/` looks like a second record written on the same
+    Checks whether a note after a record's closing `/` looks like a second record written on the same
     line, that is, begins like data and has a `/` of its own (`2 2 2 /`, `'B' 'G' 2 2 /`).
 
-    Eclipse ignores such a record along with any other note, so this is only used to say so.
+    Such a record is ignored along with any other note, so this is only used to say so.
     """
     note = note.strip()
     return bool(note) and RECORD_LIKE_RE.match(note) is not None and find_terminator(note) != -1
@@ -110,9 +110,9 @@ def looks_like_record(note: str) -> bool:
 
 def strip_record_notes(body: str, *, records_lost: list[str] | None = None) -> str:
     """
-    Drop the note after the closing `/` of each record in a keyword body.
+    Drops the note after the closing `/` of each record in a keyword body.
 
-    Eclipse ignores whatever follows a record's closing `/` on the same line, and decks use that to
+    Whatever follows a record's closing `/` on the same line, and decks use that to
     annotate records:
 
         MULTIPLY
@@ -146,7 +146,7 @@ def strip_record_notes(body: str, *, records_lost: list[str] | None = None) -> s
 
 def find_terminator(text: str, start: int = 0, end: int | None = None) -> int:
     """
-    Find the first `/` in `text[start:end]` that is not inside a quoted string.
+    Finds the first `/` in `text[start:end]` that is not inside a quoted string.
 
     :param text: Text to search.
     :param start: Offset to start searching at.
@@ -165,7 +165,7 @@ def find_terminator(text: str, start: int = 0, end: int | None = None) -> int:
 
 def first_segment(body: str) -> str:
     """
-    Return `body` up to its first `/` that is not inside a quoted string (all of `body` if there
+    Returns `body` up to its first `/` that is not inside a quoted string (all of `body` if there
     is none). This is the first `/`-terminated record of a keyword body, without the `/`.
     """
     terminator = find_terminator(body)
@@ -174,7 +174,7 @@ def first_segment(body: str) -> str:
 
 def split_segments(body: str) -> list[str]:
     """
-    Split `body` on every `/` that is not inside a quoted string.
+    Splits `body` on every `/` that is not inside a quoted string.
 
     Behaves like `body.split("/")`, except that a quoted value such as `'run/CASE1'` stays whole.
     """
@@ -215,7 +215,7 @@ def may_contain_include(text: str) -> bool:
 
 
 def canonical_path(path: Path) -> Path:
-    """Return the absolute, symlink-free form of `path`, for comparing files."""
+    """Returns the absolute, symlink-free form of `path`, for comparing files."""
     try:
         return path.resolve()
     except OSError:
@@ -233,7 +233,7 @@ def resolve_includes(
     """
     Recursively inline `INCLUDE 'path' /` directives.
 
-    :param text: Eclipse text that may contain `INCLUDE` directives.
+    :param text: deck text that may contain `INCLUDE` directives.
     :param source_dir: Directory the current text was read from, used to
         resolve relative include paths. `None` disables resolution (raw
         text input with no filesystem anchor); directives are dropped with
@@ -319,7 +319,7 @@ TRAILING_NONSPACE_RE = re.compile(r"\S*\Z")
 
 def parse_floats(text: str, name: str) -> FloatArray[OneDimension]:
     """
-    Read whitespace-separated numbers into a `float64` array.
+    Reads whitespace-separated numbers into a `float64` array.
 
     This is the fast path for the bulk of a large array: the text is parsed in one pass, with no
     list of token strings built along the way.
@@ -353,7 +353,7 @@ def parse_floats(text: str, name: str) -> FloatArray[OneDimension]:
 
 def parse_numeric_runs(text: str, *, name: str) -> list[NumericRun]:
     """
-    Read the numbers of a record body, keeping `N*value` and `N*` groups as single runs.
+    Reads the numbers of a record body, keeping `N*value` and `N*` groups as single runs.
 
     :param text: Record body up to its terminating `/`.
     :param name: Keyword name, for error messages.
@@ -417,7 +417,7 @@ def parse_numeric_runs(text: str, *, name: str) -> list[NumericRun]:
 
 def decode_deck_bytes(data: bytes, *, source: str, encoding: str) -> str:
     """
-    Decode raw deck bytes, turning a decoding failure into an error that says what to do.
+    Decodes raw deck bytes, turning a decoding failure into an error that says what to do.
 
     :param data: The deck's raw bytes.
     :param source: What `data` came from, for the error message (a file path, or `"bytes input"`).
@@ -443,7 +443,7 @@ def decode_deck_bytes(data: bytes, *, source: str, encoding: str) -> str:
 
 def read_deck_file(path: Path, *, encoding: str) -> str:
     """
-    Read a deck file's text.
+    Reads a deck file's text.
 
     :param path: The file to read.
     :param encoding: Character encoding to read it with.
@@ -458,13 +458,13 @@ def read_deck_file(path: Path, *, encoding: str) -> str:
 
 
 def is_lone_keyword(source: str) -> bool:
-    """Whether a single-line `str` is nothing but one keyword, such as `METRIC`."""
+    """Checks whether a single-line `str` is nothing but one keyword, such as `METRIC`."""
     return KEYWORD_LINE_RE.fullmatch(source) is not None
 
 
 def resolve_source(source: TextOrPath, *, encoding: str, strict: bool = False) -> str:
     """
-    Coerce `source` (path, raw text, or bytes) to a single fully
+    Coerces `source` (path, raw text, or bytes) to a single fully
     `INCLUDE`-resolved, comment-stripped text blob.
 
     :param source: Path, raw deck text string, or raw bytes. A `str` that spans more than one
@@ -539,7 +539,7 @@ def parse_repeat_token(token: str) -> tuple[int, str] | None:
     count = int(match.group(1))
     value = match.group(2)
 
-    # Eclipse "N*" means N defaulted fields.
+    # "N*" means N defaulted fields.
     if value == "":
         value = "1*"
     return count, value
@@ -547,7 +547,7 @@ def parse_repeat_token(token: str) -> tuple[int, str] | None:
 
 def tokenize(text: str, *, expand_repeats: bool = True) -> list[str]:
     """
-    Split text into whitespace-separated tokens, expanding `N*value`
+    Splits text into whitespace-separated tokens, expanding `N*value`
     repeat syntax and preserving quoted strings (with embedded whitespace)
     as single tokens.
 
@@ -560,7 +560,7 @@ def tokenize(text: str, *, expand_repeats: bool = True) -> list[str]:
     ```
 
     **Note**:
-        A bare "N*" expands to N occurrences of the Eclipse default
+        A bare "N*" expands to N occurrences of the default
         designator ("1*"). This preserves the distinction between an
         explicit default and an empty string.
 
@@ -568,7 +568,7 @@ def tokenize(text: str, *, expand_repeats: bool = True) -> list[str]:
         `ValueError`; they should surface this as a
         `DeckParseError` with context about which keyword failed.
 
-    :param text: Comment-stripped Eclipse text.
+    :param text: Comment-stripped deck text.
     :param expand_repeats: When `True` (default), `N*value` expands to `N`
         literal tokens. This is correct for small, fixed-shape records. When
         `False`, a repeat group is returned as a single unexpanded
@@ -639,7 +639,7 @@ class Record(typing.NamedTuple):
     # and slices copy data. This can be very expensive especially for repeated lookup of keywords
     # that can have very large record bodies e.g `PORO` or any array kind keyword. So why not just
     # pay that cost upfront (at the expense of a little more memory usage). Atleast that's why the
-    # `Deck` and `DeckFile` API exists - upfront pre-parsing of Eclipse deck text records.
+    # `Deck` and `DeckFile` API exists - upfront pre-parsing of deck text records.
 
     start: int
     """Character offset of the keyword name in the source text."""
@@ -659,9 +659,9 @@ class Record(typing.NamedTuple):
 
 
 # A keyword name is a bare token of letters, digits and underscores starting
-# with a letter, 1-8 characters (Eclipse's own limit), optionally ending in `-`
+# with a letter, 1-8 characters (the keyword length limit), optionally ending in `-`
 # (`MULTX-`, `MULTY-`, `MULTZ-`), standing alone on its own line (only
-# whitespace or end-of-line after it). Eclipse keywords are case-insensitive, so
+# whitespace or end-of-line after it). Keywords are case-insensitive, so
 # `poro` is the same keyword as `PORO`; `Deck` upper-cases every name it records.
 # The underscore is intentional because some simulator extensions use keywords
 # like `COORD_V`.
@@ -680,9 +680,9 @@ FREE_TEXT_KEYWORDS = frozenset({"TITLE"})
 
 def has_unterminated_quote(text: str) -> bool:
     """
-    Whether `text` has a `'` or `"` that is not closed on its own line.
+    Checks whether `text` has a `'` or `"` that is not closed on its own line.
 
-    Quoted strings never span lines in an Eclipse deck, so a quote character left over once every
+    Quoted strings never span lines in a deck, so a quote character left over once every
     complete quoted string is removed was opened and never closed.
     """
     if "'" not in text and '"' not in text:
@@ -692,7 +692,7 @@ def has_unterminated_quote(text: str) -> bool:
 
 
 class ScanResult(typing.NamedTuple):
-    """Result of scanning an Eclipse deck."""
+    """Result of scanning a deck."""
 
     records: list[Record]
     keyword_records: dict[str, list[Record]]
@@ -700,7 +700,7 @@ class ScanResult(typing.NamedTuple):
 
 class Deck:
     """
-    A single linear scan of comment-stripped, include-resolved Eclipse text
+    A single linear scan of comment-stripped, include-resolved deck text
     into an ordered sequence of `Record` objects.
 
     Scanning is performed once on initiaization; every subsequent lookup
@@ -708,13 +708,13 @@ class Deck:
     operator occurrences is paid exactly once per deck regardless of how
     many keywords are subsequently requested.
 
-    **Scanning strategy**: Eclipse keywords always start at the beginning
+    **Scanning strategy**: Keywords always start at the beginning
     of a line, alone (nothing else on that line). A keyword's data section
     is everything from there up to and including its terminating `/` -
     unless another keyword line is encountered first, in which case the
     first keyword is treated as bare/nullary (e.g. `ENDBOX`, `ECHO`,
     `RUNSPEC`) with an empty body, and the second keyword line starts a
-    new record. This mirrors Eclipse's own grammar without needing a
+    new record. This mirrors the deck grammar without needing a
     hardcoded list of nullary keywords.
 
     A `/` inside a quoted string (e.g. `'run/CASE1'`) is part of the string and does not end a
@@ -723,7 +723,7 @@ class Deck:
     Note:
         A keyword that has data but no terminating `/` before the next keyword (or the end of
         the deck) cannot be read: its data is dropped and the keyword becomes nullary. Well-formed
-        Eclipse decks always terminate data blocks with `/`, so this only arises with truncated or
+        Decks always terminate data blocks with `/`, so this only arises with truncated or
         hand-written files. It is reported with a warning, or raised as a `DeckParseError` when
         `strict`.
     """
@@ -732,9 +732,9 @@ class Deck:
 
     def __init__(self, text: str, *, strict: bool = False) -> None:
         """
-        Initialize the deck.
+        Initializes the deck.
 
-        :param text: Fully comment-stripped, `INCLUDE`-resolved Eclipse
+        :param text: Fully comment-stripped, `INCLUDE`-resolved deck
             text. It is scanned once and not kept: every record holds its own body, so the
             deck's memory is the record bodies rather than those plus a second copy of the text.
         :param strict: Raise a `DeckParseError` for malformed input that a lenient parse only
@@ -748,10 +748,10 @@ class Deck:
     @staticmethod
     def _scan(text: str, strict: bool = False) -> ScanResult:
         """
-        Scan `text` into an ordered list of `Record` objects together with an
+        Scans `text` into an ordered list of `Record` objects together with an
         index mapping upper-cased keywords to all matching records.
 
-        :param text: Clean Eclipse text (no comments, no `INCLUDE` directives).
+        :param text: Clean deck text (no comments, no `INCLUDE` directives).
         :param strict: Raise instead of warning about malformed records.
         :returns: `ScanResult` containing records in file order and a keyword index.
         """
@@ -870,7 +870,7 @@ class Deck:
                     records_lost.extend(later_notes[1:] if records_lost else later_notes)
                 for note in records_lost[:1]:
                     report(
-                        f"`{keyword}`: text after a record's closing '/' is ignored, as Eclipse "
+                        f"`{keyword}`: text after a record's closing '/' is ignored, as a deck "
                         f"does, but {note!r} looks like another record on the same line. Write "
                         "each record on its own line.",
                         strict=strict,
@@ -916,17 +916,17 @@ class Deck:
         return f"lines {shown}{extra}"
 
     def get_records_for(self, keyword: str) -> list[Record]:
-        """Return every record for `keyword`, in file order."""
+        """Returns every record for `keyword`, in file order."""
         return self._keyword_records.get(keyword.upper(), [])
 
     def get_first_record_for(self, keyword: str) -> Record | None:
-        """Return the first record for `keyword`, or `None` if absent."""
+        """Returns the first record for `keyword`, or `None` if absent."""
         records = self._keyword_records.get(keyword.upper())
         return records[0] if records else None
 
     def get_single_record_for(self, keyword: str) -> Record | None:
         """
-        Return the record for a keyword that may only appear once, or `None` if absent.
+        Returns the record for a keyword that may only appear once, or `None` if absent.
 
         Only the first occurrence is ever read, so a repeat is reported (a warning, or a
         `DeckParseError` when `strict`) instead of its data being silently ignored.
@@ -945,12 +945,12 @@ class Deck:
 
     @property
     def keywords(self) -> list[str]:
-        """Return every unique keyword in the deck, in file order."""
+        """Returns every unique keyword in the deck, in file order."""
         return list(self._keyword_records.keys())
 
     def has(self, keyword: str) -> bool:
         """
-        Return whether `keyword` has a literal record of its own in the
+        Returns whether `keyword` has a literal record of its own in the
         deck (i.e. appears as its own keyword line).
 
         This does not know about `BOX`/`EQUALS`/`ADD`/`MULTIPLY`/`COPY`/
@@ -966,7 +966,7 @@ class Deck:
 
     def has_many(self, *keywords: str) -> dict[str, bool]:
         """
-        Return, for each of `keywords`, whether it has a literal record of its own in the deck.
+        Returns, for each of `keywords`, whether it has a literal record of its own in the deck.
 
         This is `has` for several keywords at once: one dictionary lookup per name against the
         index built when the deck was scanned, so nothing is parsed and no record is touched.

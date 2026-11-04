@@ -165,7 +165,7 @@ def resolve_cell_type_name(
     block_idx: Integer,
 ) -> str:
     """
-    Resolve a cell block's element type to a string name.
+    Resolves a cell block's element type to a string name.
 
     Accepts either `"cell_type"` (string) or `"vtk_type"` (integer)
     keys in the block dictionary.

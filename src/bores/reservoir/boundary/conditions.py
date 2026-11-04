@@ -110,7 +110,7 @@ class BoundaryRegion:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `BoundaryRegion` with the condition rescaled to *target*.
+        Returns a new `BoundaryRegion` with the condition rescaled to *target*.
 
         `face_positions`, `face_weights` and `name` are copied unchanged.
 
@@ -272,7 +272,7 @@ class BoundaryConditions:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `BoundaryConditions` with every region's condition
+        Returns a new `BoundaryConditions` with every region's condition
         rescaled to *target*.
 
         Useful when the model unit system changes after the boundary conditions
@@ -290,7 +290,7 @@ class BoundaryConditions:
 
     def add_region(self, region: BoundaryRegion, unit_system: UnitSystem | None = None) -> Self:
         """
-        Return a new `BoundaryConditions` with *region* appended.
+        Returns a new `BoundaryConditions` with *region* appended.
 
         Since `BoundaryConditions` is frozen, this does not mutate the
         current instance.
@@ -304,7 +304,7 @@ class BoundaryConditions:
 
     def override(self, other: Self) -> Self:
         """
-        Return a new `BoundaryConditions` merging `other` into `self` by
+        Returns a new `BoundaryConditions` merging `other` into `self` by
         region name. A region in `other` replaces a same-named region
         here, and a region with a new name is appended. Regions present
         here but absent from `other` are kept unchanged.
@@ -325,7 +325,7 @@ class BoundaryConditions:
 
     def remove_region(self, name: str) -> Self:
         """
-        Return a new `BoundaryConditions` with the named region removed.
+        Returns a new `BoundaryConditions` with the named region removed.
 
         If no region with `name` exists, returns `self` unchanged and
         logs a warning.
@@ -345,7 +345,7 @@ class BoundaryConditions:
 
     def get_region(self, name: str) -> BoundaryRegion:
         """
-        Return the region with the given name.
+        Returns the region with the given name.
 
         :param name: Region name.
         :returns: Matching `BoundaryRegion`.
@@ -361,13 +361,13 @@ class BoundaryConditions:
 
     @property
     def n_regions(self) -> int:
-        """Number of boundary regions."""
+        """Returns the number of boundary regions."""
         return len(self.regions)
 
     @property
     def all_no_flow(self) -> bool:
         """
-        Return `True` if every region applies a no-flow flux condition.
+        Returns `True` if every region applies a no-flow flux condition.
 
         An empty `BoundaryConditions` (no regions) also returns `True`
         since the default is no-flow everywhere.

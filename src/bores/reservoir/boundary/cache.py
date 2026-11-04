@@ -90,7 +90,7 @@ def evaluate_aquifer_step(
     time: Number,
 ) -> tuple[Number, Number, Number, Number]:
     """
-    One aquifer's recursion step from its last committed state to `time`, for a given
+    Computes one aquifer's recursion step from its last committed state to `time`, for a given
     boundary pressure. Reads the workspace and writes nothing, so it serves both the trial
     evaluation inside an iteration and the commit of an accepted time step.
 
@@ -170,7 +170,7 @@ def compute_aquifer_boundary_pressure(
     aquifers: CompiledAquifers, pressure: CellArray, row: Integer
 ) -> Number:
     """
-    COmputes an aquifer's boundary pressure: its owner cells' pressures averaged with each face's
+    Returns cOmputes an aquifer's boundary pressure: its owner cells' pressures averaged with each face's
     share of the aquifer's influx as the weight.
 
     :param aquifers: Every aquifer's static parameters, whole.

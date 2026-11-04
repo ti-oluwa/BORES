@@ -65,12 +65,12 @@ class WellTrajectory:
 
     @property
     def top_measured_depth(self) -> Number:
-        """Measured depth of the first station."""
+        """Returns measured depth of the first station."""
         return self.stations[0].measured_depth
 
     @property
     def bottom_measured_depth(self) -> Number:
-        """Measured depth of the last station."""
+        """Returns measured depth of the last station."""
         return self.stations[-1].measured_depth
 
     def get_bracketing_leg(

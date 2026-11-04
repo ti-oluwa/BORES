@@ -46,7 +46,7 @@ def compile_model(
     dtype: npt.DTypeLike = None,
 ) -> CompiledBlackOilModel:
     """
-    Validate and compile a `BlackOilModel` into a `CompiledBlackOilModel`.
+    Validates and compile a `BlackOilModel` into a `CompiledBlackOilModel`.
 
     This function validates the input model, compiles any boundary conditions and
     well data into optimized runtime structures, and returns the original

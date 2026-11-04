@@ -36,7 +36,7 @@ def compute_incremental_influx(
     elapsed_time: Number,
 ) -> tuple[Number, Number, Number]:
     """
-    One Fetkovich (1971) recursive step.
+    Computes one Fetkovich (1971) recursive step.
 
     A pure function of its arguments that reads no workspace state and
     writes nothing. Safe to call every Newton/Picard iteration within a
@@ -161,7 +161,7 @@ class FetkovichAquifer(BoundaryCondition):
 
     *Calibrated mode, from deck*: supply `aquifer_productivity_index`,
     `aquifer_compressibility`, and `initial_aquifer_water_volume`; `We_i`
-    is derived as `c_t * W_i * p_i`. This matches Eclipse's own `AQUFETP`
+    is derived as `c_t * W_i * p_i`. This matches the `AQUFETP`
     record exactly, which gives `J`, `c_t`, and `W_i` directly rather than
     `We_i` or aquifer geometry.
 
@@ -393,7 +393,7 @@ class FetkovichAquifer(BoundaryCondition):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `FetkovichAquifer` with every dimensional field
+        Returns a new `FetkovichAquifer` with every dimensional field
         rescaled to *target*.
 
         :param target: Target `UnitSystem`.
@@ -451,7 +451,7 @@ class FetkovichAquifer(BoundaryCondition):
         get_initial_pressure: InitialPressureFactory | None = None,
     ) -> Self | dict[int, Self]:
         """
-        Construct one or all `FetkovichAquifer` objects from a parsed `DeckFile`.
+        Constructs one or all `FetkovichAquifer` objects from a parsed `DeckFile`.
 
         Reads the `AQUFETP` keyword (see `load_fetkovich_aquifer`). When `aquifer_id` is
         given, returns a single `FetkovichAquifer` for that aquifer. When `aquifer_id` is
@@ -484,7 +484,7 @@ def load_fetkovich_aquifer_from_record(
     get_initial_pressure: InitialPressureFactory | None = None,
 ) -> FetkovichAquifer:
     """
-    Build a `FetkovichAquifer` from one `AQUFETP` record.
+    Builds a `FetkovichAquifer` from one `AQUFETP` record.
 
     :param record: One parsed `AQUFETP` record.
     :param unit_system: The deck's unit system.
@@ -546,7 +546,7 @@ def load_fetkovich_aquifer(
     get_initial_pressure: InitialPressureFactory | None = None,
 ) -> FetkovichAquifer | dict[int, FetkovichAquifer]:
     """
-    Load one or all `AQUFETP` aquifers of a deck as `FetkovichAquifer`s.
+    Loads one or all `AQUFETP` aquifers of a deck as `FetkovichAquifer`s.
 
     :param deck_file: Parsed `bores.deck.file.DeckFile`.
     :param aquifer_id: Id of a specific aquifer to load, or `None` for all.

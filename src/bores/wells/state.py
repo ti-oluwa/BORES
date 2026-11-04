@@ -402,17 +402,17 @@ class WellState(StoreSerializable):
 
     @property
     def total_liquid_rate(self) -> Number:
-        """Combined oil and water rate for the well, at reservoir conditions."""
+        """Returns combined oil and water rate for the well, at reservoir conditions."""
         return self.rates.oil + self.rates.water
 
     @property
     def total_surface_liquid_rate(self) -> Number:
-        """Combined oil and water rate for the well, at surface conditions."""
+        """Returns combined oil and water rate for the well, at surface conditions."""
         return self.surface_rates.oil + self.surface_rates.water
 
     def get_perforation_state(self, cell_index: int) -> PerforationState:
         """
-        Look up and return the first `PerforationState` connected to a given cell.
+        Looks up and returns the first `PerforationState` connected to a given cell.
 
         :param cell_index: 0-based `Grid` cell index.
         :returns: Matching `PerforationState`.
@@ -491,7 +491,7 @@ class WellStates(
         unit_system: UnitSystem | None = None,
     ) -> None:
         """
-        Initialize a `WellStates` instance.
+        Initializes a `WellStates` instance.
 
         :param states: Mapping from well name to `WellState`.
         :param unit_system: Target unit system for every state. None
@@ -529,7 +529,7 @@ class WellStates(
 
     def get(self, well_name: str) -> WellState | None:
         """
-        Get the `WellState` for a given well.
+        Gets the `WellState` for a given well.
 
         :param well_name: Well to look up.
         :returns: WellState, or None if unset.
@@ -538,7 +538,7 @@ class WellStates(
 
     def set(self, state: WellState) -> None:
         """
-        Set the `WellState` for a given well.
+        Sets the `WellState` for a given well.
 
         :param state: WellState to store, keyed by `state.well_name`.
         """
@@ -556,7 +556,7 @@ class WellStates(
 
     def __getitem__(self, well_name: str) -> WellState:
         """
-        Get the `WellState` for a given well.
+        Gets the `WellState` for a given well.
 
         :raises KeyError: If no state is set for `well_name`.
         """

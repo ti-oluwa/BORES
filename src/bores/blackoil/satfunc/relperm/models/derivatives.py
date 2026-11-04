@@ -99,7 +99,7 @@ def broadcast_saturations(
     Boolean,
 ]:
     """
-    Bring the saturations to a common array shape.
+    Brings the saturations to a common array shape.
 
     :param water_saturation: Water saturation, scalar or array.
     :param oil_saturation: Oil saturation, scalar or array.
@@ -137,7 +137,7 @@ def validate_and_normalize_saturations(
     saturation_epsilon: Number,
 ) -> tuple[NumberArray[NDimension], NumberArray[NDimension], NumberArray[NDimension]]:
     """
-    Check that the saturations lie between 0 and 1, and scale them to sum to 1 where they differ
+    Checks that the saturations lie between 0 and 1, and scales them to sum to 1 where they differ
     from 1 by more than `saturation_epsilon`.
 
     :param water_saturation: Water saturation array.
@@ -183,7 +183,7 @@ def apply_water_wet_mixing_rule(
     finite_difference_epsilon: Number,
 ) -> tuple[NumberArray[NDimension], MixingRulePartialDerivatives]:
     """
-    Evaluate the three-phase oil relative permeability mixing rule for a water-wet
+    Evaluates the three-phase oil relative permeability mixing rule for a water-wet
     system, together with its partial derivatives.
 
     Oil is the intermediate phase, so the rule is evaluated with unit endpoint
@@ -256,7 +256,7 @@ def apply_oil_wet_mixing_rule(
     finite_difference_epsilon: Number,
 ) -> tuple[NumberArray[NDimension], MixingRulePartialDerivatives]:
     """
-    Evaluate the mixing rule for an oil-wet system, together with its partial
+    Evaluates the mixing rule for an oil-wet system, together with its partial
     derivatives.
 
     Oil is the wetting phase and water is the intermediate phase, so the rule is
@@ -327,7 +327,7 @@ def apply_oil_wet_mixing_rule(
 
 def to_scalar(value: NumberOrArray[NDimension]) -> Number:
     """
-    Convert a one-element array to a Python scalar.
+    Converts a one-element array to a Python scalar.
 
     :param value: One-element array or scalar.
     :return: The value as a scalar.
@@ -343,7 +343,7 @@ def blend_systems(
     water_wet_fraction: Number,
 ) -> NumberArray[NDimension]:
     """
-    Blend one quantity of the water-wet and oil-wet systems for a mixed-wet rock.
+    Blends one quantity of the water-wet and oil-wet systems for a mixed-wet rock.
 
     :param water_wet_value: The quantity for the water-wet system.
     :param oil_wet_value: The quantity for the oil-wet system.
@@ -367,7 +367,7 @@ def build_relperm_derivatives(
     is_scalar: Boolean,
 ) -> RelativePermeabilityDerivatives:
     """
-    Package the nine partial derivatives, converting each to a scalar for a scalar call.
+    Returns package the nine partial derivatives, converting each to a scalar for a scalar call.
 
     :param dkrw_dsw: Derivative of water relative permeability with respect to water saturation.
     :param dkro_dsw: Derivative of oil relative permeability with respect to water saturation.
@@ -415,7 +415,7 @@ def finalize_water_wet_derivatives(
     is_scalar: Boolean,
 ) -> RelativePermeabilityDerivatives:
     """
-    Apply the minimum relative permeability to a purely water-wet system and package
+    Applies the minimum relative permeability to a purely water-wet system and package
     the derivatives.
 
     Water relative permeability depends on water saturation only and gas relative
@@ -463,7 +463,7 @@ def finalize_oil_wet_derivatives(
     is_scalar: Boolean,
 ) -> RelativePermeabilityDerivatives:
     """
-    Apply the minimum relative permeability to a purely oil-wet system and package
+    Applies the minimum relative permeability to a purely oil-wet system and package
     the derivatives.
 
     Oil relative permeability depends on oil saturation only and gas relative
@@ -513,8 +513,8 @@ def finalize_mixed_wet_derivatives(
     is_scalar: Boolean,
 ) -> RelativePermeabilityDerivatives:
     """
-    Blend a water-wet and an oil-wet system for a mixed-wet rock, apply the minimum
-    relative permeability to the blend, and package the derivatives.
+    Blends a water-wet and an oil-wet system for a mixed-wet rock, applies the minimum
+    relative permeability to the blend, and packages the derivatives.
 
     :param water_wet: The water-wet system.
     :param oil_wet: The oil-wet system.

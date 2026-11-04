@@ -719,7 +719,7 @@ class ConnectionRates(typing.NamedTuple):
 
 def get_connection_rates(workspace: PerforationWorkspace, copy: bool = False) -> ConnectionRates:
     """
-    The per-connection rates the most recent solve left in a well's `PerforationWorkspace`.
+    Returns the per-connection rates the most recent solve left in a well's `PerforationWorkspace`.
 
     The workspace's rate arrays are overwritten by every solve, so the values only stay valid
     until the next one. Take a copy to keep them past it.
@@ -1086,7 +1086,7 @@ def load_wells_states(
     wells: Wells, compiled_system: CompiledWellSystem, workspace: WellsWorkspace
 ) -> WellStates:
     """
-    Load `WellStates` from a resolved `WellsWorkspace`.
+    Loads `WellStates` from a resolved `WellsWorkspace`.
 
     Only covers wells actually resolved this pass/step. A well whose
     `WellStatus` is still `PENDING` (its BHP is left `NaN` by

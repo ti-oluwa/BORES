@@ -142,7 +142,7 @@ def compute_infinite_dimensionless_pressure(t_d: Number) -> Number:
 @numba.njit(cache=True)
 def compute_infinite_dimensionless_pressure_derivative(t_d: Number) -> Number:
     """
-    Derivative `pD'(tD)` for an infinite-acting radial aquifer.
+    Returns derivative `pD'(tD)` for an infinite-acting radial aquifer.
 
     Edwardson et al. (1962) polynomial ratio for `tD <= 200`, analytical derivative of
     the large-time expansion used by `compute_infinite_dimensionless_pressure` beyond that.
@@ -217,7 +217,7 @@ def compute_finite_dimensionless_pressure_derivative(
     linear_coefficient: Number,
 ) -> Number:
     """
-    Derivative `pD'(tD, r_eD)` of `compute_finite_dimensionless_pressure`,
+    Returns derivative `pD'(tD, r_eD)` of `compute_finite_dimensionless_pressure`,
     from precomputed per-root coefficients.
 
     :param t_d: Dimensionless time.
@@ -261,7 +261,7 @@ class AquiferInfluenceTable:
     @property
     def time_range(self) -> tuple[Number, Number]:
         """
-        The first and last dimensionless time the table lists. Outside this range `query`
+        Returns the first and last dimensionless time the table lists. Outside this range `query`
         extends the table instead of reading it.
         """
         return self.times[0].item(), self.times[-1].item()
@@ -317,7 +317,7 @@ class AquiferInfluenceTable:
         cls, deck_file: DeckFile, *, table_number: Integer | None = None
     ) -> Self | dict[int, Self]:
         """
-        Construct one or all `AquiferInfluenceTable` objects from a parsed `DeckFile`.
+        Constructs one or all `AquiferInfluenceTable` objects from a parsed `DeckFile`.
 
         Reads the `AQUTAB` keyword (see `load_aquifer_influence_table`).
 
@@ -343,7 +343,7 @@ def compute_tabulated_dimensionless_pressure(
     pressures: NumberArray[OneDimension],
 ) -> tuple[Number, Number]:
     """
-    `pD` and `pD'` at `tD`, read from a table by linear interpolation.
+    Returns `pD` and `pD'` at `tD`, read from a table by linear interpolation.
 
     Before the first row the table is joined to the origin by a straight line, or if the
     first row is at `tD = 0`, `pD` stays at its value there. After the last row the slope
@@ -381,7 +381,7 @@ def compute_tabulated_dimensionless_pressures(
     pressures: NumberArray[OneDimension],
 ) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension]]:
     """
-    `pD` and `pD'` at every `tD` of an array, read from a table by linear interpolation as
+    Returns `pD` and `pD'` at every `tD` of an array, read from a table by linear interpolation as
     `compute_tabulated_dimensionless_pressure` does for one.
 
     :param t_d: Dimensionless times.
@@ -414,7 +414,7 @@ def compute_incremental_influx(
     influence_pressures: NumberArray[OneDimension],
 ) -> tuple[Number, Number]:
     """
-    One Carter-Tracy (1960) recursive step - Eq. 3:
+    Computes one Carter-Tracy (1960) recursive step - Eq. 3:
 
         (We)_n = (We)_{n-1}
                  + [(tD)_n - (tD)_{n-1}]
@@ -888,7 +888,7 @@ class CarterTracyAquifer(BoundaryCondition):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `CarterTracyAquifer` with all dimensional parameters
+        Returns a new `CarterTracyAquifer` with all dimensional parameters
         rescaled to *target*.
 
         :param target: Target `UnitSystem`.
@@ -952,7 +952,7 @@ class CarterTracyAquifer(BoundaryCondition):
         get_initial_pressure: InitialPressureFactory | None = None,
     ) -> Self | dict[int, Self]:
         """
-        Construct one or all `CarterTracyAquifer` objects from a parsed `DeckFile`.
+        Constructs one or all `CarterTracyAquifer` objects from a parsed `DeckFile`.
 
         Reads the `AQUCT` keyword, and the `AQUTAB` keyword for any aquifer that uses
         a custom influence table (see `load_carter_tracy_aquifer`).
@@ -983,7 +983,7 @@ def load_aquifer_influence_table_from_records(
     records: typing.Sequence[typing.Mapping[str, typing.Any]],
 ) -> AquiferInfluenceTable:
     """
-    Build an `AquiferInfluenceTable` from the rows of one `AQUTAB` table.
+    Builds an `AquiferInfluenceTable` from the rows of one `AQUTAB` table.
 
     :param records: The table's rows, each with `dimensionless_time` and
         `dimensionless_pressure`.
@@ -1016,7 +1016,7 @@ def load_aquifer_influence_table(
     deck_file: DeckFile, *, table_number: Integer | None = None
 ) -> AquiferInfluenceTable | dict[int, AquiferInfluenceTable]:
     """
-    Load one or all `AQUTAB` influence tables of a deck.
+    Loads one or all `AQUTAB` influence tables of a deck.
 
     Table 1 is the built-in influence function, so `AQUTAB` tables are numbered from 2 in
     the order they appear.
@@ -1054,7 +1054,7 @@ def load_carter_tracy_aquifer_from_record(
     influence_tables: typing.Mapping[int, AquiferInfluenceTable] | None = None,
 ) -> CarterTracyAquifer:
     """
-    Build a `CarterTracyAquifer` from one `AQUCT` record, in
+    Builds a `CarterTracyAquifer` from one `AQUCT` record, in
     physical-properties mode.
 
     `AQUCT` gives every physical-mode input directly except water
@@ -1160,7 +1160,7 @@ def load_carter_tracy_aquifer(
     get_initial_pressure: InitialPressureFactory | None = None,
 ) -> CarterTracyAquifer | dict[int, CarterTracyAquifer]:
     """
-    Load one or all `AQUCT` aquifers of a deck as `CarterTracyAquifer`s.
+    Loads one or all `AQUCT` aquifers of a deck as `CarterTracyAquifer`s.
 
     An aquifer whose record names an influence table other than 1 takes it from the
     deck's `AQUTAB` keyword (see `load_aquifer_influence_table`).

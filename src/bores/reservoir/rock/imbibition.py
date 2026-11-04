@@ -51,7 +51,7 @@ class ImbibitionEndpoints:
 
     Each array is `None` when the deck does not give that keyword. Inside a given array a `NaN`
     cell was not assigned by any record, so that cell takes the end-point of its imbibition
-    table, as in Eclipse. Saturations and relative permeabilities are dimensionless. The two
+    table. Saturations and relative permeabilities are dimensionless. The two
     capillary pressures are in `unit_system`.
     """
 
@@ -135,7 +135,7 @@ class ImbibitionEndpoints:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return the end-points in `target` units.
+        Returns the end-points in `target` units.
 
         Only the capillary pressures change, because saturations and relative permeabilities are
         dimensionless.
@@ -169,7 +169,7 @@ class ImbibitionEndpoints:
         dtype: npt.DTypeLike = None,
     ) -> Self | None:
         """
-        Load the imbibition end-points from a deck, in the deck's unit system.
+        Loads the imbibition end-points from a deck, in the deck's unit system.
 
         :param deck_file: The deck to read.
         :param n_cells: Number of cells in the grid.

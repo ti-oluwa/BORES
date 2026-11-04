@@ -40,8 +40,8 @@ and relative permeability / capillary pressure curves.
 - `ISWLPC`, `ISGLPC`: connate saturations that scale only the imbibition capillary pressure curves.
 - `SCALECRS`: how the critical saturations are scaled.
 
-A cell that is never given a value by one of these arrays is `NaN`, not `0.0`: Eclipse then takes
-that cell's end-point from the saturation tables, and `0.0` would be a different (and wrong)
+A cell that is never given a value by one of these arrays is `NaN`, not `0.0`: the cell's end-point is then taken
+from the saturation tables, and `0.0` would be a different (and wrong)
 end-point. Operators leave an unset cell unset, since `NaN` plus, times, or limited by a number is
 still `NaN`.
 
@@ -332,7 +332,7 @@ PVTO = TableKeyword(
 """
 `PVTO` - live-oil (dissolved-gas, Rs-bracketed) PVT table.
 
-The Eclipse format uses a primary Rs value on a line by itself,
+The deck format uses a primary Rs value on a line by itself,
 followed by rows of `(pressure, Bo, viscosity)` at that Rs.
 Each Rs group is terminated by `/`; the table block ends with `/`.
 
@@ -747,10 +747,10 @@ Fields:
 
 def endpoint_array(name: str) -> ArrayKeyword:
     """
-    Build the array keyword for a saturation end-point scaling array.
+    Builds the array keyword for a saturation end-point scaling array.
 
     A cell that nothing assigns is `NaN` rather than `0.0`: it has no end-point of its own, and
-    Eclipse takes the end-point from the saturation table there.
+    The end-point is taken from the saturation table there.
 
     :param name: Keyword name, e.g. `"SWL"`.
     :returns: The array keyword.

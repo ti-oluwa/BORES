@@ -85,7 +85,7 @@ class WellGroups:
         return tuple(name for name, group in self.groups.items() if group.parent == name)
 
     def descendants(self, name: str) -> tuple[str, ...]:
-        """Every group under `name`, at any depth (not including `name` itself)."""
+        """Returns every group under `name`, at any depth (not including `name` itself)."""
         result: list[str] = []
         frontier = list(self.children(name))
         while frontier:
@@ -96,7 +96,7 @@ class WellGroups:
 
     def tree(self, root: str = FIELD_GROUP, *, objects: bool = False) -> WellGroupTree:
         """
-        Return the group hierarchy rooted at `root` as a nested dictionary.
+        Returns the group hierarchy rooted at `root` as a nested dictionary.
 
         The returned structure is keyed either by group names (default) or by
         `WellGroup` objects when `objects=True`, with each value being a dictionary
@@ -147,7 +147,7 @@ class WellGroups:
 
     def format_tree(self, root: str = FIELD_GROUP, *, ascii: bool = False) -> str:
         """
-        Return a human-readable rendering of the group hierarchy.
+        Returns a human-readable rendering of the group hierarchy.
 
         Example (`ascii=False`):
 
@@ -204,7 +204,7 @@ class WellGroups:
     @classmethod
     def from_deck(cls, deck_file: DeckFile) -> Self:
         """
-        Load `WellGroups` from a parsed `DeckFile` if any exists.
+        Loads `WellGroups` from a parsed `DeckFile` if any exists.
 
         :param deck_file: Parsed deck.
         :returns: `WellGroups` from `GRUPTREE`, or None if absent.
@@ -215,7 +215,7 @@ class WellGroups:
 
     def __format__(self, spec: str) -> str:
         """
-        Format the group hierarchy.
+        Formats the group hierarchy.
 
         Supported format specifiers:
 
@@ -373,7 +373,7 @@ class GroupControls:
         unit_system: UnitSystem | None = None,
     ) -> None:
         """
-        Initialize the `GroupControls` object.
+        Initializes the `GroupControls` object.
 
         :param controls: Mapping from group name to GroupControl.
         :param unit_system: Target unit system for every control. None
@@ -410,7 +410,7 @@ class GroupControls:
     @classmethod
     def from_deck(cls, deck_file: DeckFile) -> Self:
         """
-        Load `GroupControls` from a parsed `DeckFile` if any exists.
+        Loads `GroupControls` from a parsed `DeckFile` if any exists.
 
         :param deck_file: Parsed deck.
         :returns: `GroupControls` from `GCONPROD`/`GCONINJE`, or None if absent.

@@ -1,7 +1,7 @@
 """
 Summary-vector recording API.
 
-A summary vector (Eclipse's own term: `FOPR`, `WBHP`, `WWCT`, and so on) is
+A summary vector (its deck mnemonic: `FOPR`, `WBHP`, `WWCT`, and so on) is
 just another thing a schedule can read at a point in time. It fires on the
 same `Event`s as any other scheduled item, and the values it reads are recorded in
 a `SummaryReport` rather than mutating the model.
@@ -71,7 +71,7 @@ class Summary(typing.Protocol[ModelTcon]):
     @property
     def key(self) -> str:
         """
-        This vector's identifier in a `SummaryReport`, in Eclipse's own
+        This vector's identifier in a `SummaryReport`, in its deck
         `MNEMONIC` or `MNEMONIC:QUALIFIER` form (`"FOPR"`, `"WBHP:PROD1"`).
         """
         ...
@@ -211,7 +211,7 @@ class SummaryReport(
 
     def keys(self) -> frozenset[str]:
         """
-        Every distinct vector key recorded so far.
+        Returns every distinct vector key recorded so far.
 
         :returns: The set of recorded keys.
         """
@@ -230,7 +230,7 @@ class SummaryReport(
 
     def get(self, key: str, /) -> list[SummaryRecord]:
         """
-        Every record of this vector, in recording order.
+        Returns every record of this vector, in recording order.
 
         :param key: The vector to retrieve.
         :returns: The vector's records. Empty if `key` was never recorded.
@@ -566,7 +566,7 @@ def record_every(
     """
     Builds a `ScheduleItem` recording `quantities` every `every` time units.
 
-    The common case: Eclipse-style reporting at a fixed cadence, all
+    The common case: deck-style reporting at a fixed cadence, all
     requested vectors recorded together at each report time.
 
     :param every: How often to record, in the schedule's unit system.
@@ -628,7 +628,7 @@ def select_summary_keys(
     Works out which of a report's vectors a data frame covers.
 
     :param report: The report to select from.
-    :param keys: Vector keys, or Eclipse-style patterns such as `"WBHP:*"` or `"F*PR"`, or
+    :param keys: Vector keys, or deck-style patterns such as `"WBHP:*"` or `"F*PR"`, or
         `None` for every recorded vector.
     :returns: The matching keys, in the order they were first recorded for `None` and in the
         order they were asked for otherwise, each once.

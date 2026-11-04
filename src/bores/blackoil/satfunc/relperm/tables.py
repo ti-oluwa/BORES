@@ -62,7 +62,7 @@ MinimumRelPerm = typing.Literal["auto"] | None | Number
 
 def resolve_min_relperm(min_value: MinimumRelPerm) -> Number | None:
     """
-    Resolve a `MinimumRelPerm` sentinel to a concrete Number or `None`.
+    Resolves a `MinimumRelPerm` sentinel to a concrete Number or `None`.
 
     `"auto"` - `max(4 * machine_epsilon, 1e-8)`, consistent with the
     approach used by CMG IMEX/GEM for minimum mobility min_values: tight enough
@@ -95,7 +95,7 @@ def resolve_min_relperm(min_value: MinimumRelPerm) -> Number | None:
 
 def _match_float_dtype(result: typing.Any, reference: typing.Any) -> typing.Any:
     """
-    Cast `result` to the dtype of `reference` when that is a floating dtype.
+    Casts `result` to the dtype of `reference` when that is a floating dtype.
 
     A no-op for Python scalars and for integer `reference` arrays, whose floored result must
     stay floating point.
@@ -107,7 +107,7 @@ def _match_float_dtype(result: typing.Any, reference: typing.Any) -> typing.Any:
 
 
 def _is_float_array(numba_type: typing.Any) -> bool:
-    """Whether a numba type is an array with a floating point dtype."""
+    """Checks whether a numba type is an array with a floating point dtype."""
     return isinstance(numba_type, nb_types.Array) and isinstance(numba_type.dtype, nb_types.Float)
 
 
@@ -116,7 +116,7 @@ def clamp_relperm(
     min_value: Number | None,
 ) -> NumberOrArray[NDimension]:
     """
-    Clamp `kr` to `[min_value, ∞)` in-place-compatible fashion.
+    Clamps `kr` to `[min_value, ∞)` in-place-compatible fashion.
 
     Smoothly transitions from the raw `kr` values to the min_value value, avoiding
     non-differentiability and ensuring well-behaved derivatives for solvers.
@@ -160,7 +160,7 @@ def clamp_relperm_derivative(
     min_value: Number | None,
 ) -> NumberOrArray[NDimension]:
     """
-    Smoothly clamp the derivative of `kr` to zero in the min_value region.
+    Returns smoothly clamp the derivative of `kr` to zero in the min_value region.
     When `kr` is above the min_value, the derivative is unchanged. As `kr` approaches
     and falls below the min_value, the derivative transitions smoothly to zero, ensuring
     that the Jacobian remains well-conditioned and solvers remain stable.
@@ -269,12 +269,12 @@ class RelativePermeabilityTable:
         raise NotImplementedError
 
     def get_oil_relperm_endpoint(self) -> Number:
-        """Oil relative permeability at connate water saturation (krocw). Defaults to 1.0."""
+        """Returns oil relative permeability at connate water saturation (krocw). Defaults to 1.0."""
         return 1.0
 
     def get_water_relperm_endpoint(self) -> Number:
         """
-        Water relative permeability endpoint (krw at residual oil saturation).
+        Returns water relative permeability endpoint (krw at residual oil saturation).
 
         Returns the maximum krw value from the two-phase oil-water table.
         Defaults to 1.0 for unit-normalized tables and analytical models.
@@ -283,7 +283,7 @@ class RelativePermeabilityTable:
 
     def get_gas_relperm_endpoint(self) -> Number:
         """
-        Gas relative permeability endpoint (krg at connate water + residual oil).
+        Returns gas relative permeability endpoint (krg at connate water + residual oil).
 
         Returns the maximum krg value from the two-phase gas-oil table.
         Defaults to 1.0 for unit-normalized tables and analytical models.
@@ -292,7 +292,7 @@ class RelativePermeabilityTable:
 
     def get_relperm_endpoints(self) -> RelPermEndpoints:
         """
-        Compute all three phase relative permeability endpoints in a single call.
+        Computes all three phase relative permeability endpoints in a single call.
 
         Returns a `RelPermEndpoints` container holding kro, krw, and krg endpoint
         values. For unit-normalized tables all three are 1.0. For unnormalized
@@ -344,7 +344,7 @@ class RelativePermeabilityTable:
 
     def get_saturation_endpoints(self) -> SaturationEndpoints:
         """
-        Compute all four saturation endpoints in a single call.
+        Computes all four saturation endpoints in a single call.
 
         :return: `SaturationEndpoints` with connate water and the three
             residual/critical saturations.
@@ -364,7 +364,7 @@ class RelativePermeabilityTable:
         **kwargs: typing.Any,
     ) -> RelativePermeabilities:
         """
-        Compute relative permeabilities for water, oil, and gas.
+        Computes relative permeabilities for water, oil, and gas.
 
         :param water_saturation: Water saturation (fraction) - scalar or array.
         :param oil_saturation: Oil saturation (fraction) - scalar or array.
@@ -382,7 +382,7 @@ class RelativePermeabilityTable:
         **kwargs: typing.Any,
     ) -> RelativePermeabilityDerivatives:
         """
-        Compute relative permeability derivatives for water, oil, and gas.
+        Computes relative permeability derivatives for water, oil, and gas.
 
         :param water_saturation: Water saturation (fraction) - scalar or array.
         :param oil_saturation: Oil saturation (fraction) - scalar or array.
@@ -400,7 +400,7 @@ class RelativePermeabilityTable:
         **kwargs: typing.Any,
     ) -> tuple[RelativePermeabilities, RelativePermeabilityDerivatives]:
         """
-        Compute the relative permeabilities and their derivatives together.
+        Computes the relative permeabilities and their derivatives together.
 
         Models that can share work between the two computations override this. The default
         evaluates the relative permeabilities and then the derivatives, so it gives the same
@@ -436,7 +436,7 @@ class RelativePermeabilityTable:
         **kwargs: typing.Any,
     ) -> RelativePermeabilities:
         """
-        Compute relative permeabilities for water, oil, and gas.
+        Computes relative permeabilities for water, oil, and gas.
 
         :param water_saturation: Water saturation (fraction) - scalar or array.
         :param oil_saturation: Oil saturation (fraction) - scalar or array.
@@ -682,7 +682,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
         non_wetting_saturation: NumberOrArray[NDimension],
     ) -> NumberOrArray[NDimension]:
         """
-        Return whichever saturation array corresponds to the reference axis.
+        Returns whichever saturation array corresponds to the reference axis.
 
         :param wetting_saturation: Current wetting phase saturation (scalar or array).
         :param non_wetting_saturation: Current non-wetting phase saturation (scalar or array).
@@ -700,7 +700,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
         extrapolate_right: Number,
     ) -> NumberOrArray[NDimension]:
         """
-        Evaluate a pre-built PCHIP interpolant at `reference`, applying
+        Evaluates a pre-built PCHIP interpolant at `reference`, applying
         constant extrapolation at the boundaries. Result is cast to `self.dtype`.
 
         :param interpolant: Pre-built `PchipInterpolator` instance.
@@ -730,7 +730,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
         reference: NumberOrArray[NDimension],
     ) -> NumberOrArray[NDimension]:
         """
-        Evaluate a pre-built PCHIP derivative interpolant at `reference`,
+        Evaluates a pre-built PCHIP derivative interpolant at `reference`,
         returning zero (in `self.dtype`) outside the knot range.
 
         :param d_interpolant: Pre-built derivative `PchipInterpolator`.
@@ -761,7 +761,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
         non_wetting_saturation: NumberOrArray[NDimension] | None = None,
     ) -> NumberOrArray[NDimension]:
         """
-        Get wetting phase relative permeability.
+        Gets wetting phase relative permeability.
 
         When `reference_phase="wetting"`, only `wetting_saturation` is
         needed. When `reference_phase="non_wetting"`, `non_wetting_saturation` must be supplied.
@@ -793,7 +793,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
         non_wetting_saturation: NumberOrArray[NDimension] | None = None,
     ) -> NumberOrArray[NDimension]:
         """
-        Get non-wetting phase relative permeability.
+        Gets non-wetting phase relative permeability.
 
         When `reference_phase="wetting"`, only `wetting_saturation` is
         needed. When `reference_phase="non_wetting"`, `non_wetting_saturation` must be supplied.
@@ -825,7 +825,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
         non_wetting_saturation: NumberOrArray[NDimension] | None = None,
     ) -> tuple[NumberOrArray[NDimension], NumberOrArray[NDimension]]:
         """
-        Get both wetting and non-wetting phase relative permeabilities.
+        Gets both wetting and non-wetting phase relative permeabilities.
 
         :param wetting_saturation: Wetting phase saturation (scalar or array).
         :param non_wetting_saturation: Non-wetting phase saturation (scalar or array).
@@ -846,7 +846,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
         non_wetting_saturation: NumberOrArray[NDimension] | None = None,
     ) -> NumberOrArray[NDimension]:
         """
-        Derivative of the wetting-phase relative permeability with respect to
+        Returns derivative of the wetting-phase relative permeability with respect to
         the reference saturation axis of this table, evaluated from the
         analytical PCHIP derivative.
 
@@ -885,7 +885,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
         non_wetting_saturation: NumberOrArray[NDimension] | None = None,
     ) -> NumberOrArray[NDimension]:
         """
-        Derivative of the non-wetting-phase relative permeability with respect
+        Returns derivative of the non-wetting-phase relative permeability with respect
         to the reference saturation axis of this table, evaluated from the
         analytical PCHIP derivative.
 
@@ -950,7 +950,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
 
     def get_connate_water_saturation(self) -> Number:
         """
-        Connate/critical water saturation (swco), read off this table's own
+        Returns connate/critical water saturation (swco), read off this table's own
         saturation axis. `0.0` if this table doesn't have water as one of its two
         phases (a table with no water has no water-saturation information).
 
@@ -968,7 +968,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
 
     def get_residual_oil_saturation_water(self) -> Number:
         """
-        Residual oil saturation after water flood (sorw), derived from this
+        Returns residual oil saturation after water flood (sorw), derived from this
         table's own saturation axis - only meaningful for an oil-water
         table (`0.0` otherwise). If the axis is Sw, sorw is `1 -
         Sw_max`; if the axis is So directly, sorw is the axis minimum.
@@ -982,7 +982,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
 
     def get_residual_gas_saturation(self) -> Number:
         """
-        Residual/critical gas saturation (sgr), read directly off this
+        Returns residual/critical gas saturation (sgr), read directly off this
         table's own saturation axis (its minimum, by construction) when
         that axis represents gas. `0.0` if this table doesn't have gas as
         one of its two phases, or gas isn't the axis phase.
@@ -993,7 +993,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
 
     def get_residual_oil_saturation_gas(self) -> Number:
         """
-        Residual oil saturation after gas flood (sorg), derived from this
+        Returns residual oil saturation after gas flood (sorg), derived from this
         table's own saturation axis - only meaningful for a gas-oil table
         (`0.0` otherwise).
 
@@ -1018,7 +1018,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
         **kwargs: typing.Any,
     ) -> RelativePermeabilities:
         """
-        Compute relative permeabilities for all three phases from a two-phase table.
+        Computes relative permeabilities for all three phases from a two-phase table.
 
         The absent phase always returns zero (in `self.dtype`). The reference saturation
         dispatched to the underlying PCHIP interpolant is chosen by inspecting which
@@ -1113,7 +1113,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
         **kwargs: typing.Any,
     ) -> RelativePermeabilityDerivatives:
         """
-        Compute the nine partial derivatives of three-phase relative permeabilities
+        Computes the nine partial derivatives of three-phase relative permeabilities
         for a two-phase table.
 
         The absent phase contributes zero (in `self.dtype`) to every derivative.
@@ -1316,7 +1316,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
         dtype: npt.DTypeLike = None,
     ) -> Self:
         """
-        Build a `TwoPhaseRelPermTable` for one saturation region from a `DeckFile`.
+        Builds a `TwoPhaseRelPermTable` for one saturation region from a `DeckFile`.
 
         **First keyword family** (`SWOF` / `SGOF`):
 
@@ -1376,7 +1376,7 @@ class TwoPhaseRelPermTable(RelativePermeabilityTable):
         region_index = max(satnum - 1, 0)
 
         def get_rows(keyword: str) -> list[dict[str, typing.Any]]:
-            """Extract rows for `region_index` from a deck keyword, or return []."""
+            """Extracts rows for `region_index` from a deck keyword, or returns []."""
             all_regions = deck_file.get_shared(keyword)
             if all_regions is None:
                 return []
@@ -1598,7 +1598,7 @@ def resolve_residual_oil_saturation_gas(
     connate_water_saturation: Number,
 ) -> Number:
     """
-    Residual oil saturation after gas flood (`sorg`) of a gas-oil table, accounting for
+    Returns residual oil saturation after gas flood (`sorg`) of a gas-oil table, accounting for
     the connate water saturation.
 
     A gas-oil table has no water information of its own. When it is indexed by gas
@@ -1630,7 +1630,7 @@ def query_two_phase_pair(
     derivative: bool = False,
 ) -> tuple[NumberOrArray[NDimension], NumberOrArray[NDimension]]:
     """
-    Query a two-phase table for its wetting and non-wetting phase relative permeability
+    Queries a two-phase table for its wetting and non-wetting phase relative permeability
     (or their derivatives with respect to the table's reference-axis saturation).
 
     :param table: Two-phase table.
@@ -1664,7 +1664,7 @@ def query_oil_water_system(
     derivative: bool = False,
 ) -> tuple[NumberOrArray[NDimension], NumberOrArray[NDimension]]:
     """
-    Query an oil-water table at the current water saturation, with the oil saturation
+    Queries an oil-water table at the current water saturation, with the oil saturation
     of the two-phase system `So = 1 - Sw`.
 
     With `derivative=True`, the result is the derivative with respect to `Sw`, with the
@@ -1691,7 +1691,7 @@ def query_gas_oil_system(
     derivative: bool = False,
 ) -> tuple[NumberOrArray[NDimension], NumberOrArray[NDimension]]:
     """
-    Query a gas-oil table at the current gas saturation, with the oil saturation of the
+    Queries a gas-oil table at the current gas saturation, with the oil saturation of the
     two-phase system at connate water, `So = 1 - swc - Sg`.
 
     With `derivative=True`, the result is the derivative with respect to `Sg`, with the
@@ -1739,7 +1739,7 @@ def detect_saturation_systems(
     keyword_family: typing.Literal["first", "second", "auto"] = "auto",
 ) -> DeckSaturationSystems:
     """
-    Work out which saturation-function systems a deck defines for a saturation region.
+    Returns work out which saturation-function systems a deck defines for a saturation region.
 
     With `keyword_family="auto"` the first family (`SWOF`/`SGOF`) is used when it defines both
     systems, otherwise the second family (`SWFN`/`SGFN` + `SOF2`/`SOF3`) is used when it does. A deck
@@ -1880,7 +1880,7 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
 
     @property
     def dtype(self) -> np.dtype:
-        """Shared `dtype` of the two underlying two-phase tables."""
+        """Returns shared `dtype` of the two underlying two-phase tables."""
         return np.dtype(self.oil_water_table.dtype)
 
     def get_oil_water_wetting_phase(self) -> FluidPhase:
@@ -1909,7 +1909,7 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
 
     def get_residual_oil_saturation_gas(self) -> Number:
         """
-        Residual oil saturation after gas flood (sorg), combining the gas-oil table
+        Returns residual oil saturation after gas flood (sorg), combining the gas-oil table
         with the oil-water table's connate water saturation. See
         `resolve_residual_oil_saturation_gas`.
         """
@@ -1930,7 +1930,7 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
         NumberArray[NDimension] | None,
     ]:
         """
-        Rescale cells whose saturations do not sum to one beyond the supplied
+        Rescales cells whose saturations do not sum to one beyond the supplied
         saturation tolerance.
 
         Shared by `evaluate` and `derivatives` so both are taken at the same point.
@@ -1974,7 +1974,7 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
         **kwargs: typing.Any,
     ) -> RelativePermeabilities:
         """
-        Compute relative permeabilities for water, oil, and gas.
+        Computes relative permeabilities for water, oil, and gas.
 
         Each two-phase table is queried using its declared `reference_phase`:
 
@@ -2062,7 +2062,7 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
         **kwargs: typing.Any,
     ) -> RelativePermeabilityDerivatives:
         """
-        Compute all nine partial derivatives of the three-phase relative
+        Computes all nine partial derivatives of the three-phase relative
         permeabilities with respect to water saturation, oil saturation, and
         gas saturation.
 
@@ -2257,9 +2257,9 @@ class ThreePhaseRelPermTable(RelativePermeabilityTable):
         dtype: npt.DTypeLike = None,
     ) -> "ThreePhaseRelPermTable":
         """
-        Build a `ThreePhaseRelPermTable` for one saturation region from a `DeckFile`.
+        Builds a `ThreePhaseRelPermTable` for one saturation region from a `DeckFile`.
 
-        Detects which Eclipse saturation-function keyword family is present and
+        Detects which saturation-function keyword family is present and
         builds the oil-water and gas-oil two-phase sub-tables automatically:
 
         **First family** (detected when `SWOF` or `SGOF` is present):

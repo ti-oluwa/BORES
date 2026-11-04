@@ -22,7 +22,7 @@ def resolve_salinity(
     dtype: npt.DTypeLike = None,  # type: ignore[assignment]
 ) -> CellArray:
     """
-    The salinity of every cell, from one value for the whole reservoir or from one per cell.
+    Returns the salinity of every cell, from one value for the whole reservoir or from one per cell.
 
     Salinity is in ppm by weight of salt, in every unit system, since it is a ratio of masses.
 
@@ -57,7 +57,7 @@ def load_salinity(
     dtype: npt.DTypeLike = None,  # type: ignore[assignment]
 ) -> CellArray | None:
     """
-    The salinity of every cell, from the deck's `SALINITY` keyword.
+    Returns the salinity of every cell, from the deck's `SALINITY` keyword.
 
     The deck gives the molality of NaCl in mol per kg of water, which is converted to ppm by
     weight of salt.

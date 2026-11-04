@@ -18,7 +18,7 @@ def _b64_decode(s: str, dtype: npt.DTypeLike, shape: tuple[int, ...]) -> npt.NDA
 
 
 def _sniff_scalar(array: npt.NDArray) -> bool:
-    """All values bit-identical to array.flat[0]."""
+    """Returns all values bit-identical to array.flat[0]."""
     return bool(np.all(array == array.flat[0]))
 
 
@@ -49,7 +49,7 @@ def _sniff_sparse(
     sparse_density_threshold: float = 0.05,
 ) -> tuple[typing.Any, npt.NDArray, npt.NDArray] | None:
     """
-    Return (fill_value, flat_indices_int32, values) if the array is sparse,
+    Returns (fill_value, flat_indices_int32, values) if the array is sparse,
     else None. Fill value is the most common scalar value (exact, lossless).
 
     Uses O(N) candidate-probe approach instead of O(N log N) sort:
@@ -145,7 +145,7 @@ def deserialize_ndarray(
     dtype: npt.DTypeLike = None,
 ) -> npt.NDArray:
     """
-    Reconstruct a numpy array from a wire dict produced by `serialize_ndarray`.
+    Reconstructs a numpy array from a wire dict produced by `serialize_ndarray`.
     """
     if isinstance(data, np.ndarray):
         return data.astype(dtype, copy=False) if dtype is not None else data  # type: ignore[return-value]

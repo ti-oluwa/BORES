@@ -369,7 +369,7 @@ class VFPData(Serializable):
         well_type: WellType | None = None,
     ) -> Self | list[Self]:
         """
-        Construct one or all `VFPData` objects from a parsed `DeckFile`.
+        Constructs one or all `VFPData` objects from a parsed `DeckFile`.
 
         Reads the `VFPPROD` and `VFPINJ` keywords (see `load_vfp_data`).
 
@@ -390,7 +390,7 @@ class VFPData(Serializable):
 @numba.njit(cache=True)
 def safe_ratio(numerator: Number, denominator: Number, axis: NumberArray[OneDimension]) -> Number:
     """
-    A ratio for a table lookup: zero for `0/0`, and the axis maximum for a nonzero
+    Returns a ratio for a table lookup: zero for `0/0`, and the axis maximum for a nonzero
     numerator over a zero denominator.
 
     :param numerator: Ratio numerator.
@@ -508,7 +508,7 @@ class VFPTable(StoreSerializable):
 
     @property
     def well_type(self) -> WellType:
-        """Whether this is a `VFPPROD` (producer) or `VFPINJ` (injector) table."""
+        """Checks whether this is a `VFPPROD` (producer) or `VFPINJ` (injector) table."""
         return self._data.well_type
 
     @property
@@ -518,22 +518,22 @@ class VFPTable(StoreSerializable):
 
     @property
     def unit_system(self) -> UnitSystem:
-        """Unit system of the underlying table data."""
+        """Returns unit system of the underlying table data."""
         return self._data.unit_system
 
     @property
     def flow_type(self) -> VFPFlowType:
-        """What this table's flow axis measures."""
+        """Returns what this table's flow axis measures."""
         return self._data.flow_type
 
     @property
     def water_fraction_type(self) -> VFPWaterFractionType:
-        """What this table's water axis measures."""
+        """Returns what this table's water axis measures."""
         return self._data.water_fraction_type
 
     @property
     def gas_fraction_type(self) -> VFPGasFractionType:
-        """What this table's gas axis measures."""
+        """Returns what this table's gas axis measures."""
         return self._data.gas_fraction_type
 
     def get_lookup_variables(
@@ -792,7 +792,7 @@ class VFPTable(StoreSerializable):
         dtype: npt.DTypeLike = None,
     ) -> Self | list[Self]:
         """
-        Construct one or all `VFPTable` objects from a parsed `DeckFile`.
+        Constructs one or all `VFPTable` objects from a parsed `DeckFile`.
 
         Reads the `VFPPROD` and `VFPINJ` keywords (see `load_vfp_table`).
 
@@ -851,7 +851,7 @@ class VFPTables(StoreSerializable):
 
     @property
     def unit_system(self) -> UnitSystem | None:
-        """Unit system shared by every table, or `None` if empty."""
+        """Returns unit system shared by every table, or `None` if empty."""
         return next(
             (table.unit_system for table in (*self.producers.values(), *self.injectors.values())),
             None,
@@ -913,7 +913,7 @@ class VFPTables(StoreSerializable):
         dtype: npt.DTypeLike = None,
     ) -> Self:
         """
-        Construct a `VFPTables` collection from a parsed `DeckFile`.
+        Constructs a `VFPTables` collection from a parsed `DeckFile`.
 
         Reads the `VFPPROD` and `VFPINJ` keywords (see `load_vfp_tables`).
 
@@ -974,7 +974,7 @@ def load_vfp_data_from_record(
     unit_system: UnitSystem,
 ) -> VFPData:
     """
-    Build a `VFPData` from one parsed `VFPPROD` / `VFPINJ` table.
+    Builds a `VFPData` from one parsed `VFPPROD` / `VFPINJ` table.
 
     The table keeps the definitions its deck gives its axes. Only the units are brought to
     the ones used internally: a FIELD table writes gas rates and gas-oil and gas-liquid
@@ -1084,7 +1084,7 @@ def select_vfp_records(
     well_type: WellType | None,
 ) -> list[tuple[WellType, VFPProducerDeckTable | VFPInjectorDeckTable]]:
     """
-    The `VFPPROD` / `VFPINJ` tables of a deck that match a selection.
+    Returns the `VFPPROD` / `VFPINJ` tables of a deck that match a selection.
 
     A table number defined more than once within one keyword keeps its last definition, as in a
     deck. Producer and injector tables are numbered independently.
@@ -1142,7 +1142,7 @@ def load_vfp_data(
     well_type: WellType | None = None,
 ) -> VFPData | list[VFPData]:
     """
-    Load one or all `VFPPROD` / `VFPINJ` tables of a deck as `VFPData`.
+    Loads one or all `VFPPROD` / `VFPINJ` tables of a deck as `VFPData`.
 
     :param deck_file: Parsed `bores.deck.file.DeckFile`.
     :param table_number: Number of a specific table to load, or `None` for all.
@@ -1189,7 +1189,7 @@ def load_vfp_table(
     dtype: npt.DTypeLike = None,
 ) -> VFPTable | list[VFPTable]:
     """
-    Load one or all `VFPPROD` / `VFPINJ` tables of a deck as `VFPTable`s.
+    Loads one or all `VFPPROD` / `VFPINJ` tables of a deck as `VFPTable`s.
 
     :param deck_file: Parsed `bores.deck.file.DeckFile`.
     :param table_number: Number of a specific table to load, or `None` for all.
@@ -1218,7 +1218,7 @@ def load_vfp_tables(
     dtype: npt.DTypeLike = None,
 ) -> VFPTables:
     """
-    Load the `VFPPROD` / `VFPINJ` tables of a deck into one `VFPTables` collection.
+    Loads the `VFPPROD` / `VFPINJ` tables of a deck into one `VFPTables` collection.
 
     Producer and injector tables are held separately, so the same number can exist in both.
 
@@ -1257,7 +1257,7 @@ def compute_surface_rates(
     gas_fraction: Number,
 ) -> PhaseValues:
     """
-    Surface oil, water and gas rates that a table's lookup values describe.
+    Returns surface oil, water and gas rates that a table's lookup values describe.
 
     This is the inverse of `VFPTable.get_lookup_variables`: the three definitions each give
     one linear equation in the three rates, which are solved together.
@@ -1307,7 +1307,7 @@ def compute_reservoir_rates(
     stb_to_volume_factor: Number = 1.0,
 ) -> PhaseValues:
     """
-    Reservoir-condition phase rates from surface-condition ones.
+    Returns reservoir-condition phase rates from surface-condition ones.
 
     :param surface_rates: Surface-condition oil and water rates in stock-tank barrels per day,
         and gas rate in standard cubic feet per day.

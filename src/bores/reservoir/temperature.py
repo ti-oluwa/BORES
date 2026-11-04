@@ -58,7 +58,7 @@ class TemperatureGradient:
 
     def at_depth(self, depth: NumberOrArray[OneDimension]) -> NumberOrArray[OneDimension]:
         """
-        Return temperature at the given depth or array of depths.
+        Returns temperature at the given depth or array of depths.
 
         :param depth: Depth(s) in `unit_system` length units (positive downward).
         :returns: Temperature value(s) in `unit_system` temperature units.
@@ -76,7 +76,7 @@ class TemperatureGradient:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `TemperatureGradient` with all dimensional parameters
+        Returns a new `TemperatureGradient` with all dimensional parameters
         rescaled to *target*.
 
         The `gradient` (temperature/length) is rescaled by the temperature
@@ -109,12 +109,12 @@ class TemperatureGradient:
 class TemperatureTable(StoreSerializable):
     """
     A depth-indexed temperature lookup table for a single PVT / equilibration
-    region, corresponding to one table from the Eclipse `TEMPVD` keyword.
+    region, corresponding to one table from the `TEMPVD` keyword.
 
     Temperature at a cell centroid depth is linearly interpolated from the
     `(depth, temperature)` pairs. Values above the shallowest entry or
     below the deepest entry are clamped to the respective endpoint. No
-    extrapolation is performed, consistent with Eclipse behaviour.
+    extrapolation is performed.
     """
 
     depths: NumberArray[OneDimension]
@@ -148,7 +148,7 @@ class TemperatureTable(StoreSerializable):
 
     def at_depth(self, depth: NumberOrArray[OneDimension]) -> NumberOrArray[OneDimension]:
         """
-        Return temperature at the given depth or array of depths.
+        Returns temperature at the given depth or array of depths.
 
         Linearly interpolates within the table bounds; clamps to endpoint
         values outside the range (no extrapolation).
@@ -174,7 +174,7 @@ class TemperatureTable(StoreSerializable):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `TemperatureTable` with depths and temperatures
+        Returns a new `TemperatureTable` with depths and temperatures
         rescaled to *target*.
 
         :param target: Target `UnitSystem`.
@@ -288,7 +288,7 @@ class Temperature:
 
     def region(self, num: Integer) -> TemperatureSpec:
         """
-        Return the temperature specification for the given 1-based region index.
+        Returns the temperature specification for the given 1-based region index.
 
         Falls back to the default (key `-1`) when `num` is not in
         `regions`.
@@ -308,7 +308,7 @@ class Temperature:
         dtype: npt.DTypeLike = None,
     ) -> CellArray:
         """
-        Broadcast per-region temperature specifications to a per-cell array.
+        Broadcasts per-region temperature specifications to a per-cell array.
 
         For each unique region index in `region`:
 
@@ -365,7 +365,7 @@ class Temperature:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a copy with all temperature specifications converted to *target*.
+        Returns a copy with all temperature specifications converted to *target*.
 
         Scalar values are rescaled using the temperature factor and offset.
         `TemperatureGradient` and `TemperatureTable` instances delegate
@@ -398,7 +398,7 @@ class Temperature:
     @classmethod
     def from_deck(cls, deck_file: DeckFile, *, dtype: npt.DTypeLike = None) -> Self:
         """
-        Build a `Temperature` from a parsed `DeckFile`.
+        Builds a `Temperature` from a parsed `DeckFile`.
 
         Keyword priority (highest to lowest):
 

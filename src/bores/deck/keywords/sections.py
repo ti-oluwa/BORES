@@ -1,7 +1,7 @@
 """
 Section keywords.
 
-An Eclipse deck is split into sections, each opened by a keyword of its own that takes no data. The
+A deck is split into sections, each opened by a keyword of its own that takes no data. The
 parser does not need them to find anything (every keyword is read wherever it is), but they are
 keywords of the deck like any other, so `DeckFile.get` answers whether a section is present.
 

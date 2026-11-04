@@ -77,9 +77,9 @@ class HysteresisOptions:
     """
     How saturation function hysteresis is modelled, as set by `SATOPTS` and `EHYSTR`.
 
-    Every field has the Eclipse default, so `HysteresisOptions()` is what a deck gets from
+    Every field has its default, so `HysteresisOptions()` is what a deck gets from
     `SATOPTS HYSTER` with no `EHYSTR`. The deck's abbreviations are translated once, when the
-    options are loaded, so nothing here holds an Eclipse mnemonic.
+    options are loaded, so nothing here holds a deck mnemonic.
     """
 
     relperm_model: RelPermHysteresisModel = RelPermHysteresisModel.CARLSON
@@ -155,13 +155,13 @@ class HysteresisOptions:
 
     @property
     def relperm_hysteresis_active(self) -> Boolean:
-        """Whether relative permeability follows hysteresis at all."""
+        """Checks whether relative permeability follows hysteresis at all."""
         return self.apply_to_relperm and self.relperm_model != RelPermHysteresisModel.NONE
 
     @property
     def water_imbibition_when_increasing(self) -> Boolean:
         """
-        Whether water imbibes as its saturation rises, which it does when water is the wetting
+        Checks whether water imbibes as its saturation rises, which it does when water is the wetting
         phase. This is the argument the saturation history tracker takes for water.
         """
         return self.wetting_phase == FluidPhase.WATER
@@ -169,7 +169,7 @@ class HysteresisOptions:
     @property
     def gas_imbibition_when_increasing(self) -> Boolean:
         """
-        Whether gas imbibes as its saturation rises, which it does only when gas is the wetting
+        Checks whether gas imbibes as its saturation rises, which it does only when gas is the wetting
         phase. This is the argument the saturation history tracker takes for gas.
         """
         return self.wetting_phase == FluidPhase.GAS
@@ -182,10 +182,10 @@ class HysteresisOptions:
         relperm_model: RelPermHysteresisModel | None = None,
     ) -> Self | None:
         """
-        Read the hysteresis options from a deck.
+        Reads the hysteresis options from a deck.
 
         Hysteresis is on when `SATOPTS` lists `HYSTER`. `EHYSTR` then sets the options, and
-        any item it leaves out, or all of them if it is absent, keeps its Eclipse default.
+        any item it leaves out, or all of them if it is absent, keeps its default.
 
         :param deck_file: The deck to read.
         :param relperm_model: Use this relative permeability model instead of the one `EHYSTR`
@@ -255,7 +255,7 @@ def derive_land_parameters(
     imbibition: RelativePermeabilityTable,
 ) -> LandParameters:
     """
-    Derive Land's trapping parameters from a drainage and an imbibition table.
+    Derives Land's trapping parameters from a drainage and an imbibition table.
 
     The most that is trapped is the imbibition table's critical saturation. It is trapped when
     imbibition starts from the largest saturation the non-wetting phase reaches on the drainage
@@ -297,7 +297,7 @@ def get_hysteresis_roles(
     relative_permeability: RelativePermeabilityTable,
 ) -> tuple[Boolean, Boolean]:
     """
-    The direction each phase imbibes in, as the saturation history tracker needs it.
+    Returns the direction each phase imbibes in, as the saturation history tracker needs it.
 
     Read from the table's own wetting phases, since the wetting phase decides which way a phase
     moves while it imbibes and the tables already know it.
@@ -320,7 +320,7 @@ def as_hysteresis_relperm_table(
     options: HysteresisOptions,
 ) -> RelativePermeabilityTable:
     """
-    Pair a drainage and an imbibition relative permeability table into a hysteresis table.
+    Pairs a drainage and an imbibition relative permeability table into a hysteresis table.
 
     The model comes from `options.relperm_model`. Relative permeability stays on the drainage table
     when the model is `NONE` or `options.apply_to_relperm` is off.
@@ -386,7 +386,7 @@ def as_hysteresis_capillary_pressure_table(
     options: HysteresisOptions,
 ) -> CapillaryPressureTable | None:
     """
-    Pair a drainage and an imbibition capillary pressure table into a hysteresis table.
+    Pairs a drainage and an imbibition capillary pressure table into a hysteresis table.
 
     Capillary pressure stays on the drainage table when `options.apply_to_capillary_pressure` is
     off, or when there is no imbibition table to scan towards.
@@ -426,7 +426,7 @@ def as_hysteresis_tables(
     options: HysteresisOptions,
 ) -> SatFuncTables:
     """
-    Pair the drainage and imbibition tables of a cell into the tables it is evaluated with.
+    Pairs the drainage and imbibition tables of a cell into the tables it is evaluated with.
 
     :param drainage: The tables `SATNUM` selects.
     :param imbibition: The tables `IMBNUM` selects.

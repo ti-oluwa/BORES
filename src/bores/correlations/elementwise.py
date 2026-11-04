@@ -71,7 +71,7 @@ def prepare_operand(value: NumberOrArray[NDimension]) -> NumberOrArray[NDimensio
 
 def get_extremes(value: NumberOrArray[AnyDimension]) -> tuple[Number, Number]:
     """
-    Smallest and largest element of a number or array.
+    Returns smallest and largest element of a number or array.
 
     An empty array gives `(inf, -inf)`, which no range check rejects.
 
@@ -298,7 +298,7 @@ class Elementwise(DUFunc, typing.Generic[P, R]):  # type: ignore[misc]
 
     def unchecked(self, *args: P.args, **kwargs: P.kwargs) -> R:
         """
-        Calls the function without checking the arguments against the declared ranges and
+        Callses the function without checking the arguments against the declared ranges and
         validators. Use it where the inputs are already known to be valid.
 
         :param args: Positional arguments, as for a normal call.

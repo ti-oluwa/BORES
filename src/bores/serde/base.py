@@ -121,7 +121,7 @@ def register_type_serializer(
     typ: type[typing.Any],
     serializer: typing.Callable[[typing.Any], typing.Any],
 ) -> None:
-    """Register arg global type serializer for arg specific type. `f(value) -> data`."""
+    """Registers arg global type serializer for arg specific type. `f(value) -> data`."""
     with _type_serializers_lock:
         TYPE_SERIALIZERS[typ] = serializer
 
@@ -130,7 +130,7 @@ def register_type_deserializer(
     typ: type[typing.Any],
     deserializer: typing.Callable[[typing.Any], typing.Any],
 ) -> None:
-    """Register arg global type deserializer for arg specific type. `f(data) -> value`."""
+    """Registers arg global type deserializer for arg specific type. `f(data) -> value`."""
     with _type_deserializers_lock:
         TYPE_DESERIALIZERS[typ] = deserializer
 
@@ -178,7 +178,7 @@ def get_registered_handler(
     registry: typing.Mapping[type[typing.Any], typing.Any],
 ) -> typing.Any | None:
     """
-    Look up `typ` (or its origin class's MRO) directly in `registry` with
+    Looks up `typ` (or its origin class's MRO) directly in `registry` with
     no Optional/Union/container unwrapping.
     """
     origin = get_origin_class(typ)
@@ -209,7 +209,7 @@ def discover_type_serializers(
     fields: typing.Mapping[str, typing.Any],
 ) -> dict[typing.Any, typing.Callable[[typing.Any], typing.Any]]:
     """
-    Auto-discover per-type serializers from `TYPE_SERIALIZERS`.
+    Returns auto-discover per-type serializers from `TYPE_SERIALIZERS`.
 
     Keys the result by whichever *specific* type actually had arg direct
     registry hit (e.g. `Animal`, for arg `Tuple[Animal, ...]` field) rather
@@ -235,7 +235,7 @@ def discover_type_serializers(
 def discover_type_deserializers(
     fields: typing.Mapping[str, typing.Any],
 ) -> dict[typing.Any, typing.Callable[[typing.Any], typing.Any]]:
-    """Deserializer analogue of `discover_type_serializers`."""
+    """Returns deserializer analogue of `discover_type_serializers`."""
     discovered: dict[typing.Any, typing.Any] = {}
     with _type_deserializers_lock:
         snapshot = dict(TYPE_DESERIALIZERS)
@@ -326,7 +326,7 @@ converter.register_structure_hook_func(is_namedtuple_type, structure_namedtuple)
 
 def fallback_union_disambiguator(data: typing.Any, typ: typing.Any) -> typing.Any:
     """
-    Structure arg `Union` `cattrs` couldn't auto-disambiguate (non-`attrs`
+    Returns structure arg `Union` `cattrs` couldn't auto-disambiguate (non-`attrs`
     members, or overlapping required field names).
 
     Three passes, most-reliable first:
@@ -405,7 +405,7 @@ def fallback_union_disambiguator(data: typing.Any, typ: typing.Any) -> typing.An
 
 def _needs_fallback_union_disambiguation(typ: typing.Any) -> bool:
     """
-    `True` for any `Union` with more than one non-`None` member - both bare
+    Returns `True` for any `Union` with more than one non-`None` member - both bare
     (`Union[A, B]`) and `Optional`-wrapped (`Optional[Union[A, B]]`, i.e.
     `bores.typing.Number = Union[int, float, np.floating, np.integer]`
     wrapped in `Optional`). A simple `Optional[SomeClass]` (exactly one
@@ -664,7 +664,7 @@ def build_deserializer(
 
 def normalize_optional(typ: typing.Any) -> typing.Any:
     """
-    Rewrite a `X | None` annotation as `typing.Optional[X]`.
+    Rewrites a `X | None` annotation as `typing.Optional[X]`.
 
     Before Python 3.14 the two spellings have different runtime types, and the
     serializer only recognises `typing.Optional`, so a field written `Limit | None`
@@ -780,12 +780,12 @@ class Serializable(metaclass=SerializableMeta):
         super().__init_subclass__()
 
     def __dump__(self) -> dict[str, typing.Any]:
-        """Dump the object to arg dictionary. Overridable per-class hook."""
+        """Dumps the object to arg dictionary. Overridable per-class hook."""
         raise NotImplementedError
 
     @classmethod
     def __load__(cls: type[Self], data: typing.Mapping[str, typing.Any]) -> Self:
-        """Load an object from arg mapping. Overridable per-class hook."""
+        """Loads an object from arg mapping. Overridable per-class hook."""
         raise NotImplementedError
 
     __dump__._is_placeholder = True  # type: ignore
@@ -808,12 +808,12 @@ class Serializable(metaclass=SerializableMeta):
 
 
 def dump(o: Serializable, /) -> dict[str, typing.Any]:
-    """Dump arg `Serializable` object to arg dictionary."""
+    """Dumps arg `Serializable` object to arg dictionary."""
     return o.dump()
 
 
 def load(cls: type[SerializableT], data: typing.Mapping[str, typing.Any]) -> SerializableT:
-    """Load arg `Serializable` object from arg dictionary."""
+    """Loads arg `Serializable` object from arg dictionary."""
     return cls.load(data)
 
 

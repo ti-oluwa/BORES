@@ -96,7 +96,7 @@ class BlendedKilloughRelPermTable(HysteresisRelPermTable):
         **kwargs: typing.Any,
     ) -> tuple[RelativePermeabilities, RelativePermeabilityDerivatives | None]:
         """
-        Relative permeabilities, and optionally their nine derivatives, in one pass.
+        Returns relative permeabilities, and optionally their nine derivatives, in one pass.
 
         This is the one implementation behind `evaluate`, `derivatives` and
         `evaluate_with_derivatives`. Each bounding curve is queried once, the scanning weights

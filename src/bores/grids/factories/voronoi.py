@@ -67,7 +67,7 @@ def make_voronoi_grid(
     negative_z_transmissibility_multipliers: NumberArray[OneDimension] | None = None,
 ) -> Grid:
     """
-    Build a Voronoi (PEBI) grid from seed points.
+    Builds a Voronoi (PEBI) grid from seed points.
 
     Dispatches on seed dimensionality:
 
@@ -193,7 +193,7 @@ def flatten_ragged(
     rows: typing.Sequence[typing.Sequence[int]],
 ) -> tuple[IntArray[OneDimension], IntArray[OneDimension]]:
     """
-    Pack a list of integer lists into one flat array and its offsets.
+    Packs a list of integer lists into one flat array and its offsets.
 
     :param rows: The lists, such as `scipy.spatial.Voronoi.regions`.
     :returns: `(flat, offsets)` where `flat[offsets[i]:offsets[i + 1]]` is `rows[i]`.
@@ -210,7 +210,7 @@ def resolve_ridge_owners(
     n_seeds: int,
 ) -> tuple[BooleanArray[OneDimension], IntArray[OneDimension], IntArray[OneDimension]]:
     """
-    Decide, for every Voronoi ridge, which original seed owns it and which one it neighbours.
+    Returns decide, for every Voronoi ridge, which original seed owns it and which one it neighbours.
 
     A ridge between two mirror seeds is dropped. A ridge between an original seed and a mirror
     seed is a boundary face of the original seed; one between two original seeds is interior,
@@ -256,7 +256,7 @@ def build_2d_prism_entries(
     IntArray[OneDimension],
 ]:
     """
-    List the faces of every prism cell of an extruded 2-D Voronoi grid, cell by cell.
+    Lists the faces of every prism cell of an extruded 2-D Voronoi grid, cell by cell.
 
     Cells are numbered column by column and, within a column, layer by layer. A cell lists the
     lateral faces of the ridges of its column (in ridge order), then its top and bottom faces.
@@ -441,7 +441,7 @@ def build_3d_cell_entries(
     IntArray[OneDimension],
 ]:
     """
-    List the faces of every cell of a 3-D Voronoi grid, cell by cell.
+    Lists the faces of every cell of a 3-D Voronoi grid, cell by cell.
 
     A cell lists the faces of its ridges in ridge order. Each face is wound so that its normal
     points from the ridge owner toward the neighbour (or mirror seed), and the neighbour lists
@@ -544,7 +544,7 @@ def make_2d_voronoi_grid(
     IntArray[TwoDimensions],
 ]:
     """
-    Build a 2-D Voronoi grid **extruded** through one or more depth layers.
+    Builds a 2-D Voronoi grid **extruded** through one or more depth layers.
 
     Each 2-D Voronoi cell column is extruded into `n_layers` prism cells
     stacked downward from `z_top`. Interior vertical faces are shared
@@ -630,7 +630,7 @@ def make_3d_voronoi_grid(
     IntArray[TwoDimensions],
 ]:
     """
-    Build a 3-D native polyhedral Voronoi grid.
+    Builds a 3-D native polyhedral Voronoi grid.
 
     Each ridge in the 3-D Voronoi tessellation is a polygonal face (with 3+
     vertices) shared between two cells. The mirror-seed strategy converts all
@@ -694,7 +694,7 @@ def build_2d_mirror_seeds(
     seeds: SeedCoordinates2D, bounding_box: BoundingBox2D
 ) -> npt.NDArray[np.float64]:
     """
-    Build mirror seeds reflected across each edge of a 2-D bounding rectangle.
+    Builds mirror seeds reflected across each edge of a 2-D bounding rectangle.
 
     For each original seed, 4 mirrors are created (one per bounding box edge).
     These ensure the Voronoi diagram for the original seeds has no infinite
@@ -720,7 +720,7 @@ def build_3d_mirror_seeds(
     seeds: SeedCoordinates3D, bounding_box: BoundingBox3D
 ) -> NumberArray[TwoDimensions]:
     """
-    Build mirror seeds reflected across each face of a 3-D bounding box.
+    Builds mirror seeds reflected across each face of a 3-D bounding box.
 
     For each original seed, 6 mirrors are created (one per bounding box face).
 
@@ -747,7 +747,7 @@ def _orient_face_vertices(
     direction_to_neighbour: NumberArray[TwoDimensions],
 ) -> FaceVertexIndices:
     """
-    Return `vertex_indices`, possibly reversed, so Newell's normal aligns
+    Returns `vertex_indices`, possibly reversed, so Newell's normal aligns
     with `direction_to_neighbour` (outward from owner toward neighbour).
 
     :param vertex_indices: Ordered vertex indices as returned by scipy Voronoi.
@@ -769,7 +769,7 @@ def _orient_face_vertices(
 @numba.njit(cache=True)
 def compute_newell_normal(vertices: NumberArray[TwoDimensions]) -> NumberArray[OneDimension]:
     """
-    Compute the (unnormalised) Newell normal for a planar polygon.
+    Computes the (unnormalised) Newell normal for a planar polygon.
 
     :param vertices: Shape `(n_verts, 3)` polygon vertex array.
     :returns: Shape `(3,)` normal vector (magnitude = 2 x face area).
@@ -791,7 +791,7 @@ def compute_2d_signed_area(
     a: NumberArray[OneDimension], b: NumberArray[OneDimension], point: NumberArray[OneDimension]
 ) -> float:
     """
-    Compute the 2-D signed area of triangle `(a, b, point)`.
+    Computes the 2-D signed area of triangle `(a, b, point)`.
 
     A positive value means `point` is to the **left** of the directed
     segment `a -> b` (counter-clockwise orientation).
@@ -808,7 +808,7 @@ def compute_depth_nodes(
     z_top: Number, layer_thickness: LayerThicknessArray
 ) -> NumberArray[OneDimension]:
     """
-    Compute the depth of every node surface from `z_top` downward.
+    Computes the depth of every node surface from `z_top` downward.
 
     :param z_top: Depth of the topmost node surface (positive downward).
     :param layer_thickness: Shape `(n_layers,)` positive thickness per layer.
@@ -821,7 +821,7 @@ def resolve_2d_bounding_box(
     seeds: NumberArray[TwoDimensions], bounding_box: BoundingBox2D | None
 ) -> BoundingBox2D:
     """
-    Resolve or infer a 2-D bounding box from seed extents.
+    Resolves or infer a 2-D bounding box from seed extents.
 
     :param seeds: Shape `(n_seeds, 2)` seed array.
     :param bounding_box: Caller-supplied box or `None`.
@@ -855,7 +855,7 @@ def resolve_3d_bounding_box(
     seeds: NumberArray[TwoDimensions], bounding_box: BoundingBox3D | None
 ) -> BoundingBox3D:
     """
-    Resolve or infer a 3-D bounding box from seed extents.
+    Resolves or infer a 3-D bounding box from seed extents.
 
     :param seeds: Shape `(n_seeds, 3)` seed array.
     :param bounding_box: Caller-supplied box or `None`.
@@ -888,7 +888,7 @@ def resolve_3d_bounding_box(
 
 def resolve_layer_thickness(layer_thickness: Number | npt.ArrayLike) -> LayerThicknessArray:
     """
-    Convert a scalar or array layer thickness specification to a 1-D array.
+    Converts a scalar or array layer thickness specification to a 1-D array.
 
     :param layer_thickness: Scalar (single uniform layer) or 1-D array.
     :returns: Shape `(n_layers,)` positive float64 array.

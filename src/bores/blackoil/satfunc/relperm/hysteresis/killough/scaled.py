@@ -136,7 +136,7 @@ def stretch_saturation_axis(
     out_is_scanning: NumberArray[OneDimension],
 ) -> None:
     """
-    For every cell, the saturation trapped by Land's relation and the stretched saturation to read
+    Returns for every cell, the saturation trapped by Land's relation and the stretched saturation to read
     the imbibition curve at, both in the saturation of the non-wetting phase.
 
     The cell is on a scanning curve while its saturation is below its reversal saturation, and on the
@@ -227,7 +227,7 @@ def scan_killough_curves(
     out_wetting_relperm_slope: NumberArray[OneDimension],
 ) -> None:
     """
-    Killough's scanning curves of the non-wetting and the wetting phase for every cell, in the
+    Returns Killough's scanning curves of the non-wetting and the wetting phase for every cell, in the
     saturation of the non-wetting phase and in one pass.
 
     A cell that is not on a scanning curve keeps its drainage values and slopes. Every slope is with
@@ -390,7 +390,7 @@ class KilloughRelPermTable(HysteresisRelPermTable):
         with_derivatives: Boolean,
     ) -> TwoPhaseRelPerms:
         """
-        Relative permeabilities of the gas-oil system at the given gas saturations.
+        Returns relative permeabilities of the gas-oil system at the given gas saturations.
 
         :param table: The table to read.
         :param gas_saturation: Gas saturation of every cell.
@@ -421,7 +421,7 @@ class KilloughRelPermTable(HysteresisRelPermTable):
         with_derivatives: Boolean,
     ) -> TwoPhaseRelPerms:
         """
-        Relative permeabilities of the oil-water system at the given oil saturations, where oil
+        Returns relative permeabilities of the oil-water system at the given oil saturations, where oil
         saturation means one minus water saturation.
 
         :param table: The table to read.
@@ -571,7 +571,7 @@ class KilloughRelPermTable(HysteresisRelPermTable):
         with_derivatives: Boolean,
     ) -> TwoPhaseRelPerms:
         """
-        Killough's scanning curves of one two-phase system, in the saturation of its non-wetting
+        Returns Killough's scanning curves of one two-phase system, in the saturation of its non-wetting
         phase.
 
         :param endpoints: The system's endpoints.
@@ -688,7 +688,7 @@ class KilloughRelPermTable(HysteresisRelPermTable):
         **kwargs: typing.Any,
     ) -> tuple[RelativePermeabilities, RelativePermeabilityDerivatives | None]:
         """
-        Relative permeabilities, and optionally their nine derivatives, in one pass.
+        Returns relative permeabilities, and optionally their nine derivatives, in one pass.
 
         :param water_saturation: Water saturation (fraction) - scalar or array.
         :param oil_saturation: Oil saturation (fraction) - scalar or array.

@@ -43,7 +43,7 @@ class DepthTable(StoreSerializable):
 
     Values are linearly interpolated at a query depth; values outside the
     table range are clamped to the endpoint (no extrapolation), matching
-    Eclipse behaviour and `bores.reservoir.temperature.TemperatureTable`.
+    deck behaviour and `bores.reservoir.temperature.TemperatureTable`.
     """
 
     depths: NumberArray[OneDimension]
@@ -83,7 +83,7 @@ class DepthTable(StoreSerializable):
 
     def at_depth(self, depth: NumberOrArray[OneDimension]) -> NumberOrArray[OneDimension]:
         """
-        Return the interpolated value at the given depth or array of depths.
+        Returns the interpolated value at the given depth or array of depths.
 
         :param depth: Scalar or shape `(n_cells,)` depth array in
             `unit_system` length units.
@@ -107,7 +107,7 @@ class DepthTable(StoreSerializable):
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `DepthTable` with `depths` rescaled to *target*, and `values`
+        Returns a new `DepthTable` with `depths` rescaled to *target*, and `values`
         rescaled too when `quantity` is set.
 
         :param target: Target `UnitSystem`.
@@ -138,7 +138,7 @@ def load_depth_tables(
     quantity: typing.Literal["gas_oil_ratio", "oil_gas_ratio"] | None = None,
 ) -> dict[int, DepthTable] | None:
     """
-    Parse an `RSVD`/`RVVD`-shaped keyword into `{table_number: DepthTable}`.
+    Parses an `RSVD`/`RVVD`-shaped keyword into `{table_number: DepthTable}`.
 
     Shared helper for both `RSVD` and `RVVD`, which have identical shape
     and differ only in which column holds the dependent variable.
@@ -183,11 +183,11 @@ def load_depth_tables(
 class EquilibriumRegion:
     """
     Gravity/capillary equilibration data for a single `EQLNUM` region -
-    one record of the Eclipse `EQUIL` keyword.
+    one record of the `EQUIL` keyword.
 
     Stores one `EQUIL` record, validate it, support
     unit conversion and (de)serialization, and support loading from an
-    Eclipse deck.
+    deck.
 
     **Convention**: a `woc_depth` / `goc_depth` of `None` means there is no such contact in
     this region. Any number, including zero and negative depths above the reference level, is a
@@ -268,22 +268,22 @@ class EquilibriumRegion:
 
     @property
     def has_woc(self) -> bool:
-        """Whether this region has an explicit water-oil contact."""
+        """Checks whether this region has an explicit water-oil contact."""
         return self.woc_depth is not None
 
     @property
     def has_goc(self) -> bool:
-        """Whether this region has an explicit gas-oil contact (gas cap)."""
+        """Checks whether this region has an explicit gas-oil contact (gas cap)."""
         return self.goc_depth is not None
 
     @property
     def uses_rsvd(self) -> bool:
-        """Whether Rs below the bubble point should come from an `RSVD` table."""
+        """Checks whether Rs below the bubble point should come from an `RSVD` table."""
         return self.rsvd_table > 0
 
     @property
     def uses_rvvd(self) -> bool:
-        """Whether Rv above the dew point should come from an `RVVD` table."""
+        """Checks whether Rv above the dew point should come from an `RVVD` table."""
         return self.rvvd_table > 0
 
     def convert(
@@ -294,7 +294,7 @@ class EquilibriumRegion:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `EquilibriumRegion` with all dimensional fields rescaled
+        Returns a new `EquilibriumRegion` with all dimensional fields rescaled
         to *target*.
 
         Depths use the length factor; pressures (`datum_pressure`,
@@ -329,7 +329,7 @@ class EquilibriumRegion:
     @classmethod
     def from_deck(cls, deck_file: DeckFile, *, eqlnum: Integer = 1) -> Self:
         """
-        Build a single `EquilibriumRegion` from a parsed `DeckFile`.
+        Builds a single `EquilibriumRegion` from a parsed `DeckFile`.
 
         Reads only the requested `EQLNUM` record.
 
@@ -362,7 +362,7 @@ class Equilibrium:
     Container mapping 1-based `EQLNUM` region index to `EquilibriumRegion`.
 
     Maps `EQLNUM` -> `EquilibriumRegion`, provides lookup and
-    iteration, supports and Eclipse deck loading.
+    iteration, supports and deck loading.
 
     Use `region(eqlnum)` to retrieve a region's data, and `from_deck`
     to construct from a deck.
@@ -386,7 +386,7 @@ class Equilibrium:
         unit_system: UnitSystem | None = None,
     ) -> None:
         """
-        Create a new `Equilibrium` container.
+        Creates a new `Equilibrium` container.
 
         :param regions: Mapping from 1-based EQLNUM index to `EquilibriumRegion`.
         :param rsvd_tables: `{rsvd_table number: DepthTable}`, keyed by
@@ -456,12 +456,12 @@ class Equilibrium:
 
     @property
     def n_regions(self) -> int:
-        """Number of equilibration regions."""
+        """Returns the number of equilibration regions."""
         return len(self.regions)
 
     def region(self, eqlnum: int) -> EquilibriumRegion:
         """
-        Return the `EquilibriumRegion` for a given 1-based `EQLNUM` index.
+        Returns the `EquilibriumRegion` for a given 1-based `EQLNUM` index.
 
         :param eqlnum: 1-based equilibration region index.
         :returns: `EquilibriumRegion` for that region.
@@ -491,7 +491,7 @@ class Equilibrium:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `Equilibrium` with every region converted to
+        Returns a new `Equilibrium` with every region converted to
         *target*.
 
         :param target: Target `UnitSystem`.
@@ -523,7 +523,7 @@ class Equilibrium:
     @classmethod
     def from_deck(cls, deck_file: DeckFile) -> Self:
         """
-        Build `Equilibrium` from a parsed `DeckFile`.
+        Builds `Equilibrium` from a parsed `DeckFile`.
 
         Delegates to `load_equilibrium_regions` for the `EQUIL` records so
         that parsing logic lives in exactly one place, shared with
@@ -539,7 +539,7 @@ class Equilibrium:
         """
         regions = load_equilibrium_regions(deck_file)
         unit_system = deck_file.unit_system
-        # Eclipse reports Rs in Mscf/STB under FIELD units; internally we standardize on SCF/STB.
+        # A FIELD deck gives Rs in Mscf/STB; internally we standardize on SCF/STB.
         # Also it reports Rv in STB/Mscf under FIELD units; internally we standardize on STB/SCF.
         uses_field_units = unit_system == UnitSystem.FIELD
         scf_to_mscf = c.SCF_TO_MSCF if uses_field_units else 1.0
@@ -572,7 +572,7 @@ def load_equilibrium_region(
     unit_system: UnitSystem,
 ) -> EquilibriumRegion:
     """
-    Build one `EquilibriumRegion` from a single parsed `EQUIL` record dict.
+    Builds one `EquilibriumRegion` from a single parsed `EQUIL` record dict.
 
     :param equil_record: One row of `deck_file.get("EQUIL")`.
     :param eqlnum: 1-based `EQLNUM` index this record belongs to (used only
@@ -600,7 +600,7 @@ def load_equilibrium_region(
 
 def load_equilibrium_regions(deck_file: DeckFile) -> dict[int, EquilibriumRegion]:
     """
-    Parse every `EQUIL` record in the deck file into `EquilibriumRegion`
+    Parses every `EQUIL` record in the deck file into `EquilibriumRegion`
     objects, keyed by 1-based `EQLNUM` index.
 
     :param deck_file: Parsed `DeckFile`.

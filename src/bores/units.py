@@ -48,7 +48,7 @@ class UnitSystemContext:
 
     def __init__(self, unit_system: UnitSystem) -> None:
         """
-        Initialize a temporary unit-system override.
+        Initializes a temporary unit-system override.
 
         :param unit_system: Unit system to use within the context.
         """
@@ -59,16 +59,16 @@ class UnitSystemContext:
 
     @property
     def id(self) -> str:
-        """The context ID."""
+        """Returns the context ID."""
         return self._id
 
     @property
     def unit_system(self) -> UnitSystem:
-        """The unit system configured for this context."""
+        """Returns the unit system configured for this context."""
         return self._unit_system
 
     def __enter__(self) -> UnitSystem:
-        """Enter the context and activate its unit system."""
+        """Enters the context and activate its unit system."""
         context_id = _unit_system_context.get()[1]
         if context_id == self._id:
             warnings.warn(
@@ -89,7 +89,7 @@ class UnitSystemContext:
         return self._unit_system
 
     def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> None:
-        """Exit the context and restore the previous unit system."""
+        """Exits the context and restore the previous unit system."""
         if self._entry_depth == 0 or _unit_system_context.get()[1] != self._id:
             return
 
@@ -106,7 +106,7 @@ class __UnitSystemProxy:
     @property
     def value(self) -> UnitSystem:
         """
-        Get the current context's `UnitSystem` instance.
+        Gets the current context's `UnitSystem` instance.
 
         :return: Current `UnitSystem` instance
         """
@@ -115,7 +115,7 @@ class __UnitSystemProxy:
     @property
     def context_id(self) -> str:
         """
-        Get the current context's ID.
+        Gets the current context's ID.
 
         :return: `UnitSystemContext` ID.
         """
@@ -150,13 +150,13 @@ UNIT_SYSTEM = u = __UnitSystemProxy()
 
 
 def get_unit_system() -> UnitSystem:
-    """Return the unit system active in the current context."""
+    """Returns the unit system active in the current context."""
     return _unit_system_context.get()[0]
 
 
 def set_unit_system(unit_system: UnitSystem, /) -> None:
     """
-    Set the process-local default unit system.
+    Sets the process-local default unit system.
 
     This function must only be called outside a `UnitSystemContext`. Use the
     context manager for temporary unit-system overrides.
@@ -173,7 +173,7 @@ def set_unit_system(unit_system: UnitSystem, /) -> None:
 
 def build_unit_conversion_table(constants: Constants | None = None) -> UnitConversionTable:
     """
-    Build a complete unit conversion table from the provided or default
+    Builds a complete unit conversion table from the provided or default
     constants registry.
 
     All numeric values are read from `constants` (or the global `c`
@@ -662,7 +662,7 @@ def resolve_unit_conversion_table(
     table: UnitConversionTable | None = None, /
 ) -> UnitConversionTable:
     """
-    The given conversion table, or a freshly built one when `table` is `None`.
+    Returns the given conversion table, or a freshly built one when `table` is `None`.
 
     A `convert` that hands work to several other `convert` calls resolves its table once with
     this and passes it down, so the table is built once rather than once per call.
@@ -678,7 +678,7 @@ def get_conversion_factors(
     table: UnitConversionTable | None = None,
 ) -> UnitConversionFactors:
     """
-    Return a dictionary of scalar conversion factors for every physical
+    Returns a dictionary of scalar conversion factors for every physical
     dimension used by the classes in this library.
 
     Each value converts a quantity expressed in `from_system` to

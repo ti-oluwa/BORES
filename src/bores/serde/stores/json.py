@@ -58,7 +58,7 @@ class JSONStore(DataStore[SerializableT, list[typing.Any]]):
         filepath: PathLike | str,
     ):
         """
-        Initialize the store
+        Initializes the store
 
         :param filepath: Path to the JSON file
         :raises StorageError: If filepath is invalid or has wrong extension
@@ -70,7 +70,7 @@ class JSONStore(DataStore[SerializableT, list[typing.Any]]):
 
     def open(self, mode: str = "a", **kwargs: typing.Any) -> None:
         """
-        Load the JSON file into memory as `self._handle` (a list).
+        Loads the JSON file into memory as `self._handle` (a list).
 
         :param mode: `"a"` to load existing contents for appending (default),
             `"w"` to start with an empty list (discard existing data).
@@ -95,7 +95,7 @@ class JSONStore(DataStore[SerializableT, list[typing.Any]]):
 
     def close(self) -> None:
         """
-        Serialise `self._handle` back to disk and release it.
+        Serialises `self._handle` back to disk and release it.
 
         Idempotent. Safe to call when no handle is open.
         """

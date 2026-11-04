@@ -64,7 +64,7 @@ def compute_physics_cache(
     dtype: npt.DTypeLike = None,
 ) -> PhysicsCache:
     """
-    Build (or refresh, in place) a `PhysicsCache` from the current cell
+    Builds (or refresh, in place) a `PhysicsCache` from the current cell
     state: `compute_pvt_cache` and `compute_satfunc_cache`, then
     `compute_mobility_cache` from their two outputs - one call in place of
     wiring all three yourself.

@@ -48,7 +48,7 @@ _NONE_SENTINEL = "__NONE_SENTINEL__"
 
 def _zarr_string_array(value: typing.Sequence[str]) -> npt.NDArray:
     """
-    Zarr's native variable-length string representation: plain
+    Returns Zarr's native variable-length string representation: plain
     `dtype=object`. No `h5py` dependency - `_create_dataset` recognizes
     `dtype=object` and routes it to `zarr`'s own string handling per
     version: `dtype=str` (zarr's own `StringDType` resolution) on Zarr 3,
@@ -110,7 +110,7 @@ def _encode_segment(s: str) -> str:
 
 
 def _decode_segment(s: str) -> str:
-    """Reverse of `_encode_segment`."""
+    """Reverses of `_encode_segment`."""
     return s.replace(_SEP_ENCODED, _SEP).replace(_ESC_ENCODED, _ESC)
 
 
@@ -225,7 +225,7 @@ def _unflatten(
     vtypes: dict[str, str],
 ) -> dict[str, typing.Any]:
     """
-    Reconstruct a nested dict from the three flat dicts produced by `_flatten`.
+    Reconstructs a nested dict from the three flat dicts produced by `_flatten`.
 
     :param arrays: `{flat_key: ndarray}` - from zarr array datasets.
     :param scalars: `{flat_key: scalar}` - from zarr group attrs.
@@ -321,7 +321,7 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
         chunks: tuple[int, ...] | None = None,
     ) -> None:
         """
-        Initialise the store.
+        Initialises the store.
 
         :param store: Zarr store (file path, directory, or `Store` object).
         :param compressor: Compression algorithm - `'lz4'`, `'zstd'`, or
@@ -358,7 +358,7 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
 
     def open(self, mode: str = "a", **kwargs: typing.Any) -> None:
         """
-        Open the Zarr root group and attach it to `self._handle`.
+        Opens the Zarr root group and attaches it to `self._handle`.
 
         :param mode: Zarr open mode - `"a"` (append/create), `"r"`
             (read-only), `"w"` (truncate).
@@ -380,7 +380,7 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
 
     def close(self, consolidate: bool = False) -> None:
         """
-        Flush in-memory count` to disk and release the open Zarr handle.
+        Flushes in-memory count` to disk and release the open Zarr handle.
 
         :param consolidate: If `True`, call `zarr.consolidate_metadata`
             before releasing. False by default. Pass `True` when you want
@@ -444,7 +444,7 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
 
     def _open_root(self, mode: str) -> zarr.Group:
         """
-        Return the active root group.
+        Returns the active root group.
 
         Reuses the persistent handle when open; otherwise opens a transient
         group for this call only.
@@ -461,7 +461,7 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
         meta: typing.Callable[[SerializableT], dict[str, typing.Any]] | None = None,
     ) -> EntryMeta:
         """
-        Write one `Serializable` into *root* at position *index*.
+        Writes one `Serializable` into *root* at position *index*.
 
         The entry group contains only flat datasets and two `group.attrs.update`
         calls; one for all scalar values (keyed by encoded path) and one for
@@ -497,7 +497,7 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
 
     def _read_entry(self, item_group: zarr.Group) -> dict[str, typing.Any]:
         """
-        Reconstruct a nested dict from a flat entry group.
+        Reconstructs a nested dict from a flat entry group.
 
         Strips internal metadata keys before returning.
         """
@@ -522,7 +522,7 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
         meta: typing.Callable[[SerializableT], dict[str, typing.Any]] | None = None,
     ) -> None:
         """
-        Persist *data*, always overwriting any existing content.
+        Persists *data*, always overwriting any existing content.
 
         :param data: Iterable of `Serializable` instances.
         :param validator: Optional per-item validator/transformer.
@@ -557,7 +557,7 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
         meta: typing.Callable[[SerializableT], dict[str, typing.Any]] | None = None,
     ) -> EntryMeta:
         """
-        Append a single item without rewriting existing entries.
+        Appends a single item without rewriting existing entries.
 
         :param item: The `Serializable` instance to persist.
         :param validator: Optional validator/transformer applied before writing.
@@ -587,7 +587,7 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
     @reraise_storage_error
     def entries(self) -> list[EntryMeta]:
         """
-        Return metadata for every stored item in insertion order.
+        Returns metadata for every stored item in insertion order.
 
         Does not deserialise any payload data.
 
@@ -622,7 +622,7 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
         validator: typing.Callable[[SerializableT], SerializableT] | None = None,
     ) -> typing.Generator[SerializableT, None, None]:
         """
-        Load and yield items from the store in insertion order.
+        Loads and yield items from the store in insertion order.
 
         Filtering is applied before any array data is deserialised.
 
@@ -659,7 +659,7 @@ class ZarrStore(DataStore[SerializableT, zarr.Group]):
                         yield validator(obj) if validator is not None else obj
 
     def flush(self) -> None:
-        """Clear every data item stored (destructive)."""
+        """Clears every data item stored (destructive)."""
         store = self.store
         if isinstance(store, Path):
             shutil.rmtree(store)

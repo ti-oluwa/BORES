@@ -26,7 +26,7 @@ __all__ = ["Reservoir"]
 
 def validate_rock(rock: Rock, n_cells: int) -> Rock:
     """
-    Verify that all per-cell arrays in `rock` have length `n_cells`.
+    Verifies that all per-cell arrays in `rock` have length `n_cells`.
 
     :param rock: `Rock` to validate.
     :param n_cells: Expected array length.
@@ -62,7 +62,7 @@ def validate_rock(rock: Rock, n_cells: int) -> Rock:
 
 def validate_regions(regions: Regions, n_cells: int) -> Regions:
     """
-    Verify that every region array in `regions` has length `n_cells` and holds region
+    Verifies that every region array in `regions` has length `n_cells` and holds region
     numbers of at least 1.
 
     :param regions: `Regions` to validate.
@@ -89,7 +89,7 @@ def validate_regions(regions: Regions, n_cells: int) -> Regions:
             raise ValidationError(
                 f"`regions.{name}` holds {below.size} region number(s) below 1 (first at cell "
                 f"{int(below[0])}, which is {int(array[below[0]])}). Region numbers start at 1. "
-                "Decks write 0 for inactive cells, which Eclipse ignores: build the regions with "
+                "Decks write 0 for inactive cells, which are ignored: build the regions with "
                 "`Regions.from_deck(..., active=...)` to give those cells region 1."
             )
     return regions
@@ -122,7 +122,7 @@ class Reservoir:
         unit_system: UnitSystem | None = None,
     ) -> None:
         """
-        Initialize the reservoir model.
+        Initializes the reservoir model.
 
         :param grid: Fully constructed `bores.grids.base.Grid`.
         :param rock: Static petrophysical properties. Array lengths must equal `grid.n_cells`.
@@ -171,33 +171,33 @@ class Reservoir:
 
     @property
     def n_cells(self) -> int:
-        """Total number of active cells in the grid."""
+        """Returns the total number of active cells in the grid."""
         return self.grid.n_cells
 
     @property
     def n_faces(self) -> int:
-        """Total number of faces (boundary + interior) in the grid."""
+        """Returns the total number of faces (boundary + interior) in the grid."""
         return self.grid.n_faces
 
     @property
     def n_nnc(self) -> int:
-        """Total number of non-neighbour connections in the grid."""
+        """Returns the total number of non-neighbour connections in the grid."""
         return self.grid.n_nnc
 
     @property
     def n_interior_faces(self) -> int:
-        """Number of interior faces (shared between two active cells)."""
+        """Returns the number of interior faces (shared between two active cells)."""
         return self.grid.n_interior_faces
 
     @property
     def n_boundary_faces(self) -> int:
-        """Number of boundary faces (one side is the exterior domain)."""
+        """Returns the number of boundary faces (one side is the exterior domain)."""
         return self.grid.n_boundary_faces
 
     @property
     def depth(self) -> CellArray:
         """
-        Shape `(n_cells,)` - depth of each cell centroid (positive downward).
+        Returns shape `(n_cells,)` - depth of each cell centroid (positive downward).
 
         Alias for `grid.cell_center_depths`. Units follow `unit_system`.
         """
@@ -206,7 +206,7 @@ class Reservoir:
     @property
     def elevation(self) -> CellArray:
         """
-        Shape `(n_cells,)` - elevation of each cell centroid (positive upward).
+        Returns shape `(n_cells,)` - elevation of each cell centroid (positive upward).
 
         Alias for `grid.cell_center_elevations`. Units follow `unit_system`.
         """
@@ -215,7 +215,7 @@ class Reservoir:
     @property
     def pore_volumes(self) -> CellArray:
         """
-        Shape `(n_cells,)` - bulk pore volume of each active cell.
+        Returns shape `(n_cells,)` - bulk pore volume of each active cell.
 
         Computed as `φ x NTG x Vcell`. This is the pore volume at the rock's reference
         pressure. Use `compute_pore_volumes` for the pore volume at another pressure.
@@ -234,7 +234,7 @@ class Reservoir:
         """
         Which cells are large enough in pore volume to take part in the flow (`MINPV`).
 
-        A cell whose pore volume is below `minimum_pore_volume` is left out, as in Eclipse. The
+        A cell whose pore volume is below `minimum_pore_volume` is left out. The
         comparison is made on `pore_volumes`, the pore volume at the rock's reference pressure,
         and not on the pore volume at the current pressure. The mask is therefore fixed for the
         whole run: a cell does not drop out and come back as compaction changes its pore volume.
@@ -269,7 +269,7 @@ class Reservoir:
     @property
     def hydrocarbon_pore_volumes(self) -> CellArray:
         """
-        Shape `(n_cells,)` - hydrocarbon pore volume of each active cell.
+        Returns shape `(n_cells,)` - hydrocarbon pore volume of each active cell.
 
         Computed as `pore_volumes x (1 - swc)` where swc is the connate
         water saturation from `rock`.
@@ -283,7 +283,7 @@ class Reservoir:
     @property
     def transmissibilities(self) -> ConnectionTransmissibilities:
         """
-        TPFA connection transmissibilities, computed on first access and
+        Returns TPFA connection transmissibilities, computed on first access and
         then cached for subsequent access.
 
         Returns a `ConnectionTransmissibilities` named tuple with:
@@ -306,7 +306,7 @@ class Reservoir:
 
     def invalidate_transmissibilities(self) -> None:
         """
-        Clear the cached transmissibilities.
+        Clears the cached transmissibilities.
 
         Call this whenever `rock.absolute_permeability` or `rock.net_to_gross`
         is updated (e.g. history-matching) so the next access to
@@ -322,7 +322,7 @@ class Reservoir:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `Reservoir` with all property groups rescaled to `target`.
+        Returns a new `Reservoir` with all property groups rescaled to `target`.
 
         For a true coordinate reprojection (e.g. ft -> m for all vertex
         positions), use a grid factory or IO utility that rebuilds the grid.
@@ -347,7 +347,7 @@ class Reservoir:
 
     def get_face_transmissibility(self, face_index: int) -> Number:
         """
-        Return the transmissibility (or half-transmissibility for boundary) of a single face.
+        Returns the transmissibility (or half-transmissibility for boundary) of a single face.
 
         :param face_index: Index into `grid.face_cell_indices`.
         :returns: Geometric transmissibility `K·A/d` (mD·ft in FIELD etc.), without the Darcy
@@ -365,7 +365,7 @@ class Reservoir:
 
     def summary(self) -> dict[str, typing.Any]:
         """
-        Return a lightweight diagnostic summary dictionary.
+        Returns a lightweight diagnostic summary dictionary.
 
         Includes cell counts, pore-volume totals, pressure statistics, and
         saturation range checks. Useful for logging and quick sanity checks.

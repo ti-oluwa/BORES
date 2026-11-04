@@ -74,7 +74,7 @@ def allocate_group_targets(
     group_name: str, well_system: CompiledWellSystem, workspace: WellsWorkspace
 ) -> tuple[str, ...]:
     """
-    Allocate `group_name`'s current target rate across its member wells
+    Allocates `group_name`'s current target rate across its member wells
     whose control mode is `GRUP`, by guide rate.
 
     Writes each member's concrete rate control mode and its share of the target into
@@ -158,7 +158,7 @@ def get_group_controlled_rate(
     *, well_system: CompiledWellSystem, workspace: WellsWorkspace, well_row: Integer
 ) -> Number:
     """
-    A member well's own resolved rate, in whatever quantity and
+    Returns a member well's own resolved rate, in whatever quantity and
     condition (surface or reservoir) its current concrete control mode
     actually targets. This is the one value directly comparable against
     `CompiledWellControls.target_rates[well_row]` once

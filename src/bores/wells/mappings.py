@@ -28,7 +28,7 @@ PRODUCER_CONTROL_MODE_MAP = {
 }
 """
 Maps `WCONPROD`/`WELTARG` item 2's deck-literal control mode string to the
-internal `ProducerControlMode`. The deck keeps Eclipse's own abbreviated
+internal `ProducerControlMode`. The deck keeps its own abbreviated
 vocabulary (`ORAT`, `WRAT`, and so on); the internal enum spells things
 out. This is the one place that translation happens.
 """

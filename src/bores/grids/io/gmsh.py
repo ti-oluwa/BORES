@@ -94,7 +94,7 @@ def load_msh(
     metadata: typing.Mapping[str, typing.Any] | None = None,
 ) -> Grid:
     """
-    Load a Gmsh `.msh` file (ASCII format 2.2) from a path, string, or bytes.
+    Loads a Gmsh `.msh` file (ASCII format 2.2) from a path, string, or bytes.
 
     :param source: One of:
 
@@ -118,7 +118,7 @@ def load_msh(
 
 def resolve_source(source: TextOrPath, *, encoding: str) -> str:
     """
-    Coerce `source` to a plain text string.
+    Coerces `source` to a plain text string.
 
     :param source: Path, raw string, or bytes.
     :param encoding: Byte decoding encoding.
@@ -148,7 +148,7 @@ def resolve_source(source: TextOrPath, *, encoding: str) -> str:
 
 def extract_section(text: str, section_name: str) -> str | None:
     """
-    Extract the body of a `$SectionName … $EndSectionName` block.
+    Extracts the body of a `$SectionName … $EndSectionName` block.
 
     :param text: Full `.msh` text.
     :param section_name: Section name without the `$` prefix (e.g.
@@ -169,7 +169,7 @@ def parse_msh(
     unit_system: UnitSystem | None = None,
 ) -> Grid:
     """
-    Parse a Gmsh MSH v2.2 ASCII text blob into a `bores.grids.base.Grid`.
+    Parses a Gmsh MSH v2.2 ASCII text blob into a `bores.grids.base.Grid`.
 
     :param text: Raw `.msh` text.
     :param unit_system: Unit system the coordinates are expressed in (default `FIELD`).

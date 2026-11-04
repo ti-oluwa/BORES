@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 def _hdf5_string_array(value: typing.Sequence[str]) -> npt.NDArray:
     """
-    HDF5's native variable-length string representation
+    Returns HDF5's native variable-length string representation
     (`h5py.string_dtype`), falling back to fixed-width unicode (`'U'`) on
     older `h5py` that lacks it.
     """
@@ -51,7 +51,7 @@ def _sequence_to_ndarray(value: Sequence, path: str) -> npt.NDArray:
 
 def _normalize_loaded_mapping_sequence(value: typing.Any) -> typing.Any:
     """
-    Detect if a loaded mapping represents a sequence and convert it back.
+    Detects if a loaded mapping represents a sequence and converts it back.
 
     WellGroups with numeric string keys "0", "1", "2", ... are sequences.
     """
@@ -122,7 +122,7 @@ class HDF5Store(DataStore[SerializableT, h5py.File]):
         chunks: tuple[int, ...] | None = None,
     ):
         """
-        Initialize the store
+        Initializes the store
 
         :param filepath: Path to the HDF5 file
         :param compression: Compression algorithm - 'gzip', 'lzf', or 'szip'
@@ -143,7 +143,7 @@ class HDF5Store(DataStore[SerializableT, h5py.File]):
 
     def open(self, mode: str = "a", **kwargs: typing.Any) -> None:
         """
-        Open the HDF5 file and attach the `h5py.File` to `self._handle`.
+        Opens the HDF5 file and attaches the `h5py.File` to `self._handle`.
 
         :param mode: h5py open mode - `"a"` (append/create), `"r"`
             (read-only), `"w"` (truncate).
@@ -165,7 +165,7 @@ class HDF5Store(DataStore[SerializableT, h5py.File]):
 
     def close(self) -> None:
         """
-        Flush the in-memory count to disk and close the open `h5py.File`.
+        Flushes the in-memory count to disk and close the open `h5py.File`.
 
         Idempotent. Safe to call when no handle is open.
         """
@@ -186,7 +186,7 @@ class HDF5Store(DataStore[SerializableT, h5py.File]):
     @contextmanager
     def _get_file(self, mode: str) -> typing.Generator[h5py.File, None, None]:
         """
-        Yield an open `h5py.File.`
+        Yields an open `h5py.File.`
 
         If a persistent handle is open, yield it directly (ignoring *mode*).
         Otherwise open a transient file, yield it, and close it on exit.

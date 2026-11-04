@@ -329,7 +329,7 @@ def slice_connection_fluids(
     fluids: ConnectionFluids, start: Integer, stop: Integer
 ) -> ConnectionFluids:
     """
-    The connections `start` up to `stop` of stacked connection fluids, as views.
+    Returns the connections `start` up to `stop` of stacked connection fluids, as views.
 
     :param fluids: Connection fluids of many wells, one after another.
     :param start: First connection.

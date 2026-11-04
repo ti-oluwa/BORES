@@ -181,14 +181,14 @@ class StepMetrics:
 
 
 def compute_utilization(actual: Number | None, limit: Number | None) -> Number | None:
-    """Return actual/limit, or None if either is None/zero."""
+    """Returns actual/limit, or None if either is None/zero."""
     if actual is None or limit is None or limit <= 0.0:
         return None
     return actual / limit
 
 
 def check_same_source(old: TimeTargetSource, new: TimeTargetSource) -> bool:
-    """Whether two time target sources are the same object, or equal plain values."""
+    """Checks whether two time target sources are the same object, or equal plain values."""
     if old is new:
         return True
     if isinstance(old, (list, tuple)) and isinstance(new, (list, tuple)):
@@ -506,19 +506,19 @@ class Timer:
 
     @property
     def time_remaining(self) -> Number:
-        """Remaining simulation time, in `unit_system`'s native time unit."""
+        """Returns remaining simulation time, in `unit_system`'s native time unit."""
         remaining = self.simulation_time - self.elapsed_time
         return 0.0 if remaining <= self.time_tolerance else remaining
 
     @property
     def is_last_step(self) -> bool:
-        """True if the latest accepted step completed the simulation."""
+        """Returns `True` if the latest accepted step completed the simulation."""
         return self.done()
 
     @property
     def next_target_time(self) -> Number:
         """
-        The next time the clock must land on. The earliest time target after the current time,
+        Returns the next time the clock must land on. The earliest time target after the current time,
         or `simulation_time` if that comes first. A constant step size with
         `enforce_constant_step_size` ignores `time_targets`.
         """
@@ -532,21 +532,21 @@ class Timer:
 
     @property
     def average_cfl(self) -> Number | None:
-        """Average CFL over the recent window, or None if no data."""
+        """Returns average CFL over the recent window, or None if no data."""
         if not self._cfl_window:
             return None
         return sum(self._cfl_window) / len(self._cfl_window)
 
     @property
     def average_newton_iterations(self) -> float | None:
-        """Average Newton iterations over the recent window, or None if no data."""
+        """Returns average Newton iterations over the recent window, or None if no data."""
         if not self._newton_window:
             return None
         return sum(self._newton_window) / len(self._newton_window)
 
     def compute_performance_factor(self) -> float:
         """
-        Derive a multiplicative adjustment factor from recent solver trends.
+        Derives a multiplicative adjustment factor from recent solver trends.
 
         Returns a value in (0.5, 1.0]. Values below 1.0 indicate the solver
         is under stress and growth should be dampened.
@@ -587,7 +587,7 @@ class Timer:
         total_relative_mbe: Number | None = None,
     ) -> tuple[bool, list[str]]:
         """
-        Check if any MBE limits are violated. Errors are compared by magnitude, so a
+        Checks if any MBE limits are violated. Errors are compared by magnitude, so a
         negative error counts the same as a positive one.
 
         :return: `(any_violated, message_list)`.
@@ -612,7 +612,7 @@ class Timer:
 
     def propose_step_size(self) -> Number:
         """
-        Propose the next time step size without updating any internal state.
+        Proposes the next time step size without updating any internal state.
 
         The proposal is the size the solver can currently sustain, shortened so the clock lands
         exactly on the next time target (or on `simulation_time`). A step may stretch up to
@@ -683,7 +683,7 @@ class Timer:
         aggressive: Boolean = False,
     ) -> Number:
         """
-        Register a rejected time step and compute a smaller step size from the specific failure
+        Registers a rejected time step and computes a smaller step size from the specific failure
         criteria encountered.
 
         Each diagnostic argument gives a proportional backoff factor and the most conservative
@@ -838,7 +838,7 @@ class Timer:
         aggressive: Boolean = False,
     ) -> Number:
         """
-        Compute the most conservative (smallest) backoff factor from all
+        Computes the most conservative (smallest) backoff factor from all
         failure signals. Returns a value in (0, 1].
         """
         factors: list[Number] = []
@@ -943,7 +943,7 @@ class Timer:
         **kwargs: typing.Any,
     ) -> tuple[bool, str]:
         """
-        Determine whether a completed time step meets all acceptance criteria.
+        Determines whether a completed time step meets all acceptance criteria.
 
         Each argument is checked against its corresponding configured limit.
         The first violated criterion causes an immediate `(False, message)`
@@ -1117,7 +1117,7 @@ class Timer:
         total_relative_mbe: Number | None = None,
     ) -> Number:
         """
-        Register an accepted time step and work out the step size the solver can sustain next.
+        Registers an accepted time step and work out the step size the solver can sustain next.
 
         The CFL, saturation, pressure and material balance diagnostics each give the largest
         step the solver would tolerate, found by scaling the step just taken by how far the
@@ -1309,7 +1309,7 @@ class Timer:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `Timer` with every time-valued field rescaled to `target`.
+        Returns a new `Timer` with every time-valued field rescaled to `target`.
 
         Step sizes, simulation/elapsed time, time targets and step-size history are rescaled
         from `unit_system`'s native time unit to `target`'s, and the absolute material balance
@@ -1367,7 +1367,7 @@ class Timer:
 
     def dump_state(self) -> TimerState:
         """
-        Serialize the current timer state to a dictionary. `time_targets` are not included,
+        Serializes the current timer state to a dictionary. `time_targets` are not included,
         since they are rebuilt from the schedule and the deck when a run is restarted.
         """
         return {
@@ -1396,7 +1396,7 @@ class Timer:
     @classmethod
     def load_state(cls, state: TimerState, *, time_targets: TimeTargets | None = None) -> Self:
         """
-        Reconstruct a timer from a previously saved state dictionary. Settings missing
+        Reconstructs a timer from a previously saved state dictionary. Settings missing
         from `state` take the class defaults.
 
         :param state: A dictionary from `dump_state`.

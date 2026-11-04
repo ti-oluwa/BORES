@@ -22,7 +22,7 @@ StringArrayFactory = typing.Callable[[typing.Sequence[str]], npt.NDArray]
 
 
 def is_none_sentinel(value: typing.Any) -> bool:
-    """Check if value is the None sentinel."""
+    """Checks if value is the None sentinel."""
     return isinstance(value, str) and value == NONE_SENTINEL
 
 
@@ -32,7 +32,7 @@ def sequence_to_ndarray(
     string_array_factory: StringArrayFactory,
 ) -> npt.NDArray:
     """
-    Convert a (possibly nested) sequence into a NumPy array safe for the
+    Converts a (possibly nested) sequence into a NumPy array safe for the
     calling backend's storage.
 
     Raises if the sequence would produce dtype=object for anything other
@@ -81,7 +81,7 @@ def sequence_to_ndarray(
 
 
 def normalize_for_storage(value: typing.Any) -> typing.Any:
-    """Normalize Python values for storage (replace None with sentinel)."""
+    """Normalizes Python values for storage (replace None with sentinel)."""
     if value is None:
         return NONE_SENTINEL
     elif isinstance(value, Sequence) and not isinstance(value, (str, bytes, np.ndarray)):
@@ -92,7 +92,7 @@ def normalize_for_storage(value: typing.Any) -> typing.Any:
 
 
 def denormalize_from_storage(value: typing.Any) -> typing.Any:
-    """Denormalize values from storage (replace sentinel with None)."""
+    """Denormalizes values from storage (replace sentinel with None)."""
     if is_none_sentinel(value):
         return None
     elif isinstance(value, list):
@@ -103,7 +103,7 @@ def denormalize_from_storage(value: typing.Any) -> typing.Any:
 
 
 def normalize_loaded_value(value: typing.Any) -> typing.Any:
-    """Normalize values loaded from an array-backed dataset."""
+    """Normalizes values loaded from an array-backed dataset."""
     if isinstance(value, np.ndarray):
         if value.dtype.kind in ("U", "S", "O", "T"):
             # "T" = numpy's variable-length StringDType (numpy >= 2.0),

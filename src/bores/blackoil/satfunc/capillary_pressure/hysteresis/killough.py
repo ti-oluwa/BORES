@@ -50,7 +50,7 @@ def scan_curve(
     with_derivatives: Boolean,
 ) -> CapillaryCurve:
     """
-    Scan one capillary pressure curve between its drainage and imbibition bounds.
+    Scans one capillary pressure curve between its drainage and imbibition bounds.
 
     :param size: Number of cells.
     :param flat_shape: Shape the per-cell inputs are broadcast to.
@@ -157,7 +157,7 @@ class KilloughCapillaryPressureTable(HysteresisCapillaryPressureTable):
         **kwargs: typing.Any,
     ) -> tuple[CapillaryPressures, CapillaryPressureDerivatives | None]:
         """
-        Capillary pressures, and optionally their derivatives, in one pass.
+        Returns capillary pressures, and optionally their derivatives, in one pass.
 
         This is the one implementation behind `evaluate`, `derivatives` and
         `evaluate_with_derivatives`.

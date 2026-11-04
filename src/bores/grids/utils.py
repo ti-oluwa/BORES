@@ -39,7 +39,7 @@ AXIS_SIDES: dict[int, tuple[Side, Side]] = {
     2: (Side.TOP, Side.BOTTOM),
 }
 
-# Eclipse's own `I+`/`I-`/`J+`/`J-`/`K+`/`K-` face-direction convention (as
+# The deck's own `I+`/`I-`/`J+`/`J-`/`K+`/`K-` face-direction convention (as
 # used by `AQUANCON`), each mapped to (dominant outward-normal axis, sign) -
 # axis 0=X/I, 1=Y/J, 2=Z/K, matching `AXIS_SIDES` above.
 FACE_DIRECTION_AXIS_SIGN: dict[str, tuple[int, float]] = {
@@ -54,7 +54,7 @@ FACE_DIRECTION_AXIS_SIGN: dict[str, tuple[int, float]] = {
 
 def resolve_side(side: Side | str) -> Side:
     """
-    Resolve a `Side`, its `.value` string, or a common alias
+    Resolves a `Side`, its `.value` string, or a common alias
     ('left'/'right'/'front'/'back'/'up'/'down') to a `Side` member.
 
     :param side: `Side` member, value string, or alias.
@@ -76,7 +76,7 @@ def resolve_side(side: Side | str) -> Side:
 
 def classify_boundary_faces(grid: Grid) -> dict[Side, IntArray[OneDimension]]:
     """
-    Classify every boundary face of `grid` into one of the six `Side`s.
+    Classifies every boundary face of `grid` into one of the six `Side`s.
 
     For each boundary face, its outward normal is re-derived defensively as
     `sign(dot(face_unit_normals[face], face_centroid - owner_cell_centroid))`
@@ -173,7 +173,7 @@ def resolve_boundary_faces_for_box(
     label: str = "box",
 ) -> IntArray[OneDimension]:
     """
-    Resolve an Eclipse-style IJK box + face direction (as `AQUANCON` gives
+    Resolves a deck-style IJK box + face direction (as `AQUANCON` gives
     it) to boundary face positions (into `Grid.boundary_face_indices`).
 
     For each cell in the 1-based, inclusive box, it finds the face in
@@ -304,7 +304,7 @@ def resolve_boundary_faces_for_box(
 
 def classify_boundary_cells(grid: Grid) -> dict[Side, IntArray[OneDimension]]:
     """
-    Classify every boundary-adjacent cell of `grid` into one of the six
+    Classifies every boundary-adjacent cell of `grid` into one of the six
     `Side`s, derived from `classify_boundary_faces`.
 
     A cell is included on a `Side` if it owns at least one boundary face
@@ -338,7 +338,7 @@ def get_cells_on_side(
     classified: typing.Mapping[Side, IntArray[OneDimension]] | None = None,
 ) -> IntArray[OneDimension]:
     """
-    Global cell indices of every boundary-adjacent cell on one flank of `grid`.
+    Returns global cell indices of every boundary-adjacent cell on one flank of `grid`.
 
     ```python
     west_cells = get_cells_on_side(grid, "west")
@@ -379,7 +379,7 @@ def face_has_vertex(
     face_vertex_offsets: IntArray[OneDimension],
     face_vertex_indices: IntArray[OneDimension],
 ) -> Boolean:
-    """Check whether a face has a vertex among its corners."""
+    """Checks whether a face has a vertex among its corners."""
     for slot in range(face_vertex_offsets[face], face_vertex_offsets[face + 1]):
         if face_vertex_indices[slot] == vertex:
             return True
@@ -401,7 +401,7 @@ def get_side_top_vertices(
     face_vertex_indices: IntArray[OneDimension],
 ) -> tuple[Boolean, Integer, Integer]:
     """
-    Compute and return the two top corners of the side face that holds two neighbouring base corners.
+    Computes and returns the two top corners of the side face that holds two neighbouring base corners.
 
     :param first_slot: Position of the cell's first face in `cell_face_indices`.
     :param top: The face opposite the base.
@@ -457,7 +457,7 @@ def get_side_top_vertices(
 def get_common_vertex(
     first_a: Integer, first_b: Integer, second_a: Integer, second_b: Integer
 ) -> tuple[Boolean, Integer]:
-    """The one vertex that two pairs of vertices have in common, if there is exactly one."""
+    """Returns the one vertex that two pairs of vertices have in common, if there is exactly one."""
     found = np.int64(-1)
     matches = 0
     if first_a == second_a or first_a == second_b:
@@ -479,7 +479,7 @@ def compute_hexahedron_corners(
     vertex_coordinates: NumberArray[TwoDimensions],
 ) -> tuple[Boolean, Integer, Integer, Integer, Integer, Integer, Integer, Integer, Integer]:
     """
-    Compute and return the eight corners of a cell that is a hexahedron, in VTK hexahedron order.
+    Computes and returns the eight corners of a cell that is a hexahedron, in VTK hexahedron order.
 
     A cell is a hexahedron if it has six faces, each with four vertices, and the faces pair up
     into a base, a top that shares no vertex with it, and four sides. The base corners come
@@ -673,7 +673,7 @@ def find_exposed_cells(
     rendered: BooleanArray[OneDimension],
 ) -> BooleanArray[OneDimension]:
     """
-    Find the cells that can be seen from outside the grid.
+    Finds the cells that can be seen from outside the grid.
 
     A cell is exposed if one of its faces has no cell on the other side, if the cell on the other
     side is not rendered, or if its faces do not close up on their own. The last case covers a cell
@@ -733,7 +733,7 @@ def count_cell_entries(
     use_hexahedra: Boolean,
 ) -> IntArray[OneDimension]:
     """
-    Count the entries each cell contributes to the VTK cell stream.
+    Counts the entries each cell contributes to the VTK cell stream.
 
     A polyhedron cell is laid out as
 
@@ -796,7 +796,7 @@ def fill_cell_entries(
     out: IntArray[OneDimension],
 ) -> None:
     """
-    Fill the cell stream with the cells that are rendered.
+    Fills the cell stream with the cells that are rendered.
 
     Each cell owns the slice of `out` that starts at its entry of `cell_starts` and is as long as
     its entry of `counts`, so cells write independently. A polyhedron is written as
@@ -870,7 +870,7 @@ def make_pyvista_grid(
     use_hexahedra: bool = False,
 ) -> typing.Any:
     """
-    Convert a `bores.grids.base.Grid` to a `pyvista.UnstructuredGrid`.
+    Converts a `bores.grids.base.Grid` to a `pyvista.UnstructuredGrid`.
 
     Each grid cell is represented as a **VTK polyhedron (type 42)** built
     from the cell's actual face and vertex geometry. This is geometrically

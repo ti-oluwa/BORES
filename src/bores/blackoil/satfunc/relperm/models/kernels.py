@@ -51,7 +51,7 @@ NO_MINIMUM = -1.0
 
 def to_kernel_minimum(minimum: Number | None) -> Number:
     """
-    Convert a resolved minimum relative permeability to the form the compiled kernels take.
+    Converts a resolved minimum relative permeability to the form the compiled kernels take.
 
     :param minimum: Resolved minimum relative permeability, or `None` for no minimum.
     :return: The minimum as a Number, or `NO_MINIMUM` when there is none.
@@ -102,7 +102,7 @@ class CellRelPerm(typing.NamedTuple):
 
 @numba.njit(cache=True, inline="always", error_model="numpy")
 def clip_unit(value: Number) -> Number:
-    """Limit `value` to the range 0 to 1, leaving NaN unchanged."""
+    """Returns limit `value` to the range 0 to 1, leaving NaN unchanged."""
     if value < 0.0:
         return 0.0
     if value > 1.0:
@@ -112,7 +112,7 @@ def clip_unit(value: Number) -> Number:
 
 @numba.njit(cache=True, inline="always", error_model="numpy")
 def floor_relperm(relperm: Number, minimum: Number) -> Number:
-    """Smooth floor `sqrt(kr**2 + minimum**2)` of a relative permeability, or `relperm` itself when there is no minimum."""
+    """Smooths floor `sqrt(kr**2 + minimum**2)` of a relative permeability, or `relperm` itself when there is no minimum."""
     if minimum < 0.0:
         return relperm
     return math.sqrt(relperm**2 + minimum**2)
@@ -133,7 +133,7 @@ def normalize_cell_saturations(
     gas_saturation: Number,
     saturation_epsilon: Number,
 ) -> tuple[Number, Number, Number]:
-    """Scale the saturations of a cell to sum to 1 when they differ from 1 by more than `saturation_epsilon`."""
+    """Scales the saturations of a cell to sum to 1 when they differ from 1 by more than `saturation_epsilon`."""
     total = water_saturation + oil_saturation + gas_saturation
     if abs(total - 1.0) > saturation_epsilon and total > 0.0:
         return (
@@ -160,7 +160,7 @@ def rule_value(
     residual_oil_saturation_gas: Number,
     minimum_mobile_pore_space: Number,
 ) -> Number:
-    """Value of the built-in mixing rule identified by `rule_id`, limited to the range 0 to 1."""
+    """Returns value of the built-in mixing rule identified by `rule_id`, limited to the range 0 to 1."""
     if rule_id == BAKER_LINEAR_RULE:
         value = _baker_value(
             kro_w=kro_w,
@@ -214,7 +214,7 @@ def rule_derivatives(
     minimum_mobile_pore_space: Number,
 ) -> tuple[Number, Number, Number, Number, Number, Number, Number]:
     """
-    Partial derivatives of the built-in mixing rule identified by `rule_id`.
+    Returns partial derivatives of the built-in mixing rule identified by `rule_id`.
 
     :return: Tuple of the derivatives with respect to `kro_w`, `kro_g`, `krw`, `krg`, water
         saturation, oil saturation and gas saturation, in that order.
@@ -257,7 +257,7 @@ def rule_derivatives(
 def blend_cells(
     water_wet: CellRelPerm, oil_wet: CellRelPerm, water_wet_fraction: Number
 ) -> CellRelPerm:
-    """Blend the water-wet and oil-wet systems of a mixed-wet rock, weighting the water-wet system by `water_wet_fraction`."""
+    """Blends the water-wet and oil-wet systems of a mixed-wet rock, weighting the water-wet system by `water_wet_fraction`."""
     f = water_wet_fraction
     g = 1.0 - water_wet_fraction
     return CellRelPerm(
@@ -279,7 +279,7 @@ def finalize_water_wet_cell(
     cell: CellRelPerm, minimum_water: Number, minimum_oil: Number, minimum_gas: Number
 ) -> tuple[Number, Number, Number, Number, Number, Number, Number, Number, Number]:
     """
-    Apply the minimum relative permeability to a purely water-wet cell.
+    Applies the minimum relative permeability to a purely water-wet cell.
 
     Water relative permeability depends on water saturation only and gas relative
     permeability on gas saturation only, so their other derivatives are zero.
@@ -307,7 +307,7 @@ def finalize_oil_wet_cell(
     cell: CellRelPerm, minimum_water: Number, minimum_oil: Number, minimum_gas: Number
 ) -> tuple[Number, Number, Number, Number, Number, Number, Number, Number, Number]:
     """
-    Apply the minimum relative permeability to a purely oil-wet cell.
+    Applies the minimum relative permeability to a purely oil-wet cell.
 
     Oil relative permeability depends on oil saturation only and gas relative permeability
     on gas saturation only, so their other derivatives are zero.
@@ -338,7 +338,7 @@ def finalize_mixed_wet_cell(
     cell: CellRelPerm, minimum_water: Number, minimum_oil: Number, minimum_gas: Number
 ) -> tuple[Number, Number, Number, Number, Number, Number, Number, Number, Number]:
     """
-    Apply the minimum relative permeability to an already blended mixed-wet cell.
+    Applies the minimum relative permeability to an already blended mixed-wet cell.
 
     :return: Tuple of the nine derivatives in the order of `finalize_water_wet_cell`.
     """
@@ -396,7 +396,7 @@ def prepare_relperm_inputs(
     residual_gas_saturation: NumberOrArray[NDimension],
 ) -> tuple[tuple[Integer, ...], Integer, FlatRelPermInputs]:
     """
-    Validate the saturations and bring all inputs of a relative permeability kernel to flat arrays.
+    Validates the saturations and bring all inputs of a relative permeability kernel to flat arrays.
 
     :raises ValidationError: If any saturation is outside the range 0 to 1.
     :return: Tuple of the broadcast shape, the number of cells and the flattened inputs.

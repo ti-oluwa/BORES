@@ -72,7 +72,7 @@ def make_perforation(
     direction: Orientation | None = None,
 ) -> Perforation:
     """
-    Build one perforation from vertical-depth or measured-depth bounds.
+    Builds one perforation from vertical-depth or measured-depth bounds.
 
     :param top_depth: Top true-vertical depth; pair with `bottom_depth`.
     :param bottom_depth: Bottom true-vertical depth; pair with `top_depth`.

@@ -160,16 +160,16 @@ Fields:
 - `accuracy_flag`: initialization accuracy/option switch (e.g.
   selecting compositional-vs-black-oil equilibration nuances); `0` is
   the simulator default behaviour.
-- `compositional_init_type`: Eclipse 300 compositional runs only: how the initial composition is
+- `compositional_init_type`: Compositional runs only: how the initial composition is
   set up (default 1). Not used by black-oil runs.
-- `compositional_not_set_saturation_pressure`: Eclipse 300 compositional runs only: how cells
+- `compositional_not_set_saturation_pressure`: Compositional runs only: how cells
   with no saturation pressure set are treated; `None` if omitted. Not used by black-oil runs.
-- `black_oil_init_hg`: Eclipse 300 only: initialization option for the hydrocarbon gas phase of
+- `black_oil_init_hg`: Compositional runs only: initialization option for the hydrocarbon gas phase of
   a black-oil fluid (default 0).
  
 Note:
     The exact semantics of `accuracy_flag` (item 9) vary slightly
-    between Eclipse 100 and Eclipse 300 / compositional runs; verify
+    between black-oil and compositional runs; verify
     against your simulator's manual if this run uses anything beyond
     plain black-oil equilibration.
 """
@@ -226,7 +226,7 @@ RTEMPVD = TableKeyword(
 """
 `RTEMPVD` - temperature versus depth table.
 
-Same as `TEMPVD` but used in more recent Eclipse versions
+Same as `TEMPVD` but used in more recent simulator versions
 
 Specifies how reservoir temperature varies with depth, one table per
 equilibration region (matched by `EQLNUM`). Cell temperatures are
@@ -259,7 +259,7 @@ below the bubble point as a function of depth for saturated-oil
 columns; cells are linearly interpolated from this table at their
 centroid depth instead of using the PVT table's bubble-point Rs
 directly. Values outside the table range are clamped to the endpoint
-(no extrapolation), consistent with Eclipse.
+(no extrapolation).
 
 Columns:
 
@@ -298,7 +298,7 @@ TVDPF_PATTERN = re.compile(rf"{TVDPF_PREFIX}(?P<tracer>\w{{1,{TRACER_NAME_MAX_LE
 
 def tvdpf_tracer(keyword_name: str) -> str | None:
     """
-    The tracer a `TVDPF<name>` keyword belongs to.
+    Returns the tracer a `TVDPF<name>` keyword belongs to.
 
     :param keyword_name: Name of a keyword, such as `"TVDPFSEA"`.
     :returns: The tracer name (`"SEA"`), or `None` when the keyword is not a tracer
@@ -310,7 +310,7 @@ def tvdpf_tracer(keyword_name: str) -> str | None:
 
 def tvdpf(tracer: str) -> TableKeyword:
     """
-    Build the `TVDPF<tracer>` keyword: initial concentration of a tracer versus depth.
+    Builds the `TVDPF<tracer>` keyword: initial concentration of a tracer versus depth.
 
     The tracer name is part of the keyword (`TVDPFSEA` for a tracer called `SEA`). `DeckFile`
     registers the keyword of every tracer concentration table it finds, so this is only needed to
@@ -525,7 +525,7 @@ Fields:
 - `face`: which face of each cell in the box to connect, one of
   `I+`, `I-`, `J+`, `J-`, `K+`, `K-`.
 - `influx_coefficient`: overrides the connection's face area for aquifer
-  influence. `None` (Eclipse's own default) means use the face's own area.
+  influence. `None` (the default) means use the face's own area.
   An aquifer's influx is shared between its faces in proportion to these.
 - `connection_multiplier`: multiplies the resolved influx coefficient.
   `1.0` if omitted.
@@ -577,7 +577,7 @@ RESTART = RestartKeyword()
  
 Fields (returned as a dict rather than via `Field`, since the second
 token's "is this required" rule depends only on simple positional
-arity, not Eclipse's usual optional/`1*` trailing-default convention):
+arity, not the usual optional/`1*` trailing-default convention):
  
 - `root_name`: root filename (without extension) of the restart
   case to resume from.

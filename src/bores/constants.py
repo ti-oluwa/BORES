@@ -54,7 +54,7 @@ class Constant:
     """
 
     def __str__(self) -> str:
-        """Return a human-readable string representation of the `Constant`."""
+        """Returns a human-readable string representation of the `Constant`."""
         return f"{self.value}{self.unit or ''}"
 
     def __repr__(self) -> str:
@@ -118,7 +118,7 @@ class ConstantFactory:
 
     @property
     def value(self) -> typing.Any:
-        """Evaluate and return the current value."""
+        """Evaluates and returns the current value."""
         return self.factory()
 
     def __str__(self) -> str:
@@ -142,7 +142,7 @@ class ConstantFactory:
 
 def _get_saturation_epsilon() -> float:
     """
-    Saturation clamp epsilon, scaled to the active floating-point dtype.
+    Returns saturation clamp epsilon, scaled to the active floating-point dtype.
 
     Target: 8 * machine_epsilon, floored at 1e-7 (about the float32 machine epsilon)
     so the clamp is always meaningful even if the context dtype is float64.
@@ -155,7 +155,7 @@ def _get_saturation_epsilon() -> float:
 
 def _get_minimum_pore_space() -> float:
     """
-    Minimum mobile pore-space guard, matched to the saturation epsilon so
+    Returns minimum mobile pore-space guard, matched to the saturation epsilon so
     validity guards and saturation clamps stay numerically consistent.
     """
     return _get_saturation_epsilon()
@@ -163,7 +163,7 @@ def _get_minimum_pore_space() -> float:
 
 def _get_finite_difference_epsilon() -> float:
     """
-    Central finite-difference step, scaled to the active dtype.
+    Returns central finite-difference step, scaled to the active dtype.
     Optimal step is cbrt(machine_epsilon); floored at 1e-5 for float64.
     """
     info = get_floating_point_info()
@@ -1154,7 +1154,7 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         value=0.1,
         description=(
             "Curvature parameter of the capillary pressure hysteresis scanning curves when the "
-            "deck gives no `EHYSTR`. Matches the Eclipse default."
+            "deck gives no `EHYSTR`."
         ),
         unit="dimensionless",
     ),
@@ -1162,7 +1162,7 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         value=1.0,
         description=(
             "Curvature parameter of the Killough wetting phase scanning curves when the deck "
-            "gives no `EHYSTR`. Matches the Eclipse default."
+            "gives no `EHYSTR`."
         ),
         unit="dimensionless",
     ),
@@ -1170,7 +1170,7 @@ DEFAULT_CONSTANTS: dict[str, typing.Any | Constant | ConstantFactory] = {
         value=0.1,
         description=(
             "Modification parameter of the Killough trapped non-wetting saturation when the "
-            "deck gives no `EHYSTR`. Matches the Eclipse default."
+            "deck gives no `EHYSTR`."
         ),
         unit="dimensionless",
     ),
@@ -1226,7 +1226,7 @@ class Constants:
 
     def _register_aliases(self, canonical: str, constant: Constant | ConstantFactory) -> None:
         """
-        Index `constant`'s declared aliases against `canonical` in `_aliases`.
+        Indexes `constant`'s declared aliases against `canonical` in `_aliases`.
 
         :raises ValidationError: If an alias collides with an existing
             canonical name, or is already claimed by a different canonical.
@@ -1248,13 +1248,13 @@ class Constants:
             self._aliases[alias] = canonical
 
     def _unregister_aliases_for(self, canonical: str) -> None:
-        """Drop every alias currently pointing at *canonical* (used on delete)."""
+        """Drops every alias currently pointing at *canonical* (used on delete)."""
         for alias in (a for a, c in self._aliases.items() if c == canonical):
             del self._aliases[alias]
 
     def _wrap(self, canonical: str, value: typing.Any) -> Constant | ConstantFactory:
         """
-        Wrap a value being assigned to `canonical`.
+        Wraps a value being assigned to `canonical`.
 
         A `Constant` or `ConstantFactory` is stored as given. A bare value or a callable replaces
         only the value of the constant already stored under `canonical`, so its description, unit and
@@ -1282,7 +1282,7 @@ class Constants:
         )
 
     def _resolve(self, name: str) -> str:
-        """Resolve `name` to its canonical store key (identity if not an alias)."""
+        """Resolves `name` to its canonical store key (identity if not an alias)."""
         return self._aliases.get(name, name)
 
     def __getattr__(self, name: str) -> typing.Any:
@@ -1399,7 +1399,7 @@ class ConstantsContext:
 
     def __init__(self, constants: Constants) -> None:
         """
-        Initialize the context manager with a new `Constants` instance.
+        Initializes the context manager with a new `Constants` instance.
 
         :param constants: New `Constants` instance to use within the context
         """
@@ -1410,17 +1410,17 @@ class ConstantsContext:
 
     @property
     def id(self) -> str:
-        """The context id"""
+        """Returns the context id"""
         return self._id
 
     @property
     def constants(self) -> Constants:
-        """The context's `Constants`"""
+        """Returns the context's `Constants`"""
         return self._constants
 
     def __enter__(self) -> Constants:
         """
-        Enter the context, setting the new `Constants` instance.
+        Enters the context, setting the new `Constants` instance.
 
         :return: The new `Constants` instance
         """
@@ -1444,7 +1444,7 @@ class ConstantsContext:
         return self._constants
 
     def __exit__(self, exc_type, exc_value, traceback) -> None:
-        """Exit the context, restoring the previous `Constants` instance."""
+        """Exits the context, restoring the previous `Constants` instance."""
         if self._entry_depth == 0 or _constants_context.get()[1] != self._id:
             return
 
@@ -1467,7 +1467,7 @@ class __ConstantsProxy:
     @property
     def context_id(self) -> str:
         """
-        Get the current context's ID.
+        Gets the current context's ID.
 
         :return: `ConstantsContext` ID.
         """
@@ -1476,7 +1476,7 @@ class __ConstantsProxy:
     @property
     def value(self) -> Constants:
         """
-        Get the current context's `Constants` instance.
+        Gets the current context's `Constants` instance.
 
         :return: Current `Constants` instance
         """
@@ -1488,7 +1488,7 @@ class __ConstantsProxy:
 
     def __getattr__(self, name: str) -> typing.Any:
         """
-        Get a constant's value from the current context's `Constants` instance.
+        Gets a constant's value from the current context's `Constants` instance.
 
         :param name: Name of the constant
         :return: Value of the constant
@@ -1498,7 +1498,7 @@ class __ConstantsProxy:
 
     def __getitem__(self, name: str) -> Constant:
         """
-        Get a Constant object from the current context's `Constants` instance.
+        Gets a Constant object from the current context's `Constants` instance.
 
         :param name: Name of the constant
         :return: Constant object
@@ -1519,13 +1519,13 @@ CONSTANTS = c = __ConstantsProxy()
 
 
 def get_constants() -> Constants:
-    """Return the `Constants` instance active in the current context."""
+    """Returns the `Constants` instance active in the current context."""
     return _constants_context.get()[0]
 
 
 def get_constant(name: str) -> Constant | None:
     """
-    Get a `Constant` object by name from the global constants.
+    Gets a `Constant` object by name from the global constants.
 
     :param name: Name of the constant
     :return: `Constant` object or None if not found
@@ -1535,7 +1535,7 @@ def get_constant(name: str) -> Constant | None:
 
 def set_constants(constants: Constants, /) -> None:
     """
-    Set/override the default (process local) `Constants` used.
+    Returns set/override the default (process local) `Constants` used.
 
     Note: This method should not be called inside a `ConstantsContext`.
         An error will be raise if called like so.

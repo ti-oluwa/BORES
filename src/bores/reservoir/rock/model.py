@@ -134,7 +134,7 @@ class Permeability:
                 object.__setattr__(self, "mean", (self.x * self.y * self.z) ** (1.0 / 3.0))
 
     def scale(self, factor: Number) -> Self:
-        """Return a new instance with all components multiplied by *factor*."""
+        """Returns a new instance with all components multiplied by *factor*."""
         if factor == 1:
             return self
         return attrs.evolve(
@@ -154,7 +154,7 @@ class Permeability:
         factor: Number | None = None,
     ) -> Self:
         """
-        Return a new `Permeability` with all quantities rescaled
+        Returns a new `Permeability` with all quantities rescaled
         to *target*.
 
         Conversion factors are sourced from `get_conversion_factors`.
@@ -386,7 +386,7 @@ class Rock:
         dtype: npt.DTypeLike = None,
     ) -> RockCompressibility:
         """
-        Return formation compressibility tensor.
+        Returns formation compressibility tensor.
 
         Units: 1/psi (FIELD), 1/bar (METRIC), 1/atm (LAB), 1/Pa (SI).
         """
@@ -415,7 +415,7 @@ class Rock:
         dtype: npt.DTypeLike = None,
     ) -> CellArray:
         """
-        Pore volume at `pressure` divided by pore volume at the rock's reference pressure.
+        Returns pore volume at `pressure` divided by pore volume at the rock's reference pressure.
 
         Rock compaction here is reversible and depends on pressure alone, so the compacted
         pore volume never has to be stored. Multiply the reference pore volume by this.
@@ -444,7 +444,7 @@ class Rock:
         dtype: npt.DTypeLike = None,
     ) -> CellArray:
         """
-        Derivative of `get_pore_volume_multiplier` with respect to pressure, per unit of
+        Returns derivative of `get_pore_volume_multiplier` with respect to pressure, per unit of
         pressure in `unit_system`. Zeros when the rock has no compressibility data.
 
         :param pressure: Shape `(n_cells,)` pressures in `unit_system`.
@@ -470,7 +470,7 @@ class Rock:
         dtype: npt.DTypeLike = None,
     ) -> CellArray:
         """
-        Pressure-dependent transmissibility multiplier (`ROCKTAB`), all ones when the rock
+        Returns pressure-dependent transmissibility multiplier (`ROCKTAB`), all ones when the rock
         has no compressibility data.
 
         :param pressure: Shape `(n_cells,)` pressures in `unit_system`.
@@ -498,7 +498,7 @@ class Rock:
         table: UnitConversionTable | None = None,
     ) -> Self:
         """
-        Return a new `Rock` with all dimensional quantities rescaled
+        Returns a new `Rock` with all dimensional quantities rescaled
         to *target*.
 
         Dimensionless arrays (porosity, NTG, saturations) are copied unchanged.
@@ -537,7 +537,7 @@ class Rock:
         dtype: npt.DTypeLike,
     ) -> dict[str, CellArray]:
         """
-        Derive per-cell saturation-endpoint fallbacks from each cell's
+        Derives per-cell saturation-endpoint fallbacks from each cell's
         SATNUM relative-permeability model, for whichever of the five
         endpoint keywords (`SWL`/`SWCON`, `SWCR`/`SWCRIT`, `SOWCR`, `SOGCR`, `SGCR`)
         aren't present in the deck.
@@ -587,10 +587,10 @@ class Rock:
         dtype: npt.DTypeLike = None,
     ) -> CellArray:
         """
-        The porosity of every cell, from `PORO` and `PORV`.
+        Returns the porosity of every cell, from `PORO` and `PORV`.
 
         `PORV` gives each cell's pore volume directly and overrides what `PORO`, `NTG` and the cell
-        volume would give, as in Eclipse. Here the pore volume is `porosity x NTG x cell volume`, so
+        volume would give. Here the pore volume is `porosity x NTG x cell volume`, so
         a `PORV` is honoured by taking the porosity that reproduces it: `PORV / (NTG x cell
         volume)`. A cell `PORV` does not set (an unassigned entry) keeps its `PORO`.
 
@@ -669,14 +669,14 @@ class Rock:
         endpoint_scaling: Boolean | None = None,
     ) -> Self:
         """
-        Build a `Rock` from a parsed `DeckFile` and an already-loaded `Grid`.
+        Builds a `Rock` from a parsed `DeckFile` and an already-loaded `Grid`.
 
         Reads `PORO`, `PERMX/Y/Z`, `NTG`, `SWL`, `SWCR`, `SOWCR`, `SOGCR`, `SGCR`, and
         `ROCK`/`ROCKTAB`. Rock regions (`ROCKNUM`) are carried by `Regions`, not by `Rock`.
 
-        `SWL`/`SWCR`/`SOWCR`/`SOGCR`/`SGCR` are the Eclipse per-cell saturation *endpoint*
+        `SWL`/`SWCR`/`SOWCR`/`SOGCR`/`SGCR` are the deck's per-cell saturation *endpoint*
         scaling arrays. `SWCON` and `SWCRIT` are BORES-specific aliases of `SWL` and `SWCR`
-        and are only read when the Eclipse name is absent. The Eclipse name always wins.
+        and are only read when the deck name is absent. The deck name always wins.
         Decks usually define these endpoints implicitly through the saturation function
         tables (`SWOF`/`SGOF`) instead, which is what is used when none is given.
 
@@ -745,7 +745,7 @@ class Rock:
                 )
 
         def load_endpoint_array(*keywords: str) -> CellArray | None:
-            # Keywords in order of preference: the Eclipse name, then any BORES alias
+            # Keywords in order of preference: the deck name, then any BORES alias
             if not endpoint_scaling:
                 return None
             for keyword in keywords:

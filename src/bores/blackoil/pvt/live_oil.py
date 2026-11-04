@@ -26,10 +26,10 @@ def linear_extrapolate(
     fp: npt.NDArray[np.floating],
 ) -> npt.NDArray[np.float64]:
     """
-    Piecewise-linear interpolation of `(xp, fp)` at *x*, extrapolating linearly beyond both ends.
+    Returns piecewise-linear interpolation of `(xp, fp)` at *x*, extrapolating linearly beyond both ends.
 
     Unlike `np.interp`, which holds the end values constant, the end segments' slopes are extended.
-    That is what Eclipse does outside a branch's tabulated pressures.
+    This is the behaviour outside a branch's tabulated pressures.
 
     :param x: Query points.
     :param xp: Strictly increasing knots, at least two.
@@ -69,13 +69,13 @@ def build_live_oil_branch_tables(
     npt.NDArray[np.float64],
 ]:
     """
-    Evaluate every Rs group's branch on a common pressure grid and build the saturated envelope.
+    Evaluates every Rs group's branch on a common pressure grid and builds the saturated envelope.
 
     Each group is one Rs node: rows of `(P, Bo, μo)` whose first row is the saturated (bubble-point)
     state and whose later rows are the undersaturated branch at that Rs.
 
     - **Branch tables** `(n_p, n_rs)`: group `k`'s `Bo` / `μo` at every grid pressure, linearly
-      extrapolated beyond its rows (below its bubble point as well, which Eclipse also does when it
+      extrapolated beyond its rows (below its bubble point as well, which also happens when it
       blends a branch at a pressure under that branch's own Pb). Extrapolated values are floored at
       `floor_fraction` of the group's smallest tabulated value so a far extrapolation cannot go
       non-positive.
@@ -139,10 +139,10 @@ def invert_interpolators(
     inverse_value: typing.Any, inverse_derivative: typing.Any
 ) -> tuple[typing.Callable[..., typing.Any], typing.Callable[..., typing.Any]]:
     """
-    Build interpolators of `B` and `∂B/∂P` from interpolators of `1/B` and `∂(1/B)/∂P`.
+    Builds interpolators of `B` and `∂B/∂P` from interpolators of `1/B` and `∂(1/B)/∂P`.
 
     A formation volume factor is smoother in `1/B` than in `B` (ideal-gas `Bg ∝ 1/P`, so `1/Bg` is
-    linear in `P`), which is why Eclipse tabulates and interpolates `1/B`. With `g = 1/B`:
+    linear in `P`), which is why deck tables are interpolated in `1/B`. With `g = 1/B`:
     `B = 1/g` and `∂B/∂P = -g'/g²`.
 
     :param inverse_value: Interpolator of `1/B` (`.ev` or callable).

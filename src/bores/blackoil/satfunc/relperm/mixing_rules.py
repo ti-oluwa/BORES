@@ -14,7 +14,7 @@ Every registered rule honors the two-phase limits, for any oil endpoint `kr_max`
 
 | Rule                  | Character          | Notes                                           |
 |-----------------------|--------------------|-------------------------------------------------|
-| `baker_linear_rule`   | Moderate (default) | Saturation-weighted interpolation (Baker, 1988). The ECLIPSE default. |
+| `baker_linear_rule`   | Moderate (default) | Saturation-weighted interpolation (Baker, 1988). |
 | `stone_I_rule`        | Moderate           | Stone's first model, Aziz-Settari normalization, Fayers-Matthews `Som`. |
 | `stone_II_rule`       | Moderate           | Stone's second model, normalized.              |
 | `min_rule`            | Very conservative  | Lower bound: `min(kro_w, kro_g)`.              |
@@ -162,7 +162,7 @@ class MixingRule:
 
     def dfunc(self, fn: MixingRuleDFunc, /) -> MixingRuleDFunc:
         """
-        Decorator that registers an analytical partial-derivative function for
+        Registers an analytical partial-derivative function for
         this mixing rule. See the class docstring for the expected signature.
         """
         self._dfunc = fn
@@ -212,7 +212,7 @@ class MixingRule:
         epsilon: Number = 1e-7,
     ) -> MixingRulePartialDerivatives:
         """
-        Return the seven partial derivatives of this mixing rule.
+        Returns the seven partial derivatives of this mixing rule.
 
         If an analytical derivative function has been registered (via
         `@rule.dfunc` or auto-detected from `func.partial_derivatives`),
@@ -318,7 +318,7 @@ def compute_central_difference_partial_derivatives(
     epsilon: Number = 1e-7,
 ) -> MixingRulePartialDerivatives:
     """
-    Compute the seven partial derivatives of a mixing rule by central finite
+    Computes the seven partial derivatives of a mixing rule by central finite
     differences. Used when a rule has no analytical derivative.
 
     The step is `epsilon` for saturations and `epsilon * max(1, |x|)` for the relative
@@ -395,7 +395,7 @@ def mixing_rule(
     override: bool = False,
 ) -> MixingRule | typing.Callable[[MixingRuleFunc | MixingRule], MixingRule]:
     """
-    Decorator that registers a mixing rule function or `MixingRule` instance.
+    Registers a mixing rule function or `MixingRule` instance.
 
     **Behaviour**:
 
@@ -482,7 +482,7 @@ def mixing_rule(
 
 def list_mixing_rules() -> list[str]:
     """
-    List all registered mixing rule names.
+    Lists all registered mixing rule names.
 
     :return: List of registered mixing rule names.
     """
@@ -492,7 +492,7 @@ def list_mixing_rules() -> list[str]:
 
 def get_mixing_rule(name: str) -> MixingRule:
     """
-    Get a registered mixing rule function by name.
+    Gets a registered mixing rule function by name.
 
     :param name: Registered name of the mixing rule.
     :return: Mixing rule function.
@@ -522,7 +522,7 @@ def get_mixing_rule_partial_derivatives(
     epsilon: Number = 1e-7,
 ) -> MixingRulePartialDerivatives:
     """
-    Compute the partial derivatives of a mixing rule with respect to each of its
+    Computes the partial derivatives of a mixing rule with respect to each of its
     seven varying arguments, using the analytical derivative when the rule has
     one and central differences otherwise.
 
@@ -584,7 +584,7 @@ def _prepare_rule_inputs(
     *values: NumberOrArray[NDimension],
 ) -> tuple[tuple[int, ...], tuple[NumberArray[OneDimension], ...]]:
     """
-    Broadcast the inputs of a rule to a common shape and flatten them to float64 arrays
+    Broadcasts the inputs of a rule to a common shape and flatten them to float64 arrays
     for the jitted loops.
 
     A single-element input (e.g. a scalar endpoint) is passed as a one-element array that
@@ -608,7 +608,7 @@ def _restore_shape(
     flat: NumberArray[OneDimension],
     shape: tuple[int, ...],
 ) -> NumberOrArray[NDimension]:
-    """Reshape a loop result to the broadcast shape (a scalar for scalar inputs)."""
+    """Reshapes a loop result to the broadcast shape (a scalar for scalar inputs)."""
     result = flat.reshape(shape)
     return result[()] if result.ndim == 0 else result  # type: ignore[return-value]
 
@@ -620,7 +620,7 @@ def run_rule(
     *values: NumberOrArray[NDimension],
 ) -> NumberOrArray[NDimension]:
     """
-    Run a jitted value loop and return the result in the floating dtype of `like`.
+    Runs a jitted value loop and returns the result in the floating dtype of `like`.
 
     The result is written straight into an array of that dtype. `parallel_loop` is used once the
     number of elements reaches `PARALLEL_SIZE_THRESHOLD`, `loop` otherwise. The guard
@@ -648,7 +648,7 @@ def run_rule_derivatives(
     NumberOrArray[NDimension],
 ]:
     """
-    Run a jitted derivative loop and return the seven partial derivatives.
+    Runs a jitted derivative loop and returns the seven partial derivatives.
 
     `parallel_loop` is used once the number of elements reaches `PARALLEL_SIZE_THRESHOLD`,
     `loop` otherwise.
@@ -665,7 +665,7 @@ def run_rule_derivatives(
 
 @numba.njit(cache=True, inline="always", error_model="numpy")
 def element_at(array: NumberArray[OneDimension], index: int) -> Number:
-    """Element `index` of `array`, or its only element when it holds a single value."""
+    """Returns element `index` of `array`, or its only element when it holds a single value."""
     return array[0] if array.size == 1 else array[index]  # type: ignore[return-value]
 
 
@@ -823,7 +823,7 @@ def min_rule(
     residual_oil_saturation_gas: NumberOrArray[NDimension],
 ) -> NumberOrArray[NDimension]:
     """
-    Minimum rule: `kro = min(kro_w, kro_g)`.
+    Returns minimum rule: `kro = min(kro_w, kro_g)`.
 
     A conservative lower bound on the three-phase oil relative permeability. It
     honors the two-phase limits because `kro_g = kr_max >= kro_w` with no gas and
@@ -1089,7 +1089,7 @@ def baker_linear_rule(
     residual_oil_saturation_gas: NumberOrArray[NDimension],
 ) -> NumberOrArray[NDimension]:
     """
-    Baker's saturation-weighted interpolation (Baker, 1988), the ECLIPSE default:
+    Returns Baker's saturation-weighted interpolation (Baker, 1988), the default:
 
         kro = (Sg * kro_g + (Sw - swc) * kro_w) / (Sg + (Sw - swc))
 
@@ -1356,7 +1356,7 @@ def stone_II_rule(
     residual_oil_saturation_gas: NumberOrArray[NDimension],
 ) -> NumberOrArray[NDimension]:
     """
-    Stone's second model (Stone, 1973), normalized by the oil endpoint `krocw = kr_max`:
+    Returns Stone's second model (Stone, 1973), normalized by the oil endpoint `krocw = kr_max`:
 
         kro = krocw * [(kro_w / krocw + krw) * (kro_g / krocw + krg) - (krw + krg)]
 
@@ -1444,7 +1444,7 @@ def _stone_I_terms(
     minimum_mobile_pore_space: Number,
 ) -> tuple[bool, Number, Number, bool, Number, Number, Number, Number, Number, Number, Number]:
     """
-    Intermediate quantities of Stone I (Aziz-Settari normalization, with the
+    Returns intermediate quantities of Stone I (Aziz-Settari normalization, with the
     Fayers-Matthews minimum oil saturation).
 
         alpha = 1 - Sg / (1 - swc - sorg)              clipped to [0, 1]
@@ -1745,7 +1745,7 @@ def stone_I_rule(
     residual_oil_saturation_gas: NumberOrArray[NDimension],
 ) -> NumberOrArray[NDimension]:
     """
-    Stone's first model (Stone, 1970) in the Aziz-Settari normalization, with the
+    Returns Stone's first model (Stone, 1970) in the Aziz-Settari normalization, with the
     minimum oil saturation of Fayers and Matthews (1984):
 
         alpha = 1 - Sg / (1 - swc - sorg)
@@ -1802,7 +1802,7 @@ def _(
     NumberOrArray[NDimension],
 ]:
     """
-    Exact gradient of `stone_I_rule` with respect to its arguments, treating the three
+    Returns exact gradient of `stone_I_rule` with respect to its arguments, treating the three
     saturations as independent. With `C = kro_w * kro_g / krocw` and `f = C * So* / (Y Z)`:
 
         d/dkro_w = (kro_g / krocw) So* / (Y Z)
@@ -1851,7 +1851,7 @@ BUILTIN_RULES = tuple(
 
 def get_builtin_rule_id(rule: typing.Any) -> int | None:
     """
-    Identifier that the compiled relative permeability kernels use for a built-in mixing rule.
+    Returns identifier that the compiled relative permeability kernels use for a built-in mixing rule.
 
     Only the unmodified built-in rules have an identifier. A rule that is not a built-in, or a
     built-in whose function or derivative function has been replaced (for example through

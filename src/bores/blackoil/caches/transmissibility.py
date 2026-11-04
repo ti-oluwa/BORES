@@ -133,7 +133,7 @@ def make_new_cache(n_interior_faces: int, dtype: npt.DTypeLike) -> Transmissibil
 
 def get_gravity_acceleration(unit_system: UnitSystem) -> float:
     """
-    Get gravity acceleration in `unit_system`'s length/time units.
+    Gets gravity acceleration in `unit_system`'s length/time units.
 
     :param unit_system: Target unit system.
     :return: Gravity acceleration, e.g. ft/day^2 for FIELD.
@@ -162,7 +162,7 @@ def update_transmissibility_cache(
     out: TransmissibilityCache,
 ) -> None:
     """
-    Fill `out` in place, one interior connection at a time.
+    Fills `out` in place, one interior connection at a time.
 
     :param owner_indices: Shape `(n_interior_faces,)` - `grid.
         face_cell_indices[grid.interior_face_indices, 0]`, gathered by the
@@ -309,7 +309,7 @@ def compute_transmissibility_cache(
     dtype: npt.DTypeLike = None,
 ) -> TransmissibilityCache:
     """
-    Build (or refresh, in place) a `TransmissibilityCache` for every interior
+    Builds (or refresh, in place) a `TransmissibilityCache` for every interior
     connection in `reservoir.grid`.
 
     Water/gas pressures are derived here from `oil_pressure` and the

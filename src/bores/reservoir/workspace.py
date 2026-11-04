@@ -110,7 +110,7 @@ class HysteresisWorkspace(typing.NamedTuple):
     @classmethod
     def from_state(cls, state: Hysteresis, *, dtype: npt.DTypeLike = None) -> Self:
         """
-        Create a workspace seeded from an immutable hysteresis state.
+        Creates a workspace seeded from an immutable hysteresis state.
 
         :param state: The hysteresis state to seed the workspace from.
         :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
@@ -148,7 +148,7 @@ class HysteresisWorkspace(typing.NamedTuple):
 
     def snapshot(self, *, dtype: npt.DTypeLike = None) -> Hysteresis:
         """
-        Return an independent immutable snapshot of the current history.
+        Returns an independent immutable snapshot of the current history.
 
         :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
         :returns: An immutable snapshot of the current hysteresis history.
@@ -167,7 +167,7 @@ class HysteresisWorkspace(typing.NamedTuple):
         tolerance: Number | None = None,
     ) -> None:
         """
-        Update the workspace in-place from current and previous saturations.
+        Updates the workspace in-place from current and previous saturations.
 
         :param water_saturation: Current water saturation per cell (fraction).
         :param gas_saturation: Current gas saturation per cell (fraction).
@@ -251,7 +251,7 @@ class ReservoirWorkspace(typing.NamedTuple):
     @classmethod
     def from_state(cls, state: ReservoirState, *, dtype: npt.DTypeLike = None) -> Self:
         """
-        Create a workspace seeded from an immutable reservoir state.
+        Creates a workspace seeded from an immutable reservoir state.
 
         :param state: The reservoir state to seed the workspace from.
         :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
@@ -271,7 +271,7 @@ class ReservoirWorkspace(typing.NamedTuple):
         dtype: npt.DTypeLike = None,
     ) -> ReservoirState:
         """
-        Return an independent snapshot of the current reservoir state.
+        Returns an independent snapshot of the current reservoir state.
 
         :param temperature: Reservoir temperature per cell - see `load_reservoir_state`.
         :param pore_volumes: Pore volume at the current pressure - see `load_reservoir_state`.
@@ -323,7 +323,7 @@ def build_reservoir_workspace(
 
 def load_hysteresis(workspace: HysteresisWorkspace, *, dtype: npt.DTypeLike = None) -> Hysteresis:
     """
-    Load an independent immutable snapshot of the current hysteresis history from a workspace.
+    Loads an independent immutable snapshot of the current hysteresis history from a workspace.
 
     :param workspace: The hysteresis workspace to snapshot.
     :param dtype: Output array dtype. `bores.precision.get_dtype()` if not given.
@@ -367,7 +367,7 @@ def load_reservoir_state(
     dtype: npt.DTypeLike = None,
 ) -> ReservoirState:
     """
-    Load an independent snapshot of the current reservoir state from a workspace.
+    Loads an independent snapshot of the current reservoir state from a workspace.
 
     :param workspace: The reservoir workspace to snapshot.
     :param temperature: Reservoir temperature per cell.

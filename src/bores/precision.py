@@ -18,7 +18,7 @@ _precision_context: ContextVar[npt.DTypeLike] = ContextVar("bores_precision", de
 
 def get_dtype() -> npt.DTypeLike:
     """
-    Get the current data precision type for used for computations in `BORES`.
+    Gets the current data precision type for used for computations in `BORES`.
 
     This defines the precision used in calculations.
 
@@ -32,7 +32,7 @@ get_precision = get_dtype
 
 def set_dtype(dtype: npt.DTypeLike) -> None:
     """
-    Set the default data precision type for `BORES` computations.
+    Sets the default data precision type for `BORES` computations.
 
     Useful for setting precision for current context.
 
@@ -60,14 +60,14 @@ def with_precision(dtype: npt.DTypeLike):
 
 def use_64bit_precision() -> None:
     """
-    Set the default data precision type to float64 for `BORES` computations.
+    Sets the default data precision type to float64 for `BORES` computations.
     """
     set_dtype(np.float64)
 
 
 def use_32bit_precision() -> None:
     """
-    Set the default data precision type to float32 for `BORES` computations.
+    Sets the default data precision type to float32 for `BORES` computations.
 
     Default precision for `BORES`.
     """
@@ -76,7 +76,7 @@ def use_32bit_precision() -> None:
 
 def get_floating_point_info() -> np.finfo[np.floating]:
     """
-    Get the floating point information for the current data type used in `BORES` computations.
+    Gets the floating point information for the current data type used in `BORES` computations.
 
     :return: The floating point information.
     """

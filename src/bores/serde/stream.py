@@ -122,7 +122,7 @@ class DataStream(typing.Generic[SerializableT]):
         queue_timeout: float = 1.0,
     ) -> None:
         """
-        Initialize data stream.
+        Initializes data stream.
 
         :param item_type: The `Serializable` subclass being streamed. Required
             even when `source` is given because `store`-only (replay) construction has
@@ -337,7 +337,7 @@ class DataStream(typing.Generic[SerializableT]):
             logger.debug("I/O worker thread exiting")
 
     def _check_io_error(self) -> None:
-        """Check if I/O thread encountered an error and raise it."""
+        """Checks if I/O thread encountered an error and raises it."""
         with self._saved_count_lock:
             if self._io_error is not None:
                 raise StreamError(
@@ -345,7 +345,7 @@ class DataStream(typing.Generic[SerializableT]):
                 ) from self._io_error
 
     def _wait_for_queue(self) -> None:
-        """Wait for all pending I/O operations to complete."""
+        """Waits for all pending I/O operations to complete."""
         if not self.background_io or self._io_queue is None:
             return
 
@@ -359,7 +359,7 @@ class DataStream(typing.Generic[SerializableT]):
         logger.debug("I/O queue drained successfully")
 
     def _stop_io_thread(self) -> None:
-        """Stop the I/O worker thread gracefully."""
+        """Stops the I/O worker thread gracefully."""
         if not self.background_io or self._io_thread is None:
             return
 
@@ -388,7 +388,7 @@ class DataStream(typing.Generic[SerializableT]):
 
     def __iter__(self) -> typing.Iterator[SerializableT]:
         """
-        Iterate over items, optionally persisting as we go.
+        Iterates over items, optionally persisting as we go.
 
         Yields items one at a time, accumulating in a batch buffer.
         When batch is full, flush to store and clear buffer.
@@ -552,7 +552,7 @@ class DataStream(typing.Generic[SerializableT]):
 
     def last(self) -> SerializableT | None:
         """
-        Get the last item from the stream.
+        Gets the last item from the stream.
 
         Iterates through the entire stream and returns the final item.
         Useful for quickly accessing only the end result of a simulation.
@@ -579,7 +579,7 @@ class DataStream(typing.Generic[SerializableT]):
 
     def drain(self) -> None:
         """
-        Drain/exhaust the entire stream without yielding items.
+        Returns drain/exhaust the entire stream without yielding items.
 
         This method iterates through all items, triggering any configured side effects
         (persistence, checkpointing, validation) without returning items. Useful when
@@ -623,7 +623,7 @@ class DataStream(typing.Generic[SerializableT]):
         validator: typing.Callable[[SerializableT], SerializableT] | None = None,
     ) -> typing.Iterator[SerializableT]:
         """
-        Load and iterate over previously saved items from the store.
+        Loads and iterate over previously saved items from the store.
 
         All filtering happens before any array data is deserialised, so skipped
         entries have no I/O cost. When both `indices` and `predicate` are
@@ -675,7 +675,7 @@ class DataStream(typing.Generic[SerializableT]):
         self, condition: typing.Callable[[SerializableT], bool]
     ) -> typing.Iterator[SerializableT]:
         """
-        Iterate over items, optionally persisting as we go, until `condition` evaluates to True.
+        Iterates over items, optionally persisting as we go, until `condition` evaluates to True.
 
         This is a wrapper around `__iter__`, allowing you to stream items until a stop criteria is met
 
@@ -693,7 +693,7 @@ class DataStream(typing.Generic[SerializableT]):
         self, condition: typing.Callable[[SerializableT], bool]
     ) -> typing.Iterator[SerializableT]:
         """
-        Iterate over items, optionally persisting as we go, as long `condition` evaluates to True.
+        Iterates over items, optionally persisting as we go, as long `condition` evaluates to True.
         Stop when `condition` evaluates to False.
 
         This is a wrapper around `__iter__`, allowing you to stream items
@@ -789,7 +789,7 @@ class DataStream(typing.Generic[SerializableT]):
 
     def get_pending_batch(self) -> list[SerializableT]:
         """
-        Get a copy of items in the current batch (not yet flushed to store).
+        Gets a copy of items in the current batch (not yet flushed to store).
 
         Useful for:
         - Inspecting what will be saved on next flush
@@ -802,7 +802,7 @@ class DataStream(typing.Generic[SerializableT]):
 
     def _estimate_item_size(self, item: SerializableT) -> float:
         """
-        Estimate memory footprint of a single item in MB.
+        Estimates memory footprint of a single item in MB.
 
         :param item: Item to measure
         :return: Estimated size in MB
@@ -840,7 +840,7 @@ class DataStream(typing.Generic[SerializableT]):
 
     def should_save(self, item: SerializableT) -> bool:
         """
-        Determine if item should be saved based on `save`.
+        Determines if item should be saved based on `save`.
 
         :param item: Item to evaluate
         :return: True if item should be saved, False otherwise
@@ -851,7 +851,7 @@ class DataStream(typing.Generic[SerializableT]):
 
     def should_flush(self) -> bool:
         """
-        Determine if batch should be flushed based on batch size and memory limits.
+        Determines if batch should be flushed based on batch size and memory limits.
 
         :return: True if batch should be flushed, False otherwise
         """
@@ -873,7 +873,7 @@ class DataStream(typing.Generic[SerializableT]):
 
     def should_checkpoint(self, item: SerializableT) -> bool:
         """
-        Determine if a checkpoint should be created after yielding `item`.
+        Determines if a checkpoint should be created after yielding `item`.
 
         Cadence is based on `self._yield_count` (how many items this stream
         has yielded so far), not any attribute of `item` itself - unlike
@@ -893,7 +893,7 @@ class DataStream(typing.Generic[SerializableT]):
 
     def save_checkpoint(self, item: SerializableT) -> None:
         """
-        Save a checkpoint for crash recovery.
+        Saves a checkpoint for crash recovery.
 
         Creates an entry in `checkpoint_store` that can be used to resume
         from this point later, via `checkpoint(index=...)`/`checkpoints()`.
@@ -920,7 +920,7 @@ class DataStream(typing.Generic[SerializableT]):
         predicate: typing.Callable[[EntryMeta], bool] | None = None,
     ) -> SerializableT:
         """
-        Load a specific checkpoint.
+        Loads a specific checkpoint.
 
         Exactly one of `index`/`predicate` must be given. `index` is
         `checkpoint_store`'s own insertion-order position among checkpoints
@@ -953,7 +953,7 @@ class DataStream(typing.Generic[SerializableT]):
 
     def checkpoints(self) -> typing.Generator[SerializableT, None, None]:
         """
-        Yield all checkpointed items in insertion order.
+        Yields all checkpointed items in insertion order.
 
         :return: Generator yielding checkpointed items.
         :raises `StreamError`: If checkpointing not configured
@@ -964,7 +964,7 @@ class DataStream(typing.Generic[SerializableT]):
 
     def list_checkpoints(self) -> list[EntryMeta]:
         """
-        List metadata for all available checkpoints, in insertion order.
+        Lists metadata for all available checkpoints, in insertion order.
 
         Each `EntryMeta.idx` is usable directly as `checkpoint(index=...)`;
         `EntryMeta.meta` holds whatever `meta` recorded for that item, if
@@ -979,7 +979,7 @@ class DataStream(typing.Generic[SerializableT]):
 
     def progress(self) -> StreamProgress:
         """
-        Get streaming progress statistics.
+        Gets streaming progress statistics.
 
         :return: Dictionary with progress metrics including:
             - yield_count: Total items yielded
@@ -1014,7 +1014,7 @@ class DataStream(typing.Generic[SerializableT]):
     @property
     def yield_count(self) -> int:
         """
-        Total number of items yielded (including replays).
+        Returns the total number of items yielded (including replays).
 
         :return: Count of yielded items
         """
@@ -1023,7 +1023,7 @@ class DataStream(typing.Generic[SerializableT]):
     @property
     def is_consumed(self) -> bool:
         """
-        Check if the underlying iterable has been exhausted.
+        Checks if the underlying iterable has been exhausted.
 
         Once consumed, the stream cannot be iterated again unless:
         1. A store was provided and contains data (will auto-replay)
@@ -1036,7 +1036,7 @@ class DataStream(typing.Generic[SerializableT]):
     @property
     def saved_count(self) -> int:
         """
-        Number of items saved to store so far.
+        Returns the number of items saved to store so far.
 
         :return: Count of saved items
         """
@@ -1045,7 +1045,7 @@ class DataStream(typing.Generic[SerializableT]):
     @property
     def checkpoints_count(self) -> int:
         """
-        Number of checkpoints created so far.
+        Returns the number of checkpoints created so far.
 
         :return: Count of checkpoints
         """

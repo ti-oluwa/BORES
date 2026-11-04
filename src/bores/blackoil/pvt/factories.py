@@ -40,7 +40,7 @@ def _resolve_gas(
     gas_gravity: Number | None,
 ) -> tuple[str, Number | None, PVTTable | None]:
     """
-    Resolve the *gas* argument used across all three correlation builders.
+    Resolves the *gas* argument used across all three correlation builders.
 
     Returns `(gas_name, gas_gravity, pvt_table)` where:
 
@@ -101,7 +101,7 @@ def get_gas_tables_from_pvt_table(
     dtype: npt.DTypeLike = None,
 ) -> dict[str, NumberArray[NDimension] | None]:
     """
-    Evaluate a gas `PVTTable` on a `(P, T)` meshgrid.
+    Evaluates a gas `PVTTable` on a `(P, T)` meshgrid.
 
     :param pvt_table: Source gas `PVTTable`.
     :param pressure: 2-D pressure grid, shape `(n_p, n_t)`.
@@ -155,7 +155,7 @@ def build_oil_pvt_data(
     **kwargs: typing.Any,
 ) -> PVTData:
     """
-    Build a `PVTData` for the oil phase using empirical correlations.
+    Builds a `PVTData` for the oil phase using empirical correlations.
 
     Missing primary tables (Bo, μo, Rs) are computed from correlations
     (Standing, Vazquez-Beggs, Beggs-Robinson). Missing derived tables
@@ -488,7 +488,7 @@ def build_gas_pvt_data(
     **kwargs: typing.Any,
 ) -> PVTData:
     """
-    Build a `PVTData` for the gas phase using empirical correlations.
+    Builds a `PVTData` for the gas phase using empirical correlations.
 
     Computes missing tables from correlations (DAK z-factor, Lee-Gonzalez-Eakin
     viscosity, etc.). Density is derived from `ρg = ρg,SC / Bg` (dry gas)
@@ -697,7 +697,7 @@ def build_water_pvt_data(
     **kwargs: typing.Any,
 ) -> PVTData:
     """
-    Build a `PVTData` for the water phase using empirical correlations.
+    Builds a `PVTData` for the water phase using empirical correlations.
 
     All property tables are 3-D with shape `(n_pressures, n_temperatures,
     n_salinities)`. Density is derived from `ρw = ρw,SC / Bw` when
@@ -913,7 +913,7 @@ def build_pvt_dataset(
     **kwargs: typing.Any,
 ) -> PVTDataSet:
     """
-    Build water, oil, and gas `PVTData` and return a `PVTDataSet`.
+    Builds water, oil, and gas `PVTData` and returns a `PVTDataSet`.
 
     Keyword arguments prefixed with `oil_`, `gas_`, or `water_` are
     forwarded to the appropriate phase builder after stripping the prefix.

@@ -97,7 +97,7 @@ US_TO_MAPUNITS: dict[UnitSystem, str] = {
 
 def detect_unit_system(deck_file: DeckFile) -> UnitSystem:
     """
-    Determine the grid geometry unit system from a parsed `DeckFile`.
+    Determines the grid geometry unit system from a parsed `DeckFile`.
 
     :param deck_file: Already-constructed `DeckFile`.
     :returns: The declared `bores.typing.UnitSystem`.
@@ -114,9 +114,9 @@ def detect_unit_system(deck_file: DeckFile) -> UnitSystem:
 
 def build_map_axes(deck_file: DeckFile) -> MapAxes | None:
     """
-    Construct a `MapAxes` from parsed `MAPAXES` / `MAPUNITS` keyword dicts.
+    Constructs a `MapAxes` from parsed `MAPAXES` / `MAPUNITS` keyword dicts.
 
-    Eclipse `MAPAXES` field order:
+    `MAPAXES` field order:
     `(Y-axis X, Y-axis Y, origin X, origin Y, X-axis X, X-axis Y)`.
 
     :param deck_file: Parsed deck.
@@ -172,7 +172,7 @@ HANDEDNESS_TO_DECK: dict[Handedness, str] = {
 
 def build_grid_orientation(deck_file: DeckFile) -> GridOrientation | None:
     """
-    Construct a `GridOrientation` from the parsed `GDORIENT` keyword.
+    Constructs a `GridOrientation` from the parsed `GDORIENT` keyword.
 
     :param deck_file: Parsed deck.
     :returns: The orientation, with defaults for any item the record leaves out, or `None` if
@@ -193,7 +193,7 @@ def build_grid_orientation(deck_file: DeckFile) -> GridOrientation | None:
 
 def warn_orientation_not_applied(orientation: GridOrientation) -> None:
     """
-    Warn that a non-default `GDORIENT` is recorded on the grid but does not change its geometry.
+    Warns that a non-default `GDORIENT` is recorded on the grid but does not change its geometry.
 
     :param orientation: The declared orientation.
     """
@@ -217,7 +217,7 @@ def warn_orientation_not_applied(orientation: GridOrientation) -> None:
 
 def get_deck_nnc_volume_factor(unit_system: UnitSystem) -> float:
     """
-    Factor that converts a deck's `NNC` transmissibility into the internal volume basis.
+    Returns factor that converts a deck's `NNC` transmissibility into the internal volume basis.
 
     A FIELD deck expresses reservoir volume in barrels (cP.rb/day/psi) while BORES uses cubic
     feet. METRIC (m3) and LAB (cm3) decks already match the internal volume unit.
@@ -238,7 +238,7 @@ def build_nnc_arrays(
     NumberArray[OneDimension] | None,
 ]:
     """
-    Convert parsed `NNC` keyword records to flat cell-index arrays.
+    Converts parsed `NNC` keyword records to flat cell-index arrays.
 
     Transmissibilities stay flow transmissibilities (they include the Darcy constant) and are
     only rescaled to the internal reservoir volume unit.
@@ -273,7 +273,7 @@ def build_nnc_arrays(
                     f"grid bounds ({nx}x{ny}x{nz})."
                 )
 
-        # Eclipse flat index: i fastest -> (i-1) + (j-1)*nx + (k-1)*nx*ny
+        # Flat index: i fastest -> (i-1) + (j-1)*nx + (k-1)*nx*ny
         c1 = (i1 - 1) + (j1 - 1) * nx + (k1 - 1) * nx * ny
         c2 = (i2 - 1) + (j2 - 1) * nx + (k2 - 1) * nx * ny
         pairs.append((c1, c2))
@@ -290,7 +290,7 @@ def build_nnc_arrays(
 
 def build_fault_records(deck_file: DeckFile) -> list[FaultRecord]:
     """
-    Convert parsed `FAULTS` keyword records to `FaultRecord` objects.
+    Converts parsed `FAULTS` keyword records to `FaultRecord` objects.
 
     :param deck_file: Parsed deck.
     :returns: List of `FaultRecord` in file order.
@@ -316,7 +316,7 @@ def build_fault_records(deck_file: DeckFile) -> list[FaultRecord]:
 
 def build_multflt(deck_file: DeckFile) -> dict[str, Number] | None:
     """
-    Convert parsed `MULTFLT` records to a `{name: multiplier}` dict.
+    Converts parsed `MULTFLT` records to a `{name: multiplier}` dict.
 
     :param deck_file: Parsed deck.
     :returns: Dict or `None` if `MULTFLT` is absent.
@@ -338,7 +338,7 @@ def resolve_cell_spacing(
     nx: Integer,
 ) -> npt.NDArray[np.float64] | None:
     """
-    Read the cell spacing along one axis as a `(nz, ny, nx)` array.
+    Reads the cell spacing along one axis as a `(nz, ny, nx)` array.
 
     The vector form (`DXV` / `DYV` / `DZV`, one value per cell along the axis) is preferred
     and broadcast over the other axes. Otherwise the per-cell form (`DX` / `DY` / `DZ`, one
@@ -378,7 +378,7 @@ def uniform_along_other_axes(
     spacing: npt.NDArray[np.float64], axis: str
 ) -> npt.NDArray[np.float64] | None:
     """
-    Reduce a `(nz, ny, nx)` spacing array to one value per cell along `axis`.
+    Reduces a `(nz, ny, nx)` spacing array to one value per cell along `axis`.
 
     :returns: The 1-D spacing, or `None` if it differs across the other two axes.
     """
@@ -397,7 +397,7 @@ def cartesian_corner_point_arrays(
     cell_thicknesses: npt.NDArray[np.float64],
 ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
     """
-    Build `COORD` and `ZCORN` for a block grid with vertical pillars.
+    Builds `COORD` and `ZCORN` for a block grid with vertical pillars.
 
     Corner depths are averaged over the cells meeting at each node so neighbouring cells
     share corners (a watertight grid), which reduces to flat-topped cells when the top
@@ -448,7 +448,7 @@ def load_grdecl(
     strict: bool = False,
 ) -> Grid:
     """
-    Load a GRDECL corner-point (or Cartesian) grid from a `DeckFile`, file path, raw
+    Loads a GRDECL corner-point (or Cartesian) grid from a `DeckFile`, file path, raw
     string, or bytes.
 
     Automatically detects whether `source` is a filesystem path or raw
@@ -519,7 +519,7 @@ def dump_grdecl(
     encoding: str = "ascii",
 ) -> str | None:
     """
-    Serialise a `Grid` to GRDECL text format.
+    Serialises a `Grid` to GRDECL text format.
 
     Emits all keywords that can be reconstructed from the grid object.
     The full set that may appear in the output is:
@@ -565,7 +565,7 @@ def assemble_grid(
     on_inverted_cells: InvertedCellPolicy | str = InvertedCellPolicy.RAISE,
 ) -> Grid:
     """
-    Assemble a `bores.grids.base.Grid` from a parsed `bores.deck.file`.
+    Assembles a `bores.grids.base.Grid` from a parsed `bores.deck.file`.
 
     :param deck_file: Parsed deck with grid dimensions resolved.
     :param metadata: Optional extra metadata for the returned grid.
@@ -638,7 +638,7 @@ def grid_geometry_requirements(
     is_corner_point: bool,
 ) -> dict[str, typing.Any]:
     """
-    The keywords a grid's geometry needs, as the `all_of`/`any_of` arguments of `find_missing`.
+    Returns the keywords a grid's geometry needs, as the `all_of`/`any_of` arguments of `find_missing`.
 
     :param is_corner_point: Whether the grid is corner-point (the deck has `COORD`) rather than
         Cartesian.
@@ -660,7 +660,7 @@ def assemble_corner_point_grid(
     on_inverted_cells: InvertedCellPolicy | str = InvertedCellPolicy.RAISE,
 ) -> Grid:
     """
-    Build a corner-point `bores.grids.base.Grid` from a parsed deck.
+    Builds a corner-point `bores.grids.base.Grid` from a parsed deck.
 
     :param deck_file: Parsed deck.
     :param nx: Grid extent in x.
@@ -725,7 +725,7 @@ def assemble_cartesian_grid(
     on_inverted_cells: InvertedCellPolicy | str = InvertedCellPolicy.RAISE,
 ) -> Grid:
     """
-    Build a `bores.grids.base.Grid` from `TOPS` / `DX` / `DY` / `DZ` (per-cell) or
+    Builds a `bores.grids.base.Grid` from `TOPS` / `DX` / `DY` / `DZ` (per-cell) or
     `DXV` / `DYV` / `DZV` (vector) keywords.
 
     A deck with uniform spacing, a flat top surface and every cell active becomes a
@@ -871,14 +871,14 @@ def build_grdecl_text(grid: Grid, *, actnum: ActNumArray | None = None) -> str:
 
 
 def _emit_specgrid(lines: list[str], nx: Integer, ny: Integer, nz: Integer) -> None:
-    """Append a `SPECGRID` block."""
+    """Appends a `SPECGRID` block."""
     lines.append("SPECGRID")
     lines.append(f"  {nx}  {ny}  {nz}  1  F /")
     lines.append("")
 
 
 def _emit_gridunit(lines: list[str], unit_system: UnitSystem) -> None:
-    """Append a `GRIDUNIT` block."""
+    """Appends a `GRIDUNIT` block."""
     unit_str = US_TO_GRIDUNIT.get(unit_system, "FEET")
     lines.append("GRIDUNIT")
     lines.append(f"  '{unit_str}  ' '        ' /")
@@ -886,7 +886,7 @@ def _emit_gridunit(lines: list[str], unit_system: UnitSystem) -> None:
 
 
 def _emit_gdorient(lines: list[str], orientation: GridOrientation) -> None:
-    """Append a `GDORIENT` block."""
+    """Appends a `GDORIENT` block."""
     lines.append("GDORIENT")
     lines.append(
         f"  {INDEX_DIRECTION_TO_DECK[orientation.i_direction]}"
@@ -899,8 +899,8 @@ def _emit_gdorient(lines: list[str], orientation: GridOrientation) -> None:
 
 
 def _emit_mapaxes(lines: list[str], map_axes: MapAxes) -> None:
-    """Append `MAPUNITS` and `MAPAXES` blocks."""
-    # Eclipse order for MAPAXES: Y-axis point, origin, X-axis point
+    """Appends `MAPUNITS` and `MAPAXES` blocks."""
+    # Order for MAPAXES: Y-axis point, origin, X-axis point
     my = map_axes.map_y_axis_point
     o = map_axes.origin
     mx = map_axes.map_x_axis_point
@@ -933,7 +933,7 @@ def _emit_actnum(
     ny: Integer,
     nz: Integer,
 ) -> None:
-    """Append an `ACTNUM` block in Eclipse Fortran order (i fastest)."""
+    """Appends an `ACTNUM` block in Fortran order (i fastest)."""
     actnum_array = np.asarray(actnum, dtype=np.int32)
     if actnum_array.size != nx * ny * nz:
         raise GridExportError(
@@ -957,7 +957,7 @@ def _emit_mult_array(
     ny: Integer,
     nz: Integer,
 ) -> None:
-    """Append a `MULT*` array block in Eclipse Fortran order (i fastest)."""
+    """Appends a `MULT*` array block in Fortran order (i fastest)."""
     lines.append("")
     lines.append(keyword)
     flat = (
@@ -976,7 +976,7 @@ def _emit_mult_arrays(
     ny: Integer,
     nz: Integer,
 ) -> None:
-    """Emit all non-`None` `MULT*` arrays from `grid`."""
+    """Emits all non-`None` `MULT*` arrays from `grid`."""
     pairs = [
         ("MULTX", grid.positive_x_transmissibility_multipliers),
         ("MULTX-", grid.negative_x_transmissibility_multipliers),
@@ -992,7 +992,7 @@ def _emit_mult_arrays(
 
 def _emit_faults(lines: list[str], grid: Grid, nx: Integer, ny: Integer) -> None:
     """
-    Append a `FAULTS` block to `lines` covering all named faults on the grid.
+    Appends a `FAULTS` block to `lines` covering all named faults on the grid.
 
     Each face in `grid.fault_face_indices` is looked up in `grid.face_cell_indices` to recover
     its two adjacent cells, which are converted to 1-based IJK and compared to infer the face
@@ -1016,12 +1016,12 @@ def _emit_faults(lines: list[str], grid: Grid, nx: Integer, ny: Integer) -> None
         i = flat % nx
         j = (flat // nx) % ny
         k = flat // (nx * ny)
-        # Add 1, to move from 0-based to 1-based indexing which Eclipse uses
+        # Add 1, to move from 0-based to 1-based indexing which decks use
         return (i + 1, j + 1, k + 1)
 
     def _fault_line(fault_name: str, label: str, cell_a: int, cell_b: int) -> str | None:
         """
-        One `FAULTS` record for the face between two adjacent cells, anchored on the
+        Returns one `FAULTS` record for the face between two adjacent cells, anchored on the
         lower-indexed cell and pointing to its positive side (`X`, `Y` or `Z`).
         """
         ai, aj, ak = _flat_to_ijk(cell_a)
@@ -1063,7 +1063,7 @@ def _emit_faults(lines: list[str], grid: Grid, nx: Integer, ny: Integer) -> None
 
 
 def _emit_multflt(lines: list[str], grid: Grid) -> None:
-    """Append a `MULTFLT` block from `grid.fault_transmissibility_multipliers`."""
+    """Appends a `MULTFLT` block from `grid.fault_transmissibility_multipliers`."""
     if not grid.fault_transmissibility_multipliers:
         return
     lines.append("")
@@ -1076,7 +1076,7 @@ def _emit_multflt(lines: list[str], grid: Grid) -> None:
 
 def _emit_nnc(lines: list[str], grid: Grid, nx: Integer, ny: Integer) -> None:
     """
-    Emit an `NNC` block with the flow transmissibility of every NNC, in the deck's volume unit.
+    Emits an `NNC` block with the flow transmissibility of every NNC, in the deck's volume unit.
     """
     if grid.nnc_cell_indices is None or grid.nnc_transmissibilities is None:
         return
@@ -1111,7 +1111,7 @@ def _emit_pinch(
     meta: typing.Mapping[str, typing.Any],
 ) -> None:
     """
-    Emit a `PINCH` block when the pinch tolerance is stored in metadata.
+    Emits a `PINCH` block when the pinch tolerance is stored in metadata.
 
     :param lines: Output text lines list.
     :param meta: Grid metadata mapping; reads `meta["pinch"]`.
@@ -1135,7 +1135,7 @@ def compute_cell_bounds_from_vertices(
     n_cells: int,
 ) -> tuple[NumberArray[TwoDimensions], NumberArray[TwoDimensions]]:
     """
-    Per-cell (min, max) over each cell's own vertices, walked via
+    Returns per-cell (min, max) over each cell's own vertices, walked via
     cell -> face -> vertex CSR connectivity.
 
     :param local_vertices: Shape `(n_vertices, 3)`.
@@ -1197,7 +1197,7 @@ def compute_local_cartesian_cell_bounds(
     grid: Grid, map_axes: MapAxes
 ) -> tuple[NumberArray[TwoDimensions], NumberArray[TwoDimensions]]:
     """
-    Recompute each cell's axis-aligned bounding box in local (pre-`MAPAXES`)
+    Recomputes each cell's axis-aligned bounding box in local (pre-`MAPAXES`)
     space, from the grid's (map-space) vertex positions.
 
     `grid.cell_min_xyz`/`grid.cell_max_xyz` can't be inverse-rotated
@@ -1235,7 +1235,7 @@ def compute_local_cartesian_cell_bounds(
 
 def build_grdecl_cartesian_text(grid: Grid, *, actnum: ActNumArray | None = None) -> str:
     """
-    Build a GRDECL text representation for a Cartesian grid.
+    Builds a GRDECL text representation for a Cartesian grid.
 
     Emits (in order): `SPECGRID`, `GRIDUNIT`, `MAPAXES` (if present),
     `TOPS`, `DXV`, `DYV`, `DZV`, `ACTNUM` (if present),
@@ -1287,7 +1287,7 @@ def build_grdecl_cartesian_text(grid: Grid, *, actnum: ActNumArray | None = None
         cell_min_xyz, cell_max_xyz = grid.cell_min_xyz, grid.cell_max_xyz
 
     # TOPS - use the top-layer cell minimum z values.
-    # Order: i fastest (Eclipse Fortran / C with transposed axes).
+    # Order: i fastest (Fortran order, or C order with transposed axes).
     top_layer_indices = [i + j * nx for j in range(ny) for i in range(nx)]
     tops_vals = cell_min_xyz[top_layer_indices, 2]
     lines.append("TOPS")
@@ -1335,7 +1335,7 @@ def build_grdecl_cartesian_text(grid: Grid, *, actnum: ActNumArray | None = None
 
 def build_grdecl_corner_point_text(grid: Grid, *, actnum: ActNumArray | None = None) -> str:
     """
-    Build a GRDECL text representation for a corner-point grid.
+    Builds a GRDECL text representation for a corner-point grid.
 
     Emits (in order): `SPECGRID`, `GRIDUNIT`, `MAPAXES` (if present),
     `COORD`, `ZCORN`, `ACTNUM` (if present),
@@ -1365,7 +1365,7 @@ def build_grdecl_corner_point_text(grid: Grid, *, actnum: ActNumArray | None = N
         _emit_mapaxes(lines, map_axes)
 
     # COORD (ny + 1, nx + 1, 6)
-    # Already in Eclipse COORD order, so we flatten and write as is
+    # Already in COORD order, so we flatten and write as is
     lines.append("COORD")
     flat_coord = coord.reshape(-1, 6)
     for row in flat_coord:
@@ -1375,7 +1375,7 @@ def build_grdecl_corner_point_text(grid: Grid, *, actnum: ActNumArray | None = N
     lines.append("")
 
     # ZCORN (nz*2, ny*2, nx*2)
-    # We flatten the 3D array; x vary fastest, and z slowest just as Eclipse writes it
+    # We flatten the 3D array; x vary fastest, and z slowest which is the order a deck writes it in
     lines.append("ZCORN")
     flat_zcorn = zcorn.ravel()
     for i in range(0, len(flat_zcorn), 6):

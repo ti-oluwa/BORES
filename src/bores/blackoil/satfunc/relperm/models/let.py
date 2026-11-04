@@ -125,7 +125,7 @@ def _let_relperm(
     T: Number,
 ) -> NumberArray[NDimension]:
     """
-    Core LET relative permeability formula (without endpoint scaling).
+    Returns core LET relative permeability formula (without endpoint scaling).
 
     Computes: S*^L / (S*^L + E * (1 - S*)^T)
 
@@ -153,7 +153,7 @@ def _let_relperm(
 def compute_let_curve_cell(
     normalized_saturation: Number, L: Number, E: Number, T: Number
 ) -> Number:
-    """LET relative permeability curve `S**L / (S**L + E * (1 - S)**T)` without endpoint scaling."""
+    """Returns LET relative permeability curve `S**L / (S**L + E * (1 - S)**T)` without endpoint scaling."""
     numerator = normalized_saturation**L
     denominator = numerator + E * (1.0 - normalized_saturation) ** T
     if denominator > 0.0:
@@ -166,7 +166,7 @@ def compute_let_curve_slope_cell(
     normalized_saturation: Number, L: Number, E: Number, T: Number, kr_max: Number
 ) -> Number:
     """
-    Derivative of the LET curve scaled by `kr_max` with respect to the normalized saturation.
+    Returns derivative of the LET curve scaled by `kr_max` with respect to the normalized saturation.
 
     The slope is zero at normalized saturations of 0 and 1.
     """
@@ -205,7 +205,7 @@ def compute_let_phase(
     minimum_mobile_pore_space: Number,
 ) -> tuple[Number, Number]:
     """
-    LET relative permeability of one phase and its slope with respect to the saturation of that
+    Returns LET relative permeability of one phase and its slope with respect to the saturation of that
     phase.
 
     :param numerator: Saturation of the phase above the lower end of its mobile range.
@@ -241,7 +241,7 @@ def compute_let_declining(
     minimum_mobile_pore_space: Number,
 ) -> tuple[Number, Number]:
     """
-    Unit-endpoint LET relative permeability of oil in a two-phase system, and its slope with
+    Returns unit-endpoint LET relative permeability of oil in a two-phase system, and its slope with
     respect to the saturation of the displacing phase (negative, since oil relative
     permeability falls as the displacing phase advances).
     """
@@ -285,7 +285,7 @@ def compute_let_water_wet_values(
     minimum_mobile_pore_space: Number,
     rule_minimum_mobile_pore_space: Number,
 ) -> tuple[Number, Number, Number]:
-    """LET relative permeabilities of a water-wet cell, before limiting and flooring."""
+    """Returns LET relative permeabilities of a water-wet cell, before limiting and flooring."""
     wL, wE, wT = water
     gL, gE, gT = gas
     owL, owE, owT = oil_water
@@ -368,7 +368,7 @@ def compute_let_oil_wet_values(
     minimum_mobile_pore_space: Number,
     rule_minimum_mobile_pore_space: Number,
 ) -> tuple[Number, Number, Number]:
-    """LET relative permeabilities of an oil-wet cell, before limiting and flooring."""
+    """Returns LET relative permeabilities of an oil-wet cell, before limiting and flooring."""
     wL, wE, wT = water
     gL, gE, gT = gas
     owL, owE, owT = oil_water
@@ -452,7 +452,7 @@ def compute_let_water_wet_cell(
     rule_minimum_mobile_pore_space: Number,
 ) -> CellRelPerm:
     """
-    LET relative permeabilities and derivatives of a water-wet cell.
+    Returns LET relative permeabilities and derivatives of a water-wet cell.
 
     Water and gas follow LET curves of their own saturation. Oil follows the three-phase mixing
     rule applied to the two-phase oil curves of the oil-water and gas-oil systems, and its
@@ -549,7 +549,7 @@ def compute_let_oil_wet_cell(
     rule_minimum_mobile_pore_space: Number,
 ) -> CellRelPerm:
     """
-    LET relative permeabilities and derivatives of an oil-wet cell.
+    Returns LET relative permeabilities and derivatives of an oil-wet cell.
 
     Oil is the wetting phase, so oil follows the oil-water LET curve of oil saturation and gas a
     LET curve of gas saturation. Water is the intermediate phase, so it follows the three-phase
@@ -665,7 +665,7 @@ def compute_let_values_cell(
     minimum_gas_relperm: Number,
 ) -> tuple[Number, Number, Number]:
     """
-    LET relative permeabilities of one cell.
+    Returns LET relative permeabilities of one cell.
 
     The saturations are scaled to sum to 1 when they differ from 1 by more than
     `saturation_epsilon`, and the results are limited to the range 0 to 1 and floored by the
@@ -796,7 +796,7 @@ def compute_let_derivatives_cell(
     minimum_gas_relperm: Number,
 ) -> tuple[Number, Number, Number, Number, Number, Number, Number, Number, Number]:
     """
-    LET partial derivatives of the relative permeabilities of one cell.
+    Returns LET partial derivatives of the relative permeabilities of one cell.
 
     The saturations are scaled in the same way as in `compute_let_values_cell`, so the
     derivatives belong to the same point as the values. A minimum of `NO_MINIMUM` means no floor.
@@ -939,7 +939,7 @@ def compute_let_values_loop(
     gas_relperm: NumberArray[OneDimension],
 ) -> None:
     """
-    Compute the LET relative permeabilities of `size` cells in parallel and write them
+    Computes the LET relative permeabilities of `size` cells in parallel and writes them
     to the output arrays.
 
     Per-cell inputs are flat arrays, or a single value shared by every cell.
@@ -1012,7 +1012,7 @@ def compute_let_derivatives_loop(
     dkrg_dsg: NumberArray[OneDimension],
 ) -> None:
     """
-    Compute the LET relative permeability derivatives of `size` cells in parallel and
+    Computes the LET relative permeability derivatives of `size` cells in parallel and
     write them to the output arrays.
 
     Per-cell inputs are flat arrays, or a single value shared by every cell.
@@ -1079,7 +1079,7 @@ def compute_let_relative_permeabilities_compiled(
     minimum_gas_relperm: Number | None = None,
 ) -> tuple[NumberOrArray[NDimension], NumberOrArray[NDimension], NumberOrArray[NDimension]]:
     """
-    LET relative permeabilities computed by the compiled parallel loop, for the
+    Returns LET relative permeabilities computed by the compiled parallel loop, for the
     built-in mixing rule identified by `rule_id`.
 
     The parameters match `compute_let_relative_permeabilities`, with the mixing rule replaced by
@@ -1180,7 +1180,7 @@ def compute_let_relative_permeability_derivatives_compiled(
     minimum_gas_relperm: Number | None = None,
 ) -> RelativePermeabilityDerivatives:
     """
-    LET relative permeability derivatives computed by the compiled parallel loop, for
+    Returns LET relative permeability derivatives computed by the compiled parallel loop, for
     the built-in mixing rule identified by `rule_id`.
 
     The parameters match `compute_let_relative_permeability_derivatives`, with the mixing rule
@@ -1316,7 +1316,7 @@ def compute_let_values_and_derivatives_cell(
     Number, Number, Number, Number, Number, Number, Number, Number, Number, Number, Number, Number
 ]:
     """
-    LET relative permeabilities and all nine partial derivatives of one cell, from a
+    Returns LET relative permeabilities and all nine partial derivatives of one cell, from a
     single evaluation of the underlying two-phase curves and mixing rule.
 
     The results are identical to `compute_let_values_cell` and
@@ -1488,7 +1488,7 @@ def compute_let_values_and_derivatives_loop(
     dkrg_dsg: NumberArray[OneDimension],
 ) -> None:
     """
-    Compute the LET relative permeabilities and all nine derivatives of `size` cells in
+    Computes the LET relative permeabilities and all nine derivatives of `size` cells in
     parallel and write them to the output arrays.
 
     Per-cell inputs are flat arrays, or a single value shared by every cell.
@@ -1558,7 +1558,7 @@ def compute_let_relative_permeabilities_and_derivatives_compiled(
     minimum_gas_relperm: Number | None = None,
 ) -> tuple[RelativePermeabilities, RelativePermeabilityDerivatives]:
     """
-    LET relative permeabilities and derivatives computed together by the compiled
+    Returns LET relative permeabilities and derivatives computed together by the compiled
     parallel loop, for the built-in mixing rule identified by `rule_id`.
 
     The parameters match `compute_let_relative_permeability_derivatives_compiled`. The
@@ -1722,7 +1722,7 @@ def compute_let_relative_permeabilities(
     minimum_gas_relperm: Number | None = None,
 ) -> tuple[NumberOrArray[NDimension], NumberOrArray[NDimension], NumberOrArray[NDimension]]:
     """
-    Compute three-phase relative permeabilities using the LET correlation.
+    Computes three-phase relative permeabilities using the LET correlation.
 
     The LET (Lomeland-Ebeltoft-Thomas) model uses three curve-shape parameters
     (L, E, T) per phase-pair, providing more flexibility than the single Corey
@@ -2084,7 +2084,7 @@ def compute_let_curve_slope_wrt_normalized_saturation(
     kr_max: Number,
 ) -> NumberArray[NDimension]:
     """
-    Analytical derivative of the LET relative permeability curve with
+    Returns analytical derivative of the LET relative permeability curve with
     respect to normalized (effective) saturation.
 
     The LET curve is:
@@ -2132,7 +2132,7 @@ def compute_let_phase_curve(
     zeros: NumberArray[NDimension],
 ) -> tuple[NumberArray[NDimension], NumberArray[NDimension]]:
     """
-    LET relative permeability of one phase and its slope with respect to the
+    Returns LET relative permeability of one phase and its slope with respect to the
     saturation of that phase.
 
     The relative permeability is `maximum_relperm` times the LET curve of the
@@ -2186,7 +2186,7 @@ def compute_let_declining_curve(
     zeros: NumberArray[NDimension],
 ) -> tuple[NumberArray[NDimension], NumberArray[NDimension]]:
     """
-    Unit-endpoint LET relative permeability of oil in a two-phase system, and its
+    Returns unit-endpoint LET relative permeability of oil in a two-phase system, and its
     slope with respect to the saturation of the displacing phase.
 
     Oil relative permeability falls as the displacing phase advances, so the slope is
@@ -2249,7 +2249,7 @@ def compute_let_water_wet_system(
     zeros: NumberArray[NDimension],
 ) -> WettabilitySystem:
     """
-    LET relative permeabilities and derivatives of a water-wet system.
+    Returns LET relative permeabilities and derivatives of a water-wet system.
 
     Water and gas follow LET curves of their own saturation. Oil follows the
     three-phase mixing rule applied to the two-phase oil curves of the oil-water and
@@ -2377,7 +2377,7 @@ def compute_let_oil_wet_system(
     zeros: NumberArray[NDimension],
 ) -> WettabilitySystem:
     """
-    LET relative permeabilities and derivatives of an oil-wet system.
+    Returns LET relative permeabilities and derivatives of an oil-wet system.
 
     Oil is the wetting phase, so oil follows the oil-water LET curve of oil saturation
     and gas a LET curve of gas saturation. Water is the intermediate phase, so it
@@ -2512,7 +2512,7 @@ def compute_let_relative_permeability_derivatives(
     minimum_gas_relperm: Number | None = None,
 ) -> RelativePermeabilityDerivatives:
     """
-    Compute all nine partial derivatives of the three-phase relative permeabilities
+    Computes all nine partial derivatives of the three-phase relative permeabilities
     with respect to water, oil and gas saturation using the LET model.
 
     The two-phase LET derivatives are computed analytically through the effective
@@ -2834,7 +2834,7 @@ class LETThreePhaseRelPermTable(RelativePermeabilityTable):
         NumberOrArray[NDimension],
     ]:
         """
-        Endpoint saturations for an evaluation: each argument if given, otherwise the value set
+        Returns endpoint saturations for an evaluation: each argument if given, otherwise the value set
         on the model.
 
         :param irreducible_water_saturation: Irreducible water saturation, or `None` to use the
@@ -2897,7 +2897,7 @@ class LETThreePhaseRelPermTable(RelativePermeabilityTable):
         **kwargs: typing.Any,
     ) -> tuple[RelativePermeabilities, RelativePermeabilityDerivatives]:
         """
-        Compute the relative permeabilities and all nine partial derivatives together.
+        Computes the relative permeabilities and all nine partial derivatives together.
 
         The results are the same as calling `evaluate` and `derivatives` separately. For the
         built-in mixing rules the two share one pass over the cells, which is about as fast as
@@ -2984,7 +2984,7 @@ class LETThreePhaseRelPermTable(RelativePermeabilityTable):
         **kwargs: typing.Any,
     ) -> RelativePermeabilities:
         """
-        Compute relative permeabilities for water, oil, and gas using the
+        Computes relative permeabilities for water, oil, and gas using the
         LET correlation.
 
         Supports both scalar and array inputs for saturations.
@@ -3051,7 +3051,7 @@ class LETThreePhaseRelPermTable(RelativePermeabilityTable):
         **kwargs: typing.Any,
     ) -> RelativePermeabilityDerivatives:
         """
-        Compute all nine partial derivatives of the three-phase relative
+        Computes all nine partial derivatives of the three-phase relative
         permeabilities with respect to water saturation, oil saturation, and
         gas saturation using the LET model.
 

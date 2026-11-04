@@ -1,7 +1,7 @@
 """
 SCHEDULE section keyword implementations.
 
-The SCHEDULE section is the last section of an Eclipse black-oil deck. It
+The SCHEDULE section is the last section of a black-oil deck. It
 advances simulated time (`DATES` / `TSTEP`) and defines/controls wells and
 groups as the run proceeds. Unlike the GRID/PROPS sections, most SCHEDULE
 keywords are *time-ordered events* rather than static data: the same well
@@ -118,7 +118,7 @@ class TStepKeyword(Keyword[list[float]]):
     thirty entries of `30.0`.
 
     Multiple `TSTEP` blocks in the same deck are concatenated in file
-    order, consistent with Eclipse semantics.
+    order, following the deck's semantics.
 
     `parse` returns a `List[float]`, or `None` when the keyword
     is absent.
@@ -217,7 +217,7 @@ WELSPECS = ScheduledRecordKeyword[str | float | bool](
 - declare a well's name, parent group, surface location, and defaults.
 
 Multiple `WELSPECS` blocks in the same deck are concatenated in file
-order (a deck typically only declares each well once, but Eclipse permits
+order (a deck typically only declares each well once, but a deck may repeat it
 later blocks to add more wells as drilling progresses).
 
 Fields:
@@ -295,15 +295,15 @@ Fields:
 - `saturation_table`: saturation table number override (`0` = use
   the cell's `SATNUM`).
 - `connection_factor`: explicit transmissibility/connection factor;
-  `None` means Eclipse computes it from geometry and `PERMX`/`PERMY`.
+  `None` means it is computed from geometry and `PERMX`/`PERMY`.
 - `diameter`: wellbore diameter at this connection.
 - `kh`: explicit permeability-thickness product;
-  `None` means Eclipse computes it from the grid.
+  `None` means it is computed from the grid.
 - `skin`: mechanical skin factor.
 - `d_factor`: non-Darcy (rate-dependent) skin factor.
 - `direction`: completion direction (`X`, `Y`, or `Z`).
 - `pressure_equivalent_radius`: pressure-equivalent radius of the connection's grid
-  block; `None` means Eclipse computes it from the grid.
+  block; `None` means it is computed from the grid.
 """
 
 WELSEGS = HeaderedScheduledRecordKeyword(
@@ -376,7 +376,7 @@ Header fields:
 - `tubing_length_to_first_segment`: along-hole length from the wellhead
   to the first segment node (deck item 3, `TLEN1`).
 - `first_segment_volume`: wellbore volume of the first segment
-  (deck item 4, `VOL1`); `None` means Eclipse computes it from geometry.
+  (deck item 4, `VOL1`); `None` means it is computed from geometry.
 - `length_depth_mode`: `INC`: each segment record's own
   `length`/`depth_change` are relative to its outlet segment. `ABS`:
   they're cumulative from the first segment node instead.
@@ -410,9 +410,9 @@ Segment record fields:
 - `diameter` / `roughness`: tubing inner diameter and absolute
   roughness for this segment.
 - `cross_sectional_area`: flow area of this segment; `None` means
-  Eclipse computes it from `diameter`.
+  it is computed from `diameter`.
 - `volume`: wellbore volume of this segment; `None`
-  means Eclipse computes it from the area and length.
+  means it is computed from the area and length.
 - `length_x` / `length_y`: extent of the segment in the X and Y directions; `None` if omitted.
 - `pipe_wall_area`: cross-sectional area of this segment's pipe wall (thermal runs); `None` if
   omitted.
@@ -461,14 +461,14 @@ Detail fields:
 - `branch`: which `WELSEGS` branch this connection maps
   onto; only `1` (the main bore) is supported by `load_well_segments` today.
 - `start_length` / `end_length`: along-branch length where this
-  connection starts/ends. `None` (`1*`) means Eclipse would derive it
+  connection starts/ends. `None` (`1*`) means it would be derived
   from the connection's own grid-block geometry; `load_well_segments`
   requires both explicitly instead of attempting that derivation.
 - `penetration_direction`: direction in which the well penetrates the connection's cell (`X`,
   `Y` or `Z`); needed when `start_length` and `end_length` are defaulted; `None` if omitted.
 - `end_cell_index`: index, along `penetration_direction`, of the last cell a connection spanning
   several cells penetrates; `None` if omitted.
-- `connection_center_depth`: depth of the centre of the connection; `None` means Eclipse derives
+- `connection_center_depth`: depth of the centre of the connection; `None` means it is derived
   it.
 - `thermal_contact_length`: length of the connection over which it exchanges heat with its
   segment (thermal runs); `None` if omitted.
@@ -522,7 +522,7 @@ Fields:
 
 - `well`: well name.
 - `status`: `OPEN`, `SHUT`, `STOP`, or `AUTO`.
-- `control_mode`: the constraint Eclipse actively controls the well
+- `control_mode`: the constraint that actively controls the well
   by (e.g. `ORAT`, `WRAT`, `GRAT`, `LRAT`, `RESV`, `BHP`, `THP`,
   `GRUP`); `None` is only valid if the well is shut/stopped.
 - `oil_rate` / `water_rate` / `gas_rate` / `liquid_rate`: oil/water/gas/liquid rate
@@ -589,7 +589,7 @@ Fields:
 - `well`: well name.
 - `injector_type`: injected fluid: `WATER`, `GAS`, `OIL`, or `MULTI`.
 - `status`: `OPEN`, `SHUT`, `STOP`, or `AUTO`.
-- `control_mode`: the constraint Eclipse actively controls the well
+- `control_mode`: the constraint that actively controls the well
   by (`RATE`, `RESV`, `BHP`, `THP`, or `GRUP`).
 - `rate`: surface injection rate upper-limit target.
 - `reservoir_volume_rate`: reservoir-volume injection rate upper-limit target.
@@ -598,7 +598,7 @@ Fields:
 - `vfp_table`: VFP table number for THP-to-BHP conversion
   (`0` = none assigned).
 - `vaporized_oil_concentration`: vaporized oil concentration (`Rv`) of the injected
-  gas; `None` means Eclipse uses its default.
+  gas; `None` means the default applies.
 - `gas_steam_ratio`: gas/steam ratio of the injected stream (thermal runs). `0.0` if omitted.
 - `surface_oil_fraction`: fraction of oil, by surface volume, in the injected stream. `0.0` if
   omitted.
@@ -1071,7 +1071,7 @@ Fields:
 - `available_for_group_control`: whether the well may participate in
   automatic group control (`YES`/`NO`, returned as a `bool`); `True` if omitted.
 - `guide_rate`: explicit guide rate used when allocating
-  group targets; `None` means Eclipse computes or inherits the guide rate.
+  group targets; `None` means the guide rate is computed or inherited.
 - `guide_rate_phase`: phase used for the guide rate (`OIL`,
   `WAT`, `GAS`, `LIQ`, `RES`, `COMB`, `WGA`, `CVAL`, `RAT`, `FORM`, or `UNDEFINED`).
 - `scaling_factor`: multiplier applied to the guide rate. `1.0` if omitted.
@@ -1106,8 +1106,8 @@ GECON = ScheduledRecordKeyword[str | float | bool](
 `GECON 'GROUP' [min_oil_rate] [min_gas_rate] [max_water_cut] [max_gor] [max_wgr] [workover_procedure] [end_run] / ... /`
 - define economic operating limits for an entire production group.
 
-When one of the specified limits is exceeded, Eclipse performs the selected
-workover action on wells within the group. These limits are analogous to
+When one of the specified limits is exceeded, the selected
+workover action is performed on wells within the group. These limits are analogous to
 `WECON`, but apply collectively to all wells in the group.
 
 Fields:
@@ -1228,7 +1228,7 @@ Fields:
 - `well`: well name.
 - `status`: well status (`OPEN`, `SHUT`, `STOP`, or `AUTO`).
 - `control_mode`: historical control mode (`ORAT`, `WRAT`, `GRAT`, `LRAT`,
-  `RESV`, or `BHP`). Required; Eclipse does not allow it to be defaulted.
+  `RESV`, or `BHP`). Required; it cannot be defaulted.
 - `oil_rate`: observed oil production rate.
 - `water_rate`: observed water production rate.
 - `gas_rate`: observed gas production rate.
@@ -1352,7 +1352,7 @@ WLIFT = ScheduledRecordKeyword[str | float](
 - re-tubing, THP and lift-switching workover: replace a well's VFP table and artificial lift
 quantity once a trigger is met.
 
-Item order and defaults follow OPM Flow's `WLIFT`.
+Item order and defaults follow the `WLIFT` keyword.
 
 Fields:
 
@@ -1489,7 +1489,7 @@ class VFPKeyword(Keyword[list[VFPProducerDeckTable] | list[VFPInjectorDeckTable]
 
     def parse_table(self, body: str) -> VFPProducerDeckTable | VFPInjectorDeckTable:
         """
-        Parse one table's body.
+        Parses one table's body.
 
         :param body: The text between this occurrence's keyword line and the next keyword.
         :returns: The table as declared.
@@ -1748,7 +1748,7 @@ at:
 ```
 
 An item left out (or written `1*`) takes the default shown below; `5*` leaves five items at their
-default. Defaults for times and pressures are OPM's metric values (days, bar). Three items have no
+default. Defaults for times and pressures are the metric values (days, bar). Three items have no
 default and are `None` when left out: `maximum_time_step_after_well_change`, `target_surfactant_change` and `tolerated_pressure_change_per_time_step`.
 
 Record 1, `time_step` (times in the deck's time unit):
@@ -1794,7 +1794,7 @@ Record 3, `iteration`:
 
 An occurrence with fewer than three records is reported, and the missing ones are read as empty.
 
-The field names spell out what Eclipse abbreviates. In the order the items are written, the Eclipse
+The field names spell out what the deck abbreviates. In the order the items are written, the deck
 names are: `TSINIT TSMAXZ TSMINZ TSMCHP TSFMAX TSFMIN TSFCNV TFDIFF THRUPT TMAXWC` (record 1),
 `TRGTTE TRGCNV TRGMBE TRGLCV XXXTTE XXXCNV XXXMBE XXXLCV XXXWFL TRGFIP TRGSFT THIONX TRWGHT`
 (record 2) and `NEWTMX NEWTMN LITMAX LITMIN MXWSIT MXWPIT DDPLIM DDSLIM TRGDPR XXXDPR MNWRFP`

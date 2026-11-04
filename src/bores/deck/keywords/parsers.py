@@ -3,7 +3,7 @@ Reusable value parsers for `bores.deck.keywords.base.Field.type`.
 
 A keyword's job is to read a deck, not to judge it, so most fields use a plain
 `int` or `float`. The parsers here cover the few cases where a plain conversion
-is not enough: values that Eclipse accepts in several spellings, or values that
+is not enough: values a deck accepts in several spellings, or values that
 only make sense inside a fixed range.
 """
 
@@ -33,9 +33,9 @@ an end-point saturation, which is not an input error.
 
 def uppercase(value: typing.Any) -> str:
     """
-    Convert a raw token to upper case, dropping padding spaces from quoted values.
+    Converts a raw token to upper case, dropping padding spaces from quoted values.
 
-    Eclipse keyword options are case-insensitive, so every option-valued field
+    Keyword options are case-insensitive, so every option-valued field
     runs its token through this before it is checked against the field's options.
 
     :param value: Raw token.
@@ -46,7 +46,7 @@ def uppercase(value: typing.Any) -> str:
 
 def yes_no(value: typing.Any) -> bool:
     """
-    Convert an Eclipse `YES` / `NO` token to a `bool`.
+    Converts a deck `YES` / `NO` token to a `bool`.
 
     :param value: Raw token, or an already converted `bool`.
     :returns: `True` for `YES`, `False` for `NO`.
@@ -65,7 +65,7 @@ def yes_no(value: typing.Any) -> bool:
 
 def fraction(value: typing.Any) -> np.float64:
     """
-    Convert a raw token to a float that must lie in `[0, 1]`.
+    Converts a raw token to a float that must lie in `[0, 1]`.
 
     Used by saturation and relative permeability columns, where a value outside
     that range can only be a typo or a column in the wrong place.
@@ -83,9 +83,9 @@ def fraction(value: typing.Any) -> np.float64:
 
 def fault_face(value: typing.Any) -> str:
     """
-    Convert a fault face token to the `X`, `X-`, `Y`, `Y-`, `Z`, `Z-` spelling.
+    Converts a fault face token to the `X`, `X-`, `Y`, `Y-`, `Z`, `Z-` spelling.
 
-    Eclipse accepts `I`, `J` and `K` as synonyms for `X`, `Y` and `Z`, and a
+    A deck accepts `I`, `J` and `K` as synonyms for `X`, `Y` and `Z`, and a
     trailing `+` on the positive faces.
 
     :param value: Raw token.
@@ -99,9 +99,9 @@ def fault_face(value: typing.Any) -> str:
 
 def preferred_phase(value: typing.Any) -> str:
     """
-    Convert a well preferred phase token to `OIL`, `WATER`, `GAS` or `LIQ`.
+    Converts a well preferred phase token to `OIL`, `WATER`, `GAS` or `LIQ`.
 
-    Eclipse accepts `WAT` as a short form of `WATER`.
+    A deck accepts `WAT` as a short form of `WATER`.
 
     :param value: Raw token.
     :returns: The phase name, with `WAT` expanded to `WATER`.

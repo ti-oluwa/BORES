@@ -102,7 +102,7 @@ class DataStore(ABC, typing.Generic[SerializableT, HandleT]):
     @abstractmethod
     def open(self, **kwargs: typing.Any) -> None:
         """
-        Open the underlying storage and attach the handle to `self._handle`.
+        Opens the underlying storage and attaches the handle to `self._handle`.
 
         Subsequent calls to `dump`, `load`, `append`, and `entries`
         will use this handle instead of opening the file themselves.
@@ -115,7 +115,7 @@ class DataStore(ABC, typing.Generic[SerializableT, HandleT]):
     @abstractmethod
     def close(self) -> None:
         """
-        Flush and release the persistent handle (`self._handle`).
+        Flushes and release the persistent handle (`self._handle`).
 
         After this call `self._handle` must be `None`. It is safe to call
         `close()` when no handle is open.
@@ -154,7 +154,7 @@ class DataStore(ABC, typing.Generic[SerializableT, HandleT]):
         meta: typing.Callable[[SerializableT], dict[str, typing.Any]] | None = None,
     ) -> None:
         """
-        Persist *data*, always overwriting any existing content in the store.
+        Persists *data*, always overwriting any existing content in the store.
 
         Every item in *data* is written in iteration order. If the backing
         file or directory already exists it is truncated first, so calling
@@ -183,7 +183,7 @@ class DataStore(ABC, typing.Generic[SerializableT, HandleT]):
         validator: DataValidator[SerializableT] | None = None,
     ) -> typing.Generator[SerializableT, None, None]:
         """
-        Load and yield items from the store in insertion order.
+        Loads and yield items from the store in insertion order.
 
         Filtering is applied before any array data is deserialised, so entries
         that do not match have no I/O cost beyond reading their metadata.
@@ -211,7 +211,7 @@ class DataStore(ABC, typing.Generic[SerializableT, HandleT]):
         meta: typing.Callable[[SerializableT], dict[str, typing.Any]] | None = None,
     ) -> EntryMeta:
         """
-        Append a single item to the store without rewriting existing entries.
+        Appends a single item to the store without rewriting existing entries.
 
         The item is assigned the next available insertion-order index. Unlike
         `dump`, existing entries are never touched. Backends that do not
@@ -238,7 +238,7 @@ class DataStore(ABC, typing.Generic[SerializableT, HandleT]):
     @abstractmethod
     def entries(self) -> list[EntryMeta]:
         """
-        Return metadata for every stored item in insertion order.
+        Returns metadata for every stored item in insertion order.
 
         This method must not deserialise any payload data. Implementations
         should read only group names, file keys, and lightweight attributes,
@@ -252,12 +252,12 @@ class DataStore(ABC, typing.Generic[SerializableT, HandleT]):
 
     @abstractmethod
     def flush(self) -> None:
-        """Flush the data store clean. Clear every data item stored."""
+        """Flushes the data store clean. Clear every data item stored."""
         ...
 
     def count(self) -> int:
         """
-        Return the number of items currently stored.
+        Returns the number of items currently stored.
 
         Delegates to `entries()` and returns its length. No payload data is
         deserialised.
@@ -268,7 +268,7 @@ class DataStore(ABC, typing.Generic[SerializableT, HandleT]):
 
     def max_index(self) -> int | None:
         """
-        Return the highest insertion-order index in the store, or `None` if empty.
+        Returns the highest insertion-order index in the store, or `None` if empty.
 
         Useful for targeting the last written entry via
         `store.load(typ, indices=[store.max_index()])` without replaying
@@ -288,7 +288,7 @@ def validate_path(
     create_if_not_exists: bool = False,
 ) -> Path:
     """
-    Validate and normalize a filepath for state storage.
+    Validates and normalizes a filepath for state storage.
 
     :param filepath: Path to validate
     :param expected_extension: Expected file extension (e.g., '.pkl', '.h5', '.npz')
@@ -363,7 +363,7 @@ def _get_group_name(index: int) -> str:
 
 
 def _get_index_from_group_name(name: str) -> int | None:
-    """Parse group name of form `entry_NNNNNNNNNN` to integer index, or `None` if not our format."""
+    """Parses group name of form `entry_NNNNNNNNNN` to integer index, or `None` if not our format."""
     if name.startswith("entry_") and len(name) == 16:
         try:
             return int(name[6:])
@@ -403,7 +403,7 @@ class StoreSerializable(Serializable):
     @classmethod
     def read(cls, store: DataStore[Self, typing.Any], **load_kwargs: typing.Any) -> Self | None:
         """
-        Read and load a `Serializable` instance from a `DataStore`.
+        Reads and loads a `Serializable` instance from a `DataStore`.
 
         :param store: `DataStore` to load the `Serializable` from.
         :return: Loaded `Serializable` instance.
@@ -412,7 +412,7 @@ class StoreSerializable(Serializable):
 
     def save(self, store: DataStore[Self, typing.Any], **dump_kwargs: typing.Any) -> None:
         """
-        Dump and save the `Serializable` instance to a `DataStore`.
+        Dumps and saves the `Serializable` instance to a `DataStore`.
 
         :param store: `DataStore` to dump the `Serializable` to.
         """

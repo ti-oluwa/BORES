@@ -114,7 +114,7 @@ def _rk4_march(
     dtype: npt.DTypeLike = None,
 ) -> tuple[npt.NDArray, npt.NDArray]:
     """
-    Integrate `dP/dz = gradient_factor * density_fn(pressure, depth)` from `reference_depth` to
+    Integrates `dP/dz = gradient_factor * density_fn(pressure, depth)` from `reference_depth` to
     `endpoint_depth` via fixed-step RK4.
 
     :returns: `(depths, pressures)`, both ascending in depth and spanning
@@ -173,7 +173,7 @@ def integrate_hydrostatic_pressure(
     bind_depths: DepthBinder | None = None,
 ) -> tuple[npt.NDArray, npt.NDArray]:
     """
-    Integrate `dP/dz = gradient_factor * density_fn(pressure, depth)` from `reference_depth`
+    Integrates `dP/dz = gradient_factor * density_fn(pressure, depth)` from `reference_depth`
     to `endpoint_depth`, at the same depths a fixed-step RK4 march with `step` would visit.
 
     The pressure at every depth is solved for together, so `density_fn` is called a handful of
@@ -293,7 +293,7 @@ def _march_full_range(
     bind_depths: DepthBinder | None = None,
 ) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension]]:
     """
-    March `density_fn` outward from `reference_depth` in both directions, covering
+    Returns march `density_fn` outward from `reference_depth` in both directions, covering
     `[min_depth, max_depth]` in one sorted, concatenated profile.
     """
     depths_up, pressures_up = integrate_hydrostatic_pressure(
@@ -437,7 +437,7 @@ def invert_capillary_pressure_curves(
     curve_index: IntArray[OneDimension] | None = None,
 ) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension]]:
     """
-    Find the saturation at which each capillary pressure curve reaches its target pressure.
+    Finds the saturation at which each capillary pressure curve reaches its target pressure.
 
     Every row of the two grids is one monotonic `Pc(saturation)` curve, sampled at the same
     points. A target above the curve's highest pressure gives the saturation at the
@@ -529,7 +529,7 @@ def invert_curves_per_cell(
     dtype: npt.DTypeLike,
 ) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension]]:
     """
-    Invert a capillary pressure curve for every cell, evaluating each distinct curve once.
+    Inverts a capillary pressure curve for every cell, evaluating each distinct curve once.
 
     :param curve_ids: Distinct curve of each cell, see `index_unique_endpoints`.
     :param unique_endpoints: Endpoint saturations of every distinct curve.
@@ -588,7 +588,7 @@ def get_saturations_from_capillary_pressure(
     saturation_samples: Integer = N_SATURATION_SAMPLES,
 ) -> CapillarySaturations:
     """
-    Recover `Sw(z)` and `Sg(z)` from the capillary pressure the fluids sit at, which gives a
+    Recovers `Sw(z)` and `Sg(z)` from the capillary pressure the fluids sit at, which gives a
     smooth transition zone instead of a sharp step at each contact.
 
     The oil-water capillary pressure of a cell is `Po(z) - Pw(z)` and the gas-oil capillary
@@ -1419,7 +1419,7 @@ def average_equilibrium_samples(
     sample_weights: NumberArray[TwoDimensions],
 ) -> EquilibriumArrays:
     """
-    Combine the samples taken through the thickness of each cell into one value per cell.
+    Combines the samples taken through the thickness of each cell into one value per cell.
 
     Pressure and saturations are averaged with the given sample weights. The gas dissolved in
     oil (`solution_gor` and `oil_bubble_point_pressure`) only exists where there is oil, so those
@@ -1473,7 +1473,7 @@ def initialize_horizontal_subdivision_equilibrium(
     **kwargs: typing.Any,
 ) -> EquilibriumArrays:
     """
-    Vertical-equilibrium averaging via `N` horizontal sub-divisions per cell
+    Returns vertical-equilibrium averaging via `N` horizontal sub-divisions per cell
     (`region.accuracy_flag > 0`).
 
     Samples `N` depths between each cell's top/bottom (from the grid's
@@ -1517,7 +1517,7 @@ def initialize_tilted_subdivision_equilibrium(
     **kwargs: typing.Any,
 ) -> EquilibriumArrays:
     """
-    Tilted-cell variant of horizontal subdivision, additionally accounting
+    Returns tilted-cell variant of horizontal subdivision, additionally accounting
     for cell dip (`region.accuracy_flag < 0`).
 
     Uses each cell's actual top/bottom face geometry (see
@@ -1578,7 +1578,7 @@ def initialize_equilibrium_arrays(
     phases: DeckPhases | None = None,
 ) -> EquilibriumArrays:
     """
-    Compute `EQUIL`-derived pressure/saturation/Rs/Rv arrays for every cell.
+    Computes `EQUIL`-derived pressure/saturation/Rs/Rv arrays for every cell.
 
     Dispatches each `EQLNUM` region to the algorithm selected by that
     region's `accuracy_flag` and assembles the full-grid arrays.
@@ -1788,7 +1788,7 @@ def initialize_equilibrium_arrays(
 
 @numba.njit(cache=True)
 def all_finite(values: NumberArray[OneDimension]) -> Boolean:
-    """Whether every value is finite, stopping at the first that is not."""
+    """Checks whether every value is finite, stopping at the first that is not."""
     for index in range(values.shape[0]):
         if not np.isfinite(values[index]):
             return False
@@ -1797,7 +1797,7 @@ def all_finite(values: NumberArray[OneDimension]) -> Boolean:
 
 def initial_state_needs_equilibration(deck_file: DeckFile) -> bool:
     """
-    Whether the deck leaves part of the initial state to equilibration.
+    Checks whether the deck leaves part of the initial state to equilibration.
 
     The initial state is covered without it when the deck gives the pressure, the solution gas-oil
     ratio (`RS`) and the vaporized oil-gas ratio (`RV`), and two of the three saturations
@@ -1815,7 +1815,7 @@ def derive_saturation_from_oil(
     known: CellArray, oil: CellArray, known_name: str, derived_name: str
 ) -> CellArray:
     """
-    Derive the water or gas saturation that an oil saturation and the other one leave.
+    Derives the water or gas saturation that an oil saturation and the other one leave.
 
     :param known: Saturation of the phase that is given, of every cell.
     :param oil: Oil saturation of every cell.
@@ -1840,7 +1840,7 @@ def derive_oil_saturation(
     oil_saturation: NumberArray[OneDimension],
 ) -> tuple[Number, Number, Number, Number, Number]:
     """
-    Fill `oil_saturation` with what the water and gas leave, limited to `[0, 1]`, and return the
+    Fills `oil_saturation` with what the water and gas leave, limited to `[0, 1]`, and returns the
     ranges the validation needs, all from one pass over the cells.
 
     :returns: `(lowest water, highest water, lowest gas, highest gas, largest amount by which
@@ -1870,7 +1870,7 @@ def get_temperature_array_from_regions(
     dtype: npt.DTypeLike = None,
 ) -> CellArray:
     """
-    Evaluate a `Temperature` at every cell's depth, grouped by `PVTNUM` (the
+    Evaluates a `Temperature` at every cell's depth, grouped by `PVTNUM` (the
     same grain `PVT.from_deck` resolves `Temperature` against, so PVT
     tables and this array stay consistent).
 
@@ -1897,7 +1897,7 @@ def resolve_temperature(
     unit_system: UnitSystem | None = None,
 ) -> CellArray:
     """
-    Resolve per-cell temperature. Explicit `temperature` kwarg > deck
+    Resolves per-cell temperature. Explicit `temperature` kwarg > deck
     `RTEMP`/`TEMPVD` > error. (Restart temperature is not yet supported.)
     """
     n_cells = reservoir.n_cells
@@ -2089,7 +2089,7 @@ def initialize_water_gas_state(
 
 def get_active_cells(grid: Grid, n_cells: Integer) -> BooleanCellArray | None:
     """
-    Get a mask of which cells of the grid take part in the flow simulation.
+    Gets a mask of which cells of the grid take part in the flow simulation.
 
     :param grid: The grid whose cells are described.
     :param n_cells: Number of cells the arrays being initialized have.
@@ -2118,7 +2118,7 @@ def warn_on_inconsistent_phase_state(
     pressure_consistency_tolerance: Number | None = None,
 ) -> None:
     """
-    Warn about cells whose pressure, saturations and bubble or dew point cannot coexist.
+    Warns about cells whose pressure, saturations and bubble or dew point cannot coexist.
 
     Oil that holds more dissolved gas than it can at its pressure must release it, so a cell with
     oil, no free gas and a pressure below the oil bubble point is not a state that can exist. Gas
@@ -2242,7 +2242,7 @@ def initialize_reservoir_state(
     pressure_consistency_tolerance: Number | None = None,
 ) -> ReservoirState:
     """
-    Build a complete `ReservoirState` from equilibration data (e.g `EQUIL`) and/or explicit arrays.
+    Builds a complete `ReservoirState` from equilibration data (e.g `EQUIL`) and/or explicit arrays.
 
     "Explicit array/keyword" means either the corresponding kwarg here, or
     (if the kwarg is `None`) the matching `PRESSURE`/`SWAT`/`SGAS`/`RS`/`RV`

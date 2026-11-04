@@ -39,7 +39,7 @@ def saturations_need_normalising(
     gas_saturation: NumberArray[OneDimension],
     saturation_epsilon: Number,
 ) -> bool:
-    """Whether any cell has saturations that do not add up to 1 within `saturation_epsilon`."""
+    """Checks whether any cell has saturations that do not add up to 1 within `saturation_epsilon`."""
     for i in range(size):
         total = (
             element_at(array=water_saturation, index=i)
@@ -59,7 +59,7 @@ def normalise_saturations(
     gas_saturation: NumberArray[OneDimension],
     saturation_epsilon: Number,
 ) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension], NumberArray[OneDimension]]:
-    """Scale the saturations of every cell that does not add up to 1, returning new arrays."""
+    """Scales the saturations of every cell that does not add up to 1, returning new arrays."""
     new_water = np.empty(size, dtype=water_saturation.dtype)
     new_oil = np.empty(size, dtype=water_saturation.dtype)
     new_gas = np.empty(size, dtype=water_saturation.dtype)
@@ -84,7 +84,7 @@ def normalise_saturations_parallel(
     gas_saturation: NumberArray[OneDimension],
     saturation_epsilon: Number,
 ) -> tuple[NumberArray[OneDimension], NumberArray[OneDimension], NumberArray[OneDimension]]:
-    """Scale the saturations of every cell that does not add up to 1, returning new arrays."""
+    """Scales the saturations of every cell that does not add up to 1, returning new arrays."""
     new_water = np.empty(size, dtype=water_saturation.dtype)
     new_oil = np.empty(size, dtype=water_saturation.dtype)
     new_gas = np.empty(size, dtype=water_saturation.dtype)
@@ -194,7 +194,7 @@ def scan_relative_permeabilities_block(
     out: ScanOutputs,
 ) -> None:
     """
-    Scan the four two-phase curves, mix the three-phase oil curve, and differentiate, for the
+    Scans the four two-phase curves, mix the three-phase oil curve, and differentiate, for the
     cells `start` up to but not including `stop`, in one pass.
 
     The water curves share one scanning weight, and so do the gas curves, so each weight (and its
@@ -393,7 +393,7 @@ def scan_relative_permeabilities(
     minimum_mobile_pore_space: Number,
     out: ScanOutputs,
 ) -> None:
-    """Scan every cell on the calling thread, see `scan_relative_permeabilities_block`."""
+    """Scans every cell on the calling thread, see `scan_relative_permeabilities_block`."""
     scan_relative_permeabilities_block(
         start=0,
         stop=size,
@@ -446,7 +446,7 @@ def scan_relative_permeabilities_parallel(
     minimum_mobile_pore_space: Number,
     out: ScanOutputs,
 ) -> None:
-    """Scan the cells in one contiguous block per thread, see `scan_relative_permeabilities_block`."""
+    """Scans the cells in one contiguous block per thread, see `scan_relative_permeabilities_block`."""
     block_count = numba.get_num_threads()
     block_size = (size + block_count - 1) // block_count
     for block in numba.prange(block_count):  # type: ignore
